@@ -14,7 +14,13 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // L4b: ate 3 "Abrir um link" (salvar, ler, o aluno recebe os 3, o maior cabe no check, o 4o botao e 400), o D9 por
 // aparelho (um link so no computador e outro so no celular salvam; o Livre gravado antes com o Botao principal
 // escondido no computador abre, publica e e aprovado com "Só quando o pop-up terminar") e a Forma com largura e
-// altura na sequencia, no computador e no celular.
+// altura na sequencia, no computador e no celular. L6b: o contorno das letras e o marca-texto salvos e lidos na forma
+// canonica (o jsonb igual ao salvar de novo, a aluna recebe os dois), as recusas no campo (o marca-texto no estilo do
+// elemento, os limites e o contorno no celular) e o maior Livre com os dois em todas as partes no check de 32 KB. L6c:
+// as cores ao passar o mouse do Botão e dos Links salvas e lidas na forma canonica (o objeto vazio sai, o jsonb igual
+// ao salvar de novo, a aluna recebe as cores), as recusas no campo (fora do Botão e dos Links, a cor do texto com a
+// letra em degrade, o fundo de imagem, fora da forma, fundo nos Links e as cores no celular) e o maior Livre com as
+// cores em todos os botoes e nos Links no check de 32 KB.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -810,4 +816,371 @@ test("L4b: a Forma com largura e altura na sequência, no computador e no celula
   assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre igual");
   ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
   assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "salvar de novo nao muda nada");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6b: contorno das letras e marca-texto (docs/27 §9.3 e §13.11.2; version 1, sem migracao)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O Livre de teste (sem imagem) com o contorno no Título inteiro e o marca-texto em partes do Título e do Texto,
+ * escrito fora da forma canonica: cores em maiusculas, uma parte com o contorno igual ao do elemento, o respiro
+ * [2, 6] e os cantos 4 de partida escritos, duas vizinhas com o mesmo marca-texto e o respiro [4, 4].
+ */
+function livreComContornoEMarcaTexto() {
+  const base = livre({ image: false });
+  const escuro = { color: "#111111", kind: "solid" };
+
+  return {
+    ...base,
+    children: base.children.map((node) => {
+      if (node.id === "titulo") {
+        return {
+          ...node,
+          lines: [
+            [
+              { text: "Aula " },
+              { style: { stroke: { color: "#FFFFFF", width: 2 } }, text: "nova " },
+              { style: { mark: { color: "#E5FF1F", padding: [2, 6], radius: 4 }, paint: escuro }, text: "no" },
+              { style: { mark: { color: "#e5ff1f" }, paint: escuro }, text: " ar" }
+            ]
+          ],
+          textStyle: { ...node.textStyle, stroke: { color: "#FFFFFF", width: 2 } }
+        };
+      }
+
+      if (node.id === "texto") {
+        return {
+          ...node,
+          lines: [[{ text: "Assista " }, { style: { mark: { color: "#FFFFFF26", padding: [4, 4], radius: 2 }, stroke: { color: "#000000", width: 1 } }, text: "hoje" }, { text: " e coloque em prática." }]]
+        };
+      }
+
+      return node;
+    })
+  };
+}
+
+/** Os elementos do design pelo id. */
+function porId(design) {
+  return Object.fromEntries(design.children.map((node) => [node.id, node]));
+}
+
+test("L6b: o contorno e o marca-texto são salvos e lidos na forma canônica; salvar de novo não muda o jsonb e a aluna recebe os dois", async () => {
+  const enviado = livreComContornoEMarcaTexto();
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: enviado })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const { texto, titulo } = porId(gravado);
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(enviado));
+  assert.equal(gravado.version, 1, "sem versao nova");
+  assert.equal("devices" in gravado, false, "nada no celular");
+  // O tamanho e o peso do Titulo de teste sao os padroes e saem; o contorno do elemento fica, em minusculas.
+  assert.deepEqual(titulo.textStyle, { stroke: { color: "#ffffff", width: 2 } });
+  // A parte com o contorno igual ao do elemento perde o estilo e junta com a vizinha; o respiro [2, 6] e os cantos 4
+  // de partida saem; as duas partes com o mesmo marca-texto viram uma.
+  assert.deepEqual(titulo.lines, [[{ text: "Aula nova " }, { style: { mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, text: "no ar" }]]);
+  // O respiro [4, 4] vira 4; o contorno da parte fica (o Texto nao tem contorno).
+  assert.deepEqual(texto.lines, [
+    [{ text: "Assista " }, { style: { mark: { color: "#ffffff26", padding: 4, radius: 2 }, stroke: { color: "#000000", width: 1 } }, text: "hoje" }, { text: " e coloque em prática." }]
+  ]);
+
+  const comoTexto = async () => unwrap(await db.from("campaigns").select("popup_design::text").eq("id", salvo.id).single(), "Lendo o design como texto").popup_design;
+  const antes = await comoTexto();
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+
+  assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre com o contorno e o marca-texto");
+
+  const deNovo = ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
+
+  assert.equal(await comoTexto(), antes, "salvar de novo o que o editor leu nao muda o jsonb");
+
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: deNovo.updatedAt, id: salvo.id }));
+
+  const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
+  const doAluno = porId(doLivre.freeDesign);
+
+  assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
+  assert.deepEqual(doAluno.titulo.textStyle, titulo.textStyle, "a aluna recebe o contorno do Titulo");
+  assert.deepEqual(doAluno.titulo.lines, titulo.lines, "e o marca-texto das partes");
+  assert.deepEqual(doAluno.texto.lines, texto.lines);
+});
+
+test("L6b: o marca-texto no estilo do elemento, um respiro ou uma espessura fora do limite e o contorno no celular são 400 no campo, e nada é gravado", async () => {
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: livreComContornoEMarcaTexto() })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const noTitulo = (troca) => {
+    const value = livreComContornoEMarcaTexto();
+
+    return { ...value, children: value.children.map((node) => (node.id === "titulo" ? troca(node) : node)) };
+  };
+  const casos = [
+    // O marca-texto so existe na parte: no estilo do elemento, a chave nao existe.
+    [noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, mark: { color: "#e5ff1f" } } })), "freeDesign.children.0.textStyle", POPUP_FREE_MESSAGES.design, "freeDesign.nodes.titulo.textStyle"],
+    [
+      noTitulo((node) => ({ ...node, lines: [node.lines[0].map((span, index) => (index === 2 ? { ...span, style: { ...span.style, mark: { color: "#e5ff1f", padding: [2, 25] } } } : span))] })),
+      "freeDesign.children.0.lines.0.2.style.mark.padding.1",
+      "Use de 0 a 24.",
+      "freeDesign.nodes.titulo.lines.0.2.style.mark.padding.1"
+    ],
+    [noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, stroke: { color: "#ffffff", width: 9 } } })), "freeDesign.children.0.textStyle.stroke.width", "Use de 1 a 8.", "freeDesign.nodes.titulo.textStyle.stroke.width"],
+    // O contorno nunca com a letra em degradê: o contorno cobre a cor (a chave é a do contorno do elemento).
+    [
+      noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, paint: { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] } } })),
+      "freeDesign.children.0.textStyle.stroke",
+      POPUP_FREE_MESSAGES.strokeGradient,
+      "freeDesign.nodes.titulo.textStyle.stroke"
+    ],
+    // Cor e pintura nunca por aparelho (L27): o contorno nao tem versao do celular.
+    [
+      { ...livreComContornoEMarcaTexto(), devices: { mobile: { nodes: { titulo: { textStyle: { stroke: { color: "#000000", width: 1 } } } } } } },
+      "freeDesign.devices.mobile.nodes.titulo.textStyle",
+      POPUP_FREE_MESSAGES.design,
+      "freeDesign.devices.mobile.nodes.titulo.textStyle"
+    ]
+  ];
+
+  for (const [freeDesign, campo, frase, doEditor] of casos) {
+    const recusado = await salvar(popup({ design: null, freeDesign }), salvo.id);
+
+    assert.equal(recusado.ok, false, campo);
+    assert.equal(recusado.status, 400, campo);
+    assert.deepEqual(recusado.fieldErrors[`draft.${campo}`], [frase], campo);
+    // O editor troca a posicao pela chave do id e chega ate o campo (docs/27 §9.7).
+    assert.equal(freeErrorKey(freeDesign, campo), doEditor);
+  }
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
+});
+
+test("L6b: o maior Livre com contorno e marca-texto em todas as partes passa no check de 32 KB do banco", async () => {
+  // Estilos alternados, para as vizinhas nunca juntarem: cada parte guarda o marca-texto inteiro e o contorno.
+  const estilos = [
+    { mark: { color: "#e5ff1f80", padding: [3, 7], radius: 5 }, paint: { color: "#111111", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } },
+    { mark: { color: "#7c3aed80", padding: [4, 8], radius: 6 }, paint: { color: "#fafafa", kind: "solid" }, stroke: { color: "#000000", width: 3 } }
+  ];
+  /** As partes em Textos de ate 12 linhas de 6 partes (os limites do Texto), cada um com o contorno do elemento. */
+  const textos = (count) => {
+    const partes = Array.from({ length: count }, (_, index) => ({ style: estilos[index % 2], text: "ab" }));
+    const nodes = [];
+
+    for (let start = 0; start < partes.length; start += 72) {
+      const daqui = partes.slice(start, start + 72);
+      const lines = Array.from({ length: Math.ceil(daqui.length / 6) }, (_, line) => daqui.slice(line * 6, line * 6 + 6));
+
+      nodes.push({ id: `texto${nodes.length}`, lines, textStyle: { stroke: { color: "#ffffff", width: 1 } }, type: "text" });
+    }
+
+    return nodes;
+  };
+  const build = (count, letters) => ({
+    children: [
+      ...textos(count),
+      { id: "resto", lines: [[{ text: "a".repeat(Math.max(1, letters)) }]], type: "text" },
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+  const size = (value) => model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(value));
+  let count = 1;
+
+  while (count < 300 && size(build(count + 1, 1)) <= 30_000) {
+    count += 1;
+  }
+
+  const maior = build(count, Math.min(600, 30_000 - size(build(count, 1)) + 1));
+  const partes = model.canonicalPopupFreeDesign(maior).children.flatMap((node) => (node.type === "text" && node.id !== "resto" ? node.lines.flat() : []));
+
+  assert.ok(size(maior) > 29_000 && size(maior) <= 30_000, `estimativa ${size(maior)} com ${count} partes`);
+  assert.equal(partes.length, count, "nenhuma parte juntou");
+  assert.ok(
+    partes.every((parte) => parte.style?.mark && parte.style.stroke),
+    "toda parte guarda o marca-texto e o contorno"
+  );
+
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: maior })));
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6c: cores ao passar o mouse no Botão e nos Links (docs/27 §9.3 e §13.11.3; version 1, sem migracao)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O Livre de teste (sem imagem) com as cores ao passar o mouse escritas fora da forma canonica: no Botão principal
+ * (com borda fina) as tres cores em maiusculas e o fundo em degrade com o angulo 180 de padrao escrito e as paradas
+ * fora de ordem; um "Agora não" com o objeto vazio; e a cor dos Links (cinza parado).
+ */
+function livreComCoresAoPassarOMouse() {
+  const base = livre({ image: false });
+
+  return {
+    ...base,
+    children: base.children.flatMap((node) => {
+      if (node.id === "botao") {
+        return [
+          {
+            ...node,
+            box: { ...node.box, border: { color: "#FFFFFF40", width: 1 } },
+            hover: { borderColor: "#FFFFFF", color: "#FDE68A", fill: { angle: 180, kind: "linear", stops: [{ at: 100, color: "#B20710" }, { at: 0, color: "#E50914" }] } }
+          },
+          { action: { kind: "close" }, hover: {}, id: "agoranao", label: "Agora não", type: "button" }
+        ];
+      }
+
+      if (node.id === "links") {
+        return [{ ...node, hover: { color: "#FFFFFF" }, textStyle: { paint: { color: "#A1A1AA", kind: "solid" } } }];
+      }
+
+      return [node];
+    })
+  };
+}
+
+test("L6c: as cores ao passar o mouse do Botão e dos Links são salvas e lidas na forma canônica; salvar de novo não muda o jsonb e a aluna recebe as cores", async () => {
+  const enviado = livreComCoresAoPassarOMouse();
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: enviado })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const { agoranao, botao, links } = porId(gravado);
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(enviado));
+  assert.equal(gravado.version, 1, "sem versao nova");
+  assert.equal("devices" in gravado, false, "nada no celular");
+  // Cores em minusculas, o angulo 180 de padrao sai e as paradas ficam em ordem; o objeto vazio sai.
+  assert.deepEqual(botao.hover, { borderColor: "#ffffff", color: "#fde68a", fill: { kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] } });
+  assert.equal("hover" in agoranao, false, "o objeto vazio sai");
+  assert.deepEqual(links.hover, { color: "#ffffff" });
+
+  const comoTexto = async () => unwrap(await db.from("campaigns").select("popup_design::text").eq("id", salvo.id).single(), "Lendo o design como texto").popup_design;
+  const antes = await comoTexto();
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+
+  assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre com as cores ao passar o mouse");
+
+  const deNovo = ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
+
+  assert.equal(await comoTexto(), antes, "salvar de novo o que o editor leu nao muda o jsonb");
+
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: deNovo.updatedAt, id: salvo.id }));
+
+  const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
+  const doAluno = porId(doLivre.freeDesign);
+
+  assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
+  assert.deepEqual(doAluno.botao.hover, botao.hover, "a aluna recebe as cores do Botão");
+  assert.deepEqual(doAluno.links.hover, links.hover, "e a dos Links");
+  assert.equal("hover" in doAluno.agoranao, false);
+});
+
+test("L6c: cores fora do Botão e dos Links, a cor do texto com a letra em degradê, um fundo de imagem, fundo nos Links e as cores no celular são 400 no campo, e nada é gravado", async () => {
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: livreComCoresAoPassarOMouse() })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const noElemento = (id, troca) => {
+    const value = livreComCoresAoPassarOMouse();
+
+    return { ...value, children: value.children.map((node) => (node.id === id ? troca(node) : node)) };
+  };
+  // Os elementos: 0 Título, 1 Texto, 2 Botão principal, 3 "Agora não", 4 Links.
+  const casos = [
+    // So o Botão e os Links tem cores ao passar o mouse: no Título a chave nao existe (o erro fica no elemento).
+    [noElemento("titulo", (node) => ({ ...node, hover: { color: "#ffffff" } })), "freeDesign.children.0", POPUP_FREE_MESSAGES.design, "freeDesign.nodes.titulo"],
+    // Com a letra em degrade, a cor do texto ao passar o mouse nao apareceria.
+    [
+      noElemento("botao", (node) => ({ ...node, textStyle: { paint: { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] } } })),
+      "freeDesign.children.2.hover.color",
+      POPUP_FREE_MESSAGES.hoverGradient,
+      "freeDesign.nodes.botao.hover.color"
+    ],
+    // O fundo ao passar o mouse e uma cor ou um degrade, nunca imagem (nenhum url( novo).
+    [noElemento("botao", (node) => ({ ...node, hover: { fill: { asset: "foto", kind: "image" } } })), "freeDesign.children.2.hover.fill.kind", POPUP_FREE_MESSAGES.paint, "freeDesign.nodes.botao.hover.fill.kind"],
+    [noElemento("botao", (node) => ({ ...node, hover: true })), "freeDesign.children.2.hover", POPUP_FREE_MESSAGES.hover, "freeDesign.nodes.botao.hover"],
+    // Os Links so mudam a cor.
+    [noElemento("links", (node) => ({ ...node, hover: { color: "#ffffff", fill: { color: "#000000", kind: "solid" } } })), "freeDesign.children.4.hover", POPUP_FREE_MESSAGES.design, "freeDesign.nodes.links.hover"],
+    // Cor e pintura nunca por aparelho (L27): as cores ao passar o mouse nao tem versao do celular.
+    [
+      { ...livreComCoresAoPassarOMouse(), devices: { mobile: { nodes: { botao: { hover: { color: "#000000" } } } } } },
+      "freeDesign.devices.mobile.nodes.botao",
+      POPUP_FREE_MESSAGES.design,
+      "freeDesign.devices.mobile.nodes.botao"
+    ]
+  ];
+
+  assert.equal(POPUP_FREE_MESSAGES.hover, "Escolha as cores ao passar o mouse.");
+
+  for (const [freeDesign, campo, frase, doEditor] of casos) {
+    const recusado = await salvar(popup({ design: null, freeDesign }), salvo.id);
+
+    assert.equal(recusado.ok, false, campo);
+    assert.equal(recusado.status, 400, campo);
+    assert.deepEqual(recusado.fieldErrors[`draft.${campo}`], [frase], campo);
+    // O editor troca a posicao pela chave do id e chega ate o campo no Estilo (docs/27 §9.7; critica C12).
+    assert.equal(freeErrorKey(freeDesign, campo), doEditor);
+  }
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
+});
+
+test("L6c: o maior Livre com as cores ao passar o mouse em todos os botões e nos Links passa no check de 32 KB do banco", async () => {
+  // As tres cores em cada botao (o principal, Fechar e 2 Abrir um link, o teto do L4b), com o fundo no degrade circular
+  // de 5 paradas com tudo escrito, e a cor dos Links; o resto do tamanho com as formas cheias e as letras do Texto.
+  const fundo = { extent: "closest-side", kind: "radial", shape: "circle", stops: [0, 25, 50, 75, 100].map((at) => ({ at, color: "#7c3aed99" })), x: 30, y: 40 };
+  const hover = { borderColor: "#ffffff80", color: "#111111cc", fill: fundo };
+  const box = { border: { color: "#ffffff40", width: 1 } };
+  const botoes = [
+    { action: { kind: "cta" }, box, hover, id: "botao", type: "button" },
+    { action: { kind: "close" }, box, hover, id: "fechar", label: "Agora não", type: "button" },
+    { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, box, hover, id: "compras", label: "Ver compras", type: "button" },
+    { action: { href: "https://exemplo.com/biblioteca", kind: "link", target: "new_tab" }, box, hover, id: "biblioteca", label: "Ver a biblioteca", type: "button" }
+  ];
+  const formas = maiorLivre().children.filter((node) => node.type === "shape");
+  /** As letras do Texto em linhas de ate 600 (o limite da parte). */
+  const linhas = (letters) => {
+    const out = [];
+
+    for (let rest = Math.max(1, letters); rest > 0; rest -= 600) {
+      out.push([{ text: "a".repeat(Math.min(600, rest)) }]);
+    }
+
+    return out;
+  };
+  const build = (count, letters) => ({
+    children: [...formas.slice(0, count), { id: "texto", lines: linhas(letters), type: "text" }, ...botoes, { hover: { color: "#ffffffcc" }, id: "links", type: "links" }],
+    mode: "free",
+    version: 1
+  });
+  const size = (value) => model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(value));
+  let count = 0;
+
+  while (count < formas.length && size(build(count + 1, 1)) <= 30_000) {
+    count += 1;
+  }
+
+  const maior = build(count, Math.min(1_100, 30_000 - size(build(count, 1)) + 1));
+  const comCores = model.canonicalPopupFreeDesign(maior).children.filter((node) => node.hover);
+
+  assert.ok(size(maior) > 29_000 && size(maior) <= 30_000, `estimativa ${size(maior)} com ${count} formas`);
+  assert.deepEqual(
+    comCores.map((node) => [node.id, Object.keys(node.hover)]),
+    [
+      ["botao", ["borderColor", "color", "fill"]],
+      ["fechar", ["borderColor", "color", "fill"]],
+      ["compras", ["borderColor", "color", "fill"]],
+      ["biblioteca", ["borderColor", "color", "fill"]],
+      ["links", ["color"]]
+    ],
+    "toda cor fica"
+  );
+
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: maior })));
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
 });

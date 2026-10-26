@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
-import { contaDeTeste, estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
+import { contaDeTeste, estadoDoPopUpDaAluna, eventosDoPopUp, expect, janelaParada, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 
 // Design Livre de ponta a ponta (docs/27 §8; spec §7.3; docs/18 §3.1). Num aviso NOVO, o produtor escolhe Livre,
 // usa o modelo "Vídeo no topo com degradê" (o editor de tela cheia abre), envia o video de teste, troca as duas
@@ -516,6 +516,8 @@ test.describe("aluna", () => {
     const popUp = page.getByRole("dialog", { name: NOME_NO_DIALOGO });
     await expect(popUp).toBeVisible();
     await expect(popUp.locator("[data-free-artboard]")).toBeVisible();
+    // As medidas so depois de a janela parar de crescer.
+    await janelaParada(popUp);
     return popUp;
   }
 

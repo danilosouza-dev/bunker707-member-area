@@ -157,6 +157,11 @@ export type FreeCanvasProps = {
   disabled: boolean;
   fonts: readonly PopupFontFace[];
   /**
+   * "Ver com o mouse em cima" (L6c): o elemento que o cartao desenha com as cores ao passar o mouse (o atributo
+   * `data-free-hover-on`, o mesmo CSS do aluno). Nao muda o design. null = nenhum.
+   */
+  hoverPreviewId?: FreeId | null;
+  /**
    * Fim do arrastar de varios soltos juntos (L4b): quanto o grupo andou, inteiro (o editor limita pelo grupo, com o
    * aparelho do "Ver como", e grava num passo). So vem com 2 ou mais soltos que andam.
    */
@@ -376,6 +381,7 @@ export function FreeCanvas({
   device,
   disabled,
   fonts,
+  hoverPreviewId = null,
   onCommitMoves,
   onCommitRect,
   onEditText,
@@ -1600,6 +1606,8 @@ export function FreeCanvas({
                   dragPreview={preview}
                   editorNodeRef={editorNodeRef}
                   fonts={fonts}
+                  // So o editor (L6c): o cartao poe `data-free-hover-on` no elemento com "Ver com o mouse em cima" ligado.
+                  hoverPreviewId={hoverPreviewId}
                   playing={false}
                   popup={popup}
                   preview

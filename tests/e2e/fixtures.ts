@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { test as base, expect, type Browser, type BrowserContext, type Page, type Request } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page, type Request } from "@playwright/test";
 import {
   ESCOLA_DE_TESTE,
   SENHA_DE_TESTE,
@@ -1010,6 +1010,22 @@ export async function esperarPlayerDaAula(page: Page, endereco: string, tipo: "i
 }
 
 type PlanoDoResumo = { asOf: string; plan: { id: string; notBefore: string | null; trigger: string }[] | null } | null;
+
+/**
+ * Espera a entrada da janela do pop-up acabar (docs/27 §13.11.1): a janela nasce com o data-starting-style (opacidade 0
+ * e escala de 95 %) e cresce em 200 ms. O toBeVisible ja passa com opacidade 0 e o boundingBox mede a caixa com a
+ * escala do meio do caminho; quem mede a janela ou clica por coordenada espera aqui. Com menos movimento, passa logo.
+ */
+export async function janelaParada(popUp: Locator) {
+  await expect
+    .poll(() =>
+      popUp.evaluate((element) => {
+        const janela = element.closest("[data-member-popup]") ?? element;
+        return !janela.hasAttribute("data-starting-style") && getComputedStyle(janela).opacity === "1" && janela.getAnimations().length === 0;
+      })
+    )
+    .toBe(true);
+}
 
 /**
  * Recarrega a home (a memoria do navegador comeca vazia) e devolve os ids dos pop-ups que o plano da aluna

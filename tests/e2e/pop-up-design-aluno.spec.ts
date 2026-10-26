@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { canonicalPopupDesign, newPopupBlock, popupStarterDesign, type PopupButton2Block } from "../../src/server/communications/popup-design-model";
-import { estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
+import { estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, janelaParada, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 import { prepararMidiaDoDesign, publicarPopUpComDesign, type MidiaDoDesign } from "./popup-design-fixtures";
 
 // Pop-up "Personalizado" no navegador da aluna (docs/26; docs/18 §3.1): o modelo "Mídia no topo com degradê"
@@ -43,6 +43,8 @@ async function abrirPopUp(page: Page) {
   await page.goto("/");
   const popUp = page.getByRole("dialog", { name: NOME_NO_DIALOGO });
   await expect(popUp).toBeVisible();
+  // As medidas so depois de a janela parar de crescer.
+  await janelaParada(popUp);
   return popUp;
 }
 

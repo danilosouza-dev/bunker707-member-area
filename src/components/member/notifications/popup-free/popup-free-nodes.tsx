@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { FreeButtonNode, FreeId, FreeLine, FreeNode, PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
-import { freeFirstHeading, freeFirstText, freeHasSnoozeButton, freeTextStyleOf, type FreeResolvedTextStyle } from "@/server/communications/popup-free-render";
+import { freeFirstHeading, freeFirstText, freeHasSnoozeButton, freeHollowColor, freeTextStyleOf, type FreeResolvedTextStyle } from "@/server/communications/popup-free-render";
 import { NoticeAudioPlayer } from "../notice-audio-player";
 import { resolveNotificationLink, type NotificationLink } from "../notifications-model";
 import { primaryButtonTarget } from "../popup-design/popup-design-styles";
@@ -22,16 +22,18 @@ import {
   FREE_INLINE_ICON_CSS,
   FREE_LINK_RESET_CSS,
   FREE_PRESS_CLASS,
+  FREE_PRESS_HOVER_CLASS,
   FREE_TOUCH_CLASS,
   freeBoxCss,
   freeBoxLayoutCss,
   freeButtonLayoutCss,
   freeDividerCss,
+  freeHoverAttrs,
   freeIconCss,
   freeLinksRowCss,
   freePlaceCss,
   freePointerEvents,
-  freeSpanCss,
+  freeSpanParts,
   freeStyleContext,
   freeTextCss,
   freeTextPaintCss,
@@ -54,6 +56,8 @@ export type FreeRenderContext = {
   drag: FreeDragPreview | null;
   firstHeadingId: FreeId | null;
   firstTextId: FreeId | null;
+  /** So a previa do editor ("Ver com o mouse em cima", L6c): o Botao ou os Links que mostram as cores ao passar o mouse. */
+  hoverPreviewId?: FreeId | null;
   motion: FreeMotion;
   onClose?: () => void;
   /** O 3º argumento diz qual botão foi: "cta" (o Botão principal) ou `link:<id>` (um "Abrir um link"). */
@@ -77,6 +81,7 @@ export function freeRenderContextOf(input: {
   design: PopupFreeDesign;
   dragPreview?: FreeDragPreview | null;
   faces: readonly PopupFontFace[];
+  hoverPreviewId?: FreeId | null;
   motion: FreeMotion;
   onClose?: () => void;
   onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button?: string) => void;
@@ -100,6 +105,8 @@ export function freeRenderContextOf(input: {
     drag: preview ? (input.dragPreview ?? null) : null,
     firstHeadingId: freeFirstHeading(design)?.id ?? null,
     firstTextId: freeFirstText(design)?.id ?? null,
+    // Como o arrastar, so na previa do editor.
+    hoverPreviewId: preview ? input.hoverPreviewId : null,
     motion: input.motion,
     onClose: input.onClose,
     onCta: input.onCta,
@@ -115,15 +122,24 @@ export function freeRenderContextOf(input: {
 }
 
 const ACTION_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, FREE_PRESS_CLASS, "select-none");
+/** O botao com cores proprias ao passar o mouse (L6c): o aperto sem o brilho. */
+const HOVER_ACTION_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, FREE_PRESS_HOVER_CLASS, "select-none");
 const LINK_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, "rounded-sm underline-offset-4 hover:underline");
 
-function FreeSpans({ ctx, line, text }: { ctx: FreeRenderContext; line: FreeLine; text: FreeResolvedTextStyle }) {
+/** Alguma parte do Titulo ou do Texto tem marca-texto: as letras sobem acima dos fundos (`lift` de freeSpanParts). */
+const hasMark = (lines: readonly FreeLine[]) => lines.some((line) => line.some((span) => span.style?.mark));
+
+/**
+ * As partes de uma linha: um span cada; com marca-texto, o de dentro leva as letras (com o degrade, se houver) e,
+ * com `lift`, todas as letras ficam acima dos fundos do marca-texto (freeSpanParts).
+ */
+function FreeSpans({ ctx, lift, line, text }: { ctx: FreeRenderContext; lift: boolean; line: FreeLine; text: FreeResolvedTextStyle }) {
   return line.map((span, index) => {
-    const { gradient, style } = freeSpanCss(span.style, text, ctx.style);
+    const { inner, outer, select } = freeSpanParts(span.style, text, ctx.style, lift);
 
     return (
-      <span className={gradient ? FREE_GRADIENT_SELECTION_CLASS : undefined} key={index} style={style}>
-        {span.text}
+      <span className={select ? FREE_GRADIENT_SELECTION_CLASS : undefined} key={index} style={outer}>
+        {inner ? <span style={inner}>{span.text}</span> : span.text}
       </span>
     );
   });
@@ -180,8 +196,12 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
   }
 
   const text = freeTextStyleOf(node);
-  const style: CSSProperties = { ...base, ...freeTextCss(text, ctx.style), ...freeButtonLayoutCss(node) };
-  const icon = node.icon ? <FreeIcon name={node.icon.name} style={FREE_INLINE_ICON_CSS} /> : null;
+  // As cores ao passar o mouse (L6c) tambem no span da previa: o palco do editor reage ao mouse como o aluno.
+  const { attrs, vars } = freeHoverAttrs(node, text, ctx.hoverPreviewId === node.id);
+  const style: CSSProperties = { ...base, ...freeTextCss(text, ctx.style), ...freeButtonLayoutCss(node), ...vars };
+  const className = attrs["data-free-hover"] ? HOVER_ACTION_CLASS : ACTION_CLASS;
+  // O icone desenha com currentColor: no texto vazado ("So o contorno"), na cor do contorno (freeHollowColor).
+  const icon = node.icon ? <FreeIcon name={node.icon.name} style={{ ...FREE_INLINE_ICON_CSS, color: freeHollowColor(text) }} /> : null;
   const side = node.icon?.side ?? "end";
   const { behavior, label } = resolved;
   const newTab = behavior.kind === "link" && behavior.link.newTab;
@@ -198,7 +218,7 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
 
   if (behavior.kind === "static") {
     return (
-      <span data-free-button={kind} data-free-id={node.id} ref={ref} style={style}>
+      <span data-free-button={kind} data-free-id={node.id} ref={ref} style={style} {...attrs}>
         {content}
       </span>
     );
@@ -209,13 +229,14 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
 
     return (
       <a
-        className={ACTION_CLASS}
+        className={className}
         data-free-button={kind}
         data-free-id={node.id}
         href={link.href}
         onClick={(event) => ctx.onCta?.(event, link, kind === "cta" ? "cta" : `link:${node.id}`)}
         ref={ref}
         style={style}
+        {...attrs}
         {...(link.newTab ? { rel: "noopener noreferrer", target: "_blank" } : {})}
       >
         {content}
@@ -225,13 +246,14 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
 
   return (
     <button
-      className={ACTION_CLASS}
+      className={className}
       data-free-button={kind}
       data-free-id={node.id}
       onClick={behavior.kind === "close" ? ctx.onClose : ctx.onSnooze}
       ref={ref}
       style={style}
       type="button"
+      {...attrs}
     >
       {content}
     </button>
@@ -247,15 +269,29 @@ function LinksView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderCo
   }
 
   const text = freeTextStyleOf(node);
-  const linkStyle: CSSProperties = { ...FREE_LINK_RESET_CSS, ...freeTextCss(text, ctx.style), ...labelPaintCss(text), textAlign: "center" };
+  const textCss = freeTextCss(text, ctx.style);
+  // A cor ao passar o mouse (L6c) em cada link, nunca na linha inteira: so o link sob o mouse muda.
+  const { attrs, vars } = freeHoverAttrs(node, text, ctx.hoverPreviewId === node.id);
+  // Sem linha escolhida, nenhuma linha em linha: o estilo em linha venceria o hover:underline de LINK_CLASS. Em
+  // degrade a letra e transparente, entao a linha (escolhida ou ao passar o mouse) usa a primeira parada (icones); no
+  // texto vazado, a cor do contorno.
+  const linkStyle: CSSProperties = {
+    ...FREE_LINK_RESET_CSS,
+    ...textCss,
+    textDecorationLine: text.decoration,
+    ...labelPaintCss(text),
+    textAlign: "center",
+    textDecorationColor: text.paint.kind === "solid" ? freeHollowColor(text) : textCss.color,
+    ...vars
+  };
   const preview = ctx.style.preview;
   const link = (label: string, onClick: (() => void) | undefined, name: string) =>
     preview ? (
-      <span data-free-link={name} style={linkStyle}>
+      <span data-free-link={name} style={linkStyle} {...attrs}>
         {label}
       </span>
     ) : (
-      <button className={LINK_CLASS} data-free-link={name} onClick={onClick} style={linkStyle} type="button">
+      <button className={LINK_CLASS} data-free-link={name} onClick={onClick} style={linkStyle} type="button" {...attrs}>
         {label}
       </button>
     );
@@ -293,7 +329,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
             <Fragment key={index}>
               {index > 0 ? " " : null}
               <span style={FREE_HEADING_LINE_CSS}>
-                <FreeSpans ctx={ctx} line={line} text={text} />
+                <FreeSpans ctx={ctx} lift={hasMark(node.lines)} line={line} text={text} />
               </span>
             </Fragment>
           ))}
@@ -309,7 +345,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
           {node.lines.map((line, index) => (
             <Fragment key={index}>
               {index > 0 ? <br /> : null}
-              <FreeSpans ctx={ctx} line={line} text={text} />
+              <FreeSpans ctx={ctx} lift={hasMark(node.lines)} line={line} text={text} />
             </Fragment>
           ))}
         </p>
@@ -320,7 +356,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
 
       return (
         <span data-free-id={node.id} ref={ref} style={{ ...base, ...freeTextCss(text, s), ...FREE_BADGE_CSS }}>
-          {node.icon ? <FreeIcon name={node.icon} style={FREE_INLINE_ICON_CSS} /> : null}
+          {node.icon ? <FreeIcon name={node.icon} style={{ ...FREE_INLINE_ICON_CSS, color: freeHollowColor(text) }} /> : null}
           <span style={labelPaintCss(text)}>{node.label}</span>
         </span>
       );

@@ -1,7 +1,10 @@
 "use client";
 
-import { FREE_DESIGN_LIMITS, type FreeNode, type FreeTextStyle } from "@/server/communications/popup-free-model";
+import { FREE_DESIGN_LIMITS, type FreeButtonHover, type FreeNode, type FreeTextStyle } from "@/server/communications/popup-free-model";
 import { freeTextStyleOf } from "@/server/communications/popup-free-render";
+import { Check, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { AdminSwitch } from "../../settings/kit";
 import { ColorField, PillField } from "../popup-design/design-controls";
 import { WeightPicker } from "../popup-design/font-picker";
@@ -16,35 +19,61 @@ import {
   FreeRadiusField,
   FreeSection,
   FreeShadowsField,
-  FreeTextPaintField
+  FreeFieldError,
+  FreeNote,
+  FreeTextPaintField,
+  focusFreeField,
+  freeSmallButton
 } from "./free-fields";
 import {
   FREE_DECORATION_OPTIONS,
   FREE_FADE_DEFAULT,
   FREE_FADE_SIDE_OPTIONS,
+  FREE_HOVER_FIELDS,
   FREE_INSPECTOR_COPY,
   FREE_TEXT_ALIGN_OPTIONS,
   freeErrorAt,
   freeFieldId,
   freeFillBaseColor,
+  freeHasHover,
   freeHintsOf,
+  freeHoverBorderNote,
+  freeHoverColorDisabledReason,
+  freeHoverFieldValues,
+  freeHoverPreviewDisabledReason,
+  freeIsHoverKey,
+  freeIsOutlineOnly,
+  freeOutlineOnlyDisabledReason,
+  freeOutlineOnlyPatch,
+  freeStrokeDisabledReason,
+  freeStrokeSwitchPatch,
+  isFreeHoverNode,
   withFreeBox,
   withFreeFadeEnd,
   withFreeFadeStart,
   withFreeFillImage,
+  withFreeHover,
   withFreeTextStyle,
+  type FreeHoverNode,
+  type FreeHoverPatch,
   type FreePatch
 } from "./free-inspector-model";
 
 // Editor Livre do pop-up (docs/27; spec §4.6 "Estilo"), pacote I: Texto (fonte, tamanho, peso, itálico, altura da
-// linha, espaço entre letras, maiúsculas, linha no texto, alinhamento, cor do texto com degradê e a sombra do
-// texto, com a dica de contraste embaixo da cor), Fundo (camadas), Borda, Cantos, Sombras e Efeitos (opacidade,
-// desfoque, desfoque do que esta atras, cortar e esmaecer).
+// linha, espaço entre letras, maiúsculas, linha no texto, alinhamento, cor do texto com degradê, o contorno com o
+// "Só o contorno" do L6b e a sombra do texto, com a dica de contraste embaixo da cor), Fundo (camadas), Borda,
+// Cantos, Sombras, Efeitos (opacidade, desfoque, desfoque do que esta atras, cortar e esmaecer) e, no Botão e nos
+// Links, "Ao passar o mouse" (L6c: as cores, cada uma com "Voltar ao padrão", e a chave "Ver com o mouse em cima").
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
 
 const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+/**
+ * "Só o contorno" so no Título e no Texto (docs/27 §9.8): o ícone do Selo e do Botão usa a cor da letra e sumiria
+ * com ela, e os Links o aluno precisa ler.
+ */
+const OUTLINE_ONLY_TYPES = new Set<FreeNode["type"]>(["heading", "text"]);
 
 export function FreeInspectorStyle(props: FreeSectionProps) {
   const { node } = props;
@@ -53,6 +82,7 @@ export function FreeInspectorStyle(props: FreeSectionProps) {
     <div className="flex min-w-0 flex-col gap-5 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
       {TEXT_TYPES.has(node.type) ? <TextStyleSection {...props} /> : null}
       <BoxSections {...props} />
+      {isFreeHoverNode(node) ? <HoverSection {...props} node={node} /> : null}
     </div>
   );
 }
@@ -63,6 +93,13 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
   const error = (field: string) => freeErrorAt(errors, `nodes.${node.id}.textStyle.${field}`);
   const set = (patch: FreePatch<FreeTextStyle>, field?: string) => onChange(withFreeTextStyle(design, node.id, patch), field ? `textStyle.${field}` : undefined);
   const shadow = style.shadow;
+  const stroke = style.stroke;
+  const outlineOnly = freeIsOutlineOnly(style);
+  // Com a letra em degradê, o contorno cobre a cor: a chave só desliga e o "Só o contorno" fica parado, com o motivo.
+  const strokeReason = freeStrokeDisabledReason(style);
+  const outlineReason = freeOutlineOnlyDisabledReason(style);
+  // O erro do contorno inteiro (com o degradê); o da espessura e o da cor ficam nos campos deles.
+  const strokeError = error("stroke.width") || error("stroke.color") ? undefined : error("stroke");
 
   return (
     <FreeSection title={C.style.text}>
@@ -119,7 +156,53 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
       <PillField disabled={disabled} label={C.style.align} name={id("alinhamento")} onChange={(align) => set({ align })} options={FREE_TEXT_ALIGN_OPTIONS} value={style.align} />
       <div className="flex min-w-0 flex-col gap-2">
         <FreeTextPaintField disabled={disabled} error={error("paint")} id={id("cor-texto")} onChange={(paint) => set({ paint }, "paint")} value={style.paint} />
-        <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"])} />
+        {/* A dica do contraste ao passar o mouse (L6c) fica na seção dela, embaixo das cores de lá. */}
+        <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"]).filter((hint) => !freeIsHoverKey(hint.key))} />
+      </div>
+      <div className="flex min-w-0 flex-col gap-3" id={id("contorno")} tabIndex={-1}>
+        <AdminSwitch
+          checked={stroke !== undefined}
+          description={strokeReason ?? undefined}
+          disabled={disabled || strokeReason !== null}
+          id={`${id("contorno")}-ligado`}
+          label={C.style.stroke}
+          // Desligar com a letra vazada devolve a cor dela no mesmo passo (sem o contorno ela sumiria).
+          onCheckedChange={(on) => set(freeStrokeSwitchPatch(style, on))}
+        />
+        <FreeFieldError id={`${id("contorno")}-erro`} message={strokeError} />
+        {stroke ? (
+          <div className="flex min-w-0 flex-col gap-3 border-l-2 border-[var(--border-subtle)] pl-4">
+            <FreeNumberField
+              bounds={L.textStroke}
+              disabled={disabled}
+              error={error("stroke.width")}
+              id={id("contorno-espessura")}
+              label={C.style.strokeWidth}
+              onChange={(width) => set({ stroke: { ...stroke, width } }, "stroke")}
+              unit={C.units.px}
+              value={stroke.width}
+            />
+            <ColorField disabled={disabled} error={error("stroke.color")} id={id("contorno-cor")} label={C.style.strokeColor} onChange={(color) => set({ stroke: { ...stroke, color } }, "stroke")} value={stroke.color} />
+          </div>
+        ) : null}
+        {OUTLINE_ONLY_TYPES.has(node.type) ? (
+          <div className="flex min-w-0 flex-col gap-2">
+            <Button
+              aria-describedby={outlineReason ? `${id("so-contorno")}-motivo` : undefined}
+              aria-pressed={outlineOnly}
+              className={cn(freeSmallButton, "self-start")}
+              disabled={disabled || outlineReason !== null}
+              id={id("so-contorno")}
+              onClick={() => set(freeOutlineOnlyPatch(style, !outlineOnly))}
+              type="button"
+              variant="secondary"
+            >
+              {outlineOnly ? <Check aria-hidden="true" className="size-4" /> : null}
+              {C.style.strokeOnly}
+            </Button>
+            {outlineReason ? <FreeNote id={`${id("so-contorno")}-motivo`}>{outlineReason}</FreeNote> : null}
+          </div>
+        ) : null}
       </div>
       <div className="flex min-w-0 flex-col gap-3" id={id("sombra-texto")} tabIndex={-1}>
         <AdminSwitch
@@ -229,5 +312,107 @@ function BoxSections({ design, disabled, errors, latest, node, onBusyChange, onC
         </div>
       </FreeSection>
     </>
+  );
+}
+
+/**
+ * Depois de "Voltar ao padrão" o botão sai: o foco vai para o campo, no quadro seguinte (já desenhado sem o botão). O
+ * campo que ficou parado (a Cor do texto com a letra em degradê, a Cor da borda sem borda) não recebe foco: vai a seção.
+ */
+function focusAfterReset(fieldId: string, sectionId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const field = document.getElementById(fieldId);
+
+    if (!(field instanceof HTMLInputElement && field.disabled) && focusFreeField(fieldId)) {
+      return;
+    }
+
+    focusFreeField(sectionId);
+  });
+}
+
+/** "Voltar ao padrão" de uma cor ao passar o mouse: só aparece com a cor própria; o nome falado diz qual. */
+function HoverReset({ disabled, fieldId, label, onReset }: { disabled: boolean; fieldId: string; label: string; onReset: () => void }) {
+  return (
+    <Button aria-label={C.hover.resetLabel(label)} className={cn(freeSmallButton, "self-start")} disabled={disabled} id={`${fieldId}-padrao`} onClick={onReset} type="button" variant="secondary">
+      <RotateCcw aria-hidden="true" className="size-4" />
+      {C.hover.reset}
+    </Button>
+  );
+}
+
+/**
+ * Ao passar o mouse (L6c), no Botão (Fundo de cor ou degradê, Cor do texto e Cor da borda) e nos Links (Cor). Cada
+ * campo sem escolha mostra a cor de sempre e só grava ao mudar (as chaves do histórico `<id>:hover.fill`,
+ * `<id>:hover.color` e `<id>:hover.borderColor` juntam os passos seguidos); "Voltar ao padrão" tira a escolha num
+ * passo próprio. A Cor do texto fica parada com a letra em degradê, e a Cor da borda, sem borda. Os erros e a dica de
+ * contraste do Revisar ficam no campo de cada um. A chave "Ver com o mouse em cima" só muda o palco do editor e fica
+ * parada com "Ver como: Celular" (lá não tem mouse). Sem ganchos: os testes abrem a função na mão.
+ */
+function HoverSection({ design, device = "desktop", disabled, errors, hints, hoverPreview = false, node, onChange, onHoverPreviewChange }: FreeSectionProps & { node: FreeHoverNode }) {
+  const F = FREE_HOVER_FIELDS;
+  const id = (field: string) => freeFieldId(node.id, field);
+  const sectionId = id(F.group);
+  const hover: FreeButtonHover = node.hover ?? {};
+  const values = freeHoverFieldValues(node);
+  const error = (field?: keyof FreeButtonHover) => freeErrorAt(errors, `nodes.${node.id}.hover${field ? `.${field}` : ""}`);
+  const set = (patch: FreeHoverPatch, field: keyof FreeButtonHover) => onChange(withFreeHover(design, node.id, patch), `hover.${field}`);
+  const reset = (field: keyof FreeButtonHover, fieldId: string) => {
+    onChange(withFreeHover(design, node.id, { [field]: undefined }));
+    focusAfterReset(fieldId, sectionId);
+  };
+  const button = node.type === "button";
+  const colorLabel = button ? C.hover.color : C.hover.linksColor;
+  const colorReason = freeHoverColorDisabledReason(node);
+  const borderNote = freeHoverBorderNote(node);
+  const previewReason = freeHoverPreviewDisabledReason(node, device);
+  // O erro do objeto inteiro; os de cada cor ficam nos campos delas.
+  const sectionError = error("fill") || error("color") || error("borderColor") ? undefined : error();
+
+  return (
+    <FreeSection description={C.hover.note} id={sectionId} title={C.hover.title}>
+      {button && !freeHasHover(node) ? <FreeNote>{C.hover.buttonDefault}</FreeNote> : null}
+      <FreeFieldError id={`${sectionId}-erro`} message={sectionError} />
+      {button ? (
+        <div className="flex min-w-0 flex-col gap-2">
+          <FreeTextPaintField disabled={disabled} error={error("fill")} id={id(F.fill)} label={C.hover.fill} onChange={(fill) => set({ fill }, "fill")} value={values.fill} />
+          {hover.fill ? <HoverReset disabled={disabled} fieldId={id(F.fill)} label={C.hover.fill} onReset={() => reset("fill", id(F.fill))} /> : null}
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-col gap-2">
+        <ColorField disabled={disabled || colorReason !== null} error={error("color")} id={id(F.color)} label={colorLabel} onChange={(color) => set({ color }, "color")} value={values.color} />
+        {colorReason ? <FreeNote>{colorReason}</FreeNote> : null}
+        {hover.color !== undefined ? <HoverReset disabled={disabled} fieldId={id(F.color)} label={colorLabel} onReset={() => reset("color", id(F.color))} /> : null}
+      </div>
+      {button ? (
+        <div className="flex min-w-0 flex-col gap-2">
+          <ColorField
+            disabled={disabled || (borderNote !== null && hover.borderColor === undefined)}
+            error={error("borderColor")}
+            id={id(F.borderColor)}
+            label={C.hover.borderColor}
+            onChange={(borderColor) => set({ borderColor }, "borderColor")}
+            value={values.borderColor}
+          />
+          {borderNote ? <FreeNote>{borderNote}</FreeNote> : null}
+          {hover.borderColor !== undefined ? (
+            <HoverReset disabled={disabled} fieldId={id(F.borderColor)} label={C.hover.borderColor} onReset={() => reset("borderColor", id(F.borderColor))} />
+          ) : null}
+        </div>
+      ) : null}
+      <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"]).filter((hint) => freeIsHoverKey(hint.key))} />
+      <AdminSwitch
+        checked={hoverPreview && previewReason === null}
+        description={previewReason ?? C.hover.previewNote}
+        disabled={previewReason !== null}
+        id={id(F.preview)}
+        label={C.hover.preview}
+        onCheckedChange={(on) => onHoverPreviewChange?.(on)}
+      />
+    </FreeSection>
   );
 }

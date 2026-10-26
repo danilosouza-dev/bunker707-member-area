@@ -21,6 +21,13 @@ import { closeViaOf } from "./popup-host-model";
 // "Só no X" (`popup.close === "x_only"`): o toque fora nao fecha (disablePointerDismissal), so faz o X
 // pulsar; o X e o Esc fecham (o Esc fica para quem usa teclado ou leitor de tela, padrao WAI-ARIA).
 //
+// A janela abre e fecha com fade e escala (scale-95). No Tailwind 4 a escala e a propriedade `scale`, separada
+// do `transform`: por isso a transicao lista `scale` (com `transform` a escala pulava sem animar). Com menos
+// movimento, nada anima (motion-reduce:transition-none). A guarda esta em popup-design.guard.test.mjs.
+// O Base UI so marca o data-starting-style quando o Root ja montado passa de fechado para aberto, e o host monta a
+// janela ja aberta (showing e open juntos): a entrada vem do CSS (`starting:`, o @starting-style), que anima o
+// primeiro desenho do elemento sem mudar quando a janela abre. Navegador sem @starting-style: aparece de uma vez.
+//
 // Design do pop-up (docs/26): no "Personalizado", o nome do dialogo e o texto do titulo do design (o <h2>,
 // aria-labelledby); sem bloco Título, o titulo do aviso (aria-label). A descricao e o primeiro bloco Texto. O
 // segundo botao usa as saidas de sempre: Fechar = o X, Lembrar depois = o link, link = o clique do botao. O
@@ -135,12 +142,12 @@ export function MemberPopupDialog({
       open={open}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-[2px] transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
+        <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-[2px] transition-opacity duration-200 starting:opacity-0 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
         <Dialog.Viewport className="fixed inset-0 z-[201] grid place-items-center overflow-y-auto p-4" onPointerDown={handleVeilPointerDown}>
           <Dialog.Popup
             {...aria}
             aria-modal="true"
-            className="outline-none transition-[opacity,transform] duration-200 ease-out data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="outline-none transition-[opacity,scale] duration-200 ease-out starting:scale-95 starting:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
             data-member-popup=""
             initialFocus={popupRef}
             ref={popupRef}

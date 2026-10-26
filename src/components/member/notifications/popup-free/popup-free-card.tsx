@@ -44,6 +44,11 @@ export type PopupFreeCardProps = {
   /** Só o editor: recebe o elemento do DOM de cada elemento do design (medir, selecionar). Nunca no diálogo do aluno. */
   editorNodeRef?: (id: FreeId, element: HTMLElement | null) => void;
   fonts?: readonly PopupFontFace[];
+  /**
+   * Só o editor ("Ver com o mouse em cima", L6c): o Botão ou os Links que mostram as cores ao passar o mouse sem o
+   * mouse (`data-free-hover-on`). Vale só com `preview`; o aluno nunca passa.
+   */
+  hoverPreviewId?: FreeId | null;
   nudgeClose?: boolean;
   onClose?: () => void;
   /** O 3º argumento diz qual botão foi: "cta" (o Botão principal) ou `link:<id>` (um "Abrir um link"). */
@@ -122,6 +127,7 @@ export function PopupFreeCard({
   dragPreview = null,
   editorNodeRef,
   fonts,
+  hoverPreviewId,
   nudgeClose = false,
   onClose,
   onCta,
@@ -149,6 +155,7 @@ export function PopupFreeCard({
     design: drawn,
     dragPreview,
     faces,
+    hoverPreviewId,
     motion,
     onClose,
     onCta,

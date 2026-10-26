@@ -1502,3 +1502,64 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   outline-offset: 2px;
   box-shadow: none;
 }
+
+/*
+ * Livre (docs/27 §4): as cores do Botao e dos Links do pop-up Livre ao passar o mouse e no foco pelo teclado (L6c).
+ * O cartao poe em data-free-hover a lista do que muda (color, border, fill) e os valores nas variaveis --free-hover-*
+ * do estilo em linha (so cores e degrades montados de valores validados). Fora de @layer e com !important so nestas
+ * regras: o estilo em linha do elemento venceria. So os nomes presentes entram na lista (uma variavel que falta, com
+ * !important, apagaria a cor). O passar o mouse so com mouse de verdade (hover: hover): no toque nada fica preso. O
+ * foco pelo teclado mostra as mesmas cores, e o anel de foco do cartao continua por cima (nada aqui mexe na sombra
+ * nem no contorno). A cor leva a da linha junto: nos Links vazados a linha vem em linha na cor do contorno, e o
+ * sublinhado ficaria nela. O fundo fixa tamanho, lugar e repeticao: a primeira camada do botao pode ser uma imagem que se
+ * repete, e o degrade herdaria os ladrilhos dela. data-free-hover-on: a previa do editor ("Ver com o mouse em cima").
+ * Cor, borda e o aperto mudam em 150 ms (sem animacao com menos movimento); o fundo troca na hora. A transicao so no
+ * <a> e no <button> do aluno: na previa do editor o Botao e os Links sao <span>, e o arrastar move o span por
+ * translate (com a transicao, o botao ficaria para tras do ponteiro e o palco mediria no meio do caminho).
+ */
+:is(a, button)[data-free-hover] {
+  transition:
+    color 150ms,
+    border-color 150ms,
+    translate 150ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(a, button)[data-free-hover] {
+    transition: none;
+  }
+}
+
+@media (hover: hover) {
+  [data-free-hover~="color"]:hover {
+    color: var(--free-hover-color) !important;
+    text-decoration-color: var(--free-hover-color) !important;
+  }
+
+  [data-free-hover~="border"]:hover {
+    border-color: var(--free-hover-border) !important;
+  }
+
+  [data-free-hover~="fill"]:hover {
+    background-image: var(--free-hover-fill) !important;
+    background-position: 50% 50% !important;
+    background-repeat: no-repeat !important;
+    background-size: 100% 100% !important;
+  }
+}
+
+[data-free-hover~="color"]:is(:focus-visible, [data-free-hover-on]) {
+  color: var(--free-hover-color) !important;
+  text-decoration-color: var(--free-hover-color) !important;
+}
+
+[data-free-hover~="border"]:is(:focus-visible, [data-free-hover-on]) {
+  border-color: var(--free-hover-border) !important;
+}
+
+[data-free-hover~="fill"]:is(:focus-visible, [data-free-hover-on]) {
+  background-image: var(--free-hover-fill) !important;
+  background-position: 50% 50% !important;
+  background-repeat: no-repeat !important;
+  background-size: 100% 100% !important;
+}

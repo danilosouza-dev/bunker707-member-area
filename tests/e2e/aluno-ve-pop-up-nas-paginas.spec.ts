@@ -99,6 +99,33 @@ async function nadaAbre(page: Page, titulo: string, espera = 4_500) {
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 }
 
+/**
+ * Espera a janela do titulo dado aparecer (10 s, como o toBeVisible). Enquanto nao aparece, a mensagem traz as
+ * janelas de pop-up que estao na tela e o que o banco guardou da aluna para os titulos dados (vezes e ultima vez
+ * vista): uma falha diz se abriu outro pop-up no lugar, se a abertura foi contada sem aparecer ou se nada foi pedido.
+ */
+async function esperarJanela(page: Page, titulo: string, titulos: string[] = [titulo]) {
+  await expect
+    .poll(
+      async () => {
+        if ((await page.getByRole("dialog", { name: titulo }).count()) > 0) {
+          return "aberto";
+        }
+
+        const janelas = await page
+          .locator("[data-member-popup]")
+          .evaluateAll((elementos) =>
+            elementos.map((elemento) => elemento.getAttribute("aria-label") ?? document.getElementById(elemento.getAttribute("aria-labelledby") ?? "")?.textContent ?? "?")
+          );
+        const banco = await Promise.all(titulos.map(async (nome) => [nome, await estadoDoPopUpDaAluna(nome)] as const));
+
+        return JSON.stringify({ banco: Object.fromEntries(banco.map(([nome, estado]) => [nome, estado && { impressions: estado.impressions, lastSeenAt: estado.lastSeenAt }])), janelas });
+      },
+      { timeout: 10_000 }
+    )
+    .toBe("aberto");
+}
+
 test.describe("em qualquer página, menos Perfil, com 1 minuto entre uma vez e outra", () => {
   const TITULO = "Pop-up E2E: em qualquer página";
   let id = "";
@@ -238,6 +265,7 @@ test.describe("players da aula: o nosso, o de fora tocando e o de fora no toque"
     await reabrirPopUpParaAluna(TITULO);
     await page.goto(AULA_3);
     const popUp = page.getByRole("dialog", { name: TITULO });
+    await esperarJanela(page, TITULO);
     await expect(popUp).toBeVisible();
     await popUp.getByRole("button", { name: "Fechar" }).click();
     await expect(popUp).toHaveCount(0);
@@ -413,6 +441,7 @@ test.describe("dois pop-ups no Início ao mesmo tempo", () => {
     await page.goto("/");
     // O publicado por ultimo abre primeiro.
     const primeiro = page.getByRole("dialog", { name: SEGUNDO });
+    await esperarJanela(page, SEGUNDO, [SEGUNDO, PRIMEIRO]);
     await expect(primeiro).toBeVisible();
     await page.waitForTimeout(1_500);
     await expect(page.locator("[data-member-popup]")).toHaveCount(1);

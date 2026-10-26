@@ -3,7 +3,8 @@
 // (applyFreeTextEdit, splitFreeSpanAtSelection, applyFreeSpanStyle e as fichas das partes), as camadas de fundo
 // (com a faixa Ordem do L4a: o lugar de soltar, o foco que segue a camada e a imagem que acha a sua camada),
 // as paradas do degradê, os lados, as sombras com os atalhos, a largura do pop-up com a reescala, os pesos de cada
-// fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber) e o mapa chave -> aba/campo
+// fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber), o contorno e o marca-texto (L6b, com o
+// atalho "Só o contorno"), as cores ao passar o mouse (L6c, withFreeHover) e o mapa chave -> aba/campo
 // (freeInspectorTargetOf).
 //
 // Modulo puro, imports relativos (tests/popup-livre-painel-modelo.test.mjs carrega direto pelo Node). Tudo aqui e
@@ -12,6 +13,7 @@
 import {
   FREE_ARTBOARD_WIDTH_PRESETS,
   FREE_DESIGN_LIMITS,
+  FREE_MARK_DEFAULTS,
   findFreeNode,
   freeDefaultFlowWidth,
   freeMobileNodeOf,
@@ -27,6 +29,8 @@ import {
   type FreeBorder,
   type FreeArtboard,
   type FreeBox,
+  type FreeButtonHover,
+  type FreeButtonNode,
   type FreeClose,
   type FreeIconName,
   type FreeImageAsset,
@@ -35,6 +39,8 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeLine,
+  type FreeLinksNode,
+  type FreeMark,
   type FreeMobileNode,
   type FreeNode,
   type FreeNodeType,
@@ -43,6 +49,7 @@ import {
   type FreeSpan,
   type FreeSpanStyle,
   type FreeTextPaint,
+  type FreeTextStroke,
   type FreeTextStyle,
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
@@ -99,9 +106,20 @@ export const FREE_INSPECTOR_COPY = {
     font: "Fonte",
     italic: "Itálico",
     letterSpacing: "Espaço entre letras",
+    /** Marca-texto (L6b): o fundo atrás das letras da parte, um por linha. */
+    mark: "Marca-texto",
+    markColor: "Cor do marca-texto",
+    markPaddingX: "Respiro dos lados",
+    markPaddingY: "Respiro em cima e embaixo",
+    markRadius: "Cantos do marca-texto",
     paint: "Cor do texto",
     reset: "Voltar ao estilo do elemento",
     size: "Tamanho",
+    /** Contorno da parte (L6b): põe ou troca o do elemento, mas não tira. */
+    stroke: "Contorno",
+    strokeColor: "Cor do contorno",
+    strokeFromElement: "Vem do elemento inteiro: aqui a parte troca a cor e a espessura.",
+    strokeWidth: "Espessura",
     title: "Estilo da parte",
     uppercase: "Maiúsculas",
     weight: "Peso"
@@ -191,8 +209,42 @@ export const FREE_INSPECTOR_COPY = {
     shadowX: "Horizontal",
     shadowY: "Vertical",
     size: "Tamanho",
+    /** Contorno das letras (L6b), no molde da Sombra do texto. */
+    stroke: "Contorno",
+    strokeColor: "Cor do contorno",
+    /** Com a letra em degradê, a chave Contorno e o "Só o contorno" ficam desligados (o schema recusa os dois juntos). */
+    strokeGradient: "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.",
+    strokeOnly: "Só o contorno (texto vazado)",
+    strokeOnlyGradient: "No degradê, escolha uma cor sólida antes.",
+    strokeWidth: "Espessura",
     uppercase: "Maiúsculas",
     weight: "Peso"
+  },
+  /**
+   * Ao passar o mouse (L6c), no Estilo do Botão (Fundo, Cor do texto, Cor da borda) e dos Links (Cor). Cada campo sem
+   * escolha mostra a cor de sempre como ponto de partida; "Voltar ao padrão" tira a escolha. A chave "Ver com o mouse
+   * em cima" só muda o palco do editor (não salva e fica fora do histórico).
+   */
+  hover: {
+    borderColor: "Cor da borda",
+    /** Sem borda, a cor da borda não aparece (o campo fica parado enquanto não tem cor própria). */
+    borderNone: "Escolha uma borda em Borda para mudar a cor dela.",
+    buttonDefault: "Sem cores próprias, o botão clareia um pouco quando o mouse passa.",
+    color: "Cor do texto",
+    /** Com a letra em degradê, a cor do texto ao passar o mouse não aparece (o schema recusa). */
+    colorGradient: "Com o texto em degradê, a cor ao passar o mouse não muda o texto.",
+    fill: "Fundo",
+    linksColor: "Cor",
+    note: "Vale também quando o aluno chega pelo teclado. No celular não tem mouse.",
+    preview: "Ver com o mouse em cima",
+    previewEmpty: "Escolha uma cor acima para ver aqui.",
+    /** Com "Ver como: Celular", o palco desenha o celular, onde o aluno nunca vê as cores ao passar o mouse. */
+    previewMobile: "No celular não tem mouse. Para ver aqui, use Ver como: Computador.",
+    previewNote: "Só para você ver aqui. Não muda o pop-up.",
+    reset: "Voltar ao padrão",
+    /** O nome falado de cada "Voltar ao padrão" (o texto na tela é o mesmo nos três). */
+    resetLabel: (field: string) => `${field}: voltar ao padrão`,
+    title: "Ao passar o mouse"
   },
   fill: {
     add: "Camada de fundo",
@@ -624,8 +676,15 @@ export function effectiveFreeSpanStyle(style: FreeSpanStyle | undefined, base: F
   if (style.size !== undefined && (!base || style.size !== base.size)) out.size = style.size;
   if (style.uppercase !== undefined && style.uppercase !== (base?.uppercase === true)) out.uppercase = style.uppercase;
   if (style.weight !== undefined && (!base || style.weight !== base.weight)) out.weight = style.weight;
+  // Contorno (L6b): o igual ao do elemento sai (a parte poe ou troca, mas nao tira). O marca-texto so existe na parte.
+  if (style.stroke && !sameStroke(style.stroke, base?.stroke)) out.stroke = style.stroke;
+  if (style.mark) out.mark = style.mark;
 
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sameStroke(left: FreeTextStroke, right: FreeTextStroke | undefined) {
+  return right !== undefined && left.width === right.width && left.color.toLowerCase() === right.color.toLowerCase();
 }
 
 function spanOf(text: string, style: FreeSpanStyle | undefined): FreeSpan {
@@ -992,8 +1051,11 @@ export function applyFreeSpanStyle(lines: readonly FreeLine[], targets: readonly
   return normalizeFreeLines(styled, base);
 }
 
+/** O estilo que o popover da parte mostra: o do elemento com o da parte por cima (o marca-texto so a parte tem). */
+export type FreeRangeStyle = FreeResolvedTextStyle & Pick<FreeSpanStyle, "mark">;
+
 /** O estilo que o trecho mostra no popover: o do elemento com o da primeira parte do trecho por cima. */
-export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange, base: FreeResolvedTextStyle): FreeResolvedTextStyle {
+export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange, base: FreeResolvedTextStyle): FreeRangeStyle {
   const line = lines[target.line] ?? [];
   let offset = 0;
 
@@ -1001,7 +1063,7 @@ export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange
     const to = offset + span.text.length;
 
     if (to > target.start || (span.text.length === 0 && offset === target.start)) {
-      return { ...base, ...(span.style ? Object.fromEntries(Object.entries(span.style).filter(([, value]) => value !== undefined)) : {}) } as FreeResolvedTextStyle;
+      return { ...base, ...(span.style ? Object.fromEntries(Object.entries(span.style).filter(([, value]) => value !== undefined)) : {}) } as FreeRangeStyle;
     }
 
     offset = to;
@@ -1110,6 +1172,14 @@ export function describeFreeSpanStyle(style: FreeSpanStyle, library: readonly Pi
 
   if (style.letterSpacing !== undefined) {
     words.push("espaço entre letras");
+  }
+
+  if (style.stroke) {
+    words.push("contorno");
+  }
+
+  if (style.mark) {
+    words.push("marca-texto");
   }
 
   return words.length > 0 ? words.join(", ") : "estilo do elemento";
@@ -1246,6 +1316,247 @@ export function freeTextPaintOfKind(kind: FreeTextPaintKind, current: FreeTextPa
   if (kind === "linear") return { kind: "linear", stops };
 
   return { kind: "radial", stops, x: 50, y: 50 };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Contorno e marca-texto (L6b)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O contorno que a chave Contorno liga: preto de 2 px (com 2 ou mais, o contorno conta no contraste do Revisar). */
+export const FREE_STROKE_DEFAULT: Readonly<FreeTextStroke> = { color: "#000000", width: 2 };
+
+/** A cor do marca-texto que a chave liga: o vermelho da marca, que se lê com o texto branco de partida. */
+export const FREE_MARK_DEFAULT_COLOR: HexColor = "#e50914";
+
+/** O que a chave Contorno e o "Só o contorno" mudam (vale para o elemento e para a parte). */
+export type FreeStrokePatch = { paint?: FreeTextPaint; stroke?: FreeTextStroke | undefined };
+
+/** Texto vazado: a letra sólida com alfa 00 e um contorno (sem chave própria no design). */
+export function freeIsOutlineOnly(style: Pick<FreeTextStyle, "paint" | "stroke">): boolean {
+  const color = style.paint?.kind === "solid" ? style.paint.color : null;
+
+  return style.stroke !== undefined && color !== null && color.length === 9 && color.slice(7) === "00";
+}
+
+/**
+ * "Só o contorno (texto vazado)": ligado, a letra fica com a cor de agora em alfa 00 e o contorno fica (o de agora,
+ * com espessura de pelo menos 2, ou um da cor da letra); desligado, a letra volta a mesma cor sem transparência e o
+ * contorno continua. Um passo só no histórico.
+ */
+export function freeOutlineOnlyPatch(style: Pick<FreeTextStyle, "paint" | "stroke">, on: boolean): FreeStrokePatch {
+  const color = opaque((style.paint ? freePaintBaseColor(style.paint) : null) ?? "#ffffff");
+
+  if (!on) {
+    return { paint: { color, kind: "solid" } };
+  }
+
+  return {
+    paint: { color: `${color}00`, kind: "solid" },
+    stroke: style.stroke ? { ...style.stroke, width: Math.max(FREE_STROKE_DEFAULT.width, style.stroke.width) } : { color, width: FREE_STROKE_DEFAULT.width }
+  };
+}
+
+/**
+ * A chave Contorno: ligada, o contorno padrão; desligada, sem contorno, e a letra vazada volta a ter cor (sem o
+ * contorno ela sumiria). Um passo só no histórico.
+ */
+export function freeStrokeSwitchPatch(style: Pick<FreeTextStyle, "paint" | "stroke">, on: boolean): FreeStrokePatch {
+  if (on) {
+    return { stroke: { ...FREE_STROKE_DEFAULT } };
+  }
+
+  return freeIsOutlineOnly(style) ? { ...freeOutlineOnlyPatch(style, false), stroke: undefined } : { stroke: undefined };
+}
+
+/**
+ * Por que a chave Contorno fica desligada (no elemento e na parte, pela pintura que vale ali): com a letra em
+ * degradê, o contorno cobre a cor e o schema recusa. Com o contorno já ligado, a chave continua livre para
+ * desligar. null = livre.
+ */
+export function freeStrokeDisabledReason(style: Pick<FreeTextStyle, "paint" | "stroke">): string | null {
+  return style.stroke === undefined && style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeGradient : null;
+}
+
+/**
+ * Por que o "Só o contorno" fica desligado: no degradê ele trocaria o degradê por uma cor sólida, e soltar o botão
+ * devolveria só a primeira cor. null = livre.
+ */
+export function freeOutlineOnlyDisabledReason(style: Pick<FreeTextStyle, "paint">): string | null {
+  return style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeOnlyGradient : null;
+}
+
+/** O respiro do marca-texto como [em cima e embaixo, dos lados] (sem escolha: [2, 6]). */
+export function freeMarkPadding(mark: FreeMark): [number, number] {
+  const padding = mark.padding ?? FREE_MARK_DEFAULTS.padding;
+
+  return typeof padding === "number" ? [padding, padding] : [padding[0], padding[1]];
+}
+
+/** Os cantos do marca-texto (sem escolha: 4). */
+export function freeMarkRadius(mark: FreeMark): number {
+  return mark.radius ?? FREE_MARK_DEFAULTS.radius;
+}
+
+/** Troca um lado do respiro (0 = em cima e embaixo, 1 = dos lados): o padrão [2, 6] sai e [n, n] vira n. */
+export function withFreeMarkPadding(mark: FreeMark, side: 0 | 1, value: number): FreeMark {
+  const padding = freeMarkPadding(mark);
+  const { padding: unused, ...rest } = mark;
+
+  void unused;
+  padding[side] = value;
+
+  if (padding[0] === FREE_MARK_DEFAULTS.padding[0] && padding[1] === FREE_MARK_DEFAULTS.padding[1]) {
+    return rest;
+  }
+
+  return { ...rest, padding: padding[0] === padding[1] ? padding[0] : padding };
+}
+
+/** Troca os cantos do marca-texto: o padrão 4 sai. */
+export function withFreeMarkRadius(mark: FreeMark, radius: number): FreeMark {
+  const { radius: unused, ...rest } = mark;
+
+  void unused;
+
+  return radius === FREE_MARK_DEFAULTS.radius ? rest : { ...rest, radius };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Cores ao passar o mouse (L6c)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O Botão e os Links: os únicos elementos com cores ao passar o mouse (os que recebem clique). */
+export type FreeHoverNode = FreeButtonNode | FreeLinksNode;
+
+/** O que muda ao passar o mouse; uma chave com `undefined` volta ao padrão. */
+export type FreeHoverPatch = FreePatch<FreeButtonHover>;
+
+/** Os campos do "Ao passar o mouse" no Estilo (`livre-<id>-<campo>`): a seção, cada cor e a chave da prévia. */
+export const FREE_HOVER_FIELDS = {
+  borderColor: "passar-mouse-borda",
+  color: "passar-mouse-cor",
+  fill: "passar-mouse-fundo",
+  group: "passar-mouse",
+  preview: "passar-mouse-ver"
+} as const;
+
+/** As cores que cada tipo aceita: os Links só mudam a cor (sem fundo e sem borda ao passar o mouse). */
+const HOVER_KEYS: Record<FreeHoverNode["type"], readonly (keyof FreeButtonHover)[]> = { button: ["borderColor", "color", "fill"], links: ["color"] };
+
+export function isFreeHoverNode(node: FreeNode | null | undefined): node is FreeHoverNode {
+  return node?.type === "button" || node?.type === "links";
+}
+
+/**
+ * O elemento tem alguma cor própria ao passar o mouse que aparece no cartão do aluno, pela mesma regra do
+ * freeHoverAttrs do cartão (o teste confere os dois lado a lado, combinação por combinação): a cor do texto só com a
+ * letra de cor sólida, a da borda só no Botão com borda de 1 px ou mais e o fundo só no Botão. Assim a nota do brilho,
+ * a chave "Ver com o mouse em cima" e o palco nunca discordam do aluno; sem nenhuma que apareça, o botão só clareia e
+ * os Links sublinham. Não importa o módulo do cartão: o editor importando popup-free-styles.ts muda como o Turbopack
+ * divide o pedaço do cartão do aluno (+206 B na régua, docs/27 §7).
+ */
+export function freeHasHover(node: FreeNode | null | undefined): boolean {
+  if (!isFreeHoverNode(node) || !node.hover) {
+    return false;
+  }
+
+  const hover: FreeButtonHover = node.hover;
+  const button = node.type === "button";
+
+  return (
+    (hover.color !== undefined && freeTextStyleOf(node).paint.kind === "solid") ||
+    (button && hover.fill !== undefined) ||
+    (button && hover.borderColor !== undefined && !!node.box?.border?.width)
+  );
+}
+
+/**
+ * Muda as cores ao passar o mouse do Botão ou dos Links, no molde de withFreeTextStyle: `undefined` volta ao padrão e
+ * o objeto vazio sai (como na forma canônica). Os Links ignoram o fundo e a cor da borda; os outros tipos não mudam.
+ */
+export function withFreeHover(design: PopupFreeDesign, id: FreeId, patch: FreeHoverPatch): PopupFreeDesign {
+  return updateFreeNode(design, id, (node) => {
+    if (!isFreeHoverNode(node)) {
+      return node;
+    }
+
+    const keys: readonly string[] = HOVER_KEYS[node.type];
+    const allowed = Object.fromEntries(Object.entries(patch).filter(([key]) => keys.includes(key))) as FreeHoverPatch;
+
+    if (Object.keys(allowed).length === 0) {
+      return node;
+    }
+
+    const hover = patchObject<FreeButtonHover>(node.hover, allowed);
+    const { hover: unused, ...rest } = node;
+
+    void unused;
+
+    return (hover ? { ...rest, hover } : rest) as FreeNode;
+  });
+}
+
+/**
+ * O que cada campo do "Ao passar o mouse" mostra: a cor própria ou, sem ela, a de sempre como ponto de partida (nada
+ * disso vai para o design até mudar). O fundo: a camada de cor ou degradê mais de cima, ou branco; a letra: a cor dela
+ * (a primeira do degradê), sem o alfa 00 do texto vazado, que ao passar o mouse pode ganhar cor; a borda: a dela, ou
+ * branco.
+ */
+export function freeHoverFieldValues(node: FreeHoverNode): { borderColor: HexColor; color: HexColor; fill: FreeTextPaint } {
+  const hover: FreeButtonHover = node.hover ?? {};
+  const letter = freePaintBaseColor(freeTextStyleOf(node).paint) ?? "#ffffff";
+  const top = node.box?.fill?.find((layer): layer is FreeTextPaint => layer.kind === "solid" || layer.kind === "linear" || layer.kind === "radial");
+
+  return {
+    borderColor: hover.borderColor ?? node.box?.border?.color ?? "#ffffff",
+    color: hover.color ?? (letter.length === 9 && letter.slice(7) === "00" ? opaque(letter) : letter),
+    fill: hover.fill ?? top ?? { color: "#ffffff", kind: "solid" }
+  };
+}
+
+/**
+ * Por que a Cor do texto ao passar o mouse (a Cor, nos Links) fica parada: com a letra em degradê ela não apareceria e
+ * o schema recusa. Com a cor já escolhida (colada, ou de antes de a letra virar degradê), o campo fica livre para
+ * mudar e para voltar ao padrão, e o erro do schema aparece nele. null = livre.
+ */
+export function freeHoverColorDisabledReason(node: FreeHoverNode): string | null {
+  return node.hover?.color === undefined && freeTextStyleOf(node).paint.kind !== "solid" ? FREE_INSPECTOR_COPY.hover.colorGradient : null;
+}
+
+/**
+ * A nota da Cor da borda ao passar o mouse: sem borda (ou com a de 0 px, que o cartão não desenha), ela não aparece.
+ * O campo fica parado enquanto não tem cor própria; com cor (a borda tirada depois), fica livre para voltar ao padrão,
+ * com a nota. null = o botão tem borda de 1 px ou mais.
+ */
+export function freeHoverBorderNote(node: FreeHoverNode): string | null {
+  return node.type === "button" && !node.box?.border?.width ? FREE_INSPECTOR_COPY.hover.borderNone : null;
+}
+
+/**
+ * Por que a chave "Ver com o mouse em cima" fica parada: sem cor própria, o palco não tem o que mostrar; com "Ver como:
+ * Celular", o palco desenha o celular, onde não tem mouse. null = livre.
+ */
+export function freeHoverPreviewDisabledReason(node: FreeNode, device: "desktop" | "mobile"): string | null {
+  return !freeHasHover(node) ? FREE_INSPECTOR_COPY.hover.previewEmpty : device === "mobile" ? FREE_INSPECTOR_COPY.hover.previewMobile : null;
+}
+
+/**
+ * A chave "Ver com o mouse em cima" (não salva, fora do histórico) depois de uma mudança no editor: continua ligada só
+ * com o mesmo elemento escolhido sozinho, com alguma cor própria, com o painel do elemento aberto e com "Ver como:
+ * Computador". Volta ao normal ao trocar de elemento, com vários escolhidos, no Revisar, no Celular (lá não tem mouse)
+ * e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z). Sair da aba Estilo também desliga (o painel avisa).
+ * null = desligada.
+ */
+export function freeHoverPreviewAfter(
+  previewId: FreeId | null,
+  now: { activeId: FreeId | null; device: "desktop" | "mobile"; hasHover: boolean; many: boolean; panel: "inspector" | "review" }
+): FreeId | null {
+  return previewId !== null && previewId === now.activeId && now.device === "desktop" && now.hasHover && !now.many && now.panel === "inspector" ? previewId : null;
+}
+
+/** A chave (de erro ou de dica) é do "Ao passar o mouse" de um elemento: `nodes.<id>.hover...`, com ou sem "freeDesign.". */
+export function freeIsHoverKey(key: string): boolean {
+  return /^(?:freeDesign\.)?nodes\.[^.]+\.hover(?:\.|$)/.test(key);
 }
 
 /** Troca o tipo de uma camada de fundo mantendo as cores (Imagem precisa de um arquivo). */
@@ -1854,9 +2165,13 @@ const TEXT_STYLE_FIELDS: Record<string, string> = {
   paint: "cor-texto",
   shadow: "sombra-texto",
   size: "tamanho-texto",
+  stroke: "contorno",
   uppercase: "maiusculas",
   weight: "peso"
 };
+
+/** Os campos do Contorno (L6b): a espessura e a cor; o resto, o grupo (a chave liga e desliga). */
+const STROKE_FIELDS: Record<string, string> = { color: "contorno-cor", width: "contorno-espessura" };
 
 const BOX_STYLE_FIELDS: Record<string, string> = {
   backdropBlur: "desfoque-fundo",
@@ -1905,7 +2220,7 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
   const content = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "content" });
   const style = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "style" });
   const advanced = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "advanced" });
-  const [head, second] = rest;
+  const [head, second, third] = rest;
 
   switch (head) {
     case undefined:
@@ -1943,7 +2258,23 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
     case "gap":
       return content("espaco");
     case "textStyle":
-      return style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
+      return second === "stroke" ? style(STROKE_FIELDS[third ?? ""] ?? "contorno") : style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
+    case "hover":
+      // As cores ao passar o mouse (L6c, crítica C12): cada uma no campo dela no Estilo (nunca o Conteúdo); a chave
+      // do objeto inteiro, e nos Links o que não é a cor, na seção.
+      if (!isFreeHoverNode(node)) {
+        return content(freeFirstContentField(node));
+      }
+
+      return style(
+        second === "color"
+          ? FREE_HOVER_FIELDS.color
+          : node.type === "button" && second === "fill"
+            ? FREE_HOVER_FIELDS.fill
+            : node.type === "button" && second === "borderColor"
+              ? FREE_HOVER_FIELDS.borderColor
+              : FREE_HOVER_FIELDS.group
+      );
     case "box":
       return second === "padding" ? advanced("respiro") : style(BOX_STYLE_FIELDS[second ?? "fill"] ?? "fundo");
     case "place": {

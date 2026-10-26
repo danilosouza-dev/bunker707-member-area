@@ -1016,6 +1016,133 @@ test("dicas: contraste, texto pequeno, texto no celular, ordem de leitura, texto
   assert.deepEqual(checks.popupFreeHints(valid(design([{ hidden: true, id: "t", lines: [[{ text: "Oi" }]], textStyle: { size: 10 }, type: "text" }]))).filter((hint) => hint.nodeId === "t"), []);
 });
 
+/* L6b: o contraste com o contorno e com o marca-texto (docs/27 §9.8; críticas C2 e C22) */
+
+const LETRA_VAZADA = { color: "#ffffff00", kind: "solid" };
+const contrastKeys = (value, input) => checks.popupFreeHints(valid(value), input).filter((hint) => hint.kind === "contrast").map((hint) => hint.key);
+
+test("L6b, Revisar: o texto vazado com contorno de 2 ou mais não acusa contraste; com 1, só a cor conta e acusa", () => {
+  const titulo = (stroke) => ({ id: "titulo", lines: [[{ text: "Semana" }]], textStyle: { paint: LETRA_VAZADA, size: 40, stroke }, type: "heading" });
+
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 2 })])), [], "contorno branco de 2 no fundo escuro: lê bem");
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 8 })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 1 })])), ["nodes.titulo.textStyle.paint"], "com 1 px, só a cor (transparente) conta");
+  // O contorno de 2 também precisa contrastar: escuro no fundo escuro acusa.
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#202020", width: 2 })])), ["nodes.titulo.textStyle.paint"]);
+
+  // Em cada cor do fundo vale o melhor entre a letra e o contorno: letra branca com contorno preto lê no degradê do
+  // preto ao branco; sem o contorno (ou com 1 px), o lado branco acusa.
+  const degrade = { artboard: { fill: [{ kind: "linear", stops: [{ at: 0, color: "#000000" }, { at: 100, color: "#ffffff" }] }] } };
+  const branco = (stroke) => ({ id: "texto", lines: [[{ text: "Leia" }]], textStyle: stroke ? { stroke } : undefined, type: "text" });
+  // Os Links brancos, sem contorno, acusam no lado branco; aqui so o Texto importa.
+  const doTexto = (value) => contrastKeys(value).filter((key) => key.startsWith("nodes.texto."));
+
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 2 })], degrade)), []);
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 1 })], degrade)), ["nodes.texto.textStyle.paint"]);
+  assert.deepEqual(doTexto(design([branco(null)], degrade)), ["nodes.texto.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte vazada se lê pelo contorno dela ou do elemento; trocar o contorno por um ruim acusa na parte", () => {
+  const linhas = (style) => [[{ text: "Semana " }, { style, text: "de revisão" }]];
+  const titulo = (style, textStyle = { size: 40 }) => ({ id: "titulo", lines: linhas(style), textStyle, type: "heading" });
+
+  // A parte vazada com contorno próprio de 2: lê. Com 1: a cor da parte acusa, na chave da cor dela.
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } })])), ["nodes.titulo.lines.0.1.style.paint"]);
+  // Sem contorno próprio, o do elemento vale para a parte (a parte não tira o contorno).
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA }, { size: 40, stroke: { color: "#ffffff", width: 3 } })])), []);
+
+  // Elemento vazado que lê pelo contorno; a parte só troca o contorno: por um de 1 px acusa na chave do contorno dela,
+  // por outro bom não acusa.
+  const vazado = { paint: LETRA_VAZADA, size: 40, stroke: { color: "#ffffff", width: 3 } };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#ffffff", width: 1 } }, vazado)])), ["nodes.titulo.lines.0.1.style.stroke"]);
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#e5ff1f", width: 2 } }, vazado)])), []);
+  // Com o elemento já acusando, a parte que só troca o contorno não repete a dica.
+  const ruim = { paint: { color: "#202020", kind: "solid" }, size: 40 };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#303030", width: 1 } }, ruim)])), ["nodes.titulo.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte com marca-texto é medida contra ele, mesmo sem cor própria", () => {
+  const texto = (style, extra = {}) => ({ id: "texto", lines: [[{ text: "As aulas voltam com " }, { style, text: "exercícios novos" }]], type: "text", ...extra });
+
+  // Marca-texto claro sob o texto branco do elemento: acusa na chave do marca-texto.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+  // Com uma letra escura, lê sobre ele (a mesma letra escura sem marca-texto acusaria contra o fundo escuro).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ paint: { color: "#111111", kind: "solid" } })])), ["nodes.texto.lines.0.1.style.paint"]);
+  // A cor de partida da chave Marca-texto (o vermelho da marca) lê com o texto branco.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e50914" } })])), []);
+
+  // Marca-texto transparente: composto sobre o fundo de fora (o escuro da prancheta).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffff26" } }, { textStyle: { paint: { color: "#d4d4d8", kind: "solid" } } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffffcc" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+
+  // Sobre uma imagem: o marca-texto sem transparência ainda dá para medir; o transparente, não.
+  const sobreImagem = { artboard: { fill: [{ asset: "img", kind: "image" }] }, assets: [imageAsset("img")] };
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })], sobreImagem)), ["nodes.texto.lines.0.1.style.mark"]);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1fff" }, paint: { color: "#111111", kind: "solid" } })], sobreImagem)), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f80" } })], sobreImagem)), []);
+});
+
+test("L6b, Revisar: com todas as letras sobre marca-texto, a cor do elemento não é medida contra o fundo de fora", () => {
+  const escura = { paint: { color: "#111111", kind: "solid" }, size: 32 };
+  const amarelo = { mark: { color: "#e5ff1f" } };
+  const titulo = (lines) => ({ id: "t", lines, textStyle: escura, type: "heading" });
+
+  // A letra escura do elemento só aparece sobre o amarelo: nada acusa (antes, 1,0:1 em textStyle.paint).
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana de revisão" }]])])), []);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: amarelo, text: "de revisão" }]])])), [], "em todas as linhas");
+  // Um espaço sem marca-texto entre duas partes marcadas não tem letra para medir.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }, { text: " " }, { style: { mark: { color: "#ffffff" } }, text: "de revisão" }]])])), []);
+  // Uma parte com cor própria também não usa a cor do elemento.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { style: { paint: { color: "#ffffff", kind: "solid" } }, text: "de revisão" }]])])), []);
+
+  // Uma parte com a cor do elemento fora do marca-texto: acusa no elemento, como antes.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { text: "de revisão" }]])])), ["nodes.t.textStyle.paint"]);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: { stroke: { color: "#202020", width: 1 } }, text: "de revisão" }]])])), ["nodes.t.textStyle.paint"], "a parte que só troca o contorno usa a cor do elemento");
+  // O marca-texto que não se lê continua acusando na parte.
+  assert.deepEqual(contrastKeys(design([{ ...titulo([[{ style: { mark: { color: "#202020" } }, text: "Semana" }]]) }])), ["nodes.t.lines.0.0.style.mark"]);
+});
+
+test("L6b, Revisar: o ícone do Selo e do Botão é medido pela cor que o cartão usa (no vazado, a do contorno); a dica só quando ele some", () => {
+  const vermelho = { fill: [{ color: "#e50914", kind: "solid" }], padding: [4, 10] };
+  const selo = (extra) => ({ box: vermelho, id: "selo", label: "Novidade", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "badge", ...extra });
+  const botao = (extra) => ({ action: { kind: "close" }, box: vermelho, id: "fechar", label: "Agora não", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "button", ...extra });
+  const dicas = (value) => checks.popupFreeHints(valid(value)).filter((hint) => hint.kind === "contrast");
+
+  // Vazado: o cartão desenha o ícone na cor do contorno (freeHollowColor), que se lê no vermelho. Nada acusa.
+  assert.equal(render.freeHollowColor(render.freeTextStyleOf(selo({}))), "#ffffff");
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles" }), botao({ icon: { name: "arrow-right" } })])), []);
+
+  // A letra de cor que só se lê pelo contorno: o ícone usa a cor da letra (vermelha no vermelho) e some.
+  const letraNoFundo = { paint: { color: "#e50914", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } };
+
+  for (const [node, id] of [
+    [selo({ icon: "sparkles", textStyle: letraNoFundo }), "selo"],
+    [botao({ icon: { name: "arrow-right" }, textStyle: letraNoFundo }), "fechar"]
+  ]) {
+    assert.equal(render.freeHollowColor(render.freeTextStyleOf(node)), undefined, `${id}: não é vazado`);
+    assert.deepEqual(dicas(design([node])), [{ key: `nodes.${id}.textStyle.paint`, kind: "contrast", message: checks.POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: id }], id);
+  }
+
+  // Sem ícone, a mesma letra lê pelo contorno; com a letra de cor que se lê, o ícone também.
+  assert.deepEqual(dicas(design([selo({ textStyle: letraNoFundo }), botao({ textStyle: letraNoFundo })])), []);
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles", textStyle: { stroke: { color: "#000000", width: 2 } } })])), []);
+  // A letra vazada que já acusa (contorno de 1 px) fica com a dica de contraste de sempre, sem a do ícone.
+  const fino = dicas(design([selo({ icon: "sparkles", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } } })]));
+  assert.equal(fino.length, 1);
+  assert.ok(fino[0].message.startsWith("Contraste baixo ("));
+});
+
+test("L6b, Revisar: o exemplo Contorno e marca-texto do docs/27 §9.9 não acende dica de contraste", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const block = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((item) => item.includes('"mark"'));
+
+  assert.ok(block, "o exemplo com marca-texto está no §9.9");
+  assert.deepEqual(checks.popupFreeHints(valid(JSON.parse(block)), { content: { ctaLabel: "Saiba mais" } }), [], "nem contraste, nem texto no celular");
+});
+
 test("vocabulário das frases, dos modelos e das dicas", () => {
   const forbidden = /\b(campanha|público|audiência|evento|oferta|gatilho|trigger|sessão|impressão|home|automação|lembrete|layout|template|fluxo)/i;
   const texts = [
@@ -1408,4 +1535,769 @@ test("Celular: o exemplo do docs/27 §9.10 vale e o celular muda só o que ele d
   assert.equal(render.freeTextStyleOf(model.findFreeNode(mobile, "titulo").node).size, 32);
   assert.equal(render.freeTextStyleOf(model.findFreeNode(value, "titulo").node).size, 40, "o computador continua com 40");
   assert.equal(render.resolveFreeArtboard(mobile).padding, 16);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6b: contorno das letras e marca-texto (docs/27 §9.3; version 1, sem migração, nada no celular)
+ * ---------------------------------------------------------------------------------------------- */
+
+const BRANCO = "#ffffff";
+const VAZADO = { color: "#ffffff00", kind: "solid" };
+const contorno = (width = 2, color = BRANCO) => ({ color, width });
+/** Um Título com uma parte que leva o `style` dado (a do meio de três). */
+const tituloComParte = (style, textStyle) => ({
+  id: "titulo",
+  lines: [[{ text: "Semana " }, { style, text: "de revisão" }, { text: "!" }]],
+  ...(textStyle ? { textStyle } : {}),
+  type: "heading"
+});
+
+test("L6b: contorno em Título, Texto, Selo, Botão e Links e na parte; marca-texto só na parte, aceitos nos limites", () => {
+  for (const width of [1, 8]) {
+    valid(
+      design([
+        { ...heading("titulo"), textStyle: { stroke: contorno(width) } },
+        { ...text("texto"), textStyle: { paint: VAZADO, stroke: contorno(width, "#E5FF1F") } },
+        { id: "selo", label: "Novo", textStyle: { stroke: contorno(width) }, type: "badge" },
+        { action: { kind: "close" }, id: "fechar", label: "Agora não", textStyle: { stroke: contorno(width) }, type: "button" }
+      ])
+    );
+  }
+
+  const links = valid({ children: [{ id: "links", textStyle: { stroke: contorno(1, "#000000") }, type: "links" }], mode: "free", version: 1 });
+
+  assert.deepEqual(links.children[0].textStyle, { stroke: { color: "#000000", width: 1 } });
+
+  for (const mark of [
+    { color: "#e5ff1f" },
+    { color: "#e5ff1f", padding: 0, radius: 0 },
+    { color: "#e5ff1f", padding: 24, radius: 24 },
+    { color: "#e5ff1f", padding: [0, 24] },
+    { color: "#e5ff1f80", padding: [24, 0] }
+  ]) {
+    valid(design([tituloComParte({ mark, stroke: contorno(8) }), { ...text("texto"), lines: [[{ style: { mark }, text: "Texto" }]] }]));
+  }
+});
+
+test("L6b: contorno e marca-texto fora do limite ou fora do lugar dão a frase do campo", () => {
+  const at = "children.0.lines.0.1.style";
+
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(0) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(9) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(2.5) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: { width: 2 } } }]), "children.0.textStyle.stroke.color", M.color);
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(2, "white") } }]), "children.0.textStyle.stroke.color", M.color);
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: true } }]), "children.0.textStyle.stroke", M.stroke);
+  hasIssue(design([tituloComParte({ stroke: contorno(9) })]), `${at}.stroke.width`, "Use de 1 a 8.");
+
+  hasIssue(design([tituloComParte({ mark: "amarelo" })]), `${at}.mark`, M.mark);
+  hasIssue(design([tituloComParte({ mark: {} })]), `${at}.mark.color`, M.color);
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: 25 } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: -1 } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: [2, 25] } })]), `${at}.mark.padding.1`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: [1, 2, 3, 4] } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", radius: 25 } })]), `${at}.mark.radius`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", radius: 1.5 } })]), `${at}.mark.radius`, "Use de 0 a 24.");
+
+  // O marca-texto existe so na parte: no estilo do elemento (de qualquer tipo) a chave nao existe.
+  for (const node of [
+    { ...heading("t"), textStyle: { mark: { color: "#e5ff1f" } } },
+    { ...text("t"), textStyle: { mark: { color: "#e5ff1f" } } },
+    { id: "t", label: "Novo", textStyle: { mark: { color: "#e5ff1f" } }, type: "badge" }
+  ]) {
+    hasIssue(design([node]), "children.0.textStyle", M.design);
+  }
+
+  hasIssue({ children: [{ id: "links", textStyle: { mark: { color: "#e5ff1f" } }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle", M.design);
+});
+
+test("L6b: o contorno nunca vai com a letra em degradê (no elemento ou na parte, pela pintura dela ou herdada)", () => {
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+  const circular = { kind: "radial", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }], x: 50, y: 50 };
+  const solida = { color: "#111111", kind: "solid" };
+  const at = "children.0.lines.0.1.style";
+  const recusado = (value, path) => {
+    hasIssue(value, path, M.strokeGradient);
+    assert.equal(issues(value).length, 1, `uma frase só: ${JSON.stringify(issues(value))}`);
+  };
+
+  assert.equal(M.strokeGradient, "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.");
+
+  // No elemento: o degradê (linear ou circular) com contorno, em todo tipo com texto; a chave é a do contorno.
+  for (const paint of [degrade, circular]) {
+    recusado(design([{ ...heading("t"), textStyle: { paint, stroke: contorno(8, "#000000") } }]), "children.0.textStyle.stroke");
+  }
+
+  recusado(design([{ ...text("t"), textStyle: { paint: degrade, stroke: contorno(1) } }]), "children.0.textStyle.stroke");
+  recusado(design([{ id: "t", label: "Novo", textStyle: { paint: degrade, stroke: contorno() }, type: "badge" }]), "children.0.textStyle.stroke");
+  recusado(design([{ action: { kind: "close" }, id: "t", label: "Fechar", textStyle: { paint: degrade, stroke: contorno() }, type: "button" }]), "children.0.textStyle.stroke");
+  recusado({ children: [{ id: "links", textStyle: { paint: degrade, stroke: contorno() }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle.stroke");
+
+  // Na parte: o contorno dela sobre o degradê do elemento, ou sobre o degradê dela, recusa na chave do contorno; o
+  // degradê dela sob o contorno do elemento recusa na chave da cor (a parte não tem contorno próprio).
+  recusado(design([tituloComParte({ stroke: contorno() }, { paint: degrade })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: degrade, stroke: contorno() })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: circular }, { stroke: contorno() })]), `${at}.paint`);
+  recusado(design([{ ...text("t"), lines: [[{ text: "a " }, { style: { mark: { color: "#e5ff1f" }, paint: degrade, stroke: contorno(1) }, text: "b" }]] }]), "children.0.lines.0.1.style.stroke");
+
+  // Vale: o degradê sem contorno, o contorno com cor sólida (inclusive a parte sólida com contorno no elemento em
+  // degradê sem contorno, e a parte sólida sob o contorno do elemento) e o texto vazado.
+  valid(design([{ ...heading("t"), textStyle: { paint: degrade } }, tituloComParte({ paint: degrade, mark: { color: "#111111" } })].map((node, index) => ({ ...node, id: `t${index}` }))));
+  valid(design([tituloComParte({ paint: solida, stroke: contorno() }, { paint: degrade })]));
+  valid(design([tituloComParte({ paint: solida }, { paint: { color: "#ffffff", kind: "solid" }, stroke: contorno() })]));
+  valid(design([tituloComParte({ paint: VAZADO, stroke: contorno() }, { paint: degrade })]));
+
+  // A chave sai pelo id do elemento, até o campo do contorno (Estilo) ou da cor da parte (a área de texto).
+  const value = valid(design([heading("titulo")]));
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.0.textStyle.stroke"), "freeDesign.nodes.titulo.textStyle.stroke");
+  assert.equal(schema.freeErrorKey(value, `freeDesign.${at}.paint`), "freeDesign.nodes.titulo.lines.0.1.style.paint");
+});
+
+test("L6b: chave a mais no contorno, no marca-texto e no estilo da parte é recusada; nada disso no celular", () => {
+  const at = "children.0.lines.0.1.style";
+
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: { ...contorno(), blur: 2 } } }]), "children.0.textStyle.stroke", M.design);
+  hasIssue(design([tituloComParte({ stroke: { ...contorno(), style: "dashed" } })]), `${at}.stroke`, M.design);
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", opacity: 50 } })]), `${at}.mark`, M.design);
+  // O estilo da parte e o do elemento escolhido a dedo (pick) mais o marca-texto (extend): continua estrito.
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f" }, shadow: { blur: 0, color: "#000000", x: 0, y: 1 } })]), at, M.design);
+  hasIssue(design([tituloComParte({ align: "center", stroke: contorno() })]), at, M.design);
+
+  // Celular (L27): cor e pintura nunca por aparelho. O contorno e o marca-texto nao tem versao do celular.
+  const mobile = (entry) => design([heading("titulo")], { devices: { mobile: { nodes: { titulo: entry } } } });
+
+  hasIssue(mobile({ textStyle: { stroke: contorno() } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(mobile({ textStyle: { mark: { color: "#e5ff1f" } } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(mobile({ mark: { color: "#e5ff1f" } }), "devices.mobile.nodes.titulo", M.design);
+  hasIssue(mobile({ stroke: contorno() }), "devices.mobile.nodes.titulo", M.design);
+});
+
+test("L6b: as chaves de erro do contorno e do marca-texto saem pelo id do elemento, até o campo", () => {
+  const value = valid(design([heading("titulo"), { children: [{ ...text("texto"), lines: [[{ text: "a" }], [{ text: "b " }, { style: { mark: { color: "#e5ff1f" } }, text: "c" }]] }], id: "caixa", type: "box" }]));
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.0.textStyle.stroke.width"), "freeDesign.nodes.titulo.textStyle.stroke.width");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.0.lines.1.1.style.mark.padding"), "freeDesign.nodes.texto.lines.1.1.style.mark.padding");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.0.lines.1.1.style.stroke.color"), "freeDesign.nodes.texto.lines.1.1.style.stroke.color");
+  assert.equal(model.freeNodeIdOfKey("freeDesign.nodes.texto.lines.1.1.style.mark.padding"), "texto");
+  assert.equal(model.freeNodeIdOfKey("nodes.titulo.textStyle.stroke.width"), "titulo");
+
+  // O caminho que o zod devolve chega inteiro (ate o campo) para virar a chave do editor.
+  const broken = parse(design([{ children: [{ ...text("texto"), lines: [[{ style: { mark: { color: "#e5ff1f", radius: 30 } }, text: "c" }]] }], id: "caixa", type: "box" }]));
+  const shape = design([{ children: [text("texto")], id: "caixa", type: "box" }]);
+  const keys = broken.error.issues.map((issue) => schema.freeErrorKey(shape, ["freeDesign", ...issue.path].join(".")));
+
+  assert.deepEqual(keys, ["freeDesign.nodes.texto.lines.0.0.style.mark.radius"]);
+});
+
+test("L6b: a forma canônica do contorno e do marca-texto, campo a campo, com os padrões omitidos", () => {
+  // Elemento: a cor em minusculas, a espessura inteira; o contorno fica (o padrao e nao ter contorno).
+  const elemento = valid(design([{ ...heading("titulo"), textStyle: { paint: { color: "#FFFFFF00", kind: "solid" }, size: 40, stroke: { color: "#E5FF1F", width: 3 } } }]));
+
+  assert.deepEqual(elemento.children[0].textStyle, { paint: VAZADO, size: 40, stroke: { color: "#e5ff1f", width: 3 } });
+
+  for (const type of ["badge", "button", "links"]) {
+    const node = type === "badge" ? { id: "x", label: "Novo", type } : type === "button" ? { action: { kind: "close" }, id: "x", label: "Fechar", type } : { id: "links", type };
+    const value = model.canonicalPopupFreeDesign({ children: [{ ...node, textStyle: { stroke: { color: "#ABCDEF", width: 2 } } }], mode: "free", version: 1 });
+
+    assert.deepEqual(value.children[0].textStyle, { stroke: { color: "#abcdef", width: 2 } }, type);
+  }
+
+  // Parte: o contorno igual ao do elemento sai; um diferente (ou sem contorno no elemento) fica.
+  const base = { stroke: contorno(2) };
+  const igual = valid(design([tituloComParte({ stroke: { color: "#FFFFFF", width: 2 } }, base)]));
+
+  assert.deepEqual(igual.children[0].lines, [[{ text: "Semana de revisão!" }]], "a parte igual ao elemento some e as vizinhas se juntam");
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(4) }, base)])).children[0].lines[0][1].style, { stroke: { color: BRANCO, width: 4 } });
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(1, "#000000") }, base)])).children[0].lines[0][1].style, { stroke: { color: "#000000", width: 1 } });
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(2) })])).children[0].lines[0][1].style, { stroke: { color: BRANCO, width: 2 } }, "sem contorno no elemento, o da parte fica");
+
+  // Marca-texto: tira o respiro [2, 6] e os cantos 4; o respiro [n, n] vira n; a cor em minusculas.
+  const markOf = (mark) => valid(design([tituloComParte({ mark })])).children[0].lines[0][1].style.mark;
+
+  assert.deepEqual(model.FREE_MARK_DEFAULTS, { padding: [2, 6], radius: 4 });
+  assert.equal(model.FREE_MARK_DEFAULTS, render.FREE_MARK_DEFAULTS, "mora em popup-free-render.ts (o cartao usa); o modelo reexporta");
+  assert.deepEqual(markOf({ color: "#E5FF1F", padding: [2, 6], radius: 4 }), { color: "#e5ff1f" });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [3, 3] }), { color: "#e5ff1f", padding: 3 });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: 2 }), { color: "#e5ff1f", padding: 2 }, "2 nos quatro lados nao e o padrao");
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [0, 4], radius: 0 }), { color: "#e5ff1f", padding: [0, 4], radius: 0 });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [6, 2], radius: 12 }), { color: "#e5ff1f", padding: [6, 2], radius: 12 });
+  assert.deepEqual(Object.keys(markOf({ radius: 8, padding: 1, color: "#e5ff1f" })), ["color", "padding", "radius"], "chaves em ordem alfabetica");
+
+  // Partes vizinhas com o mesmo marca-texto (pelo JSON canonico) viram uma; com outro, nao.
+  const juntas = valid(design([{ ...heading("titulo"), lines: [[{ style: { mark: { color: "#E5FF1F", padding: [2, 6] } }, text: "de " }, { style: { mark: { color: "#e5ff1f", radius: 4 } }, text: "revisão" }]] }]));
+
+  assert.deepEqual(juntas.children[0].lines[0], [{ style: { mark: { color: "#e5ff1f" } }, text: "de revisão" }]);
+
+  const separadas = valid(design([{ ...heading("titulo"), lines: [[{ style: { mark: { color: "#e5ff1f" } }, text: "de " }, { style: { mark: { color: "#e5ff1f", radius: 0 } }, text: "revisão" }]] }]));
+
+  assert.equal(separadas.children[0].lines[0].length, 2);
+
+  // Ida e volta campo a campo: tudo junto, idempotente, sem tirar nada que nao seja padrao.
+  const completo = valid(
+    design([
+      tituloComParte({ mark: { color: "#e5ff1f", padding: [1, 9], radius: 7 }, paint: { color: "#111111", kind: "solid" }, stroke: contorno(5, "#000000") }, { stroke: contorno(2) }),
+      { ...text("texto"), lines: [[{ text: "a " }, { style: { mark: { color: "#ff3d9a33" } }, text: "b" }]] }
+    ])
+  );
+
+  assert.deepEqual(completo.children[0].lines[0][1], {
+    style: { mark: { color: "#e5ff1f", padding: [1, 9], radius: 7 }, paint: { color: "#111111", kind: "solid" }, stroke: { color: "#000000", width: 5 } },
+    text: "de revisão"
+  });
+  assert.deepEqual(completo.children[0].textStyle, { stroke: { color: BRANCO, width: 2 } });
+  assert.deepEqual(completo.children[1].lines[0][1].style, { mark: { color: "#ff3d9a33" } });
+  assert.deepEqual(model.canonicalPopupFreeDesign(completo), completo, "idempotente");
+  assert.deepEqual(valid(JSON.parse(JSON.stringify(completo))), completo, "o banco devolve o mesmo design");
+  assert.ok(model.jsonbBytesUpperBound(completo) > model.jsonbBytesUpperBound(valid(design([heading("titulo"), text("texto")]))), "a estimativa do tamanho conta as chaves novas");
+});
+
+test("L6b: rescaleFreeDesign escala a espessura do contorno e o respiro e os cantos do marca-texto (com os padrões)", () => {
+  const value = valid(
+    design([
+      tituloComParte({ mark: { color: "#e5ff1f" }, stroke: contorno(8, "#000000") }, { stroke: contorno(3) }),
+      { ...text("texto"), lines: [[{ style: { mark: { color: "#e5ff1f", padding: [4, 20], radius: 20 } }, text: "b" }, { style: { mark: { color: "#ff3d9a", padding: 10 } }, text: "c" }]] },
+      { id: "selo", label: "Novo", textStyle: { stroke: contorno(1) }, type: "badge" }
+    ])
+  );
+  const big = model.rescaleFreeDesign(value, 660);
+  const [titulo, texto, selo] = big.children;
+
+  assert.deepEqual(titulo.textStyle.stroke, { color: BRANCO, width: 5 }, "3 vezes 1,5 = 4,5, arredondado para 5");
+  assert.deepEqual(titulo.lines[0][1].style.stroke, { color: "#000000", width: 8 }, "dentro do limite (12 vira 8)");
+  assert.deepEqual(titulo.lines[0][1].style.mark, { color: "#e5ff1f", padding: [3, 9], radius: 6 }, "os padroes [2, 6] e 4 escalam junto");
+  assert.deepEqual(texto.lines[0][0].style.mark, { color: "#e5ff1f", padding: [6, 24], radius: 24 }, "30 vira 24");
+  assert.deepEqual(texto.lines[0][1].style.mark, { color: "#ff3d9a", padding: 15, radius: 6 }, "os cantos 4 que nao estavam no JSON tambem");
+  assert.deepEqual(selo.textStyle.stroke, { color: BRANCO, width: 2 });
+  valid(big);
+
+  const small = model.rescaleFreeDesign(value, 280);
+  const [tituloP, textoP, seloP] = small.children;
+
+  assert.deepEqual(tituloP.textStyle.stroke, { color: BRANCO, width: 2 });
+  assert.deepEqual(tituloP.lines[0][1].style.stroke, { color: "#000000", width: 5 });
+  assert.deepEqual(tituloP.lines[0][1].style.mark, { color: "#e5ff1f", padding: [1, 4], radius: 3 });
+  assert.deepEqual(textoP.lines[0][0].style.mark, { color: "#e5ff1f", padding: [3, 13], radius: 13 });
+  assert.deepEqual(seloP.textStyle.stroke, { color: BRANCO, width: 1 }, "nunca abaixo de 1");
+  valid(small);
+
+  assert.deepEqual(model.rescaleFreeDesign(value, 440), value, "a mesma largura nao muda nada (os padroes preenchidos saem de novo)");
+});
+
+test("L6b: o JSON Schema tem o contorno e o marca-texto, estritos e com os limites", () => {
+  const jsonSchema = jsonSchemaModule.popupFreeJsonSchema();
+  const resolve = (node) => (node && typeof node.$ref === "string" ? resolve(jsonSchema.$defs[node.$ref.replace("#/$defs/", "")]) : node);
+  const objects = [];
+  const collect = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    if (node.type === "object" && node.properties) {
+      objects.push(node);
+    }
+
+    for (const value of Object.values(node)) {
+      collect(value);
+    }
+  };
+
+  collect(jsonSchema);
+
+  const withStroke = objects.filter((object) => object.properties.stroke && resolve(object.properties.stroke).properties?.width);
+  const withMark = objects.filter((object) => object.properties.mark);
+
+  assert.equal(withStroke.length, 2, "o estilo do texto e o da parte");
+  assert.equal(withMark.length, 1, "so o estilo da parte");
+  assert.ok(withMark[0].properties.stroke, "a parte tem contorno e marca-texto");
+  assert.equal(withMark[0].additionalProperties, false, "o estilo da parte continua estrito");
+
+  for (const object of withStroke) {
+    const stroke = resolve(object.properties.stroke);
+
+    assert.deepEqual([...stroke.required].sort(), ["color", "width"]);
+    assert.equal(stroke.additionalProperties, false);
+    assert.equal(stroke.properties.width.minimum, 1);
+    assert.equal(stroke.properties.width.maximum, 8);
+    assert.equal(stroke.properties.width.type, "integer");
+  }
+
+  const mark = resolve(withMark[0].properties.mark);
+
+  assert.deepEqual(mark.required, ["color"]);
+  assert.equal(mark.additionalProperties, false);
+  assert.deepEqual(mark.properties.radius, { maximum: 24, minimum: 0, type: "integer" });
+  assert.deepEqual(
+    mark.properties.padding.anyOf.map((option) => option.type),
+    ["integer", "array"],
+    "um numero ou [vertical, horizontal]"
+  );
+  assert.equal(mark.properties.padding.anyOf[1].minItems, 2);
+  assert.equal(mark.properties.padding.anyOf[1].maxItems, 2);
+
+  // O estilo de texto do elemento (o que tem sombra) nao tem marca-texto; o do celular nao tem nem contorno.
+  const elementStyle = objects.filter((object) => object.properties.shadow && object.properties.stroke);
+
+  assert.equal(elementStyle.length, 1);
+  assert.equal(elementStyle[0].properties.mark, undefined);
+
+  const mobileStyle = objects.filter((object) => Object.keys(object.properties).sort().join() === "align,letterSpacing,lineHeight,size");
+
+  assert.equal(mobileStyle.length, 1, "o estilo de texto do celular");
+  assert.equal(mobileStyle[0].additionalProperties, false);
+});
+
+test("L6b: um design sem contorno e sem marca-texto sai igual (forma canônica e reescala sem chave nova)", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const blocks = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  const effects = /"(?:stroke|mark)":\{"color"/;
+  const semEfeitos = blocks.filter((block) => !effects.test(JSON.stringify(block)));
+  const comEfeitos = blocks.filter((block) => effects.test(JSON.stringify(block)));
+  const nenhumaChave = (value, label) => assert.doesNotMatch(JSON.stringify(value), effects, label);
+
+  assert.equal(comEfeitos.length, 1, "o exemplo do contorno e do marca-texto, na 9.9");
+  assert.equal(JSON.stringify(valid(comEfeitos[0])), JSON.stringify(comEfeitos[0]), "o exemplo ja esta na forma canonica (byte a byte)");
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const value = starters.freeStarterDesign(id);
+    const written = semEfeitos.find((block) => JSON.stringify(block) === JSON.stringify(value));
+
+    assert.ok(written, `o modelo ${id} continua no docs/27 §9.9 byte a byte, como antes do L6b`);
+    assert.equal(JSON.stringify(valid(written)), JSON.stringify(written), `${id}: a forma canonica nao muda`);
+
+    for (const width of Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS)) {
+      nenhumaChave(model.rescaleFreeDesign(value, width), `${id} em ${width}: a reescala nao cria contorno nem marca-texto`);
+    }
+  }
+
+  for (const block of semEfeitos) {
+    nenhumaChave(valid(block), "a forma canonica nao cria contorno nem marca-texto");
+  }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6c: cores ao passar o mouse no Botão e nos Links (docs/27 §9.3; version 1, sem migração, nada no celular)
+ * ---------------------------------------------------------------------------------------------- */
+
+const ESCURECE = { angle: 90, kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] };
+const CIRCULO = { kind: "radial", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }], x: 50, y: 50 };
+const solida = (color) => ({ color, kind: "solid" });
+const BORDA_FINA = { border: { color: "#ffffff40", width: 1 } };
+/** Um botão Fechar ("Agora não") com o `hover` dado; `extra` troca ou acrescenta campos. */
+const botaoHover = (hover, extra = {}) => ({ action: { kind: "close" }, hover, id: "botao", label: "Agora não", type: "button", ...extra });
+/** O design mínimo, só com os Links, levando o `hover` dado. */
+const linksHover = (hover, extra = {}) => ({ children: [{ hover, id: "links", type: "links", ...extra }], mode: "free", version: 1 });
+/** [id, hover] de cada elemento com cores ao passar o mouse, na ordem do desenho. */
+const hoversOf = (value) => {
+  const out = [];
+
+  model.walkFreeNodes(value.children, (node) => {
+    if (node.hover) {
+      out.push([node.id, node.hover]);
+    }
+  });
+
+  return out;
+};
+/** Um design com as três cores no botão Fechar, o fundo em degradê no principal (dentro de uma caixa) e a cor dos Links. */
+const comHover = () =>
+  valid({
+    children: [
+      heading("titulo"),
+      {
+        children: [
+          { action: { kind: "cta" }, box: { fill: [solida("#e50914")], padding: [12, 24], radius: 999 }, hover: { fill: ESCURECE }, id: "principal", type: "button" },
+          botaoHover({ borderColor: "#ffffff", color: "#111111", fill: solida("#ffffff") }, { box: BORDA_FINA })
+        ],
+        id: "acoes",
+        layout: { dir: "row", gap: 8 },
+        type: "box"
+      },
+      { hover: { color: "#ffffff" }, id: "links", textStyle: { paint: solida("#a1a1aa") }, type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+
+test("L6c: as cores ao passar o mouse valem no Botão (fundo de cor ou degradê, cor do texto e da borda) e nos Links (cor)", () => {
+  // Cada campo sozinho e os três juntos, em todo tipo de botão (o principal, Fechar, Lembrar depois e Abrir um link),
+  // com e sem alfa, na prancheta e dentro de uma caixa.
+  for (const hover of [
+    { fill: solida("#ff2a35") },
+    { fill: ESCURECE },
+    { fill: CIRCULO },
+    { color: "#111111" },
+    { borderColor: "#ffffff80" },
+    { borderColor: "#ffffff", color: "#111111cc", fill: solida("#ffffff") }
+  ]) {
+    const value = valid(
+      design([
+        botaoHover(hover, { box: BORDA_FINA }),
+        { action: { kind: "cta" }, hover, id: "principal", type: "button" },
+        { action: { kind: "snooze" }, hover, id: "depois", label: "Lembrar depois", type: "button" },
+        { children: [{ action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, hover, id: "ver", label: "Ver", type: "button" }], id: "caixa", type: "box" }
+      ])
+    );
+
+    assert.deepEqual(hoversOf(value).map(([id]) => id), ["botao", "principal", "depois", "ver"], JSON.stringify(hover));
+  }
+
+  assert.deepEqual(valid(linksHover({ color: "#E5FF1F" })).children[0], { hover: { color: "#e5ff1f" }, id: "links", type: "links" });
+  assert.deepEqual(valid(linksHover({ color: "#ffffff00" })).children[0].hover, { color: "#ffffff00" }, "a cor com alfa também");
+
+  // O fundo e a cor da borda valem com o texto em degradê; a cor do texto, com qualquer letra de cor sólida (a padrão,
+  // uma escolhida ou a vazada, que ao passar o mouse ganha cor).
+  valid(design([botaoHover({ borderColor: "#ffffff", fill: solida("#000000") }, { box: BORDA_FINA, textStyle: { paint: ESCURECE } })]));
+  valid(design([botaoHover({ fill: CIRCULO }, { textStyle: { paint: CIRCULO } })]));
+  valid(design([botaoHover({ color: "#111111" }, { textStyle: { paint: solida("#ffffff") } })]));
+  valid(design([botaoHover({ color: "#111111" }, { textStyle: { paint: VAZADO, stroke: contorno(2) } })]));
+  valid(linksHover({ color: "#ffffff" }, { textStyle: { paint: solida("#a1a1aa") } }));
+});
+
+test("L6c: cores ao passar o mouse fora da forma ou fora do Botão e dos Links dão a frase do campo", () => {
+  assert.equal(M.hover, "Escolha as cores ao passar o mouse.");
+
+  for (const value of [true, "branco", [], null, 1]) {
+    hasIssue(design([botaoHover(value)]), "children.0.hover", M.hover);
+    hasIssue(linksHover(value), "children.0.hover", M.hover);
+  }
+
+  hasIssue(design([botaoHover({ color: "white" })]), "children.0.hover.color", M.color);
+  hasIssue(design([botaoHover({ color: 1 })]), "children.0.hover.color", M.color);
+  hasIssue(design([botaoHover({ borderColor: "#fff" })]), "children.0.hover.borderColor", M.color);
+  hasIssue(linksHover({ color: "#ffffff0" }), "children.0.hover.color", M.color);
+
+  // O fundo: uma pintura só, de cor ou degradê (nunca imagem nem outro tipo), com as regras de sempre do degradê.
+  hasIssue(design([botaoHover({ fill: { asset: "capa", kind: "image" } })]), "children.0.hover.fill.kind", M.paint);
+  hasIssue(design([botaoHover({ fill: { color: "#ffffff", kind: "pattern", pattern: "dots" } })]), "children.0.hover.fill.kind", M.paint);
+  hasIssue(design([botaoHover({ fill: [solida("#ffffff")] })]), "children.0.hover.fill", M.paint);
+  hasIssue(design([botaoHover({ fill: { kind: "linear", stops: [{ at: 0, color: "#000000" }] } })]), "children.0.hover.fill.stops", M.stops);
+  hasIssue(design([botaoHover({ fill: { ...ESCURECE, angle: 400 } })]), "children.0.hover.fill.angle", "Use de 0 a 360.");
+  hasIssue(design([botaoHover({ fill: { ...CIRCULO, x: 101 } })]), "children.0.hover.fill.x", "Use de 0 a 100.");
+
+  // Só o Botão e os Links têm a chave: em todo outro tipo, ela é recusada com a frase do design.
+  const hover = { color: "#ffffff" };
+
+  for (const node of [
+    { ...heading("x"), hover },
+    { ...text("x"), hover },
+    { hover, id: "x", label: "Novo", type: "badge" },
+    { asset: null, hover, id: "x", type: "image" },
+    { asset: null, hover, id: "x", type: "video" },
+    { hover, icon: "star", id: "x", type: "icon" },
+    { hover, id: "x", type: "divider" },
+    { hover, id: "x", type: "spacer" },
+    { hover, id: "x", type: "shape" },
+    { hover, id: "x", type: "audio" },
+    { children: [], hover, id: "x", type: "box" }
+  ]) {
+    hasIssue(design([node]), "children.0", M.design);
+  }
+});
+
+test("L6c: a cor do texto ao passar o mouse só vai com a letra de cor sólida (Botão e Links)", () => {
+  const recusado = (value, path = "children.0.hover.color") => {
+    hasIssue(value, path, M.hoverGradient);
+    assert.equal(issues(value).length, 1, `uma frase só: ${JSON.stringify(issues(value))}`);
+  };
+
+  assert.equal(M.hoverGradient, "Com o texto em degradê, a cor ao passar o mouse não muda o texto. Tire esta cor ou use uma cor sólida no texto.");
+
+  // Com a letra em degradê (linear ou circular), a cor do texto ao passar o mouse não apareceria: recusa na chave dela,
+  // sozinha ou junto do fundo e da borda, no Botão (na prancheta ou numa caixa) e nos Links.
+  for (const paint of [ESCURECE, CIRCULO]) {
+    recusado(design([botaoHover({ color: "#ffffff" }, { textStyle: { paint } })]));
+    recusado(design([botaoHover({ borderColor: "#ffffff", color: "#111111", fill: solida("#ffffff") }, { box: BORDA_FINA, textStyle: { paint } })]));
+    recusado(design([{ action: { kind: "cta" }, hover: { color: "#111111" }, id: "principal", textStyle: { paint }, type: "button" }]));
+    recusado(design([{ children: [botaoHover({ color: "#ffffff" }, { textStyle: { paint } })], id: "caixa", type: "box" }]), "children.0.children.0.hover.color");
+    recusado(linksHover({ color: "#ffffff" }, { textStyle: { paint } }));
+  }
+
+  // A chave sai pelo id do elemento, até a cor ao passar o mouse (o campo dela no Estilo).
+  const shape = design([{ children: [botaoHover({})], id: "caixa", type: "box" }]);
+  const broken = parse(design([{ children: [botaoHover({ color: "#ffffff" }, { textStyle: { paint: ESCURECE } })], id: "caixa", type: "box" }]));
+
+  assert.deepEqual(
+    broken.error.issues.map((issue) => schema.freeErrorKey(shape, ["freeDesign", ...issue.path].join("."))),
+    ["freeDesign.nodes.botao.hover.color"]
+  );
+});
+
+test("L6c: chave a mais nas cores ao passar o mouse é recusada; nada disso no celular", () => {
+  hasIssue(design([botaoHover({ color: "#111111", opacity: 90 })]), "children.0.hover", M.design);
+  hasIssue(design([botaoHover({ background: "#111111" })]), "children.0.hover", M.design);
+  hasIssue(design([botaoHover({ shadows: [] })]), "children.0.hover", M.design);
+  hasIssue(design([botaoHover({ textStyle: { size: 20 } })]), "children.0.hover", M.design);
+  hasIssue(design([botaoHover({ fill: { ...solida("#111111"), css: "x" } })]), "children.0.hover.fill", M.design);
+  // Os Links só mudam a cor: fundo e borda ao passar o mouse não existem neles.
+  hasIssue(linksHover({ fill: solida("#000000") }), "children.0.hover", M.design);
+  hasIssue(linksHover({ borderColor: "#000000" }), "children.0.hover", M.design);
+  hasIssue(linksHover({ color: "#000000", decoration: "underline" }), "children.0.hover", M.design);
+
+  // Celular (L27): cor e pintura nunca por aparelho. As cores ao passar o mouse não têm versão do celular.
+  const mobile = (entry) => design([botaoHover({ color: "#111111" })], { devices: { mobile: { nodes: { botao: entry } } } });
+
+  hasIssue(mobile({ hover: { color: "#000000" } }), "devices.mobile.nodes.botao", M.design);
+  hasIssue(mobile({ hover: {} }), "devices.mobile.nodes.botao", M.design);
+  hasIssue(mobile({ textStyle: { hover: { color: "#000000" } } }), "devices.mobile.nodes.botao.textStyle", M.design);
+  hasIssue(mobile({ box: { hover: { fill: solida("#000000") } } }), "devices.mobile.nodes.botao.box", M.design);
+  hasIssue(
+    { ...linksHover({ color: "#ffffff" }), devices: { mobile: { nodes: { links: { gap: 4, hover: { color: "#000000" } } } } } },
+    "devices.mobile.nodes.links",
+    M.design
+  );
+});
+
+test("L6c: as chaves de erro das cores ao passar o mouse saem pelo id do elemento, até o campo", () => {
+  const value = comHover();
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.0.hover.fill.stops"), "freeDesign.nodes.principal.hover.fill.stops");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.1.hover.borderColor"), "freeDesign.nodes.botao.hover.borderColor");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.2.hover.color"), "freeDesign.nodes.links.hover.color");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.devices.mobile.nodes.botao"), "freeDesign.devices.mobile.nodes.botao", "o celular já vem pelo id");
+  assert.equal(model.freeNodeIdOfKey("freeDesign.nodes.principal.hover.fill.stops"), "principal");
+  assert.equal(model.freeNodeIdOfKey("nodes.links.hover.color"), "links");
+
+  // O caminho que o zod devolve chega inteiro (até o campo) para virar a chave do editor.
+  const keysOf = (input, shape) => parse(input).error.issues.map((issue) => schema.freeErrorKey(shape, ["freeDesign", ...issue.path].join(".")));
+  const shape = design([{ children: [botaoHover({})], id: "caixa", type: "box" }]);
+
+  assert.deepEqual(keysOf(design([{ children: [botaoHover({ fill: { kind: "linear", stops: [{ at: 0, color: "#000000" }] } })], id: "caixa", type: "box" }]), shape), [
+    "freeDesign.nodes.botao.hover.fill.stops"
+  ]);
+  assert.deepEqual(keysOf(design([{ children: [botaoHover({ borderColor: "branco" })], id: "caixa", type: "box" }]), shape), ["freeDesign.nodes.botao.hover.borderColor"]);
+  assert.deepEqual(keysOf(linksHover({ color: "branco" }), linksHover({})), ["freeDesign.nodes.links.hover.color"]);
+  assert.deepEqual(keysOf(design([{ ...heading("titulo"), hover: { color: "#ffffff" } }]), design([heading("titulo")])), ["freeDesign.nodes.titulo"], "fora do Botão e dos Links, no elemento");
+});
+
+test("L6c: a forma canônica das cores ao passar o mouse, campo a campo; o objeto vazio sai", () => {
+  // Cores em minúsculas, a pintura canônica (sem o ângulo 180, paradas em ordem; sem o formato e o alcance padrão do
+  // degradê circular) e as chaves em ordem alfabética.
+  const value = valid(
+    design([
+      botaoHover(
+        { fill: { angle: 180, kind: "linear", stops: [{ at: 100, color: "#B20710" }, { at: 0, color: "#E50914" }] }, color: "#ABCDEF", borderColor: "#FFFFFF80" },
+        { box: BORDA_FINA }
+      )
+    ])
+  );
+
+  assert.deepEqual(value.children[0].hover, { borderColor: "#ffffff80", color: "#abcdef", fill: { kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] } });
+  assert.deepEqual(Object.keys(value.children[0].hover), ["borderColor", "color", "fill"]);
+  assert.deepEqual(Object.keys(value.children[0]), ["action", "box", "hover", "id", "label", "type"], "a chave no lugar dela, em ordem alfabética");
+  assert.deepEqual(valid(design([botaoHover({ fill: { ...CIRCULO, extent: "farthest-corner", shape: "ellipse" } })])).children[0].hover.fill, CIRCULO);
+  assert.deepEqual(valid(design([botaoHover({ fill: solida("#FF2A35") })])).children[0].hover, { fill: solida("#ff2a35") });
+  assert.deepEqual(valid(linksHover({ color: "#A1A1AA" })).children[0].hover, { color: "#a1a1aa" });
+
+  // O objeto vazio (e o que só tem campos indefinidos) sai, no Botão e nos Links, pelo schema e direto pela forma.
+  for (const hover of [{}, { borderColor: undefined, color: undefined, fill: undefined }]) {
+    assert.equal("hover" in valid(design([botaoHover(hover)])).children[0], false);
+    assert.equal("hover" in model.canonicalPopupFreeDesign(linksHover(hover)).children[0], false);
+  }
+
+  assert.equal("hover" in valid(linksHover({})).children[0], false);
+
+  // Ida e volta: idempotente, o banco devolve o mesmo design (byte a byte) e a estimativa do tamanho conta as chaves.
+  const completo = comHover();
+
+  assert.deepEqual(hoversOf(completo), [
+    ["principal", { fill: ESCURECE }],
+    ["botao", { borderColor: "#ffffff", color: "#111111", fill: solida("#ffffff") }],
+    ["links", { color: "#ffffff" }]
+  ]);
+  assert.deepEqual(model.canonicalPopupFreeDesign(completo), completo, "idempotente");
+  assert.equal(JSON.stringify(valid(JSON.parse(JSON.stringify(completo)))), JSON.stringify(completo), "o banco devolve o mesmo design, byte a byte");
+
+  const semHover = JSON.parse(JSON.stringify(completo), (key, item) => (key === "hover" ? undefined : item));
+
+  assert.ok(model.jsonbBytesUpperBound(completo) > model.jsonbBytesUpperBound(valid(semHover)), "a estimativa do tamanho conta as chaves novas");
+  assert.deepEqual(hoversOf(model.freeDesignForStudent(completo)), hoversOf(completo), "o aluno recebe as cores ao passar o mouse");
+});
+
+test("L6c: Ajustar os elementos à nova largura não mexe nas cores ao passar o mouse", () => {
+  const value = comHover();
+
+  for (const width of [280, ...Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS), 720]) {
+    const scaled = model.rescaleFreeDesign(value, width);
+
+    assert.deepEqual(hoversOf(scaled), hoversOf(value), `${width}: as cores não têm medida`);
+    valid(scaled);
+  }
+
+  assert.deepEqual(model.rescaleFreeDesign(value, 440), value, "a mesma largura não muda nada");
+});
+
+test("L6c: o JSON Schema tem as cores ao passar o mouse, estritas e só no Botão e nos Links", () => {
+  const jsonSchema = jsonSchemaModule.popupFreeJsonSchema();
+  const resolve = (node) => (node && typeof node.$ref === "string" ? resolve(jsonSchema.$defs[node.$ref.replace("#/$defs/", "")]) : node);
+  const objects = [];
+  const collect = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    if (node.type === "object" && node.properties) {
+      objects.push(node);
+    }
+
+    for (const item of Object.values(node)) {
+      collect(item);
+    }
+  };
+
+  collect(jsonSchema);
+
+  const withHover = objects.filter((object) => object.properties.hover);
+
+  assert.deepEqual(withHover.map((object) => object.properties.type.const).sort(), ["button", "links"], "só o Botão e os Links");
+
+  const hoverOf = (type) => resolve(withHover.find((object) => object.properties.type.const === type).properties.hover);
+  const button = hoverOf("button");
+  const links = hoverOf("links");
+
+  assert.deepEqual(Object.keys(button.properties).sort(), ["borderColor", "color", "fill"]);
+  assert.equal(button.additionalProperties, false, "estrito");
+  assert.equal(button.required, undefined, "cada campo é opcional");
+  assert.deepEqual(
+    resolve(button.properties.fill).oneOf.map((option) => resolve(option).properties.kind.const).sort(),
+    ["linear", "radial", "solid"],
+    "o fundo só de cor ou degradê, nunca imagem"
+  );
+  assert.deepEqual(Object.keys(links.properties), ["color"]);
+  assert.equal(links.additionalProperties, false);
+  assert.equal(links.required, undefined);
+
+  for (const color of [button.properties.color, button.properties.borderColor, links.properties.color]) {
+    assert.equal(resolve(color).pattern, "^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$");
+  }
+
+  // O elemento do celular continua estrito e sem a chave.
+  const mobileNode = objects.filter((object) => Object.keys(object.properties).sort().join() === "box,gap,hidden,layout,place,size,textStyle");
+
+  assert.equal(mobileNode.length, 1, "o elemento do celular");
+  assert.equal(mobileNode[0].additionalProperties, false);
+});
+
+test("L6c: um design sem cores ao passar o mouse sai igual (os 4 modelos no §9.9 byte a byte; forma canônica e reescala sem chave nova)", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const blocks = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  const effect = /"hover":\{/;
+  const semCores = blocks.filter((block) => !effect.test(JSON.stringify(block)));
+  const comCores = blocks.filter((block) => effect.test(JSON.stringify(block)));
+  const nenhumaChave = (value, label) => assert.doesNotMatch(JSON.stringify(value), effect, label);
+
+  assert.equal(comCores.length, 1, "o exemplo das cores ao passar o mouse, na 9.9");
+
+  const exemplo = comCores[0];
+
+  assert.equal(JSON.stringify(valid(exemplo)), JSON.stringify(exemplo), "o exemplo já está na forma canônica (byte a byte)");
+  assert.deepEqual(
+    hoversOf(exemplo).map(([id, hover]) => [id, Object.keys(hover)]),
+    [
+      ["botao", ["fill"]],
+      ["agoranao", ["borderColor", "color", "fill"]],
+      ["links", ["color"]]
+    ],
+    "mostra o fundo em degradê, as três cores num botão de borda e a cor dos Links"
+  );
+  assert.deepEqual(checks.popupFreeHints(valid(exemplo), { content: { ctaLabel: "Saiba mais" } }), [], "nem contraste, nem texto no celular");
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const value = starters.freeStarterDesign(id);
+    const written = semCores.find((block) => JSON.stringify(block) === JSON.stringify(value));
+
+    assert.ok(written, `o modelo ${id} continua no docs/27 §9.9 byte a byte, como antes do L6c`);
+    assert.equal(JSON.stringify(valid(written)), JSON.stringify(written), `${id}: a forma canônica não muda`);
+
+    for (const width of Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS)) {
+      nenhumaChave(model.rescaleFreeDesign(value, width), `${id} em ${width}: a reescala não cria cores ao passar o mouse`);
+    }
+  }
+
+  for (const block of semCores) {
+    nenhumaChave(valid(block), "a forma canônica não cria cores ao passar o mouse");
+  }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6c, Revisar: o contraste ao passar o mouse
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As dicas de contraste como [chave, frase] (a frase do passar o mouse começa por "Ao passar o mouse,"). */
+const contrastHints = (value, input) =>
+  checks
+    .popupFreeHints(valid(value), input)
+    .filter((hint) => hint.kind === "contrast")
+    .map((hint) => [hint.key, hint.message]);
+const AO_PASSAR = /^Ao passar o mouse, contraste baixo \(\d+,\d:1\)\. Para ler bem, use pelo menos (4,5|3,0):1\.$/;
+
+test("L6c, Revisar: a cor ao passar o mouse contra o fundo ao passar o mouse, na chave da cor, com a frase de sempre começando por “Ao passar o mouse,”", () => {
+  assert.equal(checks.POPUP_FREE_HINT_MESSAGES.hoverContrast(1, 4.5), "Ao passar o mouse, contraste baixo (1,0:1). Para ler bem, use pelo menos 4,5:1.");
+
+  // O fundo branco ao passar o mouse sob a letra branca de sempre: acusa na cor ao passar o mouse (o campo que conserta).
+  const branco = contrastHints(design([botaoHover({ fill: solida("#ffffff") })]));
+  assert.deepEqual(branco.map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.match(branco[0][1], AO_PASSAR);
+  assert.equal(checks.popupFreeHints(valid(design([botaoHover({ fill: solida("#ffffff") })])))[0].nodeId, "botao");
+  // Com a letra escura ao passar o mouse, lê.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#111111", fill: solida("#ffffff") })])), []);
+  // Só a letra muda: a cor escura no fundo escuro de sempre (a prancheta) acusa; nos Links também.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#202020" })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#202020" })).map(([key]) => key), ["nodes.links.hover.color"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#e5ff1f" })), []);
+  // A cor da borda não muda a letra nem o fundo: nada a medir.
+  assert.deepEqual(contrastHints(design([botaoHover({ borderColor: "#16181c" }, { box: BORDA_FINA })])), []);
+  // O contorno de 2 ou mais conta também ao passar o mouse: a letra branca com contorno preto lê no fundo branco.
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, { textStyle: { stroke: contorno(2, "#000000") } })])), []);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, { textStyle: { stroke: contorno(1, "#000000") } })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+});
+
+test("L6c, Revisar: cada estado tem a sua dica; a cor igual à de sempre, sem fundo, não repete a dica", () => {
+  const escura = { paint: solida("#2a2a2a") };
+
+  // A letra de sempre não lê e ao passar o mouse lê: só a dica de sempre (no campo de sempre).
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#ffffff" }, { textStyle: escura })])).map(([key]) => key), ["nodes.botao.textStyle.paint"]);
+  // A mesma cor ao passar o mouse (em maiúsculas ou não) e sem fundo: nada muda, nada a mais.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#2A2A2A" }, { textStyle: escura })])).map(([key]) => key), ["nodes.botao.textStyle.paint"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#A1A1AA" }, { textStyle: { paint: solida("#a1a1aa") } })), []);
+  // As duas não leem: uma dica em cada campo.
+  assert.deepEqual(
+    contrastHints(design([botaoHover({ color: "#303030" }, { textStyle: escura })])).map(([key]) => key),
+    ["nodes.botao.textStyle.paint", "nodes.botao.hover.color"]
+  );
+});
+
+test("L6c, Revisar: o fundo ao passar o mouse troca o fundo do Botão inteiro e fica por cima do que está atrás dele", () => {
+  // O botão branco com letra escura lê; ao passar o mouse o fundo vira transparente (o branco sai, não fica embaixo) e a
+  // letra escura cai na prancheta escura: acusa.
+  const claro = { box: { fill: [solida("#ffffff")], padding: [12, 24] }, textStyle: { paint: solida("#111111") } };
+  assert.deepEqual(contrastHints(design([botaoHover({}, claro)])), []);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff00") }, claro)])).map(([key]) => key), ["nodes.botao.hover.color"]);
+
+  // O fundo transparente ao passar o mouse dentro de uma caixa branca: ele fica sobre a caixa (não sobre a prancheta).
+  const caixa = (hover) => design([{ box: { fill: [solida("#ffffff")] }, children: [botaoHover(hover, { box: { fill: [solida("#111111")] } })], id: "caixa", type: "box" }]);
+  assert.deepEqual(contrastHints(caixa({})), [], "a letra branca no botão escuro lê");
+  assert.deepEqual(contrastHints(caixa({ fill: solida("#00000014") })).map(([key]) => key), ["nodes.botao.hover.color"], "8 % de preto sobre o branco: a letra branca some");
+  assert.deepEqual(contrastHints(caixa({ fill: solida("#000000cc") })), []);
+
+  // Um degradê ao passar o mouse é medido pela pior cor dele.
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: { kind: "linear", stops: [{ at: 0, color: "#111111" }, { at: 100, color: "#f5f5f5" }] } })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: ESCURECE })])), []);
+});
+
+test("L6c, Revisar: com a letra em degradê a dica vai para o fundo ao passar o mouse; sobre imagem ou vídeo, nada é medido", () => {
+  // A letra clara em degradê no fundo branco ao passar o mouse: a cor ao passar o mouse não vale nela, então a chave é a
+  // do fundo (o campo que conserta e que não fica parado).
+  const clara = { textStyle: { paint: { kind: "linear", stops: [{ at: 0, color: "#ffffff" }, { at: 100, color: "#eeeeee" }] } } };
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, clara)])).map(([key]) => key), ["nodes.botao.hover.fill"]);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#111111") }, clara)])), []);
+
+  // Sobre uma imagem (pelas medidas do palco), o contraste não é medido, como o de sempre.
+  const foto = { alt: "", asset: "foto", id: "foto", place: { h: 200, mode: "free", w: 440, x: 0, y: 0 }, type: "image" };
+  const sobre = design([foto, botaoHover({ fill: solida("#ffffff") }, { place: { h: 48, mode: "free", w: 200, x: 20, y: 20 } })], { assets: [imageAsset("foto")] });
+  const rects = { botao: { h: 48, w: 200, x: 20, y: 20 }, foto: { h: 200, w: 440, x: 0, y: 0 } };
+  assert.deepEqual(contrastHints(sobre, { rects }), []);
+  assert.deepEqual(contrastHints(sobre).map(([key]) => key), ["nodes.botao.hover.color"], "sem as medidas do palco, mede");
 });

@@ -1,6 +1,8 @@
 // Design Livre do pop-up (docs/27): as dicas do painel Revisar (nao impedem salvar) e o medidor de tamanho.
 // Puras: recebem o design e, quando precisam de geometria, os retangulos medidos no palco do editor (px da
 // prancheta, mais a prancheta inteira em "@artboard"). Sem retangulos, as dicas de geometria nao aparecem.
+// O contraste conta o contorno de 2 px ou mais e mede a parte com marca-texto contra ele (L6b), e mede o Botão e os
+// Links ao passar o mouse com as cores de lá (L6c).
 // So o editor usa (o cartao do aluno nunca importa este arquivo).
 
 import { contrastHintMessage, contrastRatio, isLargeText, type HexColor, type PopupFontRef } from "./popup-design-model";
@@ -14,15 +16,18 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeLine,
+  type FreeMark,
   type FreeNode,
   type FreeSides,
   type FreeTextPaint,
+  type FreeTextStroke,
   type PopupFreeDesign
 } from "./popup-free-model";
 import {
   FREE_MIN_FONT_PX,
   freeHasSnoozeButton,
   freeHeadingText,
+  freeHollowColor,
   freeTextStyleOf,
   resolveFreeArtboard,
   resolveFreeForDevice,
@@ -49,6 +54,14 @@ export const POPUP_FREE_HINT_MESSAGES = {
   cover: (name: string, button: string) => `“${name}” está por cima do “${button}” e pode atrapalhar o clique.`,
   cut: (name: string) => `“${name}” está cortado no fim do pop-up.`,
   fontDevice: "Esta fonte muda de aparelho para aparelho. Para ficar igual para todos, envie a fonte.",
+  /** O contraste do Botão e dos Links ao passar o mouse (L6c): a frase de sempre, começando por “Ao passar o mouse,”. */
+  hoverContrast: (ratio: number, required: number) => {
+    const message = contrastHintMessage(ratio, required);
+
+    return `Ao passar o mouse, ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
+  },
+  /** O ícone do Selo e do Botão desenha com a cor da letra; o contorno não chega nele (L6b, crítica C22). */
+  iconHidden: "O ícone usa a cor da letra, não a do contorno, e fica difícil de ver. Use uma cor que apareça ou tire o ícone.",
   noPoster: "Sem capa: quem prefere menos movimento não vê o vídeo.",
   phoneScroll: "No celular, o aluno precisa rolar para ver tudo, e o X sobe junto.",
   phoneText: "No celular, este texto ocupa mais linhas que no desenho (o texto não fica abaixo de 12 px). Use letra maior ou dê mais largura.",
@@ -150,16 +163,72 @@ function fillBase(fill: readonly FreeFillPaint[]): HexColor | null {
   return bottom.kind === "solid" ? bottom.color : bottom.kind === "image" ? null : ([...bottom.stops].sort((a, b) => a.at - b.at)[0]?.color ?? null);
 }
 
-function worstRatio(foregrounds: readonly HexColor[], backgrounds: readonly HexColor[], base: HexColor) {
+/** Um fundo para medir o contraste: a cor de tras e a cor embaixo dela (com transparencia, ela vai por cima). */
+type Backdrop = { color: HexColor; under: HexColor };
+
+function rgbaOf(color: HexColor) {
+  const hex = color.slice(1);
+
+  return {
+    a: hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1,
+    b: parseInt(hex.slice(4, 6), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    r: parseInt(hex.slice(0, 2), 16)
+  };
+}
+
+/** `top` por cima de `bottom` (que fica sobre o preto do veu), sem transparencia: "#rrggbb". */
+function flatten(top: HexColor, bottom: HexColor): HexColor {
+  const front = rgbaOf(top);
+  const back = rgbaOf(bottom);
+  const channel = (upper: number, lower: number) =>
+    Math.round(upper * front.a + lower * back.a * (1 - front.a))
+      .toString(16)
+      .padStart(2, "0");
+
+  return `#${channel(front.r, back.r)}${channel(front.g, back.g)}${channel(front.b, back.b)}`;
+}
+
+/**
+ * O contraste de uma letra: em cada fundo, a pior cor da pintura; com contorno de 2 px ou mais, o melhor entre a letra
+ * e o contorno (o texto vazado se le pelo contorno; com 1 px, so a cor conta). O pior entre os fundos.
+ */
+function letterRatio(colors: readonly HexColor[], stroke: FreeTextStroke | undefined, backdrops: readonly Backdrop[]) {
   let worst = 21;
 
-  for (const front of foregrounds) {
-    for (const back of backgrounds) {
-      worst = Math.min(worst, contrastRatio(front, back, base));
+  for (const back of backdrops) {
+    let ratio = Math.min(...colors.map((front) => contrastRatio(front, back.color, back.under)));
+
+    if (stroke && stroke.width >= 2) {
+      ratio = Math.max(ratio, contrastRatio(stroke.color, back.color, back.under));
     }
+
+    worst = Math.min(worst, ratio);
   }
 
   return worst;
+}
+
+/**
+ * O fundo de uma parte com marca-texto: a cor dele; com transparencia, por cima de cada cor do fundo de fora. null =
+ * nao da para medir (marca-texto transparente sobre imagem, video ou sem fundo medido).
+ */
+function markBackdrops(mark: FreeMark, outside: readonly Backdrop[] | null): Backdrop[] | null {
+  if (mark.color.length === 7 || mark.color.slice(7).toLowerCase() === "ff") {
+    return [{ color: mark.color, under: "#000000" }];
+  }
+
+  return outside ? outside.map((back) => ({ color: mark.color, under: flatten(back.color, back.under) })) : null;
+}
+
+/**
+ * A cor que o icone do Selo e do Botao usa, pela mesma regra do cartao: no texto vazado, a do contorno
+ * (freeHollowColor); senao a da letra (degrade = a primeira parada).
+ */
+function iconColor(style: Pick<FreeResolvedTextStyle, "paint" | "stroke">): HexColor {
+  const { paint } = style;
+
+  return freeHollowColor(style) ?? (paint.kind === "solid" ? paint.color : ([...paint.stops].sort((a, b) => a.at - b.at)[0]?.color ?? "#ffffff"));
 }
 
 function overlapArea(left: Rect, right: Rect) {
@@ -218,39 +287,90 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
     const prefix = `nodes.${node.id}`;
 
     // Contraste: contra o proprio fundo (selo, botao), as caixas de fora e a prancheta; imagem ou video atras = nao mede.
-    const chain = [node.box?.fill ?? [], ...ancestors, artboard.fill].filter((fill) => fill.length > 0);
-    const closest = chain[0];
-    const backgrounds = closest ? fillColors(closest) : null;
+    const behind = [...ancestors, artboard.fill];
     const behindMedia = rects?.[node.id] ? media.some((item) => rects[item.node.id] && overlapArea(rects[item.node.id], rects[node.id]) > 0) : false;
-
-    if (backgrounds && backgrounds.length > 0 && !behindMedia) {
+    /** Os fundos para medir com estas camadas (a mais perto primeiro); null = imagem, video ou nada medido atras. */
+    const backdropsOf = (layers: readonly (readonly FreeFillPaint[])[]): Backdrop[] | null => {
+      const chain = layers.filter((fill) => fill.length > 0);
+      const closest = chain[0];
+      const backgrounds = closest ? fillColors(closest) : null;
       const base = chain.slice(1).map(fillBase).find((color): color is HexColor => Boolean(color)) ?? "#000000";
-      const check = (paint: FreeTextPaint, size: number, weight: number, key: string) => {
-        const colors = paintColors(paint);
 
-        if (!colors) {
-          return;
-        }
+      return backgrounds && backgrounds.length > 0 && !behindMedia ? backgrounds.map((color) => ({ color, under: base })) : null;
+    };
+    const outside = backdropsOf([node.box?.fill ?? [], ...behind]);
+    const measure = (paint: FreeTextPaint, stroke: FreeTextStroke | undefined, size: number, weight: number, backdrops: readonly Backdrop[]) => {
+      const colors = paintColors(paint);
 
-        const required = isLargeText(size, weight) ? 3 : 4.5;
-        const ratio = worstRatio(colors, backgrounds, base);
-
-        if (ratio < required) {
-          add({ key, kind: "contrast", message: contrastHintMessage(ratio, required), nodeId: node.id });
-        }
-      };
-
-      check(style.paint, style.size, style.weight, `${prefix}.textStyle.paint`);
-
-      if (node.type === "heading" || node.type === "text") {
-        node.lines.forEach((line, lineIndex) =>
-          line.forEach((span, spanIndex) => {
-            if (span.style?.paint) {
-              check(span.style.paint, span.style.size ?? style.size, span.style.weight ?? style.weight, `${prefix}.lines.${lineIndex}.${spanIndex}.style.paint`);
-            }
-          })
-        );
+      return colors ? { ratio: letterRatio(colors, stroke, backdrops), required: isLargeText(size, weight) ? 3 : 4.5 } : null;
+    };
+    const report = (result: ReturnType<typeof measure>, key: string) => {
+      if (result && result.ratio < result.required) {
+        add({ key, kind: "contrast", message: contrastHintMessage(result.ratio, result.required), nodeId: node.id });
       }
+    };
+    // A cor do elemento so e medida contra o fundo de fora quando alguma letra a usa ali: no Titulo e no Texto, uma
+    // parte (com letra) sem cor propria e sem marca-texto. Com todas as letras sobre marca-texto, quem mede e a parte.
+    const usesOutside =
+      (node.type !== "heading" && node.type !== "text") || node.lines.some((line) => line.some((span) => span.text.trim() !== "" && !span.style?.paint && !span.style?.mark));
+    const element = outside && usesOutside ? measure(style.paint, style.stroke, style.size, style.weight, outside) : null;
+
+    report(element, `${prefix}.textStyle.paint`);
+
+    // Ao passar o mouse (L6c): a cor do texto de lá (so com a letra de cor solida, como no cartao) ou a de sempre,
+    // contra o fundo de lá (o do Botão troca o fundo inteiro dele) ou o de sempre. So quando algo muda a letra ou o
+    // fundo; a chave e a da cor ao passar o mouse (no Botão com a letra em degradê, onde ela nao vale, a do fundo).
+    if ((node.type === "button" || node.type === "links") && node.hover) {
+      const hoverFill = node.type === "button" ? node.hover.fill : undefined;
+      const hoverColor = node.hover.color !== undefined && style.paint.kind === "solid" ? node.hover.color : undefined;
+      const changesLetter = hoverColor !== undefined && style.paint.kind === "solid" && hoverColor.toLowerCase() !== style.paint.color.toLowerCase();
+
+      if (hoverFill || changesLetter) {
+        const backdrops = hoverFill ? backdropsOf([[hoverFill], ...behind]) : outside;
+        const result = backdrops ? measure(hoverColor ? { color: hoverColor, kind: "solid" } : style.paint, style.stroke, style.size, style.weight, backdrops) : null;
+
+        if (result && result.ratio < result.required) {
+          add({
+            key: `${prefix}.hover.${style.paint.kind === "solid" ? "color" : "fill"}`,
+            kind: "contrast",
+            message: POPUP_FREE_HINT_MESSAGES.hoverContrast(result.ratio, result.required),
+            nodeId: node.id
+          });
+        }
+      }
+    }
+
+    // O icone do Selo e do Botao desenha com a cor da letra (no texto vazado, com a do contorno, como no cartao): a
+    // letra que so se le pelo contorno deixa o icone sem contraste.
+    if (outside && element && element.ratio >= element.required && (node.type === "badge" || node.type === "button") && node.icon && letterRatio([iconColor(style)], undefined, outside) < 3) {
+      add({ key: `${prefix}.textStyle.paint`, kind: "contrast", message: POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: node.id });
+    }
+
+    if (node.type === "heading" || node.type === "text") {
+      node.lines.forEach((line, lineIndex) =>
+        line.forEach((span, spanIndex) => {
+          const own = span.style;
+
+          if (!own || (!own.paint && !own.stroke && !own.mark)) {
+            return;
+          }
+
+          // So o contorno mudou (sem cor propria nem marca-texto) num elemento que ja tem a dica: nada a mais.
+          if (!own.paint && !own.mark && element && element.ratio < element.required) {
+            return;
+          }
+
+          // A parte com marca-texto e medida contra ele, mesmo sem cor propria (e com ele opaco, ate sobre imagem).
+          const backdrops = own.mark ? markBackdrops(own.mark, outside) : outside;
+
+          if (backdrops) {
+            report(
+              measure(own.paint ?? style.paint, own.stroke ?? style.stroke, own.size ?? style.size, own.weight ?? style.weight, backdrops),
+              `${prefix}.lines.${lineIndex}.${spanIndex}.style.${own.paint ? "paint" : own.mark ? "mark" : "stroke"}`
+            );
+          }
+        })
+      );
     }
 
     // Tamanhos: o do elemento e o das partes.

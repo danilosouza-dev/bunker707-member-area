@@ -128,7 +128,7 @@ import {
 } from "./free-editor-selection";
 import { FreeInspector, type FreeEditorCommand, type FreeFocusRequest } from "./free-inspector";
 import { FREE_INSPECTOR_MANY_TITLE_ID, FreeInspectorMany, type FreeManyCommand } from "./free-inspector-many";
-import { freeMobileTextSizeKey, withoutFreeMobileValues } from "./free-inspector-model";
+import { freeHasHover, freeHoverPreviewAfter, freeMobileTextSizeKey, withoutFreeMobileValues } from "./free-inspector-model";
 import { FreeLayersPanel, type FreeLayerCommand, type FreeLayerSelectHow } from "./free-layers-panel";
 import { FreeReviewPanel } from "./free-review-panel";
 import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } from "./free-templates-panel";
@@ -999,6 +999,17 @@ function FreeEditorSession({
   }
 
   const inspectorId = many ? heldInspectorId : activeId;
+
+  // "Ver com o mouse em cima" (L6c): o palco mostra as cores ao passar o mouse do elemento escolhido. Nao salva e fica
+  // fora do historico; volta ao normal ao trocar de elemento, com varios escolhidos, no Revisar (o painel some), com
+  // "Ver como: Celular" (la nao tem mouse) e sem cor propria (freeHoverPreviewAfter); fora da aba Estilo, o painel
+  // desliga.
+  const [hoverPreviewId, setHoverPreviewId] = useState<FreeId | null>(null);
+  const keptHoverPreviewId = freeHoverPreviewAfter(hoverPreviewId, { activeId, device, hasHover: freeHasHover(selectedNode), many, panel: rightPanel });
+
+  if (keptHoverPreviewId !== hoverPreviewId) {
+    setHoverPreviewId(keptHoverPreviewId);
+  }
 
   useLayoutEffect(() => {
     liveIdsRef.current = liveIds;
@@ -2321,6 +2332,7 @@ function FreeEditorSession({
             device={device}
             disabled={disabled}
             fonts={fonts}
+            hoverPreviewId={hoverPreviewId}
             onCommitMoves={onCommitMoves}
             onCommitRect={onCommitRect}
             onEditText={onEditText}
@@ -2367,6 +2379,7 @@ function FreeEditorSession({
                   focusRequest={focusRequest}
                   fonts={fonts}
                   hints={checks.hints}
+                  hoverPreviewId={hoverPreviewId}
                   onBusyChange={updateBusy}
                   onChange={(next, options) => commitDesign(next, options)}
                   onCommand={onInspectorCommand}
@@ -2374,6 +2387,7 @@ function FreeEditorSession({
                   onDeviceChange={changeDevice}
                   onFocusHandled={() => setFocusRequest(null)}
                   onFontsChange={onFontsChange}
+                  onHoverPreviewChange={setHoverPreviewId}
                   rects={rects}
                   selectedId={inspectorId}
                 />
