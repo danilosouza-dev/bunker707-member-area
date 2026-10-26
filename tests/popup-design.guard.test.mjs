@@ -246,14 +246,16 @@ test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na tr
   assert.ok(windowUtilities.includes("motion-reduce:transition-none"), "com menos movimento, sem transicao");
   assert.equal(scaleTransitionProblem(windowClasses[0]), null);
 
-  // A entrada so anima se o Root ja montado passar de fechado para aberto (o Base UI so marca o data-starting-style
-  // nessa virada). O host monta a janela ja aberta: o Root nasce fechado e abre no commit seguinte, antes de pintar
-  // (efeito de layout, sem esperar um quadro).
-  assert.match(dialog, /const \[entered, setEntered\] = useState\(false\);/);
-  assert.match(dialog, /useLayoutEffect\(\(\) => \{\s+\/\/ eslint-disable-next-line react-hooks\/set-state-in-effect -- [^\n]+\n\s+setEntered\(true\);\s+\}, \[\]\);/);
-  assert.doesNotMatch(dialog, /requestAnimationFrame/, "a janela nao espera um quadro para abrir");
-  assert.match(dialog, /<Dialog\.Root[\s\S]*?\n\s+open=\{open && entered\}\n\s+>/);
-  assert.doesNotMatch(dialog, /\n\s+open=\{open\}\n/, "o Root nunca recebe o open do host direto");
+  // A entrada: o host monta a janela ja aberta, e o Base UI so marca o data-starting-style quando o Root ja montado
+  // passa de fechado para aberto. Quem anima o primeiro desenho e o CSS (`starting:`, o @starting-style), na janela e
+  // no veu; o Root recebe o open do host direto (nada muda quando a janela abre).
+  assert.ok(windowUtilities.includes("starting:scale-95") && windowUtilities.includes("starting:opacity-0"), "entra crescendo e aparecendo");
+  const veil = classLiteralsOf(dialog).filter((classes) => classes.split(/\s+/).includes("bg-black/70"));
+  assert.equal(veil.length, 1, "uma classe do veu");
+  assert.ok(veil[0].split(/\s+/).includes("starting:opacity-0"), "o veu entra aparecendo");
+  assert.ok(veil[0].split(/\s+/).includes("motion-reduce:transition-none"), "o veu, com menos movimento, sem transicao");
+  assert.match(dialog, /<Dialog\.Root[\s\S]*?\n\s+open=\{open\}\n\s+>/);
+  assert.doesNotMatch(dialog, /requestAnimationFrame|useLayoutEffect|entered/, "a janela abre quando o host abre, sem esperar");
 });
 
 test("CSP: fonte so do proprio app, data: e a origem do nosso Supabase (nada do Google na hora)", async () => {
