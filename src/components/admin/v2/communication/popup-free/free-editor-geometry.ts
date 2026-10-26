@@ -763,8 +763,11 @@ export const FREE_DROP_EDGE_SCREEN_PX = 8;
 export const FREE_DROP_EMPTY_SCREEN_PX = 24;
 
 export type FreePoint = { x: number; y: number };
-/** O lugar de um elemento: o vao `index` na lista do pai como ela esta agora (contando o proprio elemento). */
-export type FreeMoveTarget = { index: number; parentId: FreeId | null };
+/**
+ * O lugar de um elemento: o vao `index` na lista do pai como ela esta agora (contando o proprio elemento) e, quando um
+ * lugar das Camadas pede outra camada para ele ficar ali na lista e no desenho (docs/27 L66), a camada `z`.
+ */
+export type FreeMoveTarget = { index: number; parentId: FreeId | null; z?: number };
 export type FreeFlowItem = { id: FreeId; index: number; rect: FreeRect };
 /** Um filho da prancheta desenhado (da sequencia ou solto, quem se move tambem), com a camada e a posicao em children. */
 export type FreeFlowLayer = { id: FreeId; index: number; rect: FreeRect; z: number };
@@ -794,9 +797,14 @@ export type FreeFlowContainer = {
 };
 /** Onde o elemento entra no desenho: o pai e o vao, a linha de onde entra, a caixa de destino e o motivo de recusa. */
 export type FreeFlowDrop = { blocked: { id: FreeId; reason: string } | null; box: FreeRect | null; index: number; line: FreeRect; parentId: FreeId | null };
-/** Uma linha das Camadas, medida pela div da linha (px de tela, na ordem do DOM). */
+/** Uma linha das Camadas, medida pela div da linha (px de tela, de cima para baixo, como a lista se ve). */
 export type FreeLayerLine = { box: boolean; height: number; id: FreeId; top: number };
-export type FreeLayerOver = { edge: "after" | "before" | "inside"; id: FreeId } | { end: true };
+/**
+ * A zona das Camadas sob o ponteiro, so pela altura: acima da linha, abaixo dela, dentro (o meio de uma caixa) ou
+ * abaixo da ultima linha (`bottom`). Quem diz o lugar em children e a camada e freeLayerDropTarget (L64 e L66: a
+ * lista e a ordem em que o desenho e pintado).
+ */
+export type FreeLayerOver = { edge: "above" | "below" | "inside"; id: FreeId } | { bottom: true };
 /** Como o desenho mostra um elemento novo arrastado do painel: solto (o retangulo pelo centro) ou na sequencia. */
 export type FreeCanvasDropSpec = { free: false; height: 0 | 1 } | { free: true; rectAt: (center: FreePoint) => FreeRect };
 export type FreeCanvasDrop = { center: FreePoint; kind: "free" } | ({ kind: "flow" } & FreeMoveTarget);
@@ -1047,9 +1055,10 @@ export function freeFlowEmptyRects(containers: readonly FreeFlowContainer[], emp
 }
 
 /**
- * O lugar de soltar nas Camadas pela altura do ponteiro (px de tela). Numa caixa, o quarto de cima e antes, o de
- * baixo e depois e o meio e dentro; numa folha, a metade. Acima da primeira linha, antes dela; abaixo da ultima, o
- * fim da prancheta; num vao entre linhas, antes da de baixo. Quem chama devolve null fora do painel das Camadas.
+ * A zona das Camadas pela altura do ponteiro (px de tela), com as linhas de cima para baixo. Numa caixa, o quarto de
+ * cima e acima, o de baixo e abaixo e o meio e dentro; numa folha, a metade. Acima da primeira linha, acima dela;
+ * abaixo da ultima, `bottom`; num vao entre linhas, acima da de baixo. Quem chama devolve null fora do painel das
+ * Camadas. So a geometria: o lugar em children sai de freeLayerDropTarget.
  */
 export function freeLayerDropAt(lines: readonly FreeLayerLine[], y: number): FreeLayerOver | null {
   if (lines.length === 0) {
@@ -1057,26 +1066,26 @@ export function freeLayerDropAt(lines: readonly FreeLayerLine[], y: number): Fre
   }
 
   if (y < lines[0].top) {
-    return { edge: "before", id: lines[0].id };
+    return { edge: "above", id: lines[0].id };
   }
 
   const last = lines[lines.length - 1];
 
   if (y >= last.top + last.height) {
-    return { end: true };
+    return { bottom: true };
   }
 
   for (const line of lines) {
     if (y >= line.top && y < line.top + line.height) {
       if (line.box) {
-        return { edge: y < line.top + line.height / 4 ? "before" : y >= line.top + (line.height * 3) / 4 ? "after" : "inside", id: line.id };
+        return { edge: y < line.top + line.height / 4 ? "above" : y >= line.top + (line.height * 3) / 4 ? "below" : "inside", id: line.id };
       }
 
-      return { edge: y < line.top + line.height / 2 ? "before" : "after", id: line.id };
+      return { edge: y < line.top + line.height / 2 ? "above" : "below", id: line.id };
     }
   }
 
   const below = lines.find((line) => line.top > y) ?? last;
 
-  return { edge: "before", id: below.id };
+  return { edge: "above", id: below.id };
 }

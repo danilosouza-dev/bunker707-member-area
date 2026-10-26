@@ -8,8 +8,9 @@ import "./support/transpile-tsx.mjs";
 // as linhas escolhidas marcadas, aria-current so no principal, a etiqueta "Na seleção" (12 px) nas outras e lida pelo
 // aria-describedby mesmo quando e a unica etiqueta da linha (C1), o Tab no principal, o clique com Ctrl/⌘ e Shift, o
 // arrastar que nao comeca com tecla, as teclas E, T, Delete e Ctrl + D na selecao (e o ⋯ so na linha, C17) e o
-// painel de antes sem a lista de escolhidos (C6). O painel e desenhado com react-dom/server; as regras do clique, do
-// arrastar e das teclas sao funcoes do proprio painel, chamadas direto.
+// painel de antes sem a lista de escolhidos (C6). Desde o L64, as linhas como no Figma: o da frente em cima, o de tras
+// embaixo e a caixa antes dos filhos dela. O painel e desenhado com react-dom/server; as regras do clique, do arrastar
+// e das teclas sao funcoes do proprio painel, chamadas direto.
 
 const layers = await import("../src/components/admin/v2/communication/popup-free/free-layers-panel.tsx");
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
@@ -156,12 +157,26 @@ test("sem a lista de escolhidos (o editor de antes) e com um escolhido só, as C
   assert.ok(line(before, "a").includes(MARCADA));
   assert.deepEqual(tagTexts(before, "a"), [E.layers.tags.free]);
 
-  // Nada escolhido: nenhuma marca, nenhum aria-current, o Tab na primeira linha.
+  // Nada escolhido: nenhuma marca, nenhum aria-current, o Tab na primeira linha (a da Caixa, a da frente, L64).
   const none = draw();
 
   assert.equal(none.includes(MARCADA), false);
   assert.doesNotMatch(none, /aria-current/);
-  assert.match(selectButton(none, "titulo"), /tabindex="0"/);
+  assert.match(selectButton(none, "caixa"), /tabindex="0"/);
+  assert.doesNotMatch(selectButton(none, "titulo"), /tabindex="0"/, "o Título, o primeiro de children, e a ultima linha");
+});
+
+test("as linhas como no Figma (L64): o da frente em cima, o de trás embaixo, a caixa antes dos filhos dela", () => {
+  const html = draw();
+  const order = Array.from(html.matchAll(/data-free-layer-row="([^"]+)"/g), ([, id]) => id);
+
+  // children: [Título, Forma A, Forma B, Texto, Caixa [Selo]]; nas Camadas, de cima para baixo, ao contrario.
+  assert.deepEqual(order, ["caixa", "selo", "texto", "b", "a", "titulo"]);
+  // O Selo continua dentro da lista da Caixa (um <ul> dentro do <li> dela), um nivel mais para dentro.
+  const caixa = html.slice(html.indexOf('data-free-layer-row="caixa"'), html.indexOf('data-free-layer-row="texto"'));
+  assert.match(caixa, /<ul[^>]*>[\s\S]*data-free-layer-row="selo"/);
+  assert.match(line(html, "selo"), /padding-left:18px/);
+  assert.match(line(html, "caixa"), /padding-left:4px/);
 });
 
 /* ------------------------------------------------------------------------------------------------

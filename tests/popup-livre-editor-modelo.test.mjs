@@ -196,10 +196,11 @@ test("subir, descer, colocar dentro e tirar da caixa respeitam a profundidade", 
   assert.equal(editor.moveFreeNodeInList(base, "links", 1), null);
 
   // Colocar dentro: um elemento simples vai para qualquer caixa (menos a sua); uma caixa com caixa dentro nao entra em
-  // caixa nenhuma; uma caixa simples nao entra numa caixa de dentro.
+  // caixa nenhuma; uma caixa simples nao entra numa caixa de dentro. O ⋯ lista as caixas na ordem das Camadas, de cima
+  // para baixo (L64: [Links, Outra [Neta], Fora [Dentro, X1], Título]).
   assert.deepEqual(
     editor.freeBoxTargets(base, "titulo").map((target) => target.id),
-    ["fora", "dentro", "outra", "neta"]
+    ["outra", "neta", "fora", "dentro"]
   );
   assert.deepEqual(editor.freeBoxTargets(base, "outra"), []);
   assert.deepEqual(editor.freeBoxTargets(base, "dentro").map((target) => target.id), ["outra"]);
@@ -666,7 +667,8 @@ test("Celular: a etiqueta das Camadas, o Ajustar no Celular da dica e as frases"
   const base = design([SELO_SOLTO, TITLE, LINKS], { devices: { mobile: { nodes: { titulo: { textStyle: { size: 30 } } } } } });
   const rows = editor.freeLayerRows(base, null);
 
-  assert.deepEqual(rows.map((row) => [row.id, row.mobile]), [["selo", false], ["titulo", true], ["links", false]]);
+  // Nas Camadas, o da frente em cima (L64): os Links, o Título e o Selo.
+  assert.deepEqual(rows.map((row) => [row.id, row.mobile]), [["links", false], ["titulo", true], ["selo", false]]);
   assert.equal(C.layers.tags.mobile, "Celular");
 
   // A dica "texto no celular" oferece "Ajustar no Celular"; as outras dicas ficam como estavam.
@@ -905,7 +907,8 @@ test("Camadas: setas na linha, E esconde, T trava", () => {
   assert.deepEqual(editor.freeLayerKeyAction(key("F2"), at), { kind: "rename" });
   assert.equal(editor.freeLayerKeyAction(key("e", { ctrlKey: true }), at), null);
 
-  // As linhas: ordem do DOM, nivel, etiquetas, nome falado com a caixa de fora e o aviso.
+  // As linhas: como no Figma (L64, o da frente em cima e a caixa antes dos filhos), nivel, etiquetas, nome falado com a
+  // caixa de fora e o aviso.
   const box = { children: [{ ...TITLE, id: "t1", lines: [[{ text: "Experimente grátis" }]] }], id: "caixa", layout: { dir: "row" }, type: "box" };
   const value = design([
     { ...TEXT, hidden: true, locked: true, place: { mode: "free", w: 200, x: 0, y: 0 } },
@@ -916,15 +919,17 @@ test("Camadas: setas na linha, E esconde, T trava", () => {
   ]);
   const rows = editor.freeLayerRows(value, CTA, new Set(["t1"]));
 
-  assert.deepEqual(rows.map((row) => [row.id, row.depth]), [["texto", 1], ["caixa", 1], ["t1", 2], ["principal", 1], ["forma", 1], ["links", 1]]);
-  assert.equal(rows[0].label, "Texto · Assista hoje.");
-  assert.deepEqual([rows[0].free, rows[0].hidden, rows[0].locked], [true, true, true]);
-  assert.equal(rows[1].label, "Caixa em linha");
-  assert.equal(rows[2].selectLabel, "Selecionar Título: Experimente grátis dentro de Caixa em linha");
-  assert.equal(rows[2].warning, true);
-  assert.equal(rows[3].label, "Botão principal · Quero ver");
-  assert.equal(rows[4].label, "Mancha de luz");
-  assert.equal(rows[5].selectLabel, "Selecionar Links");
+  assert.deepEqual(rows.map((row) => [row.id, row.depth]), [["links", 1], ["forma", 1], ["principal", 1], ["caixa", 1], ["t1", 2], ["texto", 1]]);
+  assert.equal(rows[5].label, "Texto · Assista hoje.");
+  assert.deepEqual([rows[5].free, rows[5].hidden, rows[5].locked], [true, true, true]);
+  assert.equal(rows[3].label, "Caixa em linha");
+  assert.equal(rows[4].selectLabel, "Selecionar Título: Experimente grátis dentro de Caixa em linha");
+  assert.equal(rows[4].warning, true);
+  assert.equal(rows[2].label, "Botão principal · Quero ver");
+  assert.equal(rows[1].label, "Mancha de luz");
+  assert.equal(rows[0].selectLabel, "Selecionar Links");
+  // A posicao na lista entre os irmaos (o ⋯ desliga Subir em cima e Descer embaixo) e quantos irmaos.
+  assert.deepEqual(rows.map((row) => [row.index, row.siblings]), [[0, 5], [1, 5], [2, 5], [3, 5], [0, 1], [4, 5]]);
 
   // Esconder, travar, renomear e camada.
   const hidden = editor.setFreeNodeFlag(value, "forma", "hidden", true);
@@ -942,6 +947,37 @@ test("Camadas: setas na linha, E esconde, T trava", () => {
   assert.equal(editor.freeSelectionDescription(value, "texto", {}), "Selecionado: Texto, X 0, Y 0.");
   assert.equal(editor.freeSelectionDescription(value, "principal", { principal: { h: 44, w: 120, x: 160.4, y: 220.6 } }), "Selecionado: Botão principal, X 160, Y 221.");
   assert.equal(editor.freeSelectionDescription(value, null, {}), "Nada selecionado.");
+});
+
+test("as teclas [ e ] fazem o que o nome diz: ] traz para frente e [ envia para trás, com um e com vários (L64)", () => {
+  // Os Atalhos dizem o nome de cada tecla na ordem delas: [ primeiro (enviar para tras), ] depois (trazer para frente).
+  assert.equal(C.shortcuts[8], "[ e ]: enviar para trás / trazer para frente");
+  assert.equal(inspector.FREE_INSPECTOR_COPY.advanced.forward, "Trazer para frente");
+  assert.equal(inspector.FREE_INSPECTOR_COPY.advanced.backward, "Enviar para trás");
+  assert.equal(C.announce.layerForward, "Trazido para frente.");
+  assert.equal(C.announce.layerBackward, "Enviado para trás.");
+
+  // A casca liga ] ao "forward" e [ ao "backward", com um elemento e com varios.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(source, /if \(\(key === "\[" \|\| key === "\]"\) && !mod\) \{\s*event\.preventDefault\(\);\s*runCommand\(key === "\]" \? "forward" : "backward", activeId\);/);
+  assert.match(source, /if \(\(key === "\[" \|\| key === "\]"\) && !mod\) \{\s*event\.preventDefault\(\);\s*runMany\(key === "\]" \? "forward" : "backward"\);/);
+  assert.match(source, /shiftFreeNodeLayer\(present\.design, id, kind === "forward" \? 1 : -1\)/);
+  assert.match(source, /announce\(kind === "forward" \? copy\.announce\.layerForward : copy\.announce\.layerBackward\)/);
+
+  // "forward" sobe a camada (o elemento e desenhado por cima de quem tem camada menor); "backward" desce. Mudar a
+  // camada nao mexe na ordem de children (a de leitura), mas as Camadas mostram a ordem do desenho (L66): com o ], a
+  // Forma passa para cima dos Links na lista; com o [, para baixo do Título, como no Figma.
+  const value = design([TITLE, { id: "forma", place: { h: 10, mode: "free", w: 10, x: 0, y: 0 }, type: "shape" }, LINKS]);
+  const forward = editor.shiftFreeNodeLayer(value, "forma", 1);
+  const backward = editor.shiftFreeNodeLayer(value, "forma", -1);
+  assert.equal(find(forward, "forma").node.place.z, 1);
+  assert.equal(find(backward, "forma").node.place.z, -1);
+  assert.deepEqual(ids(forward.children), ids(value.children));
+  assert.deepEqual(ids(backward.children), ids(value.children));
+  assert.deepEqual(editor.freeLayerRows(value, null).map((row) => row.id), ["links", "forma", "titulo"]);
+  assert.deepEqual(editor.freeLayerRows(forward, null).map((row) => row.id), ["forma", "links", "titulo"]);
+  assert.deepEqual(editor.freeLayerRows(backward, null).map((row) => row.id), ["links", "titulo", "forma"]);
+  assert.equal(editor.shiftFreeNodeLayer(editor.shiftFreeNodeLayer(value, "forma", 10), "forma", 1).children[1].place.z, 10, "ate 10");
 });
 
 test("Revisar: erros do navegador e do salvar levam ao elemento; campos de fora viram a frase", () => {
@@ -1149,6 +1185,9 @@ test("vocabulário das frases do editor", () => {
     "Ctrl + = / Ctrl + −: mais e menos zoom (ou Ctrl + roda)",
     "Nas Camadas: Ctrl + clique ou Ctrl + Enter põe ou tira; Shift + clique ou Shift + ↑ / ↓ pega o intervalo"
   ]);
+  // L64: Alt + ↑/↓ nas Camadas anda como a lista se ve, e num solto tambem (ele nao tem sequencia); um elemento da
+  // sequencia, no desenho (a barrinha e o palco), anda como a sequencia se ve.
+  assert.equal(C.shortcuts[2], "Alt + ↑ / ↓: subir ou descer (nas Camadas e num elemento solto, como a lista; na sequência, como ela se vê)");
   assert.equal(C.shortcuts[10], "Alt ao mover: sem guias", "Alt + arrastar continua com o elemento de cima e sem guias");
   assert.equal(C.shortcuts[11], "Nas Camadas: E esconde, T trava, Shift + F10 abre o menu");
   assert.equal(/ [-–—] /.test(C.shortcuts.join("\n")), false, "sem hifen como separador (o − do zoom e o sinal de menos)");

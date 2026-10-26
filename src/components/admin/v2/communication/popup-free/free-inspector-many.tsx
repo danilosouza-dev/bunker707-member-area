@@ -16,8 +16,10 @@ import { FREE_ALIGN_EDGES, FREE_INSPECTOR_COPY, type FreeAlignEdge } from "./fre
 // mostra este no lugar do painel de um elemento; free-inspector.tsx nao muda). Mostra quantos estao escolhidos e a
 // dica de escolher um so para mudar textos, cores e tamanhos; Duplicar e Excluir; Alinhar entre si (pela caixa que
 // envolve os soltos), Alinhar no pop-up (cada um vai a borda ou ao centro da prancheta, decisao 1 do produtor) e
-// Distribuir os espacos (3 ou mais); a Camada; Esconder ou Mostrar e Travar ou Destravar (se algum ainda nao tem a
-// marca, todos ganham; senao, todos perdem); e a lista "Na seleção" com "Escolher só {nome}".
+// Distribuir os espacos (3 ou mais); a Camada (com a mesma frase do Avançado: quem esta mais acima nas Camadas fica
+// por cima, docs/27 L64); Esconder ou Mostrar e Travar ou Destravar (se algum ainda nao tem a marca, todos ganham;
+// senao, todos perdem); e a lista "Na seleção" com "Escolher só {nome}" (na ordem da escolha; o intervalo das Camadas
+// entra na ordem da lista, de cima para baixo).
 //
 // Um botao que nao da fica desligado com aria-disabled (continua focavel, entao o foco nunca cai no vazio quando ele
 // desliga depois de um clique) e o motivo escrito embaixo do grupo em 12 px, ligado por aria-describedby; os motivos
@@ -141,7 +143,7 @@ export function FreeInspectorMany({ design, device, disabled, onCommand, rects, 
             {reasons.distribute ? <FreeNote id={REASON_IDS.distribute}>{reasons.distribute}</FreeNote> : null}
           </FreeSection>
 
-          <FreeSection title={A.layer}>
+          <FreeSection description={A.layerNote} title={A.layer}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <ManyButton className={freeSmallButton} disabled={disabled} onClick={run({ kind: "forward" })}>
                 <BringToFront aria-hidden="true" className="size-4" />

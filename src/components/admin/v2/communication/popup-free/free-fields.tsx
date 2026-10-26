@@ -1752,7 +1752,7 @@ export function FreeTextArea({
             <Popover.Popup
               className={cn(
                 "max-h-[var(--available-height)] overflow-auto rounded-xl border border-[var(--border-strong)] bg-[var(--surface-3)] text-[var(--text-primary)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] outline-none",
-                "transition-[opacity,transform] duration-150 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none"
+                "transition-[opacity,scale] duration-150 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none"
               )}
               finalFocus={textarea}
             >

@@ -15,7 +15,9 @@ import "./support/transpile-tsx.mjs";
 // - guardas de fonte: o solto e as alcas pelo followFreePointer (mouse, caneta e toque, decisao 5; a sequencia so
 //   mouse e caneta), autoScroll, o cartao sem os ouvintes que gravavam, um ponteiro por vez, a roda nao passiva, o
 //   zoom barrado no arrastar, a ancora so nos pedidos de zoom (C12), dragDispose (C13), o stopPropagation das alcas
-//   antes de qualquer tecla (C14), elementsFromPoint so no ramo do Alt, 12 px e nada de HTML em texto.
+//   antes de qualquer tecla (C14), elementsFromPoint so no ramo do Alt, 12 px e nada de HTML em texto;
+// - desde o L65, o clique fora da prancheta: a area de desenho le o pointerdown na captura e o click desmarca pela
+//   regra pura da selecao (freeOutsidePress e freeOutsideClickClears, testadas em popup-livre-selecao-modelo).
 
 const canvasUrl = new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url);
 const source = readFileSync(canvasUrl, "utf8");
@@ -364,6 +366,42 @@ test("o pointerdown: a 1ª linha igual, um ponteiro por vez na seguinte e o prin
 
   // O duplo clique com Alt, Shift, Ctrl ou ⌘ nao abre o texto.
   assert.match(bodyOf("  function onDoubleClick("), /if \(event\.altKey \|\| event\.shiftKey \|\| event\.ctrlKey \|\| event\.metaKey\) \{\s*return;/);
+});
+
+test("o clique fora da prancheta (L65): a área lê o pointerdown na captura e o click desmarca pela regra pura da seleção", () => {
+  // A area de desenho (a da rolagem) tem os dois ouvintes; o cartao continua com os dele (o vazio da prancheta).
+  const view = /<div\s+className="relative min-h-0 min-w-0 flex-1 overflow-auto[^"]*"[\s\S]*?ref=\{viewportRef\}\s*>/.exec(source)?.[0] ?? "";
+
+  assert.ok(view, "a area de desenho");
+  assert.match(view, /data-free-zone="canvas"/);
+  assert.match(view, /onClick=\{onViewportClick\}/);
+  assert.match(view, /onPointerDownCapture=\{onViewportPointerDown\}/, "na captura: as alcas e a barrinha param o pointerdown no cartao");
+  assert.equal(source.match(/onPointerDownCapture=/g)?.length, 1);
+
+  // O pointerdown: fora do cartao, sem gesto em andamento e fora da barra de rolagem (as contas na regra pura).
+  const down = bodyOf("  function onViewportPointerDown(");
+
+  assert.match(down, /outsideRef\.current = freeOutsidePress\(\{/);
+  assert.match(down, /busy: Boolean\(sessionRef\.current \|\| flowRef\.current\),/, "no meio de um arrastar, nada");
+  assert.match(down, /inCard: !view\.contains\(target\) \|\| Boolean\(target\.closest\("\[data-free-canvas-card\]"\)\),/, "o cartao tem as regras dele");
+  assert.match(down, /onScrollbar: event\.clientX - box\.left - view\.clientLeft >= view\.clientWidth \|\| event\.clientY - box\.top - view\.clientTop >= view\.clientHeight,/);
+  assert.match(down, /button: event\.button,[\s\S]*isPrimary: event\.isPrimary,/);
+  assert.equal(/onSelect\(|preventDefault|stopPropagation/.test(down), false, "o pointerdown nao escolhe nem barra nada");
+  // O Alt nao conta (L65): so Shift, Ctrl e ⌘ vao para a regra; o clique fora com Alt desmarca como sem tecla.
+  assert.equal(/altKey/.test(down), false, "o Alt fica fora do pointerdown guardado");
+  assert.match(down, /ctrlKey: event\.ctrlKey,[\s\S]*metaKey: event\.metaKey,[\s\S]*shiftKey: event\.shiftKey,/);
+
+  // O click: le e limpa o pointerdown guardado, e so desmarca pela regra (algo escolhido, limiar e teclas), com a acao
+  // do vazio. Sem nada escolhido, o onSelect(null) nao vem (ele trocaria o Revisar aberto pelo painel Pop-up).
+  const click = bodyOf("  function onViewportClick(");
+
+  assert.match(click, /const press = outsideRef\.current;\s*outsideRef\.current = null;/);
+  assert.match(click, /if \(freeOutsideClickClears\(press, \{ x: event\.clientX, y: event\.clientY \}, liveIds\.length\)\) \{\s*onSelect\(null\);\s*\}/);
+  assert.equal(click.match(/onSelect\(/g)?.length, 1, "um onSelect so, dentro da regra");
+  assert.equal(source.match(/outsideRef\.current = /g)?.length, 2, "so o pointerdown guarda e so o click limpa");
+
+  // O vazio da prancheta continua desmarcando pelo pointerdown do cartao (a mesma acao).
+  assert.deepEqual(press({ id: null }).select, { id: null, mode: "only" });
 });
 
 test("as alças param o pointerdown antes de qualquer regra de tecla (C14) e o gesto é desligado ao recomeçar e ao desmontar (C13)", () => {

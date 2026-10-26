@@ -8,10 +8,12 @@ import "./support/admin-action-stubs.mjs";
 // pilha do Alt + clique, mover junto com o limite do grupo (e o Celular so em devices.mobile), a chave de juntar
 // passos, alinhar entre si e no pop-up (cada um, pela caixa que se ve), os espacos iguais, duplicar (Links, Áudio e
 // Vídeo de fora, atomico nos limites), excluir (Links e Áudio ficam), esconder, travar, a camada, a descricao do
-// palco, os motivos do painel Varios e as frases palavra por palavra. Tudo carregado direto pelo Node.
+// palco, os motivos do painel Varios e as frases palavra por palavra. Desde o L65, o clique fora da prancheta que
+// desmarca (o pointerdown que conta e o click que confere). Tudo carregado direto pelo Node.
 
 const selection = await import("../src/components/admin/v2/communication/popup-free/free-editor-selection.ts");
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
+const geometry = await import("../src/components/admin/v2/communication/popup-free/free-editor-geometry.ts");
 const inspector = await import("../src/components/admin/v2/communication/popup-free/free-inspector-model.ts");
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
@@ -106,22 +108,50 @@ test("seleção viva, normalizada (caixa e filho: fica o último) e pôr ou tira
   assert.deepEqual(selection.freeToggleInSelection(base, ["a"], "nada"), { added: false, ids: ["a"] });
 });
 
-test("intervalo das Camadas entre irmãos, terminando no principal; null sem âncora ou com pais diferentes", () => {
+test("intervalo das Camadas entre irmãos, na ordem da lista que se vê, terminando no principal; null sem âncora ou com pais diferentes", () => {
   const box = { children: [spacer("s1"), spacer("s2"), spacer("s3")], id: "caixa", type: "box" };
   const base = design([forma("a", 0, 0), forma("b", 0, 0), TITLE, TEXT, box, LINKS]);
+  const rows = editor.freeLayerRows(base, null).map((row) => row.id);
 
-  assert.deepEqual(selection.freeSelectionRange(base, "b", "texto"), ["b", "titulo", "texto"]);
-  // De baixo para cima: na ordem de children, mas o id clicado por ultimo (o principal).
-  assert.deepEqual(selection.freeSelectionRange(base, "texto", "b"), ["titulo", "texto", "b"]);
+  // Nas Camadas (L64), de cima para baixo: o da frente (o ultimo de children) em cima.
+  assert.deepEqual(rows, ["links", "caixa", "s3", "s2", "s1", "texto", "titulo", "b", "a"]);
+
+  // Da ancora para cima ou para baixo, os irmaos entre as duas linhas, de cima para baixo como a lista, e o id
+  // clicado por ultimo (o principal).
+  assert.deepEqual(selection.freeSelectionRange(base, "b", "texto"), ["titulo", "b", "texto"]);
+  assert.deepEqual(selection.freeSelectionRange(base, "texto", "b"), ["texto", "titulo", "b"]);
   assert.deepEqual(selection.freeSelectionRange(base, "a", "a"), ["a"]);
-  assert.deepEqual(selection.freeSelectionRange(base, "s1", "s3"), ["s1", "s2", "s3"]);
+  assert.deepEqual(selection.freeSelectionRange(base, "s1", "s3"), ["s2", "s1", "s3"]);
   assert.deepEqual(selection.freeSelectionRange(base, "s3", "s2"), ["s3", "s2"]);
+
+  // O intervalo e o das linhas irmas que se veem entre a ancora e o clicado (os mesmos ids, na mesma ordem, o
+  // principal no fim); as linhas de dentro de uma caixa no meio ficam de fora, como antes.
+  const parentOf = Object.fromEntries(editor.freeLayerRows(base, null).map((row) => [row.id, row.parentId]));
+  const seen = (from, to) => {
+    const [start, end] = [rows.indexOf(from), rows.indexOf(to)].sort((x, y) => x - y);
+
+    return [...rows.slice(start, end + 1).filter((id) => id !== to && parentOf[id] === parentOf[to]), to];
+  };
+
+  for (const [from, to] of [["b", "texto"], ["texto", "b"], ["a", "titulo"], ["titulo", "a"], ["s1", "s3"], ["s3", "s1"], ["a", "links"]]) {
+    assert.deepEqual(selection.freeSelectionRange(base, from, to), seen(from, to), `${from} -> ${to}`);
+  }
 
   assert.equal(selection.freeSelectionRange(base, null, "a"), null, "sem ancora");
   assert.equal(selection.freeSelectionRange(base, "nada", "a"), null, "ancora que nao existe mais");
   assert.equal(selection.freeSelectionRange(base, "s1", "a"), null, "pais diferentes");
   assert.equal(selection.freeSelectionRange(base, "a", "s2"), null, "pais diferentes");
   assert.equal(selection.freeSelectionRange(base, "a", "nada"), null);
+
+  // Com camada (L66), a lista e a ordem do desenho: a Forma A (camada 1) fica em cima e o Texto (camada -1) embaixo, e
+  // o intervalo segue as linhas que se veem, nao children.
+  const layered = design([forma("a", 0, 0, 40, 40, { place: { z: 1 } }), forma("b", 0, 0), TITLE, { ...TEXT, place: { mode: "flow", z: -1 } }, LINKS]);
+  const layeredRows = editor.freeLayerRows(layered, null).map((row) => row.id);
+
+  assert.deepEqual(layeredRows, ["a", "links", "titulo", "b", "texto"]);
+  assert.deepEqual(selection.freeSelectionRange(layered, "a", "titulo"), ["a", "links", "titulo"]);
+  assert.deepEqual(selection.freeSelectionRange(layered, "texto", "links"), ["titulo", "b", "texto", "links"]);
+  assert.deepEqual(selection.freeSelectionRange(layered, "b", "a"), ["links", "titulo", "b", "a"]);
 });
 
 test("Ctrl + A: irmãos do principal (ou o primeiro nível), sem travados nem escondidos no aparelho do Ver como", () => {
@@ -160,6 +190,56 @@ test("Esc: um vai à caixa de fora; vários ao pai comum quando é uma caixa; mi
   assert.equal(selection.freeSelectionEscape(base, ["a", "titulo"]), null, "na prancheta");
   assert.equal(selection.freeSelectionEscape(base, []), null);
   assert.equal(selection.freeSelectionEscape(base, ["nada", "selo"]), "caixa", "so os vivos contam");
+});
+
+test("clique fora da prancheta (L65): com algo escolhido, fora do cartão, sem arrastar e sem tecla, desmarca; o resto não muda nada", () => {
+  const fora = { busy: false, button: 0, ctrlKey: false, inCard: false, isPrimary: true, metaKey: false, onScrollbar: false, shiftKey: false, x: 120, y: 80 };
+  const press = selection.freeOutsidePress(fora);
+
+  // O pointerdown fora do cartao guarda o ponto e as teclas, e o click no mesmo ponto (ou a menos de 3 px) desmarca
+  // o que esta escolhido (um ou varios).
+  assert.deepEqual(press, { ctrlKey: false, metaKey: false, shiftKey: false, x: 120, y: 80 });
+  assert.equal(selection.freeOutsideClickClears(press, { x: 120, y: 80 }, 1), true);
+  assert.equal(selection.freeOutsideClickClears(press, { x: 120, y: 80 }, 3), true);
+  assert.equal(selection.freeOutsideClickClears(press, { x: 122, y: 81 }, 1), true, "o tremor da mao continua clique");
+  // O Alt nao muda nada (o clique fora com Alt desmarca como sem tecla): a regra pura nem recebe o Alt, e quem prende a
+  // casca a deixa-lo de fora e o teste de fonte do desenho (popup-livre-desenho-fonte).
+
+  // Sem nada escolhido nao ha o que desmarcar: nada muda, e o painel da direita fica como esta (com o Revisar aberto,
+  // ele continua aberto; antes, o clique na area escura trocava o Revisar pelo painel Pop-up).
+  assert.equal(selection.freeOutsideClickClears(press, { x: 120, y: 80 }, 0), false);
+
+  // O arrastar que comeca fora nao faz nada: a partir do limiar do solto (3 px), o click que vier nao desmarca.
+  assert.equal(selection.freeOutsideClickClears(press, { x: 123, y: 80 }, 1), false);
+  assert.equal(selection.freeOutsideClickClears(press, { x: 120, y: 200 }, 1), false);
+
+  // Com Shift, Ctrl ou ⌘, nada muda (como no vazio do cartao, L36).
+  for (const key of ["shiftKey", "ctrlKey", "metaKey"]) {
+    const comTecla = selection.freeOutsidePress({ ...fora, [key]: true });
+
+    assert.equal(comTecla?.[key], true, key);
+    assert.equal(selection.freeOutsideClickClears(comTecla, { x: 120, y: 80 }, 1), false, key);
+  }
+
+  // Nao conta: dentro do cartao (o elemento, o vazio da prancheta, as alcas e a barrinha tem as regras deles), a barra
+  // de rolagem da area, outro botao do mouse, um segundo dedo e um gesto em andamento (o arrastar de um solto ou da
+  // sequencia). Sem o pointerdown (um click do teclado), tambem nao.
+  for (const [what, change] of [
+    ["dentro do cartão", { inCard: true }],
+    ["na barra de rolagem", { onScrollbar: true }],
+    ["botão do meio", { button: 1 }],
+    ["botão de contexto", { button: 2 }],
+    ["segundo dedo", { isPrimary: false }],
+    ["no meio de um arrastar", { busy: true }]
+  ]) {
+    const nada = selection.freeOutsidePress({ ...fora, ...change });
+
+    assert.equal(nada, null, what);
+    assert.equal(selection.freeOutsideClickClears(nada, { x: 120, y: 80 }, 1), false, what);
+  }
+
+  // O limiar e o do arrastar do solto (o mesmo da casca do desenho).
+  assert.equal(geometry.FREE_DRAG_START_PX, 3);
 });
 
 /* ------------------------------------------------------------------------------------------------

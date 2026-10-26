@@ -224,6 +224,18 @@ test("alinhar: 12 nomes acessíveis distintos ('entre si' e 'no pop-up'), sem o 
   assert.match(buttonNamed(markup, "Espaços iguais na vertical").inner, /lucide-align-vertical-space-between/);
 });
 
+test("a Camada do painel Vários tem a frase do Avançado: quem está mais acima nas Camadas fica por cima (L64)", () => {
+  const markup = html(propsOf(BASE, ["a", "b"]));
+  const section = markup.match(/<section aria-label="Camada"[\s\S]*?<\/section>/)?.[0] ?? "";
+  const note = inspector.FREE_INSPECTOR_COPY.advanced.layerNote;
+
+  assert.ok(section, "a secao Camada");
+  assert.equal(note, "Quem está mais acima nas Camadas fica por cima; aqui você muda isso.");
+  assert.ok(section.includes(`<p class="mt-0.5 text-[13px] leading-5 text-[var(--text-secondary)]">${note}</p>`), "a frase embaixo do titulo, com 13 px");
+  // Os dois botoes continuam na secao, na ordem do Avançado.
+  assert.ok(section.indexOf("Trazer para frente") < section.indexOf("Enviar para trás"));
+});
+
 test("comandos: cada botão manda o seu; 'Alinhar no pop-up' com vários leva cada um à borda da prancheta (decisão 1)", () => {
   const ids = ["a", "b", "c"];
   const props = propsOf(BASE, ids);

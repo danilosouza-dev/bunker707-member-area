@@ -189,7 +189,10 @@ test("contorno e marca-texto numa parte pelo teclado: um passo cada, Ctrl + Z, o
       await pagina.keyboard.press("Enter");
       await expect(editor).toBeVisible({ timeout: 30_000 });
       await expect(prancheta(editor)).toBeVisible();
-      // Ao abrir, o foco vai para a primeira linha das Camadas: a do Título.
+      // Ao abrir, o foco vai para a primeira linha das Camadas: a dos Links (L64: o da frente em cima). O Título, o
+      // primeiro de children, e a ultima linha: End leva a ela.
+      await expect(botaoDaCamada(editor, "links")).toBeFocused();
+      await pagina.keyboard.press("End");
       await expect(botaoDaCamada(editor, "titulo")).toBeFocused();
       await pagina.keyboard.press("Enter");
       await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "titulo");

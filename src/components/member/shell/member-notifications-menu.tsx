@@ -245,7 +245,7 @@ export function MemberNotificationsMenu({
       <Popover.Portal>
         <Popover.Positioner align="end" className="z-[190] outline-none" collisionPadding={12} side="bottom" sideOffset={10}>
           <Popover.Popup
-            className="w-[min(25rem,calc(100vw-1.5rem))] origin-[var(--transform-origin)] overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b]/95 p-0 text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)] outline-none backdrop-blur-xl transition-[opacity,transform] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="w-[min(25rem,calc(100vw-1.5rem))] origin-[var(--transform-origin)] overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b]/95 p-0 text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)] outline-none backdrop-blur-xl transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
             // Foco no painel (o leitor anuncia "Notificações"); o Tab segue para os filtros e a lista.
             initialFocus={popupRef}
             ref={popupRef}

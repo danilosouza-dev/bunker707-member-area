@@ -9,6 +9,11 @@
 // Camadas e os lugares do desenho (freeFlowContainers), e o elemento novo que entra onde foi solto.
 // O L4b (docs/27 L36, L41, L43, L48 e L49): as teclas de escolher varios nas Camadas, as frases do zoom em passos, os
 // Atalhos novos no fim, a Forma e a Caixa que levam o tamanho para a sequencia e o alinhar pela caixa que se ve.
+// Camadas como no Figma (docs/27 L64 e L66): a lista mostra cada nivel na ordem em que o desenho e pintado, de cima
+// para baixo (a camada e, na mesma camada, o ultimo de children em cima; sem camadas, children ao contrario); o lugar
+// de soltar, o Subir e o Descer, a frase do mover e o intervalo das Camadas seguem a lista que se ve, e o elemento
+// levado para um lugar da lista fica com a camada que esse lugar pede. O JSON, o cartao do aluno e a ordem de leitura
+// e de Tab nao mudam.
 //
 // Modulo puro, imports relativos (tests/popup-livre-editor-modelo.test.mjs carrega direto pelo Node). Tudo aqui e
 // texto do produtor em portugues, sem palavra fora do vocabulario (testado).
@@ -198,7 +203,7 @@ export const FREE_EDITOR_COPY = {
   shortcuts: [
     "Setas: mover 1 px",
     "Shift + setas: mover 10 px",
-    "Alt + ↑ / ↓: subir ou descer na lista",
+    "Alt + ↑ / ↓: subir ou descer (nas Camadas e num elemento solto, como a lista; na sequência, como ela se vê)",
     "Delete: excluir",
     "Ctrl + D: duplicar",
     "Ctrl + Z: desfazer",
@@ -384,6 +389,46 @@ function locate(design: Pick<PopupFreeDesign, "children">, id: FreeId): Located 
   return findFreeNode(design, id) as Located | null;
 }
 
+/** A camada de um elemento (`place.z`; sem, 0), a mesma do `z-index` do cartao do aluno. */
+function layerZ(node: FreeNode): number {
+  return node.place?.z ?? 0;
+}
+
+/**
+ * Os indices de `list` (os children de um nivel) na ordem das Camadas (L64 e L66), de cima para baixo: a ordem
+ * contraria a que o cartao do aluno pinta os irmaos. Todo elemento tem posicao (solta ou relativa), entao o navegador
+ * pinta pela camada (`z-index`; sem camada, 0) e, na mesma camada, pela ordem de children: fica em cima quem tem a
+ * camada maior e, na mesma camada, quem vem depois em children. Sem camadas, e children ao contrario.
+ */
+export function freeLayerOrderOf(list: readonly FreeNode[]): number[] {
+  return list.map((_, index) => index).sort((a, b) => layerZ(list[b]) - layerZ(list[a]) || b - a);
+}
+
+/**
+ * Percorre a arvore na ordem das Camadas (L64 e L66): em cada nivel, de cima para baixo na ordem em que o desenho e
+ * pintado (freeLayerOrderOf: o da frente em cima); uma caixa vem antes dos filhos dela, como no Figma e no Photoshop.
+ * `index` e a posicao em children (a ordem de leitura, que nao muda) e `position`, a posicao na lista entre os irmaos
+ * (0 = a linha de cima, a do elemento da frente).
+ */
+export function walkFreeLayerOrder(
+  nodes: readonly FreeNode[],
+  visit: (node: FreeNode, info: { depth: number; index: number; parent: FreeBoxNode | null; position: number }) => void
+): void {
+  const walk = (list: readonly FreeNode[], depth: number, parent: FreeBoxNode | null) => {
+    freeLayerOrderOf(list).forEach((index, position) => {
+      const node = list[index];
+
+      visit(node, { depth, index, parent, position });
+
+      if (node.type === "box" && Array.isArray(node.children)) {
+        walk(node.children, depth + 1, node);
+      }
+    });
+  };
+
+  walk(nodes, 1, null);
+}
+
 function childrenOf(design: PopupFreeDesign, parentId: FreeId | null): readonly FreeNode[] {
   if (parentId === null) {
     return design.children;
@@ -534,10 +579,16 @@ function beforeLinks(design: PopupFreeDesign): { index: number; parentId: FreeId
 /**
  * Onde um elemento novo entra: com uma caixa selecionada, no fim dela; com um elemento da sequencia selecionado,
  * logo depois dele (na mesma caixa); sem selecao, com um solto selecionado ou com um elemento solto novo, no fim
- * da prancheta, antes dos Links. Quando a caixa esta cheia (20) ou a caixa nova passaria da profundidade, sobe um
- * nivel (logo depois da caixa).
+ * da prancheta, antes dos Links. Um solto que nasce atras de tudo (o Degradê, com a camada -1) entra no comeco da
+ * prancheta, o fundo: e la que ele e pintado e que as Camadas o mostram (a ultima linha), e um ] depois o traz so
+ * para a frente dos outros do fundo (L66). Quando a caixa esta cheia (20) ou a caixa nova passaria da profundidade,
+ * sobe um nivel (logo depois da caixa).
  */
 export function freeInsertionPoint(design: PopupFreeDesign, selectedId: FreeId | null, node: FreeNode): { index: number; parentId: FreeId | null } {
+  if (node.place?.mode === "free" && layerZ(node) < 0) {
+    return { index: 0, parentId: null };
+  }
+
   if (node.place?.mode === "free" || !selectedId) {
     return beforeLinks(design);
   }
@@ -836,7 +887,61 @@ export function removeFreeNode(design: PopupFreeDesign, id: FreeId): { ctaRemove
  * Subir, descer, caixas
  * ---------------------------------------------------------------------------------------------- */
 
-/** Sobe (-1) ou desce (+1) entre os irmaos; no limite da lista, null. */
+/**
+ * O Subir e o Descer (L64 e L66). Nas Camadas (`where` "layers": Alt + ↑/↓ e o ⋯ da linha, o painel das Camadas e um
+ * solto, freeMoveWhere), uma linha na lista que se ve (moveFreeNodeInLayers: Subir = mais para a frente). No desenho
+ * ("canvas": a barrinha e Alt + ↑/↓ num elemento da sequencia), como a sequencia se ve: Subir vem antes na leitura (-1
+ * em children). Na ponta, null.
+ */
+export function moveFreeNodeStep(design: PopupFreeDesign, id: FreeId, kind: "moveDown" | "moveUp", where: "canvas" | "layers"): PopupFreeDesign | null {
+  if (where === "layers") {
+    return moveFreeNodeInLayers(design, id, kind === "moveUp" ? "up" : "down");
+  }
+
+  return moveFreeNodeInList(design, id, kind === "moveUp" ? -1 : 1);
+}
+
+/**
+ * Subir ou Descer nas Camadas (L64 e L66): uma linha acima (mais para a frente) ou abaixo (mais para tras) entre os
+ * irmaos, na lista que se ve. O elemento passa para o outro lado do vizinho daquele lado e, quando a camada dele nao
+ * basta para ficar ali, leva a do vizinho (freeLayerGapTarget). Na ponta da lista, null.
+ */
+export function moveFreeNodeInLayers(design: PopupFreeDesign, id: FreeId, direction: "down" | "up"): PopupFreeDesign | null {
+  const found = locate(design, id);
+
+  if (!found) {
+    return null;
+  }
+
+  const parentId = found.parent?.id ?? null;
+  const siblings = childrenOf(design, parentId);
+  // Sem o elemento, o vao dele na lista e a posicao dele: subir vai ao vao de cima do vizinho da frente; descer, ao
+  // de baixo do vizinho de tras.
+  const position = freeLayerOrderOf(siblings).indexOf(found.index);
+
+  if (direction === "up" ? position <= 0 : position >= siblings.length - 1) {
+    return null;
+  }
+
+  const target = direction === "up" ? freeLayerGapTarget(design, id, parentId, position - 1, "back") : freeLayerGapTarget(design, id, parentId, position + 1, "front");
+
+  return target ? (moveFreeNodeTo(design, id, target)?.design ?? null) : null;
+}
+
+/** O painel das Camadas: a aba e a lista (o vazio dela inclusive, que tambem recebe o foco). */
+export const FREE_LAYERS_ZONE_SELECTOR = '[data-free-tab="layers"], [data-free-layers-zone]';
+
+/**
+ * De onde vale o Alt + ↑/↓ que nao vem de uma linha das Camadas (a linha manda "layers" sempre). Com o foco no painel
+ * das Camadas (a aba ou o vazio da lista), como a lista. Fora dele (o palco, o painel da direita), um solto tambem anda
+ * como a lista: ele nao tem sequencia nem barrinha, e subir e ir para a frente, como nas Camadas; so um elemento da
+ * sequencia anda como a sequencia se ve no desenho (como a barrinha dele).
+ */
+export function freeMoveWhere(input: { free: boolean; inLayers: boolean }): "canvas" | "layers" {
+  return input.inLayers || input.free ? "layers" : "canvas";
+}
+
+/** Anda uma posicao em children: antes (-1) ou depois (+1) entre os irmaos; no limite, null. */
 export function moveFreeNodeInList(design: PopupFreeDesign, id: FreeId, direction: -1 | 1): PopupFreeDesign | null {
   const found = locate(design, id);
 
@@ -952,7 +1057,10 @@ function withFreeMobileFlowPlace(design: PopupFreeDesign, node: FreeNode, flow: 
   return withFreeMobileNodes(design, { [node.id]: Object.keys(place).length > 1 ? { ...rest, place } : rest });
 }
 
-/** As caixas que podem receber o elemento (nao ele mesmo, nao uma caixa de dentro dele, nao a caixa onde ja esta). */
+/**
+ * As caixas que podem receber o elemento (nao ele mesmo, nao uma caixa de dentro dele, nao a caixa onde ja esta), na
+ * ordem das Camadas (L64: de cima para baixo, como o ⋯ › Colocar dentro da caixa… mostra).
+ */
 export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeId; label: string }[] {
   const found = locate(design, id);
 
@@ -963,7 +1071,7 @@ export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeI
   const height = boxHeight(found.node);
   const targets: { id: FreeId; label: string }[] = [];
 
-  walkFreeNodes(design.children, (node, info) => {
+  walkFreeLayerOrder(design.children, (node, info) => {
     if (node.type !== "box" || node.id === id || node.id === found.parent?.id) {
       return;
     }
@@ -986,9 +1094,9 @@ export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeI
  * Por que nao da para levar o elemento ao vao `target.index` da lista de `target.parentId` como ela esta agora
  * (contando o proprio elemento quando o pai e o mesmo). null = da; "" = invalido ou nada muda (sem frase); texto = a
  * frase. Na ordem: o elemento e o pai existem (o pai e a prancheta ou uma caixa); a caixa nao entra nela mesma nem
- * numa caixa de dentro dela; o indice cabe na lista; o mesmo lugar (os vaos de antes e de depois dele) nao e passo;
- * uma caixa de outro pai com 20 elementos nao recebe; a profundidade de caixas fica em 2. Nao olha travado,
- * escondido, Links, Áudio nem aparelho (a ordem e uma so nos dois).
+ * numa caixa de dentro dela; o indice cabe na lista; o mesmo lugar (os vaos de antes e de depois dele, sem camada
+ * nova) nao e passo; uma caixa de outro pai com 20 elementos nao recebe; a profundidade de caixas fica em 2. Nao olha
+ * travado, escondido, Links, Áudio nem aparelho (a ordem e uma so nos dois).
  */
 export function freeMoveProblem(design: PopupFreeDesign, id: FreeId, target: FreeMoveTarget): string | null {
   const found = locate(design, id);
@@ -1010,7 +1118,7 @@ export function freeMoveProblem(design: PopupFreeDesign, id: FreeId, target: Fre
 
   const fromParent = found.parent?.id ?? null;
 
-  if (fromParent === target.parentId && (target.index === found.index || target.index === found.index + 1)) {
+  if (fromParent === target.parentId && (target.index === found.index || target.index === found.index + 1) && (target.z === undefined || target.z === layerZ(found.node))) {
     return "";
   }
 
@@ -1028,8 +1136,8 @@ export function freeMoveProblem(design: PopupFreeDesign, id: FreeId, target: Fre
  * Forma e a Caixa guardam a largura e a altura, e o celular perde so a posicao solta (a Forma e a Caixa com tamanho
  * proprio no celular ficam com ele na sequencia do celular). Quem ja esta na sequencia e entra numa caixa (da
  * prancheta ou de outra caixa) tambem fica com a camada abaixo de 0 em 0 (flowIntoBoxOf); reordenado na mesma caixa
- * ou levado a prancheta, fica como esta. Um solto que muda de lugar na prancheta continua solto. Nada mais muda em
- * devices.
+ * ou levado a prancheta, fica como esta. Um solto que muda de lugar na prancheta continua solto. Com `target.z` (um
+ * lugar das Camadas que pede outra camada, L66), a camada no fim e essa. Nada mais muda em devices.
  */
 export function moveFreeNodeTo(design: PopupFreeDesign, id: FreeId, target: FreeMoveTarget): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (freeMoveProblem(design, id, target) !== null) {
@@ -1041,30 +1149,40 @@ export function moveFreeNodeTo(design: PopupFreeDesign, id: FreeId, target: Free
   const samePlace = (found.parent?.id ?? null) === target.parentId;
   const at = samePlace && target.index > found.index ? target.index - 1 : target.index;
   const becameFlow = detached.node.place?.mode === "free" && target.parentId !== null;
+  const layered = (node: FreeNode) => (target.z === undefined ? node : withLayerZ(node, target.z));
 
   if (!becameFlow) {
     const node = target.parentId !== null && !samePlace ? flowIntoBoxOf(detached.node) : detached.node;
 
-    return { becameFlow, design: insertNode(detached.design, target.parentId, at, node) };
+    return { becameFlow, design: insertNode(detached.design, target.parentId, at, layered(node)) };
   }
 
   const artboardWidth = resolveFreeArtboard(design).width;
-  const flow = flowPlaceOf(detached.node, { artboardWidth, intoBox: target.parentId !== null });
+  const flow = layered(flowPlaceOf(detached.node, { artboardWidth, intoBox: target.parentId !== null }));
   const moved = insertNode(detached.design, target.parentId, at, flow);
 
   return { becameFlow, design: withFreeMobileFlowPlace(moved, detached.node, flow, artboardWidth) };
 }
 
-/** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`), como no moveFreeNodeTo. */
+/**
+ * Coloca na linha de cima da caixa, na frente dos filhos (L64): sem camadas, o fim dela; com camadas, com a camada que
+ * esse lugar pede (L66). Um solto vira sequencia sozinho (`becameFlow`), como no moveFreeNodeTo.
+ */
 export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: FreeId): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (!freeBoxTargets(design, id).some((target) => target.id === boxId)) {
     return null;
   }
 
-  return moveFreeNodeTo(design, id, { index: childrenOf(design, boxId).length, parentId: boxId });
+  const target = freeLayerGapTarget(design, id, boxId, 0, "back");
+
+  return target ? moveFreeNodeTo(design, id, target) : null;
 }
 
-/** O lugar do "Tirar da caixa": logo depois da caixa, no pai dela (a caixa de fora ou a prancheta). Sem caixa, null. */
+/**
+ * O lugar do "Tirar da caixa": logo acima da caixa nas Camadas (na frente dela, L64), no pai dela (a caixa de fora ou
+ * a prancheta): sem camadas, logo depois dela em children; com camadas, com a camada que esse lugar pede (L66). Sem
+ * caixa, null.
+ */
 export function freeOutOfBoxTarget(design: PopupFreeDesign, id: FreeId): FreeMoveTarget | null {
   const found = locate(design, id);
 
@@ -1072,9 +1190,10 @@ export function freeOutOfBoxTarget(design: PopupFreeDesign, id: FreeId): FreeMov
     return null;
   }
 
-  const box = locate(design, found.parent.id) as Located;
+  const boxId = found.parent.id;
+  const parentId = locate(design, boxId)?.parent?.id ?? null;
 
-  return { index: box.index + 1, parentId: box.parent?.id ?? null };
+  return freeLayerGapTarget(design, id, parentId, freeLayerPositionOf(design, parentId, boxId, id), "back");
 }
 
 /** Por que o "Tirar da caixa" nao da: "" fora de caixa; a frase da caixa de fora cheia (20); null = da. */
@@ -1094,30 +1213,99 @@ export function moveFreeNodeOutOfBox(design: PopupFreeDesign, id: FreeId): Popup
 /**
  * A frase depois de soltar (lida no design de DEPOIS): "Movido. Posição n de N, onde.", com n e N entre os irmaos
  * (escondidos e soltos contam, como nas Camadas) e onde = "dentro de {caixa}" ou "no pop-up"; quando um solto virou
- * sequencia, mais "Agora segue a sequência.". O final do Celular quem poe e o editor.
+ * sequencia, mais "Agora segue a sequência.". O final do Celular quem poe e o editor. A posicao conta como se ve: no
+ * desenho (`order` "reading", o padrao), na ordem da sequencia; nas Camadas (`order` "list"), de cima para baixo na
+ * lista (freeLayerOrderOf), entao o da frente e a posicao 1 (L64 e L66).
  */
-export function freeMoveAnnouncement(design: PopupFreeDesign, id: FreeId, cta: NoticeDraft["cta"], options: { becameFlow: boolean }): string {
+export function freeMoveAnnouncement(
+  design: PopupFreeDesign,
+  id: FreeId,
+  cta: NoticeDraft["cta"],
+  options: { becameFlow: boolean; order?: "list" | "reading" }
+): string {
   const found = locate(design, id);
 
   if (!found) {
     return "";
   }
 
-  const total = found.parent ? found.parent.children.length : design.children.length;
+  const siblings = found.parent ? found.parent.children : design.children;
+  const total = siblings.length;
   const where = found.parent ? FREE_EDITOR_COPY.layers.inside(freeLayerLabel(found.parent, cta)) : FREE_EDITOR_COPY.drag.inArtboard;
-  const moved = FREE_EDITOR_COPY.drag.moved(found.index + 1, total, where);
+  const position = options.order === "list" ? freeLayerOrderOf(siblings).indexOf(found.index) + 1 : found.index + 1;
+  const moved = FREE_EDITOR_COPY.drag.moved(position, total, where);
 
   return options.becameFlow ? `${moved} ${FREE_EDITOR_COPY.announce.toSequence}` : moved;
 }
 
+/** A posicao de `rowId` na lista dos irmaos de `parentId` sem o elemento `movingId` (o vao de cima da linha dela). */
+function freeLayerPositionOf(design: PopupFreeDesign, parentId: FreeId | null, rowId: FreeId, movingId: FreeId): number {
+  const others = childrenOf(design, parentId).filter((node) => node.id !== movingId);
+
+  return freeLayerOrderOf(others).findIndex((index) => others[index].id === rowId);
+}
+
 /**
- * O lugar de soltar de uma zona das Camadas: antes da linha (no pai dela, no indice dela); depois (no indice + 1; numa
- * caixa com filhos, dentro dela no comeco, porque a linha de baixo e o primeiro filho); dentro de uma caixa (no fim
- * dela; numa folha vale como depois); abaixo da ultima linha, o fim da prancheta. A validade fica com freeMoveProblem.
+ * O lugar de um vao das Camadas (L66): o pai, o indice em children e, so quando muda, a camada. `gap` e a posicao na
+ * lista dos irmaos de `parentId` sem o elemento que anda (0 = acima da linha de cima, a frente de tudo; o tamanho da
+ * lista = abaixo da de baixo, o fundo). Para o elemento ficar ali na lista e no desenho, a camada dele fica entre a do
+ * vizinho de tras (o de baixo) e a do vizinho da frente (o de cima): se ja esta entre elas, nao muda; senao, vira a do
+ * vizinho mais perto (passar por cima de quem tem a camada maior leva a camada dele). A camada de partida e a de
+ * agora, com a regra de entrar numa caixa (abaixo de 0 vira 0, C8). Em children, so os irmaos da mesma camada pedem
+ * ordem (os de tras antes dele, os da frente depois): no mesmo pai, quando o lugar de agora ja serve, ele fica (so a
+ * camada muda, e a sequencia nao pula); senao, entra o mais perto do vizinho de referencia (`anchor`: logo depois do de
+ * tras ou logo antes do da frente) que serve. Sem camadas, e o lugar de antes (L64): logo depois da linha de baixo ou
+ * logo antes da de cima. A validade fica com freeMoveProblem.
  */
-export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver): FreeMoveTarget | null {
-  if ("end" in over) {
-    return { index: design.children.length, parentId: null };
+function freeLayerGapTarget(design: PopupFreeDesign, id: FreeId, parentId: FreeId | null, gap: number, anchor: "back" | "front"): FreeMoveTarget | null {
+  const found = locate(design, id);
+
+  if (!found) {
+    return null;
+  }
+
+  const sameParent = (found.parent?.id ?? null) === parentId;
+  // Os irmaos sem o elemento: os indices daqui em diante sao em `others` (o vao k entra antes de others[k]).
+  const others = childrenOf(design, parentId).filter((node) => node.id !== id);
+  const order = freeLayerOrderOf(others);
+  const at = Math.max(0, Math.min(gap, order.length));
+  const front = at > 0 ? order[at - 1] : null;
+  const back = at < order.length ? order[at] : null;
+  const current = layerZ(found.node);
+  const start = parentId !== null && !sameParent && current < 0 ? 0 : current;
+  const z = Math.max(back === null ? L.z.min : layerZ(others[back]), Math.min(front === null ? L.z.max : layerZ(others[front]), start));
+  // Na mesma camada, quem fica atras vem antes em children e quem fica na frente vem depois: os vaos que servem vao de
+  // logo depois do ultimo de tras ate logo antes do primeiro da frente.
+  const behind = order.slice(at).filter((index) => layerZ(others[index]) === z);
+  const ahead = order.slice(0, at).filter((index) => layerZ(others[index]) === z);
+  const low = behind.length ? Math.max(...behind) + 1 : 0;
+  const high = ahead.length ? Math.min(...ahead) : others.length;
+  const near = anchor === "back" ? (back !== null ? back + 1 : (front ?? 0)) : (front ?? (back !== null ? back + 1 : 0));
+  const slot = sameParent && found.index >= low && found.index <= high ? found.index : Math.max(low, Math.min(high, near));
+  // O vao em children como esta agora (contando o proprio elemento quando o pai e o mesmo), como moveFreeNodeTo le.
+  const index = sameParent && slot > found.index ? slot + 1 : slot;
+
+  return z === start ? { index, parentId } : { index, parentId, z };
+}
+
+/**
+ * O lugar de uma zona das Camadas (L64 e L66: a lista e a ordem do desenho, como no Figma e no Photoshop; o de cima
+ * fica na frente), para o elemento `id` que anda. Acima da linha: na frente dela, no pai dela. Abaixo: atras dela;
+ * numa caixa com filhos, dentro dela, na frente de todos (a linha logo abaixo da caixa e o filho da frente). Dentro de
+ * uma caixa: atras de todos os filhos dela (a linha mais baixa da caixa); numa folha vale como abaixo. Abaixo da ultima
+ * linha: atras de tudo, o fundo do pop-up. A frente de tudo sai de acima da primeira linha. Cada vao vira o lugar em
+ * children e a camada que o deixam exatamente ali (freeLayerGapTarget); a propria linha, em qualquer zona, e o mesmo
+ * lugar. A validade fica com freeMoveProblem.
+ */
+export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver, id: FreeId): FreeMoveTarget | null {
+  const moving = locate(design, id);
+
+  if (!moving) {
+    return null;
+  }
+
+  if ("bottom" in over) {
+    return freeLayerGapTarget(design, id, null, design.children.length, "front");
   }
 
   const found = locate(design, over.id);
@@ -1126,17 +1314,22 @@ export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver
     return null;
   }
 
-  const parentId = found.parent?.id ?? null;
+  if (found.node.id === id) {
+    return { index: moving.index, parentId: moving.parent?.id ?? null };
+  }
 
-  if (over.edge === "before") {
-    return { index: found.index, parentId };
+  const parentId = found.parent?.id ?? null;
+  const position = freeLayerPositionOf(design, parentId, over.id, id);
+
+  if (over.edge === "above") {
+    return freeLayerGapTarget(design, id, parentId, position, "back");
   }
 
   if (found.node.type === "box" && (over.edge === "inside" || found.node.children.length > 0)) {
-    return over.edge === "inside" ? { index: found.node.children.length, parentId: found.node.id } : { index: 0, parentId: found.node.id };
+    return over.edge === "inside" ? freeLayerGapTarget(design, id, found.node.id, found.node.children.length, "front") : freeLayerGapTarget(design, id, found.node.id, 0, "back");
   }
 
-  return { index: found.index + 1, parentId };
+  return freeLayerGapTarget(design, id, parentId, position + 1, "front");
 }
 
 /** Algum ancestral e um solto girado (no desenho, o retangulo de dentro dele e o envelope girado). */
@@ -1302,34 +1495,37 @@ export function renameFreeNode(design: PopupFreeDesign, id: FreeId, name: string
   });
 }
 
-/** Camada: `]` traz para frente (+1), `[` envia para tras (-1), de -10 a 10. */
-export function shiftFreeNodeLayer(design: PopupFreeDesign, id: FreeId, delta: number): PopupFreeDesign {
-  return updateFreeNode(design, id, (node) => {
-    const current = node.place?.z ?? 0;
-    const z = Math.max(L.z.min, Math.min(L.z.max, current + delta));
+/** O elemento com a camada `z` (0 tira a chave; na sequencia sem mais nada, o lugar sai). A mesma camada: ele mesmo. */
+function withLayerZ(node: FreeNode, z: number): FreeNode {
+  if (layerZ(node) === z) {
+    return node;
+  }
 
-    if (z === current) {
-      return node;
-    }
-
-    if (node.place?.mode === "free") {
-      const place: FreeAbsolutePlace = { ...node.place, z };
-
-      if (!z) {
-        delete place.z;
-      }
-
-      return { ...node, place };
-    }
-
-    const place: FreeFlowPlace = { ...(node.place ?? { mode: "flow" as const }), z };
+  if (node.place?.mode === "free") {
+    const place: FreeAbsolutePlace = { ...node.place, z };
 
     if (!z) {
       delete place.z;
     }
 
-    return { ...node, place: Object.keys(place).length === 1 ? undefined : place };
-  });
+    return { ...node, place };
+  }
+
+  const place: FreeFlowPlace = { ...(node.place ?? { mode: "flow" as const }), z };
+
+  if (!z) {
+    delete place.z;
+  }
+
+  return { ...node, place: Object.keys(place).length === 1 ? undefined : place };
+}
+
+/**
+ * Camada: `]` traz para frente (+1), `[` envia para tras (-1), de -10 a 10. As Camadas mostram a ordem do desenho, entao
+ * a linha muda de lugar junto quando passa por quem tem outra camada (L66).
+ */
+export function shiftFreeNodeLayer(design: PopupFreeDesign, id: FreeId, delta: number): PopupFreeDesign {
+  return updateFreeNode(design, id, (node) => withLayerZ(node, Math.max(L.z.min, Math.min(L.z.max, layerZ(node) + delta))));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -1588,7 +1784,7 @@ export type FreeLayerRow = {
   free: boolean;
   hidden: boolean;
   id: FreeId;
-  /** Posicao entre os irmaos (Subir/Descer desligam nas pontas). */
+  /** Posicao entre os irmaos na lista como se ve (0 = a de cima, a da frente; Subir e Descer desligam nas pontas). */
   index: number;
   inBox: boolean;
   label: string;
@@ -1602,24 +1798,31 @@ export type FreeLayerRow = {
   warning: boolean;
 };
 
-/** As linhas das Camadas na ordem do DOM (de cima para baixo = ordem de leitura). */
+/**
+ * As linhas das Camadas de cima para baixo, como no Figma e no Photoshop (L64 e L66): em cada nivel, na ordem em que o
+ * desenho pinta, o da frente em cima (a camada maior e, na mesma camada, o ultimo de children) e o de tras embaixo; a
+ * caixa vem antes dos filhos dela. A ordem de leitura e de Tab do aluno continua a de children, que aqui (sem camadas)
+ * fica de baixo para cima.
+ */
 export function freeLayerRows(design: PopupFreeDesign, cta: NoticeDraft["cta"], flagged: ReadonlySet<FreeId> = new Set()): FreeLayerRow[] {
   const rows: FreeLayerRow[] = [];
 
-  walkFreeNodes(design.children, (node, info) => {
+  walkFreeLayerOrder(design.children, (node, info) => {
+    const siblings = info.parent ? info.parent.children.length : design.children.length;
+
     rows.push({
       depth: info.depth,
       free: node.place?.mode === "free",
       hidden: Boolean(node.hidden),
       id: node.id,
       inBox: Boolean(info.parent),
-      index: info.index,
+      index: info.position,
       label: freeLayerLabel(node, cta),
       locked: Boolean(node.locked),
       mobile: Boolean(Object.keys(freeMobileNodeOf(design, node.id) ?? {}).length),
       parentId: info.parent?.id ?? null,
       selectLabel: layerSelectLabel(node, cta, info.parent),
-      siblings: info.parent ? info.parent.children.length : design.children.length,
+      siblings,
       type: node.type,
       warning: flagged.has(node.id)
     });

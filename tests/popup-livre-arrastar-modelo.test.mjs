@@ -10,7 +10,9 @@ import "./support/admin-action-stubs.mjs";
 // desenho (freeFlowDropAt, inclusive o mesmo vao que nao grava), o ponto da tela em px da prancheta, o Celular com a
 // ordem uma so, o elemento novo que entra onde foi solto e as guardas de fonte do editor e do desenho. No L4b, a Forma
 // e a Caixa soltas que entram numa caixa guardam o tamanho, e a camada abaixo de 0 vira 0 em quem entra numa caixa
-// (solto ou ja na sequencia). Tudo carregado direto pelo Node.
+// (solto ou ja na sequencia). Desde o L64 (Camadas como no Figma), a lista mostra children ao contrario: acima de uma
+// linha e na frente dela, abaixo da ultima e o fundo do pop-up, dentro de uma caixa e atras dos filhos dela, e a frase
+// das Camadas conta a posicao de cima para baixo na lista. Tudo carregado direto pelo Node.
 
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 const geometry = await import("../src/components/admin/v2/communication/popup-free/free-editor-geometry.ts");
@@ -18,6 +20,8 @@ const history = await import("../src/components/admin/v2/communication/popup-fre
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const starters = await import("../src/server/communications/popup-free-starters.ts");
+const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
 
 const M = schema.POPUP_FREE_MESSAGES;
 const C = editor.FREE_EDITOR_COPY;
@@ -357,6 +361,67 @@ test("frases do mover: a posição entre os irmãos, onde e o final da sequênci
   assert.equal(`${C.drag.moved(1, 5)} ${C.drag.alsoDesktop}`, "Movido. Posição 1 de 5, no pop-up. A ordem muda também no computador.");
 });
 
+test("frases do mover nas Camadas (L64): a posição conta de cima para baixo na lista, o da frente é a 1", () => {
+  const base = sample();
+
+  // O Texto no fim da caixa (o da frente nela): no desenho, o 3o da coluna; nas Camadas, a linha de cima da caixa.
+  const front = editor.moveFreeNodeTo(base, "texto", { index: 2, parentId: "caixa" });
+  assert.equal(editor.freeMoveAnnouncement(front.design, "texto", null, { becameFlow: false, order: "list" }), "Movido. Posição 1 de 3, dentro de Caixa em coluna.");
+  assert.equal(editor.freeMoveAnnouncement(front.design, "texto", null, { becameFlow: false, order: "reading" }), "Movido. Posição 3 de 3, dentro de Caixa em coluna.");
+  assert.equal(editor.freeMoveAnnouncement(front.design, "texto", null, { becameFlow: false }), "Movido. Posição 3 de 3, dentro de Caixa em coluna.", "sem order, como no desenho");
+
+  // O Texto no comeco do pop-up (o de tras de tudo): a ultima linha das Camadas.
+  const back = editor.moveFreeNodeTo(base, "texto", { index: 0, parentId: null });
+  assert.equal(editor.freeMoveAnnouncement(back.design, "texto", null, { becameFlow: false, order: "list" }), "Movido. Posição 4 de 4, no pop-up.");
+
+  // Escondidos e soltos contam, como nas Camadas; o solto que entra numa caixa fala a sequencia tambem.
+  const counted = design([{ ...TITLE, hidden: true }, { id: "forma", place: { h: 40, mode: "free", w: 40, x: 0, y: 0 }, type: "shape" }, TEXT, LINKS]);
+  assert.equal(editor.freeMoveAnnouncement(counted, "texto", null, { becameFlow: false, order: "list" }), "Movido. Posição 2 de 4, no pop-up.");
+
+  const loose = design([{ ...BADGE, place: { mode: "free", w: 80, x: 0, y: 0 } }, { children: [spacer("e1")], id: "linha", layout: { dir: "row" }, type: "box" }, LINKS]);
+  const flowed = editor.moveFreeNodeTo(loose, "selo", { index: 0, parentId: "linha" });
+  assert.equal(
+    editor.freeMoveAnnouncement(flowed.design, "selo", null, { becameFlow: flowed.becameFlow, order: "list" }),
+    "Movido. Posição 2 de 2, dentro de Caixa em linha. Agora segue a sequência."
+  );
+});
+
+test("Subir e Descer (L64): nas Camadas andam na lista que se vê (Subir = mais para a frente); no desenho, na sequência", () => {
+  // [Título, Texto, Caixa [Selo, Botão], Links]: nas Camadas, [Links, Caixa, Botão, Selo, Texto, Título].
+  const base = sample();
+  const rowsOf = (value) => editor.freeLayerRows(value, null).map((row) => row.id);
+  assert.deepEqual(rowsOf(base), ["links", "caixa", "botao", "selo", "texto", "titulo"]);
+
+  // Subir o Texto nas Camadas: a linha dele passa para cima da Caixa (na frente dela; em children, depois dela).
+  const up = editor.moveFreeNodeStep(base, "texto", "moveUp", "layers");
+  assert.deepEqual(rowsOf(up), ["links", "texto", "caixa", "botao", "selo", "titulo"]);
+  assert.deepEqual(ids(up.children), ["titulo", "caixa", "texto", "links"]);
+  assert.deepEqual(up.devices, base.devices, "o celular nao muda");
+
+  // Descer o Texto: a linha dele passa para baixo do Título (atras dele; em children, antes dele).
+  const down = editor.moveFreeNodeStep(base, "texto", "moveDown", "layers");
+  assert.deepEqual(rowsOf(down), ["links", "caixa", "botao", "selo", "titulo", "texto"]);
+  assert.deepEqual(ids(down.children), ["texto", "titulo", "caixa", "links"]);
+  // Dentro da caixa, a mesma regra: Subir o Selo o leva para cima do Botão.
+  assert.deepEqual(rowsOf(editor.moveFreeNodeStep(base, "selo", "moveUp", "layers")), ["links", "caixa", "selo", "botao", "texto", "titulo"]);
+
+  // Nas pontas da lista, nada: os Links (a linha de cima) nao sobem; o Título (a de baixo) nao desce.
+  assert.equal(editor.moveFreeNodeStep(base, "links", "moveUp", "layers"), null);
+  assert.equal(editor.moveFreeNodeStep(base, "titulo", "moveDown", "layers"), null);
+  assert.equal(editor.moveFreeNodeStep(base, "botao", "moveUp", "layers"), null, "a linha de cima dentro da caixa");
+  assert.equal(editor.moveFreeNodeStep(base, "nada", "moveUp", "layers"), null);
+
+  // No desenho (a barrinha da sequencia), Subir continua subindo na coluna: o Texto vai para antes do Título.
+  assert.deepEqual(ids(editor.moveFreeNodeStep(base, "texto", "moveUp", "canvas").children), ["texto", "titulo", "caixa", "links"]);
+  assert.deepEqual(ids(editor.moveFreeNodeStep(base, "texto", "moveDown", "canvas").children), ["titulo", "caixa", "texto", "links"]);
+  assert.equal(editor.moveFreeNodeStep(base, "titulo", "moveUp", "canvas"), null, "o primeiro da sequencia nao sobe");
+
+  // O ⋯ desliga Subir na linha de cima e Descer na de baixo de cada nivel (row.index e a posicao na lista).
+  const rows = Object.fromEntries(editor.freeLayerRows(base, null).map((row) => [row.id, row]));
+  assert.deepEqual([rows.links.index, rows.caixa.index, rows.texto.index, rows.titulo.index], [0, 1, 2, 3]);
+  assert.deepEqual([rows.botao.index, rows.selo.index, rows.botao.siblings], [0, 1, 2], "dentro da caixa, o Botão (o ultimo) em cima");
+});
+
 test("textos do arrastar palavra por palavra, os Atalhos com 17 linhas (a do Esc no lugar de antes) e o vocabulário", () => {
   assert.equal(C.drag.moved(3, 3, "dentro de Caixa em coluna"), "Movido. Posição 3 de 3, dentro de Caixa em coluna.");
   assert.equal(C.drag.moved(1, 2), "Movido. Posição 1 de 2, no pop-up.");
@@ -385,45 +450,84 @@ test("textos do arrastar palavra por palavra, os Atalhos com 17 linhas (a do Esc
  * Camadas: onde cai
  * ---------------------------------------------------------------------------------------------- */
 
-test("Camadas: onde cai pela altura da linha", () => {
+test("Camadas: onde cai pela altura da linha (só a geometria: acima, abaixo, dentro e abaixo da última)", () => {
   const lines = [
     { box: false, height: 36, id: "a", top: 0 },
     { box: true, height: 36, id: "o", top: 38 },
     { box: false, height: 36, id: "b", top: 76 }
   ];
 
-  assert.deepEqual(geometry.freeLayerDropAt(lines, -5), { edge: "before", id: "a" }, "acima da primeira");
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 10), { edge: "before", id: "a" }, "metade de cima da folha");
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 20), { edge: "after", id: "a" }, "metade de baixo da folha");
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 37), { edge: "before", id: "o" }, "o vao entre linhas vale como antes da de baixo");
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 40), { edge: "before", id: "o" }, "quarto de cima da caixa");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, -5), { edge: "above", id: "a" }, "acima da primeira");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 10), { edge: "above", id: "a" }, "metade de cima da folha");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 20), { edge: "below", id: "a" }, "metade de baixo da folha");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 37), { edge: "above", id: "o" }, "o vao entre linhas vale como acima da de baixo");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 40), { edge: "above", id: "o" }, "quarto de cima da caixa");
   assert.deepEqual(geometry.freeLayerDropAt(lines, 56), { edge: "inside", id: "o" }, "o meio da caixa");
   assert.deepEqual(geometry.freeLayerDropAt(lines, 64.9), { edge: "inside", id: "o" });
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 65), { edge: "after", id: "o" }, "quarto de baixo da caixa");
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 111.9), { edge: "after", id: "b" });
-  assert.deepEqual(geometry.freeLayerDropAt(lines, 112), { end: true }, "abaixo da ultima: o fim do pop-up");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 65), { edge: "below", id: "o" }, "quarto de baixo da caixa");
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 111.9), { edge: "below", id: "b" });
+  assert.deepEqual(geometry.freeLayerDropAt(lines, 112), { bottom: true }, "abaixo da ultima");
   assert.equal(geometry.freeLayerDropAt([], 10), null);
-
-  // [A, O[B, I[x, y]], E[], D]
-  const tree = design([spacer("a"), { children: [spacer("b"), { children: [spacer("x"), spacer("y")], id: "i", type: "box" }], id: "o", type: "box" }, { children: [], id: "e", type: "box" }, spacer("d")]);
-
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "before", id: "b" }), { index: 0, parentId: "o" });
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "after", id: "a" }), { index: 1, parentId: null });
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "after", id: "o" }), { index: 0, parentId: "o" }, "depois de uma caixa com filhos: dentro, no comeco");
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "after", id: "e" }), { index: 3, parentId: null }, "a caixa vazia: depois dela");
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "i" }), { index: 2, parentId: "i" }, "dentro: no fim");
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "e" }), { index: 0, parentId: "e" });
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "b" }), { index: 1, parentId: "o" }, "numa folha, dentro vale como depois");
-  assert.deepEqual(editor.freeLayerDropTarget(tree, { end: true }), { index: 4, parentId: null });
-  assert.equal(editor.freeLayerDropTarget(tree, { edge: "before", id: "nada" }), null);
 });
 
-test("Camadas: todo lugar válido é alcançável pelas linhas (antes, depois, dentro e o fim)", () => {
+test("Camadas como no Figma (L64): a lista é children ao contrário em todo nível, e cada zona vira o lugar que se vê", () => {
+  // [A, O[B, I[x, y]], E[], D]: nas Camadas, de cima para baixo, D, E, O, I, y, x, B, A (a caixa antes dos filhos).
+  const tree = design([spacer("a"), { children: [spacer("b"), { children: [spacer("x"), spacer("y")], id: "i", type: "box" }], id: "o", type: "box" }, { children: [], id: "e", type: "box" }, spacer("d")]);
+  const rows = editor.freeLayerRows(tree, null);
+
+  assert.deepEqual(rows.map((row) => row.id), ["d", "e", "o", "i", "y", "x", "b", "a"]);
+  assert.deepEqual(rows.map((row) => row.depth), [1, 1, 1, 2, 3, 3, 2, 1]);
+  assert.deepEqual(rows.map((row) => row.parentId), [null, null, null, "o", "i", "i", "o", null]);
+  assert.deepEqual(rows.map((row) => row.index), [0, 1, 2, 0, 0, 1, 1, 3], "a posicao na lista como se ve, entre os irmaos");
+  // O JSON nao muda: a ordem de leitura continua a de children.
+  assert.deepEqual(order(tree), ["a", "o", "b", "i", "x", "y", "e", "d"]);
+
+  // O lugar e de quem anda (sem ele, a lista dos irmaos). Sem camadas, nenhuma camada no lugar.
+  // Acima de uma linha: na frente dela (o indice dela + 1, no pai dela).
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "above", id: "b" }, "a"), { index: 1, parentId: "o" });
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "above", id: "d" }, "a"), { index: 4, parentId: null }, "acima da primeira linha: a frente de tudo (o fim do pop-up)");
+  // Abaixo: atras dela; numa caixa com filhos, dentro dela na frente de todos (a linha de baixo e o filho da frente).
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "below", id: "a" }, "d"), { index: 0, parentId: null });
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "below", id: "o" }, "a"), { index: 2, parentId: "o" }, "abaixo de uma caixa com filhos: dentro, na frente");
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "below", id: "e" }, "a"), { index: 2, parentId: null }, "a caixa vazia: atras dela");
+  // Dentro: atras de todos os filhos (a linha mais baixa da caixa); numa folha vale como abaixo.
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "i" }, "a"), { index: 0, parentId: "i" }, "dentro: atras dos filhos");
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "e" }, "a"), { index: 0, parentId: "e" });
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { edge: "inside", id: "b" }, "a"), { index: 0, parentId: "o" }, "numa folha, dentro vale como abaixo");
+  // Abaixo da ultima linha: o fundo do pop-up (atras de tudo).
+  assert.deepEqual(editor.freeLayerDropTarget(tree, { bottom: true }, "d"), { index: 0, parentId: null });
+  assert.equal(editor.freeLayerDropTarget(tree, { edge: "above", id: "nada" }, "a"), null);
+  assert.equal(editor.freeLayerDropTarget(tree, { edge: "above", id: "b" }, "nada"), null, "quem anda nao existe");
+
+  // Soltar acima de uma linha deixa o elemento logo acima dela na lista (e na frente dela no desenho).
+  const above = editor.moveFreeNodeTo(tree, "a", editor.freeLayerDropTarget(tree, { edge: "above", id: "e" }, "a"));
+  assert.deepEqual(editor.freeLayerRows(above.design, null).map((row) => row.id), ["d", "a", "e", "o", "i", "y", "x", "b"]);
+  // Soltar abaixo da ultima leva para o fundo: a ultima linha.
+  const bottom = editor.moveFreeNodeTo(tree, "d", editor.freeLayerDropTarget(tree, { bottom: true }, "d"));
+  assert.deepEqual(editor.freeLayerRows(bottom.design, null).map((row) => row.id), ["e", "o", "i", "y", "x", "b", "a", "d"]);
+  // Dentro de I: a linha mais baixa de I.
+  const inside = editor.moveFreeNodeTo(tree, "d", editor.freeLayerDropTarget(tree, { edge: "inside", id: "i" }, "d"));
+  assert.deepEqual(editor.freeLayerRows(inside.design, null).map((row) => row.id), ["e", "o", "i", "y", "x", "d", "b", "a"]);
+  // Abaixo de O (com filhos): a primeira linha dentro de O.
+  const first = editor.moveFreeNodeTo(tree, "a", editor.freeLayerDropTarget(tree, { edge: "below", id: "o" }, "a"));
+  assert.deepEqual(editor.freeLayerRows(first.design, null).map((row) => row.id), ["d", "e", "o", "a", "i", "y", "x", "b"]);
+
+  // As recusas continuam: a caixa nao entra nela mesma (abaixo de O, a caixa O) nem numa de dentro.
+  assert.equal(editor.freeMoveProblem(tree, "o", editor.freeLayerDropTarget(tree, { edge: "below", id: "x" }, "o")), C.drag.intoItself);
+  assert.equal(editor.freeMoveProblem(tree, "o", editor.freeLayerDropTarget(tree, { edge: "inside", id: "i" }, "o")), C.drag.intoItself);
+  // A propria linha (acima ou abaixo dela) e o mesmo lugar: nada muda.
+  assert.equal(editor.freeMoveProblem(tree, "b", editor.freeLayerDropTarget(tree, { edge: "above", id: "b" }, "b")), "");
+  assert.equal(editor.freeMoveProblem(tree, "b", editor.freeLayerDropTarget(tree, { edge: "below", id: "b" }, "b")), "");
+  // Logo acima da linha de baixo dele (o vao em que ja esta) e o mesmo lugar tambem: D ja esta acima de E.
+  assert.equal(editor.freeMoveProblem(tree, "d", editor.freeLayerDropTarget(tree, { edge: "above", id: "e" }, "d")), "");
+});
+
+test("Camadas: todo lugar válido é alcançável pelas linhas (acima, abaixo, dentro e abaixo da última)", () => {
   const tree = design([spacer("a"), { children: [spacer("b"), { children: [spacer("x"), spacer("y")], id: "i", type: "box" }], id: "o", type: "box" }, { children: [], id: "e", type: "box" }, spacer("d")]);
   const all = order(tree);
   const containers = [null, ...all.filter((id) => find(tree, id).node.type === "box")];
   const lengthOf = (parentId) => (parentId === null ? tree.children : find(tree, parentId).node.children).length;
-  const overs = [{ end: true }, ...all.flatMap((id) => ["before", "after", "inside"].map((edge) => ({ edge, id })))];
+  const overs = [{ bottom: true }, ...all.flatMap((id) => ["above", "below", "inside"].map((edge) => ({ edge, id })))];
 
   for (const moving of all) {
     const byGap = new Set();
@@ -440,7 +544,7 @@ test("Camadas: todo lugar válido é alcançável pelas linhas (antes, depois, d
     }
 
     for (const over of overs) {
-      const target = editor.freeLayerDropTarget(tree, over);
+      const target = editor.freeLayerDropTarget(tree, over, moving);
       const result = target ? editor.moveFreeNodeTo(tree, moving, target) : null;
 
       if (result) {
@@ -451,6 +555,278 @@ test("Camadas: todo lugar válido é alcançável pelas linhas (antes, depois, d
     assert.ok(byGap.size > 0, moving);
     assert.deepEqual([...byLine].sort(), [...byGap].sort(), `os lugares de ${moving}`);
   }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Camadas com camada (L66): a lista e a ordem em que o desenho pinta
+ * ---------------------------------------------------------------------------------------------- */
+
+const AZUL = { fill: [{ color: "#38bdf8", kind: "solid" }] };
+const forma = (id, z = 0) => ({ box: AZUL, id, place: { h: 40, mode: "free", w: 40, x: 0, y: 0, ...(z ? { z } : {}) }, type: "shape" });
+
+/** [Título, Forma A (camada 1), Forma B, Caixa [Selo (2), Botão, Texto (-1)], Fundo (-1), Links]. */
+function layered() {
+  return design([
+    TITLE,
+    forma("fa", 1),
+    forma("fb"),
+    { children: [{ ...BADGE, place: { mode: "flow", z: 2 } }, CLOSE, { ...TEXT, place: { mode: "flow", z: -1 } }], id: "caixa", type: "box" },
+    forma("fundo", -1),
+    LINKS
+  ]);
+}
+
+/**
+ * A ordem em que o cartao do aluno pinta os irmaos de um nivel, de cima para baixo: todos tem posicao (solta ou
+ * relativa), entao o navegador pinta pelo z-index que freePlaceCss da (sem, auto = 0) e, no mesmo, pela ordem do DOM.
+ */
+function paintedTopFirst(value, nodes, dir = "column") {
+  const ctx = styles.freeStyleContext(value, { origin: null });
+
+  return nodes
+    .map((node, index) => {
+      const css = styles.freePlaceCss(node, ctx, dir);
+
+      assert.ok(css.position === "absolute" || css.position === "relative", `${node.id} tem posicao`);
+
+      return { id: node.id, index, z: css.zIndex ?? 0 };
+    })
+    .sort((a, b) => b.z - a.z || b.index - a.index)
+    .map((item) => item.id);
+}
+
+/** As linhas de um nivel das Camadas (os filhos de `parentId`), de cima para baixo. */
+function levelRows(value, parentId) {
+  return editor
+    .freeLayerRows(value, null)
+    .filter((row) => row.parentId === parentId)
+    .map((row) => row.id);
+}
+
+/** Cada nivel das Camadas bate com a ordem que o cartao do aluno pinta. */
+function assertRowsArePaint(value, label) {
+  const levels = [{ dir: "column", nodes: value.children, parentId: null }];
+
+  model.walkFreeNodes(value.children, (node) => {
+    if (node.type === "box") {
+      levels.push({ dir: node.layout?.dir ?? "column", nodes: node.children, parentId: node.id });
+    }
+  });
+
+  for (const level of levels) {
+    assert.deepEqual(levelRows(value, level.parentId), paintedTopFirst(value, level.nodes, level.dir), `${label}: o nivel ${level.parentId ?? "do pop-up"}`);
+  }
+}
+
+test("Camadas na ordem do desenho (L66): a camada vem antes de children, em todo nível, como o cartão do aluno pinta", () => {
+  const base = layered();
+  const rows = editor.freeLayerRows(base, null);
+
+  // A Forma A (camada 1) fica em cima de tudo; o Fundo (-1), embaixo; na caixa, o Selo (2) em cima e o Texto (-1)
+  // embaixo. Antes, a lista era so children ao contrario e mostrava a Forma A embaixo da Forma B e o Fundo em cima.
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    ["fa", "links", "caixa", "selo", "botao", "texto", "fb", "titulo", "fundo"]
+  );
+  assert.deepEqual(rows.map((row) => [row.index, row.siblings]), [[0, 6], [1, 6], [2, 6], [0, 3], [1, 3], [2, 3], [3, 6], [4, 6], [5, 6]]);
+  assertRowsArePaint(base, "a amostra");
+  assert.deepEqual(order(base), ["titulo", "fa", "fb", "caixa", "selo", "botao", "texto", "fundo", "links"], "a ordem de leitura nao muda");
+
+  // Os 4 modelos para começar: as Camadas batem com o desenho (o selo da Imagem recortada, com camada 2, fica em cima).
+  for (const starter of starters.FREE_DESIGN_STARTERS) {
+    assertRowsArePaint(starters.freeStarterDesign(starter.id), starter.id);
+  }
+
+  assert.equal(editor.freeLayerRows(starters.freeStarterDesign("cutout_sticker"), null)[0].id, "selo");
+
+  // O ] e o [ mudam a camada; a linha vai junto para onde o desenho a pinta (como no Figma), e children nao muda.
+  const two = design([TITLE, forma("fa"), forma("fb"), LINKS]);
+  const forward = editor.shiftFreeNodeLayer(two, "fa", 1);
+
+  assert.deepEqual(levelRows(two, null), ["links", "fb", "fa", "titulo"]);
+  assert.deepEqual(levelRows(forward, null), ["fa", "links", "fb", "titulo"], "] na Forma A: ela passa para cima, como o desenho");
+  assert.deepEqual(levelRows(editor.shiftFreeNodeLayer(two, "fb", -1), null), ["links", "fa", "titulo", "fb"], "[ na Forma B: ela vai para o fundo");
+  assert.deepEqual(ids(forward.children), ids(two.children));
+  assertRowsArePaint(forward, "]");
+
+  // A frase do mover pelas Camadas conta a posicao na lista que se ve, com a camada.
+  assert.equal(editor.freeMoveAnnouncement(base, "fa", null, { becameFlow: false, order: "list" }), "Movido. Posição 1 de 6, no pop-up.");
+  assert.equal(editor.freeMoveAnnouncement(base, "fundo", null, { becameFlow: false, order: "list" }), "Movido. Posição 6 de 6, no pop-up.");
+  assert.equal(editor.freeMoveAnnouncement(base, "fa", null, { becameFlow: false }), "Movido. Posição 2 de 6, no pop-up.", "no desenho, a sequencia");
+});
+
+test("o Degradê novo nasce no fundo (L66): no começo da prancheta, na última linha das Camadas e atrás de tudo no desenho", () => {
+  const blank = starters.freeStarterDesign("blank");
+  const added = editor.addFreeElement(blank, "gradient");
+  const gradient = added.node;
+
+  assert.equal(gradient.place.z, -1);
+  assert.equal(added.design.children.indexOf(gradient), 0, "o comeco de children da prancheta (antes, entrava antes dos Links)");
+  assert.equal(editor.freeLayerRows(added.design, null).at(-1).id, gradient.id, "a ultima linha");
+  assertRowsArePaint(added.design, "o Degradê novo");
+  assert.ok(valid(added.design));
+
+  // Com um elemento escolhido, o Degradê entra no fundo do mesmo jeito; a Forma (camada 0) continua antes dos Links.
+  assert.equal(editor.addFreeElement(blank, "gradient", { selectedId: "titulo" }).design.children[0].type, "shape");
+  const shape = editor.addFreeElement(added.design, "shape");
+  assert.equal(shape.design.children.at(-2).id, shape.id);
+  assert.deepEqual(levelRows(shape.design, null).slice(0, 2), ["links", shape.id]);
+
+  // Um ] traz o Degradê so para a frente de quem esta no fundo com ele (camada 0, no comeco de children): ele continua
+  // atras do resto; o segundo ] o leva para cima de tudo.
+  const once = editor.shiftFreeNodeLayer(added.design, gradient.id, 1);
+  assert.equal(find(once, gradient.id).node.place.z, undefined);
+  assert.equal(editor.freeLayerRows(once, null).at(-1).id, gradient.id);
+  const twice = editor.shiftFreeNodeLayer(once, gradient.id, 1);
+  assert.equal(editor.freeLayerRows(twice, null)[0].id, gradient.id);
+  assertRowsArePaint(twice, "dois ]");
+});
+
+test("Camadas com camada (L66): o elemento fica exatamente na linha onde foi solto, com a camada que esse lugar pede", () => {
+  const base = layered();
+  const all = order(base);
+  const boxes = all.filter((id) => find(base, id).node.type === "box");
+  const overs = [{ bottom: true }, ...all.flatMap((id) => ["above", "below", "inside"].map((edge) => ({ edge, id })))];
+  let moves = 0;
+  let layeredMoves = 0;
+
+  for (const moving of all) {
+    const node = find(base, moving).node;
+
+    for (const over of overs) {
+      const target = editor.freeLayerDropTarget(base, over, moving);
+      const problem = target ? editor.freeMoveProblem(base, moving, target) : "";
+
+      if (problem !== null) {
+        continue;
+      }
+
+      const result = editor.moveFreeNodeTo(base, moving, target);
+      const after = result.design;
+      const label = `${moving} ${JSON.stringify(over)}`;
+
+      assert.ok(valid(after), label);
+      assertRowsArePaint(after, label);
+      moves += 1;
+      layeredMoves += target.z === undefined ? 0 : 1;
+
+      // Onde a linha foi solta, ela esta.
+      if ("bottom" in over) {
+        assert.equal(levelRows(after, null).at(-1), moving, label);
+      } else if (over.edge === "above") {
+        const level = levelRows(after, find(base, over.id).parent?.id ?? null);
+
+        assert.equal(level[level.indexOf(over.id) - 1], moving, label);
+      } else if (boxes.includes(over.id) && (over.edge === "inside" || find(base, over.id).node.children.length > 0)) {
+        const level = levelRows(after, over.id);
+
+        assert.equal(over.edge === "inside" ? level.at(-1) : level[0], moving, label);
+      } else {
+        const level = levelRows(after, find(base, over.id).parent?.id ?? null);
+
+        assert.equal(level[level.indexOf(over.id) + 1], moving, label);
+      }
+
+      // A camada so muda quando o lugar pede: a de partida (com a regra de entrar numa caixa) fica quando ja serve.
+      const moved = find(after, moving).node;
+
+      if (target.z === undefined) {
+        const entering = target.parentId !== null && (find(base, moving).parent?.id ?? null) !== target.parentId;
+        const start = entering && (node.place?.z ?? 0) < 0 ? 0 : (node.place?.z ?? 0);
+
+        assert.equal(moved.place?.z ?? 0, start, label);
+      } else {
+        assert.equal(moved.place?.z ?? 0, target.z, label);
+      }
+    }
+  }
+
+  assert.ok(moves > 80, `muitos lugares conferidos (${moves})`);
+  assert.ok(layeredMoves > 10, `com camada nova em varios (${layeredMoves})`);
+
+  // Exemplos: a Forma B acima da Forma A (camada 1) leva a camada 1 e fica no mesmo lugar em children (so a camada muda).
+  const overA = editor.freeLayerDropTarget(base, { edge: "above", id: "fa" }, "fb");
+  assert.deepEqual(overA, { index: 2, parentId: null, z: 1 });
+  assert.deepEqual(ids(editor.moveFreeNodeTo(base, "fb", overA).design.children), ids(base.children), "a sequencia nao pula");
+  assert.deepEqual(levelRows(editor.moveFreeNodeTo(base, "fb", overA).design, null).slice(0, 2), ["fb", "fa"]);
+  // A Forma A abaixo dos Links fica com a camada 0, logo antes deles em children.
+  const underLinks = editor.freeLayerDropTarget(base, { edge: "below", id: "links" }, "fa");
+  assert.deepEqual(underLinks, { index: 5, parentId: null, z: 0 });
+  assert.deepEqual(levelRows(editor.moveFreeNodeTo(base, "fa", underLinks).design, null).slice(0, 3), ["links", "fa", "caixa"]);
+  // Abaixo da ultima linha: o fundo, com a camada do Fundo; antes dele em children ja esta, entao so a camada muda.
+  const bottom = editor.freeLayerDropTarget(base, { bottom: true }, "fb");
+  assert.deepEqual(bottom, { index: 2, parentId: null, z: -1 });
+  assert.equal(levelRows(editor.moveFreeNodeTo(base, "fb", bottom).design, null).at(-1), "fb");
+  assert.deepEqual(ids(editor.moveFreeNodeTo(base, "fb", bottom).design.children), ids(base.children));
+  // Os Links no fundo: camada -1 e, em children, antes do Fundo (o mais perto do vizinho de cima que serve).
+  const linksBottom = editor.freeLayerDropTarget(base, { bottom: true }, "links");
+  assert.deepEqual(linksBottom, { index: 4, parentId: null, z: -1 });
+  assert.deepEqual(levelRows(editor.moveFreeNodeTo(base, "links", linksBottom).design, null).slice(-2), ["fundo", "links"]);
+  // A propria linha e o mesmo lugar, com camada ou sem.
+  assert.equal(editor.freeMoveProblem(base, "fa", editor.freeLayerDropTarget(base, { edge: "below", id: "fa" }, "fa")), "");
+  assert.equal(editor.freeMoveProblem(base, "fa", editor.freeLayerDropTarget(base, { edge: "above", id: "links" }, "fa")), "", "logo acima da linha de baixo dele");
+});
+
+test("Subir, Descer, Colocar dentro e Tirar da caixa com camada (L66): uma linha por vez na lista que se vê", () => {
+  const base = layered();
+  const step = (value, id, kind) => editor.moveFreeNodeStep(value, id, kind, "layers");
+
+  // Os Links sobem por cima da Forma A (camada 1): levam a camada 1 e ficam no fim de children (a sequencia nao pula).
+  const links = step(base, "links", "moveUp");
+  assert.deepEqual(levelRows(links, null).slice(0, 2), ["links", "fa"]);
+  assert.deepEqual(ids(links.children), ids(base.children));
+  assert.deepEqual(find(links, "links").node.place, { mode: "flow", z: 1 });
+  assertRowsArePaint(links, "Links sobe");
+  assert.equal(step(links, "links", "moveUp"), null, "na linha de cima, nada");
+
+  // A Forma A desce para baixo dos Links: camada 0.
+  const fa = step(base, "fa", "moveDown");
+  assert.deepEqual(levelRows(fa, null), ["links", "fa", "caixa", "fb", "titulo", "fundo"]);
+  assert.equal(find(fa, "fa").node.place.z, undefined);
+
+  // O Título desce para o fundo, para baixo do Fundo (camada -1); o Fundo sobe para cima do Título (camada 0).
+  const titulo = step(base, "titulo", "moveDown");
+  assert.deepEqual(levelRows(titulo, null).slice(-2), ["fundo", "titulo"]);
+  assert.deepEqual(find(titulo, "titulo").node.place, { mode: "flow", z: -1 });
+  assert.equal(step(titulo, "titulo", "moveDown"), null);
+  const fundo = step(base, "fundo", "moveUp");
+  assert.deepEqual(levelRows(fundo, null).slice(-2), ["fundo", "titulo"]);
+  assertRowsArePaint(fundo, "Fundo sobe");
+
+  // Dentro da caixa: o Botão sobe por cima do Selo (camada 2); o Selo desce para baixo do Botão (camada 0) sem sair
+  // do lugar na sequencia.
+  const botao = step(base, "botao", "moveUp");
+  assert.deepEqual(levelRows(botao, "caixa"), ["botao", "selo", "texto"]);
+  assert.deepEqual(ids(find(botao, "caixa").node.children), ["selo", "botao", "texto"]);
+  const selo = step(base, "selo", "moveDown");
+  assert.deepEqual(levelRows(selo, "caixa"), ["botao", "selo", "texto"]);
+  assert.deepEqual(ids(find(selo, "caixa").node.children), ["selo", "botao", "texto"]);
+  assert.equal(find(selo, "selo").node.place, undefined, "camada 0: o lugar sai");
+
+  // Cada Subir e cada Descer e o mesmo que soltar acima do vizinho da frente ou abaixo do de tras.
+  for (const id of order(base)) {
+    const parentId = find(base, id).parent?.id ?? null;
+    const level = levelRows(base, parentId);
+    const at = level.indexOf(id);
+
+    if (at > 0) {
+      assert.deepEqual(step(base, id, "moveUp"), editor.moveFreeNodeTo(base, id, editor.freeLayerDropTarget(base, { edge: "above", id: level[at - 1] }, id)).design, `${id} sobe`);
+    }
+
+    if (at < level.length - 1 && find(base, level[at + 1]).node.type !== "box") {
+      assert.deepEqual(step(base, id, "moveDown"), editor.moveFreeNodeTo(base, id, editor.freeLayerDropTarget(base, { edge: "below", id: level[at + 1] }, id)).design, `${id} desce`);
+    }
+  }
+
+  // Colocar dentro da caixa: a linha de cima dela (na frente do Selo, camada 2); Tirar da caixa: logo acima da caixa.
+  const inside = editor.moveFreeNodeIntoBox(base, "fb", "caixa");
+  assert.deepEqual(levelRows(inside.design, "caixa")[0], "fb");
+  assert.equal(find(inside.design, "fb").node.place.z, 2);
+  assertRowsArePaint(inside.design, "Colocar dentro");
+  const out = editor.moveFreeNodeOutOfBox(base, "texto");
+  assert.deepEqual(levelRows(out, null).slice(0, 4), ["fa", "links", "texto", "caixa"]);
+  assert.equal(find(out, "texto").node.place, undefined, "a camada -1 vira 0 para ficar acima da caixa");
+  assertRowsArePaint(out, "Tirar da caixa");
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1032,16 +1408,23 @@ test("elemento novo solto perto do fundo de uma prancheta alta: a Forma e o Degr
 test("o editor liga o mover: o ramo move, um passo sem juntar e a frase do Celular em toda mudança de ordem", () => {
   const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /if \(command\.kind === "move"\) \{\s*moveTo\(command\.id, command\.target\);/, "o ramo move das Camadas");
+  assert.match(source, /if \(command\.kind === "move"\) \{\s*moveTo\(command\.id, command\.target, "list"\);/, "o ramo move das Camadas, com a posicao contada na lista (L64)");
 
   const moveTo = source.match(/function moveTo\([\s\S]*?\n {2}}\n/)?.[0] ?? "";
   assert.match(moveTo, /freeMoveProblem\(present\.design, id, target\)/);
   assert.match(moveTo, /commitDesign\(result\.design\);/);
   assert.equal(/coalesceKey/.test(moveTo), false, "um gesto e um passo proprio");
-  assert.match(moveTo, /announce\(orderPhrase\(freeMoveAnnouncement\(result\.design, id, present\.cta, \{ becameFlow: result\.becameFlow \}\)\)\)/);
+  assert.match(moveTo, /announce\(orderPhrase\(freeMoveAnnouncement\(result\.design, id, present\.cta, \{ becameFlow: result\.becameFlow, order \}\)\)\)/);
+  assert.match(source, /function moveTo\(id: FreeId, target: FreeMoveTarget, order: "list" \| "reading" = "reading"\)/, "o desenho chama sem order: a posicao da sequencia");
 
   assert.match(source, /function orderPhrase\(text: string\) \{\s*return deviceRef\.current === "mobile" \? `\$\{text\} \$\{copy\.drag\.alsoDesktop\}` : text;/);
   assert.match(source, /announce\(orderPhrase\(kind === "moveUp" \? copy\.announce\.upward : copy\.announce\.downward\)\)/);
+  // L64 e L66: o Subir e o Descer andam pelo moveFreeNodeStep; das Camadas, na lista que se ve; do desenho, na sequencia.
+  assert.match(source, /const next = moveFreeNodeStep\(present\.design, id, kind, where\);/);
+  assert.match(source, /function runCommand\(kind: CommandKind, id: FreeId, where: "canvas" \| "layers" = "canvas"\)/);
+  assert.match(source, /runCommand\(command\.kind, command\.id, "layers"\);/, "das Camadas (Alt + ↑/↓ e o ⋯), na lista");
+  assert.match(source, /runCommand\(key === "ArrowUp" \? "moveUp" : "moveDown", activeId, where\);/, "Alt + ↑/↓ fora da linha: pelo freeMoveWhere");
+  assert.match(source, /onToolbar\(command: FreeCanvasToolbarCommand, id: FreeId\) \{\s*runCommand\(command, id\);/, "a barrinha, na sequencia");
   assert.match(source, /announce\(orderPhrase\(copy\.announce\.outOfBox\)\)/);
   assert.match(source, /announce\(orderPhrase\(result\.becameFlow \? copy\.announce\.toSequence : copy\.announce\.intoBox\)\)/);
   assert.match(source, /announce\(orderPhrase\(copy\.announce\.toFree\)\)/, "o Soltar tambem muda o lugar em children");
@@ -1056,6 +1439,30 @@ test("o editor liga o mover: o ramo move, um passo sem juntar e a frase do Celul
   assert.match(source, /onDragEnd=\{onElementDragEnd\} onDragMove=\{onElementDragMove\}/);
   assert.match(source, /device=\{device\}\s+disabled=\{disabled\}\s+flagged=\{flagged\}/, "as Camadas sabem do Celular");
   assert.match(source, /onMoveInFlow=\{moveTo\}/);
+});
+
+test("Alt + ↑/↓ fora da linha das Camadas: no painel das Camadas e num solto, como a lista; na sequência, como ela se vê", () => {
+  // A linha das Camadas manda "layers" sempre. Fora dela: com o foco no painel das Camadas (a aba ou o vazio da lista),
+  // como a lista; no palco ou no painel da direita, o solto tambem anda como a lista (subir = mais para a frente) e so o
+  // elemento da sequencia anda como a sequencia se ve (como a barrinha).
+  assert.equal(editor.freeMoveWhere({ free: false, inLayers: true }), "layers", "o vazio das Camadas ou a aba, com um da sequencia");
+  assert.equal(editor.freeMoveWhere({ free: true, inLayers: true }), "layers");
+  assert.equal(editor.freeMoveWhere({ free: true, inLayers: false }), "layers", "um solto no palco anda como a lista");
+  assert.equal(editor.freeMoveWhere({ free: false, inLayers: false }), "canvas", "um da sequencia no palco anda como a sequencia");
+
+  // A casca decide pelo lugar do foco e pelo modo do escolhido; o painel das Camadas e a aba e a lista (o vazio dela
+  // recebe o foco quando o clique cai fora das linhas).
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  const alt = /if \(event\.altKey && !mod && \(key === "ArrowUp" \|\| key === "ArrowDown"\)\) \{\s*event\.preventDefault\(\);([\s\S]*?)return;/.exec(source.slice(source.indexOf("  function onKeyDown(")))?.[1] ?? "";
+
+  assert.match(alt, /const where = freeMoveWhere\(\{ free: selectedNode\.place\?\.mode === "free", inLayers: Boolean\(target\.closest\(FREE_LAYERS_ZONE_SELECTOR\)\) \}\);/);
+  assert.match(alt, /runCommand\(key === "ArrowUp" \? "moveUp" : "moveDown", activeId, where\);/);
+  assert.equal(editor.FREE_LAYERS_ZONE_SELECTOR, '[data-free-tab="layers"], [data-free-layers-zone]');
+  assert.match(source, /data-free-tab=\{tab\}/, "a aba das Camadas tem data-free-tab=\"layers\"");
+  assert.match(source, /<Tabs\.Panel className="[^"]*" data-free-layers-zone="" tabIndex=\{-1\} value="layers">/, "a lista das Camadas e o vazio dela");
+  assert.equal(source.match(/data-free-layers-zone=""/g)?.length, 1, "so o painel das Camadas");
+  // A barrinha so aparece num elemento da sequencia: continua andando como a sequencia se ve.
+  assert.match(source, /onToolbar\(command: FreeCanvasToolbarCommand, id: FreeId\) \{\s*runCommand\(command, id\);/);
 });
 
 test("o desenho mostra o lugar de soltar: previewDrop no apiRef e as etiquetas de 12 px", () => {

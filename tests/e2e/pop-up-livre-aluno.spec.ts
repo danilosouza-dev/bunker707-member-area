@@ -10,12 +10,12 @@ import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type Midia
 // (selecionavel); o selo fica por cima da parte do video que some; o <video> toca mudo; com menos movimento nenhum
 // <video> e so a capa; no celular (375 px) o cartao tem 343 px, sem rolagem para o lado, e tudo encolhe na mesma
 // proporcao (conferido so no que fica acima de qualquer texto, numa amostra com a fonte enviada e textos de 16 px
-// ou mais); o Tab segue as Camadas e o X vem por ultimo; os links sublinham ao passar o mouse e o anel de foco fica
-// por cima da sombra propria do botao, cujo aperto anima o translate (L6a); uma forma por cima do botao nao impede
-// o clique (e o clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado
-// continuam iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a
-// Forma escondida no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375
-// px nessa pasta (conferencia visual).
+// ou mais); o Tab segue a ordem de leitura e o X vem por ultimo; os links sublinham ao passar o mouse e o anel de
+// foco fica por cima da sombra propria do botao, cujo aperto anima o translate (L6a); uma forma por cima do botao
+// nao impede o clique (e o clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e
+// Personalizado continuam iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o
+// celular e a Forma escondida no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de
+// 1440 e 375 px nessa pasta (conferencia visual).
 
 const TITULO = "Pop-up E2E: Livre com vídeo";
 const NOME = /experimente grátis nova aula ao vivo/i;
@@ -124,7 +124,8 @@ test.describe("computador (1440 px)", () => {
       await page.screenshot({ path: `${SHOTS}/aluno-livre-video-1440.png` });
     }
 
-    // Tab na ordem das Camadas (botao principal, os links) e o X por ultimo.
+    // Tab na ordem de leitura, a de children (botao principal, os links; nas Camadas, de baixo para cima desde o L64)
+    // e o X por ultimo.
     const nomes: string[] = [];
 
     for (let index = 0; index < 4; index += 1) {

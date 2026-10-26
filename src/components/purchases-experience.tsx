@@ -79,7 +79,7 @@ function PurchaseResumeLink({ product }: { product: PurchaseProductView }) {
       <span
         aria-hidden="true"
         className={cn(
-          "grid size-8 shrink-0 place-items-center rounded-full transition-[transform,background-color] duration-200 group-hover/resume:scale-105 motion-reduce:transition-none motion-reduce:group-hover/resume:scale-100",
+          "grid size-8 shrink-0 place-items-center rounded-full transition-[scale,background-color] duration-200 group-hover/resume:scale-105 motion-reduce:transition-none motion-reduce:group-hover/resume:scale-100",
           highlighted ? "bg-white text-black group-hover/resume:bg-zinc-200" : "bg-white/[0.08] text-white ring-1 ring-white/10 group-hover/resume:bg-white/[0.14]"
         )}
       >
