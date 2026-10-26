@@ -239,8 +239,14 @@ test("o editor Livre inteiro pelo teclado, com o foco sempre num lugar certo", a
     await expect(editor.locator("[aria-live='polite']").filter({ hasText: `X ${x + 3}, Y ${y + 10}.` })).toHaveCount(1);
 
     // Alt + ↑/↓ no palco: um solto anda como a lista das Camadas (ele nao tem sequencia): Alt + ↓ desce uma linha (mais
-    // para tras) e Alt + ↑ a devolve.
+    // para tras) e Alt + ↑ a devolve. A lista so existe com a aba Camadas aberta (desde o acrescentar, a aba e a
+    // Elementos, e o painel das Camadas fica desmontado): abre as Camadas, guarda a lista e volta ao palco pelo Tab (a
+    // lista e um lugar so no Tab, e o seguinte e o palco).
+    expect((await voltarParaCamadas(page, editor)).name).toMatch(/^Selecionar Forma/);
     const lista = await linhas(editor);
+    expect(lista.indexOf(forma), "a Forma tem uma linha nas Camadas, com outra embaixo").toBeGreaterThanOrEqual(0);
+    expect(lista.indexOf(forma)).toBeLessThan(lista.length - 1);
+    await tabAte(page, (atual) => atual.stage, { max: 5 });
     await page.keyboard.press("Alt+ArrowDown");
     await expect.poll(async () => (await linhas(editor)).indexOf(forma)).toBe(lista.indexOf(forma) + 1);
     await expect(editor.locator("[aria-live='polite']").filter({ hasText: "Movido para baixo." })).toHaveCount(1);

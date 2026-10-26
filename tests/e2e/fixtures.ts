@@ -1015,6 +1015,7 @@ type PlanoDoResumo = { asOf: string; plan: { id: string; notBefore: string | nul
  * Espera a entrada da janela do pop-up acabar (docs/27 §13.11.1): a janela nasce com o data-starting-style (opacidade 0
  * e escala de 95 %) e cresce em 200 ms. O toBeVisible ja passa com opacidade 0 e o boundingBox mede a caixa com a
  * escala do meio do caminho; quem mede a janela ou clica por coordenada espera aqui. Com menos movimento, passa logo.
+ * Serve tambem para o painel do sino, que cresce de 95 % a 100 % ao abrir (a transicao lista scale).
  */
 export async function janelaParada(popUp: Locator) {
   await expect

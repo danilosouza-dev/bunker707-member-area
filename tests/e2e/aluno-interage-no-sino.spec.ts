@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { enviarNotificacao, expect, linhaDoSino, test, zerarComunicacao } from "./fixtures";
+import { enviarNotificacao, expect, janelaParada, linhaDoSino, test, zerarComunicacao } from "./fixtures";
 
 // Sino v3a no navegador (docs/24 §1, §10 e §11; docs/18 §3.1): quatro notificacoes ja enviadas para a aluna (enquete
 // com reacoes; Aceitar/Recusar; "Só tocando na notificação" para Minhas compras; "Pelo botão ou tocando na
@@ -73,11 +73,15 @@ test.beforeAll(async () => {
 
 test.afterAll(zerarComunicacao);
 
-/** Abre o sino e devolve o painel (a lista ja carregada). */
+/**
+ * Abre o sino e devolve o painel (a lista ja carregada), ja parado: o painel cresce de 95 % a 100 % ao abrir (a
+ * transicao lista scale), e o boundingBox mede com a escala, entao as medidas so valem depois de ele parar.
+ */
 async function abrirSino(page: Page) {
   await page.getByRole("button", { name: /^Notificações/ }).click();
   const painel = page.getByRole("dialog", { name: "Notificações" });
   await expect(painel.getByRole("article", { name: ENQUETE })).toBeVisible();
+  await janelaParada(painel);
 
   return painel;
 }
