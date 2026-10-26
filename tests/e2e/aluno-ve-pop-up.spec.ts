@@ -10,6 +10,8 @@ import { estadoDoPopUpDaAluna, expect, idDoAviso, popUpsQueAbremNaHome, reabrirP
 // POST /show, logo antes de abrir.
 // L6a (docs/27 §13.11.1): a janela abre e fecha com fade e escala de 95 %. No Tailwind 4 a escala e a propriedade
 // `scale`, que precisa estar na transicao (com `transform` ela pulava sem animar); com menos movimento, nada anima.
+// A entrada so anima porque o Dialog.Root nasce fechado e abre no quadro seguinte (o host monta a janela ja aberta, e o
+// Base UI so marca o data-starting-style quando o Root ja montado passa de fechado para aberto).
 
 const TITULO = "Pop-up E2E: turma nova de agentes";
 const TEXTO = "A turma nova começa segunda. Garanta seu lugar.";

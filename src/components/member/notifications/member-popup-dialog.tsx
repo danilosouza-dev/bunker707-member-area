@@ -24,6 +24,9 @@ import { closeViaOf } from "./popup-host-model";
 // A janela abre e fecha com fade e escala (scale-95). No Tailwind 4 a escala e a propriedade `scale`, separada
 // do `transform`: por isso a transicao lista `scale` (com `transform` a escala pulava sem animar). Com menos
 // movimento, nada anima (motion-reduce:transition-none). A guarda esta em popup-design.guard.test.mjs.
+// O Base UI so marca o data-starting-style (e so anima a entrada) quando o Root ja montado passa de fechado para
+// aberto. O host monta a janela ja aberta (showing e open juntos), e assim ela aparecia de uma vez. Por isso o
+// Root nasce fechado e abre no quadro seguinte (`entered`); o resto da janela segue o `open` do host.
 //
 // Design do pop-up (docs/26): no "Personalizado", o nome do dialogo e o texto do titulo do design (o <h2>,
 // aria-labelledby); sem bloco Título, o titulo do aviso (aria-label). A descricao e o primeiro bloco Texto. O
@@ -74,7 +77,16 @@ export function MemberPopupDialog({
   const device = useSyncExternalStore(popup.freeDesign ? subscribeFreeDevice : noDeviceChange, popup.freeDesign ? freeDeviceSnapshot : freeServerDevice, freeServerDevice);
   const aria = popup.freeDesign ? freeDialogAria(popup, { bodyId, titleId }, device) : popupDialogAria(popup, { bodyId, titleId });
   const [nudgeClose, setNudgeClose] = useState(false);
+  // O Root nasce fechado e abre no quadro seguinte: so assim o Base UI anima a entrada. O host so abre com a aba
+  // visivel, entao o quadro sempre chega.
+  const [entered, setEntered] = useState(false);
   const nudgeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(
     () => () => {
@@ -136,7 +148,7 @@ export function MemberPopupDialog({
           onFinish("closed", closeViaOf(details?.reason));
         }
       }}
-      open={open}
+      open={open && entered}
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-[2px] transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />

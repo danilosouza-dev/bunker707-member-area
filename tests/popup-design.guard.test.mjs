@@ -245,6 +245,13 @@ test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na tr
   assert.ok(windowUtilities.includes("data-ending-style:scale-95"), "fecha encolhendo");
   assert.ok(windowUtilities.includes("motion-reduce:transition-none"), "com menos movimento, sem transicao");
   assert.equal(scaleTransitionProblem(windowClasses[0]), null);
+
+  // A entrada so anima se o Root ja montado passar de fechado para aberto (o Base UI so marca o data-starting-style
+  // nessa virada). O host monta a janela ja aberta: o Root nasce fechado e abre no quadro seguinte.
+  assert.match(dialog, /const \[entered, setEntered\] = useState\(false\);/);
+  assert.match(dialog, /const frame = window\.requestAnimationFrame\(\(\) => setEntered\(true\)\);\s+return \(\) => window\.cancelAnimationFrame\(frame\);/);
+  assert.match(dialog, /<Dialog\.Root[\s\S]*?\n\s+open=\{open && entered\}\n\s+>/);
+  assert.doesNotMatch(dialog, /\n\s+open=\{open\}\n/, "o Root nunca recebe o open do host direto");
 });
 
 test("CSP: fonte so do proprio app, data: e a origem do nosso Supabase (nada do Google na hora)", async () => {
