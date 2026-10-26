@@ -10,8 +10,8 @@ import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type Midia
 // (selecionavel); o selo fica por cima da parte do video que some; o <video> toca mudo; com menos movimento nenhum
 // <video> e so a capa; no celular (375 px) o cartao tem 343 px, sem rolagem para o lado, e tudo encolhe na mesma
 // proporcao (conferido so no que fica acima de qualquer texto, numa amostra com a fonte enviada e textos de 16 px
-// ou mais); o Tab segue as Camadas e o X vem por ultimo; uma forma por cima do botao nao impede o clique (e o
-// clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado continuam
+// ou mais); o Tab segue as Camadas e o X vem por ultimo; os links sublinham ao passar o mouse (L6a); uma forma por
+// cima do botao nao impede o clique (e o clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado continuam
 // iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a Forma escondida
 // no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375 px nessa pasta
 // (conferencia visual).
@@ -137,6 +137,25 @@ test.describe("computador (1440 px)", () => {
     const id = await idDoAviso(TITULO);
     await expect.poll(async () => (await eventosDoPopUp(id)).map((evento) => evento.event_type).at(-1)).toBe("message_closed");
     expect((await eventosDoPopUp(id)).at(-1)?.metadata).toMatchObject({ via: "esc" });
+  });
+
+  test("os links sublinham ao passar o mouse", async ({ page }) => {
+    await reabrirPopUpParaAluna(TITULO);
+    const popUp = await abrirPopUp(page);
+    const naoMostrar = popUp.getByRole("button", { exact: true, name: "Não mostrar de novo" });
+    const linha = () => naoMostrar.evaluate((element) => getComputedStyle(element).textDecorationLine);
+
+    // Parado, sem linha; com o mouse em cima, sublinhado (nada de linha no estilo em linha: a classe hover:underline
+    // vale). O mouse comeca dentro da janela, longe dos links (WebKit).
+    await page.mouse.move(8, 8);
+    expect(await linha()).toBe("none");
+    await naoMostrar.hover();
+    await expect.poll(linha).toBe("underline");
+    await page.mouse.move(8, 8);
+    await expect.poll(linha).toBe("none");
+
+    await popUp.getByRole("button", { exact: true, name: "Fechar" }).click();
+    await expect(popUp).toHaveCount(0);
   });
 
   test("o botão principal conta o clique e leva ao destino", async ({ page }) => {

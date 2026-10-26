@@ -598,6 +598,48 @@ test("links alinham pela textStyle.align", () => {
   assert.equal(styles.freeLinksRowCss({ gap: 20, id: "l", type: "links" }, render.freeTextStyleOf({ id: "l", type: "links" }), { width: W }).columnGap, len(20));
 });
 
+test("links sublinham ao passar o mouse: sem linha escolhida nada de linha em linha; com linha escolhida ela fica; em degradê a linha usa a primeira parada", () => {
+  /** O atributo style do link `name` ("snooze" ou "dismiss"), conferindo que ele foi desenhado. */
+  const linkStyle = (markup, name, tag = "button") => {
+    const match = new RegExp(`<${tag} [^>]*data-free-link="${name}"[^>]*>`).exec(markup);
+
+    assert.ok(match, `link ${name} desenhado como <${tag}>`);
+
+    return /style="([^"]*)"/.exec(match[0])?.[1] ?? "";
+  };
+  const plain = parsed({ children: [{ id: "links", type: "links" }] });
+  const markup = card(plain);
+
+  for (const name of ["snooze", "dismiss"]) {
+    assert.match(markup, new RegExp(`<button class="[^"]*hover:underline[^"]*" data-free-link="${name}"`));
+    // O estilo em linha venceria a classe: com text-decoration-line:none o link nunca sublinhava.
+    assert.doesNotMatch(linkStyle(markup, name), /text-decoration/, "sem linha escolhida, nada de linha em linha: a classe hover:underline vale");
+  }
+
+  assert.doesNotMatch(linkStyle(card(plain, { preview: true }), "dismiss", "span"), /text-decoration/, "na previa, o mesmo estilo");
+
+  for (const decoration of ["underline", "line-through"]) {
+    const chosen = parsed({ children: [{ id: "links", textStyle: { decoration }, type: "links" }] });
+
+    assert.match(linkStyle(card(chosen), "dismiss"), new RegExp(`text-decoration-line:${decoration}`), `com a linha escolhida (${decoration}), ela fica sempre`);
+  }
+
+  // C21: em degradê a letra é transparente e a linha (do passar o mouse ou escolhida) usaria a cor dela, invisível.
+  const paint = { angle: 90, kind: "linear", stops: [{ at: 100, color: "#22d3ee" }, { at: 0, color: "#c084fc" }] };
+  const gradient = linkStyle(card(parsed({ children: [{ id: "links", textStyle: { paint }, type: "links" }] })), "dismiss");
+
+  assert.match(gradient, /(^|;)color:transparent(;|$)/);
+  assert.match(gradient, /background-clip:text/);
+  assert.match(gradient, /(^|;)text-decoration-color:#c084fc(;|$)/, "a primeira parada (a de menor posição), a mesma cor dos ícones");
+  assert.doesNotMatch(gradient, /text-decoration-line/);
+
+  const gradientUnderline = linkStyle(card(parsed({ children: [{ id: "links", textStyle: { decoration: "underline", paint }, type: "links" }] })), "snooze");
+
+  assert.match(gradientUnderline, /text-decoration-line:underline/);
+  assert.match(gradientUnderline, /text-decoration-color:#c084fc/, "a linha escolhida em degradê também aparece");
+  assert.doesNotMatch(linkStyle(markup, "dismiss"), /text-decoration-color/, "cor sólida: a linha já usa a cor do texto");
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Nome do dialogo, descricao, ordem e clique
  * ---------------------------------------------------------------------------------------------- */
@@ -1299,7 +1341,8 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
 });
 
 // Os mesmos casos que geraram tests/fixtures/popup-livre/antes-celular-livre.html no commit-base 55a8cc0 (antes de o
-// cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa.
+// cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa. Gerada
+// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha.
 async function livreBeforeCases() {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
   const cases = [];
