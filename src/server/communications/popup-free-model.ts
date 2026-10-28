@@ -26,6 +26,7 @@ import {
 import {
   FREE_ARTBOARD_DEFAULTS,
   FREE_CLOSE_DEFAULTS,
+  FREE_COUNTDOWN_DEFAULTS,
   FREE_MARK_DEFAULTS,
   FREE_MIN_FONT_PX,
   FREE_MIN_TOUCH_PX,
@@ -42,6 +43,8 @@ import {
 export { FREE_MIN_FONT_PX, FREE_MIN_TOUCH_PX };
 /** Respiro [2, 6] e cantos 4 do marca-texto sem valor proprio; moram em popup-free-render.ts (o cartao usa). */
 export { FREE_MARK_DEFAULTS };
+/** O Contador sem nada escolhido (L6f); mora em popup-free-render.ts (o cartao usa). */
+export { FREE_COUNTDOWN_DEFAULTS };
 /** O design do aparelho (o celular com os valores proprios por cima); mora em popup-free-render.ts (o cartao usa). */
 export { resolveFreeForDevice };
 
@@ -237,14 +240,42 @@ export type FreeBoxLayout = {
   wrap?: boolean;
 };
 export type FreeBoxNode = FreeNodeCommon & { children: FreeNode[]; layout?: FreeBoxLayout; type: "box" };
+/**
+ * Contador (L6f, docs/27 §13.13): a contagem ate o fim do pop-up (a data em que o pop-up termina, o padrao) ou ate uma
+ * data, em casas com os nomes embaixo; em zero mostra `ended` e o pop-up nunca fecha sozinho. `textStyle` e o dos
+ * numeros e do texto do fim; os nomes usam a mesma fonte, menores (`labelSize`, `labelColor`).
+ */
+export type FreeCountdownUntil = { kind: "end" } | { at: string; kind: "date" };
+/** As casas: d = dias, h = horas, m = minutos, s = segundos (a maior casa leva o resto: sem dias, as horas passam de 24). */
+export type FreeCountdownUnits = "dhm" | "dhms" | "hms" | "ms";
+/** A caixa de cada casa (o fundo e uma cor ou um degrade, nunca imagem). */
+export type FreeCountdownCell = { border?: FreeBorder; fill?: FreeTextPaint; padding?: FreeSides; radius?: number };
+export type FreeCountdownNode = FreeNodeCommon & {
+  cell?: FreeCountdownCell;
+  /** O texto que aparece em zero (padrao "Encerrado"). */
+  ended?: string;
+  /** Espaco entre as casas. */
+  gap?: number;
+  labelColor?: HexColor;
+  labelSize?: number;
+  /** Os nomes (dias, horas, min, seg) embaixo dos numeros; padrao true. */
+  labels?: boolean;
+  /** Dois-pontos entre as casas; padrao false. */
+  separator?: boolean;
+  textStyle?: FreeTextStyle;
+  type: "countdown";
+  units?: FreeCountdownUnits;
+  /** Ate quando conta; sem = o fim do pop-up. */
+  until?: FreeCountdownUntil;
+};
 
 export type FreeNode =
-  | FreeAudioNode | FreeBadgeNode | FreeBoxNode | FreeButtonNode | FreeDividerNode | FreeHeadingNode | FreeIconNode
-  | FreeImageNode | FreeLinksNode | FreeShapeNode | FreeSpacerNode | FreeTextNode | FreeVideoNode;
+  | FreeAudioNode | FreeBadgeNode | FreeBoxNode | FreeButtonNode | FreeCountdownNode | FreeDividerNode | FreeHeadingNode
+  | FreeIconNode | FreeImageNode | FreeLinksNode | FreeShapeNode | FreeSpacerNode | FreeTextNode | FreeVideoNode;
 export type FreeNodeType = FreeNode["type"];
 
 export const FREE_NODE_TYPES = [
-  "audio", "badge", "box", "button", "divider", "heading", "icon", "image", "links", "shape", "spacer", "text", "video"
+  "audio", "badge", "box", "button", "countdown", "divider", "heading", "icon", "image", "links", "shape", "spacer", "text", "video"
 ] as const satisfies readonly FreeNodeType[];
 
 /* Arquivos: so o caminho no nosso Storage (o endereco e montado na hora) ------------------------------- */
@@ -342,6 +373,9 @@ export const FREE_DESIGN_LIMITS = {
   buttons: 3, // alem do principal: Fechar, Lembrar depois ou Abrir um link, em qualquer mistura (L4b)
   childrenPerBox: 20,
   closeInset: { max: 24, min: 8 },
+  countdownGap: { max: 48, min: 0 }, // espaco entre as casas do Contador (L6f)
+  countdownLabelSize: { max: 48, min: 10 }, // tamanho dos nomes do Contador (L6f)
+  countdowns: 2, // Contadores por design (L6f)
   dividerThickness: { max: 8, min: 1 },
   effects: 4, // elementos com blur ou backdropBlur
   fills: 3,
@@ -547,7 +581,7 @@ export function uploadedFontIdsOfFree(design: Pick<PopupFreeDesign, "children">)
 
 /** Elementos cuja "altura" e altura minima (o texto empurra a caixa em vez de vazar). */
 export function isTextBearing(type: FreeNodeType): boolean {
-  return type === "heading" || type === "text" || type === "badge" || type === "button" || type === "links" || type === "box";
+  return type === "heading" || type === "text" || type === "badge" || type === "button" || type === "links" || type === "box" || type === "countdown";
 }
 
 /** Largura padrao na sequencia por tipo (omitida na forma canonica). */
@@ -751,6 +785,34 @@ function canonicalRadius(radius: number | [number, number, number, number]): num
 
 function canonicalBorder(border: FreeBorder): FreeBorder {
   return sorted({ color: lower(border.color), style: border.style === "solid" ? undefined : border.style, width: int(border.width) });
+}
+
+/** Um instante ISO 8601 na forma do servidor (UTC, com milissegundos); o schema ja conferiu que e uma data. */
+function canonicalInstant(at: string): string {
+  const time = Date.parse(at);
+
+  return Number.isNaN(time) ? at : new Date(time).toISOString();
+}
+
+/** A caixa das casas do Contador sem o que e igual ao padrao (fundo #ffffff14, respiro [10, 12], cantos 12). */
+function canonicalCountdownCell(cell: FreeCountdownCell | undefined): FreeCountdownCell | undefined {
+  if (!cell) {
+    return undefined;
+  }
+
+  const D = FREE_COUNTDOWN_DEFAULTS;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const fill = cell.fill === undefined ? undefined : canonicalPaint(cell.fill);
+  const padding = cell.padding === undefined ? undefined : canonicalSides(cell.padding);
+  const radius = cell.radius === undefined ? undefined : int(cell.radius);
+  const value = sorted({
+    border: cell.border ? canonicalBorder(cell.border) : undefined,
+    fill: fill === undefined || same(fill, canonicalPaint(D.cellFill)) ? undefined : fill,
+    padding: padding === undefined || same(padding, canonicalSides(D.cellPadding)) ? undefined : padding,
+    radius: radius === D.cellRadius ? undefined : radius
+  } satisfies FreeCountdownCell);
+
+  return Object.keys(value).length > 0 ? value : undefined;
 }
 
 function canonicalShadow(shadow: FreeShadow): FreeShadow {
@@ -1049,6 +1111,28 @@ function canonicalNode(node: FreeNode): FreeNode {
         textStyle: canonicalTextStyle(node.textStyle, "links"),
         type: "links"
       } satisfies FreeLinksNode);
+    }
+    case "countdown": {
+      const D = FREE_COUNTDOWN_DEFAULTS;
+      const ended = node.ended?.trim();
+      const gap = node.gap === undefined ? undefined : int(node.gap);
+      const labelColor = node.labelColor === undefined ? undefined : lower(node.labelColor);
+      const labelSize = node.labelSize === undefined ? undefined : int(node.labelSize);
+
+      return sorted({
+        ...common,
+        cell: canonicalCountdownCell(node.cell),
+        ended: ended && ended !== D.ended ? ended : undefined,
+        gap: gap === D.gap ? undefined : gap,
+        labelColor: labelColor === D.labelColor ? undefined : labelColor,
+        labelSize: labelSize === D.labelSize ? undefined : labelSize,
+        labels: node.labels === false ? false : undefined,
+        separator: node.separator ? true : undefined,
+        textStyle: canonicalTextStyle(node.textStyle, "countdown"),
+        type: "countdown",
+        units: node.units === D.units ? undefined : node.units,
+        until: node.until?.kind === "date" ? { at: canonicalInstant(node.until.at), kind: "date" } : undefined
+      } satisfies FreeCountdownNode);
     }
     case "box": {
       const layout = node.layout
@@ -1457,6 +1541,19 @@ export function rescaleFreeDesign(design: PopupFreeDesign, width: number): Popup
         return { ...base, textStyle: scaleTextStyle(base.textStyle, base.type) };
       case "links":
         return { ...base, gap: scale(base.gap ?? 8, L.gap), textStyle: scaleTextStyle(base.textStyle, "links") };
+      case "countdown": {
+        const D = FREE_COUNTDOWN_DEFAULTS;
+        const cell = base.cell ?? {};
+        const padding = cell.padding ?? D.cellPadding;
+
+        return {
+          ...base,
+          cell: { ...cell, padding: scaleSides(padding, L.padding), radius: scale(cell.radius ?? D.cellRadius, L.radius) },
+          gap: scale(base.gap ?? D.gap, L.countdownGap),
+          labelSize: scale(base.labelSize ?? D.labelSize, L.countdownLabelSize),
+          textStyle: scaleTextStyle(base.textStyle, "countdown")
+        };
+      }
       case "icon":
         return { ...base, size: scale(base.size ?? 24, L.iconSize) };
       case "divider":
@@ -1541,6 +1638,56 @@ export function freeDesignForStudent(design: PopupFreeDesign): PopupFreeDesign {
   return { ...design, children: design.children.map(withoutEditorKeys) };
 }
 
+/**
+ * Contador ate o fim do pop-up num pop-up sem data de fim (L6f, C16): no aluno ele fica escondido, no computador e no
+ * celular (o `hidden: false` do celular dele sai, para o celular nao desfazer o escondido). Com fim, o mesmo objeto.
+ */
+export function freeHideEndlessCountdowns(design: PopupFreeDesign, hasEnd: boolean): PopupFreeDesign {
+  if (hasEnd) {
+    return design;
+  }
+
+  const endless = new Set<FreeId>();
+  const hide = (node: FreeNode): FreeNode => {
+    if (node.type === "countdown" && (node.until?.kind ?? "end") === "end") {
+      endless.add(node.id);
+      return { ...node, hidden: true };
+    }
+
+    return node.type === "box" ? { ...node, children: node.children.map(hide) } : node;
+  };
+  const children = design.children.map(hide);
+
+  if (endless.size === 0) {
+    return design;
+  }
+
+  const mobileNodes = design.devices?.mobile?.nodes;
+  const devices =
+    mobileNodes && Object.keys(mobileNodes).some((id) => endless.has(id))
+      ? {
+          ...design.devices,
+          mobile: {
+            ...design.devices?.mobile,
+            nodes: Object.fromEntries(
+              Object.entries(mobileNodes).map(([id, entry]) => {
+                if (!endless.has(id) || !entry) {
+                  return [id, entry];
+                }
+
+                const { hidden, ...rest } = entry;
+
+                void hidden;
+                return [id, rest];
+              })
+            )
+          }
+        }
+      : design.devices;
+
+  return { ...design, children, devices } as PopupFreeDesign;
+}
+
 function alphaOf(color: HexColor) {
   return color.length === 9 ? parseInt(color.slice(7, 9), 16) : 0xff;
 }
@@ -1604,6 +1751,8 @@ export function freePreviewPopupItem(input: {
   close?: "any" | "x_only";
   cta: NoticeDraft["cta"];
   design: PopupFreeDesign;
+  /** O fim do pop-up, para o Contador da previa contar ate ele (L6f); sem = o Contador mostra um tempo de exemplo. */
+  endsAt?: string | null;
   fonts: readonly PopupFontFace[];
   id?: string;
   title: string;
@@ -1617,6 +1766,7 @@ export function freePreviewPopupItem(input: {
     canSnooze: input.allowSnooze,
     ...(input.close === "x_only" ? { close: "x_only" as const } : {}),
     cta: previewCta(input.cta),
+    ...(input.endsAt ? { endsAt: input.endsAt } : {}),
     fonts: input.fonts
       .filter((face) => input.design.fonts.includes(face.id))
       .map((face) => ({ family: face.family, format: face.format, id: face.id, style: face.style, url: face.url, weight: face.weight })),

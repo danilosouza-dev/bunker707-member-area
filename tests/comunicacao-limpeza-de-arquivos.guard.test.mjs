@@ -75,6 +75,8 @@ function livreCompleto() {
       { id: "espaco", type: "spacer" },
       { id: "som", type: "audio" },
       { children: [{ id: "texto2", lines: [[{ text: "Dentro" }]], type: "text" }], id: "caixa", type: "box" },
+      // Contador (L6f, critica C3): nenhum arquivo (o fundo das casas e so cor ou degrade).
+      { id: "contador", until: { at: "2030-01-01T12:00:00.000Z", kind: "date" }, type: "countdown" },
       { id: "links", type: "links" }
     ],
     mode: "free",

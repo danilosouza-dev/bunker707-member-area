@@ -1052,6 +1052,8 @@ export function PopupDesignField({
             audio: draft.audio,
             cta: draft.cta,
             ctaOptional: freeEditorSetup !== null,
+            // Contador (L6f): o fim do pop-up do aviso; fora do aviso comum (modelos), o editor nao sabe (C18).
+            endsAt: freeEditorSetup !== null ? undefined : (draft.window?.endsAt ?? null),
             hideCtaDestination,
             // A mesma regra do card "Quantas vezes e como fecha" (campaigns.allow_snooze), pelo mesmo caminho do cta.
             onAllowSnoozeChange: (allowSnooze) => onChange({ allowSnooze }),

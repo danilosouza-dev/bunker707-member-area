@@ -24,6 +24,8 @@ import {
   type PopupFreeDesign
 } from "./popup-free-model";
 import {
+  FREE_COUNTDOWN_DEFAULTS,
+  freeCountdownParts,
   FREE_MIN_FONT_PX,
   freeHasSnoozeButton,
   freeHeadingText,
@@ -63,6 +65,7 @@ export const POPUP_FREE_HINT_MESSAGES = {
   /** O ícone do Selo e do Botão desenha com a cor da letra; o contorno não chega nele (L6b, crítica C22). */
   iconHidden: "O ícone usa a cor da letra, não a do contorno, e fica difícil de ver. Use uma cor que apareça ou tire o ícone.",
   noPoster: "Sem capa: quem prefere menos movimento não vê o vídeo.",
+  phoneCountdown: "No celular, as casas do contador não cabem lado a lado (os nomes não ficam abaixo de 12 px). Use nomes maiores, menos casas ou dê mais largura.",
   phoneScroll: "No celular, o aluno precisa rolar para ver tudo, e o X sobe junto.",
   phoneText: "No celular, este texto ocupa mais linhas que no desenho (o texto não fica abaixo de 12 px). Use letra maior ou dê mais largura.",
   phoneTextCut: "No celular, o texto deste botão fica cortado (o texto não fica abaixo de 12 px). Use letra maior ou dê mais largura.",
@@ -77,6 +80,7 @@ export const FREE_NODE_TYPE_LABELS: Record<FreeNode["type"], string> = {
   badge: "Selo",
   box: "Caixa",
   button: "Botão",
+  countdown: "Contador",
   divider: "Linha",
   heading: "Título",
   icon: "Ícone",
@@ -262,7 +266,7 @@ function visibleNodes(design: Pick<PopupFreeDesign, "children">): Visible[] {
   return out;
 }
 
-const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "countdown", "heading", "links", "text"]);
 
 /**
  * As dicas do Revisar: contraste (quando da para saber o fundo), texto pequeno, texto que muda no celular,
@@ -299,6 +303,8 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
       return backgrounds && backgrounds.length > 0 && !behindMedia ? backgrounds.map((color) => ({ color, under: base })) : null;
     };
     const outside = backdropsOf([node.box?.fill ?? [], ...behind]);
+    // Contador (L6f, C15): os numeros e os nomes ficam sobre o fundo da casa.
+    const letters = node.type === "countdown" ? backdropsOf([[node.cell?.fill ?? FREE_COUNTDOWN_DEFAULTS.cellFill], node.box?.fill ?? [], ...behind]) : outside;
     const measure = (paint: FreeTextPaint, stroke: FreeTextStroke | undefined, size: number, weight: number, backdrops: readonly Backdrop[]) => {
       const colors = paintColors(paint);
 
@@ -313,9 +319,15 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
     // parte (com letra) sem cor propria e sem marca-texto. Com todas as letras sobre marca-texto, quem mede e a parte.
     const usesOutside =
       (node.type !== "heading" && node.type !== "text") || node.lines.some((line) => line.some((span) => span.text.trim() !== "" && !span.style?.paint && !span.style?.mark));
-    const element = outside && usesOutside ? measure(style.paint, style.stroke, style.size, style.weight, outside) : null;
+    const element = letters && usesOutside ? measure(style.paint, style.stroke, style.size, style.weight, letters) : null;
 
     report(element, `${prefix}.textStyle.paint`);
+
+    if (node.type === "countdown" && node.labels !== false && letters) {
+      const color = node.labelColor ?? FREE_COUNTDOWN_DEFAULTS.labelColor;
+
+      report(measure({ color, kind: "solid" }, undefined, node.labelSize ?? FREE_COUNTDOWN_DEFAULTS.labelSize, 500, letters), `${prefix}.labelColor`);
+    }
 
     // Ao passar o mouse (L6c): a cor do texto de lá (so com a letra de cor solida, como no cartao) ou a de sempre,
     // contra o fundo de lá (o do Botão troca o fundo inteiro dele) ou o de sempre. So quando algo muda a letra ou o
@@ -376,6 +388,10 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
     // Tamanhos: o do elemento e o das partes.
     const sizes: { key: string; size: number }[] = [{ key: `${prefix}.textStyle.size`, size: style.size }];
 
+    if (node.type === "countdown" && node.labels !== false) {
+      sizes.push({ key: `${prefix}.labelSize`, size: node.labelSize ?? FREE_COUNTDOWN_DEFAULTS.labelSize });
+    }
+
     if (node.type === "heading" || node.type === "text") {
       node.lines.forEach((line, lineIndex) =>
         line.forEach((span, spanIndex) => {
@@ -430,7 +446,9 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
   }
 
   // Ordem de leitura: entre elementos com texto seguidos, o de depois mais de 8 px acima do de antes.
-  const readable = visible.filter(({ node }) => (node.type === "heading" || node.type === "text" || node.type === "badge" || node.type === "button") && rects[node.id]);
+  const readable = visible.filter(
+    ({ node }) => (node.type === "heading" || node.type === "text" || node.type === "badge" || node.type === "button" || node.type === "countdown") && rects[node.id]
+  );
 
   for (let index = 1; index < readable.length; index += 1) {
     const before = readable[index - 1].node;
@@ -574,7 +592,24 @@ function iconRun(size: number): TextRun {
   return { em: 1.55, letters: 1, size };
 }
 
-type Fit = { key: string; kind: "cut" | "lines" | "row"; node: FreeNode };
+type Fit = { key: string; kind: "countdown" | "cut" | "lines" | "row"; node: FreeNode };
+
+/**
+ * A largura das casas do Contador lado a lado (px da prancheta): cada casa do tamanho do maior entre o numero (dois
+ * algarismos) e o nome, mais o respiro e a borda da casa, o espaco entre elas e os dois-pontos.
+ */
+function countdownRowWidth(node: Extract<FreeNode, { type: "countdown" }>, style: FreeResolvedTextStyle, sizeOf: (size: number) => number): number {
+  const D = FREE_COUNTDOWN_DEFAULTS;
+  const parts = freeCountdownParts(0, node.units ?? D.units);
+  const number = runsWidth([runOf("00", style)], sizeOf);
+  const labelStyle = { ...style, size: node.labelSize ?? D.labelSize, weight: 500 as const };
+  const cellInset = sidesWidth(node.cell?.padding ?? D.cellPadding) + (node.cell?.border?.width ?? 0) * 2;
+  const gaps = (node.gap ?? D.gap) * Math.max(0, parts.length - 1) * (node.separator ? 2 : 1);
+  const separators = node.separator ? runsWidth([runOf(":", style)], sizeOf) * Math.max(0, parts.length - 1) : 0;
+  const cells = parts.reduce((sum, part) => sum + Math.max(number, node.labels === false ? 0 : runsWidth([runOf(part.label, labelStyle)], sizeOf)) + cellInset, 0);
+
+  return cells + gaps + separators;
+}
 
 /** Linhas que o texto ocupa numa largura (cada linha do texto quebra sozinha; no minimo 1 por linha). */
 function wrappedLines(lines: readonly TextRun[][], available: number, sizeOf: (size: number) => number): number {
@@ -680,6 +715,20 @@ export function freePhoneTextHints(desktop: PopupFreeDesign, content: FreePhoneT
 
   /** Confere um elemento com texto numa largura que ele tem para o texto (px da prancheta, sem respiro e borda). */
   const check = (node: FreeNode, available: number) => {
+    // Contador (L6f, C23): os nomes no piso de 12 px alargam as casas; a dica leva ao tamanho dos nomes.
+    if (node.type === "countdown") {
+      const labelSize = node.labelSize ?? FREE_COUNTDOWN_DEFAULTS.labelSize;
+      const style = freeTextStyleOf(node);
+
+      if (node.labels !== false && phoneSize(labelSize) > labelSize + 1e-9) {
+        if (countdownRowWidth(node, style, phoneSize) > available + 0.5 && countdownRowWidth(node, style, designSize) <= available + 0.5) {
+          fits.push({ key: `nodes.${node.id}.labelSize`, kind: "countdown", node });
+        }
+      }
+
+      return;
+    }
+
     if (node.type !== "badge" && node.type !== "button" && node.type !== "heading" && node.type !== "text" && node.type !== "links") {
       return;
     }
@@ -776,7 +825,14 @@ export function freePhoneTextHints(desktop: PopupFreeDesign, content: FreePhoneT
     .map((fit) => ({
       key: fit.key,
       kind: "phone-text" as const,
-      message: fit.kind === "cut" ? POPUP_FREE_HINT_MESSAGES.phoneTextCut : fit.kind === "row" ? POPUP_FREE_HINT_MESSAGES.phoneTextRow : POPUP_FREE_HINT_MESSAGES.phoneText,
+      message:
+        fit.kind === "countdown"
+          ? POPUP_FREE_HINT_MESSAGES.phoneCountdown
+          : fit.kind === "cut"
+            ? POPUP_FREE_HINT_MESSAGES.phoneTextCut
+            : fit.kind === "row"
+              ? POPUP_FREE_HINT_MESSAGES.phoneTextRow
+              : POPUP_FREE_HINT_MESSAGES.phoneText,
       nodeId: fit.node.id
     }));
 }

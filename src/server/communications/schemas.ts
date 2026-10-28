@@ -54,7 +54,7 @@ import { popupDesignLinkButton, type PopupDesign } from "./popup-design-model";
 import { popupDesignContentProblems, popupDesignSchema } from "./popup-design-schema";
 import type { PopupFreeDesign } from "./popup-free-model";
 import { freeHasClickTarget } from "./popup-free-render";
-import { POPUP_FREE_MESSAGES, popupFreeContentProblems, popupFreeDesignSchema } from "./popup-free-schema";
+import { freeCountdownProblems, POPUP_FREE_MESSAGES, popupFreeContentProblems, popupFreeDesignSchema } from "./popup-free-schema";
 import {
   canonicalPopupSettings,
   defaultPopupSettings,
@@ -688,6 +688,11 @@ export function publishProblems(draft: NoticeDraft, now: number): { message: str
 
   if (draft.kind === "popup" && draft.window.endsAt && Date.parse(draft.window.endsAt) <= now) {
     problems.push({ message: "Escolha um fim no futuro.", path: "window.endsAt" });
+  }
+
+  // Contador do Livre (L6f): "ate o fim do pop-up" pede o fim; "ate uma data", uma data no futuro.
+  if (draft.kind === "popup" && draft.freeDesign) {
+    problems.push(...freeCountdownProblems(draft.freeDesign, draft.window.endsAt, now));
   }
 
   if (draft.kind === "inbox" && draft.validity.mode === "until") {
