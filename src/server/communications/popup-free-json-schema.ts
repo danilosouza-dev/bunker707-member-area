@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { popupFreeDesignInputSchema } from "./popup-free-schema";
 
-// JSON Schema do design Livre para o PR "Criar com IA" (docs/27 §9.8; spec §5.7). Modulo proprio, que nenhuma tela
+// JSON Schema do design Livre: o contrato do docs/27 §9 em forma de maquina (o "Criar com IA", para o qual ele nasceu,
+// foi descartado pelo produtor em 28/10/2026; docs/27 §10). Modulo proprio, que nenhuma tela
 // importa de proposito: o `z.toJSONSchema` puxa para o pedaco compartilhado do zod (o mesmo que o Inicio do aluno ja
 // baixa) os conversores de todos os tipos, e o build nao descarta exportacoes sem uso de um modulo que a tela
-// importa. Quem gera o JSON Schema (a rota da IA, os testes) importa daqui.
+// importa. Quem gera o JSON Schema (hoje, so os testes) importa daqui.
 
 /** JSON Schema da entrada do Livre (`io: "input"`); o elemento recursivo sai em `$defs`/`$ref`. */
 export function popupFreeJsonSchema(): object {

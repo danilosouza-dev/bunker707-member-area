@@ -2,7 +2,7 @@
 
 Data: 23/10/2026. Pedido do produtor depois do Personalizado (`docs/26`): "criar o que eu quiser da forma que eu quiser", montando o pop-up do zero, elemento por elemento, com estilo em cada elemento, como no Elementor. No card **Design** do pop-up entra a terceira opção **Livre**, ao lado de **Padrão** e **Personalizado** (os dois continuam exatamente como estavam). Sem migração: o Livre mora na mesma coluna `campaigns.popup_design` (migração `202610230001`), com `mode: "free"`.
 
-Este documento vale para qualquer trabalho no design Livre: o editor de tela cheia, o cartão do aluno (`PopupFreeCard`), o JSON do design, os envios de imagem e o "Criar com IA" que vem depois. Onde, quando, quantas vezes e como o pop-up fecha continuam como no `docs/25`; o Personalizado continua no `docs/26`. A notificação do sino **nunca** tem design.
+Este documento vale para qualquer trabalho no design Livre: o editor de tela cheia, o cartão do aluno (`PopupFreeCard`), o JSON do design, e os envios de imagem. O "Criar com IA" foi descartado pelo produtor em 28/10/2026 (§10); o **Copiar e colar** com as instruções para a IA (§13.1) continua. Onde, quando, quantas vezes e como o pop-up fecha continuam como no `docs/25`; o Personalizado continua no `docs/26`. A notificação do sino **nunca** tem design.
 
 ---
 
@@ -256,7 +256,7 @@ A entrega que passar a sua cota em mais de 25 % encolhe antes do merge ou pega d
 | L11 | Escolher Livre (ou Personalizado) sem modelo deixa o rascunho sem design até escolher um modelo | igual ao Personalizado de antes: a prévia não muda antes da escolha |
 | L12 | `{n} problemas para revisar` conta só os erros que impedem salvar (do design e do Botão principal), não as dicas | a dica "texto no celular" aparecia nos três modelos (Links de 13 px e Selo de 12 px viram 12 px no celular): contar dicas deixaria o card sempre com um "problema". Desde o L1.1 a dica só aparece quando o piso muda o encaixe (L18) e nenhum modelo a acende; a contagem continua só com os erros |
 | L13 | Sem `z.tuple` no schema e o JSON Schema num módulo que nenhuma tela importa | o zod é um pedaço compartilhado com o JS inicial do Início e o build inclui ali toda classe e todo conversor do zod usados em qualquer tela; os dois custavam ~0,9 KB gzip a todo aluno (§7) |
-| L14 | Copiar e colar o design no L1.1; "Criar com IA" no L2 | decisões do produtor (perguntas 2 e 3 da spec) |
+| L14 | Copiar e colar o design no L1.1; "Criar com IA" no L2 (descartado pelo produtor em 28/10/2026, §10) | decisões do produtor (perguntas 2 e 3 da spec) |
 | L15 | Em "Outro estilo na seleção", a divisão da parte só entra quando um estilo é escolhido; "Linha no texto: Nenhuma" numa parte não tira o sublinhado do elemento inteiro | dividir sem estilo seria um passo invisível no histórico; o tipo da parte só aceita sublinhado ou riscado (fica para quando ganhar "nenhuma") |
 | L16 | Com o pop-up no ar ou pausado, o salvar de dentro do editor Livre fala como o editor do aviso: o botão **Salvar alterações** e, depois, a mesma frase do toast dele (`savedNoticeToast`, devolvida em `message`); o "Mostrar de novo para quem já viu" ligado não vai nesse salvar e continua ligado para o salvar do aviso. Rascunho: **Salvar rascunho** / `Rascunho salvo.`, como antes | o salvar do Livre no ar chega aos alunos em até 1 minuto, mas dizia "Rascunho salvo." e aplicava o "Mostrar de novo" sem mostrar quantos voltam a ver |
 | L17 | No **Recarregar** depois de um 409, `design` e `freeDesign` são um campo só: mexeu em um dos dois aqui, ficam os dois daqui; senão, os dois do banco | campo a campo, o Personalizado daqui juntava-se ao Livre de outra tela: salvar recusava com `Escolha um design só.` e voltar ao Personalizado apagava o que foi editado |
@@ -314,7 +314,7 @@ A entrega que passar a sua cota em mais de 25 % encolhe antes do merge ou pega d
 
 ## 9. Contrato do JSON
 
-O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do aluno e (no PR "Criar com IA") a IA. Esta seção é a fonte para quem escreve um design à mão ou pede a uma IA. **Todo bloco `json` desta seção é um design completo e passa no schema**: `tests/popup-livre-modelo.test.mjs` lê o documento e valida cada exemplo (documento e schema não se separam).
+O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do aluno e a IA de quem edita (o Claude ou o ChatGPT do produtor, pelas instruções do **Copiar e colar**, §13.1). Esta seção é a fonte para quem escreve um design à mão ou pede a uma IA. **Todo bloco `json` desta seção é um design completo e passa no schema**: `tests/popup-livre-modelo.test.mjs` lê o documento e valida cada exemplo (documento e schema não se separam).
 
 As partes 9.2 a 9.6, 9.8, 9.9 e 9.10 viram as instruções para a IA (§13.1), que vão para a conversa de um terceiro: o que é só de quem mantém o código (nomes de arquivo e de função, banco, buckets, caminhos) fica entre `<!-- ia:fora -->` e `<!-- /ia:fora -->` (o Markdown não mostra os marcadores; o script tira o trecho) e as referências entre partes dizem o nome da parte ("veja 9.4 Padrões"), nunca uma seção que não vai junto (L26).
 
@@ -1014,7 +1014,7 @@ Por dentro: `resolveFreeForDevice(design, device)` mora em `popup-free-render.ts
 | Fora desta entrega | Onde está |
 |---|---|
 | Dica do peso das imagens (precisa do tamanho do arquivo, que o design não guarda); capa de vídeo tirada de um vídeo que já está no Storage (precisa de CORS no `canvas`) | ficaram do L1.1 (que entregou o copiar e colar, as instruções para a IA, "Usar o design Personalizado", o quarto modelo e a dica nova, §13); vão para o L5 (Meus modelos e biblioteca de imagens), junto com o tamanho dos arquivos já enviados |
-| "Criar com IA" (texto e/ou imagem de referência pela conta conectada no gateway) | PR L2 (§9.8 e spec §5.7), adiado pelo produtor em 26/10/2026 (abaixo) |
+| "Criar com IA" (texto e/ou imagem de referência pela conta conectada no gateway) | descartado pelo produtor em 28/10/2026: não será feito (abaixo). O **Copiar e colar** com as instruções para a IA (§13.1) continua |
 | Valores próprios do celular por elemento (`devices.mobile`) | feito no PR L3 (§9.10; no editor, §13.8) |
 | Cores, textos, pinturas, sombras, camada e girar diferentes no celular; um terceiro aparelho (tablet) | fora de propósito (L3): um desenho só, com o que muda de tamanho e lugar por aparelho |
 | Arrastar nas Camadas e nas camadas de fundo, arrastar elementos da sequência no desenho, arrastar do painel Elementos para o desenho | feito no L4a, 25/10/2026 (§13.9) |
@@ -1038,6 +1038,8 @@ Por dentro: `resolveFreeForDevice(design, device)` mora em `popup-free-render.ts
 | Ponta a ponta no WebKit dos arquivos novos (e a foto dos cantos do vídeo com máscara, spec §3.2) | rodados no Chromium; o WebKit roda no CI |
 
 **Adiados pelo produtor em 26/10/2026.** Para encerrar a parte de pop-up e notificação e levar tudo à produção com os ajustes finais (§13.12), o produtor adiou para depois o L6d (animação de entrada), o L6e (textura e mistura), o L6f (contador e o quinto modelo para começar), o L6g (texto escrito direto no desenho), o L4c (a linha acima) e o "Criar com IA" (PR L2). Quando voltarem, valem as decisões do produtor e as regras das sete entregas (§13.11, L52) e as cotas da régua (§7). As críticas da revisão do plano do L6 que eram dessas entregas ficam guardadas aqui, para quando voltarem (as outras foram feitas no L6a, no L6b e no L6c):
+
+**Decisões do produtor em 28/10/2026.** O "Criar com IA" (PR L2) foi **descartado**: não será feito, e a pergunta em aberto sobre ele no `docs/09` fica fechada (o JSON Schema de `popup-free-json-schema.ts` continua como o contrato em forma de máquina, testado, e nenhuma tela o importa). O **contador** (L6f) é desejado: o produtor quer o contador no pop-up para criar urgência e levar o aluno a agir, e ele volta como a próxima entrega do Livre, com as decisões de 26/10 (§13.11) e as críticas guardadas abaixo. A **animação de entrada** (L6d) e a **textura e mistura** (L6e) continuam adiadas até o produtor decidir, depois da explicação do que cada uma faz. A **enquete no pop-up** (fora do Livre: a v3b-3 do `docs/09`) também é desejada.
 
 | Entrega | Críticas guardadas |
 |---|---|

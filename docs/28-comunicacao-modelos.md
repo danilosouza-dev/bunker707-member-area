@@ -360,7 +360,7 @@ Origem: **P** = decisão de produto mantida, **P*** = decisão de produto detalh
 | Fora desta entrega | Onde está |
 |---|---|
 | Tela para restaurar um modelo excluído | não planejado (a exclusão pede confirmação; o rastro fica na auditoria) |
-| "Criar" do Hoje e "Criar com IA" a partir de um modelo | depois (D27) |
+| "Criar" do Hoje e "Criar com IA" a partir de um modelo | o "Criar" do Hoje: depois (D27); o "Criar com IA" foi descartado pelo produtor em 28/10/2026 (`docs/27` §10) |
 | Modelos de Fluxos na aba Modelos | continuam em "Novo fluxo" (D25) |
 | Conferir se as regras de um segmento salvo ainda apontam para algo que existe | não planejado (risco 3) |
 | Trocar o tipo ou o modo do design de um modelo | nunca (D1: cria-se outro modelo) |
