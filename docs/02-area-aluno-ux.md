@@ -205,6 +205,8 @@ Cada fileira configuravel deve poder definir uma regra de visibilidade:
 - apenas visitantes ou pessoas sem compra ativa;
 - todos.
 
+Como a regra e decidida (28/10/2026, "Quem pode ver" em Area de membros > Vitrine): para quem entra de verdade (aluno, ou a equipe sem o "ver como"), "ja comprou" e ter pelo menos um acesso ativo, a mesma fonte que libera os conteudos (entitlements; o Professor conta os cursos dele); conteudo gratuito sozinho nao conta como compra. No "ver como" da equipe vale o modo escolhido: `Produtor` ve todas as fileiras, `Aluno com acesso` ve as de quem ja comprou e `Aluno sem acesso` as de quem ainda nao comprou. Ate 28/10/2026 a regra so valia no "ver como" e o aluno via todas as fileiras ativas. `Continue assistindo` vem com `Todos os alunos` por padrao, porque ja mostra so as aulas que cada aluno comecou (inclusive de conteudo gratuito); `Minhas compras` continua com `So quem ja comprou`.
+
 A fileira `Produtos a venda`/`Vitrine` mostra somente produtos vendaveis aos quais o aluno ainda nao tem acesso. Produtos com entitlement ativo, gratuitos ou ja liberados para aquele aluno ficam fora dessa fileira e permanecem em `Minhas compras` ou nas demais secoes de biblioteca. Os produtos ainda nao adquiridos aparecem com cadeado.
 
 Uma fileira como `Em breve na Bunker707` pode mostrar proximos cursos, formacoes, bootcamps, novidades e listas de espera para criar expectativa sem liberar acesso.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
-import { limparConfiguracoesDeTeste, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, limparConfiguracoesDeTeste, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { pngQuadradoDataUrl } from "../support/imagem-de-teste.mjs";
 
 // Admin: Area de membros (docs/18 §3.2) contra o banco LOCAL de verdade. A invariante do docs/13: cada
@@ -29,6 +29,7 @@ const arquivosEnviados = new Set();
 const produtor = usuarioDeTeste(contas.produtor);
 const analista = usuarioDeTeste(contas.analista);
 const aluna = usuarioDeTeste(contas.aluna);
+const alunoSemAcesso = usuarioDeTeste(contas.alunoSemAcesso);
 const destaque = { ...DEFAULT_HOME_HERO_DRAFT, showTitle: true, title: "Destaque de teste: bem-vinda ao Bunker" };
 
 before(() => limparConfiguracoesDeTeste(db, CHAVES));
@@ -136,6 +137,34 @@ test("fileiras da home: publicar sem versao grava; repetir sem versao e 409; a a
   assert.ok(invalida.status >= 400, `layout errado para o tipo e recusado: ${invalida.status}`);
   const { homeRows: depois } = await getHomePageData(undefined, aluna);
   assert.ok(depois.find((row) => row.title === "Produtos a venda"), "nada foi gravado com o layout errado");
+});
+
+test("Quem pode ver vale para quem entra de verdade, nao so no ver como da equipe", async () => {
+  await limparConfiguracoesDeTeste(db, ["homeSections"]);
+  const manual = (id, title, order, visibility) => ({
+    ...secao(id, title, "content_carousel", "manual", "vertical", order, visibility),
+    itemIds: [ESCOLA_DE_TESTE.cursoBloqueado.id]
+  });
+  const fileiras = [
+    manual("so-quem-comprou", "Só para quem já comprou", 0, "students"),
+    manual("so-quem-nao-comprou", "Só para quem ainda não comprou", 1, "non_students"),
+    manual("para-todos", "Para todos os alunos", 2, "all")
+  ];
+
+  const publicada = await publicarFileiras(produtor, { expectedUpdatedAt: null, sections: fileiras });
+  assert.equal(publicada.status, 200, JSON.stringify(await publicada.json()));
+
+  const titulos = async (modo, user) => (await getHomePageData(modo, user)).homeRows.map((row) => row.title).sort();
+  const todas = ["Para todos os alunos", "Só para quem ainda não comprou", "Só para quem já comprou"];
+
+  // A aluna tem dois cursos comprados; o aluno sem acesso nunca comprou nada (a mesma escola de teste).
+  assert.deepEqual(await titulos(undefined, aluna), ["Para todos os alunos", "Só para quem já comprou"]);
+  assert.deepEqual(await titulos(undefined, alunoSemAcesso), ["Para todos os alunos", "Só para quem ainda não comprou"]);
+
+  // O ver como da equipe continua mandando o modo escolhido.
+  assert.deepEqual(await titulos("producer", produtor), todas);
+  assert.deepEqual(await titulos("student_with_access", produtor), ["Para todos os alunos", "Só para quem já comprou"]);
+  assert.deepEqual(await titulos("student_without_access", produtor), ["Para todos os alunos", "Só para quem ainda não comprou"]);
 });
 
 test("tela de entrar: a frase publicada pelo produtor aparece para quem vai entrar; versao velha e 409", async () => {

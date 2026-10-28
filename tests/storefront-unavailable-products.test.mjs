@@ -236,7 +236,8 @@ test("servidor: publishHomeSections limpa produto fora de venda em vez de recusa
     store.indexOf("export type PublishHomeSectionsOptions")
   );
 
-  assert.match(store, /import \{ pruneHomeSectionRefs \} from "@\/server\/storefront\/model";/);
+  // A mesma limpeza da Vitrine, importada do modelo (o import pode trazer outras regras do modelo junto).
+  assert.match(store, /import \{[^}]*\bpruneHomeSectionRefs\b[^}]*\} from "@\/server\/storefront\/model";/);
   assert.match(validate, /const \{ sections \} = pruneHomeSectionRefs\(configs, \(itemId\) => sellableIds\.has\(itemId\)\);/);
   assert.match(validate, /for \(const section of sections\)/);
   assert.match(validate, /return normalizeHomeSectionOrder\(sections\.map/);

@@ -37,7 +37,7 @@ import { getStudentProfileRecord } from "@/server/member-area/student-profile";
 import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
 import { recordStudentActivity } from "@/server/progress/student-activity";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
-import { pruneHomeSectionRefs } from "@/server/storefront/model";
+import { homeRowViewerOf, isHomeRowVisibleTo, pruneHomeSectionRefs } from "@/server/storefront/model";
 import type {
   AdminAIAgent,
   AdminBlockedWordRule,
@@ -1720,7 +1720,8 @@ function getDefaultHomeSectionConfigs(database: PlatformDatabase): HomeSectionCo
       sectionType: "continue_watching",
       subtitle: "Retome exatamente de onde parou.",
       title: "Continue assistindo",
-      visibility: "students"
+      // Ja depende de cada aluno (as aulas que ele comecou, inclusive de conteudo gratuito): "Todos os alunos".
+      visibility: "all"
     },
     {
       contentSource: "entitlement_products",
@@ -1898,17 +1899,11 @@ function resolveConfiguredHomeRows(
   const sellableById = new Map(sellableItems.map((item) => [item.id, item]));
   // "Oculto por enquanto": fora da vitrine; em listas com curadoria, so para quem tem acesso.
   const canSeeHidden = (item: ContentItem) => hasPurchaseAccess(item, accessPreviewMode, userAccessKeys);
+  // "Quem pode ver": no "ver como", o modo escolhido; para quem entra de verdade, ter algum acesso ativo e "ja comprou".
+  const viewer = homeRowViewerOf(accessPreviewMode, userAccessKeys.size > 0);
 
   return normalizeHomeSectionOrder(sections).flatMap<HomeRow>((section) => {
-    if (!section.isActive) {
-      return [];
-    }
-
-    if (section.visibility === "students" && accessPreviewMode === "student_without_access") {
-      return [];
-    }
-
-    if (section.visibility === "non_students" && accessPreviewMode === "student_with_access") {
+    if (!section.isActive || !isHomeRowVisibleTo(section.visibility, viewer)) {
       return [];
     }
 

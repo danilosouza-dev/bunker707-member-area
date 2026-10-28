@@ -12,6 +12,7 @@
 
 import { isSameMemberStyle, normalizeMemberStyle, type MemberStyleConfig } from "../../lib/member-style";
 import { isDefaultSchoolIcon, normalizeSchoolIcon } from "../communications/message-meta";
+import type { AccessPreviewMode } from "@/lib/access-preview";
 import type {
   ContentKind,
   HomeSectionConfig,
@@ -248,7 +249,8 @@ export const AUTOMATIC_SOURCES: readonly AutomaticSourceOption[] = [
     sectionType: "continue_watching",
     source: "recent_lessons",
     subtitle: "Retome exatamente de onde parou.",
-    visibility: "students"
+    // Ja depende de cada aluno (as aulas que ele comecou, inclusive de conteudo gratuito): "Todos os alunos".
+    visibility: "all"
   },
   {
     description: "Os produtos que cada aluno tem acesso.",
@@ -308,6 +310,34 @@ export const VISIBILITY_LABELS: Record<RowVisibility, string> = {
   non_students: "Só quem ainda não comprou",
   students: "Só quem já comprou"
 };
+
+/**
+ * Quem esta olhando a home, para o "Quem pode ver" de cada fileira (docs/02, Home). No "ver como" da equipe vale o
+ * modo escolhido ("Produtor" ve todas as fileiras); para quem entra de verdade (aluno, ou a equipe sem o "ver como"),
+ * "ja comprou" e ter pelo menos um acesso ativo: a mesma fonte que libera os conteudos (entitlements, AGENTS.md).
+ */
+export type HomeRowViewer = "everyone" | "students" | "non_students";
+
+export function homeRowViewerOf(accessPreviewMode: AccessPreviewMode | undefined, hasActiveAccess: boolean): HomeRowViewer {
+  if (accessPreviewMode === "producer") {
+    return "everyone";
+  }
+
+  if (accessPreviewMode === "student_with_access") {
+    return "students";
+  }
+
+  if (accessPreviewMode === "student_without_access") {
+    return "non_students";
+  }
+
+  return hasActiveAccess ? "students" : "non_students";
+}
+
+/** A fileira aparece para quem esta olhando? "Todos os alunos" sempre; as outras, so para o publico delas. */
+export function isHomeRowVisibleTo(visibility: RowVisibility, viewer: HomeRowViewer): boolean {
+  return visibility === "all" || viewer === "everyone" || visibility === viewer;
+}
 
 export const VISIBILITY_OPTIONS: readonly { label: string; value: RowVisibility }[] = [
   { label: VISIBILITY_LABELS.all, value: "all" },

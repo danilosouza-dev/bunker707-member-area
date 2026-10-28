@@ -93,7 +93,8 @@ test("vitrine nunca publicada: ordem padrao com os destaques ligados nos produto
   assert.equal(structure.sourceContentId, "curso-prompts");
   assert.equal(structure.layout, "compact");
   assert.equal(structure.subtitle, "Cursos Online");
-  assert.equal(data.sections[0].visibility, "students");
+  assert.equal(data.sections[0].visibility, "all", "Continue assistindo ja depende de cada aluno");
+  assert.equal(data.sections[1].visibility, "students", "Minhas compras: so quem ja comprou");
   assert.equal(data.sections[4].title, "Em breve na Bunker707");
 });
 
@@ -427,7 +428,7 @@ test("fileira automatica nova: subtitulo e publico acompanham a fonte ate o prod
   assert.equal(draft.kind, "automatic");
   assert.equal(draft.source, "recent_lessons");
   assert.equal(draft.subtitle, "Retome exatamente de onde parou.");
-  assert.equal(draft.visibility, "students");
+  assert.equal(draft.visibility, "all");
 
   const switched = model.changeDraftSource(draft, "sellable_products");
   assert.equal(switched.subtitle, "Produtos disponíveis e destaques da Bunker707.");
@@ -440,4 +441,24 @@ test("fileira automatica nova: subtitulo e publico acompanham a fonte ate o prod
   const productsById = new Map();
   const saved = model.draftToSection({ ...switched, subtitle: "" }, { id: "x", isActive: true, order: 0 }, productsById);
   assert.equal(saved.subtitle, undefined, "subtitulo apagado fica vazio na home, sem texto escondido");
+});
+
+test("Quem pode ver: no ver como vale o modo; para quem entra de verdade, ter algum acesso ativo e ja ter comprado", () => {
+  assert.equal(model.homeRowViewerOf("producer", false), "everyone", "Produtor ve todas as fileiras");
+  assert.equal(model.homeRowViewerOf("student_with_access", false), "students");
+  assert.equal(model.homeRowViewerOf("student_without_access", true), "non_students", "o modo escolhido vence o acesso de quem olha");
+  assert.equal(model.homeRowViewerOf(undefined, true), "students", "aluno com algum acesso ativo");
+  assert.equal(model.homeRowViewerOf(undefined, false), "non_students", "aluno sem nenhum acesso ativo");
+
+  const esperado = {
+    all: { everyone: true, non_students: true, students: true },
+    non_students: { everyone: true, non_students: true, students: false },
+    students: { everyone: true, non_students: false, students: true }
+  };
+
+  for (const [visibility, porPublico] of Object.entries(esperado)) {
+    for (const [viewer, aparece] of Object.entries(porPublico)) {
+      assert.equal(model.isHomeRowVisibleTo(visibility, viewer), aparece, `${visibility} para ${viewer}`);
+    }
+  }
 });
