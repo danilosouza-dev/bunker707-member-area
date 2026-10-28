@@ -853,7 +853,7 @@ export function freeErrorKeys(design: Pick<PopupFreeDesign, "assets" | "children
 }
 
 /* ------------------------------------------------------------------------------------------------
- * JSON Schema (para o PR "Criar com IA")
+ * JSON Schema (o contrato do docs/27 §9 em forma de maquina)
  * ---------------------------------------------------------------------------------------------- */
 
 /**
