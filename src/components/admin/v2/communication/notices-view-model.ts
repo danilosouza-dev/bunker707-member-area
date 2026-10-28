@@ -1642,7 +1642,7 @@ export function previewHasDeviceChoice(draft: { design?: unknown; freeDesign?: u
  * freePreviewPopupItem (o mesmo do palco do editor: titulo e texto do design, sem imagem nem icone).
  */
 export function draftToPopupItem(
-  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "design" | "freeDesign" | "popup">>,
+  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "design" | "freeDesign" | "popup" | "window">>,
   input: { fonts?: readonly PopupFontFace[]; imageUrl?: string | null } = {}
 ): PopupItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
@@ -1655,6 +1655,7 @@ export function draftToPopupItem(
       close: draft.popup?.close === "x_only" ? "x_only" : "any",
       cta: draft.cta,
       design: draft.freeDesign,
+      endsAt: draft.window?.endsAt ?? null,
       fonts: input.fonts ?? [],
       title: draft.title.trim() || PREVIEW_TITLE_PLACEHOLDER
     });

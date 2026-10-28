@@ -1,7 +1,7 @@
 "use client";
 
-import { FREE_DESIGN_LIMITS, type FreeButtonHover, type FreeNode, type FreeTextStyle } from "@/server/communications/popup-free-model";
-import { freeTextStyleOf } from "@/server/communications/popup-free-render";
+import { FREE_DESIGN_LIMITS, type FreeButtonHover, type FreeCountdownNode, type FreeNode, type FreeTextStyle } from "@/server/communications/popup-free-model";
+import { FREE_COUNTDOWN_DEFAULTS, freeTextStyleOf } from "@/server/communications/popup-free-render";
 import { Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -49,10 +49,12 @@ import {
   freeStrokeSwitchPatch,
   isFreeHoverNode,
   withFreeBox,
+  withFreeCountdownCell,
   withFreeFadeEnd,
   withFreeFadeStart,
   withFreeFillImage,
   withFreeHover,
+  withFreeNodeFields,
   withFreeTextStyle,
   type FreeHoverNode,
   type FreeHoverPatch,
@@ -68,7 +70,9 @@ import {
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
 
-const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "countdown", "heading", "links", "text"]);
+/** As chaves das dicas que ficam na seção das casas do Contador (os nomes), e nao no Texto (os numeros). */
+const isCountdownLabelKey = (key: string) => key.endsWith(".labelColor") || key.endsWith(".labelSize");
 /**
  * "Só o contorno" so no Título e no Texto (docs/27 §9.8): o ícone do Selo e do Botão usa a cor da letra e sumiria
  * com ela, e os Links o aluno precisa ler.
@@ -81,9 +85,105 @@ export function FreeInspectorStyle(props: FreeSectionProps) {
   return (
     <div className="flex min-w-0 flex-col gap-5 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
       {TEXT_TYPES.has(node.type) ? <TextStyleSection {...props} /> : null}
+      {node.type === "countdown" ? <CountdownStyleSection {...props} node={node} /> : null}
       <BoxSections {...props} />
       {isFreeHoverNode(node) ? <HoverSection {...props} node={node} /> : null}
     </div>
+  );
+}
+
+/**
+ * Contador (L6f): a caixa de cada casa (fundo de cor ou degradê, borda, cantos e respiro), o espaço entre as casas e os
+ * nomes (cor e tamanho; parados com os nomes desligados). As dicas de contraste e de tamanho dos nomes ficam aqui.
+ */
+function CountdownStyleSection({ design, disabled, errors, hints, node, onChange }: FreeSectionProps & { node: FreeCountdownNode }) {
+  const D = FREE_COUNTDOWN_DEFAULTS;
+  const id = (field: string) => freeFieldId(node.id, field);
+  const error = (key: string) => freeErrorAt(errors, `nodes.${node.id}.${key}`);
+  const cell = node.cell ?? {};
+  const padding = cell.padding ?? D.cellPadding;
+  const [vertical, horizontal] = typeof padding === "number" ? [padding, padding] : [padding[0], padding[1]];
+  const setPadding = (next: [number, number]) =>
+    onChange(withFreeCountdownCell(design, node.id, { padding: next[0] === D.cellPadding[0] && next[1] === D.cellPadding[1] ? undefined : next }), "cell.padding");
+  const labelsOff = node.labels === false;
+
+  return (
+    <FreeSection id={id("casas-e-nomes")} title={C.countdown.cells}>
+      <FreeTextPaintField
+        disabled={disabled}
+        error={error("cell.fill")}
+        id={id("casas-fundo")}
+        label={C.countdown.cellFill}
+        onChange={(fill) => onChange(withFreeCountdownCell(design, node.id, { fill }), "cell.fill")}
+        value={cell.fill ?? D.cellFill}
+      />
+      <FreeBorderField
+        disabled={disabled}
+        error={error("cell.border")}
+        id={id("casas-borda")}
+        onChange={(border) => onChange(withFreeCountdownCell(design, node.id, { border }), "cell.border")}
+        title={C.countdown.cellBorder}
+        value={cell.border}
+      />
+      <FreeNumberField
+        bounds={L.radius}
+        disabled={disabled}
+        error={error("cell.radius")}
+        id={id("casas-cantos")}
+        label={C.countdown.cellRadius}
+        onChange={(radius) => onChange(withFreeCountdownCell(design, node.id, { radius: radius === D.cellRadius ? undefined : radius }), "cell.radius")}
+        unit={C.units.px}
+        value={cell.radius ?? D.cellRadius}
+      />
+      <FreeNumberField
+        bounds={L.padding}
+        disabled={disabled}
+        error={error("cell.padding")}
+        id={id("casas-respiro")}
+        label={C.countdown.cellPaddingY}
+        onChange={(value) => setPadding([value, horizontal])}
+        unit={C.units.px}
+        value={vertical}
+      />
+      <FreeNumberField
+        bounds={L.padding}
+        disabled={disabled}
+        id={id("casas-respiro-lados")}
+        label={C.countdown.cellPaddingX}
+        onChange={(value) => setPadding([vertical, value])}
+        unit={C.units.px}
+        value={horizontal}
+      />
+      <FreeNumberField
+        bounds={L.countdownGap}
+        disabled={disabled}
+        error={error("gap")}
+        id={id("casas-espaco")}
+        label={C.countdown.gap}
+        onChange={(gap) => onChange(withFreeNodeFields(design, node.id, { gap: gap === D.gap ? undefined : gap }), "gap")}
+        unit={C.units.px}
+        value={node.gap ?? D.gap}
+      />
+      <ColorField
+        disabled={disabled || labelsOff}
+        error={error("labelColor")}
+        id={id("nomes-cor")}
+        label={C.countdown.labelColor}
+        onChange={(labelColor) => onChange(withFreeNodeFields(design, node.id, { labelColor: labelColor.toLowerCase() === D.labelColor ? undefined : labelColor }), "labelColor")}
+        value={node.labelColor ?? D.labelColor}
+      />
+      <FreeNumberField
+        bounds={L.countdownLabelSize}
+        disabled={disabled || labelsOff}
+        error={error("labelSize")}
+        id={id("nomes-tamanho")}
+        label={C.countdown.labelSize}
+        onChange={(labelSize) => onChange(withFreeNodeFields(design, node.id, { labelSize: labelSize === D.labelSize ? undefined : labelSize }), "labelSize")}
+        unit={C.units.px}
+        value={node.labelSize ?? D.labelSize}
+      />
+      <FreeHints hints={freeHintsOf(hints, node.id, ["contrast", "small-text", "phone-text"]).filter((hint) => isCountdownLabelKey(hint.key))} />
+    </FreeSection>
   );
 }
 
@@ -117,7 +217,7 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
       </div>
       <div className="flex min-w-0 flex-col gap-2">
         <FreeNumberField bounds={L.fontSize} disabled={disabled} error={error("size")} id={id("tamanho-texto")} label={C.style.size} onChange={(size) => set({ size }, "size")} unit={C.units.px} value={style.size} />
-        <FreeHints hints={freeHintsOf(hints, node.id, ["small-text"])} />
+        <FreeHints hints={freeHintsOf(hints, node.id, ["small-text"]).filter((hint) => !isCountdownLabelKey(hint.key))} />
       </div>
       <WeightPicker disabled={disabled} font={style.font} id={id("peso")} label={C.style.weight} onChange={(weight) => set({ weight })} value={style.weight} />
       <AdminSwitch checked={style.italic === true} disabled={disabled} id={id("italico")} label={C.style.italic} onCheckedChange={(italic) => set({ italic: italic || undefined })} />
@@ -157,7 +257,7 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
       <div className="flex min-w-0 flex-col gap-2">
         <FreeTextPaintField disabled={disabled} error={error("paint")} id={id("cor-texto")} onChange={(paint) => set({ paint }, "paint")} value={style.paint} />
         {/* A dica do contraste ao passar o mouse (L6c) fica na seção dela, embaixo das cores de lá. */}
-        <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"]).filter((hint) => !freeIsHoverKey(hint.key))} />
+        <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"]).filter((hint) => !freeIsHoverKey(hint.key) && !isCountdownLabelKey(hint.key))} />
       </div>
       <div className="flex min-w-0 flex-col gap-3" id={id("contorno")} tabIndex={-1}>
         <AdminSwitch

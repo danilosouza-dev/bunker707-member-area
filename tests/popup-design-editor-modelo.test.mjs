@@ -153,14 +153,15 @@ function livreEmBranco() {
   return editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
 }
 
-test("modelos do Livre: os quatro, o botao “Saiba mais” quando falta, o video do Personalizado e a imagem do aviso como capa", () => {
+test("modelos do Livre: os cinco, o botao “Saiba mais” quando falta, o video do Personalizado e a imagem do aviso como capa", () => {
   assert.deepEqual(
     editor.FREE_STARTER_OPTIONS.map((starter) => [starter.label, starter.description]),
     [
       ["Vídeo no topo com degradê", "Vídeo em cima sumindo no fundo escuro, selo, título em duas cores e botão verde."],
       ["Só texto com brilho", "Sem mídia: manchas de luz no fundo, título em degradê e botão largo."],
       ["Em branco", "Só o fundo, um título, o botão e os links. Você coloca o resto."],
-      ["Imagem recortada com selo", "Uma imagem sem fundo ao lado do texto, um selo inclinado por cima e dois botões."]
+      ["Imagem recortada com selo", "Uma imagem sem fundo ao lado do texto, um selo inclinado por cima e dois botões."],
+      ["Contador com botão", "Selo, título, o contador até o fim do pop-up, um texto curto e o botão em destaque."]
     ]
   );
 

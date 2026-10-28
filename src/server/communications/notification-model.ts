@@ -93,12 +93,22 @@ export type NotificationsPage = {
 };
 
 export type PopupItem = {
+  /**
+   * Hora do servidor quando o POST /show respondeu (so com um Contador no Livre, L6f): o cartao acerta o relogio por
+   * ela, so com a resposta boa (C9). Fora do show (previas), sem a chave: vale o relogio do navegador.
+   */
+  asOf?: string;
   audio: NotificationAudio | null;
   body: string;
   canSnooze: boolean;
   /** v3b-1: so quando "Só no X"; sem a chave = fecha no X, no Esc ou clicando fora (o objeto padrao fica igual ao da v1). */
   close?: "x_only";
   cta: PopupCta | null;
+  /**
+   * Fim do pop-up (a data em que ele termina), so com um Contador no Livre (L6f): o Contador "ate o fim do pop-up"
+   * conta ate ela. null = o pop-up nao tem fim (o servidor esconde esse Contador, C16).
+   */
+  endsAt?: string | null;
   /**
    * Design "Personalizado" (docs/26), validado no servidor (popup-design-schema.ts) e com o endereco do video
    * recalculado do caminho. Sem a chave = Padrão: a resposta continua exatamente a da v3b-1.

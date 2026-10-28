@@ -20,6 +20,7 @@ import {
   Sparkles,
   Square,
   Tag,
+  Timer,
   TriangleAlert,
   Video,
   type LucideIcon
@@ -157,6 +158,7 @@ export function freeLayerDragAllowed(event: { altKey: boolean; ctrlKey: boolean;
 const LAYER_ICONS: Record<Exclude<FreeNode["type"], "box" | "button">, LucideIcon> = {
   audio: AudioLines,
   badge: Tag,
+  countdown: Timer,
   divider: Minus,
   heading: Heading,
   icon: Sparkles,

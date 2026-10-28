@@ -23,6 +23,7 @@ import type {
   FreeBoxLayout,
   FreeButtonHover,
   FreeColorStop,
+  FreeCountdownNode,
   FreeFade,
   FreeFillPaint,
   FreeId,
@@ -38,6 +39,7 @@ import type {
 } from "../../../../server/communications/popup-free-model";
 import {
   FREE_ARTBOARD_DEFAULTS,
+  FREE_COUNTDOWN_DEFAULTS,
   FREE_MARK_DEFAULTS,
   freeArtboardMinHeight,
   freeAssetUrl,
@@ -92,7 +94,7 @@ const TEXT_JUSTIFY = { center: "center", left: "flex-start", right: "flex-end" }
 /** Tipos que ficam "do tamanho do conteudo" na sequencia quando a largura nao foi escolhida (spec §2.4). */
 const HUG_TYPES: ReadonlySet<FreeNode["type"]> = new Set(["badge", "button", "icon"]);
 /** Tipos cuja "altura" e altura minima (o texto empurra a caixa em vez de vazar); os outros tem altura fixa. */
-const MIN_HEIGHT_TYPES: ReadonlySet<FreeNode["type"]> = new Set(["audio", "badge", "box", "button", "heading", "links", "text"]);
+const MIN_HEIGHT_TYPES: ReadonlySet<FreeNode["type"]> = new Set(["audio", "badge", "box", "button", "countdown", "heading", "links", "text"]);
 /** Tipos que recebem clique no aluno (texto selecionavel, botoes, links e o player); os outros sao enfeite. */
 const CLICKABLE_TYPES: ReadonlySet<FreeNode["type"]> = new Set(["audio", "badge", "button", "heading", "links", "text"]);
 
@@ -639,6 +641,35 @@ export function freeButtonLayoutCss(node: Extract<FreeNode, { type: "button" }>)
     textDecorationLine: node.textStyle?.decoration ?? "none"
   };
 }
+
+/**
+ * Contador (L6f): a linha das casas (alinhada pela textStyle.align), cada casa (numero em cima, nome embaixo, a caixa
+ * escolhida), o nome e os dois-pontos (na altura do numero, depois do respiro de cima da casa). Tudo em cqw do cartao.
+ */
+export function freeCountdownCss(node: FreeCountdownNode, style: FreeResolvedTextStyle, ctx: Pick<FreeStyleContext, "width">) {
+  const D = FREE_COUNTDOWN_DEFAULTS;
+  const cell = node.cell ?? {};
+  const padding = cell.padding ?? D.cellPadding;
+  const top = typeof padding === "number" ? padding : padding[0];
+
+  return {
+    cell: {
+      alignItems: "center",
+      backgroundImage: freeGradientCss(cell.fill ?? D.cellFill),
+      border: freeBorderCss(cell.border),
+      borderRadius: freeLength(cell.radius ?? D.cellRadius, ctx.width),
+      display: "flex",
+      flexDirection: "column",
+      padding: sidesCss(padding, ctx.width)
+    } satisfies CSSProperties,
+    label: { color: node.labelColor ?? D.labelColor, fontSize: freeFontSize(node.labelSize ?? D.labelSize, ctx.width), fontWeight: 500, lineHeight: 1.3 } satisfies CSSProperties,
+    row: { alignItems: "flex-start", columnGap: freeLength(node.gap ?? D.gap, ctx.width), display: "flex", justifyContent: TEXT_JUSTIFY[style.align] } satisfies CSSProperties,
+    separator: { paddingTop: freeLength(top, ctx.width) } satisfies CSSProperties
+  };
+}
+
+/** Os numeros do Contador: largura igual para todo algarismo (nada pula a cada segundo). */
+export const FREE_COUNTDOWN_NUMBER_CSS: CSSProperties = { fontVariantNumeric: "tabular-nums" };
 
 /** O texto do botao numa linha so, com reticencias. */
 export const FREE_BUTTON_LABEL_CSS: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
