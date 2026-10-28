@@ -51,6 +51,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Comunicacao: design Livre do pop-up, editor no estilo do Elementor (23/10/2026)](docs/27-comunicacao-design-livre.md)
 - [Comunicacao: modelos de notificacao, de pop-up e de design (25/10/2026)](docs/28-comunicacao-modelos.md)
 - [Comunicacao v3b-2: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio do pop-up e players de fora (23/10/2026)](docs/29-comunicacao-v3b2-momentos-relatorio-e-players.md)
+- [Webinarios: lives ao vivo e lives gravadas dentro da area (28/10/2026)](docs/30-webinarios.md)
 
 ## Padroes de trabalho
 
