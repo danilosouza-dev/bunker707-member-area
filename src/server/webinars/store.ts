@@ -384,14 +384,28 @@ async function findRegistrationRow(db: WebinarsDb, input: { session_id: string |
   return (data as RegistrationRow | null) ?? null;
 }
 
-export async function cancelRegistrationRow(db: WebinarsDb, input: { session_id: string | null; user_id: string; webinar_id: string }, now: string): Promise<RegistrationRow | null> {
+/**
+ * Cancela a vaga ativa; `changed` diz se foi esta chamada que cancelou (a vaga ja cancelada volta como esta, com
+ * changed false). A troca so vale para a linha ainda `registered`: duas chamadas juntas, uma muda.
+ */
+export async function cancelRegistrationRow(
+  db: WebinarsDb,
+  input: { session_id: string | null; user_id: string; webinar_id: string },
+  now: string
+): Promise<{ changed: boolean; row: RegistrationRow | null }> {
   const existing = await findRegistrationRow(db, input);
   if (!existing || existing.status !== "registered") {
-    return existing;
+    return { changed: false, row: existing };
   }
-  const { data, error } = await db.from("webinar_registrations").update({ cancelled_at: now, status: "cancelled" }).eq("id", existing.id).select(REGISTRATION_COLUMNS).single();
+  const { data, error } = await db
+    .from("webinar_registrations")
+    .update({ cancelled_at: now, status: "cancelled" })
+    .eq("id", existing.id)
+    .eq("status", "registered")
+    .select(REGISTRATION_COLUMNS)
+    .maybeSingle();
   assertNoDbError(error, "Webinarios: cancelar vaga");
-  return data as RegistrationRow;
+  return data ? { changed: true, row: data as RegistrationRow } : { changed: false, row: await findRegistrationRow(db, input) };
 }
 
 /**

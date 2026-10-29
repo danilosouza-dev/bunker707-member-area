@@ -11,7 +11,7 @@ import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { recordCommunicationEvents } from "../communications/route-support";
 import { requireWebinarAccess } from "./access";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
-import { canRegister, registrationEventMetadata, nextSession, toTime, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
+import { canRegister, registrationEventMetadata, nextSession, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { registrationFromRow, sessionFromRow, webinarFromRow } from "./rows";
 import { cancelRegistrationRow, countSessionRegistrations, fetchWebinarRow, listSessionRows, upsertRegistrationRow } from "./store";
 
@@ -167,19 +167,12 @@ export async function unregisterStudent(input: UnregisterStudentInput): Promise<
   const key = { user_id: input.userId, webinar_id: webinar.id };
   const nowIso = now.toISOString();
 
-  // Esta chamada cancelou quando cancelled_at e este instante. Compara o instante, nunca o texto: o Postgres devolve
-  // "+00:00" onde o toISOString escreve "Z".
-  const cancelledNow = (candidate: { cancelled_at: string | null; status: string } | null) =>
-    candidate?.status === "cancelled" && toTime(candidate.cancelled_at) === now.getTime();
-
-  // A vaga da sessao; sem ela, a vaga geral do webinario (session_id nulo), que tambem vale para a sessao.
-  let row = await cancelRegistrationRow(db, { ...key, session_id: session.id }, nowIso);
-  if (!cancelledNow(row)) {
-    const general = await cancelRegistrationRow(db, { ...key, session_id: null }, nowIso);
-    row = general ?? row;
-  }
-
-  const cancelled = cancelledNow(row);
+  // A vaga da sessao; sem ela, a vaga geral do webinario (session_id nulo), que tambem vale para a sessao. Quem diz
+  // se esta chamada cancelou e o banco (a linha mudou), nunca a hora devolvida.
+  const own = await cancelRegistrationRow(db, { ...key, session_id: session.id }, nowIso);
+  const general = own.changed ? null : await cancelRegistrationRow(db, { ...key, session_id: null }, nowIso);
+  const cancelled = own.changed || Boolean(general?.changed);
+  const row = own.changed ? own.row : (general?.row ?? own.row);
 
   if (cancelled && row) {
     await recordCommunicationEvents([
