@@ -55,7 +55,8 @@ test.describe("produtor", () => {
     const curva = page.getByRole("region", { name: "Presentes minuto a minuto" });
     // A media vem da RPC (arredondada): 10 baldes com 2 e 50 com 1 dao 1,17 -> 1.
     await expect(curva.getByRole("img", { name: /^Pico de 2 às 00:00; média de 1 presentes\./ })).toBeVisible();
-    await expect(curva.getByText("05:00 · 1 saiu", { exact: true })).toBeVisible();
+    // A queda aparece na lista "Maiores quedas" (o mesmo texto tambem e o <title> do ponto no SVG).
+    await expect(curva.getByRole("list", { name: "Maiores quedas" }).getByText("05:00 · 1 saiu", { exact: true })).toBeVisible();
     await curva.getByRole("button", { name: "Ver como tabela" }).click();
     const tabela = curva.getByRole("table", { name: "Presentes minuto a minuto" });
     await expect(tabela).toBeVisible();

@@ -44,7 +44,8 @@ async function entrarNaSala(page: Page) {
 test("Entrar 90 s depois do inicio: a sala abre, o player falso recebe setCurrentTime(~90), Ativar som liga o som e o selo Ao vivo aparece com o contador", async ({ page }) => {
   const sala = await entrarNaSala(page);
   await expect(sala).toHaveAttribute("data-room-phase", "live");
-  await expect(sala.getByText("Ao vivo")).toBeVisible();
+  // O selo tem duas versoes (computador e celular): so uma fica visivel.
+  await expect(sala.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
   await expect(sala.getByText(/1 assistindo/)).toBeVisible();
 
   const player = playerDaSala(page);

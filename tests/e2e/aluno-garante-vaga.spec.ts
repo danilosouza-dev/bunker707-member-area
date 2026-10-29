@@ -95,7 +95,8 @@ test("a 375 px a pagina do Webinario cabe sem rolagem lateral e o botao continua
 });
 
 test("quem nao entrou cai no login; a rota da sessao nao revela um webinario que nao existe", async ({ browser, page }) => {
-  const anonimo = await browser.newContext();
+  // Sem storageState explicito o contexto herda a sessao da aluna da configuracao.
+  const anonimo = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   await bloquearRedeExterna(anonimo);
   const visitante = await anonimo.newPage();
   await visitante.goto("/webinarios");
