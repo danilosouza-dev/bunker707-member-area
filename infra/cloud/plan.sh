@@ -26,7 +26,7 @@ min_ram = {"membros": float(sys.argv[4]), "marketing": float(sys.argv[5])}
 forced = {"membros": sys.argv[6], "marketing": sys.argv[7]}
 skip_marketing = sys.argv[8] not in ("", "0", "false")
 min_disk = {"membros": float(sys.argv[9]), "marketing": float(sys.argv[10])}
-include_arm = sys.argv[11] not in ("", "0", "false")
+include_arm = sys.argv[11] not in ("", "0", "false") if len(sys.argv) > 11 else False
 locations = [preferred] + [l for l in fallbacks if l != preferred]
 
 def price_at(t, loc):
