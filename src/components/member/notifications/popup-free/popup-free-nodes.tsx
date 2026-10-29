@@ -1,12 +1,23 @@
 "use client";
 
-import { Fragment, type CSSProperties, type MouseEvent, type RefCallback } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type MouseEvent, type RefCallback } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cn } from "@/lib/utils";
 import type { PopupItem } from "@/server/communications/notification-model";
-import type { FreeButtonNode, FreeId, FreeLine, FreeNode, PopupFreeDesign } from "@/server/communications/popup-free-model";
+import type { FreeButtonNode, FreeCountdownNode, FreeId, FreeLine, FreeNode, PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
-import { freeFirstHeading, freeFirstText, freeHasSnoozeButton, freeHollowColor, freeTextStyleOf, type FreeResolvedTextStyle } from "@/server/communications/popup-free-render";
+import {
+  FREE_COUNTDOWN_DEFAULTS,
+  freeCountdownParts,
+  freeCountdownSpoken,
+  freeCountdownTarget,
+  freeFirstHeading,
+  freeFirstText,
+  freeHasSnoozeButton,
+  freeHollowColor,
+  freeTextStyleOf,
+  type FreeResolvedTextStyle
+} from "@/server/communications/popup-free-render";
 import { NoticeAudioPlayer } from "../notice-audio-player";
 import { resolveNotificationLink, type NotificationLink } from "../notifications-model";
 import { primaryButtonTarget } from "../popup-design/popup-design-styles";
@@ -15,6 +26,7 @@ import { FreeImageView, FreeVideoView } from "./popup-free-media";
 import {
   FREE_BADGE_CSS,
   FREE_BUTTON_LABEL_CSS,
+  FREE_COUNTDOWN_NUMBER_CSS,
   FREE_FOCUS_CLASS,
   FREE_GRADIENT_SELECTION_CLASS,
   FREE_HEADING_LINE_CSS,
@@ -26,6 +38,7 @@ import {
   FREE_TOUCH_CLASS,
   freeBoxCss,
   freeBoxLayoutCss,
+  freeCountdownCss,
   freeButtonLayoutCss,
   freeDividerCss,
   freeHoverAttrs,
@@ -304,6 +317,75 @@ function LinksView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderCo
   );
 }
 
+/** Na previa sem data de fim ainda: 2 dias, 14 horas, 33 minutos e 9 segundos (so para ver o desenho). */
+const PREVIEW_SECONDS = 2 * 86400 + 14 * 3600 + 33 * 60 + 9;
+
+/**
+ * Contador (L6f): conta ate a data dele ou ate o fim do pop-up (`popup.endsAt`), com o relogio acertado pela hora do
+ * servidor que veio no show (`popup.asOf`, C9), uma vez ao abrir. Anda de segundo em segundo so no aluno; na previa,
+ * fica parado (sem data, PREVIEW_SECONDS). Em zero mostra o texto do fim e o pop-up nunca fecha sozinho. O leitor de
+ * tela le o nome do timer ("Tempo restante: ..."); as casas ficam escondidas dele.
+ */
+function CountdownView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderContext; node: FreeCountdownNode }) {
+  const s = ctx.style;
+  const target = freeCountdownTarget(node, ctx.popup.endsAt);
+  const [offset] = useState(() => {
+    const server = ctx.popup.asOf ? Date.parse(ctx.popup.asOf) : Number.NaN;
+
+    return Number.isNaN(server) ? 0 : server - Date.now();
+  });
+  const [now, setNow] = useState(() => Date.now());
+  const left = target === null ? PREVIEW_SECONDS : Math.ceil((target - now - offset) / 1000);
+  const ended = target !== null && left <= 0;
+
+  useEffect(() => {
+    if (s.preview || target === null || ended) {
+      return;
+    }
+
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+
+    return () => window.clearInterval(timer);
+  }, [ended, s.preview, target]);
+
+  if (target === null && !s.preview) {
+    return null;
+  }
+
+  const text = freeTextStyleOf(node);
+  const paint = labelPaintCss(text);
+  const ref = ctx.refFor(node.id);
+
+  if (ended) {
+    return (
+      <p data-free-id={node.id} ref={ref} style={{ ...base, ...freeTextCss(text, s) }}>
+        <span style={paint}>{node.ended ?? FREE_COUNTDOWN_DEFAULTS.ended}</span>
+      </p>
+    );
+  }
+
+  const parts = freeCountdownParts(left, node.units ?? FREE_COUNTDOWN_DEFAULTS.units);
+  const css = freeCountdownCss(node, text, s);
+
+  return (
+    <div aria-label={freeCountdownSpoken(parts)} data-free-id={node.id} ref={ref} role="timer" style={{ ...base, ...freeTextCss(text, s), ...css.row }}>
+      {parts.map((part, index) => (
+        <Fragment key={part.label}>
+          {index > 0 && node.separator ? (
+            <span aria-hidden="true" style={{ ...css.separator, ...paint }}>
+              :
+            </span>
+          ) : null}
+          <span aria-hidden="true" style={css.cell}>
+            <span style={{ ...FREE_COUNTDOWN_NUMBER_CSS, ...paint }}>{String(part.value).padStart(2, "0")}</span>
+            {node.labels === false ? null : <span style={css.label}>{part.label}</span>}
+          </span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext; node: FreeNode; parentDir: FreeParentDir }) {
   if (node.hidden) {
     return null;
@@ -365,6 +447,8 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
       return <ButtonView base={base} ctx={ctx} node={node} />;
     case "links":
       return <LinksView base={base} ctx={ctx} node={node} />;
+    case "countdown":
+      return <CountdownView base={base} ctx={ctx} node={node} />;
     case "audio":
       return ctx.popup.audio ? (
         <div data-free-id={node.id} ref={ref} style={{ ...base, textAlign: "left" }}>

@@ -797,10 +797,10 @@ test("freeAssetUrl só monta endereço de caminho do padrão e da origem conferi
  * Modelos, sincronia, JSON Schema e o documento
  * ---------------------------------------------------------------------------------------------- */
 
-test("os quatro modelos são válidos, sem dica de contraste e abaixo de 20 % do tamanho", () => {
+test("os cinco modelos são válidos, sem dica de contraste e abaixo de 20 % do tamanho", () => {
   assert.deepEqual(
     starters.FREE_DESIGN_STARTERS.map((item) => item.id),
-    ["video_top_fade", "glow_text", "blank", "cutout_sticker"]
+    ["video_top_fade", "glow_text", "blank", "cutout_sticker", "countdown_cta"]
   );
 
   for (const { id } of starters.FREE_DESIGN_STARTERS) {

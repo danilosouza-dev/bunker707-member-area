@@ -14,6 +14,7 @@ import {
   Sparkles,
   Square,
   Tag,
+  Timer,
   Video,
   type LucideIcon
 } from "lucide-react";
@@ -42,6 +43,7 @@ const ICONS: Record<FreeCatalogKind, LucideIcon> = {
   badge: Tag,
   button: RectangleHorizontal,
   column: Rows3,
+  countdown: Timer,
   cta: MousePointerClick,
   divider: Minus,
   gradient: Blend,

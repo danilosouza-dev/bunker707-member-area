@@ -326,7 +326,18 @@ Decisoes tomadas com o produtor (23/10):
 - **copiar e colar o design** (para pedir mudancas ao Claude ou ChatGPT do produtor por fora) vem no proximo PR (L1.1); **"Criar com IA"** pela conta conectada no gateway vem depois (L2);
 - o design guarda so caminhos dos nossos buckets e o endereco e montado na hora pela origem conferida; o X sempre visivel e erro que impede salvar.
 
-Em aberto: qual conta conectada usar primeiro no "Criar com IA" (Claude ou Codex) e a confirmacao do produtor de que a imagem de referencia pode ir para a empresa da IA (pergunta 3 da spec; pode responder depois).
+Fechado em 28/10/2026: o produtor **descartou o "Criar com IA"** (L2); nao sera feito, e as perguntas sobre a conta conectada e a imagem de referencia deixam de valer. O copiar e colar com as instrucoes para a IA (L1.1) continua.
+
+### Comunicacao: o que o produtor quer em seguida (28/10/2026)
+
+Decisoes do produtor de 28/10/2026, ao revisar o que ficou adiado em 26/10 (`docs/27` §10):
+
+- **enquete no pop-up**: desejada; e a enquete do construtor avancado que estava em aberto na v3b-1 (v3b-3, acima);
+- **contador no pop-up** (L6f do Livre): desejado, "aqueles contadores de oferta que tem em paginas de venda", para criar urgencia, com o aluno podendo clicar no botao; **feito** em 28/10 (`docs/27` §13.13), com as decisoes de 26/10 (`docs/27` §13.11). O produtor pode mandar exemplos de contadores para ajustar o visual (casas, cores, tamanhos) sem mudar o contrato;
+- **"Criar com IA"**: descartado (acima);
+- **textura e mistura** (L6e): **descartada** depois da explicacao ("Nao precisa colocar negocio de textura, de mistura, essas coisas");
+- **animacao de entrada** (L6d): registrada como **descartada** junto ("essas coisas"), a confirmar com o produtor; se ele quiser, volta com as criticas guardadas no `docs/27` §10;
+- **texto escrito direto no desenho** (L6g) e o L4c: continuam adiados, sem mudanca.
 
 ### Modelos da Comunicacao (25/10/2026)
 

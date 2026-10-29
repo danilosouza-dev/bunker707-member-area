@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { requireApiSessionUser } from "@/server/auth/guards";
 import { isPopupPageKey, POPUP_TRIGGERS, POPUP_V3B1_RULES } from "@/server/communications/popup-display-model";
+import { freeHasCountdown } from "@/server/communications/popup-free-render";
 import { PopupRefusedError, showPopup } from "@/server/communications/popups";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
@@ -92,7 +93,11 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    return noStore(NextResponse.json({ data: { next: shown.next, popup: shown.popup } }));
+    // Contador do Livre (L6f, C9): a hora do servidor so na resposta boa e so quando o design tem Contador; o cartao
+    // acerta o relogio por ela.
+    const popup = shown.popup.freeDesign && freeHasCountdown(shown.popup.freeDesign) ? { ...shown.popup, asOf: new Date().toISOString() } : shown.popup;
+
+    return noStore(NextResponse.json({ data: { next: shown.next, popup } }));
   } catch (error) {
     if (error instanceof PopupRefusedError) {
       return noStore(

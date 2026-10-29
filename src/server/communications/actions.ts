@@ -138,7 +138,7 @@ import { assertPopupDesignFonts } from "./popup-fonts";
 import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
 import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
 import type { PopupFreeDesign } from "./popup-free-model";
-import { POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
+import { freeCountdownProblems, POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, noticeStopOnToPublish, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import { TEMPLATE_LIMITS } from "./template-model";
@@ -1558,6 +1558,14 @@ async function changePopupStatus(input: {
   let loaded: LoadedAudience | undefined;
 
   if (input.to === "active") {
+    // Contador do Livre (L6f, C17): retomar confere de novo o fim do pop-up e a data de cada Contador.
+    const stored = parseStoredPopupDesign(row.popup_design).freeDesign;
+    const [countdownProblem] = stored ? freeCountdownProblems(stored, row.ends_at, now.getTime()) : [];
+
+    if (countdownProblem) {
+      throw new CommunicationError(countdownProblem.message, 422);
+    }
+
     // v3b-1: o pausado nao conta entre os 50 publicados; retomar o 51o e recusado (422).
     await assertPopupRoom(db, row, now, POPUPS_FULL_TO_RESUME);
     loaded = await loadFactsFor(db, now, audienceOfRow(row));

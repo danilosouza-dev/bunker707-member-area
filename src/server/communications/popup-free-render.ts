@@ -21,9 +21,12 @@ import type {
   FreeAsset,
   FreeButtonNode,
   FreeClose,
+  FreeCountdownNode,
+  FreeCountdownUnits,
   FreeHeadingNode,
   FreeNode,
   FreeTextNode,
+  FreeTextPaint,
   FreeTextStyle,
   PopupFreeDesign
 } from "./popup-free-model";
@@ -63,9 +66,10 @@ export const FREE_CLOSE_DEFAULTS: Readonly<FreeClose> = {
 /** O texto de cada tipo sem nada escolhido (tipos sem texto usam o do Texto). */
 export type FreeResolvedTextStyle = Required<Pick<FreeTextStyle, "align" | "font" | "letterSpacing" | "lineHeight" | "paint" | "size" | "weight">> & FreeTextStyle;
 
-export const FREE_TEXT_DEFAULTS: Readonly<Record<"badge" | "button" | "heading" | "links" | "text", Readonly<FreeResolvedTextStyle>>> = {
+export const FREE_TEXT_DEFAULTS: Readonly<Record<"badge" | "button" | "countdown" | "heading" | "links" | "text", Readonly<FreeResolvedTextStyle>>> = {
   badge: { align: "left", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.2, paint: { color: "#ffffff", kind: "solid" }, size: 12, weight: 700 },
   button: { align: "left", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.2, paint: { color: "#ffffff", kind: "solid" }, size: 15, weight: 700 },
+  countdown: { align: "center", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.1, paint: { color: "#ffffff", kind: "solid" }, size: 32, weight: 800 },
   heading: { align: "left", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.1, paint: { color: "#ffffff", kind: "solid" }, size: 28, weight: 800 },
   links: { align: "left", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.2, paint: { color: "#ffffff", kind: "solid" }, size: 13, weight: 600 },
   text: { align: "left", font: { key: "inter", kind: "builtin" }, letterSpacing: 0, lineHeight: 1.5, paint: { color: "#ffffff", kind: "solid" }, size: 15, weight: 400 }
@@ -73,7 +77,82 @@ export const FREE_TEXT_DEFAULTS: Readonly<Record<"badge" | "button" | "heading" 
 
 /** Os padroes de texto do tipo (os tipos sem texto proprio ficam com os do Texto). */
 export function freeTextDefaultsOf(type: FreeNode["type"]): Readonly<FreeResolvedTextStyle> {
-  return type === "badge" || type === "button" || type === "heading" || type === "links" ? FREE_TEXT_DEFAULTS[type] : FREE_TEXT_DEFAULTS.text;
+  return type === "badge" || type === "button" || type === "countdown" || type === "heading" || type === "links" ? FREE_TEXT_DEFAULTS[type] : FREE_TEXT_DEFAULTS.text;
+}
+
+/** O Contador sem nada escolhido (L6f): casas de vidro claro, nomes cinza de 12 px, as quatro casas, ate o fim do pop-up. */
+export const FREE_COUNTDOWN_DEFAULTS: Readonly<{
+  cellFill: FreeTextPaint;
+  cellPadding: [number, number];
+  cellRadius: number;
+  ended: string;
+  gap: number;
+  labelColor: HexColor;
+  labelSize: number;
+  units: FreeCountdownUnits;
+}> = {
+  cellFill: { color: "#ffffff14", kind: "solid" },
+  cellPadding: [10, 12],
+  cellRadius: 12,
+  ended: "Encerrado",
+  gap: 8,
+  labelColor: "#a1a1aa",
+  labelSize: 12,
+  units: "dhms"
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * Contador (L6f): as casas a partir dos segundos que faltam
+ * ---------------------------------------------------------------------------------------------- */
+
+type CountdownUnit = "d" | "h" | "m" | "s";
+/** Cada casa: segundos, o nome embaixo do numero e o nome falado (um e varios). */
+const COUNTDOWN_UNITS: Readonly<Record<CountdownUnit, readonly [number, string, string, string]>> = {
+  d: [86400, "dias", "dia", "dias"],
+  h: [3600, "horas", "hora", "horas"],
+  m: [60, "min", "minuto", "minutos"],
+  s: [1, "seg", "segundo", "segundos"]
+};
+
+export type FreeCountdownPart = { label: string; spoken: string; value: number };
+
+/**
+ * As casas para `seconds` segundos que faltam (>= 0). A maior casa leva o resto (sem dias, as horas passam de 24); sem
+ * segundos, os minutos arredondam para cima (nunca "00 00 00" antes de chegar a zero).
+ */
+export function freeCountdownParts(seconds: number, units: FreeCountdownUnits): FreeCountdownPart[] {
+  let rest = units.includes("s") ? Math.max(0, Math.floor(seconds)) : Math.ceil(Math.max(0, seconds) / 60) * 60;
+
+  return [...units].map((unit) => {
+    const [size, label, one, many] = COUNTDOWN_UNITS[unit as CountdownUnit];
+    const value = Math.floor(rest / size);
+
+    rest -= value * size;
+    return { label, spoken: `${value} ${value === 1 ? one : many}`, value };
+  });
+}
+
+/** O nome do Contador para o leitor de tela: "Tempo restante: 2 dias, 3 horas e 4 minutos" (os numeros ficam escondidos). */
+export function freeCountdownSpoken(parts: readonly FreeCountdownPart[]): string {
+  const words = parts.map((part) => part.spoken);
+  const last = words.pop();
+
+  return `Tempo restante: ${words.length > 0 ? `${words.join(", ")} e ${last}` : last}`;
+}
+
+/** O instante (ms) em que o Contador chega a zero: a data dele ou o fim do pop-up; null sem nenhum dos dois. */
+export function freeCountdownTarget(node: Pick<FreeCountdownNode, "until">, endsAt: string | null | undefined): number | null {
+  const at = node.until?.kind === "date" ? node.until.at : endsAt;
+  const time = at ? Date.parse(at) : Number.NaN;
+
+  return Number.isNaN(time) ? null : time;
+}
+
+/** O design tem algum Contador (em qualquer nivel)? */
+export function freeHasCountdown(design: Pick<PopupFreeDesign, "children">): boolean {
+  const has = (nodes: readonly FreeNode[]): boolean => nodes.some((node) => node.type === "countdown" || (node.type === "box" && has(node.children)));
+
+  return has(design.children);
 }
 
 /**

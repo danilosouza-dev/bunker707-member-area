@@ -49,7 +49,7 @@ import { FREE_IMAGE_PATH_PATTERN, resolveFreeArtboard } from "./popup-free-rende
 
 /** O que o painel Elementos oferece (Degradê e as duas Caixas viram forma e caixa no design). */
 export const FREE_ELEMENT_KINDS = [
-  "heading", "text", "badge", "cta", "button", "image", "video", "icon", "shape", "gradient", "divider", "spacer", "column", "row", "audio", "links"
+  "heading", "text", "badge", "cta", "button", "image", "video", "icon", "shape", "gradient", "divider", "spacer", "countdown", "column", "row", "audio", "links"
 ] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
 
@@ -59,6 +59,7 @@ export const FREE_ELEMENT_ID_PREFIX: Record<FreeElementKind, string> = {
   badge: "selo",
   button: "botao",
   column: "caixa",
+  countdown: "contador",
   cta: "principal",
   divider: "linha",
   gradient: "degrade",
@@ -151,6 +152,9 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
       return { id, type: "divider" };
     case "spacer":
       return { id, type: "spacer" };
+    case "countdown":
+      // Ate o fim do pop-up, com as quatro casas, os nomes e "Encerrado" (os padroes; L6f).
+      return { id, type: "countdown" };
     case "row":
       return { children: [], id, layout: { align: "center", dir: "row", gap: 8 }, type: "box" };
     case "column":
@@ -259,7 +263,8 @@ export const FREE_DESIGN_STARTERS = [
     description: "Uma imagem sem fundo ao lado do texto, um selo inclinado por cima e dois botões.",
     id: "cutout_sticker",
     label: "Imagem recortada com selo"
-  }
+  },
+  { description: "Selo, título, o contador até o fim do pop-up, um texto curto e o botão em destaque.", id: "countdown_cta", label: "Contador com botão" }
 ] as const;
 export type FreeStarterId = (typeof FREE_DESIGN_STARTERS)[number]["id"];
 
@@ -535,8 +540,55 @@ const CUTOUT_STICKER: PopupFreeDesignInput = {
   version: 1
 };
 
+/**
+ * "Contador com botão" (L6f, o quinto modelo): o selo com o relogio, o titulo, o Contador ate o fim do pop-up (as
+ * quatro casas com os nomes), um texto curto e o Botão principal vermelho, tudo centralizado num fundo escuro com um
+ * vermelho bem fraco no topo.
+ */
+const COUNTDOWN_CTA: PopupFreeDesignInput = {
+  artboard: {
+    align: "center",
+    border: { color: "#ffffff1a", width: 1 },
+    fill: [{ angle: 180, kind: "linear", stops: [{ at: 0, color: "#2a0d10" }, { at: 100, color: "#0f0f12" }] }],
+    gap: 16,
+    padding: [32, 24, 14, 24],
+    shadows: [{ blur: 80, color: "#000000b3", spread: 0, x: 0, y: 24 }]
+  },
+  assets: [],
+  children: [
+    {
+      box: { fill: [{ color: "#e5091433", kind: "solid" }], padding: [4, 10], radius: 999 },
+      icon: "clock",
+      id: "selo",
+      label: "Últimas horas",
+      textStyle: { paint: { color: "#fecaca", kind: "solid" } },
+      type: "badge"
+    },
+    { id: "titulo", lines: [[{ text: "As inscrições fecham em breve" }]], textStyle: { align: "center", size: 26 }, type: "heading" },
+    { id: "contador", type: "countdown" },
+    {
+      id: "texto",
+      lines: [[{ text: "Garanta a sua vaga antes do fim da contagem." }]],
+      textStyle: { align: "center", paint: { color: "#d4d4d8", kind: "solid" } },
+      type: "text"
+    },
+    {
+      action: { kind: "cta" },
+      box: { fill: [{ color: "#e50914", kind: "solid" }], padding: [14, 28], radius: 999 },
+      id: "botao",
+      textStyle: { size: 16 },
+      type: "button"
+    },
+    { id: "links", textStyle: { align: "center", paint: { color: "#a1a1aa", kind: "solid" }, size: 14 }, type: "links" }
+  ],
+  close: { background: "#ffffff14" },
+  mode: "free",
+  version: 1
+};
+
 const STARTERS: Record<FreeStarterId, PopupFreeDesignInput> = {
   blank: BLANK,
+  countdown_cta: COUNTDOWN_CTA,
   cutout_sticker: CUTOUT_STICKER,
   glow_text: GLOW_TEXT,
   video_top_fade: VIDEO_TOP_FADE
