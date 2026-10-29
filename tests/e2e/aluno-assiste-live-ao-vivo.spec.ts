@@ -212,7 +212,7 @@ test("o chat e as reacoes sao os nossos: o aceite na primeira mensagem, a mensag
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {
   // O historico ja tem as linhas dos testes anteriores: so contam os sinais deste teste (`at`, a hora do aparelho).
   const inicio = new Date().toISOString();
-  const desteTeste = async () => (await eventosDaLiveAoVivo("aluna")).filter((linha) => typeof linha.metadata.at === "string" && linha.metadata.at >= inicio);
+  const desteTeste = async () => porHoraDoAparelho((await eventosDaLiveAoVivo("aluna")).filter((linha) => typeof linha.metadata.at === "string" && linha.metadata.at >= inicio));
   const { dialogo, sala } = await entrarNaSala(page);
   const config = aoVivo.config;
   const TROCAS = ["setAudioInputDevice", "setAudioOutputDevice", "setVideoInputDevice"];
@@ -359,9 +359,16 @@ test("Configurações: antes da liberacao nada troca de aparelho; a camera so de
   expect(novas.filter((linha) => linha.event_type === "webinar_mic_toggled").map((linha) => linha.metadata.on)).toEqual([true, false]);
 });
 
+
+// Os sinais de um mesmo lote chegam juntos e ganham o mesmo created_at: a ordem dos eventos e a hora do aparelho
+// (metadata.at, ISO), nao a da gravacao.
+function porHoraDoAparelho<T extends { metadata: Record<string, unknown> }>(linhas: T[]): T[] {
+  return [...linhas].sort((a, b) => String(a.metadata.at).localeCompare(String(b.metadata.at)));
+}
+
 /** Os registros desta parte do teste (`at`, a hora do aparelho em que o sinal saiu). */
 function historicoDesde(inicio: string) {
-  return async () => (await eventosDaLiveAoVivo("aluna")).filter((linha) => typeof linha.metadata.at === "string" && linha.metadata.at >= inicio);
+  return async () => porHoraDoAparelho((await eventosDaLiveAoVivo("aluna")).filter((linha) => typeof linha.metadata.at === "string" && linha.metadata.at >= inicio));
 }
 
 /** A mao levantada e baixada marca que a fila ja mandou tudo o que veio antes (os lotes saem na ordem). */

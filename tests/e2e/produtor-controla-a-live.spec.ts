@@ -229,7 +229,8 @@ test.describe("produtor", () => {
     expect(montagem.configOverwrite).not.toHaveProperty("disableInitialGUM");
     expect(montagem.interfaceConfigOverwrite.SETTINGS_SECTIONS).toEqual(["devices"]);
 
-    const botao = page.getByRole("button", { exact: true, name: consoleAoVivo.configuracoes });
+    // Dentro do conteudo do admin: o menu lateral tem o grupo "Configurações" com o mesmo nome.
+    const botao = page.locator("#admin-main").getByRole("button", { exact: true, name: consoleAoVivo.configuracoes });
     await expect(botao).toHaveAttribute("aria-expanded", "false");
     await botao.click();
     await expect(botao).toHaveAttribute("aria-expanded", "true");
