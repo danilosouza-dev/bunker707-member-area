@@ -486,3 +486,18 @@ secao que mudou) do mesmo jeito, e atualizar juntos este paragrafo e o hash da g
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
 app (o indice parcial trava as escritas em `student_events` pelos segundos da montagem). Jitsi e Jibri so entram na fase
 3 (`docs/30` §7), com ok do produtor no chat antes de qualquer servidor novo.
+
+### 9.7 Webinarios v2: migracao `202610290001` aplicada na nuvem de teste (29/10/2026)
+
+A mesma PR leva a fase 2 "Live gravada" (`docs/30` §11) com `supabase/migrations/202610290001_webinars_v2_chat.sql`
+(sha256 fixado na guarda `webinarios-v2.guard`). Regra igual a da 9.6: **antes do merge na `dev`**. Sem ela, a sala da
+Live gravada, o console e o relatorio mostram o aviso de migracao pendente; o resto do app segue.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: secoes 1 a 12 pelo MCP do Supabase, `execute_sql`, uma por chamada, na
+ordem do arquivo, cada uma com `set lock_timeout = '5s';` (nenhuma travou). A secao 13 (`prune_webinar_history`, os unicos
+`delete` do arquivo, e o agendamento `bunker707-webinar-prune` as 06:47 UTC) fez o MCP pedir confirmacao, e a janela
+expirou tres vezes (ela espera 60 s e nao apareceu para o produtor): o produtor rodou no SQL Editor, num arquivo so, a 13, a
+14 (as permissoes das funcoes so para a `service_role`) e o registro da versao (`insert into
+supabase_migrations.schema_migrations (version, name) values ('202610290001', 'webinars_v2_chat') on conflict (version)
+do nothing;`). `list_migrations` mostra `202610290001`. Proxima vez que uma secao tiver `delete`: mandar direto o arquivo
+para o SQL Editor.
