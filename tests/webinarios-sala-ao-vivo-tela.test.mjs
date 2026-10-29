@@ -205,7 +205,7 @@ test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o c
   const hook = semComentarios(FONTES.hook);
   assert.match(hook, /window\.addEventListener\("pagehide", beacon\)/);
   assert.match(hook, /LIVE_ROOM_RULES\.eventFlushMs/, "um lote a cada 10 s");
-  assert.match(semComentarios(FONTES.api), /navigator\.sendBeacon\(url, new Blob\(\[body\], \{ type: "text\/plain;charset=UTF-8" \}\)\)/, "o mesmo corpo JSON do lote");
+  assert.match(semComentarios(FONTES.api), /navigator\.sendBeacon\(url, body\)/, "o mesmo corpo JSON do lote, como texto (Blob sai vazio no WebKit)");
   // Nenhum pop-up com a sala ou a pilula no ar: a mesma trava do player da aula, so acrescentada.
   assert.match(roomCode, /announceLiveRoomMedia\(\{ lessonId, on: true \}\);\s*return \(\) => announceLiveRoomMedia\(\{ lessonId, on: false \}\);/);
   assert.match(FONTES.signal, /export function announceLiveRoomMedia\(input: \{ lessonId: string; on: boolean \}\): void \{/);

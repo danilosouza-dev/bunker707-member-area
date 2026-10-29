@@ -214,9 +214,10 @@ function sendLessonProgressOnPageExit(payload: LessonProgressPayload) {
   const body = JSON.stringify(payload);
 
   try {
+    // Texto, não Blob: no WebKit o Blob pode ser coletado antes do envio e o POST sai vazio.
     if (
       typeof navigator.sendBeacon === "function" &&
-      navigator.sendBeacon(LESSON_PROGRESS_ENDPOINT, new Blob([body], { type: "application/json" }))
+      navigator.sendBeacon(LESSON_PROGRESS_ENDPOINT, body)
     ) {
       return;
     }

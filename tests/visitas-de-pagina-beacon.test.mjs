@@ -29,7 +29,11 @@ const beacon = await import("../src/components/member/page-visit-beacon.ts");
 const { PAGE_VISIT_THROTTLE_MS } = await import("../src/server/member-area/page-visit-model.ts");
 
 async function chaves() {
-  const lidas = await Promise.all(enviados.map(async ({ data, url }) => [url, JSON.parse(await data.text()).key]));
+  const lidas = enviados.map(({ data, url }) => {
+    // Texto, nunca Blob: no WebKit o Blob pode ser coletado antes do envio e o POST sai vazio (notifications-client.ts).
+    assert.equal(typeof data, "string", "o beacon manda o corpo como texto");
+    return [url, JSON.parse(data).key];
+  });
   enviados.length = 0;
   return lidas;
 }
