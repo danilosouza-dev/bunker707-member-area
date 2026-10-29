@@ -721,6 +721,10 @@ select pg_get_function_identity_arguments('public.webinar_close_session'::regpro
 select count(*) from public.webinar_report(gen_random_uuid()); -- 0
 select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
 select public.webinar_offer_conversions(now(), 1); -- roda sem erro (0 sem venda nova)
+-- (0003, 0004 e 0007) sessao sem Oferta e sem Assistente: nenhuma linha offer nem ai (na nuvem de teste, logo depois
+-- de aplicar, nenhuma sessao tem oferta nem resposta do Assistente)
+select count(*) from public.webinar_report((select id from public.webinar_sessions order by scheduled_at desc limit 1))
+  where metric in ('offer', 'offer_revenue', 'ai'); -- 0
 ```
 
 E das regras de acesso: `select relname, relrowsecurity from pg_class where relname in ('webinar_offers',
@@ -741,6 +745,15 @@ Assistente e da traducao. A `202610300007` rodou duas vezes seguidas e com os ca
 Se uma migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so
 a secao que mudou) do mesmo jeito, na ordem, e atualizar junto o hash na guarda dela; as guardas das seguintes conferem
 o hash acumulado das anteriores e tambem mudam.
+
+Mudanca de 30/10/2026 (segunda revisao da integracao, antes de qualquer aplicacao): em `webinar_report`, as linhas da
+Oferta sem grupo (`offer` `seen`, `clicks` e `purchases`) e as cinco do Assistente (`ai`) trocaram `where exists (...)`
+por `having exists (...)` na `202610300003` (secao 7), na `202610300004` (secao 6) e na `202610300007` (secao 5): um
+agregado sem grupo devolve uma linha mesmo com o `where` falso, entao toda sessao recebia oito linhas de zeros e o
+relatorio mostrava os blocos Oferta e Assistente em sessoes sem nenhum dos dois. So o corpo de `webinar_report` mudou
+(nenhuma tabela, coluna nem permissao); as guardas da `202610300003`, da `202610300004` e da `202610300007` ganharam o
+hash novo e as da `202610300004` a `202610300007` o hash acumulado novo. Num banco de ensaio que ja tenha as seis, basta
+rodar de novo a secao 5 da `202610300007` (a ultima a recriar `webinar_report`); o `create or replace` e idempotente.
 
 **Ambiente**: o Assistente e a traducao ficam desligados sem `WEBINAR_ASSISTANT_ENABLED=on` e
 `WEBINAR_TRANSLATION_ENABLED=on` (variaveis do servidor, nunca `NEXT_PUBLIC_*`) e sem uma conexao de IA ativa em

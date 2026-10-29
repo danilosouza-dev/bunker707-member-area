@@ -32,7 +32,7 @@ const rows = await import("../src/server/webinars/rows.ts");
 test("as migracoes ate a 202610300004 continuam byte a byte; a fase 4 sem buraco; a 202610300005 e o texto exato", () => {
   const applied = cumulativeHash("202610300004_webinars_v4c_assistente.sql");
   assert.equal(applied.count, 60);
-  assert.equal(applied.hash, "194d752b31c3f222b94fff0a36df63c0a2ab265745b6919dbcddd8c1ccc6291f", "uma migracao anterior mudou");
+  assert.equal(applied.hash, "7eeca5319aa12b198867d5db4b52ecb9946f56aaed25c10524688df6a1b3e414", "uma migracao anterior mudou");
   assert.deepEqual(
     migrationFiles().filter((name) => name.startsWith("2026103000")),
     [

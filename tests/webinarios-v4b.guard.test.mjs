@@ -38,7 +38,7 @@ test("as migracoes ate a 202610300002 continuam byte a byte; a 202610300003 e o 
   assert.equal(applied.count, 58);
   assert.equal(applied.hash, "9d188a99931179fb29491f9094261cc837e18a7fba2c1e1c8dfc606bacdba5ae", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300003_webinars_v4b_ofertas.sql"));
-  assert.equal(fileHash(MIGRATION), "6e4665d316a9a0eb0e3325483c118766ae931b44b81d1e0efad1d71db487ace9", "a 202610300003 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "c6bb9b6ce510cdc28ae084203bb90d43e5f7ec4fcc695ee1609cee8890bea2c7", "a 202610300003 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
 test("a 202610300003: nove secoes MCP, idempotente, so acrescenta; as quatro tabelas novas so do service_role", () => {
@@ -159,6 +159,10 @@ test("webinar_report e webinar_panel: o corpo anterior inteiro, a Oferta real e 
   const code = sqlCodeOf(read(MIGRATION));
   const report = functionBody(code, "webinar_report").body;
   assertKeepsBody(functionBody(sqlCodeOf(read("supabase/migrations/202610290001_webinars_v2_chat.sql")), "webinar_report").body, report, "webinar_report");
+  // As tres linhas da Oferta sem grupo so saem com oferta: `having` (um `where` falso ainda daria uma linha de zeros, e
+  // report-model.ts poria offer.present em toda sessao).
+  assert.equal((report.match(/having exists \(select 1 from win\) or exists \(select 1 from clicks\)/g) ?? []).length, 3, "offer seen, clicks e purchases atras do having");
+  assert.doesNotMatch(report, /where exists \(select 1 from win\)/);
   const panel = functionBody(code, "webinar_panel").body;
   // A unica linha que muda no painel: a sessao passa a trazer o resumo congelado (o bloco Simulacao separado).
   const panelBefore = functionBody(sqlCodeOf(read("supabase/migrations/202610300002_webinars_v4a_paineis.sql")), "webinar_panel").body.replace(

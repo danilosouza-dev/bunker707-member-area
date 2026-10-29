@@ -273,6 +273,13 @@ test("3. webinar_report e webinar_attendees contra numeros calculados a mao: so 
   assert.equal(linha(rows, "hot", alunoSemAcesso.id).total, 44);
   assert.equal(linha(rows, "replay", "viewers").total, 0);
   assert.equal(linha(rows, "sim_script", "fired").total, 0);
+  // Sessao sem oferta e sem resposta do Assistente (os dados do teste 7 ainda nao existem): nenhuma linha `offer` nem
+  // `ai`, nem as de zeros que um agregado sem grupo daria com o filtro falso.
+  assert.deepEqual(
+    rows.filter((row) => row.metric === "offer" || row.metric === "offer_revenue" || row.metric === "ai").map((row) => `${row.metric}/${row.item}`),
+    [],
+    "sem oferta e sem Assistente, nenhuma linha da Oferta nem do Assistente"
+  );
 
   const presentes = await fetchAttendees(db, LIVE.sessaoId);
   assert.deepEqual(presentes.map((row) => row.userId), [aluna.id, alunoSemAcesso.id], "mais tempo primeiro; a equipe fora");
@@ -301,6 +308,8 @@ test("4. a pagina do relatorio e o CSV: a sessao encerrada e a padrao, o replay 
   assert.deepEqual(selected.polls[0]?.options.map((option) => [option.label, option.total]), [["Planilha", 1], ["Agente", 0]]);
   assert.equal(selected.questions[perguntaId]?.body, "Vai ter replay?");
   assert.equal(selected.simulation.showLiveBadge, false);
+  // Sem oferta e sem Assistente: os dois blocos ficam fora da pagina.
+  assert.deepEqual([selected.report.offer.present, selected.report.assistant.present, selected.assistant.enabled], [false, false, false]);
 
   const csv = await loadWebinarReportCsv(db, { sessionId: LIVE.sessaoId, webinarId: LIVE.id });
   assert.ok(csv);

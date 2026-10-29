@@ -32,9 +32,9 @@ const UNDONE = /g\.closed_by is null or g\.closed_by not in \('refund', 'chargeb
 test("as migracoes ate a 202610300006 continuam byte a byte; a 202610300007 e o texto exato (as seis da fase 4 a aplicar antes do merge)", () => {
   const applied = cumulativeHash("202610300006_webinars_v4f_traducao.sql");
   assert.equal(applied.count, 62);
-  assert.equal(applied.hash, "54e93cf9df6b8caabee96ffd66bfa1e535af2194a8fc8b374fb119acbfe10ad7", "uma migracao anterior mudou");
+  assert.equal(applied.hash, "f4298411bb7f1b0b91487f8bcfb28dfb8ac4765821b34bb5d3414ddda5390714", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300007_webinars_v4_ajustes.sql"));
-  assert.equal(fileHash(MIGRATION), "7bd80f6a623246f669850f56cb70484a2be2c611b02d61a997f6dd8b15c2ab5b", "a 202610300007 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "6dfda6736c7a589b4062ce5878b929a6419f424f3c44270ed9530b458a3a2a44", "a 202610300007 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
 test("a 202610300007: seis secoes MCP, idempotente, so acrescenta; webinar_offer_seen so do service_role; as funcoes so do service_role", () => {
@@ -131,6 +131,10 @@ test("webinar_report e webinar_panel: viram pelo congelado na encerrada, compras
     assert.match(body, /case when g\.id is not null and \(g\.closed_by is null or g\.closed_by not in \('refund', 'chargeback'\)\) then c\.converted_sale_grant_id end as converted_sale_grant_id/, name);
     assert.doesNotMatch(body, /simulated_count_rule|simulated_joins|simulated_sale_notices|simulation_seed/, `${name}: as regras nunca entram num numero`);
   }
+  // A Oferta e o Assistente so com dados (o `having` da 0003 e da 0004 continua aqui).
+  assert.equal((report.match(/having exists \(select 1 from win\) or exists \(select 1 from clicks\)/g) ?? []).length, 3);
+  assert.equal((report.match(/having exists \(select 1 from (?:ai_msgs|handoffs)\)/g) ?? []).length, 5);
+  assert.doesNotMatch(report, /where exists \(select 1 from (?:ai_msgs|handoffs|win)\)/);
   assert.match(
     report,
     /select m\.id from public\.webinar_chat_messages m, s where m\.session_id = s\.id and m\.handoff_requested_at is not null\s*and not exists \(\s*select 1 from public\.webinar_questions q2\s*where q2\.message_id = m\.id and q2\.session_id = s\.id and q2\.handoff_requested_at is not null\s*\)/,

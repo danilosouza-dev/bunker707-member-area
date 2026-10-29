@@ -25,6 +25,23 @@ function fraseDaProxima() {
   return new RegExp(`^${modelo}$`);
 }
 
+/**
+ * Os minutos que a frase pode mostrar com o relogio da pagina em qualquer instante de `desde` a `ate`: o relogio da
+ * pagina anda em passos de 15 s (useTickingNow) e pode estar atras do Date.now() do teste, entao perto da virada de um
+ * horario (:00, :15, :30, :45) a pagina ainda conta para o horario que acabou de comecar ("1 min") enquanto o teste ja
+ * conta para o seguinte ("15 min"). A mesma conta de nextJitSlot: o proximo horario estritamente depois de agora.
+ */
+function minutosPossiveis(desde: number, ate: number) {
+  const valores = new Set<number>();
+  for (let instante = desde; ; instante = Math.min(instante + 1_000, ate)) {
+    const proximo = Math.floor(instante / QUINZE_MIN) * QUINZE_MIN + QUINZE_MIN;
+    valores.add(Math.max(1, Math.ceil((proximo - instante) / 60_000)));
+    if (instante === ate) {
+      return valores;
+    }
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
@@ -60,21 +77,24 @@ async function entrar(page: Page) {
 }
 
 test("a página mostra A próxima sessão começa em {n} min, sem Garantir vaga, e o Entrar leva à sala da sessão do horário, criada uma vez", async ({ page }) => {
+  const abriu = Date.now();
   await abrirPagina(page);
   const frase = page.getByText(fraseDaProxima());
   await expect(frase).toBeVisible();
   const minutos = Number(fraseDaProxima().exec((await frase.textContent())?.trim() ?? "")?.[1]);
+  const leu = Date.now();
   expect(minutos).toBeGreaterThanOrEqual(1);
   expect(minutos).toBeLessThanOrEqual(15);
-  // O mesmo minuto que o relogio diz (o proximo limite de 15 min; 1 minuto de folga para a virada).
-  const proximo = Math.ceil(Date.now() / QUINZE_MIN) * QUINZE_MIN;
-  expect(Math.abs(minutos - Math.max(1, Math.ceil((proximo - Date.now()) / 60_000)))).toBeLessThanOrEqual(1);
+  // O mesmo minuto que o relogio diz: o do proximo limite de 15 min em algum instante entre abrir a pagina (menos um
+  // passo do relogio dela e uma folga) e ler a frase; cobre a virada do minuto e a do horario.
+  expect([...minutosPossiveis(abriu - 30_000, leu)]).toContain(minutos);
   await expect(page.getByText(JIT.semVaga, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: WEBINAR_COPY.aluno.garantirVaga })).toHaveCount(0);
   expect(await sessoesJitNoBanco()).toEqual([]);
 
   const antes = Date.now();
   const sessaoId = await entrar(page);
+  const depois = Date.now();
 
   const sessoes = await sessoesJitNoBanco();
   expect(sessoes.map((sessao) => sessao.id)).toEqual([sessaoId]);
@@ -83,7 +103,9 @@ test("a página mostra A próxima sessão começa em {n} min, sem Garantir vaga,
   const horario = Date.parse(sessao.scheduled_at);
   expect(horario % QUINZE_MIN).toBe(0);
   expect(horario).toBeGreaterThan(antes - 60_000);
-  expect(horario).toBeLessThanOrEqual(antes + QUINZE_MIN);
+  // O servidor escolhe o horario pela hora dele, entre `antes` e `depois`: se o pedido cair logo depois de uma virada,
+  // e o horario seguinte (ate 15 min depois do pedido, nao de `antes`).
+  expect(horario).toBeLessThanOrEqual(depois + QUINZE_MIN);
 
   await expect.poll(async () => (await eventosDeWebinario("webinar_jit_entered")).map((evento) => evento.entity_id)).toEqual([sessaoId]);
   const [evento] = await eventosDeWebinario("webinar_jit_entered");

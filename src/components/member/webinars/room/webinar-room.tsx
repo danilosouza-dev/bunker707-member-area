@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -99,6 +99,23 @@ export function useRoomDialogLock(rootRef: RefObject<HTMLElement | null>, active
       previous?.focus?.();
     };
   }, [active, rootRef]);
+}
+
+/**
+ * O foco caiu fora da sala porque a peca que o tinha saiu (o painel, a gaveta ou o compositor quando a sala fica
+ * indisponivel, D41): volta para o primeiro [data-room-first-focus] ou, sem ele, para o primeiro controle da sala (o
+ * topo), e nunca fica no body, onde o Esc e a trava do Tab deixariam de valer. Devolve se moveu o foco.
+ */
+export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelector"> | null, active: Element | null): boolean {
+  if (!root || (active !== null && root.contains(active))) {
+    return false;
+  }
+  const target = root.querySelector<HTMLElement>("[data-room-first-focus]") ?? root.querySelector<HTMLElement>(ROOM_FOCUSABLE);
+  if (!target) {
+    return false;
+  }
+  target.focus();
+  return true;
 }
 
 /** O Tab preso no dialogo: do ultimo volta ao primeiro (e o Shift+Tab ao contrario). */
@@ -265,7 +282,16 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   // Foco preso e Esc (docs/30 §1.7): o dialogo e o unico lugar do teclado enquanto esta aberto.
   useRoomDialogLock(rootRef, !minimized);
 
-  // A gaveta fechou (Esc, Voltar para o video, toque fora): o foco volta para o botao que abriu.
+  // Fora do "Quem pode" (D41) o painel, a gaveta e o compositor saem com o foco que estava neles: ele volta para a
+  // sala antes do proximo toque de tecla (como barFocusLost na sala ao vivo).
+  useLayoutEffect(() => {
+    if (unavailable && !minimized) {
+      refocusRoom(rootRef.current, document.activeElement);
+    }
+  }, [minimized, unavailable]);
+
+  // A gaveta fechou (Esc, Voltar para o video, toque fora): o foco volta para o botao que abriu. Fechada porque a sala
+  // ficou indisponivel, o botao saiu junto e o efeito acima ja trouxe o foco de volta.
   const drawerWasOpenRef = useRef(false);
   useEffect(() => {
     if (drawerVisible) {

@@ -360,6 +360,16 @@ export function consoleClockMs(session: Pick<WebinarSession, "endedAt" | "kind" 
   return Number.isFinite(durationMs) ? Math.min(elapsed, durationMs) : elapsed;
 }
 
+/**
+ * O relogio do painel Presenca (docs/30 §2.4), no eixo dos baldes da presenca e do relatorio: o do topo
+ * (consoleClockMs: a Live ao vivo desde o Iniciar live, a gravada desde a hora marcada), que para no encerramento; na
+ * gravada, no ultimo instante do video, para a curva terminar no ultimo minuto dele mesmo com o tick fechando depois.
+ */
+export function consolePresenceClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "scheduledAt" | "startedAt" | "status">, durationMs: number, nowMs: number): number {
+  const clock = consoleClockMs(session, durationMs, nowMs);
+  return session.kind === "simulated" && Number.isFinite(durationMs) && durationMs > 0 ? Math.min(clock, durationMs - 1) : clock;
+}
+
 /** Agora, ou o encerramento se a sessao ja acabou (o relogio do console para ali). */
 function untilEnded(session: Pick<WebinarSession, "endedAt">, nowMs: number): number {
   const endedMs = toTime(session.endedAt);

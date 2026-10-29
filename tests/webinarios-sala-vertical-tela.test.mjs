@@ -410,3 +410,36 @@ test("o topo sozinho: os botoes de 44 px e o titulo truncado a 375 px; so os bot
   assert.match(html, /<div class="pointer-events-auto flex shrink-0/);
   assert.match(html, /<h1 class="min-w-0 truncate/);
 });
+
+test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba ou no campo do chat: as pecas saem e o foco volta para a sala (o primeiro controle do topo), nunca fica no body", () => {
+  const focados = [];
+  const controle = (nome) => ({ focus: () => focados.push(nome) });
+  const body = { nome: "body" };
+  const campo = { nome: "campo da aba Perguntas" };
+  const sair = controle("Sair da confirmacao");
+  const minimizar = controle("Minimizar do topo");
+  const raiz = ({ dentro = [], primeiro = null, topo = minimizar } = {}) => ({
+    contains: (node) => dentro.includes(node),
+    querySelector: (selector) => (selector === "[data-room-first-focus]" ? primeiro : selector === room.ROOM_FOCUSABLE ? topo : null)
+  });
+
+  // A gaveta (e o compositor com o botao dela) saiu com o foco no campo: o foco caiu no body e volta para o topo da sala,
+  // onde o Esc ainda sai e o Tab continua preso.
+  assert.equal(room.refocusRoom(raiz(), body), true);
+  assert.deepEqual(focados, ["Minimizar do topo"]);
+  // Com a confirmacao de saida aberta, o [data-room-first-focus] dela vem primeiro.
+  assert.equal(room.refocusRoom(raiz({ primeiro: sair }), null), true, "sem elemento ativo tambem conta como fora");
+  assert.deepEqual(focados.at(-1), "Sair da confirmacao");
+  // O foco ainda dentro da sala: nada muda.
+  assert.equal(room.refocusRoom(raiz({ dentro: [campo] }), campo), false);
+  assert.equal(room.refocusRoom(null, body), false);
+  assert.equal(room.refocusRoom(raiz({ topo: null }), body), false, "sem controle nenhum, nada a focar");
+  assert.equal(focados.length, 2);
+
+  // A sala chama a volta do foco no mesmo quadro em que fica indisponivel (antes da proxima tecla), so aberta (a
+  // pilula minimizada nao rouba o foco da pagina).
+  const roomSource = readFileSync(new URL("../src/components/member/webinars/room/webinar-room.tsx", import.meta.url), "utf8");
+  assert.match(roomSource, /useLayoutEffect\(\(\) => \{\s*if \(unavailable && !minimized\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);\s*\}\s*\}, \[minimized, unavailable\]\);/);
+  assert.match(roomSource, /composer=\{\s*vertical && !unavailable \?/, "o compositor (com o botao da gaveta) sai com a sala indisponivel");
+  assert.match(roomSource, /const drawerVisible = vertical && drawerOpen && !minimized && !unavailable;/);
+});

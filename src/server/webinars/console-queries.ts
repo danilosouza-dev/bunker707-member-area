@@ -14,9 +14,10 @@ import "server-only";
 
 import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
 import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
-import { consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
+import { consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
 import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
+import { sessionRecordingOf, sessionVideoDurationMs } from "./export-queries";
 import {
   latestRoomJoins,
   liveParticipantName,
@@ -366,9 +367,30 @@ export async function loadLiveConsole(db: WebinarsDb, input: { authors: readonly
  * ---------------------------------------------------------------------------------------------- */
 
 /**
+ * A duracao do video da sessao gravada (onde o relogio do painel Presenca para): a congelada no encerramento, senao a
+ * gravacao da sessao, senao a prevista do webinario (a mesma conta do relatorio). NaN fora da gravada; a leitura que
+ * falha tambem da NaN (o painel fica sem o teto e o resto do console segue).
+ */
+async function simulatedDurationMs(db: WebinarsDb, session: WebinarSession, webinar: WebinarRow | undefined): Promise<number> {
+  if (session.kind !== "simulated" || !webinar) {
+    return Number.NaN;
+  }
+  if (session.presenceCurve?.durationMs) {
+    return session.presenceCurve.durationMs;
+  }
+  try {
+    return sessionVideoDurationMs(session, sessionRecordingOf(await listRecordingRows(db, [session.webinarId]), session), webinar.duration_minutes);
+  } catch (error) {
+    console.error(`[admin/webinarios] duracao do video da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+    return Number.NaN;
+  }
+}
+
+/**
  * O painel Presenca (docs/30 §2.4) pela visao do relatorio em cache (60 s, o minuto do relogio na chave): o console
- * relê a cada 5 s e a RPC roda no maximo uma vez por minuto. Replay, antes de comecar ou a leitura que falhou: nulo (o
- * painel some e o resto do console segue).
+ * relê a cada 5 s e a RPC roda no maximo uma vez por minuto. `offsetMs` e o relogio do topo (consolePresenceClockMs),
+ * que para no encerramento: a curva da sessao encerrada termina no ultimo minuto dela, nao no minuto de agora.
+ * Replay, antes de comecar ou a leitura que falhou: nulo (o painel some e o resto do console segue).
  */
 async function loadConsolePresence(session: WebinarSession, offsetMs: number, nowMs: number): Promise<ConsolePresence | null> {
   if (!consolePresenceApplies(session.kind, offsetMs)) {
@@ -388,21 +410,22 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   const session = sessionFromRow(input.session);
   const nowMs = input.now.getTime();
   const offsetMs = sessionOffsetMs(session, nowMs);
-  const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds] = await Promise.all([
+  const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds, durationMs] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
     input.kind === "simulated" ? listScriptItemRows(db, session.webinarId) : Promise.resolve([]),
     input.kind === "simulated" ? loadFiredScript(db, session.id) : Promise.resolve({}),
     loadLaunchedPolls(db, session.webinarId, session.id),
     listPollRows(db, { sessionId: null, webinarId: session.webinarId }),
     listQuestionRows(db, { order: "votes", sessionId: session.id }),
-    Number.isFinite(offsetMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(offsetMs / 1000), sessionId: session.id }) : Promise.resolve([])
+    Number.isFinite(offsetMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(offsetMs / 1000), sessionId: session.id }) : Promise.resolve([]),
+    simulatedDurationMs(db, session, input.webinar)
   ]);
   const authors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
   const audienceAuthors = chatRows.filter((row) => row.source === "audience" && row.author_user_id).map((row) => row.author_user_id as string);
   const [consented, live, presence] = await Promise.all([
     authors.length > 0 ? loadConsentFlags(db, authors) : Promise.resolve(new Set<string>()),
     session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
-    loadConsolePresence(session, offsetMs, nowMs)
+    loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs)
   ]);
   const messages: ConsoleMessage[] = chatRows.map((row) => ({
     ...chatMessageFromRow(row),

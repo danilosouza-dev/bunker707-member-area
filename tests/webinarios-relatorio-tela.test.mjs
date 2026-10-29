@@ -615,6 +615,14 @@ test("'Avisar quem não veio' numa live de duas sessoes: as regras valem para a 
   assert.equal(model.absenteesNoticeReady([s1, { ...s2, endedAt: "2026-11-04T23:40:00.000Z", status: "ended" }, replay], 60, Date.parse("2026-11-05T12:00:00.000Z")), true, "as duas encerradas");
   assert.equal(model.absenteesNoticeReady([s1, { ...s2, status: "cancelled" }], 60, terca), true, "S2 cancelada");
   assert.equal(model.absenteesNoticeReady([s1, s2], 60, Date.parse("2026-11-05T12:00:00.000Z")), true, "S2 nunca abriu e passou do fim + 2 h");
+  // No ar vale pelo status, seja qual for a hora: a Live ao vivo de 60 min ainda no ar 3 h depois (sem Encerrar) e a
+  // gravada com o video mais longo que a duracao seguram o botao; a sala de espera aberta tambem.
+  const s2NoAr = { ...s2, startedAt: s2.scheduledAt, status: "live" };
+  assert.equal(model.absenteesNoticeReady([s1, s2NoAr, replay], 60, Date.parse("2026-11-05T02:05:00.000Z")), false, "S2 ainda no ar depois de duracao + 2 h");
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2NoAr, kind: "simulated" }, replay], 60, Date.parse("2026-11-05T02:05:00.000Z")), false, "gravada com o video ainda tocando");
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2, status: "waiting" }, replay], 60, Date.parse("2026-11-05T02:05:00.000Z")), false, "S2 na sala de espera");
+  // Uma sessao jit no ar continua fora da conta (nunca tem vaga).
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2NoAr, jit: true }], 60, Date.parse("2026-11-05T02:05:00.000Z")), true, "jit no ar nao conta");
   // As sessoes do "Começa quando você entra" nunca tem vaga: uma marcada para daqui a pouco nao segura o botao.
   assert.equal(model.absenteesNoticeReady([s1, { ...s2, jit: true }], 60, terca), true, "jit nao conta");
 

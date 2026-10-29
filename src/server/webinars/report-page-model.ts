@@ -86,10 +86,15 @@ export function reportableSessions(sessions: readonly WebinarSession[], now: num
  * O "Avisar quem não veio" do bloco Vagas (docs/30 §3.4) monta "garantiu vaga E não participou" da live inteira (a
  * vaga de qualquer sessao, a presenca em qualquer uma), nao so da sessao escolhida. Liga so quando nenhuma hora
  * marcada esta por acontecer ou no ar (nextSession sem o replay e sem as `jit`, que nunca tem vaga): antes disso, quem
- * garantiu vaga numa sessao futura receberia "você não veio" antes da live dele.
+ * garantiu vaga numa sessao futura receberia "você não veio" antes da live dele. "No ar" e o status, seja qual for a
+ * hora: nextSession tira a sessao da conta depois de duracao + 2 h, mas a Live ao vivo segue `live` ate o Encerrar e a
+ * gravada ate o fim do video (que pode passar da duracao do webinario).
  */
 export function absenteesNoticeReady(sessions: readonly Pick<WebinarSession, "endedAt" | "jit" | "kind" | "scheduledAt" | "status">[], durationMinutes: number, now: number): boolean {
-  return nextSession(sessions.filter((session) => !session.jit), durationMinutes, now) === null;
+  const scheduled = sessions.filter((session) => !session.jit && session.kind !== "replay");
+  const onAir = scheduled.some((session) => session.status === "live" || session.status === "waiting");
+
+  return !onAir && nextSession(scheduled, durationMinutes, now) === null;
 }
 
 /** A sessao aberta por padrao: a hora marcada mais recente que ja comecou (marcada ou jit); sem nenhuma, o replay. */

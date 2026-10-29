@@ -30,9 +30,9 @@ const model = await import("../src/server/webinars/model.ts");
 test("as migracoes ate a 202610300003 continuam byte a byte; a 202610300004 e o texto exato (aplicar antes do merge)", () => {
   const applied = cumulativeHash("202610300003_webinars_v4b_ofertas.sql");
   assert.equal(applied.count, 59);
-  assert.equal(applied.hash, "bb5a9d96665ab7c98ca433f503e88af339053c8b7af9400343d193f68b3d4e5d", "uma migracao anterior mudou");
+  assert.equal(applied.hash, "83c2e855cda3c8883c9a01ef21a3ccdafef27b9885d3c693fdb68392aa00a917", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300004_webinars_v4c_assistente.sql"));
-  assert.equal(fileHash(MIGRATION), "13315cd186925e17c79bbee1536cd02f64bdbcc119c1a09c60a949a62e47639d", "a 202610300004 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "f255bc0a13350aa40438c949bc4f7a3f1317186c8b23b7c117824ce06a8d55fe", "a 202610300004 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
 test("a 202610300004: sete secoes MCP, idempotente, so acrescenta; tres tabelas novas so do service_role", () => {
@@ -74,6 +74,10 @@ test("webinar_report: o corpo da 202610300003 inteiro e as Respostas do Assisten
   for (const item of ["replies", "avg_seconds", "edited", "deleted", "handoffs"]) {
     assert.match(report, new RegExp(`select 'ai', '${item}'`), item);
   }
+  // Sem resposta do Assistente, nenhuma linha `ai` (um agregado sem grupo com `where` falso ainda daria uma de zeros).
+  assert.equal((report.match(/having exists \(select 1 from ai_msgs\)/g) ?? []).length, 4, "replies, avg_seconds, edited e deleted atras do having");
+  assert.match(report, /select 'ai', 'handoffs', count\(\*\)::bigint, 0::bigint from handoffs h having exists \(select 1 from handoffs\)/);
+  assert.doesNotMatch(report, /where exists \(select 1 from (?:ai_msgs|handoffs|win)\)/);
   const aiLines = report.split("\n").filter((line) => line.includes("'ai', '"));
   assert.ok(aiLines.every((line) => !/sim_|scripted/.test(line)), "o Assistente nao e Simulacao (D24, M6)");
 });

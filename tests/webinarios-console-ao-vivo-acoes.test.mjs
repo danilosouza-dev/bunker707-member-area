@@ -977,6 +977,31 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
   }
 });
 
+test("fase 4: o painel Presença do retrato para no encerramento, como o topo: a Live gravada de 60 min fechada 1 min depois e aberta meia hora depois mostra a curva até o minuto 59", async () => {
+  const nowMs = Date.now();
+  const inicio = nowMs - 90 * MIN;
+  const relatorio = [
+    ...Array.from({ length: 120 }, (_, b) => ({ item: String(b), metric: "presence", students: 8, total: 8 })),
+    { item: "60", metric: "peak", students: 9, total: 9 },
+    { item: "58", metric: "chat_minute", students: 1, total: 4 },
+    { item: "59", metric: "chat_minute", students: 1, total: 6 }
+  ];
+  const db = usar(bancoEmMemoria(cenario(), { ...RPC, webinar_report: () => ({ data: relatorio, error: null }) }));
+  Object.assign(linha(db, S_GRAVADA), { ended_at: new Date(inicio + 61 * MIN).toISOString(), scheduled_at: new Date(inicio).toISOString(), started_at: new Date(inicio).toISOString(), status: "ended" });
+
+  const { presence } = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs));
+  assert.ok(presence, "o painel existe na sessao encerrada");
+  assert.equal(presence.minute, 59, "o ultimo minuto do video (60 min do webinario, sem gravacao), nao o 90 de agora");
+  assert.deepEqual([presence.curve[0], presence.curve.at(-1)], [{ minute: 30, present: 8 }, { minute: 59, present: 8 }], "a curva dos ultimos 30 minutos da sessao, sem minutos vazios depois do fim");
+  assert.equal(presence.messagesLastMinute, 4, "o ultimo minuto inteiro da sessao");
+  assert.deepEqual(presence.peak, { minute: 30, present: 9 });
+
+  // A gravada que passou da duracao antes de o tick fechar: o mesmo teto, pela duracao da gravacao da sessao (45 min).
+  db.tables.webinar_recordings.push({ ...DEFAULTS.webinar_recordings, created_at: agora(), duration_seconds: 45 * 60, id: randomUUID(), source: "bunny", updated_at: agora(), webinar_id: WEBINAR });
+  Object.assign(linha(db, S_GRAVADA), { ended_at: null, status: "live" });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs))).presence.minute, 44);
+});
+
 test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sessoes 'Comeca quando voce entra' so as de hoje em Sao Paulo e as em andamento; a pedida fica", () => {
   // 05/11/2026 23:30 em UTC = 20:30 em Sao Paulo: "hoje" e o dia 05 em Sao Paulo.
   const nowMs = Date.parse("2026-11-05T23:30:00.000Z");

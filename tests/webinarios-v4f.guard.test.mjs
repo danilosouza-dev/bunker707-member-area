@@ -25,7 +25,7 @@ const hash = await import("../src/server/webinars/text-hash.ts");
 test("as migracoes ate a 202610300005 continuam byte a byte; a 202610300006 e o texto exato (aplicar antes do merge)", () => {
   const applied = cumulativeHash("202610300005_webinars_v4e_just_in_time.sql");
   assert.equal(applied.count, 61);
-  assert.equal(applied.hash, "c242f358a4005715e920b37ef1866a58d8124f7f571e4f1466e6c4dda61df358", "uma migracao anterior mudou");
+  assert.equal(applied.hash, "334766e5812c6bf5b9ff9edc33a63598c2ddcf402ee0e133b026e4ae53580634", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300006_webinars_v4f_traducao.sql"));
   assert.equal(fileHash(MIGRATION), "0b9f580166b520ab5799628270ec2b6584b667a153ac74f65b7acf4523a29a94", "a 202610300006 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });

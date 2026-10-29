@@ -583,15 +583,16 @@ as $$
   select 'sim_script', 'missed', greatest(sr.n - sf.n, 0), 0::bigint from script_ready sr, script_fired sf
     where exists (select 1 from public.webinar_sessions x, s where x.id = s.id and x.script_fired_at is not null)
   union all
+  -- `having`, nao `where`: um agregado sem grupo devolve uma linha (de zeros) mesmo com o filtro falso.
   select 'offer', 'seen', count(*)::bigint, count(distinct os.user_id)::bigint from offer_seen os
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', 'clicks', count(*)::bigint, count(distinct c.user_id)::bigint from clicks c
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', 'purchases', count(*) filter (where c.converted_sale_grant_id is not null)::bigint,
     count(distinct c.user_id) filter (where c.converted_sale_grant_id is not null)::bigint from clicks c
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', os.label || ':seen', count(*)::bigint, count(distinct os.user_id)::bigint
     from offer_seen os where os.label is not null group by os.label
@@ -613,19 +614,20 @@ as $$
   select 'sim_sales', 'shown', (sim.summary->>'sale_notices_shown')::bigint, 0::bigint
     from sim where jsonb_typeof(sim.summary->'sale_notices_shown') = 'number'
   union all
+  -- Como na Oferta, `having`: sem resposta do Assistente, nenhuma linha `ai`.
   select 'ai', 'replies', count(*) filter (where am.deleted_at is null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
+    having exists (select 1 from ai_msgs)
   union all
   select 'ai', 'avg_seconds', coalesce(round(avg(extract(epoch from (ar.answered_at - ar.requested_at)))), 0)::bigint, count(*)::bigint
-    from ai_reqs ar where exists (select 1 from ai_msgs)
+    from ai_reqs ar having exists (select 1 from ai_msgs)
   union all
   select 'ai', 'edited', count(*) filter (where am.edited_at is not null and am.deleted_at is null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
+    having exists (select 1 from ai_msgs)
   union all
   select 'ai', 'deleted', count(*) filter (where am.deleted_at is not null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
+    having exists (select 1 from ai_msgs)
   union all
-  select 'ai', 'handoffs', count(*)::bigint, 0::bigint from handoffs h where exists (select 1 from handoffs)
+  select 'ai', 'handoffs', count(*)::bigint, 0::bigint from handoffs h having exists (select 1 from handoffs)
   )
   -- Sessao que nao existe: nenhuma linha (os agregados sem grupo dariam uma linha de zeros).
   select r.metric, r.item, r.total, r.students from report r where exists (select 1 from s);

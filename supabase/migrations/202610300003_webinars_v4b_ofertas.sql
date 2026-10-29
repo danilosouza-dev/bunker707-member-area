@@ -632,15 +632,16 @@ as $$
   select 'sim_script', 'missed', greatest(sr.n - sf.n, 0), 0::bigint from script_ready sr, script_fired sf
     where exists (select 1 from public.webinar_sessions x, s where x.id = s.id and x.script_fired_at is not null)
   union all
+  -- `having`, nao `where`: um agregado sem grupo devolve uma linha (de zeros) mesmo com o filtro falso.
   select 'offer', 'seen', count(*)::bigint, count(distinct os.user_id)::bigint from offer_seen os
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', 'clicks', count(*)::bigint, count(distinct c.user_id)::bigint from clicks c
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', 'purchases', count(*) filter (where c.converted_sale_grant_id is not null)::bigint,
     count(distinct c.user_id) filter (where c.converted_sale_grant_id is not null)::bigint from clicks c
-    where exists (select 1 from win) or exists (select 1 from clicks)
+    having exists (select 1 from win) or exists (select 1 from clicks)
   union all
   select 'offer', os.label || ':seen', count(*)::bigint, count(distinct os.user_id)::bigint
     from offer_seen os where os.label is not null group by os.label
