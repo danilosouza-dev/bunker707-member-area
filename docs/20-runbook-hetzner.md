@@ -518,9 +518,12 @@ Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker)
 
 O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Estado em 29/10/2026**: o C existe (`provision-meet`
 com o ok do produtor no chat: `bunker707-meet`, cx23 em fsn1, EUR 6,49/mes sem IVA pela API, 2.31.106.201,
-`meet.bunker707.com.br` so DNS); falta o `deploy-meet` (da `dev`, depois do merge da PR dos webinarios), o
-`secrets-meet` e os envs no app. O D (gravador) so existe durante cada live e cada criacao espera o pedido da equipe. O
-app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
+`meet.bunker707.com.br` so DNS). Em seguida, no mesmo dia: `deploy-meet` da `dev` com
+`APP_DOMAIN=bunker707-member-area.vercel.app` (o `ROOM_GUARD_URL` do C aponta para a Vercel de teste, §8B.3),
+`secrets-meet` com o `JWT_APP_SECRET`, e na Vercel `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` (Production e Preview).
+O primeiro `deploy-meet` subiu o stack mas parou no healthcheck do jicofo (`/about/health` 404 sem
+`JICOFO_ENABLE_HEALTH_CHECKS`; corrigido no compose, §8B.3). O D (gravador) so existe durante cada live e cada criacao
+espera o pedido da equipe. O app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
 
 ### 8B.1 O que e cada servidor e quanto custa
 
@@ -553,7 +556,14 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
   removeu ou baniu e recusa a entrada dessas contas mesmo com o token antigo (`docs/30` §8.1). A busca e assinada com
-  uma chave derivada do `JWT_APP_SECRET`: nenhum segredo novo.
+  uma chave derivada do `JWT_APP_SECRET`: nenhum segredo novo. **Hoje o C atende a Vercel de teste**: o `.env` foi
+  gerado com `APP_DOMAIN=bunker707-member-area.vercel.app` nas opcoes do `deploy-meet` (29/10/2026). No dia em que a
+  producao (`membros.<dominio>`) passar a usar a sala ao vivo, trocar a linha no C (`exec-meet` com
+  `sed -i 's#^ROOM_GUARD_URL=.*#ROOM_GUARD_URL=https://membros.<dominio>/api/webhooks/room-guard#' infra/jitsi/.env`
+  e um `deploy-meet` com `SEM_LIVE_2H=sim`): uma URL so, entao o teste e a producao nao barram ao mesmo tempo.
+- O jicofo so responde `/about/health` com `JICOFO_ENABLE_HEALTH_CHECKS=1` (no compose, padrao 1): sem isso a rota da
+  404, o container fica `unhealthy` para sempre e o `deploy-meet` para no `wait_healthy jicofo` (a sala funciona, mas o
+  `smoke.sh` nao roda).
 - `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
   `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
   (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
@@ -614,6 +624,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 
 | Sintoma | O que fazer |
 |---|---|
+| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`) |
 | Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
 | Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
 | Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |

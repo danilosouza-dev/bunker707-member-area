@@ -209,6 +209,8 @@ services:
       <<: *common-env
       ENABLE_AUTO_OWNER: "${ENABLE_AUTO_OWNER:-0}"
       JICOFO_AUTH_PASSWORD: "${JICOFO_AUTH_PASSWORD}"
+      # Sem isto a imagem nao liga a saude interna e /about/health responde 404: o healthcheck nunca passa.
+      JICOFO_ENABLE_HEALTH_CHECKS: "${JICOFO_ENABLE_HEALTH_CHECKS:-1}"
       JICOFO_MAX_MEMORY: "${JICOFO_MAX_MEMORY:-512m}"
       JIBRI_BREWERY_MUC: "${JIBRI_BREWERY_MUC:-jibribrewery}"
       JIBRI_PENDING_TIMEOUT: "${JIBRI_PENDING_TIMEOUT:-90 seconds}"

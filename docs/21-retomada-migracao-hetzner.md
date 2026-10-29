@@ -568,5 +568,7 @@ conflict (version) do nothing;`, e conferir com as consultas do cabecalho dela (
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
 app. Os servidores C (Jitsi) e D (gravador por hora) seguem com o ok do produtor no chat antes de qualquer criacao
-(`docs/20` §8B); ate la, sem `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` no app, a sala ao vivo diz "em breve" e nada
-quebra.
+(`docs/20` §8B); sem `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` no app, a sala ao vivo diz "em breve" e nada
+quebra. Estado em 29/10/2026: o C esta no ar e atende a Vercel de teste (`deploy-meet` da `dev`, `secrets-meet`, e os dois
+envs na Vercel em Production e Preview); para a producao usar a sala, o `.env` do servidor A recebe o mesmo
+`WEBINAR_JWT_SECRET` por `secrets-membros` e o `ROOM_GUARD_URL` do C passa para `membros.<dominio>` (`docs/20` §8B.3).
