@@ -250,8 +250,49 @@ export const WEBINAR_COPY = {
     barra: "Controles da sala",
     camera: "Câmera",
     cameraBloqueada: "A câmera dos alunos está desligada nesta live.",
+    cameraFalhou: "Não conseguimos abrir a sua câmera. Confira se ela está ligada e se outro programa não está usando.",
     cameraFechadaPelaEquipe: "A equipe fechou a sua câmera.",
-    comoUsar: "Como usar",
+    cameraNegada: "O navegador bloqueou a câmera. Libere o acesso nas permissões do site.",
+    /** O pedido da camera do navegador ficou sem resposta (fechado no X, ou ainda aberto) no fim do prazo. */
+    cameraSemResposta: "A câmera não foi liberada no navegador. Toque em Câmera e escolha Permitir.",
+    /** O painel Configurações da barra (docs/30 §1.3): som, alto-falante, microfone, câmera, qualidade e atalhos. */
+    config: {
+      altoFalante: "Alto-falante",
+      altoFalanteAguardando: "O alto-falante aparece aqui depois que você falar na live.",
+      cameraAguardando: "Ligue a câmera pela barra para escolher qual usar.",
+      /** O aviso da camera aceito, mas o navegador ainda sem a permissao (o pedido aberto, fechado no X ou bloqueado). */
+      cameraSemPermissao: "A câmera aparece aqui quando o navegador liberar o acesso. Se ele bloqueou, libere nas permissões do site.",
+      /** Quem apresenta, com a camera nunca ligada neste navegador (sem a permissao, nenhuma camera com id). */
+      cameraNaBarraDoVideo: "Ligue a câmera na barra do vídeo para escolher qual usar.",
+      desfocar: "Desfocar o fundo",
+      espelhar: "Espelhar a minha imagem",
+      fechar: "Fechar",
+      foraDaSala: "As escolhas de som e de vídeo aparecem aqui quando você entrar na sala.",
+      /** As acoes sem estado de quem apresenta (a barra do video tambem muda o ruido, o fundo e o espelho dele). */
+      fundoTirar: "Tirar o efeito do fundo",
+      inverterImagem: "Inverter a minha imagem",
+      maisFundos: "Mais opções de fundo",
+      microfoneAguardando: "O microfone aparece aqui depois que o apresentador liberar a sua fala e você tocar em Falar.",
+      /** Depois do Falar, mas o navegador ainda sem a permissao (o pedido aberto, fechado no X ou bloqueado). */
+      microfoneSemPermissao: "O microfone aparece aqui quando o navegador liberar o acesso. Se ele bloqueou, libere nas permissões do site.",
+      qualidade: "Qualidade do vídeo",
+      qualidadeAutomatica: "Automática",
+      qualidadeEconomizar: "Economizar dados",
+      qualidadeEconomizarTexto: "Recebe o vídeo com menos definição. Ajuda no 4G.",
+      reduzirRuido: "Reduzir ruído",
+      ruidoDesligar: "Desligar a redução de ruído",
+      ruidoLigar: "Ligar a redução de ruído",
+      /** O nome de um aparelho que o navegador ainda nao nomeou. */
+      reserva: {
+        altoFalante: (n: number) => `Alto-falante ${n}`,
+        camera: (n: number) => `Câmera ${n}`,
+        microfone: (n: number) => `Microfone ${n}`
+      },
+      semAparelho: "Nenhum aparelho encontrado neste navegador.",
+      volume: "Volume",
+      volumeValor: (n: number) => `${n}%`
+    },
+    configuracoes: "Configurações",
     desligarCamera: "Desligar câmera",
     emBreve: "A sala ao vivo ainda não está disponível. Volte em breve.",
     entrarNaSala: "Entrar na sala",
@@ -261,7 +302,11 @@ export const WEBINAR_COPY = {
     levantarMao: "Levantar a mão",
     ligarCamera: "Ligar câmera",
     microfone: "Microfone",
+    microfoneFalhou: "Não conseguimos abrir o seu microfone. Confira se ele está ligado e tente de novo.",
     microfoneLiberado: "O apresentador liberou o seu microfone.",
+    microfoneNegado: "O navegador bloqueou o microfone. Libere o acesso nas permissões do site.",
+    /** O pedido do microfone do navegador ficou sem resposta (fechado no X, ou ainda aberto) no fim do prazo. */
+    microfoneSemResposta: "O microfone não foi liberado no navegador. Toque em Microfone e escolha Permitir.",
     microfoneSilenciado: "A equipe silenciou o seu microfone.",
     maoLevantada: "Mão levantada",
     modoCinema: "Modo cinema",
@@ -274,6 +319,11 @@ export const WEBINAR_COPY = {
     silenciadoAteOFim: "Você está sem escrever no chat até o fim desta live.",
     som: "Som",
     telaCheia: "Tela cheia",
+    /** O toque em Câmera / Microfone esperando a troca daquele aparelho no painel (o botao segue com o estado real). */
+    trocandoCameraDesliga: "Trocando a câmera. Ela desliga quando a troca terminar.",
+    trocandoCameraLiga: "Trocando a câmera. Ela liga quando a troca terminar.",
+    trocandoMicrofoneDesliga: "Trocando o microfone. Ele desliga quando a troca terminar.",
+    trocandoMicrofoneLiga: "Trocando o microfone. Ele liga quando a troca terminar.",
     voltarParaLive: "Voltar para a live"
   },
   /** A faixa do topo de todas as paginas (fase 3; docs/30 §1.1, §1.5 e §2.7). */
@@ -347,6 +397,10 @@ export const WEBINAR_COPY = {
     banirConfirmarTexto: "O aluno sai da sala e não entra em nenhuma live até a equipe desfazer.",
     cancelar: "Cancelar",
     comecarParaTodos: "Começar para todos",
+    /** O card Configurações de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
+    configuracoes: "Configurações",
+    configuracoesTexto: "Escolha o microfone, o alto-falante e a câmera que você usa nesta sala.",
+    configuracoesDesfocar: "Ligue a câmera na barra do vídeo para desfocar o fundo.",
     confirmar: "Confirmar",
     convidarPalco: "Convidar ao palco",
     desfazerBanimento: "Desfazer banimento",

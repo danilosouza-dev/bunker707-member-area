@@ -20,8 +20,12 @@ export type LiveEmbedSettings = { allowStudentCamera: boolean; screenFps: 15 | 3
 export const STUDENT_CAMERA_MAX_HEIGHT = 360;
 /** Cada um recebe no maximo o palco + 8 miniaturas (custom-config.js: channelLastN = 9). */
 export const CHANNEL_LAST_N = 9;
-/** O que o iframe precisa para camera, microfone, tela, som e tela cheia (docs/30 §6.3 e §8.4). */
-export const JITSI_IFRAME_ALLOW = "camera; microphone; display-capture; autoplay; fullscreen";
+/**
+ * O que o iframe precisa para camera, microfone, tela, som, tela cheia e a escolha do alto-falante (docs/30 §6.3 e
+ * §8.4): `speaker-selection` deixa o iframe trocar a saida de som (setAudioOutputDevice) nos navegadores que pedem
+ * essa permissao; o padrao da pagina para ela ja e a propria origem, entao a Permissions-Policy nao muda.
+ */
+export const JITSI_IFRAME_ALLOW = "camera; microphone; display-capture; autoplay; fullscreen; speaker-selection";
 /** Pede outro join-token este tanto antes do `exp` (docs/30 §5.4: a pagina faz isso sozinha). */
 export const TOKEN_REFRESH_BEFORE_MS = 5 * 60_000;
 /** Depois de quantas tentativas a sala mostra "Não conseguimos voltar. Tentar de novo" (docs/30 §1.3). */
@@ -56,18 +60,19 @@ export function meetPermissionsAllowList(domain: string | null): string {
 
 /**
  * A barra do iframe por papel (docs/30 §6.3): o apresentador e o co-apresentador usam a do iframe (microfone, camera,
- * tela, mao, participantes, gravar so o host, seguranca, sair); aluno e Equipe usam so a nossa. Os controles de Zoom
- * (silenciar todos, fechar cameras, liberar, remover, trancar, destacar) sao botoes nossos que chamam executeCommand.
+ * tela, mao, participantes, gravar so o host, seguranca, fundo, configuracoes e sair; a engrenagem abre so a aba de
+ * aparelhos, liveInterfaceConfigOverwrite); aluno e Equipe usam so a nossa. Os controles de Zoom (silenciar todos,
+ * fechar cameras, liberar, remover, trancar, destacar) sao botoes nossos que chamam executeCommand.
  */
 export function toolbarButtonsFor(role: LiveRoomRole, settings: Pick<LiveEmbedSettings, "allowStudentCamera">): string[] {
   switch (role) {
     case "host":
-      return ["microphone", "camera", "desktop", "raisehand", "participants-pane", "recording", "security", "hangup"];
+      return ["microphone", "camera", "desktop", "raisehand", "participants-pane", "recording", "security", "select-background", "settings", "hangup"];
     case "co_host":
-      return ["microphone", "camera", "desktop", "raisehand", "participants-pane", "security", "hangup"];
+      return ["microphone", "camera", "desktop", "raisehand", "participants-pane", "security", "select-background", "settings", "hangup"];
     default:
       // Aluno e Equipe: a barra e a NOSSA (Reagir, Levantar a mão, Câmera, Microfone depois de liberado, Tela cheia,
-      // Som), que chama executeCommand. Assim o primeiro clique na camera passa pelo aviso de gravacao (docs/30 §8.5,
+      // Som, Configurações com os aparelhos depois do consentimento), que chama executeCommand e a api. Assim o primeiro clique na camera passa pelo aviso de gravacao (docs/30 §8.5,
       // D4) e o microfone pelo Falar / Agora não; a barra do iframe some. `allowStudentCamera` decide o NOSSO botao
       // (e o apresentador liga a moderacao de video no webinario sem camera de aluno).
       void settings;
@@ -80,10 +85,17 @@ export function sendHeightFor(role: LiveRoomRole, settings: Pick<LiveEmbedSettin
   return role === "host" || role === "co_host" ? settings.stage : STUDENT_CAMERA_MAX_HEIGHT;
 }
 
+/** Apresentador e co-apresentador: a barra do iframe, a engrenagem so com os aparelhos e a barra sempre visivel. */
+function presents(role: LiveRoomRole | null | undefined): boolean {
+  return role === "host" || role === "co_host";
+}
+
 /**
  * O configOverwrite do iframe (docs/30 §5.4, §6.3, §8.1 e D26). O chat, as enquetes e as reacoes do Jitsi ficam
  * sempre desligados (D5: sao os nossos); todo mundo entra mudo e com a camera fechada; o aluno nao tem menu sobre
  * ninguem nem silencia ninguem; o nome vem do token. `startSilent` nunca entra: ele corta o som que o aluno RECEBE.
+ * A barra de quem apresenta fica sempre visivel (`toolbarConfig.alwaysVisible`): as setinhas de microfone e camera e a
+ * engrenagem nao somem depois de alguns segundos.
  * Aluno e Equipe entram com `disableInitialGUM`: sem ele o Jitsi captura o microfone na entrada (so para as
  * estatisticas) e o navegador pede a permissao antes do aviso de gravacao e antes de o apresentador liberar (§1.3,
  * §8.5); o toggleAudio depois do Falar e o toggleVideo depois do aviso da camera pedem a permissao na hora certa. O
@@ -108,9 +120,12 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     disablePrivateChat: true,
     disableReactions: true,
     disableRemoteMute: student,
+    // Sem o "Flip" no menu da propria miniatura para o aluno e a Equipe: o espelho so pelo nosso painel, que guarda a
+    // escolha na pagina (o iframe guarda o localFlipX dele e a api nao deixa ler; MIRROR_STORAGE_KEY).
+    ...(audience ? { disableLocalVideoFlip: true } : {}),
     disableSelfView: false,
     // Sem atalhos do iframe para o aluno e a Equipe: a camera e o microfone so pela nossa barra (o aviso de gravacao).
-    disableShortcuts: role === "student" || role === "team",
+    disableShortcuts: audience,
     hideConferenceSubject: true,
     hideConferenceTimer: true,
     hideDisplayName: false,
@@ -122,13 +137,24 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     startAudioOnly: false,
     startWithAudioMuted: true,
     startWithVideoMuted: true,
+    ...(presents(role) ? { toolbarConfig: { alwaysVisible: true } } : {}),
     toolbarButtons: toolbarButtonsFor(role, settings)
   };
 }
 
-/** O interfaceConfigOverwrite (so chaves da lista permitida do IFrame API; a marca sai pelo custom-interface_config.js). */
-export function liveInterfaceConfigOverwrite(): Record<string, unknown> {
-  return { DISABLE_JOIN_LEAVE_NOTIFICATIONS: true, MOBILE_APP_PROMO: false, SHOW_CHROME_EXTENSION_BANNER: false };
+/**
+ * O interfaceConfigOverwrite (so chaves da lista permitida do IFrame API; a marca sai pelo custom-interface_config.js).
+ * Quem apresenta abre a engrenagem do iframe so na aba de aparelhos (`SETTINGS_SECTIONS: ['devices']`: sem as abas de
+ * moderador, perfil e idioma, que o console ja decide). O aluno e a Equipe nao tem engrenagem (a barra deles e a nossa);
+ * sem o papel (a chamada antiga), o mesmo do aluno.
+ */
+export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null): Record<string, unknown> {
+  return {
+    DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+    MOBILE_APP_PROMO: false,
+    ...(presents(role) ? { SETTINGS_SECTIONS: ["devices"] } : {}),
+    SHOW_CHROME_EXTENSION_BANNER: false
+  };
 }
 
 /** Os sinais do IFrame API que a pagina escuta (docs/30 §6.3); os comandos ficam com quem comanda a sala. */
@@ -148,7 +174,12 @@ export const JITSI_LISTENED_EVENTS = [
   // O "Abaixar a mão" do console chega ao aluno por sendEndpointTextMessage (o IFrame API nao abaixa a mao de outro).
   "endpointTextMessageReceived",
   "errorOccurred",
-  "readyToClose"
+  "readyToClose",
+  // O painel Configurações (use-jitsi-devices.ts): a lista de aparelhos mudou (um fone entrou ou saiu) e o navegador
+  // recusou o microfone ou a camera (o aviso na barra). Nenhum dos tres vai ao servidor (toRoomEvent devolve nulo).
+  "deviceListChanged",
+  "micError",
+  "cameraError"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -221,6 +252,11 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
       const error = field(payload, "error") ?? payload;
       return { at, data: { code: code(field(error, "name")) ?? code(field(error, "type")) ?? "unknown", fatal: field(error, "isFatal") === true }, name };
     }
+    case "deviceListChanged":
+    case "micError":
+    case "cameraError":
+      // So a tela usa (a lista do painel Configurações e o aviso na barra): o servidor nao aceita estes nomes.
+      return null;
     default:
       return null;
   }

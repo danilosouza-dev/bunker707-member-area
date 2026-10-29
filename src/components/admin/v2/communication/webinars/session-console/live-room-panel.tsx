@@ -1,9 +1,11 @@
 "use client";
 
-import { DoorOpen, LogIn, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
+import { DoorOpen, LogIn, RefreshCw, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type ReactNode, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
+import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import { useJitsiMeet, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
+import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import { liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type JitsiListenedEvent } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,7 @@ import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
+import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 
 // A sala da Live ao vivo no console (docs/30 §1.4, §2.4, §6.3, §6.4 e §8.1; fase 3): o hook useLiveRoom pede o token
 // (POST /api/webinars/[id]/join-token, o mesmo do aluno: o papel vem do servidor), monta o iframe pelo useJitsiMeet
@@ -40,12 +43,54 @@ import { StatusChip } from "../../../status-chip";
 // comanda: ao virar moderador, a sala de espera certa (Sessao de pratica, Sala de espera, tranca), a moderacao de audio
 // (o aluno so fala depois de Liberar), a de tela compartilhada (so moderador compartilha), a de video quando o webinario
 // nao tem camera de aluno e o "seguir a visao do apresentador"; o "Gravar" da fila dispara uma vez no ready; a ancora sai no recordingStatusChanged ligado (uma vez).
-// LiveRoomPanel desenha o palco, a situacao da sala e os controles ao redor (live-controls.tsx). Nenhum texto cita o
-// motor da sala.
+// Quem apresenta (host e co-apresentador) ganha o card Configurações (live-settings-card.tsx): os aparelhos pelo hook
+// useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do vídeo: setVideoQuality
+// mudaria o envio do palco) e o ruido, o fundo e o espelho como acoes sem estado (efeitosNoIframe: a barra do iframe
+// tambem os muda); a Equipe no console nao tem barra de midia (docs/30 §1.4, pendencia).
+// LiveRoomPanel desenha o palco, a situacao da sala, o botao Configurações (o card abre acima do palco) e os controles
+// ao redor (live-controls.tsx).
+// Nenhum texto cita o motor da sala.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const ANCHOR_RETRIES = 3;
 const ANCHOR_RETRY_MS = 2_000;
+
+/** Os nomes dos aparelhos que o navegador ainda nao nomeou ("Microfone 1"), os mesmos da sala do aluno. */
+const DEVICE_NAMES: Record<DeviceKind, (position: number) => string> = {
+  audioInput: WEBINAR_COPY.aoVivo.config.reserva.microfone,
+  audioOutput: WEBINAR_COPY.aoVivo.config.reserva.altoFalante,
+  videoInput: WEBINAR_COPY.aoVivo.config.reserva.camera
+};
+
+function subscribeNothing() {
+  return () => undefined;
+}
+
+function deviceEnvironment() {
+  return deviceEnvironmentOf({ maxTouchPoints: navigator.maxTouchPoints, userAgent: navigator.userAgent });
+}
+
+/** iPhone / iPad (o card nao tem a faixa de volume, mas o modelo pede). */
+function readIOS() {
+  try {
+    return deviceEnvironment().isIOS;
+  } catch {
+    return false;
+  }
+}
+
+/** Celular: sem Desfocar o fundo e sem Mais opções de fundo (o efeito nao roda la). */
+function readMobile() {
+  try {
+    return deviceEnvironment().isMobile;
+  } catch {
+    return false;
+  }
+}
+
+function presents(role: ConsoleRoomRole): boolean {
+  return role === "host" || role === "co_host";
+}
 
 type TokenState = { error: "failed" | "meet_unconfigured" | null; reply: JoinTokenReply | null };
 
@@ -54,8 +99,14 @@ export type LiveRoomHandle = {
   controls: LiveControls;
   /** As cameras dos alunos estao liberadas (moderacao de video desligada). */
   camerasAllowed: boolean;
+  /** Troca o aparelho quando a secao do card esta pronta (so quem apresenta, dentro da sala); falso quando nao trocou. */
+  chooseDevice: (kind: DeviceKind, option: DeviceOption) => boolean;
   /** Manda um comando ao iframe; falso sem sala montada. */
   command: (name: string, ...args: unknown[]) => boolean;
+  /** As secoes do card Configurações (deviceSettingsFor com o papel da sala; nunca a Qualidade do vídeo). */
+  deviceSettings: DeviceSettings;
+  /** Os aparelhos, o ruido, o fundo e o espelho de quem apresenta (useJitsiDevices: os metodos da api do iframe). */
+  devices: UseJitsiDevices;
   dispatch: Dispatch<LiveRoomAction>;
   frameStatus: JitsiStatus;
   joined: boolean;
@@ -66,6 +117,11 @@ export type LiveRoomHandle = {
   role: ConsoleRoomRole;
   room: LiveRoomState;
   setCamerasAllowed: (allowed: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
+  /** O card Configurações aberto (os aparelhos sao relidos ao abrir). */
+  settingsOpen: boolean;
+  /** A propria camera no ar (videoMuteStatusChanged), dentro da sala. */
+  videoOn: boolean;
   startTesting: () => void;
   /** Liga ou desliga a sala de espera agora (so manda quando muda). */
   syncLobby: (value: boolean) => void;
@@ -117,18 +173,28 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const [tokenAttempt, setTokenAttempt] = useState(0);
   const [room, dispatch] = useReducer(liveRoomReducer, EMPTY_ROOM);
   const [camerasAllowed, setCamerasAllowedState] = useState(webinar.allowStudentCamera !== false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** A propria camera no ar (videoMuteStatusChanged): o Desfocar o fundo so vale com o video ligado. */
+  const [videoOn, setVideoOn] = useState(false);
   const lobbySent = useRef<boolean | null>(null);
   const setupDone = useRef(false);
   const anchorMarked = useRef(false);
   const autoStartedFor = useRef<string | null>(null);
   const latest = useRef(input);
   const commandRef = useRef<(name: string, ...args: unknown[]) => boolean>(() => false);
+  /** O que o card Configurações faz com cada sinal (o aoSinal do useJitsiDevices) e o que ele le na hora da troca. */
+  const devicesSignalRef = useRef<(name: string, payload: unknown) => void>(() => undefined);
+  const deviceSettingsRef = useRef<DeviceSettings | null>(null);
+  const roomRef = useRef(room);
   const sessionId = session?.id ?? null;
   const status = session?.status ?? "scheduled";
   const meetConfigured = enabled && live?.meetConfigured === true && token.error !== "meet_unconfigured";
   const wantsRoom = enabled && sessionId !== null && shouldEnterRoom({ meetConfigured, status, testing });
   const role = consoleRoomRole({ currentUserId: input.currentUserId, hostUserId: webinar.hostUserId, tokenRole: token.reply?.role });
   const controls = liveControlsFor({ canPublish: input.canPublish, moderator: room.moderator, role });
+  const presenter = presents(role);
+  const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
+  const isMobile = useSyncExternalStore(subscribeNothing, readMobile, () => false);
 
   useEffect(() => {
     latest.current = input;
@@ -163,7 +229,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   }, [sessionId, tokenAttempt, wantsRoom, webinar.id]);
 
   const configOverwrite = useMemo(() => (token.reply ? liveConfigOverwrite(token.reply.role, token.reply.settings) : {}), [token.reply]);
-  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(), []);
+  // Quem apresenta abre a engrenagem do iframe so na aba de aparelhos (o papel vem do join-token).
+  const tokenRole = token.reply?.role ?? null;
+  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(tokenRole), [tokenRole]);
 
   const markAnchor = useCallback(async () => {
     for (let attempt = 0; attempt < ANCHOR_RETRIES; attempt += 1) {
@@ -181,7 +249,15 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
       if (name === "videoConferenceLeft" || name === "readyToClose") {
         setupDone.current = false;
         lobbySent.current = null;
+        setVideoOn(false);
       }
+      if (name === "videoMuteStatusChanged") {
+        const muted = payload && typeof payload === "object" ? (payload as { muted?: unknown }).muted : undefined;
+        setVideoOn(muted === false);
+      }
+      // O card Configurações: a lista nova (deviceListChanged, um fone que entrou), o ruido de volta numa entrada nova
+      // e o desfoque de volta na camera que liga.
+      devicesSignalRef.current(name, payload);
       if (name === "recordingStatusChanged" && shouldMarkAnchor({ alreadyMarked: anchorMarked.current, anchorAt: latest.current.live?.recorder.anchorAt ?? null, payload, role })) {
         anchorMarked.current = true;
         void markAnchor();
@@ -212,8 +288,42 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const command = meet.executeCommand;
   const api = meet.api;
 
+  const devices = useJitsiDevices({
+    api,
+    // Quem apresenta tambem muda ruido, fundo e espelho pela barra do iframe: o hook so manda o comando, sem guardar
+    // estado nem reaplicar nada por cima da escolha feita la.
+    efeitosNoIframe: true,
+    executeCommand: command,
+    joined,
+    nomesReserva: DEVICE_NAMES,
+    open: settingsOpen,
+    outrosParticipantes: () => roomRef.current.people.map((person) => person.id),
+    // So quem apresenta troca, e so com a secao pronta (a sala no ar).
+    podeTrocar: (kind) => deviceSettingsRef.current !== null && deviceSectionReady(deviceSettingsRef.current, kind),
+    proprioId: () => roomRef.current.selfId,
+    somLigado: () => true
+  });
+
+  // Quem apresenta entra sem disableInitialGUM (o navegador pede a permissao na entrada): microfone e camera ficam
+  // prontos com a sala no ar; o Falar e o aviso de gravacao (D4) sao do aluno.
+  const deviceSettings = deviceSettingsFor({
+    allowStudentCamera: webinar.allowStudentCamera !== false,
+    cameraConsented: false,
+    isIOS,
+    isMobile,
+    joined,
+    micAllowed: false,
+    outputChangeAvailable: devices.outputChangeAvailable,
+    outputs: devices.lists.audioOutput,
+    role,
+    videoOn: joined && videoOn
+  });
+
   useEffect(() => {
     commandRef.current = command;
+    devicesSignalRef.current = devices.aoSinal;
+    deviceSettingsRef.current = presenter ? deviceSettings : null;
+    roomRef.current = room;
   });
 
   // Quem ja estava na sala quando o console entrou (alem dos participantJoined).
@@ -235,7 +345,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     [command]
   );
 
-  const presenter = role === "host" || role === "co_host";
   const wantedLobby = desiredLobby({ practiceSession: webinar.practiceSession !== false, roomLocked: live?.roomLocked === true, status, waitingRoom: webinar.waitingRoom === true });
 
   // Ao virar moderador: moderacao de audio (o aluno so fala depois de Liberar), de tela compartilhada (so moderador
@@ -290,10 +399,16 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     [command]
   );
 
+  const escolher = devices.escolher;
+  const chooseDevice = (kind: DeviceKind, option: DeviceOption) => presenter && deviceSectionReady(deviceSettings, kind) && escolher(kind, option);
+
   return {
     camerasAllowed,
+    chooseDevice,
     command,
     controls,
+    deviceSettings,
+    devices,
     dispatch,
     frameStatus: meet.status,
     joined,
@@ -303,9 +418,12 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     role,
     room,
     setCamerasAllowed,
+    setSettingsOpen,
+    settingsOpen,
     startTesting: () => setTesting(true),
     syncLobby,
     testing,
+    videoOn: joined && videoOn,
     tokenError: token.error
   };
 }
@@ -345,9 +463,17 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]):
   }
 }
 
-/** O palco do console: o iframe da sala no meio, a situacao (Gravando, sala trancada, sala de espera) e os controles ao redor. */
+/**
+ * O palco do console: o iframe da sala no meio, a situacao (Gravando, sala trancada, sala de espera), o botao
+ * Configurações de quem apresenta e os controles ao redor. O card de aparelhos abre ACIMA do palco: logo depois do
+ * botao no teclado (o Tab do botao entra no card, nao nos botoes da barra do iframe, e o Esc fica a mao) e na tela
+ * (abaixo de um palco 16:9, num notebook, ele ficaria fora da tela e o clique pareceria nao fazer nada). Fechar pelo
+ * proprio botao manda o foco a ele antes de o card sumir (o WebKit nao foca o botao no clique).
+ */
 export function LiveRoomPanel({ busy, children, handle, live, session, stageRef }: LiveRoomPanelProps) {
+  const settingsButton = useRef<HTMLButtonElement | null>(null);
   const message = frameMessage(handle, session.status);
+  const showSettings = presents(handle.role) && handle.meetConfigured;
   const recording = handle.room.recording.on || live.recorder.status === "recording";
   const notice = lobbyNotice({ lobby: handle.lobby, roomLocked: live.roomLocked, status: session.status });
   const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
@@ -360,12 +486,43 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
           {recording ? <StatusChip tone="error">{copy.gravador.recording}</StatusChip> : null}
           {live.roomLocked ? <StatusChip tone="warning">{copy.salaTrancada}</StatusChip> : null}
           {handle.joined ? <StatusChip tone="muted">{LIVE_CONSOLE_COPY.naSala(handle.room.people.length + 1)}</StatusChip> : null}
+          {showSettings ? (
+            <Button
+              aria-controls={LIVE_SETTINGS_CARD_ID}
+              aria-expanded={handle.settingsOpen}
+              className="px-3"
+              onClick={() => {
+                if (handle.settingsOpen) {
+                  settingsButton.current?.focus();
+                }
+                handle.setSettingsOpen(!handle.settingsOpen);
+              }}
+              ref={settingsButton}
+              type="button"
+              variant="secondary"
+            >
+              <Settings2 aria-hidden="true" className="size-4" />
+              {copy.configuracoes}
+            </Button>
+          ) : null}
         </span>
       }
       bodyClassName="flex min-w-0 flex-col gap-4"
       title={LIVE_CONSOLE_COPY.salaAoVivo}
       titleId="console-live-room-title"
     >
+      {showSettings && handle.settingsOpen ? (
+        <LiveSettingsCard
+          cameraOn={handle.videoOn}
+          devices={handle.devices}
+          onChoose={handle.chooseDevice}
+          onClose={() => {
+            settingsButton.current?.focus();
+            handle.setSettingsOpen(false);
+          }}
+          sections={handle.deviceSettings}
+        />
+      ) : null}
       <div className="relative w-full min-w-0 overflow-hidden rounded-lg bg-black" data-live-frame-status={handle.frameStatus}>
         <div aria-label={WEBINAR_COPY.aoVivo.palco} className="aspect-video w-full [&_iframe]:size-full [&_iframe]:border-0" data-live-stage="" ref={stageRef} role="region" />
         {message ? (

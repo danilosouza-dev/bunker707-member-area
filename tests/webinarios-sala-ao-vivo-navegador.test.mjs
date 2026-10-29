@@ -342,7 +342,7 @@ test("os atalhos R, M e E (nunca escrevendo, nunca com Ctrl/Alt/Cmd), o Modo cin
 
 test("as frases da barra (LIVE_ROOM_COPY aponta para WEBINAR_COPY.aoVivo) passam pela PROIBIDAS_WEBINARIO e nao citam o motor de video", () => {
   const textos = Object.values(model.LIVE_ROOM_COPY);
-  assert.equal(model.LIVE_ROOM_COPY.comoUsar, WEBINAR_COPY.aoVivo.comoUsar);
+  assert.equal(model.LIVE_ROOM_COPY.configuracoes, WEBINAR_COPY.aoVivo.configuracoes);
   assert.equal(model.LIVE_ROOM_COPY.barra, WEBINAR_COPY.aoVivo.barra);
   assert.ok(textos.length >= 5);
   for (const texto of textos) {
