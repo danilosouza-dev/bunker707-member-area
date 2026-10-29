@@ -329,9 +329,15 @@ export async function recentRecorderPrepareDurations(db: WebinarsDb, limit = 5):
       const at = event.machine_requested_at ?? requested.get(event.session_id);
       return at ? new Date(event.received_at).getTime() - new Date(at).getTime() : Number.NaN;
     })
-    .filter((value) => Number.isFinite(value) && value > 0)
+    .filter((value) => Number.isFinite(value) && value >= RECORDER_PREPARE_MIN_MS)
     .reverse();
 }
+
+/**
+ * Abaixo disto nao e uma subida medida: a maquina pedida a mao no workflow (sem pedido do app) leva a hora do proprio
+ * ready, e a conta da quase zero. Uma maquina de verdade leva minutos (criar, Docker, imagem).
+ */
+export const RECORDER_PREPARE_MIN_MS = 60_000;
 
 /* ------------------------------------------------------------------------------------------------
  * As gravacoes (o job webinar-recordings e o "Enviar gravação")

@@ -489,6 +489,27 @@ test("ready: o gravador fica pronto, o pedido processed; o mesmo ready de novo e
   assert.equal(JSON.stringify(banco.tables), antes, "nada mudou");
 });
 
+test("ready de uma maquina pedida a mao, repetido: a segunda chamada e duplicate e fica uma linha so (a chave leva a hora que a sessao recebeu)", async () => {
+  const banco = escola({ session: { recorder_requested_at: null, recorder_status: "none" } });
+
+  const primeiro = await postar({ sessionId: SESSION, state: "ready" });
+  assert.deepEqual(primeiro.body, { recorderStatus: "ready", status: "processed" });
+  const hora = sessaoDe(banco).recorder_requested_at;
+  assert.ok(hora, "a hora do pedido foi gravada na sessao");
+
+  const repetido = await postar({ sessionId: SESSION, state: "ready" });
+  assert.equal(repetido.status, 200);
+  assert.deepEqual(repetido.body, { status: "duplicate" });
+  assert.deepEqual(
+    eventos(banco).map((linha) => [linha.state, linha.machine_requested_at, linha.processing_status]),
+    [["ready", hora, "processed"]]
+  );
+  assert.equal(sessaoDe(banco).recorder_status, "ready");
+  // A maquina pedida a mao nao tem subida medida (a hora do pedido e a do proprio ready): fica fora da estimativa.
+  const store = await import("../src/server/webinars/live-store.ts");
+  assert.deepEqual(await store.recentRecorderPrepareDurations(banco), []);
+});
+
 test("ready e unavailable de uma maquina pedida a mao (sem recorder_requested_at) gravam a hora; unavailable de novo depois de outro pedido vale", async () => {
   const banco = escola({ session: { recorder_requested_at: null, recorder_status: "none" } });
 
@@ -507,10 +528,10 @@ test("ready e unavailable de uma maquina pedida a mao (sem recorder_requested_at
   assert.deepEqual(
     eventos(banco).map((linha) => [linha.state, linha.machine_requested_at, linha.processing_status]),
     [
-      ["unavailable", null, "processed"],
+      ["unavailable", hora, "processed"],
       ["unavailable", novoPedido, "processed"]
     ],
-    "cada maquina com a sua linha"
+    "cada maquina com a sua linha (a pedida a mao leva a hora gravada na sessao)"
   );
 
   // Agora a maquina sobe: ready a partir de unavailable.
@@ -706,7 +727,8 @@ test("a segunda maquina da mesma sessao (ready, gone, Preparar de novo, ready): 
   const medidas = await store.recentRecorderPrepareDurations(banco);
   assert.equal(medidas.length, 2, "as duas subidas contam");
   assert.ok(medidas.every((ms) => ms > 0));
-  assert.ok(Math.abs(medidas.at(-1) - 4 * 60_000) < 10_000, `a segunda maquina levou cerca de 4 min (${medidas.at(-1)} ms)`);
+  // As duas linhas podem ter o mesmo received_at no banco falso: confere sem depender da ordem entre elas.
+  assert.ok(medidas.some((ms) => Math.abs(ms - 4 * 60_000) < 10_000), `a segunda maquina levou cerca de 4 min (${medidas.join(", ")} ms)`);
 
   // A mesma maquina mandando o ready de novo continua 200 duplicate.
   assert.deepEqual((await postar({ sessionId: SESSION, state: "ready" })).body, { status: "duplicate" });

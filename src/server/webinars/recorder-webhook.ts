@@ -53,9 +53,16 @@ const STORED_PAYLOAD_MAX_CHARS = 60_000;
  */
 export const RECORDER_PENDING_STALE_MS = 60_000;
 
-/** O estado da maquina leva a hora do pedido dela na chave unica (cada maquina da mesma sessao tem a sua linha). */
-function machineRequestedAtFor(state: RecorderWebhookInput["state"], session: SessionRow): string | null {
-  return state === "ready" || state === "unavailable" || state === "gone" ? (session.recorder_requested_at ?? null) : null;
+/**
+ * O estado da maquina leva a hora do pedido dela na chave unica (cada maquina da mesma sessao tem a sua linha). A maquina
+ * pedida a mao (sem recorder_requested_at) ganha a hora agora no ready / unavailable, a mesma que sessionPatchFor grava na
+ * sessao: o mesmo ready de novo cai na mesma chave e e duplicate, em vez de virar uma segunda linha.
+ */
+function machineRequestedAtFor(state: RecorderWebhookInput["state"], session: SessionRow, nowIso: string): string | null {
+  if (state === "ready" || state === "unavailable") {
+    return session.recorder_requested_at ?? nowIso;
+  }
+  return state === "gone" ? (session.recorder_requested_at ?? null) : null;
 }
 
 /**
@@ -327,7 +334,7 @@ export async function handleRecorderWebhook(input: {
       return reply(202, { status: "ignored" });
     }
 
-    const stored = await insertRecordingEvent(db, { ...event, machine_requested_at: machineRequestedAtFor(data.state, session), session_id: session.id });
+    const stored = await insertRecordingEvent(db, { ...event, machine_requested_at: machineRequestedAtFor(data.state, session, nowIso), session_id: session.id });
     let mode: Mode = "new";
 
     if (stored.duplicate) {
