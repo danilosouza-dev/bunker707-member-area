@@ -30,6 +30,7 @@ import {
   AUDIENCE_LIMITS,
   EVERYONE,
   MESSAGE_ACTIONS,
+  WEBINAR_RULE_ACTIONS,
   audienceDepth,
   countAudienceRules,
   isAudienceGroup,
@@ -117,6 +118,23 @@ const pageTargetSchema = z.discriminatedUnion(
 
 const negateSchema = z.boolean({ error: "Escolha se fez ou não fez." }).default(false);
 
+/** "Ganhou acesso recentemente": hoje (dia de Sao Paulo) ou as ultimas N horas, de 1 a 720. */
+const accessRecentPeriodSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("today") }),
+    z.object({
+      hours: z
+        .number({ error: "Informe o número de horas." })
+        .int("Use um número inteiro de horas.")
+        .min(1, "Use pelo menos 1 hora.")
+        .max(AUDIENCE_LIMITS.maxRecentHours, `Use no máximo ${AUDIENCE_LIMITS.maxRecentHours} horas.`),
+      kind: z.literal("hours")
+    })
+  ],
+  { error: "Escolha o período." }
+);
+
 const ruleSchema = z.discriminatedUnion(
   "type",
   [
@@ -160,7 +178,21 @@ const ruleSchema = z.discriminatedUnion(
         }
       }),
     z.object({ negate: negateSchema, page: pageTargetSchema, since: flowSinceSchema, type: z.literal("page_visit") }),
-    z.object({ negate: negateSchema, productIds: idListSchema("um produto"), since: flowSinceSchema, type: z.literal("access_gained") })
+    z.object({ negate: negateSchema, productIds: idListSchema("um produto"), since: flowSinceSchema, type: z.literal("access_gained") }),
+    // Quem pode da live por regras (docs/30 §1.6): no segmento e nos fluxos. Sem produto = qualquer produto.
+    z.object({
+      negate: negateSchema,
+      period: accessRecentPeriodSchema,
+      productIds: z.array(catalogIdSchema).max(AUDIENCE_LIMITS.maxIds, `Escolha no máximo ${AUDIENCE_LIMITS.maxIds}.`),
+      type: z.literal("access_recent")
+    }),
+    z.object({
+      action: z.enum(WEBINAR_RULE_ACTIONS, { error: "Escolha se participou ou garantiu vaga." }),
+      negate: negateSchema,
+      type: z.literal("webinar"),
+      // null = qualquer live.
+      webinarId: z.uuid({ error: "Escolha a live." }).nullable()
+    })
   ],
   { error: "Escolha o tipo da regra." }
 );

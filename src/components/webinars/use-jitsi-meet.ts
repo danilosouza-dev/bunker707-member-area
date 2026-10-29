@@ -17,11 +17,32 @@ export type JitsiMeetApi = {
   addListener(event: string, listener: (payload: unknown) => void): void;
   dispose(): void;
   executeCommand(command: string, ...args: unknown[]): void;
+  /** { audioInput, audioOutput, videoInput }: as listas de aparelhos (sem a permissao, sem rotulo e sem id). */
+  getAvailableDevices?(): Promise<unknown>;
+  /** { audioInput, audioOutput, videoInput }: o aparelho em uso de cada tipo. */
+  getCurrentDevices?(): Promise<unknown>;
   getIFrame?(): HTMLIFrameElement | null;
   getParticipantsInfo?(): unknown[];
   /** As salas e quem esta nelas, com o papel de cada um (a sala do aluno le quem ja era moderador ao entrar). */
   getRoomsInfo?(): Promise<unknown>;
+  /** O microfone do proprio participante esta mudo; sem faixa de microfone (o navegador recusou ou ainda pede), verdadeiro. */
+  isAudioMuted?(): Promise<boolean>;
+  /** 'output': o navegador deixa trocar o alto-falante (falso no Safari). */
+  isDeviceChangeAvailable?(deviceType?: "input" | "output"): Promise<boolean>;
+  isMultipleAudioInputSupported?(): Promise<boolean>;
+  /**
+   * A moderacao daquele tipo segura o participante (ligada, e ele nao e moderador nem foi aprovado): o Ligar câmera
+   * recusado pela equipe nao pede nada ao navegador, e a permissao da camera continua "prompt".
+   */
+  isParticipantForceMuted?(participantId: string, mediaType?: "audio" | "video"): Promise<boolean>;
   removeListener?(event: string, listener: (payload: unknown) => void): void;
+  /**
+   * Os tres trocam o aparelho: com rotulo, o iframe procura o PRIMEIRO de rotulo identico; com o rotulo vazio, usa o id
+   * (setDeviceArgs manda so o id). Respondem falso quando o aparelho nao esta na lista do iframe.
+   */
+  setAudioInputDevice?(label: string, deviceId: string): Promise<unknown> | void;
+  setAudioOutputDevice?(label: string, deviceId: string): Promise<unknown> | void;
+  setVideoInputDevice?(label: string, deviceId: string): Promise<unknown> | void;
 };
 
 type JitsiMeetConstructor = new (domain: string, options: Record<string, unknown>) => JitsiMeetApi;
@@ -149,6 +170,7 @@ export function useJitsiMeet(input: UseJitsiMeetInput): UseJitsiMeet {
           width: "100%"
         });
         api.current = instance;
+        // A nossa lista (com speaker-selection, para o alto-falante do painel Configurações) no lugar da do external_api.js.
         const iframe = instance.getIFrame?.();
         if (iframe) {
           iframe.setAttribute("allow", JITSI_IFRAME_ALLOW);

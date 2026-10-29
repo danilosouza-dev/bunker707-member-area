@@ -5,7 +5,7 @@
 import { normalizeAudience, type AudienceDefinition } from "../communications/audience-model";
 import { RECORDER_STATUSES, type RecorderStatus } from "./recorder-model";
 import {
-  ACCESS_MODES,
+  ACCESS_MODE_COLUMN_VALUES,
   CHAT_MODES,
   DISPLAY_NAME_MODES,
   SESSION_KINDS,
@@ -13,6 +13,7 @@ import {
   SLOW_MODE_SECONDS,
   WEBINAR_KINDS,
   WEBINAR_STATUSES,
+  accessModeUsesProduct,
   defaultQuality,
   defaultReminders,
   defaultRoomSettings,
@@ -40,10 +41,12 @@ import {
 } from "./model";
 
 export const WEBINAR_COLUMNS =
-  "id, slug, kind, title, description, cover_url, status, host_user_id, access_mode, product_id, audience, registration_required, capacity, show_registered_count, reminders, reminder_texts, show_on_home, replay_days_on_home, show_banner, scheduled_at, duration_minutes, allow_student_camera, quality, room_settings, auto_record, replay_lesson_target, chat_retention_days, recording_retention_days, published_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, deleted_at";
+  "id, slug, kind, title, description, cover_url, status, host_user_id, access_mode, audience_restricts, product_id, audience, registration_required, capacity, show_registered_count, reminders, reminder_texts, show_on_home, replay_days_on_home, show_banner, scheduled_at, duration_minutes, allow_student_camera, quality, room_settings, auto_record, replay_lesson_target, chat_retention_days, recording_retention_days, published_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, deleted_at";
 
 export type WebinarRow = {
   access_mode: string;
+  /** 202610300001: com access_mode 'product', o segmento tambem e exigido (o modo "both" do app). */
+  audience_restricts: boolean;
   allow_student_camera: boolean;
   audience: unknown;
   auto_record: boolean;
@@ -269,10 +272,28 @@ export function presenterFromRow(row: PresenterRow): WebinarPresenter {
   };
 }
 
+/**
+ * O "Quem pode" da linha: 'product' com audience_restricts = "both" (Quem tem o produto e está no segmento); os outros
+ * valores do check da 202610280001 como estao. Um valor que este app nao conhece (um banco mais novo, num rollback)
+ * fecha ("both": produto E segmento), nunca abre a todos.
+ */
+export function accessModeOfRow(row: Pick<WebinarRow, "access_mode" | "audience_restricts">): AccessMode {
+  if (!(ACCESS_MODE_COLUMN_VALUES as readonly string[]).includes(row.access_mode)) {
+    return "both";
+  }
+
+  return row.access_mode === "product" && row.audience_restricts === true ? "both" : (row.access_mode as AccessMode);
+}
+
+/** O access_mode e o audience_restricts gravados para um modo do app ("both" = 'product' + true; D41). */
+export function accessModeColumns(mode: AccessMode): Pick<WebinarRow, "access_mode" | "audience_restricts"> {
+  return mode === "both" ? { access_mode: "product", audience_restricts: true } : { access_mode: mode, audience_restricts: false };
+}
+
 /** A linha de webinars (e os apresentadores) no modelo do app. O video da Live gravada vem a parte (recording). */
 export function webinarFromRow(row: WebinarRow, presenters: readonly PresenterRow[] = [], recording: RecordingRow | null = null): Webinar {
   return {
-    accessMode: oneOf<AccessMode>(ACCESS_MODES, row.access_mode, "everyone"),
+    accessMode: accessModeOfRow(row),
     allowStudentCamera: row.allow_student_camera !== false,
     audience: audienceOfRow(row.audience),
     autoRecord: row.auto_record !== false,
@@ -406,7 +427,7 @@ export function registrationFromRow(row: RegistrationRow): WebinarRegistration {
 /** O patch de webinars a partir do rascunho (as sessoes, os apresentadores e o video vao para as outras tabelas). */
 export function webinarRowPatch(draft: WebinarDraft): Omit<WebinarRow, "cancel_reason" | "cancelled_at" | "created_at" | "created_by" | "deleted_at" | "id" | "published_at" | "slug" | "status" | "updated_at"> {
   return {
-    access_mode: draft.accessMode,
+    ...accessModeColumns(draft.accessMode),
     allow_student_camera: draft.allowStudentCamera,
     audience: normalizeAudience(draft.audience),
     auto_record: draft.autoRecord,
@@ -417,7 +438,7 @@ export function webinarRowPatch(draft: WebinarDraft): Omit<WebinarRow, "cancel_r
     duration_minutes: draft.durationMinutes,
     host_user_id: draft.hostUserId,
     kind: draft.kind,
-    product_id: draft.accessMode === "product" || draft.accessMode === "either" ? draft.productId : null,
+    product_id: accessModeUsesProduct(draft.accessMode) ? draft.productId : null,
     quality: draft.quality,
     recording_retention_days: draft.recordingRetentionDays,
     registration_required: draft.registrationRequired,

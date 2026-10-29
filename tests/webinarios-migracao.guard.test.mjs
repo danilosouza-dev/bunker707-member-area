@@ -109,6 +109,15 @@ test("a 0028: oito secoes MCP, idempotente, sem delete, truncate, create policy,
   assert.equal((code.match(/\bcreate function\b/gi) ?? []).length, 0);
 });
 
+test("o access_mode da 0028 continua o mesmo: o 'both' do app grava 'product' + audience_restricts (202610300001), nunca um valor novo", () => {
+  const code = sqlCodeOf(read("supabase/migrations/202610300001_webinars_quem_pode_regras.sql"));
+
+  assert.deepEqual([...model.ACCESS_MODES], ["everyone", "product", "audience", "either", "both"], "o modo novo do app entra no fim");
+  assert.deepEqual([...model.ACCESS_MODE_COLUMN_VALUES], ["everyone", "product", "audience", "either"], "a coluna fica com os quatro da 0028");
+  assert.doesNotMatch(code, /webinars_access_mode_check|\bboth\b/, "a 0030 nao mexe no check nem grava 'both'");
+  assert.match(code, /alter table public\.webinars\s+add column if not exists audience_restricts boolean not null default false;/);
+});
+
 test("as cinco tabelas sao so do service_role: RLS ligada, revoke de anon e authenticated, grant ao service_role", () => {
   const code = sqlCodeOf(read(MIGRATION));
   const tables = ["webinars", "webinar_sessions", "webinar_presenters", "webinar_recordings", "webinar_registrations"];
@@ -129,7 +138,8 @@ test("os checks do banco batem com as listas e os limites do app (model.ts)", ()
   assert.match(code, new RegExp(`status text not null default 'draft' check \\(status in \\(${sqlList(model.WEBINAR_STATUSES)}\\)\\)`));
   assert.match(code, new RegExp(`kind text not null check \\(kind in \\(${sqlList(model.SESSION_KINDS)}\\)\\)`));
   assert.match(code, new RegExp(`status text not null default 'scheduled' check \\(status in \\(${sqlList(model.SESSION_STATUSES)}\\)\\)`));
-  assert.match(code, new RegExp(`access_mode text not null default 'everyone' check \\(access_mode in \\(${sqlList(model.ACCESS_MODES)}\\)\\)`));
+  // O "both" do app grava 'product' + audience_restricts (202610300001): a coluna fica com os valores da 0028.
+  assert.match(code, new RegExp(`access_mode text not null default 'everyone' check \\(access_mode in \\(${sqlList(model.ACCESS_MODE_COLUMN_VALUES)}\\)\\)`));
   assert.match(code, new RegExp(`chat_mode text not null default 'open' check \\(chat_mode in \\(${sqlList(model.CHAT_MODES)}\\)\\)`));
   assert.match(code, new RegExp(`chat_slow_mode_seconds in \\(${sqlList(model.SLOW_MODE_SECONDS)}\\)`));
   assert.match(code, new RegExp(`role text not null check \\(role in \\(${sqlList(model.PRESENTER_ROLES)}\\)\\)`));

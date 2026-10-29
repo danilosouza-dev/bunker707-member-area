@@ -30,6 +30,10 @@ import { ProductPicker, type ProductPickerItem } from "../storefront/product-pic
 import { StudentAvatar } from "../students/student-avatar";
 import { adminTransition } from "../styles";
 import {
+  ACCESS_RECENT_HINT,
+  ACCESS_RECENT_PERIOD_CHOICES,
+  ACCESS_RECENT_PICK_HINT,
+  ACCESS_RECENT_SCOPE_CHOICES,
   AUDIENCE_RULE_LABELS,
   COMMENT_WINDOW_OPTIONS,
   FLOW_SINCE_CHOICES,
@@ -37,12 +41,18 @@ import {
   MESSAGE_RULE_SEGMENT_HINT,
   NO_FLOW_MESSAGES_MESSAGE,
   NO_SENT_NOTICES_MESSAGE,
+  NO_WEBINARS_MESSAGE,
   PAGE_TARGET_CHOICES,
+  WEBINAR_RULE_CHOICES,
+  WEBINAR_RULE_HINT,
+  accessRecentPeriodChoiceOf,
+  accessRecentPeriodOfChoice,
   appendAudienceNode,
   audienceFocusAfterRemoval,
   audienceMessageOptions,
   audienceNodeKey,
   audienceRuleTypesFor,
+  audienceWebinarOptions,
   canAddAudienceRule,
   commentWindowDays,
   commentWindowValue,
@@ -63,11 +73,14 @@ import {
   removeAudienceRuleLabel,
   replaceAudienceNode,
   starterAudience,
+  webinarRuleChoiceOf,
+  webinarRuleWithChoice,
   type AudienceBuilderMode,
   type AudienceFlowContext,
   type AudienceMessageOption,
   type AudienceNoticeChoice,
-  type AudiencePath
+  type AudiencePath,
+  type AudienceWebinarChoice
 } from "./notices-view-model";
 
 // "Para quem" do aviso (docs/22 §3; docs/17 §1.8.2): todos os alunos ou regras combinaveis. O grupo
@@ -83,6 +96,10 @@ import {
 // passo acima (`flowContext`), e entram "Visitou uma página" e "Ganhou acesso a um produto". As acoes
 // oferecidas sao so as que a notificacao escolhida tem (audio, destino, resposta; v3a: reacoes e enquete,
 // com o segundo seletor "com qualquer reação" / "em qualquer opção").
+//
+// Quem pode da live por regras (docs/22 §3, docs/30 §1.6): "Ganhou acesso recentemente" (hoje, 24 h, 48 h ou N
+// horas, a qualquer produto ou a um dos escolhidos) e "Participação em lives" (participou ou garantiu vaga, numa
+// live da lista `webinars` ou em qualquer uma), nos dois modos.
 
 type AudienceBuilderProps = {
   cohorts: readonly { id: string; name: string }[];
@@ -102,6 +119,13 @@ type AudienceBuilderProps = {
   productsLoaded: boolean;
   segments: readonly NoticeSegmentOption[];
   value: AudienceDefinition;
+  /**
+   * Lives publicadas, as mais recentes primeiro (loadAudienceWebinarOptions): o seletor de "Participação em lives".
+   * Sem a lista, so "qualquer live" (e a live ja escolhida).
+   */
+  webinars?: readonly AudienceWebinarChoice[] | null;
+  /** Live que nao aparece no seletor (a propria live, no "Quem pode" do editor do webinário). */
+  excludeWebinarId?: string | null;
 };
 
 const MODE_OPTIONS = [
@@ -251,6 +275,7 @@ function TogglePills({
 type RuleContext = {
   cohorts: readonly { id: string; name: string }[];
   disabled: boolean;
+  excludeWebinarId: string | null;
   idPrefix: string;
   /** Notificacoes que as regras v2 podem citar (avisos enviados ou passos acima, conforme o modo). */
   messageOptions: readonly AudienceMessageOption[];
@@ -258,6 +283,7 @@ type RuleContext = {
   productOptions: readonly Option<string | null>[];
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
+  webinars: readonly AudienceWebinarChoice[];
 };
 
 /**
@@ -390,6 +416,143 @@ function productOptionsWith(base: readonly Option<string | null>[], emptyLabel: 
 
 function ProductsUnavailable() {
   return <p className="text-[13px] leading-5 text-[var(--warning)]">Não foi possível carregar a lista de produtos agora. Recarregue a página para escolher.</p>;
+}
+
+const hintClass = "text-[13px] leading-5 text-[var(--text-secondary)]";
+
+/**
+ * "[Ganhou | Não ganhou] acesso a [qualquer produto | um destes produtos] [hoje | nas últimas 24 horas | ...]". A
+ * escolha "um destes produtos" fica guardada aqui enquanto a lista ainda esta vazia (sem produto = qualquer um).
+ */
+function AccessRecentFields({
+  context,
+  onChange,
+  rule,
+  ruleKey
+}: {
+  context: RuleContext;
+  onChange: (rule: AudienceRule) => void;
+  rule: Extract<AudienceRule, { type: "access_recent" }>;
+  ruleKey: string;
+}) {
+  const { disabled } = context;
+  const [choosing, setChoosing] = useState(rule.productIds.length > 0);
+  const scope = choosing || rule.productIds.length > 0 ? "chosen" : "any";
+  // "nas últimas…" fica escolhido enquanto a equipe digita: 24 e 48 no campo nao trocam a opcao nem tiram o campo.
+  const [otherHours, setOtherHours] = useState(() => accessRecentPeriodChoiceOf(rule.period) === "hours");
+  const periodChoice = accessRecentPeriodChoiceOf(rule.period, otherHours);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <InlineSelect
+          ariaLabel="Ganhou ou não"
+          className="w-36"
+          disabled={disabled}
+          onChange={(value) => onChange({ ...rule, negate: value === "not" })}
+          options={GAINED_OPTIONS}
+          value={rule.negate ? "not" : "did"}
+        />
+        <span className={textClass}>acesso a</span>
+        <InlineSelect
+          ariaLabel="Produto do acesso"
+          className="w-full sm:w-52"
+          disabled={disabled}
+          onChange={(value) => {
+            setChoosing(value === "chosen");
+
+            if (value === "any") {
+              onChange({ ...rule, productIds: [] });
+            }
+          }}
+          options={ACCESS_RECENT_SCOPE_CHOICES}
+          value={scope}
+        />
+        <InlineSelect
+          ariaLabel="Período"
+          className="w-full sm:w-56"
+          disabled={disabled}
+          onChange={(choice) => {
+            setOtherHours(choice === "hours");
+            onChange({ ...rule, period: accessRecentPeriodOfChoice(choice, rule.period) });
+          }}
+          options={ACCESS_RECENT_PERIOD_CHOICES}
+          value={periodChoice}
+        />
+        {periodChoice === "hours" && rule.period.kind === "hours" ? (
+          <>
+            <NumberField
+              ariaLabel="Horas"
+              disabled={disabled}
+              max={720}
+              min={1}
+              onChange={(hours) => onChange({ ...rule, period: { hours, kind: "hours" } })}
+              value={rule.period.hours}
+            />
+            <span className={textClass}>{rule.period.hours === 1 ? "hora" : "horas"}</span>
+          </>
+        ) : null}
+      </div>
+      {scope === "chosen" ? (
+        context.productsLoaded ? (
+          <>
+            <ProductPicker
+              disabled={disabled}
+              emptyText="Nenhum produto ainda. Crie um em Produtos."
+              id={`${context.idPrefix}-regra-${ruleKey}-produtos`}
+              items={context.products}
+              mode="multiple"
+              onChange={(productIds) => onChange({ ...rule, productIds })}
+              value={rule.productIds}
+            />
+            {rule.productIds.length === 0 ? <p className={hintClass}>{ACCESS_RECENT_PICK_HINT}</p> : null}
+          </>
+        ) : (
+          <ProductsUnavailable />
+        )
+      ) : null}
+      <p className={hintClass}>{ACCESS_RECENT_HINT}</p>
+    </div>
+  );
+}
+
+/** "[Participou | Não participou | Garantiu vaga | Não garantiu vaga] [qualquer live | live da lista]". */
+function WebinarRuleFields({
+  context,
+  onChange,
+  rule
+}: {
+  context: RuleContext;
+  onChange: (rule: AudienceRule) => void;
+  rule: Extract<AudienceRule, { type: "webinar" }>;
+}) {
+  const options = audienceWebinarOptions(context.webinars, rule.webinarId, context.excludeWebinarId);
+  const empty = options.length === 1;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <InlineSelect
+          ariaLabel="Participou ou garantiu vaga"
+          className="w-full sm:w-48"
+          disabled={context.disabled}
+          onChange={(choice) => onChange(webinarRuleWithChoice(rule, choice))}
+          options={WEBINAR_RULE_CHOICES}
+          value={webinarRuleChoiceOf(rule)}
+        />
+        <InlineSelect
+          ariaLabel="Live"
+          className="w-full sm:w-72"
+          disabled={context.disabled}
+          onChange={(webinarId) => onChange({ ...rule, webinarId })}
+          options={options}
+          value={rule.webinarId}
+        />
+      </div>
+      {empty ? <p className={hintClass}>{NO_WEBINARS_MESSAGE}</p> : null}
+      <p className={hintClass}>{WEBINAR_RULE_HINT}</p>
+    </div>
+  );
 }
 
 /** Campos de cada tipo de regra, em frase ("Concluíram pelo menos 50 % das aulas de ..."). */
@@ -741,6 +904,10 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
           </div>
         </div>
       );
+    case "access_recent":
+      return <AccessRecentFields context={context} onChange={onChange} rule={rule} ruleKey={ruleKey} />;
+    case "webinar":
+      return <WebinarRuleFields context={context} onChange={onChange} rule={rule} />;
   }
 }
 
@@ -819,6 +986,7 @@ export function AudienceBuilder({
   cohorts,
   disabled,
   errors,
+  excludeWebinarId = null,
   flowContext = null,
   idPrefix = "aviso",
   mode = "segment",
@@ -827,7 +995,8 @@ export function AudienceBuilder({
   products,
   productsLoaded,
   segments,
-  value
+  value,
+  webinars = null
 }: AudienceBuilderProps) {
   const [note, setNote] = useState<{ text: string; tone: "info" | "warning" } | null>(null);
   // Regras guardadas ao voltar para "Todos os alunos" (voltam se escolher regras de novo).
@@ -837,7 +1006,18 @@ export function AudienceBuilder({
     ...products.map((product) => ({ label: product.title, value: product.id }))
   ];
   const messageOptions = audienceMessageOptions(mode, { flowContext, notices });
-  const context: RuleContext = { cohorts, disabled, idPrefix, messageOptions, mode, productOptions, products, productsLoaded };
+  const context: RuleContext = {
+    cohorts,
+    disabled,
+    excludeWebinarId,
+    idPrefix,
+    messageOptions,
+    mode,
+    productOptions,
+    products,
+    productsLoaded,
+    webinars: webinars ?? []
+  };
   const root = value.kind === "rules" ? value.root : null;
   const addRuleButton = useRef<HTMLButtonElement>(null);
 

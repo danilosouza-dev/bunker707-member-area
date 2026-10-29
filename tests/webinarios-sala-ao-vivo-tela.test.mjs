@@ -10,7 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 // liveConfigOverwrite do papel e o nonce da pagina; nenhum texto da sala cita o motor de video; as frases sao todas de
 // WEBINAR_COPY (ou das provisorias pedidas); o aviso de gravacao da camera vem antes do toggleVideo e o microfone so
 // aparece depois do aviso e do Falar; a sala e um dialogo aria-modal com o chat em role=log e aria-live; os botoes
-// da barra tem 44 px e o nome exato; os sinais vao pelo sendBeacon no pagehide. Desenhada: Entrar na sala, Aguardando
+// da barra tem 44 px e o nome exato (Configurações no lugar do antigo Como usar, com o painel de som e aparelhos e os
+// atalhos dentro); os sinais vao pelo sendBeacon no pagehide. Desenhada: Entrar na sala, Aguardando
 // o apresentador (com a contagem), a sala trancada, em breve, encerrada (com Assistir o replay), removido e banido no
 // lugar da sala, o silencio no lugar do campo, a equipe na Sessao de pratica, o "ver como", a aba Participantes, o
 // selo Gravando, "Ao vivo · 00:42:10" e os dois avisos de gravacao.
@@ -19,6 +20,8 @@ const room = await import("../src/components/member/webinars/room/live-room.tsx"
 const stageModule = await import("../src/components/member/webinars/room/live-stage.tsx");
 const controls = await import("../src/components/member/webinars/room/live-controls.tsx");
 const notices = await import("../src/components/member/webinars/room/live-notices.tsx");
+const settingsPanel = await import("../src/components/member/webinars/room/live-settings.tsx");
+const { deviceSettingsFor } = await import("../src/lib/jitsi-device-settings.ts");
 const { LIVE_ROOM_COPY } = await import("../src/components/member/webinars/room/live-room-model.ts");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
@@ -28,12 +31,14 @@ const ROOM = "src/components/member/webinars/room";
 const FONTES = {
   api: ler(`${ROOM}/room-api.ts`),
   controls: ler(`${ROOM}/live-controls.tsx`),
+  devices: ler("src/components/webinars/use-jitsi-devices.ts"),
   hook: ler(`${ROOM}/use-live-room.ts`),
   model: ler(`${ROOM}/live-room-model.ts`),
   notices: ler(`${ROOM}/live-notices.tsx`),
   page: ler("src/app/webinarios/[slug]/sala/page.tsx"),
   queries: ler("src/server/webinars/student-queries.ts"),
   room: ler(`${ROOM}/live-room.tsx`),
+  settings: ler(`${ROOM}/live-settings.tsx`),
   signal: ler("src/lib/lesson-media-signal.ts"),
   stage: ler(`${ROOM}/live-stage.tsx`)
 };
@@ -90,9 +95,10 @@ const sala = (props = {}) =>
 
 test("o palco monta o iframe pelo useJitsiMeet com o configOverwrite do papel, o interfaceConfigOverwrite e o nonce; nada de SDK nem de origem de terceiro", () => {
   const hook = semComentarios(FONTES.hook);
-  assert.match(hook, /import \{ useJitsiMeet, type JitsiStatus \} from "@\/components\/webinars\/use-jitsi-meet";/);
+  assert.match(hook, /import \{ useJitsiMeet, type JitsiMeetApi, type JitsiStatus \} from "@\/components\/webinars\/use-jitsi-meet";/);
   assert.match(hook, /liveConfigOverwrite\(reply\.role, reply\.settings\)/, "o papel vem do servidor (a resposta do join-token)");
-  assert.match(hook, /liveInterfaceConfigOverwrite\(\)/);
+  // A engrenagem do iframe so para quem apresenta: o papel entra no interfaceConfigOverwrite (e a memoria segue o papel).
+  assert.match(hook, /const roomRole = reply\?\.role \?\? null;\s*const interfaceConfigOverwrite = useMemo\(\(\) => liveInterfaceConfigOverwrite\(roomRole\), \[roomRole\]\);/);
   assert.match(hook, /useJitsiMeet\(\{[\s\S]*?configOverwrite,[\s\S]*?container,[\s\S]*?domain: reply\?\.domain \?\? null,[\s\S]*?jwt: reply\?\.jwt \?\? null,[\s\S]*?nonce,[\s\S]*?onEvent,[\s\S]*?room: reply\?\.room \?\? null/);
   assert.match(hook, /toRoomEvent\(name, payload, \{ extra: consented \? \{ consented: true \} : undefined, nowIso: new Date\(\)\.toISOString\(\), ownId: ownIdRef\.current \}\)/);
   assert.match(hook, /tokenRefreshInMs\(reply, Date\.now\(\)\)/, "o token novo antes do exp");
@@ -105,7 +111,7 @@ test("o palco monta o iframe pelo useJitsiMeet com o configOverwrite do papel, o
   assert.match(page, /\(await headers\(\)\)\.get\("x-nonce"\)/);
   assert.match(page, /<LiveWebinarRoom[\s\S]*?nonce=\{nonce\}[\s\S]*?staff=\{data\.staff\}/);
   assert.match(page, /data\.payload\.session\.kind === "live" \?/, "a live usa a sala ao vivo; a gravada e o replay continuam na WebinarRoom");
-  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{ allowed, container: frameRef, frameTitle: WEBINAR_COPY\.aoVivo\.palco, lobby: live\.lobby === true, nonce,/);
+  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*lobby: live\.lobby === true,\s*nonce,/);
 
   // O papel nunca vem do navegador: a pagina pergunta ao servidor pela regra unica (roomGrantFor).
   assert.match(semComentarios(FONTES.queries), /roomGrantFor\(db, \{ nowMs: now, userId, webinar: webinarFromRow\(row\) \}\)/);
@@ -128,14 +134,15 @@ test("nenhum texto da sala cita o motor de video (D2): nem nas frases, nem no ti
 });
 
 test("as frases da sala ao vivo sao todas de WEBINAR_COPY (ou das provisorias de LIVE_ROOM_COPY): nenhum texto escrito direto no desenho", () => {
-  for (const nome of ["room", "stage", "controls", "notices"]) {
+  for (const nome of ["room", "stage", "controls", "notices", "settings"]) {
     const codigo = semComentarios(FONTES[nome]);
     const textosNoJsx = codigo.match(/>[^<>{}\n]*[A-Za-zÀ-ú]{2,}[^<>{}\n]*</g) ?? [];
     assert.deepEqual(textosNoJsx, [], `${nome}: texto direto no JSX`);
     const atributos = codigo.match(/\b(aria-label|title|placeholder|alt)="[^"]+"/g) ?? [];
     assert.deepEqual(atributos, [], `${nome}: rotulo escrito direto`);
   }
-  assert.match(FONTES.controls, /LIVE_ROOM_COPY\.comoUsar/);
+  assert.match(FONTES.controls, /LIVE_ROOM_COPY\.configuracoes/);
+  assert.doesNotMatch(FONTES.controls, /comoUsar|Keyboard/, "o Como usar virou o painel Configurações");
   assert.match(FONTES.model, /export const LIVE_ROOM_COPY = \{/);
 });
 
@@ -150,9 +157,10 @@ test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so lig
 
   const hook = semComentarios(FONTES.hook);
   assert.equal((hook.match(/"toggleVideo"/g) ?? []).length, 1, "um so lugar manda a camera");
-  assert.match(hook, /const toggleCamera = useCallback\([\s\S]*?consentNextVideoRef\.current = true;[\s\S]*?commandRef\.current\("toggleVideo"\)/);
-  assert.equal((hook.match(/"toggleAudio"/g) ?? []).length, 2, "o Falar e o botao Microfone (que so aparece depois dele)");
-  assert.match(hook, /const accept = useCallback\(\(\) => \{\s*setSignals\(acceptMic\);\s*commandRef\.current\("toggleAudio"\);/);
+  assert.match(hook, /const toggleCamera = useCallback\([\s\S]*?consentNextVideoRef\.current = true;[\s\S]*?sendCameraToggle\(\);/);
+  assert.match(hook, /const sendCameraToggle = useCallback\(\(\) => \{[\s\S]*?commandRef\.current\("toggleVideo"\)/, "o toque (na hora, ou quando a troca de camera acaba) manda a camera");
+  assert.equal((hook.match(/"toggleAudio"/g) ?? []).length, 2, "ligar (o Falar e o Microfone desligado, pelo turnMicOn) e desligar pelo Microfone");
+  assert.match(hook, /const accept = useCallback\(\(\) => \{\s*setSignals\(acceptMic\);\s*turnMicOn\(\);/);
   assert.match(roomCode, /room\.signals\.micPrompt && !minimized && !blocked \? <LiveMicDialog onCancel=\{room\.declineMic\} onConfirm=\{room\.acceptMic\} \/>/);
   assert.match(semComentarios(FONTES.controls), /props\.showMedia && props\.micAllowed \? <BarButton/);
 
@@ -226,7 +234,6 @@ const barra = (props = {}) =>
     cinemaOn: false,
     fullscreenOn: false,
     handRaised: false,
-    helpOpen: false,
     joined: true,
     micAllowed: false,
     notice: null,
@@ -236,53 +243,121 @@ const barra = (props = {}) =>
     onMic: noop,
     onReact: noop,
     onSound: noop,
-    onToggleHelp: noop,
     onToggleReactions: noop,
+    onToggleSettings: noop,
     reactionsDisabled: false,
     reactionsOpen: false,
+    settingsOpen: false,
     showMedia: true,
     soundOn: true,
     videoOn: false,
     ...props
   });
 const nomes = (html) => [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]);
+/** O painel Configurações desenhado (o que a sala passa para a barra), com as secoes do momento. */
+const painelConfig = (sections) =>
+  createElement(settingsPanel.LiveSettings, {
+    devices: {
+      blur: false,
+      current: { audioInput: null, audioOutput: null, videoInput: null },
+      espelhar: noop,
+      fundo: noop,
+      lists: { audioInput: [], audioOutput: [], videoInput: [] },
+      maisFundos: noop,
+      mirror: true,
+      noise: false,
+      qualidade: noop,
+      quality: "automatica",
+      ruido: noop,
+      volume: noop,
+      volumePercent: 100
+    },
+    onChoose: noop,
+    sections,
+    showMedia: true
+  });
 
-test("a barra do aluno: Reagir, Levantar a mão, Câmera, Tela cheia, Som e Como usar com 44 px e o nome exato; o Microfone so depois de liberado", () => {
+test("a barra do aluno: Reagir, Levantar a mão, Câmera, Tela cheia, Som e Configurações com 44 px e o nome exato; o Microfone so depois de liberado", () => {
   const html = barra();
-  assert.deepEqual(nomes(html), ["Reagir", "Levantar a mão", "Câmera", "Tela cheia", "Som", LIVE_ROOM_COPY.comoUsar]);
+  assert.deepEqual(nomes(html), ["Reagir", "Levantar a mão", "Câmera", "Tela cheia", "Som", LIVE_ROOM_COPY.configuracoes]);
   assert.equal((html.match(/h-11 min-w-11/g) ?? []).length, 6, "44 px cada");
   assert.match(html, /aria-keyshortcuts="R"/);
   assert.match(html, /aria-keyshortcuts="M"/);
   assert.match(html, /aria-label="Câmera" aria-pressed="false"/);
   assert.match(html, /title="Ligar câmera"/);
 
-  assert.deepEqual(nomes(barra({ handRaised: true, micAllowed: true, videoOn: true })), ["Reagir", "Abaixar a mão", "Câmera", "Microfone", "Tela cheia", "Som", LIVE_ROOM_COPY.comoUsar]);
+  const cheia = barra({ handRaised: true, micAllowed: true, videoOn: true });
+  assert.deepEqual(nomes(cheia), ["Reagir", "Abaixar a mão", "Câmera", "Microfone", "Tela cheia", "Som", LIVE_ROOM_COPY.configuracoes]);
+  // 7 botoes de 44 px com 6 px entre eles e 8 px de cada lado cabem em 375 px: 7*44 + 6*6 + 16 = 360.
+  assert.equal((cheia.match(/h-11 min-w-11/g) ?? []).length, 7);
+  assert.ok(7 * 44 + 6 * 6 + 16 <= 375);
   assert.match(barra({ videoOn: true }), /title="Desligar câmera"/);
   assert.ok(!nomes(barra({ allowStudentCamera: false })).includes("Câmera"), "sem a camera dos alunos no webinario, sem o botao");
   assert.ok(!nomes(barra({ allowStudentCamera: null })).includes("Câmera"), "antes do token, sem o botao");
-  assert.match(barra({ allowStudentCamera: false, helpOpen: true }), /A câmera dos alunos está desligada nesta live\./);
+  // A frase da camera dos alunos desligada mora na secao Câmera do painel (antes, so no Como usar).
+  const semCamera = deviceSettingsFor({ allowStudentCamera: false, cameraConsented: false, isIOS: false, isMobile: false, joined: true, micAllowed: false, outputChangeAvailable: false, outputs: [], role: "student", videoOn: false });
+  assert.match(barra({ allowStudentCamera: false, settings: painelConfig(semCamera), settingsOpen: true }), /A câmera dos alunos está desligada nesta live\./);
   assert.ok(nomes(barra({ cinemaMode: true })).includes("Modo cinema"), "no iPhone, Modo cinema no lugar de Tela cheia");
   assert.ok(!nomes(barra({ cinemaMode: true })).includes("Tela cheia"));
   assert.match(barra({ joined: false }), /aria-label="Levantar a mão"[^>]*disabled=""/, "fora da sala, a mao espera");
 
   // Host e co-apresentador que entram por aqui usam a barra do iframe: sem mao, camera e microfone nossos.
-  assert.deepEqual(nomes(barra({ micAllowed: true, showMedia: false })), ["Reagir", "Tela cheia", "Som", LIVE_ROOM_COPY.comoUsar]);
+  assert.deepEqual(nomes(barra({ micAllowed: true, showMedia: false })), ["Reagir", "Tela cheia", "Som", LIVE_ROOM_COPY.configuracoes]);
 
   const reagindo = barra({ reactionsOpen: true });
   assert.match(reagindo, /aria-expanded="true"/);
   for (const nome of Object.values(WEBINAR_COPY.sala.reacoes)) {
     assert.match(reagindo, new RegExp(`aria-label="${nome}"`), nome);
   }
-  const ajuda = barra({ helpOpen: true });
+  // Configurações: aria-expanded / aria-controls; aberto, o painel com os atalhos (o conteudo do antigo Como usar).
+  assert.match(html, /<button aria-controls="live-room-settings" aria-expanded="false" aria-label="Configurações"/);
+  assert.doesNotMatch(html, /id="live-room-settings"/, "fechado, sem o painel");
+  const entrou = deviceSettingsFor({ allowStudentCamera: true, cameraConsented: false, isIOS: false, isMobile: false, joined: true, micAllowed: false, outputChangeAvailable: false, outputs: [], role: "student", videoOn: false });
+  const aberto = barra({ settings: painelConfig(entrou), settingsOpen: true });
+  assert.match(aberto, /<button aria-controls="live-room-settings" aria-expanded="true" aria-label="Configurações"/);
+  assert.match(aberto, /id="live-room-settings"[\s\S]*data-testid="live-settings"/);
   for (const texto of [LIVE_ROOM_COPY.atalhoReagir, LIVE_ROOM_COPY.atalhoMao, LIVE_ROOM_COPY.atalhoEnquete]) {
-    assert.ok(ajuda.includes(texto), texto);
+    assert.ok(aberto.includes(texto), texto);
   }
+  assert.doesNotMatch(aberto, /<select/, "antes do Falar e do aviso da camera, nenhuma escolha de aparelho");
+  assert.ok(aberto.includes(WEBINAR_COPY.aoVivo.config.microfoneAguardando));
   assert.match(barra({ notice: WEBINAR_COPY.aoVivo.cameraFechadaPelaEquipe }), /aria-live="polite"[^>]*role="status">A equipe fechou a sua câmera\.</);
 });
 
 /* ------------------------------------------------------------------------------------------------
  * A sala inteira, nos estados
  * ---------------------------------------------------------------------------------------------- */
+
+test("o painel Configurações no celular nao tira a barra da tela: depois da barra no teclado e acima dela na tela, encolhe e rola por dentro; aberto, toma o lugar da gaveta e o palco encolhe ate 96 px; Reagir e Configurações nunca juntos", () => {
+  const entrou = deviceSettingsFor({ allowStudentCamera: true, cameraConsented: false, isIOS: false, isMobile: true, joined: true, micAllowed: false, outputChangeAvailable: true, outputs: [], role: "student", videoOn: false });
+  const aberto = barra({ settings: painelConfig(entrou), settingsOpen: true });
+  // A barra (role=group "Controles da sala") vem antes do painel no HTML: o Tab do botao Configurações entra no painel.
+  assert.ok(aberto.indexOf('aria-label="Controles da sala"') < aberto.indexOf('id="live-room-settings"'), "o painel depois da barra no teclado");
+  assert.match(aberto, /<div class="order-first flex min-h-0 flex-col[^"]*" id="live-room-settings">/, "acima da barra na tela e encolhivel");
+  assert.match(aberto, /data-testid="live-controls"/);
+  assert.match(aberto, /<div class="relative flex min-h-0 flex-col[^"]*" data-testid="live-controls">/, "a barra inteira encolhe so pelo painel");
+  assert.match(aberto, /aria-label="Controles da sala" class="flex shrink-0 /, "os botoes nunca encolhem");
+  assert.match(aberto, /class="max-h-\[min\(55dvh,30rem\)\] min-h-0 overflow-y-auto/, "o painel rola por dentro (dvh: a altura que sobra de verdade no celular)");
+
+  const room = semComentarios(FONTES.room);
+  assert.match(room, /const settingsTakeover = settingsShown && !desktop;\s*const drawerVisible = desktop \|\| \(drawerOpen && !settingsTakeover\);/, "no celular, o painel toma o lugar da gaveta (so com a barra na tela)");
+  assert.match(room, /const stageGrows = blocked \|\| !drawerVisible \|\| cinemaOn;/);
+  assert.match(room, /stageGrows \? cn\("flex-1", settingsTakeover \? "min-h-24" : "min-h-0"\) : "aspect-video"/, "o palco encolhe, com no minimo 96 px");
+  assert.match(room, /!drawerVisible && !blocked && !settingsTakeover \? <LiveChatOverlay/, "sem o chat sobreposto no palco pequeno");
+  assert.match(room, /function selectTab\(value: Tab\) \{\s*if \(settingsTakeover\) \{\s*closeSettings\(\);\s*setTab\(value\);\s*setDrawerOpen\(true\);/, "a aba de baixo fecha o painel e abre a gaveta");
+  assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen && settingsOpen\) \{\s*closeSettings\(\);/, "Reagir fecha Configurações");
+  assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);/, "Configurações fecha Reagir");
+  assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
+  assert.match(room, /onMinimize=\{\(\) => \{\s*setSettingsOpen\(false\);\s*setMinimized\(true\);/, "a pilula nao guarda o painel aberto");
+});
+
+test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes de fechar (senao o foco cai no body e a sala para de ouvir o teclado)", () => {
+  const room = semComentarios(FONTES.room);
+  assert.match(room, /function returnFocusFrom\(panelId: string\) \{\s*const panel = document\.getElementById\(panelId\);\s*if \(panel && panel\.contains\(document\.activeElement\)\) \{\s*panelButton\(panelId\)\?\.focus\(\);/);
+  assert.match(room, /querySelector<HTMLButtonElement>\(`\[aria-controls="\$\{panelId\}"\]`\)/, "o botao que abre o painel (aria-controls)");
+  assert.match(room, /\} else if \(reactionsShown \|\| settingsShown\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*\} else \{\s*askToLeave\(\);/);
+  assert.match(room, /function closeSettings\(focusButton = false\) \{[\s\S]*?returnFocusFrom\(LIVE_SETTINGS_ID\);[\s\S]*?setSettingsOpen\(false\);/);
+});
 
 test("no ar: 'Ao vivo · 00:42:10', {n} assistindo, Gravando, Entrar na sala no palco 16:9 com os atributos do sinal de midia, as quatro abas e o painel a direita", () => {
   const html = sala({ payload: payload({ live: { recording: true } }) });
@@ -449,4 +524,21 @@ test("o palco em cada momento: Abrindo a sala…, Reconectando… por cima do if
   assert.doesNotMatch(textoDe(pequeno), /\S/, "minimizado, nenhuma frase por cima");
   assert.equal(stageModule.liveStageState("open", "joined"), "live");
   assert.equal(stageModule.liveStageState("locked", "idle"), "locked");
+});
+
+test("fora do Quem pode no meio da live (D41): o palco da lugar a frase, sem capa, sem Entrar na sala e sem Tentar de novo; a sala desliga o iframe", () => {
+  const ref = { current: null };
+  const base = { countdownLabel: "", coverUrl: "https://cdn.example.com/capa.jpg", entry: "joined", frameRef: ref, minimized: false, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, sessionId: "s1", stageRef: ref, title: "Aula de IA" };
+  const fora = render(stageModule.LiveStage, { ...base, screen: "unavailable" });
+  assert.match(fora, /data-room-stage="unavailable"/);
+  assert.match(fora, /role="alert">Esta live não está disponível para você\.</);
+  assert.doesNotMatch(fora, /<img/);
+  assert.doesNotMatch(textoDe(fora), /Entrar na sala|Tentar de novo|Não conseguimos voltar/);
+  // A sala: o iframe so monta com a tela aberta (allowed), e o 404 da sessao, da presenca, do token ou dos sinais
+  // vira `unavailable` (o mesmo `local` que nao se desfaz).
+  const codigo = semComentarios(FONTES.room);
+  assert.match(codigo, /unavailable: accessLost \|\| local\.unavailable/);
+  assert.match(codigo, /onAccessLost: \(\) => setLocal/);
+  assert.match(codigo, /const lostInside = screen === "unavailable" && entryInRoom\(room\.entry\)/, "dentro do iframe, a sala sai (hangUp) sem esperar o token");
+  assert.match(codigo, /const allowed = !readOnly && liveRoomScreen\(\{ \.\.\.screenInput, inRoom: true \}\) === "open"/);
 });

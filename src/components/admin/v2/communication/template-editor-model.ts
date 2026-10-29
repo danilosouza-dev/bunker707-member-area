@@ -251,8 +251,10 @@ export function templateDraftForSave<T extends Pick<NoticeDraft, "cta" | "design
 
 /**
  * As notas do topo do aviso novo que comecou de um modelo (`start`): "Você começou do modelo…" e as notas do Usar; do
- * ?modelo= que nao abriu, startMissing ou startUnreadable. Depois do primeiro salvar (o aviso ja existe, mesmo sem
- * trocar de endereco com o editor Livre aberto), nao ha mais nota: e o que o editor mostra quando reabre o aviso.
+ * ?modelo= que nao abriu, startMissing ou startUnreadable. Um `start` sem modelo (templateName null: o atalho Avisar do
+ * webinario, docs/30 §2.2) traz a propria nota de inicio nas `notes`. Depois do primeiro salvar (o aviso ja existe,
+ * mesmo sem trocar de endereco com o editor Livre aberto), nao ha mais nota: e o que o editor mostra quando reabre o
+ * aviso.
  */
 export function noticeStartNotes(input: {
   mode: NoticeEditorMode;
@@ -266,7 +268,7 @@ export function noticeStartNotes(input: {
   }
 
   if (input.mode === "start") {
-    return [TEMPLATE_MESSAGES.startFrom(input.templateName ?? ""), ...input.notes];
+    return input.templateName === null ? [...input.notes] : [TEMPLATE_MESSAGES.startFrom(input.templateName), ...input.notes];
   }
 
   if (input.mode === "new" && input.problem) {

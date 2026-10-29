@@ -8,6 +8,7 @@ import {
   initialChatCursor,
   mergeMessages,
   nextReactionBubbles,
+  roomAccessLost,
   type ChatCursor,
   type ReactionBubble,
   type RoomMessage
@@ -34,7 +35,9 @@ import {
 // voltar para a aba, pela rota da sessao, que tambem renova fixada, enquetes, modo do chat e presentes), o sinal
 // de presenca de 15 s (e o de saida por sendBeacon), o chat (a janela por offset pedida quando o player se
 // aproxima do fim da atual e a consulta de 5 s das mensagens novas, fundidas sem repetir) e as reacoes (as
-// contagens dos ultimos segundos viram bolhas). Tudo para quando a sala fecha; nada roda no "ver como".
+// contagens dos ultimos segundos viram bolhas). Tudo para quando a sala fecha; nada roda no "ver como". O 404 da
+// releitura da sessao e do sinal de presenca (a pessoa saiu do "Quem pode" no meio da live, D41) avisa a sala, que
+// desmonta o video e mostra "Esta live não está disponível para você." (roomAccessLost).
 
 const CLOCK_MS = ROOM_RULES.clockResyncSeconds * 1000;
 const HEARTBEAT_MS = ROOM_RULES.heartbeatSeconds * 1000;
@@ -54,6 +57,8 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
   const { enabled, initial, webinarId } = input;
   const [session, setSession] = useState(initial);
   const [skewMs, setSkewMs] = useState(0);
+  /** A releitura respondeu 404: a pessoa perdeu a sala (definitivo; as releituras param). */
+  const [accessLost, setAccessLost] = useState(false);
   const skewRef = useRef(0);
   const sessionId = initial.session.id;
 
@@ -66,14 +71,20 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
       setSkewMs(skew);
       setSession((previous) => ({ ...previous, ...(answer.data as StudentRoomPayload), me: { ...previous.me, ...answer.data.me } }));
       return answer.data as StudentRoomPayload;
-    } catch {
-      // Sem resposta, o relogio anterior continua valendo; a proxima tentativa vem no proximo passo.
+    } catch (error) {
+      // 404: fora do "Quem pode" agora (ou a sessao sumiu): a sala para. Sem resposta, o relogio anterior continua
+      // valendo e a proxima tentativa vem no proximo passo.
+      if (roomAccessLost(error)) {
+        setAccessLost(true);
+      }
       return null;
     }
   }, [sessionId, webinarId]);
 
+  const reading = enabled && !accessLost;
+
   useEffect(() => {
-    if (!enabled) {
+    if (!reading) {
       return;
     }
     // A primeira leitura sai do proprio efeito (sem setState sincrono nele): acerta o relogio logo ao abrir.
@@ -88,16 +99,16 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
       window.clearTimeout(first);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [enabled, refresh]);
+  }, [reading, refresh]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!reading) {
       return;
     }
     return timer(() => void refresh(), CLOCK_MS);
-  }, [enabled, refresh]);
+  }, [reading, refresh]);
 
-  return { refresh, session, setSession, skewMs, skewRef };
+  return { accessLost, refresh, session, setSession, skewMs, skewRef };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -108,15 +119,17 @@ export function useRoomHeartbeat(input: {
   enabled: boolean;
   getOffsetSeconds: () => number;
   getState: () => PresenceState;
+  /** O sinal respondeu 404: a pessoa saiu do "Quem pode" (o acesso guardado no servidor vale ate 10 min). */
+  onAccessLost?: () => void;
   onAnswer?: (answer: { ended: boolean; presentNow: number }) => void;
   sessionId: string;
   webinarId: string;
 }) {
   const { enabled, sessionId, webinarId } = input;
-  const readRef = useRef({ getOffsetSeconds: input.getOffsetSeconds, getState: input.getState, onAnswer: input.onAnswer });
+  const readRef = useRef({ getOffsetSeconds: input.getOffsetSeconds, getState: input.getState, onAccessLost: input.onAccessLost, onAnswer: input.onAnswer });
 
   useEffect(() => {
-    readRef.current = { getOffsetSeconds: input.getOffsetSeconds, getState: input.getState, onAnswer: input.onAnswer };
+    readRef.current = { getOffsetSeconds: input.getOffsetSeconds, getState: input.getState, onAccessLost: input.onAccessLost, onAnswer: input.onAnswer };
   });
 
   useEffect(() => {
@@ -137,7 +150,12 @@ export function useRoomHeartbeat(input: {
             readRef.current.onAnswer?.({ ended: answer.ended, presentNow: answer.presentNow });
           }
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          // So o 404 importa (fora do acesso agora); rede e 5xx: o proximo sinal vem em 15 s.
+          if (!stopped && roomAccessLost(error)) {
+            readRef.current.onAccessLost?.();
+          }
+        });
     };
     const leave = () => {
       stopped = true;

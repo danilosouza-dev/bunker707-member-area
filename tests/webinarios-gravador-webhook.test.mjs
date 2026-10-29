@@ -781,14 +781,14 @@ test("pedido preso em pending (o processo caiu no meio): depois de 60 s a repeti
   assert.equal(eventos(juntas)[0].processing_status, "processed");
 });
 
-test("banco sem a migracao 202610290003 (a mais nova): 503 e o log da migracao", async () => {
+test("banco sem a migracao 202610290003 (o aviso aponta a mais nova, a 202610300001): 503 e o log da migracao", async () => {
   const banco = escola();
   banco.falhar("webinar_sessions", "select", { code: "42703", message: 'column webinar_sessions.room_name does not exist' });
 
   const resposta = await postar({ sessionId: SESSION, state: "ready" });
 
   assert.equal(resposta.status, 503);
-  assert.ok(resposta.logs.some((linha) => linha.includes("migracao 202610290003 pendente")));
+  assert.ok(resposta.logs.some((linha) => linha.includes("migracao 202610300001 pendente")));
   assert.equal(eventos(banco).length, 0);
 });
 

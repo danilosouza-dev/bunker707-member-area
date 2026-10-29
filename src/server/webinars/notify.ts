@@ -7,7 +7,9 @@ import "server-only";
 // started_notice_sent_at; a fase 3 chama ao abrir a sala). Os lembretes de 24 h e 1 h ficam no job do tick
 // (src/server/jobs/webinar-reminders-job.ts, reminders.ts). Este arquivo e o ponto que as Server Actions do admin
 // chamam: nenhuma funcao lanca (a falha vira console.error) e todas devolvem contagens. A equipe nunca recebe; o
-// dedupe_key (webinar:<sessao>:<tipo>:<hora marcada>) segura a repeticao mesmo onde nao ha marca.
+// dedupe_key (webinar:<sessao>:<tipo>:<hora marcada>) segura a repeticao mesmo onde nao ha marca. So recebe quem ainda
+// passa pelo "Quem pode" (listStudentRegistrations), com a vaga como ancora do segmento no Segmento e no "both" e, no
+// "Produto ou segmento", o produto ou o segmento de agora: o reembolsado fica de fora.
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarWhen } from "../../lib/webinar-time";
@@ -117,7 +119,7 @@ export async function queueWebinarCancelledNotices(db: WebinarsDb, webinarId: st
     const sessions = (await listSessionRows(db, [webinarId])).filter((session) => isOpenSession(session, webinar.durationMinutes, ctx.nowMs));
 
     for (const session of sessions) {
-      const marked = await markOnce(ctx, await listStudentRegistrations(ctx, session), "cancelled_notice_sent_at");
+      const marked = await markOnce(ctx, await listStudentRegistrations(ctx, session, webinar), "cancelled_notice_sent_at");
 
       if (marked.length === 0) {
         continue;
@@ -184,7 +186,7 @@ export async function queueWebinarRescheduledNotices(db: WebinarsDb, sessionId: 
     await resetReminderMarks(db, session);
 
     const ctx = createWebinarNoticeContext(db, now);
-    const registrations = await listStudentRegistrations(ctx, session);
+    const registrations = await listStudentRegistrations(ctx, session, webinar);
 
     if (registrations.length === 0) {
       return result;
@@ -233,7 +235,7 @@ export async function queueWebinarStartedNotices(db: WebinarsDb, sessionId: stri
     }
 
     const ctx = createWebinarNoticeContext(db, now);
-    const marked = await markOnce(ctx, await listStudentRegistrations(ctx, session), "started_notice_sent_at");
+    const marked = await markOnce(ctx, await listStudentRegistrations(ctx, session, webinar), "started_notice_sent_at");
 
     if (marked.length === 0) {
       return result;

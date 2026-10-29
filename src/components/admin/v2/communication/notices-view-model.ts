@@ -1699,7 +1699,10 @@ export const AUDIENCE_RULE_LABELS: Record<AudienceRuleType, string> = {
   // v2 (docs/23 §7)
   access_gained: "Ganhou acesso a um produto",
   message: "O que fez com uma notificação",
-  page_visit: "Visitou uma página"
+  page_visit: "Visitou uma página",
+  // Quem pode da live por regras (docs/22 §3, docs/30 §1.6)
+  access_recent: "Ganhou acesso recentemente",
+  webinar: "Participação em lives"
 };
 
 /** Ordem do seletor de tipo de regra (as regras que valem em todo lugar; a v2 vem em audienceRuleTypesFor). */
@@ -1708,11 +1711,13 @@ export const AUDIENCE_RULE_ORDER: readonly AudienceRuleType[] = [
   "progress",
   "comments",
   "access_age",
+  "access_recent",
   "access_ending",
   "last_study",
   "sign_in",
   "pace",
-  "cohort"
+  "cohort",
+  "webinar"
 ];
 
 /**
@@ -2017,6 +2022,128 @@ export function messageRuleWithOption(rule: MessageRule, option: AudienceMessage
   return keep ? { ...next, choice: rule.choice } : next;
 }
 
+/* Quem pode da live por regras (docs/22 §3, docs/30 §1.6): "Ganhou acesso recentemente" e "Participação em lives". */
+
+/**
+ * Periodo de "Ganhou acesso recentemente" no seletor: hoje, 24 h, 48 h ou outro numero de horas ("nas últimas…",
+ * seguido do campo e de "horas": a linha fica "nas últimas… [72] horas", sem repetir a palavra).
+ */
+export const ACCESS_RECENT_PERIOD_CHOICES = [
+  { label: "hoje", value: "today" },
+  { label: "nas últimas 24 horas", value: "24" },
+  { label: "nas últimas 48 horas", value: "48" },
+  { label: "nas últimas…", value: "hours" }
+] as const;
+
+export type AccessRecentPeriodChoice = (typeof ACCESS_RECENT_PERIOD_CHOICES)[number]["value"];
+
+type AccessRecentRule = Extract<AudienceRule, { type: "access_recent" }>;
+
+/**
+ * Hoje, 24 h e 48 h sao opcoes proprias; outro numero de horas e "nas últimas…" (com o campo). `otherHours` = a equipe
+ * escolheu "nas últimas…" nesta tela: enquanto digita, 24 e 48 continuam no campo (digitar 240 passa por 2 e 24, e o
+ * campo nao pode sumir no meio). Sem a escolha (ao abrir), 24 e 48 voltam para as opcoes proprias.
+ */
+export function accessRecentPeriodChoiceOf(period: AccessRecentRule["period"], otherHours = false): AccessRecentPeriodChoice {
+  if (period.kind === "today") {
+    return "today";
+  }
+
+  if (otherHours) {
+    return "hours";
+  }
+
+  return period.hours === 24 ? "24" : period.hours === 48 ? "48" : "hours";
+}
+
+/** "nas últimas…" comeca em 72 (24 e 48 ja tem a propria opcao) ou mantem o numero que ja estava. */
+export function accessRecentPeriodOfChoice(choice: AccessRecentPeriodChoice, previous: AccessRecentRule["period"]): AccessRecentRule["period"] {
+  switch (choice) {
+    case "today":
+      return { kind: "today" };
+    case "24":
+      return { hours: 24, kind: "hours" };
+    case "48":
+      return { hours: 48, kind: "hours" };
+    default:
+      return previous.kind === "hours" && previous.hours !== 24 && previous.hours !== 48 ? previous : { hours: 72, kind: "hours" };
+  }
+}
+
+/** Produto de "Ganhou acesso recentemente": qualquer um (sem lista) ou um dos escolhidos. */
+export const ACCESS_RECENT_SCOPE_CHOICES = [
+  { label: "qualquer produto", value: "any" },
+  { label: "um destes produtos", value: "chosen" }
+] as const;
+
+export const ACCESS_RECENT_HINT = "Conta a data de início do acesso. Hoje vai de meia-noite a meia-noite, no horário de Brasília. Quem já tinha o produto antes não entra.";
+export const ACCESS_RECENT_PICK_HINT = "Sem produto escolhido, vale qualquer produto.";
+
+/** "[Participou | Não participou | Garantiu vaga | Não garantiu vaga]" da regra "Participação em lives". */
+export const WEBINAR_RULE_CHOICES = [
+  { label: "Participou", value: "attended" },
+  { label: "Não participou", value: "not_attended" },
+  { label: "Garantiu vaga", value: "registered" },
+  { label: "Não garantiu vaga", value: "not_registered" }
+] as const;
+
+export type WebinarRuleChoice = (typeof WEBINAR_RULE_CHOICES)[number]["value"];
+
+type WebinarRule = Extract<AudienceRule, { type: "webinar" }>;
+
+export function webinarRuleChoiceOf(rule: Pick<WebinarRule, "action" | "negate">): WebinarRuleChoice {
+  return rule.action === "registered" ? (rule.negate ? "not_registered" : "registered") : rule.negate ? "not_attended" : "attended";
+}
+
+export function webinarRuleWithChoice(rule: WebinarRule, choice: WebinarRuleChoice): WebinarRule {
+  return { ...rule, action: choice === "registered" || choice === "not_registered" ? "registered" : "attended", negate: choice.startsWith("not_") };
+}
+
+export const WEBINAR_RULE_HINT = "Participou = entrou na sala por qualquer tempo, ao vivo ou na Live gravada. Assistir o replay não conta.";
+export const NO_WEBINARS_MESSAGE = "Nenhuma live publicada ainda.";
+export const ANY_WEBINAR_LABEL = "qualquer live";
+const WEBINAR_OUT_OF_LIST_LABEL = "Live fora da lista";
+
+/** Live que o segmento pode citar (queries.ts, loadAudienceWebinarOptions). */
+export type AudienceWebinarChoice = { id: string; startsAt: string | null; title: string };
+
+/** "Aula ao vivo de IA · 21/10" (dia e mes da hora marcada, em Sao Paulo; sem data, so o titulo). */
+export function webinarChoiceLabel(webinar: AudienceWebinarChoice) {
+  const title = webinar.title.trim() || "Sem título";
+  const local = webinar.startsAt ? isoToSaoPauloLocal(webinar.startsAt) : null;
+
+  return local ? `${title} · ${local.date.slice(8, 10)}/${local.date.slice(5, 7)}` : title;
+}
+
+/**
+ * Opcoes do seletor de live: "qualquer live" primeiro, depois as lives (mais recentes primeiro). A live ja escolhida
+ * que nao esta na lista (excluida ou mais antiga) continua visivel; `excludeId` tira uma live (a propria live, no
+ * "Quem pode" do editor do webinário).
+ */
+export function audienceWebinarOptions(
+  webinars: readonly AudienceWebinarChoice[] | null | undefined,
+  current: string | null,
+  excludeId: string | null = null
+): { label: string; value: string | null }[] {
+  const list = (webinars ?? []).filter((webinar) => webinar.id !== excludeId);
+  const known = current === null || list.some((webinar) => webinar.id === current);
+
+  return [
+    { label: ANY_WEBINAR_LABEL, value: null },
+    ...(known ? [] : [{ label: WEBINAR_OUT_OF_LIST_LABEL, value: current }]),
+    ...list.map((webinar) => ({ label: webinarChoiceLabel(webinar), value: webinar.id }))
+  ];
+}
+
+/** Titulos das lives do seletor nos nomes da frase ("Alunos que participaram da live “X”"). */
+export function audienceNamesWithWebinars(names: AudienceNames, webinars: readonly AudienceWebinarChoice[] | null | undefined): AudienceNames {
+  if (!webinars || webinars.length === 0) {
+    return names;
+  }
+
+  return { ...names, webinars: { ...names.webinars, ...Object.fromEntries(webinars.map((webinar) => [webinar.id, webinar.title.trim() || "Sem título"])) } };
+}
+
 /** Pagina da regra "Visitou uma página", na ordem do seletor. */
 export const PAGE_TARGET_CHOICES = [
   { label: "a página para onde a notificação leva…", value: "message_cta" },
@@ -2119,6 +2246,10 @@ export function defaultAudienceRule(type: AudienceRuleType, input: { messageRef?
       return { paces: ["at_risk"], type };
     case "cohort":
       return { cohortIds: [], type };
+    case "access_recent":
+      return { negate: false, period: { kind: "today" }, productIds: [], type };
+    case "webinar":
+      return { action: "attended", negate: false, type, webinarId: null };
   }
 }
 

@@ -114,6 +114,18 @@ test("enderecos: as rotas do aluno e o id do sinal de midia", () => {
   assert.equal(client.roomMediaLessonId("s1"), "webinar:s1");
 });
 
+test("a sala perdida (D41): o 404 da releitura da sessao ou do sinal de presenca e definitivo; rede, 5xx e as recusas nao", () => {
+  // Live gravada em Produto ou segmento: quem saiu do segmento sem o produto recebe 404 em GET .../session (a cada 60 s)
+  // e em POST .../heartbeat (depois dos 10 min do acesso guardado); a sala desmonta o player e mostra a frase.
+  const falha = (status) => Object.assign(new Error("x"), { status });
+  assert.equal(client.roomAccessLost(falha(404)), true);
+  for (const status of [400, 401, 403, 409, 429, 500, 503]) {
+    assert.equal(client.roomAccessLost(falha(status)), false, `status ${status}`);
+  }
+  assert.equal(client.roomAccessLost(new TypeError("Failed to fetch")), false, "sem rede: a proxima tentativa");
+  assert.equal(client.roomAccessLost(null), false);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * As regras puras do servidor (room-rules.ts) e os limites na memoria (room-limits.ts)
  * ---------------------------------------------------------------------------------------------- */

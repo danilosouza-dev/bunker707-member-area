@@ -11,6 +11,17 @@ import "server-only";
 // registra e devolve zeros (o tick continua verde). Fora de um pedido do Next: a origem dos links dos e-mails e
 // resolveEmailSiteOrigin(null). O job e src/server/jobs/webinar-reminders-job.ts; notify.ts (cancelada, remarcada
 // e "Comecou agora") divide os ajudantes exportados daqui.
+//
+// A vaga so recebe se ainda passa pelo "Quem pode" na hora de enviar (keepRegistrantsWithAccess le os acessos de quem
+// vai receber; registrantHasWebinarAccess, em access.ts): o produto ligado e conferido de novo; no Segmento e no
+// "both" o segmento vale com a ancora da vaga, que ainda exige o produto e a turma que o segmento pede (D41); no
+// "Produto ou segmento" nao ha ancora: recebe quem tem o produto agora ou esta no segmento agora (o segmento lido so
+// para quem nao tem o produto, registrantsInSegmentNow). Quem foi reembolsado (ou perdeu o acesso) nao recebe lembrete,
+// "Comecou agora", cancelada nem remarcada, e a vaga dele fica sem a marca (volta a receber se o acesso voltar). Os
+// lembretes conferem so as vagas com lembrete vencido (o tick de minuto sem lembrete vencido nao le acesso nenhum); a
+// vaga barrada fica na memoria do processo do job (ReminderAccessMemo) e so e conferida de novo 15 min depois, em vez
+// de a cada minuto ate a hora da live (result.withoutAccess conta as conferidas e barradas). Em Todos, e no Segmento
+// que vale sem acesso nenhum (so entrada ou lives, por exemplo), nada e lido.
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDate, saoPauloTime } from "../../lib/webinar-time";
@@ -21,7 +32,9 @@ import { enqueueEmail } from "../email/outbox";
 import { webinarIdempotencyKey, type EmailKind, type WebinarEmailKey } from "../email/outbox-rules";
 import { renderWebinarReminderEmail } from "../email/templates/webinar-reminder";
 import { resolveEmailSiteOrigin } from "../email/transactional";
-import { fetchProfilesByIds, fetchStaffUserIds } from "../students/store";
+import { loadAudienceFactsFor } from "../communications/audience-facts";
+import { fetchEntitlements, fetchProfilesByIds, fetchPublishedLessonIndex, fetchStaffUserIds, type EntitlementRow } from "../students/store";
+import { registrantAccessNeeds, registrantHasWebinarAccess, registrantsInSegmentNow, type WebinarAccessTarget } from "./access";
 import { isMissingWebinarSchema, WEBINARS_MIGRATION, type WebinarsDb } from "./db";
 import { REMINDER_RULES, reminderDecision, toTime, webinarHref, type ReminderDecision, type Webinar } from "./model";
 import { webinarFromRow, type RegistrationRow, type SessionRow } from "./rows";
@@ -131,7 +144,7 @@ export function webinarNoticeRow(input: {
 }
 
 /** As vagas garantidas de uma sessao sem a equipe (admin_roles). */
-export async function listStudentRegistrations(ctx: WebinarNoticeContext, session: { id: string; webinar_id: string }): Promise<RegistrationRow[]> {
+async function listSessionStudents(ctx: WebinarNoticeContext, session: { id: string; webinar_id: string }): Promise<RegistrationRow[]> {
   const rows = await listSessionRegistrationRows(ctx.db, session, ["registered"]);
 
   if (rows.length === 0) {
@@ -141,6 +154,72 @@ export async function listStudentRegistrations(ctx: WebinarNoticeContext, sessio
   const staff = await ctx.staff();
 
   return rows.filter((row) => !staff.has(row.user_id));
+}
+
+/**
+ * Destas vagas, so as de quem ainda passa pelo "Quem pode" agora (registrantHasWebinarAccess): o reembolsado nao
+ * recebe, nem quem perdeu o produto ou a turma que o segmento pede; no Segmento e no "both" a vaga e a ancora. Os
+ * acessos (e, com regra de Turma, as turmas) so destas pessoas, em lotes de 150, e so quando decidem
+ * (registrantAccessNeeds). No "Produto ou segmento" (sem ancora), quem nao tem o produto agora recebe se estiver no
+ * segmento agora: os fatos do segmento so dessas pessoas (registrantsInSegmentNow), como a pagina le.
+ */
+export async function keepRegistrantsWithAccess(ctx: WebinarNoticeContext, webinar: WebinarAccessTarget, rows: readonly RegistrationRow[]): Promise<RegistrationRow[]> {
+  const needs = registrantAccessNeeds(webinar);
+
+  if (rows.length === 0 || !needs.entitlements) {
+    return [...rows];
+  }
+
+  const withAccess = new Set<string>();
+  // O indice de aulas uma vez para o lote: as turmas de quem tem a plataforma saem dele.
+  const lessonIndex = needs.lessonIndex ? await fetchPublishedLessonIndex(ctx.db) : null;
+
+  for (const part of chunksOf([...new Set(rows.map((row) => row.user_id))], PROFILE_CHUNK)) {
+    const entitlements = await fetchEntitlements(ctx.db, { userIds: part });
+    const byUser = new Map<string, EntitlementRow[]>();
+
+    for (const entitlement of entitlements) {
+      byUser.set(entitlement.user_id, [...(byUser.get(entitlement.user_id) ?? []), entitlement]);
+    }
+
+    // As turmas de agora, so com regra de Turma que decide a ancora (a turma conta so com o produto dela aberto).
+    const cohorts = new Map<string, readonly string[]>();
+
+    if (needs.cohorts && lessonIndex) {
+      const loaded = await loadAudienceFactsFor(ctx.db, part, ctx.nowMs, { comments: "none", entitlements, lessonIndex, staff: new Set<string>() });
+
+      for (const fact of loaded.facts) {
+        cohorts.set(fact.userId, fact.cohortIds);
+      }
+    }
+
+    // No "Produto ou segmento", quem nao tem o produto agora entra se estiver no segmento agora (como na pagina): o
+    // segmento so dessas pessoas.
+    const segmentNow: string[] = [];
+
+    for (const userId of part) {
+      if (registrantHasWebinarAccess(webinar, { cohortIds: cohorts.get(userId) ?? [], entitlements: byUser.get(userId) ?? [], now: ctx.nowMs, userId })) {
+        withAccess.add(userId);
+      } else if (webinar.accessMode === "either") {
+        segmentNow.push(userId);
+      }
+    }
+
+    for (const userId of await registrantsInSegmentNow(ctx.db, webinar, { entitlements, lessonIndex, now: ctx.nowMs, userIds: segmentNow })) {
+      withAccess.add(userId);
+    }
+  }
+
+  return rows.filter((row) => withAccess.has(row.user_id));
+}
+
+/** As vagas garantidas de uma sessao sem a equipe e so de quem ainda passa pelo "Quem pode" (keepRegistrantsWithAccess). */
+export async function listStudentRegistrations(
+  ctx: WebinarNoticeContext,
+  session: { id: string; webinar_id: string },
+  webinar: WebinarAccessTarget
+): Promise<RegistrationRow[]> {
+  return keepRegistrantsWithAccess(ctx, webinar, await listSessionStudents(ctx, session));
 }
 
 /** Enfileira um e-mail de live (fila email_outbox); false quando a mesma chave ja estava na fila. */
@@ -180,7 +259,36 @@ export type WebinarRemindersResult = {
   reminders24h: number;
   /** Vagas com lembrete vencido que outro tick marcou primeiro (ou que mudaram no meio): nada enviado por aqui. */
   skipped: number;
+  /** Vagas com lembrete vencido conferidas neste tick e fora do "Quem pode" (sem a marca; conferidas de novo em 15 min). */
+  withoutAccess: number;
 };
+
+/** Quanto a vaga barrada fica sem ser conferida de novo (o acesso que volta faz o lembrete sair ate 15 min depois). */
+export const REMINDER_ACCESS_RECHECK_MS = 15 * MINUTE_MS;
+
+/**
+ * As vagas com lembrete vencido barradas pelo "Quem pode" (vaga:garantida em:lembrete:hora marcada -> ate quando nao
+ * conferir de novo). Vive na memoria do processo do job (WEBINAR_REMINDER_ACCESS_MEMO); sem ela (testes, outra chamada),
+ * cada tick confere todas as vagas vencidas. Perdida num reinicio: a vaga e conferida uma vez de novo, nada mais.
+ */
+export type ReminderAccessMemo = Map<string, number>;
+
+/** A memoria do processo que o job do tick usa (src/server/jobs/webinar-reminders-job.ts). */
+export const WEBINAR_REMINDER_ACCESS_MEMO: ReminderAccessMemo = new Map();
+
+function memoKey(registration: RegistrationRow, decision: ReminderDecision, session: SessionRow) {
+  // A vaga garantida de novo (registered_at novo) e conferida na hora.
+  return `${registration.id}:${registration.registered_at}:${decision.send}:${scheduledStamp(session.scheduled_at)}`;
+}
+
+/** Tira da memoria o que ja venceu (a cada tick com lembrete vencido: a memoria nunca passa das vagas barradas em 15 min). */
+function pruneMemo(memo: ReminderAccessMemo, now: number) {
+  for (const [key, until] of memo) {
+    if (until <= now) {
+      memo.delete(key);
+    }
+  }
+}
 
 function isMissingWebinars(error: unknown) {
   return isPendingMigrationError(error) || isMissingWebinarSchema(error);
@@ -219,10 +327,10 @@ type DueReminder = { decision: ReminderDecision; registration: RegistrationRow }
 type DueEmail = DueReminder & { email: string; fullName: string | null };
 
 /** Os lembretes vencidos de uma sessao: marca a vaga, grava o sino e enfileira o e-mail (quando ligado). */
-async function remindSession(ctx: WebinarNoticeContext, result: WebinarRemindersResult, webinar: Webinar, session: SessionRow) {
-  const due: DueReminder[] = [];
+async function remindSession(ctx: WebinarNoticeContext, result: WebinarRemindersResult, webinar: Webinar, session: SessionRow, memo: ReminderAccessMemo) {
+  const pending: DueReminder[] = [];
 
-  for (const registration of await listStudentRegistrations(ctx, session)) {
+  for (const registration of await listSessionStudents(ctx, session)) {
     const decision = reminderDecision({
       now: ctx.nowMs,
       reminders: webinar.reminders,
@@ -231,8 +339,28 @@ async function remindSession(ctx: WebinarNoticeContext, result: WebinarReminders
       sent24h: Boolean(registration.reminder_24h_sent_at)
     });
 
-    if (decision) {
-      due.push({ decision, registration });
+    // A vaga barrada ha menos de 15 min nem e conferida de novo (a memoria do processo do job).
+    if (decision && !((memo.get(memoKey(registration, decision, session)) ?? 0) > ctx.nowMs)) {
+      pending.push({ decision, registration });
+    }
+  }
+
+  if (pending.length === 0) {
+    return;
+  }
+
+  // O "Quem pode" so de quem tem lembrete vencido: o tick de minuto sem lembrete vencido nao le acesso nenhum.
+  const allowed = new Set((await keepRegistrantsWithAccess(ctx, webinar, pending.map((item) => item.registration))).map((row) => row.id));
+  const due = pending.filter((item) => allowed.has(item.registration.id));
+
+  for (const item of pending) {
+    const key = memoKey(item.registration, item.decision, session);
+
+    if (allowed.has(item.registration.id)) {
+      memo.delete(key);
+    } else {
+      memo.set(key, ctx.nowMs + REMINDER_ACCESS_RECHECK_MS);
+      result.withoutAccess += 1;
     }
   }
 
@@ -335,10 +463,17 @@ async function remindSession(ctx: WebinarNoticeContext, result: WebinarReminders
  * so com sessao na janela, o resto. Lembretes so de sessao 'scheduled' ainda por vir, de webinario publicado e nao
  * cancelado; a sessao que passou do fim previsto + 2 h vira 'ended' (a situacao Encerrado de docs/30 §2.3).
  */
-export async function processWebinarReminders(input: { db: WebinarsDb; now?: Date; signal?: AbortSignal }): Promise<WebinarRemindersResult> {
+export async function processWebinarReminders(input: {
+  /** As vagas barradas dos ticks de antes (o job passa WEBINAR_REMINDER_ACCESS_MEMO); sem ela, todas sao conferidas. */
+  accessMemo?: ReminderAccessMemo;
+  db: WebinarsDb;
+  now?: Date;
+  signal?: AbortSignal;
+}): Promise<WebinarRemindersResult> {
   const { db, signal } = input;
   const now = input.now ?? new Date();
-  const result: WebinarRemindersResult = { autoEnded: 0, emails: 0, pendingMigration: false, reminders1h: 0, reminders24h: 0, skipped: 0 };
+  const memo = input.accessMemo ?? new Map<string, number>();
+  const result: WebinarRemindersResult = { autoEnded: 0, emails: 0, pendingMigration: false, reminders1h: 0, reminders24h: 0, skipped: 0, withoutAccess: 0 };
 
   if (signal?.aborted) {
     return result;
@@ -357,6 +492,8 @@ export async function processWebinarReminders(input: { db: WebinarsDb; now?: Dat
 
     const ctx = createWebinarNoticeContext(db, now, signal);
     const webinars = new Map<string, Webinar | null>();
+
+    pruneMemo(memo, ctx.nowMs);
     const webinarOf = async (id: string) => {
       if (!webinars.has(id)) {
         const row = await fetchWebinarRow(db, id);
@@ -401,7 +538,7 @@ export async function processWebinarReminders(input: { db: WebinarsDb; now?: Dat
         continue;
       }
 
-      await remindSession(ctx, result, webinar, session);
+      await remindSession(ctx, result, webinar, session, memo);
     }
   } catch (error) {
     if (isMissingWebinars(error)) {

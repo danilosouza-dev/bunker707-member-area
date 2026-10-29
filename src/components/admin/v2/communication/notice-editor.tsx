@@ -205,7 +205,10 @@ type NoticeEditorProps = {
   now: number;
   options: NoticeEditorOptions;
   permissions: NoticePermissions;
-  /** Aviso novo comecando de um modelo (/avisos/novo?modelo=). Lido so na montagem (D28). */
+  /**
+   * Aviso novo comecando de um modelo (/avisos/novo?modelo=) ou do webinario (/avisos/novo?webinario=, o atalho Avisar,
+   * docs/30 §2.2: templateId e templateName nulos, a nota de inicio nas `notes`). Lido so na montagem (D28).
+   */
   start?: NoticeStart | null;
   /** Nota do topo quando o ?modelo= nao abriu: "missing" -> startMissing; "unreadable" -> startUnreadable. */
   startProblem?: "missing" | "unreadable" | null;
@@ -790,7 +793,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
       products: pickerItems,
       productsLoaded: options.productsLoaded,
       segments: options.segments,
-      senders
+      senders,
+      webinars: options.webinars
     }),
     [options, pickerItems, senders]
   );
@@ -1789,6 +1793,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
                   productsLoaded={options.productsLoaded}
                   segments={options.segments}
                   value={draft.audience}
+                  webinars={options.webinars}
                 />
                 <AudienceCount description={audienceDescription} needsApproval={needsApproval} onRetry={() => setCountAttempt((attempt) => attempt + 1)} state={countView} />
               </div>

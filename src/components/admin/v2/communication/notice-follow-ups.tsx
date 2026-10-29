@@ -479,7 +479,8 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
       products: options ? pickerItemsOf(options.products) : [],
       productsLoaded: options?.productsLoaded ?? false,
       segments: options?.segments ?? [],
-      senders
+      senders,
+      webinars: options?.webinars ?? []
     }),
     [options, senders]
   );
@@ -493,7 +494,13 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
 
     walk(state.items);
 
-    return { cohorts: { ...options?.names.cohorts }, messages, products: { ...followUps?.names.products, ...options?.names.products } };
+    return {
+      cohorts: { ...options?.names.cohorts },
+      messages,
+      products: { ...followUps?.names.products, ...options?.names.products },
+      // As lives da regra "Participação em lives" ("participaram da live “X”").
+      webinars: { ...followUps?.names.webinars, ...options?.names.webinars }
+    };
   }, [detail.title, entryId, followUps?.names, options?.names, state.items]);
   const clientErrors = useMemo(() => {
     if (mode.kind !== "live" || state.items.length === 0) {

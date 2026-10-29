@@ -13,7 +13,10 @@ import "./support/resolve-extensionless-ts.mjs";
 // cartao Gravacao (Preparar, a reserva, a fila, Gravando, a ancora), Alinhar chat com a previa, Enviar gravacao e o ⋯
 // do autor no chat. Nas fontes: os comandos do IFrame API ligados aos botoes (muteEveryone, toggleLobby, kickParticipant,
 // askToUnmute, startRecording...), a ancora no recordingStatusChanged, as frases so de WEBINAR_COPY (ou das provisorias
-// de live-console-model.ts) e nenhum "Jitsi" em texto de tela.
+// de live-console-model.ts) e nenhum "Jitsi" em texto de tela. O card Configurações de quem apresenta (docs/30 §1.4):
+// o botao nas acoes do palco so para o Apresentador e o co-apresentador, o card com Microfone, Alto-falante e Câmera,
+// Reduzir ruído, Espelhar, Desfocar o fundo e Mais opções de fundo, sem Qualidade do vídeo nem volume, e nas fontes a
+// troca so com a secao pronta e o dialogo de fundo pelo toggleVirtualBackgroundDialog.
 
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
 
@@ -120,6 +123,8 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { SessionConsole } = await import("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx");
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const { LIVE_CONSOLE_COPY } = await import("../src/server/webinars/live-console-model.ts");
+const { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } = await import("../src/components/admin/v2/communication/webinars/session-console/live-settings-card.tsx");
+const { deviceOptions, deviceSettingsFor } = await import("../src/lib/jitsi-device-settings.ts");
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const html = (element) => renderToStaticMarkup(element);
@@ -231,7 +236,8 @@ const LIVE_FILES = [
   "live-participants.tsx",
   "live-recorder.tsx",
   "live-align-chat.tsx",
-  "live-attach-recording.tsx"
+  "live-attach-recording.tsx",
+  "live-settings-card.tsx"
 ].map((name) => `src/components/admin/v2/communication/webinars/session-console/${name}`);
 
 test("topo da Live ao vivo: Começar para todos e Encerrar live na espera, Abrir a sala na agendada, Encerrar live no ar; sem messaging.publish desligados com a explicacao", () => {
@@ -439,4 +445,174 @@ test("frases: os .tsx da live só desenham textos de WEBINAR_COPY ou das provis�
     }
     assert.ok(PROIBIDAS_WEBINARIO.includes("jitsi"));
   }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * O card Configurações de quem apresenta (docs/30 §1.4 e §5.4)
+ * ---------------------------------------------------------------------------------------------- */
+
+const config = WEBINAR_COPY.aoVivo.config;
+const noop = () => undefined;
+const RESERVA = { audioInput: config.reserva.microfone, audioOutput: config.reserva.altoFalante, videoInput: config.reserva.camera };
+/** Como o Chrome lista com a permissao (quem apresenta entra com ela): o "default" repete o aparelho interno. */
+const CRU = {
+  audioInput: [
+    { deviceId: "default", groupId: "g-interno", label: "Padrão - Microfone interno" },
+    { deviceId: "mic-interno", groupId: "g-interno", label: "Microfone interno" },
+    { deviceId: "mic-usb", groupId: "g-usb", label: "Fone USB" }
+  ],
+  audioOutput: [
+    { deviceId: "default", groupId: "g-interno", label: "Padrão - Alto-falantes internos" },
+    { deviceId: "som-interno", groupId: "g-interno", label: "Alto-falantes internos" },
+    { deviceId: "som-usb", groupId: "g-usb", label: "Fone USB" }
+  ],
+  videoInput: [
+    { deviceId: "cam-integrada", groupId: "g-cam", label: "Câmera integrada" },
+    { deviceId: "cam-usb", groupId: "g-webcam", label: "Webcam USB" }
+  ]
+};
+const LISTAS = Object.fromEntries(Object.entries(CRU).map(([kind, list]) => [kind, deviceOptions(list, RESERVA[kind])]));
+
+/** As secoes como o console monta (live-room-panel.tsx): o papel da sala, sem o Falar nem o aviso do aluno. */
+const secoes = (role, extra = {}) =>
+  deviceSettingsFor({
+    allowStudentCamera: false,
+    cameraConsented: false,
+    isIOS: false,
+    isMobile: false,
+    joined: true,
+    micAllowed: false,
+    outputChangeAvailable: true,
+    outputs: LISTAS.audioOutput,
+    role,
+    videoOn: true,
+    ...extra
+  });
+
+const aparelhos = (extra = {}) => ({
+  current: { audioInput: "mic-interno", audioOutput: "som-interno", videoInput: "cam-integrada" },
+  espelhar: noop,
+  fundo: noop,
+  lists: LISTAS,
+  maisFundos: noop,
+  ruido: noop,
+  ...extra
+});
+const card = (sections, extra = {}) => html(createElement(LiveSettingsCard, { cameraOn: true, devices: aparelhos(), onChoose: noop, onClose: noop, sections, ...extra }));
+const openTag = (markup, pattern) => markup.match(new RegExp(`<button(?=[^>]*${pattern})[^>]*>`))?.[0] ?? "";
+
+test("Configurações no console: o botão nas ações do palco só para o Apresentador e o co-apresentador (aria-expanded, aria-controls); a Equipe e a sala sem configuração ficam sem", () => {
+  const host = render(snapshot());
+  const botao = openTag(host, `aria-controls="${LIVE_SETTINGS_CARD_ID}"`);
+  assert.ok(botao, "o botao Configurações do Apresentador");
+  assert.match(botao, /aria-expanded="false"/);
+  assert.match(textOf(host.slice(host.indexOf(botao), host.indexOf("</button>", host.indexOf(botao)))), new RegExp(`^${escape(copy.configuracoes)}$`));
+  assert.ok(host.indexOf(botao) < host.indexOf("data-live-stage"), "nas acoes do card do palco, acima do palco");
+  assert.doesNotMatch(host, /data-live-settings=""/, "o card so abre no clique");
+
+  assert.doesNotMatch(render(snapshot(), { currentUserId: "u-equipe" }), new RegExp(`aria-controls="${LIVE_SETTINGS_CARD_ID}"`), "a Equipe nao tem barra de midia no console (pendencia)");
+  assert.doesNotMatch(render(snapshot({ live: liveBlock({ meetConfigured: false }) })), new RegExp(`aria-controls="${LIVE_SETTINGS_CARD_ID}"`), "sem a sala no ambiente, nada a configurar");
+});
+
+test("o card de quem apresenta: Microfone, Alto-falante e Câmera com o aparelho em uso; ruido, fundo e espelho como acoes sem estado (a barra do iframe tambem os muda); Mais opções de fundo; nunca Qualidade do vídeo nem volume", () => {
+  for (const role of ["host", "co_host"]) {
+    const markup = card(secoes(role));
+    const text = textOf(markup);
+    assert.match(markup, new RegExp(`<section(?=[^>]*id="${LIVE_SETTINGS_CARD_ID}")(?=[^>]*aria-labelledby="console-live-settings-title")`), role);
+    assert.match(markup, /<select aria-labelledby="console-live-settings-microfone"[^>]*data-live-device="audioInput"/, `${role}: microfone`);
+    assert.match(markup, /<select aria-labelledby="console-live-settings-alto-falante"[^>]*data-live-device="audioOutput"/, `${role}: alto-falante`);
+    assert.match(markup, /<select aria-labelledby="console-live-settings-camera"[^>]*data-live-device="videoInput"/, `${role}: camera`);
+    assert.match(markup, /id="console-live-settings-microfone">Microfone</);
+    assert.match(markup, /<option(?=[^>]*selected="")(?=[^>]*value="mic-interno")[^>]*>Microfone interno<\/option>/, "o aparelho em uso marcado");
+    assert.match(markup, /<option(?=[^>]*selected="")(?=[^>]*value="som-interno")[^>]*>Alto-falantes internos<\/option>/);
+    assert.match(markup, /<option value="som-usb">Fone USB<\/option>/);
+    assert.match(markup, /<option value="cam-usb">Webcam USB<\/option>/);
+    assert.doesNotMatch(markup, /value="default"/, "o 'Padrão' do Chrome junta com o aparelho que repete");
+    for (const label of [
+      copy.configuracoes,
+      copy.configuracoesTexto,
+      config.altoFalante,
+      config.ruidoLigar,
+      config.ruidoDesligar,
+      config.inverterImagem,
+      config.desfocar,
+      config.fundoTirar,
+      config.maisFundos
+    ]) {
+      assert.ok(text.includes(label), `${role}: ${label}`);
+    }
+    // Sem estado: nenhuma caixa marcada que a setinha do microfone, o fundo ou a engrenagem do iframe deixariam errada,
+    // e nada de "Espelhar" com estado suposto (o iframe guarda o espelho de uma live para outra).
+    assert.doesNotMatch(markup, /type="checkbox"/);
+    assert.ok(!text.includes(config.reduzirRuido) && !text.includes(config.espelhar), `${role}: sem as caixas do aluno`);
+    for (const label of [config.ruidoLigar, config.inverterImagem, config.desfocar, config.fundoTirar]) {
+      assert.match(markup, new RegExp(`<button[^>]*type="button"[^>]*>${escape(label)}</button>`), `${role}: ${label} e um botao`);
+    }
+    for (const label of [config.qualidade, config.qualidadeAutomatica, config.qualidadeEconomizar, config.volume, WEBINAR_COPY.aoVivo.som, WEBINAR_COPY.aoVivo.atalhos]) {
+      assert.ok(!text.includes(label), `${role}: sem "${label}" (setVideoQuality mudaria o envio do palco)`);
+    }
+    assert.doesNotMatch(markup, /type="range"|type="radio"/);
+  }
+
+  // A camera fechada (ja liberada antes: a lista com nomes): sem Desfocar, com a frase de onde liga-la; no celular, nem
+  // desfoque nem o dialogo de fundo.
+  const semCamera = textOf(card(secoes("host", { videoOn: false }), { cameraOn: false }));
+  assert.ok(!semCamera.includes(config.desfocar) && !semCamera.includes(config.fundoTirar));
+  assert.ok(semCamera.includes(copy.configuracoesDesfocar));
+  assert.ok(semCamera.includes(config.maisFundos));
+  assert.ok(semCamera.includes(config.inverterImagem), "inverter nao depende da camera no ar");
+  const celular = textOf(card(secoes("host", { isMobile: true })));
+  assert.ok(!celular.includes(config.desfocar) && !celular.includes(config.maisFundos) && !celular.includes(copy.configuracoesDesfocar));
+  assert.ok(celular.includes(config.ruidoLigar), "o resto continua no celular");
+
+  // A camera nunca ligada neste navegador (quem apresenta entra so com o microfone: a lista de cameras vem sem id): no
+  // lugar da lista, a frase de liga-la na barra do video (uma frase so, sem a do desfoque); ligada, a lista volta.
+  const nuncaLigada = card(secoes("host", { videoOn: false }), { cameraOn: false, devices: aparelhos({ lists: { ...LISTAS, videoInput: [] } }) });
+  assert.ok(textOf(nuncaLigada).includes(config.cameraNaBarraDoVideo));
+  assert.doesNotMatch(nuncaLigada, /data-live-device="videoInput"/);
+  assert.ok(!textOf(nuncaLigada).includes(copy.configuracoesDesfocar) && !textOf(nuncaLigada).includes(config.semAparelho));
+  assert.ok(!textOf(card(secoes("host"))).includes(config.cameraNaBarraDoVideo), "com a lista, sem a frase");
+
+  // O navegador que nao troca a saida (Safari): sem a secao Alto-falante, o resto pronto.
+  const safari = card(secoes("host", { outputChangeAvailable: false }));
+  assert.doesNotMatch(safari, /data-live-device="audioOutput"/);
+  assert.match(safari, /data-live-device="audioInput"/);
+
+  // Fora da sala: so a frase de que as escolhas aparecem ao entrar, nenhuma lista.
+  const fora = card(secoes("host", { joined: false }));
+  assert.ok(textOf(fora).includes(config.foraDaSala));
+  assert.doesNotMatch(fora, /<select/);
+
+  // Sem nenhum aparelho listado (o navegador recusou): a frase no lugar da lista.
+  assert.ok(textOf(card(secoes("host"), { devices: aparelhos({ lists: { audioInput: [], audioOutput: LISTAS.audioOutput, videoInput: [] } }) })).includes(config.semAparelho));
+
+  // As frases do card pela lista proibida dos Webinarios, sem citar o motor da sala.
+  for (const markup of [card(secoes("host")), card(secoes("co_host", { videoOn: false })), card(secoes("host", { joined: false }))]) {
+    const lower = textOf(markup).toLocaleLowerCase("pt-BR");
+    for (const palavra of PROIBIDAS_WEBINARIO) {
+      assert.ok(!lower.includes(palavra), `"${palavra}" no card`);
+    }
+  }
+});
+
+test("fontes do card: os aparelhos pelo useJitsiDevices do console, a troca só com a secao pronta e só de quem apresenta, a engrenagem só de aparelhos pelo papel, o dialogo de fundo pelo toggleVirtualBackgroundDialog e nada de setVideoQuality", () => {
+  const panel = stripComments(read(LIVE_FILES[1]));
+  assert.match(panel, /useJitsiDevices\(\{[\s\S]*?podeTrocar: \(kind\) => deviceSettingsRef\.current !== null && deviceSectionReady\(deviceSettingsRef\.current, kind\)/);
+  assert.match(panel, /deviceSettingsRef\.current = presenter \? deviceSettings : null;/, "so quem apresenta troca");
+  assert.match(panel, /chooseDevice = \(kind: DeviceKind, option: DeviceOption\) => presenter && deviceSectionReady\(deviceSettings, kind\) && escolher\(kind, option\)/);
+  assert.match(panel, /deviceSettingsFor\(\{[\s\S]*?role,[\s\S]*?videoOn: joined && videoOn/);
+  assert.match(panel, /devicesSignalRef\.current\(name, payload\)/, "deviceListChanged e o ruido de volta numa entrada nova");
+  assert.match(panel, /useMemo\(\(\) => liveInterfaceConfigOverwrite\(tokenRole\), \[tokenRole\]\)/, "a engrenagem so de aparelhos depende do papel");
+  assert.match(panel, /<LiveSettingsCard[\s\S]*?cameraOn=\{handle\.videoOn\}[\s\S]*?onChoose=\{handle\.chooseDevice\}/);
+  // Ruido, fundo e espelho sem estado nem reaplicacao: a barra do iframe de quem apresenta tambem os muda.
+  assert.match(panel, /useJitsiDevices\(\{[\s\S]*?efeitosNoIframe: true,/);
+
+  const cardSource = stripComments(read(LIVE_FILES[LIVE_FILES.length - 1]));
+  assert.match(cardSource, /onClick=\{devices\.maisFundos\}/);
+  assert.match(cardSource, /event\.key === "Escape"/);
+  for (const source of [panel, cardSource]) {
+    assert.doesNotMatch(source, /setVideoQuality|qualidade\(|volume\(|toggleNoiseSuppression/, "quem apresenta nao baixa o proprio palco");
+  }
+  const hook = stripComments(read("src/components/webinars/use-jitsi-devices.ts"));
+  assert.match(hook, /const maisFundos = useCallback\(\(\) => \{\s*executeCommand\("toggleVirtualBackgroundDialog"\);/);
 });

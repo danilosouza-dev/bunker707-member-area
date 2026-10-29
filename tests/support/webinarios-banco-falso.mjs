@@ -95,6 +95,7 @@ export function webinarRow(extra = {}) {
     access_mode: "everyone",
     allow_student_camera: true,
     audience: { kind: "everyone" },
+    audience_restricts: false,
     auto_record: true,
     cancel_reason: null,
     cancelled_at: null,

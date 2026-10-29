@@ -207,17 +207,22 @@ export type CommunicationOverview = {
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * Ids citados no segmento: produtos (tambem os da pagina visitada e do acesso ganho, v2), turmas e avisos
- * das regras "o que fez com a notificacao X" (os passos de um fluxo tem o titulo no proprio fluxo).
+ * Ids citados no segmento: produtos (tambem os da pagina visitada e do acesso ganho, v2, e do acesso recente),
+ * turmas, avisos das regras "o que fez com a notificacao X" (os passos de um fluxo tem o titulo no proprio fluxo)
+ * e lives da regra "Participação em lives".
  */
-function collectIds(definition: AudienceDefinition, products: Set<string>, cohorts: Set<string>, campaigns: Set<string>) {
+function collectIds(definition: AudienceDefinition, products: Set<string>, cohorts: Set<string>, campaigns: Set<string>, webinars: Set<string>) {
   const visit = (node: AudienceNode) => {
     if (isAudienceGroup(node)) {
       node.items.forEach(visit);
       return;
     }
 
-    if (node.type === "product" || node.type === "access_gained") {
+    if (node.type === "webinar") {
+      if (node.webinarId) {
+        webinars.add(node.webinarId);
+      }
+    } else if (node.type === "product" || node.type === "access_gained" || node.type === "access_recent") {
       node.productIds.forEach((id) => products.add(id));
     } else if (node.type === "cohort") {
       node.cohortIds.forEach((id) => cohorts.add(id));
@@ -266,7 +271,7 @@ async function selectNoticeTitles(db: CommunicationsDb, ids: readonly string[]) 
   return { pollOptions, titles };
 }
 
-async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_items", column: "name" | "title", ids: readonly string[]) {
+async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_items" | "webinars", column: "name" | "title", ids: readonly string[]) {
   const names: Record<string, string> = {};
 
   for (const part of chunksOf(Array.from(new Set(ids)), 150)) {
@@ -286,29 +291,51 @@ async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_ite
 }
 
 /**
- * Nomes dos produtos, turmas e avisos citados nos segmentos (produto ou aviso removido cai no texto
- * padrao da frase). `messages` so vem quando alguma regra cita um aviso; `pollOptions` (v3a), quando
- * algum aviso citado tem enquete.
+ * Titulo de cada live citada pela regra "Participação em lives" (live excluida, ou banco sem as tabelas dos
+ * webinarios, fica sem titulo: a frase diz "uma live removida").
+ */
+async function selectWebinarTitles(db: CommunicationsDb, ids: readonly string[]) {
+  return selectNames(
+    db,
+    "webinars",
+    "title",
+    ids.filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+  ).catch((error: unknown) => {
+    if (isMissingCommunicationSchema(error)) {
+      return {} as Record<string, string>;
+    }
+
+    throw error;
+  });
+}
+
+/**
+ * Nomes dos produtos, turmas, avisos e lives citados nos segmentos (produto, aviso ou live removida cai no
+ * texto padrao da frase). `messages` so vem quando alguma regra cita um aviso; `pollOptions` (v3a), quando
+ * algum aviso citado tem enquete; `webinars`, quando alguma regra cita uma live.
  */
 export async function loadAudienceNames(db: CommunicationsDb, definitions: readonly AudienceDefinition[]): Promise<AudienceNames> {
   const products = new Set<string>();
   const cohorts = new Set<string>();
   const campaigns = new Set<string>();
-  definitions.forEach((definition) => collectIds(definition, products, cohorts, campaigns));
+  const webinars = new Set<string>();
+  definitions.forEach((definition) => collectIds(definition, products, cohorts, campaigns, webinars));
 
-  const [productNames, cohortNames, notices] = await Promise.all([
+  const [productNames, cohortNames, notices, webinarNames] = await Promise.all([
     selectNames(db, "content_items", "title", Array.from(products)),
     selectNames(db, "cohorts", "name", Array.from(cohorts).filter((id) => /^[0-9a-f-]{36}$/i.test(id))),
-    campaigns.size > 0 ? selectNoticeTitles(db, Array.from(campaigns)) : Promise.resolve(null)
+    campaigns.size > 0 ? selectNoticeTitles(db, Array.from(campaigns)) : Promise.resolve(null),
+    webinars.size > 0 ? selectWebinarTitles(db, Array.from(webinars)) : Promise.resolve(null)
   ]);
+  const lives = webinarNames ? { webinars: webinarNames } : {};
 
   if (!notices) {
-    return { cohorts: cohortNames, products: productNames };
+    return { cohorts: cohortNames, products: productNames, ...lives };
   }
 
   return Object.keys(notices.pollOptions).length > 0
-    ? { cohorts: cohortNames, messages: notices.titles, pollOptions: notices.pollOptions, products: productNames }
-    : { cohorts: cohortNames, messages: notices.titles, products: productNames };
+    ? { cohorts: cohortNames, messages: notices.titles, pollOptions: notices.pollOptions, products: productNames, ...lives }
+    : { cohorts: cohortNames, messages: notices.titles, products: productNames, ...lives };
 }
 
 /** Aviso enviado que o segmento pode citar em "O que fez com uma notificação" (o seletor do construtor). */
@@ -386,6 +413,40 @@ export async function loadAudienceNoticeOptions(db: CommunicationsDb, now = Date
       title: row.title?.trim() || "Sem título"
     };
   });
+}
+
+/** Live que o segmento pode citar em "Participação em lives" (o seletor do construtor). */
+export type AudienceWebinarOption = {
+  id: string;
+  /** A hora marcada da Live ao vivo; na Live gravada (sem hora unica), quando foi publicada. */
+  startsAt: string | null;
+  title: string;
+};
+
+/** Lives no seletor da regra "Participação em lives": as mais recentes primeiro. */
+export const AUDIENCE_WEBINAR_OPTIONS_LIMIT = 100;
+
+/**
+ * Lives publicadas (ou ja arquivadas) e nao excluidas, as mais recentes primeiro (pela hora marcada ou, na Live
+ * gravada, pela publicacao): o seletor da regra "Participação em lives". Uma leitura leve (id, titulo e datas).
+ */
+export async function loadAudienceWebinarOptions(db: CommunicationsDb): Promise<AudienceWebinarOption[]> {
+  const { data, error } = await db
+    .from("webinars")
+    .select("id,title,scheduled_at,published_at")
+    .in("status", ["published", "archived"])
+    .is("deleted_at", null)
+    .order("published_at", { ascending: false, nullsFirst: false })
+    .order("id")
+    .limit(AUDIENCE_WEBINAR_OPTIONS_LIMIT * 2);
+  assertNoDbError(error, "Comunicacao: lives do seletor");
+
+  type Row = { id: string; published_at: string | null; scheduled_at: string | null; title: string | null };
+
+  return ((data ?? []) as Row[])
+    .map((row) => ({ id: row.id, startsAt: row.scheduled_at ?? row.published_at, title: row.title?.trim() || "Sem título" }))
+    .sort((left, right) => (right.startsAt ?? "").localeCompare(left.startsAt ?? "") || left.id.localeCompare(right.id))
+    .slice(0, AUDIENCE_WEBINAR_OPTIONS_LIMIT);
 }
 
 async function loadPeople(db: CommunicationsDb, ids: readonly (string | null)[]) {
@@ -814,6 +875,8 @@ export type NoticeEditorOptions = {
   segments: NoticeSegmentOption[];
   /** Quem pode ser escolhido em "Quem envia": so a equipe (admin_roles), em ordem alfabetica. */
   senders: NoticeSenderOption[];
+  /** Lives publicadas, as mais recentes primeiro: o seletor da regra "Participação em lives"; [] se a leitura falhar. */
+  webinars: AudienceWebinarOption[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -895,7 +958,7 @@ async function editorViewer() {
 export async function loadNoticeEditorOptions(input: { audiences?: readonly AudienceDefinition[] } = {}): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
   const viewer = await editorViewer();
-  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson, popupFonts] = await Promise.all([
+  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson, popupFonts, webinars] = await Promise.all([
     listProductOptions()
       .then((items) => ({ items, loaded: true }))
       .catch((error: unknown) => {
@@ -922,6 +985,11 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     listPopupFontLibrary(db).catch((error: unknown) => {
       console.error("[admin/comunicacao] biblioteca de fontes", error);
       return [] as PopupFontOption[];
+    }),
+    // So o seletor da regra "Participação em lives" depende disto (banco sem os webinarios: lista vazia).
+    loadAudienceWebinarOptions(db).catch((error: unknown) => {
+      console.error("[admin/comunicacao] lives do seletor", error);
+      return [] as AudienceWebinarOption[];
     })
   ]);
   assertNoDbError(cohortsResult.error, "Comunicacao: turmas");
@@ -966,7 +1034,9 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
       ...(extra.messages ? { messages: extra.messages } : {}),
       // v3a: as opcoes das enquetes citadas ("votaram em “Sábado” na enquete …").
       ...(extra.pollOptions ? { pollOptions: extra.pollOptions } : {}),
-      products: { ...extra.products, ...names.products }
+      products: { ...extra.products, ...names.products },
+      // As lives citadas (mesmo fora da lista) e as do seletor, para a frase "participaram da live “X”".
+      webinars: { ...extra.webinars, ...Object.fromEntries(webinars.map((webinar) => [webinar.id, webinar.title])) }
     },
     notices,
     opensOnLesson,
@@ -974,7 +1044,8 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     products,
     productsLoaded: productsResult.loaded,
     segments,
-    senders
+    senders,
+    webinars
   };
 }
 

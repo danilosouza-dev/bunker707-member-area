@@ -290,7 +290,11 @@ test("contorno e marca-texto numa parte pelo teclado: um passo cada, Ctrl + Z, o
 
       const publicar = pagina.getByRole("button", { exact: true, name: "Publicar pop-up" });
 
+      // Logo depois de fechar o editor o Publicar pode estar desligado (o aviso ainda ocupado) e o foco volta ao botao
+      // que abriu o Livre: o focus() num botao desligado nao move o foco e o Enter reabriria o editor.
+      await expect(publicar).toBeEnabled();
       await publicar.focus();
+      await expect(publicar).toBeFocused();
       await pagina.keyboard.press("Enter");
       await expect(pagina.getByText(/^Pop-up publicado\./)).toBeVisible({ timeout: 30_000 });
       await expect(pagina).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${avisoId}$`));

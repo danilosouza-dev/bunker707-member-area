@@ -13,6 +13,11 @@ import "server-only";
 // (loadMessageFacts, chave "campaign:<id>"), e context.messageKeys diz quais foram lidos: chave fora dele
 // nunca combina. loadAudienceFactsFor monta os mesmos fatos so para alguns alunos (lote do motor dos
 // fluxos, em pedacos de 150), com a mesma conta (buildStudentFacts).
+//
+// Quem pode da live por regras (docs/30 §1.6): a regra "Participação em lives" le as lives de cada aluno pela RPC
+// communication_webinar_facts (migracao 202610300001), so quando alguma regra pede (opcao `webinars`), e
+// context.webinarFactsLoaded diz que a leitura foi feita: sem ela (ou num banco sem a migracao) a regra nunca
+// combina, nem negada.
 
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { accessStateOf, isAccessOpen, paceOf } from "@/server/students/model";
@@ -36,6 +41,7 @@ import {
   type AudienceCommentCounts,
   type AudienceContext,
   type AudienceStudentFacts,
+  type AudienceWebinarFacts,
   type MessageFact
 } from "./audience-model";
 import { assertNoDbError, chunksOf, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
@@ -219,6 +225,25 @@ export function accessFactsOf(openRows: readonly AudienceEntitlementRow[]): Audi
       }
     ];
   });
+}
+
+/**
+ * Fatos so com os acessos (sem perfil, progresso, turmas, entrada nem comentarios), para quando nenhuma regra usa o
+ * resto: o lote do motor dos fluxos e o "Quem pode" da live com regras so de acesso ou de lives.
+ */
+export function accessOnlyFacts(userId: string, rows: readonly AudienceEntitlementRow[], now: number): AudienceStudentFacts {
+  return {
+    accesses: accessFactsOf(openAccessRows(rows, now)),
+    cohortIds: [],
+    comments: ZERO_COMMENTS,
+    completedByContent: {},
+    completedLessons: 0,
+    lastSignInAt: null,
+    lastStudiedAt: null,
+    pace: "never_started",
+    totalLessons: 0,
+    userId
+  };
 }
 
 export type StudentFactsSources = {
@@ -467,12 +492,116 @@ export function attachMessageFacts(loaded: LoadedAudience, campaignIds: readonly
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Lives de cada aluno: regra "Participação em lives" (docs/30 §1.6)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** userId -> lives em que entrou na sala e em que garantiu vaga (ids dos webinarios, em ordem). */
+export type WebinarFactsByUser = Map<string, AudienceWebinarFacts>;
+
+/** Alunos por pagina da RPC communication_webinar_facts (o teto do PostgREST tambem corta RPC, sem erro). */
+export const WEBINAR_FACTS_PAGE = 1_000;
+
+/** Uma linha por aluno: as lives em que garantiu vaga e as em que entrou na sala (null = nenhuma). */
+type WebinarFactsRow = { attended: readonly (string | null)[] | null; registered: readonly (string | null)[] | null; user_id: string | null };
+
+function webinarIdsOf(list: readonly (string | null)[] | null | undefined): string[] {
+  return Array.isArray(list) ? Array.from(new Set(list.filter((id): id is string => typeof id === "string" && id !== ""))).sort() : [];
+}
+
+/**
+ * As lives de cada aluno pela RPC communication_webinar_facts (sem a equipe; a RPC une a vaga 'registered', a
+ * presenca resumida das sessoes ao vivo e gravadas e as amostras da sessao em andamento; o replay nao conta), uma
+ * linha por aluno. Todos os alunos: paginas de 1000 alunos por chave (p_after = o ultimo id da pagina anterior; a RPC
+ * escolhe os proximos pelos indices por user_id, entao cada pagina custa o mesmo e ninguem pula de pagina se uma vaga
+ * mudar no meio; uma pagina menor que 1000 e a ultima). Com `userIds`, so estes alunos (pedacos de 150, uma chamada
+ * cada; [] = nada lido). Banco sem a migracao 202610300001: null (quem chama deixa context.webinarFactsLoaded de fora
+ * e a regra nunca combina). Outros erros sobem.
+ */
+export async function loadWebinarFacts(db: CommunicationsDb, options: { userIds?: readonly string[] } = {}): Promise<WebinarFactsByUser | null> {
+  const byUser: WebinarFactsByUser = new Map();
+  const userChunks = options.userIds ? chunksOf(Array.from(new Set(options.userIds.filter((id) => UUID.test(id)))).sort(), AUDIENCE_FACTS_CHUNK) : [null];
+
+  if (options.userIds && userChunks.length === 0) {
+    return byUser;
+  }
+
+  for (const users of userChunks) {
+    let after: string | null = null;
+
+    for (;;) {
+      const { data, error } = await db
+        .rpc("communication_webinar_facts", users ? { p_user_ids: users } : { p_after: after, p_limit: WEBINAR_FACTS_PAGE })
+        .order("user_id");
+
+      if (error) {
+        if (isMissingCommunicationSchema(error)) {
+          console.error("[comunicacao] lives de cada aluno indisponiveis (migracao 202610300001 pendente).");
+          return null;
+        }
+
+        throw new Error(`Comunicacao: lives de cada aluno: ${error.message}`);
+      }
+
+      const rows = (data ?? []) as WebinarFactsRow[];
+
+      for (const row of rows) {
+        if (!row.user_id) {
+          continue;
+        }
+
+        const attended = webinarIdsOf(row.attended);
+        const registered = webinarIdsOf(row.registered);
+
+        if (attended.length > 0 || registered.length > 0) {
+          byUser.set(row.user_id, { attended, registered });
+        }
+      }
+
+      const last = rows.at(-1)?.user_id ?? null;
+
+      // Com ids, uma chamada basta; todos: ate a pagina menor que 1000 (o id da ultima linha e a chave da proxima).
+      if (users || rows.length < WEBINAR_FACTS_PAGE || !last || (after !== null && last <= after)) {
+        break;
+      }
+
+      after = last;
+    }
+  }
+
+  return byUser;
+}
+
+/**
+ * Junta as lives aos fatos ja montados e marca a leitura (context.webinarFactsLoaded) para todos os avaliados:
+ * quem nao tem linha "nunca participou nem garantiu vaga". `webinars` null (banco sem a migracao) devolve o
+ * mesmo LoadedAudience, sem a marca. Os fatos de quem tem linha sao copiados; os demais sao os mesmos objetos.
+ */
+export function attachWebinarFacts(loaded: LoadedAudience, webinars: WebinarFactsByUser | null): LoadedAudience {
+  if (!webinars) {
+    return loaded;
+  }
+
+  const facts = loaded.facts.map((fact) => {
+    const own = webinars.get(fact.userId);
+
+    return own ? { ...fact, webinars: own } : fact;
+  });
+
+  return { ...loaded, context: { ...loaded.context, webinarFactsLoaded: true }, facts };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Carregadores
  * ---------------------------------------------------------------------------------------------- */
 
 export type AudienceFactsOptions = {
   /** Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. */
   messageCampaignIds?: readonly string[];
+  /**
+   * Le as lives de cada aluno (regra "Participação em lives"; audienceFactNeeds(...).webinars). Sem isto, nada e
+   * lido e a regra nunca combina.
+   */
+  webinars?: boolean;
 };
 
 /** Todos os alunos (fora a equipe), com as linhas do sino so dos avisos pedidos. */
@@ -483,7 +612,7 @@ export async function loadAudienceFacts(
 ): Promise<LoadedAudience> {
   const nowMs = typeof now === "number" ? now : now.getTime();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
-  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages] = await Promise.all([
+  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars] = await Promise.all([
     fetchProfiles(db),
     fetchStaffUserIds(db),
     fetchEntitlements(db),
@@ -491,7 +620,8 @@ export async function loadAudienceFacts(
     fetchPublishedLessonIndex(db),
     fetchCohortMemberships(db),
     fetchCommentCounts(db),
-    loadMessageFacts(db, messageCampaignIds)
+    loadMessageFacts(db, messageCampaignIds),
+    options.webinars ? loadWebinarFacts(db) : Promise.resolve(null)
   ]);
   const { facts, people } = buildStudentFacts({ comments, entitlements, lessonIndex, memberships, now: nowMs, profiles, progressRows, staff });
   const loaded: LoadedAudience = {
@@ -505,7 +635,7 @@ export async function loadAudienceFacts(
     people
   };
 
-  return attachMessageFacts(loaded, messageCampaignIds, messages);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }
 
 export type AudienceFactsForOptions = AudienceFactsOptions & {
@@ -529,6 +659,11 @@ export type AudienceFactsForOptions = AudienceFactsOptions & {
   lessonIndex?: Map<string, Set<string>>;
   /** Quem e da equipe (o RPC de fatos do lote ja traz). Sem isso, le admin_roles. */
   staff?: ReadonlySet<string>;
+  /**
+   * As lives destes alunos ja lidas (loadWebinarFacts, ou null num banco sem a migracao). Sem elas e com
+   * `webinars`, le pelos ids.
+   */
+  webinarFacts?: WebinarFactsByUser | null;
 };
 
 /**
@@ -556,7 +691,7 @@ export async function loadAudienceFactsFor(
 
     return { entitlements, memberships, profiles, progressRows };
   };
-  const [chunks, staff, lessonIndex, comments, messages] = await Promise.all([
+  const [chunks, staff, lessonIndex, comments, messages, webinars] = await Promise.all([
     (async () => {
       const results = [];
 
@@ -573,7 +708,12 @@ export async function loadAudienceFactsFor(
       : commentsMode === "none" || ids.length === 0
         ? Promise.resolve(new Map<string, AudienceCommentCounts>())
         : fetchCommentCounts(db),
-    loadMessageFacts(db, messageCampaignIds, { userIds: ids })
+    loadMessageFacts(db, messageCampaignIds, { userIds: ids }),
+    options.webinarFacts !== undefined
+      ? Promise.resolve(options.webinarFacts)
+      : options.webinars
+        ? loadWebinarFacts(db, { userIds: ids })
+        : Promise.resolve(null)
   ]);
   const wanted = new Set(ids);
   const { facts, people } = buildStudentFacts({
@@ -601,5 +741,5 @@ export async function loadAudienceFactsFor(
     people
   };
 
-  return attachMessageFacts(loaded, messageCampaignIds, messages);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }

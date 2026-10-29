@@ -722,6 +722,55 @@ test("cache do tick: o fluxo e lido antes dos passos; fluxo esquecido (stale_ver
   assert.equal(leiturasDoFluxo(), 2);
 });
 
+test("lote do motor: a regra 'Participação em lives' le as lives so dos alunos do lote; sem a regra, nada e lido", async () => {
+  const { loadFlowBatchContext } = await import("../src/server/communications/flow-facts.ts");
+  const entrada = "4e5f6071-3b1a-4c55-9d7e-2a6b8c9d0e01";
+  const live = "55555555-5555-4555-8555-555555555555";
+  const tarefas = [tarefaReservada(1), { ...tarefaReservada(2), node_id: tarefaReservada(1).node_id }];
+  const nuncaParticipou = { kind: "rules", root: { items: [{ action: "attended", negate: true, type: "webinar", webinarId: null }], match: "all" } };
+  const banco = (filter) =>
+    scriptedDb((query) => {
+      if (query.table === "communication_flows") {
+        return { data: [fluxoDoConstrutor({ entry_audience: { kind: "everyone" }, revision: 1 })], error: null };
+      }
+
+      if (query.table === "communication_flow_nodes") {
+        return {
+          data: [
+            { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: null, condition: null, expire_with_anchor: false, filter: null, flow_id: FLUXO, id: entrada, kind: "entry", max_wait_minutes: null, offset_minutes: 0, parent_id: null, position: 0, wait_until_true: false },
+            { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: AVISO, condition: null, expire_with_anchor: false, filter, flow_id: FLUXO, id: tarefas[0].node_id, kind: "message", max_wait_minutes: null, offset_minutes: 0, parent_id: entrada, position: 0, wait_until_true: false }
+          ],
+          error: null
+        };
+      }
+
+      if (query.op === "rpc" && query.table === "communication_webinar_facts") {
+        return { data: [{ attended: [live], registered: [live], user_id: tarefas[1].user_id }], error: null };
+      }
+
+      if (query.op === "rpc") {
+        return { data: {}, error: null };
+      }
+
+      return { count: 0, data: [], error: null };
+    });
+
+  const db = banco(nuncaParticipou);
+  const itens = await loadFlowBatchContext(db, tarefas, FORA_DA_FAIXA);
+  const leituras = db.queries.filter((query) => query.table === "communication_webinar_facts");
+
+  assert.equal(leituras.length, 1, "uma leitura para o lote");
+  assert.deepEqual([...leituras[0].args.p_user_ids].sort(), tarefas.map((tarefa) => tarefa.user_id).sort(), "so os alunos do lote");
+  assert.equal(itens[0].input.context.webinarFactsLoaded, true);
+  assert.equal(itens[0].input.facts.webinars, undefined, "sem linha: nunca participou");
+  assert.deepEqual(itens[1].input.facts.webinars, { attended: [live], registered: [live] });
+
+  const semRegra = banco(null);
+  const semLives = await loadFlowBatchContext(semRegra, tarefas, FORA_DA_FAIXA);
+  assert.equal(semRegra.queries.some((query) => query.table === "communication_webinar_facts"), false, "sem a regra, nada lido");
+  assert.equal(semLives[0].input.context.webinarFactsLoaded, undefined);
+});
+
 test("faixa de 15 minutos: a sondagem pega so quem nao foi conferido nesta faixa, os mais esquecidos primeiro", async () => {
   const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
   await flowStore.probeSlotWork(db, new Date("2026-10-20T15:15:00.000Z"));

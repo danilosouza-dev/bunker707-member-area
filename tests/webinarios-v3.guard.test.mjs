@@ -58,7 +58,7 @@ test("as migracoes ate a 202610290001 continuam byte a byte; a 0002 e o texto ex
     "b48d8504a243ba8f7e860cb20e5b3342acd06cdf2571c3b9a3ec1d2795463fbd",
     "a 202610290002 mudou: aplique de novo na nuvem de teste (docs/21) e atualize este hash junto"
   );
-  assert.equal(appMigration, "202610290003", "o aviso de migracao pendente aponta a mais nova (a 0003, os ajustes da revisao)");
+  assert.equal(appMigration, "202610300001", "o aviso de migracao pendente aponta a mais nova (a 0030 do Quem pode por regras; a guarda dela confere o arquivo)");
 });
 
 test("a 0002: seis secoes MCP, idempotente, sem create/alter policy, concurrently, truncate, delete nem drop", () => {

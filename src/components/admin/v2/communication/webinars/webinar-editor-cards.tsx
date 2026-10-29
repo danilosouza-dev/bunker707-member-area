@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard, MonitorPlay, Plus, Trash2, Upload } from "lucide-react";
+import { BellRing, Clapperboard, MonitorPlay, PanelTop, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,11 +17,15 @@ import {
   nextWebinarSessionAt,
   reminderPreviewText,
   sortWebinarSessions,
+  webinarAccessHint,
+  webinarAccessNotice,
+  webinarAudienceChoices,
   webinarConsoleHref,
   webinarFirstSessionAt,
   webinarRecordingCard,
   type WebinarCardLink,
   type WebinarLiveSessionSummary,
+  type WebinarNotifyShortcuts,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
 import { toTime, type AccessMode, type ChatMode, type DisplayNameMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
@@ -322,10 +326,14 @@ type AccessCardProps = CardProps & {
   onRetryCount: () => void;
   options: WebinarEditorOptions;
   pickerItems: readonly ProductPickerItem[];
+  /** O webinario gravado (null no novo): a regra "Participação em lives" nunca oferece a propria live. */
+  webinarId: string | null;
 };
 
-export function AccessCard({ audienceDescription, audienceErrors, countState, disabled, draft, errorFor, onBlur, onChange, onRetryCount, options, pickerItems }: AccessCardProps) {
+export function AccessCard({ audienceDescription, audienceErrors, countState, disabled, draft, errorFor, onBlur, onChange, onRetryCount, options, pickerItems, webinarId }: AccessCardProps) {
   const capacityDisabled = disabled || !draft.registrationRequired;
+  const hint = webinarAccessHint(draft.accessMode);
+  const notice = webinarAccessNotice(draft);
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -333,7 +341,13 @@ export function AccessCard({ audienceDescription, audienceErrors, countState, di
         ariaLabel={WEBINAR_ADMIN_COPY.cards.quemPode.title}
         disabled={disabled}
         name="webinar-access-mode"
-        onChange={(mode: AccessMode) => onChange({ accessMode: mode })}
+        onChange={(mode: AccessMode) => {
+          onChange({ accessMode: mode });
+          // Produto ou segmento com Limite de vagas e recusado (a vaga nao segura, D41): o aviso aparece na hora.
+          if (mode === "either" && draft.capacity != null) {
+            onBlur("capacity");
+          }
+        }}
         options={ACCESS_MODE_OPTIONS}
         value={draft.accessMode}
       />
@@ -367,9 +381,16 @@ export function AccessCard({ audienceDescription, audienceErrors, countState, di
             productsLoaded={options.productsLoaded}
             segments={options.segments}
             value={draft.audience}
+            excludeWebinarId={webinarId}
+            webinars={webinarAudienceChoices(options.webinars, webinarId)}
           />
           <AudienceCount description={audienceDescription} needsApproval={false} onRetry={onRetryCount} state={countState} />
-          <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.accessSegmentHint}</p>
+          {hint ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{hint}</p> : null}
+          {notice ? (
+            <p className="text-xs leading-5 text-[var(--warning)]" data-webinar-access-notice="" role="note">
+              {notice}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <AdminField
@@ -505,7 +526,39 @@ export function RegistrationCard({ disabled, draft, errorFor, now, onBlur, onCha
  * Avisar
  * ---------------------------------------------------------------------------------------------- */
 
-export function NotifyCard({ disabled, draft, errorFor, onBlur, onChange }: CardProps) {
+/**
+ * Um atalho do card Avisar (Aviso no sino, Pop-up): link para o editor da Comunicacao preenchido; desligado, o rotulo
+ * apagado (aria-disabled). O motivo vem uma vez so, embaixo dos dois (NotifyCard).
+ */
+function NotifyShortcut({ hint, icon, id, link }: { hint: string; icon: ReactNode; id: string; link: WebinarCardLink }) {
+  const hintId = `webinar-notify-${id}-hint`;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5" data-notify-shortcut={id}>
+      {link.href ? (
+        <Link aria-describedby={hintId} className={cardLinkClass} href={link.href}>
+          {icon}
+          {link.label}
+        </Link>
+      ) : (
+        <span aria-describedby={hintId} aria-disabled="true" className="inline-flex min-h-9 w-fit items-center gap-1.5 px-2 text-[13px] font-medium text-[var(--text-tertiary)]">
+          {icon}
+          {link.label}
+        </span>
+      )}
+      <span className="px-2 text-xs leading-5 text-[var(--text-secondary)]" id={hintId}>
+        {hint}
+      </span>
+    </div>
+  );
+}
+
+type NotifyCardProps = CardProps & {
+  /** Aviso no sino e Pop-up (webinarNotifyShortcuts): o endereco ou o motivo de estarem desligados. */
+  shortcuts: WebinarNotifyShortcuts;
+};
+
+export function NotifyCard({ disabled, draft, errorFor, onBlur, onChange, shortcuts }: NotifyCardProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <AdminSwitch checked={draft.showOnHome} description={copy.homeCardHint} disabled={disabled} id="webinar-showOnHome" label={copy.homeCard} onCheckedChange={(showOnHome) => onChange({ showOnHome })} />
@@ -523,8 +576,17 @@ export function NotifyCard({ disabled, draft, errorFor, onBlur, onChange }: Card
         />
       </AdminField>
       <AdminSwitch checked={draft.showBanner} description={copy.bannerSwitchHint} disabled={disabled} id="webinar-showBanner" label={copy.bannerSwitch} onCheckedChange={(showBanner) => onChange({ showBanner })} />
-      <SoonRow label={copy.popupLink} />
-      <SoonRow label={copy.flowLink} />
+      <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4" data-webinar-notify-shortcuts="">
+        <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.notifyLinksTitle}</span>
+        <NotifyShortcut hint={copy.notifyInboxHint} icon={<BellRing aria-hidden="true" className="size-4" />} id="inbox" link={shortcuts.inbox} />
+        <NotifyShortcut hint={shortcuts.popupHint} icon={<PanelTop aria-hidden="true" className="size-4" />} id="popup" link={shortcuts.popup} />
+        {shortcuts.blocked ? (
+          <p className="px-2 text-xs leading-5 text-[var(--text-secondary)]" data-webinar-notify-blocked="" role="note">
+            {shortcuts.blocked}
+          </p>
+        ) : null}
+        <SoonRow label={copy.flowLink} />
+      </div>
     </div>
   );
 }

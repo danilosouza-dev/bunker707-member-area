@@ -154,13 +154,35 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   const host = embed.liveConfigOverwrite("host", settings);
   assert.deepEqual(host.constraints.video.height, { ideal: 1080, max: 1080, min: 180 });
   assert.deepEqual(host.desktopSharingFrameRate, { max: 30, min: 5 });
-  assert.deepEqual(host.toolbarButtons, ["microphone", "camera", "desktop", "raisehand", "participants-pane", "recording", "security", "hangup"]);
+  // A engrenagem (so a aba de aparelhos) e o fundo na barra de quem apresenta, que fica sempre visivel (as setinhas de
+  // microfone e camera nao somem); o aluno continua sem barra nenhuma.
+  assert.deepEqual(host.toolbarButtons, ["microphone", "camera", "desktop", "raisehand", "participants-pane", "recording", "security", "select-background", "settings", "hangup"]);
+  assert.deepEqual(host.toolbarConfig, { alwaysVisible: true });
+  assert.equal(aluno.toolbarConfig, undefined);
+  const coHost = embed.liveConfigOverwrite("co_host", settings);
+  assert.deepEqual(coHost.toolbarButtons, ["microphone", "camera", "desktop", "raisehand", "participants-pane", "security", "select-background", "settings", "hangup"], "o co-apresentador: o mesmo do host sem gravar");
+  assert.deepEqual(coHost.toolbarConfig, { alwaysVisible: true });
+  assert.equal(embed.liveConfigOverwrite("team", settings).toolbarConfig, undefined, "a Equipe segue o aluno: sem a barra do iframe");
+  for (const role of ["student", "team"]) {
+    const semBarra = embed.liveConfigOverwrite(role, settings);
+    assert.ok(!semBarra.toolbarButtons.includes("settings") && !semBarra.toolbarButtons.includes("select-background"), `${role}: sem engrenagem nem fundo do iframe`);
+    assert.equal(embed.liveInterfaceConfigOverwrite(role).SETTINGS_SECTIONS, undefined, `${role}: sem engrenagem`);
+  }
   assert.ok(!embed.liveConfigOverwrite("co_host", settings).toolbarButtons.includes("recording"), "so o host grava");
   assert.equal(embed.liveConfigOverwrite("co_host", { ...settings, screenFps: 15, stage: 720 }).desktopSharingFrameRate.max, 15);
   assert.equal(embed.liveConfigOverwrite("team", settings).constraints.video.height.max, 360);
   assert.equal(embed.liveConfigOverwrite("host", settings).disableChat, true, "o chat e sempre o nosso (D5)");
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite()).toLowerCase().includes("jitsi"));
-  assert.equal(embed.JITSI_IFRAME_ALLOW, "camera; microphone; display-capture; autoplay; fullscreen");
+  assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite("host")).toLowerCase().includes("jitsi"));
+  assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");
+  assert.deepEqual(embed.liveInterfaceConfigOverwrite("host").SETTINGS_SECTIONS, ["devices"], "a engrenagem do host so com os aparelhos");
+  assert.deepEqual(embed.liveInterfaceConfigOverwrite("co_host").SETTINGS_SECTIONS, ["devices"]);
+  assert.deepEqual(
+    Object.keys(embed.liveInterfaceConfigOverwrite("host")).sort(),
+    ["DISABLE_JOIN_LEAVE_NOTIFICATIONS", "MOBILE_APP_PROMO", "SETTINGS_SECTIONS", "SHOW_CHROME_EXTENSION_BANNER"],
+    "o resto do interfaceConfig igual para todos"
+  );
+  assert.equal(embed.JITSI_IFRAME_ALLOW, "camera; microphone; display-capture; autoplay; fullscreen; speaker-selection");
   assert.deepEqual(live.liveEmbedSettings({ allowStudentCamera: false, quality: { screenFps: 15, stage: 720 } }), { allowStudentCamera: false, screenFps: 15, stage: 720 });
 
   assert.equal(embed.tokenRefreshDelayMs(iso(NOW + 60 * 60_000), NOW), 55 * 60_000, "5 min antes do exp");

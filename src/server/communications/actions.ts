@@ -58,9 +58,18 @@ import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { pageKeyOfHref, pageKeyOfTarget } from "@/server/member-area/page-visit-model";
 import { previewAudience, resolveAudienceUserIds, type AudienceSamplePerson } from "./audience";
-import { accessFactsOf, loadAudienceFacts, messageFactOf, openAccessRows, type AudienceEntitlementRow, type LoadedAudience } from "./audience-facts";
+import {
+  accessFactsOf,
+  loadAudienceFacts,
+  loadWebinarFacts,
+  messageFactOf,
+  openAccessRows,
+  type AudienceEntitlementRow,
+  type LoadedAudience
+} from "./audience-facts";
 import {
   audienceFactNeeds,
+  audienceFactsRequest,
   buildCommentRanks,
   collectMessageCampaignIds,
   describeAudience,
@@ -262,10 +271,11 @@ async function requireCampaign(db: CommunicationsDb, id: string) {
 
 /**
  * Fatos dos alunos para contar este segmento, com as linhas dos avisos citados por regras "o que fez
- * com a notificacao X" (docs/23 §7): a previa, a publicacao e o envio contam igual.
+ * com a notificacao X" (docs/23 §7) e, com a regra "Participação em lives", as lives de cada aluno: a
+ * previa, a publicacao e o envio contam igual.
  */
 function loadFactsFor(db: CommunicationsDb, now: Date, definition: AudienceDefinition) {
-  return loadAudienceFacts(db, now, { messageCampaignIds: collectMessageCampaignIds(definition) });
+  return loadAudienceFacts(db, now, audienceFactsRequest(definition));
 }
 
 /** A pessoa escolhida em "Quem envia" esta na equipe agora (admin_roles)? E o nome dela, para a mensagem. */
@@ -2405,16 +2415,19 @@ export async function previewFollowUpAudience(input: PreviewFollowUpAudienceInpu
       collectPages(filter.root);
     }
 
-    // Progresso, comentarios, entrada, ritmo ou turma: os fatos completos, uma vez so.
+    // Progresso, comentarios, entrada, ritmo ou turma: os fatos completos, uma vez so. "Participação em lives": as
+    // lives de cada aluno, uma leitura so (null num banco sem a migracao 202610300001: a regra nunca combina).
     const needs = audienceFactNeeds([filter]);
     const full = needs.students ? await loadAudienceFacts(db, now) : null;
     const fullFacts = new Map((full?.facts ?? []).map((fact) => [fact.userId, fact]));
+    const webinarFacts = needs.webinars ? await loadWebinarFacts(db) : null;
     const context: AudienceContext = {
       commentRanks: full?.context.commentRanks ?? buildCommentRanks([]),
       flow: { ctaPageKeys },
       lessonTotals: full?.context.lessonTotals ?? {},
       messageKeys,
-      now: nowMs
+      now: nowMs,
+      ...(webinarFacts ? { webinarFactsLoaded: true } : {})
     };
     let qualified = 0;
     let counted = 0;
@@ -2504,7 +2517,8 @@ export async function previewFollowUpAudience(input: PreviewFollowUpAudienceInpu
         const own = messages.get(userId) ?? {};
         // "desde que entrou": a passagem no fluxo; sem passagem ainda, quando recebeu o aviso.
         const enteredAt = entered.get(userId) ?? own[noticeKey]?.visibleAt ?? nowMs;
-        const facts: AudienceStudentFacts = { ...base, flow: { enteredAt, pageVisits: visits.get(userId) ?? {} }, messages: own };
+        const lives = webinarFacts?.get(userId);
+        const facts: AudienceStudentFacts = { ...base, flow: { enteredAt, pageVisits: visits.get(userId) ?? {} }, messages: own, ...(lives ? { webinars: lives } : {}) };
 
         counted += 1;
 

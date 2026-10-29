@@ -394,7 +394,7 @@ export type WebinarPersonOption = {
   roleLabel: string;
 };
 
-export type WebinarEditorOptions = Pick<NoticeEditorOptions, "cohorts" | "names" | "notices" | "products" | "productsLoaded" | "segments"> & {
+export type WebinarEditorOptions = Pick<NoticeEditorOptions, "cohorts" | "names" | "notices" | "products" | "productsLoaded" | "segments" | "webinars"> & {
   currentUserId: string | null;
   /** O nome de quem esta na tela, como a frase da Simulacao (docs/30 §8.6) registra o responsavel. */
   currentUserName: string | null;
@@ -466,6 +466,8 @@ export async function loadWebinarEditorOptions(input: { audiences?: readonly Aud
     peopleLoaded: permissions.loaded,
     products: base.products,
     productsLoaded: base.productsLoaded,
-    segments: base.segments
+    segments: base.segments,
+    // As lives do seletor da regra "Participação em lives"; o card Quem pode tira a propria live.
+    webinars: base.webinars
   };
 }

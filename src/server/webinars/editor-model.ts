@@ -1,7 +1,8 @@
 // Modelo de tela do admin dos Webinarios (docs/30 §2): enderecos e filtros da lista, situacoes e botoes
 // (§2.3; na fase 3 Abrir a sala, Abrir o console e o Encerrar live da Live ao vivo levam ao console /[id]/sala, e
 // sem messaging.publish os da sala aparecem desligados com a explicacao, §2.6), os cards do editor (§2.2, com o card
-// Gravacao pela situacao do gravador), o mapa dos erros do zod para os campos, a previa do card do aluno, a sessao
+// Gravacao pela situacao do gravador e o Avisar com os atalhos Aviso no sino e Pop-up, webinarNotifyShortcuts), o
+// mapa dos erros do zod para os campos, a previa do card do aluno, a sessao
 // que vai para a tela sem o nome da sala (§8.1) e as conferencias de tela que o schema nao cobre. Modulo puro (sem
 // React, sem "server-only", imports relativos):
 // tests/webinarios-admin-modelo.test.mjs e tests/webinarios-frases.test.mjs carregam direto pelo Node.
@@ -10,20 +11,37 @@
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { countdownLabel, formatWebinarWhen, saoPauloTime } from "../../lib/webinar-time";
+import {
+  AUDIENCE_LIMITS,
+  audienceDepth,
+  countAudienceRules,
+  describeAudience,
+  isAudienceGroup,
+  normalizeAudience,
+  type AudienceDefinition,
+  type AudienceNames,
+  type AudienceNode,
+  type AudienceRule
+} from "../communications/audience-model";
 import { formatSaoPauloDateTime, saoPauloLocalToIso } from "../communications/campaign-model";
 import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatus } from "./recorder-model";
 import { webinarReportHref } from "./report-page-model";
 import {
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
+  accessModeAnchorsAudience,
+  accessModeUsesAudience,
+  accessModeUsesProduct,
   emptyWebinarDraft,
   type AccessMode,
   type SessionStatus,
   type WebinarDraft,
   type WebinarKind,
   type WebinarSession,
-  type WebinarSituation
+  type WebinarSituation,
+  type WebinarStatus
 } from "./model";
+import { WEBINAR_NOTICE_COPY, audienceWithProduct, webinarNoticeAudience, webinarNoticeHref, webinarNoticeStatusBlock, withOwnWebinar } from "./notice-shortcut-model";
 import { WEBINAR_MESSAGES, publishProblems } from "./schemas";
 
 /* ------------------------------------------------------------------------------------------------
@@ -261,11 +279,27 @@ export const WEBINAR_ADMIN_COPY = {
   fields: {
     accessModes: {
       audience: "Segmento",
+      both: "Quem tem o produto e está no segmento",
       either: "Produto ou segmento",
       everyone: "Todos",
       product: "Quem tem o produto"
     },
-    accessSegmentHint: "Quem entrar no segmento agora vê o webinário em até 15 min.",
+    /**
+     * Segmento e "both": o segmento vale na hora e quem garantiu vaga fica (a ancora, D41), mas o produto e a turma que o
+     * segmento pede sao conferidos de novo.
+     */
+    accessSegmentHint: "Vale na hora. Quem garantiu vaga continua vendo, mesmo se sair do segmento. O produto e a turma que o segmento pede são conferidos sempre.",
+    /**
+     * "Produto ou segmento": sem ancora (D41), vale o produto ou o segmento de agora, a cada pedido; nem a vaga nem ter
+     * entrado na sala seguram, entao quem sai do segmento sem o produto no meio da live sai da sala (o video e o chat) e
+     * nao volta. Para a vaga segurar (e para limitar as vagas), o Segmento com o produto como uma das regras.
+     */
+    accessEitherHint:
+      "Vale na hora, e aqui nem a vaga nem ter entrado na sala seguram: quem sair do segmento sem o produto, mesmo no meio da live, sai da sala e não consegue voltar. Para segurar, use Segmento com o produto como uma das regras (por exemplo, “tem o produto X” ou “ganhou acesso hoje”).",
+    /** Regra "Ganhou acesso recentemente" com "Entrar direto, sem vaga" (Segmento e "both"): nada segura quem saiu do segmento. */
+    accessTimeRuleNoSeat: "Sem Garantir vaga, quem sair do segmento antes de entrar na sala deixa de ver a live (quando o dia vira, por exemplo).",
+    /** Regra "Ganhou acesso recentemente" no "Produto ou segmento", com ou sem vaga: sem ancora, a regra vence ate na sala. */
+    accessTimeRuleEither: "Quem entrou pela regra de tempo e não tem o produto sai quando ela vence (quando o dia vira, por exemplo), com vaga ou sem, mesmo no meio da live.",
     accessCapacityHint: "Só quem garantir vaga entra.",
     afterAbsent: "E-mail para quem não veio",
     afterAttended: "E-mail para quem veio",
@@ -295,6 +329,21 @@ export const WEBINAR_ADMIN_COPY = {
     email: "E-mail",
     emailHint: "Cada lembrete sai uma vez por aluno.",
     flowLink: "Fluxo",
+    /** Avisar › Aviso no sino e Pop-up (docs/30 §2.2): atalhos que abrem o editor da Comunicacao preenchido. */
+    notifyBlocked: WEBINAR_NOTICE_COPY.blocked,
+    notifyInbox: "Aviso no sino",
+    notifyInboxHint: `Abre um aviso novo já preenchido: para quem está no Quem pode agora, com o nome, a data e o botão ${WEBINAR_NOTICE_COPY.ctaSee}. Nada é enviado até você publicar.`,
+    notifyLinksTitle: "Avisar pela Comunicação",
+    /**
+     * A dica embaixo do atalho Pop-up, pelo Quem pode salvo (webinarNotifyPopupHint, D42): no Segmento e no "both" a vaga
+     * segura a live mas nao entra no aviso; no "Produto ou segmento" (sem ancora) quem sai do segmento sem o produto perde
+     * a live e os avisos dela; em Todos e Quem tem o produto nao ha segmento.
+     */
+    notifyPopupHint: {
+      anchored: `Abre um pop-up novo já preenchido para a hora da live, com o botão ${WEBINAR_NOTICE_COPY.ctaEnter}, para quem está no Quem pode agora. Quem garantiu vaga e já saiu do segmento não vê o pop-up: recebe o Começou agora pelo sino. Nada é salvo até você salvar.`,
+      either: `Abre um pop-up novo já preenchido para a hora da live, com o botão ${WEBINAR_NOTICE_COPY.ctaEnter}, para quem está no Quem pode agora. Quem saiu do segmento sem o produto não vê a live nem recebe os avisos dela. Nada é salvo até você salvar.`,
+      plain: `Abre um pop-up novo já preenchido para a hora da live, com o botão ${WEBINAR_NOTICE_COPY.ctaEnter}, para quem está no Quem pode agora. Nada é salvo até você salvar.`
+    },
     h1: "1 hora antes",
     h1Text: "Texto do lembrete de 1 hora",
     h24: "1 dia antes",
@@ -452,7 +501,7 @@ export const WEBINAR_ADMIN_COPY = {
     waitUpload: "Espere a capa terminar de enviar e tente de novo."
   },
   problems: {
-    eitherNeedsAudience: "Monte o segmento ou escolha só o produto.",
+    eitherNeedsAudience: WEBINAR_MESSAGES.accessAudience,
     hostCannotPublish: "O apresentador precisa poder publicar na Comunicação.",
     hostInPresenters: "O apresentador já é quem apresenta.",
     replayLessonNeedsProduct: "Escolha o produto da aula do replay.",
@@ -1139,7 +1188,7 @@ export function canonicalWebinarDraft(draft: WebinarDraft): WebinarDraft {
     coverUrl: trimText(draft.coverUrl),
     description: draft.description.trim(),
     presenters: draft.presenters.map((presenter) => ({ ...presenter, canModerateRoom: presenter.role === "team" && presenter.canModerateRoom })),
-    productId: draft.accessMode === "product" || draft.accessMode === "either" ? draft.productId : null,
+    productId: accessModeUsesProduct(draft.accessMode) ? draft.productId : null,
     recordingVideoUrl: draft.kind === "simulated" ? trimText(draft.recordingVideoUrl) : null,
     reminderTexts: {
       afterAbsent: trimText(texts.afterAbsent),
@@ -1294,15 +1343,140 @@ export const ACCESS_MODE_OPTIONS: readonly { label: string; value: AccessMode }[
   { label: WEBINAR_ADMIN_COPY.fields.accessModes.everyone, value: "everyone" },
   { label: WEBINAR_ADMIN_COPY.fields.accessModes.product, value: "product" },
   { label: WEBINAR_ADMIN_COPY.fields.accessModes.audience, value: "audience" },
-  { label: WEBINAR_ADMIN_COPY.fields.accessModes.either, value: "either" }
+  { label: WEBINAR_ADMIN_COPY.fields.accessModes.either, value: "either" },
+  { label: WEBINAR_ADMIN_COPY.fields.accessModes.both, value: "both" }
 ];
 
 export function accessUsesProduct(mode: AccessMode) {
-  return mode === "product" || mode === "either";
+  return accessModeUsesProduct(mode);
 }
 
 export function accessUsesAudience(mode: AccessMode) {
-  return mode === "audience" || mode === "either";
+  return accessModeUsesAudience(mode);
+}
+
+/** As lives do seletor da regra "Participação em lives" no Quem pode, sem a propria live (uma regra nela seria um laco). */
+export function webinarAudienceChoices<T extends { id: string }>(webinars: readonly T[] | null | undefined, webinarId: string | null): T[] {
+  return (webinars ?? []).filter((webinar) => webinar.id !== webinarId);
+}
+
+/**
+ * A dica embaixo do segmento: no Segmento e no "both", vale na hora e a vaga e a ancora; no "Produto ou segmento", sem
+ * ancora, como segurar a vaga (D41).
+ */
+export function webinarAccessHint(mode: AccessMode): string | null {
+  if (mode === "either") {
+    return WEBINAR_ADMIN_COPY.fields.accessEitherHint;
+  }
+
+  return accessModeAnchorsAudience(mode) ? WEBINAR_ADMIN_COPY.fields.accessSegmentHint : null;
+}
+
+function someRule(node: AudienceNode, test: (rule: AudienceRule) => boolean): boolean {
+  return isAudienceGroup(node) ? node.items.some((item) => someRule(item, test)) : test(node);
+}
+
+/**
+ * O aviso do card Quem pode quando o segmento tem regra de tempo ("Ganhou acesso recentemente", que vira com o dia ou
+ * com as horas). No Segmento e no "both", onde a vaga e a ancora, so com "Entrar direto, sem vaga": sem vaga nada
+ * segura quem saiu do segmento antes de entrar na sala. No "Produto ou segmento", sem ancora, com ou sem vaga: nem a
+ * vaga nem a presenca seguram, e quem nao tem o produto sai quando a regra vence, ate no meio da live (D41).
+ */
+export function webinarAccessNotice(draft: Pick<WebinarDraft, "accessMode" | "audience" | "registrationRequired">): string | null {
+  if (!accessUsesAudience(draft.accessMode) || draft.audience.kind !== "rules" || !someRule(draft.audience.root, (rule) => rule.type === "access_recent")) {
+    return null;
+  }
+
+  if (draft.accessMode === "either") {
+    return WEBINAR_ADMIN_COPY.fields.accessTimeRuleEither;
+  }
+
+  return accessModeAnchorsAudience(draft.accessMode) && !draft.registrationRequired ? WEBINAR_ADMIN_COPY.fields.accessTimeRuleNoSeat : null;
+}
+
+/**
+ * O segmento que a contagem ao vivo do editor conta (previewNoticeAudience). Em "Quem tem o produto e está no segmento",
+ * o produto entra como regra junto do segmento, num grupo "todas": as regras de um grupo "todas" entram soltas; um
+ * grupo "qualquer" entra inteiro (e, se ja tiver grupos dentro, cada caminho dele ganha o produto, para nao passar de
+ * um grupo dentro do principal). Sem produto escolhido, conta so o segmento (o erro do produto ja esta no card). A
+ * montagem e a mesma do atalho Avisar (audienceWithProduct, em notice-shortcut-model.ts). Com o webinario salvo
+ * (`webinarId`), a regra "nunca ... em nenhuma live" nao conta a propria live (withOwnWebinar, como no Quem pode): a
+ * contagem nao cai a cada vaga nesta live; se a troca passar dos limites, conta o segmento como esta.
+ */
+export function webinarCountAudience(draft: Pick<WebinarDraft, "accessMode" | "audience" | "productId">, webinarId?: string | null): AudienceDefinition {
+  const own = withOwnWebinar(draft.audience, webinarId);
+  const segment = countAudienceRules(own) <= AUDIENCE_LIMITS.maxRules && audienceDepth(own) <= AUDIENCE_LIMITS.maxDepth ? own : draft.audience;
+
+  return draft.accessMode === "both" && draft.productId ? audienceWithProduct(draft.productId, segment) : segment;
+}
+
+/**
+ * A frase embaixo do "≈ N agora" no card Quem pode: o segmento como a equipe montou (no "both", com o produto junto),
+ * sem a troca da propria live de webinarCountAudience, que so vale para o numero. Assim a frase nunca mostra uma regra
+ * que a equipe nao montou nem pode montar ("garantiram vaga nesta live"), e o rascunho, que nao aparece na lista de
+ * lives, nunca vira "uma live removida".
+ */
+export function webinarAudienceDescription(draft: Pick<WebinarDraft, "accessMode" | "audience" | "productId">, names: AudienceNames): string {
+  return describeAudience(normalizeAudience(webinarCountAudience(draft)), names);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Avisar › Aviso no sino e Pop-up (docs/30 §2.2)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type WebinarNotifyShortcuts = {
+  /** O motivo dos dois atalhos desligados (uma frase so, embaixo deles); null = ligados. */
+  blocked: string | null;
+  inbox: WebinarCardLink;
+  popup: WebinarCardLink;
+  /** A dica embaixo do Pop-up, pelo Quem pode salvo (webinarNotifyPopupHint). */
+  popupHint: string;
+};
+
+/**
+ * A dica do atalho Pop-up pelo modo do Quem pode (D42): no Segmento e no "both" (com a ancora), quem tem vaga e saiu
+ * do segmento fica fora do pop-up e recebe o Comecou agora; no "Produto ou segmento" (sem ancora), quem saiu do
+ * segmento sem o produto nao ve a live nem recebe os avisos dela; em Todos e Quem tem o produto, sem frase de segmento.
+ */
+export function webinarNotifyPopupHint(mode: AccessMode): string {
+  const hints = WEBINAR_ADMIN_COPY.fields.notifyPopupHint;
+
+  if (mode === "either") {
+    return hints.either;
+  }
+
+  return accessModeAnchorsAudience(mode) ? hints.anchored : hints.plain;
+}
+
+/**
+ * Os atalhos do card Avisar: abrem /admin/comunicacao/avisos/novo?webinario=<id>&tipo= (o aviso preenchido com o
+ * webinario SALVO, sem gravar nada; notice-shortcut-model.ts). Desligados, com o motivo, nesta ordem: sem
+ * messaging.write (a mesma permissao do editor do aviso); webinario nunca salvo ou rascunho; cancelado; encerrado; com
+ * mudanca sem salvar; Quem pode que nao cabe num aviso (AUDIENCE_LIMITS). `draft` e o webinario salvo.
+ */
+export function webinarNotifyShortcuts(input: {
+  dirty: boolean;
+  draft: Pick<WebinarDraft, "accessMode" | "audience" | "productId">;
+  permissions: WebinarPermissions;
+  saved: { id: string; situation: WebinarSituation; status: WebinarStatus } | null;
+}): WebinarNotifyShortcuts {
+  const fields = WEBINAR_ADMIN_COPY.fields;
+  const blocked = !input.permissions.canWrite
+    ? WEBINAR_NOTICE_COPY.blocked.write
+    : (webinarNoticeStatusBlock(input.saved) ??
+      (input.dirty ? WEBINAR_NOTICE_COPY.blocked.dirty : null) ??
+      (() => {
+        const translated = webinarNoticeAudience({ ...input.draft, id: input.saved?.id ?? null });
+
+        return translated.ok ? null : translated.reason;
+      })());
+  const link = (kind: "inbox" | "popup", label: string): WebinarCardLink => ({
+    blocked,
+    href: blocked || !input.saved ? null : webinarNoticeHref(input.saved.id, kind),
+    label
+  });
+
+  return { blocked, inbox: link("inbox", fields.notifyInbox), popup: link("popup", fields.popupLink), popupHint: webinarNotifyPopupHint(input.draft.accessMode) };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -1383,6 +1557,9 @@ export function describeWebinarAccess(draft: Pick<WebinarDraft, "accessMode" | "
       break;
     case "either":
       who = `quem tem ${product} ou está no segmento`;
+      break;
+    case "both":
+      who = `quem tem ${product} e está no segmento`;
       break;
     default:
       who = "todos os alunos";

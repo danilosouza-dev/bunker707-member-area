@@ -1,29 +1,32 @@
 // A sala ao vivo do aluno no navegador, a parte pura (docs/30 §1.3, §1.4, §1.7, §5.1, §6.3, §8.5 e §9; fase 3): qual
 // tela a sala mostra (em breve, removido, banido, encerrada, trancada, aguardando o apresentador ou aberta), a frase de
-// cada recusa do join-token (409 not_started / ended / kicked / banned, 503 meet_unconfigured, o resto "Tentar de
-// novo"), a fila dos sinais do iframe para POST .../room-events (lotes de ate 20 que cabem no corpo de 4 KB; o que
+// cada recusa do join-token (409 not_started / ended / kicked / banned, 503 meet_unconfigured, 404 fora do acesso, o
+// resto "Tentar de novo"), a fila dos sinais do iframe para POST .../room-events (lotes de ate 20 que cabem no corpo de 4 KB; o que
 // toRoomEvent recusa nunca entra; 429 espera o Retry-After; a queda da rede devolve o lote), as tentativas de voltar
 // depois de uma queda (2 s, 4 s, 8 s e depois "Não conseguimos voltar"), o relogio "Ao vivo · 00:42:10" pelo inicio
 // de verdade e o skew do servidor, a hora do silencio no chat em Sao Paulo, o que os sinais do iframe mudam na nossa
-// barra (mao, camera, microfone liberado, gravando, quem esta no palco) e os atalhos R / M / E. Sem "use client" e com
-// imports relativos: tests/webinarios-sala-ao-vivo-navegador.test.mjs carrega direto pelo Node. Nada aqui le o relogio
-// de verdade nem a rede: a hora e o resto chegam por parametro.
+// barra (mao, camera, microfone liberado, gravando, quem esta no palco, o navegador que recusou o microfone ou a camera),
+// os sinais de mudo da troca de aparelho do painel Configurações (nem a equipe silenciando, nem linha no servidor) e os
+// atalhos R / M / E. Sem "use client" e com imports relativos: tests/webinarios-sala-ao-vivo-navegador.test.mjs carrega
+// direto pelo Node. Nada aqui le o relogio de verdade nem a rede: a hora e o resto chegam por parametro.
 
+import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
 import { LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
+import { roomAccessLost } from "../../../../lib/webinar-room-client";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
 
 /* ------------------------------------------------------------------------------------------------
- * Frases da barra e do "Como usar" (WEBINAR_COPY.aoVivo; o nome do objeto ficou para os componentes e testes)
+ * Frases da barra e do painel Configurações (WEBINAR_COPY.aoVivo; o nome do objeto ficou para os componentes e testes)
  * ---------------------------------------------------------------------------------------------- */
 
 export const LIVE_ROOM_COPY = {
   /** O nome da nossa barra para o leitor de tela. */
   barra: WEBINAR_COPY.aoVivo.barra,
-  /** O "Como usar" da barra (docs/30 §9): os atalhos anunciados. */
-  comoUsar: WEBINAR_COPY.aoVivo.comoUsar,
+  /** O botao Configurações da barra (docs/30 §1.3 e §9): som, aparelhos, qualidade e os atalhos anunciados. */
+  configuracoes: WEBINAR_COPY.aoVivo.configuracoes,
   atalhos: WEBINAR_COPY.aoVivo.atalhos,
   atalhoReagir: WEBINAR_COPY.aoVivo.atalhoReagir,
   atalhoMao: WEBINAR_COPY.aoVivo.atalhoMao,
@@ -57,10 +60,30 @@ export const LIVE_ROOM_RULES = {
   overlayMessages: 3,
   /** Os avisos passageiros da barra (camera fechada pela equipe, microfone silenciado) somem depois disto. */
   noticeMs: 6_000,
-  /** Ligar a camera sem resposta do iframe depois disto: a camera dos alunos esta desligada (a equipe fechou). */
+  /**
+   * Ligar a camera sem resposta do iframe depois disto: a camera dos alunos esta desligada (a equipe fechou). Tambem o
+   * prazo do microfone com a permissao do site dada (micAnswerDelayMs: a faixa abre em centenas de ms).
+   */
   cameraAnswerMs: 5_000,
-  /** O mesmo prazo com o pedido de permissao do navegador ainda aberto (o aluno le e responde). */
+  /** O mesmo prazo com o pedido de permissao do navegador ainda aberto (o aluno le e responde); o do microfone tambem. */
   cameraPromptMs: 30_000,
+  /**
+   * O pedido do microfone (Falar, ou Microfone para ligar): a sala confere a faixa do iframe e a permissao do navegador
+   * neste intervalo ate o prazo do pedido (micAnswerDelayMs: 5 s com a permissao dada, 30 s sem ela).
+   */
+  micCheckMs: 500,
+  /**
+   * Depois do prazo sem a faixa abrir (o pedido do navegador fechado no X, ainda aberto, ou o aparelho que nao abriu):
+   * a barra fica com o microfone desligado e a sala continua conferindo neste intervalo, sem fim por prazo, enquanto o
+   * pedido durar (o mesmo iframe, sem o mudo, sem outro toque): o getUserMedia aberto pelo toggleAudio nao tem prazo, e o
+   * aluno que libera depois abre a faixa sem sinal nenhum (o "ligado" vai entao para a barra e o servidor).
+   */
+  micLateCheckMs: 2_000,
+  /**
+   * A troca de camera do painel Configurações espera os sinais de mudo dela por este prazo, contado de novo quando o
+   * set*Device responde e a cada sinal da troca (uma webcam USB leva alguns segundos para abrir).
+   */
+  deviceSwitchMs: 10_000,
   /** O getRoomsInfo (quem ja moderava antes de o aluno entrar) no maximo uma vez neste intervalo. */
   roomsInfoMs: 5_000,
   /** Um token que falhou ao renovar tenta de novo depois disto. */
@@ -82,12 +105,13 @@ export function liveApiPath(webinarId: string, part: "join-token" | "room-events
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * banned / kicked: a sala inteira da lugar a frase (sem iframe nem chat); ended: palco encerrado (o chat fica so para
+ * unavailable: a pessoa perdeu o acesso (404 da sessao, do sinal de presenca, do token ou dos sinais; D41) e, como
+ * banned / kicked, a sala inteira da lugar a frase (sem iframe nem chat); ended: palco encerrado (o chat fica so para
  * ler); unconfigured: "em breve" no palco (o chat funciona); locked: quem ainda nao entrou ve a frase da sala trancada
  * e a pagina reconsulta a sessao; waiting: a sala ainda nao abriu para o aluno (Aguardando o apresentador); open: o
  * botao Entrar na sala (ou o iframe, depois dele).
  */
-export type LiveScreen = "banned" | "ended" | "kicked" | "locked" | "open" | "unconfigured" | "waiting";
+export type LiveScreen = "banned" | "ended" | "kicked" | "locked" | "open" | "unavailable" | "unconfigured" | "waiting";
 
 export const NO_LIVE_BAN: LiveBanState = { banned: false, kicked: false, muted: false, mutedUntil: null };
 
@@ -100,8 +124,14 @@ export function liveRoomScreen(input: {
   staff: boolean;
   /** O join-token respondeu 503 meet_unconfigured (o ambiente ficou sem a sala depois de a pagina abrir). */
   unconfigured?: boolean;
+  /** Uma rota da sala respondeu 404: a pessoa saiu do "Quem pode" no meio da live (roomAccessLost). */
+  unavailable?: boolean;
 }): LiveScreen {
   const { ban, live } = input;
+  // Fora do acesso o servidor nem chega aos banimentos (o 404 vem antes do 409).
+  if (input.unavailable) {
+    return "unavailable";
+  }
   if (ban.banned) {
     return "banned";
   }
@@ -140,9 +170,9 @@ export function joinTimeoutOutcome(input: { joined: boolean; leaving: boolean; l
   return input.lobby ? "wait" : "drop";
 }
 
-/** A sala inteira da lugar a frase (removido ou banido): sem iframe, sem chat. */
+/** A sala inteira da lugar a frase (removido, banido ou fora do acesso): sem iframe, sem chat. */
 export function screenBlocksRoom(screen: LiveScreen): boolean {
-  return screen === "banned" || screen === "kicked";
+  return screen === "banned" || screen === "kicked" || screen === "unavailable";
 }
 
 /** A frase de cada tela (o titulo e, quando ha, a linha de baixo); `open` nao tem frase. */
@@ -152,6 +182,8 @@ export function liveScreenPhrase(screen: LiveScreen, input: { hasReplay: boolean
       return { text: null, title: WEBINAR_COPY.aoVivo.banido };
     case "kicked":
       return { text: null, title: WEBINAR_COPY.aoVivo.removido };
+    case "unavailable":
+      return { text: null, title: WEBINAR_COPY.aluno.naoDisponivel };
     case "ended":
       return { text: null, title: input.hasReplay ? WEBINAR_COPY.sala.encerrada : WEBINAR_COPY.sala.encerradaReplay };
     case "unconfigured":
@@ -182,12 +214,19 @@ export function liveAcceptsWrites(status: SessionStatus): boolean {
  * O join-token: as recusas viram a frase do estado
  * ---------------------------------------------------------------------------------------------- */
 
-export type LiveJoinFailure = "banned" | "ended" | "error" | "kicked" | "meet_unconfigured" | "not_started";
+export type LiveJoinFailure = "banned" | "ended" | "error" | "kicked" | "meet_unconfigured" | "not_started" | "unavailable";
 
-/** O motivo de uma falha de POST .../join-token (o erro do fetch traz status e reason). Rede e 5xx: `error`. */
+/**
+ * O motivo de uma falha de POST .../join-token (o erro do fetch traz status e reason). 404: a pessoa saiu do "Quem pode"
+ * (ou a sessao sumiu): `unavailable`, definitivo, na entrada, na renovacao e na volta depois de uma queda. Rede e 5xx:
+ * `error`.
+ */
 export function joinFailureOf(error: unknown): LiveJoinFailure {
   const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : null;
   const reason = (error as { reason?: unknown } | null)?.reason;
+  if (roomAccessLost(error)) {
+    return "unavailable";
+  }
   if (status === 503 && reason === "meet_unconfigured") {
     return "meet_unconfigured";
   }
@@ -210,6 +249,8 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
       return WEBINAR_COPY.aoVivo.emBreve;
     case "not_started":
       return WEBINAR_COPY.aluno.aguardando;
+    case "unavailable":
+      return WEBINAR_COPY.aluno.naoDisponivel;
     default:
       return WEBINAR_COPY.aoVivo.erroAbrir;
   }
@@ -218,6 +259,18 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
 /** Depois de quanto tempo pedir outro token (ms): o contrato de jitsi-room-config (5 min antes do exp, piso de 10 s). */
 export function tokenRefreshInMs(reply: Pick<JoinTokenReply, "expiresAt">, nowMs: number): number {
   return tokenRefreshDelayMs(reply.expiresAt, nowMs);
+}
+
+export type TokenRefreshOutcome = { action: "refuse"; failure: Exclude<LiveJoinFailure, "error"> } | { action: "retry"; delayMs: number };
+
+/**
+ * A renovacao do token (com a pessoa dentro da sala) falhou: rede, 5xx e 429 tentam de novo em `tokenRetryMs`; uma
+ * recusa troca a sala na hora, e o 404 (`unavailable`: saiu do "Quem pode" no meio da live) desmonta o iframe e mostra
+ * "Esta live não está disponível para você." (D41), em vez de seguir tentando com o video no ar.
+ */
+export function tokenRefreshOutcome(error: unknown): TokenRefreshOutcome {
+  const failure = joinFailureOf(error);
+  return failure === "error" ? { action: "retry", delayMs: LIVE_ROOM_RULES.tokenRetryMs } : { action: "refuse", failure };
 }
 
 /** Aluno e Equipe usam a nossa barra (camera e microfone com os avisos); host e co-apresentador, a barra do iframe. */
@@ -299,13 +352,14 @@ export function takeRoomEventBatch(
   return { batch, body, rest: queue.slice(index) };
 }
 
-export type RoomEventsOutcome = { blocked: "banned" | "ended" | "kicked" | null; pauseUntilMs: number | null; requeue: boolean };
+export type RoomEventsOutcome = { blocked: "banned" | "ended" | "kicked" | "unavailable" | null; pauseUntilMs: number | null; requeue: boolean };
 
 /**
  * O que fazer depois de mandar um lote: entregue (2xx), nada; 429: o lote volta para a fila e o proximo espera o
  * Retry-After; rede ou 5xx: volta para a fila; outro 4xx: descartado (nunca insiste num lote recusado). 409 banned:
  * a sala troca pela frase de removido (`kicked`, a mensagem do servidor e a do removido desta live) ou de banido de
- * todas (`banned`, so com a frase do banido; o mesmo criterio de writeRefusalOf); 409 ended: a sala encerra.
+ * todas (`banned`, so com a frase do banido; o mesmo criterio de writeRefusalOf); 409 ended: a sala encerra; 404: a
+ * pessoa saiu do "Quem pode" (`unavailable`, D41).
  */
 export function roomEventsOutcome(input: { message?: string | null; nowMs: number; reason?: string | null; retryAfterSeconds: number | null; status: number | null }): RoomEventsOutcome {
   const { status } = input;
@@ -318,6 +372,9 @@ export function roomEventsOutcome(input: { message?: string | null; nowMs: numbe
   }
   if (status === null || status >= 500) {
     return { blocked: null, pauseUntilMs: null, requeue: true };
+  }
+  if (roomAccessLost({ status })) {
+    return { blocked: "unavailable", pauseUntilMs: null, requeue: false };
   }
   if (status === 409 && input.reason === "banned") {
     return { blocked: input.message === WEBINAR_COPY.aoVivo.banido ? "banned" : "kicked", pauseUntilMs: null, requeue: false };
@@ -507,15 +564,25 @@ export function recordingSignalOf(state: Pick<LiveSignalState, "participants">, 
  * O que os sinais do iframe mudam na nossa barra
  * ---------------------------------------------------------------------------------------------- */
 
-export type LiveNotice = "camera_blocked" | "camera_closed" | "mic_released" | "mic_silenced";
+export type LiveNotice =
+  | "camera_blocked"
+  | "camera_closed"
+  | "camera_denied"
+  | "camera_failed"
+  | "camera_unanswered"
+  | "mic_denied"
+  | "mic_failed"
+  | "mic_released"
+  | "mic_silenced"
+  | "mic_unanswered";
 
 export type LiveParticipants = { moderators: string[]; names: Record<string, string> };
 
 export type LiveSignalState = {
   audioOn: boolean;
-  /** O proximo audioMuteStatusChanged foi pedido por nos (Falar ou Microfone): nao e a equipe silenciando. */
+  /** O proximo audioMuteStatusChanged foi pedido por nos (Falar, Microfone ou a troca do microfone): nao e a equipe silenciando. */
   expectAudio: boolean;
-  /** O proximo videoMuteStatusChanged foi pedido por nos (Câmera): nao e a equipe fechando. */
+  /** O proximo videoMuteStatusChanged foi pedido por nos (Câmera ou a troca da camera): nao e a equipe fechando. */
   expectVideo: boolean;
   handRaised: boolean;
   /** O apresentador liberou e o aluno aceitou: o botao Microfone aparece. */
@@ -556,12 +623,26 @@ function withoutKey(record: Record<string, string>, key: string): Record<string,
   return next;
 }
 
+/** O aviso de um micError / cameraError do iframe: a permissao negada pelo navegador, ou o aparelho que nao abriu. */
+export function mediaErrorNotice(media: "camera" | "mic", payload: unknown): LiveNotice {
+  const error = field(payload, "error") ?? payload;
+  const code = `${field(error, "type") ?? ""} ${field(error, "name") ?? ""}`;
+  const denied = /permission|denied|notallowed/i.test(code);
+  if (media === "camera") {
+    return denied ? "camera_denied" : "camera_failed";
+  }
+  return denied ? "mic_denied" : "mic_failed";
+}
+
 /**
  * O estado da nossa barra depois de um sinal do iframe. Entrar zera tudo (todo mundo entra mudo e com a camera
  * fechada); a mao e o papel so contam quando sao do proprio participante; a camera ou o microfone que fecham sem o
  * nosso pedido viram o aviso "A equipe fechou a sua câmera" / "A equipe silenciou o seu microfone" (e o microfone some
  * da barra); a liberacao do proprio microfone abre o dialogo Falar / Agora não; quem tem papel de moderador entra na
- * lista "No palco" (nunca a lista de alunos).
+ * lista "No palco" (nunca a lista de alunos); o micError / cameraError vira o aviso na barra e encerra a espera do
+ * nosso pedido. Na tag stable-11248 eles so chegam da troca de aparelho do painel (o set*Device): o Falar e o Ligar
+ * câmera vao pelo toggleAudio / toggleVideo, cuja recusa nao avisa nada, e a sala confere a permissao do navegador
+ * (micAskCheck, cameraRequestUnanswered).
  */
 export function applyLiveSignal(state: LiveSignalState, input: { name: string; ownId: string | null; payload: unknown }): LiveSignalState {
   const { name, ownId, payload } = input;
@@ -576,8 +657,9 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
     case "videoMuteStatusChanged": {
       const on = field(payload, "muted") === false;
       const closedByTeam = !on && state.videoOn && !state.expectVideo;
-      // A camera ligou depois do aviso "camera desligada" (o aluno so respondeu ao pedido do navegador depois do prazo).
-      const notice = closedByTeam ? "camera_closed" : on && state.notice === "camera_blocked" ? null : state.notice;
+      // A camera ligou depois do aviso "camera desligada" ou "nao liberada" (o aluno so respondeu ao pedido do navegador
+      // depois do prazo).
+      const notice = closedByTeam ? "camera_closed" : on && (state.notice === "camera_blocked" || state.notice === "camera_unanswered") ? null : state.notice;
       return { ...state, expectVideo: false, notice, videoOn: on };
     }
     case "audioMuteStatusChanged": {
@@ -588,13 +670,18 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
         audioOn: on,
         expectAudio: false,
         micAllowed: silencedByTeam ? false : state.micAllowed || on,
-        notice: silencedByTeam ? "mic_silenced" : state.notice
+        // O microfone abriu depois do aviso do prazo (o aluno liberou depois, ou o aparelho abriu tarde): o aviso sai.
+        notice: silencedByTeam ? "mic_silenced" : on && (state.notice === "mic_unanswered" || state.notice === "mic_failed") ? null : state.notice
       };
     }
     case "raiseHandUpdated":
       return ownId !== null && id === ownId ? { ...state, handRaised: Boolean(field(payload, "handRaised")) } : state;
     case "moderationParticipantApproved":
       return isOwnMicApproval(payload, ownId) ? { ...state, micPrompt: true, notice: "mic_released" } : state;
+    case "micError":
+      return { ...state, expectAudio: false, notice: mediaErrorNotice("mic", payload) };
+    case "cameraError":
+      return { ...state, expectVideo: false, notice: mediaErrorNotice("camera", payload) };
     case "recordingStatusChanged":
       return { ...state, recording: field(payload, "on") === true };
     case "participantJoined": {
@@ -619,25 +706,50 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
 }
 
 /**
- * Pedimos a camera e o iframe nao respondeu (a equipe desligou as cameras dos alunos no meio da live: a moderacao de
- * video recusa sem aviso): o pedido vence e a barra diz que a camera dos alunos esta desligada.
+ * Pedimos a camera e o iframe nao respondeu no prazo: o pedido vence. `forceMuted` e o isParticipantForceMuted do
+ * proprio aluno para o video (nulo sem resposta) e `permission` a permissao da camera relida no fim do prazo (o
+ * toggleVideo da tag stable-11248 nao avisa cameraError quando o navegador recusa). A moderacao de video segurando o
+ * aluno (a equipe desligou as cameras dos alunos no meio da live: o iframe recusa sem pedir nada ao navegador, e a
+ * permissao fica como estava) diz que a camera dos alunos esta desligada; a permissao negada, que o navegador bloqueou;
+ * o pedido do navegador ainda sem resposta (`prompt`: fechado no X, ou aberto), que a camera nao foi liberada (o aceite
+ * fica, e a camera que abrir depois tira o aviso); com a permissao dada ou sem como saber, a camera dos alunos
+ * desligada (o caso de antes).
  */
-export function cameraRequestUnanswered(state: LiveSignalState): LiveSignalState {
-  return state.expectVideo && !state.videoOn ? { ...state, expectVideo: false, notice: "camera_blocked" } : state;
+export function cameraRequestUnanswered(state: LiveSignalState, permission: string | null = null, forceMuted: boolean | null = null): LiveSignalState {
+  if (!state.expectVideo || state.videoOn) {
+    return state;
+  }
+  const notice: LiveNotice = forceMuted === true ? "camera_blocked" : permission === "denied" ? "camera_denied" : permission === "prompt" ? "camera_unanswered" : "camera_blocked";
+  return { ...state, expectVideo: false, notice };
 }
 
 /**
- * Quanto esperar a camera ligar antes de dizer que a camera dos alunos esta desligada: com o pedido de permissao do
- * navegador ainda por responder (`prompt`, comum no celular), o prazo cobre a resposta (30 s); com a permissao dada
- * (ou sem como saber), 5 s.
+ * Quanto esperar a camera ligar antes de dizer que ela nao ligou: com a permissao ja negada, nada (o navegador recusa
+ * na hora); com o pedido de permissao do navegador ainda por responder (`prompt`, comum no celular), o prazo cobre a
+ * resposta (30 s); com a permissao dada (ou sem como saber), 5 s.
  */
 export function cameraAnswerDelayMs(permission: string | null | undefined): number {
+  if (permission === "denied") {
+    return 0;
+  }
   return permission === "prompt" ? LIVE_ROOM_RULES.cameraPromptMs : LIVE_ROOM_RULES.cameraAnswerMs;
 }
 
 /**
+ * O prazo do pedido da camera venceu com a permissao negada e o aceite do aviso ainda pendente (a camera nao ligou):
+ * o aceite desta abertura sai, como no erro de camera, e o proximo clique abre o aviso de novo.
+ */
+export function cameraConsentEndedByDenial(pending: boolean, permission: string | null): boolean {
+  return pending && permission === "denied";
+}
+
+/**
  * O aceite do aviso de gravacao (D4) vai no PRIMEIRO videoMuteStatusChanged depois dele, chegue quando chegar (o prazo
- * da frase da barra nao mexe nele); um erro de camera (permissao negada, sem dispositivo) tambem o encerra.
+ * da frase da barra nao mexe nele); um erro de camera tambem o encerra, venha pelo errorOccurred de gum ou pelo
+ * cameraError (que nesta tag so chega da troca de aparelho; a recusa do Ligar câmera e a permissao negada no fim do
+ * prazo, cameraConsentEndedByDenial). O micError e do microfone: nao mexe no aceite da camera. Encerrado por erro, a
+ * sala desfaz o aceite (cameraConsentEndedByError): o proximo clique em Câmera abre o aviso de novo e o aceite vai com
+ * a camera que ligar depois.
  */
 export function consentForVideoSignal(pending: boolean, name: string, payload?: unknown): { consented: boolean; pending: boolean } {
   if (!pending) {
@@ -646,12 +758,20 @@ export function consentForVideoSignal(pending: boolean, name: string, payload?: 
   if (name === "videoMuteStatusChanged") {
     return { consented: true, pending: false };
   }
+  if (name === "cameraError") {
+    return { consented: false, pending: false };
+  }
   if (name === "errorOccurred") {
     const error = field(payload, "error") ?? payload;
     const code = `${field(error, "name") ?? ""} ${field(error, "type") ?? ""}`;
     return /gum|camera|video|permission|device/i.test(code) ? { consented: false, pending: false } : { consented: false, pending: true };
   }
   return { consented: false, pending: true };
+}
+
+/** O aceite pendente acabou sem a camera ligar (um erro de camera): a sala desfaz o aceite desta abertura. */
+export function cameraConsentEndedByError(pending: boolean, next: { consented: boolean; pending: boolean }): boolean {
+  return pending && !next.pending && !next.consented;
 }
 
 /**
@@ -705,6 +825,287 @@ export function expectAudioToggle(state: LiveSignalState): LiveSignalState {
   return { ...state, expectAudio: true };
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * O pedido do microfone e a recusa do navegador
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Ligar o microfone (o Falar, ou Microfone com ele desligado) pelo toggleAudio da tag stable-11248: o iframe marca o
+ * microfone "ligado" (base/media audio.muted = false, e o audioMuteStatusChanged { muted: false } sai na hora) ANTES do
+ * getUserMedia, e a falha dele nao avisa nada (vira so TRACK_CREATE_ERROR: nem micError, nem a volta do mudo), seja a
+ * permissao do site, a do sistema (o macOS que bloqueou o navegador), o microfone ocupado ou o fone desplugado. Entao
+ * TODO pedido segura o "ligado" ate a faixa abrir de verdade (isAudioMuted do iframe falso), com ou sem a permissao do
+ * site dada. O pedido e um so, ligado ao iframe em que o toggleAudio foi (`api`), e acaba so com a faixa aberta (o
+ * "ligado" vai), o mudo (micAskStep), a recusa do navegador, outro toque, outro iframe ou a saida; nunca por prazo (o
+ * getUserMedia aberto continua esperando o aluno: quem libera depois abre a faixa sem sinal nenhum). Enquanto ele
+ * durar, o iframe pode estar com o "ligado" sem faixa: o proximo toque abre outro pedido, e o "ligado" que nao vier de
+ * novo como sinal a sala cria quando a faixa abrir.
+ */
+export type MicAsk = {
+  /** O IFrame API em que o toggleAudio foi: outro (a queda, a volta, a sala desmontada) encerra o pedido. */
+  api: unknown;
+  /** Ate quando a sala confere depressa; depois, o aviso (uma vez) e a conferencia devagar. */
+  deadline: number;
+  /** O "ligado" que o iframe mandou e a sala segurou (nulo depois do aviso: a faixa que abrir cria um). */
+  held: unknown;
+  id: number;
+  /** O aviso do fim do prazo ja saiu (micRequestUnanswered): a sala so confere, mais devagar, se a faixa abriu. */
+  noticed: boolean;
+};
+
+/**
+ * O prazo do pedido do microfone: com a permissao do site dada, a faixa abre em centenas de ms (ou o getUserMedia ja
+ * falhou: o sistema, o aparelho ocupado), entao 5 s; sem ela (o pedido do navegador por responder, ou sem como saber),
+ * o tempo de o aluno ler e responder, 30 s. A permissao negada nao espera prazo nenhum (micAskCheck).
+ */
+export function micAnswerDelayMs(permission: string | null): number {
+  return permission === "granted" ? LIVE_ROOM_RULES.cameraAnswerMs : LIVE_ROOM_RULES.cameraPromptMs;
+}
+
+/**
+ * O pedido novo, aberto ANTES do toggleAudio (o "ligado" que o iframe manda logo em seguida ja fica guardado). O
+ * "ligado" ainda guardado do pedido anterior no mesmo iframe passa para este.
+ */
+export function startMicAsk(previous: MicAsk | null, input: { api: unknown; id: number; nowMs: number; permission: string | null }): MicAsk {
+  return {
+    api: input.api,
+    deadline: input.nowMs + micAnswerDelayMs(input.permission),
+    held: previous && previous.api === input.api ? previous.held : null,
+    id: input.id,
+    noticed: false
+  };
+}
+
+/**
+ * Um sinal do iframe durante o pedido do microfone: o "ligado" fica guardado (nem a barra, nem o servidor); o mudo (a
+ * equipe silenciou) encerra o pedido e passa, depois do "ligado" guardado (`release`), na ordem em que vieram.
+ */
+export function micAskStep(current: MicAsk | null, name: string, payload: unknown): { next: MicAsk | null; release: unknown; swallow: boolean } {
+  const muted = field(payload, "muted");
+  if (!current || name !== "audioMuteStatusChanged" || typeof muted !== "boolean") {
+    return { next: current, release: null, swallow: false };
+  }
+  if (!muted) {
+    return { next: { ...current, held: payload }, release: null, swallow: true };
+  }
+  return { next: null, release: current.held, swallow: false };
+}
+
+export type MicAskOutcome =
+  | { action: "denied" }
+  | { action: "gone" }
+  | { action: "late"; next: MicAsk; notice: "mic_failed" | "mic_unanswered" }
+  | { action: "release"; signal: unknown }
+  | { action: "wait"; ms: number };
+
+/**
+ * Cada conferencia do pedido do microfone: `api` e o IFrame API montado agora, `muted` o isAudioMuted do iframe do
+ * pedido (falso so com a faixa aberta, verdadeiro sem faixa; nulo sem resposta), `permission` a permissao do microfone
+ * no navegador. Outro pedido, o mudo, a queda ou outro iframe ja o encerraram: "gone" (a conferencia para, e nada do
+ * pedido vai a barra nem ao servidor). A faixa aberta solta o "ligado" (o guardado, ou um criado quando o iframe ja
+ * estava no "ligado" sem faixa). A permissao negada descarta o "ligado" ("denied": o aviso, e a conferencia para). No
+ * fim do prazo sem a faixa aberta, ou sem resposta do iframe (sem como saber nunca vira "ligado"), "late" uma vez: o
+ * aviso (com a permissao dada, o aparelho que nao abriu; sem ela, o pedido do navegador sem resposta), o "ligado"
+ * guardado descartado (nada na barra nem no servidor) e a conferencia devagar, sem fim por prazo, para soltar o
+ * "ligado" se a faixa abrir depois. "wait" diz quando conferir de novo.
+ */
+export function micAskCheck(current: MicAsk | null, id: number, input: { api: unknown; muted: boolean | null; nowMs: number; permission: string | null }): MicAskOutcome {
+  if (!current || current.id !== id || current.api !== input.api) {
+    return { action: "gone" };
+  }
+  if (input.muted === false) {
+    return { action: "release", signal: current.held ?? { muted: false } };
+  }
+  if (input.permission === "denied") {
+    return { action: "denied" };
+  }
+  if (input.nowMs < current.deadline) {
+    return { action: "wait", ms: LIVE_ROOM_RULES.micCheckMs };
+  }
+  if (current.noticed) {
+    return { action: "wait", ms: LIVE_ROOM_RULES.micLateCheckMs };
+  }
+  return { action: "late", next: { ...current, held: null, noticed: true }, notice: input.permission === "granted" ? "mic_failed" : "mic_unanswered" };
+}
+
+/**
+ * O pedido do microfone venceu sem a faixa abrir: a barra mostra o microfone desligado com o aviso (sem a permissao
+ * dada, que ele nao foi liberado no navegador; com ela, que o aparelho nao abriu: o sistema bloqueou o navegador, outro
+ * programa o ocupa, o fone saiu) e nenhuma linha "ligado" vai ao servidor; o botao Microfone fica para tentar de novo.
+ */
+export function micRequestUnanswered(state: LiveSignalState, notice: "mic_failed" | "mic_unanswered" = "mic_unanswered"): LiveSignalState {
+  return { ...state, audioOn: false, expectAudio: false, notice };
+}
+
+/** O navegador recusou o microfone: o aviso na barra e o microfone desligado (o botao Microfone fica para tentar de novo). */
+export function micRequestDenied(state: LiveSignalState): LiveSignalState {
+  return { ...state, audioOn: false, expectAudio: false, notice: "mic_denied" };
+}
+
+/**
+ * O sinal de mudo da troca que vale no fim do prazo e nosso: a marca expectVideo (ou expectAudio) antes de aplica-lo (a
+ * faixa nova que nao voltou nunca vira "A equipe fechou a sua câmera"). O alto-falante nao mexe em faixa nenhuma.
+ */
+export function expectDeviceSwitch(state: LiveSignalState, kind: DeviceKind): LiveSignalState {
+  if (kind === "audioInput") {
+    return { ...state, expectAudio: true };
+  }
+  return kind === "videoInput" ? { ...state, expectVideo: true } : state;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A troca de camera do painel Configurações
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Os aparelhos cuja troca cria uma faixa nova no iframe (o alto-falante nao). */
+export type DeviceSwitchKind = "audioInput" | "videoInput";
+
+/**
+ * Os aparelhos cuja troca a sala separa: so a camera. Na tag stable-11248 o mudo da camera sai da faixa
+ * (isLocalTrackMuted), e a troca tira a faixa velha e poe a nova: o par muted:true / muted:false chega. O mudo do
+ * microfone sai de base/media audio.muted, e a troca do microfone despacha setAudioMuted com o mesmo valor de antes:
+ * nenhum sinal chega, e uma troca aberta para ele so engoliria a equipe silenciando nos segundos seguintes.
+ */
+export const DEVICE_SWITCH_KINDS: readonly DeviceSwitchKind[] = ["videoInput"];
+
+/**
+ * Uma troca de camera em andamento: o set*Device cria uma faixa nova, que avisa o mudo e volta (videoMuteStatusChanged)
+ * sem ninguem ter ligado ou desligado nada. Esses sinais nao vao para a barra (seriam lidos como a equipe fechando a
+ * camera) nem para o servidor (virariam webinar_camera_toggled falsos, com a camera "ligada" sem o aceite, D4).
+ */
+export type DeviceSwitch = {
+  /** O microfone / a camera estavam ligados antes da troca: o estado que a faixa nova devolve. */
+  before: boolean;
+  /** Ate quando a troca espera (LIVE_ROOM_RULES.deviceSwitchMs, contado de novo na resposta e a cada sinal dela). */
+  deadline: number;
+  /** O ultimo sinal da troca diferente do estado de antes (a faixa nova que nao voltou): vale no fim do prazo. */
+  held: unknown;
+  id: number;
+};
+
+/** O sinal de mudo que a troca daquele aparelho separa. */
+export function deviceSwitchSignalOf(kind: DeviceSwitchKind): "audioMuteStatusChanged" | "videoMuteStatusChanged" {
+  return kind === "audioInput" ? "audioMuteStatusChanged" : "videoMuteStatusChanged";
+}
+
+/**
+ * A troca comeca ANTES do set*Device, com o estado de agora. So a camera abre troca (DEVICE_SWITCH_KINDS): a troca do
+ * microfone nao manda sinal de mudo nesta tag, e o alto-falante nao mexe em faixa.
+ */
+export function startDeviceSwitch(state: Pick<LiveSignalState, "audioOn" | "videoOn">, kind: DeviceKind, id: number, nowMs: number): DeviceSwitch | null {
+  if (!DEVICE_SWITCH_KINDS.includes(kind as DeviceSwitchKind)) {
+    return null;
+  }
+  return { before: kind === "audioInput" ? state.audioOn : state.videoOn, deadline: nowMs + LIVE_ROOM_RULES.deviceSwitchMs, held: null, id };
+}
+
+/** O set*Device respondeu: o prazo conta de novo dali (so a mesma troca; uma troca mais nova nao muda). */
+export function answerDeviceSwitch(current: DeviceSwitch | null, id: number, nowMs: number): DeviceSwitch | null {
+  return current && current.id === id ? { ...current, deadline: nowMs + LIVE_ROOM_RULES.deviceSwitchMs } : current;
+}
+
+/**
+ * Um sinal do iframe durante a troca: o mudo daquele aparelho e da troca (`swallow`: nem a barra, nem o servidor). De
+ * volta ao estado de antes, a troca acaba; diferente, fica guardado (o prazo conta de novo) para valer no fim.
+ */
+export function deviceSwitchStep(current: DeviceSwitch | null, kind: DeviceSwitchKind, name: string, payload: unknown, nowMs: number): { next: DeviceSwitch | null; swallow: boolean } {
+  // O iframe nao conseguiu abrir o aparelho novo: a faixa velha fica e nada mais vem da troca (o erro vai para a barra;
+  // o que vier depois, como a equipe fechando a camera, e da equipe).
+  if (current && name === (kind === "audioInput" ? "micError" : "cameraError")) {
+    return { next: null, swallow: false };
+  }
+  const muted = field(payload, "muted");
+  if (!current || name !== deviceSwitchSignalOf(kind) || typeof muted !== "boolean") {
+    return { next: current, swallow: false };
+  }
+  if (!muted === current.before) {
+    return { next: null, swallow: true };
+  }
+  return { next: { ...current, deadline: nowMs + LIVE_ROOM_RULES.deviceSwitchMs, held: payload }, swallow: true };
+}
+
+/**
+ * O relogio da troca: outra troca ou o proprio aluno (Câmera) ja a encerrou ("gone"); ainda no prazo ("wait", quanto
+ * falta); vencida ("expire", com o sinal guardado, ou nulo quando a faixa nova nao avisou nada).
+ */
+export function deviceSwitchCheck(current: DeviceSwitch | null, id: number, nowMs: number): { action: "expire"; held: unknown } | { action: "gone" } | { action: "wait"; ms: number } {
+  if (!current || current.id !== id) {
+    return { action: "gone" };
+  }
+  if (current.deadline > nowMs) {
+    return { action: "wait", ms: current.deadline - nowMs };
+  }
+  return { action: "expire", held: current.held };
+}
+
+/**
+ * A troca acabou de verdade (o hook viu o aparelho escolhido em uso, o erro dela ou o teto): a janela dela fecha, e o
+ * sinal guardado que nao voltou ao estado de antes vale como nosso (como no fim do prazo). Outra troca: nada muda.
+ */
+export function deviceSwitchSettled(current: DeviceSwitch | null, id: number): { held: unknown; next: DeviceSwitch | null } {
+  return current && current.id === id ? { held: current.held, next: null } : { held: null, next: current };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O toque em Microfone / Câmera durante a troca daquele aparelho
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Na tag stable-11248 o onAudioDeviceChanged / onVideoDeviceChanged le o mudo ANTES do getUserMedia do aparelho novo e,
+ * quando ele abre, troca a faixa e grava o mudo dela (replaceStoredTracks): um toque em Microfone / Câmera no meio da
+ * troca seria desfeito (a camera desligada voltaria ao ar, a ligada viraria "A equipe fechou a sua câmera."). Entao o
+ * toque espera a troca acabar e vai depois, na faixa nova. `inFlight` e o numero da troca em andamento; `queued`, um
+ * toque esperando (um segundo toque desfaz o primeiro: o aluno volta ao que estava).
+ */
+export type SwitchGate = { inFlight: number | null; queued: boolean };
+
+export const OPEN_SWITCH_GATE: SwitchGate = { inFlight: null, queued: false };
+
+/** A troca daquele aparelho comecou (antes do set*Device); um toque que ja esperava continua esperando. */
+export function gateSwitchStarted(gate: SwitchGate, id: number): SwitchGate {
+  return { inFlight: id, queued: gate.queued };
+}
+
+/** O toque em Microfone / Câmera: sem troca em andamento vai na hora; com ela, espera (o segundo desfaz o primeiro). */
+export function gateToggle(gate: SwitchGate): { gate: SwitchGate; send: boolean } {
+  if (gate.inFlight === null) {
+    return { gate, send: true };
+  }
+  return { gate: { ...gate, queued: !gate.queued }, send: false };
+}
+
+/** A troca acabou: o toque que esperava vai agora. Uma troca mais antiga que acaba depois de outra comecar: nada. */
+export function gateSwitchDone(gate: SwitchGate, id: number): { gate: SwitchGate; send: boolean } {
+  if (gate.inFlight !== id) {
+    return { gate, send: false };
+  }
+  return { gate: OPEN_SWITCH_GATE, send: gate.queued };
+}
+
+/**
+ * O toque em Microfone / Câmera que espera a troca daquele aparelho: o botao continua com o estado REAL (o microfone e
+ * a camera seguem no ar ate a troca acabar), com o sinal de espera, e a linha de aviso diz o que acontece quando a troca
+ * terminar. Nulo sem toque esperando (o do microfone so com o botao Microfone na barra).
+ */
+export function pendingTogglePhrase(pending: Record<DeviceSwitchKind, boolean>, state: Pick<LiveSignalState, "audioOn" | "micAllowed" | "videoOn">): string | null {
+  const copy = WEBINAR_COPY.aoVivo;
+  if (pending.videoInput) {
+    return state.videoOn ? copy.trocandoCameraDesliga : copy.trocandoCameraLiga;
+  }
+  if (pending.audioInput && state.micAllowed) {
+    return state.audioOn ? copy.trocandoMicrofoneDesliga : copy.trocandoMicrofoneLiga;
+  }
+  return null;
+}
+
+/**
+ * A nossa barra acabou de sumir (a live encerrada, removido ou banido) e o foco caiu no body (estava num botao dela,
+ * no painel Configurações ou nas reacoes, que sumiram juntos): a sala manda o foco de volta para dentro dela.
+ */
+export function barFocusLost(input: { active: unknown; barShown: boolean; barWasShown: boolean; body: unknown }): boolean {
+  return input.barWasShown && !input.barShown && (input.active === input.body || input.active === null);
+}
+
 /** Levantar / Abaixar a mão: a barra muda na hora; o raiseHandUpdated do iframe confirma. */
 export function toggleHandLocally(state: LiveSignalState): LiveSignalState {
   return { ...state, handRaised: !state.handRaised };
@@ -721,6 +1122,18 @@ export function liveNoticePhrase(notice: LiveNotice | null): string | null {
       return WEBINAR_COPY.aoVivo.microfoneLiberado;
     case "mic_silenced":
       return WEBINAR_COPY.aoVivo.microfoneSilenciado;
+    case "mic_denied":
+      return WEBINAR_COPY.aoVivo.microfoneNegado;
+    case "mic_failed":
+      return WEBINAR_COPY.aoVivo.microfoneFalhou;
+    case "camera_denied":
+      return WEBINAR_COPY.aoVivo.cameraNegada;
+    case "camera_failed":
+      return WEBINAR_COPY.aoVivo.cameraFalhou;
+    case "camera_unanswered":
+      return WEBINAR_COPY.aoVivo.cameraSemResposta;
+    case "mic_unanswered":
+      return WEBINAR_COPY.aoVivo.microfoneSemResposta;
     default:
       return null;
   }

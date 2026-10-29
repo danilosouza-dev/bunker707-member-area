@@ -1723,6 +1723,34 @@ type EstadoDaSalaFalsa = {
   }[];
 };
 
+/** Um aparelho da sala falsa, no formato do getAvailableDevices do IFrame API (o MediaDeviceInfo do navegador). */
+export type DispositivoFalso = { deviceId: string; groupId: string; label: string };
+
+/**
+ * Os aparelhos da sala falsa (o painel Configurações, docs/30 §1.3 e §10.1). `saidaTrocavel` e o
+ * isDeviceChangeAvailable('output') (falso imita o Safari, que nao troca o alto-falante).
+ */
+export type DispositivosDaSalaFalsa = { audioInput: DispositivoFalso[]; audioOutput: DispositivoFalso[]; saidaTrocavel: boolean; videoInput: DispositivoFalso[] };
+
+/** Como o Chrome lista: o "default" repete o aparelho interno (mesmo grupo, rotulo "Padrão - …"); depois os de verdade. */
+export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
+  audioInput: [
+    { deviceId: "default", groupId: "grupo-interno", label: "Padrão - Microfone interno" },
+    { deviceId: "mic-interno", groupId: "grupo-interno", label: "Microfone interno" },
+    { deviceId: "mic-usb", groupId: "grupo-usb", label: "Fone USB" }
+  ],
+  audioOutput: [
+    { deviceId: "default", groupId: "grupo-interno", label: "Padrão - Alto-falantes internos" },
+    { deviceId: "som-interno", groupId: "grupo-interno", label: "Alto-falantes internos" },
+    { deviceId: "som-usb", groupId: "grupo-usb", label: "Fone USB" }
+  ],
+  saidaTrocavel: true,
+  videoInput: [
+    { deviceId: "cam-integrada", groupId: "grupo-camera", label: "Câmera integrada" },
+    { deviceId: "cam-usb", groupId: "grupo-webcam", label: "Webcam USB" }
+  ]
+};
+
 /**
  * O external_api.js de mentira (docs/30 §10.1): define window.JitsiMeetExternalAPI com o construtor
  * (dominio, { roomName, jwt, configOverwrite, interfaceConfigOverwrite, parentNode, width, height }) que guarda o que
@@ -1732,11 +1760,41 @@ type EstadoDaSalaFalsa = {
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
  * proprio participante e hangup responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao
  * ligou, alguem bateu na sala de espera) o teste dispara.
+ *
+ * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
+ * isMultipleAudioInputSupported e setAudioInputDevice / setAudioOutputDevice / setVideoInputDevice(rotulo, id), cada
+ * chamada anotada em `comandos` com o nome do metodo e os argumentos (o esperarComando acha). Como o navegador, a
+ * permissao e por tipo: sem ela, a lista daquele tipo vem com um aparelho sem id e sem rotulo; o microfone libera os
+ * microfones E os alto-falantes (no Chrome e no Firefox o rotulo da saida depende do microfone), a camera so as cameras.
+ * Com `ecoar`, o primeiro toggleAudio libera o microfone e o primeiro toggleVideo a camera; o sinal disparado de
+ * microfone ou camera ligados (a barra do proprio iframe, do apresentador) tambem libera o tipo dele; sem
+ * `disableInitialGUM` no configOverwrite (o apresentador, que entra com startWithVideoMuted), a montagem ja nasce com o
+ * microfone liberado e a camera nao (o iframe so pede o audio na entrada). A troca procura o aparelho pelo ROTULO e so
+ * usa o id sem rotulo (como o "setDevice" do iframe, que pega o PRIMEIRO de rotulo identico; a sala manda so o id). A
+ * resposta sai na hora e a faixa nova entra depois (2 s o microfone, como um fone Bluetooth; 1,5 s a camera, como
+ * uma webcam USB), quando o getCurrentDevices muda e o comando "trocaConcluida" (tipo, id) e anotado; o mudo da faixa
+ * nova e o de quando a troca comecou (um toque no meio seria desfeito, como na tag). Com `ecoar`, trocar a camera ligada avisa o mudo e o volta,
+ * como a faixa nova do Jitsi (a faixa velha sai e a nova entra): a sala nao pode ler isso como "a equipe fechou a sua
+ * câmera" nem mandar esses sinais ao servidor. Trocar o microfone nao avisa nada, como na tag stable-11248 (o mudo do
+ * microfone sai de base/media audio.muted, que a troca grava com o mesmo valor). O isAudioMuted responde o mudo da sala
+ * falsa (o Falar so aparece ligado na barra quando ele diz que a faixa abriu).
+ *
+ * Como o navegador, a permissao dada e da PAGINA (a origem), nao de cada montagem: a volta depois de uma queda ja
+ * encontra a camera e o microfone liberados. Como a tag stable-11248, o getCurrentDevices da camera e o
+ * `cameraDeviceId ?? userSelectedCameraDeviceId`: numa montagem que ainda nao teve faixa de camera, ele diz o escolhido
+ * ja na resposta do setVideoInputDevice (o primeiro so nasce quando uma faixa entra). Com `microfone: "falha"`, o
+ * getUserMedia do microfone nunca abre (o macOS bloqueou o navegador, outro programa o ocupa, ou o pedido do navegador
+ * fica sem resposta): o toggleAudio manda o "ligado" uma vez (base/media), o isAudioMuted continua verdadeiro (sem faixa)
+ * e o toggleAudio seguinte nao manda nada (o iframe ja esta no "ligado"); a permissao do microfone nao muda.
  */
-function scriptDaSalaFalsa(ecoar: boolean) {
+function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa, opcoes: { microfone: "abre" | "falha"; permissaoDoMicrofone: boolean }) {
   return `(() => {
   const ECOAR = ${JSON.stringify(ecoar)};
+  const DISPOSITIVOS = ${JSON.stringify(dispositivos)};
+  const MICROFONE_FALHA = ${JSON.stringify(opcoes.microfone === "falha")};
   const sala = (window.__salaFalsa = window.__salaFalsa || { montagens: [] });
+  // A permissao do navegador, por tipo, da pagina inteira (a origem): vale para todas as montagens.
+  const permitido = (sala.permitido = sala.permitido || { audio: ${JSON.stringify(opcoes.permissaoDoMicrofone)}, video: false });
   const copia = (valor) => JSON.parse(JSON.stringify(valor === undefined ? null : valor));
   const vivas = () => sala.montagens.filter((montagem) => !montagem.descartada);
 
@@ -1750,7 +1808,29 @@ function scriptDaSalaFalsa(ecoar: boolean) {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("data-sala-falsa", "");
     pai.appendChild(iframe);
-    const estado = { audioMudo: true, maoLevantada: false, participantes: [], proprioId: null, videoMudo: true };
+    const configuracao = config.configOverwrite || {};
+    // Sem disableInitialGUM o Jitsi pede ao entrar so o microfone (o apresentador entra com a camera fechada:
+    // startWithVideoMuted): o navegador da a permissao do microfone.
+    if (configuracao.disableInitialGUM !== true) {
+      permitido.audio = true;
+    }
+    const estado = {
+      atuais: {
+        audioInput: DISPOSITIVOS.audioInput[0] || null,
+        audioOutput: DISPOSITIVOS.audioOutput[0] || null,
+        videoInput: DISPOSITIVOS.videoInput[0] || null
+      },
+      audioMudo: true,
+      // O userSelectedCameraDeviceId: gravado na hora do setVideoInputDevice.
+      cameraEscolhida: null,
+      maoLevantada: false,
+      participantes: [],
+      permitido,
+      proprioId: null,
+      // Uma faixa de camera ja entrou nesta montagem (o cameraDeviceId da tag nasce com ela).
+      teveFaixaDeCamera: false,
+      videoMudo: true
+    };
     const montagem = {
       allowDoIframe: null,
       comandos: [],
@@ -1804,9 +1884,18 @@ function scriptDaSalaFalsa(ecoar: boolean) {
       }
       setTimeout(() => {
         if (comando === "toggleVideo") {
+          estado.permitido.video = true;
           estado.videoMudo = !estado.videoMudo;
+          estado.teveFaixaDeCamera = estado.teveFaixaDeCamera || !estado.videoMudo;
           montagem.emitir("videoMuteStatusChanged", { muted: estado.videoMudo });
+        } else if (comando === "toggleAudio" && MICROFONE_FALHA) {
+          // O getUserMedia nunca abre: o "ligado" de base/media sai uma vez; depois, sem faixa, o toque so tenta de novo.
+          if (estado.audioMudo) {
+            estado.audioMudo = false;
+            montagem.emitir("audioMuteStatusChanged", { muted: false });
+          }
         } else if (comando === "toggleAudio") {
+          estado.permitido.audio = true;
           estado.audioMudo = !estado.audioMudo;
           montagem.emitir("audioMuteStatusChanged", { muted: estado.audioMudo });
         } else if (comando === "toggleRaiseHand") {
@@ -1820,8 +1909,88 @@ function scriptDaSalaFalsa(ecoar: boolean) {
     this.getIFrame = () => iframe;
     this.getParticipantsInfo = () => estado.participantes.map((pessoa) => ({ displayName: pessoa.displayName, formattedDisplayName: pessoa.displayName, participantId: pessoa.id }));
     this.getNumberOfParticipants = () => estado.participantes.length + 1;
-    this.isAudioMuted = () => Promise.resolve(estado.audioMudo);
+    // Verdadeiro sem faixa de microfone (MICROFONE_FALHA: o getUserMedia nunca abriu).
+    this.isAudioMuted = () => Promise.resolve(MICROFONE_FALHA || estado.audioMudo);
     this.isVideoMuted = () => Promise.resolve(estado.videoMudo);
+
+    // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
+    const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
+    const TIPOS = { audioInput: "audioinput", audioOutput: "audiooutput", videoInput: "videoinput" };
+    // A permissao de cada lista: microfones e alto-falantes pelo microfone, cameras pela camera.
+    const liberado = (tipo) => (tipo === "videoInput" ? estado.permitido.video : estado.permitido.audio);
+    const comTipo = (tipo, aparelho) => (aparelho ? { deviceId: aparelho.deviceId, groupId: aparelho.groupId, kind: TIPOS[tipo], label: aparelho.label } : undefined);
+    // Sem a permissao o navegador nao da id nem rotulo: um aparelho vazio de cada tipo.
+    const vazio = (tipo) => ({ deviceId: "", groupId: "", kind: TIPOS[tipo], label: "" });
+    this.getAvailableDevices = () => {
+      anotar("getAvailableDevices", []);
+      const listas = {};
+      for (const tipo of Object.keys(TIPOS)) {
+        listas[tipo] = liberado(tipo) ? DISPOSITIVOS[tipo].map((aparelho) => comTipo(tipo, aparelho)) : [vazio(tipo)];
+      }
+      return Promise.resolve(listas);
+    };
+    this.getCurrentDevices = () => {
+      anotar("getCurrentDevices", []);
+      const atuais = {};
+      for (const tipo of Object.keys(TIPOS)) {
+        // A camera, como a tag: cameraDeviceId (so depois de uma faixa) ?? userSelectedCameraDeviceId (na hora da troca).
+        const emUso = tipo === "videoInput" && !estado.teveFaixaDeCamera && estado.cameraEscolhida ? estado.cameraEscolhida : estado.atuais[tipo];
+        atuais[tipo] = liberado(tipo) ? comTipo(tipo, emUso) : undefined;
+      }
+      return Promise.resolve(atuais);
+    };
+    this.isDeviceChangeAvailable = (tipo) => {
+      anotar("isDeviceChangeAvailable", [tipo]);
+      return Promise.resolve(tipo === "output" ? DISPOSITIVOS.saidaTrocavel !== false : true);
+    };
+    this.isMultipleAudioInputSupported = () => {
+      anotar("isMultipleAudioInputSupported", []);
+      return Promise.resolve(true);
+    };
+    // O getUserMedia do aparelho novo: o microfone demora como um fone Bluetooth (mais que os 1,5 s que a sala ja
+    // esperou as cegas) e a camera como uma webcam USB; o alto-falante troca na hora.
+    const ATRASO_DA_FAIXA_NOVA = { audioInput: 2000, audioOutput: 0, videoInput: 1500 };
+    const trocar = (metodo, tipo, rotulo, id) => {
+      anotar(metodo, [rotulo, id]);
+      // Como o "setDevice" do iframe: pelo rotulo quando ele vem (o PRIMEIRO de rotulo identico); o id so sem rotulo.
+      const lista = DISPOSITIVOS[tipo];
+      const achado = rotulo ? lista.find((aparelho) => aparelho.label === rotulo) : lista.find((aparelho) => aparelho.deviceId === id);
+      if (!achado) {
+        return Promise.resolve(false);
+      }
+      // Como a tag: a resposta sai na hora, antes do getUserMedia; o mudo de agora vale para a faixa nova, e o
+      // getCurrentDevices so muda quando ela entra (anotada como "trocaConcluida"). A camera ligada avisa o mudo e o
+      // volta (a velha sai, a nova entra); com ela desligada, nada. O microfone nao avisa nada.
+      const videoEstavaMudo = estado.videoMudo;
+      if (tipo === "videoInput") {
+        estado.cameraEscolhida = achado;
+      }
+      setTimeout(() => {
+        if (montagem.descartada) {
+          return;
+        }
+        estado.atuais[tipo] = achado;
+        if (tipo === "videoInput") {
+          // A faixa da troca entrou (mutada ou nao): o cameraDeviceId nasce com ela.
+          estado.teveFaixaDeCamera = true;
+        }
+        if (ECOAR && tipo === "videoInput") {
+          if (!estado.videoMudo) {
+            estado.videoMudo = true;
+            montagem.emitir("videoMuteStatusChanged", { muted: true });
+          }
+          if (!videoEstavaMudo) {
+            estado.videoMudo = false;
+            montagem.emitir("videoMuteStatusChanged", { muted: false });
+          }
+        }
+        anotar("trocaConcluida", [tipo, achado.deviceId]);
+      }, ATRASO_DA_FAIXA_NOVA[tipo]);
+      return Promise.resolve(true);
+    };
+    this.setAudioInputDevice = (rotulo, id) => trocar("setAudioInputDevice", "audioInput", rotulo, id);
+    this.setAudioOutputDevice = (rotulo, id) => trocar("setAudioOutputDevice", "audioOutput", rotulo, id);
+    this.setVideoInputDevice = (rotulo, id) => trocar("setVideoInputDevice", "videoInput", rotulo, id);
     this.dispose = () => {
       montagem.descartada = true;
       ouvintes.clear();
@@ -1844,9 +2013,13 @@ function scriptDaSalaFalsa(ecoar: boolean) {
     } else if (evento === "participantLeft" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
     } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
+      // A camera ligada pela barra do proprio iframe (o apresentador): o navegador deu a permissao da camera.
       estado.videoMudo = dados.muted;
+      estado.permitido.video = estado.permitido.video || !dados.muted;
+      estado.teveFaixaDeCamera = estado.teveFaixaDeCamera || !dados.muted;
     } else if (evento === "audioMuteStatusChanged" && typeof dados.muted === "boolean") {
       estado.audioMudo = dados.muted;
+      estado.permitido.audio = estado.permitido.audio || !dados.muted;
     }
     atual.emitir(evento, dados);
   };
@@ -1859,10 +2032,41 @@ function scriptDaSalaFalsa(ecoar: boolean) {
  * dominio responde 404 e nada sai da maquina: page.route vence o corte de rede do contexto, como na paginaFalsaDoVimeo)
  * e devolve os comandos para o teste conduzir a sala. Chame antes de abrir a pagina.
  */
-export async function salaFalsaDoJitsi(page: Page, opcoes: { domain?: string; ecoar?: boolean } = {}): Promise<SalaFalsaDoJitsi> {
+export async function salaFalsaDoJitsi(
+  page: Page,
+  opcoes: {
+    dispositivos?: Partial<DispositivosDaSalaFalsa>;
+    domain?: string;
+    ecoar?: boolean;
+    /** "falha": o getUserMedia do microfone nunca abre (o toggleAudio manda o "ligado" uma vez, sem faixa). */
+    microfone?: "abre" | "falha";
+    /**
+     * O navegador.permissions.query({ name: "microphone" }) da pagina, como se o aluno tivesse liberado (ou bloqueado) o
+     * microfone numa live anterior; "granted" tambem lista os microfones e os alto-falantes com nome desde a entrada.
+     */
+    permissaoDoMicrofone?: "denied" | "granted" | "prompt";
+  } = {}
+): Promise<SalaFalsaDoJitsi> {
   const dominio = opcoes.domain ?? ambienteDaSalaAoVivo().WEBINAR_MEET_DOMAIN;
-  const script = scriptDaSalaFalsa(opcoes.ecoar ?? true);
+  const script = scriptDaSalaFalsa(
+    opcoes.ecoar ?? true,
+    { ...DISPOSITIVOS_PADRAO_DA_SALA_FALSA, ...opcoes.dispositivos },
+    { microfone: opcoes.microfone ?? "abre", permissaoDoMicrofone: opcoes.permissaoDoMicrofone === "granted" }
+  );
   let pedidos = 0;
+
+  if (opcoes.permissaoDoMicrofone) {
+    // O iframe pede pela origem da pagina (delegacao de permissao): a sala le a resposta aqui.
+    await page.addInitScript((estado) => {
+      const permissoes = navigator.permissions;
+      if (!permissoes) {
+        return;
+      }
+      const original = permissoes.query.bind(permissoes);
+      permissoes.query = ((descritor: PermissionDescriptor) =>
+        descritor?.name === ("microphone" as PermissionName) ? Promise.resolve({ name: "microphone", onchange: null, state: estado } as unknown as PermissionStatus) : original(descritor)) as Permissions["query"];
+    }, opcoes.permissaoDoMicrofone);
+  }
 
   await page.route(`https://${dominio}/**`, (route) => {
     if (new URL(route.request().url()).pathname === "/external_api.js") {

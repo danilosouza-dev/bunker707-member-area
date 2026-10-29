@@ -27,7 +27,7 @@ import "server-only";
 import { recordAudit } from "@/server/audit/log";
 import { resolveAudienceUserIds } from "./audience";
 import { loadAudienceFacts, type LoadedAudience } from "./audience-facts";
-import { collectMessageCampaignIds, type AudienceDefinition } from "./audience-model";
+import { audienceFactsRequest, type AudienceDefinition } from "./audience-model";
 import { APPROVAL_THRESHOLD } from "./campaign-model";
 import { CommunicationError, describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import { createFactsLoader, type FactsLoader } from "./facts-loader";
@@ -67,10 +67,10 @@ export const EXPIRED_BEFORE_DISPATCH_MESSAGE = "A notificação venceria antes d
 
 /**
  * Fatos dos alunos para o segmento do aviso, com as linhas dos avisos citados por regras "o que fez com
- * a notificacao X" (docs/23 §7).
+ * a notificacao X" (docs/23 §7) e, com a regra "Participação em lives", as lives de cada aluno.
  */
 function loadDispatchFacts(db: CommunicationsDb, now: Date, definition: AudienceDefinition) {
-  return loadAudienceFacts(db, now, { messageCampaignIds: collectMessageCampaignIds(definition) });
+  return loadAudienceFacts(db, now, audienceFactsRequest(definition));
 }
 
 /**
@@ -271,10 +271,11 @@ export async function refreshPopupDeliveries(input: {
   const { campaign, db } = input;
   const now = input.now ?? new Date();
   const audience = audienceOfRow(campaign);
-  // Regras "o que fez com a notificacao X" do segmento: as linhas de X entram nos fatos (docs/23 §7).
-  const messageCampaignIds = collectMessageCampaignIds(audience);
+  // Regras "o que fez com a notificacao X" do segmento: as linhas de X entram nos fatos (docs/23 §7); com a regra
+  // "Participação em lives", as lives de cada aluno (uma leitura por tick no carregador).
+  const request = audienceFactsRequest(audience);
   const loaded =
-    (await input.loaded) ?? (input.facts ? await input.facts.load(messageCampaignIds) : await loadAudienceFacts(db, now, { messageCampaignIds }));
+    (await input.loaded) ?? (input.facts ? await input.facts.load(request.messageCampaignIds, request) : await loadAudienceFacts(db, now, request));
   const matching = new Set(resolveAudienceUserIds(audience, loaded));
   const settings = popupSettingsOfRow(campaign);
   let changes: { added: number; audienceCount: number; removed: number };
@@ -355,7 +356,11 @@ export async function processCommunications(input: {
   const result: ProcessCommunicationsResult = { awaitingApproval: 0, dispatched: 0, failed: 0, pendingMigration: false, refreshed: 0, sending: 0 };
   // Rejeicao guardada no carregador: falha de leitura dos fatos nunca vira rejeicao solta.
   const facts = input.facts ?? createFactsLoader(db, now);
-  const loadedFor = (campaign: CampaignRow) => facts.load(collectMessageCampaignIds(audienceOfRow(campaign)));
+  const loadedFor = (campaign: CampaignRow) => {
+    const request = audienceFactsRequest(audienceOfRow(campaign));
+
+    return facts.load(request.messageCampaignIds, request);
+  };
 
   try {
     const claimed = await claimDueInbox(db, now, INBOX_PER_TICK);

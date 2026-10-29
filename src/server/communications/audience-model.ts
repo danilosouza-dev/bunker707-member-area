@@ -9,10 +9,18 @@
 // v2 (docs/23): tres regras novas. "message" (o que o aluno fez com uma notificacao) vale no segmento,
 // apontando para um aviso enviado, e nos fluxos, apontando para um passo acima; "page_visit" e
 // "access_gained" valem so dentro de um fluxo (so ha visita gravada enquanto um fluxo no ar usa a pagina).
+//
+// Quem pode da live por regras (docs/22 §3, docs/30 §1.6): duas regras novas, no segmento e nos fluxos.
+// "access_recent" (ganhou acesso hoje, no dia de Sao Paulo, ou nas ultimas N horas, pela data de inicio do
+// acesso) e "webinar" (participou de uma live ou garantiu vaga nela). Tipos novos, e nao um op novo numa regra
+// antiga: o app de antes avalia um tipo que nao conhece como false (seguro), e um op desconhecido de
+// "access_age" cairia no "ha mais de". A regra "webinar" depende de um fato lido a parte (a RPC
+// communication_webinar_facts): sem a leitura, nunca combina, nem negada (como "message").
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
 import { isReactionId, POLL_OPTION_ID, REACTION_EMOJI } from "./interactions-model";
+import { saoPauloDayBounds } from "./sao-paulo-day";
 
 export const AUDIENCE_RULE_TYPES = [
   "product",
@@ -26,7 +34,10 @@ export const AUDIENCE_RULE_TYPES = [
   "cohort",
   "message",
   "page_visit",
-  "access_gained"
+  "access_gained",
+  // Quem pode da live por regras (docs/30 §1.6): valem no segmento e nos fluxos.
+  "access_recent",
+  "webinar"
 ] as const;
 export type AudienceRuleType = (typeof AUDIENCE_RULE_TYPES)[number];
 
@@ -49,7 +60,23 @@ export type AudienceRule =
   /** So dentro de um fluxo. */
   | { negate: boolean; page: PageTarget; since: FlowSince; type: "page_visit" }
   /** So dentro de um fluxo. */
-  | { negate: boolean; productIds: string[]; since: FlowSince; type: "access_gained" };
+  | { negate: boolean; productIds: string[]; since: FlowSince; type: "access_gained" }
+  /**
+   * Ganhou acesso recentemente: hoje (dia de Sao Paulo) ou nas ultimas N horas, pela data de inicio do acesso
+   * (entitlements.starts_at). `productIds` vazio = qualquer produto (inclui o acesso a plataforma).
+   */
+  | { negate: boolean; period: AccessRecentPeriod; productIds: string[]; type: "access_recent" }
+  /**
+   * Participacao em lives: "attended" = entrou na sala (ao vivo ou na Live gravada, por qualquer tempo; o replay
+   * nao conta), "registered" = garantiu vaga. `webinarId` null = qualquer live.
+   */
+  | { action: WebinarRuleAction; negate: boolean; type: "webinar"; webinarId: string | null };
+
+/** Periodo da regra "Ganhou acesso recentemente": o dia de Sao Paulo ou as ultimas N horas (1 a 720). */
+export type AccessRecentPeriod = { kind: "today" } | { hours: number; kind: "hours" };
+
+export const WEBINAR_RULE_ACTIONS = ["attended", "registered"] as const;
+export type WebinarRuleAction = (typeof WEBINAR_RULE_ACTIONS)[number];
 
 /** Notificacao de uma regra "message": um passo do fluxo (acima deste) ou um aviso enviado (segmento). */
 export type MessageRef = { kind: "node"; nodeId: string } | { campaignId: string; kind: "campaign" };
@@ -96,12 +123,15 @@ export const AUDIENCE_LIMITS = {
   maxRules: 20,
   maxIds: 50,
   maxDays: 3650,
-  maxCount: 100_000
+  maxCount: 100_000,
+  /** "Ganhou acesso recentemente": ate 30 dias em horas. */
+  maxRecentHours: 720
 } as const;
 
 export const EVERYONE: AudienceDefinition = { kind: "everyone" };
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const PLATFORM_ACCESS_ID = "platform";
 
 export function isAudienceGroup(node: AudienceNode): node is AudienceGroup {
@@ -164,7 +194,14 @@ export type AudienceStudentFacts = {
   messages?: Record<string, MessageFact>;
   /** So no motor dos fluxos: entrada no fluxo (passagem) e ultima visita por chave de pagina, em ms. */
   flow?: { enteredAt: number; pageVisits: Record<string, number> };
+  /**
+   * Lives em que o aluno entrou na sala (`attended`) e em que garantiu vaga (`registered`), por id do webinario
+   * (RPC communication_webinar_facts). Ausente com a leitura feita (context.webinarFactsLoaded) = nenhuma.
+   */
+  webinars?: AudienceWebinarFacts;
 };
+
+export type AudienceWebinarFacts = { attended: readonly string[]; registered: readonly string[] };
 
 export type CommentRankWindow = "7" | "30" | "90" | "all";
 
@@ -181,6 +218,12 @@ export type AudienceContext = {
    * fora daqui nunca combina (negada ou nao): o aviso nao foi lido, entao nao da para saber.
    */
   messageKeys?: ReadonlySet<string>;
+  /**
+   * As lives de cada aluno foram lidas para todos os avaliados (communication_webinar_facts). Sem a leitura (banco
+   * sem a migracao 202610300001, ou quem montou os fatos nao pediu), a regra "webinar" nunca combina, nem negada:
+   * "nunca participou de nenhuma live" nao vira "todos os alunos".
+   */
+  webinarFactsLoaded?: boolean;
 };
 
 function windowKey(days: AudienceWindow): CommentRankWindow {
@@ -369,9 +412,54 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
 
       return rule.negate ? !gained : gained;
     }
+
+    case "access_recent": {
+      const gained = gainedAccessSince(facts, rule.productIds, accessRecentSince(rule.period, now));
+
+      return rule.negate ? !gained : gained;
+    }
+
+    case "webinar": {
+      if (!context.webinarFactsLoaded) {
+        return false;
+      }
+
+      const list = (rule.action === "registered" ? facts.webinars?.registered : facts.webinars?.attended) ?? [];
+      const done = rule.webinarId === null ? list.length > 0 : list.includes(rule.webinarId);
+
+      return rule.negate ? !done : done;
+    }
   }
 
   return false;
+}
+
+/** Inicio do periodo de "Ganhou acesso recentemente", em ms: 00:00 de hoje em Sao Paulo ou agora menos N horas. */
+export function accessRecentSince(period: AccessRecentPeriod, now: number) {
+  return period.kind === "today" ? saoPauloDayBounds(now).start : now - period.hours * HOUR_MS;
+}
+
+/** O acesso aberto vale para o produto: o proprio produto ou a plataforma inteira. */
+function coversProduct(access: AudienceAccessFact, productId: string) {
+  return access.productId === productId || access.productId === PLATFORM_ACCESS_ID;
+}
+
+/**
+ * Ganhou acesso desde `since` (so acessos abertos, pela data de inicio). Com produtos: o acesso a algum deles (ou a
+ * plataforma) comecou no periodo e nenhum outro acesso aberto ja cobria o produto antes (quem ja tinha o produto,
+ * ou a plataforma, nao "ganhou" de novo). Sem produto: algum acesso aberto comecou no periodo e nao estava coberto
+ * antes (o da plataforma conta; um produto novo de quem ja tinha a plataforma, nao).
+ */
+function gainedAccessSince(facts: AudienceStudentFacts, productIds: readonly string[], since: number) {
+  const coveredBefore = (productId: string) => facts.accesses.some((access) => access.startsAt < since && coversProduct(access, productId));
+
+  if (productIds.length === 0) {
+    return facts.accesses.some((access) => access.startsAt >= since && !coveredBefore(access.productId));
+  }
+
+  return productIds.some(
+    (productId) => !coveredBefore(productId) && facts.accesses.some((access) => access.startsAt >= since && coversProduct(access, productId))
+  );
 }
 
 /**
@@ -474,14 +562,19 @@ function pageKeyOfRule(page: PageTarget, context: AudienceContext): string | nul
 /**
  * O que os fatos precisam ter para estas regras (o motor dos fluxos so le progresso, turmas e
  * comentarios quando alguma regra pede): `students` = progresso, ultimo estudo, entrada, ritmo, turma
- * ou comentarios; `comments` = "ranked" quando ha regra "top N" (o ranking e entre todos os alunos).
- * Acessos e notificacoes vem sempre do lote.
+ * ou comentarios; `lessons` = o indice de aulas publicadas, so para progresso, ritmo e turma (a turma
+ * de quem tem a plataforma inteira sai dos conteudos com aula; entrada, ultimo estudo e comentarios nao
+ * usam o indice); `comments` = "ranked" quando ha regra "top N" (o ranking e entre todos os alunos);
+ * `webinars` = alguma regra "webinar" (as lives de cada aluno, pela RPC communication_webinar_facts).
+ * Acessos e notificacoes vem sempre do lote ("Ganhou acesso recentemente" so usa os acessos).
  */
 export function audienceFactNeeds(
   definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
-): { comments: "counts" | "none" | "ranked"; students: boolean } {
+): { comments: "counts" | "none" | "ranked"; lessons: boolean; students: boolean; webinars: boolean } {
   let comments: "counts" | "none" | "ranked" = "none";
+  let lessons = false;
   let students = false;
+  let webinars = false;
   const visit = (node: AudienceNode) => {
     if (isAudienceGroup(node)) {
       node.items.forEach(visit);
@@ -494,11 +587,17 @@ export function audienceFactNeeds(
         comments = node.op === "top" ? "ranked" : comments === "ranked" ? "ranked" : "counts";
         return;
       case "progress":
-      case "last_study":
-      case "sign_in":
       case "pace":
       case "cohort":
         students = true;
+        lessons = true;
+        return;
+      case "last_study":
+      case "sign_in":
+        students = true;
+        return;
+      case "webinar":
+        webinars = true;
         return;
     }
   };
@@ -510,7 +609,7 @@ export function audienceFactNeeds(
     }
   }
 
-  return { comments, students };
+  return { comments, lessons, students, webinars };
 }
 
 function evaluateNode(node: AudienceNode, facts: AudienceStudentFacts, context: AudienceContext): boolean {
@@ -526,6 +625,63 @@ function evaluateNode(node: AudienceNode, facts: AudienceStudentFacts, context: 
 /** O aluno esta no segmento agora? Grupo "todas" vazio = todos; grupo "qualquer" vazio = ninguem. */
 export function evaluateAudience(definition: AudienceDefinition, facts: AudienceStudentFacts, context: AudienceContext) {
   return definition.kind === "everyone" ? true : evaluateNode(definition.root, facts, context);
+}
+
+/** O que a ancora le do aluno: os acessos abertos agora e as turmas de agora (a turma nunca e relaxada). */
+export type AnchoredAudienceFacts = { accesses: readonly AudienceAccessFact[]; cohortIds: readonly string[] };
+
+/**
+ * A ancora do "Quem pode" da live (docs/30 §1.1, D41): quem garantiu vaga ou ja entrou na sala continua no segmento
+ * mesmo se sair dele pelo que vence com o tempo ou muda com o que o aluno faz, mas o produto pago e a turma sao sempre
+ * conferidos de novo. Sobre os acessos abertos e as turmas de agora:
+ * - cada regra que exige ter um produto (Produto "tem", "Ganhou acesso recentemente" nao negada, Tempo de acesso,
+ *   Acesso terminando e Progresso) vira "tem um acesso aberto a um destes produtos, ou a plataforma inteira"
+ *   ("qualquer produto", e o Progresso geral, = algum acesso aberto);
+ * - a Turma vale como agora (quem foi tirado da turma sai);
+ * - o resto vale como verdadeiro: o que vence com o tempo ou com a atividade (entrada, ultimo estudo, ritmo,
+ *   comentarios, lives, o que fez com uma notificacao, "Ganhou acesso recentemente" negada) e "nao tem o produto"
+ *   (comprar o produto durante a live nao tira ninguem da sala).
+ * Os grupos "todas" e "qualquer" continuam valendo. Nunca da menos que evaluateAudience sobre os mesmos acessos e
+ * turmas: quem esta no segmento agora tambem passa aqui (e quem perdeu o produto ou a turma que o segmento pede, nao).
+ */
+export function evaluateAnchoredAudience(definition: AudienceDefinition, facts: AnchoredAudienceFacts): boolean {
+  if (definition.kind !== "rules") {
+    return true;
+  }
+
+  const { accesses, cohortIds } = facts;
+  const anyAccess = accesses.length > 0;
+  const hasOneOf = (productIds: readonly string[]) =>
+    accesses.some((access) => access.productId === PLATFORM_ACCESS_ID || productIds.includes(access.productId));
+  const visit = (node: AudienceNode): boolean => {
+    if (isAudienceGroup(node)) {
+      return node.match === "all" ? node.items.every(visit) : node.items.some(visit);
+    }
+
+    switch (node.type) {
+      case "product":
+        return node.op === "has" ? hasOneOf(node.productIds) : true;
+      case "access_recent":
+        return node.negate ? true : node.productIds.length === 0 ? anyAccess : hasOneOf(node.productIds);
+      case "access_age":
+      case "access_ending":
+      case "progress":
+        return node.productId ? hasOneOf([node.productId]) : anyAccess;
+      case "cohort":
+        return cohortIds.some((id) => node.cohortIds.includes(id));
+      default:
+        return true;
+    }
+  };
+
+  return visit(definition.root);
+}
+
+/** O segmento tem regra de Turma (a ancora le as turmas de agora: evaluateAnchoredAudience). */
+export function audienceHasCohortRule(definition: AudienceDefinition | null | undefined): boolean {
+  const visit = (node: AudienceNode): boolean => (isAudienceGroup(node) ? node.items.some(visit) : node.type === "cohort");
+
+  return definition?.kind === "rules" ? visit(definition.root) : false;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -562,6 +718,16 @@ export function collectMessageCampaignIds(
   }
 
   return Array.from(ids).sort();
+}
+
+/**
+ * O que pedir ao carregador de fatos (loadAudienceFacts, FactsLoader.load) para avaliar estas regras: os avisos
+ * citados por "o que fez com a notificacao X" e, so com a regra "Participação em lives", as lives de cada aluno.
+ */
+export function audienceFactsRequest(
+  definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
+): { messageCampaignIds: string[]; webinars: boolean } {
+  return { messageCampaignIds: collectMessageCampaignIds(definitions), webinars: audienceFactNeeds(definitions).webinars };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -681,6 +847,36 @@ function normalizeV2Rule(rule: Extract<AudienceRule, { type: "access_gained" | "
   return null;
 }
 
+/** Periodo de "Ganhou acesso recentemente": hoje ou horas inteiras de 1 a 720; outro formato -> null (a regra sai). */
+function normalizeAccessRecentPeriod(period: AccessRecentPeriod): AccessRecentPeriod | null {
+  if (period?.kind === "today") {
+    return { kind: "today" };
+  }
+
+  if (period?.kind === "hours" && typeof period.hours === "number") {
+    return { hours: clampInteger(period.hours, 1, AUDIENCE_LIMITS.maxRecentHours), kind: "hours" };
+  }
+
+  return null;
+}
+
+/** As duas regras de "Quem pode da live por regras"; periodo ou acao desconhecida -> null (a regra sai). */
+function normalizeLiveAudienceRule(rule: Extract<AudienceRule, { type: "access_recent" | "webinar" }>): AudienceRule | null {
+  const negate = rule.negate === true;
+
+  if (rule.type === "access_recent") {
+    const period = normalizeAccessRecentPeriod(rule.period);
+
+    return period ? { negate, period, productIds: uniqueSorted(Array.isArray(rule.productIds) ? rule.productIds : []), type: "access_recent" } : null;
+  }
+
+  if (!WEBINAR_RULE_ACTIONS.includes(rule.action)) {
+    return null;
+  }
+
+  return { action: rule.action, negate, type: "webinar", webinarId: typeof rule.webinarId === "string" && rule.webinarId.trim() ? rule.webinarId.trim() : null };
+}
+
 function normalizeRule(rule: AudienceRule): AudienceRule | null {
   const days = (value: number) => clampInteger(value, 1, AUDIENCE_LIMITS.maxDays);
 
@@ -712,6 +908,9 @@ function normalizeRule(rule: AudienceRule): AudienceRule | null {
     case "page_visit":
     case "access_gained":
       return normalizeV2Rule(rule);
+    case "access_recent":
+    case "webinar":
+      return normalizeLiveAudienceRule(rule);
   }
 
   return rule;
@@ -799,6 +998,8 @@ export type AudienceNames = {
   /** v3a: chave da notificacao -> id da opcao da enquete -> texto da opcao. */
   pollOptions?: Record<string, Record<string, string>>;
   products: Record<string, string>;
+  /** Id do webinario -> titulo (regra "Participação em lives"). */
+  webinars?: Record<string, string>;
 };
 
 const MISSING_PRODUCT = "um produto removido";
@@ -915,9 +1116,55 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
 
       return `${rule.negate ? "não " : ""}ganharam acesso a ${list || MISSING_PRODUCT} ${sincePhrase(names, rule.since)}`;
     }
+    case "access_recent": {
+      const list = joinWithOr(
+        rule.productIds.map((id) => productName(names, id)),
+        (count) => `mais ${count} ${count === 1 ? "produto" : "produtos"}`
+      );
+
+      return `${rule.negate ? "não " : ""}ganharam acesso a ${list || "qualquer produto"} ${accessRecentPeriodPhrase(rule.period)}`;
+    }
+    case "webinar":
+      return webinarRulePhrase(rule, names);
   }
 
   return "";
+}
+
+/** "hoje", "na última hora" ou "nas últimas 24 horas". */
+export function accessRecentPeriodPhrase(period: AccessRecentPeriod) {
+  if (period.kind === "today") {
+    return "hoje";
+  }
+
+  return period.hours === 1 ? "na última hora" : `nas últimas ${period.hours} horas`;
+}
+
+const MISSING_WEBINAR = "uma live removida";
+
+/**
+ * "participaram de alguma live" / "nunca participaram de nenhuma live" / "participaram da live “Y”" /
+ * "garantiram vaga na live “Y”" (negada: "não ..."). Live sem titulo nos nomes: "uma live removida".
+ */
+function webinarRulePhrase(rule: Extract<AudienceRule, { type: "webinar" }>, names: AudienceNames) {
+  const attended = rule.action === "attended";
+
+  if (rule.webinarId === null) {
+    if (rule.negate) {
+      return attended ? "nunca participaram de nenhuma live" : "nunca garantiram vaga em nenhuma live";
+    }
+
+    return attended ? "participaram de alguma live" : "garantiram vaga em alguma live";
+  }
+
+  const title = names.webinars?.[rule.webinarId]?.trim();
+  const no = rule.negate ? "não " : "";
+
+  if (attended) {
+    return `${no}participaram ${title ? `da live “${title}”` : `de ${MISSING_WEBINAR}`}`;
+  }
+
+  return `${no}garantiram vaga ${title ? `na live “${title}”` : `em ${MISSING_WEBINAR}`}`;
 }
 
 const MISSING_MESSAGE = "uma notificação removida";

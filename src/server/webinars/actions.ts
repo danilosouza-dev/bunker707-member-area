@@ -26,7 +26,7 @@ import { ensureSessionRoomName } from "./live-store";
 import { WEBINAR_LIMITS, toTime, webinarSituation, webinarSlug, type WebinarDraft, type WebinarSituation, type WebinarStatus } from "./model";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
-import { sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
+import { accessModeOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import {
   WEBINAR_MESSAGES,
   cancelWebinarSchema,
@@ -315,7 +315,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
         actorId: user.id,
         entityId: created.id,
         entityType: "webinar",
-        metadata: { access_mode: created.access_mode, created: true, kind: created.kind, presenters: draft.presenters.length, sessions_created: sessions.created }
+        metadata: { access_mode: accessModeOfRow(created), created: true, kind: created.kind, presenters: draft.presenters.length, sessions_created: sessions.created }
       });
       revalidateWebinars();
 
@@ -378,7 +378,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
       entityId: saved.id,
       entityType: "webinar",
       metadata: {
-        access_mode: saved.access_mode,
+        access_mode: accessModeOfRow(saved),
         created: false,
         kind: saved.kind,
         presenters: draft.presenters.length,
@@ -476,7 +476,7 @@ export async function publishWebinar(input: { expectedUpdatedAt?: string; id: st
       entityId: row.id,
       entityType: "webinar",
       metadata: {
-        access_mode: saved.access_mode,
+        access_mode: accessModeOfRow(saved),
         capacity: saved.capacity,
         kind: saved.kind,
         registration_required: saved.registration_required,
