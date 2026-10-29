@@ -461,12 +461,12 @@ test("sem sessao na janela: uma consulta so, nada no log e o job nao grava em jo
   assert.equal(abortado.queries.length, 0);
 });
 
-test("banco sem a migracao 202610280001: devolve zeros, registra e o job termina sem erro (o tick continua verde)", async () => {
+test("banco sem a migracao 202610290001: devolve zeros, registra e o job termina sem erro (o tick continua verde)", async () => {
   const db = scriptedDb(() => ({ data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_sessions' in the schema cache" } }));
   const [result, infos] = await silenciando("info", () => processWebinarReminders({ db, now: new Date(AGORA) }));
 
   assert.deepEqual(result, { ...ZEROS, pendingMigration: true });
-  assert.ok(infos.some((linha) => linha.includes("migracao 202610280001 pendente")), infos.join("\n"));
+  assert.ok(infos.some((linha) => linha.includes("migracao 202610290001 pendente")), infos.join("\n"));
   await silenciando("info", () => assert.doesNotReject(() => webinarRemindersJob.run(contexto(db))));
 
   const semRelacao = scriptedDb(() => ({ data: null, error: { code: "42P01", message: 'relation "public.webinar_sessions" does not exist' } }));

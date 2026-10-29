@@ -44,7 +44,8 @@ export const WEBINAR_MESSAGES = {
   titleTooLong: "O título pode ter até 120 caracteres.",
   tooManyCoHosts: "No máximo 5 co-apresentadores.",
   tooManyPresenters: "No máximo 25 pessoas na sala.",
-  replayDays: "De 0 a 60 dias."
+  replayDays: "De 0 a 60 dias.",
+  lateJoin: "A entrada atrasada vai de 0 a 600 minutos."
 } as const;
 
 const isoSchema = z.iso.datetime({ error: WEBINAR_MESSAGES.dateTime, offset: true });
@@ -121,7 +122,11 @@ export const presenterSchema: z.ZodType<WebinarPresenter> = z.object({
   userId: z.uuid({ error: "Escolha alguém da área." })
 });
 
-const sessionInputSchema = z.object({ scheduledAt: isoSchema });
+const sessionInputSchema = z.object({
+  /** Entrada atrasada (fase 2): ate quantos minutos depois do comeco o aluno ainda entra; nulo = sempre. */
+  lateJoinMinutes: z.number({ error: WEBINAR_MESSAGES.lateJoin }).int(WEBINAR_MESSAGES.lateJoin).min(0, WEBINAR_MESSAGES.lateJoin).max(WEBINAR_LIMITS.lateJoinMax, WEBINAR_MESSAGES.lateJoin).nullable().optional(),
+  scheduledAt: isoSchema
+});
 
 export const webinarDraftObjectSchema = z.object({
   accessMode: z.enum(ACCESS_MODES, { error: "Escolha quem pode ver o webinário." }),

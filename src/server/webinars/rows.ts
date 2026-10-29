@@ -19,6 +19,7 @@ import {
   type AccessMode,
   type ChatMode,
   type DisplayNameMode,
+  type PresenceSummary,
   type Quality,
   type RegistrationStatus,
   type ReminderSettings,
@@ -79,7 +80,7 @@ export type WebinarRow = {
 };
 
 export const SESSION_COLUMNS =
-  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, created_at, updated_at";
+  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, show_live_badge, simulation_decided_by, simulation_decided_at, simulation_ack_text, presence_curve, script_fired_at, pinned_message_id, created_at, updated_at";
 
 export type SessionRow = {
   chat_mode: string;
@@ -89,9 +90,16 @@ export type SessionRow = {
   id: string;
   kind: string;
   late_join_minutes: number | null;
+  pinned_message_id: string | null;
+  presence_curve: unknown;
   recording_anchor_at: string | null;
   recording_id: string | null;
   scheduled_at: string;
+  script_fired_at: string | null;
+  show_live_badge: boolean;
+  simulation_ack_text: string | null;
+  simulation_decided_at: string | null;
+  simulation_decided_by: string | null;
   source_session_id: string | null;
   started_at: string | null;
   status: string;
@@ -133,7 +141,7 @@ export type RegistrationRow = {
 };
 
 export const RECORDING_COLUMNS =
-  "id, webinar_id, session_id, provider, bunny_library_id, bunny_video_id, embed_url, duration_seconds, status, source, file_name, anchor_offset_ms, size_bytes, sha256, error_message, created_at, updated_at";
+  "id, webinar_id, session_id, provider, bunny_library_id, bunny_video_id, embed_url, duration_seconds, status, source, file_name, anchor_offset_ms, size_bytes, sha256, error_message, purge_due_at, created_at, updated_at";
 
 export type RecordingRow = {
   anchor_offset_ms: number;
@@ -146,6 +154,7 @@ export type RecordingRow = {
   file_name: string | null;
   id: string;
   provider: string;
+  purge_due_at: string | null;
   session_id: string | null;
   sha256: string | null;
   size_bytes: number | null;
@@ -299,15 +308,54 @@ export function sessionFromRow(row: SessionRow): WebinarSession {
     id: row.id,
     kind: oneOf<SessionKind>(SESSION_KINDS, row.kind, "live"),
     lateJoinMinutes: row.late_join_minutes,
+    pinnedMessageId: row.pinned_message_id ?? null,
+    presenceCurve: presenceSummaryOf(row.presence_curve),
     recordingAnchorAt: row.recording_anchor_at,
     recordingId: row.recording_id,
     scheduledAt: row.scheduled_at,
+    scriptFiredAt: row.script_fired_at ?? null,
+    showLiveBadge: row.show_live_badge === true,
+    simulationAckText: row.simulation_ack_text ?? null,
+    simulationDecidedAt: row.simulation_decided_at ?? null,
+    simulationDecidedBy: row.simulation_decided_by ?? null,
     sourceSessionId: row.source_session_id,
     startedAt: row.started_at,
     status: oneOf<SessionStatus>(SESSION_STATUSES, row.status, "scheduled"),
     updatedAt: row.updated_at,
     webinarId: row.webinar_id
   };
+}
+
+/** presence_curve congelada pela webinar_close_session (202610290001); nulo enquanto a sessao nao encerrou. */
+export function presenceSummaryOf(value: unknown): PresenceSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  const buckets = Array.isArray(source.buckets)
+    ? source.buckets
+        .map((entry) => (entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+        .map((entry) => ({ b: toCount(entry.b), n: toCount(entry.n) }))
+    : [];
+  const peak = source.peak && typeof source.peak === "object" ? (source.peak as Record<string, unknown>) : null;
+  return {
+    avgPresent: typeof source.avgPresent === "number" ? source.avgPresent : Number(source.avgPresent ?? 0) || 0,
+    bucketSeconds: toCount(source.bucketSeconds) || 30,
+    buckets,
+    durationMs: toCount(source.durationMs),
+    frozenAt: typeof source.frozenAt === "string" ? source.frozenAt : null,
+    peak: peak ? { b: toCount(peak.b), n: toCount(peak.n) } : null,
+    reachedEnd: toCount(source.reachedEnd),
+    unique: toCount(source.unique),
+    watchAvg: toCount(source.watchAvg),
+    watchMax: toCount(source.watchMax)
+  };
+}
+
+function toCount(value: unknown): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
 }
 
 export function registrationFromRow(row: RegistrationRow): WebinarRegistration {

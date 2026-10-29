@@ -136,8 +136,8 @@ export type WebinarDraft = {
   roomSettings: RoomSettings;
   /** Live ao vivo: a hora marcada (ISO). Live gravada: nulo. */
   scheduledAt: string | null;
-  /** Live gravada: as horas marcadas (ISO), uma sessao cada. */
-  sessions: { scheduledAt: string }[];
+  /** Live gravada: as horas marcadas (ISO), uma sessao cada; `lateJoinMinutes` = Entrada atrasada (fase 2). */
+  sessions: { lateJoinMinutes?: number | null; scheduledAt: string }[];
   showBanner: boolean;
   showOnHome: boolean;
   showRegisteredCount: boolean;
@@ -165,9 +165,20 @@ export type WebinarSession = {
   id: string;
   kind: SessionKind;
   lateJoinMinutes: number | null;
+  /** Fase 2: a mensagem fixada pela equipe (webinar_chat_messages.id). */
+  pinnedMessageId: string | null;
+  /** Fase 2: a curva de presenca congelada no fim (webinar_close_session); nulo enquanto a sessao roda. */
+  presenceCurve: PresenceSummary | null;
   recordingAnchorAt: string | null;
   recordingId: string | null;
   scheduledAt: string;
+  /** Fase 2: quando o roteiro entrou na sessao (webinar_open_session). */
+  scriptFiredAt: string | null;
+  /** Fase 2 (D10): o selo "Ao vivo" na sessao gravada, com quem decidiu e a frase marcada. */
+  showLiveBadge: boolean;
+  simulationAckText: string | null;
+  simulationDecidedAt: string | null;
+  simulationDecidedBy: string | null;
   sourceSessionId: string | null;
   startedAt: string | null;
   status: SessionStatus;
@@ -441,3 +452,268 @@ export function registrationEventMetadata(input: { campaignId?: string | null; s
     webinar_id: input.webinarId
   };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 2: Live gravada (docs/30 §1.6, §4.2 a §4.6; migracao 202610290001). Listas, limites e tipos do chat por
+ * offset, do roteiro, das enquetes, das perguntas, da presenca e do relatorio. As contas ficam em room-model.ts,
+ * script-model.ts e report-model.ts.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const CHAT_ROLES = ["host", "team", "student", "guest", "ai"] as const;
+export type ChatRole = (typeof CHAT_ROLES)[number];
+
+export const CHAT_SOURCES = ["original", "audience", "team", "scripted", "ai"] as const;
+export type ChatSource = (typeof CHAT_SOURCES)[number];
+
+export const MESSAGE_KINDS = ["message", "question", "answer", "system"] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+export const DELETE_REASONS = ["student", "team", "consent_revoked"] as const;
+export type DeleteReason = (typeof DELETE_REASONS)[number];
+
+/** As seis reacoes da barra do aluno (docs/30 §1.3). */
+export const REACTIONS = ["like", "love", "clap", "fire", "laugh", "wow"] as const;
+export type Reaction = (typeof REACTIONS)[number];
+
+export const POLL_KINDS = ["single", "multiple", "survey"] as const;
+export type PollKind = (typeof POLL_KINDS)[number];
+
+export const POLL_STATUSES = ["draft", "open", "closed"] as const;
+export type PollStatus = (typeof POLL_STATUSES)[number];
+
+export const QUESTION_STATUSES = ["open", "answered", "dismissed"] as const;
+export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
+
+export const PRESENCE_STATES = ["playing", "paused", "buffering", "hidden"] as const;
+export type PresenceState = (typeof PRESENCE_STATES)[number];
+
+export const SCRIPT_TRIGGERS = ["at_offset", "on_phrase", "manual"] as const;
+export type ScriptTrigger = (typeof SCRIPT_TRIGGERS)[number];
+
+export const SCRIPT_STATUSES = ["draft", "ready", "unresolved", "disabled"] as const;
+export type ScriptStatus = (typeof SCRIPT_STATUSES)[number];
+
+export const PERSONA_ROLES = ["student", "team"] as const;
+export type PersonaRole = (typeof PERSONA_ROLES)[number];
+
+export const TRANSCRIPT_FORMATS = ["json3", "srt", "vtt", "txt"] as const;
+export type WebinarTranscriptFormat = (typeof TRANSCRIPT_FORMATS)[number];
+
+/** A versao do texto de aceite do chat (D10); muda quando o texto mudar, e o aluno aceita de novo. */
+export const CHAT_CONSENT_VERSION = 1;
+
+/** Limites do chat, do roteiro, das enquetes e das perguntas (os checks da 202610290001). */
+export const CHAT_LIMITS = {
+  body: 1000,
+  question: 500,
+  answer: 1000,
+  displayName: 80,
+  nicknameMin: 2,
+  nicknameMax: 40,
+  personaName: 60,
+  phraseMin: 2,
+  phraseMax: 300,
+  phraseDelayMinMs: -60_000,
+  phraseDelayMaxMs: 600_000,
+  offsetMinMs: -86_400_000,
+  offsetMaxMs: 172_800_000,
+  scriptItemsMax: 5000,
+  scriptCsvBytes: 1_048_576,
+  pollQuestion: 300,
+  pollOption: 120,
+  pollOptionsMax: 20,
+  pollOptionsMin: 2,
+  transcriptBytes: 2_000_000,
+  simulationAck: 600,
+  chatPageMax: 200
+} as const;
+
+/** Os ritmos da sala (docs/30 §5.1, §6.6, M1 a M4) e os pesos dos "mais quentes" (M3); o SQL repete os mesmos numeros. */
+export const ROOM_RULES = {
+  heartbeatSeconds: 15,
+  bucketSeconds: 30,
+  /** Sem sinal por 3 baldes (90 s) a pessoa saiu. */
+  leaveAfterBuckets: 3,
+  /** A janela do chat baixada de cada vez e de quanto em quanto tempo (gravada e replay). */
+  chatWindowSeconds: 120,
+  chatRefreshSeconds: 90,
+  /** Mensagens novas da turma de hoje: consulta de 5 s. */
+  chatPollSeconds: 5,
+  /** O player volta para o alvo quando atrasa ou adianta mais que isto. */
+  resyncToleranceSeconds: 2,
+  clockResyncSeconds: 60,
+  chatBurst: { max: 5, windowMs: 60_000 },
+  reactions: { perSecond: 1, perMinute: 20 },
+  questionsPerMinute: 2,
+  /** "Ate o fim" = chegou a 95 % dos baldes (M2). */
+  reachedEndRatio: 0.95,
+  hotWeights: { message: 1, question: 2, reaction: 0.5, poll: 1, tenMinutes: 1, messageCap: 50 },
+  dropPoints: 5,
+  topPeople: 10
+} as const;
+
+export type ChatMessage = {
+  approved: boolean;
+  authorUserId: string | null;
+  body: string;
+  createdAt: string;
+  displayName: string;
+  id: string;
+  kind: MessageKind;
+  master: boolean;
+  offsetMs: number;
+  pinnedAt: string | null;
+  replyToId: string | null;
+  role: ChatRole;
+  scriptItemId: string | null;
+  sessionId: string;
+  source: ChatSource;
+  webinarId: string;
+};
+
+/** O que o aluno recebe: a origem `scripted` vira o papel da persona (docs/30 §5.1); `ai` continua `ai`. */
+export type StudentChatMessage = {
+  body: string;
+  displayName: string;
+  id: string;
+  kind: MessageKind;
+  mine: boolean;
+  offsetMs: number;
+  pending: boolean;
+  pinned: boolean;
+  replyToId: string | null;
+  role: ChatRole;
+};
+
+export type ScriptItem = {
+  body: string;
+  createdAt: string;
+  generatedByAi: boolean;
+  id: string;
+  kind: "message" | "question";
+  offsetMs: number | null;
+  personaName: string;
+  personaRole: PersonaRole;
+  phrase: string | null;
+  phraseDelayMs: number;
+  position: number;
+  resolvedOffsetMs: number | null;
+  resolvedTranscriptId: string | null;
+  status: ScriptStatus;
+  triggerKind: ScriptTrigger;
+  updatedAt: string;
+  webinarId: string;
+};
+
+/** O item como a equipe edita (sem ids do banco alem do proprio, que e opcional). */
+export type ScriptItemDraft = {
+  body: string;
+  id?: string | null;
+  kind: "message" | "question";
+  offsetMs: number | null;
+  personaName: string;
+  personaRole: PersonaRole;
+  phrase: string | null;
+  phraseDelayMs: number;
+  status: ScriptStatus;
+  triggerKind: ScriptTrigger;
+};
+
+export type PollOption = { id: string; label: string; position: number };
+
+export type Poll = {
+  anonymous: boolean;
+  closedAt: string | null;
+  id: string;
+  kind: PollKind;
+  openOffsetMs: number | null;
+  openedAt: string | null;
+  options: PollOption[];
+  position: number;
+  question: string;
+  resultsSharedAt: string | null;
+  sessionId: string | null;
+  status: PollStatus;
+  templatePollId: string | null;
+  webinarId: string;
+};
+
+export type PollDraft = { anonymous: boolean; id?: string | null; kind: PollKind; options: { id?: string | null; label: string }[]; question: string };
+
+export type PollAnswer = { createdAt: string; id: string; offsetMs: number; optionIds: string[]; pollId: string; sessionId: string; userId: string };
+
+export type WebinarQuestion = {
+  anonymous: boolean;
+  answerText: string | null;
+  answeredAt: string | null;
+  answeredBy: string | null;
+  answeredLive: boolean;
+  body: string;
+  createdAt: string;
+  displayName: string;
+  id: string;
+  messageId: string | null;
+  offsetMs: number;
+  sessionId: string;
+  status: QuestionStatus;
+  upvotes: number;
+  userId: string;
+};
+
+export type ChatConsent = {
+  consentVersion: number;
+  consentedAt: string;
+  displayMode: DisplayNameMode;
+  nickname: string | null;
+  revokedAt: string | null;
+  userId: string;
+};
+
+export type PresenceSample = {
+  bucket: number;
+  firstAt: string;
+  lastAt: string;
+  offsetSeconds: number;
+  samples: number;
+  sessionId: string;
+  state: PresenceState;
+  userId: string;
+};
+
+export type Attendance = {
+  entries: number;
+  firstAt: string;
+  lastAt: string;
+  maxBucket: number;
+  reachedEnd: boolean;
+  seconds: number;
+  sessionId: string;
+  userId: string;
+};
+
+/** O que webinar_close_session congela em webinar_sessions.presence_curve. */
+export type PresenceSummary = {
+  avgPresent: number;
+  bucketSeconds: number;
+  buckets: { b: number; n: number }[];
+  durationMs: number;
+  frozenAt: string | null;
+  peak: { b: number; n: number } | null;
+  reachedEnd: number;
+  unique: number;
+  watchAvg: number;
+  watchMax: number;
+};
+
+export type RecordingTranscript = {
+  createdAt: string;
+  cues: { endSeconds: number | null; startSeconds: number; text: string }[];
+  id: string;
+  language: string;
+  recordingId: string;
+  sourceFormat: WebinarTranscriptFormat;
+};
+
+/** A fase da sessao gravada pelo relogio do servidor (docs/30 §1.6, §6.6). */
+export const SIMULATED_PHASES = ["waiting", "live", "ended"] as const;
+export type SimulatedPhase = (typeof SIMULATED_PHASES)[number];
