@@ -12,7 +12,7 @@ import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste, SENHA_DE_TESTE, u
 // sessao depois da duracao do video (webinar_attendance resumida, presence_curve congelada) e cria a sessao replay,
 // uma so; webinar_report e webinar_attendees conferidos contra numeros calculados a mao aqui; a pagina do relatorio e
 // o CSV; as RPCs recusam o aluno logado (42501); a rota do CSV recusa o analista (403) e serve o produtor com a
-// auditoria webinar_export. Fase 4 (202610290005 e 202610290006): a Oferta com a janela, os cliques e a compra ligada
+// auditoria webinar_export. Fase 4 (202610300003 e 202610300004): a Oferta com a janela, os cliques e a compra ligada
 // pelo webhook com o valor (offer / offer_revenue), as Respostas do Assistente (ai) e o resumo da Simulacao (sim_*)
 // na RPC com dados reais, sem mexer em nenhum numero real; e os CSVs com os nomes do Zoom pelas rotas da sessao e do
 // painel. O teste anda com a hora marcada (como o teste dos lembretes) em vez de esperar.

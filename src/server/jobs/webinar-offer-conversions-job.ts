@@ -5,7 +5,7 @@ import "server-only";
 // RPC webinar_offer_conversions (runOfferConversions em src/server/webinars/offer-store.ts), em lote de
 // OFFER_LIMITS.conversionsPerRun, com a hora do tick (o mesmo minuto entregue duas vezes nao muda nada: so clique sem
 // conversao e venda ainda nao ligada entram). Nunca cria venda nem acesso a partir de um clique. Sem trabalho: uma
-// chamada. Tick ja sem tempo (ctx.signal): nao chama. Banco sem a 202610290005: registra e termina sem erro (o tick
+// chamada. Tick ja sem tempo (ctx.signal): nao chama. Banco sem a 202610300003: registra e termina sem erro (o tick
 // continua verde). Quando ligou alguma venda, a contagem vai para job_runs.metadata da linha deste job
 // ({ tick_run_id, webinar_offer_conversions: { converted, job_ms } }: o tick_run_id gravado pelo run-tick.ts fica).
 

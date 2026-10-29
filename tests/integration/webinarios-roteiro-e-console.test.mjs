@@ -270,7 +270,7 @@ test("5. enquetes e perguntas: o modelo, abrir na sessao (sem duplicar), a respo
   const [pergunta] = retrato.questions;
   const respondida = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias no replay.", questionId: pergunta.id }));
   assert.deepEqual([respondida.question.status, respondida.question.answeredBy, respondida.message.kind, respondida.message.source], ["answered", produtor.id, "answer", "team"]);
-  // Fase 4c (202610290006): a resposta da equipe fica marcada como da equipe (a do Assistente e 'ai').
+  // Fase 4c (202610300004): a resposta da equipe fica marcada como da equipe (a do Assistente e 'ai').
   const origem = unwrap(await db.from("webinar_questions").select("answer_source").eq("id", pergunta.id).single(), "Lendo a origem da resposta");
   assert.equal(origem.answer_source, "team");
   const dispensada = ok(await roomActions.setQuestionStatus({ questionId: pergunta.id, status: "dismissed" }));

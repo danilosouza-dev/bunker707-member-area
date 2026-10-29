@@ -80,7 +80,7 @@ function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; se
   const { assistant, attendees, csvHref, dropExcerpts, durationMs, exportReports, offerClicked, people, polls, questions, report, session, simulation } = selected;
   const live = session.status === "live";
   const kpis = reportKpis(report, { hasReplay });
-  // O bloco do Assistente: ligado no webinario, com resposta nesta sessao ou o aviso da migracao 202610290006.
+  // O bloco do Assistente: ligado no webinario, com resposta nesta sessao ou o aviso da migracao 202610300004.
   const showAssistant = assistant.enabled || assistant.pending || report.assistant.present;
   const topChat: ReportPersonItem[] = report.chat.top.map((entry) => ({ href: studentHref(entry.userId), id: entry.userId, label: personName(people, entry.userId), meta: COPY.mensagensDe(entry.total) }));
   const hottest: ReportPersonItem[] = report.chat.hot.map((entry) => ({ href: studentHref(entry.userId), id: entry.userId, label: personName(people, entry.userId), meta: COPY.pontos(entry.score) }));

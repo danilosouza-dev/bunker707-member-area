@@ -1,184 +1,283 @@
--- Webinarios v4, os ajustes da revisao da fase 4 (docs/30 §3.3, §3.4, §3.6, §4.2, §4.5, §6.6, §8.6 e §11). As
--- migracoes 202610290004 a 202610290009 nao mudam (nenhuma migracao da fase 4 foi aplicada ainda, em lugar nenhum;
--- docs/21 §9.10); este arquivo so acrescenta.
+-- Webinarios v4b, a Oferta A/B/C/D com a conversao e a receita, o follow-up e a Simulacao completa (docs/30 §1.6, §2.2,
+-- §2.4, §3.3 a §3.6, §4.2, §4.3, §5.1, §6.6, §8.6 e §11, fase 4b). A 202610300002 nao muda (nenhuma migracao da fase 4
+-- foi aplicada ainda; docs/21 §9.10); este arquivo so acrescenta.
 --
 -- Regras:
--- - webinar_offer_seen: quem viu a oferta em cada sessao, congelado no fim junto da curva (webinar_close_session); as
---   amostras de presenca somem 90 dias depois do fim (prune_webinar_history) e "Viram a oferta" (painel, relatorio e
---   follow-up) passa a ler o congelado quando a sessao tem presence_curve, e as amostras so na sessao em andamento. As
---   sessoes ja encerradas ganham o congelado pelas amostras que ainda existem (insert ... on conflict do nothing);
--- - webinar_close_session: o corpo da 202610290001 inteiro mais o congelado acima (pode rodar de novo);
--- - webinar_offer_conversions: o ultimo clique antes da venda e escolhido entre todos os cliques da janela, convertidos
---   ou nao (a segunda venda nao desce para um clique mais antigo); a venda reembolsada ou com chargeback nao converte;
--- - webinar_follow_up_facts, webinar_report e webinar_panel: "Viram a oferta" pelo congelado; Compras, compradores e
---   receita sem as vendas reembolsadas ou com chargeback (closed_by 'refund' / 'chargeback'; a assinatura cancelada e
---   o fechamento pela equipe continuam contando, foram vendas); no relatorio, "ai / handoffs" conta uma vez o pedido
---   numa pergunta que veio do chat (a mensagem e a pergunta ligada ganham a marca juntas). Mesmas assinaturas, corpo
---   completo;
--- - a tabela nova so do service_role (RLS, revoke de anon e authenticated, grant); nada de create policy, alter
---   policy, drop, delete nem truncate. Seis secoes, cada uma pelo MCP do Supabase (execute_sql, uma por chamada, na
+-- - webhook_events ganha amount_cents e currency (M8): o adaptador de cada plataforma le o valor da venda do payload e
+--   o webhook grava junto do evento; a regra de acesso (process-sale.ts) nao muda nem le estas colunas;
+-- - webinar_offers (uma Oferta ativa por webinario, com o produto da escola que a venda libera, "Quando aparece" num
+--   minuto do video / pelo botao / nunca, "Some em" em minutos ou ate o fim, o prazo real em minutos depois de aparecer
+--   e a atribuicao em dias, padrao 7, M7) e webinar_offer_variants (A, B, C e D: titulo, selo, preco de/por em texto,
+--   cupom, link de checkout https, imagem https, peso; "Divisao" igual = pesos iguais);
+-- - webinar_offer_displays: o que cada sessao mostrou de verdade (a janela em ms do video, o prazo, quem mostrou ou
+--   escondeu e a foto das variantes no momento, docs/30 §8.6: "o relatorio guarda o que foi mostrado"); uma linha por
+--   sessao e oferta;
+-- - webinar_offer_clicks: um clique do aluno (a variante dele, o offset, o click_token unico que vai no link do
+--   checkout como ?b7=) e a conversao ligada ao sale_grants da mesma conta e do mesmo produto criado entre o clique e
+--   clique + attribution_days (M7), pela funcao webinar_offer_conversions (o job do tick), nunca pelo clique;
+-- - webinar_offer_variant(user, oferta): a variante deterministica do aluno (M7), md5(user_id || offer_id), os 8
+--   primeiros digitos hexadecimais como inteiro, modulo a soma dos pesos das variantes ligadas, na ordem A, B, C, D.
+--   O app repete a mesma conta (offer-model.ts, offerVariantFor) e "viram", "clicaram" e "compraram" caem sempre na
+--   mesma variante;
+-- - webinar_follow_up_facts(webinarios): por aluno e webinario, vaga, compareceu, viu o replay, viu a oferta, saiu antes
+--   da oferta, clicou e comprou (as regras de follow-up da Comunicacao, docs/30 §1.6); nunca le a Simulacao;
+-- - webinar_sessions ganha simulated_count_rule, simulated_joins, simulated_sale_notices, simulation_summary (§4.3) e
+--   simulation_seed (a semente do contador e das entradas, D6: todos veem o mesmo numero, so o servidor a conhece); a
+--   sessao `live` nunca tem regra simulada (check webinar_sessions_simulation_not_live_v4);
+-- - webinar_report e webinar_panel ganham as linhas `offer*` (reais) e o bloco `sim_*` separado (o contador, as
+--   entradas e os avisos de venda so de simulation_summary, congelado no fim), mesmas assinaturas, corpo completo;
+-- - tabelas novas so do service_role (RLS, revoke de anon e authenticated, grant); nada de create policy, alter
+--   policy, drop, delete nem truncate. Nove secoes, cada uma pelo MCP do Supabase (execute_sql, uma por chamada, na
 --   ordem), ou apply_migration com o arquivo inteiro.
 --
 -- Verificacao manual depois de aplicar:
---   select table_name from information_schema.tables where table_schema = 'public' and table_name = 'webinar_offer_seen'; -- 1 linha
---   select relrowsecurity from pg_class where relname = 'webinar_offer_seen'; -- true
---   select has_table_privilege('authenticated', 'public.webinar_offer_seen', 'select'); -- false
---   select pg_get_function_identity_arguments('public.webinar_close_session'::regproc); -- p_session_id uuid, p_now timestamp with time zone
---   select count(*) from public.webinar_report(gen_random_uuid()); -- 0
---   select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
---   select public.webinar_offer_conversions(now(), 1); -- roda sem erro (0 sem venda nova)
+--   select column_name from information_schema.columns where table_name = 'webhook_events' and column_name in ('amount_cents', 'currency'); -- 2 linhas
+--   select table_name from information_schema.tables where table_schema = 'public' and table_name like 'webinar_offer%' order by 1; -- 4 linhas
+--   select column_name from information_schema.columns where table_name = 'webinar_sessions' and (column_name like 'simulat%' or column_name = 'simulation_seed') order by 1; -- 8 linhas (3 da fase 2 + 5)
+--   select proname from pg_proc where proname in ('webinar_offer_variant', 'webinar_offer_conversions', 'webinar_follow_up_facts') order by 1; -- 3 linhas
+--   select has_function_privilege('authenticated', 'public.webinar_offer_conversions(timestamptz, integer)', 'execute'); -- false
+--   select count(*) from public.webinar_panel('simulated', now() - interval '30 days', now()); -- roda sem erro
 --
 -- Idempotente: pode rodar de novo sem efeito.
 
 /* ------------------------------------------------------------------------------------------------
- * 1. webinar_offer_seen: quem viu a oferta, congelado no fim da sessao (as amostras somem em 90 dias). MCP.
+ * 1. webhook_events: o valor da venda (M8), lido pelo adaptador da plataforma e gravado pelo webhook. MCP.
  * ---------------------------------------------------------------------------------------------- */
 
-create table if not exists public.webinar_offer_seen (
-  session_id uuid not null references public.webinar_sessions(id) on delete cascade,
-  offer_id uuid not null references public.webinar_offers(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  -- A variante do aluno no momento (webinar_offer_variant); nula quando nenhuma variante estava ligada.
-  variant_label text check (variant_label is null or variant_label in ('A', 'B', 'C', 'D')),
-  created_at timestamptz not null default now(),
-  primary key (session_id, offer_id, user_id)
-);
+alter table public.webhook_events add column if not exists amount_cents bigint;
+alter table public.webhook_events add column if not exists currency text;
 
-comment on table public.webinar_offer_seen is
-  'Quem esteve na janela da oferta em cada sessao, congelado no fim (webinar_close_session): "Viram a oferta" depois que as amostras somem.';
-
-create index if not exists webinar_offer_seen_offer_idx on public.webinar_offer_seen (offer_id, user_id);
-
-alter table public.webinar_offer_seen enable row level security;
-revoke all on public.webinar_offer_seen from anon, authenticated;
-grant select, insert, update, delete on public.webinar_offer_seen to service_role;
-
--- As sessoes ja encerradas: o congelado pelas amostras que ainda existem (as podadas ja davam zero antes).
-insert into public.webinar_offer_seen (session_id, offer_id, user_id, variant_label)
-select distinct d.session_id, d.offer_id, ps.user_id, public.webinar_offer_variant(ps.user_id, d.offer_id)
-from public.webinar_offer_displays d
-join public.webinar_sessions s on s.id = d.session_id and s.presence_curve is not null
-join public.webinars w on w.id = s.webinar_id
-join public.webinar_presence_samples ps on ps.session_id = d.session_id
-  and ps.bucket between floor(d.show_offset_ms / 30000.0)::integer
-    and ceil(coalesce(d.hide_offset_ms, greatest(coalesce(
-      (select r.duration_seconds::bigint * 1000 from public.webinar_recordings r where r.id = s.recording_id and r.duration_seconds > 0),
-      case when s.started_at is not null and s.ended_at is not null then (extract(epoch from (s.ended_at - s.started_at)) * 1000)::bigint end,
-      w.duration_minutes::bigint * 60000), 30000)) / 30000.0)::integer
-on conflict (session_id, offer_id, user_id) do nothing;
-
-/* ------------------------------------------------------------------------------------------------
- * 2. webinar_close_session (o corpo completo da 202610290001, mesma assinatura, com o congelado da oferta). MCP.
- * ---------------------------------------------------------------------------------------------- */
-
-create or replace function public.webinar_close_session(p_session_id uuid, p_now timestamptz default now())
-returns jsonb
-language plpgsql
-security invoker
-set search_path = pg_catalog, public
-as $$
-declare
-  v_session public.webinar_sessions%rowtype;
-  v_duration_ms bigint;
-  v_buckets integer;
-  v_curve jsonb;
-  v_summary jsonb;
+do $$
 begin
-  select * into v_session from public.webinar_sessions where id = p_session_id for update;
-  if not found then
-    raise exception 'webinar session % not found', p_session_id using errcode = 'P0002';
+  if not exists (select 1 from pg_constraint where conname = 'webhook_events_amount_cents_v4') then
+    alter table public.webhook_events add constraint webhook_events_amount_cents_v4
+      check (amount_cents is null or amount_cents between 0 and 100000000000);
   end if;
-
-  -- A duracao do video (gravacao), ou o tempo real da live, ou a duracao prevista do webinario.
-  select coalesce(
-      (select r.duration_seconds::bigint * 1000 from public.webinar_recordings r
-        where r.id = v_session.recording_id and r.duration_seconds > 0),
-      case when v_session.started_at is not null and v_session.ended_at is not null
-        then (extract(epoch from (v_session.ended_at - v_session.started_at)) * 1000)::bigint end,
-      case when v_session.started_at is not null
-        then (extract(epoch from (p_now - v_session.started_at)) * 1000)::bigint end,
-      (select w.duration_minutes::bigint * 60000 from public.webinars w where w.id = v_session.webinar_id))
-    into v_duration_ms;
-  v_duration_ms := greatest(coalesce(v_duration_ms, 0), 30000);
-  v_buckets := greatest(1, ceil(v_duration_ms / 30000.0))::integer;
-
-  -- O resumo por aluno (todo mundo que mandou sinal; a equipe sai nas leituras). Trecho novo = buraco > 3 baldes.
-  insert into public.webinar_attendance (session_id, user_id, first_at, last_at, entries, seconds, max_bucket, reached_end)
-  select p.session_id, p.user_id, min(p.first_at), max(p.last_at),
-    1 + count(*) filter (where p.prev_bucket is not null and p.bucket - p.prev_bucket > 3),
-    (sum(least(p.samples, 2)) * 15)::integer,
-    max(p.bucket),
-    max(p.bucket) + 1 >= ceil(v_buckets * 0.95)
-  from (
-    select ps.*, lag(ps.bucket) over (partition by ps.user_id order by ps.bucket) as prev_bucket
-    from public.webinar_presence_samples ps
-    where ps.session_id = p_session_id and ps.bucket >= 0
-  ) p
-  group by p.session_id, p.user_id
-  on conflict (session_id, user_id) do update
-    set first_at = excluded.first_at, last_at = excluded.last_at, entries = excluded.entries,
-      seconds = excluded.seconds, max_bucket = excluded.max_bucket, reached_end = excluded.reached_end;
-
-  -- A curva por balde (so alunos), congelada na sessao.
-  select coalesce(jsonb_agg(jsonb_build_object('b', c.b, 'n', c.n) order by c.b), '[]'::jsonb)
-    into v_curve
-  from (
-    select ps.bucket as b, count(distinct ps.user_id) as n
-    from public.webinar_presence_samples ps
-    where ps.session_id = p_session_id and ps.bucket >= 0
-      and not exists (select 1 from public.admin_roles a where a.user_id = ps.user_id)
-    group by ps.bucket
-  ) c;
-
-  select jsonb_build_object(
-      'buckets', v_curve,
-      'bucketSeconds', 30,
-      'durationMs', v_duration_ms,
-      'unique', (select count(*) from public.webinar_attendance a
-                  where a.session_id = p_session_id
-                    and not exists (select 1 from public.admin_roles x where x.user_id = a.user_id)),
-      'peak', (select jsonb_build_object('b', x.b, 'n', x.n)
-               from (select (e->>'b')::integer as b, (e->>'n')::integer as n from jsonb_array_elements(v_curve) e
-                     order by (e->>'n')::integer desc, (e->>'b')::integer asc limit 1) x),
-      'avgPresent', (select coalesce(round(avg((e->>'n')::numeric), 1), 0) from jsonb_array_elements(v_curve) e),
-      'watchAvg', (select coalesce(round(avg(a.seconds)), 0) from public.webinar_attendance a
-                   where a.session_id = p_session_id
-                     and not exists (select 1 from public.admin_roles x where x.user_id = a.user_id)),
-      'watchMax', (select coalesce(max(a.seconds), 0) from public.webinar_attendance a
-                   where a.session_id = p_session_id
-                     and not exists (select 1 from public.admin_roles x where x.user_id = a.user_id)),
-      'reachedEnd', (select count(*) filter (where a.reached_end) from public.webinar_attendance a
-                     where a.session_id = p_session_id
-                       and not exists (select 1 from public.admin_roles x where x.user_id = a.user_id)),
-      'frozenAt', p_now)
-    into v_summary;
-
-  -- Quem viu a oferta, congelado junto da curva (as amostras somem 90 dias depois do fim, prune_webinar_history; os
-  -- paineis, o relatorio e o follow-up leem daqui quando a sessao tem curva). A variante do momento fica gravada.
-  insert into public.webinar_offer_seen (session_id, offer_id, user_id, variant_label)
-  select distinct d.session_id, d.offer_id, ps.user_id, public.webinar_offer_variant(ps.user_id, d.offer_id)
-  from public.webinar_offer_displays d
-  join public.webinar_presence_samples ps on ps.session_id = d.session_id
-    and ps.bucket between floor(d.show_offset_ms / 30000.0)::integer and ceil(coalesce(d.hide_offset_ms, v_duration_ms) / 30000.0)::integer
-  where d.session_id = p_session_id
-  on conflict (session_id, offer_id, user_id) do nothing;
-
-  update public.webinar_sessions
-  set presence_curve = v_summary,
-      status = case when status = 'cancelled' then status else 'ended' end,
-      ended_at = coalesce(ended_at, p_now)
-  where id = p_session_id;
-
-  return v_summary;
+  if not exists (select 1 from pg_constraint where conname = 'webhook_events_currency_v4') then
+    alter table public.webhook_events add constraint webhook_events_currency_v4
+      check (currency is null or currency ~ '^[A-Z]{3}$');
+  end if;
 end;
 $$;
 
-comment on function public.webinar_close_session(uuid, timestamptz) is
-  'Encerra a sessao: resume as amostras em webinar_attendance, congela presence_curve e quem viu a oferta (webinar_offer_seen) (docs/30 §4.5). Pode rodar de novo.';
+comment on column public.webhook_events.amount_cents is
+  'O valor da venda em centavos (docs/30 M8), lido pelo adaptador da plataforma; nunca decide acesso.';
 
 /* ------------------------------------------------------------------------------------------------
- * 3. webinar_offer_conversions (o ultimo clique entre todos da janela; sem venda reembolsada). MCP.
+ * 2. webinar_offers e webinar_offer_variants: a Oferta do webinario e as variantes A, B, C e D. MCP.
  * ---------------------------------------------------------------------------------------------- */
+
+create table if not exists public.webinar_offers (
+  id uuid primary key default gen_random_uuid(),
+  webinar_id uuid not null references public.webinars(id) on delete cascade,
+  -- O produto da escola que a venda libera (entitlements.target_id / sale_grants.product_id).
+  product_id text not null check (char_length(product_id) between 1 and 240),
+  title text not null default '' check (char_length(title) <= 120),
+  trigger_kind text not null default 'at_offset' check (trigger_kind in ('at_offset', 'manual', 'never')),
+  show_at_offset_ms integer check (show_at_offset_ms is null or show_at_offset_ms between 0 and 172800000),
+  -- "Some em": minutos depois de aparecer; nulo = ate o fim.
+  visible_minutes integer check (visible_minutes is null or visible_minutes between 1 and 600),
+  -- O prazo real: minutos depois de aparecer em cada sessao; nulo = sem prazo na tela (docs/30 §8.6).
+  deadline_minutes integer check (deadline_minutes is null or deadline_minutes between 1 and 1440),
+  attribution_days integer not null default 7 check (attribution_days between 1 and 30),
+  status text not null default 'draft' check (status in ('draft', 'active', 'archived')),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint webinar_offers_show_at_v4 check (trigger_kind <> 'at_offset' or show_at_offset_ms is not null)
+);
+
+comment on table public.webinar_offers is 'A Oferta de um webinario (docs/30 §2.2): quando aparece, quanto tempo fica, o prazo e a atribuicao da compra.';
+
+create unique index if not exists webinar_offers_one_active_idx on public.webinar_offers (webinar_id) where status <> 'archived';
+create index if not exists webinar_offers_webinar_idx on public.webinar_offers (webinar_id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'set_webinar_offers_updated_at' and tgrelid = 'public.webinar_offers'::regclass
+  ) then
+    create trigger set_webinar_offers_updated_at
+      before update on public.webinar_offers
+      for each row execute function public.set_updated_at();
+  end if;
+end;
+$$;
+
+alter table public.webinar_offers enable row level security;
+revoke all on public.webinar_offers from anon, authenticated;
+grant select, insert, update, delete on public.webinar_offers to service_role;
+
+create table if not exists public.webinar_offer_variants (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.webinar_offers(id) on delete cascade,
+  label text not null check (label in ('A', 'B', 'C', 'D')),
+  enabled boolean not null default true,
+  headline text not null check (char_length(headline) between 1 and 120),
+  badge text check (badge is null or char_length(badge) <= 40),
+  price_from_label text check (price_from_label is null or char_length(price_from_label) <= 40),
+  price_label text check (price_label is null or char_length(price_label) <= 40),
+  coupon text check (coupon is null or char_length(coupon) <= 40),
+  checkout_url text not null check (char_length(checkout_url) between 12 and 2048 and checkout_url ~ '^https://'),
+  image_url text check (image_url is null or (char_length(image_url) <= 2048 and image_url ~ '^https://')),
+  weight integer not null default 1 check (weight between 1 and 100),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+comment on table public.webinar_offer_variants is 'As variantes A, B, C e D da Oferta; o aluno ve sempre a mesma (webinar_offer_variant, M7).';
+
+create unique index if not exists webinar_offer_variants_label_idx on public.webinar_offer_variants (offer_id, label);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'set_webinar_offer_variants_updated_at' and tgrelid = 'public.webinar_offer_variants'::regclass
+  ) then
+    create trigger set_webinar_offer_variants_updated_at
+      before update on public.webinar_offer_variants
+      for each row execute function public.set_updated_at();
+  end if;
+end;
+$$;
+
+alter table public.webinar_offer_variants enable row level security;
+revoke all on public.webinar_offer_variants from anon, authenticated;
+grant select, insert, update, delete on public.webinar_offer_variants to service_role;
+
+/* ------------------------------------------------------------------------------------------------
+ * 3. webinar_offer_displays (o que cada sessao mostrou) e webinar_offer_clicks (o clique e a conversao). MCP.
+ * ---------------------------------------------------------------------------------------------- */
+
+create table if not exists public.webinar_offer_displays (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.webinar_offers(id) on delete cascade,
+  session_id uuid not null references public.webinar_sessions(id) on delete cascade,
+  show_offset_ms integer not null check (show_offset_ms between -86400000 and 172800000),
+  hide_offset_ms integer check (hide_offset_ms is null or hide_offset_ms between -86400000 and 172800000),
+  shown_at timestamptz not null default now(),
+  hidden_at timestamptz,
+  deadline_at timestamptz,
+  shown_by uuid references auth.users(id) on delete set null,
+  hidden_by uuid references auth.users(id) on delete set null,
+  -- A foto das variantes ligadas no momento (titulo, selo, precos, cupom, prazo): o registro do que foi mostrado.
+  snapshot jsonb not null default '{}'::jsonb check (jsonb_typeof(snapshot) = 'object' and pg_column_size(snapshot) <= 16384),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint webinar_offer_displays_window_v4 check (hide_offset_ms is null or hide_offset_ms >= show_offset_ms)
+);
+
+comment on table public.webinar_offer_displays is 'A janela da Oferta em cada sessao (docs/30 §3.6 e §8.6): "viram a oferta" e quem esteve nela.';
+
+create unique index if not exists webinar_offer_displays_session_idx on public.webinar_offer_displays (session_id, offer_id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'set_webinar_offer_displays_updated_at' and tgrelid = 'public.webinar_offer_displays'::regclass
+  ) then
+    create trigger set_webinar_offer_displays_updated_at
+      before update on public.webinar_offer_displays
+      for each row execute function public.set_updated_at();
+  end if;
+end;
+$$;
+
+alter table public.webinar_offer_displays enable row level security;
+revoke all on public.webinar_offer_displays from anon, authenticated;
+grant select, insert, update, delete on public.webinar_offer_displays to service_role;
+
+create table if not exists public.webinar_offer_clicks (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.webinar_offers(id) on delete cascade,
+  variant_id uuid references public.webinar_offer_variants(id) on delete set null,
+  variant_label text not null check (variant_label in ('A', 'B', 'C', 'D')),
+  session_id uuid not null references public.webinar_sessions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  offset_ms integer not null check (offset_ms between -86400000 and 172800000),
+  click_token text not null check (click_token ~ '^[A-Za-z0-9_-]{16,64}$'),
+  clicked_at timestamptz not null default now(),
+  converted_sale_grant_id uuid references public.sale_grants(id) on delete set null,
+  converted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.webinar_offer_clicks is 'Os cliques em Quero participar e a compra ligada pelo sale_grants em ate attribution_days (M7).';
+
+create unique index if not exists webinar_offer_clicks_token_idx on public.webinar_offer_clicks (click_token);
+create index if not exists webinar_offer_clicks_offer_user_idx on public.webinar_offer_clicks (offer_id, user_id);
+create index if not exists webinar_offer_clicks_session_idx on public.webinar_offer_clicks (session_id);
+create index if not exists webinar_offer_clicks_pending_idx on public.webinar_offer_clicks (clicked_at) where converted_sale_grant_id is null;
+create unique index if not exists webinar_offer_clicks_grant_idx
+  on public.webinar_offer_clicks (offer_id, converted_sale_grant_id) where converted_sale_grant_id is not null;
+
+alter table public.webinar_offer_clicks enable row level security;
+revoke all on public.webinar_offer_clicks from anon, authenticated;
+grant select, insert, update, delete on public.webinar_offer_clicks to service_role;
+
+/* ------------------------------------------------------------------------------------------------
+ * 4. webinar_sessions: a Simulacao completa (contador, entradas, avisos de venda, o resumo congelado e a semente). MCP.
+ * ---------------------------------------------------------------------------------------------- */
+
+alter table public.webinar_sessions add column if not exists simulated_count_rule jsonb;
+alter table public.webinar_sessions add column if not exists simulated_joins jsonb;
+alter table public.webinar_sessions add column if not exists simulated_sale_notices jsonb;
+alter table public.webinar_sessions add column if not exists simulation_summary jsonb;
+alter table public.webinar_sessions add column if not exists simulation_seed integer not null default (floor(random() * 2147483647))::integer;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'webinar_sessions_simulation_not_live_v4') then
+    alter table public.webinar_sessions add constraint webinar_sessions_simulation_not_live_v4
+      check (kind <> 'live' or (simulated_count_rule is null and simulated_joins is null and simulated_sale_notices is null and simulation_summary is null));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'webinar_sessions_simulation_shape_v4') then
+    alter table public.webinar_sessions add constraint webinar_sessions_simulation_shape_v4
+      check (
+        (simulated_count_rule is null or (jsonb_typeof(simulated_count_rule) = 'object' and pg_column_size(simulated_count_rule) <= 4096))
+        and (simulated_joins is null or (jsonb_typeof(simulated_joins) = 'object' and pg_column_size(simulated_joins) <= 4096))
+        and (simulated_sale_notices is null or (jsonb_typeof(simulated_sale_notices) = 'object' and pg_column_size(simulated_sale_notices) <= 65536))
+        and (simulation_summary is null or (jsonb_typeof(simulation_summary) = 'object' and pg_column_size(simulation_summary) <= 4096))
+      );
+  end if;
+end;
+$$;
+
+comment on column public.webinar_sessions.simulation_seed is
+  'A semente do contador e das entradas simuladas (docs/30 §6.6): todos veem o mesmo numero; nunca sai do servidor.';
+comment on column public.webinar_sessions.simulation_summary is
+  'Os totais da Simulacao congelados no fim ({counter_max, joins_shown, sale_notices_shown}); so o bloco Simulacao le.';
+
+/* ------------------------------------------------------------------------------------------------
+ * 5. webinar_offer_variant (a variante do aluno, M7) e webinar_offer_conversions (a compra pelo sale_grants). MCP.
+ * ---------------------------------------------------------------------------------------------- */
+
+create or replace function public.webinar_offer_variant(p_user_id uuid, p_offer_id uuid)
+returns text
+language sql
+stable
+security invoker
+set search_path = pg_catalog, public
+as $$
+  with v as (
+    select o.label,
+      sum(o.weight) over (order by o.label rows between unbounded preceding and current row) as upto,
+      sum(o.weight) over () as total
+    from public.webinar_offer_variants o
+    where o.offer_id = p_offer_id and o.enabled
+  )
+  select v.label
+  from v
+  where (('x' || substr(md5(p_user_id::text || p_offer_id::text), 1, 8))::bit(32)::bigint % v.total) < v.upto
+  order by v.label
+  limit 1;
+$$;
+
+comment on function public.webinar_offer_variant(uuid, uuid) is
+  'A variante deterministica do aluno (M7): md5(user_id || offer_id), 8 hex como inteiro, modulo a soma dos pesos (A, B, C, D ligadas).';
 
 create or replace function public.webinar_offer_conversions(p_now timestamptz, p_limit integer default 500)
 returns integer
@@ -190,37 +289,28 @@ declare
   v_count integer;
 begin
   -- Cada venda (sale_grants) liga no maximo um clique por oferta: o ultimo clique antes dela, dentro de
-  -- attribution_days, escolhido entre TODOS os cliques da janela (convertidos ou nao). Se esse ultimo clique ja tem
-  -- venda, a venda nova nao desce para um clique mais antigo (o segundo pedido nao infla Compras). A venda reembolsada
-  -- ou com chargeback nao converte. A venda vem so do webhook (process-sale.ts), nunca do clique.
-  with ranked as (
-    select distinct on (g.id, c.offer_id) c.id as click_id, c.offer_id, c.converted_sale_grant_id as click_grant,
-      g.id as grant_id, g.created_at as converted_at
+  -- attribution_days. A venda vem so do webhook (process-sale.ts), nunca do clique.
+  with candidates as (
+    select distinct on (g.id, c.offer_id) c.id as click_id, g.id as grant_id, g.created_at as converted_at
     from public.webinar_offer_clicks c
     join public.webinar_offers o on o.id = c.offer_id
     join public.sale_grants g on g.user_id = c.user_id and g.product_id = o.product_id
       and g.created_at >= c.clicked_at
       and g.created_at <= c.clicked_at + make_interval(days => o.attribution_days)
-      and (g.closed_by is null or g.closed_by not in ('refund', 'chargeback'))
-    where c.clicked_at >= p_now - interval '31 days'
+    where c.converted_sale_grant_id is null
+      and c.clicked_at >= p_now - interval '31 days'
       and c.clicked_at <= p_now
-    order by g.id, c.offer_id, c.clicked_at desc, c.id desc
-  ),
-  candidates as (
-    select r.click_id, r.grant_id, r.converted_at
-    from ranked r
-    where r.click_grant is null
       and not exists (
         select 1 from public.webinar_offer_clicks x
-        where x.offer_id = r.offer_id and x.converted_sale_grant_id = r.grant_id
+        where x.offer_id = c.offer_id and x.converted_sale_grant_id = g.id
       )
-    order by r.converted_at, r.grant_id
+    order by g.id, c.offer_id, c.clicked_at desc
     limit greatest(1, least(coalesce(p_limit, 500), 5000))
   ),
   picked as (
     select distinct on (k.click_id) k.click_id, k.grant_id, k.converted_at
     from candidates k
-    order by k.click_id, k.converted_at, k.grant_id
+    order by k.click_id, k.converted_at
   )
   update public.webinar_offer_clicks c
      set converted_sale_grant_id = p.grant_id,
@@ -234,10 +324,10 @@ end;
 $$;
 
 comment on function public.webinar_offer_conversions(timestamptz, integer) is
-  'O job webinar-offer-conversions do tick (docs/30 §4.2, M7): liga o ultimo clique antes da venda (entre todos os da janela) ao sale_grants da mesma conta e produto em ate attribution_days; sem venda reembolsada.';
+  'O job webinar-offer-conversions do tick (docs/30 §4.2, M7): liga o clique ao sale_grants da mesma conta e produto em ate attribution_days.';
 
 /* ------------------------------------------------------------------------------------------------
- * 4. webinar_follow_up_facts (o corpo completo da 202610290005: o congelado da oferta e a compra de pe). MCP.
+ * 6. webinar_follow_up_facts: o que cada aluno fez em cada webinario (as regras de follow-up da Comunicacao). MCP.
  * ---------------------------------------------------------------------------------------------- */
 
 create or replace function public.webinar_follow_up_facts(p_webinar_ids uuid[])
@@ -258,7 +348,7 @@ security invoker
 set search_path = pg_catalog, public
 as $$
   with ss as (
-    select s.id, s.webinar_id, s.kind, s.presence_curve,
+    select s.id, s.webinar_id, s.kind,
       greatest(coalesce(
         (select r.duration_seconds::bigint * 1000 from public.webinar_recordings r
           where r.id = s.recording_id and r.duration_seconds > 0),
@@ -296,17 +386,10 @@ as $$
     union
     select ss.webinar_id, p.user_id, 'watched_replay' from pres p join ss on ss.id = p.session_id where ss.kind = 'replay'
     union
-    -- Viu a oferta: pelas amostras so com a sessao em andamento; encerrada, pelo que o fim congelou (as amostras somem).
     select ss.webinar_id, ps.user_id, 'offer_seen'
     from win w
     join ss on ss.id = w.session_id
     join public.webinar_presence_samples ps on ps.session_id = w.session_id and ps.bucket between w.b0 and w.b1
-    where ss.presence_curve is null
-    union
-    select ss.webinar_id, f.user_id, 'offer_seen'
-    from public.webinar_offer_seen f
-    join ss on ss.id = f.session_id
-    where ss.presence_curve is not null
     union
     select ss.webinar_id, p.user_id, 'left_before_offer'
     from pres p join ss on ss.id = p.session_id join win w on w.session_id = p.session_id
@@ -318,9 +401,7 @@ as $$
     union
     select o.webinar_id, c.user_id, 'purchased'
     from public.webinar_offer_clicks c join public.webinar_offers o on o.id = c.offer_id
-    join public.sale_grants g on g.id = c.converted_sale_grant_id
-    where o.webinar_id = any(p_webinar_ids)
-      and (g.closed_by is null or g.closed_by not in ('refund', 'chargeback'))
+    where o.webinar_id = any(p_webinar_ids) and c.converted_sale_grant_id is not null
   )
   select f.webinar_id, f.user_id,
     bool_or(f.fact = 'registered'),
@@ -336,10 +417,10 @@ as $$
 $$;
 
 comment on function public.webinar_follow_up_facts(uuid[]) is
-  'As regras de follow-up do segmento (docs/30 §1.6): vaga, compareceu, replay, viu a oferta (congelado no fim), saiu antes, clicou e comprou (sem reembolso); so alunos, nunca a Simulacao.';
+  'As regras de follow-up do segmento (docs/30 §1.6): vaga, compareceu, replay, viu a oferta, saiu antes, clicou e comprou; so alunos, nunca a Simulacao.';
 
 /* ------------------------------------------------------------------------------------------------
- * 5. webinar_report e webinar_panel (os corpos completos da 202610290006 e da 202610290005, mesmas assinaturas). MCP.
+ * 7. webinar_report (o corpo completo da 202610290001, mesma assinatura, com a Oferta e o bloco Simulacao). MCP.
  * ---------------------------------------------------------------------------------------------- */
 
 create or replace function public.webinar_report(p_session_id uuid)
@@ -464,25 +545,15 @@ as $$
     where d.session_id = s.id
   ),
   offer_seen as (
-    -- Pelas amostras so com a sessao em andamento; encerrada, pelo que o fim congelou (webinar_offer_seen).
     select distinct w.offer_id, ps.user_id, public.webinar_offer_variant(ps.user_id, w.offer_id) as label
     from win w
     cross join s
     join public.webinar_presence_samples ps on ps.session_id = s.id and ps.bucket between w.b0 and w.b1
-    where s.presence_curve is null and not exists (select 1 from staff where staff.user_id = ps.user_id)
-    union
-    select f.offer_id, f.user_id, coalesce(f.variant_label, public.webinar_offer_variant(f.user_id, f.offer_id))
-    from public.webinar_offer_seen f, s
-    where f.session_id = s.id and s.presence_curve is not null
-      and not exists (select 1 from staff where staff.user_id = f.user_id)
+    where not exists (select 1 from staff where staff.user_id = ps.user_id)
   ),
   clicks as (
-    -- A compra so vale com a venda de pe: o reembolso e o chargeback desfazem (a assinatura cancelada foi venda).
-    select c.offer_id, c.user_id, c.variant_label as label,
-      case when g.id is not null and (g.closed_by is null or g.closed_by not in ('refund', 'chargeback')) then c.converted_sale_grant_id end as converted_sale_grant_id
-    from public.webinar_offer_clicks c
-    cross join s
-    left join public.sale_grants g on g.id = c.converted_sale_grant_id
+    select c.offer_id, c.user_id, c.variant_label as label, c.converted_sale_grant_id
+    from public.webinar_offer_clicks c, s
     where c.session_id = s.id and not exists (select 1 from staff where staff.user_id = c.user_id)
   ),
   revenue as (
@@ -494,28 +565,6 @@ as $$
   ),
   sim as (
     select x.simulation_summary as summary from public.webinar_sessions x, s where x.id = s.id and x.simulation_summary is not null
-  ),
-  ai_msgs as (
-    -- As respostas do Assistente (source = 'ai', D24): reais, a alunos reais; fora da Simulacao e do chat dos alunos.
-    select m.id, m.edited_at, m.deleted_at
-    from public.webinar_chat_messages m, s
-    where m.session_id = s.id and m.source = 'ai'
-  ),
-  ai_reqs as (
-    select q.requested_at, q.answered_at
-    from public.webinar_ai_requests q, s
-    where q.session_id = s.id and q.status = 'answered' and q.answered_at is not null
-  ),
-  handoffs as (
-    -- Um pedido do aluno conta uma vez: a mensagem do chat que tem a pergunta ligada (as duas ganham a marca) fica so
-    -- pela pergunta.
-    select q.id from public.webinar_questions q, s where q.session_id = s.id and q.handoff_requested_at is not null
-    union all
-    select m.id from public.webinar_chat_messages m, s where m.session_id = s.id and m.handoff_requested_at is not null
-      and not exists (
-        select 1 from public.webinar_questions q2
-        where q2.message_id = m.id and q2.session_id = s.id and q2.handoff_requested_at is not null
-      )
   ),
   report as (
   select 'registration'::text as metric, r.status as item, count(*)::bigint as total, count(distinct r.user_id)::bigint as students from reg r group by r.status
@@ -612,26 +661,16 @@ as $$
   union all
   select 'sim_sales', 'shown', (sim.summary->>'sale_notices_shown')::bigint, 0::bigint
     from sim where jsonb_typeof(sim.summary->'sale_notices_shown') = 'number'
-  union all
-  select 'ai', 'replies', count(*) filter (where am.deleted_at is null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
-  union all
-  select 'ai', 'avg_seconds', coalesce(round(avg(extract(epoch from (ar.answered_at - ar.requested_at)))), 0)::bigint, count(*)::bigint
-    from ai_reqs ar where exists (select 1 from ai_msgs)
-  union all
-  select 'ai', 'edited', count(*) filter (where am.edited_at is not null and am.deleted_at is null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
-  union all
-  select 'ai', 'deleted', count(*) filter (where am.deleted_at is not null)::bigint, 0::bigint from ai_msgs am
-    where exists (select 1 from ai_msgs)
-  union all
-  select 'ai', 'handoffs', count(*)::bigint, 0::bigint from handoffs h where exists (select 1 from handoffs)
   )
   -- Sessao que nao existe: nenhuma linha (os agregados sem grupo dariam uma linha de zeros).
   select r.metric, r.item, r.total, r.students from report r where exists (select 1 from s);
 $$;
 comment on function public.webinar_report(uuid) is
-  'O relatorio de uma sessao (docs/30 §3.4 e §4.6): uma linha por metrica e item, so alunos, so chat audience/original; a Oferta (offer*: viram pelo congelado, compras sem reembolso), as Respostas do Assistente (ai) e o bloco Simulacao (sim_*) separados.';
+  'O relatorio de uma sessao (docs/30 §3.4 e §4.6): uma linha por metrica e item, so alunos, so chat audience/original; a Oferta (offer*) e o bloco Simulacao (sim_*) separados.';
+
+/* ------------------------------------------------------------------------------------------------
+ * 8. webinar_panel (o corpo completo da 202610300002, mesma assinatura, com a Oferta e o bloco Simulacao). MCP.
+ * ---------------------------------------------------------------------------------------------- */
 
 create or replace function public.webinar_panel(p_kind text, p_start timestamptz, p_end timestamptz, p_session_ids uuid[] default null)
 returns table (session_id uuid, metric text, item text, total bigint, students bigint)
@@ -757,26 +796,15 @@ as $$
     join ss on ss.id = d.session_id
   ),
   offer_seen as (
-    -- Pelas amostras so com a sessao em andamento; encerrada, pelo que o fim congelou (webinar_offer_seen): as
-    -- amostras somem 90 dias depois do fim e o periodo vai ate 366 dias.
     select distinct w.session_id, w.offer_id, ps.user_id, public.webinar_offer_variant(ps.user_id, w.offer_id) as label
     from win w
-    join ss on ss.id = w.session_id
     join public.webinar_presence_samples ps on ps.session_id = w.session_id and ps.bucket between w.b0 and w.b1
-    where ss.presence_curve is null and not exists (select 1 from staff where staff.user_id = ps.user_id)
-    union
-    select f.session_id, f.offer_id, f.user_id, coalesce(f.variant_label, public.webinar_offer_variant(f.user_id, f.offer_id))
-    from public.webinar_offer_seen f
-    join ss on ss.id = f.session_id
-    where ss.presence_curve is not null and not exists (select 1 from staff where staff.user_id = f.user_id)
+    where not exists (select 1 from staff where staff.user_id = ps.user_id)
   ),
   clicks as (
-    -- A compra so vale com a venda de pe: o reembolso e o chargeback desfazem (a assinatura cancelada foi venda).
-    select c.session_id, c.offer_id, c.user_id, c.variant_label as label,
-      case when g.id is not null and (g.closed_by is null or g.closed_by not in ('refund', 'chargeback')) then c.converted_sale_grant_id end as converted_sale_grant_id
+    select c.session_id, c.offer_id, c.user_id, c.variant_label as label, c.converted_sale_grant_id
     from public.webinar_offer_clicks c
     join ss on ss.id = c.session_id
-    left join public.sale_grants g on g.id = c.converted_sale_grant_id
     where not exists (select 1 from staff where staff.user_id = c.user_id)
   ),
   revenue as (
@@ -890,14 +918,14 @@ as $$
   select pn.session_id, pn.metric, pn.item, pn.total, pn.students from panel pn where pn.total is not null;
 $$;
 comment on function public.webinar_panel(text, timestamptz, timestamptz, uuid[]) is
-  'Os paineis Lives ao vivo e Lives gravadas (docs/30 §3.2, §3.3 e §4.6): numeros reais por sessao e os unicos do periodo, a Oferta (offer*: viram pelo congelado, compras e receita sem reembolso) e o bloco Simulacao (sim_*) separados.';
+  'Os paineis Lives ao vivo e Lives gravadas (docs/30 §3.2, §3.3 e §4.6): numeros reais por sessao e os unicos do periodo, a Oferta (offer*) e o bloco Simulacao (sim_*) separados.';
 
 /* ------------------------------------------------------------------------------------------------
- * 6. Permissoes das funcoes recriadas (so service_role; o create or replace mantem, aqui de novo). MCP.
+ * 9. Permissoes das funcoes novas (so service_role). MCP.
  * ---------------------------------------------------------------------------------------------- */
 
-revoke all on function public.webinar_close_session(uuid, timestamptz) from public, anon, authenticated;
-grant execute on function public.webinar_close_session(uuid, timestamptz) to service_role;
+revoke all on function public.webinar_offer_variant(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.webinar_offer_variant(uuid, uuid) to service_role;
 revoke all on function public.webinar_offer_conversions(timestamptz, integer) from public, anon, authenticated;
 grant execute on function public.webinar_offer_conversions(timestamptz, integer) to service_role;
 revoke all on function public.webinar_follow_up_facts(uuid[]) from public, anon, authenticated;

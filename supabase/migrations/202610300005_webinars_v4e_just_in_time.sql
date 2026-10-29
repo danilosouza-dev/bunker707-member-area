@@ -1,6 +1,6 @@
 -- Webinarios v4e, "Comeca quando voce entra" (just-in-time; docs/30 §1.2, §1.6, §2.2, A14, D25 e §11, fase 4e). A
--- 202610290006 nao muda (nenhuma migracao da fase 4 foi aplicada ainda; docs/21 §9.10); este arquivo so acrescenta
--- (a 4d, Sala Live vertical, nao precisa de dado novo e nao tem migracao: a 202610290007 nao existe de proposito).
+-- 202610300004 nao muda (nenhuma migracao da fase 4 foi aplicada ainda; docs/21 §9.10); este arquivo so acrescenta
+-- (a 4d, Sala Live vertical, nao precisa de dado novo e nao tem migracao).
 --
 -- Regras:
 -- - webinars.jit_settings (jsonb, zod no salvar e no ler): a Live gravada abre uma sessao "a cada 15 / 30 / 60 min"

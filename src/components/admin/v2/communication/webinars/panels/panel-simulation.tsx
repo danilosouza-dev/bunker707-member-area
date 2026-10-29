@@ -6,7 +6,7 @@ import { panelNumberText, type PanelSimulationView } from "@/server/webinars/pan
 // O bloco Simulacao do painel Lives gravadas (docs/30 §3.5; D6, D10, M6): sempre o ultimo da aba, com o fundo
 // diferente (superficie 2 e borda tracejada) e a frase "Estes números são da simulação e não entram em nenhum outro
 // número." logo abaixo do titulo. Le so o que panelSimulationOf devolve (as linhas sim_* e as regras); o numero real
-// de participantes aparece ao lado do contador para a equipe comparar. Sem a 202610290005, tudo "—".
+// de participantes aparece ao lado do contador para a equipe comparar. Sem a 202610300003, tudo "—".
 
 const COPY = WEBINAR_COPY.paineis.simulacao;
 

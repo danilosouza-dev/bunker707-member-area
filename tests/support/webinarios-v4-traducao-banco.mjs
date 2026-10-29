@@ -8,7 +8,7 @@ import { actionStubs } from "./admin-action-stubs.mjs";
 // pelo teste; por padrao devolve "[EN] texto" no JSON pedido; nunca um provedor de verdade), o banco em memoria que
 // entende as consultas das rotas da Sala e de translation-store.ts (filtros do PostgREST, ordem, limite, upsert por
 // chave com ignoreDuplicates, as chaves unicas de webinar_text_translations e webinar_viewer_prefs como 23505), o banco
-// "sem a 202610290009" (as tabelas novas respondem 42P01) e a escola de mentira: uma Live gravada no ar com a live de
+// "sem a 202610300006" (as tabelas novas respondem 42P01) e a escola de mentira: uma Live gravada no ar com a live de
 // origem, uma sessao irma, um outro webinario e as mensagens do chat de cada caso. Importe este modulo antes de
 // carregar o codigo de src/ com import().
 
@@ -313,7 +313,7 @@ export function bancoDaTraducao({ tables = {} } = {}) {
   };
 }
 
-/** Um banco em que as tabelas da traducao ainda nao existem (a 202610290009 pendente): 42P01 em qualquer leitura delas. */
+/** Um banco em que as tabelas da traducao ainda nao existem (a 202610300006 pendente): 42P01 em qualquer leitura delas. */
 export function semAsTabelasDaTraducao(db) {
   const from = db.from.bind(db);
   db.from = (name) => {

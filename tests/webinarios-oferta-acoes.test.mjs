@@ -22,7 +22,7 @@ import {
 // As Server Actions da Oferta (docs/30 §2.2, §2.4, §8.6 e M7; docs/18 §2.3), sem banco: o banco da Oferta em memoria,
 // a permissao por um duble que recusa tudo (o analista sem messaging.write), "next/cache" so anota e os produtos do
 // seletor por um duble do catalogo. Aqui: 403 sem messaging.write em todas; o editor le a oferta e os produtos (e
-// segue sem a lista quando ela falha; banco sem a 202610290005 = pendingMigration); salvar cria e atualiza a oferta
+// segue sem a lista quando ela falha; banco sem a 202610300003 = pendingMigration); salvar cria e atualiza a oferta
 // com as variantes (pesos 1, a letra que saiu e apagada) e audita so ids e contagens; o zod recusa o link sem https e
 // a oferta ligada sem variante; arquivar; Mostrar agora grava a janela da sessao no segundo do servidor com quem
 // mostrou e o prazo real, mostrar de novo guarda o comeco e o prazo; Esconder fecha agora (e grava a linha do minuto
@@ -127,7 +127,7 @@ test("403 sem messaging.write em todas as acoes da Oferta, sem tocar no banco", 
   assert.equal(db.calls.from.length, 0);
 });
 
-test("o editor le a oferta e os produtos; sem oferta, nulo; a lista que falha nao derruba o card; banco sem a 202610290005 = aviso", async () => {
+test("o editor le a oferta e os produtos; sem oferta, nulo; a lista que falha nao derruba o card; banco sem a 202610300003 = aviso", async () => {
   usar({ oferta: false });
   const empty = ok(await actions.loadOfferEditor({ webinarId: WEBINAR }));
   assert.equal(empty.pendingMigration, false);
@@ -154,7 +154,7 @@ test("o editor le a oferta e os produtos; sem oferta, nulo; a lista que falha na
   assert.deepEqual(loaded.products, []);
 
   semAsTabelasDaOferta(usar());
-  assert.deepEqual(ok(await actions.loadOfferEditor({ webinarId: WEBINAR })), { migration: "202610290005", pendingMigration: true });
+  assert.deepEqual(ok(await actions.loadOfferEditor({ webinarId: WEBINAR })), { migration: "202610300003", pendingMigration: true });
 
   usar();
   const missing = await actions.loadOfferEditor({ webinarId: "cccccccc-0000-4000-8000-0000000000ff" });
@@ -354,7 +354,7 @@ test("o console: a janela, na tela pelo relogio do servidor e os cliques por var
   assert.equal(replay.clicks.clicks, 1);
 
   semAsTabelasDaOferta(usar());
-  assert.deepEqual(ok(await actions.loadOfferConsole({ sessionId: SESSION })), { migration: "202610290005", pendingMigration: true });
+  assert.deepEqual(ok(await actions.loadOfferConsole({ sessionId: SESSION })), { migration: "202610300003", pendingMigration: true });
 
   usar();
   assert.equal((await actions.loadOfferConsole({ sessionId: "cccccccc-0000-4000-8000-0000000000ff" })).status, 404);

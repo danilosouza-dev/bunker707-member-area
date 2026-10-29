@@ -8,7 +8,7 @@
 // texto e traduzido uma vez por idioma: a chave fica bloqueada na memoria do processo enquanto o lote roda (outro
 // aluno pedindo a mesma recebe "pendente") e por TRANSLATION_RETRY_MS depois de uma falha; o banco tambem guarda uma
 // vez so (insertTranslations ignora a repetida). O lote nunca lanca: a falha vira log. Limite de pedidos por aluno
-// por minuto na memoria. Sem WEBINAR_TRANSLATION_ENABLED=on ou sem a 202610290009, { enabled: false } e o chat como
+// por minuto na memoria. Sem WEBINAR_TRANSLATION_ENABLED=on ou sem a 202610300006, { enabled: false } e o chat como
 // foi escrito. LGPD: a traducao guarda so o texto (por hash), nunca quem escreveu; "Remover minhas mensagens" apaga a
 // mensagem e a traducao fica sem ligacao com ninguem.
 
@@ -123,7 +123,7 @@ export function resetTranslationState() {
  * O idioma do aluno
  * ---------------------------------------------------------------------------------------------- */
 
-/** GET /api/webinars/preferences: sem o env ou sem a 202610290009, desligado e como foi escrito. */
+/** GET /api/webinars/preferences: sem o env ou sem a 202610300006, desligado e como foi escrito. */
 export async function readViewerPreferences(userId: string, deps: Pick<TranslationDeps, "db" | "env"> = {}): Promise<ViewerPrefsReply> {
   if (!webinarTranslationEnabled(deps.env)) {
     return VIEWER_PREFS_OFF;
@@ -141,7 +141,7 @@ export async function readViewerPreferences(userId: string, deps: Pick<Translati
 
 /**
  * PUT /api/webinars/preferences: grava o idioma (nulo = como foi escrito) e o historico webinar_chat_language_set.
- * Desligado ou sem a 202610290009: nada e gravado e a resposta diz desligado.
+ * Desligado ou sem a 202610300006: nada e gravado e a resposta diz desligado.
  */
 export async function saveViewerPreferences(
   userId: string,
@@ -262,7 +262,7 @@ export type ReadRoomTranslationsInput = {
 
 /**
  * GET /api/webinars/[id]/translations: as guardadas das mensagens que o aluno pode ver nesta sessao, os ids ainda
- * pendentes e o lote das que faltam agendado (uma vez por chave). Desligado ou sem a 202610290009: { enabled: false }.
+ * pendentes e o lote das que faltam agendado (uma vez por chave). Desligado ou sem a 202610300006: { enabled: false }.
  */
 export async function readRoomTranslations(input: ReadRoomTranslationsInput, deps: TranslationDeps = {}): Promise<TranslationsReply> {
   if (!webinarTranslationEnabled(deps.env)) {

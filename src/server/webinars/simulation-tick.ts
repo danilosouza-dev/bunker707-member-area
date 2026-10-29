@@ -4,7 +4,7 @@
 // ou o Encerrar da equipe, o que veio primeiro), congelados uma vez (freezeSimulationSummary: so onde ainda e nulo).
 // E o que o bloco Simulacao do relatorio e dos paineis le; nenhum numero real muda. Uma consulta por tick (lote de 50,
 // as mais antigas primeiro); o webinario e as gravacoes de cada webinario sao lidos uma vez por tick. Uma falha numa
-// sessao vira log e o lote segue; o fim do orcamento do tick (signal) para o lote. Banco sem a 202610290005: registra e
+// sessao vira log e o lote segue; o fim do orcamento do tick (signal) para o lote. Banco sem a 202610300003: registra e
 // devolve zeros (o tick continua verde). A sessao sem a decisao registrada (§8.6, D10) nao mostrou nada na sala
 // (simulationDecisionRecorded): congela zeros. O job e src/server/jobs/webinar-simulation-summaries-job.ts.
 
@@ -45,7 +45,7 @@ export type SimulationSummariesResult = {
   failed: number;
   /** Resumos congelados neste tick. */
   frozen: number;
-  /** Banco sem a 202610290005: nada feito, o tick continua verde. */
+  /** Banco sem a 202610300003: nada feito, o tick continua verde. */
   pendingMigration: boolean;
   /** Sessoes lidas pela consulta. */
   scanned: number;

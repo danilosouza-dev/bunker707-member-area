@@ -9,7 +9,7 @@ import "./support/admin-action-stubs.mjs";
 // Webinarios v4b (docs/30 M8): o valor da venda. sale-amount.ts converte numero ou texto decimal em centavos sem conta
 // de ponto flutuante e a moeda em ISO 4217; a Hotmart le data.purchase.price (ou full_price) com a moeda do bloco; o
 // acesso nao muda com o valor; o store grava amount_cents/currency na linha e, no banco sem as colunas (sem a
-// 202610290005), grava a venda sem elas (dublê do banco, sem rede).
+// 202610300003), grava a venda sem elas (dublê do banco, sem rede).
 
 const hotmart = await import("../src/server/payments/hotmart.ts");
 const model = await import("../src/server/payments/model.ts");
@@ -489,7 +489,7 @@ test("store: o valor vai para amount_cents/currency na mesma linha; sem valor (o
   }
 });
 
-test("store: banco sem as colunas do valor (migracao 202610290005 pendente) grava a venda sem elas, e o repetido continua repetido", async () => {
+test("store: banco sem as colunas do valor (migracao 202610300003 pendente) grava a venda sem elas, e o repetido continua repetido", async () => {
   const avisos = [];
   const original = console.warn;
   console.warn = (...args) => avisos.push(args.join(" "));
@@ -514,7 +514,7 @@ test("store: banco sem as colunas do valor (migracao 202610290005 pendente) grav
     console.warn = original;
   }
 
-  assert.ok(avisos.every((linha) => /migracao 202610290005 pendente/.test(linha)), "o log diz a migracao");
+  assert.ok(avisos.every((linha) => /migracao 202610300003 pendente/.test(linha)), "o log diz a migracao");
   assert.equal(avisos.length, 3);
 
   const duplicado = bancoDeVendas([{ data: null, error: { code: "23505", message: "duplicate key" } }]);

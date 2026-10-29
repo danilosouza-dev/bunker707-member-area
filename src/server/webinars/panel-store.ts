@@ -1,7 +1,7 @@
-// Os paineis "Lives ao vivo" e "Lives gravadas" no banco (docs/30 §3.1 a §3.3 e §4.6; migracao 202610290004): a RPC
+// Os paineis "Lives ao vivo" e "Lives gravadas" no banco (docs/30 §3.1 a §3.3 e §4.6; migracao 202610300002): a RPC
 // webinar_panel e as sessoes e webinarios do periodo, pela service role. Quem monta os numeros, os graficos, o cache
 // de 60 s (unstable_cache com o minuto na chave e a tag "webinars") e os CSVs e a frente dos paineis
-// (panel-model.ts / panel-queries.ts); aqui so o acesso. Banco sem a 202610290004: o erro sobe como
+// (panel-model.ts / panel-queries.ts); aqui so o acesso. Banco sem a 202610300002: o erro sobe como
 // PendingMigrationError (a tela mostra o aviso com WEBINARS_PANELS_MIGRATION).
 
 import "server-only";

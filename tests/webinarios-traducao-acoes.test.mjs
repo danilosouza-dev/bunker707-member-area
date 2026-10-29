@@ -8,7 +8,7 @@ import { MSG, TEXTO_MESTRE, TEXTO_TURMA, WEBINAR, montarBanco, semAsTabelasDaTra
 // em memoria de tests/support/webinarios-v4-traducao-banco.mjs e a permissao por um duble. A primeira traducao
 // guardada vale para sempre e o mesmo texto se repete em toda sessao: a acao apaga as traducoes do texto da mensagem
 // (todos os idiomas, so as dele), com a auditoria so de contagem e ids; 403 sem messaging.write; 404 na mensagem que
-// nao existe; banco sem a 202610290009, 409 com a frase.
+// nao existe; banco sem a 202610300006, 409 com a frase.
 
 const estado = (globalThis.__traducaoAcoes ??= { negar: false });
 
@@ -88,7 +88,7 @@ test("Refazer tradução: apaga as traducoes do texto da mensagem em todos os id
   assert.equal(typeof COPY.refeita(2), "string");
 });
 
-test("Refazer tradução recusa: 403 sem messaging.write (nada apagado), 404 na mensagem que nao existe e 409 sem a 202610290009", async () => {
+test("Refazer tradução recusa: 403 sem messaging.write (nada apagado), 404 na mensagem que nao existe e 409 sem a 202610300006", async () => {
   let db = montar();
   estado.negar = true;
   const negado = await clearMessageTranslations({ messageId: MSG.turma });
@@ -101,5 +101,5 @@ test("Refazer tradução recusa: 403 sem messaging.write (nada apagado), 404 na 
 
   db = semAsTabelasDaTraducao(montar());
   const pendente = await clearMessageTranslations({ messageId: MSG.turma });
-  assert.deepEqual([pendente.status, pendente.error], [409, COPY.precisaMigracao("202610290009")]);
+  assert.deepEqual([pendente.status, pendente.error], [409, COPY.precisaMigracao("202610300006")]);
 });

@@ -1,9 +1,9 @@
 // O Assistente de IA, os atendentes e o modo hibrido no banco (docs/30 §1.6, §2.4, §6.6 e D24; migracao
-// 202610290006), pela service role: o Assistente ligado no webinario, as perguntas e respostas cadastradas, o
+// 202610300004), pela service role: o Assistente ligado no webinario, as perguntas e respostas cadastradas, o
 // "Responder tudo" da sessao, quem esta atendendo, quem assumiu cada pergunta, o "Falar com a equipe" e os pedidos ao
 // Assistente (um por mensagem ou pergunta, sem texto). Quem decide se o Assistente responde, monta o contexto e chama o
 // gateway de IA e a frente do Assistente (assistant-model.ts / assistant.ts); aqui so o acesso as linhas. Banco sem a
-// 202610290006: o erro sobe como PendingMigrationError (WEBINARS_ASSISTANT_MIGRATION).
+// 202610300004: o erro sobe como PendingMigrationError (WEBINARS_ASSISTANT_MIGRATION).
 
 import "server-only";
 
@@ -112,7 +112,7 @@ export async function setSessionReplyAll(db: WebinarsDb, input: { on: boolean; s
 
 /**
  * O "Começar cada sessão com Responder tudo" do webinario, para as sessoes que nascem depois de salvar o card (o
- * editor e o "Começa quando você entra"). Banco sem a 202610290006: false (a coluna nem existe).
+ * editor e o "Começa quando você entra"). Banco sem a 202610300004: false (a coluna nem existe).
  */
 export async function replyAllDefaultFor(db: WebinarsDb, webinarId: string): Promise<boolean> {
   try {

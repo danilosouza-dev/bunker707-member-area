@@ -6,7 +6,7 @@ import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../supp
 import { SENHA_DE_TESTE, limparWebinarios, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Webinarios, fase 4 (docs/30 §1.6, §2.4, §3.4, §4.2, §5.1, §6.6, D24 e §11; docs/18 §3) contra o banco LOCAL de
-// verdade, com as migracoes 202610290006, 202610290008 e 202610290009 aplicadas:
+// verdade, com as migracoes 202610300004, 202610300005 e 202610300006 aplicadas:
 // - o Assistente: webinar_ai_requests e unico por alvo (insertAiRequest devolve `created: false` na segunda vez: o
 //   Assistente nunca responde duas vezes), "Falar com a equipe" pela rota POST /api/webinars/[id]/handoff (a marca na
 //   pergunta do proprio aluno, uma vez; a de outro aluno: 404) e as linhas ai/* de webinar_report (respostas sem as
@@ -331,7 +331,7 @@ test("4. o Assistente: webinar_ai_requests unico por alvo, Falar com a equipe pe
   assert.equal(marca.answer_source, "ai");
 
   // A mensagem do chat do tipo pergunta abre a pergunta ligada (message_id) e o "Falar com a equipe" marca as duas: o
-  // pedido conta uma vez (revisao da fase 4, 202610290010).
+  // pedido conta uma vez (revisao da fase 4, 202610300007).
   unwrap(
     await db.from("webinar_questions").insert({
       body: "Pelo chat",

@@ -246,7 +246,7 @@ test("painel Perguntas do console com as marcas: Respondida pelo Assistente, Ped
 
 test("card Assistente: migracao pendente, ambiente desligado, sem conexao de IA e o formulario com as perguntas cadastradas", () => {
   const base = { canWrite: true, disabled: false, webinarId: "w1" };
-  assert.match(textOf(render(AssistantCardBody, { ...base, data: { migration: "202610290006", pendingMigration: true } })), /migração 202610290006/);
+  assert.match(textOf(render(AssistantCardBody, { ...base, data: { migration: "202610300004", pendingMigration: true } })), /migração 202610300004/);
   assert.equal(textOf(render(AssistantCardBody, { ...base, data: { aiAvailable: true, envEnabled: false, items: [], pendingMigration: false, settings: { enabled: false, replyAllDefault: false } } })), COPY.card.desligadoNoAmbiente);
   assert.equal(textOf(render(AssistantCardBody, { ...base, data: { aiAvailable: false, envEnabled: true, items: [], pendingMigration: false, settings: { enabled: false, replyAllDefault: false } } })), COPY.card.semIa);
 

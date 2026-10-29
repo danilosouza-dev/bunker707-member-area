@@ -1,4 +1,4 @@
-// A Simulacao completa no banco (docs/30 §2.2, §3.5, §4.3, §6.6, §8.6, D6, D10 e D25; migracao 202610290005), pela
+// A Simulacao completa no banco (docs/30 §2.2, §3.5, §4.3, §6.6, §8.6, D6, D10 e D25; migracao 202610300003), pela
 // service role: as regras de cada sessao gravada (contador, entradas, avisos de venda), a decisao registrada (o selo
 // "Ao vivo" e a frase de §8.6 com quem e quando, colunas da fase 2) e o resumo congelado no fim. Estas colunas so sao
 // lidas aqui e pelo bloco Simulacao; nenhuma consulta de numero real as le (D6, M6). Quem calcula o contador e as

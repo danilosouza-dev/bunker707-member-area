@@ -120,7 +120,7 @@ test("rotulos: balde em mm:ss, tempo assistido, porcentagem e alunos", () => {
   assert.equal(report.studentsLabel(12), "12 alunos");
 });
 
-// Fase 4 (202610290005 e 202610290006): a Oferta, as Respostas do Assistente e o bloco Simulacao como a RPC devolveu
+// Fase 4 (202610300003 e 202610300004): a Oferta, as Respostas do Assistente e o bloco Simulacao como a RPC devolveu
 // na conferencia das migracoes (bigint como texto; uma variante sem compra; duas moedas).
 const RPC_V4 = [
   { metric: "offer", item: "seen", total: "4", students: "3" },

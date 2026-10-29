@@ -101,7 +101,7 @@ import {
 // Quem pode da live por regras (docs/22 §3, docs/30 §1.6): "Ganhou acesso recentemente" (hoje, 24 h, 48 h ou N
 // horas, a qualquer produto ou a um dos escolhidos) e "Participação em lives", nos dois modos: o que o aluno fez (com
 // o "não" no mesmo seletor) numa live da lista `webinars` ou em qualquer uma. No segmento comum entram tambem as acoes
-// do follow-up (viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card; D49):
+// do follow-up (viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card; D52):
 // com elas "qualquer live" sai e a live e obrigatoria. Dentro de um fluxo e no Quem pode da live
 // (`webinarFollowUps={false}`) so "participou" e "garantiu vaga".
 

@@ -440,7 +440,7 @@ test("fase 4 na pagina: o Assistente ligado no webinario, o trecho da transcrica
   assert.ok(consultas(db, "webinar_chat_messages").every((query) => query.filters.some(([metodo, coluna, valor]) => metodo === "eq" && coluna === "source" && valor === "scripted")), "o roteiro que entrou e lido so para o bloco Simulacao");
 });
 
-test("fase 4 na pagina: banco sem a 202610290005 ou a 202610290006 deixa o aviso so no bloco; a Live ao vivo nao le a Simulacao nem oferece o CSV dela", async () => {
+test("fase 4 na pagina: banco sem a 202610300003 ou a 202610300004 deixa o aviso so no bloco; a Live ao vivo nao le a Simulacao nem oferece o CSV dela", async () => {
   const db = bancoV4({ semMigracao: ["ofertas", "assistente"] });
   const selected = (await semCacheV4(db))?.selected;
   assert.ok(selected, "a pagina abre");
@@ -488,7 +488,7 @@ test("M9: os CSVs nunca passam pelo cache; cada pedido le o banco (a lista por a
   assert.equal(consultas(db, "profiles").length, 2);
 });
 
-test("a lista por aluno da pagina (§3.4.1): a variante que cada aluno clicou na sessao gravada; banco sem a 202610290005, vazio; na Live ao vivo nem le os cliques", async () => {
+test("a lista por aluno da pagina (§3.4.1): a variante que cada aluno clicou na sessao gravada; banco sem a 202610300003, vazio; na Live ao vivo nem le os cliques", async () => {
   const clique = (userId, variant_label) => ({ clicked_at: "2026-11-05T23:20:00.000Z", converted_sale_grant_id: null, id: `${userId}-${variant_label}`, offer_id: "f0000000-0000-4000-8000-000000000001", session_id: SESSAO_ID, user_id: userId, variant_label });
   const db = bancoV4({ cliques: [clique(ALUNA, "B"), clique(ALUNA, "B"), clique(ALUNO, "Z")] });
   const selected = (await semCacheV4(db))?.selected;

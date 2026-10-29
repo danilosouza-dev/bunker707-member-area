@@ -1,5 +1,5 @@
 // Schemas zod da Oferta (fase 4b; docs/30 §2.2, §2.4 e §5.1). Modulo puro (sem "server-only", imports relativos; zod
-// v4): tests/webinarios-v4-contratos.test.mjs carrega direto pelo Node. Os limites sao os checks da 202610290005
+// v4): tests/webinarios-v4-contratos.test.mjs carrega direto pelo Node. Os limites sao os checks da 202610300003
 // (OFFER_LIMITS); as mensagens passam pela lista PROIBIDAS_WEBINARIO.
 
 import { z } from "zod";

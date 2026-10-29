@@ -6,7 +6,7 @@
 // todos os webinarios recebe 409 banned; fora da janela, escondida ou com o prazo vencido, 409 offer_hidden; o mesmo
 // aluno, oferta e sessao em ate 10 s recebe o mesmo link; senao um click_token novo, o clique gravado e o registro
 // webinar_offer_clicked (so ids e numeros) que a rota grava depois da resposta. O link do checkout so sai aqui, com
-// ?b7=<token>. Banco sem a 202610290005: o aluno recebe { offer: null } e o console o aviso da migracao.
+// ?b7=<token>. Banco sem a 202610300003: o aluno recebe { offer: null } e o console o aviso da migracao.
 
 import "server-only";
 
@@ -61,7 +61,7 @@ export class OfferHiddenError extends WebinarError {
   }
 }
 
-/** A Oferta do webinario; banco sem a 202610290005, nula (a sala segue sem o card). */
+/** A Oferta do webinario; banco sem a 202610300003, nula (a sala segue sem o card). */
 async function offerOrNull(load: () => Promise<WebinarOffer | null>): Promise<WebinarOffer | null> {
   try {
     return await load();

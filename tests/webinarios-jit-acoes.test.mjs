@@ -408,7 +408,7 @@ test("o editor e a lista nao contam nem listam sessoes jit; o editor recebe as r
   assert.equal(lista.numbers.webinars, 1, "so a hora marcada no periodo");
 });
 
-test("banco sem a 202610290008: ler e gravar respondem 409 com a frase da migracao, nunca o erro cru", async () => {
+test("banco sem a 202610300005: ler e gravar respondem 409 com a frase da migracao, nunca o erro cru", async () => {
   const db = usar();
   const original = db.from.bind(db);
   // A coluna webinars.jit_settings (e webinar_sessions.jit) ainda nao existe: o PostgREST responde 42703.
@@ -421,7 +421,7 @@ test("banco sem a 202610290008: ler e gravar respondem 409 com a frase da migrac
     return chain;
   };
   const lido = await actions.loadJitSettings({ webinarId: WEBINAR });
-  assert.deepEqual([lido.status, lido.error], [409, WEBINAR_COPY.jit.servidor.precisaMigracao("202610290008")]);
+  assert.deepEqual([lido.status, lido.error], [409, WEBINAR_COPY.jit.servidor.precisaMigracao("202610300005")]);
   const gravado = await actions.saveJitSettings(pedido());
-  assert.deepEqual([gravado.status, gravado.error], [409, WEBINAR_COPY.jit.servidor.precisaMigracao("202610290008")]);
+  assert.deepEqual([gravado.status, gravado.error], [409, WEBINAR_COPY.jit.servidor.precisaMigracao("202610300005")]);
 });

@@ -14,26 +14,27 @@ import {
 } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da fase 4a dos webinarios (docs/30 §3.1 a §3.3, §3.6, §4.6 e §11; docs/18 §1.2): a migracao
-// 202610290004_webinars_v4a_paineis.sql.
-// - as migracoes ate a 202610290003 (aplicadas) continuam byte a byte, e a 0004 e o texto exato (hash);
+// 202610300002_webinars_v4a_paineis.sql, a primeira da fase 4, logo depois da 202610300001 do "Quem pode" por regras.
+// - as migracoes ate a 202610300001 (aplicadas na nuvem de teste) continuam byte a byte, e a 202610300002 e o texto
+//   exato (hash);
 // - tres secoes MCP, idempotente, sem drop, delete, truncate, politica nem concurrently;
 // - webinar_panel so do service_role, security invoker, a assinatura exata, so alunos (admin_roles fora) e so numeros
 //   reais: o chat so `audience`, nunca `scripted` / `ai` nem as colunas de Simulacao (D6, D10, M6);
-// - as metricas que a 0004 devolve estao nas listas do app (PANEL_SESSION_METRICS / PANEL_PERIOD_METRICS) e a
+// - as metricas que a 202610300002 devolve estao nas listas do app (PANEL_SESSION_METRICS / PANEL_PERIOD_METRICS) e a
 //   retencao sai nos 21 pontos de PANEL_RETENTION_POINTS.
 
-const MIGRATION = "supabase/migrations/202610290004_webinars_v4a_paineis.sql";
+const MIGRATION = "supabase/migrations/202610300002_webinars_v4a_paineis.sql";
 const model = await import("../src/server/webinars/model.ts");
 
-test("as migracoes ate a 202610290003 continuam byte a byte; a 0004 e o texto exato (aplicar antes do merge)", () => {
-  const applied = cumulativeHash("202610290003_webinars_v3_ajustes.sql");
-  assert.equal(applied.count, 56);
-  assert.equal(applied.hash, "bc05a69924908f0ea3da37eb1a6315e6d662371709a82a4b1351e47a857d4273", "uma migracao ja aplicada mudou");
-  assert.ok(migrationFiles().includes("202610290004_webinars_v4a_paineis.sql"));
-  assert.equal(fileHash(MIGRATION), "f1e5b0de3405a6d8d5c24c1bf098e7253e8ed2a4c4bcc97ff3357fe91dc976c5", "a 202610290004 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+test("as migracoes ate a 202610300001 continuam byte a byte; a 202610300002 e o texto exato (aplicar antes do merge)", () => {
+  const applied = cumulativeHash("202610300001_webinars_quem_pode_regras.sql");
+  assert.equal(applied.count, 57);
+  assert.equal(applied.hash, "731f61dfc62bed59450739366af5f18b4f5ff2ffb9aa0d9931f4fc8f54155f2d", "uma migracao ja aplicada mudou");
+  assert.ok(migrationFiles().includes("202610300002_webinars_v4a_paineis.sql"));
+  assert.equal(fileHash(MIGRATION), "6c5b7f779e3aace5bc9e4aaf2a66b110a8b56e54d448884abfa08addcb1da7e0", "a 202610300002 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
-test("a 0004: tres secoes MCP, idempotente, so acrescenta", () => {
+test("a 202610300002: tres secoes MCP, idempotente, so acrescenta", () => {
   const migration = read(MIGRATION);
   assertSections(migration, 3);
   assertOnlyAdds(migration);
@@ -60,7 +61,7 @@ test("webinar_panel: so alunos e so numeros reais (nunca scripted, ai nem simula
   assert.match(panel, /staff as \(select a\.user_id from public\.admin_roles a\)/);
   assert.ok((panel.match(/not exists \(select 1 from staff where staff\.user_id = /g) ?? []).length >= 8, "a equipe fora de cada fonte");
   assert.match(panel, /m\.source = 'audience'/, "mensagens: so alunos (docs/30 §3.2)");
-  assert.doesNotMatch(panel, /scripted|'ai'|simulation_|simulated_|sim_/, "a 0004 nao le nada simulado (D6, M6; 'simulated' e o tipo da sessao)");
+  assert.doesNotMatch(panel, /scripted|'ai'|simulation_|simulated_|sim_/, "a 202610300002 nao le nada simulado (D6, M6; 'simulated' e o tipo da sessao)");
   assert.match(panel, /ss\.presence_curve is null and ps\.bucket >= 0/, "as amostras so da sessao em andamento");
 });
 
@@ -72,7 +73,7 @@ test("webinar_panel: as metricas batem com as listas do app e a retencao tem os 
     assert.ok([...model.PANEL_SESSION_METRICS, ...model.PANEL_PERIOD_METRICS].includes(metric), `${metric} esta nas listas do app`);
   }
   for (const metric of ["duration", "registered", "present", "attended_registered", "watch_sum", "watch_max", "reached_end", "peak", "messages", "question", "reactions", "poll_answers", "replay_viewers", "visitors", "retention"]) {
-    assert.ok(named.has(metric), `${metric} sai na 0004`);
+    assert.ok(named.has(metric), `${metric} sai na 202610300002`);
   }
   assert.match(panel, /generate_series\(0, 100, 5\)/);
   assert.deepEqual(model.PANEL_RETENTION_POINTS, Array.from({ length: 21 }, (_, index) => index * 5));

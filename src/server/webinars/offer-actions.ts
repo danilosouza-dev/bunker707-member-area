@@ -5,7 +5,7 @@
 // com messaging.write por runAdminAction; as escritas gravam recordAudit so com ids e contagens (nunca o texto das
 // variantes nem o link) e derrubam o cache do relatorio (invalidateWebinars). O relogio e sempre o do servidor: o
 // "Mostrar agora" aparece no segundo do video de agora (hora marcada da sessao gravada) e so na sessao gravada que
-// ainda nao terminou. Banco sem a 202610290005: a leitura devolve { pendingMigration } e a tela mostra o aviso.
+// ainda nao terminou. Banco sem a 202610300003: a leitura devolve { pendingMigration } e a tela mostra o aviso.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -43,7 +43,7 @@ export type OfferConsoleData = PendingOfferMigration | { pendingMigration: false
 
 const pending = (): PendingOfferMigration => ({ migration: WEBINARS_OFFERS_MIGRATION, pendingMigration: true });
 
-/** Uma escrita que esbarra no banco sem a 202610290005 vira 409 com a frase da migracao (nunca um 500 generico). */
+/** Uma escrita que esbarra no banco sem a 202610300003 vira 409 com a frase da migracao (nunca um 500 generico). */
 async function withOfferTables<T>(write: () => Promise<T>): Promise<T> {
   try {
     return await write();

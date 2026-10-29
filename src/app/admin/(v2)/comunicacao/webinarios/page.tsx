@@ -33,7 +33,7 @@ function readNow() {
 }
 
 // Comunicação › Webinários (docs/30 §2.1 e §3): os cinco numeros do periodo da barra superior (Compareceram e
-// Assistiram o replay pela RPC webinar_panel, em "—" sem a migracao 202610290004), as abas da pagina (?aba=), os
+// Assistiram o replay pela RPC webinar_panel, em "—" sem a migracao 202610300002), as abas da pagina (?aba=), os
 // filtros (?situacao=, ?tipo=, ?busca=) e a lista paginada (?pagina=) com as acoes de cada webinario; nas abas Lives
 // ao vivo e Lives gravadas, os paineis de §3.2 e §3.3 (WebinarPanelTab: filtros da aba no endereco, um Suspense por
 // bloco). Pagina depois da ultima volta para a ultima que tem webinarios (ou para a primeira). Banco sem a migracao

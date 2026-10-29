@@ -15,7 +15,7 @@
 // acesso) e "webinar" (Participação em lives). Tipos novos, e nao um op novo numa regra antiga: o app de antes avalia
 // um tipo que nao conhece como false (seguro), e um op desconhecido de "access_age" cairia no "ha mais de".
 //
-// "Participação em lives" e uma regra so (docs/30 §1.6 e D49; a regra "Webinário" da fase 4 virou acoes dela na
+// "Participação em lives" e uma regra so (docs/30 §1.6 e D52; a regra "Webinário" da fase 4 virou acoes dela na
 // integracao de 30/10/2026): o que o aluno fez numa live. "attended" (entrou na sala) e "registered" (garantiu vaga)
 // valem numa live ou em qualquer uma (webinarId null), no segmento e dentro dos fluxos, e vem da RPC
 // communication_webinar_facts (context.webinarFactsLoaded). As acoes do follow-up ("watched_replay", "offer_seen",
@@ -499,7 +499,7 @@ function gainedAccessSince(facts: AudienceStudentFacts, productIds: readonly str
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Participacao em lives (docs/30 §1.6, D49)
+ * Participacao em lives (docs/30 §1.6, D52)
  * ---------------------------------------------------------------------------------------------- */
 
 /** O que o aluno fez numa live, pelo fato do follow-up. "clicou e não comprou" = clicou no card e nenhuma compra ligada ao clique. */

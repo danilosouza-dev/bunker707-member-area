@@ -34,9 +34,9 @@ export function notFound() { throw new Error("notFound"); }`,
   "@/server/webinars/panel-queries": `export async function getWebinarPanel() { return { status: "error" }; }
 export async function getPanelPresence() { return { status: "empty" }; }`,
   "@/server/webinars/report-queries": `export async function getWebinarReport() { return { status: "error" }; }`,
-  "@/server/webinars/db": `export const WEBINARS_MIGRATION = "202610290008";
-export const WEBINARS_PANELS_MIGRATION = "202610290004";
-export const WEBINARS_OFFERS_MIGRATION = "202610290005";`
+  "@/server/webinars/db": `export const WEBINARS_MIGRATION = "202610300007";
+export const WEBINARS_PANELS_MIGRATION = "202610300002";
+export const WEBINARS_OFFERS_MIGRATION = "202610300003";`
 };
 
 function withExtension(base) {
@@ -372,8 +372,8 @@ test("vazios, migracao pendente e erro", () => {
   assert.match(textOf(filteredMarkup), /Sem dados no período Nenhuma sessão do período combina com esses filtros\./);
   assert.match(filteredMarkup, /href="\/admin\/comunicacao\/webinarios\?aba=ao-vivo&amp;periodo=30d"[^>]*>Limpar filtros/);
 
-  const pending = textOf(html(createElement(panel.WebinarPanelContent, { context: context("live"), presence: { status: "empty" }, result: { migration: "202610290004", status: "pending_migration" } })));
-  assert.match(pending, /Esta tela precisa da atualização do banco \(migração 202610290004\)\./);
+  const pending = textOf(html(createElement(panel.WebinarPanelContent, { context: context("live"), presence: { status: "empty" }, result: { migration: "202610300002", status: "pending_migration" } })));
+  assert.match(pending, /Esta tela precisa da atualização do banco \(migração 202610300002\)\./);
   assert.doesNotMatch(pending, /Lives realizadas/);
 
   const errorMarkup = html(createElement(panel.WebinarPanelContent, { context: context("live"), presence: { status: "empty" }, result: { status: "error" } }));
@@ -393,7 +393,7 @@ test("vazios, migracao pendente e erro", () => {
   assert.match(comFiltros, /href="\/admin\/comunicacao\/webinarios\?aba=gravadas&amp;situacao=ended&amp;periodo=7d"[^>]*>Tentar de novo/);
 
   const noOffers = html(createElement(panel.WebinarPanelContent, { context: context("simulated"), presence: { status: "empty" }, result: { status: "ok", view: recordedView({ offers: null, simulations: null }) } }));
-  assert.match(textOf(noOffers), /Esta parte precisa da atualização do banco \(migração 202610290005\)\./);
+  assert.match(textOf(noOffers), /Esta parte precisa da atualização do banco \(migração 202610300003\)\./);
   assert.match(textOf(noOffers), /A oferta aparece depois da atualização do banco\./);
   assert.match(textOf(noOffers), /Escolha uma sessão que já aconteceu para ver a curva\./);
   assert.match(textOf(noOffers.slice(noOffers.indexOf('data-panel-simulation=""'))), /Maior número do contador —/);

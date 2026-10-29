@@ -1,12 +1,12 @@
-// O follow-up das lives (docs/30 §1.6 e §4.7, D49): o que as acoes do follow-up da regra "Participação em lives" da
+// O follow-up das lives (docs/30 §1.6 e §4.7, D52): o que as acoes do follow-up da regra "Participação em lives" da
 // Comunicacao (viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card) leem do
-// banco: o que cada aluno fez em cada live citada (RPC webinar_follow_up_facts da migracao 202610290005: tira a equipe
+// banco: o que cada aluno fez em cada live citada (RPC webinar_follow_up_facts da migracao 202610300003: tira a equipe
 // e nunca le a Simulacao). Quem le e o carregador da Comunicacao (loadAudienceWebinarFacts em audience-facts.ts e o do
 // tick em facts-loader.ts), uma vez por tick para cada live; a avaliacao e audience-model.ts. A vaga e a presenca da
 // mesma regra vem de communication_webinar_facts (audience-facts.ts), nunca daqui.
 //
 // Live apagada (ou que nao existe) nao e lida: a regra que a cita nunca combina, negada ou nao. Banco sem a
-// 202610290005: nenhuma live e lida (a mesma regra), com um log; o resto do segmento segue. A RPC devolve uma linha por
+// 202610300003: nenhuma live e lida (a mesma regra), com um log; o resto do segmento segue. A RPC devolve uma linha por
 // aluno e live e o PostgREST corta qualquer resposta em 1000 linhas (RPC tambem): a leitura e paginada em ordem
 // (webinar_id, user_id), como fetchWebinarFollowUpFacts (offer-store.ts), e aqui filtra antes as lives apagadas e
 // devolve o formato da Comunicacao.
@@ -62,7 +62,7 @@ async function existingWebinars(db: WebinarsDb, ids: readonly string[]) {
 
 /**
  * O follow-up destas lives, por aluno (com `userIds`, so destes alunos). Live apagada fica fora de `loadedIds`; banco
- * sem a migracao 202610290005 (ou sem webinarios) devolve nada lido.
+ * sem a migracao 202610300003 (ou sem webinarios) devolve nada lido.
  */
 export async function loadWebinarFollowUpFacts(db: WebinarsDb, webinarIds: readonly string[], options: { userIds?: readonly string[] } = {}): Promise<WebinarFollowUpRead> {
   const byUser = new Map<string, Record<string, WebinarFollowUpFact>>();

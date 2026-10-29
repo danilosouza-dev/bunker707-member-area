@@ -25,7 +25,7 @@ import {
 // .../simulation?sessao=&from=&to=: 401 sem sessao, 400 sem id, sem ?sessao= ou com a janela maior que 120 s, 404 para
 // a sessao de outro webinario; a sessao gravada com regra devolve o contador, as entradas e os avisos da janela, iguais
 // ao modelo e iguais para todos os alunos, sem a semente nem as regras; replay, live, sessao sem regra e banco sem a
-// 202610290005 devolvem enabled false; nada vai para student_events; a resposta e sem cache.
+// 202610300003 devolvem enabled false; nada vai para student_events; a resposta e sem cache.
 
 const sessao = (globalThis.__simulacaoRotasSessao ??= { user: null });
 
@@ -135,7 +135,7 @@ test("a sessao gravada com regra: o contador, as entradas e os avisos da janela,
   assert.equal(db.calls.writes.length, 0, "a rota so le");
 });
 
-test("replay, live, sessao sem regra, sessao encerrada antes do minuto e banco sem a 202610290005 devolvem enabled false com listas vazias", async () => {
+test("replay, live, sessao sem regra, sessao encerrada antes do minuto e banco sem a 202610300003 devolvem enabled false com listas vazias", async () => {
   montar({ sessao: regras });
   const vazio = (from, to) => ({ counter: [], enabled: false, from, joins: [], saleNotices: [], to });
 
@@ -162,7 +162,7 @@ test("replay, live, sessao sem regra, sessao encerrada antes do minuto e banco s
   montar({ sessao: regras }, { semColunas: true });
   const pendente = await ler();
   assert.equal(pendente.status, 200);
-  assert.deepEqual(pendente.body.data, vazio(0, 120_000), "banco sem a 202610290005: a sala segue como hoje");
+  assert.deepEqual(pendente.body.data, vazio(0, 120_000), "banco sem a 202610300003: a sala segue como hoje");
 });
 
 test("CDC (§8.6, D10): a regra gravada sem a decisao registrada (sem a frase marcada ou sem a hora) nao mostra nada ao aluno", async () => {

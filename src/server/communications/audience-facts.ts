@@ -14,7 +14,7 @@ import "server-only";
 // nunca combina. loadAudienceFactsFor monta os mesmos fatos so para alguns alunos (lote do motor dos
 // fluxos, em pedacos de 150), com a mesma conta (buildStudentFacts).
 //
-// Participação em lives (docs/30 §1.6, D49): as lives de cada aluno chegam por um carregador so
+// Participação em lives (docs/30 §1.6, D52): as lives de cada aluno chegam por um carregador so
 // (loadAudienceWebinarFacts) e um juntar so (attachWebinarFacts), em facts.webinars, e so o que as regras pedem
 // (audienceFactsRequest): as vagas e presencas pela RPC communication_webinar_facts (migracao 202610300001; opcao
 // `webinars`; marca context.webinarFactsLoaded) e o follow-up so das lives citadas pelas acoes dele

@@ -5,7 +5,7 @@
 // (translationSourceHash do corpo). A primeira traducao guardada vale para sempre (insertTranslations ignora a
 // repetida) e o mesmo texto se repete em toda sessao (o roteiro, a linha mestre): sem isto, uma traducao errada ou
 // envenenada nao teria como sair. A proxima leitura da sala traduz de novo. messaging.write; a auditoria leva so a
-// contagem e os ids, nunca o texto. Banco sem a 202610290009: 409 com a frase da migracao.
+// contagem e os ids, nunca o texto. Banco sem a 202610300006: 409 com a frase da migracao.
 
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";

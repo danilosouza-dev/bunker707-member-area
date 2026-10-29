@@ -1,8 +1,8 @@
-// "Comeca quando voce entra" no banco (docs/30 §1.2, §1.6, §2.2, A14 e D25; migracao 202610290008), pela service
+// "Comeca quando voce entra" no banco (docs/30 §1.2, §1.6, §2.2, A14 e D25; migracao 202610300005), pela service
 // role: as regras do webinario (webinars.jit_settings) e a sessao `jit` de cada horario, criada quando o primeiro aluno
 // chega (o indice unico (webinar_id, scheduled_at) where jit garante uma por horario: no 23505, le a que ja existe).
 // Quem calcula o proximo horario, a janela de horas de Sao Paulo e a espera e jit-model.ts, da frente do
-// just-in-time; aqui so o acesso as linhas. Banco sem a 202610290008: PendingMigrationError (WEBINARS_JIT_MIGRATION).
+// just-in-time; aqui so o acesso as linhas. Banco sem a 202610300005: PendingMigrationError (WEBINARS_JIT_MIGRATION).
 
 import "server-only";
 

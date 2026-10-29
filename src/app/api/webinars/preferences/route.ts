@@ -11,7 +11,7 @@ import { viewerPrefsBodySchema } from "@/server/webinars/translation-schemas";
 // (uma linha por aluno em webinar_viewer_prefs) e o historico webinar_chat_language_set { language }, e devolve o mesmo
 // formato. Sessao obrigatoria (401); o PUT conta no teto de 30 escritas por minuto do aluno (429 com Retry-After),
 // corpo em JSON de ate 4 KB (413/400) e idioma fora da lista: 400. Sem WEBINAR_TRANSLATION_ENABLED=on ou sem a
-// 202610290009: { chatLanguage: null, enabled: false } e nada e gravado.
+// 202610300006: { chatLanguage: null, enabled: false } e nada e gravado.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

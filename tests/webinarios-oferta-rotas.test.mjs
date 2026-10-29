@@ -23,7 +23,7 @@ import {
 
 // As rotas da Oferta do aluno (docs/30 §1.6, §5.1, §8.6 e M7; docs/18 §2.2), sem banco: o banco da Oferta em memoria
 // (tests/support/webinarios-v4-oferta-banco.mjs) e a sessao do aluno pelo teste. GET .../offer: 401 sem sessao, 400
-// sem id ou sem ?sessao=, 404 para a sessao de outro webinario; a live e o banco sem a 202610290005 devolvem
+// sem id ou sem ?sessao=, 404 para a sessao de outro webinario; a live e o banco sem a 202610300003 devolvem
 // { offer: null }; antes do minuto a janela vem sem gravar nada; dentro dela a linha da sessao e gravada uma vez com a
 // foto e o prazo real; quem ja tem o produto ou ja comprou nao recebe o card; rascunho, Nunca e o botao da equipe sem
 // o Mostrar agora tambem nao; o replay grava a linha sem prazo. POST .../offer-click: o link do checkout da variante
@@ -169,7 +169,7 @@ test("GET dentro da janela: grava a linha da sessao uma vez com a foto das varia
   assert.equal(db.calls.writes.filter((write) => write.table === "webinar_offer_displays").length, 1);
 });
 
-test("GET: a live, quem ja tem o produto, quem ja comprou pela oferta, rascunho, Nunca e o banco sem a 202610290005 recebem { offer: null }", async () => {
+test("GET: a live, quem ja tem o produto, quem ja comprou pela oferta, rascunho, Nunca e o banco sem a 202610300003 recebem { offer: null }", async () => {
   montar();
   assert.equal((await ler(LIVE_SESSION)).body.data.offer, null, "a sala ao vivo nunca tem card");
 

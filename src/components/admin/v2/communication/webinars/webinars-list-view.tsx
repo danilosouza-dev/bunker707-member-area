@@ -28,7 +28,7 @@ import { WebinarsTable } from "./webinars-table";
 
 // Comunicacao > Webinários (docs/30 §2.1): cabecalho com "Novo webinário", as abas de Comunicacao, os cinco
 // numeros do periodo da barra superior (sem dado, "—" e "Sem dados no período"; Compareceram e Assistiram o replay
-// vem de webinar_panel, getWebinarListNumbers, e ficam em "—" com a migracao 202610290004 pendente), as abas da
+// vem de webinar_panel, getWebinarListNumbers, e ficam em "—" com a migracao 202610300002 pendente), as abas da
 // pagina (Webinários · Lives ao vivo · Lives gravadas; as duas ultimas sao os paineis de §3, montados pela pagina
 // em `panel`), as pilulas de filtro, a busca pelo titulo e a tabela paginada (?pagina=) com o menu "…" por linha.
 

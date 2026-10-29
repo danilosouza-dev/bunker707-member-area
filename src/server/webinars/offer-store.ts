@@ -1,8 +1,8 @@
-// A Oferta no banco (docs/30 §2.2, §2.4, §4.2, §5.1, M7 e M8; migracao 202610290005), pela service role: a Oferta do
+// A Oferta no banco (docs/30 §2.2, §2.4, §4.2, §5.1, M7 e M8; migracao 202610300003), pela service role: a Oferta do
 // webinario e as variantes, o que cada sessao mostrou (webinar_offer_displays), os cliques, a conversao pelo job do
 // tick (RPC webinar_offer_conversions) e os fatos do follow-up (RPC webinar_follow_up_facts). Quem decide (a variante
 // do aluno, a janela, o prazo, quem ve o card, o link) e offer-model.ts e os modulos da frente da Oferta; aqui so o
-// acesso as linhas. Banco sem a 202610290005: o erro sobe como PendingMigrationError (WEBINARS_OFFERS_MIGRATION).
+// acesso as linhas. Banco sem a 202610300003: o erro sobe como PendingMigrationError (WEBINARS_OFFERS_MIGRATION).
 
 import "server-only";
 

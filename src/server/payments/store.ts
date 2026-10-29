@@ -208,7 +208,7 @@ export type WebhookEventRow = {
 
 export type WebhookEventInsert = {
   /**
-   * O valor da venda (docs/30 M8, migracao 202610290005): vai para amount_cents/currency. Ausente, nulo ou fora dos
+   * O valor da venda (docs/30 M8, migracao 202610300003): vai para amount_cents/currency. Ausente, nulo ou fora dos
    * checks da migracao: a linha fica sem as colunas (nulas).
    */
   amount?: SaleAmount | null;
@@ -225,7 +225,7 @@ export type WebhookEventInsert = {
 };
 
 /** A migracao que traz webhook_events.amount_cents/currency (docs/30 M8). */
-export const SALE_AMOUNT_MIGRATION = "202610290005";
+export const SALE_AMOUNT_MIGRATION = "202610300003";
 
 async function insertWebhookEventRow(db: SalesDb, row: Record<string, unknown>) {
   return db.from("webhook_events").insert(row).select("id").single();
@@ -233,7 +233,7 @@ async function insertWebhookEventRow(db: SalesDb, row: Record<string, unknown>) 
 
 /**
  * Grava o evento bruto; o mesmo (provider, external_event_id) de novo devolve `duplicate`. Com o valor (M8), grava
- * amount_cents/currency na mesma linha; banco sem as colunas (sem a migracao 202610290005) nao derruba a venda: grava
+ * amount_cents/currency na mesma linha; banco sem as colunas (sem a migracao 202610300003) nao derruba a venda: grava
  * de novo sem elas (o valor fica de fora, o acesso segue igual).
  */
 export async function insertWebhookEvent(db: SalesDb, input: WebhookEventInsert): Promise<{ duplicate: boolean; id: string | null }> {

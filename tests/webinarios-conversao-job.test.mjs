@@ -6,7 +6,7 @@ import { contexto, rpcs, scriptedDb, silenciando, tabelas } from "./support/webi
 // O job do tick da conversao da Oferta (docs/30 §4.2, M7; fase 4b), sem banco: uma chamada da RPC
 // webinar_offer_conversions com o lote de OFFER_LIMITS.conversionsPerRun e a hora do tick (nunca a do relogio), e
 // nada mais; sem conversao, nenhuma escrita em job_runs; com conversao, a contagem e o tempo na linha do proprio job
-// (o tick_run_id fica); banco sem a 202610290005 registra e termina sem erro; o tick sem tempo (signal abortado) nao
+// (o tick_run_id fica); banco sem a 202610300003 registra e termina sem erro; o tick sem tempo (signal abortado) nao
 // chama; outro erro do banco aparece em job_runs (o job falha). O job nunca grava venda, acesso nem clique: a RPC liga
 // a venda (sale_grants) ao ultimo clique em ate attribution_days, conferida no Postgres pela guarda da migracao.
 
@@ -88,7 +88,7 @@ test("dois ticks no mesmo minuto: cada um so chama a RPC (a idempotencia e dela:
   assert.ok(!db.queries.some((query) => ["insert", "upsert", "delete"].includes(query.op)), "o job nunca grava venda, acesso nem clique");
 });
 
-test("banco sem a migracao 202610290005: registra e termina sem erro (o tick continua verde)", async () => {
+test("banco sem a migracao 202610300003: registra e termina sem erro (o tick continua verde)", async () => {
   for (const erro of [
     { code: "PGRST202", message: "Could not find the function public.webinar_offer_conversions(p_limit, p_now) in the schema cache" },
     { code: "42883", message: "function public.webinar_offer_conversions(timestamp with time zone, integer) does not exist" },
@@ -99,7 +99,7 @@ test("banco sem a migracao 202610290005: registra e termina sem erro (o tick con
     const [result, linhas] = await silenciando("info", () => runOfferConversionsTick(contexto(db, TICK)));
 
     assert.deepEqual(result, { converted: 0, pendingMigration: true, skipped: false }, erro.code);
-    assert.ok(linhas.some((linha) => linha.includes("migracao 202610290005 pendente")), linhas.join("\n"));
+    assert.ok(linhas.some((linha) => linha.includes("migracao 202610300003 pendente")), linhas.join("\n"));
     assert.ok(!db.queries.some((query) => query.table === "job_runs"), "nada em job_runs");
     await silenciando("info", () => assert.doesNotReject(() => webinarOfferConversionsJob.run(contexto(db, TICK))));
   }

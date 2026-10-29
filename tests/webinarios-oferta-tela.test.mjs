@@ -296,7 +296,7 @@ test("console: replay sem botoes, pelo botao da equipe, rascunho, sem oferta, ca
   const failed = render(panel.ConsoleOfferPanel, panelProps({ loadError: "Não foi possível ler a oferta agora.", view: null }));
   assert.match(failed, /Não foi possível ler a oferta agora\./);
   assert.match(failed, />Tentar de novo</);
-  assert.match(render(panel.ConsoleOfferPanel, panelProps({ migration: "202610290005", view: null })), /migração 202610290005/);
+  assert.match(render(panel.ConsoleOfferPanel, panelProps({ migration: "202610300003", view: null })), /migração 202610300003/);
 
   assert.match(render(consoleOffer.ConsoleOffer, { canAct: true, sessionId: "s1", webinarId: "w1" }), /Carregando a oferta…/, "o painel abre lendo");
 });

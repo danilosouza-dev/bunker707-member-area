@@ -21,7 +21,7 @@ export type ConsoleOfferPanelProps = {
   busy: "hide" | "show" | null;
   canAct: boolean;
   loadError: string | null;
-  /** Banco sem a 202610290005: o numero da migracao (o aviso no lugar do painel). */
+  /** Banco sem a 202610300003: o numero da migracao (o aviso no lugar do painel). */
   migration: string | null;
   onHide: () => void;
   onRetry: () => void;

@@ -22,7 +22,7 @@ import {
 // Simulacao em memoria e o contexto do tick pelo teste. A sessao gravada encerrada com regra ganha simulation_summary
 // igual a simulationTotals (o maior numero somado, as entradas e os avisos de 0 ao fim, cortado pelo Encerrar da
 // equipe), uma vez so; a sem regra, a que ainda esta no ar e a encerrada ha mais de 6 h ficam como estao; lote de 50;
-// o tick sem tempo nao faz nada; banco sem a 202610290005 registra e sai sem erro; as contagens vao para job_runs.
+// o tick sem tempo nao faz nada; banco sem a 202610300003 registra e sai sem erro; as contagens vao para job_runs.
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -136,7 +136,7 @@ test("pula: sem regra, ainda no ar, encerrada ha mais de 6 h, ja congelada; lote
   assert.equal(segundo.frozen, 10);
 });
 
-test("o tick sem tempo nao faz nada; banco sem a 202610290005 registra e sai sem erro (o tick continua verde) e sem contagem em job_runs", async () => {
+test("o tick sem tempo nao faz nada; banco sem a 202610300003 registra e sai sem erro (o tick continua verde) e sem contagem em job_runs", async () => {
   const tables = escolaDaSimulacao();
   Object.assign(tables.webinar_sessions.find((row) => row.id === ENDED_SESSION), regras);
   const db = montar(tables);
@@ -150,7 +150,7 @@ test("o tick sem tempo nao faz nada; banco sem a 202610290005 registra e sai sem
   const [resultado, linhas] = await silenciando(() => job.runSimulationSummariesJob(contexto(pendente)));
   assert.equal(resultado.pendingMigration, true);
   assert.equal(resultado.frozen, 0);
-  assert.ok(linhas.some((line) => line.includes("202610290005")), "o log cita a migracao");
+  assert.ok(linhas.some((line) => line.includes("202610300003")), "o log cita a migracao");
   assert.deepEqual(pendente.tables.job_runs[0].metadata, {}, "sem trabalho, sem contagem");
   assert.equal(job.webinarSimulationSummariesJob.name, "webinar-simulation-summaries");
   await silenciando(() => job.webinarSimulationSummariesJob.run(contexto(pendente)));

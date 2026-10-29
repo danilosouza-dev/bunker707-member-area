@@ -17,8 +17,8 @@ import {
 } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da fase 4b dos webinarios (docs/30 §1.6, §2.2, §3.3 a §3.6, §4.2, §4.3, §5.1, §6.6, §8.6, M6 a M8 e §11): a
-// migracao 202610290005_webinars_v4b_ofertas.sql.
-// - as migracoes ate a 202610290004 continuam byte a byte, e a 0005 e o texto exato (hash);
+// migracao 202610300003_webinars_v4b_ofertas.sql.
+// - as migracoes ate a 202610300002 continuam byte a byte, e a 202610300003 e o texto exato (hash);
 // - nove secoes MCP, idempotente, so acrescenta (nenhum drop, delete nem politica; triggers atras da guarda);
 // - as quatro tabelas da Oferta so do service_role; os checks batem com as listas e limites do app (model.ts,
 //   offer-model.ts);
@@ -27,21 +27,21 @@ import {
 //   clique; o follow-up nunca le a Simulacao;
 // - webinar_report e webinar_panel mantem o corpo anterior inteiro e so leem a Simulacao nas linhas sim_*.
 
-const MIGRATION = "supabase/migrations/202610290005_webinars_v4b_ofertas.sql";
+const MIGRATION = "supabase/migrations/202610300003_webinars_v4b_ofertas.sql";
 const model = await import("../src/server/webinars/model.ts");
 const offerModel = await import("../src/server/webinars/offer-model.ts");
 
 const NEW_TABLES = ["webinar_offers", "webinar_offer_variants", "webinar_offer_displays", "webinar_offer_clicks"];
 
-test("as migracoes ate a 202610290004 continuam byte a byte; a 0005 e o texto exato (aplicar antes do merge)", () => {
-  const applied = cumulativeHash("202610290004_webinars_v4a_paineis.sql");
-  assert.equal(applied.count, 57);
-  assert.equal(applied.hash, "ed615506da6f4b6b17e39cd51d67dc10d63d58d6f79fc9cba486433adcd9a88c", "uma migracao anterior mudou");
-  assert.ok(migrationFiles().includes("202610290005_webinars_v4b_ofertas.sql"));
-  assert.equal(fileHash(MIGRATION), "2ad2b6057e9530af94c42540323b6d39aa8cd9b1a9d4d0117cdd2c613a5a0933", "a 202610290005 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+test("as migracoes ate a 202610300002 continuam byte a byte; a 202610300003 e o texto exato (aplicar antes do merge)", () => {
+  const applied = cumulativeHash("202610300002_webinars_v4a_paineis.sql");
+  assert.equal(applied.count, 58);
+  assert.equal(applied.hash, "9d188a99931179fb29491f9094261cc837e18a7fba2c1e1c8dfc606bacdba5ae", "uma migracao anterior mudou");
+  assert.ok(migrationFiles().includes("202610300003_webinars_v4b_ofertas.sql"));
+  assert.equal(fileHash(MIGRATION), "6e4665d316a9a0eb0e3325483c118766ae931b44b81d1e0efad1d71db487ace9", "a 202610300003 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
-test("a 0005: nove secoes MCP, idempotente, so acrescenta; as quatro tabelas novas so do service_role", () => {
+test("a 202610300003: nove secoes MCP, idempotente, so acrescenta; as quatro tabelas novas so do service_role", () => {
   const migration = read(MIGRATION);
   assertSections(migration, 9);
   assertOnlyAdds(migration);
@@ -102,7 +102,7 @@ test("M8: o valor da venda em webhook_events, com nome e guarda; a regra de aces
   assert.match(code, /alter table public\.webhook_events add column if not exists amount_cents bigint;/);
   assert.match(code, /alter table public\.webhook_events add column if not exists currency text;/);
   assert.match(code, /check \(currency is null or currency ~ '\^\[A-Z\]\{3\}\$'\)/);
-  assert.doesNotMatch(code, /\bentitlements\b/, "a 0005 nunca le nem muda acesso");
+  assert.doesNotMatch(code, /\bentitlements\b/, "a 202610300003 nunca le nem muda acesso");
   assert.doesNotMatch(read("src/server/payments/process-sale.ts"), /amount_cents|amount\b/, "process-sale.ts (acesso) nao le o valor");
 });
 
@@ -161,7 +161,7 @@ test("webinar_report e webinar_panel: o corpo anterior inteiro, a Oferta real e 
   assertKeepsBody(functionBody(sqlCodeOf(read("supabase/migrations/202610290001_webinars_v2_chat.sql")), "webinar_report").body, report, "webinar_report");
   const panel = functionBody(code, "webinar_panel").body;
   // A unica linha que muda no painel: a sessao passa a trazer o resumo congelado (o bloco Simulacao separado).
-  const panelBefore = functionBody(sqlCodeOf(read("supabase/migrations/202610290004_webinars_v4a_paineis.sql")), "webinar_panel").body.replace(
+  const panelBefore = functionBody(sqlCodeOf(read("supabase/migrations/202610300002_webinars_v4a_paineis.sql")), "webinar_panel").body.replace(
     "select s.id, s.webinar_id, s.kind, s.presence_curve,",
     "select s.id, s.webinar_id, s.kind, s.presence_curve, s.simulation_summary,"
   );

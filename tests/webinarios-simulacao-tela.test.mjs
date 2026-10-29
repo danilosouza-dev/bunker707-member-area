@@ -6,7 +6,7 @@ import "./support/transpile-tsx.mjs";
 // A Simulacao desenhada (docs/30 §1.6, §1.7, §2.2, §4.3 e §8.6; D10; docs/18 §2.2), no Node e sem navegador: o card do
 // editor com os tres blocos por sessao gravada (Contador de plateia, Entradas e saidas, Notificacoes de venda), o aviso
 // do CDC, a frase de §8.6 com a caixa so quando algo mudou, a sessao encerrada so para ler com o que mostrou, o banco
-// sem a 202610290005 (o aviso da migracao e o selo da fase 2) e o card lendo as regras; o formulario puro (erros em
+// sem a 202610300003 (o aviso da migracao e o selo da fase 2) e o card lendo as regras; o formulario puro (erros em
 // portugues, minutos dos avisos, mudanca, limite de 50); e a sala: o contador somado ao real no cabecalho, a entrada
 // "Ana M. entrou" no chat por 8 s, o aviso de venda num toast de 4 s (no topo na sala vertical), o leitor de tela no
 // maximo um aviso por minuto, prefers-reduced-motion sem deslizar e, sem regra ligada, tudo como hoje.
@@ -203,9 +203,9 @@ test("card: uma mudanca pendente mostra a frase de §8.6 de hoje com o nome, a c
   assert.doesNotMatch(comErro, /data-simulation-sentence/);
 });
 
-test("card: banco sem a 202610290005 mostra o aviso da migracao e so o selo (fase 2); lendo, nada mexe", () => {
-  const pendente = card({ initialSimulations: { migration: "202610290005", pendingMigration: true } });
-  assert.match(textOf(pendente), /Esta parte precisa da atualização do banco \(migração 202610290005\)\./);
+test("card: banco sem a 202610300003 mostra o aviso da migracao e so o selo (fase 2); lendo, nada mexe", () => {
+  const pendente = card({ initialSimulations: { migration: "202610300003", pendingMigration: true } });
+  assert.match(textOf(pendente), /Esta parte precisa da atualização do banco \(migração 202610300003\)\./);
   assert.equal(count(pendente, /data-simulation-block=/g), 0, "sem os numeros");
   assert.equal(count(pendente, /role="switch"/g), 2, "o selo continua");
 

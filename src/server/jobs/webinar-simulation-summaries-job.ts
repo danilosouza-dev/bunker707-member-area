@@ -6,7 +6,7 @@ import "server-only";
 // grava uma vez (runSimulationSummariesTick em src/server/webinars/simulation-tick.ts; freezeSimulationSummary so onde
 // ainda e nulo: o mesmo minuto entregue duas vezes nao muda nada). Vem logo depois de `webinar-sessions` (a sessao que
 // acabou de encerrar congela no mesmo minuto) e cobre tambem o "Encerrar" manual do console. Leve: uma consulta, lote de
-// 50, para no fim do orcamento do tick (ctx.signal). Banco sem a 202610290005: registra e termina sem erro (o tick
+// 50, para no fim do orcamento do tick (ctx.signal). Banco sem a 202610300003: registra e termina sem erro (o tick
 // continua verde). Quando trabalhou, as contagens vao para job_runs.metadata da linha deste job ({ tick_run_id,
 // webinar_simulation_summaries: { failed, frozen, job_ms, scanned, skipped } }: o tick_run_id gravado pelo
 // run-tick.ts fica). So numeros: nada da regra nem dos nomes.

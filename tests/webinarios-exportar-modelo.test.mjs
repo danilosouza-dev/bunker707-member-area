@@ -382,7 +382,7 @@ test("Simulacao: o roteiro (Solta em, persona, texto, Disparou pelas mensagens d
   assert.deepEqual(desligada, [["Contador", "", "", "", "real · maior número mostrado: 0 · participantes de verdade: 3", "Não"]]);
 
   const semMigracao = model.simulationExportRows({ elapsedMs: 0, fired: new Map(), items: [item({})], realParticipants: 0, simulation: null });
-  assert.deepEqual(semMigracao, [["Comentário do roteiro", "01:00", "Num minuto do vídeo", "Marina", "Que aula boa!", "Não"]], "sem a 202610290005 so o roteiro sai");
+  assert.deepEqual(semMigracao, [["Comentário do roteiro", "01:00", "Num minuto do vídeo", "Marina", "Que aula boa!", "Não"]], "sem a 202610300003 so o roteiro sai");
 
   assert.equal(model.simulationElapsedMs({ durationMs: 1_800_000, now: Date.parse("2026-11-05T23:10:00Z"), startedAt: "2026-11-05T23:00:00+00:00", status: "live" }), 600_000);
   assert.equal(model.simulationElapsedMs({ durationMs: 1_800_000, now: 0, startedAt: null, status: "ended" }), 1_800_000);

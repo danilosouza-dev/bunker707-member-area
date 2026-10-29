@@ -1,5 +1,5 @@
 -- Webinarios v4c, o Assistente de IA no chat, os atendentes humanos com distribuicao e o modo hibrido (docs/30 §1.6,
--- §2.4, §3.4, §6.6, D24 e §11, fase 4c). A 202610290005 nao muda (nenhuma migracao da fase 4 foi
+-- §2.4, §3.4, §6.6, D24 e §11, fase 4c). A 202610300003 nao muda (nenhuma migracao da fase 4 foi
 -- aplicada ainda; docs/21 §9.10); este arquivo so acrescenta.
 --
 -- Regras:
@@ -17,7 +17,7 @@
 --   situacao, o motivo de nao responder, a resposta gravada, a hora do pedido e da resposta (o tempo medio do
 --   relatorio) e o provedor; sem texto (so ids e codigos, docs/05); base do limite por aluno e por minuto;
 -- - webinar_report ganha o bloco "Respostas do Assistente" (ai / replies, avg_seconds, edited, deleted, handoffs),
---   mesma assinatura, corpo completo (o da 202610290005 mais estas linhas); fora da Simulacao e das mensagens de
+--   mesma assinatura, corpo completo (o da 202610300003 mais estas linhas); fora da Simulacao e das mensagens de
 --   aluno e equipe (D24, M6);
 -- - tabelas novas so do service_role; nada de create policy, alter policy, drop, delete nem truncate. Sete secoes,
 --   cada uma pelo MCP do Supabase (execute_sql, uma por chamada, na ordem), ou apply_migration com o arquivo inteiro.
@@ -173,7 +173,7 @@ revoke all on public.webinar_ai_requests from anon, authenticated;
 grant select, insert, update, delete on public.webinar_ai_requests to service_role;
 
 /* ------------------------------------------------------------------------------------------------
- * 6. webinar_report (o corpo completo da 202610290005, mesma assinatura, com as Respostas do Assistente). MCP.
+ * 6. webinar_report (o corpo completo da 202610300003, mesma assinatura, com as Respostas do Assistente). MCP.
  * ---------------------------------------------------------------------------------------------- */
 
 create or replace function public.webinar_report(p_session_id uuid)

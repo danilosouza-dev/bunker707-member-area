@@ -9,7 +9,7 @@ import "server-only";
 // primeira vez que alguem pede aquele id, e juntadas aos mesmos fatos (context.messageKeys diz quais foram
 // lidos: chave fora dele nunca combina). Sem regra de mensagem, load([]) nao le nada a mais.
 //
-// Participação em lives (docs/30 §1.6, D49): load(ids, { webinars, webinarFollowUpIds }) (o que audienceFactsRequest pede)
+// Participação em lives (docs/30 §1.6, D52): load(ids, { webinars, webinarFollowUpIds }) (o que audienceFactsRequest pede)
 // junta as lives de cada aluno: as vagas e presencas (RPC communication_webinar_facts) lidas no maximo uma vez por tick
 // e so se algum segmento tem "participou" ou "garantiu vaga"; o follow-up de cada live citada por uma acao dele (RPC
 // webinar_follow_up_facts) lido no maximo uma vez por tick, como as linhas de um aviso. Os dois pelo mesmo juntar

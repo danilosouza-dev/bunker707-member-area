@@ -6,7 +6,7 @@ import { guardRoomRequest, loadRoomContextFor, ok, roomErrorResponse, sessionIdO
 // O Assistente na sala do aluno (docs/30 §1.6, §6.6 e D24): GET ?sessao= devolve { enabled, replyAll, attendantsOnline }
 // para a dica "@assistente" (so com o Assistente ligado no ambiente, no webinario e com conexao de IA), o "Responder
 // tudo" da sessao e "A equipe responde depois pelo sino" quando ninguem da equipe esta atendendo. Banco sem a
-// 202610290006 ou ambiente desligado: tudo desligado (nada quebra). Sessao obrigatoria (401), fora do acesso ou sessao
+// 202610300004 ou ambiente desligado: tudo desligado (nada quebra). Sessao obrigatoria (401), fora do acesso ou sessao
 // de outro webinario (404), sem a vaga obrigatoria (403). Leitura: fora do teto de escritas do aluno; a sala pergunta
 // a cada minuto.
 

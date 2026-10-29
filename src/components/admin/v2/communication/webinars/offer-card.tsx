@@ -12,7 +12,7 @@ import { OfferEditorForm } from "./offer/offer-editor-form";
 // O card Oferta do editor (docs/30 §2.2): variantes A/B/C/D, Quando aparece, Some em, prazo, divisao e atribuicao, com
 // o salvar proprio (saveOffer). webinar-editor.tsx monta este card num webinario gravado (Live gravada e Live ao vivo,
 // onde a oferta aparece so no replay). O card le a Oferta e os produtos pela Server Action loadOfferEditor ao abrir
-// (Tentar de novo quando falha); banco sem a 202610290005, o aviso da migracao no lugar do formulario.
+// (Tentar de novo quando falha); banco sem a 202610300003, o aviso da migracao no lugar do formulario.
 
 const COPY = WEBINAR_COPY.oferta.card;
 

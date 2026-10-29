@@ -17,7 +17,7 @@ import { AttendancePanel } from "../assistant/attendance-panel";
 // das perguntas novas (feita na propria leitura, loadAttendanceSnapshot, a cada 5 s com a aba visivel), Assumir,
 // Devolver, Passar para, Responder, o "Pediu a equipe" e o "Responder tudo" do Assistente. "Atender" bate o
 // "Atendendo agora" na hora e a cada 30 s enquanto o painel esta aberto (sem batida ha 90 s, a pessoa sai da
-// distribuicao); "Pausar" marca ausente. Banco sem a 202610290006: o aviso da migracao. A leitura nova sobe para o
+// distribuicao); "Pausar" marca ausente. Banco sem a 202610300004: o aviso da migracao. A leitura nova sobe para o
 // console (`onSnapshot`), que mostra as marcas no painel Perguntas.
 
 export type ConsoleAttendanceProps = {

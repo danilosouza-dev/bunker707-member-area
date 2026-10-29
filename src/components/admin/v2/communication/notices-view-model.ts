@@ -12,7 +12,7 @@
 // design canonico e a previa monta o PopupItem com o design e as fontes resolvidas. Livre (docs/27): a chave
 // `freeDesign` ao lado (as duas sempre no pedido, no maximo uma nao nula), a forma canonica do Livre e a previa
 // pelo freePreviewPopupItem (o mesmo item do palco do editor).
-// Participação em lives (docs/30 §1.6, D49): uma regra so, com as acoes de presenca e as do follow-up (o seletor da acao
+// Participação em lives (docs/30 §1.6, D52): uma regra so, com as acoes de presenca e as do follow-up (o seletor da acao
 // com o "não", o seletor da live com o dia, "qualquer live" so nas de presenca, a nota da compra).
 
 import {

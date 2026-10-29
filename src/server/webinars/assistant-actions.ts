@@ -6,7 +6,7 @@
 // painel Atendimento do console (loadAttendanceSnapshot a cada 5 s, que tambem distribui as perguntas novas entre quem
 // esta atendendo; pingAttendant a cada 30 s com "Atender" / "Pausar"; assign para Assumir, Devolver e Passar para;
 // setReplyAll) e "Corrigir resposta" do chat (editAssistantAnswer; apagar segue por moderateMessage). As escritas
-// gravam recordAudit so com ids, contagens e codigos (nunca o texto). Banco sem a 202610290006: as leituras devolvem
+// gravam recordAudit so com ids, contagens e codigos (nunca o texto). Banco sem a 202610300004: as leituras devolvem
 // { pendingMigration } (a tela mostra o aviso) e as escritas respondem 409 com a frase da migracao.
 
 import { revalidatePath } from "next/cache";
@@ -56,7 +56,7 @@ export type SavedAssistant = { items: AssistantKnowledgeItem[]; sessionsUpdated:
 
 const pending = (): PendingAssistantMigration => ({ migration: WEBINARS_ASSISTANT_MIGRATION, pendingMigration: true });
 
-/** Uma escrita que esbarra no banco sem a 202610290006 vira 409 com a frase da migracao (nunca um 500 generico). */
+/** Uma escrita que esbarra no banco sem a 202610300004 vira 409 com a frase da migracao (nunca um 500 generico). */
 async function withAssistantTables<T>(write: () => Promise<T>): Promise<T> {
   try {
     return await write();

@@ -17,7 +17,7 @@ import {
 // As Server Actions do card Simulacao (docs/30 §2.2, §2.6, §4.3, §5.2 e §8.6; D10; docs/18 §2.2), sem banco: o banco
 // da Simulacao em memoria, a permissao por um duble (sem messaging.publish recusa o salvar com 403 e deixa ler), o nome
 // de quem decide pelo duble da sessao e "next/cache" so anotando. Aqui: ler as regras sem a semente (e o aviso da
-// 202610290005); salvar exige a caixa e a frase de hoje com o nome de quem decide (com algo simulado ligado), grava as
+// 202610300003); salvar exige a caixa e a frase de hoje com o nome de quem decide (com algo simulado ligado), grava as
 // colunas de §4.3, quem e quando; tudo desligado salva sem caixa com a frase de tudo desligado; a live, o replay, a
 // encerrada e a que nao existe recusam; a auditoria leva so numeros e booleanos (dos avisos, so a contagem).
 
@@ -94,7 +94,7 @@ const avisos = { enabled: true, items: [{ offsetMs: 15 * MIN, text: "Carlos acab
 const regrasLigadas = { countRule: contador, joins: entradas, saleNotices: avisos, showLiveBadge: true };
 const fraseDeHoje = (rules = regrasLigadas, responsible = "Produtora de Teste") => model.simulationAckFor({ nowMs: Date.now(), responsible, rules: model.normalizeSimulationRules(rules) });
 
-test("ler: as regras das sessoes gravadas do webinario sem a semente; banco sem a 202610290005 devolve o aviso da migracao; quem so escreve tambem le", async () => {
+test("ler: as regras das sessoes gravadas do webinario sem a semente; banco sem a 202610300003 devolve o aviso da migracao; quem so escreve tambem le", async () => {
   const tables = escolaDaSimulacao({ sessao: { simulated_count_rule: { base: 30, jitter: 0, mode: "fixed", peak: 30 }, simulation_summary: null } });
   usar(bancoDaSimulacao({ tables }));
   estado.semPublicar = true;
@@ -107,7 +107,7 @@ test("ler: as regras das sessoes gravadas do webinario sem a semente; banco sem 
   assert.doesNotMatch(JSON.stringify(data), /424242/);
 
   usar(semAsColunasDaSimulacao({ tables: escolaDaSimulacao() }));
-  assert.deepEqual(ok(await actions.loadSessionSimulations({ webinarId: WEBINAR })), { migration: "202610290005", pendingMigration: true });
+  assert.deepEqual(ok(await actions.loadSessionSimulations({ webinarId: WEBINAR })), { migration: "202610300003", pendingMigration: true });
   assert.equal((await actions.loadSessionSimulations({ webinarId: "nao-e-id" })).status, 400);
 });
 
@@ -190,7 +190,7 @@ test("salvar tudo desligado: sem caixa, grava nulo nas regras e a frase de tudo 
   assert.equal(auditorias(db)[0].metadata.numbers_simulated, false);
 });
 
-test("salvar recusa: a live e o replay (409, so a sessao gravada), a encerrada (409), a que nao existe (404) e o banco sem a 202610290005 (409 com a frase)", async () => {
+test("salvar recusa: a live e o replay (409, so a sessao gravada), a encerrada (409), a que nao existe (404) e o banco sem a 202610300003 (409 com a frase)", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, sessionId });
 
@@ -205,7 +205,7 @@ test("salvar recusa: a live e o replay (409, so a sessao gravada), a encerrada (
 
   usar(semAsColunasDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   const pendente = await pedido(SESSION);
-  assert.deepEqual([pendente.status, pendente.error], [409, WEBINAR_COPY.simulacao.servidor.precisaMigracao("202610290005")]);
+  assert.deepEqual([pendente.status, pendente.error], [409, WEBINAR_COPY.simulacao.servidor.precisaMigracao("202610300003")]);
 });
 
 test("salvar recusa a troca de regra com a sessao ja comecada (no ar, ou com a hora marcada passada e o status atrasado): 409 e nada gravado", async () => {

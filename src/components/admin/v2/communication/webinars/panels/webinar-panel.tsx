@@ -20,7 +20,7 @@ import { PanelSessionsTable } from "./panel-table";
 // a frase da aba, os filtros com o botao Exportar, os dez cartoes, a curva minuto a minuto da sessao escolhida, os
 // graficos, a tabela de sessoes e, so na gravada, o bloco Simulacao por ultimo. Cada bloco no seu Suspense, com o
 // skeleton na forma final; todos esperam a mesma leitura (getWebinarPanel, a RPC em cache de 60 s), e a curva espera
-// a segunda (getWebinarReport da sessao escolhida). Banco sem a 202610290004: o aviso no lugar do painel; qualquer
+// a segunda (getWebinarReport da sessao escolhida). Banco sem a 202610300002: o aviso no lugar do painel; qualquer
 // falha: a frase de erro, nunca a tela quebrada. WebinarPanelContent desenha os mesmos blocos sem esperar nada (os
 // testes e quem ja tem os dados).
 

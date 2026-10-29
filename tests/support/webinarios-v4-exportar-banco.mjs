@@ -6,8 +6,8 @@ import { aplicaFiltros, gravacaoRow, perfis as perfisPadrao, scriptedDb, sessaoR
 // As RPCs devolvem o que o teste passou: `relatorio` (webinar_report), `presentes` (webinar_attendees, uma lista ou
 // um objeto por sessao) e `painel` (webinar_panel; lista ou funcao dos argumentos). `ofertas`, `variantes` e `exibicoes`
 // sao a Oferta montada e o que cada sessao mostrou (o recorte "Com oferta" / "Variante" do painel). `semMigracao` imita o banco sem uma
-// parte da fase 4: "ofertas" (webinar_offer_clicks e as colunas da Simulacao, 202610290005) e "assistente"
-// (answer_source e assistant_settings, 202610290006) respondem como o PostgREST sem o objeto (PGRST205 / 42703).
+// parte da fase 4: "ofertas" (webinar_offer_clicks e as colunas da Simulacao, 202610300003) e "assistente"
+// (answer_source e assistant_settings, 202610300004) respondem como o PostgREST sem o objeto (PGRST205 / 42703).
 // `falha` derruba qualquer leitura de uma tabela com um erro comum. Nada aqui e importado por src/.
 
 const COLUNAS_DA_SIMULACAO = /simulated_count_rule|simulation_summary/;

@@ -5,7 +5,7 @@ import { actionStubs } from "./admin-action-stubs.mjs";
 // Dubles da fase 4c (o Assistente de IA, os atendentes e o modo hibrido; docs/30 §1.6, §2.4, §6.6 e D24; docs/18
 // §2.5) para os testes sem banco: um banco em memoria que entende as consultas das rotas da Sala, das Server Actions
 // e de assistant-store.ts (filtros do PostgREST, or, not, neq, ordem, limite, contagem, upsert por chave e as chaves
-// unicas da 202610290001 e da 202610290006 como 23505), o banco "sem a 202610290006" (tabelas e colunas novas
+// unicas da 202610290001 e da 202610300004 como 23505), o banco "sem a 202610300004" (tabelas e colunas novas
 // respondem 42P01 / 42703), a escola de mentira (uma Live gravada no ar com a gravacao, a transcricao e a live de
 // origem; ou a mesma sessao como Live ao vivo) e o gateway de IA falso no lugar de src/server/ai/provider-pool.ts
 // (`iaFalsa`: as conexoes ativas e a resposta combinada pelo teste; nunca um provedor de verdade). A sessao do aluno
@@ -133,8 +133,8 @@ const DEFAULTS = {
   }
 };
 
-/** O que so existe com a 202610290006: tabelas novas e colunas novas (o banco "sem a migracao" responde erro). */
-export const MIGRACAO_0006 = {
+/** O que so existe com a 202610300004: tabelas novas e colunas novas (o banco "sem a migracao" responde erro). */
+export const MIGRACAO_V4C = {
   colunas: {
     webinar_chat_messages: ["assigned_to", "assigned_at", "handoff_requested_at", "edited_at", "edited_by"],
     webinar_questions: ["assigned_to", "assigned_at", "answer_source", "handoff_requested_at"],
@@ -200,7 +200,7 @@ const iso = (time) => new Date(time).toISOString();
 
 /**
  * O banco em memoria: `tables` (listas por tabela), `rpc` (dubles das RPCs) e `semMigracao` (o banco sem a
- * 202610290006). `calls` guarda as tabelas lidas, as RPCs e as escritas.
+ * 202610300004). `calls` guarda as tabelas lidas, as RPCs e as escritas.
  */
 export function bancoFalso({ rpc = {}, semMigracao = false, tables = {} } = {}) {
   const calls = { from: [], rpc: [], writes: [] };
@@ -212,10 +212,10 @@ export function bancoFalso({ rpc = {}, semMigracao = false, tables = {} } = {}) 
 
   function missingIn(name, state) {
     if (!semMigracao) return null;
-    if (MIGRACAO_0006.tabelas.includes(name)) {
+    if (MIGRACAO_V4C.tabelas.includes(name)) {
       return { code: "42P01", message: `relation "public.${name}" does not exist` };
     }
-    const columns = MIGRACAO_0006.colunas[name] ?? [];
+    const columns = MIGRACAO_V4C.colunas[name] ?? [];
     const mentioned = [
       typeof state.columns === "string" ? state.columns : "",
       JSON.stringify(state.payload ?? {}),

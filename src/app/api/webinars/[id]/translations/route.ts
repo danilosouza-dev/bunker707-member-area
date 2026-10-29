@@ -13,7 +13,7 @@ import { webinarTranslationEnabled } from "@/server/webinars/v4-env";
 // se existem). Sessao obrigatoria (401); id do webinario (400); ?sessao=, ?lang= e ?ids= validos (400); fora do acesso
 // ou sessao de outro webinario: 404 sem dizer se existe (o acesso conferido fica 10 min na memoria, como os sinais da
 // sala); ate TRANSLATION_REQUESTS_PER_MINUTE pedidos por aluno por minuto (429 com Retry-After). Sem
-// WEBINAR_TRANSLATION_ENABLED=on ou sem a 202610290009: { enabled: false } e o chat como foi escrito. Nunca grava em
+// WEBINAR_TRANSLATION_ENABLED=on ou sem a 202610300006: { enabled: false } e o chat como foi escrito. Nunca grava em
 // student_events (e uma leitura).
 
 export const dynamic = "force-dynamic";

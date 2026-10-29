@@ -1,5 +1,5 @@
 // O contrato puro da Oferta (docs/30 §1.6, §4.2, §5.1 e M7) que o banco repete: a variante deterministica de cada
-// aluno (a mesma conta de webinar_offer_variant na 202610290005, para "viram", "clicaram" e "compraram" cairem sempre
+// aluno (a mesma conta de webinar_offer_variant na 202610300003, para "viram", "clicaram" e "compraram" cairem sempre
 // na mesma variante), o click_token e o link do checkout com ?b7=<token>. Sem "server-only", imports relativos:
 // tests/webinarios-v4-contratos.test.mjs carrega direto pelo Node. As contas da tela e das rotas (a janela da oferta
 // no relogio do video, o prazo, o card) ficam no modulo da frente da Oferta, nao aqui.
@@ -44,7 +44,7 @@ export function isOfferVariantLabel(value: unknown): value is OfferVariantLabel 
   return typeof value === "string" && (OFFER_VARIANT_LABELS as readonly string[]).includes(value);
 }
 
-/** O click_token de um clique (base64url de 18 bytes = 24 caracteres; o check da 202610290005 aceita 16 a 64). */
+/** O click_token de um clique (base64url de 18 bytes = 24 caracteres; o check da 202610300003 aceita 16 a 64). */
 export function newClickToken(random: (size: number) => Buffer = randomBytes): string {
   return random(OFFER_LIMITS.clickTokenBytes).toString("base64url");
 }

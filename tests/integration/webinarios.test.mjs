@@ -19,7 +19,7 @@ import {
 // 200) e grava webinar_registered uma vez; o job do tick manda o lembrete de 24 h pelo sino e pela fila de
 // e-mail uma vez por vaga (o tick seguinte nao repete) e a equipe nunca recebe; cancelar o webinario avisa quem
 // tinha vaga, uma vez. O teste anda com a hora marcada da sessao (como o teste dos avisos agendados adianta o
-// send_at) em vez de esperar. Fase 4e (migracao 202610290008): o "Comeca quando voce entra" cria a sessao do horario
+// send_at) em vez de esperar. Fase 4e (migracao 202610300005): o "Comeca quando voce entra" cria a sessao do horario
 // uma vez para dois alunos (o indice unico por horario), sem vaga nem com limite de vagas; o banco recusa a segunda
 // sessao jit no mesmo horario (23505) e a jit fora de `simulated` (23514); a jit nunca recebe lembrete, nem com a vaga
 // geral do webinario, e nao entra nas sessoes do editor.

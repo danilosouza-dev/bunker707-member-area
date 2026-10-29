@@ -263,7 +263,7 @@ async function syncSimulatedSessions(
   await deleteSessionRows(db, removable);
 
   const newTimes = Array.from(wanted.entries()).filter(([time]) => !existingTimes.has(time));
-  // As sessoes novas seguem o "Responder tudo" padrao do Assistente (a coluna so vai quando ligado: sem a 0006, nunca).
+  // As sessoes novas seguem o "Responder tudo" padrao do Assistente (a coluna so vai quando ligado: sem a 202610300004, nunca).
   const replyAll = newTimes.length > 0 && (await replyAllDefaultFor(db, webinarId)) ? { assistant_reply_all: true } : {};
   const toCreate = newTimes
     .map(([, want]) => ({

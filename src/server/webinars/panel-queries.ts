@@ -1,15 +1,15 @@
 import "server-only";
 
 // Leituras dos paineis "Lives ao vivo" e "Lives gravadas" e dos numeros da lista (docs/30 §2.1, §3.1 a §3.3, §3.5,
-// §4.6, D9, M6, M8 e M9). A RPC webinar_panel (202610290004, recriada na 202610290005 com a oferta e o bloco sim_*)
+// §4.6, D9, M6, M8 e M9). A RPC webinar_panel (202610300002, recriada na 202610300003 com a oferta e o bloco sim_*)
 // vai para o unstable_cache de 60 s com o minuto do relogio na chave e a tag "webinars": chave ["webinars-panel", "v1",
 // tipo, inicio, fim, hash dos ids das sessoes do recorte, minuto] (o mesmo desenho de getWebinarReport e de
 // getPopupReport; o minuto torna a janela de 60 s dura). So os agregados da RPC entram no cache; as sessoes, os
 // webinarios, a Oferta, as regras da Simulacao, os nomes dos produtos e o nome da equipe (o filtro Apresentador) sao
 // lidos fora dele. Nunca nome nem e-mail de aluno aqui (M9).
 //
-// Banco sem uma parte: sem a 202610290004 (webinar_panel) o painel inteiro vira o aviso WEBINARS_PANELS_MIGRATION;
-// sem a leitura das sessoes (jit, 202610290008), o aviso WEBINARS_MIGRATION; sem a 202610290005 a Oferta e a
+// Banco sem uma parte: sem a 202610300002 (webinar_panel) o painel inteiro vira o aviso WEBINARS_PANELS_MIGRATION;
+// sem a leitura das sessoes (jit, 202610300005), o aviso WEBINARS_MIGRATION; sem a 202610300003 a Oferta e a
 // Simulacao ficam em "—" e o resto segue. A curva minuto a minuto da sessao escolhida vem de getWebinarReport
 // (report-queries.ts, cache de 60 s da propria visao), passado por quem chama: este modulo nao importa report-queries,
 // entao o CSV do painel (export-queries.ts, que report-queries importa) pode usar resolvePanelSelection sem ciclo.
@@ -86,7 +86,7 @@ export function panelCacheKey(input: PanelRowsInput): string[] {
 
 /**
  * As linhas de webinar_panel pela chave do minuto. Recorte vazio: nenhuma linha, sem ir ao banco. So o resultado certo
- * entra no cache (o erro sobe e nao fica guardado); lanca PendingMigrationError sem a 202610290004.
+ * entra no cache (o erro sobe e nao fica guardado); lanca PendingMigrationError sem a 202610300002.
  */
 export function cachedPanelRows(input: PanelRowsInput): Promise<PanelRow[]> {
   if (input.sessionIds && input.sessionIds.length === 0) {
@@ -109,7 +109,7 @@ export type { WebinarListNumbers };
 
 /**
  * Compareceram (unique_present) e Assistiram o replay (unique_replay_viewers) do periodo, as duas abas somadas
- * (webinar_panel 'all'). Banco sem a 202610290004 ou qualquer falha: "—" nos dois, a lista segue.
+ * (webinar_panel 'all'). Banco sem a 202610300002 ou qualquer falha: "—" nos dois, a lista segue.
  */
 export async function getWebinarListNumbers(period: { end: Date; start: Date }, options: { now?: number; rows?: PanelRowsLoader } = {}): Promise<WebinarListNumbers> {
   const window = panelWindowOf(period);
@@ -130,7 +130,7 @@ export async function getWebinarListNumbers(period: { end: Date; start: Date }, 
  * As leituras fora do cache
  * ---------------------------------------------------------------------------------------------- */
 
-/** Uma parte da 202610290005 (Oferta, Simulacao): sem ela, nulo; qualquer outro erro sobe. */
+/** Uma parte da 202610300003 (Oferta, Simulacao): sem ela, nulo; qualquer outro erro sobe. */
 async function unlessOffersPending<T>(load: () => Promise<T>): Promise<T | null> {
   try {
     return await load();
@@ -192,7 +192,7 @@ async function hasAnySession(db: WebinarsDb, kind: PanelTabKind): Promise<boolea
  * ---------------------------------------------------------------------------------------------- */
 
 export type PanelSelection = {
-  /** A Oferta de cada webinario e a janela de cada sessao (nulo: banco sem a 202610290005). */
+  /** A Oferta de cada webinario e a janela de cada sessao (nulo: banco sem a 202610300003). */
   offers: PanelOfferFacts | null;
   /** O recorte dos filtros (ordem das horas marcadas). */
   selected: PanelSession[];

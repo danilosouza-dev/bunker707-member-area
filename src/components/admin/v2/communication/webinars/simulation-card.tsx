@@ -18,7 +18,7 @@ import { SimulationSessionRow, type SimulationRowMode, type SimulationSaveOutcom
 // fixo, a frase de §8.6 do que vai ser gravado (data de Sao Paulo, o nome de quem esta na tela, exatamente como o
 // servidor confere) e a caixa de confirmacao. Cada sessao salva
 // tudo de uma vez (saveSessionSimulation, messaging.publish). As regras sao lidas ao abrir (loadSessionSimulations;
-// Tentar de novo quando falha); banco sem a 202610290005, o aviso da migracao no lugar dos numeros e o selo como na
+// Tentar de novo quando falha); banco sem a 202610300003, o aviso da migracao no lugar dos numeros e o selo como na
 // fase 2. Os numeros simulados aparecem no relatorio so no bloco Simulacao (D6, M6).
 
 const COPY = WEBINAR_COPY.simulacao.card;

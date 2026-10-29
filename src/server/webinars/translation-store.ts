@@ -1,8 +1,8 @@
-// A traducao do chat e do roteiro no banco (docs/30 §1.6; migracao 202610290009), pela service role: o idioma do chat
+// A traducao do chat e do roteiro no banco (docs/30 §1.6; migracao 202610300006), pela service role: o idioma do chat
 // escolhido pelo aluno (webinar_viewer_prefs) e as traducoes guardadas por texto e idioma (webinar_text_translations,
 // chave = translationSourceHash do texto). Quem decide o que traduzir, chama o provedor (o gateway de IA, atras de um
 // adaptador com duble nos testes) e devolve para a sala e a frente da traducao (translation-model.ts /
-// translation.ts); aqui so o acesso as linhas. Banco sem a 202610290009: PendingMigrationError
+// translation.ts); aqui so o acesso as linhas. Banco sem a 202610300006: PendingMigrationError
 // (WEBINARS_TRANSLATION_MIGRATION); a sala trata como "sem traducao" e mostra o chat como foi escrito.
 
 import "server-only";

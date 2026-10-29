@@ -20,7 +20,7 @@ import {
 // As rotas da traducao do chat e do roteiro (docs/30 §1.6, fase 4f; docs/18 §2.2), sem banco e sem provedor de IA de
 // verdade: o banco em memoria e o gateway falso de tests/support/webinarios-v4-traducao-banco.mjs. GET
 // /api/webinars/[id]/translations: 401 sem sessao, 400 sem id, sem ?sessao=, idioma ou ids invalidos, 404 para a
-// sessao de outro webinario; sem o env ou sem a 202610290009 { enabled: false }; as faltantes ficam pendentes e sao
+// sessao de outro webinario; sem o env ou sem a 202610300006 { enabled: false }; as faltantes ficam pendentes e sao
 // traduzidas UMA vez (o mesmo texto em duas mensagens vai uma vez so; fora de um pedido do Next o after() roda na hora)
 // e gravadas sem autor; o pedido seguinte devolve as guardadas sem chamar a IA; so passa o que o aluno pode ver nesta
 // sessao (outro webinario, sessao irma, pendente de outro aluno e apagada ficam de fora, sem dizer se existem); o mesmo
@@ -136,7 +136,7 @@ test("sem WEBINAR_TRANSLATION_ENABLED=on: { enabled: false }, o chat como foi es
   }
 });
 
-test("banco sem a 202610290009: { enabled: false } nas duas rotas, sem chamar a IA", async () => {
+test("banco sem a 202610300006: { enabled: false } nas duas rotas, sem chamar a IA", async () => {
   const { db } = montar();
   semAsTabelasDaTraducao(db);
   const lida = await traducoes({ ids: [MSG.turma] });

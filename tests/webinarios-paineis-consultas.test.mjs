@@ -10,8 +10,9 @@ import { aplicaFiltros, filterOf, scriptedDb, sessaoRow, webinarRow } from "./su
 // relogio (duas leituras no mesmo minuto, uma RPC; no minuto seguinte, outra) com o hash dos ids do recorte e a tag
 // "webinars"; os filtros da aba que viram `p_session_ids` (e o periodo inteiro sem lista); o periodo anterior com a
 // janela `previous` de period.ts; so agregados no cache (nada de nome); os nomes de produto e da equipe fora do cache;
-// a migracao pendente de cada parte (0004 = aviso do painel, 0005 = Oferta em "—", sessoes = aviso da 0008); os
-// numeros da lista; a curva da sessao pela visao do relatorio e o recorte do CSV do painel.
+// a migracao pendente de cada parte (202610300002 = aviso do painel, 202610300003 = Oferta em "—", sessoes = o aviso
+// de WEBINARS_MIGRATION, que inclui a 202610300005 do jit); os numeros da lista; a curva da sessao pela visao do
+// relatorio e o recorte do CSV do painel.
 
 const cache = (globalThis.__webinariosPaineisCache ??= { calls: [], entries: new Map(), keys: [], options: [] });
 
@@ -340,14 +341,14 @@ test("Lives gravadas: Com oferta e Variante pela Oferta do webinario e a foto da
   assert.deepEqual(filterOf(simulationQuery, "in")[2], [R1], "as regras so das sessoes do recorte");
 });
 
-test("migracao pendente: sem webinar_panel o aviso da 0004; sem a coluna das sessoes o da 0008; sem a Oferta, '—' e o resto segue", async () => {
+test("migracao pendente: sem webinar_panel o aviso da 202610300002; sem a coluna das sessoes o de WEBINARS_MIGRATION; sem a Oferta, '—' e o resto segue", async () => {
   resetCache();
   const noPanel = banco({ panelError: missing("webinar_panel") });
   assert.deepEqual(await queries.loadWebinarPanel(noPanel.db, { filters: model.emptyPanelFilters(), kind: "live", now: NOW, period: panelPeriod, sessionId: null }), {
     migration: WEBINARS_PANELS_MIGRATION,
     status: "pending_migration"
   });
-  assert.equal(WEBINARS_PANELS_MIGRATION, "202610290004");
+  assert.equal(WEBINARS_PANELS_MIGRATION, "202610300002");
 
   resetCache();
   const noSessions = banco({ sessionsError: { code: "42703", message: "column webinar_sessions.jit does not exist" } });
@@ -364,7 +365,7 @@ test("migracao pendente: sem webinar_panel o aviso da 0004; sem a coluna das ses
   assert.equal(result.view.kpis.find((kpi) => kpi.id === "offerSeen").value, null);
   assert.equal(result.view.kpis.find((kpi) => kpi.id === "revenue").text, "—");
   assert.equal(result.view.simulation.available, false);
-  assert.ok(!noOffers.db.queries.some((query) => String(query.payload).includes("simulated_count_rule")), "sem a 0005, nem tenta ler a Simulacao");
+  assert.ok(!noOffers.db.queries.some((query) => String(query.payload).includes("simulated_count_rule")), "sem a 202610300003, nem tenta ler a Simulacao");
 
   resetCache();
   const broken = banco({ panelError: { code: "XX000", message: "falhou" } });
@@ -386,7 +387,7 @@ test("sem nenhuma sessao no periodo: 'never' quando o tipo nunca teve sessao, 'p
   assert.equal(quiet.view.empty, "period");
 });
 
-test("numeros da lista: Compareceram e Assistiram o replay pela RPC 'all'; sem a 0004, '—'", async () => {
+test("numeros da lista: Compareceram e Assistiram o replay pela RPC 'all'; sem a 202610300002, '—'", async () => {
   resetCache();
   const { db } = banco();
   const numbers = await queries.getWebinarListNumbers(resolved, { now: NOW });

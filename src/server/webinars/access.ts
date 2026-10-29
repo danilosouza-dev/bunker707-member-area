@@ -167,7 +167,7 @@ async function loadSegmentFacts(
     needs.webinars ? loadWebinarFacts(db, { userIds }) : Promise.resolve(undefined)
   ]);
 
-  // So as vagas e presencas: as acoes do follow-up nao valem no Quem pode (accessAudienceDefinitionSchema; D49).
+  // So as vagas e presencas: as acoes do follow-up nao valem no Quem pode (accessAudienceDefinitionSchema; D52).
   return { loaded: attachWebinarFacts(segment, { presence: webinarFacts ?? null }), webinarFacts };
 }
 

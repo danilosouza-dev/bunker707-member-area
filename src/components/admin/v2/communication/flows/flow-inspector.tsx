@@ -207,7 +207,7 @@ export function FlowSettingsPanel({
                 segments={options.segments}
                 value={draft.entry.audience}
                 // As acoes do follow-up da regra "Participação em lives" valem no "Quem entra" (modo segment; docs/30
-                // §1.6, D49), nunca no Objetivo nem nas condicoes (modo flow).
+                // §1.6, D52), nunca no Objetivo nem nas condicoes (modo flow).
                 webinars={options.webinars}
               />
             </RulesForm>

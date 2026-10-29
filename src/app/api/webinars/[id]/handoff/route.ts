@@ -8,7 +8,7 @@ import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, roomErrorRespo
 // id } marca o pedido na propria mensagem ou pergunta do aluno nesta sessao (a pergunta aberta por uma mensagem do chat
 // ganha a marca junto) e o Assistente cala nela dali em diante; o console mostra "Pediu a equipe" e a resposta da
 // equipe chega tambem pelo sino. 200 { requested } (false quando ja estava pedido). O que nao e do aluno, de outra
-// sessao ou apagado: 404 sem dizer se existe. Banco sem a 202610290006: 503 com a frase. Sessao obrigatoria (401);
+// sessao ou apagado: 404 sem dizer se existe. Banco sem a 202610300004: 503 com a frase. Sessao obrigatoria (401);
 // conta no teto de 30 escritas por minuto (429); corpo de ate 4 KB; fora do acesso ou sessao de outro webinario: 404.
 
 export const dynamic = "force-dynamic";

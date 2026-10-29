@@ -8,7 +8,7 @@ import "server-only";
 // monta a pagina inteira: o webinario, as sessoes com relatorio (as "Comeca quando voce entra" so dos ultimos 7 dias),
 // a sessao escolhida (?sessao=) com o relatorio, a lista por aluno (nome, e-mail, hora da vaga e aparelho), as
 // enquetes e as perguntas citadas, o trecho da transcricao de cada ponto de queda, o bloco Respostas do Assistente
-// (ligado no webinario ou com resposta) e a Simulacao completa (a decisao do selo, as regras da 202610290005, o
+// (ligado no webinario ou com resposta) e a Simulacao completa (a decisao do selo, as regras da 202610300003, o
 // resumo congelado e o roteiro por Solta em). Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
 // (M9); webinarReportCsv continua servindo o Attendee de sempre. Tudo pela service role; PendingMigrationError sobe
 // para a pagina mostrar o aviso da migracao (WEBINARS_MIGRATION); as partes da fase 4 lidas guardadas mostram o aviso
@@ -130,7 +130,7 @@ async function guarded<T>(load: () => Promise<T>): Promise<Guarded<T>> {
 export type ReportQuestionInfo = { answeredBy: string | null; body: string; displayName: string; status: QuestionStatus };
 
 export type WebinarReportSelection = {
-  /** O bloco Respostas do Assistente: ligado no webinario (ou com resposta na sessao); `pending` sem a 202610290006. */
+  /** O bloco Respostas do Assistente: ligado no webinario (ou com resposta na sessao); `pending` sem a 202610300004. */
   assistant: { enabled: boolean; pending: boolean };
   attendees: ReportAttendee[];
   csvHref: string;
@@ -142,7 +142,7 @@ export type WebinarReportSelection = {
   exportReports: WebinarExportReport[];
   /**
    * A coluna "Oferta clicada" da lista por aluno (§3.4.1): a variante que cada aluno clicou nesta sessao ("B"; vazio
-   * sem clique). Nulo na Live ao vivo (a Oferta so aparece na gravada e no Replay); banco sem a 202610290005: vazio.
+   * sem clique). Nulo na Live ao vivo (a Oferta so aparece na gravada e no Replay); banco sem a 202610300003: vazio.
    */
   offerClicked: Record<string, string> | null;
   people: Record<string, ReportPerson>;
@@ -181,7 +181,7 @@ function simulationScriptByTrigger(fires: ReadonlyMap<string, number>, triggers:
   return counts;
 }
 
-/** As regras da Simulacao da sessao (202610290005) no formato do bloco; nulo sem regra lida. */
+/** As regras da Simulacao da sessao (202610300003) no formato do bloco; nulo sem regra lida. */
 async function loadSimulationRules(db: WebinarsDb, session: WebinarSession): Promise<Guarded<SimulationRulesSummary | null>> {
   if (session.kind !== "simulated") {
     return { pending: false, value: null };

@@ -392,7 +392,7 @@ test("modelo: barras (mensagens por minuto, reacoes, origem, perguntas), enquete
       "0 comentários do roteiro entraram · 0 não dispararam",
       "Comentários do roteiro por Solta em: Num minuto do vídeo 0 · Quando o apresentador diz 0 · Pelo botão da equipe 0"
     ],
-    "sem as regras da fase 4 (banco sem a 202610290005), so o selo e o roteiro"
+    "sem as regras da fase 4 (banco sem a 202610300003), so o selo e o roteiro"
   );
   assert.deepEqual(
     model.simulationLines(
@@ -506,7 +506,7 @@ test("o bloco Oferta (so com oferta): viram, cliques, compras, receita, conversa
   assert.deepEqual(semValor.find((fact) => fact.label === "Receita"), { label: "Receita", value: "—" }, "receita sem valor gravado: '—' (M8)");
 });
 
-test("o bloco Respostas do Assistente: os cinco numeros; ligado sem resposta, a frase; banco sem a 202610290006, o aviso; desligado e sem resposta, nada", () => {
+test("o bloco Respostas do Assistente: os cinco numeros; ligado sem resposta, a frase; banco sem a 202610300004, o aviso; desligado e sem resposta, nada", () => {
   const ligado = textOf(html(createElement(WebinarReportView, { page: paginaV4({ assistant: { enabled: true, pending: false } }) })));
   assert.match(ligado, /Respostas do Assistente Respostas reais a alunos reais: ficam fora da Simulação e das mensagens de alunos e equipe\./);
   assert.match(ligado, /Respostas 5 Tempo médio de resposta 7 s Corrigidas pela equipe 1 Apagadas pela equipe 2 Pediram para falar com a equipe 3/);
@@ -515,13 +515,13 @@ test("o bloco Respostas do Assistente: os cinco numeros; ligado sem resposta, a 
   assert.match(semResposta, /Respostas do Assistente .*O Assistente não respondeu nesta sessão\./);
 
   const pendente = textOf(html(createElement(WebinarReportView, { page: pagina({ selected: { ...pagina().selected, assistant: { enabled: false, pending: true } } }) })));
-  assert.match(pendente, /Esta parte precisa da atualização do banco \(migração 202610290006\)\./);
+  assert.match(pendente, /Esta parte precisa da atualização do banco \(migração 202610300004\)\./);
 
   assert.doesNotMatch(textOf(html(createElement(WebinarReportView, { page: pagina() }))), /Respostas do Assistente/);
   assert.deepEqual(model.assistantFacts({ ...viewV4, assistant: { ...viewV4.assistant, avgSeconds: null } })[1], { label: "Tempo médio de resposta", value: "—" });
 });
 
-test("a Simulacao completa: o contador com o real ao lado, entradas, avisos de venda e o roteiro por Solta em; sem a 202610290005, o aviso no bloco", () => {
+test("a Simulacao completa: o contador com o real ao lado, entradas, avisos de venda e o roteiro por Solta em; sem a 202610300003, o aviso no bloco", () => {
   const regras = { countMode: "curve", joins: { enabled: true, everySeconds: 60, max: 30 }, saleNotices: { enabled: true, items: 2 } };
   const text = textOf(html(createElement(WebinarReportView, { page: paginaV4({ simulation: simulacao({ rules: regras, totals: viewV4.simulation }) }) })));
   assert.match(text, /Simulação Estes números são da simulação e não entram em nenhum outro número\./);
@@ -530,7 +530,7 @@ test("a Simulacao completa: o contador com o real ao lado, entradas, avisos de v
   assert.match(text, /Comentários do roteiro por Solta em: Num minuto do vídeo 1 · Quando o apresentador diz 1 · Pelo botão da equipe 0/);
 
   const pendente = textOf(html(createElement(WebinarReportView, { page: paginaV4({ simulation: simulacao({ pending: true }) }) })));
-  assert.match(pendente, /Simulação .*Esta parte precisa da atualização do banco \(migração 202610290005\)\./);
+  assert.match(pendente, /Simulação .*Esta parte precisa da atualização do banco \(migração 202610300003\)\./);
 });
 
 test("os pontos de queda com o trecho da transcricao daquele minuto; sem cue no minuto, a frase; sem transcricao, a lista de sempre", () => {

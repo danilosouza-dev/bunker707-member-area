@@ -1,4 +1,4 @@
-// Frases do follow-up por segmento (docs/30 §1.6 e D49): as acoes do follow-up (viu o replay, viu o card de compra,
+// Frases do follow-up por segmento (docs/30 §1.6 e D52): as acoes do follow-up (viu o replay, viu o card de compra,
 // saiu antes dele, clicou e nao comprou, comprou pelo card) sao acoes da regra "Participação em lives" do construtor de
 // segmentos da Comunicacao, que tem os proprios rotulos (notices-view-model.ts) e frases (audience-model.ts). Aqui
 // ficam so as frases do webinario em volta dela: onde as acoes do follow-up valem, quando a compra entra no segmento e

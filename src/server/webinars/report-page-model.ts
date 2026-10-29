@@ -566,7 +566,7 @@ export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly Tran
  * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6).
  * ---------------------------------------------------------------------------------------------- */
 
-/** As regras da fase 4 (202610290005) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
+/** As regras da fase 4 (202610300003) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
 export type SimulationRulesSummary = {
   countMode: SimulatedCountMode;
   joins: { enabled: boolean; everySeconds: number; max: number };
@@ -577,7 +577,7 @@ export type SimulationSummary = {
   ackText: string | null;
   decidedAt: string | null;
   decidedByName: string | null;
-  /** Banco sem a 202610290005: as regras ficam de fora e a tela mostra o aviso da migracao no bloco. */
+  /** Banco sem a 202610300003: as regras ficam de fora e a tela mostra o aviso da migracao no bloco. */
   pending: boolean;
   /** Os participantes de verdade (presentes unicos), ao lado do contador para a equipe comparar. */
   realParticipants: number;

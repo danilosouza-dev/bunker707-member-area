@@ -1243,7 +1243,7 @@ export async function seedLiveAoVivoDeTeste(db, { comecouHa = 60_000, equipeMode
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Webinarios, fase 4 (docs/30 §1.6, §3.2, §3.3, §3.5, §4.2, §4.3, §8.6 e §11; migracoes 202610290004 a 0009): a live ao
+ * Webinarios, fase 4 (docs/30 §1.6, §3.2, §3.3, §3.5, §4.2, §4.3, §8.6 e §11; migracoes 202610300002 a 202610300007): a live ao
  * vivo encerrada dos paineis, a Oferta da Live gravada no ar, a Simulacao da sessao encerrada e o "Comeca quando voce
  * entra". Ids na faixa bbbbbbbb-...-0006xx a 0008xx (a integracao usa 0004xx e 0005xx); slugs "teste-" (limparWebinarios
  * apaga tudo, as linhas filhas por cascata).
@@ -1395,7 +1395,7 @@ export async function seedOfertaDeTeste(db, { mostraEm = 120_000, prazo = null, 
       visible_minutes: someEm,
       webinar_id: webinarId
     }),
-    "Gravando a oferta de teste (a migracao 202610290005 esta aplicada?)"
+    "Gravando a oferta de teste (a migracao 202610300003 esta aplicada?)"
   );
   unwrap(
     await db.from("webinar_offer_variants").insert(
@@ -1454,7 +1454,7 @@ export async function seedSimulacaoDeTeste(db, { sessaoId = LIVE_GRAVADA_DE_TEST
         simulation_summary: SIMULACAO_DE_TESTE.resumo
       })
       .eq("id", sessaoId),
-    "Gravando a simulacao de teste (a migracao 202610290005 esta aplicada?)"
+    "Gravando a simulacao de teste (a migracao 202610300003 esta aplicada?)"
   );
 
   return { ackText: frase, resumo: SIMULACAO_DE_TESTE.resumo };
@@ -1509,7 +1509,7 @@ export async function seedJitDeTeste(db, { aCada = 15, entradaAtrasada = 0 } = {
       },
       { onConflict: "id" }
     ),
-    "Gravando a live gravada do just-in-time de teste (a migracao 202610290008 esta aplicada?)"
+    "Gravando a live gravada do just-in-time de teste (a migracao 202610300005 esta aplicada?)"
   );
   unwrap(await db.from("webinar_sessions").delete().eq("webinar_id", id), "Apagando as sessoes de uma rodada anterior do just-in-time");
   unwrap(

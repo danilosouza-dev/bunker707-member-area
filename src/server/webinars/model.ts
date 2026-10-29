@@ -221,7 +221,7 @@ export type WebinarSession = {
   /** Fase 3 (202610290003): a reserva Gravar no navegador ligada desde esta hora (o selo Gravando do aluno). */
   browserRecordingAt: string | null;
   /**
-   * Fase 4e (202610290008): a sessao "Comeca quando voce entra" que nasceu no horario em que o primeiro aluno chegou
+   * Fase 4e (202610300005): a sessao "Comeca quando voce entra" que nasceu no horario em que o primeiro aluno chegou
    * (sempre `simulated`). O editor, os lembretes e a lista de sessoes marcadas nunca mexem nela.
    */
   jit: boolean;
@@ -775,8 +775,8 @@ export const SIMULATED_PHASES = ["waiting", "live", "ended"] as const;
 export type SimulatedPhase = (typeof SIMULATED_PHASES)[number];
 
 /* ------------------------------------------------------------------------------------------------
- * Fase 4: paineis e Hot Webinar (docs/30 §1.6, §2.2, §2.4, §3, §4.2, §4.3, §6.6 e §11; migracoes 202610290004 a
- * 202610290009). So listas, limites e tipos que mais de uma frente usa; as contas ficam nos modulos de cada frente
+ * Fase 4: paineis e Hot Webinar (docs/30 §1.6, §2.2, §2.4, §3, §4.2, §4.3, §6.6 e §11; migracoes 202610300002 a
+ * 202610300006). So listas, limites e tipos que mais de uma frente usa; as contas ficam nos modulos de cada frente
  * (panel-model.ts, offer-model.ts, simulation-model.ts, assistant-model.ts, jit-model.ts, translation-model.ts).
  * As listas batem com os checks das migracoes (as guardas tests/webinarios-v4*.guard.test.mjs conferem).
  * ---------------------------------------------------------------------------------------------- */
@@ -787,7 +787,7 @@ export type SimulatedPhase = (typeof SIMULATED_PHASES)[number];
 export const PANEL_KINDS = ["live", "simulated", "all"] as const;
 export type PanelKind = (typeof PANEL_KINDS)[number];
 
-/** As metricas por sessao de webinar_panel (202610290004 e, com a oferta e a Simulacao, 202610290005). */
+/** As metricas por sessao de webinar_panel (202610300002 e, com a oferta e a Simulacao, 202610300003). */
 export const PANEL_SESSION_METRICS = [
   "duration",
   "registered",
@@ -888,7 +888,7 @@ export type OfferTrigger = (typeof OFFER_TRIGGERS)[number];
 export const OFFER_STATUSES = ["draft", "active", "archived"] as const;
 export type OfferStatus = (typeof OFFER_STATUSES)[number];
 
-/** Os limites da Oferta (os checks da 202610290005). */
+/** Os limites da Oferta (os checks da 202610300003). */
 export const OFFER_LIMITS = {
   title: 120,
   headline: 120,
@@ -1051,7 +1051,7 @@ export type SessionSimulation = {
   summary: SimulationTotals | null;
 };
 
-/** Os limites da Simulacao (zod no salvar e no ler; os checks de tamanho da 202610290005). */
+/** Os limites da Simulacao (zod no salvar e no ler; os checks de tamanho da 202610300003). */
 export const SIMULATION_LIMITS = {
   countMax: 100_000,
   jitterMax: 5_000,
@@ -1179,7 +1179,7 @@ export type AssistantRequest = {
 
 export type Attendant = { lastSeenAt: string; sessionId: string; status: AttendantStatus; userId: string };
 
-/** O que a pergunta (ou a pergunta do chat) ganhou na 202610290006: quem assumiu e o "Falar com a equipe". */
+/** O que a pergunta (ou a pergunta do chat) ganhou na 202610300004: quem assumiu e o "Falar com a equipe". */
 export type AttendanceMarks = { answerSource: AnswerSource | null; assignedAt: string | null; assignedTo: string | null; handoffRequestedAt: string | null };
 
 /* 4e: "Comeca quando voce entra" (docs/30 §1.2, §1.6, §2.2, A14 e D25). */

@@ -9,7 +9,7 @@
 // valores da decisao, D10). O relogio e sempre o do servidor. Fase 4c (docs/30 §1.6, §2.4 e D24): a resposta da equipe
 // a uma pergunta grava answer_source 'team' (a do Assistente e 'ai'), e a resposta que chega depois (o aluno pediu a
 // equipe, a sessao acabou ou ele saiu da sala) vira aviso no sino (notify.queueWebinarAnswerNotice), na pergunta e na
-// resposta da equipe a uma mensagem do chat; banco sem a 202610290006: a resposta segue e so a marca fica de fora.
+// resposta da equipe a uma mensagem do chat; banco sem a 202610300004: a resposta segue e so a marca fica de fora.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
@@ -162,7 +162,7 @@ function teamDisplayName(user: { email?: string; user_metadata: Record<string, u
   return firstNameInitial(getUserDisplayName(user).fullName).slice(0, CHAT_LIMITS.displayName) || "Equipe";
 }
 
-/** Fase 4c: as marcas de atendimento de um alvo; sem a 202610290006 (ou na falha da leitura), nenhuma: a resposta da equipe segue igual. */
+/** Fase 4c: as marcas de atendimento de um alvo; sem a 202610300004 (ou na falha da leitura), nenhuma: a resposta da equipe segue igual. */
 async function attendanceMarksOf(db: WebinarsDb, target: "chat" | "question", id: string) {
   try {
     return (await fetchAttendanceMarks(db, { ids: [id], target })).get(id) ?? null;
@@ -205,7 +205,7 @@ async function noticeTeamAnswer(
   }
 }
 
-/** Fase 4c: a pergunta foi respondida pela equipe (answer_source 'team'); sem a 202610290006, nada. */
+/** Fase 4c: a pergunta foi respondida pela equipe (answer_source 'team'); sem a 202610300004, nada. */
 async function markTeamAnswer(db: WebinarsDb, questionId: string) {
   try {
     await setQuestionAnswerSource(db, { questionId, source: "team" });
@@ -837,7 +837,7 @@ export async function saveSimulation(input: { ackText?: string; acknowledged?: b
     }
 
     // Fase 4 (D10): com regra simulada na sessao, a frase da fase 2 ("numeros reais") seria falsa; a decisao passa
-    // pelo card novo (saveSessionSimulation). Banco sem a 202610290005: nao ha regra, segue a fase 2.
+    // pelo card novo (saveSessionSimulation). Banco sem a 202610300003: nao ha regra, segue a fase 2.
     if (await hasSimulatedRules(db, row.id)) {
       throw new WebinarError(WEBINAR_COPY.simulacao.servidor.usarCardNovo, 409);
     }
@@ -878,7 +878,7 @@ export async function saveSimulation(input: { ackText?: string; acknowledged?: b
   });
 }
 
-/** A sessao tem contador, entradas ou avisos de venda simulados (colunas da 202610290005; sem elas, false). */
+/** A sessao tem contador, entradas ou avisos de venda simulados (colunas da 202610300003; sem elas, false). */
 async function hasSimulatedRules(db: WebinarsDb, sessionId: string) {
   try {
     const simulation = await fetchSessionSimulation(db, sessionId);

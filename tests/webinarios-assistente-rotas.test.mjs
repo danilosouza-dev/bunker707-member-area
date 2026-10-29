@@ -8,7 +8,7 @@ import { atendente, EQUIPE, EQUIPE_2, GRAVACAO, iaFalsa, montarEscola, novoAluno
 // role ai, source ai, kind answer, master falso (tambem na Live ao vivo), o nome "Assistente" e a resposta ligada a
 // mensagem do aluno; o MATERIAL leva as perguntas cadastradas, o produto e as cues em volta do minuto; o mesmo alvo
 // nunca responde duas vezes; quem a equipe assumiu, o "Falar com a equipe", a equipe como autora, o limite do minuto,
-// sem conexao de IA, desligado no ambiente ou no webinario e o banco sem a 202610290006 calam; a equipe que assume
+// sem conexao de IA, desligado no ambiente ou no webinario e o banco sem a 202610300004 calam; a equipe que assume
 // enquanto a IA escreve tambem cala (conferido de novo antes de gravar); a falha e o teto de tempo ficam no pedido; o
 // "Responder tudo"; a pergunta da aba Perguntas respondida pelo Assistente (answer_source ai) e o modo hibrido com
 // alguem atendendo; o GET /assistant; o POST /handoff so no que e do aluno (404 no resto) e o GET /questions com a
@@ -230,7 +230,7 @@ test("cala sem ser ligado: ambiente desligado (nem agenda), webinario desligado 
   assert.equal(iaFalsa.chamadas.length, 0);
 });
 
-test("banco sem a 202610290006: o chat responde 201 e o Assistente se cala sem erro", async () => {
+test("banco sem a 202610300004: o chat responde 201 e o Assistente se cala sem erro", async () => {
   const { db } = montar({}, { semMigracao: true });
   const enviada = await enviar({ body: "@assistente funciona?" });
   assert.equal(enviada.status, 201, JSON.stringify(enviada.body));

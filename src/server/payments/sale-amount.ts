@@ -7,7 +7,7 @@
 
 import type { SaleAmount } from "./types";
 
-/** O teto do check webhook_events_amount_cents_v4 (migracao 202610290005): 1 bilhao na moeda, em centavos. */
+/** O teto do check webhook_events_amount_cents_v4 (migracao 202610300003): 1 bilhao na moeda, em centavos. */
 export const MAX_SALE_AMOUNT_CENTS = 100_000_000_000;
 
 /** Digitos da parte inteira aceitos (1 bilhao tem 10; o resto e lixo ou outra unidade). */
@@ -158,7 +158,7 @@ export function saleAmountOf(input: { cents: number | null; currency: unknown; d
 
 /**
  * As colunas de webhook_events para o valor (amount_cents + currency), so quando o valor passa nos checks da migracao
- * 202610290005; senao null (a venda e gravada sem as colunas, que ficam nulas).
+ * 202610300003; senao null (a venda e gravada sem as colunas, que ficam nulas).
  */
 export function saleAmountColumns(amount: SaleAmount | null | undefined): { amount_cents: number; currency: string } | null {
   const valid = amount ? saleAmountOf({ cents: amount.cents, currency: amount.currency }) : null;

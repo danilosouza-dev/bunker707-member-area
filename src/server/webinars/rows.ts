@@ -162,7 +162,7 @@ export type SessionRow = {
   room_name?: string | null;
   /* 202610290003: a reserva Gravar no navegador ligada (o selo Gravando do aluno). */
   browser_recording_at?: string | null;
-  /* 202610290008 (fase 4e): a sessao "Comeca quando voce entra"; opcional para os dubles das fases 1 a 3. */
+  /* 202610300005 (fase 4e): a sessao "Comeca quando voce entra"; opcional para os dubles das fases 1 a 3. */
   jit?: boolean | null;
   scheduled_at: string;
   script_fired_at: string | null;
@@ -567,7 +567,7 @@ export type RecordingEventRow = {
 };
 
 /* ------------------------------------------------------------------------------------------------
- * Fase 4 (202610290004 a 202610290009): as linhas novas e os leitores sem confiar no formato (jsonb e bigint podem vir
+ * Fase 4 (202610300002 a 202610300006): as linhas novas e os leitores sem confiar no formato (jsonb e bigint podem vir
  * de qualquer jeito: o que nao bate volta ao padrao, nunca quebra a tela). Quem le e grava e o store de cada parte
  * (panel-store.ts, offer-store.ts, simulation-store.ts, assistant-store.ts, jit-store.ts, translation-store.ts); o
  * zod de quem salva fica em offer-schemas.ts, simulation-schemas.ts, assistant-schemas.ts, jit-schemas.ts e
@@ -990,7 +990,7 @@ export function aiRequestFromRow(row: AiRequestRow): AssistantRequest {
   };
 }
 
-/** As colunas da 202610290006 numa pergunta (webinar_questions) ou numa pergunta do chat (webinar_chat_messages). */
+/** As colunas da 202610300004 numa pergunta (webinar_questions) ou numa pergunta do chat (webinar_chat_messages). */
 export const QUESTION_ATTENDANCE_COLUMNS = "id, assigned_to, assigned_at, answer_source, handoff_requested_at";
 export const MESSAGE_ATTENDANCE_COLUMNS = "id, assigned_to, assigned_at, handoff_requested_at, edited_at, edited_by";
 

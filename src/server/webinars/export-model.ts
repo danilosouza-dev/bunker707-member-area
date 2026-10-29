@@ -296,7 +296,7 @@ export function performanceRow(facts: PerformanceFacts): CsvCell[] {
 
 export type QaQuestionInput = {
   anonymous: boolean;
-  /** De quem e a resposta (202610290006): "ai" sai como "Assistente"; nulo sem a migracao ou sem resposta. */
+  /** De quem e a resposta (202610300004): "ai" sai como "Assistente"; nulo sem a migracao ou sem resposta. */
   answerSource: AnswerSource | null;
   answerText: string | null;
   answeredAt: string | null;
@@ -431,7 +431,7 @@ export type SimulationExportInput = {
   items: readonly SimulationScriptItemInput[];
   /** Os participantes de verdade, ao lado do contador (§3.5). */
   realParticipants: number;
-  /** As regras e o resumo congelado (202610290005); nulo sem a migracao: so o roteiro sai. */
+  /** As regras e o resumo congelado (202610300003); nulo sem a migracao: so o roteiro sai. */
   simulation: SessionSimulation | null;
 };
 

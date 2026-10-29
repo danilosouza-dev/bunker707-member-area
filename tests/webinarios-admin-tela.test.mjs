@@ -234,7 +234,7 @@ test("lista: cabecalho, abas de Comunicacao, cinco numeros ('—' sem dado), aba
   assert.doesNotMatch(text, /em construção/i);
 });
 
-test("lista: Compareceram e Assistiram o replay vem da RPC do painel; sem ela (migracao 202610290004), '—'", () => {
+test("lista: Compareceram e Assistiram o replay vem da RPC do painel; sem ela (migracao 202610300002), '—'", () => {
   const numbersOf = (markup) =>
     Object.fromEntries(
       Array.from(markup.matchAll(/aria-label="([^",]+), ([^,"]+)[^"]*"[^>]*role="group"/g)).map((match) => [match[1], match[2]])

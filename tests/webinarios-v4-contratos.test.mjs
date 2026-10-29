@@ -25,7 +25,7 @@ const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-c
 const SESSION = "7a0c1c8e-9a2b-4d7e-8f0a-1b2c3d4e5f60";
 const WEBINAR = "10000000-0000-4000-8000-000000000001";
 
-test("a sessao le jit (202610290008) e os dubles antigos sem a coluna continuam false", () => {
+test("a sessao le jit (202610300005) e os dubles antigos sem a coluna continuam false", () => {
   const base = { chat_mode: "open", chat_slow_mode_seconds: null, created_at: "2026-11-05T12:00:00Z", ended_at: null, id: SESSION, kind: "simulated", late_join_minutes: null, pinned_message_id: null, presence_curve: null, recording_anchor_at: null, recording_id: null, scheduled_at: "2026-11-05T23:00:00Z", script_fired_at: null, show_live_badge: false, simulation_ack_text: null, simulation_decided_at: null, simulation_decided_by: null, source_session_id: null, started_at: null, status: "scheduled", updated_at: "2026-11-05T12:00:00Z", webinar_id: WEBINAR };
   assert.equal(rows.sessionFromRow(base).jit, false);
   assert.equal(rows.sessionFromRow({ ...base, jit: true }).jit, true);

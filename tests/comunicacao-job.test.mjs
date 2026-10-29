@@ -949,7 +949,7 @@ test("os outros momentos continuam como antes: o segmento inteiro, sem ler nem g
 });
 
 /* ------------------------------------------------------------------------------------------------
- * Participação em lives com uma acao do follow-up (docs/30 §1.6, D49) no recalculo dos pop-ups (faixas de 15 min, docs/29)
+ * Participação em lives com uma acao do follow-up (docs/30 §1.6, D52) no recalculo dos pop-ups (faixas de 15 min, docs/29)
  * ---------------------------------------------------------------------------------------------- */
 
 const WEBINARIO = "aaaaaaaa-1111-4111-8111-111111111111";

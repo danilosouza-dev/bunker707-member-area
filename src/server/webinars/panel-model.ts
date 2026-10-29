@@ -262,7 +262,7 @@ export function saoPauloHourOf(iso: string): number {
 /** A janela mostrada numa sessao (webinar_offer_displays) e as variantes da foto dela. */
 export type PanelOfferWindow = { hideOffsetMs: number | null; showOffsetMs: number; variants: readonly OfferVariantLabel[] };
 
-/** O que os filtros "Com oferta" e "Variante" e a faixa da janela leem da Oferta (nulo: banco sem a 202610290005). */
+/** O que os filtros "Com oferta" e "Variante" e a faixa da janela leem da Oferta (nulo: banco sem a 202610300003). */
 export type PanelOfferFacts = {
   byWebinar: ReadonlyMap<string, { offerId: string; variants: readonly OfferVariantLabel[] }>;
   displays: ReadonlyMap<string, PanelOfferWindow>;
@@ -317,7 +317,7 @@ function sessionVariants(session: PanelSession, offers: PanelOfferFacts): readon
 /**
  * O recorte dos filtros (vira `sessionIds` de webinar_panel, entao os unicos do topo seguem os filtros). Sem Situacao, as
  * canceladas ficam de fora (as vagas delas continuam `registered` e inchariam Vagas garantidas, como na lista).
- * "Com oferta" e "Variante" sem a 202610290005 (offers nulo) nao casam com nada.
+ * "Com oferta" e "Variante" sem a 202610300003 (offers nulo) nao casam com nada.
  */
 export function filterPanelSessions(sessions: readonly PanelSession[], filters: PanelFilters, offers: PanelOfferFacts | null): PanelSession[] {
   return sessions.filter((session) => {
@@ -617,7 +617,7 @@ export function panelPeriodStatsOf(rows: readonly PanelRow[]): PanelPeriodStats 
   return stats;
 }
 
-/** Compareceram e Assistiram o replay da lista; nulo = "—" (banco sem a 202610290004 ou falha na leitura). */
+/** Compareceram e Assistiram o replay da lista; nulo = "—" (banco sem a 202610300002 ou falha na leitura). */
 export type WebinarListNumbers = { attended: number | null; replayViewers: number | null };
 
 /** Os dois numeros reais da lista (aba Webinarios): Compareceram e Assistiram o replay do periodo. */
@@ -805,7 +805,7 @@ function recordedKpiValues(snapshot: PanelSnapshot): KpiValues {
   };
 }
 
-/** A receita do recorte por moeda (M8); sem a 202610290005, nada. */
+/** A receita do recorte por moeda (M8); sem a 202610300003, nada. */
 export function panelRevenueOf(snapshot: PanelSnapshot): Record<string, number> {
   const revenue: Record<string, number> = {};
 
@@ -966,7 +966,7 @@ export function byHourOfDayOf(snapshot: PanelSnapshot): HourRow[] {
 
 export type VariantRow = { clicks: number; conversion: number | null; label: OfferVariantLabel; purchases: number; seen: number };
 
-/** Oferta por variante (A/B/C/D): viram, clicaram, compraram e a conversao (compras ÷ quem viu); nulo sem a 202610290005. */
+/** Oferta por variante (A/B/C/D): viram, clicaram, compraram e a conversao (compras ÷ quem viu); nulo sem a 202610300003. */
 export function offerByVariantOf(snapshot: PanelSnapshot): VariantRow[] | null {
   if (!snapshot.offersAvailable) {
     return null;
@@ -1119,7 +1119,7 @@ export function panelTableOf(kind: PanelTabKind, snapshot: PanelSnapshot, produc
  * ---------------------------------------------------------------------------------------------- */
 
 export type PanelSimulationView = {
-  /** Banco com a 202610290005 (sem ela, tudo "—"). */
+  /** Banco com a 202610300003 (sem ela, tudo "—"). */
   available: boolean;
   badge: { on: number; total: number };
   counterMax: number | null;
@@ -1185,7 +1185,7 @@ export type PanelFilterOptions = {
   products: PanelOption[];
   variants: OfferVariantLabel[];
   webinars: PanelOption[];
-  /** "Com oferta" so aparece quando algum webinario do periodo tem Oferta (e o banco tem a 202610290005). */
+  /** "Com oferta" so aparece quando algum webinario do periodo tem Oferta (e o banco tem a 202610300003). */
   withOffer: boolean;
 };
 

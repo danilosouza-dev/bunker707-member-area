@@ -3,7 +3,7 @@
 // imports relativos: tests/webinarios-*.test.mjs carregam direto pelo Node. Os nomes dos alunos do top 10 vem numa
 // segunda leitura (fora do cache), por isso aqui so ids.
 //
-// Fase 4 (202610290005 e 202610290006): a RPC ganhou a Oferta (`offer / seen|clicks|purchases`, `offer /
+// Fase 4 (202610300003 e 202610300004): a RPC ganhou a Oferta (`offer / seen|clicks|purchases`, `offer /
 // <L>:seen|clicks|purchases`, `offer_revenue / <moeda>`), as Respostas do Assistente (`ai / replies|avg_seconds|
 // edited|deleted|handoffs`) e o bloco Simulacao (`sim_counter / max`, `sim_joins / shown`, `sim_sales / shown`, alem do
 // `sim_script` da fase 2). Cada familia tem o seu leitor (applyOfferRow, applyAssistantRow, applySimulationRow): os

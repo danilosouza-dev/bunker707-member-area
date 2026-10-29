@@ -1,5 +1,5 @@
 -- Webinarios v4f, a traducao do chat e do roteiro em PT, EN e ES (docs/30 §1.6 "Traducao automatica" e "Detalhes que
--- mudam a experiencia", §11, fase 4f). A 202610290008 nao muda (nenhuma migracao da fase 4 foi
+-- mudam a experiencia", §11, fase 4f). A 202610300005 nao muda (nenhuma migracao da fase 4 foi
 -- aplicada ainda; docs/21 §9.10); este arquivo so acrescenta.
 --
 -- Regras:

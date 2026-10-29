@@ -11,7 +11,7 @@ import { assistantCardNotice } from "./assistant/assistant-editor-model";
 
 // O card Assistente do editor (docs/30 §1.6, §2.2, §6.6 e D24): ligado no webinario, "Responder tudo" padrao e as
 // perguntas e respostas cadastradas, com o salvar proprio. webinar-editor.tsx monta este card num webinario gravado. O
-// card le pela Server Action loadAssistantEditor ao abrir (Tentar de novo quando falha); banco sem a 202610290006, o
+// card le pela Server Action loadAssistantEditor ao abrir (Tentar de novo quando falha); banco sem a 202610300004, o
 // aviso da migracao; sem WEBINAR_ASSISTANT_ENABLED=on no ambiente ou sem conexao de IA ativa, so a frase (o formulario
 // fica escondido e nada quebra).
 

@@ -16,7 +16,7 @@ import {
 } from "../fixtures/escola-de-teste.mjs";
 
 // Webinarios, fase 4 (docs/30 §3.2, §3.3, §3.5, §3.6, §4.2, §4.6, §5.1, M7 e M8; docs/18 §3) contra o banco LOCAL de
-// verdade, com as migracoes 202610290004 e 202610290005 aplicadas. Os numeros abaixo foram conferidos a mao (e num
+// verdade, com as migracoes 202610300002 e 202610300003 aplicadas. Os numeros abaixo foram conferidos a mao (e num
 // Postgres 16 local com os mesmos dados) e as sessoes ficam em marco de 2020, fora de qualquer outro teste, para o
 // periodo do painel so ter o que este arquivo grava:
 // - webinar_panel('live'): uma live encerrada de 10 min (20 baldes) lida pelas amostras: a aluna do comeco ao fim, o
@@ -321,7 +321,7 @@ async function seedGravada() {
     await db.from("webinar_offer_displays").insert({ hide_offset_ms: 150_000, offer_id: GRAVADA.ofertaId, session_id: GRAVADA.sessaoId, show_offset_ms: 60_000 }),
     "Gravando a janela da oferta"
   );
-  // Quem viu a oferta, como o fim da sessao congela (webinar_close_session, 202610290010): aqui a curva e gravada
+  // Quem viu a oferta, como o fim da sessao congela (webinar_close_session, 202610300007): aqui a curva e gravada
   // direto, entao o congelado tambem (os baldes 2 a 5: a aluna, a expirada e o produtor; o aluno sem acesso saiu no 1).
   unwrap(
     await db.from("webinar_offer_seen").insert(
@@ -494,7 +494,7 @@ test("2. a conversao pela venda real da Hotmart: o job liga o ULTIMO clique ante
   );
 
   // Uma segunda venda do mesmo produto (outro pedido): o ultimo clique antes dela ja converteu, entao ela nao desce
-  // para o clique mais antigo, ainda dentro dos 7 dias (revisao da fase 4, 202610290010).
+  // para o clique mais antigo, ainda dentro dos 7 dias (revisao da fase 4, 202610300007).
   const segunda = await postarNaHotmart(compraNaHotmart({ comprador: contas.aluna, id: "aluna-segunda", transacao: "HP-TESTE-V4-ALUNA-2" }));
   assert.equal(segunda.status, 200, JSON.stringify(segunda.body));
   assert.equal(unwrap(await db.rpc("webinar_offer_conversions", { p_limit: 500, p_now: new Date().toISOString() }), "Rodando depois da segunda venda"), 0);

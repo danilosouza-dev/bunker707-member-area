@@ -153,7 +153,7 @@ export function saoPauloDay(iso: string): string | null {
 }
 
 /**
- * Se a mensagem e uma que a sala desta sessao mostraria (o recorte da webinar_chat_window, 202610290008): nunca
+ * Se a mensagem e uma que a sala desta sessao mostraria (o recorte da webinar_chat_window, 202610300005): nunca
  * apagada; da propria sessao, aprovada ou do proprio aluno na moderacao; da linha mestre (outra sessao do mesmo
  * webinario ou a de origem), aprovada; ou, na sessao "Comeca quando voce entra", da turma do dia (outra sessao jit do
  * mesmo webinario no mesmo dia de Sao Paulo, `audience`, aprovada, fora da linha mestre). `sessions` traz as outras

@@ -25,7 +25,7 @@ import { sessionOffsetMs } from "./room-model";
 export const OFFER_POLL_MS = 60_000;
 export const OFFER_MANUAL_POLL_MS = 20_000;
 
-/** Os limites do offset gravado (o check de webinar_offer_displays e webinar_offer_clicks na 202610290005). */
+/** Os limites do offset gravado (o check de webinar_offer_displays e webinar_offer_clicks na 202610300003). */
 export const OFFER_OFFSET_MIN_MS = -86_400_000;
 export const OFFER_OFFSET_MAX_MS = 172_800_000;
 

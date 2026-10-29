@@ -17,35 +17,47 @@ import {
 } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da fase 4e dos webinarios (docs/30 §1.2, §1.6, §2.2, A14, D25 e §11): a migracao
-// 202610290008_webinars_v4e_just_in_time.sql (e a 0007 que nao existe: a Sala Live vertical nao tem dado novo).
-// - as migracoes ate a 202610290006 continuam byte a byte, e a 0008 e o texto exato (hash);
+// 202610300005_webinars_v4e_just_in_time.sql (a 4d, Sala Live vertical, nao tem dado novo nem migracao: a 4e vem
+// logo depois da 4c, sem buraco).
+// - as migracoes ate a 202610300004 continuam byte a byte, e a 202610300005 e o texto exato (hash);
 // - quatro secoes MCP, idempotente, so acrescenta;
 // - webinar_sessions.jit so na sessao `simulated`, uma por horario (indice unico parcial); SESSION_COLUMNS le `jit`
-//   e o app exige a 0008 (WEBINARS_MIGRATION; provisoriamente a 202610300001, que a inclui, ate a renumeracao);
+//   e o aviso de migracao pendente (WEBINARS_MIGRATION) aponta a mais nova dos webinarios, que inclui a 202610300005;
 // - webinar_chat_window mantem o corpo inteiro da 202610290001 e so acrescenta a turma do dia das sessoes jit:
 //   `audience` aprovadas, nunca a linha mestre nem os pendentes, pelo dia de Sao Paulo.
 
-const MIGRATION = "supabase/migrations/202610290008_webinars_v4e_just_in_time.sql";
+const MIGRATION = "supabase/migrations/202610300005_webinars_v4e_just_in_time.sql";
 const rows = await import("../src/server/webinars/rows.ts");
 
-test("as migracoes ate a 202610290006 continuam byte a byte; a 0007 nao existe; a 0008 e o texto exato", () => {
-  const applied = cumulativeHash("202610290006_webinars_v4c_assistente.sql");
-  assert.equal(applied.count, 59);
-  assert.equal(applied.hash, "472aaa9ce161d9c36311fba15190bfe7f3fdc91b445bad0faa5c72262aaae4f8", "uma migracao anterior mudou");
-  assert.ok(!migrationFiles().some((name) => name.startsWith("202610290007")), "a 4d (Sala Live vertical) nao tem migracao");
-  assert.ok(migrationFiles().includes("202610290008_webinars_v4e_just_in_time.sql"));
-  assert.equal(fileHash(MIGRATION), "33b6f6392a6a25998404beb5013b6510cfaae974dfacd534d921566a63df4cbf", "a 202610290008 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+test("as migracoes ate a 202610300004 continuam byte a byte; a fase 4 sem buraco; a 202610300005 e o texto exato", () => {
+  const applied = cumulativeHash("202610300004_webinars_v4c_assistente.sql");
+  assert.equal(applied.count, 60);
+  assert.equal(applied.hash, "194d752b31c3f222b94fff0a36df63c0a2ab265745b6919dbcddd8c1ccc6291f", "uma migracao anterior mudou");
+  assert.deepEqual(
+    migrationFiles().filter((name) => name.startsWith("2026103000")),
+    [
+      "202610300001_webinars_quem_pode_regras.sql",
+      "202610300002_webinars_v4a_paineis.sql",
+      "202610300003_webinars_v4b_ofertas.sql",
+      "202610300004_webinars_v4c_assistente.sql",
+      "202610300005_webinars_v4e_just_in_time.sql",
+      "202610300006_webinars_v4f_traducao.sql",
+      "202610300007_webinars_v4_ajustes.sql"
+    ],
+    "a fase 4 vem depois da 202610300001, na ordem e sem buraco (a 4d, Sala Live vertical, nao tem migracao)"
+  );
+  assert.ok(migrationFiles().includes("202610300005_webinars_v4e_just_in_time.sql"));
+  assert.equal(fileHash(MIGRATION), "a38aecc10f7beff4581ca1826d34f4d63b57bbe382eabffa0c1983bfe642a957", "a 202610300005 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
-  // INTEGRACAO (provisorio, ate a renumeracao das migracoes da fase 4): toda leitura de sessao le jit (0008), e o aviso de
-  // migracao pendente aponta a mais nova pela ordem dos arquivos, a 202610300001 (aplicar ate ela inclui a 0008), como
-  // pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs. Depois da renumeracao, volta a apontar a da 4e.
-  assert.equal(appMigration, "202610300001", "toda leitura de sessao le jit: o aviso de migracao pendente aponta uma migracao que inclui a 0008");
-  assert.ok(appMigration > "202610290008");
+  // Toda leitura de sessao le jit (202610300005), e o aviso de migracao pendente aponta a mais nova dos webinarios, a
+  // 202610300007 (aplicar ate ela inclui a 202610300005), como pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs.
+  assert.equal(appMigration, "202610300007", "toda leitura de sessao le jit: o aviso de migracao pendente aponta uma migracao que inclui a 202610300005");
+  assert.ok(appMigration >= "202610300005");
   assert.ok(rows.SESSION_COLUMNS.split(", ").includes("jit"));
   assert.ok(existsSync(new URL(MIGRATION, root)));
 });
 
-test("a 0008: quatro secoes MCP, idempotente, so acrescenta; jit so na sessao gravada, uma por horario", () => {
+test("a 202610300005: quatro secoes MCP, idempotente, so acrescenta; jit so na sessao gravada, uma por horario", () => {
   const migration = read(MIGRATION);
   assertSections(migration, 4);
   assertOnlyAdds(migration);

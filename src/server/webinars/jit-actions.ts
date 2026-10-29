@@ -14,7 +14,7 @@
 // - a auditoria leva os valores (numeros e booleanos; dos avisos de venda, so a contagem), nunca a frase nem textos;
 // - a resposta leva a versao nova do webinario (updated_at muda com jit_settings): o editor segue com ela e o proximo
 //   Salvar do rascunho nao vira "mudou em outra tela";
-// - banco sem a 202610290008 (WEBINARS_JIT_MIGRATION): 409 com a frase da migracao, nunca o erro cru.
+// - banco sem a 202610300005 (WEBINARS_JIT_MIGRATION): 409 com a frase da migracao, nunca o erro cru.
 // As sessoes que ja nasceram nao mudam: cada uma guardou a decisao que valia quando nasceu.
 
 import { revalidatePath } from "next/cache";
@@ -52,7 +52,7 @@ export type JitSettingsData = { deciderName: string | null; sessionsToday: JitSe
 
 const rulesKey = (rules: SimulationRules) => JSON.stringify(normalizeSimulationRules(rules));
 
-/** O banco sem a 202610290008 vira a frase da migracao (409); o resto segue como veio. */
+/** O banco sem a 202610300005 vira a frase da migracao (409); o resto segue como veio. */
 async function withJitSchema<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();

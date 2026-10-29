@@ -5,8 +5,8 @@ import "server-only";
 // (Registration, Attendee, Performance, Q&A, Poll, Survey e o extra Simulacao) e loadPanelExport os dois do periodo
 // de um painel (Performance e Simulacao, com o mesmo recorte da aba: resolvePanelSelection). Tambem aqui as leituras que a aba Relatorio divide
 // com o CSV: os nomes (profiles), a lista por aluno com a hora da vaga e o aparelho (webinar_attendees + webinar_joined)
-// e a gravacao da sessao. As partes da fase 4 sao lidas guardadas: banco sem a 202610290005 (cliques, Simulacao) ou a
-// 202610290006 (quem respondeu) devolve o CSV sem elas, nunca quebra; o resto sobe como PendingMigrationError (a rota
+// e a gravacao da sessao. As partes da fase 4 sao lidas guardadas: banco sem a 202610300003 (cliques, Simulacao) ou a
+// 202610300004 (quem respondeu) devolve o CSV sem elas, nunca quebra; o resto sobe como PendingMigrationError (a rota
 // responde 503 com a migracao). Os numeros reais vem das RPCs (webinar_panel, webinar_report); as linhas simuladas so
 // pelo CSV Simulacao (as funcoes *Simulation* abaixo), nunca noutro (D6, M6). A equipe (admin_roles) fica fora.
 
@@ -269,7 +269,7 @@ async function listSessionQuestionRows(db: WebinarsDb, sessionId: string): Promi
   );
 }
 
-/** Quem respondeu cada pergunta (202610290006: answer_source); sem a migracao, nenhum (a resposta sai como da equipe). */
+/** Quem respondeu cada pergunta (202610300004: answer_source); sem a migracao, nenhum (a resposta sai como da equipe). */
 async function loadQuestionMarks(db: WebinarsDb, ids: readonly string[]): Promise<Map<string, AttendanceMarks>> {
   const marks = new Map<string, AttendanceMarks>();
   for (const part of chunksOf([...ids], ID_CHUNK)) {

@@ -252,7 +252,7 @@ test("Registration, Performance e Simulacao pela rota: a equipe fora das vagas; 
   ]);
 });
 
-test("banco sem uma parte da fase 4: o Attendee sai sem a variante (sem a 202610290005) e o Q&A sem o Assistente (sem a 202610290006)", async () => {
+test("banco sem uma parte da fase 4: o Attendee sai sem a variante (sem a 202610300003) e o Q&A sem o Assistente (sem a 202610300004)", async () => {
   banco({ semMigracao: ["ofertas", "assistente"] });
   const attendee = lerCsv(await (await pedirSessao(`?sessao=${SESSAO_ID}`)).text());
   assert.equal(attendee[1][13], "");
@@ -266,9 +266,9 @@ test("banco sem a migracao dos webinarios: 503 com a migracao; erro comum do ban
   actionStubs.db = scriptedDb(() => ({ data: null, error: { code: "42703", message: "column webinar_sessions.jit does not exist" } }));
   const sem = await pedirSessao(`?sessao=${SESSAO_ID}&relatorio=qa`);
   assert.equal(sem.status, 503);
-  // INTEGRACAO (provisorio, ate a renumeracao das migracoes da fase 4): WEBINARS_MIGRATION aponta a mais nova (a
-  // 202610300001, que inclui a 0008 do jit pela ordem dos arquivos).
-  assert.deepEqual(await sem.json(), { error: "Esta parte precisa da atualização do banco (migração 202610300001)." });
+  // WEBINARS_MIGRATION aponta a mais nova dos webinarios (a 202610300007, que inclui a 202610300005 do jit pela ordem
+  // dos arquivos).
+  assert.deepEqual(await sem.json(), { error: "Esta parte precisa da atualização do banco (migração 202610300007)." });
   const semPainel = await pedirPainel("?tipo=gravadas&inicio=2026-11-01T03:00:00.000Z&fim=2026-12-01T03:00:00.000Z");
   assert.equal(semPainel.status, 503);
 

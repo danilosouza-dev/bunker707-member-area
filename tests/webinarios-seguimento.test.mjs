@@ -3,7 +3,7 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 import { consultas, escolaMinima, fatoDoWebinario, memoryDb, PG_TETO } from "./support/webinarios-v4-seguimento-banco.mjs";
 
-// Follow-up por segmento (docs/30 §1.6 "Follow-up por segmento", §4.7 e D49): as acoes do follow-up da regra
+// Follow-up por segmento (docs/30 §1.6 "Follow-up por segmento", §4.7 e D52): as acoes do follow-up da regra
 // "Participação em lives" do segmento da Comunicacao (viu o replay, viu o card de compra, saiu antes dele, clicou e nao
 // comprou, comprou pelo card; a fase 4 nasceu com uma regra "Webinário" so para elas, unida a "Participação em lives" na
 // integracao de 30/10/2026). Avaliacao de cada acao, a negacao como NOT (quem tinha vaga e nao veio = duas regras), a
@@ -11,7 +11,7 @@ import { consultas, escolaMinima, fatoDoWebinario, memoryDb, PG_TETO } from "./s
 // acoes), a frase, a normalizacao, o zod (vale no segmento comum; dentro de um fluxo e no Quem pode da live, nao), as
 // pecas e a tela do construtor, as frases pelas guardas da Comunicacao e a leitura: o follow-up pela RPC
 // webinar_follow_up_facts em paginas de 1000, so das lives que existem, uma vez por tick, junto das vagas e presencas
-// (communication_webinar_facts) no mesmo facts.webinars (a equipe fica fora; banco sem a 202610290005 nao derruba
+// (communication_webinar_facts) no mesmo facts.webinars (a equipe fica fora; banco sem a 202610300003 nao derruba
 // nada). Sem rede: dublê do banco em tests/support/webinarios-v4-seguimento-banco.mjs.
 
 const model = await import("../src/server/communications/audience-model.ts");
@@ -387,7 +387,7 @@ test("follow-up: so das lives que existem, em paginas de 1000 na ordem (webinar_
   assert.deepEqual(await followUp.loadWebinarFollowUpFacts(nada, []), { byUser: new Map(), loadedIds: [] });
 });
 
-test("follow-up: banco sem a 202610290005 (RPC ausente) le nada, com um log; outro erro sobe", async () => {
+test("follow-up: banco sem a 202610300003 (RPC ausente) le nada, com um log; outro erro sobe", async () => {
   const semRpc = memoryDb(
     { webinars: [webinarRow(WEBINAR)] },
     { webinar_follow_up_facts: { error: { code: "PGRST202", message: "Could not find the function public.webinar_follow_up_facts" } } }
@@ -403,7 +403,7 @@ test("follow-up: banco sem a 202610290005 (RPC ausente) le nada, com um log; out
   }
 
   assert.ok(
-    erros.some((linha) => linha.includes("migracao 202610290005 pendente")),
+    erros.some((linha) => linha.includes("migracao 202610300003 pendente")),
     erros.join("\n")
   );
 

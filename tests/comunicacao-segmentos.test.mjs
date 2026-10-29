@@ -1861,7 +1861,7 @@ test("carregador do tick: as lives sao lidas uma vez por tick e so quando algum 
 });
 
 /* ------------------------------------------------------------------------------------------------
- * As acoes do follow-up da regra "Participação em lives" (docs/30 §1.6, D49; a regra "Webinário" da fase 4 virou acoes
+ * As acoes do follow-up da regra "Participação em lives" (docs/30 §1.6, D52; a regra "Webinário" da fase 4 virou acoes
  * dela na integracao): viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card. O
  * detalhe (cada acao, as frases, o construtor, a leitura paginada) fica em tests/webinarios-seguimento.test.mjs; aqui,
  * o encaixe no segmento: um tipo so, o NOT, o zod e o carregador que junta as duas leituras.

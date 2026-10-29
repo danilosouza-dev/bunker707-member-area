@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-// O banco do "Comeca quando voce entra" para os testes sem banco (docs/18 §2.5; docs/30 §1.6 e a 202610290008):
+// O banco do "Comeca quando voce entra" para os testes sem banco (docs/18 §2.5; docs/30 §1.6 e a 202610300005):
 // tabelas como listas e os filtros do PostgREST que o app usa (eq, neq, in, is, gt, gte, lt, lte, or, order, limit,
 // range, not, like, maybeSingle/single; insert, upsert, update e delete), cada consulta anotada em `calls`. Como o banco de
 // verdade:

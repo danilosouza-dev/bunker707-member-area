@@ -8,7 +8,7 @@ import { atendente, EQUIPE, EQUIPE_2, montarEscola, OUTRA_SESSAO, SESSAO, WEBINA
 // banco: o banco em memoria de tests/support/webinarios-v4-assistente-banco.mjs, a permissao por um duble que recusa
 // quando o teste pede e "next/cache" so anotando. Aqui: 403 sem messaging.write em toda acao (nada gravado); o card do
 // editor (ler, salvar com as perguntas trocadas, o "Responder tudo" padrao nas sessoes que ainda nao comecaram, o zod
-// por campo, a auditoria so com contagens, o banco sem a 202610290006); o "Responder tudo" da sessao; "Atender" /
+// por campo, a auditoria so com contagens, o banco sem a 202610300004); o "Responder tudo" da sessao; "Atender" /
 // "Pausar" com a auditoria so na troca; Assumir, Passar para (so quem atende) e Devolver; "Corrigir resposta" so na do
 // Assistente (e a pergunta da aba junto); o retrato do Atendimento que distribui as perguntas novas entre os online; a
 // resposta da equipe que grava answer_source 'team' e vai ao sino quando o aluno pediu a equipe, a sessao acabou ou ele
@@ -109,7 +109,7 @@ test("403 sem messaging.write em toda acao do Assistente e do Atendimento; nada 
  * O card do editor
  * ---------------------------------------------------------------------------------------------- */
 
-test("loadAssistantEditor: o Assistente, as perguntas cadastradas e se o ambiente e a IA deixam; sem a 202610290006, o aviso", async () => {
+test("loadAssistantEditor: o Assistente, as perguntas cadastradas e se o ambiente e a IA deixam; sem a 202610300004, o aviso", async () => {
   montar();
   const lido = await acoes.loadAssistantEditor({ webinarId: WEBINAR });
   assert.equal(lido.ok, true, JSON.stringify(lido));
@@ -134,7 +134,7 @@ test("loadAssistantEditor: o Assistente, as perguntas cadastradas e se o ambient
 
   montar({}, { semMigracao: true });
   const pendente = await acoes.loadAssistantEditor({ webinarId: WEBINAR });
-  assert.deepEqual(pendente.data, { migration: "202610290006", pendingMigration: true });
+  assert.deepEqual(pendente.data, { migration: "202610300004", pendingMigration: true });
 });
 
 test("saveAssistant: grava o Assistente, troca as perguntas (atualiza, cria, apaga), aplica o Responder tudo padrao as sessoes que nao comecaram e audita so contagens", async () => {
@@ -181,7 +181,7 @@ test("saveAssistant: grava o Assistente, troca as perguntas (atualiza, cria, apa
   const semMigracao = await acoes.saveAssistant({ items: [], settings: { enabled: true, replyAllDefault: false }, webinarId: WEBINAR });
   assert.equal(semMigracao.ok, false);
   assert.equal(semMigracao.status, 409);
-  assert.equal(semMigracao.error, COPY.erros.precisaMigracao("202610290006"));
+  assert.equal(semMigracao.error, COPY.erros.precisaMigracao("202610300004"));
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -320,7 +320,7 @@ test("loadAttendanceSnapshot: distribui as perguntas novas entre quem esta atend
   assert.equal(fechada.data.open, false);
 
   montar({}, { semMigracao: true });
-  assert.deepEqual((await acoes.loadAttendanceSnapshot({ sessionId: SESSAO })).data, { migration: "202610290006", pendingMigration: true });
+  assert.deepEqual((await acoes.loadAttendanceSnapshot({ sessionId: SESSAO })).data, { migration: "202610300004", pendingMigration: true });
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -378,7 +378,7 @@ test("answerQuestion: com o aluno na sala e sem pedido, nada no sino; fora da sa
   assert.equal(db.tables.notifications.length, 2);
 });
 
-test("sendTeamMessage respondendo a mensagem do aluno que pediu a equipe vai ao sino; setQuestionStatus answered grava 'team'; sem a 202610290006 a resposta segue sem a marca", async () => {
+test("sendTeamMessage respondendo a mensagem do aluno que pediu a equipe vai ao sino; setQuestionStatus answered grava 'team'; sem a 202610300004 a resposta segue sem a marca", async () => {
   const { db, userId } = montar();
   const pediu = mensagem({ author_user_id: userId, body: "@assistente nao entendi", handoff_requested_at: agora() });
   db.tables.webinar_chat_messages.push(pediu);

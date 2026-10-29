@@ -27,7 +27,7 @@ import { SimulationRulesFields } from "./simulation-rules-fields";
 // fase 4 (contador, entradas e saidas, avisos de venda; simulation-rules-fields.tsx), a frase de §8.6 do que vai ser
 // gravado com a caixa de confirmacao (so quando algo mudou), quem decidiu e quando, a frase gravada e o que a sessao
 // mostrou (congelado no fim). Salva tudo de uma vez por saveSessionSimulation (o servidor confere a frase e grava quem
-// e quando). Banco sem a 202610290005 ("v2"): so o selo, como na fase 2 (saveSimulation, a frase sem os numeros).
+// e quando). Banco sem a 202610300003 ("v2"): so o selo, como na fase 2 (saveSimulation, a frase sem os numeros).
 // Enquanto o card le as regras ("loading"), nada muda. A sessao encerrada fica so para ler.
 
 const COPY = WEBINAR_COPY.simulacao.card;

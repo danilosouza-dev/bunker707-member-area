@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-// O banco da Oferta para os testes sem banco (docs/18 §2.5; docs/30 §4.2 e a 202610290005): o mesmo desenho do banco
+// O banco da Oferta para os testes sem banco (docs/18 §2.5; docs/30 §4.2 e a 202610300003): o mesmo desenho do banco
 // falso de tests/webinarios-sala-rotas.test.mjs (tabelas como listas, os filtros do PostgREST que o app usa: eq, neq,
 // in, is, not is/in, gt, gte, lt, lte, or, order, limit, range, maybeSingle/single, select com count/head; insert,
 // upsert por onConflict, update e delete; 23505 nas chaves unicas) com as tabelas da Oferta (webinar_offers,
@@ -221,7 +221,7 @@ export function bancoDaOferta({ rpc = {}, tables = {} } = {}) {
   };
 }
 
-/** Um banco em que as tabelas da Oferta ainda nao existem (a 202610290005 pendente): 42P01 em qualquer leitura delas. */
+/** Um banco em que as tabelas da Oferta ainda nao existem (a 202610300003 pendente): 42P01 em qualquer leitura delas. */
 export function semAsTabelasDaOferta(db) {
   const from = db.from.bind(db);
   db.from = (name) => {

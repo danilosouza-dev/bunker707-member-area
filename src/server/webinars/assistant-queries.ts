@@ -4,7 +4,7 @@
 // cues da transcricao da gravacao da sessao e o nome do produto), se o aluno ainda esta na sala (o aviso do sino da
 // resposta da equipe), o "Responder tudo" padrao aplicado as sessoes que ainda nao comecaram e o retrato do painel
 // Atendimento do console, com a distribuicao automatica das perguntas novas entre os atendentes online feita na propria
-// leitura (onlyIfUnassigned: nunca tira de quem assumiu). Banco sem a 202610290006: o estado da sala diz desligado e o
+// leitura (onlyIfUnassigned: nunca tira de quem assumiu). Banco sem a 202610300004: o estado da sala diz desligado e o
 // retrato devolve { pendingMigration } (o console mostra o aviso). As regras puras ficam em assistant-model.ts.
 
 import "server-only";
@@ -55,7 +55,7 @@ async function aiAvailableSafely(db: WebinarsDb, check: (db: WebinarsDb) => Prom
 
 /**
  * GET /api/webinars/[id]/assistant: ligado (ambiente, webinario e conexao de IA), o "Responder tudo" da sessao e
- * quantos da equipe estao atendendo agora. Sem a 202610290006 (ou com o ambiente desligado): tudo desligado.
+ * quantos da equipe estao atendendo agora. Sem a 202610300004 (ou com o ambiente desligado): tudo desligado.
  */
 export async function loadStudentAssistantState(
   db: WebinarsDb,
@@ -393,7 +393,7 @@ export async function listAssignedOpenQuestions(db: WebinarsDb, sessionId: strin
 
 /**
  * As marcas das perguntas que a aba Perguntas do aluno mostra (de quem e a resposta e o "Falar com a equipe" ja
- * pedido), so com o Assistente ligado no ambiente; sem a 202610290006, nenhuma.
+ * pedido), so com o Assistente ligado no ambiente; sem a 202610300004, nenhuma.
  */
 export async function studentQuestionMarks(db: WebinarsDb, input: { env?: Env; ids: readonly string[] }): Promise<Map<string, AttendanceMarks>> {
   if (!webinarAssistantEnabled(input.env) || input.ids.length === 0) {

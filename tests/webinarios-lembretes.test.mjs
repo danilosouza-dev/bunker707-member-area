@@ -488,7 +488,7 @@ test("banco sem a migracao 202610290001: devolve zeros, registra e o job termina
   const [result, infos] = await silenciando("info", () => processWebinarReminders({ db, now: new Date(AGORA) }));
 
   assert.deepEqual(result, { ...ZEROS, pendingMigration: true });
-  assert.ok(infos.some((linha) => linha.includes("migracao 202610300001 pendente")), infos.join("\n"));
+  assert.ok(infos.some((linha) => linha.includes("migracao 202610300007 pendente")), infos.join("\n"));
   await silenciando("info", () => assert.doesNotReject(() => webinarRemindersJob.run(contexto(db))));
 
   const semRelacao = scriptedDb(() => ({ data: null, error: { code: "42P01", message: 'relation "public.webinar_sessions" does not exist' } }));

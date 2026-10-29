@@ -16,7 +16,7 @@ import {
 } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda dos ajustes da revisao da fase 4 dos webinarios (docs/30 §3.3, §3.4, §4.2, §4.5, §8.6 e §11): a migracao
-// 202610290010_webinars_v4_ajustes.sql. As de 0004 a 0009 nao mudam (hash acumulado; nenhuma migracao da fase 4 foi
+// 202610300007_webinars_v4_ajustes.sql. As de 202610300002 a 202610300006 nao mudam (hash acumulado; nenhuma migracao da fase 4 foi
 // aplicada ainda, em lugar nenhum: docs/21 §9.10) e os ajustes entram aqui, so acrescentando.
 // - seis secoes MCP, idempotente, so acrescenta (nenhum drop, delete nem politica); a tabela nova so do service_role;
 // - webinar_close_session mantem o corpo da 202610290001 inteiro e congela quem viu a oferta (webinar_offer_seen);
@@ -25,19 +25,19 @@ import {
 //   fixa abaixo), "Viram a oferta" pelo congelado com a sessao encerrada, a compra e a receita sem reembolso nem
 //   chargeback, e no relatorio o "Falar com a equipe" contado uma vez.
 
-const MIGRATION = "supabase/migrations/202610290010_webinars_v4_ajustes.sql";
+const MIGRATION = "supabase/migrations/202610300007_webinars_v4_ajustes.sql";
 const code = () => sqlCodeOf(read(MIGRATION));
 const UNDONE = /g\.closed_by is null or g\.closed_by not in \('refund', 'chargeback'\)/;
 
-test("as migracoes ate a 202610290009 continuam byte a byte; a 0010 e o texto exato (as seis da fase 4 a aplicar antes do merge)", () => {
-  const applied = cumulativeHash("202610290009_webinars_v4f_traducao.sql");
-  assert.equal(applied.count, 61);
-  assert.equal(applied.hash, "5b79fca5bd361feb0ec7c4d02c1f83817efeb66db0f4701a9636a335cdaed3d5", "uma migracao anterior mudou");
-  assert.ok(migrationFiles().includes("202610290010_webinars_v4_ajustes.sql"));
-  assert.equal(fileHash(MIGRATION), "57d5ff68f2af978d41bc40a2494001bbdb504be1efd44ad2145389702ee3af9e", "a 202610290010 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+test("as migracoes ate a 202610300006 continuam byte a byte; a 202610300007 e o texto exato (as seis da fase 4 a aplicar antes do merge)", () => {
+  const applied = cumulativeHash("202610300006_webinars_v4f_traducao.sql");
+  assert.equal(applied.count, 62);
+  assert.equal(applied.hash, "54e93cf9df6b8caabee96ffd66bfa1e535af2194a8fc8b374fb119acbfe10ad7", "uma migracao anterior mudou");
+  assert.ok(migrationFiles().includes("202610300007_webinars_v4_ajustes.sql"));
+  assert.equal(fileHash(MIGRATION), "7bd80f6a623246f669850f56cb70484a2be2c611b02d61a997f6dd8b15c2ab5b", "a 202610300007 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
 });
 
-test("a 0010: seis secoes MCP, idempotente, so acrescenta; webinar_offer_seen so do service_role; as funcoes so do service_role", () => {
+test("a 202610300007: seis secoes MCP, idempotente, so acrescenta; webinar_offer_seen so do service_role; as funcoes so do service_role", () => {
   const migration = read(MIGRATION);
   assertSections(migration, 6);
   assertOnlyAdds(migration);
@@ -102,7 +102,7 @@ function assertOnlyChanged(file, name, changed) {
 }
 
 test("webinar_follow_up_facts: viu a oferta pelo congelado na sessao encerrada; comprou sem reembolso; nunca a Simulacao", () => {
-  const body = assertOnlyChanged("202610290005_webinars_v4b_ofertas.sql", "webinar_follow_up_facts", [
+  const body = assertOnlyChanged("202610300003_webinars_v4b_ofertas.sql", "webinar_follow_up_facts", [
     "select s.id, s.webinar_id, s.kind,",
     "where o.webinar_id = any(p_webinar_ids) and c.converted_sale_grant_id is not null"
   ]);
@@ -114,12 +114,12 @@ test("webinar_follow_up_facts: viu a oferta pelo congelado na sessao encerrada; 
 });
 
 test("webinar_report e webinar_panel: viram pelo congelado na encerrada, compras e receita sem reembolso; o handoff uma vez", () => {
-  const report = assertOnlyChanged("202610290006_webinars_v4c_assistente.sql", "webinar_report", [
+  const report = assertOnlyChanged("202610300004_webinars_v4c_assistente.sql", "webinar_report", [
     "where not exists (select 1 from staff where staff.user_id = ps.user_id)",
     "select c.offer_id, c.user_id, c.variant_label as label, c.converted_sale_grant_id",
     "from public.webinar_offer_clicks c, s"
   ]);
-  const panel = assertOnlyChanged("202610290005_webinars_v4b_ofertas.sql", "webinar_panel", [
+  const panel = assertOnlyChanged("202610300003_webinars_v4b_ofertas.sql", "webinar_panel", [
     "where not exists (select 1 from staff where staff.user_id = ps.user_id)",
     "select c.session_id, c.offer_id, c.user_id, c.variant_label as label, c.converted_sale_grant_id"
   ]);

@@ -199,7 +199,7 @@ test("sem sessao na janela: uma consulta so e o job nao grava em job_runs; banco
   const semTabela = scriptedDb(() => ({ data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_sessions' in the schema cache" } }));
   const [pendente, avisos] = await silenciando("info", () => runSessionsTick({ db: semTabela, now: em("2026-11-05T23:00:20.000Z") }));
   assert.deepEqual(pendente, { ...ZEROS, pendingMigration: true });
-  assert.ok(avisos.some((linha) => linha.includes("migracao 202610300001 pendente")), avisos.join("\n"));
+  assert.ok(avisos.some((linha) => linha.includes("migracao 202610300007 pendente")), avisos.join("\n"));
   await silenciando("info", () => assert.doesNotReject(() => webinarSessionsJob.run(contexto(semTabela, em("2026-11-05T23:00:20.000Z")))));
 
   const quebrado = scriptedDb(() => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }));

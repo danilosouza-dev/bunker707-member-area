@@ -10,7 +10,7 @@
 // check webinar_sessions_simulation_not_live_v4), a que ja comecou (no ar ou com a hora marcada passada) nao muda no
 // meio e a encerrada fica registrada como estava. A auditoria leva os
 // valores (D10: numeros e booleanos; dos avisos de venda, so a contagem). A semente nunca sai daqui. Banco sem a
-// 202610290005: a leitura devolve { pendingMigration } (o card volta ao selo da fase 2) e a escrita, 409 com a frase.
+// 202610300003: a leitura devolve { pendingMigration } (o card volta ao selo da fase 2) e a escrita, 409 com a frase.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -51,7 +51,7 @@ function isMissingSimulation(error: unknown) {
   return isPendingMigrationError(error) || isMissingWebinarSchema(error);
 }
 
-/** [messaging.write] As regras das sessoes gravadas do webinario (nada da semente); banco sem a 0005, o aviso. */
+/** [messaging.write] As regras das sessoes gravadas do webinario (nada da semente); banco sem a 202610300003, o aviso. */
 export async function loadSessionSimulations(input: { webinarId: string }): Promise<ActionResult<SessionSimulationsData>> {
   return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) => {
     const db = webinarsDb();

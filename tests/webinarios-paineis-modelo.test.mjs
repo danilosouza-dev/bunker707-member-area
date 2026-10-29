@@ -441,7 +441,7 @@ test("Lives gravadas: os dez cartoes, a conversao (compras ÷ participantes) e a
   assert.equal(model.formatPanelRevenue({ BRL: 0 }), "—");
 });
 
-test("Lives gravadas sem a 202610290005: Oferta, Conversao e Receita em '—'; o resto segue", () => {
+test("Lives gravadas sem a 202610300003: Oferta, Conversao e Receita em '—'; o resto segue", () => {
   const view = recordedView({ offers: null, simulations: null });
 
   for (const id of ["offerSeen", "clickers", "buyers", "conversion"]) {
@@ -634,7 +634,7 @@ test("recorte: sem Situacao as canceladas saem; Situacao, Apresentador, Produto,
   assert.deepEqual(ids({ hostUserId: HOST_BETO }), [S2]);
   assert.deepEqual(ids({ productId: "prod-ia" }), [S1]);
   assert.deepEqual(ids({ hour: 10 }), [S2], "10:00 em Sao Paulo (13:00 UTC)");
-  assert.deepEqual(ids({ withOffer: true }), [], "sem a 202610290005, Com oferta nao casa com nada");
+  assert.deepEqual(ids({ withOffer: true }), [], "sem a 202610300003, Com oferta nao casa com nada");
 
   const recorded = model.panelSessionsOf(recordedRows, webinars);
   const facts = offerFacts();

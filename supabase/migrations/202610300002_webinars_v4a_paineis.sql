@@ -1,5 +1,6 @@
--- Webinarios v4a, os paineis "Lives ao vivo" e "Lives gravadas" (docs/30 §3.1 a §3.3, §3.6, §4.6 e §11, fase 4a). A
--- 202610290003 ja foi aplicada e nao muda; este arquivo so acrescenta.
+-- Webinarios v4a, os paineis "Lives ao vivo" e "Lives gravadas" (docs/30 §3.1 a §3.3, §3.6, §4.6 e §11, fase 4a). As
+-- migracoes ate a 202610300001 (a do "Quem pode" por regras, ja aplicada na nuvem de teste) nao mudam; a fase 4 vem
+-- depois dela, de 202610300002 a 202610300007, e nenhuma foi aplicada ainda (docs/21 §9.10); este arquivo so acrescenta.
 --
 -- Regras:
 -- - webinar_panel(p_kind, p_start, p_end, p_session_ids): o mesmo desenho de webinar_report (uma linha por metrica e
@@ -9,7 +10,7 @@
 --   webinario, horario), para os unicos do topo seguirem os mesmos filtros. As linhas com session_id preenchido sao da
 --   sessao; as com session_id nulo sao os unicos do periodo (o mesmo aluno em duas sessoes conta uma vez);
 -- - so numeros reais (D6, D10, M6): presenca, vagas, chat `audience`, perguntas, reacoes, enquetes, replay e as
---   visitas (`webinar_joined`); nunca `scripted`, `ai` nem as colunas de simulacao (a 202610290005 acrescenta a oferta
+--   visitas (`webinar_joined`); nunca `scripted`, `ai` nem as colunas de simulacao (a 202610300003 acrescenta a oferta
 --   e o bloco Simulacao separado, com os nomes `offer_*` e `sim_*`);
 -- - a presenca le webinar_attendance (sessao encerrada) e as amostras so da sessao em andamento (presence_curve nulo),
 --   como webinar_report; o pico vem da curva congelada; a retencao sai em 21 pontos (0 a 100 % da duracao, de 5 em

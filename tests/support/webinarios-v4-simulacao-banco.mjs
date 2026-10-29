@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-// O banco da Simulacao para os testes sem banco (docs/18 §2.5; docs/30 §4.3 e a 202610290005): tabelas como listas e
+// O banco da Simulacao para os testes sem banco (docs/18 §2.5; docs/30 §4.3 e a 202610300003): tabelas como listas e
 // os filtros do PostgREST que o app usa (eq, neq, in, is, not, gt, gte, lt, lte, or com "col.not.is.null", order,
 // limit, range, maybeSingle/single; insert, upsert, update e delete), cada consulta anotada em `calls` (a tabela, a
 // operacao, as colunas lidas e o que foi gravado). A escola de mentira: uma Live gravada publicada para todos, com a
 // sessao gravada no ar (com as colunas simulated_*, simulation_summary e simulation_seed), a live de origem, o replay,
 // uma sessao gravada encerrada, a gravacao da Bunny de 60 min e um outro webinario. `semAsColunasDaSimulacao` imita o
-// banco sem a 202610290005 (42703 em qualquer leitura ou escrita das colunas novas). Nada aqui e importado por src/.
+// banco sem a 202610300003 (42703 em qualquer leitura ou escrita das colunas novas). Nada aqui e importado por src/.
 
 export const MIN = 60_000;
 export const HOUR = 60 * MIN;
@@ -178,7 +178,7 @@ export function bancoDaSimulacao({ rpc = {}, semColunas = false, tables = {} } =
   };
 }
 
-/** O banco sem a 202610290005: 42703 em qualquer leitura ou escrita das colunas novas da Simulacao. */
+/** O banco sem a 202610300003: 42703 em qualquer leitura ou escrita das colunas novas da Simulacao. */
 export function semAsColunasDaSimulacao(options = {}) {
   return bancoDaSimulacao({ ...options, semColunas: true });
 }

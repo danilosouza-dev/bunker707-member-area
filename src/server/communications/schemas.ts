@@ -20,7 +20,7 @@
 // por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
 // Design Livre (docs/27): `freeDesign` ao lado (popup-free-schema.ts); no maximo um dos dois nao nulo.
 //
-// Participação em lives (docs/30 §1.6, D49): uma regra so; "participou" e "garantiu vaga" valem numa live ou em qualquer
+// Participação em lives (docs/30 §1.6, D52): uma regra so; "participou" e "garantiu vaga" valem numa live ou em qualquer
 // uma, no segmento e nos fluxos; as acoes do follow-up (replay, card de compra, compra) exigem a live e valem so no
 // segmento comum (flowRuleDefinitionSchema e accessAudienceDefinitionSchema, o do Quem pode da live, recusam).
 
@@ -285,7 +285,7 @@ export const SEGMENT_ONLY_RULE_MESSAGE = SEGUIMENTO_COPY.soNoSegmento;
 /**
  * As acoes do follow-up (replay, card de compra, compra) so valem no segmento comum (avisos, pop-ups, "Quem entra"):
  * dentro de um fluxo o lote do motor nao le o follow-up das lives, e no Quem pode da live ele seria lido a cada
- * pedido do aluno (D49).
+ * pedido do aluno (D52).
  */
 function addSegmentOnlyIssues(group: AudienceGroup, path: (number | string)[], context: z.RefinementCtx) {
   group.items.forEach((item, index) => {
