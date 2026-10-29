@@ -28,13 +28,13 @@ import {
   type LiveConsoleSnapshot,
   type RoomJoinedRow
 } from "./live-console-model";
-import { liveBanState, liveRoomConfigured } from "./live-model";
+import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
 import type { WebinarKind, WebinarSession } from "./model";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
-import { bunnyEmbedUrl, parseBunnyEmbed, presenceBucket, sessionOffsetMs } from "./room-model";
+import { bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
 import { bunnyViewToken, consentIsCurrent } from "./room-queries";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
@@ -409,7 +409,9 @@ async function loadConsolePresence(session: WebinarSession, offsetMs: number, no
 export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: WebinarKind; now: Date; session: SessionRow; webinar?: WebinarRow }): Promise<ConsoleSnapshot> {
   const session = sessionFromRow(input.session);
   const nowMs = input.now.getTime();
-  const offsetMs = sessionOffsetMs(session, nowMs);
+  // Os presentes agora pelo relogio da presenca, o mesmo do sinal de 15 s (na live, desde o Iniciar live, nunca pela
+  // ancora da gravacao), como a sala do aluno conta.
+  const presenceMs = presenceOffsetMs(session, nowMs);
   const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds, durationMs] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
     input.kind === "simulated" ? listScriptItemRows(db, session.webinarId) : Promise.resolve([]),
@@ -417,7 +419,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     loadLaunchedPolls(db, session.webinarId, session.id),
     listPollRows(db, { sessionId: null, webinarId: session.webinarId }),
     listQuestionRows(db, { order: "votes", sessionId: session.id }),
-    Number.isFinite(offsetMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(offsetMs / 1000), sessionId: session.id }) : Promise.resolve([]),
+    Number.isFinite(presenceMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor(presenceMs / 1000)), sessionId: session.id }) : Promise.resolve([]),
     simulatedDurationMs(db, session, input.webinar)
   ]);
   const authors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));

@@ -977,6 +977,27 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
   }
 });
 
+test("os presentes agora do console contam pelo relogio da presenca: na live com a gravacao comecada 6 min depois do Iniciar live, os sinais dos alunos (desde o Iniciar) contam", async () => {
+  const nowMs = Date.now();
+  const db = usar(
+    bancoEmMemoria(
+      cenario({
+        webinar_presence_samples: [
+          { bucket: 20, session_id: S_NO_AR, user_id: ALUNA },
+          { bucket: 19, session_id: S_NO_AR, user_id: ALUNO },
+          { bucket: 8, session_id: S_NO_AR, user_id: COAPRESENTADOR }
+        ]
+      }),
+      RPC
+    )
+  );
+  // Iniciar live ha 10 min 10 s (balde 20 dos sinais de 30 s); a ancora da gravacao ha 4 min 10 s (seria o balde 8).
+  Object.assign(linha(db, S_NO_AR), { recording_anchor_at: new Date(nowMs - 4 * MIN - 10_000).toISOString(), started_at: new Date(nowMs - 10 * MIN - 10_000).toISOString() });
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs));
+  assert.equal(retrato.presentNow, 2, "os dois sinais dos ultimos 3 baldes desde o Iniciar live; o do balde 8 ja saiu");
+});
+
 test("fase 4: o painel Presença do retrato para no encerramento, como o topo: a Live gravada de 60 min fechada 1 min depois e aberta meia hora depois mostra a curva até o minuto 59", async () => {
   const nowMs = Date.now();
   const inicio = nowMs - 90 * MIN;
