@@ -20,8 +20,9 @@
 // por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
 // Design Livre (docs/27): `freeDesign` ao lado (popup-free-schema.ts); no maximo um dos dois nao nulo.
 //
-// Webinarios v4b (docs/30 §1.6): a regra "webinar_follow_up" do segmento (o webinario e o que o aluno fez nele), com os erros nas
-// frases de WEBINAR_COPY.seguimento; vale no segmento comum e nunca dentro de um fluxo (flowRuleDefinitionSchema).
+// Participação em lives (docs/30 §1.6, D49): uma regra so; "participou" e "garantiu vaga" valem numa live ou em qualquer
+// uma, no segmento e nos fluxos; as acoes do follow-up (replay, card de compra, compra) exigem a live e valem so no
+// segmento comum (flowRuleDefinitionSchema e accessAudienceDefinitionSchema, o do Quem pode da live, recusam).
 
 import { z } from "zod";
 import { SEGUIMENTO_COPY } from "../../lib/webinar-copy-v4/seguimento";
@@ -30,7 +31,6 @@ import { catalogIdSchema, expectedUpdatedAtSchema } from "../catalog/schemas";
 import { describeHeroCtaHrefProblem, isSafeHeroCtaHref } from "../member-area/home-hero-links";
 import { FIXED_PAGE_KEYS } from "../member-area/page-visit-model";
 import { STUDENT_PACES } from "../students/model";
-import { WEBINAR_FOLLOW_UP_ACTIONS } from "../webinars/model";
 import {
   AUDIENCE_LIMITS,
   EVERYONE,
@@ -39,6 +39,7 @@ import {
   audienceDepth,
   countAudienceRules,
   isAudienceGroup,
+  isWebinarFollowUpAction,
   normalizeAudience,
   type AudienceDefinition,
   type AudienceGroup,
@@ -140,6 +141,12 @@ const accessRecentPeriodSchema = z.discriminatedUnion(
   { error: "Escolha o período." }
 );
 
+/** Os erros da regra "Participação em lives". */
+export const WEBINAR_RULE_ERRORS = {
+  action: "Escolha o que o aluno fez na live.",
+  webinar: "Escolha a live."
+} as const;
+
 const ruleSchema = z.discriminatedUnion(
   "type",
   [
@@ -191,20 +198,19 @@ const ruleSchema = z.discriminatedUnion(
       productIds: z.array(catalogIdSchema).max(AUDIENCE_LIMITS.maxIds, `Escolha no máximo ${AUDIENCE_LIMITS.maxIds}.`),
       type: z.literal("access_recent")
     }),
-    z.object({
-      action: z.enum(WEBINAR_RULE_ACTIONS, { error: "Escolha se participou ou garantiu vaga." }),
-      negate: negateSchema,
-      type: z.literal("webinar"),
-      // null = qualquer live.
-      webinarId: z.uuid({ error: "Escolha a live." }).nullable()
-    }),
-    // v4b: o que o aluno fez num webinario (follow-up por segmento; o "webinar" da fase 4, renomeado na integracao).
-    z.object({
-      action: z.enum(WEBINAR_FOLLOW_UP_ACTIONS, { error: SEGUIMENTO_COPY.erroAcao }),
-      negate: negateSchema,
-      type: z.literal("webinar_follow_up"),
-      webinarId: z.uuid({ error: SEGUIMENTO_COPY.erroWebinario })
-    })
+    z
+      .object({
+        action: z.enum(WEBINAR_RULE_ACTIONS, { error: WEBINAR_RULE_ERRORS.action }),
+        negate: negateSchema,
+        type: z.literal("webinar"),
+        // null = qualquer live (so "participou" e "garantiu vaga").
+        webinarId: z.uuid({ error: WEBINAR_RULE_ERRORS.webinar }).nullable()
+      })
+      .superRefine((rule, context) => {
+        if (rule.webinarId === null && isWebinarFollowUpAction(rule.action)) {
+          context.addIssue({ code: "custom", message: WEBINAR_RULE_ERRORS.webinar, path: ["webinarId"] });
+        }
+      })
   ],
   { error: "Escolha o tipo da regra." }
 );
@@ -273,11 +279,13 @@ export const audienceDefinitionSchema: z.ZodType<AudienceDefinition> = definitio
   }
 });
 
+/** A acao do follow-up da regra "Participação em lives" fora do segmento comum (dentro de um fluxo ou no Quem pode). */
 export const SEGMENT_ONLY_RULE_MESSAGE = SEGUIMENTO_COPY.soNoSegmento;
 
 /**
- * v4b: regra que so vale no segmento comum (avisos, pop-ups, "Quem entra"): "webinar_follow_up". Dentro de um fluxo o lote
- * do motor nao le os fatos do webinario.
+ * As acoes do follow-up (replay, card de compra, compra) so valem no segmento comum (avisos, pop-ups, "Quem entra"):
+ * dentro de um fluxo o lote do motor nao le o follow-up das lives, e no Quem pode da live ele seria lido a cada
+ * pedido do aluno (D49).
  */
 function addSegmentOnlyIssues(group: AudienceGroup, path: (number | string)[], context: z.RefinementCtx) {
   group.items.forEach((item, index) => {
@@ -285,20 +293,30 @@ function addSegmentOnlyIssues(group: AudienceGroup, path: (number | string)[], c
 
     if (isAudienceGroup(item)) {
       addSegmentOnlyIssues(item, itemPath, context);
-    } else if (item.type === "webinar_follow_up") {
+    } else if (item.type === "webinar" && isWebinarFollowUpAction(item.action)) {
       context.addIssue({ code: "custom", message: SEGMENT_ONLY_RULE_MESSAGE, path: itemPath });
     }
   });
 }
 
 /**
- * Regras dentro de um fluxo (condicao, "So para quem...", Objetivo, "Para quem" da seguinte): tudo vale, menos a
- * regra do webinario (v4b), que so vale no segmento comum.
+ * Regras dentro de um fluxo (condicao, "So para quem...", Objetivo, "Para quem" da seguinte): tudo vale, menos as
+ * acoes do follow-up da regra "Participação em lives", que so valem no segmento comum.
  */
 export const flowRuleDefinitionSchema: z.ZodType<AudienceDefinition> = definitionBaseSchema.superRefine((definition, context) => {
   addDefinitionLimitIssues(definition, context);
 
   if (definition.kind === "rules") {
+    addSegmentOnlyIssues(definition.root, ["root"], context);
+  }
+});
+
+/** O segmento do Quem pode de uma live (docs/30 §1.1): o segmento comum, sem as acoes do follow-up das lives. */
+export const accessAudienceDefinitionSchema: z.ZodType<AudienceDefinition> = definitionBaseSchema.superRefine((definition, context) => {
+  addDefinitionLimitIssues(definition, context);
+
+  if (definition.kind === "rules") {
+    addFlowOnlyIssues(definition.root, ["root"], context);
     addSegmentOnlyIssues(definition.root, ["root"], context);
   }
 });

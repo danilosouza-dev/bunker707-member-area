@@ -206,10 +206,9 @@ export function FlowSettingsPanel({
                 productsLoaded={options.productsLoaded}
                 segments={options.segments}
                 value={draft.entry.audience}
+                // As acoes do follow-up da regra "Participação em lives" valem no "Quem entra" (modo segment; docs/30
+                // §1.6, D49), nunca no Objetivo nem nas condicoes (modo flow).
                 webinars={options.webinars}
-                // A regra "Webinário" (webinar_follow_up) vale no "Quem entra" (docs/30 §1.6, D49); nunca no Objetivo nem
-                // nas condicoes.
-                webinarFollowUps={options.webinarFollowUps ?? null}
               />
             </RulesForm>
             <AudienceCount description={entryDescription} needsApproval={needsApproval} onRetry={onRetryCount} state={count} />

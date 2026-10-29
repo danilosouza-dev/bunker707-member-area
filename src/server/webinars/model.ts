@@ -1092,12 +1092,11 @@ export type SimulationFeed = {
   to: number;
 };
 
-/* 4b: o follow-up como regras do segmento da Comunicacao (docs/30 §1.6 "Follow-up por segmento", §4.7). */
-
-/** O que a regra "Webinario" do segmento pergunta (webinar_follow_up_facts; nunca le a Simulacao). */
-export const WEBINAR_FOLLOW_UP_ACTIONS = ["registered", "attended", "watched_replay", "offer_seen", "left_before_offer", "clicked_no_purchase", "purchased"] as const;
-export type WebinarFollowUpAction = (typeof WEBINAR_FOLLOW_UP_ACTIONS)[number];
-
+/*
+ * 4b: o follow-up das lives (docs/30 §1.6 "Follow-up por segmento", §4.7): uma linha de webinar_follow_up_facts (nunca
+ * le a Simulacao). As acoes que a Comunicacao pergunta sobre ela sao da regra "Participação em lives"
+ * (WEBINAR_FOLLOW_UP_ACTIONS em src/server/communications/audience-model.ts).
+ */
 export type WebinarFollowUpFacts = {
   attended: boolean;
   clicked: boolean;

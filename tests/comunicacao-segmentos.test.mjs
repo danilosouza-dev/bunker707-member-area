@@ -1657,8 +1657,14 @@ test("o que as regras novas pedem dos fatos: 'Participação em lives' pede as l
     students: false,
     webinars: true
   });
-  assert.deepEqual(model.audienceFactsRequest(todas(mensagem("opened"), live("attended"))), { messageCampaignIds: [AVISO], webinars: true });
-  assert.deepEqual(model.audienceFactsRequest(model.EVERYONE), { messageCampaignIds: [], webinars: false });
+  assert.deepEqual(model.audienceFactsRequest(todas(mensagem("opened"), live("attended"))), { messageCampaignIds: [AVISO], webinarFollowUpIds: [], webinars: true });
+  assert.deepEqual(model.audienceFactsRequest(model.EVERYONE), { messageCampaignIds: [], webinarFollowUpIds: [], webinars: false });
+  // As acoes do follow-up pedem so o follow-up das lives delas, nunca as vagas e presencas de todos.
+  assert.deepEqual(model.audienceFactsRequest(todas(live("purchased", LIVE_Y), live("watched_replay", LIVE_Z, true))), {
+    messageCampaignIds: [],
+    webinarFollowUpIds: [LIVE_Y, LIVE_Z],
+    webinars: false
+  });
 });
 
 test("construtor: as regras novas nos dois seletores, a regra nova de cada uma ja nasce valida e as escolhas viram a regra", () => {
@@ -1833,6 +1839,7 @@ test("carregador: banco sem a migracao 202610300001 deixa a leitura de fora e a 
 
   const base = { context: contexto(), facts: [aluno()], people: new Map() };
   assert.equal(facts.attachWebinarFacts(base, null), base, "sem leitura, o mesmo objeto");
+  assert.equal(facts.attachWebinarFacts(base, facts.NO_WEBINAR_FACTS), base, "nada lido, o mesmo objeto");
   assert.deepEqual(await facts.loadWebinarFacts(memoryDb(tables), { userIds: [] }), new Map(), "lista vazia: nada lido");
 });
 
@@ -1854,57 +1861,59 @@ test("carregador do tick: as lives sao lidas uma vez por tick e so quando algum 
 });
 
 /* ------------------------------------------------------------------------------------------------
- * Webinarios v4b (docs/30 §1.6): a regra "Webinário" (follow-up por segmento; tipo "webinar_follow_up" desde a integracao,
- * ao lado de "Participação em lives"). O detalhe (cada acao, as frases, o
- * construtor, a leitura paginada) fica em tests/webinarios-seguimento.test.mjs; aqui, o encaixe no segmento.
+ * As acoes do follow-up da regra "Participação em lives" (docs/30 §1.6, D49; a regra "Webinário" da fase 4 virou acoes
+ * dela na integracao): viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card. O
+ * detalhe (cada acao, as frases, o construtor, a leitura paginada) fica em tests/webinarios-seguimento.test.mjs; aqui,
+ * o encaixe no segmento: um tipo so, o NOT, o zod e o carregador que junta as duas leituras.
  * ---------------------------------------------------------------------------------------------- */
 
-const WEBINARIO = "55555555-5555-4555-8555-555555555555";
-const WEBINARIO_APAGADO = "66666666-6666-4666-8666-666666666666";
-const webinario = (action, negate = false, webinarId = WEBINARIO) => ({ action, negate, type: "webinar_follow_up", webinarId });
+const FOLLOW_UP = { clicked: false, leftBeforeOffer: false, offerSeen: false, purchased: false, watchedReplay: false };
 
-test("webinario: e um tipo de regra do segmento; a chave viaja com os avisos e o fluxo recusa a regra", () => {
-  assert.ok(model.AUDIENCE_RULE_TYPES.includes("webinar_follow_up"));
-  assert.deepEqual(model.collectMessageCampaignIds(todas(mensagem("opened"), webinario("attended"), webinario("purchased", true))), [AVISO, `webinar:${WEBINARIO}`]);
-  assert.equal(audienceDefinitionSchema.safeParse(todas(mensagem("opened"), webinario("attended", true))).success, true);
-  assert.equal(flowRuleDefinitionSchema.safeParse(todas(webinario("attended"))).success, false);
-  assert.equal(model.describeAudience(todas(webinario("attended", true)), { cohorts: {}, products: {}, webinars: { [WEBINARIO]: "Live" } }), "Alunos que não compareceram em “Live”");
+test("follow-up: um tipo so com as acoes de presenca; o segmento aceita, o fluxo recusa, e a frase segue a das lives", () => {
+  assert.equal(model.AUDIENCE_RULE_TYPES.filter((type) => type.startsWith("webinar")).join(), "webinar");
+  assert.equal(audienceDefinitionSchema.safeParse(todas(mensagem("opened"), live("purchased", LIVE_Y, true))).success, true);
+  assert.equal(flowRuleDefinitionSchema.safeParse(todas(live("purchased", LIVE_Y))).success, false);
+  assert.equal(flowRuleDefinitionSchema.safeParse(todas(live("attended", LIVE_Y, true))).success, true, "as de presenca continuam no fluxo");
+  assert.equal(audienceDefinitionSchema.safeParse(todas(live("purchased"))).success, false, "a live e obrigatoria no follow-up");
+  assert.equal(model.describeAudience(todas(live("purchased", LIVE_Y, true)), { cohorts: {}, products: {}, webinars: { [LIVE_Y]: "Live" } }), "Alunos que não compraram pelo card na live “Live”");
 });
 
-test("webinario: cada acao, negada so para quem passou pelo webinario, e chave nao lida que nunca combina", () => {
-  const fato = { attended: true, clicked: true, leftBeforeOffer: false, offerSeen: true, purchased: false, registered: true, watchedReplay: false };
-  const comFato = aluno({ webinarFollowUps: { [WEBINARIO]: fato } });
-  const semLinha = aluno({ webinarFollowUps: {} });
-  const lido = contexto({ messageKeys: new Set([`webinar:${WEBINARIO}`]) });
+test("follow-up: cada acao pelo fato da live; negada = NOT; live nao lida nunca combina, nem negada", () => {
+  const comFato = aluno({ webinars: { attended: [], followUps: { [LIVE_Y]: { ...FOLLOW_UP, clicked: true, offerSeen: true } }, registered: [] } });
+  const semLinha = aluno();
+  const lido = contexto({ webinarFollowUpsLoaded: new Set([LIVE_Y]) });
 
-  assert.equal(avalia(todas(webinario("attended")), comFato, lido), true);
-  assert.equal(avalia(todas(webinario("clicked_no_purchase")), comFato, lido), true);
-  assert.equal(avalia(todas(webinario("purchased")), comFato, lido), false);
-  assert.equal(avalia(todas(webinario("watched_replay", true)), comFato, lido), true);
-  assert.equal(avalia(todas(webinario("watched_replay", true)), semLinha, lido), false, "negada so para quem passou pelo webinario");
-  assert.equal(avalia(todas(webinario("registered", true)), semLinha, lido), true, "'não garantiu vaga' vale para todos sem vaga");
-  assert.equal(avalia(todas(webinario("attended")), comFato, contexto()), false, "chave nao lida nunca combina");
-  assert.equal(avalia(todas(webinario("registered", true)), semLinha, contexto()), false, "nem negada");
+  assert.equal(avalia(todas(live("offer_seen", LIVE_Y)), comFato, lido), true);
+  assert.equal(avalia(todas(live("clicked_no_purchase", LIVE_Y)), comFato, lido), true);
+  assert.equal(avalia(todas(live("purchased", LIVE_Y)), comFato, lido), false);
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), comFato, lido), true);
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, lido), true, "NOT: quem nem passou pela live tambem");
+  assert.equal(avalia(todas(live("offer_seen", LIVE_Y)), comFato, contexto()), false, "live nao lida nunca combina");
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto()), false, "nem negada");
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto({ webinarFactsLoaded: true })), false, "as vagas e presencas lidas nao bastam");
 });
 
-test("webinario: o carregador le os fatos so do webinario que existe, uma vez, e marca a chave dele", async () => {
+test("follow-up: o carregador le o follow-up so da live que existe e as vagas e presencas, uma vez cada, no mesmo facts.webinars", async () => {
   const tables = escola(3);
   const db = memoryDb(
-    { ...tables, webinars: [{ deleted_at: null, id: WEBINARIO, title: "Live" }, { deleted_at: "2026-10-01T00:00:00.000Z", id: WEBINARIO_APAGADO, title: "Antiga" }] },
+    { ...tables, webinars: [{ deleted_at: null, id: LIVE_Y, title: "Live" }, { deleted_at: "2026-10-01T00:00:00.000Z", id: LIVE_Z, title: "Antiga" }] },
     {
+      communication_webinar_facts: [linhaDeLive(1, { attended: [LIVE_Y], registered: [LIVE_Y] }), linhaDeLive(3, { registered: [LIVE_Y] })],
       webinar_follow_up_facts: [
-        { attended: true, clicked: false, left_before_offer: false, offer_seen: false, purchased: false, registered: true, user_id: uid(1), watched_replay: false, webinar_id: WEBINARIO },
-        { attended: false, clicked: false, left_before_offer: false, offer_seen: false, purchased: false, registered: true, user_id: uid(3), watched_replay: false, webinar_id: WEBINARIO }
+        { attended: true, clicked: false, left_before_offer: false, offer_seen: true, purchased: false, registered: true, user_id: uid(1), watched_replay: false, webinar_id: LIVE_Y },
+        { attended: false, clicked: false, left_before_offer: false, offer_seen: false, purchased: false, registered: true, user_id: uid(3), watched_replay: true, webinar_id: LIVE_Y }
       ]
     }
   );
 
-  const loaded = await facts.loadAudienceFacts(db, now, { messageCampaignIds: [`webinar:${WEBINARIO}`, `webinar:${WEBINARIO_APAGADO}`, `webinar:${WEBINARIO}`] });
+  const loaded = await facts.loadAudienceFacts(db, now, model.audienceFactsRequest(todas(live("registered", LIVE_Y), live("attended", LIVE_Y, true), live("watched_replay", LIVE_Y), live("offer_seen", LIVE_Z))));
   const ids = (definition) => loaded.facts.filter((fact) => model.evaluateAudience(definition, fact, loaded.context)).map((fact) => fact.userId);
 
-  assert.deepEqual([...loaded.context.messageKeys], [`webinar:${WEBINARIO}`]);
-  assert.equal(db.log.filter((entry) => entry.source === "rpc:webinar_follow_up_facts").length, 1);
-  assert.deepEqual(ids(todas(webinario("attended"))), [uid(1)]);
-  assert.deepEqual(ids(todas(webinario("attended", true))), [uid(3)], "a equipe (2) fica fora e quem tinha vaga e faltou entra");
-  assert.deepEqual(ids(todas(webinario("attended", false, WEBINARIO_APAGADO))), []);
+  assert.deepEqual([...loaded.context.webinarFollowUpsLoaded], [LIVE_Y], "a apagada fica de fora");
+  assert.equal(loaded.context.webinarFactsLoaded, true);
+  assert.equal(db.rpcCalls.filter((call) => call.name === "webinar_follow_up_facts").length, 1);
+  assert.equal(db.rpcCalls.filter((call) => call.name === "communication_webinar_facts").length, 1);
+  assert.deepEqual(loaded.facts.find((fact) => fact.userId === uid(1)).webinars, { attended: [LIVE_Y], followUps: { [LIVE_Y]: { ...FOLLOW_UP, offerSeen: true } }, registered: [LIVE_Y] });
+  assert.deepEqual(ids(todas(live("registered", LIVE_Y), live("attended", LIVE_Y, true), live("watched_replay", LIVE_Y))), [uid(3)], "tinha vaga, nao veio e viu o replay; a equipe (2) fica fora");
+  assert.deepEqual(ids(todas(live("offer_seen", LIVE_Z))), []);
 });

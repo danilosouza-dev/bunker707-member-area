@@ -389,6 +389,8 @@ export function AccessCard({ audienceDescription, audienceErrors, countState, di
             segments={options.segments}
             value={draft.audience}
             excludeWebinarId={webinarId}
+            // O Quem pode e conferido a cada pedido do aluno: so "participou" e "garantiu vaga" (D49).
+            webinarFollowUps={false}
             webinars={webinarAudienceChoices(options.webinars, webinarId)}
           />
           <AudienceCount description={audienceDescription} needsApproval={false} onRetry={onRetryCount} state={countState} />

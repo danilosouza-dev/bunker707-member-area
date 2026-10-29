@@ -167,7 +167,8 @@ async function loadSegmentFacts(
     needs.webinars ? loadWebinarFacts(db, { userIds }) : Promise.resolve(undefined)
   ]);
 
-  return { loaded: attachWebinarFacts(segment, webinarFacts ?? null), webinarFacts };
+  // So as vagas e presencas: as acoes do follow-up nao valem no Quem pode (accessAudienceDefinitionSchema; D49).
+  return { loaded: attachWebinarFacts(segment, { presence: webinarFacts ?? null }), webinarFacts };
 }
 
 /** Le o que o acesso de `webinars` precisa sobre a pessoa: equipe, acessos, (so se algum pede) o segmento e a ancora. */
@@ -244,7 +245,7 @@ function withoutOwnWebinar(fact: AudienceStudentFacts, webinarId: string): Audie
 
   return {
     ...fact,
-    webinars: { attended: own.attended.filter((id) => id !== webinarId), registered: own.registered.filter((id) => id !== webinarId) }
+    webinars: { ...own, attended: own.attended.filter((id) => id !== webinarId), registered: own.registered.filter((id) => id !== webinarId) }
   };
 }
 

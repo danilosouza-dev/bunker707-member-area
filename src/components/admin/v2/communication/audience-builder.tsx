@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import {
   isAudienceGroup,
+  isWebinarFollowUpAction,
   messageRefKey,
   type AudienceDefinition,
   type AudienceGroup,
@@ -43,8 +44,6 @@ import {
   NO_SENT_NOTICES_MESSAGE,
   NO_WEBINARS_MESSAGE,
   PAGE_TARGET_CHOICES,
-  WEBINAR_RULE_CHOICES,
-  WEBINAR_RULE_HINT,
   accessRecentPeriodChoiceOf,
   accessRecentPeriodOfChoice,
   appendAudienceNode,
@@ -73,22 +72,16 @@ import {
   removeAudienceRuleLabel,
   replaceAudienceNode,
   starterAudience,
-  WEBINAR_FOLLOW_UP_RULE_ACTION_LABEL,
-  WEBINAR_FOLLOW_UP_RULE_CHOICES,
-  WEBINAR_FOLLOW_UP_RULE_PICKER_LABEL,
-  webinarFollowUpRuleChoiceOf,
-  webinarFollowUpRuleNotes,
-  webinarFollowUpRuleOptions,
-  webinarFollowUpRuleWithChoice,
   webinarRuleChoiceOf,
+  webinarRuleChoicesFor,
+  webinarRuleNotes,
   webinarRuleWithChoice,
   type AudienceBuilderMode,
   type AudienceFlowContext,
   type AudienceMessageOption,
   type AudienceNoticeChoice,
   type AudiencePath,
-  type AudienceWebinarChoice,
-  type AudienceWebinarFollowUpChoice
+  type AudienceWebinarChoice
 } from "./notices-view-model";
 
 // "Para quem" do aviso (docs/22 §3; docs/17 §1.8.2): todos os alunos ou regras combinaveis. O grupo
@@ -106,12 +99,11 @@ import {
 // com o segundo seletor "com qualquer reação" / "em qualquer opção").
 //
 // Quem pode da live por regras (docs/22 §3, docs/30 §1.6): "Ganhou acesso recentemente" (hoje, 24 h, 48 h ou N
-// horas, a qualquer produto ou a um dos escolhidos) e "Participação em lives" (participou ou garantiu vaga, numa
-// live da lista `webinars` ou em qualquer uma), nos dois modos.
-//
-// Webinarios v4b (docs/30 §1.6): com `webinarFollowUps` (so no segmento: avisos e pop-ups), entra a regra "Webinário"
-// (`webinar_follow_up`): o que o aluno fez (com o "não" no mesmo seletor: "não compareceu") e em qual webinario (os
-// publicados, com o dia). Convive com "Participação em lives" ate a unificacao (provisorio).
+// horas, a qualquer produto ou a um dos escolhidos) e "Participação em lives", nos dois modos: o que o aluno fez (com
+// o "não" no mesmo seletor) numa live da lista `webinars` ou em qualquer uma. No segmento comum entram tambem as acoes
+// do follow-up (viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card; D49):
+// com elas "qualquer live" sai e a live e obrigatoria. Dentro de um fluxo e no Quem pode da live
+// (`webinarFollowUps={false}`) so "participou" e "garantiu vaga".
 
 type AudienceBuilderProps = {
   cohorts: readonly { id: string; name: string }[];
@@ -139,10 +131,10 @@ type AudienceBuilderProps = {
   /** Live que nao aparece no seletor (a propria live, no "Quem pode" do editor do webinário). */
   excludeWebinarId?: string | null;
   /**
-   * v4b: so no modo "segment": os webinarios da regra "Webinário" (`webinar_follow_up`, listWebinarFollowUpChoices).
-   * Sem a lista (null), a regra nao aparece no seletor de tipo; uma regra salva continua visivel.
+   * As acoes do follow-up na regra "Participação em lives" (replay, card de compra, compra). Padrao: so no modo
+   * "segment"; o Quem pode da live passa false. Uma regra salva com elas continua visivel.
    */
-  webinarFollowUps?: readonly AudienceWebinarFollowUpChoice[] | null;
+  webinarFollowUps?: boolean;
 };
 
 const MODE_OPTIONS = [
@@ -301,8 +293,8 @@ type RuleContext = {
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
   webinars: readonly AudienceWebinarChoice[];
-  /** v4b: os webinarios da regra "Webinário"; null = a tela nao mandou (a regra nao entra no seletor de tipo). */
-  webinarFollowUps: readonly AudienceWebinarFollowUpChoice[] | null;
+  /** As acoes do follow-up entram no seletor da regra "Participação em lives". */
+  webinarFollowUps: boolean;
 };
 
 /**
@@ -316,8 +308,8 @@ function defaultMessageOption(context: Pick<RuleContext, "messageOptions" | "mod
 }
 
 /** Tipos do seletor; uma regra que nao vale neste modo (colada de um fluxo) continua visivel. */
-function ruleTypeOptions(context: Pick<RuleContext, "mode" | "webinarFollowUps">, current: AudienceRuleType): Option<AudienceRuleType>[] {
-  const types = audienceRuleTypesFor(context.mode, { webinarFollowUps: context.webinarFollowUps !== null });
+function ruleTypeOptions(mode: AudienceBuilderMode, current: AudienceRuleType): Option<AudienceRuleType>[] {
+  const types = audienceRuleTypesFor(mode);
 
   return (types.includes(current) ? types : [...types, current]).map((type) => ({ label: AUDIENCE_RULE_LABELS[type], value: type }));
 }
@@ -535,7 +527,10 @@ function AccessRecentFields({
   );
 }
 
-/** "[Participou | Não participou | Garantiu vaga | Não garantiu vaga] [qualquer live | live da lista]". */
+/**
+ * "[Participou | Não participou | Garantiu vaga | ... | Comprou pelo card] [qualquer live | live da lista]": nas acoes do
+ * follow-up, a live e obrigatoria ("qualquer live" sai; "Escolha a live" enquanto nenhuma foi escolhida).
+ */
 function WebinarRuleFields({
   context,
   onChange,
@@ -545,18 +540,18 @@ function WebinarRuleFields({
   onChange: (rule: AudienceRule) => void;
   rule: Extract<AudienceRule, { type: "webinar" }>;
 }) {
-  const options = audienceWebinarOptions(context.webinars, rule.webinarId, context.excludeWebinarId);
-  const empty = options.length === 1;
+  const options = audienceWebinarOptions(context.webinars, rule.webinarId, context.excludeWebinarId, !isWebinarFollowUpAction(rule.action));
+  const empty = options.every((option) => option.value === null);
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <InlineSelect
-          ariaLabel="Participou ou garantiu vaga"
-          className="w-full sm:w-48"
+          ariaLabel="O que o aluno fez na live"
+          className="w-full sm:w-72"
           disabled={context.disabled}
-          onChange={(choice) => onChange(webinarRuleWithChoice(rule, choice))}
-          options={WEBINAR_RULE_CHOICES}
+          onChange={(choice: string) => onChange(webinarRuleWithChoice(rule, choice))}
+          options={webinarRuleChoicesFor(rule, context.webinarFollowUps)}
           value={webinarRuleChoiceOf(rule)}
         />
         <InlineSelect
@@ -569,7 +564,11 @@ function WebinarRuleFields({
         />
       </div>
       {empty ? <p className={hintClass}>{NO_WEBINARS_MESSAGE}</p> : null}
-      <p className={hintClass}>{WEBINAR_RULE_HINT}</p>
+      {webinarRuleNotes(rule).map((note) => (
+        <p className={hintClass} key={note}>
+          {note}
+        </p>
+      ))}
     </div>
   );
 }
@@ -927,40 +926,6 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
       return <AccessRecentFields context={context} onChange={onChange} rule={rule} ruleKey={ruleKey} />;
     case "webinar":
       return <WebinarRuleFields context={context} onChange={onChange} rule={rule} />;
-    case "webinar_follow_up": {
-      const choices = context.webinarFollowUps ?? [];
-      const options = webinarFollowUpRuleOptions(choices, rule.webinarId);
-      const notes = webinarFollowUpRuleNotes(rule);
-
-      return (
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <InlineSelect
-              ariaLabel={WEBINAR_FOLLOW_UP_RULE_ACTION_LABEL}
-              className="w-full sm:w-72"
-              disabled={disabled}
-              onChange={(choice: string) => onChange(webinarFollowUpRuleWithChoice(rule, choice))}
-              options={WEBINAR_FOLLOW_UP_RULE_CHOICES}
-              value={webinarFollowUpRuleChoiceOf(rule)}
-            />
-            <span className={textClass}>em</span>
-            <InlineSelect
-              ariaLabel={WEBINAR_FOLLOW_UP_RULE_PICKER_LABEL}
-              className="w-full sm:w-72"
-              disabled={disabled || choices.length === 0}
-              onChange={(webinarId: string | null) => webinarId && onChange({ ...rule, webinarId })}
-              options={options}
-              value={rule.webinarId || null}
-            />
-          </div>
-          {notes.map((note) => (
-            <p className="text-[13px] leading-5 text-[var(--text-secondary)]" key={note}>
-              {note}
-            </p>
-          ))}
-        </div>
-      );
-    }
   }
 }
 
@@ -1003,12 +968,10 @@ function RuleRow({
           disabled={context.disabled}
           onChange={(type: AudienceRuleType) => {
             if (type !== rule.type) {
-              onChange(
-                defaultAudienceRule(type, { messageRef: defaultMessageOption(context)?.ref ?? null, mode: context.mode, webinarId: context.webinarFollowUps?.[0]?.id ?? null })
-              );
+              onChange(defaultAudienceRule(type, { messageRef: defaultMessageOption(context)?.ref ?? null, mode: context.mode }));
             }
           }}
-          options={ruleTypeOptions(context, rule.type)}
+          options={ruleTypeOptions(context.mode, rule.type)}
           value={rule.type}
         />
         <Button
@@ -1051,7 +1014,7 @@ export function AudienceBuilder({
   productsLoaded,
   segments,
   value,
-  webinarFollowUps = null,
+  webinarFollowUps = true,
   webinars = null
 }: AudienceBuilderProps) {
   const [note, setNote] = useState<{ text: string; tone: "info" | "warning" } | null>(null);
@@ -1072,8 +1035,8 @@ export function AudienceBuilder({
     productOptions,
     products,
     productsLoaded,
-    // v4b: a regra "Webinário" (webinar_follow_up) so no segmento (o lote dos fluxos nao le os fatos do webinario).
-    webinarFollowUps: mode === "segment" ? webinarFollowUps : null,
+    // As acoes do follow-up so no segmento comum (o lote dos fluxos nao le o follow-up das lives).
+    webinarFollowUps: mode === "segment" && webinarFollowUps,
     webinars: webinars ?? []
   };
   const root = value.kind === "rules" ? value.root : null;

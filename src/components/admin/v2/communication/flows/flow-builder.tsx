@@ -28,7 +28,7 @@ import { adminToast } from "../../toast";
 import { useAdminTopbarTitle } from "../../topbar-title";
 import { useMediaQuery } from "../../use-media-query";
 import type { AudienceCountState } from "../audience-builder";
-import { audienceMessageOptions, audienceNamesWithMessages, audienceNamesWithWebinarFollowUps, NOTHING_TO_SAVE_MESSAGE, type NoticeSenderChoice } from "../notices-view-model";
+import { audienceMessageOptions, audienceNamesWithMessages, NOTHING_TO_SAVE_MESSAGE, type NoticeSenderChoice } from "../notices-view-model";
 import { FlowCanvas } from "./flow-canvas";
 import { ConditionInspector, FlowSettingsPanel, MessageInspector, type InspectorContext } from "./flow-inspector";
 import { FlowRemoveDialog, type RemoveTarget } from "./flow-remove-dialog";
@@ -265,14 +265,7 @@ export function FlowBuilder({ initial, initialStep = null, now, onChangeTemplate
   const dirty = !saved || !isSameFlowDraft(saved, draft);
   const uploading = imageUpload !== null;
   const pickerItems = useMemo(() => toPickerItems(options.products), [options.products]);
-  const baseNames = useMemo(
-    () =>
-      audienceNamesWithWebinarFollowUps(
-        audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })),
-        options.webinarFollowUps
-      ),
-    [options.names, options.notices, options.webinarFollowUps]
-  );
+  const baseNames = useMemo(() => audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })), [options.names, options.notices]);
   const names = useMemo(() => flowAudienceNames(baseNames, draft, source), [baseNames, draft, source]);
   const titleOf = useMemo(() => flowTitleOf(draft, source), [draft, source]);
   const clientErrors = useMemo(() => {

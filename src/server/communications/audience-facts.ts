@@ -14,16 +14,13 @@ import "server-only";
 // nunca combina. loadAudienceFactsFor monta os mesmos fatos so para alguns alunos (lote do motor dos
 // fluxos, em pedacos de 150), com a mesma conta (buildStudentFacts).
 //
-// Quem pode da live por regras (docs/30 §1.6): a regra "Participação em lives" le as lives de cada aluno pela RPC
-// communication_webinar_facts (migracao 202610300001), so quando alguma regra pede (opcao `webinars`), e
-// context.webinarFactsLoaded diz que a leitura foi feita: sem ela (ou num banco sem a migracao) a regra nunca
-// combina, nem negada.
-//
-// Webinarios v4b (docs/30 §1.6): a lista de chaves que chega aqui (collectMessageCampaignIds) traz tambem
-// "webinar:<id>" das regras "webinar_follow_up" (o "Webinário" da fase 4). Os avisos seguem pelas linhas do sino; os
-// webinarios, pelos fatos do follow-up (loadWebinarFollowUpFacts em src/server/webinars/follow-up-queries.ts),
-// juntados em facts.webinarFollowUps, e "webinar:<id>" entra em context.messageKeys so quando o webinario foi lido
-// (apagado ou banco sem a migracao: a regra nao combina). As duas leituras convivem ate a unificacao das regras.
+// Participação em lives (docs/30 §1.6, D49): as lives de cada aluno chegam por um carregador so
+// (loadAudienceWebinarFacts) e um juntar so (attachWebinarFacts), em facts.webinars, e so o que as regras pedem
+// (audienceFactsRequest): as vagas e presencas pela RPC communication_webinar_facts (migracao 202610300001; opcao
+// `webinars`; marca context.webinarFactsLoaded) e o follow-up so das lives citadas pelas acoes dele
+// (loadWebinarFollowUpFacts em src/server/webinars/follow-up-queries.ts, a RPC webinar_follow_up_facts; opcao
+// `webinarFollowUpIds`; marca context.webinarFollowUpsLoaded so com as lives lidas). Sem a leitura (ou num banco sem a
+// migracao, ou live apagada) a regra nunca combina, nem negada.
 
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { accessStateOf, isAccessOpen, paceOf } from "@/server/students/model";
@@ -44,8 +41,6 @@ import { loadWebinarFollowUpFacts, type WebinarFollowUpRead } from "@/server/web
 import {
   buildCommentRanks,
   messageRefKey,
-  webinarIdOfKey,
-  webinarRuleKey,
   type AudienceAccessFact,
   type AudienceCommentCounts,
   type AudienceContext,
@@ -353,23 +348,12 @@ const MESSAGE_ROW_COLUMNS =
   "id,user_id,campaign_id,created_at,expires_at,seen_at,opened_at,clicked_at,response,audio_started_at,audio_completed_at,reaction,poll_choice,hidden_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Ids de aviso validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato; "webinar:<id>" fica de fora). */
-function campaignIdsOf(campaignIds: readonly string[] | undefined) {
-  return Array.from(new Set((campaignIds ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
+/** Ids validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato): avisos e lives pedidos. */
+export function validIdsOf(ids: readonly string[] | undefined) {
+  return Array.from(new Set((ids ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
 }
 
-/** v4b: ids dos webinarios das chaves "webinar:<id>" (validos, sem repeticao e em ordem). */
-export function webinarIdsOfKeys(keys: readonly string[] | undefined) {
-  return Array.from(
-    new Set(
-      (keys ?? []).flatMap((key) => {
-        const id = webinarIdOfKey(key);
-
-        return id && UUID.test(id) ? [id] : [];
-      })
-    )
-  ).sort();
-}
+const campaignIdsOf = validIdsOf;
 
 /** v3a: ids das opcoes votadas (so texto no formato do id; outra coisa = nao votou). */
 function pollChoiceOf(value: unknown): string[] | null {
@@ -593,49 +577,81 @@ export async function loadWebinarFacts(db: CommunicationsDb, options: { userIds?
   return byUser;
 }
 
+/** O que foi lido das lives para os avaliados (regra "Participação em lives"). */
+export type WebinarFactsRead = {
+  /** O follow-up das lives pedidas (webinar_follow_up_facts); `loadedIds` = as lidas (apagada fica de fora). */
+  followUps: WebinarFollowUpRead;
+  /** As vagas e presencas por aluno (communication_webinar_facts); null = nao lidas (nao pedidas ou banco sem a 202610300001). */
+  presence: WebinarFactsByUser | null;
+};
+
+/** Nada lido das lives (sem a regra, ou a regra sem live). */
+export const NO_WEBINAR_FACTS: WebinarFactsRead = { followUps: { byUser: new Map(), loadedIds: [] }, presence: null };
+
 /**
- * Junta as lives aos fatos ja montados e marca a leitura (context.webinarFactsLoaded) para todos os avaliados:
- * quem nao tem linha "nunca participou nem garantiu vaga". `webinars` null (banco sem a migracao) devolve o
- * mesmo LoadedAudience, sem a marca. Os fatos de quem tem linha sao copiados; os demais sao os mesmos objetos.
+ * As lives destes avaliados, so o que as regras pedem (audienceFactsRequest): as vagas e presencas (`webinars`; ou as ja
+ * lidas em `presence`, sem reler) e o follow-up das lives citadas (`webinarFollowUpIds`), as duas leituras em paralelo.
+ * Com `userIds`, so destes alunos ([] = nada lido); sem, todos.
  */
-export function attachWebinarFacts(loaded: LoadedAudience, webinars: WebinarFactsByUser | null): LoadedAudience {
-  if (!webinars) {
-    return loaded;
-  }
+export async function loadAudienceWebinarFacts(
+  db: CommunicationsDb,
+  request: { webinarFollowUpIds?: readonly string[]; webinars?: boolean },
+  options: { presence?: WebinarFactsByUser | null; userIds?: readonly string[] } = {}
+): Promise<WebinarFactsRead> {
+  const followUpIds = validIdsOf(request.webinarFollowUpIds);
+  const userIds = options.userIds;
+  const [presence, followUps] = await Promise.all([
+    options.presence !== undefined ? Promise.resolve(options.presence) : request.webinars ? loadWebinarFacts(db, userIds ? { userIds } : {}) : Promise.resolve(null),
+    followUpIds.length > 0 && userIds?.length !== 0
+      ? loadWebinarFollowUpFacts(db, followUpIds, userIds ? { userIds } : {})
+      : Promise.resolve(NO_WEBINAR_FACTS.followUps)
+  ]);
 
-  const facts = loaded.facts.map((fact) => {
-    const own = webinars.get(fact.userId);
-
-    return own ? { ...fact, webinars: own } : fact;
-  });
-
-  return { ...loaded, context: { ...loaded.context, webinarFactsLoaded: true }, facts };
+  return { followUps, presence };
 }
 
-/* ------------------------------------------------------------------------------------------------
- * v4b: os fatos dos webinarios citados por regras "webinar_follow_up" (o "Webinário" da fase 4)
- * ---------------------------------------------------------------------------------------------- */
-
-const NOTHING_READ: WebinarFollowUpRead = { byUser: new Map(), loadedIds: [] };
-
 /**
- * Junta os fatos dos webinarios lidos aos fatos ja montados e marca "webinar:<id>" em context.messageKeys (so os
- * lidos: um webinario apagado continua fora, e a regra nao combina). Devolve um novo LoadedAudience (os fatos de quem
- * tem linha sao copiados; os demais sao os mesmos objetos).
+ * Junta as lives aos fatos ja montados (facts.webinars) e marca o que foi lido para todos os avaliados: as vagas e
+ * presencas (context.webinarFactsLoaded; quem nao tem linha "nunca participou nem garantiu vaga") e as lives do
+ * follow-up (context.webinarFollowUpsLoaded; quem nao tem linha nao fez nada nelas). Nada lido (null, banco sem as
+ * migracoes, live apagada) devolve o mesmo LoadedAudience. Os fatos de quem tem linha sao copiados; os demais sao os
+ * mesmos objetos.
  */
-export function attachWebinarFollowUpFacts(loaded: LoadedAudience, read: WebinarFollowUpRead): LoadedAudience {
-  if (read.loadedIds.length === 0) {
+export function attachWebinarFacts(loaded: LoadedAudience, read: Partial<WebinarFactsRead> | null): LoadedAudience {
+  const presence = read?.presence ?? null;
+  const followUps = read?.followUps && read.followUps.loadedIds.length > 0 ? read.followUps : null;
+
+  if (!presence && !followUps) {
     return loaded;
   }
 
-  const messageKeys = new Set([...(loaded.context.messageKeys ?? []), ...read.loadedIds.map(webinarRuleKey)]);
   const facts = loaded.facts.map((fact) => {
-    const own = read.byUser.get(fact.userId);
+    const lives = presence?.get(fact.userId);
+    const followed = followUps?.byUser.get(fact.userId);
 
-    return own ? { ...fact, webinarFollowUps: { ...fact.webinarFollowUps, ...own } } : fact;
+    if (!lives && !followed) {
+      return fact;
+    }
+
+    const current = fact.webinars;
+    const merged = followed || current?.followUps ? { ...current?.followUps, ...followed } : undefined;
+
+    return {
+      ...fact,
+      webinars: {
+        attended: lives?.attended ?? current?.attended ?? [],
+        registered: lives?.registered ?? current?.registered ?? [],
+        ...(merged ? { followUps: merged } : {})
+      }
+    };
   });
+  const context = {
+    ...loaded.context,
+    ...(presence ? { webinarFactsLoaded: true } : {}),
+    ...(followUps ? { webinarFollowUpsLoaded: new Set([...(loaded.context.webinarFollowUpsLoaded ?? []), ...followUps.loadedIds]) } : {})
+  };
 
-  return { ...loaded, context: { ...loaded.context, messageKeys }, facts };
+  return { ...loaded, context, facts };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -643,14 +659,16 @@ export function attachWebinarFollowUpFacts(loaded: LoadedAudience, read: Webinar
  * ---------------------------------------------------------------------------------------------- */
 
 export type AudienceFactsOptions = {
-  /**
-   * Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. v4b: as
-   * chaves "webinar:<id>" das regras "webinar_follow_up" vem na mesma lista e trazem os fatos do webinario.
-   */
+  /** Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. */
   messageCampaignIds?: readonly string[];
   /**
-   * Le as lives de cada aluno (regra "Participação em lives"; audienceFactNeeds(...).webinars). Sem isto, nada e
-   * lido e a regra nunca combina.
+   * Lives citadas pelas acoes do follow-up da regra "Participação em lives" (collectWebinarFollowUpIds): o follow-up so
+   * delas. Sem isto, essas acoes nunca combinam.
+   */
+  webinarFollowUpIds?: readonly string[];
+  /**
+   * Le as vagas e presencas de cada aluno ("participou" e "garantiu vaga"; audienceFactNeeds(...).webinars). Sem
+   * isto, nada e lido e essas acoes nunca combinam.
    */
   webinars?: boolean;
 };
@@ -663,8 +681,7 @@ export async function loadAudienceFacts(
 ): Promise<LoadedAudience> {
   const nowMs = typeof now === "number" ? now : now.getTime();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
-  const webinarIds = webinarIdsOfKeys(options.messageCampaignIds);
-  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars, webinarFollowUps] = await Promise.all([
+  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars] = await Promise.all([
     fetchProfiles(db),
     fetchStaffUserIds(db),
     fetchEntitlements(db),
@@ -673,8 +690,7 @@ export async function loadAudienceFacts(
     fetchCohortMemberships(db),
     fetchCommentCounts(db),
     loadMessageFacts(db, messageCampaignIds),
-    options.webinars ? loadWebinarFacts(db) : Promise.resolve(null),
-    webinarIds.length > 0 ? loadWebinarFollowUpFacts(db, webinarIds) : Promise.resolve(NOTHING_READ)
+    loadAudienceWebinarFacts(db, options)
   ]);
   const { facts, people } = buildStudentFacts({ comments, entitlements, lessonIndex, memberships, now: nowMs, profiles, progressRows, staff });
   const loaded: LoadedAudience = {
@@ -688,7 +704,7 @@ export async function loadAudienceFacts(
     people
   };
 
-  return attachWebinarFollowUpFacts(attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars), webinarFollowUps);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }
 
 export type AudienceFactsForOptions = AudienceFactsOptions & {
@@ -713,7 +729,7 @@ export type AudienceFactsForOptions = AudienceFactsOptions & {
   /** Quem e da equipe (o RPC de fatos do lote ja traz). Sem isso, le admin_roles. */
   staff?: ReadonlySet<string>;
   /**
-   * As lives destes alunos ja lidas (loadWebinarFacts, ou null num banco sem a migracao). Sem elas e com
+   * As vagas e presencas destes alunos ja lidas (loadWebinarFacts, ou null num banco sem a migracao). Sem elas e com
    * `webinars`, le pelos ids.
    */
   webinarFacts?: WebinarFactsByUser | null;
@@ -733,7 +749,6 @@ export async function loadAudienceFactsFor(
   const nowMs = typeof now === "number" ? now : now.getTime();
   const ids = Array.from(new Set(userIds.filter(Boolean))).sort();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
-  const webinarIds = webinarIdsOfKeys(options.messageCampaignIds);
   const commentsMode = options.comments ?? "ranked";
   const readRows = async (chunk: string[]) => {
     const [profiles, progressRows, memberships, entitlements] = await Promise.all([
@@ -745,7 +760,7 @@ export async function loadAudienceFactsFor(
 
     return { entitlements, memberships, profiles, progressRows };
   };
-  const [chunks, staff, lessonIndex, comments, messages, webinars, webinarFollowUps] = await Promise.all([
+  const [chunks, staff, lessonIndex, comments, messages, webinars] = await Promise.all([
     (async () => {
       const results = [];
 
@@ -763,12 +778,7 @@ export async function loadAudienceFactsFor(
         ? Promise.resolve(new Map<string, AudienceCommentCounts>())
         : fetchCommentCounts(db),
     loadMessageFacts(db, messageCampaignIds, { userIds: ids }),
-    options.webinarFacts !== undefined
-      ? Promise.resolve(options.webinarFacts)
-      : options.webinars
-        ? loadWebinarFacts(db, { userIds: ids })
-        : Promise.resolve(null),
-    webinarIds.length > 0 && ids.length > 0 ? loadWebinarFollowUpFacts(db, webinarIds, { userIds: ids }) : Promise.resolve(NOTHING_READ)
+    loadAudienceWebinarFacts(db, options, { ...(options.webinarFacts !== undefined ? { presence: options.webinarFacts } : {}), userIds: ids })
   ]);
   const wanted = new Set(ids);
   const { facts, people } = buildStudentFacts({
@@ -796,5 +806,5 @@ export async function loadAudienceFactsFor(
     people
   };
 
-  return attachWebinarFollowUpFacts(attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars), webinarFollowUps);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }

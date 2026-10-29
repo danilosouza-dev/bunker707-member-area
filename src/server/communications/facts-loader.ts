@@ -9,15 +9,12 @@ import "server-only";
 // primeira vez que alguem pede aquele id, e juntadas aos mesmos fatos (context.messageKeys diz quais foram
 // lidos: chave fora dele nunca combina). Sem regra de mensagem, load([]) nao le nada a mais.
 //
-// Quem pode da live por regras (docs/30 §1.6): load(ids, { webinars: true }) junta as lives de cada aluno (RPC
-// communication_webinar_facts), lidas no maximo uma vez por tick e so se algum segmento tem a regra
-// "Participação em lives" (audienceFactNeeds(...).webinars).
-//
-// Webinarios v4b (docs/30 §1.6): a mesma lista traz "webinar:<id>" das regras "webinar_follow_up" (o "Webinário" da
-// fase 4). Cada webinario e lido (loadWebinarFollowUpFacts, a RPC webinar_follow_up_facts) no maximo uma vez por tick,
-// como as linhas de um aviso, e juntado em facts.webinarFollowUps; "webinar:<id>" so entra em context.messageKeys
-// quando o webinario foi lido. Assim o recalculo do segmento dos pop-ups nas faixas de 15 min (docs/29) ve as compras
-// ligadas pelo job da conversao. As duas leituras de lives convivem ate a unificacao das regras.
+// Participação em lives (docs/30 §1.6, D49): load(ids, { webinars, webinarFollowUpIds }) (o que audienceFactsRequest pede)
+// junta as lives de cada aluno: as vagas e presencas (RPC communication_webinar_facts) lidas no maximo uma vez por tick
+// e so se algum segmento tem "participou" ou "garantiu vaga"; o follow-up de cada live citada por uma acao dele (RPC
+// webinar_follow_up_facts) lido no maximo uma vez por tick, como as linhas de um aviso. Os dois pelo mesmo juntar
+// (attachWebinarFacts). Assim o recalculo do segmento dos pop-ups nas faixas de 15 min (docs/29) ve as compras ligadas
+// pelo job da conversao.
 //
 // Toda promessa ja nasce com um catch: uma falha de leitura nunca vira rejeicao solta quando ninguem a
 // espera (o par loaded/guarded que ficava dentro de processCommunications). Quem espera recebe o erro.
@@ -26,24 +23,23 @@ import { loadWebinarFollowUpFacts, type WebinarFollowUpRead } from "@/server/web
 import {
   attachMessageFacts,
   attachWebinarFacts,
-  attachWebinarFollowUpFacts,
   loadAudienceFacts,
   loadMessageFacts,
   loadWebinarFacts,
-  webinarIdsOfKeys,
+  validIdsOf,
   type LoadedAudience,
   type MessageFactsByUser,
   type WebinarFactsByUser
 } from "./audience-facts";
-import { messageRefKey, type WebinarFollowUpFact } from "./audience-model";
+import { messageRefKey, type AudienceFactsRequest, type WebinarFollowUpFact } from "./audience-model";
 import type { CommunicationsDb } from "./db";
 
 export type FactsLoader = {
   /**
-   * Fatos de todos os alunos com as linhas destes avisos e os fatos destes webinarios (chaves de
-   * collectMessageCampaignIds) e, com `webinars`, as lives de cada aluno (audienceFactNeeds(...).webinars).
+   * Fatos de todos os alunos com as linhas destes avisos (collectMessageCampaignIds) e, pelo pedido de
+   * audienceFactsRequest, as vagas e presencas (`webinars`) e o follow-up destas lives (`webinarFollowUpIds`).
    */
-  load(messageCampaignIds: readonly string[], options?: { webinars?: boolean }): Promise<LoadedAudience>;
+  load(messageCampaignIds: readonly string[], options?: Partial<Pick<AudienceFactsRequest, "webinarFollowUpIds" | "webinars">>): Promise<LoadedAudience>;
 };
 
 function guarded<T>(promise: Promise<T>): Promise<T> {
@@ -56,20 +52,19 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
   let base: Promise<LoadedAudience> | null = null;
   // Aviso -> leitura que trouxe as linhas dele (avisos pedidos juntos dividem a mesma leitura).
   const rows = new Map<string, Promise<MessageFactsByUser>>();
-  // Lives de cada aluno: uma leitura por tick, na primeira vez que um segmento pede.
+  // Vagas e presencas de cada aluno: uma leitura por tick, na primeira vez que um segmento pede.
   let webinars: Promise<WebinarFactsByUser | null> | null = null;
-  // v4b: webinario -> leitura que trouxe os fatos dele (webinarios pedidos juntos dividem a mesma leitura).
-  const webinarReads = new Map<string, Promise<WebinarFollowUpRead>>();
+  // Live -> leitura que trouxe o follow-up dela (lives pedidas juntas dividem a mesma leitura).
+  const followUpReads = new Map<string, Promise<WebinarFollowUpRead>>();
 
   return {
     load(messageCampaignIds, options = {}) {
-      const keys = messageCampaignIds.filter((id) => typeof id === "string" && id.length > 0);
-      const webinarIds = webinarIdsOfKeys(keys);
-      const ids = Array.from(new Set(keys.filter((id) => !id.startsWith("webinar:")))).sort();
+      const ids = Array.from(new Set(messageCampaignIds.filter((id) => typeof id === "string" && id.length > 0))).sort();
+      const followUpIds = validIdsOf(options.webinarFollowUpIds);
       const facts = (base ??= guarded(loadAudienceFacts(db, now)));
       const missing = ids.filter((id) => !rows.has(id));
       const webinarRows = options.webinars ? (webinars ??= guarded(loadWebinarFacts(db))) : null;
-      const missingWebinars = webinarIds.filter((id) => !webinarReads.has(id));
+      const missingFollowUps = followUpIds.filter((id) => !followUpReads.has(id));
 
       if (missing.length > 0) {
         const read = guarded(loadMessageFacts(db, missing));
@@ -79,15 +74,15 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
         }
       }
 
-      if (missingWebinars.length > 0) {
-        const read = guarded(loadWebinarFollowUpFacts(db, missingWebinars));
+      if (missingFollowUps.length > 0) {
+        const read = guarded(loadWebinarFollowUpFacts(db, missingFollowUps));
 
-        for (const id of missingWebinars) {
-          webinarReads.set(id, read);
+        for (const id of missingFollowUps) {
+          followUpReads.set(id, read);
         }
       }
 
-      if (ids.length === 0 && webinarIds.length === 0 && !webinarRows) {
+      if (ids.length === 0 && followUpIds.length === 0 && !webinarRows) {
         return facts;
       }
 
@@ -108,17 +103,11 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
             }
           }
 
-          const withMessages = ids.length === 0 ? loaded : attachMessageFacts(loaded, ids, merged);
-          const withWebinars = webinarRows ? attachWebinarFacts(withMessages, await webinarRows) : withMessages;
-
-          if (webinarIds.length === 0) {
-            return withWebinars;
-          }
-
+          // As lives pedidas por este segmento, de cada leitura do tick (lives pedidas juntas dividem a mesma).
           const followUps: WebinarFollowUpRead = { byUser: new Map(), loadedIds: [] };
 
-          for (const id of webinarIds) {
-            const read = await (webinarReads.get(id) as Promise<WebinarFollowUpRead>);
+          for (const id of followUpIds) {
+            const read = await (followUpReads.get(id) as Promise<WebinarFollowUpRead>);
 
             if (!read.loadedIds.includes(id)) {
               continue;
@@ -135,7 +124,9 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
             }
           }
 
-          return attachWebinarFollowUpFacts(withWebinars, followUps);
+          const withMessages = ids.length === 0 ? loaded : attachMessageFacts(loaded, ids, merged);
+
+          return attachWebinarFacts(withMessages, { followUps, presence: webinarRows ? await webinarRows : null });
         })()
       );
     }

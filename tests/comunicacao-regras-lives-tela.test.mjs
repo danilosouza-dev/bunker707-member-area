@@ -203,3 +203,24 @@ test("Participação em lives: a escolha e a live aparecem; sem lives, 'qualquer
   const fora = textoDe(desenhar(todas({ action: "attended", negate: false, type: "webinar", webinarId: LIVE_Y }), { excludeWebinarId: LIVE_Y }));
   assert.match(fora, /Live fora da lista/, "a propria live, ja escolhida, continua visivel");
 });
+
+test("Participação em lives com uma acao do follow-up: sem 'qualquer live', 'Escolha a live' sem live e a nota da compra", () => {
+  const comLive = textoDe(desenhar(todas({ action: "purchased", negate: false, type: "webinar", webinarId: LIVE_Y })));
+
+  assert.match(comLive, /Participação em lives Comprou pelo card Aula ao vivo de IA · 21\/10/);
+  assert.doesNotMatch(comLive, /qualquer live/);
+  assert.ok(comLive.includes(model.WEBINAR_RULE_HINT));
+  assert.match(comLive, /A compra entra pelo webhook de venda/);
+  semPalavrasProibidas(comLive);
+
+  const semLive = textoDe(desenhar(todas({ action: "watched_replay", negate: true, type: "webinar", webinarId: null })));
+  assert.match(semLive, /Não viu o replay Escolha a live/);
+
+  // Dentro de um fluxo a acao salva continua visivel (o zod diz o motivo ao salvar); o seletor so oferece as de presenca.
+  const noFluxo = textoDe(desenhar(todas({ action: "purchased", negate: false, type: "webinar", webinarId: LIVE_Y }), { mode: "flow" }));
+  assert.match(noFluxo, /Comprou pelo card/);
+  assert.deepEqual(
+    model.webinarRuleChoicesFor({ action: "attended", negate: false }, false).map((choice) => choice.label),
+    ["Participou", "Não participou", "Garantiu vaga", "Não garantiu vaga"]
+  );
+});

@@ -579,11 +579,12 @@ test("a lista por aluno da sessao gravada (§3.4.1): a coluna Oferta clicada com
   assert.doesNotMatch(aoVivo, /Oferta clicada/);
 });
 
-test("o bloco Vagas (§3.4): com quem garantiu vaga e nao veio, 'Avisar quem não veio' abre o aviso novo com a regra do webinário; sem faltosos, nada", () => {
+test("o bloco Vagas (§3.4): com quem garantiu vaga e nao veio, 'Avisar quem não veio' abre o aviso novo com as regras da live; sem faltosos, nada", () => {
   const comFaltosos = { ...viewV4, registration: { ...viewV4.registration, absent: 2 } };
   const markup = html(createElement(WebinarReportView, { page: paginaV4({ report: comFaltosos }) }));
   const vagas = markup.slice(markup.indexOf('aria-labelledby="webinario-relatorio-vagas"'));
-  const href = `/admin/comunicacao/avisos/novo?webinario=${WEBINAR_ID}&amp;seguimento=registered%2Cnao-attended`;
+  // O mesmo endereco do card Avisar (?webinario=&tipo=) com as duas regras em ?seguimento= (webinarNoticeHref).
+  const href = `/admin/comunicacao/avisos/novo?webinario=${WEBINAR_ID}&amp;tipo=notificacao&amp;seguimento=registered%2Cnao-attended`;
   assert.ok(vagas.includes(`href="${href}"`), "o link com as duas regras");
   assert.match(textOf(vagas), /> Vagas Garantir vaga Avisar quem não veio Vagas garantidas/);
 

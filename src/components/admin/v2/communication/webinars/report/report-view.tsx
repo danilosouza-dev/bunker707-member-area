@@ -4,7 +4,7 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, webinarAdminHref } from "@/server/webinars/editor-model";
-import { WEBINAR_ABSENTEES, webinarFollowUpNoticeHref } from "@/server/webinars/follow-up-links";
+import { WEBINAR_ABSENTEES, webinarNoticeHref } from "@/server/webinars/notice-shortcut-model";
 import { watchTimeLabel } from "@/server/webinars/report-model";
 import {
   messagesPerMinuteBars,
@@ -171,7 +171,7 @@ function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; se
             actions={
               report.registration.absent > 0 ? (
                 <AdminLinkButton
-                  href={webinarFollowUpNoticeHref({ steps: WEBINAR_ABSENTEES, webinarId })}
+                  href={webinarNoticeHref(webinarId, "inbox", WEBINAR_ABSENTEES)}
                   prefetch={false}
                   title={COPY.avisarQuemFaltouDica}
                   variant="secondary"

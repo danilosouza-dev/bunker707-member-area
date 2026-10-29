@@ -21,7 +21,7 @@ import {
 // - as migracoes ate a 202610290006 continuam byte a byte, e a 0008 e o texto exato (hash);
 // - quatro secoes MCP, idempotente, so acrescenta;
 // - webinar_sessions.jit so na sessao `simulated`, uma por horario (indice unico parcial); SESSION_COLUMNS le `jit`
-//   e o app exige a 0008 (WEBINARS_MIGRATION);
+//   e o app exige a 0008 (WEBINARS_MIGRATION; provisoriamente a 202610300001, que a inclui, ate a renumeracao);
 // - webinar_chat_window mantem o corpo inteiro da 202610290001 e so acrescenta a turma do dia das sessoes jit:
 //   `audience` aprovadas, nunca a linha mestre nem os pendentes, pelo dia de Sao Paulo.
 
@@ -36,7 +36,11 @@ test("as migracoes ate a 202610290006 continuam byte a byte; a 0007 nao existe; 
   assert.ok(migrationFiles().includes("202610290008_webinars_v4e_just_in_time.sql"));
   assert.equal(fileHash(MIGRATION), "33b6f6392a6a25998404beb5013b6510cfaae974dfacd534d921566a63df4cbf", "a 202610290008 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
-  assert.equal(appMigration, "202610290008", "toda leitura de sessao le jit: o aviso de migracao pendente aponta a 0008");
+  // INTEGRACAO (provisorio, ate a renumeracao das migracoes da fase 4): toda leitura de sessao le jit (0008), e o aviso de
+  // migracao pendente aponta a mais nova pela ordem dos arquivos, a 202610300001 (aplicar ate ela inclui a 0008), como
+  // pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs. Depois da renumeracao, volta a apontar a da 4e.
+  assert.equal(appMigration, "202610300001", "toda leitura de sessao le jit: o aviso de migracao pendente aponta uma migracao que inclui a 0008");
+  assert.ok(appMigration > "202610290008");
   assert.ok(rows.SESSION_COLUMNS.split(", ").includes("jit"));
   assert.ok(existsSync(new URL(MIGRATION, root)));
 });

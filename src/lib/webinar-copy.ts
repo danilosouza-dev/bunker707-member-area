@@ -515,7 +515,7 @@ export const WEBINAR_COPY = {
     faltaram: "Não vieram",
     /** Bloco Vagas (§3.4, fase 4b): quem garantiu vaga e nao veio vira o "Para quem" de um aviso novo. */
     avisarQuemFaltou: "Avisar quem não veio",
-    avisarQuemFaltouDica: "Abre um aviso novo para quem garantiu vaga e não veio, com a regra do webinário já no “Para quem”.",
+    avisarQuemFaltouDica: "Abre um aviso novo para quem garantiu vaga e não veio, com as regras “Participação em lives” já no “Para quem”.",
     maioresQuedas: "Maiores quedas",
     maisQuentes: "Mais quentes",
     mensagens: "Mensagens",

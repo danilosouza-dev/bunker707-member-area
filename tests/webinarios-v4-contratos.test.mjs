@@ -171,7 +171,7 @@ test("as frases novas (WEBINAR_COPY da fase 4 e as mensagens dos schemas) passam
   assert.equal(WEBINAR_COPY.exportar.cabecalhoPerformance, "Estes números são reais; a simulação não entra em nenhum deles.");
   assert.equal(WEBINAR_COPY.exportar.cabecalhoSimulacao, "Estes números são da simulação e não entram em nenhum outro número.");
   assert.equal(WEBINAR_COPY.paineis.simulacao.aviso, WEBINAR_COPY.relatorio.avisoSimulacao);
-  assert.ok(!Object.values(WEBINAR_COPY.seguimento.acoes).some((text) => /oferta/i.test(text)), "os rotulos do segmento da Comunicacao nao usam 'oferta' (FORBIDDEN_COPY)");
+  assert.ok(!Object.values(WEBINAR_COPY.seguimento).some((text) => /oferta/i.test(text)), "as frases do follow-up da Comunicacao nao usam 'oferta' (FORBIDDEN_COPY)");
 });
 
 test("os stores da fase 4 sao server-only; os modulos que os testes importam sao puros", () => {
