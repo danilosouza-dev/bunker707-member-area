@@ -1,8 +1,8 @@
 // A Sala da Live gravada e do Replay no navegador, a parte pura (docs/30 §1.6, §6.6 e §9): a decisao da trava do
 // player (esperar, recolocar no alvo, encerrar), a fase pelo relogio corrigido, a janela do chat e quando pedir a
 // seguinte, a fusao das mensagens sem repetir, o estado de presenca que o sinal de 15 s manda, o compositor do
-// chat (desligado, modo lento, aceite) e as bolhas das reacoes. Sem React e sem rede: tests/webinarios-sala-
-// navegador.test.mjs carrega direto pelo Node. Os pedidos ficam em src/components/member/webinars/room/room-api.ts.
+// chat (desligado, modo lento, aceite), as bolhas das reacoes e a sala perdida (404). Sem React e sem rede:
+// tests/webinarios-sala-navegador.test.mjs carrega direto pelo Node. Os pedidos ficam em src/components/member/webinars/room/room-api.ts.
 
 import type { EmbedBridge } from "./lesson-embed-bridge";
 import { ROOM_RULES, type ChatMode, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
@@ -214,6 +214,17 @@ export function roomApiPath(webinarId: string, part: RoomApiPart, query?: Record
 
 export function questionVotePath(webinarId: string, questionId: string): string {
   return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/vote`;
+}
+
+/**
+ * A pessoa perdeu a sala (docs/30 §1.1 e D41): as rotas da sala respondem 404 fora do "Quem pode" (saiu do segmento sem
+ * o produto, foi reembolsada), com o webinario despublicado ou a sessao que sumiu. So nas rotas sem item proprio (a
+ * releitura da sessao, o sinal de presenca, o token e os sinais da sala ao vivo; a pergunta ou a enquete que sumiu
+ * tambem da 404 e nao conta) isso e definitivo: a sala desmonta o video e mostra "Esta live não está disponível para
+ * você.". Rede, 5xx e as outras recusas: nao.
+ */
+export function roomAccessLost(error: unknown): boolean {
+  return (error as { status?: unknown } | null)?.status === 404;
 }
 
 /** O identificador da aula para o sinal de midia (o pop-up nunca abre com o player da sala tocando). */

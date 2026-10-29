@@ -9,11 +9,12 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 
 // O palco da Sala (docs/30 §1.6, §6.6 e §9): o iframe da Bunny (sem barra na sessao gravada; com barra no replay),
 // o botao "Ativar som" por cima ate o primeiro toque (o navegador bloqueia som automatico), a espera antes do
-// zero com a capa e a contagem, e a tela "Essa live acabou." com Assistir de novo quando ha replay. O palco leva
+// zero com a capa e a contagem, a tela "Essa live acabou." com Assistir de novo quando ha replay e, sem player, "Esta
+// live não está disponível para você." para quem saiu do "Quem pode" no meio da sessao (D41). O palco leva
 // os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
 // enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao minimizar (o som continua).
 
-export type RoomStageState = "ended" | "live" | "replay" | "waiting";
+export type RoomStageState = "ended" | "live" | "replay" | "unavailable" | "waiting";
 
 export type RoomStageProps = {
   countdownLabel: string;
@@ -101,6 +102,14 @@ export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, minim
       {!showPlayer && state === "replay" ? (
         <Cover coverUrl={coverUrl}>
           <p className="text-sm font-semibold text-zinc-200">{copy.semVideo}</p>
+        </Cover>
+      ) : null}
+
+      {state === "unavailable" ? (
+        <Cover coverUrl={null}>
+          <p className="text-lg font-black text-white sm:text-2xl" data-testid="room-unavailable" role="alert">
+            {WEBINAR_COPY.aluno.naoDisponivel}
+          </p>
         </Cover>
       ) : null}
 

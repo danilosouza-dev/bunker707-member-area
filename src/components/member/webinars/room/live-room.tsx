@@ -56,8 +56,9 @@ import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion 
 // Enquetes so com enquete aberta; no celular, gaveta pela aba de baixo e as 3 ultimas mensagens por cima do palco com
 // ela fechada) e os avisos de gravacao da camera e do microfone (live-notices.tsx). O chat, as perguntas, as enquetes,
 // as reacoes e o sinal de presenca sao os da fase 2; o offset do chat e do servidor. Silenciado no chat: o campo da
-// lugar a frase com a hora de Sao Paulo; removido ou banido (pela sessao ou por um 409 de qualquer rota): a sala da
-// lugar a frase e o iframe desmonta; encerrada (a sessao relida, o sinal de presenca ou o join-token): o iframe
+// lugar a frase com a hora de Sao Paulo; removido ou banido (pela sessao ou por um 409 de qualquer rota) e quem saiu do
+// "Quem pode" no meio da live (o 404 da releitura da sessao, do sinal de presenca, do token ou dos sinais; D41): a sala
+// da lugar a frase e o iframe desmonta; encerrada (a sessao relida, o sinal de presenca ou o join-token): o iframe
 // desmonta e o palco mostra o fim, com Assistir o replay quando ha. Minimizar encolhe a sala para a pilula de 56 px
 // sem tirar o palco do lugar (a live continua tocando); com a sala ou a pilula no ar, nenhum pop-up abre
 // (announceLiveRoomMedia). Host e co-apresentador que entram por aqui usam a barra do iframe. O botao Configurações da
@@ -90,13 +91,13 @@ export type LiveWebinarRoomProps = {
 };
 
 /**
- * O que uma recusa contou antes de a sessao ser relida. `ended` e `unconfigured` ficam (nao se desfazem); banido,
- * removido e silenciado valem so ate a proxima leitura da sessao (`refusedAtMs`, localBanStillValid): o silencio que
- * venceu e o Desfazer da equipe liberam a sala sem recarregar.
+ * O que uma recusa contou antes de a sessao ser relida. `ended`, `unconfigured` e `unavailable` (o 404 de quem saiu do
+ * "Quem pode") ficam (nao se desfazem); banido, removido e silenciado valem so ate a proxima leitura da sessao
+ * (`refusedAtMs`, localBanStillValid): o silencio que venceu e o Desfazer da equipe liberam a sala sem recarregar.
  */
-type LocalState = { banned: boolean; ended: boolean; kicked: boolean; muted: boolean; refusedAtMs: number | null; unconfigured: boolean };
+type LocalState = { banned: boolean; ended: boolean; kicked: boolean; muted: boolean; refusedAtMs: number | null; unavailable: boolean; unconfigured: boolean };
 
-const NO_LOCAL: LocalState = { banned: false, ended: false, kicked: false, muted: false, refusedAtMs: null, unconfigured: false };
+const NO_LOCAL: LocalState = { banned: false, ended: false, kicked: false, muted: false, refusedAtMs: null, unavailable: false, unconfigured: false };
 const NO_LOCAL_BAN = { banned: false, kicked: false, muted: false };
 
 function subscribeNothing() {
@@ -173,7 +174,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const webinarId = payload.webinar.id;
   const sessionId = payload.session.id;
   const lessonId = roomMediaLessonId(sessionId);
-  const { refresh: refreshSession, session, skewMs, skewRef } = useRoomClock({ enabled: !readOnly, initial: payload, webinarId });
+  const { accessLost, refresh: refreshSession, session, skewMs, skewRef } = useRoomClock({ enabled: !readOnly, initial: payload, webinarId });
   // A hora (do servidor) da leitura da sessao que a sala tem: a recusa local so vale enquanto ela e de antes da recusa.
   const sessionTimeRef = useRef(session.serverTime);
   useEffect(() => {
@@ -206,13 +207,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const live: LiveRoomInfo = { ...info, status };
   const localBan = localBanStillValid({ refusedAtMs: local.refusedAtMs, serverTimeIso: session.serverTime, skewMs }) ? local : NO_LOCAL_BAN;
   const ban = mergeBan(session.me.ban, localBan);
-  const screenInput = { ban, live, staff, unconfigured: local.unconfigured };
+  const screenInput = { ban, live, staff, unavailable: accessLost || local.unavailable, unconfigured: local.unconfigured };
   // O iframe pode montar quando a sala esta aberta para a pessoa (a tranca so barra quem ainda nao entrou).
   const allowed = !readOnly && liveRoomScreen({ ...screenInput, inRoom: true }) === "open";
   const phase = livePhaseOf(status);
   const writable = liveAcceptsWrites(status);
 
-  /** O join-token (ou um lote de sinais) recusou: a tela muda na hora e a sessao e relida. */
+  /** O join-token (ou um lote de sinais) recusou: a tela muda na hora e a sessao e relida. 404: fora do acesso, de vez. */
   const onRefused = useCallback(
     (failure: Exclude<LiveJoinFailure, "error">) => {
       setLocal((previous) => {
@@ -225,6 +226,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           ended: base.ended || failure === "ended",
           kicked: base.kicked || failure === "kicked",
           refusedAtMs: barred ? Date.now() : base.refusedAtMs,
+          unavailable: base.unavailable || failure === "unavailable",
           unconfigured: base.unconfigured || failure === "meet_unconfigured"
         };
       });
@@ -308,6 +310,18 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     deviceSettingsRef.current = deviceSettings;
   });
 
+  // Fora do "Quem pode" pela sessao ou pela presenca (D41): a sala sai do iframe de vez (o que sobrou da fila vai pelo
+  // beacon), sem esperar a renovacao do token nem tentar voltar. Fora do efeito, no proximo passo.
+  const hangUpRoom = room.hangUp;
+  const lostInside = screen === "unavailable" && entryInRoom(room.entry);
+  useEffect(() => {
+    if (!lostInside) {
+      return;
+    }
+    const id = window.setTimeout(() => hangUpRoom(), 0);
+    return () => window.clearTimeout(id);
+  }, [hangUpRoom, lostInside]);
+
   /** Uma escrita da sala foi recusada (409 banned / muted / ended de qualquer rota). */
   const onWriteRefused = useCallback(
     (error: unknown) => {
@@ -380,6 +394,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     enabled: !readOnly && writable && !blocked,
     getOffsetSeconds: () => Math.floor(getOffsetMs() / 1000),
     getState: () => (joined ? "playing" : "paused"),
+    onAccessLost: () => setLocal((previous) => (previous.unavailable ? previous : { ...previous, unavailable: true })),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
       if (answer.ended) {

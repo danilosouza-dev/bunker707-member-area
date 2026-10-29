@@ -273,22 +273,44 @@ function bancoFalso({ tables = {} } = {}) {
     },
     rpc(name, args) {
       calls.rpc.push({ args, name });
-      return { then: (resolve, reject) => Promise.resolve({ data: null, error: null }).then(resolve, reject) };
+      const run = () => (name === "communication_webinar_facts" ? { data: webinarFacts(args?.p_user_ids ?? null), error: null } : { data: null, error: null });
+      const chain = { order: () => chain, range: () => chain, then: (resolve, reject) => Promise.resolve().then(run).then(resolve, reject) };
+      return chain;
     },
     tables
   };
+
+  /** A RPC das lives de cada aluno (202610300001): uma linha por aluno, com as lives da vaga 'registered' e da presenca. */
+  function webinarFacts(users) {
+    const wanted = (userId) => users === null || users.includes(userId);
+    const sessionWebinar = new Map(table("webinar_sessions").map((row) => [row.id, row.webinar_id]));
+    const byUser = new Map();
+    const add = (userId, webinarId, key) => {
+      if (!webinarId || !wanted(userId)) {
+        return;
+      }
+      const own = byUser.get(userId) ?? { attended: null, registered: null, user_id: userId };
+      own[key] = [...new Set([...(own[key] ?? []), webinarId])];
+      byUser.set(userId, own);
+    };
+    table("webinar_registrations").filter((row) => row.status === "registered").forEach((row) => add(row.user_id, row.webinar_id, "registered"));
+    table("webinar_attendance").forEach((row) => add(row.user_id, sessionWebinar.get(row.session_id), "attended"));
+    return [...byUser.values()];
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------
  * A escola de mentira: uma Live ao vivo publicada para todos, no ar ha 95 s, gravando ha 30 s
  * ---------------------------------------------------------------------------------------------- */
 
-function escola({ accessMode = "everyone", anchorAgoMs = 30_000, durationMinutes = 60, roomName = null, scheduledAgoMs = 2 * MIN, startedAgoMs = 95_000, status = "live" } = {}) {
+function escola({ accessMode = "everyone", anchorAgoMs = 30_000, audience = { kind: "everyone" }, durationMinutes = 60, roomName = null, scheduledAgoMs = 2 * MIN, startedAgoMs = 95_000, status = "live" } = {}) {
   const now = Date.now();
   const webinar = (id, extra = {}) => ({
-    access_mode: accessMode,
+    // O "both" grava 'product' + audience_restricts (202610300001).
+    access_mode: accessMode === "both" ? "product" : accessMode,
     allow_student_camera: true,
-    audience: { kind: "everyone" },
+    audience,
+    audience_restricts: accessMode === "both",
     auto_record: true,
     cancel_reason: null,
     cancelled_at: null,
@@ -303,7 +325,7 @@ function escola({ accessMode = "everyone", anchorAgoMs = 30_000, durationMinutes
     host_user_id: null,
     id,
     kind: "live",
-    product_id: accessMode === "product" ? "curso-x" : null,
+    product_id: accessMode === "product" || accessMode === "both" ? "curso-x" : null,
     published_at: iso(now - HOUR),
     quality: { screenFps: 15, stage: 1080 },
     recording_retention_days: 730,
@@ -483,6 +505,54 @@ test("join-token: 401 sem sessao; 400 sem sessionId; 404 fora do acesso, sessao 
     process.env.WEBINAR_MEET_DOMAIN = dominio;
   }
   assert.equal(semMeet.tables.student_events.length, 0);
+});
+
+test("join-token em 'Quem tem o produto e está no segmento': 404 so com o produto ou so com o segmento, 200 com os dois; a vaga segura o segmento, nunca o produto", async () => {
+  // Segmento: entrou na area nos ultimos 7 dias.
+  const audience = { kind: "rules", root: { items: [{ days: 7, op: "within", type: "sign_in" }], match: "all" } };
+  const acesso = (userId) => ({ created_at: iso(Date.now() - 30 * 24 * HOUR), ends_at: null, id: randomUUID(), starts_at: iso(Date.now() - 30 * 24 * HOUR), status: "active", target_id: "curso-x", target_type: "standalone_course", user_id: userId });
+  const noSegmento = (db, userId) => {
+    db.tables.profiles.find((row) => row.id === userId).last_sign_in_at = iso(Date.now() - HOUR);
+  };
+
+  const { db, userId } = montar({ accessMode: "both", audience });
+  const nenhum = await token();
+  assert.equal(nenhum.status, 404, "sem o produto e fora do segmento");
+  assert.equal(nenhum.body.error, WEBINAR_COPY.aluno.naoDisponivel, "404 sem dizer se existe");
+
+  db.tables.entitlements.push(acesso(userId));
+  assert.equal((await token()).status, 404, "so o produto: o segmento restringe");
+
+  const soSegmento = novaPessoa();
+  perfil(db, soSegmento);
+  noSegmento(db, soSegmento);
+  assert.equal((await token()).status, 404, "so o segmento: nao abre a live a quem nao tem o produto");
+
+  const osDois = novaPessoa();
+  perfil(db, osDois);
+  noSegmento(db, osDois);
+  db.tables.entitlements.push(acesso(osDois));
+  const entrou = await token();
+  assert.equal(entrou.status, 200, JSON.stringify(entrou.body));
+  assert.ok(claimsDe(entrou).room, "o token da sala");
+  assert.equal(sessaoLive(db).room_name !== null, true);
+
+  // A ancora: com o produto e a vaga garantida neste webinario, fora do segmento continua entrando.
+  const comVaga = novaPessoa();
+  perfil(db, comVaga);
+  db.tables.entitlements.push(acesso(comVaga));
+  db.tables.webinar_registrations.push({ calendar_token: randomUUID().replaceAll("-", ""), id: randomUUID(), registered_at: iso(Date.now() - 24 * HOUR), session_id: null, status: "registered", user_id: comVaga, webinar_id: WEBINAR });
+  assert.equal((await token()).status, 200, "a vaga segura o segmento");
+  assert.ok(db.calls.rpc.some((call) => call.name === "communication_webinar_facts" && JSON.stringify(call.args) === JSON.stringify({ p_user_ids: [comVaga] })), "as lives so da propria pessoa");
+
+  // Reembolsado: a vaga (e ate o segmento) nao seguram o produto.
+  const reembolsado = novaPessoa();
+  perfil(db, reembolsado);
+  noSegmento(db, reembolsado);
+  db.tables.entitlements.push({ ...acesso(reembolsado), status: "revoked" });
+  db.tables.webinar_registrations.push({ calendar_token: randomUUID().replaceAll("-", ""), id: randomUUID(), registered_at: iso(Date.now() - 24 * HOUR), session_id: null, status: "registered", user_id: reembolsado, webinar_id: WEBINAR });
+  assert.equal((await token()).status, 404, "o produto e conferido a cada renovacao do token");
+  assert.ok(!db.calls.rpc.some((call) => call.name === "communication_comment_counts"), "nada da contagem de comentarios de todos os alunos");
 });
 
 test("join-token do aluno: 409 not_started na agendada; 200 na espera e no ar com as claims da regra (iss, aud, sub, room, nbf, exp), sem moderator, o nome sem e-mail e o nome da sala gerado uma vez", async () => {

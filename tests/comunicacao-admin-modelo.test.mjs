@@ -343,11 +343,13 @@ test("construtor de segmento: regra padrao valida, grupos de um nivel e no maxim
     "Progresso nas aulas",
     "Comentários",
     "Tempo de acesso",
+    "Ganhou acesso recentemente",
     "Acesso terminando",
     "Último estudo",
     "Entrada na plataforma",
     "Ritmo",
-    "Turma"
+    "Turma",
+    "Participação em lives"
   ]);
 
   let root = model.starterAudience().root;

@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import { catalogIdSchema, expectedUpdatedAtSchema } from "../catalog/schemas";
+import { isAudienceGroup, type AudienceDefinition, type AudienceNode } from "../communications/audience-model";
 import { audienceDefinitionSchema } from "../communications/schemas";
 import {
   ACCESS_MODES,
@@ -14,6 +15,7 @@ import {
   PRESENTER_ROLES,
   WEBINAR_KINDS,
   WEBINAR_LIMITS,
+  accessModeUsesProduct,
   type Quality,
   type ReminderSettings,
   type ReminderTexts,
@@ -24,9 +26,12 @@ import {
 } from "./model";
 
 export const WEBINAR_MESSAGES = {
+  accessAudience: "Monte o segmento ou escolha só o produto.",
   accessProduct: "Escolha o produto que libera o webinário.",
+  accessSelfRule: "Escolha outra live: esta regra não pode apontar para este webinário.",
   capacity: "Informe um número de vagas de 1 a 100.000.",
   capacityNeedsRegistration: "O limite de vagas só vale com Garantir vaga ligado.",
+  capacityEither: "Para limitar as vagas, use Segmento com o produto como uma das regras: no Produto ou segmento, a vaga de quem sai do segmento continuaria ocupando o limite.",
   coverUrl: "A capa precisa ser um endereço https.",
   dateTime: "Informe data e hora.",
   description: "A descrição pode ter até 2.000 caracteres.",
@@ -173,8 +178,18 @@ export const webinarDraftSchema: z.ZodType<WebinarDraft> = webinarDraftObjectSch
   if (draft.capacity != null && !draft.registrationRequired) {
     context.addIssue({ code: "custom", message: WEBINAR_MESSAGES.capacityNeedsRegistration, path: ["capacity"] });
   }
-  if ((draft.accessMode === "product" || draft.accessMode === "either") && !draft.productId) {
+  // "Produto ou segmento" nao tem ancora (D41): a vaga de quem sai do segmento sem o produto nao abre mais a sala, nao
+  // recebe aviso e ninguem consegue solta-la (a pagina da 404), mas contaria no Limite de vagas e esgotaria a live para
+  // quem entra depois. Com limite, a vaga precisa segurar: Segmento com o produto como uma das regras.
+  if (draft.accessMode === "either" && draft.capacity != null) {
+    context.addIssue({ code: "custom", message: WEBINAR_MESSAGES.capacityEither, path: ["capacity"] });
+  }
+  if (accessModeUsesProduct(draft.accessMode) && !draft.productId) {
     context.addIssue({ code: "custom", message: WEBINAR_MESSAGES.accessProduct, path: ["productId"] });
+  }
+  // "Quem tem o produto e está no segmento": sem segmento seria so o produto (o segmento so restringe).
+  if (draft.accessMode === "both" && draft.audience.kind !== "rules") {
+    context.addIssue({ code: "custom", message: WEBINAR_MESSAGES.accessAudience, path: ["audience"] });
   }
   const times = new Set<number>();
   draft.sessions.forEach((session, index) => {
@@ -211,8 +226,11 @@ export function publishProblems(draft: WebinarDraft, now: number): { message: st
       problems.push({ message: WEBINAR_MESSAGES.pastDate, path: "sessions" });
     }
   }
-  if ((draft.accessMode === "product" || draft.accessMode === "either") && !draft.productId) {
+  if (accessModeUsesProduct(draft.accessMode) && !draft.productId) {
     problems.push({ message: WEBINAR_MESSAGES.accessProduct, path: "productId" });
+  }
+  if (draft.accessMode === "both" && draft.audience.kind !== "rules") {
+    problems.push({ message: WEBINAR_MESSAGES.accessAudience, path: "audience" });
   }
   return problems;
 }
@@ -222,11 +240,43 @@ export const webinarIdSchema = z.object({
   id: z.uuid({ error: "Webinário inválido." })
 });
 
-export const saveWebinarSchema = z.object({
-  draft: webinarDraftSchema,
-  expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
-  id: z.uuid({ error: "Webinário inválido." }).optional()
-});
+/**
+ * Onde o segmento cita o proprio webinario numa regra de lives ("participou desta live" seria um laco: quem entra na
+ * sala sai do segmento). Devolve os caminhos das regras, no formato do zod ("root", "items", 0, ...).
+ */
+export function selfWebinarRulePaths(audience: AudienceDefinition, webinarId: string): (number | string)[][] {
+  const paths: (number | string)[][] = [];
+  const visit = (node: AudienceNode, path: (number | string)[]) => {
+    if (isAudienceGroup(node)) {
+      node.items.forEach((item, index) => visit(item, [...path, "items", index]));
+      return;
+    }
+    if (node.type === "webinar" && node.webinarId === webinarId) {
+      paths.push(path);
+    }
+  };
+
+  if (audience.kind === "rules") {
+    visit(audience.root, ["root"]);
+  }
+
+  return paths;
+}
+
+export const saveWebinarSchema = z
+  .object({
+    draft: webinarDraftSchema,
+    expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
+    id: z.uuid({ error: "Webinário inválido." }).optional()
+  })
+  .superRefine((input, context) => {
+    if (!input.id) {
+      return;
+    }
+    for (const path of selfWebinarRulePaths(input.draft.audience, input.id)) {
+      context.addIssue({ code: "custom", message: WEBINAR_MESSAGES.accessSelfRule, path: ["draft", "audience", ...path] });
+    }
+  });
 export type SaveWebinarInput = z.infer<typeof saveWebinarSchema>;
 
 export const cancelWebinarSchema = z.object({

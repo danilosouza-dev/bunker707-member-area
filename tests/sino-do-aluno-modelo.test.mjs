@@ -691,3 +691,35 @@ test("live (kind webinar, docs/30 D27): o cartao inteiro leva para a pagina da l
   assert.equal(model.canHideNotification({ allowHide: false, kind: "webinar" }), true);
   assert.equal(model.noticeMeta({ actor: null, createdAt: "2026-10-20T14:00:00.000Z", expiresAt: "2026-10-20T15:00:00.000Z", kind: "webinar", response: null }, { schoolName: "Bunker707", serverNow: Date.parse("2026-10-20T14:30:00.000Z") }).hint, null, "sem Termina em");
 });
+
+test("o sino do aluno nao traz flow-model nem audience-model para o pacote do navegador (a folga das linhas de fluxo vem do modulo folha)", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  // Os imports de valor (nao `import type`) relativos e por "@/", de arquivo em arquivo.
+  const seen = new Set();
+  const visit = (file) => {
+    if (seen.has(file)) {
+      return;
+    }
+    seen.add(file);
+    const source = readFileSync(file, "utf8");
+    for (const [, spec] of source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gms)) {
+      const base = spec.startsWith("@/") ? resolve(root, "src", spec.slice(2)) : spec.startsWith(".") ? resolve(dirname(file), spec) : null;
+      const target = base && [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((path) => existsSync(path));
+      if (target) {
+        visit(target);
+      }
+    }
+  };
+  visit(resolve(root, "src/components/member/notifications/notifications-model.ts"));
+  const reached = [...seen].map((path) => path.slice(root.length + 1));
+
+  assert.ok(reached.includes("src/server/communications/flow-row-settle.ts"), reached.join("\n"));
+  assert.ok(!reached.includes("src/server/communications/flow-model.ts"), "flow-model fora do sino");
+  assert.ok(!reached.includes("src/server/communications/audience-model.ts"), "audience-model fora do sino");
+  const { FLOW_LIMITS } = await import("../src/server/communications/flow-model.ts");
+  const { FLOW_ROW_SETTLE_MS } = await import("../src/server/communications/flow-row-settle.ts");
+  assert.equal(FLOW_LIMITS.flowRowSettleMs, FLOW_ROW_SETTLE_MS, "uma constante so");
+});

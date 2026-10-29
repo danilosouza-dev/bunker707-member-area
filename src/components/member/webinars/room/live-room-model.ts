@@ -1,7 +1,7 @@
 // A sala ao vivo do aluno no navegador, a parte pura (docs/30 §1.3, §1.4, §1.7, §5.1, §6.3, §8.5 e §9; fase 3): qual
 // tela a sala mostra (em breve, removido, banido, encerrada, trancada, aguardando o apresentador ou aberta), a frase de
-// cada recusa do join-token (409 not_started / ended / kicked / banned, 503 meet_unconfigured, o resto "Tentar de
-// novo"), a fila dos sinais do iframe para POST .../room-events (lotes de ate 20 que cabem no corpo de 4 KB; o que
+// cada recusa do join-token (409 not_started / ended / kicked / banned, 503 meet_unconfigured, 404 fora do acesso, o
+// resto "Tentar de novo"), a fila dos sinais do iframe para POST .../room-events (lotes de ate 20 que cabem no corpo de 4 KB; o que
 // toRoomEvent recusa nunca entra; 429 espera o Retry-After; a queda da rede devolve o lote), as tentativas de voltar
 // depois de uma queda (2 s, 4 s, 8 s e depois "Não conseguimos voltar"), o relogio "Ao vivo · 00:42:10" pelo inicio
 // de verdade e o skew do servidor, a hora do silencio no chat em Sao Paulo, o que os sinais do iframe mudam na nossa
@@ -13,6 +13,7 @@
 import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
 import { LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
+import { roomAccessLost } from "../../../../lib/webinar-room-client";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
@@ -104,12 +105,13 @@ export function liveApiPath(webinarId: string, part: "join-token" | "room-events
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * banned / kicked: a sala inteira da lugar a frase (sem iframe nem chat); ended: palco encerrado (o chat fica so para
+ * unavailable: a pessoa perdeu o acesso (404 da sessao, do sinal de presenca, do token ou dos sinais; D41) e, como
+ * banned / kicked, a sala inteira da lugar a frase (sem iframe nem chat); ended: palco encerrado (o chat fica so para
  * ler); unconfigured: "em breve" no palco (o chat funciona); locked: quem ainda nao entrou ve a frase da sala trancada
  * e a pagina reconsulta a sessao; waiting: a sala ainda nao abriu para o aluno (Aguardando o apresentador); open: o
  * botao Entrar na sala (ou o iframe, depois dele).
  */
-export type LiveScreen = "banned" | "ended" | "kicked" | "locked" | "open" | "unconfigured" | "waiting";
+export type LiveScreen = "banned" | "ended" | "kicked" | "locked" | "open" | "unavailable" | "unconfigured" | "waiting";
 
 export const NO_LIVE_BAN: LiveBanState = { banned: false, kicked: false, muted: false, mutedUntil: null };
 
@@ -122,8 +124,14 @@ export function liveRoomScreen(input: {
   staff: boolean;
   /** O join-token respondeu 503 meet_unconfigured (o ambiente ficou sem a sala depois de a pagina abrir). */
   unconfigured?: boolean;
+  /** Uma rota da sala respondeu 404: a pessoa saiu do "Quem pode" no meio da live (roomAccessLost). */
+  unavailable?: boolean;
 }): LiveScreen {
   const { ban, live } = input;
+  // Fora do acesso o servidor nem chega aos banimentos (o 404 vem antes do 409).
+  if (input.unavailable) {
+    return "unavailable";
+  }
   if (ban.banned) {
     return "banned";
   }
@@ -162,9 +170,9 @@ export function joinTimeoutOutcome(input: { joined: boolean; leaving: boolean; l
   return input.lobby ? "wait" : "drop";
 }
 
-/** A sala inteira da lugar a frase (removido ou banido): sem iframe, sem chat. */
+/** A sala inteira da lugar a frase (removido, banido ou fora do acesso): sem iframe, sem chat. */
 export function screenBlocksRoom(screen: LiveScreen): boolean {
-  return screen === "banned" || screen === "kicked";
+  return screen === "banned" || screen === "kicked" || screen === "unavailable";
 }
 
 /** A frase de cada tela (o titulo e, quando ha, a linha de baixo); `open` nao tem frase. */
@@ -174,6 +182,8 @@ export function liveScreenPhrase(screen: LiveScreen, input: { hasReplay: boolean
       return { text: null, title: WEBINAR_COPY.aoVivo.banido };
     case "kicked":
       return { text: null, title: WEBINAR_COPY.aoVivo.removido };
+    case "unavailable":
+      return { text: null, title: WEBINAR_COPY.aluno.naoDisponivel };
     case "ended":
       return { text: null, title: input.hasReplay ? WEBINAR_COPY.sala.encerrada : WEBINAR_COPY.sala.encerradaReplay };
     case "unconfigured":
@@ -204,12 +214,19 @@ export function liveAcceptsWrites(status: SessionStatus): boolean {
  * O join-token: as recusas viram a frase do estado
  * ---------------------------------------------------------------------------------------------- */
 
-export type LiveJoinFailure = "banned" | "ended" | "error" | "kicked" | "meet_unconfigured" | "not_started";
+export type LiveJoinFailure = "banned" | "ended" | "error" | "kicked" | "meet_unconfigured" | "not_started" | "unavailable";
 
-/** O motivo de uma falha de POST .../join-token (o erro do fetch traz status e reason). Rede e 5xx: `error`. */
+/**
+ * O motivo de uma falha de POST .../join-token (o erro do fetch traz status e reason). 404: a pessoa saiu do "Quem pode"
+ * (ou a sessao sumiu): `unavailable`, definitivo, na entrada, na renovacao e na volta depois de uma queda. Rede e 5xx:
+ * `error`.
+ */
 export function joinFailureOf(error: unknown): LiveJoinFailure {
   const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : null;
   const reason = (error as { reason?: unknown } | null)?.reason;
+  if (roomAccessLost(error)) {
+    return "unavailable";
+  }
   if (status === 503 && reason === "meet_unconfigured") {
     return "meet_unconfigured";
   }
@@ -232,6 +249,8 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
       return WEBINAR_COPY.aoVivo.emBreve;
     case "not_started":
       return WEBINAR_COPY.aluno.aguardando;
+    case "unavailable":
+      return WEBINAR_COPY.aluno.naoDisponivel;
     default:
       return WEBINAR_COPY.aoVivo.erroAbrir;
   }
@@ -240,6 +259,18 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
 /** Depois de quanto tempo pedir outro token (ms): o contrato de jitsi-room-config (5 min antes do exp, piso de 10 s). */
 export function tokenRefreshInMs(reply: Pick<JoinTokenReply, "expiresAt">, nowMs: number): number {
   return tokenRefreshDelayMs(reply.expiresAt, nowMs);
+}
+
+export type TokenRefreshOutcome = { action: "refuse"; failure: Exclude<LiveJoinFailure, "error"> } | { action: "retry"; delayMs: number };
+
+/**
+ * A renovacao do token (com a pessoa dentro da sala) falhou: rede, 5xx e 429 tentam de novo em `tokenRetryMs`; uma
+ * recusa troca a sala na hora, e o 404 (`unavailable`: saiu do "Quem pode" no meio da live) desmonta o iframe e mostra
+ * "Esta live não está disponível para você." (D41), em vez de seguir tentando com o video no ar.
+ */
+export function tokenRefreshOutcome(error: unknown): TokenRefreshOutcome {
+  const failure = joinFailureOf(error);
+  return failure === "error" ? { action: "retry", delayMs: LIVE_ROOM_RULES.tokenRetryMs } : { action: "refuse", failure };
 }
 
 /** Aluno e Equipe usam a nossa barra (camera e microfone com os avisos); host e co-apresentador, a barra do iframe. */
@@ -321,13 +352,14 @@ export function takeRoomEventBatch(
   return { batch, body, rest: queue.slice(index) };
 }
 
-export type RoomEventsOutcome = { blocked: "banned" | "ended" | "kicked" | null; pauseUntilMs: number | null; requeue: boolean };
+export type RoomEventsOutcome = { blocked: "banned" | "ended" | "kicked" | "unavailable" | null; pauseUntilMs: number | null; requeue: boolean };
 
 /**
  * O que fazer depois de mandar um lote: entregue (2xx), nada; 429: o lote volta para a fila e o proximo espera o
  * Retry-After; rede ou 5xx: volta para a fila; outro 4xx: descartado (nunca insiste num lote recusado). 409 banned:
  * a sala troca pela frase de removido (`kicked`, a mensagem do servidor e a do removido desta live) ou de banido de
- * todas (`banned`, so com a frase do banido; o mesmo criterio de writeRefusalOf); 409 ended: a sala encerra.
+ * todas (`banned`, so com a frase do banido; o mesmo criterio de writeRefusalOf); 409 ended: a sala encerra; 404: a
+ * pessoa saiu do "Quem pode" (`unavailable`, D41).
  */
 export function roomEventsOutcome(input: { message?: string | null; nowMs: number; reason?: string | null; retryAfterSeconds: number | null; status: number | null }): RoomEventsOutcome {
   const { status } = input;
@@ -340,6 +372,9 @@ export function roomEventsOutcome(input: { message?: string | null; nowMs: numbe
   }
   if (status === null || status >= 500) {
     return { blocked: null, pauseUntilMs: null, requeue: true };
+  }
+  if (roomAccessLost({ status })) {
+    return { blocked: "unavailable", pauseUntilMs: null, requeue: false };
   }
   if (status === 409 && input.reason === "banned") {
     return { blocked: input.message === WEBINAR_COPY.aoVivo.banido ? "banned" : "kicked", pauseUntilMs: null, requeue: false };

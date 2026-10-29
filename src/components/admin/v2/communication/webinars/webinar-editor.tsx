@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { previewNoticeAudience } from "@/server/communications/actions";
-import { describeAudience, normalizeAudience, type AudienceDefinition } from "@/server/communications/audience-model";
+import { normalizeAudience, type AudienceDefinition } from "@/server/communications/audience-model";
 import { audienceDefinitionSchema } from "@/server/communications/schemas";
 import { publishWebinar, saveWebinarDraft, uploadWebinarCover } from "@/server/webinars/actions";
 import {
@@ -21,8 +21,10 @@ import {
   savedWebinarToast,
   startWebinarDraft,
   webinarAdminHref,
+  webinarAudienceDescription,
   webinarAudienceErrorsFrom,
   webinarCardOfField,
+  webinarCountAudience,
   webinarCardTitle,
   webinarDraftForKind,
   webinarEditorCards,
@@ -31,6 +33,7 @@ import {
   webinarFailureTitle,
   webinarHeaderButtons,
   webinarKindLabel,
+  webinarNotifyShortcuts,
   webinarReviewSentence,
   webinarScreenProblems,
   webinarSituationLabel,
@@ -76,12 +79,15 @@ import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActio
 //   foco; o banner de erro e persistente (ErrorBanner); toast so no sucesso (adminToast);
 // - cada acao leva a versao lida (updatedAt): 409 = "mudou em outra tela" com Recarregar, e a tela refaz o
 //   rascunho sem perder o que foi digitado (rebaseWebinarDraft);
-// - a contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca;
+// - a contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca; em "Quem tem o
+//   produto e está no segmento" ela conta o produto junto (webinarCountAudience);
 // - Ctrl+Enter (⌘+Enter) salva o rascunho; sair com mudanca nao salva avisa (useWarnBeforeUnload);
 // - o que chega em outra fase aparece desligado com "em breve", nunca some em silencio (docs/30 §2.8);
 // - fase 3: na Live ao vivo publicada, Abrir a sala, Abrir o console e Encerrar live levam ao console /[id]/sala (a
 //   sala e as acoes dela moram la); sem messaging.publish, Abrir a sala e Encerrar live aparecem desligados com a
-//   explicacao embaixo do cabecalho (§2.6); o card Gravacao mostra a situacao do gravador da sessao `live`.
+//   explicacao embaixo do cabecalho (§2.6); o card Gravacao mostra a situacao do gravador da sessao `live`;
+// - Avisar › Aviso no sino e Pop-up levam a /admin/comunicacao/avisos/novo?webinario=<id>&tipo= (o aviso preenchido
+//   pelo webinario salvo, nada gravado ate salvar); desligados com o motivo (webinarNotifyShortcuts).
 
 type WebinarEditorProps = {
   /** Tipo ja escolhido (?tipo= no "Novo webinário"); null pergunta o tipo primeiro. */
@@ -209,10 +215,19 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
 
     return { ...webinarScreenProblems(payload, { publishers }), ...(parsed.success ? {} : webinarErrorsFrom(parsed.error.issues)) };
   }, [payload, publishers]);
-  const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
+  // O que a contagem conta: o segmento (sem a propria live na regra "nunca ... em nenhuma live") e, em "Quem tem o
+  // produto e está no segmento", o produto junto (webinarCountAudience).
+  const audienceKey = JSON.stringify(normalizeAudience(webinarCountAudience(draft, savedVersion?.id)));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
   const usesAudience = accessUsesAudience(draft.accessMode);
   const dirty = !isSameWebinarDraft(saved, draft);
+  // Avisar › Aviso no sino e Pop-up: abrem o editor da Comunicacao com o webinario SALVO (por isso o `saved`).
+  const notifyShortcuts = webinarNotifyShortcuts({
+    dirty,
+    draft: saved,
+    permissions,
+    saved: savedVersion ? { id: savedVersion.id, situation: savedVersion.situation, status: savedVersion.status } : null
+  });
   const uploading = coverUpload !== null;
   const locked = busy !== null;
   const disabled = locked || readOnly;
@@ -267,7 +282,8 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const countView: AudienceCountState = audienceValid ? count : { status: "incomplete" };
   const audienceErrors = webinarAudienceErrorsFrom(submitted ? { ...clientErrors, ...serverErrors } : serverErrors);
   const audienceNames = useMemo(() => audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })), [options.names, options.notices]);
-  const audienceDescription = describeAudience(normalizeAudience(draft.audience), audienceNames);
+  // A frase descreve o segmento como a equipe montou: a troca da propria live vale so para o numero (audienceKey).
+  const audienceDescription = webinarAudienceDescription(draft, audienceNames);
   const productName = draft.productId ? (options.names.products[draft.productId] ?? null) : null;
   const reviewSentence = webinarReviewSentence({ draft: payload, now, productName, registeredCount: savedVersion?.registeredCount ?? null, situation });
 
@@ -777,6 +793,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
               onRetryCount={() => setCountAttempt((attempt) => attempt + 1)}
               options={options}
               pickerItems={pickerItems}
+              webinarId={savedVersion?.id ?? null}
             />
           </SectionCard>
         );
@@ -789,7 +806,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
       case "avisar":
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
-            <NotifyCard {...cardProps} />
+            <NotifyCard {...cardProps} shortcuts={notifyShortcuts} />
           </SectionCard>
         );
       case "sala":

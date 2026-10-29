@@ -5,15 +5,17 @@ import "server-only";
 // Sem trabalho: uma consulta de sessoes e nada mais. Idempotente pela marca na vaga, pelo dedupe_key do sino e pela
 // chave do e-mail (src/server/webinars/reminders.ts). Banco sem a migracao 202610280001: registra e termina sem erro
 // (o tick continua verde). Quando trabalhou, as contagens vao para job_runs.metadata da linha deste job
-// ({ tick_run_id, webinars }: o tick_run_id gravado pelo run-tick.ts fica).
+// ({ tick_run_id, webinars }: o tick_run_id gravado pelo run-tick.ts fica). A vaga barrada pelo "Quem pode" fica na
+// memoria deste processo (WEBINAR_REMINDER_ACCESS_MEMO) e so e conferida de novo 15 min depois; as conferidas e barradas
+// contam como trabalho (without_access).
 
-import { processWebinarReminders, type WebinarRemindersResult } from "@/server/webinars/reminders";
+import { processWebinarReminders, WEBINAR_REMINDER_ACCESS_MEMO, type WebinarRemindersResult } from "@/server/webinars/reminders";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_REMINDERS_JOB_NAME = "webinar-reminders";
 
 function worked(result: WebinarRemindersResult) {
-  return result.reminders24h + result.reminders1h + result.emails + result.autoEnded + result.skipped > 0;
+  return result.reminders24h + result.reminders1h + result.emails + result.autoEnded + result.skipped + result.withoutAccess > 0;
 }
 
 /** Contagens do tick em job_runs.metadata (so numeros). */
@@ -24,7 +26,8 @@ async function recordJobMetrics(ctx: JobContext, result: WebinarRemindersResult,
     job_ms: jobMs,
     reminders_1h: result.reminders1h,
     reminders_24h: result.reminders24h,
-    skipped: result.skipped
+    skipped: result.skipped,
+    without_access: result.withoutAccess
   };
   const { error } = await ctx.supabase.from("job_runs").update({ metadata: { tick_run_id: ctx.tickRunId, webinars: counts } }).eq("id", ctx.runId);
 
@@ -37,12 +40,12 @@ export const webinarRemindersJob: Job = {
   name: WEBINAR_REMINDERS_JOB_NAME,
   async run(ctx) {
     const startedAt = Date.now();
-    const result = await processWebinarReminders({ db: ctx.supabase, now: ctx.tickStartedAt, signal: ctx.signal });
+    const result = await processWebinarReminders({ accessMemo: WEBINAR_REMINDER_ACCESS_MEMO, db: ctx.supabase, now: ctx.tickStartedAt, signal: ctx.signal });
 
     if (worked(result)) {
       console.info(
         `[webinarios] tick ${ctx.tickRunId}: ${result.reminders24h} lembrete(s) de 24 h, ${result.reminders1h} de 1 h, ${result.emails} e-mail(s) na fila, ` +
-          `${result.autoEnded} sessao(oes) encerrada(s) sozinha(s), ${result.skipped} pulada(s).`
+          `${result.autoEnded} sessao(oes) encerrada(s) sozinha(s), ${result.skipped} pulada(s), ${result.withoutAccess} fora do Quem pode.`
       );
       await recordJobMetrics(ctx, result, Date.now() - startedAt);
     }

@@ -142,6 +142,14 @@ test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar
 
   const noVideo = render(stage.RoomStage, { ...base, embedUrl: null, state: "live" });
   assert.match(noVideo, /ainda não está disponível/);
+
+  // Quem saiu do Quem pode no meio da sessao (o 404 da sessao ou da presenca, D41): o player desmonta e a frase fica.
+  const fora = render(stage.RoomStage, { ...base, coverUrl: "https://cdn.example.com/capa.jpg", muted: false, state: "unavailable" });
+  assert.doesNotMatch(fora, /<iframe/, "o player nao continua com a URL que ja veio");
+  assert.doesNotMatch(fora, /data-lesson-player-kind/);
+  assert.doesNotMatch(fora, /<img/, "sem a capa por tras da frase");
+  assert.match(fora, /data-room-stage="unavailable"/);
+  assert.match(fora, /role="alert">Esta live não está disponível para você\.</);
 });
 
 test("chat: os selos, a pendente, a fixada, a lista em role=log; compositor desligado, so a equipe, modo lento e encerrada; Remover minhas mensagens no menu", () => {

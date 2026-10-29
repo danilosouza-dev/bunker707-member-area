@@ -13,9 +13,10 @@ export type WebinarsDb = SupabaseClient;
  * A migracao mais nova que o app exige (PendingMigrationNotice e a mensagem do tick): a fase 1 foi a 202610280001, a
  * fase 2 a 202610290001 e a fase 3 (sala ao vivo: room_name, gravador, banimentos, ancora) a 202610290002, com os
  * ajustes da revisao na 202610290003 (a maquina na chave do webhook do gravador, a gravacao no navegador na sessao e o
- * trigger do offset pela ancora).
+ * trigger do offset pela ancora). A 202610300001 ("Quem pode" por regras) traz webinars.audience_restricts, que
+ * WEBINAR_COLUMNS le em toda leitura de webinario: sem ela, tudo aqui cai no aviso de migracao pendente.
  */
-export const WEBINARS_MIGRATION = "202610290003";
+export const WEBINARS_MIGRATION = "202610300001";
 
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();

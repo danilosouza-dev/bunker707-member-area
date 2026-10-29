@@ -6,7 +6,7 @@ import { MemberButton, MemberButtonLink } from "@/components/member/ui/member-bu
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { roomMediaLessonId } from "@/lib/webinar-room-client";
-import { joinFailurePhrase, liveScreenPhrase, type LiveScreen } from "./live-room-model";
+import { joinFailurePhrase, liveScreenPhrase, screenBlocksRoom, type LiveScreen } from "./live-room-model";
 import type { LiveEntry } from "./use-live-room";
 
 // O palco da Live ao vivo (docs/30 §1.3, §1.7, §6.3 e §9; fase 3): o lugar 16:9 do iframe (o useJitsiMeet monta o
@@ -14,7 +14,8 @@ import type { LiveEntry } from "./use-live-room";
 // por cima, a frase de cada momento: Entrar na sala (o primeiro toque, que tambem libera o som no iPhone), "Abrindo a
 // sala…", "Reconectando…" (o iframe por baixo), "Aguardando a equipe deixar você entrar…" (a sala de espera ligada), "Não conseguimos voltar." e "Não foi possível abrir a sala." com Tentar
 // de novo, Aguardando o apresentador (com a contagem), a sala trancada, "em breve" (o ambiente sem a sala ao vivo),
-// encerrada (com Assistir o replay quando ha) e, na sala inteira, removido ou banido. O palco leva os atributos do
+// encerrada (com Assistir o replay quando ha) e, na sala inteira, removido, banido ou "Esta live não está disponível
+// para você." (quem saiu do "Quem pode" no meio da live, D41). O palco leva os atributos do
 // palco da aula (data-lesson-player-stage etc.): com o sinal de midia da sala (announceLiveRoomMedia) nenhum pop-up
 // abre com a sala ou a pilula no ar. Nenhum texto daqui cita o motor de video (D2).
 
@@ -137,9 +138,9 @@ export function LiveStage(props: LiveStageProps) {
           ) : null}
 
           {phrase ? (
-            <Cover coverUrl={screen === "kicked" || screen === "banned" ? null : coverUrl}>
+            <Cover coverUrl={screenBlocksRoom(screen) ? null : coverUrl}>
               {screen === "waiting" ? <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{phrase.title}</p> : null}
-              <p className={cn("font-black text-white", screen === "waiting" ? "text-2xl sm:text-3xl" : "text-lg sm:text-2xl")} data-testid="live-stage-phrase" role={screen === "kicked" || screen === "banned" ? "alert" : undefined}>
+              <p className={cn("font-black text-white", screen === "waiting" ? "text-2xl sm:text-3xl" : "text-lg sm:text-2xl")} data-testid="live-stage-phrase" role={screenBlocksRoom(screen) ? "alert" : undefined}>
                 {screen === "waiting" ? countdownLabel || phrase.text : phrase.title}
               </p>
               {screen === "ended" && replayHref ? (

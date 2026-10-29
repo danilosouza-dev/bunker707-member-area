@@ -138,6 +138,30 @@ test("as recusas do join-token viram a frase do estado; o resto e 'Não foi poss
   assert.equal(copy.aoVivo.salaFechada, "A sala está cheia ou fechada. Fique aqui: avisamos quando abrir.");
 });
 
+test("quem sai do Quem pode no meio da live (D41): o 404 da renovacao do token troca a sala pela frase e desmonta o iframe, em vez de tentar de novo a cada 60 s", () => {
+  // Live em Produto ou segmento com "Curso P ou ganhou acesso hoje", das 23:30 a 00:30: a aluna sem o P entrou pelo
+  // "hoje". Depois da meia-noite, a renovacao do token responde 404 (requireWebinarAccess, com a frase do servidor).
+  const foraDoAcesso = erro(404, undefined, WEBINAR_COPY.aluno.naoDisponivel);
+  assert.equal(model.joinFailureOf(foraDoAcesso), "unavailable", "na entrada e na volta depois de uma queda, nunca 'Tentar de novo'");
+  assert.deepEqual(model.tokenRefreshOutcome(foraDoAcesso), { action: "refuse", failure: "unavailable" });
+  assert.deepEqual(model.tokenRefreshOutcome(erro(500)), { action: "retry", delayMs: model.LIVE_ROOM_RULES.tokenRetryMs }, "5xx: outra tentativa");
+  assert.deepEqual(model.tokenRefreshOutcome(new TypeError("Failed to fetch")), { action: "retry", delayMs: 60_000 }, "sem rede: outra tentativa");
+  assert.deepEqual(model.tokenRefreshOutcome(erro(429)), { action: "retry", delayMs: 60_000 });
+  assert.deepEqual(model.tokenRefreshOutcome(erro(409, "kicked")), { action: "refuse", failure: "kicked" });
+
+  // A tela: mesmo com a aluna dentro do iframe (inRoom), a sala inteira da lugar a frase (sem iframe, sem chat).
+  const tela = model.liveRoomScreen({ ban: semBan, inRoom: true, live: live(), staff: false, unavailable: true });
+  assert.equal(tela, "unavailable");
+  assert.equal(model.screenBlocksRoom(tela), true);
+  assert.deepEqual(model.liveScreenPhrase(tela, { hasReplay: false }), { text: null, title: "Esta live não está disponível para você." });
+  assert.equal(model.joinFailurePhrase("unavailable"), WEBINAR_COPY.aluno.naoDisponivel);
+  assert.equal(model.liveRoomScreen({ ban: { ...semBan, kicked: true }, inRoom: false, live: live({ status: "ended" }), staff: false, unavailable: true }), "unavailable", "o 404 vem antes do 409");
+  assert.equal(model.liveRoomScreen({ ban: semBan, inRoom: true, live: live(), staff: false, unavailable: false }), "open");
+
+  // Os sinais do iframe com 404 (o acesso guardado no servidor venceu): a sala troca tambem, e o lote nao volta.
+  assert.deepEqual(model.roomEventsOutcome({ nowMs: T0, retryAfterSeconds: null, status: 404 }), { blocked: "unavailable", pauseUntilMs: null, requeue: false });
+});
+
 test("a tela da sala: banido e removido primeiro, depois encerrada, em breve, a equipe sempre aberta, o aluno espera ate a sala abrir, a tranca so barra quem chega", () => {
   const screen = (extra = {}) => model.liveRoomScreen({ ban: semBan, inRoom: false, live: live(), staff: false, ...extra });
   assert.equal(screen(), "open");

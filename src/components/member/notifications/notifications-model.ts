@@ -6,7 +6,8 @@
 // v3a (docs/24 §1 e §7.3): como o aluno chega ao destino, os nomes da lixeira e das reacoes, a enquete,
 // a troca da resposta, o plano de cada abertura e a busca por intencao (no fim do arquivo).
 
-import { FLOW_LIMITS } from "../../../server/communications/flow-model";
+// A folga das linhas de fluxo vem do modulo folha: flow-model.ts (e audience-model.ts) fica fora do pacote do aluno.
+import { FLOW_ROW_SETTLE_MS } from "../../../server/communications/flow-row-settle";
 import { pollPercent, REACTION_LABELS, type NotificationPoll, type ReactionId } from "../../../server/communications/interactions-model";
 import { urgencyLabel } from "../../../server/communications/message-meta";
 import {
@@ -185,7 +186,7 @@ export function recentFlowIds(items: readonly Pick<NotificationItem, "createdAt"
   }
 
   return items
-    .filter((item) => item.kind === "notice" && Date.parse(item.createdAt) > reference - FLOW_LIMITS.flowRowSettleMs)
+    .filter((item) => item.kind === "notice" && Date.parse(item.createdAt) > reference - FLOW_ROW_SETTLE_MS)
     .slice(0, MAX_SHOWN_IDS)
     .map((item) => item.id);
 }

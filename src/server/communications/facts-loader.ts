@@ -9,16 +9,32 @@ import "server-only";
 // primeira vez que alguem pede aquele id, e juntadas aos mesmos fatos (context.messageKeys diz quais foram
 // lidos: chave fora dele nunca combina). Sem regra de mensagem, load([]) nao le nada a mais.
 //
+// Quem pode da live por regras (docs/30 §1.6): load(ids, { webinars: true }) junta as lives de cada aluno (RPC
+// communication_webinar_facts), lidas no maximo uma vez por tick e so se algum segmento tem a regra
+// "Participação em lives" (audienceFactNeeds(...).webinars).
+//
 // Toda promessa ja nasce com um catch: uma falha de leitura nunca vira rejeicao solta quando ninguem a
 // espera (o par loaded/guarded que ficava dentro de processCommunications). Quem espera recebe o erro.
 
-import { attachMessageFacts, loadAudienceFacts, loadMessageFacts, type LoadedAudience, type MessageFactsByUser } from "./audience-facts";
+import {
+  attachMessageFacts,
+  attachWebinarFacts,
+  loadAudienceFacts,
+  loadMessageFacts,
+  loadWebinarFacts,
+  type LoadedAudience,
+  type MessageFactsByUser,
+  type WebinarFactsByUser
+} from "./audience-facts";
 import { messageRefKey } from "./audience-model";
 import type { CommunicationsDb } from "./db";
 
 export type FactsLoader = {
-  /** Fatos de todos os alunos com as linhas destes avisos (ids de collectMessageCampaignIds). */
-  load(messageCampaignIds: readonly string[]): Promise<LoadedAudience>;
+  /**
+   * Fatos de todos os alunos com as linhas destes avisos (ids de collectMessageCampaignIds) e, com `webinars`, as
+   * lives de cada aluno (audienceFactNeeds(...).webinars).
+   */
+  load(messageCampaignIds: readonly string[], options?: { webinars?: boolean }): Promise<LoadedAudience>;
 };
 
 function guarded<T>(promise: Promise<T>): Promise<T> {
@@ -31,12 +47,15 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
   let base: Promise<LoadedAudience> | null = null;
   // Aviso -> leitura que trouxe as linhas dele (avisos pedidos juntos dividem a mesma leitura).
   const rows = new Map<string, Promise<MessageFactsByUser>>();
+  // Lives de cada aluno: uma leitura por tick, na primeira vez que um segmento pede.
+  let webinars: Promise<WebinarFactsByUser | null> | null = null;
 
   return {
-    load(messageCampaignIds) {
+    load(messageCampaignIds, options = {}) {
       const ids = Array.from(new Set(messageCampaignIds.filter((id) => typeof id === "string" && id.length > 0))).sort();
       const facts = (base ??= guarded(loadAudienceFacts(db, now)));
       const missing = ids.filter((id) => !rows.has(id));
+      const webinarRows = options.webinars ? (webinars ??= guarded(loadWebinarFacts(db))) : null;
 
       if (missing.length > 0) {
         const read = guarded(loadMessageFacts(db, missing));
@@ -46,7 +65,7 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
         }
       }
 
-      if (ids.length === 0) {
+      if (ids.length === 0 && !webinarRows) {
         return facts;
       }
 
@@ -67,7 +86,9 @@ export function createFactsLoader(db: CommunicationsDb, now: Date | number): Fac
             }
           }
 
-          return attachMessageFacts(loaded, ids, merged);
+          const withMessages = ids.length === 0 ? loaded : attachMessageFacts(loaded, ids, merged);
+
+          return webinarRows ? attachWebinarFacts(withMessages, await webinarRows) : withMessages;
         })()
       );
     }

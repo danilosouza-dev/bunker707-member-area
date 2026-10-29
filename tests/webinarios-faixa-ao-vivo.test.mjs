@@ -461,9 +461,12 @@ function matches(row, [op, column, value]) {
   }
 }
 
-/** O banco falso: tabelas como listas, os filtros que as leituras usam; `errors` faz uma tabela responder com erro. */
-function bancoFalso({ errors = {}, tables = {} } = {}) {
-  const calls = { from: [] };
+/**
+ * O banco falso: tabelas como listas, os filtros que as leituras usam; `errors` faz uma tabela responder com erro; as
+ * RPCs ficam anotadas em `calls.rpc` e respondem por `rpcs[nome](args)` (sem resposta: vazio).
+ */
+function bancoFalso({ errors = {}, rpcs = {}, tables = {} } = {}) {
+  const calls = { from: [], rpc: [] };
 
   function query(name) {
     const state = { filters: [], head: false, range: null, single: null };
@@ -504,8 +507,11 @@ function bancoFalso({ errors = {}, tables = {} } = {}) {
       calls.from.push(name);
       return query(name);
     },
-    async rpc() {
-      return { data: null, error: null };
+    rpc(name, args) {
+      calls.rpc.push({ args, name });
+      const run = () => (rpcs[name] ? rpcs[name](args) : { data: null, error: null });
+      const chain = { order: () => chain, range: () => chain, then: (resolve, reject) => Promise.resolve().then(run).then(resolve, reject) };
+      return chain;
     },
     tables
   };
@@ -758,4 +764,109 @@ test("rota: nada candidato = uma consulta so; banco sem a migracao = faixa vazia
   assert.equal(semMigracao.response.status, 200);
   assert.deepEqual(semMigracao.body.data.live, []);
   assert.equal(semMigracao.body.data.soon, null);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Quem pode por regras: o segmento "ganhou acesso hoje" e a ancora da vaga (docs/30 §1.1, D41)
+ * ---------------------------------------------------------------------------------------------- */
+
+const W_HOJE = "bbbbbbbb-0000-4000-8000-000000000007";
+/** Ganhou acesso a qualquer produto hoje, no dia de Sao Paulo (UTC-3 fixo: 03:00 UTC = 00:00 em Sao Paulo). */
+const GANHOU_HOJE = { kind: "rules", root: { items: [{ negate: false, period: { kind: "today" }, productIds: [], type: "access_recent" }], match: "all" } };
+const inicioDoDia = (now) => Math.floor((now - 3 * HOUR) / DAY) * DAY + 3 * HOUR;
+
+/** A escola so com a live do segmento "ganhou acesso hoje" no ar; as vagas viram as linhas da RPC das lives. */
+function escolaDoSegmento() {
+  const now = Date.now();
+  const tables = {
+    admin_roles: [],
+    entitlements: [],
+    profiles: [ALUNO_ID, OUTRO_ALUNO].map((id) => ({ avatar_url: null, created_at: iso(now - 90 * DAY), email: null, full_name: "Aluno", id, last_sign_in_at: null, phone: null })),
+    webinar_recordings: [],
+    webinar_registrations: [],
+    webinar_sessions: [sessionRow(SESS(9), W_HOJE, { started_at: iso(now - 3 * MIN) })],
+    webinars: [webinarRow(W_HOJE, { access_mode: "audience", audience: GANHOU_HOJE, slug: "live-de-hoje", title: "Live de hoje" })]
+  };
+  const rpcs = {
+    // Uma linha por aluno: as lives com vaga 'registered' (sem presenca nesta escola).
+    communication_webinar_facts: ({ p_user_ids: users }) => ({
+      data: users
+        .map((userId) => ({ attended: null, registered: tables.webinar_registrations.filter((row) => row.status === "registered" && row.user_id === userId).map((row) => row.webinar_id), user_id: userId }))
+        .filter((row) => row.registered.length > 0),
+      error: null
+    })
+  };
+  return bancoFalso({ rpcs, tables });
+}
+
+function ganhouAcesso(db, userId, startsAt) {
+  db.tables.entitlements.push({ created_at: iso(startsAt), ends_at: null, id: `e-${userId}`, starts_at: iso(startsAt), status: "active", target_id: "curso-x", target_type: "standalone_course", user_id: userId });
+}
+
+const rpcsDe = (db, name) => db.calls.rpc.filter((call) => call.name === name);
+
+test("rota: segmento 'ganhou acesso hoje': quem ganhou hoje ve a faixa, quem ganhou ontem nao; com a vaga garantida ontem, ve; a contagem de comentarios nunca e lida", async () => {
+  const hoje = inicioDoDia(Date.now());
+
+  const db = escolaDoSegmento();
+  ganhouAcesso(db, ALUNO_ID, hoje);
+  actionStubs.db = db;
+  sessao.user = { id: ALUNO_ID };
+  assert.deepEqual((await pedir()).body.data.live.map((item) => item.title), ["Live de hoje"], "ganhou hoje (00:00 de Sao Paulo conta)");
+  assert.equal(rpcsDe(db, "communication_webinar_facts").length, 0, "no segmento, a ancora nem e lida");
+
+  const ontem = escolaDoSegmento();
+  ganhouAcesso(ontem, OUTRO_ALUNO, hoje - HOUR);
+  actionStubs.db = ontem;
+  sessao.user = { id: OUTRO_ALUNO };
+  assert.deepEqual((await pedir()).body.data.live, [], "ganhou ontem (23:00 de Sao Paulo): fora");
+  assert.deepEqual(
+    rpcsDe(ontem, "communication_webinar_facts").map((call) => call.args),
+    [{ p_user_ids: [OUTRO_ALUNO] }],
+    "fora do segmento, as lives so da propria pessoa"
+  );
+
+  const comVaga = escolaDoSegmento();
+  ganhouAcesso(comVaga, OUTRO_ALUNO, hoje - HOUR);
+  comVaga.tables.webinar_registrations.push(registrationRow(OUTRO_ALUNO, W_HOJE, null, { registered_at: iso(hoje - 30 * MIN) }));
+  actionStubs.db = comVaga;
+  assert.deepEqual((await pedir()).body.data.live.map((item) => item.title), ["Live de hoje"], "a vaga garantida ontem segura o segmento");
+
+  for (const banco of [db, ontem, comVaga]) {
+    assert.equal(rpcsDe(banco, "communication_comment_counts").length, 0, "sem regra de comentarios, nada da contagem de todos os alunos");
+    assert.ok(!banco.calls.from.includes("lessons"), "sem regra de progresso, nada do indice de aulas");
+  }
+});
+
+test("rota: so le o segmento onde ele decide; sem regra de progresso, ritmo ou turma, nunca o indice de aulas", async () => {
+  const now = Date.now();
+  const ENTROU_NA_SEMANA = { kind: "rules", root: { items: [{ days: 7, op: "within", type: "sign_in" }], match: "all" } };
+  const escolaCom = (webinar) => {
+    const tables = {
+      admin_roles: [],
+      entitlements: [{ created_at: iso(now - 40 * DAY), ends_at: null, id: "e-outro", starts_at: iso(now - 40 * DAY), status: "active", target_id: "outro-curso", target_type: "standalone_course", user_id: ALUNO_ID }],
+      profiles: [{ avatar_url: null, created_at: iso(now - 90 * DAY), email: null, full_name: "Aluno", id: ALUNO_ID, last_sign_in_at: iso(now - HOUR), phone: null }],
+      webinar_recordings: [],
+      webinar_registrations: [],
+      webinar_sessions: [sessionRow(SESS(9), W_HOJE, { started_at: iso(now - 3 * MIN) })],
+      webinars: [webinarRow(W_HOJE, { slug: "live-de-hoje", title: "Live de hoje", ...webinar })]
+    };
+    return bancoFalso({ tables });
+  };
+  const leuOSegmento = (db) => ["profiles", "lesson_progress", "cohort_memberships", "lessons", "course_modules"].filter((table) => db.calls.from.includes(table));
+  sessao.user = { id: ALUNO_ID };
+
+  // "Quem tem o produto e está no segmento" ('product' + audience_restricts) sem o produto: a resposta ja e nao, e a
+  // cada 60 s nada do perfil, do progresso, das turmas nem das aulas e lido.
+  const semProduto = escolaCom({ access_mode: "product", audience: ENTROU_NA_SEMANA, audience_restricts: true, product_id: "curso-x" });
+  actionStubs.db = semProduto;
+  assert.deepEqual((await pedir()).body.data.live, []);
+  assert.deepEqual(leuOSegmento(semProduto), [], "both sem o produto: o segmento nem e lido");
+
+  // Segmento "entrou na semana": le o perfil, mas nao o indice de aulas (a regra de entrada nao usa).
+  const entrada = escolaCom({ access_mode: "audience", audience: ENTROU_NA_SEMANA });
+  actionStubs.db = entrada;
+  assert.deepEqual((await pedir()).body.data.live.map((item) => item.title), ["Live de hoje"]);
+  assert.ok(entrada.calls.from.includes("profiles"));
+  assert.ok(!entrada.calls.from.includes("lessons") && !entrada.calls.from.includes("course_modules"), "sem o indice de aulas");
 });

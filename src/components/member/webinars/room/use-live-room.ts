@@ -50,6 +50,7 @@ import {
   takeRoomEventBatch,
   toggleHandLocally,
   tokenRefreshInMs,
+  tokenRefreshOutcome,
   type DeviceSwitch,
   type DeviceSwitchKind,
   type LiveJoinFailure,
@@ -62,12 +63,14 @@ import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from ".
 
 // A sala ao vivo do aluno por dentro (docs/30 §1.3, §5.1, §5.4, §6.3, §8.5 e §9; fase 3), fora do desenho:
 // - a entrada: "Entrar na sala" pede o token (POST .../join-token) e monta o iframe no palco pelo useJitsiMeet com o
-//   configOverwrite do papel que o servidor decidiu (liveConfigOverwrite); 409 / 503 viram a tela do estado
+//   configOverwrite do papel que o servidor decidiu (liveConfigOverwrite); 409 / 503 / 404 viram a tela do estado
 //   (onRefused) e o resto, "Não foi possível abrir a sala" com Tentar de novo;
 // - o token novo antes do `exp` (tokenRefreshDelayMs): guardado sem remontar a sala no ar (vale na proxima montagem);
+//   a renovacao recusada troca a sala (tokenRefreshOutcome): o 404 de quem saiu do "Quem pode" no meio da live
+//   desmonta o iframe e mostra "Esta live não está disponível para você." (D41); rede e 5xx tentam de novo em 60 s;
 // - a queda (o iframe falhou, ou saiu sem o aluno sair, ou nao confirmou a entrada em 30 s): "Reconectando…" e ate
 //   RECONNECT_ATTEMPTS tentativas (2 s, 4 s, 8 s), cada uma com um token novo (o join-token decide se ainda pode: a
-//   live encerrada, o removido e o banido param aqui); depois, "Não conseguimos voltar" e Tentar de novo;
+//   live encerrada, o removido, o banido e quem perdeu o acesso param aqui); depois, "Não conseguimos voltar";
 // - os sinais: cada sinal do iframe passa por toRoomEvent (so codigos; o que ele recusa nem entra na fila) e vai em
 //   lotes de ate 20 a cada 10 s para POST .../room-events, e o que sobrar no pagehide pelo sendBeacon; 429 espera o
 //   Retry-After; e muda a nossa barra (applyLiveSignal: mao, camera, microfone liberado, gravando, quem esta no palco);
@@ -140,7 +143,7 @@ function iframeAnswer(call: () => Promise<unknown> | unknown): Promise<boolean |
  * A fila dos sinais do iframe
  * ---------------------------------------------------------------------------------------------- */
 
-export function useRoomEventQueue(input: { enabled: boolean; onBlocked: (reason: "banned" | "ended" | "kicked") => void; sessionId: string; webinarId: string }) {
+export function useRoomEventQueue(input: { enabled: boolean; onBlocked: (reason: "banned" | "ended" | "kicked" | "unavailable") => void; sessionId: string; webinarId: string }) {
   const { enabled, sessionId, webinarId } = input;
   const queueRef = useRef<RoomEventItem[]>([]);
   const pauseUntilRef = useRef(0);
@@ -239,7 +242,7 @@ export type UseLiveRoomInput = {
   nonce: string | null;
   /** Um erro de camera encerrou o aceite pendente do aviso de gravacao: o proximo clique em Câmera abre o aviso de novo. */
   onCameraConsentEnded: () => void;
-  /** O join-token recusou (409 / 503) ou um lote de sinais voltou 409: a sala troca de tela. */
+  /** O join-token recusou (409 / 503 / 404) ou um lote de sinais voltou 409 / 404: a sala troca de tela. */
   onRefused: (failure: Exclude<LiveJoinFailure, "error">) => void;
   sessionId: string;
   /** O painel Configurações aberto: os aparelhos sao relidos. */
@@ -734,11 +737,13 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
             if (stopped) {
               return;
             }
-            const failure = joinFailureOf(error);
-            if (failure === "error") {
-              arm(LIVE_ROOM_RULES.tokenRetryMs);
+            // Rede e 5xx: outra tentativa; recusa (inclusive o 404 de quem saiu do "Quem pode"): a sala troca de tela
+            // e o iframe desmonta (refuse), sem esperar a proxima queda.
+            const outcome = tokenRefreshOutcome(error);
+            if (outcome.action === "retry") {
+              arm(outcome.delayMs);
             } else {
-              refuse(failure);
+              refuse(outcome.failure);
             }
           });
       }, delayMs);

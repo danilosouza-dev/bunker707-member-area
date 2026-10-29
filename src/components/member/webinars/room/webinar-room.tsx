@@ -25,9 +25,11 @@ import { useRoomPlayer } from "./use-room-player";
 // Chat, Perguntas e Enquetes (a de Enquetes so com enquete aberta). A 375 px: palco na largura, abas embaixo, o
 // campo de mensagem fixo no rodape, botoes de 44 px. Minimizar vira a pilula de 56 px no canto; o player continua
 // (e o sinal de midia com ele: nenhum pop-up abre). Sair volta para a pagina da live; o sinal de saida vai por
-// beacon. No "ver como" da equipe nada e gravado: nem sinal, nem chat, nem reacao. A sala da Live ao vivo (fase 3) e
-// outra tela (live-room.tsx, escolhida pela pagina pela sessao `live`) e usa o mesmo dialogo daqui: o foco preso, o
-// corpo da pagina parado e o prefers-reduced-motion (os helpers exportados abaixo).
+// beacon. Quem sai do "Quem pode" no meio da sessao (o 404 da releitura da sessao a cada 60 s ou do sinal de presenca;
+// D41) perde o player, o chat e a presenca, e o palco mostra "Esta live não está disponível para você.". No "ver
+// como" da equipe nada e gravado: nem sinal, nem chat, nem reacao. A sala da Live ao vivo (fase 3) e outra tela
+// (live-room.tsx, escolhida pela pagina pela sessao `live`) e usa o mesmo dialogo daqui: o foco preso, o corpo da
+// pagina parado e o prefers-reduced-motion (os helpers exportados abaixo).
 
 type Tab = "chat" | "enquetes" | "perguntas";
 
@@ -129,11 +131,15 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   const [playerEnded, setPlayerEnded] = useState(false);
   /** O contador do ultimo sinal de presenca; antes dele, o da leitura da sessao. */
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
+  /** O sinal de presenca respondeu 404 (fora do acesso agora). */
+  const [heartbeatLost, setHeartbeatLost] = useState(false);
   const reducedMotion = useRoomReducedMotion();
   const [replaySeconds, setReplaySeconds] = useState(0);
   const replayOffsetRef = useRef(0);
   const lastReplaySecondRef = useRef<number | null>(null);
   const serverEnded = session.session.status === "ended" || session.session.status === "cancelled";
+  // Fora do "Quem pode" agora (D41): o player desmonta e nada mais e lido nem gravado.
+  const unavailable = clock.accessLost || heartbeatLost;
 
   // O relogio da sala, a cada segundo (a contagem, o tempo no ar e a revelacao das mensagens).
   useEffect(() => {
@@ -155,7 +161,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   }, [clock.skewRef, kind, zeroMs]);
 
   // O chat liga ja na espera (a sala de espera tem chat, docs/30 §1.6): so o "ver como" fica sem nada.
-  const chat = useRoomChat({ enabled: !readOnly, getPlayerOffsetMs: getOffsetMs, initialServerTime: payload.serverTime, sessionId, webinarId });
+  const chat = useRoomChat({ enabled: !readOnly && !unavailable, getPlayerOffsetMs: getOffsetMs, initialServerTime: payload.serverTime, sessionId, webinarId });
   const chatSeeked = chat.seeked;
 
   const onTime = useCallback(
@@ -173,7 +179,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
 
   const player = useRoomPlayer({
     durationMs,
-    enabled: !readOnly && (live || phase === "replay") && session.video !== null,
+    enabled: !readOnly && !unavailable && (live || phase === "replay") && session.video !== null,
     iframe,
     locked: kind === "simulated",
     onEnded: () => setPlayerEnded(true),
@@ -185,9 +191,10 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   });
 
   useRoomHeartbeat({
-    enabled: !readOnly && phase !== "ended",
+    enabled: !readOnly && !unavailable && phase !== "ended",
     getOffsetSeconds: () => Math.floor(getOffsetMs() / 1000),
     getState: () => presenceStateOf({ bridge: player.bridge, playing: player.playing, visible: true }),
+    onAccessLost: () => setHeartbeatLost(true),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
       if (answer.ended) {
@@ -198,7 +205,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
     webinarId
   });
 
-  const reactions = useRoomReactions({ enabled: !readOnly && (live || phase === "replay"), getOffsetMs, reducedMotion, sessionId, webinarId });
+  const reactions = useRoomReactions({ enabled: !readOnly && !unavailable && (live || phase === "replay"), getOffsetMs, reducedMotion, sessionId, webinarId });
 
   const currentOffsetMs = kind === "replay" ? replaySeconds * 1000 : targetOffsetMs({ deviceNowMs: nowMs, skewMs: clock.skewMs, zeroMs });
   const revealed = useMemo(() => revealedMessages(chat.messages, currentOffsetMs), [chat.messages, currentOffsetMs]);
@@ -212,12 +219,12 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   }, [router, webinarHref]);
 
   const askToLeave = useCallback(() => {
-    if (live && !minimized) {
+    if (live && !minimized && !unavailable) {
       setConfirmLeave(true);
       return;
     }
     leave();
-  }, [leave, live, minimized]);
+  }, [leave, live, minimized, unavailable]);
 
   // Foco preso e Esc (docs/30 §1.7): o dialogo e o unico lugar do teclado enquanto esta aberto.
   useRoomDialogLock(rootRef, !minimized);
@@ -242,7 +249,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
     player.unmute();
   }
 
-  const stageState = phase === "replay" ? "replay" : phase;
+  const stageState = unavailable ? "unavailable" : phase === "replay" ? "replay" : phase;
   const timeLabel = saoPauloTime(session.session.scheduledAt);
   const composerPhase = phase === "replay" ? "replay" : phase;
 
@@ -317,82 +324,84 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
                 <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
               </div>
               <div className="border-t border-white/10 bg-[#111]">
-                <RoomReactionBar disabled={readOnly || !(live || phase === "replay")} onReact={reactions.react} />
+                <RoomReactionBar disabled={readOnly || unavailable || !(live || phase === "replay")} onReact={reactions.react} />
               </div>
             </div>
 
-            <aside className="flex min-h-0 flex-1 flex-col border-t border-white/10 bg-[#0f0f0f] lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
-              <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-white/10" role="tablist">
-                {(["chat", "perguntas", ...(showPollsTab ? (["enquetes"] as const) : [])] as Tab[]).map((value) => (
-                  <button
-                    aria-controls={`room-tab-${value}`}
-                    aria-selected={tab === value}
-                    className={cn(
-                      "relative h-11 flex-1 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
-                      tab === value ? "text-white" : "text-zinc-400 hover:text-white"
-                    )}
-                    data-room-first-focus={value === "chat" ? "" : undefined}
-                    id={`room-tabbtn-${value}`}
-                    key={value}
-                    onClick={() => setTab(value)}
-                    role="tab"
-                    type="button"
-                  >
-                    {value === "chat" ? (kind === "replay" ? copy.abas.chatDaLive : copy.abas.chat) : value === "perguntas" ? copy.abas.perguntas : copy.abas.enquetes}
-                    {value === "enquetes" && openPolls.length > 0 ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-[var(--accent)] align-middle" /> : null}
-                    {tab === value ? <span aria-hidden="true" className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-[var(--accent)]" /> : null}
-                  </button>
-                ))}
-              </div>
+            {unavailable ? null : (
+              <aside className="flex min-h-0 flex-1 flex-col border-t border-white/10 bg-[#0f0f0f] lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
+                <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-white/10" role="tablist">
+                  {(["chat", "perguntas", ...(showPollsTab ? (["enquetes"] as const) : [])] as Tab[]).map((value) => (
+                    <button
+                      aria-controls={`room-tab-${value}`}
+                      aria-selected={tab === value}
+                      className={cn(
+                        "relative h-11 flex-1 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
+                        tab === value ? "text-white" : "text-zinc-400 hover:text-white"
+                      )}
+                      data-room-first-focus={value === "chat" ? "" : undefined}
+                      id={`room-tabbtn-${value}`}
+                      key={value}
+                      onClick={() => setTab(value)}
+                      role="tab"
+                      type="button"
+                    >
+                      {value === "chat" ? (kind === "replay" ? copy.abas.chatDaLive : copy.abas.chat) : value === "perguntas" ? copy.abas.perguntas : copy.abas.enquetes}
+                      {value === "enquetes" && openPolls.length > 0 ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-[var(--accent)] align-middle" /> : null}
+                      {tab === value ? <span aria-hidden="true" className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-[var(--accent)]" /> : null}
+                    </button>
+                  ))}
+                </div>
 
-              <div aria-labelledby={`room-tabbtn-${tab}`} className="flex min-h-0 flex-1 flex-col" id={`room-tab-${tab}`} role="tabpanel">
-                {tab === "chat" ? (
-                  <>
-                    {openPolls.length > 0 ? (
-                      <button className="mx-3 mt-2 rounded-[12px] border border-white/15 bg-[#161616] px-3 py-2 text-left text-sm hover:border-white/40" onClick={() => setTab("enquetes")} type="button">
-                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.abas.enquetes}</span>
-                        <span className="block truncate font-bold text-white">{openPolls[0].question}</span>
-                      </button>
-                    ) : null}
-                    <RoomChatPanel
-                      chatMode={session.session.chatMode}
+                <div aria-labelledby={`room-tabbtn-${tab}`} className="flex min-h-0 flex-1 flex-col" id={`room-tab-${tab}`} role="tabpanel">
+                  {tab === "chat" ? (
+                    <>
+                      {openPolls.length > 0 ? (
+                        <button className="mx-3 mt-2 rounded-[12px] border border-white/15 bg-[#161616] px-3 py-2 text-left text-sm hover:border-white/40" onClick={() => setTab("enquetes")} type="button">
+                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.abas.enquetes}</span>
+                          <span className="block truncate font-bold text-white">{openPolls[0].question}</span>
+                        </button>
+                      ) : null}
+                      <RoomChatPanel
+                        chatMode={session.session.chatMode}
+                        consented={session.me.consented}
+                        defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                        displayName={session.me.displayName}
+                        error={chat.error}
+                        messages={revealed}
+                        nowMs={nowMs}
+                        onRemoveMine={chat.removeMine}
+                        onSend={async (body) => {
+                          const answer = await chat.send({ ...body, offsetMs: kind === "replay" ? Math.round(getOffsetMs()) : undefined });
+                          if (!session.me.consented) {
+                            void clock.refresh();
+                          }
+                          return answer;
+                        }}
+                        phase={composerPhase}
+                        pinned={session.pinned}
+                        readOnly={readOnly}
+                        slowUntilMs={chat.slowUntilMs}
+                      />
+                    </>
+                  ) : null}
+                  {tab === "perguntas" ? (
+                    <RoomQuestionsTab
+                      allowAnonymous={session.session.anonymousQuestions}
                       consented={session.me.consented}
                       defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-                      displayName={session.me.displayName}
-                      error={chat.error}
-                      messages={revealed}
-                      nowMs={nowMs}
-                      onRemoveMine={chat.removeMine}
-                      onSend={async (body) => {
-                        const answer = await chat.send({ ...body, offsetMs: kind === "replay" ? Math.round(getOffsetMs()) : undefined });
-                        if (!session.me.consented) {
-                          void clock.refresh();
-                        }
-                        return answer;
-                      }}
-                      phase={composerPhase}
-                      pinned={session.pinned}
-                      readOnly={readOnly}
-                      slowUntilMs={chat.slowUntilMs}
+                      enabled={!readOnly}
+                      getOffsetMs={getOffsetMs}
+                      onConsented={() => void clock.refresh()}
+                      readOnly={readOnly || phase === "ended"}
+                      sessionId={sessionId}
+                      webinarId={webinarId}
                     />
-                  </>
-                ) : null}
-                {tab === "perguntas" ? (
-                  <RoomQuestionsTab
-                    allowAnonymous={session.session.anonymousQuestions}
-                    consented={session.me.consented}
-                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-                    enabled={!readOnly}
-                    getOffsetMs={getOffsetMs}
-                    onConsented={() => void clock.refresh()}
-                    readOnly={readOnly || phase === "ended"}
-                    sessionId={sessionId}
-                    webinarId={webinarId}
-                  />
-                ) : null}
-                {tab === "enquetes" ? <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} /> : null}
-              </div>
-            </aside>
+                  ) : null}
+                  {tab === "enquetes" ? <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} /> : null}
+                </div>
+              </aside>
+            )}
           </div>
         </>
       )}

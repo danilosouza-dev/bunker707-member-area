@@ -525,3 +525,20 @@ test("o palco em cada momento: Abrindo a sala…, Reconectando… por cima do if
   assert.equal(stageModule.liveStageState("open", "joined"), "live");
   assert.equal(stageModule.liveStageState("locked", "idle"), "locked");
 });
+
+test("fora do Quem pode no meio da live (D41): o palco da lugar a frase, sem capa, sem Entrar na sala e sem Tentar de novo; a sala desliga o iframe", () => {
+  const ref = { current: null };
+  const base = { countdownLabel: "", coverUrl: "https://cdn.example.com/capa.jpg", entry: "joined", frameRef: ref, minimized: false, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, sessionId: "s1", stageRef: ref, title: "Aula de IA" };
+  const fora = render(stageModule.LiveStage, { ...base, screen: "unavailable" });
+  assert.match(fora, /data-room-stage="unavailable"/);
+  assert.match(fora, /role="alert">Esta live não está disponível para você\.</);
+  assert.doesNotMatch(fora, /<img/);
+  assert.doesNotMatch(textoDe(fora), /Entrar na sala|Tentar de novo|Não conseguimos voltar/);
+  // A sala: o iframe so monta com a tela aberta (allowed), e o 404 da sessao, da presenca, do token ou dos sinais
+  // vira `unavailable` (o mesmo `local` que nao se desfaz).
+  const codigo = semComentarios(FONTES.room);
+  assert.match(codigo, /unavailable: accessLost \|\| local\.unavailable/);
+  assert.match(codigo, /onAccessLost: \(\) => setLocal/);
+  assert.match(codigo, /const lostInside = screen === "unavailable" && entryInRoom\(room\.entry\)/, "dentro do iframe, a sala sai (hangUp) sem esperar o token");
+  assert.match(codigo, /const allowed = !readOnly && liveRoomScreen\(\{ \.\.\.screenInput, inRoom: true \}\) === "open"/);
+});

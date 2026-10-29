@@ -23,8 +23,42 @@ export type SessionKind = (typeof SESSION_KINDS)[number];
 export const SESSION_STATUSES = ["scheduled", "waiting", "live", "ended", "cancelled"] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
-export const ACCESS_MODES = ["everyone", "product", "audience", "either"] as const;
+/**
+ * "Quem pode" (docs/30 §1.1 e §2.2): Todos, Quem tem o produto, Segmento, Produto ou segmento e, desde a 202610300001,
+ * "both" (Quem tem o produto e está no segmento: o segmento so restringe, nunca abre a live a quem nao tem o produto).
+ */
+export const ACCESS_MODES = ["everyone", "product", "audience", "either", "both"] as const;
 export type AccessMode = (typeof ACCESS_MODES)[number];
+
+/**
+ * Os valores da coluna webinars.access_mode (o check da 202610280001, que nao muda). O "both" grava 'product' com
+ * webinars.audience_restricts = true (202610300001): o app de antes le um valor que nao conhece como 'everyone' e
+ * abriria a live para todos num rollback; com 'product' ele continua exigindo o produto (D41).
+ */
+export const ACCESS_MODE_COLUMN_VALUES = ["everyone", "product", "audience", "either"] as const;
+export type AccessModeColumnValue = (typeof ACCESS_MODE_COLUMN_VALUES)[number];
+
+/** O modo confere o produto ligado (os acessos do aluno): Quem tem o produto, Produto ou segmento e "both". */
+export function accessModeUsesProduct(mode: AccessMode) {
+  return mode === "product" || mode === "either" || mode === "both";
+}
+
+/** O modo avalia o segmento (as regras da Comunicacao): Segmento, Produto ou segmento e "both". */
+export function accessModeUsesAudience(mode: AccessMode) {
+  return mode === "audience" || mode === "either" || mode === "both";
+}
+
+/**
+ * Ancora do segmento (docs/30 §1.1, D41): so no Segmento e no "both" (Quem tem o produto e está no segmento), quem
+ * garantiu vaga neste webinario ou ja entrou numa sessao dele continua dentro do segmento mesmo se sair dele (o "hoje"
+ * passou, por exemplo), desde que ainda tenha o produto e a turma que o segmento pede (evaluateAnchoredAudience, com os
+ * acessos e as turmas de agora). No "Produto ou segmento" nao ha ancora: vale o produto ou o segmento de agora, porque
+ * a linha do acesso nao guarda a historia (nao da para saber por qual lado a vaga veio). O produto ligado ao webinario
+ * nunca e ancorado.
+ */
+export function accessModeAnchorsAudience(mode: AccessMode) {
+  return mode === "audience" || mode === "both";
+}
 
 export const CHAT_MODES = ["open", "moderated", "team_only", "off"] as const;
 export type ChatMode = (typeof CHAT_MODES)[number];
@@ -319,7 +353,7 @@ export function sessionEndsAt(session: Pick<WebinarSession, "scheduledAt" | "end
 }
 
 /** A proxima sessao que ainda vai acontecer (ou esta acontecendo), na ordem das horas marcadas. */
-export function nextSession(sessions: readonly WebinarSession[], durationMinutes: number, now: number): WebinarSession | null {
+export function nextSession<T extends Pick<WebinarSession, "endedAt" | "kind" | "scheduledAt" | "status">>(sessions: readonly T[], durationMinutes: number, now: number): T | null {
   const open = sessions
     .filter((session) => session.kind !== "replay" && session.status !== "cancelled" && session.status !== "ended")
     .filter((session) => sessionEndsAt(session, durationMinutes) + REMINDER_RULES.autoEndMinutesAfter * 60_000 >= now)
