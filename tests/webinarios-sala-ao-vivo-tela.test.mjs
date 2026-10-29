@@ -193,7 +193,8 @@ test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so lig
 
 test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o chat em role=log com aria-live; os sinais vao pelo sendBeacon no pagehide", () => {
   const html = sala();
-  assert.match(html, /^<div aria-label="Aula de IA" aria-modal="true"[^>]*role="dialog"/);
+  // No desenho do servidor o React poe antes da raiz o preload das imagens (a marca no cabecalho); a raiz e o dialogo.
+  assert.match(html.replace(/^(?:<link rel="preload" as="image"[^>]*\/>)+/, ""), /^<div aria-label="Aula de IA" aria-modal="true"[^>]*role="dialog"/);
   assert.match(html, /role="log"/);
   assert.match(html, /aria-live="polite"/);
   const roomCode = semComentarios(FONTES.room);
@@ -204,7 +205,7 @@ test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o c
   const hook = semComentarios(FONTES.hook);
   assert.match(hook, /window\.addEventListener\("pagehide", beacon\)/);
   assert.match(hook, /LIVE_ROOM_RULES\.eventFlushMs/, "um lote a cada 10 s");
-  assert.match(semComentarios(FONTES.api), /navigator\.sendBeacon\(url, new Blob\(\[body\], \{ type: "text\/plain;charset=UTF-8" \}\)\)/, "o mesmo corpo JSON do lote");
+  assert.match(semComentarios(FONTES.api), /navigator\.sendBeacon\(url, body\)/, "o mesmo corpo JSON do lote, como texto (Blob sai vazio no WebKit)");
   // Nenhum pop-up com a sala ou a pilula no ar: a mesma trava do player da aula, so acrescentada.
   assert.match(roomCode, /announceLiveRoomMedia\(\{ lessonId, on: true \}\);\s*return \(\) => announceLiveRoomMedia\(\{ lessonId, on: false \}\);/);
   assert.match(FONTES.signal, /export function announceLiveRoomMedia\(input: \{ lessonId: string; on: boolean \}\): void \{/);
@@ -303,6 +304,16 @@ test("no ar: 'Ao vivo · 00:42:10', {n} assistindo, Gravando, Entrar na sala no 
   assert.match(html, /order-last[^"]*lg:order-first/, "no celular as abas ficam embaixo (a gaveta)");
   assert.match(html, /aria-label="Escreva uma mensagem"/);
   assert.doesNotMatch(sala(), />Gravando</, "sem gravador, sem o selo");
+
+  // A 375 px o cabecalho cabe com a marca, o tempo e o Gravando: no celular, so o tempo (a frase inteira no title e
+  // para o leitor de tela) e so o ponto vermelho (a palavra para o leitor de tela).
+  assert.match(html, /title="Ao vivo · 00:42:10"/);
+  assert.match(html, /<span aria-hidden="true" class="sm:hidden">00:42:10<\/span>/);
+  assert.match(html, /<span class="sr-only sm:hidden">Ao vivo · 00:42:10<\/span>/);
+  assert.match(html, /title="Gravando"/);
+  assert.match(html, /<span class="max-sm:sr-only" data-testid="live-recording">Gravando<\/span>/);
+  assert.match(html, /<img[^>]*class="[^"]*\blg:hidden\b[^"]*" data-room-brand="icon"/, "o Icone da escola abaixo de lg");
+  assert.match(html, /class="hidden shrink-0 items-center gap-3 lg:flex" data-room-brand="logo"/, "a logo so a partir de lg (o ponto em que a sala vira computador)");
 
   const comEnquete = sala({ payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }) });
   assert.match(comEnquete, /role="tab"[^>]*>Enquetes</);

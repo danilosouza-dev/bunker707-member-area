@@ -10,7 +10,7 @@ import { MemberPopupHost } from "@/components/member/notifications/member-popup-
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
-import { getMemberSidebarSections } from "@/components/member/shell/member-shell-model";
+import { directorLauncherAllowedOn, getMemberSidebarSections } from "@/components/member/shell/member-shell-model";
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
@@ -491,7 +491,8 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
       {/* Pop-ups dos avisos: em toda pagina do aluno com chave, fora do modo "ver como" do produtor (docs/25 §4). */}
       <MemberPopupHost onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pageKey={popupPage} />
 
-      {!sidebarOpen ? (
+      {/* Fora da sala do Webinario: o dialogo de tela cheia tem o Enviar do chat e o X da pilula nesse canto (docs/30 §1.3). */}
+      {!sidebarOpen && directorLauncherAllowedOn(pathname) ? (
         directorRequested ? (
           <PlatformDirectorChat defaultOpen={directorOpenOnMount} onNavigate={handleDirectorNavigation} studentName={student.name} />
         ) : (

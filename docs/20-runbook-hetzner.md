@@ -563,7 +563,9 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   e um `deploy-meet` com `SEM_LIVE_2H=sim`): uma URL so, entao o teste e a producao nao barram ao mesmo tempo.
 - O jicofo so responde `/about/health` com `JICOFO_ENABLE_HEALTH_CHECKS=1` (no compose, padrao 1): sem isso a rota da
   404, o container fica `unhealthy` para sempre e o `deploy-meet` para no `wait_healthy jicofo` (a sala funciona, mas o
-  `smoke.sh` nao roda).
+  `smoke.sh` nao roda). E com `JICOFO_ENABLE_REST=1` (padrao 1) a REST ouve em `0.0.0.0` dentro do container: sem
+  isso ela fica so no loopback do container e o `smoke.sh`, que pergunta em `127.0.0.1:8888` do servidor, ve `000`. A
+  porta continua publicada so em `127.0.0.1`.
 - `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
   `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
   (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
@@ -573,6 +575,16 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
 - `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
   custo; avisa quando um gravador passa de 6 h ligado.
+- **No dia em que a producao (`membros.<dominio>`) passar a usar a sala ao vivo**, junto com a troca do `ROOM_GUARD_URL`
+  para `https://membros.<dominio>/api/webhooks/room-guard`: o `MEET_FRAME_ANCESTORS` do C tambem foi gerado so com a
+  origem da Vercel de teste (o `--app-origin` do primeiro `deploy-meet`) e precisa da origem de producao; sem ela o
+  navegador recusa a sala dentro da area (o cabecalho `frame-ancestors` do Caddy do C, `docs/30` D18 e D40). O
+  `frame-ancestors` aceita uma lista separada por espaco, entao as duas origens ficam: `exec-meet` com
+  `sed -i 's#^MEET_FRAME_ANCESTORS=.*#MEET_FRAME_ANCESTORS="https://membros.<dominio> https://bunker707-member-area.vercel.app"#' infra/jitsi/.env`
+  e um `deploy-meet` com `SEM_LIVE_2H=sim` (recria o Caddy com o valor novo e o `smoke.sh` confere o cabecalho). As
+  aspas funcionam: o compose tira as aspas do valor no `.env`, o Caddyfile poe o valor inteiro dentro de
+  `"frame-ancestors {$MEET_FRAME_ANCESTORS}"` e o `env_value` dos scripts (`smoke.sh`) tambem tira as aspas. O
+  `deploy-meet` nao regera um `.env` que ja existe, entao a troca fica.
 
 ### 8B.4 Antes da primeira live real
 
@@ -624,7 +636,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 
 | Sintoma | O que fazer |
 |---|---|
-| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`) |
+| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`); o `smoke.sh` ve `000` em `127.0.0.1:8888` com o container saudavel = falta `JICOFO_ENABLE_REST` (a REST so no loopback do container) |
 | Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
 | Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
 | Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |

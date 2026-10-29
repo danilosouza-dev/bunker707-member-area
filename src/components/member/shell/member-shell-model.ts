@@ -9,6 +9,7 @@ import {
   isMemberNavigationItemActive,
   type MemberNavigationKey
 } from "../../../lib/member-navigation";
+import { isWebinarRoomPath } from "../../../lib/webinar-paths";
 
 export type MemberShellLink = {
   /** Item da pagina atual (fundo claro, barra vermelha, `aria-current="page"`). */
@@ -73,6 +74,14 @@ export function getMemberFirstName(name: string | null | undefined) {
 export function getDirectorGreeting(name: string | null | undefined) {
   const firstName = getMemberFirstName(name);
   return firstName ? `Olá, ${firstName}` : "Olá!";
+}
+
+/**
+ * O botao flutuante da IA Diretor fica em toda pagina da area, menos na sala do Webinario (/webinarios/<slug>/sala):
+ * a sala e um dialogo de tela cheia e o botao cobriria o Enviar do chat e o X da pilula minimizada (docs/30 §1.3).
+ */
+export function directorLauncherAllowedOn(pathname: string | null | undefined) {
+  return !isWebinarRoomPath(pathname);
 }
 
 // --- IA Diretor: historico ----------------------------------------------------------------------

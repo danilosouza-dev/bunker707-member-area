@@ -7,11 +7,14 @@ import { createLocalAdminClient } from "../support/local-db.mjs";
 // pela pagina da live (Entrar), o player falso da Bunny (servido no endereco real pela pagina falsa) recebe
 // setCurrentTime(~90) da trava, "Ativar som" liga o som, a linha mestre aparece no segundo certo (a de 100 s
 // chega; a de 20 min nao), a mensagem nova aparece numa segunda aba pela consulta de 5 s depois do aceite
-// (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe.
+// (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. A IA Diretor fica
+// na pagina da live e some na sala (o botao flutuante cobria o X da pilula), e o cabecalho da sala tem a logo da escola.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
 const SALA = new RegExp(`/webinarios/${slug}/sala\\?sessao=`);
+/** O botao flutuante da IA Diretor (PlatformDirectorLauncher em src/components/app-shell.tsx). */
+const IA_DIRETOR = "Abrir IA Diretor";
 
 test.describe.configure({ mode: "serial" });
 
@@ -34,10 +37,14 @@ async function entrarNaSala(page: Page) {
   await paginaFalsaPlayerJs(page, ORIGEM_DA_BUNNY);
   await page.goto(`/webinarios/${slug}`);
   await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+  // Na pagina da live a IA Diretor continua no canto.
+  await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
   await page.getByRole("link", { exact: true, name: "Entrar" }).click();
   await expect(page).toHaveURL(SALA);
   const sala = page.getByRole("dialog", { name: titulo });
   await expect(sala).toBeVisible();
+  // Na sala o botao da IA Diretor nao existe (docs/30 §1.3).
+  await expect(page.getByRole("button", { name: /IA Diretor/ })).toHaveCount(0);
   return sala;
 }
 
@@ -47,6 +54,9 @@ test("Entrar 90 s depois do inicio: a sala abre, o player falso recebe setCurren
   // O selo tem duas versoes (computador e celular): so uma fica visivel.
   await expect(sala.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
   await expect(sala.getByText(/1 assistindo/)).toBeVisible();
+  // A sala cobre o topo da area: no computador, a logo da escola no cabecalho da sala, sem link.
+  await expect(sala.getByRole("img", { name: "Bunker707" })).toBeVisible();
+  await expect(sala.getByRole("link", { name: "Bunker707" })).toHaveCount(0);
 
   const player = playerDaSala(page);
   await expect(player.locator("#estado")).toHaveText("pronto", { timeout: 20_000 });
@@ -111,7 +121,7 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 });
 
-test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura, as reacoes tem 44 px e o campo fica no rodape", async ({ page }) => {
+test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura, as reacoes tem 44 px e o campo fica no rodape; o X da pilula fecha a sala", async ({ page }) => {
   await page.setViewportSize({ height: 740, width: 375 });
   const sala = await entrarNaSala(page);
   await expect(sala.getByRole("tab", { name: "Chat" })).toBeVisible();
@@ -133,4 +143,11 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura, as rea
   await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
   await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Voltar" }).click();
   await expect(sala.getByRole("tab", { name: "Chat" })).toBeVisible();
+
+  // O X da pilula (Sair) fica no canto de baixo, onde ficava a IA Diretor: o clique chega nele e fecha a sala.
+  await sala.getByRole("button", { exact: true, name: "Minimizar" }).click();
+  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Sair" }).click();
+  await expect(page).toHaveURL(`/webinarios/${slug}`);
+  await expect(page.getByTestId("room-pill")).toHaveCount(0);
+  await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });

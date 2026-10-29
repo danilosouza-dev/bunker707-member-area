@@ -327,6 +327,7 @@ test("sessao encerrada: so leitura (sem Soltar agora, Liberar nem Enviar habilit
   const text = textOf(markup);
 
   assert.match(text, /Encerrada/);
+  assert.match(markup, /data-console-clock="">Durou 1:00:00</, "o relogio parou no encerramento (1 h depois da hora marcada), nao conta ate agora (2 h)");
   assert.match(text, /Esta sessão não aceita mais ações da equipe\./);
   assert.match(markup, /href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111\/relatorio"/, "Ver relatório");
   assert.equal(count(markup, />Soltar agora</g), 0);

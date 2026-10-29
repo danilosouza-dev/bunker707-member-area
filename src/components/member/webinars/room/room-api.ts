@@ -81,7 +81,7 @@ export function beaconLeave(webinarId: string, body: { offsetSeconds: number; se
   const url = roomApiPath(webinarId, "heartbeat");
   const text = JSON.stringify({ ...body, leave: true });
   try {
-    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, new Blob([text], { type: "text/plain;charset=UTF-8" }))) {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, text)) {
       return;
     }
   } catch {
@@ -191,7 +191,7 @@ export async function postRoomEvents(webinarId: string, body: string) {
 export function beaconRoomEvents(webinarId: string, body: string): boolean {
   const url = liveApiPath(webinarId, "room-events");
   try {
-    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, new Blob([body], { type: "text/plain;charset=UTF-8" }))) {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, body)) {
       return true;
     }
   } catch {

@@ -314,12 +314,53 @@ export function consoleSessionOf<T extends { roomName: string | null }>(session:
   return { ...session, roomName: null };
 }
 
-/** O offset da sessao pelo relogio do console (a hora do servidor corrigida pelo skew do navegador). */
-export function consoleOffsetMs(session: Pick<WebinarSession, "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
-  return sessionOffsetMs(session, deviceNowMs + skewMs);
+/**
+ * O offset da sessao pelo relogio do console (a hora do servidor corrigida pelo skew do navegador), no relogio do
+ * video (a ancora da gravacao na live): alimenta a fila do roteiro. Para no encerramento: depois do Encerrar, o
+ * roteiro fica no minuto em que a sessao acabou.
+ */
+export function consoleOffsetMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
+  return sessionOffsetMs(session, untilEnded(session, deviceNowMs + skewMs));
 }
 
-/** O tempo decorrido/faltando como o topo mostra: "12:30 no ar" ou "comeca em 4:10". */
+/**
+ * O tempo do rotulo do topo, em ms (negativo antes da hora; NaN quando nao ha o que mostrar). Nao e o relogio do
+ * video: e o tempo que a sessao durou para a turma, e para no encerramento.
+ * - Live ao vivo: desde o Iniciar live (startedAt, o mesmo zero da sala do aluno, da presenca e do relatorio; a
+ *   ancora da gravacao so move o roteiro) ate agora ou ate o Encerrar live. Antes de comecar, so a contagem ate a
+ *   hora marcada; na espera depois da hora, ou encerrada direto da espera, nada.
+ * - Live gravada: desde a hora marcada ate agora ou ate o encerramento, nunca alem da duracao do video (passada a
+ *   duracao a fase ja e encerrada; o tick fecha com atraso, as vezes horas depois). Encerrada antes da hora, nada.
+ * - Replay: nada (cada aluno controla o proprio player).
+ */
+export function consoleClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "scheduledAt" | "startedAt" | "status">, durationMs: number, nowMs: number): number {
+  if (session.kind === "replay") {
+    return Number.NaN;
+  }
+  const until = untilEnded(session, nowMs);
+  const finished = session.status === "ended" || Number.isFinite(toTime(session.endedAt));
+  if (session.kind === "live") {
+    const startedMs = toTime(session.startedAt);
+    if (Number.isFinite(startedMs)) {
+      return Math.max(0, until - startedMs);
+    }
+    const untilScheduled = nowMs - toTime(session.scheduledAt);
+    return !finished && untilScheduled < 0 ? untilScheduled : Number.NaN;
+  }
+  const elapsed = until - toTime(session.scheduledAt);
+  if (finished && elapsed < 0) {
+    return Number.NaN;
+  }
+  return Number.isFinite(durationMs) ? Math.min(elapsed, durationMs) : elapsed;
+}
+
+/** Agora, ou o encerramento se a sessao ja acabou (o relogio do console para ali). */
+function untilEnded(session: Pick<WebinarSession, "endedAt">, nowMs: number): number {
+  const endedMs = toTime(session.endedAt);
+  return Number.isFinite(endedMs) ? Math.min(nowMs, endedMs) : nowMs;
+}
+
+/** O rotulo do topo a partir de consoleClockMs: "No ar há 12:30", "Começa em 4:10", "Durou 42:00"; vazio no NaN. */
 export function consoleClockLabel(offsetMs: number, phase: ConsolePhase): string {
   if (!Number.isFinite(offsetMs) || phase === "replay" || phase === "cancelled") {
     return "";

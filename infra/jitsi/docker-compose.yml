@@ -211,6 +211,9 @@ services:
       JICOFO_AUTH_PASSWORD: "${JICOFO_AUTH_PASSWORD}"
       # Sem isto a imagem nao liga a saude interna e /about/health responde 404: o healthcheck nunca passa.
       JICOFO_ENABLE_HEALTH_CHECKS: "${JICOFO_ENABLE_HEALTH_CHECKS:-1}"
+      # A REST ouve em 0.0.0.0 dentro do container (sem isto, so no loopback dele e a porta publicada em
+      # 127.0.0.1:8888 do servidor nao chega: o smoke.sh ve 000). Fora do servidor continua fechada.
+      JICOFO_ENABLE_REST: "${JICOFO_ENABLE_REST:-1}"
       JICOFO_MAX_MEMORY: "${JICOFO_MAX_MEMORY:-512m}"
       JIBRI_BREWERY_MUC: "${JIBRI_BREWERY_MUC:-jibribrewery}"
       JIBRI_PENDING_TIMEOUT: "${JIBRI_PENDING_TIMEOUT:-90 seconds}"

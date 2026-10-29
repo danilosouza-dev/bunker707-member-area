@@ -191,12 +191,18 @@ export function LiveChatOverlay({ messages }: { messages: readonly RoomMessage[]
   );
 }
 
-/** O selo Gravando (o gravador gravando: a voz e a imagem de quem liga entram no replay). */
+/**
+ * O selo Gravando (o gravador gravando: a voz e a imagem de quem liga entram no replay). No celular, so o ponto
+ * vermelho (a palavra fica no title e para o leitor de tela), para o titulo da sala caber no cabecalho.
+ */
 export function LiveRecordingBadge() {
+  const gravando = WEBINAR_COPY.aoVivo.gravando;
   return (
-    <MemberChip tone="warning">
+    <MemberChip className="max-sm:px-1.5" title={gravando} tone="warning">
       <span aria-hidden="true" className="inline-block size-2 rounded-full bg-red-500 motion-safe:animate-pulse" />
-      <span data-testid="live-recording">{WEBINAR_COPY.aoVivo.gravando}</span>
+      <span className="max-sm:sr-only" data-testid="live-recording">
+        {gravando}
+      </span>
     </MemberChip>
   );
 }
