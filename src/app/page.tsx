@@ -4,7 +4,6 @@ import { HeroSection } from "@/components/hero-section";
 import { FeaturedStructureHomeSection } from "@/components/featured-structure-home-section";
 import { MemberFooter } from "@/components/member-footer";
 import { HomeLivesRow } from "@/components/member/webinars/home-lives-row";
-import { WebinarStartBanner } from "@/components/member/webinars/webinar-start-banner";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getHomePageData } from "@/server/db/platform-store";
 import { requireStudentPageUser } from "@/server/auth/guards";
@@ -27,7 +26,8 @@ export default async function Home({ searchParams }: HomeProps) {
   const user = await requireStudentPageUser("/");
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
-  // As lives (docs/30 §1.1: o card "Próxima live" e a faixa "Começa em 1 h") vêm em paralelo e nunca derrubam a página.
+  // O card "Proxima live" (docs/30 §1.1) vem em paralelo e nunca derruba a pagina. A faixa "Ao vivo agora" e "Comeca em
+  // 1 h: Entrar" saiu daqui: ela fica no topo de todas as paginas (AppShell, live-now-banner.tsx).
   const [{ hero: storedHero, homeRows, modalStructures }, lives] = await Promise.all([
     getHomePageData(accessPreviewMode, user),
     getHomeWebinars(user.id, undefined, { accessPreviewMode })
@@ -44,7 +44,6 @@ export default async function Home({ searchParams }: HomeProps) {
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      {lives.banner ? <WebinarStartBanner banner={lives.banner} serverNow={lives.now} /> : null}
       <HeroSection accessPreviewMode={accessPreviewMode} hero={hero} />
       <div className={`relative z-20 space-y-20 pb-24 ${heroVisible ? "mt-[var(--member-hero-overlap)]" : "pt-24"}`}>
         {lives.card ? <HomeLivesRow accessPreviewMode={accessPreviewMode} card={lives.card} serverNow={lives.now} /> : null}

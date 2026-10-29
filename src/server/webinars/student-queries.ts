@@ -20,6 +20,7 @@ import { isMissingWebinarSchema, WebinarError, webinarsDb, type WebinarsDb } fro
 import { webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { registrationFromRow, sessionFromRow, webinarFromRow } from "./rows";
 import { loadStudentWebinarById, resolveStudentSession } from "./registrations";
+import { roomGrantFor } from "./live-room";
 import { loadRoomExtras, roomContextOf } from "./room-queries";
 import { canJoinSimulated } from "./room-model";
 import {
@@ -30,19 +31,17 @@ import {
   calendarPath,
   groupStudentWebinars,
   pickHomeWebinar,
-  pickStartBanner,
   previewCanSee,
   roomHref,
   seatRequired,
   type HomeWebinarCard,
-  type StartBanner,
   type StudentRoomPayload,
   type StudentSessionPayload,
   type StudentSessionView,
   type StudentWebinarLists,
   type StudentWebinarView
 } from "./student-model";
-import { countSessionRegistrations, fetchRegistrationRows, fetchWebinarRowBySlug, listPublishedWebinarRows, listSessionRows } from "./store";
+import { countSessionRegistrations, fetchRegistrationRows, fetchWebinarRow, fetchWebinarRowBySlug, listPublishedWebinarRows, listSessionRows } from "./store";
 
 export type StudentQueryOptions = {
   accessPreviewMode?: AccessPreviewMode;
@@ -205,36 +204,30 @@ export async function getStudentWebinar(userId: string, slug: string, now = Date
   return { calendars, view };
 }
 
-export type HomeWebinars = { banner: StartBanner | null; card: HomeWebinarCard | null; now: number };
+export type HomeWebinars = { card: HomeWebinarCard | null; now: number };
 
-/** Card "Proxima live" e faixa "Comeca em 1 h: Entrar" da pagina inicial. Nunca lanca: falha vira log e nada. */
+/**
+ * Card "Proxima live" da pagina inicial. Nunca lanca: falha vira log e nada. A faixa "Comeca em 1 h: Entrar" saiu
+ * daqui para a faixa global do topo (live-banner.ts e GET /api/webinars/live-now; docs/30 §1.1).
+ */
 export async function getHomeWebinars(userId: string, now = Date.now(), options: StudentQueryOptions = {}): Promise<HomeWebinars> {
   try {
     const db = options.db ?? webinarsDb();
-    const loaded = await loadVisible(db, userId, now, options, (webinar) => webinar.showOnHome || webinar.showBanner);
+    const loaded = await loadVisible(db, userId, now, options, (webinar) => webinar.showOnHome);
     if (loaded.webinars.length === 0) {
-      return { banner: null, card: null, now };
+      return { card: null, now };
     }
     const views = await buildViews(db, loaded, now);
-    return {
-      banner: options.accessPreviewMode ? null : pickStartBanner(views, now),
-      card: pickHomeWebinar(views, now),
-      now
-    };
+    return { card: pickHomeWebinar(views, now), now };
   } catch (error) {
     console.error(`[webinarios] pagina inicial sem as lives: ${describe(error)}`);
-    return { banner: null, card: null, now };
+    return { card: null, now };
   }
 }
 
 /** So o card da pagina inicial (showOnHome: o mais proximo, ou "Replay disponivel" dentro de replayDaysOnHome). */
 export async function getNextWebinarForHome(userId: string, now = Date.now(), options: StudentQueryOptions = {}): Promise<HomeWebinarCard | null> {
   return (await getHomeWebinars(userId, now, options)).card;
-}
-
-/** So a faixa "Comeca em 1 h: Entrar" para quem garantiu vaga (bannerWindow). */
-export async function getWebinarBanner(userId: string, now = Date.now(), options: StudentQueryOptions = {}): Promise<StartBanner | null> {
-  return (await getHomeWebinars(userId, now, options)).banner;
 }
 
 /**
@@ -272,19 +265,87 @@ export async function getStudentSessionPayload(userId: string, webinarId: string
 }
 
 /* ------------------------------------------------------------------------------------------------
- * A Sala (docs/30 §1.6): /webinarios/[slug]/sala?sessao=
+ * A Sala (docs/30 §1.3 e §1.6): /webinarios/[slug]/sala?sessao=
  * ---------------------------------------------------------------------------------------------- */
 
+export type RoomRefusalReason = "banned" | "cancelled" | "ended" | "late" | "no_seat" | "not_started";
+
 export type RoomPageData =
-  | { href: string; now: number; page: StudentWebinarPage; payload: StudentRoomPayload; state: "ready" }
+  | {
+      href: string;
+      now: number;
+      page: StudentWebinarPage;
+      payload: StudentRoomPayload;
+      /** Live ao vivo: host, co-apresentador ou Equipe (entram na Sessao de pratica e com a sala trancada); senao falso. */
+      staff: boolean;
+      state: "ready";
+    }
   | { state: "not_found" }
-  | { page: StudentWebinarPage; reason: "ended" | "late" | "no_seat" | "not_started"; state: "refused" }
+  | { page: StudentWebinarPage; reason: RoomRefusalReason; state: "refused" }
   | { state: "error" };
 
 /**
+ * Se a pessoa entra na sala ao vivo como equipe (host, co-apresentador ou Equipe pela regra unica de live-room.ts,
+ * lida do banco, nunca do navegador). Falha de leitura: como aluno (a sala abre do mesmo jeito; o join-token decide).
+ */
+export async function liveRoomStaff(db: WebinarsDb, userId: string, webinarId: string, now = Date.now()): Promise<boolean> {
+  try {
+    const row = await fetchWebinarRow(db, webinarId);
+    if (!row) {
+      return false;
+    }
+    const grant = await roomGrantFor(db, { nowMs: now, userId, webinar: webinarFromRow(row) });
+    return grant.role !== "student";
+  } catch (error) {
+    console.error(`[webinarios] papel na sala ao vivo nao lido: ${describe(error)}`);
+    return false;
+  }
+}
+
+/**
+ * O que a pagina da Sala faz com a sessao (puro, para o teste). A Live gravada pelo relogio: fora da janela de entrada
+ * (antes de 15 min, depois do fim ou da Entrada atrasada), recusada com o motivo. A Live ao vivo (fase 3) nao segue o
+ * relogio: a sala abre em qualquer situacao (a tela mostra Aguardando o apresentador antes de a equipe abrir, a sala
+ * trancada, encerrada com o replay, removido ou banido) e so recusa a sessao cancelada; a vaga obrigatoria (A12) vale
+ * para os dois, menos para a equipe na live (o join-token tambem deixa a equipe passar). Na gravada e no replay, o
+ * banido de todos os webinarios fica fora (D33).
+ */
+export function roomPageDecision(
+  payload: Pick<StudentRoomPayload, "session">,
+  input: { durationMs: number; now: number; staff: boolean }
+): { ok: true } | { ok: false; reason: RoomRefusalReason } {
+  const { session } = payload;
+  const join = session.join;
+  if (session.kind === "live") {
+    if (session.status === "cancelled") {
+      return { ok: false, reason: "cancelled" };
+    }
+    if (!input.staff && !join.ok && join.reason === "no_seat") {
+      return { ok: false, reason: "no_seat" };
+    }
+    return { ok: true };
+  }
+  // O banido de todos os webinarios nao entra na Live gravada nem no Replay (D33; a live mostra a frase na propria sala).
+  if (!join.ok && (join.reason === "banned" || join.reason === "no_seat")) {
+    return { ok: false, reason: join.reason };
+  }
+  if (session.kind !== "replay") {
+    const simulated = canJoinSimulated(
+      { kind: session.kind, lateJoinMinutes: session.lateJoinMinutes, recordingAnchorAt: null, scheduledAt: session.scheduledAt, startedAt: session.startedAt, status: session.status },
+      input.durationMs,
+      input.now
+    );
+    if (!simulated.ok) {
+      return { ok: false, reason: simulated.reason };
+    }
+  }
+  return { ok: true };
+}
+
+/**
  * A pagina da Sala: o webinario pelo endereco (404 fora do acesso), a sessao pedida (404 se nao e deste webinario)
- * e a resposta completa da sessao; fora da janela de entrada da gravada (antes de 15 min, depois do fim ou da
- * Entrada atrasada) ou sem a vaga quando a live tem limite de vagas (A12), `refused` com o motivo. No "ver como" da equipe a sala abre sem gravar nada (a tela decide).
+ * e a resposta completa da sessao; o resto decide roomPageDecision. Na live, quem e da equipe (staff) vai junto para a
+ * tela. No "ver como" da equipe a sala abre sem gravar nada e como aluno (a tela decide).
  */
 export async function getRoomPageData(accessPreviewMode: AccessPreviewMode | undefined, user: SessionUser, slug: string, sessionId: string): Promise<RoomPageData> {
   const now = Date.now();
@@ -297,20 +358,12 @@ export async function getRoomPageData(accessPreviewMode: AccessPreviewMode | und
     if (!payload) {
       return { state: "error" };
     }
-    if (!payload.session.join.ok && payload.session.join.reason === "no_seat") {
-      return { page, reason: "no_seat", state: "refused" };
+    const staff = payload.session.kind === "live" && !accessPreviewMode ? await liveRoomStaff(webinarsDb(), user.id, page.view.id, now) : false;
+    const decision = roomPageDecision(payload, { durationMs: payload.session.durationMs, now, staff });
+    if (!decision.ok) {
+      return { page, reason: decision.reason, state: "refused" };
     }
-    if (payload.session.kind !== "replay") {
-      const join = canJoinSimulated(
-        { kind: payload.session.kind, lateJoinMinutes: payload.session.lateJoinMinutes, recordingAnchorAt: null, scheduledAt: payload.session.scheduledAt, startedAt: payload.session.startedAt, status: payload.session.status },
-        payload.session.durationMs,
-        now
-      );
-      if (!join.ok) {
-        return { page, reason: join.reason, state: "refused" };
-      }
-    }
-    return { href: roomHref(page.view.slug, payload.session.id), now, page, payload, state: "ready" };
+    return { href: roomHref(page.view.slug, payload.session.id), now, page, payload, staff, state: "ready" };
   } catch (error) {
     if (error instanceof WebinarError && error.status === 404) {
       return { state: "not_found" };

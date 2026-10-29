@@ -516,9 +516,11 @@ Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker)
 
 ## 8B. Webinarios: servidor C do Jitsi e o gravador por hora (servidor D) (29/10/2026)
 
-O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Nada desta secao foi executado**: os arquivos estao
-prontos (`infra/jitsi/`, `infra/cloud/jibri.sh`, as etapas novas do workflow), e cada criacao espera o ok do produtor no
-chat. O app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
+O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Estado em 29/10/2026**: o C existe (`provision-meet`
+com o ok do produtor no chat: `bunker707-meet`, cx23 em fsn1, EUR 6,49/mes sem IVA pela API, 2.31.106.201,
+`meet.bunker707.com.br` so DNS); falta o `deploy-meet` (da `dev`, depois do merge da PR dos webinarios), o
+`secrets-meet` e os envs no app. O D (gravador) so existe durante cada live e cada criacao espera o pedido da equipe. O
+app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
 
 ### 8B.1 O que e cada servidor e quanto custa
 
@@ -547,6 +549,11 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `smoke.sh` (site no ar, servicos saudaveis, nenhuma marca do Jitsi na interface, UDP 10000 ouvindo).
 - Com o stack ja no ar, um novo `deploy-meet` recria containers e derruba quem esta na sala: so com `SEM_LIVE_2H=sim`
   nas opcoes (nenhuma live nas proximas 2 h).
+- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard` e `ROOM_GUARD_URL=<origem da area de
+  membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
+  acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
+  removeu ou baniu e recusa a entrada dessas contas mesmo com o token antigo (`docs/30` §8.1). A busca e assinada com
+  uma chave derivada do `JWT_APP_SECRET`: nenhum segredo novo.
 - `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
   `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
   (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
@@ -576,9 +583,11 @@ Jitsi, que o aluno entra sem microfone e so com o token do app, e rodar o roteir
   apaga mesmo assim (perde o arquivo que nao subiu). Sem `SESSAO`, o `jibri-down` cuida de todos os gravadores vivos.
 - **Envio falhou** (`upload_failed`, o e-mail chega ao produtor; o MP4 fica na maquina com a marca `.failed`): rodar o
   envio de novo com `exec-jibri`, `SESSAO=<id>` e `COMANDO='docker compose exec -T jibri sh /config/finalize.sh'` (sem
-  argumento ele pega o MP4 mais novo da pasta de gravacoes); sem sucesso, copiar o MP4 da maquina e envia-lo pelo painel
-  da Bunny (ligar o video a sessao pelo admin, Gravacao › Enviar arquivo, chega com a sala ao vivo, fase 3), e so depois
-  `jibri-down`.
+  argumento ele pega o MP4 mais novo da pasta de gravacoes; o app aceita o `uploaded` depois do `upload_failed` e a
+  gravacao volta a `processing`); sem sucesso, copiar o MP4 da maquina e envia-lo pelo painel da Bunny (ligar o video a
+  sessao pelo console da sala, **Enviar gravacao** / **Ligar um video da Bunny**), e so depois `jibri-down`.
+- O `jibri-down` de uma sessao cujo servidor ja nao existe manda o `gone` de novo ao app (o primeiro pode ter se
+  perdido); sem isso o job pediria a devolucao a cada 2 h para sempre.
 - Um gravador esquecido custa por hora: `status-meet` avisa depois de 6 h; a regra e apagar no mesmo dia.
 
 ### 8B.6 Atualizar o Jitsi
@@ -594,7 +603,12 @@ anterior em `infra/jitsi/.previous-image-version` e roda o smoke). Voltar: `exec
 Se o C cair na hora da live e nao voltar em 5 minutos: avisar a turma pelo sino (aviso da Comunicacao), publicar uma
 **Live gravada do dia** com a gravacao mais recente do mesmo tema (ou o OBS gravando a tela do apresentador, enviado depois
 como Replay) e remarcar a Live ao vivo (o app avisa quem tinha vaga). Nunca anunciar a gravada como ao vivo fora da area
-(`docs/30` §8.6).
+(`docs/30` §8.6). O texto pronto do sino e o do `docs/30` §2.7 ("A live {titulo} de hoje mudou: assista a sessao gravada
+as {hora}. Entrar."); o clique unico no admin que manda esse texto a quem garantiu vaga ainda nao existe (fica para
+depois, `docs/30` §11): por ora, um aviso da Comunicacao para o segmento de quem tem vaga. Monitor: com o C no ar, um
+monitor HTTPS no Better Stack (o mesmo do servidor A, §12) em `https://meet.<dominio>/` (200 e a palavra `Bunker707`),
+o certificado (aviso 14 dias antes) e o ping; o alerta vai para os mesmos destinatarios do servidor A (o produtor e a
+equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o plano B acima comeca antes da hora.
 
 ### 8B.8 Incidentes
 
@@ -603,7 +617,38 @@ como Replay) e remarcar a Live ao vivo (o app avisa quem tinha vaga). Nunca anun
 | Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
 | Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
 | Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |
-| Gravador ligado depois da live | `jibri-down` com `CONFIRMADO=sim` (sem `SESSAO`: todos) |
+| Gravador ligado depois da live | `jibri-down` com `CONFIRMADO=sim` (sem `SESSAO`: todos). O app ja pede o `jibri-down` da sessao sozinho (job `webinar-recordings`, de novo a cada 2 h) e avisa no sino depois de 6 h; se o aviso chegou, o pedido do app nao esta passando: conferir o `GITHUB_INFRA_TOKEN` (§8B.9) |
+| Aluno ve a sala mas sem video nem audio | UDP 10000 e TURN no firewall do C; os `webinar_room_error` do aluno (so o codigo) no historico; `exec-meet` com `COMANDO='docker compose logs --tail 200 jvb'`; testar com TURN forcado; TURN em 443 e a opcao B (`docs/30` I7) |
+| Apresentador entra como participante, nao como moderador | `XMPP_MUC_MODULES=token_affiliation` e `ENABLE_AUTO_OWNER=0` no `.env` do C; o claim `moderator` vem do papel no app (o Apresentador precisa de `messaging.publish`; a Equipe so com "Pode remover e silenciar na sala"); `exec-meet` com `docker compose logs prosody`. Nunca imprimir o token nem a chave |
+| "Gravacao pronta" nao chega (o console fica em Preparando) | o Jibri no brewery? a regra 5222 do C para o IP do gravador? `exec-jibri` com `docker compose logs jibri`; o webhook recusou? `webinar_recording_events` da sessao (o motivo do `ignored` em `error_message`; 401 nao grava linha: conferir `WEBINAR_RECORDER_WEBHOOK_SECRET` igual no app e no `JIBRI_SECRETS`); refazer `jibri-up` |
+| Hetzner sem estoque para o gravador | log do `jibri-up` ("unavailable" nos locais e tipos de reserva); o console mostra "Sem gravador hoje: gravar no navegador": gravar no navegador ou no OBS e ligar o video pelo console (**Enviar gravacao**) |
+| Envio para a Bunny falhou (`upload_failed`) | o e-mail "A gravacao nao subiu" chega ao Apresentador; arquivo em `/opt/jibri/recordings` (`exec-jibri`); reenviar como em §8B.5 ou subir pelo painel da Bunny e ligar pelo console; so entao `jibri-down` com `FORCAR=1` |
+| Certificado do `meet` invalido | `docker compose logs caddy` no C; o registro DNS so DNS (sem proxy); porta 80 aberta; `docker compose restart caddy` |
+| O servidor C sumiu | painel da Hetzner; o plano B "Live gravada do dia" (§8B.7) e o aviso pelo sino; reprovisionar com `provision-meet` + `deploy-meet` + `secrets-meet` (o DNS e refeito pelo `cf_apply_dns`) |
+| Aluno removido ou banido volta para a sala | `XMPP_MUC_MODULES` com `bunker_room_guard` e `ROOM_GUARD_URL` no `.env` do C; `exec-meet` com `docker compose logs prosody` ("lista de barrados indisponivel" = o app nao respondeu: conferir `JWT_APP_SECRET` = `WEBINAR_JWT_SECRET` e o `ROOM_GUARD_URL`); o token vence em 15 min de qualquer jeito |
+| O segredo do token vazou | trocar `JWT_APP_SECRET` (C, `secrets-meet`) e `WEBINAR_JWT_SECRET` (app, `secrets-membros`) juntos, fora de live (derruba quem esta na sala) |
+
+### 8B.9 O app da fase 3 (sala ao vivo, 29/10/2026)
+
+O app ja tem a sala ao vivo (`docs/30` §11; a migracao `202610290002` vai para a nuvem de teste antes do merge, `docs/21`
+§9.8, e para a producao pelo `deploy-membros`, §9). Sem as variaveis abaixo nada quebra: a sala diz "em breve" e a Live gravada segue. Cada uma entra pelo envelope
+(`secrets-membros`, §4A.6), nunca em `NEXT_PUBLIC_*`:
+
+| Variavel (app) | Para que | Sem ela |
+|---|---|---|
+| `WEBINAR_MEET_DOMAIN` | hostname do C (`meet.<dominio>`, sem `https://`); tambem lido no build pela Permissions-Policy de `/webinarios` e do console da sala | sala "em breve"; o build usa `meet.bunker707.com.br` na Permissions-Policy |
+| `WEBINAR_JWT_SECRET` (+ `WEBINAR_JWT_APP_ID`, vazio = `bunker707`) | o token da sala; o mesmo valor de `JWT_APP_SECRET` no C | sala "em breve" (`join-token` 503) |
+| `WEBINAR_RECORDER_WEBHOOK_SECRET` | o HMAC do webhook do gravador; o mesmo valor do `JIBRI_SECRETS` | o webhook responde 401 e nada e gravado |
+| `GITHUB_INFRA_TOKEN` (opcional; so "Actions: write" deste repositorio) | o app pede `jibri-up` / `jibri-down` sozinho (Preparar gravacao, Gravar automaticamente, a devolucao) | o console mostra a reserva e a maquina e pedida a mao pelo workflow |
+| `BUNNY_STREAM_API_KEY` + `BUNNY_STREAM_LIBRARY_ID` (opcionais) | o job `webinar-recordings` consulta a codificacao ate `ready`, cria o replay e apaga o vencido | a gravacao fica em processamento ate a equipe ligar o video pelo console |
+| `WEBINAR_RECORDER_DISPATCH` | so fora da producao (`fake` = o duble dos testes) | nada (nunca na producao) |
+
+A reserva **Gravar no navegador** do console usa a gravacao local do Jitsi, ligada de forma explicita no
+`infra/jitsi/web/custom-config.js` (`config.localRecording = { disable: false }`): entra no C no proximo `deploy-meet`.
+
+Antes de cada live: **Testar sala** no console (com a sessao ainda agendada, o Apresentador entra na sala da propria
+sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao chega a **Pronto**. Durante: o console
+mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
 
 ## 9. Deploy de nova versao do app
 

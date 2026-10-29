@@ -3,15 +3,16 @@ import { readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/ro
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { postStudentChat, removeStudentChat } from "@/server/webinars/room-writes";
 
-// O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre
-// ja deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after=
-// devolve as mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor. POST { sessionId,
-// body, kind, anonymous, consent, consentVersion, displayMode, nickname, replyToId, offsetMs? } grava a mensagem com
-// o offset do relogio do servidor (no replay, a posicao do player que veio no corpo): 201 { message, pending }; a
-// primeira exige o aceite (409 consent_required); fora da hora ou do modo 409 { reason }; rajada e modo lento 429
-// com Retry-After; palavra bloqueada 422. DELETE { all: true } e "Remover minhas mensagens": apaga o que o aluno
-// escreveu em todas as sessoes e retira o aceite, 200 { removed }. Sessao obrigatoria (401); ate 30 escritas por
-// minuto por aluno; corpo de ate 4 KB; fora do acesso ou sessao de outro webinario: 404 sem dizer se existe.
+// O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
+// deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
+// mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor. POST { sessionId, body, kind,
+// anonymous, consent, consentVersion, displayMode, nickname, replyToId, offsetMs? } grava a mensagem com o offset do
+// relogio do servidor (no replay, a posicao do player que veio no corpo): 201 { message, pending }; a primeira exige o
+// aceite (409 consent_required); fora da hora ou do modo 409 { reason }; rajada e modo lento 429 com Retry-After;
+// palavra bloqueada 422; na live, removido ou banido 409 banned e silenciado 409 muted (fase 3). DELETE { all: true } e
+// "Remover minhas mensagens": apaga o que o aluno escreveu em todas as sessoes e retira o aceite, 200 { removed }.
+// Sessao obrigatoria (401); ate 30 escritas por minuto por aluno; corpo de ate 4 KB; fora do acesso ou sessao de outro
+// webinario: 404 sem dizer se existe.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

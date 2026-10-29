@@ -36,7 +36,12 @@ config.videoQuality.minHeightForQualityLvl = { 360: 'standard', 720: 'high' };
 // Tela compartilhada a 30 quadros (mouse e escrita fluidos); 15 na outra opcao do card Qualidade.
 config.desktopSharingFrameRate = { min: 5, max: 30 };
 
-// Barra padrao = a do host (docs/30 §6.3); o iframe troca por papel (aluno: camera, raisehand, fullscreen, hangup).
-config.toolbarButtons = [
-  'microphone', 'camera', 'desktop', 'raisehand', 'participants-pane', 'recording', 'security', 'fullscreen', 'hangup'
-];
+// Barra padrao = a minima (docs/30 §6.3 e §8.1): quem abre a sala direto pelo endereco com o token nao ganha tela
+// compartilhada, gravar, seguranca nem a lista de participantes. O host e o co-apresentador recebem a barra deles pelo
+// configOverwrite do iframe; aluno e Equipe usam a nossa (barra vazia). E so uma barreira no cliente: a tela e a
+// gravacao tambem saem pelas features do token (context.features) e pela moderacao de 'desktop' que o apresentador liga.
+config.toolbarButtons = ['camera', 'raisehand', 'fullscreen', 'hangup'];
+
+// A reserva "Gravar no navegador" do console (docs/30 §6.7) usa a gravacao local: fica ligada de forma explicita,
+// sem depender do padrao da imagem.
+config.localRecording = { disable: false };

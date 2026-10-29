@@ -1,7 +1,10 @@
 // O token da sala ao vivo (docs/30 §5.4 e §8.1): HS256 assinado so no servidor, com `room` = o nome da sala da
-// sessao (nunca "*"), validade curta e o papel que o admin decidiu (host, co-apresentador, Equipe ou aluno). O
-// navegador recebe o token pronto e monta o iframe; nada aqui e NEXT_PUBLIC_*. Modulo puro sobre node:crypto
-// (tests/webinarios-sala-ao-vivo-modelo.test.mjs); quem le o segredo do ambiente e a rota join-token.
+// sessao (nunca "*"), validade curta (15 min: o token que vazou do navegador de quem foi removido ou banido morre
+// logo; a pagina pede outro 5 min antes e o Prosody ainda recusa quem esta barrado, mod_bunker_room_guard) e o papel
+// que o admin decidiu (host, co-apresentador, Equipe ou aluno). Todo papel leva `context.features` (o aluno e a Equipe
+// sem tela, gravacao, transmissao nem ligacao: sem a claim o Jitsi deixa tudo). O navegador recebe o token pronto e
+// monta o iframe; nada aqui e NEXT_PUBLIC_*. Modulo puro sobre node:crypto (tests/webinarios-sala-ao-vivo-modelo.test.mjs);
+// quem le o segredo do ambiente e a rota join-token.
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebinarPresenter } from "./model";
@@ -20,9 +23,12 @@ export type RoomGrant = {
 export const TOKEN_RULES = {
   /** nbf = agora − 60 s (relogios desalinhados). */
   notBeforeSkewSeconds: 60,
-  /** exp = min(fim previsto + 30 min, agora + 6 h). */
+  /**
+   * exp = min(fim previsto + 30 min, agora + 15 min). Curto de proposito: o Remover e o Banir nao revogam o token que o
+   * navegador do aluno ja tem (o Jitsi so confere o token na entrada); a pagina pede outro 5 min antes do exp.
+   */
   afterEndSeconds: 30 * 60,
-  maxLifetimeSeconds: 6 * 60 * 60,
+  maxLifetimeSeconds: 15 * 60,
   /** `w-<id do webinario>-<16 caracteres aleatorios>` (§8.1). */
   roomSuffixChars: 16
 } as const;
@@ -103,15 +109,16 @@ export function jitsiTokenClaims(input: JitsiTokenInput): Record<string, unknown
     user.moderator = true;
     user.affiliation = "owner";
   }
-  const context: Record<string, unknown> = { user };
-  if (input.grant.role !== "student") {
-    context.features = {
+  // Todo papel leva as features (o aluno tambem): sem a claim, o Jitsi da tag fixada deixa compartilhar a tela e gravar.
+  const context: Record<string, unknown> = {
+    features: {
       livestreaming: false,
       "outbound-call": false,
       recording: input.grant.features.recording,
       "screen-sharing": input.grant.features.screenSharing
-    };
-  }
+    },
+    user
+  };
   return {
     aud: input.appId,
     context,

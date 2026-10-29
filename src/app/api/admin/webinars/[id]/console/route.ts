@@ -5,8 +5,10 @@ import { jsonRouteError } from "@/server/http/route-errors";
 import { getConsoleSnapshot } from "@/server/webinars/console-queries";
 
 // O retrato do console da sessao (docs/30 §2.4), que a tela busca a cada 5 s: chat com os pendentes, roteiro com
-// o que ja entrou, enquetes com as contagens, perguntas por voto e os presentes agora. So a equipe com
-// messaging.write (a mesma guarda das rotas de /api/admin/communications), sem cache: cada resposta e de agora.
+// o que ja entrou, enquetes com as contagens, perguntas por voto e os presentes agora; na Live ao vivo (fase 3), o
+// bloco `live` (gravador, gravacao, removidos/silenciados/banidos e o mapa aluno -> participante da sala; nunca o nome
+// da sala nem token). So a equipe com messaging.write (a mesma guarda das rotas de /api/admin/communications), sem
+// cache: cada resposta e de agora.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

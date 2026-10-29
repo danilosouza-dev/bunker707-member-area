@@ -9,6 +9,7 @@ import { can } from "@/server/auth/roles";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
+import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { getWebinarEditorData, loadWebinarEditorOptions } from "@/server/webinars/queries";
 
 // Publicar, cancelar e excluir rodam Server Actions desta rota.
@@ -28,7 +29,9 @@ function readNow() {
 }
 
 // Comunicação › Webinários › um webinário (docs/30 §2.2 e §2.3): o editor em cards com a situacao e os botoes
-// dela no topo. O relatorio (aba Relatório) chega com a fase 2. Webinario que nao existe (ou excluido): 404.
+// dela no topo (na Live ao vivo, Abrir a sala, Abrir o console e Encerrar live levam ao console /sala). O card
+// Gravacao recebe aqui, lido no servidor, se a sala ao vivo existe neste ambiente (liveRoomConfigured: o hostname e
+// o segredo do token; so o booleano vai para o cliente). Webinario que nao existe (ou excluido): 404.
 export default async function AdminWebinarPage({ params }: PageProps) {
   const [{ access }, { id }] = await Promise.all([requirePageArea("comunicacao"), params]);
 
@@ -67,6 +70,7 @@ export default async function AdminWebinarPage({ params }: PageProps) {
     <WebinarEditor
       defaultKind={loaded.data.detail.draft.kind}
       initial={loaded.data.detail}
+      liveRoomReady={liveRoomConfigured(process.env)}
       now={now}
       options={loaded.data.options}
       permissions={{ canPublish: can(access, "messaging.publish"), canWrite: true }}

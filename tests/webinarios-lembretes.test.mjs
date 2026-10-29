@@ -466,7 +466,7 @@ test("banco sem a migracao 202610290001: devolve zeros, registra e o job termina
   const [result, infos] = await silenciando("info", () => processWebinarReminders({ db, now: new Date(AGORA) }));
 
   assert.deepEqual(result, { ...ZEROS, pendingMigration: true });
-  assert.ok(infos.some((linha) => linha.includes("migracao 202610290001 pendente")), infos.join("\n"));
+  assert.ok(infos.some((linha) => linha.includes("migracao 202610290003 pendente")), infos.join("\n"));
   await silenciando("info", () => assert.doesNotReject(() => webinarRemindersJob.run(contexto(db))));
 
   const semRelacao = scriptedDb(() => ({ data: null, error: { code: "42P01", message: 'relation "public.webinar_sessions" does not exist' } }));
@@ -508,7 +508,7 @@ test("chaves: o dedupe do sino e a chave do e-mail levam a hora marcada (a sessa
   assert.equal(webinarIdempotencyKey({ kind: "cancelled", sessionId: SESSAO_ID, stamp: "202611052300", userId: ALUNA }), `webinar:cancelled:${SESSAO_ID}:202611052300:${ALUNA}`);
   assert.equal(webinarNoticeExpiresAt({ durationMinutes: 60, floorMs: Date.parse(AGORA), scheduledAt: HORA_MARCADA }), "2026-11-06T02:00:00.000Z");
   assert.equal(webinarNoticeExpiresAt({ durationMinutes: 60, floorMs: Date.parse("2026-11-10T00:00:00.000Z"), scheduledAt: HORA_MARCADA }), "2026-11-10T00:00:00.000Z");
-  assert.deepEqual(EMAIL_KINDS.slice(3), ["webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled"]);
+  assert.deepEqual(EMAIL_KINDS.slice(3), ["webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled", "webinar_recording_failed"]);
 });
 
 /* ------------------------------------------------------------------------------------------------

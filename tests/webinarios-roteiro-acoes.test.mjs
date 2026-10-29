@@ -850,6 +850,21 @@ test("perguntas: responder por escrito vira linha da equipe no chat e marca resp
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /replay\?|7 dias/, "nem a pergunta nem a resposta vao para a auditoria");
 });
 
+test("D31 na Live ao vivo: a mensagem da equipe e a resposta escrita nascem na linha mestre (o replay toca o chat da live); na Live gravada nao", async () => {
+  const SESSAO_LIVE = "bbbbbbbb-2222-4222-8222-444444444444";
+  const noAr = new Date(Date.now() - 5 * MIN).toISOString();
+  const live = { ...DEFAULTS.webinar_sessions, id: SESSAO_LIVE, kind: "live", recording_id: null, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR };
+  const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_LIVE, updated_at: agora(), upvotes: 0, user_id: ALUNA };
+  usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta], webinar_sessions: [...cenario().webinar_sessions, live] })));
+
+  const daEquipe = ok(await roomActions.sendTeamMessage({ body: "Bem-vindos!", sessionId: SESSAO_LIVE }));
+  assert.equal(daEquipe.message.master, true, "a mensagem da equipe na live e da linha mestre");
+  const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai sim.", questionId: pergunta.id }));
+  assert.equal(resposta.message.master, true, "a resposta escrita na live tambem");
+  const naGravada = ok(await roomActions.sendTeamMessage({ body: "Oi", sessionId: SESSAO_NO_AR }));
+  assert.equal(naGravada.message.master, false, "na Live gravada so a equipe promove");
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Replay livre e LGPD
  * ---------------------------------------------------------------------------------------------- */

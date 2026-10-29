@@ -6,13 +6,16 @@ import { WebinarPageView } from "@/components/member/webinars/webinar-page-view"
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requireStudentPageUser } from "@/server/auth/guards";
 import { getAppShellData } from "@/server/db/platform-store";
+import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { webinarHref } from "@/server/webinars/model";
 import { isWebinarSlug, normalizeSource } from "@/server/webinars/student-model";
 import { getWebinarPageData } from "@/server/webinars/student-queries";
 
-// /webinarios/[slug] (docs/30 §1.2): a pagina do Webinario com o Garantir vaga. Quem nao pode ver (fora do
-// "Quem pode", rascunho, apagado) recebe a pagina de nao encontrado, sem saber se o webinario existe
-// (docs/30 §8.2). ?origem= e o link de origem que a vaga guarda (docs/30 §2.8).
+// /webinarios/[slug] (docs/30 §1.2): a pagina do Webinario com o Garantir vaga e o Entrar. Quem nao pode ver (fora
+// do "Quem pode", rascunho, apagado) recebe a pagina de nao encontrado, sem saber se o webinario existe
+// (docs/30 §8.2). ?origem= e o link de origem que a vaga guarda (docs/30 §2.8). Se a sala ao vivo existe neste
+// ambiente (WEBINAR_MEET_DOMAIN e o segredo do token) e lido aqui, no servidor, e vai so como sim/nao para a tela:
+// sem ela, o Entrar da Live ao vivo diz "em breve" (fase 3, docs/30 §1.3).
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +56,12 @@ export default async function WebinarPage({ params, searchParams }: WebinarPageP
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      <WebinarPageView accessPreviewMode={accessPreviewMode} data={data} source={normalizeSource(resolvedSearchParams?.origem)} />
+      <WebinarPageView
+        accessPreviewMode={accessPreviewMode}
+        data={data}
+        liveRoomConfigured={liveRoomConfigured(process.env)}
+        source={normalizeSource(resolvedSearchParams?.origem)}
+      />
       <MemberFooter branding={shellData.branding} />
     </AppShell>
   );

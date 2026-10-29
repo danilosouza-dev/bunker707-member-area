@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { imageRemotePatterns } from "./src/lib/image-hosts";
+import { DEFAULT_MEET_DOMAIN, meetDomainOf, meetOrigin, meetPermissionsAllowList } from "./src/lib/jitsi-room-config";
 
 const localDevOrigins = Object.values(networkInterfaces()).flatMap((networkAddresses = []) => {
   return networkAddresses
@@ -42,14 +43,25 @@ function getTurbopackRoot() {
 // Microfone bloqueado em todo o app; so o admin libera para a propria origem (gravar o audio de um aviso
 // em Comunicacao > Avisos e pop-ups, docs/22). A regra de /admin vem depois da global e o Next usa a
 // ultima que define a mesma chave (tests/deployment-security.test.mjs confere o valor efetivo).
-function permissionsPolicy(microphone: "()" | "(self)") {
+//
+// A sala ao vivo (docs/30 §6.3, §8.4 e I10): nas paginas do aluno em /webinarios e no console da equipe
+// (/admin/comunicacao/webinarios/[id]/sala), camera, microfone e tela ficam liberados para a propria origem e
+// para o Jitsi proprio (o iframe precisa deles para o aluno que levantou a mao, a camera do aluno e o palco do
+// apresentador); o resto da area continua fechado. O hostname e o de WEBINAR_MEET_DOMAIN no build (os cabecalhos
+// do next.config sao fixados no build), ou meet.bunker707.com.br quando o build nao recebeu a variavel.
+const meetDomain = meetDomainOf(process.env.WEBINAR_MEET_DOMAIN) ?? DEFAULT_MEET_DOMAIN;
+const fullscreenOrigins = ['"https://www.youtube.com"', '"https://www.youtube-nocookie.com"', '"https://player.vimeo.com"'];
+
+function permissionsPolicy(microphone: "()" | "(self)", liveRoom = false) {
+  const media = liveRoom ? meetPermissionsAllowList(meetDomain) : null;
+
   return [
-    "camera=()",
-    "display-capture=()",
+    `camera=${media ?? "()"}`,
+    `display-capture=${media ?? "()"}`,
     "geolocation=()",
-    `microphone=${microphone}`,
+    `microphone=${media ?? microphone}`,
     "payment=()",
-    'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com")'
+    `fullscreen=(self ${[...fullscreenOrigins, ...(liveRoom ? [`"${meetOrigin(meetDomain)}"`] : [])].join(" ")})`
   ].join(", ");
 }
 
@@ -108,6 +120,14 @@ const nextConfig: NextConfig = {
       {
         headers: [{ key: "Permissions-Policy", value: permissionsPolicy("(self)") }],
         source: "/admin/:path*"
+      },
+      {
+        headers: [{ key: "Permissions-Policy", value: permissionsPolicy("()", true) }],
+        source: "/webinarios/:path*"
+      },
+      {
+        headers: [{ key: "Permissions-Policy", value: permissionsPolicy("(self)", true) }],
+        source: "/admin/comunicacao/webinarios/:id/sala"
       }
     ];
   },

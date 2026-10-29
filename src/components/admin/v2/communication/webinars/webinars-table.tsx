@@ -2,21 +2,32 @@
 
 import { CalendarClock } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
-import { WEBINAR_ADMIN_COPY, webinarAdminHref, type WebinarPermissions } from "@/server/webinars/editor-model";
+import { WEBINAR_ADMIN_COPY, webinarAdminHref, webinarRowShortcut, type WebinarPermissions } from "@/server/webinars/editor-model";
 import type { WebinarListItem } from "@/server/webinars/queries";
 import { DataTable, type DataTableColumn } from "../../data-table";
 import { EMPTY_VALUE } from "../../format";
 import { StatusChip } from "../../status-chip";
-import { WebinarRowMenu, useWebinarActions, type WebinarActionTarget } from "./webinar-row-menu";
+import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActionTarget } from "./webinar-row-menu";
 
 // Tabela de Webinários (docs/30 §2.1): capa pequena (2:3, como a do produto), titulo e tipo, data e hora (Sao
-// Paulo) da proxima sessao, situacao, vagas garantidas, presentes (pico: "—" ate a fase 2) e quem criou. A linha
-// inteira abre o editor; o menu "…" com as acoes da situacao fica por cima do link. No celular vira um cartao por
-// webinario com o menu no canto.
+// Paulo) da proxima sessao, situacao, vagas garantidas, presentes (pico das curvas congeladas; "—" sem sessao
+// encerrada) e quem criou. A linha inteira abre o editor; o menu "…" com as acoes da situacao e o atalho da Live ao
+// vivo (Abrir a sala na agendada, Abrir o console na em andamento; webinarRowShortcut) ficam por cima do link. No
+// celular vira um cartao por webinario com o menu no canto.
 
 export function toWebinarActionTarget(item: WebinarListItem): WebinarActionTarget {
-  return { id: item.id, registeredCount: item.registeredCount, runningSessionId: item.runningSessionId, situation: item.situation, status: item.status, title: item.title, updatedAt: item.updatedAt };
+  return {
+    id: item.id,
+    kind: item.kind,
+    registeredCount: item.registeredCount,
+    runningSessionId: item.runningSessionId,
+    situation: item.situation,
+    status: item.status,
+    title: item.title,
+    updatedAt: item.updatedAt
+  };
 }
 
 /** Miniatura 2:3 da capa, ou o icone do webinario. */
@@ -67,7 +78,25 @@ export function WebinarsTable({ items, permissions }: { items: readonly WebinarL
       mobileLabel: copy.when
     },
     {
-      cell: (item) => <StatusChip tone={item.situationTone}>{item.situationLabel}</StatusChip>,
+      cell: (item) => {
+        const shortcut = webinarRowShortcut(item, permissions);
+
+        return (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <StatusChip tone={item.situationTone}>{item.situationLabel}</StatusChip>
+            {shortcut ? (
+              <Link
+                className="relative z-10 inline-flex min-h-8 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-[var(--text-primary)] underline-offset-4 hover:underline pointer-coarse:min-h-11"
+                data-row-shortcut={shortcut.action}
+                href={shortcut.href}
+              >
+                <WebinarActionIcon action={shortcut.action} className="size-3.5" />
+                {shortcut.label}
+              </Link>
+            ) : null}
+          </span>
+        );
+      },
       header: copy.situation,
       id: "situacao",
       mobileLabel: copy.situation

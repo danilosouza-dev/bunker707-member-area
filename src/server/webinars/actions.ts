@@ -5,6 +5,11 @@
 // runAdminAction (messaging.write; publicar, cancelar e excluir pedem messaging.publish), gravam recordAudit so
 // com ids e contagens (nunca nomes, e-mails nem texto digitado) e revalidam a lista e a pagina do webinario.
 // Toda leitura e escrita vai pela service role (webinarsDb) com assertNoDbError no store.
+// Fase 3 (docs/30 §2.3, §6.4 e §6.7): publicar gera o `room_name` da sessao `live` (ou garante numa live antiga);
+// duplicar nunca copia sessoes (nem `room_name`, nem `recorder_*`); cancelar e mudar a hora so mexem na situacao e
+// na hora da sessao, nunca no nome da sala nem no gravador, e nada aqui chama o GitHub: a maquina do gravador que
+// ficou ligada e devolvida pelo job webinar-recordings (recordings-tick.ts). A sala e o gravador moram no console
+// (live-actions.ts).
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -16,6 +21,8 @@ import { isSameVersion } from "@/server/communications/campaign-model";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { WEBINAR_CHANGED_MESSAGE, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { webinarDraftOf } from "./editor-model";
+import { newRoomName } from "./jitsi-token";
+import { ensureSessionRoomName } from "./live-store";
 import { WEBINAR_LIMITS, toTime, webinarSituation, webinarSlug, type WebinarDraft, type WebinarSituation, type WebinarStatus } from "./model";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
@@ -438,12 +445,24 @@ export async function publishWebinar(input: { expectedUpdatedAt?: string; id: st
       const scheduledAt = new Date(toTime(draft.scheduledAt)).toISOString();
 
       if (!live) {
+        // A sala nasce aqui (docs/30 §2.3 e §8.1): o nome nao adivinhavel vai so dentro do token.
         await insertSessionRows(db, [
-          { chat_mode: draft.roomSettings.chatMode, chat_slow_mode_seconds: draft.roomSettings.slowModeSeconds, kind: "live", scheduled_at: scheduledAt, status: "scheduled", webinar_id: row.id }
+          {
+            chat_mode: draft.roomSettings.chatMode,
+            chat_slow_mode_seconds: draft.roomSettings.slowModeSeconds,
+            kind: "live",
+            room_name: newRoomName(row.id),
+            scheduled_at: scheduledAt,
+            status: "scheduled",
+            webinar_id: row.id
+          }
         ]);
         sessionsCreated = 1;
-      } else if (live.status === "scheduled" && toTime(live.scheduled_at) !== toTime(scheduledAt)) {
-        await updateSessionRow(db, live.id, { scheduled_at: scheduledAt }, { expectedStatuses: ["scheduled"] });
+      } else {
+        if (live.status === "scheduled" && toTime(live.scheduled_at) !== toTime(scheduledAt)) {
+          await updateSessionRow(db, live.id, { scheduled_at: scheduledAt }, { expectedStatuses: ["scheduled"] });
+        }
+        await ensureSessionRoomName(db, live);
       }
     } else if (draft.kind === "simulated") {
       const recording = baseRecordingOf(bundle.recordings);
@@ -535,7 +554,8 @@ export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: str
 
 /**
  * [messaging.write] Copia o webinario como rascunho, "Cópia de …": tudo menos data, vagas, chat e relatorio
- * (docs/30 §2.3). Os apresentadores e o video base da Live gravada vao junto.
+ * (docs/30 §2.3). Os apresentadores e o video base da Live gravada vao junto; nenhuma sessao (a sala e o gravador
+ * nascem quando a copia for publicada).
  */
 export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; updatedAt: string }>> {
   return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data, user }) => {

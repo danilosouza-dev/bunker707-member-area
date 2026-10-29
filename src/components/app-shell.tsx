@@ -14,6 +14,7 @@ import { getMemberSidebarSections } from "@/components/member/shell/member-shell
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
+import type { LiveNowBanner as LiveNowBannerComponent } from "@/components/member/webinars/live-now-banner";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
@@ -144,6 +145,21 @@ const PlatformDirectorChat = dynamic(
     loading: () => <PlatformDirectorLauncher state="loading" />,
     ssr: false
   }
+);
+
+type LiveNowBannerProps = ComponentProps<typeof LiveNowBannerComponent>;
+
+function LiveNowBannerUnavailable() {
+  return null;
+}
+
+// A faixa "Ao vivo agora" / "Comeca em 1 h: Entrar" dos Webinarios (docs/30 §1.1): carregada a parte, depois da
+// pagina, para nao pesar no JS inicial. Falha ao baixar: sem faixa, a pagina segue.
+const LiveNowBanner = dynamic(
+  () => import("@/components/member/webinars/live-now-banner")
+    .then((bannerModule) => bannerModule.LiveNowBanner)
+    .catch((): ComponentType<LiveNowBannerProps> => LiveNowBannerUnavailable),
+  { loading: () => null, ssr: false }
 );
 
 export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
@@ -428,6 +444,9 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
           </div>
         </div>
       </header>
+
+      {/* Faixa das lives (docs/30 §1.1): toda pagina do aluno, fora do "ver como"; a propria faixa some na sala. */}
+      {!accessPreviewMode ? <LiveNowBanner onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pathname={pathname} /> : null}
 
       <MemberSidebar
         accessPreviewMode={accessPreviewMode}

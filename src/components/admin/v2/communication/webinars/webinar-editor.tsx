@@ -11,12 +11,8 @@ import { audienceDefinitionSchema } from "@/server/communications/schemas";
 import { publishWebinar, saveWebinarDraft, uploadWebinarCover } from "@/server/webinars/actions";
 import {
   WEBINARS_HREF,
-  WEBINAR_ACTION_LABELS,
   WEBINAR_ADMIN_COPY,
   WEBINAR_EDITOR_LIMITS,
-  WEBINAR_HEADER_ACTIONS,
-  WEBINAR_LINK_ACTIONS,
-  WEBINAR_SOON_ACTIONS,
   accessUsesAudience,
   canonicalWebinarDraft,
   isSameWebinarDraft,
@@ -24,7 +20,6 @@ import {
   rebaseWebinarDraft,
   savedWebinarToast,
   startWebinarDraft,
-  webinarActionHref,
   webinarAdminHref,
   webinarAudienceErrorsFrom,
   webinarCardOfField,
@@ -34,6 +29,7 @@ import {
   webinarErrorsFrom,
   webinarErrorsFromAction,
   webinarFailureTitle,
+  webinarHeaderButtons,
   webinarKindLabel,
   webinarReviewSentence,
   webinarScreenProblems,
@@ -82,12 +78,17 @@ import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActio
 //   rascunho sem perder o que foi digitado (rebaseWebinarDraft);
 // - a contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca;
 // - Ctrl+Enter (⌘+Enter) salva o rascunho; sair com mudanca nao salva avisa (useWarnBeforeUnload);
-// - o que chega em outra fase aparece desligado com "em breve", nunca some em silencio (docs/30 §2.8).
+// - o que chega em outra fase aparece desligado com "em breve", nunca some em silencio (docs/30 §2.8);
+// - fase 3: na Live ao vivo publicada, Abrir a sala, Abrir o console e Encerrar live levam ao console /[id]/sala (a
+//   sala e as acoes dela moram la); sem messaging.publish, Abrir a sala e Encerrar live aparecem desligados com a
+//   explicacao embaixo do cabecalho (§2.6); o card Gravacao mostra a situacao do gravador da sessao `live`.
 
 type WebinarEditorProps = {
   /** Tipo ja escolhido (?tipo= no "Novo webinário"); null pergunta o tipo primeiro. */
   defaultKind: WebinarKind | null;
   initial: WebinarEditorData | null;
+  /** A sala ao vivo existe neste ambiente (liveRoomConfigured(process.env), lido no servidor pela pagina). */
+  liveRoomReady: boolean;
   /** Hora da leitura no servidor: o "agora" da previa e das regras de data. */
   now: number;
   options: WebinarEditorOptions;
@@ -156,7 +157,7 @@ function versionOf(initial: WebinarEditorData): SavedVersion {
   return { id: initial.id, registeredCount: initial.registeredCount, situation: initial.situation, slug: initial.slug, status: initial.status, updatedAt: initial.updatedAt };
 }
 
-export function WebinarEditor({ defaultKind, initial, now, options, permissions }: WebinarEditorProps) {
+export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, options, permissions }: WebinarEditorProps) {
   const router = useRouter();
   const [kind, setKind] = useState<WebinarKind | null>(() => initial?.draft.kind ?? defaultKind);
   const [draft, setDraft] = useState<WebinarDraft>(() => initial?.draft ?? startWebinarDraft(initial?.draft.kind ?? defaultKind ?? "live"));
@@ -456,6 +457,8 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
   const actionTarget: WebinarActionTarget | null = savedVersion
     ? {
         id: savedVersion.id,
+        // O tipo gravado (o do rascunho na tela so vale depois de salvar).
+        kind: saved.kind,
         registeredCount: savedVersion.registeredCount,
         runningSessionId: initial?.runningSessionId ?? null,
         situation: savedVersion.situation,
@@ -466,10 +469,10 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
     : null;
   const conflict = failure?.status === 409;
   const working = (label: string, key: Exclude<Busy, null>) => (busy === key ? WEBINAR_ADMIN_COPY.review.working[key] : label);
-  const headerActions = situation ? WEBINAR_HEADER_ACTIONS[situation] : [];
-  const soonActions = headerActions.filter((action) => WEBINAR_SOON_ACTIONS.includes(action));
-  // Abrir o console e Ver relatorio so navegam: viram botoes de link no topo (fase 2b).
-  const linkActions = headerActions.filter((action) => WEBINAR_LINK_ACTIONS.includes(action));
+  // Os botoes do topo que navegam (Abrir a sala, Abrir o console, Ver relatório; Encerrar live da Live ao vivo) ou
+  // que chegam depois ("em breve"); o resto fica no menu "…" ao lado.
+  const headerButtons = actionTarget ? webinarHeaderButtons({ id: actionTarget.id, kind: actionTarget.kind, permissions, situation: actionTarget.situation }) : [];
+  const blockedNotes = Array.from(new Set(headerButtons.flatMap((button) => (button.blocked ? [button.blocked] : []))));
   const cards = kind ? webinarEditorCards(kind) : [];
   const savedSessions = initial?.sessions ?? [];
 
@@ -804,7 +807,7 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
       case "gravacao":
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
-            <RecordingCard {...cardProps} />
+            <RecordingCard {...cardProps} liveRoomReady={liveRoomReady} liveSession={initial?.liveSession ?? null} permissions={permissions} webinarId={savedVersion?.id ?? null} />
           </SectionCard>
         );
       case "replayAula":
@@ -838,18 +841,29 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
         actions={
           actionTarget ? (
             <>
-              {linkActions.map((action) => (
-                <AdminLinkButton href={webinarActionHref(action, actionTarget.id) ?? webinarAdminHref(actionTarget.id)} key={action} variant="secondary">
-                  <WebinarActionIcon action={action} />
-                  {WEBINAR_ACTION_LABELS[action]}
-                </AdminLinkButton>
-              ))}
-              {soonActions.map((action) => (
-                <Button className="px-3" disabled key={action} title={WEBINAR_ADMIN_COPY.emBreve} type="button" variant="secondary">
-                  {WEBINAR_ACTION_LABELS[action]} · {WEBINAR_ADMIN_COPY.emBreve}
-                </Button>
-              ))}
-              <WebinarRowMenu exclude={["open", ...WEBINAR_SOON_ACTIONS, ...linkActions]} onRequest={webinarActions.request} permissions={permissions} webinar={actionTarget} />
+              {headerButtons.map((button) =>
+                button.href ? (
+                  <AdminLinkButton data-header-action={button.action} href={button.href} key={button.action} variant="secondary">
+                    <WebinarActionIcon action={button.action} />
+                    {button.label}
+                  </AdminLinkButton>
+                ) : (
+                  <Button
+                    aria-describedby={button.blocked ? "webinar-header-blocked" : undefined}
+                    className="px-3"
+                    data-header-action={button.action}
+                    disabled
+                    key={button.action}
+                    title={button.blocked ?? WEBINAR_ADMIN_COPY.emBreve}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <WebinarActionIcon action={button.action} />
+                    {button.soon ? `${button.label} · ${WEBINAR_ADMIN_COPY.emBreve}` : button.label}
+                  </Button>
+                )
+              )}
+              <WebinarRowMenu exclude={["open", ...headerButtons.map((button) => button.action)]} onRequest={webinarActions.request} permissions={permissions} webinar={actionTarget} />
             </>
           ) : null
         }
@@ -871,6 +885,12 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
         }
         title={initial ? initial.title : WEBINAR_ADMIN_COPY.header.newTitle}
       />
+
+      {blockedNotes.length > 0 ? (
+        <p className="-mt-3 text-[13px] leading-5 text-[var(--text-secondary)]" id="webinar-header-blocked">
+          {blockedNotes.join(" ")}
+        </p>
+      ) : null}
 
       {webinarActions.errorBanner}
 

@@ -1,8 +1,10 @@
-// Leituras da Sala do aluno (docs/30 §1.6, §5.1 e §6.6): o contexto de uma sessao (webinario publicado e dentro do
-// acesso, a sessao do proprio webinario, a gravacao e a duracao do video), o que GET .../session devolve a mais na
+// Leituras da Sala do aluno (docs/30 §1.3, §1.6, §5.1 e §6.6): o contexto de uma sessao (webinario publicado e dentro
+// do acesso, a sessao do proprio webinario, a gravacao e a duracao do video), o que GET .../session devolve a mais na
 // fase 2 (relogio, fase, video da Bunny com o token do servidor, mensagem fixada, enquetes, presentes agora e o
-// aceite do aluno), a janela do chat e as mensagens novas, as perguntas, as enquetes e as reacoes recentes. Tudo
-// pela service role e so o que o aluno pode ver; as regras puras ficam em room-model.ts e room-rules.ts.
+// aceite do aluno) e na fase 3 (o bloco `live` e os banimentos do aluno; a entrada recusa o removido e o banido), a
+// janela do chat e as mensagens novas, as perguntas, as enquetes e as reacoes recentes. Tudo pela service role e so
+// o que o aluno pode ver (nunca o nome da sala, o token nem a situacao do gravador alem de LiveRoomInfo); as regras
+// puras ficam em room-model.ts, room-rules.ts e live-model.ts.
 
 import "server-only";
 
@@ -40,6 +42,8 @@ import {
   type ChatWindow
 } from "./room-model";
 import { countReactions, nextChatCursor, toStudentPoll, toStudentQuestion, type ChatCursor, type StudentPoll, type StudentQuestion } from "./room-rules";
+import { NO_BAN, liveBanState, liveJoinRefusal, liveRoomConfigured, liveRoomInfoOf, presenceOffsetMs, type LiveBanState } from "./live-model";
+import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { registrationFromRow, type RecordingRow } from "./rows";
 import { fetchRegistrationRows, listRecordingRows } from "./store";
 import { openReplaySessionId, registrationFor, seatRequired, type RoomJoin, type StudentRoomExtras, type StudentRoomVideo } from "./student-model";
@@ -133,7 +137,7 @@ export function roomVideoFor(context: Pick<RoomContext, "durationMs" | "recordin
 }
 
 /** A vaga do aluno nesta sessao (a da sessao ou a geral do webinario), quando a sala so abre para quem garantiu. */
-async function hasSeat(db: WebinarsDb, userId: string, context: Pick<RoomContext, "session" | "webinar">): Promise<boolean> {
+export async function hasRoomSeat(db: WebinarsDb, userId: string, context: Pick<RoomContext, "session" | "webinar">): Promise<boolean> {
   const rows = await fetchRegistrationRows(db, { userId, webinarIds: [context.webinar.id] });
   return registrationFor(rows.map(registrationFromRow), context.session.id) !== null;
 }
@@ -146,7 +150,7 @@ async function hasSeat(db: WebinarsDb, userId: string, context: Pick<RoomContext
 export async function loadRoomContext(db: WebinarsDb, userId: string, webinarId: string, sessionId: string, now = Date.now()): Promise<RoomContext> {
   const record = await loadStudentWebinarById(db, userId, webinarId, now);
   const context = await roomContextOf(db, record, sessionId);
-  if (seatRequired(context.webinar, context.session) && !(await hasSeat(db, userId, context))) {
+  if (seatRequired(context.webinar, context.session) && !(await hasRoomSeat(db, userId, context))) {
     throw new WebinarError(WEBINAR_COPY.sala.vagaObrigatoria, 403);
   }
   return context;
@@ -207,42 +211,62 @@ export function studentDisplayName(identity: Pick<StudentIdentity, "fullName" | 
  * GET .../session: o que a fase 2 acrescenta
  * ---------------------------------------------------------------------------------------------- */
 
-/** Se o aluno entra na sala agora: o replay sempre; a live pela situacao; a gravada pelo relogio; com limite de vagas, so com a vaga. */
-export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">, now: number, options: { seatMissing?: boolean } = {}): RoomJoin {
+/**
+ * Se o aluno entra na sala agora: o banido de todos os webinarios nunca (`banned`, em qualquer forma: D33); o replay
+ * sempre; a live pela situacao (espera ou no ar) e nunca removido desta sessao (`kicked`, os mesmos motivos do
+ * join-token); a gravada pelo relogio; com limite de vagas, so com a vaga.
+ */
+export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">, now: number, options: { ban?: LiveBanState; practiceSession?: boolean; seatMissing?: boolean } = {}): RoomJoin {
   const { durationMs, session } = context;
-  if (session.kind !== "replay" && options.seatMissing) {
-    return { ok: false, reason: "no_seat" };
+  if (options.ban?.banned) {
+    return { ok: false, reason: "banned" };
   }
   if (session.kind === "replay") {
     return { ok: true };
   }
   if (session.kind === "live") {
-    if (session.status === "waiting" || session.status === "live") {
-      return { ok: true };
+    const refusal = liveJoinRefusal({ ban: options.ban ?? NO_BAN, practiceSession: options.practiceSession, role: "student", session });
+    if (refusal === "ended" || refusal === "banned" || refusal === "kicked") {
+      return { ok: false, reason: refusal };
     }
-    return { ok: false, reason: session.status === "ended" || session.status === "cancelled" ? "ended" : "not_started" };
+    if (options.seatMissing) {
+      return { ok: false, reason: "no_seat" };
+    }
+    return refusal ? { ok: false, reason: "not_started" } : { ok: true };
+  }
+  if (options.seatMissing) {
+    return { ok: false, reason: "no_seat" };
   }
   return canJoinSimulated(session, durationMs, now);
 }
 
 /**
  * O que a Sala recebe a mais em GET .../session. O video (com o token da Bunny) so vai dentro da entrada: antes da
- * abertura, depois do fim, depois da Entrada atrasada ou sem a vaga obrigatoria, nulo. A live (fase 3) nao usa a Bunny.
+ * abertura, depois do fim, depois da Entrada atrasada ou sem a vaga obrigatoria, nulo. A live (fase 3) nao usa a Bunny:
+ * leva o bloco `live` (sem o nome da sala nem o token, que so saem do join-token), os banimentos do aluno em `me.ban`
+ * e os presentes agora pelo relogio da presenca (desde o inicio, presenceOffsetMs).
  */
 export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userId: string, now = Date.now(), options: { seatMissing?: boolean } = {}): Promise<StudentRoomExtras> {
   const { durationMs, session, webinar } = context;
   const offset = sessionOffsetMs(session, now);
   const simulated = session.kind === "simulated";
-  const [identity, pinnedRow, polls, presentIds] = await Promise.all([
+  const live = session.kind === "live";
+  const presence = presenceOffsetMs(session, now);
+  const [identity, pinnedRow, polls, presentIds, bans] = await Promise.all([
     loadStudentIdentity(db, userId),
     fetchPinnedMessageRow(db, session.pinnedMessageId),
     listStudentPolls(db, session, userId),
-    simulated ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(offset) ? offset : 0) / 1000)), sessionId: session.id }) : Promise.resolve([])
+    simulated || live ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(presence) ? presence : 0) / 1000)), sessionId: session.id }) : Promise.resolve([]),
+    // Fase 3: remover e silenciar so existem na live; o banido de todos os webinarios vale em qualquer forma (D33).
+    live ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan }))
   ]);
-  const join = roomJoinFor(context, now, options);
+  const ban = liveBanState({ nowMs: now, sessionBans: bans.sessionBans, userBan: bans.userBan });
+  const join = roomJoinFor(context, now, { ...options, ban, practiceSession: webinar.roomSettings.practiceSession });
 
   return {
+    live: live ? liveRoomInfoOf(session, liveRoomConfigured(process.env), webinar.roomSettings) : null,
     me: {
+      ban,
       consented: identity.consented,
       displayMode: identity.displayMode,
       displayName: identity.consented && identity.displayMode ? studentDisplayName(identity, identity.displayMode, userId, webinar.id) : null,

@@ -4,7 +4,8 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // A area do aluno dos Webinarios (docs/30 §1.1 e §1.2), na parte pura: a tabela de situacoes montada com
 // studentPhase, a contagem regressiva, os tres blocos de /webinarios, o card da pagina inicial, a faixa
-// "Comeca em 1 h", a resposta da rota de sessao e o acesso por produto.
+// "Comeca em 1 h" (a regra da fase 1 e a mesma da faixa do topo de todas as paginas, live-banner.ts; o resto da
+// faixa em tests/webinarios-faixa-ao-vivo.test.mjs), a resposta da rota de sessao e o acesso por produto.
 
 const model = await import("../src/server/webinars/model.ts");
 const student = await import("../src/server/webinars/student-model.ts");
@@ -246,6 +247,27 @@ test("faixa 'Comeca em 1 h: Entrar': so para quem garantiu vaga, de 60 min antes
   // Duas vagas: a mais proxima.
   const in10 = build(webinar({ id: "w2", slug: "logo", title: "Logo" }), [session({ id: "s2", scheduledAt: iso(now + 10 * MINUTE), webinarId: "w2" })], [registration({ sessionId: "s2", webinarId: "w2" })]);
   assert.equal(student.pickStartBanner([in30, in10], now).sessionId, "s2");
+});
+
+test("a faixa 'Comeca em 1 h: Entrar' saiu da pagina inicial para o topo de todas as paginas: a mesma regra de vaga e janela (live-banner.ts)", async () => {
+  const banner = await import("../src/server/webinars/live-banner.ts");
+  const soonOf = (input, sessions, registrations, at = now) =>
+    banner.chooseLiveNow({ entries: [{ registrations, sessions, webinar: input }], meetConfigured: true, nowMs: at }).soon;
+
+  // Os mesmos casos da faixa da fase 1: o mesmo titulo e a mesma hora, so com vaga, de 60 min antes ate a hora.
+  const in30 = [session({ scheduledAt: iso(now + 30 * MINUTE) })];
+  const old = student.pickStartBanner([build(webinar(), in30, [registration()])], now);
+  assert.deepEqual(soonOf(webinar(), in30, [registration()]), { href: old.href, scheduledAt: old.scheduledAt, title: old.title });
+  assert.equal(soonOf(webinar(), in30, []), null, "sem vaga, sem faixa");
+  assert.equal(soonOf(webinar(), [session({ scheduledAt: iso(now + 90 * MINUTE) })], [registration()]), null);
+  assert.equal(soonOf(webinar({ showBanner: false }), in30, [registration()]), null, "Faixa no topo desligada");
+  assert.equal(soonOf(webinar({ cancelledAt: iso(now - HOUR) }), in30, [registration()]), null);
+  assert.equal(soonOf(webinar(), in30, [registration()], now + 30 * MINUTE), null, "na hora marcada some");
+
+  // A conta desce com as frases da faixa (webinar-copy.ts), com o ": Entrar" do docs/30 §2.7.
+  assert.equal(banner.soonLabel(iso(now + 60 * MINUTE), now), copy.WEBINAR_COPY.faixa.comecaEm1h);
+  assert.equal(banner.soonLabel(iso(now + 30 * MINUTE), now), "Começa em 30 min: Entrar");
+  assert.equal(banner.soonLabel(iso(now + 61 * MINUTE), now), "", "antes dos 60 min a faixa nao existe");
 });
 
 test("GET .../session: a resposta desta fase, com o .ics da vaga pelo token e sem numero quando a equipe nao mostra", () => {

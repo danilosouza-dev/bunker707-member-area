@@ -1,13 +1,17 @@
-// Escritas do aluno na Sala (docs/30 §1.6, §4.7, §5.1, §8.3 e §8.5): a mensagem do chat (com o aceite na primeira,
-// o nome exibido, a rajada, o modo lento, as palavras bloqueadas e a moderacao), "Remover minhas mensagens", o sinal
-// de presenca, a reacao, a pergunta e o voto, a resposta da enquete. Toda escrita passa pelo servidor com a service
-// role; o offset gravado e o do relogio do servidor na gravada (nunca o do navegador) e a posicao do player no
-// replay. Cada funcao devolve o que a rota responde e os registros do historico (so ids e numeros, nunca o texto)
-// que a rota grava depois da resposta. Fora da hora ou do modo: RoomRefusedError (409 { reason }); limites: 429.
+// Escritas do aluno na Sala (docs/30 §1.4, §1.6, §4.7, §5.1, §8.3 e §8.5): a mensagem do chat (com o aceite na
+// primeira, o nome exibido, a rajada, o modo lento, as palavras bloqueadas e a moderacao), "Remover minhas mensagens",
+// o sinal de presenca, a reacao, a pergunta e o voto, a resposta da enquete. Toda escrita passa pelo servidor com a
+// service role; o offset gravado e o do relogio do servidor na gravada e na live (nunca o do navegador) e a posicao do
+// player no replay. Cada funcao devolve o que a rota responde e os registros do historico (so ids e numeros, nunca o
+// texto) que a rota grava depois da resposta. Fora da hora ou do modo: RoomRefusedError (409 { reason }); limites: 429.
+// Na live (fase 3) os banimentos tambem recusam: removido ou banido nao escreve nada (409 banned); silenciado no chat
+// nao manda mensagem nem pergunta (409 muted), mas reage, curte e responde enquete. Na Live gravada e no Replay, so o
+// banido de todos os webinarios recusa (409 banned, uma leitura pela chave).
 
 import "server-only";
 
 import { containsBlockedTerm, sanitizeLessonCommentBody } from "../comments/comment-validation";
+import { saoPauloTime } from "../../lib/webinar-time";
 import type { StudentEventInsert } from "../students/store";
 import {
   countStudentPresenceRows,
@@ -30,8 +34,10 @@ import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, ty
 import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
 import { CHAT_CONSENT_VERSION, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
+import { liveBanState, liveWriteRefusal, presenceOffsetMs, type LiveBanState } from "./live-model";
+import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { presenceBucket, sessionOffsetMs, simulatedPhase, toStudentMessage } from "./room-model";
-import { reserveChatSlot, takeChatBurst, takeQuestionBurst, takeReaction } from "./room-limits";
+import { markLiveOpening, reserveChatSlot, takeChatBurst, takeQuestionBurst, takeReaction } from "./room-limits";
 import {
   chatSentMetadata,
   consentMetadata,
@@ -52,13 +58,20 @@ import {
 import { consentIsCurrent, loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 
-export type RoomRefusal = PostingRefusal | "consent_required" | "late" | "poll_closed";
+/**
+ * Os motivos do 409. Da fase 3: `banned` nas escritas da live (removido desta sessao ou banido de todas), `muted` no
+ * chat e nas perguntas do silenciado, e `kicked` so no join-token (removido desta sessao; o banido de todas e `banned`).
+ */
+export type RoomRefusal = PostingRefusal | "banned" | "consent_required" | "kicked" | "late" | "muted" | "poll_closed";
 
 const REFUSAL_MESSAGES: Record<RoomRefusal, string> = {
+  banned: WEBINAR_COPY.aoVivo.banido,
   chat_off: WEBINAR_COPY.sala.chatDesligado,
   consent_required: CHAT_MESSAGES.consent,
   ended: WEBINAR_COPY.sala.encerrada,
+  kicked: WEBINAR_COPY.aoVivo.removido,
   late: WEBINAR_COPY.sala.entradaAtrasada,
+  muted: WEBINAR_COPY.aoVivo.silenciadoAteOFim,
   not_started: WEBINAR_COPY.sala.naoComecou,
   poll_closed: WEBINAR_COPY.sala.enquete.encerrada,
   team_only: WEBINAR_COPY.sala.chatSoEquipe
@@ -96,6 +109,43 @@ function refuse(context: RoomContext, now: number, kind: "chat" | "interaction")
   const refusal = postingRefusal(context.session, context.durationMs, now, kind);
   if (refusal) {
     throw new RoomRefusedError(refusal);
+  }
+}
+
+/**
+ * O 409 de quem foi barrado na live, com a frase certa: `banned` para removido ("Você foi removido desta live.") e
+ * banido de todas; `muted` com a hora em Sao Paulo ate quando vale (ou "ate o fim"). Sem recusa: nulo.
+ */
+export function banRefusalError(ban: LiveBanState, kind: "chat" | "interaction"): RoomRefusedError | null {
+  const refusal = liveWriteRefusal(ban, kind);
+  if (refusal === "banned") {
+    return new RoomRefusedError("banned", ban.banned ? WEBINAR_COPY.aoVivo.banido : WEBINAR_COPY.aoVivo.removido);
+  }
+  if (refusal === "muted") {
+    return new RoomRefusedError("muted", ban.mutedUntil ? WEBINAR_COPY.aoVivo.silenciadoAte(saoPauloTime(ban.mutedUntil)) : WEBINAR_COPY.aoVivo.silenciadoAteOFim);
+  }
+  return null;
+}
+
+/**
+ * Os banimentos (docs/30 §1.4 e §8.3), lidos agora a cada escrita (o silencio vence pela hora, a equipe desfaz a
+ * qualquer momento). Na sessao `live`, tudo: removido, silenciado e banido. Na Live gravada e no Replay, so o banido de
+ * todos os webinarios (uma leitura pela chave; D33: Banir vale para qualquer Webinario), com o mesmo 409 banned.
+ * Vem antes dos limites, entao a mensagem recusada nao gasta a vez do modo lento nem a rajada.
+ */
+async function refuseBanned(input: { context: Pick<RoomContext, "session">; db: WebinarsDb; kind: "chat" | "interaction"; now: number; userId: string }) {
+  const { session } = input.context;
+  if (session.kind !== "live") {
+    const userBan = await fetchUserBan(input.db, input.userId);
+    if (userBan) {
+      throw new RoomRefusedError("banned", WEBINAR_COPY.aoVivo.banido);
+    }
+    return;
+  }
+  const bans = await fetchStudentBans(input.db, { sessionId: session.id, userId: input.userId });
+  const error = banRefusalError(liveBanState({ nowMs: input.now, sessionBans: bans.sessionBans, userBan: bans.userBan }), input.kind);
+  if (error) {
+    throw error;
   }
 }
 
@@ -163,6 +213,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   const events: StudentEventInsert[] = [];
 
   refuse(context, now, "chat");
+  await refuseBanned({ context, db, kind: "chat", now, userId });
 
   const identity = await loadStudentIdentity(db, userId);
   const choice = consentChoice(identity, body, webinar);
@@ -198,7 +249,9 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
       body: text,
       display_name: displayName,
       kind: body.kind,
-      master: false,
+      // D31: tudo o que e escrito numa sessao live nasce master (o replay le da live so `master and approved`; na live
+      // moderada a linha so aparece depois de liberada). Na gravada e no replay, nunca (a equipe promove a mao).
+      master: session.kind === "live",
       offset_ms: offsetMs,
       reply_to_id: body.replyToId ?? null,
       role: "student",
@@ -251,17 +304,22 @@ export type HeartbeatContext = Pick<RoomContext, "durationMs" | "session"> & { r
 export type HeartbeatResult = { ended: boolean; events: StudentEventInsert[]; offsetMs: number | null; presentNow: number; serverTime: string };
 
 /**
- * O sinal de 15 s (docs/30 §5.1, §9 e D19): o balde de 30 s pelo offset do servidor (gravada) ou do player (replay);
- * o primeiro sinal depois de 90 s sem sinal grava webinar_joined (e webinar_replay_started no primeiro do replay);
- * `leave` grava webinar_left com os segundos presentes. Fora dos limites de escrita.
+ * O sinal de 15 s (docs/30 §5.1, §9 e D19): o balde de 30 s pelo offset do servidor (gravada), pelo inicio de verdade
+ * (live: presenceOffsetMs, desde started_at e nunca pela ancora, como webinar_close_session mede) ou pelo player
+ * (replay); o primeiro sinal depois de 90 s sem sinal grava webinar_joined (e webinar_replay_started no primeiro do
+ * replay), menos na live, onde a entrada e gravada pelo join-token; `leave` grava webinar_left com os segundos
+ * presentes (na live, `kicked` para quem foi removido ou banido). A live so acaba pela situacao (o apresentador encerra;
+ * passar da duracao prevista nao encerra). Fora dos limites de escrita.
  */
 export async function recordStudentHeartbeat(input: { body: HeartbeatInput; context: HeartbeatContext; db: WebinarsDb; now?: number; userAgent?: string | null; userId: string }): Promise<HeartbeatResult> {
   const { body, context, db, userId } = input;
   const now = input.now ?? Date.now();
   const nowIso = new Date(now).toISOString();
   const { session } = context;
+  const live = session.kind === "live";
   const serverOffset = sessionOffsetMs(session, now);
-  const offsetSeconds = Number.isFinite(serverOffset) ? Math.floor(serverOffset / 1000) : body.offsetSeconds;
+  const presenceOffset = presenceOffsetMs(session, now);
+  const offsetSeconds = Number.isFinite(presenceOffset) ? Math.floor(presenceOffset / 1000) : body.offsetSeconds;
   const bucket = Math.max(-2880, Math.min(5760, presenceBucket(offsetSeconds)));
   const events: StudentEventInsert[] = [];
 
@@ -278,23 +336,37 @@ export async function recordStudentHeartbeat(input: { body: HeartbeatInput; cont
     userId
   });
 
-  if (joined && !body.leave) {
+  if (joined && !body.leave && live) {
+    // Na live a entrada e do join-token; se este sinal chegou antes do pedido do token, fica a marca para ele.
+    markLiveOpening(userId, session.id, now);
+  } else if (joined && !body.leave) {
     events.push(webinarEvent(userId, session.id, "webinar_joined", { device: deviceOf(input.userAgent), kind: session.kind }));
     if (session.kind === "replay" && !last) {
       events.push(webinarEvent(userId, session.id, "webinar_replay_started", { recording_id: context.recordingId }));
     }
   }
 
-  const ended = session.kind === "replay" ? false : session.status === "ended" || session.status === "cancelled" || simulatedPhase(session, context.durationMs, now) === "ended";
+  const ended =
+    session.kind === "replay"
+      ? false
+      : session.status === "ended" || session.status === "cancelled" || (session.kind === "simulated" && simulatedPhase(session, context.durationMs, now) === "ended");
 
   if (body.leave) {
-    const buckets = await countStudentPresenceRows(db, { sessionId: session.id, userId });
-    events.push(webinarEvent(userId, session.id, "webinar_left", { kind: session.kind, reason: ended ? "ended" : "closed", seconds_present: buckets * ROOM_RULES.bucketSeconds }));
+    const [buckets, removed] = await Promise.all([countStudentPresenceRows(db, { sessionId: session.id, userId }), live && !ended ? wasRemoved(db, session.id, userId, now) : Promise.resolve(false)]);
+    const reason = ended ? "ended" : removed ? "kicked" : "closed";
+    events.push(webinarEvent(userId, session.id, "webinar_left", { kind: session.kind, reason, seconds_present: buckets * ROOM_RULES.bucketSeconds }));
   }
 
   const presentNow = session.kind === "replay" ? 0 : (await listPresentUserIds(db, { currentBucket: bucket, sessionId: session.id })).length;
 
   return { ended, events, offsetMs: Number.isFinite(serverOffset) ? Math.round(serverOffset) : null, presentNow, serverTime: nowIso };
+}
+
+/** Na saida da live: a pessoa saiu porque foi removida desta sessao ou banida (webinar_left com reason `kicked`). */
+async function wasRemoved(db: WebinarsDb, sessionId: string, userId: string, now: number): Promise<boolean> {
+  const bans = await fetchStudentBans(db, { sessionId, userId });
+  const ban = liveBanState({ nowMs: now, sessionBans: bans.sessionBans, userBan: bans.userBan });
+  return ban.kicked || ban.banned;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -311,6 +383,7 @@ export async function sendStudentReaction(input: { context: RoomContext; db: Web
   const { context, db, reaction, userId } = input;
   const now = input.now ?? Date.now();
   refuse(context, now, "interaction");
+  await refuseBanned({ context, db, kind: "interaction", now, userId });
 
   const taken = takeReaction(userId, context.session.id, now);
   if (!taken.ok) {
@@ -354,6 +427,8 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
   const { session, webinar } = context;
   const events: StudentEventInsert[] = [];
   refuse(context, now, "interaction");
+  // A pergunta e escrever: o silenciado no chat tambem nao pergunta (so reage, curte e responde enquete).
+  await refuseBanned({ context, db, kind: "chat", now, userId });
 
   if (body.anonymous && !webinar.roomSettings.anonymousQuestions) {
     throw new WebinarError(CHAT_MESSAGES.anonymousOff, 400);
@@ -393,6 +468,7 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
 export async function voteStudentQuestion(input: { context: RoomContext; db: WebinarsDb; now?: number; questionId: string; userId: string }): Promise<{ upvotes: number; voted: boolean }> {
   const now = input.now ?? Date.now();
   refuse(input.context, now, "interaction");
+  await refuseBanned({ context: input.context, db: input.db, kind: "interaction", now, userId: input.userId });
   const row = await fetchQuestionRow(input.db, input.questionId);
   if (!row || row.session_id !== input.context.session.id || row.deleted_at || !toStudentQuestion(questionFromRow(row), input.userId, false)) {
     throw new WebinarError("Pergunta não encontrada.", 404);
@@ -407,6 +483,7 @@ export async function answerStudentPoll(input: { context: RoomContext; db: Webin
   const { context, db, userId } = input;
   const now = input.now ?? Date.now();
   refuse(context, now, "interaction");
+  await refuseBanned({ context, db, kind: "interaction", now, userId });
 
   const found = await fetchPollRow(db, input.pollId);
   if (!found || found.poll.session_id !== context.session.id) {

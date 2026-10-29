@@ -3,10 +3,11 @@ import { recentReactionCounts, webinarsDb } from "@/server/webinars/room-queries
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { sendStudentReaction } from "@/server/webinars/room-writes";
 
-// As reacoes da Sala (docs/30 §5.1 e D16): POST { sessionId, reaction, offsetMs? } grava uma reacao (no maximo
-// 1 por segundo e 20 por minuto por aluno e sessao, contadas no banco: 429 com Retry-After) e responde 201;
-// GET ?sessao=&since= devolve as contagens por reacao dos ultimos 10 s para a animacao. Sessao obrigatoria;
-// o teto global de 30 escritas por minuto; fora do acesso ou sessao de outro webinario: 404.
+// As reacoes da Sala (docs/30 §5.1 e D16): POST { sessionId, reaction, offsetMs? } grava uma reacao (no maximo 1 por
+// segundo e 20 por minuto por aluno e sessao, contadas no banco: 429 com Retry-After; na live, removido ou banido 409
+// banned, o silenciado no chat reage) e responde 201; GET ?sessao=&since= devolve as contagens por reacao dos ultimos
+// 10 s para a animacao. Sessao obrigatoria; o teto global de 30 escritas por minuto; fora do acesso ou sessao de outro
+// webinario: 404.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, CalendarClock, ImageOff, Radio, TriangleAlert } from "lucide-react";
-import { MemberButton, MemberButtonLink } from "@/components/member/ui/member-button";
+import { MemberButtonLink } from "@/components/member/ui/member-button";
 import { MemberChip, type MemberChipTone } from "@/components/member/ui/member-chip";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
 import { MemberPage, MemberSection } from "@/components/member/ui/member-page";
@@ -11,21 +11,24 @@ import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { StudentPhase } from "@/server/webinars/model";
+import { liveEnterState } from "@/server/webinars/live-banner";
 import { phaseLabel, roomHref, type StudentSessionView, type StudentWebinarView } from "@/server/webinars/student-model";
 import type { SessionCalendarLinks, WebinarPageData } from "@/server/webinars/student-queries";
 import { WebinarCountdown } from "./webinar-countdown";
-import { WebinarEnterButton, WebinarReplayButton } from "./webinar-enter-button";
+import { LiveRoomWatcher, WebinarEnterButton, WebinarReplayButton } from "./webinar-enter-button";
 import { WebinarFacts } from "./webinar-facts";
 import { WebinarLocalTime } from "./webinar-local-time";
 import { WebinarSessionActions } from "./webinar-session-actions";
 
 // /webinarios/[slug] (docs/30 §1.2): a tabela de situacoes. Agendado (Garantir vaga), Vaga garantida (selo,
 // Adicionar ao calendario e Cancelar minha vaga), Vagas esgotadas (sem botao), Aguardando o apresentador e
-// Ao vivo (Entrar: na Live gravada abre a Sala de 15 min antes ate o fim, fase 2; na Live ao vivo a sala chega
-// na fase 3 e o botao diz "em breve"), Encerrada ("Essa live acabou." e Assistir o replay quando ha a sessao
-// replay, fase 2) e Cancelado (o motivo que a equipe escreveu). Na Live gravada o aluno escolhe a sessao
-// antes de garantir a vaga. Horarios em Sao Paulo; "(no seu horario: 21:00)" quando o aparelho esta em
-// outro fuso. Sem acesso a pagina nem existe (notFound na page.tsx).
+// Ao vivo (Entrar: na Live gravada abre a Sala de 15 min antes ate o fim, fase 2; na Live ao vivo, fase 3, abre a
+// sala quando a equipe abriu ou o apresentador comecou; da hora marcada ate a equipe abrir, "Aguardando o
+// apresentador" sem link e a pagina reconsulta a cada 15 s; sem a sala neste ambiente, o botao diz "em breve"),
+// Encerrada ("Essa live acabou." e Assistir o replay quando ha a sessao replay) e Cancelado (o motivo que a equipe
+// escreveu). Com limite de vagas (A12) so quem garantiu entra: sem a vaga, Garantir vaga e depois Entrar. Na Live
+// gravada o aluno escolhe a sessao antes de garantir a vaga. Horarios em Sao Paulo; "(no seu horario: 21:00)"
+// quando o aparelho esta em outro fuso. Sem acesso a pagina nem existe (notFound na page.tsx).
 
 const PHASE_TONES: Record<StudentPhase, MemberChipTone> = {
   cancelled: "warning",
@@ -38,17 +41,6 @@ const PHASE_TONES: Record<StudentPhase, MemberChipTone> = {
 };
 
 const UPCOMING: readonly StudentPhase[] = ["scheduled", "registered", "sold_out"];
-
-function ComingSoonButton({ label, variant }: { label: string; variant: "primary" | "secondary" }) {
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      <MemberButton aria-disabled="true" disabled title={WEBINAR_COPY.aluno.emBreve} variant={variant}>
-        {label}
-      </MemberButton>
-      <MemberChip tone="muted">{WEBINAR_COPY.aluno.emBreve}</MemberChip>
-    </div>
-  );
-}
 
 function SessionRow({
   accessPreviewMode,
@@ -123,6 +115,7 @@ function SessionRow({
 function PhaseBlock({
   accessPreviewMode,
   calendars,
+  liveRoomConfigured,
   readOnly,
   serverNow,
   source,
@@ -130,6 +123,7 @@ function PhaseBlock({
 }: {
   accessPreviewMode?: AccessPreviewMode;
   calendars: Record<string, SessionCalendarLinks>;
+  liveRoomConfigured: boolean;
   readOnly: boolean;
   serverNow: number;
   source: string | null;
@@ -160,8 +154,17 @@ function PhaseBlock({
     return null;
   }
 
+  // A Live ao vivo ainda nao aberta: a pagina reconsulta a cada 15 s (de 15 min antes ate a equipe abrir a sala), com
+  // ou sem vaga; o Entrar aparece quando a sessao vira `waiting` ou `live`.
+  const watcher = view.kind === "live" ? <LiveRoomWatcher liveRoomConfigured={liveRoomConfigured} serverNow={serverNow} session={primary} /> : null;
+
   if (!view.registrationRequired && UPCOMING.includes(view.phase)) {
-    return <p className="text-sm leading-6 text-zinc-400">{copy.semVaga}</p>;
+    return (
+      <>
+        <p className="text-sm leading-6 text-zinc-400">{copy.semVaga}</p>
+        {watcher}
+      </>
+    );
   }
 
   if (view.kind === "simulated") {
@@ -191,38 +194,71 @@ function PhaseBlock({
   }
 
   if (view.phase === "waiting" || view.phase === "live") {
+    const roomOpen = liveEnterState(primary, { liveRoomConfigured, nowMs: serverNow }) === "enter";
+    // Com limite de vagas so quem garantiu entra (A12): sem a vaga, Garantir vaga e, com a sala aberta, Entrar.
+    const seatMissing = !readOnly && view.registrationRequired && view.capacity !== null && !primary.registered;
+
     return (
       <MemberSurface variant="inset">
         <p className="flex items-center gap-2 text-sm font-semibold text-white">
           {view.phase === "live" ? <Radio aria-hidden="true" className="size-4 text-[var(--accent)]" /> : null}
           {view.phase === "live" ? copy.selo.aoVivo : copy.aguardando}
         </p>
-        <p className="mt-1 text-sm leading-6 text-zinc-400">{copy.aguardandoTexto}</p>
-        <ComingSoonButton label={copy.entrar} variant="primary" />
+        {view.phase === "waiting" ? <p className="mt-1 text-sm leading-6 text-zinc-400">{copy.aguardandoTexto}</p> : null}
+        {seatMissing ? (
+          <div className="mt-3">
+            <WebinarSessionActions
+              calendar={calendars[primary.id] ?? null}
+              enterHref={roomOpen ? roomHref(view.slug, primary.id) : null}
+              phase="scheduled"
+              readOnly={readOnly}
+              registered={primary.registered}
+              sessionId={primary.id}
+              source={source}
+              webinarId={view.id}
+            />
+          </div>
+        ) : (
+          <WebinarEnterButton
+            accessPreviewMode={accessPreviewMode}
+            durationMinutes={view.durationMinutes}
+            liveRoomConfigured={liveRoomConfigured}
+            serverNow={serverNow}
+            session={primary}
+            slug={view.slug}
+          />
+        )}
+        {watcher}
       </MemberSurface>
     );
   }
 
   return (
-    <WebinarSessionActions
-      calendar={calendars[primary.id] ?? null}
-      phase={primary.phase}
-      readOnly={readOnly}
-      registered={primary.registered}
-      sessionId={primary.id}
-      source={source}
-      webinarId={view.id}
-    />
+    <>
+      <WebinarSessionActions
+        calendar={calendars[primary.id] ?? null}
+        phase={primary.phase}
+        readOnly={readOnly}
+        registered={primary.registered}
+        sessionId={primary.id}
+        source={source}
+        webinarId={view.id}
+      />
+      {watcher}
+    </>
   );
 }
 
 export function WebinarPageView({
   accessPreviewMode,
   data,
+  liveRoomConfigured = false,
   source
 }: {
   accessPreviewMode?: AccessPreviewMode;
   data: Exclude<WebinarPageData, { state: "not_found" }>;
+  /** A sala ao vivo existe neste ambiente (liveRoomConfigured(process.env), lido no servidor); sem ela, "em breve". */
+  liveRoomConfigured?: boolean;
   /** Link de origem (?origem=) ja conferido pela pagina. */
   source: string | null;
 }) {
@@ -300,7 +336,15 @@ export function WebinarPageView({
           ) : null}
 
           <div className="mt-6">
-            <PhaseBlock accessPreviewMode={accessPreviewMode} calendars={calendars} readOnly={readOnly} serverNow={serverNow} source={source} view={view} />
+            <PhaseBlock
+              accessPreviewMode={accessPreviewMode}
+              calendars={calendars}
+              liveRoomConfigured={liveRoomConfigured}
+              readOnly={readOnly}
+              serverNow={serverNow}
+              source={source}
+              view={view}
+            />
           </div>
         </div>
       </article>

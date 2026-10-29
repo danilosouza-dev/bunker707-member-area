@@ -261,7 +261,7 @@ test("abas da pagina: a ativa pelo ?aba= (nao pelo endereco) e o periodo junto",
   assert.equal(textOf(markup), "Webinários Lives ao vivo Lives gravadas");
 });
 
-test("tabela: capa, tipo e sessoes, situacao, vagas, presentes '—'; o menu por situacao (Excluir so no rascunho, 'em breve' no que chega depois)", () => {
+test("tabela: capa, tipo e sessoes, situacao, vagas, presentes '—'; o menu por situacao (Excluir so no rascunho; Abrir a sala vale na fase 3)", () => {
   const rows = [
     item(),
     item({ id: "1c8f3c1e-2a4d-4e5f-8a9b-0c1d2e3f4a5b", kind: "simulated", kindLabel: "Live gravada", registeredCount: 0, sessionsCount: 3, situation: "draft", situationLabel: "Rascunho", situationTone: "neutral", status: "draft", title: "Gravada", whenIso: null, whenLabel: "—" }),
@@ -281,8 +281,9 @@ test("tabela: capa, tipo e sessoes, situacao, vagas, presentes '—'; o menu por
   const menus = markup.split('role="menu"').slice(1);
   assert.equal(menus.length, 3, "um menu por linha");
   const labels = (menu) => Array.from(menu.matchAll(/role="menuitem"[^>]*>(.*?)<\/div>/g)).map((match) => textOf(match[1]));
-  assert.deepEqual(labels(menus[0]), ["Abrir", "Abrir a sala · em breve", "Duplicar", "Cancelar"]);
-  assert.match(menus[0], /aria-disabled="true"[^>]*>[\s\S]*?Abrir a sala · em breve/, "o que chega na fase 3 fica desligado");
+  assert.deepEqual(labels(menus[0]), ["Abrir", "Abrir a sala", "Duplicar", "Cancelar"]);
+  assert.doesNotMatch(markup, /em breve/, "a sala ao vivo chegou: nada de 'em breve' na lista");
+  assert.match(markup, /data-row-shortcut="open_room" href="\/admin\/comunicacao\/webinarios\/0b7f3c1e-2a4d-4e5f-8a9b-0c1d2e3f4a5b\/sala"/, "a Live ao vivo agendada leva a sala pela linha");
   assert.deepEqual(labels(menus[1]), ["Abrir", "Duplicar", "Excluir"]);
   assert.deepEqual(labels(menus[2]), ["Abrir", "Duplicar"]);
 

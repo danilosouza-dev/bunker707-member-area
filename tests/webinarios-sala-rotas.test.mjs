@@ -876,7 +876,9 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.equal(data.session.showLiveBadge, true);
   assert.equal(data.webinar.replaySessionId, REPLAY);
   assert.equal(data.presentNow, 1);
-  assert.deepEqual(data.me, { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null });
+  const semBanimento = { banned: false, kicked: false, muted: false, mutedUntil: null };
+  assert.deepEqual(data.me, { ban: semBanimento, calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null });
+  assert.equal(data.live, null, "a gravada nao tem o bloco da sala ao vivo (fase 3)");
   assert.equal(data.pinned.body, "link da apostila");
   assert.equal(data.pinned.pinned, true);
   assert.deepEqual(data.polls, []);
@@ -903,7 +905,7 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   // Com o aceite gravado, `me` traz como o aluno aparece.
   assert.equal((await enviar({ body: "oi", displayMode: "nickname", nickname: "aninha", ...comAceite })).status, 201);
   const depois = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
-  assert.deepEqual(depois.body.data.me, { calendarUrl: null, consented: true, displayMode: "nickname", displayName: "aninha", nickname: "aninha", registered: false, registeredAt: null });
+  assert.deepEqual(depois.body.data.me, { ban: semBanimento, calendarUrl: null, consented: true, displayMode: "nickname", displayName: "aninha", nickname: "aninha", registered: false, registeredAt: null });
   assert.equal(db.tables.webinar_chat_consents[0].user_id, userId);
 
   assert.equal(data.session.anonymousQuestions, true, "a opcao Anonima das perguntas vem do card Sala");

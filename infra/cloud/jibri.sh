@@ -193,12 +193,19 @@ down() {
     [ "${CONFIRMADO:-}" = "sim" ] || die "jibri-down apaga o servidor do gravador. Confirme com CONFIRMADO=sim nas opcoes (docs/20 §8B.5)."
     need HCLOUD_TOKEN JIBRI_SECRETS
     install_hcloud; deploy_key
-    local names forced="" name
+    local names forced="" name code
     if [ -n "${SESSAO:-}" ]; then valid_sessao "$SESSAO"; names=$(jibri_name "$SESSAO"); else names=$(hzj server list --selector papel=jibri | jq -r '.[].name'); fi
     [ -n "$names" ] || { echo "Nenhum gravador ligado (label papel=jibri)."; return 0; }
     case "${FORCAR:-${FORCE:-}}" in 1|sim|true) forced=1 ;; esac
     for name in $names; do
-        server_exists "$name" || { echo "  $name nao existe; nada a apagar."; continue; }
+        if ! server_exists "$name"; then
+            # A maquina ja foi apagada, mas o primeiro "gone" pode ter se perdido: avisa o app de novo, senao o job
+            # repete o jibri-down a cada 2 h (releaseRetryMinutes) com a sessao parada em uploaded/ready (docs/30 §6.7).
+            echo "  $name nao existe; nada a apagar."
+            code=$(recorder_request POST "" "{\"sessionId\":\"${name#"$JIBRI_NAME_PREFIX"}\",\"state\":\"gone\"}")
+            echo "  app avisado (state=gone): $code"
+            continue
+        fi
         local sessao="${name#"$JIBRI_NAME_PREFIX"}" created type loc hours ip target code rs ok_to_delete="" pending=""
         log "Gravador $name (sessao $sessao)"
         created=$(server_json_field "$name" '.created'); type=$(server_json_field "$name" '.server_type.name'); loc=$(server_json_field "$name" '.location.name // .datacenter.location.name')

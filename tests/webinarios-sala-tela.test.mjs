@@ -239,7 +239,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas 
   assert.match(preview, /No modo de visualização, nada é gravado\./);
 });
 
-test("Entrar e Assistir o replay na pagina da live: link para a sala dentro da janela, a frase fora dela, em breve na Live ao vivo e sem replay", () => {
+test("Entrar e Assistir o replay na pagina da live: link para a sala dentro da janela, a frase fora dela, em breve na Live ao vivo sem a sala neste ambiente (liveRoomConfigured falso) e sem replay", () => {
   const session = { id: "s1", kind: "simulated", lateJoinMinutes: null, scheduledAt: new Date(T0).toISOString(), startedAt: null, status: "scheduled" };
   const within = render(enter.WebinarEnterButton, { durationMinutes: 60, serverNow: T0 + 5 * MIN, session, slug: "aula-de-ia" });
   assert.match(within, /href="\/webinarios\/aula-de-ia\/sala\?sessao=s1"/);

@@ -9,6 +9,7 @@
 import { saoPauloDayKey } from "../../lib/webinar-time";
 import { slugifyTitle } from "../catalog/model";
 import type { AudienceDefinition } from "../communications/audience-model";
+import type { RecorderStatus } from "./recorder-model";
 
 export const WEBINAR_KINDS = ["live", "simulated"] as const;
 export type WebinarKind = (typeof WEBINAR_KINDS)[number];
@@ -171,6 +172,22 @@ export type WebinarSession = {
   presenceCurve: PresenceSummary | null;
   recordingAnchorAt: string | null;
   recordingId: string | null;
+  /** Fase 3: quando a equipe foi avisada da maquina do gravador ligada ha 6 h (uma vez). */
+  recorderAlertedAt: string | null;
+  /** Fase 3: quando o app pediu a devolucao da maquina (jibri-down). */
+  recorderReleaseRequestedAt: string | null;
+  /** Fase 3: quando o app pediu a maquina do gravador (jibri-up). */
+  recorderRequestedAt: string | null;
+  /** Fase 3: a situacao da maquina do gravador por hora (so na live; nas outras, "none"). */
+  recorderStatus: RecorderStatus;
+  /** Fase 3: o "Gravar" clicado antes de a maquina ficar pronta (a gravacao comeca sozinha no ready). */
+  recordingRequestedAt: string | null;
+  /** Fase 3: a sala trancada pelo apresentador (quem chega espera). */
+  roomLocked: boolean;
+  /** Fase 3 (202610290003): a reserva Gravar no navegador ligada desde esta hora (o selo Gravando do aluno). */
+  browserRecordingAt: string | null;
+  /** Fase 3: o nome da sala do Jitsi proprio (`w-<webinario>-<16>`); so no servidor, nunca vai para o aluno. */
+  roomName: string | null;
   scheduledAt: string;
   /** Fase 2: quando o roteiro entrou na sessao (webinar_open_session). */
   scriptFiredAt: string | null;

@@ -3,8 +3,10 @@
 // a cada N s", N escolhido pela equipe por sessao), as perguntas (2 por minuto) e as reacoes (1 por segundo e 20
 // por minuto). Tudo e conferido e reservado sem nenhum await no meio, entao dois pedidos ao mesmo tempo nao passam
 // juntos; as reacoes tambem contam no banco (countStudentReactionsSince), o limite entre instancias. Por cima de
-// tudo vale o teto global takeStudentWrite. Modulo puro (sem "server-only"), com o relogio por parametro:
-// tests/webinarios-sala-navegador e tests/webinarios-sala-rotas.
+// tudo vale o teto global takeStudentWrite. Na live (fase 3): os lotes de sinais do iframe (POST .../room-events,
+// 6 por minuto) e o webinar_joined do join-token (no maximo um a cada 90 s, a mesma tolerancia da presenca: pedir
+// o token de novo nao e uma entrada nova; a abertura vista primeiro pela presenca fica marcada para o token). Modulo puro (sem "server-only"), com o relogio por parametro:
+// tests/webinarios-sala-navegador, tests/webinarios-sala-rotas e tests/webinarios-sala-ao-vivo-rotas.
 
 import { ROOM_RULES } from "./model";
 
@@ -83,6 +85,15 @@ const reactionSecond = windowedLimit(ROOM_RULES.reactions.perSecond, 1000);
 const reactionMinute = windowedLimit(ROOM_RULES.reactions.perMinute, 60_000);
 const lastSentAt = new Map<string, number>();
 
+/** Lotes de POST .../room-events por aluno e sessao num minuto (o iframe junta os sinais; 6 lotes sobram). */
+export const ROOM_EVENT_BATCHES_PER_MINUTE = 6;
+/** Uma entrada (webinar_joined) por aluno e sessao a cada 90 s: 3 baldes de 30 s sem sinal, como a presenca (D19). */
+export const LIVE_JOIN_WINDOW_MS = ROOM_RULES.leaveAfterBuckets * ROOM_RULES.bucketSeconds * 1000;
+
+const roomEventBatches = windowedLimit(ROOM_EVENT_BATCHES_PER_MINUTE, 60_000);
+const liveJoins = windowedLimit(1, LIVE_JOIN_WINDOW_MS);
+const liveOpenings = new Map<string, number>();
+
 export function chatBurstKey(userId: string, sessionId: string) {
   return `chat:${userId}:${sessionId}`;
 }
@@ -111,6 +122,36 @@ export function takeReaction(userId: string, sessionId: string, now = Date.now()
   reactionSecond.add(key, now);
   reactionMinute.add(key, now);
   return { ok: true, retryAfterSeconds: 0 };
+}
+
+/** Sinais do iframe: no maximo 6 lotes por minuto por aluno e sessao (429 com Retry-After). */
+export function takeRoomEventBatch(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return roomEventBatches.take(roomKey(userId, sessionId), now);
+}
+
+/**
+ * Se o join-token grava webinar_joined agora: a primeira entrada da pessoa na sessao nos ultimos 90 s neste processo.
+ * Confere e marca no mesmo passo (dois tokens pedidos juntos gravam uma entrada so); entre processos, quem segura e a
+ * amostra de presenca recente (live-room.ts).
+ */
+export function takeLiveJoinRecord(userId: string, sessionId: string, now = Date.now()): boolean {
+  return liveJoins.take(roomKey(userId, sessionId), now).ok;
+}
+
+/**
+ * O sinal de presenca da live viu uma abertura nova (90 s sem sinal antes dele): guarda a hora para o join-token
+ * gravar o webinar_joined mesmo quando o primeiro sinal chega antes do pedido do token (a pagina dispara os dois juntos).
+ */
+export function markLiveOpening(userId: string, sessionId: string, now = Date.now()) {
+  remember(liveOpenings, roomKey(userId, sessionId), now);
+}
+
+/** Se ha abertura vista pela presenca nos ultimos 90 s ainda sem entrada gravada; consome a marca. */
+export function consumeLiveOpening(userId: string, sessionId: string, now = Date.now()): boolean {
+  const key = roomKey(userId, sessionId);
+  const at = liveOpenings.get(key);
+  liveOpenings.delete(key);
+  return at !== undefined && now - at <= LIVE_JOIN_WINDOW_MS;
 }
 
 /**
@@ -170,5 +211,8 @@ export function resetRoomLimits() {
   questionBurst.clear();
   reactionSecond.clear();
   reactionMinute.clear();
+  roomEventBatches.clear();
+  liveJoins.clear();
+  liveOpenings.clear();
   lastSentAt.clear();
 }

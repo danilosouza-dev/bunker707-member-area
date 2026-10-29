@@ -66,6 +66,11 @@ cfg_ok=1
 for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9"; do
     printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
+# A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.
+toolbar=$(printf '%s' "$cfg" | grep -E '^[[:space:]]*config\.toolbarButtons[[:space:]]*=' | tail -n1)
+for button in "'desktop'" "'recording'" "'security'" "'participants-pane'"; do
+    if [ -z "$toolbar" ] || printf '%s' "$toolbar" | grep -qF "$button"; then cfg_ok=0; falha "config.js" "barra padrao com $button (ou sem toolbarButtons): $toolbar"; fi
+done
 [ "$cfg_ok" = 1 ] && ok "config.js" "custom-config.js no fim"
 if [ -z "$frame_ancestors" ]; then
     falha "frame-ancestors (MEET_FRAME_ANCESTORS)" "vazio: a sala nao abre no iframe da area de membros"

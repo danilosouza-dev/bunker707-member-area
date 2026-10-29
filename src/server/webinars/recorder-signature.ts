@@ -59,6 +59,18 @@ export function verifyRecorderSignature(input: {
   return { ok: true };
 }
 
+/**
+ * A chave da lista de barrados que o Prosody busca (GET /api/webhooks/room-guard, docs/30 §8.1): derivada do segredo do
+ * token da sala (WEBINAR_JWT_SECRET no app, JWT_APP_SECRET no Jitsi: os dois ja tem) por HMAC-SHA256 com um rotulo
+ * proprio, em hexadecimal. Assim o Prosody assina o pedido sem um segredo novo e a assinatura nunca vale como token.
+ * O mod_bunker_room_guard.lua faz a mesma conta.
+ */
+export const ROOM_GUARD_LABEL = "bunker707-room-guard";
+
+export function roomGuardKey(jwtSecret: string): string {
+  return createHmac("sha256", jwtSecret.trim()).update(ROOM_GUARD_LABEL, "utf8").digest("hex");
+}
+
 /** Os dois cabecalhos prontos para quem chama o webhook (o workflow e os testes). */
 export function recorderHeaders(secret: string, body: string, nowMs: number): Record<string, string> {
   const timestamp = String(Math.floor(nowMs / 1000));

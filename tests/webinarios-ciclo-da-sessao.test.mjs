@@ -125,6 +125,16 @@ test("encerrar: sem gravacao pronta nenhum replay (Live ao vivo espera o MP4); a
   const [insert] = comAsDuas.queries.filter((query) => query.table === "webinar_sessions" && query.op === "insert");
   assert.equal(insert.payload.recording_id, propria.id, "a gravacao da sessao vale antes da base");
 
+  // A gravacao da live ficou pronta com a live no ar (so session_id, sem recording_id): o encerramento mede pelo relogio,
+  // acha a gravacao pela sessao, cria o replay com ela e so entao liga recording_id.
+  const soPelaSessao = bancoDosWebinarios({ gravacoes: [gravacaoRow(), { ...propria }], sessoes: [sessaoRow({ kind: "live", recording_id: null, started_at: "2026-11-05T23:00:00.000Z", status: "live" })] });
+  assert.equal((await finishSession(soPelaSessao, SESSAO_ID, FIM)).replayCreated, true);
+  const [doReplay] = soPelaSessao.queries.filter((query) => query.table === "webinar_sessions" && query.op === "insert");
+  assert.equal(doReplay.payload.recording_id, propria.id, "a gravacao da live, achada pelo session_id");
+  const ordem = soPelaSessao.queries.map((query) => `${query.table}:${query.op}`);
+  assert.ok(ordem.indexOf("webinar_close_session:rpc") < ordem.indexOf("webinar_sessions:update"), "liga recording_id depois de medir a live");
+  assert.equal(soPelaSessao.estado.sessoes.find((row) => row.id === SESSAO_ID).recording_id, propria.id);
+
   const replay = bancoDosWebinarios({ sessoes: [sessaoRow({ kind: "replay", source_session_id: "11111111-aaaa-4aaa-8aaa-111111111111", status: "live" })] });
   const encerrado = await finishSession(replay, SESSAO_ID, FIM);
   assert.equal(encerrado.replayCreated, false);
@@ -153,4 +163,11 @@ test("replayRecordingOf: a gravacao da sessao, senao a base do webinario (bunny 
   assert.equal(replayRecordingOf([outraBase], { recording_id: null })?.id, outraBase.id);
   assert.equal(replayRecordingOf([gravacaoRow({ status: "processing" })], { recording_id: GRAVACAO_ID }), null);
   assert.equal(replayRecordingOf([], { recording_id: GRAVACAO_ID }), null);
+  // A gravacao da live pronta antes do fim fica so com session_id (o job e o Enviar gravacao nao ligam recording_id com
+  // a live no ar): o encerramento a acha pela sessao, a mais nova pronta, antes da base do webinario.
+  const antiga = gravacaoRow({ created_at: "2026-11-05T22:00:00.000Z", id: "99999999-2222-4222-8222-222222222201", session_id: SESSAO_ID, source: "jibri" });
+  const nova = gravacaoRow({ created_at: "2026-11-05T23:00:00.000Z", id: "99999999-2222-4222-8222-222222222202", session_id: SESSAO_ID, source: "upload" });
+  const codificando = gravacaoRow({ created_at: "2026-11-05T23:30:00.000Z", id: "99999999-2222-4222-8222-222222222203", session_id: SESSAO_ID, status: "processing" });
+  assert.equal(replayRecordingOf([base, antiga, nova, codificando], { id: SESSAO_ID, recording_id: null })?.id, nova.id);
+  assert.equal(replayRecordingOf([base, antiga], { id: "outra", recording_id: null })?.id, base.id, "de outra sessao, nao");
 });

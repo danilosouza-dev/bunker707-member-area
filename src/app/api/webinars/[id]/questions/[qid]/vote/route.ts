@@ -5,9 +5,10 @@ import { webinarsDb } from "@/server/webinars/room-queries";
 import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, roomErrorResponse } from "@/server/webinars/room-route";
 import { voteStudentQuestion } from "@/server/webinars/room-writes";
 
-// Curtir / Tirar a curtida de uma pergunta (docs/30 §5.1): POST { sessionId } alterna o voto do aluno e responde
-// { upvotes, voted }. Pergunta de outra sessao, apagada ou dispensada de outro aluno: 404; fora da hora da sessao: 409.
-// Sessao obrigatoria; o teto global de 30 escritas.
+// Curtir / Tirar a curtida de uma pergunta (docs/30 §5.1): POST { sessionId } alterna o voto do aluno e responde {
+// upvotes, voted }. Pergunta de outra sessao, apagada ou dispensada de outro aluno: 404; fora da hora da sessao: 409;
+// na live, removido ou banido 409 banned (o silenciado no chat curte). Sessao obrigatoria; o teto global de 30
+// escritas.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

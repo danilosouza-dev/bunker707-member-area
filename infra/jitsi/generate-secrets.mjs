@@ -76,11 +76,16 @@ function defaultAppOrigin(meetHost) {
   return `https://membros.${parent}`;
 }
 
+// O app responde a lista de removidos e banidos que o Prosody busca (mod_bunker_room_guard, docs/30 §8.1).
+const roomGuardUrl = (origin) => (origin ? `${origin}/api/webhooks/room-guard` : "");
+
 const addresses = options.local
   ? {
       PUBLIC_URL: "https://meet.127.0.0.1.sslip.io:3443",
       MEET_SITE_ADDRESS: "meet.127.0.0.1.sslip.io",
       MEET_FRAME_ANCESTORS: options.appOrigin || "http://localhost:3000 http://127.0.0.1:3000",
+      // No ensaio local o Prosody nao alcanca o localhost da maquina: so com --app-origin.
+      ROOM_GUARD_URL: roomGuardUrl(options.appOrigin),
       ACME_EMAIL: "local@example.invalid",
       CADDY_BIND: "127.0.0.1",
       CADDY_HTTP_PORT: "3080",
@@ -92,6 +97,7 @@ const addresses = options.local
       PUBLIC_URL: `https://${options.domain}`,
       MEET_SITE_ADDRESS: options.domain,
       MEET_FRAME_ANCESTORS: options.appOrigin || defaultAppOrigin(options.domain),
+      ROOM_GUARD_URL: roomGuardUrl(options.appOrigin || defaultAppOrigin(options.domain)),
       ACME_EMAIL: options.email,
       CADDY_LOCAL_CERTS: ""
     };

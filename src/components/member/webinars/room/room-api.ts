@@ -3,15 +3,20 @@
 // A conversa da Sala com /api/webinars/[id]/* (docs/30 §5.1), no desenho de webinars-client.ts: fetch sem cache e
 // na mesma origem; { data } | { error, reason? } desembrulhado em WebinarsRequestError (4xx traz a frase do
 // servidor; 5xx e falha de rede ficam com a frase da tela); o sinal de saida vai por sendBeacon (text/plain, como
-// o servidor aceita). Nenhum segredo aqui: o endereco do player ja vem montado pelo servidor.
+// o servidor aceita). Nenhum segredo aqui: o endereco do player ja vem montado pelo servidor. Fase 3 (a sala ao vivo):
+// o token da sala (POST .../join-token, o nome da sala so na resposta, nunca na URL) e os lotes de sinais do iframe
+// (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain).
 
+import type { RoomEventItem } from "@/lib/jitsi-room-config";
 import { roomApiPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
 import type { StudentPoll, StudentQuestion } from "@/server/webinars/room-rules";
 import type { StudentSessionPayload } from "@/server/webinars/student-model";
 import { WebinarsRequestError } from "../webinars-client";
+import { liveApiPath } from "./live-room-model";
 
 export { WebinarsRequestError };
 
@@ -157,4 +162,43 @@ export function postPollAnswer(webinarId: string, body: { offsetMs?: number; opt
   return sendJson<{ poll: StudentPoll }>(roomApiPath(webinarId, "polls"), "POST", body, GENERIC);
 }
 
-export type { ChatMode, Reaction, StudentChatMessage, StudentPoll, StudentQuestion };
+/* ------------------------------------------------------------------------------------------------
+ * A sala ao vivo (fase 3): o token e os sinais do iframe
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O token da sala ao vivo: 200 { domain, jwt, room, role, expiresAt, refreshAt, settings }; 409 { reason } (not_started,
+ * ended, kicked, banned) e 503 { reason: "meet_unconfigured" } chegam no erro com `status` e `reason`.
+ */
+export function postJoinToken(webinarId: string, sessionId: string) {
+  return sendJson<JoinTokenReply>(liveApiPath(webinarId, "join-token"), "POST", { sessionId }, WEBINAR_COPY.aoVivo.erroAbrir);
+}
+
+/** Um lote de sinais do iframe ({ sessionId, events } ja em JSON): 202 { accepted }; 429 traz o Retry-After no erro. */
+export async function postRoomEvents(webinarId: string, body: string) {
+  const response = await fetch(liveApiPath(webinarId, "room-events"), {
+    body,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+    method: "POST"
+  });
+  return readData<{ accepted: number }>(response, GENERIC);
+}
+
+/** O que sobrou da fila ao sair (pagehide): o navegador entrega mesmo descarregando a pagina. */
+export function beaconRoomEvents(webinarId: string, body: string): boolean {
+  const url = liveApiPath(webinarId, "room-events");
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, new Blob([body], { type: "text/plain;charset=UTF-8" }))) {
+      return true;
+    }
+  } catch {
+    // Sem beacon: vai pelo fetch keepalive.
+  }
+  void fetch(url, { body, credentials: "same-origin", headers: { "Content-Type": "text/plain;charset=UTF-8" }, keepalive: true, method: "POST" }).catch(() => undefined);
+  return false;
+}
+
+export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion };
