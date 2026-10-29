@@ -148,10 +148,10 @@ test("2. a rota da sessao: 401 sem sessao, 404 para quem nao pode ver (sem dizer
 
   await acesso("audience", quemTemOCurso);
   const semAcesso = await sessao(alunoSemAcesso);
-  assert.equal(semAcesso.status, 404, await semAcesso.text());
+  assert.equal(semAcesso.status, 404, await semAcesso.clone().text());
 
   const comAcesso = await sessao(aluna);
-  assert.equal(comAcesso.status, 200, await comAcesso.text());
+  assert.equal(comAcesso.status, 200, await comAcesso.clone().text());
   const { data } = await comAcesso.json();
   assert.equal(data.session.id, sessaoId);
   assert.equal(data.session.kind, "live");
@@ -165,14 +165,14 @@ test("2. a rota da sessao: 401 sem sessao, 404 para quem nao pode ver (sem dizer
 
 test("3. Garantir vaga: 201 com o calendario, repetir devolve 200 sem duplicar, um webinar_registered; cancelar grava cancelled: true uma vez", async () => {
   const primeira = await garantirVaga(aluna, { source: "email" });
-  assert.equal(primeira.status, 201, await primeira.text());
+  assert.equal(primeira.status, 201, await primeira.clone().text());
   const corpo = (await primeira.json()).data;
   assert.equal(corpo.registration.sessionId, sessaoId);
   assert.match(corpo.calendarUrl, /\/api\/webinars\/.+\/calendar\?token=/);
   assert.match(corpo.googleUrl, /^https:\/\/calendar\.google\.com\//);
 
   const segunda = await garantirVaga(aluna, {});
-  assert.equal(segunda.status, 200, await segunda.text());
+  assert.equal(segunda.status, 200, await segunda.clone().text());
 
   const linhas = await vagas(aluna.id);
   assert.equal(linhas.length, 1, "uma vaga por aluno e sessao");
@@ -190,7 +190,7 @@ test("3. Garantir vaga: 201 com o calendario, repetir devolve 200 sem duplicar, 
   await acesso("everyone", { kind: "everyone" });
 
   const cancelada = await cancelarVaga(aluna);
-  assert.equal(cancelada.status, 200, await cancelada.text());
+  assert.equal(cancelada.status, 200, await cancelada.clone().text());
   assert.equal((await cancelada.json()).data.cancelled, true);
   assert.equal((await vagas(aluna.id))[0].status, "cancelled");
   const depois = await eventos(aluna.id);
@@ -203,7 +203,7 @@ test("3. Garantir vaga: 201 com o calendario, repetir devolve 200 sem duplicar, 
 
   // A vaga volta (para o tick abaixo) como uma vaga nova.
   const volta = await garantirVaga(aluna, {});
-  assert.equal(volta.status, 201, await volta.text());
+  assert.equal(volta.status, 201, await volta.clone().text());
   assert.equal((await vagas(aluna.id)).length, 1);
 });
 

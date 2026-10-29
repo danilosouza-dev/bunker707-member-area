@@ -49,7 +49,6 @@ let perguntaId = "";
 async function limparRastros() {
   unwrap(await db.from("student_events").delete().in("user_id", pessoas).eq("entity_type", "webinar"), "Apagando o historico de webinario de teste");
   unwrap(await db.from("notifications").delete().in("user_id", pessoas).eq("kind", "webinar"), "Apagando o sino de webinario de teste");
-  unwrap(await db.from("admin_audit_log").delete().eq("action", "webinar_export").eq("entity_id", LIVE.id), "Apagando a auditoria de teste");
 }
 
 /** A live gravada marcada para `scheduledAt`, com o video de 10 min pronto e as vagas da aluna, do aluno sem acesso e do produtor (equipe). */
@@ -331,8 +330,10 @@ test("6. a rota do CSV: 401 sem sessao, 403 para o analista, 400 sem a sessao, 4
   assert.equal((await pedir(produtor, "")).status, 400);
   assert.equal((await pedir(produtor, `?sessao=${LIVE.sessaoId}`, "bbbbbbbb-0000-4000-8000-000000000099")).status, 404);
 
+  // A auditoria e so de insercao (o service_role nao apaga): conta so o que este pedido gravou.
+  const antes = new Date(Date.now() - 2000).toISOString();
   const resposta = await pedir(produtor);
-  assert.equal(resposta.status, 200, await resposta.text());
+  assert.equal(resposta.status, 200, await resposta.clone().text());
   assert.match(resposta.headers.get("content-type") ?? "", /^text\/csv/);
   assert.match(resposta.headers.get("content-disposition") ?? "", /attachment; filename="webinario-teste-live-gravada-relatorio-.*-attendee\.csv"/);
   assert.equal(resposta.headers.get("cache-control"), "private, no-store, max-age=0");
@@ -340,7 +341,7 @@ test("6. a rota do CSV: 401 sem sessao, 403 para o analista, 400 sem a sessao, 4
   assert.match(corpo, /^﻿Compareceu;Nome;E-mail;/);
   assert.match(corpo, new RegExp(ESCOLA_DE_TESTE.contas.aluna.email));
 
-  const auditoria = unwrap(await db.from("admin_audit_log").select("action,actor_id,entity_id,entity_type,count,metadata").eq("action", "webinar_export").eq("entity_id", LIVE.id), "Lendo a auditoria");
+  const auditoria = unwrap(await db.from("admin_audit_log").select("action,actor_id,entity_id,entity_type,count,metadata").eq("action", "webinar_export").eq("entity_id", LIVE.id).gte("occurred_at", antes), "Lendo a auditoria");
   assert.equal(auditoria.length, 1);
   assert.deepEqual([auditoria[0].actor_id, auditoria[0].entity_type, auditoria[0].count], [produtor.id, "webinar", 2]);
   assert.deepEqual(auditoria[0].metadata, { report: "attendee", session_id: LIVE.sessaoId, webinar_id: LIVE.id });

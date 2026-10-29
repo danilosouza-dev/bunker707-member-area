@@ -174,8 +174,17 @@ test("4. rajada 5/60 s (a 6a e 429 com Retry-After), palavra bloqueada 422 e a r
   assert.match(sexta.headers.get("Retry-After") ?? "", /^\d+$/);
   resetRoomLimits();
 
-  unwrap(await db.from("lesson_comment_blocked_words").insert({ active: true, message: "Sem isso na live.", word: "teste-proibida" }), "Palavra bloqueada de teste");
+  // normalized_word e obrigatoria e unica (a mesma normalizacao de normalizeCommentForModeration).
+  const regra = unwrap(
+    await db
+      .from("lesson_comment_blocked_words")
+      .upsert({ active: true, message: "Sem isso na live.", normalized_word: "teste proibida", word: "teste-proibida" }, { onConflict: "normalized_word" })
+      .select("id")
+      .single(),
+    "Palavra bloqueada de teste"
+  );
   const bloqueada = await enviar(aluna, { body: "uma teste-proibida aqui" });
+  unwrap(await db.from("lesson_comment_blocked_words").delete().eq("id", regra.id), "Apagando a palavra bloqueada de teste");
   assert.equal(bloqueada.status, 422, JSON.stringify(bloqueada.body));
   assert.equal(bloqueada.body.error, "Sem isso na live.");
 

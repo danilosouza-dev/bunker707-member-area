@@ -342,7 +342,8 @@ test("7. encerrar pela mao: a presenca congela, a sessao vira Encerrada e o repl
 test("8. Remover minhas mensagens a pedido: o chat (inclusive a linha mestre), a pergunta e a resposta de enquete somem, o aceite e retirado, o historico e a auditoria com o motivo", async () => {
   actAs(produtor);
   const removido = ok(await roomActions.removeStudentMessages({ reason: "pedido pelo e-mail de 29/10", userId: aluna.id }));
-  assert.deepEqual([removido.messages, removido.questions, removido.answers, removido.consentRevoked], [1, 1, 1, true]);
+  // 3 mensagens: a pendente desta sessao e as 2 da aluna na live gravada encerrada (seedLiveGravadaEncerradaDeTeste).
+  assert.deepEqual([removido.messages, removido.questions, removido.answers, removido.consentRevoked], [3, 1, 1, true]);
 
   const dela = await mensagens({ author_user_id: aluna.id });
   assert.ok(dela.every((row) => row.deleted_reason === "consent_revoked" && row.deleted_at));
@@ -370,7 +371,7 @@ test("9. a rota de 5 s do console: 403 para o analista, 404 para a sessao de out
   assert.equal((await consoleRoute.GET(pedido("bbbbbbbb-0000-4000-8000-0000000000ff"), contexto)).status, 404);
   assert.equal((await consoleRoute.GET(new Request(`http://localhost/api/admin/webinars/${webinarId}/console`), contexto)).status, 400, "sem ?sessao=");
   const resposta = await consoleRoute.GET(pedido(SESSAO), contexto);
-  assert.equal(resposta.status, 200, await resposta.text());
+  assert.equal(resposta.status, 200, await resposta.clone().text());
   assert.match(resposta.headers.get("cache-control") ?? "", /no-store/);
   const { data } = await resposta.json();
   assert.equal(data.session.id, SESSAO);
