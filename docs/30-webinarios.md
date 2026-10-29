@@ -694,21 +694,24 @@ Regras que valem para tudo: o vídeo gravado nunca passa pelo servidor A (D11, A
 
 ```txt
 infra/jitsi/
-  docker-compose.yml          web, prosody, jicofo, jvb, coturn; perfil `borda` com o Caddy (como o Mautic)
-  caddy/Caddyfile             HTTPS automático em meet.<domínio>; proxy para web:80 (websocket passa)
+  docker-compose.yml          web, prosody, jicofo, jvb (coturn é o passo seguinte; as portas ficam reservadas);
+                              perfil `borda` com o Caddy (como o Mautic)
+  caddy/Caddyfile             HTTPS automático em meet.<domínio>; proxy para web:8000 (o site da imagem escuta em
+                              8000, HTTP, sem privilégio; websocket passa)
+  prosody/plugins/mod_token_affiliation.lua   host e co-apresentador viram moderadores pelo token
   .env.example                todas as chaves comentadas (abaixo); generate-secrets.sh/.mjs gera as senhas
   web/custom-interface_config.js   sem marca d'água e sem nome Jitsi (D2)
   web/custom-config.js        logo, teto de bitrate, chat/enquetes/reações desligados
   jibri/docker-compose.yml    o container do gravador (roda no servidor D)
   jibri/finalize.sh           envia o MP4 para a Bunny e avisa o app (§6.7)
-  scripts/_env.sh, smoke.sh, update.sh   no padrão de infra/mautic/scripts e infra/scripts/update.sh
+  scripts/_env.sh, smoke.sh, update.sh, logs.sh, jibri-status.sh, volumes.sh   no padrão de infra/mautic/scripts
   LICENSE-jitsi, NOTICE       Apache-2.0: a licença fica; a marca não aparece
 ```
 
 `.env` do servidor C (valores de exemplo; os segredos vêm pelo envelope, §7.3):
 
 ```bash
-JITSI_IMAGE_VERSION=stable-11248      # tag stable fixada (última em 14/09); sobe só pelo update.sh (§7.4)
+JITSI_IMAGE_VERSION=stable-11248      # tag stable fixada; sobe só pelo update.sh (§7.4; docs/20 §8B.6)
 PUBLIC_URL=https://meet.bunker707.com.br
 TZ=UTC                                # hora de parede em UTC em todo servidor nosso
 # Quem entra: só com JWT do nosso app (ninguém entra pelo link)
@@ -723,34 +726,43 @@ XMPP_MUC_MODULES=token_affiliation    # host vira moderador pelo JWT (context.us
 ENABLE_AUTO_OWNER=0                   # o primeiro que entra NÃO vira moderador (aluno nunca manda na sala)
 # Sala
 ENABLE_XMPP_WEBSOCKET=1               # transporte recomendado
-ENABLE_P2P=0                          # Webinário nunca é 1:1
 ENABLE_LOBBY=1                        # sala de espera e Sessão de prática (D4)
 ENABLE_PREJOIN_PAGE=0                 # a nossa página é a entrada
 ENABLE_WELCOME_PAGE=0
 ENABLE_CLOSE_PAGE=0                   # ao sair, volta para a nossa página
+ENABLE_BREAKOUT_ROOMS=0
+ENABLE_THIRD_PARTY_REQUESTS=0         # nada de gravatar nem chamadas de fora no navegador do aluno
+DISABLE_DEEP_LINKING=1                # nunca oferece o app do Jitsi no celular (D2)
 DISABLE_POLLS=1                       # enquetes são nossas (D5)
 DISABLE_REACTIONS=1                   # reações são nossas (D5)
 DISABLE_PRIVATE_CHAT=1                # chat é nosso (D5); o do Jitsi fica escondido no iframe
 DISABLE_REMOTE_VIDEO_MENU=1           # aluno não abre menu sobre ninguém
-START_AUDIO_MUTED=1                   # todo mundo entra mudo
-START_VIDEO_MUTED=1                   # e com a câmera desligada; o aluno liga se quiser (D4)
+START_WITH_AUDIO_MUTED=1              # todo mundo entra mudo (os nomes START_AUDIO_MUTED/START_VIDEO_MUTED
+START_WITH_VIDEO_MUTED=1              # antigos ficam também, a imagem lê os dois)
 RESOLUTION=1080                       # teto do palco (D26); o aluno fica em 360p pelo constraints do iframe dele (§6.3)
 RESOLUTION_MIN=180
+DESKTOP_SHARING_FRAMERATE_MIN=5
+DESKTOP_SHARING_FRAMERATE_MAX=30      # tela compartilhada a 30 quadros (15 na opção do card Qualidade)
+VIDEOQUALITY_BITRATE_FULL=4000000     # 1080p no palco cabe em ~4 Mbit/s
 # Gravação
 ENABLE_RECORDING=1                    # liga o botão e o domínio escondido do gravador
 JIBRI_XMPP_USER=jibri
-JIBRI_XMPP_PASSWORD=<envelope>
+JIBRI_XMPP_PASSWORD=<gerado>
 JIBRI_RECORDER_USER=recorder
-JIBRI_RECORDER_PASSWORD=<envelope>
+JIBRI_RECORDER_PASSWORD=<gerado>
 JIBRI_BREWERY_MUC=jibribrewery
-# TURN (redes fechadas)
-TURN_HOST=meet.bunker707.com.br
+# Rede
+JVB_PORT=10000                        # UDP da mídia
+JVB_ADVERTISE_IPS=<IPv4 público>      # o JVB está atrás do NAT do Docker; a etapa deploy-meet grava
+XMPP_PUBLIC_BIND=0.0.0.0              # 5222 publicada só para o Jibri; o firewall da Hetzner limita a origem
+TURN_HOST=meet.bunker707.com.br       # TURN reservado (coturn é o passo seguinte)
 TURN_PORT=3478
 TURNS_HOST=meet.bunker707.com.br
 TURNS_PORT=5349
 TURN_CREDENTIALS=<gerado>
-# Teto da JVM do jvb e do jicofo, para caber em 4 GB: os nomes das variáveis são os do env.example
-# da tag fixada (a conferir ao criar infra/jitsi/; não escrever de memória)
+# Memória da JVM para caber num cx23 de 4 GB (nomes conferidos no env.example da tag fixada)
+VIDEOBRIDGE_MAX_MEMORY=1536m          # o JVB: um palco 1080p e 100-150 alunos cabem com folga
+JICOFO_MAX_MEMORY=512m                # um palco por vez
 ```
 
 `web/custom-interface_config.js` (D2; só funciona em instância própria, porque essas chaves estão fora da whitelist do IFrame API):

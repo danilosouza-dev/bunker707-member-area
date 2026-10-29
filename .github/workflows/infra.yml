@@ -5,7 +5,8 @@ name: Infra (Hetzner)
 # script idempotente de infra/cloud (docs/20, "Sessao na nuvem"). Nada roda em push.
 #
 # Segredos nunca entram pelos inputs: a chave do Resend e afins viajam num envelope cifrado para a chave
-# RSA do servidor (infra/cloud/envelope.sh), que so ele abre.
+# RSA do servidor (infra/cloud/envelope.sh), que so ele abre. O gravador por hora (jibri-up/jibri-down, docs/20
+# §8B) nao tem chave propria: os dele vem do segredo JIBRI_SECRETS do repositorio (linhas CHAVE=VALOR).
 
 on:
   # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece
@@ -36,13 +37,21 @@ on:
           - backup-marketing
           - exec-membros
           - exec-marketing
+          - provision-meet
+          - deploy-meet
+          - secrets-meet
+          - exec-meet
+          - status-meet
+          - jibri-up
+          - jibri-down
+          - exec-jibri
           - snapshot
           - restaurar
           - fechar-ssh
           - chave-backup
           - carga
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1)"
         type: string
         required: false
         default: ""
@@ -108,9 +117,11 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
-          case "$ETAPA" in provision|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
+          case "$ETAPA" in provision|provision-meet|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
+          case "$ETAPA" in jibri-up|jibri-down) [ -n "$JIBRI_SECRETS" ] || { echo "::error::Segredo JIBRI_SECRETS ausente (linhas CHAVE=VALOR do gravador, docs/20 secao 8B.3)."; exit 1; } ;; esac
 
       - name: ${{ inputs.etapa }}
         # Abaixo dos 60 minutos do job, para o passo final sempre ter tempo de rodar.
@@ -119,6 +130,7 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
           PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
           COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
         run: bash infra/cloud/run.sh "$ETAPA"

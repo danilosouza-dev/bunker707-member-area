@@ -1,0 +1,22 @@
+Bunker707 - servidor de video das Lives ao vivo (infra/jitsi)
+
+Este diretorio configura uma instancia propria do Jitsi Meet, executada a partir das imagens oficiais do
+projeto docker-jitsi-meet. Nada do codigo do Jitsi e distribuido por este repositorio, exceto a copia de um
+modulo do Prosody listada abaixo; o restante e configuracao nossa.
+
+Jitsi Meet e docker-jitsi-meet
+  Copyright (c) 8x8, Inc. e colaboradores do projeto Jitsi.
+  Licenciados sob a Apache License, Version 2.0 (texto completo em LICENSE-jitsi, neste diretorio).
+  https://github.com/jitsi/jitsi-meet e https://github.com/jitsi/docker-jitsi-meet
+  "Jitsi" e marca registrada da 8x8, Inc. A marca nao aparece na interface servida aos alunos
+  (web/custom-interface_config.js) e nao e usada em divulgacao; a atribuicao e a licenca ficam aqui.
+
+prosody/plugins/mod_token_affiliation.lua
+  Copia, sem alteracao de codigo, de resources/prosody-plugins/mod_token_affiliation.lua do Jitsi Meet
+  (originalmente importado de https://github.com/jitsi-contrib/prosody-plugins, token_affiliation), sob a
+  mesma Apache License, Version 2.0. Da ao host a afiliacao de dono da sala a partir do JWT.
+
+Caddy (imagem caddy:2.11.7-alpine): Apache License, Version 2.0, https://github.com/caddyserver/caddy
+
+Modificacoes da Bunker707 neste diretorio (docker-compose.yml, caddy/Caddyfile, web/custom-config.js,
+web/custom-interface_config.js, jibri/, scripts/) sao configuracao e automacao proprias.

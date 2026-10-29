@@ -11,6 +11,8 @@
 #   PRODUCER_EMAIL         e-mail do produtor (Let's Encrypt, admin do Mautic)
 #   PRODUCER_IP            opcional: IP do produtor, mantido no firewall (SSH e Studio)
 #   SKIP_MARKETING=1       Mautic no mesmo servidor do app (colocacao), sem o segundo servidor
+#   MEET_TYPE              tipo do servidor C do Jitsi (cx23); JIBRI_TYPE, o do gravador por hora (cpx42)
+#   JIBRI_SECRETS          segredo do repositorio com as linhas CHAVE=VALOR do gravador (docs/20 §8B.3)
 # Nunca imprime segredos; o que precisa ser guardado vai mascarado para o log do Actions (::add-mask::).
 
 set -euo pipefail
@@ -34,11 +36,20 @@ STORAGE_BOX_LOCATION="${STORAGE_BOX_LOCATION:-fsn1}"
 SSH_KEY_NAME="${SSH_KEY_NAME:-bunker707-deploy}"
 # Um so sentido em todos os scripts: vazio, 0, false ou no = dois servidores.
 case "${SKIP_MARKETING:-}" in ""|0|false|no) SKIP_MARKETING="" ;; *) SKIP_MARKETING=1 ;; esac
+# Webinarios (docs/30 §6.1): servidor C do Jitsi e os gravadores por hora, um por sessao (bunker707-jibri-<sessao>).
+MEET_NAME="${MEET_NAME:-bunker707-meet}"
+MEET_TYPE="${MEET_TYPE:-cx23}"
+JIBRI_NAME_PREFIX="${JIBRI_NAME_PREFIX:-bunker707-jibri-}"
+JIBRI_TYPE="${JIBRI_TYPE:-cpx42}"
+JIBRI_REMOTE_DIR="${JIBRI_REMOTE_DIR:-/opt/jibri}"
 
 APP_DOMAIN="${APP_DOMAIN:-membros.$ZONE_NAME}"
 API_DOMAIN="${API_DOMAIN:-api.$ZONE_NAME}"
 STUDIO_DOMAIN="${STUDIO_DOMAIN:-studio.$ZONE_NAME}"
 MAUTIC_DOMAIN="${MAUTIC_DOMAIN:-marketing.$ZONE_NAME}"
+MEET_DOMAIN="${MEET_DOMAIN:-meet.$ZONE_NAME}"
+# Webhook do gravador no app (docs/30 §5.3); JIBRI_SECRETS pode trazer outro WEBINAR_RECORDER_WEBHOOK_URL.
+RECORDER_WEBHOOK_URL="${WEBINAR_RECORDER_WEBHOOK_URL:-https://$APP_DOMAIN/api/webhooks/recorder}"
 
 HCLOUD_VERSION="${HCLOUD_VERSION:-1.70.1}"
 HCLOUD_SHA256="${HCLOUD_SHA256:-85182e0d51f9a26abeefd79b37de8a7fb51215d54c59ee290c3c9141e8aa887e}"
@@ -107,6 +118,66 @@ rules += [
 print(json.dumps(rules))
 PY
 }
+# fw_rules_meet [cidr ...]: regras do servidor C do Jitsi (docs/30 §6.2). meet.<dominio> e DNS puro, entao 80 e
+# 443 vem de qualquer lugar (site, external_api.js, websocket, Let's Encrypt); UDP 10000 e a midia do JVB;
+# 3478 e 5349 ficam reservadas para o TURN (coturn, passo seguinte); TCP 5222 (XMPP) so dos gravadores vivos
+# (servidores com label papel=jibri: a regra nasce e morre com eles, sem lista guardada); 22 so dos CIDRs
+# informados, como nos outros servidores.
+fw_rules_meet() {
+    local jibri; jibri=$(jibri_cidrs)
+    python3 -I - "$jibri" "$@" <<'PY'
+import json, sys
+jibri = [c for c in sys.argv[1].split() if c]; ssh = [c for c in sys.argv[2:] if c]
+anywhere = ["0.0.0.0/0", "::/0"]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules += [
+    {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt; DNS puro, sem Cloudflare)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (site, external_api.js, websocket XMPP)"},
+    {"direction": "in", "protocol": "udp", "port": "443", "source_ips": anywhere, "description": "HTTP/3"},
+    {"direction": "in", "protocol": "udp", "port": "10000", "source_ips": anywhere, "description": "midia (JVB)"},
+    {"direction": "in", "protocol": "udp", "port": "3478", "source_ips": anywhere, "description": "TURN (reservado; coturn e passo seguinte)"},
+    {"direction": "in", "protocol": "tcp", "port": "3478", "source_ips": anywhere, "description": "TURN/TCP (reservado)"},
+    {"direction": "in", "protocol": "tcp", "port": "5349", "source_ips": anywhere, "description": "TURNS (reservado)"},
+]
+if jibri:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "5222", "source_ips": jibri, "description": "XMPP so dos gravadores (Jibri) vivos"})
+rules.append({"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0", "::/0"], "description": "ping do monitor"})
+print(json.dumps(rules))
+PY
+}
+# fw_rules_jibri [cidr ...]: o gravador nao recebe nada de fora; so a 22 durante a etapa e o ping.
+fw_rules_jibri() {
+    python3 -I - "$@" <<'PY'
+import json, sys
+ssh = [c for c in sys.argv[1:] if c]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules.append({"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0", "::/0"], "description": "ping"})
+print(json.dumps(rules))
+PY
+}
+# fw_rules_for SERVER_NAME [cidr ...]: o conjunto de regras de cada papel, pelo nome do servidor.
+fw_rules_for() {
+    local name="$1"; shift
+    case "$name" in
+        "$MEET_NAME") fw_rules_meet "$@" ;;
+        "$JIBRI_NAME_PREFIX"*) fw_rules_jibri "$@" ;;
+        *) fw_rules "$@" ;;
+    esac
+}
+# CIDRs (IPv4/32 e o /64 de IPv6) dos gravadores vivos, lidos pela API e guardados por execucao; jibri-up e
+# jibri-down chamam jibri_cidrs_refresh depois de criar ou apagar um.
+jibri_cidrs() {
+    if [ -z "${JIBRI_CIDRS_CACHE+x}" ]; then
+        JIBRI_CIDRS_CACHE=$(hzj server list --selector papel=jibri 2>/dev/null | jq -r '.[] | [((.public_net.ipv4.ip // empty) + "/32"), (.public_net.ipv6.ip // empty)] | .[] | select(. != "/32")' | tr '\n' ' ') || JIBRI_CIDRS_CACHE=""
+        export JIBRI_CIDRS_CACHE
+    fi
+    printf '%s' "$JIBRI_CIDRS_CACHE"
+}
+jibri_cidrs_refresh() { unset JIBRI_CIDRS_CACHE; }
 fw_name() { printf '%s-fw' "$1"; }
 fw_ensure() {  # fw_ensure SERVER_NAME
     local name; name=$(fw_name "$1")
@@ -114,7 +185,7 @@ fw_ensure() {  # fw_ensure SERVER_NAME
         log "Criando o firewall $name"
         hz firewall create --name "$name" --label app=bunker707 >/dev/null
     fi
-    fw_rules "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-$name.json"
+    fw_rules_for "$1" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-$name.json"
     hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-$name.json"
 }
 fw_apply() {  # fw_apply SERVER_NAME (idempotente; a API recusa aplicar duas vezes)
@@ -137,7 +208,7 @@ runner_ip() { curl -fsS --max-time 15 https://checkip.amazonaws.com | tr -d '[:s
 fw_open_ssh() {  # fw_open_ssh SERVER_NAME
     local name me; name=$(fw_name "$1"); me=$(runner_ip)
     log "Abrindo SSH do $1 para $me"
-    fw_rules "$(cidr_or_empty "$me")" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-open-$name.json"
+    fw_rules_for "$1" "$(cidr_or_empty "$me")" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-open-$name.json"
     FW_OPENED="${FW_OPENED:-} $1"
     printf '%s\n' "$1" >> "$WORK_DIR/fw-abertos"
     trap 'rc=$?; set +e; fw_close_all || rc=1; exit $rc' EXIT
@@ -149,7 +220,7 @@ fw_close_all() {
         ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "$DEPLOY_USER@$(server_ip4 "$s")" 2>/dev/null || true
         ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "root@$(server_ip4 "$s")" 2>/dev/null || true
         name=$(fw_name "$s")
-        fw_rules "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-close-$name.json"
+        fw_rules_for "$s" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-close-$name.json"
         if hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-close-$name.json"; then
             printf 'SSH do %s fechado.\n' "$s"
             [ -f "$WORK_DIR/fw-abertos" ] && sed -i "/^$s\$/d" "$WORK_DIR/fw-abertos"
@@ -297,5 +368,53 @@ cf_remove_dns() {
     done
 }
 
+# cf_apply_dns_meet: meet.<dominio> -> servidor C, A e AAAA SEM proxy (WebRTC/UDP nao passa pela Cloudflare;
+# o certificado e do Caddy do proprio servidor, docs/30 §6.2).
+cf_apply_dns_meet() {
+    local ip4 ip6 sub; ip4=$(server_ip4 "$MEET_NAME"); ip6=$(server_ip6 "$MEET_NAME"); sub="${MEET_DOMAIN%%.*}"
+    cf_dns_upsert "$sub" A "$ip4" false
+    [ -n "$ip6" ] && cf_dns_upsert "$sub" AAAA "$ip6" false
+    return 0
+}
+
 # ---- Storage Box ------------------------------------------------------------------------------------
 storage_box_json() { hzj storage-box describe "$STORAGE_BOX_NAME" 2>/dev/null || true; }
+
+# ---- Webinarios: segredos do gravador, webhook assinado e preco por hora --------------------------------
+# JIBRI_SECRETS e um segredo do repositorio com linhas CHAVE=VALOR (docs/20 §8B.3; docs/30 §7.3, I4): o
+# gravador vive poucas horas e nao tem transfer.key para o envelope. O runner do Actions mascara cada linha.
+jibri_secret() {  # jibri_secret CHAVE  (obrigatoria)
+    local value; value=$(jibri_secret_opt "$1" "")
+    [ -n "$value" ] || die "JIBRI_SECRETS sem a linha $1=... (segredo do repositorio, docs/20 §8B.3)."
+    printf '%s' "$value"
+}
+jibri_secret_opt() {  # jibri_secret_opt CHAVE PADRAO
+    local line
+    line=$(printf '%s\n' "${JIBRI_SECRETS:-}" | tr -d '\r' | grep -E "^$1=" | head -n1 || true)
+    if [ -n "$line" ]; then printf '%s' "${line#*=}"; else printf '%s' "$2"; fi
+}
+# recorder_request METODO CAMINHO [CORPO]: chama o webhook do gravador do app (docs/30 §5.3) assinado com o
+# WEBINAR_RECORDER_WEBHOOK_SECRET de JIBRI_SECRETS: X-Bunker-Timestamp (segundos Unix) e X-Bunker-Signature =
+# HMAC-SHA256 de "<timestamp>.<corpo>" (corpo vazio no GET). O segredo entra no python por variavel de ambiente,
+# nunca em argv. Imprime o codigo HTTP (000 sem resposta); o corpo da resposta fica em $WORK_DIR/recorder-response.
+recorder_request() {
+    local method="$1" path="${2:-}" body="${3:-}" secret ts sig url code
+    secret=$(jibri_secret WEBINAR_RECORDER_WEBHOOK_SECRET)
+    url="$(jibri_secret_opt WEBINAR_RECORDER_WEBHOOK_URL "$RECORDER_WEBHOOK_URL")"; url="${url%/}$path"
+    ts=$(date -u +%s)
+    sig=$(RECORDER_SECRET="$secret" python3 -I -c 'import hashlib, hmac, os, sys; print(hmac.new(os.environ["RECORDER_SECRET"].encode(), (sys.argv[1] + "." + sys.argv[2]).encode(), hashlib.sha256).hexdigest())' "$ts" "$body")
+    : > "$WORK_DIR/recorder-response"
+    if [ -n "$body" ]; then
+        code=$(curl -sS -o "$WORK_DIR/recorder-response" -w '%{http_code}' --max-time 30 -X "$method" "$url" -H "Content-Type: application/json" -H "X-Bunker-Timestamp: $ts" -H "X-Bunker-Signature: $sig" --data-binary "$body" 2>/dev/null) || code=000
+    else
+        code=$(curl -sS -o "$WORK_DIR/recorder-response" -w '%{http_code}' --max-time 30 -X "$method" "$url" -H "X-Bunker-Timestamp: $ts" -H "X-Bunker-Signature: $sig" 2>/dev/null) || code=000
+    fi
+    printf '%s' "${code:-000}"
+}
+# hourly_price TIPO LOCAL: preco liquido por hora (EUR) do tipo naquele local, pela API; vazio se nao houver.
+hourly_price() {
+    hzj server-type describe "$1" 2>/dev/null | jq -r --arg l "$2" '.prices[]? | select(.location==$l) | (.price_hourly.net // .price_hourly.gross // empty)' 2>/dev/null | head -n1
+}
+monthly_price() {
+    hzj server-type describe "$1" 2>/dev/null | jq -r --arg l "$2" '.prices[]? | select(.location==$l) | (.price_monthly.net // .price_monthly.gross // empty)' 2>/dev/null | head -n1
+}

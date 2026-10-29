@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Cria (ou confere) toda a infraestrutura da Bunker707 na Hetzner e na Cloudflare, do zero, sem passos
 # manuais. Idempotente: rodar de novo so completa o que faltar.
-#   bash infra/cloud/provision.sh
+#   bash infra/cloud/provision.sh          servidores A (membros) e B (marketing), Storage Box, DNS e TLS
+#   bash infra/cloud/provision.sh meet     so o servidor C do Jitsi (bunker707-meet; docs/30 §6 e docs/20 §8B),
+#                                          com CONFIRMADO=sim: firewall proprio, bootstrap, transfer.key e o
+#                                          DNS meet.<dominio> SEM proxy da Cloudflare; nada de Storage Box
 # Variaveis: HCLOUD_TOKEN, CLOUDFLARE_API_TOKEN, e as de lib.sh (LOCATION, PRODUCER_EMAIL, PRODUCER_IP,
-# SKIP_MARKETING, MEMBROS_TYPE, MARKETING_TYPE). Sem *_TYPE, usa a escolha mais barata de plan.sh.
+# SKIP_MARKETING, MEMBROS_TYPE, MARKETING_TYPE, MEET_TYPE). Sem *_TYPE, usa a escolha mais barata de plan.sh
+# (o meet nao passa pelo plan: cx23 por padrao, docs/30 D1).
 # Etapas: chave SSH no projeto -> firewalls -> servidores (cloud-init) -> Storage Box -> bootstrap por SSH
 # (infra/scripts/bootstrap.sh) + chave de transferencia de segredos -> DNS e TLS na Cloudflare -> resumo.
 # Custa dinheiro a partir do minuto em que o servidor existe (docs/19).
@@ -11,34 +15,30 @@
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
+role="${1:-}"
+[ -z "$role" ] || [ "$role" = "meet" ] || die "uso: provision.sh [meet]"
+if [ "$role" = "meet" ]; then
+    [ "${CONFIRMADO:-}" = "sim" ] || die "provision-meet cria o servidor C do Jitsi (cobrado por mes a partir de agora). Confirme com CONFIRMADO=sim nas opcoes, depois do ok do produtor no chat (docs/20 §8B.2)."
+fi
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
 install_hcloud
 deploy_key
 
 # ---- 1. chave SSH do projeto ------------------------------------------------------------------------
-log "1/7 Chave SSH '$SSH_KEY_NAME' no projeto da Hetzner"
-pub=$(deploy_public_key)
-if hzj ssh-key describe "$SSH_KEY_NAME" >/dev/null 2>&1; then
-    if [ "$(hzj ssh-key describe "$SSH_KEY_NAME" | jq -r .public_key | awk '{print $2}')" != "$(printf '%s' "$pub" | awk '{print $2}')" ]; then
-        die "A chave '$SSH_KEY_NAME' na Hetzner e diferente da derivada do HCLOUD_TOKEN atual (o token mudou?). Veja docs/20, 'Sessao na nuvem', antes de continuar."
+ensure_project_ssh_key() {
+    pub=$(deploy_public_key)
+    if hzj ssh-key describe "$SSH_KEY_NAME" >/dev/null 2>&1; then
+        if [ "$(hzj ssh-key describe "$SSH_KEY_NAME" | jq -r .public_key | awk '{print $2}')" != "$(printf '%s' "$pub" | awk '{print $2}')" ]; then
+            die "A chave '$SSH_KEY_NAME' na Hetzner e diferente da derivada do HCLOUD_TOKEN atual (o token mudou?). Veja docs/20, 'Sessao na nuvem', antes de continuar."
+        fi
+        echo "  ja existe e confere."
+    else
+        hz ssh-key create --name "$SSH_KEY_NAME" --public-key "$pub" --label app=bunker707 >/dev/null
+        echo "  criada."
     fi
-    echo "  ja existe e confere."
-else
-    hz ssh-key create --name "$SSH_KEY_NAME" --public-key "$pub" --label app=bunker707 >/dev/null
-    echo "  criada."
-fi
+}
 
-# ---- 2. tipos e locais -------------------------------------------------------------------------------
-log "2/7 Tipos de servidor"
-if [ -z "${MEMBROS_TYPE:-}" ] || { [ -z "${SKIP_MARKETING:-}" ] && [ -z "${MARKETING_TYPE:-}" ]; }; then
-    bash "$CLOUD_DIR/plan.sh"
-    # shellcheck disable=SC1091
-    . "$WORK_DIR/plan.env"
-fi
-MEMBROS_LOCATION="${MEMBROS_LOCATION:-$LOCATION}"; MARKETING_LOCATION="${MARKETING_LOCATION:-$LOCATION}"
-roles="membros"; [ -n "${SKIP_MARKETING:-}" ] || roles="membros marketing"
-
-# ---- 3. firewalls e servidores -----------------------------------------------------------------------
+# ---- servidores (usado pelos dois caminhos) ----------------------------------------------------------
 create_server() {  # create_server NOME TIPO LOCAL PAPEL
     local name="$1" type="$2" loc="$3" role="$4" ud l
     ud="$WORK_DIR/cloud-init-$name.yaml"
@@ -57,8 +57,76 @@ create_server() {  # create_server NOME TIPO LOCAL PAPEL
         cat "$WORK_DIR/create-$name.err" >&2
         die "Falha ao criar $name."
     done
-    die "Nenhum local tem $type disponivel para esta conta. Rode plan.sh e force outro tipo (MEMBROS_TYPE/MARKETING_TYPE)."
+    die "Nenhum local tem $type disponivel para esta conta. Rode plan.sh e force outro tipo (MEMBROS_TYPE/MARKETING_TYPE/MEET_TYPE)."
 }
+# bootstrap_server NOME: por SSH como root, infra/scripts/bootstrap.sh e a chave RSA de transferencia de
+# segredos (so o servidor abre); imprime a transfer.pub em base64 para o envelope. Deixa a 22 aberta para o
+# chamador (fw_open_ssh ja feito).
+bootstrap_server() {
+    local name="$1" ip; ip=$(server_ip4 "$name")
+    wait_ssh "root@$ip"
+    # O cloud-init do primeiro boot ainda esta instalando pacotes quando o SSH abre: esperar, senao o apt
+    # do bootstrap disputa a trava do dpkg.
+    rsh "root@$ip" "cloud-init status --wait >/dev/null 2>&1 || true"
+    rcopy "$REPO_ROOT/infra/scripts/bootstrap.sh" "root@$ip:/root/bootstrap.sh"
+    rsh "root@$ip" "SSH_PUBLIC_KEY='$pub' DEPLOY_USER='$DEPLOY_USER' REPO_DIR='$REMOTE_DIR' bash /root/bootstrap.sh" | tail -n 15
+    # Chave RSA para receber segredos (chave do Resend etc.) cifrados pela sessao do Claude: so o servidor abre.
+    rsh "root@$ip" "install -d -m 700 /etc/bunker707 && [ -f /etc/bunker707/transfer.key ] || { openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /etc/bunker707/transfer.key && chmod 600 /etc/bunker707/transfer.key && openssl pkey -in /etc/bunker707/transfer.key -pubout -out /etc/bunker707/transfer.pub; }"
+    rsh "root@$ip" "chown -R '$DEPLOY_USER:$DEPLOY_USER' '$REMOTE_DIR'"
+}
+print_transfer_pub() {
+    local name="$1" ip; ip=$(server_ip4 "$name")
+    wait_ssh "$DEPLOY_USER@$ip" 10
+    echo "  transfer.pub ($name), base64 numa linha (para infra/cloud/envelope.sh):"
+    rsh "root@$ip" "base64 -w0 /etc/bunker707/transfer.pub"; echo
+}
+
+# ====== servidor C do Jitsi (provision-meet) =============================================================
+if [ "$role" = "meet" ]; then
+    log "1/5 Chave SSH '$SSH_KEY_NAME' no projeto da Hetzner"
+    ensure_project_ssh_key
+    log "2/5 Servidor $MEET_NAME ($MEET_TYPE em $LOCATION)"
+    p=$(monthly_price "$MEET_TYPE" "$LOCATION"); [ -n "$p" ] && echo "  preco: EUR $p/mes sem IVA (+ IPv4), pela API hoje; docs/30 §7.5" || echo "  preco de $MEET_TYPE nao lido pela API (confira no console)."
+    fw_ensure "$MEET_NAME"
+    if server_exists "$MEET_NAME"; then
+        echo "  ja existe: $(hzj server describe "$MEET_NAME" | jq -r '"\(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.status)"')"
+    else
+        create_server "$MEET_NAME" "$MEET_TYPE" "$LOCATION" meet
+    fi
+    fw_apply "$MEET_NAME"
+    hz server poweron "$MEET_NAME" >/dev/null 2>&1 || true
+
+    log "3/5 Bootstrap do $MEET_NAME (ufw, Docker, fail2ban, swap; sem Storage Box: o C nao tem dados)"
+    fw_open_ssh "$MEET_NAME"
+    bootstrap_server "$MEET_NAME"
+    print_transfer_pub "$MEET_NAME"
+    fw_close_all
+
+    log "4/5 DNS: $MEET_DOMAIN -> $MEET_NAME, sem proxy (WebRTC nao passa pela Cloudflare)"
+    cf_apply_dns_meet
+
+    log "5/5 Resumo"
+    hzj server describe "$MEET_NAME" | jq -r '"  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status)"'
+    echo "  DNS: $MEET_DOMAIN (so DNS) -> $MEET_NAME; firewall: 80/443 de qualquer lugar, UDP 10000, TURN reservado, 5222 so de gravadores vivos, 22 so durante as etapas."
+    echo "Proximo: etapa deploy-meet (so da main), depois secrets-meet com JWT_APP_SECRET e secrets-membros com o mesmo valor em WEBINAR_JWT_SECRET (docs/20 §8B.3)."
+    exit 0
+fi
+
+# ====== servidores A e B (provision) =====================================================================
+log "1/7 Chave SSH '$SSH_KEY_NAME' no projeto da Hetzner"
+ensure_project_ssh_key
+
+# ---- 2. tipos e locais -------------------------------------------------------------------------------
+log "2/7 Tipos de servidor"
+if [ -z "${MEMBROS_TYPE:-}" ] || { [ -z "${SKIP_MARKETING:-}" ] && [ -z "${MARKETING_TYPE:-}" ]; }; then
+    bash "$CLOUD_DIR/plan.sh"
+    # shellcheck disable=SC1091
+    . "$WORK_DIR/plan.env"
+fi
+MEMBROS_LOCATION="${MEMBROS_LOCATION:-$LOCATION}"; MARKETING_LOCATION="${MARKETING_LOCATION:-$LOCATION}"
+roles="membros"; [ -n "${SKIP_MARKETING:-}" ] || roles="membros marketing"
+
+# ---- 3. firewalls e servidores -----------------------------------------------------------------------
 for role in $roles; do
     case "$role" in
         membros) name="$MEMBROS_NAME"; type="$MEMBROS_TYPE"; loc="$MEMBROS_LOCATION" ;;
@@ -107,21 +175,11 @@ for role in $roles; do
     log "5/7 Bootstrap do $name"
     ip=$(server_ip4 "$name")
     fw_open_ssh "$name"
-    wait_ssh "root@$ip"
-    # O cloud-init do primeiro boot ainda esta instalando pacotes quando o SSH abre: esperar, senao o apt
-    # do bootstrap disputa a trava do dpkg.
-    rsh "root@$ip" "cloud-init status --wait >/dev/null 2>&1 || true"
-    rcopy "$REPO_ROOT/infra/scripts/bootstrap.sh" "root@$ip:/root/bootstrap.sh"
-    rsh "root@$ip" "SSH_PUBLIC_KEY='$pub' DEPLOY_USER='$DEPLOY_USER' REPO_DIR='$REMOTE_DIR' bash /root/bootstrap.sh" | tail -n 15
-    # Chave RSA para receber segredos (chave do Resend etc.) cifrados pela sessao do Claude: so o servidor abre.
-    rsh "root@$ip" "install -d -m 700 /etc/bunker707 && [ -f /etc/bunker707/transfer.key ] || { openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /etc/bunker707/transfer.key && chmod 600 /etc/bunker707/transfer.key && openssl pkey -in /etc/bunker707/transfer.key -pubout -out /etc/bunker707/transfer.pub; }"
-    rsh "root@$ip" "chown -R '$DEPLOY_USER:$DEPLOY_USER' '$REMOTE_DIR'"
+    bootstrap_server "$name"
     rsh "root@$ip" "install -d -m 700 -o '$DEPLOY_USER' -g '$DEPLOY_USER' /home/$DEPLOY_USER/.ssh && cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chmod 600 /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox" < "$backup_key"
     rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$backup_key.pub"
     echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
-    wait_ssh "$DEPLOY_USER@$ip" 10
-    echo "  transfer.pub ($name), base64 numa linha (para infra/cloud/envelope.sh):"
-    rsh "root@$ip" "base64 -w0 /etc/bunker707/transfer.pub"; echo
+    print_transfer_pub "$name"
     fw_close_all
 done
 rm -f "$backup_key" "$backup_key.pub"

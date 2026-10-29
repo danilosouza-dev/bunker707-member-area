@@ -1,0 +1,79 @@
+# O gravador (Jibri) da Live ao vivo, num servidor por hora (docs/30 §6.7, D3): um container jitsi/jibri na
+# MESMA tag do stack do servidor C, que entra na sala como participante escondido, grava a tela em 1080p (D26)
+# e, ao terminar, roda finalize.sh (envia o MP4 para a Bunny Stream e avisa o app). Nunca roda na maquina do
+# Jitsi (o manual pede 8 GB so para ele, uma gravacao por maquina) nem na do app (video nao passa por la, D11).
+#
+# Quem cria e apaga a maquina: as etapas jibri-up / jibri-down (infra/cloud/jibri.sh). O cloud-init instala o
+# Docker e baixa a imagem; o .env e gravado por SSH (nenhum segredo no user-data). Na maquina fica tudo em
+# /opt/jibri: docker-compose.yml, .env, finalize.sh, jibri-status.sh e volumes/ (o MP4 em
+# volumes/storage/jibri/recordings ate subir para a Bunny).
+#   docker compose -f /opt/jibri/docker-compose.yml up -d
+#   bash /opt/jibri/jibri-status.sh
+# A imagem roda como o usuario s6 (uid 1000) com raiz somente leitura: volumes/ precisa ser do uid 1000.
+
+name: bunker707-jibri
+
+services:
+  jibri:
+    container_name: bunker707-jibri
+    image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/jibri:${JITSI_IMAGE_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:size=256M,mode=1750,exec
+      - /tmp:size=256M,mode=1777,noexec
+    # O Chrome do gravador precisa de 2 GB em /dev/shm (a imagem recusa subir com menos).
+    shm_size: "2gb"
+    # Saude pela API HTTP do Jibri, so em 127.0.0.1 (jibri-status.sh e a espera do jibri-up).
+    ports:
+      - "${JIBRI_HEALTH_BIND:-127.0.0.1}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}/jibri/api/v1.0/health | grep -q HEALTHY"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    volumes:
+      - ./volumes/jibri:/config
+      - ./volumes/storage/jibri:/storage
+      # Versionado no repositorio (755); a imagem o copia para /run/jibri/config e o Jibri o chama ao terminar.
+      - ./finalize.sh:/config/finalize.sh:ro
+    environment:
+      DISPLAY: ":0"
+      TZ: "${TZ:-UTC}"
+      # O servidor C: IPv4 publico dele na 5222 (o firewall de la so deixa este IP passar) e os mesmos
+      # dominios XMPP internos do stack. O Chrome do gravador abre a sala por PUBLIC_URL.
+      XMPP_SERVER: "${XMPP_SERVER}"
+      XMPP_PORT: "${XMPP_PORT:-5222}"
+      XMPP_DOMAIN: "${XMPP_DOMAIN:-meet.jitsi}"
+      XMPP_AUTH_DOMAIN: "${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}"
+      XMPP_INTERNAL_MUC_DOMAIN: "${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}"
+      XMPP_MUC_DOMAIN: "${XMPP_MUC_DOMAIN:-muc.meet.jitsi}"
+      XMPP_HIDDEN_DOMAIN: "${XMPP_HIDDEN_DOMAIN:-hidden.meet.jitsi}"
+      XMPP_TRUST_ALL_CERTS: "${XMPP_TRUST_ALL_CERTS:-true}"
+      PUBLIC_URL: "${PUBLIC_URL}"
+      JIBRI_INSTANCE_ID: "${JIBRI_INSTANCE_ID:-bunker707-jibri}"
+      JIBRI_XMPP_USER: "${JIBRI_XMPP_USER:-jibri}"
+      JIBRI_XMPP_PASSWORD: "${JIBRI_XMPP_PASSWORD}"
+      JIBRI_RECORDER_USER: "${JIBRI_RECORDER_USER:-recorder}"
+      JIBRI_RECORDER_PASSWORD: "${JIBRI_RECORDER_PASSWORD}"
+      JIBRI_BREWERY_MUC: "${JIBRI_BREWERY_MUC:-jibribrewery}"
+      # Gravacao: 1080p a 30 quadros (D26), CRF 25 com o preset ultrafast (pouca CPU; o arquivo fica maior).
+      JIBRI_RECORDING_DIR: "/storage/recordings"
+      JIBRI_FINALIZE_RECORDING_SCRIPT_PATH: "/config/finalize.sh"
+      JIBRI_RECORDING_RESOLUTION: "${JIBRI_RECORDING_RESOLUTION:-1920x1080}"
+      JIBRI_RECORDING_FRAMERATE: "${JIBRI_RECORDING_FRAMERATE:-30}"
+      JIBRI_RECORDING_CONSTANT_RATE_FACTOR: "${JIBRI_RECORDING_CONSTANT_RATE_FACTOR:-25}"
+      JIBRI_RECORDING_VIDEO_ENCODE_PRESET_RECORDING: "${JIBRI_RECORDING_VIDEO_ENCODE_PRESET_RECORDING:-ultrafast}"
+      JIBRI_RECORDING_QUEUE_SIZE: "${JIBRI_RECORDING_QUEUE_SIZE:-4096}"
+      JIBRI_SINGLE_USE_MODE: "${JIBRI_SINGLE_USE_MODE:-0}"
+      JIBRI_USAGE_TIMEOUT: "${JIBRI_USAGE_TIMEOUT:-0}"
+      JIBRI_HTTP_API_EXTERNAL_PORT: "${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}"
+      JIBRI_HTTP_API_INTERNAL_PORT: "${JIBRI_HTTP_API_INTERNAL_PORT:-3333}"
+      # O que o finalize.sh usa: a sessao, o webhook do app (docs/30 §5.3) e a biblioteca da Bunny.
+      SESSAO: "${SESSAO}"
+      WEBINAR_RECORDER_WEBHOOK_URL: "${WEBINAR_RECORDER_WEBHOOK_URL}"
+      WEBINAR_RECORDER_WEBHOOK_SECRET: "${WEBINAR_RECORDER_WEBHOOK_SECRET}"
+      BUNNY_LIBRARY_ID: "${BUNNY_LIBRARY_ID}"
+      BUNNY_API_KEY: "${BUNNY_API_KEY}"
+      BUNNY_COLLECTION_ID: "${BUNNY_COLLECTION_ID:-}"

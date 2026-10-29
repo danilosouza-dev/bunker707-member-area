@@ -1,0 +1,282 @@
+# Jitsi Meet proprio da Bunker707 (docs/30 §6.2, D1/D2): o video da Live ao vivo, no servidor C
+# (`bunker707-meet`, cx23). Quatro servicos do docker-jitsi-meet (web, prosody, jicofo, jvb), na tag stable
+# fixada em JITSI_IMAGE_VERSION, e o Caddy na frente (perfil `borda`) com HTTPS automatico em meet.<dominio>,
+# como no Mautic. Sem marca nem nome do Jitsi na tela (web/custom-*.js); a licenca Apache-2.0 fica em
+# LICENSE-jitsi e NOTICE.
+#
+# Rede (docs/30 §6.2): meet.<dominio> e DNS puro (sem proxy da Cloudflare: WebRTC/UDP nao passa por ela).
+# O que sai do servidor: 80/443 do Caddy (TCP e UDP), UDP 10000 do JVB (midia) e TCP 5222 do prosody, este
+# so para o gravador (Jibri) da vez, limitado pelo firewall da Hetzner (infra/cloud/lib.sh, fw_rules_meet).
+# O resto fica em 127.0.0.1 ou dentro da rede do compose. TURN (coturn) e um passo seguinte (docs/20 §8B.4).
+#
+# Memoria num cx23 (4 GB): VIDEOBRIDGE_MAX_MEMORY e JICOFO_MAX_MEMORY (os nomes do env.example da tag) poem
+# o teto da JVM; o resto (prosody, nginx, caddy, sistema) fica em algumas centenas de MiB, docs/30 §7.1.
+#
+# Uso (servidor C pela etapa deploy-meet, ou ensaio local):
+#   sh infra/jitsi/generate-secrets.sh --local                                   # ou --domain ... --email ...
+#   sh infra/jitsi/scripts/volumes.sh                                            # pastas dos volumes (uid 1000)
+#   docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d
+#   sh infra/jitsi/scripts/smoke.sh
+#
+# As imagens rodam como o usuario `s6` (uid 1000) com raiz somente leitura: os volumes em ./volumes/ precisam
+# ser do uid 1000 (scripts/volumes.sh cria; o usuario deploy do servidor tem esse uid).
+
+name: bunker707-meet
+
+x-common-env: &common-env
+  TZ: "${TZ:-UTC}"
+  PUBLIC_URL: "${PUBLIC_URL}"
+  XMPP_DOMAIN: "${XMPP_DOMAIN:-meet.jitsi}"
+  XMPP_AUTH_DOMAIN: "${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}"
+  XMPP_MUC_DOMAIN: "${XMPP_MUC_DOMAIN:-muc.meet.jitsi}"
+  XMPP_INTERNAL_MUC_DOMAIN: "${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}"
+  XMPP_HIDDEN_DOMAIN: "${XMPP_HIDDEN_DOMAIN:-hidden.meet.jitsi}"
+  XMPP_SERVER: "${XMPP_SERVER:-xmpp.meet.jitsi}"
+  XMPP_PORT: "${XMPP_PORT:-5222}"
+  ENABLE_AUTH: "${ENABLE_AUTH:-1}"
+  AUTH_TYPE: "${AUTH_TYPE:-jwt}"
+  ENABLE_GUESTS: "${ENABLE_GUESTS:-0}"
+  ENABLE_RECORDING: "${ENABLE_RECORDING:-1}"
+  ENABLE_XMPP_WEBSOCKET: "${ENABLE_XMPP_WEBSOCKET:-1}"
+  ENABLE_IPV6: "${ENABLE_IPV6:-0}"
+
+services:
+
+  # O site (nginx + jitsi-meet): config.js e interface_config.js gerados na partida, com os nossos
+  # custom-config.js e custom-interface_config.js concatenados no fim (e o fim que vale). Escuta em 8000 (HTTP,
+  # usuario sem privilegio); so o Caddy chega nele. Sem Let's Encrypt aqui: DISABLE_HTTPS=1, o TLS e do Caddy.
+  web:
+    container_name: bunker707-meet-web
+    image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/web:${JITSI_IMAGE_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:size=16M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    depends_on:
+      - jvb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8000/config.js"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - ./volumes/web:/config
+      - ./volumes/storage/web:/storage
+      # Versionados no repositorio; o script de partida da imagem os anexa a config.js e interface_config.js.
+      - ./web/custom-config.js:/config/custom-config.js:ro
+      - ./web/custom-interface_config.js:/config/custom-interface_config.js:ro
+    environment:
+      <<: *common-env
+      DISABLE_HTTPS: "1"
+      ENABLE_HTTP_REDIRECT: "0"
+      ENABLE_LETSENCRYPT: "0"
+      ENABLE_HSTS: "0"
+      # Sala (docs/30 §6.2): a nossa pagina e a entrada; nada de boas-vindas, pre-entrada ou pagina de saida.
+      ENABLE_P2P: "${ENABLE_P2P:-0}"
+      ENABLE_PREJOIN_PAGE: "${ENABLE_PREJOIN_PAGE:-0}"
+      ENABLE_WELCOME_PAGE: "${ENABLE_WELCOME_PAGE:-0}"
+      ENABLE_CLOSE_PAGE: "${ENABLE_CLOSE_PAGE:-0}"
+      ENABLE_BREAKOUT_ROOMS: "${ENABLE_BREAKOUT_ROOMS:-0}"
+      ENABLE_CALENDAR: "0"
+      ENABLE_LIVESTREAMING: "0"
+      ENABLE_TRANSCRIPTIONS: "0"
+      # Sem pedidos a terceiros (gravatar etc.) e sem a pagina "abra no aplicativo" no celular (D2, LGPD).
+      ENABLE_THIRD_PARTY_REQUESTS: "${ENABLE_THIRD_PARTY_REQUESTS:-0}"
+      DISABLE_DEEP_LINKING: "${DISABLE_DEEP_LINKING:-1}"
+      # Chat, enquetes e reacoes sao nossos (D5); o aluno nao abre menu sobre ninguem.
+      DISABLE_POLLS: "${DISABLE_POLLS:-1}"
+      DISABLE_REACTIONS: "${DISABLE_REACTIONS:-1}"
+      DISABLE_PRIVATE_CHAT: "${DISABLE_PRIVATE_CHAT:-1}"
+      DISABLE_REMOTE_VIDEO_MENU: "${DISABLE_REMOTE_VIDEO_MENU:-1}"
+      # Todo mundo entra mudo e com a camera desligada (D4); o host liga os dele com um clique.
+      START_WITH_AUDIO_MUTED: "${START_WITH_AUDIO_MUTED:-1}"
+      START_WITH_VIDEO_MUTED: "${START_WITH_VIDEO_MUTED:-1}"
+      START_AUDIO_MUTED: "${START_AUDIO_MUTED:-1}"
+      START_VIDEO_MUTED: "${START_VIDEO_MUTED:-1}"
+      DEFAULT_LANGUAGE: "${DEFAULT_LANGUAGE:-ptBR}"
+      # Qualidade (D26): teto de captura 1080p; os tetos por papel vao no configOverwrite do iframe (docs/30 §6.3).
+      RESOLUTION: "${RESOLUTION:-1080}"
+      RESOLUTION_MIN: "${RESOLUTION_MIN:-180}"
+      RESOLUTION_WIDTH: "${RESOLUTION_WIDTH:-1920}"
+      RESOLUTION_WIDTH_MIN: "${RESOLUTION_WIDTH_MIN:-320}"
+      DESKTOP_SHARING_FRAMERATE_AUTO: "0"
+      DESKTOP_SHARING_FRAMERATE_MIN: "${DESKTOP_SHARING_FRAMERATE_MIN:-5}"
+      DESKTOP_SHARING_FRAMERATE_MAX: "${DESKTOP_SHARING_FRAMERATE_MAX:-30}"
+      # Tetos de bitrate por nivel (low 180p, standard 360p, high 720p, fullHd 1080p; ss = tela compartilhada),
+      # iguais para os tres codecs que o JVB negocia; minHeightForQualityLvl fica em web/custom-config.js.
+      VIDEOQUALITY_BITRATE_VP8_LOW: "${VIDEOQUALITY_BITRATE_LOW:-200000}"
+      VIDEOQUALITY_BITRATE_VP8_STANDARD: "${VIDEOQUALITY_BITRATE_STANDARD:-500000}"
+      VIDEOQUALITY_BITRATE_VP8_HIGH: "${VIDEOQUALITY_BITRATE_HIGH:-1500000}"
+      VIDEOQUALITY_BITRATE_VP8_FULL: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_VP8_ULTRA: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_VP8_SS_HIGH: "${VIDEOQUALITY_BITRATE_SCREEN:-4000000}"
+      VIDEOQUALITY_BITRATE_VP9_LOW: "${VIDEOQUALITY_BITRATE_LOW:-200000}"
+      VIDEOQUALITY_BITRATE_VP9_STANDARD: "${VIDEOQUALITY_BITRATE_STANDARD:-500000}"
+      VIDEOQUALITY_BITRATE_VP9_HIGH: "${VIDEOQUALITY_BITRATE_HIGH:-1500000}"
+      VIDEOQUALITY_BITRATE_VP9_FULL: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_VP9_ULTRA: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_VP9_SS_HIGH: "${VIDEOQUALITY_BITRATE_SCREEN:-4000000}"
+      VIDEOQUALITY_BITRATE_AV1_LOW: "${VIDEOQUALITY_BITRATE_LOW:-200000}"
+      VIDEOQUALITY_BITRATE_AV1_STANDARD: "${VIDEOQUALITY_BITRATE_STANDARD:-500000}"
+      VIDEOQUALITY_BITRATE_AV1_HIGH: "${VIDEOQUALITY_BITRATE_HIGH:-1500000}"
+      VIDEOQUALITY_BITRATE_AV1_FULL: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_AV1_ULTRA: "${VIDEOQUALITY_BITRATE_FULL:-4000000}"
+      VIDEOQUALITY_BITRATE_AV1_SS_HIGH: "${VIDEOQUALITY_BITRATE_SCREEN:-4000000}"
+    networks:
+      meet.jitsi:
+
+  # Sinalizacao (XMPP). Quem entra: so com JWT do nosso app (AUTH_TYPE=jwt, ENABLE_GUESTS=0); o host vira
+  # moderador pelo token (XMPP_MUC_MODULES=token_affiliation, a copia versionada em prosody/plugins). A porta
+  # 5222 sai do servidor so para o Jibri da vez (firewall da Hetzner); o navegador fala por websocket pelo web.
+  prosody:
+    container_name: bunker707-meet-prosody
+    image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/prosody:${JITSI_IMAGE_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:size=16M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    ports:
+      - "${XMPP_PUBLIC_BIND:-0.0.0.0}:${XMPP_PORT:-5222}:5222"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - ./volumes/prosody/config:/config
+      - ./volumes/storage/prosody:/var/lib/prosody
+      - ./prosody/plugins:/prosody-plugins-custom:ro
+    environment:
+      <<: *common-env
+      JWT_APP_ID: "${JWT_APP_ID:-bunker707}"
+      JWT_APP_SECRET: "${JWT_APP_SECRET}"
+      JWT_ACCEPTED_ISSUERS: "${JWT_ACCEPTED_ISSUERS:-bunker707}"
+      JWT_ACCEPTED_AUDIENCES: "${JWT_ACCEPTED_AUDIENCES:-bunker707}"
+      JWT_ALLOW_EMPTY: "0"
+      XMPP_MUC_MODULES: "${XMPP_MUC_MODULES:-token_affiliation}"
+      ENABLE_LOBBY: "${ENABLE_LOBBY:-1}"
+      ENABLE_AV_MODERATION: "1"
+      ENABLE_END_CONFERENCE: "1"
+      JICOFO_AUTH_PASSWORD: "${JICOFO_AUTH_PASSWORD}"
+      JVB_AUTH_PASSWORD: "${JVB_AUTH_PASSWORD}"
+      JIBRI_XMPP_USER: "${JIBRI_XMPP_USER:-jibri}"
+      JIBRI_XMPP_PASSWORD: "${JIBRI_XMPP_PASSWORD}"
+      JIBRI_RECORDER_USER: "${JIBRI_RECORDER_USER:-recorder}"
+      JIBRI_RECORDER_PASSWORD: "${JIBRI_RECORDER_PASSWORD}"
+      # TURN (redes fechadas): fica desligado ate o coturn entrar; com TURN_HOST vazio nada e anunciado.
+      TURN_HOST: "${TURN_HOST:-}"
+      TURN_PORT: "${TURN_PORT:-3478}"
+      TURNS_HOST: "${TURNS_HOST:-}"
+      TURNS_PORT: "${TURNS_PORT:-5349}"
+      TURN_TRANSPORT: "${TURN_TRANSPORT:-udp,tcp}"
+      TURN_CREDENTIALS: "${TURN_CREDENTIALS:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    networks:
+      meet.jitsi:
+        aliases:
+          - ${XMPP_SERVER:-xmpp.meet.jitsi}
+
+  # O foco da conferencia. ENABLE_AUTO_OWNER=0: o primeiro que entra NAO vira moderador (D14); a REST de saude
+  # fica em 127.0.0.1:8888 (smoke.sh). JICOFO_MAX_MEMORY: um palco por vez cabe em 512 MB de heap.
+  jicofo:
+    container_name: bunker707-meet-jicofo
+    image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/jicofo:${JITSI_IMAGE_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:size=32M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    ports:
+      - "127.0.0.1:${JICOFO_REST_PORT:-8888}:8888"
+    depends_on:
+      - prosody
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    volumes:
+      - ./volumes/jicofo:/config
+    environment:
+      <<: *common-env
+      ENABLE_AUTO_OWNER: "${ENABLE_AUTO_OWNER:-0}"
+      JICOFO_AUTH_PASSWORD: "${JICOFO_AUTH_PASSWORD}"
+      JICOFO_MAX_MEMORY: "${JICOFO_MAX_MEMORY:-512m}"
+      JIBRI_BREWERY_MUC: "${JIBRI_BREWERY_MUC:-jibribrewery}"
+      JIBRI_PENDING_TIMEOUT: "${JIBRI_PENDING_TIMEOUT:-90 seconds}"
+      JVB_BREWERY_MUC: "${JVB_BREWERY_MUC:-jvbbrewery}"
+    networks:
+      meet.jitsi:
+
+  # A ponte de video (SFU): a midia dos alunos entra e sai por UDP 10000. JVB_ADVERTISE_IPS leva o IPv4 publico
+  # do servidor (o container esta atras do NAT do Docker); a etapa deploy-meet grava. VIDEOBRIDGE_MAX_MEMORY:
+  # 1,5 GB de heap chegam para as dezenas de alunos do cx23 (docs/30 §7.1); a saude em 127.0.0.1:8080.
+  jvb:
+    container_name: bunker707-meet-jvb
+    image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/jvb:${JITSI_IMAGE_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:size=32M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    ports:
+      - "${JVB_PORT:-10000}:${JVB_PORT:-10000}/udp"
+      - "127.0.0.1:${JVB_COLIBRI_PORT:-8080}:8080"
+    depends_on:
+      - prosody
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    volumes:
+      - ./volumes/jvb:/config
+    environment:
+      <<: *common-env
+      JVB_AUTH_PASSWORD: "${JVB_AUTH_PASSWORD}"
+      JVB_ADVERTISE_IPS: "${JVB_ADVERTISE_IPS:-}"
+      JVB_PORT: "${JVB_PORT:-10000}"
+      JVB_BREWERY_MUC: "${JVB_BREWERY_MUC:-jvbbrewery}"
+      VIDEOBRIDGE_MAX_MEMORY: "${VIDEOBRIDGE_MAX_MEMORY:-1536m}"
+    networks:
+      meet.jitsi:
+
+  # Borda do servidor C (perfil `borda`): TLS automatico em meet.<dominio> e a unica porta publica alem do UDP
+  # 10000. Sem Cloudflare na frente (DNS puro), entao sem a lista de proxies confiaveis dela.
+  caddy:
+    container_name: bunker707-meet-caddy
+    image: caddy:2.11.7-alpine
+    profiles: ["borda"]
+    restart: unless-stopped
+    ports:
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:80
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443/udp
+    depends_on:
+      web:
+        condition: service_started
+    environment:
+      MEET_SITE_ADDRESS: ${MEET_SITE_ADDRESS}
+      MEET_FRAME_ANCESTORS: ${MEET_FRAME_ANCESTORS:-'self'}
+      ACME_EMAIL: ${ACME_EMAIL}
+      CADDY_LOCAL_CERTS: ${CADDY_LOCAL_CERTS:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      meet.jitsi:
+
+# Rede propria para os servicos se acharem por nome (o prosody atende por xmpp.meet.jitsi).
+networks:
+  meet.jitsi:
+
+volumes:
+  caddy-data:
+  caddy-config:
