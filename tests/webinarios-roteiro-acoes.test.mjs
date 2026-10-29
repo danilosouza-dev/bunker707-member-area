@@ -76,6 +76,7 @@ const scriptActions = await import("../src/server/webinars/script-actions.ts");
 const roomActions = await import("../src/server/webinars/room-actions.ts");
 const consoleModel = await import("../src/server/webinars/console-model.ts");
 const { CHAT_MESSAGES } = await import("../src/server/webinars/chat-schemas.ts");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 /* ------------------------------------------------------------------------------------------------
  * Banco em memoria
@@ -765,6 +766,18 @@ test("Simulação (§8.6): ligar exige a frase de hoje com o nome de quem decide
   assert.equal(noAr.ok, true, "a sessao no ar ainda muda o selo");
   const encerrada = ok(await roomActions.saveSimulation({ sessionId: SESSAO_ENCERRADA, showLiveBadge: false }));
   assert.equal(encerrada.session.showLiveBadge, false);
+});
+
+test("Simulação (fase 4, D10): com contador, entradas ou avisos simulados na sessão, o selo da fase 2 recusa com 409 e nada muda", async () => {
+  const db = usar(bancoEmMemoria(cenario()));
+  const sessao = () => db.tables.webinar_sessions.find((row) => row.id === SESSAO_MARCADA);
+  Object.assign(sessao(), { simulated_count_rule: { base: 40, jitter: 5, mode: "fixed", peak: 40 } });
+
+  const recusada = await roomActions.saveSimulation({ sessionId: SESSAO_MARCADA, showLiveBadge: false });
+  assert.deepEqual([recusada.ok, recusada.status], [false, 409]);
+  assert.equal(recusada.error, WEBINAR_COPY.simulacao.servidor.usarCardNovo);
+  assert.equal(sessao().simulation_decided_at ?? null, null);
+  assert.equal(audits(db, "webinar.simulation_saved").length, 0);
 });
 
 /* ------------------------------------------------------------------------------------------------

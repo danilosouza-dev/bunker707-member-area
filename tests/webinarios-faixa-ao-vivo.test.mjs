@@ -199,6 +199,18 @@ test("escolha: a Live gravada so com o selo ligado (A16), na fase live do relogi
   assert.equal(escolha([gravada({ kind: "replay" })], T0 + 10 * MIN).live.length, 0, "o replay nunca e Ao vivo agora");
 });
 
+test("escolha: a sessao do 'Começa quando você entra' (fase 4e) nunca entra na faixa, nem no ar com o selo nem como Comeca em", () => {
+  const jitNoAr = session({ jit: true, kind: "simulated", roomName: null, showLiveBadge: true, status: "live" });
+  assert.equal(banner.sessionOnAir(jitNoAr, HOUR, { meetConfigured: true, nowMs: T0 + 10 * MIN }), false);
+  assert.deepEqual(escolha([entrada({ kind: "simulated" }, [jitNoAr])], T0 + 10 * MIN), { live: [], soon: null });
+
+  // Uma vaga geral do webinario (sem sessao) nunca vira a "Comeca em" de uma sessao jit.
+  const jitLogo = session({ id: S2, jit: true, kind: "simulated", roomName: null, scheduledAt: iso(T0 + 30 * MIN), status: "scheduled" });
+  assert.equal(escolha([entrada({ kind: "simulated" }, [jitLogo], [vaga({ sessionId: null })])], T0).soon, null);
+  const marcada = session({ id: S3, kind: "simulated", roomName: null, scheduledAt: iso(T0 + 40 * MIN), status: "scheduled" });
+  assert.equal(escolha([entrada({ kind: "simulated" }, [jitLogo, marcada], [vaga({ sessionId: null })])], T0).soon?.scheduledAt, iso(T0 + 40 * MIN), "a hora marcada continua");
+});
+
 test("escolha: Comeca em so para quem garantiu vaga, de 60 min antes ate a hora; a mais proxima; o Entrar vai a sala so quando ela abre", () => {
   const comVaga = entrada({}, [session()], [vaga()]);
   assert.deepEqual(escolha([comVaga], T0 - 30 * MIN), { live: [], soon: { href: "/webinarios/aula-de-ia", scheduledAt: iso(T0), title: "Aula de IA" } });
@@ -869,4 +881,27 @@ test("rota: so le o segmento onde ele decide; sem regra de progresso, ritmo ou t
   assert.deepEqual((await pedir()).body.data.live.map((item) => item.title), ["Live de hoje"]);
   assert.ok(entrada.calls.from.includes("profiles"));
   assert.ok(!entrada.calls.from.includes("lessons") && !entrada.calls.from.includes("course_modules"), "sem o indice de aulas");
+});
+
+test("rota: as sessoes do 'Começa quando você entra' nunca sao candidatas (nem no ar com o selo, nem com a vaga geral)", async () => {
+  const now = Date.now();
+  const W_JIT = "bbbbbbbb-0000-4000-8000-000000000007";
+  actionStubs.db = bancoFalso({
+    tables: {
+      admin_roles: [],
+      entitlements: [],
+      webinar_recordings: [],
+      webinar_registrations: [registrationRow(ALUNO_ID, W_JIT, null)],
+      webinar_sessions: [
+        sessionRow("cccccccc-0000-4000-8000-000000000009", W_JIT, { jit: true, kind: "simulated", room_name: null, scheduled_at: iso(now - 5 * MIN), show_live_badge: true, started_at: iso(now - 5 * MIN) }),
+        sessionRow("cccccccc-0000-4000-8000-000000000010", W_JIT, { jit: true, kind: "simulated", room_name: null, scheduled_at: iso(now + 10 * MIN), started_at: null, status: "scheduled" })
+      ],
+      webinars: [webinarRow(W_JIT, { kind: "simulated", slug: "agentes-quando-voce-entra", title: "Agentes quando você entra" })]
+    }
+  });
+  sessao.user = { id: ALUNO_ID };
+  const { body, response } = await pedir();
+  assert.equal(response.status, 200);
+  assert.deepEqual({ live: body.data.live, soon: body.data.soon }, { live: [], soon: null });
+  assert.deepEqual(actionStubs.db.calls.from, ["webinar_sessions"], "sem candidata, nem o webinario nem as vagas sao lidos");
 });

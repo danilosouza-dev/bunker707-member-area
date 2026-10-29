@@ -186,6 +186,36 @@ test("Live gravada: cada sessao tem a propria situacao; a proxima fica em destaq
   assert.equal(view.replayAvailable, true);
 });
 
+test("Comeca quando voce entra (fase 4e): as sessoes jit nunca aparecem uma a uma; o webinario vira um card so, nunca Encerrado nem Replay", () => {
+  const jit = { ...model.defaultJitSettings(), enabled: true };
+  // 15:00 em Sao Paulo: o horario das 15:00 comecou agora e o das 14:45 ja nasceu, encerrado, com o replay.
+  const sessions = [
+    session({ id: "j1", jit: true, kind: "simulated", scheduledAt: iso(now - 15 * MINUTE), startedAt: iso(now - 15 * MINUTE), status: "live" }),
+    session({ endedAt: iso(now - 5 * MINUTE), id: "j0", jit: true, kind: "simulated", scheduledAt: iso(now - 2 * HOUR), status: "ended" }),
+    session({ id: "rp", kind: "replay", status: "live" })
+  ];
+  const view = student.buildStudentWebinarView({
+    jit,
+    now,
+    presenterName: null,
+    registeredCounts: new Map(),
+    registrations: [registration({ sessionId: null })],
+    sessions,
+    webinar: webinar({ durationMinutes: 60, kind: "simulated" })
+  });
+  assert.deepEqual(student.realSessions(sessions).map((item) => item.id), [], "nem a jit no ar nem a encerrada");
+  assert.deepEqual([view.sessions.length, view.primary, view.phase, view.endedAtMs], [0, null, "scheduled", null]);
+  assert.equal(view.jit.state.kind, "current", "a sessao das 15:00 ainda aceita entrada (ate o fim)");
+  assert.equal(view.replayAvailable, true);
+  const grupos = student.groupStudentWebinars([view]);
+  assert.deepEqual([grupos.inProgress.length, grupos.upcoming.length, grupos.replays.length], [1, 0, 0], "correndo: Em andamento; nunca Replays");
+  assert.equal(student.pickStartBanner([view], now), null, "a vaga geral nunca vira 'Comeca em 1 h' de uma sessao jit");
+
+  const semJit = student.buildStudentWebinarView({ now, presenterName: null, registeredCounts: new Map(), registrations: [], sessions, webinar: webinar({ durationMinutes: 60, kind: "simulated" }) });
+  assert.deepEqual([semJit.jit, semJit.phase], [null, "ended"], "sem as regras, o webinario sem sessao marcada acabou como antes");
+  assert.equal(student.buildStudentWebinarView({ jit, now, presenterName: null, registeredCounts: new Map(), registrations: [], sessions: [], webinar: webinar() }).jit, null, "so a Live gravada");
+});
+
 test("/webinarios: Proxima live (do mais proximo), Em andamento e Replays; cancelados ficam fora", () => {
   const later = build(webinar({ id: "w3", slug: "depois", title: "Depois" }), [session({ id: "s3", scheduledAt: iso(now + 5 * DAY), webinarId: "w3" })]);
   const next = build(webinar(), [session()]);

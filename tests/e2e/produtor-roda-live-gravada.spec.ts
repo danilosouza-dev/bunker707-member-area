@@ -1,12 +1,15 @@
 import { expect, test } from "./fixtures";
 import { LIVE_GRAVADA_DE_TESTE, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
+import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 
 // O produtor roda uma Live gravada (docs/30 §2.2 "Roteiro de chat", §2.4 e §10.2; fase 2b): importa um CSV no
 // Roteiro de chat (a previa com a contagem, Importar), salva uma enquete pronta, abre o console da sessao marcada,
 // abre a sessao pela mao (o roteiro pronto entra no chat), manda uma mensagem da equipe e lanca a enquete; a 375 px
 // o console cabe sem rolar de lado. Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
 // marcada ha 1 min, so para esta rodada; a aluna nao participa aqui (a Sala dela esta em aluno-assiste-live-gravada).
+// Fase 4 (docs/30 §2.2 e §2.4): o editor da Live gravada ganhou os cards Oferta e Assistente e o console da sessao
+// gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais.
 
 const { id, titulo } = LIVE_GRAVADA_DE_TESTE;
 const SESSAO = "bbbbbbbb-0000-4000-8000-0000000000e1";
@@ -37,6 +40,10 @@ test.describe("produtor", () => {
     await page.goto(`/admin/comunicacao/webinarios/${id}`);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+
+    // Fase 4: os cards novos do webinario ja gravado (cada um salva pela propria Server Action).
+    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.card.titulo })).toBeVisible();
+    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.card.titulo })).toBeVisible();
 
     const roteiro = page.getByRole("region", { name: "Roteiro de chat" });
     await expect(roteiro.getByText(/0 entram sozinhas/)).toBeVisible();
@@ -71,6 +78,10 @@ test.describe("produtor", () => {
     await confirmacao.getByRole("button", { exact: true, name: "Abrir sessão" }).click();
     await expect(page.getByText("Sessão aberta. O roteiro pronto entrou no chat.")).toBeVisible();
     await expect(page.getByRole("button", { exact: true, name: "Encerrar sessão" })).toBeVisible();
+
+    // Fase 4: na sessao gravada o console tem tambem a Oferta (Mostrar agora / Esconder) e o Atendimento.
+    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.console.titulo })).toBeVisible();
+    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.console.titulo })).toBeVisible();
 
     const chat = page.getByRole("list", { name: "Chat" });
     await expect(chat.getByText("Boa noite, turma!")).toBeVisible();

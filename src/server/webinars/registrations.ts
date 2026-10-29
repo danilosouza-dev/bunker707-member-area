@@ -108,6 +108,10 @@ export async function registerStudent(input: RegisterStudentInput): Promise<Regi
   }
 
   const session = resolveStudentSession(record, input.sessionId, now.getTime());
+  // Fase 4e (docs/30 §1.2): a sessao do "Começa quando você entra" nunca tem vaga, so Entrar.
+  if (session.jit) {
+    throw new WebinarError("Sessão inválida.", 404);
+  }
   const registeredCount = await countSessionRegistrations(db, { id: session.id, webinar_id: webinar.id });
   const decision = canRegister({
     capacity: webinar.capacity,

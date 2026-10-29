@@ -18,6 +18,12 @@ import "server-only";
 // communication_webinar_facts (migracao 202610300001), so quando alguma regra pede (opcao `webinars`), e
 // context.webinarFactsLoaded diz que a leitura foi feita: sem ela (ou num banco sem a migracao) a regra nunca
 // combina, nem negada.
+//
+// Webinarios v4b (docs/30 §1.6): a lista de chaves que chega aqui (collectMessageCampaignIds) traz tambem
+// "webinar:<id>" das regras "webinar_follow_up" (o "Webinário" da fase 4). Os avisos seguem pelas linhas do sino; os
+// webinarios, pelos fatos do follow-up (loadWebinarFollowUpFacts em src/server/webinars/follow-up-queries.ts),
+// juntados em facts.webinarFollowUps, e "webinar:<id>" entra em context.messageKeys so quando o webinario foi lido
+// (apagado ou banco sem a migracao: a regra nao combina). As duas leituras convivem ate a unificacao das regras.
 
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { accessStateOf, isAccessOpen, paceOf } from "@/server/students/model";
@@ -34,9 +40,12 @@ import {
   type ProfileRow,
   type ProgressRow
 } from "@/server/students/store";
+import { loadWebinarFollowUpFacts, type WebinarFollowUpRead } from "@/server/webinars/follow-up-queries";
 import {
   buildCommentRanks,
   messageRefKey,
+  webinarIdOfKey,
+  webinarRuleKey,
   type AudienceAccessFact,
   type AudienceCommentCounts,
   type AudienceContext,
@@ -344,9 +353,22 @@ const MESSAGE_ROW_COLUMNS =
   "id,user_id,campaign_id,created_at,expires_at,seen_at,opened_at,clicked_at,response,audio_started_at,audio_completed_at,reaction,poll_choice,hidden_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Ids de aviso validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato). */
+/** Ids de aviso validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato; "webinar:<id>" fica de fora). */
 function campaignIdsOf(campaignIds: readonly string[] | undefined) {
   return Array.from(new Set((campaignIds ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
+}
+
+/** v4b: ids dos webinarios das chaves "webinar:<id>" (validos, sem repeticao e em ordem). */
+export function webinarIdsOfKeys(keys: readonly string[] | undefined) {
+  return Array.from(
+    new Set(
+      (keys ?? []).flatMap((key) => {
+        const id = webinarIdOfKey(key);
+
+        return id && UUID.test(id) ? [id] : [];
+      })
+    )
+  ).sort();
 }
 
 /** v3a: ids das opcoes votadas (so texto no formato do id; outra coisa = nao votou). */
@@ -591,11 +613,40 @@ export function attachWebinarFacts(loaded: LoadedAudience, webinars: WebinarFact
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * v4b: os fatos dos webinarios citados por regras "webinar_follow_up" (o "Webinário" da fase 4)
+ * ---------------------------------------------------------------------------------------------- */
+
+const NOTHING_READ: WebinarFollowUpRead = { byUser: new Map(), loadedIds: [] };
+
+/**
+ * Junta os fatos dos webinarios lidos aos fatos ja montados e marca "webinar:<id>" em context.messageKeys (so os
+ * lidos: um webinario apagado continua fora, e a regra nao combina). Devolve um novo LoadedAudience (os fatos de quem
+ * tem linha sao copiados; os demais sao os mesmos objetos).
+ */
+export function attachWebinarFollowUpFacts(loaded: LoadedAudience, read: WebinarFollowUpRead): LoadedAudience {
+  if (read.loadedIds.length === 0) {
+    return loaded;
+  }
+
+  const messageKeys = new Set([...(loaded.context.messageKeys ?? []), ...read.loadedIds.map(webinarRuleKey)]);
+  const facts = loaded.facts.map((fact) => {
+    const own = read.byUser.get(fact.userId);
+
+    return own ? { ...fact, webinarFollowUps: { ...fact.webinarFollowUps, ...own } } : fact;
+  });
+
+  return { ...loaded, context: { ...loaded.context, messageKeys }, facts };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Carregadores
  * ---------------------------------------------------------------------------------------------- */
 
 export type AudienceFactsOptions = {
-  /** Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. */
+  /**
+   * Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. v4b: as
+   * chaves "webinar:<id>" das regras "webinar_follow_up" vem na mesma lista e trazem os fatos do webinario.
+   */
   messageCampaignIds?: readonly string[];
   /**
    * Le as lives de cada aluno (regra "Participação em lives"; audienceFactNeeds(...).webinars). Sem isto, nada e
@@ -612,7 +663,8 @@ export async function loadAudienceFacts(
 ): Promise<LoadedAudience> {
   const nowMs = typeof now === "number" ? now : now.getTime();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
-  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars] = await Promise.all([
+  const webinarIds = webinarIdsOfKeys(options.messageCampaignIds);
+  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars, webinarFollowUps] = await Promise.all([
     fetchProfiles(db),
     fetchStaffUserIds(db),
     fetchEntitlements(db),
@@ -621,7 +673,8 @@ export async function loadAudienceFacts(
     fetchCohortMemberships(db),
     fetchCommentCounts(db),
     loadMessageFacts(db, messageCampaignIds),
-    options.webinars ? loadWebinarFacts(db) : Promise.resolve(null)
+    options.webinars ? loadWebinarFacts(db) : Promise.resolve(null),
+    webinarIds.length > 0 ? loadWebinarFollowUpFacts(db, webinarIds) : Promise.resolve(NOTHING_READ)
   ]);
   const { facts, people } = buildStudentFacts({ comments, entitlements, lessonIndex, memberships, now: nowMs, profiles, progressRows, staff });
   const loaded: LoadedAudience = {
@@ -635,7 +688,7 @@ export async function loadAudienceFacts(
     people
   };
 
-  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
+  return attachWebinarFollowUpFacts(attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars), webinarFollowUps);
 }
 
 export type AudienceFactsForOptions = AudienceFactsOptions & {
@@ -680,6 +733,7 @@ export async function loadAudienceFactsFor(
   const nowMs = typeof now === "number" ? now : now.getTime();
   const ids = Array.from(new Set(userIds.filter(Boolean))).sort();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
+  const webinarIds = webinarIdsOfKeys(options.messageCampaignIds);
   const commentsMode = options.comments ?? "ranked";
   const readRows = async (chunk: string[]) => {
     const [profiles, progressRows, memberships, entitlements] = await Promise.all([
@@ -691,7 +745,7 @@ export async function loadAudienceFactsFor(
 
     return { entitlements, memberships, profiles, progressRows };
   };
-  const [chunks, staff, lessonIndex, comments, messages, webinars] = await Promise.all([
+  const [chunks, staff, lessonIndex, comments, messages, webinars, webinarFollowUps] = await Promise.all([
     (async () => {
       const results = [];
 
@@ -713,7 +767,8 @@ export async function loadAudienceFactsFor(
       ? Promise.resolve(options.webinarFacts)
       : options.webinars
         ? loadWebinarFacts(db, { userIds: ids })
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+    webinarIds.length > 0 && ids.length > 0 ? loadWebinarFollowUpFacts(db, webinarIds, { userIds: ids }) : Promise.resolve(NOTHING_READ)
   ]);
   const wanted = new Set(ids);
   const { facts, people } = buildStudentFacts({
@@ -741,5 +796,5 @@ export async function loadAudienceFactsFor(
     people
   };
 
-  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
+  return attachWebinarFollowUpFacts(attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars), webinarFollowUps);
 }

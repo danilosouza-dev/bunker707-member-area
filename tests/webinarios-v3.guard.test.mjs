@@ -39,7 +39,7 @@ function functionBody(code, name) {
 
 const NEW_TABLES = ["webinar_session_bans", "webinar_user_bans", "webinar_recording_events"];
 
-test("as migracoes ate a 202610290001 continuam byte a byte; a 0002 e o texto exato (ja aplicada); o app exige a 0003", () => {
+test("as migracoes ate a 202610290001 continuam byte a byte; a 0002 e o texto exato (ja aplicada); o app exige a mais nova (a 202610300001)", () => {
   const dir = new URL("supabase/migrations/", root);
   const files = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -58,6 +58,9 @@ test("as migracoes ate a 202610290001 continuam byte a byte; a 0002 e o texto ex
     "b48d8504a243ba8f7e860cb20e5b3342acd06cdf2571c3b9a3ec1d2795463fbd",
     "a 202610290002 mudou: aplique de novo na nuvem de teste (docs/21) e atualize este hash junto"
   );
+  // INTEGRACAO (provisorio, ate a renumeracao das migracoes da fase 4): o aviso aponta a 202610300001, a mais nova pela
+  // ordem dos arquivos; a fase 4 le webinar_sessions.jit (0008) em toda leitura de sessao, e as guardas
+  // tests/webinarios-v4*.guard.test.mjs fixam as migracoes dela.
   assert.equal(appMigration, "202610300001", "o aviso de migracao pendente aponta a mais nova (a 0030 do Quem pode por regras; a guarda dela confere o arquivo)");
 });
 

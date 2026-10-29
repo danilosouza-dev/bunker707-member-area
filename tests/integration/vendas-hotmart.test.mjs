@@ -22,6 +22,9 @@ import {
 // reembolso registrado nao libera no reprocesso; evento preso em `received` e retomado; codigo repetido
 // nao grava nada; falha fica guardada e "Precisa de atencao" dura ate o reprocesso; a exclusao do aluno
 // anonimiza as vendas dele; desconectar volta a recusar. Nenhum e-mail sai.
+//
+// Webinarios v4b (docs/30 M8): o valor da compra (data.purchase.price) fica em webhook_events.amount_cents/currency
+// (e o preco no payload guardado); evento que nao muda acesso fica sem o valor.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -83,7 +86,13 @@ function payload({ assinatura = null, email = COMPRADOR.email, event = "PURCHASE
       commissions: [{ value: 10 }],
       producer: { name: "Produtor Ficticio" },
       product: { id: Number(produto), name: `Produto ${produto} na Hotmart` },
-      purchase: { approved_date: Date.now(), order_date: Date.now(), status: event === "PURCHASE_APPROVED" ? "APPROVED" : "REFUNDED", transaction }
+      purchase: {
+        approved_date: Date.now(),
+        order_date: Date.now(),
+        price: { currency_value: "BRL", value: 1597.9 },
+        status: event === "PURCHASE_APPROVED" ? "APPROVED" : "REFUNDED",
+        transaction
+      }
     },
     event,
     id: `${PREFIXO}${id}`,
@@ -123,7 +132,8 @@ async function postJson(body, token = TOKEN) {
   return { body: await response.json(), status: response.status };
 }
 
-const EVENT_COLUMNS = "id,external_event_id,event_type,processing_status,outcome,outcome_detail,error_message,product_id,combo_id,user_id,buyer_email,transaction_id,payload";
+const EVENT_COLUMNS =
+  "id,external_event_id,event_type,processing_status,outcome,outcome_detail,error_message,product_id,combo_id,user_id,buyer_email,transaction_id,payload,amount_cents,currency";
 
 async function eventos() {
   return unwrap(await db.from("webhook_events").select(EVENT_COLUMNS).like("external_event_id", `${PREFIXO}%`).order("received_at"), "Lendo vendas recebidas");
@@ -341,6 +351,10 @@ test("compra aprovada cria a conta, libera o curso e deixa boas-vindas e compra 
   assert.deepEqual(Object.keys(linha.payload.data).sort(), ["buyer", "product", "purchase"], "so os blocos permitidos ficam guardados");
   assert.deepEqual(linha.payload.data.buyer, { checkout_phone: "11999990000", checkout_phone_code: "55", email: COMPRADOR.email, name: COMPRADOR.nome });
   assert.equal(JSON.stringify(linha.payload).includes("00000000000"), false, "documento e endereco nunca sao gravados");
+  // v4b (docs/30 M8): o valor da compra, em centavos e na moeda do payload, so para a receita dos webinarios.
+  assert.equal(Number(linha.amount_cents), 159_790, "1597.9 vira 159790 centavos, sem erro de ponto flutuante");
+  assert.equal(linha.currency, "BRL");
+  assert.deepEqual(linha.payload.data.purchase.price, { currency_value: "BRL", value: 1597.9 }, "o preco fica no payload guardado");
 
   const row = await integracao();
   assert.ok(row.last_sync_at, "a plataforma registra a ultima venda");
@@ -924,6 +938,8 @@ test("eventos que nao mudam acesso ficam guardados so com o envelope; JSON inval
   assert.match(boleto.outcome_detail, /não muda o acesso/);
   assert.equal("data" in boleto.payload, false, "evento que nao muda acesso nao guarda dados do comprador");
   assert.equal(boleto.buyer_email, null, "nem o e-mail na coluna");
+  assert.equal(boleto.amount_cents, null, "nem o valor (docs/30 M8)");
+  assert.equal(boleto.currency, null);
   assert.deepEqual(Object.keys(boleto.payload).sort(), ["creation_date", "event", "id", "version"]);
 
   const invalido = await route.POST(

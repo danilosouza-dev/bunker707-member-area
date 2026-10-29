@@ -27,7 +27,8 @@ import {
 // gravacao vale a duracao prevista; a sessao cuja janela inteira passou sem abrir e encerrada direto, sem "Comecou
 // agora" atrasado; rascunho e cancelado pulam; `live` (fase 3) e `replay` ficam de fora; uma consulta de sessoes por
 // tick e um webinario lido uma vez; o tick abortado para entre as sessoes; a migracao pendente; o nome e as contagens
-// do job em job_runs. O job contra o banco local fica em tests/integration/webinarios-relatorio.test.mjs.
+// do job em job_runs; a sessao do "Comeca quando voce entra" (fase 4e) abre e encerra igual, sem o "Comecou agora". O
+// job contra o banco local fica em tests/integration/webinarios-relatorio.test.mjs.
 
 process.env.NEXT_PUBLIC_SITE_URL = "https://membros.exemplo.test";
 
@@ -66,6 +67,29 @@ test("na hora marcada: uma consulta de sessoes, a RPC abre a sessao gravada, o C
   assert.deepEqual(tabelas(db, antes), ["webinar_sessions:select", "webinars:select", "webinar_recordings:select"]);
   assert.equal(rpcs(db, "webinar_open_session").length, 1, "a RPC de abrir nao roda de novo");
   assert.equal(sinos(db).length, 2);
+});
+
+test("Comeca quando voce entra (fase 4e): a sessao jit abre na hora (roteiro, presenca) sem o 'Comecou agora', mesmo com vaga geral, e encerra com o replay", async () => {
+  const JIT = "dddddddd-9999-4999-8999-999999999999";
+  const db = bancoDosWebinarios({
+    roteiro: [{ id: "r1", status: "ready", trigger_kind: "offset" }],
+    sessoes: [sessaoRow({ id: JIT, jit: true })],
+    vagas: [vagaRow(ALUNA, { session_id: null }), vagaRow(ALUNO, { session_id: null })]
+  });
+
+  const result = await runSessionsTick({ db, now: em("2026-11-05T23:00:20.000Z") });
+
+  assert.deepEqual(result, { ...ZEROS, opened: 1 });
+  assert.deepEqual(rpcs(db, "webinar_open_session")[0].args, { p_now: "2026-11-05T23:00:20.000Z", p_session_id: JIT }, "a mesma RPC: o roteiro entra");
+  assert.equal(db.estado.sessoes[0].status, "live");
+  assert.equal(db.estado.sessoes[0].script_fired_at, "2026-11-05T23:00:20.000Z");
+  assert.deepEqual(sinos(db), [], "nenhum 'Comecou agora' (a vaga geral receberia um a cada horario)");
+  assert.equal(db.queries.some((query) => query.table === "webinar_registrations"), false, "nem as vagas sao lidas");
+
+  const fim = await runSessionsTick({ db, now: em("2026-11-05T23:30:00.000Z") });
+  assert.deepEqual(fim, { ...ZEROS, finished: 1, replays: 1 }, "encerra pela duracao do video e cria o replay como as outras");
+  assert.equal(db.estado.sessoes[0].status, "ended");
+  assert.equal(db.estado.sessoes[0].presence_curve.unique, 2);
 });
 
 test("depois da duracao do video: a RPC encerra, o replay nasce apontando para a gravacao e os ticks seguintes nao repetem nem criam outro", async () => {

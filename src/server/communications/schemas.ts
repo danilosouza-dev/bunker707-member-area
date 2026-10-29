@@ -19,13 +19,18 @@
 // Design do pop-up (docs/26): `design` (null = Padrão; so pop-up, a notificacao nunca leva a chave), validado
 // por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
 // Design Livre (docs/27): `freeDesign` ao lado (popup-free-schema.ts); no maximo um dos dois nao nulo.
+//
+// Webinarios v4b (docs/30 §1.6): a regra "webinar_follow_up" do segmento (o webinario e o que o aluno fez nele), com os erros nas
+// frases de WEBINAR_COPY.seguimento; vale no segmento comum e nunca dentro de um fluxo (flowRuleDefinitionSchema).
 
 import { z } from "zod";
+import { SEGUIMENTO_COPY } from "../../lib/webinar-copy-v4/seguimento";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import { catalogIdSchema, expectedUpdatedAtSchema } from "../catalog/schemas";
 import { describeHeroCtaHrefProblem, isSafeHeroCtaHref } from "../member-area/home-hero-links";
 import { FIXED_PAGE_KEYS } from "../member-area/page-visit-model";
 import { STUDENT_PACES } from "../students/model";
+import { WEBINAR_FOLLOW_UP_ACTIONS } from "../webinars/model";
 import {
   AUDIENCE_LIMITS,
   EVERYONE,
@@ -192,6 +197,13 @@ const ruleSchema = z.discriminatedUnion(
       type: z.literal("webinar"),
       // null = qualquer live.
       webinarId: z.uuid({ error: "Escolha a live." }).nullable()
+    }),
+    // v4b: o que o aluno fez num webinario (follow-up por segmento; o "webinar" da fase 4, renomeado na integracao).
+    z.object({
+      action: z.enum(WEBINAR_FOLLOW_UP_ACTIONS, { error: SEGUIMENTO_COPY.erroAcao }),
+      negate: negateSchema,
+      type: z.literal("webinar_follow_up"),
+      webinarId: z.uuid({ error: SEGUIMENTO_COPY.erroWebinario })
     })
   ],
   { error: "Escolha o tipo da regra." }
@@ -261,9 +273,34 @@ export const audienceDefinitionSchema: z.ZodType<AudienceDefinition> = definitio
   }
 });
 
-/** Regras dentro de um fluxo (condicao, "So para quem...", Objetivo, "Para quem" da seguinte): tudo vale. */
+export const SEGMENT_ONLY_RULE_MESSAGE = SEGUIMENTO_COPY.soNoSegmento;
+
+/**
+ * v4b: regra que so vale no segmento comum (avisos, pop-ups, "Quem entra"): "webinar_follow_up". Dentro de um fluxo o lote
+ * do motor nao le os fatos do webinario.
+ */
+function addSegmentOnlyIssues(group: AudienceGroup, path: (number | string)[], context: z.RefinementCtx) {
+  group.items.forEach((item, index) => {
+    const itemPath = [...path, "items", index];
+
+    if (isAudienceGroup(item)) {
+      addSegmentOnlyIssues(item, itemPath, context);
+    } else if (item.type === "webinar_follow_up") {
+      context.addIssue({ code: "custom", message: SEGMENT_ONLY_RULE_MESSAGE, path: itemPath });
+    }
+  });
+}
+
+/**
+ * Regras dentro de um fluxo (condicao, "So para quem...", Objetivo, "Para quem" da seguinte): tudo vale, menos a
+ * regra do webinario (v4b), que so vale no segmento comum.
+ */
 export const flowRuleDefinitionSchema: z.ZodType<AudienceDefinition> = definitionBaseSchema.superRefine((definition, context) => {
   addDefinitionLimitIssues(definition, context);
+
+  if (definition.kind === "rules") {
+    addSegmentOnlyIssues(definition.root, ["root"], context);
+  }
 });
 
 /* ------------------------------------------------------------------------------------------------

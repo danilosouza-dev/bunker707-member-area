@@ -1,20 +1,42 @@
-// A aba Relatorio de um webinario, a parte pura (docs/30 §2.5, §3.4, §3.6 e §3.7): o seletor de sessao, os
-// onze numeros, a geometria da curva "Presentes minuto a minuto" (e a tabela por minuto que a substitui), as
-// barras (mensagens por minuto, reacoes, origem da vaga), as enquetes por opcao, a pontuacao dos alunos (a mesma
-// conta M3 de webinar_report, com os pesos de ROOM_RULES), o bloco Simulacao e o CSV "Attendee" nos nomes do Zoom.
-// Sem "server-only", imports relativos: tests/webinarios-relatorio-*.test.mjs carregam direto pelo Node. Os
-// numeros simulados nunca entram aqui alem do bloco Simulacao (D6, D10): a RPC ja separa `sim_script`.
+// A aba Relatorio de um webinario, a parte pura (docs/30 §2.5, §3.4, §3.5, §3.6 e §3.7): o seletor de sessao (as
+// sessoes "Comeca quando voce entra" so dos ultimos 7 dias, da mais nova para a mais velha), os onze numeros, a
+// geometria da curva "Presentes minuto a minuto" (e a tabela por minuto que a substitui) com o trecho da transcricao
+// de cada ponto de queda, as barras (mensagens por minuto, reacoes, origem da vaga), as enquetes por opcao, a
+// pontuacao dos alunos (a mesma conta M3 de webinar_report, com os pesos de ROOM_RULES), os blocos da fase 4 (Oferta,
+// Respostas do Assistente e a Simulacao completa) e o CSV "Attendee" nos nomes do Zoom. Sem "server-only", imports
+// relativos: tests/webinarios-relatorio-*.test.mjs carregam direto pelo Node. Os numeros simulados nunca entram aqui
+// alem do bloco Simulacao (D6, D10): a RPC ja separa as linhas `sim_*` e report-model.ts so as poe em `script` e
+// `simulation`, que so simulationLines le.
 
 import type { CsvCell } from "../../lib/csv";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDayKey, saoPauloTime } from "../../lib/webinar-time";
 import { formatSaoPauloDateTime } from "../communications/campaign-model";
 import type { Attendee } from "./chat-rows";
-import { REACTIONS, ROOM_RULES, toTime, type Poll, type QuestionStatus, type Reaction, type SessionKind, type SessionStatus, type WebinarSession } from "./model";
-import { bucketLabel, percentOf, watchTimeLabel, type ReportBucket, type WebinarReportView } from "./report-model";
+import {
+  REACTIONS,
+  ROOM_RULES,
+  SCRIPT_TRIGGERS,
+  toTime,
+  webinarExportFileName,
+  type Poll,
+  type QuestionStatus,
+  type Reaction,
+  type ScriptTrigger,
+  type SessionKind,
+  type SessionStatus,
+  type SimulatedCountMode,
+  type WebinarSession
+} from "./model";
+import { bucketLabel, percentOf, revenueLabel, watchTimeLabel, type ReportBucket, type WebinarReportView } from "./report-model";
 import { bucketCount } from "./room-model";
 
 const COPY = WEBINAR_COPY.relatorio;
+const EXPORTAR = WEBINAR_COPY.exportar;
+const integer = new Intl.NumberFormat("pt-BR");
+
+/** As sessoes "Comeca quando voce entra" no seletor: so as dos ultimos 7 dias (uma por horario e por dia). */
+export const REPORT_JIT_DAYS = 7;
 
 export const WEBINAR_REPORT_SESSION_PARAM = "sessao";
 
@@ -42,19 +64,27 @@ export type ReportSessionOption = {
   status: SessionStatus;
 };
 
-/** As sessoes com relatorio: as que comecaram ou encerraram, na ordem das horas marcadas; o replay por ultimo. */
-export function reportableSessions(sessions: readonly WebinarSession[]): WebinarSession[] {
+/**
+ * As sessoes com relatorio: as que comecaram ou encerraram, as horas marcadas em ordem; depois as "Comeca quando voce
+ * entra" (`jit`, fase 4e) dos ultimos 7 dias, da mais nova para a mais velha (sao muitas: uma por horario e por
+ * dia); o replay por ultimo. Datas comparadas pelo instante (o banco escreve "+00:00", o navegador "Z").
+ */
+export function reportableSessions(sessions: readonly WebinarSession[], now: number = Date.now()): WebinarSession[] {
   const started = sessions.filter((session) => session.status === "live" || session.status === "ended");
-  const regular = started.filter((session) => session.kind !== "replay").sort((a, b) => toTime(a.scheduledAt) - toTime(b.scheduledAt));
+  const regular = started.filter((session) => session.kind !== "replay" && !session.jit).sort((a, b) => toTime(a.scheduledAt) - toTime(b.scheduledAt));
+  const since = now - REPORT_JIT_DAYS * 86_400_000;
+  const jit = started
+    .filter((session) => session.kind !== "replay" && session.jit && toTime(session.scheduledAt) >= since)
+    .sort((a, b) => toTime(b.scheduledAt) - toTime(a.scheduledAt));
   const replay = started.filter((session) => session.kind === "replay");
 
-  return [...regular, ...replay];
+  return [...regular, ...jit, ...replay];
 }
 
-/** A sessao aberta por padrao: a ultima hora marcada que ja comecou; sem nenhuma, o replay. */
+/** A sessao aberta por padrao: a hora marcada mais recente que ja comecou (marcada ou jit); sem nenhuma, o replay. */
 export function defaultReportSessionId(sessions: readonly WebinarSession[]): string | null {
   const regular = sessions.filter((session) => session.kind !== "replay");
-  const chosen = regular.length > 0 ? regular[regular.length - 1] : sessions[0];
+  const chosen = regular.length > 0 ? regular.reduce((latest, session) => (toTime(session.scheduledAt) > toTime(latest.scheduledAt) ? session : latest)) : sessions[0];
 
   return chosen?.id ?? null;
 }
@@ -395,30 +425,17 @@ export function toDevice(value: unknown): AttendeeDevice | null {
  * O CSV "Attendee" (docs/30 §3.7, nomes do Zoom)
  * ---------------------------------------------------------------------------------------------- */
 
-export const ATTENDEE_CSV_HEADERS = [
-  "Compareceu",
-  "Nome",
-  "E-mail",
-  "Hora da vaga",
-  "Entrou",
-  "Saiu",
-  "Entradas",
-  "Tempo na sessão (min)",
-  "Até o fim (95 %)",
-  "Mensagens",
-  "Reações",
-  "Perguntas",
-  "Enquetes respondidas",
-  "Oferta clicada (variante)",
-  "Pontuação (0–100)",
-  "Dispositivo"
-] as const;
+/** As colunas do Attendee, na ordem de §3.7 (WEBINAR_COPY.exportar.colunas.attendee). */
+export const ATTENDEE_CSV_HEADERS = EXPORTAR.colunas.attendee;
 
 const yesNo = (value: boolean) => (value ? COPY.sim : COPY.nao);
 const when = (iso: string | null) => (iso ? formatSaoPauloDateTime(iso) : "");
 
-/** Uma linha por aluno presente ou com vaga; quem so garantiu vaga fica com as colunas de presenca vazias. */
-export function attendeeCsvRow(attendee: ReportAttendee): CsvCell[] {
+/**
+ * Uma linha por aluno presente ou com vaga; quem so garantiu vaga fica com as colunas de presenca vazias.
+ * `offerClicked`: a variante da Oferta que o aluno clicou nesta sessao ("B"; vazio sem clique).
+ */
+export function attendeeCsvRow(attendee: ReportAttendee, offerClicked = ""): CsvCell[] {
   const present = attendeeWasPresent(attendee);
 
   return [
@@ -435,40 +452,169 @@ export function attendeeCsvRow(attendee: ReportAttendee): CsvCell[] {
     attendee.reactions,
     attendee.questions,
     attendee.polls,
-    // A oferta chega na fase 4; a coluna fica, vazia, para o arquivo ter sempre as mesmas colunas.
-    "",
+    offerClicked,
     attendee.score,
     deviceLabel(attendee.device)
   ];
 }
 
+/** A sessao no nome do arquivo: a hora marcada em Sao Paulo, "AAAA-MM-DD-HHMM". */
+export function webinarSessionExportKey(scheduledAt: string) {
+  return `${saoPauloDayKey(scheduledAt)}-${saoPauloTime(scheduledAt).replace(":", "")}`;
+}
+
 /** `webinario-{slug}-{sessao}-attendee.csv`, com a hora marcada em Sao Paulo (AAAA-MM-DD-HHMM). */
 export function attendeeCsvFileName(slug: string, scheduledAt: string) {
-  const stamp = `${saoPauloDayKey(scheduledAt)}-${saoPauloTime(scheduledAt).replace(":", "")}`;
-
-  return `webinario-${slug}-${stamp}-attendee.csv`;
+  return webinarExportFileName({ report: "attendee", sessionKey: webinarSessionExportKey(scheduledAt), slug });
 }
 
 /* ------------------------------------------------------------------------------------------------
- * O bloco Simulacao (so a decisao do selo e o roteiro nesta fase; docs/30 §3.5)
+ * O bloco Oferta (docs/30 §3.4): so numeros reais (presenca na janela, cliques e compras ligadas pelo webhook)
  * ---------------------------------------------------------------------------------------------- */
+
+export type ReportFactItem = { label: string; value: string };
+
+const percentText = (value: number | null) => (value === null ? "—" : `${value} %`);
+
+/** Viram, cliques e compras (alunos unicos), a receita ("—" sem valor gravado, M8) e a conversao da sessao. */
+export function offerFacts(view: WebinarReportView): ReportFactItem[] {
+  const { offer, presence } = view;
+  const revenue = revenueLabel(offer.revenue);
+  const overClicks = percentOf(offer.purchases.students, offer.clicks.students);
+
+  return [
+    { label: EXPORTAR.oferta.viram, value: integer.format(offer.seen.students) },
+    { label: EXPORTAR.oferta.cliques, value: integer.format(offer.clicks.students) },
+    { label: EXPORTAR.oferta.compras, value: integer.format(offer.purchases.students) },
+    { label: EXPORTAR.oferta.receita, value: revenue ?? EXPORTAR.oferta.receitaAMedir },
+    {
+      label: EXPORTAR.oferta.conversao,
+      value: `${percentText(percentOf(offer.purchases.students, presence.unique))}${overClicks === null ? "" : ` · ${EXPORTAR.oferta.sobreCliques(overClicks)}`}`
+    }
+  ];
+}
+
+export type OfferVariantRow = { clicks: number; conversion: number | null; label: string; letter: string; purchases: number; seen: number };
+
+/** Por variante (A a D, so as que apareceram): viram, cliques, compras e compras ÷ quem viu aquela variante. */
+export function offerVariantRows(view: WebinarReportView): OfferVariantRow[] {
+  return view.offer.variants.map((variant) => ({
+    clicks: variant.clicks.students,
+    conversion: percentOf(variant.purchases.students, variant.seen.students),
+    label: EXPORTAR.oferta.variante(variant.label),
+    letter: variant.label,
+    purchases: variant.purchases.students,
+    seen: variant.seen.students
+  }));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O bloco Respostas do Assistente (docs/30 §3.4, D24): fora da Simulacao e das mensagens de aluno e equipe
+ * ---------------------------------------------------------------------------------------------- */
+
+export function assistantFacts(view: WebinarReportView): ReportFactItem[] {
+  const { assistant } = view;
+
+  return [
+    { label: EXPORTAR.assistente.respostas, value: integer.format(assistant.replies) },
+    { label: EXPORTAR.assistente.tempoMedio, value: assistant.avgSeconds === null ? "—" : EXPORTAR.assistente.segundos(assistant.avgSeconds) },
+    { label: EXPORTAR.assistente.corrigidas, value: integer.format(assistant.edited) },
+    { label: EXPORTAR.assistente.apagadas, value: integer.format(assistant.deleted) },
+    { label: EXPORTAR.assistente.pedidosDeEquipe, value: integer.format(assistant.handoffs) }
+  ];
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Os pontos de queda com o trecho da transcricao daquele minuto (docs/30 §3.4)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type TranscriptCue = { endSeconds: number | null; startSeconds: number; text: string };
+
+const EXCERPT_MAX = 180;
+
+/** O que o video dizia no minuto da queda (as cues que tocam aquele minuto, juntas e cortadas); nulo sem nenhuma. */
+export function dropExcerpt(bucket: number, cues: readonly TranscriptCue[], bucketSeconds: number = ROOM_RULES.bucketSeconds): string | null {
+  const from = Math.floor((Math.max(0, bucket) * bucketSeconds) / 60) * 60;
+  const to = from + 60;
+  const text = cues
+    .filter((cue) => cue.startSeconds < to && (cue.endSeconds ?? cue.startSeconds) >= from)
+    .sort((a, b) => a.startSeconds - b.startSeconds)
+    .map((cue) => cue.text.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text) {
+    return null;
+  }
+
+  return text.length > EXCERPT_MAX ? `${text.slice(0, EXCERPT_MAX - 1).trimEnd()}…` : text;
+}
+
+/** O trecho de cada ponto de queda, pelo balde; sem transcricao da gravacao, nulo (a tela nao fala do trecho). */
+export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly TranscriptCue[] | null, bucketSeconds: number = ROOM_RULES.bucketSeconds): Record<number, string | null> | null {
+  if (!cues) {
+    return null;
+  }
+
+  return Object.fromEntries(drops.map((drop) => [drop.b, dropExcerpt(drop.b, cues, bucketSeconds)]));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O bloco Simulacao completo (docs/30 §3.5): o selo e quem decidiu, o contador com o real ao lado, as entradas, os
+ * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6).
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As regras da fase 4 (202610290005) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
+export type SimulationRulesSummary = {
+  countMode: SimulatedCountMode;
+  joins: { enabled: boolean; everySeconds: number; max: number };
+  saleNotices: { enabled: boolean; items: number };
+};
 
 export type SimulationSummary = {
   ackText: string | null;
   decidedAt: string | null;
   decidedByName: string | null;
-  script: { fired: number; missed: number; ready: number };
+  /** Banco sem a 202610290005: as regras ficam de fora e a tela mostra o aviso da migracao no bloco. */
+  pending: boolean;
+  /** Os participantes de verdade (presentes unicos), ao lado do contador para a equipe comparar. */
+  realParticipants: number;
+  rules: SimulationRulesSummary | null;
+  script: { byTrigger: Record<ScriptTrigger, number>; fired: number; missed: number; ready: number };
   showLiveBadge: boolean;
+  /** O que simulation_summary congelou no fim (as linhas sim_* da RPC); nulo antes do fim ou sem regra. */
+  totals: WebinarReportView["simulation"];
 };
+
+export function emptyScriptByTrigger(): Record<ScriptTrigger, number> {
+  return { at_offset: 0, manual: 0, on_phrase: 0 };
+}
+
+const SIM = EXPORTAR.simulacao;
 
 export function simulationLines(summary: SimulationSummary): string[] {
   const decision = summary.decidedAt
     ? COPY.decididoPor(summary.decidedByName || COPY.alunoSemNome, formatSaoPauloDateTime(summary.decidedAt))
     : COPY.semDecisao;
+  const lines = [`${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`];
+  const { rules, totals } = summary;
 
-  return [
-    `${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`,
-    COPY.roteiroProntos(summary.script.ready),
-    `${COPY.roteiroEntraram(summary.script.fired)} · ${COPY.roteiroFaltaram(summary.script.missed)}`
-  ];
+  if (rules) {
+    const counter: string[] = [SIM.regra[rules.countMode]];
+    if (rules.countMode !== "off") {
+      counter.push(SIM.maiorNumero(totals.counterMax ?? 0));
+    }
+    counter.push(SIM.real(summary.realParticipants));
+    lines.push(`${SIM.contador}: ${counter.join(" · ")}`);
+    lines.push(`${SIM.entradas}: ${rules.joins.enabled || totals.joinsShown ? SIM.apareceram(totals.joinsShown ?? 0) : COPY.desligado}`);
+    lines.push(`${SIM.avisosDeVenda}: ${rules.saleNotices.enabled || totals.saleNoticesShown ? SIM.apareceram(totals.saleNoticesShown ?? 0) : COPY.desligado}`);
+  }
+
+  lines.push(COPY.roteiroProntos(summary.script.ready));
+  lines.push(`${COPY.roteiroEntraram(summary.script.fired)} · ${COPY.roteiroFaltaram(summary.script.missed)}`);
+  lines.push(`${SIM.porSoltaEm}: ${SCRIPT_TRIGGERS.map((trigger) => `${EXPORTAR.valores.soltaEm[trigger]} ${summary.script.byTrigger[trigger] ?? 0}`).join(" · ")}`);
+
+  return lines;
 }

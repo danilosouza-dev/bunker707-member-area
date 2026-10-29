@@ -68,9 +68,18 @@ export type NormalizedSaleEvent = {
   reactivatesSubscription?: boolean;
   purchasedAt: string | null;
   warrantyEndsAt: string | null;
+  /**
+   * O valor pago (docs/30 M8, fase 4b): centavos e moeda ISO 4217 em maiusculas, lidos do payload pelo adaptador.
+   * Ausente ou nulo = a plataforma nao mandou (ou nao deu para ler). So vai para webhook_events.amount_cents/currency
+   * (a receita do relatorio dos webinarios); nunca decide acesso (process-sale.ts nao le).
+   */
+  amount?: SaleAmount | null;
   /** Quando o evento aconteceu na plataforma. */
   occurredAt: string | null;
 };
+
+/** O valor de uma venda (M8): centavos inteiros (>= 0) e a moeda ("BRL", "USD"). */
+export type SaleAmount = { cents: number; currency: string };
 
 export type SaleVerification = { ok: true } | { ok: false; reason: "missing_secret" | "missing_token" | "mismatch" };
 

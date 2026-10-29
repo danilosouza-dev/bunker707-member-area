@@ -11,7 +11,8 @@ import "server-only";
 import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { SALES_CODE_FIELDS, STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus, pendingAttentionMessage } from "./model";
-import type { NormalizedSaleType, SalesProvider } from "./types";
+import { saleAmountColumns } from "./sale-amount";
+import type { NormalizedSaleType, SaleAmount, SalesProvider } from "./types";
 
 export type SalesDb = ReturnType<typeof getSupabaseAdminClient>;
 
@@ -206,6 +207,11 @@ export type WebhookEventRow = {
 };
 
 export type WebhookEventInsert = {
+  /**
+   * O valor da venda (docs/30 M8, migracao 202610290005): vai para amount_cents/currency. Ausente, nulo ou fora dos
+   * checks da migracao: a linha fica sem as colunas (nulas).
+   */
+  amount?: SaleAmount | null;
   buyerEmail: string | null;
   eventType: string;
   externalEventId: string;
@@ -218,26 +224,40 @@ export type WebhookEventInsert = {
   transactionId: string | null;
 };
 
-/** Grava o evento bruto; o mesmo (provider, external_event_id) de novo devolve `duplicate`. */
+/** A migracao que traz webhook_events.amount_cents/currency (docs/30 M8). */
+export const SALE_AMOUNT_MIGRATION = "202610290005";
+
+async function insertWebhookEventRow(db: SalesDb, row: Record<string, unknown>) {
+  return db.from("webhook_events").insert(row).select("id").single();
+}
+
+/**
+ * Grava o evento bruto; o mesmo (provider, external_event_id) de novo devolve `duplicate`. Com o valor (M8), grava
+ * amount_cents/currency na mesma linha; banco sem as colunas (sem a migracao 202610290005) nao derruba a venda: grava
+ * de novo sem elas (o valor fica de fora, o acesso segue igual).
+ */
 export async function insertWebhookEvent(db: SalesDb, input: WebhookEventInsert): Promise<{ duplicate: boolean; id: string | null }> {
-  const { data, error } = await db
-    .from("webhook_events")
-    .insert({
-      buyer_email: input.buyerEmail,
-      event_type: input.eventType,
-      external_event_id: input.externalEventId,
-      external_product_id: input.externalProductId,
-      external_product_name: input.externalProductName,
-      normalized_type: input.normalizedType,
-      payload: input.payload,
-      processing_started_at: new Date().toISOString(),
-      processing_status: "received",
-      provider: input.provider,
-      signature_valid: input.signatureValid,
-      transaction_id: input.transactionId
-    })
-    .select("id")
-    .single();
+  const row = {
+    buyer_email: input.buyerEmail,
+    event_type: input.eventType,
+    external_event_id: input.externalEventId,
+    external_product_id: input.externalProductId,
+    external_product_name: input.externalProductName,
+    normalized_type: input.normalizedType,
+    payload: input.payload,
+    processing_started_at: new Date().toISOString(),
+    processing_status: "received",
+    provider: input.provider,
+    signature_valid: input.signatureValid,
+    transaction_id: input.transactionId
+  };
+  const amount = saleAmountColumns(input.amount);
+  let { data, error } = await insertWebhookEventRow(db, amount ? { ...row, ...amount } : row);
+
+  if (amount && error && isMissingSchemaObjectError(error)) {
+    console.warn(`[vendas] valor da venda nao gravado (migracao ${SALE_AMOUNT_MIGRATION} pendente): ${error.message}`);
+    ({ data, error } = await insertWebhookEventRow(db, row));
+  }
 
   if (error?.code === "23505") {
     return { duplicate: true, id: null };

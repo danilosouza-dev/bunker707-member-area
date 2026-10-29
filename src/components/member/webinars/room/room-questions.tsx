@@ -1,12 +1,16 @@
 "use client";
 
 import { ThumbsUp } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type DisplayNameMode } from "@/server/webinars/model";
+import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
+import { AssistantHandoff } from "./assistant/assistant-handoff";
+import { AssistantHint } from "./assistant/assistant-hint";
+import { useRoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 
@@ -15,11 +19,17 @@ import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 // Dispensada, so para o autor), os filtros Todas / Respondidas e a ordem Mais votadas / Mais recentes. Le ao abrir
 // e a cada 15 s enquanto aberta. Sem o aceite do chat (D10), a primeira pergunta abre o mesmo aceite do chat. Na live
 // (fase 3), o silenciado no chat tambem nao pergunta: o campo da lugar a frase (`notice`); a recusa de uma escrita (409
-// banned / muted) e contada a sala (`onRefused`), que troca pela frase de removido ou banido.
+// banned / muted) e contada a sala (`onRefused`), que troca pela frase de removido ou banido. Fase 4c (docs/30 §1.6,
+// §6.6 e D24): a resposta do Assistente aparece com o selo Assistente e, na pergunta do proprio aluno, "Falar com a
+// equipe"; depois de perguntar, "O Assistente esta respondendo..." (com ele ligado e sem atendente para a pergunta)
+// ate a resposta chegar, ou "A equipe responde depois pelo sino" quando ninguem esta atendendo.
 
 const REFRESH_MS = 15_000;
 
-export function RoomQuestionItem({ onVote, question }: { onVote: (question: StudentQuestion) => void; question: StudentQuestion }) {
+/** A pergunta como a rota devolve na fase 4c: de quem e a resposta e se o aluno ja pediu a equipe. */
+export type RoomQuestion = StudentQuestion & { answerSource?: AnswerSource | null; handoffRequested?: boolean };
+
+export function RoomQuestionItem({ footer = null, onVote, question }: { footer?: ReactNode; onVote: (question: RoomQuestion) => void; question: RoomQuestion }) {
   const copy = WEBINAR_COPY.sala;
 
   return (
@@ -45,8 +55,21 @@ export function RoomQuestionItem({ onVote, question }: { onVote: (question: Stud
       </div>
       {question.status === "answered" ? (
         <div className="mt-2">
-          <MemberChip tone="success">{question.answeredLive ? copy.respondidaAoVivo : copy.respondidaPorEscrito}</MemberChip>
-          {question.answerText ? <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-zinc-200">{question.answerText}</p> : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <MemberChip tone="success">{question.answeredLive ? copy.respondidaAoVivo : copy.respondidaPorEscrito}</MemberChip>
+            {question.answerSource === "ai" ? (
+              <span className="inline-flex" data-testid="question-answer-assistant">
+                <MemberChip tone="outline">{copy.selos.assistente}</MemberChip>
+              </span>
+            ) : null}
+          </div>
+          {question.answerText ? (
+            <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-zinc-200">
+              {question.answerSource === "ai" ? <span className="sr-only">{`${copy.selos.assistente}: `}</span> : null}
+              {question.answerText}
+            </p>
+          ) : null}
+          {footer}
         </div>
       ) : null}
       {question.status === "dismissed" ? (
@@ -87,7 +110,9 @@ export function RoomQuestionsTab({
   webinarId: string;
 }) {
   const copy = WEBINAR_COPY.sala;
-  const [questions, setQuestions] = useState<StudentQuestion[]>([]);
+  const assistant = useRoomAssistant({ enabled: enabled && !readOnly, sessionId, webinarId });
+  const [questions, setQuestions] = useState<RoomQuestion[]>([]);
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [filter, setFilter] = useState<"answered" | "all">("all");
   const [order, setOrder] = useState<"recentes" | "votadas">("votadas");
   const [draft, setDraft] = useState("");
@@ -99,11 +124,20 @@ export function RoomQuestionsTab({
   const load = useCallback(async () => {
     try {
       const answer = await getQuestions(webinarId, sessionId, order);
-      setQuestions(answer.data.questions);
+      setQuestions(answer.data.questions as RoomQuestion[]);
     } catch {
       // A proxima leitura vem em 15 s.
     }
   }, [order, sessionId, webinarId]);
+
+  // Fase 4c: o "respondendo" dura no maximo o teto do Assistente e a folga do chat.
+  useEffect(() => {
+    if (!waiting) {
+      return;
+    }
+    const id = window.setTimeout(() => setWaiting(null), ASSISTANT_WAIT_MS);
+    return () => window.clearTimeout(id);
+  }, [waiting]);
 
   useEffect(() => {
     if (!enabled) {
@@ -131,7 +165,16 @@ export function RoomQuestionsTab({
       const answer = await postQuestion(webinarId, { ...consent, anonymous: allowAnonymous && anonymous, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
       setQuestions((previous) => [answer.question, ...previous.filter((question) => question.id !== answer.question.id)]);
       setDraft("");
-      setStatus(copy.perguntaEnviada);
+      // Fase 4c: o Assistente responde (ligado, e sem atendente quando nao ha "Responder tudo"); senao, sem ninguem
+      // atendendo, a equipe responde depois pelo sino.
+      const { attendantsOnline, enabled: assistantOn, replyAll } = assistant.state;
+      if (assistantOn && (replyAll || attendantsOnline === 0)) {
+        setWaiting(answer.question.id);
+        setStatus(copy.perguntaEnviada);
+      } else {
+        setWaiting(null);
+        setStatus(attendantsOnline === 0 && !assistantOn ? `${copy.perguntaEnviada} ${WEBINAR_COPY.assistente.aluno.equipeRespondeDepois}` : copy.perguntaEnviada);
+      }
       setConsentOpen(false);
       if (choice) {
         onConsented();
@@ -157,7 +200,7 @@ export function RoomQuestionsTab({
     void deliver();
   }
 
-  async function vote(question: StudentQuestion) {
+  async function vote(question: RoomQuestion) {
     if (readOnly) {
       return;
     }
@@ -173,6 +216,8 @@ export function RoomQuestionsTab({
   }
 
   const visible = filter === "answered" ? questions.filter((question) => question.status === "answered") : questions;
+  const waitedQuestion = waiting ? questions.find((question) => question.id === waiting) : null;
+  const waitingNow = Boolean(waitedQuestion && waitedQuestion.status === "open");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-questions">
@@ -195,7 +240,26 @@ export function RoomQuestionsTab({
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
         {visible.length === 0 ? <li className="py-6 text-center text-sm text-zinc-500">{copy.semPerguntas}</li> : null}
         {visible.map((question) => (
-          <RoomQuestionItem key={question.id} onVote={(item) => void vote(item)} question={question} />
+          <RoomQuestionItem
+            footer={
+              question.mine && question.answerSource === "ai" && !readOnly ? (
+                <AssistantHandoff
+                  attendantsOnline={assistant.state.attendantsOnline}
+                  done={question.handoffRequested === true}
+                  onRequest={async () => {
+                    const requested = await assistant.handoff("question", question.id);
+                    if (requested) {
+                      setQuestions((previous) => previous.map((item) => (item.id === question.id ? { ...item, handoffRequested: true } : item)));
+                    }
+                    return requested;
+                  }}
+                />
+              ) : null
+            }
+            key={question.id}
+            onVote={(item) => void vote(item)}
+            question={question}
+          />
         ))}
       </ul>
       {consentOpen && !consented && !notice ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
@@ -231,6 +295,7 @@ export function RoomQuestionsTab({
           <p aria-live="polite" className="mt-1 min-h-4 px-1 text-[11px] text-zinc-500">
             {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : "")}
           </p>
+          <AssistantHint state={waitingNow ? "waiting" : "none"} />
         </form>
       )}
     </div>

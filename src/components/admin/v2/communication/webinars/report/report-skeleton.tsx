@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 import { AdminPage } from "../../../page-container";
 import { adminCard, adminDelayedReveal } from "../../../styles";
 
-// O relatorio do webinario enquanto carrega (docs/17 §2.7): trilha e titulo, o seletor de sessao, os onze numeros
-// e a curva, na forma final. Nunca o spinner de tela cheia. O cartao de numero e redesenhado aqui (as mesmas
+// O relatorio do webinario enquanto carrega (docs/17 §2.7): trilha e titulo, o seletor de sessao, a situacao com o
+// botao Exportar, os onze numeros e a curva, na forma final. Nunca o spinner de tela cheia. O cartao de numero e redesenhado aqui (as mesmas
 // medidas do KpiTileSkeleton de skeletons.tsx) para a pagina nao carregar o grafico do Hoje junto.
 
 const bar = "bg-[var(--surface-2)] motion-reduce:animate-none";
@@ -42,6 +42,10 @@ export function WebinarReportSkeleton() {
         {PILL_KEYS.map((key) => (
           <Skeleton className={cn("h-[34px] w-44 rounded-full", bar)} key={key} />
         ))}
+      </div>
+      <div aria-hidden="true" className={cn("flex items-center gap-2", adminDelayedReveal)}>
+        <Skeleton className={cn("h-6 w-24 rounded-full", bar)} />
+        <Skeleton className={cn("ml-auto h-8 w-28 rounded-lg max-md:h-11", bar)} />
       </div>
       <div aria-hidden="true" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {KPI_KEYS.map((key) => (

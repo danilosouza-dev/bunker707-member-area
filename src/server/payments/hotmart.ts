@@ -6,13 +6,19 @@
 // `subscription`/`subscriber`. A autenticacao e o hottok, um token fixo da conta enviado no cabecalho
 // `X-HOTMART-HOTTOK` (nas versoes antigas tambem no corpo, em `hottok`). A conferencia e em tempo
 // constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
+//
+// O valor da compra (docs/30 M8, fase 4b) vem de `data.purchase.price` ({ value, currency_value }, na unidade da
+// moeda: 1500 = mil e quinhentos), ou de `full_price` sem ele; sem moeda ou com valor ilegivel, `amount` e null. So
+// vai para webhook_events.amount_cents/currency; nunca decide acesso.
 
 import { asObject, normalizeBuyerEmail, pick, shortString } from "./adapter-helpers";
+import { saleAmountCents, saleAmountOf } from "./sale-amount";
 import { isSalesSecretHash, isValidSalesToken } from "./secret";
 import {
   type NormalizedSaleEvent,
   type NormalizedSaleType,
   type PaymentProviderAdapter,
+  type SaleAmount,
   type SaleBuyer,
   type SaleVerification
 } from "./types";
@@ -112,6 +118,26 @@ export function parseHotmartPayload(payload: unknown): HotmartPayload | null {
   };
 }
 
+/** Chaves do preco da compra, na ordem: o preco pago e, sem ele, o preco cheio. */
+const PRICE_KEYS = ["price", "full_price"] as const;
+const PRICE_FIELDS = ["value", "currency_value", "currency_code"] as const;
+
+/**
+ * O valor da compra (M8): o primeiro de `purchase.price` / `purchase.full_price` que traz `value`, com a moeda do
+ * mesmo bloco (`currency_value`; `currency_code` em payloads antigos). Sem moeda ou com valor ilegivel: null.
+ */
+export function readHotmartAmount(purchase: Record<string, unknown> | null): SaleAmount | null {
+  for (const key of PRICE_KEYS) {
+    const price = asObject(purchase?.[key]);
+
+    if (price && price.value !== undefined && price.value !== null) {
+      return saleAmountOf({ cents: saleAmountCents(price.value), currency: price.currency_value ?? price.currency_code });
+    }
+  }
+
+  return null;
+}
+
 export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | null {
   const parsed = parseHotmartPayload(payload);
 
@@ -133,6 +159,7 @@ export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | n
   }
 
   return {
+    amount: readHotmartAmount(purchase),
     buyer: readBuyer(parsed.data),
     eventId,
     externalProductId: shortString(product?.id, 120),
@@ -180,9 +207,10 @@ export function verifyHotmartRequest(input: { headers: Headers; payload: unknown
 const BUYER_KEYS = ["email", "name", "checkout_phone", "checkout_phone_code", "code"] as const;
 
 /**
- * O que fica guardado do payload da Hotmart: envelope, produto (id e nome), compra (transacao, situacao
- * e datas), assinatura (situacao e codigo do assinante) e, do comprador, so e-mail, nome e telefone.
- * Token (hottok), documento, endereco, produtor, afiliados e comissoes nunca sao gravados.
+ * O que fica guardado do payload da Hotmart: envelope, produto (id e nome), compra (transacao, situacao,
+ * datas e o preco: valor e moeda, M8), assinatura (situacao e codigo do assinante) e, do comprador, so
+ * e-mail, nome e telefone. Token (hottok), documento, endereco, produtor, afiliados e comissoes nunca sao
+ * gravados.
  */
 export function redactHotmartPayload(payload: unknown): unknown {
   const root = asObject(payload);
@@ -196,7 +224,11 @@ export function redactHotmartPayload(payload: unknown): unknown {
   const keptData = pick(data, ["product", "buyer", "subscriber", "purchase", "subscription"], {
     buyer: (value) => pick(asObject(value), BUYER_KEYS),
     product: (value) => pick(asObject(value), ["id", "name"]),
-    purchase: (value) => pick(asObject(value), ["transaction", "status", "approved_date", "order_date", "warranty_expire_date"]),
+    purchase: (value) =>
+      pick(asObject(value), ["transaction", "status", "approved_date", "order_date", "warranty_expire_date", ...PRICE_KEYS], {
+        full_price: (inner) => pick(asObject(inner), PRICE_FIELDS),
+        price: (inner) => pick(asObject(inner), PRICE_FIELDS)
+      }),
     subscriber: (value) => pick(asObject(value), BUYER_KEYS),
     subscription: (value) => pick(asObject(value), ["status", "subscriber"], { subscriber: (inner) => pick(asObject(inner), ["code"]) })
   });

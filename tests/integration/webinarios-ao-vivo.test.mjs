@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
-import { actAs } from "../support/integration-hooks.mjs";
+import { actAs, provedorFalso } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
 import {
   ambienteDaSalaAoVivo,
   LIVE_AO_VIVO_DE_TESTE,
   LIVE_GRAVADA_DE_TESTE,
+  limparProvedoresDeIa,
   limparWebinarios,
   seedEscolaDeTeste,
   seedLiveAoVivoDeTeste,
@@ -56,6 +57,8 @@ const recorderRoute = await import("../../src/app/api/webhooks/recorder/route.ts
 const recorderStatusRoute = await import("../../src/app/api/webhooks/recorder/[sessionId]/route.ts");
 const roomGuardRoute = await import("../../src/app/api/webhooks/room-guard/route.ts");
 const { resetRoomLimits } = await import("../../src/server/webinars/room-limits.ts");
+const { saveAIProviderConfig } = await import("../../src/server/ai/provider-config.ts");
+const { saveAIProviderAPIConnection } = await import("../../src/server/ai/provider-connections.ts");
 const { verifyJitsiToken } = await import("../../src/server/webinars/jitsi-token.ts");
 const { recorderHeaders, roomGuardKey } = await import("../../src/server/webinars/recorder-signature.ts");
 const { CHAT_CONSENT_VERSION } = await import("../../src/server/webinars/model.ts");
@@ -500,6 +503,45 @@ test("6b. D31: a mensagem que a aluna manda pela rota na live nasce na linha mes
     assert.equal(noReplay.offset_ms, linha.offset_ms, "na posicao do video (sem gravacao ligada, ancora 0)");
   } finally {
     unwrap(await db.from("webinar_sessions").delete().eq("id", replay.id), "Apagando o replay de teste");
+  }
+});
+
+test("6c. fase 4c: na live a mensagem da aluna nasce master, mas a resposta do Assistente (provedor falso) entra com role ai e master falso (excecao a D31) e o replay nao a repete", async () => {
+  const ambienteAntes = process.env.WEBINAR_ASSISTANT_ENABLED;
+  process.env.WEBINAR_ASSISTANT_ENABLED = "on";
+  resetRoomLimits();
+  provedorFalso.zerar();
+  await limparProvedoresDeIa(db);
+  await saveAIProviderConfig({ actorId: produtor.id, dailyQuestionLimit: 100, defaultModel: "modelo-de-teste", provider: "openai" });
+  await saveAIProviderAPIConnection({ actorId: produtor.id, apiKey: "sk-teste-de-integracao-12345678", label: "Conexao de teste", provider: "openai" });
+  unwrap(await db.from("webinars").update({ assistant_settings: { enabled: true, replyAllDefault: false } }).eq("id", webinarId), "Ligando o Assistente na live");
+  provedorFalso.responder = () => "A live fica gravada para o replay.";
+  const replay = { id: null };
+
+  try {
+    actAs(aluna);
+    const enviada = await json(await chatRoute.POST(pedido("chat", "POST", { body: "@assistente vai ter replay?", consent: true, consentVersion: CHAT_CONSENT_VERSION, sessionId: sessaoId }), contexto));
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+    const daAluna = unwrap(await db.from("webinar_chat_messages").select("master").eq("id", enviada.body.data.message.id).single(), "Lendo a mensagem da aluna");
+    assert.equal(daAluna.master, true, "D31: a da aluna nasce master");
+    const resposta = unwrap(await db.from("webinar_chat_messages").select("id,role,source,master,approved,reply_to_id").eq("session_id", sessaoId).eq("reply_to_id", enviada.body.data.message.id).single(), "Lendo a resposta do Assistente");
+    assert.deepEqual([resposta.role, resposta.source, resposta.master, resposta.approved], ["ai", "ai", false, true]);
+
+    replay.id = unwrap(
+      await db.from("webinar_sessions").insert({ kind: "replay", scheduled_at: new Date().toISOString(), source_session_id: sessaoId, status: "live", webinar_id: webinarId }).select("id").single(),
+      "Criando o replay da live"
+    ).id;
+    const janela = await db.rpc("webinar_chat_window", { p_from_ms: -86_400_000, p_session_id: replay.id, p_to_ms: 172_800_000, p_user_id: null });
+    assert.equal(janela.error, null, JSON.stringify(janela.error));
+    assert.ok((janela.data ?? []).some((row) => row.id === enviada.body.data.message.id), "a pergunta da aluna esta na linha mestre");
+    assert.ok(!(janela.data ?? []).some((row) => row.id === resposta.id), "a resposta do Assistente nao entra sem a equipe");
+  } finally {
+    if (replay.id) {
+      unwrap(await db.from("webinar_sessions").delete().eq("id", replay.id), "Apagando o replay de teste");
+    }
+    process.env.WEBINAR_ASSISTANT_ENABLED = ambienteAntes ?? "";
+    provedorFalso.zerar();
+    await limparProvedoresDeIa(db);
   }
 });
 

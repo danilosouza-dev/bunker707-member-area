@@ -20,6 +20,7 @@ import {
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
+import type { ConsolePresence } from "./console-presence-model";
 import type { LiveConsoleSnapshot } from "./live-console-model";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
@@ -300,6 +301,11 @@ export type ConsoleSnapshot = {
   messages: ConsoleMessage[];
   pinnedMessageId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
+  /**
+   * O painel Presenca (docs/30 §2.4): pico, mensagens por minuto e a curva dos ultimos 30 minutos, da visao do
+   * relatorio em cache de 60 s (console-presence-model.ts). Nulo no Replay, antes de comecar ou sem a leitura.
+   */
+  presence?: ConsolePresence | null;
   presentNow: number;
   questions: WebinarQuestion[];
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */

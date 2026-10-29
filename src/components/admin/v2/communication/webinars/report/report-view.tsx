@@ -1,10 +1,11 @@
-import { ChartColumn, Pencil } from "lucide-react";
+import { BellPlus, ChartColumn, Pencil } from "lucide-react";
 import Link from "next/link";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, webinarAdminHref } from "@/server/webinars/editor-model";
-import { bucketLabel, watchTimeLabel } from "@/server/webinars/report-model";
+import { WEBINAR_ABSENTEES, webinarFollowUpNoticeHref } from "@/server/webinars/follow-up-links";
+import { watchTimeLabel } from "@/server/webinars/report-model";
 import {
   messagesPerMinuteBars,
   personName,
@@ -13,7 +14,6 @@ import {
   reactionBars,
   registrationSourceBars,
   reportKpis,
-  simulationLines,
   type ReportSessionOption
 } from "@/server/webinars/report-page-model";
 import type { WebinarReportPage, WebinarReportSelection } from "@/server/webinars/report-queries";
@@ -24,17 +24,21 @@ import { AdminPage } from "../../../page-container";
 import { PageHeader } from "../../../page-header";
 import { StatusChip } from "../../../status-chip";
 import { adminTransition } from "../../../styles";
+import { WebinarExportMenu } from "../export-menu";
 import { AttendeesTable } from "./attendees-table";
 import { PresenceCurveCard } from "./presence-curve";
 import { ReportBars, ReportBlock, ReportFacts, ReportNote, ReportRanking, ReportSubheading, type ReportPersonItem } from "./report-blocks";
+import { AssistantReportBlock, OfferReportBlock, SimulationReportBlock } from "./report-extra-blocks";
 
-// A aba Relatorio de um webinario (docs/30 §2.5 e §3.4): o seletor de sessao no topo (?sessao=: as horas marcadas
-// que ja comecaram e o replay), os onze numeros (KpiTile, 4 por linha, 2 abaixo de 768 px), a curva "Presentes
-// minuto a minuto" com as 5 maiores quedas, o Chat (mensagens por minuto, Quem mais comentou, Mais quentes com a
-// formula escrita), as Perguntas, as Enquetes por opcao, as Vagas, o Replay, a Simulacao (so a decisao do selo e o
-// roteiro nesta fase; fundo diferente e a frase de que nada dali entra nos outros numeros) e a Lista por aluno com
-// o CSV. Nada aqui e estimado: sem dado, "—". Os nomes vem de profiles numa segunda leitura; o e-mail so no CSV.
-// Tudo desenha no servidor; so a curva e cliente (o alternador grafico/tabela).
+// A aba Relatorio de um webinario (docs/30 §2.5, §3.4, §3.5 e §3.7): o seletor de sessao no topo (?sessao=: as horas
+// marcadas que ja comecaram, as "Comeca quando voce entra" dos ultimos 7 dias e o replay), o botao Exportar com os sete
+// CSVs nos nomes do Zoom (a Simulacao so na sessao gravada), os onze numeros (KpiTile, 4 por linha, 2 abaixo de 768 px),
+// a curva "Presentes minuto a minuto" com as 5 maiores quedas e o trecho da transcricao de cada uma, o Chat (mensagens
+// por minuto, Quem mais comentou, Mais quentes com a formula escrita), as Perguntas, as Enquetes por opcao, as Vagas, o
+// Replay, a Oferta (so com oferta), as Respostas do Assistente (fora da Simulacao, D24), a Simulacao completa (fundo
+// diferente e a frase de que nada dali entra nos outros numeros) e a Lista por aluno com o CSV. Nada aqui e estimado:
+// sem dado, "—". Os nomes vem de profiles numa segunda leitura; o e-mail so nos CSVs. Tudo desenha no servidor; so a
+// curva e o menu Exportar sao cliente.
 
 const COPY = WEBINAR_COPY.relatorio;
 const integer = new Intl.NumberFormat("pt-BR");
@@ -72,10 +76,12 @@ function studentHref(userId: string) {
   return `/admin/alunos/${userId}`;
 }
 
-function ReportBody({ hasReplay, selected }: { hasReplay: boolean; selected: WebinarReportSelection }) {
-  const { attendees, csvHref, durationMs, people, polls, questions, report, session, simulation } = selected;
+function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; selected: WebinarReportSelection; webinarId: string }) {
+  const { assistant, attendees, csvHref, dropExcerpts, durationMs, exportReports, offerClicked, people, polls, questions, report, session, simulation } = selected;
   const live = session.status === "live";
   const kpis = reportKpis(report, { hasReplay });
+  // O bloco do Assistente: ligado no webinario, com resposta nesta sessao ou o aviso da migracao 202610290006.
+  const showAssistant = assistant.enabled || assistant.pending || report.assistant.present;
   const topChat: ReportPersonItem[] = report.chat.top.map((entry) => ({ href: studentHref(entry.userId), id: entry.userId, label: personName(people, entry.userId), meta: COPY.mensagensDe(entry.total) }));
   const hottest: ReportPersonItem[] = report.chat.hot.map((entry) => ({ href: studentHref(entry.userId), id: entry.userId, label: personName(people, entry.userId), meta: COPY.pontos(entry.score) }));
   const topQuestions: ReportPersonItem[] = report.questions.top.map((entry) => {
@@ -91,6 +97,9 @@ function ReportBody({ hasReplay, selected }: { hasReplay: boolean; selected: Web
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <StatusChip tone={live ? "warning" : "neutral"}>{live ? COPY.situacaoSessao.live : COPY.situacaoSessao.ended}</StatusChip>
         {session.endedAt ? <span className="text-[13px] leading-5 text-[var(--text-tertiary)]">{formatSaoPauloDateTime(session.endedAt)}</span> : null}
+        <div className="ml-auto">
+          <WebinarExportMenu reports={exportReports} scope="session" sessionId={session.id} webinarId={webinarId} />
+        </div>
       </div>
       {live ? <ReportNote>{COPY.emAndamento}</ReportNote> : null}
 
@@ -100,7 +109,15 @@ function ReportBody({ hasReplay, selected }: { hasReplay: boolean; selected: Web
         ))}
       </section>
 
-      <PresenceCurveCard avgPresent={report.presence.avgPresent} curve={report.presence.curve} drops={report.presence.drops} durationMs={durationMs} live={live} peak={report.presence.peak} />
+      <PresenceCurveCard
+        avgPresent={report.presence.avgPresent}
+        curve={report.presence.curve}
+        dropExcerpts={dropExcerpts}
+        drops={report.presence.drops}
+        durationMs={durationMs}
+        live={live}
+        peak={report.presence.peak}
+      />
 
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
         <ReportBlock description={COPY.definicoes.mensagens} id="webinario-relatorio-chat" title={COPY.blocos.chat}>
@@ -150,7 +167,24 @@ function ReportBody({ hasReplay, selected }: { hasReplay: boolean; selected: Web
         </ReportBlock>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <ReportBlock description={COPY.definicoes.vagasGarantidas} id="webinario-relatorio-vagas" title={COPY.blocos.vagas}>
+          <ReportBlock
+            actions={
+              report.registration.absent > 0 ? (
+                <AdminLinkButton
+                  href={webinarFollowUpNoticeHref({ steps: WEBINAR_ABSENTEES, webinarId })}
+                  prefetch={false}
+                  title={COPY.avisarQuemFaltouDica}
+                  variant="secondary"
+                >
+                  <BellPlus aria-hidden="true" className="size-4" />
+                  {COPY.avisarQuemFaltou}
+                </AdminLinkButton>
+              ) : null
+            }
+            description={COPY.definicoes.vagasGarantidas}
+            id="webinario-relatorio-vagas"
+            title={COPY.blocos.vagas}
+          >
             <ReportFacts
               items={[
                 { label: COPY.vagasGarantidas, value: integer.format(report.registration.registered) },
@@ -176,23 +210,16 @@ function ReportBody({ hasReplay, selected }: { hasReplay: boolean; selected: Web
         </div>
       </div>
 
-      {session.kind === "simulated" ? (
-        <ReportBlock className="bg-[var(--surface-2)]" description={COPY.avisoSimulacao} id="webinario-relatorio-simulacao" title={COPY.blocos.simulacao}>
-          <ul className="flex min-w-0 flex-col gap-1.5 text-sm leading-5 text-[var(--text-primary)]">
-            {simulationLines(simulation).map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          {simulation.ackText ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{simulation.ackText}</p> : null}
-          {report.presence.peak ? (
-            <p className="text-xs leading-5 text-[var(--text-tertiary)]">
-              {COPY.pico}: {report.presence.peak.n} · {bucketLabel(report.presence.peak.b)}
-            </p>
-          ) : null}
-        </ReportBlock>
+      {report.offer.present || showAssistant ? (
+        <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
+          {report.offer.present ? <OfferReportBlock report={report} /> : null}
+          {showAssistant ? <AssistantReportBlock pending={assistant.pending} report={report} /> : null}
+        </div>
       ) : null}
 
-      <AttendeesTable attendees={attendees} csvHref={csvHref} />
+      {session.kind === "simulated" ? <SimulationReportBlock report={report} simulation={simulation} /> : null}
+
+      <AttendeesTable attendees={attendees} csvHref={csvHref} offerClicked={offerClicked} />
     </>
   );
 }
@@ -217,7 +244,7 @@ export function WebinarReportView({ page }: { page: WebinarReportPage }) {
         <SessionSelector sessions={sessions} />
       </div>
 
-      {selected ? <ReportBody hasReplay={hasReplay} selected={selected} /> : <EmptyState description={COPY.semDados} icon={ChartColumn} title={COPY.semSessoes} />}
+      {selected ? <ReportBody hasReplay={hasReplay} selected={selected} webinarId={webinar.id} /> : <EmptyState description={COPY.semDados} icon={ChartColumn} title={COPY.semSessoes} />}
     </AdminPage>
   );
 }

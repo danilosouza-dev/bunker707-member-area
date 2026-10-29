@@ -1,5 +1,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
+import { ChartCardSkeleton } from "../../chart-card";
 import { CommunicationTabs } from "../../frames/communication-frame";
 import { COMMUNICATION_TAB_META, COMMUNICATION_TITLE } from "../../frames/communication-model";
 import { AdminPage } from "../../page-container";
@@ -8,12 +10,16 @@ import { KpiTileSkeleton } from "../../skeletons";
 import { adminCard, adminDelayedReveal } from "../../styles";
 
 // Skeletons de Webinários na forma final (docs/17 §2.7): a lista (cabecalho e abas estaticos, cinco numeros,
-// as abas da pagina, filtros e linhas), o editor (cards a esquerda, previa a direita) e a pagina de um
-// webinario (cabecalho e duas colunas). Nunca o spinner de tela cheia.
+// as abas da pagina, filtros e linhas), o editor (cards a esquerda, previa a direita), a pagina de um
+// webinario (cabecalho e duas colunas) e os blocos dos paineis Lives ao vivo / Lives gravadas (filtros e os
+// dez cartoes, a curva, os graficos e a tabela; cada um e o fallback do Suspense do seu bloco). Nunca o
+// spinner de tela cheia.
 
 const bar = "bg-[var(--surface-2)] motion-reduce:animate-none";
 const ROW_KEYS = ["a", "b", "c", "d", "e"] as const;
 const KPI_KEYS = ["a", "b", "c", "d", "e"] as const;
+const PANEL_KPI_KEYS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] as const;
+const PANEL_ROW_KEYS = ["a", "b", "c", "d"] as const;
 const FILTER_WIDTHS = [
   { id: "busca", width: "w-64" },
   { id: "todos", width: "w-16" },
@@ -145,5 +151,59 @@ export function WebinarDetailSkeleton() {
         </div>
       </div>
     </AdminPage>
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Os paineis Lives ao vivo e Lives gravadas (docs/30 §3.1): um skeleton por bloco
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Filtros e os dez cartoes (4 por linha, 2 abaixo de 768 px). */
+export function PanelTopSkeleton() {
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <LoadingStatus label={WEBINAR_COPY.paineis.carregando} />
+      <div aria-hidden="true" className={cn("flex flex-wrap gap-2", adminDelayedReveal)}>
+        <Skeleton className={cn("h-9 w-full rounded-lg md:w-48", bar)} />
+        <Skeleton className={cn("h-9 w-full rounded-lg md:w-48", bar)} />
+      </div>
+      <div aria-hidden="true" className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {PANEL_KPI_KEYS.map((key) => (
+          <KpiTileSkeleton key={key} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A curva minuto a minuto (largura inteira). */
+export function PanelPresenceSkeleton() {
+  return <ChartCardSkeleton compactHeight={208} height={280} />;
+}
+
+/** Os graficos, dois por linha no computador. */
+export function PanelChartsSkeleton() {
+  return (
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      <ChartCardSkeleton compactHeight={208} height={280} />
+      <ChartCardSkeleton compactHeight={208} height={280} />
+    </div>
+  );
+}
+
+/** A tabela de sessoes. */
+export function PanelTableSkeleton() {
+  return (
+    <div aria-hidden="true" className={cn(adminCard, "flex flex-col gap-3 p-4")}>
+      <Skeleton className={cn("h-6 w-40", bar, adminDelayedReveal)} />
+      {PANEL_ROW_KEYS.map((key) => (
+        <div className={cn("flex h-11 items-center gap-3 border-b border-[var(--border-subtle)] last:border-b-0", adminDelayedReveal)} key={key}>
+          <Skeleton className={cn("h-4 w-48 max-w-full", bar)} />
+          <Skeleton className={cn("ml-auto hidden h-4 w-16 md:block", bar)} />
+          <Skeleton className={cn("hidden h-4 w-16 md:block", bar)} />
+          <Skeleton className={cn("hidden h-4 w-16 md:block", bar)} />
+        </div>
+      ))}
+    </div>
   );
 }

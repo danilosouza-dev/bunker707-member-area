@@ -27,7 +27,9 @@ import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-mod
 import { normalizeLogo } from "@/server/storefront/model";
 import { STUDENT_SEGMENT_PRESETS } from "@/server/students/model";
 import { listSavedSegments } from "@/server/students/queries";
+import { listWebinarFollowUpChoices, loadWebinarFollowUpNames, type WebinarFollowUpChoice } from "@/server/webinars/follow-up-queries";
 import {
+  collectAudienceWebinarIds,
   describeAudience,
   isAudienceGroup,
   messageRefKey,
@@ -320,14 +322,19 @@ export async function loadAudienceNames(db: CommunicationsDb, definitions: reado
   const campaigns = new Set<string>();
   const webinars = new Set<string>();
   definitions.forEach((definition) => collectIds(definition, products, cohorts, campaigns, webinars));
+  // v4b (docs/30 §1.6): os webinarios citados pela regra "webinar_follow_up" (apagado cai no texto padrao da frase).
+  const followUpWebinarIds = collectAudienceWebinarIds(definitions);
 
-  const [productNames, cohortNames, notices, webinarNames] = await Promise.all([
+  const [productNames, cohortNames, notices, webinarNames, followUpWebinarNames] = await Promise.all([
     selectNames(db, "content_items", "title", Array.from(products)),
     selectNames(db, "cohorts", "name", Array.from(cohorts).filter((id) => /^[0-9a-f-]{36}$/i.test(id))),
     campaigns.size > 0 ? selectNoticeTitles(db, Array.from(campaigns)) : Promise.resolve(null),
-    webinars.size > 0 ? selectWebinarTitles(db, Array.from(webinars)) : Promise.resolve(null)
+    webinars.size > 0 ? selectWebinarTitles(db, Array.from(webinars)) : Promise.resolve(null),
+    followUpWebinarIds.length > 0 ? loadWebinarFollowUpNames(db, followUpWebinarIds) : Promise.resolve({} as Record<string, string>)
   ]);
-  const lives = webinarNames ? { webinars: webinarNames } : {};
+  // Os titulos das duas regras de lives (Participação em lives e o follow-up da fase 4) dividem `webinars`.
+  const allWebinarNames = { ...followUpWebinarNames, ...webinarNames };
+  const lives = webinarNames || Object.keys(followUpWebinarNames).length > 0 ? { webinars: allWebinarNames } : {};
 
   if (!notices) {
     return { cohorts: cohortNames, products: productNames, ...lives };
@@ -877,6 +884,8 @@ export type NoticeEditorOptions = {
   senders: NoticeSenderOption[];
   /** Lives publicadas, as mais recentes primeiro: o seletor da regra "Participação em lives"; [] se a leitura falhar. */
   webinars: AudienceWebinarOption[];
+  /** v4b (docs/30 §1.6): os webinarios da regra "webinar_follow_up" ("Webinário") do segmento. */
+  webinarFollowUps?: WebinarFollowUpChoice[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -958,7 +967,7 @@ async function editorViewer() {
 export async function loadNoticeEditorOptions(input: { audiences?: readonly AudienceDefinition[] } = {}): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
   const viewer = await editorViewer();
-  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson, popupFonts, webinars] = await Promise.all([
+  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson, popupFonts, webinars, webinarFollowUps] = await Promise.all([
     listProductOptions()
       .then((items) => ({ items, loaded: true }))
       .catch((error: unknown) => {
@@ -990,6 +999,11 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     loadAudienceWebinarOptions(db).catch((error: unknown) => {
       console.error("[admin/comunicacao] lives do seletor", error);
       return [] as AudienceWebinarOption[];
+    }),
+    // v4b: so o seletor da regra "Webinário" (webinar_follow_up) depende disto.
+    listWebinarFollowUpChoices(db).catch((error: unknown) => {
+      console.error("[admin/comunicacao] webinarios da regra do segmento", error);
+      return [] as WebinarFollowUpChoice[];
     })
   ]);
   assertNoDbError(cohortsResult.error, "Comunicacao: turmas");
@@ -1035,8 +1049,13 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
       // v3a: as opcoes das enquetes citadas ("votaram em “Sábado” na enquete …").
       ...(extra.pollOptions ? { pollOptions: extra.pollOptions } : {}),
       products: { ...extra.products, ...names.products },
-      // As lives citadas (mesmo fora da lista) e as do seletor, para a frase "participaram da live “X”".
-      webinars: { ...extra.webinars, ...Object.fromEntries(webinars.map((webinar) => [webinar.id, webinar.title])) }
+      // As lives citadas (mesmo fora da lista) e as do seletor, para a frase "participaram da live “X”"; os webinarios
+      // do seletor do follow-up (fase 4) tambem.
+      webinars: {
+        ...extra.webinars,
+        ...Object.fromEntries(webinarFollowUps.filter((item) => item.title).map((item) => [item.id, item.title])),
+        ...Object.fromEntries(webinars.map((webinar) => [webinar.id, webinar.title]))
+      }
     },
     notices,
     opensOnLesson,
@@ -1045,6 +1064,7 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     productsLoaded: productsResult.loaded,
     segments,
     senders,
+    webinarFollowUps,
     webinars
   };
 }

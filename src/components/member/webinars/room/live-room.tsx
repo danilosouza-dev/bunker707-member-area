@@ -11,6 +11,7 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 import { formatCountdown } from "@/lib/webinar-time";
 import type { LiveRoomInfo } from "@/server/webinars/live-model";
 import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-model";
+import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls } from "./live-controls";
 import { LiveCameraDialog, LiveChatOverlay, LiveMicDialog, LiveParticipantsTab, LivePillInfo, LiveRecordingBadge } from "./live-notices";
 import {
@@ -45,6 +46,7 @@ import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
+import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 
@@ -388,6 +390,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const getOffsetMs = useCallback(() => Date.now() + (skewRef.current ?? 0) - zeroMs, [skewRef, zeroMs]);
 
   const chat = useRoomChat({ enabled: !readOnly && !blocked, getPlayerOffsetMs: getOffsetMs, initialServerTime: payload.serverTime, sessionId, webinarId });
+  // Fase 4f: o chat no idioma do aluno (Perfil > Privacidade); sem idioma, desligado ou no "ver como", passa como veio.
+  const translation = useRoomTranslation({ enabled: !readOnly && !blocked, messages: chat.messages, sessionId, webinarId });
   const reactions = useRoomReactions({ enabled: !readOnly && writable && !blocked, getOffsetMs, onRefused: onWriteRefused, reducedMotion, sessionId, webinarId });
 
   useRoomHeartbeat({
@@ -678,7 +682,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
             title={session.webinar.title}
           >
             <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
-            {!drawerVisible && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(chat.messages)} /> : null}
+            {!drawerVisible && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(translation.messages)} /> : null}
           </LiveStage>
           {!barShown ? null : (
             <LiveControls
@@ -772,13 +776,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                       <span className="block truncate font-bold text-white">{openPolls[0].question}</span>
                     </button>
                   ) : null}
+                  <RoomTranslationBar state={translation} />
                   <RoomChatPanel
                     chatMode={session.session.chatMode}
                     consented={session.me.consented}
                     defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                     displayName={session.me.displayName}
                     error={chat.error}
-                    messages={chat.messages}
+                    messages={translation.messages}
                     notice={readOnly ? null : composerNotice}
                     nowMs={nowMs}
                     onRemoveMine={chat.removeMine}
@@ -797,7 +802,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                     phase={phase}
                     pinned={session.pinned}
                     readOnly={readOnly}
+                    sessionId={sessionId}
                     slowUntilMs={chat.slowUntilMs}
+                    webinarId={webinarId}
                   />
                 </>
               ) : null}

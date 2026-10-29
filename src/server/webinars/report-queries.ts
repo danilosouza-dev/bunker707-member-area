@@ -1,51 +1,62 @@
 import "server-only";
 
-// Leituras da aba Relatorio de um webinario (docs/30 §2.5, §3.4, §3.7 e §4.6): getWebinarReport e a RPC
+// Leituras da aba Relatorio de um webinario (docs/30 §2.5, §3.4, §3.5, §3.7 e §4.6): getWebinarReport e a RPC
 // webinar_report em unstable_cache de 60 s, chave ["webinars-report", "v1", sessao, minuto] e tag "webinars"
 // (o minuto do relogio na chave torna a janela de 60 s dura, como no relatorio do pop-up, docs/29 §4.6); os nomes
 // dos alunos citados (top 10 do chat e mais quentes) vem numa segunda leitura de profiles, fora do cache.
 // getWebinarAttendees e a lista por aluno (RPC webinar_attendees, sem cache: e a base do CSV). getWebinarReportPage
-// monta a pagina inteira: o webinario, as sessoes com relatorio, a sessao escolhida (?sessao=) com o relatorio, a
-// lista por aluno (nome, e-mail, hora da vaga e aparelho), as enquetes e as perguntas citadas, a Simulacao (a
-// decisao do selo e o roteiro) e o endereco do CSV. webinarReportCsv escreve o CSV "Attendee" (docs/30 §3.7).
-// Tudo pela service role; PendingMigrationError sobe para a pagina mostrar o aviso da migracao 202610290001.
-// Nomes e e-mails so chegam a quem tem messaging.write (a pagina e a rota conferem); nunca nos graficos.
+// monta a pagina inteira: o webinario, as sessoes com relatorio (as "Comeca quando voce entra" so dos ultimos 7 dias),
+// a sessao escolhida (?sessao=) com o relatorio, a lista por aluno (nome, e-mail, hora da vaga e aparelho), as
+// enquetes e as perguntas citadas, o trecho da transcricao de cada ponto de queda, o bloco Respostas do Assistente
+// (ligado no webinario ou com resposta) e a Simulacao completa (a decisao do selo, as regras da 202610290005, o
+// resumo congelado e o roteiro por Solta em). Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
+// (M9); webinarReportCsv continua servindo o Attendee de sempre. Tudo pela service role; PendingMigrationError sobe
+// para a pagina mostrar o aviso da migracao (WEBINARS_MIGRATION); as partes da fase 4 lidas guardadas mostram o aviso
+// so no bloco delas. Nomes e e-mails so chegam a quem tem messaging.write (a pagina e a rota conferem); nunca nos graficos.
 
 import { unstable_cache } from "next/cache";
-import { toCsv } from "../../lib/csv";
-import { WEBINAR_COPY } from "../../lib/webinar-copy";
-import { chunksOf, describeError } from "../communications/db";
+import { describeError } from "../communications/db";
 import { isPendingMigrationError } from "../db/pending-migration";
+import { fetchAssistantSettings } from "./assistant-store";
 import { WEBINARS_TAG } from "./cache";
-import { pollFromRow, questionFromRow, type Attendee } from "./chat-rows";
-import { fetchAttendees, listPollRows, listQuestionRows, listScriptItemRows } from "./chat-store";
-import { assertNoDbError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
-import { toTime, type Poll, type QuestionStatus, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
+import { pollFromRow, questionFromRow, scriptItemFromRow, transcriptCuesOf, type Attendee } from "./chat-rows";
+import { fetchAttendees, fetchTranscriptRow, listPollRows, listQuestionRows, listScriptItemRows } from "./chat-store";
+import { isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import {
-  ATTENDEE_CSV_HEADERS,
-  attendeeCsvFileName,
-  attendeeCsvRow,
-  attendeeScores,
+  listSimulationScriptFires,
+  loadAttendeeFacts,
+  loadReportPeople,
+  loadSessionExport,
+  sessionRecordingOf,
+  sessionVideoDurationMs,
+  toReportAttendees,
+  unlessMissing,
+  type SessionExport
+} from "./export-queries";
+import { offerClickedByUser } from "./export-model";
+import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
+import {
   defaultReportSessionId,
+  dropExcerpts,
+  emptyScriptByTrigger,
   pollResults,
   reportSessionOptions,
   reportableSessions,
-  toDevice,
   webinarReportCsvHref,
-  type AttendeeDevice,
   type PollResult,
   type ReportAttendee,
   type ReportPerson,
   type ReportSessionOption,
+  type SimulationRulesSummary,
   type SimulationSummary
 } from "./report-page-model";
 import { buildWebinarReport, readWebinarReportRows, reportUserIds, type WebinarReportView } from "./report-model";
-import { sessionDurationMs } from "./room-model";
-import { sessionFromRow, webinarFromRow, type RecordingRow, type SessionRow } from "./rows";
-import { fetchSessionRow, fetchWebinarReport, fetchWebinarRow, listRecordingRows, listSessionRegistrationRows, listSessionRows } from "./store";
+import { sessionFromRow, webinarFromRow } from "./rows";
+import { listSessionOfferClicks } from "./offer-store";
+import { fetchSessionSimulation } from "./simulation-store";
+import { fetchWebinarReport, fetchWebinarRow, listRecordingRows, listSessionRows } from "./store";
 
-const PROFILE_CHUNK = 150;
-const JOINED_EVENTS_MAX = 5000;
+export { loadReportPeople } from "./export-queries";
 
 /* ------------------------------------------------------------------------------------------------
  * O relatorio da sessao em cache (60 s, por minuto)
@@ -68,22 +79,6 @@ const cachedReportView = unstable_cache(loadReportView, ["webinars-report", "v1"
 /** A visao do relatorio pela chave do minuto; lanca PendingMigrationError sem a migracao. */
 export function reportViewOf(sessionId: string, now = Date.now()): Promise<WebinarReportView> {
   return cachedReportView(sessionId, webinarReportCacheMinute(now));
-}
-
-/** Nome e e-mail dos alunos citados, fora do cache (so ids no cache; a tela decide quem ve o e-mail). */
-export async function loadReportPeople(db: WebinarsDb, userIds: readonly string[]): Promise<Record<string, ReportPerson>> {
-  const people: Record<string, ReportPerson> = {};
-
-  for (const part of chunksOf([...new Set(userIds.filter(Boolean))], PROFILE_CHUNK)) {
-    const { data, error } = await db.from("profiles").select("id,full_name,email").in("id", part);
-    assertNoDbError(error, "Webinarios: nomes do relatorio");
-
-    for (const row of (data ?? []) as { email: string | null; full_name: string | null; id: string }[]) {
-      people[row.id] = { email: row.email?.trim() || null, name: row.full_name?.trim() || WEBINAR_COPY.relatorio.alunoSemNome };
-    }
-  }
-
-  return people;
 }
 
 export type WebinarReportResult = { people: Record<string, ReportPerson>; status: "ok"; view: WebinarReportView } | { status: "error" } | { status: "pending_migration" };
@@ -112,67 +107,20 @@ export function getWebinarAttendees(sessionId: string): Promise<Attendee[]> {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * A lista por aluno com nome, e-mail, hora da vaga, aparelho e pontuacao
+ * As partes da fase 4 lidas guardadas (o aviso da migracao fica so no bloco)
  * ---------------------------------------------------------------------------------------------- */
 
-type AttendeeFacts = { attendees: Attendee[]; devices: Map<string, AttendeeDevice>; registeredAt: Map<string, string> };
+type Guarded<T> = { pending: false; value: T } | { pending: true };
 
-/** O aparelho de quem abriu a Sala (webinar_joined, docs/30 §4.7): o primeiro registro de cada aluno. */
-async function loadJoinedDevices(db: WebinarsDb, sessionId: string): Promise<Map<string, AttendeeDevice>> {
-  const { data, error } = await db
-    .from("student_events")
-    .select("user_id, metadata")
-    .eq("entity_type", "webinar")
-    .eq("entity_id", sessionId)
-    .eq("event_type", "webinar_joined")
-    .order("created_at", { ascending: true })
-    .limit(JOINED_EVENTS_MAX);
-  assertNoDbError(error, "Webinarios: aparelho de quem entrou");
-  const devices = new Map<string, AttendeeDevice>();
-
-  for (const row of (data ?? []) as { metadata: unknown; user_id: string }[]) {
-    const metadata = row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : {};
-    const device = toDevice(metadata.device);
-
-    if (device && !devices.has(row.user_id)) {
-      devices.set(row.user_id, device);
+async function guarded<T>(load: () => Promise<T>): Promise<Guarded<T>> {
+  try {
+    return { pending: false, value: await load() };
+  } catch (error) {
+    if (isPendingMigrationError(error) || isMissingWebinarSchema(error)) {
+      return { pending: true };
     }
+    throw error;
   }
-
-  return devices;
-}
-
-async function loadAttendeeFacts(db: WebinarsDb, session: Pick<SessionRow, "id" | "webinar_id">): Promise<AttendeeFacts> {
-  const [attendees, registrations, devices] = await Promise.all([
-    fetchAttendees(db, session.id),
-    listSessionRegistrationRows(db, session, ["registered", "cancelled"]),
-    loadJoinedDevices(db, session.id)
-  ]);
-  const registeredAt = new Map<string, string>();
-
-  // A vaga que vale: a garantida; sem ela, a cancelada (a hora em que o aluno chegou a garantir).
-  for (const row of registrations) {
-    const current = registeredAt.get(row.user_id);
-
-    if (!current || row.status === "registered") {
-      registeredAt.set(row.user_id, row.registered_at);
-    }
-  }
-
-  return { attendees, devices, registeredAt };
-}
-
-function toReportAttendees(facts: AttendeeFacts, people: Record<string, ReportPerson>): ReportAttendee[] {
-  const scores = attendeeScores(facts.attendees);
-
-  return facts.attendees.map((attendee) => ({
-    ...attendee,
-    device: facts.devices.get(attendee.userId) ?? null,
-    email: people[attendee.userId]?.email ?? null,
-    name: people[attendee.userId]?.name ?? WEBINAR_COPY.relatorio.alunoSemNome,
-    registeredAt: facts.registeredAt.get(attendee.userId) ?? null,
-    score: scores.get(attendee.userId) ?? 0
-  }));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -182,10 +130,21 @@ function toReportAttendees(facts: AttendeeFacts, people: Record<string, ReportPe
 export type ReportQuestionInfo = { answeredBy: string | null; body: string; displayName: string; status: QuestionStatus };
 
 export type WebinarReportSelection = {
+  /** O bloco Respostas do Assistente: ligado no webinario (ou com resposta na sessao); `pending` sem a 202610290006. */
+  assistant: { enabled: boolean; pending: boolean };
   attendees: ReportAttendee[];
   csvHref: string;
+  /** O trecho da transcricao de cada ponto de queda (pelo balde); nulo quando a gravacao nao tem transcricao. */
+  dropExcerpts: Record<number, string | null> | null;
   /** A duracao do video (a curva congelada; na sessao em andamento, a gravacao ou a duracao prevista). */
   durationMs: number;
+  /** Os CSVs do menu Exportar desta sessao (a Simulacao so na sessao gravada). */
+  exportReports: WebinarExportReport[];
+  /**
+   * A coluna "Oferta clicada" da lista por aluno (§3.4.1): a variante que cada aluno clicou nesta sessao ("B"; vazio
+   * sem clique). Nulo na Live ao vivo (a Oferta so aparece na gravada e no Replay); banco sem a 202610290005: vazio.
+   */
+  offerClicked: Record<string, string> | null;
   people: Record<string, ReportPerson>;
   polls: PollResult[];
   questions: Record<string, ReportQuestionInfo>;
@@ -210,13 +169,33 @@ export type ReportPageOptions = {
   view?: (sessionId: string, now: number) => Promise<WebinarReportView>;
 };
 
-function recordingOf(recordings: readonly RecordingRow[], session: WebinarSession): RecordingRow | null {
-  return (
-    (session.recordingId ? recordings.find((recording) => recording.id === session.recordingId) : null) ??
-    recordings.find((recording) => recording.session_id === null && recording.source === "bunny") ??
-    recordings.find((recording) => recording.session_id === null) ??
-    null
-  );
+/** Os comentarios do roteiro que entraram, por Solta em (so o bloco Simulacao le). */
+function simulationScriptByTrigger(fires: ReadonlyMap<string, number>, triggers: ReadonlyMap<string, ScriptTrigger>): Record<ScriptTrigger, number> {
+  const counts = emptyScriptByTrigger();
+  for (const itemId of fires.keys()) {
+    const trigger = triggers.get(itemId);
+    if (trigger && SCRIPT_TRIGGERS.includes(trigger)) {
+      counts[trigger] += 1;
+    }
+  }
+  return counts;
+}
+
+/** As regras da Simulacao da sessao (202610290005) no formato do bloco; nulo sem regra lida. */
+async function loadSimulationRules(db: WebinarsDb, session: WebinarSession): Promise<Guarded<SimulationRulesSummary | null>> {
+  if (session.kind !== "simulated") {
+    return { pending: false, value: null };
+  }
+  return guarded(async () => {
+    const simulation = await fetchSessionSimulation(db, session.id);
+    return simulation
+      ? {
+          countMode: simulation.countRule.mode,
+          joins: { enabled: simulation.joins.enabled, everySeconds: simulation.joins.everySeconds, max: simulation.joins.max },
+          saleNotices: { enabled: simulation.saleNotices.enabled, items: simulation.saleNotices.items.length }
+        }
+      : null;
+  });
 }
 
 export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, options: ReportPageOptions = {}): Promise<WebinarReportPage | null> {
@@ -226,10 +205,11 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     return null;
   }
 
+  const now = options.now ?? Date.now();
   const webinar = webinarFromRow(row);
   const sessionRows = await listSessionRows(db, [webinarId]);
   const sessions = sessionRows.map(sessionFromRow);
-  const reportable = reportableSessions(sessions);
+  const reportable = reportableSessions(sessions, now);
   const hasReplay = sessions.some((session) => session.kind === "replay" && session.status !== "cancelled");
   const selectedId = options.sessionId && reportable.some((session) => session.id === options.sessionId) ? options.sessionId : defaultReportSessionId(reportable);
   const page: WebinarReportPage = {
@@ -253,15 +233,22 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     return page;
   }
 
-  const now = options.now ?? Date.now();
   const report = await (options.view ?? reportViewOf)(session.id, now);
-  const [facts, pollRows, questionRows, scriptItems, recordings] = await Promise.all([
+  const simulated = session.kind === "simulated";
+  const withOffer = session.kind !== "live";
+  const [facts, pollRows, questionRows, scriptItems, recordings, assistant, rules, fires, clicks] = await Promise.all([
     loadAttendeeFacts(db, sessionRow),
     listPollRows(db, { sessionId: session.id, webinarId }),
     report.questions.top.length > 0 ? listQuestionRows(db, { limit: 100, order: "votes", sessionId: session.id }) : Promise.resolve([]),
     listScriptItemRows(db, webinarId),
-    listRecordingRows(db, [webinarId])
+    listRecordingRows(db, [webinarId]),
+    guarded(() => fetchAssistantSettings(db, webinarId)),
+    loadSimulationRules(db, session),
+    simulated ? listSimulationScriptFires(db, [session.id]) : Promise.resolve(new Map<string, Map<string, number>>()),
+    withOffer ? unlessMissing(() => listSessionOfferClicks(db, session.id), []) : Promise.resolve([])
   ]);
+  const recording = sessionRecordingOf(recordings, session);
+  const transcript = recording && report.presence.drops.length > 0 ? await fetchTranscriptRow(db, recording.id) : null;
   const questions: Record<string, ReportQuestionInfo> = {};
 
   for (const questionRow of questionRows) {
@@ -276,12 +263,19 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     ...Object.values(questions).flatMap((question) => (question.answeredBy ? [question.answeredBy] : []))
   ]);
   const polls: Poll[] = pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options));
-  const recording = recordingOf(recordings, session);
+  const items = scriptItemRowsOf(scriptItems);
 
   page.selected = {
+    assistant: {
+      enabled: assistant.pending ? false : (assistant.value?.enabled ?? false) || report.assistant.present,
+      pending: assistant.pending
+    },
     attendees: toReportAttendees(facts, people),
     csvHref: webinarReportCsvHref(webinarId, session.id),
-    durationMs: session.presenceCurve?.durationMs || sessionDurationMs(recording?.duration_seconds ?? null, webinar.durationMinutes),
+    dropExcerpts: dropExcerpts(report.presence.drops, transcript ? transcriptCuesOf(transcript.cues) : null),
+    durationMs: sessionVideoDurationMs(session, recording, webinar.durationMinutes),
+    exportReports: WEBINAR_EXPORT_REPORTS.filter((entry) => entry !== "simulacao" || simulated),
+    offerClicked: withOffer ? Object.fromEntries(offerClickedByUser(clicks.map((click) => ({ userId: click.user_id, variantLabel: click.variant_label })))) : null,
     people,
     polls: pollResults(report.polls, polls),
     questions,
@@ -291,16 +285,26 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
       ackText: session.simulationAckText,
       decidedAt: session.simulationDecidedAt,
       decidedByName: session.simulationDecidedBy ? (people[session.simulationDecidedBy]?.name ?? null) : null,
+      pending: rules.pending,
+      realParticipants: report.presence.unique,
+      rules: rules.pending ? null : rules.value,
       script: {
+        byTrigger: simulationScriptByTrigger(fires.get(session.id) ?? new Map(), new Map(items.map((item) => [item.id, item.triggerKind]))),
         fired: report.script.fired,
         missed: report.script.missed,
-        ready: scriptItems.filter((item) => item.status === "ready" && item.trigger_kind !== "manual").length
+        ready: items.filter((item) => item.status === "ready" && item.triggerKind !== "manual").length
       },
-      showLiveBadge: session.showLiveBadge
+      showLiveBadge: session.showLiveBadge,
+      totals: report.simulation
     }
   };
 
   return page;
+}
+
+/** Os itens do roteiro com o que o relatorio usa: o id, a situacao e o Solta em. */
+function scriptItemRowsOf(rows: Awaited<ReturnType<typeof listScriptItemRows>>) {
+  return rows.map(scriptItemFromRow).map((item) => ({ id: item.id, status: item.status, triggerKind: item.triggerKind }));
 }
 
 /** A pagina da aba Relatorio (service role); null quando o webinario nao existe. */
@@ -309,37 +313,14 @@ export function getWebinarReportPage(webinarId: string, options: ReportPageOptio
 }
 
 /* ------------------------------------------------------------------------------------------------
- * O CSV "Attendee" (docs/30 §3.7)
+ * O CSV "Attendee" de sempre (a rota sem ?relatorio=); os outros seis em export-queries.ts
  * ---------------------------------------------------------------------------------------------- */
 
-export type WebinarReportCsv = { count: number; csv: string; fileName: string };
+export type WebinarReportCsv = SessionExport;
 
 /** O CSV da lista por aluno da sessao; null quando a sessao nao e deste webinario (ou nao existe). */
-export async function loadWebinarReportCsv(db: WebinarsDb, input: { sessionId: string; webinarId: string }): Promise<WebinarReportCsv | null> {
-  const session = await fetchSessionRow(db, input.sessionId);
-
-  if (!session || session.webinar_id !== input.webinarId) {
-    return null;
-  }
-
-  const row = await fetchWebinarRow(db, input.webinarId);
-
-  if (!row) {
-    return null;
-  }
-
-  const facts = await loadAttendeeFacts(db, session);
-  const people = await loadReportPeople(
-    db,
-    facts.attendees.map((attendee) => attendee.userId)
-  );
-  const attendees = toReportAttendees(facts, people).sort((left, right) => right.seconds - left.seconds || toTime(left.registeredAt) - toTime(right.registeredAt));
-
-  return {
-    count: attendees.length,
-    csv: toCsv(ATTENDEE_CSV_HEADERS, attendees.map(attendeeCsvRow)),
-    fileName: attendeeCsvFileName(row.slug, session.scheduled_at)
-  };
+export function loadWebinarReportCsv(db: WebinarsDb, input: { sessionId: string; webinarId: string }): Promise<WebinarReportCsv | null> {
+  return loadSessionExport(db, { report: "attendee", sessionId: input.sessionId, webinarId: input.webinarId });
 }
 
 export function webinarReportCsv(input: { sessionId: string; webinarId: string }): Promise<WebinarReportCsv | null> {

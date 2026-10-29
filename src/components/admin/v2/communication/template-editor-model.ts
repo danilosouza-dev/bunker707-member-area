@@ -268,7 +268,9 @@ export function noticeStartNotes(input: {
   }
 
   if (input.mode === "start") {
-    return input.templateName === null ? [...input.notes] : [TEMPLATE_MESSAGES.startFrom(input.templateName), ...input.notes];
+    // Sem nome de modelo: o atalho Avisar do webinario (docs/30 §2.2) ou o aviso que veio do relatorio do webinario
+    // (docs/30 §3.4, "Avisar quem não veio"): so as notas de quem preparou.
+    return input.templateName ? [TEMPLATE_MESSAGES.startFrom(input.templateName), ...input.notes] : [...input.notes];
   }
 
   if (input.mode === "new" && input.problem) {

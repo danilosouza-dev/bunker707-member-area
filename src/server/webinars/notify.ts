@@ -9,15 +9,18 @@ import "server-only";
 // chamam: nenhuma funcao lanca (a falha vira console.error) e todas devolvem contagens. A equipe nunca recebe; o
 // dedupe_key (webinar:<sessao>:<tipo>:<hora marcada>) segura a repeticao mesmo onde nao ha marca. So recebe quem ainda
 // passa pelo "Quem pode" (listStudentRegistrations), com a vaga como ancora do segmento no Segmento e no "both" e, no
-// "Produto ou segmento", o produto ou o segmento de agora: o reembolsado fica de fora.
+// "Produto ou segmento", o produto ou o segmento de agora: o reembolsado fica de fora. Fase 4c: a resposta da equipe
+// que chega depois (o aluno pediu a equipe, a sessao acabou ou ele saiu da sala) vira aviso no sino com o texto da
+// resposta, uma vez por pergunta (dedupe_key webinar:<sessao>:answer:<pergunta ou mensagem>).
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarWhen } from "../../lib/webinar-time";
 import { describeError } from "../communications/db";
 import { insertNotificationRows } from "../communications/store";
 import { renderWebinarCancelledEmail } from "../email/templates/webinar-cancelled";
+import { fetchStaffUserIds } from "../students/store";
 import { assertNoDbError, type WebinarsDb } from "./db";
-import { REMINDER_RULES, toTime, type Webinar } from "./model";
+import { REMINDER_RULES, toTime, webinarHref, type Webinar } from "./model";
 import {
   createWebinarNoticeContext,
   listStudentRegistrations,
@@ -217,6 +220,62 @@ export async function queueWebinarRescheduledNotices(db: WebinarsDb, sessionId: 
   return result;
 }
 
+/** A resposta da equipe fica no sino por duas semanas (a sessao pode ter acabado ha tempo). */
+const ANSWER_NOTICE_MS = 14 * 24 * HOUR_MS;
+const NOTICE_TITLE_MAX = 200;
+const NOTICE_BODY_MAX = 600;
+
+/** `webinar:<sessao>:answer:<pergunta ou mensagem>`: a mesma resposta nunca entra duas vezes no sino. */
+export function webinarAnswerDedupeKey(sessionId: string, targetId: string) {
+  return `webinar:${sessionId}:answer:${targetId}`;
+}
+
+/**
+ * Fase 4c (docs/30 §1.6, Atendentes): a equipe respondeu depois a pergunta do aluno (ele pediu a equipe, a sessao
+ * acabou ou ele saiu da sala). Sino kind 'webinar' com o titulo do webinario, o texto da resposta e o link da pagina
+ * da live, uma vez por pergunta (ou mensagem do chat). Nunca para a equipe; nunca lanca.
+ */
+export async function queueWebinarAnswerNotice(
+  db: WebinarsDb,
+  input: { answerText: string; now: Date; sessionId: string; targetId: string; userId: string; webinarId: string }
+): Promise<NotifyResult> {
+  const result: NotifyResult = { emails: 0, notifications: 0 };
+
+  try {
+    const text = input.answerText.trim();
+    const row = text ? await fetchWebinarRow(db, input.webinarId) : null;
+
+    if (!row) {
+      return result;
+    }
+
+    const staff = await fetchStaffUserIds(db);
+
+    if (staff.has(input.userId)) {
+      return result;
+    }
+
+    const webinar = webinarFromRow(row);
+
+    result.notifications += await insertNotificationRows(db, [
+      {
+        body: WEBINAR_COPY.assistente.sino.corpo(text).slice(0, NOTICE_BODY_MAX),
+        dedupe_key: webinarAnswerDedupeKey(input.sessionId, input.targetId),
+        expires_at: new Date(input.now.getTime() + ANSWER_NOTICE_MS).toISOString(),
+        href: webinarHref(webinar.slug),
+        kind: "webinar",
+        payload: { kind: "answer", sessionId: input.sessionId, targetId: input.targetId, webinarId: webinar.id },
+        title: WEBINAR_COPY.assistente.sino.titulo(webinar.title).slice(0, NOTICE_TITLE_MAX),
+        user_id: input.userId
+      }
+    ]);
+  } catch (error) {
+    console.error(`[webinarios] aviso da resposta da equipe (${input.targetId}) nao enviado: ${describeError(error)}`);
+  }
+
+  return result;
+}
+
 /** "Comecou agora": sino para quem tinha vaga (uma vez por vaga; a fase 3 chama ao abrir a sala). */
 export async function queueWebinarStartedNotices(db: WebinarsDb, sessionId: string, now: Date): Promise<NotifyResult> {
   const result: NotifyResult = { emails: 0, notifications: 0 };
@@ -224,7 +283,8 @@ export async function queueWebinarStartedNotices(db: WebinarsDb, sessionId: stri
   try {
     const session = await fetchSessionRow(db, sessionId);
 
-    if (!session || session.kind === "replay" || session.status === "ended" || session.status === "cancelled") {
+    // A sessao jit nunca manda "Começou agora" (nem pelo botao Começar do console): seria um aviso por horario.
+    if (!session || session.kind === "replay" || session.jit === true || session.status === "ended" || session.status === "cancelled") {
       return result;
     }
 

@@ -8,7 +8,9 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 // continua), o selo e Voltar; Sair fecha a sala. O pop-up da Comunicacao nao abre com a pilula no ar: o palco
 // continua anunciando o sinal de midia (lesson-media-signal) por dentro dela.
 
-export function RoomPill({ children, live, onLeave, onRestore, title }: { children: ReactNode; live: boolean; onLeave: () => void; onRestore: () => void; title: string }) {
+// A miniatura: na Live gravada o palco vem da propria sala, por cima dela (mesmo lugar da arvore, o player nao
+// remonta), e children fica vazio; a sala ao vivo ainda passa o proprio conteudo.
+export function RoomPill({ children, live, onLeave, onRestore, title }: { children?: ReactNode; live: boolean; onLeave: () => void; onRestore: () => void; title: string }) {
   const copy = WEBINAR_COPY.sala;
 
   return (

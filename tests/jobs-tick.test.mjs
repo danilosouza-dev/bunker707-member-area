@@ -170,8 +170,10 @@ test("tick route authenticates first, bounds the body and records job_runs", () 
   assert.match(jobTypeBody, /\bname: string;/);
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
   // Ordem do registro: e-mails primeiro, depois a Comunicacao (sino e pop-ups), as sessoes gravadas das lives (docs/30
-  // §6.6), os lembretes das lives (docs/30 §2.7), o gravador e as gravacoes das lives (docs/30 §6.7) e, por ultimo, a limpeza diaria dos arquivos da Comunicacao sem uso (usa so o que sobra do tick).
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, webinarRecordingsJob, communicationMediaJob\];/);
+  // §6.6), a Simulacao congelada das sessoes encerradas (fase 4b), os lembretes das lives (docs/30 §2.7), o gravador e
+  // as gravacoes das lives (docs/30 §6.7), a conversao da Oferta (fase 4b, M7) e, por ultimo, a limpeza diaria dos
+  // arquivos da Comunicacao sem uso (usa so o que sobra do tick).
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob\];/);
   assert.match(jobRunsSource, /\.from\("job_runs"\)/);
 });
 

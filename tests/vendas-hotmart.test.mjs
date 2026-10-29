@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import "./support/resolve-extensionless-ts.mjs";
+import "./support/admin-action-stubs.mjs";
 
 // Vendas pela Hotmart (docs/04, secao Webhooks externos; docs/17 §1.10), regras puras: o adaptador le
 // o webhook 2.0 (payloads FICTICIOS, nenhum dado real), confere o token em tempo constante, o modelo da
 // tela rotula e mascara, e o rodape de "Novos acessos" diz de onde vieram os acessos.
+//
+// Webinarios v4b (docs/30 M8): o valor da venda. sale-amount.ts converte numero ou texto decimal em centavos sem conta
+// de ponto flutuante e a moeda em ISO 4217; a Hotmart le data.purchase.price (ou full_price) com a moeda do bloco; o
+// acesso nao muda com o valor; o store grava amount_cents/currency na linha e, no banco sem as colunas (sem a
+// 202610290005), grava a venda sem elas (dublê do banco, sem rede).
 
 const hotmart = await import("../src/server/payments/hotmart.ts");
 const model = await import("../src/server/payments/model.ts");
@@ -12,6 +17,8 @@ const schemas = await import("../src/server/payments/schemas.ts");
 const adapters = await import("../src/server/payments/adapters.ts");
 const todayModel = await import("../src/components/admin/v2/today/today-model.ts");
 const { requestOriginOf } = await import("../src/server/http/request-origin.ts");
+const amounts = await import("../src/server/payments/sale-amount.ts");
+const store = await import("../src/server/payments/store.ts");
 
 const TOKEN = "hottok-de-teste-0123456789abcdef";
 /** O banco guarda so o SHA-256 do token (src/server/payments/secret.ts). */
@@ -26,7 +33,9 @@ function compraAprovada(overrides = {}) {
       product: { id: 7001, name: "Curso Ficticio", ucode: "abc-123" },
       purchase: {
         approved_date: 1760702460000,
+        full_price: { currency_value: "BRL", value: 1597.9 },
         order_date: 1760702400000,
+        price: { currency_value: "BRL", value: 1500 },
         status: "APPROVED",
         transaction: "HP-TESTE-0001",
         warranty_expire_date: 1761307200000
@@ -44,6 +53,7 @@ test("compra aprovada: evento normalizado com comprador, produto, compra e datas
   const event = hotmart.normalizeHotmartEvent(compraAprovada());
 
   assert.deepEqual(event, {
+    amount: { cents: 150_000, currency: "BRL" },
     buyer: { email: "comprador.teste@bunker707.test", name: "Comprador de Teste", phone: "+55 11999990000" },
     eventId: "evento-teste-1",
     externalProductId: "7001",
@@ -142,7 +152,16 @@ test("o payload guardado fica so com os campos permitidos (sem token, documento,
       commissions: [{ value: 10 }],
       producer: { name: "Produtor" },
       product: { id: 7001, name: "Curso", ucode: "abc" },
-      purchase: { approved_date: 1, full_price: { value: 100 }, order_date: 1, status: "APPROVED", transaction: "HP-1", warranty_expire_date: 2 },
+      purchase: {
+        approved_date: 1,
+        full_price: { currency_value: "BRL", value: 100 },
+        order_date: 1,
+        payment: { installments_number: 12, type: "CREDIT_CARD" },
+        price: { currency_value: "BRL", tax: 9, value: 97.9 },
+        status: "APPROVED",
+        transaction: "HP-1",
+        warranty_expire_date: 2
+      },
       subscription: { plan: { name: "Mensal" }, status: "ACTIVE", subscriber: { code: "SUB-1" } }
     }
   });
@@ -153,7 +172,15 @@ test("o payload guardado fica so com os campos permitidos (sem token, documento,
     data: {
       buyer: { checkout_phone: "11999990000", checkout_phone_code: "55", email: "comprador@bunker707.test", name: "Comprador" },
       product: { id: 7001, name: "Curso" },
-      purchase: { approved_date: 1, order_date: 1, status: "APPROVED", transaction: "HP-1", warranty_expire_date: 2 },
+      purchase: {
+        approved_date: 1,
+        full_price: { currency_value: "BRL", value: 100 },
+        order_date: 1,
+        price: { currency_value: "BRL", value: 97.9 },
+        status: "APPROVED",
+        transaction: "HP-1",
+        warranty_expire_date: 2
+      },
       subscription: { status: "ACTIVE", subscriber: { code: "SUB-1" } }
     },
     event: "PURCHASE_APPROVED",
@@ -162,6 +189,8 @@ test("o payload guardado fica so com os campos permitidos (sem token, documento,
   });
   assert.equal(JSON.stringify(guardado).includes("00000000000"), false, "documento nunca e gravado");
   assert.equal(hotmart.normalizeHotmartEvent(guardado).buyer.email, "comprador@bunker707.test", "o que fica guardado ainda da para reprocessar");
+  assert.deepEqual(hotmart.normalizeHotmartEvent(guardado).amount, { cents: 9790, currency: "BRL" }, "o preco guardado da o mesmo valor no reprocesso");
+  assert.deepEqual(hotmart.normalizeHotmartEvent(guardado).amount, hotmart.normalizeHotmartEvent(completo).amount);
   assert.deepEqual(hotmart.redactHotmartPayload({ event: "X", hottok: TOKEN }), { event: "X" });
   assert.equal(adapters.getPaymentAdapter("hotmart")?.provider, "hotmart");
   assert.equal(adapters.getPaymentAdapter("ticto")?.provider, "ticto");
@@ -300,4 +329,203 @@ test("origem do site para os links dos e-mails: variavel, cabecalhos do proxy ou
   assert.equal(requestOriginOf(request({ host: "escola.exemplo.test", "x-forwarded-proto": "https" }), {}), "https://escola.exemplo.test");
   assert.equal(requestOriginOf(request({ host: "127.0.0.1:3100" }), {}), "http://127.0.0.1:3100");
   assert.equal(requestOriginOf(request({ "x-forwarded-host": "app.exemplo.test, proxy" }), {}), "https://app.exemplo.test");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios v4b (docs/30 M8): o valor da venda
+ * ---------------------------------------------------------------------------------------------- */
+
+test("valor: numero do JSON vira centavos pelo texto (sem erro de ponto flutuante), na unidade da moeda", () => {
+  assert.equal(amounts.saleAmountCents(1500), 150_000);
+  assert.equal(amounts.saleAmountCents(97.9), 9790);
+  assert.equal(amounts.saleAmountCents(19.99), 1999, "19.99 * 100 daria 1998.9999999999998");
+  assert.equal(amounts.saleAmountCents(1.005), 101, "a terceira casa arredonda para cima");
+  assert.equal(amounts.saleAmountCents(0.1 + 0.2), 30, "0.30000000000000004");
+  assert.equal(amounts.saleAmountCents(0), 0);
+  assert.equal(amounts.saleAmountCents(1e-7), 0, "fracao minuscula em notacao cientifica");
+  assert.equal(amounts.saleAmountCents(1_000_000_000), amounts.MAX_SALE_AMOUNT_CENTS, "o teto do check da migracao");
+  assert.equal(amounts.saleAmountCents(1_000_000_000.01), null, "acima do teto");
+  assert.equal(amounts.saleAmountCents(1e21), null);
+  assert.equal(amounts.saleAmountCents(-10), null, "negativo");
+  assert.equal(amounts.saleAmountCents(Number.NaN), null);
+  assert.equal(amounts.saleAmountCents(Number.POSITIVE_INFINITY), null);
+  assert.equal(amounts.saleAmountCents(null), null);
+  assert.equal(amounts.saleAmountCents({ value: 10 }), null);
+  assert.equal(amounts.saleAmountCents(true), null);
+});
+
+test("valor: texto com virgula ou ponto; os dois separadores (o ultimo e o decimal); milhar so com grupos de 3; ambiguo e null", () => {
+  assert.equal(amounts.saleAmountCents("1500"), 150_000);
+  assert.equal(amounts.saleAmountCents(" 1500.5 "), 150_050);
+  assert.equal(amounts.saleAmountCents("1500,50"), 150_050);
+  assert.equal(amounts.saleAmountCents("1.500,50"), 150_050, "formato brasileiro");
+  assert.equal(amounts.saleAmountCents("1,500.50"), 150_050, "formato americano");
+  assert.equal(amounts.saleAmountCents("1.234.567,89"), 123_456_789);
+  assert.equal(amounts.saleAmountCents("1.234.567"), 123_456_700, "um separador repetido e o de milhar");
+  assert.equal(amounts.saleAmountCents("47.00"), 4700);
+  assert.equal(amounts.saleAmountCents("0,5"), 50);
+  assert.equal(amounts.saleAmountCents("+10"), 1000);
+  assert.equal(amounts.saleAmountCents("19.999"), null, "um separador com 3 casas: mil ou dezenove? nunca um chute");
+  assert.equal(amounts.saleAmountCents("1.500"), null);
+  assert.equal(amounts.saleAmountCents("12.34.56"), null, "grupo de milhar fora do formato");
+  assert.equal(amounts.saleAmountCents("1,23.45"), null);
+  assert.equal(amounts.saleAmountCents("1.234,5.6"), null);
+  assert.equal(amounts.saleAmountCents("10."), null);
+  assert.equal(amounts.saleAmountCents("-10"), null);
+  assert.equal(amounts.saleAmountCents("R$ 10,00"), null, "moeda no texto");
+  assert.equal(amounts.saleAmountCents("dez"), null);
+  assert.equal(amounts.saleAmountCents(""), null);
+  assert.equal(amounts.saleAmountCents("9999999999999"), null, "parte inteira longa demais");
+});
+
+test("moeda: ISO 4217 de 3 letras em maiusculas; ausente usa o padrao (quando ha); invalida e null", () => {
+  assert.equal(amounts.saleCurrencyCode("brl"), "BRL");
+  assert.equal(amounts.saleCurrencyCode(" usd "), "USD");
+  for (const invalida of ["R$", "REAL", "US", "", null, 840, "B R"]) {
+    assert.equal(amounts.saleCurrencyCode(invalida), null, String(invalida));
+  }
+
+  assert.deepEqual(amounts.saleAmountOf({ cents: 100, currency: "eur" }), { cents: 100, currency: "EUR" });
+  assert.equal(amounts.saleAmountOf({ cents: 100, currency: undefined }), null, "sem moeda e sem padrao");
+  assert.deepEqual(amounts.saleAmountOf({ cents: 100, currency: null, defaultCurrency: "BRL" }), { cents: 100, currency: "BRL" });
+  assert.deepEqual(amounts.saleAmountOf({ cents: 100, currency: " ", defaultCurrency: "BRL" }), { cents: 100, currency: "BRL" });
+  assert.equal(amounts.saleAmountOf({ cents: 100, currency: "R$", defaultCurrency: "BRL" }), null, "moeda presente e invalida nao cai no padrao");
+  assert.equal(amounts.saleAmountOf({ cents: null, currency: "BRL" }), null);
+  assert.equal(amounts.saleAmountOf({ cents: 1.5, currency: "BRL" }), null);
+  assert.equal(amounts.saleAmountOf({ cents: amounts.MAX_SALE_AMOUNT_CENTS + 1, currency: "BRL" }), null);
+
+  assert.deepEqual(amounts.saleAmountColumns({ cents: 150_000, currency: "BRL" }), { amount_cents: 150_000, currency: "BRL" });
+  assert.equal(amounts.saleAmountColumns({ cents: -1, currency: "BRL" }), null);
+  assert.equal(amounts.saleAmountColumns({ cents: 1, currency: "real" }), null);
+  assert.equal(amounts.saleAmountColumns(null), null);
+  assert.equal(amounts.saleAmountColumns(undefined), null);
+});
+
+test("Hotmart: o valor vem de purchase.price com a moeda do bloco; sem price, full_price; sem moeda ou ilegivel, null", () => {
+  const comPreco = (purchase) => hotmart.normalizeHotmartEvent(compraAprovada({ data: { ...compraAprovada().data, purchase: { transaction: "HP-TESTE-0001", ...purchase } } }));
+
+  assert.deepEqual(comPreco({ price: { currency_value: "BRL", value: 97.9 } }).amount, { cents: 9790, currency: "BRL" });
+  assert.deepEqual(comPreco({ price: { currency_value: "usd", value: "49.90" } }).amount, { cents: 4990, currency: "USD" }, "moeda em minusculas e valor em texto");
+  assert.deepEqual(comPreco({ full_price: { currency_value: "EUR", value: 120 } }).amount, { cents: 12_000, currency: "EUR" }, "sem price, o preco cheio");
+  assert.deepEqual(comPreco({ price: { currency_code: "BRL", value: 10 } }).amount, { cents: 1000, currency: "BRL" }, "payload antigo com currency_code");
+  assert.deepEqual(comPreco({ price: { currency_value: "BRL", value: 0 } }).amount, { cents: 0, currency: "BRL" }, "compra gratuita vale 0");
+  assert.equal(comPreco({ price: { value: 97.9 } }).amount, null, "sem moeda");
+  assert.equal(comPreco({ price: { currency_value: "R$", value: 97.9 } }).amount, null, "moeda invalida");
+  assert.equal(comPreco({ price: { currency_value: "BRL", value: "noventa" } }).amount, null, "valor ilegivel");
+  assert.equal(comPreco({ price: { currency_value: "BRL", value: -5 } }).amount, null, "valor negativo");
+  assert.equal(comPreco({}).amount, null, "sem preco nenhum");
+  assert.equal(hotmart.normalizeHotmartEvent({ data: { product: { id: 1 }, subscriber: { code: "S" } }, event: "SUBSCRIPTION_CANCELLATION", id: "x" }).amount, null, "cancelamento sem compra");
+});
+
+test("Hotmart: o valor nunca muda o que o evento significa para o acesso", () => {
+  const semPreco = compraAprovada();
+  delete semPreco.data.purchase.price;
+  delete semPreco.data.purchase.full_price;
+  const comPreco = hotmart.normalizeHotmartEvent(compraAprovada());
+  const sem = hotmart.normalizeHotmartEvent(semPreco);
+  const outroPreco = hotmart.normalizeHotmartEvent(compraAprovada({ data: { ...compraAprovada().data, purchase: { ...compraAprovada().data.purchase, price: { currency_value: "USD", value: 1 } } } }));
+
+  assert.equal(sem.amount, null);
+  const semValor = (event) => Object.fromEntries(Object.entries(event).filter(([key]) => key !== "amount"));
+  assert.deepEqual(semValor(comPreco), semValor(sem));
+  assert.deepEqual(semValor(comPreco), semValor(outroPreco));
+});
+
+/** Dublê do banco para o insert de webhook_events: cada chamada anotada; `respostas` na ordem. */
+function bancoDeVendas(respostas) {
+  const inserts = [];
+  let chamada = 0;
+
+  return {
+    inserts,
+    from(table) {
+      assert.equal(table, "webhook_events");
+      const chain = {
+        insert(row) {
+          inserts.push(row);
+          return chain;
+        },
+        select() {
+          return chain;
+        },
+        async single() {
+          const resposta = respostas[Math.min(chamada, respostas.length - 1)];
+          chamada += 1;
+          return resposta;
+        }
+      };
+
+      return chain;
+    }
+  };
+}
+
+const EVENTO = {
+  buyerEmail: "comprador@bunker707.test",
+  eventType: "PURCHASE_APPROVED",
+  externalEventId: "evento-1",
+  externalProductId: "7001",
+  externalProductName: "Curso",
+  normalizedType: "purchase_approved",
+  payload: { event: "PURCHASE_APPROVED" },
+  provider: "hotmart",
+  signatureValid: true,
+  transactionId: "HP-1"
+};
+
+test("store: o valor vai para amount_cents/currency na mesma linha; sem valor (ou fora dos checks), a linha sai sem as colunas", async () => {
+  const db = bancoDeVendas([{ data: { id: "linha-1" }, error: null }]);
+  assert.deepEqual(await store.insertWebhookEvent(db, { ...EVENTO, amount: { cents: 150_000, currency: "BRL" } }), { duplicate: false, id: "linha-1" });
+  assert.equal(db.inserts.length, 1);
+  assert.equal(db.inserts[0].amount_cents, 150_000);
+  assert.equal(db.inserts[0].currency, "BRL");
+  assert.equal(db.inserts[0].processing_status, "received");
+
+  for (const amount of [null, undefined, { cents: -1, currency: "BRL" }, { cents: 10, currency: "R$" }]) {
+    const semValor = bancoDeVendas([{ data: { id: "linha-2" }, error: null }]);
+    await store.insertWebhookEvent(semValor, { ...EVENTO, amount });
+    assert.equal("amount_cents" in semValor.inserts[0], false, JSON.stringify(amount));
+    assert.equal("currency" in semValor.inserts[0], false);
+  }
+});
+
+test("store: banco sem as colunas do valor (migracao 202610290005 pendente) grava a venda sem elas, e o repetido continua repetido", async () => {
+  const avisos = [];
+  const original = console.warn;
+  console.warn = (...args) => avisos.push(args.join(" "));
+
+  try {
+    for (const erro of [
+      { code: "PGRST204", message: "Could not find the 'amount_cents' column of 'webhook_events' in the schema cache" },
+      { code: "42703", message: 'column "amount_cents" of relation "webhook_events" does not exist' }
+    ]) {
+      const db = bancoDeVendas([{ data: null, error: erro }, { data: { id: "linha-3" }, error: null }]);
+      assert.deepEqual(await store.insertWebhookEvent(db, { ...EVENTO, amount: { cents: 100, currency: "BRL" } }), { duplicate: false, id: "linha-3" });
+      assert.equal(db.inserts.length, 2, erro.code);
+      assert.equal(db.inserts[0].amount_cents, 100);
+      assert.equal("amount_cents" in db.inserts[1], false, "a segunda tentativa vai sem o valor");
+      const semValor = Object.fromEntries(Object.entries(db.inserts[0]).filter(([key]) => key !== "amount_cents" && key !== "currency"));
+      assert.deepEqual(db.inserts[1], semValor, "a mesma linha, sem as duas colunas");
+    }
+
+    const repetido = bancoDeVendas([{ data: null, error: { code: "PGRST204", message: "Could not find the 'currency' column" } }, { data: null, error: { code: "23505", message: "duplicate key" } }]);
+    assert.deepEqual(await store.insertWebhookEvent(repetido, { ...EVENTO, amount: { cents: 100, currency: "BRL" } }), { duplicate: true, id: null });
+  } finally {
+    console.warn = original;
+  }
+
+  assert.ok(avisos.every((linha) => /migracao 202610290005 pendente/.test(linha)), "o log diz a migracao");
+  assert.equal(avisos.length, 3);
+
+  const duplicado = bancoDeVendas([{ data: null, error: { code: "23505", message: "duplicate key" } }]);
+  assert.deepEqual(await store.insertWebhookEvent(duplicado, { ...EVENTO, amount: { cents: 100, currency: "BRL" } }), { duplicate: true, id: null });
+  assert.equal(duplicado.inserts.length, 1, "repetido com as colunas: uma tentativa so");
+
+  const outroErro = bancoDeVendas([{ data: null, error: { code: "23514", message: "violates check constraint" } }]);
+  await assert.rejects(store.insertWebhookEvent(outroErro, { ...EVENTO, amount: { cents: 100, currency: "BRL" } }), /Registrar a venda recebida/);
+  assert.equal(outroErro.inserts.length, 1, "outro erro nao tenta de novo sem o valor");
+
+  const semColunasSemValor = bancoDeVendas([{ data: null, error: { code: "PGRST204", message: "Could not find the 'payload' column" } }]);
+  await assert.rejects(store.insertWebhookEvent(semColunasSemValor, { ...EVENTO, amount: null }));
+  assert.equal(semColunasSemValor.inserts.length, 1, "sem valor nao ha o que tirar: o erro sobe");
 });

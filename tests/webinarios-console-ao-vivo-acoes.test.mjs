@@ -976,3 +976,24 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
     delete process.env.WEBINAR_JWT_SECRET;
   }
 });
+
+test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sessoes 'Comeca quando voce entra' so as de hoje em Sao Paulo e as em andamento; a pedida fica", () => {
+  // 05/11/2026 23:30 em UTC = 20:30 em Sao Paulo: "hoje" e o dia 05 em Sao Paulo.
+  const nowMs = Date.parse("2026-11-05T23:30:00.000Z");
+  const sessao = (id, scheduledAt, extra = {}) => ({ id, jit: true, scheduledAt, status: "scheduled", ...extra });
+  const sessions = [
+    { id: "comum-velha", jit: false, scheduledAt: "2026-10-01T23:00:00.000Z", status: "ended" },
+    sessao("jit-hoje-cedo", "2026-11-05T11:15:00.000Z", { status: "ended" }),
+    sessao("jit-hoje-noite", "2026-11-06T01:45:00+00:00"),
+    sessao("jit-ontem", "2026-11-05T02:15:00.000Z", { status: "ended" }),
+    sessao("jit-ontem-no-ar", "2026-11-04T23:00:00.000Z", { status: "live" }),
+    sessao("jit-amanha", "2026-11-06T12:00:00.000Z"),
+    sessao("jit-pedida", "2026-11-01T12:00:00.000Z", { status: "ended" })
+  ];
+  assert.deepEqual(
+    consoleQueries.consoleSessionsFor(sessions, nowMs).map((item) => item.id),
+    ["comum-velha", "jit-hoje-cedo", "jit-hoje-noite", "jit-ontem-no-ar"],
+    "22:45 em Sao Paulo ainda e hoje; 23:15 do dia 04 em Sao Paulo nao"
+  );
+  assert.ok(consoleQueries.consoleSessionsFor(sessions, nowMs, "jit-pedida").some((item) => item.id === "jit-pedida"), "a pedida por ?sessao= continua no seletor");
+});

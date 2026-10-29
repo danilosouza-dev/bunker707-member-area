@@ -7,8 +7,11 @@ import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, resumoDePrese
 // (?sessao=) com a sessao marcada, os onze numeros ("—" sem dado), a curva com o resumo e as maiores quedas (grafico
 // com SVG acessivel e a tabela por minuto no lugar dele), as barras do chat, Quem mais comentou e Mais quentes com os
 // nomes de profiles, as perguntas mais votadas, as enquetes por opcao, as vagas, o replay, o bloco Simulacao a parte e
-// a lista por aluno com o CSV; e o estado vazio antes da primeira sessao. Os .tsx sao transpilados pelo TypeScript
-// (so JSX -> JS) e desenhados com react-dom/server; a parte pura (report-page-model.ts) e conferida direto.
+// a lista por aluno com o CSV; e o estado vazio antes da primeira sessao. Da fase 4: o botao Exportar (o menu dos CSVs
+// nos nomes do Zoom), os blocos Oferta, Respostas do Assistente e a Simulacao completa (com o aviso da migracao so no
+// bloco), o trecho da transcricao nas quedas e as sessoes "Comeca quando voce entra" no seletor. Os .tsx sao
+// transpilados pelo TypeScript (so JSX -> JS) e desenhados com react-dom/server; a parte pura (report-page-model.ts) e
+// conferida direto.
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -112,10 +115,28 @@ const attendee = (userId, extra = {}) => ({
   ...extra
 });
 
+function simulacao(extra = {}) {
+  return {
+    ackText: encerrada.simulationAckText,
+    decidedAt: encerrada.simulationDecidedAt,
+    decidedByName: "Carla Produtora",
+    pending: false,
+    realParticipants: 3,
+    rules: null,
+    script: { byTrigger: { at_offset: 1, manual: 0, on_phrase: 1 }, fired: 2, missed: 1, ready: 3 },
+    showLiveBadge: true,
+    totals: { counterMax: null, joinsShown: null, saleNoticesShown: null },
+    ...extra
+  };
+}
+
 function pagina(extra = {}) {
   return {
     hasReplay: true,
     selected: {
+      assistant: { enabled: false, pending: false },
+      dropExcerpts: null,
+      exportReports: ["registration", "attendee", "performance", "qa", "poll", "survey", "simulacao"],
       attendees: [attendee(ALUNA), attendee(ALUNO, { device: null, entries: 2, firstAt: null, lastAt: null, messages: 1, polls: 0, reachedEnd: false, score: 38, seconds: 0 })],
       csvHref: model.webinarReportCsvHref(WEBINAR_ID, SESSAO_ID),
       durationMs: 1_800_000,
@@ -124,7 +145,7 @@ function pagina(extra = {}) {
       questions: { [PERGUNTA]: { answeredBy: EQUIPE, body: "Funciona no celular?", displayName: "Ana S.", status: "answered" } },
       report: view,
       session: encerrada,
-      simulation: { ackText: encerrada.simulationAckText, decidedAt: encerrada.simulationDecidedAt, decidedByName: "Carla Produtora", script: { fired: 2, missed: 1, ready: 3 }, showLiveBadge: true }
+      simulation: simulacao()
     },
     sessions: model.reportSessionOptions(WEBINAR_ID, [encerrada, replay], SESSAO_ID),
     webinar: { durationMinutes: 60, id: WEBINAR_ID, kind: "simulated", registrationRequired: true, slug: "live-de-agentes", status: "published", title: "Live de agentes" },
@@ -363,11 +384,39 @@ test("modelo: barras (mensagens por minuto, reacoes, origem, perguntas), enquete
     ["Sem resposta", 0, [null]]
   ]);
 
-  assert.deepEqual(model.simulationLines({ ackText: null, decidedAt: null, decidedByName: null, script: { fired: 0, missed: 0, ready: 1 }, showLiveBadge: false }), [
-    'Selo "Ao vivo": desligado · sem decisão registrada',
-    "1 item pronto no roteiro",
-    "0 comentários do roteiro entraram · 0 não dispararam"
-  ]);
+  assert.deepEqual(
+    model.simulationLines(simulacao({ ackText: null, decidedAt: null, decidedByName: null, script: { byTrigger: model.emptyScriptByTrigger(), fired: 0, missed: 0, ready: 1 }, showLiveBadge: false })),
+    [
+      'Selo "Ao vivo": desligado · sem decisão registrada',
+      "1 item pronto no roteiro",
+      "0 comentários do roteiro entraram · 0 não dispararam",
+      "Comentários do roteiro por Solta em: Num minuto do vídeo 0 · Quando o apresentador diz 0 · Pelo botão da equipe 0"
+    ],
+    "sem as regras da fase 4 (banco sem a 202610290005), so o selo e o roteiro"
+  );
+  assert.deepEqual(
+    model.simulationLines(
+      simulacao({
+        realParticipants: 31,
+        rules: { countMode: "curve", joins: { enabled: true, everySeconds: 60, max: 30 }, saleNotices: { enabled: false, items: 0 } },
+        totals: { counterMax: 240, joinsShown: 18, saleNoticesShown: null }
+      })
+    ),
+    [
+      'Selo "Ao vivo": ligado · decidido por Carla Produtora em 05/11/2026 às 09:00',
+      "Contador simulado: real + faixa que varia · maior número mostrado: 240 · participantes de verdade: 31",
+      "Entradas simuladas: 18 apareceram",
+      "Avisos de venda simulados: desligado",
+      "3 itens prontos no roteiro",
+      "2 comentários do roteiro entraram · 1 não disparou",
+      "Comentários do roteiro por Solta em: Num minuto do vídeo 1 · Quando o apresentador diz 1 · Pelo botão da equipe 0"
+    ]
+  );
+  assert.equal(
+    model.simulationLines(simulacao({ realParticipants: 4, rules: { countMode: "off", joins: { enabled: false, everySeconds: 60, max: 30 }, saleNotices: { enabled: true, items: 2 } }, totals: { counterMax: 9, joinsShown: null, saleNoticesShown: 1 } }))[1],
+    "Contador simulado: real · participantes de verdade: 4",
+    "contador desligado: so o real"
+  );
 });
 
 test("modelo: a pontuacao (M3), 'Saiu' = ultima amostra + 15 s, a linha e o nome do CSV", () => {
@@ -397,4 +446,147 @@ test("modelo: a pontuacao (M3), 'Saiu' = ultima amostra + 15 s, a linha e o nome
   assert.equal(model.deviceLabel(null), "");
   assert.equal(model.toDevice("tablet"), null);
   assert.equal(model.personName(people, "ninguem"), "Aluno");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 4: Exportar, Oferta, Respostas do Assistente, Simulacao completa, trechos das quedas e sessoes jit
+ * ---------------------------------------------------------------------------------------------- */
+
+const { WebinarExportMenu } = await import("../src/components/admin/v2/communication/webinars/export-menu.tsx");
+
+const viewV4 = buildWebinarReport(
+  readWebinarReportRows([
+    ...RPC_ROWS,
+    { metric: "offer", item: "seen", total: 3, students: 3 },
+    { metric: "offer", item: "clicks", total: 3, students: 2 },
+    { metric: "offer", item: "purchases", total: 1, students: 1 },
+    { metric: "offer", item: "A:seen", total: 1, students: 1 },
+    { metric: "offer", item: "B:seen", total: 2, students: 2 },
+    { metric: "offer", item: "B:clicks", total: 2, students: 2 },
+    { metric: "offer", item: "B:purchases", total: 1, students: 1 },
+    { metric: "offer_revenue", item: "BRL", total: 197000, students: 1 },
+    { metric: "ai", item: "replies", total: 5, students: 0 },
+    { metric: "ai", item: "avg_seconds", total: 7, students: 5 },
+    { metric: "ai", item: "edited", total: 1, students: 0 },
+    { metric: "ai", item: "deleted", total: 2, students: 0 },
+    { metric: "ai", item: "handoffs", total: 3, students: 0 },
+    { metric: "sim_counter", item: "max", total: 240, students: 0 },
+    { metric: "sim_joins", item: "shown", total: 18, students: 0 },
+    { metric: "sim_sales", item: "shown", total: 2, students: 0 }
+  ])
+);
+
+function paginaV4(selected = {}) {
+  const base = pagina();
+  return { ...base, selected: { ...base.selected, report: viewV4, ...selected } };
+}
+
+test("o botao Exportar no topo da sessao: um menu (aria-haspopup) com 44 px a 375 px; sem periodo valido no painel, nada", () => {
+  const markup = html(createElement(WebinarReportView, { page: paginaV4() }));
+  assert.match(markup, /<button[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"[^>]*class="[^"]*max-md:h-11[^"]*"[^>]*>.*?Exportar/);
+
+  const sozinho = html(createElement(WebinarExportMenu, { scope: "session", sessionId: SESSAO_ID, webinarId: WEBINAR_ID }));
+  assert.match(sozinho, /aria-haspopup="menu"/);
+  assert.match(textOf(sozinho), /^Exportar$/);
+  assert.equal(html(createElement(WebinarExportMenu, { end: "x", kind: "live", scope: "panel", start: "y" })), "");
+  assert.match(html(createElement(WebinarExportMenu, { end: "2026-12-01T03:00:00.000Z", kind: "simulated", scope: "panel", start: "2026-11-01T03:00:00.000Z" })), /Exportar/);
+});
+
+test("o bloco Oferta (so com oferta): viram, cliques, compras, receita, conversao e a tabela por variante", () => {
+  const text = textOf(html(createElement(WebinarReportView, { page: paginaV4() })));
+  assert.match(text, /Oferta Viram a oferta: presentes na janela da oferta/);
+  assert.match(text, /Viram a oferta 3 Cliques 2 Compras 1 Receita R\$\s1\.970,00 Conversão 33 % · 50 % dos cliques/);
+  assert.match(text, /Por variante Variante Viram a oferta Cliques Compras Conversão Variante A 1 0 0 0 % Variante B 2 2 1 50 %/);
+  assert.match(text, /Compras: pelos webhooks de venda, em até 7 dias depois do clique/);
+
+  const sem = textOf(html(createElement(WebinarReportView, { page: pagina() })));
+  assert.doesNotMatch(sem, /Viram a oferta/, "sessao sem oferta: sem o bloco");
+
+  const semValor = model.offerFacts({ ...viewV4, offer: { ...viewV4.offer, revenue: [] } });
+  assert.deepEqual(semValor.find((fact) => fact.label === "Receita"), { label: "Receita", value: "—" }, "receita sem valor gravado: '—' (M8)");
+});
+
+test("o bloco Respostas do Assistente: os cinco numeros; ligado sem resposta, a frase; banco sem a 202610290006, o aviso; desligado e sem resposta, nada", () => {
+  const ligado = textOf(html(createElement(WebinarReportView, { page: paginaV4({ assistant: { enabled: true, pending: false } }) })));
+  assert.match(ligado, /Respostas do Assistente Respostas reais a alunos reais: ficam fora da Simulação e das mensagens de alunos e equipe\./);
+  assert.match(ligado, /Respostas 5 Tempo médio de resposta 7 s Corrigidas pela equipe 1 Apagadas pela equipe 2 Pediram para falar com a equipe 3/);
+
+  const semResposta = textOf(html(createElement(WebinarReportView, { page: pagina({ selected: { ...pagina().selected, assistant: { enabled: true, pending: false } } }) })));
+  assert.match(semResposta, /Respostas do Assistente .*O Assistente não respondeu nesta sessão\./);
+
+  const pendente = textOf(html(createElement(WebinarReportView, { page: pagina({ selected: { ...pagina().selected, assistant: { enabled: false, pending: true } } }) })));
+  assert.match(pendente, /Esta parte precisa da atualização do banco \(migração 202610290006\)\./);
+
+  assert.doesNotMatch(textOf(html(createElement(WebinarReportView, { page: pagina() }))), /Respostas do Assistente/);
+  assert.deepEqual(model.assistantFacts({ ...viewV4, assistant: { ...viewV4.assistant, avgSeconds: null } })[1], { label: "Tempo médio de resposta", value: "—" });
+});
+
+test("a Simulacao completa: o contador com o real ao lado, entradas, avisos de venda e o roteiro por Solta em; sem a 202610290005, o aviso no bloco", () => {
+  const regras = { countMode: "curve", joins: { enabled: true, everySeconds: 60, max: 30 }, saleNotices: { enabled: true, items: 2 } };
+  const text = textOf(html(createElement(WebinarReportView, { page: paginaV4({ simulation: simulacao({ rules: regras, totals: viewV4.simulation }) }) })));
+  assert.match(text, /Simulação Estes números são da simulação e não entram em nenhum outro número\./);
+  assert.match(text, /Contador simulado: real \+ faixa que varia · maior número mostrado: 240 · participantes de verdade: 3/);
+  assert.match(text, /Entradas simuladas: 18 apareceram Avisos de venda simulados: 2 apareceram/);
+  assert.match(text, /Comentários do roteiro por Solta em: Num minuto do vídeo 1 · Quando o apresentador diz 1 · Pelo botão da equipe 0/);
+
+  const pendente = textOf(html(createElement(WebinarReportView, { page: paginaV4({ simulation: simulacao({ pending: true }) }) })));
+  assert.match(pendente, /Simulação .*Esta parte precisa da atualização do banco \(migração 202610290005\)\./);
+});
+
+test("os pontos de queda com o trecho da transcricao daquele minuto; sem cue no minuto, a frase; sem transcricao, a lista de sempre", () => {
+  const props = { avgPresent: view.presence.avgPresent, curve: view.presence.curve, drops: view.presence.drops, durationMs: 1_800_000, live: false, peak: view.presence.peak };
+  const comTrecho = textOf(html(createElement(PresenceCurveCard, { ...props, dropExcerpts: { 2: "Agora vamos ver o preço", 41: null } })));
+  assert.match(comTrecho, /Maiores quedas 01:00 · 1 saiu No vídeo, nesse minuto: “Agora vamos ver o preço” 20:30 · 1 saiu Sem transcrição deste trecho\./);
+  const semTranscricao = textOf(html(createElement(PresenceCurveCard, { ...props, dropExcerpts: null })));
+  assert.doesNotMatch(semTranscricao, /No vídeo|Sem transcrição/);
+
+  const cues = [
+    { endSeconds: 58, startSeconds: 50, text: "antes do minuto" },
+    { endSeconds: 66, startSeconds: 59, text: " Agora " },
+    { endSeconds: 80, startSeconds: 70, text: "vamos ver o preço." },
+    { endSeconds: 130, startSeconds: 125, text: "depois" }
+  ];
+  assert.equal(model.dropExcerpt(2, cues), "Agora vamos ver o preço.", "o balde 2 (01:00) pega as cues que tocam o minuto 1");
+  assert.equal(model.dropExcerpt(10, cues), null);
+  assert.equal(model.dropExcerpt(2, [{ endSeconds: null, startSeconds: 61, text: "x".repeat(400) }]).length, 180, "trecho cortado com reticencias");
+  assert.deepEqual(model.dropExcerpts([{ b: 2, n: 1 }, { b: 10, n: 1 }], cues), { 2: "Agora vamos ver o preço.", 10: null });
+  assert.equal(model.dropExcerpts([{ b: 2, n: 1 }], null), null);
+});
+
+test("o seletor: as sessoes 'Comeca quando voce entra' so dos ultimos 7 dias, da mais nova para a mais velha, depois das marcadas; a padrao e a mais recente", () => {
+  const agora = Date.parse("2026-11-10T12:00:00.000Z");
+  const marcada = sessionFromRow(sessaoRow({ id: "a0000000-0000-4000-8000-000000000001", scheduled_at: "2026-11-01T23:00:00.000Z", status: "ended" }));
+  const jit = (id, iso) => sessionFromRow(sessaoRow({ id, jit: true, scheduled_at: iso, status: "ended" }));
+  const ontem = jit("a0000000-0000-4000-8000-000000000002", "2026-11-09T14:15:00+00:00");
+  const anteontem = jit("a0000000-0000-4000-8000-000000000003", "2026-11-08T14:15:00.000Z");
+  const velha = jit("a0000000-0000-4000-8000-000000000004", "2026-11-02T14:15:00.000Z");
+  const ordem = model.reportableSessions([velha, anteontem, replay, marcada, ontem], agora);
+
+  assert.deepEqual(ordem.map((session) => session.id), [marcada.id, ontem.id, anteontem.id, replay.id], "a de 8 dias fica fora");
+  assert.equal(model.defaultReportSessionId(ordem), ontem.id, "a padrao e a hora mais recente que ja comecou");
+  assert.equal(model.REPORT_JIT_DAYS, 7);
+});
+
+test("a lista por aluno da sessao gravada (§3.4.1): a coluna Oferta clicada com a variante, '—' sem clique; na Live ao vivo, sem a coluna", () => {
+  const markup = html(createElement(WebinarReportView, { page: paginaV4({ offerClicked: { [ALUNA]: "B" } }) }));
+  const tabela = markup.slice(markup.indexOf('id="webinario-relatorio-alunos"'));
+  const texto = textOf(tabela);
+  assert.match(texto, /Enquetes Oferta clicada Pontuação/, "antes da Pontuacao, como no Attendee do Zoom");
+  assert.match(tabela, /<td[^>]*>B<\/td>/, "a aluna clicou na variante B");
+  assert.match(tabela, /<td[^>]*>—<\/td>/, "o aluno sem clique fica com '—'");
+
+  const aoVivo = textOf(html(createElement(WebinarReportView, { page: paginaV4({ offerClicked: null }) })));
+  assert.doesNotMatch(aoVivo, /Oferta clicada/);
+});
+
+test("o bloco Vagas (§3.4): com quem garantiu vaga e nao veio, 'Avisar quem não veio' abre o aviso novo com a regra do webinário; sem faltosos, nada", () => {
+  const comFaltosos = { ...viewV4, registration: { ...viewV4.registration, absent: 2 } };
+  const markup = html(createElement(WebinarReportView, { page: paginaV4({ report: comFaltosos }) }));
+  const vagas = markup.slice(markup.indexOf('aria-labelledby="webinario-relatorio-vagas"'));
+  const href = `/admin/comunicacao/avisos/novo?webinario=${WEBINAR_ID}&amp;seguimento=registered%2Cnao-attended`;
+  assert.ok(vagas.includes(`href="${href}"`), "o link com as duas regras");
+  assert.match(textOf(vagas), /> Vagas Garantir vaga Avisar quem não veio Vagas garantidas/);
+
+  const semFaltosos = html(createElement(WebinarReportView, { page: paginaV4({ report: { ...viewV4, registration: { ...viewV4.registration, absent: 0 } } }) }));
+  assert.doesNotMatch(textOf(semFaltosos), /Avisar quem não veio/);
 });

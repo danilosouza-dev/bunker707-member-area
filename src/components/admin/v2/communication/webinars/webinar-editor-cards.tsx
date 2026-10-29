@@ -38,10 +38,12 @@ import { ProductPicker } from "../../storefront/product-picker";
 import { AudienceBuilder, AudienceCount, type AudienceCountState } from "../audience-builder";
 import { DateTimeField } from "../notice-when-fields";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import { JitCard, type JitCardProps } from "./jit/jit-card";
 
 // Cards do editor do webinario que nao dependem do estado do editor alem do rascunho (docs/30 §2.2): Sessoes,
 // Quem pode, Vaga e lembretes, Avisar, Sala, Qualidade, Gravacao e Publicar replay como aula. O card Dados fica
-// no editor (precisa do envio da capa e da equipe). Cada campo tem id "webinar-<campo>" para o foco do erro.
+// no editor (precisa do envio da capa e da equipe). Cada campo tem id "webinar-<campo>" para o foco do erro. Fase 4e:
+// o card Sessoes termina com o "Comeca quando voce entra" (jit/jit-card.tsx), que salva as proprias regras.
 
 export type CardProps = {
   disabled: boolean;
@@ -168,6 +170,8 @@ export type ReplayControl = {
 };
 
 type SessionsCardProps = CardProps & {
+  /** Fase 4e: o "Comeca quando voce entra" (as regras gravadas e quem decide); sem ele, o bloco nao aparece. */
+  jit?: JitCardProps | null;
   /** Nulo enquanto o webinario nao foi gravado (sem id): o Replay livre e os consoles aparecem depois do primeiro salvar. */
   replay: ReplayControl | null;
   /** As sessoes gravadas, para a situacao e o link do console de cada hora marcada. */
@@ -175,10 +179,13 @@ type SessionsCardProps = CardProps & {
   webinarId: string | null;
 };
 
-export function SessionsCard({ disabled, draft, errorFor, now, onBlur, onChange, replay, savedSessions, webinarId }: SessionsCardProps) {
+export function SessionsCard({ disabled, draft, errorFor, jit = null, now, onBlur, onChange, replay, savedSessions, webinarId }: SessionsCardProps) {
   const sessions = draft.sessions;
   const listError = errorFor("sessions");
-  const savedByTime = new Map(savedSessions.filter((session) => session.kind === "simulated" && session.status !== "cancelled").map((session) => [toTime(session.scheduledAt), session]));
+  // As sessoes do "Comeca quando voce entra" nunca entram aqui (a lista e das horas marcadas).
+  const savedByTime = new Map(
+    savedSessions.filter((session) => session.kind === "simulated" && session.status !== "cancelled" && !session.jit).map((session) => [toTime(session.scheduledAt), session])
+  );
 
   function update(index: number, patch: Partial<WebinarDraft["sessions"][number]>) {
     const next = sessions.map((session, position) => (position === index ? { ...session, ...patch } : session));
@@ -310,7 +317,7 @@ export function SessionsCard({ disabled, draft, errorFor, now, onBlur, onChange,
           ) : null}
         </div>
       ) : null}
-      <SoonRow label={copy.justInTime} />
+      {jit ? <JitCard {...jit} /> : null}
     </div>
   );
 }

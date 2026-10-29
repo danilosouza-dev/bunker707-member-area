@@ -667,7 +667,7 @@ test("retencao: so o video do nosso gravador (source jibri) e apagado na Bunny; 
  * Migracao pendente, frases, o job e o cliente da Bunny
  * ---------------------------------------------------------------------------------------------- */
 
-test("banco sem a migracao 202610290003 (o aviso aponta a mais nova, a 202610300001): zeros, pendingMigration e o log da migracao", async () => {
+test("banco sem a migracao mais nova (WEBINARS_MIGRATION: a 202610300001 pela ordem dos arquivos; a fase 4 exige tambem a 0008): zeros, pendingMigration e o log da migracao", async () => {
   const comAdaptador = escola();
   comAdaptador.falhar("webinar_sessions", "select", { code: "42703", message: "column webinar_sessions.recorder_status does not exist" });
   const result = await rodar(comAdaptador, HORA_MARCADA - 10 * MIN, { bunny: bunnyFalsa(), dispatcher: fakeRecorderDispatcher([]) });
@@ -708,7 +708,7 @@ test("o job: nome, registro depois dos lembretes e as contagens em job_runs quan
   assert.equal(webinarRecordingsJob.name, WEBINAR_RECORDINGS_JOB_NAME);
   assert.match(webinarRecordingsJob.name, /^[a-z0-9][a-z0-9-]{0,119}$/);
   const registry = readFileSync(new URL("../src/server/jobs/registry.ts", import.meta.url), "utf8");
-  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, webinarRecordingsJob, communicationMediaJob\]/);
+  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob\]/);
   assert.match(registry, /- `webinar-recordings` \(/, "a linha no comentario dos jobs registrados");
 
   const env = { ...process.env };

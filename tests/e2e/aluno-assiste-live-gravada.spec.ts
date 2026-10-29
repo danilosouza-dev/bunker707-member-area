@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, paginaFalsaPlayerJs, test } from "./fixtures";
 import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveGravadaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
+import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 
 // Webinarios, fase 2a (docs/30 §1.6, §6.6, §8.5, §9 e §10.2): a aluna entra na Live gravada 90 s depois do inicio
 // pela pagina da live (Entrar), o player falso da Bunny (servido no endereco real pela pagina falsa) recebe
@@ -9,6 +10,9 @@ import { createLocalAdminClient } from "../support/local-db.mjs";
 // chega; a de 20 min nao), a mensagem nova aparece numa segunda aba pela consulta de 5 s depois do aceite
 // (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. A IA Diretor fica
 // na pagina da live e some na sala (o botao flutuante cobria o X da pilula), e o cabecalho da sala tem a logo da escola.
+// Fase 4d (docs/30 §1.6 e §6.6): com o celular em pe (375 x 740) a sala abre na Sala Live vertical 9:16 (o video
+// cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
+// deitado, volta ao desenho normal com as abas, sem trocar de sala.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
@@ -121,31 +125,52 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 });
 
-test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura, as reacoes tem 44 px e o campo fica no rodape; o X da pilula fecha a sala", async ({ page }) => {
+test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; deitado, volta ao desenho normal; o X da pilula fecha a sala", async ({ page }) => {
+  const sala = WEBINAR_COPY.sala;
+  const vertical = WEBINAR_COPY.vertical;
   await page.setViewportSize({ height: 740, width: 375 });
-  const sala = await entrarNaSala(page);
-  await expect(sala.getByRole("tab", { name: "Chat" })).toBeVisible();
+  const dialogo = await entrarNaSala(page);
+  await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
 
   const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
   expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
 
-  const palco = await sala.locator("[data-room-stage]").boundingBox();
+  const palco = await dialogo.locator("[data-room-stage]").boundingBox();
   expect(palco?.width).toBeGreaterThanOrEqual(360);
 
-  const reagir = sala.getByRole("button", { exact: true, name: "Palmas" });
-  const caixa = await reagir.boundingBox();
+  // O rodape compacto: o campo (o mesmo nome do chat) e Reagir abrindo a fileira das seis reacoes, 44 px cada.
+  await expect(dialogo.getByRole("textbox", { name: sala.escreva })).toBeInViewport();
+  const reagir = dialogo.getByRole("button", { exact: true, name: sala.reagir });
+  const caixaDoReagir = await reagir.boundingBox();
+  expect(caixaDoReagir?.height).toBeGreaterThanOrEqual(44);
+  await reagir.click();
+  const palmas = dialogo.getByRole("button", { exact: true, name: "Palmas" });
+  const caixa = await palmas.boundingBox();
   expect(caixa?.height).toBeGreaterThanOrEqual(44);
   expect(caixa?.width).toBeGreaterThanOrEqual(44);
 
-  await expect(sala.getByRole("textbox", { name: "Escreva uma mensagem" })).toBeInViewport();
-  await sala.getByRole("button", { exact: true, name: "Minimizar" }).click();
+  // A gaveta: o chat inteiro, Perguntas e Enquetes; Voltar para o video fecha.
+  await dialogo.getByRole("button", { exact: true, name: vertical.gaveta }).click();
+  const gaveta = dialogo.getByRole("region", { name: vertical.gavetaRotulo });
+  await expect(gaveta.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
+  await gaveta.getByRole("button", { exact: true, name: vertical.voltarAoVideo }).click();
+  await expect(gaveta).toHaveCount(0);
+
+  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
   await expect(page.getByTestId("room-pill")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
-  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Voltar" }).click();
-  await expect(sala.getByRole("tab", { name: "Chat" })).toBeVisible();
+  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: sala.voltar }).click();
+  await expect(dialogo.getByRole("textbox", { name: sala.escreva })).toBeVisible();
 
-  // O X da pilula (Sair) fica no canto de baixo, onde ficava a IA Diretor: o clique chega nele e fecha a sala.
-  await sala.getByRole("button", { exact: true, name: "Minimizar" }).click();
+  // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
+  await page.setViewportSize({ height: 375, width: 740 });
+  await expect(dialogo).toHaveAttribute("data-room-design", "normal");
+  await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
+
+  // De volta a 375 px em pe: o X da pilula (Sair) fica no canto de baixo, onde ficava a IA Diretor: o clique chega
+  // nele e fecha a sala.
+  await page.setViewportSize({ height: 740, width: 375 });
+  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
   await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Sair" }).click();
   await expect(page).toHaveURL(`/webinarios/${slug}`);
   await expect(page.getByTestId("room-pill")).toHaveCount(0);

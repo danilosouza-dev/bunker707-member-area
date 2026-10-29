@@ -4,7 +4,8 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // O relatorio da sessao, a parte pura (docs/30 §3.4 e §4.6): as linhas da RPC lidas sem confiar no formato (bigint
 // como texto), a visao montada (as mesmas linhas que a webinar_report devolveu no Postgres local com dados
-// sinteticos), os ids para a segunda leitura dos nomes e os rotulos.
+// sinteticos), os ids para a segunda leitura dos nomes e os rotulos; da fase 4, as linhas da Oferta (offer, offer_revenue),
+// das Respostas do Assistente (ai) e do bloco Simulacao (sim_*), que so entram em `simulation` e `script`.
 
 const report = await import("../src/server/webinars/report-model.ts");
 
@@ -117,4 +118,62 @@ test("rotulos: balde em mm:ss, tempo assistido, porcentagem e alunos", () => {
   assert.equal(report.studentsLabel(0), "ninguém");
   assert.equal(report.studentsLabel(1), "1 aluno");
   assert.equal(report.studentsLabel(12), "12 alunos");
+});
+
+// Fase 4 (202610290005 e 202610290006): a Oferta, as Respostas do Assistente e o bloco Simulacao como a RPC devolveu
+// na conferencia das migracoes (bigint como texto; uma variante sem compra; duas moedas).
+const RPC_V4 = [
+  { metric: "offer", item: "seen", total: "4", students: "3" },
+  { metric: "offer", item: "clicks", total: 3, students: 2 },
+  { metric: "offer", item: "purchases", total: 1, students: 1 },
+  { metric: "offer", item: "B:seen", total: 2, students: 2 },
+  { metric: "offer", item: "A:seen", total: 1, students: 1 },
+  { metric: "offer", item: "B:clicks", total: 2, students: 1 },
+  { metric: "offer", item: "B:purchases", total: 1, students: 1 },
+  { metric: "offer", item: "Z:seen", total: 9, students: 9 },
+  { metric: "offer", item: "B:abriu", total: 9, students: 9 },
+  { metric: "offer_revenue", item: "USD", total: 5000, students: 1 },
+  { metric: "offer_revenue", item: "BRL", total: "197000", students: "2" },
+  { metric: "offer_revenue", item: "reais", total: 1, students: 1 },
+  { metric: "ai", item: "replies", total: 5, students: 0 },
+  { metric: "ai", item: "avg_seconds", total: 7, students: 4 },
+  { metric: "ai", item: "edited", total: 1, students: 0 },
+  { metric: "ai", item: "deleted", total: 2, students: 0 },
+  { metric: "ai", item: "handoffs", total: 3, students: 0 },
+  { metric: "sim_counter", item: "max", total: 240, students: 0 },
+  { metric: "sim_joins", item: "shown", total: 18, students: 0 },
+  { metric: "sim_sales", item: "shown", total: 2, students: 0 }
+];
+
+test("fase 4: a Oferta (sessao, variantes A a D na ordem, receita por moeda), as Respostas do Assistente e o resumo da Simulacao", () => {
+  const view = report.buildWebinarReport(report.readWebinarReportRows(RPC_V4));
+
+  assert.equal(view.offer.present, true);
+  assert.deepEqual(view.offer.seen, { students: 3, total: 4 });
+  assert.deepEqual(view.offer.clicks, { students: 2, total: 3 });
+  assert.deepEqual(view.offer.purchases, { students: 1, total: 1 });
+  assert.deepEqual(view.offer.variants, [
+    { clicks: { students: 0, total: 0 }, label: "A", purchases: { students: 0, total: 0 }, seen: { students: 1, total: 1 } },
+    { clicks: { students: 1, total: 2 }, label: "B", purchases: { students: 1, total: 1 }, seen: { students: 2, total: 2 } }
+  ], "letra fora de A a D e parte desconhecida ficam de fora");
+  assert.deepEqual(view.offer.revenue, [
+    { cents: 197000, currency: "BRL", sales: 2 },
+    { cents: 5000, currency: "USD", sales: 1 }
+  ]);
+  assert.deepEqual(view.assistant, { avgSeconds: 7, deleted: 2, edited: 1, handoffs: 3, present: true, replies: 5 });
+  assert.deepEqual(view.simulation, { counterMax: 240, joinsShown: 18, saleNoticesShown: 2 });
+  assert.equal(view.presence.unique, 0, "nada simulado entra num numero real");
+
+  const sem = report.buildWebinarReport(report.readWebinarReportRows(RPC_ROWS));
+  assert.equal(sem.offer.present, false, "sessao sem oferta: o bloco nao aparece");
+  assert.equal(sem.assistant.present, false);
+  assert.deepEqual(sem.simulation, { counterMax: null, joinsShown: null, saleNoticesShown: null });
+  assert.equal(report.buildWebinarReport([{ item: "avg_seconds", metric: "ai", students: 0, total: 0 }]).assistant.avgSeconds, null, "sem resposta respondida, sem media");
+});
+
+test("a receita escrita (M8): uma por moeda; sem venda com valor, nulo (a tela e o CSV mostram '—')", () => {
+  assert.equal(report.revenueLabel([{ cents: 197000, currency: "BRL", sales: 2 }]).replace(/\s/g, " "), "R$ 1.970,00");
+  assert.match(report.revenueLabel([{ cents: 197000, currency: "BRL", sales: 2 }, { cents: 5000, currency: "USD", sales: 1 }]), /R\$\s1\.970,00 · US\$\s50,00/);
+  assert.equal(report.revenueLabel([]), null);
+  assert.equal(report.revenueLabel([{ cents: 0, currency: "BRL", sales: 0 }]), null);
 });

@@ -14,6 +14,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 // cabecalho (a sala cobre o topo da area): a logo de Marca a partir de lg (o ponto em que a sala vira computador),
 // "Bunker707" sem logo, o Icone da escola de 24 px abaixo de lg, sem link; e o "Ao vivo · 00:42:10" curto no celular da
 // Live ao vivo.
+// Fase 4d: sem o celular em pe (deitado, tablet, computador e a primeira pintura do servidor) a sala continua no
+// desenho normal, igual a antes; as caixas novas do esqueleto (bolhas, aviso de venda, doca e lugar da Oferta) sao
+// `contents` e nao mudam nada na tela. O desenho vertical e testado em tests/webinarios-sala-vertical-*.test.mjs.
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
 const branding = await import("../src/components/platform-branding.tsx");
@@ -303,6 +306,22 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas 
 
   const preview = render(room.WebinarRoom, { coverUrl: null, payload: payload(), readOnly: true, webinarHref: "/x" });
   assert.match(preview, /No modo de visualização, nada é gravado\./);
+});
+
+test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura sao o normal; as caixas novas sao contents; o card da Oferta e o aviso de venda no palco", () => {
+  const html = render(room.WebinarRoom, { coverUrl: null, payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" });
+  assert.match(html, /data-room-design="normal"/, "sem o celular em pe (e no servidor), o desenho normal");
+  assert.equal(html, render(room.WebinarRoom, { coverUrl: null, design: "normal", payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" }), "o normal forcado e o mesmo");
+  // A marca no cabecalho (PR #137) poe os preloads das imagens da marca antes do dialogo.
+  assert.match(html, /^(?:<link rel="preload" as="image" href="[^"]+"\/>)*<div aria-label="Aula de IA" aria-modal="true" class="z-\[60\] text-white fixed inset-0 flex flex-col bg-\[#0b0b0b\]"/, "o dialogo como era");
+  assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
+  assert.match(html, /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute bottom-3 right-3/, "as bolhas no canto do palco");
+  assert.match(html, /<div class="contents" data-room-slot="sales">/);
+  assert.match(html, /<div class="contents" data-room-slot="dock"><div class="contents" data-room-slot="offer"><p aria-live="polite" class="sr-only" data-room-offer-announce="">/, "o card da Oferta no canto do palco (layout stage)");
+  assert.match(html, /<header class="flex h-12/, "o cabecalho de sempre");
+  assert.match(html, /data-testid="room-panel"/);
+  assert.match(html, /role="group"><button aria-label="Curtir"/, "a barra de reacoes embaixo do palco");
+  assert.doesNotMatch(html, /data-room-vertical|data-room-drawer|Comente…|Perguntas e enquetes/, "nada do desenho vertical");
 });
 
 test("Entrar e Assistir o replay na pagina da live: link para a sala dentro da janela, a frase fora dela, em breve na Live ao vivo sem a sala neste ambiente (liveRoomConfigured falso) e sem replay", () => {

@@ -3,7 +3,10 @@
 // para a pagina mostrar <PendingMigrationNotice migration={WEBINARS_MIGRATION} /> enquanto o banco nao tem as
 // tabelas. Sao poucos webinarios: a lista filtra e pagina em memoria, como o store faz. Fase 3: o editor recebe a
 // sessao `live` (situacao e gravador, webinarLiveSessionOf) e as sessoes sem o nome da sala (webinarScreenSession):
-// tudo daqui vira props de componente cliente, e o `room_name` nunca sai do servidor (docs/30 §8.1).
+// tudo daqui vira props de componente cliente, e o `room_name` nunca sai do servidor (docs/30 §8.1). Fase 4e: as
+// sessoes do "Comeca quando voce entra" (`jit`) nunca entram na lista, nos numeros do periodo nem nas sessoes do
+// editor (o card Sessoes recebe as regras e as que nasceram hoje, loadJitEditorData); o relatorio, o painel e o
+// console tratam a lista longa delas nas telas deles.
 
 import "server-only";
 
@@ -30,11 +33,15 @@ import {
   type WebinarTone
 } from "./editor-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
+import { isJitSession } from "./jit-model";
+import { loadJitEditorData, type JitSessionSummary } from "./jit-queries";
 import {
   TRANSCRIPT_FORMATS,
+  defaultJitSettings,
   nextSession,
   toTime,
   webinarSituation,
+  type JitSettings,
   type Poll,
   type ScriptItem,
   type WebinarDraft,
@@ -233,7 +240,8 @@ export async function listWebinarsForAdmin(input: {
   const rows = await listWebinarRows(db);
   const ids = rows.map((row) => row.id);
   const [sessionRows, registered, names] = await Promise.all([listSessionRows(db, ids), countRegistrationsByWebinar(db, ids), loadCreatorNames(db, rows.map((row) => row.created_by))]);
-  const sessions = groupSessions(sessionRows);
+  // As sessoes do "Comeca quando voce entra" nao contam na lista nem nos numeros (uma por horario, o dia todo).
+  const sessions = groupSessions(sessionRows.filter((row) => !isJitSession(row)));
   const all = rows.map((row) => toListItem(row, { names, now, registered, sessions }));
   const filters = input.filters ?? {};
   const filtered = all.filter(
@@ -286,6 +294,10 @@ export type WebinarEditorData = {
   deciderNames: Record<string, string>;
   draft: WebinarDraft;
   id: string;
+  /** Fase 4e: as regras do "Comeca quando voce entra" (o padrao, desligado, na Live ao vivo). */
+  jit: JitSettings;
+  /** Fase 4e: as sessoes `jit` que nasceram hoje (dia de Sao Paulo), para o card Sessoes. */
+  jitSessionsToday: JitSessionSummary[];
   /** Fase 3: a sessao `live` da Live ao vivo (situacao e gravador, para o card Gravacao); nunca o nome da sala. */
   liveSession: WebinarLiveSessionSummary | null;
   /** Os modelos de enquete (sem sessao); as copias lancadas ficam no console. */
@@ -313,10 +325,13 @@ export function baseRecordingOf(recordings: readonly RecordingRow[]): RecordingR
   return recordings.find((recording) => recording.session_id === null && recording.source === "bunny") ?? recordings.find((recording) => recording.session_id === null) ?? null;
 }
 
-/** As horas marcadas da Live gravada que o editor edita: sessoes `simulated` ainda nao canceladas, com a Entrada atrasada. */
+/**
+ * As horas marcadas da Live gravada que o editor edita: sessoes `simulated` ainda nao canceladas, com a Entrada
+ * atrasada; as do "Comeca quando voce entra" (`jit`) nunca (nascem quando o aluno chega).
+ */
 export function draftSessionsOf(sessions: readonly WebinarSession[]): { lateJoinMinutes: number | null; scheduledAt: string }[] {
   return sessions
-    .filter((session) => session.kind === "simulated" && session.status !== "cancelled")
+    .filter((session) => session.kind === "simulated" && session.status !== "cancelled" && !isJitSession(session))
     .sort((left, right) => toTime(left.scheduledAt) - toTime(right.scheduledAt))
     .map((session) => ({ lateJoinMinutes: session.lateJoinMinutes, scheduledAt: session.scheduledAt }));
 }
@@ -339,19 +354,19 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     listSessionRows(db, [row.id]),
     countRegistrationsByWebinar(db, [row.id])
   ]);
-  // As sessoes saem daqui ja sem o nome da sala: o editor e os cards sao componentes cliente.
-  const sessions = sessionRows.map((sessionRow) => webinarScreenSession(sessionFromRow(sessionRow)));
+  // As sessoes saem daqui ja sem o nome da sala: o editor e os cards sao componentes cliente. As `jit` ficam fora (o
+  // card Sessoes recebe so as de hoje, abaixo).
+  const sessions = sessionRows.filter((sessionRow) => !isJitSession(sessionRow)).map((sessionRow) => webinarScreenSession(sessionFromRow(sessionRow)));
   const recording = baseRecordingOf(recordings);
   const webinar = webinarFromRow(row, presenters, recording);
   const simulated = webinar.kind === "simulated";
+  const jitData = simulated ? await loadJitEditorData(db, row.id, now) : null;
+  const jit = jitData?.settings ?? defaultJitSettings();
   const [scriptRows, transcriptRow, pollRows, deciderNames] = await Promise.all([
     simulated ? listScriptItemRows(db, row.id) : Promise.resolve([]),
     simulated && recording ? fetchTranscriptRow(db, recording.id) : Promise.resolve(null),
     listPollRows(db, { sessionId: null, webinarId: row.id }),
-    loadCreatorNames(
-      db,
-      sessions.map((session) => session.simulationDecidedBy)
-    )
+    loadCreatorNames(db, [...sessions.map((session) => session.simulationDecidedBy), jit.simulation?.decidedBy ?? null])
   ]);
 
   return {
@@ -361,6 +376,8 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     deciderNames: Object.fromEntries(deciderNames),
     draft: { ...webinarDraftOf(webinar), sessions: draftSessionsOf(sessions) },
     id: webinar.id,
+    jit,
+    jitSessionsToday: jitData?.sessionsToday ?? [],
     liveSession: webinar.kind === "live" ? webinarLiveSessionOf(sessions) : null,
     polls: pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options)),
     publishedAt: webinar.publishedAt,

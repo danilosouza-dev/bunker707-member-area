@@ -14,6 +14,13 @@
 > publicar nem editar pop-ups "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao
 > de antes** (R1). Passos na secao 9.5.
 >
+> **Atualização de 29/10/2026:** a fase 4 dos webinários traz cinco migrações (`202610290004`, `0005`, `0006`,
+> `0008` e `0009`; a `0007` não existe), aplicadas nessa ordem antes do merge na `dev`: o app novo lê
+> `webinar_sessions.jit` em toda leitura de sessão. A revisão da fase 4 trouxe a sexta, `202610290010` (ajustes),
+> também antes do merge. **Nenhuma das seis foi aplicada ainda, em lugar nenhum** (corrigido em 30/10/2026: um texto
+> anterior dizia que o produtor já tinha rodado as cinco primeiras na nuvem de teste, o que não aconteceu). Passos e
+> consultas de conferência na seção 9.10.
+>
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
 > `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
@@ -593,3 +600,133 @@ plpgsql, `security invoker`, retorno `TABLE(user_id uuid, registered uuid[], att
 `execute` e `service_role` com; `select count(*) from public.communication_webinar_facts()` roda; o check
 `webinars_access_mode_check` com os quatro modos de antes. Se a migracao mudar antes do merge, aplicar de novo a secao
 que mudou do mesmo jeito.
+
+### 9.10 Webinários v4: migrações `202610290004` a `202610290010`, nenhuma aplicada ainda (29/10/2026; corrigido em 30/10/2026)
+
+> **Correção (30/10/2026, na integração com a `dev`):** uma versão anterior desta seção dizia que o produtor já tinha
+> rodado o SQL da fase 4 (`0004` a `0009`) na nuvem de teste. **Isso é falso: nenhuma migração da fase 4 foi aplicada
+> em lugar nenhum** (nem na nuvem de teste, nem na produção). As seis (`0004`, `0005`, `0006`, `0008`, `0009` e
+> `0010`) ainda estão por aplicar, na ordem, antes do merge. A renumeração delas para depois da `202610300001` (§9.9,
+> que já está na nuvem de teste) vem na fase seguinte da integração; até lá os números abaixo são os de agora.
+
+A fase 4 "Painéis e Hot Webinar" (`docs/30` §11) vem na mesma PR com cinco migrações, uma por parte, todas aditivas e
+idempotentes, sem `drop`, `delete` nem política, cada uma com a guarda própria que fixa o hash do arquivo e confere byte
+a byte as de antes (`tests/webinarios-v4a.guard.test.mjs` … `-v4f.guard`). A 4d (Sala Live vertical) não tem dado novo:
+a `202610290007` **não existe de propósito**. Aplicar **nesta ordem**, todas **antes do merge na `dev`** (a Vercel
+publica a `dev` sozinha):
+
+| Ordem | Arquivo | Seções | Nome em `schema_migrations` |
+|---|---|---|---|
+| 1 | `202610290004_webinars_v4a_paineis.sql` | 3: o índice `webinar_sessions_kind_scheduled_idx` → a função `webinar_panel` → as permissões | `webinars_v4a_paineis` |
+| 2 | `202610290005_webinars_v4b_ofertas.sql` | 9: `webhook_events.amount_cents` / `currency` → `webinar_offers` e `webinar_offer_variants` → `webinar_offer_displays` e `webinar_offer_clicks` → as colunas da Simulação em `webinar_sessions` → `webinar_offer_variant` e `webinar_offer_conversions` → `webinar_follow_up_facts` → `webinar_report` recriada → `webinar_panel` recriada → as permissões | `webinars_v4b_ofertas` |
+| 3 | `202610290006_webinars_v4c_assistente.sql` | 7: `webinars.assistant_settings` e `webinar_sessions.assistant_reply_all` → `webinar_assistant_knowledge` → `webinar_attendants` → as colunas de atendimento em `webinar_questions` e `webinar_chat_messages` → `webinar_ai_requests` → `webinar_report` recriada → as permissões | `webinars_v4c_assistente` |
+| 4 | `202610290008_webinars_v4e_just_in_time.sql` | 4: `webinars.jit_settings` → `webinar_sessions.jit` e o índice único do horário → `webinar_chat_window` recriada → as permissões | `webinars_v4e_just_in_time` |
+| 5 | `202610290009_webinars_v4f_traducao.sql` | 3: `webinar_viewer_prefs` → `webinar_text_translations` → `webinar_chat_messages.language` | `webinars_v4f_traducao` |
+| 6 | `202610290010_webinars_v4_ajustes.sql` | 6: `webinar_offer_seen` (e o congelado das sessões já encerradas) → `webinar_close_session` recriada → `webinar_offer_conversions` recriada → `webinar_follow_up_facts` recriada → `webinar_report` e `webinar_panel` recriadas → as permissões | `webinars_v4_ajustes` |
+
+**Por que antes do merge**: o app novo lê `webinar_sessions.jit` em toda leitura de sessão (a `202610290008`) e
+`webinars.audience_restricts` em toda leitura de webinário (a `202610300001`, §9.9); `WEBINARS_MIGRATION` em
+`src/server/webinars/db.ts` aponta, por enquanto, a `202610300001`, a mais nova pela ordem dos arquivos (provisório, até a
+renumeração). Sem as migrações até a 0008, as páginas de webinário do aluno e do admin
+mostram o aviso de migração pendente (o resto do app segue); cada parte tem a própria constante
+(`WEBINARS_PANELS_MIGRATION` 0004, `WEBINARS_OFFERS_MIGRATION` 0005, `WEBINARS_ASSISTANT_MIGRATION` 0006,
+`WEBINARS_JIT_MIGRATION` 0008, `WEBINARS_TRANSLATION_MIGRATION` 0009), e o aviso aponta a que falta; os jobs novos
+(`webinar-simulation-summaries` e `webinar-offer-conversions`) registram a migração pendente e terminam sem erro. As
+migrações sozinhas não atrapalham o app de antes: colunas novas com padrão ou nulas, tabelas e funções que ele não lê,
+`webinar_report`, `webinar_panel` e `webinar_chat_window` com as mesmas assinaturas e o corpo de antes dentro do novo.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**, duas formas (as duas valem, porque os arquivos são idempotentes):
+
+1. pelo MCP do Supabase, `execute_sql`, **uma seção por chamada e na ordem do arquivo**, cada uma começando com
+   `set lock_timeout = '5s';`, arquivo por arquivo na ordem da tabela; ou
+2. o arquivo inteiro no SQL Editor, um de cada vez, na ordem da tabela (é o caminho quando o MCP pede confirmação e a
+   janela expira, como na 9.7 e na 9.8).
+
+Depois de cada arquivo, gravar a versão (uma linha por arquivo, com o nome da tabela acima):
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values
+  ('202610290004', 'webinars_v4a_paineis'),
+  ('202610290005', 'webinars_v4b_ofertas'),
+  ('202610290006', 'webinars_v4c_assistente'),
+  ('202610290008', 'webinars_v4e_just_in_time'),
+  ('202610290009', 'webinars_v4f_traducao'),
+  ('202610290010', 'webinars_v4_ajustes')
+on conflict (version) do nothing;
+```
+
+e conferir `list_migrations` (as seis versões, sem a `202610290007`).
+
+Conferência depois de aplicar (as consultas do cabeçalho de cada migração):
+
+```sql
+-- 0004
+select indexname from pg_indexes where schemaname = 'public' and indexname = 'webinar_sessions_kind_scheduled_idx'; -- 1 linha
+select pg_get_function_identity_arguments('public.webinar_panel'::regproc); -- p_kind text, p_start timestamp with time zone, p_end timestamp with time zone, p_session_ids uuid[]
+select has_function_privilege('authenticated', 'public.webinar_panel(text, timestamptz, timestamptz, uuid[])', 'execute'); -- false
+select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
+-- 0005
+select column_name from information_schema.columns where table_name = 'webhook_events' and column_name in ('amount_cents', 'currency'); -- 2 linhas
+select table_name from information_schema.tables where table_schema = 'public' and table_name like 'webinar_offer%' order by 1; -- 4 linhas
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and (column_name like 'simulat%' or column_name = 'simulation_seed') order by 1; -- 8 linhas (3 da fase 2 + 5)
+select proname from pg_proc where proname in ('webinar_offer_variant', 'webinar_offer_conversions', 'webinar_follow_up_facts') order by 1; -- 3 linhas
+select has_function_privilege('authenticated', 'public.webinar_offer_conversions(timestamptz, integer)', 'execute'); -- false
+select count(*) from public.webinar_panel('simulated', now() - interval '30 days', now()); -- roda sem erro
+-- 0006
+select column_name from information_schema.columns where table_name = 'webinars' and column_name = 'assistant_settings'; -- 1 linha
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and column_name = 'assistant_reply_all'; -- 1 linha
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_assistant_knowledge', 'webinar_attendants', 'webinar_ai_requests') order by 1; -- 3 linhas
+select column_name from information_schema.columns where table_name = 'webinar_questions'
+  and column_name in ('assigned_to', 'assigned_at', 'answer_source', 'handoff_requested_at'); -- 4 linhas
+select column_name from information_schema.columns where table_name = 'webinar_chat_messages'
+  and column_name in ('assigned_to', 'assigned_at', 'handoff_requested_at', 'edited_at', 'edited_by'); -- 5 linhas
+select count(*) from public.webinar_report(gen_random_uuid()); -- 0
+-- 0008
+select column_name from information_schema.columns where table_name = 'webinars' and column_name = 'jit_settings'; -- 1 linha
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and column_name = 'jit'; -- 1 linha
+select indexname from pg_indexes where schemaname = 'public' and indexname = 'webinar_sessions_jit_slot_idx'; -- 1 linha
+select count(*) from public.webinar_chat_window(gen_random_uuid(), 0, 120000, null); -- 0
+-- 0009
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_viewer_prefs', 'webinar_text_translations') order by 1; -- 2 linhas
+select column_name from information_schema.columns where table_name = 'webinar_chat_messages' and column_name = 'language'; -- 1 linha
+select has_table_privilege('authenticated', 'public.webinar_text_translations', 'select'); -- false
+-- 0010
+select table_name from information_schema.tables where table_schema = 'public' and table_name = 'webinar_offer_seen'; -- 1 linha
+select relrowsecurity from pg_class where relname = 'webinar_offer_seen'; -- true
+select has_table_privilege('authenticated', 'public.webinar_offer_seen', 'select'); -- false
+select count(*) from public.webinar_report(gen_random_uuid()); -- 0
+select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
+select public.webinar_offer_conversions(now(), 1); -- roda sem erro
+```
+
+E das regras de acesso: `select relname, relrowsecurity from pg_class where relname in ('webinar_offers',
+'webinar_offer_variants', 'webinar_offer_displays', 'webinar_offer_clicks', 'webinar_assistant_knowledge',
+'webinar_attendants', 'webinar_ai_requests', 'webinar_viewer_prefs', 'webinar_text_translations')` (9 × `true`). A
+idempotência se confere rodando de novo a seção 1 de qualquer um dos arquivos (sem erro, nada muda).
+
+Estado em 30/10/2026: **nenhuma** migração da fase 4 foi aplicada, nem na nuvem de teste (onde só está a
+`202610300001` do §9.9) nem na produção. A revisão da fase 4 não mexeu nos arquivos de `0004` a `0009` (as guardas
+fixam o hash acumulado): os ajustes vieram na `202610290010`
+(o congelado de quem viu a oferta, a conversão pelo último clique entre todos e sem venda reembolsada, a receita e as
+compras sem reembolso, o "Falar com a equipe" contado uma vez), conferida num Postgres 16 local (rodada duas vezes e
+com os casos da revisão em transação desfeita); as seis faltam aplicar na nuvem de teste antes do merge, na ordem. O app
+não depende da 0010 para abrir (as funções têm as mesmas assinaturas); sem ela, os números ficam como antes da revisão. Antes do merge, conferir
+com `list_migrations` (as seis versões) e as consultas acima; se alguma versão faltar em `schema_migrations`, gravar
+com o `insert` acima. Antes disso, os números de `webinar_panel`, `webinar_report`, `webinar_offer_conversions`,
+`webinar_follow_up_facts`, `webinar_chat_window` (a turma do dia) e as tabelas do Assistente e da tradução foram
+conferidos num Postgres 16 local, com os dados dos testes de integração e `rollback`.
+
+Se uma migração mudar antes do merge (pedido da implementação ou da revisão): aplicar de novo o arquivo inteiro (ou só
+a seção que mudou) do mesmo jeito, na ordem, e atualizar junto o hash na guarda dela; as guardas das seguintes conferem
+o hash acumulado das anteriores e também mudam.
+
+**Ambiente**: o Assistente e a tradução ficam desligados sem `WEBINAR_ASSISTANT_ENABLED=on` e
+`WEBINAR_TRANSLATION_ENABLED=on` (variáveis do servidor, nunca `NEXT_PUBLIC_*`) e sem uma conexão de IA ativa em
+Configurações › IA; com as migrações aplicadas e as variáveis ausentes, o card Assistente diz que ele não está ligado
+neste ambiente, a sala mostra o chat como foi escrito (a escolha de idioma diz que a tradução não está ligada) e nada
+quebra.
+
+**Produção (Hetzner)**: nada manual. A promoção `dev` → `main` e o `deploy-membros` aplicam as migrações, na ordem dos
+nomes, antes de trocar o app. A fase 4 não cria servidor novo.

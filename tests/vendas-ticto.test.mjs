@@ -6,6 +6,10 @@ import "./support/resolve-extensionless-ts.mjs";
 // webhook 2.0 (payloads FICTICIOS, nenhum dado real), monta a chave de idempotencia sem id de evento,
 // confere o token do corpo em tempo constante, esconde o que e segredo ou dado pessoal demais no payload
 // guardado, e o modelo da tela rotula as situacoes da Ticto.
+//
+// Webinarios v4b (docs/30 M8): o valor pago. A Ticto manda `order.paid_amount` em centavos (inteiro), ou `item.amount`
+// sem ele; texto com casa decimal e lido na unidade da moeda; a moeda e BRL quando falta; o acesso e a chave de
+// idempotencia nao mudam com o valor.
 
 const ticto = await import("../src/server/payments/ticto.ts");
 const model = await import("../src/server/payments/model.ts");
@@ -46,6 +50,7 @@ test("compra aprovada: evento normalizado com comprador, produto, transacao e da
   const event = ticto.normalizeTictoEvent(compraAprovada());
 
   assert.deepEqual(event, {
+    amount: { cents: 19_700, currency: "BRL" },
     buyer: { email: "comprador.teste@bunker707.test", name: "Comprador de Teste", phone: "+55 11999990000" },
     eventId: "TPC-TESTE-0001:268:authorized:2026-10-17 09:00:14",
     externalProductId: "268",
@@ -283,4 +288,54 @@ test("a Ticto esta registrada como plataforma com adaptador; a Kiwify ainda nao;
   assert.equal(model.buildSalesWebhookUrl("https://app.exemplo.test", "ticto"), "https://app.exemplo.test/api/webhooks/ticto");
   assert.deepEqual(model.SALES_CODE_FIELDS, { hotmart: "hotmartProductId", kiwify: "kiwifyProductId", ticto: "tictoProductId" });
   assert.equal(model.summarizeSalesSetup([{ status: "configured", supported: true }, { status: "configured", supported: true }, { status: "not_configured", supported: false }]).label, "2 plataformas conectadas");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios v4b (docs/30 M8): o valor pago
+ * ---------------------------------------------------------------------------------------------- */
+
+test("valor: order.paid_amount em centavos (o pedido inteiro, com os bumps), em reais quando a Ticto nao manda a moeda", () => {
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada()).amount, { cents: 19_700, currency: "BRL" });
+  assert.deepEqual(
+    ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: 24_400, transaction_hash: "TPC-1" } })).amount,
+    { cents: 24_400, currency: "BRL" },
+    "com bump: o pedido inteiro"
+  );
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: "19700" } })).amount, { cents: 19_700, currency: "BRL" }, "texto so com digitos tambem e centavos");
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: "197.00" } })).amount, { cents: 19_700, currency: "BRL" }, "texto com casa decimal e em reais");
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: "197,50" } })).amount, { cents: 19_750, currency: "BRL" });
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: 0 } })).amount, { cents: 0, currency: "BRL" }, "pedido gratuito vale 0");
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1" } })).amount, { cents: 19_700, currency: "BRL" }, "sem paid_amount, o item.amount");
+});
+
+test("valor: a moeda do pedido ou do topo quando vem; invalida, valor ilegivel ou ausente de todo dao null", () => {
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ order: { currency: "usd", hash: "TOC-1", paid_amount: 4990 } })).amount, { cents: 4990, currency: "USD" });
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ currency: "EUR" })).amount, { cents: 19_700, currency: "EUR" });
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ currency: "R$" })).amount, null, "moeda presente e invalida nao vira BRL");
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: -100 } })).amount, null, "negativo");
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: "cento e noventa" } })).amount, null);
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ item: { product_id: 268 }, order: { hash: "TOC-1" } })).amount, null, "sem valor nenhum");
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-1", paid_amount: 1e12 } })).amount, null, "acima do teto do check");
+
+  assert.equal(ticto.tictoAmountCents(19_700), 19_700);
+  assert.equal(ticto.tictoAmountCents(" 19700 "), 19_700);
+  assert.equal(ticto.tictoAmountCents(197.5), 19_750, "numero quebrado e em reais");
+  assert.equal(ticto.tictoAmountCents(-1), null);
+  assert.equal(ticto.tictoAmountCents(null), null);
+  assert.equal(ticto.TICTO_DEFAULT_CURRENCY, "BRL");
+});
+
+test("valor: o acesso e a chave de idempotencia nao mudam com o valor (a lista do payload guardado continua a mesma)", () => {
+  const semAmount = (event) => Object.fromEntries(Object.entries(event).filter(([key]) => key !== "amount"));
+  const acesso = semAmount(ticto.normalizeTictoEvent(compraAprovada()));
+  const outroValor = semAmount(ticto.normalizeTictoEvent(compraAprovada({ currency: "USD", order: { ...compraAprovada().order, paid_amount: 1 } })));
+  const semValor = semAmount(ticto.normalizeTictoEvent(compraAprovada({ item: { ...compraAprovada().item, amount: undefined }, order: { ...compraAprovada().order, paid_amount: undefined } })));
+
+  assert.deepEqual(outroValor, { ...acesso, eventId: outroValor.eventId });
+  assert.equal(outroValor.eventId, acesso.eventId);
+  assert.deepEqual(semValor, acesso);
+
+  const semData = (extra) => ticto.normalizeTictoEvent(compraAprovada({ status_date: undefined, ...extra })).eventId;
+  assert.equal(semData({ currency: "USD" }), semData({}), "a moeda do topo nao entra no digest da chave sem data (reenvios de antes continuam repetidos)");
+  assert.equal("currency" in ticto.redactTictoPayload(compraAprovada({ currency: "USD" })), false);
 });

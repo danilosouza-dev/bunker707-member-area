@@ -19,7 +19,10 @@ import {
 // 200) e grava webinar_registered uma vez; o job do tick manda o lembrete de 24 h pelo sino e pela fila de
 // e-mail uma vez por vaga (o tick seguinte nao repete) e a equipe nunca recebe; cancelar o webinario avisa quem
 // tinha vaga, uma vez. O teste anda com a hora marcada da sessao (como o teste dos avisos agendados adianta o
-// send_at) em vez de esperar.
+// send_at) em vez de esperar. Fase 4e (migracao 202610290008): o "Comeca quando voce entra" cria a sessao do horario
+// uma vez para dois alunos (o indice unico por horario), sem vaga nem com limite de vagas; o banco recusa a segunda
+// sessao jit no mesmo horario (23505) e a jit fora de `simulated` (23514); a jit nunca recebe lembrete, nem com a vaga
+// geral do webinario, e nao entra nas sessoes do editor.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -31,6 +34,8 @@ const { queueWebinarCancelledNotices } = await import("../../src/server/webinars
 const { runJobsTick } = await import("../../src/server/jobs/run-tick.ts");
 const { webinarRemindersJob, WEBINAR_REMINDERS_JOB_NAME } = await import("../../src/server/jobs/webinar-reminders-job.ts");
 const { listNotifications } = await import("../../src/server/communications/inbox.ts");
+const jitRoute = await import("../../src/app/api/webinars/[id]/jit/route.ts");
+const { getWebinarEditorData } = await import("../../src/server/webinars/queries.ts");
 
 const aluna = usuarioDeTeste(contas.aluna);
 const alunoSemAcesso = usuarioDeTeste(contas.alunoSemAcesso);
@@ -273,4 +278,93 @@ test("5. cancelar o webinario avisa quem tinha vaga uma vez (sino + e-mail com o
   assert.match(fila[0].subject, /cancelada/i);
   assert.equal((await emails(produtor.id, "webinar_cancelled")).length, 0);
   assert.ok((await vagas(aluna.id))[0].cancelled_notice_sent_at);
+});
+
+test("6. Comeca quando voce entra (fase 4e): a sessao do horario nasce uma vez para dois alunos, sem vaga; o banco garante uma por horario; nada de lembrete; fora do editor", async () => {
+  const jitId = "bbbbbbbb-0000-4000-8000-0000000000e1";
+  const slug = "teste-comeca-quando-voce-entra";
+  const agora = new Date().toISOString();
+  unwrap(
+    await db.from("webinars").upsert(
+      {
+        access_mode: "everyone",
+        capacity: 5,
+        created_by: produtor.id,
+        description: "Live gravada de teste com o Comeca quando voce entra.",
+        duration_minutes: 60,
+        id: jitId,
+        // A janela inteira do dia, a cada 15 min, ate o fim do video: sempre ha um horario aceitando entrada.
+        jit_settings: { enabled: true, endHour: 24, everyMinutes: 15, lateJoinMinutes: null, simulation: null, startHour: 0 },
+        kind: "simulated",
+        published_at: agora,
+        registration_required: true,
+        slug,
+        status: "published",
+        title: "Live Gravada de Teste: Quando você entra"
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando o webinario do jit"
+  );
+  unwrap(
+    await db.from("webinar_recordings").insert({
+      duration_seconds: 3600,
+      embed_url: "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc",
+      provider: "bunny",
+      session_id: null,
+      source: "bunny",
+      status: "ready",
+      webinar_id: jitId
+    }),
+    "Gravando o video base do jit"
+  );
+
+  const contextoJit = { params: Promise.resolve({ id: jitId }) };
+  const entrar = async (user) => {
+    actAs(user);
+    return jitRoute.POST(new Request(`http://localhost/api/webinars/${jitId}/jit`, { body: "{}", headers: { "content-type": "application/json" }, method: "POST" }), contextoJit);
+  };
+
+  const primeira = await entrar(aluna);
+  assert.equal(primeira.status, 200, await primeira.clone().text());
+  const daAluna = (await primeira.json()).data;
+  const segunda = await entrar(alunoSemAcesso);
+  assert.equal(segunda.status, 200, await segunda.clone().text());
+  const doOutro = (await segunda.json()).data;
+  assert.equal(doOutro.sessionId, daAluna.sessionId, "a mesma turma");
+  assert.equal(daAluna.roomHref, `/webinarios/${slug}/sala?sessao=${daAluna.sessionId}`);
+
+  const linhas = unwrap(await db.from("webinar_sessions").select("id,jit,kind,status,scheduled_at,recording_id").eq("webinar_id", jitId), "Lendo as sessoes do jit");
+  assert.equal(linhas.length, 1);
+  assert.deepEqual([linhas[0].jit, linhas[0].kind, linhas[0].status], [true, "simulated", "scheduled"]);
+  assert.equal(Date.parse(linhas[0].scheduled_at), Date.parse(daAluna.scheduledAt), "o mesmo instante (o banco devolve +00:00)");
+  assert.ok(linhas[0].recording_id, "o video base");
+  assert.equal(unwrap(await db.from("webinar_registrations").select("id").eq("webinar_id", jitId), "Lendo as vagas do jit").length, 0, "nenhuma vaga");
+
+  // A sala da sessao jit abre sem vaga, mesmo com limite de vagas.
+  actAs(aluna);
+  const sala = await sessionRoute.GET(new Request(`http://localhost/api/webinars/${jitId}/session?sessao=${daAluna.sessionId}`), contextoJit);
+  assert.equal(sala.status, 200, await sala.clone().text());
+  assert.deepEqual((await sala.json()).data.session.join, { ok: true });
+
+  // O banco: uma sessao jit por horario (23505) e so na Live gravada (23514).
+  const repetida = await db.from("webinar_sessions").insert({ jit: true, kind: "simulated", scheduled_at: daAluna.scheduledAt, status: "scheduled", webinar_id: jitId });
+  assert.equal(repetida.error?.code, "23505", JSON.stringify(repetida.error));
+  const aoVivo = await db.from("webinar_sessions").insert({ jit: true, kind: "live", scheduled_at: new Date(Date.parse(daAluna.scheduledAt) + 3 * HORA_MS).toISOString(), status: "scheduled", webinar_id: jitId });
+  assert.equal(aoVivo.error?.code, "23514", JSON.stringify(aoVivo.error));
+
+  // Nenhum lembrete para a sessao jit, nem com a vaga geral do webinario (sem sessao).
+  unwrap(await db.from("webinar_registrations").insert({ session_id: null, status: "registered", user_id: aluna.id, webinar_id: jitId }), "Vaga geral no jit");
+  await processWebinarReminders({ db });
+  const avisos = (await listNotifications({ limit: 50, userId: aluna.id })).items.filter((item) => item.href === `/webinarios/${slug}`);
+  assert.deepEqual(avisos, []);
+
+  // O historico: um webinar_jit_entered por entrada, created so para quem criou.
+  const historico = unwrap(await db.from("student_events").select("user_id,metadata").eq("event_type", "webinar_jit_entered").eq("entity_id", daAluna.sessionId), "Lendo o historico do jit");
+  assert.deepEqual(historico.map((linha) => linha.metadata.created).sort(), [false, true]);
+
+  // O editor nao lista nem conta a sessao jit.
+  const editor = await getWebinarEditorData(jitId);
+  assert.deepEqual([editor.sessions.length, editor.draft.sessions.length, editor.jit.enabled], [0, 0, true]);
+  actAs(null);
 });

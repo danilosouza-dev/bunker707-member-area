@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import "./support/resolve-extensionless-ts.mjs";
 
 // A lista de Webinários desenhada (docs/30 §2.1; docs/18 §1.1): cabecalho com "Novo webinário" so para quem cria,
-// os cinco numeros do periodo ("—" e "Sem dados no período" sem dado), as abas da pagina por ?aba=, os estados
-// vazios ("Nenhum webinário ainda", "Sem lives ao vivo ainda", "Sem dados no período"), a tabela com capa, tipo,
+// os cinco numeros do periodo ("—" e "Sem dados no período" sem dado; Compareceram e Assistiram o replay pela RPC
+// webinar_panel, fase 4a), as abas da pagina por ?aba= (Lives ao vivo e Lives gravadas mostram o painel que a pagina
+// monta, sem a tabela da lista), os estados vazios ("Nenhum webinário ainda"), a tabela com capa, tipo,
 // data, situacao e vagas, o menu "…" por situacao (Excluir so no rascunho; o que chega depois com "em breve"),
 // e a previa do card do aluno. Tambem as paginas: permissao, migracao pendente, loading e not-found.
 //
@@ -233,6 +234,33 @@ test("lista: cabecalho, abas de Comunicacao, cinco numeros ('—' sem dado), aba
   assert.doesNotMatch(text, /em construção/i);
 });
 
+test("lista: Compareceram e Assistiram o replay vem da RPC do painel; sem ela (migracao 202610290004), '—'", () => {
+  const numbersOf = (markup) =>
+    Object.fromEntries(
+      Array.from(markup.matchAll(/aria-label="([^",]+), ([^,"]+)[^"]*"[^>]*role="group"/g)).map((match) => [match[1], match[2]])
+    );
+  const filled = html(
+    createElement(WebinarsListView, {
+      listNumbers: { attended: 37, replayViewers: 12 },
+      page: page([item()]),
+      period: resolvedPeriod,
+      permissions: both,
+      searchParams: {},
+      state: emptyState
+    })
+  );
+  const values = numbersOf(filled);
+  assert.equal(values.Compareceram, "37");
+  assert.equal(values["Assistiram o replay"], "12");
+  assert.equal(values["Vagas garantidas"], "12");
+
+  const pending = numbersOf(
+    html(createElement(WebinarsListView, { listNumbers: { attended: null, replayViewers: null }, page: page([item()]), period: resolvedPeriod, permissions: both, searchParams: {}, state: emptyState }))
+  );
+  assert.equal(pending.Compareceram, "Sem dados no período");
+  assert.equal(pending["Assistiram o replay"], "Sem dados no período");
+});
+
 test("lista: sem permissao de criar nao ha 'Novo webinário'; estados vazios de cada aba e do filtro", () => {
   const readOnly = html(createElement(WebinarsListView, { page: page([]), period: resolvedPeriod, permissions: { canPublish: false, canWrite: false }, searchParams: {}, state: emptyState }));
   assert.doesNotMatch(readOnly, /href="\/admin\/comunicacao\/webinarios\/novo"/);
@@ -245,12 +273,23 @@ test("lista: sem permissao de criar nao ha 'Novo webinário'; estados vazios de 
   assert.match(textOf(filtered), /Nenhum webinário encontrado/);
   assert.match(filtered, /href="\/admin\/comunicacao\/webinarios"[^>]*>Limpar filtros|Limpar filtros/);
 
-  const live = textOf(html(createElement(WebinarsListView, { page: page([item()]), period: resolvedPeriod, permissions: both, searchParams: { aba: "ao-vivo" }, state: { ...emptyState, tab: "ao-vivo" } })));
-  assert.match(live, /Sem lives ao vivo ainda/);
-  assert.doesNotMatch(live, /Buscar pelo título|Aula de IA/, "a aba Lives ao vivo nao mostra a tabela");
+  const panelNode = (label) => createElement("div", { "data-test-panel": label }, `Painel ${label}`);
+  const liveMarkup = html(
+    createElement(WebinarsListView, { page: page([item()]), panel: panelNode("ao-vivo"), period: resolvedPeriod, permissions: both, searchParams: { aba: "ao-vivo" }, state: { ...emptyState, tab: "ao-vivo" } })
+  );
+  const live = textOf(liveMarkup);
+  assert.match(liveMarkup, /data-test-panel="ao-vivo"/, "a aba Lives ao vivo mostra o painel da pagina");
+  assert.doesNotMatch(live, /Buscar pelo título|Aula de IA|Sem lives ao vivo ainda/, "nem a tabela da lista nem o estado vazio antigo");
+  assert.match(liveMarkup, /aria-current="page"[^>]*href="\/admin\/comunicacao\/webinarios\?aba=ao-vivo"/);
 
-  const recorded = textOf(html(createElement(WebinarsListView, { page: page([item()]), period: resolvedPeriod, permissions: both, searchParams: { aba: "gravadas" }, state: { ...emptyState, tab: "gravadas" } })));
-  assert.match(recorded, /Sem dados no período/);
+  const recordedMarkup = html(
+    createElement(WebinarsListView, { page: page([item()]), panel: panelNode("gravadas"), period: resolvedPeriod, permissions: both, searchParams: { aba: "gravadas" }, state: { ...emptyState, tab: "gravadas" } })
+  );
+  assert.match(recordedMarkup, /data-test-panel="gravadas"/);
+  assert.doesNotMatch(textOf(recordedMarkup), /Buscar pelo título|Aula de IA/);
+
+  const listTab = html(createElement(WebinarsListView, { page: page([item()]), panel: panelNode("ignorado"), period: resolvedPeriod, permissions: both, searchParams: {}, state: emptyState }));
+  assert.doesNotMatch(listTab, /data-test-panel/, "a aba Webinarios ignora o painel");
 });
 
 test("abas da pagina: a ativa pelo ?aba= (nao pelo endereco) e o periodo junto", () => {
@@ -314,9 +353,11 @@ test("paginas: permissao, migracao pendente com o numero certo, loading e not-fo
   const detail = stripComments(read("src/app/admin/(v2)/comunicacao/webinarios/[id]/page.tsx"));
 
   assert.doesNotMatch(list, /CommunicationFrame|data-phase/);
-  assert.match(list, /readAdminPeriod\(params, new Date\(\)\)/);
+  assert.match(list, /readAdminPeriod\(params, new Date\(now\)\)/);
   assert.match(list, /listWebinarsForAdmin\(/);
   assert.match(list, /webinarsPageFallbackHref\(/, "?pagina= depois do fim volta para a ultima");
+  assert.match(list, /getWebinarListNumbers\(period, \{ now \}\)/, "Compareceram e Assistiram o replay pela RPC do painel");
+  assert.match(list, /<WebinarPanelTab kind=\{state\.tab === "ao-vivo" \? "live" : "simulated"\} now=\{now\} period=\{period\} searchParams=\{params\} \/>/);
   for (const source of [list, create, detail]) {
     assert.match(source, /requirePageArea\("comunicacao"\)/);
     assert.match(source, /loadUnlessPendingMigration\(/);

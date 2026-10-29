@@ -11,7 +11,8 @@ import "./support/admin-action-stubs.mjs";
 // do fim previsto; a migracao pendente; o nome e as contagens do job; e os avisos de cancelada, remarcada e "Comecou
 // agora" (notify.ts); o "Quem pode" na hora de enviar (a vaga e a ancora no Segmento e no "both"; no "Produto ou
 // segmento", sem ancora, so o produto de agora ou o segmento de agora) e a vaga barrada conferida de novo so 15 min
-// depois. O job contra o banco local fica para tests/integration/webinarios.test.mjs.
+// depois; a sessao do "Comeca quando voce entra" (fase 4e) sem lembrete nenhum. O job contra o banco local fica para
+// tests/integration/webinarios.test.mjs.
 
 process.env.NEXT_PUBLIC_SITE_URL = "https://membros.exemplo.test";
 
@@ -416,6 +417,21 @@ test("webinario cancelado, rascunho ou com os lembretes desligados: nenhuma vaga
   const cancelada = bancoDosWebinarios({ sessoes: [sessaoRow({ status: "cancelled" })], vagas: [vagaRow(ALUNA)] });
   assert.deepEqual(await processWebinarReminders({ db: cancelada, now: new Date(AGORA) }), ZEROS);
   assert.deepEqual(tabelas(cancelada), ["webinar_sessions:select"], "a sessao cancelada fica fora pela propria consulta");
+});
+
+test("Comeca quando voce entra (fase 4e): nenhum lembrete para a sessao jit, nem com vaga geral do webinario; a hora marcada segue com o dela", async () => {
+  const jit = sessaoRow({ id: "44444444-aaaa-4aaa-8aaa-444444444444", jit: true });
+  const db = bancoDosWebinarios({ sessoes: [jit], vagas: [vagaRow(ALUNA, { session_id: null })] });
+
+  assert.deepEqual(await processWebinarReminders({ db, now: new Date(AGORA) }), ZEROS);
+  assert.ok(!db.queries.some((query) => query.table === "webinar_registrations"), "nenhuma vaga lida");
+  assert.deepEqual(sinos(db), []);
+  assert.deepEqual(emailsNaFila(db), []);
+
+  const comMarcada = bancoDosWebinarios({ sessoes: [jit, sessaoRow()], vagas: [vagaRow(ALUNA)] });
+  const result = await processWebinarReminders({ db: comMarcada, now: new Date(AGORA) });
+  assert.deepEqual(result, { ...ZEROS, emails: 1, reminders24h: 1 }, "so a hora marcada");
+  assert.deepEqual(sinos(comMarcada).map((linha) => linha.payload.sessionId), [SESSAO_ID]);
 });
 
 test("outro tick marcou a vaga no meio: a vaga conta como pulada e nada sai por aqui; a outra segue", async () => {
@@ -946,6 +962,14 @@ test("a vaga barrada pelo Quem pode nao e conferida a cada minuto: de novo so 15
   } finally {
     WEBINAR_REMINDER_ACCESS_MEMO.clear();
   }
+});
+
+test("Comecou agora (fase 4e): a sessao do Comeca quando voce entra nunca avisa, nem pelo Comecar do console", async () => {
+  const comecou = "2026-11-05T23:02:00.000Z";
+  const db = bancoDosWebinarios({ sessoes: [sessaoRow({ jit: true, kind: "simulated", started_at: comecou, status: "live" })], vagas: [vagaRow(ALUNA)] });
+  assert.deepEqual(await queueWebinarStartedNotices(db, SESSAO_ID, new Date(comecou)), { emails: 0, notifications: 0 });
+  assert.ok(!db.queries.some((query) => query.table === "webinar_registrations"), "nem le as vagas");
+  assert.equal(sinos(db).length, 0);
 });
 
 test("os avisos nunca derrubam a acao do admin: erro de banco vira log e contagens zeradas", async () => {

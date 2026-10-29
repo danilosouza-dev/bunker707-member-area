@@ -12,6 +12,8 @@
 // design canonico e a previa monta o PopupItem com o design e as fontes resolvidas. Livre (docs/27): a chave
 // `freeDesign` ao lado (as duas sempre no pedido, no maximo uma nao nula), a forma canonica do Livre e a previa
 // pelo freePreviewPopupItem (o mesmo item do palco do editor).
+// Webinarios v4b (docs/30 §1.6): a regra "Webinário" do construtor (o seletor da acao com "não", o seletor do
+// webinario com o dia, as notas e os titulos na frase), com as frases de WEBINAR_COPY.seguimento.
 
 import {
   AUDIENCE_LIMITS,
@@ -70,6 +72,9 @@ import {
   type NoticeIconId
 } from "../../../../server/communications/message-meta";
 import { AUDIO_HEARD_SLOTS } from "../../../../server/communications/notification-model";
+// Webinarios v4b (docs/30 §1.6): a regra "Webinário" do segmento.
+import { WEBINAR_FOLLOW_UP_ACTIONS, type WebinarFollowUpAction } from "../../../../server/webinars/model";
+import { SEGUIMENTO_COPY } from "../../../../lib/webinar-copy-v4/seguimento";
 // v3b-1 (docs/25): onde, quando e quantas vezes o pop-up aparece, "Lembrar depois" e como fecha.
 import {
   canonicalPopupSettings,
@@ -1702,7 +1707,9 @@ export const AUDIENCE_RULE_LABELS: Record<AudienceRuleType, string> = {
   page_visit: "Visitou uma página",
   // Quem pode da live por regras (docs/22 §3, docs/30 §1.6)
   access_recent: "Ganhou acesso recentemente",
-  webinar: "Participação em lives"
+  webinar: "Participação em lives",
+  // Webinarios v4b (docs/30 §1.6): o follow-up por segmento ("Webinário"), lado a lado ate a unificacao
+  webinar_follow_up: SEGUIMENTO_COPY.regra
 };
 
 /** Ordem do seletor de tipo de regra (as regras que valem em todo lugar; a v2 vem em audienceRuleTypesFor). */
@@ -1727,16 +1734,114 @@ export const AUDIENCE_RULE_ORDER: readonly AudienceRuleType[] = [
 export type AudienceBuilderMode = "flow" | "segment";
 
 /**
- * Tipos no seletor: no segmento, os de sempre mais "O que fez com uma notificação" (um aviso enviado);
- * no fluxo, tambem "Visitou uma página" e "Ganhou acesso a um produto" (so ha dado dentro de um fluxo).
+ * Tipos no seletor: no segmento, os de sempre mais "O que fez com uma notificação" (um aviso enviado) e, quando a
+ * tela manda a lista de webinarios do follow-up (`webinarFollowUps`), "Webinário" (v4b, `webinar_follow_up`); no
+ * fluxo, tambem "Visitou uma página" e "Ganhou acesso a um produto" (so ha dado dentro de um fluxo), nunca "Webinário"
+ * (o lote do motor nao le). "Participação em lives" (`webinar`) esta em AUDIENCE_RULE_ORDER e vale nos dois.
  */
-export function audienceRuleTypesFor(mode: AudienceBuilderMode): readonly AudienceRuleType[] {
-  return mode === "flow" ? [...AUDIENCE_RULE_ORDER, "message", "page_visit", "access_gained"] : [...AUDIENCE_RULE_ORDER, "message"];
+export function audienceRuleTypesFor(mode: AudienceBuilderMode, options: { webinarFollowUps?: boolean } = {}): readonly AudienceRuleType[] {
+  if (mode === "flow") {
+    return [...AUDIENCE_RULE_ORDER, "message", "page_visit", "access_gained"];
+  }
+
+  return options.webinarFollowUps ? [...AUDIENCE_RULE_ORDER, "message", "webinar_follow_up"] : [...AUDIENCE_RULE_ORDER, "message"];
 }
 
 /** O tipo vale neste modo? (uma regra salva de fluxo aberta no segmento aparece como invalida). */
 export function isAudienceRuleTypeAllowed(type: AudienceRuleType, mode: AudienceBuilderMode) {
-  return audienceRuleTypesFor(mode).includes(type);
+  return audienceRuleTypesFor(mode, { webinarFollowUps: true }).includes(type);
+}
+
+/*
+ * v4b (docs/30 §1.6): a regra "Webinário" (follow-up por segmento, tipo `webinar_follow_up`). INTEGRACAO (provisorio):
+ * os nomes ganharam "FollowUp" para conviver com a regra "Participação em lives" (`webinar`, mais abaixo) ate a
+ * unificacao.
+ */
+
+/** Um webinario do seletor da regra (src/server/webinars/follow-up-queries.ts, listWebinarFollowUpChoices). */
+export type AudienceWebinarFollowUpChoice = { id: string; scheduledAt: string | null; title: string };
+
+/** "Live de agentes · 05/11" (dia e mes da hora marcada, em Sao Paulo); sem hora, so o titulo. */
+export function webinarFollowUpChoiceLabel(choice: Pick<AudienceWebinarFollowUpChoice, "scheduledAt" | "title">) {
+  const title = choice.title.trim() || "Sem título";
+  const local = choice.scheduledAt ? isoToSaoPauloLocal(choice.scheduledAt) : null;
+
+  return local ? `${title} · ${local.date.slice(8, 10)}/${local.date.slice(5, 7)}` : title;
+}
+
+export const WEBINAR_FOLLOW_UP_RULE_EMPTY_MESSAGE = SEGUIMENTO_COPY.semWebinarios;
+export const WEBINAR_FOLLOW_UP_RULE_PICK_LABEL = SEGUIMENTO_COPY.escolhaWebinario;
+export const WEBINAR_FOLLOW_UP_RULE_ACTION_LABEL = SEGUIMENTO_COPY.rotuloAcao;
+export const WEBINAR_FOLLOW_UP_RULE_PICKER_LABEL = SEGUIMENTO_COPY.rotuloWebinario;
+
+/** Valor do seletor da acao: "attended" ou "not:attended" (a negacao vai junto, como em "não compareceu"). */
+export type WebinarFollowUpRuleChoice = WebinarFollowUpAction | `not:${WebinarFollowUpAction}`;
+
+/** As opcoes do seletor da acao, em pares: "garantiu vaga", "não garantiu vaga", "compareceu", "não compareceu"... */
+export const WEBINAR_FOLLOW_UP_RULE_CHOICES: readonly { label: string; value: WebinarFollowUpRuleChoice }[] = WEBINAR_FOLLOW_UP_ACTIONS.flatMap((action) => [
+  { label: SEGUIMENTO_COPY.acoes[action], value: action },
+  { label: SEGUIMENTO_COPY.negadas[action], value: `not:${action}` as const }
+]);
+
+type WebinarFollowUpRule = Extract<AudienceRule, { type: "webinar_follow_up" }>;
+
+export function webinarFollowUpRuleChoiceOf(rule: Pick<WebinarFollowUpRule, "action" | "negate">): WebinarFollowUpRuleChoice {
+  return rule.negate ? `not:${rule.action}` : rule.action;
+}
+
+/** Trocar a acao (e o "não") pelo valor do seletor; valor desconhecido nao muda a regra. */
+export function webinarFollowUpRuleWithChoice(rule: WebinarFollowUpRule, choice: string): WebinarFollowUpRule {
+  const negate = choice.startsWith("not:");
+  const action = (negate ? choice.slice(4) : choice) as WebinarFollowUpAction;
+
+  return WEBINAR_FOLLOW_UP_ACTIONS.includes(action) ? { ...rule, action, negate } : rule;
+}
+
+/** As opcoes do seletor de webinario: os da lista (com o dia) e o ja escolhido que saiu dela ("Webinário fora da lista"). */
+export function webinarFollowUpRuleOptions(choices: readonly AudienceWebinarFollowUpChoice[], current: string): { label: string; value: string | null }[] {
+  if (choices.length === 0 && !current) {
+    return [{ label: WEBINAR_FOLLOW_UP_RULE_EMPTY_MESSAGE, value: null }];
+  }
+
+  const known = current ? choices.some((choice) => choice.id === current) : false;
+
+  return [
+    ...(current ? [] : [{ label: WEBINAR_FOLLOW_UP_RULE_PICK_LABEL, value: null }]),
+    ...(current && !known ? [{ label: SEGUIMENTO_COPY.foraDaLista, value: current }] : []),
+    ...choices.map((choice) => ({ label: webinarFollowUpChoiceLabel(choice), value: choice.id }))
+  ];
+}
+
+/**
+ * Notas embaixo da regra: com "não" (fora "não garantiu vaga"), quem conta; nas acoes da compra, quando a compra
+ * entra no segmento.
+ */
+export function webinarFollowUpRuleNotes(rule: Pick<WebinarFollowUpRule, "action" | "negate">): string[] {
+  const notes: string[] = [];
+
+  if (rule.negate && rule.action !== "registered") {
+    notes.push(SEGUIMENTO_COPY.notaNegada);
+  }
+
+  if (rule.action === "purchased" || rule.action === "clicked_no_purchase") {
+    notes.push(SEGUIMENTO_COPY.atraso);
+  }
+
+  return notes;
+}
+
+/** Os titulos dos webinarios do seletor nos nomes da frase do segmento ("Alunos que compareceram em “X”"). */
+export function audienceNamesWithWebinarFollowUps(
+  names: AudienceNames,
+  choices: readonly Pick<AudienceWebinarFollowUpChoice, "id" | "title">[] | null | undefined
+): AudienceNames {
+  const titled = (choices ?? []).filter((choice) => choice.title.trim());
+
+  if (titled.length === 0) {
+    return names;
+  }
+
+  return { ...names, webinars: { ...names.webinars, ...Object.fromEntries(titled.map((choice) => [choice.id, choice.title.trim()])) } };
 }
 
 /** Acao da regra "O que fez com uma notificação", na linha "[Fez | Não fez] [acao]". */
@@ -2215,8 +2320,15 @@ export function commentWindowDays(value: string): 7 | 30 | 90 | null {
  * notificacao dada (sem ela, fica para escolher, como o produto); no fluxo cita um passo, no segmento um
  * aviso enviado.
  */
-export function defaultAudienceRule(type: AudienceRuleType, input: { messageRef?: MessageRef | null; mode?: AudienceBuilderMode } = {}): AudienceRule {
+export function defaultAudienceRule(
+  type: AudienceRuleType,
+  input: { messageRef?: MessageRef | null; mode?: AudienceBuilderMode; webinarId?: string | null } = {}
+): AudienceRule {
   switch (type) {
+    // v4b: comeca em "compareceu" no webinario dado (o mais recente da lista); sem ele, fica para escolher. So o
+    // follow-up le `webinarId`; "Participação em lives" comeca em "qualquer live" (mais abaixo).
+    case "webinar_follow_up":
+      return { action: "attended", negate: false, type, webinarId: input.webinarId ?? "" };
     case "message":
       return {
         action: "opened",

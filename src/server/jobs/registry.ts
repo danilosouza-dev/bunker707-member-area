@@ -4,9 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
+import { webinarOfferConversionsJob } from "./webinar-offer-conversions-job";
 import { webinarRecordingsJob } from "./webinar-recordings-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
 import { webinarSessionsJob } from "./webinar-sessions-job";
+import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-job";
 
 // Ponto de extensao dos jobs leves executados pelo tick de minuto.
 //
@@ -44,6 +46,9 @@ import { webinarSessionsJob } from "./webinar-sessions-job";
 //   "Comecou agora", encerra as que passaram da duracao do video congelando a presenca e cria o replay do webinario,
 //   src/server/jobs/webinar-sessions-job.ts; docs/30 §1.6 e §6.6). Vem antes dos lembretes: a sessao que o tick nao
 //   abriu a tempo e encerrada aqui com a curva, nao pelo encerramento automatico de la. Sem trabalho, uma consulta;
+// - `webinar-simulation-summaries` (fase 4b: congela a Simulacao das sessoes gravadas encerradas, uma vez, com a semente;
+//   src/server/jobs/webinar-simulation-summaries-job.ts; docs/30 §3.5 e §4.3). Logo depois das sessoes: a que encerrou
+//   neste minuto congela aqui. Sem trabalho, uma consulta;
 // - `webinar-reminders` (lembretes de 24 h e 1 h das lives para quem garantiu vaga, pelo sino e pela fila de e-mail,
 //   e a sessao que encerra sozinha 2 h depois do fim previsto, src/server/jobs/webinar-reminders-job.ts; docs/30 §2.7).
 //   Sem trabalho, uma consulta de sessoes e nada mais;
@@ -52,6 +57,9 @@ import { webinarSessionsJob } from "./webinar-sessions-job";
 //   sino a maquina ligada ha mais de 6 h e apaga na Bunny a gravacao vencida uma vez por hora,
 //   src/server/jobs/webinar-recordings-job.ts; docs/30 §4.5 e §6.7). Vem depois dos lembretes: a sessao encerrada
 //   sozinha la ja conta para devolver a maquina aqui. Sem o token do GitHub nem a chave da Bunny, so o aviso de 6 h roda;
+// - `webinar-offer-conversions` (fase 4b: liga as vendas do webhook aos cliques da Oferta em ate 7 dias, M7, pela RPC
+//   webinar_offer_conversions, em lote; src/server/jobs/webinar-offer-conversions-job.ts; docs/30 §4.2). Nunca cria
+//   venda nem acesso. Sem trabalho, uma chamada;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
@@ -73,4 +81,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, webinarRecordingsJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob];

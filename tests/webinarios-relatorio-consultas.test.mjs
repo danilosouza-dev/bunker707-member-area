@@ -10,7 +10,9 @@ import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, bancoDosWebin
 // RPC; no minuto seguinte, outra), os nomes lidos fora do cache a cada vez, a pagina inteira (o seletor de sessao e a
 // padrao, a sessao pedida, a lista por aluno com nome, e-mail, hora da vaga, aparelho e pontuacao, as enquetes com
 // os rotulos, as perguntas citadas, a Simulacao), o CSV "Attendee" (colunas do Zoom, BOM, ponto e virgula, nome do
-// arquivo, sessao de outro webinario) e a migracao pendente. Contra o banco local: tests/integration/webinarios-relatorio.test.mjs.
+// arquivo, sessao de outro webinario) e a migracao pendente. Da fase 4: o Assistente ligado, o trecho da transcricao das
+// quedas, as regras da Simulacao e o roteiro por Solta em (e o aviso so no bloco sem a migracao da parte), as sessoes
+// "Comeca quando voce entra" e os CSVs sem cache (M9). Contra o banco local: tests/integration/webinarios-relatorio.test.mjs.
 
 const cache = (globalThis.__webinariosRelatorioCache ??= { calls: [], entries: new Map(), keyParts: null, options: null });
 
@@ -247,9 +249,17 @@ test("a sessao escolhida: lista por aluno com nome, e-mail, hora da vaga, aparel
     ackText: "Decisão do produtor em 05/11/2026: o selo fica ligado.",
     decidedAt: "2026-11-05T12:00:00.000Z",
     decidedByName: "Carla Produtora",
-    script: { fired: 2, missed: 1, ready: 2 },
-    showLiveBadge: true
+    pending: false,
+    realParticipants: 3,
+    // A sessao do duble nao tem as colunas da fase 4: as regras saem no padrao (tudo desligado).
+    rules: { countMode: "off", joins: { enabled: false, everySeconds: 60, max: 30 }, saleNotices: { enabled: false, items: 0 } },
+    script: { byTrigger: { at_offset: 0, manual: 0, on_phrase: 0 }, fired: 2, missed: 1, ready: 2 },
+    showLiveBadge: true,
+    totals: { counterMax: null, joinsShown: null, saleNoticesShown: null }
   });
+  assert.deepEqual(selected.assistant, { enabled: false, pending: false }, "o Assistente desligado no webinario e sem resposta");
+  assert.equal(selected.dropExcerpts, null, "a gravacao sem transcricao: as quedas sem trecho");
+  assert.deepEqual(selected.exportReports, ["registration", "attendee", "performance", "qa", "poll", "survey", "simulacao"], "sessao gravada: os sete");
 });
 
 test("a pontuacao da lista por aluno segue a conta M3 (mensagem 1, pergunta 2, reacao 0,5, enquete 1, cada 10 min 1; 0-100 pelo maior)", async () => {
@@ -323,4 +333,174 @@ test("banco sem a migracao: pending_migration; outro erro do banco: error (regis
   assert.equal(ok.status, "ok", "o erro nao ficou guardado: a leitura seguinte vai ao banco");
   assert.equal(await queries.getWebinarAttendees(SESSAO_ID).then((rows) => rows.length), 2);
   assert.ok(gravacaoRow().id && webinarRow().id);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 4: o que a pagina le a mais (Assistente, transcricao das quedas, regras da Simulacao, roteiro por Solta em),
+ * as sessoes "Comeca quando voce entra" e os CSVs sem cache (M9)
+ * ---------------------------------------------------------------------------------------------- */
+
+const { bancoDoExportar, consultas } = await import("./support/webinarios-v4-exportar-banco.mjs");
+const { buildWebinarReport, readWebinarReportRows } = await import("../src/server/webinars/report-model.ts");
+
+const ITEM_MINUTO = "e1e1e1e1-0000-4000-8000-000000000001";
+const ITEM_FRASE = "e2e2e2e2-0000-4000-8000-000000000002";
+const ITEM_BOTAO = "e3e3e3e3-0000-4000-8000-000000000003";
+const itemDoRoteiro = (id, trigger_kind, extra = {}) => ({
+  body: "Que aula boa!",
+  created_at: "",
+  created_by: null,
+  generated_by_ai: false,
+  id,
+  kind: "message",
+  offset_ms: 60_000,
+  persona_name: "Marina",
+  persona_role: "student",
+  phrase: null,
+  phrase_delay_ms: 0,
+  position: 0,
+  resolved_offset_ms: null,
+  resolved_transcript_id: null,
+  status: "ready",
+  trigger_kind,
+  updated_at: "",
+  webinar_id: WEBINAR_ID,
+  ...extra
+});
+
+const LINHAS_V4 = [
+  ...RPC_ROWS,
+  { metric: "drop", item: "4", total: 1, students: 1 },
+  { metric: "ai", item: "replies", total: 2, students: 0 },
+  { metric: "sim_counter", item: "max", total: 240, students: 0 },
+  { metric: "sim_joins", item: "shown", total: 18, students: 0 }
+];
+
+function bancoV4(extra = {}) {
+  const db = bancoDoExportar({
+    mensagens: [
+      { offset_ms: 60_000, script_item_id: ITEM_MINUTO, session_id: SESSAO_ID, source: "scripted" },
+      { offset_ms: 900_000, script_item_id: ITEM_BOTAO, session_id: SESSAO_ID, source: "scripted" }
+    ],
+    presentes: [presente(ALUNA)],
+    relatorio: LINHAS_V4,
+    roteiro: [itemDoRoteiro(ITEM_MINUTO, "at_offset"), itemDoRoteiro(ITEM_FRASE, "on_phrase", { status: "unresolved" }), itemDoRoteiro(ITEM_BOTAO, "manual")],
+    sessoes: [
+      sessaoRow({
+        ended_at: "2026-11-05T23:31:00.000Z",
+        presence_curve: resumoDePresenca(),
+        simulated_count_rule: { base: 40, jitter: 5, mode: "curve", peak: 120 },
+        simulated_joins: { enabled: true, every_seconds: 45, max: 20, names: "generic" },
+        simulated_sale_notices: null,
+        simulation_summary: { counter_max: 240, joins_shown: 18, sale_notices_shown: 0 },
+        started_at: "2026-11-05T23:00:00.000Z",
+        status: "ended"
+      })
+    ],
+    transcricoes: [
+      {
+        checksum: "x",
+        created_at: "",
+        created_by: null,
+        cues: [
+          { endSeconds: 45, startSeconds: 30, text: "Fora do minuto" },
+          { endSeconds: 70, startSeconds: 62, text: "Antes da queda" },
+          { endSeconds: 130, startSeconds: 121, text: "Agora o preço do curso" }
+        ],
+        id: "t1",
+        language: "pt",
+        recording_id: GRAVACAO_ID,
+        source_format: "vtt",
+        updated_at: ""
+      }
+    ],
+    webinars: [webinarRow({ assistant_settings: { enabled: true, replyAllDefault: false } })],
+    ...extra
+  });
+  actionStubs.db = db;
+  return db;
+}
+
+const semCacheV4 = (db, sessionId = SESSAO_ID, now = T0) =>
+  queries.loadWebinarReportPage(db, WEBINAR_ID, { now, sessionId, view: async () => buildWebinarReport(readWebinarReportRows(LINHAS_V4)) });
+
+test("fase 4 na pagina: o Assistente ligado no webinario, o trecho da transcricao de cada queda, as regras da Simulacao e o roteiro por Solta em", async () => {
+  const db = bancoV4();
+  const selected = (await semCacheV4(db))?.selected;
+  assert.ok(selected);
+
+  assert.deepEqual(selected.assistant, { enabled: true, pending: false });
+  assert.deepEqual(selected.dropExcerpts, { 2: "Antes da queda", 4: "Agora o preço do curso" }, "balde 2 = o minuto 01:00, balde 4 = o minuto 02:00");
+  assert.deepEqual(consultas(db, "webinar_recording_transcripts")[0].filters.find(([metodo]) => metodo === "eq"), ["eq", "recording_id", GRAVACAO_ID]);
+  assert.deepEqual(selected.simulation.rules, { countMode: "curve", joins: { enabled: true, everySeconds: 45, max: 20 }, saleNotices: { enabled: false, items: 0 } });
+  assert.deepEqual(selected.simulation.totals, { counterMax: 240, joinsShown: 18, saleNoticesShown: null }, "o que a RPC trouxe do resumo congelado");
+  assert.deepEqual(selected.simulation.script.byTrigger, { at_offset: 1, manual: 1, on_phrase: 0 });
+  assert.equal(selected.simulation.script.ready, 1, "prontos: so os que entram sozinhos (o manual e o sem frase nao)");
+  assert.equal(selected.simulation.realParticipants, selected.report.presence.unique);
+  assert.ok(consultas(db, "webinar_chat_messages").every((query) => query.filters.some(([metodo, coluna, valor]) => metodo === "eq" && coluna === "source" && valor === "scripted")), "o roteiro que entrou e lido so para o bloco Simulacao");
+});
+
+test("fase 4 na pagina: banco sem a 202610290005 ou a 202610290006 deixa o aviso so no bloco; a Live ao vivo nao le a Simulacao nem oferece o CSV dela", async () => {
+  const db = bancoV4({ semMigracao: ["ofertas", "assistente"] });
+  const selected = (await semCacheV4(db))?.selected;
+  assert.ok(selected, "a pagina abre");
+  assert.deepEqual(selected.assistant, { enabled: false, pending: true });
+  assert.equal(selected.simulation.pending, true);
+  assert.equal(selected.simulation.rules, null);
+
+  const live = bancoV4({ sessoes: [sessaoRow({ kind: "live", started_at: "2026-11-05T23:00:00.000Z", status: "live" })] });
+  const aoVivo = (await semCacheV4(live))?.selected;
+  assert.ok(aoVivo);
+  assert.ok(!aoVivo.exportReports.includes("simulacao"));
+  assert.equal(aoVivo.simulation.rules, null);
+  assert.equal(consultas(live, "webinar_chat_messages").length, 0, "nada do roteiro numa live ao vivo");
+});
+
+test("as sessoes 'Comeca quando voce entra': so as dos ultimos 7 dias, da mais nova para a mais velha; a padrao e a mais recente", async () => {
+  const agora = Date.parse("2026-11-10T12:00:00.000Z");
+  const jit = (id, iso) => sessaoRow({ ended_at: iso, id, jit: true, scheduled_at: iso, started_at: iso, status: "ended" });
+  const db = bancoV4({
+    sessoes: [
+      sessaoRow({ id: SESSAO_ID, status: "ended" }),
+      jit("a0000000-0000-4000-8000-000000000002", "2026-11-09T14:15:00.000Z"),
+      jit("a0000000-0000-4000-8000-000000000003", "2026-11-08T14:15:00.000Z"),
+      jit("a0000000-0000-4000-8000-000000000004", "2026-11-01T14:15:00.000Z")
+    ]
+  });
+  const page = await semCacheV4(db, null, agora);
+  assert.deepEqual(
+    page?.sessions.map((session) => [session.id, session.selected]),
+    [
+      [SESSAO_ID, false],
+      ["a0000000-0000-4000-8000-000000000002", true],
+      ["a0000000-0000-4000-8000-000000000003", false]
+    ]
+  );
+});
+
+test("M9: os CSVs nunca passam pelo cache; cada pedido le o banco (a lista por aluno e os nomes) de novo", async () => {
+  const db = bancoV4();
+  const antes = cache.calls.length;
+  await queries.loadWebinarReportCsv(db, { sessionId: SESSAO_ID, webinarId: WEBINAR_ID });
+  await queries.loadWebinarReportCsv(db, { sessionId: SESSAO_ID, webinarId: WEBINAR_ID });
+  assert.equal(cache.calls.length, antes, "nada no unstable_cache");
+  assert.equal(consultas(db, "webinar_attendees").length, 2);
+  assert.equal(consultas(db, "profiles").length, 2);
+});
+
+test("a lista por aluno da pagina (§3.4.1): a variante que cada aluno clicou na sessao gravada; banco sem a 202610290005, vazio; na Live ao vivo nem le os cliques", async () => {
+  const clique = (userId, variant_label) => ({ clicked_at: "2026-11-05T23:20:00.000Z", converted_sale_grant_id: null, id: `${userId}-${variant_label}`, offer_id: "f0000000-0000-4000-8000-000000000001", session_id: SESSAO_ID, user_id: userId, variant_label });
+  const db = bancoV4({ cliques: [clique(ALUNA, "B"), clique(ALUNA, "B"), clique(ALUNO, "Z")] });
+  const selected = (await semCacheV4(db))?.selected;
+  assert.ok(selected);
+  assert.deepEqual(selected.offerClicked, { [ALUNA]: "B" }, "a letra uma vez; variante fora de A a D nao entra");
+  assert.ok(consultas(db, "webinar_offer_clicks")[0].filters.some(([metodo, coluna, valor]) => metodo === "eq" && coluna === "session_id" && valor === SESSAO_ID));
+
+  const pendente = (await semCacheV4(bancoV4({ semMigracao: ["ofertas"] })))?.selected;
+  assert.deepEqual(pendente?.offerClicked, {}, "sem a migracao: a coluna fica com '—' e a pagina abre");
+
+  const live = bancoV4({ sessoes: [sessaoRow({ kind: "live", started_at: "2026-11-05T23:00:00.000Z", status: "live" })] });
+  const aoVivo = (await semCacheV4(live))?.selected;
+  assert.equal(aoVivo?.offerClicked, null);
+  assert.equal(consultas(live, "webinar_offer_clicks").length, 0);
 });

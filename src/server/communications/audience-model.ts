@@ -16,7 +16,19 @@
 // antiga: o app de antes avalia um tipo que nao conhece como false (seguro), e um op desconhecido de
 // "access_age" cairia no "ha mais de". A regra "webinar" depende de um fato lido a parte (a RPC
 // communication_webinar_facts): sem a leitura, nunca combina, nem negada (como "message").
+//
+// Webinarios v4b (docs/30 §1.6 "Follow-up por segmento", §4.7): a regra "webinar_follow_up" (o que o aluno fez num
+// webinario: garantiu vaga, compareceu, viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou,
+// comprou pelo card), avaliada sobre webinar_follow_up_facts (que tira a equipe e nunca le a Simulacao). Vale no
+// segmento dos avisos e pop-ups ("Quem entra" de um fluxo tambem), nunca dentro de um fluxo (flowRuleDefinitionSchema
+// recusa). A chave "webinar:<id>" viaja junto das chaves de aviso em collectMessageCampaignIds e em
+// context.messageKeys: quem chama (dispatch, actions, motor) nao muda; o carregador de fatos separa as duas.
+// INTEGRACAO (provisorio): a fase 4 nasceu com o tipo "webinar", o mesmo nome da regra "Participação em lives" do
+// "Quem pode" (PR #138). As duas ficam lado a lado ate a unificacao (a proxima fase): a da fase 4 virou
+// "webinar_follow_up", com os fatos em `webinarFollowUps`.
 
+import { WEBINAR_FOLLOW_UP_ACTIONS, type WebinarFollowUpAction, type WebinarFollowUpFacts } from "../webinars/model";
+import { SEGUIMENTO_COPY } from "../../lib/webinar-copy-v4/seguimento";
 import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
 import { isReactionId, POLL_OPTION_ID, REACTION_EMOJI } from "./interactions-model";
@@ -37,7 +49,9 @@ export const AUDIENCE_RULE_TYPES = [
   "access_gained",
   // Quem pode da live por regras (docs/30 §1.6): valem no segmento e nos fluxos.
   "access_recent",
-  "webinar"
+  "webinar",
+  // Webinarios v4b (docs/30 §1.6): o follow-up por segmento; so no segmento comum (provisorio, ate a unificacao).
+  "webinar_follow_up"
 ] as const;
 export type AudienceRuleType = (typeof AUDIENCE_RULE_TYPES)[number];
 
@@ -70,7 +84,12 @@ export type AudienceRule =
    * Participacao em lives: "attended" = entrou na sala (ao vivo ou na Live gravada, por qualquer tempo; o replay
    * nao conta), "registered" = garantiu vaga. `webinarId` null = qualquer live.
    */
-  | { action: WebinarRuleAction; negate: boolean; type: "webinar"; webinarId: string | null };
+  | { action: WebinarRuleAction; negate: boolean; type: "webinar"; webinarId: string | null }
+  /**
+   * v4b (docs/30 §1.6): o que o aluno fez num webinario. Negada, so vale para quem garantiu vaga ou passou pelo
+   * webinario (tem linha em webinar_follow_up_facts), menos "não garantiu vaga", que vale para todos sem vaga.
+   */
+  | { action: WebinarFollowUpAction; negate: boolean; type: "webinar_follow_up"; webinarId: string };
 
 /** Periodo da regra "Ganhou acesso recentemente": o dia de Sao Paulo ou as ultimas N horas (1 a 720). */
 export type AccessRecentPeriod = { kind: "today" } | { hours: number; kind: "hours" };
@@ -169,6 +188,9 @@ export type MessageFact = {
 
 export type AudienceCommentCounts = { d7: number; d30: number; d90: number; total: number };
 
+/** v4b: o que o aluno fez num webinario (uma linha de webinar_follow_up_facts, sem os ids). */
+export type WebinarFollowUpFact = Omit<WebinarFollowUpFacts, "userId" | "webinarId">;
+
 export type AudienceStudentFacts = {
   accesses: AudienceAccessFact[];
   cohortIds: string[];
@@ -199,6 +221,12 @@ export type AudienceStudentFacts = {
    * (RPC communication_webinar_facts). Ausente com a leitura feita (context.webinarFactsLoaded) = nenhuma.
    */
   webinars?: AudienceWebinarFacts;
+  /**
+   * v4b: o que o aluno fez em cada webinario citado por uma regra "webinar_follow_up", pelo id do webinario.
+   * Webinario lido (context.messageKeys tem "webinar:<id>") sem a chave deste aluno = nao garantiu vaga nem passou
+   * por ele.
+   */
+  webinarFollowUps?: Record<string, WebinarFollowUpFact>;
 };
 
 export type AudienceWebinarFacts = { attended: readonly string[]; registered: readonly string[] };
@@ -215,7 +243,8 @@ export type AudienceContext = {
   flow?: { ctaPageKeys: Record<string, string | null> };
   /**
    * Chaves de mensagem ("campaign:<id>", "node:<id>") carregadas para todos os avaliados. Regra com chave
-   * fora daqui nunca combina (negada ou nao): o aviso nao foi lido, entao nao da para saber.
+   * fora daqui nunca combina (negada ou nao): o aviso nao foi lido, entao nao da para saber. v4b: tambem
+   * "webinar:<id>" (os fatos do webinario lidos; webinario apagado ou banco sem a migracao fica de fora).
    */
   messageKeys?: ReadonlySet<string>;
   /**
@@ -429,6 +458,9 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
 
       return rule.negate ? !done : done;
     }
+
+    case "webinar_follow_up":
+      return evaluateWebinarFollowUpRule(rule, facts, context);
   }
 
   return false;
@@ -460,6 +492,67 @@ function gainedAccessSince(facts: AudienceStudentFacts, productIds: readonly str
   return productIds.some(
     (productId) => !coveredBefore(productId) && facts.accesses.some((access) => access.startsAt >= since && coversProduct(access, productId))
   );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * v4b: a regra "webinar_follow_up" (follow-up por segmento, docs/30 §1.6; a "webinar" da fase 4 renomeada na integracao)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Chave dos fatos de um webinario em context.messageKeys e em collectMessageCampaignIds: "webinar:<id>". */
+export function webinarRuleKey(webinarId: string) {
+  return `webinar:${webinarId}`;
+}
+
+const WEBINAR_KEY_PREFIX = "webinar:";
+
+/** "webinar:<id>" -> id; outra chave (aviso) -> null. */
+export function webinarIdOfKey(key: string): string | null {
+  return typeof key === "string" && key.startsWith(WEBINAR_KEY_PREFIX) && key.length > WEBINAR_KEY_PREFIX.length ? key.slice(WEBINAR_KEY_PREFIX.length) : null;
+}
+
+/** O aluno fez isto no webinario? "clicou e não comprou" = clicou no card e nenhuma compra ligada ao clique. */
+export function webinarActionDone(fact: WebinarFollowUpFact, action: WebinarFollowUpAction) {
+  switch (action) {
+    case "registered":
+      return fact.registered;
+    case "attended":
+      return fact.attended;
+    case "watched_replay":
+      return fact.watchedReplay;
+    case "offer_seen":
+      return fact.offerSeen;
+    case "left_before_offer":
+      return fact.leftBeforeOffer;
+    case "clicked_no_purchase":
+      return fact.clicked && !fact.purchased;
+    case "purchased":
+      return fact.purchased;
+  }
+
+  return false;
+}
+
+/**
+ * Webinario nao lido (apagado, fora do carregador, banco sem a migracao) -> nunca combina, negada ou nao. Negada, so
+ * vale para quem tem linha (garantiu vaga ou passou pelo webinario): "não compareceu" e quem tinha vaga e nao veio,
+ * nunca a escola inteira. A excecao e "não garantiu vaga", que vale para todos sem vaga.
+ */
+function evaluateWebinarFollowUpRule(rule: Extract<AudienceRule, { type: "webinar_follow_up" }>, facts: AudienceStudentFacts, context: AudienceContext) {
+  if (!context.messageKeys?.has(webinarRuleKey(rule.webinarId))) {
+    return false;
+  }
+
+  const fact = facts.webinarFollowUps?.[rule.webinarId];
+
+  if (!rule.negate) {
+    return fact ? webinarActionDone(fact, rule.action) : false;
+  }
+
+  if (rule.action === "registered") {
+    return !fact?.registered;
+  }
+
+  return fact ? !webinarActionDone(fact, rule.action) : false;
 }
 
 /**
@@ -698,12 +791,16 @@ function collectCampaignIdsIn(node: AudienceNode, ids: Set<string>) {
     node.items.forEach((item) => collectCampaignIdsIn(item, ids));
   } else if (node.type === "message" && node.ref.kind === "campaign" && node.ref.campaignId) {
     ids.add(node.ref.campaignId);
+  } else if (node.type === "webinar_follow_up" && node.webinarId) {
+    ids.add(webinarRuleKey(node.webinarId));
   }
 }
 
 /**
  * Avisos cujas linhas do sino o carregador de fatos precisa ler para avaliar estas regras (cada regra
- * "message" que aponta para um aviso), sem repeticao e em ordem. Sem regra de mensagem -> [].
+ * "message" que aponta para um aviso), sem repeticao e em ordem. Sem regra de mensagem -> []. v4b: cada regra
+ * "webinar_follow_up" entra como a chave "webinar:<id>" (depois dos ids dos avisos, na ordem): o carregador de fatos
+ * (audience-facts.ts, facts-loader.ts) separa e le os fatos do webinario uma vez; quem so repassa a lista nao muda.
  */
 export function collectMessageCampaignIds(
   definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
@@ -723,11 +820,26 @@ export function collectMessageCampaignIds(
 /**
  * O que pedir ao carregador de fatos (loadAudienceFacts, FactsLoader.load) para avaliar estas regras: os avisos
  * citados por "o que fez com a notificacao X" e, so com a regra "Participação em lives", as lives de cada aluno.
+ * (As chaves "webinar:<id>" da regra "webinar_follow_up", da fase 4, ja vem em messageCampaignIds.)
  */
 export function audienceFactsRequest(
   definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
 ): { messageCampaignIds: string[]; webinars: boolean } {
   return { messageCampaignIds: collectMessageCampaignIds(definitions), webinars: audienceFactNeeds(definitions).webinars };
+}
+
+/**
+ * v4b: os webinarios citados por regras "webinar_follow_up" (a frase do segmento busca os titulos), sem repeticao e em
+ * ordem.
+ */
+export function collectAudienceWebinarIds(
+  definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
+): string[] {
+  return collectMessageCampaignIds(definitions).flatMap((key) => {
+    const id = webinarIdOfKey(key);
+
+    return id ? [id] : [];
+  });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -911,6 +1023,10 @@ function normalizeRule(rule: AudienceRule): AudienceRule | null {
     case "access_recent":
     case "webinar":
       return normalizeLiveAudienceRule(rule);
+    case "webinar_follow_up":
+      return typeof rule.webinarId === "string" && WEBINAR_FOLLOW_UP_ACTIONS.includes(rule.action)
+        ? { action: rule.action, negate: rule.negate === true, type: "webinar_follow_up", webinarId: rule.webinarId.trim() }
+        : null;
   }
 
   return rule;
@@ -998,7 +1114,11 @@ export type AudienceNames = {
   /** v3a: chave da notificacao -> id da opcao da enquete -> texto da opcao. */
   pollOptions?: Record<string, Record<string, string>>;
   products: Record<string, string>;
-  /** Id do webinario -> titulo (regra "Participação em lives"). */
+  /**
+   * Id do webinario -> titulo. Compartilhado pelas duas regras de lives enquanto convivem: "Participação em lives"
+   * (`webinar`, sem titulo: "uma live removida") e o follow-up da fase 4 (`webinar_follow_up`, sem o titulo: "um
+   * webinário removido").
+   */
   webinars?: Record<string, string>;
 };
 
@@ -1126,6 +1246,11 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
     }
     case "webinar":
       return webinarRulePhrase(rule, names);
+    case "webinar_follow_up": {
+      const phrase = (rule.negate ? SEGUIMENTO_COPY.pluralNegadas : SEGUIMENTO_COPY.plural)[rule.action] ?? "";
+
+      return phrase ? SEGUIMENTO_COPY.descrever(phrase, names.webinars?.[rule.webinarId]?.trim() || null) : "";
+    }
   }
 
   return "";

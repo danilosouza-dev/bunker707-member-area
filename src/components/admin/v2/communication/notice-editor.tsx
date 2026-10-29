@@ -123,6 +123,7 @@ import {
   audienceErrorsFrom,
   audienceMessageOptions,
   audienceNamesWithMessages,
+  audienceNamesWithWebinarFollowUps,
   canonicalNoticeDraft,
   isLivePopupStatus,
   isNoticeKindLocked,
@@ -767,8 +768,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
           window: payload.window
         });
   const audienceNames = useMemo(
-    () => audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })),
-    [options.names, options.notices]
+    () =>
+      audienceNamesWithWebinarFollowUps(
+        audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })),
+        options.webinarFollowUps
+      ),
+    [options.names, options.notices, options.webinarFollowUps]
   );
   const audienceDescription = describeAudience(normalizeAudience(draft.audience), audienceNames);
   // Nomes das frases das seguintes: a principal e cada seguinte pelo passo ("node:<id>").
@@ -1793,6 +1798,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
                   productsLoaded={options.productsLoaded}
                   segments={options.segments}
                   value={draft.audience}
+                  webinarFollowUps={options.webinarFollowUps ?? null}
                   webinars={options.webinars}
                 />
                 <AudienceCount description={audienceDescription} needsApproval={needsApproval} onRetry={() => setCountAttempt((attempt) => attempt + 1)} state={countView} />

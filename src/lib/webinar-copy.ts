@@ -2,7 +2,19 @@
 // Comunicacao (tests/comunicacao-admin-modelo.test.mjs e tests/pop-ups-v3b1-frases.test.mjs) nao leem este
 // arquivo, de proposito: o Webinario usa "Sessão", "lembrete" e, na fase 4, "Oferta" na tela. A guarda propria
 // e tests/webinarios-frases.test.mjs (PROIBIDAS_WEBINARIO em src/lib/webinar-copy.ts, abaixo).
-// Modulo puro, sem imports.
+// Modulo puro: os unicos imports sao as frases da fase 4, uma por frente, em src/lib/webinar-copy-v4/ (cada frente e
+// dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
+// .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto.
+
+import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
+import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
+import { JIT_COPY } from "./webinar-copy-v4/jit";
+import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
+import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
+import { SEGUIMENTO_COPY } from "./webinar-copy-v4/seguimento";
+import { SIMULACAO_COPY } from "./webinar-copy-v4/simulacao";
+import { TRADUCAO_COPY } from "./webinar-copy-v4/traducao";
+import { VERTICAL_COPY } from "./webinar-copy-v4/vertical";
 
 /** Palavras que nunca entram num rotulo do Webinario (docs/30, Resumo e §10.1). */
 export const PROIBIDAS_WEBINARIO = [
@@ -501,6 +513,9 @@ export const WEBINAR_COPY = {
     curva: "Presentes minuto a minuto",
     enquetes: "Enquetes",
     faltaram: "Não vieram",
+    /** Bloco Vagas (§3.4, fase 4b): quem garantiu vaga e nao veio vira o "Para quem" de um aviso novo. */
+    avisarQuemFaltou: "Avisar quem não veio",
+    avisarQuemFaltouDica: "Abre um aviso novo para quem garantiu vaga e não veio, com a regra do webinário já no “Para quem”.",
     maioresQuedas: "Maiores quedas",
     maisQuentes: "Mais quentes",
     mensagens: "Mensagens",
@@ -545,6 +560,7 @@ export const WEBINAR_COPY = {
       entradas: "Entradas",
       entrou: "Entrou",
       mensagens: "Mensagens",
+      ofertaClicada: "Oferta clicada",
       perguntas: "Perguntas",
       pontuacao: "Pontuação",
       reacoes: "Reações",
@@ -601,7 +617,17 @@ export const WEBINAR_COPY = {
     semSessoes: "Nenhuma sessão começou ainda.",
     dispositivo: { desktop: "computador", mobile: "celular" },
     carregando: "Carregando o relatório"
-  }
+  },
+  /* Fase 4 (docs/30 §11): uma chave por frente, cada uma no seu arquivo de src/lib/webinar-copy-v4/. */
+  paineis: PAINEIS_COPY,
+  exportar: EXPORTAR_COPY,
+  oferta: OFERTA_COPY,
+  simulacao: SIMULACAO_COPY,
+  seguimento: SEGUIMENTO_COPY,
+  assistente: ASSISTENTE_COPY,
+  vertical: VERTICAL_COPY,
+  jit: JIT_COPY,
+  traducao: TRADUCAO_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

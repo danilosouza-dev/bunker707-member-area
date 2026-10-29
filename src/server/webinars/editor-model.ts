@@ -26,6 +26,7 @@ import {
 import { formatSaoPauloDateTime, saoPauloLocalToIso } from "../communications/campaign-model";
 import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatus } from "./recorder-model";
 import { webinarReportHref } from "./report-page-model";
+import { jitActive, jitSummary, withJitPublishProblems } from "./jit-model";
 import {
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
@@ -34,6 +35,7 @@ import {
   accessModeUsesProduct,
   emptyWebinarDraft,
   type AccessMode,
+  type JitSettings,
   type SessionStatus,
   type WebinarDraft,
   type WebinarKind,
@@ -107,6 +109,8 @@ export const WEBINAR_ADMIN_COPY = {
     avisar: { description: "Onde o webinário aparece para quem pode ver.", title: "Avisar" },
     dados: { description: "Título, capa, quem apresenta e a hora marcada.", title: "Dados" },
     enquetes: { description: "Prontas para abrir na hora, no console da sessão.", title: "Enquetes" },
+    oferta: { description: WEBINAR_COPY.oferta.card.descricao, title: WEBINAR_COPY.oferta.card.titulo },
+    assistente: { description: WEBINAR_COPY.assistente.card.descricao, title: WEBINAR_COPY.assistente.card.titulo },
     gravacao: { description: "Só na Live ao vivo: o servidor de gravação é criado antes da live e apagado no fim.", title: "Gravação" },
     qualidade: { description: "Cada aluno recebe o tamanho que cabe na tela dele; em 4G cai sozinho para 720p ou 360p.", title: "Qualidade" },
     quemPode: { description: "Quem não passa por aqui não vê o webinário em lugar nenhum.", title: "Quem pode" },
@@ -170,7 +174,6 @@ export const WEBINAR_ADMIN_COPY = {
       "Pela lei (CDC, art. 37), nunca anuncie uma sessão gravada como ao vivo fora da área de membros. Dentro dela, o selo e os números simulados são sua decisão e ficam registrados com seu nome e a data.",
     needsPublish: "Só quem publica na Comunicação decide o selo.",
     noSessions: "Marque as sessões no card Sessões e salve para decidir o selo de cada uma.",
-    numbersReal: "Números de plateia: reais (o contador simulado chega na fase 4).",
     sessionLabel: (when: string) => `Sessão de ${when}`,
     undecided: "Sem decisão registrada: o selo fica desligado.",
     unsaved: "Marque a confirmação para gravar a decisão."
@@ -1017,11 +1020,30 @@ export function webinarFailureTitle(input: { savedDraft: boolean; status: number
  * Cards do editor (docs/30 §2.2) e o mapa dos erros
  * ---------------------------------------------------------------------------------------------- */
 
-export const WEBINAR_EDITOR_CARDS = ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "gravacao", "replayAula", "revisao"] as const;
+export const WEBINAR_EDITOR_CARDS = [
+  "dados",
+  "sessoes",
+  "simulacao",
+  "roteiro",
+  "quemPode",
+  "vagaLembretes",
+  "avisar",
+  "sala",
+  "enquetes",
+  "oferta",
+  "assistente",
+  "qualidade",
+  "gravacao",
+  "replayAula",
+  "revisao"
+] as const;
 export type WebinarEditorCard = (typeof WEBINAR_EDITOR_CARDS)[number];
 
-/** Cards que so existem num webinario ja gravado (precisam do id): o roteiro, a Simulacao e as enquetes. */
-export const WEBINAR_SAVED_ONLY_CARDS: readonly WebinarEditorCard[] = ["simulacao", "roteiro", "enquetes"];
+/**
+ * Cards que so existem num webinario ja gravado (precisam do id): o roteiro, a Simulacao, as enquetes e, na fase 4, a
+ * Oferta (4b) e o Assistente (4c), que salvam pelas proprias Server Actions.
+ */
+export const WEBINAR_SAVED_ONLY_CARDS: readonly WebinarEditorCard[] = ["simulacao", "roteiro", "enquetes", "oferta", "assistente"];
 
 const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes", "simulacao", "roteiro"];
 
@@ -1053,6 +1075,7 @@ const FIELD_CARDS: readonly [string, WebinarEditorCard][] = [
   ["autoRecord", "gravacao"],
   ["replayLessonTarget", "replayAula"],
   ["sessions", "sessoes"],
+  ["jit", "sessoes"],
   ["kind", "dados"],
   ["title", "dados"],
   ["coverUrl", "dados"],
@@ -1572,16 +1595,26 @@ export function describeWebinarAccess(draft: Pick<WebinarDraft, "accessMode" | "
   return who;
 }
 
-/** A frase da Revisao: o que falta para publicar ou o resumo do que vai ao ar. */
+/**
+ * O que falta para publicar na tela (publishProblems) com o "Comeca quando voce entra" gravado: a Live gravada com ele
+ * ligado publica sem hora marcada (docs/30 §2.2; a Server Action confere de novo com as regras do banco).
+ */
+export function webinarPublishProblems(draft: WebinarDraft, now: number, jit: Pick<JitSettings, "enabled"> | null | undefined) {
+  return withJitPublishProblems(publishProblems(draft, now), { jit, kind: draft.kind });
+}
+
+/** A frase da Revisao: o que falta para publicar ou o resumo do que vai ao ar (com o just-in-time, os horarios dele). */
 export function webinarReviewSentence(input: {
   draft: WebinarDraft;
+  /** Fase 4e: as regras gravadas do "Comeca quando voce entra" (nulo ou desligado: so as horas marcadas). */
+  jit?: Pick<JitSettings, "enabled" | "endHour" | "everyMinutes" | "startHour"> | null;
   now: number;
   productName: string | null;
   registeredCount: number | null;
   situation: WebinarSituation | null;
 }): string {
   const { draft } = input;
-  const problems = publishProblems(draft, input.now);
+  const problems = webinarPublishProblems(draft, input.now, input.jit);
 
   if ((input.situation === null || input.situation === "draft") && problems.length > 0) {
     const messages = Array.from(new Set(problems.map((problem) => problem.message.replace(/\.$/, ""))));
@@ -1600,8 +1633,10 @@ export function webinarReviewSentence(input: {
     : ", sem vaga";
   const registered = typeof input.registeredCount === "number" && input.registeredCount > 0 ? ` ${input.registeredCount} ${input.registeredCount === 1 ? "aluno já garantiu" : "alunos já garantiram"} vaga.` : "";
   const home = draft.showOnHome ? " O card entra na página inicial." : "";
+  const jit = input.jit && jitActive(draft.kind, input.jit) ? jitSummary(input.jit) : null;
+  const schedule = jit && draft.sessions.length === 0 ? ` com ${jit}` : ` em ${when}${sessions}${jit ? ` e ${jit}` : ""}`;
 
-  return `${webinarKindLabel(draft.kind)} em ${when}${sessions}, ${draft.durationMinutes} min, para ${access}${registration}.${home}${registered}`;
+  return `${webinarKindLabel(draft.kind)}${schedule}, ${draft.durationMinutes} min, para ${access}${registration}.${home}${registered}`;
 }
 
 /* ------------------------------------------------------------------------------------------------

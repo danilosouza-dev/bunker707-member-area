@@ -1,6 +1,6 @@
 "use client";
 
-import { Pin, PinOff, Send, Trash2 } from "lucide-react";
+import { Languages, PencilLine, Pin, PinOff, Send, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -18,7 +18,9 @@ import { StatusChip } from "../../../status-chip";
 // (Liberar), Apagar, Fixar/Desafixar, "Aprovar para as proximas turmas" (so mensagem da turma com o aceite do
 // autor; sem aceite, a tela diz por que), Quem pode escrever e Modo lento no topo, e a caixa da equipe (Enter envia,
 // Shift+Enter quebra a linha). A lista cola no fim quando a pessoa ja estava no fim. Na Live ao vivo (fase 3), o ⋯ de
-// cada mensagem da turma (`personMenu`) traz Silenciar 5/15/60 min / ate o fim, Remover e Banir do autor.
+// cada mensagem da turma (`personMenu`) traz Silenciar 5/15/60 min / ate o fim, Remover e Banir do autor. Fase 4c
+// (docs/30 §1.6 e D24): as respostas do Assistente levam o selo Assistente e "Corrigir resposta" (`onEditAssistant`,
+// o texto novo em linha); Apagar segue o mesmo de qualquer mensagem.
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
 
@@ -29,7 +31,11 @@ type ConsoleChatProps = {
   hostUserId: string | null;
   messages: readonly ConsoleMessage[];
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
+  /** Fase 4c: "Corrigir resposta" numa resposta do Assistente (devolve se gravou). */
+  onEditAssistant?: ((messageId: string, body: string) => Promise<boolean>) | null;
   onModerate: (action: ModerationAction, messageId: string) => void;
+  /** Fase 4f: "Refazer tradução" (apaga a traducao guardada do texto); nulo com a traducao desligada no ambiente. */
+  onRetranslate?: ((messageId: string) => void) | null;
   onSend: (body: string) => Promise<boolean>;
   /** Fase 3: o ⋯ do autor de uma mensagem da turma (Silenciar no chat, Remover, Banir); nulo fora da Live ao vivo. */
   personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
@@ -56,8 +62,9 @@ function roleLabel(message: ConsoleMessage): string | null {
   return null;
 }
 
-export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate, onSend, personMenu = null, pinnedMessageId, session }: ConsoleChatProps) {
+export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssistant = null, onModerate, onRetranslate = null, onSend, personMenu = null, pinnedMessageId, session }: ConsoleChatProps) {
   const [body, setBody] = useState("");
+  const [editing, setEditing] = useState<{ body: string; id: string } | null>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const stickToEnd = useRef(true);
   const sending = busyKey === "send";
@@ -88,6 +95,18 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate,
     if (await onSend(text)) {
       setBody("");
       stickToEnd.current = true;
+    }
+  }
+
+  async function saveEdit() {
+    const text = editing?.body.trim() ?? "";
+
+    if (!editing || !text || !onEditAssistant) {
+      return;
+    }
+
+    if (await onEditAssistant(editing.id, text)) {
+      setEditing(null);
     }
   }
 
@@ -135,9 +154,47 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate,
                 {pinnedMessageId === message.id ? <StatusChip tone="success">{copy.pinned}</StatusChip> : null}
                 {message.master ? <StatusChip tone="success">{copy.master}</StatusChip> : null}
               </div>
-              <p className="text-sm leading-5 break-words whitespace-pre-wrap text-[var(--text-primary)]">{message.body}</p>
+              {editing?.id === message.id ? (
+                <div className="flex min-w-0 flex-col gap-2" data-console-edit={message.id}>
+                  <label className="sr-only" htmlFor={`console-edit-${message.id}`}>
+                    {WEBINAR_COPY.assistente.console.corrigir}
+                  </label>
+                  <textarea
+                    className={cn(adminTextareaClass, "min-h-16")}
+                    disabled={busy}
+                    id={`console-edit-${message.id}`}
+                    maxLength={CHAT_LIMITS.body}
+                    onChange={(event) => setEditing({ body: event.target.value, id: message.id })}
+                    rows={3}
+                    value={editing.body}
+                  />
+                  <div className="flex flex-wrap justify-end gap-1">
+                    <Button className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => setEditing(null)} type="button" variant="ghost">
+                      {WEBINAR_COPY.assistente.console.cancelar}
+                    </Button>
+                    <Button className="h-8! px-2 text-[13px]" disabled={busy || !editing.body.trim()} onClick={() => void saveEdit()} type="button" variant="secondary">
+                      {WEBINAR_COPY.assistente.console.salvarCorrecao}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm leading-5 break-words whitespace-pre-wrap text-[var(--text-primary)]">{message.body}</p>
+              )}
               {canAct ? (
                 <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  {onEditAssistant && message.source === "ai" && editing?.id !== message.id ? (
+                    <Button
+                      aria-label={WEBINAR_COPY.assistente.console.corrigir}
+                      className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
+                      disabled={busy}
+                      onClick={() => setEditing({ body: message.body, id: message.id })}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <PencilLine aria-hidden="true" className="size-4" />
+                      {WEBINAR_COPY.assistente.console.corrigir}
+                    </Button>
+                  ) : null}
                   {actions.approve ? (
                     <Button className="h-8! px-2 text-[13px]" disabled={busy} onClick={() => onModerate("approve", message.id)} type="button" variant="secondary">
                       {copy.approve}
@@ -160,6 +217,20 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate,
                     <Button aria-label={`${copy.unpin}: ${message.displayName}`} className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => onModerate("unpin", message.id)} type="button" variant="ghost">
                       <PinOff aria-hidden="true" className="size-4" />
                       {copy.unpin}
+                    </Button>
+                  ) : null}
+                  {onRetranslate ? (
+                    <Button
+                      aria-label={`${WEBINAR_COPY.traducao.console.refazer}: ${message.displayName}`}
+                      className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
+                      data-console-retranslate=""
+                      disabled={busy}
+                      onClick={() => onRetranslate(message.id)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Languages aria-hidden="true" className="size-4" />
+                      {WEBINAR_COPY.traducao.console.refazer}
                     </Button>
                   ) : null}
                   <Button aria-label={`${copy.delete}: ${message.displayName}`} className="h-8! px-2 text-[13px] text-[var(--error)]" disabled={busy} onClick={() => onModerate("delete", message.id)} type="button" variant="ghost">
