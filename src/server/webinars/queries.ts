@@ -7,13 +7,28 @@ import "server-only";
 
 import { ADMIN_ROLE_LABELS, can, customFunctionIdsOf, resolveAdminAccess, type AdminRole, type CustomFunctionDefinition } from "@/server/auth/roles";
 import { readCustomFunctions } from "@/server/auth/admin-access";
-import { getAuthenticatedUser } from "@/server/auth/session";
+import { getAuthenticatedUser, getUserDisplayName } from "@/server/auth/session";
 import type { AudienceDefinition } from "@/server/communications/audience-model";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { loadNoticeEditorOptions, type NoticeEditorOptions } from "@/server/communications/queries";
+import { pollFromRow, scriptItemFromRow, transcriptCuesOf } from "./chat-rows";
+import { fetchTranscriptRow, listPollRows, listScriptItemRows } from "./chat-store";
 import { WEBINARS_PAGE_SIZE, matchesWebinarSearch, webinarDraftOf, webinarKindLabel, webinarSituationLabel, webinarSituationTone, type WebinarTone } from "./editor-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
-import { nextSession, toTime, webinarSituation, type WebinarDraft, type WebinarKind, type WebinarSession, type WebinarSituation, type WebinarStatus } from "./model";
+import {
+  TRANSCRIPT_FORMATS,
+  nextSession,
+  toTime,
+  webinarSituation,
+  type Poll,
+  type ScriptItem,
+  type WebinarDraft,
+  type WebinarKind,
+  type WebinarSession,
+  type WebinarSituation,
+  type WebinarStatus,
+  type WebinarTranscriptFormat
+} from "./model";
 import { sessionFromRow, webinarFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows, listWebinarRows } from "./store";
 
@@ -31,6 +46,8 @@ export type WebinarListItem = {
   /** Presentes (pico): so a partir da fase 2 (presenca por balde). */
   peakPresent: number | null;
   registeredCount: number;
+  /** A sessao no ar ou na espera agora (Abrir o console e Encerrar live do menu); nula fora disso. */
+  runningSessionId: string | null;
   sessionsCount: number;
   situation: WebinarSituation;
   situationLabel: string;
@@ -101,6 +118,11 @@ async function loadCreatorNames(db: WebinarsDb, ids: readonly (string | null)[])
   return names;
 }
 
+/** A sessao que esta rodando (no ar ou na espera), nunca o replay. */
+export function runningSessionOf(sessions: readonly WebinarSession[]): WebinarSession | null {
+  return sessions.find((session) => session.kind !== "replay" && (session.status === "live" || session.status === "waiting")) ?? null;
+}
+
 /** A hora que a lista mostra: a proxima sessao; sem proxima, a ultima marcada; sem sessao, a hora marcada do webinario. */
 function whenOf(row: WebinarRow, sessions: readonly WebinarSession[], now: number): string | null {
   const next = nextSession(sessions, row.duration_minutes, now);
@@ -133,6 +155,7 @@ function toListItem(row: WebinarRow, input: { names: Map<string, string>; now: n
     kindLabel: webinarKindLabel(webinar.kind),
     peakPresent: null,
     registeredCount: input.registered.get(row.id) ?? 0,
+    runningSessionId: runningSessionOf(sessions)?.id ?? null,
     sessionsCount: sessions.filter((session) => session.kind !== "replay" && session.status !== "cancelled").length,
     situation,
     situationLabel: webinarSituationLabel(situation),
@@ -237,19 +260,33 @@ export async function listWebinarsForAdmin(input: {
  * O editor (docs/30 §2.2)
  * ---------------------------------------------------------------------------------------------- */
 
+/** A transcricao da gravacao base como o card Roteiro mostra (so o resumo; as cues ficam no servidor). */
+export type TranscriptSummary = { cues: number; format: WebinarTranscriptFormat; language: string; updatedAt: string };
+
 export type WebinarEditorData = {
   cancelReason: string | null;
   cancelledAt: string | null;
   createdAt: string;
+  /** Nome de quem decidiu a Simulacao de cada sessao (simulation_decided_by -> nome), para o card. */
+  deciderNames: Record<string, string>;
   draft: WebinarDraft;
   id: string;
+  /** Os modelos de enquete (sem sessao); as copias lancadas ficam no console. */
+  polls: Poll[];
   publishedAt: string | null;
+  /** A gravacao base (o video da Live gravada); a transcricao e o roteiro apontam para ela. */
+  recordingId: string | null;
   registeredCount: number;
+  /** A sessao `replay` (livre), quando existe e nao foi fechada. */
+  replaySession: WebinarSession | null;
+  runningSessionId: string | null;
+  scriptItems: ScriptItem[];
   sessions: WebinarSession[];
   situation: WebinarSituation;
   slug: string;
   status: WebinarStatus;
   title: string;
+  transcript: TranscriptSummary | null;
   updatedAt: string;
 };
 
@@ -258,12 +295,16 @@ export function baseRecordingOf(recordings: readonly RecordingRow[]): RecordingR
   return recordings.find((recording) => recording.session_id === null && recording.source === "bunny") ?? recordings.find((recording) => recording.session_id === null) ?? null;
 }
 
-/** As horas marcadas da Live gravada que o editor edita: sessoes `simulated` ainda nao canceladas. */
-export function draftSessionsOf(sessions: readonly WebinarSession[]): { scheduledAt: string }[] {
+/** As horas marcadas da Live gravada que o editor edita: sessoes `simulated` ainda nao canceladas, com a Entrada atrasada. */
+export function draftSessionsOf(sessions: readonly WebinarSession[]): { lateJoinMinutes: number | null; scheduledAt: string }[] {
   return sessions
     .filter((session) => session.kind === "simulated" && session.status !== "cancelled")
     .sort((left, right) => toTime(left.scheduledAt) - toTime(right.scheduledAt))
-    .map((session) => ({ scheduledAt: session.scheduledAt }));
+    .map((session) => ({ lateJoinMinutes: session.lateJoinMinutes, scheduledAt: session.scheduledAt }));
+}
+
+function transcriptFormatOf(value: string): WebinarTranscriptFormat {
+  return (TRANSCRIPT_FORMATS as readonly string[]).includes(value) ? (value as WebinarTranscriptFormat) : "vtt";
 }
 
 export async function getWebinarEditorData(id: string, now = Date.now()): Promise<WebinarEditorData | null> {
@@ -281,21 +322,41 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     countRegistrationsByWebinar(db, [row.id])
   ]);
   const sessions = sessionRows.map(sessionFromRow);
-  const webinar = webinarFromRow(row, presenters, baseRecordingOf(recordings));
+  const recording = baseRecordingOf(recordings);
+  const webinar = webinarFromRow(row, presenters, recording);
+  const simulated = webinar.kind === "simulated";
+  const [scriptRows, transcriptRow, pollRows, deciderNames] = await Promise.all([
+    simulated ? listScriptItemRows(db, row.id) : Promise.resolve([]),
+    simulated && recording ? fetchTranscriptRow(db, recording.id) : Promise.resolve(null),
+    listPollRows(db, { sessionId: null, webinarId: row.id }),
+    loadCreatorNames(
+      db,
+      sessions.map((session) => session.simulationDecidedBy)
+    )
+  ]);
 
   return {
     cancelReason: webinar.cancelReason,
     cancelledAt: webinar.cancelledAt,
     createdAt: webinar.createdAt,
+    deciderNames: Object.fromEntries(deciderNames),
     draft: { ...webinarDraftOf(webinar), sessions: draftSessionsOf(sessions) },
     id: webinar.id,
+    polls: pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options)),
     publishedAt: webinar.publishedAt,
+    recordingId: recording?.id ?? null,
     registeredCount: registered.get(row.id) ?? 0,
+    replaySession: sessions.find((session) => session.kind === "replay" && session.status !== "cancelled") ?? null,
+    runningSessionId: runningSessionOf(sessions)?.id ?? null,
+    scriptItems: scriptRows.map(scriptItemFromRow),
     sessions,
     situation: webinarSituation(webinar, sessions, now),
     slug: webinar.slug,
     status: webinar.status,
     title: row.title,
+    transcript: transcriptRow
+      ? { cues: transcriptCuesOf(transcriptRow.cues).length, format: transcriptFormatOf(transcriptRow.source_format), language: transcriptRow.language, updatedAt: transcriptRow.updated_at }
+      : null,
     updatedAt: webinar.updatedAt
   };
 }
@@ -315,6 +376,8 @@ export type WebinarPersonOption = {
 
 export type WebinarEditorOptions = Pick<NoticeEditorOptions, "cohorts" | "names" | "notices" | "products" | "productsLoaded" | "segments"> & {
   currentUserId: string | null;
+  /** O nome de quem esta na tela, como a frase da Simulacao (docs/30 §8.6) registra o responsavel. */
+  currentUserName: string | null;
   people: WebinarPersonOption[];
   /** false: as permissoes da equipe nao carregaram agora (todos aparecem; o servidor confere ao publicar). */
   peopleLoaded: boolean;
@@ -376,6 +439,7 @@ export async function loadWebinarEditorOptions(input: { audiences?: readonly Aud
   return {
     cohorts: base.cohorts,
     currentUserId,
+    currentUserName: viewer ? getUserDisplayName(viewer).fullName : (people.find((person) => person.isMe)?.name ?? null),
     names: base.names,
     notices: base.notices,
     people,

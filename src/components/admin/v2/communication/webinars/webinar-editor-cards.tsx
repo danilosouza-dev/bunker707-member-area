@@ -1,10 +1,12 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { MonitorPlay, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
 import type { AudienceDefinition } from "@/server/communications/audience-model";
+import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import {
   ACCESS_MODE_OPTIONS,
   WEBINAR_ADMIN_COPY,
@@ -14,16 +16,19 @@ import {
   nextWebinarSessionAt,
   reminderPreviewText,
   sortWebinarSessions,
+  webinarConsoleHref,
   webinarFirstSessionAt
 } from "@/server/webinars/editor-model";
-import type { AccessMode, ChatMode, DisplayNameMode, WebinarDraft } from "@/server/webinars/model";
+import { toTime, type AccessMode, type ChatMode, type DisplayNameMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
 import type { WebinarEditorOptions } from "@/server/webinars/queries";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
+import { StatusChip } from "../../status-chip";
 import type { ProductPickerItem } from "../../storefront/product-picker";
 import { ProductPicker } from "../../storefront/product-picker";
 import { AudienceBuilder, AudienceCount, type AudienceCountState } from "../audience-builder";
 import { DateTimeField } from "../notice-when-fields";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 
 // Cards do editor do webinario que nao dependem do estado do editor alem do rascunho (docs/30 §2.2): Sessoes,
 // Quem pode, Vaga e lembretes, Avisar, Sala, Qualidade, Gravacao e Publicar replay como aula. O card Dados fica
@@ -118,55 +123,154 @@ function SoonRow({ hint, label }: { hint?: string; label: string }) {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Sessoes (so Live gravada)
+ * Sessoes (so Live gravada): horas marcadas, Entrada atrasada por sessao e o Replay livre (fase 2)
  * ---------------------------------------------------------------------------------------------- */
 
-export function SessionsCard({ disabled, draft, errorFor, now, onBlur, onChange }: CardProps) {
+type LateJoinChoice = "always" | "until";
+
+const LATE_JOIN_OPTIONS: readonly { label: string; value: LateJoinChoice }[] = [
+  { label: copy.lateJoinAlways, value: "always" },
+  { label: copy.lateJoinUntil, value: "until" }
+];
+
+const SESSION_STATUS_TONE: Record<WebinarSession["status"], "error" | "muted" | "neutral" | "success" | "warning"> = {
+  cancelled: "error",
+  ended: "muted",
+  live: "success",
+  scheduled: "neutral",
+  waiting: "warning"
+};
+
+const SESSION_STATUS_LABEL: Record<WebinarSession["status"], string> = {
+  cancelled: WEBINAR_ADMIN_COPY.console.phases.cancelled,
+  ended: WEBINAR_ADMIN_COPY.console.phases.ended,
+  live: WEBINAR_ADMIN_COPY.console.phases.live,
+  scheduled: WEBINAR_ADMIN_COPY.console.phases.scheduled,
+  waiting: WEBINAR_ADMIN_COPY.console.phases.waiting
+};
+
+export type ReplayControl = {
+  busy: boolean;
+  /** Alguma sessao ja encerrou: o replay pode abrir. */
+  firstEnded: boolean;
+  onCancel: () => void;
+  onCreate: () => void;
+  session: WebinarSession | null;
+};
+
+type SessionsCardProps = CardProps & {
+  /** Nulo enquanto o webinario nao foi gravado (sem id): o Replay livre e os consoles aparecem depois do primeiro salvar. */
+  replay: ReplayControl | null;
+  /** As sessoes gravadas, para a situacao e o link do console de cada hora marcada. */
+  savedSessions: readonly WebinarSession[];
+  webinarId: string | null;
+};
+
+export function SessionsCard({ disabled, draft, errorFor, now, onBlur, onChange, replay, savedSessions, webinarId }: SessionsCardProps) {
   const sessions = draft.sessions;
   const listError = errorFor("sessions");
+  const savedByTime = new Map(savedSessions.filter((session) => session.kind === "simulated" && session.status !== "cancelled").map((session) => [toTime(session.scheduledAt), session]));
 
-  function update(index: number, scheduledAt: string) {
-    const next = sessions.map((session, position) => (position === index ? { scheduledAt } : session));
+  function update(index: number, patch: Partial<WebinarDraft["sessions"][number]>) {
+    const next = sessions.map((session, position) => (position === index ? { ...session, ...patch } : session));
     onChange({ sessions: next });
-    onBlur(`sessions.${index}.scheduledAt`);
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex min-w-0 flex-col gap-3" role="group" aria-labelledby="webinar-sessions-label">
+      <div className="flex min-w-0 flex-col gap-4" role="group" aria-labelledby="webinar-sessions-label">
         <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id="webinar-sessions-label">
           {copy.sessions}
         </span>
         {sessions.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.sessionsEmpty}</p> : null}
-        {sessions.map((session, index) => (
-          <div className="flex min-w-0 flex-wrap items-end gap-2" key={`${index}-${session.scheduledAt}`}>
-            <DateTimeField
-              disabled={disabled}
-              error={errorFor(`sessions.${index}.scheduledAt`)}
-              idPrefix={`webinar-sessions-${index}`}
-              label={`Sessão ${index + 1}`}
-              onChange={(iso) => update(index, iso)}
-              value={session.scheduledAt}
-            />
-            <Button
-              aria-label={`${copy.sessionsRemove} ${index + 1}`}
-              className="px-3 text-[var(--text-secondary)]"
-              disabled={disabled}
-              onClick={() => onChange({ sessions: sessions.filter((_, position) => position !== index) })}
-              type="button"
-              variant="ghost"
-            >
-              <Trash2 aria-hidden="true" className="size-4" />
-              {copy.sessionsRemove}
-            </Button>
-          </div>
-        ))}
+        {sessions.map((session, index) => {
+          const saved = savedByTime.get(toTime(session.scheduledAt)) ?? null;
+          const lateJoin: LateJoinChoice = session.lateJoinMinutes == null ? "always" : "until";
+          const lateJoinId = `webinar-sessions-${index}-lateJoinMinutes`;
+          const lateJoinError = errorFor(`sessions.${index}.lateJoinMinutes`);
+
+          return (
+            <div className="flex min-w-0 flex-col gap-3 border-b border-[var(--border-subtle)] pb-4 last:border-b-0 last:pb-0" data-session-row={index} key={`${index}-${session.scheduledAt}`}>
+              <div className="flex min-w-0 flex-wrap items-end gap-2">
+                <DateTimeField
+                  disabled={disabled || (saved !== null && saved.status !== "scheduled")}
+                  error={errorFor(`sessions.${index}.scheduledAt`)}
+                  idPrefix={`webinar-sessions-${index}`}
+                  label={`Sessão ${index + 1}`}
+                  onChange={(iso) => {
+                    update(index, { scheduledAt: iso });
+                    onBlur(`sessions.${index}.scheduledAt`);
+                  }}
+                  value={session.scheduledAt}
+                />
+                <Button
+                  aria-label={`${copy.sessionsRemove} ${index + 1}`}
+                  className="px-3 text-[var(--text-secondary)]"
+                  disabled={disabled || (saved !== null && saved.status !== "scheduled")}
+                  onClick={() => onChange({ sessions: sessions.filter((_, position) => position !== index) })}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 aria-hidden="true" className="size-4" />
+                  {copy.sessionsRemove}
+                </Button>
+              </div>
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id={`${lateJoinId}-label`}>
+                  {copy.lateJoin}
+                </span>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <PillGroup
+                    ariaLabel={`${copy.lateJoin} da sessão ${index + 1}`}
+                    disabled={disabled}
+                    name={`webinar-sessions-${index}-lateJoin`}
+                    onChange={(choice: LateJoinChoice) => update(index, { lateJoinMinutes: choice === "always" ? null : (session.lateJoinMinutes ?? 15) })}
+                    options={LATE_JOIN_OPTIONS}
+                    value={lateJoin}
+                  />
+                  {lateJoin === "until" ? (
+                    <label className="flex min-w-0 items-center gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
+                      <span className="sr-only">{copy.lateJoinMinutes}</span>
+                      <NumberInput
+                        describedBy={fieldDescribedBy(lateJoinId, { error: lateJoinError })}
+                        disabled={disabled}
+                        id={lateJoinId}
+                        invalid={Boolean(lateJoinError)}
+                        max={WEBINAR_EDITOR_LIMITS.lateJoinMax}
+                        min={0}
+                        onBlur={() => onBlur(`sessions.${index}.lateJoinMinutes`)}
+                        onChange={(minutes) => update(index, { lateJoinMinutes: minutes })}
+                        value={session.lateJoinMinutes ?? null}
+                      />
+                      <span>min</span>
+                    </label>
+                  ) : null}
+                </div>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.lateJoinHint}</p>
+                {lateJoinError ? <p className="text-[13px] leading-5 text-[var(--error)]">{lateJoinError}</p> : null}
+              </div>
+              {saved && webinarId ? (
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <StatusChip tone={SESSION_STATUS_TONE[saved.status]}>{SESSION_STATUS_LABEL[saved.status]}</StatusChip>
+                  <Link
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+                    data-session-console={saved.id}
+                    href={webinarConsoleHref(webinarId, saved.id)}
+                  >
+                    <MonitorPlay aria-hidden="true" className="size-4" />
+                    {copy.openConsole}
+                  </Link>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
         {listError ? <p className="text-[13px] leading-5 text-[var(--error)]">{listError}</p> : null}
         <div>
           <Button
             className="px-3"
             disabled={disabled || sessions.length >= WEBINAR_EDITOR_LIMITS.sessionsMax}
-            onClick={() => onChange({ sessions: sortWebinarSessions([...sessions, { scheduledAt: nextWebinarSessionAt(sessions, now) }]) })}
+            onClick={() => onChange({ sessions: sortWebinarSessions([...sessions, { lateJoinMinutes: null, scheduledAt: nextWebinarSessionAt(sessions, now) }]) })}
             type="button"
             variant="secondary"
           >
@@ -175,8 +279,29 @@ export function SessionsCard({ disabled, draft, errorFor, now, onBlur, onChange 
           </Button>
         </div>
       </div>
+      {replay ? (
+        <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4">
+          <AdminSwitch
+            checked={replay.session !== null}
+            description={replay.session ? copy.replayOn(formatSaoPauloDateTime(replay.session.scheduledAt)) : replay.firstEnded ? copy.replayHint : copy.replayWaiting}
+            disabled={disabled || (!replay.firstEnded && replay.session === null)}
+            id="webinar-replay"
+            label={copy.replaySwitch}
+            onCheckedChange={(checked) => (checked ? replay.onCreate() : replay.onCancel())}
+            pending={replay.busy}
+          />
+          {replay.session ? (
+            <Link
+              className="inline-flex min-h-9 w-fit items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+              href={webinarConsoleHref(webinarId ?? "", replay.session.id)}
+            >
+              <MonitorPlay aria-hidden="true" className="size-4" />
+              {WEBINAR_COPY.aluno.replay}: {copy.openConsole}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
       <SoonRow label={copy.justInTime} />
-      <SoonRow hint={copy.lateJoinHint} label={copy.lateJoin} />
     </div>
   );
 }

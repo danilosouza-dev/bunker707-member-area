@@ -15,6 +15,7 @@ import {
   WEBINAR_ADMIN_COPY,
   WEBINAR_EDITOR_LIMITS,
   WEBINAR_HEADER_ACTIONS,
+  WEBINAR_LINK_ACTIONS,
   WEBINAR_SOON_ACTIONS,
   accessUsesAudience,
   canonicalWebinarDraft,
@@ -23,6 +24,7 @@ import {
   rebaseWebinarDraft,
   savedWebinarToast,
   startWebinarDraft,
+  webinarActionHref,
   webinarAdminHref,
   webinarAudienceErrorsFrom,
   webinarCardOfField,
@@ -41,11 +43,13 @@ import {
   type WebinarFieldErrors,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
-import type { WebinarDraft, WebinarKind, WebinarSituation, WebinarStatus } from "@/server/webinars/model";
+import type { WebinarDraft, WebinarKind, WebinarSession, WebinarSituation, WebinarStatus } from "@/server/webinars/model";
 import type { WebinarEditorData, WebinarEditorOptions } from "@/server/webinars/queries";
+import { cancelReplaySession, createReplaySession } from "@/server/webinars/room-actions";
 import { publishProblems, webinarDraftSchema } from "@/server/webinars/schemas";
 import { ErrorBanner } from "../../error-banner";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../form";
+import { AdminLinkButton } from "../../link-button";
 import type { PreviewDevice } from "../../member-area/preview-frame";
 import { AdminPage } from "../../page-container";
 import { PageHeader } from "../../page-header";
@@ -60,10 +64,13 @@ import type { AudienceCountState } from "../audience-builder";
 import { DateTimeField } from "../notice-when-fields";
 import { audienceMessageOptions, audienceNamesWithMessages } from "../notices-view-model";
 import { isEditorSaveShortcut } from "../save-shortcut";
-import { AccessCard, NotifyCard, QualityCard, RecordingCard, RegistrationCard, ReplayLessonCard, RoomCard, SessionsCard, toPickerItems } from "./webinar-editor-cards";
+import { PollsCard } from "./polls-card";
+import { ScriptCard } from "./script-card";
+import { SimulationCard } from "./simulation-card";
+import { AccessCard, NotifyCard, QualityCard, RecordingCard, RegistrationCard, ReplayLessonCard, RoomCard, SessionsCard, toPickerItems, type ReplayControl } from "./webinar-editor-cards";
 import { PeoplePicker, PersonSelect } from "./webinar-people-fields";
 import { WebinarPreview } from "./webinar-preview";
-import { WebinarRowMenu, useWebinarActions, type WebinarActionTarget } from "./webinar-row-menu";
+import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActionTarget } from "./webinar-row-menu";
 
 // Editor do webinario (docs/30 §2.2 e §2.3), no molde do editor do aviso (notice-editor.tsx): "Novo webinário"
 // pergunta o tipo em duas pilulas e abre os cards a esquerda (Dados, Sessões, Quem pode, Vaga e lembretes, Avisar,
@@ -169,6 +176,9 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
   const [countAttempt, setCountAttempt] = useState(0);
   // Remonta os campos com memoria propria (datas) quando o rascunho e trocado de uma vez.
   const [resetKey, setResetKey] = useState(0);
+  // O Replay livre (fase 2): a sessao `replay` do webinario, ligada e desligada pelo card Sessoes.
+  const [replaySession, setReplaySession] = useState<WebinarSession | null>(initial?.replaySession ?? null);
+  const [replayBusy, setReplayBusy] = useState(false);
   const countRequest = useRef(0);
   const bannerRef = useRef<HTMLDivElement>(null);
   const saveShortcut = useRef<() => void>(() => undefined);
@@ -444,12 +454,67 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
 
   const webinarActions = useWebinarActions({ onDeleted: () => router.push(WEBINARS_HREF), permissions });
   const actionTarget: WebinarActionTarget | null = savedVersion
-    ? { id: savedVersion.id, registeredCount: savedVersion.registeredCount, situation: savedVersion.situation, status: savedVersion.status, title: draft.title.trim() || initial?.title || WEBINAR_ADMIN_COPY.header.newTitle, updatedAt: savedVersion.updatedAt }
+    ? {
+        id: savedVersion.id,
+        registeredCount: savedVersion.registeredCount,
+        runningSessionId: initial?.runningSessionId ?? null,
+        situation: savedVersion.situation,
+        status: savedVersion.status,
+        title: draft.title.trim() || initial?.title || WEBINAR_ADMIN_COPY.header.newTitle,
+        updatedAt: savedVersion.updatedAt
+      }
     : null;
   const conflict = failure?.status === 409;
   const working = (label: string, key: Exclude<Busy, null>) => (busy === key ? WEBINAR_ADMIN_COPY.review.working[key] : label);
-  const soonActions = situation ? WEBINAR_HEADER_ACTIONS[situation].filter((action) => WEBINAR_SOON_ACTIONS.includes(action)) : [];
+  const headerActions = situation ? WEBINAR_HEADER_ACTIONS[situation] : [];
+  const soonActions = headerActions.filter((action) => WEBINAR_SOON_ACTIONS.includes(action));
+  // Abrir o console e Ver relatorio so navegam: viram botoes de link no topo (fase 2b).
+  const linkActions = headerActions.filter((action) => WEBINAR_LINK_ACTIONS.includes(action));
   const cards = kind ? webinarEditorCards(kind) : [];
+  const savedSessions = initial?.sessions ?? [];
+
+  async function toggleReplay(create: boolean) {
+    if (!savedVersion || replayBusy) {
+      return;
+    }
+
+    setReplayBusy(true);
+
+    if (create) {
+      const result = await createReplaySession({ webinarId: savedVersion.id });
+      setReplayBusy(false);
+
+      if (!result.ok) {
+        showFailure({ message: result.error, status: result.status });
+        return;
+      }
+
+      setReplaySession(result.data.session);
+      adminToast.success(WEBINAR_ADMIN_COPY.toasts.replayCreated);
+      return;
+    }
+
+    const result = await cancelReplaySession({ webinarId: savedVersion.id });
+    setReplayBusy(false);
+
+    if (!result.ok) {
+      showFailure({ message: result.error, status: result.status });
+      return;
+    }
+
+    setReplaySession(null);
+    adminToast.success(WEBINAR_ADMIN_COPY.toasts.replayCancelled);
+  }
+
+  const replayControl: ReplayControl | null = savedVersion
+    ? {
+        busy: replayBusy,
+        firstEnded: savedSessions.some((session) => session.kind !== "replay" && session.status === "ended"),
+        onCancel: () => void toggleReplay(false),
+        onCreate: () => void toggleReplay(true),
+        session: replaySession
+      }
+    : null;
   const coHostIds = draft.presenters.filter((presenter) => presenter.role === "co_host").map((presenter) => presenter.userId);
   const teamIds = draft.presenters.filter((presenter) => presenter.role === "team").map((presenter) => presenter.userId);
   const moderation = new Map(draft.presenters.filter((presenter) => presenter.role === "team").map((presenter) => [presenter.userId, presenter.canModerateRoom]));
@@ -662,7 +727,40 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
       case "sessoes":
         return (
           <SectionCard description={meta.description} key={`${card}-${resetKey}`} title={meta.title} titleId={titleId}>
-            <SessionsCard {...cardProps} />
+            <SessionsCard {...cardProps} replay={replayControl} savedSessions={savedSessions} webinarId={savedVersion?.id ?? null} />
+          </SectionCard>
+        );
+      case "simulacao":
+        return (
+          <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
+            {savedVersion ? (
+              <SimulationCard canPublish={permissions.canPublish} currentUserName={options.currentUserName} deciderNames={initial?.deciderNames ?? {}} disabled={locked} now={now} sessions={savedSessions} />
+            ) : (
+              <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
+            )}
+          </SectionCard>
+        );
+      case "roteiro":
+        return (
+          <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
+            {savedVersion ? (
+              <ScriptCard
+                disabled={locked}
+                hasRecording={Boolean(initial?.recordingId) || Boolean(saved.recordingVideoUrl)}
+                initialItems={initial?.scriptItems ?? []}
+                initialTranscript={initial?.transcript ?? null}
+                sessions={savedSessions}
+                webinarId={savedVersion.id}
+              />
+            ) : (
+              <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
+            )}
+          </SectionCard>
+        );
+      case "enquetes":
+        return (
+          <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
+            {savedVersion ? <PollsCard disabled={locked} initial={initial?.polls ?? []} webinarId={savedVersion.id} /> : <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>}
           </SectionCard>
         );
       case "quemPode":
@@ -740,12 +838,18 @@ export function WebinarEditor({ defaultKind, initial, now, options, permissions 
         actions={
           actionTarget ? (
             <>
+              {linkActions.map((action) => (
+                <AdminLinkButton href={webinarActionHref(action, actionTarget.id) ?? webinarAdminHref(actionTarget.id)} key={action} variant="secondary">
+                  <WebinarActionIcon action={action} />
+                  {WEBINAR_ACTION_LABELS[action]}
+                </AdminLinkButton>
+              ))}
               {soonActions.map((action) => (
                 <Button className="px-3" disabled key={action} title={WEBINAR_ADMIN_COPY.emBreve} type="button" variant="secondary">
                   {WEBINAR_ACTION_LABELS[action]} · {WEBINAR_ADMIN_COPY.emBreve}
                 </Button>
               ))}
-              <WebinarRowMenu exclude={["open", ...WEBINAR_SOON_ACTIONS]} onRequest={webinarActions.request} permissions={permissions} webinar={actionTarget} />
+              <WebinarRowMenu exclude={["open", ...WEBINAR_SOON_ACTIONS, ...linkActions]} onRequest={webinarActions.request} permissions={permissions} webinar={actionTarget} />
             </>
           ) : null
         }

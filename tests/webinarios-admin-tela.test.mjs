@@ -61,7 +61,30 @@ export const cancelWebinar = fail;
 export const duplicateWebinar = fail;
 export const deleteWebinar = fail;
 export const rescheduleSession = fail;
-export const uploadWebinarCover = fail;`
+export const uploadWebinarCover = fail;`,
+  "@/server/webinars/script-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
+export const saveScriptItems = fail;
+export const importScriptCsv = fail;
+export const exportScriptCsv = fail;
+export const exportSessionChatCsv = fail;
+export const saveTranscript = fail;
+export const resolveScriptPhrases = fail;
+export const fireScriptItem = fail;`,
+  "@/server/webinars/room-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
+export const openSessionNow = fail;
+export const endSessionNow = fail;
+export const sendTeamMessage = fail;
+export const moderateMessage = fail;
+export const setSessionChatMode = fail;
+export const savePolls = fail;
+export const launchPoll = fail;
+export const closePoll = fail;
+export const answerQuestion = fail;
+export const setQuestionStatus = fail;
+export const saveSimulation = fail;
+export const createReplaySession = fail;
+export const cancelReplaySession = fail;
+export const removeStudentMessages = fail;`
 };
 
 function withExtension(base) {
@@ -155,6 +178,7 @@ function item(extra = {}) {
     kindLabel: "Live ao vivo",
     peakPresent: null,
     registeredCount: 12,
+    runningSessionId: null,
     sessionsCount: 1,
     situation: "scheduled",
     situationLabel: "Agendado",

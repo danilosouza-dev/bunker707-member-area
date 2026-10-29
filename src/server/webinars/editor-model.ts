@@ -8,6 +8,7 @@
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { countdownLabel, formatWebinarWhen, saoPauloTime } from "../../lib/webinar-time";
 import { formatSaoPauloDateTime, saoPauloLocalToIso } from "../communications/campaign-model";
+import { webinarReportHref } from "./report-page-model";
 import {
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
@@ -81,14 +82,175 @@ export const WEBINAR_ADMIN_COPY = {
   cards: {
     avisar: { description: "Onde o webinário aparece para quem pode ver.", title: "Avisar" },
     dados: { description: "Título, capa, quem apresenta e a hora marcada.", title: "Dados" },
+    enquetes: { description: "Prontas para abrir na hora, no console da sessão.", title: "Enquetes" },
     gravacao: { description: "Só na Live ao vivo: o servidor de gravação é criado antes da live e apagado no fim.", title: "Gravação" },
     qualidade: { description: "Cada aluno recebe o tamanho que cabe na tela dele; em 4G cai sozinho para 720p ou 360p.", title: "Qualidade" },
     quemPode: { description: "Quem não passa por aqui não vê o webinário em lugar nenhum.", title: "Quem pode" },
     replayAula: { description: "O replay vira uma aula com vídeo da Bunny; o chat da live fica na página do webinário.", title: "Publicar replay como aula" },
     revisao: { description: "", title: "Revisão" },
+    roteiro: { description: "Mensagens do roteiro nunca entram nas métricas reais.", title: "Roteiro de chat" },
     sala: { description: "Controles padrão ao começar; a sessão copia ao abrir.", title: "Sala" },
     sessoes: { description: "Cada sessão tem a própria Simulação e o próprio relatório.", title: "Sessões" },
+    simulacao: { description: "Por sessão: o selo que o aluno vê na sala, com a decisão registrada.", title: "Simulação" },
     vagaLembretes: { description: "O e-mail sai pela fila com os outros e-mails da área (Resend).", title: "Vaga e lembretes" }
+  },
+  /** Roteiro de chat (docs/30 §2.2, §6.6 D6). */
+  script: {
+    add: "Adicionar mensagem",
+    columns: { body: "Mensagem", delay: "Atraso (s)", name: "Nome", phrase: "Frase do apresentador", role: "Papel", status: "Situação", time: "Tempo", trigger: "Solta em" },
+    csvHint: "Quatro colunas: Tempo;Nome;Papel;Mensagem. Tempo como 1:02:03, 02:03 ou 63 (segundos); Papel Aluno ou Equipe.",
+    empty: "Nenhuma mensagem no roteiro. Importe um CSV ou adicione uma a uma.",
+    exportChat: "Baixar o chat de uma sessão como CSV",
+    exportChatHint: "O chat real de uma sessão encerrada, no formato do roteiro, para reaproveitar.",
+    exportCsv: "Exportar CSV",
+    importAppend: "Acrescentar ao fim",
+    importConfirm: "Importar",
+    importCsv: "Importar CSV",
+    importErrors: (count: number) => (count === 1 ? "1 linha com problema fica de fora:" : `${count} linhas com problema ficam de fora:`),
+    importLine: (line: number, message: string) => `Linha ${line}: ${message}`,
+    importNothing: "Nenhuma linha válida no arquivo.",
+    importPreview: (count: number) => (count === 1 ? "1 mensagem pronta para entrar." : `${count} mensagens prontas para entrar.`),
+    importReplace: "Substituir o roteiro",
+    importTitle: "Importar CSV do roteiro",
+    importTruncated: "O arquivo tinha mais linhas que o limite; só as primeiras 5.000 entraram.",
+    noRecording: "Cole o endereço do vídeo da Bunny no card Dados e salve antes de enviar a transcrição.",
+    remove: "Remover mensagem",
+    resolve: "Resolver frases",
+    resolved: (ready: number, unresolved: number) => `${ready} ${ready === 1 ? "frase achada" : "frases achadas"} na transcrição; ${unresolved} ${unresolved === 1 ? "não achada" : "não achadas"}.`,
+    roles: { student: "Aluno", team: "Equipe" },
+    save: "Salvar roteiro",
+    saving: "Salvando…",
+    statuses: { disabled: "Desligada", draft: "Rascunho", ready: "Pronta", unresolved: "Frase não achada" },
+    summary: (summary: { disabled: number; manual: number; ready: number; unresolved: number }) =>
+      `${summary.ready} ${summary.ready === 1 ? "entra sozinha" : "entram sozinhas"} · ${summary.manual} pelo botão · ${summary.unresolved} sem minuto · ${summary.disabled} ${summary.disabled === 1 ? "desligada" : "desligadas"}`,
+    timePlaceholder: "mm:ss",
+    toggleOff: "Desligar",
+    toggleOn: "Ligar",
+    transcriptFile: "Enviar arquivo (.vtt, .srt ou .txt)",
+    transcriptHint: "Cole a transcrição (VTT, SRT ou texto corrido) ou envie o arquivo. Ela serve para soltar mensagens quando o apresentador diz uma frase.",
+    transcriptNone: "Transcreva o vídeo para soltar mensagens por frase dita.",
+    transcriptPaste: "Colar transcrição",
+    transcriptSave: "Salvar transcrição",
+    transcriptSummary: (cues: number, format: string, when: string) => `Transcrição ${format.toUpperCase()} com ${cues} ${cues === 1 ? "trecho" : "trechos"}, enviada em ${when}.`,
+    transcriptTitle: "Transcrição do vídeo",
+    unsaved: "Mudanças no roteiro ainda não salvas."
+  },
+  /** Simulação (docs/30 §2.2 e §8.6, D10). */
+  simulation: {
+    ackLabel: "Li e confirmo a frase acima.",
+    badge: 'Selo "Ao vivo"',
+    badgeHint: "Desligado, o aluno vê o selo Sessão e o número real da turma.",
+    confirm: "Confirmar decisão",
+    decidedBy: (name: string, when: string) => `Decisão de ${name} em ${when}.`,
+    legal:
+      "Pela lei (CDC, art. 37), nunca anuncie uma sessão gravada como ao vivo fora da área de membros. Dentro dela, o selo e os números simulados são sua decisão e ficam registrados com seu nome e a data.",
+    needsPublish: "Só quem publica na Comunicação decide o selo.",
+    noSessions: "Marque as sessões no card Sessões e salve para decidir o selo de cada uma.",
+    numbersReal: "Números de plateia: reais (o contador simulado chega na fase 4).",
+    sessionLabel: (when: string) => `Sessão de ${when}`,
+    undecided: "Sem decisão registrada: o selo fica desligado.",
+    unsaved: "Marque a confirmação para gravar a decisão."
+  },
+  /** Enquetes prontas (docs/30 §2.2 e §2.4). */
+  polls: {
+    add: "Adicionar enquete",
+    addOption: "Adicionar opção",
+    anonymous: "Respostas anônimas",
+    empty: "Nenhuma enquete pronta. A equipe abre, encerra e compartilha o resultado no console.",
+    kind: "Tipo",
+    kinds: { multiple: "Várias opções", single: "Uma opção", survey: "Pesquisa" },
+    limit: (count: number) => `Até ${count} enquetes por webinário.`,
+    optionPlaceholder: (index: number) => `Opção ${index}`,
+    options: "Opções",
+    question: "Pergunta",
+    remove: "Remover enquete",
+    removeOption: "Remover opção",
+    save: "Salvar enquetes",
+    saving: "Salvando…",
+    unsaved: "Mudanças nas enquetes ainda não salvas."
+  },
+  /** O console da sessao (docs/30 §2.4). */
+  console: {
+    backToEditor: "Voltar ao editor",
+    breadcrumb: "Console",
+    chat: {
+      approve: "Liberar",
+      composer: "Escreva para a turma",
+      delete: "Apagar",
+      empty: "Nenhuma mensagem ainda.",
+      master: "Nas próximas turmas",
+      noConsent: "Sem consentimento do aluno",
+      pending: "Na moderação",
+      pin: "Fixar",
+      pinned: "Fixada",
+      promote: "Aprovar para as próximas turmas",
+      send: "Enviar",
+      slowMode: "Modo lento",
+      sources: { ai: "Assistente", audience: "Turma de hoje", original: "Chat original", scripted: "Roteiro", team: "Equipe" },
+      title: "Chat",
+      unpin: "Desafixar",
+      whoWrites: "Quem pode escrever"
+    },
+    description: "A mesa da equipe durante a sessão: chat, roteiro, enquetes e perguntas.",
+    end: "Encerrar sessão",
+    endConfirm: {
+      confirmLabel: "Encerrar sessão",
+      description: "O vídeo para para todo mundo, a presença é resumida e a sessão vira Encerrada. Isso não tem volta.",
+      title: "Encerrar a sessão agora?"
+    },
+    lasted: (text: string) => `Durou ${text}`,
+    offline: "Sem resposta do servidor; tentando de novo.",
+    onAirFor: (text: string) => `No ar há ${text}`,
+    open: "Abrir sessão",
+    openConfirm: {
+      confirmLabel: "Abrir sessão",
+      description: "A sessão entra no ar para quem pode ver, o roteiro pronto entra no chat e quem garantiu vaga recebe o Começou agora pelo sino.",
+      title: "Abrir a sessão agora?"
+    },
+    phases: { cancelled: "Cancelada", ended: "Encerrada", live: "No ar", replay: "Replay disponível", scheduled: "Agendada", waiting: "Na espera" },
+    polls: {
+      answers: (count: number) => (count === 1 ? "1 resposta" : `${count} respostas`),
+      close: "Encerrar",
+      closed: "Encerrada",
+      empty: "Nenhuma enquete pronta. Crie no editor do webinário.",
+      launch: "Abrir",
+      launched: "Nesta sessão",
+      open: "Aberta",
+      share: "Compartilhar resultado",
+      shared: "Resultado compartilhado",
+      templates: "Prontas",
+      title: "Enquetes"
+    },
+    presentNow: (count: number) => (count === 1 ? "1 presente agora" : `${count} presentes agora`),
+    questions: {
+      anonymous: "Anônima",
+      answerLive: "Respondida ao vivo",
+      answerPlaceholder: "Escreva a resposta",
+      answerWritten: "Responder por escrito",
+      dismiss: "Dispensar",
+      empty: "Nenhuma pergunta ainda.",
+      reopen: "Reabrir",
+      statuses: { answered: "Respondida", dismissed: "Dispensada", open: "Aberta" },
+      title: "Perguntas",
+      votes: (count: number) => (count === 1 ? "1 voto" : `${count} votos`)
+    },
+    readOnly: "Esta sessão não aceita mais ações da equipe.",
+    refresh: "Atualizar",
+    report: "Ver relatório",
+    script: {
+      due: (text: string) => `Entra em ${text}`,
+      empty: "Sem roteiro nesta Live gravada.",
+      fire: "Soltar agora",
+      fired: "Entrou",
+      manual: "Pelo botão",
+      passed: "Minuto já passou",
+      summary: (fired: number, pending: number, manual: number) => `${fired} ${fired === 1 ? "entrou" : "entraram"} · ${pending} a caminho · ${manual} pelo botão`,
+      title: "Roteiro"
+    },
+    sessionPicker: "Sessão",
+    startsIn: (text: string) => `Começa em ${text}`,
+    title: "Console da sessão",
+    updating: "Atualizando…"
   },
   fields: {
     accessModes: {
@@ -137,7 +299,18 @@ export const WEBINAR_ADMIN_COPY = {
     hostPlaceholder: "Escolher quem apresenta",
     justInTime: "Começa quando você entra",
     lateJoin: "Entrada atrasada",
+    lateJoinAlways: "Até o fim",
     lateJoinHint: "Até o fim ou até um número de minutos depois do começo.",
+    lateJoinMinutes: "Minutos depois do começo",
+    lateJoinUntil: "Até um minuto",
+    openConsole: WEBINAR_COPY.admin.abrirConsole,
+    replayCancel: "Fechar o replay",
+    replayCreate: "Liberar o replay",
+    replayHint: "Depois da primeira sessão encerrar, o aluno assiste com a barra e o chat pelo segundo do vídeo.",
+    replayOn: (when: string) => `Replay disponível desde ${when}.`,
+    replaySwitch: "Replay livre",
+    replayWaiting: "Abre depois da primeira sessão encerrar.",
+    sessionSaved: (when: string) => `Sessão de ${when}`,
     micOff: "Todos entram sem microfone",
     micOffHint: "Fixo nesta versão.",
     micSelf: "Permitir que o aluno abra o microfone sozinho",
@@ -216,18 +389,32 @@ export const WEBINAR_ADMIN_COPY = {
     buttons: { publish: WEBINAR_COPY.admin.publicar, save: WEBINAR_COPY.admin.salvar, saveDraft: "Salvar rascunho" },
     missing: (items: readonly string[]) => `Para publicar, falta: ${items.join("; ")}`,
     publishedHint: "Já publicado: salvar muda o que os alunos veem.",
+    saveFirst: "Salve o rascunho primeiro: este card vale para um webinário já gravado.",
     shortcutHint: "Ctrl+Enter (⌘+Enter no Mac) salva o rascunho.",
     working: { publish: "Publicando…", save: "Salvando…" }
   },
   toasts: {
     cancelled: "Live cancelada. Quem tinha vaga recebe o aviso pelo sino e por e-mail.",
+    chatExported: "CSV do chat pronto.",
     deleted: "Rascunho excluído.",
     duplicated: "Cópia criada como rascunho.",
+    ended: "Sessão encerrada. O relatório fica pronto em instantes.",
+    messageSent: "Mensagem enviada.",
     nothingToSave: "Nenhuma mudança para salvar.",
+    opened: "Sessão aberta. O roteiro pronto entrou no chat.",
+    phrasesResolved: "Frases conferidas na transcrição.",
+    pollsSaved: "Enquetes salvas.",
     published: "Webinário publicado. O card entra na página inicial e os lembretes passam a valer.",
+    replayCancelled: "Replay fechado.",
+    replayCreated: "Replay liberado para quem pode ver.",
     rescheduled: "Hora marcada atualizada. Quem tinha vaga recebe o aviso.",
     saved: "Rascunho salvo.",
-    savedPublished: "Webinário atualizado."
+    savedPublished: "Webinário atualizado.",
+    scriptExported: "CSV do roteiro pronto.",
+    scriptImported: (count: number) => (count === 1 ? "1 mensagem entrou no roteiro." : `${count} mensagens entraram no roteiro.`),
+    scriptSaved: "Roteiro salvo.",
+    simulationSaved: "Decisão registrada.",
+    transcriptSaved: "Transcrição salva."
   },
   confirm: {
     cancel: {
@@ -243,6 +430,11 @@ export const WEBINAR_ADMIN_COPY = {
       confirmLabel: "Excluir",
       description: "O rascunho sai da lista. Nenhum aluno viu nada.",
       title: "Excluir este rascunho?"
+    },
+    end: {
+      confirmLabel: "Encerrar live",
+      description: "A sessão que está no ar vira Encerrada para todo mundo e a presença é resumida. Isso não tem volta.",
+      title: (title: string) => `Encerrar “${title}” agora?`
     }
   },
   failures: {
@@ -420,6 +612,18 @@ export function webinarAdminHref(id: string) {
   return `${WEBINARS_HREF}/${encodeURIComponent(id)}`;
 }
 
+/** O console da sessao (docs/30 §2.4): /[id]/sala, com ?sessao= quando a equipe escolhe uma. */
+export const WEBINAR_SESSION_PARAM = "sessao";
+
+export function webinarConsoleHref(id: string, sessionId?: string | null) {
+  const base = `${webinarAdminHref(id)}/sala`;
+
+  return sessionId ? `${base}?${WEBINAR_SESSION_PARAM}=${encodeURIComponent(sessionId)}` : base;
+}
+
+/** A aba Relatório (docs/30 §2.5): /[id]/relatorio, o endereco e da entrega 2c (report-page-model.ts). */
+export { webinarReportHref };
+
 /** "Novo webinário" ja com o tipo (?tipo=ao-vivo|gravada). */
 export function newWebinarHref(kind?: WebinarKind | null) {
   return kind ? `${NEW_WEBINAR_HREF}?${WEBINAR_KIND_PARAM}=${KIND_PARAM_VALUES[kind]}` : NEW_WEBINAR_HREF;
@@ -498,8 +702,28 @@ export type WebinarAction = (typeof WEBINAR_ACTIONS)[number];
 
 export type WebinarPermissions = { canPublish: boolean; canWrite: boolean };
 
-/** Acoes que chegam em outra fase: aparecem desligadas com "em breve" (docs/30 §2.8), nunca somem em silencio. */
-export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = ["open_room", "open_console", "end", "view_report", "publish_replay"];
+/**
+ * Acoes que chegam em outra fase: aparecem desligadas com "em breve" (docs/30 §2.8), nunca somem em silencio.
+ * Fase 2b: Abrir o console, Encerrar live e Ver relatório passaram a valer; a sala ao vivo e o replay como aula
+ * ficam para as fases 3 e 4.
+ */
+export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = ["open_room", "publish_replay"];
+
+/** Acoes que so navegam (o menu e o topo abrem outra tela em vez de chamar uma Server Action). */
+export const WEBINAR_LINK_ACTIONS: readonly WebinarAction[] = ["open", "open_console", "view_report"];
+
+export function webinarActionHref(action: WebinarAction, id: string): string | null {
+  switch (action) {
+    case "open":
+      return webinarAdminHref(id);
+    case "open_console":
+      return webinarConsoleHref(id);
+    case "view_report":
+      return webinarReportHref(id);
+    default:
+      return null;
+  }
+}
 
 const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end"];
 
@@ -567,18 +791,31 @@ export function webinarMenuEntries(situation: WebinarSituation, permissions: Web
 }
 
 export function webinarActionNeedsConfirm(action: WebinarAction) {
-  return action === "cancel" || action === "delete";
+  return action === "cancel" || action === "delete" || action === "end";
 }
 
 export type WebinarConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
 
-export function webinarActionConfirm(action: "cancel" | "delete", target: { registeredCount: number; title: string }): WebinarConfirmCopy {
+export type WebinarConfirmableAction = "cancel" | "delete" | "end";
+
+export function webinarActionConfirm(action: WebinarConfirmableAction, target: { registeredCount: number; title: string }): WebinarConfirmCopy {
+  const title = target.title.trim() || WEBINAR_ADMIN_COPY.preview.titlePlaceholder;
+
   if (action === "cancel") {
     return {
       confirmLabel: WEBINAR_ADMIN_COPY.confirm.cancel.confirmLabel,
       description: WEBINAR_ADMIN_COPY.confirm.cancel.description(target.registeredCount),
       destructive: true,
-      title: WEBINAR_ADMIN_COPY.confirm.cancel.title(target.title.trim() || WEBINAR_ADMIN_COPY.preview.titlePlaceholder)
+      title: WEBINAR_ADMIN_COPY.confirm.cancel.title(title)
+    };
+  }
+
+  if (action === "end") {
+    return {
+      confirmLabel: WEBINAR_ADMIN_COPY.confirm.end.confirmLabel,
+      description: WEBINAR_ADMIN_COPY.confirm.end.description,
+      destructive: true,
+      title: WEBINAR_ADMIN_COPY.confirm.end.title(title)
     };
   }
 
@@ -594,6 +831,7 @@ export const WEBINAR_ACTION_TOASTS: Partial<Record<WebinarAction, string>> = {
   cancel: WEBINAR_ADMIN_COPY.toasts.cancelled,
   delete: WEBINAR_ADMIN_COPY.toasts.deleted,
   duplicate: WEBINAR_ADMIN_COPY.toasts.duplicated,
+  end: WEBINAR_ADMIN_COPY.toasts.ended,
   publish: WEBINAR_ADMIN_COPY.toasts.published
 };
 
@@ -613,12 +851,17 @@ export function webinarFailureTitle(input: { savedDraft: boolean; status: number
  * Cards do editor (docs/30 §2.2) e o mapa dos erros
  * ---------------------------------------------------------------------------------------------- */
 
-export const WEBINAR_EDITOR_CARDS = ["dados", "sessoes", "quemPode", "vagaLembretes", "avisar", "sala", "qualidade", "gravacao", "replayAula", "revisao"] as const;
+export const WEBINAR_EDITOR_CARDS = ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "gravacao", "replayAula", "revisao"] as const;
 export type WebinarEditorCard = (typeof WEBINAR_EDITOR_CARDS)[number];
 
-/** Os cards na ordem, por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo. */
+/** Cards que so existem num webinario ja gravado (precisam do id): o roteiro, a Simulacao e as enquetes. */
+export const WEBINAR_SAVED_ONLY_CARDS: readonly WebinarEditorCard[] = ["simulacao", "roteiro", "enquetes"];
+
+const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes", "simulacao", "roteiro"];
+
+/** Os cards na ordem, por tipo: Sessoes, Simulacao e Roteiro so na Live gravada, Gravacao so na Live ao vivo. */
 export function webinarEditorCards(kind: WebinarKind): WebinarEditorCard[] {
-  return WEBINAR_EDITOR_CARDS.filter((card) => (card === "sessoes" ? kind === "simulated" : card === "gravacao" ? kind === "live" : true));
+  return WEBINAR_EDITOR_CARDS.filter((card) => (SIMULATED_ONLY_CARDS.includes(card) ? kind === "simulated" : card === "gravacao" ? kind === "live" : true));
 }
 
 export function webinarCardTitle(card: WebinarEditorCard) {
@@ -791,9 +1034,17 @@ export function canonicalWebinarDraft(draft: WebinarDraft): WebinarDraft {
     },
     replayLessonTarget: draft.replayLessonTarget ? { ...draft.replayLessonTarget, moduleId: trimText(draft.replayLessonTarget.moduleId), title: trimText(draft.replayLessonTarget.title) } : null,
     scheduledAt: draft.kind === "live" ? draft.scheduledAt : null,
-    sessions: draft.kind === "simulated" ? draft.sessions.map((session) => ({ scheduledAt: session.scheduledAt })) : [],
+    sessions: draft.kind === "simulated" ? draft.sessions.map(canonicalSession) : [],
     title: draft.title.trim()
   };
+}
+
+/** A sessao do rascunho com a Entrada atrasada normalizada (vazio ou invalido = sempre). */
+export function canonicalSession(session: WebinarDraft["sessions"][number]): WebinarDraft["sessions"][number] {
+  const minutes = session.lateJoinMinutes;
+  const lateJoinMinutes = typeof minutes === "number" && Number.isInteger(minutes) && minutes >= 0 ? Math.min(minutes, WEBINAR_LIMITS.lateJoinMax) : null;
+
+  return { lateJoinMinutes, scheduledAt: session.scheduledAt };
 }
 
 function stableJson(value: unknown): string {
@@ -862,7 +1113,7 @@ export function webinarDraftOf(source: WebinarDraft): WebinarDraft {
     replayLessonTarget: source.replayLessonTarget ? { ...source.replayLessonTarget } : null,
     roomSettings: { ...source.roomSettings },
     scheduledAt: source.scheduledAt,
-    sessions: source.sessions.map((session) => ({ scheduledAt: session.scheduledAt })),
+    sessions: source.sessions.map(canonicalSession),
     showBanner: source.showBanner,
     showOnHome: source.showOnHome,
     showRegisteredCount: source.showRegisteredCount,
@@ -878,7 +1129,7 @@ export function webinarDraftForKind(draft: WebinarDraft, kind: WebinarKind): Web
 
   return kind === "live"
     ? { ...draft, kind, recordingVideoUrl: null, scheduledAt: draft.sessions[0]?.scheduledAt ?? draft.scheduledAt, sessions: [] }
-    : { ...draft, kind, scheduledAt: null, sessions: draft.scheduledAt ? [{ scheduledAt: draft.scheduledAt }] : draft.sessions };
+    : { ...draft, kind, scheduledAt: null, sessions: draft.scheduledAt ? [{ lateJoinMinutes: null, scheduledAt: draft.scheduledAt }] : draft.sessions };
 }
 
 export function isWebinarKindLocked(status: "archived" | "draft" | "published" | null | undefined) {

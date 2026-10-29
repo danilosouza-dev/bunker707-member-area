@@ -10,34 +10,43 @@ import { cancelWebinar, deleteWebinar, duplicateWebinar } from "@/server/webinar
 import {
   WEBINAR_ACTION_TOASTS,
   WEBINAR_ADMIN_COPY,
+  WEBINAR_LINK_ACTIONS,
   webinarActionConfirm,
+  webinarActionHref,
   webinarActionNeedsConfirm,
   webinarAdminHref,
   webinarMenuEntries,
   type WebinarAction,
+  type WebinarConfirmableAction,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
 import { WEBINAR_LIMITS, type WebinarSituation, type WebinarStatus } from "@/server/webinars/model";
+import { endSessionNow } from "@/server/webinars/room-actions";
 import { ErrorBanner } from "../../error-banner";
 import { adminTextareaClass } from "../../form";
 import { ConfirmDialog, RowMenu } from "../../settings/kit";
 import { adminToast } from "../../toast";
 
 // Acoes de um webinario (docs/30 §2.1 e §2.3), as mesmas na lista e no editor: o menu "…" mostra so o que a
-// situacao e a permissao permitem (webinarMenuEntries; o servidor confere de novo), Cancelar e Excluir pedem
-// confirmacao (ConfirmDialog, nunca window.confirm; Cancelar com o motivo e o numero de alunos com vaga), sucesso
-// vira toast e erro fica num banner na tela. Cada acao leva a versao lida (updatedAt): se o webinario mudou em
-// outra tela, volta 409 e o banner oferece "Recarregar". O que chega em outra fase (Abrir a sala, Abrir o
-// console, Encerrar live, Ver relatório, Publicar replay) aparece desligado com "em breve" (docs/30 §2.8).
+// situacao e a permissao permitem (webinarMenuEntries; o servidor confere de novo), Cancelar, Excluir e Encerrar
+// live pedem confirmacao (ConfirmDialog, nunca window.confirm; Cancelar com o motivo e o numero de alunos com
+// vaga), sucesso vira toast e erro fica num banner na tela. Cada acao leva a versao lida (updatedAt): se o
+// webinario mudou em outra tela, volta 409 e o banner oferece "Recarregar". Abrir o console e Ver relatório so
+// navegam (fase 2b); o que chega em outra fase (Abrir a sala, Publicar replay) aparece desligado com "em breve"
+// (docs/30 §2.8).
 
 export type WebinarActionTarget = {
   id: string;
   registeredCount: number;
+  /** A sessao no ar ou na espera (Encerrar live); nula fora disso. */
+  runningSessionId: string | null;
   situation: WebinarSituation;
   status: WebinarStatus;
   title: string;
   updatedAt: string;
 };
+
+const NO_RUNNING_SESSION_MESSAGE = "Nenhuma sessão no ar para encerrar.";
 
 type Failure = { message: string; status: number };
 
@@ -73,7 +82,7 @@ type UseWebinarActionsOptions = {
 export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsOptions) {
   const router = useRouter();
   const reasonId = useId();
-  const [confirming, setConfirming] = useState<{ action: "cancel" | "delete"; target: WebinarActionTarget } | null>(null);
+  const [confirming, setConfirming] = useState<{ action: WebinarConfirmableAction; target: WebinarActionTarget } | null>(null);
   const [reason, setReason] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -135,6 +144,21 @@ export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsO
 
           return;
         }
+        case "end": {
+          if (!target.runningSessionId) {
+            return fail({ error: NO_RUNNING_SESSION_MESSAGE, ok: false, status: 409 });
+          }
+
+          const result = await endSessionNow({ sessionId: target.runningSessionId });
+
+          if (!result.ok) {
+            return fail(result);
+          }
+
+          adminToast.success(WEBINAR_ACTION_TOASTS.end ?? "");
+          refreshInBackground();
+          return;
+        }
         default:
           return;
       }
@@ -145,15 +169,15 @@ export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsO
   }
 
   function request(action: WebinarAction, target: WebinarActionTarget) {
-    if (action === "open") {
-      router.push(webinarAdminHref(target.id));
+    if (WEBINAR_LINK_ACTIONS.includes(action)) {
+      router.push(webinarActionHref(action, target.id) ?? webinarAdminHref(target.id));
       return;
     }
 
     if (webinarActionNeedsConfirm(action)) {
       setFailure(null);
       setReason("");
-      setConfirming({ action: action as "cancel" | "delete", target });
+      setConfirming({ action: action as WebinarConfirmableAction, target });
       return;
     }
 

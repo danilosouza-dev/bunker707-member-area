@@ -142,18 +142,25 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
     ["duplicate", "Duplicar", false, false, false],
     ["cancel", "Cancelar", true, true, false]
   ]);
+  // Fase 2b: Abrir o console, Encerrar live e Ver relatório valem; Abrir a sala e Publicar replay seguem "em breve".
   assert.deepEqual(rows("in_progress"), [
     ["open", "Abrir", false, false, false],
-    ["open_console", "Abrir o console", false, false, true],
+    ["open_console", "Abrir o console", false, false, false],
     ["duplicate", "Duplicar", false, false, false],
-    ["end", "Encerrar live", true, true, true]
+    ["end", "Encerrar live", true, true, false]
   ]);
   assert.deepEqual(rows("ended"), [
     ["open", "Abrir", false, false, false],
-    ["view_report", "Ver relatório", false, false, true],
+    ["view_report", "Ver relatório", false, false, false],
     ["publish_replay", "Publicar replay", false, false, true],
     ["duplicate", "Duplicar", false, false, false]
   ]);
+  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["open_room", "publish_replay"]);
+  assert.deepEqual([...vm.WEBINAR_LINK_ACTIONS], ["open", "open_console", "view_report"]);
+  assert.equal(vm.webinarActionHref("open_console", "abc"), "/admin/comunicacao/webinarios/abc/sala");
+  assert.equal(vm.webinarActionHref("view_report", "abc"), "/admin/comunicacao/webinarios/abc/relatorio");
+  assert.equal(vm.webinarActionHref("end", "abc"), null);
+  assert.equal(vm.webinarConsoleHref("abc", "s1"), "/admin/comunicacao/webinarios/abc/sala?sessao=s1");
   assert.deepEqual(rows("cancelled"), [
     ["open", "Abrir", false, false, false],
     ["duplicate", "Duplicar", false, false, false]
@@ -166,7 +173,10 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
 
   assert.equal(vm.webinarActionNeedsConfirm("cancel"), true);
   assert.equal(vm.webinarActionNeedsConfirm("delete"), true);
+  assert.equal(vm.webinarActionNeedsConfirm("end"), true, "Encerrar live pede confirmacao (fase 2b)");
   assert.equal(vm.webinarActionNeedsConfirm("duplicate"), false);
+  assert.equal(vm.webinarActionConfirm("end", { registeredCount: 0, title: "Aula" }).title, "Encerrar “Aula” agora?");
+  assert.equal(vm.webinarActionConfirm("end", { registeredCount: 0, title: "Aula" }).destructive, true);
 
   const cancel = vm.webinarActionConfirm("cancel", { registeredCount: 12, title: "Aula de IA" });
   assert.equal(cancel.title, "Cancelar “Aula de IA”?");
@@ -188,8 +198,10 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
  * ---------------------------------------------------------------------------------------------- */
 
 test("cards por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo; cada campo sabe o card dele", () => {
-  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "quemPode", "vagaLembretes", "avisar", "sala", "qualidade", "gravacao", "replayAula", "revisao"]);
-  assert.deepEqual(vm.webinarEditorCards("simulated"), ["dados", "sessoes", "quemPode", "vagaLembretes", "avisar", "sala", "qualidade", "replayAula", "revisao"]);
+  // Fase 2b: Simulacao e Roteiro so na Live gravada; Enquetes nos dois tipos (prontas para o console).
+  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "gravacao", "replayAula", "revisao"]);
+  assert.deepEqual(vm.webinarEditorCards("simulated"), ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "replayAula", "revisao"]);
+  assert.deepEqual([...vm.WEBINAR_SAVED_ONLY_CARDS], ["simulacao", "roteiro", "enquetes"]);
   assert.equal(vm.webinarCardTitle("vagaLembretes").title, "Vaga e lembretes");
   assert.equal(vm.webinarCardOfField("sessions.1.scheduledAt"), "sessoes");
   assert.equal(vm.webinarCardOfField("audience.root.items.0"), "quemPode");
@@ -241,7 +253,13 @@ test("rascunho canonico: espacos nas pontas somem, vagas so com Garantir vaga, p
   const simulated = vm.webinarDraftForKind(live, "simulated");
   assert.equal(simulated.kind, "simulated");
   assert.equal(simulated.scheduledAt, null);
-  assert.deepEqual(simulated.sessions, [{ scheduledAt: iso(now + DAY) }]);
+  assert.deepEqual(simulated.sessions, [{ lateJoinMinutes: null, scheduledAt: iso(now + DAY) }]);
+  // Entrada atrasada (fase 2): vazio, negativo ou quebrado vira "sempre"; acima do teto, o teto.
+  assert.deepEqual(vm.canonicalSession({ scheduledAt: iso(now + DAY) }), { lateJoinMinutes: null, scheduledAt: iso(now + DAY) });
+  assert.deepEqual(vm.canonicalSession({ lateJoinMinutes: 15, scheduledAt: iso(now + DAY) }), { lateJoinMinutes: 15, scheduledAt: iso(now + DAY) });
+  assert.equal(vm.canonicalSession({ lateJoinMinutes: -1, scheduledAt: iso(now + DAY) }).lateJoinMinutes, null);
+  assert.equal(vm.canonicalSession({ lateJoinMinutes: 2.5, scheduledAt: iso(now + DAY) }).lateJoinMinutes, null);
+  assert.equal(vm.canonicalSession({ lateJoinMinutes: 9_999, scheduledAt: iso(now + DAY) }).lateJoinMinutes, 600);
   const back = vm.webinarDraftForKind({ ...simulated, recordingVideoUrl: "https://x.test/v" }, "live");
   assert.equal(back.scheduledAt, iso(now + DAY));
   assert.deepEqual(back.sessions, []);

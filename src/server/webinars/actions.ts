@@ -185,11 +185,14 @@ async function syncBaseRecording(db: WebinarsDb, webinarId: string, url: string 
   return insertRecordingRow(db, { embed_url: url, provider: "bunny", session_id: null, source: "bunny", status: "ready", webinar_id: webinarId });
 }
 
-type SessionsSync = { created: number; kept: number; removed: number };
+type SessionsSync = { created: number; kept: number; lateJoinUpdated: number; removed: number };
+
+type WantedSession = { iso: string; lateJoinMinutes: number | null };
 
 /**
  * As horas marcadas da Live gravada viram sessoes `simulated`: cria as novas, apaga as que sairam e ainda nao tem
- * vaga garantida, mantem as que tem vaga (e as que ja comecaram, acabaram ou foram canceladas).
+ * vaga garantida, mantem as que tem vaga (e as que ja comecaram, acabaram ou foram canceladas). A Entrada atrasada
+ * (late_join_minutes, fase 2) acompanha cada hora marcada: muda nas sessoes que ainda nao acabaram.
  */
 async function syncSimulatedSessions(
   db: WebinarsDb,
@@ -198,13 +201,13 @@ async function syncSimulatedSessions(
   sessions: readonly SessionRow[],
   recordingId: string | null
 ): Promise<SessionsSync> {
-  const wanted = new Map<number, string>();
+  const wanted = new Map<number, WantedSession>();
 
   for (const session of draft.sessions) {
     const time = toTime(session.scheduledAt);
 
     if (Number.isFinite(time)) {
-      wanted.set(time, new Date(time).toISOString());
+      wanted.set(time, { iso: new Date(time).toISOString(), lateJoinMinutes: session.lateJoinMinutes ?? null });
     }
   }
 
@@ -212,13 +215,21 @@ async function syncSimulatedSessions(
   const existingTimes = new Set<number>();
   const removable: string[] = [];
   let kept = 0;
+  let lateJoinUpdated = 0;
 
   for (const session of simulated) {
     const time = toTime(session.scheduled_at);
+    const want = wanted.get(time);
 
-    if (wanted.has(time) || session.status !== "scheduled") {
+    if (want || session.status !== "scheduled") {
       existingTimes.add(time);
       kept += 1;
+
+      if (want && want.lateJoinMinutes !== session.late_join_minutes && session.status !== "ended" && session.status !== "cancelled") {
+        await updateSessionRow(db, session.id, { late_join_minutes: want.lateJoinMinutes });
+        lateJoinUpdated += 1;
+      }
+
       continue;
     }
 
@@ -236,12 +247,13 @@ async function syncSimulatedSessions(
 
   const toCreate = Array.from(wanted.entries())
     .filter(([time]) => !existingTimes.has(time))
-    .map(([, iso]) => ({
+    .map(([, want]) => ({
       chat_mode: draft.roomSettings.chatMode,
       chat_slow_mode_seconds: draft.roomSettings.slowModeSeconds,
       kind: "simulated",
+      late_join_minutes: want.lateJoinMinutes,
       recording_id: recordingId,
-      scheduled_at: iso,
+      scheduled_at: want.iso,
       status: "scheduled",
       webinar_id: webinarId
     }));
@@ -256,7 +268,7 @@ async function syncSimulatedSessions(
     }
   }
 
-  return { created: created.length, kept, removed: removable.length };
+  return { created: created.length, kept, lateJoinUpdated, removed: removable.length };
 }
 
 /** A sessao `live` da Live ao vivo que ainda vale (nao cancelada). */
@@ -284,7 +296,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
     if (!data.id) {
       const created = await insertWithFreeSlug(db, { ...patch, created_by: user.id, status: "draft" }, draft.title);
       await replacePresenterRows(db, created.id, presenterRowsOf(draft));
-      let sessions: SessionsSync = { created: 0, kept: 0, removed: 0 };
+      let sessions: SessionsSync = { created: 0, kept: 0, lateJoinUpdated: 0, removed: 0 };
 
       if (draft.kind === "simulated") {
         const recording = await syncBaseRecording(db, created.id, draft.recordingVideoUrl, []);
@@ -334,7 +346,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
     const saved = await updateWebinarRow(db, current.id, { ...patch, slug }, { expectedUpdatedAt: current.updated_at });
     await replacePresenterRows(db, saved.id, presenterRowsOf(draft));
 
-    let sessions: SessionsSync = { created: 0, kept: 0, removed: 0 };
+    let sessions: SessionsSync = { created: 0, kept: 0, lateJoinUpdated: 0, removed: 0 };
     let rescheduled = false;
 
     if (draft.kind === "simulated") {
@@ -365,6 +377,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
         presenters: draft.presenters.length,
         rescheduled,
         sessions_created: sessions.created,
+        sessions_late_join_updated: sessions.lateJoinUpdated,
         sessions_removed: sessions.removed,
         slug_changed: slug !== current.slug,
         status: saved.status

@@ -16,7 +16,7 @@ import { WebinarRowMenu, useWebinarActions, type WebinarActionTarget } from "./w
 // webinario com o menu no canto.
 
 export function toWebinarActionTarget(item: WebinarListItem): WebinarActionTarget {
-  return { id: item.id, registeredCount: item.registeredCount, situation: item.situation, status: item.status, title: item.title, updatedAt: item.updatedAt };
+  return { id: item.id, registeredCount: item.registeredCount, runningSessionId: item.runningSessionId, situation: item.situation, status: item.status, title: item.title, updatedAt: item.updatedAt };
 }
 
 /** Miniatura 2:3 da capa, ou o icone do webinario. */
