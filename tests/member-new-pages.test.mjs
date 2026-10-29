@@ -22,7 +22,9 @@ const routes = [
   { dir: "continue-assistindo", guard: "requireStudentPageUser", loader: "getContinueWatchingPageData", route: "/continue-assistindo", usesLibrary: true },
   { dir: "materiais", guard: "requireStudentPageUser", loader: "getMaterialsPageData", route: "/materiais", usesLibrary: true },
   { dir: "suporte", guard: "requirePageUser", loader: "getSupportPageData", route: "/suporte", usesLibrary: false },
-  { dir: "perfil", guard: "requirePageUser", loader: "getProfilePageData", route: "/perfil", usesLibrary: true }
+  { dir: "perfil", guard: "requirePageUser", loader: "getProfilePageData", route: "/perfil", usesLibrary: true },
+  // Webinarios (docs/30 §1.1): le as tabelas webinar_* pela service role, nao a biblioteca do aluno.
+  { dir: "webinarios", guard: "requireStudentPageUser", loader: "getWebinarsPageData", route: "/webinarios", usesLibrary: false }
 ];
 
 function functionBody(source, name) {
@@ -60,7 +62,7 @@ test("cada pagina nova exige sessao, so aceita previa de admin e tem esqueleto p
   }
 });
 
-test("proxy protege as cinco rotas novas e o rodape leva ao suporte", () => {
+test("proxy protege as rotas novas (e /webinarios) e o rodape leva ao suporte", () => {
   const proxy = read("src/proxy.ts");
   const prefixes = proxy.match(/const protectedPagePrefixes = \[([^\]]*)\]/)?.[1] ?? "";
 

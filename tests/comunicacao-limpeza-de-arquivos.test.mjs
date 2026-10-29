@@ -125,11 +125,13 @@ test("ao salvar e na limpeza é a mesma leitura: storedPopupDesignAssetPaths sai
 });
 
 test("notificações: os tipos de hoje não guardam arquivo; um payload com arquivo seria lido", () => {
-  assert.deepEqual([...refs.NOTIFICATION_KINDS_WITHOUT_MEDIA].sort(), ["comment_mention", "comment_reply", "notice"]);
+  assert.deepEqual([...refs.NOTIFICATION_KINDS_WITHOUT_MEDIA].sort(), ["comment_mention", "comment_reply", "notice", "webinar"]);
   assert.deepEqual([...refs.NOTIFICATION_KINDS_WITH_MEDIA], []);
 
   const comentario = { payload: { commentId: "c1", contentId: "p1", lessonId: "l1", lessonTitle: "Aula 1", moduleId: "m1", parentCommentId: null } };
   assert.deepEqual(refs.notificationMediaRefs(comentario), []);
+  // A de live (docs/30 D27) guarda so ids e o tipo do aviso.
+  assert.deepEqual(refs.notificationMediaRefs({ payload: { kind: "h24", sessionId: "s1", webinarId: "w1" } }), []);
   assert.deepEqual(refs.notificationMediaRefs({ payload: null }), []);
 
   const comArquivo = { payload: { extra: { audio: publico(NUVEM, "communication-audio", AUDIO), lista: [VIDEO, "texto qualquer"] } } };

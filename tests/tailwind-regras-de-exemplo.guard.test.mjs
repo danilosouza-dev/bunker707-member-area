@@ -35,7 +35,6 @@ const KNOWN_BEFORE_L6A = [
   "h-screen",
   "lg:grid-cols-[minmax(16rem,.7fr)_minmax(0,1.3fr)]",
   "m-75",
-  "md:grid-cols-3",
   "md:p-6",
   "min-w-64",
   "min-w-[13rem]",

@@ -703,3 +703,93 @@ export async function limparComunicacao(db) {
     }
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios (docs/30; migracao 202610280001)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma Live ao vivo publicada para todos, apresentada pelo produtor, com Garantir vaga ligado. */
+export const WEBINARIO_DE_TESTE = {
+  descricao: "Uma live de boas-vindas da escola de teste, com perguntas ao vivo.",
+  id: "bbbbbbbb-0000-4000-8000-000000000001",
+  sessaoId: "bbbbbbbb-0000-4000-8000-000000000002",
+  slug: "teste-live-de-boas-vindas",
+  titulo: "Live de Teste: Boas-vindas"
+};
+
+/**
+ * Grava o webinario de teste (e a sessao `live`) marcado para daqui a 3 dias, em hora cheia. Idempotente: a
+ * hora marcada e refeita a cada chamada, entao a contagem regressiva nunca vence entre uma rodada e outra.
+ * Pede as contas da escola (seedEscolaDeTeste antes). Banco sem a migracao: erro claro.
+ */
+export async function seedWebinarioDeTeste(db) {
+  const contas = await contasDeTeste(db);
+  const horaMarcada = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  horaMarcada.setUTCMinutes(0, 0, 0);
+  const scheduledAt = horaMarcada.toISOString();
+  const agora = new Date().toISOString();
+
+  unwrap(
+    await db.from("webinars").upsert(
+      {
+        access_mode: "everyone",
+        cancel_reason: null,
+        cancelled_at: null,
+        created_by: contas.produtor.id,
+        deleted_at: null,
+        description: WEBINARIO_DE_TESTE.descricao,
+        duration_minutes: 60,
+        host_user_id: contas.produtor.id,
+        id: WEBINARIO_DE_TESTE.id,
+        kind: "live",
+        published_at: agora,
+        registration_required: true,
+        scheduled_at: scheduledAt,
+        show_banner: true,
+        show_on_home: true,
+        slug: WEBINARIO_DE_TESTE.slug,
+        status: "published",
+        title: WEBINARIO_DE_TESTE.titulo
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando webinario de teste"
+  );
+  unwrap(
+    await db.from("webinar_sessions").upsert(
+      {
+        ended_at: null,
+        id: WEBINARIO_DE_TESTE.sessaoId,
+        kind: "live",
+        scheduled_at: scheduledAt,
+        started_at: null,
+        status: "scheduled",
+        webinar_id: WEBINARIO_DE_TESTE.id
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando sessao do webinario de teste"
+  );
+
+  return { scheduledAt };
+}
+
+/**
+ * Apaga o que os testes gravaram nos webinarios: as vagas das contas de teste e os webinarios de teste
+ * (slug "teste-"; sessoes e vagas saem por cascata). Banco sem a migracao: nada a limpar.
+ */
+export async function limparWebinarios(db) {
+  const ids = await idsDasContasDeTeste(db);
+  const etapas = [
+    ["Apagando vagas de teste", () => (ids.length === 0 ? Promise.resolve({ error: null }) : db.from("webinar_registrations").delete().in("user_id", ids))],
+    ["Apagando webinarios de teste", () => db.from("webinars").delete().like("slug", "teste-%")]
+  ];
+
+  for (const [contexto, etapa] of etapas) {
+    const result = await etapa();
+
+    if (result.error && !/does not exist|Could not find/i.test(result.error.message)) {
+      throw new Error(`${contexto}: ${result.error.message}`);
+    }
+  }
+}

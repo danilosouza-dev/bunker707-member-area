@@ -552,7 +552,8 @@ export type NotificationInsert = {
   expires_at?: string | null;
   href?: string | null;
   is_test?: boolean;
-  kind: "comment_mention" | "comment_reply" | "notice";
+  /** 'webinar' (docs/30 D27): lembrete ou aviso de live, com titulo, texto e link na propria linha. */
+  kind: "comment_mention" | "comment_reply" | "notice" | "webinar";
   payload?: Record<string, unknown>;
   title?: string | null;
   user_id: string;

@@ -242,6 +242,7 @@ const mobileTitleOverrides: readonly AdminNavChild[] = [
   { href: "/admin/comunicacao/avisos/novo", label: "Novo aviso" },
   { href: "/admin/comunicacao/fluxos/novo", label: "Novo fluxo" },
   { href: "/admin/comunicacao/modelos/novo", label: "Novo modelo" },
+  { href: "/admin/comunicacao/webinarios/novo", label: "Novo webinário" },
   { href: "/admin/configuracoes/equipe", label: "Equipe" },
   { href: "/admin/configuracoes/ia", label: "Tutor IA" },
   { href: "/admin/configuracoes/vendas", label: "Vendas" }

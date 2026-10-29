@@ -276,10 +276,11 @@ export function campaignMediaRefs(row: CampaignMediaRow): MediaRef[] {
 
 /**
  * Tipos de notificacao que nunca guardam arquivo: a de aviso aponta para o aviso (os arquivos contam pelo aviso,
- * e o sino so mostra aviso nao excluido); as de comentario guardam ids e o titulo da aula. Tipo novo entra numa
+ * e o sino so mostra aviso nao excluido); as de comentario guardam ids e o titulo da aula; a de live ('webinar',
+ * docs/30 D27) guarda ids e o tipo do aviso. Tipo novo entra numa
  * das duas listas (a guarda confere): se o payload dele puder ter arquivo, vai para a segunda, e o job le.
  */
-export const NOTIFICATION_KINDS_WITHOUT_MEDIA = ["notice", "comment_reply", "comment_mention"] as const;
+export const NOTIFICATION_KINDS_WITHOUT_MEDIA = ["notice", "comment_reply", "comment_mention", "webinar"] as const;
 export const NOTIFICATION_KINDS_WITH_MEDIA: readonly string[] = [];
 
 /** Arquivos citados no payload de uma notificacao (qualquer texto que aponte para um arquivo nosso). */

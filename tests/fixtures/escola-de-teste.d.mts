@@ -79,3 +79,7 @@ export function limparConfiguracoesDeTeste(db: unknown, keys: string[]): Promise
 export function apagarProdutosDeTeste(db: unknown, prefixoDoTitulo: string): Promise<void>;
 export function definirCapaDoProduto(db: unknown, titulo: string, image?: string): Promise<void>;
 export function limparComunicacao(db: unknown): Promise<void>;
+
+export const WEBINARIO_DE_TESTE: { descricao: string; id: string; sessaoId: string; slug: string; titulo: string };
+export function seedWebinarioDeTeste(db: unknown): Promise<{ scheduledAt: string }>;
+export function limparWebinarios(db: unknown): Promise<void>;

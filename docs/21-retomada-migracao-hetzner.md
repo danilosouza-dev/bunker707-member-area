@@ -452,3 +452,37 @@ anterior (`docs/20` §9).
 migracao antes de trocar o app (o indice trava as escritas em `student_events` pelos segundos da montagem). Antes de
 voltar para a imagem anterior, pausar os pop-ups "No primeiro acesso" e "Ao concluir um curso" (`docs/20` §9). Depois,
 uma rodada do `carga` com um pop-up de hora marcada (`docs/20` §12.1, `docs/29` R17).
+
+### 9.6 Webinarios v1: migracao `202610280001` aplicada na nuvem de teste (28/10/2026)
+
+A PR dos webinarios, fase 1 "Base: agenda, vaga garantida e lembretes" (`docs/30` §11, branch `claude/nifty-mendel-tx2kro`)
+traz `supabase/migrations/202610280001_webinars_v1.sql` (sha256 fixado na guarda `webinarios-migracao.guard`). As
+migracoes ate a `202610260001` nao mudam.
+
+Regra: **a 0028 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo mostra o
+aviso de migracao pendente em `/admin/comunicacao/webinarios`, a pagina `/webinarios` do aluno responde vazia, "Garantir
+vaga" responde 404 e o job `webinarios` do tick registra "migracao 202610280001 pendente" e termina; o resto do app segue.
+A migracao sozinha nao atrapalha o app de antes: cinco tabelas novas que ele nao le, o kind `webinar` que ele nunca grava
+(a funcao do sino so ganha um ramo), e a politica do historico que so tira do navegador um `entity_type` que ele nao usa.
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**: feito em 28/10/2026, pelo MCP do Supabase,
+`execute_sql`, **uma secao por chamada e na ordem do arquivo**, cada uma comecando com `set lock_timeout = '5s';`:
+1 `webinars` -> 2 `webinar_sessions` -> 3 `webinar_presenters` -> 4 `webinar_recordings` e a chave
+`webinar_sessions_recording_fk` -> 5 `webinar_registrations` -> 6 `notifications` (a troca do check do kind dentro do
+`do $$ ... if not exists`, a unica remocao, e a funcao `communication_visible_notifications` com o ramo do `webinar`)
+-> 7 o `alter policy "Students can create own events"` e o indice `student_events_webinar_idx` (69 linhas em
+`student_events`: instantaneo) -> 8 `webinar_report`. Nenhuma chamada travou; o MCP nao pediu confirmacao. A versao
+foi gravada com `insert into supabase_migrations.schema_migrations (version, name) values ('202610280001', 'webinars_v1')
+on conflict (version) do nothing;` e `list_migrations` mostra `202610280001`.
+
+Conferido depois de aplicar (as consultas do cabecalho da migracao): 5 tabelas `webinar%`, todas com RLS;
+`notifications_kind_v4` existe e e o unico check de kind; `webinar_report` existe, `authenticated` = false e
+`service_role` = true, e devolve 0 linhas para um id qualquer; a politica com `campaign` e `webinar`; o indice existe; 4
+gatilhos `set_webinar*_updated_at`. A idempotencia foi conferida la mesmo (a secao 1 e a 6 de novo: sem erro, nada muda).
+
+Se a migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so a
+secao que mudou) do mesmo jeito, e atualizar juntos este paragrafo e o hash da guarda.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
+app (o indice parcial trava as escritas em `student_events` pelos segundos da montagem). Jitsi e Jibri so entram na fase
+3 (`docs/30` §7), com ok do produtor no chat antes de qualquer servidor novo.

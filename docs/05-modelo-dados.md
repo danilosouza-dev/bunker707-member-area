@@ -1753,6 +1753,10 @@ RLS de `campaigns` e `campaign_deliveries` como estava; nenhuma tabela nova. Eve
 
 **Deploy**: **antes** do merge na `dev` (`docs/29` §10; `docs/21` §9.5); na Hetzner o `deploy-membros` aplica antes de trocar o app. Sem ela, `CAMPAIGN_COLUMNS` quebra o admin de avisos e o job `comunicacao` do tick (como na v3b-1). A migracao sozinha nao atrapalha o app de antes. **Nao publicar nem editar "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao de antes** (`docs/29` R1).
 
+### Webinarios v1 (migracao `202610280001`, 28/10/2026)
+
+Fase 1 dos webinarios (`docs/30` §4): `webinars` (a peca editada no admin: tipo `live`/`simulated`, titulo, capa, apresentador, acesso `everyone`/`product`/`audience`/`either` com `product_id` e `audience` jsonb no formato das campanhas, Garantir vaga com `capacity`, lembretes e textos, o que avisar na pagina inicial, `scheduled_at` e `duration_minutes`, `allow_student_camera`, `quality` e `room_settings` jsonb, `auto_record`, `replay_lesson_target`, prazos de guarda, `published_at`/`cancelled_at`), `webinar_sessions` (cada hora marcada: `live`, `simulated` ou `replay`, com `status`, `recording_anchor_at`, `chat_mode` e `chat_slow_mode_seconds`), `webinar_presenters` (co-apresentadores e Equipe da sala, chave `(webinar_id, user_id)`), `webinar_recordings` (o video da Bunny de uma sessao) e `webinar_registrations` (a vaga garantida por aluno e sessao, com as marcas de cada lembrete e o `calendar_token`). Todas sem politica para `authenticated` (so service_role). A mesma migracao poe o kind `webinar` em `notifications` (D27 do `docs/30`), altera a politica de insert de `student_events` para recusar `entity_type = 'webinar'`, cria o indice parcial `student_events_webinar_idx` e a funcao `webinar_report(p_session_id)` (so vagas ate a fase 2).
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

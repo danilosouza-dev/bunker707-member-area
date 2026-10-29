@@ -263,7 +263,7 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
       ["Pacote", "/admin/produtos/pacotes", null],
       ["Aluno", "/admin/alunos/novo", null],
       ["Aviso", "/admin/comunicacao/avisos/novo", null],
-      ["Webinário", null, "Em breve"],
+      ["Webinário", "/admin/comunicacao/webinarios/novo", null],
       ["Promoção", null, "Em breve"]
     ]
   );
@@ -279,7 +279,8 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
     "/admin/produtos/novo": "src/app/admin/(v2)/produtos/novo/page.tsx",
     "/admin/produtos/pacotes": "src/app/admin/(v2)/produtos/pacotes/page.tsx",
     "/admin/alunos/novo": "src/app/admin/(v2)/alunos/novo/page.tsx",
-    "/admin/comunicacao/avisos/novo": "src/app/admin/(v2)/comunicacao/avisos/novo/page.tsx"
+    "/admin/comunicacao/avisos/novo": "src/app/admin/(v2)/comunicacao/avisos/novo/page.tsx",
+    "/admin/comunicacao/webinarios/novo": "src/app/admin/(v2)/comunicacao/webinarios/novo/page.tsx"
   };
   for (const [href, file] of Object.entries(pages)) {
     assert.ok(items.some((item) => item.href === href), href);

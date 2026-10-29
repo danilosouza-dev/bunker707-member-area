@@ -13,7 +13,8 @@ import type { PopupFreeDesign } from "./popup-free-model";
 
 export type { NotificationPoll } from "./interactions-model";
 
-export type NotificationKind = "comment_mention" | "comment_reply" | "notice";
+/** 'webinar' (docs/30 D27): lembrete ou aviso de live, com titulo, texto e link na propria linha do sino. */
+export type NotificationKind = "comment_mention" | "comment_reply" | "notice" | "webinar";
 
 /** Icone ao lado do titulo (catalogo em message-meta.ts). */
 export type NotificationIcon = { color: NoticeIconColor; id: NoticeIconId };

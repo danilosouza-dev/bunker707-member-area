@@ -4,10 +4,12 @@
 // Avisos e pop-ups ja e a tela de verdade (docs/22): os quatro numeros vem do banco
 // (communication_overview). Fluxos tambem (docs/23): sequencias de notificacoes com regras, com os
 // numeros de communication_flow_stats. Modelos (docs/28) e a lista das configuracoes prontas, sem numeros
-// no topo nem Periodo na barra (uma lista de modelos nao tem numero de periodo). Webinarios e Promocoes ainda nao existem (docs/17 §1.8): a moldura mostra
-// o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum
-// numero, webinario ou promocao de exemplo.
+// no topo nem Periodo na barra (uma lista de modelos nao tem numero de periodo). Webinarios e tela de verdade
+// (docs/30 §2.1): a lista com os cinco numeros do periodo. Promocoes ainda nao existe (docs/17 §1.8): a moldura
+// mostra o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum numero ou
+// promocao de exemplo.
 
+import { WEBINAR_ADMIN_COPY } from "../../../../server/webinars/editor-model";
 import type { KpiValueFormat } from "../format";
 import type { ResolvedAdminPeriod } from "../period";
 
@@ -144,12 +146,11 @@ export function getCommunicationKpis(tab: CommunicationTab, period: Pick<Resolve
     case "modelos":
       return [];
     case "webinarios":
-      return [
-        { format: "number", label: "Próximos" },
-        { format: "number", label: "Inscritos" },
-        { format: "percent", label: "Comparecimento" },
-        { format: "number", label: "Replays" }
-      ];
+      // Tela de verdade (docs/30 §2.1): cinco numeros do periodo; Compareceram e Assistiram o replay ficam em "—"
+      // ate a fase 2 (presenca por balde). Rotulos e definicoes vivem com as outras frases do Webinario.
+      return [WEBINAR_ADMIN_COPY.kpis.webinars, WEBINAR_ADMIN_COPY.kpis.registered, WEBINAR_ADMIN_COPY.kpis.attended, WEBINAR_ADMIN_COPY.kpis.replay, WEBINAR_ADMIN_COPY.kpis.liveNow].map(
+        (kpi) => ({ definition: kpi.definition, definitionShort: kpi.definitionShort, format: "number" as const, label: kpi.label })
+      );
     case "promocoes":
       return [
         { format: "number", label: "Ativas" },

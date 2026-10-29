@@ -108,7 +108,9 @@ test("proxy lives in src/ (the only place Next 16 compiles it with the app in sr
     "/continue-assistindo",
     "/materiais",
     "/suporte",
-    "/perfil"
+    "/perfil",
+    // Webinarios (docs/30 §1.1).
+    "/webinarios"
   ]) {
     assert.ok(protectedPrefixes.includes(`"${prefix}"`), `${prefix} must stay behind login`);
   }

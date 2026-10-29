@@ -22,7 +22,7 @@ test("hamburguer abre a gaveta: grupos, item atual marcado, Esc fecha e devolve 
   await expect(gaveta).toBeVisible();
   const navegacao = gaveta.getByRole("navigation", { name: "Navegação da área do aluno" });
   await expect(navegacao.getByRole("link")).toHaveText([
-    "Início", "Minha jornada", "Continue assistindo", "Minhas compras", "Favoritos", "Materiais", "Suporte", "Perfil"
+    "Início", "Minha jornada", "Continue assistindo", "Minhas compras", "Favoritos", "Materiais", "Webinários", "Suporte", "Perfil"
   ]);
   await expect(navegacao.getByRole("link", { name: "Início" })).toHaveAttribute("aria-current", "page");
   await expect(navegacao.getByRole("link", { name: "Minha jornada" })).not.toHaveAttribute("aria-current", "page");

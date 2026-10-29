@@ -44,7 +44,7 @@ test("tempos e contagens em portugues", () => {
   assert.equal(format.clampMemberPercent(Number.NaN), 0);
 });
 
-test("barra lateral: oito destinos reais, agrupados, sem item sem pagina", () => {
+test("barra lateral: nove destinos reais, agrupados, sem item sem pagina", () => {
   const items = navigation.MEMBER_NAVIGATION_ITEMS;
 
   assert.deepEqual(items.map((item) => item.href), [
@@ -54,12 +54,15 @@ test("barra lateral: oito destinos reais, agrupados, sem item sem pagina", () =>
     "/minhas-compras",
     "/favoritos",
     "/materiais",
+    // Webinarios (docs/30 §1.1): no grupo Estudar, depois de Materiais.
+    "/webinarios",
     "/suporte",
     "/perfil"
   ]);
   assert.ok(items.every((item) => item.href && item.label && item.description));
+  assert.equal(items.find((item) => item.key === "webinars")?.label, "Webinários");
   assert.deepEqual(navigation.MEMBER_NAVIGATION_GROUPS.map((group) => group.label), ["Estudar", "Conta e ajuda"]);
-  assert.deepEqual([...navigation.MEMBER_NEW_PAGE_PREFIXES], ["/minha-jornada", "/continue-assistindo", "/materiais", "/suporte", "/perfil"]);
+  assert.deepEqual([...navigation.MEMBER_NEW_PAGE_PREFIXES], ["/minha-jornada", "/continue-assistindo", "/materiais", "/suporte", "/perfil", "/webinarios"]);
 });
 
 test("item ativo: home so na home, demais por rota e subrota, nunca por prefixo parcial", () => {

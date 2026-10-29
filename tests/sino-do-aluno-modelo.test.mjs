@@ -674,3 +674,20 @@ test("escritas do cartao: uma em andamento; toques na espera trocam o que vai de
   fila.push("reacao:3", "love", options(null));
   assert.deepEqual(enviados.slice(-2), ["a", "love"]);
 });
+
+test("live (kind webinar, docs/30 D27): o cartao inteiro leva para a pagina da live, o link de verdade e o titulo e o excluir esta sempre la", () => {
+  const live = { cta: null, href: "/webinarios/live-de-agentes", kind: "webinar", title: "Lembrete da live" };
+
+  assert.deepEqual(model.cardLinkOf(live), {
+    accessibleLink: "title",
+    button: false,
+    cue: null,
+    describedBy: null,
+    display: "card",
+    link: { href: "/webinarios/live-de-agentes", internal: true, newTab: false },
+    wholeCard: true
+  });
+  assert.equal(model.cardLinkOf({ ...live, href: null }).wholeCard, false);
+  assert.equal(model.canHideNotification({ allowHide: false, kind: "webinar" }), true);
+  assert.equal(model.noticeMeta({ actor: null, createdAt: "2026-10-20T14:00:00.000Z", expiresAt: "2026-10-20T15:00:00.000Z", kind: "webinar", response: null }, { schoolName: "Bunker707", serverNow: Date.parse("2026-10-20T14:30:00.000Z") }).hint, null, "sem Termina em");
+});

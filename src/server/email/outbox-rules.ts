@@ -8,8 +8,11 @@ import type { EmailSendResult } from "./types";
 export const EMAIL_OUTBOX_STATUSES = ["queued", "sending", "sent", "failed", "bounced", "complained"] as const;
 export type EmailOutboxStatus = (typeof EMAIL_OUTBOX_STATUSES)[number];
 
-/** `sent_as`: a pessoa da equipe escolhida em "Quem envia" fica sabendo (docs/23, §1.6). */
-export const EMAIL_KINDS = ["welcome", "purchase", "sent_as"] as const;
+/**
+ * `sent_as`: a pessoa da equipe escolhida em "Quem envia" fica sabendo (docs/23, §1.6). `webinar_*`: os lembretes de
+ * 24 h e 1 h da live e o aviso de live cancelada, para quem garantiu vaga (docs/30 §2.7).
+ */
+export const EMAIL_KINDS = ["welcome", "purchase", "sent_as", "webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled"] as const;
 export type EmailKind = (typeof EMAIL_KINDS)[number];
 
 /** Depois desta quantidade de falhas passageiras a linha vira `failed` (dead-letter). */
@@ -111,4 +114,16 @@ export function purchaseIdempotencyKey(input: { entitlementIds: string[]; source
 /** Uma vez por pessoa por aviso ("sent-as:campaign:<id>:<pessoa>") ou por fluxo ("sent-as:flow:<id>:<pessoa>"). */
 export function sentAsIdempotencyKey(input: { campaignId?: string | null; flowId?: string | null; userId: string }) {
   return input.flowId ? idempotencyKeyOf("sent-as", "flow", input.flowId, input.userId) : idempotencyKeyOf("sent-as", "campaign", input.campaignId, input.userId);
+}
+
+/** O e-mail de live que a chave identifica: os dois lembretes e o cancelamento. */
+export type WebinarEmailKey = "cancelled" | "h1" | "h24";
+
+/**
+ * Uma vez por vaga, por tipo e por hora marcada ("webinar:h24:<sessao>:<hora marcada>:<aluno>"): a sessao remarcada
+ * manda os lembretes de novo; o mesmo tick repetido, nao. `stamp` e a hora marcada em AAAAMMDDHHMM (UTC), a mesma do
+ * dedupe_key do sino (src/server/webinars/reminders.ts).
+ */
+export function webinarIdempotencyKey(input: { kind: WebinarEmailKey; sessionId: string; stamp?: string | null; userId: string }) {
+  return idempotencyKeyOf("webinar", input.kind, input.sessionId, input.stamp, input.userId);
 }
