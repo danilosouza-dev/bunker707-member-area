@@ -5,6 +5,7 @@ import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
+import { webinarSessionsJob } from "./webinar-sessions-job";
 
 // Ponto de extensao dos jobs leves executados pelo tick de minuto.
 //
@@ -38,6 +39,10 @@ import { webinarRemindersJob } from "./webinar-reminders-job";
 // - `comunicacao` (notificacoes do sino agendadas e quem ve cada pop-up, src/server/jobs/communications-job.ts).
 //   Excecao registrada em docs/09 e docs/04: as linhas do sino sao minusculas, gravadas em lotes de 500,
 //   com teto por rodada e retomaveis; envio em massa de e-mail/push continua fora do tick;
+// - `webinar-sessions` (as sessoes gravadas das lives pelo relogio: abre as que chegaram na hora com o roteiro e o
+//   "Comecou agora", encerra as que passaram da duracao do video congelando a presenca e cria o replay do webinario,
+//   src/server/jobs/webinar-sessions-job.ts; docs/30 §1.6 e §6.6). Vem antes dos lembretes: a sessao que o tick nao
+//   abriu a tempo e encerrada aqui com a curva, nao pelo encerramento automatico de la. Sem trabalho, uma consulta;
 // - `webinar-reminders` (lembretes de 24 h e 1 h das lives para quem garantiu vaga, pelo sino e pela fila de e-mail,
 //   e a sessao que encerra sozinha 2 h depois do fim previsto, src/server/jobs/webinar-reminders-job.ts; docs/30 §2.7).
 //   Sem trabalho, uma consulta de sessoes e nada mais;
@@ -62,4 +67,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarRemindersJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, communicationMediaJob];

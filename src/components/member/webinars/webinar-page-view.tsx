@@ -14,14 +14,16 @@ import type { StudentPhase } from "@/server/webinars/model";
 import { phaseLabel, type StudentSessionView, type StudentWebinarView } from "@/server/webinars/student-model";
 import type { SessionCalendarLinks, WebinarPageData } from "@/server/webinars/student-queries";
 import { WebinarCountdown } from "./webinar-countdown";
+import { WebinarEnterButton, WebinarReplayButton } from "./webinar-enter-button";
 import { WebinarFacts } from "./webinar-facts";
 import { WebinarLocalTime } from "./webinar-local-time";
 import { WebinarSessionActions } from "./webinar-session-actions";
 
 // /webinarios/[slug] (docs/30 §1.2): a tabela de situacoes. Agendado (Garantir vaga), Vaga garantida (selo,
 // Adicionar ao calendario e Cancelar minha vaga), Vagas esgotadas (sem botao), Aguardando o apresentador e
-// Ao vivo (Entrar: a sala chega na fase 3, o botao diz "em breve"), Encerrada ("Essa live acabou."; o replay
-// chega na fase 2) e Cancelado (o motivo que a equipe escreveu). Na Live gravada o aluno escolhe a sessao
+// Ao vivo (Entrar: na Live gravada abre a Sala de 15 min antes ate o fim, fase 2; na Live ao vivo a sala chega
+// na fase 3 e o botao diz "em breve"), Encerrada ("Essa live acabou." e Assistir o replay quando ha a sessao
+// replay, fase 2) e Cancelado (o motivo que a equipe escreveu). Na Live gravada o aluno escolhe a sessao
 // antes de garantir a vaga. Horarios em Sao Paulo; "(no seu horario: 21:00)" quando o aparelho esta em
 // outro fuso. Sem acesso a pagina nem existe (notFound na page.tsx).
 
@@ -49,17 +51,23 @@ function ComingSoonButton({ label, variant }: { label: string; variant: "primary
 }
 
 function SessionRow({
+  accessPreviewMode,
   calendar,
+  durationMinutes,
   readOnly,
   serverNow,
   session,
+  slug,
   source,
   webinarId
 }: {
+  accessPreviewMode?: AccessPreviewMode;
   calendar: SessionCalendarLinks | null;
+  durationMinutes: number;
   readOnly: boolean;
   serverNow: number;
   session: StudentSessionView;
+  slug: string;
   source: string | null;
   webinarId: string;
 }) {
@@ -88,7 +96,7 @@ function SessionRow({
         </div>
         <div className="shrink-0">
           {inProgress ? (
-            <ComingSoonButton label={copy.entrar} variant="primary" />
+            <WebinarEnterButton accessPreviewMode={accessPreviewMode} durationMinutes={durationMinutes} serverNow={serverNow} session={session} slug={slug} />
           ) : (
             <WebinarSessionActions
               calendar={calendar}
@@ -106,7 +114,21 @@ function SessionRow({
   );
 }
 
-function PhaseBlock({ calendars, readOnly, serverNow, source, view }: { calendars: Record<string, SessionCalendarLinks>; readOnly: boolean; serverNow: number; source: string | null; view: StudentWebinarView }) {
+function PhaseBlock({
+  accessPreviewMode,
+  calendars,
+  readOnly,
+  serverNow,
+  source,
+  view
+}: {
+  accessPreviewMode?: AccessPreviewMode;
+  calendars: Record<string, SessionCalendarLinks>;
+  readOnly: boolean;
+  serverNow: number;
+  source: string | null;
+  view: StudentWebinarView;
+}) {
   const copy = WEBINAR_COPY.aluno;
   const primary = view.primary;
 
@@ -123,7 +145,7 @@ function PhaseBlock({ calendars, readOnly, serverNow, source, view }: { calendar
     return (
       <MemberSurface variant="inset">
         <p className="text-sm font-semibold text-white">{copy.encerrada}</p>
-        {view.replayAvailable ? <ComingSoonButton label={copy.assistirReplay} variant="secondary" /> : null}
+        {view.replayAvailable ? <WebinarReplayButton accessPreviewMode={accessPreviewMode} replaySessionId={view.replaySessionId} slug={view.slug} /> : null}
       </MemberSurface>
     );
   }
@@ -144,11 +166,14 @@ function PhaseBlock({ calendars, readOnly, serverNow, source, view }: { calendar
         <ul className="grid gap-3">
           {open.map((session) => (
             <SessionRow
+              accessPreviewMode={accessPreviewMode}
               calendar={calendars[session.id] ?? null}
+              durationMinutes={view.durationMinutes}
               key={session.id}
               readOnly={readOnly}
               serverNow={serverNow}
               session={session}
+              slug={view.slug}
               source={source}
               webinarId={view.id}
             />
@@ -268,7 +293,7 @@ export function WebinarPageView({
           ) : null}
 
           <div className="mt-6">
-            <PhaseBlock calendars={calendars} readOnly={readOnly} serverNow={serverNow} source={source} view={view} />
+            <PhaseBlock accessPreviewMode={accessPreviewMode} calendars={calendars} readOnly={readOnly} serverNow={serverNow} source={source} view={view} />
           </div>
         </div>
       </article>

@@ -20,16 +20,22 @@ import { isMissingWebinarSchema, WebinarError, webinarsDb, type WebinarsDb } fro
 import { webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { registrationFromRow, sessionFromRow, webinarFromRow } from "./rows";
 import { loadStudentWebinarById, resolveStudentSession } from "./registrations";
+import { loadRoomExtras, roomContextOf } from "./room-queries";
+import { canJoinSimulated } from "./room-model";
 import {
+  asRoomPayload,
   buildSessionPayload,
+  buildStudentSession,
   buildStudentWebinarView,
   calendarPath,
   groupStudentWebinars,
   pickHomeWebinar,
   pickStartBanner,
   previewCanSee,
+  roomHref,
   type HomeWebinarCard,
   type StartBanner,
+  type StudentRoomPayload,
   type StudentSessionPayload,
   type StudentSessionView,
   type StudentWebinarLists,
@@ -232,28 +238,80 @@ export async function getWebinarBanner(userId: string, now = Date.now(), options
 
 /**
  * GET /api/webinars/[id]/session?sessao=: a sessao pedida (ou a da Live ao vivo) com a situacao, a vaga do
- * aluno e o total de vagas quando a equipe mostra. Fora do acesso ou sem o webinario: WebinarError 404.
+ * aluno e o total de vagas quando a equipe mostra; na fase 2, tambem o que a Sala precisa (relogio, fase, video,
+ * mensagem fixada, enquetes, presentes e o aceite do aluno; room-queries.ts). ?sessao= pode ser a sessao `replay`.
+ * Fora do acesso ou sem o webinario: WebinarError 404.
  */
 export async function getStudentSessionPayload(userId: string, webinarId: string, sessionId: string | null, now = Date.now(), options: StudentQueryOptions = {}): Promise<StudentSessionPayload> {
   const db = options.db ?? webinarsDb();
   const record = await loadStudentWebinarById(db, userId, webinarId, now);
-  const session = resolveStudentSession(record, sessionId, now);
+  const replay = sessionId ? (record.sessions.find((item) => item.id === sessionId && item.kind === "replay") ?? null) : null;
+  const session = replay ?? resolveStudentSession(record, sessionId, now);
   const registrations = (await fetchRegistrationRows(db, { userId, webinarIds: [record.webinar.id] })).map(registrationFromRow);
   const counts = await loadRegisteredCounts(db, [record.webinar], [session]);
   const names = await loadPresenterNames(db, [record.webinar]);
-  const view = buildStudentWebinarView({
+  const input = {
     now,
     presenterName: record.webinar.hostUserId ? (names.get(record.webinar.hostUserId) ?? null) : null,
     registeredCounts: counts,
     registrations,
     sessions: record.sessions,
     webinar: record.webinar
-  });
-  const sessionView = view.sessions.find((item) => item.id === session.id);
+  };
+  const view = buildStudentWebinarView(input);
+  const sessionView = view.sessions.find((item) => item.id === session.id) ?? (replay ? buildStudentSession(input, replay) : null);
   if (!sessionView) {
     throw new WebinarError("Sessão inválida.", 404);
   }
-  return buildSessionPayload(view, sessionView, { lateJoinMinutes: session.lateJoinMinutes, now });
+  const roomContext = await roomContextOf(db, record, session.id);
+  const room = await loadRoomExtras(db, roomContext, userId, now);
+  return buildSessionPayload(view, sessionView, { lateJoinMinutes: session.lateJoinMinutes, now, room });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A Sala (docs/30 §1.6): /webinarios/[slug]/sala?sessao=
+ * ---------------------------------------------------------------------------------------------- */
+
+export type RoomPageData =
+  | { href: string; now: number; page: StudentWebinarPage; payload: StudentRoomPayload; state: "ready" }
+  | { state: "not_found" }
+  | { page: StudentWebinarPage; reason: "ended" | "late" | "not_started"; state: "refused" }
+  | { state: "error" };
+
+/**
+ * A pagina da Sala: o webinario pelo endereco (404 fora do acesso), a sessao pedida (404 se nao e deste webinario)
+ * e a resposta completa da sessao; fora da janela de entrada da gravada (antes de 15 min, depois do fim ou da
+ * Entrada atrasada), `refused` com o motivo. No "ver como" da equipe a sala abre sem gravar nada (a tela decide).
+ */
+export async function getRoomPageData(accessPreviewMode: AccessPreviewMode | undefined, user: SessionUser, slug: string, sessionId: string): Promise<RoomPageData> {
+  const now = Date.now();
+  try {
+    const page = await getStudentWebinar(user.id, slug, now, { accessPreviewMode });
+    if (!page) {
+      return { state: "not_found" };
+    }
+    const payload = asRoomPayload(await getStudentSessionPayload(user.id, page.view.id, sessionId, now, { accessPreviewMode }));
+    if (!payload) {
+      return { state: "error" };
+    }
+    if (payload.session.kind !== "replay") {
+      const join = canJoinSimulated(
+        { kind: payload.session.kind, lateJoinMinutes: payload.session.lateJoinMinutes, recordingAnchorAt: null, scheduledAt: payload.session.scheduledAt, startedAt: payload.session.startedAt, status: payload.session.status },
+        payload.session.durationMs,
+        now
+      );
+      if (!join.ok) {
+        return { page, reason: join.reason, state: "refused" };
+      }
+    }
+    return { href: roomHref(page.view.slug, payload.session.id), now, page, payload, state: "ready" };
+  } catch (error) {
+    if (error instanceof WebinarError && error.status === 404) {
+      return { state: "not_found" };
+    }
+    console.error(`[webinarios] sala nao carregou: ${describe(error)}`);
+    return { state: "error" };
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------

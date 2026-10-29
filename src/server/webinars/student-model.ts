@@ -19,14 +19,20 @@ import {
   toTime,
   WEBINAR_LIMITS,
   webinarHref,
+  type ChatMode,
+  type DisplayNameMode,
   type SessionKind,
   type SessionStatus,
+  type SimulatedPhase,
+  type StudentChatMessage,
   type StudentPhase,
   type Webinar,
   type WebinarKind,
   type WebinarRegistration,
   type WebinarSession
 } from "./model";
+import type { JoinRefusal } from "./room-model";
+import type { StudentPoll } from "./room-rules";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -38,6 +44,8 @@ export type StudentSessionView = {
   endedAt: string | null;
   id: string;
   kind: SessionKind;
+  /** Entrada atrasada da Live gravada (fase 2): depois deste minuto a sala nao abre mais. */
+  lateJoinMinutes: number | null;
   phase: StudentPhase;
   registered: boolean;
   registeredAt: string | null;
@@ -74,6 +82,8 @@ export type StudentWebinarView = {
   registrationRequired: boolean;
   replayAvailable: boolean;
   replayDaysOnHome: number;
+  /** A sessao `replay` (Replay livre, fase 2) quando existe e nao foi cancelada: o botao Assistir o replay abre a sala dela. */
+  replaySessionId: string | null;
   sessions: StudentSessionView[];
   showBanner: boolean;
   showOnHome: boolean;
@@ -148,6 +158,7 @@ export function buildStudentSession(input: StudentWebinarInput, session: Webinar
     endedAt: session.endedAt,
     id: session.id,
     kind: session.kind,
+    lateJoinMinutes: session.lateJoinMinutes,
     phase,
     registered: registration !== null,
     registeredAt: registration?.registeredAt ?? null,
@@ -173,6 +184,17 @@ function endedAtOf(webinar: Webinar, sessions: readonly WebinarSession[], now: n
   const latest = Math.max(...ends);
   const allOver = sessions.every((session) => session.status === "ended" || session.status === "cancelled" || sessionEndsAt(session, webinar.durationMinutes) + REMINDER_RULES.autoEndMinutesAfter * 60_000 <= now);
   return allOver ? latest : null;
+}
+
+/** A sessao `replay` que o aluno pode abrir (existe e nao foi cancelada). */
+export function openReplaySessionId(sessions: readonly WebinarSession[]): string | null {
+  const replay = replaySession(sessions);
+  return replay && replay.status !== "cancelled" ? replay.id : null;
+}
+
+/** O endereco da Sala de uma sessao (docs/30 §1.6): /webinarios/[slug]/sala?sessao=<id>. */
+export function roomHref(slug: string, sessionId: string) {
+  return `${webinarHref(slug)}/sala?sessao=${encodeURIComponent(sessionId)}`;
 }
 
 /** O webinario como a area do aluno o ve (docs/30 §1.2), a partir das linhas ja lidas. */
@@ -205,6 +227,7 @@ export function buildStudentWebinarView(input: StudentWebinarInput): StudentWebi
     registrationRequired: webinar.registrationRequired,
     replayAvailable: replaySession(input.sessions) !== null,
     replayDaysOnHome: webinar.replayDaysOnHome,
+    replaySessionId: openReplaySessionId(input.sessions),
     sessions: views,
     showBanner: webinar.showBanner,
     showOnHome: webinar.showOnHome,
@@ -279,9 +302,45 @@ export function bannerLabel(scheduledAt: string, now: number): string {
   return text.startsWith("1 h") ? "Começa em 1 h" : `Começa em ${text}`;
 }
 
-/** O que GET /api/webinars/[id]/session devolve nesta fase (subconjunto de docs/30 §5.1). */
+/** O video da sessao gravada (docs/30 §5.1): o endereco do player da Bunny ja montado no servidor. */
+export type StudentRoomVideo = {
+  embedUrl: string;
+  /** Fim do token de visualizacao (segundos desde 1970), quando a biblioteca da Bunny pede token; senao nulo. */
+  expires: number | null;
+  libraryId: string;
+  provider: "bunny";
+  videoId: string;
+};
+
+/** O que a Sala precisa alem da fase 1 (docs/30 §5.1 e §6.6), montado por room-queries.ts. */
+export type StudentRoomExtras = {
+  me: { consented: boolean; displayMode: DisplayNameMode | null; displayName: string | null; nickname: string | null };
+  pinned: StudentChatMessage | null;
+  polls: StudentPoll[];
+  presentNow: number;
+  replaySessionId: string | null;
+  session: {
+    chatMode: ChatMode;
+    chatSlowModeSeconds: number | null;
+    /** A duracao do video em ms (a gravacao quando se sabe; senao a duracao prevista). */
+    durationMs: number;
+    /** Se a sala abre agora para o aluno (canJoinSimulated); o replay sempre abre. */
+    join: { ok: true } | { ok: false; reason: JoinRefusal };
+    /** Onde o video esta agora, em ms (autoritativo na gravada); nulo no replay. */
+    offsetMs: number | null;
+    /** A fase da sessao gravada pelo relogio do servidor; nulo no replay. */
+    roomPhase: SimulatedPhase | null;
+    showLiveBadge: boolean;
+  };
+  video: StudentRoomVideo | null;
+};
+
+/** O que GET /api/webinars/[id]/session devolve (docs/30 §5.1): a fase 1 sempre; a Sala (fase 2) quando a rota traz `room`. */
 export type StudentSessionPayload = {
-  me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null };
+  me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null } & Partial<StudentRoomExtras["me"]>;
+  pinned?: StudentChatMessage | null;
+  polls?: StudentPoll[];
+  presentNow?: number;
   registeredCount: number | null;
   serverTime: string;
   session: {
@@ -293,8 +352,20 @@ export type StudentSessionPayload = {
     scheduledAt: string;
     startedAt: string | null;
     status: SessionStatus;
-  };
-  webinar: { durationMinutes: number; id: string; kind: WebinarKind; slug: string; title: string };
+  } & Partial<StudentRoomExtras["session"]>;
+  video?: StudentRoomVideo | null;
+  webinar: { durationMinutes: number; id: string; kind: WebinarKind; replaySessionId?: string | null; slug: string; title: string };
+};
+
+/** A resposta completa da Sala: a fase 1 mais tudo o que `room` traz (o que o navegador da sala recebe). */
+export type StudentRoomPayload = Omit<StudentSessionPayload, "me" | "pinned" | "polls" | "presentNow" | "session" | "video" | "webinar"> & {
+  me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null } & StudentRoomExtras["me"];
+  pinned: StudentChatMessage | null;
+  polls: StudentPoll[];
+  presentNow: number;
+  session: StudentSessionPayload["session"] & StudentRoomExtras["session"];
+  video: StudentRoomVideo | null;
+  webinar: { durationMinutes: number; id: string; kind: WebinarKind; replaySessionId: string | null; slug: string; title: string };
 };
 
 /** Caminho do .ics da vaga (a rota nao pede sessao: o token basta). */
@@ -305,9 +376,9 @@ export function calendarPath(webinarId: string, calendarToken: string): string {
 export function buildSessionPayload(
   view: StudentWebinarView,
   session: StudentSessionView,
-  extra: { lateJoinMinutes: number | null; now: number }
+  extra: { lateJoinMinutes: number | null; now: number; room?: StudentRoomExtras }
 ): StudentSessionPayload {
-  return {
+  const base: StudentSessionPayload = {
     me: {
       calendarUrl: session.calendarToken ? calendarPath(view.id, session.calendarToken) : null,
       registered: session.registered,
@@ -327,6 +398,28 @@ export function buildSessionPayload(
     },
     webinar: { durationMinutes: view.durationMinutes, id: view.id, kind: view.kind, slug: view.slug, title: view.title }
   };
+  const room = extra.room;
+  if (!room) {
+    return base;
+  }
+  return {
+    ...base,
+    me: { ...base.me, ...room.me },
+    pinned: room.pinned,
+    polls: room.polls,
+    presentNow: room.presentNow,
+    session: { ...base.session, ...room.session },
+    video: room.video,
+    webinar: { ...base.webinar, replaySessionId: room.replaySessionId }
+  };
+}
+
+/** A resposta da fase 1 com `room`: o tipo completo que a Sala usa (so para o TypeScript do navegador). */
+export function asRoomPayload(payload: StudentSessionPayload): StudentRoomPayload | null {
+  if (payload.session.roomPhase === undefined && payload.session.offsetMs === undefined) {
+    return null;
+  }
+  return payload as StudentRoomPayload;
 }
 
 /* ------------------------------------------------------------------------------------------------

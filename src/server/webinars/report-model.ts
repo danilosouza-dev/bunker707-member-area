@@ -58,7 +58,7 @@ export type WebinarReportView = {
   reactions: { byType: { reaction: string; students: number; total: number }[]; perMinute: { minute: number; reaction: string; total: number }[] };
   registration: { absent: number; attended: number; cancelled: number; registered: number; sources: { source: string; total: number }[] };
   replay: { viewers: number; watchedPct: number };
-  script: { fired: number; missed: number };
+  script: { fired: number; missed: number; ready: number };
 };
 
 function emptyReport(): WebinarReportView {

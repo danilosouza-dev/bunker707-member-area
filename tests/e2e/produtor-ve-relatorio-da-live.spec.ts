@@ -1,0 +1,111 @@
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
+import { LIVE_GRAVADA_DE_TESTE, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { createLocalAdminClient } from "../support/local-db.mjs";
+
+// A aba Relatorio do webinario no navegador (docs/30 §2.5, §3.4 e §3.7; docs/18 §3.2): o produtor abre o relatorio
+// de uma Live gravada ja encerrada da escola de teste (a curva congelada e a lista por aluno gravadas pela seed) e
+// ve a sessao marcada no seletor, os numeros, a curva "Presentes minuto a minuto" em grafico e em tabela, a lista por
+// aluno com o nome da aluna e baixa o CSV pela rota; a 375 px a pagina nao rola de lado.
+
+const { id, sessaoId, titulo } = LIVE_GRAVADA_DE_TESTE;
+
+test.describe.configure({ mode: "serial" });
+
+test.beforeAll(async () => {
+  const db = createLocalAdminClient();
+  await limparWebinarios(db);
+  await seedLiveGravadaEncerradaDeTeste(db);
+});
+
+test.afterAll(async () => {
+  await limparWebinarios(createLocalAdminClient());
+});
+
+/** A pagina nao rola de lado (lida ate o desenho parar de mudar). */
+async function semRolagemLateral(page: Page) {
+  await expect.poll(() => page.evaluate(() => (document.scrollingElement?.scrollWidth ?? 0) <= window.innerWidth)).toBe(true);
+}
+
+test.describe("produtor", () => {
+  test.use({ storageState: "tests/e2e/.auth/produtor.json" });
+
+  test("abre o relatório da sessão encerrada: números, curva em gráfico e em tabela, lista por aluno e o CSV; 375 px sem rolar de lado", async ({ page }) => {
+    await page.goto(`/admin/comunicacao/webinarios/${id}/relatorio`);
+    await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+    await expect(page.getByText("Os números da sessão escolhida, só de alunos. Atualiza a cada minuto.", { exact: true })).toBeVisible();
+
+    // O seletor: a sessao encerrada e a unica e esta marcada; o endereco dela leva ?sessao=.
+    const seletor = page.getByRole("navigation", { name: "Sessão" });
+    const marcada = seletor.locator('a[aria-current="page"]');
+    await expect(marcada).toContainText("Sessão ·");
+    expect(await marcada.getAttribute("href")).toBe(`/admin/comunicacao/webinarios/${id}/relatorio?sessao=${sessaoId}`);
+    await expect(page.getByText("Encerrada", { exact: true })).toBeVisible();
+
+    // Os numeros (role="group" com "rotulo, valor, definicao").
+    await expect(page.getByRole("group", { name: /^Vagas garantidas, 2,/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Compareceram, 2,/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Taxa de comparecimento, 100/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Pico de presentes, 2,/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Até o fim, 50/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Mensagens, 2,/ })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Reações, 1,/ })).toBeVisible();
+
+    // A curva: o SVG acessivel com o resumo, e a tabela por minuto no lugar dele.
+    const curva = page.getByRole("region", { name: "Presentes minuto a minuto" });
+    // A media vem da RPC (arredondada): 10 baldes com 2 e 50 com 1 dao 1,17 -> 1.
+    await expect(curva.getByRole("img", { name: /^Pico de 2 às 00:00; média de 1 presentes\./ })).toBeVisible();
+    await expect(curva.getByText("05:00 · 1 saiu", { exact: true })).toBeVisible();
+    await curva.getByRole("button", { name: "Ver como tabela" }).click();
+    const tabela = curva.getByRole("table", { name: "Presentes minuto a minuto" });
+    await expect(tabela).toBeVisible();
+    await expect(tabela.getByRole("columnheader", { name: "Minuto" })).toBeVisible();
+    await expect(tabela.getByRole("row").filter({ has: page.getByRole("cell", { exact: true, name: "00:00" }) })).toContainText("2");
+    await curva.getByRole("button", { name: "Ver como gráfico" }).click();
+    await expect(curva.getByRole("img")).toBeVisible();
+
+    // O chat e a lista por aluno trazem o nome da aluna (de profiles), nunca o e-mail.
+    await expect(page.getByRole("region", { name: "Chat" }).getByRole("link", { name: "Aluna de Teste" }).first()).toBeVisible();
+    const lista = page.getByRole("region", { name: "Lista por aluno" });
+    await expect(lista.getByRole("link", { name: "Aluna de Teste" })).toBeVisible();
+    await expect(lista.getByRole("link", { name: "Aluno Sem Acesso" })).toBeVisible();
+    await expect(page.getByText("aluna.teste@bunker707.test")).toHaveCount(0);
+
+    // Baixar CSV: a rota serve o arquivo com as colunas do Zoom e o nome e o e-mail da aluna.
+    const baixar = lista.getByRole("link", { name: "Baixar CSV" });
+    const href = await baixar.getAttribute("href");
+    expect(href).toBe(`/api/admin/webinars/${id}/relatorio/csv?sessao=${sessaoId}`);
+    const csv = await page.request.get(href!);
+    expect(csv.status()).toBe(200);
+    expect(csv.headers()["content-type"]).toContain("text/csv");
+    expect(csv.headers()["content-disposition"]).toContain("-attendee.csv");
+    const corpo = await csv.text();
+    expect(corpo).toContain("Compareceu;Nome;E-mail;Hora da vaga;Entrou;Saiu;Entradas;Tempo na sessão (min);Até o fim (95 %)");
+    expect(corpo).toContain("Sim;Aluna de Teste;aluna.teste@bunker707.test;");
+
+    // A 375 px, em grafico e em tabela, a pagina nao rola de lado.
+    await page.setViewportSize({ height: 812, width: 375 });
+    await page.reload();
+    await expect(page.getByRole("group", { name: /^Vagas garantidas, 2,/ })).toBeVisible();
+    await semRolagemLateral(page);
+    await page.getByRole("region", { name: "Presentes minuto a minuto" }).getByRole("button", { name: "Ver como tabela" }).click();
+    await expect(page.getByRole("table", { name: "Presentes minuto a minuto" })).toBeVisible();
+    await semRolagemLateral(page);
+  });
+
+  test("sem sessão que começou, a aba mostra o estado vazio em vez de números inventados", async ({ page }) => {
+    const db = createLocalAdminClient();
+    // A mesma live com a sessao devolvida a "agendada" para o futuro: nenhum relatorio ainda.
+    const { error } = await db
+      .from("webinar_sessions")
+      .update({ ended_at: null, presence_curve: null, scheduled_at: new Date(Date.now() + 86_400_000).toISOString(), started_at: null, status: "scheduled" })
+      .eq("id", sessaoId);
+    expect(error).toBeNull();
+
+    await page.goto(`/admin/comunicacao/webinarios/${id}/relatorio`);
+    await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Nenhuma sessão começou ainda" })).toBeVisible();
+    await expect(page.getByText("Os números aparecem depois da primeira sessão.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: /^Vagas garantidas/ })).toHaveCount(0);
+  });
+});

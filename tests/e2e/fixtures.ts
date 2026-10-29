@@ -1351,6 +1351,9 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
 <button id="pausar" type="button">Pausar</button>
 <button id="terminar" type="button">Terminar</button>
 <p id="estado" role="status">carregando</p>
+<p id="tempo" data-testid="tempo">0</p>
+<p id="som" data-testid="som">som</p>
+<p id="ultimo-salto" data-testid="ultimo-salto"></p>
 <script>
 (() => {
   const CONFIG = ${JSON.stringify(config)};
@@ -1367,9 +1370,31 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     }
   })();
   const estado = document.getElementById("estado");
+  const tempo = document.getElementById("tempo");
+  const som = document.getElementById("som");
+  const ultimoSalto = document.getElementById("ultimo-salto");
   const inscritos = new Map();
+  const parametros = new URLSearchParams(location.search);
+  // A sala da Live gravada (docs/30 §6.6) abre o player com autoplay=true&muted=true: a pagina falsa toca sozinha,
+  // sem som, e anda 1 s por segundo. O t= do endereco e ignorado de proposito: a trava da sala precisa recolocar o
+  // player no segundo certo (setCurrentTime), e o teste le o salto em #ultimo-salto.
+  const autoplay = parametros.get("autoplay") === "true";
   let pausado = true;
   let segundos = 0;
+  let mudo = parametros.get("muted") === "true";
+  som.textContent = mudo ? "mudo" : "som";
+
+  function mostrarTempo() {
+    tempo.textContent = String(Math.floor(segundos));
+  }
+
+  setInterval(() => {
+    if (!pausado && autoplay) {
+      segundos += 1;
+      mostrarTempo();
+      emitir("timeupdate");
+    }
+  }, 1000);
 
   function postar(mensagem) {
     window.parent.postMessage(mensagem, destino);
@@ -1396,7 +1421,7 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     }
     if (CONFIG.protocolos.includes("playerjs") && (CONFIG.semInscricao || inscritos.has(nome))) {
       const mensagem = { context: "player.js", version: VERSAO, event: nome, listener: inscritos.get(nome) ?? undefined };
-      postar(JSON.stringify(nome === "timeupdate" || nome === "ended" ? { ...mensagem, value: tempo } : mensagem));
+      postar(JSON.stringify(nome === "timeupdate" || nome === "ended" || nome === "seeked" ? { ...mensagem, value: tempo } : mensagem));
     }
   }
 
@@ -1438,6 +1463,27 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     } else if (dados.method === "getPaused") {
       postar(JSON.stringify({ context: "player.js", version: VERSAO, event: "getPaused", value: pausado, listener: dados.listener }));
       estado.textContent = "pronto";
+    } else if (dados.method === "getCurrentTime") {
+      postar(JSON.stringify({ context: "player.js", version: VERSAO, event: "getCurrentTime", value: segundos, listener: dados.listener }));
+    } else if (dados.method === "setCurrentTime" && typeof dados.value === "number") {
+      // Os comandos da sala travada (docs/30 §6.6): o salto fica visivel para o teste.
+      segundos = dados.value;
+      ultimoSalto.textContent = String(Math.round(dados.value));
+      mostrarTempo();
+      emitir("seeked");
+      emitir("timeupdate");
+    } else if (dados.method === "play") {
+      pausado = false;
+      emitir("play");
+    } else if (dados.method === "pause") {
+      pausado = true;
+      emitir("pause");
+    } else if (dados.method === "mute") {
+      mudo = true;
+      som.textContent = "mudo";
+    } else if (dados.method === "unmute") {
+      mudo = false;
+      som.textContent = "som";
     }
   });
 
@@ -1458,11 +1504,20 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     emitir("ended");
   });
 
+  function comecar() {
+    pronto();
+    if (autoplay) {
+      pausado = false;
+      mostrarTempo();
+      emitir("play");
+    }
+  }
+
   window.addEventListener("load", () => {
     if (CONFIG.prontoDepoisDe > 0) {
-      setTimeout(pronto, CONFIG.prontoDepoisDe);
+      setTimeout(comecar, CONFIG.prontoDepoisDe);
     } else {
-      pronto();
+      comecar();
     }
   });
 })();

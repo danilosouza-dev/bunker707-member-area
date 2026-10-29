@@ -42,13 +42,16 @@ export const CHAT_MESSAGES = {
   simulationAck: "Marque a confirmação para ligar o selo.",
   tooManyItems: "O roteiro aceita até 5.000 mensagens.",
   tooManyPolls: "Até 20 enquetes por webinário.",
-  transcriptTooLong: "A transcrição passa de 2 MB."
+  transcriptTooLong: "A transcrição passa de 2 MB.",
+  window: "Janela inválida."
 } as const;
 
 const uuidSchema = z.uuid({ error: CHAT_MESSAGES.invalid });
 const sessionIdSchema = z.uuid({ error: CHAT_MESSAGES.session });
 const offsetSchema = z.number({ error: CHAT_MESSAGES.offset }).int(CHAT_MESSAGES.offset).min(CHAT_LIMITS.offsetMinMs, CHAT_MESSAGES.offset).max(CHAT_LIMITS.offsetMaxMs, CHAT_MESSAGES.offset);
 const bodySchema = z.string({ error: CHAT_MESSAGES.body }).trim().min(1, CHAT_MESSAGES.body).max(CHAT_LIMITS.body, CHAT_MESSAGES.bodyTooLong);
+/** So no Replay livre: o segundo do video em que o aluno estava (docs/30 §1.6); na gravada e na live o servidor ignora e usa o relogio. */
+const replayOffsetSchema = offsetSchema.optional();
 
 /* ------------------------------------------------------------------------------------------------
  * Rotas do aluno (src/app/api/webinars/[id]/...)
@@ -75,6 +78,7 @@ export const chatPostBodySchema = z.object({
   displayMode: z.enum(DISPLAY_NAME_MODES).optional(),
   kind: z.enum(["message", "question"]).default("message"),
   nickname: z.string().trim().min(CHAT_LIMITS.nicknameMin, CHAT_MESSAGES.nickname).max(CHAT_LIMITS.nicknameMax, CHAT_MESSAGES.nickname).optional(),
+  offsetMs: replayOffsetSchema,
   replyToId: uuidSchema.nullable().optional(),
   sessionId: sessionIdSchema
 });
@@ -93,7 +97,7 @@ export const heartbeatBodySchema = z.object({
 });
 export type HeartbeatInput = z.infer<typeof heartbeatBodySchema>;
 
-export const reactionBodySchema = z.object({ reaction: z.enum(REACTIONS, { error: CHAT_MESSAGES.invalid }), sessionId: sessionIdSchema });
+export const reactionBodySchema = z.object({ offsetMs: replayOffsetSchema, reaction: z.enum(REACTIONS, { error: CHAT_MESSAGES.invalid }), sessionId: sessionIdSchema });
 
 /** GET /reactions?sessao=&since= (ISO): as contagens dos ultimos segundos para a animacao. */
 export const reactionsQuerySchema = z.object({ sessao: sessionIdSchema, since: z.iso.datetime({ offset: true }).optional() });
@@ -101,6 +105,7 @@ export const reactionsQuerySchema = z.object({ sessao: sessionIdSchema, since: z
 export const questionBodySchema = z.object({
   anonymous: z.boolean().default(false),
   body: z.string({ error: CHAT_MESSAGES.question }).trim().min(1, CHAT_MESSAGES.question).max(CHAT_LIMITS.question, CHAT_MESSAGES.questionTooLong),
+  offsetMs: replayOffsetSchema,
   sessionId: sessionIdSchema
 });
 
@@ -110,6 +115,7 @@ export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
 export const questionsQuerySchema = z.object({ ordem: z.enum(["votadas", "recentes"]).default("votadas"), sessao: sessionIdSchema });
 
 export const pollAnswerBodySchema = z.object({
+  offsetMs: replayOffsetSchema,
   optionIds: z.array(uuidSchema).min(1, CHAT_MESSAGES.pollAnswer).max(CHAT_LIMITS.pollOptionsMax, CHAT_MESSAGES.pollAnswer),
   pollId: uuidSchema,
   sessionId: sessionIdSchema
