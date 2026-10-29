@@ -1,6 +1,6 @@
 "use client";
 
-import { jitPageSentence, jitPageState } from "@/server/webinars/jit-model";
+import { jitPageSentence, jitPageState } from "@/server/webinars/jit-clock";
 import type { StudentJitView } from "@/server/webinars/student-model";
 import { useTickingNow } from "../use-ticking-now";
 

@@ -1,6 +1,8 @@
 // Frases do "Comeca quando voce entra" (docs/30 §1.2, §1.6, §2.2, §2.7 e A14): o card Sessoes do editor, a pagina do
-// webinario e a sala na espera. Entram em WEBINAR_COPY.jit. Modulo puro, sem imports. Dono: a frente 4e do
-// just-in-time.
+// webinario e a sala na espera. Entram em WEBINAR_COPY.jit. Modulo puro; o unico import e o das frases do aluno
+// (jit-aluno.ts, um modulo folha que o contador da Inicio le sem trazer estas). Dono: a frente 4e do just-in-time.
+
+import { JIT_ALUNO_COPY, jitHoraDe } from "./jit-aluno";
 
 export const JIT_COPY = {
   card: {
@@ -13,7 +15,7 @@ export const JIT_COPY = {
     minutos: (n: number) => `${n} min`,
     janela: "Entre",
     janelaAte: "e",
-    horaDe: (hora: number) => `${String(hora).padStart(2, "0")}:00`,
+    horaDe: jitHoraDe,
     horarioDeBrasilia: "horário de Brasília",
     inicioDaJanela: "Início da janela",
     fimDaJanela: "Fim da janela",
@@ -39,17 +41,7 @@ export const JIT_COPY = {
     resumo: (minutos: number, de: string, ate: string) => `Começa quando você entra: a cada ${minutos} min, das ${de} às ${ate} (horário de Brasília)`,
     turma: "Quem entrar no mesmo horário vê os comentários uns dos outros; os de outros horários do dia aparecem pelo segundo em que foram escritos."
   },
-  aluno: {
-    proximaSessaoEm: (minutos: number) => (minutos <= 1 ? "A próxima sessão começa em 1 min" : `A próxima sessão começa em ${minutos} min`),
-    sessaoJaComecou: (hora: string) => `A sessão das ${hora} já começou. Entre agora.`,
-    salaAbreAntes: (minutos: number) => `A sala abre ${minutos} min antes.`,
-    selo: "Começa quando você entra",
-    entrar: "Entrar",
-    semVaga: "Não precisa de vaga: é só entrar.",
-    foraDoHorario: (hora: string) => `As sessões abrem a partir das ${hora} (horário de Brasília).`,
-    preparando: "Preparando a sua sessão…",
-    erro: "Não foi possível abrir a sessão. Tente de novo."
-  },
+  aluno: JIT_ALUNO_COPY,
   /** As recusas da rota POST /api/webinars/[id]/jit e da Server Action do card. */
   servidor: {
     desligado: "Este webinário não tem Começa quando você entra.",

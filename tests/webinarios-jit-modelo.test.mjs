@@ -158,3 +158,68 @@ test("o resto do app: a sessao jit, o publicar sem hora marcada so com o just-in
 
   assert.equal(jit.jitSummary(regras()), "Começa quando você entra: a cada 15 min, das 08:00 às 23:00 (horário de Brasília)");
 });
+
+test("o contador do card na Inicio e o Entrar da pagina nao levam model.ts, room-model.ts nem as frases do editor ao navegador (JS inicial do Inicio)", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  // Os imports e reexports de valor (nao `import type`) relativos e por "@/", de arquivo em arquivo.
+  const reachedFrom = (start) => {
+    const seen = new Set();
+    const visit = (file) => {
+      if (seen.has(file)) {
+        return;
+      }
+      seen.add(file);
+      const source = readFileSync(file, "utf8");
+      for (const [, spec] of source.matchAll(/^(?:import|export)\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gms)) {
+        const base = spec.startsWith("@/") ? resolve(root, "src", spec.slice(2)) : spec.startsWith(".") ? resolve(dirname(file), spec) : null;
+        const target = base && [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((path) => existsSync(path));
+        if (target) {
+          visit(target);
+        }
+      }
+    };
+    visit(resolve(root, start));
+    return [...seen].map((path) => path.slice(root.length + 1));
+  };
+
+  // O contador esta no card da Inicio: nem as frases do editor. O Entrar fica so na pagina do webinario, que ja le
+  // WEBINAR_COPY (com todas as frases do JIT); dele, so o modelo.
+  const heavy = ["src/server/webinars/jit-model.ts", "src/server/webinars/model.ts", "src/server/webinars/room-model.ts"];
+  for (const [start, forbidden] of [
+    ["src/components/member/webinars/jit/jit-countdown.tsx", [...heavy, "src/lib/webinar-copy-v4/jit.ts", "src/lib/webinar-copy.ts"]],
+    ["src/components/member/webinars/jit/jit-enter.tsx", heavy]
+  ]) {
+    const reached = reachedFrom(start);
+    assert.ok(reached.includes("src/server/webinars/jit-clock.ts"), `${start}: ${reached.join(", ")}`);
+    for (const file of forbidden) {
+      assert.ok(!reached.includes(file), `${start} nao alcanca ${file}`);
+    }
+  }
+  const clock = reachedFrom("src/server/webinars/jit-clock.ts").sort();
+  assert.deepEqual(
+    clock,
+    ["src/lib/webinar-copy-v4/jit-aluno.ts", "src/lib/webinar-time.ts", "src/server/webinars/jit-clock.ts", "src/server/webinars/jit-limits.ts", "src/server/webinars/room-opens.ts"],
+    "o relogio so le modulos folha"
+  );
+
+  // Uma constante e uma frase so: model.ts, room-model.ts, jit.ts e jit-model.ts reexportam as dos modulos folha.
+  const { JIT_LIMITS } = await import("../src/server/webinars/model.ts");
+  const leafLimits = await import("../src/server/webinars/jit-limits.ts");
+  const { ROOM_OPENS_MINUTES_BEFORE } = await import("../src/server/webinars/room-model.ts");
+  const leafRoom = await import("../src/server/webinars/room-opens.ts");
+  const { JIT_COPY } = await import("../src/lib/webinar-copy-v4/jit.ts");
+  const aluno = await import("../src/lib/webinar-copy-v4/jit-aluno.ts");
+  const relogio = await import("../src/server/webinars/jit-clock.ts");
+  assert.equal(JIT_LIMITS, leafLimits.JIT_LIMITS);
+  assert.equal(ROOM_OPENS_MINUTES_BEFORE, leafRoom.ROOM_OPENS_MINUTES_BEFORE);
+  assert.equal(ROOM_OPENS_MINUTES_BEFORE, 15);
+  assert.equal(JIT_COPY.aluno, aluno.JIT_ALUNO_COPY);
+  assert.equal(JIT_COPY.card.horaDe, aluno.jitHoraDe);
+  assert.equal(WEBINAR_COPY.jit.aluno, aluno.JIT_ALUNO_COPY);
+  for (const name of ["jitPageState", "jitPageSentence", "jitCanEnter", "nextJitSlot", "jitEntryChoice", "jitDayRange", "jitSlotsOfDay", "isJitSlot", "saoPauloWallClock", "saoPauloWallToMs"]) {
+    assert.equal(jit[name], relogio[name], `jit-model reexporta ${name} de jit-clock`);
+  }
+});

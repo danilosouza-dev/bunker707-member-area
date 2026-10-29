@@ -1188,14 +1188,8 @@ export type AttendanceMarks = { answerSource: AnswerSource | null; assignedAt: s
 export const JIT_EVERY_MINUTES = [15, 30, 60] as const;
 export type JitEveryMinutes = (typeof JIT_EVERY_MINUTES)[number];
 
-export const JIT_LIMITS = {
-  /** A janela de horas de Sao Paulo (inicio inclusive, fim exclusivo; 0 a 24). */
-  hourMin: 0,
-  hourMax: 24,
-  /** Quantos dias a frente a pagina procura o proximo horario. */
-  lookaheadDays: 7,
-  lateJoinMax: 600
-} as const;
+/** Num modulo folha: o relogio do aluno (jit-clock.ts) roda no navegador sem trazer este arquivo. */
+export { JIT_LIMITS } from "./jit-limits";
 
 /** A Simulacao que cada sessao `jit` copia ao nascer (a mesma decisao registrada do card Simulacao, D10). */
 export type JitSimulationTemplate = {
