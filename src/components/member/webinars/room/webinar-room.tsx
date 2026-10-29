@@ -354,7 +354,19 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
                     />
                   </>
                 ) : null}
-                {tab === "perguntas" ? <RoomQuestionsTab enabled={!readOnly} getOffsetMs={getOffsetMs} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} /> : null}
+                {tab === "perguntas" ? (
+                  <RoomQuestionsTab
+                    allowAnonymous={session.session.anonymousQuestions}
+                    consented={session.me.consented}
+                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                    enabled={!readOnly}
+                    getOffsetMs={getOffsetMs}
+                    onConsented={() => void clock.refresh()}
+                    readOnly={readOnly || phase === "ended"}
+                    sessionId={sessionId}
+                    webinarId={webinarId}
+                  />
+                ) : null}
                 {tab === "enquetes" ? <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} /> : null}
               </div>
             </aside>

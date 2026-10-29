@@ -653,6 +653,34 @@ test("moderacao: liberar grava quem e quando; fixar uma por sessao; apagar some 
   assert.equal(desligado.slowModeSeconds, null, "chat desligado nao tem modo lento");
 });
 
+test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quando a equipe libera (anonima pelo nome Aluno {n}); apagar a mensagem apaga a pergunta", async () => {
+  const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
+  const anonima = message({ approved: false, author_user_id: ALUNO, body: "vai ter certificado?", display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, kind: "question", offset_ms: 42_000 });
+  const comNome = message({ approved: false, author_user_id: ALUNA, body: "e a apostila?", kind: "question" });
+  const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [anonima, comNome] })));
+  const perguntaDe = (id) => db.tables.webinar_questions.find((row) => row.message_id === id);
+
+  ok(await roomActions.moderateMessage({ action: "approve", messageId: anonima.id }));
+  const aberta = perguntaDe(anonima.id);
+  assert.ok(aberta, "liberar abre a pergunta");
+  assert.deepEqual([aberta.anonymous, aberta.body, aberta.offset_ms, aberta.user_id, aberta.session_id], [true, "vai ter certificado?", 42_000, ALUNO, SESSAO_NO_AR]);
+  const [evento] = db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
+  assert.deepEqual(evento.metadata, { anonymous: true, offset_ms: 42_000, question_id: aberta.id });
+  assert.equal(evento.user_id, ALUNO);
+
+  ok(await roomActions.moderateMessage({ action: "approve", messageId: anonima.id }));
+  assert.equal(db.tables.webinar_questions.filter((row) => row.message_id === anonima.id).length, 1, "liberar de novo nao duplica");
+
+  ok(await roomActions.moderateMessage({ action: "approve", messageId: comNome.id }));
+  assert.equal(perguntaDe(comNome.id).anonymous, false);
+  assert.equal(perguntaDe(comNome.id).display_name, "Ana M.");
+
+  ok(await roomActions.moderateMessage({ action: "delete", messageId: comNome.id }));
+  assert.ok(perguntaDe(comNome.id).deleted_at, "a pergunta some junto");
+  assert.equal(perguntaDe(comNome.id).deleted_reason, "team");
+  assert.equal(perguntaDe(anonima.id).deleted_at, null);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Abrir, encerrar e a Simulacao
  * ---------------------------------------------------------------------------------------------- */

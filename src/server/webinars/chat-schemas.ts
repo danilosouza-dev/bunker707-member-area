@@ -22,6 +22,7 @@ import {
 } from "./model";
 
 export const CHAT_MESSAGES = {
+  anonymousOff: "Perguntas anônimas estão desligadas nesta live.",
   answer: "A resposta pode ter até 1.000 caracteres.",
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
@@ -69,15 +70,20 @@ export const chatWindowQuerySchema = z.object({
   to: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional()
 });
 
-/** POST /chat: a primeira mensagem traz o aceite (consent + versao + como o nome aparece). */
-export const chatPostBodySchema = z.object({
-  anonymous: z.boolean().optional(),
-  body: bodySchema,
+/** O aceite do chat (D10), que vem junto da primeira mensagem ou da primeira pergunta: consent + versao + como o nome aparece. */
+const consentFields = {
   consent: z.boolean().optional(),
   consentVersion: z.number().int().min(1).max(100).optional(),
   displayMode: z.enum(DISPLAY_NAME_MODES).optional(),
+  nickname: z.string().trim().min(CHAT_LIMITS.nicknameMin, CHAT_MESSAGES.nickname).max(CHAT_LIMITS.nicknameMax, CHAT_MESSAGES.nickname).optional()
+};
+
+/** POST /chat: a primeira mensagem traz o aceite. */
+export const chatPostBodySchema = z.object({
+  ...consentFields,
+  anonymous: z.boolean().optional(),
+  body: bodySchema,
   kind: z.enum(["message", "question"]).default("message"),
-  nickname: z.string().trim().min(CHAT_LIMITS.nicknameMin, CHAT_MESSAGES.nickname).max(CHAT_LIMITS.nicknameMax, CHAT_MESSAGES.nickname).optional(),
   offsetMs: replayOffsetSchema,
   replyToId: uuidSchema.nullable().optional(),
   sessionId: sessionIdSchema
@@ -102,12 +108,15 @@ export const reactionBodySchema = z.object({ offsetMs: replayOffsetSchema, react
 /** GET /reactions?sessao=&since= (ISO): as contagens dos ultimos segundos para a animacao. */
 export const reactionsQuerySchema = z.object({ sessao: sessionIdSchema, since: z.iso.datetime({ offset: true }).optional() });
 
+/** POST /questions: sem o aceite gravado, a pergunta traz o aceite como a primeira mensagem do chat. */
 export const questionBodySchema = z.object({
+  ...consentFields,
   anonymous: z.boolean().default(false),
   body: z.string({ error: CHAT_MESSAGES.question }).trim().min(1, CHAT_MESSAGES.question).max(CHAT_LIMITS.question, CHAT_MESSAGES.questionTooLong),
   offsetMs: replayOffsetSchema,
   sessionId: sessionIdSchema
 });
+export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
 

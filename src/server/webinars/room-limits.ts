@@ -1,27 +1,15 @@
 // Limites da sala por aluno e sessao (docs/30 §5.1, §8.3 e D16), na memoria do processo como
 // src/server/communications/student-write-limit.ts: a rajada do chat (5 por 60 s), o modo lento ("1 mensagem
-// a cada N s", N escolhido pela equipe por sessao) e as perguntas (2 por minuto). As reacoes contam no banco
-// (countStudentReactionsSince) porque o relatorio ja precisa das linhas. Por cima de tudo vale o teto global
-// takeStudentWrite. Modulo puro (sem "server-only"), com o relogio por parametro: tests/webinarios-sala-rotas.
+// a cada N s", N escolhido pela equipe por sessao), as perguntas (2 por minuto) e as reacoes (1 por segundo e 20
+// por minuto). Tudo e conferido e reservado sem nenhum await no meio, entao dois pedidos ao mesmo tempo nao passam
+// juntos; as reacoes tambem contam no banco (countStudentReactionsSince), o limite entre instancias. Por cima de
+// tudo vale o teto global takeStudentWrite. Modulo puro (sem "server-only"), com o relogio por parametro:
+// tests/webinarios-sala-navegador e tests/webinarios-sala-rotas.
 
 import { ROOM_RULES } from "./model";
 
-type Window = { startedAt: number; times: number[] };
-
 /** Chaves guardadas ao mesmo tempo; acima disto as mais antigas saem. */
 const MAX_TRACKED = 20_000;
-
-const windows = new Map<string, Window>();
-const lastSentAt = new Map<string, number>();
-
-function prune(now: number, windowMs: number) {
-  for (const [key, window] of windows) {
-    if (now - window.startedAt < windowMs) {
-      return;
-    }
-    windows.delete(key);
-  }
-}
 
 function remember<T>(map: Map<string, T>, key: string, value: T) {
   map.delete(key);
@@ -35,46 +23,99 @@ function remember<T>(map: Map<string, T>, key: string, value: T) {
   map.set(key, value);
 }
 
-/**
- * Conta uma escrita na janela deslizante da chave; false = passou de `max` nos ultimos `windowMs`.
- * Devolve tambem em quantos segundos a janela abre de novo (o Retry-After).
- */
-export function takeWindowedWrite(key: string, max: number, windowMs: number, now = Date.now()): { ok: boolean; retryAfterSeconds: number } {
-  prune(now, windowMs);
-  const current = windows.get(key);
-  const times = (current?.times ?? []).filter((time) => now - time < windowMs);
+export type WindowedTake = { ok: boolean; retryAfterSeconds: number };
 
-  if (times.length >= max) {
-    const oldest = times[0] ?? now;
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000)) };
+/**
+ * Uma janela deslizante por chave, num mapa so dela (uma janela de 1 s nunca poda as de 60 s). As chaves ficam na
+ * ordem da ultima escrita (remember reinsere), entao a poda para na primeira chave que ainda tem escrita na janela.
+ */
+function windowedLimit(max: number, windowMs: number) {
+  const entries = new Map<string, number[]>();
+
+  function prune(now: number) {
+    for (const [key, times] of entries) {
+      if (now - (times[times.length - 1] ?? Number.NEGATIVE_INFINITY) < windowMs) {
+        return;
+      }
+      entries.delete(key);
+    }
   }
 
-  times.push(now);
-  remember(windows, key, { startedAt: times[0] ?? now, times });
-  return { ok: true, retryAfterSeconds: 0 };
+  function live(key: string, now: number) {
+    return (entries.get(key) ?? []).filter((time) => now - time < windowMs);
+  }
+
+  /** Em quantos segundos a chave pode escrever de novo (0 = pode agora). */
+  function wait(key: string, now: number): number {
+    prune(now);
+    const times = live(key, now);
+    if (times.length < max) {
+      return 0;
+    }
+    const oldest = times[0] ?? now;
+    return Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000));
+  }
+
+  function add(key: string, now: number) {
+    const times = live(key, now);
+    times.push(now);
+    remember(entries, key, times);
+  }
+
+  return {
+    add,
+    clear: () => entries.clear(),
+    take(key: string, now: number): WindowedTake {
+      const retryAfterSeconds = wait(key, now);
+      if (retryAfterSeconds > 0) {
+        return { ok: false, retryAfterSeconds };
+      }
+      add(key, now);
+      return { ok: true, retryAfterSeconds: 0 };
+    },
+    wait
+  };
 }
+
+const chatBurst = windowedLimit(ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs);
+const questionBurst = windowedLimit(ROOM_RULES.questionsPerMinute, 60_000);
+const reactionSecond = windowedLimit(ROOM_RULES.reactions.perSecond, 1000);
+const reactionMinute = windowedLimit(ROOM_RULES.reactions.perMinute, 60_000);
+const lastSentAt = new Map<string, number>();
 
 export function chatBurstKey(userId: string, sessionId: string) {
   return `chat:${userId}:${sessionId}`;
 }
 
-export function questionBurstKey(userId: string, sessionId: string) {
-  return `question:${userId}:${sessionId}`;
+function roomKey(userId: string, sessionId: string) {
+  return `${userId}:${sessionId}`;
 }
 
 /** A rajada do chat: 5 mensagens por 60 s por aluno e sessao (ROOM_RULES.chatBurst). */
-export function takeChatBurst(userId: string, sessionId: string, now = Date.now()) {
-  return takeWindowedWrite(chatBurstKey(userId, sessionId), ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs, now);
+export function takeChatBurst(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return chatBurst.take(roomKey(userId, sessionId), now);
 }
 
 /** Perguntas: 2 por minuto por aluno e sessao (ROOM_RULES.questionsPerMinute). */
-export function takeQuestionBurst(userId: string, sessionId: string, now = Date.now()) {
-  return takeWindowedWrite(questionBurstKey(userId, sessionId), ROOM_RULES.questionsPerMinute, 60_000, now);
+export function takeQuestionBurst(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return questionBurst.take(roomKey(userId, sessionId), now);
+}
+
+/** Reacoes: 1 por segundo e 20 por minuto por aluno e sessao; as duas janelas conferidas antes de contar. */
+export function takeReaction(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  const key = roomKey(userId, sessionId);
+  const retryAfterSeconds = Math.max(reactionSecond.wait(key, now), reactionMinute.wait(key, now));
+  if (retryAfterSeconds > 0) {
+    return { ok: false, retryAfterSeconds };
+  }
+  reactionSecond.add(key, now);
+  reactionMinute.add(key, now);
+  return { ok: true, retryAfterSeconds: 0 };
 }
 
 /**
- * Modo lento: segundos que faltam ate o aluno poder enviar de novo nesta sessao (0 = pode). So conta depois de
- * markChatSent; a equipe nao passa por aqui (escreve pelas Server Actions).
+ * Modo lento: segundos que faltam ate o aluno poder enviar de novo nesta sessao (0 = pode). Conta a partir da
+ * ultima mensagem reservada (reserveChatSlot) ou marcada; a equipe nao passa por aqui (escreve pelas Server Actions).
  */
 export function slowModeWaitSeconds(userId: string, sessionId: string, slowModeSeconds: number | null, now = Date.now()): number {
   if (!slowModeSeconds || slowModeSeconds <= 0) {
@@ -93,8 +134,41 @@ export function markChatSent(userId: string, sessionId: string, now = Date.now()
   remember(lastSentAt, chatBurstKey(userId, sessionId), now);
 }
 
+export type ChatSlot = { ok: true; release: () => void } | { ok: false; waitSeconds: number };
+
+/**
+ * Confere o modo lento e ja reserva a vez (marca a hora) no mesmo passo, antes de qualquer await: a segunda
+ * mensagem enviada junto espera. `release` devolve a vez quando a mensagem nao foi gravada (palavra bloqueada,
+ * falha no banco), para o aluno nao esperar por uma mensagem que nao existe.
+ */
+export function reserveChatSlot(userId: string, sessionId: string, slowModeSeconds: number | null, now = Date.now()): ChatSlot {
+  const waitSeconds = slowModeWaitSeconds(userId, sessionId, slowModeSeconds, now);
+  if (waitSeconds > 0) {
+    return { ok: false, waitSeconds };
+  }
+  const key = chatBurstKey(userId, sessionId);
+  const previous = lastSentAt.get(key);
+  remember(lastSentAt, key, now);
+  return {
+    ok: true,
+    release: () => {
+      if (lastSentAt.get(key) !== now) {
+        return;
+      }
+      if (previous === undefined) {
+        lastSentAt.delete(key);
+      } else {
+        remember(lastSentAt, key, previous);
+      }
+    }
+  };
+}
+
 /** Zera tudo (testes). */
 export function resetRoomLimits() {
-  windows.clear();
+  chatBurst.clear();
+  questionBurst.clear();
+  reactionSecond.clear();
+  reactionMinute.clear();
   lastSentAt.clear();
 }

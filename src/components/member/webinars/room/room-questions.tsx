@@ -6,12 +6,14 @@ import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { CHAT_LIMITS } from "@/server/webinars/model";
-import { getQuestions, postQuestion, postQuestionVote, type StudentQuestion } from "./room-api";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type DisplayNameMode } from "@/server/webinars/model";
+import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
+import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 
-// A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima), a lista com Curtir para subir a
-// pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto / Dispensada, so para o autor),
-// os filtros Todas / Respondidas e a ordem Mais votadas / Mais recentes. Le ao abrir e a cada 15 s enquanto aberta.
+// A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima so quando a equipe deixou ligada), a
+// lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
+// Dispensada, so para o autor), os filtros Todas / Respondidas e a ordem Mais votadas / Mais recentes. Le ao abrir
+// e a cada 15 s enquanto aberta. Sem o aceite do chat (D10), a primeira pergunta abre o mesmo aceite do chat.
 
 const REFRESH_MS = 15_000;
 
@@ -54,7 +56,28 @@ export function RoomQuestionItem({ onVote, question }: { onVote: (question: Stud
   );
 }
 
-export function RoomQuestionsTab({ enabled, getOffsetMs, readOnly, sessionId, webinarId }: { enabled: boolean; getOffsetMs: () => number; readOnly: boolean; sessionId: string; webinarId: string }) {
+export function RoomQuestionsTab({
+  allowAnonymous,
+  consented,
+  defaultDisplayMode,
+  enabled,
+  getOffsetMs,
+  onConsented,
+  readOnly,
+  sessionId,
+  webinarId
+}: {
+  allowAnonymous: boolean;
+  consented: boolean;
+  defaultDisplayMode: DisplayNameMode;
+  enabled: boolean;
+  getOffsetMs: () => number;
+  /** O aceite foi gravado junto da pergunta: a sala relê a sessao para o chat saber. */
+  onConsented: () => void;
+  readOnly: boolean;
+  sessionId: string;
+  webinarId: string;
+}) {
   const copy = WEBINAR_COPY.sala;
   const [questions, setQuestions] = useState<StudentQuestion[]>([]);
   const [filter, setFilter] = useState<"answered" | "all">("all");
@@ -63,6 +86,7 @@ export function RoomQuestionsTab({ enabled, getOffsetMs, readOnly, sessionId, we
   const [anonymous, setAnonymous] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -85,24 +109,43 @@ export function RoomQuestionsTab({ enabled, getOffsetMs, readOnly, sessionId, we
     };
   }, [enabled, load]);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function deliver(choice?: ConsentChoice) {
     const text = draft.trim();
     if (!text || readOnly) {
       return;
     }
     setSending(true);
     setStatus(null);
+    const consent: Partial<QuestionPostBody> = choice
+      ? { consent: true, consentVersion: CHAT_CONSENT_VERSION, displayMode: choice.displayMode, ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {}) }
+      : {};
     try {
-      const answer = await postQuestion(webinarId, { anonymous, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
+      const answer = await postQuestion(webinarId, { ...consent, anonymous: allowAnonymous && anonymous, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
       setQuestions((previous) => [answer.question, ...previous.filter((question) => question.id !== answer.question.id)]);
       setDraft("");
       setStatus(copy.perguntaEnviada);
+      setConsentOpen(false);
+      if (choice) {
+        onConsented();
+      }
     } catch (failure) {
       setStatus(failure instanceof Error ? failure.message : copy.erroEnviar);
     } finally {
       setSending(false);
     }
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.trim() || readOnly) {
+      return;
+    }
+    if (!consented) {
+      setConsentOpen(true);
+      setStatus(copy.aceiteParaPerguntar);
+      return;
+    }
+    void deliver();
   }
 
   async function vote(question: StudentQuestion) {
@@ -145,7 +188,8 @@ export function RoomQuestionsTab({ enabled, getOffsetMs, readOnly, sessionId, we
           <RoomQuestionItem key={question.id} onVote={(item) => void vote(item)} question={question} />
         ))}
       </ul>
-      <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={(event) => void submit(event)}>
+      {consentOpen && !consented ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
+      <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
         <textarea
           aria-label={copy.suaPergunta}
           className="min-h-11 w-full resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
@@ -157,10 +201,14 @@ export function RoomQuestionsTab({ enabled, getOffsetMs, readOnly, sessionId, we
           value={draft}
         />
         <div className="mt-2 flex items-center justify-between gap-2">
-          <label className="inline-flex min-h-8 items-center gap-2 text-xs text-zinc-300">
-            <input checked={anonymous} className="accent-white" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
-            {copy.anonima}
-          </label>
+          {allowAnonymous ? (
+            <label className="inline-flex min-h-8 items-center gap-2 text-xs text-zinc-300">
+              <input checked={anonymous} className="accent-white" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
+              {copy.anonima}
+            </label>
+          ) : (
+            <span />
+          )}
           <MemberButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
             {copy.fazerPergunta}
           </MemberButton>

@@ -1030,6 +1030,21 @@ Nada disso é criado antes da fase 3 e sem o ok do produtor no chat (D13).
 | Remover / banir | tira o aluno da sala (`kickParticipant` no iframe) e bloqueia novo token até o fim da sessão (`webinar_session_bans`, `kind = kicked`); banir estende para qualquer Webinário até a equipe desfazer; fica no relatório | novo |
 | Denúncia | o aluno denuncia uma mensagem; cai na fila da equipe no painel da sessão | padrão de denúncia dos comentários |
 
+#### 8.3.1 O que a revisão de segurança da fase 2 fechou (29/10/2026)
+
+A revisão adversarial da sala da Live gravada (rotas do aluno e Server Actions da equipe) achou oito pontos; todos estão corrigidos no código e cobertos por teste (`tests/webinarios-sala-rotas.test.mjs`, `tests/webinarios-roteiro-acoes.test.mjs`):
+
+| Ponto | Como ficou | Onde |
+|---|---|---|
+| Pergunta pelo chat moderado aparecia na aba Perguntas antes de a equipe liberar | a pergunta (`webinar_questions`) só nasce quando a equipe libera a mensagem (`moderateMessage` → `approve`), anônima quando o nome gravado é o `Aluno {n}` do próprio aluno; apagar a mensagem apaga (soft, motivo `team`) a pergunta ligada | `room-writes.ts`, `room-actions.ts`, `chat-store.ts` |
+| Pergunta publicava o nome sem o aceite e ignorava em silêncio a Anônima desligada | a pergunta segue a regra do chat (D10): sem o aceite gravado, o corpo traz o aceite (a aba abre o mesmo quadro do chat) ou responde 409 `consent_required`; Anônima com a opção desligada no card Sala responde 400; a sessão manda `anonymousQuestions` e a aba só mostra a caixa quando está ligada | `room-writes.ts`, `chat-schemas.ts`, `room-questions.tsx` |
+| Replay cancelado continuava abrindo | a sessão `replay` com `status = cancelled` responde 404 na sessão e em todas as rotas da sala | `room-queries.ts`, `student-queries.ts` |
+| O vídeo da Bunny (com o token) saía fora da entrada | `GET .../session` só manda `video` quando a entrada está aberta (`join.ok`); a live (fase 3) não usa a Bunny; na gravada o token vale até o fim do vídeo + 15 min (no máximo 6 h) | `room-queries.ts` (`roomJoinFor`, `roomVideoFor`) |
+| A janela do chat da gravada deixava ler o chat original de depois de agora | na gravada e na live a janela para no segundo do servidor + 120 s (+10 s de folga do aparelho) e a resposta traz a janela de verdade (a seguinte começa dali); no replay, até onde o aluno pedir | `room-queries.ts` (`chatWindowLimitMs`) |
+| Modo lento e reações passavam em pedidos simultâneos | o modo lento reserva a vez antes de qualquer `await` e devolve a vez se a mensagem não for gravada (palavra bloqueada, falha); as reações conferem 1/s e 20/min na memória antes da contagem no banco (o banco segue como o limite entre instâncias); a poda das janelas olha a última escrita de cada chave, num mapa por limite | `room-limits.ts` |
+| Curtir pergunta não conferia a hora nem a dispensada | curtir fora da hora da sessão responde 409; a dispensada de outro aluno, 404 (como na lista) | `room-writes.ts` |
+| Limite de vagas não valia na sala (A12) | com o limite ligado, só quem garantiu a vaga entra: as rotas da sala respondem 403, a sessão diz `join: { ok: false, reason: "no_seat" }` sem o vídeo, a página da sala mostra a frase e a página da live troca o **Entrar** por **Garantir vaga** (e mostra **Entrar** logo depois); o replay não pede vaga; o "ver como" da equipe abre sem vaga | `room-queries.ts`, `student-queries.ts`, `webinar-page-view.tsx`, `webinar-session-actions.tsx` |
+
 ### 8.4 CSP e iframe
 
 - O `external_api.js` é carregado do nosso domínio do Jitsi (`meet.<domínio>`) com o `nonce` da página: a CSP de `src/proxy.ts` usa `'strict-dynamic'`, e um `<script>` com nonce pode ter qualquer origem, então **nenhuma origem nova entra em `script-src`** (mesma regra do `docs/29` §5 para os players; §6.3 diz o mesmo). A guarda confere isso.

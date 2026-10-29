@@ -26,12 +26,12 @@ import {
   toggleQuestionVote,
   upsertConsentRow
 } from "./chat-store";
-import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow } from "./chat-rows";
-import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput } from "./chat-schemas";
+import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
+import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
-import { CHAT_CONSENT_VERSION, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage } from "./model";
+import { CHAT_CONSENT_VERSION, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
 import { presenceBucket, sessionOffsetMs, simulatedPhase, toStudentMessage } from "./room-model";
-import { markChatSent, slowModeWaitSeconds, takeChatBurst, takeQuestionBurst } from "./room-limits";
+import { reserveChatSlot, takeChatBurst, takeQuestionBurst, takeReaction } from "./room-limits";
 import {
   chatSentMetadata,
   consentMetadata,
@@ -49,7 +49,7 @@ import {
   type StudentPoll,
   type StudentQuestion
 } from "./room-rules";
-import { consentIsCurrent, loadStudentIdentity, studentDisplayName, type RoomContext } from "./room-queries";
+import { consentIsCurrent, loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 
 export type RoomRefusal = PostingRefusal | "consent_required" | "late" | "poll_closed";
@@ -100,6 +100,42 @@ function refuse(context: RoomContext, now: number, kind: "chat" | "interaction")
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * O aceite (D10): a primeira mensagem ou a primeira pergunta traz o aceite; sem ele, nada com o nome do aluno
+ * ---------------------------------------------------------------------------------------------- */
+
+type ConsentFields = Pick<ChatPostInput, "anonymous" | "consent" | "consentVersion" | "displayMode" | "nickname">;
+type ConsentChoice = { mode: DisplayNameMode; nickname: string | null; save: boolean };
+
+/**
+ * Como o aluno aparece: com o aceite valido, a escolha gravada; sem ele, o corpo precisa trazer o aceite (consent +
+ * versao: 409 consent_required) e a escolha de agora, que `saveConsent` grava. Puro (sem banco): a rota confere
+ * antes de reservar os limites.
+ */
+function consentChoice(identity: StudentIdentity, body: ConsentFields, webinar: Pick<Webinar, "roomSettings">): ConsentChoice {
+  if (consentIsCurrent(identity.consent)) {
+    return { mode: identity.displayMode ?? webinar.roomSettings.displayName, nickname: identity.nickname, save: false };
+  }
+  if (body.consent !== true || body.consentVersion !== CHAT_CONSENT_VERSION) {
+    throw new RoomRefusedError("consent_required");
+  }
+  const mode: DisplayNameMode = body.anonymous ? "anonymous" : (body.displayMode ?? webinar.roomSettings.displayName);
+  const nickname = mode === "nickname" ? (body.nickname ?? null) : null;
+  if (mode === "nickname" && !nickname) {
+    throw new WebinarError(CHAT_MESSAGES.nickname, 400);
+  }
+  return { mode, nickname, save: true };
+}
+
+async function saveConsent(input: { choice: ConsentChoice; db: WebinarsDb; events: StudentEventInsert[]; now: number; sessionId: string; userId: string }) {
+  const { choice, userId } = input;
+  if (!choice.save) {
+    return;
+  }
+  await upsertConsentRow(input.db, { consent_version: CHAT_CONSENT_VERSION, display_mode: choice.mode, nickname: choice.nickname, user_id: userId }, new Date(input.now).toISOString());
+  input.events.push(webinarEvent(userId, input.sessionId, "webinar_chat_consented", consentMetadata({ consentVersion: CHAT_CONSENT_VERSION, display: choice.mode })));
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Chat
  * ---------------------------------------------------------------------------------------------- */
 
@@ -115,9 +151,10 @@ async function blockedTermIn(db: WebinarsDb, body: string): Promise<string | nul
 
 /**
  * A mensagem do aluno (docs/30 §5.1): fora da hora ou do modo 409; na primeira vez exige o aceite (consent +
- * versao) e grava webinar_chat_consented; o nome exibido sai da escolha do aluno; rajada 5/60 s e modo lento 429;
+ * versao) e grava webinar_chat_consented; o nome exibido sai da escolha do aluno; modo lento e rajada 5/60 s 429,
+ * conferidos e reservados juntos antes de qualquer await (o modo lento volta se a mensagem nao for gravada);
  * palavra bloqueada 422; chat moderado grava approved = false e devolve pending; `kind: "question"` tambem abre a
- * pergunta na aba Perguntas, ligada por message_id.
+ * pergunta na aba Perguntas, ligada por message_id (no chat moderado, so quando a equipe libera: moderateMessage).
  */
 export async function postStudentChat(input: PostChatInput): Promise<PostChatResult> {
   const { body, context, db, userId } = input;
@@ -128,63 +165,55 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   refuse(context, now, "chat");
 
   const identity = await loadStudentIdentity(db, userId);
-  let mode: DisplayNameMode = identity.displayMode ?? webinar.roomSettings.displayName;
-  let nickname = identity.nickname;
+  const choice = consentChoice(identity, body, webinar);
+  await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
+  const mode: DisplayNameMode = body.anonymous ? "anonymous" : choice.mode;
 
-  if (!consentIsCurrent(identity.consent)) {
-    if (body.consent !== true || body.consentVersion !== CHAT_CONSENT_VERSION) {
-      throw new RoomRefusedError("consent_required");
-    }
-    mode = body.anonymous ? "anonymous" : (body.displayMode ?? webinar.roomSettings.displayName);
-    nickname = mode === "nickname" ? (body.nickname ?? null) : null;
-    if (mode === "nickname" && !nickname) {
-      throw new WebinarError(CHAT_MESSAGES.nickname, 400);
-    }
-    await upsertConsentRow(db, { consent_version: CHAT_CONSENT_VERSION, display_mode: mode, nickname, user_id: userId }, new Date(now).toISOString());
-    events.push(webinarEvent(userId, session.id, "webinar_chat_consented", consentMetadata({ consentVersion: CHAT_CONSENT_VERSION, display: mode })));
-  } else if (body.anonymous) {
-    mode = "anonymous";
-  }
-
-  const slowWait = slowModeWaitSeconds(userId, session.id, session.chatSlowModeSeconds, now);
-  if (slowWait > 0) {
-    throw new RoomLimitError(WEBINAR_COPY.sala.modoLento(slowWait), slowWait);
+  const slot = reserveChatSlot(userId, session.id, session.chatSlowModeSeconds, now);
+  if (!slot.ok) {
+    throw new RoomLimitError(WEBINAR_COPY.sala.modoLento(slot.waitSeconds), slot.waitSeconds);
   }
   const burst = takeChatBurst(userId, session.id, now);
   if (!burst.ok) {
+    slot.release();
     throw new RoomLimitError(ROOM_LIMIT_MESSAGE, burst.retryAfterSeconds);
   }
 
   const text = sanitizeLessonCommentBody(body.body);
-  if (!text) {
-    throw new WebinarError(CHAT_MESSAGES.body, 400);
-  }
-  const blocked = await blockedTermIn(db, text);
-  if (blocked) {
-    throw new WebinarError(blocked, 422);
-  }
-
-  const displayName = studentDisplayName({ fullName: identity.fullName, nickname }, mode, userId, webinar.id);
+  const displayName = studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, mode, userId, webinar.id);
   const offsetMs = writeOffsetMs(session, now, body.offsetMs);
   const approved = session.chatMode !== "moderated";
-  const row = await insertChatMessage(db, {
-    approved,
-    author_user_id: userId,
-    body: text,
-    display_name: displayName,
-    kind: body.kind,
-    master: false,
-    offset_ms: offsetMs,
-    reply_to_id: body.replyToId ?? null,
-    role: "student",
-    session_id: session.id,
-    source: "audience",
-    webinar_id: webinar.id
-  });
-  markChatSent(userId, session.id, now);
+  let row: ChatMessageRow;
+  try {
+    if (!text) {
+      throw new WebinarError(CHAT_MESSAGES.body, 400);
+    }
+    const blocked = await blockedTermIn(db, text);
+    if (blocked) {
+      throw new WebinarError(blocked, 422);
+    }
+    row = await insertChatMessage(db, {
+      approved,
+      author_user_id: userId,
+      body: text,
+      display_name: displayName,
+      kind: body.kind,
+      master: false,
+      offset_ms: offsetMs,
+      reply_to_id: body.replyToId ?? null,
+      role: "student",
+      session_id: session.id,
+      source: "audience",
+      webinar_id: webinar.id
+    });
+  } catch (error) {
+    slot.release();
+    throw error;
+  }
   events.push(webinarEvent(userId, session.id, "webinar_chat_sent", chatSentMetadata({ kind: body.kind, length: text.length, messageId: row.id, offsetMs })));
 
-  if (body.kind === "question") {
+  // A pergunta pendente nao vai para a aba Perguntas (la todo mundo ve): entra quando a equipe libera.
+  if (body.kind === "question" && approved) {
     const question = await insertQuestionRow(db, {
       anonymous: mode === "anonymous",
       body: text.slice(0, 500),
@@ -274,12 +303,19 @@ export async function recordStudentHeartbeat(input: { body: HeartbeatInput; cont
 
 export type ReactionResult = { events: StudentEventInsert[]; offsetMs: number; reaction: Reaction };
 
-/** A reacao (docs/30 §5.1): no maximo 1 por segundo e 20 por minuto por aluno e sessao, contadas no banco. */
+/**
+ * A reacao (docs/30 §5.1): no maximo 1 por segundo e 20 por minuto por aluno e sessao, conferidas na memoria antes
+ * de qualquer await (dois pedidos juntos nao passam os dois) e de novo no banco (o limite entre instancias).
+ */
 export async function sendStudentReaction(input: { context: RoomContext; db: WebinarsDb; now?: number; offsetMs?: number | null; reaction: Reaction; userId: string }): Promise<ReactionResult> {
   const { context, db, reaction, userId } = input;
   const now = input.now ?? Date.now();
   refuse(context, now, "interaction");
 
+  const taken = takeReaction(userId, context.session.id, now);
+  if (!taken.ok) {
+    throw new RoomLimitError(ROOM_LIMIT_MESSAGE, taken.retryAfterSeconds);
+  }
   const [lastSecond, lastMinute] = await Promise.all([
     countStudentReactionsSince(db, { sessionId: context.session.id, sinceIso: new Date(now - 1000 / ROOM_RULES.reactions.perSecond).toISOString(), userId }),
     countStudentReactionsSince(db, { sessionId: context.session.id, sinceIso: new Date(now - 60_000).toISOString(), userId })
@@ -298,17 +334,39 @@ export async function sendStudentReaction(input: { context: RoomContext; db: Web
 
 export type QuestionResult = { events: StudentEventInsert[]; question: StudentQuestion };
 
-/** A pergunta da aba Perguntas (2 por minuto por aluno e sessao), com o nome exibido ou "Aluno {n}" quando anonima. */
-export async function askStudentQuestion(input: { anonymous: boolean; body: string; context: RoomContext; db: WebinarsDb; now?: number; offsetMs?: number | null; userId: string }): Promise<QuestionResult> {
-  const { context, db, userId } = input;
+export type AskQuestionInput = {
+  body: Pick<QuestionPostInput, "anonymous" | "body" | "consent" | "consentVersion" | "displayMode" | "nickname">;
+  context: RoomContext;
+  db: WebinarsDb;
+  now?: number;
+  offsetMs?: number | null;
+  userId: string;
+};
+
+/**
+ * A pergunta da aba Perguntas (2 por minuto por aluno e sessao). O nome aparece como no chat e so com o aceite
+ * (D10): sem ele, a pergunta precisa trazer o aceite (409 consent_required) e grava como a primeira mensagem.
+ * Anonima ("Aluno {n}") so quando a equipe deixou ligada no card Sala; pedida com ela desligada, 400.
+ */
+export async function askStudentQuestion(input: AskQuestionInput): Promise<QuestionResult> {
+  const { body, context, db, userId } = input;
   const now = input.now ?? Date.now();
+  const { session, webinar } = context;
+  const events: StudentEventInsert[] = [];
   refuse(context, now, "interaction");
 
-  const burst = takeQuestionBurst(userId, context.session.id, now);
+  if (body.anonymous && !webinar.roomSettings.anonymousQuestions) {
+    throw new WebinarError(CHAT_MESSAGES.anonymousOff, 400);
+  }
+  const identity = await loadStudentIdentity(db, userId);
+  // O aceite passa pelo mesmo caminho do chat, mas "Anonima" aqui e da pergunta, nao do nome no chat.
+  const choice = consentChoice(identity, { ...body, anonymous: false }, webinar);
+
+  const burst = takeQuestionBurst(userId, session.id, now);
   if (!burst.ok) {
     throw new RoomLimitError(ROOM_LIMIT_MESSAGE, burst.retryAfterSeconds);
   }
-  const text = sanitizeLessonCommentBody(input.body);
+  const text = sanitizeLessonCommentBody(body.body);
   if (!text) {
     throw new WebinarError(CHAT_MESSAGES.question, 400);
   }
@@ -317,24 +375,26 @@ export async function askStudentQuestion(input: { anonymous: boolean; body: stri
     throw new WebinarError(blocked, 422);
   }
 
-  const identity = await loadStudentIdentity(db, userId);
-  // A opcao Anonima so vale quando a equipe a deixou ligada no card Sala.
-  const anonymous = input.anonymous && context.webinar.roomSettings.anonymousQuestions;
-  const mode: DisplayNameMode = anonymous ? "anonymous" : (identity.displayMode ?? context.webinar.roomSettings.displayName);
-  const displayName = studentDisplayName(identity, mode, userId, context.webinar.id);
-  const offsetMs = writeOffsetMs(context.session, now, input.offsetMs);
-  const row = await insertQuestionRow(db, { anonymous, body: text, display_name: displayName, offset_ms: offsetMs, session_id: context.session.id, user_id: userId });
+  await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
+  const mode: DisplayNameMode = body.anonymous ? "anonymous" : choice.mode;
+  const anonymous = mode === "anonymous";
+  const displayName = studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, mode, userId, webinar.id);
+  const offsetMs = writeOffsetMs(session, now, input.offsetMs);
+  const row = await insertQuestionRow(db, { anonymous, body: text, display_name: displayName, offset_ms: offsetMs, session_id: session.id, user_id: userId });
   const question = toStudentQuestion(questionFromRow(row), userId, false);
   if (!question) {
     throw new WebinarError(CHAT_MESSAGES.invalid, 500);
   }
-  return { events: [webinarEvent(userId, context.session.id, "webinar_question_sent", questionSentMetadata({ anonymous, offsetMs, questionId: row.id }))], question };
+  events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous, offsetMs, questionId: row.id })));
+  return { events, question };
 }
 
-/** Curtir / Tirar a curtida de uma pergunta da sessao. */
-export async function voteStudentQuestion(input: { context: RoomContext; db: WebinarsDb; questionId: string; userId: string }): Promise<{ upvotes: number; voted: boolean }> {
+/** Curtir / Tirar a curtida de uma pergunta que o aluno ve na sessao (fora da hora 409; a dispensada de outro aluno 404). */
+export async function voteStudentQuestion(input: { context: RoomContext; db: WebinarsDb; now?: number; questionId: string; userId: string }): Promise<{ upvotes: number; voted: boolean }> {
+  const now = input.now ?? Date.now();
+  refuse(input.context, now, "interaction");
   const row = await fetchQuestionRow(input.db, input.questionId);
-  if (!row || row.session_id !== input.context.session.id || row.deleted_at) {
+  if (!row || row.session_id !== input.context.session.id || row.deleted_at || !toStudentQuestion(questionFromRow(row), input.userId, false)) {
     throw new WebinarError("Pergunta não encontrada.", 404);
   }
   return toggleQuestionVote(input.db, { questionId: input.questionId, userId: input.userId });

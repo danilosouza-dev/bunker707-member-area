@@ -22,7 +22,7 @@ import {
 } from "./chat-store";
 import { chatMessageFromRow, chatMessageFromWindowRow, pollAnswerFromRow, pollFromRow, questionFromRow, type ConsentRow } from "./chat-rows";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
-import { CHAT_CONSENT_VERSION, REACTIONS, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar, type WebinarSession } from "./model";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, REACTIONS, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar, type WebinarSession } from "./model";
 import { loadStudentWebinarById, type StudentWebinarRecord } from "./registrations";
 import {
   anonymousNumber,
@@ -40,14 +40,21 @@ import {
   type ChatWindow
 } from "./room-model";
 import { countReactions, nextChatCursor, toStudentPoll, toStudentQuestion, type ChatCursor, type StudentPoll, type StudentQuestion } from "./room-rules";
-import type { RecordingRow } from "./rows";
-import { listRecordingRows } from "./store";
-import { openReplaySessionId, type StudentRoomExtras, type StudentRoomVideo } from "./student-model";
+import { registrationFromRow, type RecordingRow } from "./rows";
+import { fetchRegistrationRows, listRecordingRows } from "./store";
+import { openReplaySessionId, registrationFor, seatRequired, type RoomJoin, type StudentRoomExtras, type StudentRoomVideo } from "./student-model";
+import { WEBINAR_COPY } from "../../lib/webinar-copy";
 
 export const INVALID_SESSION_MESSAGE = "Sessão inválida.";
 
-/** Quanto o token de visualizacao da Bunny vale (docs/30 §5.1: `expires`), em segundos. */
+/** Quanto o token de visualizacao da Bunny vale no maximo (docs/30 §5.1: `expires`), em segundos. */
 export const BUNNY_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+
+/** Na gravada, o token vale ate o fim do video e mais esta folga (quem entrou tarde ainda termina de ver). */
+export const BUNNY_TOKEN_GRACE_SECONDS = 15 * 60;
+
+/** Quanto a janela do chat da gravada passa do segundo do servidor (o aparelho pode estar um pouco adiantado). */
+export const CHAT_WINDOW_SLACK_MS = 10_000;
 
 export type RoomContext = {
   durationMs: number;
@@ -81,27 +88,34 @@ function bunnyRefOf(recording: RecordingRow | null) {
 }
 
 /** O token de visualizacao da Bunny (SHA-256 de chave + video + expires), so quando a biblioteca pede (BUNNY_EMBED_TOKEN_KEY). */
-export function bunnyViewToken(videoId: string, nowMs: number, tokenKey: string | undefined = process.env.BUNNY_EMBED_TOKEN_KEY): { expires: number; token: string } | null {
+export function bunnyViewToken(
+  videoId: string,
+  nowMs: number,
+  tokenKey: string | undefined = process.env.BUNNY_EMBED_TOKEN_KEY,
+  ttlSeconds: number = BUNNY_TOKEN_TTL_SECONDS
+): { expires: number; token: string } | null {
   const key = tokenKey?.trim();
   if (!key) {
     return null;
   }
-  const expires = Math.floor(nowMs / 1000) + BUNNY_TOKEN_TTL_SECONDS;
+  const expires = Math.floor(nowMs / 1000) + Math.max(60, Math.min(BUNNY_TOKEN_TTL_SECONDS, Math.ceil(ttlSeconds)));
   return { expires, token: createHash("sha256").update(bunnyEmbedTokenInput(key, videoId, expires)).digest("hex") };
 }
 
 /**
  * O video da sessao para o aluno: a gravada entra sem som, sem controles e ja no segundo atual (quem chega
- * atrasado cai no minuto certo); o replay entra com a barra e sem autoplay. Sem video da Bunny: nulo.
+ * atrasado cai no minuto certo), com o token valendo ate o fim do video e a folga; o replay entra com a barra e sem
+ * autoplay. Sem video da Bunny: nulo. Quem decide se o aluno recebe o video e loadRoomExtras (so dentro da entrada).
  */
-export function roomVideoFor(context: Pick<RoomContext, "recording" | "session">, nowMs: number): StudentRoomVideo | null {
+export function roomVideoFor(context: Pick<RoomContext, "durationMs" | "recording" | "session">, nowMs: number): StudentRoomVideo | null {
   const ref = bunnyRefOf(context.recording);
   if (!ref) {
     return null;
   }
-  const token = bunnyViewToken(ref.videoId, nowMs);
   const simulated = context.session.kind !== "replay";
   const offset = simulated ? sessionOffsetMs(context.session, nowMs) : Number.NaN;
+  const ttlSeconds = simulated && Number.isFinite(offset) ? (context.durationMs - offset) / 1000 + BUNNY_TOKEN_GRACE_SECONDS : BUNNY_TOKEN_TTL_SECONDS;
+  const token = bunnyViewToken(ref.videoId, nowMs, undefined, ttlSeconds);
   return {
     embedUrl: bunnyEmbedUrl(ref, {
       autoplay: simulated,
@@ -118,18 +132,30 @@ export function roomVideoFor(context: Pick<RoomContext, "recording" | "session">
   };
 }
 
+/** A vaga do aluno nesta sessao (a da sessao ou a geral do webinario), quando a sala so abre para quem garantiu. */
+async function hasSeat(db: WebinarsDb, userId: string, context: Pick<RoomContext, "session" | "webinar">): Promise<boolean> {
+  const rows = await fetchRegistrationRows(db, { userId, webinarIds: [context.webinar.id] });
+  return registrationFor(rows.map(registrationFromRow), context.session.id) !== null;
+}
+
 /**
- * O contexto de uma sessao da Sala: o webinario publicado que o aluno pode ver (404 fora disso), a sessao pedida
- * (precisa ser deste webinario: 404), a gravacao e a duracao do video.
+ * O contexto de uma sessao da Sala para as rotas: o webinario publicado que o aluno pode ver (404 fora disso), a
+ * sessao pedida (precisa ser deste webinario: 404; o replay cancelado tambem), a gravacao e a duracao do video. Com
+ * limite de vagas, so quem garantiu a vaga entra (A12): sem ela, 403.
  */
 export async function loadRoomContext(db: WebinarsDb, userId: string, webinarId: string, sessionId: string, now = Date.now()): Promise<RoomContext> {
   const record = await loadStudentWebinarById(db, userId, webinarId, now);
-  return roomContextOf(db, record, sessionId);
+  const context = await roomContextOf(db, record, sessionId);
+  if (seatRequired(context.webinar, context.session) && !(await hasSeat(db, userId, context))) {
+    throw new WebinarError(WEBINAR_COPY.sala.vagaObrigatoria, 403);
+  }
+  return context;
 }
 
 export async function roomContextOf(db: WebinarsDb, record: StudentWebinarRecord, sessionId: string): Promise<RoomContext> {
   const session = record.sessions.find((item) => item.id === sessionId);
-  if (!session) {
+  // O replay que a equipe tirou do ar some para o aluno (Cancelar replay no console).
+  if (!session || (session.kind === "replay" && session.status === "cancelled")) {
     throw new WebinarError(INVALID_SESSION_MESSAGE, 404);
   }
   const recordings = await listRecordingRows(db, [record.webinar.id]);
@@ -181,7 +207,29 @@ export function studentDisplayName(identity: Pick<StudentIdentity, "fullName" | 
  * GET .../session: o que a fase 2 acrescenta
  * ---------------------------------------------------------------------------------------------- */
 
-export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userId: string, now = Date.now()): Promise<StudentRoomExtras> {
+/** Se o aluno entra na sala agora: o replay sempre; a live pela situacao; a gravada pelo relogio; com limite de vagas, so com a vaga. */
+export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">, now: number, options: { seatMissing?: boolean } = {}): RoomJoin {
+  const { durationMs, session } = context;
+  if (session.kind !== "replay" && options.seatMissing) {
+    return { ok: false, reason: "no_seat" };
+  }
+  if (session.kind === "replay") {
+    return { ok: true };
+  }
+  if (session.kind === "live") {
+    if (session.status === "waiting" || session.status === "live") {
+      return { ok: true };
+    }
+    return { ok: false, reason: session.status === "ended" || session.status === "cancelled" ? "ended" : "not_started" };
+  }
+  return canJoinSimulated(session, durationMs, now);
+}
+
+/**
+ * O que a Sala recebe a mais em GET .../session. O video (com o token da Bunny) so vai dentro da entrada: antes da
+ * abertura, depois do fim, depois da Entrada atrasada ou sem a vaga obrigatoria, nulo. A live (fase 3) nao usa a Bunny.
+ */
+export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userId: string, now = Date.now(), options: { seatMissing?: boolean } = {}): Promise<StudentRoomExtras> {
   const { durationMs, session, webinar } = context;
   const offset = sessionOffsetMs(session, now);
   const simulated = session.kind === "simulated";
@@ -191,7 +239,7 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
     listStudentPolls(db, session, userId),
     simulated ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(offset) ? offset : 0) / 1000)), sessionId: session.id }) : Promise.resolve([])
   ]);
-  const join = session.kind === "replay" ? ({ ok: true } as const) : canJoinSimulated(session, durationMs, now);
+  const join = roomJoinFor(context, now, options);
 
   return {
     me: {
@@ -208,12 +256,13 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       chatMode: session.chatMode,
       chatSlowModeSeconds: session.chatSlowModeSeconds,
       durationMs,
-      join: session.kind === "live" ? (session.status === "waiting" || session.status === "live" ? { ok: true } : { ok: false, reason: session.status === "ended" || session.status === "cancelled" ? "ended" : "not_started" }) : join,
+      join,
       offsetMs: Number.isFinite(offset) ? Math.round(offset) : null,
       roomPhase: simulated ? simulatedPhase(session, durationMs, now) : null,
+      anonymousQuestions: webinar.roomSettings.anonymousQuestions,
       showLiveBadge: session.showLiveBadge
     },
-    video: roomVideoFor(context, now)
+    video: join.ok && session.kind !== "live" ? roomVideoFor(context, now) : null
   };
 }
 
@@ -224,17 +273,39 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
 export type ChatWindowReply = { messages: StudentChatMessage[]; mode: "window"; serverTime: string; window: ChatWindow };
 export type ChatRecentReply = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; serverTime: string };
 
-/** A janela [from, to] em ms: a linha mestre (ja deslocada pela ancora na RPC) + as linhas da sessao. */
+/**
+ * Ate onde a janela pode ir: no replay, ate onde o aluno pedir (ele mesmo pula pelo video); na gravada e na live,
+ * no maximo a janela a frente do segundo do servidor (o chat original de depois de agora nunca sai antes da hora).
+ */
+export function chatWindowLimitMs(session: Pick<WebinarSession, "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, now: number): number {
+  if (session.kind === "replay") {
+    return CHAT_LIMITS.offsetMaxMs;
+  }
+  const offset = sessionOffsetMs(session, now);
+  return Number.isFinite(offset) ? Math.floor(offset) + ROOM_RULES.chatWindowSeconds * 1000 + CHAT_WINDOW_SLACK_MS : CHAT_LIMITS.offsetMinMs - 1;
+}
+
+/**
+ * A janela [from, to] em ms: a linha mestre (ja deslocada pela ancora na RPC) + as linhas da sessao. Na gravada o
+ * fim e cortado em chatWindowLimitMs e a resposta traz a janela de verdade (a seguinte comeca dali, sem pular linha);
+ * pedida toda depois do limite, volta vazia com `toMs = fromMs - 1`.
+ */
 export async function readChatWindow(db: WebinarsDb, context: RoomContext, userId: string, window: ChatWindow, now = Date.now()): Promise<ChatWindowReply> {
   if (!isValidChatWindow(window)) {
     throw new WebinarError("Janela inválida.", 400);
   }
-  const rows = await fetchChatWindow(db, { fromMs: window.fromMs, sessionId: context.session.id, toMs: window.toMs, userId });
+  const serverTime = new Date(now).toISOString();
+  const limit = chatWindowLimitMs(context.session, now);
+  if (window.fromMs > limit) {
+    return { messages: [], mode: "window", serverTime, window: { fromMs: window.fromMs, toMs: window.fromMs - 1 } };
+  }
+  const served: ChatWindow = { fromMs: window.fromMs, toMs: Math.min(window.toMs, limit) };
+  const rows = await fetchChatWindow(db, { fromMs: served.fromMs, sessionId: context.session.id, toMs: served.toMs, userId });
   return {
     messages: rows.map((row) => toStudentMessage(chatMessageFromWindowRow(row, context.session.id, context.webinar.id), userId)),
     mode: "window",
-    serverTime: new Date(now).toISOString(),
-    window
+    serverTime,
+    window: served
   };
 }
 

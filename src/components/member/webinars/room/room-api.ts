@@ -139,7 +139,9 @@ export function getQuestions(webinarId: string, sessionId: string, order: "recen
   return getJson<{ questions: StudentQuestion[]; serverTime: string }>(roomApiPath(webinarId, "questions", { ordem: order, sessao: sessionId }), GENERIC, signal);
 }
 
-export function postQuestion(webinarId: string, body: { anonymous: boolean; body: string; offsetMs?: number; sessionId: string }) {
+export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { anonymous: boolean; body: string; offsetMs?: number; sessionId: string };
+
+export function postQuestion(webinarId: string, body: QuestionPostBody) {
   return sendJson<{ question: StudentQuestion }>(roomApiPath(webinarId, "questions"), "POST", body, GENERIC);
 }
 

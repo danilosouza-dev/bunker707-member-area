@@ -131,6 +131,14 @@ export function registrationFor(registrations: readonly WebinarRegistration[], s
   return active.find((registration) => registration.sessionId === sessionId) ?? active.find((registration) => registration.sessionId === null) ?? null;
 }
 
+/**
+ * Se a sala desta sessao so abre para quem garantiu a vaga (A12): com o limite de vagas ligado, sim; o replay
+ * nunca pede vaga (e de quem tem acesso).
+ */
+export function seatRequired(webinar: Pick<Webinar, "capacity" | "registrationRequired">, session: Pick<WebinarSession, "kind">): boolean {
+  return session.kind !== "replay" && webinar.registrationRequired && webinar.capacity != null;
+}
+
 /** As sessoes que o aluno escolhe ou ve (sem a `replay`), na ordem das horas marcadas. */
 export function realSessions(sessions: readonly WebinarSession[]): WebinarSession[] {
   return sessions.filter((session) => session.kind !== "replay").sort((a, b) => toTime(a.scheduledAt) - toTime(b.scheduledAt));
@@ -313,6 +321,9 @@ export type StudentRoomVideo = {
 };
 
 /** O que a Sala precisa alem da fase 1 (docs/30 §5.1 e §6.6), montado por room-queries.ts. */
+/** A entrada na sala: aberta, ou o motivo (fora da hora, Entrada atrasada, ou sem a vaga quando ha limite). */
+export type RoomJoin = { ok: true } | { ok: false; reason: JoinRefusal | "no_seat" };
+
 export type StudentRoomExtras = {
   me: { consented: boolean; displayMode: DisplayNameMode | null; displayName: string | null; nickname: string | null };
   pinned: StudentChatMessage | null;
@@ -320,12 +331,14 @@ export type StudentRoomExtras = {
   presentNow: number;
   replaySessionId: string | null;
   session: {
+    /** A equipe deixou a opcao Anonima ligada nas perguntas (card Sala). */
+    anonymousQuestions: boolean;
     chatMode: ChatMode;
     chatSlowModeSeconds: number | null;
     /** A duracao do video em ms (a gravacao quando se sabe; senao a duracao prevista). */
     durationMs: number;
-    /** Se a sala abre agora para o aluno (canJoinSimulated); o replay sempre abre. */
-    join: { ok: true } | { ok: false; reason: JoinRefusal };
+    /** Se a sala abre agora para o aluno (roomJoinFor); o replay sempre abre. */
+    join: RoomJoin;
     /** Onde o video esta agora, em ms (autoritativo na gravada); nulo no replay. */
     offsetMs: number | null;
     /** A fase da sessao gravada pelo relogio do servidor; nulo no replay. */

@@ -1,8 +1,8 @@
 "use client";
 
-import { CalendarPlus, CheckCircle2, ChevronDown } from "lucide-react";
+import { CalendarPlus, CheckCircle2, ChevronDown, Radio } from "lucide-react";
 import { useState } from "react";
-import { MemberButton, memberButtonClassName } from "@/components/member/ui/member-button";
+import { MemberButton, MemberButtonLink, memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { StudentPhase } from "@/server/webinars/model";
@@ -13,6 +13,7 @@ import { cancelWebinarRegistration, registerForWebinar, WebinarsRequestError } f
 // Toaster), com o menu Adicionar ao calendario (Baixar arquivo, Google Agenda, Outlook) e Cancelar minha vaga.
 // Um pedido por vez (o botao trava enquanto espera); 409 do servidor muda a situacao na hora (vagas
 // esgotadas, live encerrada ou cancelada). No "ver como" da equipe nada e gravado: os botoes ficam desligados.
+// Com a sessao ja aberta e limite de vagas (A12), o aluno sem vaga garante aqui e o Entrar aparece em seguida.
 
 export type SessionCalendarLinks = { downloadUrl: string; googleUrl: string; outlookUrl: string };
 
@@ -54,6 +55,7 @@ function CalendarMenu({ links }: { links: SessionCalendarLinks }) {
 
 export function WebinarSessionActions({
   calendar: initialCalendar,
+  enterHref = null,
   phase: initialPhase,
   readOnly,
   registered: initialRegistered,
@@ -63,6 +65,8 @@ export function WebinarSessionActions({
 }: {
   /** Links do calendario quando o aluno ja tem vaga (vindos do servidor). */
   calendar: SessionCalendarLinks | null;
+  /** A sala desta sessao, quando ela ja abriu: com a vaga garantida, o Entrar aparece junto. */
+  enterHref?: string | null;
   phase: StudentPhase;
   /** "Ver como" da equipe: mostra, mas nao grava. */
   readOnly: boolean;
@@ -140,6 +144,12 @@ export function WebinarSessionActions({
   if (registered) {
     controls = (
       <div className="flex flex-wrap items-center gap-2">
+        {enterHref ? (
+          <MemberButtonLink href={enterHref} size="lg" variant="primary">
+            <Radio />
+            {copy.entrar}
+          </MemberButtonLink>
+        ) : null}
         <MemberChip icon={CheckCircle2} size="md" tone="success">
           {copy.selo.vagaGarantida}
         </MemberChip>

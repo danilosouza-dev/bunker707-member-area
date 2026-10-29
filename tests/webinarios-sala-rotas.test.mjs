@@ -464,6 +464,26 @@ test("janela do chat: a linha mestre vem deslocada pela ancora (100 s na live = 
   assert.deepEqual(repetida.body.data.next, novas.body.data.next, "o cursor se mantem");
 });
 
+test("janela do chat na gravada: nunca passa da janela a frente do relogio do servidor (o chat original de depois de agora fica para depois); no replay, ate onde o aluno pedir", async () => {
+  const { db } = montar();
+  // A sessao gravada esta no minuto 10 (600 s); a linha mestre do minuto 15 (900 s no video) ainda nao pode sair.
+  db.tables.webinar_chat_messages.push({ approved: true, author_user_id: "11111111-1111-4111-8111-111111111111", body: "spoiler do minuto 15", created_at: iso(Date.now() - 30 * 24 * HOUR), deleted_at: null, display_name: "Bia C.", id: "cccccccc-aaaa-4000-8000-00000000000f", kind: "message", master: true, offset_ms: 905_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: LIVE_SOURCE, source: "original", webinar_id: WEBINAR });
+  const adiante = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=590000&to=1400000`), contexto()));
+  assert.equal(adiante.status, 200, JSON.stringify(adiante.body));
+  assert.deepEqual(adiante.body.data.messages.map((message) => message.body), [], "nada do minuto 15 agora");
+  const ate = adiante.body.data.window.toMs;
+  assert.ok(ate >= 600_000 + 120_000 && ate <= 600_000 + 120_000 + 15_000, `a janela devolvida para no relogio do servidor + 120 s (${ate})`);
+  assert.equal(adiante.body.data.window.fromMs, 590_000);
+
+  const depois = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=880000&to=920000`), contexto()));
+  assert.deepEqual(depois.body.data.messages, [], "pedida toda depois do limite, vazia");
+  assert.deepEqual(depois.body.data.window, { fromMs: 880_000, toMs: 879_999 }, "a seguinte recomeca do mesmo ponto");
+
+  const replay = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${REPLAY}&from=880000&to=920000`), contexto()));
+  assert.deepEqual(replay.body.data.messages.map((message) => message.body), ["spoiler do minuto 15"], "no replay o aluno pula pelo video");
+  assert.deepEqual(replay.body.data.window, { fromMs: 880_000, toMs: 920_000 });
+});
+
 test("POST chat: a primeira exige o aceite (409 consent_required); com ele grava o aceite, o nome exibido pela escolha e os registros; o offset e o do servidor", async () => {
   const { db, userId } = montar({ scheduledAt: Date.now() - 90_000 });
   const semAceite = await enviar({ body: "oi" });
@@ -574,6 +594,22 @@ test("POST chat: rajada 5/60 s (a 6a e 429 com Retry-After), modo lento 429, pal
   assert.equal(pendente.body.data.pending, true);
   assert.equal(pendente.body.data.message.pending, true);
   assert.equal(moderado.tables.webinar_chat_messages.find((row) => row.author_user_id === userId).approved, false);
+  const perguntaPendente = await enviar({ body: "e o certificado?", kind: "question" });
+  assert.equal(perguntaPendente.status, 201);
+  assert.equal(moderado.tables.webinar_questions.length, 0, "a pergunta pendente so entra na aba quando a equipe libera");
+  assert.equal(eventos(moderado, "webinar_question_sent").length, 0);
+});
+
+test("POST chat: dois pedidos juntos no modo lento passam um so; a mensagem recusada (palavra bloqueada) devolve a vez", async () => {
+  montar({ slowMode: 20 });
+  const juntos = await Promise.all([enviar({ body: "um", ...comAceite }), enviar({ body: "dois", ...comAceite })]);
+  assert.deepEqual(juntos.map((item) => item.status).sort(), [201, 429], "o modo lento reserva a vez antes de qualquer espera");
+
+  const { db } = montar({ slowMode: 20 });
+  assert.equal((await enviar({ body: "isso é um palavrão", ...comAceite })).status, 422);
+  const depois = await enviar({ body: "agora sim" });
+  assert.equal(depois.status, 201, "a recusada nao conta para o modo lento");
+  assert.equal(db.tables.webinar_chat_messages.filter((row) => row.source === "audience").length, 1);
 });
 
 test("DELETE chat { all: true }: apaga (soft, consent_revoked) mensagens, perguntas e respostas de enquete de todas as sessoes, retira o aceite e grava revoked; a rota sem id faz o mesmo", async () => {
@@ -668,8 +704,10 @@ test("reacoes: 201 com o registro; a segunda no mesmo segundo e 429 (Retry-After
   assert.equal(seguida.status, 429);
   assert.equal(seguida.headers.get("Retry-After"), "1");
 
-  // 20 reacoes espalhadas no ultimo minuto (nenhuma no ultimo segundo): a proxima e a 21a.
+  // 20 reacoes espalhadas no ultimo minuto (nenhuma no ultimo segundo), gravadas por outra instancia do app: a
+  // memoria desta nao as viu (zerada), o banco segura a 21a.
   db.tables.webinar_reactions.length = 0;
+  resetRoomLimits();
   // De 50 s a 2,5 s atras, a cada 2,5 s: 3 delas (17, 18 e 19) caem nos ultimos 10 s.
   for (let i = 0; i < 20; i += 1) {
     db.tables.webinar_reactions.push({ created_at: iso(Date.now() - 50_000 + i * 2500), id: randomUUID(), offset_ms: 0, reaction: "like", session_id: SESSION, user_id: userId });
@@ -685,17 +723,34 @@ test("reacoes: 201 com o registro; a segunda no mesmo segundo e 429 (Retry-After
   assert.ok(contagens.body.data.counts.like >= 2 && contagens.body.data.counts.like <= 4, `as dos ultimos 10 s (${contagens.body.data.counts.like})`);
   const invalida = await reactionsRoute.POST(pedido(`${WEBINAR}/reactions`, "POST", { reaction: "banana", sessionId: SESSION }), contexto());
   assert.equal(invalida.status, 400);
+
+  // Duas reacoes no mesmo instante: a memoria reserva antes da contagem no banco, entao so uma passa.
+  const { db: outra } = montar();
+  const juntas = await Promise.all([reagir("clap"), reagir("fire")]);
+  assert.deepEqual(juntas.map((response) => response.status).sort(), [201, 429]);
+  assert.equal(outra.tables.webinar_reactions.length, 1);
 });
 
 test("perguntas: 201 (anonima vira Aluno {n}), a 3a no minuto e 429; a lista com mine e voted, a dispensada so para o autor, a ordem; o voto alterna e reconta", async () => {
   const { db, userId } = montar();
   const perguntar = (body) => questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { sessionId: SESSION, ...body }), contexto());
-  const primeira = await json(await perguntar({ anonymous: true, body: "Vai ter certificado?" }));
+  // Sem o aceite do chat, nada com o nome do aluno (D10): 409 consent_required, nada gravado, a rajada nao conta.
+  const semAceite = await json(await perguntar({ anonymous: true, body: "Vai ter certificado?" }));
+  assert.equal(semAceite.status, 409);
+  assert.equal(semAceite.body.reason, "consent_required");
+  assert.equal(db.tables.webinar_questions.length, 0);
+  const primeira = await json(await perguntar({ anonymous: true, body: "Vai ter certificado?", ...comAceite }));
   assert.equal(primeira.status, 201, JSON.stringify(primeira.body));
   assert.match(primeira.body.data.question.displayName, /^Aluno \d{3}$/);
   assert.equal(primeira.body.data.question.mine, true);
   assert.deepEqual(eventos(db, "webinar_question_sent")[0].metadata, { anonymous: true, offset_ms: db.tables.webinar_questions[0].offset_ms, question_id: db.tables.webinar_questions[0].id });
-  assert.equal((await perguntar({ anonymous: false, body: "E a apostila?" })).status, 201);
+  assert.equal(db.tables.webinar_chat_consents[0].display_mode, "first_name_initial", "a Anonima e da pergunta, nao do nome no chat");
+  assert.equal(eventos(db, "webinar_chat_consented").length, 1, "o aceite veio com a pergunta");
+  const segunda = await json(await perguntar({ anonymous: false, body: "E a apostila?" }));
+  assert.equal(segunda.status, 201);
+  assert.equal(segunda.body.data.question.displayName, "Ana S.", "com o aceite, o nome como no chat");
+  // As duas podem cair no mesmo milissegundo do banco falso: a primeira fica 2 s antes para a ordem "mais recentes".
+  db.tables.webinar_questions.find((row) => row.body === "Vai ter certificado?").created_at = iso(Date.now() - 2000);
   assert.equal((await perguntar({ anonymous: false, body: "terceira" })).status, 429);
 
   const deOutro = "11111111-1111-4111-8111-111111111113";
@@ -725,8 +780,28 @@ test("perguntas: 201 (anonima vira Aluno {n}), a 3a no minuto e 429; a lista com
   assert.equal(lista.body.data.questions[0].body, "E a apostila?", "mais recentes primeiro");
   const outraSessao = await voteRoute.POST(pedido(`${WEBINAR}/questions/${alvo}/vote`, "POST", { sessionId: REPLAY }), { params: Promise.resolve({ id: WEBINAR, qid: alvo }) });
   assert.equal(outraSessao.status, 404, "pergunta de outra sessao");
+  const dispensada = db.tables.webinar_questions.find((row) => row.status === "dismissed").id;
+  const naDispensada = await voteRoute.POST(pedido(`${WEBINAR}/questions/${dispensada}/vote`, "POST", { sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: dispensada }) });
+  assert.equal(naDispensada.status, 404, "a dispensada de outro aluno nao aparece, nem para curtir");
   assert.equal(db.tables.webinar_question_votes.length, 0);
   assert.equal(db.tables.webinar_questions.filter((row) => row.user_id === userId).length, 2);
+
+  // Anonima com a opcao desligada no card Sala: 400 (nunca grava com o nome sem avisar).
+  const { db: semAnonimas } = montar();
+  semAnonimas.tables.webinars.find((row) => row.id === WEBINAR).room_settings.anonymousQuestions = false;
+  const desligada = await json(await perguntar({ anonymous: true, body: "posso sem nome?", ...comAceite }));
+  assert.equal(desligada.status, 400);
+  assert.match(desligada.body.error, /anônimas estão desligadas/);
+  assert.equal(semAnonimas.tables.webinar_questions.length, 0);
+
+  // Curtir fora da hora da sessao (a gravada acabou): 409 ended.
+  const { db: encerrada } = montar({ scheduledAt: Date.now() - 2 * HOUR });
+  const antiga = randomUUID();
+  encerrada.tables.webinar_questions.push({ anonymous: false, body: "antiga", created_at: iso(Date.now() - HOUR), deleted_at: null, display_name: "Zé", id: antiga, offset_ms: 0, session_id: SESSION, status: "open", upvotes: 0, user_id: deOutro });
+  const tarde = await json(await voteRoute.POST(pedido(`${WEBINAR}/questions/${antiga}/vote`, "POST", { sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: antiga }) }));
+  assert.equal(tarde.status, 409);
+  assert.equal(tarde.body.reason, "ended");
+  assert.equal(encerrada.tables.webinar_question_votes.length, 0);
 });
 
 test("enquetes: a aberta com myOptionIds nulo; 201 na resposta; a segunda e 409; encerrada 409 poll_closed; opcao invalida 400; o resultado so compartilhado", async () => {
@@ -830,9 +905,50 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.deepEqual(depois.body.data.me, { calendarUrl: null, consented: true, displayMode: "nickname", displayName: "aninha", nickname: "aninha", registered: false, registeredAt: null });
   assert.equal(db.tables.webinar_chat_consents[0].user_id, userId);
 
-  // Antes de 15 min da hora, a sala nao abre (join), mas a sessao responde.
+  assert.equal(data.session.anonymousQuestions, true, "a opcao Anonima das perguntas vem do card Sala");
+
+  // Antes de 15 min da hora, a sala nao abre (join) e o video (com o token da Bunny) nao sai; a sessao responde.
   montar({ scheduledAt: Date.now() + HOUR });
   const cedo = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
   assert.deepEqual(cedo.body.data.session.join, { ok: false, reason: "not_started" });
   assert.equal(cedo.body.data.session.roomPhase, "waiting");
+  assert.equal(cedo.body.data.video, null, "sem video fora da entrada");
+  montar({ scheduledAt: Date.now() - 2 * HOUR });
+  const tarde = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+  assert.deepEqual(tarde.body.data.session.join, { ok: false, reason: "ended" });
+  assert.equal(tarde.body.data.video, null, "nem depois do fim");
+
+  // O replay que a equipe cancelou some: a sessao e as rotas da sala respondem 404.
+  const { db: semReplay } = montar();
+  semReplay.tables.webinar_sessions.find((row) => row.id === REPLAY).status = "cancelled";
+  assert.equal((await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${REPLAY}`), contexto())).status, 404);
+  assert.equal((await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${REPLAY}&from=0&to=1000`), contexto())).status, 404);
+  assert.equal((await heartbeatRoute.POST(pedido(`${WEBINAR}/heartbeat`, "POST", { offsetSeconds: 0, sessionId: REPLAY }), contexto())).status, 404);
+});
+
+test("limite de vagas (A12): so quem garantiu a vaga entra; sem ela, as rotas da sala respondem 403 e a sessao diz no_seat sem o video; o replay nao pede vaga", async () => {
+  const { db, userId } = montar();
+  Object.assign(db.tables.webinars.find((row) => row.id === WEBINAR), { capacity: 50, registration_required: true });
+
+  const semVaga = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+  assert.equal(semVaga.status, 200, JSON.stringify(semVaga.body));
+  assert.deepEqual(semVaga.body.data.session.join, { ok: false, reason: "no_seat" });
+  assert.equal(semVaga.body.data.video, null);
+  const chat = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=0&to=1000`), contexto()));
+  assert.equal(chat.status, 403);
+  assert.match(chat.body.error, /só entra quem garantiu a vaga/);
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 403);
+  assert.equal((await heartbeatRoute.POST(pedido(`${WEBINAR}/heartbeat`, "POST", { offsetSeconds: 0, sessionId: SESSION }), contexto())).status, 403);
+  assert.equal(db.tables.webinar_presence_samples.length, 0);
+
+  const replay = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${REPLAY}`), contexto()));
+  assert.deepEqual(replay.body.data.session.join, { ok: true }, "o replay e de quem tem acesso");
+
+  db.tables.webinar_registrations.push({ calendar_token: "tok", cancelled_at: null, created_at: iso(Date.now()), id: randomUUID(), registered_at: iso(Date.now() - HOUR), reminder_1h_sent_at: null, reminder_24h_sent_at: null, session_id: SESSION, source: null, source_campaign_id: null, started_notice_sent_at: null, status: "registered", updated_at: iso(Date.now()), user_id: userId, webinar_id: WEBINAR });
+  heartbeatRoute.resetHeartbeatAccessCache();
+  const comVaga = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+  assert.deepEqual(comVaga.body.data.session.join, { ok: true });
+  assert.ok(comVaga.body.data.video, "com a vaga, o video");
+  assert.equal((await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=0&to=1000`), contexto())).status, 200);
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
 });

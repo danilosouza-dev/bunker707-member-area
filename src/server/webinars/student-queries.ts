@@ -33,6 +33,7 @@ import {
   pickStartBanner,
   previewCanSee,
   roomHref,
+  seatRequired,
   type HomeWebinarCard,
   type StartBanner,
   type StudentRoomPayload,
@@ -245,7 +246,7 @@ export async function getWebinarBanner(userId: string, now = Date.now(), options
 export async function getStudentSessionPayload(userId: string, webinarId: string, sessionId: string | null, now = Date.now(), options: StudentQueryOptions = {}): Promise<StudentSessionPayload> {
   const db = options.db ?? webinarsDb();
   const record = await loadStudentWebinarById(db, userId, webinarId, now);
-  const replay = sessionId ? (record.sessions.find((item) => item.id === sessionId && item.kind === "replay") ?? null) : null;
+  const replay = sessionId ? (record.sessions.find((item) => item.id === sessionId && item.kind === "replay" && item.status !== "cancelled") ?? null) : null;
   const session = replay ?? resolveStudentSession(record, sessionId, now);
   const registrations = (await fetchRegistrationRows(db, { userId, webinarIds: [record.webinar.id] })).map(registrationFromRow);
   const counts = await loadRegisteredCounts(db, [record.webinar], [session]);
@@ -264,7 +265,9 @@ export async function getStudentSessionPayload(userId: string, webinarId: string
     throw new WebinarError("Sessão inválida.", 404);
   }
   const roomContext = await roomContextOf(db, record, session.id);
-  const room = await loadRoomExtras(db, roomContext, userId, now);
+  // No "ver como" a equipe abre a sala sem vaga (nada e gravado); o aluno, so com a vaga quando ha limite (A12).
+  const seatMissing = !options.accessPreviewMode && seatRequired(record.webinar, session) && !sessionView.registered;
+  const room = await loadRoomExtras(db, roomContext, userId, now, { seatMissing });
   return buildSessionPayload(view, sessionView, { lateJoinMinutes: session.lateJoinMinutes, now, room });
 }
 
@@ -275,13 +278,13 @@ export async function getStudentSessionPayload(userId: string, webinarId: string
 export type RoomPageData =
   | { href: string; now: number; page: StudentWebinarPage; payload: StudentRoomPayload; state: "ready" }
   | { state: "not_found" }
-  | { page: StudentWebinarPage; reason: "ended" | "late" | "not_started"; state: "refused" }
+  | { page: StudentWebinarPage; reason: "ended" | "late" | "no_seat" | "not_started"; state: "refused" }
   | { state: "error" };
 
 /**
  * A pagina da Sala: o webinario pelo endereco (404 fora do acesso), a sessao pedida (404 se nao e deste webinario)
  * e a resposta completa da sessao; fora da janela de entrada da gravada (antes de 15 min, depois do fim ou da
- * Entrada atrasada), `refused` com o motivo. No "ver como" da equipe a sala abre sem gravar nada (a tela decide).
+ * Entrada atrasada) ou sem a vaga quando a live tem limite de vagas (A12), `refused` com o motivo. No "ver como" da equipe a sala abre sem gravar nada (a tela decide).
  */
 export async function getRoomPageData(accessPreviewMode: AccessPreviewMode | undefined, user: SessionUser, slug: string, sessionId: string): Promise<RoomPageData> {
   const now = Date.now();
@@ -293,6 +296,9 @@ export async function getRoomPageData(accessPreviewMode: AccessPreviewMode | und
     const payload = asRoomPayload(await getStudentSessionPayload(user.id, page.view.id, sessionId, now, { accessPreviewMode }));
     if (!payload) {
       return { state: "error" };
+    }
+    if (!payload.session.join.ok && payload.session.join.reason === "no_seat") {
+      return { page, reason: "no_seat", state: "refused" };
     }
     if (payload.session.kind !== "replay") {
       const join = canJoinSimulated(

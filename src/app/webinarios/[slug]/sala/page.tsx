@@ -20,7 +20,7 @@ import { Radio } from "lucide-react";
 // /webinarios/[slug]/sala?sessao= (docs/30 §1.6): a Sala da Live gravada ou do Replay, um dialogo de tela cheia por
 // cima da pagina da live (que fica por baixo para a pilula do Minimizar). Fora do acesso ou sessao de outro
 // webinario: nao encontrado, sem dizer se existe (docs/30 §8.2). Fora da janela de entrada (antes de 15 min,
-// depois do fim ou da Entrada atrasada): a pagina da live com a frase e o caminho de volta. Nenhum pop-up aqui
+// depois do fim ou da Entrada atrasada) ou sem a vaga numa live com limite de vagas (A12): a frase e o caminho de volta. Nenhum pop-up aqui
 // (docs/25 §1, "onde nunca": a rota nao tem chave de pagina e o palco anuncia o sinal de midia).
 
 export const dynamic = "force-dynamic";
@@ -81,7 +81,7 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
                 {WEBINAR_COPY.aluno.titulo}
               </MemberButtonLink>
             }
-            description={data.reason === "not_started" ? copy.naoComecou : data.reason === "late" ? copy.entradaAtrasada : copy.encerrada}
+            description={data.reason === "not_started" ? copy.naoComecou : data.reason === "late" ? copy.entradaAtrasada : data.reason === "no_seat" ? copy.vagaObrigatoria : copy.encerrada}
             icon={Radio}
             title={data.page.view.title}
           />

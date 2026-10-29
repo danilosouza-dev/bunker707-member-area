@@ -482,6 +482,25 @@ export async function fetchQuestionRow(db: WebinarsDb, id: string): Promise<Ques
   return (data as QuestionRow | null) ?? null;
 }
 
+/** A pergunta aberta por uma mensagem do chat (`kind: "question"`), apagada ou nao. */
+export async function fetchQuestionRowByMessage(db: WebinarsDb, messageId: string): Promise<QuestionRow | null> {
+  const { data, error } = await db.from("webinar_questions").select(QUESTION_COLUMNS).eq("message_id", messageId).limit(1).maybeSingle();
+  assertNoDbError(error, "Webinarios: ler pergunta da mensagem");
+  return (data as QuestionRow | null) ?? null;
+}
+
+/** Apaga (soft) as perguntas abertas por uma mensagem que a equipe apagou: a pergunta some da aba junto. */
+export async function softDeleteQuestionsOfMessage(db: WebinarsDb, input: { messageId: string; nowIso: string; reason: DeleteReason }): Promise<number> {
+  const { data, error } = await db
+    .from("webinar_questions")
+    .update({ deleted_at: input.nowIso, deleted_reason: input.reason })
+    .eq("message_id", input.messageId)
+    .is("deleted_at", null)
+    .select("id");
+  assertNoDbError(error, "Webinarios: apagar pergunta da mensagem");
+  return (data ?? []).length;
+}
+
 export async function listQuestionRows(db: WebinarsDb, input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[] }): Promise<QuestionRow[]> {
   let query = db.from("webinar_questions").select(QUESTION_COLUMNS).eq("session_id", input.sessionId).is("deleted_at", null);
   if (input.statuses?.length) {

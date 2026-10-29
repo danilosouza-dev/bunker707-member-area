@@ -211,7 +211,10 @@ export const WEBINAR_COPY = {
     semMensagens: "Ainda não há mensagens.",
     semPerguntas: "Nenhuma pergunta ainda.",
     semVideo: "O vídeo desta sessão ainda não está disponível.",
-    suaPergunta: "Sua pergunta"
+    suaPergunta: "Sua pergunta",
+    /* Correcoes da revisao (A12 e D10): a vaga obrigatoria com limite e o aceite antes da primeira pergunta. */
+    aceiteParaPerguntar: "Para perguntar, aceite as regras do chat uma vez.",
+    vagaObrigatoria: "Essa live tem vagas limitadas: só entra quem garantiu a vaga. Garanta a sua na página da live."
   },
   /** Perfil › Privacidade (docs/30 §8.5): o aluno retira o aceite e apaga o que escreveu. */
   privacidade: {

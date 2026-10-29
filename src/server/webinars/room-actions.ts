@@ -15,7 +15,7 @@ import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
 import { recordEvents } from "@/server/students/store";
 import { invalidateWebinars } from "./cache";
-import { chatMessageFromRow, pollFromRow, questionFromRow } from "./chat-rows";
+import { chatMessageFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
 import {
   answerQuestionSchema,
   closePollSchema,
@@ -37,11 +37,14 @@ import {
   fetchConsentRow,
   fetchPollRow,
   fetchQuestionRow,
+  fetchQuestionRowByMessage,
   insertChatMessage,
   insertPollRow,
+  insertQuestionRow,
   listPollRows,
   replacePollOptionRows,
   revokeConsentRow,
+  softDeleteQuestionsOfMessage,
   softDeleteStudentContent,
   updateChatMessageRow,
   updatePollRow,
@@ -62,7 +65,8 @@ import {
   type WebinarSession
 } from "./model";
 import { baseRecordingOf } from "./queries";
-import { firstNameInitial, sessionOffsetMs } from "./room-model";
+import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
+import { questionSentMetadata } from "./room-rules";
 import { sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { finishSession, openSession } from "./session-lifecycle";
 import { fetchSessionRow, insertSessionRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
@@ -275,9 +279,39 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 }
 
 /**
- * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando), apagar (deleted_at, motivo
- * `team`; some para todos na hora), fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por
- * sessao) e promover a linha mestre (master + source `original`, so mensagem da turma cujo autor mantem o aceite).
+ * A pergunta que o aluno mandou pelo chat moderado so entra na aba Perguntas quando a equipe libera a mensagem
+ * (antes disso ninguem alem do autor a ve). Anonima quando o nome gravado e o "Aluno {n}" do proprio aluno.
+ */
+async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
+  if (message.kind !== "question" || message.source !== "audience" || !message.author_user_id || (await fetchQuestionRowByMessage(db, message.id))) {
+    return;
+  }
+  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(message.author_user_id, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const question = await insertQuestionRow(db, {
+    anonymous,
+    body: message.body.slice(0, 500),
+    display_name: message.display_name,
+    message_id: message.id,
+    offset_ms: message.offset_ms,
+    session_id: message.session_id,
+    user_id: message.author_user_id
+  });
+  await recordEvents(db, [
+    {
+      entity_id: message.session_id,
+      entity_type: "webinar",
+      event_type: "webinar_question_sent",
+      metadata: questionSentMetadata({ anonymous, offsetMs: message.offset_ms, questionId: question.id }),
+      user_id: message.author_user_id
+    }
+  ]);
+}
+
+/**
+ * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
+ * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
+ * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao) e promover a linha mestre
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite).
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
   return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
@@ -336,6 +370,12 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
+    }
+
+    if (data.action === "approve" && !message.approved) {
+      await openQuestionOfMessage(db, updated);
+    } else if (data.action === "delete") {
+      await softDeleteQuestionsOfMessage(db, { messageId: message.id, nowIso, reason: "team" });
     }
 
     if (data.action === "pin") {

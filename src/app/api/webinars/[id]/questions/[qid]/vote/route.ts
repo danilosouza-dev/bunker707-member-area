@@ -6,7 +6,8 @@ import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, roomErrorRespo
 import { voteStudentQuestion } from "@/server/webinars/room-writes";
 
 // Curtir / Tirar a curtida de uma pergunta (docs/30 §5.1): POST { sessionId } alterna o voto do aluno e responde
-// { upvotes, voted }. Pergunta de outra sessao ou apagada: 404. Sessao obrigatoria; o teto global de 30 escritas.
+// { upvotes, voted }. Pergunta de outra sessao, apagada ou dispensada de outro aluno: 404; fora da hora da sessao: 409.
+// Sessao obrigatoria; o teto global de 30 escritas.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

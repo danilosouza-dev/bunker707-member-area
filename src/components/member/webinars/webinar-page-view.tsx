@@ -11,7 +11,7 @@ import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { StudentPhase } from "@/server/webinars/model";
-import { phaseLabel, type StudentSessionView, type StudentWebinarView } from "@/server/webinars/student-model";
+import { phaseLabel, roomHref, type StudentSessionView, type StudentWebinarView } from "@/server/webinars/student-model";
 import type { SessionCalendarLinks, WebinarPageData } from "@/server/webinars/student-queries";
 import { WebinarCountdown } from "./webinar-countdown";
 import { WebinarEnterButton, WebinarReplayButton } from "./webinar-enter-button";
@@ -55,6 +55,7 @@ function SessionRow({
   calendar,
   durationMinutes,
   readOnly,
+  seatRequired,
   serverNow,
   session,
   slug,
@@ -65,6 +66,8 @@ function SessionRow({
   calendar: SessionCalendarLinks | null;
   durationMinutes: number;
   readOnly: boolean;
+  /** A live tem limite de vagas: so quem garantiu entra (A12). */
+  seatRequired: boolean;
   serverNow: number;
   session: StudentSessionView;
   slug: string;
@@ -73,6 +76,8 @@ function SessionRow({
 }) {
   const copy = WEBINAR_COPY.aluno;
   const inProgress = session.phase === "waiting" || session.phase === "live";
+  // Com limite de vagas so quem garantiu entra (A12): sem a vaga, a sessao aberta mostra Garantir vaga e depois Entrar.
+  const seatMissing = inProgress && !readOnly && session.kind !== "live" && seatRequired && !session.registered;
 
   return (
     <MemberSurface as="li" padding="sm">
@@ -95,12 +100,13 @@ function SessionRow({
           </p>
         </div>
         <div className="shrink-0">
-          {inProgress ? (
+          {inProgress && !seatMissing ? (
             <WebinarEnterButton accessPreviewMode={accessPreviewMode} durationMinutes={durationMinutes} serverNow={serverNow} session={session} slug={slug} />
           ) : (
             <WebinarSessionActions
               calendar={calendar}
-              phase={session.phase}
+              enterHref={seatMissing ? roomHref(slug, session.id) : null}
+              phase={seatMissing ? "scheduled" : session.phase}
               readOnly={readOnly}
               registered={session.registered}
               sessionId={session.id}
@@ -171,6 +177,7 @@ function PhaseBlock({
               durationMinutes={view.durationMinutes}
               key={session.id}
               readOnly={readOnly}
+              seatRequired={view.registrationRequired && view.capacity !== null}
               serverNow={serverNow}
               session={session}
               slug={view.slug}
