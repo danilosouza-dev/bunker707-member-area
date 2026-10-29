@@ -168,6 +168,8 @@ export type SessionInsertRow = {
   kind: string;
   late_join_minutes?: number | null;
   recording_id?: string | null;
+  /** Fase 3: a sala do Jitsi proprio, so na sessao `live` (gerada ao publicar, jitsi-token.newRoomName). */
+  room_name?: string | null;
   scheduled_at: string;
   source_session_id?: string | null;
   status?: string;

@@ -12,11 +12,15 @@ import {
   limparConfiguracoesDeTeste,
   limparFotoDoPerfil,
   limparProgresso,
-  limparSessoesDeTv
+  limparSessoesDeTv,
+  ambienteDaSalaAoVivo as ambienteDaSalaAoVivoDaEscola,
+  LIVE_AO_VIVO_DE_TESTE as LIVE_AO_VIVO_DA_ESCOLA,
+  seedLiveAoVivoDeTeste as seedLiveAoVivoDaEscola
 } from "../fixtures/escola-de-teste.mjs";
 import { templateMediaUse } from "../../src/server/communications/media-refs";
 import { storedPopupDesignAssetPaths } from "../../src/server/communications/popup-design-router";
 import { templateDesignModeOf, type TemplatePayload } from "../../src/server/communications/template-model";
+import { recorderHeaders } from "../../src/server/webinars/recorder-signature";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
@@ -1633,4 +1637,392 @@ export async function segurarResumoDoSino(page: Page) {
   });
 
   return { soltar };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios, fase 3 (docs/30 §1.3, §1.4, §5.3, §6.3, §6.7 e §10.1): a sala ao vivo com o Jitsi de mentira
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Os valores de teste da sala ao vivo (tests/fixtures/escola-de-teste.mjs). */
+export type AmbienteDaSalaAoVivo = {
+  WEBINAR_JWT_APP_ID: string;
+  WEBINAR_JWT_SECRET: string;
+  WEBINAR_MEET_DOMAIN: string;
+  WEBINAR_RECORDER_DISPATCH: string;
+  WEBINAR_RECORDER_WEBHOOK_SECRET: string;
+};
+
+export type LiveAoVivoDeTeste = {
+  coApresentador: "professor";
+  descricao: string;
+  equipe: "analista";
+  id: string;
+  roomName: string;
+  sessaoId: string;
+  slug: string;
+  titulo: string;
+};
+
+// A Live ao vivo de teste e o ambiente da sala vem de escola-de-teste.mjs (tipos em escola-de-teste.d.mts).
+export const LIVE_AO_VIVO_DE_TESTE: LiveAoVivoDeTeste = LIVE_AO_VIVO_DA_ESCOLA;
+export const seedLiveAoVivoDeTeste = seedLiveAoVivoDaEscola;
+
+/**
+ * Os valores da sala ao vivo que valem para o app de teste: o servidor do e2e (tests/support/e2e-server.mjs) preenche
+ * as chaves vazias com estes mesmos valores antes do build, e este processo faz igual, para assinar o webhook do
+ * gravador e conferir o token com o segredo que o app usa.
+ */
+export function ambienteDaSalaAoVivo(): AmbienteDaSalaAoVivo {
+  return ambienteDaSalaAoVivoDaEscola(process.env);
+}
+
+export type ComandoDaSalaFalsa = { args: unknown[]; comando: string };
+
+/** O que a pagina passou ao construtor do JitsiMeetExternalAPI na montagem mais nova (ainda nao descartada). */
+export type MontagemDaSalaFalsa = {
+  configOverwrite: Record<string, unknown>;
+  dominio: string;
+  interfaceConfigOverwrite: Record<string, unknown>;
+  jwt: string | null;
+  /** O iframe que getIFrame() devolve esta dentro do parentNode passado (o palco). */
+  noPalco: boolean;
+  roomName: string | null;
+  /** O `title` e o `allow` que a pagina pos no iframe. */
+  tituloDoIframe: string | null;
+  allowDoIframe: string | null;
+};
+
+export type SalaFalsaDoJitsi = {
+  /** Os comandos (executeCommand) recebidos pela montagem mais nova, na ordem. */
+  comandos(): Promise<ComandoDaSalaFalsa[]>;
+  /** Dispara um sinal do IFrame API para os ouvintes da montagem mais nova. */
+  disparar(evento: string, payload?: Record<string, unknown>): Promise<void>;
+  /** Espera um comando com este nome a partir da posicao `depoisDe` (o tamanho da lista antes do clique). */
+  esperarComando(comando: string, opcoes?: { depoisDe?: number; timeout?: number }): Promise<ComandoDaSalaFalsa>;
+  /** Espera a pagina construir a sala e devolve o que ela passou. */
+  esperarMontada(opcoes?: { timeout?: number }): Promise<MontagemDaSalaFalsa>;
+  /** Quantas vezes a pagina construiu a sala (troca de token nao remonta). */
+  montagens(): Promise<number>;
+  /** Quantas vezes o navegador pediu o external_api.js. */
+  pedidosDoScript(): number;
+};
+
+type EstadoDaSalaFalsa = {
+  disparar(evento: string, payload: Record<string, unknown>): void;
+  montagens: {
+    allowDoIframe: string | null;
+    comandos: ComandoDaSalaFalsa[];
+    configOverwrite: Record<string, unknown>;
+    descartada: boolean;
+    dominio: string;
+    interfaceConfigOverwrite: Record<string, unknown>;
+    jwt: string | null;
+    noPalco: boolean;
+    roomName: string | null;
+    tituloDoIframe: string | null;
+  }[];
+};
+
+/**
+ * O external_api.js de mentira (docs/30 §10.1): define window.JitsiMeetExternalAPI com o construtor
+ * (dominio, { roomName, jwt, configOverwrite, interfaceConfigOverwrite, parentNode, width, height }) que guarda o que
+ * recebeu, poe um iframe vazio no parentNode (o getIFrame) e implementa addListener / removeListener (e on / off),
+ * executeCommand (anotado), getParticipantsInfo, isAudioMuted / isVideoMuted e dispose. window.__salaFalsa.disparar
+ * manda um sinal aos ouvintes da montagem mais nova. Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
+ * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
+ * proprio participante e hangup responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao
+ * ligou, alguem bateu na sala de espera) o teste dispara.
+ */
+function scriptDaSalaFalsa(ecoar: boolean) {
+  return `(() => {
+  const ECOAR = ${JSON.stringify(ecoar)};
+  const sala = (window.__salaFalsa = window.__salaFalsa || { montagens: [] });
+  const copia = (valor) => JSON.parse(JSON.stringify(valor === undefined ? null : valor));
+  const vivas = () => sala.montagens.filter((montagem) => !montagem.descartada);
+
+  function JitsiMeetExternalAPI(dominio, opcoes) {
+    if (!(this instanceof JitsiMeetExternalAPI)) {
+      throw new TypeError("JitsiMeetExternalAPI precisa de new");
+    }
+    const config = opcoes || {};
+    const ouvintes = new Map();
+    const pai = config.parentNode && config.parentNode.appendChild ? config.parentNode : document.body;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("data-sala-falsa", "");
+    pai.appendChild(iframe);
+    const estado = { audioMudo: true, maoLevantada: false, participantes: [], proprioId: null, videoMudo: true };
+    const montagem = {
+      allowDoIframe: null,
+      comandos: [],
+      configOverwrite: copia(config.configOverwrite || {}),
+      descartada: false,
+      dominio: String(dominio),
+      interfaceConfigOverwrite: copia(config.interfaceConfigOverwrite || {}),
+      jwt: typeof config.jwt === "string" ? config.jwt : null,
+      noPalco: pai !== document.body,
+      roomName: typeof config.roomName === "string" ? config.roomName : null,
+      tituloDoIframe: null
+    };
+    Object.defineProperty(montagem, "estado", { enumerable: false, value: estado });
+    Object.defineProperty(montagem, "emitir", {
+      enumerable: false,
+      value: (evento, payload) => {
+        if (montagem.descartada) {
+          return;
+        }
+        for (const ouvinte of Array.from(ouvintes.get(evento) || [])) {
+          try {
+            ouvinte(payload);
+          } catch (erro) {
+            console.error(erro);
+          }
+        }
+      }
+    });
+    Object.defineProperty(montagem, "iframe", { enumerable: false, value: iframe });
+    sala.montagens.push(montagem);
+
+    this.addListener = (evento, ouvinte) => {
+      if (!ouvintes.has(evento)) {
+        ouvintes.set(evento, new Set());
+      }
+      ouvintes.get(evento).add(ouvinte);
+      return this;
+    };
+    this.on = this.addListener;
+    this.removeListener = (evento, ouvinte) => {
+      if (ouvintes.has(evento)) {
+        ouvintes.get(evento).delete(ouvinte);
+      }
+      return this;
+    };
+    this.off = this.removeListener;
+    this.executeCommand = (comando, ...args) => {
+      montagem.comandos.push({ args: copia(args), comando: String(comando) });
+      if (!ECOAR) {
+        return;
+      }
+      setTimeout(() => {
+        if (comando === "toggleVideo") {
+          estado.videoMudo = !estado.videoMudo;
+          montagem.emitir("videoMuteStatusChanged", { muted: estado.videoMudo });
+        } else if (comando === "toggleAudio") {
+          estado.audioMudo = !estado.audioMudo;
+          montagem.emitir("audioMuteStatusChanged", { muted: estado.audioMudo });
+        } else if (comando === "toggleRaiseHand") {
+          estado.maoLevantada = !estado.maoLevantada;
+          montagem.emitir("raiseHandUpdated", { handRaised: estado.maoLevantada ? Date.now() : 0, id: estado.proprioId });
+        } else if (comando === "hangup") {
+          montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
+        }
+      }, 0);
+    };
+    this.getIFrame = () => iframe;
+    this.getParticipantsInfo = () => estado.participantes.map((pessoa) => ({ displayName: pessoa.displayName, formattedDisplayName: pessoa.displayName, participantId: pessoa.id }));
+    this.getNumberOfParticipants = () => estado.participantes.length + 1;
+    this.isAudioMuted = () => Promise.resolve(estado.audioMudo);
+    this.isVideoMuted = () => Promise.resolve(estado.videoMudo);
+    this.dispose = () => {
+      montagem.descartada = true;
+      ouvintes.clear();
+      iframe.remove();
+    };
+  }
+
+  window.JitsiMeetExternalAPI = JitsiMeetExternalAPI;
+  sala.disparar = (evento, payload) => {
+    const atual = vivas().pop();
+    if (!atual) {
+      throw new Error("Nenhuma sala montada para receber " + evento);
+    }
+    const dados = payload || {};
+    const estado = atual.estado;
+    if (evento === "videoConferenceJoined" && typeof dados.id === "string") {
+      estado.proprioId = dados.id;
+    } else if (evento === "participantJoined" && typeof dados.id === "string") {
+      estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id).concat({ displayName: dados.displayName || "", id: dados.id });
+    } else if (evento === "participantLeft" && typeof dados.id === "string") {
+      estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
+    } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
+      estado.videoMudo = dados.muted;
+    } else if (evento === "audioMuteStatusChanged" && typeof dados.muted === "boolean") {
+      estado.audioMudo = dados.muted;
+    }
+    atual.emitir(evento, dados);
+  };
+})();
+`;
+}
+
+/**
+ * Serve o external_api.js de mentira no endereco real do Jitsi proprio (https://<dominio>/external_api.js; o resto do
+ * dominio responde 404 e nada sai da maquina: page.route vence o corte de rede do contexto, como na paginaFalsaDoVimeo)
+ * e devolve os comandos para o teste conduzir a sala. Chame antes de abrir a pagina.
+ */
+export async function salaFalsaDoJitsi(page: Page, opcoes: { domain?: string; ecoar?: boolean } = {}): Promise<SalaFalsaDoJitsi> {
+  const dominio = opcoes.domain ?? ambienteDaSalaAoVivo().WEBINAR_MEET_DOMAIN;
+  const script = scriptDaSalaFalsa(opcoes.ecoar ?? true);
+  let pedidos = 0;
+
+  await page.route(`https://${dominio}/**`, (route) => {
+    if (new URL(route.request().url()).pathname === "/external_api.js") {
+      pedidos += 1;
+      return route.fulfill({ body: script, contentType: "text/javascript; charset=utf-8", status: 200 });
+    }
+
+    return route.fulfill({ body: "", status: 404 });
+  });
+
+  const lerComandos = () =>
+    page.evaluate(() => {
+      const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+      const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop();
+      return atual ? atual.comandos : [];
+    });
+
+  const lerMontagem = () =>
+    page.evaluate(() => {
+      const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+      const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop() as (EstadoDaSalaFalsa["montagens"][number] & { iframe?: HTMLIFrameElement }) | undefined;
+
+      if (!atual) {
+        return null;
+      }
+
+      return {
+        allowDoIframe: atual.iframe?.getAttribute("allow") ?? null,
+        configOverwrite: atual.configOverwrite,
+        dominio: atual.dominio,
+        interfaceConfigOverwrite: atual.interfaceConfigOverwrite,
+        jwt: atual.jwt,
+        noPalco: atual.noPalco,
+        roomName: atual.roomName,
+        tituloDoIframe: atual.iframe?.getAttribute("title") ?? null
+      };
+    });
+
+  return {
+    comandos: lerComandos,
+    async disparar(evento, payload = {}) {
+      await page.evaluate(
+        ([nome, dados]) => {
+          const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+
+          if (!sala) {
+            throw new Error("A sala falsa nao foi carregada.");
+          }
+
+          sala.disparar(nome, dados);
+        },
+        [evento, payload] as const
+      );
+    },
+    async esperarComando(comando, { depoisDe = 0, timeout = 15_000 } = {}) {
+      let achado: ComandoDaSalaFalsa | undefined;
+
+      await expect
+        .poll(
+          async () => {
+            achado = (await lerComandos()).slice(depoisDe).find((item) => item.comando === comando);
+            return Boolean(achado);
+          },
+          { message: `a sala falsa nao recebeu ${comando}`, timeout }
+        )
+        .toBe(true);
+
+      return achado as ComandoDaSalaFalsa;
+    },
+    async esperarMontada({ timeout = 20_000 } = {}) {
+      let montagem: MontagemDaSalaFalsa | null = null;
+
+      await expect
+        .poll(
+          async () => {
+            montagem = await lerMontagem();
+            return montagem !== null;
+          },
+          { message: "a pagina nao construiu a sala", timeout }
+        )
+        .toBe(true);
+
+      return montagem as unknown as MontagemDaSalaFalsa;
+    },
+    montagens: () => page.evaluate(() => (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa?.montagens.length ?? 0),
+    pedidosDoScript: () => pedidos
+  };
+}
+
+/**
+ * Chama o webhook do gravador do app de teste (POST /api/webhooks/recorder) como a maquina do Jibri e o workflow fazem
+ * (docs/30 §5.3): o corpo JSON assinado com o segredo de teste (recorderHeaders: HMAC de "carimbo.corpo").
+ */
+export async function chamarWebhookDoGravador(corpo: Record<string, unknown>) {
+  const bruto = JSON.stringify(corpo);
+  const resposta = await fetch(`${enderecoDoApp}/api/webhooks/recorder`, {
+    body: bruto,
+    headers: recorderHeaders(ambienteDaSalaAoVivo().WEBINAR_RECORDER_WEBHOOK_SECRET, bruto, Date.now()),
+    method: "POST"
+  });
+
+  return { corpo: (await resposta.json().catch(() => null)) as Record<string, unknown> | null, status: resposta.status };
+}
+
+export type SessaoAoVivoNoBanco = {
+  recorder_requested_at: string | null;
+  recorder_status: string;
+  recording_anchor_at: string | null;
+  recording_requested_at: string | null;
+  room_locked: boolean;
+  room_name: string | null;
+  started_at: string | null;
+  status: string;
+};
+
+/** A sessao da Live ao vivo de teste como o banco guarda (situacao, sala, gravador, ancora). */
+export async function sessaoAoVivoNoBanco(): Promise<SessaoAoVivoNoBanco> {
+  const db = createLocalAdminClient();
+
+  return unwrap(
+    await db
+      .from("webinar_sessions")
+      .select("status, started_at, room_name, room_locked, recorder_status, recorder_requested_at, recording_requested_at, recording_anchor_at")
+      .eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId)
+      .single(),
+    "Lendo a sessao da live ao vivo de teste"
+  ) as SessaoAoVivoNoBanco;
+}
+
+/** Os registros da conta na sessao da Live ao vivo de teste (student_events, entity_type webinar), na ordem. */
+export async function eventosDaLiveAoVivo(chave: ChaveDaConta = "aluna"): Promise<{ event_type: string; metadata: Record<string, unknown> }[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("event_type, metadata")
+      .eq("entity_type", "webinar")
+      .eq("entity_id", LIVE_AO_VIVO_DE_TESTE.sessaoId)
+      .eq("user_id", conta.id)
+      .order("created_at", { ascending: true }),
+    "Lendo o historico da live ao vivo de teste"
+  ) as { event_type: string; metadata: Record<string, unknown> }[];
+}
+
+/** Apaga o historico (student_events de webinario) das contas de teste: cada arquivo da live comeca do zero. */
+export async function zerarHistoricoDeWebinarios() {
+  const db = createLocalAdminClient();
+  const contas = (await contasDeTeste(db)) as Record<ChaveDaConta, ContaDeTeste>;
+
+  unwrap(
+    await db
+      .from("student_events")
+      .delete()
+      .eq("entity_type", "webinar")
+      .in(
+        "user_id",
+        Object.values(contas).map((conta) => conta.id)
+      ),
+    "Apagando o historico de webinario das contas de teste"
+  );
 }

@@ -128,7 +128,8 @@ services:
       meet.jitsi:
 
   # Sinalizacao (XMPP). Quem entra: so com JWT do nosso app (AUTH_TYPE=jwt, ENABLE_GUESTS=0); o host vira
-  # moderador pelo token (XMPP_MUC_MODULES=token_affiliation, a copia versionada em prosody/plugins). A porta
+  # moderador pelo token (XMPP_MUC_MODULES=token_affiliation, a copia versionada em prosody/plugins) e quem a equipe
+  # removeu ou baniu nao volta com o token antigo (bunker_room_guard, nosso, tambem em prosody/plugins). A porta
   # 5222 sai do servidor so para o Jibri da vez (firewall da Hetzner); o navegador fala por websocket pelo web.
   prosody:
     container_name: bunker707-meet-prosody
@@ -157,7 +158,9 @@ services:
       JWT_ACCEPTED_ISSUERS: "${JWT_ACCEPTED_ISSUERS:-bunker707}"
       JWT_ACCEPTED_AUDIENCES: "${JWT_ACCEPTED_AUDIENCES:-bunker707}"
       JWT_ALLOW_EMPTY: "0"
-      XMPP_MUC_MODULES: "${XMPP_MUC_MODULES:-token_affiliation}"
+      XMPP_MUC_MODULES: "${XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard}"
+      # A lista de removidos e banidos que o mod_bunker_room_guard busca no app (docs/30 §8.1); vazio, so o token curto.
+      ROOM_GUARD_URL: "${ROOM_GUARD_URL:-}"
       ENABLE_LOBBY: "${ENABLE_LOBBY:-1}"
       ENABLE_AV_MODERATION: "1"
       ENABLE_END_CONFERENCE: "1"

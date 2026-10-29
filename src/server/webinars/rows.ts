@@ -3,6 +3,7 @@
 // store.ts/queries.ts; aqui so a forma das linhas e os mapeadores, para admin, aluno e tick lerem igual.
 
 import { normalizeAudience, type AudienceDefinition } from "../communications/audience-model";
+import { RECORDER_STATUSES, type RecorderStatus } from "./recorder-model";
 import {
   ACCESS_MODES,
   CHAT_MODES,
@@ -80,7 +81,7 @@ export type WebinarRow = {
 };
 
 export const SESSION_COLUMNS =
-  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, show_live_badge, simulation_decided_by, simulation_decided_at, simulation_ack_text, presence_curve, script_fired_at, pinned_message_id, created_at, updated_at";
+  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, show_live_badge, simulation_decided_by, simulation_decided_at, simulation_ack_text, presence_curve, script_fired_at, pinned_message_id, room_name, recorder_status, recorder_requested_at, recorder_release_requested_at, recorder_alerted_at, recording_requested_at, room_locked, browser_recording_at, created_at, updated_at";
 
 export type SessionRow = {
   chat_mode: string;
@@ -94,6 +95,16 @@ export type SessionRow = {
   presence_curve: unknown;
   recording_anchor_at: string | null;
   recording_id: string | null;
+  /* Fase 3 (202610290002): opcionais aqui para os dubles de banco das fases 1 e 2; o banco sempre devolve. */
+  recorder_alerted_at?: string | null;
+  recorder_release_requested_at?: string | null;
+  recorder_requested_at?: string | null;
+  recorder_status?: string | null;
+  recording_requested_at?: string | null;
+  room_locked?: boolean | null;
+  room_name?: string | null;
+  /* 202610290003: a reserva Gravar no navegador ligada (o selo Gravando do aluno). */
+  browser_recording_at?: string | null;
   scheduled_at: string;
   script_fired_at: string | null;
   show_live_badge: boolean;
@@ -141,12 +152,14 @@ export type RegistrationRow = {
 };
 
 export const RECORDING_COLUMNS =
-  "id, webinar_id, session_id, provider, bunny_library_id, bunny_video_id, embed_url, duration_seconds, status, source, file_name, anchor_offset_ms, size_bytes, sha256, error_message, purge_due_at, created_at, updated_at";
+  "id, webinar_id, session_id, provider, bunny_library_id, bunny_video_id, embed_url, duration_seconds, status, source, file_name, anchor_offset_ms, size_bytes, sha256, error_message, purge_due_at, checked_at, purged_at, created_at, updated_at";
 
 export type RecordingRow = {
   anchor_offset_ms: number;
   bunny_library_id: string | null;
   bunny_video_id: string | null;
+  /* Fase 3 (202610290002): a ultima consulta a Bunny e o apagamento pela retencao. */
+  checked_at?: string | null;
   created_at: string;
   duration_seconds: number | null;
   embed_url: string | null;
@@ -155,6 +168,7 @@ export type RecordingRow = {
   id: string;
   provider: string;
   purge_due_at: string | null;
+  purged_at?: string | null;
   session_id: string | null;
   sha256: string | null;
   size_bytes: number | null;
@@ -301,6 +315,7 @@ export function webinarFromRow(row: WebinarRow, presenters: readonly PresenterRo
 
 export function sessionFromRow(row: SessionRow): WebinarSession {
   return {
+    browserRecordingAt: row.browser_recording_at ?? null,
     chatMode: oneOf<ChatMode>(CHAT_MODES, row.chat_mode, "open"),
     chatSlowModeSeconds: (SLOW_MODE_SECONDS as readonly number[]).includes(row.chat_slow_mode_seconds as number) ? (row.chat_slow_mode_seconds as SlowModeSeconds) : null,
     createdAt: row.created_at,
@@ -312,6 +327,13 @@ export function sessionFromRow(row: SessionRow): WebinarSession {
     presenceCurve: presenceSummaryOf(row.presence_curve),
     recordingAnchorAt: row.recording_anchor_at,
     recordingId: row.recording_id,
+    recorderAlertedAt: row.recorder_alerted_at ?? null,
+    recorderReleaseRequestedAt: row.recorder_release_requested_at ?? null,
+    recorderRequestedAt: row.recorder_requested_at ?? null,
+    recorderStatus: recorderStatusOf(row.recorder_status),
+    recordingRequestedAt: row.recording_requested_at ?? null,
+    roomLocked: row.room_locked === true,
+    roomName: row.room_name ?? null,
     scheduledAt: row.scheduled_at,
     scriptFiredAt: row.script_fired_at ?? null,
     showLiveBadge: row.show_live_badge === true,
@@ -324,6 +346,11 @@ export function sessionFromRow(row: SessionRow): WebinarSession {
     updatedAt: row.updated_at,
     webinarId: row.webinar_id
   };
+}
+
+/** recorder_status da 202610290002; fora da lista (ou ausente, nos dubles antigos) vale "none". */
+export function recorderStatusOf(value: unknown): RecorderStatus {
+  return oneOf<RecorderStatus>(RECORDER_STATUSES, value, "none");
 }
 
 /** presence_curve congelada pela webinar_close_session (202610290001); nulo enquanto a sessao nao encerrou. */
@@ -406,3 +433,57 @@ export function webinarRowPatch(draft: WebinarDraft): Omit<WebinarRow, "cancel_r
     title: draft.title.trim()
   };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 3 (202610290002): banimentos e o webhook do gravador. O modelo (estado do aluno, regras) fica em live-model.ts;
+ * as leituras e escritas em live-store.ts.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const SESSION_BAN_COLUMNS = "session_id, user_id, kind, until_at, by_user_id, reason, created_at";
+
+/** webinar_session_bans: remover da sala (kicked, ate o fim) e silenciar no chat (muted, ate until_at ou o fim). */
+export type SessionBanRow = {
+  by_user_id: string | null;
+  created_at: string;
+  kind: "kicked" | "muted";
+  reason: string | null;
+  session_id: string;
+  until_at: string | null;
+  user_id: string;
+};
+
+export const USER_BAN_COLUMNS = "user_id, session_id, by_user_id, reason, created_at";
+
+/** webinar_user_bans: banido de todos os webinarios ate a equipe desfazer. */
+export type UserBanRow = {
+  by_user_id: string | null;
+  created_at: string;
+  reason: string | null;
+  session_id: string | null;
+  user_id: string;
+};
+
+export const RECORDING_EVENT_COLUMNS =
+  "id, session_id, state, room, file_name, machine_requested_at, payload, signature_valid, processing_status, received_at, processed_at, error_message";
+
+export const RECORDING_EVENT_STATUSES = ["pending", "processed", "ignored", "failed"] as const;
+export type RecordingEventStatus = (typeof RECORDING_EVENT_STATUSES)[number];
+
+/**
+ * webinar_recording_events: cada chamada do webhook do gravador, bruta (payload) e idempotente por sessao + estado +
+ * arquivo + maquina (machine_requested_at, 202610290003: a hora do pedido da maquina no ready / unavailable / gone).
+ */
+export type RecordingEventRow = {
+  error_message: string | null;
+  file_name: string | null;
+  id: string;
+  machine_requested_at?: string | null;
+  payload: Record<string, unknown>;
+  processed_at: string | null;
+  processing_status: RecordingEventStatus;
+  received_at: string;
+  room: string | null;
+  session_id: string | null;
+  signature_valid: boolean;
+  state: string;
+};

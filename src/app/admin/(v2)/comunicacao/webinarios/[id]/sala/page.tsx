@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { SessionConsole } from "@/components/admin/v2/communication/webinars/session-console/session-console";
 import { AdminPage } from "@/components/admin/v2/page-container";
@@ -11,7 +12,7 @@ import { getSessionConsoleData } from "@/server/webinars/console-queries";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_SESSION_PARAM, webinarAdminHref } from "@/server/webinars/editor-model";
 
-// Abrir, encerrar e soltar o roteiro rodam Server Actions desta rota.
+// Abrir, encerrar, soltar o roteiro e as acoes da sala ao vivo rodam Server Actions desta rota.
 export const maxDuration = 60;
 
 export const metadata: Metadata = {
@@ -29,11 +30,14 @@ function firstParam(value: string | string[] | undefined) {
   return text?.trim() || null;
 }
 
-// Comunicação › Webinários › um webinário › Console (docs/30 §2.4): a mesa da equipe durante a sessao, com o
+// Comunicacao › Webinarios › um webinario › Console (docs/30 §2.4): a mesa da equipe durante a sessao, com o
 // seletor de sessoes (?sessao=), o relogio, os presentes, o chat com a moderacao, o roteiro com "Soltar agora", as
-// enquetes e as perguntas. So quem cria avisos (messaging.write) entra; abrir e encerrar pedem messaging.publish.
+// enquetes e as perguntas. So quem cria avisos (messaging.write) entra; abrir e encerrar pedem messaging.publish. Na
+// Live ao vivo (fase 3) a mesa ganha a sala no meio: o external_api.js do Jitsi proprio entra por um <script> com o
+// nonce desta pagina (cabecalho x-nonce do src/proxy.ts; a CSP com 'strict-dynamic' aceita sem origem nova), e o
+// next.config.ts libera camera, microfone e tela para o Jitsi proprio nesta rota.
 export default async function AdminWebinarConsolePage({ params, searchParams }: PageProps) {
-  const [{ access, user }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
+  const [{ access, user }, { id }, query, requestHeaders] = await Promise.all([requirePageArea("comunicacao"), params, searchParams, headers()]);
 
   if (!can(access, "messaging.write")) {
     redirect(WEBINARS_HREF);
@@ -64,6 +68,7 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
       currentUserId={user.id}
       data={loaded.data}
       key={loaded.data.snapshot?.session.id ?? "sem-sessao"}
+      nonce={requestHeaders.get("x-nonce")}
       permissions={{ canPublish: can(access, "messaging.publish"), canWrite: true }}
       serverNow={now.getTime()}
     />

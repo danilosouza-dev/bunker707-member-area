@@ -10,7 +10,7 @@ import { cancelWebinar, deleteWebinar, duplicateWebinar } from "@/server/webinar
 import {
   WEBINAR_ACTION_TOASTS,
   WEBINAR_ADMIN_COPY,
-  WEBINAR_LINK_ACTIONS,
+  webinarActionBlockedReason,
   webinarActionConfirm,
   webinarActionHref,
   webinarActionNeedsConfirm,
@@ -20,7 +20,7 @@ import {
   type WebinarConfirmableAction,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
-import { WEBINAR_LIMITS, type WebinarSituation, type WebinarStatus } from "@/server/webinars/model";
+import { WEBINAR_LIMITS, type WebinarKind, type WebinarSituation, type WebinarStatus } from "@/server/webinars/model";
 import { endSessionNow } from "@/server/webinars/room-actions";
 import { ErrorBanner } from "../../error-banner";
 import { adminTextareaClass } from "../../form";
@@ -32,11 +32,15 @@ import { adminToast } from "../../toast";
 // live pedem confirmacao (ConfirmDialog, nunca window.confirm; Cancelar com o motivo e o numero de alunos com
 // vaga), sucesso vira toast e erro fica num banner na tela. Cada acao leva a versao lida (updatedAt): se o
 // webinario mudou em outra tela, volta 409 e o banner oferece "Recarregar". Abrir o console e Ver relatório so
-// navegam (fase 2b); o que chega em outra fase (Abrir a sala, Publicar replay) aparece desligado com "em breve"
-// (docs/30 §2.8).
+// navegam (fase 2b); na fase 3 Abrir a sala tambem leva ao console, e na Live ao vivo o Encerrar live idem (a acao
+// mora la: o navegador do apresentador para a gravacao e desliga a sala). Sem messaging.publish, Abrir a sala e o
+// Encerrar live da Live ao vivo aparecem desligados com "· só quem publica" (§2.6); o que chega em outra fase
+// (Publicar replay) aparece desligado com "em breve" (docs/30 §2.8).
 
 export type WebinarActionTarget = {
   id: string;
+  /** O tipo decide o Encerrar live: link para o console na Live ao vivo, confirmacao na Live gravada. */
+  kind: WebinarKind;
   registeredCount: number;
   /** A sessao no ar ou na espera (Encerrar live); nula fora disso. */
   runningSessionId: string | null;
@@ -169,12 +173,19 @@ export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsO
   }
 
   function request(action: WebinarAction, target: WebinarActionTarget) {
-    if (WEBINAR_LINK_ACTIONS.includes(action)) {
-      router.push(webinarActionHref(action, target.id) ?? webinarAdminHref(target.id));
+    // Desligado por permissao: o item nao reage (o servidor recusaria de novo).
+    if (webinarActionBlockedReason(action, permissions, target.kind)) {
       return;
     }
 
-    if (webinarActionNeedsConfirm(action)) {
+    const href = webinarActionHref(action, target.id, target.kind);
+
+    if (href) {
+      router.push(href);
+      return;
+    }
+
+    if (webinarActionNeedsConfirm(action, target.kind)) {
       setFailure(null);
       setReason("");
       setConfirming({ action: action as WebinarConfirmableAction, target });
@@ -264,15 +275,15 @@ type WebinarRowMenuProps = {
 
 /** Menu "…" de um webinario. Sem nenhuma acao disponivel, nao aparece. */
 export function WebinarRowMenu({ exclude, onRequest, permissions, webinar }: WebinarRowMenuProps) {
-  const entries = webinarMenuEntries(webinar.situation, permissions, exclude);
+  const entries = webinarMenuEntries(webinar.situation, permissions, exclude, webinar.kind);
 
   return (
     <RowMenu
       actions={entries.map((entry) => ({
         destructive: entry.destructive,
-        disabled: entry.soon,
+        disabled: entry.soon || entry.blocked !== null,
         icon: <WebinarActionIcon action={entry.action} />,
-        label: entry.soon ? `${entry.label} · ${WEBINAR_ADMIN_COPY.emBreve}` : entry.label,
+        label: entry.display,
         onSelect: () => onRequest(entry.action, webinar),
         separated: entry.separated
       }))}

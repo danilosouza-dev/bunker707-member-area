@@ -120,3 +120,22 @@ export const alignChatSchema = z.object({
   anchorOffsetMs: z.number().int().min(-3_600_000).max(3_600_000),
   recordingId: uuidSchema
 });
+
+/** Banir: o aluno nao entra em nenhum webinario ate a equipe desfazer (webinar_user_bans; messaging.publish). */
+export const banUserSchema = z.object({
+  reason: z.string().trim().max(200, LIVE_MESSAGES.reason).optional(),
+  sessionId: sessionIdSchema,
+  userId: uuidSchema
+});
+
+/** Desfazer o banimento (apaga a linha de webinar_user_bans; messaging.publish). */
+export const unbanUserSchema = z.object({ reason: z.string().trim().max(200, LIVE_MESSAGES.reason).optional(), userId: uuidSchema });
+
+/** Trancar / destrancar a sala (webinar_sessions.room_locked; o navegador do apresentador chama toggleLobby). */
+export const roomLockSchema = z.object({ locked: z.boolean(), sessionId: sessionIdSchema });
+
+/** A reserva "Gravar no navegador" ligou ou desligou (o selo Gravando do aluno). */
+export const browserRecordingSchema = z.object({ on: z.boolean(), sessionId: sessionIdSchema });
+
+/** Devolver a maquina do gravador (jibri-down); `force` so com a confirmacao do produtor (FORCAR=1 no workflow). */
+export const releaseRecorderSchema = z.object({ force: z.boolean().optional(), sessionId: sessionIdSchema });

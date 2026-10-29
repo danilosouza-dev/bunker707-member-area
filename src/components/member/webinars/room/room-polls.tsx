@@ -10,7 +10,8 @@ import { getPolls, postPollAnswer, type StudentPoll } from "./room-api";
 
 // As enquetes da Sala (docs/30 §1.3 e §9): a aberta aparece na aba (e como um card por cima do chat), resposta
 // unica ou multipla num fieldset com legend, Enviar, depois "Resposta enviada"; o resultado so quando a equipe
-// compartilhou (barras, anunciadas uma vez); encerrada com o selo. Le ao abrir e a cada 15 s enquanto aberta.
+// compartilhou (barras, anunciadas uma vez); encerrada com o selo. Le ao abrir e a cada 15 s enquanto aberta. Na live
+// (fase 3) a resposta recusada (409 banned) e contada a sala (`onRefused`).
 
 const REFRESH_MS = 15_000;
 
@@ -102,7 +103,24 @@ export function RoomPollCard({ onAnswer, poll, readOnly }: { onAnswer: (poll: St
   );
 }
 
-export function RoomPollsTab({ enabled, getOffsetMs, initial, readOnly, sessionId, webinarId }: { enabled: boolean; getOffsetMs: () => number; initial: readonly StudentPoll[]; readOnly: boolean; sessionId: string; webinarId: string }) {
+export function RoomPollsTab({
+  enabled,
+  getOffsetMs,
+  initial,
+  onRefused,
+  readOnly,
+  sessionId,
+  webinarId
+}: {
+  enabled: boolean;
+  getOffsetMs: () => number;
+  initial: readonly StudentPoll[];
+  /** Fase 3: a resposta recusada (409 banned) e contada a sala. */
+  onRefused?: (error: unknown) => void;
+  readOnly: boolean;
+  sessionId: string;
+  webinarId: string;
+}) {
   const copy = WEBINAR_COPY.sala;
   const [polls, setPolls] = useState<StudentPoll[]>([...initial]);
 
@@ -128,8 +146,13 @@ export function RoomPollsTab({ enabled, getOffsetMs, initial, readOnly, sessionI
   }, [enabled, load]);
 
   async function answer(poll: StudentPoll, optionIds: string[]) {
-    const reply = await postPollAnswer(webinarId, { offsetMs: Math.round(getOffsetMs()), optionIds, pollId: poll.id, sessionId });
-    setPolls((previous) => previous.map((item) => (item.id === poll.id ? reply.poll : item)));
+    try {
+      const reply = await postPollAnswer(webinarId, { offsetMs: Math.round(getOffsetMs()), optionIds, pollId: poll.id, sessionId });
+      setPolls((previous) => previous.map((item) => (item.id === poll.id ? reply.poll : item)));
+    } catch (failure) {
+      onRefused?.(failure);
+      throw failure;
+    }
   }
 
   return (

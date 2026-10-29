@@ -13,7 +13,9 @@ import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 // A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima so quando a equipe deixou ligada), a
 // lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
 // Dispensada, so para o autor), os filtros Todas / Respondidas e a ordem Mais votadas / Mais recentes. Le ao abrir
-// e a cada 15 s enquanto aberta. Sem o aceite do chat (D10), a primeira pergunta abre o mesmo aceite do chat.
+// e a cada 15 s enquanto aberta. Sem o aceite do chat (D10), a primeira pergunta abre o mesmo aceite do chat. Na live
+// (fase 3), o silenciado no chat tambem nao pergunta: o campo da lugar a frase (`notice`); a recusa de uma escrita (409
+// banned / muted) e contada a sala (`onRefused`), que troca pela frase de removido ou banido.
 
 const REFRESH_MS = 15_000;
 
@@ -62,7 +64,9 @@ export function RoomQuestionsTab({
   defaultDisplayMode,
   enabled,
   getOffsetMs,
+  notice = null,
   onConsented,
+  onRefused,
   readOnly,
   sessionId,
   webinarId
@@ -72,8 +76,12 @@ export function RoomQuestionsTab({
   defaultDisplayMode: DisplayNameMode;
   enabled: boolean;
   getOffsetMs: () => number;
+  /** Fase 3: a frase que toma o lugar do campo (silenciado no chat, sala que ainda nao abriu). */
+  notice?: string | null;
   /** O aceite foi gravado junto da pergunta: a sala relê a sessao para o chat saber. */
   onConsented: () => void;
+  /** Fase 3: uma escrita recusada (409 banned / muted) e contada a sala. */
+  onRefused?: (error: unknown) => void;
   readOnly: boolean;
   sessionId: string;
   webinarId: string;
@@ -130,6 +138,7 @@ export function RoomQuestionsTab({
       }
     } catch (failure) {
       setStatus(failure instanceof Error ? failure.message : copy.erroEnviar);
+      onRefused?.(failure);
     } finally {
       setSending(false);
     }
@@ -157,8 +166,9 @@ export function RoomQuestionsTab({
     try {
       const answer = await postQuestionVote(webinarId, question.id, sessionId);
       setQuestions((previous) => previous.map((item) => (item.id === question.id ? { ...item, upvotes: answer.upvotes, voted: answer.voted } : item)));
-    } catch {
+    } catch (failure) {
       setQuestions((previous) => previous.map((item) => (item.id === question.id ? question : item)));
+      onRefused?.(failure);
     }
   }
 
@@ -188,35 +198,41 @@ export function RoomQuestionsTab({
           <RoomQuestionItem key={question.id} onVote={(item) => void vote(item)} question={question} />
         ))}
       </ul>
-      {consentOpen && !consented ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
-      <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
-        <textarea
-          aria-label={copy.suaPergunta}
-          className="min-h-11 w-full resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
-          disabled={readOnly || sending}
-          maxLength={CHAT_LIMITS.question}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={copy.fazerPergunta}
-          rows={2}
-          value={draft}
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          {allowAnonymous ? (
-            <label className="inline-flex min-h-8 items-center gap-2 text-xs text-zinc-300">
-              <input checked={anonymous} className="accent-white" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
-              {copy.anonima}
-            </label>
-          ) : (
-            <span />
-          )}
-          <MemberButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
-            {copy.fazerPergunta}
-          </MemberButton>
-        </div>
-        <p aria-live="polite" className="mt-1 min-h-4 px-1 text-[11px] text-zinc-500">
-          {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : "")}
+      {consentOpen && !consented && !notice ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
+      {notice ? (
+        <p className="border-t border-white/10 bg-[#111] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-amber-100" data-testid="room-questions-notice" role="status">
+          {notice}
         </p>
-      </form>
+      ) : (
+        <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+          <textarea
+            aria-label={copy.suaPergunta}
+            className="min-h-11 w-full resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
+            disabled={readOnly || sending}
+            maxLength={CHAT_LIMITS.question}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={copy.fazerPergunta}
+            rows={2}
+            value={draft}
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {allowAnonymous ? (
+              <label className="inline-flex min-h-8 items-center gap-2 text-xs text-zinc-300">
+                <input checked={anonymous} className="accent-white" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
+                {copy.anonima}
+              </label>
+            ) : (
+              <span />
+            )}
+            <MemberButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
+              {copy.fazerPergunta}
+            </MemberButton>
+          </div>
+          <p aria-live="polite" className="mt-1 min-h-4 px-1 text-[11px] text-zinc-500">
+            {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : "")}
+          </p>
+        </form>
+      )}
     </div>
   );
 }

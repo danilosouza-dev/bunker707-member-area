@@ -1,4 +1,4 @@
-// O console da sessao e os cards da fase 2b do editor, a parte pura (docs/30 §2.2 "Roteiro de chat" e "Simulação",
+// O console da sessao e os cards da fase 2b do editor, a parte pura (docs/30 §2.2 "Roteiro de chat" e "Simulacao",
 // §2.4, §6.6 D6-c, §8.6): a fase que a equipe ve, o que pode abrir e encerrar, a fila do roteiro com o que ja
 // entrou, as contagens das enquetes, a ordem do quadro de perguntas, a sessao que o console abre por padrao e a
 // frase da decisao do selo (montada e conferida do mesmo jeito no navegador e no servidor). Sem "server-only",
@@ -20,6 +20,7 @@ import {
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
+import type { LiveConsoleSnapshot } from "./live-console-model";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -77,7 +78,7 @@ export function consolePhaseTone(phase: ConsolePhase): "error" | "muted" | "neut
   }
 }
 
-/** "Abrir sessão" so antes de ela estar no ar; "Encerrar sessão" so com ela na espera ou no ar (docs/30 §2.3). */
+/** "Abrir sessao" so antes de ela estar no ar; "Encerrar sessao" so com ela na espera ou no ar (docs/30 §2.3). */
 export function canOpenSession(status: SessionStatus): boolean {
   return status === "scheduled" || status === "waiting";
 }
@@ -291,6 +292,11 @@ export function ackSentenceMatches(input: { ackText: string | null | undefined; 
 export type ConsolePollView = Poll & { counts: PollCounts };
 
 export type ConsoleSnapshot = {
+  /**
+   * Fase 3: so na sessao `live` (gravador, gravacao, removidos/silenciados/banidos, o mapa aluno -> participante e se a
+   * sala existe neste ambiente); nulo nas outras. Nunca o nome da sala nem token: o iframe pede o join-token.
+   */
+  live: LiveConsoleSnapshot | null;
   messages: ConsoleMessage[];
   pinnedMessageId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
@@ -303,12 +309,17 @@ export type ConsoleSnapshot = {
   session: WebinarSession;
 };
 
+/** A sessao como o console recebe: sem o nome da sala (so o join-token entrega, docs/30 §8.1). */
+export function consoleSessionOf<T extends { roomName: string | null }>(session: T): T {
+  return { ...session, roomName: null };
+}
+
 /** O offset da sessao pelo relogio do console (a hora do servidor corrigida pelo skew do navegador). */
 export function consoleOffsetMs(session: Pick<WebinarSession, "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
   return sessionOffsetMs(session, deviceNowMs + skewMs);
 }
 
-/** O tempo decorrido/faltando como o topo mostra: "12:30 no ar" ou "começa em 4:10". */
+/** O tempo decorrido/faltando como o topo mostra: "12:30 no ar" ou "comeca em 4:10". */
 export function consoleClockLabel(offsetMs: number, phase: ConsolePhase): string {
   if (!Number.isFinite(offsetMs) || phase === "replay" || phase === "cancelled") {
     return "";

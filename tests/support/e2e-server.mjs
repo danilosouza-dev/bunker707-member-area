@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ambienteDaSalaAoVivo } from "../fixtures/escola-de-teste.mjs";
 import { loadEnvFile } from "./db.mjs";
 import { readLocalSupabaseConfig } from "./local-db.mjs";
 
@@ -12,21 +13,36 @@ import { readLocalSupabaseConfig } from "./local-db.mjs";
 // do navegador na hora do build. Por isso o marcador .next/e2e-build.json diz com qual Supabase o build
 // foi feito: E2E_SKIP_BUILD=1 so reaproveita o build se o marcador bater (um `npm run verify` no meio
 // refaz o .next com o .env.local, e o app de teste passaria a falar com o projeto errado).
+//
+// A sala ao vivo (docs/30 §10.1): o .env.test.local deixa WEBINAR_MEET_DOMAIN, WEBINAR_JWT_SECRET,
+// WEBINAR_RECORDER_WEBHOOK_SECRET e WEBINAR_RECORDER_DISPATCH vazios; aqui eles ganham os valores SO de teste de
+// AMBIENTE_DA_SALA_AO_VIVO_DE_TESTE (tests/fixtures/escola-de-teste.mjs) quando vazios: o hostname meet.bunker707.test
+// (o navegador recebe o external_api.js falso por page.route, salaFalsaDoJitsi), os dois segredos que os testes usam
+// para conferir o token e assinar o webhook do gravador, e o duble do pedido ao GitHub (inerte aqui: o `next start` roda
+// como producao, onde o duble nao vale, e sem GITHUB_INFRA_TOKEN nada e pedido; o teste do console poe a sessao em
+// `preparing` direto no banco). O hostname entra no build (a
+// Permissions-Policy de /webinarios e do console da sala e fixada no next.config.ts), por isso tambem vai no marcador.
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const port = process.env.E2E_PORT ?? "3100";
 const buildMarker = `${root}.next/e2e-build.json`;
 
 loadEnvFile();
+const salaAoVivo = ambienteDaSalaAoVivo(process.env);
 // Trava: nunca buildar nem subir o app de teste apontando para fora da maquina.
 const { url } = readLocalSupabaseConfig();
-console.log(`[e2e] app de teste com Supabase em ${url}, porta ${port}.`);
+console.log(`[e2e] app de teste com Supabase em ${url}, porta ${port}; sala ao vivo em ${salaAoVivo.WEBINAR_MEET_DOMAIN}.`);
 
 const nextBinary = `${root}node_modules/.bin/next`;
 
 function buildMarkerMatches() {
   try {
-    return existsSync(buildMarker) && JSON.parse(readFileSync(buildMarker, "utf8")).supabaseUrl === url;
+    if (!existsSync(buildMarker)) {
+      return false;
+    }
+
+    const marker = JSON.parse(readFileSync(buildMarker, "utf8"));
+    return marker.supabaseUrl === url && marker.meetDomain === salaAoVivo.WEBINAR_MEET_DOMAIN;
   } catch {
     return false;
   }
@@ -46,7 +62,7 @@ if (process.env.E2E_SKIP_BUILD === "1" && buildMarkerMatches()) {
     process.exit(build.status ?? 1);
   }
 
-  writeFileSync(buildMarker, `${JSON.stringify({ builtAt: new Date().toISOString(), supabaseUrl: url })}\n`);
+  writeFileSync(buildMarker, `${JSON.stringify({ builtAt: new Date().toISOString(), meetDomain: salaAoVivo.WEBINAR_MEET_DOMAIN, supabaseUrl: url })}\n`);
 }
 
 const server = spawn(nextBinary, ["start", "-p", port], { cwd: root, env: process.env, stdio: "inherit" });

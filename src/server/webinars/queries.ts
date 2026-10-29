@@ -1,7 +1,9 @@
 // Leituras do admin dos Webinarios (docs/30 §2.1 e §2.2): a lista com os numeros do periodo, os dados do editor
 // e as opcoes do editor (produtos, segmento e a equipe). Tudo pela service role (webinarsDb) com assertNoDbError,
-// para a pagina mostrar <PendingMigrationNotice migration="202610280001" /> enquanto o banco nao tem as tabelas.
-// Sao poucos webinarios: a lista filtra e pagina em memoria, como o store faz.
+// para a pagina mostrar <PendingMigrationNotice migration={WEBINARS_MIGRATION} /> enquanto o banco nao tem as
+// tabelas. Sao poucos webinarios: a lista filtra e pagina em memoria, como o store faz. Fase 3: o editor recebe a
+// sessao `live` (situacao e gravador, webinarLiveSessionOf) e as sessoes sem o nome da sala (webinarScreenSession):
+// tudo daqui vira props de componente cliente, e o `room_name` nunca sai do servidor (docs/30 §8.1).
 
 import "server-only";
 
@@ -13,7 +15,20 @@ import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { loadNoticeEditorOptions, type NoticeEditorOptions } from "@/server/communications/queries";
 import { pollFromRow, scriptItemFromRow, transcriptCuesOf } from "./chat-rows";
 import { fetchTranscriptRow, listPollRows, listScriptItemRows } from "./chat-store";
-import { WEBINARS_PAGE_SIZE, matchesWebinarSearch, webinarDraftOf, webinarKindLabel, webinarSituationLabel, webinarSituationTone, type WebinarTone } from "./editor-model";
+import {
+  WEBINARS_PAGE_SIZE,
+  matchesWebinarSearch,
+  webinarDraftOf,
+  webinarKindLabel,
+  webinarLiveSessionOf,
+  webinarPeakPresent,
+  webinarScreenSession,
+  webinarSituationLabel,
+  webinarSituationTone,
+  type WebinarLiveSessionSummary,
+  type WebinarScreenSession,
+  type WebinarTone
+} from "./editor-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
 import {
   TRANSCRIPT_FORMATS,
@@ -43,7 +58,7 @@ export type WebinarListItem = {
   id: string;
   kind: WebinarKind;
   kindLabel: string;
-  /** Presentes (pico): so a partir da fase 2 (presenca por balde). */
+  /** Presentes (pico): o maior pico das curvas congeladas no fim das sessoes (fase 2); sem sessao encerrada, nulo. */
   peakPresent: number | null;
   registeredCount: number;
   /** A sessao no ar ou na espera agora (Abrir o console e Encerrar live do menu); nula fora disso. */
@@ -153,7 +168,7 @@ function toListItem(row: WebinarRow, input: { names: Map<string, string>; now: n
     id: row.id,
     kind: webinar.kind,
     kindLabel: webinarKindLabel(webinar.kind),
-    peakPresent: null,
+    peakPresent: webinarPeakPresent(sessions),
     registeredCount: input.registered.get(row.id) ?? 0,
     runningSessionId: runningSessionOf(sessions)?.id ?? null,
     sessionsCount: sessions.filter((session) => session.kind !== "replay" && session.status !== "cancelled").length,
@@ -271,6 +286,8 @@ export type WebinarEditorData = {
   deciderNames: Record<string, string>;
   draft: WebinarDraft;
   id: string;
+  /** Fase 3: a sessao `live` da Live ao vivo (situacao e gravador, para o card Gravacao); nunca o nome da sala. */
+  liveSession: WebinarLiveSessionSummary | null;
   /** Os modelos de enquete (sem sessao); as copias lancadas ficam no console. */
   polls: Poll[];
   publishedAt: string | null;
@@ -278,10 +295,11 @@ export type WebinarEditorData = {
   recordingId: string | null;
   registeredCount: number;
   /** A sessao `replay` (livre), quando existe e nao foi fechada. */
-  replaySession: WebinarSession | null;
+  replaySession: WebinarScreenSession | null;
   runningSessionId: string | null;
   scriptItems: ScriptItem[];
-  sessions: WebinarSession[];
+  /** As sessoes como vao para a tela: `roomName` sempre nulo (webinarScreenSession). */
+  sessions: WebinarScreenSession[];
   situation: WebinarSituation;
   slug: string;
   status: WebinarStatus;
@@ -321,7 +339,8 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     listSessionRows(db, [row.id]),
     countRegistrationsByWebinar(db, [row.id])
   ]);
-  const sessions = sessionRows.map(sessionFromRow);
+  // As sessoes saem daqui ja sem o nome da sala: o editor e os cards sao componentes cliente.
+  const sessions = sessionRows.map((sessionRow) => webinarScreenSession(sessionFromRow(sessionRow)));
   const recording = baseRecordingOf(recordings);
   const webinar = webinarFromRow(row, presenters, recording);
   const simulated = webinar.kind === "simulated";
@@ -342,6 +361,7 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     deciderNames: Object.fromEntries(deciderNames),
     draft: { ...webinarDraftOf(webinar), sessions: draftSessionsOf(sessions) },
     id: webinar.id,
+    liveSession: webinar.kind === "live" ? webinarLiveSessionOf(sessions) : null,
     polls: pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options)),
     publishedAt: webinar.publishedAt,
     recordingId: recording?.id ?? null,

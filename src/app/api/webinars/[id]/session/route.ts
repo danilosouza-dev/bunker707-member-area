@@ -4,12 +4,13 @@ import { isUuid, noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { getStudentSessionPayload } from "@/server/webinars/student-queries";
 
-// A sessao do Webinario para o aluno (docs/30 §5.1, o subconjunto da fase 1): GET ?sessao= devolve
-// { serverTime, session: { id, kind, status, scheduledAt, startedAt, endedAt, lateJoinMinutes, phase },
-// webinar: { id, slug, title, kind, durationMinutes }, me: { registered, registeredAt, calendarUrl },
-// registeredCount } (o total so quando a equipe mostra; senao null). Sem ?sessao=, a sessao da Live ao vivo.
-// Sessao obrigatoria (requireApiUser, 401); fora do acesso, nao publicado ou inexistente: 404 sem dizer se
-// existe (docs/30 §8.2); sessao de outro webinario: 404.
+// A sessao do Webinario para o aluno (docs/30 §5.1, o subconjunto da fase 1): GET ?sessao= devolve { serverTime,
+// session: { id, kind, status, scheduledAt, startedAt, endedAt, lateJoinMinutes, phase }, webinar: { id, slug, title,
+// kind, durationMinutes }, me: { registered, registeredAt, calendarUrl }, registeredCount } (o total so quando a equipe
+// mostra; senao null), mais o que a Sala precisa (fase 2: relogio, entrada, video, fixada, enquetes, presentes, aceite;
+// fase 3, so na live: o bloco `live` sem o nome da sala nem o token, `me.ban` e a entrada recusada para removido e
+// banido). Sem ?sessao=, a sessao da Live ao vivo. Sessao obrigatoria (requireApiUser, 401); fora do acesso, nao
+// publicado ou inexistente: 404 sem dizer se existe (docs/30 §8.2); sessao de outro webinario: 404.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

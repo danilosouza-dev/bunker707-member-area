@@ -159,7 +159,8 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   const prosody = services.get("prosody");
   assert.match(prosody, /JWT_APP_SECRET: "\$\{JWT_APP_SECRET\}"/);
   assert.match(prosody, /JWT_ALLOW_EMPTY: "0"/);
-  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation\}"/);
+  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard\}"/, "o modulo que barra quem foi removido ou banido");
+  assert.match(prosody, /ROOM_GUARD_URL: "\$\{ROOM_GUARD_URL:-\}"/);
   assert.match(prosody, /- \.\/prosody\/plugins:\/prosody-plugins-custom:ro/, "a copia versionada do token_affiliation entra no caminho dos plugins");
   assert.match(prosody, /\/usr\/local\/bin\/healthcheck\.sh/);
   const prosodyPorts = [...prosody.matchAll(/^\s+- "([^"]+)"\s*$/gm)].map((m) => m[1]).filter((p) => /:\d+$/.test(p));
@@ -278,10 +279,23 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.deepEqual(plain(config.videoQuality.minHeightForQualityLvl), { 360: "standard", 720: "high" });
   assert.deepEqual(plain(config.videoQuality.codecPreferenceOrder), ["AV1", "VP9", "VP8"], "o custom-config completa o videoQuality gerado, nao o substitui");
   assert.deepEqual(plain(config.desktopSharingFrameRate), { min: 5, max: 30 });
-  assert.ok(Array.isArray(config.toolbarButtons) && config.toolbarButtons.includes("recording") && config.toolbarButtons.includes("raisehand"));
-  for (const button of ["chat", "polls", "reactions", "invite", "embedmeeting", "livestreaming"]) {
+  // A barra padrao e a minima (seguranca-02): quem abre a sala direto com o token nao compartilha a tela, nao grava e nao
+  // ve a lista de alunos; o host e o co-apresentador recebem a barra deles pelo configOverwrite.
+  assert.deepEqual(plain(config.toolbarButtons), ["camera", "raisehand", "fullscreen", "hangup"]);
+  for (const button of ["chat", "polls", "reactions", "invite", "embedmeeting", "livestreaming", "desktop", "recording", "security", "participants-pane"]) {
     assert.ok(!config.toolbarButtons.includes(button), `botao ${button} fora da barra padrao`);
   }
+  // O smoke.sh confere a barra servida: a ultima config.toolbarButtons do config.js sem 'desktop' (rodado de verdade num
+  // bash com o config.js gerado + o nosso no fim, e com a barra antiga do host).
+  const smokeSource = read(join(jitsiDir, "scripts", "smoke.sh"));
+  const start = smokeSource.indexOf("toolbar=$(");
+  const end = smokeSource.indexOf("done\n", start) + "done\n".length;
+  assert.ok(start > 0 && end > start, "o smoke.sh confere a barra padrao");
+  const toolbarCheck = (cfg) =>
+    spawnSync("bash", ["-c", `cfg_ok=1; falha() { echo "FALHA $*"; }\n${smokeSource.slice(start, end)}echo "cfg_ok=$cfg_ok"`], { encoding: "utf8", env: { ...process.env, cfg } }).stdout;
+  const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
+  assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
+  assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
   // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window.
   for (const source of [customConfig, customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
 });
@@ -339,6 +353,8 @@ test("generate-secrets em producao: --domain e --email obrigatorios, --jwt-secre
   assert.equal(env.get("PUBLIC_URL"), "https://meet.exemplo.com.br");
   assert.equal(env.get("MEET_SITE_ADDRESS"), "meet.exemplo.com.br");
   assert.equal(env.get("MEET_FRAME_ANCESTORS"), "https://membros.exemplo.com.br", "a area de membros e membros.<mesmo dominio> por convencao");
+  assert.equal(env.get("ROOM_GUARD_URL"), "https://membros.exemplo.com.br/api/webhooks/room-guard", "a lista de barrados do app");
+  assert.equal(env.get("XMPP_MUC_MODULES"), "token_affiliation,bunker_room_guard");
   assert.equal(env.get("ACME_EMAIL"), "equipe@exemplo.com.br");
   assert.equal(env.get("CADDY_BIND"), "0.0.0.0");
   assert.equal(env.get("CADDY_LOCAL_CERTS"), "");
@@ -350,6 +366,35 @@ test("generate-secrets em producao: --domain e --email obrigatorios, --jwt-secre
   const origin = generate(["--domain", "meet.exemplo.com.br", "--email", "equipe@exemplo.com.br", "--app-origin", "https://app.exemplo.com", "--force"]);
   assert.equal(origin.status, 0, origin.stderr);
   assert.equal(parseEnv(read(envPath)).get("MEET_FRAME_ANCESTORS"), "https://app.exemplo.com");
+  assert.equal(parseEnv(read(envPath)).get("ROOM_GUARD_URL"), "https://app.exemplo.com/api/webhooks/room-guard");
+});
+
+test("mod_bunker_room_guard: recusa na entrada (antes do token_affiliation) a conta do token removida ou banida, pela lista do app com o GET assinado pela chave derivada do JWT", async () => {
+  const plugin = read(join(jitsiDir, "prosody", "plugins", "mod_bunker_room_guard.lua"));
+  const hook = /module:hook\("muc-occupant-pre-join", function\(event\)([\s\S]*?)end, (-?[\d.]+)\);/.exec(plugin);
+  assert.ok(hook, "um gancho na entrada da sala");
+  assert.ok(Number(hook[2]) > -3.5, "antes do token_affiliation (-3.5), do lobby (-4) e do members_only (-5)");
+  assert.match(hook[1], /session\.jitsi_meet_context_user/, "pela conta do token, nunca pelo JID");
+  assert.match(hook[1], /context_user\.id/);
+  assert.match(hook[1], /jid\.node\(room\.jid\)/, "pelo nome da sala");
+  assert.match(hook[1], /banned\[user_id\] or \(in_room and in_room\[user_id\]\)/, "removido desta sala ou banido de todas");
+  assert.match(hook[1], /st\.error_reply\(stanza, "cancel", "not-allowed"/);
+  assert.match(hook[1], /return true;/, "a entrada para aqui");
+  assert.doesNotMatch(hook[1], /http\.request|async/, "o gancho nunca espera a rede: a lista ja esta na memoria");
+  assert.match(plugin, /os\.getenv\("ROOM_GUARD_URL"\)/);
+  assert.match(plugin, /os\.getenv\("JWT_APP_SECRET"\)/);
+  assert.match(plugin, /local GUARD_LABEL = "bunker707-room-guard";/);
+  assert.match(plugin, /\["X-Bunker-Signature"\] = hmac_hex\(guard_key, timestamp \.\. "\."\)/, "o HMAC de \"<timestamp>.\" (sem corpo)");
+  assert.match(plugin, /module:add_timer\(/, "a lista e buscada de tempos em tempos");
+  // A chave e a assinatura do Lua sao as mesmas que o app confere (roomGuardKey + verifyRecorderSignature).
+  const { roomGuardKey, verifyRecorderSignature, ROOM_GUARD_LABEL } = await import("../src/server/webinars/recorder-signature.ts");
+  const jwt = "j".repeat(48);
+  const chave = createHmac("sha256", jwt).update("bunker707-room-guard").digest("hex");
+  assert.equal(ROOM_GUARD_LABEL, "bunker707-room-guard");
+  assert.equal(roomGuardKey(jwt), chave);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const assinatura = createHmac("sha256", chave).update(`${ts}.`).digest("hex");
+  assert.deepEqual(verifyRecorderSignature({ body: "", now: Date.now(), secret: roomGuardKey(jwt), signature: assinatura, timestamp: ts }), { ok: true });
 });
 
 test("licenca e atribuicao ficam no repositorio, nao na tela: LICENSE-jitsi (Apache 2.0), NOTICE e a copia do mod_token_affiliation", () => {
@@ -654,6 +699,58 @@ test("recorder_request (lib.sh) assina como o app confere: HMAC-SHA256 de timest
   assert.match(jibriSource, /mask "\$webhook_secret"/);
   assert.match(jibriSource, /mask "\$bunny_key"/);
   assert.match(jibriSource, /mask "\$xmpp_pw"/);
+});
+
+test("jibri-down com a maquina ja apagada avisa o app de novo: POST assinado { sessionId: <id sem o prefixo>, state: gone } e sai com 0 (o app nao fica preso em uploaded/ready)", () => {
+  const dir = tempDir("bunker707-jibri-down-");
+  const shims = join(dir, "bin");
+  mkdirSync(shims, { recursive: true });
+  const log = join(dir, "curl.log");
+  // hcloud: so a versao fixada (sem download) e o servidor que nao existe mais.
+  writeFileSync(join(shims, "hcloud"), `#!/bin/sh\ncase "$*" in *version*) echo "hcloud 1.70.1"; exit 0 ;; *"server describe"*) exit 1 ;; esac\necho "inesperado: $*" >&2; exit 2\n`);
+  const shimJs = join(dir, "curl-shim.mjs");
+  writeFileSync(shimJs, `import fs from "node:fs";
+const args = process.argv.slice(2);
+const headers = {};
+let method = "GET", url = "", data = null, out = null;
+for (let i = 0; i < args.length; i += 1) {
+  const arg = args[i];
+  if (arg === "-X") method = args[++i];
+  else if (arg === "-H") { const [k, ...v] = args[++i].split(":"); headers[k.trim().toLowerCase()] = v.join(":").trim(); }
+  else if (arg === "--data-binary") data = args[++i];
+  else if (arg === "-o") out = args[++i];
+  else if (arg === "-w" || arg === "--max-time") i += 1;
+  else if (/^https?:/.test(arg)) url = arg;
+}
+fs.appendFileSync(process.env.CURL_SHIM_LOG, JSON.stringify({ data, headers, method, url }) + "\\n");
+if (out) fs.writeFileSync(out, "{}");
+process.stdout.write("200");
+`);
+  writeFileSync(join(shims, "curl"), `#!/bin/sh\nexec "${process.execPath}" "${shimJs}" "$@"\n`);
+  chmodSync(join(shims, "hcloud"), 0o755);
+  chmodSync(join(shims, "curl"), 0o755);
+  const sessao = "abababab-0000-4000-8000-000000000002";
+  const secret = "segredo-do-gravador-com-mais-de-32-caracteres-0001";
+  const result = run("bash", [join(cloudDir, "jibri.sh"), "down"], {
+    env: cleanEnv({
+      CONFIRMADO: "sim",
+      CURL_SHIM_LOG: log,
+      HCLOUD_TOKEN: "t".repeat(64),
+      JIBRI_SECRETS: `WEBINAR_RECORDER_WEBHOOK_SECRET=${secret}\nWEBINAR_RECORDER_WEBHOOK_URL=https://membros.exemplo.com.br/api/webhooks/recorder`,
+      PATH: `${shims}:${process.env.PATH}`,
+      SESSAO: sessao
+    })
+  });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /nao existe; nada a apagar/);
+  const calls = read(log).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(calls.length, 1, "uma chamada so: o aviso");
+  const [aviso] = calls;
+  assert.equal(aviso.method, "POST");
+  assert.equal(aviso.url, "https://membros.exemplo.com.br/api/webhooks/recorder");
+  assert.deepEqual(JSON.parse(aviso.data), { sessionId: sessao, state: "gone" }, "o id da sessao, sem o prefixo bunker707-jibri- (o schema do webhook recusaria)");
+  const ts = aviso.headers["x-bunker-timestamp"];
+  assert.equal(aviso.headers["x-bunker-signature"], createHmac("sha256", secret).update(`${ts}.${aviso.data}`).digest("hex"), "assinado como o app confere");
 });
 
 test("jibri.sh e provision-meet recusam sem CONFIRMADO=sim antes de tocar na Hetzner; SESSAO e validada; o gravador so e apagado com a gravacao na Bunny", () => {

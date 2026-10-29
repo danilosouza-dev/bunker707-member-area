@@ -4,9 +4,11 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // A sala da Live gravada, a parte pura (docs/30 §1.6, §5.1, §6.5 e §6.6): o zero do video e o offset, as fases e
 // a entrada, a janela do chat, o relogio do navegador e o alvo do player, os baldes de presenca (M1, M2), o nome
-// exibido (D10) e o endereco do player da Bunny.
+// exibido (D10) e o endereco do player da Bunny. Da sala ao vivo (fase 3, D16 e D19): os limites na memoria dos lotes
+// de sinais do iframe (6 por minuto) e da entrada do join-token (uma a cada 90 s, com a marca da presenca).
 
 const room = await import("../src/server/webinars/room-model.ts");
+const limits = await import("../src/server/webinars/room-limits.ts");
 const { ROOM_RULES } = await import("../src/server/webinars/model.ts");
 
 const T0 = Date.parse("2026-11-05T23:00:00.000Z");
@@ -149,4 +151,33 @@ test("o player da Bunny: le o embed, monta o endereco com autoplay sem som, posi
   const sentence = room.simulationAckSentence({ badgeOn: true, date: "05/11/2026", numbersSimulated: false, responsible: "Danilo" });
   assert.match(sentence, /^Decisão do produtor em 05\/11\/2026: nesta sessão gravada, dentro da área de membros, o selo "Ao vivo" fica ligado e os números de plateia são reais\./);
   assert.match(sentence, /Responsável: Danilo\.$/);
+});
+
+test("sala ao vivo: 6 lotes de sinais por minuto por aluno e sessao; uma entrada a cada 90 s; a abertura vista pela presenca vale 90 s e se consome", () => {
+  limits.resetRoomLimits();
+  for (let i = 0; i < limits.ROOM_EVENT_BATCHES_PER_MINUTE; i += 1) {
+    assert.equal(limits.takeRoomEventBatch("ana", "s1", T0 + i * 1000).ok, true, `lote ${i + 1}`);
+  }
+  const setimo = limits.takeRoomEventBatch("ana", "s1", T0 + 10_000);
+  assert.deepEqual(setimo, { ok: false, retryAfterSeconds: 50 }, "volta quando o primeiro lote sai da janela");
+  assert.equal(limits.takeRoomEventBatch("ana", "s2", T0 + 10_000).ok, true, "outra sessao, outra conta");
+  assert.equal(limits.takeRoomEventBatch("bia", "s1", T0 + 10_000).ok, true, "outro aluno, outra conta");
+  assert.equal(limits.takeRoomEventBatch("ana", "s1", T0 + 60_000).ok, true, "um minuto depois do primeiro");
+
+  assert.equal(limits.LIVE_JOIN_WINDOW_MS, ROOM_RULES.leaveAfterBuckets * ROOM_RULES.bucketSeconds * 1000);
+  assert.equal(limits.LIVE_JOIN_WINDOW_MS, 90_000);
+  assert.equal(limits.takeLiveJoinRecord("ana", "s1", T0), true, "a primeira entrada");
+  assert.equal(limits.takeLiveJoinRecord("ana", "s1", T0 + 89_000), false, "o token renovado nao e entrada");
+  assert.equal(limits.takeLiveJoinRecord("ana", "s1", T0 + 90_000), true, "depois de 90 s, sim");
+
+  limits.markLiveOpening("ana", "s1", T0);
+  assert.equal(limits.consumeLiveOpening("ana", "s1", T0 + 5000), true);
+  assert.equal(limits.consumeLiveOpening("ana", "s1", T0 + 6000), false, "consumida");
+  limits.markLiveOpening("ana", "s1", T0);
+  assert.equal(limits.consumeLiveOpening("ana", "s1", T0 + 91_000), false, "vencida");
+
+  limits.markLiveOpening("ana", "s1", T0);
+  limits.resetRoomLimits();
+  assert.equal(limits.consumeLiveOpening("ana", "s1", T0 + 1000), false, "resetRoomLimits zera tudo");
+  assert.equal(limits.takeRoomEventBatch("ana", "s1", T0 + 10_000).ok, true);
 });

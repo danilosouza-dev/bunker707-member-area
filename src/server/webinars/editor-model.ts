@@ -1,6 +1,9 @@
 // Modelo de tela do admin dos Webinarios (docs/30 §2): enderecos e filtros da lista, situacoes e botoes
-// (§2.3), os cards do editor (§2.2), o mapa dos erros do zod para os campos, a previa do card do aluno e as
-// conferencias de tela que o schema nao cobre. Modulo puro (sem React, sem "server-only", imports relativos):
+// (§2.3; na fase 3 Abrir a sala, Abrir o console e o Encerrar live da Live ao vivo levam ao console /[id]/sala, e
+// sem messaging.publish os da sala aparecem desligados com a explicacao, §2.6), os cards do editor (§2.2, com o card
+// Gravacao pela situacao do gravador), o mapa dos erros do zod para os campos, a previa do card do aluno, a sessao
+// que vai para a tela sem o nome da sala (§8.1) e as conferencias de tela que o schema nao cobre. Modulo puro (sem
+// React, sem "server-only", imports relativos):
 // tests/webinarios-admin-modelo.test.mjs e tests/webinarios-frases.test.mjs carregam direto pelo Node.
 // Todas as frases do admin que nao estao em src/lib/webinar-copy.ts ficam em WEBINAR_ADMIN_COPY, abaixo,
 // e passam pela mesma guarda (PROIBIDAS_WEBINARIO).
@@ -8,14 +11,17 @@
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { countdownLabel, formatWebinarWhen, saoPauloTime } from "../../lib/webinar-time";
 import { formatSaoPauloDateTime, saoPauloLocalToIso } from "../communications/campaign-model";
+import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatus } from "./recorder-model";
 import { webinarReportHref } from "./report-page-model";
 import {
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
   emptyWebinarDraft,
   type AccessMode,
+  type SessionStatus,
   type WebinarDraft,
   type WebinarKind,
+  type WebinarSession,
   type WebinarSituation
 } from "./model";
 import { WEBINAR_MESSAGES, publishProblems } from "./schemas";
@@ -268,7 +274,8 @@ export const WEBINAR_ADMIN_COPY = {
     allowStudentCameraHint: "Entram desligadas e o aluno liga se quiser. A câmera do aluno sai em 360p e o apresentador fecha quando quiser.",
     anonymousQuestions: "Perguntas anônimas permitidas",
     autoRecord: "Gravar automaticamente",
-    autoRecordHint: "Um servidor de gravação é criado antes da live e apagado no fim, cobrado por hora (uma live de 2 h gravada em 1080p custa cerca de EUR 0,30).",
+    autoRecordHint: `Um servidor de gravação é criado ${RECORDER_RULES.prepareLeadMinutes} min antes da live e apagado no fim, cobrado por hora (uma live de 2 h gravada em 1080p custa cerca de EUR 0,30).`,
+    autoRecordOffHint: "Desligado: ninguém cria o servidor sozinho. A equipe prepara a gravação no console, pelo botão Preparar gravação.",
     bannerSwitch: "Faixa no topo",
     bannerSwitchHint: "Ao vivo e 1 h antes para quem garantiu vaga.",
     canModerateRoom: "Pode remover e silenciar na sala",
@@ -328,13 +335,13 @@ export const WEBINAR_ADMIN_COPY = {
     qualityScreenOptions: { 15: "1080p a 15 quadros", 30: "1080p a 30 quadros" },
     qualityScreenHint: "15 quadros usa menos banda, com a mesma nitidez para texto parado.",
     qualityStage: "Câmera do palco",
-    qualityStageHint1080: "Com 1080p no palco, cada aluno recebe cerca de 5 a 8 Mbit/s.",
+    qualityStageHint1080: "Com 1080p no palco, cada aluno recebe cerca de 5 a 8 Mbit/s. Meta do servidor atual: cerca de 30 a 40 alunos com câmera.",
     qualityFixed: ["Miniaturas: até 360p (180p na fileira pequena, automático).", "Câmera dos alunos: até 360p.", "Gravação: 1080p."],
     questions: "Perguntas",
     reactions: "Reações",
-    recordingSoon: "Enviar arquivo",
+    recordingAfterPublish: "A sala e o servidor de gravação nascem ao publicar; a situação aparece aqui depois disso.",
     recordingStatus: "Situação do servidor de gravação",
-    recordingStatusNone: "Não preparado",
+    recordingUploadHint: "Reserva: a gravação do navegador do apresentador ou do OBS, enviada pelo console.",
     recordingUrl: "Vídeo da Bunny",
     recordingUrlHint: "Cole o endereço do player (embed) do vídeo na Bunny.",
     registration: "Garantir vaga",
@@ -348,9 +355,8 @@ export const WEBINAR_ADMIN_COPY = {
     replayDaysHint: "Quantos dias o card do replay fica na página inicial.",
     replayLesson: "Publicar o replay como aula",
     replayLessonModule: "Módulo",
-    replayLessonModuleHint: "O identificador do módulo do produto (a lista de módulos chega com a fase 3).",
+    replayLessonModuleHint: "O identificador do módulo do produto (a escolha pela lista de módulos chega depois).",
     replayLessonTitle: "Título da aula",
-    roomNameSoon: "A sala nasce ao publicar (fase 3).",
     scheduledAt: "Data e hora",
     sessions: "Horários marcados",
     sessionsAdd: "Adicionar sessão",
@@ -457,6 +463,8 @@ export const WEBINAR_ADMIN_COPY = {
     delete: WEBINAR_COPY.admin.excluir,
     duplicate: WEBINAR_COPY.admin.duplicar,
     end: WEBINAR_COPY.admin.encerrarLive,
+    /** O sufixo do item desligado por permissao ("Abrir a sala · só quem publica"). */
+    onlyPublishers: "só quem publica",
     open: "Abrir",
     openConsole: WEBINAR_COPY.admin.abrirConsole,
     openRoom: WEBINAR_COPY.admin.abrirSala,
@@ -464,6 +472,12 @@ export const WEBINAR_ADMIN_COPY = {
     publishReplay: "Publicar replay",
     save: WEBINAR_COPY.admin.salvar,
     viewReport: WEBINAR_COPY.admin.verRelatorio
+  },
+  /** Por que um botao da sala ao vivo esta desligado para quem so escreve na Comunicacao (docs/30 §2.6). */
+  blocked: {
+    end: "Só quem publica na Comunicação encerra a live.",
+    openRoom: "Só quem publica na Comunicação abre a sala.",
+    prepare: "Só quem publica na Comunicação prepara a gravação."
   }
 } as const;
 
@@ -704,28 +718,58 @@ export type WebinarPermissions = { canPublish: boolean; canWrite: boolean };
 
 /**
  * Acoes que chegam em outra fase: aparecem desligadas com "em breve" (docs/30 §2.8), nunca somem em silencio.
- * Fase 2b: Abrir o console, Encerrar live e Ver relatório passaram a valer; a sala ao vivo e o replay como aula
- * ficam para as fases 3 e 4.
+ * Fase 2b: Abrir o console, Encerrar live e Ver relatório passaram a valer. Fase 3: Abrir a sala leva ao console da
+ * sessao (a Sessao de pratica da Live ao vivo; na Live gravada, o console da fase 2). Fica so o replay como aula.
  */
-export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = ["open_room", "publish_replay"];
+export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = ["publish_replay"];
 
 /** Acoes que so navegam (o menu e o topo abrem outra tela em vez de chamar uma Server Action). */
-export const WEBINAR_LINK_ACTIONS: readonly WebinarAction[] = ["open", "open_console", "view_report"];
+export const WEBINAR_LINK_ACTIONS: readonly WebinarAction[] = ["open", "open_room", "open_console", "view_report"];
 
-export function webinarActionHref(action: WebinarAction, id: string): string | null {
+/**
+ * Na Live ao vivo, Encerrar live tambem so navega: a acao mora no console, porque e o navegador do apresentador que
+ * para a gravacao e desliga a sala para todos antes de a sessao virar Encerrada (docs/30 §6.4 passo 9). Na Live
+ * gravada continua a Server Action com confirmacao (fase 2b).
+ */
+export function isWebinarLinkAction(action: WebinarAction, kind?: WebinarKind | null): boolean {
+  return WEBINAR_LINK_ACTIONS.includes(action) || (action === "end" && kind === "live");
+}
+
+/** Para onde a acao leva (nulo: a acao roda aqui). Abrir a sala e Abrir o console levam ao console /[id]/sala. */
+export function webinarActionHref(action: WebinarAction, id: string, kind?: WebinarKind | null): string | null {
   switch (action) {
     case "open":
       return webinarAdminHref(id);
+    case "open_room":
     case "open_console":
       return webinarConsoleHref(id);
     case "view_report":
       return webinarReportHref(id);
+    case "end":
+      return kind === "live" ? webinarConsoleHref(id) : null;
     default:
       return null;
   }
 }
 
-const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end"];
+const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end", "open_room"];
+
+/**
+ * Por que a acao aparece desligada (docs/30 §2.6): quem so escreve na Comunicacao ve os botoes da sala que pedem
+ * messaging.publish (Abrir a sala; Encerrar live da Live ao vivo) com a explicacao, em vez de nao achar o caminho.
+ * As outras acoes de quem publica (Publicar, Cancelar, Excluir, Encerrar da Live gravada) seguem fora da tela.
+ */
+export function webinarActionBlockedReason(action: WebinarAction, permissions: WebinarPermissions, kind?: WebinarKind | null): string | null {
+  if (permissions.canPublish || !PUBLISH_ACTIONS.includes(action)) {
+    return null;
+  }
+
+  if (action === "open_room") {
+    return WEBINAR_ADMIN_COPY.blocked.openRoom;
+  }
+
+  return action === "end" && kind === "live" ? WEBINAR_ADMIN_COPY.blocked.end : null;
+}
 
 export const WEBINAR_ACTION_LABELS: Record<WebinarAction, string> = {
   cancel: WEBINAR_ADMIN_COPY.menu.cancel,
@@ -751,10 +795,11 @@ export const WEBINAR_HEADER_ACTIONS: Record<WebinarSituation, readonly WebinarAc
 };
 
 /**
- * O que a pessoa pode fazer com o webinario nesta situacao (o servidor confere de novo): os botoes do topo de
- * §2.3 mais Abrir e Duplicar, que o menu "…" da lista oferece em qualquer situacao (§2.1).
+ * O que aparece para a pessoa com o webinario nesta situacao (o servidor confere de novo): os botoes do topo de
+ * §2.3 mais Abrir e Duplicar, que o menu "…" da lista oferece em qualquer situacao (§2.1). Sem messaging.publish, os
+ * botoes da sala ao vivo ficam (desligados, webinarActionBlockedReason) e os outros de quem publica saem.
  */
-export function webinarActionsFor(situation: WebinarSituation, permissions: WebinarPermissions): WebinarAction[] {
+export function webinarActionsFor(situation: WebinarSituation, permissions: WebinarPermissions, kind?: WebinarKind | null): WebinarAction[] {
   if (!permissions.canWrite) {
     return [];
   }
@@ -765,33 +810,105 @@ export function webinarActionsFor(situation: WebinarSituation, permissions: Webi
     actions.push("duplicate");
   }
 
-  return actions.filter((action) => permissions.canPublish || !PUBLISH_ACTIONS.includes(action));
+  return actions.filter((action) => permissions.canPublish || !PUBLISH_ACTIONS.includes(action) || webinarActionBlockedReason(action, permissions, kind) !== null);
 }
 
-export type WebinarMenuEntry = { action: WebinarAction; destructive: boolean; label: string; separated: boolean; soon: boolean };
+export type WebinarMenuEntry = {
+  action: WebinarAction;
+  /** Desligado por permissao: a explicacao (o item mostra "· só quem publica"); nulo quando vale. */
+  blocked: string | null;
+  destructive: boolean;
+  /** O texto do item como a tela mostra (com "· em breve" ou "· só quem publica" quando desligado). */
+  display: string;
+  label: string;
+  separated: boolean;
+  soon: boolean;
+};
 
 const MENU_ORDER: readonly WebinarAction[] = ["open", "open_room", "open_console", "view_report", "publish_replay", "duplicate", "cancel", "end", "delete"];
 const DESTRUCTIVE_ACTIONS = new Set<WebinarAction>(["cancel", "delete", "end"]);
 
 /**
- * Itens do menu "…" (docs/30 §2.1: Abrir, Duplicar, Cancelar, Excluir só rascunho). Salvar e Publicar ficam na
- * Revisao do editor; `exclude` tira o que a tela ja mostra como botao.
+ * Itens do menu "…" (docs/30 §2.1: Abrir, Abrir a sala, Duplicar, Cancelar, Excluir só rascunho). Salvar e Publicar
+ * ficam na Revisao do editor; `exclude` tira o que a tela ja mostra como botao. `kind` decide o Encerrar live (link
+ * para o console na Live ao vivo).
  */
-export function webinarMenuEntries(situation: WebinarSituation, permissions: WebinarPermissions, exclude: readonly WebinarAction[] = []): WebinarMenuEntry[] {
-  const available = new Set(webinarActionsFor(situation, permissions).filter((action) => action !== "save" && action !== "publish" && !exclude.includes(action)));
+export function webinarMenuEntries(situation: WebinarSituation, permissions: WebinarPermissions, exclude: readonly WebinarAction[] = [], kind?: WebinarKind | null): WebinarMenuEntry[] {
+  const available = new Set(webinarActionsFor(situation, permissions, kind).filter((action) => action !== "save" && action !== "publish" && !exclude.includes(action)));
   const ordered = MENU_ORDER.filter((action) => available.has(action));
 
-  return ordered.map((action, index) => ({
-    action,
-    destructive: DESTRUCTIVE_ACTIONS.has(action),
-    label: WEBINAR_ACTION_LABELS[action],
-    separated: index > 0 && DESTRUCTIVE_ACTIONS.has(action) && !DESTRUCTIVE_ACTIONS.has(ordered[index - 1]),
-    soon: WEBINAR_SOON_ACTIONS.includes(action)
-  }));
+  return ordered.map((action, index) => {
+    const label = WEBINAR_ACTION_LABELS[action];
+    const soon = WEBINAR_SOON_ACTIONS.includes(action);
+    const blocked = webinarActionBlockedReason(action, permissions, kind);
+
+    return {
+      action,
+      blocked,
+      destructive: DESTRUCTIVE_ACTIONS.has(action),
+      display: soon ? `${label} · ${WEBINAR_ADMIN_COPY.emBreve}` : blocked ? `${label} · ${WEBINAR_ADMIN_COPY.menu.onlyPublishers}` : label,
+      label,
+      separated: index > 0 && DESTRUCTIVE_ACTIONS.has(action) && !DESTRUCTIVE_ACTIONS.has(ordered[index - 1]),
+      soon
+    };
+  });
 }
 
-export function webinarActionNeedsConfirm(action: WebinarAction) {
-  return action === "cancel" || action === "delete" || action === "end";
+export type WebinarHeaderButton = {
+  action: WebinarAction;
+  /** Desligado por permissao: a explicacao que a tela escreve embaixo do cabecalho. */
+  blocked: string | null;
+  /** O link (nulo quando desligado: em breve ou sem permissao). */
+  href: string | null;
+  label: string;
+  soon: boolean;
+};
+
+/**
+ * Os botoes do topo do editor (docs/30 §2.3) que nao sao Salvar e Publicar (na Revisao): os que navegam (Abrir a sala,
+ * Abrir o console, Ver relatório; Encerrar live na Live ao vivo) e os que chegam depois ("em breve"). Cancelar,
+ * Duplicar, Excluir e o Encerrar da Live gravada ficam no menu "…" ao lado.
+ */
+export function webinarHeaderButtons(input: { id: string; kind: WebinarKind; permissions: WebinarPermissions; situation: WebinarSituation }): WebinarHeaderButton[] {
+  if (!input.permissions.canWrite) {
+    return [];
+  }
+
+  return WEBINAR_HEADER_ACTIONS[input.situation].flatMap((action): WebinarHeaderButton[] => {
+    const soon = WEBINAR_SOON_ACTIONS.includes(action);
+    const href = webinarActionHref(action, input.id, input.kind);
+
+    if (action === "save" || action === "publish" || (!soon && !href)) {
+      return [];
+    }
+
+    const blocked = webinarActionBlockedReason(action, input.permissions, input.kind);
+
+    return [{ action, blocked, href: soon || blocked ? null : href, label: WEBINAR_ACTION_LABELS[action], soon }];
+  });
+}
+
+export type WebinarRowShortcut = { action: "open_console" | "open_room"; href: string; label: string };
+
+/**
+ * O atalho na linha da lista (docs/30 §2.1 e §2.3): a Live ao vivo agendada leva a sala (so quem publica; quem nao
+ * publica acha o item desligado no menu "…") e a Live ao vivo em andamento ao console. A Live gravada fica com o menu.
+ */
+export function webinarRowShortcut(item: { id: string; kind: WebinarKind; situation: WebinarSituation }, permissions: WebinarPermissions): WebinarRowShortcut | null {
+  if (item.kind !== "live" || !permissions.canWrite) {
+    return null;
+  }
+
+  if (item.situation === "in_progress") {
+    return { action: "open_console", href: webinarConsoleHref(item.id), label: WEBINAR_ACTION_LABELS.open_console };
+  }
+
+  return item.situation === "scheduled" && permissions.canPublish ? { action: "open_room", href: webinarConsoleHref(item.id), label: WEBINAR_ACTION_LABELS.open_room } : null;
+}
+
+/** Cancelar, Excluir e o Encerrar live da Live gravada pedem confirmacao; o da Live ao vivo so leva ao console. */
+export function webinarActionNeedsConfirm(action: WebinarAction, kind?: WebinarKind | null) {
+  return action === "cancel" || action === "delete" || (action === "end" && kind !== "live");
 }
 
 export type WebinarConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
@@ -1308,6 +1425,141 @@ export function webinarReviewSentence(input: {
   const home = draft.showOnHome ? " O card entra na página inicial." : "";
 
   return `${webinarKindLabel(draft.kind)} em ${when}${sessions}, ${draft.durationMinutes} min, para ${access}${registration}.${home}${registered}`;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A sessao da Live ao vivo no admin (fase 3): o que vai para a tela, o card Gravacao e o pico da lista
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * A sessao como vai para a tela (props de componente cliente): sem o nome da sala. O `room_name` so existe no
+ * servidor e dentro do token de quem entra (docs/30 §8.1); quem adivinha o nome nao entra, mas ele nunca e mostrado.
+ */
+export type WebinarScreenSession = WebinarSession & { roomName: null };
+
+export function webinarScreenSession(session: WebinarSession): WebinarScreenSession {
+  return { ...session, roomName: null };
+}
+
+/** O que o editor precisa da sessao `live` (card Gravacao): a situacao e o gravador, nunca o nome da sala. */
+export type WebinarLiveSessionSummary = {
+  endedAt: string | null;
+  id: string;
+  recorderRequestedAt: string | null;
+  recorderStatus: RecorderStatus;
+  recordingAnchorAt: string | null;
+  recordingRequestedAt: string | null;
+  scheduledAt: string;
+  startedAt: string | null;
+  status: SessionStatus;
+};
+
+/**
+ * A sessao `live` do webinario, campo a campo: a que ainda vale (nao cancelada; a mais recente) ou, num webinario
+ * cancelado, a ultima cancelada (o card mostra a situacao do gravador dela, sem caminhos para o console).
+ */
+export function webinarLiveSessionOf(sessions: readonly WebinarSession[]): WebinarLiveSessionSummary | null {
+  const latest = (list: readonly WebinarSession[]) =>
+    list.reduce<WebinarSession | null>((best, session) => (!best || Date.parse(session.scheduledAt) > Date.parse(best.scheduledAt) ? session : best), null);
+  const lives = sessions.filter((session) => session.kind === "live");
+  const live = latest(lives.filter((session) => session.status !== "cancelled")) ?? latest(lives);
+
+  if (!live) {
+    return null;
+  }
+
+  return {
+    endedAt: live.endedAt,
+    id: live.id,
+    recorderRequestedAt: live.recorderRequestedAt,
+    recorderStatus: live.recorderStatus,
+    recordingAnchorAt: live.recordingAnchorAt,
+    recordingRequestedAt: live.recordingRequestedAt,
+    scheduledAt: live.scheduledAt,
+    startedAt: live.startedAt,
+    status: live.status
+  };
+}
+
+/** O tom do selo de cada situacao do gravador (os nomes de §2.2 vem de RECORDER_LABELS). */
+export const RECORDER_TONES: Record<RecorderStatus, WebinarTone> = {
+  gone: "muted",
+  none: "neutral",
+  preparing: "warning",
+  ready: "success",
+  recording: "success",
+  unavailable: "error",
+  upload_failed: "error",
+  uploaded: "success",
+  uploading: "warning"
+};
+
+/** Um link do card (nulo o href quando desligado por permissao, com a explicacao). */
+export type WebinarCardLink = { blocked: string | null; href: string | null; label: string };
+
+export type WebinarRecordingCardView = {
+  /** A frase do Gravar automaticamente, ligado ou desligado. */
+  autoRecordHint: string;
+  /** Antes de publicar (sem a sessao `live`): a sala e o gravador nascem ao publicar. */
+  pendingNote: string | null;
+  /** Preparar gravação: so com a maquina por pedir e a sessao por acontecer ou no ar. */
+  prepare: WebinarCardLink | null;
+  /** Sem a sala neste ambiente (WEBINAR_MEET_DOMAIN e o segredo do token): o aviso discreto. */
+  roomMissingNote: string | null;
+  status: { label: string; tone: WebinarTone; value: RecorderStatus };
+  /** Enviar gravação (a reserva de D3): a sessao existe e nao foi cancelada. */
+  upload: WebinarCardLink | null;
+};
+
+const OPEN_SESSION_STATUSES: readonly SessionStatus[] = ["scheduled", "waiting", "live"];
+
+/**
+ * O card Gravacao da Live ao vivo (docs/30 §2.2, §6.4 passo 3 e §6.7): a situacao do servidor de gravacao da sessao
+ * (`recorder_status`, "Não preparado" antes de publicar), Gravar automaticamente com o custo, e os dois caminhos para o
+ * console: Preparar gravação (messaging.publish, como a Server Action) e Enviar gravação (messaging.write).
+ */
+export function webinarRecordingCard(input: {
+  autoRecord: boolean;
+  liveRoomReady: boolean;
+  liveSession: Pick<WebinarLiveSessionSummary, "recorderStatus" | "status"> | null;
+  permissions: WebinarPermissions;
+  webinarId: string | null;
+}): WebinarRecordingCardView {
+  const { liveSession, permissions, webinarId } = input;
+  const value: RecorderStatus = liveSession?.recorderStatus ?? "none";
+  const base = {
+    autoRecordHint: input.autoRecord ? WEBINAR_ADMIN_COPY.fields.autoRecordHint : WEBINAR_ADMIN_COPY.fields.autoRecordOffHint,
+    roomMissingNote: input.liveRoomReady ? null : WEBINAR_COPY.consoleAoVivo.salaEmBreve,
+    status: { label: RECORDER_LABELS[value], tone: RECORDER_TONES[value], value }
+  };
+
+  if (!liveSession || !webinarId) {
+    return { ...base, pendingNote: WEBINAR_ADMIN_COPY.fields.recordingAfterPublish, prepare: null, upload: null };
+  }
+
+  const href = webinarConsoleHref(webinarId);
+  const prepare: WebinarCardLink | null =
+    OPEN_SESSION_STATUSES.includes(liveSession.status) && canRequestRecorder(value)
+      ? { blocked: permissions.canPublish ? null : WEBINAR_ADMIN_COPY.blocked.prepare, href: permissions.canPublish ? href : null, label: WEBINAR_COPY.consoleAoVivo.prepararGravacao }
+      : null;
+  const upload: WebinarCardLink | null = liveSession.status !== "cancelled" && permissions.canWrite ? { blocked: null, href, label: WEBINAR_COPY.consoleAoVivo.enviarGravacao } : null;
+
+  return { ...base, pendingNote: null, prepare, upload };
+}
+
+/** Presentes (pico) da lista (docs/30 §2.1): o maior pico das curvas congeladas no fim das sessoes; sem curva, nulo ("—"). */
+export function webinarPeakPresent(sessions: readonly Pick<WebinarSession, "kind" | "presenceCurve">[]): number | null {
+  let peak: number | null = null;
+
+  for (const session of sessions) {
+    const value = session.kind === "replay" ? undefined : session.presenceCurve?.peak?.n;
+
+    if (typeof value === "number" && Number.isFinite(value) && (peak === null || value > peak)) {
+      peak = value;
+    }
+  }
+
+  return peak;
 }
 
 /** Limites expostos para a tela (o mesmo arquivo do servidor). */

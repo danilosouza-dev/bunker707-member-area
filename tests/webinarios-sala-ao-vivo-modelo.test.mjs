@@ -42,7 +42,7 @@ test("o nome da sala: w-<webinario>-<16 letras>, nunca adivinhavel, reconhecido 
   assert.equal(fixed, `w-${WEBINAR}-${"h".repeat(16)}`, "aleatorio injetavel para teste");
 });
 
-test("o token: HS256, iss = aud = app, sub = o hostname, room da sessao, nbf 60 s antes, exp = fim + 30 min (ou 6 h), moderador so por papel", () => {
+test("o token: HS256, iss = aud = app, sub = o hostname, room da sessao, nbf 60 s antes, exp = min(fim + 30 min, agora + 15 min), features em todo papel, moderador so por papel", () => {
   const room = token.newRoomName(WEBINAR, () => Buffer.alloc(16, 1));
   const host = token.signJitsiToken({
     appId: "bunker707",
@@ -62,7 +62,9 @@ test("o token: HS256, iss = aud = app, sub = o hostname, room da sessao, nbf 60 
   assert.equal(claims.sub, "meet.bunker707.com.br");
   assert.equal(claims.room, room);
   assert.equal(claims.nbf, Math.floor(NOW / 1000) - 60);
-  assert.equal(claims.exp, Math.floor(ENDS / 1000) + 30 * 60, "fim previsto + 30 min");
+  assert.equal(claims.exp, Math.floor(NOW / 1000) + 15 * 60, "agora + 15 min (antes do fim previsto + 30 min)");
+  const curto = token.jitsiTokenClaims({ appId: "bunker707", domain: "meet.bunker707.com.br", endsAtMs: NOW - 25 * 60 * 1000, grant: token.roomRoleFor({ hostUserId: "host", nowMs: NOW, presenters, staff: false, userId: "host" }), nowMs: NOW, room, secret: SECRET, user: { id: "host", name: "D." } });
+  assert.equal(curto.exp, Math.floor(NOW / 1000) + 5 * 60, "o fim previsto + 30 min vale quando vem antes");
   assert.deepEqual(claims.context.user, { avatar: "https://cdn.example/a.png", id: "host", moderator: true, affiliation: "owner", name: "Danilo S." });
   assert.deepEqual(claims.context.features, { livestreaming: false, "outbound-call": false, recording: true, "screen-sharing": true });
   assert.equal(token.verifyJitsiToken(host, "x".repeat(48)), null, "outro segredo nao confere");
@@ -81,8 +83,12 @@ test("o token: HS256, iss = aud = app, sub = o hostname, room da sessao, nbf 60 
     }),
     SECRET
   );
-  assert.deepEqual(student.context, { user: { id: "aluna", name: "Ana M." } }, "aluno sem moderator e sem features");
-  assert.equal(student.exp, Math.floor(NOW / 1000) + 6 * 60 * 60, "no maximo 6 h");
+  assert.deepEqual(
+    student.context,
+    { features: { livestreaming: false, "outbound-call": false, recording: false, "screen-sharing": false }, user: { id: "aluna", name: "Ana M." } },
+    "aluno sem moderator e com as features desligadas (sem a claim o Jitsi deixa compartilhar a tela)"
+  );
+  assert.equal(student.exp, Math.floor(NOW / 1000) + 15 * 60, "no maximo 15 min");
   assert.throws(() => token.signJitsiToken({ appId: "b", domain: "d", endsAtMs: ENDS, grant: { features: { recording: false, screenSharing: false }, moderator: false, role: "student" }, nowMs: NOW, room: "*", secret: SECRET, user: { id: "u", name: "n" } }), /Sala inválida/);
   assert.throws(() => token.signJitsiToken({ appId: "b", domain: "d", endsAtMs: ENDS, grant: { features: { recording: false, screenSharing: false }, moderator: false, role: "student" }, nowMs: NOW, room, secret: "curto", user: { id: "u", name: "n" } }), /Segredo/);
 });
@@ -135,6 +141,12 @@ test("o gravador: a maquina de estados, o carimbo do arquivo, a diferenca para a
   assert.equal(rec.recorderTransition("ready", "recording"), "recording");
   assert.equal(rec.recorderTransition("recording", "uploaded"), "uploaded");
   assert.equal(rec.recorderTransition("recording", "upload_failed"), "upload_failed");
+  assert.equal(rec.recorderTransition("upload_failed", "uploaded"), "uploaded", "o envio refeito a mao depois da falha");
+  assert.equal(rec.recorderTransition("preparing", "uploaded"), "uploaded", "o ready perdido nao perde o arquivo");
+  assert.equal(rec.recorderTransition("none", "uploaded"), "uploaded", "maquina pedida a mao, sem o ready");
+  assert.equal(rec.recorderTransition("gone", "uploaded"), null, "depois de apagada, nada volta");
+  assert.equal(rec.recorderTransition("uploaded", "uploaded"), "uploaded", "o segundo arquivo da mesma live (o mesmo arquivo repetido cai na chave unica do evento)");
+  assert.equal(rec.recorderTransition("upload_failed", "upload_failed"), null);
   assert.equal(rec.recorderTransition("uploaded", "gone"), "gone");
   assert.equal(rec.recorderTransition("gone", "gone"), null, "repeticao e ignorada");
   assert.equal(rec.recorderTransition("uploaded", "ready"), null, "fora de ordem e ignorado");

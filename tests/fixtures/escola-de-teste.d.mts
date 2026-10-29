@@ -99,3 +99,17 @@ export const LIVE_GRAVADA_NO_AR_DE_TESTE: {
   videoUrl: string;
 };
 export function seedLiveGravadaDeTeste(db: unknown, opcoes?: { comecouHa?: number; duracaoSegundos?: number; seloAoVivo?: boolean }): Promise<{ scheduledAt: string }>;
+
+export const AMBIENTE_DA_SALA_AO_VIVO_DE_TESTE: {
+  WEBINAR_JWT_APP_ID: string;
+  WEBINAR_JWT_SECRET: string;
+  WEBINAR_MEET_DOMAIN: string;
+  WEBINAR_RECORDER_DISPATCH: string;
+  WEBINAR_RECORDER_WEBHOOK_SECRET: string;
+};
+export function ambienteDaSalaAoVivo(env?: Record<string, string | undefined>): typeof AMBIENTE_DA_SALA_AO_VIVO_DE_TESTE;
+export const LIVE_AO_VIVO_DE_TESTE: { coApresentador: "professor"; descricao: string; equipe: "analista"; id: string; roomName: string; sessaoId: string; slug: string; titulo: string };
+export function seedLiveAoVivoDeTeste(
+  db: unknown,
+  opcoes?: { comecouHa?: number; equipeModera?: boolean; status?: "live" | "scheduled" | "waiting" }
+): Promise<{ scheduledAt: string; startedAt: string | null }>;

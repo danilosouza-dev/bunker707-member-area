@@ -6,6 +6,7 @@
 // Toda data mostrada ao aluno sai de src/lib/webinar-time.ts ou src/lib/member-format.ts; toda frase, de
 // src/lib/webinar-copy.ts.
 
+import type { LiveBanState, LiveRoomInfo } from "./live-model";
 import { formatMemberDuration } from "../../lib/member-format";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatCountdown, formatWebinarWhen, saoPauloDate, saoPauloTime } from "../../lib/webinar-time";
@@ -321,11 +322,23 @@ export type StudentRoomVideo = {
 };
 
 /** O que a Sala precisa alem da fase 1 (docs/30 §5.1 e §6.6), montado por room-queries.ts. */
-/** A entrada na sala: aberta, ou o motivo (fora da hora, Entrada atrasada, ou sem a vaga quando ha limite). */
-export type RoomJoin = { ok: true } | { ok: false; reason: JoinRefusal | "no_seat" };
+/**
+ * A entrada na sala: aberta, ou o motivo (fora da hora, Entrada atrasada, ou sem a vaga quando ha limite). Na live
+ * (fase 3) tambem `kicked` (removido desta sessao) e `banned` (banido de todos os webinarios), como no join-token.
+ */
+export type RoomJoin = { ok: true } | { ok: false; reason: JoinRefusal | "banned" | "kicked" | "no_seat" };
 
 export type StudentRoomExtras = {
-  me: { consented: boolean; displayMode: DisplayNameMode | null; displayName: string | null; nickname: string | null };
+  /** Fase 3: a sala ao vivo (so na sessao `live`; nas outras, nulo). Nunca leva o nome da sala nem o token. */
+  live: LiveRoomInfo | null;
+  me: {
+    /** Fase 3: removido desta sessao, banido de todas, silenciado no chat ate `mutedUntil` (nulo = ate o fim). */
+    ban: LiveBanState;
+    consented: boolean;
+    displayMode: DisplayNameMode | null;
+    displayName: string | null;
+    nickname: string | null;
+  };
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
   presentNow: number;
@@ -351,6 +364,7 @@ export type StudentRoomExtras = {
 /** O que GET /api/webinars/[id]/session devolve (docs/30 §5.1): a fase 1 sempre; a Sala (fase 2) quando a rota traz `room`. */
 export type StudentSessionPayload = {
   me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null } & Partial<StudentRoomExtras["me"]>;
+  live?: LiveRoomInfo | null;
   pinned?: StudentChatMessage | null;
   polls?: StudentPoll[];
   presentNow?: number;
@@ -371,7 +385,8 @@ export type StudentSessionPayload = {
 };
 
 /** A resposta completa da Sala: a fase 1 mais tudo o que `room` traz (o que o navegador da sala recebe). */
-export type StudentRoomPayload = Omit<StudentSessionPayload, "me" | "pinned" | "polls" | "presentNow" | "session" | "video" | "webinar"> & {
+export type StudentRoomPayload = Omit<StudentSessionPayload, "live" | "me" | "pinned" | "polls" | "presentNow" | "session" | "video" | "webinar"> & {
+  live: LiveRoomInfo | null;
   me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null } & StudentRoomExtras["me"];
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
@@ -417,6 +432,7 @@ export function buildSessionPayload(
   }
   return {
     ...base,
+    live: room.live,
     me: { ...base.me, ...room.me },
     pinned: room.pinned,
     polls: room.polls,

@@ -57,15 +57,18 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
   const skewRef = useRef(0);
   const sessionId = initial.session.id;
 
-  const refresh = useCallback(async () => {
+  /** Rele a sessao; devolve a resposta (ou nulo sem resposta) para quem precisa decidir na hora. */
+  const refresh = useCallback(async (): Promise<StudentRoomPayload | null> => {
     try {
       const answer = await getSession(webinarId, sessionId);
       const skew = clockSkewMs({ requestSentAtMs: answer.sentAtMs, responseReceivedAtMs: answer.receivedAtMs, serverTimeMs: Date.parse(answer.data.serverTime) });
       skewRef.current = skew;
       setSkewMs(skew);
       setSession((previous) => ({ ...previous, ...(answer.data as StudentRoomPayload), me: { ...previous.me, ...answer.data.me } }));
+      return answer.data as StudentRoomPayload;
     } catch {
-      // Sem resposta, o relogio anterior continua valendo; a proxima tentativa vem em 60 s.
+      // Sem resposta, o relogio anterior continua valendo; a proxima tentativa vem no proximo passo.
+      return null;
     }
   }, [sessionId, webinarId]);
 
@@ -75,7 +78,6 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
     }
     // A primeira leitura sai do proprio efeito (sem setState sincrono nele): acerta o relogio logo ao abrir.
     const first = window.setTimeout(() => void refresh(), 0);
-    const stop = timer(() => void refresh(), CLOCK_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         void refresh();
@@ -84,9 +86,15 @@ export function useRoomClock(input: { enabled: boolean; initial: StudentRoomPayl
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearTimeout(first);
-      stop();
       document.removeEventListener("visibilitychange", onVisible);
     };
+  }, [enabled, refresh]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    return timer(() => void refresh(), CLOCK_MS);
   }, [enabled, refresh]);
 
   return { refresh, session, setSession, skewMs, skewRef };
@@ -276,7 +284,15 @@ export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => 
  * Reacoes
  * ---------------------------------------------------------------------------------------------- */
 
-export function useRoomReactions(input: { enabled: boolean; getOffsetMs: () => number; reducedMotion: boolean; sessionId: string; webinarId: string }) {
+export function useRoomReactions(input: {
+  enabled: boolean;
+  getOffsetMs: () => number;
+  /** A sala ao vivo quer saber da reacao recusada (409 banned: removido ou banido no meio da live). */
+  onRefused?: (error: unknown) => void;
+  reducedMotion: boolean;
+  sessionId: string;
+  webinarId: string;
+}) {
   const { enabled, reducedMotion, sessionId, webinarId } = input;
   const [bubbles, setBubbles] = useState<ReactionBubble[]>([]);
   const [overflow, setOverflow] = useState(0);
@@ -284,9 +300,11 @@ export function useRoomReactions(input: { enabled: boolean; getOffsetMs: () => n
   const sinceRef = useRef<string | null>(null);
   const lastSentRef = useRef(0);
   const offsetRef = useRef(input.getOffsetMs);
+  const refusedRef = useRef(input.onRefused);
 
   useEffect(() => {
     offsetRef.current = input.getOffsetMs;
+    refusedRef.current = input.onRefused;
   });
 
   const push = useCallback(
@@ -336,7 +354,7 @@ export function useRoomReactions(input: { enabled: boolean; getOffsetMs: () => n
       }
       lastSentRef.current = now;
       push({ [reaction]: 1 });
-      void postReaction(webinarId, { offsetMs: Math.round(offsetRef.current()), reaction, sessionId }).catch(() => undefined);
+      void postReaction(webinarId, { offsetMs: Math.round(offsetRef.current()), reaction, sessionId }).catch((error: unknown) => refusedRef.current?.(error));
     },
     [push, sessionId, webinarId]
   );

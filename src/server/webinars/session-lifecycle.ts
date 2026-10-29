@@ -21,17 +21,24 @@ export type OpenSessionOutcome = { changed: boolean; fired: number; notified: nu
 export type FinishSessionOutcome = { replayCreated: boolean; summary: PresenceSummary | null };
 
 /**
- * A gravacao que o replay vai tocar: a da propria sessao (recording_id) ou, sem ela, a gravacao base do webinario
- * (sem sessao; a colada pela equipe na Live gravada), desde que esteja pronta. Na Live ao vivo (fase 3) a gravacao
- * so fica pronta quando o MP4 chega na Bunny: ate la, nenhum replay.
+ * A gravacao que o replay vai tocar: a da propria sessao (recording_id); sem ela, a mais nova pronta com session_id da
+ * sessao (a do gravador ou a enviada pela equipe durante a live: o job e o "Enviar gravacao" so ligam recording_id com
+ * a sessao encerrada, para webinar_close_session medir a live por ended_at − started_at e nunca pela duracao do video);
+ * sem nenhuma, a gravacao base do webinario (sem sessao; a colada pela equipe na Live gravada), desde que esteja pronta.
+ * Na Live ao vivo (fase 3) a gravacao so fica pronta quando o MP4 chega na Bunny: ate la, nenhum replay.
  */
-export function replayRecordingOf(recordings: readonly RecordingRow[], session: Pick<SessionRow, "recording_id">): RecordingRow | null {
+export function replayRecordingOf(recordings: readonly RecordingRow[], session: Pick<SessionRow, "recording_id"> & { id?: string }): RecordingRow | null {
   const own = session.recording_id ? recordings.find((recording) => recording.id === session.recording_id) : null;
+  const bySession = own
+    ? null
+    : (recordings
+        .filter((recording) => session.id !== undefined && recording.session_id === session.id && recording.status === "ready")
+        .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0] ?? null);
   const base =
     recordings.find((recording) => recording.session_id === null && recording.source === "bunny") ??
     recordings.find((recording) => recording.session_id === null) ??
     null;
-  const candidate = own ?? base;
+  const candidate = own ?? bySession ?? base;
 
   return candidate && candidate.status === "ready" ? candidate : null;
 }
@@ -89,32 +96,38 @@ async function insertReplaySession(db: WebinarsDb, row: ReplayInsert): Promise<b
 }
 
 /**
- * Encerra a sessao (resumo por aluno + curva congelada, idempotente) e cria a sessao `replay` do webinario quando
- * ainda nao existe e a gravacao esta pronta: `kind = replay`, disponivel na hora (`live`), `scheduled_at = agora`,
- * apontando para a sessao de origem (o chat dela reaparece pelo segundo do video), sem Entrada atrasada, com os
- * controles de chat da sessao encerrada.
+ * Cria a sessao `replay` do webinario a partir de uma sessao encerrada, quando ainda nao existe e a gravacao esta
+ * pronta: `kind = replay`, disponivel na hora (`live`), `scheduled_at = agora`, apontando para a sessao de origem (o
+ * chat dela reaparece pelo segundo do video), sem Entrada atrasada, com os controles de chat da sessao encerrada.
+ * Quem chama: finishSession (no fim), o job webinar-recordings (fase 3: o MP4 da live fica pronto horas depois) e o
+ * "Enviar gravação" do console. Devolve se criou (outro replay ja existia, ou sem gravacao pronta: false).
  */
-export async function finishSession(db: WebinarsDb, sessionId: string, now: Date): Promise<FinishSessionOutcome> {
-  const summary = presenceSummaryOf(await closeSessionRpc(db, sessionId, now.toISOString()));
+export async function createReplayForSession(db: WebinarsDb, sessionId: string, now: Date): Promise<boolean> {
   const session = await fetchSessionRow(db, sessionId);
 
-  if (!session || session.kind === "replay") {
-    return { replayCreated: false, summary };
+  if (!session || session.kind === "replay" || session.status !== "ended") {
+    return false;
   }
 
   const recording = replayRecordingOf(await listRecordingRows(db, [session.webinar_id]), session);
 
   if (!recording) {
-    return { replayCreated: false, summary };
+    return false;
+  }
+
+  // A gravacao da propria live (pronta com a sessao ja encerrada): a sessao passa a apontar para ela, como o job faria.
+  if (recording.session_id === session.id && !session.recording_id) {
+    const { error } = await db.from("webinar_sessions").update({ recording_id: recording.id }).eq("id", session.id).is("recording_id", null);
+    assertNoDbError(error, "Webinarios: ligar a gravacao a sessao encerrada");
   }
 
   const existing = (await listSessionRows(db, [session.webinar_id])).some((row) => row.kind === "replay");
 
   if (existing) {
-    return { replayCreated: false, summary };
+    return false;
   }
 
-  const created = await insertReplaySession(db, {
+  return insertReplaySession(db, {
     chat_mode: session.chat_mode,
     chat_slow_mode_seconds: session.chat_slow_mode_seconds,
     kind: "replay",
@@ -125,6 +138,15 @@ export async function finishSession(db: WebinarsDb, sessionId: string, now: Date
     status: "live",
     webinar_id: session.webinar_id
   });
+}
 
-  return { replayCreated: created, summary };
+/**
+ * Encerra a sessao (resumo por aluno + curva congelada, idempotente) e cria a sessao `replay` do webinario quando
+ * ainda nao existe e a gravacao esta pronta (createReplayForSession).
+ */
+export async function finishSession(db: WebinarsDb, sessionId: string, now: Date): Promise<FinishSessionOutcome> {
+  const summary = presenceSummaryOf(await closeSessionRpc(db, sessionId, now.toISOString()));
+  const replayCreated = await createReplayForSession(db, sessionId, now);
+
+  return { replayCreated, summary };
 }

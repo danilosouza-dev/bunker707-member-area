@@ -1,7 +1,7 @@
 "use client";
 
 import { Pin, PinOff, Send, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -15,9 +15,10 @@ import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
 
 // O painel Chat do console (docs/30 §2.4 e §8.3): tudo o que o aluno ve mais os pendentes do chat moderado
-// (Liberar), Apagar, Fixar/Desafixar, "Aprovar para as próximas turmas" (so mensagem da turma com o aceite do
+// (Liberar), Apagar, Fixar/Desafixar, "Aprovar para as proximas turmas" (so mensagem da turma com o aceite do
 // autor; sem aceite, a tela diz por que), Quem pode escrever e Modo lento no topo, e a caixa da equipe (Enter envia,
-// Shift+Enter quebra a linha). A lista cola no fim quando a pessoa ja estava no fim.
+// Shift+Enter quebra a linha). A lista cola no fim quando a pessoa ja estava no fim. Na Live ao vivo (fase 3), o ⋯ de
+// cada mensagem da turma (`personMenu`) traz Silenciar 5/15/60 min / ate o fim, Remover e Banir do autor.
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
 
@@ -30,6 +31,8 @@ type ConsoleChatProps = {
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
   onModerate: (action: ModerationAction, messageId: string) => void;
   onSend: (body: string) => Promise<boolean>;
+  /** Fase 3: o ⋯ do autor de uma mensagem da turma (Silenciar no chat, Remover, Banir); nulo fora da Live ao vivo. */
+  personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
   pinnedMessageId: string | null;
   session: WebinarSession;
 };
@@ -53,7 +56,7 @@ function roleLabel(message: ConsoleMessage): string | null {
   return null;
 }
 
-export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate, onSend, pinnedMessageId, session }: ConsoleChatProps) {
+export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate, onSend, personMenu = null, pinnedMessageId, session }: ConsoleChatProps) {
   const [body, setBody] = useState("");
   const listRef = useRef<HTMLOListElement>(null);
   const stickToEnd = useRef(true);
@@ -163,6 +166,7 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onModerate,
                     <Trash2 aria-hidden="true" className="size-4" />
                     {copy.delete}
                   </Button>
+                  {personMenu && message.source === "audience" && message.authorUserId ? personMenu(message) : null}
                 </div>
               ) : null}
             </li>

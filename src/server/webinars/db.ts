@@ -9,8 +9,13 @@ import { isMissingSchemaObjectError, toDbError } from "../db/pending-migration";
 
 export type WebinarsDb = SupabaseClient;
 
-/** A migracao mais nova que o app exige (PendingMigrationNotice e a mensagem do tick); a fase 1 foi a 202610280001. */
-export const WEBINARS_MIGRATION = "202610290001";
+/**
+ * A migracao mais nova que o app exige (PendingMigrationNotice e a mensagem do tick): a fase 1 foi a 202610280001, a
+ * fase 2 a 202610290001 e a fase 3 (sala ao vivo: room_name, gravador, banimentos, ancora) a 202610290002, com os
+ * ajustes da revisao na 202610290003 (a maquina na chave do webhook do gravador, a gravacao no navegador na sessao e o
+ * trigger do offset pela ancora).
+ */
+export const WEBINARS_MIGRATION = "202610290003";
 
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();

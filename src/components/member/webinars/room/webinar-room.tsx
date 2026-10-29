@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -25,11 +25,14 @@ import { useRoomPlayer } from "./use-room-player";
 // Chat, Perguntas e Enquetes (a de Enquetes so com enquete aberta). A 375 px: palco na largura, abas embaixo, o
 // campo de mensagem fixo no rodape, botoes de 44 px. Minimizar vira a pilula de 56 px no canto; o player continua
 // (e o sinal de midia com ele: nenhum pop-up abre). Sair volta para a pagina da live; o sinal de saida vai por
-// beacon. No "ver como" da equipe nada e gravado: nem sinal, nem chat, nem reacao.
+// beacon. No "ver como" da equipe nada e gravado: nem sinal, nem chat, nem reacao. A sala da Live ao vivo (fase 3) e
+// outra tela (live-room.tsx, escolhida pela pagina pela sessao `live`) e usa o mesmo dialogo daqui: o foco preso, o
+// corpo da pagina parado e o prefers-reduced-motion (os helpers exportados abaixo).
 
 type Tab = "chat" | "enquetes" | "perguntas";
 
-const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/** O que recebe o foco dentro da sala (o Tab circula so por aqui enquanto ela esta aberta). */
+export const ROOM_FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -48,6 +51,52 @@ function readReducedMotion() {
     return window.matchMedia(REDUCED_MOTION).matches;
   } catch {
     return false;
+  }
+}
+
+/** prefers-reduced-motion, seguindo a mudanca (as reacoes ficam paradas 1,5 s com ele ligado). */
+export function useRoomReducedMotion(): boolean {
+  return useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
+}
+
+/**
+ * O dialogo aberto (docs/30 §1.7): o corpo da pagina para de rolar, o foco vai para o primeiro [data-room-first-focus]
+ * e volta para onde estava quando a sala minimiza ou fecha.
+ */
+export function useRoomDialogLock(rootRef: RefObject<HTMLElement | null>, active: boolean) {
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const root = rootRef.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    root?.querySelector<HTMLElement>("[data-room-first-focus]")?.focus();
+    return () => {
+      document.body.style.overflow = overflow;
+      previous?.focus?.();
+    };
+  }, [active, rootRef]);
+}
+
+/** O Tab preso no dialogo: do ultimo volta ao primeiro (e o Shift+Tab ao contrario). */
+export function trapRoomFocus(event: Pick<ReactKeyboardEvent, "key" | "preventDefault" | "shiftKey">, root: HTMLElement | null) {
+  if (event.key !== "Tab" || !root) {
+    return;
+  }
+  const focusable = Array.from(root.querySelectorAll<HTMLElement>(ROOM_FOCUSABLE)).filter((element) => element.offsetParent !== null || element === document.activeElement);
+  if (focusable.length === 0) {
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -80,7 +129,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   const [playerEnded, setPlayerEnded] = useState(false);
   /** O contador do ultimo sinal de presenca; antes dele, o da leitura da sessao. */
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
-  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
+  const reducedMotion = useRoomReducedMotion();
   const [replaySeconds, setReplaySeconds] = useState(0);
   const replayOffsetRef = useRef(0);
   const lastReplaySecondRef = useRef<number | null>(null);
@@ -171,20 +220,7 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
   }, [leave, live, minimized]);
 
   // Foco preso e Esc (docs/30 §1.7): o dialogo e o unico lugar do teclado enquanto esta aberto.
-  useEffect(() => {
-    if (minimized) {
-      return;
-    }
-    const root = rootRef.current;
-    const previous = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    root?.querySelector<HTMLElement>("[data-room-first-focus]")?.focus();
-    return () => {
-      document.body.style.overflow = overflow;
-      previous?.focus?.();
-    };
-  }, [minimized]);
+  useRoomDialogLock(rootRef, !minimized);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -196,21 +232,8 @@ export function WebinarRoom({ coverUrl, payload, readOnly, webinarHref }: Webina
       }
       return;
     }
-    if (event.key !== "Tab" || minimized || !rootRef.current) {
-      return;
-    }
-    const focusable = Array.from(rootRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => element.offsetParent !== null || element === document.activeElement);
-    if (focusable.length === 0) {
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !rootRef.current.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
+    if (!minimized) {
+      trapRoomFocus(event, rootRef.current);
     }
   }
 

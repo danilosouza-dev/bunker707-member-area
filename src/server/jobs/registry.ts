@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
+import { webinarRecordingsJob } from "./webinar-recordings-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
 import { webinarSessionsJob } from "./webinar-sessions-job";
 
@@ -46,6 +47,11 @@ import { webinarSessionsJob } from "./webinar-sessions-job";
 // - `webinar-reminders` (lembretes de 24 h e 1 h das lives para quem garantiu vaga, pelo sino e pela fila de e-mail,
 //   e a sessao que encerra sozinha 2 h depois do fim previsto, src/server/jobs/webinar-reminders-job.ts; docs/30 §2.7).
 //   Sem trabalho, uma consulta de sessoes e nada mais;
+// - `webinar-recordings` (o gravador por hora e as gravacoes da Live ao vivo: pede a maquina 30 min antes da live com
+//   "Gravar automaticamente", consulta a Bunny ate a gravacao ficar pronta e cria o replay, devolve a maquina, avisa no
+//   sino a maquina ligada ha mais de 6 h e apaga na Bunny a gravacao vencida uma vez por hora,
+//   src/server/jobs/webinar-recordings-job.ts; docs/30 §4.5 e §6.7). Vem depois dos lembretes: a sessao encerrada
+//   sozinha la ja conta para devolver a maquina aqui. Sem o token do GitHub nem a chave da Bunny, so o aviso de 6 h roda;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
@@ -67,4 +73,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarRemindersJob, webinarRecordingsJob, communicationMediaJob];

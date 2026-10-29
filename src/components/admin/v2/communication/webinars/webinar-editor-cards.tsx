@@ -1,7 +1,8 @@
 "use client";
 
-import { MonitorPlay, Plus, Trash2 } from "lucide-react";
+import { Clapperboard, MonitorPlay, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
@@ -17,7 +18,11 @@ import {
   reminderPreviewText,
   sortWebinarSessions,
   webinarConsoleHref,
-  webinarFirstSessionAt
+  webinarFirstSessionAt,
+  webinarRecordingCard,
+  type WebinarCardLink,
+  type WebinarLiveSessionSummary,
+  type WebinarPermissions
 } from "@/server/webinars/editor-model";
 import { toTime, type AccessMode, type ChatMode, type DisplayNameMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
 import type { WebinarEditorOptions } from "@/server/webinars/queries";
@@ -682,17 +687,72 @@ export function QualityCard({ disabled, draft, onChange }: CardProps) {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Gravacao (so Live ao vivo)
+ * Gravacao (so Live ao vivo): a situacao do servidor de gravacao e os caminhos para o console (fase 3)
  * ---------------------------------------------------------------------------------------------- */
 
-export function RecordingCard({ disabled, draft, onChange }: CardProps) {
+type RecordingCardProps = CardProps & {
+  /** A sala ao vivo existe neste ambiente (liveRoomConfigured, lido no servidor pela pagina). */
+  liveRoomReady: boolean;
+  /** A sessao `live` gravada (nula antes de publicar); so situacao e gravador, nunca o nome da sala. */
+  liveSession: Pick<WebinarLiveSessionSummary, "recorderStatus" | "status"> | null;
+  permissions: WebinarPermissions;
+  webinarId: string | null;
+};
+
+const cardLinkClass =
+  "inline-flex min-h-9 w-fit items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-[var(--text-primary)] underline-offset-4 hover:underline";
+
+/** Um caminho do card para o console: link quando vale, texto desligado com a explicacao quando falta permissao. */
+function CardLink({ icon, id, link }: { icon: ReactNode; id: string; link: WebinarCardLink }) {
+  if (link.href) {
+    return (
+      <Link className={cardLinkClass} data-card-link={id} href={link.href}>
+        {icon}
+        {link.label}
+      </Link>
+    );
+  }
+
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5" data-card-link={id}>
+      <span aria-disabled="true" className="inline-flex min-h-9 w-fit items-center gap-1.5 px-2 text-[13px] font-medium text-[var(--text-tertiary)]">
+        {icon}
+        {link.label}
+      </span>
+      {link.blocked ? <span className="px-2 text-xs leading-5 text-[var(--text-secondary)]">{link.blocked}</span> : null}
+    </span>
+  );
+}
+
+export function RecordingCard({ disabled, draft, liveRoomReady, liveSession, onChange, permissions, webinarId }: RecordingCardProps) {
+  const view = webinarRecordingCard({ autoRecord: draft.autoRecord, liveRoomReady, liveSession, permissions, webinarId });
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <AdminSwitch checked={draft.autoRecord} description={copy.autoRecordHint} disabled={disabled} id="webinar-autoRecord" label={copy.autoRecord} onCheckedChange={(autoRecord) => onChange({ autoRecord })} />
-      <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
-        {copy.recordingStatus}: <span className="font-medium text-[var(--text-primary)]">{copy.recordingStatusNone}</span>
-      </p>
-      <SoonRow label={copy.recordingSoon} />
+      <AdminSwitch checked={draft.autoRecord} description={view.autoRecordHint} disabled={disabled} id="webinar-autoRecord" label={copy.autoRecord} onCheckedChange={(autoRecord) => onChange({ autoRecord })} />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <p className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] leading-5 text-[var(--text-secondary)]" data-recorder-status={view.status.value}>
+          <span>{copy.recordingStatus}:</span>
+          <StatusChip tone={view.status.tone}>{view.status.label}</StatusChip>
+        </p>
+        {view.pendingNote ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{view.pendingNote}</p> : null}
+      </div>
+      {view.prepare || view.upload ? (
+        <div className="flex min-w-0 flex-col gap-2">
+          {view.prepare ? <CardLink icon={<Clapperboard aria-hidden="true" className="size-4" />} id="prepare" link={view.prepare} /> : null}
+          {view.upload ? (
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <CardLink icon={<Upload aria-hidden="true" className="size-4" />} id="upload" link={view.upload} />
+              <span className="px-2 text-xs leading-5 text-[var(--text-secondary)]">{copy.recordingUploadHint}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {view.roomMissingNote ? (
+        <p className="text-xs leading-5 text-[var(--text-tertiary)]" data-live-room-missing="" role="note">
+          {view.roomMissingNote}
+        </p>
+      ) : null}
     </div>
   );
 }

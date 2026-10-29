@@ -14,7 +14,9 @@ import type { ChatPostBody } from "./room-api";
 // ouve "N mensagens novas" em vez de cada uma), a mensagem fixada no topo, os selos Equipe / Apresentador /
 // Assistente, a pendente do proprio aluno ("Aguardando a equipe"), o aceite na primeira mensagem (o texto de §8.5,
 // palavra por palavra, com "Entendi e quero participar" e "Participar como anonimo", e como o nome aparece), o
-// compositor (desligado, so a equipe, modo lento com a contagem) e o menu "..." com Remover minhas mensagens.
+// compositor (desligado, so a equipe, modo lento com a contagem) e o menu "..." com Remover minhas mensagens. Na live
+// (fase 3) o campo da lugar a uma frase (`notice`) quando o aluno esta silenciado no chat (ate a hora em Sao Paulo ou
+// ate o fim) ou antes de a sala abrir.
 
 export type RoomChatPanelProps = {
   busy?: boolean;
@@ -24,6 +26,8 @@ export type RoomChatPanelProps = {
   displayName: string | null;
   error: string | null;
   messages: readonly RoomMessage[];
+  /** Fase 3: a frase que toma o lugar do campo (silenciado no chat, sala que ainda nao abriu); nulo, o campo fica. */
+  notice?: string | null;
   nowMs: number;
   onRemoveMine: () => Promise<number>;
   onSend: (body: Omit<ChatPostBody, "sessionId">) => Promise<{ pending: boolean }>;
@@ -148,7 +152,7 @@ function composerHint(state: ComposerState, phase: SimulatedPhase | "replay"): s
 }
 
 export function RoomChatPanel(props: RoomChatPanelProps) {
-  const { busy = false, chatMode, consented, defaultDisplayMode, error, messages, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, slowUntilMs } = props;
+  const { busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, slowUntilMs } = props;
   const copy = WEBINAR_COPY.sala;
   const [draft, setDraft] = useState("");
   const [consentOpen, setConsentOpen] = useState(false);
@@ -305,7 +309,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         {announce}
       </p>
 
-      {consentOpen && !consented ? (
+      {consentOpen && !consented && !notice ? (
         <RoomConsentBox
           busy={sending}
           defaultDisplayMode={defaultDisplayMode}
@@ -322,32 +326,38 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         />
       ) : null}
 
-      <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
-        <div className="flex items-end gap-2">
-          <textarea
-            aria-label={copy.escreva}
-            className="max-h-24 min-h-11 flex-1 resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
-            disabled={state.disabled || readOnly || busy}
-            maxLength={CHAT_LIMITS.body}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={hint || copy.escreva}
-            rows={1}
-            value={draft}
-          />
-          <button
-            aria-label={copy.enviar}
-            className="grid size-11 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
-            disabled={state.disabled || readOnly || sending || !draft.trim()}
-            type="submit"
-          >
-            <SendHorizontal aria-hidden="true" className="size-4" />
-          </button>
-        </div>
-        <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-amber-200" : "text-zinc-500")}>
-          {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
+      {notice ? (
+        <p className="border-t border-white/10 bg-[#111] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-amber-100" data-testid="room-chat-notice" role="status">
+          {notice}
         </p>
-      </form>
+      ) : (
+        <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+          <div className="flex items-end gap-2">
+            <textarea
+              aria-label={copy.escreva}
+              className="max-h-24 min-h-11 flex-1 resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
+              disabled={state.disabled || readOnly || busy}
+              maxLength={CHAT_LIMITS.body}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={hint || copy.escreva}
+              rows={1}
+              value={draft}
+            />
+            <button
+              aria-label={copy.enviar}
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+              disabled={state.disabled || readOnly || sending || !draft.trim()}
+              type="submit"
+            >
+              <SendHorizontal aria-hidden="true" className="size-4" />
+            </button>
+          </div>
+          <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-amber-200" : "text-zinc-500")}>
+            {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
+          </p>
+        </form>
+      )}
     </div>
   );
 }

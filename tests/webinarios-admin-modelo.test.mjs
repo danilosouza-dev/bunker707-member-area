@@ -120,7 +120,7 @@ test("situacoes: rotulo, tom e os botoes do topo de §2.3; sem messaging.publish
   assert.deepEqual(vm.webinarActionsFor("cancelled", { canPublish: false, canWrite: false }), [], "sem messaging.write nada aparece");
 });
 
-test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o que chega em outra fase vem desligado com 'em breve'", () => {
+test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so rascunho); so o que chega na fase 4 vem com 'em breve'", () => {
   const rows = (situation, permissions = both, exclude = []) => vm.webinarMenuEntries(situation, permissions, exclude).map((entry) => [entry.action, entry.label, entry.destructive, entry.separated, entry.soon]);
 
   assert.deepEqual(rows("draft"), [
@@ -136,13 +136,14 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
     ],
     "sem messaging.publish nao exclui"
   );
+  // Fase 3: Abrir a sala vale (leva ao console da sessao); so Publicar replay segue "em breve".
   assert.deepEqual(rows("scheduled"), [
     ["open", "Abrir", false, false, false],
-    ["open_room", "Abrir a sala", false, false, true],
+    ["open_room", "Abrir a sala", false, false, false],
     ["duplicate", "Duplicar", false, false, false],
     ["cancel", "Cancelar", true, true, false]
   ]);
-  // Fase 2b: Abrir o console, Encerrar live e Ver relatório valem; Abrir a sala e Publicar replay seguem "em breve".
+  // Fase 2b: Abrir o console, Encerrar live e Ver relatório valem.
   assert.deepEqual(rows("in_progress"), [
     ["open", "Abrir", false, false, false],
     ["open_console", "Abrir o console", false, false, false],
@@ -155,9 +156,10 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
     ["publish_replay", "Publicar replay", false, false, true],
     ["duplicate", "Duplicar", false, false, false]
   ]);
-  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["open_room", "publish_replay"]);
-  assert.deepEqual([...vm.WEBINAR_LINK_ACTIONS], ["open", "open_console", "view_report"]);
+  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"]);
+  assert.deepEqual([...vm.WEBINAR_LINK_ACTIONS], ["open", "open_room", "open_console", "view_report"]);
   assert.equal(vm.webinarActionHref("open_console", "abc"), "/admin/comunicacao/webinarios/abc/sala");
+  assert.equal(vm.webinarActionHref("open_room", "abc"), "/admin/comunicacao/webinarios/abc/sala", "Abrir a sala leva ao console");
   assert.equal(vm.webinarActionHref("view_report", "abc"), "/admin/comunicacao/webinarios/abc/relatorio");
   assert.equal(vm.webinarActionHref("end", "abc"), null);
   assert.equal(vm.webinarConsoleHref("abc", "s1"), "/admin/comunicacao/webinarios/abc/sala?sessao=s1");
@@ -166,7 +168,7 @@ test("menu '…' (§2.1): Abrir, Duplicar, Cancelar e Excluir (so rascunho); o q
     ["duplicate", "Duplicar", false, false, false]
   ]);
   assert.deepEqual(
-    rows("scheduled", both, ["open", ...vm.WEBINAR_SOON_ACTIONS]).map((row) => row[0]),
+    rows("scheduled", both, ["open", "open_room"]).map((row) => row[0]),
     ["duplicate", "cancel"],
     "no editor, Abrir e os botoes do topo ficam fora do menu"
   );

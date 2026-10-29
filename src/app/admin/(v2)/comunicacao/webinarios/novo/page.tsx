@@ -9,6 +9,7 @@ import { can } from "@/server/auth/roles";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_KIND_PARAM, parseWebinarKindParam } from "@/server/webinars/editor-model";
+import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { loadWebinarEditorOptions } from "@/server/webinars/queries";
 
 // Publicar roda Server Actions desta rota (cria as sessoes).
@@ -29,7 +30,7 @@ function readNow() {
 
 // Comunicação › Webinários › Novo webinário (docs/30 §2.2): pergunta o tipo em duas pilulas (ou abre ja no tipo de
 // ?tipo=ao-vivo|gravada) e segue para os cards. So quem cria avisos (messaging.write) entra; o resto volta para a
-// lista.
+// lista. O card Gravacao recebe, lido no servidor, se a sala ao vivo existe neste ambiente (so o booleano).
 export default async function AdminNewWebinarPage({ searchParams }: PageProps) {
   const [{ access }, params] = await Promise.all([requirePageArea("comunicacao"), searchParams]);
 
@@ -55,6 +56,7 @@ export default async function AdminNewWebinarPage({ searchParams }: PageProps) {
     <WebinarEditor
       defaultKind={parseWebinarKindParam(params[WEBINAR_KIND_PARAM])}
       initial={null}
+      liveRoomReady={liveRoomConfigured(process.env)}
       now={readNow()}
       options={loaded.data}
       permissions={{ canPublish: can(access, "messaging.publish"), canWrite: true }}

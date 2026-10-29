@@ -3,11 +3,12 @@ import { listStudentQuestions, webinarsDb } from "@/server/webinars/room-queries
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { askStudentQuestion } from "@/server/webinars/room-writes";
 
-// A aba Perguntas (docs/30 §1.3, §5.1 e D22): GET ?sessao=&ordem=votadas|recentes lista as abertas e as respondidas
-// (a dispensada so para o autor) com `mine` e `voted`; POST { sessionId, body, anonymous, offsetMs? } faz a pergunta
-// (sem o aceite do chat, o corpo traz consent + consentVersion + displayMode, ou 409 consent_required; anonima com a
-// opcao desligada 400; 2 por minuto por aluno e sessao: 429 com Retry-After; palavra bloqueada 422) e responde 201.
-// Sessao obrigatoria; o teto global de 30 escritas por minuto; fora do acesso ou sessao de outro webinario: 404.
+// A aba Perguntas (docs/30 §1.3, §5.1 e D22): GET ?sessao=&ordem=votadas|recentes lista as abertas e as respondidas (a
+// dispensada so para o autor) com `mine` e `voted`; POST { sessionId, body, anonymous, offsetMs? } faz a pergunta (sem
+// o aceite do chat, o corpo traz consent + consentVersion + displayMode, ou 409 consent_required; anonima com a opcao
+// desligada 400; 2 por minuto por aluno e sessao: 429 com Retry-After; palavra bloqueada 422; na live, removido ou
+// banido 409 banned e silenciado no chat 409 muted) e responde 201. Sessao obrigatoria; o teto global de 30 escritas
+// por minuto; fora do acesso ou sessao de outro webinario: 404.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

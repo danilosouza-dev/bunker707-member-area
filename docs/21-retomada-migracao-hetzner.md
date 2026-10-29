@@ -501,3 +501,72 @@ expirou tres vezes (ela espera 60 s e nao apareceu para o produtor): o produtor 
 supabase_migrations.schema_migrations (version, name) values ('202610290001', 'webinars_v2_chat') on conflict (version)
 do nothing;`). `list_migrations` mostra `202610290001`. Proxima vez que uma secao tiver `delete`: mandar direto o arquivo
 para o SQL Editor.
+
+### 9.8 Webinarios v3: migracao `202610290002` antes do merge (29/10/2026)
+
+A fase 3 "Sala ao vivo" (`docs/30` §11) vem na mesma PR com `supabase/migrations/202610290002_webinars_v3_live.sql`
+(sha256 `b48d8504a243ba8f...`, fixado na guarda `webinarios-v3.guard`, que tambem confere byte a byte as 54 migracoes de
+antes). Regra igual a da 9.6: **antes do merge na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo pede as
+colunas novas de `webinar_sessions` em toda leitura de sessao: as paginas de webinario do aluno e do admin mostram o
+aviso de migracao pendente e o job `webinar-recordings` registra a migracao pendente e termina; o resto do app segue. A
+migracao sozinha nao atrapalha o app de antes: as colunas novas tem padrao (`recorder_status = 'none'`,
+`room_locked = false`, o resto nulo) e o check `webinar_sessions_live_only_v3` aceita toda linha que o app de antes grava;
+tres tabelas e uma funcao que ele nao le.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: pelo MCP do Supabase, `execute_sql`, **uma secao por chamada e na ordem
+do arquivo**, cada uma comecando com `set lock_timeout = '5s';`: 1 `webinar_sessions` (as sete colunas, os tres checks
+dentro de `do $$ ... if not exists`, o indice unico parcial de `room_name` e os comentarios) -> 2 `webinar_recordings`
+(`checked_at`, `purged_at` e os dois indices parciais) -> 3 `webinar_session_bans` e `webinar_user_bans` (RLS, revoke de
+`anon` e `authenticated`, grant ao `service_role`) -> 4 `webinar_recording_events` (idem, e os tres indices) -> 5 a
+funcao `webinar_mark_recording_anchor` (com o revoke e o grant so ao `service_role`) -> 6 os indices
+`webinar_sessions_recorder_idx` e `webinar_session_bans_session_idx`. Nenhuma secao tem `delete`, `drop` nem politica (a
+5 so define a funcao; os `update` dela rodam quando o app chama). Se o MCP pedir confirmacao e a janela expirar (como na
+9.7), mandar o arquivo inteiro para o SQL Editor (e idempotente). Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610290002', 'webinars_v3_live') on conflict
+(version) do nothing;` e conferir `list_migrations`.
+
+Conferencia depois de aplicar (as consultas do cabecalho da migracao):
+
+```sql
+select column_name from information_schema.columns where table_name = 'webinar_sessions'
+  and column_name in ('room_name', 'recorder_status', 'recorder_requested_at', 'recorder_release_requested_at',
+    'recorder_alerted_at', 'recording_requested_at', 'room_locked'); -- 7 linhas
+select column_name from information_schema.columns where table_name = 'webinar_recordings'
+  and column_name in ('checked_at', 'purged_at'); -- 2 linhas
+select count(*) from pg_tables where schemaname = 'public'
+  and tablename in ('webinar_session_bans', 'webinar_user_bans', 'webinar_recording_events'); -- 3
+select indexname from pg_indexes where schemaname = 'public' and indexname in ('webinar_sessions_room_name_idx',
+  'webinar_recording_events_unique_idx', 'webinar_session_bans_session_idx', 'webinar_sessions_recorder_idx'); -- 4 linhas
+select proname from pg_proc where proname = 'webinar_mark_recording_anchor'; -- 1 linha
+select public.webinar_mark_recording_anchor(gen_random_uuid()); -- erro P0002 (sessao inexistente)
+```
+
+E mais duas, das regras de acesso: `select relrowsecurity from pg_class where relname in ('webinar_session_bans',
+'webinar_user_bans', 'webinar_recording_events')` (3 x `true`) e
+`select has_function_privilege('authenticated', 'public.webinar_mark_recording_anchor(uuid, timestamptz)', 'execute')`
+(`false`; `service_role`: `true`). A idempotencia se confere rodando a secao 1 de novo (sem erro, nada muda). Estado em
+29/10/2026: aplicada na nuvem de teste antes do merge da PR da fase 3. As seis secoes da 0002 e a secao 2 da 0003 foram pelo
+MCP, uma por chamada, sem travar. A secao 1 da 0003 (`drop index` da chave antiga) fez o MCP pedir confirmacao e a janela
+expirou, entao o produtor rodou no SQL Editor as secoes 1 e 3 da 0003 e o registro das duas versoes. `list_migrations`
+mostra `202610290002` e `202610290003`. Antes disso, o arquivo rodou duas vezes num Postgres 16 limpo e duas no banco de
+ensaio com o rascunho.
+
+Se a migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so a
+secao que mudou) do mesmo jeito, e atualizar juntos este paragrafo e o hash da guarda.
+
+**A 0003 da revisao (29/10/2026)**: `supabase/migrations/202610290003_webinars_v3_ajustes.sql` vem na mesma PR, depois da
+0002 (as duas sao aplicadas juntas, nesta ordem; a 0002 nao muda mais). Tres secoes, pelo MCP uma por chamada (cada uma com `set lock_timeout = '5s';`)
+ou o arquivo inteiro no SQL Editor (idempotente): 1 `webinar_recording_events.machine_requested_at` e a chave unica
+nova (o indice novo nasce antes de o velho sair) -> 2 `webinar_sessions.browser_recording_at` e o check -> 3 a funcao
+`webinar_live_offset_from_anchor` e os quatro triggers. Tambem antes do merge na `dev`: o app novo pede
+`browser_recording_at` em toda leitura de sessao (sem ela, o aviso de migracao pendente aponta a 0003) e o webhook do
+gravador grava `machine_requested_at`. Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610290003', 'webinars_v3_ajustes') on
+conflict (version) do nothing;`, e conferir com as consultas do cabecalho dela (a coluna, so o indice
+`webinar_recording_events_machine_unique_idx`, a coluna da sessao e os 4 triggers). Conferida num Postgres 16 com a 0002
+(duas vezes seguidas, e a escrita em voo esperando a ancora e gravando o offset pela ancora).
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
+app. Os servidores C (Jitsi) e D (gravador por hora) seguem com o ok do produtor no chat antes de qualquer criacao
+(`docs/20` §8B); ate la, sem `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` no app, a sala ao vivo diz "em breve" e nada
+quebra.

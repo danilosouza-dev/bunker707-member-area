@@ -257,7 +257,8 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       body: data.body,
       display_name: teamDisplayName(user),
       kind: data.kind,
-      master: false,
+      // D31: o que e escrito na Live ao vivo nasce na linha mestre (o replay toca o chat da live pela posicao do video).
+      master: session.kind === "live",
       offset_ms: offset,
       reply_to_id: data.replyToId ?? null,
       role,
@@ -654,7 +655,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
         body: answerText,
         display_name: teamDisplayName(user),
         kind: "answer",
-        master: false,
+        master: session.kind === "live",
         offset_ms: offset,
         reply_to_id: question.message_id,
         role: teamRole(webinar, user.id),
