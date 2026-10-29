@@ -563,7 +563,9 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   e um `deploy-meet` com `SEM_LIVE_2H=sim`): uma URL so, entao o teste e a producao nao barram ao mesmo tempo.
 - O jicofo so responde `/about/health` com `JICOFO_ENABLE_HEALTH_CHECKS=1` (no compose, padrao 1): sem isso a rota da
   404, o container fica `unhealthy` para sempre e o `deploy-meet` para no `wait_healthy jicofo` (a sala funciona, mas o
-  `smoke.sh` nao roda).
+  `smoke.sh` nao roda). E com `JICOFO_ENABLE_REST=1` (padrao 1) a REST ouve em `0.0.0.0` dentro do container: sem
+  isso ela fica so no loopback do container e o `smoke.sh`, que pergunta em `127.0.0.1:8888` do servidor, ve `000`. A
+  porta continua publicada so em `127.0.0.1`.
 - `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
   `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
   (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
@@ -634,7 +636,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 
 | Sintoma | O que fazer |
 |---|---|
-| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`) |
+| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`); o `smoke.sh` ve `000` em `127.0.0.1:8888` com o container saudavel = falta `JICOFO_ENABLE_REST` (a REST so no loopback do container) |
 | Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
 | Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
 | Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |

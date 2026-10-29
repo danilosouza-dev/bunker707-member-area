@@ -172,6 +172,7 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   assert.match(jicofo, /ENABLE_AUTO_OWNER: "\$\{ENABLE_AUTO_OWNER:-0\}"/, "o primeiro que entra nao vira moderador (D14)");
   assert.match(jicofo, /JICOFO_MAX_MEMORY: "\$\{JICOFO_MAX_MEMORY:-512m\}"/);
   assert.match(jicofo, /JICOFO_ENABLE_HEALTH_CHECKS: "\$\{JICOFO_ENABLE_HEALTH_CHECKS:-1\}"/, "sem a saude ligada /about/health responde 404 e o healthcheck nunca passa");
+  assert.match(jicofo, /JICOFO_ENABLE_REST: "\$\{JICOFO_ENABLE_REST:-1\}"/, "sem a REST ligada o jicofo ouve so no loopback do container e o smoke.sh (127.0.0.1:8888 do servidor) ve 000");
   assert.match(jicofo, /- "127\.0\.0\.1:\$\{JICOFO_REST_PORT:-8888\}:8888"/);
   assert.doesNotMatch(jicofo, /^\s+- "(?!127\.0\.0\.1:)[^"]*:\d+"\s*$/m, "o jicofo nao publica porta fora de 127.0.0.1");
   const jvb = services.get("jvb");
