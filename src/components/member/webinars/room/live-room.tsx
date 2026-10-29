@@ -18,6 +18,7 @@ import {
   LIVE_ROOM_RULES,
   liveAcceptsWrites,
   liveComposerNotice,
+  liveElapsedLabel,
   liveNoticePhrase,
   liveOnAirLabel,
   livePhaseOf,
@@ -430,6 +431,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           badge={recording && !blocked ? <LiveRecordingBadge /> : null}
           kind="live"
           liveLabel={liveOnAirLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
+          liveTime={liveElapsedLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
           onLeave={askToLeave}
           onMinimize={() => setMinimized(true)}
           phase={phase}

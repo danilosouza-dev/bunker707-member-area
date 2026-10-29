@@ -573,6 +573,16 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
 - `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
   custo; avisa quando um gravador passa de 6 h ligado.
+- **No dia em que a producao (`membros.<dominio>`) passar a usar a sala ao vivo**, junto com a troca do `ROOM_GUARD_URL`
+  para `https://membros.<dominio>/api/webhooks/room-guard`: o `MEET_FRAME_ANCESTORS` do C tambem foi gerado so com a
+  origem da Vercel de teste (o `--app-origin` do primeiro `deploy-meet`) e precisa da origem de producao; sem ela o
+  navegador recusa a sala dentro da area (o cabecalho `frame-ancestors` do Caddy do C, `docs/30` D18 e D40). O
+  `frame-ancestors` aceita uma lista separada por espaco, entao as duas origens ficam: `exec-meet` com
+  `sed -i 's#^MEET_FRAME_ANCESTORS=.*#MEET_FRAME_ANCESTORS="https://membros.<dominio> https://bunker707-member-area.vercel.app"#' infra/jitsi/.env`
+  e um `deploy-meet` com `SEM_LIVE_2H=sim` (recria o Caddy com o valor novo e o `smoke.sh` confere o cabecalho). As
+  aspas funcionam: o compose tira as aspas do valor no `.env`, o Caddyfile poe o valor inteiro dentro de
+  `"frame-ancestors {$MEET_FRAME_ANCESTORS}"` e o `env_value` dos scripts (`smoke.sh`) tambem tira as aspas. O
+  `deploy-meet` nao regera um `.env` que ja existe, entao a troca fica.
 
 ### 8B.4 Antes da primeira live real
 

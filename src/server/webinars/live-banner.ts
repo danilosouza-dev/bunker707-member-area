@@ -16,6 +16,7 @@
 // relativos: tests/webinarios-faixa-ao-vivo.test.mjs carrega direto pelo Node. Nada aqui le o banco nem o relogio.
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
+import { WEBINAR_ROOM_PATH } from "../../lib/webinar-paths";
 import { bannerWindow, REMINDER_RULES, toTime, webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { canJoinSimulated, simulatedPhase } from "./room-model";
 import { registrationFor, roomHref, seatRequired } from "./student-model";
@@ -318,7 +319,7 @@ export function isDismissed(map: Readonly<Record<string, number>>, key: string, 
  * Onde a faixa aparece
  * ---------------------------------------------------------------------------------------------- */
 
-const NEVER_ON = [/^\/webinarios\/[^/]+\/sala(\/|$)/, /^\/(login|tv|auth|alterar-senha|admin)(\/|$)/];
+const NEVER_ON = [WEBINAR_ROOM_PATH, /^\/(login|tv|auth|alterar-senha|admin)(\/|$)/];
 
 /** Todas as paginas da area, menos a propria sala (/webinarios/<slug>/sala), o login e o Modo TV (docs/30 §1.1). */
 export function liveBannerAllowedOn(pathname: string | null | undefined): boolean {

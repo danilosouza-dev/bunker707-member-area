@@ -180,3 +180,65 @@ test("o relogio do console: o offset pelo skew e o rotulo por fase", () => {
   assert.equal(console_.consoleClockLabel(10, "cancelled"), "");
   assert.equal(console_.CONSOLE_POLL_MS, 5_000);
 });
+
+// O topo como a tela monta: o relogio do aparelho mais o skew, o tempo da sessao e a fase.
+function topLabel(target, deviceNowMs, skewMs = 0) {
+  const nowMs = deviceNowMs + skewMs;
+  return console_.consoleClockLabel(console_.consoleClockMs(target, DURATION, nowMs), console_.consolePhaseOf(target, DURATION, nowMs));
+}
+
+test("o topo da live ao vivo conta desde o Iniciar live e para no Encerrar live (5 s ou 3 h depois, Durou e o mesmo)", () => {
+  const started = { kind: "live", startedAt: new Date(T0).toISOString(), status: "live" };
+  assert.equal(topLabel(session(started), T0 + 5 * MIN - 4_000, 4_000), "No ar há 5:00", "no ar, com o aparelho atrasado 4 s");
+
+  const ended = session({ ...started, endedAt: new Date(T0 + 42 * MIN).toISOString(), status: "ended" });
+  assert.equal(topLabel(ended, T0 + 42 * MIN + 1_000, 4_000), "Durou 42:00", "5 s depois do Encerrar live");
+  assert.equal(topLabel(ended, T0 + 42 * MIN + 3 * HOUR - 4_000, 4_000), "Durou 42:00", "3 h depois, com o console ainda aberto");
+
+  const anchored = session({ ...started, recordingAnchorAt: new Date(T0 + 15 * MIN).toISOString() });
+  assert.equal(topLabel(anchored, T0 + 20 * MIN), "No ar há 20:00", "a ancora da gravacao nao move o topo: conta desde o startedAt, como a sala do aluno e o relatorio");
+  assert.equal(console_.consoleOffsetMs(anchored, T0 + 20 * MIN, 0), 5 * MIN, "o roteiro segue no relogio da ancora");
+  assert.equal(topLabel({ ...anchored, endedAt: new Date(T0 + 42 * MIN).toISOString(), status: "ended" }, T0 + 2 * HOUR), "Durou 42:00");
+});
+
+test("o topo da live ao vivo antes de comecar: Começa em ate a hora; na espera depois da hora e encerrada direto da espera, vazio", () => {
+  const scheduled = session({ kind: "live", status: "scheduled" });
+  assert.equal(topLabel(scheduled, T0 - 10 * MIN), "Começa em 10:00");
+  assert.equal(topLabel({ ...scheduled, status: "waiting" }, T0 + 3 * MIN), "", "na espera depois da hora, sem startedAt: nada a contar");
+
+  const endedFromWaiting = session({ endedAt: new Date(T0 + 10 * MIN).toISOString(), kind: "live", status: "ended" });
+  assert.ok(Number.isNaN(console_.consoleClockMs(endedFromWaiting, DURATION, T0 + 11 * MIN)));
+  assert.equal(topLabel(endedFromWaiting, T0 + 11 * MIN), "", "nunca foi ao ar: sem Durou");
+  assert.equal(topLabel(endedFromWaiting, T0 + 3 * HOUR), "");
+  assert.equal(topLabel(session({ endedAt: new Date(T0 - 5 * MIN).toISOString(), kind: "live", status: "ended" }), T0 - MIN), "", "encerrada antes da hora: nem Começa em");
+});
+
+test("o topo da Live gravada: anda no ar, para no Encerrar e nunca passa da duracao do video (o tick que fecha horas depois)", () => {
+  const live = session({ startedAt: new Date(T0).toISOString(), status: "live" });
+  assert.equal(topLabel(live, T0 + 5 * MIN), "No ar há 5:00");
+  assert.equal(topLabel(live, T0 + 6 * MIN), "No ar há 6:00", "aberta, anda");
+  assert.equal(topLabel(session(), T0 - 4 * MIN - 10_000), "Começa em 4:10");
+
+  const byButton = { ...live, endedAt: new Date(T0 + 20 * MIN).toISOString(), status: "ended" };
+  assert.equal(topLabel(byButton, T0 + 20 * MIN + 5_000), "Durou 20:00", "encerrada pelo botao antes do fim do video");
+  assert.equal(topLabel(byButton, T0 + 3 * HOUR), "Durou 20:00");
+
+  const lateTick = { ...live, endedAt: new Date(T0 + 4 * HOUR).toISOString(), status: "ended" };
+  assert.equal(topLabel(lateTick, T0 + 5 * HOUR), "Durou 1:00:00", "ended_at gravado horas depois do fim: limitado a duracao");
+  assert.equal(topLabel(live, T0 + 2 * HOUR), "Durou 1:00:00", "o tick ainda nao fechou: a fase ja e encerrada e o topo nao passa da duracao");
+
+  assert.equal(topLabel(session({ endedAt: new Date(T0 - 5 * MIN).toISOString(), status: "ended" }), T0 + HOUR), "", "encerrada antes da hora: nunca foi ao ar");
+  assert.ok(Number.isNaN(console_.consoleClockMs(session({ kind: "replay", status: "live" }), DURATION, T0 + MIN)), "o replay nao tem relogio");
+});
+
+test("o offset do roteiro corta no encerramento: depois do Encerrar, a fila fica no minuto em que a sessao acabou", () => {
+  const live = session({ startedAt: new Date(T0).toISOString(), status: "live" });
+  assert.equal(console_.consoleOffsetMs(live, T0 + 30 * MIN, 0), 30 * MIN, "aberta, anda");
+  const ended = { ...live, endedAt: new Date(T0 + 20 * MIN).toISOString(), status: "ended" };
+  assert.equal(console_.consoleOffsetMs(ended, T0 + 3 * HOUR, 4_000), 20 * MIN);
+  const anchored = session({ endedAt: new Date(T0 + 42 * MIN).toISOString(), kind: "live", recordingAnchorAt: new Date(T0 + 15 * MIN).toISOString(), startedAt: new Date(T0).toISOString(), status: "ended" });
+  assert.equal(console_.consoleOffsetMs(anchored, T0 + 3 * HOUR, 0), 27 * MIN, "na live, pela ancora ate o Encerrar live");
+  const late = { body: "x", createdAt: "", generatedByAi: false, id: "late", kind: "message", offsetMs: 25 * MIN, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "", webinarId: "w1" };
+  const queue = console_.scriptQueue([late], {}, console_.consoleOffsetMs(ended, T0 + 3 * HOUR, 0));
+  assert.equal(queue[0].passed, false, "o item depois do fim nao conta como passado");
+});

@@ -15,6 +15,7 @@ import {
   canOpenSession,
   canTeamActOn,
   consoleClockLabel,
+  consoleClockMs,
   consoleOffsetMs,
   consolePhaseLabel,
   consolePhaseOf,
@@ -120,6 +121,8 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   const durationMs = sessionDurationMs(webinar.recordingDurationSeconds, webinar.durationMinutes);
   const nowMs = tick + skew;
   const offsetMs = session ? consoleOffsetMs(session, tick, skew) : Number.NaN;
+  // O topo conta o tempo da sessao (desde o Iniciar live na ao vivo) e para no encerramento; o roteiro segue offsetMs.
+  const clockMs = session ? consoleClockMs(session, durationMs, nowMs) : Number.NaN;
   const phase = session ? consolePhaseOf(session, durationMs, nowMs) : null;
   const canAct = session ? canTeamActOn(session) : false;
   const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, offsetMs) : []), [snapshot, offsetMs]);
@@ -562,7 +565,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
             <span className="flex flex-wrap items-center gap-2" data-console-status="">
               <StatusChip tone={consolePhaseTone(phase)}>{consolePhaseLabel(phase)}</StatusChip>
               <span className="tabular-nums" data-console-clock="">
-                {consoleClockLabel(offsetMs, phase)}
+                {consoleClockLabel(clockMs, phase)}
               </span>
               <span className="tabular-nums" data-console-present="">
                 · {copy.presentNow(snapshot?.presentNow ?? 0)}

@@ -3,8 +3,9 @@ import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
 // Regras puras do topo da area do aluno: grupos e itens da barra lateral (fonte unica da navegacao),
-// item ativo pela rota, previa do produtor nos links, menu da conta, saudacao e historico da IA
-// Diretor. O que e tela (gaveta, menu, botoes) esta em tests/e2e/aluno-menu-e-ia-diretor.spec.ts.
+// item ativo pela rota, previa do produtor nos links, menu da conta, onde o botao da IA Diretor aparece,
+// saudacao e historico da IA Diretor. O que e tela (gaveta, menu, botoes) esta em
+// tests/e2e/aluno-menu-e-ia-diretor.spec.ts (e o botao fora da sala do Webinario, nos e2e aluno-assiste-live-*).
 
 const model = await import("../src/components/member/shell/member-shell-model.ts");
 const navigation = await import("../src/lib/member-navigation.ts");
@@ -51,6 +52,33 @@ test("menu da conta: Perfil, Minhas compras e Suporte, com o ativo marcado e a p
     model.getMemberAccountMenuLinks("/", "producer").map((link) => link.href),
     ["/perfil?accessPreview=producer", "/minhas-compras?accessPreview=producer", "/suporte?accessPreview=producer"]
   );
+});
+
+test("IA Diretor: o botao flutuante some so na sala do Webinario (com ?sessao=, maiusculas, barra no fim); a pagina do Webinario e as outras continuam", () => {
+  // A sala e um dialogo de tela cheia: o botao (fixed bottom-4 right-4) cobriria o Enviar do chat e o X da pilula.
+  for (const sala of [
+    "/webinarios/aula-de-ia/sala",
+    "/webinarios/aula-de-ia/sala?sessao=0b1c2d3e-aaaa-4bbb-8ccc-123456789abc",
+    "/Webinarios/aula/SALA",
+    "/webinarios/x/sala/",
+    "/webinarios/aula-de-ia/sala#chat"
+  ]) {
+    assert.equal(model.directorLauncherAllowedOn(sala), false, sala);
+  }
+
+  for (const pagina of [
+    "/",
+    "/webinarios",
+    "/webinarios/aula-de-ia",
+    "/webinarios/aula-de-ia?sessao=0b1c2d3e-aaaa-4bbb-8ccc-123456789abc",
+    "/webinarios/sala",
+    "/webinarios/aula-de-ia/salas",
+    "/conteudo/curso-1/aulas/modulo-1?aula=aula-1",
+    null,
+    undefined
+  ]) {
+    assert.equal(model.directorLauncherAllowedOn(pagina), true, String(pagina));
+  }
 });
 
 test("primeiro nome e saudacao da IA Diretor", () => {

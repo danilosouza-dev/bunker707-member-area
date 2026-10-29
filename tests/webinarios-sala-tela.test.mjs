@@ -10,9 +10,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 // "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (os selos Equipe / Apresentador /
 // Assistente, a pendente "Aguardando a equipe", a fixada, o compositor desligado e no modo lento), o aceite com o
 // texto exato de §8.5 e os dois botoes, a barra de reacoes com seis botoes de 44 px, a sala inteira como dialogo
-// (aria-modal, as abas, a 375 px: palco na largura, campo no rodape) e os botoes Entrar / Assistir o replay.
+// (aria-modal, as abas, a 375 px: palco na largura, campo no rodape) e os botoes Entrar / Assistir o replay. A marca no
+// cabecalho (a sala cobre o topo da area): a logo de Marca a partir de lg (o ponto em que a sala vira computador),
+// "Bunker707" sem logo, o Icone da escola de 24 px abaixo de lg, sem link; e o "Ao vivo · 00:42:10" curto no celular da
+// Live ao vivo.
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const branding = await import("../src/components/platform-branding.tsx");
 const stage = await import("../src/components/member/webinars/room/room-stage.tsx");
 const chat = await import("../src/components/member/webinars/room/room-chat.tsx");
 const reactions = await import("../src/components/member/webinars/room/room-reactions.tsx");
@@ -47,6 +51,60 @@ test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao da
   assert.match(replay, />Replay</);
   assert.doesNotMatch(replay, /assistindo/, "o replay nao tem contador");
   assert.equal(render(header.RoomHeader, { ...base, presentNow: 1 }).includes("1 assistindo"), true);
+});
+
+test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 sem logo) com o traco; o Icone da escola de 24 px abaixo de lg", () => {
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onMinimize: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
+  const comMarca = (marca, props = {}) =>
+    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...base, ...props })));
+  const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
+  const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
+  const ICONE = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/icone.png";
+
+  // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg, com o traco.
+  const semLogo = comMarca({ logoImage: null });
+  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<span aria-hidden="true" class="h-5 w-px bg-white\/15"><\/span>/);
+  assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center gap-3 lg:flex"/, "a logo e o traco so a partir de lg");
+  assert.doesNotMatch(semLogo, /<img[^>]*class="[^"]*w-\[112px\]/, "sem logo, nenhuma imagem de logo");
+
+  // Com a logo enviada em Marca: a imagem com o nome da escola, 112 px no maximo 32 de altura, alinhada a esquerda.
+  const comLogo = comMarca({ logoImage: LOGO });
+  const logo = comLogo.match(/<img[^>]*w-\[112px\][^>]*>/)?.[0] ?? "";
+  assert.match(logo, /alt="Bunker707"/);
+  assert.match(logo, new RegExp(`src="${LOGO.replace(/[.]/g, "\\.")}"`));
+  assert.match(logo, /class="h-auto max-h-8 w-\[112px\] shrink-0 object-contain object-left"/);
+  assert.doesNotMatch(comLogo, />Bunker707</, "com a logo, sem o nome em texto");
+
+  // O Icone da escola no celular: o simbolo padrao sem nada em Marca; o enviado preenche o quadrado.
+  const icone = tag(semLogo, "icon");
+  assert.match(icone, /^<img/);
+  assert.match(icone, /alt="Bunker707"/);
+  assert.match(icone, /src="\/brand\/icon-bunker\.svg"/);
+  assert.match(icone, /class="size-6 shrink-0 rounded-\[6px\] lg:hidden object-contain"/, "24 px, so abaixo de lg");
+  // A troca e no ponto da sala (lg, DESKTOP em live-room.tsx), nunca em sm: entre 640 e 1023 px o cabecalho ja tem o
+  // "{n} assistindo" e Minimizar/Sair com texto, e os 125 px da logo cobririam os selos e zerariam o titulo.
+  for (const html of [semLogo, comLogo]) {
+    assert.doesNotMatch(tag(html, "logo"), /\bsm:flex\b/, "a logo nao entra em sm");
+    assert.doesNotMatch(tag(html, "icon"), /\bsm:hidden\b/, "o icone nao sai em sm");
+  }
+  const enviado = tag(comMarca({ logoImage: LOGO, schoolIcon: ICONE }), "icon");
+  assert.match(enviado, new RegExp(`src="${ICONE.replace(/[.]/g, "\\.")}"`));
+  assert.match(enviado, /object-cover/);
+
+  // Sem link: sair da live passa pela confirmacao (askToLeave), nunca por um clique na logo.
+  for (const html of [semLogo, comLogo]) {
+    assert.doesNotMatch(html, /<a\b/);
+  }
+  // A marca vem antes do selo e do titulo; o titulo continua encolhendo.
+  assert.ok(comLogo.indexOf('data-room-brand="logo"') < comLogo.indexOf("<h1"));
+  assert.match(comLogo, /<h1 class="min-w-0 truncate/);
+
+  // Live ao vivo: no celular, so o icone e "00:42:10" (a frase inteira no title e para o leitor de tela).
+  const aoVivo = comMarca({ logoImage: null }, { kind: "live", liveLabel: "Ao vivo · 00:42:10", liveTime: "00:42:10", showLiveBadge: true });
+  assert.match(aoVivo, /title="Ao vivo · 00:42:10"/);
+  assert.match(aoVivo, /<span class="hidden sm:inline">Ao vivo · 00:42:10<\/span>/, "no computador, a frase inteira");
+  assert.match(aoVivo, /<span aria-hidden="true" class="sm:hidden">00:42:10<\/span>/, "no celular, so o tempo");
+  assert.match(aoVivo, /<span class="sr-only sm:hidden">Ao vivo · 00:42:10<\/span>/, "e o leitor de tela ouve a frase");
 });
 
 test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar som, encerrada com Assistir de novo; os atributos do sinal de midia", () => {
