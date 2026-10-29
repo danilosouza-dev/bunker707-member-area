@@ -132,6 +132,7 @@ function simulacao(extra = {}) {
 
 function pagina(extra = {}) {
   return {
+    absenteesReady: true,
     hasReplay: true,
     selected: {
       assistant: { enabled: false, pending: false },
@@ -590,4 +591,35 @@ test("o bloco Vagas (§3.4): com quem garantiu vaga e nao veio, 'Avisar quem nã
 
   const semFaltosos = html(createElement(WebinarReportView, { page: paginaV4({ report: { ...viewV4, registration: { ...viewV4.registration, absent: 0 } } }) }));
   assert.doesNotMatch(textOf(semFaltosos), /Avisar quem não veio/);
+});
+
+test("'Avisar quem não veio' numa live de duas sessoes: as regras valem para a live inteira, entao so abre quando nenhuma sessao esta por acontecer", () => {
+  // S1 na segunda (encerrada), S2 na quarta (marcada). O relatorio de S1 mostra "Não vieram: 2"; o aluno com vaga em S2
+  // entraria no "garantiu vaga E não participou" antes da live dele.
+  const S2 = "33333333-aaaa-4aaa-8aaa-333333333333";
+  const s1 = sessionFromRow(sessaoRow({ ended_at: "2026-11-02T23:31:00.000Z", scheduled_at: "2026-11-02T23:00:00.000Z", started_at: "2026-11-02T23:00:00.000Z", status: "ended" }));
+  const s2 = sessionFromRow(sessaoRow({ id: S2, scheduled_at: "2026-11-04T23:00:00.000Z", status: "scheduled" }));
+  const terca = Date.parse("2026-11-03T15:00:00.000Z");
+  const pronto = model.absenteesNoticeReady([s1, s2, replay], 60, terca);
+  assert.equal(pronto, false, "S2 ainda vai acontecer");
+
+  const comFaltosos = { ...viewV4, registration: { ...viewV4.registration, absent: 2 } };
+  const markup = html(createElement(WebinarReportView, { page: { ...paginaV4({ report: comFaltosos, session: s1 }), absenteesReady: pronto, sessions: model.reportSessionOptions(WEBINAR_ID, [s1], s1.id) } }));
+  const vagas = markup.slice(markup.indexOf('aria-labelledby="webinario-relatorio-vagas"'));
+  assert.doesNotMatch(vagas, /seguimento=/, "sem link para o aviso");
+  assert.match(vagas, /<span aria-describedby="webinario-relatorio-avisar-depois" aria-disabled="true"[^>]*>.*?Avisar quem não veio<\/span>/);
+  assert.match(textOf(vagas), /Avisar quem não veio Disponível quando todas as sessões desta live terminarem\./);
+
+  // Na quarta, S2 no ar: continua desligado; depois do fim de S2 (ou com S2 cancelada), abre.
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2, startedAt: s2.scheduledAt, status: "live" }, replay], 60, Date.parse("2026-11-04T23:20:00.000Z")), false, "S2 no ar");
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2, endedAt: "2026-11-04T23:40:00.000Z", status: "ended" }, replay], 60, Date.parse("2026-11-05T12:00:00.000Z")), true, "as duas encerradas");
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2, status: "cancelled" }], 60, terca), true, "S2 cancelada");
+  assert.equal(model.absenteesNoticeReady([s1, s2], 60, Date.parse("2026-11-05T12:00:00.000Z")), true, "S2 nunca abriu e passou do fim + 2 h");
+  // As sessoes do "Começa quando você entra" nunca tem vaga: uma marcada para daqui a pouco nao segura o botao.
+  assert.equal(model.absenteesNoticeReady([s1, { ...s2, jit: true }], 60, terca), true, "jit nao conta");
+
+  const aberto = html(createElement(WebinarReportView, { page: { ...paginaV4({ report: comFaltosos, session: s1 }), absenteesReady: true } }));
+  assert.match(aberto, /seguimento=registered%2Cnao-attended/);
+  assert.match(aberto, /title="Abre um aviso novo para quem garantiu vaga em qualquer sessão desta live e não entrou em nenhuma/);
+  assert.doesNotMatch(textOf(aberto), /Disponível quando todas as sessões/);
 });

@@ -2153,9 +2153,16 @@ export const ANY_WEBINAR_LABEL = "qualquer live";
 export const PICK_WEBINAR_LABEL = "Escolha a live";
 const WEBINAR_OUT_OF_LIST_LABEL = "Live fora da lista";
 
-/** As notas embaixo da regra: o que conta como "participou" e, nas acoes da compra, quando a compra entra no segmento. */
-export function webinarRuleNotes(rule: Pick<WebinarRule, "action">): string[] {
-  return rule.action === "purchased" || rule.action === "clicked_no_purchase" ? [WEBINAR_RULE_HINT, SEGUIMENTO_COPY.atraso] : [WEBINAR_RULE_HINT];
+/**
+ * As notas embaixo da regra: o que conta como "participou"; numa acao do follow-up negada, que ela so alcanca quem
+ * garantiu vaga ou passou pela live (D52); nas acoes da compra, quando a compra entra no segmento.
+ */
+export function webinarRuleNotes(rule: Pick<WebinarRule, "action" | "negate">): string[] {
+  return [
+    WEBINAR_RULE_HINT,
+    ...(rule.negate && isWebinarFollowUpAction(rule.action) ? [SEGUIMENTO_COPY.notaNegada] : []),
+    ...(rule.action === "purchased" || rule.action === "clicked_no_purchase" ? [SEGUIMENTO_COPY.atraso] : [])
+  ];
 }
 
 /** Live que o segmento pode citar (queries.ts, loadAudienceWebinarOptions). */

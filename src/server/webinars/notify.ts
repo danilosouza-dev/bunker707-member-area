@@ -19,6 +19,7 @@ import { describeError } from "../communications/db";
 import { insertNotificationRows } from "../communications/store";
 import { renderWebinarCancelledEmail } from "../email/templates/webinar-cancelled";
 import { fetchStaffUserIds } from "../students/store";
+import { canAccessWebinar } from "./access";
 import { assertNoDbError, type WebinarsDb } from "./db";
 import { REMINDER_RULES, toTime, webinarHref, type Webinar } from "./model";
 import {
@@ -233,7 +234,10 @@ export function webinarAnswerDedupeKey(sessionId: string, targetId: string) {
 /**
  * Fase 4c (docs/30 §1.6, Atendentes): a equipe respondeu depois a pergunta do aluno (ele pediu a equipe, a sessao
  * acabou ou ele saiu da sala). Sino kind 'webinar' com o titulo do webinario, o texto da resposta e o link da pagina
- * da live, uma vez por pergunta (ou mensagem do chat). Nunca para a equipe; nunca lanca.
+ * da live, uma vez por pergunta (ou mensagem do chat). Como os outros avisos da live: so com o webinario publicado e
+ * nao cancelado, e so para quem ainda passa pelo Quem pode agora (canAccessWebinar: a ancora do Segmento e do "e", o
+ * produto conferido de novo; o reembolsado, ou quem saiu do segmento sem o produto no "Produto ou segmento", fica de
+ * fora, sem o texto da resposta nem o link de uma pagina que para ele responde 404). Nunca para a equipe; nunca lanca.
  */
 export async function queueWebinarAnswerNotice(
   db: WebinarsDb,
@@ -245,7 +249,7 @@ export async function queueWebinarAnswerNotice(
     const text = input.answerText.trim();
     const row = text ? await fetchWebinarRow(db, input.webinarId) : null;
 
-    if (!row) {
+    if (!row || row.status !== "published" || row.cancelled_at) {
       return result;
     }
 
@@ -256,6 +260,10 @@ export async function queueWebinarAnswerNotice(
     }
 
     const webinar = webinarFromRow(row);
+
+    if (!(await canAccessWebinar(input.userId, webinar, { db, now: input.now.getTime() }))) {
+      return result;
+    }
 
     result.notifications += await insertNotificationRows(db, [
       {

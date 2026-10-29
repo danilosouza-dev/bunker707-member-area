@@ -435,18 +435,25 @@ function linhaDoWebinario(extra = {}) {
   };
 }
 
-function bancoDoWebinario(linha) {
+const SESSAO_MARCADA = { ended_at: null, id: "bbbbbbbb-1111-4111-8111-111111111111", kind: "live", scheduled_at: INICIO, status: "scheduled", webinar_id: WEBINAR };
+
+function bancoDoWebinario(linha, sessoes = [SESSAO_MARCADA]) {
   return scriptedDb((query) => {
     if (query.table === "webinars") {
       return { data: linha, error: null };
     }
 
     if (query.table === "webinar_sessions") {
-      return { data: [{ ended_at: null, id: "bbbbbbbb-1111-4111-8111-111111111111", kind: "live", scheduled_at: INICIO, status: "scheduled", webinar_id: WEBINAR }], error: null };
+      return { data: sessoes, error: null };
     }
 
     return { data: [], error: null };
   });
+}
+
+/** Uma sessao do "Começa quando você entra" (jit), de um aluno so. */
+function sessaoJit(n, scheduledAt, status, extra = {}) {
+  return { ended_at: status === "ended" ? scheduledAt : null, id: `cccccccc-1111-4111-8111-00000000000${n}`, jit: true, kind: "simulated", scheduled_at: scheduledAt, status, webinar_id: WEBINAR, ...extra };
 }
 
 test("prepareWebinarNoticeStart: le o webinario salvo e as sessoes, so le e nunca grava; id invalido, inexistente ou que nao vale", async () => {
@@ -466,6 +473,38 @@ test("prepareWebinarNoticeStart: le o webinario salvo e as sessoes, so le e nunc
   assert.deepEqual(await prepareWebinarNoticeStart(WEBINAR, "inbox", AGORA, bancoDoWebinario(null)), { ok: false, reason: "missing" });
   assert.deepEqual(await prepareWebinarNoticeStart(WEBINAR, "inbox", AGORA, bancoDoWebinario(linhaDoWebinario({ status: "draft" }))), { ok: false, reason: "blocked" });
   assert.deepEqual(await prepareWebinarNoticeStart(WEBINAR, "inbox", AGORA, bancoDoWebinario(linhaDoWebinario({ cancelled_at: "2026-11-04T12:00:00.000Z" }))), { ok: false, reason: "blocked" });
+});
+
+test("prepareWebinarNoticeStart: as sessoes do 'Começa quando você entra' ficam fora, como no editor (a situacao e a proxima live batem com o card Avisar)", async () => {
+  const gravada = linhaDoWebinario({ access_mode: "everyone", jit_settings: { enabled: true }, kind: "simulated", product_id: null, scheduled_at: null });
+  const ontem = (hora) => `2026-11-04T${hora}:00.000Z`;
+
+  // (a) So "Começa quando você entra", sem hora marcada: tres alunos entraram ontem e as tres sessoes encerraram. O
+  // editor (sem as jit) ve "scheduled" e liga o Avisar; o atalho abre, sem data no texto.
+  const soJit = [sessaoJit(1, ontem("13:15"), "ended"), sessaoJit(2, ontem("14:30"), "ended"), sessaoJit(3, ontem("20:45"), "ended")];
+  const sino = await prepareWebinarNoticeStart(WEBINAR, "inbox", AGORA, bancoDoWebinario(gravada, soJit));
+  assert.equal(sino.ok, true, "nao volta para o editor com o Avisar ligado");
+  assert.equal(sino.start.draft.body, shortcut.WEBINAR_NOTICE_COPY.inbox.bodyNoDate);
+  const popup = await prepareWebinarNoticeStart(WEBINAR, "popup", AGORA, bancoDoWebinario(gravada, soJit));
+  assert.equal(popup.ok, true);
+  assert.deepEqual(popup.start.draft.window, { endsAt: null, startsAt: null }, "sem live marcada, sem janela");
+
+  // (b) Com hora marcada amanha as 20:00 e um aluno no ar agora (jit das 11:45) e outro as 12:15: o aviso fala da
+  // live de amanha, nunca da sessao de um aluno so.
+  const amanha = "2026-11-06T23:00:00.000Z";
+  const comMarcada = [
+    sessaoJit(4, "2026-11-05T14:45:00.000Z", "live"),
+    sessaoJit(5, "2026-11-05T15:15:00.000Z", "scheduled"),
+    { ended_at: null, id: "bbbbbbbb-2222-4222-8222-222222222222", jit: false, kind: "simulated", scheduled_at: amanha, status: "scheduled", webinar_id: WEBINAR }
+  ];
+  const marcadaSino = await prepareWebinarNoticeStart(WEBINAR, "inbox", AGORA, bancoDoWebinario({ ...gravada, scheduled_at: amanha }, comMarcada));
+  assert.equal(marcadaSino.ok, true);
+  assert.equal(marcadaSino.start.draft.body, shortcut.WEBINAR_NOTICE_COPY.inbox.bodySeat(formatWebinarWhen(amanha)));
+  assert.doesNotMatch(marcadaSino.start.draft.body, /ao vivo agora/i);
+  const marcadaPopup = await prepareWebinarNoticeStart(WEBINAR, "popup", AGORA, bancoDoWebinario({ ...gravada, scheduled_at: amanha }, comMarcada));
+  assert.equal(marcadaPopup.ok, true);
+  assert.deepEqual(marcadaPopup.start.draft.window, { endsAt: "2026-11-07T00:00:00.000Z", startsAt: amanha }, "Começa e Termina da live de amanha");
+  assert.equal(marcadaPopup.start.draft.title, shortcut.WEBINAR_NOTICE_COPY.popup.title("Aula de IA"));
 });
 
 /* ------------------------------------------------------------------------------------------------

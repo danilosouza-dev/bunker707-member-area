@@ -93,7 +93,7 @@ test("Avisar quem não veio: o mesmo endereco com &seguimento= abre o aviso em b
   const antes = await avisos();
 
   await page.goto(`/admin/comunicacao/avisos/novo?webinario=${id}&tipo=notificacao&seguimento=registered,nao-attended`);
-  await expect(page.getByText("O “Para quem” já vem com as regras da live. Confira e escreva o aviso: nada foi salvo ainda.", { exact: true })).toBeVisible();
+  await expect(page.getByText("O “Para quem” já vem com as regras da live inteira: quem garantiu vaga em qualquer horário e não entrou em nenhum. Confira e escreva o aviso: nada foi salvo ainda.", { exact: true })).toBeVisible();
   await page.waitForLoadState("networkidle");
 
   await expect(page.getByLabel("Título", { exact: true })).toHaveValue("");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
-import { atendente, EQUIPE, EQUIPE_2, montarEscola, OUTRA_SESSAO, SESSAO, WEBINAR } from "./support/webinarios-v4-assistente-banco.mjs";
+import { atendente, EQUIPE, EQUIPE_2, montarEscola, OUTRA_SESSAO, PRODUTO, SESSAO, WEBINAR } from "./support/webinarios-v4-assistente-banco.mjs";
 
 // As Server Actions do Assistente e do Atendimento (docs/30 §1.6, §2.2, §2.4, §2.6, §6.6 e D24; docs/18 §2.2), sem
 // banco: o banco em memoria de tests/support/webinarios-v4-assistente-banco.mjs, a permissao por um duble que recusa
@@ -376,6 +376,67 @@ test("answerQuestion: com o aluno na sala e sem pedido, nada no sino; fora da sa
   db.tables.webinar_questions.push(depoisDoFim);
   assert.equal((await roomActions.answerQuestion({ answerText: "Respondida no dia seguinte.", questionId: depoisDoFim.id })).data.notified, true);
   assert.equal(db.tables.notifications.length, 2);
+});
+
+/** O Quem pode da Live gravada da escola de mentira (as colunas da linha; "both" = 'product' + audience_restricts). */
+function quemPode(db, colunas) {
+  Object.assign(db.tables.webinars[0], colunas);
+}
+
+const segmentoDoProduto = (productId) => ({ kind: "rules", root: { items: [{ op: "has", productIds: [productId], type: "product" }], match: "all" } });
+const acesso = (userId, targetId, status = "active") => ({ created_at: agora(), ends_at: null, id: crypto.randomUUID(), starts_at: new Date(Date.now() - 86_400_000).toISOString(), status, target_id: targetId, target_type: "content", user_id: userId });
+
+test("resposta da equipe: no modo 'e', o aluno reembolsado depois de perguntar nao recebe a resposta no sino (o Quem pode de agora)", async () => {
+  const { db, userId } = montar();
+  quemPode(db, { access_mode: "product", audience: segmentoDoProduto(PRODUTO), audience_restricts: true, product_id: PRODUTO });
+  const compra = acesso(userId, PRODUTO);
+  db.tables.entitlements.push(compra);
+
+  // Com o produto: a resposta depois que ele saiu da sala vai ao sino (o caminho de sempre).
+  const antes = perguntaDoAluno(userId);
+  db.tables.webinar_questions.push(antes);
+  assert.equal((await roomActions.answerQuestion({ answerText: "Sim, com certificado.", questionId: antes.id })).data.notified, true);
+  assert.equal(db.tables.notifications.length, 1);
+
+  // O reembolso revoga o acesso; a equipe responde a pergunta feita antes: nada no sino (nem o texto, nem o link).
+  const depois = perguntaDoAluno(userId, { body: "Tem cupom?" });
+  db.tables.webinar_questions.push(depois);
+  compra.status = "revoked";
+  const respondida = await roomActions.answerQuestion({ answerText: "Use o cupom LIVE10 no link.", questionId: depois.id });
+  assert.equal(respondida.ok, true, JSON.stringify(respondida));
+  assert.equal(respondida.data.notified, false);
+  assert.equal(depois.answer_source, "team", "a resposta fica gravada na pergunta");
+  assert.equal(db.tables.notifications.length, 1, "nenhuma linha nova no sino");
+  assert.ok(db.tables.notifications.every((row) => !row.body.includes("LIVE10")));
+});
+
+test("resposta da equipe: no Produto ou segmento, quem esta fora do segmento e sem o produto nao recebe; com o segmento de agora, recebe", async () => {
+  const OUTRO = "abcdabcd-0000-4000-8000-0000000000f1";
+  const { db, userId } = montar();
+  quemPode(db, { access_mode: "either", audience: segmentoDoProduto(OUTRO), audience_restricts: false, product_id: PRODUTO });
+
+  const fora = perguntaDoAluno(userId);
+  db.tables.webinar_questions.push(fora);
+  assert.equal((await roomActions.answerQuestion({ answerText: "Respondida depois.", questionId: fora.id })).data.notified, false, "sem o produto e fora do segmento");
+  assert.equal(db.tables.notifications.length, 0);
+
+  db.tables.entitlements.push(acesso(userId, OUTRO));
+  const dentro = perguntaDoAluno(userId, { body: "E agora?" });
+  db.tables.webinar_questions.push(dentro);
+  assert.equal((await roomActions.answerQuestion({ answerText: "Agora sim.", questionId: dentro.id })).data.notified, true, "no segmento de agora");
+  assert.equal(db.tables.notifications.length, 1);
+});
+
+test("resposta da equipe: com o webinario cancelado ou fora do ar (rascunho, arquivado), nada no sino", async () => {
+  for (const colunas of [{ cancelled_at: agora() }, { status: "draft" }, { status: "archived" }]) {
+    const { db, userId } = montar();
+    const pergunta = perguntaDoAluno(userId);
+    db.tables.webinar_questions.push(pergunta);
+    quemPode(db, colunas);
+    const respondida = await roomActions.answerQuestion({ answerText: "Respondida depois.", questionId: pergunta.id });
+    assert.equal(respondida.data?.notified ?? false, false, JSON.stringify(colunas));
+    assert.equal(db.tables.notifications.length, 0, JSON.stringify(colunas));
+  }
 });
 
 test("sendTeamMessage respondendo a mensagem do aluno que pediu a equipe vai ao sino; setQuestionStatus answered grava 'team'; sem a 202610300004 a resposta segue sem a marca", async () => {

@@ -22,8 +22,10 @@
 // "left_before_offer", "clicked_no_purchase", "purchased") exigem uma live e vem de webinar_follow_up_facts, lida so
 // para as lives citadas por elas (context.webinarFollowUpsLoaded); valem no "Para quem" de avisos e pop-ups e no
 // "Quem entra" de um fluxo, nunca dentro de um fluxo nem no Quem pode da live (schemas.ts). Sem a leitura, a regra
-// nunca combina, nem negada (como "message"); lida, a negacao e o NOT da acao ("não participou" inclui quem nem
-// garantiu vaga; quem tinha vaga e nao veio = "garantiu vaga" E "não participou"). Rollback: a imagem de antes da uniao
+// nunca combina, nem negada (como "message"); lida, a negacao de "participou" e "garantiu vaga" e o NOT da acao ("não
+// participou" inclui quem nem garantiu vaga; quem tinha vaga e nao veio = "garantiu vaga" E "não participou"), e a de
+// uma acao do follow-up so vale para quem garantiu vaga ou passou pela live (a regra da 4b; "não comprou pelo card"
+// nunca alcanca a escola inteira; o construtor diz isso embaixo da regra). Rollback: a imagem de antes da uniao
 // (o Quem pode por regras) le uma acao do follow-up como "attended"; docs/22 §3 diz o que tirar do ar antes de voltar.
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
@@ -79,7 +81,8 @@ export type AudienceRule =
   /**
    * Participacao em lives: o que o aluno fez numa live. "attended" = entrou na sala (ao vivo ou na Live gravada, por
    * qualquer tempo; o replay nao conta), "registered" = garantiu vaga; `webinarId` null = qualquer live. As acoes do
-   * follow-up (WEBINAR_FOLLOW_UP_ACTIONS) exigem uma live (null nunca combina; o zod recusa).
+   * follow-up (WEBINAR_FOLLOW_UP_ACTIONS) exigem uma live (null nunca combina; o zod recusa) e, negadas, so valem para
+   * quem garantiu vaga ou passou por ela (evaluateWebinarRule).
    */
   | { action: WebinarRuleAction; negate: boolean; type: "webinar"; webinarId: string | null };
 
@@ -460,11 +463,8 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
       return rule.negate ? !gained : gained;
     }
 
-    case "webinar": {
-      const done = webinarActionDone(rule, facts, context);
-
-      return done === null ? false : rule.negate ? !done : done;
-    }
+    case "webinar":
+      return evaluateWebinarRule(rule, facts, context);
   }
 
   return false;
@@ -543,6 +543,30 @@ function webinarActionDone(rule: Extract<AudienceRule, { type: "webinar" }>, fac
   const list = (rule.action === "registered" ? facts.webinars?.registered : facts.webinars?.attended) ?? [];
 
   return rule.webinarId === null ? list.length > 0 : list.includes(rule.webinarId);
+}
+
+/**
+ * A regra "Participação em lives" para este aluno. Sem a leitura que ela pede, nunca combina (nem negada). Negada:
+ * participou e garantiu vaga sao o NOT da acao ("não participou" inclui quem nem garantiu vaga); uma acao do follow-up
+ * negada so vale para quem tem linha naquela live em webinar_follow_up_facts (garantiu vaga ou passou por ela: entrou,
+ * viu o replay ou clicou no card), a regra da 4b (D52): "não comprou pelo card" nunca alcanca a escola inteira.
+ */
+function evaluateWebinarRule(rule: Extract<AudienceRule, { type: "webinar" }>, facts: AudienceStudentFacts, context: AudienceContext) {
+  const done = webinarActionDone(rule, facts, context);
+
+  if (done === null) {
+    return false;
+  }
+
+  if (!rule.negate) {
+    return done;
+  }
+
+  if (isWebinarFollowUpAction(rule.action)) {
+    return rule.webinarId !== null && facts.webinars?.followUps?.[rule.webinarId] !== undefined && !done;
+  }
+
+  return !done;
 }
 
 /**

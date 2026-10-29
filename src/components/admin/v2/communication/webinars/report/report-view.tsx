@@ -1,5 +1,6 @@
 import { BellPlus, ChartColumn, Pencil } from "lucide-react";
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
@@ -76,7 +77,45 @@ function studentHref(userId: string) {
   return `/admin/alunos/${userId}`;
 }
 
-function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; selected: WebinarReportSelection; webinarId: string }) {
+/**
+ * "Avisar quem não veio" (§3.4): as regras do aviso valem para a live inteira (garantiu vaga em qualquer sessao e nao
+ * entrou em nenhuma), entao o botao so abre quando nenhuma hora marcada esta por acontecer ou no ar; antes, desligado
+ * com o motivo (quem tem vaga numa sessao futura receberia "você não veio" antes da live dele).
+ */
+function AbsenteesNoticeButton({ ready, webinarId }: { ready: boolean; webinarId: string }) {
+  const content = (
+    <>
+      <BellPlus aria-hidden="true" className="size-4" />
+      {COPY.avisarQuemFaltou}
+    </>
+  );
+
+  if (ready) {
+    return (
+      <AdminLinkButton href={webinarNoticeHref(webinarId, "inbox", WEBINAR_ABSENTEES)} prefetch={false} title={COPY.avisarQuemFaltouDica} variant="secondary">
+        {content}
+      </AdminLinkButton>
+    );
+  }
+
+  return (
+    <div className="flex max-w-64 flex-col items-start gap-1" data-absentees-notice="later">
+      <span
+        aria-describedby="webinario-relatorio-avisar-depois"
+        aria-disabled="true"
+        className={cn(buttonVariants({ variant: "secondary" }), "pointer-events-none border-[var(--border-strong)] px-4 opacity-50")}
+        data-slot="button"
+      >
+        {content}
+      </span>
+      <span className="text-xs leading-5 text-[var(--text-secondary)]" id="webinario-relatorio-avisar-depois">
+        {COPY.avisarQuemFaltouDepois}
+      </span>
+    </div>
+  );
+}
+
+function ReportBody({ absenteesReady, hasReplay, selected, webinarId }: { absenteesReady: boolean; hasReplay: boolean; selected: WebinarReportSelection; webinarId: string }) {
   const { assistant, attendees, csvHref, dropExcerpts, durationMs, exportReports, offerClicked, people, polls, questions, report, session, simulation } = selected;
   const live = session.status === "live";
   const kpis = reportKpis(report, { hasReplay });
@@ -169,17 +208,7 @@ function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; se
         <div className="flex min-w-0 flex-col gap-4">
           <ReportBlock
             actions={
-              report.registration.absent > 0 ? (
-                <AdminLinkButton
-                  href={webinarNoticeHref(webinarId, "inbox", WEBINAR_ABSENTEES)}
-                  prefetch={false}
-                  title={COPY.avisarQuemFaltouDica}
-                  variant="secondary"
-                >
-                  <BellPlus aria-hidden="true" className="size-4" />
-                  {COPY.avisarQuemFaltou}
-                </AdminLinkButton>
-              ) : null
+              report.registration.absent > 0 ? <AbsenteesNoticeButton ready={absenteesReady} webinarId={webinarId} /> : null
             }
             description={COPY.definicoes.vagasGarantidas}
             id="webinario-relatorio-vagas"
@@ -225,7 +254,7 @@ function ReportBody({ hasReplay, selected, webinarId }: { hasReplay: boolean; se
 }
 
 export function WebinarReportView({ page }: { page: WebinarReportPage }) {
-  const { hasReplay, selected, sessions, webinar } = page;
+  const { absenteesReady, hasReplay, selected, sessions, webinar } = page;
 
   return (
     <AdminPage className="gap-6">
@@ -244,7 +273,7 @@ export function WebinarReportView({ page }: { page: WebinarReportPage }) {
         <SessionSelector sessions={sessions} />
       </div>
 
-      {selected ? <ReportBody hasReplay={hasReplay} selected={selected} webinarId={webinar.id} /> : <EmptyState description={COPY.semDados} icon={ChartColumn} title={COPY.semSessoes} />}
+      {selected ? <ReportBody absenteesReady={absenteesReady} hasReplay={hasReplay} selected={selected} webinarId={webinar.id} /> : <EmptyState description={COPY.semDados} icon={ChartColumn} title={COPY.semSessoes} />}
     </AdminPage>
   );
 }

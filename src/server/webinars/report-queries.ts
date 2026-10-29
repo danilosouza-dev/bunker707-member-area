@@ -36,6 +36,7 @@ import {
 import { offerClickedByUser } from "./export-model";
 import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
 import {
+  absenteesNoticeReady,
   defaultReportSessionId,
   dropExcerpts,
   emptyScriptByTrigger,
@@ -154,6 +155,11 @@ export type WebinarReportSelection = {
 };
 
 export type WebinarReportPage = {
+  /**
+   * O "Avisar quem não veio" pode abrir: nenhuma hora marcada por acontecer ou no ar (absenteesNoticeReady; as regras
+   * dele valem para a live inteira, nao so para a sessao escolhida).
+   */
+  absenteesReady: boolean;
   /** Existe uma sessao `replay` no webinario (o numero "Assistiram o replay" so faz sentido com ela). */
   hasReplay: boolean;
   selected: WebinarReportSelection | null;
@@ -213,6 +219,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
   const hasReplay = sessions.some((session) => session.kind === "replay" && session.status !== "cancelled");
   const selectedId = options.sessionId && reportable.some((session) => session.id === options.sessionId) ? options.sessionId : defaultReportSessionId(reportable);
   const page: WebinarReportPage = {
+    absenteesReady: absenteesNoticeReady(sessions, webinar.durationMinutes, now),
     hasReplay,
     selected: null,
     sessions: reportSessionOptions(webinarId, reportable, selectedId),

@@ -91,15 +91,25 @@ test("cada acao do follow-up conta pelo fato da live; 'clicou e não comprou' e 
   assert.deepEqual([...model.WEBINAR_RULE_ACTIONS].sort(), [...model.WEBINAR_PRESENCE_ACTIONS, ...WEBINAR_FOLLOW_UP_ACTIONS].sort(), "uma regra: presenca + follow-up");
 });
 
-test("negada e o NOT da acao: quem nem passou pela live tambem 'não viu o replay'; quem tinha vaga e nao veio sao duas regras", () => {
+test("negada (D52, a regra da 4b): a acao do follow-up so alcanca quem garantiu vaga ou passou pela live, nunca a escola inteira; quem tinha vaga e nao veio sao duas regras", () => {
   const semLinha = aluno({ attended: [], followUps: {}, registered: [] });
 
-  assert.equal(avalia(todas(regra("watched_replay", true)), semLinha), true, "nao viu o replay (nem passou pela live)");
-  assert.equal(avalia(todas(regra("watched_replay", true)), aluno(undefined)), true, "sem linha nenhuma: tambem");
+  assert.equal(avalia(todas(regra("watched_replay", true)), no({ registered: true })), true, "garantiu vaga e nao viu o replay");
+  assert.equal(avalia(todas(regra("watched_replay", true)), semLinha), false, "nem passou pela live: fora");
+  assert.equal(avalia(todas(regra("watched_replay", true)), aluno(undefined)), false, "sem linha nenhuma: fora");
   assert.equal(avalia(todas(regra("offer_seen", true)), no({ offerSeen: true })), false);
   assert.equal(avalia(todas(regra("purchased", true)), no({ clicked: true })), true, "clicou e nao comprou = não comprou");
   assert.equal(avalia(todas(regra("clicked_no_purchase", true)), no({ clicked: true, purchased: true })), true, "comprou");
-  assert.equal(avalia(todas(regra("clicked_no_purchase", true)), semLinha), true, "nem clicou");
+  assert.equal(avalia(todas(regra("clicked_no_purchase", true)), no({ attended: true })), true, "entrou e nem clicou");
+  assert.equal(avalia(todas(regra("clicked_no_purchase", true)), semLinha), false, "nunca passou pela live: fora");
+
+  // O pop-up de venda "esteve na live X e não comprou": so quem passou por ela, menos quem comprou.
+  for (const action of WEBINAR_FOLLOW_UP_ACTIONS) {
+    assert.equal(avalia(todas(regra(action, true)), semLinha), false, `${action} negada nao alcanca quem nunca passou pela live`);
+  }
+
+  // Participou e garantiu vaga continuam o NOT puro (a outra leitura).
+  assert.equal(avalia(todas(regra("attended", true)), aluno({ attended: [], registered: [] }), lidos([], true)), true, "não participou: quem nem garantiu vaga tambem");
 
   // "Garantiu vaga E não participou" (o "Avisar quem não veio"): as vagas e presencas vem da outra leitura.
   const faltou = todas(regra("registered"), regra("attended", true));
@@ -282,7 +292,10 @@ test("construtor: o seletor da live nas acoes do follow-up nao tem 'qualquer liv
 test("construtor: as notas da regra (o que conta como participou; quando a compra entra)", () => {
   assert.deepEqual(builder.webinarRuleNotes(regra("watched_replay")), [builder.WEBINAR_RULE_HINT]);
   assert.deepEqual(builder.webinarRuleNotes(regra("purchased")), [builder.WEBINAR_RULE_HINT, WEBINAR_COPY.seguimento.atraso]);
-  assert.deepEqual(builder.webinarRuleNotes(regra("clicked_no_purchase", true)), [builder.WEBINAR_RULE_HINT, WEBINAR_COPY.seguimento.atraso]);
+  assert.deepEqual(builder.webinarRuleNotes(regra("clicked_no_purchase", true)), [builder.WEBINAR_RULE_HINT, WEBINAR_COPY.seguimento.notaNegada, WEBINAR_COPY.seguimento.atraso]);
+  assert.deepEqual(builder.webinarRuleNotes(regra("watched_replay", true)), [builder.WEBINAR_RULE_HINT, WEBINAR_COPY.seguimento.notaNegada], "negada: quem ela alcanca");
+  assert.deepEqual(builder.webinarRuleNotes(regra("attended", true)), [builder.WEBINAR_RULE_HINT], "não participou e o NOT puro: sem a nota");
+  assert.deepEqual(builder.webinarRuleNotes(regra("registered", true)), [builder.WEBINAR_RULE_HINT]);
 });
 
 /** O construtor desenhado no servidor (o seletor mostra o valor escolhido), so o texto. */
@@ -300,6 +313,7 @@ test("tela do construtor: a acao com o 'não', a live com o dia e a nota da comp
 
   assert.match(texto, /Participação em lives ▼ Não comprou pelo card ▼ Live de agentes · 05\/11 ▼/);
   assert.ok(texto.includes(WEBINAR_COPY.seguimento.atraso), texto);
+  assert.ok(texto.includes(WEBINAR_COPY.seguimento.notaNegada), "negada: a nota diz quem a regra alcanca");
   assert.doesNotMatch(texto, /qualquer live/);
 
   assert.match(desenha({ value: todas(regra("purchased", false, APAGADO)), webinars: lista }), /Live fora da lista/, "a salva que saiu da lista continua visivel");
@@ -440,7 +454,7 @@ test("loadAudienceFacts: o follow-up das lives pedidas e as vagas e presencas no
   });
   assert.deepEqual(ids(todas(regra("attended"), regra("clicked_no_purchase"))), [uid(1)], "presenca e follow-up na mesma regra");
   assert.deepEqual(ids(todas(regra("registered"), regra("attended", true))), [uid(3)], "tinha vaga e nao veio; a equipe (2) fica fora");
-  assert.deepEqual(ids(todas(regra("watched_replay", true))).sort(), [uid(1), uid(4)], "NOT: quem nem passou pela live tambem");
+  assert.deepEqual(ids(todas(regra("watched_replay", true))), [uid(1)], "negada: so quem passou pela live (o 4 nunca passou; o 3 viu o replay)");
   assert.deepEqual(ids(todas(regra("watched_replay", true, APAGADO))), [], "live apagada nao combina");
   assert.equal(loaded.facts.find((fact) => fact.userId === uid(4)).webinars, undefined, "sem linha: os mesmos fatos de antes");
   assert.equal(consultas(db, "notifications").length, 0, "nenhuma linha do sino lida pelas lives");

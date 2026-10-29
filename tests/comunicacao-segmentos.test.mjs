@@ -1878,7 +1878,7 @@ test("follow-up: um tipo so com as acoes de presenca; o segmento aceita, o fluxo
   assert.equal(model.describeAudience(todas(live("purchased", LIVE_Y, true)), { cohorts: {}, products: {}, webinars: { [LIVE_Y]: "Live" } }), "Alunos que não compraram pelo card na live “Live”");
 });
 
-test("follow-up: cada acao pelo fato da live; negada = NOT; live nao lida nunca combina, nem negada", () => {
+test("follow-up: cada acao pelo fato da live; negada so para quem passou pela live (D52); live nao lida nunca combina, nem negada", () => {
   const comFato = aluno({ webinars: { attended: [], followUps: { [LIVE_Y]: { ...FOLLOW_UP, clicked: true, offerSeen: true } }, registered: [] } });
   const semLinha = aluno();
   const lido = contexto({ webinarFollowUpsLoaded: new Set([LIVE_Y]) });
@@ -1887,7 +1887,8 @@ test("follow-up: cada acao pelo fato da live; negada = NOT; live nao lida nunca 
   assert.equal(avalia(todas(live("clicked_no_purchase", LIVE_Y)), comFato, lido), true);
   assert.equal(avalia(todas(live("purchased", LIVE_Y)), comFato, lido), false);
   assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), comFato, lido), true);
-  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, lido), true, "NOT: quem nem passou pela live tambem");
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, lido), false, "negada: quem nem passou pela live fica fora (nunca a escola inteira)");
+  assert.equal(avalia(todas(live("attended", LIVE_Y, true)), semLinha, contexto({ webinarFactsLoaded: true })), true, "não participou continua o NOT puro");
   assert.equal(avalia(todas(live("offer_seen", LIVE_Y)), comFato, contexto()), false, "live nao lida nunca combina");
   assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto()), false, "nem negada");
   assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto({ webinarFactsLoaded: true })), false, "as vagas e presencas lidas nao bastam");

@@ -207,6 +207,12 @@ test("a pagina: as sessoes com relatorio (a futura fica de fora, o replay por ul
   const futura = await semCache(FUTURA_ID);
   assert.equal(futura?.selected?.session.id, SESSAO_ID, "sessao fora da lista: vale a padrao");
 
+  // O "Avisar quem não veio" conta a live inteira: com a sessao de 07/11 por acontecer, desligado; depois dela, ligado.
+  const antes = await queries.loadWebinarReportPage(actionStubs.db, WEBINAR_ID, { now: T0, view: async () => (await queries.getWebinarReport(SESSAO_ID, { now: T0 })).view });
+  assert.equal(antes.absenteesReady, false, "a sessao de 07/11 ainda vai acontecer");
+  const depois = await queries.loadWebinarReportPage(actionStubs.db, WEBINAR_ID, { now: Date.parse("2026-11-08T12:00:00.000Z"), view: async () => (await queries.getWebinarReport(SESSAO_ID, { now: T0 })).view });
+  assert.equal(depois.absenteesReady, true, "nenhuma sessao por acontecer");
+
   bancoDaPagina({ webinars: [] });
   assert.equal(await semCache(null), null);
 });
