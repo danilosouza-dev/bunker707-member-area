@@ -203,7 +203,7 @@ Decisao tomada (tabela C1-C13 em `docs/22` §5):
 Fica em aberto:
 
 - convites entre membros e a comunidade (posts de texto, texto com audio, video, resultados, gamificacao): o pedido de resposta esta pronto; falta quem cria o convite. Video de aluno vai para Bunny ou Mux, nunca para o servidor da area;
-- salas ao vivo e webinarios "tipo Zoom" dentro da area, com comentarios e numeros de retencao (momento de saida, retencao media e maxima, quem mais comentou): pede um estudo proprio (provedor de video ao vivo, custo e escala) antes do desenho;
+- salas ao vivo e webinarios "tipo Zoom" dentro da area, com comentarios e numeros de retencao (momento de saida, retencao media e maxima, quem mais comentou): pede um estudo proprio (provedor de video ao vivo, custo e escala) antes do desenho. Estudo feito e decidido em 28/10/2026: `docs/30-webinarios.md` (Jitsi proprio sem marca d'agua no cx23, Jibri por hora, live gravada com o chat original, paineis separados);
 - outros tipos e canais: faixa no topo, card na home, destaque, toast, e-mail (pela fila `email_outbox`), push e WhatsApp;
 - central de preferencias `/perfil/notificacoes` e descadastro sem login, que chegam junto com o primeiro canal fora da plataforma;
 - seletor de desfecho, "Salvar quem converteu como segmento", aba "Avisos recebidos" no perfil do aluno e "Enviar aviso" a partir de Alunos, Comunidade e Hoje.

@@ -4,19 +4,26 @@
 #                                           .env gerado no servidor, compose up, migracoes, smoke, tick de
 #                                           jobs no Vault, backup (restic -> Storage Box) e timer
 #   bash infra/cloud/deploy.sh marketing    Mautic: .env gerado, compose up, instalacao, smoke, backup
+#   bash infra/cloud/deploy.sh meet         Jitsi proprio (servidor C, docs/20 §8B): .env gerado, volumes, ufw,
+#                                           compose up com o perfil borda, smoke; a segunda rodada (stack ja no
+#                                           ar) so com SEM_LIVE_2H=sim, porque recriar containers derruba a sala
 # Idempotente: a segunda rodada vira atualizacao (nova imagem, migracoes novas). Precisa de HCLOUD_TOKEN
 # (abre e fecha o SSH no firewall), GITHUB_TOKEN com packages:write (GHCR) e Docker (buildx) na maquina.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
-role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || die "uso: deploy.sh membros|marketing"
+role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || [ "$role" = "meet" ] || die "uso: deploy.sh membros|marketing|meet"
 need HCLOUD_TOKEN
 install_hcloud
 deploy_key
 
-if [ "$role" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
-server_exists "$server" || die "Servidor $server nao existe: rode provision.sh antes."
+case "$role" in
+    membros) server="$MEMBROS_NAME" ;;
+    meet) server="$MEET_NAME" ;;
+    *) if [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi ;;
+esac
+server_exists "$server" || die "Servidor $server nao existe: rode provision.sh antes (provision-meet para o Jitsi)."
 ip=$(server_ip4 "$server"); target="$DEPLOY_USER@$ip"
 box=$(storage_box_json)
 sb_user=$(printf '%s' "$box" | jq -r '.username // .user // empty'); sb_host=$(printf '%s' "$box" | jq -r '.server // .host // empty')
@@ -91,6 +98,34 @@ SQL
     echo
     echo "App no ar: https://$APP_DOMAIN (versao sha-$commit). Supabase: https://$API_DOMAIN. Studio: https://$STUDIO_DOMAIN (so STUDIO_ALLOWED_IPS)."
     echo "Falta: secrets-membros (chave do Resend) e equipe (contas da equipe)."
+elif [ "$role" = "meet" ]; then
+    envf="$REMOTE_DIR/infra/jitsi/.env"
+    jitsi_compose="docker compose -f infra/jitsi/docker-compose.yml --profile borda"
+    if ! remote "test -f infra/jitsi/.env"; then
+        log "Gerando segredos e enderecos no servidor (infra/jitsi/.env)"
+        remote "sh infra/jitsi/generate-secrets.sh --domain '$MEET_DOMAIN' --email '$PRODUCER_EMAIL' --app-origin 'https://$APP_DOMAIN'"
+    fi
+    # O JVB esta atras do NAT do Docker: anuncia o IPv4 publico do servidor.
+    set_env "$target" "$envf" JVB_ADVERTISE_IPS "$ip"
+    jvb_port=$(get_env "$target" "$envf" JVB_PORT); jvb_port="${jvb_port:-10000}"
+    log "Pastas dos volumes (uid 1000) e portas no ufw: UDP $jvb_port (midia) e TCP 5222 (so o Jibri; o firewall da Hetzner limita a origem)"
+    remote "bash infra/jitsi/scripts/volumes.sh"
+    remote "sudo ufw route allow proto udp from any to any port $jvb_port comment 'JVB midia' >/dev/null && sudo ufw route allow proto tcp from any to any port 5222 comment 'XMPP so do Jibri' >/dev/null"
+    if remote "$jitsi_compose ps -q web 2>/dev/null | grep -q ."; then
+        # Stack ja no ar: recriar containers (imagem ou configuracao nova) derruba quem esta na sala.
+        [ "${SEM_LIVE_2H:-}" = "sim" ] || die "O Jitsi ja esta no ar em $server. Um novo deploy-meet recria containers e derruba a sala: confirme que nao ha live nas proximas 2 h com SEM_LIVE_2H=sim nas opcoes (docs/20 §8B.6)."
+        log "Atualizando o stack (tag do .env.example do commit, se mudou) e a configuracao"
+        remote "SEM_LIVE_2H=sim bash infra/jitsi/scripts/update.sh --server"
+        remote "$jitsi_compose up -d"
+    else
+        log "Primeira subida do stack do Jitsi (imagens, compose up)"
+        remote "$jitsi_compose pull --quiet && $jitsi_compose up -d"
+    fi
+    for s in prosody jicofo jvb web; do remote "bash -c '. infra/jitsi/scripts/_env.sh; wait_healthy $s 300'"; done
+    remote "bash infra/jitsi/scripts/smoke.sh"
+    echo
+    echo "Jitsi no ar: https://$MEET_DOMAIN (commit $commit). Sem marca do Jitsi; ninguem entra sem o JWT do app."
+    echo "Falta: secrets-meet com JWT_APP_SECRET e secrets-membros com o MESMO valor em WEBINAR_JWT_SECRET (docs/20 §8B.3); depois status-meet e o botao Testar sala."
 else
     envf="$REMOTE_DIR/infra/mautic/.env"
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="BUNKER707_COMPOSE_OVERRIDE=$REMOTE_DIR/infra/mautic/compose.colocado.yml"

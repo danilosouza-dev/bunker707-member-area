@@ -703,3 +703,337 @@ export async function limparComunicacao(db) {
     }
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios (docs/30; migracao 202610280001)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma Live ao vivo publicada para todos, apresentada pelo produtor, com Garantir vaga ligado. */
+export const WEBINARIO_DE_TESTE = {
+  descricao: "Uma live de boas-vindas da escola de teste, com perguntas ao vivo.",
+  id: "bbbbbbbb-0000-4000-8000-000000000001",
+  sessaoId: "bbbbbbbb-0000-4000-8000-000000000002",
+  slug: "teste-live-de-boas-vindas",
+  titulo: "Live de Teste: Boas-vindas"
+};
+
+/**
+ * Grava o webinario de teste (e a sessao `live`) marcado para daqui a 3 dias, em hora cheia. Idempotente: a
+ * hora marcada e refeita a cada chamada, entao a contagem regressiva nunca vence entre uma rodada e outra.
+ * Pede as contas da escola (seedEscolaDeTeste antes). Banco sem a migracao: erro claro.
+ */
+export async function seedWebinarioDeTeste(db) {
+  const contas = await contasDeTeste(db);
+  const horaMarcada = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  horaMarcada.setUTCMinutes(0, 0, 0);
+  const scheduledAt = horaMarcada.toISOString();
+  const agora = new Date().toISOString();
+
+  unwrap(
+    await db.from("webinars").upsert(
+      {
+        access_mode: "everyone",
+        cancel_reason: null,
+        cancelled_at: null,
+        created_by: contas.produtor.id,
+        deleted_at: null,
+        description: WEBINARIO_DE_TESTE.descricao,
+        duration_minutes: 60,
+        host_user_id: contas.produtor.id,
+        id: WEBINARIO_DE_TESTE.id,
+        kind: "live",
+        published_at: agora,
+        registration_required: true,
+        scheduled_at: scheduledAt,
+        show_banner: true,
+        show_on_home: true,
+        slug: WEBINARIO_DE_TESTE.slug,
+        status: "published",
+        title: WEBINARIO_DE_TESTE.titulo
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando webinario de teste"
+  );
+  unwrap(
+    await db.from("webinar_sessions").upsert(
+      {
+        ended_at: null,
+        id: WEBINARIO_DE_TESTE.sessaoId,
+        kind: "live",
+        scheduled_at: scheduledAt,
+        started_at: null,
+        status: "scheduled",
+        webinar_id: WEBINARIO_DE_TESTE.id
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando sessao do webinario de teste"
+  );
+
+  return { scheduledAt };
+}
+
+/**
+ * Apaga o que os testes gravaram nos webinarios: as vagas das contas de teste e os webinarios de teste
+ * (slug "teste-"; sessoes e vagas saem por cascata). Banco sem a migracao: nada a limpar.
+ */
+export async function limparWebinarios(db) {
+  const ids = await idsDasContasDeTeste(db);
+  const etapas = [
+    ["Apagando vagas de teste", () => (ids.length === 0 ? Promise.resolve({ error: null }) : db.from("webinar_registrations").delete().in("user_id", ids))],
+    // Fase 2: o aceite do chat e por aluno (nao sai com o webinario) e as palavras bloqueadas de teste tambem.
+    ["Apagando aceites de chat de teste", () => (ids.length === 0 ? Promise.resolve({ error: null }) : db.from("webinar_chat_consents").delete().in("user_id", ids))],
+    ["Apagando palavras bloqueadas de teste", () => db.from("lesson_comment_blocked_words").delete().like("word", "teste-%")],
+    ["Apagando webinarios de teste", () => db.from("webinars").delete().like("slug", "teste-%")]
+  ];
+
+  for (const [contexto, etapa] of etapas) {
+    const result = await etapa();
+
+    if (result.error && !/does not exist|Could not find/i.test(result.error.message)) {
+      throw new Error(`${contexto}: ${result.error.message}`);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios, fase 2 (docs/30 §1.6 e §3.4; migracao 202610290001): uma Live gravada ja encerrada
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma Live gravada publicada para todos, com uma sessao encerrada ha pouco (presenca congelada e lista por aluno). */
+export const LIVE_GRAVADA_DE_TESTE = {
+  gravacaoId: "bbbbbbbb-0000-4000-8000-000000000013",
+  id: "bbbbbbbb-0000-4000-8000-000000000011",
+  sessaoId: "bbbbbbbb-0000-4000-8000-000000000012",
+  slug: "teste-live-gravada-encerrada",
+  titulo: "Live Gravada de Teste: Encerrada"
+};
+
+/**
+ * Grava a Live gravada de teste com uma sessao `simulated` encerrada ha 90 min (30 min de video): a curva de
+ * presenca congelada (2 alunos ate o minuto 5, 1 ate o fim), o resumo por aluno em webinar_attendance (a aluna ate
+ * o fim, o aluno sem acesso saiu aos 5 min), as duas vagas, duas mensagens e uma reacao da aluna. E o que a aba
+ * Relatorio e o CSV leem. Idempotente (upsert pelos ids fixos; mensagens, reacoes e vagas da sessao sao refeitas).
+ * Pede as contas da escola (seedEscolaDeTeste antes) e `limparWebinarios` apaga tudo pelo slug "teste-".
+ */
+export async function seedLiveGravadaEncerradaDeTeste(db) {
+  const contas = await contasDeTeste(db);
+  const { gravacaoId, id, sessaoId, slug, titulo } = LIVE_GRAVADA_DE_TESTE;
+  const inicio = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  inicio.setUTCSeconds(0, 0);
+  const fim = new Date(inicio.getTime() + 30 * 60 * 1000);
+  const emSegundos = (segundos) => new Date(inicio.getTime() + segundos * 1000).toISOString();
+  const buckets = Array.from({ length: 60 }, (_, b) => ({ b, n: b < 10 ? 2 : 1 }));
+  const presenceCurve = {
+    avgPresent: 1.2,
+    bucketSeconds: 30,
+    buckets,
+    durationMs: 1_800_000,
+    frozenAt: fim.toISOString(),
+    peak: { b: 0, n: 2 },
+    reachedEnd: 1,
+    unique: 2,
+    watchAvg: 1050,
+    watchMax: 1800
+  };
+
+  unwrap(
+    await db.from("webinars").upsert(
+      {
+        access_mode: "everyone",
+        cancel_reason: null,
+        cancelled_at: null,
+        created_by: contas.produtor.id,
+        deleted_at: null,
+        description: "Uma live gravada da escola de teste, ja encerrada, para o relatorio.",
+        duration_minutes: 30,
+        host_user_id: contas.produtor.id,
+        id,
+        kind: "simulated",
+        published_at: emSegundos(-86_400),
+        registration_required: true,
+        scheduled_at: null,
+        show_banner: true,
+        show_on_home: true,
+        slug,
+        status: "published",
+        title: titulo
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando a live gravada de teste"
+  );
+  unwrap(
+    await db.from("webinar_recordings").upsert(
+      {
+        bunny_library_id: "1",
+        bunny_video_id: "teste-live-gravada-encerrada",
+        duration_seconds: 1800,
+        embed_url: "https://iframe.mediadelivery.net/embed/1/teste-live-gravada-encerrada",
+        id: gravacaoId,
+        provider: "bunny",
+        session_id: null,
+        source: "bunny",
+        status: "ready",
+        webinar_id: id
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando o video da live gravada de teste"
+  );
+  unwrap(
+    await db.from("webinar_sessions").upsert(
+      {
+        ended_at: fim.toISOString(),
+        id: sessaoId,
+        kind: "simulated",
+        presence_curve: presenceCurve,
+        recording_id: gravacaoId,
+        scheduled_at: inicio.toISOString(),
+        script_fired_at: inicio.toISOString(),
+        show_live_badge: false,
+        started_at: inicio.toISOString(),
+        status: "ended",
+        webinar_id: id
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando a sessao encerrada de teste"
+  );
+  unwrap(
+    await db.from("webinar_attendance").upsert(
+      [
+        { entries: 1, first_at: emSegundos(10), last_at: emSegundos(1790), max_bucket: 59, reached_end: true, seconds: 1800, session_id: sessaoId, user_id: contas.aluna.id },
+        { entries: 1, first_at: emSegundos(10), last_at: emSegundos(300), max_bucket: 9, reached_end: false, seconds: 300, session_id: sessaoId, user_id: contas.alunoSemAcesso.id }
+      ],
+      { onConflict: "session_id,user_id" }
+    ),
+    "Gravando a presenca por aluno de teste"
+  );
+
+  for (const [contexto, apaga] of [
+    ["Apagando as vagas da live gravada de teste", () => db.from("webinar_registrations").delete().eq("webinar_id", id)],
+    ["Apagando as mensagens da sessao de teste", () => db.from("webinar_chat_messages").delete().eq("session_id", sessaoId)],
+    ["Apagando as reacoes da sessao de teste", () => db.from("webinar_reactions").delete().eq("session_id", sessaoId)]
+  ]) {
+    unwrap(await apaga(), contexto);
+  }
+
+  unwrap(
+    await db.from("webinar_registrations").insert([
+      { registered_at: emSegundos(-3600), session_id: sessaoId, source: "email", status: "registered", user_id: contas.aluna.id, webinar_id: id },
+      { registered_at: emSegundos(-1800), session_id: sessaoId, source: null, status: "registered", user_id: contas.alunoSemAcesso.id, webinar_id: id }
+    ]),
+    "Gravando as vagas da live gravada de teste"
+  );
+  unwrap(
+    await db.from("webinar_chat_messages").insert([
+      { approved: true, author_user_id: contas.aluna.id, body: "Boa noite, pessoal!", created_at: emSegundos(30), display_name: "Aluna T.", kind: "message", master: false, offset_ms: 30_000, role: "student", session_id: sessaoId, source: "audience", webinar_id: id },
+      { approved: true, author_user_id: contas.aluna.id, body: "Esse exemplo ficou claro.", created_at: emSegundos(90), display_name: "Aluna T.", kind: "message", master: false, offset_ms: 90_000, role: "student", session_id: sessaoId, source: "audience", webinar_id: id }
+    ]),
+    "Gravando as mensagens da sessao de teste"
+  );
+  unwrap(await db.from("webinar_reactions").insert({ created_at: emSegundos(60), offset_ms: 60_000, reaction: "fire", session_id: sessaoId, user_id: contas.aluna.id }), "Gravando a reacao da sessao de teste");
+
+  return { endedAt: fim.toISOString(), startedAt: inicio.toISOString() };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Live gravada no ar (docs/30 §1.6; migracao 202610290001): a sala do aluno (fase 2a)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Uma Live gravada publicada para todos, NO AR: a sessao `simulated` que comecou ha pouco, a live de origem (encerrada,
+ * com a gravacao da Bunny e a ancora de 5 s) e duas linhas da linha mestre: "cedo" no segundo 100 do video
+ * (105 s na live) e "tarde" aos 20 minutos. O endereco do player e um embed real da Bunny que os testes de ponta a
+ * ponta cobrem com a pagina falsa (paginaFalsaPlayerJs).
+ */
+export const LIVE_GRAVADA_NO_AR_DE_TESTE = {
+  descricao: "Uma live gravada da escola de teste, reexibida em horario marcado.",
+  gravacaoId: "bbbbbbbb-0000-4000-8000-000000000021",
+  id: "bbbbbbbb-0000-4000-8000-000000000020",
+  mensagens: { cedo: "bbbbbbbb-0000-4000-8000-000000000025", tarde: "bbbbbbbb-0000-4000-8000-000000000026" },
+  origemId: "bbbbbbbb-0000-4000-8000-000000000023",
+  sessaoId: "bbbbbbbb-0000-4000-8000-000000000022",
+  slug: "teste-live-gravada-no-ar",
+  textos: { cedo: "oi da live real", tarde: "ate mais tarde" },
+  titulo: "Live de Teste: Gravada no ar",
+  videoUrl: "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc"
+};
+
+/**
+ * Grava a Live gravada de teste. `comecouHa` (ms) e quanto a sessao ja comecou (padrao 90 s: quem entra cai no
+ * minuto certo); negativo marca para o futuro (a espera). Idempotente: a hora marcada e refeita a cada chamada.
+ * Pede as contas da escola (seedEscolaDeTeste antes). Banco sem a migracao 202610290001: erro claro.
+ */
+export async function seedLiveGravadaDeTeste(db, { comecouHa = 90_000, duracaoSegundos = 3600, seloAoVivo = true } = {}) {
+  const contas = await contasDeTeste(db);
+  const agora = Date.now();
+  const scheduledAt = new Date(agora - comecouHa).toISOString();
+  const origemEm = new Date(agora - 30 * 24 * 60 * 60 * 1000);
+  const origemIso = origemEm.toISOString();
+  const { id, gravacaoId, mensagens, origemId, sessaoId, slug, textos, titulo, videoUrl } = LIVE_GRAVADA_NO_AR_DE_TESTE;
+
+  unwrap(
+    await db.from("webinars").upsert(
+      {
+        access_mode: "everyone",
+        cancel_reason: null,
+        cancelled_at: null,
+        created_by: contas.produtor.id,
+        deleted_at: null,
+        description: LIVE_GRAVADA_NO_AR_DE_TESTE.descricao,
+        duration_minutes: Math.max(15, Math.round(duracaoSegundos / 60)),
+        host_user_id: contas.produtor.id,
+        id,
+        kind: "simulated",
+        published_at: origemIso,
+        registration_required: false,
+        room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+        scheduled_at: scheduledAt,
+        show_banner: false,
+        show_on_home: true,
+        slug,
+        status: "published",
+        title: titulo
+      },
+      { onConflict: "id" }
+    ),
+    "Gravando a live gravada de teste"
+  );
+  // A live de origem primeiro (a gravacao aponta para ela), depois a gravacao, depois a sessao gravada.
+  unwrap(
+    await db.from("webinar_sessions").upsert(
+      { ended_at: new Date(origemEm.getTime() + duracaoSegundos * 1000).toISOString(), id: origemId, kind: "live", recording_anchor_at: origemIso, scheduled_at: origemIso, started_at: origemIso, status: "ended", webinar_id: id },
+      { onConflict: "id" }
+    ),
+    "Gravando a live de origem de teste"
+  );
+  unwrap(
+    await db.from("webinar_recordings").upsert(
+      { anchor_offset_ms: 5000, bunny_library_id: "12345", bunny_video_id: "0b1c2d3e-aaaa-4bbb-8ccc-123456789abc", duration_seconds: duracaoSegundos, embed_url: videoUrl, id: gravacaoId, provider: "bunny", session_id: origemId, source: "upload", status: "ready", webinar_id: id },
+      { onConflict: "id" }
+    ),
+    "Gravando o video da live gravada de teste"
+  );
+  unwrap(
+    await db.from("webinar_sessions").upsert(
+      { chat_mode: "open", chat_slow_mode_seconds: null, ended_at: null, id: sessaoId, kind: "simulated", recording_id: gravacaoId, scheduled_at: scheduledAt, show_live_badge: seloAoVivo, source_session_id: origemId, started_at: null, status: "scheduled", webinar_id: id },
+      { onConflict: "id" }
+    ),
+    "Gravando a sessao gravada de teste"
+  );
+  unwrap(
+    await db.from("webinar_chat_messages").upsert(
+      [
+        { approved: true, author_user_id: null, body: textos.cedo, created_at: new Date(origemEm.getTime() + 105_000).toISOString(), display_name: "Bia C.", id: mensagens.cedo, kind: "message", master: true, offset_ms: 105_000, role: "student", session_id: origemId, source: "original", webinar_id: id },
+        { approved: true, author_user_id: null, body: textos.tarde, created_at: new Date(origemEm.getTime() + 20 * 60_000).toISOString(), display_name: "Bia C.", id: mensagens.tarde, kind: "message", master: true, offset_ms: 20 * 60_000 + 5000, role: "student", session_id: origemId, source: "original", webinar_id: id }
+      ],
+      { onConflict: "id" }
+    ),
+    "Gravando a linha mestre de teste"
+  );
+
+  return { scheduledAt };
+}

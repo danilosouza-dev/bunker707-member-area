@@ -1,0 +1,25 @@
+# Borda do servidor C, o Jitsi proprio (infra/jitsi/docker-compose.yml, servico caddy, perfil `borda`).
+#   MEET_SITE_ADDRESS     hostname do Jitsi (dominio puro = HTTPS automatico pelo Let's Encrypt)
+#   MEET_FRAME_ANCESTORS  quem pode colocar a sala num iframe: a origem da area de membros
+#                         (https://membros.<dominio>); vazio = ninguem (a sala so abre inteira)
+#   ACME_EMAIL            e-mail de avisos do Let's Encrypt
+#   CADDY_LOCAL_CERTS     `local_certs` no ensaio local (certificado da CA interna do Caddy); vazio em producao
+# Sem Cloudflare na frente (meet.<dominio> e DNS puro, docs/30 §6.2): nada de lista de proxies confiaveis; o
+# IP do visitante e o da conexao. O websocket (/xmpp-websocket) passa pelo reverse_proxy sem configuracao extra.
+# O site do Jitsi escuta em web:8000 (HTTP, usuario sem privilegio); o TLS e todo daqui.
+
+{
+	email {$ACME_EMAIL}
+	{$CADDY_LOCAL_CERTS}
+}
+
+{$MEET_SITE_ADDRESS} {
+	header -Server
+	# A sala so pode ser emoldurada pela nossa area de membros (D18); o gravador abre a pagina inteira.
+	header Content-Security-Policy "frame-ancestors {$MEET_FRAME_ANCESTORS}"
+	encode zstd gzip
+
+	reverse_proxy web:8000 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}

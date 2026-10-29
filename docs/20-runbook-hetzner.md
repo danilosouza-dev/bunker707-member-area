@@ -514,6 +514,97 @@ Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker)
 
 ---
 
+## 8B. Webinarios: servidor C do Jitsi e o gravador por hora (servidor D) (29/10/2026)
+
+O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Nada desta secao foi executado**: os arquivos estao
+prontos (`infra/jitsi/`, `infra/cloud/jibri.sh`, as etapas novas do workflow), e cada criacao espera o ok do produtor no
+chat. O app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
+
+### 8B.1 O que e cada servidor e quanto custa
+
+| Servidor | Papel | Tipo | Cobranca |
+|---|---|---|---|
+| C, `bunker707-meet` | a Live ao vivo: Jitsi proprio (web, prosody, jicofo, jvb) atras do Caddy, em `meet.<dominio>` | cx23 (`MEET_TYPE`) | mensal, a partir da criacao (preco lido pela API na hora; referencia `docs/30` §7.5) |
+| D, `bunker707-jibri-<sessao>` | grava uma live em 1080p e envia o MP4 para a Bunny | cpx42 (`JIBRI_TYPE`; reserva ccx23 e cpx32, este em 720p) | por hora, so durante a live (uma live de 2,5 h ~ EUR 0,28) |
+
+O C nao guarda dado de aluno (chat, presenca e relatorio ficam no banco do A), por isso nao tem Storage Box nem backup:
+recriar e `provision-meet` + `deploy-meet` + `secrets-meet`.
+
+### 8B.2 Criar o servidor C (etapa `provision-meet`)
+
+1. O produtor da o ok no chat. 2. A IA dispara `provision-meet` com `CONFIRMADO=sim` nas opcoes (sem ele a etapa recusa). A
+etapa garante a chave SSH do projeto, cria `bunker707-meet` com o firewall proprio (80/443 TCP e 443 UDP de qualquer lugar,
+UDP 10000 da midia, 3478/5349 reservados para TURN, 5222 so dos gravadores vivos, 22 so durante as etapas), faz o
+bootstrap (ufw, Docker, fail2ban, swap) e grava `meet.<dominio>` na Cloudflare **so DNS** (sem proxy: WebRTC nao passa
+pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o ufw e o Caddy.
+
+### 8B.3 Deploy e segredos (etapas `deploy-meet` e `secrets-meet`)
+
+- `deploy-meet` roda da `main` ou da `dev` (decisao do produtor em 29/10/2026: o C nao guarda dado de aluno e atende o
+  teste da Vercel e a producao; o `deploy-membros` continua so da `main`). Na primeira vez gera `infra/jitsi/.env` no
+  servidor (`generate-secrets.sh`: senhas do Jicofo, do JVB e do Jibri, as credenciais de TURN e o `JWT_APP_SECRET`,
+  nunca impressos), grava `JVB_ADVERTISE_IPS` com o IPv4 publico, sobe o stack com o perfil `borda` e roda o
+  `smoke.sh` (site no ar, servicos saudaveis, nenhuma marca do Jitsi na interface, UDP 10000 ouvindo).
+- Com o stack ja no ar, um novo `deploy-meet` recria containers e derruba quem esta na sala: so com `SEM_LIVE_2H=sim`
+  nas opcoes (nenhuma live nas proximas 2 h).
+- `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
+  `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
+  (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
+- O segredo do repositorio `JIBRI_SECRETS` (linhas `CHAVE=VALOR`: `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`,
+  `WEBINAR_RECORDER_WEBHOOK_SECRET`; opcionais `WEBINAR_RECORDER_WEBHOOK_URL` e `BUNNY_COLLECTION_ID`) so entra nos
+  passos de `jibri-up` e `jibri-down`, nunca no ambiente do job inteiro. O `WEBINAR_RECORDER_WEBHOOK_SECRET` tambem vai
+  para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
+- `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
+  custo; avisa quando um gravador passa de 6 h ligado.
+
+### 8B.4 Antes da primeira live real
+
+Testar a sala com 2 ou 3 contas (celular e computador, uma em 4G), conferir que nenhuma tela mostra o nome ou a marca do
+Jitsi, que o aluno entra sem microfone e so com o token do app, e rodar o roteiro de conferencia do `docs/30` §10.3.
+
+### 8B.5 O gravador por hora (etapas `jibri-up`, `jibri-down` e `exec-jibri`)
+
+- **Antes da live** (cerca de 30 min): `jibri-up` com `CONFIRMADO=sim SESSAO=<id da sessao>`. Cria
+  `bunker707-jibri-<sessao>` (tenta o cpx42 e as reservas nos locais da lista), grava `/opt/jibri/.env` por SSH (senhas e
+  dominios do `.env` do C, segredos do `JIBRI_SECRETS`), abre a 5222 do C so para o IP dele, sobe o container, espera o
+  Jibri ficar saudavel e avisa o app (`state=ready`). Sem estoque em tipo algum: avisa `unavailable` (a live acontece, sem
+  gravacao; o plano B e gravar pelo OBS e enviar o arquivo pelo admin).
+- **Durante a live**: o host clica Gravar; o app marca a ancora no relogio do servidor. O MP4 fica na maquina D.
+- **Depois da live**: o `finalize.sh` envia o MP4 para a Bunny Stream e avisa o app (`uploaded`, com duracao, tamanho e
+  sha256; ou `upload_failed`, guardando o arquivo). Em seguida `jibri-down` com `CONFIRMADO=sim SESSAO=<id>`: so apaga
+  quando o app confirma `uploaded` (ou que nao houve gravacao) e nao ha MP4 sem a marca `.uploaded` na maquina. `FORCAR=1`
+  apaga mesmo assim (perde o arquivo que nao subiu). Sem `SESSAO`, o `jibri-down` cuida de todos os gravadores vivos.
+- **Envio falhou** (`upload_failed`, o e-mail chega ao produtor; o MP4 fica na maquina com a marca `.failed`): rodar o
+  envio de novo com `exec-jibri`, `SESSAO=<id>` e `COMANDO='docker compose exec -T jibri sh /config/finalize.sh'` (sem
+  argumento ele pega o MP4 mais novo da pasta de gravacoes); sem sucesso, copiar o MP4 da maquina e envia-lo pelo painel
+  da Bunny (ligar o video a sessao pelo admin, Gravacao › Enviar arquivo, chega com a sala ao vivo, fase 3), e so depois
+  `jibri-down`.
+- Um gravador esquecido custa por hora: `status-meet` avisa depois de 6 h; a regra e apagar no mesmo dia.
+
+### 8B.6 Atualizar o Jitsi
+
+A tag `stable-NNNNN` fica fixada em `infra/jitsi/.env.example` (e em `infra/jitsi/jibri/.env.example`, sempre igual). A
+cada 4 a 8 semanas: `sh infra/jitsi/scripts/update.sh --check` (compara com a ultima stable), `--apply` (reescreve as duas
+tags), ensaio local, PR, `main`, e `deploy-meet` com `SEM_LIVE_2H=sim` (o servidor roda `update.sh --server`, guarda a tag
+anterior em `infra/jitsi/.previous-image-version` e roda o smoke). Voltar: `exec-meet` com
+`COMANDO='bash infra/jitsi/scripts/update.sh --server --tag <tag anterior> --sem-live'`.
+
+### 8B.7 Plano B: "Live gravada do dia"
+
+Se o C cair na hora da live e nao voltar em 5 minutos: avisar a turma pelo sino (aviso da Comunicacao), publicar uma
+**Live gravada do dia** com a gravacao mais recente do mesmo tema (ou o OBS gravando a tela do apresentador, enviado depois
+como Replay) e remarcar a Live ao vivo (o app avisa quem tinha vaga). Nunca anunciar a gravada como ao vivo fora da area
+(`docs/30` §8.6).
+
+### 8B.8 Incidentes
+
+| Sintoma | O que fazer |
+|---|---|
+| Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
+| Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
+| Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |
+| Gravador ligado depois da live | `jibri-down` com `CONFIRMADO=sim` (sem `SESSAO`: todos) |
+
 ## 9. Deploy de nova versao do app
 
 Desde 19/10/2026 a etapa so roda a partir da `main` (passo "Deploy so da main" do workflow): o caminho e branch da tarefa -> PR para `dev` (teste na Vercel com o Supabase da nuvem) -> PR `dev` -> `main` -> `deploy-membros` (ambientes em `CONTRIBUTING.md`). Em 18/10/2026 o caminho de producao passou a ser a etapa `deploy-membros` (secao 4A.3): ela constroi a imagem no runner com as `NEXT_PUBLIC_*` lidas do `.env` do servidor (`SUPABASE_PUBLIC_URL`, `SUPABASE_PUBLISHABLE_KEY` e, se preenchidos, PostHog e Sentry), publica `ghcr.io/<repositorio>:hetzner-sha-<commit>` e, no servidor, roda o `infra/scripts/deploy.sh --image` descrito abaixo. Nao ha variaveis `NEXT_PUBLIC_*` no GitHub. O `build-image.yml` continua rodando a cada push na `main` e em PR que mexe no build (Dockerfile, package.json, next.config) para conferir que o build passa; a imagem que ele publica (`sha-<commit>`) nao leva as `NEXT_PUBLIC_*` do servidor e nao e a de producao; por isso a de producao tem o prefixo `hetzner-`.

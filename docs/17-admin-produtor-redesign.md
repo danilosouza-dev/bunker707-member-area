@@ -424,6 +424,8 @@ Campos: nome, data e hora (fuso de São Paulo), duração, onde (YouTube Live n�
 
 Lado do aluno: página `/webinarios`, card "Próxima live" na home, **Garantir vaga** em 1 clique, confirmação com arquivo de calendário e links Google/Outlook, faixa "Começa em 1 h — Entrar" para inscritos. Números: inscritos, compareceram (clicaram em Entrar), assistiram o replay.
 
+Atualização (28/10/2026): o estudo pedido em docs/09 foi feito e a decisão está em `docs/30-webinarios.md`: o "onde" deixa de ser YouTube/Zoom/Meet e passa a ser a sala própria (Jitsi Meet numa instância nossa, sem marca d'água) ou a Live gravada (vídeo da Bunny com o chat original por offset); as tabelas são `webinars`, `webinar_sessions`, `webinar_presenters`, `webinar_registrations` e `webinar_recordings` (migração `202610280001`), no lugar de `events`/`event_registrations` da tabela de §2.4; "Inscritos" vira **Vagas garantidas** na tela. A fase 1 (cadastro, Garantir vaga, lembretes) está construída; sala ao vivo, Live gravada e painéis seguem as fases do docs/30 §11.
+
 #### 1.8.4 Promoções (`/admin/comunicacao/promocoes`)
 
 Campos: produto ofertado, título, selo ("-40 % até domingo"), preço de/por (texto), cupom (copiável), link de checkout (Hotmart/Ticto/Kiwify), prazo com contagem regressiva, para quem (padrão: quem não tem o produto; opções: concluíram o produto X, inativos, segmento), onde (card bloqueado / pop-up / faixa / destaque). O card bloqueado do aluno ganha selo, preço e prazo. Todo clique passa por um link curto que registra quem clicou e, quando as vendas automáticas chegarem, fecha a conversão. Até lá, o relatório diz "cliques no checkout" e não "vendas".
@@ -515,7 +517,7 @@ Nota (21/10/2026): "automações encadeadas" saiu de fora do MVP por pedido expl
 | D2 | De onde vêm os arquivos originais dos vídeos hoje no YouTube? (HD, Drive, Studio) | Levantar antes da fase 4; define o esforço de "Trocar vídeos em massa" |
 | D3 | Regra de conclusão de aula: só fim do vídeo, ou 90 % assistido? | 90 % por padrão, configurável por produto, com "marcada à mão" sempre separada |
 | D4 | Quem na equipe pode publicar um pop-up para mais de 500 alunos sem segunda aprovação? | Dono e admin; editor cria e agenda, e a publicação acima de 500 fica "Aguardando aprovação" até um dono ou admin aprovar |
-| D5 | Plataforma de webinário padrão: YouTube Live não listado (grátis, exige canal habilitado) ou Zoom Webinars (≈ US$ 80–95/mês além da licença, estimativa)? | YouTube Live não listado; Zoom só se precisar de link único por aluno |
+| D5 | Plataforma de webinário padrão: YouTube Live não listado (grátis, exige canal habilitado) ou Zoom Webinars (≈ US$ 80–95/mês além da licença, estimativa)? | Decidido em 28/10/2026 (`docs/30` D1): sala própria com Jitsi Meet numa instância nossa, sem marca d'água, num servidor cx23 da Hetzner; nem YouTube nem Zoom |
 | D6 | E-mail de convites e lembretes: começar no plano gratuito (3.000 por mês, **100 por dia**) ou já no pago (US$ 20 por 50 mil)? | Gratuito só em desenvolvimento; a fase 5 entra no pago desde o primeiro webinário com mais de 100 inscritos, com remetente no domínio da escola |
 | D7 | Produto adicionado a um pacote depois da venda: liberar retroativamente por padrão? | Não; botão manual "Liberar para quem já tem o pacote" |
 | D8 | Por quanto tempo guardar dados de comportamento (eventos, avisos recebidos) depois que o aluno sai? | 24 meses, anonimizados na exclusão da conta |

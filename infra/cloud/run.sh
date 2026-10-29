@@ -5,6 +5,8 @@
 # etapas que precisam, PAYLOAD (envelope cifrado) ou COMANDO (exec-*). Etapas:
 #   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
+#   provision-meet, deploy-meet, secrets-meet, exec-meet, status-meet (servidor C do Jitsi; CONFIRMADO=sim),
+#   jibri-up, jibri-down, exec-jibri (gravador por hora; SESSAO=<id> e CONFIRMADO=sim; docs/20 §8B),
 #   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots),
 #   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
 #   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup),
@@ -20,10 +22,14 @@ for kv in ${OPCOES:-}; do
         *) echo "opcao ignorada (formato CHAVE=VALOR): $kv" >&2 ;;
     esac
 done
-exec_remote() {  # exec_remote membros|marketing: roda COMANDO como deploy em REMOTE_DIR
+exec_remote() {  # exec_remote membros|marketing|meet: roda COMANDO como deploy em REMOTE_DIR
     . "$here/lib.sh"
     need HCLOUD_TOKEN COMANDO; install_hcloud; deploy_key
-    if [ "$1" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
+    case "$1" in
+        membros) server="$MEMBROS_NAME" ;;
+        meet) server="$MEET_NAME" ;;
+        *) if [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi ;;
+    esac
     ip=$(server_ip4 "$server"); fw_open_ssh "$server"; wait_ssh "$DEPLOY_USER@$ip"
     rsh "$DEPLOY_USER@$ip" "cd '$REMOTE_DIR' && $COMANDO"
 }
@@ -41,6 +47,14 @@ case "$etapa" in
     backup-marketing) COMANDO="bash infra/mautic/scripts/backup.sh --check" exec_remote marketing ;;
     exec-membros) exec_remote membros ;;
     exec-marketing) exec_remote marketing ;;
+    provision-meet) bash "$here/provision.sh" meet ;;
+    deploy-meet) bash "$here/deploy.sh" meet ;;
+    secrets-meet) bash "$here/secrets.sh" meet ;;
+    exec-meet) exec_remote meet ;;
+    status-meet) bash "$here/status.sh" meet ;;
+    jibri-up) bash "$here/jibri.sh" up ;;
+    jibri-down) bash "$here/jibri.sh" down ;;
+    exec-jibri) bash "$here/jibri.sh" exec ;;
     snapshot) bash "$here/snapshot.sh" ;;
     restaurar) bash "$here/restaurar.sh" ;;
     carga) bash "$here/carga.sh" ;;
@@ -62,5 +76,5 @@ case "$etapa" in
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,11p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,13p "$0"; exit 2 ;;
 esac

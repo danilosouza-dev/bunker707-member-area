@@ -14,10 +14,12 @@ import {
   Phone,
   ShieldCheck,
   UserRound,
+  Lock,
   type LucideIcon
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProfileAvatarEditor } from "@/components/member/profile/profile-avatar-editor";
+import { WebinarChatPrivacy } from "@/components/member/webinars/webinar-chat-privacy";
 import { MemberButtonLink } from "@/components/member/ui/member-button";
 import { MemberChip, type MemberChipTone } from "@/components/member/ui/member-chip";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
@@ -31,8 +33,9 @@ import type { ProfileAccessView, ProfileDetailsView, ProfileTab } from "@/server
 import { ProfileSignOutButton } from "./profile-sign-out-button";
 
 // Perfil do aluno: foto (o aluno troca ou remove no cabecalho), Dados (somente leitura nesta fase),
-// Acessos (inicio e fim de cada acesso ativo) e Segurança (alterar senha e sair). Abas trocam o endereco (?aba=), sem JavaScript. Rotulos curtos
-// para as tres abas caberem em 390 px sem rolar.
+// Acessos (inicio e fim de cada acesso ativo), Segurança (alterar senha e sair) e Privacidade (o chat das lives,
+// docs/30 §8.5: Remover minhas mensagens). Abas trocam o endereco (?aba=), sem JavaScript. Rotulos curtos para as
+// abas caberem em 390 px (a barra rola de lado quando precisa).
 
 const accessTones: Record<ProfileAccessView["kind"], MemberChipTone> = {
   entitlement: "success",
@@ -204,6 +207,14 @@ function ProfileSecurityTab() {
   );
 }
 
+function ProfilePrivacyTab({ accessPreviewMode }: { accessPreviewMode?: AccessPreviewMode }) {
+  return (
+    <div className="grid gap-3" data-testid="profile-privacy">
+      <WebinarChatPrivacy readOnly={Boolean(accessPreviewMode)} />
+    </div>
+  );
+}
+
 export function ProfileView({
   accessPreviewMode,
   accesses,
@@ -241,13 +252,15 @@ export function ProfileView({
         items={[
           { active: tab === "dados", href: tabHref("dados"), icon: UserRound, label: "Dados" },
           { active: tab === "acessos", count: accesses.length, href: tabHref("acessos"), icon: ShieldCheck, label: "Acessos" },
-          { active: tab === "seguranca", href: tabHref("seguranca"), icon: KeyRound, label: "Segurança" }
+          { active: tab === "seguranca", href: tabHref("seguranca"), icon: KeyRound, label: "Segurança" },
+          { active: tab === "privacidade", href: tabHref("privacidade"), icon: Lock, label: "Privacidade" }
         ]}
       />
 
       {tab === "dados" ? <ProfileDetailsTab details={details} supportHref={supportHref} /> : null}
       {tab === "acessos" ? <ProfileAccessesTab accesses={accesses} supportHref={supportHref} /> : null}
       {tab === "seguranca" ? <ProfileSecurityTab /> : null}
+      {tab === "privacidade" ? <ProfilePrivacyTab accessPreviewMode={accessPreviewMode} /> : null}
     </MemberPage>
   );
 }

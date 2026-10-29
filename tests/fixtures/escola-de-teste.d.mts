@@ -79,3 +79,23 @@ export function limparConfiguracoesDeTeste(db: unknown, keys: string[]): Promise
 export function apagarProdutosDeTeste(db: unknown, prefixoDoTitulo: string): Promise<void>;
 export function definirCapaDoProduto(db: unknown, titulo: string, image?: string): Promise<void>;
 export function limparComunicacao(db: unknown): Promise<void>;
+
+export const WEBINARIO_DE_TESTE: { descricao: string; id: string; sessaoId: string; slug: string; titulo: string };
+export function seedWebinarioDeTeste(db: unknown): Promise<{ scheduledAt: string }>;
+export function limparWebinarios(db: unknown): Promise<void>;
+
+export const LIVE_GRAVADA_DE_TESTE: { gravacaoId: string; id: string; sessaoId: string; slug: string; titulo: string };
+export function seedLiveGravadaEncerradaDeTeste(db: unknown): Promise<{ endedAt: string; startedAt: string }>;
+export const LIVE_GRAVADA_NO_AR_DE_TESTE: {
+  descricao: string;
+  gravacaoId: string;
+  id: string;
+  mensagens: { cedo: string; tarde: string };
+  origemId: string;
+  sessaoId: string;
+  slug: string;
+  textos: { cedo: string; tarde: string };
+  titulo: string;
+  videoUrl: string;
+};
+export function seedLiveGravadaDeTeste(db: unknown, opcoes?: { comecouHa?: number; duracaoSegundos?: number; seloAoVivo?: boolean }): Promise<{ scheduledAt: string }>;

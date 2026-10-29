@@ -21,7 +21,8 @@ const protectedPagePrefixes = [
   "/minha-jornada",
   "/minhas-compras",
   "/perfil",
-  "/suporte"
+  "/suporte",
+  "/webinarios"
 ];
 const publicPagePrefixes = ["/login", "/auth/callback", "/auth/confirm"];
 

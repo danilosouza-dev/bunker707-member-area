@@ -70,10 +70,11 @@ test("telas e acoes estaticas apontam so para destinos que existem", () => {
   }
 
   const titles = items.map((item) => item.title);
-  for (const missing of ["Novo webinário", "Nova promoção"]) {
+  for (const missing of ["Nova promoção"]) {
     assert.ok(!titles.includes(missing), `${missing} ainda nao existe`);
   }
   assert.equal(items.find((item) => item.title === "Novo aviso")?.href, "/admin/comunicacao/avisos/novo", "o editor de avisos ja existe");
+  assert.equal(items.find((item) => item.title === "Novo webinário")?.href, "/admin/comunicacao/webinarios/novo", "o editor de webinarios ja existe (docs/30)");
   assert.equal(items.find((item) => item.title === "Novo fluxo")?.href, "/admin/comunicacao/fluxos/novo", "o construtor de fluxos ja existe");
   assert.equal(items.find((item) => item.title === "Novo modelo")?.href, "/admin/comunicacao/modelos/novo", "a escolha do tipo do modelo ja existe");
   assert.equal(items.find((item) => item.title === "Fluxos")?.href, "/admin/comunicacao/fluxos", "a aba Fluxos e uma tela");
@@ -130,6 +131,8 @@ test("texto casa com telas e acoes sem acento e por palavras", () => {
   assert.ok(titles("notificacoes seguintes").includes("Novo fluxo"), "acha pelo que o fluxo faz");
   assert.ok(titles("modelo").includes("Novo modelo"));
   assert.ok(titles("reutilizar configuracao").includes("Novo modelo"), "acha pelo que o modelo faz");
+  assert.ok(titles("webinario").includes("Novo webinário"));
+  assert.ok(titles("live gravada").includes("Novo webinário"), "acha pelo tipo da live");
   // "x" passou a achar "Fluxos" e "z" passou a achar "Novo modelo" (reutilizar): a letra sem nada parecido agora e "k".
   assert.deepEqual(titles("k"), [], "1 letra sem nada parecido: lista vazia (o campo mostra 'Nada encontrado')");
   assert.ok(!titles("k").some((title) => title.includes("em alunos")), "busca de alunos so com 2 letras");
@@ -149,6 +152,12 @@ test("Novo aviso, Novo fluxo e Novo modelo so aparecem para quem cria avisos", a
   assert.ok(!actionsFor("support").includes("Novo fluxo"));
   assert.ok(!actionsFor("analyst").includes("Novo fluxo"));
   assert.ok(!actionsFor("instructor").includes("Novo fluxo"), "Professor nao ve Comunicacao");
+  // Webinarios (docs/30 §2.6): ver e editar e messaging.write, como os avisos.
+  assert.ok(actionsFor("owner").includes("Novo webinário"));
+  assert.ok(actionsFor("editor").includes("Novo webinário"));
+  assert.ok(!actionsFor("support").includes("Novo webinário"));
+  assert.ok(!actionsFor("analyst").includes("Novo webinário"));
+  assert.ok(!actionsFor("instructor").includes("Novo webinário"));
   // Modelos (docs/28 §5.1): so quem cria avisos cria modelos.
   assert.ok(actionsFor("owner").includes("Novo modelo"));
   assert.ok(actionsFor("editor").includes("Novo modelo"));

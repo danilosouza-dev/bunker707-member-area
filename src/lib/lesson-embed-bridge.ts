@@ -27,12 +27,21 @@ export type EmbedMessage =
   | { duration: number | null; kind: "ended"; seconds: number | null }
   | { duration: number | null; kind: "time"; seconds: number }
   | { kind: "paused_answer"; paused: boolean }
-  | { fullscreen: boolean; kind: "fullscreen" };
+  | { fullscreen: boolean; kind: "fullscreen" }
+  /** Fase 2 (docs/30 §6.6): o player pulou (a sala travada volta ao alvo) e a resposta do getCurrentTime. */
+  | { kind: "seeked"; seconds: number | null }
+  | { kind: "current_time"; seconds: number };
 
 const PLAYERJS_CONTEXT = "player.js";
 const PLAYERJS_VERSION = "0.0.11";
-const PLAYERJS_EVENTS: readonly string[] = ["ready", "play", "pause", "ended", "timeupdate", "getPaused"];
+const PLAYERJS_EVENTS: readonly string[] = ["ready", "play", "pause", "ended", "timeupdate", "getPaused", "getCurrentTime"];
 const VIMEO_EVENTS: readonly string[] = ["ready", "play", "playing", "pause", "ended", "timeupdate", "fullscreenchange"];
+/** Os eventos a mais que a sala travada pede (connectEmbedBridge `extraEvents`); a aula nao os pede. */
+export const EMBED_EXTRA_EVENTS = ["seeked"] as const;
+export type EmbedExtraEvent = (typeof EMBED_EXTRA_EVENTS)[number];
+/** Os comandos que a sala manda ao player (Player.js e Vimeo falam os mesmos nomes). */
+export const EMBED_COMMANDS = ["play", "pause", "mute", "unmute", "setCurrentTime", "getCurrentTime"] as const;
+export type EmbedCommand = (typeof EMBED_COMMANDS)[number];
 /** Os eventos que a ponte pede (o Vimeo tambem avisa a tela cheia; o Player.js nao tem esse evento). */
 const PLAYERJS_SUBSCRIPTIONS = ["play", "pause", "ended", "timeupdate"] as const;
 const VIMEO_SUBSCRIPTIONS = ["play", "pause", "ended", "timeupdate", "fullscreenchange"] as const;
@@ -82,8 +91,8 @@ function pausedAnswer(value: unknown): EmbedMessage | null {
   return typeof value === "boolean" ? { kind: "paused_answer", paused: value } : null;
 }
 
-function playerJsMessage(data: Loose): EmbedMessage | null {
-  if (data.context !== PLAYERJS_CONTEXT || typeof data.event !== "string" || !PLAYERJS_EVENTS.includes(data.event)) {
+function playerJsMessage(data: Loose, extra: readonly EmbedExtraEvent[]): EmbedMessage | null {
+  if (data.context !== PLAYERJS_CONTEXT || typeof data.event !== "string" || !(PLAYERJS_EVENTS.includes(data.event) || (extra as readonly string[]).includes(data.event))) {
     return null;
   }
 
@@ -99,12 +108,18 @@ function playerJsMessage(data: Loose): EmbedMessage | null {
     case "timeupdate":
       // A Bunny legada manda o value como texto JSON: readObject aceita os dois.
       return timing("time", data.value);
+    case "seeked":
+      return { kind: "seeked", seconds: secondsOf(readObject(data.value)?.seconds ?? data.value) };
+    case "getCurrentTime": {
+      const seconds = secondsOf(data.value);
+      return seconds === null ? null : { kind: "current_time", seconds };
+    }
     default:
       return pausedAnswer(data.value);
   }
 }
 
-function vimeoMessage(data: Loose): EmbedMessage | null {
+function vimeoMessage(data: Loose, extra: readonly EmbedExtraEvent[]): EmbedMessage | null {
   // O player ja carregado responde ao aperto de mao assim, sem novo `ready` (SDK vimeo/player.js, isPingResponse).
   if (data.method === "ping") {
     return { kind: "ready" };
@@ -114,11 +129,16 @@ function vimeoMessage(data: Loose): EmbedMessage | null {
     return pausedAnswer(data.value);
   }
 
+  if (data.method === "getCurrentTime") {
+    const seconds = secondsOf(data.value);
+    return seconds === null ? null : { kind: "current_time", seconds };
+  }
+
   if (data.event === "error") {
     return isLoose(data.data) && data.data.method === "ready" ? { kind: "ready_error" } : null;
   }
 
-  if (typeof data.event !== "string" || !VIMEO_EVENTS.includes(data.event)) {
+  if (typeof data.event !== "string" || !(VIMEO_EVENTS.includes(data.event) || (extra as readonly string[]).includes(data.event))) {
     return null;
   }
 
@@ -134,24 +154,41 @@ function vimeoMessage(data: Loose): EmbedMessage | null {
       return timing("ended", data.data);
     case "timeupdate":
       return timing("time", data.data);
+    case "seeked":
+      return { kind: "seeked", seconds: secondsOf(readObject(data.data)?.seconds) };
     default:
       return isLoose(data.data) && typeof data.data.fullscreen === "boolean" ? { fullscreen: data.data.fullscreen, kind: "fullscreen" } : null;
   }
 }
 
-/** Le uma mensagem do player (objeto ou texto), sem confiar no formato. */
-export function parseEmbedMessage(protocol: EmbedProtocol, data: unknown): EmbedMessage | null {
+/** Le uma mensagem do player (objeto ou texto), sem confiar no formato; `extra` aceita os eventos a mais da sala (seeked). */
+export function parseEmbedMessage(protocol: EmbedProtocol, data: unknown, extra: readonly EmbedExtraEvent[] = []): EmbedMessage | null {
   const value = readObject(data);
 
   if (!value) {
     return null;
   }
 
-  return protocol === "vimeo" ? vimeoMessage(value) : playerJsMessage(value);
+  return protocol === "vimeo" ? vimeoMessage(value, extra) : playerJsMessage(value, extra);
 }
 
-function playerJsCommand(method: string, extra: { listener: string; value?: string }) {
+function playerJsCommand(method: string, extra: { listener?: string; value?: number | string }) {
   return JSON.stringify({ context: PLAYERJS_CONTEXT, version: PLAYERJS_VERSION, method, ...extra });
+}
+
+/**
+ * Um comando para o player (fase 2, docs/30 §6.6): play, pause, mute, unmute, setCurrentTime (segundos) e
+ * getCurrentTime (a resposta chega como `current_time`), ja no formato do protocolo. Quem manda e `openEmbedBridge`.
+ */
+export function embedCommand(protocol: EmbedProtocol, command: EmbedCommand, value?: number): unknown {
+  const seconds = typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : undefined;
+  if (protocol === "vimeo") {
+    return seconds === undefined ? { method: command } : { method: command, value: seconds };
+  }
+  if (command === "getCurrentTime") {
+    return playerJsCommand(command, { listener: "b707-current-time" });
+  }
+  return seconds === undefined ? playerJsCommand(command, {}) : playerJsCommand(command, { value: seconds });
 }
 
 /** O aperto de mao, ja no formato do protocolo (objeto no Vimeo, texto JSON no Player.js). */
@@ -161,11 +198,12 @@ export function embedHandshake(protocol: EmbedProtocol): unknown {
     : playerJsCommand("addEventListener", { value: "ready", listener: "b707-ready" });
 }
 
-/** As inscricoes nos eventos (no Player.js sempre com `listener`: a Bunny nova ignora sem). */
-export function embedSubscriptions(protocol: EmbedProtocol): unknown[] {
+/** As inscricoes nos eventos (no Player.js sempre com `listener`: a Bunny nova ignora sem); `extra` so na sala. */
+export function embedSubscriptions(protocol: EmbedProtocol, extra: readonly EmbedExtraEvent[] = []): unknown[] {
+  const events: readonly string[] = protocol === "vimeo" ? [...VIMEO_SUBSCRIPTIONS, ...extra] : [...PLAYERJS_SUBSCRIPTIONS, ...extra];
   return protocol === "vimeo"
-    ? VIMEO_SUBSCRIPTIONS.map((value) => ({ method: "addEventListener", value }))
-    : PLAYERJS_SUBSCRIPTIONS.map((value) => playerJsCommand("addEventListener", { value, listener: `b707-${value}` }));
+    ? events.map((value) => ({ method: "addEventListener", value }))
+    : events.map((value) => playerJsCommand("addEventListener", { value, listener: `b707-${value}` }));
 }
 
 /** A pergunta "esta pausado?": a resposta e o que confirma a ponte. */
@@ -215,6 +253,10 @@ export function reduceEmbedState(state: EmbedBridgeState, message: EmbedMessage)
       });
     case "time":
       return withChanges(state, { duration: message.duration ?? state.duration, seconds: message.seconds });
+    case "seeked":
+      return message.seconds === null ? state : withChanges(state, { seconds: message.seconds });
+    case "current_time":
+      return withChanges(state, { seconds: message.seconds });
     case "paused_answer":
       return withChanges(state, message.paused ? { bridge: "confirmed", playing: false } : { bridge: "confirmed", ended: false, playing: true });
     case "ready_error":
@@ -253,14 +295,31 @@ type BridgeTarget = NonNullable<ReturnType<typeof embedBridgeTarget>>;
  * src ate a primeira mensagem aceita; depois, a origem dela (sempre do grupo, nunca "*"). Recomeca no `load` do
  * iframe. Devolve a funcao que desliga tudo.
  */
-export function connectEmbedBridge(input: {
+export function connectEmbedBridge(input: EmbedBridgeInput): () => void {
+  return openEmbedBridge(input).disconnect;
+}
+
+export type EmbedBridgeInput = {
+  /** Fase 2: eventos a mais na inscricao (a sala travada pede `seeked`); a aula nao passa nada. */
+  extraEvents?: readonly EmbedExtraEvent[];
   iframe: BridgeIframe;
   now?: () => number;
   onChange: (state: EmbedBridgeState, message: EmbedMessage | null) => void;
   target: BridgeTarget;
   win: BridgeWindow;
-}): () => void {
+};
+
+export type EmbedBridgeHandle = {
+  disconnect: () => void;
+  /** Manda um comando ja formatado (embedCommand) ao player, com a targetOrigin exata; antes do ready nada sai. */
+  send: (command: unknown) => boolean;
+};
+
+/** Como connectEmbedBridge, devolvendo tambem o canal de comandos (fase 2: a sala travada da Live gravada). */
+export function openEmbedBridge(input: EmbedBridgeInput): EmbedBridgeHandle {
   const { iframe, onChange, target, win } = input;
+  const extraEvents = input.extraEvents ?? [];
+  let ready = false;
   let state: EmbedBridgeState = EMBED_BRIDGE_START;
   let sendOrigin = target.sendOrigin;
   let handshakeTimer: ReturnType<typeof win.setInterval> | null = null;
@@ -331,7 +390,8 @@ export function connectEmbedBridge(input: {
 
   function handleReady() {
     stopHandshake();
-    embedSubscriptions(target.protocol).forEach(post);
+    ready = true;
+    embedSubscriptions(target.protocol, extraEvents).forEach(post);
 
     if (askTimer === null) {
       askTimer = repeat(
@@ -372,7 +432,7 @@ export function connectEmbedBridge(input: {
       return;
     }
 
-    const message = parseEmbedMessage(target.protocol, event.data);
+    const message = parseEmbedMessage(target.protocol, event.data, extraEvents);
 
     if (!message) {
       return;
@@ -400,6 +460,7 @@ export function connectEmbedBridge(input: {
 
     // Documento novo no iframe: tudo de novo, com o prazo de novo. A targetOrigin fica a da ultima mensagem
     // aceita (a Bunny que abre no host novo manda o `ready` dela antes do `load` do iframe).
+    ready = false;
     update(EMBED_BRIDGE_START, null);
     begin();
   }
@@ -408,16 +469,25 @@ export function connectEmbedBridge(input: {
   iframe.addEventListener("load", handleLoad);
   begin();
 
-  return () => {
-    stopped = true;
-    win.removeEventListener("message", handleMessage);
-    iframe.removeEventListener("load", handleLoad);
-    stopHandshake();
-    stopAsking();
+  return {
+    disconnect() {
+      stopped = true;
+      win.removeEventListener("message", handleMessage);
+      iframe.removeEventListener("load", handleLoad);
+      stopHandshake();
+      stopAsking();
 
-    if (deadline !== null) {
-      win.clearTimeout(deadline);
-      deadline = null;
+      if (deadline !== null) {
+        win.clearTimeout(deadline);
+        deadline = null;
+      }
+    },
+    send(command) {
+      if (stopped || !ready || !iframe.contentWindow) {
+        return false;
+      }
+      post(command);
+      return true;
     }
   };
 }

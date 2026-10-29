@@ -1,0 +1,44 @@
+#cloud-config
+# Primeiro boot do servidor do gravador (bunker707-jibri-<sessao>; infra/cloud/jibri.sh troca os marcadores
+# __DEPLOY_USER__, __SSH_PUBLIC_KEY__, __JITSI_IMAGE_REPO__ e __JITSI_IMAGE_VERSION__): o usuario de deploy
+# com a chave, o Docker CE e a imagem do Jibri ja baixada, para o .env e o `up -d` do jibri-up serem rapidos.
+# NENHUM segredo aqui: a Hetzner guarda o user-data; o .env e gravado por SSH (set_env, 0600). A maquina vive
+# algumas horas e e apagada pelo jibri-down (D3), por isso nao leva ufw, fail2ban nem atualizacoes automaticas:
+# o firewall da Hetzner nao abre porta alguma de entrada fora da 22 durante a etapa.
+users:
+  - name: __DEPLOY_USER__
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+ssh_pwauth: false
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "20m", "max-file": "5" },
+        "live-restore": true
+      }
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c '. /etc/os-release && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get -o DPkg::Lock::Timeout=600 update -q
+  - DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker __DEPLOY_USER__
+  - install -d -o __DEPLOY_USER__ -g __DEPLOY_USER__ /opt/jibri
+  # A imagem roda como uid 1000 (o mesmo do primeiro usuario criado aqui) e recusa volumes que nao pode escrever.
+  - install -d -o 1000 -g 1000 /opt/jibri/volumes/jibri /opt/jibri/volumes/storage/jibri
+  - docker pull __JITSI_IMAGE_REPO__/jibri:__JITSI_IMAGE_VERSION__
+  - touch /opt/jibri/.cloud-init-done

@@ -4,6 +4,8 @@
 # Papel "membros" (app + Supabase): MEMBROS_MIN_RAM_GB (8). Papel "marketing" (Mautic): MARKETING_MIN_RAM_GB (4).
 # Forcar um tipo: MEMBROS_TYPE=cx33 MARKETING_TYPE=cx23. Disco minimo (restaurar de snapshot, que so cabe
 # num disco do mesmo tamanho ou maior): MEMBROS_MIN_DISK_GB, MARKETING_MIN_DISK_GB.
+# INCLUDE_ARM=1 lista tambem os tipos ARM (CAX) na tabela, so para consulta: a escolha por papel continua
+# em x86 (as imagens do Supabase em ARM nao foram conferidas, docs/19 §3.2), a nao ser que o tipo seja forcado.
 # Grava a escolha em $GITHUB_OUTPUT quando existir.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -16,7 +18,7 @@ hzj server-type list > "$WORK_DIR/server-types.json"
 hzj location list > "$WORK_DIR/locations.json" 2>/dev/null || echo '[]' > "$WORK_DIR/locations.json"
 python3 -I - "$WORK_DIR/server-types.json" "$LOCATION" "$FALLBACK_LOCATIONS" \
     "${MEMBROS_MIN_RAM_GB:-8}" "${MARKETING_MIN_RAM_GB:-4}" "${MEMBROS_TYPE:-}" "${MARKETING_TYPE:-}" "${SKIP_MARKETING:-}" \
-    "${MEMBROS_MIN_DISK_GB:-0}" "${MARKETING_MIN_DISK_GB:-0}" <<'PY'
+    "${MEMBROS_MIN_DISK_GB:-0}" "${MARKETING_MIN_DISK_GB:-0}" "${INCLUDE_ARM:-}" <<'PY'
 import json, os, sys
 types = json.load(open(sys.argv[1]))
 preferred, fallbacks = sys.argv[2], sys.argv[3].split()
@@ -24,6 +26,7 @@ min_ram = {"membros": float(sys.argv[4]), "marketing": float(sys.argv[5])}
 forced = {"membros": sys.argv[6], "marketing": sys.argv[7]}
 skip_marketing = sys.argv[8] not in ("", "0", "false")
 min_disk = {"membros": float(sys.argv[9]), "marketing": float(sys.argv[10])}
+include_arm = sys.argv[11] not in ("", "0", "false") if len(sys.argv) > 11 else False
 locations = [preferred] + [l for l in fallbacks if l != preferred]
 
 def price_at(t, loc):
@@ -49,21 +52,23 @@ def available_at(t, loc):
 
 rows = []
 for t in types:
-    if t.get("deprecated") or t.get("architecture") not in ("x86", None):
+    arch = t.get("architecture") or "x86"
+    if t.get("deprecated") or (arch != "x86" and not include_arm):
         continue
     for loc in locations:
         price = price_at(t, loc)
         if price is None:
             continue
-        rows.append((t["name"], loc, t.get("cores"), t.get("memory"), t.get("disk"), t.get("cpu_type"), price, available_at(t, loc)))
+        rows.append((t["name"], loc, t.get("cores"), t.get("memory"), t.get("disk"), t.get("cpu_type"), price, available_at(t, loc), arch))
 
-print(f"{'tipo':8} {'local':6} {'vcpu':>4} {'ram':>5} {'disco':>6} {'cpu':9} {'EUR/mes':>8} disponivel")
-for name, loc, cores, mem, disk, cpu, price, avail in sorted(rows, key=lambda r: (r[6], r[0], r[1])):
-    print(f"{name:8} {loc:6} {cores:>4} {mem:>5} {disk:>6} {str(cpu):9} {price:>8.2f} {'?' if avail is None else ('sim' if avail else 'nao')}")
+print(f"{'tipo':8} {'local':6} {'vcpu':>4} {'ram':>5} {'disco':>6} {'cpu':9} {'arq':4} {'EUR/mes':>8} disponivel")
+for name, loc, cores, mem, disk, cpu, price, avail, arch in sorted(rows, key=lambda r: (r[6], r[0], r[1])):
+    print(f"{name:8} {loc:6} {cores:>4} {mem:>5} {disk:>6} {str(cpu):9} {arch:4} {price:>8.2f} {'?' if avail is None else ('sim' if avail else 'nao')}")
 
 choice = {}
 for role in (["membros"] if skip_marketing else ["membros", "marketing"]):
-    candidates = [r for r in rows if r[3] >= min_ram[role] and r[4] >= min_disk[role] and r[7] is not False and (not forced[role] or r[0] == forced[role])]
+    candidates = [r for r in rows if r[3] >= min_ram[role] and r[4] >= min_disk[role] and r[7] is not False
+                  and (r[0] == forced[role] if forced[role] else r[8] == "x86")]
     candidates.sort(key=lambda r: (r[6], locations.index(r[1])))
     if not candidates:
         print(f"\nNenhum tipo com >= {min_ram[role]} GB para '{role}'" + (f" e disco >= {min_disk[role]:.0f} GB" if min_disk[role] else "") + (f" (forcado: {forced[role]})" if forced[role] else ""))

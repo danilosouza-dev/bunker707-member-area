@@ -70,7 +70,7 @@ function yamlChildren(source, topKey) {
 }
 
 test("scripts de infra/cloud passam na conferencia de sintaxe do bash", () => {
-  assert.deepEqual(shellScripts, ["carga.sh", "deploy.sh", "envelope.sh", "equipe.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
+  assert.deepEqual(shellScripts, ["carga.sh", "deploy.sh", "envelope.sh", "equipe.sh", "jibri.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
   for (const file of shellScripts) {
     const result = run("bash", ["-n", join(cloudDir, file)]);
     assert.equal(result.status, 0, `${file}: ${result.stderr}`);
@@ -379,7 +379,7 @@ test("o workflow de infra so executa etapas por workflow_dispatch: um push apena
   assert.match(infraJob, /^    concurrency:\n      group: \S+\n      cancel-in-progress: false\s*$/m, "uma etapa por vez, e uma no meio nunca e cancelada");
 });
 
-test("deploy-membros e deploy-marketing so rodam na main; as outras etapas rodam de qualquer branch", () => {
+test("deploy-membros e deploy-marketing so rodam na main; deploy-meet na main ou na dev; as outras etapas rodam de qualquer branch", () => {
   const { children: jobs } = yamlChildren(workflowSource, "jobs");
   const infraJob = jobs.get("infra");
   const guard = infraJob.match(/- name: Deploy so da main\n\s+if: (.+)\n\s+run: \|\n\s+(.+)\n/);
@@ -393,7 +393,17 @@ test("deploy-membros e deploy-marketing so rodam na main; as outras etapas rodam
   for (const ref of ["refs/heads/dev", "refs/heads/claude/hopeful-franklin-04s7wt", "refs/tags/v1"]) {
     const result = run("deploy-membros", ref);
     assert.equal(result.status, 1, ref);
-    assert.match(result.stdout, /::error::deploy-membros so roda na main/);
+    assert.match(result.stdout, /::error::deploy-membros so roda na main \(recebido/);
+  }
+  assert.equal(run("deploy-marketing", "refs/heads/dev").status, 1);
+
+  // O Jitsi (servidor C) tambem sai da dev: atende o teste da Vercel e a producao, sem dado de aluno.
+  assert.equal(run("deploy-meet", "refs/heads/main").status, 0);
+  assert.equal(run("deploy-meet", "refs/heads/dev").status, 0);
+  for (const ref of ["refs/heads/claude/nifty-mendel-tx2kro", "refs/tags/v1"]) {
+    const result = run("deploy-meet", ref);
+    assert.equal(result.status, 1, ref);
+    assert.match(result.stdout, /::error::deploy-meet so roda na main ou na dev/);
   }
 });
 

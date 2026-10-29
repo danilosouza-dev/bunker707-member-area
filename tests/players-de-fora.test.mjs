@@ -510,3 +510,65 @@ test("embedAnnouncement e shouldReportTime", () => {
   assert.equal(bridge.shouldReportTime(1_000, 2_000), true);
   assert.equal(bridge.EMBED_BRIDGE_RULES.minTimeReportMs, 1_000);
 });
+
+// --- Fase 2: os comandos da sala travada (docs/30 §6.6) -----------------------------------------------------
+
+test("fase 2: embedCommand no formato de cada protocolo; seeked e getCurrentTime so quando a ponte pede (a aula nao muda)", () => {
+  assert.deepEqual(JSON.parse(bridge.embedCommand("playerjs", "setCurrentTime", 125.7)), { context: "player.js", method: "setCurrentTime", value: 125.7, version: "0.0.11" });
+  assert.deepEqual(JSON.parse(bridge.embedCommand("playerjs", "play")), { context: "player.js", method: "play", version: "0.0.11" });
+  assert.deepEqual(JSON.parse(bridge.embedCommand("playerjs", "getCurrentTime")), { context: "player.js", listener: "b707-current-time", method: "getCurrentTime", version: "0.0.11" });
+  assert.deepEqual(JSON.parse(bridge.embedCommand("playerjs", "setCurrentTime", -3)), { context: "player.js", method: "setCurrentTime", value: 0, version: "0.0.11" }, "nunca negativo");
+  assert.deepEqual(bridge.embedCommand("vimeo", "setCurrentTime", 10), { method: "setCurrentTime", value: 10 });
+  assert.deepEqual(bridge.embedCommand("vimeo", "unmute"), { method: "unmute" });
+
+  assert.equal(bridge.parseEmbedMessage("playerjs", pjs("seeked", { value: { seconds: 90 } })), null, "sem pedir, o seeked continua fora da lista");
+  assert.deepEqual(bridge.parseEmbedMessage("playerjs", pjs("seeked", { value: { seconds: 90 } }), ["seeked"]), { kind: "seeked", seconds: 90 });
+  assert.deepEqual(bridge.parseEmbedMessage("playerjs", pjs("seeked"), ["seeked"]), { kind: "seeked", seconds: null });
+  assert.deepEqual(bridge.parseEmbedMessage("vimeo", { data: { seconds: 12 }, event: "seeked" }, ["seeked"]), { kind: "seeked", seconds: 12 });
+  assert.deepEqual(bridge.parseEmbedMessage("playerjs", pjs("getCurrentTime", { listener: "b707-current-time", value: 42.5 })), { kind: "current_time", seconds: 42.5 });
+  assert.equal(bridge.parseEmbedMessage("playerjs", pjs("getCurrentTime", { value: "42" })), null, "precisa de numero");
+  assert.deepEqual(bridge.parseEmbedMessage("vimeo", { method: "getCurrentTime", value: 7 }), { kind: "current_time", seconds: 7 });
+
+  const seeked = bridge.reduceEmbedState({ ...bridge.EMBED_BRIDGE_START, bridge: "confirmed", playing: true }, { kind: "seeked", seconds: 50 });
+  assert.equal(seeked.seconds, 50);
+  assert.equal(seeked.playing, true, "pular nao muda o tocar");
+  assert.deepEqual(bridge.embedSubscriptions("playerjs", ["seeked"]).map((m) => JSON.parse(m).value), ["play", "pause", "ended", "timeupdate", "seeked"]);
+  assert.deepEqual(bridge.embedSubscriptions("playerjs").map((m) => JSON.parse(m).value), ["play", "pause", "ended", "timeupdate"], "a aula continua igual");
+});
+
+test("fase 2: openEmbedBridge devolve o canal de comandos: nada sai antes do ready, depois sai com a targetOrigin exata; o disconnect fecha o canal", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  const win = janelaDeMentira();
+  const enviados = [];
+  const janelaDoPlayer = { postMessage: (message, targetOrigin) => enviados.push({ message, targetOrigin }) };
+  const iframe = Object.assign(new EventTarget(), { contentWindow: janelaDoPlayer });
+  const target = bridge.embedBridgeTarget(BUNNY);
+  const mudancas = [];
+  const ponte = bridge.openEmbedBridge({ extraEvents: ["seeked"], iframe, onChange: (state, message) => mudancas.push({ message, state }), target, win });
+  const mensagem = (data) => win.dispatchEvent(Object.assign(new Event("message"), { data, origin: target.sendOrigin, source: janelaDoPlayer }));
+
+  assert.equal(ponte.send(bridge.embedCommand("playerjs", "play")), false, "antes do ready nada sai");
+  assert.ok(!textos(enviados).some((m) => m.method === "play"));
+
+  mensagem(pjs("ready"));
+  assert.deepEqual(
+    textos(enviados).filter((m) => m.method === "addEventListener" && m.value !== "ready").map((m) => m.value),
+    ["play", "pause", "ended", "timeupdate", "seeked"],
+    "com seeked na inscricao"
+  );
+  assert.equal(ponte.send(bridge.embedCommand("playerjs", "setCurrentTime", 90)), true);
+  const comando = enviados.at(-1);
+  assert.deepEqual(JSON.parse(comando.message), { context: "player.js", method: "setCurrentTime", value: 90, version: "0.0.11" });
+  assert.equal(comando.targetOrigin, "https://iframe.mediadelivery.net");
+
+  mensagem(pjs("seeked", { listener: "b707-seeked", value: { seconds: 90 } }));
+  assert.deepEqual(mudancas.at(-1).message, { kind: "seeked", seconds: 90 });
+
+  // connectEmbedBridge continua devolvendo so a funcao que desliga.
+  const antigo = bridge.connectEmbedBridge({ iframe, onChange: () => undefined, target, win });
+  assert.equal(typeof antigo, "function");
+  antigo();
+
+  ponte.disconnect();
+  assert.equal(ponte.send(bridge.embedCommand("playerjs", "pause")), false, "desligada, nada sai");
+});

@@ -1,0 +1,13 @@
+# Segredos e dados do Jitsi: nunca no repositorio (AGENTS.md, docs/13).
+.env
+.env.*
+!.env.example
+volumes/*
+!volumes/.gitkeep
+jibri/.env
+jibri/.env.*
+!jibri/.env.example
+jibri/volumes/*
+!jibri/volumes/.gitkeep
+caddy/data/
+.previous-image-version

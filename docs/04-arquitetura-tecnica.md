@@ -420,6 +420,12 @@ Tracking de progresso:
 - enquanto um adapter especifico ainda nao estiver completo, o app pode registrar inicio por clique no player e um temporizador de sessao para alimentar `Continue assistindo`, deixando claro que esse fallback nao substitui a precisao de provedores com API integrada.
 - desde 23/10/2026 (Comunicacao v3b-2, `docs/29` §4.4), Bunny, Vimeo e Mux tem uma **ponte por `postMessage`** na pagina da aula (`src/lib/lesson-embed-bridge.ts`, puro; as origens e regras em `src/lib/lesson-embed-origins.ts`; o hook `src/components/use-lesson-embed-bridge.ts` baixa a ponte por `import()` so quando o iframe e de um player da lista): protocolo do Vimeo (`{ method, value }` / `{ event, data }`) e Player.js (Bunny e Mux, texto JSON com `context: "player.js"`), sem SDK, sem script de fora e sem mudar a CSP. Liga pela origem do `src` do iframe (lista exata: `player.vimeo.com`, `iframe.mediadelivery.net` e `player.mediadelivery.net` como um grupo, `player.mux.com`), aceita mensagem so dessas origens e do `contentWindow` do iframe, manda com `targetOrigin` exato e so confia depois da resposta ao `getPaused`. Com a ponte confirmada: o fim do video conclui a aula (como o YouTube), o progresso usa o tempo real e o temporizador de sessao acima nao roda; o pop-up le se o video toca (`lesson-media-signal.ts`). Sem resposta (sem referrer, player que nao responde, outra origem), fica o fallback. Ainda nao ha `seek` nem comando de tocar pela ponte (so leitura).
 
+### Webinarios (28/10/2026, `docs/30`)
+
+- Live ao vivo: o video sai de um Jitsi Meet proprio (docker-jitsi-meet, Apache-2.0) num servidor separado da Hetzner, sem marca d'agua (so possivel em instancia propria: a chave esta fora da whitelist do IFrame API), com entrada so por JWT emitido pelo nosso servidor; a gravacao e feita pelo Jibri num servidor por hora e enviada para a Bunny Stream (fase 3). Chat, reacoes, enquetes, perguntas e presenca sao do nosso banco, nunca do Jitsi.
+- Live gravada: o video da Bunny toca pelo relogio do servidor, com o chat original reaparecendo por offset (fase 2). O replay e o mesmo video com barra livre.
+- Fase 1 (migracao `202610280001`): cadastro, sessoes, apresentadores, Garantir vaga, calendario e lembretes pelo sino (kind `webinar`) e pela fila `email_outbox`, no job `webinar-reminders` do tick. Detalhe em `docs/30` §4 a §7.
+
 ## Eventos do aluno
 
 Registrar eventos desde o MVP.
@@ -444,6 +450,8 @@ Eventos iniciais:
 - support_requested.
 
 Esses eventos alimentarao dashboards, automacoes e IA no futuro.
+
+Webinarios (28/10/2026, `docs/30` §4.7): `webinar_registered` (e `cancelled: true` ao cancelar a vaga), `webinar_joined`, `webinar_left`, `webinar_chat_sent`, `webinar_reaction_sent`, `webinar_question_sent`, `webinar_poll_answered`, `webinar_offer_clicked`, `webinar_replay_started`, `webinar_chat_consented` e `webinar_camera_toggled`, todos com `entity_type = 'webinar'` e `entity_id = sessao`, gravados so pelo servidor (a politica de insert do aluno recusa `entity_type` `campaign` e `webinar`), com metadata so de ids e codigos. A fase 1 grava so o `webinar_registered`.
 
 Comunicacao v3b-2 (23/10/2026): nenhum evento novo; o aluno nao grava mais linhas com `entity_type = 'campaign'` (politica de insert de `student_events`), e o relatorio do pop-up le essas linhas por um indice parcial (`docs/29`). Comunicacao v1 (20/10/2026) grava, pelas rotas do sino e do pop-up, `notification_read`, `notification_clicked`, `notification_responded`, `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed` e `message_snoozed`, so com ids no metadata (`docs/05`, secao Eventos). A v2 (21/10/2026) soma `notification_audio_started` e `notification_audio_completed` (rota do audio, uma vez cada); visitas de pagina nao viram evento: vao para `member_page_visits`, so enquanto um fluxo precisa (secao Comunicacao).
 

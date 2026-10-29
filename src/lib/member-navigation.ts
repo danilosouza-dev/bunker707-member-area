@@ -14,7 +14,8 @@ export const MEMBER_ROUTES = {
   materials: "/materiais",
   profile: "/perfil",
   purchases: "/minhas-compras",
-  support: "/suporte"
+  support: "/suporte",
+  webinars: "/webinarios"
 } as const;
 
 export type MemberRouteKey = keyof typeof MEMBER_ROUTES;
@@ -27,6 +28,7 @@ export type MemberNavigationKey =
   | "purchases"
   | "favorites"
   | "materials"
+  | "webinars"
   | "support"
   | "profile";
 
@@ -53,7 +55,8 @@ export const MEMBER_NAVIGATION_GROUPS: readonly MemberNavigationGroup[] = [
       { description: "Aulas que você começou", key: "continueWatching", label: "Continue assistindo", href: "/continue-assistindo" },
       { description: "Tudo que você comprou ou recebeu", key: "purchases", label: "Minhas compras", href: "/minhas-compras" },
       { description: "Cursos, módulos e aulas salvos", key: "favorites", label: "Favoritos", href: "/favoritos" },
-      { description: "Arquivos de apoio das suas aulas", key: "materials", label: "Materiais", href: "/materiais" }
+      { description: "Arquivos de apoio das suas aulas", key: "materials", label: "Materiais", href: "/materiais" },
+      { description: "Lives ao vivo e gravadas da escola", key: "webinars", label: "Webinários", href: "/webinarios" }
     ],
     label: "Estudar"
   },
@@ -75,7 +78,8 @@ export const MEMBER_NEW_PAGE_PREFIXES = [
   MEMBER_ROUTES.continueWatching,
   MEMBER_ROUTES.materials,
   MEMBER_ROUTES.support,
-  MEMBER_ROUTES.profile
+  MEMBER_ROUTES.profile,
+  MEMBER_ROUTES.webinars
 ] as const;
 
 /**

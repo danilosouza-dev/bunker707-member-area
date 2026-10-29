@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Molduras das telas que ainda estao sendo construidas (Webinarios e Promocoes em Comunicacao), na
-// disposicao do prototipo aprovado: cabecalho, abas e numeros no lugar certo, todos vazios e honestos.
+// Molduras das telas que ainda estao sendo construidas (Promocoes em Comunicacao), na disposicao do
+// prototipo aprovado: cabecalho, abas e numeros no lugar certo, todos vazios e honestos.
 // Avisos e pop-ups ja e tela de verdade (docs/22): numeros do banco, "Novo aviso" e telas com loading.
-// Fluxos (docs/23) tambem: nunca moldura, com os numeros dos fluxos e "Novo fluxo".
+// Fluxos (docs/23) tambem: nunca moldura, com os numeros dos fluxos e "Novo fluxo". Webinarios (docs/30)
+// idem: a lista com os cinco numeros do periodo (tests/webinarios-admin-tela.test.mjs desenha a tela).
 
 const model = await import("../src/components/admin/v2/frames/communication-model.ts");
 const period = await import("../src/components/admin/v2/period.ts");
@@ -55,7 +56,8 @@ test("Comunicacao: os quatro numeros de cada aba seguem o periodo da barra super
   assert.deepEqual(labels("avisos"), ["Avisos ativos", "Vistos em 30 dias", "Taxa de clique", "Voltaram a estudar"]);
   assert.deepEqual(labels("fluxos"), ["Fluxos ativos", "No fluxo agora", "Notificações enviadas", "Atingiram o objetivo"]);
   assert.match(model.getCommunicationKpis("fluxos", resolve("hoje"))[2].definition, /hoje$/, "enviadas seguem o periodo");
-  assert.deepEqual(labels("webinarios"), ["Próximos", "Inscritos", "Comparecimento", "Replays"]);
+  // Webinarios (docs/30 §2.1): cinco numeros, e "Vagas garantidas" no lugar de "Inscritos".
+  assert.deepEqual(labels("webinarios"), ["Webinários", "Vagas garantidas", "Compareceram", "Assistiram o replay", "Ao vivo agora"]);
   assert.deepEqual(labels("promocoes"), ["Ativas", "Cliques no checkout", "Taxa de clique", "Terminam em 7 dias"]);
   assert.deepEqual(labels("modelos"), [], "Modelos nao tem numeros no topo (D22)");
 
@@ -70,21 +72,26 @@ test("Comunicacao: os quatro numeros de cada aba seguem o periodo da barra super
     model.getCommunicationKpis("avisos", resolve("30d")).map((kpi) => kpi.format),
     ["number", "number", "percent", "number"]
   );
-  assert.equal(model.getCommunicationKpis("webinarios", resolve("30d"))[2].format, "percent");
+  assert.ok(model.getCommunicationKpis("webinarios", resolve("30d")).every((kpi) => kpi.format === "number"));
 
-  // So os numeros de verdade (Avisos e Fluxos) dizem o que contam; as abas em construcao nao inventam definicao.
-  for (const kpi of [...model.getCommunicationKpis("avisos", resolve("30d")), ...model.getCommunicationKpis("fluxos", resolve("30d"))]) {
+  // So os numeros de verdade (Avisos, Fluxos e Webinarios) dizem o que contam; a aba em construcao nao inventa definicao.
+  for (const kpi of [
+    ...model.getCommunicationKpis("avisos", resolve("30d")),
+    ...model.getCommunicationKpis("fluxos", resolve("30d")),
+    ...model.getCommunicationKpis("webinarios", resolve("30d"))
+  ]) {
     assert.ok(kpi.definition && kpi.definitionShort, kpi.label);
     assert.doesNotMatch(`${kpi.definition} ${kpi.definitionShort}`, /campanha|público|audiência|evento|oferta/i, kpi.label);
   }
-  for (const tab of ["webinarios", "promocoes"]) {
+  for (const tab of ["promocoes"]) {
     assert.ok(model.getCommunicationKpis(tab, resolve("30d")).every((kpi) => !kpi.definition), tab);
   }
 });
 
 test("Comunicacao: moldura sem numero inventado e sem botao que finge funcionar", async () => {
   const frame = await read("src/components/admin/v2/frames/communication-frame.tsx");
-  const constructionTabs = ["webinarios", "promocoes"];
+  // Webinarios virou tela de verdade (docs/30); so Promocoes continua em moldura.
+  const constructionTabs = ["promocoes"];
   const pages = await Promise.all(constructionTabs.map((tab) => read(`src/app/admin/(v2)/comunicacao/${tab}/page.tsx`)));
   const root = await read("src/app/admin/(v2)/comunicacao/page.tsx");
 
@@ -119,7 +126,7 @@ test("Comunicacao: Avisos e pop-ups e tela de verdade, com numeros do banco e lo
   assert.match(list, /canWrite \? \(\s*<NewNoticeButton/, "Novo aviso so para quem cria avisos (com modelos, o menu; sem, o link de sempre)");
   assert.match(list, /<CommunicationTabs \/>/, "mesmas abas das outras telas de Comunicacao");
 
-  for (const route of ["avisos", "avisos/novo", "avisos/[id]", "fluxos", "fluxos/novo", "fluxos/[id]", "modelos"]) {
+  for (const route of ["avisos", "avisos/novo", "avisos/[id]", "fluxos", "fluxos/novo", "fluxos/[id]", "modelos", "webinarios", "webinarios/novo", "webinarios/[id]"]) {
     for (const file of ["page.tsx", "loading.tsx"]) {
       assert.ok(existsSync(new URL(`../src/app/admin/(v2)/comunicacao/${route}/${file}`, import.meta.url)), `${route}/${file}`);
     }
