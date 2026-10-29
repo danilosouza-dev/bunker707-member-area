@@ -238,7 +238,8 @@ test("3. webinar_report e webinar_attendees contra numeros calculados a mao: so 
   assert.equal(linha(rows, "unique").total, 2);
   assert.equal(linha(rows, "presence", "0").total, 2);
   assert.equal(linha(rows, "presence", "6").total, 1);
-  assert.deepEqual([linha(rows, "peak").item, linha(rows, "peak").total], ["0", 2]);
+  const pico = rows.find((row) => row.metric === "peak");
+  assert.deepEqual([pico?.item, pico?.total], ["0", 2], "o pico traz o balde no item");
   assert.equal(linha(rows, "registration", "registered").total, 2, "a vaga do produtor (equipe) nao conta");
   assert.equal(linha(rows, "registration", "attended").total, 2);
   assert.equal(linha(rows, "registration", "absent").total, 0);
@@ -337,8 +338,11 @@ test("6. a rota do CSV: 401 sem sessao, 403 para o analista, 400 sem a sessao, 4
   assert.match(resposta.headers.get("content-type") ?? "", /^text\/csv/);
   assert.match(resposta.headers.get("content-disposition") ?? "", /attachment; filename="webinario-teste-live-gravada-relatorio-.*-attendee\.csv"/);
   assert.equal(resposta.headers.get("cache-control"), "private, no-store, max-age=0");
+  // O Excel precisa do BOM; o text() do Response o tira, entao confere nos bytes.
+  const bytes = new Uint8Array(await resposta.clone().arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], "o arquivo comeca com o BOM do UTF-8");
   const corpo = await resposta.text();
-  assert.match(corpo, /^﻿Compareceu;Nome;E-mail;/);
+  assert.match(corpo, /^Compareceu;Nome;E-mail;/);
   assert.match(corpo, new RegExp(ESCOLA_DE_TESTE.contas.aluna.email));
 
   const auditoria = unwrap(await db.from("admin_audit_log").select("action,actor_id,entity_id,entity_type,count,metadata").eq("action", "webinar_export").eq("entity_id", LIVE.id).gte("occurred_at", antes), "Lendo a auditoria");

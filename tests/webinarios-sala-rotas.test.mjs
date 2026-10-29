@@ -64,6 +64,7 @@ const questionsRoute = await import("../src/app/api/webinars/[id]/questions/rout
 const voteRoute = await import("../src/app/api/webinars/[id]/questions/[qid]/vote/route.ts");
 const pollsRoute = await import("../src/app/api/webinars/[id]/polls/route.ts");
 const sessionRoute = await import("../src/app/api/webinars/[id]/session/route.ts");
+const registerRoute = await import("../src/app/api/webinars/[id]/register/route.ts");
 const { resetRoomLimits } = await import("../src/server/webinars/room-limits.ts");
 const { CHAT_CONSENT_VERSION } = await import("../src/server/webinars/model.ts");
 
@@ -951,4 +952,43 @@ test("limite de vagas (A12): so quem garantiu a vaga entra; sem ela, as rotas da
   assert.ok(comVaga.body.data.video, "com a vaga, o video");
   assert.equal((await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=0&to=1000`), contexto())).status, 200);
   assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Cancelar minha vaga com as horas como o Postgres devolve
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Como o PostgREST: timestamptz volta com "+00:00" (o toISOString escreve "Z"). */
+function horasDoPostgres(db, table) {
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    const chain = from(name);
+    if (name !== table) {
+      return chain;
+    }
+    const then = chain.then;
+    const pg = (row) => (row && typeof row === "object" ? Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key.endsWith("_at") && typeof value === "string" ? value.replace(/Z$/, "+00:00") : value])) : row);
+    chain.then = (resolve, reject) => then((result) => resolve({ ...result, data: Array.isArray(result.data) ? result.data.map(pg) : pg(result.data) }), reject);
+    return chain;
+  };
+}
+
+test("Cancelar minha vaga: com a hora no formato do Postgres (+00:00) a rota responde cancelled: true e grava o historico uma vez", async () => {
+  const { db } = montar({ scheduledAt: Date.now() + 2 * HOUR });
+  db.tables.webinars.find((row) => row.id === WEBINAR).registration_required = true;
+  horasDoPostgres(db, "webinar_registrations");
+  const vaga = (method) => registerRoute[method](pedido(`${WEBINAR}/register`, method, { sessionId: SESSION }), contexto());
+
+  assert.equal((await vaga("POST")).status, 201);
+  const cancelada = await json(await vaga("DELETE"));
+  assert.equal(cancelada.status, 200, JSON.stringify(cancelada.body));
+  assert.equal(cancelada.body.data.cancelled, true, "esta chamada cancelou");
+  assert.equal(db.tables.webinar_registrations[0].status, "cancelled");
+  assert.deepEqual(
+    eventos(db, "webinar_registered").map((row) => row.metadata.cancelled ?? null),
+    [null, true]
+  );
+  const deNovo = await json(await vaga("DELETE"));
+  assert.equal(deNovo.body.data.cancelled, false, "repetir nao cancela de novo");
+  assert.equal(eventos(db, "webinar_registered").length, 2);
 });
