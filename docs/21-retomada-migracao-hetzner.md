@@ -572,3 +572,24 @@ app. Os servidores C (Jitsi) e D (gravador por hora) seguem com o ok do produtor
 quebra. Estado em 29/10/2026: o C esta no ar e atende a Vercel de teste (`deploy-meet` da `dev`, `secrets-meet`, e os dois
 envs na Vercel em Production e Preview); para a producao usar a sala, o `.env` do servidor A recebe o mesmo
 `WEBINAR_JWT_SECRET` por `secrets-membros` e o `ROOM_GUARD_URL` do C passa para `membros.<dominio>` (`docs/20` §8B.3).
+
+### 9.9 Quem pode por regras: migracao `202610300001` aplicada na nuvem de teste (30/10/2026)
+
+Os ajustes do teste da live (`docs/30` §1.1, D41 e D42) vem com `supabase/migrations/202610300001_webinars_quem_pode_regras.sql`:
+1 `webinars.audience_restricts` (o modo **Quem tem o produto e esta no segmento** grava `access_mode = 'product'` + a
+coluna, sem mexer no check da 202610280001) e 2 a funcao `communication_webinar_facts(p_user_ids, p_after, p_limit)`
+(as lives de cada aluno para as regras "Participacao em lives" e a ancora; so `service_role`). **Antes do merge na
+`dev`**: o app novo le `audience_restricts` junto das outras colunas do webinario; sem ela, as telas de webinario mostram
+o aviso de migracao pendente (`WEBINARS_MIGRATION = "202610300001"`). A migracao sozinha nao atrapalha o app de antes (a
+coluna tem padrao `false`; a funcao ele nao chama).
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: aplicada em 30/10/2026 pelo MCP, uma secao por chamada com
+`set lock_timeout = '5s';`. A secao 2 comeca por um bloco `do` que apaga versoes anteriores da propria funcao; como
+nenhuma existia na nuvem de teste (`to_regprocedure` nulo nas duas assinaturas), rodou so o `create or replace`, o
+comentario, o `revoke` e o `grant` (o bloco seria um nada a fazer). Depois:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610300001', 'webinars_quem_pode_regras')
+on conflict (version) do nothing;`. Conferido: `audience_restricts` boolean, nao nulo, padrao `false`; a funcao em
+plpgsql, `security invoker`, retorno `TABLE(user_id uuid, registered uuid[], attended uuid[])`; `authenticated` sem
+`execute` e `service_role` com; `select count(*) from public.communication_webinar_facts()` roda; o check
+`webinars_access_mode_check` com os quatro modos de antes. Se a migracao mudar antes do merge, aplicar de novo a secao
+que mudou do mesmo jeito.
