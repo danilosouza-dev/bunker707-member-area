@@ -540,7 +540,8 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
 
 ### 8B.3 Deploy e segredos (etapas `deploy-meet` e `secrets-meet`)
 
-- `deploy-meet` so roda da `main` (a mesma trava do `deploy-membros`). Na primeira vez gera `infra/jitsi/.env` no
+- `deploy-meet` roda da `main` ou da `dev` (decisao do produtor em 29/10/2026: o C nao guarda dado de aluno e atende o
+  teste da Vercel e a producao; o `deploy-membros` continua so da `main`). Na primeira vez gera `infra/jitsi/.env` no
   servidor (`generate-secrets.sh`: senhas do Jicofo, do JVB e do Jibri, as credenciais de TURN e o `JWT_APP_SECRET`,
   nunca impressos), grava `JVB_ADVERTISE_IPS` com o IPv4 publico, sobe o stack com o perfil `borda` e roda o
   `smoke.sh` (site no ar, servicos saudaveis, nenhuma marca do Jitsi na interface, UDP 10000 ouvindo).
