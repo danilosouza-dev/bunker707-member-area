@@ -292,9 +292,13 @@ test("contorno e marca-texto numa parte pelo teclado: um passo cada, Ctrl + Z, o
 
       // Logo depois de fechar o editor o Publicar pode estar desligado (o aviso ainda ocupado) e o foco volta ao botao
       // que abriu o Livre: o focus() num botao desligado nao move o foco e o Enter reabriria o editor.
+      // E ele ainda pode desligar de novo por um instante (o aviso termina de gravar): o foco e repetido ate pegar,
+      // em vez de esperar 10 s por um focus() que caiu num botao desligado (CI de 30/10/2026).
       await expect(publicar).toBeEnabled();
-      await publicar.focus();
-      await expect(publicar).toBeFocused();
+      await expect(async () => {
+        await publicar.focus();
+        await expect(publicar).toBeFocused({ timeout: 1_000 });
+      }).toPass({ timeout: 15_000 });
       await pagina.keyboard.press("Enter");
       await expect(pagina.getByText(/^Pop-up publicado\./)).toBeVisible({ timeout: 30_000 });
       await expect(pagina).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${avisoId}$`));
