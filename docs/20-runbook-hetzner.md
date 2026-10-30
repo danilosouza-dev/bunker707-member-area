@@ -655,7 +655,10 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 
 O app ja tem a sala ao vivo (`docs/30` §11; a migracao `202610290002` vai para a nuvem de teste antes do merge, `docs/21`
 §9.8, e para a producao pelo `deploy-membros`, §9). Sem as variaveis abaixo nada quebra: a sala diz "em breve" e a Live gravada segue. Cada uma entra pelo envelope
-(`secrets-membros`, §4A.6), nunca em `NEXT_PUBLIC_*`:
+(`secrets-membros`, §4A.6), nunca em `NEXT_PUBLIC_*`. O `environment:` do servico `app` em
+`infra/compose/docker-compose.yml` repassa todas ao container (ate 30/10/2026 nao repassava: gravadas no `.env`, o app
+nao as via; a guarda `tests/infra-compose-env.guard.test.mjs` confere que toda variavel do `.env.example` que o app le
+chega ao container):
 
 | Variavel (app) | Para que | Sem ela |
 |---|---|---|
