@@ -109,9 +109,10 @@ async function postJson<T>(url: string, body: unknown, fallback: string) {
  */
 export function sendBeaconPost(url: string, body?: string) {
   try {
-    const data = body === undefined ? undefined : new Blob([body], { type: "text/plain;charset=UTF-8" });
-
-    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, data)) {
+    // Texto, nunca Blob: o WebKit guarda na fila so o endereco do Blob e le os bytes na hora de enviar; se o Blob
+    // ja foi coletado, o POST sai vazio (Content-Length 0) e a rota responde 400. Texto e copiado na chamada e sai
+    // com o mesmo Content-Type (text/plain;charset=UTF-8). Guarda: tests/beacon-sem-blob.guard.test.mjs.
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, body)) {
       return;
     }
   } catch {

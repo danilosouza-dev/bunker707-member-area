@@ -424,6 +424,8 @@ Campos: nome, data e hora (fuso de São Paulo), duração, onde (YouTube Live n�
 
 Lado do aluno: página `/webinarios`, card "Próxima live" na home, **Garantir vaga** em 1 clique, confirmação com arquivo de calendário e links Google/Outlook, faixa "Começa em 1 h — Entrar" para inscritos. Números: inscritos, compareceram (clicaram em Entrar), assistiram o replay.
 
+Atualização (28/10/2026): o estudo pedido em docs/09 foi feito e a decisão está em `docs/30-webinarios.md`: o "onde" deixa de ser YouTube/Zoom/Meet e passa a ser a sala própria (Jitsi Meet numa instância nossa, sem marca d'água) ou a Live gravada (vídeo da Bunny com o chat original por offset); as tabelas são `webinars`, `webinar_sessions`, `webinar_presenters`, `webinar_registrations` e `webinar_recordings` (migração `202610280001`), no lugar de `events`/`event_registrations` da tabela de §2.4; "Inscritos" vira **Vagas garantidas** na tela. A fase 1 (cadastro, Garantir vaga, lembretes) está construída; sala ao vivo, Live gravada e painéis seguem as fases do docs/30 §11. Atualização (29/10/2026): a Live gravada (fase 2, migração `202610290001`) e a sala ao vivo no app (fase 3, migração `202610290002`: o token da sala, a nossa barra do aluno, o console com os controles do Zoom, o gravador por hora com o webhook assinado e o replay pela Bunny) estão prontas; as tabelas da fase 3 são `webinar_session_bans`, `webinar_user_bans` e `webinar_recording_events`, mais a sala, o gravador e a tranca em `webinar_sessions`; o provedor é o Jitsi próprio (servidor C) para o ao vivo e a Bunny Stream para o gravado. **Publicar replay como aula** sozinho continua para depois (o destino fica guardado em `replay_lesson_target`).
+
 #### 1.8.4 Promoções (`/admin/comunicacao/promocoes`)
 
 Campos: produto ofertado, título, selo ("-40 % até domingo"), preço de/por (texto), cupom (copiável), link de checkout (Hotmart/Ticto/Kiwify), prazo com contagem regressiva, para quem (padrão: quem não tem o produto; opções: concluíram o produto X, inativos, segmento), onde (card bloqueado / pop-up / faixa / destaque). O card bloqueado do aluno ganha selo, preço e prazo. Todo clique passa por um link curto que registra quem clicou e, quando as vendas automáticas chegarem, fecha a conversão. Até lá, o relatório diz "cliques no checkout" e não "vendas".
@@ -515,7 +517,7 @@ Nota (21/10/2026): "automações encadeadas" saiu de fora do MVP por pedido expl
 | D2 | De onde vêm os arquivos originais dos vídeos hoje no YouTube? (HD, Drive, Studio) | Levantar antes da fase 4; define o esforço de "Trocar vídeos em massa" |
 | D3 | Regra de conclusão de aula: só fim do vídeo, ou 90 % assistido? | 90 % por padrão, configurável por produto, com "marcada à mão" sempre separada |
 | D4 | Quem na equipe pode publicar um pop-up para mais de 500 alunos sem segunda aprovação? | Dono e admin; editor cria e agenda, e a publicação acima de 500 fica "Aguardando aprovação" até um dono ou admin aprovar |
-| D5 | Plataforma de webinário padrão: YouTube Live não listado (grátis, exige canal habilitado) ou Zoom Webinars (≈ US$ 80–95/mês além da licença, estimativa)? | YouTube Live não listado; Zoom só se precisar de link único por aluno |
+| D5 | Plataforma de webinário padrão: YouTube Live não listado (grátis, exige canal habilitado) ou Zoom Webinars (≈ US$ 80–95/mês além da licença, estimativa)? | Decidido em 28/10/2026 (`docs/30` D1): sala própria com Jitsi Meet numa instância nossa, sem marca d'água, num servidor cx23 da Hetzner; nem YouTube nem Zoom |
 | D6 | E-mail de convites e lembretes: começar no plano gratuito (3.000 por mês, **100 por dia**) ou já no pago (US$ 20 por 50 mil)? | Gratuito só em desenvolvimento; a fase 5 entra no pago desde o primeiro webinário com mais de 100 inscritos, com remetente no domínio da escola |
 | D7 | Produto adicionado a um pacote depois da venda: liberar retroativamente por padrão? | Não; botão manual "Liberar para quem já tem o pacote" |
 | D8 | Por quanto tempo guardar dados de comportamento (eventos, avisos recebidos) depois que o aluno sai? | 24 meses, anonimizados na exclusão da conta |
@@ -818,7 +820,7 @@ Próximos passos, fora desta entrega:
 | `notifications` | `user_id`, `kind`, `title`, `body`, `href`, `campaign_id`, `event_id`, `read_at`, `created_at` | 5 |
 | `campaigns` | `name`, `kind` (popup/banner/card/hero/toast/inbox), `tier`, `priority`, `status` (inclui `pending_approval`), `approved_by`, `content jsonb`, `audience_id`, `channels jsonb`, `starts_at`, `ends_at`, `frequency jsonb`, `goal_event_type`, `attribution_days`, `revision`, `created_by` | 5 |
 | `campaign_deliveries` | `campaign_id`, `user_id`, `impressions`, `first/last_seen_at`, `clicked_at`, `dismissed_at`, `snoozed_until`, `converted_at`; `message_events` (append-only); `campaign_daily_stats` | 5 |
-| `events` / `event_registrations` | webinário: `title`, `starts_at`, `ends_at`, `provider`, `join_url`, `visibility`, `audience_id`, `capacity`, `replay_lesson_id`, `status`; inscrição: `status`, `source_campaign_id`, `reminder_24h_sent_at`, `reminder_1h_sent_at`, `joined_at` | 5 |
+| `webinar_*` (no lugar de `events` / `event_registrations`, decidido em 28/10/2026, `docs/30` §4) | `webinars` (tipo `live` / `simulated`, acesso, Garantir vaga com `capacity`, lembretes, `quality`, `room_settings`, `replay_lesson_target`), `webinar_sessions` (cada hora marcada, situação, âncora; na fase 3 `room_name`, `recorder_status` e a tranca), `webinar_presenters`, `webinar_registrations` (a vaga: `status`, `source`, `source_campaign_id`, `reminder_24h_sent_at`, `reminder_1h_sent_at`), `webinar_recordings` (Bunny), o chat, as reações, as perguntas, as enquetes e a presença da fase 2, e `webinar_session_bans`, `webinar_user_bans` e `webinar_recording_events` da fase 3; o provedor ao vivo é o Jitsi próprio (não YouTube Live nem Zoom, D5) | 5 (fases 1 a 3 do `docs/30`) |
 | `communication_preferences` / `consent_log` / `push_subscriptions` / `scheduled_sends` | preferências por canal e tema, `unsubscribe_token`; registro de consentimento com origem e IP; VAPID; fila idempotente por (campanha, aluno, canal) | 5 |
 | `offers` / `attribution_clicks` | promoção: `content_id`, `badge`, `price_label`, `coupon_code`, `checkout_url`, `provider`, `starts_at`, `ends_at`, `audience_id`; clique: `click_token unique`, `user_id`, `campaign_id`, `offer_id`, `clicked_at`, `converted_at`, `webhook_event_id` | 6 |
 | `webhook_events` | `provider`, `external_event_id`, `payload jsonb` bruto, `signature_valid`, `processing_status`, `outcome`, `outcome_detail`, `error_message`, alvo e aluno resolvidos → entitlements (feita em 17/10/2026, com `integration_settings` e `sales_product_links`; docs/05) | 6 |
@@ -1019,7 +1021,7 @@ Pedido do produtor: notificações no sino com imagem, áudio que toca ali mesmo
   - arquivo enviado ou gravado no navegador (MediaRecorder), até 5 minutos e 10 MB;
   - rota própria em vez de Server Action (limite de 1 MB), tipo conferido pelos bytes;
   - bucket público `communication-audio`;
-  - microfone liberado só no `/admin` (`Permissions-Policy`);
+  - microfone liberado para a própria origem pela `Permissions-Policy` (desde 30/10/2026 a mesma em todo o app, `docs/30` I10);
   - a forma de onda (48 barras) e a duração são medidas no navegador da equipe e gravadas com o aviso.
 - **Menção:** só quando um único autor da conversa tem o `@usuario` (o nome de usuário não é único na escola).
 - **Números:**
@@ -1093,7 +1095,7 @@ Pedido explícito do produtor (20/10/2026), olhando a prévia do sino: trocar o 
 | Segmento / Público | `audiences` avaliadas sobre `student_facts`; nos avisos, desde 20/10/2026, `campaigns.audience` (regras E/OU avaliadas em `src/server/communications/audience-model.ts`) |
 | Aviso (Pop-up, Faixa, Card, Destaque, Toast) | `campaigns.kind` (hoje `inbox` = Notificação e `popup` = Pop-up) |
 | Avisos recebidos (aba do perfil) | `campaign_deliveries` + `notifications` do aluno e os `message_*` / `notification_*` em `student_events` |
-| Webinário | `events` + `event_registrations` |
+| Webinário | `webinars` + `webinar_sessions` + `webinar_registrations` (e as demais `webinar_*`, `docs/30` §4) |
 | Promoção | `offers` + `attribution_clicks` |
 | Notificação (sino) | `notifications` (`kind` `notice` aponta para o aviso; `comment_reply` / `comment_mention` são as automáticas) |
 | Desfecho de um aviso | `campaigns.goal_event_type` + janela de atribuição; na Comunicação v1, fixo: "Voltaram a estudar (7 dias)" pela RPC `communication_campaign_stats` |

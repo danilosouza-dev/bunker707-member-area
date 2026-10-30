@@ -168,6 +168,15 @@ const ACTIONS: readonly StaticEntry[] = [
     title: "Novo fluxo"
   },
   {
+    // Webinarios (docs/30 §2.2): a tela de criar uma Live ao vivo ou uma Live gravada.
+    group: "actions",
+    href: "/admin/comunicacao/webinarios/novo",
+    id: "acao:novo-webinario",
+    keywords: "criar live ao vivo gravada webinario sessao vaga garantida lembretes comunicar",
+    requires: ["messaging.write"],
+    title: "Novo webinário"
+  },
+  {
     // Modelos da Comunicacao (docs/28 §5.1): a escolha do tipo do modelo novo.
     group: "actions",
     href: "/admin/comunicacao/modelos/novo",

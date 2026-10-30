@@ -257,7 +257,7 @@ export const TODAY_CREATE_ITEMS: readonly TodayCreateItem[] = [
   { href: "/admin/produtos/pacotes", id: "pacote", label: "Pacote", permission: "catalog.access" },
   { href: newStudentHref(), id: "aluno", label: "Aluno", permission: "students.access" },
   { href: "/admin/comunicacao/avisos/novo", id: "aviso", label: "Aviso", permission: "messaging.write" },
-  { href: null, id: "webinario", label: "Webinário", meta: "Em breve", permission: "messaging.write" },
+  { href: "/admin/comunicacao/webinarios/novo", id: "webinario", label: "Webinário", permission: "messaging.write" },
   { href: null, id: "promocao", label: "Promoção", meta: "Em breve", permission: "messaging.write" }
 ];
 

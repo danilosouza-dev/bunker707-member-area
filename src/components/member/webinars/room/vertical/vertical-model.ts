@@ -1,0 +1,316 @@
+// A Sala Live vertical 9:16 (docs/30 §1.6, §6.6, §1.7 e §9), a parte pura: quando a sala usa o desenho do celular em
+// pe, o esqueleto da sala nos dois desenhos (e minimizada) e o que muda no topo e no chat. E a mesma pagina, a mesma
+// sessao, o mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo
+// lugar da arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho ou minimizar troca so as
+// classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
+// recarrega o video). Por isso o desenho vertical nao e outra arvore: e o mesmo esqueleto com outras classes e as
+// pecas por cima (topo, chat, gaveta). Vale para a Live gravada e o Replay; a Live ao vivo fica de fora ate o palco
+// ser gravado em 9:16 (live-room.tsx nao usa nada daqui). Modulo puro (sem React e sem rede): os testes carregam pelo
+// Node direto; os imports sao relativos.
+
+import { WEBINAR_COPY } from "../../../../../lib/webinar-copy";
+import type { ComposerState, RoomMessage } from "../../../../../lib/webinar-room-client";
+import type { SimulatedPhase } from "../../../../../server/webinars/model";
+
+export const ROOM_DESIGNS = ["normal", "vertical"] as const;
+export type RoomDesign = (typeof ROOM_DESIGNS)[number];
+
+/** O celular em pe: retrato e ate 767 px de largura (o `md` do Tailwind comeca em 768). Deitado, tablet e computador: normal. */
+export const VERTICAL_ROOM_QUERY = "(orientation: portrait) and (max-width: 767px)";
+
+export const VERTICAL_LIMITS = {
+  /** Quantas mensagens o chat por cima mostra (as ultimas); o resto fica na gaveta (Ver mais mensagens). */
+  overlayMessages: 6
+} as const;
+
+/**
+ * O desenho da sala: o forcado (a previa e os testes) vence; senao o celular em pe decide. A consulta e da viewport,
+ * nao do aparelho: nas WebViews dos apps (Instagram, TikTok, Facebook) e no Firefox do Android o teclado encolhe a
+ * viewport (360x640 vira uns 360x330, "deitado"). Enquanto o aluno digita num campo da sala (`editing`) a troca
+ * vertical -> normal fica travada: senao o campo desmontava, o teclado fechava, a tela voltava a retrato e a sala
+ * entrava num laco sem deixar escrever. `portraitScreen` (screen.orientation, que nao muda com o teclado) confirma:
+ * com o aparelho de fato deitado (false), a troca vale mesmo digitando; sem a leitura (null), vale o travamento.
+ */
+export function roomDesignFor(input: {
+  editing?: boolean;
+  forced?: RoomDesign | null;
+  portraitPhone: boolean;
+  portraitScreen?: boolean | null;
+  previous?: RoomDesign | null;
+}): RoomDesign {
+  if (input.forced === "normal" || input.forced === "vertical") {
+    return input.forced;
+  }
+  if (input.portraitPhone) {
+    return "vertical";
+  }
+  if (input.previous === "vertical" && input.editing === true && input.portraitScreen !== false) {
+    return "vertical";
+  }
+  return "normal";
+}
+
+/** O minimo de um elemento que a sala confere (o campo em foco). */
+export type FocusLike = { closest?: (selector: string) => unknown; isContentEditable?: boolean; tagName?: string; type?: string } | null | undefined;
+
+const TEXT_INPUT_TYPES = new Set(["", "email", "number", "password", "search", "tel", "text", "url"]);
+
+/** O foco esta num campo de texto (o teclado do celular esta aberto por ele): input de texto, textarea ou editavel. */
+export function isTextEntry(element: FocusLike): boolean {
+  if (!element) {
+    return false;
+  }
+  if (element.isContentEditable === true) {
+    return true;
+  }
+  const tag = String(element.tagName ?? "").toUpperCase();
+  if (tag === "TEXTAREA") {
+    return true;
+  }
+  return tag === "INPUT" && TEXT_INPUT_TYPES.has(String(element.type ?? "").toLowerCase());
+}
+
+/** A leitura de screen.orientation: o aparelho em pe (true), deitado (false) ou sem a leitura (null). */
+export function readPortraitScreen(screen: { orientation?: { type?: string } | null } | null | undefined): boolean | null {
+  const type = screen?.orientation?.type;
+  if (typeof type !== "string" || !type) {
+    return null;
+  }
+  return type.startsWith("portrait");
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A consulta do aparelho (matchMedia injetavel: o servidor e os testes nao tem window)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O minimo de MediaQueryList que a sala usa (addListener: Safari antes do 14). */
+export type PortraitMediaList = {
+  addEventListener?: (type: "change", listener: () => void) => void;
+  addListener?: (listener: () => void) => void;
+  matches: boolean;
+  removeEventListener?: (type: "change", listener: () => void) => void;
+  removeListener?: (listener: () => void) => void;
+};
+
+export type PortraitMatchMedia = ((query: string) => PortraitMediaList) | null | undefined;
+
+/** O celular esta em pe agora? Sem matchMedia (servidor) ou com erro: nao (o desenho normal). */
+export function readPortraitPhone(matchMedia: PortraitMatchMedia): boolean {
+  if (typeof matchMedia !== "function") {
+    return false;
+  }
+  try {
+    return matchMedia(VERTICAL_ROOM_QUERY).matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Segue a mudanca (girar o aparelho, redimensionar); devolve o desligar. Sem matchMedia: nada a seguir. */
+export function subscribePortraitPhone(matchMedia: PortraitMatchMedia, callback: () => void): () => void {
+  if (typeof matchMedia !== "function") {
+    return () => undefined;
+  }
+  try {
+    const media = matchMedia(VERTICAL_ROOM_QUERY);
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", callback);
+      return () => media.removeEventListener?.("change", callback);
+    }
+    if (typeof media.addListener === "function") {
+      media.addListener(callback);
+      return () => media.removeListener?.(callback);
+    }
+  } catch {
+    // Sem a consulta, a sala fica no desenho normal.
+  }
+  return () => undefined;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O esqueleto: as mesmas pecas nos dois desenhos, so as classes mudam
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O caminho do palco a partir do dialogo (data-room-slot de cada nivel). E o mesmo no desenho normal, no vertical e
+ * minimizada: a prova de que girar ou minimizar nao remonta o player (tests/webinarios-sala-vertical-modelo.test.mjs).
+ */
+export const ROOM_STAGE_PATH = ["body", "stage-column", "stage-box"] as const;
+
+/**
+ * O video em `cover` no vertical: a caixa do palco ocupa a tela e o iframe ganha o tamanho de um 16:9 que cobre a tela
+ * inteira (centrado; o que sobra nos lados fica cortado). Um video gravado em 9:16 aparece inteiro na altura. So CSS:
+ * o mesmo iframe, sem remontar.
+ */
+export const VERTICAL_STAGE_COVER = [
+  "[&_[data-room-stage]]:aspect-auto",
+  "[&_[data-room-stage]]:h-full",
+  "[&_[data-room-stage]]:overflow-hidden",
+  "[&_[data-room-stage]>iframe]:left-1/2",
+  "[&_[data-room-stage]>iframe]:top-1/2",
+  "[&_[data-room-stage]>iframe]:h-[max(100dvh,56.25vw)]",
+  "[&_[data-room-stage]>iframe]:w-[max(100vw,177.78dvh)]",
+  "[&_[data-room-stage]>iframe]:max-w-none",
+  "[&_[data-room-stage]>iframe]:-translate-x-1/2",
+  "[&_[data-room-stage]>iframe]:-translate-y-1/2"
+].join(" ");
+
+export type RoomSkeleton = {
+  body: string;
+  /** O lugar das bolhas das reacoes (no vertical, a direita, acima do chat). */
+  bubbles: string;
+  /** A confirmacao de Sair (no vertical, um cartao por cima, abaixo do topo). */
+  confirm: string;
+  root: string;
+  /** O lugar do aviso de venda simulado (no vertical, o topo abaixo da barra; o toast fica em top-14 dele). */
+  sales: string;
+  stageBox: string;
+  stageColumn: string;
+};
+
+const MINIMIZED_ROOT =
+  "fixed bottom-4 right-4 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-[16px] border border-white/15 bg-[#121212] shadow-[0_18px_48px_rgba(0,0,0,0.6)]";
+const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-2";
+
+/** As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco e os lugares por cima). */
+export function roomSkeleton(design: RoomDesign, minimized: boolean): RoomSkeleton {
+  if (minimized) {
+    // A propria sala vira a pilula de 56 px; o palco fica no mesmo lugar da arvore, por cima da miniatura da pilula.
+    return {
+      body: "contents",
+      bubbles: "hidden",
+      confirm: NORMAL_CONFIRM,
+      root: `z-[60] text-white ${MINIMIZED_ROOT}`,
+      sales: "hidden",
+      stageBox: "relative size-full",
+      stageColumn: "absolute left-0 top-0 h-14 w-24 overflow-hidden rounded-l-[14px] bg-black"
+    };
+  }
+  if (design === "vertical") {
+    return {
+      body: "relative min-h-0 flex-1",
+      bubbles: "pointer-events-none absolute bottom-[46%] right-0 h-44 w-20",
+      confirm:
+        "absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-amber-400/30 bg-[#1f1a0c]/95 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.55)]",
+      root: "z-[60] text-white fixed inset-0 flex flex-col overflow-hidden bg-black",
+      sales: "pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] h-28",
+      stageBox: `absolute inset-0 ${VERTICAL_STAGE_COVER}`,
+      stageColumn: "absolute inset-0 bg-black"
+    };
+  }
+  return {
+    body: "flex min-h-0 flex-1 flex-col lg:flex-row",
+    bubbles: "contents",
+    confirm: NORMAL_CONFIRM,
+    root: "z-[60] text-white fixed inset-0 flex flex-col bg-[#0b0b0b]",
+    sales: "contents",
+    stageBox: "relative lg:min-h-0 lg:flex-1",
+    stageColumn: "relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col"
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O topo do vertical: o selo e o contador pela mesma regra do cabecalho (room-header.tsx)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type VerticalBadge = {
+  /** "live": Ao vivo (so com a decisao da equipe, D10); "session": Sessao das 20:00; "replay": Replay. */
+  badge: "live" | "replay" | "session";
+  /** O tempo no ar ao lado do selo (so com a sessao no ar). */
+  elapsed: boolean;
+  /** "{n} assistindo" (nunca no replay nem com a sessao encerrada). */
+  showCount: boolean;
+};
+
+/** O selo do topo: a mesma regra de RoomHeader (showLiveBadge so vale com a sessao gravada no ar). */
+export function verticalBadge(input: { kind: "replay" | "simulated"; phase: "ended" | "live" | "waiting"; showLiveBadge: boolean }): VerticalBadge {
+  if (input.kind === "replay") {
+    return { badge: "replay", elapsed: false, showCount: false };
+  }
+  const live = input.phase === "live";
+  return { badge: live && input.showLiveBadge ? "live" : "session", elapsed: live, showCount: input.phase !== "ended" };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O chat por cima: as ultimas mensagens, o anuncio e o compositor compacto
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As ultimas mensagens para o chat por cima (as que a sala mostra, ja traduzidas) e se ha mais na gaveta. */
+export function verticalChatTail(messages: readonly RoomMessage[], limit: number = VERTICAL_LIMITS.overlayMessages): { hidden: number; tail: readonly RoomMessage[] } {
+  const size = Math.max(1, Math.trunc(limit));
+  if (messages.length <= size) {
+    return { hidden: 0, tail: messages };
+  }
+  return { hidden: messages.length - size, tail: messages.slice(messages.length - size) };
+}
+
+const ROLE_PREFIX: Partial<Record<RoomMessage["role"], string>> = {
+  ai: WEBINAR_COPY.sala.selos.assistente,
+  host: WEBINAR_COPY.sala.selos.apresentador,
+  team: WEBINAR_COPY.sala.selos.equipe
+};
+
+/**
+ * O que o leitor de tela ouve (aria-live polite) quando chegam mensagens: uma so, lida com o prefixo do papel ("Equipe:
+ * Ana: texto"); em rajada (mais de uma de uma vez), "N mensagens novas". Nenhuma nova: nada.
+ */
+export function verticalChatAnnouncement(fresh: readonly RoomMessage[]): string {
+  if (fresh.length === 0) {
+    return "";
+  }
+  if (fresh.length > 1) {
+    return WEBINAR_COPY.sala.mensagensNovas(fresh.length);
+  }
+  const message = fresh[0];
+  const prefix = ROLE_PREFIX[message.role];
+  return `${prefix ? `${prefix}: ` : ""}${message.displayName}: ${message.body}`;
+}
+
+/** A frase do compositor quando o aluno nao pode escrever (a mesma regra do chat da sala). */
+export function verticalComposerHint(state: ComposerState, phase: SimulatedPhase | "replay"): string {
+  const copy = WEBINAR_COPY.sala;
+  switch (state.reason) {
+    case "chat_off":
+      return copy.chatDesligado;
+    case "team_only":
+      return copy.chatSoEquipe;
+    case "slow_mode":
+      return copy.modoLento(state.waitSeconds);
+    case "ended":
+      return phase === "replay" ? "" : copy.encerrada;
+    default:
+      return "";
+  }
+}
+
+/** Em que aba a gaveta abre: Ver mais mensagens abre no Chat; o botao da gaveta, em Perguntas (ou onde o aluno estava). */
+export function drawerTabFor(input: { current: "chat" | "enquetes" | "perguntas"; from: "chat" | "drawer" | "poll" }): "chat" | "enquetes" | "perguntas" {
+  if (input.from === "chat") {
+    return "chat";
+  }
+  if (input.from === "poll") {
+    return "enquetes";
+  }
+  return input.current === "chat" ? "perguntas" : input.current;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O card aberto pela pilula da Oferta
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A folga entre o card aberto e o topo (Minimizar e Sair) e o minimo de altura que ainda mostra o botao. */
+export const OFFER_PILL_PANEL = { gapPx: 12, minPx: 160 } as const;
+
+/**
+ * A altura maxima do card aberto pela pilula (sala vertical): do topo da pilula ate logo abaixo da barra do topo
+ * (Minimizar e Sair), para o Fechar nunca sair da tela nem ficar debaixo do Sair num celular baixo (o card rola por
+ * dentro). Sem as medidas (servidor), nulo: vale o teto do CSS.
+ */
+export function offerPillPanelMaxHeight(input: { gapPx?: number; panelMarginPx?: number; pillTop: number | null; topBarBottom: number | null }): number | null {
+  if (input.pillTop === null || !Number.isFinite(input.pillTop)) {
+    return null;
+  }
+  const top = input.topBarBottom !== null && Number.isFinite(input.topBarBottom) ? Math.max(0, input.topBarBottom) : 0;
+  const room = input.pillTop - (input.panelMarginPx ?? 8) - top - (input.gapPx ?? OFFER_PILL_PANEL.gapPx);
+  return Math.max(OFFER_PILL_PANEL.minPx, Math.floor(room));
+}

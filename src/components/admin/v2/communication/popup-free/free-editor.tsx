@@ -206,6 +206,12 @@ export type FreeEditorContent = {
    * modelo (docs/28 D8: texto e destino podem ficar vazios), como o card e o "Salvar modelo".
    */
   ctaOptional?: boolean;
+  /**
+   * Quando o pop-up termina (o "Termina" do card Quando), para o Contador (L6f): a nota "O pop-up termina em ..." e a
+   * previa contando ate la. null = o pop-up nao tem fim; undefined = o editor nao sabe (modo modelo e pagina do modelo
+   * de Design, C18: nenhuma frase do fim e a previa com um tempo de exemplo).
+   */
+  endsAt?: string | null;
   /** Pagina do modelo de Design (docs/28 §5.7): o destino do Botão principal some (e escolhido em cada aviso). */
   hideCtaDestination?: boolean;
   /**
@@ -2075,8 +2081,8 @@ function FreeEditorSession({
    * ------------------------------------------------------------------------------------------ */
 
   const popup = useMemo(
-    () => freePreviewPopupItem({ allowSnooze: content.allowSnooze, audio: content.audio, cta, design: stageDesign, fonts, title: content.title }),
-    [content.allowSnooze, content.audio, content.title, cta, fonts, stageDesign]
+    () => freePreviewPopupItem({ allowSnooze: content.allowSnooze, audio: content.audio, cta, design: stageDesign, endsAt: content.endsAt, fonts, title: content.title }),
+    [content.allowSnooze, content.audio, content.endsAt, content.title, cta, fonts, stageDesign]
   );
   const toolbarDisabled = useMemo(() => {
     // Com varios, o desenho nao mostra a barrinha.

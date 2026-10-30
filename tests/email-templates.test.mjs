@@ -98,3 +98,62 @@ test("a moldura e um HTML completo em pt-BR com fundo escuro e o titulo escapado
   assert.match(html, /background:#141414/);
   assert.match(html, /Rodapé &amp; cia/);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios (docs/30 §2.7): os lembretes de 24 h ("Amanhã às"), do 24 h atrasado ("Hoje às") e de 1 h, e a
+ * live cancelada. Enfileirados por src/server/webinars/reminders.ts e notify.ts (tests/webinarios-lembretes).
+ * ---------------------------------------------------------------------------------------------- */
+
+const { renderWebinarReminderEmail, webinarReminderSubject } = await import("../src/server/email/templates/webinar-reminder.ts");
+const { renderWebinarCancelledEmail } = await import("../src/server/email/templates/webinar-cancelled.ts");
+
+const live = { dateLabel: "05/11/2026", fullName: "Ana Maria Souza", link: "https://app.exemplo.test/webinarios/live-de-agentes", timeLabel: "20:00", title: "Live de agentes" };
+
+test("lembretes da live: assunto por variante, saudacao pelo primeiro nome, botao para a pagina da live e versao em texto sem HTML", () => {
+  const amanha = renderWebinarReminderEmail({ ...live, variant: "tomorrow" });
+
+  assert.equal(amanha.subject, "Amanhã às 20:00: Live de agentes");
+  assert.match(amanha.html, /<title>Lembrete da live<\/title>/);
+  assert.match(amanha.html, /Olá, Ana\. Sua vaga está garantida para Live de agentes, amanhã, 05\/11\/2026 às 20:00 \(horário de Brasília\)/);
+  assert.match(amanha.html, /href="https:\/\/app\.exemplo\.test\/webinarios\/live-de-agentes"[^>]*>Entrar na área de membros/);
+  assert.match(amanha.html, /cancele sua vaga na página dela/);
+  assert.match(amanha.text, /Entrar na área de membros: https:\/\/app\.exemplo\.test\/webinarios\/live-de-agentes/);
+  assert.match(amanha.text, /garantiu vaga nesta live/);
+  assert.doesNotMatch(amanha.text, /<[a-z]/i, "a versao em texto nao tem HTML");
+
+  const hoje = renderWebinarReminderEmail({ ...live, variant: "today" });
+  assert.equal(hoje.subject, "Hoje às 20:00: Live de agentes");
+  assert.match(hoje.text, /Olá, Ana\. Sua vaga está garantida para Live de agentes, hoje às 20:00/);
+
+  const umaHora = renderWebinarReminderEmail({ ...live, fullName: null, variant: "one_hour" });
+  assert.equal(umaHora.subject, "Começa em 1 hora: Live de agentes");
+  assert.match(umaHora.html, /Olá, aluno\. Live de agentes começa às 20:00 \(horário de Brasília\)/);
+  assert.equal(webinarReminderSubject({ timeLabel: "20:00", title: "X", variant: "one_hour" }), "Começa em 1 hora: X");
+});
+
+test("lembrete com o texto da equipe: a saudacao e o texto escolhido no lugar do padrao, com o mesmo botao e tudo escapado", () => {
+  const email = renderWebinarReminderEmail({ ...live, customText: "  Amanhã a gente se vê. Traga <perguntas>.  ", title: "Live <b>x</b>", variant: "tomorrow" });
+
+  assert.match(email.html, /Olá, Ana\.<\/p>/);
+  assert.match(email.html, /Amanhã a gente se vê\. Traga &lt;perguntas&gt;\./);
+  assert.doesNotMatch(email.html, /Sua vaga está garantida para/);
+  assert.doesNotMatch(email.html, /<b>x<\/b>/);
+  assert.match(email.html, /href="https:\/\/app\.exemplo\.test\/webinarios\/live-de-agentes"/);
+  assert.equal(email.subject, "Amanhã às 20:00: Live <b>x</b>", "o assunto nao e HTML: vai como esta");
+  assert.doesNotMatch(renderWebinarReminderEmail({ ...live, customText: "   ", variant: "tomorrow" }).html, /Olá, Ana\.<\/p>/, "texto vazio volta ao padrao");
+});
+
+test("live cancelada: assunto, saudacao, o motivo escrito pela equipe quando existe e nenhum botao", () => {
+  const com = renderWebinarCancelledEmail({ fullName: "Ana Souza", reason: "O apresentador adoeceu.", title: "Live de agentes" });
+
+  assert.equal(com.subject, "Live cancelada: Live de agentes");
+  assert.match(com.html, /<title>Live cancelada<\/title>/);
+  assert.match(com.html, /Olá, Ana\. A live Live de agentes foi cancelada\./);
+  assert.match(com.html, /Motivo: O apresentador adoeceu\./);
+  assert.doesNotMatch(com.html, /href=/);
+  assert.doesNotMatch(com.text, /<[a-z]/i);
+
+  const sem = renderWebinarCancelledEmail({ fullName: null, reason: "  ", title: "Live" });
+  assert.match(sem.text, /Olá, aluno\. A live Live foi cancelada\./);
+  assert.doesNotMatch(sem.text, /Motivo:/);
+});

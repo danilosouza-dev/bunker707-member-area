@@ -1938,12 +1938,15 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
 // cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa. Gerada
 // de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha, o
 // anel de foco pelo box-shadow inteiro com !important (FREE_FOCUS_CLASS) e o aperto dos botoes com a transicao do
-// translate no lugar da do transform (FREE_PRESS_CLASS).
+// translate no lugar da do transform (FREE_PRESS_CLASS). So os quatro modelos que existiam quando a amostra foi
+// gerada: o quinto (o Contador com botao, L6f) nao muda o HTML de nenhum deles e tem os testes proprios.
+const MODELOS_DA_AMOSTRA = ["video_top_fade", "glow_text", "blank", "cutout_sticker"];
+
 async function livreBeforeCases() {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
   const cases = [];
 
-  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+  for (const id of MODELOS_DA_AMOSTRA) {
     const { cta, design } = starters.applyFreeStarter(id, { audio: null, cta: CTA });
     cases.push([`livre ${id}`, card(design, { popup: { cta } })]);
     cases.push([`livre ${id} previa`, card(design, { popup: { cta }, preview: true })]);

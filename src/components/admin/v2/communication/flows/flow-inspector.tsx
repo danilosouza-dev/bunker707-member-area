@@ -206,6 +206,9 @@ export function FlowSettingsPanel({
                 productsLoaded={options.productsLoaded}
                 segments={options.segments}
                 value={draft.entry.audience}
+                // As acoes do follow-up da regra "Participação em lives" valem no "Quem entra" (modo segment; docs/30
+                // §1.6, D52), nunca no Objetivo nem nas condicoes (modo flow).
+                webinars={options.webinars}
               />
             </RulesForm>
             <AudienceCount description={entryDescription} needsApproval={needsApproval} onRetry={onRetryCount} state={count} />
@@ -231,6 +234,7 @@ export function FlowSettingsPanel({
             productsLoaded={options.productsLoaded}
             segments={options.segments}
             value={draft.goal ?? EVERYONE}
+            webinars={options.webinars}
           />
         </RulesForm>
         <p className="text-xs leading-5 text-[var(--text-secondary)]">{GOAL_HINT}</p>
@@ -395,6 +399,7 @@ export function MessageInspector({ content, context, draft, errors, imagePreview
             productsLoaded={options.productsLoaded}
             segments={options.segments}
             value={node.filter ?? EVERYONE}
+            webinars={options.webinars}
           />
         </RulesForm>
         {watchesNewPage && context.live ? <Note>{PAGE_VISIT_LIVE_NOTE}</Note> : null}
@@ -463,6 +468,7 @@ export function ConditionInspector({ context, draft, errors, locked, node, onCha
             productsLoaded={options.productsLoaded}
             segments={options.segments}
             value={node.condition}
+            webinars={options.webinars}
           />
         </RulesForm>
         {errors.condition ? <p className="text-[13px] leading-5 text-[var(--error)]">{errors.condition}</p> : null}

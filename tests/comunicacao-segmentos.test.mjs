@@ -875,7 +875,16 @@ function memoryDb(tables, rpcs = {}) {
     return api;
   }
 
-  return { from: (table) => query(table, tables[table] ?? []), log, rpc: (name) => query(`rpc:${name}`, rpcs[name] ?? []) };
+  // Uma RPC pode ser uma funcao dos argumentos (as linhas que o banco devolveria para eles); cada chamada fica em rpcCalls.
+  const rpcCalls = [];
+  const rpc = (name, args) => {
+    rpcCalls.push({ args, name });
+    const source = rpcs[name];
+
+    return query(`rpc:${name}`, typeof source === "function" ? source(args ?? {}) : (source ?? []));
+  };
+
+  return { from: (table) => query(table, tables[table] ?? []), log, rpc, rpcCalls };
 }
 
 const iso = (ms) => new Date(ms).toISOString();
@@ -1090,16 +1099,20 @@ test("linha do sino como fato: visibleAt = greatest(created_at, sent_at), ou o v
   }, "resposta fora de aceitar/recusar vira null");
 });
 
-test("o que as regras pedem dos fatos: progresso, estudo, entrada, ritmo, turma ou comentarios; ranking so para 'top N'", () => {
-  assert.deepEqual(model.audienceFactNeeds(todas(mensagem("opened"), ganhou(["a"]), { op: "has", productIds: ["a"], type: "product" })), { comments: "none", students: false });
-  assert.deepEqual(model.audienceFactNeeds(todas({ days: 7, op: "within", type: "last_study" })), { comments: "none", students: true });
-  assert.deepEqual(model.audienceFactNeeds(todas({ count: 1, days: 30, op: "gte", type: "comments" })), { comments: "counts", students: true });
+test("o que as regras pedem dos fatos: progresso, estudo, entrada, ritmo, turma ou comentarios; ranking so para 'top N'; aulas so para progresso, ritmo e turma", () => {
+  assert.deepEqual(model.audienceFactNeeds(todas(mensagem("opened"), ganhou(["a"]), { op: "has", productIds: ["a"], type: "product" })), { comments: "none", lessons: false, students: false, webinars: false });
+  assert.deepEqual(model.audienceFactNeeds(todas({ days: 7, op: "within", type: "last_study" })), { comments: "none", lessons: false, students: true, webinars: false });
+  assert.deepEqual(model.audienceFactNeeds(todas({ days: 7, op: "within", type: "sign_in" })), { comments: "none", lessons: false, students: true, webinars: false });
+  assert.deepEqual(model.audienceFactNeeds(todas({ count: 1, days: 30, op: "gte", type: "comments" })), { comments: "counts", lessons: false, students: true, webinars: false });
   assert.deepEqual(
     model.audienceFactNeeds([todas({ count: 10, days: 7, op: "top", type: "comments" }), todas({ count: 0, days: null, op: "none", type: "comments" })]),
-    { comments: "ranked", students: true },
+    { comments: "ranked", lessons: false, students: true, webinars: false },
     "o ranking vence a contagem"
   );
-  assert.deepEqual(model.audienceFactNeeds([null, model.EVERYONE, todas({ items: [{ paces: ["inactive"], type: "pace" }], match: "any" })]), { comments: "none", students: true });
+  assert.deepEqual(model.audienceFactNeeds([null, model.EVERYONE, todas({ items: [{ paces: ["inactive"], type: "pace" }], match: "any" })]), { comments: "none", lessons: true, students: true, webinars: false });
+  assert.deepEqual(model.audienceFactNeeds(todas({ op: "gte", percent: 50, productId: "a", type: "progress" })), { comments: "none", lessons: true, students: true, webinars: false });
+  // A turma de quem tem a plataforma inteira sai dos conteudos com aula (buildStudentFacts): o indice volta.
+  assert.deepEqual(model.audienceFactNeeds(todas({ cohortIds: ["t"], type: "cohort" })), { comments: "none", lessons: true, students: true, webinars: false });
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1376,4 +1389,532 @@ test("v3a: a copia neutra 'destino' no lugar de 'botão' nos modulos das regras"
 
   assert.equal(fraseV2(mensagem("clicked")), "Alunos que foram para o destino da notificação “Oferta especial!”");
   assert.equal(builder.PAGE_TARGET_CHOICES[0].label, "a página para onde a notificação leva…");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Quem pode da live por regras (docs/22 §3, docs/30 §1.6): "Ganhou acesso recentemente" e
+ * "Participação em lives", no segmento e nos fluxos
+ * ---------------------------------------------------------------------------------------------- */
+
+const recente = (period, productIds = [], negate = false) => ({ negate, period, productIds, type: "access_recent" });
+const HOJE = { kind: "today" };
+const horas = (value) => ({ hours: value, kind: "hours" });
+const LIVE_Y = "55555555-5555-4555-8555-555555555555";
+const LIVE_Z = "66666666-6666-4666-8666-666666666666";
+const live = (action, webinarId = null, negate = false) => ({ action, negate, type: "webinar", webinarId });
+const comLives = (attended = [], registered = [], extra = {}) => aluno({ webinars: { attended, registered }, ...extra });
+const livesLidas = (extra = {}) => contexto({ webinarFactsLoaded: true, ...extra });
+
+test("ganhou acesso hoje: o dia de Sao Paulo comeca as 03:00 UTC (02:59:59 nao conta, 03:00 conta), tambem logo depois da meia-noite", () => {
+  const regra = todas(recente(HOJE));
+
+  // now = 20/10 12:00 em Sao Paulo: o dia comecou em 20/10 03:00 UTC.
+  assert.equal(avalia(regra, aluno({ accesses: [acesso("curso-a", Date.parse("2026-10-20T02:59:59.000Z"))] })), false, "23:59:59 de ontem");
+  assert.equal(avalia(regra, aluno({ accesses: [acesso("curso-a", Date.parse("2026-10-20T03:00:00.000Z"))] })), true, "00:00 de hoje");
+
+  // 00:30 em Sao Paulo (03:30 UTC do dia 21): o "hoje" ja e o dia 21.
+  const madrugada = contexto({ now: Date.parse("2026-10-21T03:30:00.000Z") });
+  assert.equal(avalia(regra, aluno({ accesses: [acesso("curso-a", Date.parse("2026-10-21T02:59:59.000Z"))] }), madrugada), false, "fim do dia 20");
+  assert.equal(avalia(regra, aluno({ accesses: [acesso("curso-a", Date.parse("2026-10-21T03:10:00.000Z"))] }), madrugada), true);
+  assert.equal(model.accessRecentSince(HOJE, now), Date.parse("2026-10-20T03:00:00.000Z"));
+});
+
+test("ganhou acesso nas ultimas 24 h e 48 h: conta do inicio do acesso ate agora, com o limite incluido", () => {
+  const HOUR = 3_600_000;
+
+  assert.equal(avalia(todas(recente(horas(24))), aluno({ accesses: [acesso("curso-a", now - 24 * HOUR)] })), true, "exatamente 24 h");
+  assert.equal(avalia(todas(recente(horas(24))), aluno({ accesses: [acesso("curso-a", now - 24 * HOUR - 1)] })), false);
+  assert.equal(avalia(todas(recente(horas(24))), aluno({ accesses: [acesso("curso-a", now - 30 * HOUR)] })), false, "30 h fora das 24");
+  assert.equal(avalia(todas(recente(horas(48))), aluno({ accesses: [acesso("curso-a", now - 30 * HOUR)] })), true, "30 h dentro das 48");
+  assert.equal(avalia(todas(recente(horas(1))), aluno({ accesses: [acesso("curso-a", now - 30 * 60_000)] })), true, "meia hora");
+  assert.equal(model.accessRecentSince(horas(48), now), now - 48 * HOUR);
+});
+
+test("ganhou acesso recentemente: sem produto = qualquer produto, com a plataforma; com produto, o dele ou a plataforma", () => {
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("platform", daysAgo(0))] })), true, "a plataforma de hoje");
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("curso-z", daysAgo(0))] })), true, "qualquer produto");
+  assert.equal(avalia(todas(recente(HOJE, ["curso-a", "curso-b"])), aluno({ accesses: [acesso("curso-b", daysAgo(0))] })), true);
+  assert.equal(avalia(todas(recente(HOJE, ["curso-a"])), aluno({ accesses: [acesso("curso-b", daysAgo(0))] })), false, "outro produto");
+  assert.equal(avalia(todas(recente(HOJE, ["curso-a"])), aluno({ accesses: [acesso("platform", daysAgo(0))] })), true, "a plataforma abre o produto");
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("curso-a", daysAgo(3))] })), false, "acesso antigo");
+  assert.equal(avalia(todas(recente(HOJE)), aluno()), false, "sem acesso");
+});
+
+test("ganhou acesso recentemente: quem ja tinha o produto (ou a plataforma) antes do periodo nao ganhou de novo", () => {
+  const hoje = daysAgo(0);
+
+  assert.equal(avalia(todas(recente(HOJE, ["curso-a"])), aluno({ accesses: [acesso("curso-a", daysAgo(200)), acesso("platform", hoje)] })), false, "ja tinha o curso");
+  assert.equal(avalia(todas(recente(HOJE, ["curso-a"])), aluno({ accesses: [acesso("platform", daysAgo(200)), acesso("curso-a", hoje)] })), false, "ja tinha a plataforma");
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("platform", daysAgo(200)), acesso("curso-a", hoje)] })), false, "nada novo de fato");
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("curso-a", daysAgo(200)), acesso("platform", hoje)] })), true, "a plataforma e nova");
+  assert.equal(avalia(todas(recente(HOJE)), aluno({ accesses: [acesso("curso-a", daysAgo(200)), acesso("curso-b", hoje)] })), true, "outro produto novo");
+});
+
+test("ganhou acesso recentemente: acesso fechado (revogado, vencido) nao conta; a recompra depois do vencimento conta", () => {
+  const hoje = new Date(daysAgo(0)).toISOString();
+  const linhaDeAcesso = (extra) => ({ created_at: hoje, ends_at: null, starts_at: hoje, status: "active", target_id: "curso-a", target_type: "content", user_id: "aluno-1", ...extra });
+  const fatosDe = (rows) => aluno({ accesses: facts.accessFactsOf(facts.openAccessRows(rows, now)) });
+  const regra = todas(recente(HOJE, ["curso-a"]));
+
+  assert.equal(avalia(regra, fatosDe([linhaDeAcesso({ status: "revoked" })])), false, "revogado hoje");
+  assert.equal(avalia(regra, fatosDe([linhaDeAcesso({ ends_at: new Date(now - 60_000).toISOString() })])), false, "venceu hoje");
+  assert.equal(avalia(regra, fatosDe([linhaDeAcesso({ starts_at: new Date(now + 3_600_000).toISOString() })])), false, "comeca daqui a 1 h");
+  assert.equal(
+    avalia(regra, fatosDe([linhaDeAcesso({ ends_at: new Date(daysAgo(10)).toISOString(), starts_at: new Date(daysAgo(400)).toISOString() }), linhaDeAcesso()])),
+    true,
+    "o acesso antigo ja fechou: a compra de hoje conta"
+  );
+});
+
+test("ganhou acesso recentemente negada: 'não ganharam acesso hoje' e o contrario", () => {
+  const naoGanhou = todas(recente(HOJE, ["curso-a"], true));
+
+  assert.equal(avalia(naoGanhou, aluno({ accesses: [acesso("curso-a", daysAgo(5))] })), true);
+  assert.equal(avalia(naoGanhou, aluno()), true, "sem acesso nenhum");
+  assert.equal(avalia(naoGanhou, aluno({ accesses: [acesso("curso-a", daysAgo(0))] })), false);
+  assert.equal(avalia(todas(recente(horas(24), [], true)), aluno({ accesses: [acesso("platform", daysAgo(0))] })), false);
+});
+
+test("participacao em lives: qualquer live ou a live Y, participou ou garantiu vaga, e negadas", () => {
+  const ctx = livesLidas();
+  const ana = comLives([LIVE_Y], [LIVE_Y, LIVE_Z]);
+  const bia = comLives([], [LIVE_Z]);
+  const caio = aluno({ userId: "aluno-3" });
+
+  assert.equal(avalia(todas(live("attended")), ana, ctx), true, "participou de alguma");
+  assert.equal(avalia(todas(live("attended")), bia, ctx), false, "so garantiu vaga");
+  assert.equal(avalia(todas(live("attended", null, true)), bia, ctx), true, "nunca participou");
+  assert.equal(avalia(todas(live("attended", null, true)), caio, ctx), true, "sem linha nenhuma: nunca participou");
+  assert.equal(avalia(todas(live("attended", null, true)), ana, ctx), false);
+  assert.equal(avalia(todas(live("attended", LIVE_Y)), ana, ctx), true);
+  assert.equal(avalia(todas(live("attended", LIVE_Z)), ana, ctx), false, "garantiu vaga em Z, nao entrou");
+  assert.equal(avalia(todas(live("attended", LIVE_Z, true)), ana, ctx), true);
+  assert.equal(avalia(todas(live("registered", LIVE_Z)), bia, ctx), true);
+  assert.equal(avalia(todas(live("registered", LIVE_Y)), bia, ctx), false);
+  assert.equal(avalia(todas(live("registered", LIVE_Y, true)), bia, ctx), true, "nao garantiu vaga em Y");
+  assert.equal(avalia(todas(live("registered")), caio, ctx), false);
+  assert.equal(avalia(todas(live("registered", null, true)), caio, ctx), true);
+});
+
+test("participacao em lives sem a leitura das lives nunca combina, nem negada (banco sem a migracao, ou ninguem pediu)", () => {
+  const ana = comLives([LIVE_Y], [LIVE_Y]);
+
+  for (const negate of [false, true]) {
+    for (const rule of [live("attended", null, negate), live("attended", LIVE_Y, negate), live("registered", LIVE_Z, negate)]) {
+      assert.equal(avalia(todas(rule), ana, contexto()), false, `${rule.action} ${rule.webinarId} ${negate}`);
+      assert.equal(avalia(todas(rule), aluno(), contexto()), false, `${rule.action} ${rule.webinarId} ${negate} sem fatos`);
+      assert.equal(avalia(todas(rule), ana, contexto({ webinarFactsLoaded: false })), false);
+    }
+  }
+});
+
+test("tipo de regra desconhecido (de um app mais novo) vale false; num grupo 'qualquer' as outras regras decidem", () => {
+  const futuro = { foo: 1, type: "regra_do_futuro" };
+
+  assert.equal(avalia(todas(futuro), aluno()), false);
+  assert.equal(avalia(regras("any", futuro, { op: "has_not", productIds: ["x"], type: "product" }), aluno()), true);
+  assert.equal(avalia(todas(futuro, { op: "has_not", productIds: ["x"], type: "product" }), aluno()), false);
+});
+
+test("normalizar as regras novas: ids em ordem, horas inteiras de 1 a 720, live vazia = qualquer live, formato errado fora", () => {
+  const normalized = model.normalizeAudience(
+    todas(
+      { negate: "sim", period: { kind: "today" }, productIds: ["curso-b", " curso-a ", "curso-b", ""], type: "access_recent" },
+      { negate: true, period: { hours: 0, kind: "hours" }, productIds: [], type: "access_recent" },
+      { negate: false, period: { hours: 9_999, kind: "hours" }, productIds: [], type: "access_recent" },
+      { negate: false, period: { hours: 2.4, kind: "hours" }, productIds: [], type: "access_recent" },
+      { negate: false, period: { kind: "semana" }, productIds: [], type: "access_recent" },
+      { action: "attended", negate: 1, type: "webinar", webinarId: `  ${LIVE_Y} ` },
+      { action: "registered", negate: true, type: "webinar", webinarId: "   " },
+      { action: "assistiu_replay", negate: false, type: "webinar", webinarId: null }
+    )
+  );
+
+  assert.deepEqual(normalized.root.items, [
+    { negate: false, period: { kind: "today" }, productIds: ["curso-a", "curso-b"], type: "access_recent" },
+    { negate: true, period: { hours: 1, kind: "hours" }, productIds: [], type: "access_recent" },
+    { negate: false, period: { hours: 720, kind: "hours" }, productIds: [], type: "access_recent" },
+    { negate: false, period: { hours: 2, kind: "hours" }, productIds: [], type: "access_recent" },
+    { action: "attended", negate: false, type: "webinar", webinarId: LIVE_Y },
+    { action: "registered", negate: true, type: "webinar", webinarId: null }
+  ]);
+  assert.deepEqual(model.normalizeAudience(todas({ action: "viu", negate: false, type: "webinar", webinarId: null })), model.EVERYONE, "sem regra valida vira todos");
+});
+
+test("frases das regras novas: hoje, ultima hora, ultimas N horas, qualquer produto e as lives", () => {
+  const nomes = { cohorts: {}, products: { "curso-a": "Curso de IA", "curso-b": "Formação Agentes" }, webinars: { [LIVE_Y]: "Aula ao vivo de IA" } };
+  const frase = (rule) => model.describeAudience(todas(rule), nomes);
+
+  assert.equal(frase(recente(HOJE)), "Alunos que ganharam acesso a qualquer produto hoje");
+  assert.equal(frase(recente(horas(24), ["curso-a"])), "Alunos que ganharam acesso a Curso de IA nas últimas 24 horas");
+  assert.equal(frase(recente(horas(1), ["curso-a", "curso-b"])), "Alunos que ganharam acesso a Curso de IA ou Formação Agentes na última hora");
+  assert.equal(frase(recente(HOJE, ["curso-a"], true)), "Alunos que não ganharam acesso a Curso de IA hoje");
+  assert.equal(frase(recente(horas(48), ["sumiu"])), "Alunos que ganharam acesso a um produto removido nas últimas 48 horas");
+
+  assert.equal(frase(live("attended")), "Alunos que participaram de alguma live");
+  assert.equal(frase(live("attended", null, true)), "Alunos que nunca participaram de nenhuma live");
+  assert.equal(frase(live("attended", LIVE_Y)), "Alunos que participaram da live “Aula ao vivo de IA”");
+  assert.equal(frase(live("attended", LIVE_Y, true)), "Alunos que não participaram da live “Aula ao vivo de IA”");
+  assert.equal(frase(live("registered", LIVE_Y)), "Alunos que garantiram vaga na live “Aula ao vivo de IA”");
+  assert.equal(frase(live("registered", LIVE_Y, true)), "Alunos que não garantiram vaga na live “Aula ao vivo de IA”");
+  assert.equal(frase(live("registered")), "Alunos que garantiram vaga em alguma live");
+  assert.equal(frase(live("registered", null, true)), "Alunos que nunca garantiram vaga em nenhuma live");
+  assert.equal(frase(live("attended", LIVE_Z)), "Alunos que participaram de uma live removida");
+  assert.equal(frase(live("registered", LIVE_Z)), "Alunos que garantiram vaga em uma live removida");
+  assert.equal(model.describeAudience(todas(recente(HOJE), live("attended", null, true)), nomes), "Alunos que ganharam acesso a qualquer produto hoje e nunca participaram de nenhuma live");
+});
+
+test("schema: as regras novas valem no segmento e nos fluxos; produto vazio = qualquer um; formatos errados sao recusados", () => {
+  const aceita = (schema, ...items) => schema.safeParse(todas(...items)).success;
+
+  for (const schema of [audienceDefinitionSchema, flowRuleDefinitionSchema]) {
+    assert.equal(aceita(schema, recente(HOJE)), true);
+    assert.equal(aceita(schema, recente(horas(720), ["curso-a"], true)), true);
+    assert.equal(aceita(schema, live("attended")), true);
+    assert.equal(aceita(schema, live("registered", LIVE_Y, true)), true);
+  }
+
+  assert.equal(aceita(audienceDefinitionSchema, recente(horas(0))), false, "0 hora");
+  assert.equal(aceita(audienceDefinitionSchema, recente(horas(721))), false, "mais de 30 dias");
+  assert.equal(aceita(audienceDefinitionSchema, recente(horas(1.5))), false, "hora quebrada");
+  assert.equal(aceita(audienceDefinitionSchema, recente({ kind: "semana" })), false);
+  assert.equal(aceita(audienceDefinitionSchema, { negate: false, productIds: [], type: "access_recent" }), false, "sem periodo");
+  assert.equal(aceita(audienceDefinitionSchema, recente(HOJE, Array.from({ length: 51 }, (_, index) => `curso-${index}`))), false, "mais de 50 produtos");
+  assert.equal(aceita(audienceDefinitionSchema, live("assistiu_replay")), false);
+  assert.equal(aceita(audienceDefinitionSchema, live("attended", "nao-e-uuid")), false);
+  assert.equal(aceita(audienceDefinitionSchema, { action: "attended", negate: false, type: "webinar" }), false, "sem a live (null = qualquer)");
+
+  const parsed = audienceDefinitionSchema.parse(todas({ action: "attended", type: "webinar", webinarId: null }));
+  assert.equal(parsed.root.items[0].negate, false, "negate padrao");
+});
+
+test("ancora do Quem pode da live: o segmento sobre os acessos e as turmas de agora; o produto e a turma pedidos continuam conferidos, o que vence com o tempo vale", () => {
+  const acesso = (productId, startsAt = daysAgo(40)) => ({ endsAt: null, productId, startsAt });
+  const ancora = (accesses = [], cohortIds = []) => ({ accesses, cohortIds });
+  const temA = { op: "has", productIds: ["a"], type: "product" };
+  const ganhouAHoje = recente(HOJE, ["a"]);
+  const entrou = { days: 7, op: "within", type: "sign_in" };
+  const turma = { cohortIds: ["t"], type: "cohort" };
+
+  // O que vence com o tempo ou com a atividade (entrada, ultimo estudo, ritmo, comentarios, lives, notificacao, a
+  // negada) e "nao tem o produto": valem, com ou sem acesso.
+  for (const definition of [
+    todas(entrou),
+    todas({ days: 30, op: "not_within", type: "last_study" }),
+    todas({ paces: ["never_started"], type: "pace" }),
+    todas({ count: 1, days: 30, op: "gte", type: "comments" }),
+    todas(live("registered", null, true)),
+    todas(live("attended", LIVE_Y)),
+    todas({ op: "has_not", productIds: ["a"], type: "product" }),
+    todas({ ...ganhouAHoje, negate: true }),
+    model.EVERYONE
+  ]) {
+    assert.equal(model.evaluateAnchoredAudience(definition, ancora()), true, JSON.stringify(definition));
+  }
+
+  // Regra com produto: precisa de um acesso aberto a ele (ou a plataforma), comecado quando for.
+  assert.equal(model.evaluateAnchoredAudience(todas(ganhouAHoje, entrou), ancora([acesso("a")])), true, "o 'hoje' passou, o produto ficou");
+  assert.equal(model.evaluateAnchoredAudience(todas(ganhouAHoje, entrou), ancora([acesso("b")])), false, "sem o produto pedido");
+  assert.equal(model.evaluateAnchoredAudience(todas(ganhouAHoje), ancora([acesso("platform")])), true, "a plataforma cobre");
+  assert.equal(model.evaluateAnchoredAudience(todas(recente(HOJE)), ancora()), false, "'qualquer produto' pede algum acesso");
+  assert.equal(model.evaluateAnchoredAudience(todas(recente(HOJE)), ancora([acesso("b")])), true);
+  assert.equal(model.evaluateAnchoredAudience(todas({ days: 3, op: "lt", productId: "a", type: "access_age" }), ancora([acesso("b")])), false);
+  assert.equal(model.evaluateAnchoredAudience(todas({ days: 3, productId: null, type: "access_ending" }), ancora([acesso("b")])), true);
+  assert.equal(model.evaluateAnchoredAudience(todas({ op: "gte", percent: 50, productId: "a", type: "progress" }), ancora()), false);
+  // Progresso geral: no segmento ja exige algum acesso com aula (totalLessons > 0); quem perdeu todos os acessos sai.
+  assert.equal(model.evaluateAnchoredAudience(todas({ op: "gte", percent: 50, productId: null, type: "progress" }), ancora()), false);
+  assert.equal(model.evaluateAnchoredAudience(todas({ op: "gte", percent: 50, productId: null, type: "progress" }), ancora([acesso("b")])), true);
+
+  // A turma vale como agora: quem foi tirado da turma sai, mesmo com a vaga.
+  assert.equal(model.evaluateAnchoredAudience(todas(turma), ancora()), false, "fora da turma");
+  assert.equal(model.evaluateAnchoredAudience(todas(turma), ancora([], ["t"])), true);
+
+  // Os grupos continuam valendo, e uma regra relaxada nao abre um "qualquer" por quem perdeu o produto e nao esta na turma.
+  assert.equal(model.evaluateAnchoredAudience(regras("any", temA, entrou), ancora()), true, "a entrada vence com o tempo: vale");
+  assert.equal(model.evaluateAnchoredAudience(regras("any", ganhouAHoje, turma), ancora()), false, "reembolsada de A e fora da turma: sai");
+  assert.equal(model.evaluateAnchoredAudience(regras("any", ganhouAHoje, turma), ancora([acesso("a")])), true);
+  assert.equal(model.evaluateAnchoredAudience(todas(temA, recente(HOJE, ["c"])), ancora([acesso("a")])), false);
+  assert.equal(model.evaluateAnchoredAudience(todas(temA, recente(HOJE, ["c"])), ancora([acesso("a"), acesso("c")])), true);
+
+  // Nunca da menos que o segmento de agora, sobre os mesmos acessos e turmas.
+  const fatosHoje = { ...aluno(), accesses: [acesso("a", now - 60_000)], cohortIds: ["t"] };
+  for (const definition of [todas(ganhouAHoje), todas(temA, ganhouAHoje), regras("any", ganhouAHoje, entrou), todas(turma, ganhouAHoje)]) {
+    if (model.evaluateAudience(definition, fatosHoje, contexto())) {
+      assert.equal(model.evaluateAnchoredAudience(definition, fatosHoje), true, JSON.stringify(definition));
+    }
+  }
+  assert.equal(model.audienceHasCohortRule(regras("any", entrou, { items: [turma], match: "all" })), true);
+  assert.equal(model.audienceHasCohortRule(todas(entrou)), false);
+  assert.equal(model.audienceHasCohortRule(model.EVERYONE), false);
+});
+
+test("o que as regras novas pedem dos fatos: 'Participação em lives' pede as lives (tambem dentro de grupos); acesso recente, nada a mais", () => {
+  assert.deepEqual(model.audienceFactNeeds(todas(recente(HOJE))), { comments: "none", lessons: false, students: false, webinars: false });
+  assert.deepEqual(model.audienceFactNeeds(todas(live("attended"))), { comments: "none", lessons: false, students: false, webinars: true });
+  assert.deepEqual(model.audienceFactNeeds([model.EVERYONE, regras("any", recente(HOJE), { items: [live("registered", LIVE_Y, true)], match: "all" })]), {
+    comments: "none",
+    lessons: false,
+    students: false,
+    webinars: true
+  });
+  assert.deepEqual(model.audienceFactsRequest(todas(mensagem("opened"), live("attended"))), { messageCampaignIds: [AVISO], webinarFollowUpIds: [], webinars: true });
+  assert.deepEqual(model.audienceFactsRequest(model.EVERYONE), { messageCampaignIds: [], webinarFollowUpIds: [], webinars: false });
+  // As acoes do follow-up pedem so o follow-up das lives delas, nunca as vagas e presencas de todos.
+  assert.deepEqual(model.audienceFactsRequest(todas(live("purchased", LIVE_Y), live("watched_replay", LIVE_Z, true))), {
+    messageCampaignIds: [],
+    webinarFollowUpIds: [LIVE_Y, LIVE_Z],
+    webinars: false
+  });
+});
+
+test("construtor: as regras novas nos dois seletores, a regra nova de cada uma ja nasce valida e as escolhas viram a regra", () => {
+  for (const mode of ["segment", "flow"]) {
+    assert.ok(builder.audienceRuleTypesFor(mode).includes("access_recent"), mode);
+    assert.ok(builder.audienceRuleTypesFor(mode).includes("webinar"), mode);
+  }
+
+  assert.equal(builder.AUDIENCE_RULE_LABELS.access_recent, "Ganhou acesso recentemente");
+  assert.equal(builder.AUDIENCE_RULE_LABELS.webinar, "Participação em lives");
+  assert.deepEqual(builder.defaultAudienceRule("access_recent"), recente(HOJE));
+  assert.deepEqual(builder.defaultAudienceRule("webinar"), live("attended"));
+  assert.equal(audienceDefinitionSchema.safeParse(todas(builder.defaultAudienceRule("access_recent"), builder.defaultAudienceRule("webinar"))).success, true);
+
+  assert.equal(builder.accessRecentPeriodChoiceOf(HOJE), "today");
+  assert.equal(builder.accessRecentPeriodChoiceOf(horas(24)), "24");
+  assert.equal(builder.accessRecentPeriodChoiceOf(horas(48)), "48");
+  assert.equal(builder.accessRecentPeriodChoiceOf(horas(6)), "hours");
+  assert.deepEqual(builder.accessRecentPeriodOfChoice("24", HOJE), horas(24));
+  assert.deepEqual(builder.accessRecentPeriodOfChoice("hours", horas(24)), horas(72), "o campo comeca em 72");
+  assert.deepEqual(builder.accessRecentPeriodOfChoice("hours", horas(6)), horas(6), "mantem o numero escolhido");
+  assert.deepEqual(builder.accessRecentPeriodOfChoice("today", horas(6)), HOJE);
+
+  const regra = live("attended", LIVE_Y);
+  assert.equal(builder.webinarRuleChoiceOf(regra), "attended");
+  assert.deepEqual(builder.webinarRuleWithChoice(regra, "not_registered"), live("registered", LIVE_Y, true));
+  assert.deepEqual(builder.webinarRuleWithChoice(regra, "not_attended"), live("attended", LIVE_Y, true));
+  assert.equal(builder.webinarRuleChoiceOf(live("registered", null, true)), "not_registered");
+});
+
+test("construtor: o seletor de live tem 'qualquer live', as lives com o dia e a escolhida fora da lista; a propria live sai", () => {
+  const lives = [
+    { id: LIVE_Y, startsAt: "2026-10-21T22:00:00.000Z", title: "Aula ao vivo de IA" },
+    { id: LIVE_Z, startsAt: null, title: "  " }
+  ];
+
+  assert.deepEqual(builder.audienceWebinarOptions(lives, null), [
+    { label: "qualquer live", value: null },
+    { label: "Aula ao vivo de IA · 21/10", value: LIVE_Y },
+    { label: "Sem título", value: LIVE_Z }
+  ]);
+  assert.deepEqual(builder.audienceWebinarOptions(lives, AVISO).map((option) => option.label), ["qualquer live", "Live fora da lista", "Aula ao vivo de IA · 21/10", "Sem título"]);
+  assert.deepEqual(builder.audienceWebinarOptions(lives, null, LIVE_Y).map((option) => option.value), [null, LIVE_Z], "a propria live nao aparece");
+  assert.deepEqual(builder.audienceWebinarOptions(null, null), [{ label: "qualquer live", value: null }]);
+  assert.deepEqual(builder.audienceNamesWithWebinars({ cohorts: {}, products: {} }, lives).webinars, { [LIVE_Y]: "Aula ao vivo de IA", [LIVE_Z]: "Sem título" });
+});
+
+test("a copia das regras novas passa pelas listas proibidas da Comunicacao e do Webinario, sem 'sessão'", async () => {
+  const { PROIBIDAS_WEBINARIO } = await import("../src/lib/webinar-copy.ts");
+  const PROIBIDAS = /campanha|público|audiência|evento|oferta|gatilho|trigger|sessão|impressão|automação|lembrete|layout|template|\bhome\b/i;
+  const nomes = { cohorts: {}, products: { "curso-a": "Curso" }, webinars: { [LIVE_Y]: "Y" } };
+  const textos = [
+    builder.AUDIENCE_RULE_LABELS.access_recent,
+    builder.AUDIENCE_RULE_LABELS.webinar,
+    builder.ACCESS_RECENT_HINT,
+    builder.ACCESS_RECENT_PICK_HINT,
+    builder.WEBINAR_RULE_HINT,
+    builder.NO_WEBINARS_MESSAGE,
+    builder.ANY_WEBINAR_LABEL,
+    ...builder.ACCESS_RECENT_PERIOD_CHOICES.map((choice) => choice.label),
+    ...builder.ACCESS_RECENT_SCOPE_CHOICES.map((choice) => choice.label),
+    ...builder.WEBINAR_RULE_CHOICES.map((choice) => choice.label),
+    ...[recente(HOJE), recente(horas(6), ["curso-a"], true), live("attended"), live("attended", null, true), live("registered", LIVE_Y), live("registered", LIVE_Z, true)].map(
+      (rule) => model.describeAudienceRule(rule, nomes)
+    )
+  ];
+
+  for (const texto of textos) {
+    assert.doesNotMatch(texto, PROIBIDAS, texto);
+
+    for (const palavra of PROIBIDAS_WEBINARIO) {
+      assert.equal(texto.toLocaleLowerCase("pt-BR").includes(palavra), false, `${texto}: ${palavra}`);
+    }
+  }
+});
+
+/* Lives de cada aluno: a RPC communication_webinar_facts no carregador de fatos */
+
+/** A linha da RPC (uma por aluno): as lives com vaga e as lives em que entrou (null = nenhuma). */
+const linhaDeLive = (userIndex, { attended = [], registered = [] } = {}) => ({
+  attended: attended.length > 0 ? attended : null,
+  registered: registered.length > 0 ? registered : null,
+  user_id: uid(userIndex)
+});
+
+test("carregador: le as lives so quando pedidas, uma linha por aluno em paginas de 1000 alunos por chave (nunca OFFSET), e marca a leitura; quem nao tem linha nunca participou", async () => {
+  const tables = escola(4);
+  const muitasLives = Array.from({ length: 1_205 }, (_, index) => `77777777-0000-4000-8000-${String(index).padStart(12, "0")}`);
+  // 1.203 alunos de fora da escola (sem perfil) so para passar de uma pagina; o aluno 1 com 1.205 vagas numa linha so.
+  const outros = Array.from({ length: 1_203 }, (_, index) => linhaDeLive(5_000 + index, { registered: [LIVE_Y] }));
+  const rows = [linhaDeLive(1, { registered: muitasLives }), ...outros, linhaDeLive(3, { attended: [LIVE_Y], registered: [LIVE_Y] }), linhaDeLive(4, { attended: [LIVE_Z] })];
+  // A RPC como a 202610300001: os proximos p_limit alunos depois de p_after, na ordem do id.
+  const porChave = (args) =>
+    rows
+      .filter((row) => !args.p_after || row.user_id > args.p_after)
+      .sort((a, b) => (a.user_id < b.user_id ? -1 : 1))
+      .slice(0, args.p_limit ?? 1_000);
+  const db = memoryDb(tables, { communication_webinar_facts: porChave });
+
+  const semPedir = await facts.loadAudienceFacts(db, now);
+  assert.equal(db.rpcCalls.some((call) => call.name === "communication_webinar_facts"), false, "sem a regra, nada lido");
+  assert.equal(semPedir.context.webinarFactsLoaded, undefined);
+
+  const loaded = await facts.loadAudienceFacts(db, now, { webinars: true });
+  const chamadas = db.rpcCalls.filter((call) => call.name === "communication_webinar_facts");
+  const porAluno = new Map(loaded.facts.map((fact) => [fact.userId, fact]));
+
+  const ordenados = rows.map((row) => row.user_id).sort();
+  assert.equal(chamadas.length, 2, "1.206 alunos: duas paginas");
+  assert.deepEqual(chamadas[0].args, { p_after: null, p_limit: 1_000 }, "todos os alunos, a primeira pagina");
+  assert.deepEqual(chamadas[1].args, { p_after: ordenados[999], p_limit: 1_000 }, "a segunda pagina comeca depois do ultimo id da primeira");
+  const lidas = await facts.loadWebinarFacts(db);
+  assert.equal(lidas.size, rows.length, "as duas paginas inteiras, sem repetir nem pular ninguem");
+  assert.deepEqual(lidas.get(ordenados.at(-1)), { attended: [], registered: [LIVE_Y] });
+  assert.equal(loaded.context.webinarFactsLoaded, true);
+  assert.equal(porAluno.get(uid(1)).webinars.registered.length, 1_205);
+  assert.deepEqual(porAluno.get(uid(3)).webinars, { attended: [LIVE_Y], registered: [LIVE_Y] });
+  assert.equal(porAluno.get(uid(2)), undefined, "a equipe fica de fora");
+
+  const nunca = todas(live("attended", null, true));
+  const ids = loaded.facts.filter((fact) => model.evaluateAudience(nunca, fact, loaded.context)).map((fact) => fact.userId);
+  assert.deepEqual(ids, [uid(1)], "so quem nunca entrou numa sala (vaga sem presenca conta como nunca)");
+});
+
+test("carregador por alunos: as lives so destes alunos (p_user_ids, pedacos de 150), ou as ja lidas sem reler", async () => {
+  const tables = escola(320);
+  const rows = [linhaDeLive(5, { attended: [LIVE_Y], registered: [LIVE_Y] }), linhaDeLive(200, { attended: [LIVE_Z] })];
+  const db = memoryDb(tables, {
+    communication_webinar_facts: (args) => rows.filter((row) => !args.p_user_ids || args.p_user_ids.includes(row.user_id))
+  });
+  const userIds = Array.from({ length: 320 }, (_, index) => uid(index + 1));
+  const loaded = await facts.loadAudienceFactsFor(db, userIds, now, { comments: "none", webinars: true });
+  const chamadas = db.rpcCalls.filter((call) => call.name === "communication_webinar_facts");
+
+  assert.deepEqual(chamadas.map((call) => call.args.p_user_ids.length), [150, 150, 20]);
+  assert.equal(loaded.context.webinarFactsLoaded, true);
+  assert.deepEqual(loaded.facts.find((fact) => fact.userId === uid(200)).webinars, { attended: [LIVE_Z], registered: [] });
+
+  const lidas = new Map([[uid(7), { attended: [LIVE_Y], registered: [] }]]);
+  const outro = memoryDb(tables, { communication_webinar_facts: rows });
+  const dados = await facts.loadAudienceFactsFor(outro, [uid(7)], now, { comments: "none", webinarFacts: lidas, webinars: true });
+  assert.equal(outro.rpcCalls.length, 0, "as lives ja lidas (a ancora do webinário) nao sao relidas");
+  assert.deepEqual(dados.facts[0].webinars, { attended: [LIVE_Y], registered: [] });
+  assert.equal(dados.context.webinarFactsLoaded, true);
+});
+
+test("carregador: banco sem a migracao 202610300001 deixa a leitura de fora e a regra nunca combina, nem 'nunca participou'", async () => {
+  const tables = escola(3);
+  const db = memoryDb(tables);
+  const errado = () => {
+    const api = {
+      order: () => api,
+      range: () => api,
+      then: (resolve, reject) =>
+        Promise.resolve({ data: null, error: { code: "PGRST202", message: "Could not find the function public.communication_webinar_facts" } }).then(resolve, reject)
+    };
+
+    return api;
+  };
+  const original = db.rpc;
+  db.rpc = (name, args) => (name === "communication_webinar_facts" ? errado() : original(name, args));
+
+  assert.equal(await facts.loadWebinarFacts(db), null);
+
+  const loaded = await facts.loadAudienceFacts(db, now, { webinars: true });
+  assert.equal(loaded.context.webinarFactsLoaded, undefined);
+  assert.equal(
+    loaded.facts.some((fact) => model.evaluateAudience(todas(live("attended", null, true)), fact, loaded.context)),
+    false,
+    "'nunca participou' nao vira todos"
+  );
+
+  const base = { context: contexto(), facts: [aluno()], people: new Map() };
+  assert.equal(facts.attachWebinarFacts(base, null), base, "sem leitura, o mesmo objeto");
+  assert.equal(facts.attachWebinarFacts(base, facts.NO_WEBINAR_FACTS), base, "nada lido, o mesmo objeto");
+  assert.deepEqual(await facts.loadWebinarFacts(memoryDb(tables), { userIds: [] }), new Map(), "lista vazia: nada lido");
+});
+
+test("carregador do tick: as lives sao lidas uma vez por tick e so quando algum segmento pede", async () => {
+  const { createFactsLoader } = await import("../src/server/communications/facts-loader.ts");
+  const db = memoryDb(escola(3), { communication_webinar_facts: [linhaDeLive(1, { attended: [LIVE_Y], registered: [LIVE_Y] })] });
+  const loader = createFactsLoader(db, now);
+  const semLives = await loader.load([]);
+
+  assert.equal(semLives.context.webinarFactsLoaded, undefined);
+  assert.equal(db.rpcCalls.filter((call) => call.name === "communication_webinar_facts").length, 0, "ninguem pediu");
+
+  const primeiro = await loader.load([], { webinars: true });
+  const segundo = await loader.load([], { webinars: true });
+  assert.equal(db.rpcCalls.filter((call) => call.name === "communication_webinar_facts").length, 1, "uma leitura no tick");
+  assert.equal(primeiro.context.webinarFactsLoaded, true);
+  assert.deepEqual(segundo.facts.find((fact) => fact.userId === uid(1)).webinars, { attended: [LIVE_Y], registered: [LIVE_Y] });
+  assert.equal((await loader.load([])).context.webinarFactsLoaded, undefined, "o segmento sem a regra continua sem a marca");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * As acoes do follow-up da regra "Participação em lives" (docs/30 §1.6, D52; a regra "Webinário" da fase 4 virou acoes
+ * dela na integracao): viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card. O
+ * detalhe (cada acao, as frases, o construtor, a leitura paginada) fica em tests/webinarios-seguimento.test.mjs; aqui,
+ * o encaixe no segmento: um tipo so, o NOT, o zod e o carregador que junta as duas leituras.
+ * ---------------------------------------------------------------------------------------------- */
+
+const FOLLOW_UP = { clicked: false, leftBeforeOffer: false, offerSeen: false, purchased: false, watchedReplay: false };
+
+test("follow-up: um tipo so com as acoes de presenca; o segmento aceita, o fluxo recusa, e a frase segue a das lives", () => {
+  assert.equal(model.AUDIENCE_RULE_TYPES.filter((type) => type.startsWith("webinar")).join(), "webinar");
+  assert.equal(audienceDefinitionSchema.safeParse(todas(mensagem("opened"), live("purchased", LIVE_Y, true))).success, true);
+  assert.equal(flowRuleDefinitionSchema.safeParse(todas(live("purchased", LIVE_Y))).success, false);
+  assert.equal(flowRuleDefinitionSchema.safeParse(todas(live("attended", LIVE_Y, true))).success, true, "as de presenca continuam no fluxo");
+  assert.equal(audienceDefinitionSchema.safeParse(todas(live("purchased"))).success, false, "a live e obrigatoria no follow-up");
+  assert.equal(model.describeAudience(todas(live("purchased", LIVE_Y, true)), { cohorts: {}, products: {}, webinars: { [LIVE_Y]: "Live" } }), "Alunos que não compraram pelo card na live “Live”");
+});
+
+test("follow-up: cada acao pelo fato da live; negada so para quem passou pela live (D52); live nao lida nunca combina, nem negada", () => {
+  const comFato = aluno({ webinars: { attended: [], followUps: { [LIVE_Y]: { ...FOLLOW_UP, clicked: true, offerSeen: true } }, registered: [] } });
+  const semLinha = aluno();
+  const lido = contexto({ webinarFollowUpsLoaded: new Set([LIVE_Y]) });
+
+  assert.equal(avalia(todas(live("offer_seen", LIVE_Y)), comFato, lido), true);
+  assert.equal(avalia(todas(live("clicked_no_purchase", LIVE_Y)), comFato, lido), true);
+  assert.equal(avalia(todas(live("purchased", LIVE_Y)), comFato, lido), false);
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), comFato, lido), true);
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, lido), false, "negada: quem nem passou pela live fica fora (nunca a escola inteira)");
+  assert.equal(avalia(todas(live("attended", LIVE_Y, true)), semLinha, contexto({ webinarFactsLoaded: true })), true, "não participou continua o NOT puro");
+  assert.equal(avalia(todas(live("offer_seen", LIVE_Y)), comFato, contexto()), false, "live nao lida nunca combina");
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto()), false, "nem negada");
+  assert.equal(avalia(todas(live("watched_replay", LIVE_Y, true)), semLinha, contexto({ webinarFactsLoaded: true })), false, "as vagas e presencas lidas nao bastam");
+});
+
+test("follow-up: o carregador le o follow-up so da live que existe e as vagas e presencas, uma vez cada, no mesmo facts.webinars", async () => {
+  const tables = escola(3);
+  const db = memoryDb(
+    { ...tables, webinars: [{ deleted_at: null, id: LIVE_Y, title: "Live" }, { deleted_at: "2026-10-01T00:00:00.000Z", id: LIVE_Z, title: "Antiga" }] },
+    {
+      communication_webinar_facts: [linhaDeLive(1, { attended: [LIVE_Y], registered: [LIVE_Y] }), linhaDeLive(3, { registered: [LIVE_Y] })],
+      webinar_follow_up_facts: [
+        { attended: true, clicked: false, left_before_offer: false, offer_seen: true, purchased: false, registered: true, user_id: uid(1), watched_replay: false, webinar_id: LIVE_Y },
+        { attended: false, clicked: false, left_before_offer: false, offer_seen: false, purchased: false, registered: true, user_id: uid(3), watched_replay: true, webinar_id: LIVE_Y }
+      ]
+    }
+  );
+
+  const loaded = await facts.loadAudienceFacts(db, now, model.audienceFactsRequest(todas(live("registered", LIVE_Y), live("attended", LIVE_Y, true), live("watched_replay", LIVE_Y), live("offer_seen", LIVE_Z))));
+  const ids = (definition) => loaded.facts.filter((fact) => model.evaluateAudience(definition, fact, loaded.context)).map((fact) => fact.userId);
+
+  assert.deepEqual([...loaded.context.webinarFollowUpsLoaded], [LIVE_Y], "a apagada fica de fora");
+  assert.equal(loaded.context.webinarFactsLoaded, true);
+  assert.equal(db.rpcCalls.filter((call) => call.name === "webinar_follow_up_facts").length, 1);
+  assert.equal(db.rpcCalls.filter((call) => call.name === "communication_webinar_facts").length, 1);
+  assert.deepEqual(loaded.facts.find((fact) => fact.userId === uid(1)).webinars, { attended: [LIVE_Y], followUps: { [LIVE_Y]: { ...FOLLOW_UP, offerSeen: true } }, registered: [LIVE_Y] });
+  assert.deepEqual(ids(todas(live("registered", LIVE_Y), live("attended", LIVE_Y, true), live("watched_replay", LIVE_Y))), [uid(3)], "tinha vaga, nao veio e viu o replay; a equipe (2) fica fora");
+  assert.deepEqual(ids(todas(live("offer_seen", LIVE_Z))), []);
 });

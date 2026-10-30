@@ -13,6 +13,14 @@ import "server-only";
 // (loadMessageFacts, chave "campaign:<id>"), e context.messageKeys diz quais foram lidos: chave fora dele
 // nunca combina. loadAudienceFactsFor monta os mesmos fatos so para alguns alunos (lote do motor dos
 // fluxos, em pedacos de 150), com a mesma conta (buildStudentFacts).
+//
+// Participação em lives (docs/30 §1.6, D52): as lives de cada aluno chegam por um carregador so
+// (loadAudienceWebinarFacts) e um juntar so (attachWebinarFacts), em facts.webinars, e so o que as regras pedem
+// (audienceFactsRequest): as vagas e presencas pela RPC communication_webinar_facts (migracao 202610300001; opcao
+// `webinars`; marca context.webinarFactsLoaded) e o follow-up so das lives citadas pelas acoes dele
+// (loadWebinarFollowUpFacts em src/server/webinars/follow-up-queries.ts, a RPC webinar_follow_up_facts; opcao
+// `webinarFollowUpIds`; marca context.webinarFollowUpsLoaded so com as lives lidas). Sem a leitura (ou num banco sem a
+// migracao, ou live apagada) a regra nunca combina, nem negada.
 
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { accessStateOf, isAccessOpen, paceOf } from "@/server/students/model";
@@ -29,6 +37,7 @@ import {
   type ProfileRow,
   type ProgressRow
 } from "@/server/students/store";
+import { loadWebinarFollowUpFacts, type WebinarFollowUpRead } from "@/server/webinars/follow-up-queries";
 import {
   buildCommentRanks,
   messageRefKey,
@@ -36,6 +45,7 @@ import {
   type AudienceCommentCounts,
   type AudienceContext,
   type AudienceStudentFacts,
+  type AudienceWebinarFacts,
   type MessageFact
 } from "./audience-model";
 import { assertNoDbError, chunksOf, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
@@ -221,6 +231,25 @@ export function accessFactsOf(openRows: readonly AudienceEntitlementRow[]): Audi
   });
 }
 
+/**
+ * Fatos so com os acessos (sem perfil, progresso, turmas, entrada nem comentarios), para quando nenhuma regra usa o
+ * resto: o lote do motor dos fluxos e o "Quem pode" da live com regras so de acesso ou de lives.
+ */
+export function accessOnlyFacts(userId: string, rows: readonly AudienceEntitlementRow[], now: number): AudienceStudentFacts {
+  return {
+    accesses: accessFactsOf(openAccessRows(rows, now)),
+    cohortIds: [],
+    comments: ZERO_COMMENTS,
+    completedByContent: {},
+    completedLessons: 0,
+    lastSignInAt: null,
+    lastStudiedAt: null,
+    pace: "never_started",
+    totalLessons: 0,
+    userId
+  };
+}
+
 export type StudentFactsSources = {
   comments: ReadonlyMap<string, AudienceCommentCounts>;
   /** Acessos dos alunos (abertos ou nao: o filtro de "aberto agora" fica aqui). */
@@ -319,10 +348,12 @@ const MESSAGE_ROW_COLUMNS =
   "id,user_id,campaign_id,created_at,expires_at,seen_at,opened_at,clicked_at,response,audio_started_at,audio_completed_at,reaction,poll_choice,hidden_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Ids de aviso validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato). */
-function campaignIdsOf(campaignIds: readonly string[] | undefined) {
-  return Array.from(new Set((campaignIds ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
+/** Ids validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato): avisos e lives pedidos. */
+export function validIdsOf(ids: readonly string[] | undefined) {
+  return Array.from(new Set((ids ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
 }
+
+const campaignIdsOf = validIdsOf;
 
 /** v3a: ids das opcoes votadas (so texto no formato do id; outra coisa = nao votou). */
 function pollChoiceOf(value: unknown): string[] | null {
@@ -467,12 +498,179 @@ export function attachMessageFacts(loaded: LoadedAudience, campaignIds: readonly
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Lives de cada aluno: regra "Participação em lives" (docs/30 §1.6)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** userId -> lives em que entrou na sala e em que garantiu vaga (ids dos webinarios, em ordem). */
+export type WebinarFactsByUser = Map<string, AudienceWebinarFacts>;
+
+/** Alunos por pagina da RPC communication_webinar_facts (o teto do PostgREST tambem corta RPC, sem erro). */
+export const WEBINAR_FACTS_PAGE = 1_000;
+
+/** Uma linha por aluno: as lives em que garantiu vaga e as em que entrou na sala (null = nenhuma). */
+type WebinarFactsRow = { attended: readonly (string | null)[] | null; registered: readonly (string | null)[] | null; user_id: string | null };
+
+function webinarIdsOf(list: readonly (string | null)[] | null | undefined): string[] {
+  return Array.isArray(list) ? Array.from(new Set(list.filter((id): id is string => typeof id === "string" && id !== ""))).sort() : [];
+}
+
+/**
+ * As lives de cada aluno pela RPC communication_webinar_facts (sem a equipe; a RPC une a vaga 'registered', a
+ * presenca resumida das sessoes ao vivo e gravadas e as amostras da sessao em andamento; o replay nao conta), uma
+ * linha por aluno. Todos os alunos: paginas de 1000 alunos por chave (p_after = o ultimo id da pagina anterior; a RPC
+ * escolhe os proximos pelos indices por user_id, entao cada pagina custa o mesmo e ninguem pula de pagina se uma vaga
+ * mudar no meio; uma pagina menor que 1000 e a ultima). Com `userIds`, so estes alunos (pedacos de 150, uma chamada
+ * cada; [] = nada lido). Banco sem a migracao 202610300001: null (quem chama deixa context.webinarFactsLoaded de fora
+ * e a regra nunca combina). Outros erros sobem.
+ */
+export async function loadWebinarFacts(db: CommunicationsDb, options: { userIds?: readonly string[] } = {}): Promise<WebinarFactsByUser | null> {
+  const byUser: WebinarFactsByUser = new Map();
+  const userChunks = options.userIds ? chunksOf(Array.from(new Set(options.userIds.filter((id) => UUID.test(id)))).sort(), AUDIENCE_FACTS_CHUNK) : [null];
+
+  if (options.userIds && userChunks.length === 0) {
+    return byUser;
+  }
+
+  for (const users of userChunks) {
+    let after: string | null = null;
+
+    for (;;) {
+      const { data, error } = await db
+        .rpc("communication_webinar_facts", users ? { p_user_ids: users } : { p_after: after, p_limit: WEBINAR_FACTS_PAGE })
+        .order("user_id");
+
+      if (error) {
+        if (isMissingCommunicationSchema(error)) {
+          console.error("[comunicacao] lives de cada aluno indisponiveis (migracao 202610300001 pendente).");
+          return null;
+        }
+
+        throw new Error(`Comunicacao: lives de cada aluno: ${error.message}`);
+      }
+
+      const rows = (data ?? []) as WebinarFactsRow[];
+
+      for (const row of rows) {
+        if (!row.user_id) {
+          continue;
+        }
+
+        const attended = webinarIdsOf(row.attended);
+        const registered = webinarIdsOf(row.registered);
+
+        if (attended.length > 0 || registered.length > 0) {
+          byUser.set(row.user_id, { attended, registered });
+        }
+      }
+
+      const last = rows.at(-1)?.user_id ?? null;
+
+      // Com ids, uma chamada basta; todos: ate a pagina menor que 1000 (o id da ultima linha e a chave da proxima).
+      if (users || rows.length < WEBINAR_FACTS_PAGE || !last || (after !== null && last <= after)) {
+        break;
+      }
+
+      after = last;
+    }
+  }
+
+  return byUser;
+}
+
+/** O que foi lido das lives para os avaliados (regra "Participação em lives"). */
+export type WebinarFactsRead = {
+  /** O follow-up das lives pedidas (webinar_follow_up_facts); `loadedIds` = as lidas (apagada fica de fora). */
+  followUps: WebinarFollowUpRead;
+  /** As vagas e presencas por aluno (communication_webinar_facts); null = nao lidas (nao pedidas ou banco sem a 202610300001). */
+  presence: WebinarFactsByUser | null;
+};
+
+/** Nada lido das lives (sem a regra, ou a regra sem live). */
+export const NO_WEBINAR_FACTS: WebinarFactsRead = { followUps: { byUser: new Map(), loadedIds: [] }, presence: null };
+
+/**
+ * As lives destes avaliados, so o que as regras pedem (audienceFactsRequest): as vagas e presencas (`webinars`; ou as ja
+ * lidas em `presence`, sem reler) e o follow-up das lives citadas (`webinarFollowUpIds`), as duas leituras em paralelo.
+ * Com `userIds`, so destes alunos ([] = nada lido); sem, todos.
+ */
+export async function loadAudienceWebinarFacts(
+  db: CommunicationsDb,
+  request: { webinarFollowUpIds?: readonly string[]; webinars?: boolean },
+  options: { presence?: WebinarFactsByUser | null; userIds?: readonly string[] } = {}
+): Promise<WebinarFactsRead> {
+  const followUpIds = validIdsOf(request.webinarFollowUpIds);
+  const userIds = options.userIds;
+  const [presence, followUps] = await Promise.all([
+    options.presence !== undefined ? Promise.resolve(options.presence) : request.webinars ? loadWebinarFacts(db, userIds ? { userIds } : {}) : Promise.resolve(null),
+    followUpIds.length > 0 && userIds?.length !== 0
+      ? loadWebinarFollowUpFacts(db, followUpIds, userIds ? { userIds } : {})
+      : Promise.resolve(NO_WEBINAR_FACTS.followUps)
+  ]);
+
+  return { followUps, presence };
+}
+
+/**
+ * Junta as lives aos fatos ja montados (facts.webinars) e marca o que foi lido para todos os avaliados: as vagas e
+ * presencas (context.webinarFactsLoaded; quem nao tem linha "nunca participou nem garantiu vaga") e as lives do
+ * follow-up (context.webinarFollowUpsLoaded; quem nao tem linha nao fez nada nelas). Nada lido (null, banco sem as
+ * migracoes, live apagada) devolve o mesmo LoadedAudience. Os fatos de quem tem linha sao copiados; os demais sao os
+ * mesmos objetos.
+ */
+export function attachWebinarFacts(loaded: LoadedAudience, read: Partial<WebinarFactsRead> | null): LoadedAudience {
+  const presence = read?.presence ?? null;
+  const followUps = read?.followUps && read.followUps.loadedIds.length > 0 ? read.followUps : null;
+
+  if (!presence && !followUps) {
+    return loaded;
+  }
+
+  const facts = loaded.facts.map((fact) => {
+    const lives = presence?.get(fact.userId);
+    const followed = followUps?.byUser.get(fact.userId);
+
+    if (!lives && !followed) {
+      return fact;
+    }
+
+    const current = fact.webinars;
+    const merged = followed || current?.followUps ? { ...current?.followUps, ...followed } : undefined;
+
+    return {
+      ...fact,
+      webinars: {
+        attended: lives?.attended ?? current?.attended ?? [],
+        registered: lives?.registered ?? current?.registered ?? [],
+        ...(merged ? { followUps: merged } : {})
+      }
+    };
+  });
+  const context = {
+    ...loaded.context,
+    ...(presence ? { webinarFactsLoaded: true } : {}),
+    ...(followUps ? { webinarFollowUpsLoaded: new Set([...(loaded.context.webinarFollowUpsLoaded ?? []), ...followUps.loadedIds]) } : {})
+  };
+
+  return { ...loaded, context, facts };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Carregadores
  * ---------------------------------------------------------------------------------------------- */
 
 export type AudienceFactsOptions = {
   /** Avisos citados por regras "o que fez com a notificacao X" (collectMessageCampaignIds); [] = nenhum. */
   messageCampaignIds?: readonly string[];
+  /**
+   * Lives citadas pelas acoes do follow-up da regra "Participação em lives" (collectWebinarFollowUpIds): o follow-up so
+   * delas. Sem isto, essas acoes nunca combinam.
+   */
+  webinarFollowUpIds?: readonly string[];
+  /**
+   * Le as vagas e presencas de cada aluno ("participou" e "garantiu vaga"; audienceFactNeeds(...).webinars). Sem
+   * isto, nada e lido e essas acoes nunca combinam.
+   */
+  webinars?: boolean;
 };
 
 /** Todos os alunos (fora a equipe), com as linhas do sino so dos avisos pedidos. */
@@ -483,7 +681,7 @@ export async function loadAudienceFacts(
 ): Promise<LoadedAudience> {
   const nowMs = typeof now === "number" ? now : now.getTime();
   const messageCampaignIds = campaignIdsOf(options.messageCampaignIds);
-  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages] = await Promise.all([
+  const [profiles, staff, entitlements, progressRows, lessonIndex, memberships, comments, messages, webinars] = await Promise.all([
     fetchProfiles(db),
     fetchStaffUserIds(db),
     fetchEntitlements(db),
@@ -491,7 +689,8 @@ export async function loadAudienceFacts(
     fetchPublishedLessonIndex(db),
     fetchCohortMemberships(db),
     fetchCommentCounts(db),
-    loadMessageFacts(db, messageCampaignIds)
+    loadMessageFacts(db, messageCampaignIds),
+    loadAudienceWebinarFacts(db, options)
   ]);
   const { facts, people } = buildStudentFacts({ comments, entitlements, lessonIndex, memberships, now: nowMs, profiles, progressRows, staff });
   const loaded: LoadedAudience = {
@@ -505,7 +704,7 @@ export async function loadAudienceFacts(
     people
   };
 
-  return attachMessageFacts(loaded, messageCampaignIds, messages);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }
 
 export type AudienceFactsForOptions = AudienceFactsOptions & {
@@ -529,6 +728,11 @@ export type AudienceFactsForOptions = AudienceFactsOptions & {
   lessonIndex?: Map<string, Set<string>>;
   /** Quem e da equipe (o RPC de fatos do lote ja traz). Sem isso, le admin_roles. */
   staff?: ReadonlySet<string>;
+  /**
+   * As vagas e presencas destes alunos ja lidas (loadWebinarFacts, ou null num banco sem a migracao). Sem elas e com
+   * `webinars`, le pelos ids.
+   */
+  webinarFacts?: WebinarFactsByUser | null;
 };
 
 /**
@@ -556,7 +760,7 @@ export async function loadAudienceFactsFor(
 
     return { entitlements, memberships, profiles, progressRows };
   };
-  const [chunks, staff, lessonIndex, comments, messages] = await Promise.all([
+  const [chunks, staff, lessonIndex, comments, messages, webinars] = await Promise.all([
     (async () => {
       const results = [];
 
@@ -573,7 +777,8 @@ export async function loadAudienceFactsFor(
       : commentsMode === "none" || ids.length === 0
         ? Promise.resolve(new Map<string, AudienceCommentCounts>())
         : fetchCommentCounts(db),
-    loadMessageFacts(db, messageCampaignIds, { userIds: ids })
+    loadMessageFacts(db, messageCampaignIds, { userIds: ids }),
+    loadAudienceWebinarFacts(db, options, { ...(options.webinarFacts !== undefined ? { presence: options.webinarFacts } : {}), userIds: ids })
   ]);
   const wanted = new Set(ids);
   const { facts, people } = buildStudentFacts({
@@ -601,5 +806,5 @@ export async function loadAudienceFactsFor(
     people
   };
 
-  return attachMessageFacts(loaded, messageCampaignIds, messages);
+  return attachWebinarFacts(attachMessageFacts(loaded, messageCampaignIds, messages), webinars);
 }

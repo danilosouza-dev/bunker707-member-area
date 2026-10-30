@@ -79,3 +79,65 @@ export function limparConfiguracoesDeTeste(db: unknown, keys: string[]): Promise
 export function apagarProdutosDeTeste(db: unknown, prefixoDoTitulo: string): Promise<void>;
 export function definirCapaDoProduto(db: unknown, titulo: string, image?: string): Promise<void>;
 export function limparComunicacao(db: unknown): Promise<void>;
+
+export const WEBINARIO_DE_TESTE: { descricao: string; id: string; sessaoId: string; slug: string; titulo: string };
+export function seedWebinarioDeTeste(db: unknown): Promise<{ scheduledAt: string }>;
+export function limparWebinarios(db: unknown): Promise<void>;
+
+export const LIVE_GRAVADA_DE_TESTE: { gravacaoId: string; id: string; sessaoId: string; slug: string; titulo: string };
+export function seedLiveGravadaEncerradaDeTeste(db: unknown): Promise<{ endedAt: string; startedAt: string }>;
+export const LIVE_GRAVADA_NO_AR_DE_TESTE: {
+  descricao: string;
+  gravacaoId: string;
+  id: string;
+  mensagens: { cedo: string; tarde: string };
+  origemId: string;
+  sessaoId: string;
+  slug: string;
+  textos: { cedo: string; tarde: string };
+  titulo: string;
+  videoUrl: string;
+};
+export function seedLiveGravadaDeTeste(db: unknown, opcoes?: { comecouHa?: number; duracaoSegundos?: number; seloAoVivo?: boolean }): Promise<{ scheduledAt: string }>;
+
+export const AMBIENTE_DA_SALA_AO_VIVO_DE_TESTE: {
+  WEBINAR_JWT_APP_ID: string;
+  WEBINAR_JWT_SECRET: string;
+  WEBINAR_MEET_DOMAIN: string;
+  WEBINAR_RECORDER_DISPATCH: string;
+  WEBINAR_RECORDER_WEBHOOK_SECRET: string;
+};
+export function ambienteDaSalaAoVivo(env?: Record<string, string | undefined>): typeof AMBIENTE_DA_SALA_AO_VIVO_DE_TESTE;
+export const LIVE_AO_VIVO_DE_TESTE: { coApresentador: "professor"; descricao: string; equipe: "analista"; id: string; roomName: string; sessaoId: string; slug: string; titulo: string };
+export function seedLiveAoVivoDeTeste(
+  db: unknown,
+  opcoes?: { comecouHa?: number; equipeModera?: boolean; status?: "live" | "scheduled" | "waiting" }
+): Promise<{ scheduledAt: string; startedAt: string | null }>;
+
+/* Webinarios, fase 4 (docs/30 §11): as sementes dos paineis, da Oferta, da Simulacao e do "Comeca quando voce entra". */
+export const LIVE_AO_VIVO_ENCERRADA_DE_TESTE: { id: string; sessaoId: string; slug: string; titulo: string };
+export function seedLiveAoVivoEncerradaDeTeste(db: unknown): Promise<{ endedAt: string; startedAt: string }>;
+export const OFERTA_DE_TESTE: {
+  checkoutOrigem: string;
+  id: string;
+  produtoId: string;
+  titulo: string;
+  variantes: {
+    badge: string | null;
+    checkoutUrl: string;
+    enabled: boolean;
+    headline: string;
+    label: "A" | "B" | "C" | "D";
+    priceFromLabel: string | null;
+    priceLabel: string | null;
+    weight: number;
+  }[];
+};
+export function seedOfertaDeTeste(
+  db: unknown,
+  opcoes?: { mostraEm?: number; prazo?: number | null; someEm?: number | null }
+): Promise<{ ofertaId: string; variantes: { enabled: boolean; label: "A" | "B" | "C" | "D"; weight: number }[] }>;
+export const SIMULACAO_DE_TESTE: { resumo: { counter_max: number; joins_shown: number; sale_notices_shown: number } };
+export function seedSimulacaoDeTeste(db: unknown, opcoes?: { sessaoId?: string }): Promise<{ ackText: string; resumo: { counter_max: number; joins_shown: number; sale_notices_shown: number } }>;
+export const JIT_DE_TESTE: { gravacaoId: string; id: string; slug: string; titulo: string; videoUrl: string };
+export function seedJitDeTeste(db: unknown, opcoes?: { aCada?: 15 | 30 | 60; entradaAtrasada?: number | null }): Promise<{ everyMinutes: number; lateJoinMinutes: number | null }>;

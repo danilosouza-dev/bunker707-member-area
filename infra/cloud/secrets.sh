@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Entrega segredos externos (chave do Resend etc.) ao .env de um papel, a partir de um envelope cifrado
 # para o servidor (infra/cloud/envelope.sh encrypt), e recria os servicos que mudaram:
-#   PAYLOAD='<base64>' bash infra/cloud/secrets.sh membros|marketing
+#   PAYLOAD='<base64>' bash infra/cloud/secrets.sh membros|marketing|meet
 # O payload nunca e legivel fora do servidor; as chaves aplicadas sao listadas sem os valores.
+# meet (servidor C do Jitsi): JWT_APP_SECRET, o mesmo valor que o app recebe em WEBINAR_JWT_SECRET (docs/20 §8B.3);
+# recria o prosody, o que derruba quem estiver na sala: fora de live.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
-role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || die "uso: secrets.sh membros|marketing"
+role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || [ "$role" = "meet" ] || die "uso: secrets.sh membros|marketing|meet"
 need HCLOUD_TOKEN PAYLOAD
 install_hcloud; deploy_key
-if [ "$role" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
+case "$role" in
+    membros) server="$MEMBROS_NAME"; envf="$REMOTE_DIR/infra/compose/.env" ;;
+    meet) server="$MEET_NAME"; envf="$REMOTE_DIR/infra/jitsi/.env" ;;
+    *) if [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi; envf="$REMOTE_DIR/infra/mautic/.env" ;;
+esac
 ip=$(server_ip4 "$server"); target="$DEPLOY_USER@$ip"
-if [ "$role" = "membros" ]; then envf="$REMOTE_DIR/infra/compose/.env"; else envf="$REMOTE_DIR/infra/mautic/.env"; fi
 
 # Conferencia de que o payload chegou inteiro (e cifrado: o hash nao revela nada).
 log "Payload: ${#PAYLOAD} caracteres, sha256 $(printf '%s' "$PAYLOAD" | tr -d '[:space:]' | sha256sum | cut -c1-16)"
@@ -60,6 +65,8 @@ if [ "$role" = "membros" ]; then
     # Os servicos recriados (auth, app) precisam ficar saudaveis antes do smoke: sem a espera, o primeiro
     # /api/health pega o app ainda subindo (502).
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash -c '. infra/scripts/lib.sh; for s in auth app; do wait_healthy \$s 180; done' && bash infra/scripts/smoke.sh"
+elif [ "$role" = "meet" ]; then
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d && bash -c '. infra/jitsi/scripts/_env.sh; for s in prosody jicofo jvb web; do wait_healthy \$s 300; done' && bash infra/jitsi/scripts/smoke.sh"
 else
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="-f infra/mautic/compose.colocado.yml"
     profile=""; [ -n "${SKIP_MARKETING:-}" ] || profile="--profile borda"

@@ -23,7 +23,7 @@ import { can, type AdminAccess } from "@/server/auth/roles";
 import { resolveAudienceUserIds } from "./audience";
 import { loadAudienceFacts } from "./audience-facts";
 import {
-  collectMessageCampaignIds,
+  audienceFactsRequest,
   EVERYONE,
   isAudienceGroup,
   normalizeAudience,
@@ -143,9 +143,9 @@ function entryAudienceOf(flow: Pick<FlowRow, "entry_audience">) {
   return definitionOf(flow.entry_audience) ?? EVERYONE;
 }
 
-/** Quantos estao no segmento de entrada agora (com as linhas dos avisos citados por "o que fez com"). */
+/** Quantos estao no segmento de entrada agora (com as linhas dos avisos citados por "o que fez com" e as lives). */
 async function countEntry(db: CommunicationsDb, now: Date, audience: AudienceDefinition) {
-  const loaded = await loadAudienceFacts(db, now, { messageCampaignIds: collectMessageCampaignIds(audience) });
+  const loaded = await loadAudienceFacts(db, now, audienceFactsRequest(audience));
 
   return resolveAudienceUserIds(audience, loaded).length;
 }

@@ -722,6 +722,55 @@ test("cache do tick: o fluxo e lido antes dos passos; fluxo esquecido (stale_ver
   assert.equal(leiturasDoFluxo(), 2);
 });
 
+test("lote do motor: a regra 'Participação em lives' le as lives so dos alunos do lote; sem a regra, nada e lido", async () => {
+  const { loadFlowBatchContext } = await import("../src/server/communications/flow-facts.ts");
+  const entrada = "4e5f6071-3b1a-4c55-9d7e-2a6b8c9d0e01";
+  const live = "55555555-5555-4555-8555-555555555555";
+  const tarefas = [tarefaReservada(1), { ...tarefaReservada(2), node_id: tarefaReservada(1).node_id }];
+  const nuncaParticipou = { kind: "rules", root: { items: [{ action: "attended", negate: true, type: "webinar", webinarId: null }], match: "all" } };
+  const banco = (filter) =>
+    scriptedDb((query) => {
+      if (query.table === "communication_flows") {
+        return { data: [fluxoDoConstrutor({ entry_audience: { kind: "everyone" }, revision: 1 })], error: null };
+      }
+
+      if (query.table === "communication_flow_nodes") {
+        return {
+          data: [
+            { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: null, condition: null, expire_with_anchor: false, filter: null, flow_id: FLUXO, id: entrada, kind: "entry", max_wait_minutes: null, offset_minutes: 0, parent_id: null, position: 0, wait_until_true: false },
+            { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: AVISO, condition: null, expire_with_anchor: false, filter, flow_id: FLUXO, id: tarefas[0].node_id, kind: "message", max_wait_minutes: null, offset_minutes: 0, parent_id: entrada, position: 0, wait_until_true: false }
+          ],
+          error: null
+        };
+      }
+
+      if (query.op === "rpc" && query.table === "communication_webinar_facts") {
+        return { data: [{ attended: [live], registered: [live], user_id: tarefas[1].user_id }], error: null };
+      }
+
+      if (query.op === "rpc") {
+        return { data: {}, error: null };
+      }
+
+      return { count: 0, data: [], error: null };
+    });
+
+  const db = banco(nuncaParticipou);
+  const itens = await loadFlowBatchContext(db, tarefas, FORA_DA_FAIXA);
+  const leituras = db.queries.filter((query) => query.table === "communication_webinar_facts");
+
+  assert.equal(leituras.length, 1, "uma leitura para o lote");
+  assert.deepEqual([...leituras[0].args.p_user_ids].sort(), tarefas.map((tarefa) => tarefa.user_id).sort(), "so os alunos do lote");
+  assert.equal(itens[0].input.context.webinarFactsLoaded, true);
+  assert.equal(itens[0].input.facts.webinars, undefined, "sem linha: nunca participou");
+  assert.deepEqual(itens[1].input.facts.webinars, { attended: [live], registered: [live] });
+
+  const semRegra = banco(null);
+  const semLives = await loadFlowBatchContext(semRegra, tarefas, FORA_DA_FAIXA);
+  assert.equal(semRegra.queries.some((query) => query.table === "communication_webinar_facts"), false, "sem a regra, nada lido");
+  assert.equal(semLives[0].input.context.webinarFactsLoaded, undefined);
+});
+
 test("faixa de 15 minutos: a sondagem pega so quem nao foi conferido nesta faixa, os mais esquecidos primeiro", async () => {
   const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
   await flowStore.probeSlotWork(db, new Date("2026-10-20T15:15:00.000Z"));
@@ -897,4 +946,87 @@ test("os outros momentos continuam como antes: o segmento inteiro, sem ler nem g
   assert.deepEqual(result, { added: 2, audienceCount: 2, removed: 1 });
   assert.equal(gravadas(db, "select")[0].payload, "user_id,eligible");
   assert.deepEqual(gravadas(db, "upsert")[0].payload, [uid(1), uid(2)].map((userId) => ({ campaign_id: campaign.id, eligible: true, user_id: userId })), "sem first_access_at");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Participação em lives com uma acao do follow-up (docs/30 §1.6, D52) no recalculo dos pop-ups (faixas de 15 min, docs/29)
+ * ---------------------------------------------------------------------------------------------- */
+
+const WEBINARIO = "aaaaaaaa-1111-4111-8111-111111111111";
+const veioENaoComprou = {
+  kind: "rules",
+  root: {
+    items: [
+      { action: "attended", negate: false, type: "webinar", webinarId: WEBINARIO },
+      { action: "purchased", negate: true, type: "webinar", webinarId: WEBINARIO }
+    ],
+    match: "all"
+  }
+};
+const perfilDe = (n) => ({ avatar_url: null, created_at: "2026-09-01T00:00:00.000Z", email: null, full_name: `Aluno ${n}`, id: uid(n), last_sign_in_at: null, phone: null });
+const fatoDoWebinario = (n, fatos) => ({
+  attended: false,
+  clicked: false,
+  left_before_offer: false,
+  offer_seen: false,
+  purchased: false,
+  registered: false,
+  user_id: uid(n),
+  watched_replay: false,
+  webinar_id: WEBINARIO,
+  ...fatos
+});
+
+test("Participação em lives no tick: dois pop-ups citam a mesma live, a presenca e o follow-up dela sao lidos uma vez e so quem veio e nao comprou fica elegivel", async () => {
+  const popups = ["0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e31", "0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e32"].map((id) => ({ ...POPUP, audience: veioENaoComprou, id }));
+  const db = scriptedDb((query) => {
+    if (query.table === "campaigns" && query.op === "select") {
+      return { data: isPopupQuery(query) ? popups : [], error: null };
+    }
+
+    if (query.table === "campaigns" && query.op === "update") {
+      return { data: [{ ...POPUP, ...query.payload }], error: null };
+    }
+
+    if (query.table === "profiles") {
+      return { count: 3, data: [perfilDe(1), perfilDe(2), perfilDe(3)], error: null };
+    }
+
+    if (query.table === "webinars") {
+      return { data: [{ id: WEBINARIO, title: "Live de agentes" }], error: null };
+    }
+
+    if (query.op === "rpc" && query.table === "communication_webinar_facts") {
+      return {
+        data: [
+          { attended: [WEBINARIO], registered: [WEBINARIO], user_id: uid(1) },
+          { attended: [WEBINARIO], registered: null, user_id: uid(2) },
+          { attended: null, registered: [WEBINARIO], user_id: uid(3) }
+        ],
+        error: null
+      };
+    }
+
+    if (query.op === "rpc" && query.table === "webinar_follow_up_facts") {
+      return {
+        data: [fatoDoWebinario(1, { attended: true, registered: true }), fatoDoWebinario(2, { attended: true, clicked: true, purchased: true }), fatoDoWebinario(3, { registered: true })],
+        error: null
+      };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+
+  const result = await processCommunications({ db, now: new Date("2026-10-20T15:07:42.000Z") });
+
+  assert.equal(result.refreshed, 2, JSON.stringify(result));
+  assert.equal(db.queries.filter((query) => query.table === "profiles").length, 1, "alunos uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.op === "rpc" && query.table === "webinar_follow_up_facts").length, 1, "o follow-up da live uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.op === "rpc" && query.table === "communication_webinar_facts").length, 1, "as vagas e presencas uma vez por tick");
+  assert.deepEqual(db.queries.find((query) => query.op === "rpc" && query.table === "webinar_follow_up_facts").args, { p_webinar_ids: [WEBINARIO] });
+  assert.equal(db.queries.filter((query) => query.table === "webinars").length, 1, "a live conferida uma vez");
+  assert.equal(db.queries.filter((query) => query.table === "notifications").length, 0, "a regra de lives nao le linhas do sino");
+
+  const elegiveis = db.queries.filter((query) => query.table === "campaign_deliveries" && query.op === "upsert").map((query) => query.payload.map((row) => row.user_id));
+  assert.deepEqual(elegiveis, [[uid(1)], [uid(1)]], "veio e nao comprou; quem comprou (2) e quem faltou (3) ficam fora");
 });

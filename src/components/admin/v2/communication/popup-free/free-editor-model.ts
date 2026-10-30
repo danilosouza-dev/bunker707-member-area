@@ -321,7 +321,8 @@ export const FREE_ELEMENT_GROUPS: readonly FreeCatalogGroup[] = [
     items: [
       { kind: "heading", label: "Título" },
       { kind: "text", label: "Texto" },
-      { kind: "badge", label: "Selo" }
+      { kind: "badge", label: "Selo" },
+      { kind: "countdown", label: "Contador" }
     ],
     label: "Texto"
   },
@@ -362,6 +363,7 @@ const ADDED: Record<FreeCatalogKind, string> = {
   badge: "Selo adicionado.",
   button: "Botão adicionado.",
   column: "Caixa em coluna adicionada.",
+  countdown: "Contador adicionado.",
   cta: "Botão principal adicionado.",
   divider: "Linha adicionada.",
   gradient: "Degradê adicionado.",
@@ -509,9 +511,12 @@ export function freeParentId(design: Pick<PopupFreeDesign, "children">, id: Free
  * Contagens: o que ainda cabe (o mesmo limite do schema, para o botao desligar antes)
  * ---------------------------------------------------------------------------------------------- */
 
-type Counts = { audio: number; buttons: number; cta: number; free: number; headings: number; icons: number; images: number; links: number; nodes: number; videos: number };
+type Counts = { audio: number; buttons: number; countdowns: number; cta: number; free: number; headings: number; icons: number; images: number; links: number; nodes: number; videos: number };
 
-function countNodes(nodes: readonly FreeNode[], counts: Counts = { audio: 0, buttons: 0, cta: 0, free: 0, headings: 0, icons: 0, images: 0, links: 0, nodes: 0, videos: 0 }): Counts {
+function countNodes(
+  nodes: readonly FreeNode[],
+  counts: Counts = { audio: 0, buttons: 0, countdowns: 0, cta: 0, free: 0, headings: 0, icons: 0, images: 0, links: 0, nodes: 0, videos: 0 }
+): Counts {
   walkFreeNodes(nodes, (node) => {
     counts.nodes += 1;
 
@@ -522,6 +527,7 @@ function countNodes(nodes: readonly FreeNode[], counts: Counts = { audio: 0, but
     if (node.type === "icon") counts.icons += 1;
     if (node.type === "links") counts.links += 1;
     if (node.type === "audio") counts.audio += 1;
+    if (node.type === "countdown") counts.countdowns += 1;
 
     if (node.type === "button") {
       if (node.action.kind === "cta") {
@@ -548,6 +554,7 @@ export function freeAddProblem(design: Pick<PopupFreeDesign, "children">, added:
   if (counts.icons > L.icons) return M.icons;
   if (counts.links > 1) return M.linksDuplicate;
   if (counts.audio > 1) return M.audioDuplicate;
+  if (counts.countdowns > L.countdowns) return M.countdowns;
   if (counts.free > L.freeNodes) return M.freeNodes;
 
   return null;
@@ -730,6 +737,7 @@ const TYPE_PREFIX: Record<FreeNodeType, string> = {
   badge: "selo",
   box: "caixa",
   button: "botao",
+  countdown: "contador",
   divider: "linha",
   heading: "titulo",
   icon: "icone",
@@ -2167,7 +2175,7 @@ export function applyFreeFontAtKey(design: PopupFreeDesign, key: string, font: P
       };
     }
 
-    if (node.type === "heading" || node.type === "text" || node.type === "badge" || node.type === "button" || node.type === "links") {
+    if (node.type === "heading" || node.type === "text" || node.type === "badge" || node.type === "button" || node.type === "links" || node.type === "countdown") {
       return { ...node, textStyle: { ...node.textStyle, font } };
     }
 

@@ -75,6 +75,8 @@ function livreCompleto() {
       { id: "espaco", type: "spacer" },
       { id: "som", type: "audio" },
       { children: [{ id: "texto2", lines: [[{ text: "Dentro" }]], type: "text" }], id: "caixa", type: "box" },
+      // Contador (L6f, critica C3): nenhum arquivo (o fundo das casas e so cor ou degrade).
+      { id: "contador", until: { at: "2030-01-01T12:00:00.000Z", kind: "date" }, type: "countdown" },
       { id: "links", type: "links" }
     ],
     mode: "free",
@@ -285,8 +287,9 @@ test("colunas de campaigns e tipos de notificacao: cada um decidido", () => {
   const decididos = [...refs.NOTIFICATION_KINDS_WITHOUT_MEDIA, ...refs.NOTIFICATION_KINDS_WITH_MEDIA].sort();
   assert.deepEqual(tiposDoApp, decididos, "tipo novo de notificacao: decida se o payload guarda arquivo (NOTIFICATION_KINDS_* em media-refs.ts)");
 
-  const v1 = read("supabase/migrations/202610200001_communication_v1.sql");
-  const banco = /create table if not exists public\.notifications \([\s\S]*?kind text not null check \(kind in \(([^)]+)\)\)/.exec(v1)?.[1] ?? "";
+  // O check do kind de hoje e o notifications_kind_v4 da 202610280001 (trocou o da 202610200001 pelo kind 'webinar').
+  const v4 = read("supabase/migrations/202610280001_webinars_v1.sql");
+  const banco = /add constraint notifications_kind_v4\s+check \(kind in \(([^)]+)\)\)/.exec(v4)?.[1] ?? "";
   assert.deepEqual([...banco.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(), decididos);
 });
 

@@ -157,6 +157,8 @@ test("titulo da barra do celular: area ou tela interna", () => {
   assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos"), "Comunicação");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos"), "Comunicação");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos/novo?tipo=popup"), "Novo modelo");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/webinarios/novo?tipo=gravada"), "Novo webinário");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/webinarios/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do webinario");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do aviso");
   assert.equal(getAdminMobileTitle("/admin/comunidade/denuncias"), "Comunidade");
   assert.equal(getAdminMobileTitle("/admin/configuracoes"), "Configurações");

@@ -23,6 +23,8 @@ import {
 } from "./audience-model";
 import { pageKeyOfHref, pageKeyOfTarget } from "../member-area/page-visit-model";
 import { computeExpiresAt, validityDurationLabel } from "./message-meta";
+import { saoPauloDayBounds } from "./sao-paulo-day";
+import { FLOW_ROW_SETTLE_MS } from "./flow-row-settle";
 
 /** Limites fixos (aparecem no editor como texto, nunca como campo; docs/23 e docs/17 §1.8.1). */
 export const FLOW_LIMITS = {
@@ -61,8 +63,8 @@ export const FLOW_LIMITS = {
   goalSweepPerSlot: 1_000,
   /** O RPC de aplicacao para de pegar tarefas depois disto (o SQL tem os mesmos 10 s). */
   applyStatementMs: 10_000,
-  /** Folga de inbox.ts wasVisibleAt para linhas de fluxo (maior que applyStatementMs). */
-  flowRowSettleMs: 15_000
+  /** Folga de inbox.ts wasVisibleAt para linhas de fluxo (maior que applyStatementMs; mora em flow-row-settle.ts). */
+  flowRowSettleMs: FLOW_ROW_SETTLE_MS
 } as const;
 
 /* ------------------------------------------------------------------------------------------------
@@ -204,9 +206,6 @@ export type FollowUp = {
  * ---------------------------------------------------------------------------------------------- */
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 86_400_000;
-/** Sao Paulo em UTC-3 fixo, sem horario de verao (como campaign-model.ts). */
-const SAO_PAULO_OFFSET_MS = 3 * 60 * MINUTE_MS;
 const POLL_MS = FLOW_LIMITS.pollMinutes * MINUTE_MS;
 /** "Ficar no sino" padrao (90 dias), quando o conteudo nao diz outra coisa. */
 const DEFAULT_VALIDITY_MINUTES = 129_600;
@@ -241,12 +240,11 @@ export function nextPollAt(now: number): number {
   return Math.floor(now / POLL_MS) * POLL_MS + POLL_MS;
 }
 
-/** Comeco do dia de Sao Paulo (UTC-3 fixo, como campaign-model.ts) e do dia seguinte. */
-export function saoPauloDayBounds(now: number): { nextStart: number; start: number } {
-  const start = Math.floor((now - SAO_PAULO_OFFSET_MS) / DAY_MS) * DAY_MS + SAO_PAULO_OFFSET_MS;
-
-  return { nextStart: start + DAY_MS, start };
-}
+/**
+ * Comeco do dia de Sao Paulo (UTC-3 fixo, como campaign-model.ts) e do dia seguinte. Mora em sao-paulo-day.ts
+ * (o "hoje" da regra "Ganhou acesso recentemente" usa o mesmo); reexportado aqui para quem ja importava daqui.
+ */
+export { saoPauloDayBounds };
 
 /* ------------------------------------------------------------------------------------------------
  * Arvore: filhos, caminho e regras

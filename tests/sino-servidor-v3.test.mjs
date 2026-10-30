@@ -767,3 +767,46 @@ test("as quatro rotas de escrita respondem 429 'Muitas tentativas. Espere um pou
   }
   assert.equal((await post(hideRoute, ID, { hidden: true })).status, 429);
 });
+
+test("live (kind webinar, docs/30 D27): titulo, texto e link vem da propria linha, o icone pelo tipo do payload, sem botao, reacoes, enquete nem resposta; link que nao vale some", async () => {
+  const live = (extra) =>
+    itemDaPagina({
+      body: "Amanhã às 20:00: Live de agentes. Sua vaga está garantida.",
+      campaign: null,
+      campaign_id: null,
+      href: "/webinarios/live-de-agentes",
+      kind: "webinar",
+      payload: { kind: "h24", sessionId: idDe(7), webinarId: idDe(8) },
+      title: "Lembrete da live",
+      ...extra
+    });
+  actionStubs.db = pagina([
+    live({ id: idDe(1) }),
+    live({ body: "Começou agora: Live de agentes. Entrar.", id: idDe(2), payload: { kind: "started", sessionId: idDe(7), webinarId: idDe(8) }, title: "Começou agora" }),
+    live({ id: idDe(3), payload: { kind: "cancelled" }, title: "Live cancelada" }),
+    live({ href: "javascript:alert(1)", id: idDe(4), title: "  " }),
+    live({ id: idDe(5), payload: { kind: "answer", sessionId: idDe(7), webinarId: idDe(8) }, title: "A equipe respondeu" })
+  ]);
+
+  const { items } = await inbox.listNotifications({ now: AGORA, userId: ALUNA });
+
+  assert.deepEqual(
+    items.map((item) => [item.kind, item.title, item.href, item.icon]),
+    [
+      ["webinar", "Lembrete da live", "/webinarios/live-de-agentes", { color: "white", id: "calendar" }],
+      ["webinar", "Começou agora", "/webinarios/live-de-agentes", { color: "red", id: "live" }],
+      ["webinar", "Live cancelada", "/webinarios/live-de-agentes", { color: "amber", id: "alert" }],
+      ["webinar", "Lembrete da live", null, { color: "white", id: "calendar" }],
+      ["webinar", "A equipe respondeu", "/webinarios/live-de-agentes", { color: "green", id: "megaphone" }]
+    ]
+  );
+  assert.equal(items[0].body, "Amanhã às 20:00: Live de agentes. Sua vaga está garantida.");
+  assert.equal(items[1].body, "Começou agora: Live de agentes. Entrar.");
+  assert.ok(
+    items.every(
+      (item) =>
+        item.actor === null && item.cta === null && item.reactions === null && item.poll === null && item.response === null && item.audio === null && item.image === null && item.context === null && item.allowHide === true
+    ),
+    "a escola envia; nada de botao, reacao, enquete ou resposta; a lixeira sempre"
+  );
+});

@@ -18,6 +18,7 @@ import "server-only";
 
 import { allowHideOf } from "@/components/member/notifications/notifications-model";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { assertNoDbError, chunksOf, communicationsDb, CommunicationError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
@@ -225,6 +226,22 @@ function noticeSender(row: Pick<PageRow, "sender_on_team" | "sender_profile">): 
   };
 }
 
+/** Icone do aviso de live pelo tipo gravado no payload (docs/30 D27): no ar, cancelada ou o calendario dos lembretes. */
+function webinarNotificationIcon(payload: Record<string, unknown> | null) {
+  const kind = payloadText(payload, "kind");
+
+  if (kind === "started") {
+    return noticeIconOfColumns("live", "red");
+  }
+
+  // Fase 4c: a equipe respondeu a pergunta do aluno depois (notify.queueWebinarAnswerNotice).
+  if (kind === "answer") {
+    return noticeIconOfColumns("megaphone", "green");
+  }
+
+  return kind === "cancelled" ? noticeIconOfColumns("alert", "amber") : noticeIconOfColumns("calendar", "white");
+}
+
 /** Item do sino a partir da linha da pagina (null = aviso sem a campanha, que a regra do banco ja tira). */
 function toItem(row: PageRow, now: number): BellItem | null {
   const base = {
@@ -275,6 +292,27 @@ function toItem(row: PageRow, now: number): BellItem | null {
           ? { acceptLabel: campaign.accept_label ?? "Aceitar", declineLabel: campaign.decline_label ?? "Recusar", value: row.response }
           : null,
       title: campaign.title
+    };
+  }
+
+  if (row.kind === "webinar") {
+    // Lembrete ou aviso de live (docs/30 D27): titulo, texto e link vem da propria linha, que o servidor escreve; a
+    // escola envia; sem botao, reacoes, enquete nem resposta; o link e a pagina da live.
+    return {
+      ...base,
+      actor: null,
+      allowHide: true,
+      audio: null,
+      body: row.body ?? "",
+      context: null,
+      cta: null,
+      href: row.href && isSafeHeroCtaHref(row.href) ? row.href : null,
+      icon: webinarNotificationIcon(row.payload),
+      image: null,
+      poll: null,
+      reactions: null,
+      response: null,
+      title: row.title?.trim() || WEBINAR_COPY.sino.tituloLembrete
     };
   }
 

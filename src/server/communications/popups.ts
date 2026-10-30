@@ -36,8 +36,8 @@ import { noticeIconOfColumns } from "./message-meta";
 import { normalizePeaks, type PopupItem, type PopupsAnswer } from "./notification-model";
 import type { PopupDesign, PopupFontFace } from "./popup-design-model";
 import { parseStoredPopupDesign, popupDesignKindOf } from "./popup-design-router";
-import { freeDesignForStudent, type PopupFreeDesign } from "./popup-free-model";
-import { freeFirstHeading, freeFirstText, freeHeadingText } from "./popup-free-render";
+import { freeDesignForStudent, freeHideEndlessCountdowns, type PopupFreeDesign } from "./popup-free-model";
+import { freeFirstHeading, freeFirstText, freeHasCountdown, freeHeadingText } from "./popup-free-render";
 import {
   coversPage,
   decideShow,
@@ -182,7 +182,8 @@ async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
   const freeDesigns = rows.map((row) => {
     const freeDesign = stored.get(row.id)?.freeDesign ?? null;
 
-    return freeDesign ? freeDesignForStudent(freeDesign) : null;
+    // Contador ate o fim do pop-up num pop-up sem fim: escondido no aluno (L6f, C16).
+    return freeDesign ? freeHideEndlessCountdowns(freeDesignForStudent(freeDesign), Boolean(row.ends_at)) : null;
   });
   const fontIds = [...designs.flatMap((design) => design?.fonts ?? []), ...freeDesigns.flatMap((design) => design?.fonts ?? [])];
   let faces: PopupFontFace[] = [];
@@ -278,6 +279,8 @@ function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupIte
     // Design do pop-up (docs/26): so no Personalizado (o Padrão continua com o objeto de antes).
     ...(entry.design ? { design: entry.design, fonts: entry.fonts } : {}),
     ...(freeDesign ? { fonts: entry.fonts, freeDesign } : {}),
+    // Contador do Livre (L6f): o fim do pop-up vai junto so quando o design tem Contador (a resposta dos outros nao muda).
+    ...(freeDesign && freeHasCountdown(freeDesign) ? { endsAt: row.ends_at ? new Date(row.ends_at).toISOString() : null } : {}),
     audio:
       audioUrl && row.audio_duration_seconds
         ? { durationSeconds: row.audio_duration_seconds, mimeType: row.audio_mime, peaks: normalizePeaks(row.audio_peaks), url: audioUrl }

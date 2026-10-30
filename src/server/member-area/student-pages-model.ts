@@ -642,7 +642,7 @@ export function buildProfileDetails(input: {
   };
 }
 
-export const PROFILE_TABS = ["dados", "acessos", "seguranca"] as const;
+export const PROFILE_TABS = ["dados", "acessos", "seguranca", "privacidade"] as const;
 export type ProfileTab = (typeof PROFILE_TABS)[number];
 
 export function normalizeProfileTab(value: string | string[] | null | undefined): ProfileTab {

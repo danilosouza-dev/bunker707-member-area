@@ -25,6 +25,8 @@ import {
   FREE_BOX_DIR_OPTIONS,
   FREE_BOX_JUSTIFY_OPTIONS,
   FREE_BUTTON_ACTION_OPTIONS,
+  FREE_COUNTDOWN_UNITS_OPTIONS,
+  FREE_COUNTDOWN_UNTIL_OPTIONS,
   FREE_ICON_SIDE_OPTIONS,
   FREE_IMAGE_FIT_OPTIONS,
   FREE_INSPECTOR_COPY,
@@ -33,6 +35,10 @@ import {
   FREE_LINK_TARGET_OPTIONS,
   FREE_SHAPE_OPTIONS,
   freeButtonActionOf,
+  freeCountdownDefaultDate,
+  freeCountdownEndNote,
+  freeCountdownInstant,
+  freeCountdownLocalValue,
   freeErrorAt,
   freeFieldId,
   freeHintsOf,
@@ -49,7 +55,8 @@ import {
 // texto com "Outro estilo na seleção"; Selo: texto e icone; Botão principal: o campo do botao do aviso (o mesmo do
 // Personalizado, sem a chave); Botão: o que faz, texto, destino e onde abre, icone; Imagem: enviar/trocar/usar uma
 // do pop-up, descricao, como preenche e ponto de foco; Vídeo: enviar, capa, como preenche e ponto de foco; Ícone,
-// Linha, Espaço, Forma, Caixa, Links e Áudio.
+// Linha, Espaço, Forma, Caixa, Links, Áudio e Contador (L6f: até quando conta, o que mostra, os nomes, os dois-pontos e
+// o texto do fim).
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
@@ -129,6 +136,8 @@ export function FreeInspectorContent(props: FreeSectionProps) {
       return <BoxContent {...props} node={node} />;
     case "links":
       return <LinksContent {...props} node={node} />;
+    case "countdown":
+      return <CountdownContent {...props} node={node} />;
     case "audio":
       return (
         <p className="text-[13px] leading-5 text-[var(--text-secondary)] outline-none" id={freeFieldId(node.id, "audio")} tabIndex={-1}>
@@ -799,6 +808,102 @@ function LinksContent({ content, design, disabled, errors, node, onChange }: Of<
         unit={C.units.px}
         value={node.gap ?? 8}
       />
+    </div>
+  );
+}
+
+/**
+ * Contador (L6f, docs/27 §13.13): até quando conta (o fim do pop-up, com a data do card Quando, ou uma data no fuso
+ * deste computador), as casas que mostra, os nomes, os dois-pontos e o texto que aparece em zero. Fora do aviso comum
+ * (modelos), a nota do fim fica de fora (C18).
+ */
+function CountdownContent({ content, design, disabled, errors, node, onChange }: Of<"countdown">) {
+  const id = (field: string) => freeFieldId(node.id, field);
+  const until = node.until ?? { kind: "end" as const };
+  const endNote = until.kind === "end" ? freeCountdownEndNote(content.endsAt) : null;
+  const dateError = freeErrorAt(errors, `nodes.${node.id}.until.at`) ?? freeErrorAt(errors, `nodes.${node.id}.until`);
+  const endedError = freeErrorAt(errors, `nodes.${node.id}.ended`);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex min-w-0 flex-col gap-2" id={id("conta-ate")} tabIndex={-1}>
+        <PillField
+          disabled={disabled}
+          label={C.countdown.until}
+          name={`${id("conta-ate")}-opcoes`}
+          onChange={(kind) =>
+            onChange(
+              withFreeNodeFields(design, node.id, { until: kind === "end" ? undefined : { at: freeCountdownDefaultDate(Date.now()), kind: "date" } }),
+              "until"
+            )
+          }
+          options={FREE_COUNTDOWN_UNTIL_OPTIONS}
+          value={until.kind}
+        />
+        {endNote ? <FreeNote>{endNote}</FreeNote> : null}
+      </div>
+      {until.kind === "date" ? (
+        <AdminField error={dateError ?? undefined} hint={C.countdown.dateHint} id={id("data")} label={C.countdown.date}>
+          <Input
+            aria-describedby={fieldDescribedBy(id("data"), { error: dateError, hint: dateError ? undefined : C.countdown.dateHint })}
+            className={adminInputClass}
+            disabled={disabled}
+            id={id("data")}
+            onChange={(event) => {
+              const at = freeCountdownInstant(event.target.value);
+
+              if (at) {
+                onChange(withFreeNodeFields(design, node.id, { until: { at, kind: "date" } }), "until.at");
+              }
+            }}
+            type="datetime-local"
+            value={freeCountdownLocalValue(until.at)}
+          />
+        </AdminField>
+      ) : null}
+      <FreeChoiceField
+        error={freeErrorAt(errors, `nodes.${node.id}.units`)}
+        disabled={disabled}
+        label={C.countdown.units}
+        name={id("casas")}
+        onChange={(units) => onChange(withFreeNodeFields(design, node.id, { units: units === "dhms" ? undefined : units }))}
+        options={FREE_COUNTDOWN_UNITS_OPTIONS}
+        value={node.units ?? "dhms"}
+      />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <AdminSwitch
+          checked={node.labels !== false}
+          disabled={disabled}
+          id={id("nomes")}
+          label={C.countdown.labels}
+          onCheckedChange={(checked) => onChange(withFreeNodeFields(design, node.id, { labels: checked ? undefined : false }))}
+        />
+        <AdminSwitch
+          checked={node.separator === true}
+          disabled={disabled}
+          id={id("dois-pontos")}
+          label={C.countdown.separator}
+          onCheckedChange={(checked) => onChange(withFreeNodeFields(design, node.id, { separator: checked ? true : undefined }))}
+        />
+      </div>
+      <AdminField error={endedError ?? undefined} hint={C.countdown.endedNote} id={id("fim-texto")} label={C.countdown.ended}>
+        <Input
+          aria-describedby={fieldDescribedBy(id("fim-texto"), { error: endedError, hint: endedError ? undefined : C.countdown.endedNote })}
+          className={adminInputClass}
+          disabled={disabled}
+          id={id("fim-texto")}
+          maxLength={L.label}
+          onChange={(event) => {
+            const ended = event.target.value;
+
+            // "Encerrado" (o padrao) fica como digitado: a forma canonica tira ao salvar, sem esvaziar o campo no meio
+            // da palavra ("Encerrados").
+            onChange(withFreeNodeFields(design, node.id, { ended: ended.trim() === "" ? undefined : ended }), "ended");
+          }}
+          placeholder="Encerrado"
+          value={node.ended ?? ""}
+        />
+      </AdminField>
     </div>
   );
 }

@@ -14,6 +14,12 @@
 > publicar nem editar pop-ups "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao
 > de antes** (R1). Passos na secao 9.5.
 >
+> **Atualização de 29/10/2026 (renumerada em 30/10/2026):** a fase 4 dos webinários traz seis migrações, de
+> `202610300002` a `202610300007` (4a, 4b, 4c, 4e, 4f e os ajustes da revisão; a 4d não tem migração), numeradas
+> depois da `202610300001` do Quem pode por regras (seção 9.9) e aplicadas nessa ordem antes do merge na `dev`: o app
+> novo lê `webinar_sessions.jit` (`202610300005`) em toda leitura de sessão. **Aplicadas na nuvem de teste em 30/10/2026**, antes
+> do merge, pelo MCP e conferidas; na produção, nenhuma ainda. Passos, conferência e estado na seção 9.10.
+>
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
 > `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
@@ -452,3 +458,315 @@ anterior (`docs/20` §9).
 migracao antes de trocar o app (o indice trava as escritas em `student_events` pelos segundos da montagem). Antes de
 voltar para a imagem anterior, pausar os pop-ups "No primeiro acesso" e "Ao concluir um curso" (`docs/20` §9). Depois,
 uma rodada do `carga` com um pop-up de hora marcada (`docs/20` §12.1, `docs/29` R17).
+
+### 9.6 Webinarios v1: migracao `202610280001` aplicada na nuvem de teste (28/10/2026)
+
+A PR dos webinarios, fase 1 "Base: agenda, vaga garantida e lembretes" (`docs/30` §11, branch `claude/nifty-mendel-tx2kro`)
+traz `supabase/migrations/202610280001_webinars_v1.sql` (sha256 fixado na guarda `webinarios-migracao.guard`). As
+migracoes ate a `202610260001` nao mudam.
+
+Regra: **a 0028 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo mostra o
+aviso de migracao pendente em `/admin/comunicacao/webinarios`, a pagina `/webinarios` do aluno responde vazia, "Garantir
+vaga" responde 404 e o job `webinarios` do tick registra "migracao 202610280001 pendente" e termina; o resto do app segue.
+A migracao sozinha nao atrapalha o app de antes: cinco tabelas novas que ele nao le, o kind `webinar` que ele nunca grava
+(a funcao do sino so ganha um ramo), e a politica do historico que so tira do navegador um `entity_type` que ele nao usa.
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**: feito em 28/10/2026, pelo MCP do Supabase,
+`execute_sql`, **uma secao por chamada e na ordem do arquivo**, cada uma comecando com `set lock_timeout = '5s';`:
+1 `webinars` -> 2 `webinar_sessions` -> 3 `webinar_presenters` -> 4 `webinar_recordings` e a chave
+`webinar_sessions_recording_fk` -> 5 `webinar_registrations` -> 6 `notifications` (a troca do check do kind dentro do
+`do $$ ... if not exists`, a unica remocao, e a funcao `communication_visible_notifications` com o ramo do `webinar`)
+-> 7 o `alter policy "Students can create own events"` e o indice `student_events_webinar_idx` (69 linhas em
+`student_events`: instantaneo) -> 8 `webinar_report`. Nenhuma chamada travou; o MCP nao pediu confirmacao. A versao
+foi gravada com `insert into supabase_migrations.schema_migrations (version, name) values ('202610280001', 'webinars_v1')
+on conflict (version) do nothing;` e `list_migrations` mostra `202610280001`.
+
+Conferido depois de aplicar (as consultas do cabecalho da migracao): 5 tabelas `webinar%`, todas com RLS;
+`notifications_kind_v4` existe e e o unico check de kind; `webinar_report` existe, `authenticated` = false e
+`service_role` = true, e devolve 0 linhas para um id qualquer; a politica com `campaign` e `webinar`; o indice existe; 4
+gatilhos `set_webinar*_updated_at`. A idempotencia foi conferida la mesmo (a secao 1 e a 6 de novo: sem erro, nada muda).
+
+Se a migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so a
+secao que mudou) do mesmo jeito, e atualizar juntos este paragrafo e o hash da guarda.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
+app (o indice parcial trava as escritas em `student_events` pelos segundos da montagem). Jitsi e Jibri so entram na fase
+3 (`docs/30` §7), com ok do produtor no chat antes de qualquer servidor novo.
+
+### 9.7 Webinarios v2: migracao `202610290001` aplicada na nuvem de teste (29/10/2026)
+
+A mesma PR leva a fase 2 "Live gravada" (`docs/30` §11) com `supabase/migrations/202610290001_webinars_v2_chat.sql`
+(sha256 fixado na guarda `webinarios-v2.guard`). Regra igual a da 9.6: **antes do merge na `dev`**. Sem ela, a sala da
+Live gravada, o console e o relatorio mostram o aviso de migracao pendente; o resto do app segue.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: secoes 1 a 12 pelo MCP do Supabase, `execute_sql`, uma por chamada, na
+ordem do arquivo, cada uma com `set lock_timeout = '5s';` (nenhuma travou). A secao 13 (`prune_webinar_history`, os unicos
+`delete` do arquivo, e o agendamento `bunker707-webinar-prune` as 06:47 UTC) fez o MCP pedir confirmacao, e a janela
+expirou tres vezes (ela espera 60 s e nao apareceu para o produtor): o produtor rodou no SQL Editor, num arquivo so, a 13, a
+14 (as permissoes das funcoes so para a `service_role`) e o registro da versao (`insert into
+supabase_migrations.schema_migrations (version, name) values ('202610290001', 'webinars_v2_chat') on conflict (version)
+do nothing;`). `list_migrations` mostra `202610290001`. Proxima vez que uma secao tiver `delete`: mandar direto o arquivo
+para o SQL Editor.
+
+### 9.8 Webinarios v3: migracao `202610290002` antes do merge (29/10/2026)
+
+A fase 3 "Sala ao vivo" (`docs/30` §11) vem na mesma PR com `supabase/migrations/202610290002_webinars_v3_live.sql`
+(sha256 `b48d8504a243ba8f...`, fixado na guarda `webinarios-v3.guard`, que tambem confere byte a byte as 54 migracoes de
+antes). Regra igual a da 9.6: **antes do merge na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo pede as
+colunas novas de `webinar_sessions` em toda leitura de sessao: as paginas de webinario do aluno e do admin mostram o
+aviso de migracao pendente e o job `webinar-recordings` registra a migracao pendente e termina; o resto do app segue. A
+migracao sozinha nao atrapalha o app de antes: as colunas novas tem padrao (`recorder_status = 'none'`,
+`room_locked = false`, o resto nulo) e o check `webinar_sessions_live_only_v3` aceita toda linha que o app de antes grava;
+tres tabelas e uma funcao que ele nao le.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: pelo MCP do Supabase, `execute_sql`, **uma secao por chamada e na ordem
+do arquivo**, cada uma comecando com `set lock_timeout = '5s';`: 1 `webinar_sessions` (as sete colunas, os tres checks
+dentro de `do $$ ... if not exists`, o indice unico parcial de `room_name` e os comentarios) -> 2 `webinar_recordings`
+(`checked_at`, `purged_at` e os dois indices parciais) -> 3 `webinar_session_bans` e `webinar_user_bans` (RLS, revoke de
+`anon` e `authenticated`, grant ao `service_role`) -> 4 `webinar_recording_events` (idem, e os tres indices) -> 5 a
+funcao `webinar_mark_recording_anchor` (com o revoke e o grant so ao `service_role`) -> 6 os indices
+`webinar_sessions_recorder_idx` e `webinar_session_bans_session_idx`. Nenhuma secao tem `delete`, `drop` nem politica (a
+5 so define a funcao; os `update` dela rodam quando o app chama). Se o MCP pedir confirmacao e a janela expirar (como na
+9.7), mandar o arquivo inteiro para o SQL Editor (e idempotente). Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610290002', 'webinars_v3_live') on conflict
+(version) do nothing;` e conferir `list_migrations`.
+
+Conferencia depois de aplicar (as consultas do cabecalho da migracao):
+
+```sql
+select column_name from information_schema.columns where table_name = 'webinar_sessions'
+  and column_name in ('room_name', 'recorder_status', 'recorder_requested_at', 'recorder_release_requested_at',
+    'recorder_alerted_at', 'recording_requested_at', 'room_locked'); -- 7 linhas
+select column_name from information_schema.columns where table_name = 'webinar_recordings'
+  and column_name in ('checked_at', 'purged_at'); -- 2 linhas
+select count(*) from pg_tables where schemaname = 'public'
+  and tablename in ('webinar_session_bans', 'webinar_user_bans', 'webinar_recording_events'); -- 3
+select indexname from pg_indexes where schemaname = 'public' and indexname in ('webinar_sessions_room_name_idx',
+  'webinar_recording_events_unique_idx', 'webinar_session_bans_session_idx', 'webinar_sessions_recorder_idx'); -- 4 linhas
+select proname from pg_proc where proname = 'webinar_mark_recording_anchor'; -- 1 linha
+select public.webinar_mark_recording_anchor(gen_random_uuid()); -- erro P0002 (sessao inexistente)
+```
+
+E mais duas, das regras de acesso: `select relrowsecurity from pg_class where relname in ('webinar_session_bans',
+'webinar_user_bans', 'webinar_recording_events')` (3 x `true`) e
+`select has_function_privilege('authenticated', 'public.webinar_mark_recording_anchor(uuid, timestamptz)', 'execute')`
+(`false`; `service_role`: `true`). A idempotencia se confere rodando a secao 1 de novo (sem erro, nada muda). Estado em
+29/10/2026: aplicada na nuvem de teste antes do merge da PR da fase 3. As seis secoes da 0002 e a secao 2 da 0003 foram pelo
+MCP, uma por chamada, sem travar. A secao 1 da 0003 (`drop index` da chave antiga) fez o MCP pedir confirmacao e a janela
+expirou, entao o produtor rodou no SQL Editor as secoes 1 e 3 da 0003 e o registro das duas versoes. `list_migrations`
+mostra `202610290002` e `202610290003`. Antes disso, o arquivo rodou duas vezes num Postgres 16 limpo e duas no banco de
+ensaio com o rascunho.
+
+Se a migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so a
+secao que mudou) do mesmo jeito, e atualizar juntos este paragrafo e o hash da guarda.
+
+**A 0003 da revisao (29/10/2026)**: `supabase/migrations/202610290003_webinars_v3_ajustes.sql` vem na mesma PR, depois da
+0002 (as duas sao aplicadas juntas, nesta ordem; a 0002 nao muda mais). Tres secoes, pelo MCP uma por chamada (cada uma com `set lock_timeout = '5s';`)
+ou o arquivo inteiro no SQL Editor (idempotente): 1 `webinar_recording_events.machine_requested_at` e a chave unica
+nova (o indice novo nasce antes de o velho sair) -> 2 `webinar_sessions.browser_recording_at` e o check -> 3 a funcao
+`webinar_live_offset_from_anchor` e os quatro triggers. Tambem antes do merge na `dev`: o app novo pede
+`browser_recording_at` em toda leitura de sessao (sem ela, o aviso de migracao pendente aponta a 0003) e o webhook do
+gravador grava `machine_requested_at`. Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610290003', 'webinars_v3_ajustes') on
+conflict (version) do nothing;`, e conferir com as consultas do cabecalho dela (a coluna, so o indice
+`webinar_recording_events_machine_unique_idx`, a coluna da sessao e os 4 triggers). Conferida num Postgres 16 com a 0002
+(duas vezes seguidas, e a escrita em voo esperando a ancora e gravando o offset pela ancora).
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de trocar o
+app. Os servidores C (Jitsi) e D (gravador por hora) seguem com o ok do produtor no chat antes de qualquer criacao
+(`docs/20` §8B); sem `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` no app, a sala ao vivo diz "em breve" e nada
+quebra. Estado em 29/10/2026: o C esta no ar e atende a Vercel de teste (`deploy-meet` da `dev`, `secrets-meet`, e os dois
+envs na Vercel em Production e Preview); para a producao usar a sala, o `.env` do servidor A recebe o mesmo
+`WEBINAR_JWT_SECRET` por `secrets-membros` e o `ROOM_GUARD_URL` do C passa para `membros.<dominio>` (`docs/20` §8B.3).
+
+### 9.9 Quem pode por regras: migracao `202610300001` aplicada na nuvem de teste (30/10/2026)
+
+Os ajustes do teste da live (`docs/30` §1.1, D41 e D42) vem com `supabase/migrations/202610300001_webinars_quem_pode_regras.sql`:
+1 `webinars.audience_restricts` (o modo **Quem tem o produto e esta no segmento** grava `access_mode = 'product'` + a
+coluna, sem mexer no check da 202610280001) e 2 a funcao `communication_webinar_facts(p_user_ids, p_after, p_limit)`
+(as lives de cada aluno para as regras "Participacao em lives" e a ancora; so `service_role`). **Antes do merge na
+`dev`**: o app novo le `audience_restricts` junto das outras colunas do webinario; sem ela, as telas de webinario mostram
+o aviso de migracao pendente (`WEBINARS_MIGRATION = "202610300001"`; com a fase 4, que vem depois, a `202610300007`, §9.10). A migracao sozinha nao atrapalha o app de antes (a
+coluna tem padrao `false`; a funcao ele nao chama).
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: aplicada em 30/10/2026 pelo MCP, uma secao por chamada com
+`set lock_timeout = '5s';`. A secao 2 comeca por um bloco `do` que apaga versoes anteriores da propria funcao; como
+nenhuma existia na nuvem de teste (`to_regprocedure` nulo nas duas assinaturas), rodou so o `create or replace`, o
+comentario, o `revoke` e o `grant` (o bloco seria um nada a fazer). Depois:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202610300001', 'webinars_quem_pode_regras')
+on conflict (version) do nothing;`. Conferido: `audience_restricts` boolean, nao nulo, padrao `false`; a funcao em
+plpgsql, `security invoker`, retorno `TABLE(user_id uuid, registered uuid[], attended uuid[])`; `authenticated` sem
+`execute` e `service_role` com; `select count(*) from public.communication_webinar_facts()` roda; o check
+`webinars_access_mode_check` com os quatro modos de antes. Se a migracao mudar antes do merge, aplicar de novo a secao
+que mudou do mesmo jeito.
+
+### 9.10 Webinarios v4: migracoes `202610300002` a `202610300007` aplicadas na nuvem de teste (30/10/2026)
+
+A fase 4 "Paineis e Hot Webinar" (`docs/30` §11) vem com seis migracoes: uma por parte (a 4d, Sala Live vertical, nao
+tem dado novo nem migracao) e a dos ajustes da revisao. Todas so acrescentam, sao idempotentes e tem a guarda propria,
+que fixa o sha256 do arquivo e confere byte a byte, pelo hash acumulado, todas as de antes
+(`tests/webinarios-v4a.guard.test.mjs` a `-v4f.guard` e `-v4-ajustes.guard`). Elas vem **depois** da `202610300001`
+(§9.9, ja na nuvem de teste), na ordem e sem buraco. Foram escritas como `202610290004` a `202610290010` (sem a 0007) e
+renumeradas em 30/10/2026, na integracao com a `dev`, antes de qualquer aplicacao: nenhum banco tem as versoes antigas
+em `schema_migrations`, e a renumeracao so trocou nomes e comentarios (os hashes das guardas mudaram junto). Nenhuma
+mexe no que a `202610300001` cria (`webinars.audience_restricts` e `communication_webinar_facts`). As colunas, tabelas,
+indices, checks e funcoes tem outros nomes, e as funcoes que elas recriam (`webinar_report`, `webinar_panel`,
+`webinar_chat_window`, `webinar_close_session`) nao foram tocadas pela `202610290002`, pela `202610290003` nem pela
+`202610300001`.
+
+| Ordem | Arquivo | O que faz | Secoes | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202610300002_webinars_v4a_paineis.sql` | os paineis "Lives ao vivo" e "Lives gravadas" e os numeros da lista: a funcao `webinar_panel` | 3: 1 o indice `webinar_sessions_kind_scheduled_idx` -> 2 a funcao `webinar_panel` -> 3 as permissoes | `webinars_v4a_paineis` |
+| 2 | `202610300003_webinars_v4b_ofertas.sql` | a Oferta A/B/C/D com a conversao e a receita, o follow-up por segmento e a Simulacao completa | 9: 1 `webhook_events.amount_cents` / `currency` -> 2 `webinar_offers` e `webinar_offer_variants` -> 3 `webinar_offer_displays` e `webinar_offer_clicks` -> 4 as colunas da Simulacao em `webinar_sessions` -> 5 `webinar_offer_variant` e `webinar_offer_conversions` -> 6 `webinar_follow_up_facts` -> 7 `webinar_report` recriada -> 8 `webinar_panel` recriada -> 9 as permissoes | `webinars_v4b_ofertas` |
+| 3 | `202610300004_webinars_v4c_assistente.sql` | o Assistente de IA no chat, os atendentes humanos e o modo hibrido | 7: 1 `webinars.assistant_settings` e `webinar_sessions.assistant_reply_all` -> 2 `webinar_assistant_knowledge` -> 3 `webinar_attendants` -> 4 as colunas de atendimento em `webinar_questions` e `webinar_chat_messages` -> 5 `webinar_ai_requests` -> 6 `webinar_report` recriada -> 7 as permissoes | `webinars_v4c_assistente` |
+| 4 | `202610300005_webinars_v4e_just_in_time.sql` | o "Comeca quando voce entra": a sessao `jit` de cada horario e a turma do dia no chat | 4: 1 `webinars.jit_settings` -> 2 `webinar_sessions.jit` e o indice unico do horario -> 3 `webinar_chat_window` recriada -> 4 as permissoes | `webinars_v4e_just_in_time` |
+| 5 | `202610300006_webinars_v4f_traducao.sql` | a traducao do chat e do roteiro em PT, EN e ES, guardada por texto e idioma | 3: 1 `webinar_viewer_prefs` -> 2 `webinar_text_translations` -> 3 `webinar_chat_messages.language` | `webinars_v4f_traducao` |
+| 6 | `202610300007_webinars_v4_ajustes.sql` | os ajustes da revisao: quem viu a oferta congelado no fim, a conversao pelo ultimo clique e a venda reembolsada fora | 6: 1 `webinar_offer_seen` (e o congelado das sessoes ja encerradas) -> 2 `webinar_close_session` recriada -> 3 `webinar_offer_conversions` recriada -> 4 `webinar_follow_up_facts` recriada -> 5 `webinar_report` e `webinar_panel` recriadas -> 6 as permissoes | `webinars_v4_ajustes` |
+
+**Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): o app novo le `webinar_sessions.jit` (da
+`202610300005`) em toda leitura de sessao, alem de `webinars.audience_restricts` (da `202610300001`) em toda leitura de
+webinario. Sem as migracoes, as paginas de webinario do aluno e do admin mostram o aviso de migracao pendente; o resto do
+app segue. O aviso aponta `WEBINARS_MIGRATION = "202610300007"`, a mais nova: aplicar ate ela inclui a `202610300005`, e
+os numeros da revisao (D57 e D58 do `docs/30`) so saem com a `202610300007`. Cada parte tem a propria constante em
+`src/server/webinars/db.ts` (`WEBINARS_PANELS_MIGRATION` `202610300002`, `WEBINARS_OFFERS_MIGRATION` `202610300003`,
+`WEBINARS_ASSISTANT_MIGRATION` `202610300004`, `WEBINARS_JIT_MIGRATION` `202610300005` e
+`WEBINARS_TRANSLATION_MIGRATION` `202610300006`), e o aviso de cada tela aponta a que falta. Os jobs novos
+(`webinar-simulation-summaries` e `webinar-offer-conversions`) registram a migracao pendente e terminam sem erro. As
+acoes do follow-up da regra "Participacao em lives" (viu o replay, viu o card de compra, saiu antes dele, clicou e nao
+comprou, comprou pelo card) leem `webinar_follow_up_facts`; sem ela, essas acoes nunca combinam e ficam registradas num
+log. As migracoes sozinhas nao atrapalham o app de antes: as colunas novas tem padrao ou sao nulas, ele nao le as
+tabelas e funcoes novas, e `webinar_report`, `webinar_panel`, `webinar_chat_window` e `webinar_close_session` mantem as
+assinaturas, com o corpo de antes dentro do novo.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: pelo MCP do Supabase, `execute_sql`, **uma secao por chamada, na ordem
+do arquivo e arquivo por arquivo na ordem da tabela**, cada chamada comecando com `set lock_timeout = '5s';`.
+
+**Nenhuma das seis tem `drop`, `delete`, `truncate` nem politica** (as guardas conferem), entao nenhuma secao deveria
+fazer o MCP pedir confirmacao. Tres coisas parecem `delete` mas nao sao:
+- os `grant select, insert, update, delete ... to service_role` das tabelas novas, que sao so permissao (secoes 2 e 3 da
+  `202610300003`, 2, 3 e 5 da `202610300004`, 1 e 2 da `202610300006` e 1 da `202610300007`);
+- os `on delete cascade` / `on delete set null` das chaves;
+- o `insert ... on conflict do nothing` da secao 1 da `202610300007`: o congelado das sessoes ja encerradas pelas
+  amostras. Na nuvem de teste `webinar_offer_displays` nasce vazia na `202610300003`, entao insere zero linhas.
+
+Se o MCP pedir confirmacao e a janela expirar (como na 9.7 e na 9.8), mandar o arquivo inteiro para o SQL Editor, um de
+cada vez e na ordem (sao idempotentes).
+
+Estas secoes tocam tabelas que ja tem linhas (pequenas na nuvem de teste):
+- `webhook_events`: secao 1 da `202610300003`, duas colunas nulas e dois checks validados na tabela;
+- `webinar_sessions`: secao 4 da `202610300003`, que a reescreve inteira (a `simulation_seed` tem padrao `random()`), e
+  secao 2 da `202610300005`, uma coluna com padrao, um check e o indice unico parcial;
+- `webinar_questions` e `webinar_chat_messages`: secao 4 da `202610300004`, colunas nulas, um check e dois indices
+  parciais;
+- `webinar_chat_messages`: secao 3 da `202610300006`, uma coluna e o check.
+
+Se uma delas travar no `lock_timeout`, repetir a secao. Depois de cada arquivo, gravar a versao dele (a linha
+correspondente; as seis de uma vez no fim tambem servem):
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values
+  ('202610300002', 'webinars_v4a_paineis'),
+  ('202610300003', 'webinars_v4b_ofertas'),
+  ('202610300004', 'webinars_v4c_assistente'),
+  ('202610300005', 'webinars_v4e_just_in_time'),
+  ('202610300006', 'webinars_v4f_traducao'),
+  ('202610300007', 'webinars_v4_ajustes')
+on conflict (version) do nothing;
+```
+
+Depois, conferir `list_migrations`: as seis versoes, de `202610300002` a `202610300007`, logo depois da `202610300001`,
+e nenhuma `202610290004` a `202610290010`.
+
+Conferencia depois de aplicar (as consultas do cabecalho de cada migracao):
+
+```sql
+-- 202610300002
+select indexname from pg_indexes where schemaname = 'public' and indexname = 'webinar_sessions_kind_scheduled_idx'; -- 1 linha
+select pg_get_function_identity_arguments('public.webinar_panel'::regproc); -- p_kind text, p_start timestamp with time zone, p_end timestamp with time zone, p_session_ids uuid[]
+select has_function_privilege('authenticated', 'public.webinar_panel(text, timestamptz, timestamptz, uuid[])', 'execute'); -- false
+select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
+-- 202610300003
+select column_name from information_schema.columns where table_name = 'webhook_events' and column_name in ('amount_cents', 'currency'); -- 2 linhas
+select table_name from information_schema.tables where table_schema = 'public' and table_name like 'webinar_offer%' order by 1; -- 4 linhas (5 depois da 202610300007)
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and (column_name like 'simulat%' or column_name = 'simulation_seed') order by 1; -- 8 linhas (3 da fase 2 + 5)
+select proname from pg_proc where proname in ('webinar_offer_variant', 'webinar_offer_conversions', 'webinar_follow_up_facts') order by 1; -- 3 linhas
+select has_function_privilege('authenticated', 'public.webinar_offer_conversions(timestamptz, integer)', 'execute'); -- false
+select count(*) from public.webinar_panel('simulated', now() - interval '30 days', now()); -- roda sem erro
+-- 202610300004
+select column_name from information_schema.columns where table_name = 'webinars' and column_name = 'assistant_settings'; -- 1 linha
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and column_name = 'assistant_reply_all'; -- 1 linha
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_assistant_knowledge', 'webinar_attendants', 'webinar_ai_requests') order by 1; -- 3 linhas
+select column_name from information_schema.columns where table_name = 'webinar_questions'
+  and column_name in ('assigned_to', 'assigned_at', 'answer_source', 'handoff_requested_at'); -- 4 linhas
+select column_name from information_schema.columns where table_name = 'webinar_chat_messages'
+  and column_name in ('assigned_to', 'assigned_at', 'handoff_requested_at', 'edited_at', 'edited_by'); -- 5 linhas
+select count(*) from public.webinar_report(gen_random_uuid()); -- 0
+-- 202610300005
+select column_name from information_schema.columns where table_name = 'webinars' and column_name = 'jit_settings'; -- 1 linha
+select column_name from information_schema.columns where table_name = 'webinar_sessions' and column_name = 'jit'; -- 1 linha
+select indexname from pg_indexes where schemaname = 'public' and indexname = 'webinar_sessions_jit_slot_idx'; -- 1 linha
+select count(*) from public.webinar_chat_window(gen_random_uuid(), 0, 120000, null); -- 0
+-- 202610300006
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_viewer_prefs', 'webinar_text_translations') order by 1; -- 2 linhas
+select column_name from information_schema.columns where table_name = 'webinar_chat_messages' and column_name = 'language'; -- 1 linha
+select has_table_privilege('authenticated', 'public.webinar_text_translations', 'select'); -- false
+-- 202610300007
+select table_name from information_schema.tables where table_schema = 'public' and table_name = 'webinar_offer_seen'; -- 1 linha
+select relrowsecurity from pg_class where relname = 'webinar_offer_seen'; -- true
+select has_table_privilege('authenticated', 'public.webinar_offer_seen', 'select'); -- false
+select pg_get_function_identity_arguments('public.webinar_close_session'::regproc); -- p_session_id uuid, p_now timestamp with time zone
+select count(*) from public.webinar_report(gen_random_uuid()); -- 0
+select count(*) from public.webinar_panel('all', now() - interval '30 days', now()); -- roda sem erro
+select public.webinar_offer_conversions(now(), 1); -- roda sem erro (0 sem venda nova)
+-- (0003, 0004 e 0007) sessao sem Oferta e sem Assistente: nenhuma linha offer nem ai (na nuvem de teste, logo depois
+-- de aplicar, nenhuma sessao tem oferta nem resposta do Assistente)
+select count(*) from public.webinar_report((select id from public.webinar_sessions order by scheduled_at desc limit 1))
+  where metric in ('offer', 'offer_revenue', 'ai'); -- 0
+```
+
+E das regras de acesso: `select relname, relrowsecurity from pg_class where relname in ('webinar_offers',
+'webinar_offer_variants', 'webinar_offer_displays', 'webinar_offer_clicks', 'webinar_assistant_knowledge',
+'webinar_attendants', 'webinar_ai_requests', 'webinar_viewer_prefs', 'webinar_text_translations', 'webinar_offer_seen')`
+(10 x `true`). A idempotencia se confere rodando de novo a secao 1 de qualquer um dos arquivos (sem erro, nada muda). E
+a `202610300001` continua igual: `select count(*) from public.communication_webinar_facts()` roda e
+`audience_restricts` segue boolean, nao nulo, padrao `false`.
+
+Estado em 30/10/2026: **aplicadas na nuvem de teste** (`hrtnqcznhdmodjikvddm`), antes do merge, pelo MCP: as 32
+secoes uma por chamada, na ordem da tabela, cada uma com `set lock_timeout = '5s';` (nenhuma travou nem pediu
+confirmacao), e a versao de cada arquivo gravada logo depois dele. Conferido: `list_migrations` com as seis logo depois
+da `202610300001` e nenhuma `202610290004` a `202610290010`; todas as consultas acima como esperado (RLS 10 x `true`,
+nenhum `grant` de `anon` ou `authenticated` nas tabelas novas, nenhum `execute` de `authenticated` nas funcoes
+`webinar*`, `webinar_panel` e `webinar_report` rodando); o corpo de cada funcao recriada igual ao do arquivo (md5 de
+`prosrc`, conferido depois de cada secao); e uma impressao das 31 tabelas e 11 funcoes `webinar*` (colunas, checks,
+indices, RLS e corpos) igual a de um Postgres 16 com as 63 migracoes do repositorio, menos o corpo de
+`webinar_open_session` (da fase 3, que a fase 4 nao toca), que na nuvem nao tem os comentarios `--` e ja diferia so
+nisso antes. Antes de aplicar, as 32 secoes foram ensaiadas uma a uma num Postgres 16 com dados como os da nuvem (o
+esquema final igual ao do banco limpo, e as seis de novo sem mudar nada). Na producao (Hetzner), nenhuma ainda: vao
+com a promocao da fase 4 para a `main` (secao 8). Uma versao anterior desta secao dizia que o produtor ja tinha rodado
+o SQL das cinco primeiras na nuvem de teste; isso nao aconteceu. O que tambem foi conferido, num Postgres 16 local, com os
+dados dos testes de integracao e `rollback`: os numeros de `webinar_panel`, `webinar_report`,
+`webinar_offer_conversions`, `webinar_follow_up_facts` e `webinar_chat_window` (a turma do dia), e as tabelas do
+Assistente e da traducao. A `202610300007` rodou duas vezes seguidas e com os casos da revisao em transacao desfeita.
+
+Aplicadas, as seis nao mudam mais: uma correcao vai numa migracao nova, depois da `202610300007` (a guarda de cada uma
+prende o hash do arquivo e o acumulado das anteriores).
+
+Mudanca de 30/10/2026 (segunda revisao da integracao, antes de qualquer aplicacao): em `webinar_report`, as linhas da
+Oferta sem grupo (`offer` `seen`, `clicks` e `purchases`) e as cinco do Assistente (`ai`) trocaram `where exists (...)`
+por `having exists (...)` na `202610300003` (secao 7), na `202610300004` (secao 6) e na `202610300007` (secao 5): um
+agregado sem grupo devolve uma linha mesmo com o `where` falso, entao toda sessao recebia oito linhas de zeros e o
+relatorio mostrava os blocos Oferta e Assistente em sessoes sem nenhum dos dois. So o corpo de `webinar_report` mudou
+(nenhuma tabela, coluna nem permissao); as guardas da `202610300003`, da `202610300004` e da `202610300007` ganharam o
+hash novo e as da `202610300004` a `202610300007` o hash acumulado novo. Num banco de ensaio que ja tenha as seis, basta
+rodar de novo a secao 5 da `202610300007` (a ultima a recriar `webinar_report`); o `create or replace` e idempotente.
+
+**Ambiente**: o Assistente e a traducao ficam desligados sem `WEBINAR_ASSISTANT_ENABLED=on` e
+`WEBINAR_TRANSLATION_ENABLED=on` (variaveis do servidor, nunca `NEXT_PUBLIC_*`) e sem uma conexao de IA ativa em
+Configuracoes > IA. Com as migracoes aplicadas e as variaveis ausentes, o card Assistente diz que ele nao esta ligado
+neste ambiente, a sala mostra o chat como foi escrito (a escolha de idioma diz que a traducao nao esta ligada) e nada
+quebra.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes, na ordem dos
+nomes (a `202610300001` e depois as seis), antes de trocar o app. A fase 4 nao cria servidor novo.

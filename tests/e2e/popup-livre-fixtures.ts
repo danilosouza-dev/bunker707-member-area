@@ -91,6 +91,8 @@ export type PopUpLivreDeTeste = {
   /** Segundos depois de abrir a pagina. Padrao 1. */
   depoisDe?: number;
   design: PopupFreeDesignInput;
+  /** Quando o pop-up termina (ISO); padrao: sem fim. O Contador ate o fim do pop-up precisa dele para publicar. */
+  fim?: string;
   titulo: string;
 };
 
@@ -113,6 +115,7 @@ export async function publicarPopUpLivre(browser: Browser, input: PopUpLivreDeTe
         cta_href: botao?.href ?? null,
         cta_label: botao?.label ?? null,
         cta_target: botao ? "same_tab" : null,
+        ends_at: input.fim ?? null,
         kind: "popup",
         popup_close: "any",
         popup_delay_seconds: input.depoisDe ?? 1,

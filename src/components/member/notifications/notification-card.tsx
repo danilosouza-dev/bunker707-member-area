@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, AtSign, Check, ChevronRight, ExternalLink, MessageCircle, type LucideIcon } from "lucide-react";
+import { ArrowRight, AtSign, CalendarClock, Check, ChevronRight, ExternalLink, MessageCircle, Radio, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
@@ -40,6 +40,10 @@ import {
 // pessoa da equipe (foto ou iniciais) ou a escola (o Icone da escola de Marca); o aviso nao tem selo, so
 // os comentarios.
 //
+// Live (docs/30 D27): lembrete, "Comecou agora", hora nova ou cancelamento; a escola envia (o circulo da escola com
+// o relogio no canto, ou o "ao vivo" no "Comecou agora"), o titulo em negrito, o texto e a hora; o cartao inteiro
+// leva para a pagina da live e o link de verdade e o titulo; sem botao, reacoes, enquete nem resposta (WebinarCard).
+//
 // Ajustes da v3a (o produtor testou): a linha de baixo so com Reagir e a lixeira saiu. Reagir (ou a
 // pilula com a reacao) fica no fim da linha dos botoes (Acessar, ou Aceitar/Recusar) ou, sem ela, no fim
 // da linha de quem envia; o seletor abre na linha logo abaixo. Excluir foi para um botao pequeno no canto
@@ -71,6 +75,23 @@ function KindBadge({ kind }: { kind: CommentKind }) {
       className={cn(
         "absolute -bottom-1 -right-1 grid size-[18px] place-items-center rounded-full border-2 border-[#1b1b1b]",
         badge.className
+      )}
+    >
+      <Icon className="size-2.5" strokeWidth={2.8} />
+    </span>
+  );
+}
+
+/** Selo do aviso de live no circulo da escola: o relogio do lembrete, ou o "ao vivo" no "Comecou agora". */
+function WebinarBadge({ live }: { live: boolean }) {
+  const Icon = live ? Radio : CalendarClock;
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "absolute -bottom-1 -right-1 grid size-[18px] place-items-center rounded-full border-2 border-[#1b1b1b]",
+        live ? "bg-[#e50914] text-white" : "bg-sky-600 text-white"
       )}
     >
       <Icon className="size-2.5" strokeWidth={2.8} />
@@ -155,7 +176,7 @@ function SchoolAvatar({ iconUrl, logoUrl }: { iconUrl?: string | null; logoUrl?:
 }
 
 function CardAvatar({ item, schoolIconUrl, schoolLogoUrl }: { item: NotificationItem; schoolIconUrl?: string | null; schoolLogoUrl?: string | null }) {
-  const badge = item.kind === "notice" ? null : <KindBadge kind={item.kind} />;
+  const badge = item.kind === "notice" ? null : item.kind === "webinar" ? <WebinarBadge live={item.icon?.id === "live"} /> : <KindBadge kind={item.kind} />;
 
   if (!item.actor) {
     return (
@@ -278,7 +299,11 @@ export type NotificationCardProps = {
 };
 
 export function NotificationCard(props: NotificationCardProps) {
-  return props.item.kind === "notice" ? <NoticeCard {...props} /> : <CommentCard {...props} />;
+  if (props.item.kind === "notice") {
+    return <NoticeCard {...props} />;
+  }
+
+  return props.item.kind === "webinar" ? <WebinarCard {...props} /> : <CommentCard {...props} />;
 }
 
 /** `group/card`: o excluir aparece com o mouse sobre o cartao ou o foco dentro dele (ponteiro fino). */
@@ -355,6 +380,65 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
         </p>
         {item.context ? <span className="mt-0.5 block truncate text-xs text-zinc-400">em {item.context}</span> : null}
         {item.body ? <span className="mt-1 line-clamp-3 text-sm leading-5 text-zinc-300 [overflow-wrap:anywhere]">“{item.body}”</span> : null}
+        <p className="mt-1 text-xs text-zinc-400" suppressHydrationWarning>
+          <time dateTime={item.createdAt} suppressHydrationWarning>
+            {formatMemberRelativeTime(item.createdAt, now)}
+          </time>
+        </p>
+        <CardError message={interaction?.hide?.error} />
+      </div>
+      {hidable ? <NotificationCardDelete label={labels.hide} onHide={onHide} preview={preview} /> : null}
+      {unread ? <UnreadDot /> : null}
+    </article>
+  );
+}
+
+/**
+ * Lembrete ou aviso de live (docs/30 D27): o titulo em negrito, o texto e a hora. O cartao inteiro leva para a pagina
+ * da live (o link acessivel e o titulo); sem botao, reacoes, enquete nem resposta. O circulo e o Icone da escola com
+ * o relogio no canto (o "ao vivo" no "Comecou agora").
+ */
+function WebinarCard({ accessPreviewMode, interaction, item, now, onHide, onOpenLink, preview = false, schoolIconUrl, schoolLogoUrl }: NotificationCardProps) {
+  const unread = !item.readAt;
+  const titleId = useId();
+  const plan = cardLinkOf(item, { accessPreviewMode });
+  const link = preview ? null : plan.link;
+  const labels = cardActionLabels(item);
+  const hidable = canHideNotification(item);
+
+  function handleLinkClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (link) {
+      onOpenLink?.(event, link);
+    }
+  }
+
+  return (
+    <article aria-labelledby={titleId} className={cn(cardClassName, unread && "bg-white/[0.035]", plan.wholeCard && clickableCardClassName)}>
+      {/* Decorativo: o cartao inteiro leva para a pagina da live. Fora do leitor de tela e do Tab: o link de verdade e o titulo. */}
+      {link ? (
+        <a aria-hidden="true" className="absolute inset-0 z-0" data-navigation-message="Abrindo a live..." href={link.href} onClick={handleLinkClick} tabIndex={-1} />
+      ) : null}
+      <span className={cn(layerClassName, "block size-10")}>
+        <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
+      </span>
+      <div className={cn(layerClassName, "min-w-0")}>
+        {/* O titulo reserva o canto do excluir. */}
+        <p className={cn("text-[15px] font-bold leading-5 text-white [overflow-wrap:anywhere]", hidable && "pr-8")} id={titleId}>
+          {link ? (
+            <a
+              className="pointer-events-auto rounded-[4px] outline-none"
+              data-card-link=""
+              data-navigation-message="Abrindo a live..."
+              href={link.href}
+              onClick={handleLinkClick}
+            >
+              {item.title}
+            </a>
+          ) : (
+            item.title
+          )}
+        </p>
+        {item.body.trim() ? <p className="mt-1 whitespace-pre-line text-sm leading-5 text-zinc-300 [overflow-wrap:anywhere]">{item.body}</p> : null}
         <p className="mt-1 text-xs text-zinc-400" suppressHydrationWarning>
           <time dateTime={item.createdAt} suppressHydrationWarning>
             {formatMemberRelativeTime(item.createdAt, now)}

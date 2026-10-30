@@ -17,7 +17,7 @@ import "server-only";
 // 5. Varredura do objetivo (uma vez por faixa) e 6. fim automatico (Concluido) dos fluxos sem mais nada.
 
 import { resolveAudienceUserIds } from "./audience";
-import { collectMessageCampaignIds } from "./audience-model";
+import { audienceFactsRequest } from "./audience-model";
 import { popupRefreshDueBefore } from "./campaign-model";
 import { describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import { createFactsLoader, type FactsLoader } from "./facts-loader";
@@ -222,7 +222,8 @@ export async function processFlows(input: {
 async function enterBuilderFlow(input: { budget: number; db: CommunicationsDb; facts: FactsLoader; flow: FlowRow; now: Date }) {
   const { db, flow, now } = input;
   const audience = definitionOf(flow.entry_audience) ?? { kind: "everyone" };
-  const loaded = await input.facts.load(collectMessageCampaignIds(audience));
+  const request = audienceFactsRequest(audience);
+  const loaded = await input.facts.load(request.messageCampaignIds, request);
   const matching = resolveAudienceUserIds(audience, loaded);
   const already = await fetchFlowRunUserIds(db, flow.id);
   const missing = matching.filter((userId) => !already.has(userId));

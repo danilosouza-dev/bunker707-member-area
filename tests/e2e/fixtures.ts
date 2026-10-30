@@ -12,11 +12,25 @@ import {
   limparConfiguracoesDeTeste,
   limparFotoDoPerfil,
   limparProgresso,
-  limparSessoesDeTv
+  limparSessoesDeTv,
+  ambienteDaSalaAoVivo as ambienteDaSalaAoVivoDaEscola,
+  LIVE_AO_VIVO_DE_TESTE as LIVE_AO_VIVO_DA_ESCOLA,
+  seedLiveAoVivoDeTeste as seedLiveAoVivoDaEscola
+} from "../fixtures/escola-de-teste.mjs";
+import {
+  JIT_DE_TESTE,
+  LIVE_AO_VIVO_ENCERRADA_DE_TESTE,
+  OFERTA_DE_TESTE,
+  SIMULACAO_DE_TESTE,
+  seedJitDeTeste,
+  seedLiveAoVivoEncerradaDeTeste,
+  seedOfertaDeTeste,
+  seedSimulacaoDeTeste
 } from "../fixtures/escola-de-teste.mjs";
 import { templateMediaUse } from "../../src/server/communications/media-refs";
 import { storedPopupDesignAssetPaths } from "../../src/server/communications/popup-design-router";
 import { templateDesignModeOf, type TemplatePayload } from "../../src/server/communications/template-model";
+import { recorderHeaders } from "../../src/server/webinars/recorder-signature";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
@@ -1351,6 +1365,9 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
 <button id="pausar" type="button">Pausar</button>
 <button id="terminar" type="button">Terminar</button>
 <p id="estado" role="status">carregando</p>
+<p id="tempo" data-testid="tempo">0</p>
+<p id="som" data-testid="som">som</p>
+<p id="ultimo-salto" data-testid="ultimo-salto"></p>
 <script>
 (() => {
   const CONFIG = ${JSON.stringify(config)};
@@ -1367,9 +1384,31 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     }
   })();
   const estado = document.getElementById("estado");
+  const tempo = document.getElementById("tempo");
+  const som = document.getElementById("som");
+  const ultimoSalto = document.getElementById("ultimo-salto");
   const inscritos = new Map();
+  const parametros = new URLSearchParams(location.search);
+  // A sala da Live gravada (docs/30 §6.6) abre o player com autoplay=true&muted=true: a pagina falsa toca sozinha,
+  // sem som, e anda 1 s por segundo. O t= do endereco e ignorado de proposito: a trava da sala precisa recolocar o
+  // player no segundo certo (setCurrentTime), e o teste le o salto em #ultimo-salto.
+  const autoplay = parametros.get("autoplay") === "true";
   let pausado = true;
   let segundos = 0;
+  let mudo = parametros.get("muted") === "true";
+  som.textContent = mudo ? "mudo" : "som";
+
+  function mostrarTempo() {
+    tempo.textContent = String(Math.floor(segundos));
+  }
+
+  setInterval(() => {
+    if (!pausado && autoplay) {
+      segundos += 1;
+      mostrarTempo();
+      emitir("timeupdate");
+    }
+  }, 1000);
 
   function postar(mensagem) {
     window.parent.postMessage(mensagem, destino);
@@ -1396,7 +1435,7 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     }
     if (CONFIG.protocolos.includes("playerjs") && (CONFIG.semInscricao || inscritos.has(nome))) {
       const mensagem = { context: "player.js", version: VERSAO, event: nome, listener: inscritos.get(nome) ?? undefined };
-      postar(JSON.stringify(nome === "timeupdate" || nome === "ended" ? { ...mensagem, value: tempo } : mensagem));
+      postar(JSON.stringify(nome === "timeupdate" || nome === "ended" || nome === "seeked" ? { ...mensagem, value: tempo } : mensagem));
     }
   }
 
@@ -1438,6 +1477,27 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     } else if (dados.method === "getPaused") {
       postar(JSON.stringify({ context: "player.js", version: VERSAO, event: "getPaused", value: pausado, listener: dados.listener }));
       estado.textContent = "pronto";
+    } else if (dados.method === "getCurrentTime") {
+      postar(JSON.stringify({ context: "player.js", version: VERSAO, event: "getCurrentTime", value: segundos, listener: dados.listener }));
+    } else if (dados.method === "setCurrentTime" && typeof dados.value === "number") {
+      // Os comandos da sala travada (docs/30 §6.6): o salto fica visivel para o teste.
+      segundos = dados.value;
+      ultimoSalto.textContent = String(Math.round(dados.value));
+      mostrarTempo();
+      emitir("seeked");
+      emitir("timeupdate");
+    } else if (dados.method === "play") {
+      pausado = false;
+      emitir("play");
+    } else if (dados.method === "pause") {
+      pausado = true;
+      emitir("pause");
+    } else if (dados.method === "mute") {
+      mudo = true;
+      som.textContent = "mudo";
+    } else if (dados.method === "unmute") {
+      mudo = false;
+      som.textContent = "som";
     }
   });
 
@@ -1458,11 +1518,20 @@ function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
     emitir("ended");
   });
 
+  function comecar() {
+    pronto();
+    if (autoplay) {
+      pausado = false;
+      mostrarTempo();
+      emitir("play");
+    }
+  }
+
   window.addEventListener("load", () => {
     if (CONFIG.prontoDepoisDe > 0) {
-      setTimeout(pronto, CONFIG.prontoDepoisDe);
+      setTimeout(comecar, CONFIG.prontoDepoisDe);
     } else {
-      pronto();
+      comecar();
     }
   });
 })();
@@ -1578,4 +1647,670 @@ export async function segurarResumoDoSino(page: Page) {
   });
 
   return { soltar };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios, fase 3 (docs/30 §1.3, §1.4, §5.3, §6.3, §6.7 e §10.1): a sala ao vivo com o Jitsi de mentira
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Os valores de teste da sala ao vivo (tests/fixtures/escola-de-teste.mjs). */
+export type AmbienteDaSalaAoVivo = {
+  WEBINAR_JWT_APP_ID: string;
+  WEBINAR_JWT_SECRET: string;
+  WEBINAR_MEET_DOMAIN: string;
+  WEBINAR_RECORDER_DISPATCH: string;
+  WEBINAR_RECORDER_WEBHOOK_SECRET: string;
+};
+
+export type LiveAoVivoDeTeste = {
+  coApresentador: "professor";
+  descricao: string;
+  equipe: "analista";
+  id: string;
+  roomName: string;
+  sessaoId: string;
+  slug: string;
+  titulo: string;
+};
+
+// A Live ao vivo de teste e o ambiente da sala vem de escola-de-teste.mjs (tipos em escola-de-teste.d.mts).
+export const LIVE_AO_VIVO_DE_TESTE: LiveAoVivoDeTeste = LIVE_AO_VIVO_DA_ESCOLA;
+export const seedLiveAoVivoDeTeste = seedLiveAoVivoDaEscola;
+
+/**
+ * Os valores da sala ao vivo que valem para o app de teste: o servidor do e2e (tests/support/e2e-server.mjs) preenche
+ * as chaves vazias com estes mesmos valores antes do build, e este processo faz igual, para assinar o webhook do
+ * gravador e conferir o token com o segredo que o app usa.
+ */
+export function ambienteDaSalaAoVivo(): AmbienteDaSalaAoVivo {
+  return ambienteDaSalaAoVivoDaEscola(process.env);
+}
+
+export type ComandoDaSalaFalsa = { args: unknown[]; comando: string };
+
+/** O que a pagina passou ao construtor do JitsiMeetExternalAPI na montagem mais nova (ainda nao descartada). */
+export type MontagemDaSalaFalsa = {
+  configOverwrite: Record<string, unknown>;
+  dominio: string;
+  interfaceConfigOverwrite: Record<string, unknown>;
+  jwt: string | null;
+  /** O iframe que getIFrame() devolve esta dentro do parentNode passado (o palco). */
+  noPalco: boolean;
+  roomName: string | null;
+  /** O `title` e o `allow` que a pagina pos no iframe. */
+  tituloDoIframe: string | null;
+  allowDoIframe: string | null;
+};
+
+export type SalaFalsaDoJitsi = {
+  /** Os comandos (executeCommand) recebidos pela montagem mais nova, na ordem. */
+  comandos(): Promise<ComandoDaSalaFalsa[]>;
+  /** Dispara um sinal do IFrame API para os ouvintes da montagem mais nova. */
+  disparar(evento: string, payload?: Record<string, unknown>): Promise<void>;
+  /** Espera um comando com este nome a partir da posicao `depoisDe` (o tamanho da lista antes do clique). */
+  esperarComando(comando: string, opcoes?: { depoisDe?: number; timeout?: number }): Promise<ComandoDaSalaFalsa>;
+  /** Espera a pagina construir a sala e devolve o que ela passou. */
+  esperarMontada(opcoes?: { timeout?: number }): Promise<MontagemDaSalaFalsa>;
+  /** Quantas vezes a pagina construiu a sala (troca de token nao remonta). */
+  montagens(): Promise<number>;
+  /** Quantas vezes o navegador pediu o external_api.js. */
+  pedidosDoScript(): number;
+};
+
+type EstadoDaSalaFalsa = {
+  disparar(evento: string, payload: Record<string, unknown>): void;
+  montagens: {
+    allowDoIframe: string | null;
+    comandos: ComandoDaSalaFalsa[];
+    configOverwrite: Record<string, unknown>;
+    descartada: boolean;
+    dominio: string;
+    interfaceConfigOverwrite: Record<string, unknown>;
+    jwt: string | null;
+    noPalco: boolean;
+    roomName: string | null;
+    tituloDoIframe: string | null;
+  }[];
+};
+
+/** Um aparelho da sala falsa, no formato do getAvailableDevices do IFrame API (o MediaDeviceInfo do navegador). */
+export type DispositivoFalso = { deviceId: string; groupId: string; label: string };
+
+/**
+ * Os aparelhos da sala falsa (o painel Configurações, docs/30 §1.3 e §10.1). `saidaTrocavel` e o
+ * isDeviceChangeAvailable('output') (falso imita o Safari, que nao troca o alto-falante).
+ */
+export type DispositivosDaSalaFalsa = { audioInput: DispositivoFalso[]; audioOutput: DispositivoFalso[]; saidaTrocavel: boolean; videoInput: DispositivoFalso[] };
+
+/** Como o Chrome lista: o "default" repete o aparelho interno (mesmo grupo, rotulo "Padrão - …"); depois os de verdade. */
+export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
+  audioInput: [
+    { deviceId: "default", groupId: "grupo-interno", label: "Padrão - Microfone interno" },
+    { deviceId: "mic-interno", groupId: "grupo-interno", label: "Microfone interno" },
+    { deviceId: "mic-usb", groupId: "grupo-usb", label: "Fone USB" }
+  ],
+  audioOutput: [
+    { deviceId: "default", groupId: "grupo-interno", label: "Padrão - Alto-falantes internos" },
+    { deviceId: "som-interno", groupId: "grupo-interno", label: "Alto-falantes internos" },
+    { deviceId: "som-usb", groupId: "grupo-usb", label: "Fone USB" }
+  ],
+  saidaTrocavel: true,
+  videoInput: [
+    { deviceId: "cam-integrada", groupId: "grupo-camera", label: "Câmera integrada" },
+    { deviceId: "cam-usb", groupId: "grupo-webcam", label: "Webcam USB" }
+  ]
+};
+
+/**
+ * O external_api.js de mentira (docs/30 §10.1): define window.JitsiMeetExternalAPI com o construtor
+ * (dominio, { roomName, jwt, configOverwrite, interfaceConfigOverwrite, parentNode, width, height }) que guarda o que
+ * recebeu, poe um iframe vazio no parentNode (o getIFrame) e implementa addListener / removeListener (e on / off),
+ * executeCommand (anotado), getParticipantsInfo, isAudioMuted / isVideoMuted e dispose. window.__salaFalsa.disparar
+ * manda um sinal aos ouvintes da montagem mais nova. Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
+ * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
+ * proprio participante e hangup responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao
+ * ligou, alguem bateu na sala de espera) o teste dispara.
+ *
+ * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
+ * isMultipleAudioInputSupported e setAudioInputDevice / setAudioOutputDevice / setVideoInputDevice(rotulo, id), cada
+ * chamada anotada em `comandos` com o nome do metodo e os argumentos (o esperarComando acha). Como o navegador, a
+ * permissao e por tipo: sem ela, a lista daquele tipo vem com um aparelho sem id e sem rotulo; o microfone libera os
+ * microfones E os alto-falantes (no Chrome e no Firefox o rotulo da saida depende do microfone), a camera so as cameras.
+ * Com `ecoar`, o primeiro toggleAudio libera o microfone e o primeiro toggleVideo a camera; o sinal disparado de
+ * microfone ou camera ligados (a barra do proprio iframe, do apresentador) tambem libera o tipo dele; sem
+ * `disableInitialGUM` no configOverwrite (o apresentador, que entra com startWithVideoMuted), a montagem ja nasce com o
+ * microfone liberado e a camera nao (o iframe so pede o audio na entrada). A troca procura o aparelho pelo ROTULO e so
+ * usa o id sem rotulo (como o "setDevice" do iframe, que pega o PRIMEIRO de rotulo identico; a sala manda so o id). A
+ * resposta sai na hora e a faixa nova entra depois (2 s o microfone, como um fone Bluetooth; 1,5 s a camera, como
+ * uma webcam USB), quando o getCurrentDevices muda e o comando "trocaConcluida" (tipo, id) e anotado; o mudo da faixa
+ * nova e o de quando a troca comecou (um toque no meio seria desfeito, como na tag). Com `ecoar`, trocar a camera ligada avisa o mudo e o volta,
+ * como a faixa nova do Jitsi (a faixa velha sai e a nova entra): a sala nao pode ler isso como "a equipe fechou a sua
+ * câmera" nem mandar esses sinais ao servidor. Trocar o microfone nao avisa nada, como na tag stable-11248 (o mudo do
+ * microfone sai de base/media audio.muted, que a troca grava com o mesmo valor). O isAudioMuted responde o mudo da sala
+ * falsa (o Falar so aparece ligado na barra quando ele diz que a faixa abriu).
+ *
+ * Como o navegador, a permissao dada e da PAGINA (a origem), nao de cada montagem: a volta depois de uma queda ja
+ * encontra a camera e o microfone liberados. Como a tag stable-11248, o getCurrentDevices da camera e o
+ * `cameraDeviceId ?? userSelectedCameraDeviceId`: numa montagem que ainda nao teve faixa de camera, ele diz o escolhido
+ * ja na resposta do setVideoInputDevice (o primeiro so nasce quando uma faixa entra). Com `microfone: "falha"`, o
+ * getUserMedia do microfone nunca abre (o macOS bloqueou o navegador, outro programa o ocupa, ou o pedido do navegador
+ * fica sem resposta): o toggleAudio manda o "ligado" uma vez (base/media), o isAudioMuted continua verdadeiro (sem faixa)
+ * e o toggleAudio seguinte nao manda nada (o iframe ja esta no "ligado"); a permissao do microfone nao muda.
+ */
+function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa, opcoes: { microfone: "abre" | "falha"; permissaoDoMicrofone: boolean }) {
+  return `(() => {
+  const ECOAR = ${JSON.stringify(ecoar)};
+  const DISPOSITIVOS = ${JSON.stringify(dispositivos)};
+  const MICROFONE_FALHA = ${JSON.stringify(opcoes.microfone === "falha")};
+  const sala = (window.__salaFalsa = window.__salaFalsa || { montagens: [] });
+  // A permissao do navegador, por tipo, da pagina inteira (a origem): vale para todas as montagens.
+  const permitido = (sala.permitido = sala.permitido || { audio: ${JSON.stringify(opcoes.permissaoDoMicrofone)}, video: false });
+  const copia = (valor) => JSON.parse(JSON.stringify(valor === undefined ? null : valor));
+  const vivas = () => sala.montagens.filter((montagem) => !montagem.descartada);
+
+  function JitsiMeetExternalAPI(dominio, opcoes) {
+    if (!(this instanceof JitsiMeetExternalAPI)) {
+      throw new TypeError("JitsiMeetExternalAPI precisa de new");
+    }
+    const config = opcoes || {};
+    const ouvintes = new Map();
+    const pai = config.parentNode && config.parentNode.appendChild ? config.parentNode : document.body;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("data-sala-falsa", "");
+    pai.appendChild(iframe);
+    const configuracao = config.configOverwrite || {};
+    // Sem disableInitialGUM o Jitsi pede ao entrar so o microfone (o apresentador entra com a camera fechada:
+    // startWithVideoMuted): o navegador da a permissao do microfone.
+    if (configuracao.disableInitialGUM !== true) {
+      permitido.audio = true;
+    }
+    const estado = {
+      atuais: {
+        audioInput: DISPOSITIVOS.audioInput[0] || null,
+        audioOutput: DISPOSITIVOS.audioOutput[0] || null,
+        videoInput: DISPOSITIVOS.videoInput[0] || null
+      },
+      audioMudo: true,
+      // O userSelectedCameraDeviceId: gravado na hora do setVideoInputDevice.
+      cameraEscolhida: null,
+      maoLevantada: false,
+      participantes: [],
+      permitido,
+      proprioId: null,
+      // Uma faixa de camera ja entrou nesta montagem (o cameraDeviceId da tag nasce com ela).
+      teveFaixaDeCamera: false,
+      videoMudo: true
+    };
+    const montagem = {
+      allowDoIframe: null,
+      comandos: [],
+      configOverwrite: copia(config.configOverwrite || {}),
+      descartada: false,
+      dominio: String(dominio),
+      interfaceConfigOverwrite: copia(config.interfaceConfigOverwrite || {}),
+      jwt: typeof config.jwt === "string" ? config.jwt : null,
+      noPalco: pai !== document.body,
+      roomName: typeof config.roomName === "string" ? config.roomName : null,
+      tituloDoIframe: null
+    };
+    Object.defineProperty(montagem, "estado", { enumerable: false, value: estado });
+    Object.defineProperty(montagem, "emitir", {
+      enumerable: false,
+      value: (evento, payload) => {
+        if (montagem.descartada) {
+          return;
+        }
+        for (const ouvinte of Array.from(ouvintes.get(evento) || [])) {
+          try {
+            ouvinte(payload);
+          } catch (erro) {
+            console.error(erro);
+          }
+        }
+      }
+    });
+    Object.defineProperty(montagem, "iframe", { enumerable: false, value: iframe });
+    sala.montagens.push(montagem);
+
+    this.addListener = (evento, ouvinte) => {
+      if (!ouvintes.has(evento)) {
+        ouvintes.set(evento, new Set());
+      }
+      ouvintes.get(evento).add(ouvinte);
+      return this;
+    };
+    this.on = this.addListener;
+    this.removeListener = (evento, ouvinte) => {
+      if (ouvintes.has(evento)) {
+        ouvintes.get(evento).delete(ouvinte);
+      }
+      return this;
+    };
+    this.off = this.removeListener;
+    this.executeCommand = (comando, ...args) => {
+      montagem.comandos.push({ args: copia(args), comando: String(comando) });
+      if (!ECOAR) {
+        return;
+      }
+      setTimeout(() => {
+        if (comando === "toggleVideo") {
+          estado.permitido.video = true;
+          estado.videoMudo = !estado.videoMudo;
+          estado.teveFaixaDeCamera = estado.teveFaixaDeCamera || !estado.videoMudo;
+          montagem.emitir("videoMuteStatusChanged", { muted: estado.videoMudo });
+        } else if (comando === "toggleAudio" && MICROFONE_FALHA) {
+          // O getUserMedia nunca abre: o "ligado" de base/media sai uma vez; depois, sem faixa, o toque so tenta de novo.
+          if (estado.audioMudo) {
+            estado.audioMudo = false;
+            montagem.emitir("audioMuteStatusChanged", { muted: false });
+          }
+        } else if (comando === "toggleAudio") {
+          estado.permitido.audio = true;
+          estado.audioMudo = !estado.audioMudo;
+          montagem.emitir("audioMuteStatusChanged", { muted: estado.audioMudo });
+        } else if (comando === "toggleRaiseHand") {
+          estado.maoLevantada = !estado.maoLevantada;
+          montagem.emitir("raiseHandUpdated", { handRaised: estado.maoLevantada ? Date.now() : 0, id: estado.proprioId });
+        } else if (comando === "hangup") {
+          montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
+        }
+      }, 0);
+    };
+    this.getIFrame = () => iframe;
+    this.getParticipantsInfo = () => estado.participantes.map((pessoa) => ({ displayName: pessoa.displayName, formattedDisplayName: pessoa.displayName, participantId: pessoa.id }));
+    this.getNumberOfParticipants = () => estado.participantes.length + 1;
+    // Verdadeiro sem faixa de microfone (MICROFONE_FALHA: o getUserMedia nunca abriu).
+    this.isAudioMuted = () => Promise.resolve(MICROFONE_FALHA || estado.audioMudo);
+    this.isVideoMuted = () => Promise.resolve(estado.videoMudo);
+
+    // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
+    const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
+    const TIPOS = { audioInput: "audioinput", audioOutput: "audiooutput", videoInput: "videoinput" };
+    // A permissao de cada lista: microfones e alto-falantes pelo microfone, cameras pela camera.
+    const liberado = (tipo) => (tipo === "videoInput" ? estado.permitido.video : estado.permitido.audio);
+    const comTipo = (tipo, aparelho) => (aparelho ? { deviceId: aparelho.deviceId, groupId: aparelho.groupId, kind: TIPOS[tipo], label: aparelho.label } : undefined);
+    // Sem a permissao o navegador nao da id nem rotulo: um aparelho vazio de cada tipo.
+    const vazio = (tipo) => ({ deviceId: "", groupId: "", kind: TIPOS[tipo], label: "" });
+    this.getAvailableDevices = () => {
+      anotar("getAvailableDevices", []);
+      const listas = {};
+      for (const tipo of Object.keys(TIPOS)) {
+        listas[tipo] = liberado(tipo) ? DISPOSITIVOS[tipo].map((aparelho) => comTipo(tipo, aparelho)) : [vazio(tipo)];
+      }
+      return Promise.resolve(listas);
+    };
+    this.getCurrentDevices = () => {
+      anotar("getCurrentDevices", []);
+      const atuais = {};
+      for (const tipo of Object.keys(TIPOS)) {
+        // A camera, como a tag: cameraDeviceId (so depois de uma faixa) ?? userSelectedCameraDeviceId (na hora da troca).
+        const emUso = tipo === "videoInput" && !estado.teveFaixaDeCamera && estado.cameraEscolhida ? estado.cameraEscolhida : estado.atuais[tipo];
+        atuais[tipo] = liberado(tipo) ? comTipo(tipo, emUso) : undefined;
+      }
+      return Promise.resolve(atuais);
+    };
+    this.isDeviceChangeAvailable = (tipo) => {
+      anotar("isDeviceChangeAvailable", [tipo]);
+      return Promise.resolve(tipo === "output" ? DISPOSITIVOS.saidaTrocavel !== false : true);
+    };
+    this.isMultipleAudioInputSupported = () => {
+      anotar("isMultipleAudioInputSupported", []);
+      return Promise.resolve(true);
+    };
+    // O getUserMedia do aparelho novo: o microfone demora como um fone Bluetooth (mais que os 1,5 s que a sala ja
+    // esperou as cegas) e a camera como uma webcam USB; o alto-falante troca na hora.
+    const ATRASO_DA_FAIXA_NOVA = { audioInput: 2000, audioOutput: 0, videoInput: 1500 };
+    const trocar = (metodo, tipo, rotulo, id) => {
+      anotar(metodo, [rotulo, id]);
+      // Como o "setDevice" do iframe: pelo rotulo quando ele vem (o PRIMEIRO de rotulo identico); o id so sem rotulo.
+      const lista = DISPOSITIVOS[tipo];
+      const achado = rotulo ? lista.find((aparelho) => aparelho.label === rotulo) : lista.find((aparelho) => aparelho.deviceId === id);
+      if (!achado) {
+        return Promise.resolve(false);
+      }
+      // Como a tag: a resposta sai na hora, antes do getUserMedia; o mudo de agora vale para a faixa nova, e o
+      // getCurrentDevices so muda quando ela entra (anotada como "trocaConcluida"). A camera ligada avisa o mudo e o
+      // volta (a velha sai, a nova entra); com ela desligada, nada. O microfone nao avisa nada.
+      const videoEstavaMudo = estado.videoMudo;
+      if (tipo === "videoInput") {
+        estado.cameraEscolhida = achado;
+      }
+      setTimeout(() => {
+        if (montagem.descartada) {
+          return;
+        }
+        estado.atuais[tipo] = achado;
+        if (tipo === "videoInput") {
+          // A faixa da troca entrou (mutada ou nao): o cameraDeviceId nasce com ela.
+          estado.teveFaixaDeCamera = true;
+        }
+        if (ECOAR && tipo === "videoInput") {
+          if (!estado.videoMudo) {
+            estado.videoMudo = true;
+            montagem.emitir("videoMuteStatusChanged", { muted: true });
+          }
+          if (!videoEstavaMudo) {
+            estado.videoMudo = false;
+            montagem.emitir("videoMuteStatusChanged", { muted: false });
+          }
+        }
+        anotar("trocaConcluida", [tipo, achado.deviceId]);
+      }, ATRASO_DA_FAIXA_NOVA[tipo]);
+      return Promise.resolve(true);
+    };
+    this.setAudioInputDevice = (rotulo, id) => trocar("setAudioInputDevice", "audioInput", rotulo, id);
+    this.setAudioOutputDevice = (rotulo, id) => trocar("setAudioOutputDevice", "audioOutput", rotulo, id);
+    this.setVideoInputDevice = (rotulo, id) => trocar("setVideoInputDevice", "videoInput", rotulo, id);
+    this.dispose = () => {
+      montagem.descartada = true;
+      ouvintes.clear();
+      iframe.remove();
+    };
+  }
+
+  window.JitsiMeetExternalAPI = JitsiMeetExternalAPI;
+  sala.disparar = (evento, payload) => {
+    const atual = vivas().pop();
+    if (!atual) {
+      throw new Error("Nenhuma sala montada para receber " + evento);
+    }
+    const dados = payload || {};
+    const estado = atual.estado;
+    if (evento === "videoConferenceJoined" && typeof dados.id === "string") {
+      estado.proprioId = dados.id;
+    } else if (evento === "participantJoined" && typeof dados.id === "string") {
+      estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id).concat({ displayName: dados.displayName || "", id: dados.id });
+    } else if (evento === "participantLeft" && typeof dados.id === "string") {
+      estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
+    } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
+      // A camera ligada pela barra do proprio iframe (o apresentador): o navegador deu a permissao da camera.
+      estado.videoMudo = dados.muted;
+      estado.permitido.video = estado.permitido.video || !dados.muted;
+      estado.teveFaixaDeCamera = estado.teveFaixaDeCamera || !dados.muted;
+    } else if (evento === "audioMuteStatusChanged" && typeof dados.muted === "boolean") {
+      estado.audioMudo = dados.muted;
+      estado.permitido.audio = estado.permitido.audio || !dados.muted;
+    }
+    atual.emitir(evento, dados);
+  };
+})();
+`;
+}
+
+/**
+ * Serve o external_api.js de mentira no endereco real do Jitsi proprio (https://<dominio>/external_api.js; o resto do
+ * dominio responde 404 e nada sai da maquina: page.route vence o corte de rede do contexto, como na paginaFalsaDoVimeo)
+ * e devolve os comandos para o teste conduzir a sala. Chame antes de abrir a pagina.
+ */
+export async function salaFalsaDoJitsi(
+  page: Page,
+  opcoes: {
+    dispositivos?: Partial<DispositivosDaSalaFalsa>;
+    domain?: string;
+    ecoar?: boolean;
+    /** "falha": o getUserMedia do microfone nunca abre (o toggleAudio manda o "ligado" uma vez, sem faixa). */
+    microfone?: "abre" | "falha";
+    /**
+     * O navegador.permissions.query({ name: "microphone" }) da pagina, como se o aluno tivesse liberado (ou bloqueado) o
+     * microfone numa live anterior; "granted" tambem lista os microfones e os alto-falantes com nome desde a entrada.
+     */
+    permissaoDoMicrofone?: "denied" | "granted" | "prompt";
+  } = {}
+): Promise<SalaFalsaDoJitsi> {
+  const dominio = opcoes.domain ?? ambienteDaSalaAoVivo().WEBINAR_MEET_DOMAIN;
+  const script = scriptDaSalaFalsa(
+    opcoes.ecoar ?? true,
+    { ...DISPOSITIVOS_PADRAO_DA_SALA_FALSA, ...opcoes.dispositivos },
+    { microfone: opcoes.microfone ?? "abre", permissaoDoMicrofone: opcoes.permissaoDoMicrofone === "granted" }
+  );
+  let pedidos = 0;
+
+  if (opcoes.permissaoDoMicrofone) {
+    // O iframe pede pela origem da pagina (delegacao de permissao): a sala le a resposta aqui.
+    await page.addInitScript((estado) => {
+      const permissoes = navigator.permissions;
+      if (!permissoes) {
+        return;
+      }
+      const original = permissoes.query.bind(permissoes);
+      permissoes.query = ((descritor: PermissionDescriptor) =>
+        descritor?.name === ("microphone" as PermissionName) ? Promise.resolve({ name: "microphone", onchange: null, state: estado } as unknown as PermissionStatus) : original(descritor)) as Permissions["query"];
+    }, opcoes.permissaoDoMicrofone);
+  }
+
+  await page.route(`https://${dominio}/**`, (route) => {
+    if (new URL(route.request().url()).pathname === "/external_api.js") {
+      pedidos += 1;
+      return route.fulfill({ body: script, contentType: "text/javascript; charset=utf-8", status: 200 });
+    }
+
+    return route.fulfill({ body: "", status: 404 });
+  });
+
+  const lerComandos = () =>
+    page.evaluate(() => {
+      const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+      const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop();
+      return atual ? atual.comandos : [];
+    });
+
+  const lerMontagem = () =>
+    page.evaluate(() => {
+      const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+      const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop() as (EstadoDaSalaFalsa["montagens"][number] & { iframe?: HTMLIFrameElement }) | undefined;
+
+      if (!atual) {
+        return null;
+      }
+
+      return {
+        allowDoIframe: atual.iframe?.getAttribute("allow") ?? null,
+        configOverwrite: atual.configOverwrite,
+        dominio: atual.dominio,
+        interfaceConfigOverwrite: atual.interfaceConfigOverwrite,
+        jwt: atual.jwt,
+        noPalco: atual.noPalco,
+        roomName: atual.roomName,
+        tituloDoIframe: atual.iframe?.getAttribute("title") ?? null
+      };
+    });
+
+  return {
+    comandos: lerComandos,
+    async disparar(evento, payload = {}) {
+      await page.evaluate(
+        ([nome, dados]) => {
+          const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+
+          if (!sala) {
+            throw new Error("A sala falsa nao foi carregada.");
+          }
+
+          sala.disparar(nome, dados);
+        },
+        [evento, payload] as const
+      );
+    },
+    async esperarComando(comando, { depoisDe = 0, timeout = 15_000 } = {}) {
+      let achado: ComandoDaSalaFalsa | undefined;
+
+      await expect
+        .poll(
+          async () => {
+            achado = (await lerComandos()).slice(depoisDe).find((item) => item.comando === comando);
+            return Boolean(achado);
+          },
+          { message: `a sala falsa nao recebeu ${comando}`, timeout }
+        )
+        .toBe(true);
+
+      return achado as ComandoDaSalaFalsa;
+    },
+    async esperarMontada({ timeout = 20_000 } = {}) {
+      let montagem: MontagemDaSalaFalsa | null = null;
+
+      await expect
+        .poll(
+          async () => {
+            montagem = await lerMontagem();
+            return montagem !== null;
+          },
+          { message: "a pagina nao construiu a sala", timeout }
+        )
+        .toBe(true);
+
+      return montagem as unknown as MontagemDaSalaFalsa;
+    },
+    montagens: () => page.evaluate(() => (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa?.montagens.length ?? 0),
+    pedidosDoScript: () => pedidos
+  };
+}
+
+/**
+ * Chama o webhook do gravador do app de teste (POST /api/webhooks/recorder) como a maquina do Jibri e o workflow fazem
+ * (docs/30 §5.3): o corpo JSON assinado com o segredo de teste (recorderHeaders: HMAC de "carimbo.corpo").
+ */
+export async function chamarWebhookDoGravador(corpo: Record<string, unknown>) {
+  const bruto = JSON.stringify(corpo);
+  const resposta = await fetch(`${enderecoDoApp}/api/webhooks/recorder`, {
+    body: bruto,
+    headers: recorderHeaders(ambienteDaSalaAoVivo().WEBINAR_RECORDER_WEBHOOK_SECRET, bruto, Date.now()),
+    method: "POST"
+  });
+
+  return { corpo: (await resposta.json().catch(() => null)) as Record<string, unknown> | null, status: resposta.status };
+}
+
+export type SessaoAoVivoNoBanco = {
+  recorder_requested_at: string | null;
+  recorder_status: string;
+  recording_anchor_at: string | null;
+  recording_requested_at: string | null;
+  room_locked: boolean;
+  room_name: string | null;
+  started_at: string | null;
+  status: string;
+};
+
+/** A sessao da Live ao vivo de teste como o banco guarda (situacao, sala, gravador, ancora). */
+export async function sessaoAoVivoNoBanco(): Promise<SessaoAoVivoNoBanco> {
+  const db = createLocalAdminClient();
+
+  return unwrap(
+    await db
+      .from("webinar_sessions")
+      .select("status, started_at, room_name, room_locked, recorder_status, recorder_requested_at, recording_requested_at, recording_anchor_at")
+      .eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId)
+      .single(),
+    "Lendo a sessao da live ao vivo de teste"
+  ) as SessaoAoVivoNoBanco;
+}
+
+/** Os registros da conta na sessao da Live ao vivo de teste (student_events, entity_type webinar), na ordem. */
+export async function eventosDaLiveAoVivo(chave: ChaveDaConta = "aluna"): Promise<{ event_type: string; metadata: Record<string, unknown> }[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("event_type, metadata")
+      .eq("entity_type", "webinar")
+      .eq("entity_id", LIVE_AO_VIVO_DE_TESTE.sessaoId)
+      .eq("user_id", conta.id)
+      .order("created_at", { ascending: true }),
+    "Lendo o historico da live ao vivo de teste"
+  ) as { event_type: string; metadata: Record<string, unknown> }[];
+}
+
+/** Apaga o historico (student_events de webinario) das contas de teste: cada arquivo da live comeca do zero. */
+export async function zerarHistoricoDeWebinarios() {
+  const db = createLocalAdminClient();
+  const contas = (await contasDeTeste(db)) as Record<ChaveDaConta, ContaDeTeste>;
+
+  unwrap(
+    await db
+      .from("student_events")
+      .delete()
+      .eq("entity_type", "webinar")
+      .in(
+        "user_id",
+        Object.values(contas).map((conta) => conta.id)
+      ),
+    "Apagando o historico de webinario das contas de teste"
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios, fase 4 (docs/30 §1.6, §3.2, §3.3, §3.5, §4.2, §4.3 e §11): as sementes dos paineis, da Oferta, da
+ * Simulacao e do "Comeca quando voce entra" (codigo em tests/fixtures/escola-de-teste.mjs) e as leituras do banco.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type VarianteDaOfertaDeTeste = {
+  badge: string | null;
+  checkoutUrl: string;
+  enabled: boolean;
+  headline: string;
+  label: "A" | "B" | "C" | "D";
+  priceFromLabel: string | null;
+  priceLabel: string | null;
+  weight: number;
+};
+
+export {
+  JIT_DE_TESTE,
+  LIVE_AO_VIVO_ENCERRADA_DE_TESTE,
+  OFERTA_DE_TESTE,
+  SIMULACAO_DE_TESTE,
+  seedJitDeTeste,
+  seedLiveAoVivoEncerradaDeTeste,
+  seedOfertaDeTeste,
+  seedSimulacaoDeTeste
+};
+
+export type CliqueDaOfertaNoBanco = { click_token: string; converted_sale_grant_id: string | null; offset_ms: number; session_id: string; variant_label: string };
+
+/** Os cliques da conta na Oferta de teste (webinar_offer_clicks), do mais antigo ao mais novo. */
+export async function cliquesDaOfertaNoBanco(chave: ChaveDaConta = "aluna"): Promise<CliqueDaOfertaNoBanco[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("webinar_offer_clicks")
+      .select("click_token, converted_sale_grant_id, offset_ms, session_id, variant_label")
+      .eq("offer_id", OFERTA_DE_TESTE.id)
+      .eq("user_id", conta.id)
+      .order("clicked_at", { ascending: true }),
+    "Lendo os cliques da oferta de teste"
+  ) as CliqueDaOfertaNoBanco[];
+}
+
+export type SessaoJitNoBanco = { id: string; jit: boolean; kind: string; scheduled_at: string; status: string };
+
+/** As sessoes que nasceram no "Comeca quando voce entra" de teste, na ordem do horario. */
+export async function sessoesJitNoBanco(): Promise<SessaoJitNoBanco[]> {
+  const db = createLocalAdminClient();
+
+  return unwrap(
+    await db.from("webinar_sessions").select("id, jit, kind, scheduled_at, status").eq("webinar_id", JIT_DE_TESTE.id).order("scheduled_at", { ascending: true }),
+    "Lendo as sessoes do just-in-time de teste"
+  ) as SessaoJitNoBanco[];
+}
+
+/** O historico de webinario da conta por tipo (student_events, entity_type webinar), do mais antigo ao mais novo. */
+export async function eventosDeWebinario(eventType: string, chave: ChaveDaConta = "aluna"): Promise<{ entity_id: string | null; metadata: Record<string, unknown> }[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("entity_id, metadata")
+      .eq("entity_type", "webinar")
+      .eq("event_type", eventType)
+      .eq("user_id", conta.id)
+      .order("created_at", { ascending: true }),
+    `Lendo ${eventType} de teste`
+  ) as { entity_id: string | null; metadata: Record<string, unknown> }[];
 }

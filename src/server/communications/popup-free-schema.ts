@@ -20,6 +20,7 @@ import {
   jsonbBytesUpperBound,
   uploadedFontIdsOfFree,
   usedFreeAssetIds,
+  walkFreeNodes,
   type FreeAsset,
   type FreeFillPaint,
   type FreeId,
@@ -43,6 +44,13 @@ export const POPUP_FREE_MESSAGES = {
   childrenPerBox: `Use até ${L.childrenPerBox} elementos dentro de uma caixa.`,
   closeVisible: "O X precisa aparecer bem: use uma cor que contraste com o fundo dele.",
   color: POPUP_DESIGN_MESSAGES.color,
+  countdownDate: "Escolha a data e a hora em que o contador chega a zero.",
+  countdownEnd: "O contador conta até o fim do pop-up: escolha quando o pop-up termina.",
+  countdownPast: "A data do contador já passou. Escolha uma data no futuro.",
+  countdownEnded: "Escreva o texto que aparece quando o contador chega a zero.",
+  countdownUnits: "Escolha o que o contador mostra.",
+  countdownUntil: "Escolha até quando o contador conta.",
+  countdowns: `Use até ${L.countdowns} contadores.`,
   cta: POPUP_DESIGN_MESSAGES.buttonWithoutCta,
   ctaDuplicate: "O design só pode ter um botão principal.",
   ctaMissing: "Falta o botão principal no design.",
@@ -262,6 +270,17 @@ const buttonAction = z.discriminatedUnion(
   { error: M.buttonAction }
 );
 
+/**
+ * Contador (L6f): a data e um instante ISO 8601 com o fuso (Z ou +hh:mm), conferido pelo regex e pelo Date.parse num
+ * refine so (uma frase so; sem outra classe do zod: o zod e um pedaco compartilhado com o JS inicial do Inicio, docs/27 §7).
+ */
+const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const instant = z.string({ error: M.countdownDate }).refine((value) => ISO_INSTANT_PATTERN.test(value) && !Number.isNaN(Date.parse(value)), M.countdownDate);
+const countdownUntil = z.discriminatedUnion("kind", [strict({ kind: z.literal("end") }), strict({ at: instant, kind: z.literal("date") })], {
+  error: M.countdownUntil
+});
+const countdownCell = strict({ border: border.optional(), fill: textPaint.optional(), padding: sidesOf(L.padding).optional(), radius: intIn(L.radius).optional() });
+
 const boxLayout = strict({
   align: alignSchema.optional(),
   dir: z.enum(["column", "row"], { error: "Escolha a direção." }).optional(),
@@ -309,6 +328,20 @@ export const freeNodeSchema: z.ZodType<FreeNode> = z.discriminatedUnion(
     strict({ ...common, shape: z.enum(["ellipse", "rect"], { error: "Escolha o formato." }).optional(), type: z.literal("shape") }),
     strict({ ...common, type: z.literal("audio") }),
     strict({ ...common, dismiss: bool.optional(), gap: intIn(L.gap).optional(), hover: linksHover.optional(), textStyle: textStyle.optional(), type: z.literal("links") }),
+    strict({
+      ...common,
+      cell: countdownCell.optional(),
+      ended: z.string({ error: M.countdownEnded }).trim().min(1, M.countdownEnded).max(L.label, `Use até ${L.label} letras.`).optional(),
+      gap: intIn(L.countdownGap).optional(),
+      labelColor: hex.optional(),
+      labelSize: intIn(L.countdownLabelSize).optional(),
+      labels: bool.optional(),
+      separator: bool.optional(),
+      textStyle: textStyle.optional(),
+      type: z.literal("countdown"),
+      units: z.enum(["dhm", "dhms", "hms", "ms"], { error: M.countdownUnits }).optional(),
+      until: countdownUntil.optional()
+    }),
     boxNode
   ],
   { error: M.nodeType }
@@ -409,7 +442,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
   const byId = new Map<FreeId, FreeNode>();
   const assets = design.assets ?? [];
   const assetKinds = new Map<FreeId, FreeAsset["kind"]>();
-  const counts = { audio: 0, buttons: 0, cta: 0, effects: 0, free: 0, headings: 0, icons: 0, imageNodes: 0, links: 0, nodes: 0, text: 0, videos: 0 };
+  const counts = { audio: 0, buttons: 0, countdowns: 0, cta: 0, effects: 0, free: 0, headings: 0, icons: 0, imageNodes: 0, links: 0, nodes: 0, text: 0, videos: 0 };
   let textTotalReported = false;
 
   assets.forEach((item, index) => {
@@ -453,7 +486,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
   // por cima dele, cobre a cor (com 8 px a letra fica toda da cor do contorno). Vale no elemento e na parte, pela
   // pintura dela ou pela do elemento; a chave e a do contorno (ou a da cor da parte, quando o contorno vem do elemento).
   const checkStroke = (node: FreeNode, at: Path) => {
-    if (node.type !== "badge" && node.type !== "button" && node.type !== "heading" && node.type !== "links" && node.type !== "text") {
+    if (node.type !== "badge" && node.type !== "button" && node.type !== "countdown" && node.type !== "heading" && node.type !== "links" && node.type !== "text") {
       return;
     }
 
@@ -588,6 +621,15 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
             issue(M.linksDuplicate, at);
           }
           break;
+        case "countdown":
+          if (++counts.countdowns > L.countdowns) {
+            issue(M.countdowns, at);
+          }
+
+          if (node.ended !== undefined) {
+            addText(node.ended, [...at, "ended"]);
+          }
+          break;
         case "box":
           if (depth > L.boxDepth) {
             issue(M.depth, at);
@@ -645,7 +687,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
   }
 }
 
-const MOBILE_TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+const MOBILE_TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "countdown", "heading", "links", "text"]);
 
 /**
  * Celular: ate 32 entradas; a posicao no modo do computador (sem `place` = na sequencia); `textStyle` so em
@@ -787,6 +829,33 @@ export function popupFreeContentProblems(design: PopupFreeDesign, content: Popup
   return problems;
 }
 
+/**
+ * Contador (L6f): o que so vale na hora de publicar e de retomar um pop-up pausado (C17), nunca no rascunho nem num
+ * modelo (C18: um modelo nao tem quando). "Ate o fim do pop-up" pede que o pop-up tenha fim; "ate uma data" pede uma
+ * data no futuro. A chave do fim e a do campo "Termina"; a da data, a do proprio Contador.
+ */
+export function freeCountdownProblems(design: Pick<PopupFreeDesign, "children">, endsAt: string | null | undefined, now: number): { message: string; path: string }[] {
+  const problems: { message: string; path: string }[] = [];
+  let endReported = false;
+
+  walkFreeNodes(design.children, (node) => {
+    if (node.type !== "countdown") {
+      return;
+    }
+
+    if (node.until?.kind === "date") {
+      if (Date.parse(node.until.at) <= now) {
+        problems.push({ message: M.countdownPast, path: `freeDesign.nodes.${node.id}.until.at` });
+      }
+    } else if (!endsAt && !endReported) {
+      endReported = true;
+      problems.push({ message: M.countdownEnd, path: "window.endsAt" });
+    }
+  });
+
+  return problems;
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Chaves de erro: indices viram ids (estavel se a ordem mudar)
  * ---------------------------------------------------------------------------------------------- */
@@ -853,7 +922,7 @@ export function freeErrorKeys(design: Pick<PopupFreeDesign, "assets" | "children
 }
 
 /* ------------------------------------------------------------------------------------------------
- * JSON Schema (para o PR "Criar com IA")
+ * JSON Schema (o contrato do docs/27 §9 em forma de maquina)
  * ---------------------------------------------------------------------------------------------- */
 
 /**

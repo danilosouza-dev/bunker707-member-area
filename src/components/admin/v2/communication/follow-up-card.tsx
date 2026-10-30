@@ -47,7 +47,7 @@ import {
   type QuickChoiceId,
   type WhenUnit
 } from "./follow-ups-view-model";
-import { previewSender, type AudienceFlowContext, type AudienceNoticeChoice, type NoticeSenderChoice } from "./notices-view-model";
+import { previewSender, type AudienceFlowContext, type AudienceNoticeChoice, type AudienceWebinarChoice, type NoticeSenderChoice } from "./notices-view-model";
 
 // Uma notificacao seguinte no cartao "Depois desta notificação" (docs/23 §2.2): cabecalho com o numero e o
 // resumo ("1 dia depois do envio · para quem viu no sino, mas não abriu"), a linha do conteudo (quem envia,
@@ -67,6 +67,8 @@ export type FollowUpEditorOptions = {
   productsLoaded: boolean;
   segments: readonly NoticeSegmentOption[];
   senders: readonly NoticeSenderChoice[];
+  /** Lives publicadas: o seletor da regra "Participação em lives" (sem a lista, so "qualquer live"). */
+  webinars?: readonly AudienceWebinarChoice[];
 };
 
 type FollowUpCardProps = {
@@ -445,6 +447,7 @@ export function FollowUpCard({
                 productsLoaded={options.productsLoaded}
                 segments={options.segments}
                 value={item.rules}
+                webinars={options.webinars}
               />
             </form>
           ) : whoError ? (

@@ -514,6 +514,168 @@ Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker)
 
 ---
 
+## 8B. Webinarios: servidor C do Jitsi e o gravador por hora (servidor D) (29/10/2026)
+
+O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Estado em 29/10/2026**: o C existe (`provision-meet`
+com o ok do produtor no chat: `bunker707-meet`, cx23 em fsn1, EUR 6,49/mes sem IVA pela API, 2.31.106.201,
+`meet.bunker707.com.br` so DNS). Em seguida, no mesmo dia: `deploy-meet` da `dev` com
+`APP_DOMAIN=bunker707-member-area.vercel.app` (o `ROOM_GUARD_URL` do C aponta para a Vercel de teste, §8B.3),
+`secrets-meet` com o `JWT_APP_SECRET`, e na Vercel `WEBINAR_MEET_DOMAIN` e `WEBINAR_JWT_SECRET` (Production e Preview).
+O primeiro `deploy-meet` subiu o stack mas parou no healthcheck do jicofo (`/about/health` 404 sem
+`JICOFO_ENABLE_HEALTH_CHECKS`; corrigido no compose, §8B.3). O D (gravador) so existe durante cada live e cada criacao
+espera o pedido da equipe. O app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
+
+### 8B.1 O que e cada servidor e quanto custa
+
+| Servidor | Papel | Tipo | Cobranca |
+|---|---|---|---|
+| C, `bunker707-meet` | a Live ao vivo: Jitsi proprio (web, prosody, jicofo, jvb) atras do Caddy, em `meet.<dominio>` | cx23 (`MEET_TYPE`) | mensal, a partir da criacao (preco lido pela API na hora; referencia `docs/30` §7.5) |
+| D, `bunker707-jibri-<sessao>` | grava uma live em 1080p e envia o MP4 para a Bunny | cpx42 (`JIBRI_TYPE`; reserva ccx23 e cpx32, este em 720p) | por hora, so durante a live (uma live de 2,5 h ~ EUR 0,28) |
+
+O C nao guarda dado de aluno (chat, presenca e relatorio ficam no banco do A), por isso nao tem Storage Box nem backup:
+recriar e `provision-meet` + `deploy-meet` + `secrets-meet`.
+
+### 8B.2 Criar o servidor C (etapa `provision-meet`)
+
+1. O produtor da o ok no chat. 2. A IA dispara `provision-meet` com `CONFIRMADO=sim` nas opcoes (sem ele a etapa recusa). A
+etapa garante a chave SSH do projeto, cria `bunker707-meet` com o firewall proprio (80/443 TCP e 443 UDP de qualquer lugar,
+UDP 10000 da midia, 3478/5349 reservados para TURN, 5222 so dos gravadores vivos, 22 so durante as etapas), faz o
+bootstrap (ufw, Docker, fail2ban, swap) e grava `meet.<dominio>` na Cloudflare **so DNS** (sem proxy: WebRTC nao passa
+pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o ufw e o Caddy.
+
+### 8B.3 Deploy e segredos (etapas `deploy-meet` e `secrets-meet`)
+
+- `deploy-meet` roda da `main` ou da `dev` (decisao do produtor em 29/10/2026: o C nao guarda dado de aluno e atende o
+  teste da Vercel e a producao; o `deploy-membros` continua so da `main`). Na primeira vez gera `infra/jitsi/.env` no
+  servidor (`generate-secrets.sh`: senhas do Jicofo, do JVB e do Jibri, as credenciais de TURN e o `JWT_APP_SECRET`,
+  nunca impressos), grava `JVB_ADVERTISE_IPS` com o IPv4 publico, sobe o stack com o perfil `borda` e roda o
+  `smoke.sh` (site no ar, servicos saudaveis, nenhuma marca do Jitsi na interface, UDP 10000 ouvindo).
+- Com o stack ja no ar, um novo `deploy-meet` recria containers e derruba quem esta na sala: so com `SEM_LIVE_2H=sim`
+  nas opcoes (nenhuma live nas proximas 2 h).
+- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard` e `ROOM_GUARD_URL=<origem da area de
+  membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
+  acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
+  removeu ou baniu e recusa a entrada dessas contas mesmo com o token antigo (`docs/30` §8.1). A busca e assinada com
+  uma chave derivada do `JWT_APP_SECRET`: nenhum segredo novo. **Hoje o C atende a Vercel de teste**: o `.env` foi
+  gerado com `APP_DOMAIN=bunker707-member-area.vercel.app` nas opcoes do `deploy-meet` (29/10/2026). No dia em que a
+  producao (`membros.<dominio>`) passar a usar a sala ao vivo, trocar a linha no C (`exec-meet` com
+  `sed -i 's#^ROOM_GUARD_URL=.*#ROOM_GUARD_URL=https://membros.<dominio>/api/webhooks/room-guard#' infra/jitsi/.env`
+  e um `deploy-meet` com `SEM_LIVE_2H=sim`): uma URL so, entao o teste e a producao nao barram ao mesmo tempo.
+- O jicofo so responde `/about/health` com `JICOFO_ENABLE_HEALTH_CHECKS=1` (no compose, padrao 1): sem isso a rota da
+  404, o container fica `unhealthy` para sempre e o `deploy-meet` para no `wait_healthy jicofo` (a sala funciona, mas o
+  `smoke.sh` nao roda). E com `JICOFO_ENABLE_REST=1` (padrao 1) a REST ouve em `0.0.0.0` dentro do container: sem
+  isso ela fica so no loopback do container e o `smoke.sh`, que pergunta em `127.0.0.1:8888` do servidor, ve `000`. A
+  porta continua publicada so em `127.0.0.1`.
+- `secrets-meet` grava `JWT_APP_SECRET` no C pelo envelope (`docs/20` §4A.6). O **mesmo valor** vai para o app em
+  `WEBINAR_JWT_SECRET` por `secrets-membros` (o app assina o token da sala, o Jitsi confere). Sem ele ninguem entra
+  (`ENABLE_GUESTS=0`, `AUTH_TYPE=jwt`).
+- O segredo do repositorio `JIBRI_SECRETS` (linhas `CHAVE=VALOR`: `BUNNY_LIBRARY_ID`, `BUNNY_API_KEY`,
+  `WEBINAR_RECORDER_WEBHOOK_SECRET`; opcionais `WEBINAR_RECORDER_WEBHOOK_URL` e `BUNNY_COLLECTION_ID`) so entra nos
+  passos de `jibri-up` e `jibri-down`, nunca no ambiente do job inteiro. O `WEBINAR_RECORDER_WEBHOOK_SECRET` tambem vai
+  para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
+- `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
+  custo; avisa quando um gravador passa de 6 h ligado.
+- **No dia em que a producao (`membros.<dominio>`) passar a usar a sala ao vivo**, junto com a troca do `ROOM_GUARD_URL`
+  para `https://membros.<dominio>/api/webhooks/room-guard`: o `MEET_FRAME_ANCESTORS` do C tambem foi gerado so com a
+  origem da Vercel de teste (o `--app-origin` do primeiro `deploy-meet`) e precisa da origem de producao; sem ela o
+  navegador recusa a sala dentro da area (o cabecalho `frame-ancestors` do Caddy do C, `docs/30` D18 e D40). O
+  `frame-ancestors` aceita uma lista separada por espaco, entao as duas origens ficam: `exec-meet` com
+  `sed -i 's#^MEET_FRAME_ANCESTORS=.*#MEET_FRAME_ANCESTORS="https://membros.<dominio> https://bunker707-member-area.vercel.app"#' infra/jitsi/.env`
+  e um `deploy-meet` com `SEM_LIVE_2H=sim` (recria o Caddy com o valor novo e o `smoke.sh` confere o cabecalho). As
+  aspas funcionam: o compose tira as aspas do valor no `.env`, o Caddyfile poe o valor inteiro dentro de
+  `"frame-ancestors {$MEET_FRAME_ANCESTORS}"` e o `env_value` dos scripts (`smoke.sh`) tambem tira as aspas. O
+  `deploy-meet` nao regera um `.env` que ja existe, entao a troca fica.
+
+### 8B.4 Antes da primeira live real
+
+Testar a sala com 2 ou 3 contas (celular e computador, uma em 4G), conferir que nenhuma tela mostra o nome ou a marca do
+Jitsi, que o aluno entra sem microfone e so com o token do app, e rodar o roteiro de conferencia do `docs/30` §10.3.
+
+### 8B.5 O gravador por hora (etapas `jibri-up`, `jibri-down` e `exec-jibri`)
+
+- **Antes da live** (cerca de 30 min): `jibri-up` com `CONFIRMADO=sim SESSAO=<id da sessao>`. Cria
+  `bunker707-jibri-<sessao>` (tenta o cpx42 e as reservas nos locais da lista), grava `/opt/jibri/.env` por SSH (senhas e
+  dominios do `.env` do C, segredos do `JIBRI_SECRETS`), abre a 5222 do C so para o IP dele, sobe o container, espera o
+  Jibri ficar saudavel e avisa o app (`state=ready`). Sem estoque em tipo algum: avisa `unavailable` (a live acontece, sem
+  gravacao; o plano B e gravar pelo OBS e enviar o arquivo pelo admin).
+- **Durante a live**: o host clica Gravar; o app marca a ancora no relogio do servidor. O MP4 fica na maquina D.
+- **Depois da live**: o `finalize.sh` envia o MP4 para a Bunny Stream e avisa o app (`uploaded`, com duracao, tamanho e
+  sha256; ou `upload_failed`, guardando o arquivo). Em seguida `jibri-down` com `CONFIRMADO=sim SESSAO=<id>`: so apaga
+  quando o app confirma `uploaded` (ou que nao houve gravacao) e nao ha MP4 sem a marca `.uploaded` na maquina. `FORCAR=1`
+  apaga mesmo assim (perde o arquivo que nao subiu). Sem `SESSAO`, o `jibri-down` cuida de todos os gravadores vivos.
+- **Envio falhou** (`upload_failed`, o e-mail chega ao produtor; o MP4 fica na maquina com a marca `.failed`): rodar o
+  envio de novo com `exec-jibri`, `SESSAO=<id>` e `COMANDO='docker compose exec -T jibri sh /config/finalize.sh'` (sem
+  argumento ele pega o MP4 mais novo da pasta de gravacoes; o app aceita o `uploaded` depois do `upload_failed` e a
+  gravacao volta a `processing`); sem sucesso, copiar o MP4 da maquina e envia-lo pelo painel da Bunny (ligar o video a
+  sessao pelo console da sala, **Enviar gravacao** / **Ligar um video da Bunny**), e so depois `jibri-down`.
+- O `jibri-down` de uma sessao cujo servidor ja nao existe manda o `gone` de novo ao app (o primeiro pode ter se
+  perdido); sem isso o job pediria a devolucao a cada 2 h para sempre.
+- Um gravador esquecido custa por hora: `status-meet` avisa depois de 6 h; a regra e apagar no mesmo dia.
+
+### 8B.6 Atualizar o Jitsi
+
+A tag `stable-NNNNN` fica fixada em `infra/jitsi/.env.example` (e em `infra/jitsi/jibri/.env.example`, sempre igual). A
+cada 4 a 8 semanas: `sh infra/jitsi/scripts/update.sh --check` (compara com a ultima stable), `--apply` (reescreve as duas
+tags), ensaio local, PR, `main`, e `deploy-meet` com `SEM_LIVE_2H=sim` (o servidor roda `update.sh --server`, guarda a tag
+anterior em `infra/jitsi/.previous-image-version` e roda o smoke). Voltar: `exec-meet` com
+`COMANDO='bash infra/jitsi/scripts/update.sh --server --tag <tag anterior> --sem-live'`.
+
+### 8B.7 Plano B: "Live gravada do dia"
+
+Se o C cair na hora da live e nao voltar em 5 minutos: avisar a turma pelo sino (aviso da Comunicacao), publicar uma
+**Live gravada do dia** com a gravacao mais recente do mesmo tema (ou o OBS gravando a tela do apresentador, enviado depois
+como Replay) e remarcar a Live ao vivo (o app avisa quem tinha vaga). Nunca anunciar a gravada como ao vivo fora da area
+(`docs/30` §8.6). O texto pronto do sino e o do `docs/30` §2.7 ("A live {titulo} de hoje mudou: assista a sessao gravada
+as {hora}. Entrar."); o clique unico no admin que manda esse texto a quem garantiu vaga ainda nao existe (fica para
+depois, `docs/30` §11): por ora, um aviso da Comunicacao para o segmento de quem tem vaga. Monitor: com o C no ar, um
+monitor HTTPS no Better Stack (o mesmo do servidor A, §12) em `https://meet.<dominio>/` (200 e a palavra `Bunker707`),
+o certificado (aviso 14 dias antes) e o ping; o alerta vai para os mesmos destinatarios do servidor A (o produtor e a
+equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o plano B acima comeca antes da hora.
+
+### 8B.8 Incidentes
+
+| Sintoma | O que fazer |
+|---|---|
+| `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`); o `smoke.sh` ve `000` em `127.0.0.1:8888` com o container saudavel = falta `JICOFO_ENABLE_REST` (a REST so no loopback do container) |
+| Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
+| Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
+| Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |
+| Gravador ligado depois da live | `jibri-down` com `CONFIRMADO=sim` (sem `SESSAO`: todos). O app ja pede o `jibri-down` da sessao sozinho (job `webinar-recordings`, de novo a cada 2 h) e avisa no sino depois de 6 h; se o aviso chegou, o pedido do app nao esta passando: conferir o `GITHUB_INFRA_TOKEN` (§8B.9) |
+| Aluno ve a sala mas sem video nem audio | UDP 10000 e TURN no firewall do C; os `webinar_room_error` do aluno (so o codigo) no historico; `exec-meet` com `COMANDO='docker compose logs --tail 200 jvb'`; testar com TURN forcado; TURN em 443 e a opcao B (`docs/30` I7) |
+| Apresentador entra como participante, nao como moderador | `XMPP_MUC_MODULES=token_affiliation` e `ENABLE_AUTO_OWNER=0` no `.env` do C; o claim `moderator` vem do papel no app (o Apresentador precisa de `messaging.publish`; a Equipe so com "Pode remover e silenciar na sala"); `exec-meet` com `docker compose logs prosody`. Nunca imprimir o token nem a chave |
+| "Gravacao pronta" nao chega (o console fica em Preparando) | o Jibri no brewery? a regra 5222 do C para o IP do gravador? `exec-jibri` com `docker compose logs jibri`; o webhook recusou? `webinar_recording_events` da sessao (o motivo do `ignored` em `error_message`; 401 nao grava linha: conferir `WEBINAR_RECORDER_WEBHOOK_SECRET` igual no app e no `JIBRI_SECRETS`); refazer `jibri-up` |
+| Hetzner sem estoque para o gravador | log do `jibri-up` ("unavailable" nos locais e tipos de reserva); o console mostra "Sem gravador hoje: gravar no navegador": gravar no navegador ou no OBS e ligar o video pelo console (**Enviar gravacao**) |
+| Envio para a Bunny falhou (`upload_failed`) | o e-mail "A gravacao nao subiu" chega ao Apresentador; arquivo em `/opt/jibri/recordings` (`exec-jibri`); reenviar como em §8B.5 ou subir pelo painel da Bunny e ligar pelo console; so entao `jibri-down` com `FORCAR=1` |
+| Certificado do `meet` invalido | `docker compose logs caddy` no C; o registro DNS so DNS (sem proxy); porta 80 aberta; `docker compose restart caddy` |
+| O servidor C sumiu | painel da Hetzner; o plano B "Live gravada do dia" (§8B.7) e o aviso pelo sino; reprovisionar com `provision-meet` + `deploy-meet` + `secrets-meet` (o DNS e refeito pelo `cf_apply_dns`) |
+| Aluno removido ou banido volta para a sala | `XMPP_MUC_MODULES` com `bunker_room_guard` e `ROOM_GUARD_URL` no `.env` do C; `exec-meet` com `docker compose logs prosody` ("lista de barrados indisponivel" = o app nao respondeu: conferir `JWT_APP_SECRET` = `WEBINAR_JWT_SECRET` e o `ROOM_GUARD_URL`); o token vence em 15 min de qualquer jeito |
+| O segredo do token vazou | trocar `JWT_APP_SECRET` (C, `secrets-meet`) e `WEBINAR_JWT_SECRET` (app, `secrets-membros`) juntos, fora de live (derruba quem esta na sala) |
+
+### 8B.9 O app da fase 3 (sala ao vivo, 29/10/2026)
+
+O app ja tem a sala ao vivo (`docs/30` §11; a migracao `202610290002` vai para a nuvem de teste antes do merge, `docs/21`
+§9.8, e para a producao pelo `deploy-membros`, §9). Sem as variaveis abaixo nada quebra: a sala diz "em breve" e a Live gravada segue. Cada uma entra pelo envelope
+(`secrets-membros`, §4A.6), nunca em `NEXT_PUBLIC_*`. O `environment:` do servico `app` em
+`infra/compose/docker-compose.yml` repassa todas ao container (ate 30/10/2026 nao repassava: gravadas no `.env`, o app
+nao as via; a guarda `tests/infra-compose-env.guard.test.mjs` confere que toda variavel do `.env.example` que o app le
+chega ao container):
+
+| Variavel (app) | Para que | Sem ela |
+|---|---|---|
+| `WEBINAR_MEET_DOMAIN` | hostname do C (`meet.<dominio>`, sem `https://`); tambem lido no build pela Permissions-Policy do app (`next.config.ts`, a mesma em toda pagina) | sala "em breve"; o build usa `meet.bunker707.com.br` na Permissions-Policy |
+| `WEBINAR_JWT_SECRET` (+ `WEBINAR_JWT_APP_ID`, vazio = `bunker707`) | o token da sala; o mesmo valor de `JWT_APP_SECRET` no C | sala "em breve" (`join-token` 503) |
+| `WEBINAR_RECORDER_WEBHOOK_SECRET` | o HMAC do webhook do gravador; o mesmo valor do `JIBRI_SECRETS` | o webhook responde 401 e nada e gravado |
+| `GITHUB_INFRA_TOKEN` (opcional; so "Actions: write" deste repositorio) | o app pede `jibri-up` / `jibri-down` sozinho (Preparar gravacao, Gravar automaticamente, a devolucao) | o console mostra a reserva e a maquina e pedida a mao pelo workflow |
+| `BUNNY_STREAM_API_KEY` + `BUNNY_STREAM_LIBRARY_ID` (opcionais) | o job `webinar-recordings` consulta a codificacao ate `ready`, cria o replay e apaga o vencido | a gravacao fica em processamento ate a equipe ligar o video pelo console |
+| `WEBINAR_RECORDER_DISPATCH` | so fora da producao (`fake` = o duble dos testes) | nada (nunca na producao) |
+
+A reserva **Gravar no navegador** do console usa a gravacao local do Jitsi, ligada de forma explicita no
+`infra/jitsi/web/custom-config.js` (`config.localRecording = { disable: false }`): entra no C no proximo `deploy-meet`.
+
+Antes de cada live: **Testar sala** no console (com a sessao ainda agendada, o Apresentador entra na sala da propria
+sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao chega a **Pronto**. Durante: o console
+mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
+
 ## 9. Deploy de nova versao do app
 
 Desde 19/10/2026 a etapa so roda a partir da `main` (passo "Deploy so da main" do workflow): o caminho e branch da tarefa -> PR para `dev` (teste na Vercel com o Supabase da nuvem) -> PR `dev` -> `main` -> `deploy-membros` (ambientes em `CONTRIBUTING.md`). Em 18/10/2026 o caminho de producao passou a ser a etapa `deploy-membros` (secao 4A.3): ela constroi a imagem no runner com as `NEXT_PUBLIC_*` lidas do `.env` do servidor (`SUPABASE_PUBLIC_URL`, `SUPABASE_PUBLISHABLE_KEY` e, se preenchidos, PostHog e Sentry), publica `ghcr.io/<repositorio>:hetzner-sha-<commit>` e, no servidor, roda o `infra/scripts/deploy.sh --image` descrito abaixo. Nao ha variaveis `NEXT_PUBLIC_*` no GitHub. O `build-image.yml` continua rodando a cada push na `main` e em PR que mexe no build (Dockerfile, package.json, next.config) para conferir que o build passa; a imagem que ele publica (`sha-<commit>`) nao leva as `NEXT_PUBLIC_*` do servidor e nao e a de producao; por isso a de producao tem o prefixo `hetzner-`.
@@ -528,6 +690,10 @@ sh infra/scripts/deploy.sh --image ghcr.io/danilosouza-dev/bunker707-member-area
 O script atualiza `APP_IMAGE` no `.env` (guardando a anterior em `infra/compose/.deploy-history`), puxa a imagem, aplica as migracoes novas, recria so o app, espera o healthcheck e roda o smoke. `curl https://membros.bunker707.com.br/api/health` mostra a versao no ar. Para voltar: `deploy.sh --image <anterior> --no-migrate`, por `exec-membros` (a imagem anterior esta no disco, entao nao ha pull; migracao nao volta sozinha: toda migracao do repositorio e aditiva por regra do docs/13).
 
 **Antes de voltar para uma imagem anterior a Comunicacao v3b-2** (`docs/29`, migracao `202610260001`): em Comunicacao > Avisos e pop-ups, **pausar** os pop-ups com **No primeiro acesso** e **Ao concluir um curso** (a coluna Quando da lista mostra o momento) e so depois rodar o `deploy.sh --image <anterior> --no-migrate`. A imagem anterior le esses momentos como "Ao abrir a pagina": o plano dela os mostraria em toda pagina escolhida, o tick dela habilitaria o segmento inteiro num "No primeiro acesso" e editar um deles ali gravaria "Ao abrir a pagina" sem erro (`docs/29` R1). Depois de voltar para a versao nova, retomar: o recalculo tira as linhas sem a marca `first_access_at`. A migracao fica (aditiva) e nao atrapalha a imagem anterior.
+
+**Antes de voltar para uma imagem anterior ao Quem pode por regras** (`docs/30` D41, migracao `202610300001`): nada a fazer no banco, mas quatro coisas na equipe, todas **antes** do `deploy.sh`. **(1) As lives com as regras novas.** Em Comunicacao > Webinarios, toda live em **Segmento** ou **Produto ou segmento** cujo segmento usa **Ganhou acesso recentemente** ou **Participação em lives** (inclusive "nunca garantiram vaga em nenhuma live") e que acontece, ou manda lembrete, enquanto a imagem anterior estiver no ar: trocar o **Quem pode** para **Quem tem o produto** (ou **Todos**) com a imagem nova ainda no ar (o schema da imagem anterior recusa salvar um webinario com essas regras) e anotar quais mudaram; ou nao voltar a imagem com uma delas marcada para as proximas horas. A imagem anterior avalia o tipo de regra que nao conhece como "nao" e nao tem a ancora: a live em **Segmento** fecha para todos os alunos, inclusive quem ja garantiu vaga ("Esta live não está disponível para você" na pagina e na sala), e no **Produto ou segmento** so quem tem o produto entra. E os avisos da live na imagem anterior (lembretes de 24 h e 1 h, **Começou agora**, cancelada e remarcada) nao conferem o **Quem pode**: vao para todas as vagas, e quem clica cai no "não disponível" (300 vagas numa live em Segmento com "Ganhou acesso hoje a Curso X" = 300 lembretes de 1 h para uma pagina fechada). Sem a ancora, em qualquer live em Segmento quem garantiu vaga e saiu do segmento tambem deixa de ver a live enquanto a imagem anterior estiver no ar. O segmento fica gravado no webinario mesmo com outro **Quem pode**: depois de voltar para a versao nova, devolver o **Quem pode** de cada live anotada. **(2) Os fluxos.** **Pausar os fluxos que usam as regras novas numa condicao, no Objetivo ou no "Só para quem…"**. Em Comunicacao > Fluxos (e nos avisos com notificacoes seguintes), pausar todo fluxo com **Ganhou acesso recentemente** ou **Participação em lives** numa condicao ("Participou da live X?"), no Objetivo ou no "Só para quem…" (ou no "Para quem") de uma notificacao, e so depois rodar o `deploy.sh --image <anterior> --no-migrate`. A imagem anterior avalia um tipo de regra que nao conhece como "nao": numa condicao, todo aluno que chega nela vai pelo caminho **Não** e recebe as notificacoes desse caminho (inclusive quem participou da live: "Voce perdeu, veja o replay"), e com "Esperar ate ser verdade" todos esperam ate o prazo e tambem vao pelo **Não**; no Objetivo, ninguem sai do fluxo por ele e quem ja atingiu continua recebendo; no "Só para quem…", ninguem combina, e todo aluno que chega na notificacao nao a recebe e para ali naquele caminho (nao volta a receber quando a imagem nova voltar). Depois de voltar para a versao nova, retomar esses fluxos. **(3) As notificacoes agendadas.** Em Comunicacao > Avisos e pop-ups, toda notificacao **agendada** cujo segmento usa **Ganhou acesso recentemente** ou **Participação em lives** e cuja hora cai enquanto a imagem anterior estiver no ar: abrir e mudar o **Quando** para depois da volta (ou salvar uma mudança como rascunho, que cancela o envio agendado) e anotar quais mudaram. O tick da imagem anterior reserva o aviso na hora, avalia a regra como "nao" para todo aluno e grava o aviso como enviado, com 0 destinatarios (o publicar confere o segmento vazio, o envio pelo tick nao): quando a imagem nova volta, o aviso continua enviado e ninguem o recebeu. Depois de voltar para a versao nova, agendar de novo cada aviso anotado. **(4) Os modelos.** Com a imagem anterior no ar, nao usar, nao salvar e nao excluir os modelos de Notificacao ou de Pop-up (`docs/28`) cujo segmento, ou cujas notificacoes seguintes, usam **Ganhou acesso recentemente** ou **Participação em lives**. O schema da imagem anterior recusa as regras novas ao ler o modelo: o segmento cai para "Todos os alunos" (com a nota "O segmento guardado neste modelo não pôde ser lido: ficou “Todos os alunos”.") e as notificacoes seguintes ficam de fora, entao o **Usar** abre o aviso para a escola inteira e sem as seguintes, e salvar o modelo ali grava sem o segmento e sem as seguintes (a imagem nova nao recupera). Onde a regra "fecha" e nao precisa de nada: o segmento dos pop-ups e o "Quem entra" de um fluxo (ninguem novo ve ou entra enquanto a imagem anterior estiver no ar; ao voltar, o recalculo e a entrada voltam a valer). O modo **Quem tem o produto e está no segmento** e gravado como `access_mode = 'product'` + `audience_restricts = true` (nenhum valor novo no `access_mode`, que a imagem anterior leria como `everyone`): a imagem anterior ignora a coluna e trata essas lives como **Quem tem o produto** enquanto estiver no ar (o segmento deixa de restringir, o produto continua exigido; nenhuma live abre para quem nao tem o produto). O schema dela recusa salvar webinarios e avisos com as regras novas. Ao voltar para a versao nova, o resto volta como estava (o banco nao muda); o que a imagem anterior ja gravou fica: o aviso agendado que saiu com 0 destinatarios, quem parou num "Só para quem…" e o modelo salvo com ela (os passos 2 a 4 evitam isso).
+
+**Antes de voltar para uma imagem anterior a uniao das regras de lives** (a integracao da fase 4 dos webinarios, `docs/30` D52 e `docs/22` §3; sem migracao): as acoes do follow-up (viu o replay, viu o card de compra, saiu antes dele, clicou e nao comprou, comprou pelo card) sao acoes novas do mesmo tipo de regra **Participação em lives** (`webinar`), e a imagem do Quem pode por regras le qualquer acao que nao conhece como **participou** (negada, **não participou**), em vez de "nao". Antes do `deploy.sh --image <anterior> --no-migrate`: em Comunicacao > Avisos e pop-ups, retirar ou pausar os pop-ups no ar e tirar da agenda as notificacoes cujo segmento usa uma dessas acoes (um pop-up "comprou pelo card na live X" iria para todo mundo que participou da live X); em Comunicacao > Fluxos, pausar os fluxos com uma delas no "Quem entra"; e nao abrir nem salvar esses avisos e modelos com a imagem anterior no ar (o editor dela tira a regra ao salvar). Depois de voltar para a versao nova, devolver o que foi pausado.
 
 **Antes de voltar para uma imagem anterior ao Celular do Livre** (`docs/27` §9.10, PR L3: valores proprios do celular em `devices.mobile`, sem migracao): a imagem anterior tem o schema estrito que recusa a chave `devices`, entao todo pop-up Livre salvo com algum valor de Celular fica invalido para ela ate a imagem nova voltar: some para os alunos (sai da lista no ar com o log `[comunicacao] design livre invalido <id do aviso>`), da 404 no `show` e abre como Padrao no editor do aviso (salvar ali troca o Livre pelo Padrao: nao salvar esses avisos com a imagem anterior no ar). Os Livres sem valor de Celular continuam iguais. O mesmo vale para os modelos (`docs/28`): um modelo de Design cujo Livre tem valores de Celular aparece como ilegivel ("Este modelo não pode ser aberto…") e um modelo de Pop-up com esse Livre abre com o design Padrao; nao excluir nem salvar esses modelos ate a imagem nova voltar. Ao voltar para a versao nova, avisos e modelos reaparecem como estavam (o banco nao muda). O espelho do R1 (`docs/29`): com uma imagem anterior no ar (inclusive no meio de um deploy), ninguem salva valores de Celular no editor Livre; a imagem nova le os Livres de antes sem mudanca.
 

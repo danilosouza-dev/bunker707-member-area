@@ -7,15 +7,16 @@ import "server-only";
 // avisos citados por regras), as visitas das paginas acompanhadas, os acessos, a passagem de cada aluno e
 // quem e da equipe. Progresso, turmas, entrada e comentarios so sao lidos (loadAudienceFactsFor, so para
 // os alunos do lote) quando alguma regra dos fluxos do lote usa. O limite do dia nao e lido aqui: so o RPC
-// de aplicacao decide.
+// de aplicacao decide. As lives de cada aluno (regra "Participação em lives") so sao lidas, so para os alunos do
+// lote, quando alguma regra dos fluxos do lote usa (communication_webinar_facts).
 
 import { fetchPublishedLessonIndex } from "@/server/students/store";
 import {
-  accessFactsOf,
+  accessOnlyFacts,
   fetchCommentCounts,
   loadAudienceFactsFor,
+  loadWebinarFacts,
   messageFactOf,
-  openAccessRows,
   type AudienceEntitlementRow
 } from "./audience-facts";
 import {
@@ -76,8 +77,6 @@ export function forgetFlows(cache: FlowTickCache, flowIds: Iterable<string>) {
  * `revision`: a do fluxo lida antes da arvore (vai junto com a decisao; 7.4 recusa se mudou).
  */
 export type FlowBatchItem = { input: DecideInput | null; revision: number | null; task: FlowTaskRow };
-
-const ZERO_COMMENTS: AudienceCommentCounts = { d7: 0, d30: 0, d90: 0, total: 0 };
 
 function timeOf(value: string | null | undefined) {
   if (!value) {
@@ -214,22 +213,6 @@ function planOf(flow: FlowRow, tree: FlowTree, cache: FlowTickCache): FlowPlan {
   return { ctaPageKeys, dedupeKeys, definitions, entryId: entry?.id ?? null, flow, goal, messageKeys, messagesByNode, pageKeys: Array.from(pageKeys), tree };
 }
 
-/** Fatos sem progresso, turmas, entrada e comentarios (nenhuma regra do lote usa): so acessos, do lote. */
-function minimalFacts(userId: string, accesses: readonly AudienceEntitlementRow[], now: number): AudienceStudentFacts {
-  return {
-    accesses: accessFactsOf(openAccessRows(accesses, now)),
-    cohortIds: [],
-    comments: ZERO_COMMENTS,
-    completedByContent: {},
-    completedLessons: 0,
-    lastSignInAt: null,
-    lastStudiedAt: null,
-    pace: "never_started",
-    totalLessons: 0,
-    userId
-  };
-}
-
 function groupByUser<Row extends { u: string }>(rows: readonly Row[]) {
   const groups = new Map<string, Row[]>();
 
@@ -336,13 +319,19 @@ export async function loadFlowBatchContext(
     }
   }
 
-  // Progresso, turmas, entrada e comentarios: so quando alguma regra dos fluxos do lote usa.
+  // Progresso, turmas, entrada e comentarios: so quando alguma regra dos fluxos do lote usa. As lives (regra
+  // "Participação em lives"): so destes alunos, so quando alguma regra pede; null num banco sem a migracao.
   const needs = audienceFactNeeds(planList.flatMap((plan) => plan.definitions));
   const baseFacts = new Map<string, AudienceStudentFacts>();
   let baseContext: Pick<AudienceContext, "commentRanks" | "lessonTotals"> = { commentRanks: buildCommentRanks([]), lessonTotals: {} };
+  const webinarFacts = needs.webinars ? await loadWebinarFacts(db, { userIds }) : null;
 
   if (needs.students) {
-    cache.lessonIndex ??= guarded(fetchPublishedLessonIndex(db));
+    // O indice de aulas so para progresso, ritmo e turma (audienceFactNeeds.lessons); entrada, ultimo estudo e
+    // comentarios nao usam.
+    if (needs.lessons) {
+      cache.lessonIndex ??= guarded(fetchPublishedLessonIndex(db));
+    }
 
     if (needs.comments !== "none") {
       cache.commentCounts ??= guarded(fetchCommentCounts(db));
@@ -352,7 +341,7 @@ export async function loadFlowBatchContext(
       commentCounts: needs.comments === "none" ? undefined : await cache.commentCounts!,
       comments: needs.comments,
       entitlements: Array.from(accessesByUser.values()).flat(),
-      lessonIndex: await cache.lessonIndex,
+      lessonIndex: needs.lessons ? await cache.lessonIndex! : new Map<string, Set<string>>(),
       staff
     });
 
@@ -362,7 +351,7 @@ export async function loadFlowBatchContext(
 
   const ctaPageKeys = Object.assign({}, ...planList.map((plan) => plan.ctaPageKeys)) as Record<string, string | null>;
   const messageKeys = new Set(planList.flatMap((plan) => plan.messageKeys));
-  const context: AudienceContext = { ...baseContext, flow: { ctaPageKeys }, messageKeys, now: nowMs };
+  const context: AudienceContext = { ...baseContext, flow: { ctaPageKeys }, messageKeys, now: nowMs, ...(webinarFacts ? { webinarFactsLoaded: true } : {}) };
   const userMessages = new Map(userIds.map((userId) => [userId, messagesOfUser(messagesByUser.get(userId) ?? [], entryBySource)]));
   const userVisits = new Map(
     userIds.map((userId) => [
@@ -381,12 +370,14 @@ export async function loadFlowBatchContext(
       return { input: null, revision: plan?.flow.revision ?? null, task };
     }
 
-    const base = baseFacts.get(task.user_id) ?? minimalFacts(task.user_id, accessesByUser.get(task.user_id) ?? [], nowMs);
+    const base = baseFacts.get(task.user_id) ?? accessOnlyFacts(task.user_id, accessesByUser.get(task.user_id) ?? [], nowMs);
     const entered = enteredAt.get(`${task.flow_id}|${task.user_id}`) ?? null;
+    const lives = webinarFacts?.get(task.user_id);
     const facts: AudienceStudentFacts = {
       ...base,
       messages: userMessages.get(task.user_id) ?? {},
-      ...(entered === null ? {} : { flow: { enteredAt: entered, pageVisits: userVisits.get(task.user_id) ?? {} } })
+      ...(entered === null ? {} : { flow: { enteredAt: entered, pageVisits: userVisits.get(task.user_id) ?? {} } }),
+      ...(lives ? { webinars: lives } : {})
     };
 
     return {

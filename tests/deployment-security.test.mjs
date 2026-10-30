@@ -30,7 +30,7 @@ test("application responses include baseline browser security headers", () => {
   }
 });
 
-test("microfone so no admin: a Permissions-Policy efetiva libera microphone=(self) nas telas do admin e bloqueia no resto do app", async () => {
+test("uma Permissions-Policy so para o app inteiro: camera, microfone e tela para a propria origem e o Jitsi proprio em toda pagina (de onde se chega a sala sem recarregar), geolocalizacao e pagamento bloqueados, nenhum terceiro", async () => {
   // next.config.ts importa ./src/lib/image-hosts sem extensao (como o Next resolve); aqui o Node precisa do ".ts".
   const { registerHooks } = await import("node:module");
   const configUrl = new URL("../next.config.ts", import.meta.url).href;
@@ -61,18 +61,45 @@ test("microfone so no admin: a Permissions-Policy efetiva libera microphone=(sel
     return value;
   }
 
-  for (const pathname of ["/admin", "/admin/comunicacao/avisos/novo", "/admin/comunicacao/avisos/0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e1f"]) {
+  // O Chrome fixa a politica no carregamento do documento e a navegacao interna do Next nao carrega outro: a sala
+  // aberta pelo Entrar da pagina da live, pela faixa "Ao vivo agora" de qualquer pagina, pelo sino ou pelo console a
+  // partir do editor fica com a politica da pagina de onde a pessoa veio (docs/30 I10). Por isso a mesma politica vale
+  // em toda pagina: na area do aluno, no login e no admin, inclusive nas salas.
+  const { DEFAULT_MEET_DOMAIN, meetDomainOf } = await import("../src/lib/jitsi-room-config.ts");
+  const meet = `https://${meetDomainOf(process.env.WEBINAR_MEET_DOMAIN) ?? DEFAULT_MEET_DOMAIN}`;
+  const mediaList = `(self "${meet}")`;
+  const paths = [
+    "/",
+    "/perfil",
+    "/login",
+    "/conteudo/teste-curso-agentes",
+    "/administrar",
+    "/webinario",
+    "/webinarios",
+    "/webinarios/aula-aberta",
+    "/webinarios/aula-aberta/sala",
+    "/admin",
+    "/admin/comunicacao/avisos/novo",
+    "/admin/comunicacao/avisos/0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e1f",
+    "/admin/comunicacao/webinarios",
+    "/admin/comunicacao/webinarios/0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e1f",
+    "/admin/comunicacao/webinarios/0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e1f/sala"
+  ];
+  const first = effective(paths[0], "Permissions-Policy");
+  for (const pathname of paths) {
     const policy = effective(pathname, "Permissions-Policy");
-    assert.match(policy, /(^|, )microphone=\(self\)(,|$)/, pathname);
-    assert.match(policy, /camera=\(\)/, `${pathname}: o resto continua bloqueado`);
-    assert.match(policy, /geolocation=\(\)/);
+    assert.equal(policy, first, `${pathname}: a mesma politica em toda pagina`);
+    const directives = Object.fromEntries(policy.split(", ").map((directive) => directive.split("=")));
+    for (const feature of ["camera", "microphone", "display-capture"]) {
+      assert.equal(directives[feature], mediaList, `${pathname}: ${feature} so para a propria origem e o Jitsi proprio`);
+    }
+    assert.equal(directives.geolocation, "()", pathname);
+    assert.equal(directives.payment, "()", pathname);
+    assert.ok(directives.fullscreen.includes(`"${meet}"`), `${pathname}: tela cheia do Jitsi`);
+    assert.ok(!/jit\.si|youtube|vimeo|mediadelivery|bunny/.test([directives.camera, directives.microphone, directives["display-capture"]].join(" ")), `${pathname}: nenhum terceiro com camera ou microfone`);
+    assert.equal(effective(pathname, "X-Frame-Options"), "DENY", pathname);
   }
-
-  for (const pathname of ["/", "/conteudo/teste-curso-agentes", "/perfil", "/administrar", "/login"]) {
-    assert.match(effective(pathname, "Permissions-Policy"), /(^|, )microphone=\(\)(,|$)/, pathname);
-  }
-
-  assert.equal(effective("/admin/comunicacao/avisos/novo", "X-Frame-Options"), "DENY", "o resto dos cabecalhos continua valendo no admin");
+  assert.equal(rules.filter((rule) => rule.headers.some((header) => header.key === "Permissions-Policy")).length, 1, "uma regra so: nenhuma pagina sobrescreve a politica");
 });
 
 test("proxy issues a per-request nonce and an enforced CSP", () => {
@@ -108,7 +135,9 @@ test("proxy lives in src/ (the only place Next 16 compiles it with the app in sr
     "/continue-assistindo",
     "/materiais",
     "/suporte",
-    "/perfil"
+    "/perfil",
+    // Webinarios (docs/30 §1.1).
+    "/webinarios"
   ]) {
     assert.ok(protectedPrefixes.includes(`"${prefix}"`), `${prefix} must stay behind login`);
   }

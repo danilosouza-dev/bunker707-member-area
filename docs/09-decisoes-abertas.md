@@ -203,7 +203,7 @@ Decisao tomada (tabela C1-C13 em `docs/22` §5):
 Fica em aberto:
 
 - convites entre membros e a comunidade (posts de texto, texto com audio, video, resultados, gamificacao): o pedido de resposta esta pronto; falta quem cria o convite. Video de aluno vai para Bunny ou Mux, nunca para o servidor da area;
-- salas ao vivo e webinarios "tipo Zoom" dentro da area, com comentarios e numeros de retencao (momento de saida, retencao media e maxima, quem mais comentou): pede um estudo proprio (provedor de video ao vivo, custo e escala) antes do desenho;
+- salas ao vivo e webinarios "tipo Zoom" dentro da area, com comentarios e numeros de retencao (momento de saida, retencao media e maxima, quem mais comentou): pede um estudo proprio (provedor de video ao vivo, custo e escala) antes do desenho. Estudo feito e decidido em 28/10/2026: `docs/30-webinarios.md` (Jitsi proprio sem marca d'agua no cx23, Jibri por hora, live gravada com o chat original, paineis separados). Decidido; as fases 1 e 2 entregues e a fase 3 (a sala ao vivo no app, migracao `202610290002`) pronta em 29/10/2026, com as decisoes novas D33 a D39 no `docs/30` §12.1; os servidores C e D seguem esperando o ok do produtor no chat (`docs/20` §8B). A fase 4 (29/10/2026, migrações `202610300002` a `202610300007`, aplicadas na nuvem de teste antes do merge; `docs/21` §9.10) decidiu e entregou o resto: os painéis "Lives ao vivo" e "Lives gravadas" com o Exportar nos nomes do Zoom; a Oferta A/B/C/D com a compra ligada ao último clique pelo webhook (atribuição de 7 dias) e a receita de `webhook_events.amount_cents`; o follow-up pelas ações da regra **Participação em lives** dos segmentos (a regra **Webinário** da 4b, unida a ela na integração de 30/10/2026; vale no "Para quem" e no "Quem entra", nunca dentro de um fluxo nem no Quem pode); a Simulação completa fora de todo número real; o Assistente de IA (nunca na linha mestre) com os atendentes e o modo híbrido; a Sala Live vertical; o "Começa quando você entra" por horário (uma sessão por horário, a turma do dia no chat); e a tradução do chat guardada por texto e idioma (decisões D43 a D59 no `docs/30` §12.1). Seguem em aberto, com o padrão assumido (`docs/30` §12.3, A27 a A32): a janela padrão do just-in-time, os limites do Assistente, uma Oferta ativa por webinário, a cascata dos cliques e dos pedidos à IA, a tradução guardada sem autor e a revisão jurídica dos avisos de venda simulados (desligados por padrão);
 - outros tipos e canais: faixa no topo, card na home, destaque, toast, e-mail (pela fila `email_outbox`), push e WhatsApp;
 - central de preferencias `/perfil/notificacoes` e descadastro sem login, que chegam junto com o primeiro canal fora da plataforma;
 - seletor de desfecho, "Salvar quem converteu como segmento", aba "Avisos recebidos" no perfil do aluno e "Enviar aviso" a partir de Alunos, Comunidade e Hoje.
@@ -326,7 +326,18 @@ Decisoes tomadas com o produtor (23/10):
 - **copiar e colar o design** (para pedir mudancas ao Claude ou ChatGPT do produtor por fora) vem no proximo PR (L1.1); **"Criar com IA"** pela conta conectada no gateway vem depois (L2);
 - o design guarda so caminhos dos nossos buckets e o endereco e montado na hora pela origem conferida; o X sempre visivel e erro que impede salvar.
 
-Em aberto: qual conta conectada usar primeiro no "Criar com IA" (Claude ou Codex) e a confirmacao do produtor de que a imagem de referencia pode ir para a empresa da IA (pergunta 3 da spec; pode responder depois).
+Fechado em 28/10/2026: o produtor **descartou o "Criar com IA"** (L2); nao sera feito, e as perguntas sobre a conta conectada e a imagem de referencia deixam de valer. O copiar e colar com as instrucoes para a IA (L1.1) continua.
+
+### Comunicacao: o que o produtor quer em seguida (28/10/2026)
+
+Decisoes do produtor de 28/10/2026, ao revisar o que ficou adiado em 26/10 (`docs/27` §10):
+
+- **enquete no pop-up**: desejada; e a enquete do construtor avancado que estava em aberto na v3b-1 (v3b-3, acima);
+- **contador no pop-up** (L6f do Livre): desejado, "aqueles contadores de oferta que tem em paginas de venda", para criar urgencia, com o aluno podendo clicar no botao; **feito** em 28/10 (`docs/27` §13.13), com as decisoes de 26/10 (`docs/27` §13.11). O produtor pode mandar exemplos de contadores para ajustar o visual (casas, cores, tamanhos) sem mudar o contrato;
+- **"Criar com IA"**: descartado (acima);
+- **textura e mistura** (L6e): **descartada** depois da explicacao ("Nao precisa colocar negocio de textura, de mistura, essas coisas");
+- **animacao de entrada** (L6d): registrada como **descartada** junto ("essas coisas"), a confirmar com o produtor; se ele quiser, volta com as criticas guardadas no `docs/27` §10;
+- **texto escrito direto no desenho** (L6g) e o L4c: continuam adiados, sem mudanca.
 
 ### Modelos da Comunicacao (25/10/2026)
 

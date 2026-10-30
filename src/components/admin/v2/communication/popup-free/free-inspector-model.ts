@@ -35,6 +35,8 @@ import {
   type FreeIconName,
   type FreeImageAsset,
   type FreeColorStop,
+  type FreeCountdownCell,
+  type FreeCountdownUnits,
   type FreeFade,
   type FreeFillPaint,
   type FreeId,
@@ -194,6 +196,29 @@ export const FREE_INSPECTOR_COPY = {
     snoozeOff: "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”."
   },
   audio: { note: "O player do áudio do aviso aparece aqui. Para trocar o áudio, use o campo Áudio." },
+  /** Contador (L6f, docs/27 §13.13). */
+  countdown: {
+    cellBorder: "Borda das casas",
+    cellFill: "Fundo das casas",
+    cellPadding: "Respiro das casas",
+    cellPaddingX: "Respiro dos lados",
+    cellPaddingY: "Respiro em cima e embaixo",
+    cellRadius: "Cantos das casas",
+    cells: "Casas e nomes",
+    date: "Data e hora",
+    dateHint: "No horário deste computador.",
+    ended: "Quando chegar a zero, mostrar",
+    endedNote: "O pop-up não fecha sozinho: este texto fica no lugar dos números.",
+    endsAt: (date: string) => `O pop-up termina em ${date}.`,
+    gap: "Espaço entre as casas",
+    labelColor: "Cor dos nomes",
+    labelSize: "Tamanho dos nomes",
+    labels: "Nomes embaixo dos números",
+    noEnd: "O pop-up ainda não tem fim. Escolha quando ele termina no card Quando, ou conte até uma data.",
+    separator: "Dois-pontos entre os números",
+    units: "O que mostra",
+    until: "Conta até"
+  },
   style: {
     text: "Texto",
     align: "Alinhamento",
@@ -450,6 +475,17 @@ export const FREE_LINE_STYLE_OPTIONS: readonly Option<"dashed" | "dotted" | "sol
   { label: "Contínua", value: "solid" },
   { label: "Tracejada", value: "dashed" },
   { label: "Pontilhada", value: "dotted" }
+];
+/** Contador (L6f): ate quando conta e as casas que mostra. */
+export const FREE_COUNTDOWN_UNTIL_OPTIONS: readonly Option<"date" | "end">[] = [
+  { label: "O fim do pop-up", value: "end" },
+  { label: "Uma data", value: "date" }
+];
+export const FREE_COUNTDOWN_UNITS_OPTIONS: readonly Option<FreeCountdownUnits>[] = [
+  { label: "Dias, horas, minutos e segundos", value: "dhms" },
+  { label: "Dias, horas e minutos", value: "dhm" },
+  { label: "Horas, minutos e segundos", value: "hms" },
+  { label: "Minutos e segundos", value: "ms" }
 ];
 export const FREE_SHAPE_OPTIONS: readonly Option<"ellipse" | "rect">[] = [
   { label: "Retângulo", value: "rect" },
@@ -1261,6 +1297,8 @@ export function freeLetterCount(design: Pick<PopupFreeDesign, "children">): numb
       count += freeTextLength(node.label);
     } else if (node.type === "button" && node.action.kind !== "cta" && node.label) {
       count += freeTextLength(node.label);
+    } else if (node.type === "countdown" && node.ended) {
+      count += freeTextLength(node.ended);
     }
   });
 
@@ -2212,6 +2250,8 @@ export function freeFirstContentField(node: FreeNode): string {
       return "nao-mostrar";
     case "audio":
       return "audio";
+    case "countdown":
+      return "conta-ate";
   }
 }
 
@@ -2256,7 +2296,24 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
     case "dismiss":
       return content("nao-mostrar");
     case "gap":
-      return content("espaco");
+      // No Contador, o espaco entre as casas fica no Estilo, junto das casas.
+      return node.type === "countdown" ? style("casas-espaco") : content("espaco");
+    case "until":
+      return content(second === "at" ? "data" : "conta-ate");
+    case "units":
+      return content("casas");
+    case "labels":
+      return content("nomes");
+    case "separator":
+      return content("dois-pontos");
+    case "ended":
+      return content("fim-texto");
+    case "cell":
+      return style({ border: "casas-borda", fill: "casas-fundo", padding: "casas-respiro", radius: "casas-cantos" }[second ?? "fill"] ?? "casas-fundo");
+    case "labelColor":
+      return style("nomes-cor");
+    case "labelSize":
+      return style("nomes-tamanho");
     case "textStyle":
       return second === "stroke" ? style(STROKE_FIELDS[third ?? ""] ?? "contorno") : style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
     case "hover":
@@ -2442,7 +2499,15 @@ function patchObject<T extends object>(current: T | undefined, patch: FreePatch<
 /** Muda o estilo do texto de um elemento com texto (Título, Texto, Selo, Botão, Links); os outros nao mudam. */
 export function withFreeTextStyle(design: PopupFreeDesign, id: FreeId, patch: FreePatch<FreeTextStyle>): PopupFreeDesign {
   return updateFreeNode(design, id, (node) => {
-    if (!("textStyle" in node) && node.type !== "heading" && node.type !== "text" && node.type !== "badge" && node.type !== "button" && node.type !== "links") {
+    if (
+      !("textStyle" in node) &&
+      node.type !== "heading" &&
+      node.type !== "text" &&
+      node.type !== "badge" &&
+      node.type !== "button" &&
+      node.type !== "links" &&
+      node.type !== "countdown"
+    ) {
       return node;
     }
 
@@ -2471,6 +2536,72 @@ export function withFreeBox(design: PopupFreeDesign, id: FreeId, patch: FreePatc
 /** Muda campos do proprio elemento (texto do selo, icone, como preenche, nome...); `undefined` tira o campo. */
 export function withFreeNodeFields(design: PopupFreeDesign, id: FreeId, patch: Record<string, unknown>): PopupFreeDesign {
   return updateFreeNode(design, id, (node) => patchObject(node as unknown as Record<string, unknown>, patch) as unknown as FreeNode);
+}
+
+/** Contador (L6f): muda a caixa das casas (fundo, borda, cantos, respiro); `undefined` volta ao padrao. */
+export function withFreeCountdownCell(design: PopupFreeDesign, id: FreeId, patch: FreePatch<FreeCountdownCell>): PopupFreeDesign {
+  return updateFreeNode(design, id, (node) => {
+    if (node.type !== "countdown") {
+      return node;
+    }
+
+    const cell = patchObject(node.cell, patch);
+    const { cell: unused, ...rest } = node;
+
+    void unused;
+
+    return cell ? { ...rest, cell } : rest;
+  });
+}
+
+const pad2 = (value: number) => String(value).padStart(2, "0");
+
+/** O instante do design no campo de data e hora ("2026-11-30T23:59"), no fuso deste computador; "" sem data. */
+export function freeCountdownLocalValue(at: string | undefined): string {
+  const time = at ? Date.parse(at) : Number.NaN;
+
+  if (Number.isNaN(time)) {
+    return "";
+  }
+
+  const date = new Date(time);
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+/** O valor do campo de data e hora (no fuso deste computador) como o instante do design; null sem data valida. */
+export function freeCountdownInstant(local: string): string | null {
+  const time = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? new Date(local).getTime() : Number.NaN;
+
+  return Number.isNaN(time) ? null : new Date(time).toISOString();
+}
+
+/** A data que "Uma data" comeca: amanha, na hora cheia seguinte a de agora. */
+export function freeCountdownDefaultDate(now: number): string {
+  const date = new Date(now + 24 * 3_600_000);
+
+  date.setMinutes(0, 0, 0);
+  date.setHours(date.getHours() + 1);
+
+  return date.toISOString();
+}
+
+/**
+ * A nota do "O fim do pop-up" (L6f): a data em que o pop-up termina, ou o pedido para escolher. `undefined` = o editor
+ * nao sabe quando o pop-up termina (o modo modelo e a pagina do modelo de Design, C18): nenhuma frase do fim.
+ */
+export function freeCountdownEndNote(endsAt: string | null | undefined): string | null {
+  if (endsAt === undefined) {
+    return null;
+  }
+
+  const time = endsAt ? Date.parse(endsAt) : Number.NaN;
+
+  if (Number.isNaN(time)) {
+    return FREE_INSPECTOR_COPY.countdown.noEnd;
+  }
+
+  return FREE_INSPECTOR_COPY.countdown.endsAt(new Date(time).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }));
 }
 
 /** Tira os arquivos que nenhum elemento usa (como a forma canonica; o schema aceita ate 7 na lista). */
@@ -2803,13 +2934,13 @@ export function freeMobileFieldId(nodeId: FreeId | null, key: FreeMobileFieldKey
   return freeFieldId(nodeId, `celular-${slug}`);
 }
 
-const MOBILE_TEXT_TYPES: readonly FreeNodeType[] = ["badge", "button", "heading", "links", "text"];
+const MOBILE_TEXT_TYPES: readonly FreeNodeType[] = ["badge", "button", "countdown", "heading", "links", "text"];
 
 /**
  * Os campos da aba Celular de um elemento, na ordem da tela: Mostrar (todos), Posição (solto: X, Y, Largura e a
  * Altura quando o computador tem uma, o elemento nao tem texto ou o celular ja tem uma propria, como a das alcas de
  * cima e de baixo no Ver como Celular; na sequência: Largura, Altura, Alinhar nesta caixa e Margem), Texto (Título,
- * Texto, Selo, Botão e Links: Tamanho, Altura da linha, Espaço entre letras, Alinhamento), Conteúdo (Espaço e Ícone:
+ * Texto, Selo, Botão, Links e Contador: Tamanho, Altura da linha, Espaço entre letras, Alinhamento), Conteúdo (Espaço e Ícone:
  * o tamanho; Links: o espaço entre eles; Caixa: a sequência dela) e Respiro e cantos. Cores, textos, pinturas,
  * sombras, camada e girar nao aparecem: sao os mesmos nos dois. `design` traz a entrada do celular do elemento.
  */

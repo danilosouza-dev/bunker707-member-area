@@ -44,9 +44,12 @@ export function MemberFooter({ branding }: { branding?: PlatformBrandingConfig }
           <button className="transition hover:text-white" type="button">
             Termos
           </button>
-          <button className="transition hover:text-white" type="button">
+          <MemberProgressLink
+            className="rounded-[4px] transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            href={`${MEMBER_ROUTES.profile}?aba=privacidade`}
+          >
             Privacidade
-          </button>
+          </MemberProgressLink>
         </nav>
       </div>
     </footer>

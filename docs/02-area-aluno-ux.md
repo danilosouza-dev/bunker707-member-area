@@ -205,6 +205,8 @@ Cada fileira configuravel deve poder definir uma regra de visibilidade:
 - apenas visitantes ou pessoas sem compra ativa;
 - todos.
 
+Como a regra e decidida (28/10/2026, "Quem pode ver" em Area de membros > Vitrine): para quem entra de verdade (aluno, ou a equipe sem o "ver como"), "ja comprou" e ter pelo menos um acesso ativo, a mesma fonte que libera os conteudos (entitlements; o Professor conta os cursos dele); conteudo gratuito sozinho nao conta como compra. No "ver como" da equipe vale o modo escolhido: `Produtor` ve todas as fileiras, `Aluno com acesso` ve as de quem ja comprou e `Aluno sem acesso` as de quem ainda nao comprou. Ate 28/10/2026 a regra so valia no "ver como" e o aluno via todas as fileiras ativas. `Continue assistindo` vem com `Todos os alunos` por padrao, porque ja mostra so as aulas que cada aluno comecou (inclusive de conteudo gratuito); `Minhas compras` continua com `So quem ja comprou`.
+
 A fileira `Produtos a venda`/`Vitrine` mostra somente produtos vendaveis aos quais o aluno ainda nao tem acesso. Produtos com entitlement ativo, gratuitos ou ja liberados para aquele aluno ficam fora dessa fileira e permanecem em `Minhas compras` ou nas demais secoes de biblioteca. Os produtos ainda nao adquiridos aparecem com cadeado.
 
 Uma fileira como `Em breve na Bunker707` pode mostrar proximos cursos, formacoes, bootcamps, novidades e listas de espera para criar expectativa sem liberar acesso.
@@ -654,7 +656,7 @@ A IA Diretor e a orientadora geral da escola. Ela nao substitui o Tutor IA de ca
 
 Comportamento:
 
-- fica disponivel em um launcher circular discreto no canto inferior direito de todas as paginas autenticadas da area do aluno;
+- fica disponivel em um launcher circular discreto no canto inferior direito de todas as paginas autenticadas da area do aluno, menos na sala do webinario (`/webinarios/[slug]/sala`): a sala e um dialogo de tela cheia e o launcher cobriria o Enviar do chat e o X da pilula minimizada (`directorLauncherAllowedOn` em `src/components/member/shell/member-shell-model.ts`; `docs/30` §1.3);
 - usa `Compass` com uma estrela de IA, diferenciando-se do chapeu de formatura do Tutor;
 - no desktop abre um painel flutuante ancorado acima do launcher, sem bloquear a pagina; no celular ocupa a tela para preservar leitura, teclado e historico;
 - a entrada explica apenas que o aluno pode encontrar aulas, descobrir o que estudar e organizar o proximo passo, sem mencionar transcricao ou detalhes tecnicos;

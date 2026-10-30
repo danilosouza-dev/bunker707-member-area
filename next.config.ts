@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { imageRemotePatterns } from "./src/lib/image-hosts";
+import { DEFAULT_MEET_DOMAIN, meetDomainOf, meetOrigin, meetPermissionsAllowList } from "./src/lib/jitsi-room-config";
 
 const localDevOrigins = Object.values(networkInterfaces()).flatMap((networkAddresses = []) => {
   return networkAddresses
@@ -39,19 +40,28 @@ function getTurbopackRoot() {
   }
 }
 
-// Microfone bloqueado em todo o app; so o admin libera para a propria origem (gravar o audio de um aviso
-// em Comunicacao > Avisos e pop-ups, docs/22). A regra de /admin vem depois da global e o Next usa a
-// ultima que define a mesma chave (tests/deployment-security.test.mjs confere o valor efetivo).
-function permissionsPolicy(microphone: "()" | "(self)") {
-  return [
-    "camera=()",
-    "display-capture=()",
-    "geolocation=()",
-    `microphone=${microphone}`,
-    "payment=()",
-    'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com")'
-  ].join(", ");
-}
+// A Permissions-Policy e uma so para o app inteiro (docs/30 §6.3 e I10; docs/06): camera, microfone e tela liberados
+// para a propria origem e para o Jitsi proprio, geolocalizacao e pagamento bloqueados, e nenhum terceiro (YouTube,
+// Vimeo, Bunny) na lista de camera e microfone. Por que em toda pagina e nao so na sala: o Chrome fixa a politica no
+// carregamento do documento, e a navegacao interna do Next (o Entrar da pagina da live, a faixa "Ao vivo agora", o
+// sino, o console aberto pelo editor) troca de pagina sem carregar outro documento; a sala aberta assim ficava com a
+// politica da pagina de onde a pessoa veio, e o iframe recebia "nao autorizado" sem o navegador perguntar nada. O
+// navegador pede a permissao na primeira vez; depois que a pessoa permite, o Chrome a guarda para a origem do app e uma
+// pagina do app pode usa-la sem perguntar de novo: risco aceito (nenhum terceiro na lista, CSP com nonce, e so a sala ao
+// vivo e o audio de um aviso pedem camera ou microfone; a alternativa mais fechada esta em docs/30 I10). O hostname e o de WEBINAR_MEET_DOMAIN no build (os cabecalhos do
+// next.config sao fixados no build), ou meet.bunker707.com.br quando o build nao recebeu a variavel.
+const meetDomain = meetDomainOf(process.env.WEBINAR_MEET_DOMAIN) ?? DEFAULT_MEET_DOMAIN;
+const fullscreenOrigins = ['"https://www.youtube.com"', '"https://www.youtube-nocookie.com"', '"https://player.vimeo.com"', `"${meetOrigin(meetDomain)}"`];
+const media = meetPermissionsAllowList(meetDomain);
+
+const permissionsPolicy = [
+  `camera=${media}`,
+  `display-capture=${media}`,
+  "geolocation=()",
+  `microphone=${media}`,
+  "payment=()",
+  `fullscreen=(self ${fullscreenOrigins.join(" ")})`
+].join(", ");
 
 const securityHeaders = [
   {
@@ -64,7 +74,7 @@ const securityHeaders = [
   },
   {
     key: "Permissions-Policy",
-    value: permissionsPolicy("()")
+    value: permissionsPolicy
   },
   {
     key: "Referrer-Policy",
@@ -104,10 +114,6 @@ const nextConfig: NextConfig = {
       {
         headers: securityHeaders,
         source: "/:path*"
-      },
-      {
-        headers: [{ key: "Permissions-Policy", value: permissionsPolicy("(self)") }],
-        source: "/admin/:path*"
       }
     ];
   },

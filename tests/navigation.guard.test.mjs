@@ -38,8 +38,9 @@ test("guarda: o layout raiz monta o feedback de navegacao uma vez e o carregamen
 });
 
 test("guarda: entrar no admin vindo do login, da troca de senha ou da area do aluno recarrega a pagina", async () => {
-  // O Permissions-Policy libera o microfone so em /admin (next.config.ts) e vale para o documento
-  // carregado: numa troca de rota, "Gravar agora" dos avisos ficaria bloqueado (docs/22 §4.5).
+  // O navegador aplica a Permissions-Policy do documento carregado: quando ela liberava o microfone so em /admin,
+  // numa troca de rota "Gravar agora" dos avisos ficava bloqueado (docs/22 §4.5). Desde 30/10/2026 a politica e a
+  // mesma em todo o app (next.config.ts, docs/30 I10); o carregamento inteiro continua.
   const login = await source("../src/components/login-experience.tsx");
   const passwordChange = await source("../src/components/password-change-experience.tsx");
   const appShell = await source("../src/components/app-shell.tsx");
