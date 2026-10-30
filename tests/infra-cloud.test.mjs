@@ -570,3 +570,47 @@ test("carga.sh: aluno e curso de teste apagados no trap, k6 fixado por digest, s
   for (const id of sql.matchAll(/'(carga-[a-z0-9-]+)'/g)) assert.match(id[1], /^carga-(curso|modulo-[12]|modulo-|aula-)$/);
   assert.doesNotMatch(sql, /\b(delete|drop|truncate)\b/i, "o seed so insere");
 });
+
+// secrets-membros com DO_JIBRI=sim (docs/20 §8B.3): o app recebe do JIBRI_SECRETS so as chaves que repetem o gravador,
+// com os nomes do app; o produtor cadastra um segredo so na tela do GitHub e nada passa pelo chat.
+test("app_env_from_jibri (lib.sh): a Bunny com os nomes do app, o webhook e o GITHUB_INFRA_TOKEN; nada mais", () => {
+  const jibri = [
+    "BUNNY_LIBRARY_ID=123456\r",
+    "BUNNY_API_KEY=chave-da-bunny-de-teste",
+    "BUNNY_COLLECTION_ID=colecao-que-so-o-gravador-usa",
+    "WEBINAR_RECORDER_WEBHOOK_SECRET=segredo-do-webhook-de-teste-com-mais-de-32",
+    "WEBINAR_RECORDER_WEBHOOK_URL=https://membros.exemplo.com.br/api/webhooks/recorder",
+    "GITHUB_INFRA_TOKEN=github_pat_de_teste",
+  ].join("\n");
+  const run = (secrets) =>
+    spawnSync("bash", ["-c", `. "${join(cloudDir, "lib.sh")}"; app_env_from_jibri`], {
+      encoding: "utf8",
+      env: cleanEnv({ JIBRI_SECRETS: secrets }),
+    });
+  const all = run(jibri);
+  assert.equal(all.status, 0, all.stderr);
+  assert.equal(
+    all.stdout,
+    [
+      "BUNNY_STREAM_API_KEY=chave-da-bunny-de-teste",
+      "BUNNY_STREAM_LIBRARY_ID=123456",
+      "WEBINAR_RECORDER_WEBHOOK_SECRET=segredo-do-webhook-de-teste-com-mais-de-32",
+      "GITHUB_INFRA_TOKEN=github_pat_de_teste",
+      "",
+    ].join("\n"),
+  );
+  const onlyBunny = run("BUNNY_API_KEY=k\nBUNNY_LIBRARY_ID=1");
+  assert.equal(onlyBunny.stdout, "BUNNY_STREAM_API_KEY=k\nBUNNY_STREAM_LIBRARY_ID=1\n");
+  assert.equal(run("").stdout, "");
+});
+
+test("secrets.sh: DO_JIBRI=sim so no membros e sem payload; o envelope continua o caminho padrao", () => {
+  const secrets = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
+  assert.match(secrets, /if \[ "\$role" = "membros" \] && \[ -z "\$\{PAYLOAD:-\}" \] && \[ "\$\{DO_JIBRI:-\}" = "sim" \]; then\n\s+need HCLOUD_TOKEN JIBRI_SECRETS/);
+  assert.match(secrets, /else\n\s+need HCLOUD_TOKEN PAYLOAD\nfi/);
+  // Os valores sao mascarados fora do $(...) e nunca vao para o log.
+  assert.match(secrets, /done <<< "\$from_jibri"/);
+  assert.doesNotMatch(secrets, /log [^\n]*\$from_jibri/);
+  const workflow = readFileSync(new URL("../.github/workflows/infra.yml", import.meta.url), "utf8");
+  assert.match(workflow, /JIBRI_SECRETS: \$\{\{ secrets\.JIBRI_SECRETS \}\}/);
+});

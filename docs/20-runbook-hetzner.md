@@ -579,6 +579,13 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `WEBINAR_RECORDER_WEBHOOK_SECRET`; opcionais `WEBINAR_RECORDER_WEBHOOK_URL` e `BUNNY_COLLECTION_ID`) so entra nos
   passos de `jibri-up` e `jibri-down`, nunca no ambiente do job inteiro. O `WEBINAR_RECORDER_WEBHOOK_SECRET` tambem vai
   para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
+- **As chaves do app que repetem o gravador vem do proprio `JIBRI_SECRETS`** (30/10/2026): `secrets-membros` com
+  `opcoes` `DO_JIBRI=sim` e sem `payload` copia para o `.env` do app, pelo SSH, `BUNNY_API_KEY` -> `BUNNY_STREAM_API_KEY`,
+  `BUNNY_LIBRARY_ID` -> `BUNNY_STREAM_LIBRARY_ID`, `WEBINAR_RECORDER_WEBHOOK_SECRET` e `GITHUB_INFRA_TOKEN` (so as linhas
+  presentes; `app_env_from_jibri` em `infra/cloud/lib.sh`, valores mascarados no log). Assim o produtor cadastra um segredo
+  so, na tela do GitHub, e nada passa pelo chat. O `GITHUB_INFRA_TOKEN` pode ficar no `JIBRI_SECRETS`: o gravador le so as
+  chaves dele. O `WEBINAR_RECORDER_WEBHOOK_SECRET` do app de producao foi gerado em 30/10/2026 e entregue ao produtor num
+  arquivo, para o `JIBRI_SECRETS`.
 - `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
   custo; avisa quando um gravador passa de 6 h ligado.
 - **No dia em que a producao (`membros.<dominio>`) passar a usar a sala ao vivo**, junto com a troca do `ROOM_GUARD_URL`

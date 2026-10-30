@@ -383,6 +383,18 @@ storage_box_json() { hzj storage-box describe "$STORAGE_BOX_NAME" 2>/dev/null ||
 # ---- Webinarios: segredos do gravador, webhook assinado e preco por hora --------------------------------
 # JIBRI_SECRETS e um segredo do repositorio com linhas CHAVE=VALOR (docs/20 §8B.3; docs/30 §7.3, I4): o
 # gravador vive poucas horas e nao tem transfer.key para o envelope. O runner do Actions mascara cada linha.
+# app_env_from_jibri: as linhas CHAVE=VALOR do .env do app que repetem o gravador, lidas do JIBRI_SECRETS (secrets-membros
+# com DO_JIBRI=sim, docs/20 §8B.3): a Bunny Stream com os nomes do app, o segredo do webhook e o GITHUB_INFRA_TOKEN. So as
+# linhas presentes. Quem chama mascara os valores fora do $(...): o ::add-mask:: vai para a saida, que o $(...) engoliria.
+app_env_from_jibri() {
+    local pair value
+    for pair in BUNNY_API_KEY:BUNNY_STREAM_API_KEY BUNNY_LIBRARY_ID:BUNNY_STREAM_LIBRARY_ID \
+        WEBINAR_RECORDER_WEBHOOK_SECRET:WEBINAR_RECORDER_WEBHOOK_SECRET GITHUB_INFRA_TOKEN:GITHUB_INFRA_TOKEN; do
+        value=$(jibri_secret_opt "${pair%%:*}" "")
+        [ -n "$value" ] || continue
+        printf '%s=%s\n' "${pair#*:}" "$value"
+    done
+}
 jibri_secret() {  # jibri_secret CHAVE  (obrigatoria)
     local value; value=$(jibri_secret_opt "$1" "")
     [ -n "$value" ] || die "JIBRI_SECRETS sem a linha $1=... (segredo do repositorio, docs/20 §8B.3)."
