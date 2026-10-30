@@ -275,7 +275,8 @@ test("4. o Assistente: webinar_ai_requests unico por alvo, Falar com a equipe pe
   unwrap(
     await db.from("webinar_questions").insert([
       { body: "Quanto custa?", display_name: "Aluna T.", id: PERGUNTA.daAluna, offset_ms: 25_000, session_id: sessao, status: "answered", user_id: aluna.id },
-      { body: "Tem certificado?", display_name: "Aluno S.", id: PERGUNTA.doAluno, offset_ms: 26_000, session_id: sessao, user_id: alunoSemAcesso.id }
+      // Em lote, a coluna que falta numa linha vai nula (nao o padrao): o status vai explicito nas duas.
+      { body: "Tem certificado?", display_name: "Aluno S.", id: PERGUNTA.doAluno, offset_ms: 26_000, session_id: sessao, status: "open", user_id: alunoSemAcesso.id }
     ]),
     "Gravando as perguntas"
   );

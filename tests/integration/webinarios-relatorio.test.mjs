@@ -388,6 +388,10 @@ test("7. fase 4 na RPC com dados reais: a Oferta (janela, cliques, compra pelo w
   );
   // A janela da sessao: do comeco aos 2:30 (baldes 0 a 5): a aluna e o aluno sem acesso estavam la; o produtor e equipe.
   unwrap(await db.from("webinar_offer_displays").insert({ hide_offset_ms: 150_000, offer_id: oferta.id, session_id: LIVE.sessaoId, show_offset_ms: 0 }), "Gravando a janela");
+  // A sessao ja foi encerrada no teste 2; de verdade a janela vem antes do fim, e o fim congela quem esteve nela
+  // (webinar_offer_seen, D58), que a sessao encerrada passa a ler. O encerramento pode rodar de novo: refaz o resumo
+  // pelas mesmas amostras e congela quem viu a oferta.
+  unwrap(await db.rpc("webinar_close_session", { p_now: new Date().toISOString(), p_session_id: LIVE.sessaoId }), "Encerrando de novo depois da janela");
   const variante = async (user) => unwrap(await db.rpc("webinar_offer_variant", { p_offer_id: oferta.id, p_user_id: user.id }), "Lendo a variante");
   const varianteDaAluna = await variante(aluna);
   const clicouHa = new Date(Date.now() - 10 * MINUTO_MS).toISOString();

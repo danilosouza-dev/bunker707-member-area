@@ -281,9 +281,12 @@ test("8. fase 4c: o Assistente (provedor falso) responde ao @assistente com role
   await saveAIProviderAPIConnection({ actorId: produtor.id, apiKey: "sk-teste-de-integracao-12345678", label: "Conexao de teste", provider: "openai" });
   unwrap(await db.from("webinars").update({ assistant_settings: { enabled: true, replyAllDefault: false } }).eq("id", webinarId), "Ligando o Assistente");
   unwrap(await db.from("webinar_assistant_knowledge").insert({ answer: "R$ 997 a vista.", position: 0, question: "Quanto custa a formacao?", webinar_id: webinarId }), "Cadastrando a pergunta do Assistente");
+  // A pergunta de cada chamada, na ordem: o @assistente do chat e depois a pergunta da aba. Um assert que falha aqui
+  // vira erro do provedor (o Assistente grava "failed"), por isso a lista e conferida tambem depois.
+  const perguntas = ["quanto custa?", "Tem certificado?"];
   provedorFalso.responder = ({ messages, system }) => {
     assert.match(system, /Quanto custa a formacao\?/, "a pergunta cadastrada vai no MATERIAL");
-    assert.equal(messages.at(-1).content, "quanto custa?");
+    assert.equal(messages.at(-1).content, perguntas[provedorFalso.chamadas.length - 1]);
     return "Custa R$ 997 a vista.";
   };
 
@@ -314,6 +317,7 @@ test("8. fase 4c: o Assistente (provedor falso) responde ao @assistente com role
     const linha = unwrap(await db.from("webinar_questions").select("status,answer_text,answered_by,answer_source").eq("id", pergunta.body.data.question.id).single(), "Lendo a pergunta respondida");
     assert.deepEqual(linha, { answer_source: "ai", answer_text: "Custa R$ 997 a vista.", answered_by: null, status: "answered" });
     assert.equal(provedorFalso.chamadas.length, 2);
+    assert.deepEqual(provedorFalso.chamadas.map((chamada) => chamada.messages.at(-1).content), perguntas);
   } finally {
     process.env.WEBINAR_ASSISTANT_ENABLED = ambiente ?? "";
     provedorFalso.zerar();
