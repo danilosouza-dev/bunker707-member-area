@@ -21,7 +21,7 @@ import { readLocalSupabaseConfig } from "./local-db.mjs";
 // para conferir o token e assinar o webhook do gravador, e o duble do pedido ao GitHub (inerte aqui: o `next start` roda
 // como producao, onde o duble nao vale, e sem GITHUB_INFRA_TOKEN nada e pedido; o teste do console poe a sessao em
 // `preparing` direto no banco). O hostname entra no build (a
-// Permissions-Policy de /webinarios e do console da sala e fixada no next.config.ts), por isso tambem vai no marcador.
+// Permissions-Policy do app e fixada no next.config.ts), por isso tambem vai no marcador.
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const port = process.env.E2E_PORT ?? "3100";

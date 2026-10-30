@@ -1021,7 +1021,7 @@ Pedido do produtor: notificações no sino com imagem, áudio que toca ali mesmo
   - arquivo enviado ou gravado no navegador (MediaRecorder), até 5 minutos e 10 MB;
   - rota própria em vez de Server Action (limite de 1 MB), tipo conferido pelos bytes;
   - bucket público `communication-audio`;
-  - microfone liberado só no `/admin` (`Permissions-Policy`);
+  - microfone liberado para a própria origem pela `Permissions-Policy` (desde 30/10/2026 a mesma em todo o app, `docs/30` I10);
   - a forma de onda (48 barras) e a duração são medidas no navegador da equipe e gravadas com o aviso.
 - **Menção:** só quando um único autor da conversa tem o `@usuario` (o nome de usuário não é único na escola).
 - **Números:**

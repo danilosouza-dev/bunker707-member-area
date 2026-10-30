@@ -616,3 +616,31 @@ test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
   expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDosPresentes);
 });
+
+// O Chrome fixa a Permissions-Policy no carregamento do documento, e a navegacao interna do Next nao carrega outro:
+// a sala aberta pela faixa "Ao vivo agora" de qualquer pagina fica com a politica da pagina de onde a aluna veio. Com a
+// regra so nas paginas da sala, a camera e o microfone davam "nao autorizado" sem o navegador perguntar (teste do
+// produtor, 30/10/2026; os testes acima entram pela propria pagina da live). A politica agora e a mesma em todo o app
+// (next.config.ts, docs/30 I10). O featurePolicy so existe no Chromium; no WebKit fica a conferencia da navegacao.
+test("entrar na sala pela faixa Ao vivo agora do Inicio, sem recarregar a pagina: o documento continua com camera, microfone e tela liberados para o Jitsi", async ({ page }) => {
+  await salaFalsaDoJitsi(page);
+  await page.goto("/");
+  const faixa = page.getByRole("complementary", { name: WEBINAR_COPY.faixa.rotulo });
+  await faixa.getByRole("link", { exact: true, name: WEBINAR_COPY.faixa.entrar }).click();
+  await page.waitForURL(new RegExp(`/webinarios/${slug}`));
+  if (!SALA.test(page.url())) {
+    await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  }
+  await expect(page).toHaveURL(SALA);
+  await expect(page.getByRole("dialog", { name: titulo })).toHaveAttribute("data-room-kind", "live");
+
+  const documento = await page.evaluate((origem) => {
+    const politica = (document as Document & { featurePolicy?: { allowsFeature: (feature: string, origin?: string) => boolean } }).featurePolicy;
+    const carregadoEm = new URL((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).name).pathname;
+    return { carregadoEm, liberado: politica ? ["camera", "microphone", "display-capture"].map((feature) => politica.allowsFeature(feature, origem)) : null };
+  }, `https://${ambienteDaSalaAoVivo().WEBINAR_MEET_DOMAIN}`);
+  expect(documento.carregadoEm, "a sala abriu pela navegacao interna, no documento do Inicio").not.toMatch(/\/sala\/?$/);
+  if (documento.liberado) {
+    expect(documento.liberado, "camera, microfone e tela para o Jitsi").toEqual([true, true, true]);
+  }
+});
