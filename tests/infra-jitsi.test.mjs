@@ -892,3 +892,45 @@ test("nenhum segredo no repositorio: as chaves de segredo dos dois .env.example 
     }
   }
 });
+
+// O jicofo que reconecta a um prosody recriado fica com 0 pontes e o /about/health em 500 (30/10/2026, docs/20 §8B.8):
+// todo `up -d` com o stack no ar reinicia o jicofo depois do prosody saudavel e espera a saude dele.
+test("reconnect_focus: espera o prosody, reinicia o jicofo e so volta com o /about/health em 200", () => {
+  const dir = mkdtempSync(join(tmpdir(), "reconnect-focus-"));
+  const shims = join(dir, "bin");
+  mkdirSync(shims);
+  const log = join(dir, "calls.log");
+  writeFileSync(join(dir, ".env"), "JICOFO_REST_PORT=8899\n");
+  writeFileSync(
+    join(shims, "docker"),
+    `#!/bin/sh\necho "docker $*" >> "${log}"\ncase "$*" in *" ps "*) echo "healthy|running" ;; esac\nexit 0\n`,
+  );
+  // A primeira pergunta ve 500 (sem ponte); a segunda, 200.
+  writeFileSync(
+    join(shims, "curl"),
+    `#!/bin/sh\necho "curl $*" >> "${log}"\nn=$(grep -c '^curl ' "${log}")\n[ "$n" -ge 2 ] && printf 200 || printf 500\n`,
+  );
+  writeFileSync(join(shims, "sleep"), "#!/bin/sh\nexit 0\n");
+  for (const name of ["docker", "curl", "sleep"]) chmodSync(join(shims, name), 0o755);
+  const result = spawnSync("bash", ["-c", ". infra/jitsi/scripts/_env.sh; reconnect_focus && echo pronto"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${shims}:${process.env.PATH}`, BUNKER707_ENV_FILE: join(dir, ".env") },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /pronto/);
+  const calls = readFileSync(log, "utf8").trim().split("\n");
+  const prosodyPs = calls.findIndex((line) => /^docker compose .* ps .*prosody/.test(line));
+  const restart = calls.findIndex((line) => /^docker compose .* restart jicofo$/.test(line));
+  assert.ok(prosodyPs >= 0 && restart > prosodyPs, `prosody saudavel antes do restart: ${calls.join(" | ")}`);
+  const healthChecks = calls.filter((line) => line.startsWith("curl ") && line.includes("http://127.0.0.1:8899/about/health"));
+  assert.equal(healthChecks.length, 2, "pergunta de novo ate o 200");
+});
+
+test("deploy-meet, secrets-meet e update.sh reiniciam o jicofo depois do up -d com o stack no ar", () => {
+  const deploy = readFileSync(new URL("../infra/cloud/deploy.sh", import.meta.url), "utf8");
+  const secrets = readFileSync(new URL("../infra/cloud/secrets.sh", import.meta.url), "utf8");
+  const update = readFileSync(new URL("../infra/jitsi/scripts/update.sh", import.meta.url), "utf8");
+  assert.match(deploy, /\$jitsi_compose up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus'/);
+  assert.match(secrets, /--profile borda up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus;/);
+  assert.match(update, /compose up -d\n\s+reconnect_focus\n/);
+});

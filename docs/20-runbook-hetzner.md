@@ -524,6 +524,12 @@ com o ok do produtor no chat: `bunker707-meet`, cx23 em fsn1, EUR 6,49/mes sem I
 O primeiro `deploy-meet` subiu o stack mas parou no healthcheck do jicofo (`/about/health` 404 sem
 `JICOFO_ENABLE_HEALTH_CHECKS`; corrigido no compose, §8B.3). O D (gravador) so existe durante cada live e cada criacao
 espera o pedido da equipe. O app ja funciona sem os dois servidores (a Live gravada e o Replay nao dependem do Jitsi).
+**Estado em 30/10/2026**: os webinarios estao em producao (promocao #142, imagem `hetzner-sha-e15f6d4`). O app do A
+recebeu os `WEBINAR_*` por `secrets-membros` (o mesmo `WEBINAR_JWT_SECRET` do C e da Vercel) e o compose os repassa
+(#141). O C passou a atender a producao: `ROOM_GUARD_URL` em `membros.<dominio>` e `MEET_FRAME_ANCESTORS` com as duas
+origens (`exec-meet` + `deploy-meet` da `main` com `SEM_LIVE_2H=sim`). Os banimentos da Vercel de teste deixam de
+barrar na sala (o token de 15 min continua valendo). Gravacao automatica (D) ainda sem `JIBRI_SECRETS` e sem
+`GITHUB_INFRA_TOKEN`: o console oferece a reserva (Gravar no navegador ou Enviar gravacao).
 
 ### 8B.1 O que e cada servidor e quanto custa
 
@@ -636,6 +642,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 
 | Sintoma | O que fazer |
 |---|---|
+| O smoke acusa `jicofo /about/health` 500 depois de um `deploy-meet` ou `secrets-meet` (log do jicofo: "No operational bridges available (total bridge count: 0)") | o prosody foi recriado e o jicofo reconectou sem retomar a sessao, ficando sem ponte (30/10/2026). Desde entao as etapas chamam `reconnect_focus` (`infra/jitsi/scripts/_env.sh`) depois do `up -d`; a mao: `exec-meet` com `COMANDO='docker compose -f infra/jitsi/docker-compose.yml restart jicofo'` e o `smoke.sh` |
 | `deploy-meet` ou `secrets-meet` para em "jicofo nao ficou saudavel" | `exec-meet` com `docker inspect --format '{{json .State.Health}}' bunker707-meet-jicofo`: `404` = falta `JICOFO_ENABLE_HEALTH_CHECKS` no compose (§8B.3); `500` = sem ponte (ver `docker compose logs jvb`); o `smoke.sh` ve `000` em `127.0.0.1:8888` com o container saudavel = falta `JICOFO_ENABLE_REST` (a REST so no loopback do container) |
 | Ninguem entra na sala | `status-meet`; conferir `JWT_APP_SECRET` (C) = `WEBINAR_JWT_SECRET` (app) e o relogio dos dois (o token vale 60 s antes) |
 | Video trava para quem esta em 4G ou rede de empresa | UDP 10000 bloqueado na rede do aluno: TURN e o passo seguinte (portas reservadas no firewall) |
@@ -839,6 +846,7 @@ Primeiro minuto, sempre: `ssh deploy@<ip>`, `cd /opt/bunker707`, `docker compose
 
 | Sintoma | Verificar | Acao |
 |---|---|---|
+| Capas e imagens do Storage quebradas no app (o `/_next/image` responde 400 "\"url\" parameter is not allowed") | `docker compose logs app` mostra "hostname resolved to private IP": o app chega ao Storage pelo host-gateway (IP privado) | a imagem precisa ter sido construida com `images.dangerouslyAllowLocalIP` ligado (`next.config.ts`, so com `NEXT_OUTPUT=standalone`, desde 30/10/2026); refazer o `deploy-membros` da `main` |
 | App fora (health 5xx/timeout), Supabase ok | `docker compose logs --tail=200 app` | `docker compose restart app`; se e deploy recente, `deploy.sh --image <anterior> --no-migrate` |
 | Ninguem consegue entrar | `logs auth`; `smoke.sh` (auth 200?) | `restart auth`; conferir `SMTP_*` se for e-mail; conferir relogio (`timedatectl`) |
 | Tudo lento | `docker stats`, `free -h`, `df -h` | memoria: Studio desligado? (8.1); `stop supavisor`; disco cheio: `docker system prune -f`, logs, `stage/` antigos |

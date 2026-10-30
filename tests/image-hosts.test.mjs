@@ -58,3 +58,33 @@ test("sem URL do Supabase configurada, qualquer projeto hospedado é aceito", as
   assert.equal(fallback.canOptimizeImageSrc("https://supabase.co/storage/v1/object/public/capas/a.webp"), false);
   assert.equal(fallback.canOptimizeImageSrc("https://outro.supabase.co:8443/storage/v1/object/public/capas/a.webp"), false);
 });
+
+// O app do servidor proprio chega ao Storage pelo host-gateway do compose (IP privado) e o otimizador do Next 16
+// recusa imagem de IP privado sem dangerouslyAllowLocalIP: em 30/10/2026 toda capa do Storage sumia na producao.
+test("next.config: o otimizador aceita o Storage em IP privado so no build da imagem Docker (standalone)", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const configUrl = new URL("../next.config.ts", import.meta.url).href;
+  const script = `
+    import { registerHooks } from "node:module";
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (context.parentURL === ${JSON.stringify(configUrl)} && /^\\.\\.?\\//.test(specifier) && !/\\.[cm]?[jt]sx?$/.test(specifier)) {
+          return nextResolve(specifier + ".ts", context);
+        }
+        return nextResolve(specifier, context);
+      }
+    });
+    const { default: config } = await import(${JSON.stringify(configUrl)});
+    process.stdout.write(JSON.stringify({ allow: config.images.dangerouslyAllowLocalIP, output: config.output ?? null }));
+  `;
+  const run = (env) => {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      env: { ...process.env, NEXT_OUTPUT: "", ...env },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.deepEqual(run({ NEXT_OUTPUT: "standalone" }), { allow: true, output: "standalone" });
+  assert.deepEqual(run({}), { allow: false, output: null });
+});
