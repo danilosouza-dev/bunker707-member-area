@@ -458,11 +458,15 @@ test("7. fase 4 na RPC com dados reais: a Oferta (janela, cliques, compra pelo w
     "Respondendo a pergunta pelo Assistente"
   );
 
-  // A Simulacao da sessao gravada: a regra, um aviso de venda e o resumo congelado.
+  // A Simulacao da sessao gravada: a decisao registrada pelo produtor (sem ela a sala nao mostra nada simulado e o CSV
+  // diz que nada disparou), a regra, um aviso de venda e o resumo congelado.
   unwrap(
     await db
       .from("webinar_sessions")
       .update({
+        simulation_ack_text: "Decisão do produtor no teste do relatório.",
+        simulation_decided_at: new Date(agora).toISOString(),
+        simulation_decided_by: produtor.id,
         simulated_count_rule: { base: 40, jitter: 0, mode: "fixed", peak: 40 },
         simulated_sale_notices: { enabled: true, items: [{ offset_ms: 60_000, text: "Ana garantiu a vaga" }] },
         simulation_summary: { counter_max: 240, joins_shown: 18, sale_notices_shown: 2 }

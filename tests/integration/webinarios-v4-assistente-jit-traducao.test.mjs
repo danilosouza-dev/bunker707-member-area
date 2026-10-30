@@ -290,7 +290,7 @@ test("4. o Assistente: webinar_ai_requests unico por alvo, Falar com a equipe pe
   unwrap(
     await db.from("webinar_ai_requests").insert([
       { answered_at: new Date(agora).toISOString(), requested_at: new Date(agora - 8000).toISOString(), session_id: sessao, status: "answered", target_id: PERGUNTA.daAluna, target_kind: "question", user_id: aluna.id, webinar_id: JIT.id },
-      { session_id: sessao, skip_reason: "claimed", status: "skipped", target_id: MENSAGEM.daEquipe, target_kind: "chat", user_id: aluna.id, webinar_id: JIT.id }
+      { requested_at: new Date(agora - 2000).toISOString(), session_id: sessao, skip_reason: "claimed", status: "skipped", target_id: MENSAGEM.daEquipe, target_kind: "chat", user_id: aluna.id, webinar_id: JIT.id }
     ]),
     "Gravando os outros pedidos"
   );
