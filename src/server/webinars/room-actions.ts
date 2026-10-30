@@ -6,14 +6,22 @@
 // as perguntas, a decisao do selo "Ao vivo" (a frase de §8.6 conferida no servidor), o Replay livre e "Remover
 // minhas mensagens" a pedido do aluno. Permissoes de §2.6: abrir, encerrar, a Simulacao e a remocao a pedido pedem
 // messaging.publish; o resto, messaging.write. Toda acao grava recordAudit com ids e contagens (a Simulacao leva os
-// valores da decisao, D10). O relogio e sempre o do servidor.
+// valores da decisao, D10). O relogio e sempre o do servidor. Fase 4c (docs/30 §1.6, §2.4 e D24): a resposta da equipe
+// a uma pergunta grava answer_source 'team' (a do Assistente e 'ai'), e a resposta que chega depois (o aluno pediu a
+// equipe, a sessao acabou ou ele saiu da sala) vira aviso no sino (notify.queueWebinarAnswerNotice), na pergunta e na
+// resposta da equipe a uma mensagem do chat; banco sem a 202610300004: a resposta segue e so a marca fica de fora.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
+import { isPendingMigrationError } from "@/server/db/pending-migration";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { recordEvents } from "@/server/students/store";
+import { teamAnswerNeedsNotice } from "./assistant-model";
+import { studentPresentNow } from "./assistant-queries";
+import { answerQuestionOfApprovedAiReply, fetchAttendanceMarks, setQuestionAnswerSource } from "./assistant-store";
 import { invalidateWebinars } from "./cache";
 import { chatMessageFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
 import {
@@ -52,7 +60,7 @@ import {
   type ChatMessagePatch
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
-import { WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import {
   CHAT_LIMITS,
   type ChatMessage,
@@ -64,10 +72,12 @@ import {
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
+import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
 import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
 import { questionSentMetadata } from "./room-rules";
 import { sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
+import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
 import { fetchSessionRow, insertSessionRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
 
@@ -99,7 +109,7 @@ export type SessionEnded = { replayCreated: boolean; sessionId: string; summary:
 export type ModeratedMessage = { message: ChatMessage; pinnedMessageId: string | null };
 export type SessionChatMode = { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null };
 export type SavedPolls = { created: number; deleted: number; polls: Poll[]; updated: number };
-export type AnsweredQuestion = { message: ChatMessage | null; question: WebinarQuestion };
+export type AnsweredQuestion = { message: ChatMessage | null; notified: boolean; question: WebinarQuestion };
 export type SavedSimulation = { deciderName: string; session: WebinarSession };
 export type ReplayCreated = { created: boolean; session: WebinarSession };
 export type RemovedStudentContent = { answers: number; consentRevoked: boolean; messages: number; questions: number };
@@ -150,6 +160,60 @@ function teamRole(webinar: WebinarRow, userId: string): "host" | "team" {
 
 function teamDisplayName(user: { email?: string; user_metadata: Record<string, unknown> }) {
   return firstNameInitial(getUserDisplayName(user).fullName).slice(0, CHAT_LIMITS.displayName) || "Equipe";
+}
+
+/** Fase 4c: as marcas de atendimento de um alvo; sem a 202610300004 (ou na falha da leitura), nenhuma: a resposta da equipe segue igual. */
+async function attendanceMarksOf(db: WebinarsDb, target: "chat" | "question", id: string) {
+  try {
+    return (await fetchAttendanceMarks(db, { ids: [id], target })).get(id) ?? null;
+  } catch (error) {
+    if (!isPendingMigrationError(error)) {
+      console.error(`[webinarios] marcas de atendimento nao lidas: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * Fase 4c: a resposta da equipe vai tambem para o sino quando o aluno pediu a equipe, quando a sessao ja nao esta no ar
+ * ou quando ele saiu da sala (assistant-model.teamAnswerNeedsNotice). Nunca lanca; devolve se avisou.
+ */
+async function noticeTeamAnswer(
+  db: WebinarsDb,
+  input: { answerText: string; handoffRequested: boolean; now: Date; session: WebinarSession; targetId: string; userId: string }
+): Promise<boolean> {
+  try {
+    const sessionRunning = canTeamActOn(input.session);
+    const studentPresent = sessionRunning && !input.handoffRequested ? await studentPresentNow(db, { nowMs: input.now.getTime(), session: input.session, userId: input.userId }) : false;
+
+    if (!teamAnswerNeedsNotice({ handoffRequested: input.handoffRequested, sessionRunning, studentPresent })) {
+      return false;
+    }
+
+    const sent = await queueWebinarAnswerNotice(db, {
+      answerText: input.answerText,
+      now: input.now,
+      sessionId: input.session.id,
+      targetId: input.targetId,
+      userId: input.userId,
+      webinarId: input.session.webinarId
+    });
+    return sent.notifications > 0;
+  } catch (error) {
+    console.error(`[webinarios] aviso da resposta da equipe nao decidido: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+/** Fase 4c: a pergunta foi respondida pela equipe (answer_source 'team'); sem a 202610300004, nada. */
+async function markTeamAnswer(db: WebinarsDb, questionId: string) {
+  try {
+    await setQuestionAnswerSource(db, { questionId, source: "team" });
+  } catch (error) {
+    if (!isPendingMigrationError(error)) {
+      throw error;
+    }
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -267,12 +331,29 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       webinar_id: webinar.id
     });
 
+    // Fase 4c: a resposta da equipe a uma mensagem do aluno (a fila do Atendimento) tambem vai para o sino quando ele
+    // pediu a equipe ou ja saiu da sala.
+    let notified = false;
+    const repliedTo = data.replyToId ? await fetchChatMessageRow(db, data.replyToId).catch(() => null) : null;
+
+    if (repliedTo && repliedTo.session_id === session.id && repliedTo.source === "audience" && repliedTo.author_user_id && !repliedTo.deleted_at) {
+      const marks = await attendanceMarksOf(db, "chat", repliedTo.id);
+      notified = await noticeTeamAnswer(db, {
+        answerText: data.body,
+        handoffRequested: Boolean(marks?.handoffRequestedAt),
+        now,
+        session,
+        targetId: repliedTo.id,
+        userId: repliedTo.author_user_id
+      });
+    }
+
     await recordAudit(db, {
       action: "webinar.team_message",
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: { kind: data.kind, message_id: inserted.id, reply: Boolean(data.replyToId), role, session_id: session.id }
+      metadata: { kind: data.kind, message_id: inserted.id, notified, reply: Boolean(data.replyToId), role, session_id: session.id }
     });
 
     return { message: chatMessageFromRow(inserted) };
@@ -367,14 +448,20 @@ export async function moderateMessage(input: { action: ModerationAction; message
         throw new WebinarError("Ação inválida.", 400);
     }
 
+    // O estado de antes da troca (a linha lida pode ser a mesma referencia que a escrita devolve).
+    const wasApproved = message.approved;
     const updated = await updateChatMessageRow(db, message.id, patch);
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
     }
 
-    if (data.action === "approve" && !message.approved) {
+    if (data.action === "approve" && !wasApproved) {
       await openQuestionOfMessage(db, updated);
+      // A resposta do Assistente que esperava a equipe (chat moderado): a pergunta da aba fica respondida so agora.
+      if (message.role === "ai") {
+        await answerQuestionOfApprovedAiReply(db, { body: message.body, messageId: message.id, nowIso });
+      }
     } else if (data.action === "delete") {
       await softDeleteQuestionsOfMessage(db, { messageId: message.id, nowIso, reason: "team" });
     }
@@ -645,6 +732,8 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
       throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
     }
 
+    await markTeamAnswer(db, question.id);
+
     let message: ChatMessage | null = null;
     const offset = serverOffsetMs(session, now.getTime());
 
@@ -666,17 +755,23 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
       message = chatMessageFromRow(inserted);
     }
 
+    // Fase 4c: a resposta por escrito que chega depois (pediu a equipe, sessao fora do ar ou aluno fora da sala) vai ao sino.
+    const marks = answerText ? await attendanceMarksOf(db, "question", question.id) : null;
+    const notified = answerText
+      ? await noticeTeamAnswer(db, { answerText, handoffRequested: Boolean(marks?.handoffRequestedAt), now, session, targetId: question.id, userId: question.user_id })
+      : false;
+
     await recordAudit(db, {
       action: "webinar.question_answered",
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: { live: Boolean(data.answeredLive), message_id: message?.id ?? null, question_id: question.id, session_id: session.id, written: Boolean(answerText) }
+      metadata: { live: Boolean(data.answeredLive), message_id: message?.id ?? null, notified, question_id: question.id, session_id: session.id, written: Boolean(answerText) }
     });
     revalidateConsole(webinar.id);
     invalidateReport();
 
-    return { message, question: questionFromRow(updated) };
+    return { message, notified, question: questionFromRow(updated) };
   });
 }
 
@@ -692,6 +787,7 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
     }
 
     const sessionRow = await fetchSessionRow(db, question.session_id);
+    const previousStatus = question.status;
     const patch = data.status === "answered" ? { answered_at: question.answered_at ?? nowIso, answered_by: question.answered_by ?? user.id, status: "answered" } : { status: data.status };
     const updated = await updateQuestionRow(db, question.id, patch);
 
@@ -699,12 +795,16 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
       throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
     }
 
+    if (data.status === "answered" && previousStatus !== "answered") {
+      await markTeamAnswer(db, question.id);
+    }
+
     await recordAudit(db, {
       action: "webinar.question_status",
       actorId: user.id,
       entityId: sessionRow?.webinar_id ?? null,
       entityType: "webinar",
-      metadata: { from: question.status, question_id: question.id, session_id: question.session_id, status: data.status }
+      metadata: { from: previousStatus, question_id: question.id, session_id: question.session_id, status: data.status }
     });
 
     if (sessionRow) {
@@ -734,6 +834,12 @@ export async function saveSimulation(input: { ackText?: string; acknowledged?: b
 
     if (row.kind !== "simulated" || row.status === "cancelled") {
       throw new WebinarError(ONLY_SIMULATED_SESSION_MESSAGE, 409);
+    }
+
+    // Fase 4 (D10): com regra simulada na sessao, a frase da fase 2 ("numeros reais") seria falsa; a decisao passa
+    // pelo card novo (saveSessionSimulation). Banco sem a 202610300003: nao ha regra, segue a fase 2.
+    if (await hasSimulatedRules(db, row.id)) {
+      throw new WebinarError(WEBINAR_COPY.simulacao.servidor.usarCardNovo, 409);
     }
 
     const responsible = getUserDisplayName(user).fullName;
@@ -770,6 +876,19 @@ export async function saveSimulation(input: { ackText?: string; acknowledged?: b
 
     return { deciderName: responsible, session: sessionFromRow(updated) };
   });
+}
+
+/** A sessao tem contador, entradas ou avisos de venda simulados (colunas da 202610300003; sem elas, false). */
+async function hasSimulatedRules(db: WebinarsDb, sessionId: string) {
+  try {
+    const simulation = await fetchSessionSimulation(db, sessionId);
+    return Boolean(simulation && (simulation.countRule.mode !== "off" || simulation.joins.enabled || simulation.saleNotices.enabled));
+  } catch (error) {
+    if (isMissingWebinarSchema(error) || isPendingMigrationError(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------

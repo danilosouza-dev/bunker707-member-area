@@ -11,14 +11,21 @@
 // `token` no corpo, gerado pela Ticto ao cadastrar o webhook; sem cabecalho. A conferencia e em tempo
 // constante contra o SHA-256 do token guardado em integration_settings (secret.ts, o mesmo da Hotmart),
 // nunca contra variavel de ambiente.
+//
+// O valor pago (docs/30 M8, fase 4b) vem de `order.paid_amount` (o pedido inteiro, com os bumps), ou de `item.amount`
+// sem ele, em centavos (inteiro: 19700 = R$ 197,00); a moeda, de `order.currency` ou `currency`, e reais (BRL) quando a
+// Ticto nao manda. Lido do payload bruto na chegada (o guardado mantem `order.paid_amount`). So vai para
+// webhook_events.amount_cents/currency; nunca decide acesso.
 
 import { createHash } from "node:crypto";
 import { asObject, normalizeBuyerEmail, pick, shortString } from "./adapter-helpers";
+import { saleAmountCents, saleAmountOf } from "./sale-amount";
 import { isSalesSecretHash, isValidSalesToken } from "./secret";
 import {
   type NormalizedSaleEvent,
   type NormalizedSaleType,
   type PaymentProviderAdapter,
+  type SaleAmount,
   type SaleBuyer,
   type SaleExtraProduct,
   type SaleVerification
@@ -191,6 +198,41 @@ function warrantyEnd(purchasedAt: string | null, refundDeadlineDays: unknown): s
   return new Date(new Date(purchasedAt).getTime() + Math.floor(refundDeadlineDays) * DAY_MS).toISOString();
 }
 
+/** A moeda da Ticto quando o payload nao traz: o checkout vende em reais. */
+export const TICTO_DEFAULT_CURRENCY = "BRL";
+
+/**
+ * Centavos de um valor da Ticto: inteiro (numero ou texto so com digitos) ja e centavos; texto com casa decimal
+ * ("197.00", "197,00") ou numero quebrado e lido na unidade da moeda. O resto: null.
+ */
+export function tictoAmountCents(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return value >= 0 ? value : null;
+  }
+
+  if (typeof value === "string" && /^\s*\d+\s*$/.test(value)) {
+    const cents = Number(value.trim());
+
+    return Number.isSafeInteger(cents) ? cents : null;
+  }
+
+  return saleAmountCents(value);
+}
+
+/**
+ * O valor pago (M8): `order.paid_amount`, ou `item.amount` sem ele, com a moeda de `order.currency` / `currency` (BRL
+ * quando falta). Sem valor, valor ilegivel ou moeda invalida: null.
+ */
+export function readTictoAmount(parsed: Pick<TictoPayload, "item" | "order" | "root">): SaleAmount | null {
+  const raw = parsed.order?.paid_amount ?? parsed.item?.amount;
+
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+
+  return saleAmountOf({ cents: tictoAmountCents(raw), currency: parsed.order?.currency ?? parsed.root.currency, defaultCurrency: TICTO_DEFAULT_CURRENCY });
+}
+
 export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | null {
   const parsed = parseTictoPayload(payload);
 
@@ -213,6 +255,7 @@ export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | nul
   const purchasedAt = tictoDateToIso(parsed.order?.order_date) ?? occurredAt;
 
   return {
+    amount: readTictoAmount(parsed),
     buyer: readBuyer(parsed.root),
     eventId,
     externalProductId,
@@ -278,7 +321,8 @@ function pickList(value: unknown, keys: readonly string[]) {
  * (produto e oferta), as assinaturas (id, intervalo, cancelamento e proxima cobranca) e, do comprador,
  * so nome, e-mail, telefone e codigo. Token, link de login direto, CPF/CNPJ, endereco, cartao, rastreio,
  * produtor, afiliados, coprodutores e comissoes nunca sao gravados. E o que o reprocesso relê: tudo o
- * que normalizeTictoEvent usa esta aqui.
+ * que normalizeTictoEvent usa esta aqui, menos a moeda e o `item.amount` do valor (M8), lidos do payload bruto na
+ * chegada (a lista nao muda: o digest da chave sem `status_date` continua o mesmo para reenvios de antes).
  */
 export function redactTictoPayload(payload: unknown): unknown {
   const root = asObject(payload);

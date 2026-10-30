@@ -157,7 +157,8 @@ test("communication_webinar_facts: so service_role, security invoker; uma linha 
 
 test("o aviso de migracao pendente dos webinarios aponta a migracao mais nova que mexe nas tabelas webinar*", () => {
   // WEBINAR_COLUMNS le webinars.audience_restricts (desta migracao): num banco sem ela toda leitura de webinario da 42703,
-  // e o aviso da tela e o log dos ticks precisam mandar aplicar a que falta, nunca uma ja aplicada.
+  // e o aviso da tela e o log dos ticks precisam mandar aplicar a que falta, nunca uma ja aplicada. As da fase 4 vem
+  // depois desta (202610300002 a 202610300007, docs/21 §9.10): o aviso aponta a mais nova, e aplicar ate ela inclui esta.
   const dir = new URL("supabase/migrations/", root);
   const newest = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -166,7 +167,8 @@ test("o aviso de migracao pendente dos webinarios aponta a migracao mais nova qu
     .at(-1);
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
 
-  assert.equal(newest, "202610300001_webinars_quem_pode_regras.sql");
+  assert.equal(newest, "202610300007_webinars_v4_ajustes.sql");
   assert.equal(appMigration, newest.slice(0, 12), "WEBINARS_MIGRATION = o prefixo da migracao mais nova dos webinarios");
+  assert.ok(appMigration >= "202610300001", "aplicar ate a do aviso inclui esta");
   assert.match(read("src/server/webinars/rows.ts"), /\baudience_restricts\b/, "a coluna desta migracao e lida pelo app");
 });

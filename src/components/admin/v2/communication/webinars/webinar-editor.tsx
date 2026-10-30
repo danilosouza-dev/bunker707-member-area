@@ -34,6 +34,7 @@ import {
   webinarHeaderButtons,
   webinarKindLabel,
   webinarNotifyShortcuts,
+  webinarPublishProblems,
   webinarReviewSentence,
   webinarScreenProblems,
   webinarSituationLabel,
@@ -42,10 +43,10 @@ import {
   type WebinarFieldErrors,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
-import type { WebinarDraft, WebinarKind, WebinarSession, WebinarSituation, WebinarStatus } from "@/server/webinars/model";
+import { defaultJitSettings, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSession, type WebinarSituation, type WebinarStatus } from "@/server/webinars/model";
 import type { WebinarEditorData, WebinarEditorOptions } from "@/server/webinars/queries";
 import { cancelReplaySession, createReplaySession } from "@/server/webinars/room-actions";
-import { publishProblems, webinarDraftSchema } from "@/server/webinars/schemas";
+import { webinarDraftSchema } from "@/server/webinars/schemas";
 import { ErrorBanner } from "../../error-banner";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../form";
 import { AdminLinkButton } from "../../link-button";
@@ -63,6 +64,8 @@ import type { AudienceCountState } from "../audience-builder";
 import { DateTimeField } from "../notice-when-fields";
 import { audienceMessageOptions, audienceNamesWithMessages } from "../notices-view-model";
 import { isEditorSaveShortcut } from "../save-shortcut";
+import { AssistantCard } from "./assistant-card";
+import { OfferCard } from "./offer-card";
 import { PollsCard } from "./polls-card";
 import { ScriptCard } from "./script-card";
 import { SimulationCard } from "./simulation-card";
@@ -87,7 +90,9 @@ import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActio
 //   sala e as acoes dela moram la); sem messaging.publish, Abrir a sala e Encerrar live aparecem desligados com a
 //   explicacao embaixo do cabecalho (§2.6); o card Gravacao mostra a situacao do gravador da sessao `live`;
 // - Avisar › Aviso no sino e Pop-up levam a /admin/comunicacao/avisos/novo?webinario=<id>&tipo= (o aviso preenchido
-//   pelo webinario salvo, nada gravado ate salvar); desligados com o motivo (webinarNotifyShortcuts).
+//   pelo webinario salvo, nada gravado ate salvar); desligados com o motivo (webinarNotifyShortcuts);
+// - fase 4e: o card Sessoes da Live gravada termina com o "Comeca quando voce entra" (JitCard, salva sozinho); com ele
+//   ligado e gravado, Publicar nao pede hora marcada (webinarPublishProblems) e a Revisao diz os horarios dele.
 
 type WebinarEditorProps = {
   /** Tipo ja escolhido (?tipo= no "Novo webinário"); null pergunta o tipo primeiro. */
@@ -186,6 +191,8 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   // O Replay livre (fase 2): a sessao `replay` do webinario, ligada e desligada pelo card Sessoes.
   const [replaySession, setReplaySession] = useState<WebinarSession | null>(initial?.replaySession ?? null);
   const [replayBusy, setReplayBusy] = useState(false);
+  // O "Comeca quando voce entra" gravado (fase 4e): o card salva sozinho e avisa aqui (Publicar e a Revisao leem).
+  const [jitSaved, setJitSaved] = useState<JitSettings>(() => initial?.jit ?? defaultJitSettings());
   const countRequest = useRef(0);
   const bannerRef = useRef<HTMLDivElement>(null);
   const saveShortcut = useRef<() => void>(() => undefined);
@@ -285,7 +292,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   // A frase descreve o segmento como a equipe montou: a troca da propria live vale so para o numero (audienceKey).
   const audienceDescription = webinarAudienceDescription(draft, audienceNames);
   const productName = draft.productId ? (options.names.products[draft.productId] ?? null) : null;
-  const reviewSentence = webinarReviewSentence({ draft: payload, now, productName, registeredCount: savedVersion?.registeredCount ?? null, situation });
+  const reviewSentence = webinarReviewSentence({ draft: payload, jit: jitSaved, now, productName, registeredCount: savedVersion?.registeredCount ?? null, situation });
 
   function errorFor(key: string) {
     return serverErrors[key] ?? (submitted || touched.has(key) ? clientErrors[key] : undefined);
@@ -440,7 +447,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
       return;
     }
 
-    const problems = publishProblems(payload, Date.now());
+    const problems = webinarPublishProblems(payload, Date.now(), jitSaved);
     const extra = Object.fromEntries(problems.map((problem) => [problem.path, problem.message]));
 
     setBusy("publish");
@@ -746,7 +753,28 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
       case "sessoes":
         return (
           <SectionCard description={meta.description} key={`${card}-${resetKey}`} title={meta.title} titleId={titleId}>
-            <SessionsCard {...cardProps} replay={replayControl} savedSessions={savedSessions} webinarId={savedVersion?.id ?? null} />
+            <SessionsCard
+              {...cardProps}
+              jit={{
+                canPublish: permissions.canPublish,
+                currentUserName: options.currentUserName,
+                deciderNames: initial?.deciderNames ?? {},
+                disabled: locked || situation === "cancelled",
+                hasVideo: Boolean(saved.recordingVideoUrl),
+                initial: jitSaved,
+                now,
+                onSaved: (settings, updatedAt) => {
+                  setJitSaved(settings);
+                  // jit_settings muda o updated_at do webinario: o proximo Salvar leva a versao nova.
+                  setSavedVersion((current) => (current ? { ...current, updatedAt } : current));
+                },
+                sessionsToday: initial?.jitSessionsToday ?? [],
+                webinarId: savedVersion?.id ?? null
+              }}
+              replay={replayControl}
+              savedSessions={savedSessions}
+              webinarId={savedVersion?.id ?? null}
+            />
           </SectionCard>
         );
       case "simulacao":
@@ -780,6 +808,32 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
             {savedVersion ? <PollsCard disabled={locked} initial={initial?.polls ?? []} webinarId={savedVersion.id} /> : <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>}
+          </SectionCard>
+        );
+      case "oferta":
+        return (
+          <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
+            {savedVersion ? (
+              <OfferCard canWrite={permissions.canWrite} disabled={locked} kind={draft.kind} webinarId={savedVersion.id} />
+            ) : (
+              <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
+            )}
+          </SectionCard>
+        );
+      case "assistente":
+        return (
+          <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
+            {savedVersion ? (
+              <AssistantCard
+                canWrite={permissions.canWrite}
+                disabled={locked}
+                // assistant_settings muda o updated_at do webinario: o proximo Salvar leva a versao nova.
+                onSaved={(updatedAt) => setSavedVersion((current) => (current ? { ...current, updatedAt } : current))}
+                webinarId={savedVersion.id}
+              />
+            ) : (
+              <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
+            )}
           </SectionCard>
         );
       case "quemPode":

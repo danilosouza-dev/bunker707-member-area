@@ -19,6 +19,7 @@ import { LiveRoomWatcher, WebinarEnterButton, WebinarReplayButton } from "./webi
 import { WebinarFacts } from "./webinar-facts";
 import { WebinarLocalTime } from "./webinar-local-time";
 import { WebinarSessionActions } from "./webinar-session-actions";
+import { JitEnter } from "./jit/jit-enter";
 
 // /webinarios/[slug] (docs/30 §1.2): a tabela de situacoes. Agendado (Garantir vaga), Vaga garantida (selo,
 // Adicionar ao calendario e Cancelar minha vaga), Vagas esgotadas (sem botao), Aguardando o apresentador e
@@ -28,7 +29,10 @@ import { WebinarSessionActions } from "./webinar-session-actions";
 // Encerrada ("Essa live acabou." e Assistir o replay quando ha a sessao replay) e Cancelado (o motivo que a equipe
 // escreveu). Com limite de vagas (A12) so quem garantiu entra: sem a vaga, Garantir vaga e depois Entrar. Na Live
 // gravada o aluno escolhe a sessao antes de garantir a vaga. Horarios em Sao Paulo; "(no seu horario: 21:00)"
-// quando o aparelho esta em outro fuso. Sem acesso a pagina nem existe (notFound na page.tsx).
+// quando o aparelho esta em outro fuso. Sem acesso a pagina nem existe (notFound na page.tsx). Fase 4e: com o
+// "Comeca quando voce entra" ligado, a pagina mostra "A próxima sessão começa em {n} min" e o Entrar (sem Garantir
+// vaga; jit/jit-enter.tsx), o selo no lugar da situacao quando nao ha hora marcada e, se houver, as sessoes marcadas
+// embaixo como antes; as sessoes `jit` nunca aparecem uma a uma.
 
 const PHASE_TONES: Record<StudentPhase, MemberChipTone> = {
   cancelled: "warning",
@@ -314,9 +318,16 @@ export function WebinarPageView({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <MemberChip tone="neutral">{view.kindLabel}</MemberChip>
-            <MemberChip icon={view.phase === "live" ? Radio : undefined} tone={PHASE_TONES[view.phase]}>
-              {phaseLabel(view.phase)}
-            </MemberChip>
+            {view.jit ? (
+              <MemberChip icon={Radio} tone="outline">
+                {WEBINAR_COPY.jit.aluno.selo}
+              </MemberChip>
+            ) : null}
+            {!view.jit || primary ? (
+              <MemberChip icon={view.phase === "live" ? Radio : undefined} tone={PHASE_TONES[view.phase]}>
+                {phaseLabel(view.phase)}
+              </MemberChip>
+            ) : null}
           </div>
           <h1 className="mt-3 text-[28px] font-black leading-[1.08] text-white sm:text-4xl">{view.title}</h1>
           {view.description ? (
@@ -324,6 +335,17 @@ export function WebinarPageView({
           ) : null}
 
           {primary ? <WebinarFacts className="mt-5" durationLabel={view.durationLabel} presenterName={view.presenterName} session={primary} /> : null}
+          {!primary && view.jit ? (
+            <p className="mt-5 text-sm text-zinc-400">
+              {copy.duracao}: <span className="text-zinc-200">{view.durationLabel}</span>
+              {view.presenterName ? (
+                <>
+                  {" · "}
+                  {copy.apresentador}: <span className="text-zinc-200">{view.presenterName}</span>
+                </>
+              ) : null}
+            </p>
+          ) : null}
 
           {primary && upcoming ? (
             <p className="mt-5 flex items-center gap-2 text-lg font-bold text-white">
@@ -333,6 +355,12 @@ export function WebinarPageView({
           ) : null}
           {primary && upcoming && primary.registeredCount !== null && view.kind !== "simulated" ? (
             <p className="mt-1 text-xs text-zinc-500">{copy.vagasGarantidas(primary.registeredCount)}</p>
+          ) : null}
+
+          {view.jit ? (
+            <div className="mt-6">
+              <JitEnter accessPreviewMode={accessPreviewMode} jit={view.jit} readOnly={readOnly} serverNow={serverNow} webinarId={view.id} />
+            </div>
           ) : null}
 
           <div className="mt-6">

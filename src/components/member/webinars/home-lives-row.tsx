@@ -4,6 +4,7 @@ import { withAccessPreviewParam, type AccessPreviewMode } from "@/lib/access-pre
 import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { HomeWebinarCard } from "@/server/webinars/student-model";
+import { JitPosterCard, hasJit } from "./jit/jit-cards";
 import { WebinarPosterCard, type WebinarCardVariant } from "./webinar-poster-card";
 
 // A fileira "Lives" da pagina inicial (docs/30 §1.1): o card "Proxima live" (ou "Replay disponivel" por
@@ -41,14 +42,19 @@ export function HomeLivesRow({ accessPreviewMode, card, serverNow }: { accessPre
         </Link>
       </div>
       <div className="member-row-scroller scrollbar-hidden flex gap-[0.75rem] overflow-x-auto overscroll-x-contain px-[var(--member-row-inset)]">
-        <WebinarPosterCard
-          accessPreviewMode={accessPreviewMode}
-          className="w-[44vw] shrink-0 sm:w-[200px] lg:w-[220px]"
-          priority
-          serverNow={serverNow}
-          variant={variantOf(card)}
-          view={card.view}
-        />
+        {/* Fase 4e: o webinario do "Começa quando você entra" usa o card com a contagem do proximo horario. */}
+        {hasJit(card.view) ? (
+          <JitPosterCard accessPreviewMode={accessPreviewMode} className="w-[44vw] shrink-0 sm:w-[200px] lg:w-[220px]" priority serverNow={serverNow} view={card.view} />
+        ) : (
+          <WebinarPosterCard
+            accessPreviewMode={accessPreviewMode}
+            className="w-[44vw] shrink-0 sm:w-[200px] lg:w-[220px]"
+            priority
+            serverNow={serverNow}
+            variant={variantOf(card)}
+            view={card.view}
+          />
+        )}
       </div>
     </section>
   );

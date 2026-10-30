@@ -12,7 +12,10 @@ import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste, SENHA_DE_TESTE, u
 // sessao depois da duracao do video (webinar_attendance resumida, presence_curve congelada) e cria a sessao replay,
 // uma so; webinar_report e webinar_attendees conferidos contra numeros calculados a mao aqui; a pagina do relatorio e
 // o CSV; as RPCs recusam o aluno logado (42501); a rota do CSV recusa o analista (403) e serve o produtor com a
-// auditoria webinar_export. O teste anda com a hora marcada (como o teste dos lembretes) em vez de esperar.
+// auditoria webinar_export. Fase 4 (202610300003 e 202610300004): a Oferta com a janela, os cliques e a compra ligada
+// pelo webhook com o valor (offer / offer_revenue), as Respostas do Assistente (ai) e o resumo da Simulacao (sim_*)
+// na RPC com dados reais, sem mexer em nenhum numero real; e os CSVs com os nomes do Zoom pelas rotas da sessao e do
+// painel. O teste anda com a hora marcada (como o teste dos lembretes) em vez de esperar.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -25,6 +28,7 @@ const { fetchAttendees } = await import("../../src/server/webinars/chat-store.ts
 const { getWebinarReportPage, loadWebinarReportCsv } = await import("../../src/server/webinars/report-queries.ts");
 const { listNotifications } = await import("../../src/server/communications/inbox.ts");
 const csvRoute = await import("../../src/app/api/admin/webinars/[id]/relatorio/csv/route.ts");
+const panelCsvRoute = await import("../../src/app/api/admin/webinars/painel/csv/route.ts");
 
 const aluna = usuarioDeTeste(contas.aluna);
 const alunoSemAcesso = usuarioDeTeste(contas.alunoSemAcesso);
@@ -46,9 +50,15 @@ let enqueteId = "";
 let opcaoA = "";
 let perguntaId = "";
 
+// A venda de teste da Oferta (fase 4): o vinculo, o evento do webhook com o valor e o acesso, apagados antes e depois.
+const VENDA = { evento: "evt-teste-relatorio-oferta", produto: "teste-oferta-relatorio", transacao: "T-TESTE-RELATORIO-OFERTA" };
+
 async function limparRastros() {
   unwrap(await db.from("student_events").delete().in("user_id", pessoas).eq("entity_type", "webinar"), "Apagando o historico de webinario de teste");
   unwrap(await db.from("notifications").delete().in("user_id", pessoas).eq("kind", "webinar"), "Apagando o sino de webinario de teste");
+  unwrap(await db.from("sale_grants").delete().eq("transaction_id", VENDA.transacao), "Apagando a venda de teste da oferta");
+  unwrap(await db.from("webhook_events").delete().eq("external_event_id", VENDA.evento), "Apagando o webhook de teste da oferta");
+  unwrap(await db.from("entitlements").delete().eq("target_id", VENDA.produto), "Apagando o acesso de teste da oferta");
 }
 
 /** A live gravada marcada para `scheduledAt`, com o video de 10 min pronto e as vagas da aluna, do aluno sem acesso e do produtor (equipe). */
@@ -263,6 +273,13 @@ test("3. webinar_report e webinar_attendees contra numeros calculados a mao: so 
   assert.equal(linha(rows, "hot", alunoSemAcesso.id).total, 44);
   assert.equal(linha(rows, "replay", "viewers").total, 0);
   assert.equal(linha(rows, "sim_script", "fired").total, 0);
+  // Sessao sem oferta e sem resposta do Assistente (os dados do teste 7 ainda nao existem): nenhuma linha `offer` nem
+  // `ai`, nem as de zeros que um agregado sem grupo daria com o filtro falso.
+  assert.deepEqual(
+    rows.filter((row) => row.metric === "offer" || row.metric === "offer_revenue" || row.metric === "ai").map((row) => `${row.metric}/${row.item}`),
+    [],
+    "sem oferta e sem Assistente, nenhuma linha da Oferta nem do Assistente"
+  );
 
   const presentes = await fetchAttendees(db, LIVE.sessaoId);
   assert.deepEqual(presentes.map((row) => row.userId), [aluna.id, alunoSemAcesso.id], "mais tempo primeiro; a equipe fora");
@@ -291,6 +308,8 @@ test("4. a pagina do relatorio e o CSV: a sessao encerrada e a padrao, o replay 
   assert.deepEqual(selected.polls[0]?.options.map((option) => [option.label, option.total]), [["Planilha", 1], ["Agente", 0]]);
   assert.equal(selected.questions[perguntaId]?.body, "Vai ter replay?");
   assert.equal(selected.simulation.showLiveBadge, false);
+  // Sem oferta e sem Assistente: os dois blocos ficam fora da pagina.
+  assert.deepEqual([selected.report.offer.present, selected.report.assistant.present, selected.assistant.enabled], [false, false, false]);
 
   const csv = await loadWebinarReportCsv(db, { sessionId: LIVE.sessaoId, webinarId: LIVE.id });
   assert.ok(csv);
@@ -348,5 +367,216 @@ test("6. a rota do CSV: 401 sem sessao, 403 para o analista, 400 sem a sessao, 4
   const auditoria = unwrap(await db.from("admin_audit_log").select("action,actor_id,entity_id,entity_type,count,metadata").eq("action", "webinar_export").eq("entity_id", LIVE.id).gte("occurred_at", antes), "Lendo a auditoria");
   assert.equal(auditoria.length, 1);
   assert.deepEqual([auditoria[0].actor_id, auditoria[0].entity_type, auditoria[0].count], [produtor.id, "webinar", 2]);
-  assert.deepEqual(auditoria[0].metadata, { report: "attendee", session_id: LIVE.sessaoId, webinar_id: LIVE.id });
+  assert.deepEqual(auditoria[0].metadata, { kind: "simulated", report: "attendee", session_id: LIVE.sessaoId, webinar_id: LIVE.id });
+});
+
+test("7. fase 4 na RPC com dados reais: a Oferta (janela, cliques, compra pelo webhook com o valor), as Respostas do Assistente e o resumo da Simulacao, sem mexer nos numeros reais", async () => {
+  const oferta = unwrap(
+    await db
+      .from("webinar_offers")
+      .insert({ product_id: VENDA.produto, show_at_offset_ms: 0, status: "active", title: "Oferta de teste", trigger_kind: "at_offset", webinar_id: LIVE.id })
+      .select("id")
+      .single(),
+    "Gravando a oferta"
+  );
+  unwrap(
+    await db.from("webinar_offer_variants").insert([
+      { checkout_url: "https://pay.example.com/a", headline: "Entre agora", label: "A", offer_id: oferta.id },
+      { checkout_url: "https://pay.example.com/b", headline: "Ultima chance", label: "B", offer_id: oferta.id }
+    ]),
+    "Gravando as variantes"
+  );
+  // A janela da sessao: do comeco aos 2:30 (baldes 0 a 5): a aluna e o aluno sem acesso estavam la; o produtor e equipe.
+  unwrap(await db.from("webinar_offer_displays").insert({ hide_offset_ms: 150_000, offer_id: oferta.id, session_id: LIVE.sessaoId, show_offset_ms: 0 }), "Gravando a janela");
+  // A sessao ja foi encerrada no teste 2; de verdade a janela vem antes do fim, e o fim congela quem esteve nela
+  // (webinar_offer_seen, D58), que a sessao encerrada passa a ler. O encerramento pode rodar de novo: refaz o resumo
+  // pelas mesmas amostras e congela quem viu a oferta.
+  unwrap(await db.rpc("webinar_close_session", { p_now: new Date().toISOString(), p_session_id: LIVE.sessaoId }), "Encerrando de novo depois da janela");
+  const variante = async (user) => unwrap(await db.rpc("webinar_offer_variant", { p_offer_id: oferta.id, p_user_id: user.id }), "Lendo a variante");
+  const varianteDaAluna = await variante(aluna);
+  const clicouHa = new Date(Date.now() - 10 * MINUTO_MS).toISOString();
+  unwrap(
+    await db.from("webinar_offer_clicks").insert([
+      { click_token: "teste-relatorio-clique-aluna", clicked_at: clicouHa, offer_id: oferta.id, offset_ms: 120_000, session_id: LIVE.sessaoId, user_id: aluna.id, variant_label: varianteDaAluna },
+      { click_token: "teste-relatorio-clique-aluno", clicked_at: clicouHa, offer_id: oferta.id, offset_ms: 130_000, session_id: LIVE.sessaoId, user_id: alunoSemAcesso.id, variant_label: await variante(alunoSemAcesso) }
+    ]),
+    "Gravando os cliques"
+  );
+  // A compra so vem do webhook (sale_grants), com o valor gravado em webhook_events (M8); o job liga ao ultimo clique.
+  const acesso = unwrap(
+    await db.from("entitlements").insert({ source_event_id: VENDA.evento, source_provider: "hotmart", status: "active", target_id: VENDA.produto, target_type: "product", user_id: aluna.id }).select("id").single(),
+    "Gravando o acesso"
+  );
+  const evento = unwrap(
+    await db
+      .from("webhook_events")
+      .insert({ amount_cents: 19_700, currency: "BRL", event_type: "PURCHASE_APPROVED", external_event_id: VENDA.evento, payload: {}, provider: "hotmart" })
+      .select("id")
+      .single(),
+    "Gravando o webhook"
+  );
+  unwrap(
+    await db.from("sale_grants").insert({ entitlement_id: acesso.id, opened: true, product_id: VENDA.produto, provider: "hotmart", transaction_id: VENDA.transacao, user_id: aluna.id, webhook_event_id: evento.id }),
+    "Gravando a venda"
+  );
+  assert.ok(unwrap(await db.rpc("webinar_offer_conversions", { p_limit: 500, p_now: new Date().toISOString() }), "Ligando a compra") >= 1);
+  const ligados = unwrap(await db.from("webinar_offer_clicks").select("user_id, converted_sale_grant_id").eq("offer_id", oferta.id), "Lendo os cliques");
+  assert.deepEqual(
+    ligados.filter((clique) => clique.converted_sale_grant_id).map((clique) => clique.user_id),
+    [aluna.id],
+    "so o clique da aluna virou compra (o do aluno sem acesso nao tem venda)"
+  );
+
+  // O Assistente: uma resposta, uma corrigida, uma apagada; o pedido respondido em 6 s; a pergunta pediu a equipe.
+  const agora = Date.now();
+  unwrap(
+    await db.from("webinar_chat_messages").insert([
+      { body: "Sim.", display_name: "Assistente", kind: "answer", offset_ms: 95_000, role: "ai", session_id: LIVE.sessaoId, source: "ai", webinar_id: LIVE.id },
+      { body: "Corrigida.", display_name: "Assistente", edited_at: new Date(agora).toISOString(), edited_by: produtor.id, kind: "answer", offset_ms: 96_000, role: "ai", session_id: LIVE.sessaoId, source: "ai", webinar_id: LIVE.id },
+      { body: "Apagada.", deleted_at: new Date(agora).toISOString(), deleted_by: produtor.id, deleted_reason: "team", display_name: "Assistente", kind: "answer", offset_ms: 97_000, role: "ai", session_id: LIVE.sessaoId, source: "ai", webinar_id: LIVE.id }
+    ]),
+    "Gravando as respostas do Assistente"
+  );
+  unwrap(
+    await db.from("webinar_ai_requests").insert({
+      answered_at: new Date(agora).toISOString(),
+      requested_at: new Date(agora - 6000).toISOString(),
+      session_id: LIVE.sessaoId,
+      status: "answered",
+      target_id: perguntaId,
+      target_kind: "question",
+      user_id: alunoSemAcesso.id,
+      webinar_id: LIVE.id
+    }),
+    "Gravando o pedido ao Assistente"
+  );
+  unwrap(
+    await db
+      .from("webinar_questions")
+      .update({ answer_source: "ai", answer_text: "Sim, por 7 dias.", answered_at: new Date(agora).toISOString(), handoff_requested_at: new Date(agora).toISOString(), status: "answered" })
+      .eq("id", perguntaId),
+    "Respondendo a pergunta pelo Assistente"
+  );
+
+  // A Simulacao da sessao gravada: a decisao registrada pelo produtor (sem ela a sala nao mostra nada simulado e o CSV
+  // diz que nada disparou), a regra, um aviso de venda e o resumo congelado.
+  unwrap(
+    await db
+      .from("webinar_sessions")
+      .update({
+        simulation_ack_text: "Decisão do produtor no teste do relatório.",
+        simulation_decided_at: new Date(agora).toISOString(),
+        simulation_decided_by: produtor.id,
+        simulated_count_rule: { base: 40, jitter: 0, mode: "fixed", peak: 40 },
+        simulated_sale_notices: { enabled: true, items: [{ offset_ms: 60_000, text: "Ana garantiu a vaga" }] },
+        simulation_summary: { counter_max: 240, joins_shown: 18, sale_notices_shown: 2 }
+      })
+      .eq("id", LIVE.sessaoId),
+    "Gravando a Simulacao"
+  );
+
+  const rows = await fetchWebinarReport(db, LIVE.sessaoId);
+  assert.deepEqual([linha(rows, "offer", "seen").total, linha(rows, "offer", "seen").students], [2, 2], "os dois alunos na janela; a equipe fora");
+  assert.deepEqual([linha(rows, "offer", "clicks").total, linha(rows, "offer", "purchases").students], [2, 1]);
+  assert.equal(linha(rows, "offer", `${varianteDaAluna}:purchases`).students, 1, "a compra cai na variante da aluna");
+  assert.deepEqual([linha(rows, "offer_revenue", "BRL").total, linha(rows, "offer_revenue", "BRL").students], [19_700, 1], "o valor do webhook, uma venda");
+  assert.deepEqual(
+    ["replies", "avg_seconds", "edited", "deleted", "handoffs"].map((item) => linha(rows, "ai", item).total),
+    [2, 6, 1, 1, 1]
+  );
+  assert.deepEqual(
+    [linha(rows, "sim_counter", "max").total, linha(rows, "sim_joins", "shown").total, linha(rows, "sim_sales", "shown").total],
+    [240, 18, 2]
+  );
+  assert.equal(linha(rows, "unique").total, 2, "nada simulado nem do Assistente entra nos presentes");
+  assert.equal(linha(rows, "chat_total").total, 2, "as respostas do Assistente ficam fora das mensagens de alunos");
+
+  const page = await getWebinarReportPage(LIVE.id, { sessionId: LIVE.sessaoId });
+  const selected = page?.selected;
+  assert.ok(selected);
+  assert.equal(selected.report.offer.present, true);
+  assert.deepEqual(selected.report.offer.revenue, [{ cents: 19_700, currency: "BRL", sales: 1 }]);
+  assert.equal(selected.report.assistant.present, true);
+  assert.deepEqual(selected.simulation.rules?.countMode, "fixed");
+  assert.deepEqual(selected.simulation.totals, { counterMax: 240, joinsShown: 18, saleNoticesShown: 2 });
+});
+
+// Uma linha do CSV em celulas (";" fora de aspas; "" dentro de aspas vira "): toCsv poe entre aspas a celula com ";",
+// como a frase do cabecalho do Performance. Nenhuma celula destes arquivos quebra linha.
+function celulas(texto) {
+  const saida = [];
+  let celula = "";
+  let entreAspas = false;
+  for (let i = 0; i < texto.length; i += 1) {
+    const c = texto[i];
+    if (entreAspas) {
+      if (c === '"' && texto[i + 1] === '"') {
+        celula += '"';
+        i += 1;
+      } else if (c === '"') {
+        entreAspas = false;
+      } else {
+        celula += c;
+      }
+    } else if (c === '"') {
+      entreAspas = true;
+    } else if (c === ";") {
+      saida.push(celula);
+      celula = "";
+    } else {
+      celula += c;
+    }
+  }
+  saida.push(celula);
+  return saida;
+}
+
+test("8. os CSVs com os nomes do Zoom pelas rotas: Q&A com o Assistente, Attendee com a variante, Performance e Simulacao separados, Registration sem a equipe, o Performance do periodo", async () => {
+  actAs(produtor);
+  const pedir = (relatorio) =>
+    csvRoute.GET(new Request(`http://localhost/api/admin/webinars/${LIVE.id}/relatorio/csv?sessao=${LIVE.sessaoId}&relatorio=${relatorio}`), { params: Promise.resolve({ id: LIVE.id }) });
+  const linhas = async (resposta) => {
+    assert.equal(resposta.status, 200, await resposta.clone().text());
+    return (await resposta.text()).trimEnd().split("\r\n").map(celulas);
+  };
+
+  const qa = await linhas(await pedir("qa"));
+  assert.equal(qa[0].join(";"), "Nº;Hora;Minuto do vídeo;Nome;E-mail;Pergunta;Votos;Situação;Respondida por;Resposta;Ao vivo;Hora da resposta");
+  assert.deepEqual(qa[1].slice(2, 10), ["02:00", ESCOLA_DE_TESTE.contas.alunoSemAcesso.nome, ESCOLA_DE_TESTE.contas.alunoSemAcesso.email, "Vai ter replay?", "2", "Respondida", "Assistente", "Sim, por 7 dias."]);
+
+  const attendee = await linhas(await pedir("attendee"));
+  const daAluna = attendee.find((linha) => linha[1] === ESCOLA_DE_TESTE.contas.aluna.nome);
+  assert.match(daAluna?.[13] ?? "", /^[AB]$/, "Oferta clicada (variante)");
+
+  const performance = await linhas(await pedir("performance"));
+  assert.equal(performance[0][0], "Estes números são reais; a simulação não entra em nenhum deles.");
+  assert.deepEqual(performance[2].slice(5, 8), ["2", "2", "100 %"], "vagas, presentes e comparecimento reais");
+  assert.deepEqual(performance[2].slice(20, 24), ["2", "2", "1", "50 %"], "viram, cliques, compras e conversao");
+  assert.ok(!performance.flat().includes("240"), "o contador simulado nunca entra");
+
+  const simulacao = await linhas(await pedir("simulacao"));
+  assert.equal(simulacao[0][0], "Estes números são da simulação e não entram em nenhum outro número.");
+  assert.ok(simulacao.some((linha) => linha[0] === "Contador" && linha[4] === "real + número fixo · maior número mostrado: 240 · participantes de verdade: 2"));
+  assert.ok(simulacao.some((linha) => linha[0] === "Aviso de venda" && linha[1] === "01:00" && linha[5] === "Sim"));
+
+  const vagas = await linhas(await pedir("registration"));
+  assert.deepEqual(vagas.slice(1).map((linha) => linha[0]).sort(), [ESCOLA_DE_TESTE.contas.aluna.nome, ESCOLA_DE_TESTE.contas.alunoSemAcesso.nome].sort(), "a vaga do produtor (equipe) fica fora");
+  assert.equal(vagas.find((linha) => linha[0] === ESCOLA_DE_TESTE.contas.aluna.nome)?.[4], "email");
+
+  const survey = await linhas(await pedir("survey"));
+  assert.deepEqual(survey, [["Nome", "E-mail", "Hora", "Pergunta", "Resposta"]], "sem pesquisa do fim, so as colunas (A20)");
+
+  const sessao = unwrap(await db.from("webinar_sessions").select("scheduled_at").eq("id", LIVE.sessaoId).single(), "Lendo a hora marcada");
+  const inicio = new Date(Date.parse(sessao.scheduled_at) - 86_400_000).toISOString();
+  const fim = new Date(Date.now() + 86_400_000).toISOString();
+  const antes = new Date(Date.now() - 2000).toISOString();
+  const periodo = await panelCsvRoute.GET(new Request(`http://localhost/api/admin/webinars/painel/csv?tipo=gravadas&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}&relatorio=performance&webinario=${LIVE.id}`));
+  const doPeriodo = await linhas(periodo);
+  assert.deepEqual(doPeriodo.slice(2).map((linha) => [linha[0], linha[1]]), [[LIVE.titulo, LIVE.sessaoId]], "so a sessao gravada do webinario (o replay nao e do painel)");
+  const auditoria = unwrap(await db.from("admin_audit_log").select("count,metadata").eq("action", "webinar_export").is("entity_id", null).gte("occurred_at", antes), "Lendo a auditoria do periodo");
+  assert.deepEqual(auditoria.map((linha) => [linha.count, linha.metadata.report, linha.metadata.kind, linha.metadata.sessions]), [[1, "performance", "simulated", 1]]);
+
+  actAs(analista);
+  assert.equal((await pedir("qa")).status, 403);
+  actAs(null);
 });

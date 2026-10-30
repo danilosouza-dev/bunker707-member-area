@@ -201,9 +201,9 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
 
 test("cards por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo; cada campo sabe o card dele", () => {
   // Fase 2b: Simulacao e Roteiro so na Live gravada; Enquetes nos dois tipos (prontas para o console).
-  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "gravacao", "replayAula", "revisao"]);
-  assert.deepEqual(vm.webinarEditorCards("simulated"), ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "qualidade", "replayAula", "revisao"]);
-  assert.deepEqual([...vm.WEBINAR_SAVED_ONLY_CARDS], ["simulacao", "roteiro", "enquetes"]);
+  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "oferta", "assistente", "qualidade", "gravacao", "replayAula", "revisao"]);
+  assert.deepEqual(vm.webinarEditorCards("simulated"), ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "oferta", "assistente", "qualidade", "replayAula", "revisao"]);
+  assert.deepEqual([...vm.WEBINAR_SAVED_ONLY_CARDS], ["simulacao", "roteiro", "enquetes", "oferta", "assistente"]);
   assert.equal(vm.webinarCardTitle("vagaLembretes").title, "Vaga e lembretes");
   assert.equal(vm.webinarCardOfField("sessions.1.scheduledAt"), "sessoes");
   assert.equal(vm.webinarCardOfField("audience.root.items.0"), "quemPode");
@@ -212,6 +212,9 @@ test("cards por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo; c
   assert.equal(vm.webinarCardOfField("replayLessonTarget.productId"), "replayAula");
   assert.equal(vm.webinarCardOfField("hostUserId"), "dados");
   assert.equal(vm.webinarCardOfField("qualquer-coisa"), "dados");
+  // Fase 4e: o "Comeca quando voce entra" mora no card Sessoes (os erros dele levam para la).
+  assert.equal(vm.webinarCardOfField("jit.settings.endHour"), "sessoes");
+  assert.equal(vm.webinarCardTitle("sessoes").title, "Sessões");
 });
 
 test("erros: zod e fieldErrors viram a primeira frase por campo, sem o 'draft.' do schema de salvar; segmento por regra", () => {
@@ -340,4 +343,37 @@ test("frase da revisao: o que falta para publicar; depois, o resumo com tipo, ho
   // Publicado com a data ja passada: a frase e o resumo, nao a lista do que falta (so o rascunho lista).
   assert.match(vm.webinarReviewSentence({ draft: { ...complete, scheduledAt: iso(now - HOUR) }, now, productName: null, registeredCount: 0, situation: "ended" }), /^Live ao vivo em /);
   assert.equal(vm.describeWebinarAccess({ accessMode: "audience", capacity: 1, registrationRequired: true }, null), "quem está no segmento, até 1 vaga");
+});
+
+test("frase da revisao e o que falta para publicar com o 'Começa quando você entra' (fase 4e): sem hora marcada, so com o video", () => {
+  const jit = { ...model.defaultJitSettings(), enabled: true };
+  const gravada = { ...vm.startWebinarDraft("simulated"), recordingVideoUrl: "https://iframe.mediadelivery.net/embed/1/abc", registrationRequired: false, title: "Agentes" };
+
+  assert.equal(
+    vm.webinarReviewSentence({ draft: gravada, now, productName: null, registeredCount: null, situation: null }),
+    "Para publicar, falta: Marque pelo menos uma sessão.",
+    "sem o jit, a hora marcada continua obrigatoria"
+  );
+  assert.deepEqual(vm.webinarPublishProblems(gravada, now, jit), [], "com o jit ligado, publica sem hora marcada");
+  assert.equal(
+    vm.webinarReviewSentence({ draft: gravada, jit, now, productName: null, registeredCount: null, situation: null }),
+    "Live gravada com Começa quando você entra: a cada 15 min, das 08:00 às 23:00 (horário de Brasília), 60 min, para todos os alunos, sem vaga. O card entra na página inicial."
+  );
+  assert.deepEqual(
+    vm.webinarPublishProblems({ ...gravada, recordingVideoUrl: null }, now, jit).map((problem) => problem.path),
+    ["recordingVideoUrl"],
+    "o video continua obrigatorio"
+  );
+  assert.deepEqual(
+    vm.webinarPublishProblems(gravada, now, { ...jit, enabled: false }).map((problem) => problem.path),
+    ["sessions"],
+    "desligado, como antes"
+  );
+
+  const comHora = { ...gravada, sessions: [{ lateJoinMinutes: null, scheduledAt: "2026-11-05T23:00:00.000Z" }] };
+  assert.equal(
+    vm.webinarReviewSentence({ draft: comHora, jit: { ...jit, everyMinutes: 30 }, now, productName: null, registeredCount: null, situation: null }),
+    "Live gravada em 05/11/2026 às 20:00 (1 sessão) e Começa quando você entra: a cada 30 min, das 08:00 às 23:00 (horário de Brasília), 60 min, para todos os alunos, sem vaga. O card entra na página inicial."
+  );
+  assert.match(vm.webinarReviewSentence({ draft: comHora, jit: { ...jit, enabled: false }, now, productName: null, registeredCount: null, situation: null }), /^Live gravada em .*\(1 sessão\), 60 min/, "desligado, a frase de antes");
 });

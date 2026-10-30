@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { actAs } from "../support/integration-hooks.mjs";
+import { actAs, provedorFalso } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
-import { ESCOLA_DE_TESTE, LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveGravadaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, LIVE_GRAVADA_NO_AR_DE_TESTE, limparProvedoresDeIa, limparWebinarios, seedEscolaDeTeste, seedLiveGravadaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // A Sala da Live gravada, fase 2a (docs/30 §1.6, §4.7, §5.1, §6.6, §8.3, §8.5 e §10.2; docs/18 §3) contra o banco
 // LOCAL de verdade, com a migracao 202610290001 aplicada: a resposta da sessao traz os campos da sala (relogio
@@ -22,9 +22,13 @@ const reactionsRoute = await import("../../src/app/api/webinars/[id]/reactions/r
 const { resetRoomLimits } = await import("../../src/server/webinars/room-limits.ts");
 const { CHAT_CONSENT_VERSION } = await import("../../src/server/webinars/model.ts");
 const { firstNameInitial } = await import("../../src/server/webinars/room-model.ts");
+const questionsRoute = await import("../../src/app/api/webinars/[id]/questions/route.ts");
+const { saveAIProviderConfig } = await import("../../src/server/ai/provider-config.ts");
+const { saveAIProviderAPIConnection } = await import("../../src/server/ai/provider-connections.ts");
 
 const aluna = usuarioDeTeste(contas.aluna);
 const alunoSemAcesso = usuarioDeTeste(contas.alunoSemAcesso);
+const produtor = usuarioDeTeste(contas.produtor);
 const pessoas = [aluna.id, alunoSemAcesso.id];
 const { id: webinarId, mensagens, origemId, sessaoId, textos } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const contexto = { params: Promise.resolve({ id: webinarId }) };
@@ -265,4 +269,58 @@ test("7. quem nao pode ver recebe 404 em toda rota da sala, sem dizer se o webin
   // A sessao de outro webinario (a de origem e deste; um id que nao existe nao e): 404.
   assert.equal((await sessao(aluna, "bbbbbbbb-0000-4000-8000-0000000000ff")).status, 404);
   assert.equal((await sessao(aluna, origemId)).status, 200, "a live de origem e deste webinario");
+});
+
+test("8. fase 4c: o Assistente (provedor falso) responde ao @assistente com role ai e source ai (nunca team), fora da linha mestre, uma vez por alvo; a pergunta da aba fica com answer_source ai", async () => {
+  const ambiente = process.env.WEBINAR_ASSISTANT_ENABLED;
+  process.env.WEBINAR_ASSISTANT_ENABLED = "on";
+  resetRoomLimits();
+  provedorFalso.zerar();
+  await limparProvedoresDeIa(db);
+  await saveAIProviderConfig({ actorId: produtor.id, dailyQuestionLimit: 100, defaultModel: "modelo-de-teste", provider: "openai" });
+  await saveAIProviderAPIConnection({ actorId: produtor.id, apiKey: "sk-teste-de-integracao-12345678", label: "Conexao de teste", provider: "openai" });
+  unwrap(await db.from("webinars").update({ assistant_settings: { enabled: true, replyAllDefault: false } }).eq("id", webinarId), "Ligando o Assistente");
+  unwrap(await db.from("webinar_assistant_knowledge").insert({ answer: "R$ 997 a vista.", position: 0, question: "Quanto custa a formacao?", webinar_id: webinarId }), "Cadastrando a pergunta do Assistente");
+  // A pergunta de cada chamada, na ordem: o @assistente do chat e depois a pergunta da aba. Um assert que falha aqui
+  // vira erro do provedor (o Assistente grava "failed"), por isso a lista e conferida tambem depois.
+  const perguntas = ["quanto custa?", "Tem certificado?"];
+  provedorFalso.responder = ({ messages, system }) => {
+    assert.match(system, /Quanto custa a formacao\?/, "a pergunta cadastrada vai no MATERIAL");
+    assert.equal(messages.at(-1).content, perguntas[provedorFalso.chamadas.length - 1]);
+    return "Custa R$ 997 a vista.";
+  };
+
+  try {
+    const enviada = await enviar(aluna, { body: "@assistente quanto custa?", consent: true, consentVersion: CHAT_CONSENT_VERSION });
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+    assert.equal(enviada.body.data.assistant, "scheduled");
+    assert.equal(provedorFalso.chamadas.length, 1);
+
+    const respostas = unwrap(await db.from("webinar_chat_messages").select("id,role,source,kind,master,author_user_id,display_name,body,reply_to_id").eq("session_id", sessaoId).eq("source", "ai"), "Lendo as respostas do Assistente");
+    assert.equal(respostas.length, 1);
+    assert.deepEqual(
+      [respostas[0].role, respostas[0].source, respostas[0].kind, respostas[0].master, respostas[0].author_user_id, respostas[0].display_name, respostas[0].body, respostas[0].reply_to_id],
+      ["ai", "ai", "answer", false, null, "Assistente", "Custa R$ 997 a vista.", enviada.body.data.message.id]
+    );
+    const pedidos = unwrap(await db.from("webinar_ai_requests").select("status,target_kind,target_id,reply_message_id,provider,model").eq("session_id", sessaoId), "Lendo os pedidos ao Assistente");
+    assert.deepEqual(pedidos, [{ model: "modelo-de-teste", provider: "openai", reply_message_id: respostas[0].id, status: "answered", target_id: enviada.body.data.message.id, target_kind: "chat" }]);
+
+    actAs(alunoSemAcesso);
+    const desde = new Date(Date.now() - 60_000).toISOString();
+    const novas = await json(await chatRoute.GET(pedido(`chat?sessao=${sessaoId}&since=${encodeURIComponent(desde)}`), contexto));
+    const vista = novas.body.data.messages.find((message) => message.id === respostas[0].id);
+    assert.equal(vista.role, "ai", "o aluno ve o selo Assistente, nunca Equipe");
+
+    actAs(aluna);
+    const pergunta = await json(await questionsRoute.POST(pedido("questions", "POST", { anonymous: false, body: "Tem certificado?", sessionId: sessaoId }), contexto));
+    assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
+    const linha = unwrap(await db.from("webinar_questions").select("status,answer_text,answered_by,answer_source").eq("id", pergunta.body.data.question.id).single(), "Lendo a pergunta respondida");
+    assert.deepEqual(linha, { answer_source: "ai", answer_text: "Custa R$ 997 a vista.", answered_by: null, status: "answered" });
+    assert.equal(provedorFalso.chamadas.length, 2);
+    assert.deepEqual(provedorFalso.chamadas.map((chamada) => chamada.messages.at(-1).content), perguntas);
+  } finally {
+    process.env.WEBINAR_ASSISTANT_ENABLED = ambiente ?? "";
+    provedorFalso.zerar();
+    await limparProvedoresDeIa(db);
+  }
 });

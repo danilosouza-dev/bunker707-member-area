@@ -4,8 +4,9 @@ import "server-only";
 // por POST /api/webhooks/<plataforma>:
 //   plataforma conectada? (senao 503) -> corpo limitado (413) -> JSON (400) -> token conferido em tempo
 //   constante contra o segredo salvo (senao 401, nada gravado) -> evento normalizado (400 sem nome)
-//   -> payload (so os campos permitidos) gravado, unico por (provider, external_event_id)
-//   -> regra de acesso (process-sale.ts) -> resultado na linha e na situacao da plataforma.
+//   -> payload (so os campos permitidos) gravado, unico por (provider, external_event_id), com o valor da venda
+//      em amount_cents/currency quando o adaptador leu (docs/30 M8; banco sem as colunas grava sem ele)
+//   -> regra de acesso (process-sale.ts, que nunca le o valor) -> resultado na linha e na situacao da plataforma.
 // Evento repetido: 200 sem reprocessar, salvo quando a linha ficou presa em `received` (o processamento
 // morreu depois de gravar): ai o reenvio da plataforma reivindica a linha e processa de novo.
 // Erro na regra de acesso: a linha fica `failed` com o motivo e a resposta e 500; a tela do produtor
@@ -165,6 +166,9 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
 
   try {
     stored = await insertWebhookEvent(db, {
+      // O valor da venda (docs/30 M8): so a receita dos webinarios le; o acesso nunca. Evento que nao muda acesso fica
+      // so com o envelope, sem o valor. Banco sem as colunas: a venda e gravada sem ele (store.ts).
+      amount: event.type === "other" ? null : (event.amount ?? null),
       // Evento que nao muda acesso nao guarda o e-mail do comprador (nem o payload alem do envelope).
       buyerEmail: event.type === "other" ? null : event.buyer.email,
       eventType: event.rawType,

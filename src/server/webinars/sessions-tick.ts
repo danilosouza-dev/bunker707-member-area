@@ -8,10 +8,15 @@ import "server-only";
 // tick. Uma sessao que ninguem abriu e cuja janela inteira ja passou (o tick ficou fora do ar) e encerrada direto,
 // sem "Comecou agora" atrasado. As sessoes `live` (fase 3: o apresentador abre e encerra) e `replay` (nasce
 // disponivel) ficam de fora. Banco sem a migracao 202610290001: registra e devolve zeros (o tick continua verde).
-// O job e src/server/jobs/webinar-sessions-job.ts.
+// O job e src/server/jobs/webinar-sessions-job.ts. Fase 4e: as sessoes do "Comeca quando voce entra" (`jit`) abrem e
+// encerram como as outras (o roteiro, a presenca congelada e o replay), mas nunca mandam o "Comecou agora": abrem pela
+// RPC direto (openJitSession), sem o aviso do sino (sao de quem ja esta entrando, e uma vaga geral do webinario
+// receberia um aviso a cada horario).
 
 import { isPendingMigrationError } from "../db/pending-migration";
+import { openSessionRpc } from "./chat-store";
 import { isMissingWebinarSchema, WEBINARS_MIGRATION, type WebinarsDb } from "./db";
+import { isJitSession } from "./jit-model";
 import { toTime, type Webinar } from "./model";
 import { sessionDurationMs } from "./room-model";
 import { webinarFromRow, type RecordingRow, type SessionRow } from "./rows";
@@ -54,6 +59,15 @@ function recordingOf(context: WebinarContext, session: SessionRow): RecordingRow
 /** O fim da sessao gravada pelo relogio: inicio (a hora marcada; started_at e a mesma coisa) + duracao do video. */
 export function simulatedSessionEndsAt(session: Pick<SessionRow, "scheduled_at" | "started_at">, recording: Pick<RecordingRow, "duration_seconds"> | null, durationMinutes: number) {
   return toTime(session.started_at ?? session.scheduled_at) + sessionDurationMs(recording?.duration_seconds ?? null, durationMinutes);
+}
+
+/**
+ * Abre a sessao `jit`: a mesma RPC do openSession (live, o roteiro pronto uma vez, started_at na hora marcada), sem o
+ * "Comecou agora" no sino.
+ */
+export async function openJitSession(db: WebinarsDb, sessionId: string, now: Date): Promise<{ changed: boolean }> {
+  const opened = await openSessionRpc(db, sessionId, now.toISOString());
+  return { changed: opened.changed };
 }
 
 /** Um tick das sessoes gravadas. `now` e `signal` vem do tick; nos testes, o relogio falso. */
@@ -126,7 +140,7 @@ export async function runSessionsTick(input: { db: WebinarsDb; now?: Date; signa
         continue;
       }
 
-      const opened = await openSession(db, session.id, now);
+      const opened = isJitSession(session) ? await openJitSession(db, session.id, now) : await openSession(db, session.id, now);
 
       if (opened.changed) {
         result.opened += 1;

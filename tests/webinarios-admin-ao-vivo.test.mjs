@@ -600,6 +600,9 @@ test("publicar a Live ao vivo gera o nome da sala (so na sessao live); duplicar 
   assert.ok(!serialized.includes(session.room_name), "o nome da sala nao vai para a copia");
   assert.equal(session.room_name.length > 0 && session.recorder_status, "ready", "a sessao original fica como estava");
   assert.deepEqual(fetches, [], "nada vai para a rede");
+  // Fase 4: a Live ao vivo nao tem o "Comeca quando voce entra"; a auditoria diz o que a copia levou.
+  const audit = db.tables.admin_audit_log.find((row) => row.action === "webinar.duplicated" && row.entity_id === copy.id);
+  assert.deepEqual([audit.metadata.jit_copied, audit.metadata.offer_copied, audit.metadata.assistant_items], [false, false, 0]);
 });
 
 test("cancelar uma Live ao vivo com a maquina do gravador ligada: a sessao vira cancelada, o nome da sala e o gravador ficam, e nada chama o GitHub", async () => {
@@ -691,6 +694,7 @@ test("nenhum room_name nas leituras do admin nem na tela: getWebinarEditorData, 
   assert.equal(vm.webinarLiveSessionOf([{ ...data.sessions[0], kind: "simulated" }]), null, "so a sessao live");
   assert.equal(data.liveSession.recorderStatus, "preparing");
   assert.equal(data.liveSession.id, SESSAO);
+  assert.deepEqual([data.jit.enabled, data.jitSessionsToday], [false, []], "a Live ao vivo nao tem o Comeca quando voce entra");
 
   const now = Date.now();
   const list = await queries.listWebinarsForAdmin({ now, period: { end: new Date(now + 10 * DAY), start: new Date(now - DAY) } });
@@ -738,6 +742,8 @@ function editorData(extra = {}) {
     deciderNames: {},
     draft,
     id: ID,
+    jit: model.defaultJitSettings(),
+    jitSessionsToday: [],
     liveSession: { endedAt: null, id: SESSAO, recorderRequestedAt: null, recorderStatus: "ready", recordingAnchorAt: null, recordingRequestedAt: null, scheduledAt: draft.scheduledAt, startedAt: null, status: "scheduled" },
     polls: [],
     publishedAt: "2026-10-21T12:00:00.000Z",

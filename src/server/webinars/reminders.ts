@@ -10,7 +10,8 @@ import "server-only";
 // previsto (docs/30 §2.3). Sem trabalho: uma consulta de sessoes e nada mais. Banco sem a migracao 202610280001:
 // registra e devolve zeros (o tick continua verde). Fora de um pedido do Next: a origem dos links dos e-mails e
 // resolveEmailSiteOrigin(null). O job e src/server/jobs/webinar-reminders-job.ts; notify.ts (cancelada, remarcada
-// e "Comecou agora") divide os ajudantes exportados daqui.
+// e "Comecou agora") divide os ajudantes exportados daqui. As sessoes do "Comeca quando voce entra" (fase 4e, `jit`)
+// nunca recebem lembrete: nascem quando o aluno chega e nao tem vaga (o encerramento de 2 h depois vale para elas).
 //
 // A vaga so recebe se ainda passa pelo "Quem pode" na hora de enviar (keepRegistrantsWithAccess le os acessos de quem
 // vai receber; registrantHasWebinarAccess, em access.ts): o produto ligado e conferido de novo; no Segmento e no
@@ -36,6 +37,7 @@ import { loadAudienceFactsFor } from "../communications/audience-facts";
 import { fetchEntitlements, fetchProfilesByIds, fetchPublishedLessonIndex, fetchStaffUserIds, type EntitlementRow } from "../students/store";
 import { registrantAccessNeeds, registrantHasWebinarAccess, registrantsInSegmentNow, type WebinarAccessTarget } from "./access";
 import { isMissingWebinarSchema, WEBINARS_MIGRATION, type WebinarsDb } from "./db";
+import { isJitSession } from "./jit-model";
 import { REMINDER_RULES, reminderDecision, toTime, webinarHref, type ReminderDecision, type Webinar } from "./model";
 import { webinarFromRow, type RegistrationRow, type SessionRow } from "./rows";
 import { fetchWebinarRow, listSessionRegistrationRows, listSessionRowsBetween, markRegistrationSent, updateSessionRow } from "./store";
@@ -531,6 +533,11 @@ export async function processWebinarReminders(input: {
       }
 
       if (session.status !== "scheduled" || !(startsAt > ctx.nowMs) || webinar.status !== "published" || webinar.cancelledAt) {
+        continue;
+      }
+
+      // O "Comeca quando voce entra" nao tem vaga nem lembrete (docs/30 §1.2).
+      if (isJitSession(session)) {
         continue;
       }
 

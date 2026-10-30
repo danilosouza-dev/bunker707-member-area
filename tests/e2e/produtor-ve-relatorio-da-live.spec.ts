@@ -1,12 +1,15 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { LIVE_GRAVADA_DE_TESTE, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { readFile } from "node:fs/promises";
+import { LIVE_GRAVADA_DE_TESTE, contasDeTeste, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // A aba Relatorio do webinario no navegador (docs/30 §2.5, §3.4 e §3.7; docs/18 §3.2): o produtor abre o relatorio
 // de uma Live gravada ja encerrada da escola de teste (a curva congelada e a lista por aluno gravadas pela seed) e
 // ve a sessao marcada no seletor, os numeros, a curva "Presentes minuto a minuto" em grafico e em tabela, a lista por
-// aluno com o nome da aluna e baixa o CSV pela rota; a 375 px a pagina nao rola de lado.
+// aluno com o nome da aluna e baixa o CSV pela rota; a 375 px a pagina nao rola de lado. Fase 4 (docs/30 §3.7): o botao
+// Exportar abre o menu com os relatorios nos nomes do Zoom e o Q&A baixa com o cabecalho certo e a pergunta da aluna
+// (o botao com 44 px a 375 px); sem login, a rota do CSV responde 401 (contexto com storageState vazio).
 
 const { id, sessaoId, titulo } = LIVE_GRAVADA_DE_TESTE;
 
@@ -94,6 +97,54 @@ test.describe("produtor", () => {
     await semRolagemLateral(page);
   });
 
+  test("o botão Exportar abre o menu dos relatórios do Zoom e baixa o Q&A com o cabeçalho certo; 44 px a 375 px", async ({ page }) => {
+    const db = createLocalAdminClient();
+    const contas = await contasDeTeste(db);
+    const { error } = await db.from("webinar_questions").insert({
+      anonymous: false,
+      answer_text: "Fica disponível por 7 dias.",
+      answered_at: new Date().toISOString(),
+      answered_by: contas.produtor.id,
+      answered_live: true,
+      body: "O replay fica até quando?",
+      display_name: "Aluna T.",
+      offset_ms: 125_000,
+      session_id: sessaoId,
+      status: "answered",
+      upvotes: 1,
+      user_id: contas.aluna.id
+    });
+    expect(error).toBeNull();
+
+    await page.goto(`/admin/comunicacao/webinarios/${id}/relatorio?sessao=${sessaoId}`);
+    await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+    const exportar = page.getByRole("button", { name: "Exportar" });
+    await exportar.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    for (const nome of ["Registration (vagas)", "Attendee (lista por aluno)", "Performance (números da sessão)", "Q&A (perguntas)", "Poll (respostas das enquetes)", "Survey (pesquisa do fim)", "Simulação (só a parte simulada)"]) {
+      await expect(menu.getByRole("menuitem", { exact: true, name: nome })).toBeVisible();
+    }
+
+    const baixando = page.waitForEvent("download");
+    await menu.getByRole("menuitem", { exact: true, name: "Q&A (perguntas)" }).click();
+    const download = await baixando;
+    expect(download.suggestedFilename()).toMatch(/^webinario-teste-live-gravada-encerrada-\d{4}-\d{2}-\d{2}-\d{4}-qa\.csv$/);
+    const caminho = await download.path();
+    const linhas = (await readFile(caminho, "utf8")).replace(/^\uFEFF/, "").trimEnd().split("\r\n");
+    expect(linhas[0]).toBe("Nº;Hora;Minuto do vídeo;Nome;E-mail;Pergunta;Votos;Situação;Respondida por;Resposta;Ao vivo;Hora da resposta");
+    expect(linhas[1]).toContain(";02:05;Aluna de Teste;aluna.teste@bunker707.test;O replay fica até quando?;1;Respondida;");
+    expect(linhas[1]).toContain(";Fica disponível por 7 dias.;Sim;");
+
+    // A 375 px o botao tem o alvo de toque de 44 px. A janela muda com a pagina aberta e o botao (transition-all) cresce
+    // ate os 44 px animando: confere a altura depois que ela assenta, nunca no meio da animacao.
+    await page.setViewportSize({ height: 812, width: 375 });
+    await page.keyboard.press("Escape");
+    await expect(exportar).toBeVisible();
+    await expect.poll(async () => (await exportar.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await semRolagemLateral(page);
+  });
+
   test("sem sessão que começou, a aba mostra o estado vazio em vez de números inventados", async ({ page }) => {
     const db = createLocalAdminClient();
     // A mesma live com a sessao devolvida a "agendada" para o futuro: nenhum relatorio ainda.
@@ -108,5 +159,17 @@ test.describe("produtor", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Nenhuma sessão começou ainda" })).toBeVisible();
     await expect(page.getByText("Os números aparecem depois da primeira sessão.", { exact: true })).toBeVisible();
     await expect(page.getByRole("group", { name: /^Vagas garantidas/ })).toHaveCount(0);
+  });
+});
+
+test.describe("sem login", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("a rota do CSV responde 401 sem sessão, sem arquivo", async ({ page }) => {
+    const resposta = await page.request.get(`/api/admin/webinars/${id}/relatorio/csv?sessao=${sessaoId}&relatorio=qa`);
+    expect(resposta.status()).toBe(401);
+    expect(resposta.headers()["content-type"] ?? "").not.toContain("text/csv");
+    const painel = await page.request.get("/api/admin/webinars/painel/csv?tipo=gravadas&inicio=2026-11-01T03:00:00.000Z&fim=2026-12-01T03:00:00.000Z");
+    expect(painel.status()).toBe(401);
   });
 });

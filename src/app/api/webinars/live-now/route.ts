@@ -5,6 +5,7 @@ import { jsonRouteError } from "@/server/http/route-errors";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { hasWebinarAccess, loadStudentAccessFacts } from "@/server/webinars/access";
 import { assertNoDbError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "@/server/webinars/db";
+import { isJitSession } from "@/server/webinars/jit-model";
 import { chooseLiveNow, EMPTY_LIVE_NOW, LIVE_NOW_LOOKAHEAD_MS, LIVE_NOW_LOOKBACK_MS, type LiveBannerEntry, type LiveNowData } from "@/server/webinars/live-banner";
 import { liveRoomConfigured } from "@/server/webinars/live-model";
 import type { Webinar, WebinarSession } from "@/server/webinars/model";
@@ -22,7 +23,9 @@ import { fetchRegistrationRows, listRecordingRows, listSessionRowsBetween } from
 // A faixa pergunta a cada 60 s em toda pagina: as sessoes candidatas (marcadas de 24 h atras ate 60 min a frente,
 // ainda nao encerradas) e os webinarios delas sao os mesmos para todos e ficam 15 s na memoria do processo; sem
 // candidata (quase sempre) nada mais e lido. So com candidata: o acesso, as vagas do aluno e, na gravada com o selo,
-// a duracao do video. Sessao obrigatoria (401); banco sem a migracao dos webinarios: faixa vazia, nunca erro.
+// a duracao do video. Sessao obrigatoria (401); banco sem a migracao dos webinarios: faixa vazia, nunca erro. As
+// sessoes do "Comeca quando voce entra" (fase 4e, `jit`) nunca sao candidatas: uma por horario o dia todo, e nenhuma
+// e uma live no ar para todos.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,7 +53,7 @@ async function readCandidates(db: WebinarsDb, nowMs: number): Promise<Candidates
     statuses: ["scheduled", "waiting", "live"],
     to: new Date(nowMs + LIVE_NOW_LOOKAHEAD_MS).toISOString()
   });
-  const sessions = rows.map(sessionFromRow).filter((session) => session.kind !== "replay");
+  const sessions = rows.map(sessionFromRow).filter((session) => session.kind !== "replay" && !isJitSession(session));
   const ids = Array.from(new Set(sessions.map((session) => session.webinarId)));
   const webinars = ids.length > 0 ? (await readPublishedWebinars(db, ids)).filter((webinar) => webinar.showBanner && !webinar.cancelledAt) : [];
   const kept = new Set(webinars.map((webinar) => webinar.id));

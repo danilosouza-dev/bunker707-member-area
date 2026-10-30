@@ -10,6 +10,10 @@
 // na hora da sessao, nunca no nome da sala nem no gravador, e nada aqui chama o GitHub: a maquina do gravador que
 // ficou ligada e devolvida pelo job webinar-recordings (recordings-tick.ts). A sala e o gravador moram no console
 // (live-actions.ts).
+// Fase 4e ("Comeca quando voce entra", docs/30 §2.2 e D25): o sincronismo das horas marcadas nunca apaga nem muda uma
+// sessao `jit` (elas nascem quando o aluno chega, jit-queries.ts); a Live gravada com o just-in-time ligado publica sem
+// hora marcada (so com o video; withJitPublishProblems); duplicar copia a Oferta (rascunho), o Assistente (desligado) e
+// o just-in-time (desligado, a Simulacao sem a decisao: a copia decide de novo).
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -19,11 +23,16 @@ import { recordAudit } from "@/server/audit/log";
 import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { isSameVersion } from "@/server/communications/campaign-model";
 import { persistImageAsset } from "@/server/db/media-assets";
-import { WEBINAR_CHANGED_MESSAGE, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isPendingMigrationError } from "@/server/db/pending-migration";
+import { copyAssistantToWebinar, replyAllDefaultFor } from "./assistant-store";
+import { WEBINAR_CHANGED_MESSAGE, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import { webinarDraftOf } from "./editor-model";
+import { isJitSession, withJitPublishProblems } from "./jit-model";
+import { fetchJitSettings, saveJitSettings } from "./jit-store";
 import { newRoomName } from "./jitsi-token";
 import { ensureSessionRoomName } from "./live-store";
-import { WEBINAR_LIMITS, toTime, webinarSituation, webinarSlug, type WebinarDraft, type WebinarSituation, type WebinarStatus } from "./model";
+import { WEBINAR_LIMITS, toTime, webinarSituation, webinarSlug, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
+import { copyOfferToWebinar } from "./offer-store";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
 import { accessModeOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
@@ -199,7 +208,8 @@ type WantedSession = { iso: string; lateJoinMinutes: number | null };
 /**
  * As horas marcadas da Live gravada viram sessoes `simulated`: cria as novas, apaga as que sairam e ainda nao tem
  * vaga garantida, mantem as que tem vaga (e as que ja comecaram, acabaram ou foram canceladas). A Entrada atrasada
- * (late_join_minutes, fase 2) acompanha cada hora marcada: muda nas sessoes que ainda nao acabaram.
+ * (late_join_minutes, fase 2) acompanha cada hora marcada: muda nas sessoes que ainda nao acabaram. As sessoes do
+ * "Comeca quando voce entra" (`jit`, fase 4e) ficam fora: nunca sao apagadas, mudadas nem contadas aqui.
  */
 async function syncSimulatedSessions(
   db: WebinarsDb,
@@ -218,7 +228,7 @@ async function syncSimulatedSessions(
     }
   }
 
-  const simulated = sessions.filter((session) => session.kind === "simulated");
+  const simulated = sessions.filter((session) => session.kind === "simulated" && !isJitSession(session));
   const existingTimes = new Set<number>();
   const removable: string[] = [];
   let kept = 0;
@@ -252,9 +262,12 @@ async function syncSimulatedSessions(
 
   await deleteSessionRows(db, removable);
 
-  const toCreate = Array.from(wanted.entries())
-    .filter(([time]) => !existingTimes.has(time))
+  const newTimes = Array.from(wanted.entries()).filter(([time]) => !existingTimes.has(time));
+  // As sessoes novas seguem o "Responder tudo" padrao do Assistente (a coluna so vai quando ligado: sem a 202610300004, nunca).
+  const replyAll = newTimes.length > 0 && (await replyAllDefaultFor(db, webinarId)) ? { assistant_reply_all: true } : {};
+  const toCreate = newTimes
     .map(([, want]) => ({
+      ...replyAll,
       chat_mode: draft.roomSettings.chatMode,
       chat_slow_mode_seconds: draft.roomSettings.slowModeSeconds,
       kind: "simulated",
@@ -281,6 +294,33 @@ async function syncSimulatedSessions(
 /** A sessao `live` da Live ao vivo que ainda vale (nao cancelada). */
 function liveSessionOf(sessions: readonly SessionRow[]) {
   return sessions.find((session) => session.kind === "live" && session.status !== "cancelled") ?? null;
+}
+
+/** As regras do "Comeca quando voce entra" (so a Live gravada as tem; na Live ao vivo, nulo sem ler o banco). */
+async function jitSettingsFor(db: WebinarsDb, webinarId: string, kind: WebinarKind): Promise<JitSettings | null> {
+  return kind === "simulated" ? fetchJitSettings(db, webinarId) : null;
+}
+
+/** O que falta para publicar, com a Live gravada do just-in-time ligado sem hora marcada (docs/30 §2.2). */
+async function publishProblemsFor(db: WebinarsDb, webinarId: string, draft: WebinarDraft, now: number) {
+  return withJitPublishProblems(publishProblems(draft, now), { jit: await jitSettingsFor(db, webinarId, draft.kind), kind: draft.kind });
+}
+
+function isPendingSchema(error: unknown) {
+  return isPendingMigrationError(error) || isMissingWebinarSchema(error);
+}
+
+/** Uma parte opcional da copia (Oferta, Assistente, just-in-time): o banco sem a migracao dela deixa a copia sem ela. */
+async function copyPart<T>(label: string, run: () => Promise<T>, empty: T): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isPendingSchema(error)) {
+      console.info(`[webinarios] duplicar sem ${label}: migracao pendente.`);
+      return empty;
+    }
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -339,7 +379,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
 
     if (published) {
       const sameDate = draft.kind === "live" ? toTime(draft.scheduledAt) === toTime(current.scheduled_at) : true;
-      const problems = publishProblems(draft, now.getTime()).filter((problem) => !(problem.message === WEBINAR_MESSAGES.pastDate && sameDate));
+      const problems = (await publishProblemsFor(db, current.id, draft, now.getTime())).filter((problem) => !(problem.message === WEBINAR_MESSAGES.pastDate && sameDate));
 
       if (problems[0]) {
         throw new WebinarFieldError(problems[0].path, problems[0].message);
@@ -430,7 +470,7 @@ export async function publishWebinar(input: { expectedUpdatedAt?: string; id: st
     }
 
     const draft = parsed.data;
-    const [problem] = publishProblems(draft, now.getTime());
+    const [problem] = await publishProblemsFor(db, row.id, draft, now.getTime());
 
     if (problem) {
       throw new WebinarFieldError(problem.path, problem.message);
@@ -446,8 +486,10 @@ export async function publishWebinar(input: { expectedUpdatedAt?: string; id: st
 
       if (!live) {
         // A sala nasce aqui (docs/30 §2.3 e §8.1): o nome nao adivinhavel vai so dentro do token.
+        const replyAll = (await replyAllDefaultFor(db, row.id)) ? { assistant_reply_all: true } : {};
         await insertSessionRows(db, [
           {
+            ...replyAll,
             chat_mode: draft.roomSettings.chatMode,
             chat_slow_mode_seconds: draft.roomSettings.slowModeSeconds,
             kind: "live",
@@ -555,7 +597,9 @@ export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: str
 /**
  * [messaging.write] Copia o webinario como rascunho, "Cópia de …": tudo menos data, vagas, chat e relatorio
  * (docs/30 §2.3). Os apresentadores e o video base da Live gravada vao junto; nenhuma sessao (a sala e o gravador
- * nascem quando a copia for publicada).
+ * nascem quando a copia for publicada). Fase 4: a Oferta (em rascunho, copyOfferToWebinar), o Assistente (desligado,
+ * com as perguntas e respostas, copyAssistantToWebinar) e o "Comeca quando voce entra" (desligado; a Simulacao das
+ * sessoes que nascem vai sem a decisao, que e de quem liga na copia, D10).
  */
 export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; updatedAt: string }>> {
   return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data, user }) => {
@@ -571,12 +615,29 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
       await syncBaseRecording(db, created.id, draft.recordingVideoUrl, []);
     }
 
+    const copy = { fromWebinarId: bundle.row.id, toWebinarId: created.id, userId: user.id };
+    const offer = await copyPart("a oferta", () => copyOfferToWebinar(db, copy), null);
+    const assistantItems = await copyPart("o assistente", () => copyAssistantToWebinar(db, copy), 0);
+    const jit = await copyPart(
+      "o comeca quando voce entra",
+      async () => {
+        const source = await jitSettingsFor(db, bundle.row.id, draft.kind);
+        if (!source) {
+          return false;
+        }
+        const simulation = source.simulation ? { ...source.simulation, ackText: null, decidedAt: null, decidedBy: null } : null;
+        await saveJitSettings(db, { settings: { ...source, enabled: false, simulation }, webinarId: created.id });
+        return true;
+      },
+      false
+    );
+
     await recordAudit(db, {
       action: "webinar.duplicated",
       actorId: user.id,
       entityId: created.id,
       entityType: "webinar",
-      metadata: { kind: created.kind, presenters: draft.presenters.length, source_id: bundle.row.id }
+      metadata: { assistant_items: assistantItems, jit_copied: jit, kind: created.kind, offer_copied: offer !== null, presenters: draft.presenters.length, source_id: bundle.row.id }
     });
     revalidateWebinars();
 

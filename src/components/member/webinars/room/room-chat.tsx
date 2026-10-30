@@ -1,14 +1,19 @@
 "use client";
 
 import { MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberChip, type MemberChipTone } from "@/components/member/ui/member-chip";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { composerState, type ComposerState, type RoomMessage } from "@/lib/webinar-room-client";
+import { ASSISTANT_WAIT_MS, assistantRepliesToMe, mentionsAssistant, studentAtAssistantLimit } from "@/server/webinars/assistant-model";
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type DisplayNameMode, type SimulatedPhase } from "@/server/webinars/model";
+import { AssistantHandoff } from "./assistant/assistant-handoff";
+import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
+import { useRoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
+import { verticalChatAnnouncement } from "./vertical/vertical-model";
 
 // O painel do chat da Sala (docs/30 §1.3, §1.6, §8.5 e §9): a lista em role="log" (em rajada, o leitor de tela
 // ouve "N mensagens novas" em vez de cada uma), a mensagem fixada no topo, os selos Equipe / Apresentador /
@@ -16,9 +21,14 @@ import type { ChatPostBody } from "./room-api";
 // palavra por palavra, com "Entendi e quero participar" e "Participar como anonimo", e como o nome aparece), o
 // compositor (desligado, so a equipe, modo lento com a contagem) e o menu "..." com Remover minhas mensagens. Na live
 // (fase 3) o campo da lugar a uma frase (`notice`) quando o aluno esta silenciado no chat (ate a hora em Sao Paulo ou
-// ate o fim) ou antes de a sala abrir.
+// ate o fim) ou antes de a sala abrir. Fase 4c (docs/30 §1.6, §6.6 e D24), com `webinarId` e `sessionId`: a dica
+// "@assistente" quando o Assistente esta ligado, "O Assistente esta respondendo..." logo depois de chama-lo (ate a
+// resposta chegar ou o teto de tempo passar), o aviso do limite do minuto e, na resposta do Assistente a uma mensagem
+// do proprio aluno, "Falar com a equipe" (a sala ao vivo usa este mesmo painel: tudo vale la tambem).
 
 export type RoomChatPanelProps = {
+  /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
+  aboveComposer?: ReactNode;
   busy?: boolean;
   chatMode: ChatMode;
   consented: boolean;
@@ -35,7 +45,11 @@ export type RoomChatPanelProps = {
   pinned: RoomMessage | null;
   /** "Ver como" da equipe: mostra, mas nao grava. */
   readOnly: boolean;
+  /** Fase 4c: a sessao (com o webinario, liga a dica do Assistente e o "Falar com a equipe"). */
+  sessionId?: string | null;
   slowUntilMs: number | null;
+  /** Fase 4c: o webinario (com a sessao, liga a dica do Assistente e o "Falar com a equipe"). */
+  webinarId?: string | null;
 };
 
 const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: MemberChipTone }>> = {
@@ -44,7 +58,7 @@ const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: MemberChipTon
   team: { label: WEBINAR_COPY.sala.selos.equipe, tone: "neutral" }
 };
 
-export function RoomMessageItem({ message }: { message: RoomMessage }) {
+export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode; message: RoomMessage }) {
   const badge = ROLE_BADGES[message.role];
   const prefix = badge ? `${badge.label}: ` : "";
 
@@ -65,6 +79,7 @@ export function RoomMessageItem({ message }: { message: RoomMessage }) {
         ) : null}
       </p>
       <p className="whitespace-pre-line break-words text-sm leading-5 text-zinc-100">{message.body}</p>
+      {footer}
     </li>
   );
 }
@@ -152,8 +167,21 @@ function composerHint(state: ComposerState, phase: SimulatedPhase | "replay"): s
 }
 
 export function RoomChatPanel(props: RoomChatPanelProps) {
-  const { busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, slowUntilMs } = props;
+  const { aboveComposer = null, busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, sessionId = null, slowUntilMs, webinarId = null } = props;
   const copy = WEBINAR_COPY.sala;
+  const assistant = useRoomAssistant({ enabled: !readOnly, sessionId, webinarId });
+  const repliesToMe = useMemo(() => assistantRepliesToMe(messages), [messages]);
+  const [assistantCalls, setAssistantCalls] = useState<number[]>([]);
+  const [waiting, setWaiting] = useState<{ base: number } | null>(null);
+  const [limitedUntil, setLimitedUntil] = useState(0);
+  // O "respondendo" dura no maximo o teto do Assistente e a folga do chat.
+  useEffect(() => {
+    if (!waiting) {
+      return;
+    }
+    const id = window.setTimeout(() => setWaiting(null), ASSISTANT_WAIT_MS);
+    return () => window.clearTimeout(id);
+  }, [waiting]);
   const [draft, setDraft] = useState("");
   const [consentOpen, setConsentOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -173,9 +201,13 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     if (fresh.length === 0) {
       return;
     }
+    const hadKnown = knownRef.current.size > 0;
     fresh.forEach((message) => knownRef.current.add(message.id));
     if (fresh.length > 1) {
       setAnnounce(copy.mensagensNovas(fresh.length));
+    } else if (hadKnown && messages.length > 1) {
+      // Com mais de uma mensagem o log fica aria-live="off" (§9): a nova sozinha e lida aqui, com o papel na frente.
+      setAnnounce(verticalChatAnnouncement(fresh));
     }
     const list = listRef.current;
     if (list && stickRef.current) {
@@ -202,6 +234,16 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       setDraft("");
       setConsentOpen(false);
       setStatus(answer.pending ? copy.aguardandoEquipe : null);
+      // Fase 4c: chamou o Assistente (ligado): "respondendo" ate a resposta chegar; no limite do minuto, o aviso.
+      if (!answer.pending && assistant.state.enabled && mentionsAssistant(text)) {
+        if (studentAtAssistantLimit(assistantCalls, nowMs)) {
+          setLimitedUntil(nowMs + 60_000);
+          setWaiting(null);
+        } else {
+          setWaiting({ base: repliesToMe.size });
+        }
+        setAssistantCalls((previous) => [...previous.filter((at) => nowMs - at < 60_000), nowMs]);
+      }
     } catch (failure) {
       setStatus(failure instanceof Error ? failure.message : copy.erroEnviar);
     } finally {
@@ -240,6 +282,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   }
 
   const single = messages.length <= 1;
+  const waitingNow = waiting !== null && repliesToMe.size <= waiting.base;
+  const assistantHint: AssistantHintState = readOnly || notice ? "none" : waitingNow ? "waiting" : limitedUntil > nowMs ? "limit" : assistant.state.enabled && !state.disabled ? "call" : "none";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
@@ -301,13 +345,25 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         role="log"
       >
         {messages.length === 0 ? <li className="px-2 py-6 text-center text-sm text-zinc-500">{error ?? copy.semMensagens}</li> : null}
-        {messages.map((message) => (
-          <RoomMessageItem key={message.id} message={message} />
-        ))}
+        {messages.map((message) => {
+          const repliedTo = repliesToMe.get(message.id);
+          return (
+            <RoomMessageItem
+              footer={
+                repliedTo && !readOnly && webinarId && sessionId ? (
+                  <AssistantHandoff attendantsOnline={assistant.state.attendantsOnline} onRequest={() => assistant.handoff("chat", repliedTo)} readOnly={readOnly} />
+                ) : null
+              }
+              key={message.id}
+              message={message}
+            />
+          );
+        })}
       </ol>
       <p aria-live="polite" className="sr-only">
         {announce}
       </p>
+      {aboveComposer}
 
       {consentOpen && !consented && !notice ? (
         <RoomConsentBox
@@ -356,6 +412,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
           <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-amber-200" : "text-zinc-500")}>
             {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
           </p>
+          <AssistantHint state={assistantHint} />
         </form>
       )}
     </div>

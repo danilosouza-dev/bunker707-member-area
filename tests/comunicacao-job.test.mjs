@@ -947,3 +947,86 @@ test("os outros momentos continuam como antes: o segmento inteiro, sem ler nem g
   assert.equal(gravadas(db, "select")[0].payload, "user_id,eligible");
   assert.deepEqual(gravadas(db, "upsert")[0].payload, [uid(1), uid(2)].map((userId) => ({ campaign_id: campaign.id, eligible: true, user_id: userId })), "sem first_access_at");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Participação em lives com uma acao do follow-up (docs/30 §1.6, D52) no recalculo dos pop-ups (faixas de 15 min, docs/29)
+ * ---------------------------------------------------------------------------------------------- */
+
+const WEBINARIO = "aaaaaaaa-1111-4111-8111-111111111111";
+const veioENaoComprou = {
+  kind: "rules",
+  root: {
+    items: [
+      { action: "attended", negate: false, type: "webinar", webinarId: WEBINARIO },
+      { action: "purchased", negate: true, type: "webinar", webinarId: WEBINARIO }
+    ],
+    match: "all"
+  }
+};
+const perfilDe = (n) => ({ avatar_url: null, created_at: "2026-09-01T00:00:00.000Z", email: null, full_name: `Aluno ${n}`, id: uid(n), last_sign_in_at: null, phone: null });
+const fatoDoWebinario = (n, fatos) => ({
+  attended: false,
+  clicked: false,
+  left_before_offer: false,
+  offer_seen: false,
+  purchased: false,
+  registered: false,
+  user_id: uid(n),
+  watched_replay: false,
+  webinar_id: WEBINARIO,
+  ...fatos
+});
+
+test("Participação em lives no tick: dois pop-ups citam a mesma live, a presenca e o follow-up dela sao lidos uma vez e so quem veio e nao comprou fica elegivel", async () => {
+  const popups = ["0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e31", "0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e32"].map((id) => ({ ...POPUP, audience: veioENaoComprou, id }));
+  const db = scriptedDb((query) => {
+    if (query.table === "campaigns" && query.op === "select") {
+      return { data: isPopupQuery(query) ? popups : [], error: null };
+    }
+
+    if (query.table === "campaigns" && query.op === "update") {
+      return { data: [{ ...POPUP, ...query.payload }], error: null };
+    }
+
+    if (query.table === "profiles") {
+      return { count: 3, data: [perfilDe(1), perfilDe(2), perfilDe(3)], error: null };
+    }
+
+    if (query.table === "webinars") {
+      return { data: [{ id: WEBINARIO, title: "Live de agentes" }], error: null };
+    }
+
+    if (query.op === "rpc" && query.table === "communication_webinar_facts") {
+      return {
+        data: [
+          { attended: [WEBINARIO], registered: [WEBINARIO], user_id: uid(1) },
+          { attended: [WEBINARIO], registered: null, user_id: uid(2) },
+          { attended: null, registered: [WEBINARIO], user_id: uid(3) }
+        ],
+        error: null
+      };
+    }
+
+    if (query.op === "rpc" && query.table === "webinar_follow_up_facts") {
+      return {
+        data: [fatoDoWebinario(1, { attended: true, registered: true }), fatoDoWebinario(2, { attended: true, clicked: true, purchased: true }), fatoDoWebinario(3, { registered: true })],
+        error: null
+      };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+
+  const result = await processCommunications({ db, now: new Date("2026-10-20T15:07:42.000Z") });
+
+  assert.equal(result.refreshed, 2, JSON.stringify(result));
+  assert.equal(db.queries.filter((query) => query.table === "profiles").length, 1, "alunos uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.op === "rpc" && query.table === "webinar_follow_up_facts").length, 1, "o follow-up da live uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.op === "rpc" && query.table === "communication_webinar_facts").length, 1, "as vagas e presencas uma vez por tick");
+  assert.deepEqual(db.queries.find((query) => query.op === "rpc" && query.table === "webinar_follow_up_facts").args, { p_webinar_ids: [WEBINARIO] });
+  assert.equal(db.queries.filter((query) => query.table === "webinars").length, 1, "a live conferida uma vez");
+  assert.equal(db.queries.filter((query) => query.table === "notifications").length, 0, "a regra de lives nao le linhas do sino");
+
+  const elegiveis = db.queries.filter((query) => query.table === "campaign_deliveries" && query.op === "upsert").map((query) => query.payload.map((row) => row.user_id));
+  assert.deepEqual(elegiveis, [[uid(1)], [uid(1)]], "veio e nao comprou; quem comprou (2) e quem faltou (3) ficam fora");
+});

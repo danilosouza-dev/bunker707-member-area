@@ -37,7 +37,61 @@ import {
   type WebinarPresenter,
   type WebinarRegistration,
   type WebinarSession,
-  type WebinarStatus
+  type WebinarStatus,
+  ANSWER_SOURCES,
+  ASSISTANT_REQUEST_STATUSES,
+  ASSISTANT_SKIP_REASONS,
+  ASSISTANT_TARGETS,
+  ATTENDANT_STATUSES,
+  CHAT_LANGUAGES,
+  CHAT_LIMITS,
+  JIT_EVERY_MINUTES,
+  JIT_LIMITS,
+  OFFER_LIMITS,
+  OFFER_STATUSES,
+  OFFER_TRIGGERS,
+  OFFER_VARIANT_LABELS,
+  SIMULATED_COUNT_MODES,
+  SIMULATION_LIMITS,
+  SOURCE_LANGUAGES,
+  defaultAssistantSettings,
+  defaultJitSettings,
+  defaultSimulatedCountRule,
+  defaultSimulatedJoins,
+  type AnswerSource,
+  type AssistantKnowledgeItem,
+  type AssistantRequest,
+  type AssistantRequestStatus,
+  type AssistantSettings,
+  type AssistantSkipReason,
+  type AssistantTarget,
+  type Attendant,
+  type AttendanceMarks,
+  type AttendantStatus,
+  type ChatLanguage,
+  type JitEveryMinutes,
+  type JitSettings,
+  type JitSimulationTemplate,
+  type OfferClick,
+  type OfferDisplay,
+  type OfferDisplaySnapshot,
+  type OfferStatus,
+  type OfferTrigger,
+  type OfferVariant,
+  type OfferVariantLabel,
+  type PanelRow,
+  type SessionSimulation,
+  type SimulatedCountMode,
+  type SimulatedCountRule,
+  type SimulatedJoins,
+  type SimulatedSaleNotice,
+  type SimulatedSaleNotices,
+  type SimulationTotals,
+  type SourceLanguage,
+  type TextTranslation,
+  type ViewerPrefs,
+  type WebinarFollowUpFacts,
+  type WebinarOffer
 } from "./model";
 
 export const WEBINAR_COLUMNS =
@@ -84,7 +138,7 @@ export type WebinarRow = {
 };
 
 export const SESSION_COLUMNS =
-  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, show_live_badge, simulation_decided_by, simulation_decided_at, simulation_ack_text, presence_curve, script_fired_at, pinned_message_id, room_name, recorder_status, recorder_requested_at, recorder_release_requested_at, recorder_alerted_at, recording_requested_at, room_locked, browser_recording_at, created_at, updated_at";
+  "id, webinar_id, kind, scheduled_at, started_at, ended_at, recording_anchor_at, status, recording_id, source_session_id, late_join_minutes, chat_mode, chat_slow_mode_seconds, show_live_badge, simulation_decided_by, simulation_decided_at, simulation_ack_text, presence_curve, script_fired_at, pinned_message_id, room_name, recorder_status, recorder_requested_at, recorder_release_requested_at, recorder_alerted_at, recording_requested_at, room_locked, browser_recording_at, jit, created_at, updated_at";
 
 export type SessionRow = {
   chat_mode: string;
@@ -108,6 +162,8 @@ export type SessionRow = {
   room_name?: string | null;
   /* 202610290003: a reserva Gravar no navegador ligada (o selo Gravando do aluno). */
   browser_recording_at?: string | null;
+  /* 202610300005 (fase 4e): a sessao "Comeca quando voce entra"; opcional para os dubles das fases 1 a 3. */
+  jit?: boolean | null;
   scheduled_at: string;
   script_fired_at: string | null;
   show_live_badge: boolean;
@@ -342,6 +398,7 @@ export function sessionFromRow(row: SessionRow): WebinarSession {
     createdAt: row.created_at,
     endedAt: row.ended_at,
     id: row.id,
+    jit: row.jit === true,
     kind: oneOf<SessionKind>(SESSION_KINDS, row.kind, "live"),
     lateJoinMinutes: row.late_join_minutes,
     pinnedMessageId: row.pinned_message_id ?? null,
@@ -508,3 +565,533 @@ export type RecordingEventRow = {
   signature_valid: boolean;
   state: string;
 };
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 4 (202610300002 a 202610300006): as linhas novas e os leitores sem confiar no formato (jsonb e bigint podem vir
+ * de qualquer jeito: o que nao bate volta ao padrao, nunca quebra a tela). Quem le e grava e o store de cada parte
+ * (panel-store.ts, offer-store.ts, simulation-store.ts, assistant-store.ts, jit-store.ts, translation-store.ts); o
+ * zod de quem salva fica em offer-schemas.ts, simulation-schemas.ts, assistant-schemas.ts, jit-schemas.ts e
+ * translation-schemas.ts.
+ * ---------------------------------------------------------------------------------------------- */
+
+function asCount(value: unknown): number {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? Math.trunc(number) : 0;
+}
+
+function asInteger(value: unknown, min: number, max: number, fallback: number): number {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.trunc(number))) : fallback;
+}
+
+function asNullableInteger(value: unknown, min: number, max: number): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.trunc(number))) : null;
+}
+
+function asIsoOrNull(value: unknown): string | null {
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+/* 4a: webinar_panel ------------------------------------------------------------------------------ */
+
+/** As linhas de webinar_panel: bigint pode vir como texto; linha sem metrica fica de fora. */
+export function readPanelRows(rows: readonly unknown[]): PanelRow[] {
+  const result: PanelRow[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const source = row as Record<string, unknown>;
+    if (typeof source.metric !== "string") {
+      continue;
+    }
+    result.push({
+      item: typeof source.item === "string" ? source.item : String(source.item ?? ""),
+      metric: source.metric,
+      sessionId: typeof source.session_id === "string" && source.session_id ? source.session_id : null,
+      students: asCount(source.students),
+      total: asCount(source.total)
+    });
+  }
+  return result;
+}
+
+/* 4b: a Oferta ----------------------------------------------------------------------------------- */
+
+export const OFFER_COLUMNS =
+  "id, webinar_id, product_id, title, trigger_kind, show_at_offset_ms, visible_minutes, deadline_minutes, attribution_days, status, created_by, created_at, updated_at";
+
+export type OfferRow = {
+  attribution_days: number;
+  created_at: string;
+  created_by: string | null;
+  deadline_minutes: number | null;
+  id: string;
+  product_id: string;
+  show_at_offset_ms: number | null;
+  status: string;
+  title: string;
+  trigger_kind: string;
+  updated_at: string;
+  visible_minutes: number | null;
+  webinar_id: string;
+};
+
+export const OFFER_VARIANT_COLUMNS =
+  "id, offer_id, label, enabled, headline, badge, price_from_label, price_label, coupon, checkout_url, image_url, weight, created_at, updated_at";
+
+export type OfferVariantRow = {
+  badge: string | null;
+  checkout_url: string;
+  coupon: string | null;
+  created_at: string;
+  enabled: boolean;
+  headline: string;
+  id: string;
+  image_url: string | null;
+  label: string;
+  offer_id: string;
+  price_from_label: string | null;
+  price_label: string | null;
+  updated_at: string;
+  weight: number;
+};
+
+export function offerVariantFromRow(row: OfferVariantRow): OfferVariant {
+  return {
+    badge: row.badge ?? null,
+    checkoutUrl: row.checkout_url,
+    coupon: row.coupon ?? null,
+    enabled: row.enabled !== false,
+    headline: row.headline,
+    id: row.id,
+    imageUrl: row.image_url ?? null,
+    label: oneOf<OfferVariantLabel>(OFFER_VARIANT_LABELS, row.label, "A"),
+    offerId: row.offer_id,
+    priceFromLabel: row.price_from_label ?? null,
+    priceLabel: row.price_label ?? null,
+    weight: asInteger(row.weight, OFFER_LIMITS.weightMin, OFFER_LIMITS.weightMax, 1)
+  };
+}
+
+/** A Oferta com as variantes dela, na ordem A, B, C, D. */
+export function offerFromRows(row: OfferRow, variants: readonly OfferVariantRow[]): WebinarOffer {
+  return {
+    attributionDays: asInteger(row.attribution_days, OFFER_LIMITS.attributionDaysMin, OFFER_LIMITS.attributionDaysMax, OFFER_LIMITS.attributionDaysDefault),
+    createdAt: row.created_at,
+    createdBy: row.created_by ?? null,
+    deadlineMinutes: asNullableInteger(row.deadline_minutes, 1, OFFER_LIMITS.deadlineMinutesMax),
+    id: row.id,
+    productId: row.product_id,
+    showAtOffsetMs: asNullableInteger(row.show_at_offset_ms, 0, CHAT_LIMITS.offsetMaxMs),
+    status: oneOf<OfferStatus>(OFFER_STATUSES, row.status, "draft"),
+    title: row.title ?? "",
+    triggerKind: oneOf<OfferTrigger>(OFFER_TRIGGERS, row.trigger_kind, "never"),
+    updatedAt: row.updated_at,
+    variants: variants
+      .filter((variant) => variant.offer_id === row.id)
+      .map(offerVariantFromRow)
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    visibleMinutes: asNullableInteger(row.visible_minutes, 1, OFFER_LIMITS.visibleMinutesMax),
+    webinarId: row.webinar_id
+  };
+}
+
+export const OFFER_DISPLAY_COLUMNS =
+  "id, offer_id, session_id, show_offset_ms, hide_offset_ms, shown_at, hidden_at, deadline_at, shown_by, hidden_by, snapshot, created_at, updated_at";
+
+export type OfferDisplayRow = {
+  created_at: string;
+  deadline_at: string | null;
+  hidden_at: string | null;
+  hidden_by: string | null;
+  hide_offset_ms: number | null;
+  id: string;
+  offer_id: string;
+  session_id: string;
+  show_offset_ms: number;
+  shown_at: string;
+  shown_by: string | null;
+  snapshot: unknown;
+  updated_at: string;
+};
+
+/** A foto guardada da sessao; o que nao bate vira nulo (a tela mostra so a janela). */
+export function offerDisplaySnapshotOf(value: unknown): OfferDisplaySnapshot | null {
+  const raw = asObject(value);
+  if (!Array.isArray(raw.variants)) {
+    return null;
+  }
+  const variants = raw.variants
+    .map((entry) => asObject(entry))
+    .filter((entry) => typeof entry.headline === "string" && (OFFER_VARIANT_LABELS as readonly unknown[]).includes(entry.label))
+    .map((entry) => ({
+      badge: asText(entry.badge, OFFER_LIMITS.badge),
+      coupon: asText(entry.coupon, OFFER_LIMITS.coupon),
+      headline: String(entry.headline).slice(0, OFFER_LIMITS.headline),
+      label: entry.label as OfferVariantLabel,
+      priceFromLabel: asText(entry.priceFromLabel, OFFER_LIMITS.priceLabel),
+      priceLabel: asText(entry.priceLabel, OFFER_LIMITS.priceLabel)
+    }));
+  return { capturedAt: asIsoOrNull(raw.capturedAt) ?? "", deadlineAt: asIsoOrNull(raw.deadlineAt), variants };
+}
+
+export function offerDisplayFromRow(row: OfferDisplayRow): OfferDisplay {
+  return {
+    deadlineAt: row.deadline_at ?? null,
+    hiddenAt: row.hidden_at ?? null,
+    hiddenBy: row.hidden_by ?? null,
+    hideOffsetMs: row.hide_offset_ms ?? null,
+    id: row.id,
+    offerId: row.offer_id,
+    sessionId: row.session_id,
+    showOffsetMs: row.show_offset_ms,
+    shownAt: row.shown_at,
+    shownBy: row.shown_by ?? null,
+    snapshot: offerDisplaySnapshotOf(row.snapshot)
+  };
+}
+
+export const OFFER_CLICK_COLUMNS =
+  "id, offer_id, variant_id, variant_label, session_id, user_id, offset_ms, click_token, clicked_at, converted_sale_grant_id, converted_at, created_at";
+
+export type OfferClickRow = {
+  click_token: string;
+  clicked_at: string;
+  converted_at: string | null;
+  converted_sale_grant_id: string | null;
+  created_at: string;
+  id: string;
+  offer_id: string;
+  offset_ms: number;
+  session_id: string;
+  user_id: string;
+  variant_id: string | null;
+  variant_label: string;
+};
+
+export function offerClickFromRow(row: OfferClickRow): OfferClick {
+  return {
+    clickToken: row.click_token,
+    clickedAt: row.clicked_at,
+    convertedAt: row.converted_at ?? null,
+    convertedSaleGrantId: row.converted_sale_grant_id ?? null,
+    id: row.id,
+    offerId: row.offer_id,
+    offsetMs: row.offset_ms,
+    sessionId: row.session_id,
+    userId: row.user_id,
+    variantId: row.variant_id ?? null,
+    variantLabel: oneOf<OfferVariantLabel>(OFFER_VARIANT_LABELS, row.variant_label, "A")
+  };
+}
+
+/* 4b: a Simulacao na sessao ---------------------------------------------------------------------- */
+
+/**
+ * As colunas de Simulacao da fase 4, lidas a parte (nunca em SESSION_COLUMNS: nenhuma leitura de numero real as traz,
+ * D6, M6). O formato dos jsonb e o de docs/30 §4.3 (snake_case).
+ */
+export const SESSION_SIMULATION_COLUMNS = "id, kind, simulated_count_rule, simulated_joins, simulated_sale_notices, simulation_summary, simulation_seed";
+
+export type SessionSimulationRow = {
+  id: string;
+  kind: string;
+  simulated_count_rule: unknown;
+  simulated_joins: unknown;
+  simulated_sale_notices: unknown;
+  simulation_seed: number | string | null;
+  simulation_summary: unknown;
+};
+
+export function simulatedCountRuleOfRow(value: unknown): SimulatedCountRule {
+  const raw = asObject(value);
+  const base = defaultSimulatedCountRule();
+  const mode = oneOf<SimulatedCountMode>(SIMULATED_COUNT_MODES, raw.mode, base.mode);
+  const lowest = asInteger(raw.base, 0, SIMULATION_LIMITS.countMax, 0);
+  return {
+    base: lowest,
+    jitter: asInteger(raw.jitter, 0, SIMULATION_LIMITS.jitterMax, 0),
+    mode,
+    peak: Math.max(lowest, asInteger(raw.peak, 0, SIMULATION_LIMITS.countMax, lowest))
+  };
+}
+
+export function simulatedJoinsOfRow(value: unknown): SimulatedJoins {
+  const raw = asObject(value);
+  const base = defaultSimulatedJoins();
+  return {
+    enabled: asBoolean(raw.enabled, base.enabled),
+    everySeconds: asInteger(raw.every_seconds, SIMULATION_LIMITS.joinsEverySecondsMin, SIMULATION_LIMITS.joinsEverySecondsMax, base.everySeconds),
+    max: asInteger(raw.max, 0, SIMULATION_LIMITS.joinsMax, base.max),
+    names: "generic"
+  };
+}
+
+export function simulatedSaleNoticesOfRow(value: unknown): SimulatedSaleNotices {
+  const raw = asObject(value);
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  return {
+    enabled: asBoolean(raw.enabled, false),
+    items: items
+      .map((entry) => asObject(entry))
+      .map((entry) => ({ offsetMs: asNullableInteger(entry.offset_ms, CHAT_LIMITS.offsetMinMs, CHAT_LIMITS.offsetMaxMs), text: asText(entry.text, SIMULATION_LIMITS.saleNoticeText) }))
+      .filter((entry): entry is SimulatedSaleNotice => entry.offsetMs !== null && entry.text !== null)
+      .slice(0, SIMULATION_LIMITS.saleNoticesMax)
+      .sort((a, b) => a.offsetMs - b.offsetMs)
+  };
+}
+
+export function simulationTotalsOfRow(value: unknown): SimulationTotals | null {
+  const raw = asObject(value);
+  if (!("counter_max" in raw) && !("joins_shown" in raw) && !("sale_notices_shown" in raw)) {
+    return null;
+  }
+  return {
+    counterMax: asInteger(raw.counter_max, 0, Number.MAX_SAFE_INTEGER, 0),
+    joinsShown: asInteger(raw.joins_shown, 0, Number.MAX_SAFE_INTEGER, 0),
+    saleNoticesShown: asInteger(raw.sale_notices_shown, 0, Number.MAX_SAFE_INTEGER, 0)
+  };
+}
+
+export function sessionSimulationFromRow(row: SessionSimulationRow): SessionSimulation {
+  return {
+    countRule: simulatedCountRuleOfRow(row.simulated_count_rule),
+    joins: simulatedJoinsOfRow(row.simulated_joins),
+    saleNotices: simulatedSaleNoticesOfRow(row.simulated_sale_notices),
+    seed: asInteger(row.simulation_seed, 0, 2_147_483_647, 0),
+    sessionId: row.id,
+    summary: simulationTotalsOfRow(row.simulation_summary)
+  };
+}
+
+/** O que vai para as colunas (docs/30 §4.3): "off" e "desligado" gravam nulo (a sessao fica sem regra simulada). */
+export function simulationRulesToRow(input: { countRule: SimulatedCountRule; joins: SimulatedJoins; saleNotices: SimulatedSaleNotices }) {
+  return {
+    simulated_count_rule:
+      input.countRule.mode === "off" ? null : { base: input.countRule.base, jitter: input.countRule.jitter, mode: input.countRule.mode, peak: input.countRule.peak },
+    simulated_joins: input.joins.enabled ? { enabled: true, every_seconds: input.joins.everySeconds, max: input.joins.max, names: "generic" } : null,
+    simulated_sale_notices: input.saleNotices.enabled
+      ? { enabled: true, items: input.saleNotices.items.map((item) => ({ offset_ms: item.offsetMs, text: item.text })) }
+      : null
+  };
+}
+
+export function simulationTotalsToRow(totals: SimulationTotals) {
+  return { counter_max: totals.counterMax, joins_shown: totals.joinsShown, sale_notices_shown: totals.saleNoticesShown };
+}
+
+/* 4b: o follow-up -------------------------------------------------------------------------------- */
+
+export type FollowUpFactsRow = {
+  attended: boolean | null;
+  clicked: boolean | null;
+  left_before_offer: boolean | null;
+  offer_seen: boolean | null;
+  purchased: boolean | null;
+  registered: boolean | null;
+  user_id: string;
+  watched_replay: boolean | null;
+  webinar_id: string;
+};
+
+export function followUpFactsFromRow(row: FollowUpFactsRow): WebinarFollowUpFacts {
+  return {
+    attended: row.attended === true,
+    clicked: row.clicked === true,
+    leftBeforeOffer: row.left_before_offer === true,
+    offerSeen: row.offer_seen === true,
+    purchased: row.purchased === true,
+    registered: row.registered === true,
+    userId: row.user_id,
+    watchedReplay: row.watched_replay === true,
+    webinarId: row.webinar_id
+  };
+}
+
+/* 4c: o Assistente e os atendentes --------------------------------------------------------------- */
+
+export function assistantSettingsOfRow(value: unknown): AssistantSettings {
+  const raw = asObject(value);
+  const base = defaultAssistantSettings();
+  return { enabled: asBoolean(raw.enabled, base.enabled), replyAllDefault: asBoolean(raw.replyAllDefault, base.replyAllDefault) };
+}
+
+export function assistantSettingsToRow(settings: AssistantSettings) {
+  return { enabled: settings.enabled, replyAllDefault: settings.replyAllDefault };
+}
+
+export const KNOWLEDGE_COLUMNS = "id, webinar_id, question, answer, position, created_by, created_at, updated_at";
+
+export type KnowledgeRow = {
+  answer: string;
+  created_at: string;
+  created_by: string | null;
+  id: string;
+  position: number;
+  question: string;
+  updated_at: string;
+  webinar_id: string;
+};
+
+export function knowledgeFromRow(row: KnowledgeRow): AssistantKnowledgeItem {
+  return { answer: row.answer, createdAt: row.created_at, id: row.id, position: row.position, question: row.question, updatedAt: row.updated_at, webinarId: row.webinar_id };
+}
+
+export const ATTENDANT_COLUMNS = "session_id, user_id, status, last_seen_at, created_at";
+
+export type AttendantRow = { created_at: string; last_seen_at: string; session_id: string; status: string; user_id: string };
+
+export function attendantFromRow(row: AttendantRow): Attendant {
+  return { lastSeenAt: row.last_seen_at, sessionId: row.session_id, status: oneOf<AttendantStatus>(ATTENDANT_STATUSES, row.status, "away"), userId: row.user_id };
+}
+
+export const AI_REQUEST_COLUMNS =
+  "id, webinar_id, session_id, user_id, target_kind, target_id, status, skip_reason, reply_message_id, requested_at, answered_at, provider, model, error_code, created_at";
+
+export type AiRequestRow = {
+  answered_at: string | null;
+  created_at: string;
+  error_code: string | null;
+  id: string;
+  model: string | null;
+  provider: string | null;
+  reply_message_id: string | null;
+  requested_at: string;
+  session_id: string;
+  skip_reason: string | null;
+  status: string;
+  target_id: string;
+  target_kind: string;
+  user_id: string;
+  webinar_id: string;
+};
+
+export function aiRequestFromRow(row: AiRequestRow): AssistantRequest {
+  return {
+    answeredAt: row.answered_at ?? null,
+    errorCode: row.error_code ?? null,
+    id: row.id,
+    model: row.model ?? null,
+    provider: row.provider ?? null,
+    replyMessageId: row.reply_message_id ?? null,
+    requestedAt: row.requested_at,
+    sessionId: row.session_id,
+    skipReason: row.skip_reason ? oneOf<AssistantSkipReason>(ASSISTANT_SKIP_REASONS, row.skip_reason, "empty") : null,
+    status: oneOf<AssistantRequestStatus>(ASSISTANT_REQUEST_STATUSES, row.status, "pending"),
+    targetId: row.target_id,
+    targetKind: oneOf<AssistantTarget>(ASSISTANT_TARGETS, row.target_kind, "chat"),
+    userId: row.user_id,
+    webinarId: row.webinar_id
+  };
+}
+
+/** As colunas da 202610300004 numa pergunta (webinar_questions) ou numa pergunta do chat (webinar_chat_messages). */
+export const QUESTION_ATTENDANCE_COLUMNS = "id, assigned_to, assigned_at, answer_source, handoff_requested_at";
+export const MESSAGE_ATTENDANCE_COLUMNS = "id, assigned_to, assigned_at, handoff_requested_at, edited_at, edited_by";
+
+export type AttendanceMarksRow = {
+  answer_source?: string | null;
+  assigned_at: string | null;
+  assigned_to: string | null;
+  handoff_requested_at: string | null;
+  id: string;
+};
+
+export function attendanceMarksFromRow(row: AttendanceMarksRow): AttendanceMarks {
+  return {
+    answerSource: row.answer_source ? oneOf<AnswerSource>(ANSWER_SOURCES, row.answer_source, "team") : null,
+    assignedAt: row.assigned_at ?? null,
+    assignedTo: row.assigned_to ?? null,
+    handoffRequestedAt: row.handoff_requested_at ?? null
+  };
+}
+
+/* 4e: "Comeca quando voce entra" ----------------------------------------------------------------- */
+
+function jitSimulationOfRow(value: unknown): JitSimulationTemplate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  return {
+    ackText: asText(raw.ackText, CHAT_LIMITS.simulationAck),
+    countRule: simulatedCountRuleOfRow(raw.countRule),
+    decidedAt: asIsoOrNull(raw.decidedAt),
+    decidedBy: typeof raw.decidedBy === "string" && raw.decidedBy ? raw.decidedBy : null,
+    joins: simulatedJoinsOfRow(raw.joins),
+    saleNotices: simulatedSaleNoticesOfRow(raw.saleNotices),
+    showLiveBadge: asBoolean(raw.showLiveBadge, false)
+  };
+}
+
+/** webinars.jit_settings: o que nao bate volta ao padrao (desligado). */
+export function jitSettingsOfRow(value: unknown): JitSettings {
+  const raw = asObject(value);
+  const base = defaultJitSettings();
+  const startHour = asInteger(raw.startHour, JIT_LIMITS.hourMin, JIT_LIMITS.hourMax - 1, base.startHour);
+  const endHour = asInteger(raw.endHour, JIT_LIMITS.hourMin + 1, JIT_LIMITS.hourMax, base.endHour);
+  return {
+    enabled: asBoolean(raw.enabled, base.enabled) && endHour > startHour,
+    endHour: Math.max(endHour, startHour + 1),
+    everyMinutes: oneOf<JitEveryMinutes>(JIT_EVERY_MINUTES, raw.everyMinutes, base.everyMinutes),
+    lateJoinMinutes: asNullableInteger(raw.lateJoinMinutes, 0, JIT_LIMITS.lateJoinMax),
+    simulation: jitSimulationOfRow(raw.simulation),
+    startHour
+  };
+}
+
+/** O que vai para webinars.jit_settings (as regras da Simulacao no formato das colunas da sessao, docs/30 §4.3). */
+export function jitSettingsToRow(settings: JitSettings) {
+  const simulation = settings.simulation;
+  const rules = simulation ? simulationRulesToRow(simulation) : null;
+  return {
+    enabled: settings.enabled,
+    endHour: settings.endHour,
+    everyMinutes: settings.everyMinutes,
+    lateJoinMinutes: settings.lateJoinMinutes,
+    simulation:
+      simulation && rules
+        ? {
+            ackText: simulation.ackText,
+            countRule: rules.simulated_count_rule,
+            decidedAt: simulation.decidedAt,
+            decidedBy: simulation.decidedBy,
+            joins: rules.simulated_joins,
+            saleNotices: rules.simulated_sale_notices,
+            showLiveBadge: simulation.showLiveBadge
+          }
+        : null,
+    startHour: settings.startHour
+  };
+}
+
+/* 4f: a traducao --------------------------------------------------------------------------------- */
+
+export const VIEWER_PREFS_COLUMNS = "user_id, chat_language, created_at, updated_at";
+
+export type ViewerPrefsRow = { chat_language: string | null; created_at: string; updated_at: string; user_id: string };
+
+export function viewerPrefsFromRow(row: ViewerPrefsRow): ViewerPrefs {
+  const known = (CHAT_LANGUAGES as readonly unknown[]).includes(row.chat_language);
+  return { chatLanguage: known ? (row.chat_language as ChatLanguage) : null, userId: row.user_id };
+}
+
+export const TEXT_TRANSLATION_COLUMNS = "source_hash, language, source_language, body, provider, created_at";
+
+export type TextTranslationRow = { body: string; created_at: string; language: string; provider: string; source_hash: string; source_language: string | null };
+
+export function textTranslationFromRow(row: TextTranslationRow): TextTranslation {
+  return {
+    body: row.body,
+    createdAt: row.created_at,
+    language: oneOf<ChatLanguage>(CHAT_LANGUAGES, row.language, "pt"),
+    provider: row.provider,
+    sourceHash: row.source_hash,
+    sourceLanguage: row.source_language ? oneOf<SourceLanguage>(SOURCE_LANGUAGES, row.source_language, "other") : null
+  };
+}
