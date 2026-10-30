@@ -136,12 +136,12 @@ test.describe("produtor", () => {
     expect(linhas[1]).toContain(";02:05;Aluna de Teste;aluna.teste@bunker707.test;O replay fica até quando?;1;Respondida;");
     expect(linhas[1]).toContain(";Fica disponível por 7 dias.;Sim;");
 
-    // A 375 px o botao tem o alvo de toque de 44 px.
+    // A 375 px o botao tem o alvo de toque de 44 px. A janela muda com a pagina aberta e o botao (transition-all) cresce
+    // ate os 44 px animando: confere a altura depois que ela assenta, nunca no meio da animacao.
     await page.setViewportSize({ height: 812, width: 375 });
     await page.keyboard.press("Escape");
     await expect(exportar).toBeVisible();
-    const caixa = await exportar.boundingBox();
-    expect(caixa?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect.poll(async () => (await exportar.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await semRolagemLateral(page);
   });
 
