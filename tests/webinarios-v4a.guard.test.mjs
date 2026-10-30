@@ -26,12 +26,12 @@ import {
 const MIGRATION = "supabase/migrations/202610300002_webinars_v4a_paineis.sql";
 const model = await import("../src/server/webinars/model.ts");
 
-test("as migracoes ate a 202610300001 continuam byte a byte; a 202610300002 e o texto exato (aplicar antes do merge)", () => {
+test("as migracoes ate a 202610300001 continuam byte a byte; a 202610300002 e o texto exato (ja aplicada)", () => {
   const applied = cumulativeHash("202610300001_webinars_quem_pode_regras.sql");
   assert.equal(applied.count, 57);
   assert.equal(applied.hash, "731f61dfc62bed59450739366af5f18b4f5ff2ffb9aa0d9931f4fc8f54155f2d", "uma migracao ja aplicada mudou");
   assert.ok(migrationFiles().includes("202610300002_webinars_v4a_paineis.sql"));
-  assert.equal(fileHash(MIGRATION), "6c5b7f779e3aace5bc9e4aaf2a66b110a8b56e54d448884abfa08addcb1da7e0", "a 202610300002 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "6c5b7f779e3aace5bc9e4aaf2a66b110a8b56e54d448884abfa08addcb1da7e0", "a 202610300002 mudou: ela ja foi aplicada na nuvem de teste (docs/21 §9.10): a correcao vai numa migracao nova, nunca neste arquivo");
 });
 
 test("a 202610300002: tres secoes MCP, idempotente, so acrescenta", () => {

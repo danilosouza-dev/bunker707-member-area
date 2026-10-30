@@ -29,12 +29,12 @@ const MIGRATION = "supabase/migrations/202610300007_webinars_v4_ajustes.sql";
 const code = () => sqlCodeOf(read(MIGRATION));
 const UNDONE = /g\.closed_by is null or g\.closed_by not in \('refund', 'chargeback'\)/;
 
-test("as migracoes ate a 202610300006 continuam byte a byte; a 202610300007 e o texto exato (as seis da fase 4 a aplicar antes do merge)", () => {
+test("as migracoes ate a 202610300006 continuam byte a byte; a 202610300007 e o texto exato (as seis da fase 4 ja aplicadas)", () => {
   const applied = cumulativeHash("202610300006_webinars_v4f_traducao.sql");
   assert.equal(applied.count, 62);
   assert.equal(applied.hash, "f4298411bb7f1b0b91487f8bcfb28dfb8ac4765821b34bb5d3414ddda5390714", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300007_webinars_v4_ajustes.sql"));
-  assert.equal(fileHash(MIGRATION), "6dfda6736c7a589b4062ce5878b929a6419f424f3c44270ed9530b458a3a2a44", "a 202610300007 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "6dfda6736c7a589b4062ce5878b929a6419f424f3c44270ed9530b458a3a2a44", "a 202610300007 mudou: ela ja foi aplicada na nuvem de teste (docs/21 §9.10): a correcao vai numa migracao nova, nunca neste arquivo");
 });
 
 test("a 202610300007: seis secoes MCP, idempotente, so acrescenta; webinar_offer_seen so do service_role; as funcoes so do service_role", () => {

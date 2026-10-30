@@ -33,12 +33,12 @@ const offerModel = await import("../src/server/webinars/offer-model.ts");
 
 const NEW_TABLES = ["webinar_offers", "webinar_offer_variants", "webinar_offer_displays", "webinar_offer_clicks"];
 
-test("as migracoes ate a 202610300002 continuam byte a byte; a 202610300003 e o texto exato (aplicar antes do merge)", () => {
+test("as migracoes ate a 202610300002 continuam byte a byte; a 202610300003 e o texto exato (ja aplicada)", () => {
   const applied = cumulativeHash("202610300002_webinars_v4a_paineis.sql");
   assert.equal(applied.count, 58);
   assert.equal(applied.hash, "9d188a99931179fb29491f9094261cc837e18a7fba2c1e1c8dfc606bacdba5ae", "uma migracao anterior mudou");
   assert.ok(migrationFiles().includes("202610300003_webinars_v4b_ofertas.sql"));
-  assert.equal(fileHash(MIGRATION), "c6bb9b6ce510cdc28ae084203bb90d43e5f7ec4fcc695ee1609cee8890bea2c7", "a 202610300003 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "c6bb9b6ce510cdc28ae084203bb90d43e5f7ec4fcc695ee1609cee8890bea2c7", "a 202610300003 mudou: ela ja foi aplicada na nuvem de teste (docs/21 §9.10): a correcao vai numa migracao nova, nunca neste arquivo");
 });
 
 test("a 202610300003: nove secoes MCP, idempotente, so acrescenta; as quatro tabelas novas so do service_role", () => {

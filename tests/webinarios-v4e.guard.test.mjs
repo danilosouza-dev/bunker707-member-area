@@ -47,7 +47,7 @@ test("as migracoes ate a 202610300004 continuam byte a byte; a fase 4 sem buraco
     "a fase 4 vem depois da 202610300001, na ordem e sem buraco (a 4d, Sala Live vertical, nao tem migracao)"
   );
   assert.ok(migrationFiles().includes("202610300005_webinars_v4e_just_in_time.sql"));
-  assert.equal(fileHash(MIGRATION), "a38aecc10f7beff4581ca1826d34f4d63b57bbe382eabffa0c1983bfe642a957", "a 202610300005 mudou: confira de novo antes de aplicar na nuvem de teste (docs/21 §9.10; nenhuma foi aplicada ainda) e atualize este hash junto");
+  assert.equal(fileHash(MIGRATION), "a38aecc10f7beff4581ca1826d34f4d63b57bbe382eabffa0c1983bfe642a957", "a 202610300005 mudou: ela ja foi aplicada na nuvem de teste (docs/21 §9.10): a correcao vai numa migracao nova, nunca neste arquivo");
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
   // Toda leitura de sessao le jit (202610300005), e o aviso de migracao pendente aponta a mais nova dos webinarios, a
   // 202610300007 (aplicar ate ela inclui a 202610300005), como pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs.

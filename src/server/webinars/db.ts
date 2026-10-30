@@ -19,7 +19,7 @@ export type WebinarsDb = SupabaseClient;
  * webinar_sessions.jit em toda leitura de sessao (SESSION_COLUMNS), da 202610300005: sem qualquer uma das duas, tudo
  * aqui cai no aviso de migracao pendente. As migracoes da fase 4 vem depois da 202610300001, em ordem e sem buraco
  * (202610300002 a 202610300007: 4a, 4b, 4c, 4e, 4f e os ajustes da revisao; a 4d, Sala Live vertical, nao tem dado
- * novo nem migracao), todas antes do merge (docs/21 §9.10; nenhuma aplicada ainda). A 202610300007 e a mais
+ * novo nem migracao), aplicadas na nuvem de teste antes do merge (docs/21 §9.10). A 202610300007 e a mais
  * nova: os numeros da revisao (quem viu a oferta congelado, a venda reembolsada fora) so saem com ela, entao o aviso a
  * aponta. Cada parte da fase 4 tem a propria constante abaixo, para o aviso de migracao pendente apontar a certa onde
  * so aquela parte falta.

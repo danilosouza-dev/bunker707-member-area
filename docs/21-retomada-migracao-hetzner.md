@@ -17,9 +17,8 @@
 > **Atualização de 29/10/2026 (renumerada em 30/10/2026):** a fase 4 dos webinários traz seis migrações, de
 > `202610300002` a `202610300007` (4a, 4b, 4c, 4e, 4f e os ajustes da revisão; a 4d não tem migração), numeradas
 > depois da `202610300001` do Quem pode por regras (seção 9.9) e aplicadas nessa ordem antes do merge na `dev`: o app
-> novo lê `webinar_sessions.jit` (`202610300005`) em toda leitura de sessão. **Nenhuma das seis foi aplicada ainda, em
-> lugar nenhum** (um texto anterior dizia que o produtor já tinha rodado as cinco primeiras na nuvem de teste, o que
-> não aconteceu). Passos e consultas de conferência na seção 9.10.
+> novo lê `webinar_sessions.jit` (`202610300005`) em toda leitura de sessão. **Aplicadas na nuvem de teste em 30/10/2026**, antes
+> do merge, pelo MCP e conferidas; na produção, nenhuma ainda. Passos, conferência e estado na seção 9.10.
 >
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
@@ -601,7 +600,7 @@ plpgsql, `security invoker`, retorno `TABLE(user_id uuid, registered uuid[], att
 `webinars_access_mode_check` com os quatro modos de antes. Se a migracao mudar antes do merge, aplicar de novo a secao
 que mudou do mesmo jeito.
 
-### 9.10 Webinarios v4: migracoes `202610300002` a `202610300007` antes do merge (30/10/2026)
+### 9.10 Webinarios v4: migracoes `202610300002` a `202610300007` aplicadas na nuvem de teste (30/10/2026)
 
 A fase 4 "Paineis e Hot Webinar" (`docs/30` §11) vem com seis migracoes: uma por parte (a 4d, Sala Live vertical, nao
 tem dado novo nem migracao) e a dos ajustes da revisao. Todas so acrescentam, sao idempotentes e tem a guarda propria,
@@ -734,17 +733,25 @@ E das regras de acesso: `select relname, relrowsecurity from pg_class where reln
 a `202610300001` continua igual: `select count(*) from public.communication_webinar_facts()` roda e
 `audience_restricts` segue boolean, nao nulo, padrao `false`.
 
-Estado em 30/10/2026: **a aplicar**. Nenhuma das seis foi aplicada, nem na nuvem de teste (a mais nova la e a
-`202610300001` do §9.9) nem na producao. Uma versao anterior desta secao dizia que o produtor ja tinha rodado o SQL das
-cinco primeiras na nuvem de teste; isso nao aconteceu. Antes do merge, aplicar as seis na ordem da tabela, gravar as
-versoes e conferir com `list_migrations` e as consultas acima. O que ja foi conferido, num Postgres 16 local, com os
+Estado em 30/10/2026: **aplicadas na nuvem de teste** (`hrtnqcznhdmodjikvddm`), antes do merge, pelo MCP: as 32
+secoes uma por chamada, na ordem da tabela, cada uma com `set lock_timeout = '5s';` (nenhuma travou nem pediu
+confirmacao), e a versao de cada arquivo gravada logo depois dele. Conferido: `list_migrations` com as seis logo depois
+da `202610300001` e nenhuma `202610290004` a `202610290010`; todas as consultas acima como esperado (RLS 10 x `true`,
+nenhum `grant` de `anon` ou `authenticated` nas tabelas novas, nenhum `execute` de `authenticated` nas funcoes
+`webinar*`, `webinar_panel` e `webinar_report` rodando); o corpo de cada funcao recriada igual ao do arquivo (md5 de
+`prosrc`, conferido depois de cada secao); e uma impressao das 31 tabelas e 11 funcoes `webinar*` (colunas, checks,
+indices, RLS e corpos) igual a de um Postgres 16 com as 63 migracoes do repositorio, menos o corpo de
+`webinar_open_session` (da fase 3, que a fase 4 nao toca), que na nuvem nao tem os comentarios `--` e ja diferia so
+nisso antes. Antes de aplicar, as 32 secoes foram ensaiadas uma a uma num Postgres 16 com dados como os da nuvem (o
+esquema final igual ao do banco limpo, e as seis de novo sem mudar nada). Na producao (Hetzner), nenhuma ainda: vao
+com a promocao da fase 4 para a `main` (secao 8). Uma versao anterior desta secao dizia que o produtor ja tinha rodado
+o SQL das cinco primeiras na nuvem de teste; isso nao aconteceu. O que tambem foi conferido, num Postgres 16 local, com os
 dados dos testes de integracao e `rollback`: os numeros de `webinar_panel`, `webinar_report`,
 `webinar_offer_conversions`, `webinar_follow_up_facts` e `webinar_chat_window` (a turma do dia), e as tabelas do
 Assistente e da traducao. A `202610300007` rodou duas vezes seguidas e com os casos da revisao em transacao desfeita.
 
-Se uma migracao mudar antes do merge (pedido da implementacao ou da revisao): aplicar de novo o arquivo inteiro (ou so
-a secao que mudou) do mesmo jeito, na ordem, e atualizar junto o hash na guarda dela; as guardas das seguintes conferem
-o hash acumulado das anteriores e tambem mudam.
+Aplicadas, as seis nao mudam mais: uma correcao vai numa migracao nova, depois da `202610300007` (a guarda de cada uma
+prende o hash do arquivo e o acumulado das anteriores).
 
 Mudanca de 30/10/2026 (segunda revisao da integracao, antes de qualquer aplicacao): em `webinar_report`, as linhas da
 Oferta sem grupo (`offer` `seen`, `clicks` e `purchases`) e as cinco do Assistente (`ai`) trocaram `where exists (...)`
