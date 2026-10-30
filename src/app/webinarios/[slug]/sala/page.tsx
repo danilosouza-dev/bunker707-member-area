@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
@@ -30,6 +30,10 @@ import { Radio } from "lucide-react";
 // "onde nunca": a rota nao tem chave de pagina e o palco anuncia o sinal de midia).
 
 export const dynamic = "force-dynamic";
+
+// O teclado do celular encolhe so a viewport visual (Chrome 108+): a sala vertical nao gira ao abrir o teclado. As
+// WebViews dos apps ignoram; la quem segura e useRoomOrientation (o campo em foco trava o vertical).
+export const viewport: Viewport = { interactiveWidget: "resizes-visual" };
 
 export const metadata: Metadata = {
   title: "Sala | Bunker707"

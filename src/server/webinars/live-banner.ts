@@ -8,7 +8,9 @@
 // a /webinarios (§1.5). "Comeca em": so para quem garantiu vaga, de 60 min antes ate a hora marcada (bannerWindow), a
 // mais proxima primeiro. Tudo so com "Faixa no topo" ligada (show_banner) e nunca num webinario cancelado; quem le o
 // banco (a rota) ja deixou de fora o que o aluno nao pode ver (access.ts). O Entrar leva a sala quando ela abre agora
-// para o aluno; com limite de vagas e sem a vaga (A12), a pagina do Webinario (la ele garante e entra).
+// para o aluno; com limite de vagas e sem a vaga (A12), a pagina do Webinario (la ele garante e entra). As sessoes do
+// "Comeca quando voce entra" (fase 4e, `jit`) nunca entram na faixa: cada uma e a sessao de quem chegou naquele horario,
+// nunca uma live no ar para todos (nem com o selo ligado), e nao tem vaga para a "Comeca em".
 //
 // Na tela: o X dispensa por 1 dia naquele navegador (o mapa chave -> ate quando, em localStorage pela faixa; aqui so a
 // leitura e a escrita do texto guardado), a resposta da rota conferida antes de desenhar (so links internos de
@@ -18,6 +20,7 @@
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { WEBINAR_ROOM_PATH } from "../../lib/webinar-paths";
 import { bannerWindow, REMINDER_RULES, toTime, webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
+import { isJitSession } from "./jit-model";
 import { canJoinSimulated, simulatedPhase } from "./room-model";
 import { registrationFor, roomHref, seatRequired } from "./student-model";
 
@@ -60,12 +63,15 @@ function durationMsOf(entry: LiveBannerEntry, session: WebinarSession): number {
   return entry.durationMsBySession?.get(session.id) ?? Math.max(1, entry.webinar.durationMinutes) * 60_000;
 }
 
-/** Se a sessao esta no ar agora para a faixa (a Live ao vivo pela situacao; a gravada pelo selo e pelo relogio). */
+/**
+ * Se a sessao esta no ar agora para a faixa (a Live ao vivo pela situacao; a gravada pelo selo e pelo relogio). A sessao
+ * do "Comeca quando voce entra" nunca.
+ */
 export function sessionOnAir(session: WebinarSession, durationMs: number, input: { meetConfigured: boolean; nowMs: number }): boolean {
   if (session.kind === "live") {
     return input.meetConfigured && session.status === "live";
   }
-  if (session.kind !== "simulated" || !session.showLiveBadge) {
+  if (session.kind !== "simulated" || !session.showLiveBadge || isJitSession(session)) {
     return false;
   }
   return simulatedPhase(session, durationMs, input.nowMs) === "live" && canJoinSimulated(session, durationMs, input.nowMs).ok;
@@ -101,7 +107,7 @@ export function chooseLiveNow(input: { entries: readonly LiveBannerEntry[]; meet
     let onAir: LiveNowItem | null = null;
 
     for (const session of entry.sessions) {
-      if (session.kind === "replay" || session.status === "cancelled" || session.status === "ended") {
+      if (session.kind === "replay" || isJitSession(session) || session.status === "cancelled" || session.status === "ended") {
         continue;
       }
       const durationMs = durationMsOf(entry, session);

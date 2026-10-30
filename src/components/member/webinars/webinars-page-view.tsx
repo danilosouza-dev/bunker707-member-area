@@ -15,12 +15,23 @@ import { phaseLabel, type StudentWebinarView } from "@/server/webinars/student-m
 import type { WebinarsPageData } from "@/server/webinars/student-queries";
 import { WebinarCountdown } from "./webinar-countdown";
 import { WebinarFacts } from "./webinar-facts";
-import { WebinarPosterCard } from "./webinar-poster-card";
+import { WebinarPosterCard, type WebinarCardVariant } from "./webinar-poster-card";
+import { JitFeaturedWebinar, JitPosterCard, hasJit } from "./jit/jit-cards";
 
 // /webinarios (docs/30 §1.1): tres blocos em cards verticais. Proxima live (o mais proximo em destaque, com
 // capa, data e hora de Sao Paulo, duracao, apresentador e a contagem regressiva; os seguintes numa grade),
 // Em andamento (botao Entrar) e Replays (selo Replay). So o que o aluno pode ver; estados honestos para
-// "nenhuma live" e para falha de leitura.
+// "nenhuma live" e para falha de leitura. Fase 4e: o webinario com o "Comeca quando voce entra" e um card so (o selo
+// e "A próxima sessão começa em {n} min"; jit/jit-cards.tsx), em Em andamento enquanto as sessoes correm e em
+// Proxima live fora do horario, nunca uma sessao `jit` por card.
+
+function Card({ accessPreviewMode, serverNow, variant, view }: { accessPreviewMode?: AccessPreviewMode; serverNow: number; variant: WebinarCardVariant; view: StudentWebinarView }) {
+  return hasJit(view) ? (
+    <JitPosterCard accessPreviewMode={accessPreviewMode} serverNow={serverNow} view={view} />
+  ) : (
+    <WebinarPosterCard accessPreviewMode={accessPreviewMode} serverNow={serverNow} variant={variant} view={view} />
+  );
+}
 
 function FeaturedWebinar({ accessPreviewMode, serverNow, view }: { accessPreviewMode?: AccessPreviewMode; serverNow: number; view: StudentWebinarView }) {
   const copy = WEBINAR_COPY.aluno;
@@ -105,13 +116,17 @@ export function WebinarsPageView({ accessPreviewMode, data }: { accessPreviewMod
         <div className="grid gap-12">
           {featured ? (
             <MemberSection id="proxima-live" title={copy.proximaLive}>
-              <FeaturedWebinar accessPreviewMode={accessPreviewMode} serverNow={serverNow} view={featured} />
+              {hasJit(featured) ? (
+                <JitFeaturedWebinar accessPreviewMode={accessPreviewMode} serverNow={serverNow} view={featured} />
+              ) : (
+                <FeaturedWebinar accessPreviewMode={accessPreviewMode} serverNow={serverNow} view={featured} />
+              )}
               {rest.length > 0 ? (
                 <div className="mt-8">
                   <h3 className="mb-4 text-sm font-semibold text-zinc-400">{copy.proximas}</h3>
                   <div className={memberPosterGridClassName}>
                     {rest.map((view) => (
-                      <WebinarPosterCard accessPreviewMode={accessPreviewMode} key={view.id} serverNow={serverNow} variant="upcoming" view={view} />
+                      <Card accessPreviewMode={accessPreviewMode} key={view.id} serverNow={serverNow} variant="upcoming" view={view} />
                     ))}
                   </div>
                 </div>
@@ -123,7 +138,7 @@ export function WebinarsPageView({ accessPreviewMode, data }: { accessPreviewMod
             <MemberSection count={lists.inProgress.length} id="em-andamento" title={copy.emAndamento}>
               <div className={memberPosterGridClassName}>
                 {lists.inProgress.map((view) => (
-                  <WebinarPosterCard accessPreviewMode={accessPreviewMode} key={view.id} serverNow={serverNow} variant="in_progress" view={view} />
+                  <Card accessPreviewMode={accessPreviewMode} key={view.id} serverNow={serverNow} variant="in_progress" view={view} />
                 ))}
               </div>
             </MemberSection>

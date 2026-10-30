@@ -61,6 +61,15 @@ export const saveWebinarDraft = fail; export const publishWebinar = fail; export
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail;`,
+  // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas (o painel
+  // fica no "carregando" do desenho do servidor).
+  "@/server/webinars/offer-actions": `${fail}
+export const loadOfferEditor = fail; export const saveOffer = fail; export const archiveOffer = fail; export const loadOfferConsole = fail; export const showOfferNow = fail; export const hideOffer = fail;`,
+  "@/server/webinars/assistant-actions": `${fail}
+export const loadAssistantEditor = fail; export const saveAssistant = fail; export const loadAttendanceSnapshot = fail; export const setReplyAll = fail; export const pingAttendant = fail; export const assign = fail; export const editAssistantAnswer = fail;`,
+  // Fase 4f: "Refazer tradução" no chat do console.
+  "@/server/webinars/translation-actions": `${fail}
+export const clearMessageTranslations = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
 };
@@ -339,6 +348,23 @@ test("sessao encerrada: so leitura (sem Soltar agora, Liberar nem Enviar habilit
   assert.doesNotMatch(empty, /Soltar agora|Enviar/);
 });
 
+test("fase 4c: o painel Atendimento entra no console (le pela propria acao) e a resposta do Assistente no chat tem o selo e Corrigir resposta", () => {
+  const ai = message({ authorUserId: null, body: "Custa R$ 997.", displayName: "Assistente", id: "m-ia", kind: "answer", promotable: false, replyToId: "m-ana", role: "ai", source: "ai" });
+  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, ai] }), webinar });
+  const text = textOf(markup);
+  assert.match(text, /Atendimento/);
+  assert.match(text, /Carregando o atendimento…/);
+  const block = markup.slice(markup.indexOf('data-console-message="m-ia"'), markup.indexOf("</li>", markup.indexOf('data-console-message="m-ia"')));
+  assert.match(block, /data-message-source="ai"/);
+  assert.match(textOf(block), /Assistente/);
+  assert.match(textOf(block), /Corrigir resposta/);
+  assert.match(textOf(block), /Apagar/, "apagar segue pela moderacao");
+  assert.equal(count(markup, />Corrigir resposta</g), 1, "so na resposta do Assistente");
+
+  const ended = textOf(render({ sessions, snapshot: snapshot({ messages: [ai], session: sessions[2] }), webinar }));
+  assert.doesNotMatch(ended, /Corrigir resposta/, "sessao encerrada: so leitura");
+});
+
 test("paginas e rota: a pagina do console com as guardas e a migracao pendente; a rota de 5 s so com messaging.write e sem cache; as acoes com a permissao de §2.6", () => {
   const page = stripComments(read("src/app/admin/(v2)/comunicacao/webinarios/[id]/sala/page.tsx"));
   assert.match(page, /requirePageArea\("comunicacao"\)/);
@@ -375,4 +401,29 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
     assert.match(script, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }
   assert.doesNotMatch(`${room}${script}`, /full_name|email:/, "nada de nome ou e-mail na auditoria");
+});
+
+test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minuto com a media e a curva dos ultimos 30 minutos; sem o painel, nada", async () => {
+  const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
+  const view = {
+    chat: { hot: [], perMinute: [{ minute: 3, students: 2, total: 4 }, { minute: 4, students: 1, total: 2 }], students: 3, top: [], total: 6 },
+    presence: { avgPresent: 5, curve: [{ b: 0, n: 2 }, { b: 6, n: 8 }, { b: 7, n: 9 }, { b: 9, n: 7 }], drops: [], peak: { b: 7, n: 9 }, reachedEnd: 0, unique: 9, watchAvgSeconds: 0, watchMaxSeconds: 0 }
+  };
+  const presence = consolePresenceOf(view, 4 * MIN + 30_000);
+  const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
+  const painel = markup.slice(markup.indexOf('id="console-presence-title"'));
+  const text = textOf(painel);
+  assert.match(text, />Presença Atualiza a cada minuto\. Só alunos; o roteiro e o Assistente não entram\. Presentes agora 7 Pico 9 em 03:00 Mensagens no último minuto 4 média de 1,2 por minuto nos últimos 30 min Últimos 30 minutos/);
+  assert.match(painel, /<svg[^>]*aria-label="Presentes nos últimos 30 minutos: 7 agora, no máximo 9\."[^>]*role="img"/);
+  assert.equal((painel.match(/<rect /g) ?? []).length, 5, "um minuto por barra, do 0 ao 4");
+  assert.match(painel, /<title>03:00 · 9 presentes<\/title>/);
+
+  assert.doesNotMatch(textOf(render({ sessions, snapshot: snapshot({ presence: null }), webinar })), /Mensagens no último minuto/);
+});
+
+test("Refazer tradução: cada mensagem do chat ganha o botao so com a traducao ligada no ambiente", () => {
+  const desligada = render({ sessions, snapshot: snapshot(), webinar });
+  assert.doesNotMatch(desligada, /data-console-retranslate=""/);
+  const ligada = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions, snapshot: snapshot(), webinar }, permissions: both, serverNow: NOW, translationEnabled: true }));
+  assert.match(ligada, /<button[^>]*aria-label="Refazer tradução: [^"]+"[^>]*data-console-retranslate=""/);
 });

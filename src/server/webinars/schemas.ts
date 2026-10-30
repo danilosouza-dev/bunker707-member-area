@@ -7,7 +7,7 @@ import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import { catalogIdSchema, expectedUpdatedAtSchema } from "../catalog/schemas";
 import { isAudienceGroup, type AudienceDefinition, type AudienceNode } from "../communications/audience-model";
-import { audienceDefinitionSchema } from "../communications/schemas";
+import { accessAudienceDefinitionSchema } from "../communications/schemas";
 import {
   ACCESS_MODES,
   CHAT_MODES,
@@ -136,7 +136,7 @@ const sessionInputSchema = z.object({
 export const webinarDraftObjectSchema = z.object({
   accessMode: z.enum(ACCESS_MODES, { error: "Escolha quem pode ver o webinário." }),
   allowStudentCamera: z.boolean(),
-  audience: audienceDefinitionSchema,
+  audience: accessAudienceDefinitionSchema,
   autoRecord: z.boolean(),
   capacity: z.number({ error: WEBINAR_MESSAGES.capacity }).int(WEBINAR_MESSAGES.capacity).min(1, WEBINAR_MESSAGES.capacity).max(WEBINAR_LIMITS.capacityMax, WEBINAR_MESSAGES.capacity).nullable(),
   chatRetentionDays: z.number().int().min(WEBINAR_LIMITS.retentionMin).max(WEBINAR_LIMITS.retentionMax).default(730),

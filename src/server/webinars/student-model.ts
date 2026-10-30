@@ -5,7 +5,13 @@
 //
 // Toda data mostrada ao aluno sai de src/lib/webinar-time.ts ou src/lib/member-format.ts; toda frase, de
 // src/lib/webinar-copy.ts.
+//
+// Fase 4e ("Comeca quando voce entra", docs/30 §1.2 e §1.6): as sessoes `jit` nunca aparecem uma a uma (nem na lista de
+// sessoes, nem como a sessao em destaque, nem na faixa "Comeca em 1 h"); o webinario com o just-in-time ligado vira um
+// card so, com a contagem ate o proximo horario (jitPageState), em Em andamento enquanto as sessoes correm e em Proxima
+// live fora do horario, nunca em Replays. Sem vaga: a sessao `jit` nunca pede a vaga, nem com limite de vagas.
 
+import { isJitSession, jitActive, jitPageState, type JitPageState } from "./jit-model";
 import type { LiveBanState, LiveRoomInfo } from "./live-model";
 import { formatMemberDuration } from "../../lib/member-format";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -22,6 +28,7 @@ import {
   webinarHref,
   type ChatMode,
   type DisplayNameMode,
+  type JitSettings,
   type SessionKind,
   type SessionStatus,
   type SimulatedPhase,
@@ -61,6 +68,20 @@ export type StudentSessionView = {
   whenLabel: string;
 };
 
+/**
+ * "Comeca quando voce entra" na pagina (fase 4e): as regras que o navegador usa para refazer a conta a cada 15 s e o
+ * que a pagina mostra na hora da leitura (jitPageState). Nunca a lista de sessoes `jit`.
+ */
+export type StudentJitView = {
+  /** A duracao do video (a gravacao, senao a prevista): o horario atual so aceita entrada antes do fim. */
+  durationMs: number;
+  endHour: number;
+  everyMinutes: JitSettings["everyMinutes"];
+  lateJoinMinutes: number | null;
+  startHour: number;
+  state: JitPageState;
+};
+
 export type StudentWebinarView = {
   cancelReason: string | null;
   cancelled: boolean;
@@ -73,9 +94,11 @@ export type StudentWebinarView = {
   endedAtMs: number | null;
   href: string;
   id: string;
+  /** Fase 4e: o "Comeca quando voce entra" ligado (so a Live gravada); nulo sem ele ou no webinario cancelado. */
+  jit: StudentJitView | null;
   kind: WebinarKind;
   kindLabel: string;
-  /** A situacao da sessao em destaque (a tabela de docs/30 §1.2). */
+  /** A situacao da sessao em destaque (a tabela de docs/30 §1.2); com o just-in-time e nada marcado, Agendado. */
   phase: StudentPhase;
   presenterName: string | null;
   /** A sessao em destaque: a proxima (ou a que esta acontecendo); sem nenhuma, a ultima que aconteceu. */
@@ -94,12 +117,16 @@ export type StudentWebinarView = {
 };
 
 export type StudentWebinarInput = {
+  /** Fase 4e: webinars.jit_settings (nulo ou desligado: o webinario como antes). */
+  jit?: JitSettings | null;
   now: number;
   presenterName: string | null;
   /** Vagas garantidas por sessao (id da sessao -> total), so das sessoes que precisam do numero. */
   registeredCounts: ReadonlyMap<string, number>;
   registrations: readonly WebinarRegistration[];
   sessions: readonly WebinarSession[];
+  /** A duracao do video da Live gravada (ms), quando a gravacao e conhecida; senao a prevista do webinario. */
+  videoDurationMs?: number | null;
   webinar: Webinar;
 };
 
@@ -134,22 +161,34 @@ export function registrationFor(registrations: readonly WebinarRegistration[], s
 
 /**
  * Se a sala desta sessao so abre para quem garantiu a vaga (A12): com o limite de vagas ligado, sim; o replay
- * nunca pede vaga (e de quem tem acesso).
+ * nunca pede vaga (e de quem tem acesso), nem a sessao do "Comeca quando voce entra" (so Entrar, docs/30 §1.2).
  */
-export function seatRequired(webinar: Pick<Webinar, "capacity" | "registrationRequired">, session: Pick<WebinarSession, "kind">): boolean {
-  return session.kind !== "replay" && webinar.registrationRequired && webinar.capacity != null;
+export function seatRequired(webinar: Pick<Webinar, "capacity" | "registrationRequired">, session: Pick<WebinarSession, "kind"> & { jit?: boolean | null }): boolean {
+  return session.kind !== "replay" && !isJitSession(session) && webinar.registrationRequired && webinar.capacity != null;
 }
 
-/** As sessoes que o aluno escolhe ou ve (sem a `replay`), na ordem das horas marcadas. */
+/** As sessoes que o aluno escolhe ou ve (sem a `replay` e sem as `jit`), na ordem das horas marcadas. */
 export function realSessions(sessions: readonly WebinarSession[]): WebinarSession[] {
-  return sessions.filter((session) => session.kind !== "replay").sort((a, b) => toTime(a.scheduledAt) - toTime(b.scheduledAt));
+  return sessions.filter((session) => session.kind !== "replay" && !isJitSession(session)).sort((a, b) => toTime(a.scheduledAt) - toTime(b.scheduledAt));
+}
+
+/** O "Comeca quando voce entra" da pagina (fase 4e): nulo sem ele, fora da Live gravada ou no webinario cancelado. */
+export function studentJitView(input: Pick<StudentWebinarInput, "jit" | "now" | "videoDurationMs" | "webinar">): StudentJitView | null {
+  const { jit, webinar } = input;
+  if (!jit || webinar.cancelledAt || !jitActive(webinar.kind, jit)) {
+    return null;
+  }
+  const durationMs = input.videoDurationMs && input.videoDurationMs > 0 ? input.videoDurationMs : Math.max(1, webinar.durationMinutes) * 60_000;
+  const settings = { endHour: jit.endHour, everyMinutes: jit.everyMinutes, lateJoinMinutes: jit.lateJoinMinutes, startHour: jit.startHour };
+  return { ...settings, durationMs, state: jitPageState({ durationMs, nowMs: input.now, settings }) };
 }
 
 export function buildStudentSession(input: StudentWebinarInput, session: WebinarSession): StudentSessionView {
   const { webinar } = input;
   const registration = registrationFor(input.registrations, session.id);
   const registeredCount = input.registeredCounts.get(session.id) ?? 0;
-  const showsCount = webinar.showRegisteredCount || (webinar.registrationRequired && webinar.capacity != null);
+  // A sessao `jit` nao tem vaga: nunca o "{n} alunos com vaga garantida".
+  const showsCount = !isJitSession(session) && (webinar.showRegisteredCount || (webinar.registrationRequired && webinar.capacity != null));
   const phase = studentPhase({
     cancelled: Boolean(webinar.cancelledAt),
     capacity: webinar.registrationRequired ? webinar.capacity : null,
@@ -211,11 +250,16 @@ export function buildStudentWebinarView(input: StudentWebinarInput): StudentWebi
   const { now, webinar } = input;
   const sessions = realSessions(input.sessions);
   const next = nextSession(sessions, webinar.durationMinutes, now);
-  const primarySession = next ?? sessions[sessions.length - 1] ?? null;
+  const jit = studentJitView(input);
+  // Com o just-in-time ligado, uma hora marcada que ja passou nunca vira o destaque (a pagina mostraria a data antiga,
+  // "Agendado" e a contagem para tras ao lado do Entrar): sem marcada por vir, nenhum destaque, e manda o jit.
+  const primarySession = next ?? (jit ? null : (sessions[sessions.length - 1] ?? null));
   const views = sessions.map((session) => buildStudentSession(input, session));
   const primary = primarySession ? (views.find((view) => view.id === primarySession.id) ?? null) : null;
   const cancelled = Boolean(webinar.cancelledAt);
-  const phase: StudentPhase = cancelled ? "cancelled" : (primary?.phase ?? "ended");
+  const sessionsPhase: StudentPhase = primary?.phase ?? "ended";
+  // Com o just-in-time ligado o webinario nunca acaba sozinho: sem sessao marcada por vir, ele fica Agendado.
+  const phase: StudentPhase = cancelled ? "cancelled" : jit && sessionsPhase === "ended" ? "scheduled" : sessionsPhase;
 
   return {
     cancelReason: webinar.cancelReason,
@@ -225,9 +269,10 @@ export function buildStudentWebinarView(input: StudentWebinarInput): StudentWebi
     description: webinar.description,
     durationLabel: formatMemberDuration(webinar.durationMinutes * 60),
     durationMinutes: webinar.durationMinutes,
-    endedAtMs: cancelled ? null : endedAtOf(webinar, sessions, now),
+    endedAtMs: cancelled || jit ? null : endedAtOf(webinar, sessions, now),
     href: webinarHref(webinar.slug),
     id: webinar.id,
+    jit,
     kind: webinar.kind,
     kindLabel: KIND_LABELS[webinar.kind],
     phase,
@@ -249,20 +294,45 @@ export function buildStudentWebinarView(input: StudentWebinarInput): StudentWebi
 const UPCOMING_PHASES: readonly StudentPhase[] = ["scheduled", "registered", "sold_out"];
 const IN_PROGRESS_PHASES: readonly StudentPhase[] = ["waiting", "live"];
 
-function byPrimaryTime(a: StudentWebinarView, b: StudentWebinarView) {
-  return toTime(a.primary?.scheduledAt ?? 0) - toTime(b.primary?.scheduledAt ?? 0);
+/** A hora que ordena os cards: a sessao em destaque; no just-in-time sem sessao marcada, o horario que a pagina mostra. */
+function viewTime(view: StudentWebinarView): number {
+  if (view.primary) {
+    return toTime(view.primary.scheduledAt);
+  }
+  const state = view.jit?.state;
+  const iso = state ? (state.kind === "closed" ? state.nextIso : state.slotIso) : null;
+  return iso ? toTime(iso) : 0;
 }
 
-/** Os tres blocos de /webinarios (docs/30 §1.1): Proxima live, Em andamento e Replays. Cancelados ficam fora. */
+function byPrimaryTime(a: StudentWebinarView, b: StudentWebinarView) {
+  return viewTime(a) - viewTime(b);
+}
+
+/** Em que bloco o card entra: a sessao em destaque decide; o just-in-time correndo agora e Em andamento. */
+function blockOf(view: StudentWebinarView): keyof StudentWebinarLists | null {
+  if (IN_PROGRESS_PHASES.includes(view.phase)) {
+    return "inProgress";
+  }
+  if (view.jit) {
+    return view.jit.state.kind === "closed" ? "upcoming" : "inProgress";
+  }
+  if (UPCOMING_PHASES.includes(view.phase)) {
+    return "upcoming";
+  }
+  return view.phase === "ended" && view.replayAvailable ? "replays" : null;
+}
+
+/**
+ * Os tres blocos de /webinarios (docs/30 §1.1): Proxima live, Em andamento e Replays. Cancelados ficam fora. O
+ * webinario com o just-in-time e um card so: Em andamento enquanto as sessoes correm, Proxima live fora do horario.
+ */
 export function groupStudentWebinars(views: readonly StudentWebinarView[]): StudentWebinarLists {
   const visible = views.filter((view) => !view.cancelled);
 
   return {
-    inProgress: visible.filter((view) => IN_PROGRESS_PHASES.includes(view.phase)).sort(byPrimaryTime),
-    replays: visible
-      .filter((view) => view.phase === "ended" && view.replayAvailable)
-      .sort((a, b) => (b.endedAtMs ?? 0) - (a.endedAtMs ?? 0)),
-    upcoming: visible.filter((view) => UPCOMING_PHASES.includes(view.phase)).sort(byPrimaryTime)
+    inProgress: visible.filter((view) => blockOf(view) === "inProgress").sort(byPrimaryTime),
+    replays: visible.filter((view) => blockOf(view) === "replays").sort((a, b) => (b.endedAtMs ?? 0) - (a.endedAtMs ?? 0)),
+    upcoming: visible.filter((view) => blockOf(view) === "upcoming").sort(byPrimaryTime)
   };
 }
 

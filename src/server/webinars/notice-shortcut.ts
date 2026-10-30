@@ -9,6 +9,7 @@ import type { AudienceDefinition } from "@/server/communications/audience-model"
 import type { CampaignKind } from "@/server/communications/campaign-model";
 import type { NoticeStart } from "@/server/communications/template-model";
 import { webinarsDb, type WebinarsDb } from "./db";
+import { isJitSession } from "./jit-model";
 import { webinarSituation } from "./model";
 import { webinarNoticeStart } from "./notice-shortcut-model";
 import { sessionFromRow, webinarFromRow } from "./rows";
@@ -35,7 +36,9 @@ export async function prepareWebinarNoticeStart(webinarId: string, kind: Campaig
   }
 
   const webinar = webinarFromRow(row);
-  const sessions = (await listSessionRows(db, [row.id])).map(sessionFromRow);
+  // Sem as sessoes do "Comeca quando voce entra" (uma por aluno, o dia todo), como o editor (getWebinarEditorData) e a
+  // lista: a situacao e a proxima live batem com o card Avisar que abriu este atalho.
+  const sessions = (await listSessionRows(db, [row.id])).filter((sessionRow) => !isJitSession(sessionRow)).map(sessionFromRow);
   const built = webinarNoticeStart({ ...webinar, sessions, situation: webinarSituation(webinar, sessions, now) }, kind, now);
 
   // As regras do segmento ganham nome nas opcoes do editor (loadNoticeEditorOptions({ audiences })).

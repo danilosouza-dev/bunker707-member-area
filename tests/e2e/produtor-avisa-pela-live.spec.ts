@@ -6,7 +6,9 @@ import { expect, segmentoDoAviso, test, zerarComunicacao } from "./fixtures";
 // tem o produto" (o curso da escola), o card Avisar leva o Aviso no sino a /admin/comunicacao/avisos/novo?webinario=
 // &tipo=notificacao e o Pop-up ao mesmo endereco com tipo=popup. O editor do aviso abre com a nota de inicio, o titulo
 // "Live: {nome}", o texto com a data, o botao "Ver a live" para a pagina do webinario e o "Para quem" com a regra do
-// produto; nada e gravado ate "Salvar rascunho", que grava o aviso com o segmento traduzido.
+// produto; nada e gravado ate "Salvar rascunho", que grava o aviso com o segmento traduzido. O "Avisar quem não veio" do
+// relatorio (docs/30 §3.4) usa o mesmo endereco com &seguimento=registered,nao-attended: o aviso abre em branco com as
+// duas regras "Participação em lives" da live no "Para quem" e a nota de onde veio, sem gravar nada.
 
 const { id, slug, titulo } = WEBINARIO_DE_TESTE;
 const TITULO_DO_AVISO = `Live: ${titulo}`;
@@ -83,4 +85,25 @@ test("Avisar › Aviso no sino abre o aviso preenchido (titulo, texto, botao e P
     expect(aviso.cta_label).toBe("Ver a live");
     expect(await segmentoDoAviso(TITULO_DO_AVISO)).toMatchObject({ kind: "rules", root: { items: [{ op: "has", productIds: [ESCOLA_DE_TESTE.curso.id], type: "product" }] } });
   });
+});
+
+test("Avisar quem não veio: o mesmo endereco com &seguimento= abre o aviso em branco com as regras da live e nada e gravado", async ({ page }) => {
+  const db = createLocalAdminClient();
+  const avisos = async () => (unwrap(await db.from("campaigns").select("id").is("flow_id", null).is("deleted_at", null), "Contando os avisos") as { id: string }[]).length;
+  const antes = await avisos();
+
+  await page.goto(`/admin/comunicacao/avisos/novo?webinario=${id}&tipo=notificacao&seguimento=registered,nao-attended`);
+  await expect(page.getByText("O “Para quem” já vem com as regras da live inteira: quem garantiu vaga em qualquer horário e não entrou em nenhum. Confira e escreva o aviso: nada foi salvo ainda.", { exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("radiogroup", { exact: true, name: "Para quem" }).getByRole("radio", { name: "Escolher por regras" })).toBeChecked();
+  const acoes = page.getByRole("combobox", { exact: true, name: "O que o aluno fez na live" });
+  await expect(acoes).toHaveCount(2);
+  await expect(acoes.nth(0)).toContainText("Garantiu vaga");
+  await expect(acoes.nth(1)).toContainText("Não participou");
+  const lives = page.getByRole("combobox", { exact: true, name: "Live" });
+  await expect(lives.nth(0)).toContainText(titulo);
+  await expect(lives.nth(1)).toContainText(titulo);
+  expect(await avisos()).toBe(antes);
 });

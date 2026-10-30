@@ -220,6 +220,11 @@ export type WebinarSession = {
   roomLocked: boolean;
   /** Fase 3 (202610290003): a reserva Gravar no navegador ligada desde esta hora (o selo Gravando do aluno). */
   browserRecordingAt: string | null;
+  /**
+   * Fase 4e (202610300005): a sessao "Comeca quando voce entra" que nasceu no horario em que o primeiro aluno chegou
+   * (sempre `simulated`). O editor, os lembretes e a lista de sessoes marcadas nunca mexem nela.
+   */
+  jit: boolean;
   /** Fase 3: o nome da sala do Jitsi proprio (`w-<webinario>-<16>`); so no servidor, nunca vai para o aluno. */
   roomName: string | null;
   scheduledAt: string;
@@ -768,3 +773,471 @@ export type RecordingTranscript = {
 /** A fase da sessao gravada pelo relogio do servidor (docs/30 §1.6, §6.6). */
 export const SIMULATED_PHASES = ["waiting", "live", "ended"] as const;
 export type SimulatedPhase = (typeof SIMULATED_PHASES)[number];
+
+/* ------------------------------------------------------------------------------------------------
+ * Fase 4: paineis e Hot Webinar (docs/30 §1.6, §2.2, §2.4, §3, §4.2, §4.3, §6.6 e §11; migracoes 202610300002 a
+ * 202610300006). So listas, limites e tipos que mais de uma frente usa; as contas ficam nos modulos de cada frente
+ * (panel-model.ts, offer-model.ts, simulation-model.ts, assistant-model.ts, jit-model.ts, translation-model.ts).
+ * As listas batem com os checks das migracoes (as guardas tests/webinarios-v4*.guard.test.mjs conferem).
+ * ---------------------------------------------------------------------------------------------- */
+
+/* 4a: os paineis "Lives ao vivo" e "Lives gravadas" e as exportacoes (docs/30 §3.1 a §3.7). */
+
+/** O tipo de sessao de webinar_panel(p_kind, ...): 'all' soma as duas (a lista do admin). */
+export const PANEL_KINDS = ["live", "simulated", "all"] as const;
+export type PanelKind = (typeof PANEL_KINDS)[number];
+
+/** As metricas por sessao de webinar_panel (202610300002 e, com a oferta e a Simulacao, 202610300003). */
+export const PANEL_SESSION_METRICS = [
+  "duration",
+  "registered",
+  "present",
+  "attended_registered",
+  "watch_sum",
+  "watch_max",
+  "reached_end",
+  "peak",
+  "messages",
+  "question",
+  "reactions",
+  "poll_answers",
+  "replay_viewers",
+  "visitors",
+  "retention",
+  "offer_seen",
+  "offer_clicks",
+  "offer_purchases",
+  "offer_variant",
+  "offer_revenue",
+  "sim_counter",
+  "sim_joins",
+  "sim_sales",
+  "sim_script"
+] as const;
+export type PanelSessionMetric = (typeof PANEL_SESSION_METRICS)[number];
+
+/** As metricas do periodo (session_id nulo): o mesmo aluno em duas sessoes conta uma vez. */
+export const PANEL_PERIOD_METRICS = [
+  "unique_present",
+  "unique_registered",
+  "unique_attended_registered",
+  "unique_reached_end",
+  "unique_replay_viewers",
+  "unique_visitors",
+  "unique_commenters",
+  "unique_offer_seen",
+  "unique_clickers",
+  "unique_buyers"
+] as const;
+export type PanelPeriodMetric = (typeof PANEL_PERIOD_METRICS)[number];
+
+/** Os nomes do bloco Simulacao (D6, M6): so aparecem no bloco e no CSV Simulacao, nunca num numero real. */
+export const SIMULATION_METRICS = ["sim_counter", "sim_joins", "sim_sales", "sim_script"] as const;
+
+/** Uma linha de webinar_panel (bigint pode vir como texto do PostgREST: readPanelRows em rows.ts converte). */
+export type PanelRow = { item: string; metric: string; sessionId: string | null; students: number; total: number };
+
+/** Os 21 pontos da retencao media (0 a 100 % da duracao, de 5 em 5; docs/30 §3.2). */
+export const PANEL_RETENTION_POINTS = Array.from({ length: 21 }, (_, index) => index * 5);
+
+/** Os relatorios do botao Exportar (nomes do Zoom, docs/30 §3.7) e o extra da Simulacao, nesta ordem no menu. */
+export const WEBINAR_EXPORT_REPORTS = ["registration", "attendee", "performance", "qa", "poll", "survey", "simulacao"] as const;
+export type WebinarExportReport = (typeof WEBINAR_EXPORT_REPORTS)[number];
+
+/** O nome de cada relatorio no menu e no arquivo (o do Zoom; "Simulacao" sem acento no arquivo). */
+export const WEBINAR_EXPORT_FILE_PARTS: Record<WebinarExportReport, string> = {
+  attendee: "attendee",
+  performance: "performance",
+  poll: "poll",
+  qa: "qa",
+  registration: "registration",
+  simulacao: "simulacao",
+  survey: "survey"
+};
+
+/** Os limites das exportacoes (docs/30 §3.7, M9: sem cache; o CSV inteiro numa resposta). */
+export const WEBINAR_EXPORT_LIMITS = { rowsMax: 50_000, sessionsPerPanelExport: 500 } as const;
+
+/**
+ * O nome do arquivo (docs/30 §3.7): `webinario-{slug}-{sessao}-{relatorio}.csv`. `sessionKey` e a sessao em texto
+ * curto (a data e a hora de Sao Paulo, "2026-11-05-2000") ou o periodo do painel ("periodo-2026-11-01-a-2026-11-30").
+ * So letras minusculas, numeros e hifens: nada do titulo vaza para o nome alem do slug.
+ */
+export function webinarExportFileName(input: { report: WebinarExportReport; sessionKey: string; slug: string }) {
+  const clean = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+  const parts = ["webinario", clean(input.slug) || "live", clean(input.sessionKey) || "sessao", WEBINAR_EXPORT_FILE_PARTS[input.report]];
+  return `${parts.join("-")}.csv`;
+}
+
+/* 4b: a Oferta A/B/C/D, a conversao e a receita (docs/30 §1.6, §2.2, §2.4, §3.3, §4.2, §5.1, M7 e M8). */
+
+export const OFFER_VARIANT_LABELS = ["A", "B", "C", "D"] as const;
+export type OfferVariantLabel = (typeof OFFER_VARIANT_LABELS)[number];
+
+/** "Quando aparece": num minuto do video / pelo botao da equipe / nunca. */
+export const OFFER_TRIGGERS = ["at_offset", "manual", "never"] as const;
+export type OfferTrigger = (typeof OFFER_TRIGGERS)[number];
+
+export const OFFER_STATUSES = ["draft", "active", "archived"] as const;
+export type OfferStatus = (typeof OFFER_STATUSES)[number];
+
+/** Os limites da Oferta (os checks da 202610300003). */
+export const OFFER_LIMITS = {
+  title: 120,
+  headline: 120,
+  badge: 40,
+  priceLabel: 40,
+  coupon: 40,
+  url: 2048,
+  urlMin: 12,
+  weightMin: 1,
+  weightMax: 100,
+  visibleMinutesMax: 600,
+  deadlineMinutesMax: 1440,
+  attributionDaysMin: 1,
+  attributionDaysMax: 30,
+  /** M7: a compra conta para o clique em ate 7 dias (padrao; a equipe pode mudar de 1 a 30). */
+  attributionDaysDefault: 7,
+  /** O click_token: 16 a 64 caracteres [A-Za-z0-9_-] (base64url de 18 bytes = 24 caracteres). */
+  clickTokenBytes: 18,
+  /** O parametro do token no link do checkout (docs/30 §5.1). */
+  clickTokenParam: "b7",
+  /** Um clique por aluno, oferta e sessao a cada 10 s (o mesmo link sai de novo sem gravar outro clique). */
+  clickRepeatSeconds: 10,
+  /** Quantas vendas o job do tick liga por volta (webinar_offer_conversions). */
+  conversionsPerRun: 500
+} as const;
+
+export type OfferVariant = {
+  badge: string | null;
+  checkoutUrl: string;
+  coupon: string | null;
+  enabled: boolean;
+  headline: string;
+  id: string;
+  imageUrl: string | null;
+  label: OfferVariantLabel;
+  offerId: string;
+  priceFromLabel: string | null;
+  priceLabel: string | null;
+  weight: number;
+};
+
+export type WebinarOffer = {
+  attributionDays: number;
+  createdAt: string;
+  createdBy: string | null;
+  /** O prazo real: minutos depois de aparecer em cada sessao; nulo = sem prazo na tela (docs/30 §8.6). */
+  deadlineMinutes: number | null;
+  id: string;
+  /** O produto da escola que a venda libera (entitlements.target_id / sale_grants.product_id). */
+  productId: string;
+  /** "Num minuto do video": o offset em ms; nulo nos outros. */
+  showAtOffsetMs: number | null;
+  status: OfferStatus;
+  title: string;
+  triggerKind: OfferTrigger;
+  updatedAt: string;
+  variants: OfferVariant[];
+  /** "Some em": minutos depois de aparecer; nulo = ate o fim. */
+  visibleMinutes: number | null;
+  webinarId: string;
+};
+
+export type OfferVariantDraft = Omit<OfferVariant, "id" | "offerId"> & { id?: string | null };
+
+/** O que o card Oferta do editor grava (saveOffer). */
+export type OfferDraft = {
+  attributionDays: number;
+  deadlineMinutes: number | null;
+  productId: string;
+  showAtOffsetMs: number | null;
+  status: OfferStatus;
+  title: string;
+  triggerKind: OfferTrigger;
+  variants: OfferVariantDraft[];
+  visibleMinutes: number | null;
+};
+
+/** A foto do que a sessao mostrou (docs/30 §8.6), guardada em webinar_offer_displays.snapshot. */
+export type OfferDisplaySnapshot = {
+  capturedAt: string;
+  deadlineAt: string | null;
+  variants: { badge: string | null; coupon: string | null; headline: string; label: OfferVariantLabel; priceFromLabel: string | null; priceLabel: string | null }[];
+};
+
+export type OfferDisplay = {
+  deadlineAt: string | null;
+  hiddenAt: string | null;
+  hiddenBy: string | null;
+  hideOffsetMs: number | null;
+  id: string;
+  offerId: string;
+  sessionId: string;
+  showOffsetMs: number;
+  shownAt: string;
+  shownBy: string | null;
+  snapshot: OfferDisplaySnapshot | null;
+};
+
+export type OfferClick = {
+  clickToken: string;
+  clickedAt: string;
+  convertedAt: string | null;
+  convertedSaleGrantId: string | null;
+  id: string;
+  offerId: string;
+  offsetMs: number;
+  sessionId: string;
+  userId: string;
+  variantId: string | null;
+  variantLabel: OfferVariantLabel;
+};
+
+/**
+ * O card da Oferta para o aluno (GET /api/webinars/[id]/offer): a variante dele, sem o link do checkout (sai so no
+ * POST .../offer-click, com o token) e sem os pesos. `showAtMs` / `hideAtMs` no relogio do video da sessao.
+ */
+export type StudentOfferView = {
+  badge: string | null;
+  coupon: string | null;
+  deadlineAt: string | null;
+  headline: string;
+  hideAtMs: number | null;
+  imageUrl: string | null;
+  offerId: string;
+  priceFromLabel: string | null;
+  priceLabel: string | null;
+  showAtMs: number | null;
+  variant: OfferVariantLabel;
+  /** Pelo botao da equipe: true enquanto a equipe mostra; nos outros, pela janela. */
+  visible: boolean;
+};
+
+/* 4b: a Simulacao completa (docs/30 §1.6, §2.2, §3.5, §4.3, §6.6, §8.6, D6, D10 e D25). */
+
+export const SIMULATED_COUNT_MODES = ["off", "fixed", "curve"] as const;
+export type SimulatedCountMode = (typeof SIMULATED_COUNT_MODES)[number];
+
+/** Contador de plateia (`simulated_count_rule`): real / real + base / real + de base a peak com jitter. */
+export type SimulatedCountRule = { base: number; jitter: number; mode: SimulatedCountMode; peak: number };
+
+/** Entradas e saidas (`simulated_joins`): "Ana M. entrou" a cada `everySeconds`, ate `max`, so nomes genericos. */
+export type SimulatedJoins = { enabled: boolean; everySeconds: number; max: number; names: "generic" };
+
+export type SimulatedSaleNotice = { offsetMs: number; text: string };
+
+/** Avisos de venda (`simulated_sale_notices`): o texto e o minuto de cada um, cadastrados pela equipe. */
+export type SimulatedSaleNotices = { enabled: boolean; items: SimulatedSaleNotice[] };
+
+/** O que o fim da sessao congela em `simulation_summary` (so o bloco Simulacao le). */
+export type SimulationTotals = { counterMax: number; joinsShown: number; saleNoticesShown: number };
+
+/** As colunas de Simulacao da fase 4 numa sessao (lidas so pelo codigo da Simulacao, nunca por uma metrica real). */
+export type SessionSimulation = {
+  countRule: SimulatedCountRule;
+  joins: SimulatedJoins;
+  saleNotices: SimulatedSaleNotices;
+  /** A semente do contador e das entradas (so no servidor; nunca vai para o aluno). */
+  seed: number;
+  sessionId: string;
+  summary: SimulationTotals | null;
+};
+
+/** Os limites da Simulacao (zod no salvar e no ler; os checks de tamanho da 202610300003). */
+export const SIMULATION_LIMITS = {
+  countMax: 100_000,
+  jitterMax: 5_000,
+  joinsEverySecondsMin: 10,
+  joinsEverySecondsMax: 3_600,
+  joinsMax: 1_000,
+  saleNoticesMax: 50,
+  saleNoticeText: 140,
+  /** A janela que GET /api/webinars/[id]/simulation devolve de cada vez (como o chat, docs/30 §6.6). */
+  feedWindowSeconds: 120,
+  /** O passo do contador na janela: um ponto a cada 15 s (o mesmo ritmo do sinal de presenca). */
+  counterStepSeconds: 15
+} as const;
+
+export function defaultSimulatedCountRule(): SimulatedCountRule {
+  return { base: 0, jitter: 0, mode: "off", peak: 0 };
+}
+
+export function defaultSimulatedJoins(): SimulatedJoins {
+  return { enabled: false, everySeconds: 60, max: 30, names: "generic" };
+}
+
+export function defaultSimulatedSaleNotices(): SimulatedSaleNotices {
+  return { enabled: false, items: [] };
+}
+
+/**
+ * A janela da Simulacao para o aluno (GET /api/webinars/[id]/simulation?sessao=&from=&to=): o contador (so a parte
+ * simulada: a tela soma ao real), as entradas e os avisos de venda que caem em [from, to] do relogio do video. Tudo
+ * calculado no servidor com a semente; `enabled: false` (sem nada ligado, sessao `live` ou replay) devolve listas vazias.
+ */
+export type SimulationFeed = {
+  counter: { atMs: number; extra: number }[];
+  enabled: boolean;
+  from: number;
+  joins: { atMs: number; name: string }[];
+  saleNotices: { atMs: number; text: string }[];
+  to: number;
+};
+
+/*
+ * 4b: o follow-up das lives (docs/30 §1.6 "Follow-up por segmento", §4.7): uma linha de webinar_follow_up_facts (nunca
+ * le a Simulacao). As acoes que a Comunicacao pergunta sobre ela sao da regra "Participação em lives"
+ * (WEBINAR_FOLLOW_UP_ACTIONS em src/server/communications/audience-model.ts).
+ */
+export type WebinarFollowUpFacts = {
+  attended: boolean;
+  clicked: boolean;
+  leftBeforeOffer: boolean;
+  offerSeen: boolean;
+  purchased: boolean;
+  registered: boolean;
+  userId: string;
+  watchedReplay: boolean;
+  webinarId: string;
+};
+
+/* 4c: o Assistente de IA, os atendentes e o modo hibrido (docs/30 §1.6, §2.4, §3.4, §6.6 e D24). */
+
+export const ASSISTANT_TARGETS = ["chat", "question"] as const;
+export type AssistantTarget = (typeof ASSISTANT_TARGETS)[number];
+
+export const ASSISTANT_REQUEST_STATUSES = ["pending", "answered", "skipped", "failed"] as const;
+export type AssistantRequestStatus = (typeof ASSISTANT_REQUEST_STATUSES)[number];
+
+/** Por que o Assistente nao respondeu (webinar_ai_requests.skip_reason). */
+export const ASSISTANT_SKIP_REASONS = ["disabled", "not_called", "claimed", "handoff", "rate_limited", "unconfigured", "timeout", "empty"] as const;
+export type AssistantSkipReason = (typeof ASSISTANT_SKIP_REASONS)[number];
+
+export const ATTENDANT_STATUSES = ["online", "away"] as const;
+export type AttendantStatus = (typeof ATTENDANT_STATUSES)[number];
+
+/** De quem e a resposta de uma pergunta (webinar_questions.answer_source). */
+export const ANSWER_SOURCES = ["team", "ai"] as const;
+export type AnswerSource = (typeof ANSWER_SOURCES)[number];
+
+export const ASSISTANT_LIMITS = {
+  knowledgeMax: 100,
+  question: 300,
+  questionMin: 2,
+  answer: 2000,
+  /** O aluno chama o Assistente no chat escrevendo isto (sem diferenciar maiusculas). */
+  mention: "@assistente",
+  /** Limite por aluno e por minuto (pedidos ao Assistente) e o teto da sessao. */
+  perStudentPerMinute: 2,
+  perSessionPerMinute: 30,
+  /** O teto de tempo de cada resposta (after() do Next 16, docs/30 §6.6). */
+  timeoutMs: 20_000,
+  /** As cues da transcricao em volta do offset atual que entram no contexto (antes e depois, em segundos). */
+  contextBeforeSeconds: 180,
+  contextAfterSeconds: 30,
+  /** O texto de contexto inteiro (cues + perguntas e respostas cadastradas). */
+  contextMaxCharacters: 12_000,
+  /** O atendente sem batida ha mais que isto sai da distribuicao. */
+  attendantOnlineSeconds: 90
+} as const;
+
+/** webinars.assistant_settings (zod no salvar e no ler). Sem o ambiente (WEBINAR_ASSISTANT_ENABLED), nada liga. */
+export type AssistantSettings = { enabled: boolean; replyAllDefault: boolean };
+
+export function defaultAssistantSettings(): AssistantSettings {
+  return { enabled: false, replyAllDefault: false };
+}
+
+export type AssistantKnowledgeItem = { answer: string; createdAt: string; id: string; position: number; question: string; updatedAt: string; webinarId: string };
+
+export type AssistantKnowledgeDraft = { answer: string; id?: string | null; question: string };
+
+export type AssistantRequest = {
+  answeredAt: string | null;
+  errorCode: string | null;
+  id: string;
+  model: string | null;
+  provider: string | null;
+  replyMessageId: string | null;
+  requestedAt: string;
+  sessionId: string;
+  skipReason: AssistantSkipReason | null;
+  status: AssistantRequestStatus;
+  targetId: string;
+  targetKind: AssistantTarget;
+  userId: string;
+  webinarId: string;
+};
+
+export type Attendant = { lastSeenAt: string; sessionId: string; status: AttendantStatus; userId: string };
+
+/** O que a pergunta (ou a pergunta do chat) ganhou na 202610300004: quem assumiu e o "Falar com a equipe". */
+export type AttendanceMarks = { answerSource: AnswerSource | null; assignedAt: string | null; assignedTo: string | null; handoffRequestedAt: string | null };
+
+/* 4e: "Comeca quando voce entra" (docs/30 §1.2, §1.6, §2.2, A14 e D25). */
+
+/** "A cada 15 / 30 / 60 min": o horario de cada sessao e a janela da turma (A14). */
+export const JIT_EVERY_MINUTES = [15, 30, 60] as const;
+export type JitEveryMinutes = (typeof JIT_EVERY_MINUTES)[number];
+
+/** Num modulo folha: o relogio do aluno (jit-clock.ts) roda no navegador sem trazer este arquivo. */
+export { JIT_LIMITS } from "./jit-limits";
+
+/** A Simulacao que cada sessao `jit` copia ao nascer (a mesma decisao registrada do card Simulacao, D10). */
+export type JitSimulationTemplate = {
+  ackText: string | null;
+  countRule: SimulatedCountRule;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  joins: SimulatedJoins;
+  saleNotices: SimulatedSaleNotices;
+  showLiveBadge: boolean;
+};
+
+/** webinars.jit_settings (zod no salvar e no ler). */
+export type JitSettings = {
+  enabled: boolean;
+  /** Fim da janela (hora de Sao Paulo, exclusivo). */
+  endHour: number;
+  everyMinutes: JitEveryMinutes;
+  /** "Entrada atrasada" da sessao que nasce; nulo = ate o fim. */
+  lateJoinMinutes: number | null;
+  simulation: JitSimulationTemplate | null;
+  /** Inicio da janela (hora de Sao Paulo, inclusive). */
+  startHour: number;
+};
+
+export function defaultJitSettings(): JitSettings {
+  return { enabled: false, endHour: 23, everyMinutes: 15, lateJoinMinutes: null, simulation: null, startHour: 8 };
+}
+
+/* 4f: a traducao do chat e do roteiro (docs/30 §1.6). */
+
+export const CHAT_LANGUAGES = ["pt", "en", "es"] as const;
+export type ChatLanguage = (typeof CHAT_LANGUAGES)[number];
+
+/** O idioma de origem detectado ("other" quando nao e nenhum dos tres: a mensagem aparece como foi escrita). */
+export const SOURCE_LANGUAGES = ["pt", "en", "es", "other"] as const;
+export type SourceLanguage = (typeof SOURCE_LANGUAGES)[number];
+
+export const TRANSLATION_LIMITS = {
+  body: 2000,
+  provider: 40,
+  /** Quantas mensagens a sala pede de uma vez em GET /api/webinars/[id]/translations. */
+  idsPerRequest: 100,
+  /** Quantos textos novos uma resposta manda traduzir depois (after()), e o teto de tempo de cada lote. */
+  translateBatch: 20,
+  timeoutMs: 15_000
+} as const;
+
+export type ViewerPrefs = { chatLanguage: ChatLanguage | null; userId: string };
+
+export type TextTranslation = { body: string; createdAt: string; language: ChatLanguage; provider: string; sourceHash: string; sourceLanguage: SourceLanguage | null };

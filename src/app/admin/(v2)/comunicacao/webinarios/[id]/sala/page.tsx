@@ -11,6 +11,7 @@ import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { getSessionConsoleData } from "@/server/webinars/console-queries";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_SESSION_PARAM, webinarAdminHref } from "@/server/webinars/editor-model";
+import { webinarTranslationEnabled } from "@/server/webinars/v4-env";
 
 // Abrir, encerrar, soltar o roteiro e as acoes da sala ao vivo rodam Server Actions desta rota.
 export const maxDuration = 60;
@@ -71,6 +72,7 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
       nonce={requestHeaders.get("x-nonce")}
       permissions={{ canPublish: can(access, "messaging.publish"), canWrite: true }}
       serverNow={now.getTime()}
+      translationEnabled={webinarTranslationEnabled()}
     />
   );
 }

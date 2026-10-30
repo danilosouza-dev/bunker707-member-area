@@ -4,11 +4,17 @@
 // le o webinario salvo no servidor e monta o rascunho com webinarNoticeStart; nada e gravado ate "Salvar rascunho"
 // ou "Publicar".
 //
-// Aqui ficam as pecas puras: o endereco do atalho, o "Quem pode" do webinario traduzido para o segmento da
+// O mesmo endereco serve o "Avisar quem não veio" do relatorio (docs/30 §3.4): com &seguimento=<acoes>
+// (registered,nao-attended), o aviso comeca em branco com as regras "Participação em lives" da live no "Para quem"
+// (todas valendo), sem ler o webinario. Um endereco (webinarNoticeHref) e um parse (webinarNoticeRequestOf) para os
+// dois botoes.
+//
+// Aqui ficam as pecas puras: o endereco, o parse, o "Quem pode" do webinario traduzido para o segmento da
 // Comunicacao (dentro de AUDIENCE_LIMITS: um grupo dentro do principal e ate 20 regras), os motivos para o atalho
 // ficar desligado e o rascunho do aviso. Modulo puro (sem React, sem "server-only", imports relativos):
 // tests/webinarios-avisar.test.mjs carrega direto pelo Node. Nunca importa editor-model.ts (que importa daqui).
 
+import { SEGUIMENTO_COPY } from "../../lib/webinar-copy-v4/seguimento";
 import { formatWebinarWhen } from "../../lib/webinar-time";
 import {
   AUDIENCE_LIMITS,
@@ -17,15 +23,17 @@ import {
   countAudienceRules,
   isAudienceGroup,
   normalizeAudience,
+  WEBINAR_RULE_ACTIONS,
   type AudienceDefinition,
   type AudienceGroup,
   type AudienceNode,
-  type AudienceRule
+  type AudienceRule,
+  type WebinarRuleAction
 } from "../communications/audience-model";
 import { NOTICE_LIMITS, type CampaignKind } from "../communications/campaign-model";
 import { defaultPopupSettings } from "../communications/popup-display-model";
 import { emptyNoticeDraft, type NoticeDraft } from "../communications/schemas";
-import type { NoticeStart } from "../communications/template-model";
+import { emptyTemplateStart, type NoticeStart } from "../communications/template-model";
 import { nextSession, sessionEndsAt, toTime, webinarHref, type AccessMode, type WebinarSession, type WebinarSituation, type WebinarStatus } from "./model";
 
 /* ------------------------------------------------------------------------------------------------
@@ -65,20 +73,111 @@ export const WEBINAR_NOTICE_COPY = {
 } as const;
 
 /* ------------------------------------------------------------------------------------------------
- * Endereco do atalho
+ * Endereco: o card Avisar e o "Avisar quem não veio" (um endereco, um parse)
  * ---------------------------------------------------------------------------------------------- */
 
 /** O "Novo aviso" da Comunicacao (o mesmo NEW_NOTICE_HREF de notices-view-model.ts; o teste confere os dois). */
 export const WEBINAR_NOTICE_NEW_HREF = "/admin/comunicacao/avisos/novo";
-/** ?webinario=<id> do "Novo aviso": o aviso comeca do webinario salvo (o ?modelo= vence quando os dois vem). */
+/** ?webinario=<id> do "Novo aviso": o aviso comeca da live (o ?modelo= vence quando os dois vem). */
 export const WEBINAR_NOTICE_PARAM = "webinario";
+/** ?seguimento=<acoes> (com o ?webinario=): o aviso em branco com estas regras da live no "Para quem". */
+export const WEBINAR_FOLLOW_UP_PARAM = "seguimento";
 /** Os valores do ?tipo= que parseNoticeKindParam le. */
 const KIND_PARAM: Record<CampaignKind, string> = { inbox: "notificacao", popup: "popup" };
 /** O ?origem= do botao (a vaga guarda em webinar_registrations.source; o relatorio mostra em "Link de origem"). */
 export const WEBINAR_NOTICE_ORIGINS: Record<CampaignKind, string> = { inbox: "sino", popup: "pop-up" };
 
-export function webinarNoticeHref(webinarId: string, kind: CampaignKind) {
-  return `${WEBINAR_NOTICE_NEW_HREF}?${WEBINAR_NOTICE_PARAM}=${encodeURIComponent(webinarId)}&tipo=${KIND_PARAM[kind]}`;
+/** O prefixo da acao negada no ?seguimento= ("nao-attended" = não participou). */
+const NEGATED_PREFIX = "nao-";
+/** Regras no maximo por endereco (o "Para quem" continua editavel). */
+const MAX_FOLLOW_UP_STEPS = 4;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Uma regra "Participação em lives" que o endereco pede, na live do ?webinario=. */
+export type WebinarNoticeStep = { action: WebinarRuleAction; negate: boolean };
+
+/** "Avisar quem não veio" (o bloco Vagas do relatorio): garantiu vaga E não participou. */
+export const WEBINAR_ABSENTEES: readonly WebinarNoticeStep[] = [
+  { action: "registered", negate: false },
+  { action: "attended", negate: true }
+];
+
+/**
+ * O "Novo aviso" que comeca da live: sem `steps`, o card Avisar (?webinario=<id>&tipo=notificacao|popup, o aviso
+ * preenchido pelo webinario salvo); com `steps`, o "Avisar quem não veio" (o mesmo endereco com &seguimento=, o aviso em
+ * branco com as regras no "Para quem").
+ */
+export function webinarNoticeHref(webinarId: string, kind: CampaignKind, steps: readonly WebinarNoticeStep[] = []) {
+  const query = new URLSearchParams({ [WEBINAR_NOTICE_PARAM]: webinarId, tipo: KIND_PARAM[kind] });
+
+  if (steps.length > 0) {
+    query.set(WEBINAR_FOLLOW_UP_PARAM, steps.map((step) => `${step.negate ? NEGATED_PREFIX : ""}${step.action}`).join(","));
+  }
+
+  return `${WEBINAR_NOTICE_NEW_HREF}?${query.toString()}`;
+}
+
+type ParamValue = string | string[] | undefined;
+
+/** O que o ?webinario= do "Novo aviso" pede (o ?tipo= a pagina le com parseNoticeKindParam). */
+export type WebinarNoticeRequest =
+  /** O card Avisar: o aviso preenchido pelo webinario salvo (prepareWebinarNoticeStart). */
+  | { mode: "webinar"; webinarId: string }
+  /** "Avisar quem não veio": o aviso em branco com estas regras no "Para quem", sem ler o webinario. */
+  | { audience: AudienceDefinition; mode: "rules"; webinarId: string }
+  /** ?seguimento= que nao vale (id que nao e uuid, acao fora da lista, repetida, vazia ou mais de 4): o aviso em branco. */
+  | { mode: "blank" };
+
+/**
+ * O parse do ?webinario= para os dois botoes. Sem ?webinario= (vazio ou repetido): null (o "Novo aviso" de sempre). Sem
+ * ?seguimento=: o card Avisar. Com ele: as regras pedidas, cada uma na live do endereco, no grupo principal "todas".
+ */
+export function webinarNoticeRequestOf(params: Record<string, ParamValue>): WebinarNoticeRequest | null {
+  const raw = params[WEBINAR_NOTICE_PARAM];
+  const webinarId = typeof raw === "string" ? raw.trim() : "";
+
+  if (!webinarId) {
+    return null;
+  }
+
+  const follow = params[WEBINAR_FOLLOW_UP_PARAM];
+
+  if (follow === undefined) {
+    return { mode: "webinar", webinarId };
+  }
+
+  const id = webinarId.toLowerCase();
+  const parts = typeof follow === "string" ? follow.split(",").map((part) => part.trim()) : [];
+
+  if (!UUID_PATTERN.test(id) || parts.length === 0 || parts.length > MAX_FOLLOW_UP_STEPS) {
+    return { mode: "blank" };
+  }
+
+  const steps: WebinarNoticeStep[] = [];
+
+  for (const part of parts) {
+    const negate = part.startsWith(NEGATED_PREFIX);
+    const action = negate ? part.slice(NEGATED_PREFIX.length) : part;
+
+    if (!(WEBINAR_RULE_ACTIONS as readonly string[]).includes(action) || steps.some((step) => step.action === action)) {
+      return { mode: "blank" };
+    }
+
+    steps.push({ action: action as WebinarRuleAction, negate });
+  }
+
+  return {
+    audience: { kind: "rules", root: { items: steps.map((step) => ({ action: step.action, negate: step.negate, type: "webinar" as const, webinarId: id })), match: "all" } },
+    mode: "rules",
+    webinarId: id
+  };
+}
+
+/** O aviso em branco com o "Para quem" do "Avisar quem não veio" e a nota do topo (o editor no modo "start", sem modelo). */
+export function webinarRulesNoticeStart(kind: CampaignKind, audience: AudienceDefinition): NoticeStart {
+  const base = emptyTemplateStart(kind);
+
+  return { ...base, draft: { ...base.draft, audience }, notes: [SEGUIMENTO_COPY.inicioDoAviso] };
 }
 
 /** O destino do botao do aviso: a pagina do webinario com o link de origem do atalho. */

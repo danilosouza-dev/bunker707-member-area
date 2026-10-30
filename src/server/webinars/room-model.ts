@@ -4,9 +4,10 @@
 // carregam direto pelo Node. Nada aqui le o banco nem o relogio de verdade: tudo recebe `nowMs`.
 
 import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type DisplayNameMode, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
+import { ROOM_OPENS_MINUTES_BEFORE } from "./room-opens";
 
-/** A sala abre para o aluno este tanto antes da hora marcada (a espera, com o chat da sala de espera). */
-export const ROOM_OPENS_MINUTES_BEFORE = 15;
+/** A sala abre para o aluno este tanto antes da hora marcada (num modulo folha, para o contador do just-in-time). */
+export { ROOM_OPENS_MINUTES_BEFORE };
 
 /** Quanto do chat anterior quem entra atrasado recebe de uma vez (depois, so a janela a frente). */
 export const CHAT_BACKLOG_SECONDS = 300;

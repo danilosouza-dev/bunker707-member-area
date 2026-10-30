@@ -1,4 +1,5 @@
-import { CalendarClock, Film, Plus, Radio } from "lucide-react";
+import { CalendarClock, Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import {
   NEW_WEBINAR_HREF,
@@ -10,6 +11,7 @@ import {
   type WebinarPermissions,
   type WebinarsListState
 } from "@/server/webinars/editor-model";
+import type { WebinarListNumbers } from "@/server/webinars/panel-model";
 import type { WebinarsAdminPage } from "@/server/webinars/queries";
 import { CommunityPagination } from "../../community/pagination";
 import { EmptyState } from "../../empty-state";
@@ -25,22 +27,33 @@ import { WebinarListTabs } from "./webinar-list-tabs";
 import { WebinarsTable } from "./webinars-table";
 
 // Comunicacao > Webinários (docs/30 §2.1): cabecalho com "Novo webinário", as abas de Comunicacao, os cinco
-// numeros do periodo da barra superior (sem dado, "—" e "Sem dados no período"), as abas da pagina (Webinários ·
-// Lives ao vivo · Lives gravadas; as duas ultimas so com o estado vazio ate a fase 4), as pilulas de filtro, a
-// busca pelo titulo e a tabela paginada (?pagina=) com o menu "…" por linha.
+// numeros do periodo da barra superior (sem dado, "—" e "Sem dados no período"; Compareceram e Assistiram o replay
+// vem de webinar_panel, getWebinarListNumbers, e ficam em "—" com a migracao 202610300002 pendente), as abas da
+// pagina (Webinários · Lives ao vivo · Lives gravadas; as duas ultimas sao os paineis de §3, montados pela pagina
+// em `panel`), as pilulas de filtro, a busca pelo titulo e a tabela paginada (?pagina=) com o menu "…" por linha.
 
 type WebinarsListViewProps = {
+  /** Compareceram e Assistiram o replay do periodo (webinar_panel 'all'); sem eles, os da lista ("—"). */
+  listNumbers?: WebinarListNumbers;
   page: WebinarsAdminPage;
+  /** O painel da aba Lives ao vivo ou Lives gravadas (WebinarPanelTab); a aba Webinarios ignora. */
+  panel?: ReactNode;
   period: ResolvedAdminPeriod;
   permissions: WebinarPermissions;
   searchParams: ParamsRecord;
   state: WebinarsListState;
 };
 
-export function WebinarsListView({ page, period, permissions, searchParams, state }: WebinarsListViewProps) {
+export function WebinarsListView({ listNumbers, page, panel, period, permissions, searchParams, state }: WebinarsListViewProps) {
   const meta = COMMUNICATION_TAB_META.webinarios;
   const periodLabel = period.label.toLocaleLowerCase("pt-BR");
-  const values = [page.numbers.webinars, page.numbers.registered, page.numbers.attended, page.numbers.replayViewers, page.numbers.liveNow];
+  const values = [
+    page.numbers.webinars,
+    page.numbers.registered,
+    listNumbers?.attended ?? page.numbers.attended,
+    listNumbers?.replayViewers ?? page.numbers.replayViewers,
+    page.numbers.liveNow
+  ];
   const periodo = typeof searchParams.periodo === "string" && searchParams.periodo ? searchParams.periodo : null;
   const filtered = hasWebinarFilters(state);
 
@@ -83,10 +96,8 @@ export function WebinarsListView({ page, period, permissions, searchParams, stat
         </h2>
         <WebinarListTabs active={state.tab} searchParams={searchParams} />
 
-        {state.tab === "ao-vivo" ? (
-          <EmptyState description={WEBINAR_ADMIN_COPY.list.empty.liveTabDescription} icon={Radio} title={WEBINAR_COPY.admin.semLivesAoVivo} />
-        ) : state.tab === "gravadas" ? (
-          <EmptyState description={WEBINAR_ADMIN_COPY.list.empty.recordedTabDescription} icon={Film} title={WEBINAR_COPY.admin.semDados} />
+        {state.tab !== "webinarios" ? (
+          (panel ?? null)
         ) : (
           <>
             <WebinarFilters searchParams={searchParams} state={state} />

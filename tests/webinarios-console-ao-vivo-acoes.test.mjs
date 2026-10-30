@@ -976,3 +976,70 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
     delete process.env.WEBINAR_JWT_SECRET;
   }
 });
+
+test("os presentes agora do console contam pelo relogio da presenca: na live com a gravacao comecada 6 min depois do Iniciar live, os sinais dos alunos (desde o Iniciar) contam", async () => {
+  const nowMs = Date.now();
+  const db = usar(
+    bancoEmMemoria(
+      cenario({
+        webinar_presence_samples: [
+          { bucket: 20, session_id: S_NO_AR, user_id: ALUNA },
+          { bucket: 19, session_id: S_NO_AR, user_id: ALUNO },
+          { bucket: 8, session_id: S_NO_AR, user_id: COAPRESENTADOR }
+        ]
+      }),
+      RPC
+    )
+  );
+  // Iniciar live ha 10 min 10 s (balde 20 dos sinais de 30 s); a ancora da gravacao ha 4 min 10 s (seria o balde 8).
+  Object.assign(linha(db, S_NO_AR), { recording_anchor_at: new Date(nowMs - 4 * MIN - 10_000).toISOString(), started_at: new Date(nowMs - 10 * MIN - 10_000).toISOString() });
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs));
+  assert.equal(retrato.presentNow, 2, "os dois sinais dos ultimos 3 baldes desde o Iniciar live; o do balde 8 ja saiu");
+});
+
+test("fase 4: o painel Presença do retrato para no encerramento, como o topo: a Live gravada de 60 min fechada 1 min depois e aberta meia hora depois mostra a curva até o minuto 59", async () => {
+  const nowMs = Date.now();
+  const inicio = nowMs - 90 * MIN;
+  const relatorio = [
+    ...Array.from({ length: 120 }, (_, b) => ({ item: String(b), metric: "presence", students: 8, total: 8 })),
+    { item: "60", metric: "peak", students: 9, total: 9 },
+    { item: "58", metric: "chat_minute", students: 1, total: 4 },
+    { item: "59", metric: "chat_minute", students: 1, total: 6 }
+  ];
+  const db = usar(bancoEmMemoria(cenario(), { ...RPC, webinar_report: () => ({ data: relatorio, error: null }) }));
+  Object.assign(linha(db, S_GRAVADA), { ended_at: new Date(inicio + 61 * MIN).toISOString(), scheduled_at: new Date(inicio).toISOString(), started_at: new Date(inicio).toISOString(), status: "ended" });
+
+  const { presence } = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs));
+  assert.ok(presence, "o painel existe na sessao encerrada");
+  assert.equal(presence.minute, 59, "o ultimo minuto do video (60 min do webinario, sem gravacao), nao o 90 de agora");
+  assert.deepEqual([presence.curve[0], presence.curve.at(-1)], [{ minute: 30, present: 8 }, { minute: 59, present: 8 }], "a curva dos ultimos 30 minutos da sessao, sem minutos vazios depois do fim");
+  assert.equal(presence.messagesLastMinute, 4, "o ultimo minuto inteiro da sessao");
+  assert.deepEqual(presence.peak, { minute: 30, present: 9 });
+
+  // A gravada que passou da duracao antes de o tick fechar: o mesmo teto, pela duracao da gravacao da sessao (45 min).
+  db.tables.webinar_recordings.push({ ...DEFAULTS.webinar_recordings, created_at: agora(), duration_seconds: 45 * 60, id: randomUUID(), source: "bunny", updated_at: agora(), webinar_id: WEBINAR });
+  Object.assign(linha(db, S_GRAVADA), { ended_at: null, status: "live" });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs))).presence.minute, 44);
+});
+
+test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sessoes 'Comeca quando voce entra' so as de hoje em Sao Paulo e as em andamento; a pedida fica", () => {
+  // 05/11/2026 23:30 em UTC = 20:30 em Sao Paulo: "hoje" e o dia 05 em Sao Paulo.
+  const nowMs = Date.parse("2026-11-05T23:30:00.000Z");
+  const sessao = (id, scheduledAt, extra = {}) => ({ id, jit: true, scheduledAt, status: "scheduled", ...extra });
+  const sessions = [
+    { id: "comum-velha", jit: false, scheduledAt: "2026-10-01T23:00:00.000Z", status: "ended" },
+    sessao("jit-hoje-cedo", "2026-11-05T11:15:00.000Z", { status: "ended" }),
+    sessao("jit-hoje-noite", "2026-11-06T01:45:00+00:00"),
+    sessao("jit-ontem", "2026-11-05T02:15:00.000Z", { status: "ended" }),
+    sessao("jit-ontem-no-ar", "2026-11-04T23:00:00.000Z", { status: "live" }),
+    sessao("jit-amanha", "2026-11-06T12:00:00.000Z"),
+    sessao("jit-pedida", "2026-11-01T12:00:00.000Z", { status: "ended" })
+  ];
+  assert.deepEqual(
+    consoleQueries.consoleSessionsFor(sessions, nowMs).map((item) => item.id),
+    ["comum-velha", "jit-hoje-cedo", "jit-hoje-noite", "jit-ontem-no-ar"],
+    "22:45 em Sao Paulo ainda e hoje; 23:15 do dia 04 em Sao Paulo nao"
+  );
+  assert.ok(consoleQueries.consoleSessionsFor(sessions, nowMs, "jit-pedida").some((item) => item.id === "jit-pedida"), "a pedida por ?sessao= continua no seletor");
+});

@@ -22,6 +22,9 @@ import {
 // revoga; assinatura cancelada suspende e reativada devolve; o pacote ganha o codigo da Ticto pela acao de
 // Pacotes e a venda dele libera todos os produtos; situacao que nao muda acesso e ignorada; token errado
 // e 401; desconectar volta a recusar. Nenhum e-mail sai.
+//
+// Webinarios v4b (docs/30 M8): o valor pago (order.paid_amount, em centavos, reais quando a Ticto nao manda a moeda)
+// fica em webhook_events.amount_cents/currency; situacao que nao muda acesso fica sem o valor.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -96,7 +99,7 @@ async function eventos() {
   return unwrap(
     await db
       .from("webhook_events")
-      .select("id,provider,external_event_id,event_type,normalized_type,processing_status,outcome,outcome_detail,error_message,product_id,combo_id,user_id,buyer_email,payload")
+      .select("id,provider,external_event_id,event_type,normalized_type,processing_status,outcome,outcome_detail,error_message,product_id,combo_id,user_id,buyer_email,payload,amount_cents,currency")
       .like("external_event_id", `${PREFIXO}%`)
       .order("received_at"),
     "Lendo vendas recebidas"
@@ -272,6 +275,9 @@ test("compra aprovada cria a conta, libera o curso com origem ticto, enfileira b
   assert.equal(JSON.stringify(evento.payload).includes(TOKEN), false);
   assert.equal(evento.payload.customer.email, COMPRADOR.email);
   assert.equal(evento.payload.item.product_id, Number(CODIGOS.curso));
+  // v4b (docs/30 M8): o valor pago em centavos; sem moeda no payload, reais.
+  assert.equal(Number(evento.amount_cents), 19_700);
+  assert.equal(evento.currency, "BRL");
 
   const row = await integracao();
   assert.ok(row.last_sync_at, "a plataforma registra a ultima venda");
@@ -687,6 +693,8 @@ test("situacoes que nao mudam acesso (pix gerado, boleto) ficam guardadas como i
   const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T0300:${CODIGOS.curso}:pix_created`));
   assert.equal(linha.event_type, "pix_created");
   assert.match(linha.outcome_detail, /pix_created não muda o acesso/);
+  assert.equal(linha.amount_cents, null, "situacao que nao muda acesso fica sem o valor (docs/30 M8)");
+  assert.equal(linha.currency, null);
 
   const semStatus = await post({ ...payload({ transacao: "T0301" }), status: undefined });
   assert.equal(semStatus.status, 400);

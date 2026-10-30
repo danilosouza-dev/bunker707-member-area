@@ -25,6 +25,8 @@ import {
   type ConsoleSnapshot
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
+import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
+import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
 import {
   alignChat,
@@ -59,8 +61,11 @@ import { ConfirmDialog } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
 import { adminToast } from "../../../toast";
 import { useAdminTopbarTitle } from "../../../topbar-title";
+import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleChat } from "./console-chat";
+import { ConsoleOffer } from "./console-offer";
 import { ConsolePolls } from "./console-polls";
+import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
 import { ConsoleScript } from "./console-script";
 import { LiveAlignChat } from "./live-align-chat";
@@ -70,6 +75,7 @@ import { LiveHands } from "./live-hands";
 import { LivePersonMenu, LiveParticipants, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { LiveRoomPanel, useLiveRoom } from "./live-room-panel";
+import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
 // na carga, como a sala do aluno), os presentes agora, Abrir e Encerrar com confirmacao (messaging.publish), e os
@@ -81,7 +87,10 @@ import { LiveRoomPanel, useLiveRoom } from "./live-room-panel";
 // confirmacao: para a gravacao, encerra no servidor e fecha a sala para todos), e a mesa ganha a sala no meio
 // (live-room-panel.tsx: o iframe pelo useJitsiMeet com os botoes nossos ao redor), Mao levantada, Participantes (com o
 // ⋯ de remover, silenciar e banir, tambem no chat), o cartao Gravacao, "Alinhar chat" e "Enviar gravacao". Sem a sala
-// neste ambiente, "A sala ao vivo ainda nao esta configurada" e o resto do console funciona.
+// neste ambiente, "A sala ao vivo ainda nao esta configurada" e o resto do console funciona. Fase 4c (docs/30 §2.4 e
+// D24): o painel Atendimento (console-attendance.tsx, com a propria leitura) devolve as marcas das perguntas para o
+// painel Perguntas, e o Chat ganha "Corrigir resposta" nas respostas do Assistente (editAssistantAnswer). O painel
+// Presenca (console-presence.tsx) abre a coluna da direita com o pico, as mensagens por minuto e os ultimos 30 minutos.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -97,11 +106,13 @@ type SessionConsoleProps = {
   permissions: WebinarPermissions;
   /** Hora do servidor na carga, para o skew do relogio da sessao. */
   serverNow: number;
+  /** WEBINAR_TRANSLATION_ENABLED=on (lido no servidor): o "Refazer tradução" das mensagens. */
+  translationEnabled?: boolean;
 };
 
 type BanTarget = { name: string; participantId: string | null; userId: string };
 
-export function SessionConsole({ currentUserId, data, nonce = null, permissions, serverNow }: SessionConsoleProps) {
+export function SessionConsole({ currentUserId, data, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ConsoleSnapshot | null>(data.snapshot);
   const [skew] = useState(() => serverNow - Date.now());
@@ -114,6 +125,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   const [banTarget, setBanTarget] = useState<BanTarget | null>(null);
   const [banReason, setBanReason] = useState("");
   const [recordUnavailable, setRecordUnavailable] = useState(false);
+  const [attendance, setAttendance] = useState<AttendanceSnapshot | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const session = snapshot?.session ?? null;
   const sessionId = session?.id ?? null;
@@ -672,13 +684,31 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
               hostUserId={webinar.hostUserId}
               messages={snapshot.messages}
               onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
+              onEditAssistant={(messageId: string, body: string) =>
+                run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
+              }
               onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
+              onRetranslate={
+                translationEnabled
+                  ? (messageId: string) =>
+                      void run(
+                        `moderate:${messageId}`,
+                        () => clearMessageTranslations({ messageId }),
+                        (cleared) => adminToast.success(cleared.removed > 0 ? WEBINAR_COPY.traducao.console.refeita(cleared.removed) : WEBINAR_COPY.traducao.console.semTraducao)
+                      )
+                  : null
+              }
               onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
               personMenu={live ? chatPersonMenu : null}
               pinnedMessageId={snapshot.pinnedMessageId}
               session={session}
             />
             <div className="flex min-w-0 flex-col gap-6">
+              {/* docs/30 §2.4: o painel Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache. */}
+              {snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null}
+              {/* Fase 4 (docs/30 §2.4): Atendimento (4c) e Oferta (4b, na sessao gravada e no replay), pontos de encaixe com leitura propria. */}
+              <ConsoleAttendance canAct={canAct} currentUserId={currentUserId} key={session.id} onSnapshot={setAttendance} sessionId={session.id} webinarId={webinar.id} />
+              {session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null}
               {webinar.kind === "simulated" ? (
                 <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />
               ) : null}
@@ -693,6 +723,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
               <ConsoleQuestions
                 busyKey={busyKey}
                 canAct={canAct}
+                marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
                 onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
                 onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                 questions={snapshot.questions}

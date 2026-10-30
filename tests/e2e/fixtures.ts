@@ -17,6 +17,16 @@ import {
   LIVE_AO_VIVO_DE_TESTE as LIVE_AO_VIVO_DA_ESCOLA,
   seedLiveAoVivoDeTeste as seedLiveAoVivoDaEscola
 } from "../fixtures/escola-de-teste.mjs";
+import {
+  JIT_DE_TESTE,
+  LIVE_AO_VIVO_ENCERRADA_DE_TESTE,
+  OFERTA_DE_TESTE,
+  SIMULACAO_DE_TESTE,
+  seedJitDeTeste,
+  seedLiveAoVivoEncerradaDeTeste,
+  seedOfertaDeTeste,
+  seedSimulacaoDeTeste
+} from "../fixtures/escola-de-teste.mjs";
 import { templateMediaUse } from "../../src/server/communications/media-refs";
 import { storedPopupDesignAssetPaths } from "../../src/server/communications/popup-design-router";
 import { templateDesignModeOf, type TemplatePayload } from "../../src/server/communications/template-model";
@@ -2229,4 +2239,78 @@ export async function zerarHistoricoDeWebinarios() {
       ),
     "Apagando o historico de webinario das contas de teste"
   );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Webinarios, fase 4 (docs/30 §1.6, §3.2, §3.3, §3.5, §4.2, §4.3 e §11): as sementes dos paineis, da Oferta, da
+ * Simulacao e do "Comeca quando voce entra" (codigo em tests/fixtures/escola-de-teste.mjs) e as leituras do banco.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type VarianteDaOfertaDeTeste = {
+  badge: string | null;
+  checkoutUrl: string;
+  enabled: boolean;
+  headline: string;
+  label: "A" | "B" | "C" | "D";
+  priceFromLabel: string | null;
+  priceLabel: string | null;
+  weight: number;
+};
+
+export {
+  JIT_DE_TESTE,
+  LIVE_AO_VIVO_ENCERRADA_DE_TESTE,
+  OFERTA_DE_TESTE,
+  SIMULACAO_DE_TESTE,
+  seedJitDeTeste,
+  seedLiveAoVivoEncerradaDeTeste,
+  seedOfertaDeTeste,
+  seedSimulacaoDeTeste
+};
+
+export type CliqueDaOfertaNoBanco = { click_token: string; converted_sale_grant_id: string | null; offset_ms: number; session_id: string; variant_label: string };
+
+/** Os cliques da conta na Oferta de teste (webinar_offer_clicks), do mais antigo ao mais novo. */
+export async function cliquesDaOfertaNoBanco(chave: ChaveDaConta = "aluna"): Promise<CliqueDaOfertaNoBanco[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("webinar_offer_clicks")
+      .select("click_token, converted_sale_grant_id, offset_ms, session_id, variant_label")
+      .eq("offer_id", OFERTA_DE_TESTE.id)
+      .eq("user_id", conta.id)
+      .order("clicked_at", { ascending: true }),
+    "Lendo os cliques da oferta de teste"
+  ) as CliqueDaOfertaNoBanco[];
+}
+
+export type SessaoJitNoBanco = { id: string; jit: boolean; kind: string; scheduled_at: string; status: string };
+
+/** As sessoes que nasceram no "Comeca quando voce entra" de teste, na ordem do horario. */
+export async function sessoesJitNoBanco(): Promise<SessaoJitNoBanco[]> {
+  const db = createLocalAdminClient();
+
+  return unwrap(
+    await db.from("webinar_sessions").select("id, jit, kind, scheduled_at, status").eq("webinar_id", JIT_DE_TESTE.id).order("scheduled_at", { ascending: true }),
+    "Lendo as sessoes do just-in-time de teste"
+  ) as SessaoJitNoBanco[];
+}
+
+/** O historico de webinario da conta por tipo (student_events, entity_type webinar), do mais antigo ao mais novo. */
+export async function eventosDeWebinario(eventType: string, chave: ChaveDaConta = "aluna"): Promise<{ entity_id: string | null; metadata: Record<string, unknown> }[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("entity_id, metadata")
+      .eq("entity_type", "webinar")
+      .eq("event_type", eventType)
+      .eq("user_id", conta.id)
+      .order("created_at", { ascending: true }),
+    `Lendo ${eventType} de teste`
+  ) as { entity_id: string | null; metadata: Record<string, unknown> }[];
 }

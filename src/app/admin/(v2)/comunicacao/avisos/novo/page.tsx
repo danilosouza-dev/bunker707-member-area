@@ -13,7 +13,7 @@ import { prepareNoticeStart, type NoticeStartResult } from "@/server/communicati
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { WEBINARS_HREF, webinarAdminHref } from "@/server/webinars/editor-model";
 import { prepareWebinarNoticeStart } from "@/server/webinars/notice-shortcut";
-import { WEBINAR_NOTICE_PARAM } from "@/server/webinars/notice-shortcut-model";
+import { webinarNoticeRequestOf, webinarRulesNoticeStart } from "@/server/webinars/notice-shortcut-model";
 
 // Publicar agora envia dentro da Server Action desta rota (em lotes).
 export const maxDuration = 60;
@@ -31,7 +31,7 @@ function readNow() {
   return Date.now();
 }
 
-/** O ?modelo= ou o ?webinario= (um so; repetido ou vazio = sem). */
+/** O ?modelo= (um so; repetido ou vazio = sem). */
 function templateParam(value: string | string[] | undefined): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -51,8 +51,11 @@ async function loadStart(templateId: string | null): Promise<NoticeStartResult |
 }
 
 // Comunicação › Avisos e pop-ups › Novo aviso (docs/22 §2.2): ?tipo=popup abre em pop-up; ?modelo=<id> abre preenchido
-// por um modelo (docs/28 §5.6; o ?tipo e ignorado); ?webinario=<id>&tipo= abre preenchido pelo webinario (docs/30 §2.2;
-// o ?modelo= vence). So quem cria avisos (messaging.write) entra; o resto volta para a lista.
+// por um modelo (docs/28 §5.6; o ?tipo e ignorado); ?webinario=<id> abre a partir de uma live (docs/28 §5.6, docs/30
+// §2.2 e §3.4; o ?modelo= vence), por um parse so (webinarNoticeRequestOf): com &tipo=, o aviso preenchido pelo webinario
+// salvo (os atalhos do card Avisar); com &seguimento=<acoes>, o aviso em branco com as regras "Participação em lives"
+// no "Para quem" (o "Avisar quem não veio" do relatorio; pedido invalido = aviso em branco). Nada e gravado ate salvar,
+// como no modelo. So quem cria avisos (messaging.write) entra; o resto volta para a lista.
 export default async function AdminNewNoticePage({ searchParams }: PageProps) {
   const [{ access }, params] = await Promise.all([requirePageArea("comunicacao"), searchParams]);
 
@@ -61,10 +64,14 @@ export default async function AdminNewNoticePage({ searchParams }: PageProps) {
   }
 
   const templateId = templateParam(params.modelo);
-  const webinarId = templateId ? null : templateParam(params[WEBINAR_NOTICE_PARAM]);
-  const started = webinarId ? await loadWebinarStart(webinarId, parseNoticeKindParam(params.tipo) ?? "inbox", readNow()) : await loadStart(templateId);
-  // As regras do segmento e das seguintes do modelo ganham nome nas opcoes do editor.
-  const loaded = await loadUnlessPendingMigration(() => loadNoticeEditorOptions(started?.ok ? { audiences: started.audiences } : {}));
+  const kind = parseNoticeKindParam(params.tipo) ?? "inbox";
+  const webinar = templateId ? null : webinarNoticeRequestOf(params);
+  const started = webinar?.mode === "webinar" ? await loadWebinarStart(webinar.webinarId, kind, readNow()) : await loadStart(templateId);
+  // "Avisar quem não veio": o aviso em branco com as regras da live no "Para quem", sem ler o webinario.
+  const rulesStart = webinar?.mode === "rules" ? webinarRulesNoticeStart(kind, webinar.audience) : null;
+  // As regras do segmento e das seguintes do modelo (ou as da live) ganham nome nas opcoes do editor.
+  const audiences = started?.ok ? started.audiences : rulesStart ? [rulesStart.draft.audience] : null;
+  const loaded = await loadUnlessPendingMigration(() => loadNoticeEditorOptions(audiences ? { audiences } : {}));
 
   if (!loaded.ok) {
     return (
@@ -77,7 +84,7 @@ export default async function AdminNewNoticePage({ searchParams }: PageProps) {
 
   return (
     <NoticeEditor
-      defaultKind={started?.ok ? started.start.draft.kind : (parseNoticeKindParam(params.tipo) ?? "inbox")}
+      defaultKind={started?.ok ? started.start.draft.kind : kind}
       initial={null}
       now={readNow()}
       options={loaded.data}
@@ -86,7 +93,7 @@ export default async function AdminNewNoticePage({ searchParams }: PageProps) {
         canPublishLarge: can(access, "messaging.publish_large"),
         canWrite: true
       }}
-      start={started?.ok ? started.start : null}
+      start={started?.ok ? started.start : rulesStart}
       startProblem={started && !started.ok ? started.reason : null}
     />
   );

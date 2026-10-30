@@ -234,6 +234,11 @@ function webinarNotificationIcon(payload: Record<string, unknown> | null) {
     return noticeIconOfColumns("live", "red");
   }
 
+  // Fase 4c: a equipe respondeu a pergunta do aluno depois (notify.queueWebinarAnswerNotice).
+  if (kind === "answer") {
+    return noticeIconOfColumns("megaphone", "green");
+  }
+
   return kind === "cancelled" ? noticeIconOfColumns("alert", "amber") : noticeIconOfColumns("calendar", "white");
 }
 

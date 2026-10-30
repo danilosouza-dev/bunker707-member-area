@@ -1,7 +1,10 @@
+import { scheduleAssistant } from "@/server/webinars/assistant";
+import { chatAssistantTrigger } from "@/server/webinars/assistant-model";
 import { chatDeleteBodySchema, chatPostBodySchema, chatWindowQuerySchema } from "@/server/webinars/chat-schemas";
 import { readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/room-queries";
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { postStudentChat, removeStudentChat } from "@/server/webinars/room-writes";
+import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
 
 // O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
 // deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
@@ -12,7 +15,10 @@ import { postStudentChat, removeStudentChat } from "@/server/webinars/room-write
 // palavra bloqueada 422; na live, removido ou banido 409 banned e silenciado 409 muted (fase 3). DELETE { all: true } e
 // "Remover minhas mensagens": apaga o que o aluno escreveu em todas as sessoes e retira o aceite, 200 { removed }.
 // Sessao obrigatoria (401); ate 30 escritas por minuto por aluno; corpo de ate 4 KB; fora do acesso ou sessao de outro
-// webinario: 404 sem dizer se existe.
+// webinario: 404 sem dizer se existe. Fase 4c (docs/30 §6.6 e D24): a mensagem que chama o Assistente ("@assistente",
+// ou pergunta da turma com o "Responder tudo") agenda a resposta dele para depois desta resposta (after(), com teto de
+// tempo; assistant.ts) e o 201 traz `assistant: "scheduled"`; a resposta chega pela consulta de 5 s com role "ai"
+// (o GET nunca troca `ai` por `team`: o selo Assistente).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -62,7 +68,22 @@ export async function POST(request: Request, context: RouteContext) {
     const room = await loadRoomContextFor(guarded.userId, guarded.webinarId, body.data.sessionId.toLowerCase());
     const result = await postStudentChat({ body: body.data, context: room, db: webinarsDb(), userId: guarded.userId });
     await recordAfterReply(result.events);
-    return ok({ message: result.message, pending: result.pending }, 201);
+    const scheduled = await scheduleAssistant(
+      chatAssistantTrigger({
+        approved: !result.pending,
+        body: result.message.body,
+        envEnabled: webinarAssistantEnabled(),
+        kind: result.message.kind,
+        messageId: result.message.id,
+        offsetMs: result.offsetMs,
+        questionId: result.questionId,
+        recordingId: room.recording?.id ?? null,
+        sessionId: room.session.id,
+        userId: guarded.userId,
+        webinarId: room.webinar.id
+      })
+    );
+    return ok({ assistant: scheduled ? "scheduled" : null, message: result.message, pending: result.pending }, 201);
   } catch (error) {
     return roomErrorResponse(error, "Não foi possível enviar a mensagem.");
   }

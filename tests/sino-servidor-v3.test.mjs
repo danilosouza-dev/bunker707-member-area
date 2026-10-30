@@ -784,7 +784,8 @@ test("live (kind webinar, docs/30 D27): titulo, texto e link vem da propria linh
     live({ id: idDe(1) }),
     live({ body: "Começou agora: Live de agentes. Entrar.", id: idDe(2), payload: { kind: "started", sessionId: idDe(7), webinarId: idDe(8) }, title: "Começou agora" }),
     live({ id: idDe(3), payload: { kind: "cancelled" }, title: "Live cancelada" }),
-    live({ href: "javascript:alert(1)", id: idDe(4), title: "  " })
+    live({ href: "javascript:alert(1)", id: idDe(4), title: "  " }),
+    live({ id: idDe(5), payload: { kind: "answer", sessionId: idDe(7), webinarId: idDe(8) }, title: "A equipe respondeu" })
   ]);
 
   const { items } = await inbox.listNotifications({ now: AGORA, userId: ALUNA });
@@ -795,7 +796,8 @@ test("live (kind webinar, docs/30 D27): titulo, texto e link vem da propria linh
       ["webinar", "Lembrete da live", "/webinarios/live-de-agentes", { color: "white", id: "calendar" }],
       ["webinar", "Começou agora", "/webinarios/live-de-agentes", { color: "red", id: "live" }],
       ["webinar", "Live cancelada", "/webinarios/live-de-agentes", { color: "amber", id: "alert" }],
-      ["webinar", "Lembrete da live", null, { color: "white", id: "calendar" }]
+      ["webinar", "Lembrete da live", null, { color: "white", id: "calendar" }],
+      ["webinar", "A equipe respondeu", "/webinarios/live-de-agentes", { color: "green", id: "megaphone" }]
     ]
   );
   assert.equal(items[0].body, "Amanhã às 20:00: Live de agentes. Sua vaga está garantida.");

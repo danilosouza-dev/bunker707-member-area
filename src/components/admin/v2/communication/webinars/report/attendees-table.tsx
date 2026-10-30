@@ -11,7 +11,8 @@ import { ReportBlock } from "./report-blocks";
 // A lista por aluno (docs/30 §3.4.1, estilo Attendee report): uma linha por aluno presente ou com vaga; quem so
 // garantiu vaga aparece com "—" nas colunas de presenca (o "Absentee" do Zoom). O nome leva a ficha do aluno em
 // /admin/alunos/[id]; o e-mail so vai no CSV ("Baixar CSV", a rota /api/admin/webinars/[id]/relatorio/csv, que
-// grava a auditoria webinar_export). Abaixo de 768 px cada linha vira um cartao (DataTable mobile="cards").
+// grava a auditoria webinar_export). Abaixo de 768 px cada linha vira um cartao (DataTable mobile="cards"). Fase 4b:
+// na Live gravada e no Replay, a coluna "Oferta clicada" com a variante (A a D) que o aluno clicou, antes da Pontuacao.
 
 const COPY = WEBINAR_COPY.relatorio;
 const integer = new Intl.NumberFormat("pt-BR");
@@ -63,15 +64,42 @@ const COLUMNS: readonly DataTableColumn<ReportAttendee>[] = [
   { align: "right", cell: (row) => integer.format(row.reactions), header: COPY.colunas.reacoes, id: "reacoes", mobileLabel: COPY.colunas.reacoes },
   { align: "right", cell: (row) => integer.format(row.questions), header: COPY.colunas.perguntas, id: "perguntas", mobileLabel: COPY.colunas.perguntas },
   { align: "right", cell: (row) => integer.format(row.polls), header: COPY.colunas.enquetes, id: "enquetes", mobileLabel: COPY.colunas.enquetes },
-  { align: "right", cell: (row) => integer.format(row.score), header: COPY.colunas.pontuacao, id: "pontuacao", mobileLabel: COPY.colunas.pontuacao }
 ];
+
+const SCORE_COLUMN: DataTableColumn<ReportAttendee> = {
+  align: "right",
+  cell: (row) => integer.format(row.score),
+  header: COPY.colunas.pontuacao,
+  id: "pontuacao",
+  mobileLabel: COPY.colunas.pontuacao
+};
+
+/** As colunas da lista: com `offerClicked` (sessao gravada ou Replay), "Oferta clicada" antes da Pontuacao (§3.4.1). */
+export function attendeeColumns(offerClicked: Readonly<Record<string, string>> | null): DataTableColumn<ReportAttendee>[] {
+  if (!offerClicked) {
+    return [...COLUMNS, SCORE_COLUMN];
+  }
+
+  const offerColumn: DataTableColumn<ReportAttendee> = {
+    cell: (row) => offerClicked[row.userId] || EMPTY_VALUE,
+    header: COPY.colunas.ofertaClicada,
+    id: "oferta",
+    mobileLabel: COPY.colunas.ofertaClicada
+  };
+
+  return [...COLUMNS, offerColumn, SCORE_COLUMN];
+}
 
 type AttendeesTableProps = {
   attendees: readonly ReportAttendee[];
   csvHref: string;
+  /** A variante clicada por aluno nesta sessao; nulo na Live ao vivo (sem a coluna). */
+  offerClicked?: Readonly<Record<string, string>> | null;
 };
 
-export function AttendeesTable({ attendees, csvHref }: AttendeesTableProps) {
+export function AttendeesTable({ attendees, csvHref, offerClicked = null }: AttendeesTableProps) {
+  const columns = attendeeColumns(offerClicked);
+
   return (
     <ReportBlock
       actions={
@@ -84,7 +112,7 @@ export function AttendeesTable({ attendees, csvHref }: AttendeesTableProps) {
       id="webinario-relatorio-alunos"
       title={COPY.blocos.alunos}
     >
-      <DataTable caption={COPY.blocos.alunos} columns={COLUMNS} emptyTitle={COPY.semAlunos} getRowKey={(row) => row.userId} mobile="cards" rows={attendees} />
+      <DataTable caption={COPY.blocos.alunos} columns={columns} emptyTitle={COPY.semAlunos} getRowKey={(row) => row.userId} mobile="cards" rows={attendees} />
     </ReportBlock>
   );
 }

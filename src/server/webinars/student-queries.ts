@@ -6,6 +6,10 @@
 // "Ver como" da equipe (accessPreviewMode): a previa decide o que aparece sem ler acesso nem segmento
 // (previewCanSee) e nunca mostra vagas da propria conta. Banco sem a migracao 202610280001: listas vazias,
 // sem derrubar a area.
+//
+// Fase 4e ("Comeca quando voce entra"): as regras de cada Live gravada (uma leitura) e a duracao do video das que tem o
+// just-in-time ligado (loadJitContexts) entram no card do webinario; as sessoes `jit` nunca aparecem uma a uma, mas a
+// sala de uma delas (/webinarios/[slug]/sala?sessao=) abre como qualquer sessao gravada.
 
 import "server-only";
 
@@ -17,6 +21,8 @@ import type { SessionUser } from "../auth/session";
 import { hasWebinarAccess, loadStudentAccessFacts } from "./access";
 import { googleCalendarUrl, outlookCalendarUrl } from "./calendar";
 import { isMissingWebinarSchema, WebinarError, webinarsDb, type WebinarsDb } from "./db";
+import { isJitSession } from "./jit-model";
+import { loadJitContexts, type JitContext } from "./jit-queries";
 import { webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { registrationFromRow, sessionFromRow, webinarFromRow } from "./rows";
 import { loadStudentWebinarById, resolveStudentSession } from "./registrations";
@@ -48,7 +54,7 @@ export type StudentQueryOptions = {
   db?: WebinarsDb;
 };
 
-type Loaded = { registrations: WebinarRegistration[]; sessions: WebinarSession[]; webinars: Webinar[] };
+type Loaded = { jit: Map<string, JitContext>; registrations: WebinarRegistration[]; sessions: WebinarSession[]; webinars: Webinar[] };
 
 function describe(error: unknown) {
   return redactSecrets(error instanceof Error ? error.message : String(error));
@@ -61,7 +67,7 @@ async function loadVisible(db: WebinarsDb, userId: string, now: number, options:
     rows = await listPublishedWebinarRows(db);
   } catch (error) {
     if (isMissingWebinarSchema(error)) {
-      return { registrations: [], sessions: [], webinars: [] };
+      return { jit: new Map(), registrations: [], sessions: [], webinars: [] };
     }
     throw error;
   }
@@ -78,12 +84,13 @@ async function loadVisible(db: WebinarsDb, userId: string, now: number, options:
   }
 
   const ids = webinars.map((webinar) => webinar.id);
-  const [sessionRows, registrationRows] = await Promise.all([
+  const [sessionRows, registrationRows, jit] = await Promise.all([
     listSessionRows(db, ids),
-    options.accessPreviewMode ? Promise.resolve([]) : fetchRegistrationRows(db, { userId, webinarIds: ids })
+    options.accessPreviewMode ? Promise.resolve([]) : fetchRegistrationRows(db, { userId, webinarIds: ids }),
+    loadJitContexts(db, webinars)
   ]);
 
-  return { registrations: registrationRows.map(registrationFromRow), sessions: sessionRows.map(sessionFromRow), webinars };
+  return { jit, registrations: registrationRows.map(registrationFromRow), sessions: sessionRows.map(sessionFromRow), webinars };
 }
 
 function needsCount(webinar: Webinar) {
@@ -93,7 +100,8 @@ function needsCount(webinar: Webinar) {
 async function loadRegisteredCounts(db: WebinarsDb, webinars: readonly Webinar[], sessions: readonly WebinarSession[]): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   const wanted = new Set(webinars.filter(needsCount).map((webinar) => webinar.id));
-  const targets = sessions.filter((session) => wanted.has(session.webinarId) && session.kind !== "replay");
+  // A sessao `jit` nunca tem vaga: nada a contar.
+  const targets = sessions.filter((session) => wanted.has(session.webinarId) && session.kind !== "replay" && !isJitSession(session));
 
   await Promise.all(
     targets.map(async (session) => {
@@ -127,16 +135,19 @@ async function loadPresenterNames(db: WebinarsDb, webinars: readonly Webinar[]):
 async function buildViews(db: WebinarsDb, loaded: Loaded, now: number): Promise<StudentWebinarView[]> {
   const [counts, names] = await Promise.all([loadRegisteredCounts(db, loaded.webinars, loaded.sessions), loadPresenterNames(db, loaded.webinars)]);
 
-  return loaded.webinars.map((webinar) =>
-    buildStudentWebinarView({
+  return loaded.webinars.map((webinar) => {
+    const jit = loaded.jit.get(webinar.id) ?? null;
+    return buildStudentWebinarView({
+      jit: jit?.settings ?? null,
       now,
       presenterName: webinar.hostUserId ? (names.get(webinar.hostUserId) ?? null) : null,
       registeredCounts: counts,
       registrations: loaded.registrations.filter((registration) => registration.webinarId === webinar.id),
       sessions: loaded.sessions.filter((session) => session.webinarId === webinar.id),
+      videoDurationMs: jit?.durationMs ?? null,
       webinar
-    })
-  );
+    });
+  });
 }
 
 /** Os tres blocos de /webinarios. Lanca em falha de leitura (a pagina mostra "Tentar de novo"). */
@@ -253,7 +264,8 @@ export async function getStudentSessionPayload(userId: string, webinarId: string
     webinar: record.webinar
   };
   const view = buildStudentWebinarView(input);
-  const sessionView = view.sessions.find((item) => item.id === session.id) ?? (replay ? buildStudentSession(input, replay) : null);
+  // O replay e a sessao `jit` nao estao na lista de sessoes da pagina: a sala monta a deles aqui.
+  const sessionView = view.sessions.find((item) => item.id === session.id) ?? (replay || isJitSession(session) ? buildStudentSession(input, session) : null);
   if (!sessionView) {
     throw new WebinarError("Sessão inválida.", 404);
   }

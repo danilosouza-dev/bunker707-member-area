@@ -6,14 +6,18 @@
 // previa do "Alinhar chat"), a sala trancada, quem foi removido, silenciado ou banido, o mapa aluno -> participante da
 // sala pelo ultimo webinar_room_joined com o nome que a sala mostra, e se a sala existe neste ambiente. Nada de token
 // nem room_name: o iframe do console pede o join-token. Tudo pela service role (webinarsDb) com assertNoDbError: banco
-// sem a migracao vira PendingMigrationNotice na pagina.
+// sem a migracao vira PendingMigrationNotice na pagina. Fase 4 (4e, com o Atendimento da 4c): o seletor de sessoes
+// mostra das sessoes "Comeca quando voce entra" (session.jit, uma a cada 15 min o dia inteiro) so as do dia de Sao
+// Paulo e as em andamento; a pedida por ?sessao= continua aberta.
 
 import "server-only";
 
 import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
 import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
-import { consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
+import { consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
+import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
+import { sessionRecordingOf, sessionVideoDurationMs } from "./export-queries";
 import {
   latestRoomJoins,
   liveParticipantName,
@@ -24,16 +28,18 @@ import {
   type LiveConsoleSnapshot,
   type RoomJoinedRow
 } from "./live-console-model";
-import { liveBanState, liveRoomConfigured } from "./live-model";
+import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
 import type { WebinarKind, WebinarSession } from "./model";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
-import { bunnyEmbedUrl, parseBunnyEmbed, presenceBucket, sessionOffsetMs } from "./room-model";
+import { bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
 import { bunnyViewToken, consentIsCurrent } from "./room-queries";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
+import { reportViewOf } from "./report-queries";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
+import { saoPauloDayKey } from "../../lib/webinar-time";
 
 const PAGE = 1000;
 const CONSENT_CHUNK = 200;
@@ -63,6 +69,17 @@ export type SessionConsoleData = {
   snapshot: ConsoleSnapshot | null;
   webinar: ConsoleWebinar;
 };
+
+/**
+ * O que o seletor do console lista (fase 4e): as sessoes comuns todas; das "Comeca quando voce entra" (jit), so as
+ * marcadas para hoje em Sao Paulo e as em andamento (na espera ou no ar), mais a pedida por ?sessao=.
+ */
+export function consoleSessionsFor<T extends Pick<WebinarSession, "id" | "jit" | "scheduledAt" | "status">>(sessions: readonly T[], nowMs: number, requestedId: string | null = null): T[] {
+  const today = saoPauloDayKey(nowMs);
+  return sessions.filter(
+    (session) => !session.jit || session.id === requestedId || session.status === "live" || session.status === "waiting" || (Number.isFinite(Date.parse(session.scheduledAt)) && saoPauloDayKey(session.scheduledAt) === today)
+  );
+}
 
 /** Todas as linhas do chat de uma sessao, na ordem do video (a exportacao em CSV). */
 export async function listAllSessionChatRows(db: WebinarsDb, sessionId: string): Promise<ChatMessageRow[]> {
@@ -349,25 +366,68 @@ export async function loadLiveConsole(db: WebinarsDb, input: { authors: readonly
  * O retrato e a pagina
  * ---------------------------------------------------------------------------------------------- */
 
+/**
+ * A duracao do video da sessao gravada (onde o relogio do painel Presenca para): a congelada no encerramento, senao a
+ * gravacao da sessao, senao a prevista do webinario (a mesma conta do relatorio). NaN fora da gravada; a leitura que
+ * falha tambem da NaN (o painel fica sem o teto e o resto do console segue).
+ */
+async function simulatedDurationMs(db: WebinarsDb, session: WebinarSession, webinar: WebinarRow | undefined): Promise<number> {
+  if (session.kind !== "simulated" || !webinar) {
+    return Number.NaN;
+  }
+  if (session.presenceCurve?.durationMs) {
+    return session.presenceCurve.durationMs;
+  }
+  try {
+    return sessionVideoDurationMs(session, sessionRecordingOf(await listRecordingRows(db, [session.webinarId]), session), webinar.duration_minutes);
+  } catch (error) {
+    console.error(`[admin/webinarios] duracao do video da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+    return Number.NaN;
+  }
+}
+
+/**
+ * O painel Presenca (docs/30 §2.4) pela visao do relatorio em cache (60 s, o minuto do relogio na chave): o console
+ * relê a cada 5 s e a RPC roda no maximo uma vez por minuto. `offsetMs` e o relogio do topo (consolePresenceClockMs),
+ * que para no encerramento: a curva da sessao encerrada termina no ultimo minuto dela, nao no minuto de agora.
+ * Replay, antes de comecar ou a leitura que falhou: nulo (o painel some e o resto do console segue).
+ */
+async function loadConsolePresence(session: WebinarSession, offsetMs: number, nowMs: number): Promise<ConsolePresence | null> {
+  if (!consolePresenceApplies(session.kind, offsetMs)) {
+    return null;
+  }
+
+  try {
+    return consolePresenceOf(await reportViewOf(session.id, nowMs), offsetMs);
+  } catch (error) {
+    console.error(`[admin/webinarios] presenca do console da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 /** O retrato do console de uma sessao agora (com `webinar`, o bloco da Live ao vivo na sessao `live`). */
 export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: WebinarKind; now: Date; session: SessionRow; webinar?: WebinarRow }): Promise<ConsoleSnapshot> {
   const session = sessionFromRow(input.session);
   const nowMs = input.now.getTime();
-  const offsetMs = sessionOffsetMs(session, nowMs);
-  const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds] = await Promise.all([
+  // Os presentes agora pelo relogio da presenca, o mesmo do sinal de 15 s (na live, desde o Iniciar live, nunca pela
+  // ancora da gravacao), como a sala do aluno conta.
+  const presenceMs = presenceOffsetMs(session, nowMs);
+  const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds, durationMs] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
     input.kind === "simulated" ? listScriptItemRows(db, session.webinarId) : Promise.resolve([]),
     input.kind === "simulated" ? loadFiredScript(db, session.id) : Promise.resolve({}),
     loadLaunchedPolls(db, session.webinarId, session.id),
     listPollRows(db, { sessionId: null, webinarId: session.webinarId }),
     listQuestionRows(db, { order: "votes", sessionId: session.id }),
-    Number.isFinite(offsetMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(offsetMs / 1000), sessionId: session.id }) : Promise.resolve([])
+    Number.isFinite(presenceMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor(presenceMs / 1000)), sessionId: session.id }) : Promise.resolve([]),
+    simulatedDurationMs(db, session, input.webinar)
   ]);
   const authors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
   const audienceAuthors = chatRows.filter((row) => row.source === "audience" && row.author_user_id).map((row) => row.author_user_id as string);
-  const [consented, live] = await Promise.all([
+  const [consented, live, presence] = await Promise.all([
     authors.length > 0 ? loadConsentFlags(db, authors) : Promise.resolve(new Set<string>()),
-    session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null)
+    session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
+    loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs)
   ]);
   const messages: ConsoleMessage[] = chatRows.map((row) => ({
     ...chatMessageFromRow(row),
@@ -379,6 +439,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     messages,
     pinnedMessageId: session.pinnedMessageId,
     polls: { launched, templates: templates.polls.map((poll) => pollFromRow(poll, templates.options)) },
+    presence,
     presentNow: presentIds.length,
     questions: questionRows.map(questionFromRow),
     scriptFired: fired,
@@ -398,7 +459,11 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
   }
 
   const [sessionRows, recordings] = await Promise.all([listSessionRows(db, [row.id]), listRecordingRows(db, [row.id])]);
-  const sessions = sessionRows.map((session) => consoleSessionOf(sessionFromRow(session)));
+  const sessions = consoleSessionsFor(
+    sessionRows.map((session) => consoleSessionOf(sessionFromRow(session))),
+    now.getTime(),
+    requestedSessionId
+  );
   const picked = pickConsoleSession(sessions, requestedSessionId, now.getTime());
   const pickedRow = picked ? (sessionRows.find((session) => session.id === picked.id) ?? null) : null;
   const kind: WebinarKind = row.kind === "simulated" ? "simulated" : "live";

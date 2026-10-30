@@ -21,7 +21,7 @@ import {
 const PAGE = 1000;
 
 /** Le todas as linhas de uma consulta, pagina a pagina (o PostgREST corta em 1000). */
-async function fetchAll<T>(run: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string | null; hint?: string | null } | null }>, context: string): Promise<T[]> {
+export async function fetchAll<T>(run: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string | null; hint?: string | null } | null }>, context: string): Promise<T[]> {
   const rows: T[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await run(from, from + PAGE - 1);

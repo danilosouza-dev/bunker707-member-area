@@ -8,7 +8,8 @@ import "./support/resolve-extensionless-ts.mjs";
 // Os cards da fase 2b do editor desenhados (docs/30 §2.2; docs/18 §1.1): Roteiro de chat (as linhas com minuto,
 // nome, papel, Solta em, a situacao, Importar/Exportar CSV, a transcricao e Resolver frases, o chat de uma sessao
 // encerrada em CSV), Simulação (o aviso do CDC, uma linha por sessao gravada com o selo e quem decidiu, so para quem
-// publica), Enquetes (os modelos) e Sessões (Entrada atrasada por sessao, o link do console e o Replay livre).
+// publica), Enquetes (os modelos) e Sessões (Entrada atrasada por sessao, o link do console e o Replay livre; o
+// "Comeca quando voce entra" da fase 4e tem o teste dele, tests/webinarios-jit-tela.test.mjs).
 //
 // Os .tsx do app sao transpilados aqui pelo TypeScript (so JSX -> JS). next/link, next/image e next/navigation viram
 // stubs; o Dialog vira uma versao sem portal; as Server Actions viram funcoes falsas.
@@ -45,6 +46,10 @@ export function DialogTrigger({ children }) { return children; }
 export function DialogClose({ children }) { return children; }`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
+  "@/server/webinars/simulation-actions": `${fail}
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail;`,
+  "@/server/webinars/jit-actions": `${fail}
+export const saveJitSettings = fail; export const loadJitSettings = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
 };
@@ -272,7 +277,8 @@ test("Sessões: Entrada atrasada por sessao (Até o fim / Até um minuto com os 
   assert.match(text, /Agendada/);
   assert.match(text, /Replay livre/);
   assert.match(text, /Depois da primeira sessão encerrar, o aluno assiste com a barra/);
-  assert.match(text, /Começa quando você entra · em breve/, "o just-in-time continua em breve");
+  assert.doesNotMatch(text, /Começa quando você entra · em breve/, "o just-in-time saiu do em breve (fase 4e)");
+  assert.doesNotMatch(text, /em breve/);
   assert.doesNotMatch(text, /Entrada atrasada · em breve/, "a Entrada atrasada saiu do em breve");
 
   const semEncerrada = html(createElement(SessionsCard, { ...props, replay: { ...replay, firstEnded: false }, savedSessions: [session()], webinarId: WEBINAR }));

@@ -994,3 +994,28 @@ test("Cancelar minha vaga: com a hora no formato do Postgres (+00:00) a rota res
   assert.equal(deNovo.body.data.cancelled, false, "repetir nao cancela de novo");
   assert.equal(eventos(db, "webinar_registered").length, 2);
 });
+
+test("fase 4e: a sessao do Comeca quando voce entra nunca tem vaga: POST /register com ela responde 404 e nada e gravado", async () => {
+  const { db } = montar({ scheduledAt: Date.now() + 2 * HOUR });
+  db.tables.webinars.find((row) => row.id === WEBINAR).registration_required = true;
+  db.tables.webinar_sessions.find((row) => row.id === SESSION).jit = true;
+  const resposta = await json(await registerRoute.POST(pedido(`${WEBINAR}/register`, "POST", { sessionId: SESSION }), contexto()));
+  assert.equal(resposta.status, 404);
+  assert.equal(db.tables.webinar_registrations.length, 0);
+});
+
+test("fase 4c: sem WEBINAR_ASSISTANT_ENABLED o chat e as perguntas seguem como antes; o 201 diz assistant: null e o GET /questions leva answerSource nulo", async () => {
+  delete process.env.WEBINAR_ASSISTANT_ENABLED;
+  const { db } = montar();
+  const chamou = await enviar({ body: "@assistente quanto custa?", ...comAceite });
+  assert.equal(chamou.status, 201, JSON.stringify(chamou.body));
+  assert.equal(chamou.body.data.assistant, null, "sem o ambiente, o Assistente nem e agendado");
+  assert.ok(!db.calls.from.includes("webinar_ai_requests"), "nenhuma leitura das tabelas do Assistente");
+
+  const feita = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { anonymous: false, body: "Tem certificado?", sessionId: SESSION }), contexto()));
+  assert.equal(feita.status, 201, JSON.stringify(feita.body));
+  assert.equal(feita.body.data.assistant, null);
+  const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}`), contexto()));
+  assert.deepEqual(lista.body.data.questions.map((question) => [question.body, question.answerSource, question.handoffRequested]), [["Tem certificado?", null, false]]);
+  assert.ok(!db.calls.from.includes("webinar_ai_requests"));
+});

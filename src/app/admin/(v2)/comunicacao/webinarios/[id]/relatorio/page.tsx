@@ -23,10 +23,13 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-// Comunicação › Webinários › um webinário › Relatório (docs/30 §2.5 e §3.4): o seletor de sessao (?sessao=), os
-// numeros, a curva, o chat, as perguntas, as enquetes, as vagas, o replay, a Simulacao e a lista por aluno com o
-// CSV. Ver e messaging.write, como as outras telas de Comunicacao; o relatorio da sessao fica 60 s em cache (tag
-// webinars). Webinario que nao existe: 404. Banco sem a migracao 202610290001: o aviso no lugar dos numeros.
+// Comunicação › Webinários › um webinário › Relatório (docs/30 §2.5, §3.4, §3.5 e §3.7): o seletor de sessao
+// (?sessao=; as "Comeca quando voce entra" so dos ultimos 7 dias), o botao Exportar com os CSVs nos nomes do Zoom, os
+// numeros, a curva com o trecho da transcricao nas quedas, o chat, as perguntas, as enquetes, as vagas, o replay, a
+// Oferta, as Respostas do Assistente, a Simulacao completa e a lista por aluno com o CSV. Ver e messaging.write, como
+// as outras telas de Comunicacao; o relatorio da sessao fica 60 s em cache (tag webinars), a lista por aluno e os CSVs
+// nunca (M9). Webinario que nao existe: 404. Banco sem a migracao WEBINARS_MIGRATION: o aviso no lugar dos numeros
+// (as partes da fase 4 sem a migracao delas mostram o aviso so no bloco).
 export default async function AdminWebinarReportPage({ params, searchParams }: PageProps) {
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
 

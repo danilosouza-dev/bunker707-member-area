@@ -20,6 +20,7 @@ import {
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
+import type { ConsolePresence } from "./console-presence-model";
 import type { LiveConsoleSnapshot } from "./live-console-model";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
@@ -300,6 +301,11 @@ export type ConsoleSnapshot = {
   messages: ConsoleMessage[];
   pinnedMessageId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
+  /**
+   * O painel Presenca (docs/30 §2.4): pico, mensagens por minuto e a curva dos ultimos 30 minutos, da visao do
+   * relatorio em cache de 60 s (console-presence-model.ts). Nulo no Replay, antes de comecar ou sem a leitura.
+   */
+  presence?: ConsolePresence | null;
   presentNow: number;
   questions: WebinarQuestion[];
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */
@@ -352,6 +358,16 @@ export function consoleClockMs(session: Pick<WebinarSession, "endedAt" | "kind" 
     return Number.NaN;
   }
   return Number.isFinite(durationMs) ? Math.min(elapsed, durationMs) : elapsed;
+}
+
+/**
+ * O relogio do painel Presenca (docs/30 §2.4), no eixo dos baldes da presenca e do relatorio: o do topo
+ * (consoleClockMs: a Live ao vivo desde o Iniciar live, a gravada desde a hora marcada), que para no encerramento; na
+ * gravada, no ultimo instante do video, para a curva terminar no ultimo minuto dele mesmo com o tick fechando depois.
+ */
+export function consolePresenceClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "scheduledAt" | "startedAt" | "status">, durationMs: number, nowMs: number): number {
+  const clock = consoleClockMs(session, durationMs, nowMs);
+  return session.kind === "simulated" && Number.isFinite(durationMs) && durationMs > 0 ? Math.min(clock, durationMs - 1) : clock;
 }
 
 /** Agora, ou o encerramento se a sessao ja acabou (o relogio do console para ali). */

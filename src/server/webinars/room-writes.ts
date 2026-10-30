@@ -190,9 +190,14 @@ async function saveConsent(input: { choice: ConsentChoice; db: WebinarsDb; event
  * ---------------------------------------------------------------------------------------------- */
 
 export type PostChatInput = { body: ChatPostInput & { offsetMs?: number | null }; context: RoomContext; db: WebinarsDb; now?: number; userId: string };
-export type PostChatResult = { events: StudentEventInsert[]; message: StudentChatMessage; pending: boolean };
+/**
+ * Fase 4c: `offsetMs` e o segundo gravado e `questionId` a pergunta que a mensagem do tipo pergunta abriu na aba (nula
+ * fora disso): a rota entrega os dois ao Assistente depois da resposta (assistant-model.chatAssistantTrigger).
+ */
+export type PostChatResult = { events: StudentEventInsert[]; message: StudentChatMessage; offsetMs: number; pending: boolean; questionId: string | null };
 
-async function blockedTermIn(db: WebinarsDb, body: string): Promise<string | null> {
+/** A frase da palavra bloqueada (lesson_comment_blocked_words) que o texto usa, ou nulo. Tambem a resposta do Assistente passa aqui. */
+export async function blockedTermIn(db: WebinarsDb, body: string): Promise<string | null> {
   const { data, error } = await db.from("lesson_comment_blocked_words").select("message,word").eq("active", true);
   assertNoDbError(error, "Webinarios: palavras bloqueadas");
   const rule = ((data ?? []) as { message: string | null; word: string }[]).find((item) => containsBlockedTerm(body, item.word));
@@ -266,6 +271,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   events.push(webinarEvent(userId, session.id, "webinar_chat_sent", chatSentMetadata({ kind: body.kind, length: text.length, messageId: row.id, offsetMs })));
 
   // A pergunta pendente nao vai para a aba Perguntas (la todo mundo ve): entra quando a equipe libera.
+  let questionId: string | null = null;
   if (body.kind === "question" && approved) {
     const question = await insertQuestionRow(db, {
       anonymous: mode === "anonymous",
@@ -277,9 +283,10 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
       user_id: userId
     });
     events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous: mode === "anonymous", offsetMs, questionId: question.id })));
+    questionId = question.id;
   }
 
-  return { events, message: toStudentMessage(chatMessageFromRow(row), userId), pending: !approved };
+  return { events, message: toStudentMessage(chatMessageFromRow(row), userId), offsetMs, pending: !approved, questionId };
 }
 
 export type RemoveChatResult = { events: StudentEventInsert[]; removed: number };
@@ -405,7 +412,8 @@ export async function sendStudentReaction(input: { context: RoomContext; db: Web
   return { events: [webinarEvent(userId, context.session.id, "webinar_reaction_sent", reactionSentMetadata({ offsetMs, reaction }))], offsetMs, reaction };
 }
 
-export type QuestionResult = { events: StudentEventInsert[]; question: StudentQuestion };
+/** Fase 4c: `offsetMs` (o segundo gravado) vai ao Assistente junto da pergunta (assistant-model.questionAssistantTrigger). */
+export type QuestionResult = { events: StudentEventInsert[]; offsetMs: number; question: StudentQuestion };
 
 export type AskQuestionInput = {
   body: Pick<QuestionPostInput, "anonymous" | "body" | "consent" | "consentVersion" | "displayMode" | "nickname">;
@@ -461,7 +469,7 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
     throw new WebinarError(CHAT_MESSAGES.invalid, 500);
   }
   events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous, offsetMs, questionId: row.id })));
-  return { events, question };
+  return { events, offsetMs, question };
 }
 
 /** Curtir / Tirar a curtida de uma pergunta que o aluno ve na sessao (fora da hora 409; a dispensada de outro aluno 404). */

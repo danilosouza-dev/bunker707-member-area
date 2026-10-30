@@ -14,9 +14,11 @@ import { adminCard } from "../../../styles";
 // alternador "Ver como tabela" / "Ver como gráfico" do relatorio do pop-up: um botao de acao comum (sem
 // aria-pressed; o texto diz o que o clique faz), 44 px no toque. A tabela e uma linha por minuto (o maior numero
 // de presentes dos dois baldes), com <caption> e <th scope="col">; cabe a 375 px sem rolar de lado. Os pontos
-// vem prontos de report-page-model.ts: aqui so o desenho.
+// vem prontos de report-page-model.ts: aqui so o desenho. Quando a gravacao tem transcricao, cada queda da lista
+// "Maiores quedas" traz o trecho do video daquele minuto (dropExcerpts; sem cue no minuto, a frase que diz isso).
 
 const COPY = WEBINAR_COPY.relatorio;
+const EXPORTAR = WEBINAR_COPY.exportar;
 const WIDTH = 600;
 const HEIGHT = 160;
 
@@ -24,6 +26,8 @@ type PresenceCurveCardProps = {
   avgPresent: number;
   bucketSeconds?: number;
   curve: readonly ReportBucket[];
+  /** O trecho da transcricao de cada queda, pelo balde; nulo quando a gravacao nao tem transcricao. */
+  dropExcerpts?: Record<number, string | null> | null;
   drops: readonly ReportBucket[];
   durationMs: number;
   /** Abre ja em tabela (o teste e quem nao enxerga o grafico). */
@@ -32,7 +36,7 @@ type PresenceCurveCardProps = {
   peak: ReportBucket | null;
 };
 
-export function PresenceCurveCard({ avgPresent, bucketSeconds, curve, drops, durationMs, initialMode = "chart", live, peak }: PresenceCurveCardProps) {
+export function PresenceCurveCard({ avgPresent, bucketSeconds, curve, dropExcerpts = null, drops, durationMs, initialMode = "chart", live, peak }: PresenceCurveCardProps) {
   const [table, setTable] = useState(initialMode === "table");
   const titleId = useId();
   const hasData = curve.some((point) => point.n > 0);
@@ -106,7 +110,22 @@ export function PresenceCurveCard({ avgPresent, bucketSeconds, curve, drops, dur
       {hasData ? (
         <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4">
           <h3 className="text-sm leading-5 font-semibold text-[var(--text-primary)]">{COPY.maioresQuedas}</h3>
-          {geometry && geometry.drops.length > 0 ? (
+          {geometry && geometry.drops.length > 0 && dropExcerpts ? (
+            <ol aria-label={COPY.maioresQuedas} className="flex min-w-0 flex-col gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
+              {geometry.drops.map((drop) => {
+                const excerpt = dropExcerpts[drop.b] ?? null;
+
+                return (
+                  <li className="flex min-w-0 flex-col gap-0.5" key={drop.b}>
+                    <span className="tabular-nums">{drop.label}</span>
+                    <span className="min-w-0 text-xs text-[var(--text-tertiary)] [overflow-wrap:anywhere]">
+                      {excerpt ? `${EXPORTAR.quedas.trechoDaTranscricao} “${excerpt}”` : EXPORTAR.quedas.semTranscricao}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : geometry && geometry.drops.length > 0 ? (
             <ol aria-label={COPY.maioresQuedas} className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-[13px] leading-5 text-[var(--text-secondary)] tabular-nums">
               {geometry.drops.map((drop) => (
                 <li key={drop.b}>{drop.label}</li>
