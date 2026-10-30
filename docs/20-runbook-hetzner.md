@@ -659,7 +659,7 @@ O app ja tem a sala ao vivo (`docs/30` §11; a migracao `202610290002` vai para 
 
 | Variavel (app) | Para que | Sem ela |
 |---|---|---|
-| `WEBINAR_MEET_DOMAIN` | hostname do C (`meet.<dominio>`, sem `https://`); tambem lido no build pela Permissions-Policy de `/webinarios` e do console da sala | sala "em breve"; o build usa `meet.bunker707.com.br` na Permissions-Policy |
+| `WEBINAR_MEET_DOMAIN` | hostname do C (`meet.<dominio>`, sem `https://`); tambem lido no build pela Permissions-Policy do app (`next.config.ts`, a mesma em toda pagina) | sala "em breve"; o build usa `meet.bunker707.com.br` na Permissions-Policy |
 | `WEBINAR_JWT_SECRET` (+ `WEBINAR_JWT_APP_ID`, vazio = `bunker707`) | o token da sala; o mesmo valor de `JWT_APP_SECRET` no C | sala "em breve" (`join-token` 503) |
 | `WEBINAR_RECORDER_WEBHOOK_SECRET` | o HMAC do webhook do gravador; o mesmo valor do `JIBRI_SECRETS` | o webhook responde 401 e nada e gravado |
 | `GITHUB_INFRA_TOKEN` (opcional; so "Actions: write" deste repositorio) | o app pede `jibri-up` / `jibri-down` sozinho (Preparar gravacao, Gravar automaticamente, a devolucao) | o console mostra a reserva e a maquina e pedida a mao pelo workflow |

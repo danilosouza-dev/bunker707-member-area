@@ -55,8 +55,9 @@ export function getSafeRedirectPath(value?: string | null) {
 /**
  * Caminho interno do admin (/admin, /admin/..., com busca ou ancora). Quem leva para o admin vindo de
  * fora dele (login, troca de senha, area do aluno) faz um carregamento inteiro da pagina, nunca uma troca
- * de rota do Next: o cabecalho Permissions-Policy (next.config.ts) libera o microfone so em /admin, e o
- * navegador aplica a politica do documento que carregou ("Gravar agora" dos avisos, docs/22 §4.5).
+ * de rota do Next: o navegador aplica a Permissions-Policy do documento que carregou ("Gravar agora" dos
+ * avisos, docs/22 §4.5). Desde 30/10/2026 a politica e a mesma em todo o app (next.config.ts, docs/30 I10) e
+ * o carregamento inteiro ficou sem efeito sobre o microfone; continua como estava.
  */
 export function isAdminPath(value: string) {
   let url: URL;

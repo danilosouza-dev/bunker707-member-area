@@ -2470,8 +2470,9 @@ type PolicyReader = { allowsFeature?: (feature: string) => boolean } | null | un
 export type PolicyDocument = { featurePolicy?: PolicyReader; permissionsPolicy?: PolicyReader };
 
 /**
- * O documento foi carregado com o microfone bloqueado pelo Permissions-Policy (veio da area do aluno
- * ou do login por troca de rota, sem recarregar): so recarregar em /admin libera. Navegador sem a API
+ * O documento foi carregado com o microfone bloqueado pelo Permissions-Policy: so recarregar libera. Desde
+ * 30/10/2026 a politica libera o microfone para a propria origem em todo o app (docs/30 I10); a conferencia
+ * fica para o navegador ou a configuracao que ainda bloquear. Navegador sem a API
  * (Firefox, Safari) ou erro na leitura: false (segue o pedido normal do microfone).
  */
 export function isMicrophoneBlockedByPolicy(doc: PolicyDocument | null | undefined) {
