@@ -489,6 +489,20 @@ services:
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
       EMAIL_DAILY_LIMIT: ${EMAIL_DAILY_LIMIT:-}
       NEXT_PUBLIC_SITE_URL: ${APP_PUBLIC_URL}
+      # Webinarios (docs/30, docs/20 §8B.9): a sala ao vivo no Jitsi proprio, o webhook e o pedido do gravador, a
+      # Bunny Stream do replay e as chaves do Assistente e da traducao. Vazias = a sala diz "em breve" e o resto segue.
+      # WEBINAR_RECORDER_DISPATCH nunca entra aqui: o duble so existe fora da producao.
+      WEBINAR_MEET_DOMAIN: ${WEBINAR_MEET_DOMAIN:-}
+      WEBINAR_JWT_APP_ID: ${WEBINAR_JWT_APP_ID:-}
+      WEBINAR_JWT_SECRET: ${WEBINAR_JWT_SECRET:-}
+      WEBINAR_RECORDER_WEBHOOK_SECRET: ${WEBINAR_RECORDER_WEBHOOK_SECRET:-}
+      GITHUB_INFRA_TOKEN: ${GITHUB_INFRA_TOKEN:-}
+      BUNNY_STREAM_API_KEY: ${BUNNY_STREAM_API_KEY:-}
+      BUNNY_STREAM_LIBRARY_ID: ${BUNNY_STREAM_LIBRARY_ID:-}
+      BUNNY_EMBED_TOKEN_KEY: ${BUNNY_EMBED_TOKEN_KEY:-}
+      WEBINAR_ASSISTANT_ENABLED: ${WEBINAR_ASSISTANT_ENABLED:-}
+      WEBINAR_TRANSLATION_ENABLED: ${WEBINAR_TRANSLATION_ENABLED:-}
+      YOUTUBE_DATA_API_KEY: ${YOUTUBE_DATA_API_KEY:-}
 
   # Borda: TLS automatico (Let's Encrypt), app, API do Supabase e Studio em hostnames separados.
   # E o unico servico que escuta fora de 127.0.0.1 (CADDY_BIND=0.0.0.0 em producao; a Hetzner so deixa
