@@ -846,6 +846,7 @@ Primeiro minuto, sempre: `ssh deploy@<ip>`, `cd /opt/bunker707`, `docker compose
 
 | Sintoma | Verificar | Acao |
 |---|---|---|
+| Capas e imagens do Storage quebradas no app (o `/_next/image` responde 400 "\"url\" parameter is not allowed") | `docker compose logs app` mostra "hostname resolved to private IP": o app chega ao Storage pelo host-gateway (IP privado) | a imagem precisa ter sido construida com `images.dangerouslyAllowLocalIP` ligado (`next.config.ts`, so com `NEXT_OUTPUT=standalone`, desde 30/10/2026); refazer o `deploy-membros` da `main` |
 | App fora (health 5xx/timeout), Supabase ok | `docker compose logs --tail=200 app` | `docker compose restart app`; se e deploy recente, `deploy.sh --image <anterior> --no-migrate` |
 | Ninguem consegue entrar | `logs auth`; `smoke.sh` (auth 200?) | `restart auth`; conferir `SMTP_*` se for e-mail; conferir relogio (`timedatectl`) |
 | Tudo lento | `docker stats`, `free -h`, `df -h` | memoria: Studio desligado? (8.1); `stop supavisor`; disco cheio: `docker system prune -f`, logs, `stage/` antigos |
