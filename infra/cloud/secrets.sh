@@ -66,7 +66,7 @@ if [ "$role" = "membros" ]; then
     # /api/health pega o app ainda subindo (502).
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash -c '. infra/scripts/lib.sh; for s in auth app; do wait_healthy \$s 180; done' && bash infra/scripts/smoke.sh"
 elif [ "$role" = "meet" ]; then
-    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d && bash -c '. infra/jitsi/scripts/_env.sh; for s in prosody jicofo jvb web; do wait_healthy \$s 300; done' && bash infra/jitsi/scripts/smoke.sh"
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d && bash -c '. infra/jitsi/scripts/_env.sh; reconnect_focus; for s in prosody jicofo jvb web; do wait_healthy \$s 300; done' && bash infra/jitsi/scripts/smoke.sh"
 else
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="-f infra/mautic/compose.colocado.yml"
     profile=""; [ -n "${SKIP_MARKETING:-}" ] || profile="--profile borda"

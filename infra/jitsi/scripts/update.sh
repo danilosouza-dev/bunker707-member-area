@@ -69,6 +69,7 @@ case "$mode" in
         sed -i.bak -E "s|^JITSI_IMAGE_VERSION=.*|JITSI_IMAGE_VERSION=$tag|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"; chmod 600 "$ENV_FILE"
         compose pull --quiet
         compose up -d
+        reconnect_focus
         for s in prosody jicofo jvb web; do wait_healthy "$s" 300; done
         if bash "$JITSI_DIR/scripts/smoke.sh"; then
             log "Jitsi em $tag."

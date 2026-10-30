@@ -118,6 +118,11 @@ const nextConfig: NextConfig = {
     ];
   },
   images: {
+    // So no servidor proprio (imagem Docker): o app chega ao Storage pelo host-gateway do compose (extra_hosts,
+    // IP privado), e o otimizador do Next 16 recusa por padrao imagem de IP privado com 400 ("url" parameter is
+    // not allowed): toda capa do Storage sumia em producao (30/10/2026). As origens continuam so as de
+    // remotePatterns (o Storage do proprio projeto e as miniaturas do YouTube). Na Vercel fica desligado.
+    dangerouslyAllowLocalIP: process.env.NEXT_OUTPUT === "standalone",
     formats: ["image/avif", "image/webp"],
     // src/lib/image-hosts.ts também alimenta canOptimizeImageSrc no render.
     remotePatterns: imageRemotePatterns

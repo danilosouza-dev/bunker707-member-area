@@ -18,7 +18,13 @@
 > `202610300002` a `202610300007` (4a, 4b, 4c, 4e, 4f e os ajustes da revisão; a 4d não tem migração), numeradas
 > depois da `202610300001` do Quem pode por regras (seção 9.9) e aplicadas nessa ordem antes do merge na `dev`: o app
 > novo lê `webinar_sessions.jit` (`202610300005`) em toda leitura de sessão. **Aplicadas na nuvem de teste em 30/10/2026**, antes
-> do merge, pelo MCP e conferidas; na produção, nenhuma ainda. Passos, conferência e estado na seção 9.10.
+> do merge, pelo MCP e conferidas. Passos, conferência e estado na seção 9.10.
+>
+> **Atualização de 30/10/2026 (produção):** os webinários (fases 1 a 4) estão em produção: promoção #142, imagem
+> `hetzner-sha-e15f6d4`. O `deploy-membros` aplicou as onze migrações de `202610280001` a `202610300007`. Os `WEBINAR_*`
+> entraram pelo `secrets-membros`, e o compose os repassa ao app (#141). O Jitsi (C) atende a produção
+> (`docs/20` §8B, estado de 30/10/2026). Fica só com o produtor a gravação automática por hora (`JIBRI_SECRETS` com a
+> Bunny e `GITHUB_INFRA_TOKEN`); sem ela a live funciona e grava pelo navegador.
 >
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
