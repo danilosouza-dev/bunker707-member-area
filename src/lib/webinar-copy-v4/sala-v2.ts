@@ -12,6 +12,15 @@ export const SALA_V2_COPY = {
     duracao: (minutos: number) => `${minutos} min`
   },
   /**
+   * O chat no estilo do Zoom (V2-9): o leitor de tela ouve quem escreveu antes do texto ("Marina R., Equipe, 20:41: ",
+   * so os trechos que existem: o aluno nao tem papel e o Replay nao tem hora); a linha "nome · papel · hora" embaixo do
+   * balao e so para quem ve. O menu ⋯ da linha do campo leva o Remover minhas mensagens.
+   */
+  chat: {
+    autor: (partes: readonly string[]) => `${partes.join(", ")}: `,
+    maisOpcoes: "Mais opções"
+  },
+  /**
    * O painel do chat (V2-6 a V2-8): o balao da barra diz o que faz ("Esconder o chat" com o painel aberto, "Mostrar o
    * chat" com ele fechado e, com mensagens novas, "Mostrar o chat, 3 mensagens novas", a contagem que vem de
    * WEBINAR_COPY.sala.mensagensNovas), o X do painel fecha e a lista das abas se chama "Painel da sala".

@@ -57,8 +57,8 @@ const iconSizes: Record<RoomIconButtonSize, string> = {
 
 /**
  * Um circulo com icone (o tema e o X do painel em "outline"; os da barra em "control", com o ativo pelo token
- * --room-active-bg; sobre o video em "video", igual nos dois temas). O nome acessivel e o `label`, que tambem vai no
- * title; `active` liga o aria-pressed.
+ * --room-active-bg; o Enviar do chat em "primary", cheio como o ativo; sobre o video em "video", igual nos dois temas).
+ * O nome acessivel e o `label`, que tambem vai no title; `active` liga o aria-pressed.
  */
 export function RoomIconButton({
   active,
@@ -68,7 +68,7 @@ export function RoomIconButton({
   tone = "outline",
   type = "button",
   ...props
-}: Omit<ComponentProps<"button">, "aria-label" | "aria-pressed" | "title"> & { active?: boolean; label: string; size?: RoomIconButtonSize; tone?: "control" | "outline" | "video" }) {
+}: Omit<ComponentProps<"button">, "aria-label" | "aria-pressed" | "title"> & { active?: boolean; label: string; size?: RoomIconButtonSize; tone?: "control" | "outline" | "primary" | "video" }) {
   return (
     <button
       aria-label={label}
@@ -81,7 +81,7 @@ export function RoomIconButton({
           ? "border border-room-border-strong bg-room-surface text-room-icon hover:bg-room-control-hover hover:text-room-fg-strong"
           : tone === "video"
             ? "bg-black/60 text-white hover:bg-black/75 focus-visible:outline-white"
-            : active
+            : tone === "primary" || active
             ? "bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85"
             : "bg-room-control text-room-fg-strong hover:bg-room-control-hover",
         className

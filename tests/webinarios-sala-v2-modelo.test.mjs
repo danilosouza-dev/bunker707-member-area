@@ -11,6 +11,7 @@ import "./support/transpile-tsx.mjs";
 // tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
+// F6 (V2-9): a hora e o papel da linha de baixo do balao do chat (webinar-room-client.ts).
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -485,4 +486,27 @@ test("overlayMessages (V2-8): sem contagem, as 2 ultimas mensagens (a mais nova 
   assert.deepEqual(model.overlayMessages(["a"]), ["a"]);
   assert.deepEqual(model.overlayMessages([]), []);
   assert.deepEqual(model.overlayMessages(["a", "b", "c"], 0), [], "contagem zero, nada");
+});
+
+test("chatTimeLabel (V2-9): a hora de Sao Paulo pelo zero da sessao mais o offset da mensagem; no Replay, nenhuma", () => {
+  const zero = Date.parse("2026-11-05T23:00:00.000Z"); // 20:00 em Sao Paulo
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 41 * 60_000, zeroMs: zero }), "20:41");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 41 * 60_000, zeroMs: zero }), "20:41", "a gravada pela hora marcada");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: -5 * 60_000, zeroMs: zero }), "19:55", "a mensagem da espera, antes do zero");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 4 * 3_600_000 + 61_000, zeroMs: zero }), "00:01", "a virada do dia");
+  // O Replay nao sabe quando a live original comecou: sem hora, nunca uma hora errada.
+  assert.equal(client.chatTimeLabel({ kind: "replay", offsetMs: 41 * 60_000, zeroMs: zero }), "");
+  // Sem o zero (ou um zero estragado), tambem sem hora.
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: null }), "");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: undefined }), "");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 0, zeroMs: Number.NaN }), "");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: 9e15 }), "", "fora do calendario, sem hora (e sem erro)");
+});
+
+test("chatRoleLabel (V2-9): o papel so para Apresentador, Equipe e Assistente; o aluno e o convidado, nenhum", () => {
+  assert.equal(client.chatRoleLabel("host"), "Apresentador");
+  assert.equal(client.chatRoleLabel("team"), "Equipe", "o co-apresentador tambem sai como Equipe ate a fase 2");
+  assert.equal(client.chatRoleLabel("ai"), "Assistente");
+  assert.equal(client.chatRoleLabel("student"), null);
+  assert.equal(client.chatRoleLabel("guest"), null);
 });

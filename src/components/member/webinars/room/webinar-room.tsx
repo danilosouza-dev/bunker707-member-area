@@ -597,7 +597,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         readOnly={readOnly}
         sessionId={sessionId}
         slowUntilMs={chat.slowUntilMs}
+        timeKind={kind}
         webinarId={webinarId}
+        zeroMs={zeroMs}
       />
     </>
   );

@@ -8,8 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 // sem navegador. O cabecalho V2 (docs/31 V2-3: o titulo, a linha da data com a duracao e quem apresenta, "{n}
 // assistindo", o tema e o Sair; Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
 // decisao da equipe, senao "Sessao das 20:00"; Replay; quem apresenta), o palco nos estados (espera com a contagem,
-// no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (os selos Equipe / Apresentador /
-// Assistente, a pendente "Aguardando a equipe", a fixada, o compositor desligado e no modo lento), o aceite com o
+// no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (V2-9:
+// o balao primeiro e "nome · papel · hora" embaixo, a minha a direita, o papel so para Apresentador, Equipe e Assistente,
+// sem etiqueta colorida; a pendente "Aguardando a equipe", a fixada, o menu ⋯ na linha do campo, o compositor desligado
+// e no modo lento), o aceite com o
 // texto exato de §8.5 e os dois botoes, a barra de reacoes com seis botoes de 44 px, a sala inteira como dialogo
 // (aria-modal, as abas, a 375 px: palco na largura, campo no rodape) e os botoes Entrar / Assistir o replay. A marca no
 // cabecalho (a sala cobre o topo da area): a logo de Marca a partir de lg (o ponto em que a sala vira computador),
@@ -251,35 +253,123 @@ test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar
   assert.match(fora, /role="alert">Esta live não está disponível para você\.</);
 });
 
-test("chat: os selos, a pendente, a fixada, a lista em role=log; compositor desligado, so a equipe, modo lento e encerrada; Remover minhas mensagens no menu", () => {
+/** O item do chat (o li da mensagem) e a linha de baixo do balao, so o texto. */
+const chatItem = (html, id) => {
+  const inicio = html.lastIndexOf("<li", html.indexOf(`data-room-message="${id}"`));
+  return html.slice(inicio, html.indexOf("</li>", inicio) + 5);
+};
+const chatMeta = (item) =>
+  (item.match(/<p [^>]*data-room-message-meta="">([\s\S]*?)<\/p>/)?.[1] ?? "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel · hora'; a minha a direita; o papel so para Apresentador, Equipe e Assistente; sem etiqueta colorida", () => {
   const base = {
     chatMode: "open",
     consented: true,
     defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
-    messages: [msg("1", { displayName: "Bia C." }), msg("2", { displayName: "Equipe", role: "team" }), msg("3", { displayName: "Danilo", role: "host" }), msg("4", { displayName: "Assistente", role: "ai" }), msg("5", { mine: true, pending: true })],
+    messages: [
+      msg("1", { displayName: "Bia C.", offsetMs: 42 * MIN }),
+      msg("2", { displayName: "Marina R.", offsetMs: 41 * MIN, role: "team" }),
+      msg("3", { displayName: "Danilo", role: "host" }),
+      msg("4", { displayName: "Assistente", role: "ai" }),
+      msg("5", { mine: true, offsetMs: 43 * MIN, pending: true }),
+      msg("6", { displayName: "Convidada", role: "guest" })
+    ],
+    nowMs: T0,
+    onRemoveMine: async () => 0,
+    onSend: async () => ({ pending: false }),
+    phase: "live",
+    pinned: null,
+    readOnly: false,
+    slowUntilMs: null,
+    // A live: o zero da sessao as 20:00 de Sao Paulo; a hora de cada mensagem e o zero mais o offset dela.
+    timeKind: "live",
+    zeroMs: T0
+  };
+  const html = render(chat.RoomChatPanel, base);
+
+  // A linha de baixo: o nome, o papel (so dos quatro) e a hora; o aluno e o convidado sem papel.
+  assert.equal(chatMeta(chatItem(html, "2")), "Marina R. · Equipe · 20:41");
+  assert.equal(chatMeta(chatItem(html, "1")), "Bia C. · 20:42", "o aluno sem papel");
+  assert.equal(chatMeta(chatItem(html, "3")), "Danilo · Apresentador · 20:00");
+  assert.equal(chatMeta(chatItem(html, "4")), "Assistente · Assistente · 20:00");
+  assert.equal(chatMeta(chatItem(html, "6")), "Convidada · 20:00", "o convidado sem papel");
+  // A pendente: "Aguardando a equipe" como texto na linha de baixo (e lido: fica fora do aria-hidden).
+  assert.equal(chatMeta(chatItem(html, "5")), "Ana S. · 20:43 · Aguardando a equipe");
+  assert.match(chatItem(html, "5"), /<\/span><span aria-hidden="true">·<\/span><span class="[^"]*">Aguardando a equipe<\/span><\/p>/);
+
+  // O balao primeiro; a linha de baixo e so para quem ve; o leitor de tela ouve o autor antes do texto.
+  const marina = chatItem(html, "2");
+  assert.ok(marina.indexOf("texto 2") < marina.indexOf("data-room-message-meta"), "o balao antes da linha de baixo");
+  assert.match(marina, /<p class="[^"]*\bbg-room-surface-2\b[^"]*"><span class="sr-only">Marina R\., Equipe, 20:41: <\/span>texto 2<\/p>/);
+  assert.match(marina, /data-room-message-meta=""><span aria-hidden="true"[^>]*><span class="[^"]*\btext-room-meta-name\b[^"]*">Marina R\.<\/span>/);
+  assert.match(chatItem(html, "1"), /<span class="sr-only">Bia C\., 20:42: <\/span>texto 1/, "sem papel, so o nome e a hora");
+  // O avatar de 28 px so com as iniciais (docs/30 §8.5), escondido do leitor de tela.
+  assert.match(marina, /^<li class="flex items-end gap-2" data-room-message="2"><span aria-hidden="true" class="[^"]*\bsize-7\b[^"]*"><span class="[^"]*">MR<\/span><\/span>/);
+
+  // A minha: a direita (a linha invertida, o avatar a direita), no balao do meu tema.
+  const minha = chatItem(html, "5");
+  assert.match(minha, /^<li class="[^"]*\bflex-row-reverse\b[^"]*" data-mine="" data-room-message="5">/);
+  assert.match(minha, /<p class="[^"]*\bbg-room-bubble-mine-bg\b[^"]*\btext-room-bubble-mine-fg\b[^"]*"><span class="sr-only">Ana S\., 20:43: <\/span>texto 5<\/p>/);
+  assert.equal((html.match(/data-mine=""/g) ?? []).length, 1, "so a minha");
+  assert.doesNotMatch(marina, /flex-row-reverse/);
+
+  // Nenhuma etiqueta colorida no item (o selo de papel e o da pendente saem): nem RoomBadge nem MemberChip.
+  const itens = ["1", "2", "3", "4", "5", "6"].map((id) => chatItem(html, id)).join("");
+  assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-\[var\(--accent\)\]/);
+
+  // Na gravada, a hora pelo mesmo zero (a hora marcada); no Replay, nenhuma hora (nem para o leitor de tela).
+  const gravada = render(chat.RoomChatPanel, { ...base, timeKind: "simulated" });
+  assert.equal(chatMeta(chatItem(gravada, "2")), "Marina R. · Equipe · 20:41");
+  const replay = render(chat.RoomChatPanel, { ...base, phase: "replay", timeKind: "replay" });
+  assert.equal(chatMeta(chatItem(replay, "2")), "Marina R. · Equipe");
+  assert.match(chatItem(replay, "2"), /<span class="sr-only">Marina R\., Equipe: <\/span>texto 2/);
+  // Sem o zero (a gaveta antiga, quem nao passa), tambem sem hora.
+  assert.equal(chatMeta(chatItem(render(chat.RoomChatPanel, { ...base, timeKind: undefined, zeroMs: undefined }), "2")), "Marina R. · Equipe");
+});
+
+test("chat: a fixada, a lista em role=log; o menu ⋯ na linha do campo; compositor desligado, so a equipe, modo lento e encerrada", () => {
+  const base = {
+    chatMode: "open",
+    consented: true,
+    defaultDisplayMode: "first_name_initial",
+    displayName: "Ana S.",
+    error: null,
+    messages: [msg("1", { displayName: "Bia C." }), msg("2", { displayName: "Equipe", role: "team" }), msg("5", { mine: true, pending: true })],
     nowMs: T0,
     onRemoveMine: async () => 0,
     onSend: async () => ({ pending: false }),
     phase: "live",
     pinned: msg("p", { displayName: "Equipe", pinned: true, role: "team", body: "link da apostila" }),
     readOnly: false,
-    slowUntilMs: null
+    slowUntilMs: null,
+    timeKind: "live",
+    zeroMs: T0
   };
   const html = render(chat.RoomChatPanel, base);
   assert.match(html, /role="log"/);
   assert.match(html, /aria-live="off"/, "em lista cheia o leitor de tela ouve so a contagem");
-  assert.match(html, />Equipe</);
-  assert.match(html, />Apresentador</);
-  assert.match(html, />Assistente</);
-  assert.match(html, /Aguardando a equipe/);
-  assert.match(html, /Fixada pela equipe/);
-  assert.match(html, /link da apostila/);
-  assert.match(html, /aria-haspopup="menu"[^>]*aria-label="Mais opções"/, "o menu ... (Remover minhas mensagens abre nele)");
-  assert.match(html, /aria-label="Escreva uma mensagem"/);
-  assert.match(html, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
-  assert.match(html, /min-h-11/, "o campo tem 44 px");
+  assert.match(html, /<div class="[^"]*\bbg-room-pinned\b[^"]*" data-testid="room-pinned">[\s\S]*?Fixada pela equipe[\s\S]*?link da apostila/);
+  // Sai a linha do rotulo "Chat" (repetia o nome da aba): o nome fica so na lista.
+  assert.doesNotMatch(html, />Chat</);
+  assert.match(html, /<ol aria-label="Chat"/);
+
+  // A linha do campo: o menu ⋯ a esquerda (40 px), o campo (44 px, 16 px abaixo de lg) e o Enviar redondo de 44 px.
+  const form = html.slice(html.indexOf("<form"), html.indexOf("</form>"));
+  assert.match(form, /<button aria-label="Mais opções" class="[^"]*\bsize-10\b[^"]*"[^>]*aria-expanded="false" aria-haspopup="menu">[\s\S]*<textarea/, "o menu antes do campo");
+  assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\bh-11\b[^"]*\btext-base\b[^"]*\blg:text-\[13px\][^"]*"/);
+  assert.match(form, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
+  assert.match(form, /<\/textarea><button aria-label="Enviar" class="[^"]*\bsize-11\b[^"]*\bbg-room-active-bg\b[^"]*" title="Enviar" type="submit" disabled="">/);
+  assert.doesNotMatch(html.slice(0, html.indexOf("<form")), /Mais opções/, "nada de menu acima da lista");
+
+  // Com a frase no lugar do campo (silenciado, sala que nao abriu), o menu continua na linha.
+  const comFrase = render(chat.RoomChatPanel, { ...base, notice: "Você está sem escrever no chat até 20:15." });
+  assert.doesNotMatch(comFrase, /<textarea/);
+  assert.match(comFrase, /aria-label="Mais opções"[\s\S]*data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.</);
 
   const off = render(chat.RoomChatPanel, { ...base, chatMode: "off" });
   assert.match(off, /O chat está desligado nesta sessão\./);

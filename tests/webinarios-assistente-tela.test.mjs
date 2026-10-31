@@ -5,8 +5,9 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // O Assistente e o Atendimento desenhados (docs/30 §1.3, §1.6, §2.2, §2.4, §6.6, §9 e D24; docs/18 §2.2), no Node com
-// react-dom/server e as Server Actions como dubles: no chat da sala, o selo Assistente (e o "Assistente:" do leitor de
-// tela) e "Falar com a equipe" so na resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
+// react-dom/server e as Server Actions como dubles: no chat da sala, o papel Assistente na linha de baixo do balao (e o
+// "Assistente, Assistente, 20:10:" do leitor de tela, antes do texto; docs/31 V2-9) e "Falar com a equipe" so na
+// resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
 // linha da dica (respondendo, limite, "@assistente", a equipe responde depois); o pronto do pedido; na aba Perguntas,
 // o selo na resposta do Assistente; o painel Atendimento do console (Atender / Pausar, Responder tudo e os avisos de
 // Assistente desligado, quem atende com as perguntas abertas, "Ninguem atendendo", a fila com origem, Pediu a equipe,
@@ -80,19 +81,25 @@ function chat(props = {}) {
     readOnly: false,
     sessionId: "s1",
     slowUntilMs: null,
+    // A live com o zero as 20:00 de Sao Paulo: as mensagens (offset de 10 min) sao das 20:10.
+    timeKind: "live",
     webinarId: "w1",
+    zeroMs: Date.parse("2026-11-05T23:00:00.000Z"),
     ...props
   });
 }
 
-test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
+test("chat da sala: o papel Assistente (e 'Assistente, Assistente, 20:10:' para o leitor de tela, antes do texto) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
   const markup = chat();
   const bloco = (id) => markup.slice(markup.indexOf(`data-room-message="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-room-message="${id}"`)));
-  assert.match(textOf(bloco("a-minha")), /Assistente: Assistente Assistente Custa R\$ 997\./, "o prefixo do leitor de tela, o nome e o selo");
+  // No estilo do Zoom (docs/31 V2-9): o leitor de tela ouve o autor, o papel e a hora antes do texto; a linha
+  // "Assistente · Assistente · 20:10" embaixo do balao e so para quem ve; o "Falar com a equipe" vem depois dela, no li.
+  assert.match(textOf(bloco("a-minha")), /Assistente, Assistente, 20:10: Custa R\$ 997\. Assistente · Assistente · 20:10 Falar com a equipe/, "o prefixo do leitor de tela, o texto, a linha de baixo e o pedido");
+  assert.match(bloco("a-minha"), /data-room-message-meta=""><span aria-hidden="true"/);
   assert.match(bloco("a-minha"), /data-testid="assistant-handoff"/);
   assert.match(textOf(bloco("a-minha")), new RegExp(COPY.aluno.falarComAEquipe));
   assert.doesNotMatch(bloco("a-outro"), /assistant-handoff/, "a resposta a outro aluno nao tem o botao");
-  assert.match(textOf(bloco("a-outro")), /Assistente/, "mas leva o selo");
+  assert.match(textOf(bloco("a-outro")), /Assistente, Assistente, 20:10: Tem bonus\./, "mas leva o papel");
   assert.doesNotMatch(bloco("t-1"), /assistant-handoff/);
   assert.equal(count(markup, /data-testid="assistant-handoff"/g), 1);
 
@@ -102,7 +109,7 @@ test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 
   assert.doesNotMatch(verComo, /data-testid="assistant-hint"/);
 
   const semIds = chat({ sessionId: null, webinarId: null });
-  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o selo)");
+  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o papel)");
   assert.match(textOf(semIds), /Assistente/);
 });
 

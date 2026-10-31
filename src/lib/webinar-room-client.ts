@@ -1,11 +1,14 @@
 // A Sala da Live gravada e do Replay no navegador, a parte pura (docs/30 §1.6, §6.6 e §9): a decisao da trava do
 // player (esperar, recolocar no alvo, encerrar), a fase pelo relogio corrigido, a janela do chat e quando pedir a
 // seguinte, a fusao das mensagens sem repetir, o estado de presenca que o sinal de 15 s manda, o compositor do
-// chat (desligado, modo lento, aceite), as bolhas das reacoes e a sala perdida (404). Sem React e sem rede:
+// chat (desligado, modo lento, aceite), a hora e o papel embaixo do balao do chat (docs/31 V2-9), as bolhas das reacoes
+// e a sala perdida (404). Sem React e sem rede:
 // tests/webinarios-sala-navegador.test.mjs carrega direto pelo Node. Os pedidos ficam em src/components/member/webinars/room/room-api.ts.
 
 import type { EmbedBridge } from "./lesson-embed-bridge";
-import { ROOM_RULES, type ChatMode, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
+import { WEBINAR_COPY } from "./webinar-copy";
+import { saoPauloTime } from "./webinar-time";
+import { ROOM_RULES, type ChatMode, type ChatRole, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
 import { initialChatWindow, needsResync, nextChatWindow, playerTargetSeconds, seekChatWindow, visibleMessages, type ChatWindow } from "../server/webinars/room-model";
 
 export { clockSkewMs, initialChatWindow, nextChatWindow, offsetLabel, playerTargetSeconds, seekChatWindow, visibleMessages } from "../server/webinars/room-model";
@@ -102,6 +105,45 @@ export function revealedMessages(messages: readonly RoomMessage[], playerOffsetM
  */
 export function newMessageCount(previousIds: ReadonlySet<string>, revealed: readonly RoomMessage[]): number {
   return revealed.reduce((count, message) => (previousIds.has(message.id) ? count : count + 1), 0);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O item do chat no estilo do Zoom (docs/31 V2-9): a hora e o papel da linha "nome · papel · hora"
+ * ---------------------------------------------------------------------------------------------- */
+
+/** De que sala e o chat: a Live ao vivo, a gravada (simulada) ou o Replay (o mesmo RoomKind de room-layout-model.ts). */
+export type ChatTimeKind = "live" | "replay" | "simulated";
+
+/**
+ * A hora da mensagem em Sao Paulo ("20:41"): o zero da sessao mais o offset da mensagem. A mensagem do aluno nao traz
+ * a hora em que foi escrita (so o offset): na live o zero e a ancora ou o inicio pela ultima leitura; na gravada, a
+ * hora marcada (o roteiro ja nasce com created_at = scheduled_at + offset). No Replay, nenhuma: o payload nao traz o
+ * inicio da live original, e uma hora errada seria pior que nenhuma.
+ */
+export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; zeroMs: number | null | undefined }): string {
+  if (input.kind === "replay" || typeof input.zeroMs !== "number") {
+    return "";
+  }
+  const at = new Date(input.zeroMs + input.offsetMs);
+  return Number.isNaN(at.getTime()) ? "" : saoPauloTime(at.toISOString());
+}
+
+/**
+ * O papel na linha de baixo do balao: so Apresentador, Equipe e Assistente; o aluno e o convidado, nenhum. O
+ * co-apresentador sai como Equipe ate o papel proprio no chat (a fase 2, com a migracao antes do merge).
+ */
+export function chatRoleLabel(role: ChatRole): string | null {
+  const selos = WEBINAR_COPY.sala.selos;
+  switch (role) {
+    case "ai":
+      return selos.assistente;
+    case "host":
+      return selos.apresentador;
+    case "team":
+      return selos.equipe;
+    default:
+      return null;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------

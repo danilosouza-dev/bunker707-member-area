@@ -851,7 +851,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   readOnly={readOnly}
                   sessionId={sessionId}
                   slowUntilMs={chat.slowUntilMs}
+                  timeKind="live"
                   webinarId={webinarId}
+                  zeroMs={zeroMs}
                 />
               </>
             ) : null}

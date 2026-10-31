@@ -314,6 +314,23 @@ test("chat por cima: so as ultimas 6 e Ver mais mensagens (44 px); vazio fica va
   assert.match(failed, /O chat não carregou\. Tente de novo\./);
 });
 
+test("chat por cima do video continua com o item de antes (V2-18): o nome em cima com o selo do papel e a pendente, o texto embaixo; nada do balao do painel (V2-9)", () => {
+  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, openPollQuestion: null, pinned: null, replay: false };
+  const html = render(verticalChat.VerticalChat, {
+    ...base,
+    messages: [msg("e", { body: "boa noite", displayName: "Marina R.", offsetMs: 41 * 60_000, role: "team" }), msg("m", { body: "minha duvida", mine: true, pending: true })]
+  });
+  // O RoomMessageItem: o prefixo do papel para o leitor de tela, o nome em negrito e o selo; o texto na linha de baixo.
+  assert.match(
+    html,
+    /<li class="rounded-\[10px\] px-2 py-1\.5" data-room-message="e"><p class="[^"]*"><span class="sr-only">Equipe: <\/span><span class="font-bold text-room-fg-strong">Marina R\.<\/span><span class="[^"]*\brounded-full border\b[^"]*"><span class="truncate">Equipe<\/span><\/span><\/p><p class="[^"]*">boa noite<\/p><\/li>/
+  );
+  // A minha so com o fundo de destaque; a pendente com o selo "Aguardando a equipe".
+  assert.match(html, /<li class="rounded-\[10px\] px-2 py-1\.5 bg-room-control" data-room-message="m">[\s\S]*?<span class="truncate">Aguardando a equipe<\/span>[\s\S]*?minha duvida<\/p><\/li>/);
+  // Nada do balao do painel: sem avatar, sem lado, sem a linha "nome · papel · hora".
+  assert.doesNotMatch(html, /data-mine|data-room-message-meta|flex-row-reverse|bg-room-bubble-mine-bg|size-7/);
+});
+
 test("compositor: Abrir o chat quando fechado (sem campo), o modo lento com a contagem, so a equipe, a gaveta aberta", () => {
   const base = {
     chatMode: "open",
