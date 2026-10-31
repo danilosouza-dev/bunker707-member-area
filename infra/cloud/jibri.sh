@@ -95,8 +95,10 @@ up() {
         echo "  ja existe: $type em $loc, $(server_json_field "$name" '.status') (idempotente: refaz o .env e confere a saude)."
     else
         pub=$(deploy_public_key); ud="$WORK_DIR/cloud-init-$name.yaml"
-        sed -e "s|__DEPLOY_USER__|$DEPLOY_USER|" -e "s|__SSH_PUBLIC_KEY__|$pub|" \
-            -e "s|__JITSI_IMAGE_REPO__|$image_repo|" -e "s|__JITSI_IMAGE_VERSION__|$image_version|" \
+        # Com /g: a linha do install -d da pasta /opt/jibri tem o __DEPLOY_USER__ duas vezes (dono e grupo); sem ele o
+        # install falhava, a pasta ficava do root e o scp do passo 3 era recusado (31/10/2026).
+        sed -e "s|__DEPLOY_USER__|$DEPLOY_USER|g" -e "s|__SSH_PUBLIC_KEY__|$pub|g" \
+            -e "s|__JITSI_IMAGE_REPO__|$image_repo|g" -e "s|__JITSI_IMAGE_VERSION__|$image_version|g" \
             "$JITSI_DIR/jibri/cloud-init.yaml" > "$ud"
         for t in $JIBRI_TYPE $JIBRI_FALLBACK_TYPES; do
             for l in "$LOCATION" $FALLBACK_LOCATIONS; do
