@@ -14,7 +14,6 @@ import type { ChatPostBody } from "./room-api";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
 import { RoomOffer } from "./room-offer";
-import { RoomPill } from "./room-pill";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBar, RoomReactionBubbles } from "./room-reactions";
@@ -36,11 +35,11 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // da area (aria-modal, foco preso, Esc fecha com confirmacao quando no ar), com o cabecalho, o palco (o player da
 // Bunny travado no relogio do servidor na gravada; livre no replay), a barra de reacoes e o painel com as abas
 // Chat, Perguntas e Enquetes (a de Enquetes so com enquete aberta). A 375 px: palco na largura, abas embaixo, o
-// campo de mensagem fixo no rodape, botoes de 44 px. Minimizar vira a pilula de 56 px no canto; o player continua
-// (e o sinal de midia com ele: nenhum pop-up abre). Sair volta para a pagina da live; o sinal de saida vai por
-// beacon. Quem sai do "Quem pode" no meio da sessao (o 404 da releitura da sessao a cada 60 s ou do sinal de presenca;
-// D41) perde o player, o chat e a presenca, e o palco mostra "Esta live não está disponível para você." (nos dois
-// desenhos: o painel, o chat por cima, o compositor, a gaveta, a Oferta e a Simulacao saem). No "ver como" da equipe
+// campo de mensagem fixo no rodape, botoes de 44 px. Sem Minimizar (docs/31 V2-2): com a sala aberta, o player e o
+// sinal de midia com ele seguram os pop-ups. Sair volta para a pagina da live; o sinal de saida vai por beacon. Quem
+// sai do "Quem pode" no meio da sessao (o 404 da releitura da sessao a cada 60 s ou do sinal de presenca; D41) perde
+// o player, o chat e a presenca, e o palco mostra "Esta live não está disponível para você." (nos dois desenhos: o
+// painel, o chat por cima, o compositor, a gaveta, a Oferta e a Simulacao saem). No "ver como" da equipe
 // nada e gravado: nem sinal, nem chat, nem reacao. A sala da Live ao vivo (fase 3) e outra tela (live-room.tsx,
 // escolhida pela pagina pela sessao `live`) e usa o mesmo dialogo daqui: o foco preso, o corpo da pagina parado e o
 // prefers-reduced-motion (os helpers exportados abaixo).
@@ -48,7 +47,7 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // vira o video em tela cheia (cover), o selo e o contador no topo, o chat por cima embaixo com o compositor compacto, a
 // pilula da Oferta, o aviso de venda no topo e a gaveta com o chat inteiro, Perguntas e Enquetes; girar volta ao desenho
 // normal. O palco fica sempre no mesmo lugar da arvore (corpo > coluna > caixa do palco, vertical/vertical-model.ts):
-// girar ou minimizar troca so as classes, o player nao remonta e o chat, o relogio, o som e o estado continuam.
+// girar troca so as classes, o player nao remonta e o chat, o relogio, o som e o estado continuam.
 
 type Tab = "chat" | "enquetes" | "perguntas";
 
@@ -82,7 +81,7 @@ export function useRoomReducedMotion(): boolean {
 
 /**
  * O dialogo aberto (docs/30 §1.7): o corpo da pagina para de rolar, o foco vai para o primeiro [data-room-first-focus]
- * e volta para onde estava quando a sala minimiza ou fecha.
+ * e volta para onde estava quando a sala fecha.
  */
 export function useRoomDialogLock(rootRef: RefObject<HTMLElement | null>, active: boolean) {
   useEffect(() => {
@@ -162,7 +161,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [iframe, setIframe] = useState<HTMLIFrameElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
-  const [minimized, setMinimized] = useState(false);
   const [tab, setTab] = useState<Tab>("chat");
   const [muted, setMuted] = useState(kind === "simulated");
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -265,30 +263,30 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const countdown = kind === "simulated" ? formatCountdown(zeroMs, nowMs + clock.skewMs) : "";
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
   const shownCount = simulation.displayCount(presentNow, currentOffsetMs);
-  const drawerVisible = vertical && drawerOpen && !minimized && !unavailable;
+  const drawerVisible = vertical && drawerOpen && !unavailable;
 
   const leave = useCallback(() => {
     router.push(webinarHref);
   }, [router, webinarHref]);
 
   const askToLeave = useCallback(() => {
-    if (live && !minimized && !unavailable) {
+    if (live && !unavailable) {
       setConfirmLeave(true);
       return;
     }
     leave();
-  }, [leave, live, minimized, unavailable]);
+  }, [leave, live, unavailable]);
 
   // Foco preso e Esc (docs/30 §1.7): o dialogo e o unico lugar do teclado enquanto esta aberto.
-  useRoomDialogLock(rootRef, !minimized);
+  useRoomDialogLock(rootRef, true);
 
   // Fora do "Quem pode" (D41) o painel, a gaveta e o compositor saem com o foco que estava neles: ele volta para a
   // sala antes do proximo toque de tecla (como barFocusLost na sala ao vivo).
   useLayoutEffect(() => {
-    if (unavailable && !minimized) {
+    if (unavailable) {
       refocusRoom(rootRef.current, document.activeElement);
     }
-  }, [minimized, unavailable]);
+  }, [unavailable]);
 
   // A gaveta fechou (Esc, Voltar para o video, toque fora): o foco volta para o botao que abriu. Fechada porque a sala
   // ficou indisponivel, o botao saiu junto e o efeito acima ja trouxe o foco de volta.
@@ -307,11 +305,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   // Girar o aparelho troca as pecas por cima do video: se o foco estava numa que saiu, ele volta para o comeco da sala.
   useEffect(() => {
     const root = rootRef.current;
-    if (minimized || !root || root.contains(document.activeElement)) {
+    if (!root || root.contains(document.activeElement)) {
       return;
     }
     root.querySelector<HTMLElement>("[data-room-first-focus]")?.focus();
-  }, [design, minimized]);
+  }, [design]);
 
   function openDrawer(from: "chat" | "drawer" | "poll") {
     setTab((current) => drawerTabFor({ current, from }));
@@ -337,9 +335,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
       }
       return;
     }
-    if (!minimized) {
-      trapRoomFocus(event, rootRef.current);
-    }
+    trapRoomFocus(event, rootRef.current);
   }
 
   function unmute() {
@@ -351,18 +347,17 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const timeLabel = saoPauloTime(session.session.scheduledAt);
   const composerPhase = phase === "replay" ? "replay" : phase;
   const headerPhase = phase === "replay" ? "live" : phase;
-  const skeleton = roomSkeleton(design, minimized);
+  const skeleton = roomSkeleton(design);
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
   const writable = (live || phase === "replay") && !unavailable;
 
-  // O palco e montado uma vez e fica sempre no mesmo lugar (corpo > coluna > caixa): girar ou minimizar so troca classes.
+  // O palco e montado uma vez e fica sempre no mesmo lugar (corpo > coluna > caixa): girar so troca classes.
   const stage = (
     <RoomStage
       countdownLabel={countdown}
       coverUrl={coverUrl}
       embedUrl={session.video?.embedUrl ?? null}
       iframeRef={setIframe}
-      minimized={minimized}
       muted={muted && kind === "simulated"}
       onUnmute={unmute}
       replayHref={replayHref}
@@ -424,26 +419,19 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   return (
     <div
       aria-label={session.webinar.title}
-      aria-modal={!minimized || undefined}
+      aria-modal="true"
       className={skeleton.root}
       data-room-design={design}
-      data-room-minimized={minimized ? "" : undefined}
       data-room-phase={phase}
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
     >
-      {minimized ? (
-        // A pilula de 56 px; a miniatura dela e o proprio palco, que fica no mesmo lugar da arvore (por cima dela).
-        <RoomPill live={live && session.session.showLiveBadge} onLeave={leave} onRestore={() => setMinimized(false)} title={session.webinar.title} />
-      ) : null}
-
-      {minimized ? null : vertical ? (
+      {vertical ? (
         <VerticalTopBar
           getOffsetMs={getOffsetMs}
           kind={kind}
           onLeave={askToLeave}
-          onMinimize={() => setMinimized(true)}
           phase={headerPhase}
           presentNow={shownCount}
           showLiveBadge={session.session.showLiveBadge}
@@ -455,7 +443,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
           getOffsetMs={getOffsetMs}
           kind={kind}
           onLeave={askToLeave}
-          onMinimize={() => setMinimized(true)}
           phase={headerPhase}
           presentNow={shownCount}
           showLiveBadge={session.session.showLiveBadge}
@@ -464,7 +451,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
         />
       )}
 
-      {confirmLeave && !minimized ? (
+      {confirmLeave ? (
         <div className={skeleton.confirm} role="alertdialog" aria-label={copy.sairConfirmar}>
           <p className="text-sm font-semibold text-amber-100">{copy.sairConfirmar}</p>
           <div className="flex gap-2">
@@ -483,10 +470,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
           <div className={skeleton.stageBox} data-room-slot="stage-box">
             {stage}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
-              {minimized ? null : <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />}
+              <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
             </div>
-            <div className={cn(skeleton.sales, vertical && !minimized ? "z-30" : null)} data-room-slot="sales">
-              {minimized || unavailable ? null : (
+            <div className={cn(skeleton.sales, vertical ? "z-30" : null)} data-room-slot="sales">
+              {unavailable ? null : (
                 <RoomSimulationSales layout={vertical ? "vertical" : "stage"} offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />
               )}
             </div>
@@ -527,10 +514,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
                 ) : null
               }
               design={design}
-              hidden={minimized || drawerVisible}
+              hidden={drawerVisible}
               offer={
                 <RoomOffer
-                  enabled={!minimized && writable}
+                  enabled={writable}
                   getOffsetMs={getOffsetMs}
                   layout={vertical ? "vertical" : "stage"}
                   readOnly={readOnly}
@@ -540,14 +527,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
               }
             />
           </div>
-          {minimized || vertical ? null : (
+          {vertical ? null : (
             <div className="border-t border-white/10 bg-[#111]">
               <RoomReactionBar disabled={readOnly || !writable} onReact={reactions.react} />
             </div>
           )}
         </div>
 
-        {minimized || vertical || unavailable ? null : (
+        {vertical || unavailable ? null : (
           <aside className="flex min-h-0 flex-1 flex-col border-t border-white/10 bg-[#0f0f0f] lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
             <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-white/10" role="tablist">
               {tabs.map((value) => (

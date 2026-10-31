@@ -1,6 +1,6 @@
 "use client";
 
-import { Radio, Users, X } from "lucide-react";
+import { Radio, Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
@@ -14,7 +14,7 @@ import { trapRoomFocus } from "./webinar-room";
 // aria-modal, o foco preso nos dois botoes: no Ligar câmera, que o proprio clique abriu; no Agora não do microfone,
 // que abre sozinho; o foco volta a quem o tinha ao fechar; Esc = Agora não, sem fechar a sala); a aba
 // Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos); o chat por cima do palco no
-// celular (as 3 ultimas, com a gaveta fechada); o selo Gravando; e a pilula do Minimizar (56 px).
+// celular (as 3 ultimas, com a gaveta fechada); e o selo Gravando.
 
 type ConsentDialogProps = {
   cancelLabel: string;
@@ -204,35 +204,5 @@ export function LiveRecordingBadge() {
         {gravando}
       </span>
     </MemberChip>
-  );
-}
-
-/**
- * O miolo da pilula do Minimizar (56 px; a propria sala encolhida e o data-testid="room-pill"): Ao vivo, o titulo,
- * Voltar e Sair; o palco pequeno fica ao lado, no mesmo lugar.
- */
-export function LivePillInfo({ live, onLeave, onRestore, title }: { live: boolean; onLeave: () => void; onRestore: () => void; title: string }) {
-  const copy = WEBINAR_COPY.sala;
-  return (
-    <>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1 text-[11px] font-semibold text-zinc-300">
-          {live ? <Radio aria-hidden="true" className="size-3 text-[var(--accent)]" /> : null}
-          {live ? copy.aoVivo : copy.salaMinimizada}
-        </p>
-        <p className="truncate text-sm font-bold text-white">{title}</p>
-      </div>
-      <button
-        className="h-9 shrink-0 rounded-full bg-white px-3 text-xs font-extrabold text-black hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-        onClick={onRestore}
-        title={WEBINAR_COPY.aoVivo.voltarParaLive}
-        type="button"
-      >
-        {copy.voltar}
-      </button>
-      <button aria-label={copy.sair} className="grid size-9 shrink-0 place-items-center rounded-full text-zinc-300 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white" onClick={onLeave} type="button">
-        <X aria-hidden="true" className="size-4" />
-      </button>
-    </>
   );
 }

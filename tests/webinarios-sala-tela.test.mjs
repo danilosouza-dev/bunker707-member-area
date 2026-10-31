@@ -36,14 +36,15 @@ const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
 
-test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao das 20:00; Replay sem contador; {n} assistindo; Minimizar e Sair", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onMinimize: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
+test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao das 20:00; Replay sem contador; {n} assistindo; so o Sair, sem Minimizar (V2-2)", () => {
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
   const live = render(header.RoomHeader, base);
   assert.match(live, /Ao vivo/);
   assert.match(live, /42:10/, "o tempo no ar");
   assert.match(live, /3 assistindo/);
-  assert.match(live, /aria-label="Minimizar"/);
-  assert.match(live, /aria-label="Sair"/);
+  assert.doesNotMatch(live, /Minimizar/, "sem Minimizar (docs/31 V2-2)");
+  assert.equal(live.match(/<button[^>]*>/g)?.length, 1, "o unico botao do cabecalho e o Sair");
+  assert.match(live, /<button aria-label="Sair"[^>]*title="Sair" type="button">/);
   assert.doesNotMatch(live, /Sessão das/);
 
   const plain = render(header.RoomHeader, { ...base, showLiveBadge: false });
@@ -57,7 +58,7 @@ test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao da
 });
 
 test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 sem logo) com o traco; o Icone da escola de 24 px abaixo de lg", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onMinimize: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
   const comMarca = (marca, props = {}) =>
     renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...base, ...props })));
   const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
@@ -85,7 +86,7 @@ test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 
   assert.match(icone, /src="\/brand\/icon-bunker\.svg"/);
   assert.match(icone, /class="size-6 shrink-0 rounded-\[6px\] lg:hidden object-contain"/, "24 px, so abaixo de lg");
   // A troca e no ponto da sala (lg, DESKTOP em live-room.tsx), nunca em sm: entre 640 e 1023 px o cabecalho ja tem o
-  // "{n} assistindo" e Minimizar/Sair com texto, e os 125 px da logo cobririam os selos e zerariam o titulo.
+  // "{n} assistindo" e o Sair com texto, e os 125 px da logo cobririam os selos e zerariam o titulo.
   for (const html of [semLogo, comLogo]) {
     assert.doesNotMatch(tag(html, "logo"), /\bsm:flex\b/, "a logo nao entra em sm");
     assert.doesNotMatch(tag(html, "icon"), /\bsm:hidden\b/, "o icone nao sai em sm");
@@ -111,7 +112,7 @@ test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 
 });
 
 test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar som, encerrada com Assistir de novo; os atributos do sinal de midia", () => {
-  const base = { countdownLabel: "4 min", coverUrl: null, embedUrl: EMBED, iframeRef: noop, minimized: false, muted: true, onUnmute: noop, replayHref: null, sessionId: "s1", state: "waiting", title: "Aula de IA" };
+  const base = { countdownLabel: "4 min", coverUrl: null, embedUrl: EMBED, iframeRef: noop, muted: true, onUnmute: noop, replayHref: null, sessionId: "s1", state: "waiting", title: "Aula de IA" };
   const waiting = render(stage.RoomStage, base);
   assert.match(waiting, /Começa em 4 min/);
   assert.doesNotMatch(waiting, /<iframe/, "antes do zero o player nao monta");
@@ -278,7 +279,8 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas 
   assert.match(live, /fixed inset-0 flex flex-col/, "tela cheia por cima da area");
   assert.match(live, /lg:w-\[360px\]/, "o painel a direita no computador");
   assert.match(live, /aspect-video w-full/, "o palco na largura a 375 px");
-  assert.match(live, /data-testid="room-pill"/.test(live) ? /nada/ : /room-panel/, "a pilula so ao minimizar");
+  assert.match(live, /data-testid="room-panel"/);
+  assert.doesNotMatch(live, /room-pill|data-room-minimized|Minimizar/, "sem Minimizar e sem pilula (docs/31 V2-2)");
 
   const waiting = render(room.WebinarRoom, { coverUrl: null, payload: payload({}, { offsetMs: -4 * MIN, roomPhase: "waiting", scheduledAt: new Date(T0 + 4 * MIN).toISOString() }), readOnly: false, webinarHref: "/x" });
   assert.match(waiting, /data-room-phase="waiting"/);

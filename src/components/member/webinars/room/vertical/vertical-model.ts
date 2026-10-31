@@ -1,8 +1,7 @@
 // A Sala Live vertical 9:16 (docs/30 §1.6, §6.6, §1.7 e §9), a parte pura: quando a sala usa o desenho do celular em
-// pe, o esqueleto da sala nos dois desenhos (e minimizada) e o que muda no topo e no chat. E a mesma pagina, a mesma
-// sessao, o mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo
-// lugar da arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho ou minimizar troca so as
-// classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
+// pe, o esqueleto da sala nos dois desenhos e o que muda no topo e no chat. E a mesma pagina, a mesma sessao, o
+// mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo lugar da
+// arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho troca so as classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
 // recarrega o video). Por isso o desenho vertical nao e outra arvore: e o mesmo esqueleto com outras classes e as
 // pecas por cima (topo, chat, gaveta). Vale para a Live gravada e o Replay; a Live ao vivo fica de fora ate o palco
 // ser gravado em 9:16 (live-room.tsx nao usa nada daqui). Modulo puro (sem React e sem rede): os testes carregam pelo
@@ -132,8 +131,9 @@ export function subscribePortraitPhone(matchMedia: PortraitMatchMedia, callback:
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * O caminho do palco a partir do dialogo (data-room-slot de cada nivel). E o mesmo no desenho normal, no vertical e
- * minimizada: a prova de que girar ou minimizar nao remonta o player (tests/webinarios-sala-vertical-modelo.test.mjs).
+ * O caminho do palco a partir do dialogo (data-room-slot de cada nivel). E o mesmo no desenho normal e no vertical: a
+ * prova de que girar nao remonta o player (tests/webinarios-sala-vertical-modelo.test.mjs). Nao ha mais Minimizar
+ * (docs/31 V2-2).
  */
 export const ROOM_STAGE_PATH = ["body", "stage-column", "stage-box"] as const;
 
@@ -168,24 +168,10 @@ export type RoomSkeleton = {
   stageColumn: string;
 };
 
-const MINIMIZED_ROOT =
-  "fixed bottom-4 right-4 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-[16px] border border-white/15 bg-[#121212] shadow-[0_18px_48px_rgba(0,0,0,0.6)]";
 const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-2";
 
 /** As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco e os lugares por cima). */
-export function roomSkeleton(design: RoomDesign, minimized: boolean): RoomSkeleton {
-  if (minimized) {
-    // A propria sala vira a pilula de 56 px; o palco fica no mesmo lugar da arvore, por cima da miniatura da pilula.
-    return {
-      body: "contents",
-      bubbles: "hidden",
-      confirm: NORMAL_CONFIRM,
-      root: `z-[60] text-white ${MINIMIZED_ROOT}`,
-      sales: "hidden",
-      stageBox: "relative size-full",
-      stageColumn: "absolute left-0 top-0 h-14 w-24 overflow-hidden rounded-l-[14px] bg-black"
-    };
-  }
+export function roomSkeleton(design: RoomDesign): RoomSkeleton {
   if (design === "vertical") {
     return {
       body: "relative min-h-0 flex-1",
@@ -298,12 +284,12 @@ export function drawerTabFor(input: { current: "chat" | "enquetes" | "perguntas"
  * O card aberto pela pilula da Oferta
  * ---------------------------------------------------------------------------------------------- */
 
-/** A folga entre o card aberto e o topo (Minimizar e Sair) e o minimo de altura que ainda mostra o botao. */
+/** A folga entre o card aberto e o topo (o Sair) e o minimo de altura que ainda mostra o botao. */
 export const OFFER_PILL_PANEL = { gapPx: 12, minPx: 160 } as const;
 
 /**
  * A altura maxima do card aberto pela pilula (sala vertical): do topo da pilula ate logo abaixo da barra do topo
- * (Minimizar e Sair), para o Fechar nunca sair da tela nem ficar debaixo do Sair num celular baixo (o card rola por
+ * (o Sair), para o Fechar nunca sair da tela nem ficar debaixo do Sair num celular baixo (o card rola por
  * dentro). Sem as medidas (servidor), nulo: vale o teto do CSS.
  */
 export function offerPillPanelMaxHeight(input: { gapPx?: number; panelMarginPx?: number; pillTop: number | null; topBarBottom: number | null }): number | null {

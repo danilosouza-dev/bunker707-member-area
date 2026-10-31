@@ -276,7 +276,7 @@ test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; se
   const state = roomSimulationStateOf(roomData);
   assert.equal(state.displayCount(3, 5_000), 43);
   assert.equal(state.displayCount(3, 16_000), 58);
-  const markup = html(createElement(header.RoomHeader, { getOffsetMs: () => 16_000, kind: "simulated", onLeave: () => undefined, onMinimize: () => undefined, phase: "live", presentNow: state.displayCount(3, 16_000), showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" }));
+  const markup = html(createElement(header.RoomHeader, { getOffsetMs: () => 16_000, kind: "simulated", onLeave: () => undefined, phase: "live", presentNow: state.displayCount(3, 16_000), showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" }));
   assert.match(markup, /58 assistindo/);
 
   const nada = roomSimulationStateOf(model.EMPTY_SIMULATION_ROOM);

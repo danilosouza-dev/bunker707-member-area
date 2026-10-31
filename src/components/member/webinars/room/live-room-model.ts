@@ -1099,6 +1099,14 @@ export function pendingTogglePhrase(pending: Record<DeviceSwitchKind, boolean>, 
 }
 
 /**
+ * A nossa barra (e com ela o painel Configurações e as reacoes) so existe com a sala no ar: a live encerrada, removido,
+ * banido ou fora do acesso a tiram (docs/30 §1.7). Nao ha mais Minimizar (docs/31 V2-2): a sala nunca encolhe.
+ */
+export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): boolean {
+  return !input.blocked && input.screen !== "ended";
+}
+
+/**
  * A nossa barra acabou de sumir (a live encerrada, removido ou banido) e o foco caiu no body (estava num botao dela,
  * no painel Configurações ou nas reacoes, que sumiram juntos): a sala manda o foco de volta para dentro dela.
  */

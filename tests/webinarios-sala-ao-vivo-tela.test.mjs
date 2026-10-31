@@ -161,7 +161,7 @@ test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so lig
   assert.match(hook, /const sendCameraToggle = useCallback\(\(\) => \{[\s\S]*?commandRef\.current\("toggleVideo"\)/, "o toque (na hora, ou quando a troca de camera acaba) manda a camera");
   assert.equal((hook.match(/"toggleAudio"/g) ?? []).length, 2, "ligar (o Falar e o Microfone desligado, pelo turnMicOn) e desligar pelo Microfone");
   assert.match(hook, /const accept = useCallback\(\(\) => \{\s*setSignals\(acceptMic\);\s*turnMicOn\(\);/);
-  assert.match(roomCode, /room\.signals\.micPrompt && !minimized && !blocked \? <LiveMicDialog onCancel=\{room\.declineMic\} onConfirm=\{room\.acceptMic\} \/>/);
+  assert.match(roomCode, /room\.signals\.micPrompt && !blocked \? <LiveMicDialog onCancel=\{room\.declineMic\} onConfirm=\{room\.acceptMic\} \/>/);
   assert.match(semComentarios(FONTES.controls), /props\.showMedia && props\.micAllowed \? <BarButton/);
 
   const camera = render(notices.LiveCameraDialog, { onCancel: noop, onConfirm: noop });
@@ -203,18 +203,19 @@ test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o c
   const html = sala();
   // No desenho do servidor o React poe antes da raiz o preload das imagens (a marca no cabecalho); a raiz e o dialogo.
   assert.match(html.replace(/^(?:<link rel="preload" as="image"[^>]*\/>)+/, ""), /^<div aria-label="Aula de IA" aria-modal="true"[^>]*role="dialog"/);
+  assert.doesNotMatch(html, /Minimizar|room-pill|data-room-minimized/, "sem Minimizar e sem pilula (docs/31 V2-2)");
   assert.match(html, /role="log"/);
   assert.match(html, /aria-live="polite"/);
   const roomCode = semComentarios(FONTES.room);
-  assert.match(roomCode, /useRoomDialogLock\(rootRef, !minimized\)/);
+  assert.match(roomCode, /useRoomDialogLock\(rootRef, true\)/, "sem Minimizar (V2-2), a trava vale sempre");
   assert.match(roomCode, /trapRoomFocus\(event, rootRef\.current\)/);
-  assert.match(roomCode, /if \(\(phase === "live" \|\| joined\) && !minimized && !blocked\) \{\s*setConfirmLeave\(true\)/, "Esc e Sair pedem confirmacao com a live no ar");
+  assert.match(roomCode, /if \(\(phase === "live" \|\| joined\) && !blocked\) \{\s*setConfirmLeave\(true\)/, "Esc e Sair pedem confirmacao com a live no ar");
 
   const hook = semComentarios(FONTES.hook);
   assert.match(hook, /window\.addEventListener\("pagehide", beacon\)/);
   assert.match(hook, /LIVE_ROOM_RULES\.eventFlushMs/, "um lote a cada 10 s");
   assert.match(semComentarios(FONTES.api), /navigator\.sendBeacon\(url, body\)/, "o mesmo corpo JSON do lote, como texto (Blob sai vazio no WebKit)");
-  // Nenhum pop-up com a sala ou a pilula no ar: a mesma trava do player da aula, so acrescentada.
+  // Nenhum pop-up com a sala no ar: a mesma trava do player da aula, so acrescentada.
   assert.match(roomCode, /announceLiveRoomMedia\(\{ lessonId, on: true \}\);\s*return \(\) => announceLiveRoomMedia\(\{ lessonId, on: false \}\);/);
   assert.match(FONTES.signal, /export function announceLiveRoomMedia\(input: \{ lessonId: string; on: boolean \}\): void \{/);
   for (const existente of ["announceLessonMedia", "lessonMediaSnapshot", "resetLessonMedia", "readLessonMediaSignal", "watchLessonPlayerFocus", "waitLessonMediaStop", "waitLessonFullscreenEnd"]) {
@@ -348,7 +349,6 @@ test("o painel Configurações no celular nao tira a barra da tela: depois da ba
   assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen && settingsOpen\) \{\s*closeSettings\(\);/, "Reagir fecha Configurações");
   assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);/, "Configurações fecha Reagir");
   assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
-  assert.match(room, /onMinimize=\{\(\) => \{\s*setSettingsOpen\(false\);\s*setMinimized\(true\);/, "a pilula nao guarda o painel aberto");
 });
 
 test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes de fechar (senao o foco cai no body e a sala para de ouvir o teclado)", () => {
@@ -485,27 +485,11 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   assert.match(overlay, /lg:hidden/, "so no celular");
   assert.equal((overlay.match(/<li/g) ?? []).length, 3);
   assert.equal(render(notices.LiveChatOverlay, { messages: [] }), "");
-
-  const pilula = render(notices.LivePillInfo, { live: true, onLeave: noop, onRestore: noop, title: "Aula de IA" });
-  assert.match(pilula, />Ao vivo</);
-  assert.match(pilula, />Voltar</);
-  assert.match(pilula, /aria-label="Sair"/);
-  assert.match(pilula, /title="Voltar para a live"/);
 });
 
-test("minimizada: a propria sala vira a pilula de 56 px (room-pill) com o palco no mesmo lugar; sem aria-modal", () => {
-  const codigo = semComentarios(FONTES.room);
-  assert.match(codigo, /data-testid=\{minimized \? "room-pill" : undefined\}/);
-  assert.match(codigo, /minimized\s*\? "fixed bottom-4 right-4 flex h-14/, "56 px no canto");
-  assert.match(codigo, /aria-modal=\{!minimized \|\| undefined\}/);
-  // O palco nunca troca de lugar na arvore: so as classes mudam (o iframe no ar nao recarrega).
-  assert.match(codigo, /<div className=\{minimized \? "contents" : "flex min-h-0 flex-1 flex-col lg:flex-row"\}>/);
-  assert.equal((codigo.match(/<LiveStage\b/g) ?? []).length, 1, "um palco so");
-});
-
-test("o palco em cada momento: Abrindo a sala…, Reconectando… por cima do iframe, Não conseguimos voltar e a abertura que falhou com Tentar de novo; minimizado, so o video", () => {
+test("o palco em cada momento: Abrindo a sala…, Reconectando… por cima do iframe, Não conseguimos voltar e a abertura que falhou com Tentar de novo", () => {
   const ref = { current: null };
-  const base = { countdownLabel: "", coverUrl: null, entry: "idle", frameRef: ref, minimized: false, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, screen: "open", sessionId: "s1", stageRef: ref, title: "Aula de IA" };
+  const base = { countdownLabel: "", coverUrl: null, entry: "idle", frameRef: ref, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, screen: "open", sessionId: "s1", stageRef: ref, title: "Aula de IA" };
   const palco = (extra) => render(stageModule.LiveStage, { ...base, ...extra });
   assert.match(palco({ entry: "opening" }), /role="status">[\s\S]*Abrindo a sala…/);
   assert.match(palco({ entry: "joining" }), /Abrindo a sala…/);
@@ -518,17 +502,13 @@ test("o palco em cada momento: Abrindo a sala…, Reconectando… por cima do if
   const falhou = palco({ entry: "open_failed" });
   assert.match(falhou, /Não foi possível abrir a sala\. Tente de novo\./);
   assert.match(falhou, />Tentar de novo</);
-  const pequeno = palco({ entry: "joined", minimized: true });
-  assert.match(pequeno, /size-full/);
-  assert.match(pequeno, /data-live-frame/, "o iframe continua no mesmo lugar");
-  assert.doesNotMatch(textoDe(pequeno), /\S/, "minimizado, nenhuma frase por cima");
   assert.equal(stageModule.liveStageState("open", "joined"), "live");
   assert.equal(stageModule.liveStageState("locked", "idle"), "locked");
 });
 
 test("fora do Quem pode no meio da live (D41): o palco da lugar a frase, sem capa, sem Entrar na sala e sem Tentar de novo; a sala desliga o iframe", () => {
   const ref = { current: null };
-  const base = { countdownLabel: "", coverUrl: "https://cdn.example.com/capa.jpg", entry: "joined", frameRef: ref, minimized: false, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, sessionId: "s1", stageRef: ref, title: "Aula de IA" };
+  const base = { countdownLabel: "", coverUrl: "https://cdn.example.com/capa.jpg", entry: "joined", frameRef: ref, onEnter: noop, onRetry: noop, readOnly: false, replayHref: null, sessionId: "s1", stageRef: ref, title: "Aula de IA" };
   const fora = render(stageModule.LiveStage, { ...base, screen: "unavailable" });
   assert.match(fora, /data-room-stage="unavailable"/);
   assert.match(fora, /role="alert">Esta live não está disponível para você\.</);

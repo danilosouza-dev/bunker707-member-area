@@ -22,8 +22,9 @@ import {
 // aceite), a mao levantada vai por toggleRaiseHand, o microfone liberado pelo apresentador abre o aviso com Falar /
 // Agora não e so o Falar manda toggleAudio. O chat e as reacoes sao os nossos; nenhum texto da pagina cita o Jitsi; a
 // 375 px a sala cabe sem rolagem lateral e os botoes da barra tem 44 px. A IA Diretor fica na pagina da live e some na
-// sala (o botao flutuante cobria o Enviar do chat e o X da pilula); o cabecalho da sala tem a marca da escola e, a 375 px
-// com a gravacao ligada, o tempo curto e o ponto do Gravando cabem antes de Minimizar; a 667 px (celular deitado) o
+// sala (o botao flutuante cobria o Enviar do chat); o cabecalho da sala tem a marca da escola e, a 375 px com a
+// gravacao ligada, o tempo curto e o ponto do Gravando cabem antes do Sair (sem Minimizar nem pilula, docs/31 V2-2;
+// o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px (celular deitado) o
 // Icone da escola fica no lugar da logo e os selos inteiros terminam antes do "{n} assistindo". O botao Configurações
 // abre o painel de som e aparelhos: antes da liberacao nada troca de aparelho (nem pede o microfone); depois do Falar o
 // microfone escolhido chega a sala so pelo id, o alto-falante tambem, a camera so depois do aviso de gravacao,
@@ -485,7 +486,7 @@ test("a volta depois de uma queda, com a camera desligada: trocar a camera e toc
   expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
 });
 
-test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho cabe com o Gravando; o X da pilula fecha a sala", async ({ page }) => {
+test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho cabe com o Gravando; sem Minimizar, o Sair pede a confirmacao e fecha a sala", async ({ page }) => {
   await page.setViewportSize({ height: 740, width: 375 });
   const { dialogo, sala } = await entrarNaSala(page);
   await expect(dialogo.getByRole("tab", { name: WEBINAR_COPY.sala.abas.chat })).toBeVisible();
@@ -550,42 +551,46 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await page.setViewportSize({ height: 740, width: 375 });
 
   // O cabecalho com a gravacao ligada (o duble avisa, como o gravador): o Icone da escola de 24 px, o tempo curto e so o
-  // ponto do Gravando terminam antes de Minimizar, e sobra largura para o titulo.
+  // ponto do Gravando terminam antes do Sair, e sobra largura para o titulo.
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
   const gravando = cabecalho.locator(`[title="${aoVivo.gravando}"]`);
   await expect(gravando).toBeVisible();
   const icone = cabecalho.getByRole("img", { name: "Bunker707" });
   await expect(icone).toBeVisible();
-  const minimizar = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.minimizar });
+  // Sem Minimizar (docs/31 V2-2): o cabecalho termina no Sair.
+  await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
+  const sair = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair });
   const caixas = {
     gravando: await gravando.boundingBox(),
     icone: await icone.boundingBox(),
-    minimizar: await minimizar.boundingBox(),
     noAr: await cabecalho.locator('[title^="Ao vivo"]').boundingBox(),
+    sair: await sair.boundingBox(),
     titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
   };
   expect(caixas.icone?.width ?? 0).toBeCloseTo(24, 0);
-  const bordaDoMinimizar = caixas.minimizar?.x ?? 0;
-  expect(bordaDoMinimizar).toBeGreaterThan(0);
-  expect((caixas.noAr?.x ?? Number.POSITIVE_INFINITY) + (caixas.noAr?.width ?? 0), "o selo Ao vivo").toBeLessThanOrEqual(bordaDoMinimizar);
-  expect((caixas.gravando?.x ?? Number.POSITIVE_INFINITY) + (caixas.gravando?.width ?? 0), "o ultimo selo").toBeLessThanOrEqual(bordaDoMinimizar);
+  const bordaDoSair = caixas.sair?.x ?? 0;
+  expect(bordaDoSair).toBeGreaterThan(0);
+  expect((caixas.noAr?.x ?? Number.POSITIVE_INFINITY) + (caixas.noAr?.width ?? 0), "o selo Ao vivo").toBeLessThanOrEqual(bordaDoSair);
+  expect((caixas.gravando?.x ?? Number.POSITIVE_INFINITY) + (caixas.gravando?.width ?? 0), "o ultimo selo").toBeLessThanOrEqual(bordaDoSair);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect((caixas.titulo?.x ?? Number.POSITIVE_INFINITY) + (caixas.titulo?.width ?? 0)).toBeLessThanOrEqual(bordaDoMinimizar);
+  expect((caixas.titulo?.x ?? Number.POSITIVE_INFINITY) + (caixas.titulo?.width ?? 0)).toBeLessThanOrEqual(bordaDoSair);
 
-  // Minimizar: a pilula no canto de baixo, onde ficava a IA Diretor; o X dela (Sair) recebe o clique e fecha a sala.
-  await minimizar.click();
-  const pilula = page.getByTestId("room-pill");
-  await expect(pilula).toBeVisible();
-  await pilula.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair }).click();
+  // O Sair, com a live no ar, abre a confirmacao; o Sair dela volta para a pagina da live, onde a IA Diretor reaparece.
+  // Nenhuma pilula fica no canto.
+  await sair.click();
+  const confirmacao = dialogo.getByRole("alertdialog", { name: WEBINAR_COPY.sala.sairConfirmar });
+  await expect(confirmacao).toBeVisible();
+  await confirmacao.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair }).click();
   await expect(page).toHaveURL(`/webinarios/${slug}`);
+  await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
   await expect(page.getByTestId("room-pill")).toHaveCount(0);
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
 test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com a gravacao ligada, os selos terminam antes de quem assiste e o titulo tem largura", async ({ page }) => {
   // Entre sm (640 px) e lg (1024 px, onde a sala vira computador) o cabecalho ja tem a frase inteira do Ao vivo, a
-  // palavra Gravando, o "{n} assistindo" e Minimizar/Sair com texto: a logo de 125 px so entra em lg.
+  // palavra Gravando, o "{n} assistindo" e o Sair com texto: a logo de 125 px so entra em lg.
   await page.setViewportSize({ height: 740, width: 667 });
   const { dialogo, sala } = await entrarNaSala(page);
   // O iPhone SE deitado: 667 x 375 (a altura nao muda o cabecalho; a entrada usa a de cima para o Entrar na sala caber).

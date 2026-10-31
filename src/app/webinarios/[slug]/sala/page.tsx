@@ -5,7 +5,6 @@ import { AppShell } from "@/components/app-shell";
 import { MemberFooter } from "@/components/member-footer";
 import { LiveWebinarRoom } from "@/components/member/webinars/room/live-room";
 import { WebinarRoom } from "@/components/member/webinars/room/webinar-room";
-import { WebinarPageView } from "@/components/member/webinars/webinar-page-view";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
 import { MemberButtonLink } from "@/components/member/ui/member-button";
 import { MemberPage } from "@/components/member/ui/member-page";
@@ -14,15 +13,15 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { requireStudentPageUser } from "@/server/auth/guards";
 import { isUuid } from "@/server/communications/route-support";
 import { getAppShellData } from "@/server/db/platform-store";
-import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { webinarHref } from "@/server/webinars/model";
 import { isWebinarSlug } from "@/server/webinars/student-model";
 import { getRoomPageData } from "@/server/webinars/student-queries";
 import { Radio } from "lucide-react";
 
 // /webinarios/[slug]/sala?sessao= (docs/30 §1.3 e §1.6): a Sala da Live gravada, do Replay ou da Live ao vivo (fase 3),
-// um dialogo de tela cheia por cima da pagina da live (que fica por baixo para a pilula do Minimizar). Fora do acesso ou
-// sessao de outro webinario: nao encontrado, sem dizer se existe (docs/30 §8.2). Gravada fora da janela de entrada
+// um dialogo de tela cheia. Nada fica desenhado por baixo dele: sem Minimizar (docs/31 V2-2), a pagina da live por
+// baixo so duplicava o h1 e o trabalho do servidor; Sair volta para ela. O rodape fica para os estados de erro e de
+// recusa. Fora do acesso ou sessao de outro webinario: nao encontrado, sem dizer se existe (docs/30 §8.2). Gravada fora da janela de entrada
 // (antes de 15 min, depois do fim ou da Entrada atrasada), sessao cancelada ou sem a vaga numa live com limite de
 // vagas (A12): a frase e o caminho de volta. A Live ao vivo abre em qualquer situacao (a tela diz Aguardando o
 // apresentador, sala trancada, em breve, encerrada, removido ou banido) e recebe o nonce da pagina: o external_api.js
@@ -112,27 +111,19 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
       ) : null}
 
       {data.state === "ready" ? (
-        <>
-          <WebinarPageView
-            accessPreviewMode={accessPreviewMode}
-            data={{ now: data.now, page: data.page, state: "ready" }}
-            liveRoomConfigured={liveRoomConfigured(process.env)}
-            source={null}
+        data.payload.session.kind === "live" ? (
+          <LiveWebinarRoom
+            coverUrl={data.page.view.coverUrl}
+            nonce={nonce}
+            payload={data.payload}
+            presenterName={data.page.view.presenterName}
+            readOnly={Boolean(accessPreviewMode)}
+            staff={data.staff}
+            webinarHref={backHref}
           />
-          {data.payload.session.kind === "live" ? (
-            <LiveWebinarRoom
-              coverUrl={data.page.view.coverUrl}
-              nonce={nonce}
-              payload={data.payload}
-              presenterName={data.page.view.presenterName}
-              readOnly={Boolean(accessPreviewMode)}
-              staff={data.staff}
-              webinarHref={backHref}
-            />
-          ) : (
-            <WebinarRoom coverUrl={data.page.view.coverUrl} payload={data.payload} readOnly={Boolean(accessPreviewMode)} webinarHref={backHref} />
-          )}
-        </>
+        ) : (
+          <WebinarRoom coverUrl={data.page.view.coverUrl} payload={data.payload} readOnly={Boolean(accessPreviewMode)} webinarHref={backHref} />
+        )
       ) : null}
       <MemberFooter branding={shellData.branding} />
     </AppShell>

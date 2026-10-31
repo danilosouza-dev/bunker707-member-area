@@ -3,7 +3,6 @@
 import { Volume2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { MemberButton, MemberButtonLink } from "@/components/member/ui/member-button";
-import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { roomMediaLessonId } from "@/lib/webinar-room-client";
 
@@ -12,7 +11,7 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 // zero com a capa e a contagem, a tela "Essa live acabou." com Assistir de novo quando ha replay e, sem player, "Esta
 // live não está disponível para você." para quem saiu do "Quem pode" no meio da sessao (D41). O palco leva
 // os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
-// enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao minimizar (o som continua).
+// enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao girar o aparelho (o som continua).
 
 export type RoomStageState = "ended" | "live" | "replay" | "unavailable" | "waiting";
 
@@ -22,7 +21,6 @@ export type RoomStageProps = {
   embedUrl: string | null;
   /** Ref de funcao com estado: a ponte liga quando o iframe monta (como na aula). */
   iframeRef: (element: HTMLIFrameElement | null) => void;
-  minimized: boolean;
   muted: boolean;
   onUnmute: () => void;
   replayHref: string | null;
@@ -43,13 +41,13 @@ function Cover({ children, coverUrl }: { children?: ReactNode; coverUrl: string 
   );
 }
 
-export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, minimized, muted, onUnmute, replayHref, sessionId, state, title }: RoomStageProps) {
+export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted, onUnmute, replayHref, sessionId, state, title }: RoomStageProps) {
   const copy = WEBINAR_COPY.sala;
   const showPlayer = embedUrl !== null && (state === "live" || state === "replay");
 
   return (
     <div
-      className={cn("relative bg-black", minimized ? "size-full" : "aspect-video w-full lg:aspect-auto lg:h-full")}
+      className="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"
       data-lesson-id={roomMediaLessonId(sessionId)}
       data-lesson-player-bridge={showPlayer ? "" : undefined}
       data-lesson-player-kind={showPlayer ? "iframe" : undefined}
@@ -75,7 +73,7 @@ export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, minim
         <div aria-hidden="true" className="absolute inset-0" data-room-lock />
       ) : null}
 
-      {showPlayer && muted && !minimized ? (
+      {showPlayer && muted ? (
         <div className="absolute inset-0 grid place-items-center bg-black/35">
           <MemberButton className="pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.6)]" onClick={onUnmute} size="lg" variant="primary">
             <Volume2 />

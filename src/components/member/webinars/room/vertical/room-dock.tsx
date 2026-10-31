@@ -7,7 +7,7 @@ import type { RoomDesign } from "./vertical-model";
 
 // A doca da sala (docs/30 §1.6, §6.6 e §9): o lugar do card da Oferta nos dois desenhos e, no vertical, o chat por cima
 // do video com o degrade para leitura, a pilula da Oferta a direita e o compositor compacto embaixo. Fica montada nos
-// dois desenhos (e escondida com a sala minimizada): o card da Oferta continua no mesmo lugar da arvore e nao perde o
+// dois desenhos (e escondida com a gaveta aberta): o card da Oferta continua no mesmo lugar da arvore e nao perde o
 // estado ao girar o aparelho (fechado continua fechado, nada e lido de novo). No desenho normal as duas caixas sao
 // `contents` (nao geram caixa): o card fica no canto do palco como sempre. O degrade e parado (nada anima).
 
@@ -17,7 +17,7 @@ export type RoomDockProps = {
   /** O compositor compacto (so no vertical). */
   composer: ReactNode;
   design: RoomDesign;
-  /** Minimizada ou com a gaveta aberta: a doca some (o card da Oferta continua montado, sem buscar nada). */
+  /** Com a gaveta aberta: a doca some (o card da Oferta continua montado, sem buscar nada). */
   hidden: boolean;
   /** <RoomOffer layout="stage" | "vertical" />, sempre neste lugar. */
   offer: ReactNode;

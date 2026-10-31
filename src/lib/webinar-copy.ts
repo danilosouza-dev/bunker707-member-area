@@ -200,7 +200,6 @@ export const WEBINAR_COPY = {
     fazerPergunta: "Fazer uma pergunta",
     filtros: { respondidas: "Respondidas", todas: "Todas" },
     fixada: "Fixada pela equipe",
-    minimizar: "Minimizar",
     modoLento: (segundos: number) => `Você pode enviar de novo em ${segundos} s`,
     naoComecou: "Essa sessão ainda não abriu. Volte na hora marcada.",
     ordem: { maisRecentes: "Mais recentes", maisVotadas: "Mais votadas" },
@@ -229,7 +228,6 @@ export const WEBINAR_COPY = {
     erroEnviar: "Não foi possível enviar. Tente de novo.",
     mensagensNovas: (n: number) => (n === 1 ? "1 mensagem nova" : `${n} mensagens novas`),
     reacoes: { clap: "Palmas", fire: "Fogo", laugh: "Risos", like: "Curtir", love: "Amei", wow: "Uau" },
-    salaMinimizada: "Sala minimizada",
     semEnquetes: "Nenhuma enquete aberta.",
     semMensagens: "Ainda não há mensagens.",
     semPerguntas: "Nenhuma pergunta ainda.",
@@ -335,8 +333,7 @@ export const WEBINAR_COPY = {
     trocandoCameraDesliga: "Trocando a câmera. Ela desliga quando a troca terminar.",
     trocandoCameraLiga: "Trocando a câmera. Ela liga quando a troca terminar.",
     trocandoMicrofoneDesliga: "Trocando o microfone. Ele desliga quando a troca terminar.",
-    trocandoMicrofoneLiga: "Trocando o microfone. Ele liga quando a troca terminar.",
-    voltarParaLive: "Voltar para a live"
+    trocandoMicrofoneLiga: "Trocando o microfone. Ele liga quando a troca terminar."
   },
   /** A faixa do topo de todas as paginas (fase 3; docs/30 §1.1, §1.5 e §2.7). */
   faixa: {

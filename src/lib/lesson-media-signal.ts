@@ -391,8 +391,8 @@ export function waitLessonFullscreenEnd(onEnd: () => void): () => void {
 }
 
 /**
- * A sala ao vivo dos Webinarios (docs/30 §1.3 e §1.5; docs/25 §1, "onde nunca"): enquanto a sala ou a pilula do
- * Minimizar esta no ar, ela conta como o player da aula tocando, entao nenhum pop-up abre por cima dela (a mesma trava
+ * A sala ao vivo dos Webinarios (docs/30 §1.3 e §1.5; docs/25 §1, "onde nunca"): enquanto a sala esta no ar (sem
+ * Minimizar, docs/31 V2-2), ela conta como o player da aula tocando, entao nenhum pop-up abre por cima dela (a mesma trava
  * do player da aula, sem regra nova no host do pop-up). O palco da sala leva os atributos do palco da aula
  * (data-lesson-player-stage, data-lesson-player-kind="iframe" e data-lesson-id = `lessonId`) e este sinal confirma a
  * "ponte" dele com `playing` = `on`: lessonMediaSnapshot().playing fica verdadeiro e o pop-up espera

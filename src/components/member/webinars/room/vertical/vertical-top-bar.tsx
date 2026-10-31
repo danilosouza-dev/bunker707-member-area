@@ -1,6 +1,6 @@
 "use client";
 
-import { Minimize2, Radio, Users, X } from "lucide-react";
+import { Radio, Users, X } from "lucide-react";
 import { MemberChip } from "@/components/member/ui/member-chip";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { RoomElapsed } from "../room-header";
@@ -9,14 +9,13 @@ import { verticalBadge } from "./vertical-model";
 // O topo da Sala Live vertical (docs/30 §1.6, §6.6 e §9): por cima do video, num degrade para leitura, o selo pela
 // mesma regra do cabecalho da sala (Ao vivo so com a decisao da equipe na Simulacao, D10; senao "Sessao das 20:00";
 // Replay), o contador "{n} assistindo" (o numero que a sala ja somou: o real mais a parte simulada daquele instante),
-// o titulo e os botoes Minimizar e Sair com 44 px. No replay, a dica de girar o celular (a barra do player fica
-// inteira com o celular deitado). So os botoes recebem o toque; o resto deixa o toque passar para o video.
+// o titulo e o botao Sair com 44 px (sem Minimizar: docs/31 V2-2). No replay, a dica de girar o celular (a barra do
+// player fica inteira com o celular deitado). So o botao recebe o toque; o resto deixa o toque passar para o video.
 
 export type VerticalTopBarProps = {
   getOffsetMs: () => number;
   kind: "replay" | "simulated";
   onLeave: () => void;
-  onMinimize: () => void;
   phase: "ended" | "live" | "waiting";
   /** O numero do contador ja somado (simulation.displayCount). */
   presentNow: number;
@@ -25,7 +24,7 @@ export type VerticalTopBarProps = {
   title: string;
 };
 
-export function VerticalTopBar({ getOffsetMs, kind, onLeave, onMinimize, phase, presentNow, showLiveBadge, timeLabel, title }: VerticalTopBarProps) {
+export function VerticalTopBar({ getOffsetMs, kind, onLeave, phase, presentNow, showLiveBadge, timeLabel, title }: VerticalTopBarProps) {
   const copy = WEBINAR_COPY.sala;
   const badge = verticalBadge({ kind, phase, showLiveBadge });
 
@@ -68,9 +67,6 @@ export function VerticalTopBar({ getOffsetMs, kind, onLeave, onMinimize, phase, 
         {kind === "replay" ? <p className="text-[11px] leading-4 text-white/80">{WEBINAR_COPY.vertical.girar}</p> : null}
       </div>
       <div className="pointer-events-auto flex shrink-0 items-center gap-1">
-        <button aria-label={copy.minimizar} className={topButtonClassName} onClick={onMinimize} title={copy.minimizar} type="button">
-          <Minimize2 aria-hidden="true" className="size-5" />
-        </button>
         <button aria-label={copy.sair} className={topButtonClassName} onClick={onLeave} title={copy.sair} type="button">
           <X aria-hidden="true" className="size-5" />
         </button>

@@ -1,7 +1,7 @@
 // A memoria da traducao no navegador (docs/30 §1.6, fase 4f): o idioma do chat lido UMA vez por pagina (GET
 // /api/webinars/preferences; o salvar do Perfil troca na hora) e, por sessao e idioma, o que a sala ja sabe de cada
 // mensagem (id -> corpo traduzido, as resolvidas como foram escritas e as tentativas das pendentes; as contas em
-// translation-model.ts). Vive no modulo para sobreviver a troca de desenho da sala (normal <-> vertical, minimizar) e
+// translation-model.ts). Vive no modulo para sobreviver a troca de desenho da sala (normal <-> vertical, ao girar) e
 // avisa quem assina (useSyncExternalStore). So o navegador escreve aqui: no servidor nada roda (os efeitos nao rodam
 // na primeira pintura), entao a memoria la fica sempre vazia e a primeira pintura e a do chat como foi escrito.
 // `pollRoomTranslations` e uma rodada da consulta de 5 s, fora do React (os testes chamam direto).

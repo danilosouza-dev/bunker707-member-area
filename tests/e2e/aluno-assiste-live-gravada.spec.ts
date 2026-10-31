@@ -9,7 +9,8 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 // setCurrentTime(~90) da trava, "Ativar som" liga o som, a linha mestre aparece no segundo certo (a de 100 s
 // chega; a de 20 min nao), a mensagem nova aparece numa segunda aba pela consulta de 5 s depois do aceite
 // (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. A IA Diretor fica
-// na pagina da live e some na sala (o botao flutuante cobria o X da pilula), e o cabecalho da sala tem a logo da escola.
+// na pagina da live e some na sala (o botao flutuante cobria o Enviar do chat), e o cabecalho da sala tem a logo da
+// escola. Sem Minimizar e sem pilula (docs/31 V2-2): o topo do vertical tem so o Sair.
 // Fase 4d (docs/30 §1.6 e §6.6): com o celular em pe (375 x 740) a sala abre na Sala Live vertical 9:16 (o video
 // cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
 // deitado, volta ao desenho normal com as abas, sem trocar de sala.
@@ -125,7 +126,7 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 });
 
-test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; deitado, volta ao desenho normal; o X da pilula fecha a sala", async ({ page }) => {
+test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; deitado, volta ao desenho normal; o Sair do topo pede a confirmação e fecha a sala", async ({ page }) => {
   const sala = WEBINAR_COPY.sala;
   const vertical = WEBINAR_COPY.vertical;
   await page.setViewportSize({ height: 740, width: 375 });
@@ -156,23 +157,29 @@ test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo c
   await gaveta.getByRole("button", { exact: true, name: vertical.voltarAoVideo }).click();
   await expect(gaveta).toHaveCount(0);
 
-  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
-  await expect(page.getByTestId("room-pill")).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
-  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: sala.voltar }).click();
-  await expect(dialogo.getByRole("textbox", { name: sala.escreva })).toBeVisible();
+  // Sem Minimizar (docs/31 V2-2): nada encolhe a sala, e a pagina da live nao fica desenhada por baixo dela.
+  await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
+  await expect(page.getByTestId("room-pill")).toHaveCount(0);
 
   // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
   await page.setViewportSize({ height: 375, width: 740 });
   await expect(dialogo).toHaveAttribute("data-room-design", "normal");
   await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
 
-  // De volta a 375 px em pe: o X da pilula (Sair) fica no canto de baixo, onde ficava a IA Diretor: o clique chega
-  // nele e fecha a sala.
+  // De volta a 375 px em pe: o topo tem so o Sair, com 44 px; ele pede a confirmacao (a sessao esta no ar) e o Sair
+  // dela volta para a pagina da live, onde a IA Diretor reaparece.
   await page.setViewportSize({ height: 740, width: 375 });
-  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
-  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Sair" }).click();
+  await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
+  const sairDoTopo = dialogo.getByRole("button", { exact: true, name: sala.sair });
+  await expect(sairDoTopo).toHaveCount(1);
+  const caixaDoSair = await sairDoTopo.boundingBox();
+  expect(caixaDoSair?.height).toBeGreaterThanOrEqual(44);
+  expect(caixaDoSair?.width).toBeGreaterThanOrEqual(44);
+  await sairDoTopo.click();
+  const confirmacao = dialogo.getByRole("alertdialog", { name: sala.sairConfirmar });
+  await expect(confirmacao).toBeVisible();
+  await confirmacao.getByRole("button", { exact: true, name: sala.sair }).click();
   await expect(page).toHaveURL(`/webinarios/${slug}`);
-  await expect(page.getByTestId("room-pill")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });

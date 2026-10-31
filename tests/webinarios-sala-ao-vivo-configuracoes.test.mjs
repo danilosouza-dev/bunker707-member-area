@@ -1022,12 +1022,13 @@ test("o painel e o foco: o proprio botao Configurações fecha mandando o foco a
   // Fechar pelo botao: closeSettings(true), que foca o botao antes de o painel sumir (o WebKit nao foca no clique).
   assert.match(tela, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}/);
   // A barra some: o painel e as reacoes fecham (o celular devolve a gaveta; o Esc seguinte sai da sala).
-  assert.match(tela, /const barShown = !minimized && !blocked && screen !== "ended";/);
+  // Quando a barra aparece e regra pura (liveBarShown, tests/webinarios-sala-v2-modelo.test.mjs); sem Minimizar (V2-2).
+  assert.match(tela, /const barShown = liveBarShown\(\{ blocked, screen \}\);/);
   assert.match(tela, /if \(barWasShown !== barShown\) \{\s*setBarWasShown\(barShown\);\s*if \(!barShown\) \{\s*setSettingsOpen\(false\);\s*setReactionsOpen\(false\);\s*\}\s*\}/);
   assert.match(tela, /const settingsTakeover = settingsShown && !desktop;/);
   assert.match(tela, /\} else if \(reactionsShown \|\| settingsShown\) \{/);
   assert.match(tela, /\{!barShown \? null : \(\s*<LiveControls/);
-  assert.match(tela, /if \(root && !minimized && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*const first = root\.querySelector<HTMLElement>\("\[data-room-first-focus\]"\);\s*\(first \?\? root\.querySelector<HTMLElement>\(ROOM_FOCUSABLE\)\)\?\.focus\(\);/);
+  assert.match(tela, /if \(root && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*const first = root\.querySelector<HTMLElement>\("\[data-room-first-focus\]"\);\s*\(first \?\? root\.querySelector<HTMLElement>\(ROOM_FOCUSABLE\)\)\?\.focus\(\);/);
 
   const body = { nome: "body" };
   assert.equal(model.barFocusLost({ active: body, barShown: false, barWasShown: true, body }), true, "o foco estava no painel quando a live acabou");

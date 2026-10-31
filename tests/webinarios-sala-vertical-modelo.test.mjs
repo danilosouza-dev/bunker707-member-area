@@ -8,7 +8,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 // celular em pe (retrato ate 767 px; deitado, tablet ou computador, o normal; forcado vence), a consulta seguida pelo
 // matchMedia (com o addListener do Safari antigo e sem matchMedia no servidor), a primeira pintura sempre no desenho
 // normal (o servidor nao sabe do aparelho: a hidratacao confere), e a transicao sem remontar o player: o palco fica
-// no mesmo caminho da arvore (corpo > coluna > caixa) no normal, no vertical e minimizada, com o MESMO HTML; so as
+// no mesmo caminho da arvore (corpo > coluna > caixa) no normal e no vertical, com o MESMO HTML (sem Minimizar desde o
+// redesign V2, docs/31 V2-2); so as
 // classes de fora mudam (o video em cover e so CSS). O selo e o contador pela regra do cabecalho, as ultimas
 // mensagens do chat por cima, o anuncio do leitor de tela (uma lida com o papel, rajada em "N mensagens novas"), a
 // frase do compositor e em que aba a gaveta abre.
@@ -153,9 +154,8 @@ test("a primeira pintura e do desenho normal mesmo no celular em pe (o servidor 
 
 test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em cover, o normal deixa as caixas sem caixa (contents)", () => {
   assert.deepEqual([...model.ROOM_STAGE_PATH], ["body", "stage-column", "stage-box"]);
-  const normal = model.roomSkeleton("normal", false);
-  const vertical = model.roomSkeleton("vertical", false);
-  const small = model.roomSkeleton("vertical", true);
+  const normal = model.roomSkeleton("normal");
+  const vertical = model.roomSkeleton("vertical");
   assert.deepEqual(Object.keys(normal).sort(), Object.keys(vertical).sort(), "as mesmas pecas nos dois desenhos");
   assert.equal(normal.root, "z-[60] text-white fixed inset-0 flex flex-col bg-[#0b0b0b]", "o normal como era");
   assert.equal(normal.body, "flex min-h-0 flex-1 flex-col lg:flex-row");
@@ -169,10 +169,11 @@ test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em c
     assert.ok(vertical.stageBox.includes(piece), `cover: ${piece}`);
   }
   assert.match(vertical.sales, /top-\[env\(safe-area-inset-top\)\]/, "o aviso de venda abaixo do entalhe");
-  assert.equal(small.body, "contents", "minimizada, o corpo nao gera caixa");
-  assert.match(small.root, /fixed bottom-4 right-4/, "a pilula no canto");
-  assert.match(small.stageColumn, /absolute left-0 top-0 h-14 w-24/, "o palco por cima da miniatura da pilula (56 px)");
-  assert.deepEqual(model.roomSkeleton("normal", true), small, "minimizada e igual nos dois desenhos");
+  // Sem Minimizar (V2-2): nenhum dos dois desenhos vira a pilula do canto.
+  for (const skeleton of [normal, vertical]) {
+    assert.doesNotMatch(skeleton.root, /bottom-4 right-4|h-14/, "nada de pilula");
+    assert.notEqual(skeleton.body, "contents", "o corpo sempre gera caixa");
+  }
 });
 
 /* ------------------------------------------------------------------------------------------------
