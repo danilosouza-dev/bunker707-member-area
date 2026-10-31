@@ -45,7 +45,7 @@ import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
-import { liveStageMoment, roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx } from "./room-layout-model";
+import { liveSkeletonState, liveStageMoment, panelToggleStep, roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx } from "./room-layout-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -529,12 +529,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   /** O balao da barra: abre e fecha o painel do chat; no celular com Configurações aberto, fecha ele e mostra o chat. */
   function togglePanel() {
-    if (settingsTakeover) {
+    const step = panelToggleStep({ panelShown, settingsTakeover });
+    if (step.closeSettings) {
       closeSettings();
-      setPanelOpen(true);
-      return;
     }
-    setPanelOpen(!panelShown);
+    setPanelOpen(step.panelOpen);
   }
 
   /** O botao da barra que abre o painel (Reagir ou Configurações). */
@@ -668,10 +667,10 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const tabs: Tab[] = ["chat", "perguntas", "participantes", ...(showPollsTab ? (["enquetes"] as const) : [])];
   const tabLabel = (value: Tab) => (value === "chat" ? copy.abas.chat : value === "perguntas" ? copy.abas.perguntas : value === "participantes" ? copy.abas.participantes : copy.abas.enquetes);
   // O palco cresce com o painel do chat fechado, no Modo cinema (o chat fica embaixo, menor) e na frase de removido /
-  // banido; no celular com o painel Configurações aberto (o chat escondido), ele divide a coluna com o painel e fica com
-  // no minimo 96 px: o painel rola por dentro e a barra continua na tela.
-  const stageGrows = blocked || !panelShown || cinemaOn;
-  const skeleton = roomSkeleton("normal", { cinema: cinemaOn, panelShown, stageGrows });
+  // banido; no celular com o painel Configurações aberto (o chat escondido), a caixa do palco divide a coluna com o
+  // painel e fica com no minimo 96 px: o painel rola por dentro e a barra continua na tela (liveSkeletonState).
+  const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown, settingsTakeover });
+  const skeleton = roomSkeleton("normal", skeletonState);
 
   return (
     <div
@@ -715,7 +714,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
           <div className={skeleton.stageBox} data-room-slot="stage-box">
             <LiveStage
-              className={cn("w-full lg:aspect-auto lg:min-h-0 lg:flex-1", stageGrows ? cn("flex-1", settingsTakeover ? "min-h-24" : "min-h-0") : "aspect-video")}
+              className={cn("w-full lg:aspect-auto lg:min-h-0 lg:flex-1", skeletonState.stageGrows ? "min-h-0 flex-1" : "aspect-video")}
               countdownLabel={countdown ? copy.comecaEm(countdown) : ""}
               coverUrl={coverUrl}
               entry={room.entry}

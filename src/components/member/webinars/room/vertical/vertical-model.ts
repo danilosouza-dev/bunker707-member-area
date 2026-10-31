@@ -175,9 +175,11 @@ export type RoomSkeleton = {
 /**
  * O estado que muda as classes do desenho normal (docs/31 V2-6 a V2-8), o mesmo nas duas salas: o painel do chat na
  * tela (`panelShown`), o palco que cresce para ocupar a coluna (`stageGrows`: o painel fechado, a frase de removido ou
- * banido, o Modo cinema) e o Modo cinema (`cinema`: o chat fica embaixo, menor).
+ * banido, o Modo cinema) e o Modo cinema (`cinema`: o chat fica embaixo, menor). `stageMin`: o palco que cresce divide
+ * a coluna com um painel no fluxo (Configurações no celular, na live) e guarda no minimo 96 px; quem encolhe e o
+ * painel, que rola por dentro (no celular deitado a coluna tem uns 320 px).
  */
-export type RoomSkeletonState = { cinema: boolean; panelShown: boolean; stageGrows: boolean };
+export type RoomSkeletonState = { cinema: boolean; panelShown: boolean; stageGrows: boolean; stageMin?: boolean };
 
 const SKELETON_DEFAULT: RoomSkeletonState = { cinema: false, panelShown: true, stageGrows: false };
 
@@ -199,9 +201,10 @@ export function themeForDesign(design: RoomDesign, theme: RoomTheme): RoomTheme 
 
 /**
  * O palco que cresce (o painel fechado, removido ou banido, o Modo cinema): a caixa ocupa a coluna e o palco dentro
- * dela deixa o 16:9 para ocupar a caixa (o player e o iframe se ajustam por dentro). So CSS, o mesmo palco.
+ * dela deixa o 16:9 para ocupar a caixa (o player e o iframe se ajustam por dentro). So CSS, o mesmo palco. O minimo
+ * fica na caixa (min-h-0, ou 96 px com `stageMin`): e ela que divide a coluna com a barra e o painel.
  */
-const STAGE_GROWS = "min-h-0 flex-1 [&>[data-room-stage]]:aspect-auto [&>[data-room-stage]]:flex-1";
+const STAGE_GROWS = "flex-1 [&>[data-room-stage]]:aspect-auto [&>[data-room-stage]]:flex-1";
 
 /**
  * As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco, o painel e os lugares por cima). O
@@ -235,7 +238,7 @@ export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKEL
     sales: "contents",
     stageBox: classes(
       "relative flex flex-col bg-black lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:rounded-[16px] [&:fullscreen>[data-room-stage]]:aspect-auto [&:fullscreen>[data-room-stage]]:h-full",
-      state.stageGrows ? STAGE_GROWS : null
+      state.stageGrows ? classes(state.stageMin ? "min-h-24" : "min-h-0", STAGE_GROWS) : null
     ),
     stageColumn: classes("relative flex flex-col lg:min-h-0 lg:min-w-0 lg:flex-1 lg:gap-3", state.stageGrows ? "min-h-0 flex-1" : "shrink-0")
   };

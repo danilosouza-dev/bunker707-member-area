@@ -1,13 +1,14 @@
 // O desenho da sala do aluno V2 (docs/31 §1), a parte pura: os trechos da linha da data no cabecalho do computador
 // (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do iframe tira da direita do video, onde os
-// selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6) e
-// quando o painel aparece (V2-7 e V2-8). Sem "use client" e com imports relativos:
-// tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
-// parametro.
+// selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
+// quando o painel aparece, o toque no balao (V2-7 e V2-8) e o esqueleto da live. Sem "use client" e com imports
+// relativos: tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio nem a tela:
+// tudo chega por parametro.
 
 import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { formatWebinarDayLong, saoPauloTime } from "../../../../lib/webinar-time";
+import type { RoomSkeletonState } from "./vertical/vertical-model";
 
 /** O tipo da sala: a Live ao vivo, a Live gravada (simulated) ou o Replay livre. */
 export type RoomKind = "live" | "replay" | "simulated";
@@ -123,4 +124,27 @@ export function roomPanelShown(input: { barShown: boolean; panelOpen: boolean; s
     return true;
   }
   return input.panelOpen && !input.settingsTakeover;
+}
+
+/**
+ * O toque no balao da barra (V2-7 e V2-8): abre e fecha o painel do chat (tambem no computador). No celular com
+ * Configurações aberto (`settingsTakeover`), o chat esta escondido por ele: o balao fecha Configurações e mostra o chat,
+ * nunca deixa os dois fechados.
+ */
+export function panelToggleStep(input: { panelShown: boolean; settingsTakeover: boolean }): { closeSettings: boolean; panelOpen: boolean } {
+  if (input.settingsTakeover) {
+    return { closeSettings: true, panelOpen: true };
+  }
+  return { closeSettings: false, panelOpen: !input.panelShown };
+}
+
+/**
+ * O esqueleto da Live ao vivo (V2-6 a V2-8, roomSkeleton): o palco cresce com o painel do chat fora da tela (o balao,
+ * ou Configurações no celular), no Modo cinema e na frase de removido ou banido. No celular com Configurações aberto
+ * (`settingsTakeover`) o palco divide a coluna com o painel no fluxo e guarda no minimo 96 px (`stageMin`): quem
+ * encolhe e o painel, que rola por dentro, e a barra continua na tela, tambem no celular deitado.
+ */
+export function liveSkeletonState(input: { blocked: boolean; cinema: boolean; panelShown: boolean; settingsTakeover: boolean }): RoomSkeletonState {
+  const stageGrows = input.blocked || !input.panelShown || input.cinema;
+  return { cinema: input.cinema, panelShown: input.panelShown, stageGrows, stageMin: stageGrows && input.settingsTakeover };
 }

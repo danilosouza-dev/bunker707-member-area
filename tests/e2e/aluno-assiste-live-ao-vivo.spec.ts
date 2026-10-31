@@ -26,9 +26,10 @@ import {
 // sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "com {apresentador} ·
 // {n} assistindo" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem Minimizar nem
 // pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px
-// (celular deitado) o cabecalho continua o do celular, sem marca, e os selos ficam no palco. O botao Configurações
-// abre o painel de som e aparelhos: antes da liberacao nada troca de aparelho (nem pede o microfone); depois do Falar o
-// microfone escolhido chega a sala so pelo id, o alto-falante tambem, a camera so depois do aviso de gravacao,
+// (celular deitado) o cabecalho continua o do celular, sem marca, os selos ficam no palco e Configurações aberto deixa
+// o palco com 96 px, acima do painel. O botao Configurações abre o painel de som e aparelhos: antes da liberacao nada
+// troca de aparelho (nem pede o microfone); depois do Falar o microfone escolhido chega a sala so pelo id, o
+// alto-falante tambem, a camera so depois do aviso de gravacao,
 // Reduzir ruído e Economizar dados viram os comandos do iframe (o ruido so depois que a faixa nova entra) e nenhuma
 // troca vira "a equipe fechou" nem linha no historico; a Câmera tocada no meio de uma troca espera a faixa nova; a
 // equipe que silencia logo depois da troca do microfone chega como a equipe, e o foco do controle que some com a secao
@@ -41,8 +42,8 @@ import {
 // recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
 // cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
 // A barra (docs/31 V2-6 a V2-8): no computador o Sair fica nela e o balao "Esconder o chat" esconde o painel (o palco
-// cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe, os circulos
-// tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
+// cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe (a 360 px
+// tambem), os circulos tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -311,6 +312,10 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   expect(caixaDoCanto?.x ?? -1).toBeGreaterThanOrEqual(caixaDoPalco?.x ?? 0);
   expect((caixaDoCanto?.y ?? 0) + (caixaDoCanto?.height ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.y ?? 0) + (caixaDoPalco?.height ?? 0));
   expect((caixaDoCanto?.x ?? 0) + (caixaDoCanto?.width ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.x ?? 0) + (caixaDoPalco?.width ?? 0));
+
+  // A 360 px (os Android pequenos) a barra tambem cabe sem rolar por dentro (a rolagem dela fica escondida).
+  await page.setViewportSize({ height: 740, width: 360 });
+  expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem em 360 px").toBe(true);
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {
@@ -719,7 +724,7 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
-test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador} · {n} assistindo', sem marca) e os selos Ao vivo e Gravando no palco", async ({ page }) => {
+test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador} · {n} assistindo', sem marca) e os selos Ao vivo e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
   // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo, a linha da
   // data e o "{n} assistindo" da direita so entram em lg; o contador fica na linha de baixo do titulo.
   await page.setViewportSize({ height: 740, width: 667 });
@@ -755,6 +760,28 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresen
   expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoTema);
   expect(fim(caixas.linha)).toBeLessThanOrEqual(bordaDoTema);
   expect(fim(caixas.palco), "o palco cabe na largura").toBeLessThanOrEqual(667);
+
+  // Configurações deitado: o painel fica no fluxo e toma o lugar do chat; a caixa do palco guarda no minimo 96 px e o
+  // palco acaba antes do painel (nunca por baixo dele): quem encolhe e o painel, que rola por dentro, e a barra continua
+  // na tela.
+  const configuracoes = dialogo.getByRole("button", { exact: true, name: aoVivo.configuracoes });
+  await configuracoes.click();
+  const painel = dialogo.getByTestId("live-settings");
+  await expect(painel).toBeVisible();
+  await expect(dialogo.getByTestId("room-panel")).toBeHidden();
+  const deitado = {
+    caixa: await dialogo.locator('[data-room-slot="stage-box"]').boundingBox(),
+    painel: await dialogo.locator("#live-room-settings").boundingBox(),
+    palco: await palco.boundingBox()
+  };
+  expect(deitado.caixa?.height ?? 0, "a caixa do palco com no minimo 96 px").toBeGreaterThanOrEqual(96);
+  expect(deitado.palco?.height ?? 0, "o palco com no minimo 96 px").toBeGreaterThanOrEqual(96);
+  expect((deitado.palco?.y ?? 0) + (deitado.palco?.height ?? 0), "o palco acaba antes do painel").toBeLessThanOrEqual((deitado.painel?.y ?? 0) + 1);
+  await expect(configuracoes).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar })).toBeInViewport({ ratio: 1 });
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar }).click();
+  await expect(painel).toHaveCount(0);
+  await expect(dialogo.getByTestId("room-panel")).toBeVisible();
 });
 
 // O Chrome fixa a Permissions-Policy no carregamento do documento, e a navegacao interna do Next nao carrega outro:

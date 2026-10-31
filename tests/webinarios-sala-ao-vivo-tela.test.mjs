@@ -313,6 +313,7 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   assert.match(sair, /class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b/, "o Sair da barra so a partir de lg (abaixo, no cabecalho)");
   assert.match(sair, /bg-\[var\(--accent\)\]/, "no acento");
   assert.match(sair, /<span class="sr-only xl:not-sr-only">Sair<\/span>/, "o nome Sair, visivel a partir de xl");
+  assert.match(sair, /^<button [^>]*title="Sair"/, "entre lg e xl so o icone: o nome no title (a dica do mouse), como nos circulos");
   // A Tela cheia sai da barra abaixo de lg (vai para o canto do palco).
   assert.match(circulos(html).find(({ item }) => item === "fullscreen")?.tag ?? "", /class="[^"]*\bhidden lg:grid\b/);
   assert.match(html, /aria-keyshortcuts="R"/);
@@ -326,10 +327,21 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   const cheia = barra({ handRaised: true, micAllowed: true, videoOn: true });
   assert.deepEqual(nomes(cheia), ["Reagir", "Abaixar a mão", "Câmera", "Microfone", "Som", "Tela cheia", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"]);
   // No celular (V2-18), com o Microfone liberado, ficam 7 circulos de 44 px: Reagir, a mao, Câmera, Microfone, Som,
-  // Configurações e o balao. Com 4 px entre eles, 10 px de cada lado dentro da barra e 8 px de margem, cabem em 375 px.
+  // Configurações e o balao. A conta usa a margem, a borda, o recuo e o vao da barra desenhada (abaixo de lg): os 7
+  // cabem em 360 px e em 375 px sem rolar a barra por dentro (a rolagem dela fica escondida e cortaria o balao).
   assert.deepEqual(noCelular(cheia).map(({ item }) => item), ["react", "hand", "camera", "mic", "sound", "settings", "panel"]);
-  assert.ok(noCelular(cheia).length * 44 + (noCelular(cheia).length - 1) * 4 + 2 * 10 + 2 * 8 <= 375);
-  assert.match(cheia, /aria-label="Controles da sala" class="mx-2 my-2 flex h-16 [^"]*gap-1 [^"]*px-2\.5 /, "64 px no celular, com a margem de 8 px");
+  const classesDaBarra = (cheia.match(/aria-label="Controles da sala" class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(["mx-2", "my-2", "h-16", "border"].every((classe) => classesDaBarra.includes(classe)), "64 px no celular, com a margem de 8 px e a borda de 1 px");
+  /** O valor em px da classe de espaco do Tailwind abaixo de lg (gap-0.5 = 2 px; px-1.5 = 6 px; mx-2 = 8 px). */
+  const espaco = (prefixo) => {
+    const classe = classesDaBarra.find((nome) => nome.startsWith(`${prefixo}-`));
+    assert.ok(classe, `a barra tem ${prefixo}`);
+    return Number(classe.slice(prefixo.length + 1)) * 4;
+  };
+  const larguraDaBarra = (circulosNaTela) => circulosNaTela * 44 + (circulosNaTela - 1) * espaco("gap") + 2 * espaco("px") + 2 * 1 + 2 * espaco("mx");
+  for (const tela of [360, 375]) {
+    assert.ok(larguraDaBarra(noCelular(cheia).length) <= tela, `os 7 circulos cabem em ${tela} px: ${larguraDaBarra(noCelular(cheia).length)}`);
+  }
   assert.match(barra({ videoOn: true }), /title="Desligar câmera"/);
   assert.ok(!nomes(barra({ allowStudentCamera: false })).includes("Câmera"), "sem a camera dos alunos no webinario, sem o botao");
   assert.ok(!nomes(barra({ allowStudentCamera: null })).includes("Câmera"), "antes do token, sem o botao");
@@ -387,16 +399,17 @@ test("o painel Configurações no celular nao tira a barra da tela: depois da ba
   // Reagir: por cima do palco no meio da barra a partir de lg; no fluxo acima dela no celular.
   const reagir = (barra({ reactionsOpen: true }).match(/<div class="([^"]*)" id="live-room-reactions">/)?.[1] ?? "").split(" ");
   assert.ok(["mx-2", "mt-2", "lg:absolute", "lg:bottom-full", "lg:left-1/2", "lg:-translate-x-1/2"].every((classe) => reagir.includes(classe)), reagir.join(" "));
-  // O painel do chat no celular com Configurações aberto: a regra pura (roomPanelShown, webinarios-sala-v2-modelo).
+  // A partir de lg o painel tem 380 px por cima do palco: o conteudo numa coluna so (sem cortar os nomes dos aparelhos).
+  const grade = aberto.match(/<div class="(grid [^"]*)">/)?.[1].split(" ") ?? [];
+  assert.ok(grade.includes("sm:grid-cols-2") && grade.includes("lg:grid-cols-1"), grade.join(" "));
+  // O painel do chat no celular com Configurações aberto, o palco que guarda 96 px e o balao que fecha Configurações e
+  // mostra o chat: as regras puras (roomPanelShown, liveSkeletonState e panelToggleStep, webinarios-sala-v2-modelo); a
+  // sala ligada a elas, em webinarios-sala-v2.guard.
   assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: true, settingsTakeover: true }), false, "no celular, o painel Configurações toma o lugar do chat");
+  assert.equal(layout.liveSkeletonState({ blocked: false, cinema: false, panelShown: false, settingsTakeover: true }).stageMin, true, "o palco encolhe, com no minimo 96 px");
+  assert.deepEqual(layout.panelToggleStep({ panelShown: false, settingsTakeover: true }), { closeSettings: true, panelOpen: true }, "o balao fecha Configurações e mostra o chat");
 
   const room = semComentarios(FONTES.room);
-  assert.match(room, /const settingsTakeover = settingsShown && !desktop;\s*[\s\S]*?const panelShown = roomPanelShown\(\{ barShown, panelOpen, settingsTakeover \}\);/, "o painel do chat pela regra, so com a barra na tela");
-  assert.match(room, /const stageGrows = blocked \|\| !panelShown \|\| cinemaOn;/);
-  assert.match(room, /stageGrows \? cn\("flex-1", settingsTakeover \? "min-h-24" : "min-h-0"\) : "aspect-video"/, "o palco encolhe, com no minimo 96 px");
-  assert.match(room, /!panelShown && !blocked && !settingsTakeover \? <LiveChatOverlay/, "sem o chat sobreposto no palco pequeno");
-  assert.match(room, /function selectTab\(value: Tab\) \{\s*if \(settingsTakeover\) \{\s*closeSettings\(\);\s*setTab\(value\);\s*setPanelOpen\(true\);/, "a aba de baixo fecha o painel e abre o chat");
-  assert.match(room, /function togglePanel\(\) \{\s*if \(settingsTakeover\) \{\s*closeSettings\(\);\s*setPanelOpen\(true\);/, "o balao tambem");
   assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen && settingsOpen\) \{\s*closeSettings\(\);/, "Reagir fecha Configurações");
   assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);/, "Configurações fecha Reagir");
   assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");

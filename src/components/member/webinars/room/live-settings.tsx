@@ -190,7 +190,9 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onT
         </div>
       ) : null}
       {sections.aguardandoSala ? <p className={cn(NOTE, "mb-3")}>{config.foraDaSala}</p> : null}
-      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+      {/* Duas colunas do sm ao lg (o painel na largura da coluna); a partir de lg o painel tem 380 px por cima do palco
+          e fica numa coluna so, sem cortar os nomes dos aparelhos. */}
+      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-1">
         {onToggleTheme && theme ? (
           <Section className="sm:hidden" id={ids.tema} title={WEBINAR_COPY.salaV2.tema.titulo}>
             <button className={cn(PANEL_BUTTON, FOCUS)} onClick={onToggleTheme} type="button">

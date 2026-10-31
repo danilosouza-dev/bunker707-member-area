@@ -240,6 +240,50 @@ test("roomSkeleton (V2-6): o mesmo desenho normal nas duas salas; o painel fecha
   assert.match(aberto.stageColumn, /lg:gap-3/);
   // O vertical 9:16 continua como estava: o estado nao muda nada nele.
   assert.deepEqual(vertical.roomSkeleton("vertical", { cinema: true, panelShown: false, stageGrows: true }), vertical.roomSkeleton("vertical"));
+  assert.deepEqual(vertical.roomSkeleton("vertical", { cinema: false, panelShown: false, stageGrows: true, stageMin: true }), vertical.roomSkeleton("vertical"));
+});
+
+/** As classes de uma peca do esqueleto, separadas. */
+const classesDe = (texto) => texto.split(" ");
+
+test("panelToggleStep (V2-7 e V2-8): o balao abre e fecha o painel; no celular com Configurações aberto, fecha Configurações e mostra o chat", () => {
+  assert.deepEqual(layout.panelToggleStep({ panelShown: true, settingsTakeover: false }), { closeSettings: false, panelOpen: false }, "aberto: o balao fecha (tambem no computador)");
+  assert.deepEqual(layout.panelToggleStep({ panelShown: false, settingsTakeover: false }), { closeSettings: false, panelOpen: true }, "fechado: o balao abre");
+  // Configurações no celular esconde o chat (roomPanelShown da false): o balao nunca deixa os dois fechados.
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: true, settingsTakeover: true }), false);
+  assert.deepEqual(layout.panelToggleStep({ panelShown: false, settingsTakeover: true }), { closeSettings: true, panelOpen: true }, "fecha Configurações e mostra o chat");
+  // Depois do passo, o chat fica na tela: Configurações fechou (sem takeover) e o painel abriu.
+  const passo = layout.panelToggleStep({ panelShown: false, settingsTakeover: true });
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: passo.panelOpen, settingsTakeover: !passo.closeSettings }), true);
+});
+
+test("liveSkeletonState (V2-6): o palco da live cresce com o chat fora da tela, no Modo cinema e removido; com Configurações no celular a caixa do palco guarda 96 px (o celular deitado tem uns 320 px de coluna)", () => {
+  const estado = (extra = {}) => layout.liveSkeletonState({ blocked: false, cinema: false, panelShown: true, settingsTakeover: false, ...extra });
+  assert.deepEqual(estado(), { cinema: false, panelShown: true, stageGrows: false, stageMin: false }, "o painel aberto: o palco 16:9");
+  assert.equal(estado({ panelShown: false }).stageGrows, true, "o balao fechou o painel");
+  assert.equal(estado({ cinema: true }).stageGrows, true, "Modo cinema");
+  assert.equal(estado({ blocked: true }).stageGrows, true, "a frase de removido ou banido");
+  assert.equal(estado({ panelShown: false }).stageMin, false, "o painel fechado pelo balao: o palco ocupa a coluna inteira, sem minimo");
+
+  // Configurações no celular: o chat sai da tela (roomPanelShown) e o palco divide a coluna com o painel, que fica no
+  // fluxo. O minimo vai na CAIXA do palco (a peca que divide a coluna com a barra), nao so no palco dentro dela: com o
+  // minimo so no filho, a caixa encolhia para uns 23 px a 667 x 375 e o palco vazava por baixo do painel.
+  const panelShown = layout.roomPanelShown({ barShown: true, panelOpen: true, settingsTakeover: true });
+  const takeover = estado({ panelShown, settingsTakeover: true });
+  assert.deepEqual(takeover, { cinema: false, panelShown: false, stageGrows: true, stageMin: true });
+  const caixa = classesDe(vertical.roomSkeleton("normal", takeover).stageBox);
+  assert.ok(caixa.includes("min-h-24"), "a caixa do palco com no minimo 96 px");
+  assert.ok(!caixa.includes("min-h-0"), "sem o min-h-0 que deixava a caixa encolher");
+  assert.ok(caixa.includes("flex-1") && caixa.includes("lg:min-h-0"), "cresce na coluna; a partir de lg nao ha takeover");
+  assert.ok(classesDe(vertical.roomSkeleton("normal", takeover).stageColumn).includes("flex-1"), "a coluna ocupa o corpo (o chat esta escondido)");
+
+  // Sem o takeover, a caixa que cresce pode encolher (min-h-0): o painel do chat fechado ou o Modo cinema.
+  for (const extra of [{ panelShown: false }, { cinema: true }, { blocked: true }]) {
+    const semMinimo = classesDe(vertical.roomSkeleton("normal", estado(extra)).stageBox);
+    assert.ok(semMinimo.includes("min-h-0") && !semMinimo.includes("min-h-24"), JSON.stringify(extra));
+  }
+  // O palco 16:9 (sem crescer) nao leva minimo nenhum alem do lg.
+  assert.ok(!classesDe(vertical.roomSkeleton("normal", estado()).stageBox).some((classe) => classe === "min-h-0" || classe === "min-h-24"));
 });
 
 const salaAoVivo = await import("../src/components/member/webinars/room/webinar-room.tsx");
