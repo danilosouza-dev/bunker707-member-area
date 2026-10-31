@@ -49,3 +49,48 @@ test("sem Minimizar (V2-2): a barra nao tem outro jeito de sumir, e a volta do f
   const depois = model.liveBarShown({ blocked: false, screen: "ended" });
   assert.equal(model.barFocusLost({ active: body, barShown: depois, barWasShown: antes, body }), true);
 });
+
+// F2 (V2-7, V2-10, V2-12 e V2-16): o que a sala guarda no navegador de cada pessoa. Um valor que falta, vem estragado ou
+// e de outra sessao vira o padrao: o escuro, o painel aberto, o Palco e nada deixado para depois.
+const prefs = await import("../src/lib/webinar-room-prefs.ts");
+
+test("as chaves do navegador: tema, painel, visao e enquetes, todas com o prefixo bunker707:", () => {
+  assert.equal(prefs.ROOM_THEME_KEY, "bunker707:webinar-sala-tema");
+  assert.equal(prefs.ROOM_PANEL_KEY, "bunker707:webinar-sala-painel");
+  assert.equal(prefs.ROOM_VIEW_KEY, "bunker707:webinar-sala-visao");
+  assert.equal(prefs.ROOM_POLLS_KEY, "bunker707:webinar-sala-enquetes");
+  const chaves = [prefs.ROOM_THEME_KEY, prefs.ROOM_PANEL_KEY, prefs.ROOM_VIEW_KEY, prefs.ROOM_POLLS_KEY];
+  assert.equal(new Set(chaves).size, 4, "uma chave para cada escolha");
+});
+
+test("storedRoomTheme: escuro por padrao; so 'light' vira o claro", () => {
+  assert.equal(prefs.storedRoomTheme(null), "dark", "nada guardado (o servidor e a primeira pintura)");
+  assert.equal(prefs.storedRoomTheme(undefined), "dark");
+  assert.equal(prefs.storedRoomTheme("x"), "dark", "valor estragado");
+  assert.equal(prefs.storedRoomTheme("LIGHT"), "dark", "sem adivinhar maiusculas");
+  assert.equal(prefs.storedRoomTheme("dark"), "dark");
+  assert.equal(prefs.storedRoomTheme("light"), "light");
+});
+
+test("storedPanelOpen: o painel abre por padrao e so fecha com '0'", () => {
+  assert.equal(prefs.storedPanelOpen(null), true);
+  assert.equal(prefs.storedPanelOpen("1"), true);
+  assert.equal(prefs.storedPanelOpen("qualquer"), true);
+  assert.equal(prefs.storedPanelOpen("0"), false);
+});
+
+test("storedRoomView: o Palco por padrao; so 'grid' vira a Grade", () => {
+  assert.equal(prefs.storedRoomView(null), "stage");
+  assert.equal(prefs.storedRoomView("stage_duo"), "stage", "o Palco duplo nao existe para o aluno nesta fase");
+  assert.equal(prefs.storedRoomView("grid"), "grid");
+});
+
+test("storedDeferredPolls: so as enquetes da sessao aberta; outra sessao ou valor estragado volta vazio", () => {
+  const sessao = "cccccccc-0000-4000-8000-000000000002";
+  const guardado = prefs.deferredPollsValue(sessao, { later: ["p1"], seen: ["p0"] });
+  assert.deepEqual(prefs.storedDeferredPolls(guardado, sessao), { later: ["p1"], seen: ["p0"] }, "ida e volta");
+  assert.deepEqual(prefs.storedDeferredPolls(guardado, "outra-sessao"), { later: [], seen: [] }, "de outra sessao volta vazio");
+  assert.deepEqual(prefs.storedDeferredPolls(null, sessao), { later: [], seen: [] });
+  assert.deepEqual(prefs.storedDeferredPolls("{nao e json", sessao), { later: [], seen: [] });
+  assert.deepEqual(prefs.storedDeferredPolls(JSON.stringify({ later: [1, "", "p2"], seen: "p3", sessionId: sessao }), sessao), { later: ["p2"], seen: [] }, "so ids de verdade");
+});

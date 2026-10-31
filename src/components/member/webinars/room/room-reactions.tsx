@@ -7,7 +7,8 @@ import { REACTIONS, type Reaction } from "@/server/webinars/model";
 
 // A barra de reacoes do aluno (docs/30 §1.3 e §9): as seis reacoes de webinar_reactions, botoes de 44 px, uma por
 // segundo; as reacoes sobem flutuando pelo canto do palco por 3 s, sem som; com prefers-reduced-motion ficam
-// paradas 1,5 s e somem (motion-reduce). Nenhuma reacao e anunciada ao leitor de tela.
+// paradas 1,5 s e somem (motion-reduce). Nenhuma reacao e anunciada ao leitor de tela. Redesign V2, F2 (docs/31
+// V2-11): a barra usa os tokens do tema da sala; as bolhas ficam sobre o video e sao iguais nos dois temas.
 
 export const REACTION_GLYPHS: Record<Reaction, string> = { clap: "👏", fire: "🔥", laugh: "😂", like: "👍", love: "❤️", wow: "😮" };
 
@@ -19,7 +20,7 @@ export function RoomReactionBar({ disabled, onReact }: { disabled: boolean; onRe
       {REACTIONS.map((reaction) => (
         <button
           aria-label={copy.reacoes[reaction]}
-          className="grid size-11 shrink-0 place-items-center rounded-full text-xl transition-transform hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-110 disabled:opacity-40 motion-reduce:transition-none"
+          className="grid size-11 shrink-0 place-items-center rounded-full text-xl transition-transform hover:bg-room-control-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus active:scale-110 disabled:opacity-40 motion-reduce:transition-none"
           disabled={disabled}
           key={reaction}
           onClick={() => onReact(reaction)}

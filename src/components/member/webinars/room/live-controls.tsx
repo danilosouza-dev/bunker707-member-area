@@ -21,7 +21,8 @@ import { RoomReactionBar } from "./room-reactions";
 // ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e a linha de aviso diz o
 // que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe,
 // microfone silenciado, camera bloqueada, o navegador que recusou o microfone ou a camera) saem numa linha com
-// aria-live. Nada aqui fala com a rede.
+// aria-live. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
+// ativo em branco com texto preto no escuro, quase preto com texto branco no claro).
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -90,8 +91,8 @@ function BarButton(props: {
       aria-label={props.label}
       aria-pressed={props.expanded === undefined ? props.active : undefined}
       className={cn(
-        "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40 motion-reduce:transition-none",
-        props.active ? "bg-white text-black hover:bg-zinc-200" : "bg-white/[0.08] text-zinc-100 hover:bg-white/[0.16]"
+        "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus disabled:opacity-40 motion-reduce:transition-none",
+        props.active ? "bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85" : "bg-room-control text-room-fg-strong hover:bg-room-control-hover"
       )}
       data-live-control={props.label}
       disabled={props.disabled}
@@ -112,9 +113,9 @@ export function LiveControls(props: LiveControlsProps) {
   const copy = WEBINAR_COPY.aoVivo;
 
   return (
-    <div className="relative flex min-h-0 flex-col border-t border-white/10 bg-[#111]" data-testid="live-controls">
+    <div className="relative flex min-h-0 flex-col border-t border-room-border bg-room-surface" data-testid="live-controls">
       {props.reactionsOpen ? (
-        <div className="shrink-0 border-b border-white/10" id={LIVE_REACTIONS_ID}>
+        <div className="shrink-0 border-b border-room-border" id={LIVE_REACTIONS_ID}>
           <RoomReactionBar disabled={props.reactionsDisabled} onReact={props.onReact} />
         </div>
       ) : null}
@@ -159,12 +160,12 @@ export function LiveControls(props: LiveControlsProps) {
       {/* Depois da barra no teclado (o Tab do botao Configurações entra no painel) e acima dela na tela; encolhe e rola
           por dentro quando a coluna e curta (no celular), sem tirar a barra da tela. */}
       {props.settingsOpen ? (
-        <div className="order-first flex min-h-0 flex-col border-b border-white/10" id={LIVE_SETTINGS_ID}>
+        <div className="order-first flex min-h-0 flex-col border-b border-room-border" id={LIVE_SETTINGS_ID}>
           {props.settings}
         </div>
       ) : null}
 
-      <p aria-live="polite" className={cn("shrink-0 px-3 text-center text-xs font-semibold text-amber-100", props.notice ? "pb-2" : "sr-only")} data-testid="live-notice" role="status">
+      <p aria-live="polite" className={cn("shrink-0 px-3 text-center text-xs font-semibold text-room-warn-fg", props.notice ? "pb-2" : "sr-only")} data-testid="live-notice" role="status">
         {props.notice ?? ""}
       </p>
     </div>

@@ -36,14 +36,18 @@ const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
 
-test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao das 20:00; Replay sem contador; {n} assistindo; so o Sair, sem Minimizar (V2-2)", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
+test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao das 20:00; Replay sem contador; {n} assistindo; o tema e o Sair, sem Minimizar (V2-2)", () => {
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
   const live = render(header.RoomHeader, base);
   assert.match(live, /Ao vivo/);
   assert.match(live, /42:10/, "o tempo no ar");
   assert.match(live, /3 assistindo/);
   assert.doesNotMatch(live, /Minimizar/, "sem Minimizar (docs/31 V2-2)");
-  assert.equal(live.match(/<button[^>]*>/g)?.length, 1, "o unico botao do cabecalho e o Sair");
+  assert.deepEqual(
+    [...live.matchAll(/<button aria-label="([^"]+)"/g)].map(([, nome]) => nome),
+    ["Tema claro", "Sair"],
+    "os botoes do cabecalho: o tema (V2-12) e o Sair"
+  );
   assert.match(live, /<button aria-label="Sair"[^>]*title="Sair" type="button">/);
   assert.doesNotMatch(live, /Sessão das/);
 
@@ -57,8 +61,41 @@ test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao da
   assert.equal(render(header.RoomHeader, { ...base, presentNow: 1 }).includes("1 assistindo"), true);
 });
 
+test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
+  const botao = (html, nome) => html.match(new RegExp(`<button aria-label="${nome}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
+
+  // No escuro, o Sol com "Tema claro"; no claro, a Lua com "Tema escuro" (o nome diz o que o clique faz).
+  const escuro = botao(render(header.RoomHeader, base), "Tema claro");
+  assert.match(escuro, /title="Tema claro" type="button"/);
+  assert.match(escuro, /lucide-sun/);
+  const classes = (escuro.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(classes.includes("size-10") && classes.includes("rounded-full"), "redondo, 40 px");
+  assert.doesNotMatch(escuro, /aria-pressed/, "o nome muda com o tema: nada de aria-pressed");
+  const claroHtml = render(header.RoomHeader, { ...base, theme: "light" });
+  assert.doesNotMatch(claroHtml, /Tema claro/);
+  const claro = botao(claroHtml, "Tema escuro");
+  assert.match(claro, /lucide-moon/);
+
+  // A sala inteira: o atributo no dialogo (nunca no html), o escuro antes de ler o navegador, as cores pelos tokens.
+  const props = { coverUrl: null, payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
+  const dialogo = (html) => html.match(/<div [^>]*role="dialog"[^>]*>/)?.[0] ?? "";
+  const normal = render(room.WebinarRoom, props);
+  assert.match(dialogo(normal), /data-room-theme="dark"/);
+  assert.equal((normal.match(/data-room-theme=/g) ?? []).length, 1, "um so lugar: o dialogo");
+  assert.match(normal, /<button aria-label="Tema claro"/);
+  assert.match(normal, /data-testid="room-panel"/);
+  assert.match(normal.match(/<aside [^>]*>/)?.[0] ?? "", /bg-room-surface/, "o painel pelo token do tema");
+
+  // O desenho vertical 9:16 fica sobre o video: sempre escuro, sem o cabecalho (e sem o botao de tema).
+  const vertical = render(room.WebinarRoom, { ...props, design: "vertical" });
+  assert.match(dialogo(vertical), /data-room-design="vertical"/);
+  assert.match(dialogo(vertical), /data-room-theme="dark"/);
+  assert.doesNotMatch(vertical, /Tema claro|Tema escuro/);
+});
+
 test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 sem logo) com o traco; o Icone da escola de 24 px abaixo de lg", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, phase: "live", presentNow: 3, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" };
+  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
   const comMarca = (marca, props = {}) =>
     renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...base, ...props })));
   const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
@@ -67,7 +104,7 @@ test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 
 
   // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg, com o traco.
   const semLogo = comMarca({ logoImage: null });
-  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<span aria-hidden="true" class="h-5 w-px bg-white\/15"><\/span>/);
+  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<span aria-hidden="true" class="h-5 w-px bg-room-divider"><\/span>/);
   assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center gap-3 lg:flex"/, "a logo e o traco so a partir de lg");
   assert.doesNotMatch(semLogo, /<img[^>]*class="[^"]*w-\[112px\]/, "sem logo, nenhuma imagem de logo");
 
@@ -315,7 +352,12 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   assert.match(html, /data-room-design="normal"/, "sem o celular em pe (e no servidor), o desenho normal");
   assert.equal(html, render(room.WebinarRoom, { coverUrl: null, design: "normal", payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" }), "o normal forcado e o mesmo");
   // A marca no cabecalho (PR #137) poe os preloads das imagens da marca antes do dialogo.
-  assert.match(html, /^(?:<link rel="preload" as="image" href="[^"]+"\/>)*<div aria-label="Aula de IA" aria-modal="true" class="z-\[60\] text-white fixed inset-0 flex flex-col bg-\[#0b0b0b\]"/, "o dialogo como era");
+  // Redesign V2, F2 (V2-11 e V2-12): o fundo e o texto pelos tokens do tema da sala, com o escuro na primeira pintura.
+  assert.match(
+    html,
+    /^(?:<link rel="preload" as="image" href="[^"]+"\/>)*<div aria-label="Aula de IA" aria-modal="true" class="z-\[60\] text-room-fg fixed inset-0 flex flex-col bg-room-bg" data-room-design="normal" data-room-phase="live" data-room-theme="dark" role="dialog"/,
+    "o dialogo, no tema escuro"
+  );
   assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
   assert.match(html, /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute bottom-3 right-3/, "as bolhas no canto do palco");
   assert.match(html, /<div class="contents" data-room-slot="sales">/);

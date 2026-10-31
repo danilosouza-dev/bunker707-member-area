@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { presenceStateOf, revealedMessages, roomPhaseAt, targetOffsetMs } from "@/lib/webinar-room-client";
@@ -19,9 +18,11 @@ import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBar, RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomStage } from "./room-stage";
+import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
+import { useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
 import { RoomDock } from "./vertical/room-dock";
@@ -48,6 +49,8 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // pilula da Oferta, o aviso de venda no topo e a gaveta com o chat inteiro, Perguntas e Enquetes; girar volta ao desenho
 // normal. O palco fica sempre no mesmo lugar da arvore (corpo > coluna > caixa do palco, vertical/vertical-model.ts):
 // girar troca so as classes, o player nao remonta e o chat, o relogio, o som e o estado continuam.
+// Redesign V2, F2 (docs/31 V2-11 e V2-12): o tema claro ou escuro da pessoa (use-room-prefs.ts) fica no atributo
+// data-room-theme do dialogo, e as superficies fora do video usam os tokens --room-*; o vertical e sempre escuro.
 
 type Tab = "chat" | "enquetes" | "perguntas";
 
@@ -172,6 +175,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const reducedMotion = useRoomReducedMotion();
   const design = useRoomOrientation(forcedDesign, rootRef);
   const vertical = design === "vertical";
+  const [theme, setTheme] = useRoomTheme();
   /** Sala vertical: a gaveta (Chat inteiro, Perguntas, Enquetes) e o chat por cima ligado ou fechado. */
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
@@ -371,9 +375,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const chatTab = (
     <>
       {openPolls.length > 0 ? (
-        <button className="mx-3 mt-2 rounded-[12px] border border-white/15 bg-[#161616] px-3 py-2 text-left text-sm hover:border-white/40" onClick={() => setTab("enquetes")} type="button">
-          <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.abas.enquetes}</span>
-          <span className="block truncate font-bold text-white">{openPolls[0].question}</span>
+        <button
+          className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
+          onClick={() => setTab("enquetes")}
+          type="button"
+        >
+          <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
+          <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
         </button>
       ) : null}
       <RoomTranslationBar state={translation} />
@@ -423,6 +431,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
       className={skeleton.root}
       data-room-design={design}
       data-room-phase={phase}
+      data-room-theme={vertical ? "dark" : theme}
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
@@ -443,9 +452,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
           getOffsetMs={getOffsetMs}
           kind={kind}
           onLeave={askToLeave}
+          onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
           phase={headerPhase}
           presentNow={shownCount}
           showLiveBadge={session.session.showLiveBadge}
+          theme={theme}
           timeLabel={timeLabel}
           title={session.webinar.title}
         />
@@ -453,14 +464,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
 
       {confirmLeave ? (
         <div className={skeleton.confirm} role="alertdialog" aria-label={copy.sairConfirmar}>
-          <p className="text-sm font-semibold text-amber-100">{copy.sairConfirmar}</p>
+          <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
           <div className="flex gap-2">
-            <MemberButton data-room-first-focus onClick={leave} size="sm" variant="danger">
+            <RoomButton data-room-first-focus onClick={leave} size="sm" variant="danger">
               {copy.sair}
-            </MemberButton>
-            <MemberButton onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
+            </RoomButton>
+            <RoomButton onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
               {copy.voltar}
-            </MemberButton>
+            </RoomButton>
           </div>
         </div>
       ) : null}
@@ -528,22 +539,22 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
             />
           </div>
           {vertical ? null : (
-            <div className="border-t border-white/10 bg-[#111]">
+            <div className="border-t border-room-border bg-room-surface">
               <RoomReactionBar disabled={readOnly || !writable} onReact={reactions.react} />
             </div>
           )}
         </div>
 
         {vertical || unavailable ? null : (
-          <aside className="flex min-h-0 flex-1 flex-col border-t border-white/10 bg-[#0f0f0f] lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
-            <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-white/10" role="tablist">
+          <aside className="flex min-h-0 flex-1 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
+            <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-room-border" role="tablist">
               {tabs.map((value) => (
                 <button
                   aria-controls={`room-tab-${value}`}
                   aria-selected={tab === value}
                   className={cn(
-                    "relative h-11 flex-1 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
-                    tab === value ? "text-white" : "text-zinc-400 hover:text-white"
+                    "relative h-11 flex-1 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none",
+                    tab === value ? "text-room-fg-strong" : "text-room-fg-muted hover:text-room-fg-strong"
                   )}
                   data-room-first-focus={value === "chat" ? "" : undefined}
                   id={`room-tabbtn-${value}`}

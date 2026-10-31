@@ -34,7 +34,7 @@ export function RoomSimulationJoins({ layout, offsetMs, reducedMotion, state }: 
       aria-hidden="true"
       className={cn(
         "flex min-w-0 items-center gap-1.5 text-xs",
-        layout === "vertical" ? "px-1 text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]" : "mx-3 mt-2 text-zinc-400",
+        layout === "vertical" ? "px-1 text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]" : "mx-3 mt-2 text-room-fg-subtle",
         !reducedMotion && "animate-in fade-in-0 slide-in-from-bottom-1 duration-300"
       )}
       data-room-simulation-join={join.left ? "saiu" : "entrou"}

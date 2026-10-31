@@ -2,8 +2,6 @@
 
 import { ThumbsUp } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
-import { MemberChip } from "@/components/member/ui/member-chip";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
@@ -13,6 +11,7 @@ import { AssistantHint } from "./assistant/assistant-hint";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
+import { RoomBadge, RoomButton } from "./room-ui";
 
 // A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima so quando a equipe deixou ligada), a
 // lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
@@ -22,7 +21,8 @@ import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 // banned / muted) e contada a sala (`onRefused`), que troca pela frase de removido ou banido. Fase 4c (docs/30 §1.6,
 // §6.6 e D24): a resposta do Assistente aparece com o selo Assistente e, na pergunta do proprio aluno, "Falar com a
 // equipe"; depois de perguntar, "O Assistente esta respondendo..." (com ele ligado e sem atendente para a pergunta)
-// ate a resposta chegar, ou "A equipe responde depois pelo sino" quando ninguem esta atendendo.
+// ate a resposta chegar, ou "A equipe responde depois pelo sino" quando ninguem esta atendendo. Redesign V2, F2
+// (docs/31 V2-11): as cores vem dos tokens do tema da sala.
 
 const REFRESH_MS = 15_000;
 
@@ -33,18 +33,18 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
   const copy = WEBINAR_COPY.sala;
 
   return (
-    <li className="rounded-[12px] border border-white/[0.08] bg-[#161616] p-3" data-room-question={question.id}>
+    <li className="rounded-[12px] border border-room-border bg-room-surface-2 p-3" data-room-question={question.id}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-zinc-400">{question.anonymous ? copy.anonima : question.displayName}</p>
-          <p className="mt-0.5 whitespace-pre-line break-words text-sm leading-5 text-white">{question.body}</p>
+          <p className="text-xs font-semibold text-room-fg-subtle">{question.anonymous ? copy.anonima : question.displayName}</p>
+          <p className="mt-0.5 whitespace-pre-line break-words text-sm leading-5 text-room-fg-strong">{question.body}</p>
         </div>
         <button
           aria-label={question.voted ? copy.descurtir : copy.curtir}
           aria-pressed={question.voted}
           className={cn(
-            "flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
-            question.voted ? "border-white bg-white text-black" : "border-white/15 text-zinc-200 hover:border-white/40"
+            "flex h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none",
+            question.voted ? "border-room-active-bg bg-room-active-bg text-room-active-fg" : "border-room-input-border text-room-fg hover:border-room-fg-subtle"
           )}
           onClick={() => onVote(question)}
           type="button"
@@ -56,15 +56,15 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
       {question.status === "answered" ? (
         <div className="mt-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <MemberChip tone="success">{question.answeredLive ? copy.respondidaAoVivo : copy.respondidaPorEscrito}</MemberChip>
+            <RoomBadge tone="success">{question.answeredLive ? copy.respondidaAoVivo : copy.respondidaPorEscrito}</RoomBadge>
             {question.answerSource === "ai" ? (
               <span className="inline-flex" data-testid="question-answer-assistant">
-                <MemberChip tone="outline">{copy.selos.assistente}</MemberChip>
+                <RoomBadge tone="outline">{copy.selos.assistente}</RoomBadge>
               </span>
             ) : null}
           </div>
           {question.answerText ? (
-            <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-zinc-200">
+            <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-room-fg">
               {question.answerSource === "ai" ? <span className="sr-only">{`${copy.selos.assistente}: `}</span> : null}
               {question.answerText}
             </p>
@@ -74,7 +74,7 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
       ) : null}
       {question.status === "dismissed" ? (
         <div className="mt-2">
-          <MemberChip tone="muted">{copy.dispensada}</MemberChip>
+          <RoomBadge tone="muted">{copy.dispensada}</RoomBadge>
         </div>
       ) : null}
     </li>
@@ -238,7 +238,7 @@ export function RoomQuestionsTab({
         </div>
       </div>
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-        {visible.length === 0 ? <li className="py-6 text-center text-sm text-zinc-500">{copy.semPerguntas}</li> : null}
+        {visible.length === 0 ? <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li> : null}
         {visible.map((question) => (
           <RoomQuestionItem
             footer={
@@ -264,14 +264,14 @@ export function RoomQuestionsTab({
       </ul>
       {consentOpen && !consented && !notice ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
       {notice ? (
-        <p className="border-t border-white/10 bg-[#111] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-amber-100" data-testid="room-questions-notice" role="status">
+        <p className="border-t border-room-border bg-room-composer px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-room-warn-fg" data-testid="room-questions-notice" role="status">
           {notice}
         </p>
       ) : (
-        <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+        <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
           <textarea
             aria-label={copy.suaPergunta}
-            className="min-h-11 w-full resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
+            className="min-h-11 w-full resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-sm text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50"
             disabled={readOnly || sending}
             maxLength={CHAT_LIMITS.question}
             onChange={(event) => setDraft(event.target.value)}
@@ -281,18 +281,18 @@ export function RoomQuestionsTab({
           />
           <div className="mt-2 flex items-center justify-between gap-2">
             {allowAnonymous ? (
-              <label className="inline-flex min-h-8 items-center gap-2 text-xs text-zinc-300">
-                <input checked={anonymous} className="accent-white" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
+              <label className="inline-flex min-h-8 items-center gap-2 text-xs text-room-fg-muted">
+                <input checked={anonymous} className="accent-room-active-bg" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
                 {copy.anonima}
               </label>
             ) : (
               <span />
             )}
-            <MemberButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
+            <RoomButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
               {copy.fazerPergunta}
-            </MemberButton>
+            </RoomButton>
           </div>
-          <p aria-live="polite" className="mt-1 min-h-4 px-1 text-[11px] text-zinc-500">
+          <p aria-live="polite" className="mt-1 min-h-4 px-1 text-[11px] text-room-fg-subtle">
             {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : "")}
           </p>
           <AssistantHint state={waitingNow ? "waiting" : "none"} />
@@ -304,7 +304,7 @@ export function RoomQuestionsTab({
 
 function pillClassName(active: boolean) {
   return cn(
-    "h-8 rounded-full border px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white motion-reduce:transition-none",
-    active ? "border-white bg-white text-black" : "border-white/15 text-zinc-300 hover:border-white/40"
+    "h-8 rounded-full border px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-room-focus motion-reduce:transition-none",
+    active ? "border-room-active-bg bg-room-active-bg text-room-active-fg" : "border-room-input-border text-room-fg-muted hover:border-room-fg-subtle"
   );
 }

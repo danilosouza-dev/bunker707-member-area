@@ -1,0 +1,133 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+// Guarda dos tokens da sala do webinario (docs/31 V2-11 e V2-12; docs/18 §2.7, por isso .guard): o texto do CSS e dos
+// componentes, que nenhum teste de tela alcanca. O tema claro e o escuro moram em dois blocos de globals.css, cada um
+// com TODOS os --room-* (um nome que falta num deles deixaria a cor vazia so naquele tema); cada --color-room-* do
+// @theme inline aponta para um --room-* que existe; as superficies fora do video nao voltam aos hex fixos de antes; e o
+// atributo data-room-theme fica so no dialogo da sala, nunca no :root nem no html (a area continua escura).
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const ler = (caminho) => readFileSync(path.join(root, caminho), "utf8");
+const CSS = ler("src/app/globals.css");
+const semComentariosCss = (fonte) => fonte.replace(/\/\*[\s\S]*?\*\//g, "");
+const semComentarios = (fonte) => fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+const css = semComentariosCss(CSS);
+
+/** O corpo de um bloco de regra pelo seletor exato (o primeiro). */
+function bloco(seletor) {
+  const inicio = css.indexOf(`${seletor} {`);
+  assert.ok(inicio >= 0, `o bloco ${seletor} existe`);
+  const abre = css.indexOf("{", inicio);
+  const fecha = css.indexOf("}", abre);
+  return css.slice(abre + 1, fecha);
+}
+
+/** Os nomes --room-* definidos num corpo de bloco, com o valor. */
+function definicoes(corpo) {
+  return new Map([...corpo.matchAll(/(--room-[a-z0-9-]+)\s*:\s*([^;]+);/g)].map(([, nome, valor]) => [nome, valor.trim()]));
+}
+
+const ESCURO = definicoes(bloco('[data-room-theme="dark"]'));
+const CLARO = definicoes(bloco('[data-room-theme="light"]'));
+
+test("os dois temas definem os mesmos --room-*, cada um com o color-scheme dele", () => {
+  assert.ok(ESCURO.size >= 30, `tokens do escuro: ${ESCURO.size}`);
+  assert.deepEqual([...CLARO.keys()].sort(), [...ESCURO.keys()].sort(), "todo --room-* nos DOIS blocos");
+  assert.match(bloco('[data-room-theme="dark"]'), /color-scheme:\s*dark;/);
+  assert.match(bloco('[data-room-theme="light"]'), /color-scheme:\s*light;/);
+  // Os valores do texto aprovado (V2-11): o fundo, o painel e o ativo de cada tema.
+  assert.equal(ESCURO.get("--room-bg"), "#141414");
+  assert.equal(CLARO.get("--room-bg"), "#f4f4f3");
+  assert.equal(ESCURO.get("--room-surface"), "#171717");
+  assert.equal(CLARO.get("--room-surface"), "#ffffff");
+  assert.equal(ESCURO.get("--room-active-bg"), "#ffffff");
+  assert.equal(CLARO.get("--room-active-bg"), "#141414");
+  // Nenhum --room-* fora dos dois blocos (um terceiro lugar poderia vencer um deles).
+  const fora = semComentariosCss(CSS)
+    .replace(/\[data-room-theme="(?:dark|light)"\]\s*\{[^}]*\}/g, "")
+    .match(/(^|[;{\s])--room-[a-z0-9-]+\s*:/gm);
+  assert.equal(fora, null, "--room-* so nos dois blocos");
+});
+
+test("cada --color-room-* do @theme inline aponta para um --room-* definido (as classes bg-room-*, text-room-*)", () => {
+  const tema = css.slice(css.indexOf("@theme inline {"));
+  const corpo = tema.slice(0, tema.indexOf("}"));
+  const cores = [...corpo.matchAll(/--color-(room-[a-z0-9-]+)\s*:\s*var\(--([a-z0-9-]+)\)\s*;/g)];
+  assert.ok(cores.length >= 30, `cores da sala no @theme: ${cores.length}`);
+  for (const [, nome, alvo] of cores) {
+    assert.equal(alvo, nome, `--color-${nome} aponta para --${nome}`);
+    assert.ok(ESCURO.has(`--${alvo}`), `--${alvo} definido`);
+  }
+  // Toda cor do tema tem a classe; so a sombra da aba ativa fica de fora (nao e cor).
+  const comClasse = new Set(cores.map(([, nome]) => `--${nome}`));
+  assert.deepEqual(
+    [...ESCURO.keys()].filter((nome) => !comClasse.has(nome)),
+    ["--room-tab-on-shadow"]
+  );
+});
+
+test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #111, #0f0f0f, #161616, #1b1b1b, #121212)", () => {
+  const ROOM = "src/components/member/webinars/room";
+  const arquivos = [
+    "room-chat.tsx",
+    "room-questions.tsx",
+    "room-polls.tsx",
+    "room-reactions.tsx",
+    "room-header.tsx",
+    "room-ui.tsx",
+    "live-controls.tsx",
+    "live-settings.tsx",
+    "live-notices.tsx",
+    "live-room.tsx",
+    "webinar-room.tsx",
+    ...readdirSync(path.join(root, ROOM, "assistant")).map((nome) => `assistant/${nome}`)
+  ].map((nome) => `${ROOM}/${nome}`);
+  arquivos.push("src/components/member/webinars/translation/room-translation-bar.tsx", `${ROOM}/vertical/vertical-model.ts`);
+  const HEX = ["0b0b0b", "111", "0f0f0f", "161616", "1b1b1b", "121212"];
+  const proibido = new RegExp(`#(?:${HEX.join("|")})(?![0-9a-f])`, "i");
+  for (const arquivo of arquivos) {
+    assert.ok(statSync(path.join(root, arquivo)).isFile(), arquivo);
+    let codigo = semComentarios(ler(arquivo));
+    if (arquivo.endsWith("vertical-model.ts")) {
+      // O desenho vertical 9:16 fica sobre o video e continua como esta: so o esqueleto normal entra aqui.
+      const inicio = codigo.indexOf("const NORMAL_CONFIRM");
+      const fim = codigo.indexOf("\n}\n", codigo.indexOf("export function roomSkeleton"));
+      assert.ok(inicio >= 0 && fim > inicio, "o esqueleto da sala em vertical-model.ts");
+      codigo = codigo.slice(inicio, fim).replace(/if \(design === "vertical"\) \{[\s\S]*?\n {2}\}/, "");
+      assert.match(codigo, /root: "[^"]*bg-room-bg[^"]*"/, "o fundo do desenho normal pelo token");
+    }
+    assert.doesNotMatch(codigo, proibido, arquivo);
+  }
+});
+
+test("data-room-theme fica so no dialogo da sala: nunca no :root, no html ou no body", () => {
+  // No CSS: so os dois blocos, sem :root, html ou body na frente nem :has() de fora.
+  const seletores = [...css.matchAll(/([^{}]*\[data-room-theme[^{}]*)\{/g)].map(([, seletor]) => seletor.trim());
+  assert.deepEqual(seletores.sort(), ['[data-room-theme="dark"]', '[data-room-theme="light"]']);
+  assert.doesNotMatch(css, /(?::root|html|body)[^{,]*data-room-theme/);
+
+  // No codigo: o atributo so nas duas salas, como atributo do dialogo; ninguem o poe no documento.
+  const quem = [];
+  const visitar = (pasta) => {
+    for (const nome of readdirSync(path.join(root, pasta))) {
+      const caminho = `${pasta}/${nome}`;
+      if (statSync(path.join(root, caminho)).isDirectory()) {
+        visitar(caminho);
+      } else if (/\.(?:tsx?|mjs|js)$/.test(nome) && /data-room-theme|roomTheme/.test(semComentarios(ler(caminho)))) {
+        quem.push(caminho);
+      }
+    }
+  };
+  visitar("src");
+  assert.deepEqual(quem.sort(), ["src/components/member/webinars/room/live-room.tsx", "src/components/member/webinars/room/webinar-room.tsx"]);
+  for (const arquivo of quem) {
+    const codigo = semComentarios(ler(arquivo));
+    assert.equal((codigo.match(/data-room-theme=/g) ?? []).length, 1, `${arquivo}: um so atributo, o do dialogo`);
+    assert.match(codigo, /role="dialog"/);
+    assert.doesNotMatch(codigo, /documentElement|document\.body\.(?:dataset|setAttribute)/, arquivo);
+  }
+});

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { useJitsiDevices, type DeviceSwitchHooks, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { DEVICE_SWITCH_MAX_MS, type DeviceKind } from "@/lib/jitsi-device-settings";
-import { liveConfigOverwrite, liveInterfaceConfigOverwrite, toRoomEvent, type JitsiListenedEvent, type RoomEventItem } from "@/lib/jitsi-room-config";
+import { liveConfigOverwrite, liveInterfaceConfigOverwrite, toRoomEvent, type JitsiListenedEvent, type LiveEmbedLook, type RoomEventItem } from "@/lib/jitsi-room-config";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import {
   acceptMic,
@@ -239,6 +239,11 @@ export type UseLiveRoomInput = {
   frameTitle: string;
   /** A sala de espera da sala esta ligada (LiveRoomInfo.lobby): a entrada espera a equipe admitir, sem o prazo de 30 s. */
   lobby: boolean;
+  /**
+   * O visual pedido para o iframe (o tema da sala, docs/31 V2-12): entra so na proxima montagem (Entrar na sala, Tentar
+   * de novo, a volta depois da queda). Trocar no meio nao remonta: o useJitsiMeet le a config ao montar.
+   */
+  look: LiveEmbedLook;
   nonce: string | null;
   /** Um erro de camera encerrou o aceite pendente do aviso de gravacao: o proximo clique em Câmera abre o aviso de novo. */
   onCameraConsentEnded: () => void;
@@ -276,7 +281,7 @@ export type LiveRoomController = {
 };
 
 export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
-  const { allowed, container, frameTitle, lobby, nonce, sessionId, webinarId } = input;
+  const { allowed, container, frameTitle, lobby, look, nonce, sessionId, webinarId } = input;
   const [reply, setReply] = useState<JoinTokenReply | null>(null);
   const [entry, setEntry] = useState<LiveEntry>("idle");
   const [signals, setSignals] = useState<LiveSignalState>(INITIAL_LIVE_SIGNALS);
@@ -587,9 +592,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     [handleSignal, readRoomsInfo, setGate]
   );
 
-  const configOverwrite = useMemo(() => (reply ? liveConfigOverwrite(reply.role, reply.settings) : {}), [reply]);
+  const configOverwrite = useMemo(() => (reply ? liveConfigOverwrite(reply.role, reply.settings, look) : {}), [reply, look]);
   const roomRole = reply?.role ?? null;
-  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(roomRole), [roomRole]);
+  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(roomRole, look), [roomRole, look]);
   const mountable = allowed && reply !== null && entryInRoom(entry);
 
   const jitsi = useJitsiMeet({

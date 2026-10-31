@@ -2,8 +2,6 @@
 
 import { MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
-import { MemberChip, type MemberChipTone } from "@/components/member/ui/member-chip";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { composerState, type ComposerState, type RoomMessage } from "@/lib/webinar-room-client";
@@ -13,6 +11,7 @@ import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
+import { RoomBadge, RoomButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
 
 // O painel do chat da Sala (docs/30 §1.3, §1.6, §8.5 e §9): a lista em role="log" (em rajada, o leitor de tela
@@ -24,7 +23,8 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // ate o fim) ou antes de a sala abrir. Fase 4c (docs/30 §1.6, §6.6 e D24), com `webinarId` e `sessionId`: a dica
 // "@assistente" quando o Assistente esta ligado, "O Assistente esta respondendo..." logo depois de chama-lo (ate a
 // resposta chegar ou o teto de tempo passar), o aviso do limite do minuto e, na resposta do Assistente a uma mensagem
-// do proprio aluno, "Falar com a equipe" (a sala ao vivo usa este mesmo painel: tudo vale la tambem).
+// do proprio aluno, "Falar com a equipe" (a sala ao vivo usa este mesmo painel: tudo vale la tambem). Redesign V2, F2
+// (docs/31 V2-11): as cores vem dos tokens do tema da sala; na gaveta e no chat por cima do vertical, sempre o escuro.
 
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
@@ -52,7 +52,7 @@ export type RoomChatPanelProps = {
   webinarId?: string | null;
 };
 
-const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: MemberChipTone }>> = {
+const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: RoomBadgeTone }>> = {
   ai: { label: WEBINAR_COPY.sala.selos.assistente, tone: "outline" },
   host: { label: WEBINAR_COPY.sala.selos.apresentador, tone: "accent" },
   team: { label: WEBINAR_COPY.sala.selos.equipe, tone: "neutral" }
@@ -63,22 +63,22 @@ export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode
   const prefix = badge ? `${badge.label}: ` : "";
 
   return (
-    <li className={cn("rounded-[10px] px-2 py-1.5", message.mine ? "bg-white/[0.05]" : undefined)} data-room-message={message.id}>
+    <li className={cn("rounded-[10px] px-2 py-1.5", message.mine ? "bg-room-control" : undefined)} data-room-message={message.id}>
       <p className="flex flex-wrap items-center gap-1.5 text-[13px]">
         <span className="sr-only">{prefix}</span>
-        <span className={cn("font-bold", badge ? "text-white" : "text-zinc-200")}>{message.displayName}</span>
+        <span className={cn("font-bold", badge ? "text-room-fg-strong" : "text-room-fg")}>{message.displayName}</span>
         {badge ? (
-          <MemberChip size="sm" tone={badge.tone}>
+          <RoomBadge size="sm" tone={badge.tone}>
             {badge.label}
-          </MemberChip>
+          </RoomBadge>
         ) : null}
         {message.pending ? (
-          <MemberChip size="sm" tone="warning">
+          <RoomBadge size="sm" tone="warning">
             {WEBINAR_COPY.sala.aguardandoEquipe}
-          </MemberChip>
+          </RoomBadge>
         ) : null}
       </p>
-      <p className="whitespace-pre-line break-words text-sm leading-5 text-zinc-100">{message.body}</p>
+      <p className="whitespace-pre-line break-words text-sm leading-5 text-room-fg">{message.body}</p>
       {footer}
     </li>
   );
@@ -86,13 +86,13 @@ export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode
 
 function RoomPinned({ message }: { message: RoomMessage }) {
   return (
-    <div className="border-b border-white/10 bg-[#161616] px-3 py-2" data-testid="room-pinned">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+    <div className="border-b border-room-border bg-room-pinned px-3 py-2" data-testid="room-pinned">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">
         <Pin aria-hidden="true" className="size-3" />
         {WEBINAR_COPY.sala.fixada}
       </p>
-      <p className="mt-0.5 text-sm text-zinc-100">
-        <span className="font-bold text-white">{message.displayName}</span> {message.body}
+      <p className="mt-0.5 text-sm text-room-fg">
+        <span className="font-bold text-room-fg-strong">{message.displayName}</span> {message.body}
       </p>
     </div>
   );
@@ -109,16 +109,16 @@ export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }:
   const nicknameInvalid = mode === "nickname" && (nickname.trim().length < CHAT_LIMITS.nicknameMin || nickname.trim().length > CHAT_LIMITS.nicknameMax);
 
   return (
-    <div className="border-t border-white/10 bg-[#161616] px-3 py-3" data-testid="room-consent" role="group" aria-labelledby={`${id}-title`}>
-      <p className="text-sm leading-6 text-zinc-100" id={`${id}-title`}>
+    <div className="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group" aria-labelledby={`${id}-title`}>
+      <p className="text-sm leading-6 text-room-fg" id={`${id}-title`}>
         {copy.consentimento}
       </p>
       <fieldset className="mt-3">
-        <legend className="text-xs font-semibold text-zinc-400">{copy.comoAparece}</legend>
+        <legend className="text-xs font-semibold text-room-fg-subtle">{copy.comoAparece}</legend>
         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
           {(["first_name_initial", "nickname"] as const).map((option) => (
-            <label className="inline-flex min-h-8 items-center gap-2 text-zinc-200" key={option}>
-              <input checked={mode === option} className="accent-white" name={`${id}-mode`} onChange={() => setMode(option)} type="radio" value={option} />
+            <label className="inline-flex min-h-8 items-center gap-2 text-room-fg" key={option}>
+              <input checked={mode === option} className="accent-room-active-bg" name={`${id}-mode`} onChange={() => setMode(option)} type="radio" value={option} />
               {option === "nickname" ? copy.responderComo.apelido : copy.responderComo.nome}
             </label>
           ))}
@@ -127,7 +127,7 @@ export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }:
           <input
             aria-invalid={nicknameInvalid || undefined}
             aria-label={copy.responderComo.apelido}
-            className="mt-2 h-10 w-full rounded-[10px] border border-white/15 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40"
+            className="mt-2 h-10 w-full rounded-[10px] border border-room-input-border bg-room-input-bg px-3 text-sm text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle"
             maxLength={CHAT_LIMITS.nicknameMax}
             onChange={(event) => setNickname(event.target.value)}
             placeholder={copy.apelidoPlaceholder}
@@ -136,15 +136,15 @@ export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }:
         ) : null}
       </fieldset>
       <div className="mt-3 flex flex-wrap gap-2">
-        <MemberButton disabled={busy || nicknameInvalid} onClick={() => onAccept({ displayMode: mode, nickname: nickname.trim() })} size="sm" variant="primary">
+        <RoomButton disabled={busy || nicknameInvalid} onClick={() => onAccept({ displayMode: mode, nickname: nickname.trim() })} size="sm" variant="primary">
           {copy.consentimentoBotao}
-        </MemberButton>
-        <MemberButton disabled={busy} onClick={() => onAccept({ displayMode: "anonymous", nickname: "" })} size="sm" variant="secondary">
+        </RoomButton>
+        <RoomButton disabled={busy} onClick={() => onAccept({ displayMode: "anonymous", nickname: "" })} size="sm" variant="secondary">
           {copy.participarComoAnonimo}
-        </MemberButton>
-        <MemberButton disabled={busy} onClick={onCancel} size="sm" variant="ghost">
+        </RoomButton>
+        <RoomButton disabled={busy} onClick={onCancel} size="sm" variant="ghost">
           {WEBINAR_COPY.admin.cancelar}
-        </MemberButton>
+        </RoomButton>
       </div>
     </div>
   );
@@ -289,22 +289,22 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
       {pinned ? <RoomPinned message={pinned} /> : null}
       <div className="flex items-center justify-between gap-2 px-3 pt-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{phase === "replay" ? copy.abas.chatDaLive : copy.abas.chat}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{phase === "replay" ? copy.abas.chatDaLive : copy.abas.chat}</p>
         <div className="relative">
           <button
             aria-expanded={menuOpen}
             aria-haspopup="menu"
             aria-label="Mais opções"
-            className="grid size-9 place-items-center rounded-full text-zinc-400 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+            className="grid size-9 place-items-center rounded-full text-room-fg-muted hover:bg-room-control-hover hover:text-room-fg-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-room-focus"
             onClick={() => setMenuOpen((open) => !open)}
             type="button"
           >
             <MoreHorizontal aria-hidden="true" className="size-4" />
           </button>
           {menuOpen ? (
-            <div className="absolute right-0 top-full z-20 mt-1 min-w-[14rem] rounded-[12px] border border-white/10 bg-[#1b1b1b] p-1 shadow-[0_18px_48px_rgba(0,0,0,0.5)]" role="menu">
+            <div className="absolute right-0 top-full z-20 mt-1 min-w-[14rem] rounded-[12px] border border-room-border bg-room-surface p-1 shadow-[0_18px_48px_rgba(0,0,0,0.5)]" role="menu">
               <button
-                className="flex h-10 w-full items-center rounded-[8px] px-3 text-left text-sm font-semibold text-zinc-200 hover:bg-white/[0.07] hover:text-white"
+                className="flex h-10 w-full items-center rounded-[8px] px-3 text-left text-sm font-semibold text-room-fg hover:bg-room-control hover:text-room-fg-strong"
                 disabled={readOnly}
                 onClick={() => {
                   setMenuOpen(false);
@@ -321,16 +321,16 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       </div>
 
       {confirmRemove ? (
-        <div className="mx-3 mt-2 rounded-[12px] border border-red-400/25 bg-red-500/10 p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
-          <p className="text-sm font-bold text-white">{WEBINAR_COPY.privacidade.confirmar}</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-300">{WEBINAR_COPY.privacidade.confirmarTexto}</p>
+        <div className="mx-3 mt-2 rounded-[12px] border border-[var(--accent)]/40 bg-[var(--accent)]/10 p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
+          <p className="text-sm font-bold text-room-fg-strong">{WEBINAR_COPY.privacidade.confirmar}</p>
+          <p className="mt-1 text-xs leading-5 text-room-fg-muted">{WEBINAR_COPY.privacidade.confirmarTexto}</p>
           <div className="mt-2 flex gap-2">
-            <MemberButton onClick={() => void removeMine()} size="sm" variant="danger">
+            <RoomButton onClick={() => void removeMine()} size="sm" variant="danger">
               {copy.removerMinhasMensagens}
-            </MemberButton>
-            <MemberButton onClick={() => setConfirmRemove(false)} size="sm" variant="ghost">
+            </RoomButton>
+            <RoomButton onClick={() => setConfirmRemove(false)} size="sm" variant="ghost">
               {WEBINAR_COPY.admin.cancelar}
-            </MemberButton>
+            </RoomButton>
           </div>
         </div>
       ) : null}
@@ -344,7 +344,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         ref={listRef}
         role="log"
       >
-        {messages.length === 0 ? <li className="px-2 py-6 text-center text-sm text-zinc-500">{error ?? copy.semMensagens}</li> : null}
+        {messages.length === 0 ? <li className="px-2 py-6 text-center text-sm text-room-fg-subtle">{error ?? copy.semMensagens}</li> : null}
         {messages.map((message) => {
           const repliedTo = repliesToMe.get(message.id);
           return (
@@ -383,15 +383,15 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       ) : null}
 
       {notice ? (
-        <p className="border-t border-white/10 bg-[#111] px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-amber-100" data-testid="room-chat-notice" role="status">
+        <p className="border-t border-room-border bg-room-composer px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-room-warn-fg" data-testid="room-chat-notice" role="status">
           {notice}
         </p>
       ) : (
-        <form className="border-t border-white/10 bg-[#111] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+        <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
           <div className="flex items-end gap-2">
             <textarea
               aria-label={copy.escreva}
-              className="max-h-24 min-h-11 flex-1 resize-none rounded-[12px] border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-500 focus-visible:border-white/40 disabled:opacity-50"
+              className="max-h-24 min-h-11 flex-1 resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-sm text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50"
               disabled={state.disabled || readOnly || busy}
               maxLength={CHAT_LIMITS.body}
               onChange={(event) => setDraft(event.target.value)}
@@ -402,14 +402,14 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
             />
             <button
               aria-label={copy.enviar}
-              className="grid size-11 shrink-0 place-items-center rounded-full bg-white text-black transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40"
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-room-active-bg text-room-active-fg transition hover:bg-room-active-bg/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus disabled:opacity-40"
               disabled={state.disabled || readOnly || sending || !draft.trim()}
               type="submit"
             >
               <SendHorizontal aria-hidden="true" className="size-4" />
             </button>
           </div>
-          <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-amber-200" : "text-zinc-500")}>
+          <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-room-warn-fg" : "text-room-fg-subtle")}>
             {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
           </p>
           <AssistantHint state={assistantHint} />

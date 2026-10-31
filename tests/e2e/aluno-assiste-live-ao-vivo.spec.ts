@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
 import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
@@ -36,6 +37,8 @@ import {
 // nao abre nunca vira "ligado" na barra nem no historico), o pedido acaba na queda e o painel diz que falta a permissao
 // (nunca "nenhum aparelho"); na volta depois de uma queda, a Câmera tocada no meio da troca da camera desligada espera a
 // faixa da troca, e o botao que espera mostra o estado real com o circulo girando e a frase do que vem.
+// O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
+// recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 const aoVivo = WEBINAR_COPY.aoVivo;
@@ -208,6 +211,42 @@ test("o chat e as reacoes sao os nossos: o aceite na primeira mensagem, a mensag
   await dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.reagir }).click();
   await dialogo.getByRole("button", { exact: true, name: "Palmas" }).click();
   expect((await reacao).status()).toBe(201);
+});
+
+test("o tema: Tema claro troca a sala na hora e fica guardado ao recarregar; o iframe monta no tema guardado e trocar com a aluna dentro nao remonta", async ({ page }) => {
+  const tema = WEBINAR_COPY.salaV2.tema;
+  const sala = await salaFalsaDoJitsi(page);
+  await page.goto(`/webinarios/${slug}`);
+  await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  await expect(page).toHaveURL(SALA);
+  const dialogo = page.getByRole("dialog", { name: titulo });
+
+  // Escuro por padrao; o botao diz para qual tema vai. So o dialogo da sala muda: o html continua sem o atributo.
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await dialogo.getByRole("button", { exact: true, name: tema.claro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+  await expect(dialogo.getByRole("button", { exact: true, name: tema.escuro })).toBeVisible();
+  expect(await page.locator("html").getAttribute("data-room-theme")).toBeNull();
+
+  // Recarregar mantem o claro (guardado no navegador da aluna).
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+
+  // Entrar na sala: o iframe monta com o tema guardado (no hash, para o CSS da instancia).
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await token).status()).toBe(200);
+  const montagem = await sala.esperarMontada();
+  expect(montagem.configOverwrite[THEME_HASH_KEY]).toBe("light");
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect(await sala.montagens()).toBe(1);
+
+  // Trocar o tema com a aluna dentro: a sala muda na hora e o iframe continua o mesmo (o motor nao tem comando de tema).
+  await dialogo.getByRole("button", { exact: true, name: tema.escuro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect(await sala.montagens()).toBe(1);
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {

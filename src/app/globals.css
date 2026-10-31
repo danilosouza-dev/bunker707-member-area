@@ -1335,6 +1335,41 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  /* A sala do webinario (docs/31 V2-11): os valores moram em [data-room-theme], logo depois do bloco do admin. */
+  --color-room-bg: var(--room-bg);
+  --color-room-surface: var(--room-surface);
+  --color-room-surface-2: var(--room-surface-2);
+  --color-room-pinned: var(--room-pinned);
+  --color-room-composer: var(--room-composer);
+  --color-room-input-bg: var(--room-input-bg);
+  --color-room-tabs: var(--room-tabs);
+  --color-room-tabs-border: var(--room-tabs-border);
+  --color-room-tab-on-bg: var(--room-tab-on-bg);
+  --color-room-tab-on-fg: var(--room-tab-on-fg);
+  --color-room-fg: var(--room-fg);
+  --color-room-fg-strong: var(--room-fg-strong);
+  --color-room-fg-muted: var(--room-fg-muted);
+  --color-room-fg-subtle: var(--room-fg-subtle);
+  --color-room-icon: var(--room-icon);
+  --color-room-meta-name: var(--room-meta-name);
+  --color-room-bubble-other-fg: var(--room-bubble-other-fg);
+  --color-room-bubble-mine-bg: var(--room-bubble-mine-bg);
+  --color-room-bubble-mine-fg: var(--room-bubble-mine-fg);
+  --color-room-border: var(--room-border);
+  --color-room-border-strong: var(--room-border-strong);
+  --color-room-divider: var(--room-divider);
+  --color-room-input-border: var(--room-input-border);
+  --color-room-control: var(--room-control);
+  --color-room-control-hover: var(--room-control-hover);
+  --color-room-active-bg: var(--room-active-bg);
+  --color-room-active-fg: var(--room-active-fg);
+  --color-room-focus: var(--room-focus);
+  --color-room-speaking: var(--room-speaking);
+  --color-room-warn-bg: var(--room-warn-bg);
+  --color-room-warn-fg: var(--room-warn-fg);
+  --color-room-warn-border: var(--room-warn-border);
+  --color-room-on-video-bg: var(--room-on-video-bg);
+  --color-room-on-video-fg: var(--room-on-video-fg);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -1462,6 +1497,94 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --chart-4: #71717a;
   --chart-5: #3f3f46;
   --radius: 0.5rem;
+}
+
+/*
+ * Sala do webinario (docs/31 V2-11 e V2-12): o tema claro e o escuro so dentro da sala. O atributo data-room-theme
+ * fica so no dialogo da sala (live-room.tsx e webinar-room.tsx), nunca no :root nem no html: a area continua escura.
+ * A sala nao usa portal, entao o escopo no dialogo alcanca tudo. O desenho vertical 9:16 forca o escuro. Somente
+ * variaveis: as cores entram pelas classes bg-room-*, text-room-* e border-room-* (o @theme inline acima). O que fica
+ * sobre o video (as capas do palco, os selos Ao vivo e Gravando, as pilulas do chat, a Oferta e o veu da enquete) e
+ * igual nos dois temas e nao passa por aqui. Os dois blocos tem os mesmos nomes (tests/webinarios-sala-tokens.guard).
+ */
+[data-room-theme="dark"] {
+  color-scheme: dark;
+
+  --room-bg: #141414;
+  --room-surface: #171717;
+  --room-surface-2: #202020;
+  --room-pinned: #161616;
+  --room-composer: #111111;
+  --room-input-bg: rgba(0, 0, 0, 0.3);
+  --room-tabs: rgba(255, 255, 255, 0.07);
+  --room-tabs-border: rgba(255, 255, 255, 0.1);
+  --room-tab-on-bg: #ffffff;
+  --room-tab-on-fg: #000000;
+  --room-tab-on-shadow: none;
+  --room-fg: #f7f7f4;
+  --room-fg-strong: #ffffff;
+  --room-fg-muted: #a1a1aa;
+  --room-fg-subtle: #a1a1aa;
+  --room-icon: #d4d4d8;
+  --room-meta-name: #d4d4d8;
+  --room-bubble-other-fg: #f4f4f5;
+  --room-bubble-mine-bg: #ffffff;
+  --room-bubble-mine-fg: #000000;
+  --room-border: rgba(255, 255, 255, 0.1);
+  --room-border-strong: rgba(255, 255, 255, 0.12);
+  --room-divider: rgba(255, 255, 255, 0.14);
+  --room-input-border: rgba(255, 255, 255, 0.15);
+  --room-control: rgba(255, 255, 255, 0.08);
+  --room-control-hover: rgba(255, 255, 255, 0.16);
+  --room-active-bg: #ffffff;
+  --room-active-fg: #000000;
+  --room-focus: #ffffff;
+  --room-speaking: #34d399;
+  --room-warn-bg: rgba(245, 158, 11, 0.1);
+  --room-warn-fg: #fef3c7;
+  --room-warn-border: rgba(251, 191, 36, 0.3);
+  --room-on-video-bg: rgba(0, 0, 0, 0.6);
+  --room-on-video-fg: #ffffff;
+}
+
+[data-room-theme="light"] {
+  color-scheme: light;
+
+  --room-bg: #f4f4f3;
+  --room-surface: #ffffff;
+  --room-surface-2: #ededeb;
+  --room-pinned: #f4f4f3;
+  --room-composer: #f4f4f3;
+  --room-input-bg: #ffffff;
+  --room-tabs: #e9e9e7;
+  --room-tabs-border: transparent;
+  --room-tab-on-bg: #ffffff;
+  --room-tab-on-fg: #141414;
+  --room-tab-on-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --room-fg: #141414;
+  --room-fg-strong: #141414;
+  --room-fg-muted: #52525b;
+  --room-fg-subtle: #71717a;
+  --room-icon: #52525b;
+  --room-meta-name: #3f3f46;
+  --room-bubble-other-fg: #141414;
+  --room-bubble-mine-bg: #141414;
+  --room-bubble-mine-fg: #ffffff;
+  --room-border: rgba(0, 0, 0, 0.08);
+  --room-border-strong: rgba(0, 0, 0, 0.1);
+  --room-divider: rgba(0, 0, 0, 0.12);
+  --room-input-border: rgba(0, 0, 0, 0.12);
+  --room-control: #f4f4f3;
+  --room-control-hover: #e9e9e7;
+  --room-active-bg: #141414;
+  --room-active-fg: #ffffff;
+  --room-focus: #141414;
+  --room-speaking: #16a34a;
+  --room-warn-bg: #fffbeb;
+  --room-warn-fg: #92400e;
+  --room-warn-border: rgba(217, 119, 6, 0.3);
+  --room-on-video-bg: #ffffff;
+  --room-on-video-fg: #141414;
 }
 
 /*

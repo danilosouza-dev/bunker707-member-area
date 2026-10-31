@@ -4,13 +4,15 @@
 // e tests/webinarios-frases.test.mjs (PROIBIDAS_WEBINARIO em src/lib/webinar-copy.ts, abaixo).
 // Modulo puro: os unicos imports sao as frases da fase 4, uma por frente, em src/lib/webinar-copy-v4/ (cada frente e
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
-// .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto.
+// .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
+// entra do mesmo jeito em WEBINAR_COPY.salaV2.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
+import { SALA_V2_COPY } from "./webinar-copy-v4/sala-v2";
 import { SEGUIMENTO_COPY } from "./webinar-copy-v4/seguimento";
 import { SIMULACAO_COPY } from "./webinar-copy-v4/simulacao";
 import { TRADUCAO_COPY } from "./webinar-copy-v4/traducao";
@@ -626,7 +628,9 @@ export const WEBINAR_COPY = {
   assistente: ASSISTENTE_COPY,
   vertical: VERTICAL_COPY,
   jit: JIT_COPY,
-  traducao: TRADUCAO_COPY
+  traducao: TRADUCAO_COPY,
+  /* A sala do aluno V2 (docs/31 §1): src/lib/webinar-copy-v4/sala-v2.ts. */
+  salaV2: SALA_V2_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

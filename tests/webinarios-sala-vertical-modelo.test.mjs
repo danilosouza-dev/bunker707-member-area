@@ -157,7 +157,10 @@ test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em c
   const normal = model.roomSkeleton("normal");
   const vertical = model.roomSkeleton("vertical");
   assert.deepEqual(Object.keys(normal).sort(), Object.keys(vertical).sort(), "as mesmas pecas nos dois desenhos");
-  assert.equal(normal.root, "z-[60] text-white fixed inset-0 flex flex-col bg-[#0b0b0b]", "o normal como era");
+  // Redesign V2, F2 (V2-11): o fundo e o texto do normal pelos tokens do tema da sala; o vertical continua preto.
+  assert.equal(normal.root, "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg", "o normal pelos tokens do tema");
+  assert.match(vertical.root, /\bbg-black\b/, "o vertical continua preto, sobre o video");
+  assert.doesNotMatch(vertical.root, /room-/, "o vertical nao usa os tokens do tema no fundo");
   assert.equal(normal.body, "flex min-h-0 flex-1 flex-col lg:flex-row");
   assert.equal(normal.bubbles, "contents");
   assert.equal(normal.sales, "contents");

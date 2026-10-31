@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
+import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { announceLiveRoomMedia } from "@/lib/lesson-media-signal";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -46,9 +46,11 @@ import { RoomHeader } from "./room-header";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
+import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
+import { useRoomTheme } from "./use-room-prefs";
 import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
@@ -74,6 +76,9 @@ import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion 
 // encerrada, removido ou banido) fecha o painel e as reacoes, e o foco que estava nela vai para a sala (o
 // primeiro [data-room-first-focus], ou o primeiro controle), nunca para o body. No "ver como" da equipe nada e
 // gravado: nem token, nem sinal, nem chat.
+// Redesign V2, F2 (docs/31 V2-11 e V2-12): o tema claro ou escuro da pessoa fica no data-room-theme do dialogo (as
+// superficies fora do video usam os tokens --room-*) e entra no iframe pelo LiveEmbedLook so na montagem (Entrar na
+// sala, Tentar de novo, a volta depois da queda): o motor nao tem comando de tema, e trocar no meio nao remonta.
 
 type Tab = "chat" | "enquetes" | "participantes" | "perguntas";
 
@@ -202,6 +207,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
   const isMobile = useSyncExternalStore(subscribeNothing, readMobile, () => false);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
+  const [theme, setTheme] = useRoomTheme();
+  // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala).
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
 
   const info = liveInfoOf(session);
   const status = local.ended ? "ended" : info.status;
@@ -250,6 +258,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     deviceNames: DEVICE_NAMES,
     frameTitle: WEBINAR_COPY.aoVivo.palco,
     lobby: live.lobby === true,
+    look,
     nonce,
     onCameraConsentEnded,
     onRefused,
@@ -604,10 +613,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
-      className="z-[60] text-white fixed inset-0 flex flex-col bg-[#0b0b0b]"
+      className="z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg"
       data-room-kind="live"
       data-room-phase={phase}
       data-room-screen={screen}
+      data-room-theme={theme}
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
@@ -618,23 +628,25 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         liveLabel={liveOnAirLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
         liveTime={liveElapsedLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
         onLeave={askToLeave}
+        onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
         phase={phase}
         presentNow={presentNow}
         showLiveBadge
+        theme={theme}
         timeLabel=""
         title={session.webinar.title}
       />
 
       {confirmLeave ? (
-        <div aria-label={copy.sairConfirmar} className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-2" role="alertdialog">
-          <p className="text-sm font-semibold text-amber-100">{copy.sairConfirmar}</p>
+        <div aria-label={copy.sairConfirmar} className="flex flex-wrap items-center justify-between gap-2 border-b border-room-warn-border bg-room-warn-bg px-3 py-2" role="alertdialog">
+          <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
           <div className="flex gap-2">
-            <MemberButton data-room-first-focus onClick={leave} size="sm" variant="danger">
+            <RoomButton data-room-first-focus onClick={leave} size="sm" variant="danger">
               {copy.sair}
-            </MemberButton>
-            <MemberButton onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
+            </RoomButton>
+            <RoomButton onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
               {copy.voltar}
-            </MemberButton>
+            </RoomButton>
           </div>
         </div>
       ) : null}
@@ -704,7 +716,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         {blocked ? null : (
           <aside
             className={cn(
-              "flex min-h-0 flex-col border-t border-white/10 bg-[#0f0f0f] lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0",
+              "flex min-h-0 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0",
               drawerVisible && !cinemaOn ? "flex-1" : "flex-none"
             )}
             data-drawer-open={drawerVisible ? "" : undefined}
@@ -712,7 +724,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           >
             <div
               aria-label={copy.abas.chat}
-              className="order-last flex shrink-0 border-t border-white/10 pb-[env(safe-area-inset-bottom)] lg:order-first lg:border-b lg:border-t-0 lg:pb-0"
+              className="order-last flex shrink-0 border-t border-room-border pb-[env(safe-area-inset-bottom)] lg:order-first lg:border-b lg:border-t-0 lg:pb-0"
               role="tablist"
             >
               {tabs.map((value) => (
@@ -721,8 +733,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   aria-expanded={value === tab && !desktop ? drawerOpen : undefined}
                   aria-selected={tab === value}
                   className={cn(
-                    "relative h-11 min-w-0 flex-1 truncate px-1 text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white motion-reduce:transition-none sm:text-sm",
-                    tab === value ? "text-white" : "text-zinc-400 hover:text-white"
+                    "relative h-11 min-w-0 flex-1 truncate px-1 text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none sm:text-sm",
+                    tab === value ? "text-room-fg-strong" : "text-room-fg-muted hover:text-room-fg-strong"
                   )}
                   data-room-first-focus={value === "chat" ? "" : undefined}
                   id={`room-tabbtn-${value}`}
@@ -747,9 +759,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               {tab === "chat" ? (
                 <>
                   {openPolls.length > 0 ? (
-                    <button className="mx-3 mt-2 rounded-[12px] border border-white/15 bg-[#161616] px-3 py-2 text-left text-sm hover:border-white/40" onClick={openPollsTab} type="button">
-                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.abas.enquetes}</span>
-                      <span className="block truncate font-bold text-white">{openPolls[0].question}</span>
+                    <button
+                      className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
+                      onClick={openPollsTab}
+                      type="button"
+                    >
+                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
+                      <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
                     </button>
                   ) : null}
                   <RoomTranslationBar state={translation} />

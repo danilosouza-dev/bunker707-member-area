@@ -96,9 +96,10 @@ const sala = (props = {}) =>
 test("o palco monta o iframe pelo useJitsiMeet com o configOverwrite do papel, o interfaceConfigOverwrite e o nonce; nada de SDK nem de origem de terceiro", () => {
   const hook = semComentarios(FONTES.hook);
   assert.match(hook, /import \{ useJitsiMeet, type JitsiMeetApi, type JitsiStatus \} from "@\/components\/webinars\/use-jitsi-meet";/);
-  assert.match(hook, /liveConfigOverwrite\(reply\.role, reply\.settings\)/, "o papel vem do servidor (a resposta do join-token)");
+  // O papel vem do servidor (a resposta do join-token); o tema da sala (docs/31 V2-12) entra pelo look, so na montagem.
+  assert.match(hook, /liveConfigOverwrite\(reply\.role, reply\.settings, look\) : (?:\{\})?\), \[reply, look\]\)/, "o papel vem do servidor (a resposta do join-token)");
   // A engrenagem do iframe so para quem apresenta: o papel entra no interfaceConfigOverwrite (e a memoria segue o papel).
-  assert.match(hook, /const roomRole = reply\?\.role \?\? null;\s*const interfaceConfigOverwrite = useMemo\(\(\) => liveInterfaceConfigOverwrite\(roomRole\), \[roomRole\]\);/);
+  assert.match(hook, /const roomRole = reply\?\.role \?\? null;\s*const interfaceConfigOverwrite = useMemo\(\(\) => liveInterfaceConfigOverwrite\(roomRole, look\), \[roomRole, look\]\);/);
   assert.match(hook, /useJitsiMeet\(\{[\s\S]*?configOverwrite,[\s\S]*?container,[\s\S]*?domain: reply\?\.domain \?\? null,[\s\S]*?jwt: reply\?\.jwt \?\? null,[\s\S]*?nonce,[\s\S]*?onEvent,[\s\S]*?room: reply\?\.room \?\? null/);
   assert.match(hook, /toRoomEvent\(name, payload, \{ extra: consented \? \{ consented: true \} : undefined, nowIso: new Date\(\)\.toISOString\(\), ownId: ownIdRef\.current \}\)/);
   assert.match(hook, /tokenRefreshInMs\(reply, Date\.now\(\)\)/, "o token novo antes do exp");
@@ -111,7 +112,7 @@ test("o palco monta o iframe pelo useJitsiMeet com o configOverwrite do papel, o
   assert.match(page, /\(await headers\(\)\)\.get\("x-nonce"\)/);
   assert.match(page, /<LiveWebinarRoom[\s\S]*?nonce=\{nonce\}[\s\S]*?staff=\{data\.staff\}/);
   assert.match(page, /data\.payload\.session\.kind === "live" \?/, "a live usa a sala ao vivo; a gravada e o replay continuam na WebinarRoom");
-  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*lobby: live\.lobby === true,\s*nonce,/);
+  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
 
   // O papel nunca vem do navegador: a pagina pergunta ao servidor pela regra unica (roomGrantFor).
   assert.match(semComentarios(FONTES.queries), /roomGrantFor\(db, \{ nowMs: now, userId, webinar: webinarFromRow\(row\) \}\)/);

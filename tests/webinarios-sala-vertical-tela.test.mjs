@@ -149,7 +149,7 @@ const textOf = (html) => html.replace(/<style>[\s\S]*?<\/style>/g, "").replace(/
 
 test("o desenho vertical: dialogo de tela cheia, o selo Ao vivo e o contador SOMADO no topo, so o Sair com 44 px (sem Minimizar, V2-2)", () => {
   const html = sala("vertical");
-  assert.match(html, /^<div aria-label="Aula de IA" aria-modal="true" class="[^"]*fixed inset-0[^"]*overflow-hidden[^"]*" data-room-design="vertical" data-room-phase="live" role="dialog"/);
+  assert.match(html, /^<div aria-label="Aula de IA" aria-modal="true" class="[^"]*fixed inset-0[^"]*overflow-hidden[^"]*" data-room-design="vertical" data-room-phase="live" data-room-theme="dark" role="dialog"/, "sempre escuro (V2-12): o vertical fica sobre o video");
   const top = elementWith(html, "data-room-vertical-top");
   assert.match(top, /data-room-vertical-badge="live">Ao vivo · /, "o selo Ao vivo com o tempo no ar (a decisao da equipe, D10)");
   assert.match(top, /data-testid="room-present"[\s\S]*122 assistindo/, "o real (2) mais a parte simulada (120) daquele instante");

@@ -2,10 +2,9 @@
 
 import { Radio, Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
-import { MemberChip } from "@/components/member/ui/member-chip";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomMessage } from "@/lib/webinar-room-client";
+import { RoomBadge, RoomButton } from "./room-ui";
 import { trapRoomFocus } from "./webinar-room";
 
 // Os avisos e pedacos pequenos da sala ao vivo (docs/30 §1.3, §1.4, §1.7, §8.5 e §9; fase 3): os dois avisos de
@@ -14,7 +13,8 @@ import { trapRoomFocus } from "./webinar-room";
 // aria-modal, o foco preso nos dois botoes: no Ligar câmera, que o proprio clique abriu; no Agora não do microfone,
 // que abre sozinho; o foco volta a quem o tinha ao fechar; Esc = Agora não, sem fechar a sala); a aba
 // Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos); o chat por cima do palco no
-// celular (as 3 ultimas, com a gaveta fechada); e o selo Gravando.
+// celular (as 3 ultimas, com a gaveta fechada); e o selo Gravando. Redesign V2, F2 (docs/31 V2-11): o cartao dos
+// avisos, a aba Participantes e o selo usam os tokens do tema da sala; o chat por cima do palco e igual nos dois temas.
 
 type ConsentDialogProps = {
   cancelLabel: string;
@@ -79,31 +79,31 @@ function ConsentDialog({ cancelLabel, confirmLabel, heading, initialFocus, onCan
         aria-describedby={`${id}-text`}
         aria-labelledby={heading ? `${id}-heading` : `${id}-text`}
         aria-modal="true"
-        className="w-full max-w-md rounded-[16px] border border-white/15 bg-[#161616] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.6)]"
+        className="w-full max-w-md rounded-[16px] border border-room-border-strong bg-room-surface p-5 shadow-[0_18px_48px_rgba(0,0,0,0.6)]"
         data-testid={testId}
         onKeyDown={handleKeyDown}
         ref={rootRef}
         role="dialog"
       >
         {heading ? (
-          <p className="text-base font-bold text-white" id={`${id}-heading`}>
+          <p className="text-base font-bold text-room-fg-strong" id={`${id}-heading`}>
             {heading}
           </p>
         ) : null}
         <div className={heading ? "mt-2 space-y-2" : "space-y-2"} id={`${id}-text`}>
           {texts.map((text) => (
-            <p className="text-sm leading-6 text-zinc-100" key={text}>
+            <p className="text-sm leading-6 text-room-fg" key={text}>
               {text}
             </p>
           ))}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <MemberButton className="min-h-11" onClick={onConfirm} ref={confirmRef} size="lg" variant="primary">
+          <RoomButton className="min-h-11" onClick={onConfirm} ref={confirmRef} size="lg" variant="primary">
             {confirmLabel}
-          </MemberButton>
-          <MemberButton className="min-h-11" onClick={onCancel} ref={cancelRef} size="lg" variant="secondary">
+          </RoomButton>
+          <RoomButton className="min-h-11" onClick={onCancel} ref={cancelRef} size="lg" variant="secondary">
             {cancelLabel}
-          </MemberButton>
+          </RoomButton>
         </div>
       </div>
     </div>
@@ -149,11 +149,11 @@ export function LiveParticipantsTab({ stage, students }: { stage: readonly strin
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3" data-testid="live-participants">
       <section>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.noPalco}</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.noPalco}</h2>
         {stage.length > 0 ? (
           <ul className="mt-2 space-y-1.5">
             {stage.map((name) => (
-              <li className="flex items-center gap-2 text-sm font-semibold text-white" key={name}>
+              <li className="flex items-center gap-2 text-sm font-semibold text-room-fg-strong" key={name}>
                 <Radio aria-hidden="true" className="size-3.5 text-[var(--accent)]" />
                 {name}
               </li>
@@ -161,7 +161,7 @@ export function LiveParticipantsTab({ stage, students }: { stage: readonly strin
           </ul>
         ) : null}
       </section>
-      <p className="flex items-center gap-2 text-sm text-zinc-200">
+      <p className="flex items-center gap-2 text-sm text-room-fg">
         <Users aria-hidden="true" className="size-4" />
         {copy.alunosNaSala(Math.max(0, students))}
       </p>
@@ -198,11 +198,11 @@ export function LiveChatOverlay({ messages }: { messages: readonly RoomMessage[]
 export function LiveRecordingBadge() {
   const gravando = WEBINAR_COPY.aoVivo.gravando;
   return (
-    <MemberChip className="max-sm:px-1.5" title={gravando} tone="warning">
+    <RoomBadge className="max-sm:px-1.5" title={gravando} tone="warning">
       <span aria-hidden="true" className="inline-block size-2 rounded-full bg-red-500 motion-safe:animate-pulse" />
       <span className="max-sm:sr-only" data-testid="live-recording">
         {gravando}
       </span>
-    </MemberChip>
+    </RoomBadge>
   );
 }
