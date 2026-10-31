@@ -8,7 +8,9 @@ import { createLocalAdminClient } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
   abrirComoProdutor,
+  abrirEnqueteDeTeste,
   ambienteDaSalaAoVivo,
+  apagarEnqueteDeTeste,
   eventosDaLiveAoVivo,
   expect,
   salaFalsaDoJitsi,
@@ -49,6 +51,10 @@ import {
 // O painel fechado (docs/31 V2-7 e V2-8): o X "Fechar o painel" fecha e devolve o foco ao balao, as 2 ultimas mensagens
 // ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome do balao ("Mostrar o chat, 1 mensagem
 // nova") e reabrir tira o contador.
+// A enquete no palco (docs/31 V2-10): aberta pela equipe, ela abre centrada dentro do palco mesmo com o painel fechado,
+// sem pegar o foco; "Responder depois" a recolhe para o card "Enquete aberta · você deixou para depois" do chat (o
+// foco vai ao balao), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
+// "Enviar resposta" grava pela nossa rota (201) e a aba Enquetes diz "Resposta enviada".
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -378,6 +384,88 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await expect(chat.getByRole("log").getByText("terceira do produtor no painel")).toBeVisible();
   } finally {
     await produtor.fechar();
+  }
+});
+
+test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  const enquete = WEBINAR_COPY.salaV2.enquete;
+  const pergunta = "Qual parte da live ajudou mais?";
+  await page.setViewportSize({ height: 900, width: 1440 });
+  await salaFalsaDoJitsi(page);
+  await page.goto(`/webinarios/${slug}`);
+  await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  await expect(page).toHaveURL(SALA);
+  const dialogo = page.getByRole("dialog", { name: titulo });
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+
+  // O painel fechado pelo balao (guardado no navegador): a enquete abre assim mesmo.
+  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await expect(chat).toBeHidden();
+
+  const { optionIds, pollId } = await abrirEnqueteDeTeste({ options: ["O chat", "As perguntas"], question: pergunta, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId, webinarId: LIVE_AO_VIVO_DE_TESTE.id });
+  try {
+    await page.reload();
+    await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+    await expect(chat).toBeHidden();
+    const camada = palco.getByRole("dialog", { name: pergunta });
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("heading", { level: 2, name: pergunta })).toBeVisible();
+    await expect(camada.getByRole("radio")).toHaveCount(2);
+    // Centrada sobre o palco, dentro dele.
+    const caixaDoPalco = await palco.boundingBox();
+    const caixaDaEnquete = await camada.boundingBox();
+    expect(caixaDoPalco && caixaDaEnquete).toBeTruthy();
+    if (caixaDoPalco && caixaDaEnquete) {
+      expect(Math.abs(caixaDaEnquete.x + caixaDaEnquete.width / 2 - (caixaDoPalco.x + caixaDoPalco.width / 2))).toBeLessThan(2);
+      expect(Math.abs(caixaDaEnquete.y + caixaDaEnquete.height / 2 - (caixaDoPalco.y + caixaDoPalco.height / 2))).toBeLessThan(2);
+      expect(caixaDaEnquete.width).toBeLessThanOrEqual(440);
+    }
+    // Aberta sozinha, ela nao pega o foco (o leitor de tela ouve "Enquete aberta" pela regiao viva).
+    expect(await camada.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(false);
+    await expect(palco.locator("[data-room-poll-said]")).toHaveText(enquete.aberta);
+
+    // Responder depois: a camada sai e o foco vai ao balao (o card do chat esta no painel fechado).
+    await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    await expect(mostrar).toBeFocused();
+    await mostrar.click();
+    await expect(chat).toBeVisible();
+    const card = chat.getByRole("region", { name: enquete.deixouParaDepois });
+    await expect(card).toContainText(pergunta);
+
+    // Recarregar mantem no "depois": o card no chat e nada no palco.
+    await page.reload();
+    await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+    await expect(card).toBeVisible();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+
+    // Responder agora: a enquete volta ao palco com o foco na primeira opcao, e o card sai.
+    await card.getByRole("button", { exact: true, name: enquete.responderAgora }).click();
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
+    await expect(card).toHaveCount(0);
+    const enviar = camada.getByRole("button", { exact: true, name: enquete.enviarResposta });
+    await expect(enviar).toBeDisabled();
+    await camada.getByRole("radio", { name: "As perguntas" }).check();
+    const resposta = page.waitForResponse((response) => response.url().endsWith("/polls") && response.request().method() === "POST");
+    await enviar.click();
+    const envio = await resposta;
+    expect(envio.status()).toBe(201);
+    expect(envio.request().postDataJSON()).toMatchObject({ optionIds: [optionIds[1]], pollId, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId });
+
+    // Enviada: a camada sai, o foco vai ao balao, a regiao viva diz "Resposta enviada" e a aba Enquetes tambem.
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toBeFocused();
+    await expect(palco.locator("[data-room-poll-said]")).toHaveText(WEBINAR_COPY.sala.enquete.respondida);
+    await chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes }).click();
+    await expect(dialogo.getByTestId("room-polls").getByText(WEBINAR_COPY.sala.enquete.respondida)).toBeVisible();
+  } finally {
+    // A enquete aberta ficaria no meio do palco dos testes seguintes.
+    await apagarEnqueteDeTeste(pollId);
   }
 });
 

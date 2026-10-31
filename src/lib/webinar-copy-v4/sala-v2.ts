@@ -21,6 +21,23 @@ export const SALA_V2_COPY = {
     maisOpcoes: "Mais opções"
   },
   /**
+   * A enquete no meio do palco (V2-10): o rotulo pelo tipo, "Enviar resposta" e "Responder depois", que recolhe para o
+   * card do chat ("Enquete aberta · você deixou para depois" com "Responder agora"); o resultado compartilhado no mesmo
+   * lugar, com o total de respostas e "Fechar". "Enquete aberta" e o que o leitor de tela ouve quando ela abre sozinha.
+   */
+  enquete: {
+    aberta: "Enquete aberta",
+    deixouParaDepois: "Enquete aberta · você deixou para depois",
+    enviarResposta: "Enviar resposta",
+    fechar: "Fechar",
+    respostaMultipla: "Enquete · resposta múltipla",
+    respostaUnica: "Enquete · resposta única",
+    respostas: (n: number) => (n === 1 ? "1 resposta" : `${n} respostas`),
+    responderAgora: "Responder agora",
+    responderDepois: "Responder depois",
+    resultado: "Enquete · resultado"
+  },
+  /**
    * O painel do chat (V2-6 a V2-8): o balao da barra diz o que faz ("Esconder o chat" com o painel aberto, "Mostrar o
    * chat" com ele fechado e, com mensagens novas, "Mostrar o chat, 3 mensagens novas", a contagem que vem de
    * WEBINAR_COPY.sala.mensagensNovas), o X do painel fecha e a lista das abas se chama "Painel da sala".

@@ -13,6 +13,7 @@ import {
   limparFotoDoPerfil,
   limparProgresso,
   limparSessoesDeTv,
+  abrirEnqueteDeTeste as abrirEnqueteDaEscola,
   ambienteDaSalaAoVivo as ambienteDaSalaAoVivoDaEscola,
   LIVE_AO_VIVO_DE_TESTE as LIVE_AO_VIVO_DA_ESCOLA,
   seedLiveAoVivoDeTeste as seedLiveAoVivoDaEscola
@@ -1676,6 +1677,20 @@ export type LiveAoVivoDeTeste = {
 // A Live ao vivo de teste e o ambiente da sala vem de escola-de-teste.mjs (tipos em escola-de-teste.d.mts).
 export const LIVE_AO_VIVO_DE_TESTE: LiveAoVivoDeTeste = LIVE_AO_VIVO_DA_ESCOLA;
 export const seedLiveAoVivoDeTeste = seedLiveAoVivoDaEscola;
+
+/**
+ * Abre uma enquete na sessao como o console faria (docs/31 V2-10), pelo cliente de servico: resposta unica, as opcoes
+ * na ordem dada. Devolve o id e os das opcoes. Quem abre apaga depois (apagarEnqueteDeTeste), para a enquete nao ficar
+ * no meio do palco dos testes seguintes.
+ */
+export async function abrirEnqueteDeTeste(opcoes: { options: string[]; question: string; sessionId: string; webinarId: string }): Promise<{ optionIds: string[]; pollId: string }> {
+  return abrirEnqueteDaEscola(createLocalAdminClient(), opcoes);
+}
+
+/** Apaga a enquete de teste (as opcoes e as respostas vao junto, por cascata). */
+export async function apagarEnqueteDeTeste(pollId: string): Promise<void> {
+  unwrap(await createLocalAdminClient().from("webinar_polls").delete().eq("id", pollId), "Apagando a enquete de teste");
+}
 
 /**
  * Os valores da sala ao vivo que valem para o app de teste: o servidor do e2e (tests/support/e2e-server.mjs) preenche

@@ -12,6 +12,8 @@ import "./support/transpile-tsx.mjs";
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
 // F6 (V2-9): a hora e o papel da linha de baixo do balao do chat (webinar-room-client.ts).
+// F7 (V2-10): qual enquete abre no meio do palco (para responder ou o resultado), o card "você deixou para depois", o
+// que o Responder depois, o Responder agora e o Fechar guardam, a fusao das leituras e a volta do foco.
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -524,4 +526,133 @@ test("chatRoleLabel (V2-9): o papel so para Apresentador, Equipe e Assistente; o
   assert.equal(client.chatRoleLabel("ai"), "Assistente");
   assert.equal(client.chatRoleLabel("student"), null);
   assert.equal(client.chatRoleLabel("guest"), null);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * F7 (V2-10): a enquete no meio do palco, o "Responder depois" e o card do chat
+ * ---------------------------------------------------------------------------------------------- */
+
+const polls = await import("../src/components/member/webinars/room/room-poll-model.ts");
+
+/** Uma enquete do aluno com id proprio (a sessao traz as abertas e as encerradas com resultado). */
+const pergunta = (id, extra = {}) => ({ anonymous: false, id, kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }, { id: "o2", label: "Não" }], question: `Pergunta ${id}?`, results: null, status: "open", ...extra });
+const RESULTADO = { counts: { o1: 3, o2: 1 }, total: 4 };
+const NADA = { later: [], seen: [] };
+
+test("stagePollFor (V2-10): aberta sem resposta abre para responder; no 'depois', nada no palco e o card do chat; respondida sem resultado, nada", () => {
+  const palco = (lista, guardado = NADA) => polls.stagePollFor({ deferredIds: guardado.later, polls: lista, seenResultIds: guardado.seen });
+  const aberta = pergunta("p1");
+  assert.deepEqual(palco([aberta]), { mode: "answer", poll: aberta }, "a equipe lancou: abre no palco, mesmo sem o aluno pedir");
+  assert.equal(polls.deferredPollCard({ deferredIds: [], polls: [aberta] }), null, "fora do 'depois', nenhum card no chat");
+
+  // Responder depois: o palco fica livre e o card do chat aparece com a mesma enquete.
+  const depois = polls.deferPoll(NADA, "p1");
+  assert.equal(palco([aberta], depois), null);
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: [aberta] }), aberta);
+
+  // Respondida e sem resultado: nada no palco e nenhum card (a aba Enquetes diz "Resposta enviada").
+  const respondida = pergunta("p1", { myOptionIds: ["o1"] });
+  assert.equal(palco([respondida]), null);
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: [respondida] }), null, "respondida, o card sai mesmo no 'depois'");
+  // Encerrada sem resultado nao chega a sala (toStudentPoll); encerrada com o card no 'depois', o card sai.
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: [pergunta("p1", { results: RESULTADO, status: "closed" })] }), null);
+});
+
+test("stagePollFor (V2-10): o resultado compartilhado abre no mesmo lugar ate o aluno fechar; nunca no lugar de uma resposta que ficou para depois; duas abertas, a primeira", () => {
+  const palco = (lista, guardado = NADA) => polls.stagePollFor({ deferredIds: guardado.later, polls: lista, seenResultIds: guardado.seen });
+  const encerrada = pergunta("p1", { myOptionIds: ["o1"], results: RESULTADO, status: "closed" });
+  assert.deepEqual(palco([encerrada]), { mode: "result", poll: encerrada }, "compartilhado e nao visto");
+  const visto = polls.markPollResultSeen(NADA, "p1");
+  assert.equal(palco([encerrada], visto), null, "o Fechar do resultado: nao volta");
+  // A encerrada que o aluno nao respondeu tambem mostra o resultado (ninguem mais espera a resposta dele).
+  assert.equal(palco([pergunta("p1", { results: RESULTADO, status: "closed" })])?.mode, "result");
+  // Aberta, respondida e com o resultado compartilhado ao vivo: o resultado.
+  assert.equal(palco([pergunta("p1", { myOptionIds: ["o2"], results: RESULTADO })])?.mode, "result");
+  // Aberta, no 'depois' e com o resultado: nada no palco (o resultado nao toma o lugar da resposta); o card fica.
+  const adiada = pergunta("p1", { results: RESULTADO });
+  assert.equal(palco([adiada], polls.deferPoll(NADA, "p1")), null);
+
+  // Duas abertas sem resposta: a primeira da lista (a ordem da equipe); a segunda espera a primeira sair.
+  const [a, b] = [pergunta("pa"), pergunta("pb")];
+  assert.equal(palco([a, b])?.poll.id, "pa");
+  assert.equal(palco([a, b], polls.deferPoll(NADA, "pa"))?.poll.id, "pb", "a primeira ficou para depois: a segunda abre");
+  // Uma para responder vence um resultado que ainda nao foi visto.
+  assert.deepEqual(palco([encerrada, b]), { mode: "answer", poll: b });
+  assert.equal(palco([]), null);
+});
+
+test("Responder depois, Responder agora e Fechar: o que fica guardado no navegador, so desta sessao (storedDeferredPolls)", () => {
+  const sessao = "cccccccc-0000-4000-8000-000000000002";
+  let guardado = polls.deferPoll(NADA, "p1");
+  assert.deepEqual(guardado, { later: ["p1"], seen: [] });
+  assert.deepEqual(polls.deferPoll(guardado, "p1"), guardado, "duas vezes, um id so");
+  guardado = polls.markPollResultSeen(guardado, "p0");
+  assert.deepEqual(polls.markPollResultSeen(guardado, "p0"), guardado);
+  // Recarregar: a escolha volta pelo valor guardado; outra sessao comeca vazia.
+  const valor = prefs.deferredPollsValue(sessao, guardado);
+  assert.deepEqual(prefs.storedDeferredPolls(valor, sessao), { later: ["p1"], seen: ["p0"] });
+  assert.deepEqual(prefs.storedDeferredPolls(valor, "outra-sessao"), NADA, "outra sessao zera");
+  // Responder agora: sai do 'depois' e o resultado visto continua visto.
+  assert.deepEqual(polls.resumePoll(guardado, "p1"), { later: [], seen: ["p0"] });
+  assert.deepEqual(polls.resumePoll(guardado, "px"), guardado, "um id que nao esta la nao muda nada");
+  // O padrao congelado (nada guardado) nunca e mexido.
+  assert.deepEqual(polls.deferPoll(prefs.NO_DEFERRED_POLLS, "p9"), { later: ["p9"], seen: [] });
+  assert.deepEqual(prefs.NO_DEFERRED_POLLS, NADA);
+});
+
+test("pollToReopen: o atalho E traz ao palco a primeira aberta sem resposta (deixada para depois ou nao); ja respondida, a aba Enquetes", () => {
+  assert.equal(polls.pollToReopen([pergunta("p1", { myOptionIds: ["o1"] }), pergunta("p2")])?.id, "p2");
+  assert.equal(polls.pollToReopen([pergunta("p1", { myOptionIds: ["o1"] })]), null);
+  assert.equal(polls.pollToReopen([pergunta("p1", { results: RESULTADO, status: "closed" })]), null);
+});
+
+test("mergeStudentPolls: quem chegou diz quais enquetes existem e como estao; a resposta que o aluno acabou de mandar nao se perde numa leitura de antes dela", () => {
+  const respondida = pergunta("p1", { myOptionIds: ["o2"] });
+  // A releitura da sessao saiu antes do envio: traz a enquete sem resposta. O palco nao reabre.
+  assert.deepEqual(polls.mergeStudentPolls([respondida], [pergunta("p1")]), [respondida]);
+  // O resultado e o fechamento chegam pela leitura, com a resposta guardada.
+  assert.deepEqual(polls.mergeStudentPolls([respondida], [pergunta("p1", { results: RESULTADO, status: "closed" })]), [pergunta("p1", { myOptionIds: ["o2"], results: RESULTADO, status: "closed" })]);
+  // A encerrada sem resultado sai da lista do aluno (e da sala); a enquete nova entra na ordem de quem chegou.
+  assert.deepEqual(polls.mergeStudentPolls([pergunta("p1")], []), []);
+  assert.deepEqual(
+    polls.mergeStudentPolls([pergunta("p2")], [pergunta("p1"), pergunta("p2")]).map(({ id }) => id),
+    ["p1", "p2"]
+  );
+  // A resposta que veio do servidor (de outra aba) vale.
+  assert.deepEqual(polls.mergeStudentPolls([pergunta("p1")], [respondida]), [respondida]);
+});
+
+test("pollOptionPercent: a porcentagem inteira de cada opcao no resultado; sem respostas, zero", () => {
+  const comResultado = pergunta("p1", { results: RESULTADO });
+  assert.equal(polls.pollOptionPercent(comResultado, "o1"), 75);
+  assert.equal(polls.pollOptionPercent(comResultado, "o2"), 25);
+  assert.equal(polls.pollOptionPercent(comResultado, "o3"), 0, "opcao sem contagem");
+  assert.equal(polls.pollOptionPercent(pergunta("p1", { results: { counts: { o1: 0 }, total: 0 } }), "o1"), 0, "sem respostas, sem divisao por zero");
+  assert.equal(polls.pollOptionPercent(pergunta("p1"), "o1"), 0, "sem resultado");
+});
+
+test("returnFocusFromPoll: a enquete saiu do palco com o foco nela (caiu no body): o foco vai ao Responder agora; sem ele, ao balao; sem os dois, a sala; um foco na sala fica", () => {
+  const focados = [];
+  const no = (nome, extra = {}) => ({ focus: () => focados.push(nome), nome, offsetParent: {}, ...extra });
+  const agora = no("Responder agora");
+  const balao = no("balao");
+  const tema = no("Tema claro");
+  const body = { nome: "body" };
+  const raiz = ({ cards = [agora], toggles = [balao], controles = [tema] } = {}) => ({
+    contains: (node) => [agora, balao, tema].includes(node),
+    querySelectorAll: (selector) =>
+      selector === "[data-room-poll-resume]" ? cards : selector === '[aria-controls="room-panel"]' ? toggles : selector === salaAoVivo.ROOM_FOCUSABLE ? controles : []
+  });
+
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz(), body), true, "Responder depois: o card do chat esta na tela");
+  assert.deepEqual(focados, ["Responder agora"]);
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz({ cards: [] }), body), true, "enviada (sem card): o balao");
+  assert.equal(focados.at(-1), "balao");
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz({ cards: [{ ...agora, offsetParent: null }] }), null), true, "o card no painel fechado nao conta");
+  assert.equal(focados.at(-1), "balao");
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz({ cards: [], toggles: [] }), body), true, "sem a barra: o primeiro controle da sala");
+  assert.equal(focados.at(-1), "Tema claro");
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz(), tema), false, "o foco estava em outro lugar da sala: fica");
+  assert.equal(salaAoVivo.returnFocusFromPoll(raiz({ cards: [], controles: [], toggles: [] }), body), false);
+  assert.equal(salaAoVivo.returnFocusFromPoll(null, body), false);
 });

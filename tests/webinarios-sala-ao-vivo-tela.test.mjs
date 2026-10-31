@@ -480,7 +480,17 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (
 
   const comEnquete = sala({ payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }) });
   assert.match(comEnquete, /role="tab"[^>]*>Enquetes</);
-  assert.match(comEnquete, /Gostou\?/);
+  // A enquete aberta sem resposta abre no meio do palco (docs/31 V2-10), dentro do [data-lesson-player-stage] e por
+  // cima do Entrar na sala, mesmo antes de o aluno pedir; o card do chat so com ela deixada para depois.
+  const noPalco = comEnquete.slice(comEnquete.indexOf("data-lesson-player-stage"), comEnquete.indexOf('data-testid="room-panel"'));
+  assert.match(noPalco, /data-room-poll-said="">Enquete aberta<\/p><div class="[^"]*" data-room-poll-layer="answer"><div aria-labelledby="[^"]+" class="[^"]*" data-room-stage-poll="answer" role="dialog">/);
+  assert.match(noPalco, /<h2 [^>]*>Gostou\?<\/h2>/);
+  assert.match(noPalco, />Responder depois<\/button>[\s\S]*?>Enviar resposta<\/button>/);
+  assert.doesNotMatch(comEnquete, /Responder agora|data-room-poll-later/, "fora do 'depois', o chat fica sem o card");
+  // A sala bloqueada (removido) nao abre nada no palco.
+  const removido = sala({ payload: payload({ me: { ban: { ...SEM_BAN, kicked: true } }, polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }) });
+  assert.match(removido, /data-room-screen="kicked"/);
+  assert.doesNotMatch(removido, /data-room-poll-layer|data-room-poll-said/);
 });
 
 test("antes de abrir: o aluno ve Aguardando o apresentador com a contagem (o chat diz que ainda nao abriu); a equipe ve Entrar na sala (Sessao de pratica)", () => {

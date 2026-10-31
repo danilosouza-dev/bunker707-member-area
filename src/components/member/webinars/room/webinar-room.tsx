@@ -21,6 +21,8 @@ import { RoomHeader } from "./room-header";
 import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomMobileLine, roomPanelShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
+import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
+import { deferPoll, deferredPollCard, markPollResultSeen, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -31,7 +33,8 @@ import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
-import { useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useRoomPolls } from "./use-room-polls";
+import { useDeferredPolls, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
 import { RoomDock } from "./vertical/room-dock";
@@ -74,6 +77,10 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // simulada), o Replay fica sem ela, e Enquetes so com enquete aberta. Fechado, o balao conta as mensagens novas e as 2
 // ultimas ficam em pilulas sobre o palco (room-chat-pills.tsx; no Replay, acima da barra da Bunny), menos com o card da
 // Oferta no palco, que tambem tira o selo do Assistente. A gaveta do vertical continua com as abas de antes.
+// Redesign V2, F7 (docs/31 V2-10): no desenho normal, a enquete aberta sem resposta abre no meio do palco (room-poll-
+// layer.tsx), mesmo com o painel fechado; "Responder depois" recolhe para o card do chat e o resultado compartilhado
+// aparece no mesmo lugar. As enquetes sao lidas pela sala (useRoomPolls), e a aba so desenha. O vertical continua com o
+// card de antes, que abre a aba Enquetes da gaveta.
 
 function subscribeNothing() {
   return () => undefined;
@@ -197,6 +204,29 @@ export function returnFocusFromPanel(
   }
   const toggle = Array.from(root.querySelectorAll<HTMLElement>(`[aria-controls="${ROOM_PANEL_ID}"]`)).find(focusShown);
   const target = toggle ?? roomFocusTarget(root);
+  if (!target) {
+    return false;
+  }
+  target.focus();
+  return true;
+}
+
+/** O primeiro elemento do seletor que esta na tela (focusShown). */
+function firstShown(root: Pick<HTMLElement, "querySelectorAll">, selector: string): HTMLElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLElement>(selector)).find(focusShown);
+}
+
+/**
+ * A enquete saiu do palco (docs/31 V2-10: enviada, deixada para depois, o resultado fechado, encerrada pela equipe)
+ * com o foco nela, que caiu no body: o foco vai para o "Responder agora" do card do chat, se ele esta na tela; senao
+ * para o balao da barra; senao para o primeiro controle da sala na tela (roomFocusTarget). Um foco que continua na
+ * sala fica onde esta. Devolve se moveu o foco.
+ */
+export function returnFocusFromPoll(root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null, active: Element | null): boolean {
+  if (!root || (active !== null && root.contains(active))) {
+    return false;
+  }
+  const target = firstShown(root, "[data-room-poll-resume]") ?? firstShown(root, `[aria-controls="${ROOM_PANEL_ID}"]`) ?? roomFocusTarget(root);
   if (!target) {
     return false;
   }
@@ -357,12 +387,21 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // ou a pilula do vertical). Os tres sao pontos de encaixe preenchidos pelas frentes.
   const simulation = useRoomSimulation({ enabled: !readOnly && !unavailable && kind === "simulated" && phase !== "ended", getOffsetMs, sessionId, webinarId });
   const translation = useRoomTranslation({ enabled: !readOnly && !unavailable, messages: revealed, sessionId, webinarId });
-  const openPolls = session.polls.filter((poll) => poll.status === "open");
+  // As enquetes da sala (a releitura da sessao e, com uma aberta, a leitura de 15 s): o palco, o card do chat e a aba.
+  const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, sessionId, sessionPolls: session.polls, webinarId });
+  const polls = roomPolls.polls;
+  const [deferred, setDeferred] = useDeferredPolls(sessionId);
+  /**
+   * O pedido de foco na enquete do palco (Responder agora): a enquete para responder (a mesma chave do palco) e um
+   * contador que muda a cada pedido. O resultado da mesma enquete, depois, abre sem pegar o foco.
+   */
+  const [pollFocus, setPollFocus] = useState<{ key: string; n: number } | null>(null);
+  const openPolls = polls.filter((poll) => poll.status === "open");
   // As abas do painel pela regra das tres salas (V2-7); a gaveta do vertical continua como no docs/30 §1.6 (Enquetes
   // tambem com o resultado de uma enquete encerrada, sem Participantes).
   const tabs = panelTabsFor({ kind, openPolls: openPolls.length, tab });
   const drawerTab: VerticalDrawerTab = tab === "participantes" ? "chat" : tab;
-  const drawerTabs: VerticalDrawerTab[] = ["chat", "perguntas", ...(openPolls.length > 0 || tab === "enquetes" || session.polls.length > 0 ? (["enquetes"] as const) : [])];
+  const drawerTabs: VerticalDrawerTab[] = ["chat", "perguntas", ...(openPolls.length > 0 || tab === "enquetes" || polls.length > 0 ? (["enquetes"] as const) : [])];
   const replayHref = session.webinar.replaySessionId && kind === "simulated" ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const countdown = kind === "simulated" ? formatCountdown(zeroMs, nowMs + clock.skewMs) : "";
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
@@ -377,6 +416,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // nao muda: a hora marcada na gravada, o player no Replay).
   const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, panelShown });
   const firstFocus = firstFocusTarget({ panelShown });
+  // A enquete no meio do palco so no desenho normal com a sala de pe (como a barra); o card do chat, a deixada para
+  // depois.
+  const stagePoll = barShown ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: deferred.seen }) : null;
+  const stagePollKey = stagePoll ? `${stagePoll.mode}:${stagePoll.poll.id}` : null;
+  const laterPoll = deferredPollCard({ deferredIds: deferred.later, polls });
 
   const leave = useCallback(() => {
     router.push(webinarHref);
@@ -421,6 +465,16 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
     }
   }, [panelShown]);
+
+  // A enquete saiu do palco (ou trocou por outra) com o foco nela: o foco vai ao Responder agora, ao balao ou a sala.
+  const stagePollKeyRef = useRef(stagePollKey);
+  useLayoutEffect(() => {
+    const was = stagePollKeyRef.current;
+    stagePollKeyRef.current = stagePollKey;
+    if (was !== null && was !== stagePollKey) {
+      returnFocusFromPoll(rootRef.current, document.activeElement);
+    }
+  }, [stagePollKey]);
 
   useEffect(() => {
     const onChange = () => setFullscreenOn(stageBoxRef.current !== null && document.fullscreenElement === stageBoxRef.current);
@@ -478,6 +532,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       return;
     }
     trapRoomFocus(event, rootRef.current);
+  }
+
+  /** "Responder agora" do card do chat: a enquete volta ao palco e o foco vai para a primeira opcao. */
+  function answerPollNow(pollId: string) {
+    setDeferred(resumePoll(deferred, pollId));
+    setPollFocus((previous) => ({ key: `answer:${pollId}`, n: (previous?.n ?? 0) + 1 }));
   }
 
   function unmute() {
@@ -569,7 +629,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // O conteudo de cada aba, o mesmo no painel do desenho normal e na gaveta do vertical.
   const chatTab = (
     <>
-      {openPolls.length > 0 ? (
+      {barShown && laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
+      {/* O vertical nao tem a enquete no palco: o card de antes abre a aba Enquetes da gaveta. */}
+      {vertical && openPolls.length > 0 ? (
         <button
           className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
           onClick={() => setTab("enquetes")}
@@ -626,7 +688,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       // no cabecalho); nunca a lista de alunos.
       <LiveParticipantsTab stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
     ) : (
-      <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} />
+      <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || phase === "ended"} />
     );
 
   return (
@@ -753,6 +815,23 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                 />
               }
             />
+            {/* A enquete no meio do palco (V2-10), por cima do video, da Oferta e das pilulas; so no desenho normal. */}
+            {vertical || unavailable ? null : (
+              <RoomPollLayer
+                focusRequest={pollFocus !== null && pollFocus.key === stagePollKey ? pollFocus.n : 0}
+                onAnswer={roomPolls.answer}
+                onLater={(pollId) => {
+                  setDeferred(deferPoll(deferred, pollId));
+                  setPollFocus(null);
+                }}
+                onSeen={(pollId) => {
+                  setDeferred(markPollResultSeen(deferred, pollId));
+                  setPollFocus(null);
+                }}
+                readOnly={readOnly || phase === "ended"}
+                stage={stagePoll}
+              />
+            )}
           </div>
           {barShown ? (
             <RecordedControls

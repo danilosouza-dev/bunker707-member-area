@@ -76,6 +76,7 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "room-chat.tsx",
     "room-questions.tsx",
     "room-polls.tsx",
+    "room-poll-layer.tsx",
     "room-reactions.tsx",
     "room-header.tsx",
     "room-ui.tsx",
@@ -209,16 +210,20 @@ for (const [nomeDoTema, tema] of [
     for (const nomeDoTexto of ["warn-fg", "fg-strong", "fg-muted"]) {
       conferir(`${nomeDoTexto} sobre o aviso`, cor(nomeDoTexto), sobre(cor("warn-bg"), painel));
     }
-    // A porcentagem da enquete fica no texto principal, por cima da barra cheia.
+    // A porcentagem da enquete fica no texto principal, por cima da barra cheia: no card da aba e no dialogo do palco
+    // (V2-10), que fica no fundo do painel.
     conferir("fg sobre a barra da enquete", cor("fg"), sobre(cor("poll-bar"), card));
+    conferir("fg sobre a barra da enquete no palco", cor("fg"), sobre(cor("poll-bar"), painel));
     // O ativo, o meu balao e a aba ativa.
     conferir("active-fg sobre active-bg", cor("active-fg"), sobre(cor("active-bg"), painel));
     conferir("bubble-mine-fg sobre bubble-mine-bg", cor("bubble-mine-fg"), sobre(cor("bubble-mine-bg"), painel));
     conferir("tab-on-fg sobre tab-on-bg", cor("tab-on-fg"), sobre(cor("tab-on-bg"), painel));
     assert.deepEqual(falhas, [], `pares abaixo de 4,5:1 no tema ${nomeDoTema}`);
 
-    // A barra do resultado aparece sobre o card (a porcentagem escrita leva o dado; a barra so precisa se ver).
+    // A barra do resultado aparece sobre o card e sobre o dialogo do palco (a porcentagem escrita leva o dado; a barra
+    // so precisa se ver).
     assert.ok(contraste(sobre(cor("poll-bar"), card), card) >= 1.3, "a barra da enquete se distingue do card");
+    assert.ok(contraste(sobre(cor("poll-bar"), painel), painel) >= 1.3, "a barra da enquete se distingue do dialogo do palco");
   });
 }
 

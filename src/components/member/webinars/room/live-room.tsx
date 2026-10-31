@@ -60,6 +60,8 @@ import {
   type RoomPanelTab
 } from "./room-layout-model";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
+import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
+import { deferPoll, deferredPollCard, markPollResultSeen, pollToReopen, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -68,8 +70,9 @@ import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
-import { useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
-import { returnFocusFromPanel, roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
+import { useRoomPolls } from "./use-room-polls";
+import { useDeferredPolls, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
@@ -113,6 +116,10 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // celular: a aba de baixo que abria e fechava saiu, o balao manda), o X "Fechar o painel" no computador e as abas pela
 // regra unica das tres salas (panelTabsFor). Fechado, o balao conta as mensagens novas de outras pessoas e as 2 ultimas
 // ficam em pilulas sobre o palco (room-chat-pills.tsx); o primeiro foco e o balao (firstFocusTarget).
+// Redesign V2, F7 (docs/31 V2-10): a enquete aberta sem resposta abre no meio do palco (room-poll-layer.tsx), mesmo com
+// o painel fechado; "Responder depois" (ou o Esc nela) recolhe para o card do chat, cujo "Responder agora" a traz de
+// volta, como o atalho E; o resultado compartilhado aparece no mesmo lugar. As enquetes sao lidas pela sala
+// (useRoomPolls), e a aba so desenha.
 
 export type LiveWebinarRoomProps = {
   coverUrl: string | null;
@@ -445,6 +452,15 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const reactions = useRoomReactions({ enabled: !readOnly && writable && !blocked, getOffsetMs, onRefused: onWriteRefused, reducedMotion, sessionId, webinarId });
   // O Assistente lido uma vez pela sala: o selo do palco, o chat e as Perguntas usam o mesmo estado.
   const assistant = useRoomAssistant({ enabled: !readOnly && !blocked, sessionId, webinarId });
+  // As enquetes da sala (a releitura da sessao e, com uma aberta, a leitura de 15 s): o palco, o card do chat e a aba.
+  const roomPolls = useRoomPolls({ enabled: !readOnly && !blocked, getOffsetMs, onRefused: onWriteRefused, sessionId, sessionPolls: session.polls, webinarId });
+  const polls = roomPolls.polls;
+  const [deferred, setDeferred] = useDeferredPolls(sessionId);
+  /**
+   * O pedido de foco na enquete do palco (Responder agora, o atalho E): a enquete para responder (a mesma chave do palco)
+   * e um contador que muda a cada pedido. O resultado da mesma enquete, depois, abre sem pegar o foco.
+   */
+  const [pollFocus, setPollFocus] = useState<{ key: string; n: number } | null>(null);
 
   useRoomHeartbeat({
     enabled: !readOnly && writable && !blocked,
@@ -462,8 +478,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   });
 
   const presentNow = heartbeatPresent ?? session.presentNow;
-  const openPolls = session.polls.filter((poll) => poll.status === "open");
+  const openPolls = polls.filter((poll) => poll.status === "open");
   const tabs = panelTabsFor({ kind: "live", openPolls: openPolls.length, tab });
+  // A enquete no meio do palco so com a sala de pe (como a barra e os selos); o card do chat, a deixada para depois.
+  const stagePoll = barShown ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: deferred.seen }) : null;
+  const stagePollKey = stagePoll ? `${stagePoll.mode}:${stagePoll.poll.id}` : null;
+  const laterPoll = barShown ? deferredPollCard({ deferredIds: deferred.later, polls }) : null;
   // O contador do balao: as mensagens novas desde que o painel fechou. Na live so os ids contam (o zero do offset anda
   // quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
   const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, panelShown });
@@ -518,6 +538,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }, [panelShown]);
 
+  // A enquete saiu do palco (ou trocou por outra) com o foco nela: o foco vai ao Responder agora, ao balao ou a sala.
+  const stagePollKeyRef = useRef(stagePollKey);
+  useLayoutEffect(() => {
+    const was = stagePollKeyRef.current;
+    stagePollKeyRef.current = stagePollKey;
+    if (was !== null && was !== stagePollKey) {
+      returnFocusFromPoll(rootRef.current, document.activeElement);
+    }
+  }, [stagePollKey]);
+
   function openPollsTab() {
     if (openPolls.length > 0) {
       setTab("enquetes");
@@ -525,6 +555,22 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       if (settingsTakeover) {
         closeSettings();
       }
+    }
+  }
+
+  /** "Responder agora" (o card do chat) e o atalho E: a enquete volta ao palco e o foco vai para a primeira opcao. */
+  function answerPollNow(pollId: string) {
+    setDeferred(resumePoll(deferred, pollId));
+    setPollFocus((previous) => ({ key: `answer:${pollId}`, n: (previous?.n ?? 0) + 1 }));
+  }
+
+  /** O atalho E: a enquete aberta sem resposta no palco; ja respondida, a aba Enquetes, como antes. */
+  function openStagePoll() {
+    const poll = pollToReopen(polls);
+    if (poll) {
+      answerPollNow(poll.id);
+    } else {
+      openPollsTab();
     }
   }
 
@@ -620,7 +666,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     } else if (shortcut === "hand" && ourBar && joined) {
       room.toggleHand();
     } else if (shortcut === "poll") {
-      openPollsTab();
+      openStagePoll();
     }
   }
 
@@ -744,6 +790,23 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} /> : null}
               {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
               {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
+              {/* A enquete no meio do palco (V2-10), por cima do video, das capas e das pilulas. */}
+              {blocked ? null : (
+                <RoomPollLayer
+                  focusRequest={pollFocus !== null && pollFocus.key === stagePollKey ? pollFocus.n : 0}
+                  onAnswer={roomPolls.answer}
+                  onLater={(pollId) => {
+                    setDeferred(deferPoll(deferred, pollId));
+                    setPollFocus(null);
+                  }}
+                  onSeen={(pollId) => {
+                    setDeferred(markPollResultSeen(deferred, pollId));
+                    setPollFocus(null);
+                  }}
+                  readOnly={readOnly || !writable}
+                  stage={stagePoll}
+                />
+              )}
             </LiveStage>
           </div>
           {!barShown ? null : (
@@ -812,16 +875,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           >
             {tab === "chat" ? (
               <>
-                {openPolls.length > 0 ? (
-                  <button
-                    className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
-                    onClick={openPollsTab}
-                    type="button"
-                  >
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
-                    <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
-                  </button>
-                ) : null}
+                {laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
                 <RoomTranslationBar state={translation} />
                 <RoomChatPanel
                   assistant={assistant}
@@ -874,7 +928,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
             ) : null}
             {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentShown} /> : null}
             {tab === "enquetes" ? (
-              <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} onRefused={onWriteRefused} readOnly={readOnly || !writable} sessionId={sessionId} webinarId={webinarId} />
+              <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || !writable} />
             ) : null}
           </RoomPanel>
         )}
