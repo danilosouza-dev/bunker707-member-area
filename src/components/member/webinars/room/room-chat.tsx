@@ -1,7 +1,7 @@
 "use client";
 
 import { MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -60,6 +60,12 @@ export type RoomChatPanelProps = {
   readOnly: boolean;
   /** Fase 4c: a sessao (com o webinario, liga a dica do Assistente e o "Falar com a equipe"). */
   sessionId?: string | null;
+  /**
+   * O painel que leva o chat esta na tela (docs/31 V2-7; padrao: sim). Fechado, o painel fica montado e escondido, e a
+   * lista escondida nao rola com as mensagens que chegam: ao reabrir, ela vai ao fim (quem estava no fim ve as novas que
+   * o balao contou; quem tinha subido para ler continua onde estava).
+   */
+  shown?: boolean;
   slowUntilMs: number | null;
   /**
    * Redesign V2, F6 (V2-9): de que sala e a hora embaixo do balao (chatTimeLabel): na "live", a hora em que o servidor
@@ -108,14 +114,15 @@ export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode
 /**
  * Uma mensagem do painel no estilo do Zoom (docs/31 V2-9): o avatar de 28 px (so as iniciais) de um lado, o balao (os
  * outros a esquerda em --room-surface-2; a minha a direita em --room-bubble-mine-bg, com o avatar a direita) e, embaixo,
- * "nome · papel · hora" em 11 px. O papel so para Apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
+ * "nome · papel · hora" em 11 px; na minha, "Você · hora" (o avatar continua com as minhas iniciais). O papel so para Apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
  * so para quem ve (aria-hidden): o leitor de tela ouve "{nome}, {papel}, {hora}: " antes do texto, nunca o texto antes
  * do autor; "Aguardando a equipe" fica lido, depois do texto. O "Falar com a equipe" do Assistente vem depois da linha.
  */
 export function RoomChatBubble({ footer = null, message, time }: { footer?: ReactNode; message: RoomMessage; time: string }) {
   const role = chatRoleLabel(message.role);
   const mine = message.mine;
-  const author = [message.displayName, role, time].filter((part): part is string => Boolean(part));
+  const name = mine ? WEBINAR_COPY.salaV2.chat.voce : message.displayName;
+  const author = [name, role, time].filter((part): part is string => Boolean(part));
 
   return (
     <li className={cn("flex items-end gap-2", mine ? "flex-row-reverse" : undefined)} data-mine={mine ? "" : undefined} data-room-message={message.id}>
@@ -132,7 +139,7 @@ export function RoomChatBubble({ footer = null, message, time }: { footer?: Reac
         </p>
         <p className={cn("flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-room-fg-subtle", mine ? "justify-end pr-1" : "pl-1")} data-room-message-meta="">
           <span aria-hidden="true" className="inline-flex flex-wrap items-center gap-1.5">
-            <span className="font-semibold text-room-meta-name">{message.displayName}</span>
+            <span className="font-semibold text-room-meta-name">{name}</span>
             {role ? (
               <>
                 <span>·</span>
@@ -202,7 +209,7 @@ export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }:
           <input
             aria-invalid={nicknameInvalid || undefined}
             aria-label={copy.responderComo.apelido}
-            className="mt-2 h-10 w-full rounded-[10px] border border-room-input-border bg-room-input-bg px-3 text-sm text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle"
+            className="mt-2 h-10 w-full rounded-[10px] border border-room-input-border bg-room-input-bg px-3 text-base text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle lg:text-sm"
             maxLength={CHAT_LIMITS.nicknameMax}
             onChange={(event) => setNickname(event.target.value)}
             placeholder={copy.apelidoPlaceholder}
@@ -241,6 +248,19 @@ function composerHint(state: ComposerState, phase: SimulatedPhase | "replay"): s
   }
 }
 
+/**
+ * O painel do chat voltou a tela (`shown`): a lista, que nao rola enquanto esta escondida, vai ao fim se o aluno estava
+ * no fim (`stick`, o mesmo do rolar com as mensagens que chegam); quem tinha subido para ler fica onde estava. Devolve se
+ * rolou.
+ */
+export function chatListOnShow(list: { scrollHeight: number; scrollTop: number } | null, input: { shown: boolean; stick: boolean }): boolean {
+  if (!list || !input.shown || !input.stick) {
+    return false;
+  }
+  list.scrollTop = list.scrollHeight;
+  return true;
+}
+
 export function RoomChatPanel(props: RoomChatPanelProps) {
   const {
     aboveComposer = null,
@@ -259,6 +279,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     pinned,
     readOnly,
     sessionId = null,
+    shown = true,
     slowUntilMs,
     timeKind,
     webinarId = null,
@@ -311,6 +332,12 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       list.scrollTop = list.scrollHeight;
     }
   }, [copy, messages]);
+
+  // O painel voltou a tela (o balao): a lista escondida nao rolou com o que chegou; quem estava no fim volta ao fim. Vale
+  // tambem para o painel que montou fechado (a primeira leitura do chat chegou com a lista escondida).
+  useLayoutEffect(() => {
+    chatListOnShow(listRef.current, { shown, stick: stickRef.current });
+  }, [shown]);
 
   function handleScroll() {
     const list = listRef.current;

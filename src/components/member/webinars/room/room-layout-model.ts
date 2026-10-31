@@ -176,6 +176,30 @@ export function panelTabsFor(input: { kind: RoomKind; openPolls: number; tab: Ro
   return tabs;
 }
 
+/** A folga que a aba escolhida guarda da borda da linha quando ela rola (o recuo da lista, p-1). */
+const TAB_SCROLL_PADDING_PX = 4;
+
+/**
+ * A rolagem da linha das abas do painel (V2-7) que deixa a aba escolhida inteira na vista: as quatro abas (com a enquete
+ * aberta) nao cabem nos 320 px do painel e a linha rola de lado. `tabLeft` e a posicao da aba no conteudo da linha (ja
+ * somada a rolagem de agora), `listWidth` a largura visivel. A aba que ja esta inteira na vista nao mexe na rolagem; a
+ * que passa de um lado traz a linha ate ela, com a folga do recuo; nunca negativa.
+ */
+export function tabScrollLeft(input: { listWidth: number; scrollLeft: number; tabLeft: number; tabWidth: number }): number {
+  const { listWidth, scrollLeft, tabLeft, tabWidth } = input;
+  if (![listWidth, scrollLeft, tabLeft, tabWidth].every(Number.isFinite) || listWidth <= 0) {
+    return Number.isFinite(scrollLeft) ? scrollLeft : 0;
+  }
+  const pad = TAB_SCROLL_PADDING_PX;
+  if (tabLeft - pad < scrollLeft) {
+    return Math.max(0, Math.round(tabLeft - pad));
+  }
+  if (tabLeft + tabWidth + pad > scrollLeft + listWidth) {
+    return Math.max(0, Math.round(tabLeft + tabWidth + pad - listWidth));
+  }
+  return scrollLeft;
+}
+
 /**
  * Quem fica em "No palco" na aba Participantes da gravada (V2-7): quem apresenta, quando a pagina sabe o nome; nunca a
  * lista dos alunos (docs/30 §1.3).
@@ -255,6 +279,41 @@ export function chatPillsShown(input: { blocked: boolean; design: RoomDesign; of
  */
 export function offerOnScreen(input: { closedKey: string | null; enabled: boolean; hasView: boolean; shown: boolean; windowKey: string | null }): boolean {
   return input.enabled && input.shown && input.hasView && input.windowKey !== null && input.windowKey !== input.closedKey;
+}
+
+/** O que o Esc faz na sala (fora de um campo que o trate antes: o menu da visao, a enquete, a gaveta). */
+export type RoomEscapeStep = "close_confirm" | "close_popovers" | "leave" | "poll_later" | "poll_seen";
+
+/**
+ * O Esc da sala fecha a camada de cima primeiro: a confirmacao de Sair; senao Reagir, Configurações ou o menu da Visão
+ * do vídeo abertos; senao a enquete no meio do palco, como o "Responder depois" (ou o "Fechar" do resultado), com o foco
+ * em qualquer lugar da sala: abaixo de lg a folha da enquete cobre a barra e o campo do chat, e o foco que ficou num
+ * controle coberto nao teria outro jeito de aparecer (WCAG 2.4.11); so sem nada disso, a sala pergunta se quer sair.
+ */
+export function roomEscapeStep(input: { confirmLeave: boolean; popoverOpen: boolean; stagePoll: "answer" | "result" | null }): RoomEscapeStep {
+  if (input.confirmLeave) {
+    return "close_confirm";
+  }
+  if (input.popoverOpen) {
+    return "close_popovers";
+  }
+  if (input.stagePoll === "answer") {
+    return "poll_later";
+  }
+  if (input.stagePoll === "result") {
+    return "poll_seen";
+  }
+  return "leave";
+}
+
+/**
+ * A capa "Ativar som" sobre o player da gravada (V2-6): so na gravada (o Replay tem a barra da Bunny) e com o som
+ * desligado. No desenho normal ela some depois do primeiro toque no som (a capa ou o Som da barra): silenciar pela
+ * barra nao a traz de volta, porque o Som da barra liga de novo. Sem a barra (o vertical 9:16, que nao tem Som nenhum),
+ * ela volta sempre que o som esta desligado: quem silenciou deitado e girou para em pe teria o video mudo sem saida.
+ */
+export function soundCoverShown(input: { barShown: boolean; kind: "replay" | "simulated"; muted: boolean; soundTouched: boolean }): boolean {
+  return input.kind === "simulated" && input.muted && (!input.barShown || !input.soundTouched);
 }
 
 /**

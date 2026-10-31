@@ -13,8 +13,10 @@ import { RoomButton } from "./room-ui";
 // comporta o dialogo, e ela vira uma folha presa embaixo da tela. O rotulo pelo tipo, a pergunta (h2), opcoes de 48
 // px, "Responder depois" (recolhe para o card do chat; o Esc dentro dela faz o mesmo) e "Enviar resposta"; o resultado
 // compartilhado no mesmo lugar, com as barras e "Fechar". E um role=dialog sem aria-modal (o resto da sala continua
-// valendo): aberta sozinha, nao pega o foco e o leitor de tela ouve "Enquete aberta" pela regiao viva, que fica sempre
-// montada (e diz "Resposta enviada" quando a enquete sai do palco pelo envio). O foco so entra quando o aluno pede
+// valendo): aberta sozinha, nao pega o foco e o leitor de tela ouve "Enquete aberta: {pergunta}" pela regiao viva, que
+// fica sempre montada (e diz "Resposta enviada" quando a enquete sai do palco pelo envio); com a pergunta, a enquete que
+// entra no lugar de outra tambem e anunciada. O Esc com o foco em qualquer lugar da sala tambem a recolhe
+// (roomEscapeStep). O foco so entra quando o aluno pede
 // (Responder agora, o atalho E). O card do chat ("Enquete aberta · você deixou para depois · Responder agora") tambem
 // mora aqui. Qual enquete abre e o que fica guardado: room-poll-model.ts.
 
@@ -179,7 +181,7 @@ export function RoomPollLayer({
       setNotice("");
     }
   }
-  const said = stage ? (stage.mode === "answer" ? copy.aberta : copy.resultado) : notice;
+  const said = stage ? (stage.mode === "answer" ? copy.anuncioAberta(stage.poll.question) : copy.anuncioResultado(stage.poll.question)) : notice;
 
   async function answer(poll: StudentPoll, optionIds: string[]) {
     await onAnswer(poll, optionIds);

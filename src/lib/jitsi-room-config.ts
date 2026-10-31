@@ -272,7 +272,11 @@ export const JITSI_LISTENED_EVENTS = [
   // equipe) e a coluna de miniaturas na tela ou escondida (o toggleFilmStrip pela largura do iframe). O botao da barra
   // diz o que o motor mostra; nenhum dos dois vai ao servidor (toRoomEvent devolve nulo).
   "tileViewChanged",
-  "filmstripDisplayChanged"
+  "filmstripDisplayChanged",
+  // Quem esta no video grande mudou (o destaque da equipe, o orador, a tela compartilhada): o selo "{nome} ·
+  // Apresentador" do palco so fica com alguem da equipe ali (docs/31 V2-4). O motor manda sem dados (o id fica no IFrame
+  // API); nao vai ao servidor (toRoomEvent devolve nulo).
+  "largeVideoChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -351,8 +355,9 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "moderationParticipantRejected":
     case "tileViewChanged":
     case "filmstripDisplayChanged":
+    case "largeVideoChanged":
       // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
-      // video e a coluna de miniaturas): o servidor nao aceita estes nomes.
+      // video, a coluna de miniaturas e quem esta no video grande): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

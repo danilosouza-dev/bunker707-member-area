@@ -38,17 +38,18 @@ import {
   LIVE_ROOM_RULES,
   lowerHandRequested,
   micAskCheck,
-  micAskRecalled,
-  micAskStep,
+  micAskOnSignal,
   micRequestDenied,
   micRequestUnanswered,
   OPEN_SWITCH_GATE,
+  onStageParticipantOf,
   queueRoomEvent,
   reconnectStep,
   recordingSignalOf,
   remoteParticipantIds,
   requeueBatch,
   roomEventsOutcome,
+  signalsForNewFrame,
   startDeviceSwitch,
   startMicAsk,
   takeRoomEventBatch,
@@ -106,7 +107,11 @@ import { useRoomView } from "./use-room-prefs";
 //   (signals.viewShown), e e isso que o botao diz. A coluna de miniaturas segue a largura do iframe (frameWidth, medida
 //   pela sala): com o Palco e 1013 px ou mais ela fica, senao sai (columnWanted); o toggleFilmStrip so vai quando o que
 //   a sala quer difere do ultimo filmstripDisplayChanged (filmstripStep), e um por vez: o seguinte espera a resposta do
-//   motor (o comando inverte a coluna; dois seguidos a deixariam como estava);
+//   motor (o comando inverte a coluna; dois seguidos a deixariam como estava). O que o motor mostra so volta ao padrao
+//   dele (o Palco com a coluna) no primeiro sinal de um iframe novo (signalsForNewFrame): o seguir a visao da equipe
+//   chega com as presencas de quem ja esta na sala, ANTES do videoConferenceJoined, e fica valendo;
+// - quem esta no video grande (o largeVideoChanged, sem dados: o id vem de onStageParticipantOf): o selo do
+//   apresentador no palco so com um moderador ali (presenterBadgeFor);
 //   Nenhuma frase de tela aqui; nada de texto vai para o servidor.
 
 export type LiveEntry = "idle" | "joined" | "joining" | "lost" | "open_failed" | "opening" | "reconnecting";
@@ -370,6 +375,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
    * esperando). O proximo so vai depois do filmstripDisplayChanged ou de uma entrada nova.
    */
   const filmstripSentRef = useRef<boolean | null>(null);
+  /** O ultimo IFrame API que mandou sinal: o primeiro sinal de outro e de um iframe novo (signalsForNewFrame). */
+  const signalFrameRef = useRef<JitsiMeetApi | null>(null);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -569,6 +576,20 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       if ((name === "audioMuteStatusChanged" || name === "videoMuteStatusChanged") && (frame === null || joinedApiRef.current !== frame)) {
         return;
       }
+      if (frame !== null && frame !== signalFrameRef.current) {
+        // O primeiro sinal de um iframe novo (o mudo de antes da entrada ja saiu acima): o motor dele comeca no Palco com
+        // a coluna, e os sinais seguintes (inclusive o seguir a visao da equipe antes da entrada) partem dai. Nenhum
+        // toggleFilmStrip do anterior espera.
+        signalFrameRef.current = frame;
+        filmstripSentRef.current = null;
+        setSignals(signalsForNewFrame);
+      }
+      if (name === "largeVideoChanged") {
+        // So a tela usa (o selo do apresentador; toRoomEvent devolve nulo): o id de quem esta no video grande, lido do
+        // IFrame API, no lugar do payload vazio do motor.
+        handleSignal(name, { id: onStageParticipantOf(frame) });
+        return;
+      }
       if (name === "videoConferenceJoined") {
         // Um iframe novo: nenhuma troca de aparelho, toque esperando, pedido do microfone nem faixa de camera do anterior.
         switchesRef.current = { audioInput: null, videoInput: null };
@@ -585,7 +606,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         droppingRef.current = false;
         joinedGenerationRef.current = mountGenerationRef.current;
         setEntry("joined");
-        // O iframe novo entra no Palco, com a coluna: a Grade guardada volta por comando; nenhum toggleFilmStrip espera.
+        // A Grade guardada volta por comando (o Palco nunca e forcado: desfaria a Grade que a equipe ligou para todos);
+        // nenhum toggleFilmStrip espera.
         filmstripSentRef.current = null;
         const viewCommand = viewOnJoin(viewRef.current);
         if (viewCommand) {
@@ -621,13 +643,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
           return;
         }
       }
-      // A equipe recolheu o microfone deste aluno (docs/31 V2-19): o pedido do Falar acaba sem soltar o "ligado"
-      // guardado, que traria o Microfone de volta a barra (a conferencia do turnMicOn para em "gone").
-      if (micAskRecalled(name, payload, ownIdRef.current)) {
-        micAskRef.current = null;
-      }
-      // O pedido do microfone: o "ligado" espera a faixa abrir (turnMicOn); o mudo o encerra e passa depois dele.
-      const ask = micAskStep(micAskRef.current, name, payload);
+      // O pedido do microfone: o "ligado" espera a faixa abrir (turnMicOn); o mudo o encerra e passa depois dele; a equipe
+      // que recolhe o microfone deste aluno (docs/31 V2-19) o encerra sem soltar o "ligado" guardado, que traria o
+      // Microfone de volta a barra (a conferencia do turnMicOn para em "gone"): micAskOnSignal.
+      const ask = micAskOnSignal(micAskRef.current, name, payload, ownIdRef.current);
       micAskRef.current = ask.next;
       if (ask.release !== null) {
         handleSignal("audioMuteStatusChanged", ask.release);

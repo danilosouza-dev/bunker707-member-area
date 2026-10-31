@@ -210,7 +210,11 @@ const STAGE_GROWS = "flex-1 [&>[data-room-stage]]:aspect-auto [&>[data-room-stag
  * As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco, o painel e os lugares por cima). O
  * desenho normal e o mesmo na Live ao vivo, na gravada e no Replay (docs/31 V2-6): a partir de lg, o corpo com recuo de
  * 16 px, o palco com cantos de 16 px (os do video grande do iframe, que sao fixos) e a barra embaixo, a 12 px; abaixo de
- * lg, o palco na largura e a barra logo abaixo. O `state` muda so as classes: o palco nunca sai do lugar.
+ * lg, em pe, o palco na largura e a barra logo abaixo. Abaixo de lg deitado (o celular de lado, o tablet ou a janela
+ * mais larga que alta, `max-lg:landscape:`) o palco 16:9 na largura empurraria a barra, o balao e o chat para fora da
+ * tela (667 x 375, 960 x 600): o corpo fica em linha como no computador, a coluna do palco cresce, o palco ocupa o que
+ * sobra acima da barra e o painel fica ao lado (288 px, room-panel.tsx). O `state` muda so as classes: o palco nunca
+ * sai do lugar.
  */
 export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKELETON_DEFAULT): RoomSkeleton {
   if (design === "vertical") {
@@ -227,7 +231,7 @@ export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKEL
     };
   }
   return {
-    body: "flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-4 lg:pb-4",
+    body: "flex min-h-0 flex-1 flex-col max-lg:landscape:flex-row lg:flex-row lg:gap-4 lg:px-4 lg:pb-4",
     bubbles: "contents",
     confirm: NORMAL_CONFIRM,
     // A largura (320 px a partir de lg), as abas e o cartao ficam no RoomPanel (room-panel.tsx, docs/31 V2-7).
@@ -235,10 +239,15 @@ export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKEL
     root: "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg",
     sales: "contents",
     stageBox: classes(
-      "relative flex flex-col bg-black lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:rounded-[16px] [&:fullscreen>[data-room-stage]]:aspect-auto [&:fullscreen>[data-room-stage]]:h-full",
+      "relative flex flex-col bg-black max-lg:landscape:flex-1 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:rounded-[16px] [&:fullscreen>[data-room-stage]]:aspect-auto [&:fullscreen>[data-room-stage]]:h-full",
+      // Deitado, o minimo e o mesmo do celular em pe: 96 px com Configurações no lugar do chat, senao nenhum.
+      state.stageMin ? "max-lg:landscape:min-h-24" : "max-lg:landscape:min-h-0",
       state.stageGrows ? classes(state.stageMin ? "min-h-24" : "min-h-0", STAGE_GROWS) : null
     ),
-    stageColumn: classes("relative flex flex-col lg:min-h-0 lg:min-w-0 lg:flex-1 lg:gap-3", state.stageGrows ? "min-h-0 flex-1" : "shrink-0")
+    stageColumn: classes(
+      "relative flex flex-col max-lg:landscape:min-h-0 max-lg:landscape:min-w-0 max-lg:landscape:flex-1 lg:min-h-0 lg:min-w-0 lg:flex-1 lg:gap-3",
+      state.stageGrows ? "min-h-0 flex-1" : "shrink-0"
+    )
   };
 }
 

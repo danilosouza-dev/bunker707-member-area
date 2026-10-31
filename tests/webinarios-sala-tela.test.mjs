@@ -40,6 +40,7 @@ const layout = await import("../src/components/member/webinars/room/room-layout-
 const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 const pollLayer = await import("../src/components/member/webinars/room/room-poll-layer.tsx");
 const pollsTab = await import("../src/components/member/webinars/room/room-polls.tsx");
+const questionsModule = await import("../src/components/member/webinars/room/room-questions.tsx");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const MIN = 60_000;
@@ -236,6 +237,39 @@ test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunke
   }
 });
 
+test("cabecalho no tema claro (V2-3): a marca vira o nome da escola em texto (a logo de Marca e feita para a area escura e sumiria sobre o fundo claro); o traco so com '{n} assistindo'", () => {
+  const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
+  const comMarca = (props = {}) =>
+    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: { logoImage: LOGO } }, createElement(header.RoomHeader, { ...HEADER, ...props })));
+  const marca = (html) => html.slice(html.indexOf("data-room-brand"), html.indexOf("<h1"));
+  const claro = comMarca({ theme: "light" });
+  assert.doesNotMatch(marca(claro), /<img/, "no claro, nenhuma imagem de logo");
+  assert.match(marca(claro), /<span class="[^"]*\btext-room-fg-strong\b[^"]*">Bunker707<\/span>/, "o nome da escola, no texto forte do tema");
+  assert.match(marca(comMarca({ theme: "dark" })), /<img[^>]*alt="Bunker707"/, "no escuro, a logo de Marca");
+
+  // O traco separa "{n} assistindo" do botao de tema: sem o contador (o Replay, a sessao encerrada), ele sai junto.
+  assert.match(comMarca(), /data-testid="room-present"[\s\S]*?<span aria-hidden="true" class="[^"]*\bbg-room-divider\b/);
+  const semContador = comMarca({ presentNow: null });
+  assert.doesNotMatch(semContador, /room-present/);
+  assert.doesNotMatch(semContador, /bg-room-divider/, "sem o contador, sem o traco sozinho");
+});
+
+test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat, a pergunta e o apelido do aceite", () => {
+  const questions = renderToStaticMarkup(
+    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+  );
+  const apelido = render(chat.RoomConsentBox, { defaultDisplayMode: "nickname", onAccept: noop, onCancel: noop });
+  const classes = (tag) => (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  for (const [nome, tag] of [
+    ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
+    ["o apelido", apelido.match(/<input aria-label="Apelido"[^>]*>/)?.[0] ?? apelido.match(/<input[^>]*placeholder="[^"]*"[^>]*>/)?.[0] ?? ""]
+  ]) {
+    const lista = classes(tag);
+    assert.ok(lista.includes("text-base") && lista.includes("lg:text-sm"), `${nome}: ${lista.join(" ")}`);
+    assert.ok(!lista.includes("text-sm"), `${nome}: sem os 14 px abaixo de lg`);
+  }
+});
+
 test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar som, encerrada com Assistir de novo; os atributos do sinal de midia", () => {
   const base = { countdownLabel: "4 min", coverUrl: null, embedUrl: EMBED, iframeRef: noop, muted: true, onUnmute: noop, replayHref: null, sessionId: "s1", state: "waiting", title: "Aula de IA" };
   const waiting = render(stage.RoomStage, base);
@@ -325,8 +359,9 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
   assert.equal(chatMeta(chatItem(html, "3")), "Danilo · Apresentador · 20:00");
   assert.equal(chatMeta(chatItem(html, "4")), "Assistente · Assistente · 20:00");
   assert.equal(chatMeta(chatItem(html, "6")), "Convidada · 20:00", "o convidado sem papel");
-  // A pendente: "Aguardando a equipe" como texto na linha de baixo (e lido: fica fora do aria-hidden).
-  assert.equal(chatMeta(chatItem(html, "5")), "Ana S. · 20:43 · Aguardando a equipe");
+  // A pendente: "Aguardando a equipe" como texto na linha de baixo (e lido: fica fora do aria-hidden). A minha mensagem
+  // diz "Você" no lugar do meu nome (o protótipo: "Você · 20:43").
+  assert.equal(chatMeta(chatItem(html, "5")), "Você · 20:43 · Aguardando a equipe");
   assert.match(chatItem(html, "5"), /<\/span><span aria-hidden="true">·<\/span><span class="[^"]*">Aguardando a equipe<\/span><\/p>/);
 
   // O balao primeiro; a linha de baixo e so para quem ve; o leitor de tela ouve o autor antes do texto.
@@ -341,7 +376,10 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
   // A minha: a direita (a linha invertida, o avatar a direita), no balao do meu tema.
   const minha = chatItem(html, "5");
   assert.match(minha, /^<li class="[^"]*\bflex-row-reverse\b[^"]*" data-mine="" data-room-message="5">/);
-  assert.match(minha, /<p class="[^"]*\bbg-room-bubble-mine-bg\b[^"]*\btext-room-bubble-mine-fg\b[^"]*"><span class="sr-only">Ana S\., 20:43: <\/span>texto 5<\/p>/);
+  assert.match(minha, /<p class="[^"]*\bbg-room-bubble-mine-bg\b[^"]*\btext-room-bubble-mine-fg\b[^"]*"><span class="sr-only">Você, 20:43: <\/span>texto 5<\/p>/);
+  // O avatar continua com as minhas iniciais (do nome de exibicao), so o nome escrito vira "Você".
+  assert.match(minha, /<span aria-hidden="true" class="[^"]*\bsize-7\b[^"]*"><span class="[^"]*">AS<\/span><\/span>/);
+  assert.doesNotMatch(minha, /Ana S\./, "o meu nome de exibicao nao aparece escrito na minha mensagem");
   assert.equal((html.match(/data-mine=""/g) ?? []).length, 1, "so a minha");
   assert.doesNotMatch(marina, /flex-row-reverse/);
 
@@ -480,7 +518,7 @@ test("a barra da gravada e do Replay (V2-6): Reagir abre as seis reacoes num pai
   assert.deepEqual(nomes(barra()), ["Sair", "Reagir", "Som", "Tela cheia", "Esconder o chat"]);
   assert.deepEqual(nomes(barra({ kind: "replay" })), ["Sair", "Reagir", "Tela cheia", "Esconder o chat"], "o Replay tem a barra da Bunny para o som");
   assert.deepEqual(nomes(barra({ fullscreenEnabled: false, kind: "replay" })), ["Sair", "Reagir", "Esconder o chat"], "sem tela cheia no navegador, sem o botao");
-  assert.match(barra({ panelOpen: false }), /<button aria-controls="room-panel" aria-label="Mostrar o chat" aria-pressed="false"/);
+  assert.match(barra({ panelOpen: false }), /<button aria-controls="room-panel" aria-expanded="false" aria-label="Mostrar o chat"/);
   assert.match(barra({ soundOn: true }), /<button aria-label="Som" aria-pressed="true"/);
   // Fechado, as reacoes nao estao na tela; aberto, as seis, com o nome de cada uma e 44 px.
   assert.doesNotMatch(barra(), /id="room-reactions"|aria-label="Curtir"/);
@@ -574,11 +612,13 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
     webinarHref: "/x"
   });
   assert.match(withPoll, />Enquetes</);
-  // A enquete aberta sem resposta abre no meio do palco (V2-10), dentro da caixa do palco; o card do chat so com ela
-  // deixada para depois.
+  // A enquete aberta sem resposta abre no meio do palco (V2-10) so depois da hidratacao: ela depende do que esta
+  // guardado no navegador (o "depois"), e o HTML do servidor sai sem ela e sem o card do chat, com a regiao viva vazia
+  // na caixa do palco (useRoomHydrated; o e2e confere a camada). Sem isso, a deixada para depois piscava a cada carga.
   const caixaDoPalco = withPoll.slice(withPoll.indexOf('data-room-slot="stage-box"'), withPoll.indexOf('data-testid="room-panel"'));
-  assert.match(caixaDoPalco, /<div aria-labelledby="([^"]+)" class="[^"]*" data-room-stage-poll="answer"[^>]*role="dialog"><p [^>]*>Enquete · resposta única<\/p><h2 [^>]*id="\1">Gostou\?<\/h2>/);
-  assert.doesNotMatch(withPoll, /Responder agora|data-room-poll-later/, "fora do 'depois', nenhum card no chat");
+  assert.match(caixaDoPalco, /<p aria-live="polite" class="sr-only" data-room-poll-said=""><\/p>/);
+  assert.doesNotMatch(withPoll, /data-room-stage-poll|data-room-poll-layer/, "nenhuma enquete no palco no HTML do servidor");
+  assert.doesNotMatch(withPoll, /Responder agora|data-room-poll-later/, "nem o card do chat");
   // So uma enquete encerrada com o resultado: sem a aba (o resultado aparece no palco, V2-10).
   const encerrada = render(room.WebinarRoom, {
     coverUrl: null,
@@ -605,8 +645,10 @@ const camada = (props) => render(pollLayer.RoomPollLayer, { onAnswer: async () =
 
 test("a enquete no meio do palco (V2-10): o rotulo pelo tipo, a pergunta em h2, opcoes de 48 px, Responder depois e Enviar resposta; um dialogo sem aria-modal que nao pega o foco e se anuncia", () => {
   const html = camada({ stage: { mode: "answer", poll: enquete() } });
-  // A regiao viva fica antes e sempre montada: ela diz "Enquete aberta" quando a enquete abre sozinha.
-  assert.match(html, /^<p aria-live="polite" class="sr-only" data-room-poll-said="">Enquete aberta<\/p>/);
+  // A regiao viva fica antes e sempre montada: ela diz "Enquete aberta: {pergunta}" quando a enquete abre sozinha (com a
+  // pergunta, a segunda enquete que entra no lugar da primeira muda o texto e tambem e anunciada).
+  assert.match(html, /^<p aria-live="polite" class="sr-only" data-room-poll-said="">Enquete aberta: Gostou\?<\/p>/);
+  assert.match(camada({ stage: { mode: "answer", poll: enquete({ id: "p2", question: "E agora?" }) } }), /data-room-poll-said="">Enquete aberta: E agora\?<\/p>/);
   // O veu so sobre o palco a partir de lg (45 %); abaixo de lg, a folha presa embaixo da tela.
   const veu = (html.match(/<div class="([^"]*)" data-room-poll-layer="answer">/)?.[1] ?? "").split(" ");
   for (const classe of ["z-30", "lg:absolute", "lg:inset-0", "lg:bg-black/45", "max-lg:fixed", "max-lg:inset-x-0", "max-lg:bottom-0"]) {
@@ -643,7 +685,7 @@ test("a enquete no meio do palco (V2-10): o rotulo pelo tipo, a pergunta em h2, 
 
 test("o resultado compartilhado no mesmo lugar (V2-10): as barras com a porcentagem, o total de respostas e Fechar; sem enquete, so a regiao viva vazia", () => {
   const html = camada({ stage: { mode: "result", poll: enquete({ myOptionIds: ["o1"], results: { counts: { o1: 3, o2: 1 }, total: 4 }, status: "closed" }) } });
-  assert.match(html, /data-room-poll-said="">Enquete · resultado<\/p>/);
+  assert.match(html, /data-room-poll-said="">Enquete · resultado: Gostou\?<\/p>/);
   assert.match(html, /data-room-stage-poll="result" role="dialog"><p [^>]*>Enquete · resultado<\/p><h2 [^>]*>Gostou\?<\/h2>/);
   const barras = [...html.matchAll(/<li class="[^"]*"><span aria-hidden="true" class="absolute inset-y-0 left-0 bg-room-poll-bar" style="width:(\d+)%"><\/span><span class="[^"]*">([^<]+)<\/span><span class="[^"]*">(\d+)%<\/span><\/li>/g)];
   assert.deepEqual(barras.map(([, largura, label, texto]) => [label, largura, texto]), [["Sim", "75", "75"], ["Ainda não", "25", "25"]]);
@@ -673,12 +715,13 @@ test("o card do chat (V2-10): 'Enquete aberta · você deixou para depois', a pe
   assert.match(render(pollsTab.RoomPollsTab, { onAnswer: async () => undefined, polls: [], readOnly: false }), /Nenhuma enquete aberta\./);
 });
 
-test("a gravada com enquete aberta: no desenho normal ela abre no palco; no vertical 9:16 nada muda (o card de antes abre a aba Enquetes da gaveta)", () => {
+test("a gravada com enquete aberta: no desenho normal ela abre no palco depois da hidratacao; no vertical 9:16 nada muda (o card de antes abre a aba Enquetes da gaveta)", () => {
   const comEnquete = payload({ polls: [enquete()] });
   const normal = render(room.WebinarRoom, { coverUrl: null, payload: comEnquete, readOnly: false, webinarHref: "/x" });
   const caixaDoPalco = normal.slice(normal.indexOf('data-room-slot="stage-box"'), normal.indexOf('data-testid="room-panel"'));
-  assert.match(caixaDoPalco, /data-room-poll-layer="answer"/);
-  assert.match(caixaDoPalco, /<h2 [^>]*>Gostou\?<\/h2>/);
+  // No desenho normal a camada fica na caixa do palco (a regiao viva ja esta la), e so entra depois da hidratacao.
+  assert.match(caixaDoPalco, /data-room-poll-said=""/);
+  assert.doesNotMatch(caixaDoPalco, /data-room-poll-layer/, "o HTML do servidor nao sabe o que ficou para depois");
 
   const deitado = render(room.WebinarRoom, { coverUrl: null, design: "vertical", payload: comEnquete, readOnly: false, webinarHref: "/x" });
   assert.doesNotMatch(deitado, /data-room-poll-layer|data-room-poll-said|Responder depois/, "o vertical nao tem a enquete no palco");
@@ -725,7 +768,7 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   // F4 (V2-6): o esqueleto e o da live (roomSkeleton): o caminho corpo > coluna > caixa continua, com o palco 16:9.
   const esqueleto = vertical.roomSkeleton("normal", { cinema: false, panelShown: true, stageGrows: false });
   assert.ok(
-    html.includes(`<div class="${esqueleto.body}" data-room-slot="body"><div class="${esqueleto.stageColumn}" data-room-slot="stage-column"><div class="${esqueleto.stageBox.replaceAll("&", "&amp;").replaceAll(">", "&gt;")}" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"`),
+    html.includes(`<div class="${esqueleto.body}" data-room-slot="body"><div class="${esqueleto.stageColumn}" data-room-slot="stage-column"><div class="${esqueleto.stageBox.replaceAll("&", "&amp;").replaceAll(">", "&gt;")}" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full max-lg:landscape:aspect-auto max-lg:landscape:h-full lg:aspect-auto lg:h-full"`),
     "o palco 16:9 na largura, no caminho de sempre"
   );
   assert.match(
@@ -745,12 +788,12 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   const barra = coluna.slice(coluna.indexOf('data-testid="recorded-controls"'));
   assert.deepEqual([...barra.matchAll(/data-room-bar-item="([a-z]+)"/g)].map(([, item]) => item), ["leave", "react", "sound", "panel"], "sem a Tela cheia no servidor (so com o navegador que deixa)");
   assert.match(barra, /<button aria-controls="room-reactions" aria-expanded="false" aria-label="Reagir"/);
-  assert.match(barra, /<button aria-controls="room-panel" aria-label="Esconder o chat" aria-pressed="true"/);
+  assert.match(barra, /<button aria-controls="room-panel" aria-expanded="true" aria-label="Esconder o chat"/);
   // O Som da gravada: o video comeca mudo (aria-pressed falso); antes do zero, sem player, nao ha o que ligar.
   assert.match(barra, /<button aria-label="Som" aria-pressed="false" class="[^"]*" data-room-bar-item="sound" title="Som" type="button">/);
   const antes = render(room.WebinarRoom, { coverUrl: null, payload: payload({}, { offsetMs: -4 * MIN, roomPhase: "waiting", scheduledAt: new Date(T0 + 4 * MIN).toISOString() }), readOnly: false, webinarHref: "/x" });
   assert.match(antes, /<button aria-label="Som" aria-pressed="false"[^>]*data-room-bar-item="sound" disabled=""/);
-  assert.match(barra, /<button class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b[^"]*"[^>]*data-room-bar-item="leave" title="Sair"><svg[\s\S]*?<span class="sr-only xl:not-sr-only">Sair<\/span><\/button>/, "o Sair da barra a partir de lg, com o nome no title entre lg e xl (so o icone)");
+  assert.match(barra, /<button class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b[^"]*"[^>]*data-room-bar-item="leave"><svg[\s\S]*?<\/svg>Sair<\/button>/, "o Sair da barra a partir de lg, com o nome visivel em toda largura (a pilula cabe a 1024 px)");
   assert.match(html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /\blg:hidden" type="button">[\s\S]*?Sair<\/button>/, "o Sair do cabecalho so abaixo de lg");
   assert.match(html, /<aside class="[^"]*" data-testid="room-panel" id="room-panel">/, "o painel do chat que o balao controla");
   assert.doesNotMatch(html, /data-room-vertical|data-room-drawer|Comente…|Perguntas e enquetes/, "nada do desenho vertical");

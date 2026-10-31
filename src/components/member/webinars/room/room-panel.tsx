@@ -1,11 +1,11 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomMessage } from "@/lib/webinar-room-client";
-import { panelUnreadCount, panelUnreadMark, panelUnreadSeen, type PanelUnreadMark, type RoomKind, type RoomPanelTab } from "./room-layout-model";
+import { panelUnreadCount, panelUnreadMark, panelUnreadSeen, tabScrollLeft, type PanelUnreadMark, type RoomKind, type RoomPanelTab } from "./room-layout-model";
 import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
 
 // O painel da sala (docs/31 V2-7 e V2-8), o mesmo na Live ao vivo, na gravada e no Replay (desenho normal): a partir
@@ -15,6 +15,10 @@ import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
 // abas em pilula no topo (44 px, abas de 34 px), sem o X (o balao da barra, logo acima, abre e fecha) e sem a aba de
 // baixo que abria e fechava o painel. Fechado, o aside fica escondido (hidden) e montado: o rascunho, o aceite e a
 // aba continuam; trocar de aba desmonta a de antes. As abas saem da regra unica panelTabsFor (room-layout-model.ts).
+// Cada aba tem a largura do rotulo inteiro (nunca reticencias: "Participantes" nao cabia nos 85 px de um terco da
+// linha) e cresce para encher a linha; quando as quatro nao cabem (a enquete aberta no painel de 320 px), a linha rola
+// de lado, sem barra, e a aba escolhida entra inteira na vista (tabScrollLeft). Abaixo de lg deitado o painel fica ao
+// lado do palco, com 288 px (roomSkeleton).
 // O contador de mensagens novas do balao (useRoomPanelUnread) conta o que chegou desde que o painel fechou. Cores pelos
 // tokens do tema da sala; o acento so no ponto da aba Enquetes com enquete aberta.
 
@@ -58,12 +62,41 @@ function tabLabel(tab: RoomPanelTab, kind: RoomKind) {
 
 export function RoomPanel({ children, className, closable, contentClassName, firstFocus, id, kind, onClose, onTab, open, pollOpen, tab, tabs }: RoomPanelProps) {
   const copy = WEBINAR_COPY.salaV2.painel;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const tabsKey = tabs.join(" ");
+
+  // A aba escolhida inteira na vista quando a linha rola (as quatro abas): ao trocar de aba, ao mudar a lista e ao abrir.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!list || !selected || !open) {
+      return;
+    }
+    const listBox = list.getBoundingClientRect();
+    const tabBox = selected.getBoundingClientRect();
+    const next = tabScrollLeft({
+      listWidth: list.clientWidth,
+      scrollLeft: list.scrollLeft,
+      tabLeft: tabBox.left - listBox.left - list.clientLeft + list.scrollLeft,
+      tabWidth: tabBox.width
+    });
+    if (next !== list.scrollLeft) {
+      list.scrollLeft = next;
+    }
+  }, [open, tab, tabsKey]);
+
   return (
-    <aside className={cn(className, "gap-2 lg:w-80 lg:flex-none lg:gap-3", closable ? null : "pt-2 lg:pt-0")} data-testid="room-panel" hidden={!open} id={id}>
+    <aside
+      className={cn(className, "gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3", closable ? null : "pt-2 lg:pt-0")}
+      data-testid="room-panel"
+      hidden={!open}
+      id={id}
+    >
       <div className="flex shrink-0 items-center gap-2 px-2 lg:px-0">
         <div
           aria-label={copy.rotulo}
-          className="flex h-11 min-w-0 flex-1 items-center gap-0.5 rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 lg:h-auto lg:gap-1"
+          className="flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&::-webkit-scrollbar]:hidden"
+          ref={listRef}
           role="tablist"
         >
           {tabs.map((value) => (
@@ -71,7 +104,7 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
               aria-controls={`room-tab-${value}`}
               aria-selected={tab === value}
               className={cn(
-                "h-[34px] min-w-0 flex-1 truncate rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px]",
+                "h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px]",
                 ROOM_FOCUS,
                 tab === value ? "bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]" : "font-semibold text-room-fg-muted hover:text-room-fg-strong"
               )}

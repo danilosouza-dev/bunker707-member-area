@@ -12,9 +12,10 @@ import { RoomButton, RoomIconButton } from "./room-ui";
 
 // O cabecalho da Sala (docs/31 V2-3 e V2-18; docs/30 §1.3), o mesmo na Live ao vivo, na gravada e no Replay, sem fundo
 // nem borda (a sala aparece por tras), 56 px. A partir de lg (o ponto em que a sala vira computador, DESKTOP em
-// live-room.tsx): a logo de Marca (ou "Bunker707" sem logo, sem link: sair passa pela confirmacao, askToLeave), o
+// live-room.tsx): a logo de Marca (ou "Bunker707" sem logo, ou no tema claro, sem link: sair passa pela confirmacao,
+// askToLeave; a logo de Marca e uma so, desenhada para a area escura, e a padrao e branca), o
 // titulo em 22/800 com reticencias e, embaixo, a linha da data ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo
-// Souza", room-layout-model.ts); a direita, "{n} assistindo", um traco e o botao de tema. Abaixo de lg: o titulo em
+// Souza", room-layout-model.ts); a direita, "{n} assistindo", um traco (so com o contador) e o botao de tema. Abaixo de lg: o titulo em
 // 15/800, a linha "com Danilo Souza · 128 assistindo", o tema a partir de sm (abaixo de sm o cabecalho nao tem largura,
 // V2-18, e na live o tema fica na linha Tema do painel Configurações) e o Sair. Sem selos: "Ao vivo", "Gravando",
 // "Sessão das 20:00", "Replay" e "Aguardando o apresentador" ficam no palco (V2-4, room-stage-badges.tsx). "{n}
@@ -58,10 +59,15 @@ export function RoomElapsed({ getOffsetMs }: { getOffsetMs?: () => number }) {
   return <span className="tabular-nums">{label}</span>;
 }
 
-/** A marca no canto da sala, so a partir de lg: a logo de Marca (ou o nome, sem logo), sem link. */
-function RoomBrand() {
+/**
+ * A marca no canto da sala, so a partir de lg: a logo de Marca (ou o nome, sem logo), sem link. No tema claro, sempre o
+ * nome: a logo de Marca e uma so, feita para a area escura (a padrao e toda branca), e sumiria sobre o fundo claro, como
+ * no tom Claro do login (docs/12).
+ */
+function RoomBrand({ theme }: { theme: RoomTheme }) {
   const copy = WEBINAR_COPY.salaV2.cabecalho;
-  const logoImage = usePlatformLogoImage();
+  const platformLogo = usePlatformLogoImage();
+  const logoImage = theme === "light" ? null : platformLogo;
 
   return (
     <div className="hidden shrink-0 items-center lg:flex" data-room-brand="logo">
@@ -97,7 +103,7 @@ export function RoomHeader({ dateLine, leaveInBar = false, mobileLine, onLeave, 
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2.5 pl-4 pr-2 sm:pr-4 lg:gap-7 lg:px-4">
-      <RoomBrand />
+      <RoomBrand theme={theme} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:gap-1">
         <h1 className="min-w-0 truncate text-[15px] font-extrabold leading-5 text-room-fg-strong lg:text-[22px] lg:leading-7">{title}</h1>
         {dateLine ? (
@@ -117,7 +123,7 @@ export function RoomHeader({ dateLine, leaveInBar = false, mobileLine, onLeave, 
           {copy.assistindo(presentNow)}
         </p>
       ) : null}
-      <span aria-hidden="true" className="hidden h-7 w-px shrink-0 bg-room-divider lg:block" />
+      {presentNow !== null ? <span aria-hidden="true" className="hidden h-7 w-px shrink-0 bg-room-divider lg:block" /> : null}
       <RoomThemeButton className="hidden sm:grid" onToggle={onToggleTheme} theme={theme} />
       <RoomButton className={leaveInBar ? "lg:hidden" : undefined} onClick={onLeave} variant="accent">
         <LogOut aria-hidden="true" />

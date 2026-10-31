@@ -62,9 +62,21 @@ export function resumePoll(polls: DeferredPolls, pollId: string): DeferredPolls 
   return { later: polls.later.filter((id) => id !== pollId), seen: [...polls.seen] };
 }
 
-/** O "Fechar" do resultado no palco: ele nao volta a abrir (o resultado continua na aba Enquetes). */
+/**
+ * O "Fechar" do resultado no palco (ou o Esc): ele nao volta a abrir no palco. Na aba Enquetes ele so continua com a
+ * enquete ainda aberta (a aba some sem enquete aberta, panelTabsFor); a gaveta do vertical o mostra sempre.
+ */
 export function markPollResultSeen(polls: DeferredPolls, pollId: string): DeferredPolls {
   return { later: [...polls.later], seen: withId(polls.seen, pollId) };
+}
+
+/**
+ * Os resultados que ja estavam compartilhados quando a sala abriu (as enquetes do HTML da pagina): eles nao abrem no
+ * palco, como se ja tivessem sido vistos. Quem entra aos 40 minutos nao recebe, um por um, todos os resultados antigos
+ * no meio do palco, por cima do Entrar na sala; so o resultado compartilhado com o aluno ja na sala abre (docs/31 §8).
+ */
+export function resultsOnArrival(polls: readonly StudentPoll[]): string[] {
+  return polls.filter((poll) => poll.results !== null).map((poll) => poll.id);
 }
 
 /**

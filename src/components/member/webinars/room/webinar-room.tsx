@@ -18,11 +18,11 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomMobileLine, roomPanelShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomEscapeStep, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
-import { deferPoll, deferredPollCard, markPollResultSeen, resumePoll, stagePollFor } from "./room-poll-model";
+import { deferPoll, deferredPollCard, markPollResultSeen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -34,7 +34,7 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
-import { useDeferredPolls, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
 import { RoomDock } from "./vertical/room-dock";
@@ -81,6 +81,10 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // layer.tsx), mesmo com o painel fechado; "Responder depois" recolhe para o card do chat e o resultado compartilhado
 // aparece no mesmo lugar. As enquetes sao lidas pela sala (useRoomPolls), e a aba so desenha. O vertical continua com o
 // card de antes, que abre a aba Enquetes da gaveta.
+// A correcao final da fase 1: abaixo de lg deitado a sala fica em linha (roomSkeleton); a capa "Ativar som" volta no
+// vertical com o som desligado (soundCoverShown); a Tela cheia da caixa do palco sai com a barra (leaveStageFullscreen);
+// a enquete e o card do chat so depois da hidratacao; o Esc fecha a camada de cima primeiro (roomEscapeStep); a
+// confirmacao de Sair leva o foco ao Voltar e o devolve a quem a abriu (useRoomConfirmFocus).
 
 function subscribeNothing() {
   return () => undefined;
@@ -234,6 +238,70 @@ export function returnFocusFromPoll(root: Pick<HTMLElement, "contains" | "queryS
   return true;
 }
 
+/**
+ * A barra saiu (o celular girou para em pe e a sala virou o vertical 9:16, ou a sessao acabou) com a caixa do palco em
+ * tela cheia (a Tela cheia da barra, V2-6): a tela cheia sai junto, senao o topo do vertical (o Sair) e a gaveta, que
+ * ficam fora da caixa, sumiriam atras dela, e o aluno nao teria como sair. So a propria caixa: a tela cheia do player
+ * da Bunny no Replay (o iframe, dentro da caixa) e do aluno e fica. Devolve se pediu a saida.
+ */
+export function leaveStageFullscreen(doc: { exitFullscreen?: () => Promise<void>; fullscreenElement: Element | null } | null, box: Element | null): boolean {
+  if (!doc || !box || doc.fullscreenElement !== box || typeof doc.exitFullscreen !== "function") {
+    return false;
+  }
+  void doc.exitFullscreen().catch(() => undefined);
+  return true;
+}
+
+/**
+ * A confirmacao "Sair da sala?" fechou (Voltar, Esc) com o foco nela, que saiu junto e caiu no body: o foco volta para
+ * quem a abriu (o Sair da barra, do cabecalho ou do topo do vertical; o controle em que estava o Esc), se ele continua
+ * na tela; senao para o primeiro controle da sala na tela (roomFocusTarget). No body, o Esc, os atalhos e a trava do Tab
+ * deixariam de valer. Um foco que continua na sala fica onde esta. Devolve se moveu o foco.
+ */
+export function returnFocusFromConfirm(
+  root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null,
+  active: Element | null,
+  opener: HTMLElement | null
+): boolean {
+  if (!root || (active !== null && root.contains(active))) {
+    return false;
+  }
+  const target = opener && root.contains(opener) && focusShown(opener) ? opener : roomFocusTarget(root);
+  if (!target) {
+    return false;
+  }
+  target.focus();
+  return true;
+}
+
+/**
+ * O lugar do foco quando a confirmacao "Sair da sala?" abre e fecha, o mesmo nas duas salas: ao abrir, o foco vai ao
+ * Voltar dela (o caminho seguro: o Enter seguinte nao tira ninguem da live); ao fechar, volta para quem a abriu
+ * (returnFocusFromConfirm). `remember` guarda quem a abriu, chamado antes de abrir.
+ */
+export function useRoomConfirmFocus(rootRef: RefObject<HTMLElement | null>, open: boolean): () => void {
+  const openerRef = useRef<HTMLElement | null>(null);
+  const openRef = useRef(open);
+  useLayoutEffect(() => {
+    const was = openRef.current;
+    openRef.current = open;
+    const root = rootRef.current;
+    if (!root || was === open) {
+      return;
+    }
+    if (open) {
+      root.querySelector<HTMLElement>("[data-room-confirm] [data-room-first-focus]")?.focus();
+      return;
+    }
+    returnFocusFromConfirm(root, document.activeElement, openerRef.current);
+    openerRef.current = null;
+  }, [open, rootRef]);
+  return useCallback(() => {
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement && rootRef.current?.contains(active) ? active : null;
+  }, [rootRef]);
+}
+
 /** O Tab preso no dialogo: do ultimo volta ao primeiro (e o Shift+Tab ao contrario). */
 export function trapRoomFocus(event: Pick<ReactKeyboardEvent, "key" | "preventDefault" | "shiftKey">, root: HTMLElement | null) {
   if (event.key !== "Tab" || !root) {
@@ -282,7 +350,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<RoomPanelTab>("chat");
   const [muted, setMuted] = useState(kind === "simulated");
-  /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" nao volta. */
+  /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" so volta sem a barra (soundCoverShown). */
   const [soundTouched, setSoundTouched] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [fullscreenOn, setFullscreenOn] = useState(false);
@@ -391,6 +459,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, sessionId, sessionPolls: session.polls, webinarId });
   const polls = roomPolls.polls;
   const [deferred, setDeferred] = useDeferredPolls(sessionId);
+  // O que depende do guardado (o "depois", os resultados vistos) so depois da hidratacao: sem isso, a enquete deixada
+  // para depois piscaria no palco a cada carga. Os resultados que ja vinham na pagina nao abrem no palco.
+  const hydrated = useRoomHydrated();
+  const [arrivedResults] = useState(() => resultsOnArrival(payload.polls));
   /**
    * O pedido de foco na enquete do palco (Responder agora): a enquete para responder (a mesma chave do palco) e um
    * contador que muda a cada pedido. O resultado da mesma enquete, depois, abre sem pegar o foco.
@@ -418,21 +490,24 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const firstFocus = firstFocusTarget({ panelShown });
   // A enquete no meio do palco so no desenho normal com a sala de pe (como a barra); o card do chat, a deixada para
   // depois.
-  const stagePoll = barShown ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: deferred.seen }) : null;
+  const stagePoll = barShown && hydrated ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: [...deferred.seen, ...arrivedResults] }) : null;
   const stagePollKey = stagePoll ? `${stagePoll.mode}:${stagePoll.poll.id}` : null;
-  const laterPoll = deferredPollCard({ deferredIds: deferred.later, polls });
+  const laterPoll = hydrated ? deferredPollCard({ deferredIds: deferred.later, polls }) : null;
 
   const leave = useCallback(() => {
     router.push(webinarHref);
   }, [router, webinarHref]);
 
+  // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.
+  const rememberLeaveOpener = useRoomConfirmFocus(rootRef, confirmLeave);
   const askToLeave = useCallback(() => {
     if (live && !unavailable) {
+      rememberLeaveOpener();
       setConfirmLeave(true);
       return;
     }
     leave();
-  }, [leave, live, unavailable]);
+  }, [leave, live, rememberLeaveOpener, unavailable]);
 
   // Foco preso e Esc (docs/30 §1.7): o dialogo e o unico lugar do teclado enquanto esta aberto.
   useRoomDialogLock(rootRef, true);
@@ -445,12 +520,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     }
   }, [unavailable]);
 
-  // A barra saiu (a sessao encerrada, o celular em pe) com o foco nela: o foco volta para a sala, nunca fica no body.
+  // A barra saiu (a sessao encerrada, o celular em pe) com o foco nela: o foco volta para a sala, nunca fica no body; e a
+  // Tela cheia da caixa do palco sai junto (o Sair do topo do vertical e a gaveta ficam fora dela).
   const barShownRef = useRef(barShown);
   useLayoutEffect(() => {
     const was = barShownRef.current;
     barShownRef.current = barShown;
     if (was && !barShown) {
+      leaveStageFullscreen(document, stageBoxRef.current);
       refocusRoom(rootRef.current, document.activeElement);
     }
   }, [barShown]);
@@ -522,10 +599,18 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.stopPropagation();
-      if (confirmLeave) {
+      // A camada de cima primeiro (roomEscapeStep): a confirmacao, as reacoes, a enquete no palco; so entao o Sair.
+      const step = roomEscapeStep({ confirmLeave, popoverOpen: reactionsShown, stagePoll: stagePoll?.mode ?? null });
+      if (step === "close_confirm") {
         setConfirmLeave(false);
-      } else if (reactionsShown) {
+      } else if (step === "close_popovers") {
         closeReactions();
+      } else if (step === "poll_later" && stagePoll) {
+        setDeferred(deferPoll(deferred, stagePoll.poll.id));
+        setPollFocus(null);
+      } else if (step === "poll_seen" && stagePoll) {
+        setDeferred(markPollResultSeen(deferred, stagePoll.poll.id));
+        setPollFocus(null);
       } else {
         askToLeave();
       }
@@ -546,7 +631,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     player.unmute();
   }
 
-  /** O Som da barra (so na gravada): o mesmo mudo do player; desligar nao traz de volta a capa "Ativar som". */
+  /** O Som da barra (so na gravada): o mesmo mudo do player; desligar so traz de volta a capa "Ativar som" sem a barra (o vertical). */
   function toggleSound() {
     if (muted) {
       unmute();
@@ -617,7 +702,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       coverUrl={coverUrl}
       embedUrl={session.video?.embedUrl ?? null}
       iframeRef={setIframe}
-      muted={muted && !soundTouched && kind === "simulated"}
+      muted={soundCoverShown({ barShown, kind, muted, soundTouched })}
       onUnmute={unmute}
       replayHref={replayHref}
       sessionId={sessionId}
@@ -658,6 +743,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         pinned={session.pinned}
         readOnly={readOnly}
         sessionId={sessionId}
+        shown={vertical || panelShown}
         slowUntilMs={chat.slowUntilMs}
         timeKind={kind}
         webinarId={webinarId}
@@ -728,13 +814,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       )}
 
       {confirmLeave ? (
-        <div className={skeleton.confirm} role="alertdialog" aria-label={copy.sairConfirmar}>
+        <div className={skeleton.confirm} data-room-confirm="" role="alertdialog" aria-label={copy.sairConfirmar}>
           <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
           <div className="flex gap-2">
-            <RoomButton data-room-first-focus onClick={leave} size="sm" variant="danger">
+            <RoomButton onClick={leave} size="sm" variant="danger">
               {copy.sair}
             </RoomButton>
-            <RoomButton onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
+            <RoomButton data-room-first-focus onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
               {copy.voltar}
             </RoomButton>
           </div>

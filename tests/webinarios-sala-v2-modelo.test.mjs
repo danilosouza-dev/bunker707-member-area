@@ -285,6 +285,9 @@ test("liveSkeletonState (V2-6): o palco da live cresce com o chat fora da tela, 
   assert.deepEqual(takeover, { cinema: false, panelShown: false, stageGrows: true, stageMin: true });
   const caixa = classesDe(vertical.roomSkeleton("normal", takeover).stageBox);
   assert.ok(caixa.includes("min-h-24"), "a caixa do palco com no minimo 96 px");
+  // Deitado (o corpo em linha abaixo de lg), o mesmo minimo: sem ele, o min-h-0 do desenho deitado deixava a caixa com
+  // 0 px a 667 x 375 com Configurações aberto.
+  assert.ok(caixa.includes("max-lg:landscape:min-h-24") && !caixa.includes("max-lg:landscape:min-h-0"), "o minimo tambem deitado");
   assert.ok(!caixa.includes("min-h-0"), "sem o min-h-0 que deixava a caixa encolher");
   assert.ok(caixa.includes("flex-1") && caixa.includes("lg:min-h-0"), "cresce na coluna; a partir de lg nao ha takeover");
   assert.ok(classesDe(vertical.roomSkeleton("normal", takeover).stageColumn).includes("flex-1"), "a coluna ocupa o corpo (o chat esta escondido)");
@@ -715,12 +718,15 @@ test("tileViewChanged e filmstripDisplayChanged: a sala escuta, mas nada vai ao 
   assert.equal(jitsi.toRoomEvent("filmstripDisplayChanged", { visible: false }, contexto), null);
 });
 
-test("applyLiveSignal: viewShown segue o tileViewChanged (a Grade da equipe tambem) e filmstripVisible o filmstripDisplayChanged; ao entrar, Palco com a coluna; fora do iframe, sem coluna", () => {
+test("applyLiveSignal: viewShown segue o tileViewChanged (a Grade da equipe tambem) e filmstripVisible o filmstripDisplayChanged; o iframe novo comeca no Palco com a coluna; a entrada e a saida nao apagam o que o motor mostra", () => {
   const sinal = (state, name, payload) => model.applyLiveSignal(state, { name, ownId: "eu", payload });
   assert.equal(model.INITIAL_LIVE_SIGNALS.viewShown, "stage");
-  assert.equal(model.INITIAL_LIVE_SIGNALS.filmstripVisible, false, "sem iframe, sem coluna");
+  assert.equal(model.INITIAL_LIVE_SIGNALS.onStageId, null, "ninguem no video grande para nos ainda");
 
-  let estado = sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" });
+  // O primeiro sinal de um iframe novo (signalsForNewFrame): o padrao do motor, o Palco com a coluna na tela.
+  const novo = model.signalsForNewFrame(model.INITIAL_LIVE_SIGNALS);
+  assert.deepEqual([novo.viewShown, novo.filmstripVisible, novo.onStageId], ["stage", true, null]);
+  let estado = sinal(novo, "videoConferenceJoined", { id: "eu" });
   assert.equal(estado.viewShown, "stage", "o iframe entra no Palco");
   assert.equal(estado.filmstripVisible, true, "com a coluna na tela");
 
@@ -741,30 +747,90 @@ test("applyLiveSignal: viewShown segue o tileViewChanged (a Grade da equipe tamb
   const depois = sinal(sinal(cheio, "tileViewChanged", { enabled: true }), "filmstripDisplayChanged", { visible: false });
   assert.deepEqual({ ...depois, filmstripVisible: cheio.filmstripVisible, viewShown: cheio.viewShown }, cheio);
 
-  // Uma entrada nova (Tentar de novo, a volta da queda) recomeca no Palco com a coluna; a saida tira a coluna.
+  // Um iframe novo (Tentar de novo, a remontagem depois da queda) recomeca no Palco com a coluna, mesmo vindo da Grade.
   const naGrade = sinal(sinal(estado, "tileViewChanged", { enabled: true }), "filmstripDisplayChanged", { visible: false });
-  const outraEntrada = sinal(naGrade, "videoConferenceJoined", { id: "eu-2" });
-  assert.deepEqual([outraEntrada.viewShown, outraEntrada.filmstripVisible], ["stage", true]);
+  const remontado = model.signalsForNewFrame(naGrade);
+  assert.deepEqual([remontado.viewShown, remontado.filmstripVisible], ["stage", true]);
+  // A saida nao apaga o que o motor mostra (o mesmo iframe pode voltar sozinho, como estava); fora do iframe a sala nao
+  // conta a coluna (stageColumnShown, abaixo).
   const saiu = sinal(naGrade, "videoConferenceLeft", {});
-  assert.deepEqual([saiu.viewShown, saiu.filmstripVisible], ["stage", false]);
+  assert.deepEqual([saiu.viewShown, saiu.filmstripVisible], ["grid", false]);
 });
 
-test("a margem dos selos (--room-video-right) so com a coluna na tela: o Palco com a coluna; na Grade, escondida ou fora do iframe, 0", () => {
-  // A mesma conta da live-room.tsx: stageColumnShown dos sinais do motor, nunca a escolha guardada.
-  const margem = (state, touch = false) => layout.stageVideoRightPx({ columnShown: model.stageColumnShown(state), touch });
+test("o seguir a visao antes da entrada (V2-16): a Grade e a coluna escondida que a equipe ligou chegam antes do videoConferenceJoined do aluno e ficam valendo", () => {
+  // A ordem real na tag stable-11248 (ljm ChatRoom.onPresence e follow-me/middleware.ts): as presencas de quem ja esta na
+  // sala chegam antes da do proprio aluno; o comando do seguir a visao do host roda com o estado vazio e aplica a Grade
+  // e a coluna, e so depois vem o MUC_JOINED, que vira o videoConferenceJoined.
   const sinal = (state, name, payload) => model.applyLiveSignal(state, { name, ownId: "eu", payload });
-  assert.equal(model.stageColumnShown(model.INITIAL_LIVE_SIGNALS), false);
-  assert.equal(margem(model.INITIAL_LIVE_SIGNALS), 0, "antes de entrar");
-  const entrou = sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" });
-  assert.equal(model.stageColumnShown(entrou), true);
+  let estado = model.signalsForNewFrame(model.INITIAL_LIVE_SIGNALS);
+  estado = sinal(estado, "participantJoined", { displayName: "Danilo Souza", id: "host" });
+  estado = sinal(estado, "tileViewChanged", { enabled: true });
+  estado = sinal(estado, "filmstripDisplayChanged", { visible: false });
+  estado = sinal(estado, "largeVideoChanged", { id: "host" });
+  const entrou = sinal(estado, "videoConferenceJoined", { id: "eu" });
+  assert.equal(entrou.viewShown, "grid", "o botao diz Grade, o que o motor mostra");
+  assert.equal(entrou.filmstripVisible, false, "a coluna real: escondida");
+  assert.equal(entrou.onStageId, "host", "quem esta no video grande tambem fica");
+  assert.deepEqual(entrou.participants.names, { host: "Danilo Souza" }, "e quem ja estava na sala");
+  // A barra e o resto comecam do zero, como antes (todo mundo entra mudo).
+  assert.deepEqual([entrou.audioOn, entrou.micAllowed, entrou.handRaised, entrou.notice], [false, false, false, null]);
+  // Com a coluna escondida pela equipe, nenhum selo desconta os 222 px de uma coluna que nao existe.
+  assert.equal(model.stageColumnShown(entrou, true), false);
+  assert.equal(layout.stageVideoRightPx({ columnShown: model.stageColumnShown(entrou, true) }), 0);
+});
+
+test("a margem dos selos (--room-video-right) so com a coluna na tela: o Palco com a coluna, dentro do iframe; na Grade, escondida ou fora do iframe, 0", () => {
+  // A mesma conta da live-room.tsx: stageColumnShown dos sinais do motor e da entrada, nunca a escolha guardada.
+  const margem = (state, joined = true, touch = false) => layout.stageVideoRightPx({ columnShown: model.stageColumnShown(state, joined), touch });
+  const sinal = (state, name, payload) => model.applyLiveSignal(state, { name, ownId: "eu", payload });
+  assert.equal(model.stageColumnShown(model.INITIAL_LIVE_SIGNALS, false), false);
+  assert.equal(margem(model.INITIAL_LIVE_SIGNALS, false), 0, "antes de entrar");
+  const entrou = sinal(model.signalsForNewFrame(model.INITIAL_LIVE_SIGNALS), "videoConferenceJoined", { id: "eu" });
+  assert.equal(model.stageColumnShown(entrou, true), true);
   assert.equal(margem(entrou), 222);
-  assert.equal(margem(entrou, true), 234, "com toque, o puxador de 21 px");
+  assert.equal(margem(entrou, true, true), 234, "com toque, o puxador de 21 px");
   assert.equal(margem(sinal(entrou, "filmstripDisplayChanged", { visible: false })), 0, "a coluna escondida pela largura");
   assert.equal(margem(sinal(entrou, "tileViewChanged", { enabled: true })), 0, "na Grade");
   // A Grade que o motor mostra vale mesmo com o filmstripDisplayChanged dizendo visivel (a coluna e a propria grade).
-  assert.equal(model.stageColumnShown({ filmstripVisible: true, viewShown: "grid" }), false);
+  assert.equal(model.stageColumnShown({ filmstripVisible: true, viewShown: "grid" }, true), false);
   assert.equal(margem(sinal(sinal(entrou, "tileViewChanged", { enabled: true }), "tileViewChanged", { enabled: false })), 222, "de volta ao Palco");
-  assert.equal(margem(sinal(entrou, "videoConferenceLeft", {})), 0, "fora do iframe");
+  assert.equal(margem(sinal(entrou, "videoConferenceLeft", {}), false), 0, "fora do iframe (a sala ja nao esta joined)");
+  assert.equal(margem(entrou, false), 0, "a reconexao: o mesmo estado, fora do iframe");
+});
+
+test("presenterBadgeFor (V2-4): o selo do apresentador so com alguem da equipe no video grande; na Grade nenhum; o aluno que fala ou que a equipe destacou fica sem selo; antes de o motor dizer, o de antes", () => {
+  const sinal = (state, name, payload) => model.applyLiveSignal(state, { name, ownId: "eu", payload });
+  let estado = sinal(model.signalsForNewFrame(model.INITIAL_LIVE_SIGNALS), "videoConferenceJoined", { id: "eu" });
+  estado = sinal(estado, "participantJoined", { displayName: "Danilo Souza", id: "host" });
+  estado = sinal(estado, "participantRoleChanged", { id: "host", role: "moderator" });
+  estado = sinal(estado, "participantJoined", { displayName: "Bia C.", id: "aluna" });
+  const selo = (signals, joined = true, presenterName = "Danilo S.") => model.presenterBadgeFor({ joined, presenterName, signals });
+
+  assert.equal(selo(estado), "Danilo S.", "o motor ainda nao disse quem esta no video grande: o selo de antes");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "host" })), "Danilo S.", "o apresentador no video grande");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "aluna" })), null, "a aluna que fala (ou que a equipe destacou) no video grande: sem o selo");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "eu" })), null, "o proprio aluno no video grande: sem o selo");
+  assert.equal(selo(sinal(sinal(estado, "largeVideoChanged", { id: "host" }), "tileViewChanged", { enabled: true })), null, "na Grade nao ha video grande");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: null })), "Danilo S.", "sem o id (o metodo do IFrame API faltou): o selo de antes");
+  assert.equal(selo(estado, false), "Danilo S.", "fora do iframe (a capa Entrar na sala), o de antes");
+  assert.equal(selo(estado, true, null), null, "sem o nome, nenhum");
+  assert.equal(selo(estado, true, "   "), null);
+  // O iframe novo esquece quem estava no video grande do anterior.
+  assert.equal(model.signalsForNewFrame(sinal(estado, "largeVideoChanged", { id: "aluna" })).onStageId, null);
+});
+
+test("onStageParticipantOf: o id que o IFrame API guarda do video grande (_getOnStageParticipant); sem o metodo, com erro ou vazio, nulo", () => {
+  assert.equal(model.onStageParticipantOf({ _getOnStageParticipant: () => "host" }), "host");
+  const api = { id: "host2", _getOnStageParticipant() { return this.id; } };
+  assert.equal(model.onStageParticipantOf(api), "host2", "chamado no proprio IFrame API");
+  assert.equal(model.onStageParticipantOf({}), null);
+  assert.equal(model.onStageParticipantOf(null), null);
+  assert.equal(model.onStageParticipantOf({ _getOnStageParticipant: () => "" }), null);
+  assert.equal(model.onStageParticipantOf({ _getOnStageParticipant: () => 42 }), null);
+  assert.equal(model.onStageParticipantOf({ _getOnStageParticipant: () => { throw new Error("x"); } }), null);
+  // O largeVideoChanged nunca vai ao servidor.
+  assert.ok(jitsi.JITSI_LISTENED_EVENTS.includes("largeVideoChanged"));
+  assert.equal(jitsi.toRoomEvent("largeVideoChanged", { id: "host" }, { nowIso: "2026-11-05T23:00:00.000Z", ownId: "eu" }), null);
 });
 
 test("o menu da Visão do vídeo fechou por ficar desligado (a reconexao): com o foco na opcao que sumiu ou no body, a sala pega o foco; com o foco em outro lugar, nada", () => {
@@ -808,4 +874,178 @@ test("o Microfone saiu da barra com o foco nele (V2-19): recolhido ou silenciado
   assert.equal(perdeu(desligado, recolhido, iframe), false);
   assert.equal(perdeu(falando, desligado, body), false);
   assert.equal(perdeu(desligado, sinal(desligado, "moderationParticipantRejected", { id: "outro", mediaType: "audio" }), body), false, "o recolhimento de outro participante");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A correcao final da fase 1: o som do vertical, a tela cheia no giro, o chat ao reabrir, as abas que rolam, o Esc da
+ * sala, os resultados de quem chega depois, a confirmacao de Sair, o pedido do microfone e o Microfone ligado
+ * ---------------------------------------------------------------------------------------------- */
+
+test("soundCoverShown (V2-6): a capa Ativar som so na gravada com o som desligado; no desenho normal some depois do primeiro toque; sem a barra (o vertical) volta enquanto o som esta desligado", () => {
+  const capa = (extra) => layout.soundCoverShown({ barShown: true, kind: "simulated", muted: true, soundTouched: false, ...extra });
+  assert.equal(capa({}), true, "normal, mudo e sem toque: a capa");
+  assert.equal(capa({ soundTouched: true }), false, "normal, silenciado pelo Som da barra: a barra liga de novo, a capa nao volta");
+  assert.equal(capa({ barShown: false, soundTouched: true }), true, "o vertical (sem barra e sem Som), mudo depois de um toque: a capa volta, senao o video fica mudo sem saida");
+  assert.equal(capa({ barShown: false }), true, "o vertical antes do primeiro toque");
+  assert.equal(capa({ barShown: false, muted: false, soundTouched: true }), false, "com o som ligado, nenhuma capa");
+  assert.equal(capa({ muted: false }), false);
+  assert.equal(capa({ kind: "replay" }), false, "o Replay tem a barra da Bunny");
+  assert.equal(capa({ barShown: false, kind: "replay", soundTouched: true }), false);
+});
+
+test("leaveStageFullscreen: a barra saiu (o giro para o vertical) com a caixa do palco em tela cheia: ela sai; a tela cheia do player da Bunny (o iframe) fica; sem tela cheia, nada", () => {
+  const caixa = { nome: "caixa do palco" };
+  const iframe = { nome: "iframe da Bunny" };
+  const documento = (fullscreenElement) => {
+    const saidas = [];
+    return { doc: { exitFullscreen: () => (saidas.push(fullscreenElement), Promise.resolve()), fullscreenElement }, saidas };
+  };
+  const naCaixa = documento(caixa);
+  assert.equal(salaAoVivo.leaveStageFullscreen(naCaixa.doc, caixa), true);
+  assert.deepEqual(naCaixa.saidas, [caixa], "a Tela cheia da barra sai junto com a barra");
+  const noIframe = documento(iframe);
+  assert.equal(salaAoVivo.leaveStageFullscreen(noIframe.doc, caixa), false, "o Replay em tela cheia pelo player continua");
+  assert.deepEqual(noIframe.saidas, []);
+  const nada = documento(null);
+  assert.equal(salaAoVivo.leaveStageFullscreen(nada.doc, caixa), false);
+  assert.deepEqual(nada.saidas, []);
+  assert.equal(salaAoVivo.leaveStageFullscreen(null, caixa), false);
+  assert.equal(salaAoVivo.leaveStageFullscreen(naCaixa.doc, null), false, "sem a caixa (o vertical montou sem ela), nada");
+  // A recusa do navegador nao derruba a sala.
+  assert.equal(salaAoVivo.leaveStageFullscreen({ exitFullscreen: () => Promise.reject(new Error("nao")), fullscreenElement: caixa }, caixa), true);
+});
+
+const chatModule = await import("../src/components/member/webinars/room/room-chat.tsx");
+
+test("chatListOnShow (V2-7): o painel reaberto leva a lista escondida ao fim, onde estao as mensagens que o balao contou; quem tinha subido para ler fica onde estava", () => {
+  const lista = () => ({ scrollHeight: 2252, scrollTop: 866 });
+  const noFim = lista();
+  assert.equal(chatModule.chatListOnShow(noFim, { shown: true, stick: true }), true);
+  assert.equal(noFim.scrollTop, 2252, "a lista vai ao fim");
+  const lendo = lista();
+  assert.equal(chatModule.chatListOnShow(lendo, { shown: true, stick: false }), false);
+  assert.equal(lendo.scrollTop, 866, "subiu para ler: fica");
+  const fechado = lista();
+  assert.equal(chatModule.chatListOnShow(fechado, { shown: false, stick: true }), false, "fechado, nada (a lista escondida nao rola)");
+  assert.equal(fechado.scrollTop, 866);
+  // O painel que montou fechado: a primeira leitura chegou escondida (scrollTop 0); ao abrir, o fim, nao as mais antigas.
+  const montouFechado = { scrollHeight: 2066, scrollTop: 0 };
+  assert.equal(chatModule.chatListOnShow(montouFechado, { shown: true, stick: true }), true);
+  assert.equal(montouFechado.scrollTop, 2066);
+  assert.equal(chatModule.chatListOnShow(null, { shown: true, stick: true }), false);
+});
+
+test("tabScrollLeft (V2-7): a linha das quatro abas rola de lado e a aba escolhida entra inteira na vista, com a folga do recuo; a que ja esta na vista nao mexe", () => {
+  // A 1024 px com a enquete aberta: 270 px visiveis, as quatro abas pedem 314 (Chat 4-46, Perguntas 50-126, Participantes
+  // 130-225, Enquetes 229-310).
+  const rolar = (tabLeft, tabWidth, scrollLeft = 0) => layout.tabScrollLeft({ listWidth: 270, scrollLeft, tabLeft, tabWidth });
+  assert.equal(rolar(4, 42), 0, "o Chat, ja na vista");
+  assert.equal(rolar(130, 95), 0, "Participantes cabe sem rolar");
+  assert.equal(rolar(229, 81), 44, "Enquetes: a linha rola ate a aba inteira, com 4 px de folga (229 + 81 + 4 - 270)");
+  assert.equal(rolar(4, 42, 44), 0, "de volta ao Chat: a linha volta ao comeco");
+  assert.equal(rolar(130, 95, 44), 44, "ja inteira na vista com a linha rolada: nada muda");
+  assert.equal(rolar(50, 76, 60), 46, "a que passou pela esquerda: a linha volta ate ela");
+  assert.equal(layout.tabScrollLeft({ listWidth: 0, scrollLeft: 12, tabLeft: 229, tabWidth: 81 }), 12, "o painel fechado (sem largura): nada");
+  assert.equal(layout.tabScrollLeft({ listWidth: Number.NaN, scrollLeft: Number.NaN, tabLeft: 1, tabWidth: 1 }), 0);
+});
+
+test("roomEscapeStep: o Esc fecha a camada de cima primeiro (a confirmacao, os paineis da barra, a enquete no palco como Responder depois ou o Fechar do resultado); so sem nada disso pergunta se quer sair", () => {
+  const esc = (extra) => layout.roomEscapeStep({ confirmLeave: false, popoverOpen: false, stagePoll: null, ...extra });
+  assert.equal(esc({}), "leave");
+  assert.equal(esc({ confirmLeave: true, popoverOpen: true, stagePoll: "answer" }), "close_confirm", "a confirmacao aberta fecha primeiro");
+  assert.equal(esc({ popoverOpen: true, stagePoll: "answer" }), "close_popovers", "Reagir, Configurações ou o menu da visao antes da enquete");
+  // O foco num controle coberto pela folha da enquete (abaixo de lg ela cobre a barra e o campo): o Esc a recolhe, como
+  // o Responder depois, e o controle aparece; nunca abre "Sair da sala?" por baixo da enquete.
+  assert.equal(esc({ stagePoll: "answer" }), "poll_later");
+  assert.equal(esc({ stagePoll: "result" }), "poll_seen", "o resultado: o Fechar");
+  // O Responder depois guarda a enquete no card do chat (deferPoll); o Fechar, nos vistos (markPollResultSeen).
+  const aberta = pergunta("p1");
+  const depois = polls.deferPoll(NADA, "p1");
+  assert.equal(polls.stagePollFor({ deferredIds: depois.later, polls: [aberta], seenResultIds: depois.seen }), null);
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: [aberta] }), aberta);
+});
+
+test("resultsOnArrival: quem entra depois nao recebe, um por um, os resultados ja compartilhados quando a sala abriu; so o resultado novo, com o aluno na sala, abre no palco", () => {
+  const antigos = [pergunta("r1", { results: RESULTADO, status: "closed" }), pergunta("r2", { myOptionIds: ["o1"], results: RESULTADO, status: "closed" }), pergunta("aberta")];
+  assert.deepEqual(polls.resultsOnArrival(antigos), ["r1", "r2"], "os que ja vinham com resultado");
+  const palco = (lista, chegada) => polls.stagePollFor({ deferredIds: [], polls: lista, seenResultIds: [...NADA.seen, ...chegada] });
+  const chegada = polls.resultsOnArrival(antigos);
+  // A aberta sem resposta continua abrindo (a enquete para responder nunca e "vista" na chegada).
+  assert.equal(palco(antigos, chegada)?.poll.id, "aberta");
+  const semAberta = antigos.slice(0, 2);
+  assert.equal(palco(semAberta, polls.resultsOnArrival(semAberta)), null, "os resultados antigos nao cobrem o Entrar na sala");
+  // A equipe compartilha o resultado de uma enquete com o aluno ja na sala: ele abre.
+  const novo = [...semAberta, pergunta("r3", { results: RESULTADO, status: "closed" })];
+  assert.equal(palco(novo, polls.resultsOnArrival(semAberta))?.poll.id, "r3");
+  assert.deepEqual(polls.resultsOnArrival([]), []);
+});
+
+test("returnFocusFromConfirm: a confirmacao de Sair fechou (Voltar, Esc) com o foco nela, que caiu no body: o foco volta para quem a abriu; sem ele na tela, para a sala; um foco na sala fica", () => {
+  const focados = [];
+  const no = (nome, extra = {}) => ({ focus: () => focados.push(nome), nome, offsetParent: {}, ...extra });
+  const sairDaBarra = no("Sair da barra");
+  const balao = no("balao");
+  const raiz = (dentro) => ({
+    contains: (node) => dentro.includes(node),
+    querySelectorAll: (selector) => (selector === "[data-room-first-focus]" ? [balao] : selector === salaAoVivo.ROOM_FOCUSABLE ? [balao] : [])
+  });
+  const body = { nome: "body" };
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([sairDaBarra, balao]), body, sairDaBarra), true);
+  assert.deepEqual(focados, ["Sair da barra"], "quem abriu");
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([sairDaBarra, balao]), null, sairDaBarra), true, "sem foco nenhum tambem");
+  // Quem abriu saiu da tela (o Sair do cabecalho abaixo de lg, escondido a partir de lg) ou da sala: o primeiro foco.
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([balao]), body, sairDaBarra), true);
+  assert.equal(focados.at(-1), "balao");
+  const escondido = no("Sair do cabecalho", { offsetParent: null });
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([escondido, balao]), body, escondido), true);
+  assert.equal(focados.at(-1), "balao", "o controle escondido pela largura nunca recebe o foco");
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([balao]), body, null), true, "aberta pelo Esc sem controle guardado");
+  // O foco ainda na sala (o clique no Voltar do WebKit nao foca o botao): nada muda.
+  const antes = focados.length;
+  assert.equal(salaAoVivo.returnFocusFromConfirm(raiz([sairDaBarra, balao]), sairDaBarra, sairDaBarra), false);
+  assert.equal(salaAoVivo.returnFocusFromConfirm(null, body, sairDaBarra), false);
+  assert.equal(focados.length, antes);
+});
+
+test("micAskOnSignal (V2-19): o recolhimento do proprio microfone encerra o pedido do Falar antes do passo, sem soltar o 'ligado' guardado; o de outro participante e os outros sinais seguem o micAskStep", () => {
+  const api = { iframe: 1 };
+  // O Falar: o pedido aberto e o "ligado" do iframe guardado (a faixa ainda nao abriu).
+  const ligado = model.micAskStep(model.startMicAsk(null, { api, id: 1, nowMs: 0, permission: "prompt" }), "audioMuteStatusChanged", { muted: false });
+  assert.equal(ligado.swallow, true);
+  assert.ok(ligado.next?.held, "o 'ligado' guardado");
+  // A equipe recolhe o microfone antes de a faixa abrir: o pedido acaba ali, nada e solto nem engolido.
+  const proprio = { id: "eu", mediaType: "audio" };
+  const recolhido = model.micAskOnSignal(ligado.next, "moderationParticipantRejected", proprio, "eu");
+  assert.deepEqual(recolhido, { next: null, release: null, swallow: false });
+  // Sem o pedido, a conferencia seguinte (a faixa abriu) da "gone": o Microfone nunca volta a barra por um 'ligado' antigo.
+  assert.deepEqual(model.micAskCheck(recolhido.next, 1, { api, muted: false, nowMs: 1000, permission: "granted" }), { action: "gone" });
+  // O mudo que a equipe manda junto passa direto, sem nada guardado antes dele.
+  assert.deepEqual(model.micAskOnSignal(recolhido.next, "audioMuteStatusChanged", { muted: true }, "eu"), { next: null, release: null, swallow: false });
+  // O recolhimento de outro participante (ou de video) nao mexe no pedido.
+  for (const payload of [{ id: "outro", mediaType: "audio" }, { id: "eu", mediaType: "video" }]) {
+    assert.equal(model.micAskOnSignal(ligado.next, "moderationParticipantRejected", payload, "eu").next, ligado.next, JSON.stringify(payload));
+  }
+  // Os outros sinais seguem o micAskStep: o mudo encerra e solta o 'ligado' guardado antes dele.
+  assert.deepEqual(model.micAskOnSignal(ligado.next, "audioMuteStatusChanged", { muted: true }, "eu"), model.micAskStep(ligado.next, "audioMuteStatusChanged", { muted: true }));
+  assert.deepEqual(model.micAskOnSignal(ligado.next, "raiseHandUpdated", { handRaised: true, id: "eu" }, "eu"), { next: ligado.next, release: null, swallow: false });
+});
+
+test("liveBarItems (V2-A16): o Microfone fica na barra enquanto o microfone esta ligado, mesmo recolhido pela equipe sem o mudo; desligado pelo aluno, ele sai", () => {
+  const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
+  const naBarra = (estado) => model.liveBarItems({ allowStudentCamera: false, audioOn: estado.audioOn, micAllowed: estado.micAllowed, showMedia: true }).center.includes("mic");
+  const entrou = sinal(model.signalsForNewFrame(model.INITIAL_LIVE_SIGNALS), "videoConferenceJoined", { id: "eu" });
+  const falando = sinal(model.acceptMic(sinal(entrou, "moderationParticipantApproved", { id: "eu", mediaType: "audio" })), "audioMuteStatusChanged", { muted: false });
+  assert.ok(naBarra(falando));
+  // O recolhimento sem o mudo: micAllowed cai, mas o som continua no ar; o botao fica para o aluno se calar.
+  const recolhido = sinal(falando, "moderationParticipantRejected", { id: "eu", mediaType: "audio" });
+  assert.deepEqual([recolhido.micAllowed, recolhido.audioOn], [false, true]);
+  assert.ok(naBarra(recolhido), "o som no ar sempre tem o botao");
+  // O aluno se cala pelo botao: o Microfone sai, e o foco que estava nele volta para a sala.
+  const calado = sinal(model.expectAudioToggle(recolhido), "audioMuteStatusChanged", { muted: true });
+  assert.equal(naBarra(calado), false);
+  const body = { nome: "body" };
+  assert.equal(model.micFocusLost({ active: body, body, micShown: naBarra(calado), micWasShown: naBarra(recolhido) }), true);
+  // Sem o audioOn (quem apresenta, o padrao), a regra de antes.
+  assert.equal(model.liveBarItems({ allowStudentCamera: false, micAllowed: false, showMedia: true }).center.includes("mic"), false);
+  assert.equal(model.liveBarItems({ allowStudentCamera: false, audioOn: true, micAllowed: false, showMedia: false }).center.includes("mic"), false, "quem apresenta usa a barra do iframe");
 });

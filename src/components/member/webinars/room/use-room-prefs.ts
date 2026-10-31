@@ -17,10 +17,13 @@ import {
 } from "@/lib/webinar-room-prefs";
 
 // As escolhas da sala guardadas no navegador da pessoa (docs/31 V2-7, V2-10, V2-12 e V2-16), lidas por
-// useSyncExternalStore como o espelho de use-jitsi-devices.ts: o servidor e a primeira pintura usam o padrao (o escuro,
-// o painel aberto, o Palco, nada para depois) e a escolha guardada entra logo depois, sem piscar o HTML do servidor.
-// Outra aba muda pelo evento "storage"; a mesma aba, pelo aviso aos ouvintes. Sem armazenamento (aba privada,
-// bloqueado), vale a memoria ate recarregar. Toda leitura e escrita fica em try/catch.
+// useSyncExternalStore como o espelho de use-jitsi-devices.ts: o HTML do servidor e a primeira pintura saem no padrao
+// (o escuro, o painel aberto, o Palco, nada para depois), sem erro de hidratacao, e a escolha guardada entra logo
+// depois da hidratacao. Quem guardou o tema claro ou o painel fechado ve o padrao ate o JS hidratar (docs/31 V2-7 e
+// V2-12). A enquete no palco e o card "deixou para depois" dependem do que esta guardado: a sala so os desenha depois
+// da hidratacao (useRoomHydrated), senao a enquete deixada para depois piscaria no palco a cada carga. Outra aba muda
+// pelo evento "storage"; a mesma aba, pelo aviso aos ouvintes. Sem armazenamento (aba privada, bloqueado), vale a
+// memoria ate recarregar. Toda leitura e escrita fica em try/catch.
 
 type PrefStore = {
   read: () => string | null;
@@ -30,6 +33,22 @@ type PrefStore = {
 
 function serverSnapshot(): string | null {
   return null;
+}
+
+function subscribeNothing() {
+  return () => undefined;
+}
+
+/**
+ * Depois da hidratacao: falso no HTML do servidor e na pintura que hidrata, verdadeiro logo em seguida (na mesma
+ * pintura em que as escolhas guardadas entram). O que depende do que esta guardado espera por ele.
+ */
+export function useRoomHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false
+  );
 }
 
 function prefStore(key: string): PrefStore {

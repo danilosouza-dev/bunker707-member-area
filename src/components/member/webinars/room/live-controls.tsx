@@ -121,7 +121,7 @@ export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" 
 
 export function LiveControls(props: LiveControlsProps) {
   const copy = WEBINAR_COPY.aoVivo;
-  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, micAllowed: props.micAllowed, showMedia: props.showMedia });
+  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, showMedia: props.showMedia });
 
   function control(item: RoomBarItem) {
     switch (item) {

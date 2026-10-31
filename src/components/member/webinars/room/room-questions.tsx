@@ -273,9 +273,10 @@ export function RoomQuestionsTab({
         </p>
       ) : (
         <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+          {/* 16 px abaixo de lg, como o campo do chat: o Safari do iPhone da zoom no foco de um campo menor. */}
           <textarea
             aria-label={copy.suaPergunta}
-            className="min-h-11 w-full resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-sm text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50"
+            className="min-h-11 w-full resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-base text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50 lg:text-sm"
             disabled={readOnly || sending}
             maxLength={CHAT_LIMITS.question}
             onChange={(event) => setDraft(event.target.value)}

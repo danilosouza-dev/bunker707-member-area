@@ -152,8 +152,13 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await page.keyboard.press("Escape");
   const confirmacao = sala.getByRole("alertdialog", { name: "Sair da sala?" });
   await expect(confirmacao).toBeVisible();
+  // O foco entra no Voltar da confirmacao; o Voltar a fecha e o foco volta para a sala, nunca para o body (onde o Esc e a
+  // trava do Tab deixariam de valer).
+  await expect(confirmacao.getByRole("button", { exact: true, name: "Voltar" })).toBeFocused();
   await confirmacao.getByRole("button", { exact: true, name: "Voltar" }).click();
   await expect(confirmacao).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
+  await expect.poll(() => sala.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
 
   await sala.getByRole("button", { exact: true, name: "Sair" }).first().click();
   await sala.getByRole("alertdialog", { name: "Sair da sala?" }).getByRole("button", { exact: true, name: "Sair" }).click();
@@ -208,11 +213,14 @@ test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo c
   await expect(page.getByTestId("room-pill")).toHaveCount(0);
   await expect(page.getByRole("heading", { level: 1, name: titulo })).toHaveCount(1);
 
-  // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
+  // Deitado (740 x 375): o desenho normal com as abas, na mesma sala, em linha (o palco ao lado do painel): a barra, o
+  // balao e as abas cabem na tela (toBeVisible passava com eles abaixo dela).
   await page.setViewportSize({ height: 375, width: 740 });
   await expect(dialogo).toHaveAttribute("data-room-design", "normal");
   await expect(dialogo).toHaveAttribute("data-room-theme", "light");
-  await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
+  await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.locator("[data-room-bar]")).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.painel.esconder })).toBeInViewport({ ratio: 1 });
 
   // De volta a 375 px em pe: o topo tem so o Sair, com 44 px; ele pede a confirmacao (a sessao esta no ar) e o Sair
   // dela volta para a pagina da live, onde a IA Diretor reaparece.

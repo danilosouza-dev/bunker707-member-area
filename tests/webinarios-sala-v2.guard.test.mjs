@@ -17,6 +17,8 @@ const semComentarios = (fonte) => fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace
 const room = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/live-room.tsx"), "utf8"));
 const recorded = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/webinar-room.tsx"), "utf8"));
 const offer = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-offer.tsx"), "utf8"));
+const hook = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/use-live-room.ts"), "utf8"));
+const chatPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-chat.tsx"), "utf8"));
 
 test("o painel do chat e o palco da live saem das regras puras: o takeover do celular so abaixo de lg, o painel por roomPanelShown e o esqueleto por liveSkeletonState", () => {
   assert.match(room, /const settingsTakeover = settingsShown && !desktop;/, "Configurações toma o lugar do chat so no celular");
@@ -62,4 +64,55 @@ test("a gravada: Participantes com quem apresenta e o numero do cabecalho; as pi
   assert.match(offer, /\{onScreen && view \? \(/, "o card na tela e o aviso a sala sao o mesmo valor");
   assert.match(recorded, /assistantOn=\{stageAssistantShown\(\{ assistantEnabled: assistant\.state\.enabled, bottomBadges, offerShown \}\)\}/);
   assert.match(recorded, /chatPillsShown\(\{ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false \}\) \? \(\s*<RoomChatPills kind=\{kind\} messages=\{overlayMessages\(translation\.messages\)\} \/>/, "no Replay acima da barra da Bunny e com o nome Chat da live");
+});
+
+test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, da enquete depois da hidratacao, da confirmacao de Sair e do chat ao reabrir", () => {
+  for (const [nome, fonte] of [
+    ["live-room", room],
+    ["webinar-room", recorded]
+  ]) {
+    // O Esc pela regra pura (roomEscapeStep): a enquete no palco recolhe antes do "Sair da sala?".
+    assert.match(fonte, /const step = roomEscapeStep\(\{ confirmLeave, popoverOpen: [^,]+, stagePoll: stagePoll\?\.mode \?\? null \}\);/, nome);
+    assert.match(fonte, /\} else if \(step === "poll_later" && stagePoll\) \{\s*setDeferred\(deferPoll\(deferred, stagePoll\.poll\.id\)\);/, nome);
+    assert.match(fonte, /\} else if \(step === "poll_seen" && stagePoll\) \{\s*setDeferred\(markPollResultSeen\(deferred, stagePoll\.poll\.id\)\);/, nome);
+    // A enquete e o card "deixou para depois" so depois da hidratacao, sem os resultados que ja vinham na pagina.
+    assert.match(fonte, /const hydrated = useRoomHydrated\(\);\s*const \[arrivedResults\] = useState\(\(\) => resultsOnArrival\(payload\.polls\)\);/, nome);
+    assert.match(fonte, /barShown && hydrated \? stagePollFor\(\{ deferredIds: deferred\.later, polls, seenResultIds: \[\.\.\.deferred\.seen, \.\.\.arrivedResults\] \}\) : null/, nome);
+    // A confirmacao de Sair: o foco entra no Voltar e volta para quem a abriu.
+    assert.match(fonte, /const rememberLeaveOpener = useRoomConfirmFocus\(rootRef, confirmLeave\);/, nome);
+    assert.match(fonte, /rememberLeaveOpener\(\);\s*setConfirmLeave\(true\);/, nome);
+    assert.match(fonte, /data-room-confirm="" role="alertdialog"/, nome);
+    assert.match(fonte, /<RoomButton data-room-first-focus onClick=\{\(\) => setConfirmLeave\(false\)\}/, "o primeiro foco da confirmacao e o Voltar");
+  }
+  // O chat reaberto vai ao fim (chatListOnShow) nas duas salas; a gaveta do vertical monta de novo a cada abertura.
+  assert.match(room, /shown=\{panelShown\}/);
+  assert.match(recorded, /shown=\{vertical \|\| panelShown\}/);
+  assert.match(chatPanel, /useLayoutEffect\(\(\) => \{\s*chatListOnShow\(listRef\.current, \{ shown, stick: stickRef\.current \}\);\s*\}, \[shown\]\);/);
+});
+
+test("a gravada: a capa Ativar som pela regra pura e a tela cheia da caixa do palco que sai com a barra (o giro para o vertical)", () => {
+  assert.match(recorded, /muted=\{soundCoverShown\(\{ barShown, kind, muted, soundTouched \}\)\}/);
+  assert.match(recorded, /if \(was && !barShown\) \{\s*leaveStageFullscreen\(document, stageBoxRef\.current\);\s*refocusRoom\(rootRef\.current, document\.activeElement\);/);
+});
+
+test("a live: o selo do apresentador, a coluna so dentro do iframe, o Microfone ligado e o pedido do microfone pelas regras puras", () => {
+  assert.match(room, /presenterName=\{phase === "live" \? presenterBadgeFor\(\{ joined, presenterName, signals: room\.signals \}\) : null\}/);
+  assert.match(room, /stageColumnShown\(room\.signals, joined\)/);
+  assert.match(room, /const micShown = barShown && ourBar && \(room\.signals\.micAllowed \|\| room\.signals\.audioOn\);/, "o mesmo criterio de liveBarItems");
+  // O onEvent: o iframe novo volta ao padrao do motor no primeiro sinal; o video grande pelo id lido do IFrame API; o
+  // pedido do microfone pelo micAskOnSignal (o recolhimento antes do passo), nunca pelo micAskStep direto.
+  const onEvent = hook.slice(hook.indexOf("const onEvent = useCallback("), hook.indexOf("const configOverwrite = useMemo("));
+  assert.match(onEvent, /if \(frame !== null && frame !== signalFrameRef\.current\) \{\s*signalFrameRef\.current = frame;\s*filmstripSentRef\.current = null;\s*setSignals\(signalsForNewFrame\);/);
+  assert.match(onEvent, /if \(name === "largeVideoChanged"\) \{\s*handleSignal\(name, \{ id: onStageParticipantOf\(frame\) \}\);\s*return;/);
+  assert.match(onEvent, /const ask = micAskOnSignal\(micAskRef\.current, name, payload, ownIdRef\.current\);/);
+  assert.doesNotMatch(onEvent, /micAskStep\(|micAskRecalled\(/, "o recolhimento e o passo numa funcao so");
+});
+
+test("as ligacoes da barra da live que o teste de tela nao alcanca: Reagir, Configurações e o menu da Visão do vídeo nunca abertos juntos; a largura do iframe e o tema vao para o hook", () => {
+  // Movidas de tests/webinarios-sala-ao-vivo-tela.test.mjs (docs/18 §2.7: texto do codigo so em .guard).
+  assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(\);\s*\}\s*closeViewMenu\(\);/, "Reagir fecha Configurações e o menu da Visão do vídeo");
+  assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*\}\s*closeViewMenu\(\);\s*setSettingsOpen\(true\);/, "Configurações fecha Reagir e o menu da Visão do vídeo");
+  assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
+  assert.match(room, /\} else if \(step === "close_popovers"\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*closeViewMenu\(\);/, "o Esc fecha os tres, com o foco de volta ao botao");
+  assert.match(room, /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*frameWidth: geometry\.frameWidth,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
 });

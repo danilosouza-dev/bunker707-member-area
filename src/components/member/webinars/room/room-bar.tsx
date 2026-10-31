@@ -10,12 +10,15 @@ import { ROOM_FOCUS, RoomButton } from "./room-ui";
 // A barra da sala do aluno (docs/31 V2-6 e V2-18), a mesma na Live ao vivo (live-controls.tsx), na gravada e no Replay
 // (recorded-controls.tsx). A partir de lg, 72 px com tres zonas: o Sair em vermelho a esquerda, os circulos de 48 px
 // sem rotulo no centro, e Configurações e o balao do chat a direita; os cantos seguem Marca › Estilo
-// (--member-cover-radius). Abaixo de lg, 64 px, cantos de 14 px e circulos de 44 px distribuidos de ponta a ponta (as
+// (--member-cover-radius). As zonas dos lados nunca ficam menores que o conteudo delas (minmax com max-content): a
+// 1024 px com o painel aberto, a camera e o microfone, o centro sai uns 30 px do meio em vez de a Visão do vídeo cobrir
+// a Tela cheia. Abaixo de lg, 64 px, cantos de 14 px e circulos de 44 px distribuidos de ponta a ponta (as
 // zonas nao geram caixa), com recuo e vao pequenos para os 7 circulos (com a camera e o microfone) caberem em 360 px;
 // o Sair fica no cabecalho e a Tela cheia vai para o canto do palco. Cada circulo tem o nome acessivel exato da frase
 // (o e2e clica por ele; o title mostra o nome no computador) e o estado em aria-pressed ou, nos que abrem um painel, em
-// aria-expanded e aria-controls. O balao abre e fecha o painel do chat (o aside com o id room-panel): aria-pressed e o
-// nome dizem o que ele faz. As cores vem dos tokens do tema da sala (docs/31 V2-11): o circulo inativo em
+// aria-expanded e aria-controls. O balao abre e fecha o painel do chat (o aside com o id room-panel): o nome diz o que
+// ele faz e o aria-expanded diz se o painel esta na tela (nunca aria-pressed com um nome que muda: "Esconder o chat,
+// pressionado" se leria como o contrario). As cores vem dos tokens do tema da sala (docs/31 V2-11): o circulo inativo em
 // --room-control, o ativo em --room-active-bg; o acento so no Sair.
 
 /** O painel do chat (o aside das duas salas): o balao da barra o controla. */
@@ -41,7 +44,7 @@ export function RoomBar({ center, label, left, right }: { center: ReactNode; lab
   return (
     <div
       aria-label={label}
-      className="mx-2 my-2 flex h-16 shrink-0 items-center justify-between gap-0.5 overflow-x-auto rounded-[14px] border border-room-border bg-room-surface px-1.5 [scrollbar-width:none] lg:mx-0 lg:my-0 lg:grid lg:h-[72px] lg:grid-cols-[1fr_auto_1fr] lg:gap-3 lg:overflow-visible lg:rounded-[var(--member-cover-radius)] lg:px-3 [&::-webkit-scrollbar]:hidden"
+      className="mx-2 my-2 flex h-16 shrink-0 items-center justify-between gap-0.5 overflow-x-auto rounded-[14px] border border-room-border bg-room-surface px-1.5 [scrollbar-width:none] lg:mx-0 lg:my-0 lg:grid lg:h-[72px] lg:grid-cols-[minmax(max-content,1fr)_auto_minmax(max-content,1fr)] lg:gap-3 lg:overflow-visible lg:rounded-[var(--member-cover-radius)] lg:px-3 [&::-webkit-scrollbar]:hidden"
       data-room-bar=""
       role="group"
     >
@@ -116,37 +119,32 @@ export function RoomBarButton(props: RoomBarButtonProps) {
 
 /**
  * O Sair da barra, so a partir de lg (abaixo, o Sair fica no cabecalho, V2-18): a pilula de 44 px no acento, com o
- * LogOut de 18 px; entre lg e xl so o icone, com o nome para o leitor de tela e no title (a dica do mouse, como nos
- * circulos). Com a live no ar, a sala pergunta antes.
+ * LogOut de 18 px e o nome, em toda largura (a zona da esquerda cabe a 1024 px com a pilula, V2-6). Com a live no ar,
+ * a sala pergunta antes.
  */
 export function RoomLeaveButton({ onLeave }: { onLeave: () => void }) {
   const copy = WEBINAR_COPY.sala;
   return (
-    <RoomButton
-      className="hidden size-11 px-0 text-[13px] font-bold lg:inline-flex xl:w-auto xl:pl-3.5 xl:pr-[18px] [&_svg]:size-[18px]"
-      data-room-bar-item="leave"
-      onClick={onLeave}
-      title={copy.sair}
-      variant="accent"
-    >
+    <RoomButton className="hidden h-11 pl-3.5 pr-[18px] text-[13px] font-bold lg:inline-flex [&_svg]:size-[18px]" data-room-bar-item="leave" onClick={onLeave} variant="accent">
       <LogOut aria-hidden="true" />
-      <span className="sr-only xl:not-sr-only">{copy.sair}</span>
+      {copy.sair}
     </RoomButton>
   );
 }
 
 /**
- * O balao do chat (V2-6 a V2-8): abre e fecha o painel (o estado fica guardado no navegador). Aberto, fica ligado e se
- * chama "Esconder o chat"; fechado, "Mostrar o chat" e, com mensagens novas de outras pessoas desde que fechou, o
- * contador vermelho no canto (o numero so na tela; o leitor de tela ouve "Mostrar o chat, 3 mensagens novas"). Com o
- * painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida).
+ * O balao do chat (V2-6 a V2-8): abre e fecha o painel (o estado fica guardado no navegador). Aberto, fica ligado (o
+ * circulo claro, so na tela) e se chama "Esconder o chat"; fechado, "Mostrar o chat" e, com mensagens novas de outras
+ * pessoas desde que fechou, o contador vermelho no canto (o numero so na tela; o leitor de tela ouve "Mostrar o chat, 3
+ * mensagens novas"). O estado vai em aria-expanded com o aria-controls do painel: o nome e a acao, o expanded e o
+ * estado. Com o painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida).
  */
 export function RoomPanelToggle({ firstFocus = false, onToggle, open, unread = 0 }: { firstFocus?: boolean; onToggle: () => void; open: boolean; unread?: number }) {
   const copy = WEBINAR_COPY.salaV2.painel;
   const count = open ? 0 : Math.max(0, Math.floor(unread));
   const label = open ? copy.esconder : count > 0 ? copy.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(count)) : copy.mostrar;
   return (
-    <RoomBarButton active={open} controls={ROOM_PANEL_ID} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
+    <RoomBarButton active={open} controls={ROOM_PANEL_ID} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
       {count > 0 ? (
         <span
           aria-hidden="true"

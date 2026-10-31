@@ -20,15 +20,20 @@ export const SALA_V2_COPY = {
    */
   chat: {
     autor: (partes: readonly string[]) => `${partes.join(", ")}: `,
-    maisOpcoes: "Mais opções"
+    maisOpcoes: "Mais opções",
+    /** O nome da minha mensagem na linha de baixo do balao e para o leitor de tela (o protótipo: "Você · 20:43"). */
+    voce: "Você"
   },
   /**
    * A enquete no meio do palco (V2-10): o rotulo pelo tipo, "Enviar resposta" e "Responder depois", que recolhe para o
    * card do chat ("Enquete aberta · você deixou para depois" com "Responder agora"); o resultado compartilhado no mesmo
-   * lugar, com o total de respostas e "Fechar". "Enquete aberta" e o que o leitor de tela ouve quando ela abre sozinha.
+   * lugar, com o total de respostas e "Fechar". Quando ela abre sozinha, o leitor de tela ouve "Enquete aberta: {pergunta}"
+   * (ou "Enquete · resultado: {pergunta}"): com a pergunta, a segunda enquete que entra no lugar da primeira tambem e
+   * anunciada.
    */
   enquete: {
-    aberta: "Enquete aberta",
+    anuncioAberta: (pergunta: string) => `Enquete aberta: ${pergunta}`,
+    anuncioResultado: (pergunta: string) => `Enquete · resultado: ${pergunta}`,
     deixouParaDepois: "Enquete aberta · você deixou para depois",
     enviarResposta: "Enviar resposta",
     fechar: "Fechar",

@@ -607,7 +607,7 @@ test("o Falar sempre segura o 'ligado' do iframe ate a faixa abrir, com ou sem a
   assert.match(turnMicOn, /audioMutedNow\(api\)/, "o isAudioMuted do iframe do pedido");
   assert.match(turnMicOn, /micAskRef\.current = null;\s*if \(outcome\.action === "denied"\) \{\s*setSignals\(micRequestDenied\);\s*\} else \{\s*handleSignal\("audioMuteStatusChanged", outcome\.signal\);/);
   const onEvent = sala.slice(sala.indexOf("const onEvent = useCallback("), sala.indexOf("const configOverwrite = useMemo("));
-  assert.match(onEvent, /const ask = micAskStep\(micAskRef\.current, name, payload\);\s*micAskRef\.current = ask\.next;\s*if \(ask\.release !== null\) \{\s*handleSignal\("audioMuteStatusChanged", ask\.release\);\s*\}\s*if \(ask\.swallow\) \{\s*return;\s*\}/);
+  assert.match(onEvent, /const ask = micAskOnSignal\(micAskRef\.current, name, payload, ownIdRef\.current\);\s*micAskRef\.current = ask\.next;\s*if \(ask\.release !== null\) \{\s*handleSignal\("audioMuteStatusChanged", ask\.release\);\s*\}\s*if \(ask\.swallow\) \{\s*return;\s*\}/);
   assert.match(onEvent, /if \(name === "videoConferenceJoined"\) \{[\s\S]*?micAskRef\.current = null;/, "um iframe novo nao herda o pedido");
   assert.doesNotMatch(sala, /micStuckRef/, "o 'preso' e o proprio pedido de pe");
 });
@@ -673,7 +673,7 @@ test("o pedido do microfone acaba na queda e no iframe novo: o 'ligado' guardado
   assert.match(queda, /const handleDrop = useCallback\(\(\) => \{\s*micAskRef\.current = null;\s*joinedApiRef\.current = null;/);
   const onEvent = sala.slice(sala.indexOf("const onEvent = useCallback("), sala.indexOf("const configOverwrite = useMemo("));
   assert.match(onEvent, /const frame = meetApiRef\.current\?\.current \?\? null;\s*if \(\(name === "audioMuteStatusChanged" \|\| name === "videoMuteStatusChanged"\) && \(frame === null \|\| joinedApiRef\.current !== frame\)\) \{\s*return;\s*\}/);
-  assert.ok(onEvent.indexOf("joinedApiRef.current !== frame") < onEvent.indexOf("micAskStep("), "antes do pedido do microfone e do lote");
+  assert.ok(onEvent.indexOf("joinedApiRef.current !== frame") < onEvent.indexOf("micAskOnSignal("), "antes do pedido do microfone e do lote");
   assert.match(onEvent, /if \(name === "videoConferenceJoined"\) \{[\s\S]*?joinedApiRef\.current = frame;/);
   assert.match(sala, /meetApiRef\.current = jitsi\.api;/);
   assert.match(sala, /const hangUp = useCallback\(\(\) => \{\s*leavingRef\.current = true;\s*micAskRef\.current = null;/);
@@ -1029,7 +1029,7 @@ test("o painel e o foco: o proprio botao Configurações fecha mandando o foco a
   assert.match(tela, /const barShown = liveBarShown\(\{ blocked, screen \}\);/);
   assert.match(tela, /if \(barWasShown !== barShown\) \{\s*setBarWasShown\(barShown\);\s*if \(!barShown\) \{\s*setSettingsOpen\(false\);\s*setReactionsOpen\(false\);\s*\}\s*\}/);
   assert.match(tela, /const settingsTakeover = settingsShown && !desktop;/);
-  assert.match(tela, /\} else if \(reactionsShown \|\| settingsShown \|\| viewMenuShown\) \{/);
+  assert.match(tela, /roomEscapeStep\(\{ confirmLeave, popoverOpen: reactionsShown \|\| settingsShown \|\| viewMenuShown, stagePoll: stagePoll\?\.mode \?\? null \}\)/);
   assert.match(tela, /\{!barShown \? null : \(\s*<LiveControls/);
   assert.match(tela, /if \(root && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*roomFocusTarget\(root\)\?\.focus\(\);/);
 

@@ -12,6 +12,7 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 // live não está disponível para você." para quem saiu do "Quem pode" no meio da sessao (D41). O palco leva
 // os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
 // enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao girar o aparelho (o som continua).
+// Abaixo de lg deitado o palco deixa o 16:9 e ocupa a caixa, como no computador (roomSkeleton, docs/31 V2-18).
 
 export type RoomStageState = "ended" | "live" | "replay" | "unavailable" | "waiting";
 
@@ -47,7 +48,7 @@ export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted
 
   return (
     <div
-      className="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"
+      className="relative bg-black aspect-video w-full max-lg:landscape:aspect-auto max-lg:landscape:h-full lg:aspect-auto lg:h-full"
       data-lesson-id={roomMediaLessonId(sessionId)}
       data-lesson-player-bridge={showPlayer ? "" : undefined}
       data-lesson-player-kind={showPlayer ? "iframe" : undefined}

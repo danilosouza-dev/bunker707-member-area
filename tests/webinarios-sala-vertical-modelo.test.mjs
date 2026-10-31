@@ -163,7 +163,18 @@ test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em c
   assert.doesNotMatch(vertical.root, /room-/, "o vertical nao usa os tokens do tema no fundo");
   // F4 (V2-6): o corpo do normal com o recuo do computador; o estado (painel, palco que cresce, Modo cinema) e testado em
   // tests/webinarios-sala-v2-modelo.test.mjs.
-  assert.equal(normal.body, "flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-4 lg:pb-4");
+  // Abaixo de lg deitado (o celular de lado, o tablet ou a janela larga e baixa) o corpo fica em linha como no computador
+  // (o palco 16:9 na largura empurrava a barra e o chat para fora da tela a 667 x 375 e a 960 x 600).
+  assert.equal(normal.body, "flex min-h-0 flex-1 flex-col max-lg:landscape:flex-row lg:flex-row lg:gap-4 lg:px-4 lg:pb-4");
+  const pecas = (texto) => texto.split(" ");
+  for (const classe of ["max-lg:landscape:min-h-0", "max-lg:landscape:min-w-0", "max-lg:landscape:flex-1"]) {
+    assert.ok(pecas(normal.stageColumn).includes(classe), `a coluna do palco cresce deitada: ${classe}`);
+  }
+  for (const classe of ["max-lg:landscape:min-h-0", "max-lg:landscape:flex-1"]) {
+    assert.ok(pecas(normal.stageBox).includes(classe), `a caixa do palco ocupa o que sobra acima da barra: ${classe}`);
+  }
+  assert.ok(pecas(normal.stageColumn).includes("shrink-0"), "em pe, o palco 16:9 na largura continua como antes");
+  assert.doesNotMatch(vertical.body, /landscape/, "o vertical (so em pe) nao muda");
   assert.equal(vertical.panel, "hidden", "no vertical o painel nao existe (a gaveta faz o papel dele)");
   assert.equal(normal.bubbles, "contents");
   assert.equal(normal.sales, "contents");

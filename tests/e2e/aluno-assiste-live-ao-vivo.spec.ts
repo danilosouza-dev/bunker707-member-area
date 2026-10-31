@@ -300,14 +300,16 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   const larguraAntes = (await palco.boundingBox())?.width ?? 0;
   expect(larguraAntes).toBeGreaterThan(0);
 
-  // Aberto, o balao fica ligado e controla o painel; fechar esconde o painel (sem desmontar) e o palco toma a largura.
+  // Aberto, o balao fica ligado e controla o painel (aria-expanded, nunca aria-pressed com o nome que muda); fechar
+  // esconde o painel (sem desmontar) e o palco toma a largura.
   const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
-  await expect(esconder).toHaveAttribute("aria-pressed", "true");
+  await expect(esconder).toHaveAttribute("aria-expanded", "true");
+  expect(await esconder.getAttribute("aria-pressed")).toBeNull();
   await expect(esconder).toHaveAttribute("aria-controls", "room-panel");
   await esconder.click();
   await expect(chat).toBeHidden();
   await expect(chat).toHaveCount(1);
-  await expect(dialogo.getByRole("button", { exact: true, name: painel.mostrar })).toHaveAttribute("aria-pressed", "false");
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.mostrar })).toHaveAttribute("aria-expanded", "false");
   await expect.poll(async () => (await palco.boundingBox())?.width ?? 0).toBeGreaterThan(larguraAntes + 300);
   expect(await sala.montagens(), "abrir e fechar o painel so troca classes: o iframe e o mesmo").toBe(1);
 
@@ -317,7 +319,7 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   await expect(dialogo.getByTestId("room-panel")).toBeHidden();
   await dialogo.getByRole("button", { exact: true, name: painel.mostrar }).click();
   await expect(dialogo.getByTestId("room-panel")).toBeVisible();
-  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toHaveAttribute("aria-expanded", "true");
 
   // No computador o Sair fica na barra, a esquerda; o do cabecalho so aparece abaixo de lg.
   const barra = dialogo.getByRole("group", { name: aoVivo.barra });
@@ -381,7 +383,7 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await expect(chat).toBeHidden();
     const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
     await expect(mostrar).toBeFocused();
-    await expect(mostrar).toHaveAttribute("aria-pressed", "false");
+    await expect(mostrar).toHaveAttribute("aria-expanded", "false");
 
     // As 2 ultimas mensagens em pilulas dentro do palco (tambem no computador), a mais nova embaixo.
     const pilulas = palco.getByTestId("room-chat-pills");
@@ -401,10 +403,11 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await comNovas.click();
     await expect(chat).toBeVisible();
     const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
-    await expect(esconder).toHaveAttribute("aria-pressed", "true");
+    await expect(esconder).toHaveAttribute("aria-expanded", "true");
     await expect(esconder.locator("[data-room-unread]")).toHaveCount(0);
     await expect(palco.getByTestId("room-chat-pills")).toHaveCount(0);
-    await expect(chat.getByRole("log").getByText("terceira do produtor no painel")).toBeVisible();
+    // A lista escondida nao rolou com a mensagem nova: reabrir a leva ao fim (chatListOnShow), e a nova fica na vista.
+    await expect(chat.getByRole("log").getByText("terceira do produtor no painel")).toBeInViewport();
   } finally {
     await produtor.fechar();
   }
@@ -448,12 +451,20 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     }
     // Aberta sozinha, ela nao pega o foco (o leitor de tela ouve "Enquete aberta" pela regiao viva).
     expect(await camada.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(false);
-    await expect(palco.locator("[data-room-poll-said]")).toHaveText(enquete.aberta);
+    await expect(palco.locator("[data-room-poll-said]")).toHaveText(enquete.anuncioAberta(pergunta));
 
     // Responder depois: a camada sai e o foco vai ao balao (o card do chat esta no painel fechado).
     await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
     await expect(palco.getByRole("dialog")).toHaveCount(0);
     const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    await expect(mostrar).toBeFocused();
+    // O atalho E (V2-10) traz a enquete deixada para depois de volta ao palco, com o foco na primeira opcao; deixada para
+    // depois de novo, o foco volta ao balao.
+    await page.keyboard.press("e");
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
+    await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
     await expect(mostrar).toBeFocused();
     await mostrar.click();
     await expect(chat).toBeVisible();
@@ -471,6 +482,16 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     await expect(camada).toBeVisible();
     await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
     await expect(card).toHaveCount(0);
+    // O Esc com o foco na enquete vale como Responder depois: ela volta ao card do chat, o foco vai ao Responder agora e a
+    // sala nao pergunta se quer sair. Responder agora a traz de novo.
+    await page.keyboard.press("Escape");
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await expect(card).toBeVisible();
+    await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+    await expect(card.getByRole("button", { exact: true, name: enquete.responderAgora })).toBeFocused();
+    await card.getByRole("button", { exact: true, name: enquete.responderAgora }).click();
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
     const enviar = camada.getByRole("button", { exact: true, name: enquete.enviarResposta });
     await expect(enviar).toBeDisabled();
     await camada.getByRole("radio", { name: "As perguntas" }).check();
@@ -484,6 +505,10 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     await expect(palco.getByRole("dialog")).toHaveCount(0);
     await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toBeFocused();
     await expect(palco.locator("[data-room-poll-said]")).toHaveText(WEBINAR_COPY.sala.enquete.respondida);
+    // Respondida, o atalho E abre a aba Enquetes (nada volta ao palco).
+    await page.keyboard.press("e");
+    await expect(chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes })).toHaveAttribute("aria-selected", "true");
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
     await chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes }).click();
     await expect(dialogo.getByTestId("room-polls").getByText(WEBINAR_COPY.sala.enquete.respondida)).toBeVisible();
   } finally {
@@ -549,8 +574,18 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   await expect(noPalco).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialogo.getByRole("alertdialog", { name: WEBINAR_COPY.sala.sairConfirmar })).toBeVisible();
+  // A confirmacao recebe o foco no Voltar (o Enter seguinte nao tira ninguem da live); o Esc a fecha e o foco volta para
+  // quem a abriu (o botao da visao), nunca para o body.
+  await expect(dialogo.getByRole("alertdialog").getByRole("button", { exact: true, name: WEBINAR_COPY.sala.voltar })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+  await expect(noPalco).toBeFocused();
+  // Um toque fora do botao e do menu (o titulo, que nao recebe foco) fecha o menu.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await dialogo.getByRole("heading", { level: 1 }).click();
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
   // O clique no video tira o foco da pagina (ele entra no iframe do motor): o menu fecha.
   await noPalco.click();
   await expect(menu).toBeVisible();
@@ -1045,6 +1080,15 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresen
   // A partir de sm o botao de tema volta ao cabecalho, antes do Sair.
   await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 
+  // Deitado, o corpo fica em linha (roomSkeleton): o palco ocupa o que sobra acima da barra e o painel do chat fica ao
+  // lado. A barra, o balao, a Tela cheia do canto do palco, as abas e o campo do chat cabem na tela (antes, o palco 16:9
+  // na largura empurrava tudo para baixo dela, e o toBeVisible passava com eles fora da tela).
+  await expect(dialogo.locator("[data-room-bar]")).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.painel.esconder })).toBeInViewport({ ratio: 1 });
+  await expect(palco.locator("[data-room-stage-corner]")).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.chat })).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("textbox", { name: WEBINAR_COPY.sala.escreva })).toBeInViewport({ ratio: 1 });
+
   const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
   const caixas = {
     linha: await linha.boundingBox(),
@@ -1080,6 +1124,7 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresen
   await dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar }).click();
   await expect(painel).toHaveCount(0);
   await expect(dialogo.getByTestId("room-panel")).toBeVisible();
+  await expect(dialogo.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.chat })).toBeInViewport({ ratio: 1 });
 });
 
 // O Chrome fixa a Permissions-Policy no carregamento do documento, e a navegacao interna do Next nao carrega outro:
