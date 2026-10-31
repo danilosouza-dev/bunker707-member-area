@@ -934,3 +934,24 @@ test("deploy-meet, secrets-meet e update.sh reiniciam o jicofo depois do up -d c
   assert.match(secrets, /--profile borda up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus;/);
   assert.match(update, /compose up -d\n\s+reconnect_focus\n/);
 });
+
+// A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o
+// install falhava, /opt/jibri era criada pelo root e o jibri-up parava no scp (31/10/2026). Roda as trocas do jibri.sh.
+test("jibri.sh: o cloud-init do gravador sai sem nenhum marcador e com a pasta /opt/jibri do usuario de deploy", () => {
+  const values = {
+    "$DEPLOY_USER": "deploy",
+    "$pub": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITeste chave-de-teste",
+    "$image_repo": "jitsi",
+    "$image_version": "stable-11248",
+  };
+  const expressions = [...jibriSource.matchAll(/-e "(s\|__[A-Z_]+__\|[^"]*)"/g)].map((match) =>
+    match[1].replace(/\$[A-Za-z_]+/, (name) => values[name] ?? name),
+  );
+  assert.equal(expressions.length, 4, "as quatro trocas do cloud-init");
+  const result = spawnSync("sed", [...expressions.flatMap((expression) => ["-e", expression]), join(jitsiDir, "jibri", "cloud-init.yaml")], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /__[A-Z_]+__/);
+  assert.match(result.stdout, /^ {2}- install -d -o deploy -g deploy \/opt\/jibri$/m);
+});
