@@ -60,13 +60,14 @@ export function RoomElapsed({ getOffsetMs }: { getOffsetMs?: () => number }) {
 
 /** A marca no canto da sala, so a partir de lg: a logo de Marca (ou o nome, sem logo), sem link. */
 function RoomBrand() {
+  const copy = WEBINAR_COPY.salaV2.cabecalho;
   const logoImage = usePlatformLogoImage();
 
   return (
     <div className="hidden shrink-0 items-center lg:flex" data-room-brand="logo">
       {logoImage ? (
         <Image
-          alt="Bunker707"
+          alt={copy.marca}
           className="h-auto max-h-8 w-[112px] shrink-0 object-contain object-left"
           height={35}
           src={logoImage}
@@ -74,7 +75,7 @@ function RoomBrand() {
           width={306}
         />
       ) : (
-        <span className="whitespace-nowrap text-sm font-black uppercase tracking-wide text-room-fg-strong">Bunker707</span>
+        <span className="whitespace-nowrap text-sm font-black uppercase tracking-wide text-room-fg-strong">{copy.marca}</span>
       )}
     </div>
   );

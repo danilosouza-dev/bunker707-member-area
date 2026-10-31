@@ -7,14 +7,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // A sala ao vivo desenhada (docs/30 §1.3, §1.4, §1.5, §1.7, §8.4, §8.5, §9, D2 e D18; docs/18 §2.2): os pedacos
 // desenhados no Node, sem navegador, e a leitura das fontes. O palco monta o iframe pelo useJitsiMeet com o
-// liveConfigOverwrite do papel e o nonce da pagina; nenhum texto da sala cita o motor de video; as frases sao todas de
-// WEBINAR_COPY (ou das provisorias pedidas); o aviso de gravacao da camera vem antes do toggleVideo e o microfone so
-// aparece depois do aviso e do Falar; a sala e um dialogo aria-modal com o chat em role=log e aria-live; os botoes
-// da barra tem 44 px e o nome exato (Configurações no lugar do antigo Como usar, com o painel de som e aparelhos e os
-// atalhos dentro); os sinais vao pelo sendBeacon no pagehide. Desenhada: Entrar na sala, Aguardando
-// o apresentador (com a contagem), a sala trancada, em breve, encerrada (com Assistir o replay), removido e banido no
-// lugar da sala, o silencio no lugar do campo, a equipe na Sessao de pratica, o "ver como", a aba Participantes, o
-// selo Gravando, "Ao vivo · 00:42:10" e os dois avisos de gravacao.
+// liveConfigOverwrite do papel e o nonce da pagina; nenhum texto da sala cita o motor de video (que as frases sao
+// todas de WEBINAR_COPY fica em tests/webinarios-sala-frases.guard.test.mjs); o aviso de gravacao da camera vem antes
+// do toggleVideo e o microfone so aparece depois do aviso e do Falar; a sala e um dialogo aria-modal com o chat em
+// role=log e aria-live; os botoes da barra tem 44 px e o nome exato (Configurações no lugar do antigo Como usar, com
+// o painel de som e aparelhos e os atalhos dentro); os sinais vao pelo sendBeacon no pagehide. Desenhada: Entrar na
+// sala, Aguardando o apresentador (com a contagem), a sala trancada, em breve, encerrada (com Assistir o replay),
+// removido e banido no lugar da sala, o silencio no lugar do campo, a equipe na Sessao de pratica, o "ver como", a aba
+// Participantes, o selo Gravando, "Ao vivo · 00:42:10" e os dois avisos de gravacao.
 
 const room = await import("../src/components/member/webinars/room/live-room.tsx");
 const stageModule = await import("../src/components/member/webinars/room/live-stage.tsx");
@@ -140,18 +140,8 @@ test("nenhum texto da sala cita o motor de video (D2): nem nas frases, nem no ti
   }
 });
 
-test("as frases da sala ao vivo sao todas de WEBINAR_COPY (ou das provisorias de LIVE_ROOM_COPY): nenhum texto escrito direto no desenho", () => {
-  for (const nome of ["room", "stage", "controls", "notices", "settings"]) {
-    const codigo = semComentarios(FONTES[nome]);
-    const textosNoJsx = codigo.match(/>[^<>{}\n]*[A-Za-zÀ-ú]{2,}[^<>{}\n]*</g) ?? [];
-    assert.deepEqual(textosNoJsx, [], `${nome}: texto direto no JSX`);
-    const atributos = codigo.match(/\b(aria-label|title|placeholder|alt)="[^"]+"/g) ?? [];
-    assert.deepEqual(atributos, [], `${nome}: rotulo escrito direto`);
-  }
-  assert.match(FONTES.controls, /LIVE_ROOM_COPY\.configuracoes/);
-  assert.doesNotMatch(FONTES.controls, /comoUsar|Keyboard/, "o Como usar virou o painel Configurações");
-  assert.match(FONTES.model, /export const LIVE_ROOM_COPY = \{/);
-});
+// As frases da sala (nenhum texto direto no JSX nem rotulo literal) ficam na guarda
+// tests/webinarios-sala-frases.guard.test.mjs, com as pecas da sala V2 (docs/18 §2.7).
 
 test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so liga depois do aviso e do Falar", () => {
   const roomCode = semComentarios(FONTES.room);

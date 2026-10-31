@@ -202,9 +202,11 @@ test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo c
   await gaveta.getByRole("button", { exact: true, name: vertical.voltarAoVideo }).click();
   await expect(gaveta).toHaveCount(0);
 
-  // Sem Minimizar (docs/31 V2-2): nada encolhe a sala, e a pagina da live nao fica desenhada por baixo dela.
+  // Sem Minimizar (docs/31 V2-2): nada encolhe a sala, e a pagina da live nao fica desenhada por baixo dela (o titulo
+  // da pagina seria um segundo h1).
   await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
   await expect(page.getByTestId("room-pill")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1, name: titulo })).toHaveCount(1);
 
   // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
   await page.setViewportSize({ height: 375, width: 740 });

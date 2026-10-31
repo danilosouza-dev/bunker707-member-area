@@ -5,11 +5,13 @@
 export const SALA_V2_COPY = {
   /**
    * O cabecalho (V2-3): a linha da data no computador ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo Souza") e a
-   * linha do celular ("com Danilo Souza · 128 assistindo"); os trechos se juntam com " · ".
+   * linha do celular ("com Danilo Souza · 128 assistindo"); os trechos se juntam com " · ". Sem a logo de Marca, o
+   * nome da escola em texto no lugar dela (e o alt da logo).
    */
   cabecalho: {
     com: (nome: string) => `com ${nome}`,
-    duracao: (minutos: number) => `${minutos} min`
+    duracao: (minutos: number) => `${minutos} min`,
+    marca: "Bunker707"
   },
   /**
    * O chat no estilo do Zoom (V2-9): o leitor de tela ouve quem escreveu antes do texto ("Marina R., Equipe, 20:41: ",
