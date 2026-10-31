@@ -67,6 +67,8 @@ services:
       # Versionados no repositorio; o script de partida da imagem os anexa a config.js e interface_config.js.
       - ./web/custom-config.js:/config/custom-config.js:ro
       - ./web/custom-interface_config.js:/config/custom-interface_config.js:ro
+      # O CSS nosso dentro do iframe (docs/31 §3), carregado pelo custom-config.js; o nginx serve /css/bunker707.css.
+      - ./web/bunker707.css:/usr/share/jitsi-meet/css/bunker707.css:ro
     environment:
       <<: *common-env
       DISABLE_HTTPS: "1"

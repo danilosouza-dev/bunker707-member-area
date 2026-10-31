@@ -45,3 +45,25 @@ config.toolbarButtons = ['camera', 'raisehand', 'fullscreen', 'hangup'];
 // A reserva "Gravar no navegador" do console (docs/30 §6.7) usa a gravacao local: fica ligada de forma explicita,
 // sem depender do padrao da imagem.
 config.localRecording = { disable: false };
+
+// Bunker707: o CSS nosso dentro do iframe (docs/31 §3). Este arquivo roda como script da pagina, antes do app:
+// le o tema no hash (`#config.bunkerTheme="light"`, chave que o app descarta por estar fora da whitelist, mas que
+// fica na URL) e liga css/bunker707.css, servido por este mesmo nginx (montado em docker-compose.yml). Sem o
+// hash, escuro. Sem a folha, o motor segue com o visual padrao dele. E a unica parte deste arquivo que toca o DOM:
+// so cria o <link> para um caminho relativo desta origem (nada de rede nem de script), entre as marcas abaixo.
+// bunker707:css-loader:inicio
+(function () {
+    if (typeof document === 'undefined' || typeof window === 'undefined') { return; }
+    try {
+        var hash = String((window.location && window.location.hash) || '');
+        var match = /config\.bunkerTheme=(?:%22|"|%27|')?(light|dark)/.exec(hash);
+        document.documentElement.setAttribute('data-bunker-theme', match ? match[1] : 'dark');
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'css/bunker707.css?v=1';
+        (document.head || document.documentElement).appendChild(link);
+    } catch (e) {
+        // Sem a folha nossa, o motor segue com o visual padrao dele.
+    }
+})();
+// bunker707:css-loader:fim

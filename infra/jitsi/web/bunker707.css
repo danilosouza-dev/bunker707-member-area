@@ -1,0 +1,33 @@
+/*
+ * Bunker707: o visual da V2 dentro do iframe do motor (docs/31 §3). O custom-config.js desta instancia carrega
+ * esta folha e grava o tema em html[data-bunker-theme] (lido do hash do iframe); sem tema, escuro. Os seletores
+ * valem para a tag stable fixada no .env.example desta instancia e foram conferidos no codigo dela;
+ * a cada atualizacao da tag, o spike de prints se repete (docs/31 §7). Nada aqui cita o motor na tela.
+ *
+ * O que fica dentro do iframe: o video grande (#largeVideoContainer) e as miniaturas (.filmstrip). Tudo o que
+ * esta ao redor (cabecalho, barra, painel, enquete) e da pagina da area de membros.
+ */
+
+:root {
+  --bunker-bg: #141414;
+  --bunker-tile: #202020;
+  --bunker-tile-border: rgba(255, 255, 255, 0.1);
+  --bunker-stage: #000000;
+  --bunker-radius: 16px;
+  --bunker-radius-tile: 12px;
+  --bunker-gap: 8px;
+  --bunker-speaking: #34d399;
+}
+
+html[data-bunker-theme="light"] {
+  --bunker-bg: #f4f4f3;
+  --bunker-tile: #e4e4e7;
+  --bunker-tile-border: rgba(0, 0, 0, 0.08);
+  --bunker-speaking: #16a34a;
+}
+
+/* O fundo da pagina do iframe e o da area, nos dois temas: as miniaturas parecem soltas sobre a pagina. */
+html,
+body {
+  background: var(--bunker-bg) !important;
+}

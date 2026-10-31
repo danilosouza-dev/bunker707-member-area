@@ -16,6 +16,36 @@ export type LiveRoomRole = "co_host" | "host" | "student" | "team";
 /** O que o card Qualidade e o card Sala decidem para o iframe (docs/30 §2.2 e D26). */
 export type LiveEmbedSettings = { allowStudentCamera: boolean; screenFps: 15 | 30; stage: 720 | 1080 };
 
+/** O tema da sala (docs/31 V2-12): a escolha da pessoa, guardada no navegador dela; escuro por padrao. */
+export type LiveRoomTheme = "dark" | "light";
+/**
+ * Os layouts do video que o motor permite (docs/31 V2-16): o palco com a coluna de miniaturas, o palco com a fileira
+ * embaixo, a grade (tile view, ligada por comando depois de entrar) e o palco duplo (ate 2 no palco, stage filmstrip).
+ */
+export type LiveRoomLayout = "grid" | "stage" | "stage_bottom" | "stage_duo";
+/** O visual pedido por pessoa (docs/31 §3): entra no iframe pelo interfaceConfig e, o tema, pelo hash (o CSS da instancia le). */
+export type LiveEmbedLook = { layout?: LiveRoomLayout | null; theme?: LiveRoomTheme | null };
+export const DEFAULT_LOOK: Readonly<Required<{ [K in keyof LiveEmbedLook]: NonNullable<LiveEmbedLook[K]> }>> = { layout: "stage", theme: "dark" };
+const ROOM_THEMES: readonly LiveRoomTheme[] = ["dark", "light"];
+const ROOM_LAYOUTS: readonly LiveRoomLayout[] = ["grid", "stage", "stage_bottom", "stage_duo"];
+/** O fundo atras do video grande (as faixas do letterbox) nos dois temas: o palco e preto, como num player. */
+export const STAGE_BACKGROUND = "#000000";
+/** A altura das miniaturas na fileira (e a base da largura na coluna): 16:9 (o padrao da tag e 1:1 para as remotas). */
+export const THUMBNAIL_HEIGHT = 120;
+export const THUMBNAIL_RATIO = 16 / 9;
+/**
+ * A chave que leva o tema no hash do iframe (`#config.bunkerTheme="light"`). O app descarta chaves fora da whitelist,
+ * mas o hash fica na URL e o custom-config.js da instancia o le antes do app subir (docs/31 §3).
+ */
+export const THEME_HASH_KEY = "bunkerTheme";
+
+/** O visual conferido: valor desconhecido ou ausente vira o padrao (escuro, palco). */
+export function normalizeLook(look?: LiveEmbedLook | null): { layout: LiveRoomLayout; theme: LiveRoomTheme } {
+  const theme = look?.theme && ROOM_THEMES.includes(look.theme) ? look.theme : DEFAULT_LOOK.theme;
+  const layout = look?.layout && ROOM_LAYOUTS.includes(look.layout) ? look.layout : DEFAULT_LOOK.layout;
+  return { layout, theme };
+}
+
 /** Teto da camera do aluno e da Equipe fora do palco (D26). */
 export const STUDENT_CAMERA_MAX_HEIGHT = 360;
 /** Cada um recebe no maximo o palco + 8 miniaturas (custom-config.js: channelLastN = 9). */
@@ -102,15 +132,22 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
  * aluno bate sozinho na sala de espera (`lobby.autoKnock`): com a sala trancada ou a Sala de espera ligada, ele fica
  * na fila sem precisar achar o botao do iframe.
  */
-export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings): Record<string, unknown> {
+export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
   const height = sendHeightFor(role, settings);
   const student = role === "student";
   const audience = role === "student" || role === "team";
+  const look = normalizeLook(lookInput);
   return {
     ...(audience ? { disableInitialGUM: true } : {}),
     ...(student ? { lobby: { autoKnock: true } } : {}),
+    // O tema vai no hash para o CSS da instancia (docs/31 §3); o app ignora a chave, que fica fora da whitelist.
+    [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
+    // A fileira com o tamanho do interfaceConfig (nao redimensionavel pela pessoa) e, no palco duplo, 2 no palco.
+    filmstrip: { disableResizable: true, stageFilmstripParticipants: look.layout === "stage_duo" ? 2 : 1 },
+    // A grade mostra no maximo o que cada um recebe (o palco + 8 miniaturas, D26).
+    tileView: { numberOfVisibleTiles: CHANNEL_LAST_N },
     constraints: { video: { height: { ideal: height, max: height, min: 180 } } },
     desktopSharingFrameRate: { max: settings.screenFps, min: 5 },
     disableChat: true,
@@ -129,8 +166,8 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     hideConferenceSubject: true,
     hideConferenceTimer: true,
     hideDisplayName: false,
+    // So `prejoinConfig.enabled` esta na whitelist da tag fixada; o `prejoinPageEnabled` antigo era ignorado.
     prejoinConfig: { enabled: false },
-    prejoinPageEnabled: false,
     readOnlyName: true,
     remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disabled: student },
     resolution: height,
@@ -148,12 +185,22 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
  * moderador, perfil e idioma, que o console ja decide). O aluno e a Equipe nao tem engrenagem (a barra deles e a nossa);
  * sem o papel (a chamada antiga), o mesmo do aluno.
  */
-export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null): Record<string, unknown> {
+export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
+  const look = normalizeLook(lookInput);
   return {
+    // O visual da V2 (docs/31 §3): o palco preto atras do letterbox, sem o indicador de conexao nas miniaturas, as
+    // miniaturas em 16:9 com a altura fixa, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
+    CONNECTION_INDICATOR_DISABLED: true,
+    DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
-    MOBILE_APP_PROMO: false,
+    FILM_STRIP_MAX_HEIGHT: THUMBNAIL_HEIGHT,
+    LOCAL_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
+    // MOBILE_APP_PROMO fica fora da whitelist do iframe (a tag ignora); a instancia ja desliga no custom-interface_config.js.
+    REMOTE_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
     ...(presents(role) ? { SETTINGS_SECTIONS: ["devices"] } : {}),
-    SHOW_CHROME_EXTENSION_BANNER: false
+    SHOW_CHROME_EXTENSION_BANNER: false,
+    VERTICAL_FILMSTRIP: look.layout !== "stage_bottom",
+    VIDEO_LAYOUT_FIT: "both"
   };
 }
 

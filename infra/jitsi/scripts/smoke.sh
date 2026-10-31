@@ -45,6 +45,7 @@ log "Site em $public_url"
 check "config.js" 200 "$public_url/config.js"
 check "interface_config.js" 200 "$public_url/interface_config.js"
 check "external_api.js" 200 "$public_url/external_api.js"
+check "css/bunker707.css (o CSS nosso)" 200 "$public_url/css/bunker707.css"
 # Sem o upgrade do websocket o prosody responde com texto ou 4xx; 502/503 seria o nginx sem chegar nele.
 check "websocket (caminho ate o prosody)" "200|400|404|426" "$public_url/xmpp-websocket"
 
@@ -63,7 +64,7 @@ printf '%s' "$last" | grep -q 'false' || { brand_ok=0; falha "interface_config.j
 [ "$brand_ok" = 1 ] && ok "interface_config.js" "custom-interface_config.js no fim, sem a marca"
 cfg=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null || true)
 cfg_ok=1
-for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9"; do
+for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css"; do
     printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
 # A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.

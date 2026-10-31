@@ -298,8 +298,14 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window.
-  for (const source of [customConfig, customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. A unica excecao e o carregador do CSS
+  // nosso (docs/31 §3), entre as marcas: ele so le o hash e cria um <link> relativo desta origem.
+  const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
+  assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
+  for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.doesNotMatch(loader[1], /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src)\b/, "o carregador nao busca nada nem roda script");
+  assert.doesNotMatch(loader[1], /https?:/, "o <link> e relativo a esta origem");
+  assert.match(loader[1], /link\.href = 'css\/bunker707\.css\?v=\d+';/);
 });
 
 test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos locais com CA interna, nada impresso, e nao repete sem --force", () => {
@@ -933,4 +939,46 @@ test("deploy-meet, secrets-meet e update.sh reiniciam o jicofo depois do up -d c
   assert.match(deploy, /\$jitsi_compose up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus'/);
   assert.match(secrets, /--profile borda up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus;/);
   assert.match(update, /compose up -d\n\s+reconnect_focus\n/);
+});
+
+// Redesign V2, fase 0 (docs/31 §3): o CSS nosso dentro do iframe do motor, carregado pelo custom-config.js, com o
+// tema lido do hash; o compose monta a folha no nginx do web e o smoke confere que ela e servida.
+test("o CSS nosso no iframe: montado no web, servido em /css/bunker707.css, ligado pelo custom-config.js com o tema do hash", () => {
+  const web = composeServices(composeSource).get("web");
+  assert.match(web, /- \.\/web\/bunker707\.css:\/usr\/share\/jitsi-meet\/css\/bunker707\.css:ro/, "a folha montada no nginx do web, somente leitura");
+  const smoke = read(join(jitsiDir, "scripts", "smoke.sh"));
+  assert.match(smoke, /check "css\/bunker707\.css[^"]*" 200 "\$public_url\/css\/bunker707\.css"/, "o smoke confere que a folha e servida");
+  assert.match(smoke, /"css\/bunker707\.css"; do/, "e que o config.js servido traz o carregador");
+
+  // Avaliado como o navegador faria: o config.js roda como script da pagina, com document e window.
+  const head = { children: [], appendChild(element) { this.children.push(element); } };
+  const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+  const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
+  const run = (hash) => {
+    head.children.length = 0;
+    vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
+    return { link: head.children[0], theme: documentElement.attributes["data-bunker-theme"] };
+  };
+  // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22light%22&config.disableChat=true"), {
+    link: { href: "css/bunker707.css?v=1", rel: "stylesheet", tag: "link" },
+    theme: "light"
+  });
+  assert.equal(run('#config.bunkerTheme="dark"').theme, "dark");
+  assert.equal(run("#config.disableChat=true").theme, "dark", "sem o tema no hash, escuro");
+  assert.equal(run("").theme, "dark");
+  assert.equal(run("#config.bunkerTheme=%22sepia%22").theme, "dark", "valor desconhecido vira escuro");
+  // Sem document (o teste de cima avalia o arquivo so com config) nada quebra: o resto do config.js continua valendo.
+  const config = { videoQuality: {} };
+  vm.runInNewContext(customConfig, { config });
+  assert.equal(config.channelLastN, 9);
+});
+
+test("bunker707.css: os dois temas, o fundo da pagina pelo tema e nenhum nome do motor", () => {
+  const css = read(join(jitsiDir, "web", "bunker707.css"));
+  assert.doesNotMatch(css, /jitsi/i, "nada cita o motor (D2)");
+  assert.match(css, /:root \{[^}]*--bunker-bg: #141414;/, "o escuro e o fundo da area");
+  assert.match(css, /html\[data-bunker-theme="light"\] \{[^}]*--bunker-bg: #f4f4f3;/, "o claro e o fundo claro da sala (docs/31 V2-11)");
+  assert.match(css, /html,\s*body \{\s*background: var\(--bunker-bg\) !important;/, "o fundo da pagina do iframe segue o tema");
+  assert.ok(!/@import|url\(\s*["']?https?:/.test(css), "a folha nao puxa nada de fora (CSP e privacidade)");
 });
