@@ -184,13 +184,15 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
       "CONNECTION_INDICATOR_DISABLED",
       "DEFAULT_BACKGROUND",
       "DISABLE_JOIN_LEAVE_NOTIFICATIONS",
+      "DISABLE_VIDEO_BACKGROUND",
       "FILM_STRIP_MAX_HEIGHT",
       "LOCAL_THUMBNAIL_RATIO",
       "REMOTE_THUMBNAIL_RATIO",
       "SETTINGS_SECTIONS",
       "SHOW_CHROME_EXTENSION_BANNER",
       "VERTICAL_FILMSTRIP",
-      "VIDEO_LAYOUT_FIT"
+      "VIDEO_LAYOUT_FIT",
+      "VIDEO_QUALITY_LABEL_DISABLED"
     ],
     "o resto do interfaceConfig igual para todos"
   );

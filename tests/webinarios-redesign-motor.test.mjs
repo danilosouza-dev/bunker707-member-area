@@ -20,7 +20,7 @@ const INTERFACE_WHITELIST = new Set(
 // manda (a lista inteira tem ~190 chaves; o teste confere as nossas). Uma entrada com ponto (`prejoinConfig.enabled`)
 // libera so aquele campo do objeto; o app descarta o resto e qualquer chave fora da lista, sem avisar.
 const CONFIG_WHITELIST = new Set(
-  "breakoutRooms channelLastN constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disablePrivateChat disableReactions disableRemoteMute disableSelfView disableShortcuts filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName lobby prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startAudioOnly startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
+  "breakoutRooms channelLastN constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disablePrivateChat disableReactions disableRemoteMute disableSelfView disableShortcuts filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startAudioOnly startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
     " "
   )
 );
@@ -47,6 +47,8 @@ test("interfaceConfig: palco preto atras do letterbox, miniaturas 16:9 com altur
   assert.equal(padrao.LOCAL_THUMBNAIL_RATIO, 16 / 9);
   assert.equal(padrao.REMOTE_THUMBNAIL_RATIO, 16 / 9, "o padrao da tag e 1:1 para as remotas");
   assert.equal(padrao.CONNECTION_INDICATOR_DISABLED, true);
+  assert.equal(padrao.VIDEO_QUALITY_LABEL_DISABLED, true);
+  assert.equal(padrao.DISABLE_VIDEO_BACKGROUND, true, "faixas pretas, sem a copia desfocada do video por tras");
   assert.equal(padrao.VIDEO_LAYOUT_FIT, "both", "o video inteiro, com as faixas pretas, nunca cortado");
   assert.equal(embed.liveInterfaceConfigOverwrite("student", { layout: "stage_bottom" }).VERTICAL_FILMSTRIP, false, "Miniaturas embaixo: a fileira horizontal");
   assert.equal(embed.liveInterfaceConfigOverwrite("host", { layout: "grid" }).VERTICAL_FILMSTRIP, true, "a grade e o palco duplo ficam na coluna (o tile view e por comando)");
@@ -60,13 +62,22 @@ test("interfaceConfig: palco preto atras do letterbox, miniaturas 16:9 com altur
   }
 });
 
-test("configOverwrite: o tema no hash, a fileira travada no tamanho do interfaceConfig, 2 no palco duplo e a grade com ate 9", () => {
+test("configOverwrite: o tema no hash, a coluna com 213 px fixados na entrada (o video ao lado, nao por baixo), 2 no palco duplo e a grade com ate 9", () => {
   const aluno = embed.liveConfigOverwrite("student", settings);
   assert.equal(aluno.bunkerTheme, "dark", "sem escolha, escuro");
   assert.equal(embed.liveConfigOverwrite("student", settings, { theme: "light" }).bunkerTheme, "light");
   assert.equal(embed.THEME_HASH_KEY, "bunkerTheme");
-  assert.deepEqual(aluno.filmstrip, { disableResizable: true, stageFilmstripParticipants: 1 });
-  assert.deepEqual(embed.liveConfigOverwrite("host", settings, { layout: "stage_duo" }).filmstrip, { disableResizable: true, stageFilmstripParticipants: 2 });
+  // Na tag, o motor so estreita o video grande para a coluna quando ela e redimensionavel e tem >= 180 px
+  // (FILMSTRIP_BREAKPOINT); initialWidth grava a largura na entrada e o puxador fica invisivel pelo CSS da instancia.
+  assert.deepEqual(aluno.filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 1 });
+  assert.ok(embed.FILMSTRIP_COLUMN_WIDTH >= 180, "abaixo de 180 px as miniaturas voltam a flutuar sobre o video");
+  assert.ok(embed.FILMSTRIP_COLUMN_WIDTH < 300, "a partir de 300 px a coluna vira uma grade (FILMSTRIP_GRID_BREAKPOINT)");
+  // Com a coluna redimensionavel a tag fixa a remota em 120 px de altura e faz a local pela razao: as duas ficam iguais.
+  assert.ok(Math.abs(embed.FILMSTRIP_COLUMN_WIDTH / embed.THUMBNAIL_RATIO - embed.THUMBNAIL_HEIGHT) < 1, "a local 16:9 fica a menos de 1 px da remota");
+  assert.equal(aluno.hideDominantSpeakerBadge, true, "os selos do palco sao da pagina (V2-4)");
+  assert.deepEqual(embed.liveConfigOverwrite("host", settings, { layout: "stage_duo" }).filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 2 });
+  assert.deepEqual(embed.liveConfigOverwrite("host", settings, { layout: "grid" }).filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 1 });
+  assert.deepEqual(embed.liveConfigOverwrite("student", settings, { layout: "stage_bottom" }).filmstrip, { disableResizable: true, stageFilmstripParticipants: 1 }, "a fileira embaixo tem o tamanho do interfaceConfig");
   assert.deepEqual(aluno.tileView, { numberOfVisibleTiles: embed.CHANNEL_LAST_N });
   assert.equal(embed.CHANNEL_LAST_N, 9, "o palco + 8 miniaturas (D26)");
   // O resto nao mudou com o visual: barra, mudo, 360p, sala de espera.
@@ -78,6 +89,9 @@ test("configOverwrite: o tema no hash, a fileira travada no tamanho do interface
   const comVisual = embed.liveConfigOverwrite("student", settings, { layout: "grid", theme: "light" });
   const diferentes = Object.keys({ ...semVisual, ...comVisual }).filter((key) => JSON.stringify(semVisual[key]) !== JSON.stringify(comVisual[key]));
   assert.deepEqual(diferentes, ["bunkerTheme"], "a grade e por comando depois de entrar; so o tema muda o configOverwrite");
+  const comFileira = embed.liveConfigOverwrite("student", settings, { layout: "stage_bottom" });
+  const soAFileira = Object.keys({ ...semVisual, ...comFileira }).filter((key) => JSON.stringify(semVisual[key]) !== JSON.stringify(comFileira[key]));
+  assert.deepEqual(soAFileira, ["filmstrip"], "a fileira embaixo so muda a filmstrip");
 });
 
 test("tudo o que o configOverwrite manda esta na whitelist do IFrame API, menos o tema, que vai so para o hash", () => {

@@ -30,7 +30,17 @@ const ROOM_THEMES: readonly LiveRoomTheme[] = ["dark", "light"];
 const ROOM_LAYOUTS: readonly LiveRoomLayout[] = ["grid", "stage", "stage_bottom", "stage_duo"];
 /** O fundo atras do video grande (as faixas do letterbox) nos dois temas: o palco e preto, como num player. */
 export const STAGE_BACKGROUND = "#000000";
-/** A altura das miniaturas na fileira (e a base da largura na coluna): 16:9 (o padrao da tag e 1:1 para as remotas). */
+/**
+ * A coluna de miniaturas (Palco, Palco duplo e a grade), conferido na tag fixada (docs/31 §3): `filmstrip.initialWidth`
+ * grava a largura na entrada e, com a coluna "redimensionavel" (o puxador fica invisivel pelo CSS da instancia) e pelo
+ * menos 180 px, o motor estreita o video grande em vez de cobrir a borda dele com as miniaturas (LargeVideo.web.tsx).
+ * Com a coluna redimensionavel a miniatura remota tem sempre 120 px de altura e a local tem largura / 16:9, por isso
+ * 213 px (213 / (16/9) = 119,8). O motor limita a coluna a (largura do iframe - 800): o iframe precisa de 1013 px
+ * para a coluna inteira e, abaixo de 980 px, a coluna fica com menos de 180 px e as miniaturas voltam a flutuar sobre
+ * o video; a pagina trata isso na fase 1 (resizeFilmStrip, toggleFilmStrip ou a fileira embaixo).
+ */
+export const FILMSTRIP_COLUMN_WIDTH = 213;
+/** A altura das miniaturas na fileira embaixo (FILM_STRIP_MAX_HEIGHT vale como altura no horizontal); 16:9. */
 export const THUMBNAIL_HEIGHT = 120;
 export const THUMBNAIL_RATIO = 16 / 9;
 /**
@@ -144,8 +154,14 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
-    // A fileira com o tamanho do interfaceConfig (nao redimensionavel pela pessoa) e, no palco duplo, 2 no palco.
-    filmstrip: { disableResizable: true, stageFilmstripParticipants: look.layout === "stage_duo" ? 2 : 1 },
+    // O selo de "quem fala" que o motor desenha sobre o video grande sai: os selos do palco sao da pagina (docs/31 V2-4).
+    hideDominantSpeakerBadge: true,
+    // A coluna com a largura fixada na entrada (o video grande ao lado, nao por baixo) e, no palco duplo, 2 no palco;
+    // a fileira embaixo com o tamanho do interfaceConfig.
+    filmstrip:
+      look.layout === "stage_bottom"
+        ? { disableResizable: true, stageFilmstripParticipants: 1 }
+        : { alwaysShowResizeBar: false, disableResizable: false, initialWidth: FILMSTRIP_COLUMN_WIDTH, stageFilmstripParticipants: look.layout === "stage_duo" ? 2 : 1 },
     // A grade mostra no maximo o que cada um recebe (o palco + 8 miniaturas, D26).
     tileView: { numberOfVisibleTiles: CHANNEL_LAST_N },
     constraints: { video: { height: { ideal: height, max: height, min: 180 } } },
@@ -188,11 +204,13 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
 export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
   const look = normalizeLook(lookInput);
   return {
-    // O visual da V2 (docs/31 §3): o palco preto atras do letterbox, sem o indicador de conexao nas miniaturas, as
-    // miniaturas em 16:9 com a altura fixa, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
+    // O visual da V2 (docs/31 §3): o palco preto atras do letterbox (sem a copia desfocada do video por tras), sem o
+    // indicador de conexao nem o rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade,
+    // palco duplo) ou embaixo.
     CONNECTION_INDICATOR_DISABLED: true,
     DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+    DISABLE_VIDEO_BACKGROUND: true,
     FILM_STRIP_MAX_HEIGHT: THUMBNAIL_HEIGHT,
     LOCAL_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
     // MOBILE_APP_PROMO fica fora da whitelist do iframe (a tag ignora); a instancia ja desliga no custom-interface_config.js.
@@ -200,7 +218,8 @@ export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInp
     ...(presents(role) ? { SETTINGS_SECTIONS: ["devices"] } : {}),
     SHOW_CHROME_EXTENSION_BANNER: false,
     VERTICAL_FILMSTRIP: look.layout !== "stage_bottom",
-    VIDEO_LAYOUT_FIT: "both"
+    VIDEO_LAYOUT_FIT: "both",
+    VIDEO_QUALITY_LABEL_DISABLED: true
   };
 }
 

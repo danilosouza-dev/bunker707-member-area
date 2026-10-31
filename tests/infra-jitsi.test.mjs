@@ -981,4 +981,16 @@ test("bunker707.css: os dois temas, o fundo da pagina pelo tema e nenhum nome do
   assert.match(css, /html\[data-bunker-theme="light"\] \{[^}]*--bunker-bg: #f4f4f3;/, "o claro e o fundo claro da sala (docs/31 V2-11)");
   assert.match(css, /html,\s*body \{\s*background: var\(--bunker-bg\) !important;/, "o fundo da pagina do iframe segue o tema");
   assert.ok(!/@import|url\(\s*["']?https?:/.test(css), "a folha nao puxa nada de fora (CSP e privacidade)");
+  // Os seletores da tag fixada (docs/31 §3): o cartao do palco, as miniaturas redondas, o anel verde de quem fala.
+  assert.match(css, /#largeVideoContainer \{\s*border-radius: var\(--bunker-radius\);/, "o video grande vira o cartao do palco");
+  assert.match(css, /#largeVideoWrapper \{\s*box-shadow: none !important;/);
+  assert.match(css, /\[data-testid="stage-display-name"\] \{\s*display: none !important;/, "o nome no palco e da pagina (V2-4)");
+  assert.match(css, /\.filmstrip__videos \.videocontainer \{\s*border-radius: var\(--bunker-radius-tile\) !important;/);
+  assert.match(css, /\.videocontainer\.dominant-speaker \.active-speaker-indicator \{\s*box-shadow: inset 0 0 0 2px var\(--bunker-speaking\) !important;/);
+  // O puxador fica no lugar (a largura dele entra na conta do video grande), so invisivel e sem ponteiro.
+  assert.match(css, /\.resizable-filmstrip \.dragHandleContainer \{\s*visibility: hidden !important;\s*pointer-events: none !important;/);
+  assert.doesNotMatch(css, /dragHandleContainer[^}]*display: none/, "display: none tiraria 9 px da conta do motor");
+  // Nada de margem, largura ou altura nas miniaturas: a lista virtual do motor mede cada item por JS.
+  const thumbRules = [...css.matchAll(/\.videocontainer[^{]*\{([^}]*)\}/g)].map((m) => m[1]).join("\n");
+  assert.doesNotMatch(thumbRules, /(^|[\s;])(margin|width|height|padding)(-[a-z]+)?\s*:/m, "margem, tamanho ou padding na miniatura desalinha a coluna");
 });
