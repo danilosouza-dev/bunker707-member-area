@@ -518,7 +518,10 @@ function field(payload: unknown, key: string): unknown {
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>)[key] : undefined;
 }
 
-/** O apresentador liberou o microfone DESTE participante (moderationParticipantApproved com mediaType audio). */
+/**
+ * O sinal da moderacao de audio e DESTE participante (o payload { id, mediaType: "audio" }): o apresentador liberou o
+ * microfone (moderationParticipantApproved) ou a equipe o recolheu (moderationParticipantRejected).
+ */
 export function isOwnMicApproval(payload: unknown, ownId: string | null): boolean {
   const id = field(payload, "id");
   return ownId !== null && typeof id === "string" && id === ownId && field(payload, "mediaType") === "audio";
@@ -654,11 +657,11 @@ export function mediaErrorNotice(media: "camera" | "mic", payload: unknown): Liv
  * O estado da nossa barra depois de um sinal do iframe. Entrar zera tudo (todo mundo entra mudo e com a camera
  * fechada); a mao e o papel so contam quando sao do proprio participante; a camera ou o microfone que fecham sem o
  * nosso pedido viram o aviso "A equipe fechou a sua câmera" / "A equipe silenciou o seu microfone" (e o microfone some
- * da barra); a liberacao do proprio microfone abre o dialogo Falar / Agora não; quem tem papel de moderador entra na
- * lista "No palco" (nunca a lista de alunos); o micError / cameraError vira o aviso na barra e encerra a espera do
- * nosso pedido. Na tag stable-11248 eles so chegam da troca de aparelho do painel (o set*Device): o Falar e o Ligar
- * câmera vao pelo toggleAudio / toggleVideo, cuja recusa nao avisa nada, e a sala confere a permissao do navegador
- * (micAskCheck, cameraRequestUnanswered).
+ * da barra); a liberacao do proprio microfone abre o dialogo Falar / Agora não, e a equipe que o recolhe tira o
+ * Microfone da barra mesmo desligado; quem tem papel de moderador entra na lista "No palco" (nunca a lista de alunos);
+ * o micError / cameraError vira o aviso na barra e encerra a espera do nosso pedido. Na tag stable-11248 eles so
+ * chegam da troca de aparelho do painel (o set*Device): o Falar e o Ligar câmera vao pelo toggleAudio / toggleVideo,
+ * cuja recusa nao avisa nada, e a sala confere a permissao do navegador (micAskCheck, cameraRequestUnanswered).
  */
 export function applyLiveSignal(state: LiveSignalState, input: { name: string; ownId: string | null; payload: unknown }): LiveSignalState {
   const { name, ownId, payload } = input;
@@ -695,6 +698,11 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       return ownId !== null && id === ownId ? { ...state, handRaised: Boolean(field(payload, "handRaised")) } : state;
     case "moderationParticipantApproved":
       return isOwnMicApproval(payload, ownId) ? { ...state, micPrompt: true, notice: "mic_released" } : state;
+    case "moderationParticipantRejected":
+      // A equipe recolheu o microfone deste aluno (o "Tirar do palco" ou o Silenciar do console): o Microfone sai da
+      // barra e o Falar / Agora não fecha, mesmo com o microfone ja desligado, quando nenhum audioMuteStatusChanged chega
+      // (docs/31 V2-19). O de outro participante e o de video nao mexem na barra.
+      return isOwnMicApproval(payload, ownId) ? { ...state, expectAudio: false, micAllowed: false, micPrompt: false, notice: "mic_silenced" } : state;
     case "micError":
       return { ...state, expectAudio: false, notice: mediaErrorNotice("mic", payload) };
     case "cameraError":

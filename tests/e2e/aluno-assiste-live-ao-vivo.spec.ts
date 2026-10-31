@@ -60,6 +60,8 @@ import {
 // Grade guardada volta depois do videoConferenceJoined. A 1280 px com o painel aberto o iframe fica abaixo de 1013 px e
 // a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna quando o motor confirma); com o
 // painel fechado ela volta.
+// O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
+// mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -111,7 +113,7 @@ async function entrarNaSala(page: Page, opcoes: Parameters<typeof salaFalsaDoJit
   return { dialogo, montagem, sala };
 }
 
-test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camera com o aviso, mao levantada e o microfone liberado com Falar; nada cita o Jitsi", async ({ page }) => {
+test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camera com o aviso, mao levantada, o microfone liberado com Falar e recolhido pela equipe; nada cita o Jitsi", async ({ page }) => {
   const ambiente = ambienteDaSalaAoVivo();
   const { dialogo, montagem, sala } = await entrarNaSala(page);
   // Dentro da sala a faixa "Ao vivo agora" nunca aparece (docs/30 §1.1).
@@ -187,7 +189,18 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleAudio")).toBe(false);
   await avisoMicrofone.getByRole("button", { exact: true, name: aoVivo.falar }).click();
   await sala.esperarComando("toggleAudio", { depoisDe: antes });
-  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.microfone })).toHaveAttribute("aria-pressed", "true");
+  const botaoMicrofone = dialogo.getByRole("button", { exact: true, name: aoVivo.microfone });
+  await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "true");
+
+  // A equipe recolhe o microfone (o "Tirar do palco" do console manda rejectParticipant de audio) com ele ja desligado
+  // pela propria aluna, quando nenhum mudo chega: o Microfone sai da barra e o aviso da equipe aparece (V2-19).
+  const antesDeDesligar = (await sala.comandos()).length;
+  await botaoMicrofone.click();
+  await sala.esperarComando("toggleAudio", { depoisDe: antesDeDesligar });
+  await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "false");
+  await sala.disparar("moderationParticipantRejected", { id: PARTICIPANTE, mediaType: "audio" });
+  await expect(botaoMicrofone).toHaveCount(0);
+  await expect(dialogo.getByTestId("live-notice")).toContainText(aoVivo.microfoneSilenciado);
 
   // Os sinais do iframe viram registros so com codigos (o lote sai a cada 10 s): a camera com o aceite e a mao.
   await expect

@@ -253,6 +253,10 @@ export const JITSI_LISTENED_EVENTS = [
   "audioMuteStatusChanged",
   "videoMuteStatusChanged",
   "moderationParticipantApproved",
+  // A equipe recolheu o microfone (o "Tirar do palco" e o Silenciar do console mandam rejectParticipant de audio): o
+  // Microfone sai da barra do aluno mesmo ja desligado, quando nenhum mudo chega (docs/31 V2-19). Nao vai ao servidor
+  // (toRoomEvent devolve nulo): o silencio da equipe ja vira linha pelo audioMuteStatusChanged.
+  "moderationParticipantRejected",
   "recordingStatusChanged",
   "knockingParticipant",
   // O "Abaixar a mão" do console chega ao aluno por sendEndpointTextMessage (o IFrame API nao abaixa a mao de outro).
@@ -344,10 +348,11 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "deviceListChanged":
     case "micError":
     case "cameraError":
+    case "moderationParticipantRejected":
     case "tileViewChanged":
     case "filmstripDisplayChanged":
-      // So a tela usa (a lista do painel Configurações, o aviso na barra, a visao do video e a coluna de miniaturas): o
-      // servidor nao aceita estes nomes.
+      // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
+      // video e a coluna de miniaturas): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;
