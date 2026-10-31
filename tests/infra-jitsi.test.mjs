@@ -299,13 +299,18 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
   // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. A unica excecao e o carregador do CSS
-  // nosso (docs/31 §3), entre as marcas: ele so le o hash e cria um <link> relativo desta origem.
+  // nosso (docs/31 §3), entre as marcas (uma vez so): ele so le o hash e cria um <link> para um caminho desta origem.
+  assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
   const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
   assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
   for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
-  assert.doesNotMatch(loader[1], /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src)\b/, "o carregador nao busca nada nem roda script");
-  assert.doesNotMatch(loader[1], /https?:/, "o <link> e relativo a esta origem");
-  assert.match(loader[1], /link\.href = '\/css\/bunker707\.css\?v=\d+';/, "caminho absoluto: a sala fica em /<sala>");
+  assert.doesNotMatch(
+    loader[1],
+    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
+    "o carregador nao busca nada, nao roda script e nao navega"
+  );
+  assert.doesNotMatch(loader[1], /https?:|wss?:|['"]\/\//, "o <link> fica nesta origem (nem endereco sem esquema)");
+  assert.match(loader[1], /link\.href = '\/css\/bunker707\.css\?v=[0-9a-f]{8}';/, "o v e o comeco do sha256 da folha (infra-jitsi-css.guard confere o valor)");
 });
 
 test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos locais com CA interna, nada impresso, e nao repete sem --force", () => {
@@ -941,73 +946,35 @@ test("deploy-meet, secrets-meet e update.sh reiniciam o jicofo depois do up -d c
   assert.match(update, /compose up -d\n\s+reconnect_focus\n/);
 });
 
-// Redesign V2, fase 0 (docs/31 §3): o CSS nosso dentro do iframe do motor, carregado pelo custom-config.js, com o
-// tema lido do hash; o compose monta a folha no nginx do web e o smoke confere que ela e servida.
-test("o CSS nosso no iframe: montado no web, servido em /css/bunker707.css, ligado pelo custom-config.js com o tema do hash", () => {
-  const web = composeServices(composeSource).get("web");
-  assert.match(web, /- \.\/web\/bunker707\.css:\/usr\/share\/jitsi-meet\/css\/bunker707\.css:ro/, "a folha montada no nginx do web, somente leitura");
-  const smoke = read(join(jitsiDir, "scripts", "smoke.sh"));
-  assert.match(smoke, /check "css\/bunker707\.css[^"]*" 200 "\$public_url\/css\/bunker707\.css"/, "o smoke confere que a folha e servida");
-  assert.match(smoke, /"css\/bunker707\.css"; do/, "e que o config.js servido traz o carregador");
-
-  // Avaliado como o navegador faria: o config.js roda como script da pagina, com document e window.
-  const head = { children: [], appendChild(element) { this.children.push(element); } };
-  const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
-  const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
+// Redesign V2, fase 0 (docs/31 §3): o carregador do CSS nosso no custom-config.js, avaliado como o navegador faria (o
+// config.js roda inline no <head>, com document e window). So age com config.bunkerTheme no hash: a instancia e uma so
+// e atende a producao; o app de antes e o gravador nao mandam a chave e seguem com o visual padrao do motor. A folha,
+// a montagem e o smoke tem a guarda em tests/infra-jitsi-css.guard.test.mjs.
+test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = sha256 da folha) e grava o tema; sem a chave, nada", () => {
+  const v = createHash("sha256").update(readFileSync(join(jitsiDir, "web", "bunker707.css"))).digest("hex").slice(0, 8);
   const run = (hash) => {
-    head.children.length = 0;
+    const head = { children: [], appendChild(element) { this.children.push(element); } };
+    const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+    const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
     vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
-    return { link: head.children[0], theme: documentElement.attributes["data-bunker-theme"] };
+    return { link: head.children[0] ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
   };
+  const link = { href: `/css/bunker707.css?v=${v}`, rel: "stylesheet", tag: "link" };
   // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
-  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22light%22&config.disableChat=true"), {
-    link: { href: "/css/bunker707.css?v=1", rel: "stylesheet", tag: "link" },
-    theme: "light"
-  });
-  assert.equal(run('#config.bunkerTheme="dark"').theme, "dark");
-  assert.equal(run("#config.disableChat=true").theme, "dark", "sem o tema no hash, escuro");
-  assert.equal(run("").theme, "dark");
-  assert.equal(run("#config.bunkerTheme=%22sepia%22").theme, "dark", "valor desconhecido vira escuro");
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22light%22&config.disableChat=true"), { link, theme: "light" });
+  assert.deepEqual(run('#config.bunkerTheme="dark"'), { link, theme: "dark" });
+  const nada = { link: null, theme: null };
+  assert.deepEqual(run("#config.disableChat=true"), nada, "o app de antes (sem a chave) fica com o visual padrao do motor");
+  assert.deepEqual(run(""), nada);
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.iAmRecorder=true"), nada, "o gravador abre a sala sem a chave: a gravacao sai como antes");
+  assert.deepEqual(run("#config.bunkerTheme="), nada, "chave sem valor");
+  assert.deepEqual(run("#config.bunkerTheme=%22%22"), nada);
+  assert.deepEqual(run("#config.bunkerTheme=%22sepia%22"), nada, "valor desconhecido");
+  assert.deepEqual(run("#config.bunkerTheme=%22lightning%22"), nada, "so light ou dark inteiros");
   // Sem document (o teste de cima avalia o arquivo so com config) nada quebra: o resto do config.js continua valendo.
   const config = { videoQuality: {} };
   vm.runInNewContext(customConfig, { config });
   assert.equal(config.channelLastN, 9);
-});
-
-test("bunker707.css: os dois temas, o fundo da pagina pelo tema e nenhum nome do motor", () => {
-  const css = read(join(jitsiDir, "web", "bunker707.css"));
-  assert.doesNotMatch(css, /jitsi/i, "nada cita o motor (D2)");
-  assert.match(css, /:root \{[^}]*--bunker-bg: #141414;/, "o escuro e o fundo da area");
-  assert.match(css, /html\[data-bunker-theme="light"\] \{[^}]*--bunker-bg: #f4f4f3;/, "o claro e o fundo claro da sala (docs/31 V2-11)");
-  assert.match(css, /html,\s*body \{\s*background: var\(--bunker-bg\) !important;/, "o fundo da pagina do iframe segue o tema");
-  assert.ok(!/@import|url\(\s*["']?https?:/.test(css), "a folha nao puxa nada de fora (CSP e privacidade)");
-  // Os seletores da tag fixada (docs/31 §3): o cartao do palco, as miniaturas redondas, o anel verde de quem fala.
-  assert.match(css, /#largeVideoContainer \{\s*border-radius: var\(--bunker-radius\);/, "o video grande vira o cartao do palco");
-  assert.match(css, /#largeVideoWrapper \{\s*box-shadow: none !important;/);
-  assert.match(css, /\[data-testid="stage-display-name"\] \{\s*display: none !important;/, "o nome no palco e da pagina (V2-4)");
-  assert.match(css, /\.filmstrip__videos \.videocontainer \{\s*border-radius: var\(--bunker-radius-tile\) !important;/);
-  assert.match(css, /\.videocontainer\.dominant-speaker \.active-speaker-indicator \{\s*box-shadow: inset 0 0 0 2px var\(--bunker-speaking\) !important;/);
-  // O puxador fica no lugar (a largura dele entra na conta do video grande), so invisivel e sem ponteiro.
-  assert.match(css, /\.resizable-filmstrip \.dragHandleContainer \{\s*visibility: hidden !important;\s*pointer-events: none !important;/);
-  assert.doesNotMatch(css, /dragHandleContainer[^}]*display: none/, "display: none tiraria 9 px da conta do motor");
-  // Nada de margem, largura ou altura nas miniaturas: a lista virtual do motor mede cada item por JS.
-  const thumbRules = [...css.matchAll(/\.videocontainer[^{]*\{([^}]*)\}/g)].map((m) => m[1]).join("\n");
-  assert.doesNotMatch(thumbRules, /(^|[\s;])(margin|width|height|padding)(-[a-z]+)?\s*:/m, "margem, tamanho ou padding na miniatura desalinha a coluna");
-});
-
-// O nginx da imagem manda expires 1y para /css/* quando a URL tem ?v= (meet.conf da tag): uma folha nova com o mesmo v
-// ficaria um ano no navegador de quem ja entrou. O v do carregador e o hash da folha ficam gravados juntos em
-// bunker707.css.version; mudou a folha, sobe o v e grava o hash novo.
-test("bunker707.css: o ?v= do carregador sobe junto com a folha (hash gravado em bunker707.css.version)", () => {
-  const css = readFileSync(join(jitsiDir, "web", "bunker707.css"));
-  const version = read(join(jitsiDir, "web", "bunker707.css.version"));
-  const v = /^v=(\d+)$/m.exec(version)?.[1];
-  const sha = /^sha256=([0-9a-f]{64})$/m.exec(version)?.[1];
-  assert.ok(v && sha, "bunker707.css.version traz v=N e sha256=<hex>");
-  const atual = createHash("sha256").update(css).digest("hex");
-  assert.equal(atual, sha, `a folha mudou: suba o v em custom-config.js e grave sha256=${atual} em bunker707.css.version`);
-  const customConfig = read(join(jitsiDir, "web", "custom-config.js"));
-  assert.match(customConfig, new RegExp(`link\\.href = '/css/bunker707\\.css\\?v=${v}';`), "o v do carregador e o do arquivo de versao sao o mesmo");
 });
 
 // A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o

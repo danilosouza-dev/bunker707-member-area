@@ -22,6 +22,9 @@ jvb_rest=$(env_value JVB_COLIBRI_PORT 8080)
 failures=0
 # No ensaio local o certificado e da CA interna do Caddy (CADDY_LOCAL_CERTS=local_certs).
 insecure=(); [ -n "$local_certs" ] && insecure=(-k)
+# A folha do iframe (docs/31 §3): o ?v= do carregador e o comeco do sha256 dela; a servida tem de ser a do commit.
+css_file="$(dirname -- "$0")/../web/bunker707.css"
+css_sha=$(sha256sum "$css_file" | cut -c1-64); css_v=${css_sha:0:8}
 
 ok()    { printf '  ok   %-40s %s\n' "$1" "$2"; }
 falha() { printf '  FALHA %-40s %s\n' "$1" "$2"; failures=$((failures + 1)); }
@@ -46,6 +49,8 @@ check "config.js" 200 "$public_url/config.js"
 check "interface_config.js" 200 "$public_url/interface_config.js"
 check "external_api.js" 200 "$public_url/external_api.js"
 check "css/bunker707.css (o CSS nosso)" 200 "$public_url/css/bunker707.css"
+served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/css/bunker707.css?v=$css_v" 2>/dev/null | sha256sum | cut -c1-64)
+if [ "$served_sha" = "$css_sha" ]; then ok "css/bunker707.css (conteudo)" "sha256 $css_v"; else falha "css/bunker707.css (conteudo)" "a servida nao e a do commit (esperado $css_v, veio ${served_sha:0:8}): o web foi recriado?"; fi
 # Sem o upgrade do websocket o prosody responde com texto ou 4xx; 502/503 seria o nginx sem chegar nele.
 check "websocket (caminho ate o prosody)" "200|400|404|426" "$public_url/xmpp-websocket"
 
@@ -64,7 +69,7 @@ printf '%s' "$last" | grep -q 'false' || { brand_ok=0; falha "interface_config.j
 [ "$brand_ok" = 1 ] && ok "interface_config.js" "custom-interface_config.js no fim, sem a marca"
 cfg=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null || true)
 cfg_ok=1
-for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css"; do
+for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v"; do
     printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
 # A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.

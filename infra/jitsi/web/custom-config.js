@@ -1,4 +1,4 @@
-// Bunker707: ajustes do config.js do Jitsi proprio (docs/30 §6.2; D2, D4, D5, D26).
+// Bunker707: ajustes do config.js do motor proprio (docs/30 §6.2; D2, D4, D5, D26).
 // O script de partida da imagem web anexa este arquivo ao fim do config.js gerado, entao cada linha aqui
 // vence o padrao. So funciona em instancia propria: estas chaves ficam fora da whitelist do IFrame API.
 // Os tetos de bitrate por codec e as resolucoes vem do .env (VIDEOQUALITY_BITRATE_*, RESOLUTION*).
@@ -46,24 +46,27 @@ config.toolbarButtons = ['camera', 'raisehand', 'fullscreen', 'hangup'];
 // sem depender do padrao da imagem.
 config.localRecording = { disable: false };
 
-// Bunker707: o CSS nosso dentro do iframe (docs/31 §3). Este arquivo roda como script da pagina, antes do app:
-// le o tema no hash (`#config.bunkerTheme="light"`, chave que o app descarta por estar fora da whitelist, mas que
-// fica na URL) e liga /css/bunker707.css, servido por este mesmo nginx (montado em docker-compose.yml). Sem o
-// hash, escuro. Sem a folha, o motor segue com o visual padrao dele. E a unica parte deste arquivo que toca o DOM:
-// so cria o <link> para um caminho relativo desta origem (nada de rede nem de script), entre as marcas abaixo.
+// Bunker707: o CSS nosso dentro do iframe (docs/31 §3). Este arquivo roda como script da pagina, inline no <head>,
+// antes do app: le o tema no hash (`#config.bunkerTheme="light"`, chave que o app descarta por estar fora da
+// whitelist, mas que fica na URL) e SO ENTAO liga /css/bunker707.css, servido por este mesmo nginx (montado em
+// docker-compose.yml). Sem a chave nada acontece: a instancia e uma so e atende a producao; so o app que ja tem a V2
+// manda a chave, e o gravador e o app de antes seguem com o visual padrao do motor. Sem a folha, o motor segue com
+// o visual padrao dele. E a unica parte deste arquivo que toca o DOM: so cria o <link> para um caminho desta origem
+// (nada de rede nem de script), entre as marcas abaixo.
 // bunker707:css-loader:inicio
 (function () {
     if (typeof document === 'undefined' || typeof window === 'undefined') { return; }
     try {
         var hash = String((window.location && window.location.hash) || '');
-        var match = /config\.bunkerTheme=(?:%22|"|%27|')?(light|dark)/.exec(hash);
-        document.documentElement.setAttribute('data-bunker-theme', match ? match[1] : 'dark');
+        var match = /config\.bunkerTheme=(?:%22|"|%27|')?(light|dark)\b/.exec(hash);
+        if (!match) { return; }
+        document.documentElement.setAttribute('data-bunker-theme', match[1]);
         var link = document.createElement('link');
         link.rel = 'stylesheet';
-        // Caminho absoluto: a sala fica em /<sala>, e um caminho relativo dependeria dele. O nginx guarda a folha por
-        // um ano quando a URL tem ?v= (expires 1y): a cada mudanca na folha, suba o v aqui e grave o novo hash em
-        // bunker707.css.version (o teste da infra confere os dois).
-        link.href = '/css/bunker707.css?v=1';
+        // O v e o comeco do sha256 da folha (a guarda da infra confere e diz o valor novo): o nginx guarda /css/* por
+        // um ano quando a URL tem ?v=, entao uma folha nova chega sempre num endereco novo. Caminho absoluto por
+        // clareza (a pagina tem <base href="/">, entao um relativo tambem resolveria).
+        link.href = '/css/bunker707.css?v=74ccdd46';
         (document.head || document.documentElement).appendChild(link);
     } catch (e) {
         // Sem a folha nossa, o motor segue com o visual padrao dele.

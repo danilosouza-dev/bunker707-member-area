@@ -20,13 +20,18 @@ const INTERFACE_WHITELIST = new Set(
 // manda (a lista inteira tem ~190 chaves; o teste confere as nossas). Uma entrada com ponto (`prejoinConfig.enabled`)
 // libera so aquele campo do objeto; o app descarta o resto e qualquer chave fora da lista, sem avisar.
 const CONFIG_WHITELIST = new Set(
-  "breakoutRooms channelLastN constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disablePrivateChat disableReactions disableRemoteMute disableSelfView disableShortcuts filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startAudioOnly startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
+  "breakoutRooms channelLastN connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
     " "
   )
 );
+// Objeto vazio ou array nao vale por vacuidade: so um objeto com todos os campos liberados um a um.
 const configAllowed = (key, value) =>
   CONFIG_WHITELIST.has(key) ||
-  (value !== null && typeof value === "object" && Object.keys(value).every((inner) => CONFIG_WHITELIST.has(`${key}.${inner}`)));
+  (value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0 &&
+    Object.keys(value).every((inner) => CONFIG_WHITELIST.has(`${key}.${inner}`)));
 
 const settings = { allowStudentCamera: true, screenFps: 30, stage: 1080 };
 
@@ -73,10 +78,14 @@ test("configOverwrite: o tema no hash, a coluna com 213 px fixados na entrada (o
   // (FILMSTRIP_BREAKPOINT); initialWidth grava a largura na entrada e o puxador fica invisivel pelo CSS da instancia.
   assert.deepEqual(aluno.filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 1 });
   assert.ok(embed.FILMSTRIP_COLUMN_WIDTH >= 180, "abaixo de 180 px as miniaturas voltam a flutuar sobre o video");
-  assert.ok(embed.FILMSTRIP_COLUMN_WIDTH < 300, "a partir de 300 px a coluna vira uma grade (FILMSTRIP_GRID_BREAKPOINT)");
-  // Com a coluna redimensionavel a tag fixa a remota em 120 px de altura e faz a local pela razao: as duas ficam iguais.
-  assert.ok(Math.abs(embed.FILMSTRIP_COLUMN_WIDTH / embed.THUMBNAIL_RATIO - embed.THUMBNAIL_HEIGHT) < 1, "a local 16:9 fica a menos de 1 px da remota");
-  assert.equal(aluno.hideDominantSpeakerBadge, true, "os selos do palco sao da pagina (V2-4)");
+  assert.ok(embed.FILMSTRIP_COLUMN_WIDTH <= 300, "acima de 300 px a coluna vira uma grade (FILMSTRIP_GRID_BREAKPOINT)");
+  // Com a coluna redimensionavel a tag fixa a remota em 120 px de altura e faz a local por floor(largura / razao).
+  assert.equal(embed.THUMBNAIL_HEIGHT - Math.floor(embed.FILMSTRIP_COLUMN_WIDTH / embed.THUMBNAIL_RATIO), 1, "a local (119) fica 1 px mais baixa que a remota (120)");
+  assert.equal(aluno.hideDominantSpeakerBadge, true, "o nome/selo que o motor escreve na base do palco sai: os selos sao da pagina (V2-4)");
+  assert.equal(aluno.disableTileView, true, "sem a grade automatica do motor com 3+ pessoas: a Grade e por comando, que vence esta chave");
+  assert.deepEqual(aluno.connectionIndicators, { disabled: true }, "a chave nova; CONNECTION_INDICATOR_DISABLED e a legada");
+  assert.equal(aluno.remoteVideoMenu.disablePrivateChat, "all", "a forma que a tag aceita (a chave na raiz nao existe nela)");
+  assert.ok(!("startAudioOnly" in aluno) && !("disablePrivateChat" in aluno), "as duas chaves que a tag ignorava sairam");
   assert.deepEqual(embed.liveConfigOverwrite("host", settings, { layout: "stage_duo" }).filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 2 });
   assert.deepEqual(embed.liveConfigOverwrite("host", settings, { layout: "grid" }).filmstrip, { alwaysShowResizeBar: false, disableResizable: false, initialWidth: 213, stageFilmstripParticipants: 1 });
   assert.deepEqual(embed.liveConfigOverwrite("student", settings, { layout: "stage_bottom" }).filmstrip, { disableResizable: true, stageFilmstripParticipants: 1 }, "a fileira embaixo tem o tamanho do interfaceConfig");
@@ -115,5 +124,5 @@ test("como o external_api.js serializa o configOverwrite: o tema chega ao hash c
     .map(([key, value]) => `config.${key}=${encodeURIComponent(JSON.stringify(value))}`)
     .join("&");
   assert.ok(hash.includes("config.bunkerTheme=%22light%22"));
-  assert.ok(!hash.includes("jitsi"), "nada no hash cita o motor");
+  assert.ok(!hash.includes("jitsi"), "a parte nossa do hash nao cita o motor (o id do iframe que o external_api.js poe e do motor)");
 });

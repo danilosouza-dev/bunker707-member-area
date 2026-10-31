@@ -37,10 +37,13 @@ export const STAGE_BACKGROUND = "#000000";
  * A coluna de miniaturas (Palco, Palco duplo e a grade), conferido na tag fixada (docs/31 §3): `filmstrip.initialWidth`
  * grava a largura na entrada e, com a coluna "redimensionavel" (o puxador fica invisivel pelo CSS da instancia) e pelo
  * menos 180 px, o motor estreita o video grande em vez de cobrir a borda dele com as miniaturas (LargeVideo.web.tsx).
- * Com a coluna redimensionavel a miniatura remota tem sempre 120 px de altura e a local tem largura / 16:9, por isso
- * 213 px (213 / (16/9) = 119,8). O motor limita a coluna a (largura do iframe - 800): o iframe precisa de 1013 px
- * para a coluna inteira e, abaixo de 980 px, a coluna fica com menos de 180 px e as miniaturas voltam a flutuar sobre
- * o video; a pagina trata isso na fase 1 (resizeFilmStrip, toggleFilmStrip ou a fileira embaixo).
+ * Com a coluna redimensionavel a miniatura remota tem sempre 120 px de altura e a local tem largura / 16:9 (floor), por
+ * isso 213 px (119 x 120). A coluna e redimensionavel sem toque sempre, e com toque so a partir de 920 px (ai o
+ * puxador ocupa 21 px, nao 9). O motor limita a coluna a (largura do iframe - 800), mas so quando a janela redimensiona
+ * (CLIENT_RESIZED), nao na entrada: ao abrir, a coluna fica com 213 px em qualquer largura; depois do primeiro resize o
+ * iframe precisa de 1013 px para a coluna inteira e, abaixo de 980 px, as miniaturas voltam a flutuar sobre o video
+ * (resizeFilmStrip muda so a largura atual; no proximo resize o motor volta a esta). A pagina trata isso na fase 1:
+ * escolhe a largura, esconde a coluna (toggleFilmStrip) ou monta a fileira embaixo pela largura do iframe.
  */
 export const FILMSTRIP_COLUMN_WIDTH = 213;
 /** A altura das miniaturas na fileira embaixo (FILM_STRIP_MAX_HEIGHT vale como altura no horizontal); 16:9. */
@@ -157,8 +160,14 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
-    // O selo de "quem fala" que o motor desenha sobre o video grande sai: os selos do palco sao da pagina (docs/31 V2-4).
+    // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
+    // pagina (docs/31 V2-4).
     hideDominantSpeakerBadge: true,
+    // Sem a grade automatica do motor: com 3 ou mais pessoas ele abriria a grade sozinho, e o "seguir a visao" do host a
+    // levaria a todos. A Grade e por comando (setTileView), e o valor explicito vence esta chave (video-layout/functions.any.ts).
+    disableTileView: true,
+    // O indicador de conexao nas miniaturas: esta chave do config vale sempre; CONNECTION_INDICATOR_DISABLED e a legada.
+    connectionIndicators: { disabled: true },
     // A coluna com a largura fixada na entrada (o video grande ao lado, nao por baixo) e, no palco duplo, 2 no palco;
     // a fileira embaixo com o tamanho do interfaceConfig.
     filmstrip:
@@ -173,7 +182,6 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     disableDeepLinking: true,
     disableInviteFunctions: true,
     disablePolls: true,
-    disablePrivateChat: true,
     disableReactions: true,
     disableRemoteMute: student,
     // Sem o "Flip" no menu da propria miniatura para o aluno e a Equipe: o espelho so pelo nosso painel, que guarda a
@@ -188,9 +196,9 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     // So `prejoinConfig.enabled` esta na whitelist da tag fixada; o `prejoinPageEnabled` antigo era ignorado.
     prejoinConfig: { enabled: false },
     readOnlyName: true,
-    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disabled: student },
+    // Sem conversa privada pelo menu da miniatura (D5: o chat e o nosso); "disablePrivateChat" na raiz nao existe na tag.
+    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disablePrivateChat: "all", disabled: student },
     resolution: height,
-    startAudioOnly: false,
     startWithAudioMuted: true,
     startWithVideoMuted: true,
     ...(presents(role) ? { toolbarConfig: { alwaysVisible: true } } : {}),
@@ -210,6 +218,7 @@ export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInp
     // O visual da V2 (docs/31 §3): a camera preenche o palco cortando ate 30 % (both + MAXIMUM_ZOOMING_COEFFICIENT da
     // tag) e o que sobra e preto liso (sem a copia desfocada do video por tras), sem o indicador de conexao nem o
     // rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
+    // Legada (a tag so a traduz quando o config nao define connectionIndicators); o configOverwrite manda a chave nova.
     CONNECTION_INDICATOR_DISABLED: true,
     DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
