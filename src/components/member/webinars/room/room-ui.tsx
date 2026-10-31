@@ -14,7 +14,9 @@ import { cn } from "@/lib/utils";
 export type RoomButtonVariant = "accent" | "danger" | "ghost" | "primary" | "secondary";
 export type RoomButtonSize = "lg" | "md" | "sm";
 
-const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus";
+/** O anel de foco da sala (o token --room-focus: branco no escuro, quase preto no claro); a barra (room-bar.tsx) usa o mesmo. */
+export const ROOM_FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus";
+const FOCUS = ROOM_FOCUS;
 
 const buttonBase = cn(
   "inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap rounded-[var(--member-button-radius)] font-semibold transition-[background-color,border-color,color,box-shadow,opacity] duration-150 disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45 motion-reduce:transition-none [&_svg]:shrink-0",
@@ -43,9 +45,11 @@ export function RoomButton({ className, size, type = "button", variant, ...props
   return <button className={roomButtonClassName({ className, size, variant })} type={type} {...props} />;
 }
 
-export type RoomIconButtonSize = 40 | 44 | 48;
+export type RoomIconButtonSize = 32 | 40 | 44 | 48;
 
 const iconSizes: Record<RoomIconButtonSize, string> = {
+  // O circulo de 32 px fica sobre o video (o Modo cinema no canto do palco do celular): a area do toque passa de 44 px.
+  32: "relative size-8 after:absolute after:-inset-1.5 [&_svg]:size-4",
   40: "size-10 [&_svg]:size-[18px]",
   44: "size-11 [&_svg]:size-5",
   48: "size-12 [&_svg]:size-[22px]"
@@ -53,7 +57,8 @@ const iconSizes: Record<RoomIconButtonSize, string> = {
 
 /**
  * Um circulo com icone (o tema e o X do painel em "outline"; os da barra em "control", com o ativo pelo token
- * --room-active-bg). O nome acessivel e o `label`, que tambem vai no title; `active` liga o aria-pressed.
+ * --room-active-bg; sobre o video em "video", igual nos dois temas). O nome acessivel e o `label`, que tambem vai no
+ * title; `active` liga o aria-pressed.
  */
 export function RoomIconButton({
   active,
@@ -63,7 +68,7 @@ export function RoomIconButton({
   tone = "outline",
   type = "button",
   ...props
-}: Omit<ComponentProps<"button">, "aria-label" | "aria-pressed" | "title"> & { active?: boolean; label: string; size?: RoomIconButtonSize; tone?: "control" | "outline" }) {
+}: Omit<ComponentProps<"button">, "aria-label" | "aria-pressed" | "title"> & { active?: boolean; label: string; size?: RoomIconButtonSize; tone?: "control" | "outline" | "video" }) {
   return (
     <button
       aria-label={label}
@@ -74,7 +79,9 @@ export function RoomIconButton({
         iconSizes[size],
         tone === "outline"
           ? "border border-room-border-strong bg-room-surface text-room-icon hover:bg-room-control-hover hover:text-room-fg-strong"
-          : active
+          : tone === "video"
+            ? "bg-black/60 text-white hover:bg-black/75 focus-visible:outline-white"
+            : active
             ? "bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85"
             : "bg-room-control text-room-fg-strong hover:bg-room-control-hover",
         className

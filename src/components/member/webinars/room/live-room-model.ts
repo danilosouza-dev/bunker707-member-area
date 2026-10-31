@@ -17,6 +17,7 @@ import { roomAccessLost } from "../../../../lib/webinar-room-client";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
+import type { RoomBarItem, RoomBarItems } from "./room-layout-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Frases da barra e do painel Configurações (WEBINAR_COPY.aoVivo; o nome do objeto ficou para os componentes e testes)
@@ -1104,6 +1105,28 @@ export function pendingTogglePhrase(pending: Record<DeviceSwitchKind, boolean>, 
  */
 export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): boolean {
   return !input.blocked && input.screen !== "ended";
+}
+
+/**
+ * Os botoes da nossa barra (docs/31 V2-6), nas tres zonas: o Sair a esquerda; no centro Reagir, a mao (so com a nossa
+ * barra de midia: aluno e Equipe), a Câmera (so com a camera dos alunos permitida no webinario; nula antes do token),
+ * o Microfone (so depois de o apresentador liberar e do Falar), o Som e a Tela cheia (ou o Modo cinema); a direita,
+ * Configurações e o balao do chat. O Som vem antes da Tela cheia. A tela decide o que some pela largura (o Sair e a
+ * Tela cheia saem da barra abaixo de lg).
+ */
+export function liveBarItems(input: { allowStudentCamera: boolean | null; micAllowed: boolean; showMedia: boolean }): RoomBarItems {
+  const center: RoomBarItem[] = ["react"];
+  if (input.showMedia) {
+    center.push("hand");
+    if (input.allowStudentCamera === true) {
+      center.push("camera");
+    }
+    if (input.micAllowed) {
+      center.push("mic");
+    }
+  }
+  center.push("sound", "fullscreen");
+  return { center, left: ["leave"], right: ["settings", "panel"] };
 }
 
 /**

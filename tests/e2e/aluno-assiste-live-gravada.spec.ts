@@ -17,6 +17,7 @@ import { ROOM_THEME_KEY } from "../../src/lib/webinar-room-prefs";
 // cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
 // deitado, volta ao desenho normal com as abas, sem trocar de sala. O tema claro guardado (docs/31 V2-12) so vale no
 // desenho normal: o vertical fica sobre o video e e sempre escuro, e girar troca o tema junto com o desenho.
+// A barra do desenho normal (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava; o balao esconde e mostra o chat.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
@@ -118,6 +119,32 @@ test("a mensagem nova: o aceite na primeira (o texto de §8.5), a mensagem apare
   await campo.press("Enter");
   await expect(sala.getByRole("log").getByText("segunda mensagem")).toBeVisible();
   await expect(sala.getByRole("group", { name: /Ao enviar mensagens neste chat/ })).toHaveCount(0);
+});
+
+test("no desenho normal, a barra da sala (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava pela nossa rota; o Esc fecha as reacoes antes de pedir para sair; o balao esconde e mostra o chat", async ({ page }) => {
+  const sala = await entrarNaSala(page);
+  await expect(sala).toHaveAttribute("data-room-design", "normal");
+  // As reacoes so abrem pelo Reagir (a fileira fixa embaixo do palco saiu).
+  await expect(sala.getByRole("button", { exact: true, name: "Curtir" })).toHaveCount(0);
+  const reagir = sala.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.reagir });
+  await expect(reagir).toHaveAttribute("aria-controls", "room-reactions");
+  await reagir.click();
+  await expect(reagir).toHaveAttribute("aria-expanded", "true");
+  const reacao = page.waitForResponse((response) => response.url().endsWith("/reactions") && response.request().method() === "POST");
+  await sala.locator("#room-reactions").getByRole("button", { exact: true, name: "Curtir" }).click();
+  expect((await reacao).status()).toBe(201);
+  await page.keyboard.press("Escape");
+  await expect(sala.locator("#room-reactions")).toHaveCount(0);
+  await expect(sala.getByRole("alertdialog", { name: "Sair da sala?" })).toHaveCount(0);
+
+  // O balao: Esconder o chat esconde o painel (montado); Mostrar o chat reabre.
+  const painel = WEBINAR_COPY.salaV2.painel;
+  const chat = sala.getByTestId("room-panel");
+  await sala.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await expect(chat).toBeHidden();
+  await expect(chat).toHaveCount(1);
+  await sala.getByRole("button", { exact: true, name: painel.mostrar }).click();
+  await expect(chat).toBeVisible();
 });
 
 test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live", async ({ page }) => {

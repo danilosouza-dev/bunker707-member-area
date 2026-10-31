@@ -40,6 +40,9 @@ import {
 // O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
 // recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
 // cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
+// A barra (docs/31 V2-6 a V2-8): no computador o Sair fica nela e o balao "Esconder o chat" esconde o painel (o palco
+// cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe, os circulos
+// tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -250,6 +253,64 @@ test("o tema: Tema claro troca a sala na hora e fica guardado ao recarregar; o i
   await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
   await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
   expect(await sala.montagens()).toBe(1);
+});
+
+test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat esconde o painel e o palco cresce sem remontar o iframe; recarregar mantem fechado e Mostrar o chat reabre; o Sair fica na barra; a 375 px a barra cabe, os circulos tem 44 px e a Tela cheia fica no palco", async ({ page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo, sala } = await entrarNaSala(page);
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(chat).toBeVisible();
+  const larguraAntes = (await palco.boundingBox())?.width ?? 0;
+  expect(larguraAntes).toBeGreaterThan(0);
+
+  // Aberto, o balao fica ligado e controla o painel; fechar esconde o painel (sem desmontar) e o palco toma a largura.
+  const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
+  await expect(esconder).toHaveAttribute("aria-pressed", "true");
+  await expect(esconder).toHaveAttribute("aria-controls", "room-panel");
+  await esconder.click();
+  await expect(chat).toBeHidden();
+  await expect(chat).toHaveCount(1);
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.mostrar })).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(async () => (await palco.boundingBox())?.width ?? 0).toBeGreaterThan(larguraAntes + 300);
+  expect(await sala.montagens(), "abrir e fechar o painel so troca classes: o iframe e o mesmo").toBe(1);
+
+  // A escolha fica guardada no navegador: recarregar mantem fechado; Mostrar o chat reabre.
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  await expect(dialogo.getByTestId("room-panel")).toBeHidden();
+  await dialogo.getByRole("button", { exact: true, name: painel.mostrar }).click();
+  await expect(dialogo.getByTestId("room-panel")).toBeVisible();
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toHaveAttribute("aria-pressed", "true");
+
+  // No computador o Sair fica na barra, a esquerda; o do cabecalho so aparece abaixo de lg.
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  await expect(barra.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toBeVisible();
+  await expect(dialogo.locator("header").first().getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toHaveCount(0);
+
+  // A 375 px: a barra cabe na largura (sem rolar por dentro), os circulos tem 44 px e a Tela cheia (ou o Modo cinema)
+  // sai da barra e fica no canto do palco.
+  await page.setViewportSize({ height: 740, width: 375 });
+  const caixaDaBarra = await barra.boundingBox();
+  expect(caixaDaBarra?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((caixaDaBarra?.x ?? 0) + (caixaDaBarra?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(375);
+  expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem sem rolar a barra").toBe(true);
+  for (const nome of [WEBINAR_COPY.sala.reagir, aoVivo.levantarMao, aoVivo.som, aoVivo.configuracoes, painel.esconder]) {
+    const caixa = await barra.getByRole("button", { exact: true, name: nome }).boundingBox();
+    expect(caixa?.height, nome).toBeGreaterThanOrEqual(44);
+    expect(caixa?.width, nome).toBeGreaterThanOrEqual(44);
+  }
+  const telaCheia = new RegExp(`^(?:${aoVivo.telaCheia}|${aoVivo.modoCinema})$`);
+  await expect(barra.getByRole("button", { name: telaCheia })).toHaveCount(0);
+  await expect(barra.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toHaveCount(0);
+  const noPalco = palco.getByRole("button", { name: telaCheia });
+  await expect(noPalco).toBeVisible();
+  const caixaDoPalco = await palco.boundingBox();
+  const caixaDoCanto = await noPalco.boundingBox();
+  expect(caixaDoCanto?.x ?? -1).toBeGreaterThanOrEqual(caixaDoPalco?.x ?? 0);
+  expect((caixaDoCanto?.y ?? 0) + (caixaDoCanto?.height ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.y ?? 0) + (caixaDoPalco?.height ?? 0));
+  expect((caixaDoCanto?.x ?? 0) + (caixaDoCanto?.width ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.x ?? 0) + (caixaDoPalco?.width ?? 0));
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {

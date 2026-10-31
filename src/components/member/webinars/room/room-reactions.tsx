@@ -9,7 +9,8 @@ import { REACTIONS, type Reaction } from "@/server/webinars/model";
 // segundo; as reacoes sobem flutuando pelo canto do palco por 3 s, sem som; com prefers-reduced-motion ficam
 // paradas 1,5 s e somem (motion-reduce). Nenhuma reacao e anunciada ao leitor de tela. Redesign V2, F2 (docs/31
 // V2-11): a barra usa os tokens do tema da sala; as bolhas ficam sobre o video e sao iguais nos dois temas. F3 (V2-4):
-// no palco, as bolhas sobem acima dos selos de baixo.
+// no palco, as bolhas sobem acima dos selos de baixo. F4 (V2-6): no desenho normal as seis reacoes abrem pelo Reagir da
+// barra (por cima do palco no computador, acima da barra no celular), nas duas salas; o vertical continua com a dele.
 
 export const REACTION_GLYPHS: Record<Reaction, string> = { clap: "👏", fire: "🔥", laugh: "😂", like: "👍", love: "❤️", wow: "😮" };
 

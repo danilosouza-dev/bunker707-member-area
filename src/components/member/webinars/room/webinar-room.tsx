@@ -11,13 +11,15 @@ import { roomHref } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
+import { RecordedControls, ROOM_REACTIONS_ID } from "./recorded-controls";
+import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
-import { roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
+import { roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
-import { RoomReactionBar, RoomReactionBubbles } from "./room-reactions";
+import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
@@ -25,7 +27,7 @@ import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
-import { useRoomTheme } from "./use-room-prefs";
+import { useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
 import { RoomDock } from "./vertical/room-dock";
@@ -58,8 +60,26 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // celular, "com {apresentador} · {n} assistindo"; o selo do momento (a regra D10: "Ao vivo" so com a decisao da
 // equipe, senao "Sessão das 20:00"; "Replay"), quem apresenta e o Assistente ficam no palco do desenho normal
 // (room-stage-badges.tsx). O estado do Assistente e lido uma vez pela sala e desce para o chat e as Perguntas.
+// Redesign V2, F4 (docs/31 V2-6 a V2-8): no desenho normal, a barra da live (recorded-controls.tsx) no lugar da fileira
+// de reacoes: o Sair (a partir de lg; abaixo, no cabecalho), Reagir num painel por cima do palco, o Som da gravada (o
+// mesmo mudo do "Ativar som", que so aparece ate o primeiro toque), a Tela cheia do palco e o balao que abre e fecha o
+// painel do chat (fechado, o painel fica montado e escondido, e o palco cresce). A escolha fica guardada no navegador.
+// Sem a barra (a sessao encerrada, fora do acesso) o painel fica na tela e o Sair volta ao cabecalho em toda largura.
 
 type Tab = "chat" | "enquetes" | "perguntas";
+
+function subscribeNothing() {
+  return () => undefined;
+}
+
+/** O navegador deixa por um elemento em tela cheia (no iPhone, nao: sem o botao). */
+function readFullscreenEnabled() {
+  try {
+    return document.fullscreenEnabled === true;
+  } catch {
+    return false;
+  }
+}
 
 /** O que recebe o foco dentro da sala (o Tab circula so por aqui enquanto ela esta aberta). */
 export const ROOM_FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -102,7 +122,8 @@ export function useRoomDialogLock(rootRef: RefObject<HTMLElement | null>, active
     const previous = document.activeElement as HTMLElement | null;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    root?.querySelector<HTMLElement>("[data-room-first-focus]")?.focus();
+    // So entre os que estao na tela (roomFocusTarget): com o painel do chat fechado a aba Chat esta escondida.
+    roomFocusTarget(root)?.focus();
     return () => {
       document.body.style.overflow = overflow;
       previous?.focus?.();
@@ -142,6 +163,33 @@ export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelectorA
     return false;
   }
   const target = roomFocusTarget(root);
+  if (!target) {
+    return false;
+  }
+  target.focus();
+  return true;
+}
+
+/**
+ * O painel do chat fechou (docs/31 V2-7 e V2-8: o balao, a aba ativa tocada de novo no celular, a escolha guardada lida
+ * depois da primeira pintura) com o foco dentro dele, ou ja fora da sala: o foco vai para o balao da barra (o que reabre
+ * o painel) ou, sem ele na tela, para o primeiro controle da sala na tela (roomFocusTarget). Um foco em outro lugar da
+ * sala fica onde esta. Devolve se moveu o foco.
+ */
+export function returnFocusFromPanel(
+  root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null,
+  active: Element | null,
+  panel: Pick<HTMLElement, "contains"> | null
+): boolean {
+  if (!root) {
+    return false;
+  }
+  const lost = active === null || !root.contains(active) || (panel !== null && panel.contains(active));
+  if (!lost) {
+    return false;
+  }
+  const toggle = Array.from(root.querySelectorAll<HTMLElement>(`[aria-controls="${ROOM_PANEL_ID}"]`)).find(focusShown);
+  const target = toggle ?? roomFocusTarget(root);
   if (!target) {
     return false;
   }
@@ -197,6 +245,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<Tab>("chat");
   const [muted, setMuted] = useState(kind === "simulated");
+  /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" nao volta. */
+  const [soundTouched, setSoundTouched] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [fullscreenOn, setFullscreenOn] = useState(false);
+  const stageBoxRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenEnabled = useSyncExternalStore(subscribeNothing, readFullscreenEnabled, () => false);
+  const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [playerEnded, setPlayerEnded] = useState(false);
   /** O contador do ultimo sinal de presenca; antes dele, o da leitura da sessao. */
@@ -301,6 +356,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
   const shownCount = simulation.displayCount(presentNow, currentOffsetMs);
   const drawerVisible = vertical && drawerOpen && !unavailable;
+  // A barra do desenho normal (V2-6) so com a sala de pe, como na live: a sessao encerrada e fora do acesso a tiram, e
+  // sem ela o painel fica na tela (o balao saiu junto).
+  const barShown = !vertical && !unavailable && phase !== "ended";
+  const reactionsShown = reactionsOpen && barShown;
+  const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover: false });
 
   const leave = useCallback(() => {
     router.push(webinarHref);
@@ -325,6 +385,33 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     }
   }, [unavailable]);
 
+  // A barra saiu (a sessao encerrada, o celular em pe) com o foco nela: o foco volta para a sala, nunca fica no body.
+  const barShownRef = useRef(barShown);
+  useLayoutEffect(() => {
+    const was = barShownRef.current;
+    barShownRef.current = barShown;
+    if (was && !barShown) {
+      refocusRoom(rootRef.current, document.activeElement);
+    }
+  }, [barShown]);
+
+  // O painel do chat fechou com o foco nele (ou a escolha guardada chegou depois da primeira pintura): o foco vai ao
+  // balao da barra.
+  const panelShownRef = useRef(panelShown);
+  useLayoutEffect(() => {
+    const was = panelShownRef.current;
+    panelShownRef.current = panelShown;
+    if (was && !panelShown) {
+      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
+    }
+  }, [panelShown]);
+
+  useEffect(() => {
+    const onChange = () => setFullscreenOn(stageBoxRef.current !== null && document.fullscreenElement === stageBoxRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
   // A gaveta fechou (Esc, Voltar para o video, toque fora): o foco volta para o botao que abriu. Fechada porque a sala
   // ficou indisponivel, o botao saiu junto e o efeito acima ja trouxe o foco de volta.
   const drawerWasOpenRef = useRef(false);
@@ -345,7 +432,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     if (!root || root.contains(document.activeElement)) {
       return;
     }
-    root.querySelector<HTMLElement>("[data-room-first-focus]")?.focus();
+    roomFocusTarget(root)?.focus();
   }, [design]);
 
   function openDrawer(from: "chat" | "drawer" | "poll") {
@@ -367,6 +454,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       event.stopPropagation();
       if (confirmLeave) {
         setConfirmLeave(false);
+      } else if (reactionsShown) {
+        closeReactions();
       } else {
         askToLeave();
       }
@@ -377,14 +466,56 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
 
   function unmute() {
     setMuted(false);
+    setSoundTouched(true);
     player.unmute();
+  }
+
+  /** O Som da barra (so na gravada): o mesmo mudo do player; desligar nao traz de volta a capa "Ativar som". */
+  function toggleSound() {
+    if (muted) {
+      unmute();
+      return;
+    }
+    setMuted(true);
+    setSoundTouched(true);
+    player.send("mute");
+  }
+
+  /** Fecha as reacoes; o foco que estava nelas volta ao Reagir (senao cairia no body). */
+  function closeReactions() {
+    const popover = document.getElementById(ROOM_REACTIONS_ID);
+    if (popover && popover.contains(document.activeElement)) {
+      rootRef.current?.querySelector<HTMLElement>(`[aria-controls="${ROOM_REACTIONS_ID}"]`)?.focus();
+    }
+    setReactionsOpen(false);
+  }
+
+  function toggleReactions() {
+    if (reactionsOpen) {
+      closeReactions();
+      return;
+    }
+    setReactionsOpen(true);
+  }
+
+  /** A Tela cheia do palco (a caixa inteira: o video, os selos e a Oferta); a barra fica de fora. */
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const element = stageBoxRef.current;
+    if (element?.requestFullscreen) {
+      void element.requestFullscreen().catch(() => undefined);
+    }
   }
 
   const stageState = unavailable ? "unavailable" : phase === "replay" ? "replay" : phase;
   const timeLabel = saoPauloTime(session.session.scheduledAt);
   const composerPhase = phase === "replay" ? "replay" : phase;
   const headerPhase = phase === "replay" ? "live" : phase;
-  const skeleton = roomSkeleton(design);
+  // Com o painel fechado o palco cresce para ocupar a coluna (abaixo de lg; no computador ele ja ocupa).
+  const skeleton = roomSkeleton(design, { cinema: false, panelShown, stageGrows: !panelShown });
   // O selo do momento no palco (V2-4), pela mesma regra do topo do vertical (D10).
   const momentBadge = verticalBadge({ kind, phase: headerPhase, showLiveBadge: session.session.showLiveBadge });
   const topLeft: RoomStageTopLeft =
@@ -410,7 +541,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       coverUrl={coverUrl}
       embedUrl={session.video?.embedUrl ?? null}
       iframeRef={setIframe}
-      muted={muted && kind === "simulated"}
+      muted={muted && !soundTouched && kind === "simulated"}
       onUnmute={unmute}
       replayHref={replayHref}
       sessionId={sessionId}
@@ -500,6 +631,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       ) : (
         <RoomHeader
           dateLine={dateLine}
+          leaveInBar={barShown}
           mobileLine={mobileLine}
           onLeave={askToLeave}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
@@ -525,7 +657,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
-          <div className={skeleton.stageBox} data-room-slot="stage-box" style={stageVars}>
+          <div className={skeleton.stageBox} data-room-slot="stage-box" ref={stageBoxRef} style={stageVars}>
             {stage}
             {vertical || unavailable ? null : (
               <RoomStageBadges
@@ -593,15 +725,29 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               }
             />
           </div>
-          {vertical ? null : (
-            <div className="border-t border-room-border bg-room-surface">
-              <RoomReactionBar disabled={readOnly || !writable} onReact={reactions.react} />
-            </div>
-          )}
+          {barShown ? (
+            <RecordedControls
+              fullscreenEnabled={fullscreenEnabled}
+              fullscreenOn={fullscreenOn}
+              kind={kind}
+              onFullscreen={toggleFullscreen}
+              onLeave={askToLeave}
+              onReact={reactions.react}
+              onSound={toggleSound}
+              onTogglePanel={() => setPanelOpen(!panelOpen)}
+              onToggleReactions={toggleReactions}
+              panelOpen={panelShown}
+              reactionsDisabled={readOnly || !writable}
+              reactionsOpen={reactionsShown}
+              soundDisabled={stageState !== "live" || session.video === null}
+              soundOn={!muted}
+            />
+          ) : null}
         </div>
 
         {vertical || unavailable ? null : (
-          <aside className="flex min-h-0 flex-1 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0" data-testid="room-panel">
+          // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
+          <aside className={skeleton.panel} data-testid="room-panel" hidden={!panelShown} id={ROOM_PANEL_ID}>
             <div aria-label={copy.abas.chat} className="flex shrink-0 border-b border-room-border" role="tablist">
               {tabs.map((value) => (
                 <button

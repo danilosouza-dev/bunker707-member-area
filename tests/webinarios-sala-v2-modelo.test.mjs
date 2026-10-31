@@ -179,3 +179,93 @@ test("liveStageMoment (V2-4): no ar, o Ao vivo; na espera com a sala aberta, Agu
   assert.equal(momento(model.livePhaseOf("waiting"), "open"), "waiting", "status waiting, fora da pratica");
   assert.equal(momento(model.livePhaseOf("scheduled"), "waiting"), null, "agendada: a capa com a contagem");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * F4 (V2-6 a V2-8 e V2-18): os botoes da barra nas tres zonas, quando o painel do chat aparece e o esqueleto das salas
+ * ---------------------------------------------------------------------------------------------- */
+
+test("liveBarItems (V2-6): o Sair a esquerda; Reagir, a mao, a camera, o microfone, o Som e a Tela cheia no centro (o Som antes da Tela cheia); Configurações e o balao a direita", () => {
+  const aluno = model.liveBarItems({ allowStudentCamera: false, micAllowed: false, showMedia: true });
+  assert.deepEqual(aluno, { center: ["react", "hand", "sound", "fullscreen"], left: ["leave"], right: ["settings", "panel"] }, "o aluno sem a camera dos alunos");
+  assert.deepEqual(model.liveBarItems({ allowStudentCamera: true, micAllowed: true, showMedia: true }).center, ["react", "hand", "camera", "mic", "sound", "fullscreen"], "com a camera permitida e o microfone liberado");
+  assert.deepEqual(model.liveBarItems({ allowStudentCamera: true, micAllowed: false, showMedia: true }).center, ["react", "hand", "camera", "sound", "fullscreen"], "o microfone so depois de liberado");
+  assert.deepEqual(model.liveBarItems({ allowStudentCamera: null, micAllowed: false, showMedia: true }).center, ["react", "hand", "sound", "fullscreen"], "antes do token, sem a camera");
+  // Host e co-apresentador que entram por esta pagina usam a barra do iframe: sem mao, camera e microfone nossos.
+  const quemApresenta = model.liveBarItems({ allowStudentCamera: true, micAllowed: true, showMedia: false });
+  assert.deepEqual(quemApresenta.center, ["react", "sound", "fullscreen"]);
+  assert.deepEqual([quemApresenta.left, quemApresenta.right], [["leave"], ["settings", "panel"]], "o Sair, Configurações e o balao ficam para todos");
+});
+
+test("recordedBarItems (V2-6, a mesma casca): a gravada com o Som; o Replay sem ele (a barra da Bunny); a Tela cheia so com o navegador que deixa; sem Configurações", () => {
+  assert.deepEqual(layout.recordedBarItems({ fullscreenEnabled: true, kind: "simulated" }), { center: ["react", "sound", "fullscreen"], left: ["leave"], right: ["panel"] });
+  assert.deepEqual(layout.recordedBarItems({ fullscreenEnabled: false, kind: "simulated" }).center, ["react", "sound"], "no iPhone, sem a Tela cheia");
+  assert.deepEqual(layout.recordedBarItems({ fullscreenEnabled: true, kind: "replay" }).center, ["react", "fullscreen"], "o Replay sem o Som");
+  assert.deepEqual(layout.recordedBarItems({ fullscreenEnabled: false, kind: "replay" }), { center: ["react"], left: ["leave"], right: ["panel"] }, "o Replay sem o Som e sem a Tela cheia");
+  for (const kind of ["simulated", "replay"]) {
+    for (const fullscreenEnabled of [true, false]) {
+      const itens = layout.recordedBarItems({ fullscreenEnabled, kind });
+      assert.ok(![...itens.left, ...itens.center, ...itens.right].includes("settings"), "a gravada nao tem aparelhos para configurar");
+    }
+  }
+});
+
+test("roomPanelShown (V2-7 e V2-8): o balao abre e fecha; no celular Configurações toma o lugar do chat; sem a barra o painel fica (o balao saiu junto)", () => {
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: true, settingsTakeover: false }), true, "aberto (o padrao)");
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: false, settingsTakeover: false }), false, "fechado pelo balao, tambem no computador");
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: true, settingsTakeover: true }), false, "Configurações aberto no celular esconde o chat");
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: false, settingsTakeover: true }), false);
+  // A live encerrada tira a barra: o painel volta para a tela mesmo fechado (o chat continua para ler).
+  assert.equal(layout.roomPanelShown({ barShown: false, panelOpen: false, settingsTakeover: false }), true);
+  // O guardado chega pela regra pura de webinar-room-prefs: nada guardado e o painel aberto.
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: prefs.storedPanelOpen(null), settingsTakeover: false }), true);
+  assert.equal(layout.roomPanelShown({ barShown: true, panelOpen: prefs.storedPanelOpen("0"), settingsTakeover: false }), false);
+});
+
+test("roomSkeleton (V2-6): o mesmo desenho normal nas duas salas; o painel fechado faz o palco crescer e o painel some; o vertical nao muda", () => {
+  const aberto = vertical.roomSkeleton("normal", { cinema: false, panelShown: true, stageGrows: false });
+  const fechado = vertical.roomSkeleton("normal", { cinema: false, panelShown: false, stageGrows: true });
+  assert.deepEqual(aberto, vertical.roomSkeleton("normal"), "sem estado, o painel aberto e o palco 16:9");
+  // O palco que cresce: a coluna e a caixa ocupam o lugar e o palco deixa o 16:9 (o mesmo palco, so classes).
+  assert.match(fechado.stageColumn, /\bflex-1\b/);
+  assert.doesNotMatch(aberto.stageColumn, /(?:^| )flex-1\b/);
+  assert.match(fechado.stageBox, /\[&>\[data-room-stage\]\]:aspect-auto/);
+  assert.doesNotMatch(aberto.stageBox, /\[&>\[data-room-stage\]\]:aspect-auto/);
+  // O painel aberto ocupa a coluna no celular; fechado (ou no Modo cinema) nao ocupa.
+  assert.match(aberto.panel, /(?:^| )flex-1(?: |$)/);
+  assert.match(fechado.panel, /(?:^| )flex-none(?: |$)/);
+  assert.match(vertical.roomSkeleton("normal", { cinema: true, panelShown: true, stageGrows: true }).panel, /(?:^| )flex-none(?: |$)/, "no Modo cinema o chat fica embaixo, menor");
+  // No computador: o corpo com recuo, o palco com cantos de 16 px (os do iframe) e a barra a 12 px dele.
+  assert.match(aberto.body, /lg:px-4/);
+  assert.match(aberto.stageBox, /lg:rounded-\[16px\]/);
+  assert.match(aberto.stageColumn, /lg:gap-3/);
+  // O vertical 9:16 continua como estava: o estado nao muda nada nele.
+  assert.deepEqual(vertical.roomSkeleton("vertical", { cinema: true, panelShown: false, stageGrows: true }), vertical.roomSkeleton("vertical"));
+});
+
+const salaAoVivo = await import("../src/components/member/webinars/room/webinar-room.tsx");
+
+test("returnFocusFromPanel: o painel fechou com o foco nele (ou no body): o foco vai ao balao na tela; um foco em outro lugar da sala fica", () => {
+  const focados = [];
+  const no = (nome, extra = {}) => ({ focus: () => focados.push(nome), nome, offsetParent: {}, ...extra });
+  const aba = no("aba Chat");
+  const balao = no("balao");
+  const tema = no("Tema claro");
+  const body = { nome: "body" };
+  const painel = { contains: (node) => node === aba };
+  const raiz = ({ toggles = [balao], controles = [tema] } = {}) => ({
+    contains: (node) => [aba, balao, tema].includes(node),
+    querySelectorAll: (selector) => (selector === '[aria-controls="room-panel"]' ? toggles : selector === salaAoVivo.ROOM_FOCUSABLE ? controles : [])
+  });
+
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), aba, painel), true, "o foco estava na aba do painel");
+  assert.deepEqual(focados, ["balao"]);
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), body, painel), true, "o foco ja tinha caido no body");
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), null, painel), true);
+  assert.deepEqual(focados, ["balao", "balao", "balao"]);
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), tema, painel), false, "o foco no cabecalho fica onde esta");
+  // Sem o balao na tela (escondido pela largura), o primeiro controle da sala na tela.
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ toggles: [{ ...balao, offsetParent: null }] }), aba, painel), true);
+  assert.equal(focados.at(-1), "Tema claro");
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ controles: [], toggles: [] }), aba, painel), false, "nada na tela, nada a focar");
+  assert.equal(salaAoVivo.returnFocusFromPanel(null, aba, painel), false);
+});

@@ -20,11 +20,15 @@ import { RoomButton, RoomIconButton } from "./room-ui";
 // "Sessão das 20:00", "Replay" e "Aguardando o apresentador" ficam no palco (V2-4, room-stage-badges.tsx). "{n}
 // assistindo" (o numero real, ou o somado da Simulacao) some no Replay e com a sessao encerrada: a sala passa
 // `presentNow` nulo. As cores vem dos tokens do tema da sala (docs/31 V2-11); o Sair fica no
-// acento, a unica cor da marca fora do video (V2-11).
+// acento, a unica cor da marca fora do video (V2-11). Com a barra da sala na tela (V2-6, `leaveInBar`), o Sair do
+// computador fica nela e o do cabecalho so aparece abaixo de lg; sem a barra (a live ou a sessao encerrada, fora do
+// acesso), o do cabecalho fica em todas as larguras.
 
 export type RoomHeaderProps = {
   /** A linha da data no computador, ja com os trechos juntos (roomDateLine); vazia, a linha sai. */
   dateLine: string;
+  /** A barra da sala esta na tela com o Sair dela (a partir de lg): o Sair do cabecalho fica so abaixo de lg. */
+  leaveInBar?: boolean;
   /** A linha do celular, ja com os trechos juntos (roomMobileLine); vazia, a linha sai. */
   mobileLine: string;
   onLeave: () => void;
@@ -87,7 +91,7 @@ export function RoomThemeButton({ className, onToggle, theme }: { className?: st
   );
 }
 
-export function RoomHeader({ dateLine, mobileLine, onLeave, onToggleTheme, presentNow, theme, title }: RoomHeaderProps) {
+export function RoomHeader({ dateLine, leaveInBar = false, mobileLine, onLeave, onToggleTheme, presentNow, theme, title }: RoomHeaderProps) {
   const copy = WEBINAR_COPY.sala;
 
   return (
@@ -114,7 +118,7 @@ export function RoomHeader({ dateLine, mobileLine, onLeave, onToggleTheme, prese
       ) : null}
       <span aria-hidden="true" className="hidden h-7 w-px shrink-0 bg-room-divider lg:block" />
       <RoomThemeButton className="hidden sm:grid" onToggle={onToggleTheme} theme={theme} />
-      <RoomButton onClick={onLeave} variant="accent">
+      <RoomButton className={leaveInBar ? "lg:hidden" : undefined} onClick={onLeave} variant="accent">
         <LogOut aria-hidden="true" />
         {copy.sair}
       </RoomButton>

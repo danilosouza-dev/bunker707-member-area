@@ -80,6 +80,8 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "room-header.tsx",
     "room-ui.tsx",
     "live-controls.tsx",
+    "room-bar.tsx",
+    "recorded-controls.tsx",
     "live-settings.tsx",
     "live-notices.tsx",
     "live-room.tsx",
@@ -240,5 +242,29 @@ test("o acento (#e50914) so no Sair: o RoomButton danger e so o Sair das confirm
   assert.ok(usos.length >= 2, `o Sair das duas salas: ${usos.join(" | ")}`);
   for (const uso of usos) {
     assert.match(uso, /: \{copy\.sair\}$/, uso);
+  }
+});
+
+test("o RoomButton cheio no acento (accent) e so o Sair: o do cabecalho e o da barra (docs/31 V2-6 e V2-11)", () => {
+  const ROOM = "src/components/member/webinars/room";
+  const usos = [];
+  const visitar = (pasta) => {
+    for (const nome of readdirSync(path.join(root, pasta))) {
+      const caminho = `${pasta}/${nome}`;
+      if (statSync(path.join(root, caminho)).isDirectory()) {
+        visitar(caminho);
+      } else if (/\.tsx?$/.test(nome)) {
+        const codigo = semComentarios(ler(caminho));
+        for (const [, filhos] of codigo.matchAll(/<RoomButton\b(?:=>|[^>])*?\bvariant="accent"(?:=>|[^>])*>([\s\S]*?)<\/RoomButton>/g)) {
+          usos.push({ caminho, filhos: filhos.trim() });
+        }
+        assert.doesNotMatch(codigo, /roomButtonClassName\(\{[^}]*variant:\s*"accent"/, `${caminho}: accent so no RoomButton do Sair`);
+      }
+    }
+  };
+  visitar(ROOM);
+  assert.deepEqual(usos.map((uso) => uso.caminho).sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
+  for (const uso of usos) {
+    assert.match(uso.filhos, /\{copy\.sair\}/, `${uso.caminho}: ${uso.filhos}`);
   }
 });

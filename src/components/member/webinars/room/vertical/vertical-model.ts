@@ -3,9 +3,10 @@
 // mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo lugar da
 // arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho troca so as classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
 // recarrega o video). Por isso o desenho vertical nao e outra arvore: e o mesmo esqueleto com outras classes e as
-// pecas por cima (topo, chat, gaveta). Vale para a Live gravada e o Replay; a Live ao vivo fica de fora ate o palco
-// ser gravado em 9:16 (live-room.tsx nao usa nada daqui). Modulo puro (sem React e sem rede): os testes carregam pelo
-// Node direto; os imports sao relativos.
+// pecas por cima (topo, chat, gaveta). O desenho vertical vale para a Live gravada e o Replay; a Live ao vivo fica de
+// fora dele ate o palco ser gravado em 9:16, mas usa o esqueleto do desenho normal (roomSkeleton("normal"), docs/31
+// V2-6: o mesmo corpo, a mesma coluna e a mesma caixa do palco). Modulo puro (sem React e sem rede): os testes carregam
+// pelo Node direto; os imports sao relativos.
 
 import { WEBINAR_COPY } from "../../../../../lib/webinar-copy";
 import type { ComposerState, RoomMessage } from "../../../../../lib/webinar-room-client";
@@ -162,12 +163,28 @@ export type RoomSkeleton = {
   bubbles: string;
   /** A confirmacao de Sair (no vertical, um cartao por cima, abaixo do topo). */
   confirm: string;
+  /** O painel do chat (o aside; no vertical nao existe: a gaveta faz o papel dele). */
+  panel: string;
   root: string;
   /** O lugar do aviso de venda simulado (no vertical, o topo abaixo da barra; o toast fica em top-14 dele). */
   sales: string;
   stageBox: string;
   stageColumn: string;
 };
+
+/**
+ * O estado que muda as classes do desenho normal (docs/31 V2-6 a V2-8), o mesmo nas duas salas: o painel do chat na
+ * tela (`panelShown`), o palco que cresce para ocupar a coluna (`stageGrows`: o painel fechado, a frase de removido ou
+ * banido, o Modo cinema) e o Modo cinema (`cinema`: o chat fica embaixo, menor).
+ */
+export type RoomSkeletonState = { cinema: boolean; panelShown: boolean; stageGrows: boolean };
+
+const SKELETON_DEFAULT: RoomSkeletonState = { cinema: false, panelShown: true, stageGrows: false };
+
+/** As classes juntas, sem as vazias (o modulo e puro: sem o cn, que traz o tailwind-merge). */
+function classes(...parts: Array<string | null | false>): string {
+  return parts.filter(Boolean).join(" ");
+}
 
 const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-room-warn-border bg-room-warn-bg px-3 py-2";
 
@@ -180,14 +197,26 @@ export function themeForDesign(design: RoomDesign, theme: RoomTheme): RoomTheme 
   return design === "vertical" ? "dark" : theme;
 }
 
-/** As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco e os lugares por cima). */
-export function roomSkeleton(design: RoomDesign): RoomSkeleton {
+/**
+ * O palco que cresce (o painel fechado, removido ou banido, o Modo cinema): a caixa ocupa a coluna e o palco dentro
+ * dela deixa o 16:9 para ocupar a caixa (o player e o iframe se ajustam por dentro). So CSS, o mesmo palco.
+ */
+const STAGE_GROWS = "min-h-0 flex-1 [&>[data-room-stage]]:aspect-auto [&>[data-room-stage]]:flex-1";
+
+/**
+ * As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco, o painel e os lugares por cima). O
+ * desenho normal e o mesmo na Live ao vivo, na gravada e no Replay (docs/31 V2-6): a partir de lg, o corpo com recuo de
+ * 16 px, o palco com cantos de 16 px (os do video grande do iframe, que sao fixos) e a barra embaixo, a 12 px; abaixo de
+ * lg, o palco na largura e a barra logo abaixo. O `state` muda so as classes: o palco nunca sai do lugar.
+ */
+export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKELETON_DEFAULT): RoomSkeleton {
   if (design === "vertical") {
     return {
       body: "relative min-h-0 flex-1",
       bubbles: "pointer-events-none absolute bottom-[46%] right-0 h-44 w-20",
       confirm:
         "absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-amber-400/30 bg-[#1f1a0c]/95 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.55)]",
+      panel: "hidden",
       root: "z-[60] text-white fixed inset-0 flex flex-col overflow-hidden bg-black",
       sales: "pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] h-28",
       stageBox: `absolute inset-0 ${VERTICAL_STAGE_COVER}`,
@@ -195,13 +224,20 @@ export function roomSkeleton(design: RoomDesign): RoomSkeleton {
     };
   }
   return {
-    body: "flex min-h-0 flex-1 flex-col lg:flex-row",
+    body: "flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-4 lg:pb-4",
     bubbles: "contents",
     confirm: NORMAL_CONFIRM,
+    panel: classes(
+      "flex min-h-0 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:overflow-hidden lg:rounded-[var(--member-cover-radius)] lg:border",
+      state.panelShown && !state.cinema ? "flex-1" : "flex-none"
+    ),
     root: "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg",
     sales: "contents",
-    stageBox: "relative lg:min-h-0 lg:flex-1",
-    stageColumn: "relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col"
+    stageBox: classes(
+      "relative flex flex-col bg-black lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:rounded-[16px] [&:fullscreen>[data-room-stage]]:aspect-auto [&:fullscreen>[data-room-stage]]:h-full",
+      state.stageGrows ? STAGE_GROWS : null
+    ),
+    stageColumn: classes("relative flex flex-col lg:min-h-0 lg:min-w-0 lg:flex-1 lg:gap-3", state.stageGrows ? "min-h-0 flex-1" : "shrink-0")
   };
 }
 

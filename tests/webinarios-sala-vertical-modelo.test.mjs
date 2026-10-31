@@ -161,7 +161,10 @@ test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em c
   assert.equal(normal.root, "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg", "o normal pelos tokens do tema");
   assert.match(vertical.root, /\bbg-black\b/, "o vertical continua preto, sobre o video");
   assert.doesNotMatch(vertical.root, /room-/, "o vertical nao usa os tokens do tema no fundo");
-  assert.equal(normal.body, "flex min-h-0 flex-1 flex-col lg:flex-row");
+  // F4 (V2-6): o corpo do normal com o recuo do computador; o estado (painel, palco que cresce, Modo cinema) e testado em
+  // tests/webinarios-sala-v2-modelo.test.mjs.
+  assert.equal(normal.body, "flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-4 lg:pb-4");
+  assert.equal(vertical.panel, "hidden", "no vertical o painel nao existe (a gaveta faz o papel dele)");
   assert.equal(normal.bubbles, "contents");
   assert.equal(normal.sales, "contents");
   assert.match(vertical.root, /fixed inset-0/);

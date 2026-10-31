@@ -17,7 +17,9 @@ import type { LiveEntry } from "./use-live-room";
 // encerrada (com Assistir o replay quando ha) e, na sala inteira, removido, banido ou "Esta live não está disponível
 // para você." (quem saiu do "Quem pode" no meio da live, D41). O palco leva os atributos do
 // palco da aula (data-lesson-player-stage etc.): com o sinal de midia da sala (announceLiveRoomMedia) nenhum pop-up
-// abre com a sala no ar. Nenhum texto daqui cita o motor de video (D2).
+// abre com a sala no ar. Nenhum texto daqui cita o motor de video (D2). Redesign V2, F4 (docs/31 V2-6 e V2-18): o
+// palco fica na caixa do esqueleto da sala (roomSkeleton), com cantos de 16 px no computador; no celular a sala poe a
+// Tela cheia (ou o Modo cinema) como filho, no canto de baixo a direita.
 
 export type LiveStageProps = {
   children?: ReactNode;

@@ -969,11 +969,14 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
       onCamera: noop,
       onFullscreen: noop,
       onHand: noop,
+      onLeave: noop,
       onMic: noop,
       onReact: noop,
       onSound: noop,
+      onTogglePanel: noop,
       onToggleReactions: noop,
       onToggleSettings: noop,
+      panelOpen: true,
       reactionsDisabled: false,
       reactionsOpen: false,
       settingsOpen: false,
@@ -987,7 +990,7 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
   const camera = barra.match(/<button aria-busy="true"[^>]*aria-label="Câmera"[\s\S]*?<\/button>/)?.[0] ?? "";
   assert.match(camera, /aria-pressed="true"/);
   assert.match(camera, /title="Desligar câmera"/);
-  assert.match(camera, /<svg[^>]*class="[^"]*lucide-loader-circle[^"]*size-5 animate-spin motion-reduce:animate-none/);
+  assert.match(camera, /<svg[^>]*class="[^"]*lucide-loader-circle[^"]*size-5 lg:size-\[22px\] animate-spin motion-reduce:animate-none/);
   assert.doesNotMatch(camera, /lucide-video/);
   assert.doesNotMatch(barra, /<button aria-busy="true"[^>]*aria-label="Microfone"/);
   const microfone = barra.match(/<button[^>]*aria-label="Microfone"[\s\S]*?<\/button>/)?.[0] ?? "";

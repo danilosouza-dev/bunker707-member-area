@@ -28,6 +28,8 @@ const enter = await import("../src/components/member/webinars/webinar-enter-butt
 const privacy = await import("../src/components/member/webinars/webinar-chat-privacy.tsx");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const { CHAT_LIMITS, REACTIONS } = await import("../src/server/webinars/model.ts");
+const vertical = await import("../src/components/member/webinars/room/vertical/vertical-model.ts");
+const recorded = await import("../src/components/member/webinars/room/recorded-controls.tsx");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const MIN = 60_000;
@@ -317,6 +319,49 @@ test("reacoes: seis botoes de 44 px com nome acessivel, as bolhas nunca anunciad
   assert.match(bubbles, /\+5/);
 });
 
+test("a barra da gravada e do Replay (V2-6): Reagir abre as seis reacoes num painel (room-reactions); o Som so na gravada; a Tela cheia so com o navegador que deixa; o balao diz o que faz", () => {
+  const props = {
+    fullscreenEnabled: true,
+    fullscreenOn: false,
+    kind: "simulated",
+    onFullscreen: noop,
+    onLeave: noop,
+    onReact: noop,
+    onSound: noop,
+    onTogglePanel: noop,
+    onToggleReactions: noop,
+    panelOpen: true,
+    reactionsDisabled: false,
+    reactionsOpen: false,
+    soundDisabled: false,
+    soundOn: false
+  };
+  const barra = (extra = {}) => render(recorded.RecordedControls, { ...props, ...extra });
+  const nomes = (html) => buttonNames(html);
+  assert.deepEqual(nomes(barra()), ["Sair", "Reagir", "Som", "Tela cheia", "Esconder o chat"]);
+  assert.deepEqual(nomes(barra({ kind: "replay" })), ["Sair", "Reagir", "Tela cheia", "Esconder o chat"], "o Replay tem a barra da Bunny para o som");
+  assert.deepEqual(nomes(barra({ fullscreenEnabled: false, kind: "replay" })), ["Sair", "Reagir", "Esconder o chat"], "sem tela cheia no navegador, sem o botao");
+  assert.match(barra({ panelOpen: false }), /<button aria-controls="room-panel" aria-label="Mostrar o chat" aria-pressed="false"/);
+  assert.match(barra({ soundOn: true }), /<button aria-label="Som" aria-pressed="true"/);
+  // Fechado, as reacoes nao estao na tela; aberto, as seis, com o nome de cada uma e 44 px.
+  assert.doesNotMatch(barra(), /id="room-reactions"|aria-label="Curtir"/);
+  const aberta = barra({ reactionsOpen: true });
+  assert.match(aberta, /<button aria-controls="room-reactions" aria-expanded="true" aria-label="Reagir"/);
+  const painel = aberta.slice(aberta.indexOf('id="room-reactions"'), aberta.indexOf('data-room-bar=""'));
+  for (const reaction of REACTIONS) {
+    assert.match(painel, new RegExp(`aria-label="${WEBINAR_COPY.sala.reacoes[reaction]}"`), reaction);
+  }
+  assert.ok(aberta.indexOf('id="room-reactions"') < aberta.indexOf('data-room-bar=""'), "acima da barra no celular (e por cima do palco no computador)");
+  assert.match(barra({ reactionsDisabled: true, reactionsOpen: true }), /aria-label="Curtir"[^>]*disabled=""/, "no ver como e antes do zero, desligadas");
+});
+
+test("o Sair do cabecalho com a barra na tela (leaveInBar): so abaixo de lg; sem a barra, em toda largura", () => {
+  const sair = (html) => html.match(/<button class="([^"]*)" type="button"><svg[^>]*lucide-log-out/)?.[1] ?? "";
+  assert.ok(sair(render(header.RoomHeader, { ...HEADER, leaveInBar: true })).split(" ").includes("lg:hidden"));
+  assert.ok(!sair(render(header.RoomHeader, HEADER)).split(" ").includes("lg:hidden"), "o padrao: sem a barra");
+  assert.ok(sair(render(header.RoomHeader, HEADER)).length > 0);
+});
+
 function payload(extra = {}, sessionExtra = {}) {
   return {
     me: { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null },
@@ -409,7 +454,12 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
     "o dialogo, no tema escuro"
   );
   // F3 (V2-4): a caixa do palco leva a margem da coluna de miniaturas (0 na gravada) e os selos vem logo depois do palco.
-  assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
+  // F4 (V2-6): o esqueleto e o da live (roomSkeleton): o caminho corpo > coluna > caixa continua, com o palco 16:9.
+  const esqueleto = vertical.roomSkeleton("normal", { cinema: false, panelShown: true, stageGrows: false });
+  assert.ok(
+    html.includes(`<div class="${esqueleto.body}" data-room-slot="body"><div class="${esqueleto.stageColumn}" data-room-slot="stage-column"><div class="${esqueleto.stageBox.replaceAll("&", "&amp;").replaceAll(">", "&gt;")}" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"`),
+    "o palco 16:9 na largura, no caminho de sempre"
+  );
   assert.match(
     html,
     /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute right-3 [^"]*bottom-14 max-h-\[calc\(100%-3\.5rem\)\]"/,
@@ -419,7 +469,22 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   assert.match(html, /<div class="contents" data-room-slot="dock"><div class="contents" data-room-slot="offer"><p aria-live="polite" class="sr-only" data-room-offer-announce="">/, "o card da Oferta no canto do palco (layout stage)");
   assert.match(html, /<header class="flex h-14/, "o cabecalho V2 (V2-3)");
   assert.match(html, /data-testid="room-panel"/);
-  assert.match(html, /role="group"><button aria-label="Curtir"/, "a barra de reacoes embaixo do palco");
+  // F4 (V2-6): a barra da live no lugar da fileira de reacoes: o Sair (a partir de lg), Reagir (as reacoes num painel),
+  // o Som da gravada e o balao do chat, embaixo do palco, na mesma coluna.
+  assert.doesNotMatch(html, /aria-label="Curtir"/, "as reacoes so abrem pelo Reagir");
+  const coluna = html.slice(html.indexOf('data-room-slot="stage-column"'), html.indexOf("<aside"));
+  assert.ok(coluna.indexOf('data-room-slot="stage-box"') < coluna.indexOf('data-testid="recorded-controls"'), "a barra embaixo do palco");
+  const barra = coluna.slice(coluna.indexOf('data-testid="recorded-controls"'));
+  assert.deepEqual([...barra.matchAll(/data-room-bar-item="([a-z]+)"/g)].map(([, item]) => item), ["leave", "react", "sound", "panel"], "sem a Tela cheia no servidor (so com o navegador que deixa)");
+  assert.match(barra, /<button aria-controls="room-reactions" aria-expanded="false" aria-label="Reagir"/);
+  assert.match(barra, /<button aria-controls="room-panel" aria-label="Esconder o chat" aria-pressed="true"/);
+  // O Som da gravada: o video comeca mudo (aria-pressed falso); antes do zero, sem player, nao ha o que ligar.
+  assert.match(barra, /<button aria-label="Som" aria-pressed="false" class="[^"]*" data-room-bar-item="sound" title="Som" type="button">/);
+  const antes = render(room.WebinarRoom, { coverUrl: null, payload: payload({}, { offsetMs: -4 * MIN, roomPhase: "waiting", scheduledAt: new Date(T0 + 4 * MIN).toISOString() }), readOnly: false, webinarHref: "/x" });
+  assert.match(antes, /<button aria-label="Som" aria-pressed="false"[^>]*data-room-bar-item="sound" disabled=""/);
+  assert.match(barra, /<button class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b[^"]*"[^>]*data-room-bar-item="leave"><svg[\s\S]*?<span class="sr-only xl:not-sr-only">Sair<\/span><\/button>/, "o Sair da barra a partir de lg");
+  assert.match(html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /\blg:hidden" type="button">[\s\S]*?Sair<\/button>/, "o Sair do cabecalho so abaixo de lg");
+  assert.match(html, /<aside class="[^"]*" data-testid="room-panel" id="room-panel">/, "o painel do chat que o balao controla");
   assert.doesNotMatch(html, /data-room-vertical|data-room-drawer|Comente…|Perguntas e enquetes/, "nada do desenho vertical");
 });
 

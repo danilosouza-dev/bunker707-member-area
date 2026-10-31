@@ -11,6 +11,15 @@ export const SALA_V2_COPY = {
     com: (nome: string) => `com ${nome}`,
     duracao: (minutos: number) => `${minutos} min`
   },
+  /**
+   * O painel do chat (V2-6 a V2-8): o balao da barra diz o que faz ("Esconder o chat" com o painel aberto, "Mostrar o
+   * chat" com ele fechado) e o X do painel fecha.
+   */
+  painel: {
+    esconder: "Esconder o chat",
+    fechar: "Fechar o painel",
+    mostrar: "Mostrar o chat"
+  },
   /** Os selos do palco (V2-4): quem apresenta, embaixo a esquerda, sobre o video. */
   selos: {
     apresentador: (nome: string) => `${nome} · Apresentador`

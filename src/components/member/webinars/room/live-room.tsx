@@ -12,7 +12,7 @@ import { formatCountdown } from "@/lib/webinar-time";
 import type { LiveRoomInfo } from "@/server/webinars/live-model";
 import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
-import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls } from "./live-controls";
+import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls, LiveStageFullscreen } from "./live-controls";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
 import { LiveCameraDialog, LiveChatOverlay, LiveMicDialog, LiveParticipantsTab } from "./live-notices";
 import {
@@ -42,9 +42,10 @@ import {
 } from "./live-room-model";
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
+import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
-import { liveStageMoment, roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
+import { liveStageMoment, roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx } from "./room-layout-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -53,8 +54,9 @@ import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
-import { useRoomTheme } from "./use-room-prefs";
-import { roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
+import { useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { returnFocusFromPanel, roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
+import { roomSkeleton } from "./vertical/vertical-model";
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
 // da gravada (/webinarios/[slug]/sala?sessao=) e no mesmo dialogo de tela cheia (aria-modal, foco preso, Esc pede
@@ -88,6 +90,11 @@ import { roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion
 // "Começar para todos", com a sala aberta, "Aguardando o apresentador" fica no mesmo lugar. O estado do Assistente e
 // lido uma vez pela sala e desce para o chat e as Perguntas. Abaixo de sm o botao de tema sai do cabecalho (V2-18) e o
 // tema fica numa linha do painel Configurações.
+// Redesign V2, F4 (docs/31 V2-6 a V2-8 e V2-18): a barra de tres zonas com o Sair (a partir de lg; abaixo, no
+// cabecalho), Reagir e Configurações por cima do palco no computador, e o balao que abre e fecha o painel do chat
+// tambem no computador (guardado no navegador; fechado, o painel fica montado e escondido e o palco cresce). O mesmo
+// esqueleto da gravada (corpo > coluna > caixa do palco, roomSkeleton): o iframe nunca muda de lugar. No celular a Tela
+// cheia (ou o Modo cinema) fica no canto do palco.
 
 type Tab = "chat" | "enquetes" | "participantes" | "perguntas";
 
@@ -120,7 +127,7 @@ function subscribeNothing() {
   return () => undefined;
 }
 
-/** O computador (lg): o painel fica sempre aberto a direita; no celular, a gaveta abre e fecha pela aba de baixo. */
+/** O computador (lg): Configurações abre por cima do palco; no celular, toma o lugar do painel do chat. */
 const DESKTOP = "(min-width: 1024px)";
 
 function subscribeDesktop(callback: () => void) {
@@ -210,7 +217,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<Tab>("chat");
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -300,10 +307,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   }
   const settingsShown = settingsOpen && barShown;
   const reactionsShown = reactionsOpen && barShown;
-  // No celular, o painel Configurações aberto toma o lugar da gaveta: o palco encolhe e a nossa barra fica na tela (o
-  // botao que fecha o painel nunca sai da tela); a aba de baixo fecha o painel e abre a gaveta.
+  // No celular, o painel Configurações aberto toma o lugar do painel do chat: o palco encolhe e a nossa barra fica na
+  // tela (o botao que fecha o painel nunca sai da tela); a aba de baixo e o balao fecham Configurações e abrem o chat.
   const settingsTakeover = settingsShown && !desktop;
-  const drawerVisible = desktop || (drawerOpen && !settingsTakeover);
+  // O painel do chat: o balao da barra abre e fecha (tambem no computador); sem a barra ele fica na tela.
+  const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover });
 
   // A barra sumiu com o foco nela (no painel, nas reacoes, num botao): o foco volta para a sala, nunca para o body (onde
   // o Esc, os atalhos e a trava do Tab deixariam de valer).
@@ -479,10 +487,21 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   useRoomDialogLock(rootRef, true);
 
+  // O painel do chat fechou com o foco nele (a aba ativa tocada de novo no celular, a escolha guardada lida depois da
+  // primeira pintura): o foco vai ao balao da barra, nunca fica no body.
+  const panelShownRef = useRef(panelShown);
+  useLayoutEffect(() => {
+    const was = panelShownRef.current;
+    panelShownRef.current = panelShown;
+    if (was && !panelShown) {
+      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
+    }
+  }, [panelShown]);
+
   function openPollsTab() {
     if (openPolls.length > 0) {
       setTab("enquetes");
-      setDrawerOpen(true);
+      setPanelOpen(true);
       if (settingsTakeover) {
         closeSettings();
       }
@@ -491,21 +510,31 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   function selectTab(value: Tab) {
     if (settingsTakeover) {
-      // No celular com o painel Configurações aberto: a aba fecha o painel e abre a gaveta nela.
+      // No celular com o painel Configurações aberto: a aba fecha o painel e abre o chat nela.
       closeSettings();
       setTab(value);
-      setDrawerOpen(true);
+      setPanelOpen(true);
       return;
     }
     if (value === tab) {
-      // No celular, a aba de baixo abre e fecha a gaveta (no computador o painel fica aberto).
+      // No celular, a aba de baixo tambem fecha o painel do chat (o balao da barra o reabre).
       if (!desktop) {
-        setDrawerOpen((open) => !open);
+        setPanelOpen(!panelOpen);
       }
       return;
     }
     setTab(value);
-    setDrawerOpen(true);
+    setPanelOpen(true);
+  }
+
+  /** O balao da barra: abre e fecha o painel do chat; no celular com Configurações aberto, fecha ele e mostra o chat. */
+  function togglePanel() {
+    if (settingsTakeover) {
+      closeSettings();
+      setPanelOpen(true);
+      return;
+    }
+    setPanelOpen(!panelShown);
   }
 
   /** O botao da barra que abre o painel (Reagir ou Configurações). */
@@ -638,16 +667,17 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   const tabs: Tab[] = ["chat", "perguntas", "participantes", ...(showPollsTab ? (["enquetes"] as const) : [])];
   const tabLabel = (value: Tab) => (value === "chat" ? copy.abas.chat : value === "perguntas" ? copy.abas.perguntas : value === "participantes" ? copy.abas.participantes : copy.abas.enquetes);
-  // O palco cresce com a gaveta fechada, no Modo cinema (o chat fica embaixo, menor) e na frase de removido / banido; no
-  // celular com o painel Configurações aberto (a gaveta fechada), ele divide a coluna com o painel e fica com no minimo
-  // 96 px: o painel rola por dentro e a barra continua na tela.
-  const stageGrows = blocked || !drawerVisible || cinemaOn;
+  // O palco cresce com o painel do chat fechado, no Modo cinema (o chat fica embaixo, menor) e na frase de removido /
+  // banido; no celular com o painel Configurações aberto (o chat escondido), ele divide a coluna com o painel e fica com
+  // no minimo 96 px: o painel rola por dentro e a barra continua na tela.
+  const stageGrows = blocked || !panelShown || cinemaOn;
+  const skeleton = roomSkeleton("normal", { cinema: cinemaOn, panelShown, stageGrows });
 
   return (
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
-      className="z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg"
+      className={skeleton.root}
       data-room-kind="live"
       data-room-phase={phase}
       data-room-screen={screen}
@@ -658,6 +688,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     >
       <RoomHeader
         dateLine={dateLine}
+        leaveInBar={barShown}
         mobileLine={mobileLine}
         onLeave={askToLeave}
         onToggleTheme={toggleTheme}
@@ -667,7 +698,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       />
 
       {confirmLeave ? (
-        <div aria-label={copy.sairConfirmar} className="flex flex-wrap items-center justify-between gap-2 border-b border-room-warn-border bg-room-warn-bg px-3 py-2" role="alertdialog">
+        <div aria-label={copy.sairConfirmar} className={skeleton.confirm} role="alertdialog">
           <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
           <div className="flex gap-2">
             <RoomButton data-room-first-focus onClick={leave} size="sm" variant="danger">
@@ -680,37 +711,41 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className={cn("relative flex shrink-0 flex-col bg-black lg:min-h-0 lg:min-w-0 lg:flex-1", stageGrows ? "min-h-0 flex-1" : undefined)}>
-          <LiveStage
-            className={cn("w-full lg:aspect-auto lg:min-h-0 lg:flex-1", stageGrows ? cn("flex-1", settingsTakeover ? "min-h-24" : "min-h-0") : "aspect-video")}
-            countdownLabel={countdown ? copy.comecaEm(countdown) : ""}
-            coverUrl={coverUrl}
-            entry={room.entry}
-            frameRef={frameRef}
-            lobby={live.lobby === true}
-            onEnter={room.enter}
-            onRetry={room.retryNow}
-            readOnly={readOnly}
-            replayHref={replayHref}
-            screen={screen}
-            sessionId={sessionId}
-            stageRef={stageRef}
-            title={session.webinar.title}
-            videoRightPx={videoRightPx}
-          >
-            {/* Os selos ficam com a sala de pe, como a barra: a live encerrada, removido ou banido os tiram. */}
-            {barShown ? (
-              <RoomStageBadges
-                assistantOn={phase === "live" && assistant.state.enabled}
-                presenterName={phase === "live" ? presenterName : null}
-                recording={recording}
-                topLeft={stageMoment === "on_air" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : stageMoment === "waiting" ? { kind: "waiting" } : null}
-              />
-            ) : null}
-            <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
-            {!drawerVisible && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(translation.messages)} /> : null}
-          </LiveStage>
+      <div className={skeleton.body} data-room-slot="body">
+        <div className={skeleton.stageColumn} data-room-slot="stage-column">
+          <div className={skeleton.stageBox} data-room-slot="stage-box">
+            <LiveStage
+              className={cn("w-full lg:aspect-auto lg:min-h-0 lg:flex-1", stageGrows ? cn("flex-1", settingsTakeover ? "min-h-24" : "min-h-0") : "aspect-video")}
+              countdownLabel={countdown ? copy.comecaEm(countdown) : ""}
+              coverUrl={coverUrl}
+              entry={room.entry}
+              frameRef={frameRef}
+              lobby={live.lobby === true}
+              onEnter={room.enter}
+              onRetry={room.retryNow}
+              readOnly={readOnly}
+              replayHref={replayHref}
+              screen={screen}
+              sessionId={sessionId}
+              stageRef={stageRef}
+              title={session.webinar.title}
+              videoRightPx={videoRightPx}
+            >
+              {/* Os selos ficam com a sala de pe, como a barra: a live encerrada, removido ou banido os tiram. */}
+              {barShown ? (
+                <RoomStageBadges
+                  assistantOn={phase === "live" && assistant.state.enabled}
+                  presenterName={phase === "live" ? presenterName : null}
+                  recording={recording}
+                  topLeft={stageMoment === "on_air" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : stageMoment === "waiting" ? { kind: "waiting" } : null}
+                />
+              ) : null}
+              <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
+              {!panelShown && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(translation.messages)} /> : null}
+              {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
+              {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
+            </LiveStage>
+          </div>
           {!barShown ? null : (
             <LiveControls
               allowStudentCamera={room.reply ? room.reply.settings.allowStudentCamera : null}
@@ -727,11 +762,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onCamera={onCamera}
               onFullscreen={toggleFullscreen}
               onHand={room.toggleHand}
+              onLeave={askToLeave}
               onMic={room.toggleMic}
               onReact={reactions.react}
               onSound={room.toggleSound}
+              onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              panelOpen={panelShown}
               reactionsDisabled={readOnly || !writable}
               reactionsOpen={reactionsShown}
               settings={
@@ -755,14 +793,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         </div>
 
         {blocked ? null : (
-          <aside
-            className={cn(
-              "flex min-h-0 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:border-l lg:border-t-0",
-              drawerVisible && !cinemaOn ? "flex-1" : "flex-none"
-            )}
-            data-drawer-open={drawerVisible ? "" : undefined}
-            data-testid="room-panel"
-          >
+          // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
+          <aside className={skeleton.panel} data-testid="room-panel" hidden={!panelShown} id={ROOM_PANEL_ID}>
             <div
               aria-label={copy.abas.chat}
               className="order-last flex shrink-0 border-t border-room-border pb-[env(safe-area-inset-bottom)] lg:order-first lg:border-b lg:border-t-0 lg:pb-0"
@@ -771,7 +803,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               {tabs.map((value) => (
                 <button
                   aria-controls={`room-tab-${value}`}
-                  aria-expanded={value === tab && !desktop ? drawerOpen : undefined}
+                  aria-expanded={value === tab && !desktop ? panelShown : undefined}
                   aria-selected={tab === value}
                   className={cn(
                     "relative h-11 min-w-0 flex-1 truncate px-1 text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none sm:text-sm",
@@ -793,7 +825,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
             <div
               aria-labelledby={`room-tabbtn-${tab}`}
-              className={cn("min-h-0 flex-1 flex-col lg:flex lg:max-h-none", drawerVisible ? "flex" : "hidden", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
+              className={cn("flex min-h-0 flex-1 flex-col lg:max-h-none", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
               id={`room-tab-${tab}`}
               role="tabpanel"
             >
