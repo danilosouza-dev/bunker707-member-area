@@ -31,6 +31,7 @@ import {
   liveShortcutOf,
   localBanStillValid,
   mergeBan,
+  micFocusLost,
   overlayMessages,
   pendingTogglePhrase,
   prefersCinemaMode,
@@ -380,6 +381,18 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       roomFocusTarget(root)?.focus();
     }
   }, [viewMenuShown, viewMenuUsable]);
+  // O Microfone saiu da barra com o foco nele (a equipe recolheu ou silenciou o microfone, docs/31 V2-19): o botao sai
+  // do DOM e o foco cai no body; a sala o manda de volta para dentro dela, como quando a barra inteira some.
+  const micShown = barShown && ourBar && room.signals.micAllowed;
+  const micShownRef = useRef(micShown);
+  useLayoutEffect(() => {
+    const was = micShownRef.current;
+    micShownRef.current = micShown;
+    const root = rootRef.current;
+    if (root && micFocusLost({ active: document.activeElement, body: document.body, micShown, micWasShown: was })) {
+      roomFocusTarget(root)?.focus();
+    }
+  }, [micShown]);
   // O microfone so depois do Falar (micAllowed) e a camera so depois do aviso aceito (cameraConsented): D4 e §8.5.
   const deviceSettings = deviceSettingsFor({
     allowStudentCamera: room.reply ? room.reply.settings.allowStudentCamera : null,

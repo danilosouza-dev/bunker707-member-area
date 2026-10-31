@@ -17,6 +17,7 @@ import "./support/transpile-tsx.mjs";
 // F8 (V2-16 e V2-A5): a Grade guardada que volta depois de cada entrada, a coluna de miniaturas pela largura do iframe
 // (1013 px), o toggleFilmStrip so quando muda o que o motor mostra, os sinais tileViewChanged e filmstripDisplayChanged
 // (na barra, nunca no servidor) e a margem que a coluna tira dos selos so quando ela esta na tela.
+// F9 (V2-19): o Microfone que a equipe recolhe ou silencia sai da barra; o foco que estava nele volta para a sala.
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -777,4 +778,34 @@ test("o menu da Visão do vídeo fechou por ficar desligado (a reconexao): com o
   assert.equal(perdeu({ active: null, inMenu: false }), true);
   // O foco no video (o iframe) ou num controle da sala: fica onde a pessoa o pos.
   assert.equal(perdeu({ active: iframe, inMenu: false }), false);
+});
+
+test("o Microfone saiu da barra com o foco nele (V2-19): recolhido ou silenciado pela equipe, a sala pega o foco que caiu no body; com o foco em outro lugar ou o Microfone na barra, nada", () => {
+  const body = { nome: "body" };
+  const iframe = { nome: "iframe" };
+  const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
+  // O botao esta na barra como o live-controls.tsx o desenha (liveBarItems), para quem usa a nossa barra.
+  const naBarra = (estado) => model.liveBarItems({ allowStudentCamera: true, micAllowed: estado.micAllowed, showMedia: true }).center.includes("mic");
+  const perdeu = (antes, depois, active) => model.micFocusLost({ active, body, micShown: naBarra(depois), micWasShown: naBarra(antes) });
+
+  const entrou = sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" });
+  const liberado = sinal(entrou, "moderationParticipantApproved", { id: "eu", mediaType: "audio" });
+  const falando = sinal(model.acceptMic(liberado), "audioMuteStatusChanged", { muted: false });
+  // A propria aluna desligou (o Microfone continua na barra, desligado) e a equipe usou o "Tirar do palco".
+  const desligado = sinal(model.expectAudioToggle(falando), "audioMuteStatusChanged", { muted: true });
+  const recolhido = sinal(desligado, "moderationParticipantRejected", { id: "eu", mediaType: "audio" });
+  // O Silenciar da equipe com o microfone ligado (o mudo que a aluna nao pediu).
+  const silenciado = sinal(falando, "audioMuteStatusChanged", { muted: true });
+  assert.ok(naBarra(desligado), "desligado pela aluna, o Microfone fica");
+  assert.ok(!naBarra(recolhido) && !naBarra(silenciado), "recolhido ou silenciado, ele sai");
+
+  assert.equal(perdeu(desligado, recolhido, body), true, "o foco estava no Microfone e caiu no body");
+  assert.equal(perdeu(desligado, recolhido, null), true);
+  assert.equal(perdeu(falando, silenciado, body), true, "o mesmo pelo mudo da equipe");
+  assert.equal(perdeu(entrou, sinal(falando, "videoConferenceJoined", { id: "outro" }), body), false, "o Microfone nunca esteve na barra");
+  assert.equal(perdeu(falando, sinal(falando, "videoConferenceJoined", { id: "outro" }), body), true, "a volta depois da queda entra muda e tira o Microfone");
+  // O foco no video ou em outro controle fica onde a pessoa o pos; o Microfone que continua na barra nao mexe em nada.
+  assert.equal(perdeu(desligado, recolhido, iframe), false);
+  assert.equal(perdeu(falando, desligado, body), false);
+  assert.equal(perdeu(desligado, sinal(desligado, "moderationParticipantRejected", { id: "outro", mediaType: "audio" }), body), false, "o recolhimento de outro participante");
 });

@@ -38,6 +38,7 @@ import {
   LIVE_ROOM_RULES,
   lowerHandRequested,
   micAskCheck,
+  micAskRecalled,
   micAskStep,
   micRequestDenied,
   micRequestUnanswered,
@@ -620,6 +621,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
           return;
         }
       }
+      // A equipe recolheu o microfone deste aluno (docs/31 V2-19): o pedido do Falar acaba sem soltar o "ligado"
+      // guardado, que traria o Microfone de volta a barra (a conferencia do turnMicOn para em "gone").
+      if (micAskRecalled(name, payload, ownIdRef.current)) {
+        micAskRef.current = null;
+      }
       // O pedido do microfone: o "ligado" espera a faixa abrir (turnMicOn); o mudo o encerra e passa depois dele.
       const ask = micAskStep(micAskRef.current, name, payload);
       micAskRef.current = ask.next;
@@ -929,7 +935,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
    * depressa ate o prazo e devagar depois, sem fim, enquanto o pedido durar: a faixa aberta solta o "ligado" para a barra
    * e o servidor; a recusa vira "O navegador bloqueou o microfone…"; o prazo sem a faixa vira o aviso (o pedido do
    * navegador sem resposta, ou o aparelho que nao abriu com a permissao dada), com o microfone desligado na barra e
-   * nenhuma linha "ligado". A queda, outro iframe, o mudo, outro toque e a saida encerram o pedido.
+   * nenhuma linha "ligado". A queda, outro iframe, o mudo, a equipe que recolhe o microfone, outro toque e a saida
+   * encerram o pedido.
    */
   const turnMicOn = useCallback(() => {
     void mediaPermissionState("microphone").then((permission) => {

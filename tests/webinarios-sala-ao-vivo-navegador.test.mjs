@@ -344,7 +344,8 @@ test("o microfone recolhido pela equipe (V2-19): o rejectParticipant de audio do
   const semResposta = model.applyLiveSignal(liberado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "audio" } });
   assert.equal(semResposta.micPrompt, false);
   assert.equal(semResposta.micAllowed, false);
-  // O Falar ja pedido (o toque esperando o mudo do iframe) tambem acaba: o mudo que vier depois e da equipe.
+  // O Falar ja pedido deixa de esperar o proximo mudo como nosso: o mudo que vier depois e da equipe (o pedido em si
+  // acaba pelo micAskRecalled, no teste seguinte).
   assert.equal(model.applyLiveSignal(model.acceptMic(liberado), { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "audio" } }).expectAudio, false);
 
   // O de outro participante, o de video, o sem id e o de antes de entrar (sem o proprio id) deixam o estado igual.
@@ -352,6 +353,49 @@ test("o microfone recolhido pela equipe (V2-19): o rejectParticipant de audio do
   assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "video" } }), desligado);
   assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { mediaType: "audio" } }), desligado);
   assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: null, payload: { id: "eu", mediaType: "audio" } }), desligado);
+});
+
+test("o recolhimento encerra o pedido do Falar (micAskRecalled, V2-19): o \"ligado\" guardado nunca traz o Microfone de volta, nem com o mudo da equipe depois", () => {
+  const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
+  const barra = (estado) => model.liveBarItems({ allowStudentCamera: true, micAllowed: estado.micAllowed, showMedia: true }).center;
+  // O sinal da moderacao de audio do proprio aluno: a liberacao (Approved) e o recolhimento (Rejected) usam o mesmo.
+  const proprioAudio = { id: "eu", mediaType: "audio" };
+  const liberado = sinal(sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" }), "moderationParticipantApproved", proprioAudio);
+  // Falar (como o turnMicOn): o pedido abre antes do toggleAudio, e o "ligado" que o iframe manda na hora fica guardado
+  // ate a faixa abrir (nem a barra, nem o servidor).
+  const api = { iframe: 1 };
+  const ligado = model.micAskStep(model.startMicAsk(null, { api, id: 1, nowMs: 0, permission: "prompt" }), "audioMuteStatusChanged", { muted: false });
+  assert.equal(ligado.swallow, true);
+  assert.ok(ligado.next.held, "o ligado esta guardado");
+
+  // A equipe recolhe antes de a faixa abrir: a sala encerra o pedido (como o onEvent) e o Microfone sai da barra.
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", proprioAudio, "eu"), true);
+  const pedido = model.micAskRecalled("moderationParticipantRejected", proprioAudio, "eu") ? null : ligado.next;
+  const recolhido = sinal(model.acceptMic(liberado), "moderationParticipantRejected", proprioAudio);
+  assert.ok(!barra(recolhido).includes("mic"));
+  // A faixa que abre depois: a conferencia do turnMicOn para ("gone"), e nenhum "ligado" chega a barra.
+  assert.deepEqual(model.micAskCheck(pedido, 1, { api, muted: false, nowMs: 100, permission: "granted" }), { action: "gone" });
+  // O mudo que a equipe manda junto passa direto, sem nada guardado antes dele: o Microfone continua fora, com o aviso.
+  const mudo = model.micAskStep(pedido, "audioMuteStatusChanged", { muted: true });
+  assert.equal(mudo.release, null);
+  assert.equal(mudo.swallow, false);
+  const depoisDoMudo = sinal(recolhido, "audioMuteStatusChanged", { muted: true });
+  assert.equal(depoisDoMudo.micAllowed, false);
+  assert.equal(depoisDoMudo.notice, "mic_silenced");
+  assert.ok(!barra(depoisDoMudo).includes("mic"));
+
+  // Sem o fim do pedido, a faixa aberta soltaria o "ligado" guardado e o Microfone voltaria a barra (o que a regra evita).
+  const semFim = model.micAskCheck(ligado.next, 1, { api, muted: false, nowMs: 100, permission: "granted" });
+  assert.equal(semFim.action, "release");
+  assert.ok(barra(sinal(recolhido, "audioMuteStatusChanged", semFim.signal)).includes("mic"));
+
+  // So o recolhimento do proprio microfone encerra o pedido: o de outro, o de video, o de antes de entrar (sem o
+  // proprio id), a liberacao e os mudos seguem pelo micAskStep.
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", { id: "outro", mediaType: "audio" }, "eu"), false);
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", { id: "eu", mediaType: "video" }, "eu"), false);
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", proprioAudio, null), false);
+  assert.equal(model.micAskRecalled("moderationParticipantApproved", proprioAudio, "eu"), false);
+  assert.equal(model.micAskRecalled("audioMuteStatusChanged", { muted: true }, "eu"), false);
 });
 
 test("a mao, o selo Gravando e o palco: so a mao do proprio; quem modera entra no palco, alunos nunca; o Som conhece todos", () => {

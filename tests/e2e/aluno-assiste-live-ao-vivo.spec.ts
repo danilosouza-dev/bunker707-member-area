@@ -61,7 +61,7 @@ import {
 // a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna quando o motor confirma); com o
 // painel fechado ela volta.
 // O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
-// mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe.
+// mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe; o foco que estava nele volta para a sala.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -198,9 +198,14 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   await botaoMicrofone.click();
   await sala.esperarComando("toggleAudio", { depoisDe: antesDeDesligar });
   await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "false");
+  // O foco fica no Microfone (o WebKit nao foca o botao no clique): quando ele some, o foco volta para dentro da sala,
+  // nunca para o body, onde o Esc, os atalhos e a trava do Tab deixariam de valer.
+  await botaoMicrofone.focus();
   await sala.disparar("moderationParticipantRejected", { id: PARTICIPANTE, mediaType: "audio" });
   await expect(botaoMicrofone).toHaveCount(0);
   await expect(dialogo.getByTestId("live-notice")).toContainText(aoVivo.microfoneSilenciado);
+  await expect(page.locator("body")).not.toBeFocused();
+  await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
 
   // Os sinais do iframe viram registros so com codigos (o lote sai a cada 10 s): a camera com o aceite e a mao.
   await expect

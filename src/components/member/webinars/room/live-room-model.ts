@@ -869,10 +869,10 @@ export function expectAudioToggle(state: LiveSignalState): LiveSignalState {
  * permissao do site, a do sistema (o macOS que bloqueou o navegador), o microfone ocupado ou o fone desplugado. Entao
  * TODO pedido segura o "ligado" ate a faixa abrir de verdade (isAudioMuted do iframe falso), com ou sem a permissao do
  * site dada. O pedido e um so, ligado ao iframe em que o toggleAudio foi (`api`), e acaba so com a faixa aberta (o
- * "ligado" vai), o mudo (micAskStep), a recusa do navegador, outro toque, outro iframe ou a saida; nunca por prazo (o
- * getUserMedia aberto continua esperando o aluno: quem libera depois abre a faixa sem sinal nenhum). Enquanto ele
- * durar, o iframe pode estar com o "ligado" sem faixa: o proximo toque abre outro pedido, e o "ligado" que nao vier de
- * novo como sinal a sala cria quando a faixa abrir.
+ * "ligado" vai), o mudo (micAskStep), a equipe que recolhe o microfone (micAskRecalled), a recusa do navegador, outro
+ * toque, outro iframe ou a saida; nunca por prazo (o getUserMedia aberto continua esperando o aluno: quem libera depois
+ * abre a faixa sem sinal nenhum). Enquanto ele durar, o iframe pode estar com o "ligado" sem faixa: o proximo toque
+ * abre outro pedido, e o "ligado" que nao vier de novo como sinal a sala cria quando a faixa abrir.
  */
 export type MicAsk = {
   /** O IFrame API em que o toggleAudio foi: outro (a queda, a volta, a sala desmontada) encerra o pedido. */
@@ -922,6 +922,16 @@ export function micAskStep(current: MicAsk | null, name: string, payload: unknow
     return { next: { ...current, held: payload }, release: null, swallow: true };
   }
   return { next: null, release: current.held, swallow: false };
+}
+
+/**
+ * A equipe recolheu o microfone deste aluno (moderationParticipantRejected de audio do proprio id, docs/31 V2-19): o
+ * pedido do Falar em andamento acaba ali, sem passar o "ligado" guardado. Assim o Microfone que saiu da barra
+ * (applyLiveSignal) nunca volta por um "ligado" antigo (micAskCheck devolve "gone"), e o mudo que a equipe manda junto
+ * passa direto, sem nada guardado antes dele.
+ */
+export function micAskRecalled(name: string, payload: unknown, ownId: string | null): boolean {
+  return name === "moderationParticipantRejected" && isOwnMicApproval(payload, ownId);
 }
 
 export type MicAskOutcome =
@@ -1217,6 +1227,16 @@ export function viewMenuFocusLost(input: { active: unknown; body: unknown; inMen
  */
 export function barFocusLost(input: { active: unknown; barShown: boolean; barWasShown: boolean; body: unknown }): boolean {
   return input.barWasShown && !input.barShown && (input.active === input.body || input.active === null);
+}
+
+/**
+ * O Microfone acabou de sair da barra (a equipe o recolheu ou silenciou: micAllowed de verdadeiro para falso; ou a
+ * reconexao, que entra mudo) com o foco nele: o foco caiu no body, e a sala o manda de volta para dentro dela
+ * (roomFocusTarget), como no barFocusLost, porque no body o Esc, os atalhos e a trava do Tab deixariam de valer. Com o
+ * foco em outro lugar (o video, outro controle) ou o Microfone que continua na barra, nada.
+ */
+export function micFocusLost(input: { active: unknown; body: unknown; micShown: boolean; micWasShown: boolean }): boolean {
+  return input.micWasShown && !input.micShown && (input.active === input.body || input.active === null);
 }
 
 /** Levantar / Abaixar a mão: a barra muda na hora; o raiseHandUpdated do iframe confirma. */
