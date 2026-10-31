@@ -65,6 +65,10 @@ export type LiveControlsProps = {
   onToggleSettings: () => void;
   /** O painel do chat esta na tela (o balao fica ligado e se chama "Esconder o chat"). */
   panelOpen: boolean;
+  /** Com o painel fechado o balao e o primeiro foco da sala (firstFocusTarget). */
+  panelFirstFocus?: boolean;
+  /** As mensagens novas desde que o painel fechou (o contador do balao). */
+  panelUnread?: number;
   /** "Ver como" ou a sala sem escrita (encerrada, antes de abrir): as reacoes ficam desligadas. */
   reactionsDisabled: boolean;
   reactionsOpen: boolean;
@@ -161,7 +165,7 @@ export function LiveControls(props: LiveControlsProps) {
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
       case "panel":
-        return <RoomPanelToggle key={item} onToggle={props.onTogglePanel} open={props.panelOpen} />;
+        return <RoomPanelToggle firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
     }
   }
 

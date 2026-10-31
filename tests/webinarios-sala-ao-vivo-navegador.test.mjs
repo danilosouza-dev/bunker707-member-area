@@ -359,9 +359,10 @@ test("os atalhos R, M e E (nunca escrevendo, nunca com Ctrl/Alt/Cmd), o Modo cin
   assert.equal(model.prefersCinemaMode({ fullscreenEnabled: true, userAgent: "Mozilla/5.0 (Macintosh) Chrome/130" }), false);
   assert.equal(model.prefersCinemaMode({ fullscreenEnabled: false, userAgent: "Mozilla/5.0 (Linux; Android 14) Chrome/130" }), true);
 
-  assert.deepEqual(model.overlayMessages([1, 2, 3, 4, 5]), [3, 4, 5]);
+  // As pilulas do chat sobre o palco com o painel fechado (docs/31 V2-8): as 2 ultimas, tambem no computador.
+  assert.deepEqual(model.overlayMessages([1, 2, 3, 4, 5]), [4, 5]);
   assert.deepEqual(model.overlayMessages([1]), [1]);
-  assert.equal(model.LIVE_ROOM_RULES.overlayMessages, 3);
+  assert.equal(model.LIVE_ROOM_RULES.overlayMessages, 2);
 });
 
 test("as frases da barra (LIVE_ROOM_COPY aponta para WEBINAR_COPY.aoVivo) passam pela PROIBIDAS_WEBINARIO e nao citam o motor de video", () => {

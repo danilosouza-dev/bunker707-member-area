@@ -82,6 +82,8 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "live-controls.tsx",
     "room-bar.tsx",
     "recorded-controls.tsx",
+    "room-panel.tsx",
+    "room-chat-pills.tsx",
     "live-settings.tsx",
     "live-notices.tsx",
     "live-room.tsx",

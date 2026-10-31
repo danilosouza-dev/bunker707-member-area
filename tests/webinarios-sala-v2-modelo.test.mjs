@@ -9,6 +9,8 @@ import "./support/transpile-tsx.mjs";
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
 // F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
 // tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
+// F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao, o primeiro foco e quando
+// as 2 ultimas mensagens ficam em pilulas sobre o palco.
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -312,4 +314,85 @@ test("returnFocusFromPanel: o painel fechou com o foco nele (ou no body): o foco
   assert.equal(focados.at(-1), "Tema claro");
   assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ controles: [], toggles: [] }), aba, painel), false, "nada na tela, nada a focar");
   assert.equal(salaAoVivo.returnFocusFromPanel(null, aba, painel), false);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador do balao, o primeiro foco e as pilulas do chat
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma enquete do aluno, como a sessao traz (aberta, ou encerrada com o resultado compartilhado). */
+const enquete = (status, extra = {}) => ({ anonymous: false, id: `p-${status}`, kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status, ...extra });
+const abertas = (polls) => polls.filter((poll) => poll.status === "open").length;
+
+test("panelTabsFor (V2-7): Chat, Perguntas e Participantes na live e na gravada; o Replay sem Participantes; Enquetes so com enquete aberta ou com a aba ja escolhida", () => {
+  assert.deepEqual(layout.panelTabsFor({ kind: "live", openPolls: 0, tab: "chat" }), ["chat", "perguntas", "participantes"]);
+  assert.deepEqual(layout.panelTabsFor({ kind: "simulated", openPolls: 0, tab: "chat" }), ["chat", "perguntas", "participantes"], "a gravada tambem tem Participantes");
+  assert.deepEqual(layout.panelTabsFor({ kind: "replay", openPolls: 0, tab: "chat" }), ["chat", "perguntas"], "no Replay ninguem esta presente");
+  // A gravada com so uma enquete encerrada com resultado: sem a aba (o resultado vai para o palco, V2-10).
+  const encerrada = [enquete("closed", { myOptionIds: ["o1"], results: { counts: { o1: 4 }, total: 4 } })];
+  assert.deepEqual(layout.panelTabsFor({ kind: "simulated", openPolls: abertas(encerrada), tab: "chat" }), ["chat", "perguntas", "participantes"]);
+  // Com enquete aberta, a aba entra por ultimo, nas tres salas.
+  for (const kind of ["live", "simulated", "replay"]) {
+    assert.equal(layout.panelTabsFor({ kind, openPolls: abertas([enquete("open")]), tab: "chat" }).at(-1), "enquetes", kind);
+  }
+  // A enquete fechou com o aluno na aba: ela continua (a aba nao some de baixo dele).
+  assert.deepEqual(layout.panelTabsFor({ kind: "live", openPolls: 0, tab: "enquetes" }), ["chat", "perguntas", "participantes", "enquetes"]);
+  assert.deepEqual(layout.panelTabsFor({ kind: "replay", openPolls: 0, tab: "enquetes" }), ["chat", "perguntas", "enquetes"]);
+});
+
+test("panelStageNames: na gravada, 'No palco' e so quem apresenta (sem nome, ninguem); nunca a lista de alunos", () => {
+  assert.deepEqual(layout.panelStageNames("Danilo Souza"), ["Danilo Souza"]);
+  assert.deepEqual(layout.panelStageNames("  Danilo Souza "), ["Danilo Souza"]);
+  assert.deepEqual(layout.panelStageNames(null), []);
+  assert.deepEqual(layout.panelStageNames("   "), []);
+});
+
+const client = await import("../src/lib/webinar-room-client.ts");
+
+/** Uma mensagem do chat (a do proprio aluno com mine). */
+const mensagem = (id, offsetMs, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
+
+test("unreadCount (V2-7): conta as mensagens que chegaram depois de o painel fechar; ignora as do proprio aluno, as ja vistas e as mais antigas que o fechar", () => {
+  const vistas = new Set(["a", "b"]);
+  const chat = [mensagem("a", 1_000), mensagem("b", 2_000), mensagem("c", 9_000), mensagem("d", 9_500, { mine: true }), mensagem("e", 10_000)];
+  assert.equal(layout.unreadCount(vistas, chat), 2, "c e e; a minha (d) nao conta");
+  assert.equal(layout.unreadCount(new Set(), [mensagem("x", 1, { mine: true })]), 0, "so as minhas: nada novo");
+  assert.equal(layout.unreadCount(new Set(chat.map((item) => item.id)), chat), 0, "tudo ja visto");
+  // O painel que monta fechado (a escolha guardada): a primeira leitura do chat chega depois, com o historico. So conta
+  // o que e mais novo que o fechar.
+  assert.equal(layout.unreadCount(new Set(), chat, 8_000), 2, "o historico (a e b) nao e novo; c e e sim");
+  assert.equal(layout.unreadCount(new Set(), chat, 10_000), 0, "a mensagem do mesmo instante do fechar ja estava na tela");
+  // Reusa a contagem das mensagens novas da sala (o leitor de tela ja anunciava "N mensagens novas").
+  assert.equal(layout.unreadCount(vistas, chat), client.newMessageCount(vistas, chat.filter((item) => !item.mine)));
+});
+
+test("firstFocusTarget: o primeiro foco da sala na aba Chat com o painel na tela; fechado, no balao da barra", () => {
+  assert.equal(layout.firstFocusTarget({ panelShown: true }), "tab");
+  assert.equal(layout.firstFocusTarget({ panelShown: false }), "panel-toggle");
+  // Sem a barra o painel fica sempre na tela (roomPanelShown): o foco vai para a aba, nunca para um balao que nao existe.
+  assert.equal(layout.firstFocusTarget({ panelShown: layout.roomPanelShown({ barShown: false, panelOpen: false, settingsTakeover: false }) }), "tab");
+});
+
+test("chatPillsShown (V2-8): as pilulas so no desenho normal, com o painel fechado e o palco de pe; o card da Oferta e Configurações no celular tiram as pilulas", () => {
+  const base = { blocked: false, design: "normal", offerShown: false, panelShown: false, settingsTakeover: false };
+  const linhas = [
+    [{}, true, "o painel fechado pelo balao (tambem no computador)"],
+    [{ panelShown: true }, false, "o painel na tela: o chat ja esta la"],
+    [{ blocked: true }, false, "removido ou banido: a frase toma a sala"],
+    [{ settingsTakeover: true }, false, "Configurações no celular: o palco fica com 96 px"],
+    [{ offerShown: true }, false, "o card da Oferta tem o canto"],
+    [{ design: "vertical" }, false, "o vertical tem o chat dele por cima do video"],
+    [{ design: "vertical", panelShown: true }, false, "o vertical nunca"]
+  ];
+  for (const [extra, esperado, motivo] of linhas) {
+    assert.equal(layout.chatPillsShown({ ...base, ...extra }), esperado, motivo);
+  }
+});
+
+test("overlayMessages (V2-8): sem contagem, as 2 ultimas mensagens (a mais nova por ultimo), tambem no computador", () => {
+  assert.equal(model.LIVE_ROOM_RULES.overlayMessages, 2);
+  assert.deepEqual(model.overlayMessages(["a", "b", "c", "d"]), ["c", "d"]);
+  assert.deepEqual(model.overlayMessages(["a"]), ["a"]);
+  assert.deepEqual(model.overlayMessages([]), []);
+  assert.deepEqual(model.overlayMessages(["a", "b", "c"], 0), [], "contagem zero, nada");
 });

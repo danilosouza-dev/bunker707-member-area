@@ -30,6 +30,10 @@ export type RecordedControlsProps = {
   onToggleReactions: () => void;
   /** O painel do chat esta na tela. */
   panelOpen: boolean;
+  /** Com o painel fechado o balao e o primeiro foco da sala (firstFocusTarget). */
+  panelFirstFocus?: boolean;
+  /** As mensagens novas desde que o painel fechou (o contador do balao). */
+  panelUnread?: number;
   /** "Ver como", antes do zero ou fora do acesso: as reacoes ficam desligadas. */
   reactionsDisabled: boolean;
   reactionsOpen: boolean;
@@ -72,7 +76,7 @@ export function RecordedControls(props: RecordedControlsProps) {
           />
         );
       case "panel":
-        return <RoomPanelToggle key={item} onToggle={props.onTogglePanel} open={props.panelOpen} />;
+        return <RoomPanelToggle firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
       default:
         return null;
     }

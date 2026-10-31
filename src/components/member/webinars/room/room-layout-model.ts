@@ -1,14 +1,16 @@
 // O desenho da sala do aluno V2 (docs/31 §1), a parte pura: os trechos da linha da data no cabecalho do computador
 // (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do iframe tira da direita do video, onde os
 // selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
-// quando o painel aparece, o toque no balao (V2-7 e V2-8) e o esqueleto da live. Sem "use client" e com imports
-// relativos: tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio nem a tela:
-// tudo chega por parametro.
+// quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
+// contador de mensagens novas do balao, o primeiro foco e quando as pilulas do chat ficam no palco (V2-7 e V2-8). Sem
+// "use client" e com imports relativos: tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le
+// o relogio nem a tela: tudo chega por parametro.
 
 import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
+import { newMessageCount, type RoomMessage } from "../../../../lib/webinar-room-client";
 import { formatWebinarDayLong, saoPauloTime } from "../../../../lib/webinar-time";
-import type { RoomSkeletonState } from "./vertical/vertical-model";
+import type { RoomDesign, RoomSkeletonState } from "./vertical/vertical-model";
 
 /** O tipo da sala: a Live ao vivo, a Live gravada (simulated) ou o Replay livre. */
 export type RoomKind = "live" | "replay" | "simulated";
@@ -147,4 +149,66 @@ export function panelToggleStep(input: { panelShown: boolean; settingsTakeover: 
 export function liveSkeletonState(input: { blocked: boolean; cinema: boolean; panelShown: boolean; settingsTakeover: boolean }): RoomSkeletonState {
   const stageGrows = input.blocked || !input.panelShown || input.cinema;
   return { cinema: input.cinema, panelShown: input.panelShown, stageGrows, stageMin: stageGrows && input.settingsTakeover };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O painel (V2-7 e V2-8): as abas, o contador do balao, o primeiro foco e as pilulas do chat no palco
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma aba do painel da sala: Chat (no Replay, "Chat da live"), Perguntas, Participantes e Enquetes. */
+export type RoomPanelTab = "chat" | "enquetes" | "participantes" | "perguntas";
+
+/**
+ * As abas do painel (V2-7), a mesma regra nas tres salas: Chat, Perguntas e Participantes na live e na gravada; o
+ * Replay sem Participantes (ninguem esta presente: o aluno assiste quando quer); Enquetes so com enquete aberta, ou
+ * com a aba ja escolhida (a enquete que fecha com o aluno nela nao tira a aba de baixo dele). A enquete encerrada com
+ * resultado nao abre a aba: o resultado compartilhado aparece no palco (V2-10).
+ */
+export function panelTabsFor(input: { kind: RoomKind; openPolls: number; tab: RoomPanelTab }): RoomPanelTab[] {
+  const tabs: RoomPanelTab[] = ["chat", "perguntas"];
+  if (input.kind !== "replay") {
+    tabs.push("participantes");
+  }
+  if (input.openPolls > 0 || input.tab === "enquetes") {
+    tabs.push("enquetes");
+  }
+  return tabs;
+}
+
+/**
+ * Quem fica em "No palco" na aba Participantes da gravada (V2-7): quem apresenta, quando a pagina sabe o nome; nunca a
+ * lista dos alunos (docs/30 §1.3).
+ */
+export function panelStageNames(presenterName: string | null): string[] {
+  const presenter = presenterName?.trim();
+  return presenter ? [presenter] : [];
+}
+
+/**
+ * Quantas mensagens novas chegaram com o painel fechado (o contador do balao, V2-7 e V2-8): as que nao estavam na
+ * tela quando o painel fechou (`seenIds`), sem as do proprio aluno. `afterOffsetMs` e o offset da sala quando o painel
+ * fechou: a mensagem mais antiga que ele (a primeira leitura do chat que chega depois de o painel abrir fechado, ao
+ * recarregar) ja era do chat e nao conta como nova.
+ */
+export function unreadCount(seenIds: ReadonlySet<string>, messages: readonly RoomMessage[], afterOffsetMs: number | null = null): number {
+  const others = messages.filter((message) => !message.mine && (afterOffsetMs === null || message.offsetMs > afterOffsetMs));
+  return newMessageCount(seenIds, others);
+}
+
+/**
+ * Onde o foco entra quando a sala abre (o [data-room-first-focus]): na aba Chat com o painel na tela; com ele fechado,
+ * no balao da barra, que o reabre (a aba escondida nao recebe foco).
+ */
+export function firstFocusTarget(input: { panelShown: boolean }): "panel-toggle" | "tab" {
+  return input.panelShown ? "tab" : "panel-toggle";
+}
+
+/**
+ * As ultimas mensagens em pilulas sobre o palco (V2-8): so no desenho normal (o vertical tem o chat dele por cima do
+ * video), com o painel fechado e o palco de pe. Saem na frase de removido ou banido (`blocked`), com Configurações
+ * no lugar do chat no celular (`settingsTakeover`: o palco fica com 96 px) e com o card da Oferta no palco, que e a
+ * unica coisa clicavel da venda e tem a prioridade do canto.
+ */
+export function chatPillsShown(input: { blocked: boolean; design: RoomDesign; offerShown: boolean; panelShown: boolean; settingsTakeover: boolean }): boolean {
+  return input.design === "normal" && !input.panelShown && !input.blocked && !input.settingsTakeover && !input.offerShown;
 }

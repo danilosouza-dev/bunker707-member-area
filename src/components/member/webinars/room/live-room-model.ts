@@ -57,8 +57,8 @@ export const LIVE_ROOM_RULES = {
   reconnectBaseMs: 2_000,
   /** Sem a entrada confirmada depois disto, a montagem conta como queda. */
   joinTimeoutMs: 30_000,
-  /** As ultimas mensagens por cima do palco com a gaveta fechada (celular). */
-  overlayMessages: 3,
+  /** As ultimas mensagens em pilulas sobre o palco com o painel do chat fechado (docs/31 V2-8, tambem no computador). */
+  overlayMessages: 2,
   /** Os avisos passageiros da barra (camera fechada pela equipe, microfone silenciado) somem depois disto. */
   noticeMs: 6_000,
   /**
@@ -1230,7 +1230,7 @@ export function prefersCinemaMode(input: { fullscreenEnabled: boolean; userAgent
   return /iPhone|iPod/i.test(input.userAgent) || !input.fullscreenEnabled;
 }
 
-/** As ultimas mensagens para o chat por cima do palco (celular, gaveta fechada). */
+/** As ultimas mensagens para as pilulas do chat sobre o palco (o painel fechado; as duas salas, V2-8). */
 export function overlayMessages<T>(messages: readonly T[], count: number = LIVE_ROOM_RULES.overlayMessages): T[] {
   return count > 0 ? messages.slice(-count) : [];
 }

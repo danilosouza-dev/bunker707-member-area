@@ -158,7 +158,7 @@ test("o desenho vertical: dialogo de tela cheia, o selo Ao vivo e o contador SOM
   assert.equal(top.match(/<button[^>]*>/g)?.length, 1, "o topo tem um botao so");
   assert.match(top, /<button aria-label="Sair" class="[^"]*size-11/);
   assert.doesNotMatch(html, /role="tablist"/, "sem o painel de abas do desenho normal");
-  assert.doesNotMatch(html, /lg:w-\[360px\]/);
+  assert.doesNotMatch(html, /data-testid="room-panel"/, "sem o painel do desenho normal (a gaveta faz o papel dele)");
   assert.doesNotMatch(html, /<header class="flex h-12/, "sem o cabecalho do desenho normal");
 });
 

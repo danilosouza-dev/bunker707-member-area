@@ -2,10 +2,12 @@ import type { Locator, Page } from "@playwright/test";
 import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
+import { CHAT_CONSENT_VERSION } from "../../src/server/webinars/model";
 import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
+  abrirComoProdutor,
   ambienteDaSalaAoVivo,
   eventosDaLiveAoVivo,
   expect,
@@ -44,6 +46,9 @@ import {
 // A barra (docs/31 V2-6 a V2-8): no computador o Sair fica nela e o balao "Esconder o chat" esconde o painel (o palco
 // cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe (a 360 px
 // tambem), os circulos tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
+// O painel fechado (docs/31 V2-7 e V2-8): o X "Fechar o painel" fecha e devolve o foco ao balao, as 2 ultimas mensagens
+// ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome do balao ("Mostrar o chat, 1 mensagem
+// nova") e reabrir tira o contador.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -316,6 +321,64 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   // A 360 px (os Android pequenos) a barra tambem cabe sem rolar por dentro (a rolagem dela fica escondida).
   await page.setViewportSize({ height: 740, width: 360 });
   expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem em 360 px").toBe(true);
+});
+
+test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; as 2 ultimas mensagens ficam em pilulas no palco; a mensagem nova do produtor entra no nome do balao e reabrir zera o contador", async ({ browser, page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo } = await entrarNaSala(page);
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(chat).toBeVisible();
+  // As abas em pilula na lista "Painel da sala" (a mesma regra nas tres salas): Chat, Perguntas e Participantes.
+  const abas = chat.getByRole("tablist", { name: painel.rotulo });
+  await expect(abas.getByRole("tab")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+
+  // O produtor escreve no chat da live pela rota da sala (a primeira mensagem com o aceite).
+  const produtor = await abrirComoProdutor(browser);
+  const escrever = async (texto: string) => {
+    const resposta = await produtor.pagina.request.post(`/api/webinars/${LIVE_AO_VIVO_DE_TESTE.id}/chat`, {
+      data: { body: texto, consent: true, consentVersion: CHAT_CONSENT_VERSION, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId }
+    });
+    expect(resposta.status(), texto).toBe(201);
+  };
+  try {
+    await escrever("primeira do produtor no painel");
+    await escrever("segunda do produtor no painel");
+    await expect(chat.getByRole("log").getByText("segunda do produtor no painel")).toBeVisible({ timeout: 15_000 });
+
+    // O X fecha o painel (montado e escondido) e o foco vai ao balao, que o reabre.
+    await chat.getByRole("button", { exact: true, name: painel.fechar }).click();
+    await expect(chat).toBeHidden();
+    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    await expect(mostrar).toBeFocused();
+    await expect(mostrar).toHaveAttribute("aria-pressed", "false");
+
+    // As 2 ultimas mensagens em pilulas dentro do palco (tambem no computador), a mais nova embaixo.
+    const pilulas = palco.getByTestId("room-chat-pills");
+    await expect(pilulas.locator("li")).toHaveCount(2);
+    await expect(pilulas.locator("li").nth(0)).toContainText("primeira do produtor no painel");
+    await expect(pilulas.locator("li").nth(1)).toContainText("segunda do produtor no painel");
+
+    // Uma mensagem nova com o painel fechado: o balao diz quantas chegaram, e as pilulas andam.
+    await escrever("terceira do produtor no painel");
+    const comNovas = dialogo.getByRole("button", { exact: true, name: painel.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(1)) });
+    await expect(comNovas).toBeVisible({ timeout: 15_000 });
+    await expect(comNovas.locator("[data-room-unread]")).toHaveText("1");
+    await expect(pilulas.locator("li").nth(1)).toContainText("terceira do produtor no painel");
+    await expect(pilulas).not.toContainText("primeira do produtor no painel");
+
+    // Reabrir mostra o chat e tira o contador (e as pilulas, porque o chat esta na tela).
+    await comNovas.click();
+    await expect(chat).toBeVisible();
+    const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
+    await expect(esconder).toHaveAttribute("aria-pressed", "true");
+    await expect(esconder.locator("[data-room-unread]")).toHaveCount(0);
+    await expect(palco.getByTestId("room-chat-pills")).toHaveCount(0);
+    await expect(chat.getByRole("log").getByText("terceira do produtor no painel")).toBeVisible();
+  } finally {
+    await produtor.fechar();
+  }
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {

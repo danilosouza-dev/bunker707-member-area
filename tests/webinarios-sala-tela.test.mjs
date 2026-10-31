@@ -30,6 +30,9 @@ const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const { CHAT_LIMITS, REACTIONS } = await import("../src/server/webinars/model.ts");
 const vertical = await import("../src/components/member/webinars/room/vertical/vertical-model.ts");
 const recorded = await import("../src/components/member/webinars/room/recorded-controls.tsx");
+const notices = await import("../src/components/member/webinars/room/live-notices.tsx");
+const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
+const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const MIN = 60_000;
@@ -158,7 +161,10 @@ test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o
   assert.equal((normal.match(/data-room-theme=/g) ?? []).length, 1, "um so lugar: o dialogo");
   assert.match(normal, /<button aria-label="Tema claro"/);
   assert.match(normal, /data-testid="room-panel"/);
-  assert.match(normal.match(/<aside [^>]*>/)?.[0] ?? "", /bg-room-surface/, "o painel pelo token do tema");
+  // O painel (V2-7): o cartao da aba pelo token do tema; a lista das abas e a aba escolhida tambem.
+  assert.match(normal.match(/<div aria-labelledby="room-tabbtn-chat" class="[^"]*"/)?.[0] ?? "", /\bbg-room-surface\b/, "o cartao da aba pelo token do tema");
+  assert.match(normal, /role="tablist"/);
+  assert.match(normal.match(/<div aria-label="Painel da sala" class="[^"]*"/)?.[0] ?? "", /\bbg-room-tabs\b/, "a lista das abas pelo token");
 
   // O desenho vertical 9:16 fica sobre o video: sempre escuro, sem o cabecalho (e sem o botao de tema).
   const vertical = render(room.WebinarRoom, { ...props, design: "vertical" });
@@ -394,7 +400,7 @@ function payload(extra = {}, sessionExtra = {}) {
   };
 }
 
-test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas (Enquetes so com enquete), no ar / espera / encerrada pelo relogio do servidor, 375 px", () => {
+test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e Participantes (Enquetes so com enquete aberta; o Replay sem Participantes), no ar / espera / encerrada pelo relogio do servidor, 375 px", () => {
   const live = render(room.WebinarRoom, { coverUrl: null, payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" });
   assert.match(live, /role="dialog"/);
   assert.match(live, /aria-modal="true"/);
@@ -403,13 +409,17 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas 
   assert.match(live, /role="tablist"/);
   assert.match(live, /role="tab"[^>]*>Chat</);
   assert.match(live, /role="tab"[^>]*>Perguntas</);
+  assert.match(live, /role="tab"[^>]*>Participantes</, "a gravada tem Participantes, como a live (V2-7)");
   assert.doesNotMatch(live, />Enquetes</, "sem enquete aberta, sem a aba");
   assert.match(live, /2 assistindo/);
   assert.match(live, /Ao vivo/);
   assert.match(live, /<iframe[^>]+mediadelivery/);
   assert.match(live, /Ativar som/);
   assert.match(live, /fixed inset-0 flex flex-col/, "tela cheia por cima da area");
-  assert.match(live, /lg:w-\[360px\]/, "o painel a direita no computador");
+  // O painel de 320 px a direita no computador (V2-7), com as abas em pilula na lista "Painel da sala".
+  const aside = live.match(/<aside class="([^"]*)" data-testid="room-panel" id="room-panel">/)?.[1].split(" ") ?? [];
+  assert.ok(aside.includes("lg:w-80") && aside.includes("lg:flex-none"), aside.join(" "));
+  assert.match(live, /<div aria-label="Painel da sala" class="[^"]*" role="tablist">/);
   assert.match(live, /aspect-video w-full/, "o palco na largura a 375 px");
   assert.match(live, /data-testid="room-panel"/);
   assert.doesNotMatch(live, /room-pill|data-room-minimized|Minimizar/, "sem Minimizar e sem pilula (docs/31 V2-2)");
@@ -432,14 +442,40 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat e Perguntas 
   });
   assert.match(withPoll, />Enquetes</);
   assert.match(withPoll, /Gostou\?/, "o card da enquete por cima do chat");
+  // So uma enquete encerrada com o resultado: sem a aba (o resultado aparece no palco, V2-10).
+  const encerrada = render(room.WebinarRoom, {
+    coverUrl: null,
+    payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: ["o1"], options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: { counts: { o1: 3 }, total: 3 }, status: "closed" }] }),
+    readOnly: false,
+    webinarHref: "/x"
+  });
+  assert.doesNotMatch(encerrada, /role="tab"[^>]*>Enquetes</, "a enquete encerrada nao abre a aba no desenho normal");
 
   const replay = render(room.WebinarRoom, { coverUrl: null, payload: payload({}, { kind: "replay", offsetMs: null, roomPhase: null }), readOnly: false, webinarHref: "/x" });
   assert.match(replay, /data-room-phase="replay"/);
-  assert.match(replay, /Chat da live/);
+  assert.match(replay, /role="tab"[^>]*>Chat da live</);
+  assert.match(replay, /role="tab"[^>]*>Perguntas</);
+  assert.doesNotMatch(replay, /role="tab"[^>]*>Participantes</, "no Replay ninguem esta presente: sem Participantes");
   assert.doesNotMatch(replay, /Ativar som/, "o replay tem a barra do player");
 
   const preview = render(room.WebinarRoom, { coverUrl: null, payload: payload(), readOnly: true, webinarHref: "/x" });
   assert.match(preview, /No modo de visualização, nada é gravado\./);
+});
+
+test("a aba Participantes da gravada (V2-7): quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada), nunca a lista de alunos", () => {
+  // O contador da gravada com a Simulacao ligada: 3 de verdade mais 55 simulados aos 16 s (o cabecalho mostra 58).
+  const simulacao = roomSimulationStateOf({ counter: [{ atMs: 0, extra: 40 }, { atMs: 15_000, extra: 55 }], enabled: true, joins: [], saleNotices: [] });
+  const shownCount = simulacao.displayCount(3, 16_000);
+  assert.equal(shownCount, 58);
+  const html = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: shownCount });
+  assert.match(html, />No palco</);
+  assert.match(html, /Danilo Souza/);
+  assert.match(html, /58 alunos na sala/, "o mesmo numero do cabecalho: a sala nao se contradiz");
+  assert.equal((html.match(/<li/g) ?? []).length, 1, "so quem apresenta vira lista");
+  // Sem o nome de quem apresenta, so o numero.
+  const semNome = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames(null), students: shownCount });
+  assert.equal((semNome.match(/<li/g) ?? []).length, 0);
+  assert.match(semNome, /58 alunos na sala/);
 });
 
 test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura sao o normal; as caixas novas sao contents; o card da Oferta e o aviso de venda no palco", () => {

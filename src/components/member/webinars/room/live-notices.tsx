@@ -3,7 +3,6 @@
 import { Radio, Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import type { RoomMessage } from "@/lib/webinar-room-client";
 import { RoomButton } from "./room-ui";
 import { trapRoomFocus } from "./webinar-room";
 
@@ -12,10 +11,10 @@ import { trapRoomFocus } from "./webinar-room";
 // microfone, quando o apresentador libera, com Falar / Agora não), cada um um dialogo de verdade (role="dialog",
 // aria-modal, o foco preso nos dois botoes: no Ligar câmera, que o proprio clique abriu; no Agora não do microfone,
 // que abre sozinho; o foco volta a quem o tinha ao fechar; Esc = Agora não, sem fechar a sala); a aba
-// Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos); o chat por cima do palco no
-// celular (as 3 ultimas, com a gaveta fechada). Redesign V2, F2 (docs/31 V2-11): o cartao dos avisos e a aba
-// Participantes usam os tokens do tema da sala; o chat por cima do palco e igual nos dois temas. F3 (V2-4): o selo
-// Gravando saiu do cabecalho para o palco (room-stage-badges.tsx).
+// Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos; tambem na gravada, com o numero do
+// cabecalho). Redesign V2, F2 (docs/31 V2-11): o cartao dos avisos e a aba Participantes usam os tokens do tema da
+// sala. F3 (V2-4): o selo Gravando saiu do cabecalho para o palco (room-stage-badges.tsx). F5 (V2-8): o chat por cima
+// do palco virou as pilulas das duas salas (room-chat-pills.tsx).
 
 type ConsentDialogProps = {
   cancelLabel: string;
@@ -167,27 +166,5 @@ export function LiveParticipantsTab({ stage, students }: { stage: readonly strin
         {copy.alunosNaSala(Math.max(0, students))}
       </p>
     </div>
-  );
-}
-
-/** O chat por cima do palco no celular com a gaveta fechada: as ultimas mensagens, com degrade para o contraste. */
-export function LiveChatOverlay({ messages }: { messages: readonly RoomMessage[] }) {
-  if (messages.length === 0) {
-    return null;
-  }
-  return (
-    <ol
-      aria-label={WEBINAR_COPY.sala.abas.chat}
-      aria-live="polite"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-20 space-y-1 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-2 pt-8 lg:hidden"
-      data-testid="live-chat-overlay"
-      role="log"
-    >
-      {messages.map((message) => (
-        <li className="truncate text-[13px] leading-5 text-white" key={message.id}>
-          <span className="font-bold">{message.displayName}</span> <span className="text-zinc-100">{message.body}</span>
-        </li>
-      ))}
-    </ol>
   );
 }

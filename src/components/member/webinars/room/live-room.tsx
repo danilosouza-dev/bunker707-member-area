@@ -14,7 +14,7 @@ import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-mod
 import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls, LiveStageFullscreen } from "./live-controls";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
-import { LiveCameraDialog, LiveChatOverlay, LiveMicDialog, LiveParticipantsTab } from "./live-notices";
+import { LiveCameraDialog, LiveMicDialog, LiveParticipantsTab } from "./live-notices";
 import {
   barFocusLost,
   cameraClick,
@@ -44,8 +44,22 @@ import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
+import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { liveSkeletonState, liveStageMoment, panelToggleStep, roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx } from "./room-layout-model";
+import {
+  chatPillsShown,
+  firstFocusTarget,
+  liveSkeletonState,
+  liveStageMoment,
+  panelTabsFor,
+  panelToggleStep,
+  roomDateLine,
+  roomMobileLine,
+  roomPanelShown,
+  stageVideoRightPx,
+  type RoomPanelTab
+} from "./room-layout-model";
+import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -63,8 +77,8 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // confirmacao com a live no ar). O cabecalho ("{n} assistindo" e Sair; sem Minimizar, docs/31 V2-2), o palco com os
 // selos ("Ao vivo · 00:42:10" pelo inicio de verdade e o Gravando) e o iframe (live-stage.tsx: Entrar na sala,
 // Reconectando…, a sala trancada, em breve, encerrada), a nossa barra (live-controls.tsx), as abas Chat / Perguntas / Participantes /
-// Enquetes (a de Enquetes so com enquete aberta; no celular, gaveta pela aba de baixo e as 3 ultimas mensagens por cima
-// do palco com ela fechada) e os avisos de gravacao da camera e do microfone (live-notices.tsx). O chat, as perguntas, as enquetes,
+// Enquetes (a de Enquetes so com enquete aberta; o painel abre e fecha pelo balao da barra e, fechado, as 2 ultimas
+// mensagens ficam em pilulas sobre o palco) e os avisos de gravacao da camera e do microfone (live-notices.tsx). O chat, as perguntas, as enquetes,
 // as reacoes e o sinal de presenca sao os da fase 2; o offset do chat e do servidor. Silenciado no chat: o campo da
 // lugar a frase com a hora de Sao Paulo; removido ou banido (pela sessao ou por um 409 de qualquer rota) e quem saiu do
 // "Quem pode" no meio da live (o 404 da releitura da sessao, do sinal de presenca, do token ou dos sinais; D41): a sala
@@ -95,8 +109,10 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // tambem no computador (guardado no navegador; fechado, o painel fica montado e escondido e o palco cresce). O mesmo
 // esqueleto da gravada (corpo > coluna > caixa do palco, roomSkeleton): o iframe nunca muda de lugar. No celular a Tela
 // cheia (ou o Modo cinema) fica no canto do palco.
-
-type Tab = "chat" | "enquetes" | "participantes" | "perguntas";
+// Redesign V2, F5 (docs/31 V2-7 e V2-8): o painel de 320 px (room-panel.tsx) com as abas em pilula no topo (tambem no
+// celular: a aba de baixo que abria e fechava saiu, o balao manda), o X "Fechar o painel" no computador e as abas pela
+// regra unica das tres salas (panelTabsFor). Fechado, o balao conta as mensagens novas de outras pessoas e as 2 ultimas
+// ficam em pilulas sobre o palco (room-chat-pills.tsx); o primeiro foco e o balao (firstFocusTarget).
 
 export type LiveWebinarRoomProps = {
   coverUrl: string | null;
@@ -216,7 +232,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const stageRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<RoomPanelTab>("chat");
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
@@ -308,7 +324,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const settingsShown = settingsOpen && barShown;
   const reactionsShown = reactionsOpen && barShown;
   // No celular, o painel Configurações aberto toma o lugar do painel do chat: o palco encolhe e a nossa barra fica na
-  // tela (o botao que fecha o painel nunca sai da tela); a aba de baixo e o balao fecham Configurações e abrem o chat.
+  // tela (o botao que fecha o painel nunca sai da tela); o balao fecha Configurações e abre o chat.
   const settingsTakeover = settingsShown && !desktop;
   // O painel do chat: o balao da barra abre e fecha (tambem no computador); sem a barra ele fica na tela.
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover });
@@ -447,7 +463,10 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   const presentNow = heartbeatPresent ?? session.presentNow;
   const openPolls = session.polls.filter((poll) => poll.status === "open");
-  const showPollsTab = openPolls.length > 0 || tab === "enquetes";
+  const tabs = panelTabsFor({ kind: "live", openPolls: openPolls.length, tab });
+  // O contador do balao: as mensagens novas desde que o painel fechou (o offset da sala pelo relogio corrigido).
+  const unread = useRoomPanelUnread({ messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, panelShown });
+  const firstFocus = firstFocusTarget({ panelShown });
   const replayHref = session.webinar.replaySessionId ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const scheduledMs = Date.parse(session.session.scheduledAt);
   const countdown = screen === "waiting" ? formatCountdown(scheduledMs, nowMs + skewMs) : "";
@@ -487,8 +506,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   useRoomDialogLock(rootRef, true);
 
-  // O painel do chat fechou com o foco nele (a aba ativa tocada de novo no celular, a escolha guardada lida depois da
-  // primeira pintura): o foco vai ao balao da barra, nunca fica no body.
+  // O painel do chat fechou com o foco nele (o X, a escolha guardada lida depois da primeira pintura): o foco vai ao
+  // balao da barra, nunca fica no body.
   const panelShownRef = useRef(panelShown);
   useLayoutEffect(() => {
     const was = panelShownRef.current;
@@ -508,24 +527,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }
 
-  function selectTab(value: Tab) {
-    if (settingsTakeover) {
-      // No celular com o painel Configurações aberto: a aba fecha o painel e abre o chat nela.
-      closeSettings();
-      setTab(value);
-      setPanelOpen(true);
-      return;
-    }
-    if (value === tab) {
-      // No celular, a aba de baixo tambem fecha o painel do chat (o balao da barra o reabre).
-      if (!desktop) {
-        setPanelOpen(!panelOpen);
-      }
-      return;
-    }
-    setTab(value);
-    setPanelOpen(true);
-  }
 
   /** O balao da barra: abre e fecha o painel do chat; no celular com Configurações aberto, fecha ele e mostra o chat. */
   function togglePanel() {
@@ -664,8 +665,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }
 
-  const tabs: Tab[] = ["chat", "perguntas", "participantes", ...(showPollsTab ? (["enquetes"] as const) : [])];
-  const tabLabel = (value: Tab) => (value === "chat" ? copy.abas.chat : value === "perguntas" ? copy.abas.perguntas : value === "participantes" ? copy.abas.participantes : copy.abas.enquetes);
   // O palco cresce com o painel do chat fechado, no Modo cinema (o chat fica embaixo, menor) e na frase de removido /
   // banido; no celular com o painel Configurações aberto (o chat escondido), a caixa do palco divide a coluna com o
   // painel e fica com no minimo 96 px: o painel rola por dentro e a barra continua na tela (liveSkeletonState).
@@ -740,7 +739,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                 />
               ) : null}
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
-              {!panelShown && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(translation.messages)} /> : null}
+              {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
+              {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills messages={overlayMessages(translation.messages)} /> : null}
               {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
               {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
             </LiveStage>
@@ -768,7 +768,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              panelFirstFocus={firstFocus === "panel-toggle"}
               panelOpen={panelShown}
+              panelUnread={unread}
               reactionsDisabled={readOnly || !writable}
               reactionsOpen={reactionsShown}
               settings={
@@ -793,108 +795,86 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
         {blocked ? null : (
           // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
-          <aside className={skeleton.panel} data-testid="room-panel" hidden={!panelShown} id={ROOM_PANEL_ID}>
-            <div
-              aria-label={copy.abas.chat}
-              className="order-last flex shrink-0 border-t border-room-border pb-[env(safe-area-inset-bottom)] lg:order-first lg:border-b lg:border-t-0 lg:pb-0"
-              role="tablist"
-            >
-              {tabs.map((value) => (
-                <button
-                  aria-controls={`room-tab-${value}`}
-                  aria-expanded={value === tab && !desktop ? panelShown : undefined}
-                  aria-selected={tab === value}
-                  className={cn(
-                    "relative h-11 min-w-0 flex-1 truncate px-1 text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none sm:text-sm",
-                    tab === value ? "text-room-fg-strong" : "text-room-fg-muted hover:text-room-fg-strong"
-                  )}
-                  data-room-first-focus={value === "chat" ? "" : undefined}
-                  id={`room-tabbtn-${value}`}
-                  key={value}
-                  onClick={() => selectTab(value)}
-                  role="tab"
-                  type="button"
-                >
-                  {tabLabel(value)}
-                  {value === "enquetes" && openPolls.length > 0 ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-[var(--accent)] align-middle" /> : null}
-                  {tab === value ? <span aria-hidden="true" className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-[var(--accent)]" /> : null}
-                </button>
-              ))}
-            </div>
-
-            <div
-              aria-labelledby={`room-tabbtn-${tab}`}
-              className={cn("flex min-h-0 flex-1 flex-col lg:max-h-none", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
-              id={`room-tab-${tab}`}
-              role="tabpanel"
-            >
-              {tab === "chat" ? (
-                <>
-                  {openPolls.length > 0 ? (
-                    <button
-                      className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
-                      onClick={openPollsTab}
-                      type="button"
-                    >
-                      <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
-                      <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
-                    </button>
-                  ) : null}
-                  <RoomTranslationBar state={translation} />
-                  <RoomChatPanel
-                    assistant={assistant}
-                    chatMode={session.session.chatMode}
-                    consented={session.me.consented}
-                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-                    displayName={session.me.displayName}
-                    error={chat.error}
-                    messages={translation.messages}
-                    notice={readOnly ? null : composerNotice}
-                    nowMs={nowMs}
-                    onRemoveMine={chat.removeMine}
-                    onSend={async (body) => {
-                      try {
-                        const answer = await chat.send(body);
-                        if (!session.me.consented) {
-                          void refreshSession();
-                        }
-                        return answer;
-                      } catch (error) {
-                        onWriteRefused(error);
-                        throw error;
-                      }
-                    }}
-                    phase={phase}
-                    pinned={session.pinned}
-                    readOnly={readOnly}
-                    sessionId={sessionId}
-                    slowUntilMs={chat.slowUntilMs}
-                    webinarId={webinarId}
-                  />
-                </>
-              ) : null}
-              {tab === "perguntas" ? (
-                <RoomQuestionsTab
-                  allowAnonymous={session.session.anonymousQuestions}
+          <RoomPanel
+            className={skeleton.panel}
+            closable={barShown}
+            contentClassName={cn("lg:max-h-none", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
+            firstFocus={firstFocus === "tab"}
+            id={ROOM_PANEL_ID}
+            kind="live"
+            onClose={() => setPanelOpen(false)}
+            onTab={setTab}
+            open={panelShown}
+            pollOpen={openPolls.length > 0}
+            tab={tab}
+            tabs={tabs}
+          >
+            {tab === "chat" ? (
+              <>
+                {openPolls.length > 0 ? (
+                  <button
+                    className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
+                    onClick={openPollsTab}
+                    type="button"
+                  >
+                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
+                    <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
+                  </button>
+                ) : null}
+                <RoomTranslationBar state={translation} />
+                <RoomChatPanel
                   assistant={assistant}
+                  chatMode={session.session.chatMode}
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-                  enabled={!readOnly}
-                  getOffsetMs={getOffsetMs}
+                  displayName={session.me.displayName}
+                  error={chat.error}
+                  messages={translation.messages}
                   notice={readOnly ? null : composerNotice}
-                  onConsented={() => void refreshSession()}
-                  onRefused={onWriteRefused}
-                  readOnly={readOnly || phase === "ended"}
+                  nowMs={nowMs}
+                  onRemoveMine={chat.removeMine}
+                  onSend={async (body) => {
+                    try {
+                      const answer = await chat.send(body);
+                      if (!session.me.consented) {
+                        void refreshSession();
+                      }
+                      return answer;
+                    } catch (error) {
+                      onWriteRefused(error);
+                      throw error;
+                    }
+                  }}
+                  phase={phase}
+                  pinned={session.pinned}
+                  readOnly={readOnly}
                   sessionId={sessionId}
+                  slowUntilMs={chat.slowUntilMs}
                   webinarId={webinarId}
                 />
-              ) : null}
-              {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentNow} /> : null}
-              {tab === "enquetes" ? (
-                <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} onRefused={onWriteRefused} readOnly={readOnly || !writable} sessionId={sessionId} webinarId={webinarId} />
-              ) : null}
-            </div>
-          </aside>
+              </>
+            ) : null}
+            {tab === "perguntas" ? (
+              <RoomQuestionsTab
+                allowAnonymous={session.session.anonymousQuestions}
+                assistant={assistant}
+                consented={session.me.consented}
+                defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                enabled={!readOnly}
+                getOffsetMs={getOffsetMs}
+                notice={readOnly ? null : composerNotice}
+                onConsented={() => void refreshSession()}
+                onRefused={onWriteRefused}
+                readOnly={readOnly || phase === "ended"}
+                sessionId={sessionId}
+                webinarId={webinarId}
+              />
+            ) : null}
+            {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentNow} /> : null}
+            {tab === "enquetes" ? (
+              <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} onRefused={onWriteRefused} readOnly={readOnly || !writable} sessionId={sessionId} webinarId={webinarId} />
+            ) : null}
+          </RoomPanel>
         )}
       </div>
 

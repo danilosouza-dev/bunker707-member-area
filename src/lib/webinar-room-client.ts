@@ -96,7 +96,10 @@ export function revealedMessages(messages: readonly RoomMessage[], playerOffsetM
   return visibleMessages(messages, playerOffsetMs).concat(messages.filter((message) => message.mine && message.offsetMs > playerOffsetMs));
 }
 
-/** Quantas mensagens novas chegaram desde a ultima contagem (o leitor de tela anuncia "N mensagens novas" em rajada). */
+/**
+ * Quantas mensagens novas chegaram desde a ultima contagem (o leitor de tela anuncia "N mensagens novas" em rajada; o
+ * contador do balao da sala com o painel fechado conta por ela, unreadCount em room-layout-model.ts, docs/31 V2-7).
+ */
 export function newMessageCount(previousIds: ReadonlySet<string>, revealed: readonly RoomMessage[]): number {
   return revealed.reduce((count, message) => (previousIds.has(message.id) ? count : count + 1), 0);
 }

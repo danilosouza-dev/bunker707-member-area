@@ -163,7 +163,7 @@ export type RoomSkeleton = {
   bubbles: string;
   /** A confirmacao de Sair (no vertical, um cartao por cima, abaixo do topo). */
   confirm: string;
-  /** O painel do chat (o aside; no vertical nao existe: a gaveta faz o papel dele). */
+  /** O painel do chat (o aside do RoomPanel: aqui so se ele ocupa a coluna no celular; no vertical nao existe: a gaveta faz o papel dele). */
   panel: string;
   root: string;
   /** O lugar do aviso de venda simulado (no vertical, o topo abaixo da barra; o toast fica em top-14 dele). */
@@ -230,10 +230,8 @@ export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKEL
     body: "flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-4 lg:px-4 lg:pb-4",
     bubbles: "contents",
     confirm: NORMAL_CONFIRM,
-    panel: classes(
-      "flex min-h-0 flex-col border-t border-room-border bg-room-surface lg:w-[360px] lg:flex-none lg:overflow-hidden lg:rounded-[var(--member-cover-radius)] lg:border",
-      state.panelShown && !state.cinema ? "flex-1" : "flex-none"
-    ),
+    // A largura (320 px a partir de lg), as abas e o cartao ficam no RoomPanel (room-panel.tsx, docs/31 V2-7).
+    panel: classes("flex min-h-0 flex-col", state.panelShown && !state.cinema ? "flex-1" : "flex-none"),
     root: "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg",
     sales: "contents",
     stageBox: classes(

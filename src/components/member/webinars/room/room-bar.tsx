@@ -71,6 +71,8 @@ export type RoomBarButtonProps = {
   disabled?: boolean;
   /** Os botoes que abrem um painel por cima (Reagir, Configurações): aria-expanded no lugar do aria-pressed. */
   expanded?: boolean;
+  /** O primeiro foco da sala (data-room-first-focus): o balao com o painel do chat fechado. */
+  firstFocus?: boolean;
   icon: ComponentType<{ "aria-hidden"?: boolean | "true"; className?: string }>;
   /** Qual botao da barra e (data-room-bar-item: os testes e a tela leem). */
   item: RoomBarItem;
@@ -100,6 +102,7 @@ export function RoomBarButton(props: RoomBarButtonProps) {
         props.className
       )}
       data-room-bar-item={props.item}
+      data-room-first-focus={props.firstFocus ? "" : undefined}
       disabled={props.disabled}
       onClick={props.onClick}
       title={props.title ?? props.label}
@@ -134,9 +137,25 @@ export function RoomLeaveButton({ onLeave }: { onLeave: () => void }) {
 
 /**
  * O balao do chat (V2-6 a V2-8): abre e fecha o painel (o estado fica guardado no navegador). Aberto, fica ligado e se
- * chama "Esconder o chat"; fechado, "Mostrar o chat".
+ * chama "Esconder o chat"; fechado, "Mostrar o chat" e, com mensagens novas de outras pessoas desde que fechou, o
+ * contador vermelho no canto (o numero so na tela; o leitor de tela ouve "Mostrar o chat, 3 mensagens novas"). Com o
+ * painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida).
  */
-export function RoomPanelToggle({ onToggle, open }: { onToggle: () => void; open: boolean }) {
+export function RoomPanelToggle({ firstFocus = false, onToggle, open, unread = 0 }: { firstFocus?: boolean; onToggle: () => void; open: boolean; unread?: number }) {
   const copy = WEBINAR_COPY.salaV2.painel;
-  return <RoomBarButton active={open} controls={ROOM_PANEL_ID} icon={MessageCircle} item="panel" label={open ? copy.esconder : copy.mostrar} onClick={onToggle} />;
+  const count = open ? 0 : Math.max(0, Math.floor(unread));
+  const label = open ? copy.esconder : count > 0 ? copy.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(count)) : copy.mostrar;
+  return (
+    <RoomBarButton active={open} controls={ROOM_PANEL_ID} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
+      {count > 0 ? (
+        <span
+          aria-hidden="true"
+          className="absolute right-0.5 top-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--accent)] px-[5px] text-[11px] font-bold leading-none tabular-nums text-white shadow-[0_0_0_2px_var(--room-surface)]"
+          data-room-unread=""
+        >
+          {count}
+        </span>
+      ) : null}
+    </RoomBarButton>
+  );
 }

@@ -13,12 +13,15 @@ export const SALA_V2_COPY = {
   },
   /**
    * O painel do chat (V2-6 a V2-8): o balao da barra diz o que faz ("Esconder o chat" com o painel aberto, "Mostrar o
-   * chat" com ele fechado) e o X do painel fecha.
+   * chat" com ele fechado e, com mensagens novas, "Mostrar o chat, 3 mensagens novas", a contagem que vem de
+   * WEBINAR_COPY.sala.mensagensNovas), o X do painel fecha e a lista das abas se chama "Painel da sala".
    */
   painel: {
     esconder: "Esconder o chat",
     fechar: "Fechar o painel",
-    mostrar: "Mostrar o chat"
+    mostrar: "Mostrar o chat",
+    mostrarComNovas: (novas: string) => `Mostrar o chat, ${novas}`,
+    rotulo: "Painel da sala"
   },
   /** Os selos do palco (V2-4): quem apresenta, embaixo a esquerda, sobre o video. */
   selos: {
