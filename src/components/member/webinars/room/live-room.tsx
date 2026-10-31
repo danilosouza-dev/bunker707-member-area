@@ -35,8 +35,10 @@ import {
   pendingTogglePhrase,
   prefersCinemaMode,
   screenBlocksRoom,
+  stageColumnShown,
   stageNames,
   usesOurBar,
+  viewMenuFocusLost,
   writeRefusalOf,
   type LiveJoinFailure
 } from "./live-room-model";
@@ -67,6 +69,7 @@ import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomStageBadges } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
+import { ROOM_VIEW_MENU_ID } from "./room-view-menu";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
@@ -240,6 +243,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // O menu da Visão do vídeo (docs/31 V2-16): aberto pela sala, para nunca ficar junto com Reagir ou Configurações.
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [cameraAsk, setCameraAsk] = useState(false);
   const [cameraConsented, setCameraConsented] = useState(false);
   const [fullscreenOn, setFullscreenOn] = useState(false);
@@ -348,6 +353,33 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // Dentro da sala de verdade: com a tela fechada (encerrada, removido) o iframe ja desmontou.
   const joined = allowed && room.entry === "joined";
   const ourBar = usesOurBar(room.reply?.role ?? null);
+  // A Visão do vídeo so com a barra e o iframe no ar: desligada (a reconexao, a saida, a barra que sumiu) ela fecha de
+  // vez, e na volta a sala nao reabre sozinha nem leva o foco para a opcao marcada sem o aluno pedir.
+  const viewMenuUsable = barShown && joined;
+  const [viewMenuWasUsable, setViewMenuWasUsable] = useState(viewMenuUsable);
+  if (viewMenuWasUsable !== viewMenuUsable) {
+    setViewMenuWasUsable(viewMenuUsable);
+    if (!viewMenuUsable) {
+      setViewMenuOpen(false);
+    }
+  }
+  const viewMenuShown = viewMenuOpen && viewMenuUsable;
+  // O menu fechou por ficar desligado com o foco na opcao que sumiu (ou ja no body): o foco volta para a sala. Fechado
+  // pelo aluno (a escolha, o Esc, o proprio botao, um toque fora, o atalho R), o foco ja foi ao botao do menu.
+  const viewMenuShownRef = useRef(viewMenuShown);
+  useLayoutEffect(() => {
+    const was = viewMenuShownRef.current;
+    viewMenuShownRef.current = viewMenuShown;
+    const root = rootRef.current;
+    if (!was || viewMenuShown || viewMenuUsable || !root) {
+      return;
+    }
+    const active = document.activeElement;
+    const inMenu = active !== null && Boolean(document.getElementById(ROOM_VIEW_MENU_ID)?.contains(active));
+    if (viewMenuFocusLost({ active, body: document.body, inMenu })) {
+      roomFocusTarget(root)?.focus();
+    }
+  }, [viewMenuShown, viewMenuUsable]);
   // O microfone so depois do Falar (micAllowed) e a camera so depois do aviso aceito (cameraConsented): D4 e §8.5.
   const deviceSettings = deviceSettingsFor({
     allowStudentCamera: room.reply ? room.reply.settings.allowStudentCamera : null,
@@ -501,7 +533,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
-  const videoRightPx = stageVideoRightPx({ columnShown: room.viewShown === "stage" && room.signals.filmstripVisible, touch: geometry.touch });
+  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals), touch: geometry.touch });
   // O selo de cima a esquerda do palco: no ar, o tempo; na espera com a sala aberta, "Aguardando o apresentador".
   const stageMoment = liveStageMoment({ phase, screen });
 
@@ -606,10 +638,23 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     setSettingsOpen(false);
   }
 
-  /** Reagir e Configurações nunca abertos juntos (no celular, empilhados, empurrariam a barra para fora da tela). */
+  /** Fecha o menu da Visão do vídeo; o foco que estava nele volta ao botao dele antes de ele sumir. */
+  function closeViewMenu() {
+    returnFocusFrom(ROOM_VIEW_MENU_ID);
+    setViewMenuOpen(false);
+  }
+
+  /**
+   * Reagir, Configurações e o menu da Visão do vídeo nunca abertos juntos: no celular, empilhados, empurrariam a barra
+   * para fora da tela; no computador os tres abrem por cima do palco, e o painel cobriria o menu.
+   */
   function toggleReactions() {
-    if (!reactionsOpen && settingsOpen) {
-      closeSettings();
+    if (!reactionsOpen) {
+      if (settingsOpen) {
+        closeSettings();
+      }
+      // O atalho R com o foco no menu tambem: o foco vai ao botao do menu, nunca fica na opcao escondida.
+      closeViewMenu();
     }
     setReactionsOpen(!reactionsOpen);
   }
@@ -625,7 +670,22 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       returnFocusFrom(LIVE_REACTIONS_ID);
       setReactionsOpen(false);
     }
+    closeViewMenu();
     setSettingsOpen(true);
+  }
+
+  /** O botao da Visão do vídeo (e as setas nele) abre o menu e fecha Reagir e Configurações; o resto o fecha. */
+  function setViewMenu(open: boolean) {
+    if (open) {
+      if (reactionsOpen) {
+        returnFocusFrom(LIVE_REACTIONS_ID);
+        setReactionsOpen(false);
+      }
+      if (settingsOpen) {
+        closeSettings();
+      }
+    }
+    setViewMenuOpen(open);
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -633,11 +693,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       event.stopPropagation();
       if (confirmLeave) {
         setConfirmLeave(false);
-      } else if (reactionsShown || settingsShown) {
+      } else if (reactionsShown || settingsShown || viewMenuShown) {
         // O foco dentro do painel volta ao botao (sem isso ele cairia no body e a sala deixaria de ouvir o teclado).
         returnFocusFrom(LIVE_REACTIONS_ID);
         setReactionsOpen(false);
         closeSettings();
+        closeViewMenu();
       } else {
         askToLeave();
       }
@@ -832,6 +893,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
               onView={room.setView}
+              onViewMenu={setViewMenu}
               panelFirstFocus={firstFocus === "panel-toggle"}
               panelOpen={panelShown}
               panelUnread={unread}
@@ -853,6 +915,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               showMedia={ourBar}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
+              viewMenuOpen={viewMenuShown}
               viewShown={room.viewShown}
             />
           )}

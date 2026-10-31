@@ -1185,6 +1185,25 @@ export function filmstripStep(input: { visible: boolean; wanted: boolean }): "to
 }
 
 /**
+ * A coluna de miniaturas esta na tela agora (o que os selos de baixo e as pilulas descontam, --room-video-right): so
+ * com o motor no Palco (o ultimo tileViewChanged, nunca a escolha guardada) e com a coluna visivel (o ultimo
+ * filmstripDisplayChanged). Antes de entrar e na Grade, nenhuma coluna.
+ */
+export function stageColumnShown(signals: Pick<LiveSignalState, "filmstripVisible" | "viewShown">): boolean {
+  return signals.viewShown === "stage" && signals.filmstripVisible;
+}
+
+/**
+ * O menu da Visão do vídeo fechou por ficar desligado (a reconexao, a saida do iframe, a barra que sumiu) com o foco na
+ * opcao que sumiu, ou ja no body: a sala manda o foco para dentro dela (roomFocusTarget; o botao do menu esta desligado
+ * ou fora da tela), nunca o deixa no body, onde o Esc, os atalhos e a trava do Tab deixariam de valer. Com o foco em
+ * outro lugar (o video, outro controle), nada. Fechado pelo aluno, o proprio menu e a sala ja levam o foco ao botao.
+ */
+export function viewMenuFocusLost(input: { active: unknown; body: unknown; inMenu: boolean }): boolean {
+  return input.inMenu || input.active === input.body || input.active === null;
+}
+
+/**
  * A nossa barra acabou de sumir (a live encerrada, removido ou banido) e o foco caiu no body (estava num botao dela,
  * no painel Configurações ou nas reacoes, que sumiram juntos): a sala manda o foco de volta para dentro dela.
  */

@@ -1029,7 +1029,7 @@ test("o painel e o foco: o proprio botao Configurações fecha mandando o foco a
   assert.match(tela, /const barShown = liveBarShown\(\{ blocked, screen \}\);/);
   assert.match(tela, /if \(barWasShown !== barShown\) \{\s*setBarWasShown\(barShown\);\s*if \(!barShown\) \{\s*setSettingsOpen\(false\);\s*setReactionsOpen\(false\);\s*\}\s*\}/);
   assert.match(tela, /const settingsTakeover = settingsShown && !desktop;/);
-  assert.match(tela, /\} else if \(reactionsShown \|\| settingsShown\) \{/);
+  assert.match(tela, /\} else if \(reactionsShown \|\| settingsShown \|\| viewMenuShown\) \{/);
   assert.match(tela, /\{!barShown \? null : \(\s*<LiveControls/);
   assert.match(tela, /if \(root && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*roomFocusTarget\(root\)\?\.focus\(\);/);
 

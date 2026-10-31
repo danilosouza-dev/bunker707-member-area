@@ -258,6 +258,7 @@ const barra = (props = {}) =>
     onToggleReactions: noop,
     onToggleSettings: noop,
     onView: noop,
+    onViewMenu: noop,
     panelOpen: true,
     reactionsDisabled: false,
     reactionsOpen: false,
@@ -265,6 +266,7 @@ const barra = (props = {}) =>
     showMedia: true,
     soundOn: true,
     videoOn: false,
+    viewMenuOpen: false,
     viewShown: "stage",
     ...props
   });
@@ -396,7 +398,7 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
 
 test("a Visão do vídeo (V2-16): 'Visão do vídeo: Palco' desligada antes de entrar, so a partir de lg, com o menu de duas opcoes (Palco e Grade) e sem a palavra proibida", () => {
   const visao = WEBINAR_COPY.salaV2.visao;
-  const menu = (props) => render(viewMenuModule.RoomViewMenu, { disabled: false, onChoose: noop, shown: "stage", ...props });
+  const menu = (props) => render(viewMenuModule.RoomViewMenu, { disabled: false, onChoose: noop, onOpenChange: noop, open: false, shown: "stage", ...props });
 
   // Antes de entrar na sala (sem iframe): o botao diz o Palco, fica desligado e o menu fechado.
   const antes = menu({ disabled: true });
@@ -405,8 +407,8 @@ test("a Visão do vídeo (V2-16): 'Visão do vídeo: Palco' desligada antes de e
   assert.match(botao, /disabled=""/, "fora da sala, nada a mudar");
   assert.match(botao, /title="Visão do vídeo: Palco"/, "a dica do mouse entre lg e xl, quando so o icone aparece");
   const classes = (botao.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
-  for (const classe of ["hidden", "lg:inline-flex", "size-11", "rounded-full", "xl:w-auto", "xl:rounded-[var(--member-button-radius)]", "border-room-border-strong"]) {
-    assert.ok(classes.includes(classe), `${classe}: so a partir de lg, um circulo de 44 px que vira a pilula a partir de xl`);
+  for (const classe of ["hidden", "lg:inline-flex", "size-11", "lg:size-12", "rounded-full", "xl:h-11", "xl:w-auto", "xl:rounded-[var(--member-button-radius)]", "border-room-border-strong"]) {
+    assert.ok(classes.includes(classe), `${classe}: so a partir de lg, um circulo de 48 px como os outros da barra, que vira a pilula de 44 px a partir de xl`);
   }
   assert.match(antes, /<span class="hidden xl:inline">Palco<\/span>/, "o nome visivel so na pilula");
 
@@ -417,6 +419,18 @@ test("a Visão do vídeo (V2-16): 'Visão do vídeo: Palco' desligada antes de e
     { marcada: true, nome: visao.palco, view: "stage" },
     { marcada: false, nome: visao.grade, view: "grid" }
   ]);
+
+  // Aberto pela sala: o menu na tela e o botao com aria-expanded; desligado (a reconexao), o menu some mesmo aberto.
+  const aberto = menu({ open: true });
+  assert.match(aberto, /aria-expanded="true" aria-haspopup="menu" aria-label="Visão do vídeo: Palco"/);
+  assert.match(aberto, /<div aria-label="Visão do vídeo" class="[^"]*" id="room-view-menu" role="menu">/, "sem o hidden");
+  const desligado = menu({ disabled: true, open: true });
+  assert.match(desligado, /aria-expanded="false"/);
+  assert.match(desligado, /hidden="" id="room-view-menu" role="menu"/, "desligado, o menu nunca aparece");
+  // Na barra, quem abre e a sala (viewMenuOpen); sem o onViewMenu, a barra fica sem o botao (o menu nunca abriria).
+  assert.match(barra({ joined: true, viewMenuOpen: true }), /<div aria-label="Visão do vídeo" class="[^"]*" id="room-view-menu" role="menu">/);
+  assert.match(barra({ joined: true }), /hidden="" id="room-view-menu" role="menu"/);
+  assert.doesNotMatch(barra({ onViewMenu: undefined }), /data-room-bar-item="view"/);
 
   // A Grade na tela (o motor avisou): o botao e a opcao marcada dizem a Grade.
   const grade = menu({ shown: "grid" });
@@ -468,8 +482,8 @@ test("o painel Configurações no celular nao tira a barra da tela: depois da ba
   assert.deepEqual(layout.panelToggleStep({ panelShown: false, settingsTakeover: true }), { closeSettings: true, panelOpen: true }, "o balao fecha Configurações e mostra o chat");
 
   const room = semComentarios(FONTES.room);
-  assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen && settingsOpen\) \{\s*closeSettings\(\);/, "Reagir fecha Configurações");
-  assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);/, "Configurações fecha Reagir");
+  assert.match(room, /function toggleReactions\(\) \{\s*if \(!reactionsOpen\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(\);\s*\}\s*closeViewMenu\(\);/, "Reagir fecha Configurações e o menu da Visão do vídeo");
+  assert.match(room, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}\s*if \(reactionsOpen\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*\}\s*closeViewMenu\(\);\s*setSettingsOpen\(true\);/, "Configurações fecha Reagir e o menu da Visão do vídeo");
   assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
 });
 
@@ -477,7 +491,7 @@ test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes d
   const room = semComentarios(FONTES.room);
   assert.match(room, /function returnFocusFrom\(panelId: string\) \{\s*const panel = document\.getElementById\(panelId\);\s*if \(panel && panel\.contains\(document\.activeElement\)\) \{\s*panelButton\(panelId\)\?\.focus\(\);/);
   assert.match(room, /querySelector<HTMLButtonElement>\(`\[aria-controls="\$\{panelId\}"\]`\)/, "o botao que abre o painel (aria-controls)");
-  assert.match(room, /\} else if \(reactionsShown \|\| settingsShown\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*\} else \{\s*askToLeave\(\);/);
+  assert.match(room, /\} else if \(reactionsShown \|\| settingsShown \|\| viewMenuShown\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*closeViewMenu\(\);\s*\} else \{\s*askToLeave\(\);/);
   assert.match(room, /function closeSettings\(focusButton = false\) \{[\s\S]*?returnFocusFrom\(LIVE_SETTINGS_ID\);[\s\S]*?setSettingsOpen\(false\);/);
 });
 

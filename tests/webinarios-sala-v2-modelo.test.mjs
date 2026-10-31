@@ -749,12 +749,32 @@ test("applyLiveSignal: viewShown segue o tileViewChanged (a Grade da equipe tamb
 });
 
 test("a margem dos selos (--room-video-right) so com a coluna na tela: o Palco com a coluna; na Grade, escondida ou fora do iframe, 0", () => {
-  const margem = (state, touch = false) => layout.stageVideoRightPx({ columnShown: state.viewShown === "stage" && state.filmstripVisible, touch });
+  // A mesma conta da live-room.tsx: stageColumnShown dos sinais do motor, nunca a escolha guardada.
+  const margem = (state, touch = false) => layout.stageVideoRightPx({ columnShown: model.stageColumnShown(state), touch });
   const sinal = (state, name, payload) => model.applyLiveSignal(state, { name, ownId: "eu", payload });
+  assert.equal(model.stageColumnShown(model.INITIAL_LIVE_SIGNALS), false);
   assert.equal(margem(model.INITIAL_LIVE_SIGNALS), 0, "antes de entrar");
   const entrou = sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" });
+  assert.equal(model.stageColumnShown(entrou), true);
   assert.equal(margem(entrou), 222);
   assert.equal(margem(entrou, true), 234, "com toque, o puxador de 21 px");
   assert.equal(margem(sinal(entrou, "filmstripDisplayChanged", { visible: false })), 0, "a coluna escondida pela largura");
   assert.equal(margem(sinal(entrou, "tileViewChanged", { enabled: true })), 0, "na Grade");
+  // A Grade que o motor mostra vale mesmo com o filmstripDisplayChanged dizendo visivel (a coluna e a propria grade).
+  assert.equal(model.stageColumnShown({ filmstripVisible: true, viewShown: "grid" }), false);
+  assert.equal(margem(sinal(sinal(entrou, "tileViewChanged", { enabled: true }), "tileViewChanged", { enabled: false })), 222, "de volta ao Palco");
+  assert.equal(margem(sinal(entrou, "videoConferenceLeft", {})), 0, "fora do iframe");
+});
+
+test("o menu da Visão do vídeo fechou por ficar desligado (a reconexao): com o foco na opcao que sumiu ou no body, a sala pega o foco; com o foco em outro lugar, nada", () => {
+  const body = { nome: "body" };
+  const opcao = { nome: "opcao" };
+  const iframe = { nome: "iframe" };
+  const perdeu = (extra) => model.viewMenuFocusLost({ active: opcao, body, inMenu: true, ...extra });
+  // A opcao escondida ainda segura o foco ate a pintura, ou ele ja caiu no body: a sala o pega (roomFocusTarget).
+  assert.equal(perdeu({}), true);
+  assert.equal(perdeu({ active: body, inMenu: false }), true, "o foco ja caiu no body");
+  assert.equal(perdeu({ active: null, inMenu: false }), true);
+  // O foco no video (o iframe) ou num controle da sala: fica onde a pessoa o pos.
+  assert.equal(perdeu({ active: iframe, inMenu: false }), false);
 });

@@ -475,6 +475,7 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
 });
 
 test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade por comando sem remontar, o botao diz o que o motor mostra, a Grade guardada volta na entrada; a 1280 px a coluna sai com o painel aberto e volta com ele fechado", async ({ page }) => {
+  test.setTimeout(120_000);
   const visao = WEBINAR_COPY.salaV2.visao;
   const painel = WEBINAR_COPY.salaV2.painel;
   await page.setViewportSize({ height: 900, width: 1440 });
@@ -485,8 +486,11 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   await expect(noPalco).toBeEnabled();
   await expect(noPalco).toHaveAttribute("aria-haspopup", "menu");
   await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  // A margem que os selos descontam, lida pelo CSSOM: o servidor pinta 0px, e depois que o valor muda o navegador
+  // reescreve o atributo style no formato dele ("--room-video-right: 222px;"), que uma regex do atributo nao pegaria.
+  const margemDosSelos = () => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-right").trim());
   // A 1440 px com o painel aberto o iframe tem cerca de 1072 px: a coluna fica, e os selos param antes dela.
-  await expect(palco).toHaveAttribute("style", /--room-video-right:222px/);
+  await expect.poll(margemDosSelos).toBe("222px");
 
   // O menu abre com o foco na opcao marcada; o Esc fecha so o menu (nada de "sair da sala") e o foco volta ao botao.
   await noPalco.click();
@@ -499,6 +503,41 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   await expect(menu).toBeHidden();
   await expect(noPalco).toBeFocused();
   await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+
+  // Nunca dois abertos juntos: com Configurações aberto, o botao da visao fecha o painel (que cobriria o menu) e abre o
+  // menu com o foco na opcao marcada.
+  const configuracoes = dialogo.getByRole("button", { exact: true, name: aoVivo.configuracoes });
+  await configuracoes.click();
+  await expect(dialogo.getByTestId("live-settings")).toBeVisible();
+  await noPalco.click();
+  await expect(dialogo.locator("#live-room-settings")).toHaveCount(0);
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  // O atalho R com o foco no menu: Reagir abre, o menu fecha e o foco vai ao botao da visao (nunca ao body); o Esc
+  // seguinte fecha Reagir sem pedir para sair.
+  await page.keyboard.press("r");
+  await expect(dialogo.locator("#live-room-reactions")).toBeVisible();
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.locator("#live-room-reactions")).toHaveCount(0);
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+  // O proprio botao fecha o menu com o foco numa opcao (no WebKit o clique nao foca o botao: o evento sem mover o foco
+  // imita isso): o foco vai ao botao, e o Esc seguinte ainda chega a sala (pede para sair).
+  await noPalco.click();
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  await noPalco.dispatchEvent("click");
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.getByRole("alertdialog", { name: WEBINAR_COPY.sala.sairConfirmar })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+  // O clique no video tira o foco da pagina (ele entra no iframe do motor): o menu fecha.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent("blur")));
+  await expect(menu).toBeHidden();
 
   // Grade: por comando (setTileView), sem remontar o iframe.
   let antes = (await sala.comandos()).length;
@@ -513,7 +552,7 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   await sala.disparar("tileViewChanged", { enabled: true });
   await expect(barra.getByRole("button", { exact: true, name: visao.atual(visao.grade) })).toBeVisible();
   // Na Grade, nenhuma coluna a descontar.
-  await expect(palco).toHaveAttribute("style", /--room-video-right:0px/);
+  await expect.poll(margemDosSelos).toBe("0px");
   await sala.disparar("tileViewChanged", { enabled: false });
   await expect(noPalco).toBeVisible();
 
@@ -536,13 +575,27 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   // O motor confirma (a coluna escondida): os selos vao ate a borda. Fechar o painel deixa o iframe com mais de 1013 px
   // e a coluna volta.
   await sala.disparar("filmstripDisplayChanged", { visible: false });
-  await expect(palco).toHaveAttribute("style", /--room-video-right:0px/);
+  await expect.poll(margemDosSelos).toBe("0px");
   antes = (await sala.comandos()).length;
   await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
   await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
   await sala.disparar("filmstripDisplayChanged", { visible: true });
-  await expect(palco).toHaveAttribute("style", /--room-video-right:222px/);
+  await expect.poll(margemDosSelos).toBe("222px");
   expect(await sala.montagens(), "a coluna e por comando: o iframe e o mesmo").toBe(1);
+
+  // A sala cai com o menu aberto: o menu fecha de vez e o foco fica na sala (nunca no body); na volta o botao religa
+  // sem reabrir o menu sozinho.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await sala.disparar("videoConferenceLeft", {});
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeDisabled();
+  await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
+  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(noPalco).toBeEnabled();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeHidden();
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {

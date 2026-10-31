@@ -34,7 +34,8 @@ import { RoomViewMenu } from "./room-view-menu";
 // abrem por cima do palco, sem empurrar o video (o iframe nao muda de tamanho); abaixo de lg, no fluxo, como antes. No
 // celular a Tela cheia (ou o Modo cinema) sai da barra e vai para o canto do palco (LiveStageFullscreen).
 // Redesign V2, F8 (docs/31 V2-16): a Visão do vídeo (room-view-menu.tsx) entra na zona da direita, antes de
-// Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala.
+// Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala. O menu dela, Reagir e
+// Configurações nunca ficam abertos juntos (a sala decide: o menu abre por cima do palco, onde o painel o cobriria).
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -69,6 +70,8 @@ export type LiveControlsProps = {
   onToggleSettings: () => void;
   /** Palco ou Grade (a Visão do vídeo): sem ele, a barra fica sem o botao. */
   onView?: (view: RoomView) => void;
+  /** Abrir ou fechar o menu da Visão do vídeo (a sala fecha Reagir e Configurações quando ele abre). */
+  onViewMenu?: (open: boolean) => void;
   /** O painel do chat esta na tela (o balao fica ligado e se chama "Esconder o chat"). */
   panelOpen: boolean;
   /** Com o painel fechado o balao e o primeiro foco da sala (firstFocusTarget). */
@@ -85,6 +88,8 @@ export type LiveControlsProps = {
   showMedia: boolean;
   soundOn: boolean;
   videoOn: boolean;
+  /** O menu da Visão do vídeo aberto (pela sala: nunca junto com Reagir ou Configurações). */
+  viewMenuOpen?: boolean;
   /** O que o video mostra agora (o ultimo tileViewChanged do motor): o nome do botao da Visão do vídeo. */
   viewShown?: RoomView;
 };
@@ -171,7 +176,9 @@ export function LiveControls(props: LiveControlsProps) {
           />
         );
       case "view":
-        return props.onView ? <RoomViewMenu disabled={!props.joined} key={item} onChoose={props.onView} shown={props.viewShown ?? "stage"} /> : null;
+        return props.onView && props.onViewMenu ? (
+          <RoomViewMenu disabled={!props.joined} key={item} onChoose={props.onView} onOpenChange={props.onViewMenu} open={props.viewMenuOpen ?? false} shown={props.viewShown ?? "stage"} />
+        ) : null;
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
       case "panel":
