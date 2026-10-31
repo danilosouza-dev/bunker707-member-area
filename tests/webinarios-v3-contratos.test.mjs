@@ -177,11 +177,28 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");
   assert.deepEqual(embed.liveInterfaceConfigOverwrite("host").SETTINGS_SECTIONS, ["devices"], "a engrenagem do host so com os aparelhos");
   assert.deepEqual(embed.liveInterfaceConfigOverwrite("co_host").SETTINGS_SECTIONS, ["devices"]);
+  // O visual da V2 (docs/31 §3) entra para todos os papeis; so a engrenagem muda por papel.
   assert.deepEqual(
     Object.keys(embed.liveInterfaceConfigOverwrite("host")).sort(),
-    ["DISABLE_JOIN_LEAVE_NOTIFICATIONS", "MOBILE_APP_PROMO", "SETTINGS_SECTIONS", "SHOW_CHROME_EXTENSION_BANNER"],
+    [
+      "CONNECTION_INDICATOR_DISABLED",
+      "DEFAULT_BACKGROUND",
+      "DISABLE_JOIN_LEAVE_NOTIFICATIONS",
+      "DISABLE_VIDEO_BACKGROUND",
+      "FILM_STRIP_MAX_HEIGHT",
+      "LOCAL_THUMBNAIL_RATIO",
+      "REMOTE_THUMBNAIL_RATIO",
+      "SETTINGS_SECTIONS",
+      "SHOW_CHROME_EXTENSION_BANNER",
+      "VERTICAL_FILMSTRIP",
+      "VIDEO_LAYOUT_FIT",
+      "VIDEO_QUALITY_LABEL_DISABLED"
+    ],
     "o resto do interfaceConfig igual para todos"
   );
+  const semPapel = { ...embed.liveInterfaceConfigOverwrite("host") };
+  delete semPapel.SETTINGS_SECTIONS;
+  assert.deepEqual(embed.liveInterfaceConfigOverwrite("student"), semPapel, "o aluno recebe o mesmo visual, sem a engrenagem");
   assert.equal(embed.JITSI_IFRAME_ALLOW, "camera; microphone; display-capture; autoplay; fullscreen; speaker-selection");
   assert.deepEqual(live.liveEmbedSettings({ allowStudentCamera: false, quality: { screenFps: 15, stage: 720 } }), { allowStudentCamera: false, screenFps: 15, stage: 720 });
 

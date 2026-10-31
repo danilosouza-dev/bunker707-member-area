@@ -1,5 +1,5 @@
-// Bunker707: ajustes do interface_config.js do Jitsi proprio (docs/30 §6.2, D2): sem marca d'agua e sem o
-// nome do Jitsi na tela. O script de partida da imagem web anexa este arquivo ao fim do interface_config.js,
+// Bunker707: ajustes do interface_config.js do motor proprio (docs/30 §6.2, D2): sem marca d'agua e sem o
+// nome do motor na tela. O script de partida da imagem web anexa este arquivo ao fim do interface_config.js,
 // entao cada linha aqui vence o padrao. So funciona em instancia propria: estas chaves ficam fora da
 // whitelist do IFrame API (e por isso o iframe de terceiro mostra a marca).
 // A licenca Apache-2.0 e a atribuicao ficam em infra/jitsi/LICENSE-jitsi e NOTICE, nao na tela.

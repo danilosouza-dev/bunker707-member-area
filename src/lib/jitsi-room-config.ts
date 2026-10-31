@@ -16,6 +16,52 @@ export type LiveRoomRole = "co_host" | "host" | "student" | "team";
 /** O que o card Qualidade e o card Sala decidem para o iframe (docs/30 §2.2 e D26). */
 export type LiveEmbedSettings = { allowStudentCamera: boolean; screenFps: 15 | 30; stage: 720 | 1080 };
 
+/** O tema da sala (docs/31 V2-12): a escolha da pessoa, guardada no navegador dela; escuro por padrao. */
+export type LiveRoomTheme = "dark" | "light";
+/**
+ * Os layouts do video que o motor permite (docs/31 V2-16): o palco com a coluna de miniaturas, o palco com a fileira
+ * embaixo, a grade (tile view, ligada por comando depois de entrar) e o palco duplo (ate 2 no palco, stage filmstrip).
+ */
+export type LiveRoomLayout = "grid" | "stage" | "stage_bottom" | "stage_duo";
+/** O visual pedido por pessoa (docs/31 §3): entra no iframe pelo interfaceConfig e, o tema, pelo hash (o CSS da instancia le). */
+export type LiveEmbedLook = { layout?: LiveRoomLayout | null; theme?: LiveRoomTheme | null };
+export const DEFAULT_LOOK: Readonly<Required<{ [K in keyof LiveEmbedLook]: NonNullable<LiveEmbedLook[K]> }>> = { layout: "stage", theme: "dark" };
+const ROOM_THEMES: readonly LiveRoomTheme[] = ["dark", "light"];
+const ROOM_LAYOUTS: readonly LiveRoomLayout[] = ["grid", "stage", "stage_bottom", "stage_duo"];
+/**
+ * O fundo atras do video grande nos dois temas: preto, como num player. Aparece quando sobra espaco: na tela
+ * compartilhada (nunca cortada) e quando a camera precisaria de mais de 30 % de zoom para preencher o palco.
+ */
+export const STAGE_BACKGROUND = "#000000";
+/**
+ * A coluna de miniaturas (Palco, Palco duplo e a grade), conferido na tag fixada (docs/31 §3): `filmstrip.initialWidth`
+ * grava a largura na entrada e, com a coluna "redimensionavel" (o puxador fica invisivel pelo CSS da instancia) e pelo
+ * menos 180 px, o motor estreita o video grande em vez de cobrir a borda dele com as miniaturas (LargeVideo.web.tsx).
+ * Com a coluna redimensionavel a miniatura remota tem sempre 120 px de altura e a local tem largura / 16:9 (floor), por
+ * isso 213 px (119 x 120). A coluna e redimensionavel sem toque sempre, e com toque so a partir de 920 px (ai o
+ * puxador ocupa 21 px, nao 9). O motor limita a coluna a (largura do iframe - 800), mas so quando a janela redimensiona
+ * (CLIENT_RESIZED), nao na entrada: ao abrir, a coluna fica com 213 px em qualquer largura; depois do primeiro resize o
+ * iframe precisa de 1013 px para a coluna inteira e, abaixo de 980 px, as miniaturas voltam a flutuar sobre o video
+ * (resizeFilmStrip muda so a largura atual; no proximo resize o motor volta a esta). A pagina trata isso na fase 1:
+ * escolhe a largura, esconde a coluna (toggleFilmStrip) ou monta a fileira embaixo pela largura do iframe.
+ */
+export const FILMSTRIP_COLUMN_WIDTH = 213;
+/** A altura das miniaturas na fileira embaixo (FILM_STRIP_MAX_HEIGHT vale como altura no horizontal); 16:9. */
+export const THUMBNAIL_HEIGHT = 120;
+export const THUMBNAIL_RATIO = 16 / 9;
+/**
+ * A chave que leva o tema no hash do iframe (`#config.bunkerTheme="light"`). O app descarta chaves fora da whitelist,
+ * mas o hash fica na URL e o custom-config.js da instancia o le antes do app subir (docs/31 §3).
+ */
+export const THEME_HASH_KEY = "bunkerTheme";
+
+/** O visual conferido: valor desconhecido ou ausente vira o padrao (escuro, palco). */
+export function normalizeLook(look?: LiveEmbedLook | null): { layout: LiveRoomLayout; theme: LiveRoomTheme } {
+  const theme = look?.theme && ROOM_THEMES.includes(look.theme) ? look.theme : DEFAULT_LOOK.theme;
+  const layout = look?.layout && ROOM_LAYOUTS.includes(look.layout) ? look.layout : DEFAULT_LOOK.layout;
+  return { layout, theme };
+}
+
 /** Teto da camera do aluno e da Equipe fora do palco (D26). */
 export const STUDENT_CAMERA_MAX_HEIGHT = 360;
 /** Cada um recebe no maximo o palco + 8 miniaturas (custom-config.js: channelLastN = 9). */
@@ -102,22 +148,40 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
  * aluno bate sozinho na sala de espera (`lobby.autoKnock`): com a sala trancada ou a Sala de espera ligada, ele fica
  * na fila sem precisar achar o botao do iframe.
  */
-export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings): Record<string, unknown> {
+export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
   const height = sendHeightFor(role, settings);
   const student = role === "student";
   const audience = role === "student" || role === "team";
+  const look = normalizeLook(lookInput);
   return {
     ...(audience ? { disableInitialGUM: true } : {}),
     ...(student ? { lobby: { autoKnock: true } } : {}),
+    // O tema vai no hash para o CSS da instancia (docs/31 §3); o app ignora a chave, que fica fora da whitelist.
+    [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
+    // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
+    // pagina (docs/31 V2-4).
+    hideDominantSpeakerBadge: true,
+    // Sem a grade automatica do motor: com 3 ou mais pessoas ele abriria a grade sozinho, e o "seguir a visao" do host a
+    // levaria a todos. A Grade e por comando (setTileView), e o valor explicito vence esta chave (video-layout/functions.any.ts).
+    disableTileView: true,
+    // O indicador de conexao nas miniaturas: esta chave do config vale sempre; CONNECTION_INDICATOR_DISABLED e a legada.
+    connectionIndicators: { disabled: true },
+    // A coluna com a largura fixada na entrada (o video grande ao lado, nao por baixo) e, no palco duplo, 2 no palco;
+    // a fileira embaixo com o tamanho do interfaceConfig.
+    filmstrip:
+      look.layout === "stage_bottom"
+        ? { disableResizable: true, stageFilmstripParticipants: 1 }
+        : { alwaysShowResizeBar: false, disableResizable: false, initialWidth: FILMSTRIP_COLUMN_WIDTH, stageFilmstripParticipants: look.layout === "stage_duo" ? 2 : 1 },
+    // A grade mostra no maximo o que cada um recebe (o palco + 8 miniaturas, D26).
+    tileView: { numberOfVisibleTiles: CHANNEL_LAST_N },
     constraints: { video: { height: { ideal: height, max: height, min: 180 } } },
     desktopSharingFrameRate: { max: settings.screenFps, min: 5 },
     disableChat: true,
     disableDeepLinking: true,
     disableInviteFunctions: true,
     disablePolls: true,
-    disablePrivateChat: true,
     disableReactions: true,
     disableRemoteMute: student,
     // Sem o "Flip" no menu da propria miniatura para o aluno e a Equipe: o espelho so pelo nosso painel, que guarda a
@@ -129,12 +193,12 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     hideConferenceSubject: true,
     hideConferenceTimer: true,
     hideDisplayName: false,
+    // So `prejoinConfig.enabled` esta na whitelist da tag fixada; o `prejoinPageEnabled` antigo era ignorado.
     prejoinConfig: { enabled: false },
-    prejoinPageEnabled: false,
     readOnlyName: true,
-    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disabled: student },
+    // Sem conversa privada pelo menu da miniatura (D5: o chat e o nosso); "disablePrivateChat" na raiz nao existe na tag.
+    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disablePrivateChat: "all", disabled: student },
     resolution: height,
-    startAudioOnly: false,
     startWithAudioMuted: true,
     startWithVideoMuted: true,
     ...(presents(role) ? { toolbarConfig: { alwaysVisible: true } } : {}),
@@ -148,12 +212,26 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
  * moderador, perfil e idioma, que o console ja decide). O aluno e a Equipe nao tem engrenagem (a barra deles e a nossa);
  * sem o papel (a chamada antiga), o mesmo do aluno.
  */
-export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null): Record<string, unknown> {
+export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
+  const look = normalizeLook(lookInput);
   return {
+    // O visual da V2 (docs/31 §3): a camera preenche o palco cortando ate 30 % (both + MAXIMUM_ZOOMING_COEFFICIENT da
+    // tag) e o que sobra e preto liso (sem a copia desfocada do video por tras), sem o indicador de conexao nem o
+    // rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
+    // Legada (a tag so a traduz quando o config nao define connectionIndicators); o configOverwrite manda a chave nova.
+    CONNECTION_INDICATOR_DISABLED: true,
+    DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
-    MOBILE_APP_PROMO: false,
+    DISABLE_VIDEO_BACKGROUND: true,
+    FILM_STRIP_MAX_HEIGHT: THUMBNAIL_HEIGHT,
+    LOCAL_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
+    // MOBILE_APP_PROMO fica fora da whitelist do iframe (a tag ignora); a instancia ja desliga no custom-interface_config.js.
+    REMOTE_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
     ...(presents(role) ? { SETTINGS_SECTIONS: ["devices"] } : {}),
-    SHOW_CHROME_EXTENSION_BANNER: false
+    SHOW_CHROME_EXTENSION_BANNER: false,
+    VERTICAL_FILMSTRIP: look.layout !== "stage_bottom",
+    VIDEO_LAYOUT_FIT: "both",
+    VIDEO_QUALITY_LABEL_DISABLED: true
   };
 }
 

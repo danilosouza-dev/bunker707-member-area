@@ -1,0 +1,166 @@
+/*
+ * Bunker707: o visual da V2 dentro do iframe do motor (docs/31 §3). O custom-config.js desta instancia so carrega
+ * esta folha quando o hash do iframe traz config.bunkerTheme (light ou dark), e grava o tema em
+ * html[data-bunker-theme]. Sem a chave (o app de antes, o gravador, uma sala aberta pelo endereco) a folha nao entra
+ * e o motor fica com o visual padrao: a instancia e uma so e atende a producao.
+ *
+ * Os seletores valem para a tag stable fixada no .env.example desta instancia e foram conferidos no codigo dela em
+ * 31/10/2026 (cada bloco cita o arquivo). A cada atualizacao da tag, o spike de prints se repete (docs/31 §7).
+ * Nada aqui cita o motor na tela.
+ *
+ * Cache: o nginx da imagem manda expires 1y para /css/* quando a URL tem ?v=. O v do carregador e o comeco do sha256
+ * desta folha (a guarda de CSS dos testes da infra confere e diz o valor novo): mudou a folha, muda o endereco.
+ *
+ * Dentro do iframe ficam o video grande (#largeVideoContainer > #largeVideoWrapper > video) e as miniaturas
+ * (.filmstrip > ... > span.videocontainer, uma por pessoa, com o nome e os indicadores do motor dentro). A classe do
+ * layout fica num ancestral: .vertical-filmstrip (a coluna), .stage-filmstrip (a coluna com mais de um no palco),
+ * .horizontal-filmstrip (a fileira embaixo, que o motor desenha POR CIMA da base do video grande) e .tile-view (a
+ * grade). O resto da sala (cabecalho, barra, painel, enquete) e da pagina da area.
+ *
+ * Regra desta folha: nada de margem, largura, altura, borda ou transformacao nas miniaturas. O motor mede as
+ * miniaturas por JS (uma lista virtual em que cada item tem altura + 4 px) e qualquer medida a mais desalinha a
+ * coluna. O espaco entre as miniaturas e a propria borda transparente de 2 px da tag (_small_video.scss; na coluna
+ * redimensionavel ela e 0 a esquerda e na grade e 0 nos quatro lados); o contorno fino vai num ::after.
+ */
+
+:root {
+  --bunker-bg: #141414;
+  --bunker-tile: #202020;
+  --bunker-tile-border: rgba(255, 255, 255, 0.1);
+  --bunker-radius: 16px;
+  --bunker-radius-tile: 12px;
+  --bunker-speaking: #34d399;
+}
+
+html[data-bunker-theme="light"] {
+  --bunker-bg: #f4f4f3;
+  --bunker-tile: #e4e4e7;
+  --bunker-tile-border: rgba(0, 0, 0, 0.08);
+  --bunker-speaking: #16a34a;
+}
+
+/* O fundo da pagina do iframe e o da area, nos dois temas: na coluna, as miniaturas ficam soltas sobre ele. */
+html,
+body {
+  background: var(--bunker-bg) !important;
+}
+
+/*
+ * O video grande vira o cartao do palco: cantos redondos (o overflow: hidden ja vem da tag) e sem a sombra do
+ * wrapper (_videolayout_default.scss). Na coluna, o motor ja estreita #largeVideoContainer para
+ * calc(100% - largura da coluna) quando ela tem 180 px ou mais (LargeVideo.web.tsx) e centraliza o video nesse
+ * espaco (VideoContainer.js); o app fixa 213 px (a configuracao do iframe no app). A camera preenche o cartao
+ * cortando ate 30 % (VIDEO_LAYOUT_FIT both + MAXIMUM_ZOOMING_COEFFICIENT); acima disso, e na tela compartilhada, que
+ * nunca e cortada, sobram faixas: pretas pelo DEFAULT_BACKGROUND e lisas porque DISABLE_VIDEO_BACKGROUND desliga a
+ * copia desfocada do video que o motor poria atras.
+ */
+#largeVideoContainer {
+  border-radius: var(--bunker-radius);
+}
+
+#largeVideoWrapper {
+  box-shadow: none !important;
+}
+
+/*
+ * Na grade e no Palco duplo o motor esconde o video grande (_tile_view_overrides.scss esconde so
+ * #largeVideoElementsContainer) mas deixa o cartao com o fundo preto inline e, estreitado pela coluna, 135 px antes
+ * da borda direita: ficaria em dois tons sob a grade (gritante no tema claro). Sem fundo e sem canto nesses layouts.
+ */
+.tile-view #largeVideoContainer,
+.stage-filmstrip #largeVideoContainer {
+  background: transparent !important;
+  border-radius: 0;
+}
+
+/*
+ * O nome que o motor escreve na base do palco (StageParticipantNameLabel.tsx): a pagina escreve o dela (docs/31 V2-4).
+ * Quem o tira de verdade e o app, com hideDominantSpeakerBadge (o motor nem o renderiza); esta regra e so a rede de
+ * seguranca para a chave faltar.
+ */
+[data-testid="stage-display-name"] {
+  display: none !important;
+}
+
+/*
+ * A coluna de miniaturas (_vertical_filmstrip.scss e Filmstrip.tsx): fixa a direita, com a largura que o app fixou.
+ * Fundo transparente sempre, inclusive o fundo cinza que a tag pinta no hover (classes.filmstrip:hover e
+ * .filmstrip-hover), para a coluna ficar solta sobre o fundo da pagina.
+ */
+.vertical-filmstrip .filmstrip,
+.stage-filmstrip .filmstrip,
+.horizontal-filmstrip .filmstrip,
+.filmstrip .resizable-filmstrip,
+.filmstrip:hover .resizable-filmstrip,
+.filmstrip:focus-within .resizable-filmstrip,
+.filmstrip .filmstrip-hover,
+.filmstrip:hover .filmstrip-hover,
+.filmstrip:focus-within .filmstrip-hover {
+  background-color: transparent !important;
+}
+
+/*
+ * O puxador de redimensionar a coluna (Filmstrip.tsx, .dragHandleContainer, 9 px): invisivel e sem resposta ao
+ * ponteiro, mas no lugar, porque a largura dele entra na conta do video grande (getVerticalViewMaxWidth). A largura
+ * da coluna e do app (filmstrip.initialWidth e o comando resizeFilmStrip), nao da pessoa.
+ */
+.resizable-filmstrip .dragHandleContainer {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/*
+ * O botao do motor que recolhe a coluna (Filmstrip.tsx, .toggleFilmstripContainer, visivel no hover): some. A coluna
+ * e da pagina (toggleFilmStrip pela API); com o botao, o aluno a esconderia sem a pagina saber (ela nao escuta
+ * filmstripDisplayChanged). E absoluto: nao entra na conta de largura do motor.
+ */
+.filmstrip .toggleFilmstripContainer {
+  display: none !important;
+}
+
+/*
+ * Cada miniatura (Thumbnail.tsx: span.videocontainer com o <video> (na miniatura local ele e neto, dentro de
+ * #localVideoWrapper), o fundo [containerBackground] e os contornos [borderIndicator] como filhos; as classes vem do
+ * tss-react com o nome da regra no fim, por isso o [class*=]).
+ * A tag da raio de 4 px e borda transparente de 2 px (o espaco entre as miniaturas, que fica). Aqui: cantos de
+ * 12 px, o fundo da miniatura sem camera no tom do tema e um contorno fino por cima do video.
+ */
+.filmstrip__videos .videocontainer {
+  border-radius: var(--bunker-radius-tile) !important;
+  overflow: hidden;
+  background-color: transparent !important;
+}
+
+.filmstrip__videos .videocontainer video,
+.filmstrip__videos .videocontainer [class*="containerBackground"],
+.filmstrip__videos .videocontainer [class*="borderIndicator"] {
+  border-radius: calc(var(--bunker-radius-tile) - 2px) !important;
+}
+
+.filmstrip__videos .videocontainer [class*="containerBackground"] {
+  background-color: var(--bunker-tile) !important;
+}
+
+/* Na grade a tag zera a borda da miniatura (_tile_view.scss): o raio interno e o raio inteiro. */
+.tile-view .filmstrip__videos .videocontainer video,
+.tile-view .filmstrip__videos .videocontainer [class*="containerBackground"],
+.tile-view .filmstrip__videos .videocontainer [class*="borderIndicator"],
+.tile-view .filmstrip__videos .videocontainer::after {
+  border-radius: var(--bunker-radius-tile) !important;
+}
+
+/* O contorno fino: abaixo dos indicadores (z 10) e do anel de quem fala (z 9), acima do video (z 1). */
+.filmstrip__videos .videocontainer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: calc(var(--bunker-radius-tile) - 2px);
+  box-shadow: inset 0 0 0 1px var(--bunker-tile-border);
+  pointer-events: none;
+  z-index: 8;
+}
+
+/* Quem esta falando (Thumbnail.tsx: .dominant-speaker e o anel .active-speaker-indicator): verde, nao azul. */
+.filmstrip__videos .videocontainer.dominant-speaker .active-speaker-indicator {
+  box-shadow: inset 0 0 0 2px var(--bunker-speaking) !important;
+}
