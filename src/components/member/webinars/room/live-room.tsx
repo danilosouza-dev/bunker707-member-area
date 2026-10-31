@@ -72,6 +72,7 @@ import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { useRoomPolls } from "./use-room-polls";
 import { useDeferredPolls, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useStageGeometry } from "./use-stage-geometry";
 import { returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
 
@@ -120,6 +121,10 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // o painel fechado; "Responder depois" (ou o Esc nela) recolhe para o card do chat, cujo "Responder agora" a traz de
 // volta, como o atalho E; o resultado compartilhado aparece no mesmo lugar. As enquetes sao lidas pela sala
 // (useRoomPolls), e a aba so desenha.
+// Redesign V2, F8 (docs/31 V2-16 e V2-A5): a Visão do vídeo na barra (a partir de lg) troca Palco por Grade por comando,
+// sem remontar, e o botao diz o que o motor mostra. A sala mede o iframe (use-stage-geometry.ts) e a coluna de
+// miniaturas so fica com 1013 px ou mais (abrir ou fechar o painel refaz a conta); os selos e as pilulas descontam a
+// coluna so quando ela esta na tela.
 
 export type LiveWebinarRoomProps = {
   coverUrl: string | null;
@@ -191,15 +196,6 @@ function readIOS() {
   }
 }
 
-/** Um aparelho com toque (como o motor conta: maxTouchPoints): o puxador da coluna de miniaturas fica mais largo. */
-function readTouch() {
-  try {
-    return navigator.maxTouchPoints > 0;
-  } catch {
-    return false;
-  }
-}
-
 /** Celular: sem desfocar o fundo e sem a secao de atalhos do teclado. */
 function readMobile() {
   try {
@@ -254,7 +250,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const cinemaPreferred = useSyncExternalStore(subscribeNothing, readCinemaPreferred, () => false);
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
   const isMobile = useSyncExternalStore(subscribeNothing, readMobile, () => false);
-  const touch = useSyncExternalStore(subscribeNothing, readTouch, () => false);
+  // A largura do iframe (a coluna de miniaturas, V2-A5) e o toque (o puxador da coluna mais largo).
+  const geometry = useStageGeometry(frameRef);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
   const [theme, setTheme] = useRoomTheme();
   // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala).
@@ -306,6 +303,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     container: frameRef,
     deviceNames: DEVICE_NAMES,
     frameTitle: WEBINAR_COPY.aoVivo.palco,
+    frameWidth: geometry.frameWidth,
     lobby: live.lobby === true,
     look,
     nonce,
@@ -501,8 +499,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const presentShown = phase === "ended" ? null : presentNow;
   const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
-  // A coluna de miniaturas do iframe fica a direita do video ate a F8 medir a largura (docs/31 V2-A5).
-  const videoRightPx = stageVideoRightPx({ columnShown: true, touch });
+  // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
+  // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
+  const videoRightPx = stageVideoRightPx({ columnShown: room.viewShown === "stage" && room.signals.filmstripVisible, touch: geometry.touch });
   // O selo de cima a esquerda do palco: no ar, o tempo; na espera com a sala aberta, "Aguardando o apresentador".
   const stageMoment = liveStageMoment({ phase, screen });
 
@@ -832,6 +831,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              onView={room.setView}
               panelFirstFocus={firstFocus === "panel-toggle"}
               panelOpen={panelShown}
               panelUnread={unread}
@@ -853,6 +853,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               showMedia={ourBar}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
+              viewShown={room.viewShown}
             />
           )}
         </div>

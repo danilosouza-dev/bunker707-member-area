@@ -5,6 +5,7 @@ import { useJitsiDevices, type DeviceSwitchHooks, type UseJitsiDevices } from "@
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { DEVICE_SWITCH_MAX_MS, type DeviceKind } from "@/lib/jitsi-device-settings";
 import { liveConfigOverwrite, liveInterfaceConfigOverwrite, toRoomEvent, type JitsiListenedEvent, type LiveEmbedLook, type RoomEventItem } from "@/lib/jitsi-room-config";
+import type { RoomView } from "@/lib/webinar-room-prefs";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import {
   acceptMic,
@@ -15,6 +16,7 @@ import {
   cameraConsentEndedByDenial,
   cameraConsentEndedByError,
   cameraRequestUnanswered,
+  columnWanted,
   consentForVideoSignal,
   declineMic,
   DEVICE_SWITCH_KINDS,
@@ -26,6 +28,7 @@ import {
   expectAudioToggle,
   expectDeviceSwitch,
   expectVideoToggle,
+  filmstripStep,
   gateSwitchDone,
   gateSwitchStarted,
   gateToggle,
@@ -51,6 +54,7 @@ import {
   toggleHandLocally,
   tokenRefreshInMs,
   tokenRefreshOutcome,
+  viewOnJoin,
   type DeviceSwitch,
   type DeviceSwitchKind,
   type LiveJoinFailure,
@@ -60,6 +64,7 @@ import {
   type SwitchGate
 } from "./live-room-model";
 import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from "./room-api";
+import { useRoomView } from "./use-room-prefs";
 
 // A sala ao vivo do aluno por dentro (docs/30 §1.3, §5.1, §5.4, §6.3, §8.5 e §9; fase 3), fora do desenho:
 // - a entrada: "Entrar na sala" pede o token (POST .../join-token) e monta o iframe no palco pelo useJitsiMeet com o
@@ -94,6 +99,13 @@ import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from ".
 //   getCurrentDevices diz o escolhido antes de a faixa da troca entrar) e vai depois, na faixa nova (SwitchGate): a tag
 //   le o mudo antes do getUserMedia do aparelho novo e o grava de volta quando a faixa nova entra, desfazendo o toque
 //   feito no meio; enquanto espera, a barra mostra o estado real com o sinal de espera;
+// - a visao do video (docs/31 V2-16 e V2-A5): o Palco ou a Grade que o aluno escolhe (guardada no navegador) vai por
+//   setTileView, sem remontar, e a Grade guardada volta depois de cada videoConferenceJoined (viewOnJoin); o Palco nunca
+//   e forcado na entrada (desfaria a grade que a equipe ligou para todos). O que o motor mostra vem do tileViewChanged
+//   (signals.viewShown), e e isso que o botao diz. A coluna de miniaturas segue a largura do iframe (frameWidth, medida
+//   pela sala): com o Palco e 1013 px ou mais ela fica, senao sai (columnWanted); o toggleFilmStrip so vai quando o que
+//   a sala quer difere do ultimo filmstripDisplayChanged (filmstripStep), e um por vez: o seguinte espera a resposta do
+//   motor (o comando inverte a coluna; dois seguidos a deixariam como estava);
 //   Nenhuma frase de tela aqui; nada de texto vai para o servidor.
 
 export type LiveEntry = "idle" | "joined" | "joining" | "lost" | "open_failed" | "opening" | "reconnecting";
@@ -237,6 +249,11 @@ export type UseLiveRoomInput = {
   deviceNames: Record<DeviceKind, (position: number) => string>;
   /** O titulo do iframe para o leitor de tela (o nosso, nunca o nome do motor de video: D2). */
   frameTitle: string;
+  /**
+   * A largura do iframe em px (useStageGeometry, ja assentada; 0 antes da primeira medida): a coluna de miniaturas so
+   * fica com 1013 px ou mais (docs/31 V2-A5).
+   */
+  frameWidth: number;
   /** A sala de espera da sala esta ligada (LiveRoomInfo.lobby): a entrada espera a equipe admitir, sem o prazo de 30 s. */
   lobby: boolean;
   /**
@@ -273,15 +290,21 @@ export type LiveRoomController = {
   soundOn: boolean;
   /** O toque em Microfone / Câmera esperando a troca daquele aparelho acabar (a barra mostra o estado real, ocupada). */
   pendingToggle: Record<DeviceSwitchKind, boolean>;
+  /** Escolher Palco ou Grade (docs/31 V2-16): guarda no navegador e, dentro da sala, manda o setTileView. */
+  setView: (view: RoomView) => void;
   /** Câmera: `consented` = este clique passou pelo aviso de gravacao (o proximo sinal leva consented = true). */
   toggleCamera: (consented: boolean) => void;
   toggleHand: () => void;
   toggleMic: () => void;
   toggleSound: () => void;
+  /** A visao que o aluno escolheu (guardada; Palco por padrao): volta depois de cada entrada. */
+  view: RoomView;
+  /** O que o motor mostra agora (o ultimo tileViewChanged): o botao diz isto, porque a equipe pode mudar a de todos. */
+  viewShown: RoomView;
 };
 
 export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
-  const { allowed, container, frameTitle, lobby, look, nonce, sessionId, webinarId } = input;
+  const { allowed, container, frameTitle, frameWidth, lobby, look, nonce, sessionId, webinarId } = input;
   const [reply, setReply] = useState<JoinTokenReply | null>(null);
   const [entry, setEntry] = useState<LiveEntry>("idle");
   const [signals, setSignals] = useState<LiveSignalState>(INITIAL_LIVE_SIGNALS);
@@ -338,6 +361,14 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   /** O volume que quem entra recebe (o Som e a faixa do painel) e o que o painel faz com cada sinal, do useJitsiDevices. */
   const soundLevelRef = useRef<() => number>(() => 1);
   const devicesSignalRef = useRef<(name: string, payload: unknown) => void>(() => undefined);
+  /** A visao guardada (Palco ou Grade): a que volta depois de cada videoConferenceJoined. */
+  const [view, storeView] = useRoomView();
+  const viewRef = useRef(view);
+  /**
+   * O toggleFilmStrip mandado e ainda sem resposta: a coluna que o motor mostrava quando ele foi (nulo: nenhum
+   * esperando). O proximo so vai depois do filmstripDisplayChanged ou de uma entrada nova.
+   */
+  const filmstripSentRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -346,6 +377,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     refusedRef.current = input.onRefused;
     signalsRef.current = signals;
     joinedRef.current = entry === "joined";
+    viewRef.current = view;
   });
 
   // Quem sai da pagina sai da sala: nenhum sinal atrasado vira queda depois daqui.
@@ -552,6 +584,16 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         droppingRef.current = false;
         joinedGenerationRef.current = mountGenerationRef.current;
         setEntry("joined");
+        // O iframe novo entra no Palco, com a coluna: a Grade guardada volta por comando; nenhum toggleFilmStrip espera.
+        filmstripSentRef.current = null;
+        const viewCommand = viewOnJoin(viewRef.current);
+        if (viewCommand) {
+          commandRef.current(...viewCommand);
+        }
+      }
+      if (name === "filmstripDisplayChanged") {
+        // O motor respondeu (ou a equipe mudou a coluna de todos): a conta da coluna pode mandar o proximo.
+        filmstripSentRef.current = null;
       }
       if (name === "participantJoined") {
         // Quem entra depois chega com o volume da sala (o Som desligado zera; a faixa do painel baixa).
@@ -982,6 +1024,34 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
 
   const showNotice = useCallback((value: LiveNotice) => setSignals((previous) => ({ ...previous, notice: value })), []);
 
+  const setView = useCallback(
+    (next: RoomView) => {
+      storeView(next);
+      // Dentro da sala, na hora (sem remontar); fora dela, a escolha guardada vai na proxima entrada (viewOnJoin).
+      if (joinedRef.current) {
+        commandRef.current("setTileView", next === "grid");
+      }
+    },
+    [storeView]
+  );
+
+  // A coluna de miniaturas pela largura do iframe (docs/31 V2-A5): na entrada e a cada largura nova (o painel que abre
+  // ou fecha, girar, a janela). So o toggleFilmStrip que muda o que o motor mostra, e um por vez.
+  const joinedNow = entry === "joined";
+  const filmstripVisible = signals.filmstripVisible;
+  const wantColumn = columnWanted({ frameWidth, view: signals.viewShown });
+  useEffect(() => {
+    if (!joinedNow || frameWidth <= 0 || filmstripStep({ visible: filmstripVisible, wanted: wantColumn }) === null) {
+      return;
+    }
+    if (filmstripSentRef.current === filmstripVisible) {
+      return;
+    }
+    if (commandRef.current("toggleFilmStrip")) {
+      filmstripSentRef.current = filmstripVisible;
+    }
+  }, [filmstripVisible, frameWidth, joinedNow, wantColumn]);
+
   return {
     acceptMic: accept,
     declineMic: decline,
@@ -993,12 +1063,15 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     pendingToggle,
     reply,
     retryNow,
+    setView,
     showNotice,
     signals,
     soundOn,
     toggleCamera,
     toggleHand,
     toggleMic,
-    toggleSound
+    toggleSound,
+    view,
+    viewShown: signals.viewShown
   };
 }

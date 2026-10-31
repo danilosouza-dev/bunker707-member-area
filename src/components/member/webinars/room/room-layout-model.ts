@@ -93,10 +93,10 @@ export function stageVideoRightPx(input: { columnShown: boolean; touch?: boolean
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * Um botao da barra da sala: Sair, Reagir, Levantar a mão, Câmera, Microfone, Som, Tela cheia (ou Modo cinema),
- * Configurações e o balao que abre e fecha o painel do chat.
+ * Um botao da barra da sala: Sair, Reagir, Levantar a mão, Câmera, Microfone, Som, Tela cheia (ou Modo cinema), a
+ * Visão do vídeo (Palco ou Grade, so na live), Configurações e o balao que abre e fecha o painel do chat.
  */
-export type RoomBarItem = "camera" | "fullscreen" | "hand" | "leave" | "mic" | "panel" | "react" | "settings" | "sound";
+export type RoomBarItem = "camera" | "fullscreen" | "hand" | "leave" | "mic" | "panel" | "react" | "settings" | "sound" | "view";
 
 /** As tres zonas da barra, na ordem da tela: o Sair a esquerda, os circulos no centro, o resto a direita. */
 export type RoomBarItems = { center: RoomBarItem[]; left: RoomBarItem[]; right: RoomBarItem[] };

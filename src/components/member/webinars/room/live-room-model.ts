@@ -11,9 +11,10 @@
 // direto pelo Node. Nada aqui le o relogio de verdade nem a rede: a hora e o resto chegam por parametro.
 
 import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
-import { LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
+import { FILMSTRIP_COLUMN_MIN_FRAME, LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { roomAccessLost } from "../../../../lib/webinar-room-client";
+import type { RoomView } from "../../../../lib/webinar-room-prefs";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
@@ -59,6 +60,11 @@ export const LIVE_ROOM_RULES = {
   joinTimeoutMs: 30_000,
   /** As ultimas mensagens em pilulas sobre o palco com o painel do chat fechado (docs/31 V2-8, tambem no computador). */
   overlayMessages: 2,
+  /**
+   * A largura do iframe parou de mudar ha este tanto (abrir ou fechar o painel, girar, a janela arrastada): a sala refaz
+   * a conta da coluna de miniaturas (docs/31 V2-A5).
+   */
+  frameSettleMs: 250,
   /** Os avisos passageiros da barra (camera fechada pela equipe, microfone silenciado) somem depois disto. */
   noticeMs: 6_000,
   /**
@@ -585,6 +591,11 @@ export type LiveSignalState = {
   expectAudio: boolean;
   /** O proximo videoMuteStatusChanged foi pedido por nos (Câmera ou a troca da camera): nao e a equipe fechando. */
   expectVideo: boolean;
+  /**
+   * A coluna de miniaturas do iframe na tela (o ultimo filmstripDisplayChanged; visivel ao entrar). Fora do iframe, nao
+   * ha coluna: o selo do Assistente e as pilulas do chat vao ate a borda.
+   */
+  filmstripVisible: boolean;
   handRaised: boolean;
   /** O apresentador liberou e o aluno aceitou: o botao Microfone aparece. */
   micAllowed: boolean;
@@ -595,19 +606,23 @@ export type LiveSignalState = {
   /** O ultimo recordingStatusChanged (nulo: nenhum ainda; vale o `live.recording` da sessao). */
   recording: boolean | null;
   videoOn: boolean;
+  /** O que o motor mostra (o ultimo tileViewChanged): a Grade ou o Palco. O botao da visao diz isto, nunca a escolha guardada. */
+  viewShown: RoomView;
 };
 
 export const INITIAL_LIVE_SIGNALS: LiveSignalState = {
   audioOn: false,
   expectAudio: false,
   expectVideo: false,
+  filmstripVisible: false,
   handRaised: false,
   micAllowed: false,
   micPrompt: false,
   notice: null,
   participants: { moderators: [], names: {} },
   recording: null,
-  videoOn: false
+  videoOn: false,
+  viewShown: "stage"
 };
 
 function cleanName(value: unknown): string | null {
@@ -650,7 +665,8 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
   const id = field(payload, "id");
   switch (name) {
     case "videoConferenceJoined":
-      return { ...INITIAL_LIVE_SIGNALS, participants: state.participants, recording: state.recording };
+      // O iframe entra no Palco, com a coluna de miniaturas na tela (a grade e por comando, depois de entrar).
+      return { ...INITIAL_LIVE_SIGNALS, filmstripVisible: true, participants: state.participants, recording: state.recording };
     case "videoConferenceLeft":
       // Fora da sala ninguem esta no palco para nos (a lista volta com os participantJoined da proxima entrada) e a
       // liberacao do microfone era do participante que saiu (quem volta entra com outro id, mudo).
@@ -685,6 +701,14 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       return { ...state, expectVideo: false, notice: mediaErrorNotice("camera", payload) };
     case "recordingStatusChanged":
       return { ...state, recording: field(payload, "on") === true };
+    case "tileViewChanged": {
+      const enabled = field(payload, "enabled");
+      return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
+    }
+    case "filmstripDisplayChanged": {
+      const visible = field(payload, "visible");
+      return typeof visible === "boolean" ? { ...state, filmstripVisible: visible } : state;
+    }
     case "participantJoined": {
       const display = cleanName(field(payload, "displayName"));
       return typeof id === "string" && id !== ownId && display ? { ...state, participants: { ...state.participants, names: { ...state.participants.names, [id]: display } } } : state;
@@ -1111,8 +1135,9 @@ export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): b
  * Os botoes da nossa barra (docs/31 V2-6), nas tres zonas: o Sair a esquerda; no centro Reagir, a mao (so com a nossa
  * barra de midia: aluno e Equipe), a Câmera (so com a camera dos alunos permitida no webinario; nula antes do token),
  * o Microfone (so depois de o apresentador liberar e do Falar), o Som e a Tela cheia (ou o Modo cinema); a direita,
- * Configurações e o balao do chat. O Som vem antes da Tela cheia. A tela decide o que some pela largura (o Sair e a
- * Tela cheia saem da barra abaixo de lg).
+ * a Visão do vídeo (Palco ou Grade, so com a nossa barra de midia: quem apresenta muda a visao pelo console, e o seguir
+ * a visao a levaria a todos), Configurações e o balao do chat. O Som vem antes da Tela cheia. A tela decide o que some
+ * pela largura (o Sair, a Tela cheia e a Visão do vídeo saem da barra abaixo de lg).
  */
 export function liveBarItems(input: { allowStudentCamera: boolean | null; micAllowed: boolean; showMedia: boolean }): RoomBarItems {
   const center: RoomBarItem[] = ["react"];
@@ -1126,7 +1151,37 @@ export function liveBarItems(input: { allowStudentCamera: boolean | null; micAll
     }
   }
   center.push("sound", "fullscreen");
-  return { center, left: ["leave"], right: ["settings", "panel"] };
+  return { center, left: ["leave"], right: input.showMedia ? ["view", "settings", "panel"] : ["settings", "panel"] };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A visao do video (docs/31 V2-16) e a coluna de miniaturas pela largura do iframe (V2-A5)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O comando que a sala manda depois de cada videoConferenceJoined (a entrada, Tentar de novo, a volta depois da queda):
+ * so a Grade guardada vira setTileView(true). O Palco guardado nao manda nada: o iframe ja entra no Palco, e forcar o
+ * Palco desfaria a grade que a equipe ligou para todos (o seguir a visao so reaplica quando a equipe muda).
+ */
+export function viewOnJoin(stored: RoomView): ["setTileView", true] | null {
+  return stored === "grid" ? ["setTileView", true] : null;
+}
+
+/**
+ * A sala quer a coluna de miniaturas a direita do video grande: so no Palco (na Grade as miniaturas sao a propria
+ * grade) e com o iframe de FILMSTRIP_COLUMN_MIN_FRAME (1013 px) ou mais, a largura em que o motor da a coluna inteira
+ * sem estreitar as miniaturas nem as deixar flutuar sobre o video. No celular (o iframe de cerca de 374 px) ela some.
+ */
+export function columnWanted(input: { frameWidth: number; view: RoomView }): boolean {
+  return input.view === "stage" && Number.isFinite(input.frameWidth) && input.frameWidth >= FILMSTRIP_COLUMN_MIN_FRAME;
+}
+
+/**
+ * O toggleFilmStrip so quando o que a sala quer difere do que o motor mostra (o ultimo filmstripDisplayChanged): o
+ * comando inverte a coluna, entao manda-lo com os dois iguais a tiraria (ou poria) por engano.
+ */
+export function filmstripStep(input: { visible: boolean; wanted: boolean }): "toggle" | null {
+  return input.wanted === input.visible ? null : "toggle";
 }
 
 /**

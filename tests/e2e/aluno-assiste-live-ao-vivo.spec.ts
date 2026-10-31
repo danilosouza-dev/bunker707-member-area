@@ -55,6 +55,11 @@ import {
 // sem pegar o foco; "Responder depois" a recolhe para o card "Enquete aberta · você deixou para depois" do chat (o
 // foco vai ao balao), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
 // "Enviar resposta" grava pela nossa rota (201) e a aba Enquetes diz "Resposta enviada".
+// A Visão do vídeo (docs/31 V2-16 e V2-A5): Grade vai por setTileView(true) sem remontar o iframe; o botao diz o que o
+// motor mostra (o tileViewChanged), nunca a escolha guardada; o Esc no menu so fecha o menu; ao recarregar e entrar, a
+// Grade guardada volta depois do videoConferenceJoined. A 1280 px com o painel aberto o iframe fica abaixo de 1013 px e
+// a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna quando o motor confirma); com o
+// painel fechado ela volta.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -467,6 +472,77 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     // A enquete aberta ficaria no meio do palco dos testes seguintes.
     await apagarEnqueteDeTeste(pollId);
   }
+});
+
+test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade por comando sem remontar, o botao diz o que o motor mostra, a Grade guardada volta na entrada; a 1280 px a coluna sai com o painel aberto e volta com ele fechado", async ({ page }) => {
+  const visao = WEBINAR_COPY.salaV2.visao;
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo, sala } = await entrarNaSala(page);
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  const noPalco = barra.getByRole("button", { exact: true, name: visao.atual(visao.palco) });
+  await expect(noPalco).toBeEnabled();
+  await expect(noPalco).toHaveAttribute("aria-haspopup", "menu");
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  // A 1440 px com o painel aberto o iframe tem cerca de 1072 px: a coluna fica, e os selos param antes dela.
+  await expect(palco).toHaveAttribute("style", /--room-video-right:222px/);
+
+  // O menu abre com o foco na opcao marcada; o Esc fecha so o menu (nada de "sair da sala") e o foco volta ao botao.
+  await noPalco.click();
+  const menu = dialogo.getByRole("menu", { name: visao.rotulo });
+  await expect(menu).toBeVisible();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+
+  // Grade: por comando (setTileView), sem remontar o iframe.
+  let antes = (await sala.comandos()).length;
+  await noPalco.click();
+  await menu.getByRole("menuitemradio", { exact: true, name: visao.grade }).click();
+  await expect(menu).toBeHidden();
+  expect((await sala.esperarComando("setTileView", { depoisDe: antes })).args).toEqual([true]);
+  expect(await sala.montagens(), "trocar a visao nao remonta o iframe").toBe(1);
+
+  // O botao diz o que o motor mostra: a Grade quando ele avisa; o Palco quando a equipe volta todos ao Palco, mesmo com
+  // a Grade guardada.
+  await sala.disparar("tileViewChanged", { enabled: true });
+  await expect(barra.getByRole("button", { exact: true, name: visao.atual(visao.grade) })).toBeVisible();
+  // Na Grade, nenhuma coluna a descontar.
+  await expect(palco).toHaveAttribute("style", /--room-video-right:0px/);
+  await sala.disparar("tileViewChanged", { enabled: false });
+  await expect(noPalco).toBeVisible();
+
+  // Recarregar e entrar de novo: a Grade guardada volta por setTileView(true), so depois do videoConferenceJoined.
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await token).status()).toBe(200);
+  await sala.esperarMontada();
+  expect((await sala.comandos()).some((item) => item.comando === "setTileView"), "antes da entrada, nenhum comando").toBe(false);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect((await sala.esperarComando("setTileView")).args).toEqual([true]);
+
+  // A 1280 px com o painel aberto o iframe fica com cerca de 912 px (abaixo de 1013): a coluna sai por toggleFilmStrip.
+  antes = (await sala.comandos()).length;
+  await page.setViewportSize({ height: 800, width: 1280 });
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  // O motor confirma (a coluna escondida): os selos vao ate a borda. Fechar o painel deixa o iframe com mais de 1013 px
+  // e a coluna volta.
+  await sala.disparar("filmstripDisplayChanged", { visible: false });
+  await expect(palco).toHaveAttribute("style", /--room-video-right:0px/);
+  antes = (await sala.comandos()).length;
+  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: true });
+  await expect(palco).toHaveAttribute("style", /--room-video-right:222px/);
+  expect(await sala.montagens(), "a coluna e por comando: o iframe e o mesmo").toBe(1);
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {

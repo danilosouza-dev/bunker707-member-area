@@ -4,12 +4,14 @@ import { Clapperboard, Hand, Maximize2, Mic, MicOff, Minimize2, Settings2, Smile
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { RoomView } from "@/lib/webinar-room-prefs";
 import type { Reaction } from "@/server/webinars/model";
 import { LIVE_ROOM_COPY, liveBarItems } from "./live-room-model";
 import { ROOM_REACTIONS_POPOVER, ROOM_SETTINGS_POPOVER, RoomBar, RoomBarButton, RoomLeaveButton, RoomPanelToggle } from "./room-bar";
 import type { RoomBarItem } from "./room-layout-model";
 import { RoomReactionBar } from "./room-reactions";
 import { RoomIconButton } from "./room-ui";
+import { RoomViewMenu } from "./room-view-menu";
 
 // A NOSSA barra da sala ao vivo (docs/30 §1.3, §8.5, §9 e D4; fase 3), a do aluno e da Equipe (o iframe deles nao tem
 // barra; host e co-apresentador que entram por esta pagina usam a barra do iframe e aqui so veem Reagir, Tela cheia e
@@ -31,6 +33,8 @@ import { RoomIconButton } from "./room-ui";
 // cheia; a direita Configurações e o balao que abre e fecha o painel do chat. A partir de lg, Reagir e Configurações
 // abrem por cima do palco, sem empurrar o video (o iframe nao muda de tamanho); abaixo de lg, no fluxo, como antes. No
 // celular a Tela cheia (ou o Modo cinema) sai da barra e vai para o canto do palco (LiveStageFullscreen).
+// Redesign V2, F8 (docs/31 V2-16): a Visão do vídeo (room-view-menu.tsx) entra na zona da direita, antes de
+// Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala.
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -63,6 +67,8 @@ export type LiveControlsProps = {
   onTogglePanel: () => void;
   onToggleReactions: () => void;
   onToggleSettings: () => void;
+  /** Palco ou Grade (a Visão do vídeo): sem ele, a barra fica sem o botao. */
+  onView?: (view: RoomView) => void;
   /** O painel do chat esta na tela (o balao fica ligado e se chama "Esconder o chat"). */
   panelOpen: boolean;
   /** Com o painel fechado o balao e o primeiro foco da sala (firstFocusTarget). */
@@ -79,6 +85,8 @@ export type LiveControlsProps = {
   showMedia: boolean;
   soundOn: boolean;
   videoOn: boolean;
+  /** O que o video mostra agora (o ultimo tileViewChanged do motor): o nome do botao da Visão do vídeo. */
+  viewShown?: RoomView;
 };
 
 export const LIVE_REACTIONS_ID = "live-room-reactions";
@@ -162,6 +170,8 @@ export function LiveControls(props: LiveControlsProps) {
             onClick={props.onFullscreen}
           />
         );
+      case "view":
+        return props.onView ? <RoomViewMenu disabled={!props.joined} key={item} onChoose={props.onView} shown={props.viewShown ?? "stage"} /> : null;
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
       case "panel":

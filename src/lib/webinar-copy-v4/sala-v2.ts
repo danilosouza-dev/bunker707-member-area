@@ -61,5 +61,16 @@ export const SALA_V2_COPY = {
     claro: "Tema claro",
     escuro: "Tema escuro",
     titulo: "Tema"
+  },
+  /**
+   * A visao do video da live (V2-16), no botao da barra a partir de lg: o nome diz o que o video mostra agora ("Visão do
+   * vídeo: Palco"), e o menu "Visão do vídeo" tem Palco (o video grande com as miniaturas ao lado) e Grade (todos do
+   * mesmo tamanho). Sem as palavras da PROIBIDAS_WEBINARIO.
+   */
+  visao: {
+    atual: (nome: string) => `Visão do vídeo: ${nome}`,
+    grade: "Grade",
+    palco: "Palco",
+    rotulo: "Visão do vídeo"
   }
 } as const;

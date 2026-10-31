@@ -24,10 +24,11 @@ const settingsPanel = await import("../src/components/member/webinars/room/live-
 const panelModule = await import("../src/components/member/webinars/room/room-panel.tsx");
 const pillsModule = await import("../src/components/member/webinars/room/room-chat-pills.tsx");
 const barModule = await import("../src/components/member/webinars/room/room-bar.tsx");
+const viewMenuModule = await import("../src/components/member/webinars/room/room-view-menu.tsx");
 const { deviceSettingsFor } = await import("../src/lib/jitsi-device-settings.ts");
 const { LIVE_ROOM_COPY, liveBarItems, overlayMessages } = await import("../src/components/member/webinars/room/live-room-model.ts");
 const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
-const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
+const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 const ler = (caminho) => readFileSync(new URL(`../${caminho}`, import.meta.url), "utf8");
 const semComentarios = (fonte) => fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1").replace(/\{\s*\}/g, "");
@@ -116,7 +117,8 @@ test("o palco monta o iframe pelo useJitsiMeet com o configOverwrite do papel, o
   assert.match(page, /\(await headers\(\)\)\.get\("x-nonce"\)/);
   assert.match(page, /<LiveWebinarRoom[\s\S]*?nonce=\{nonce\}[\s\S]*?staff=\{data\.staff\}/);
   assert.match(page, /data\.payload\.session\.kind === "live" \?/, "a live usa a sala ao vivo; a gravada e o replay continuam na WebinarRoom");
-  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
+  // A largura do iframe (a coluna de miniaturas, docs/31 V2-A5) vem da medida do palco (use-stage-geometry.ts).
+  assert.match(semComentarios(FONTES.room), /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*frameWidth: geometry\.frameWidth,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
 
   // O papel nunca vem do navegador: a pagina pergunta ao servidor pela regra unica (roomGrantFor).
   assert.match(semComentarios(FONTES.queries), /roomGrantFor\(db, \{ nowMs: now, userId, webinar: webinarFromRow\(row\) \}\)/);
@@ -255,6 +257,7 @@ const barra = (props = {}) =>
     onTogglePanel: noop,
     onToggleReactions: noop,
     onToggleSettings: noop,
+    onView: noop,
     panelOpen: true,
     reactionsDisabled: false,
     reactionsOpen: false,
@@ -262,6 +265,7 @@ const barra = (props = {}) =>
     showMedia: true,
     soundOn: true,
     videoOn: false,
+    viewShown: "stage",
     ...props
   });
 const nomes = (html) => [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]);
@@ -291,19 +295,24 @@ const painelConfig = (sections) =>
 /** Os circulos da barra (data-room-bar-item), na ordem do HTML, e o HTML de cada um. */
 const circulos = (html) => [...html.matchAll(/<button[^>]*data-room-bar-item="([a-z]+)"[^>]*>/g)].map(([tag, item]) => ({ item, tag }));
 /** O que fica na tela abaixo de lg: sem o `hidden` que so o lg tira (o Sair e a Tela cheia saem da barra no celular). */
-const noCelular = (html) => circulos(html).filter(({ tag }) => !/class="[^"]*(?:^| )hidden(?: |")/.test(tag));
+const noCelular = (html) => circulos(html).filter(({ tag }) => !/class="(?:[^"]* )?hidden[ "]/.test(tag));
 
-test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câmera, Som e Tela cheia no centro, Configurações e o balao a direita; circulos de 44 px (48 a partir de lg) com o nome exato; o Microfone so depois de liberado", () => {
+test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câmera, Som e Tela cheia no centro, a Visão do vídeo, Configurações e o balao a direita; circulos de 44 px (48 a partir de lg) com o nome exato; o Microfone so depois de liberado", () => {
   const html = barra();
-  assert.deepEqual(nomes(html), ["Reagir", "Levantar a mão", "Câmera", "Som", "Tela cheia", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"], "a ordem nova: o Som antes da Tela cheia");
-  // As tres zonas, na ordem da tela (o grupo "Controles da sala").
+  assert.deepEqual(nomes(html), ["Reagir", "Levantar a mão", "Câmera", "Som", "Tela cheia", "Visão do vídeo: Palco", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"], "a ordem nova: o Som antes da Tela cheia");
+  // As tres zonas, na ordem da tela (o grupo "Controles da sala"); cada zona vai ate a seguinte (a da direita, ate o fim).
   assert.match(html, /aria-label="Controles da sala" class="[^"]*lg:grid-cols-\[1fr_auto_1fr\][^"]*" data-room-bar="" role="group">/);
-  const zona = (nome) => html.slice(html.indexOf(`data-room-bar-zone="${nome}"`), html.indexOf("</div>", html.indexOf(`data-room-bar-zone="${nome}"`)));
+  const zona = (nome) => {
+    const inicio = html.indexOf(`data-room-bar-zone="${nome}"`);
+    const proxima = html.indexOf("data-room-bar-zone=", inicio + 1);
+    return html.slice(inicio, proxima > 0 ? proxima : undefined);
+  };
   assert.deepEqual(circulos(zona("left")).map(({ item }) => item), ["leave"]);
   assert.deepEqual(circulos(zona("center")).map(({ item }) => item), ["react", "hand", "camera", "sound", "fullscreen"]);
-  assert.deepEqual(circulos(zona("right")).map(({ item }) => item), ["settings", "panel"]);
-  // Os circulos: 44 px no celular, 48 px a partir de lg, sem rotulo visivel (o nome no aria-label e no title).
-  const redondos = circulos(html).filter(({ item }) => item !== "leave");
+  assert.deepEqual(circulos(zona("right")).map(({ item }) => item), ["view", "settings", "panel"], "a Visão do vídeo antes de Configurações");
+  // Os circulos: 44 px no celular, 48 px a partir de lg, sem rotulo visivel (o nome no aria-label e no title). A Visão
+  // do vídeo e o Sair tem o desenho deles (a pilula a partir de xl).
+  const redondos = circulos(html).filter(({ item }) => item !== "leave" && item !== "view");
   assert.equal(redondos.length, 7);
   for (const { item, tag } of redondos) {
     const classes = (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
@@ -328,9 +337,9 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   assert.match(barra({ panelOpen: false }), /<button aria-controls="room-panel" aria-label="Mostrar o chat" aria-pressed="false"/);
 
   const cheia = barra({ handRaised: true, micAllowed: true, videoOn: true });
-  assert.deepEqual(nomes(cheia), ["Reagir", "Abaixar a mão", "Câmera", "Microfone", "Som", "Tela cheia", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"]);
+  assert.deepEqual(nomes(cheia), ["Reagir", "Abaixar a mão", "Câmera", "Microfone", "Som", "Tela cheia", "Visão do vídeo: Palco", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"]);
   // No celular (V2-18), com o Microfone liberado, ficam 7 circulos de 44 px: Reagir, a mao, Câmera, Microfone, Som,
-  // Configurações e o balao. A conta usa a margem, a borda, o recuo e o vao da barra desenhada (abaixo de lg): os 7
+  // Configurações e o balao (a Visão do vídeo so a partir de lg, como o Sair e a Tela cheia). A conta usa a margem, a borda, o recuo e o vao da barra desenhada (abaixo de lg): os 7
   // cabem em 360 px e em 375 px sem rolar a barra por dentro (a rolagem dela fica escondida e cortaria o balao).
   assert.deepEqual(noCelular(cheia).map(({ item }) => item), ["react", "hand", "camera", "mic", "sound", "settings", "panel"]);
   const classesDaBarra = (cheia.match(/aria-label="Controles da sala" class="([^"]*)"/)?.[1] ?? "").split(" ");
@@ -360,8 +369,10 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   assert.match(canto(), /^<button aria-label="Tela cheia" aria-pressed="false" class="[^"]*\bsize-8\b[^"]*bg-black\/60 text-white[^"]*absolute bottom-2 right-2 z-30 lg:hidden"/);
   assert.match(canto({ cinemaMode: true, cinemaOn: true }), /^<button aria-label="Modo cinema" aria-pressed="true"/);
 
-  // Host e co-apresentador que entram por aqui usam a barra do iframe: sem mao, camera e microfone nossos.
+  // Host e co-apresentador que entram por aqui usam a barra do iframe: sem mao, camera e microfone nossos, e sem a
+  // Visão do vídeo (o seguir a visao levaria a escolha de quem apresenta a todos).
   assert.deepEqual(nomes(barra({ micAllowed: true, showMedia: false })), ["Reagir", "Som", "Tela cheia", LIVE_ROOM_COPY.configuracoes, "Esconder o chat"]);
+  assert.ok(!nomes(barra({ onView: undefined })).some((nome) => nome.startsWith(WEBINAR_COPY.salaV2.visao.rotulo)), "sem o comando da visao, sem o botao");
 
   const reagindo = barra({ reactionsOpen: true });
   assert.match(reagindo, /aria-expanded="true"/);
@@ -381,6 +392,50 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   assert.doesNotMatch(aberto, /<select/, "antes do Falar e do aviso da camera, nenhuma escolha de aparelho");
   assert.ok(aberto.includes(WEBINAR_COPY.aoVivo.config.microfoneAguardando));
   assert.match(barra({ notice: WEBINAR_COPY.aoVivo.cameraFechadaPelaEquipe }), /aria-live="polite"[^>]*role="status">A equipe fechou a sua câmera\.</);
+});
+
+test("a Visão do vídeo (V2-16): 'Visão do vídeo: Palco' desligada antes de entrar, so a partir de lg, com o menu de duas opcoes (Palco e Grade) e sem a palavra proibida", () => {
+  const visao = WEBINAR_COPY.salaV2.visao;
+  const menu = (props) => render(viewMenuModule.RoomViewMenu, { disabled: false, onChoose: noop, shown: "stage", ...props });
+
+  // Antes de entrar na sala (sem iframe): o botao diz o Palco, fica desligado e o menu fechado.
+  const antes = menu({ disabled: true });
+  const botao = antes.match(/<button [^>]*data-room-bar-item="view"[^>]*>/)?.[0] ?? "";
+  assert.match(botao, /aria-controls="room-view-menu" aria-expanded="false" aria-haspopup="menu" aria-label="Visão do vídeo: Palco"/);
+  assert.match(botao, /disabled=""/, "fora da sala, nada a mudar");
+  assert.match(botao, /title="Visão do vídeo: Palco"/, "a dica do mouse entre lg e xl, quando so o icone aparece");
+  const classes = (botao.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  for (const classe of ["hidden", "lg:inline-flex", "size-11", "rounded-full", "xl:w-auto", "xl:rounded-[var(--member-button-radius)]", "border-room-border-strong"]) {
+    assert.ok(classes.includes(classe), `${classe}: so a partir de lg, um circulo de 44 px que vira a pilula a partir de xl`);
+  }
+  assert.match(antes, /<span class="hidden xl:inline">Palco<\/span>/, "o nome visivel so na pilula");
+
+  // O menu "Visão do vídeo": fechado (hidden), com as duas opcoes; a marcada e a que o video mostra.
+  assert.match(antes, /<div aria-label="Visão do vídeo" class="[^"]*\bz-40\b[^"]*" hidden="" id="room-view-menu" role="menu">/, "por cima da enquete do palco (z-30)");
+  const opcoes = (html) => [...html.matchAll(/<button aria-checked="(true|false)"[^>]*data-room-view="([a-z]+)"[^>]*role="menuitemradio"[^>]*>[\s\S]*?<span class="flex-1">([^<]+)<\/span>/g)].map(([, marcada, view, nome]) => ({ marcada: marcada === "true", nome, view }));
+  assert.deepEqual(opcoes(antes), [
+    { marcada: true, nome: visao.palco, view: "stage" },
+    { marcada: false, nome: visao.grade, view: "grid" }
+  ]);
+
+  // A Grade na tela (o motor avisou): o botao e a opcao marcada dizem a Grade.
+  const grade = menu({ shown: "grid" });
+  assert.match(grade, /aria-label="Visão do vídeo: Grade"/);
+  assert.doesNotMatch(grade, /data-room-bar-item="view"[^>]*disabled=""/, "dentro da sala, ligada");
+  assert.deepEqual(opcoes(grade).map(({ marcada, view }) => [view, marcada]), [["stage", false], ["grid", true]]);
+
+  // Nenhuma palavra proibida no que o aluno le ou ouve (o nome acessivel, o title e o texto).
+  for (const html of [antes, grade]) {
+    const ouvido = [textoDe(html), ...[...html.matchAll(/(?:aria-label|title)="([^"]+)"/g)].map(([, valor]) => valor)].join(" ").toLowerCase();
+    for (const palavra of PROIBIDAS_WEBINARIO) {
+      assert.ok(!ouvido.includes(palavra), palavra);
+    }
+  }
+
+  // Na sala antes de entrar: o botao na barra do aluno, antes de Configurações, desligado.
+  const naSala = sala();
+  assert.match(naSala, /<button aria-controls="room-view-menu" aria-expanded="false" aria-haspopup="menu" aria-label="Visão do vídeo: Palco"[^>]*disabled=""/);
+  assert.ok(naSala.indexOf('data-room-bar-item="view"') < naSala.indexOf('aria-label="Configurações"'), "antes de Configurações");
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -464,8 +519,8 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (
   assert.match(palco, /data-testid="live-recording" title="Gravando">[\s\S]*?Gravando<\/span>/, "o Gravando no palco");
   assert.match(palco, /data-room-badge="presenter"[\s\S]*?>Danilo S\. · Apresentador</, "quem apresenta, embaixo a esquerda");
   assert.ok(palco.indexOf('data-testid="room-on-air"') < palco.indexOf('data-testid="live-recording"'), "o Gravando ao lado do Ao vivo");
-  // A coluna de miniaturas do iframe (213 px e o puxador de 9 px sem toque) ate a F8 medir: o selo do Assistente para antes.
-  assert.match(html, /data-room-stage="idle" role="region" style="--room-video-right:222px"/);
+  // Antes de entrar nao ha iframe, nem a coluna de miniaturas dele (docs/31 V2-A5): os selos e as pilulas vao ate a borda.
+  assert.match(html, /data-room-stage="idle" role="region" style="--room-video-right:0px"/);
   assert.doesNotMatch(html, /data-room-badge="assistant"/, "o Assistente desligado (o servidor ainda nao leu o estado)");
   assert.doesNotMatch(sala(), /Gravando/, "sem gravador, sem o selo");
 
