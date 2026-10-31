@@ -39,7 +39,7 @@ test("o visual por pessoa: escuro e palco por padrao; valor desconhecido, vazio 
   assert.deepEqual(embed.DEFAULT_LOOK, { layout: "stage", theme: "dark" });
 });
 
-test("interfaceConfig: palco preto atras do letterbox, miniaturas 16:9 com altura fixa, sem indicador de conexao, coluna ou fileira pelo layout", () => {
+test("interfaceConfig: palco preto atras do video, miniaturas 16:9 com altura fixa, sem indicador de conexao, coluna ou fileira pelo layout", () => {
   const padrao = embed.liveInterfaceConfigOverwrite("student");
   assert.equal(padrao.DEFAULT_BACKGROUND, "#000000", "o palco e preto nos dois temas, como num player");
   assert.equal(padrao.VERTICAL_FILMSTRIP, true, "no Palco, a coluna de miniaturas");
@@ -48,8 +48,10 @@ test("interfaceConfig: palco preto atras do letterbox, miniaturas 16:9 com altur
   assert.equal(padrao.REMOTE_THUMBNAIL_RATIO, 16 / 9, "o padrao da tag e 1:1 para as remotas");
   assert.equal(padrao.CONNECTION_INDICATOR_DISABLED, true);
   assert.equal(padrao.VIDEO_QUALITY_LABEL_DISABLED, true);
-  assert.equal(padrao.DISABLE_VIDEO_BACKGROUND, true, "faixas pretas, sem a copia desfocada do video por tras");
-  assert.equal(padrao.VIDEO_LAYOUT_FIT, "both", "o video inteiro, com as faixas pretas, nunca cortado");
+  assert.equal(padrao.DISABLE_VIDEO_BACKGROUND, true, "o que sobra e preto liso, sem a copia desfocada do video por tras");
+  // VideoContainer.js da tag: "both" preenche o palco cortando ate MAXIMUM_ZOOMING_COEFFICIENT (1,3); "nocrop" seria
+  // o video inteiro com faixas. A tela compartilhada usa outra conta e nunca e cortada.
+  assert.equal(padrao.VIDEO_LAYOUT_FIT, "both", "a camera preenche o palco, cortando ate 30 %, como no Zoom");
   assert.equal(embed.liveInterfaceConfigOverwrite("student", { layout: "stage_bottom" }).VERTICAL_FILMSTRIP, false, "Miniaturas embaixo: a fileira horizontal");
   assert.equal(embed.liveInterfaceConfigOverwrite("host", { layout: "grid" }).VERTICAL_FILMSTRIP, true, "a grade e o palco duplo ficam na coluna (o tile view e por comando)");
   assert.equal(embed.liveInterfaceConfigOverwrite("host", { layout: "stage_duo" }).VERTICAL_FILMSTRIP, true);

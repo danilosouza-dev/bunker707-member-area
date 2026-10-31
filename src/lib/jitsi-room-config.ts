@@ -28,7 +28,10 @@ export type LiveEmbedLook = { layout?: LiveRoomLayout | null; theme?: LiveRoomTh
 export const DEFAULT_LOOK: Readonly<Required<{ [K in keyof LiveEmbedLook]: NonNullable<LiveEmbedLook[K]> }>> = { layout: "stage", theme: "dark" };
 const ROOM_THEMES: readonly LiveRoomTheme[] = ["dark", "light"];
 const ROOM_LAYOUTS: readonly LiveRoomLayout[] = ["grid", "stage", "stage_bottom", "stage_duo"];
-/** O fundo atras do video grande (as faixas do letterbox) nos dois temas: o palco e preto, como num player. */
+/**
+ * O fundo atras do video grande nos dois temas: preto, como num player. Aparece quando sobra espaco: na tela
+ * compartilhada (nunca cortada) e quando a camera precisaria de mais de 30 % de zoom para preencher o palco.
+ */
 export const STAGE_BACKGROUND = "#000000";
 /**
  * A coluna de miniaturas (Palco, Palco duplo e a grade), conferido na tag fixada (docs/31 §3): `filmstrip.initialWidth`
@@ -204,9 +207,9 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
 export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
   const look = normalizeLook(lookInput);
   return {
-    // O visual da V2 (docs/31 §3): o palco preto atras do letterbox (sem a copia desfocada do video por tras), sem o
-    // indicador de conexao nem o rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade,
-    // palco duplo) ou embaixo.
+    // O visual da V2 (docs/31 §3): a camera preenche o palco cortando ate 30 % (both + MAXIMUM_ZOOMING_COEFFICIENT da
+    // tag) e o que sobra e preto liso (sem a copia desfocada do video por tras), sem o indicador de conexao nem o
+    // rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
     CONNECTION_INDICATOR_DISABLED: true,
     DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,

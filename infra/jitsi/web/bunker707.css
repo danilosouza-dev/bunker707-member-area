@@ -6,6 +6,9 @@
  * 31/10/2026 (cada bloco cita o arquivo). A cada atualizacao da tag, o spike de prints se repete (docs/31 §7).
  * Nada aqui cita o motor na tela.
  *
+ * Cache: o nginx da imagem manda expires 1y para /css/* quando a URL tem ?v=. A cada mudanca nesta folha, suba o
+ * v no custom-config.js e grave o novo sha256 em bunker707.css.version; o teste da infra confere os dois.
+ *
  * Dentro do iframe ficam o video grande (#largeVideoContainer > #largeVideoWrapper > video) e as miniaturas
  * (.filmstrip > ... > span.videocontainer, uma por pessoa). A classe do layout fica num ancestral:
  * .vertical-filmstrip (a coluna), .stage-filmstrip (a coluna com mais de um no palco), .horizontal-filmstrip (a
@@ -43,8 +46,10 @@ body {
  * O video grande vira o cartao do palco: cantos redondos (o overflow: hidden ja vem da tag) e sem a sombra do
  * wrapper (_videolayout_default.scss). Na coluna, o motor ja estreita #largeVideoContainer para
  * calc(100% - largura da coluna) quando ela tem 180 px ou mais (LargeVideo.web.tsx) e centraliza o video nesse
- * espaco (VideoContainer.js); o app fixa 213 px (a configuracao do iframe no app). O fundo preto vem de
- * DEFAULT_BACKGROUND e as faixas do letterbox ficam lisas porque DISABLE_VIDEO_BACKGROUND desliga a copia desfocada.
+ * espaco (VideoContainer.js); o app fixa 213 px (a configuracao do iframe no app). A camera preenche o cartao
+ * cortando ate 30 % (VIDEO_LAYOUT_FIT both + MAXIMUM_ZOOMING_COEFFICIENT); acima disso, e na tela compartilhada, que
+ * nunca e cortada, sobram faixas: pretas pelo DEFAULT_BACKGROUND e lisas porque DISABLE_VIDEO_BACKGROUND desliga a
+ * copia desfocada do video que o motor poria atras.
  */
 #largeVideoContainer {
   border-radius: var(--bunker-radius);

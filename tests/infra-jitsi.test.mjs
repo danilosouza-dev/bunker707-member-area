@@ -305,7 +305,7 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
   assert.doesNotMatch(loader[1], /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src)\b/, "o carregador nao busca nada nem roda script");
   assert.doesNotMatch(loader[1], /https?:/, "o <link> e relativo a esta origem");
-  assert.match(loader[1], /link\.href = 'css\/bunker707\.css\?v=\d+';/);
+  assert.match(loader[1], /link\.href = '\/css\/bunker707\.css\?v=\d+';/, "caminho absoluto: a sala fica em /<sala>");
 });
 
 test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos locais com CA interna, nada impresso, e nao repete sem --force", () => {
@@ -961,7 +961,7 @@ test("o CSS nosso no iframe: montado no web, servido em /css/bunker707.css, liga
   };
   // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
   assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22light%22&config.disableChat=true"), {
-    link: { href: "css/bunker707.css?v=1", rel: "stylesheet", tag: "link" },
+    link: { href: "/css/bunker707.css?v=1", rel: "stylesheet", tag: "link" },
     theme: "light"
   });
   assert.equal(run('#config.bunkerTheme="dark"').theme, "dark");
@@ -993,6 +993,21 @@ test("bunker707.css: os dois temas, o fundo da pagina pelo tema e nenhum nome do
   // Nada de margem, largura ou altura nas miniaturas: a lista virtual do motor mede cada item por JS.
   const thumbRules = [...css.matchAll(/\.videocontainer[^{]*\{([^}]*)\}/g)].map((m) => m[1]).join("\n");
   assert.doesNotMatch(thumbRules, /(^|[\s;])(margin|width|height|padding)(-[a-z]+)?\s*:/m, "margem, tamanho ou padding na miniatura desalinha a coluna");
+});
+
+// O nginx da imagem manda expires 1y para /css/* quando a URL tem ?v= (meet.conf da tag): uma folha nova com o mesmo v
+// ficaria um ano no navegador de quem ja entrou. O v do carregador e o hash da folha ficam gravados juntos em
+// bunker707.css.version; mudou a folha, sobe o v e grava o hash novo.
+test("bunker707.css: o ?v= do carregador sobe junto com a folha (hash gravado em bunker707.css.version)", () => {
+  const css = readFileSync(join(jitsiDir, "web", "bunker707.css"));
+  const version = read(join(jitsiDir, "web", "bunker707.css.version"));
+  const v = /^v=(\d+)$/m.exec(version)?.[1];
+  const sha = /^sha256=([0-9a-f]{64})$/m.exec(version)?.[1];
+  assert.ok(v && sha, "bunker707.css.version traz v=N e sha256=<hex>");
+  const atual = createHash("sha256").update(css).digest("hex");
+  assert.equal(atual, sha, `a folha mudou: suba o v em custom-config.js e grave sha256=${atual} em bunker707.css.version`);
+  const customConfig = read(join(jitsiDir, "web", "custom-config.js"));
+  assert.match(customConfig, new RegExp(`link\\.href = '/css/bunker707\\.css\\?v=${v}';`), "o v do carregador e o do arquivo de versao sao o mesmo");
 });
 
 // A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o
