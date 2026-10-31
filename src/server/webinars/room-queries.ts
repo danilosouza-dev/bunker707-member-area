@@ -272,7 +272,7 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       displayName: identity.consented && identity.displayMode ? studentDisplayName(identity, identity.displayMode, userId, webinar.id) : null,
       nickname: identity.nickname
     },
-    pinned: pinnedRow && pinnedRow.approved ? toStudentMessage(chatMessageFromRow(pinnedRow), userId) : null,
+    pinned: pinnedRow && pinnedRow.approved ? toStudentMessage(chatMessageFromRow(pinnedRow), userId, session.kind) : null,
     polls,
     presentNow: presentIds.length,
     replaySessionId: openReplaySessionId(context.sessions),
@@ -326,7 +326,7 @@ export async function readChatWindow(db: WebinarsDb, context: RoomContext, userI
   const served: ChatWindow = { fromMs: window.fromMs, toMs: Math.min(window.toMs, limit) };
   const rows = await fetchChatWindow(db, { fromMs: served.fromMs, sessionId: context.session.id, toMs: served.toMs, userId });
   return {
-    messages: rows.map((row) => toStudentMessage(chatMessageFromWindowRow(row, context.session.id, context.webinar.id), userId)),
+    messages: rows.map((row) => toStudentMessage(chatMessageFromWindowRow(row, context.session.id, context.webinar.id), userId, context.session.kind)),
     mode: "window",
     serverTime,
     window: served
@@ -344,7 +344,7 @@ export async function readRecentChat(db: WebinarsDb, context: RoomContext, userI
     userId
   });
   return {
-    messages: rows.map((row) => toStudentMessage(chatMessageFromRow(row), userId)),
+    messages: rows.map((row) => toStudentMessage(chatMessageFromRow(row), userId, context.session.kind)),
     mode: "recent",
     next: nextChatCursor(rows, cursor, nowIso),
     serverTime: nowIso

@@ -94,7 +94,7 @@ test("nome exibido (D10): primeiro nome e inicial, apelido, Aluno {n} estavel po
   assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "first_name_initial", nickname: null }), "Ana M.");
 });
 
-test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so para o autor, fixada", () => {
+test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so para o autor, fixada; a hora gravada so na live", () => {
   const base = {
     approved: true,
     authorUserId: "u1",
@@ -113,13 +113,17 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
     source: "audience",
     webinarId: "w1"
   };
-  assert.deepEqual(room.toStudentMessage(base, "u1"), { body: "oi", displayName: "Ana M.", id: "m1", kind: "message", mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student" });
-  const scripted = room.toStudentMessage({ ...base, authorUserId: null, role: "team", source: "scripted" }, "u1");
+  assert.deepEqual(room.toStudentMessage(base, "u1", "simulated"), { body: "oi", displayName: "Ana M.", id: "m1", kind: "message", mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: null });
+  const scripted = room.toStudentMessage({ ...base, authorUserId: null, role: "team", source: "scripted" }, "u1", "simulated");
   assert.equal(scripted.role, "team");
   assert.equal(scripted.mine, false);
-  assert.equal(room.toStudentMessage({ ...base, approved: false }, "u1").pending, true);
-  assert.equal(room.toStudentMessage({ ...base, pinnedAt: "2026-11-05T23:01:00.000Z" }, null).pinned, true);
-  assert.equal(room.toStudentMessage(base, null, 8_000).offsetMs, 8_000, "a linha mestre vem deslocada");
+  assert.equal(room.toStudentMessage({ ...base, approved: false }, "u1", "simulated").pending, true);
+  assert.equal(room.toStudentMessage({ ...base, pinnedAt: "2026-11-05T23:01:00.000Z" }, null, "simulated").pinned, true);
+  assert.equal(room.toStudentMessage(base, null, "simulated", 8_000).offsetMs, 8_000, "a linha mestre vem deslocada");
+  // A hora em que o servidor gravou (docs/31 V2-9) so na live: na gravada e no Replay a linha mestre diria a data da
+  // live de origem.
+  assert.equal(room.toStudentMessage(base, "u1", "live").sentAt, "2026-11-05T23:00:10.000Z");
+  assert.equal(room.toStudentMessage(base, "u1", "replay").sentAt, null);
   assert.equal(room.offsetLabel(3_723_000), "1:02:03");
   assert.equal(room.offsetLabel(750_000), "12:30");
   assert.equal(room.offsetLabel(-30_000), "-0:30");

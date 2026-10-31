@@ -29,8 +29,10 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // A confirmacao de remover as minhas mensagens usa o aviso, como a de Sair: o acento fica so no Sair. Redesign V2, F6
 // (docs/31 V2-9): no painel, cada mensagem e um balao no estilo do Zoom (RoomChatBubble): o avatar so com as iniciais
 // do nome de exibicao (§8.5), o balao primeiro e, embaixo, "nome · papel · hora" em cinza, sem etiqueta colorida; a
-// minha a direita. Sai a linha do rotulo "Chat" (repetia a aba) e o menu ⋯ vai para a linha do campo, a esquerda. O
-// chat por cima do video no vertical (vertical-chat.tsx) continua com o item de antes (RoomMessageItem, V2-18).
+// minha a direita. Sai a linha do rotulo "Chat" (repetia a aba) e o menu ⋯ vai para a linha do campo, a esquerda. A
+// hora: na live, a que o servidor gravou (`sentAt`); na gravada, a hora marcada mais o offset; no Replay, nenhuma. O
+// chat por cima do video no vertical (vertical-chat.tsx) continua com o item de antes (RoomMessageItem, V2-18); a
+// gaveta do vertical abre este mesmo painel, com o balao.
 
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
@@ -60,13 +62,14 @@ export type RoomChatPanelProps = {
   sessionId?: string | null;
   slowUntilMs: number | null;
   /**
-   * Redesign V2, F6 (V2-9): de que sala e a hora embaixo do balao (o zero mais o offset da mensagem, chatTimeLabel):
-   * "live" e "simulated" com o `zeroMs`; no "replay" (ou sem ele) a mensagem fica sem hora.
+   * Redesign V2, F6 (V2-9): de que sala e a hora embaixo do balao (chatTimeLabel): na "live", a hora em que o servidor
+   * gravou a mensagem (`sentAt`); na "simulated", o `zeroMs` mais o offset; no "replay", nenhuma. Obrigatoria: sem ela
+   * a hora sumiria sem erro nenhum.
    */
-  timeKind?: ChatTimeKind;
+  timeKind: ChatTimeKind;
   /** Fase 4c: o webinario (com a sessao, liga a dica do Assistente e o "Falar com a equipe"). */
   webinarId?: string | null;
-  /** O zero da sessao em ms (a ancora ou o inicio na live; a hora marcada na gravada), para a hora das mensagens. */
+  /** So na gravada: o zero da sessao em ms (a hora marcada), para a hora das mensagens. */
   zeroMs?: number | null;
 };
 
@@ -257,7 +260,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     readOnly,
     sessionId = null,
     slowUntilMs,
-    timeKind = "replay",
+    timeKind,
     webinarId = null,
     zeroMs = null
   } = props;
@@ -429,7 +432,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
               }
               key={message.id}
               message={message}
-              time={chatTimeLabel({ kind: timeKind, offsetMs: message.offsetMs, zeroMs })}
+              time={chatTimeLabel({ kind: timeKind, offsetMs: message.offsetMs, sentAt: message.sentAt, zeroMs })}
             />
           );
         })}
@@ -482,10 +485,11 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
           <div className="flex items-center gap-2">
             {menu}
-            {/* 16 px abaixo de lg: o Safari do iPhone da zoom no foco de um campo menor. */}
+            {/* 16 px abaixo de lg: o Safari do iPhone da zoom no foco de um campo menor. A linha de 20 px cabe nos 44 px
+                com a borda e o respiro (1 + 10 + 20 + 10 + 1); com 24 px sobrariam 22 e o Chrome mostraria a barra de rolar. */}
             <textarea
               aria-label={copy.escreva}
-              className="h-11 min-w-0 flex-1 resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-base leading-6 text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50 lg:text-[13px]"
+              className="h-11 min-w-0 flex-1 resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-base leading-5 text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50 lg:text-[13px]"
               disabled={state.disabled || readOnly || busy}
               maxLength={CHAT_LIMITS.body}
               onChange={(event) => setDraft(event.target.value)}

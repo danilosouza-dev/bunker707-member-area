@@ -115,13 +115,17 @@ export function newMessageCount(previousIds: ReadonlySet<string>, revealed: read
 export type ChatTimeKind = "live" | "replay" | "simulated";
 
 /**
- * A hora da mensagem em Sao Paulo ("20:41"): o zero da sessao mais o offset da mensagem. A mensagem do aluno nao traz
- * a hora em que foi escrita (so o offset): na live o zero e a ancora ou o inicio pela ultima leitura; na gravada, a
- * hora marcada (o roteiro ja nasce com created_at = scheduled_at + offset). No Replay, nenhuma: o payload nao traz o
- * inicio da live original, e uma hora errada seria pior que nenhuma.
+ * A hora da mensagem em Sao Paulo ("20:41"). Na live, a hora em que o servidor gravou a mensagem (`sentAt`): o offset
+ * nao serve, porque a mensagem da espera conta da hora marcada, o "Comecar para todos" muda o zero sem recalcular, e
+ * o que ja esta na tela guarda o offset de antes da ancora. Na gravada, a hora marcada mais o offset (o roteiro ja
+ * nasce com created_at = scheduled_at + offset, e a linha mestre nao leva a data da live de origem). No Replay,
+ * nenhuma: o payload nao traz o inicio da live original, e uma hora errada seria pior que nenhuma.
  */
-export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; zeroMs: number | null | undefined }): string {
-  if (input.kind === "replay" || typeof input.zeroMs !== "number") {
+export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): string {
+  if (input.kind === "live") {
+    return saoPauloTime(input.sentAt);
+  }
+  if (input.kind !== "simulated" || typeof input.zeroMs !== "number") {
     return "";
   }
   const at = new Date(input.zeroMs + input.offsetMs);

@@ -488,19 +488,34 @@ test("overlayMessages (V2-8): sem contagem, as 2 ultimas mensagens (a mais nova 
   assert.deepEqual(model.overlayMessages(["a", "b", "c"], 0), [], "contagem zero, nada");
 });
 
-test("chatTimeLabel (V2-9): a hora de Sao Paulo pelo zero da sessao mais o offset da mensagem; no Replay, nenhuma", () => {
+test("chatTimeLabel (V2-9): na live, a hora em que o servidor gravou; na gravada, a hora marcada mais o offset; no Replay, nenhuma", () => {
   const zero = Date.parse("2026-11-05T23:00:00.000Z"); // 20:00 em Sao Paulo
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 41 * 60_000, zeroMs: zero }), "20:41");
+  // Na gravada, o zero e a hora marcada (fixo): a hora e o zero mais o offset da mensagem.
   assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 41 * 60_000, zeroMs: zero }), "20:41", "a gravada pela hora marcada");
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: -5 * 60_000, zeroMs: zero }), "19:55", "a mensagem da espera, antes do zero");
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 4 * 3_600_000 + 61_000, zeroMs: zero }), "00:01", "a virada do dia");
-  // O Replay nao sabe quando a live original comecou: sem hora, nunca uma hora errada.
-  assert.equal(client.chatTimeLabel({ kind: "replay", offsetMs: 41 * 60_000, zeroMs: zero }), "");
-  // Sem o zero (ou um zero estragado), tambem sem hora.
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: null }), "");
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: undefined }), "");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: -5 * 60_000, zeroMs: zero }), "19:55", "a mensagem da espera, antes do zero");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 4 * 3_600_000 + 61_000, zeroMs: zero }), "00:01", "a virada do dia");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 0, zeroMs: null }), "", "sem o zero, sem hora");
   assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 0, zeroMs: Number.NaN }), "");
-  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, zeroMs: 9e15 }), "", "fora do calendario, sem hora (e sem erro)");
+  assert.equal(client.chatTimeLabel({ kind: "simulated", offsetMs: 0, zeroMs: 9e15 }), "", "fora do calendario, sem hora (e sem erro)");
+
+  // Na live, a hora gravada pelo servidor, nunca o zero mais o offset. A live das 20:00: o aluno escreve as 19:55 na
+  // espera (a sala aberta por "Abrir a sala", sem started_at): o servidor conta o offset da hora marcada (-5 min). O
+  // "Comecar para todos" as 20:07 poe started_at sem recalcular nada, e o zero da releitura seguinte vai para 20:07.
+  const espera = salaModelo.sessionVideoZero({ kind: "live", recordingAnchorAt: null, scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: null });
+  const offsetGravado = Date.parse("2026-11-05T22:55:00.000Z") - espera;
+  const depois = salaModelo.sessionVideoZero({ kind: "live", recordingAnchorAt: null, scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: "2026-11-05T23:07:00.000Z" });
+  assert.notEqual(depois, espera, "o zero da live muda de lugar");
+  const mensagem = { offsetMs: offsetGravado, sentAt: "2026-11-05T22:55:00.000Z" };
+  assert.equal(client.chatTimeLabel({ kind: "live", ...mensagem, zeroMs: espera }), "19:55");
+  assert.equal(client.chatTimeLabel({ kind: "live", ...mensagem, zeroMs: depois }), "19:55", "o zero novo nao desloca a hora (o zero mais o offset daria 20:02)");
+  assert.equal(client.chatTimeLabel({ kind: "live", ...mensagem }), "19:55", "a live nem precisa do zero");
+  // Sem a hora gravada, sem hora: nunca a conta pelo zero, que pode estar errada.
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 41 * 60_000, sentAt: null, zeroMs: zero }), "");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 41 * 60_000, zeroMs: zero }), "");
+  assert.equal(client.chatTimeLabel({ kind: "live", offsetMs: 0, sentAt: "nao e data" }), "");
+
+  // O Replay nao sabe quando a live original comecou: sem hora, nunca uma hora errada.
+  assert.equal(client.chatTimeLabel({ kind: "replay", offsetMs: 41 * 60_000, sentAt: "2026-11-05T23:41:00.000Z", zeroMs: zero }), "");
 });
 
 test("chatRoleLabel (V2-9): o papel so para Apresentador, Equipe e Assistente; o aluno e o convidado, nenhum", () => {

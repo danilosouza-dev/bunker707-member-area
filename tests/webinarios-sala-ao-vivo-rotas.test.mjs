@@ -895,6 +895,8 @@ test("D31: a mensagem do aluno na Live ao vivo nasce na linha mestre (aberta e m
   const noAr = await json(await chatRoute.POST(pedido(`${WEBINAR}/chat`, "POST", { body: "oi da live", sessionId: LIVE, ...comAceite }), contexto()));
   assert.equal(noAr.status, 201, JSON.stringify(noAr.body));
   assert.equal(db.tables.webinar_chat_messages.at(-1).master, true, "o replay le da live so master and approved");
+  // A hora embaixo do balao na live (docs/31 V2-9) e a que o servidor gravou, nunca o zero mais o offset.
+  assert.equal(noAr.body.data.message.sentAt, db.tables.webinar_chat_messages.at(-1).created_at);
 
   sessaoLive(db).chat_mode = "moderated";
   resetRoomLimits();
@@ -907,6 +909,7 @@ test("D31: a mensagem do aluno na Live ao vivo nasce na linha mestre (aberta e m
   const naGravada = await json(await chatRoute.POST(pedido(`${WEBINAR}/chat`, "POST", { body: "oi da gravada", sessionId: GRAVADA, ...comAceite }), contexto()));
   assert.equal(naGravada.status, 201, JSON.stringify(naGravada.body));
   assert.equal(gravada.tables.webinar_chat_messages.at(-1).master, false);
+  assert.equal(naGravada.body.data.message.sentAt, null, "na gravada, a hora marcada mais o offset");
 });
 
 /* ------------------------------------------------------------------------------------------------

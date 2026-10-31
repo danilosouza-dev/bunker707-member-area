@@ -57,7 +57,8 @@ const NOW = Date.parse("2026-11-05T23:10:00.000Z");
  * A sala do aluno
  * ---------------------------------------------------------------------------------------------- */
 
-const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
+// Na Live ao vivo, a hora embaixo do balao e a que o servidor gravou (sentAt): as 20:10 de Sao Paulo.
+const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: "2026-11-05T23:10:00.000Z", ...extra });
 
 function chat(props = {}) {
   return render(RoomChatPanel, {
@@ -81,10 +82,8 @@ function chat(props = {}) {
     readOnly: false,
     sessionId: "s1",
     slowUntilMs: null,
-    // A live com o zero as 20:00 de Sao Paulo: as mensagens (offset de 10 min) sao das 20:10.
     timeKind: "live",
     webinarId: "w1",
-    zeroMs: Date.parse("2026-11-05T23:00:00.000Z"),
     ...props
   });
 }

@@ -42,6 +42,29 @@ const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc?autoplay=true&muted=true&controls=false";
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
+/**
+ * A caixa de um campo pelas classes do Tailwind (a escala de 4 px; a linha do text-base e 24 px), no celular ou a partir
+ * de lg (o lg: por cima): a altura, a borda, o respiro de cima e de baixo e a altura da linha, em px.
+ */
+function caixaDoCampo(classes, largura) {
+  const valer = largura === "lg" ? [...classes.filter((name) => !name.includes(":")), ...classes.filter((name) => name.startsWith("lg:")).map((name) => name.slice(3))] : classes.filter((name) => !name.includes(":"));
+  const px = (valor) => (valor.startsWith("[") ? Number.parseFloat(valor.slice(1)) : Number(valor) * 4);
+  const caixa = { altura: 0, borda: 0, linha: 0, respiro: 0 };
+  let linhaDoTexto = 0;
+  for (const name of valer) {
+    const [prefixo, ...resto] = name.split("-");
+    const valor = resto.join("-");
+    if (prefixo === "h" && valor) caixa.altura = px(valor);
+    if (name === "border") caixa.borda = 1;
+    if (prefixo === "py" && valor) caixa.respiro = px(valor);
+    if (prefixo === "leading" && valor) caixa.linha = px(valor);
+    if (name === "text-base") linhaDoTexto = 24;
+  }
+  caixa.linha ||= linhaDoTexto;
+  return caixa;
+}
+/** A mensagem da Live ao vivo, com a hora que o servidor gravou (sentAt): a live das 20:00 mais o offset dado. */
+const naLive = (id, offsetMs, extra = {}) => msg(id, { offsetMs, sentAt: new Date(T0 + offsetMs).toISOString(), ...extra });
 
 /** As props do cabecalho V2 (V2-3), como a sala monta: a linha da data e a do celular ja juntas. */
 const HEADER = {
@@ -272,12 +295,12 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
     displayName: "Ana S.",
     error: null,
     messages: [
-      msg("1", { displayName: "Bia C.", offsetMs: 42 * MIN }),
-      msg("2", { displayName: "Marina R.", offsetMs: 41 * MIN, role: "team" }),
-      msg("3", { displayName: "Danilo", role: "host" }),
-      msg("4", { displayName: "Assistente", role: "ai" }),
-      msg("5", { mine: true, offsetMs: 43 * MIN, pending: true }),
-      msg("6", { displayName: "Convidada", role: "guest" })
+      naLive("1", 42 * MIN, { displayName: "Bia C." }),
+      naLive("2", 41 * MIN, { displayName: "Marina R.", role: "team" }),
+      naLive("3", 1000, { displayName: "Danilo", role: "host" }),
+      naLive("4", 1000, { displayName: "Assistente", role: "ai" }),
+      naLive("5", 43 * MIN, { mine: true, pending: true }),
+      naLive("6", 1000, { displayName: "Convidada", role: "guest" })
     ],
     nowMs: T0,
     onRemoveMine: async () => 0,
@@ -286,9 +309,8 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
     pinned: null,
     readOnly: false,
     slowUntilMs: null,
-    // A live: o zero da sessao as 20:00 de Sao Paulo; a hora de cada mensagem e o zero mais o offset dela.
-    timeKind: "live",
-    zeroMs: T0
+    // A live: a hora de cada mensagem e a que o servidor gravou (sentAt), nunca o zero mais o offset.
+    timeKind: "live"
   };
   const html = render(chat.RoomChatPanel, base);
 
@@ -322,14 +344,21 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
   const itens = ["1", "2", "3", "4", "5", "6"].map((id) => chatItem(html, id)).join("");
   assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-\[var\(--accent\)\]/);
 
-  // Na gravada, a hora pelo mesmo zero (a hora marcada); no Replay, nenhuma hora (nem para o leitor de tela).
-  const gravada = render(chat.RoomChatPanel, { ...base, timeKind: "simulated" });
+  // Na live o zero nao entra: o "Comecar para todos" e a ancora mudam o zero sem recalcular o que ja esta na tela.
+  const zeroMudou = render(chat.RoomChatPanel, { ...base, zeroMs: T0 + 7 * MIN });
+  assert.equal(chatMeta(chatItem(zeroMudou, "2")), "Marina R. · Equipe · 20:41", "o zero novo nao desloca a hora");
+  const semHoraGravada = render(chat.RoomChatPanel, { ...base, messages: [msg("2", { displayName: "Marina R.", offsetMs: 41 * MIN, role: "team", sentAt: null })], zeroMs: T0 });
+  assert.equal(chatMeta(chatItem(semHoraGravada, "2")), "Marina R. · Equipe", "sem a hora gravada, sem hora (nunca a conta pelo zero)");
+
+  // Na gravada, a hora marcada mais o offset (a mensagem nao traz a hora gravada); no Replay, nenhuma hora (nem para
+  // o leitor de tela).
+  const gravada = render(chat.RoomChatPanel, { ...base, messages: base.messages.map((message) => ({ ...message, sentAt: null })), timeKind: "simulated", zeroMs: T0 });
   assert.equal(chatMeta(chatItem(gravada, "2")), "Marina R. · Equipe · 20:41");
-  const replay = render(chat.RoomChatPanel, { ...base, phase: "replay", timeKind: "replay" });
+  const replay = render(chat.RoomChatPanel, { ...base, phase: "replay", timeKind: "replay", zeroMs: T0 });
   assert.equal(chatMeta(chatItem(replay, "2")), "Marina R. · Equipe");
   assert.match(chatItem(replay, "2"), /<span class="sr-only">Marina R\., Equipe: <\/span>texto 2/);
-  // Sem o zero (a gaveta antiga, quem nao passa), tambem sem hora.
-  assert.equal(chatMeta(chatItem(render(chat.RoomChatPanel, { ...base, timeKind: undefined, zeroMs: undefined }), "2")), "Marina R. · Equipe");
+  // Sem dizer de que sala e (a prop e obrigatoria no tipo: o typecheck pega quem esquece), tambem sem hora.
+  assert.equal(chatMeta(chatItem(render(chat.RoomChatPanel, { ...base, timeKind: undefined }), "2")), "Marina R. · Equipe");
 });
 
 test("chat: a fixada, a lista em role=log; o menu ⋯ na linha do campo; compositor desligado, so a equipe, modo lento e encerrada", () => {
@@ -362,6 +391,15 @@ test("chat: a fixada, a lista em role=log; o menu ⋯ na linha do campo; composi
   const form = html.slice(html.indexOf("<form"), html.indexOf("</form>"));
   assert.match(form, /<button aria-label="Mais opções" class="[^"]*\bsize-10\b[^"]*"[^>]*aria-expanded="false" aria-haspopup="menu">[\s\S]*<textarea/, "o menu antes do campo");
   assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\bh-11\b[^"]*\btext-base\b[^"]*\blg:text-\[13px\][^"]*"/);
+  // A linha cabe no campo de altura fixa (a caixa conta a borda, box-sizing do Tailwind): borda + respiro + linha <=
+  // altura, no celular e a partir de lg. Com a linha de 24 px nos 44 px sobravam 22 e o Chrome do Windows e do Linux
+  // mostrava a barra de rolar.
+  const campo = form.match(/<textarea [^>]*class="([^"]*)"/)[1].split(/\s+/);
+  for (const largura of ["celular", "lg"]) {
+    const caixa = caixaDoCampo(campo, largura);
+    assert.ok(caixa.altura > 0 && caixa.linha > 0, `${largura}: a altura e a linha vem das classes`);
+    assert.ok(2 * caixa.borda + 2 * caixa.respiro + caixa.linha <= caixa.altura, `${largura}: ${JSON.stringify(caixa)} cabe sem rolar`);
+  }
   assert.match(form, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
   assert.match(form, /<\/textarea><button aria-label="Enviar" class="[^"]*\bsize-11\b[^"]*\bbg-room-active-bg\b[^"]*" title="Enviar" type="submit" disabled="">/);
   assert.doesNotMatch(html.slice(0, html.indexOf("<form")), /Mais opções/, "nada de menu acima da lista");
