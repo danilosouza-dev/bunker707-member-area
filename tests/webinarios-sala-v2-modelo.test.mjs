@@ -8,7 +8,7 @@ import "./support/transpile-tsx.mjs";
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
 // F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
-// tira da direita do video (room-layout-model.ts).
+// tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -161,4 +161,21 @@ test("stageVideoRightPx: a coluna de miniaturas do iframe (213 px) mais o puxado
   assert.equal(layout.stageVideoRightPx({ columnShown: true }), 222, "sem saber do toque, o puxador do mouse");
   assert.equal(layout.stageVideoRightPx({ columnShown: false, touch: true }), 0);
   assert.equal(layout.stageVideoRightPx({ columnShown: false }), 0);
+});
+
+test("liveStageMoment (V2-4): no ar, o Ao vivo; na espera com a sala aberta, Aguardando o apresentador; a capa da espera e a encerrada ja dizem a frase", () => {
+  // O momento que a sala calcula: a fase pelo status (livePhaseOf) e a tela pela regra da sala (liveRoomScreen).
+  const momento = (phase, screen) => layout.liveStageMoment({ phase, screen });
+  for (const screen of TELAS) {
+    assert.equal(momento("live", screen), "on_air", `no ar (${screen}): o Ao vivo com o tempo`);
+    assert.equal(momento("ended", screen), null, `encerrada (${screen}): a capa diz que acabou`);
+  }
+  // Antes do Comecar para todos: o aluno dentro do iframe (a tela aberta, sem capa nenhuma) ve que a live nao comecou.
+  assert.equal(momento("waiting", "open"), "waiting");
+  assert.equal(momento("waiting", "locked"), "waiting", "a sala trancada antes de comecar tambem");
+  assert.equal(momento("waiting", "unconfigured"), "waiting");
+  // A capa da espera (a Sessao de pratica, a sessao que ainda nao abriu) ja diz "Aguardando o apresentador": nada repete.
+  assert.equal(momento("waiting", "waiting"), null);
+  assert.equal(momento(model.livePhaseOf("waiting"), "open"), "waiting", "status waiting, fora da pratica");
+  assert.equal(momento(model.livePhaseOf("scheduled"), "waiting"), null, "agendada: a capa com a contagem");
 });

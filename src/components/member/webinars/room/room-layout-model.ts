@@ -55,6 +55,19 @@ export function roomMobileLine(input: { presenterName: string | null; presentNow
   return parts;
 }
 
+/**
+ * O selo do momento em cima a esquerda do palco da Live ao vivo (V2-4): no ar, "Ao vivo" com o tempo; antes do
+ * "Começar para todos", "Aguardando o apresentador" (o que o cabecalho dizia antes do V2), menos na capa da espera
+ * (`screen` waiting: a Sessao de pratica ou a sessao que ainda nao abriu), que ja diz a mesma frase; encerrada, nada
+ * (a capa diz que acabou).
+ */
+export function liveStageMoment(input: { phase: "ended" | "live" | "waiting"; screen: string }): "on_air" | "waiting" | null {
+  if (input.phase === "live") {
+    return "on_air";
+  }
+  return input.phase === "waiting" && input.screen !== "waiting" ? "waiting" : null;
+}
+
 /** O puxador da coluna de miniaturas do motor: 9 px sem toque e 21 px com toque (jitsi-room-config.ts). */
 const FILMSTRIP_HANDLE_PX = { mouse: 9, touch: 21 } as const;
 

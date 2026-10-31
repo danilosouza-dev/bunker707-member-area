@@ -15,9 +15,13 @@ export const SALA_V2_COPY = {
   selos: {
     apresentador: (nome: string) => `${nome} · Apresentador`
   },
-  /** O botao de tema do cabecalho diz para onde vai: no escuro, "Tema claro"; no claro, "Tema escuro" (V2-12). */
+  /**
+   * O botao de tema do cabecalho diz para onde vai: no escuro, "Tema claro"; no claro, "Tema escuro" (V2-12). Abaixo de
+   * sm, na live, o mesmo botao fica na linha "Tema" do painel Configurações (V2-18).
+   */
   tema: {
     claro: "Tema claro",
-    escuro: "Tema escuro"
+    escuro: "Tema escuro",
+    titulo: "Tema"
   }
 } as const;

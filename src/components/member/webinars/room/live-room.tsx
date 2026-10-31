@@ -44,7 +44,7 @@ import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
-import { roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
+import { liveStageMoment, roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
@@ -54,7 +54,7 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { useRoomTheme } from "./use-room-prefs";
-import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
+import { roomFocusTarget, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
 // da gravada (/webinarios/[slug]/sala?sessao=) e no mesmo dialogo de tela cheia (aria-modal, foco preso, Esc pede
@@ -77,15 +77,17 @@ import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion 
 // Câmera que espera a troca daquele aparelho deixa o botao com o estado real (o que esta no ar), ocupado, e a linha de
 // aviso diz o que acontece quando a troca terminar. A barra que some (a live
 // encerrada, removido ou banido) fecha o painel e as reacoes, e o foco que estava nela vai para a sala (o
-// primeiro [data-room-first-focus], ou o primeiro controle), nunca para o body. No "ver como" da equipe nada e
-// gravado: nem token, nem sinal, nem chat.
+// primeiro [data-room-first-focus] na tela ou, sem ele, o primeiro controle na tela: roomFocusTarget), nunca para o
+// body. No "ver como" da equipe nada e gravado: nem token, nem sinal, nem chat.
 // Redesign V2, F2 (docs/31 V2-11 e V2-12): o tema claro ou escuro da pessoa fica no data-room-theme do dialogo (as
 // superficies fora do video usam os tokens --room-*) e entra no iframe pelo LiveEmbedLook so na montagem (Entrar na
 // sala, Tentar de novo, a volta depois da queda): o motor nao tem comando de tema, e trocar no meio nao remonta.
 // Redesign V2, F3 (docs/31 V2-3 e V2-4): o cabecalho tem a linha da data (com a duracao e o apresentador) e, no
 // celular, "com {apresentador} · {n} assistindo"; "Ao vivo · 00:42:10", "Gravando", quem apresenta e o Assistente
-// ficam no palco (room-stage-badges.tsx), antes da coluna de miniaturas do iframe (--room-video-right). O estado do
-// Assistente e lido uma vez pela sala e desce para o chat e as Perguntas.
+// ficam no palco (room-stage-badges.tsx), antes da coluna de miniaturas do iframe (--room-video-right); antes do
+// "Começar para todos", com a sala aberta, "Aguardando o apresentador" fica no mesmo lugar. O estado do Assistente e
+// lido uma vez pela sala e desce para o chat e as Perguntas. Abaixo de sm o botao de tema sai do cabecalho (V2-18) e o
+// tema fica numa linha do painel Configurações.
 
 type Tab = "chat" | "enquetes" | "participantes" | "perguntas";
 
@@ -311,8 +313,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     barShownRef.current = barShown;
     const root = rootRef.current;
     if (root && barFocusLost({ active: document.activeElement, barShown, barWasShown: was, body: document.body })) {
-      const first = root.querySelector<HTMLElement>("[data-room-first-focus]");
-      (first ?? root.querySelector<HTMLElement>(ROOM_FOCUSABLE))?.focus();
+      roomFocusTarget(root)?.focus();
     }
   }, [barShown]);
   // Dentro da sala de verdade: com a tela fechada (encerrada, removido) o iframe ja desmontou.
@@ -454,6 +455,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
   // A coluna de miniaturas do iframe fica a direita do video ate a F8 medir a largura (docs/31 V2-A5).
   const videoRightPx = stageVideoRightPx({ columnShown: true, touch });
+  // O selo de cima a esquerda do palco: no ar, o tempo; na espera com a sala aberta, "Aguardando o apresentador".
+  const stageMoment = liveStageMoment({ phase, screen });
+
+  /** O tema da sala: o botao do cabecalho (a partir de sm) e a linha Tema do painel Configurações (abaixo de sm). */
+  function toggleTheme() {
+    setTheme(theme === "light" ? "dark" : "light");
+  }
 
   function leave() {
     room.hangUp();
@@ -652,7 +660,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         dateLine={dateLine}
         mobileLine={mobileLine}
         onLeave={askToLeave}
-        onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
+        onToggleTheme={toggleTheme}
         presentNow={presentShown}
         theme={theme}
         title={session.webinar.title}
@@ -697,7 +705,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                 assistantOn={phase === "live" && assistant.state.enabled}
                 presenterName={phase === "live" ? presenterName : null}
                 recording={recording}
-                topLeft={phase === "live" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : null}
+                topLeft={stageMoment === "on_air" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : stageMoment === "waiting" ? { kind: "waiting" } : null}
               />
             ) : null}
             <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
@@ -732,8 +740,10 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   devices={room.devices}
                   onChoose={chooseDevice}
                   onClose={() => closeSettings(true)}
+                  onToggleTheme={toggleTheme}
                   sections={deviceSettings}
                   showMedia={ourBar}
+                  theme={theme}
                 />
               }
               settingsOpen={settingsShown}

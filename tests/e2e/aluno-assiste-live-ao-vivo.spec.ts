@@ -38,7 +38,8 @@ import {
 // (nunca "nenhum aparelho"); na volta depois de uma queda, a Câmera tocada no meio da troca da camera desligada espera a
 // faixa da troca, e o botao que espera mostra o estado real com o circulo girando e a frase do que vem.
 // O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
-// recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe.
+// recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
+// cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -589,6 +590,16 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await configuracoes.dispatchEvent("click");
   await expect(painel).toHaveCount(0);
   await expect(configuracoes).toBeFocused();
+  // Abaixo de sm o cabecalho nao tem o botao de tema (V2-18): o tema fica na linha Tema do painel, com o mesmo nome.
+  const tema = WEBINAR_COPY.salaV2.tema;
+  await expect(dialogo.locator("header").first().getByRole("button", { exact: true, name: tema.claro })).toBeHidden();
+  await configuracoes.click();
+  await painel.getByRole("button", { exact: true, name: tema.claro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+  await painel.getByRole("button", { exact: true, name: tema.escuro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar }).click();
+  await expect(painel).toHaveCount(0);
   await page.setViewportSize({ height: 740, width: 375 });
 
   // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "com

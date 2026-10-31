@@ -9,7 +9,7 @@ import { ASSISTANT_WAIT_MS, assistantRepliesToMe, mentionsAssistant, studentAtAs
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type DisplayNameMode, type SimulatedPhase } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
-import { useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
+import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
 import { RoomBadge, RoomButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
@@ -175,7 +175,7 @@ function composerHint(state: ComposerState, phase: SimulatedPhase | "replay"): s
 export function RoomChatPanel(props: RoomChatPanelProps) {
   const { aboveComposer = null, assistant: sharedAssistant, busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, sessionId = null, slowUntilMs, webinarId = null } = props;
   const copy = WEBINAR_COPY.sala;
-  const ownAssistant = useRoomAssistant({ enabled: !sharedAssistant && !readOnly, sessionId, webinarId });
+  const ownAssistant = useRoomAssistant({ enabled: ownAssistantEnabled({ readOnly, shared: sharedAssistant }), sessionId, webinarId });
   const assistant = sharedAssistant ?? ownAssistant;
   const repliesToMe = useMemo(() => assistantRepliesToMe(messages), [messages]);
   const [assistantCalls, setAssistantCalls] = useState<number[]>([]);

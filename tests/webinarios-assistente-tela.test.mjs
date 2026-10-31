@@ -38,6 +38,7 @@ const { RoomQuestionItem } = await import("../src/components/member/webinars/roo
 const { RoomStageBadges } = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const { AssistantHandoff } = await import("../src/components/member/webinars/room/assistant/assistant-handoff.tsx");
 const { AssistantHint, assistantHintText } = await import("../src/components/member/webinars/room/assistant/assistant-hint.tsx");
+const { ownAssistantEnabled } = await import("../src/components/member/webinars/room/assistant/use-room-assistant.ts");
 const { AttendancePanel } = await import("../src/components/admin/v2/communication/webinars/assistant/attendance-panel.tsx");
 const { AssistantCardBody } = await import("../src/components/admin/v2/communication/webinars/assistant-card.tsx");
 const editorModel = await import("../src/components/admin/v2/communication/webinars/assistant/assistant-editor-model.ts");
@@ -118,6 +119,20 @@ test("o Assistente lido pela sala (docs/31 V2-4): o chat usa o estado que a sala
   assert.equal(count(comSala, /data-testid="assistant-handoff"/g), 1, "o Falar com a equipe continua na resposta a mim");
   // Desligado na sala: nada de dica, mesmo com o painel podendo ler.
   assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } } }), /data-assistant-hint="call"/);
+});
+
+test("ownAssistantEnabled: o chat e a aba Perguntas so leem o Assistente sozinhos sem o estado da sala e fora do so leitura (nada de um segundo pedido por minuto)", () => {
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  // Com o estado da sala (as duas salas passam o dela, docs/31 V2-4): a leitura propria desligada, em qualquer caso.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: daSala }), false, "o chat com a sala");
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: daSala }), false, "a aba Perguntas com a sala");
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: { ...daSala, state: { ...daSala.state, enabled: false } } }), false, "o Assistente desligado na sala tambem conta como estado");
+  // Sem a sala (o chat solto, os paineis antigos): o painel le, menos no so leitura e com a aba desligada.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: null }), true);
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: true, shared: undefined }), false, "no 'ver como', nada lido");
+  assert.equal(ownAssistantEnabled({ enabled: false, readOnly: false, shared: undefined }), false, "a aba Perguntas desligada");
 });
 
 test("o selo Assistente no palco (docs/31 V2-4): aparece com o Assistente ligado, embaixo a direita antes da coluna de miniaturas, so a partir de lg; some sem ele", () => {

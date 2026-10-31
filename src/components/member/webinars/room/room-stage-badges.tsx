@@ -7,7 +7,8 @@ import { RoomElapsed } from "./room-header";
 
 // Os selos do palco (docs/31 V2-4), por cima do video, no lugar dos selos do cabecalho: em cima a esquerda, o selo do
 // momento ("Ao vivo · 00:42:10" em vermelho na Live ao vivo; na gravada, a regra D10 do docs/30 §1.6: "Ao vivo" so com
-// a decisao da equipe, senao "Sessão das 20:00" com o tempo; "Replay" no Replay) e, ao lado, "Gravando" enquanto o
+// a decisao da equipe, senao "Sessão das 20:00" com o tempo; "Replay" no Replay; na Live ao vivo antes de comecar, com
+// a sala aberta, "Aguardando o apresentador", como dizia o cabecalho antes do V2) e, ao lado, "Gravando" enquanto o
 // gravador grava; embaixo a esquerda, "{nome} · Apresentador"; embaixo a direita, "Assistente" com o Assistente de IA
 // ligado, so a partir de lg (no celular o canto e do Modo cinema) e sempre antes da coluna de miniaturas do iframe
 // (--room-video-right, room-layout-model.ts). Pilulas de 32 px (26 px abaixo de lg); no celular o "Ao vivo" fica so com
@@ -23,7 +24,9 @@ export type RoomStageTopLeft =
   | { getOffsetMs?: () => number; kind: "recorded_on_air" }
   /** A Live gravada sem o "Ao vivo": "Sessão das 20:00" e, com a sessao no ar, o tempo. */
   | { getOffsetMs?: () => number; kind: "session"; timeLabel: string }
-  | { kind: "replay" };
+  | { kind: "replay" }
+  /** A Live ao vivo antes do "Começar para todos", com a sala aberta: "Aguardando o apresentador", neutro sobre o video. */
+  | { kind: "waiting" };
 
 export type RoomStageBadgesProps = {
   /** O Assistente de IA ligado na sessao (o estado lido pela sala, useRoomAssistant). */
@@ -80,6 +83,12 @@ function TopLeft({ topLeft }: { topLeft: RoomStageTopLeft }) {
       );
     case "replay":
       return <span className={cn(PILL, ON_VIDEO)}>{WEBINAR_COPY.aluno.selo.replay}</span>;
+    case "waiting":
+      return (
+        <span className={cn(PILL, ON_VIDEO)} data-room-badge="waiting">
+          {WEBINAR_COPY.aluno.aguardando}
+        </span>
+      );
   }
 }
 

@@ -37,14 +37,16 @@ export function RoomReactionBar({ disabled, onReact }: { disabled: boolean; onRe
 
 /**
  * As bolhas no canto do palco: sobem 3 s (motion-safe) ou ficam paradas (motion-reduce); o excesso vira um contador
- * discreto. No palco (`stage`, o padrao) elas nascem acima da linha dos selos de baixo (docs/31 V2-4); no vertical, o
- * lugar delas ja fica acima do chat e continua como era.
+ * discreto. No palco (`stage`, o padrao) elas nascem acima da linha dos selos de baixo (docs/31 V2-4), com a coluna
+ * nunca mais alta que o palco acima dessa linha (a 375 px o palco 16:9 tem cerca de 211 px: os 160 px da coluna a 56
+ * px da base passariam do topo dele e pintariam por cima do cabecalho); no vertical, o lugar delas ja fica acima do
+ * chat e continua como era.
  */
 export function RoomReactionBubbles({ bubbles, layout = "stage", overflow }: { bubbles: readonly ReactionBubble[]; layout?: "stage" | "vertical"; overflow: number }) {
   return (
     <div
       aria-hidden="true"
-      className={cn("pointer-events-none absolute right-3 flex h-40 w-16 flex-col-reverse items-center overflow-hidden", layout === "vertical" ? "bottom-3" : "bottom-14")}
+      className={cn("pointer-events-none absolute right-3 flex h-40 w-16 flex-col-reverse items-center overflow-hidden", layout === "vertical" ? "bottom-3" : "bottom-14 max-h-[calc(100%-3.5rem)]")}
       data-testid="room-reactions"
     >
       {bubbles.map((bubble, index) => (

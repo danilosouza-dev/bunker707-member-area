@@ -8,7 +8,7 @@ import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint } from "./assistant/assistant-hint";
-import { useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
+import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 import { RoomBadge, RoomButton } from "./room-ui";
@@ -113,7 +113,7 @@ export function RoomQuestionsTab({
   webinarId: string;
 }) {
   const copy = WEBINAR_COPY.sala;
-  const ownAssistant = useRoomAssistant({ enabled: !sharedAssistant && enabled && !readOnly, sessionId, webinarId });
+  const ownAssistant = useRoomAssistant({ enabled: ownAssistantEnabled({ enabled, readOnly, shared: sharedAssistant }), sessionId, webinarId });
   const assistant = sharedAssistant ?? ownAssistant;
   const [questions, setQuestions] = useState<RoomQuestion[]>([]);
   const [waiting, setWaiting] = useState<string | null>(null);

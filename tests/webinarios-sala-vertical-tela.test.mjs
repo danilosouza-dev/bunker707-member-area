@@ -425,7 +425,10 @@ test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba o
   const sairDoTopo = controle("Sair do topo");
   const raiz = ({ dentro = [], primeiro = null, topo = sairDoTopo } = {}) => ({
     contains: (node) => dentro.includes(node),
-    querySelector: (selector) => (selector === "[data-room-first-focus]" ? primeiro : selector === room.ROOM_FOCUSABLE ? topo : null)
+    querySelectorAll: (selector) => {
+      const achado = selector === "[data-room-first-focus]" ? primeiro : selector === room.ROOM_FOCUSABLE ? topo : null;
+      return achado ? [achado] : [];
+    }
   });
 
   // A gaveta (e o compositor com o botao dela) saiu com o foco no campo: o foco caiu no body e volta para o topo da sala,
@@ -440,6 +443,16 @@ test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba o
   assert.equal(room.refocusRoom(null, body), false);
   assert.equal(room.refocusRoom(raiz({ topo: null }), body), false, "sem controle nenhum, nada a focar");
   assert.equal(focados.length, 2);
+
+  // Abaixo de sm o primeiro controle do topo e o botao de tema, escondido pela largura (display:none, sem offsetParent):
+  // o focus() nele nao faz nada e o foco ficaria no body. Ele fica de fora, e o foco vai para o Sair, o seguinte na tela.
+  const temaEscondido = { ...controle("Tema claro, escondido"), offsetParent: null };
+  const sairNaTela = { ...controle("Sair do topo, na tela"), offsetParent: {} };
+  const abaixoDeSm = { contains: () => false, querySelectorAll: (selector) => (selector === room.ROOM_FOCUSABLE ? [temaEscondido, sairNaTela] : []) };
+  assert.equal(room.refocusRoom(abaixoDeSm, body), true);
+  assert.deepEqual(focados.at(-1), "Sair do topo, na tela", "o botao escondido nunca recebe o foco");
+  assert.equal(focados.includes("Tema claro, escondido"), false);
+  assert.equal(room.refocusRoom({ contains: () => false, querySelectorAll: () => [temaEscondido] }, body), false, "so com controles escondidos, nada a focar");
 
   // A sala chama a volta do foco no mesmo quadro em que fica indisponivel (antes da proxima tecla); sem Minimizar (V2-2)
   // a sala esta sempre aberta.

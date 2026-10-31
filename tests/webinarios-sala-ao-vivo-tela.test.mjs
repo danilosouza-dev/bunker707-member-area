@@ -427,6 +427,25 @@ test("antes de abrir: o aluno ve Aguardando o apresentador com a contagem (o cha
   const espera = sala({ payload: payload({ live: { startedAt: null, status: "waiting" }, session: { startedAt: null, status: "waiting" } }) });
   assert.match(espera, />Entrar na sala</, "na espera o aluno ja recebe o token");
   assert.match(espera, /aria-label="Escreva uma mensagem"/, "e o chat aceita");
+
+  // Na espera fora da Sessao de pratica a sala abre (sem capa depois de entrar): o selo "Aguardando o apresentador" fica
+  // no palco, em cima a esquerda, neutro sobre o video, onde o "Ao vivo" aparece quando a live comeca (V2-4).
+  const palcoDe = (html) => html.slice(html.indexOf("data-lesson-player-stage"), html.indexOf('data-testid="live-controls"'));
+  const cabecalhoDe = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
+  assert.match(espera, /data-room-screen="open"/);
+  assert.match(palcoDe(espera), /data-room-badges="top"><span class="[^"]*bg-black\/60[^"]*" data-room-badge="waiting">Aguardando o apresentador<\/span><\/div>/);
+  assert.doesNotMatch(cabecalhoDe(espera), /Aguardando o apresentador/, "nada no cabecalho");
+  assert.doesNotMatch(palcoDe(espera), /room-on-air|data-room-badge="presenter"/, "sem o Ao vivo e sem quem apresenta antes de comecar");
+  // Na capa da espera (a sessao que ainda nao abriu, a Sessao de pratica) a frase ja esta na capa: o selo nao repete.
+  assert.equal((aluno.match(/Aguardando o apresentador/g) ?? []).length, 1, "so a capa");
+  assert.doesNotMatch(aluno, /data-room-badge="waiting"/);
+  const pratica = sala({ payload: payload({ live: { practice: true, startedAt: null, status: "waiting" }, session: { startedAt: null, status: "waiting" } }) });
+  assert.match(pratica, /data-room-screen="waiting"/);
+  assert.doesNotMatch(pratica, /data-room-badge="waiting"/);
+  // A equipe na Sessao de pratica entra (a tela aberta) e tambem ve que a live ainda nao comecou para todos.
+  assert.match(sala({ payload: payload({ live: { practice: true, startedAt: null, status: "waiting" }, session: { startedAt: null, status: "waiting" } }), staff: true }), /data-room-badge="waiting">Aguardando o apresentador</);
+  // No ar, o selo da espera sai e o Ao vivo entra no lugar dele.
+  assert.doesNotMatch(sala(), /data-room-badge="waiting"/);
 });
 
 test("a sala trancada, em breve e o 'ver como': a frase no palco, o chat segue; no 'ver como' Entrar na sala fica desligado", () => {

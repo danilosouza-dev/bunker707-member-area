@@ -1,11 +1,12 @@
 "use client";
 
-import { ImagePlus, X } from "lucide-react";
+import { ImagePlus, Moon, Sun, X } from "lucide-react";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import type { UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import type { DeviceKind, DeviceOption, DeviceSettings, ReceiveQuality } from "@/lib/jitsi-device-settings";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { RoomTheme } from "@/lib/webinar-room-prefs";
 import { LIVE_ROOM_COPY } from "./live-room-model";
 
 // O painel Configurações da sala ao vivo (docs/30 §1.3, §8.5, §9 e D4), aberto pelo botao Configurações da nossa barra
@@ -25,7 +26,9 @@ import { LIVE_ROOM_COPY } from "./live-room-model";
 // tem a barra do iframe, que tambem muda ruido, fundo e espelho: para ele, as mesmas acoes sem estado do card do console
 // (Ligar / Desligar a redução de ruído, Inverter a minha imagem, Desfocar o fundo / Tirar o efeito do fundo). Os campos tem 44 px; o nome de cada lista e o titulo da secao;
 // o painel encolhe e rola por dentro numa coluna curta; nada aqui fala com a rede e nenhuma frase e escrita direto.
-// Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala.
+// Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala. F3 (V2-12 e V2-18): abaixo de sm o botao
+// de tema sai do cabecalho (nao ha largura) e a linha Tema entra no topo do painel, com o mesmo nome do botao ("Tema
+// claro" no escuro, "Tema escuro" no claro); a partir de sm ela some, porque o cabecalho tem o botao.
 
 /** O que o painel le e chama do useJitsiDevices (os testes passam um objeto com o mesmo formato). */
 export type LiveSettingsDevices = Pick<
@@ -41,9 +44,13 @@ export type LiveSettingsProps = {
   onChoose: (kind: DeviceKind, option: DeviceOption) => void;
   /** Fechar: o painel fecha e o foco volta ao botao Configurações da barra. */
   onClose?: () => void;
+  /** A sala ao vivo: troca o tema (com `theme`, a linha Tema aparece abaixo de sm). */
+  onToggleTheme?: () => void;
   sections: DeviceSettings;
   /** Aluno e Equipe: o atalho da mao e os efeitos com estado (host e co-apresentador usam a barra do iframe). */
   showMedia: boolean;
+  /** O tema da sala agora (a linha Tema diz para qual vai). */
+  theme?: RoomTheme;
 };
 
 const NOTE = "text-xs leading-5 text-room-fg-subtle";
@@ -60,12 +67,13 @@ export const LIVE_SETTINGS_SECTION_IDS = {
   camera: "live-settings-camera",
   microfone: "live-settings-microfone",
   qualidade: "live-settings-qualidade",
-  som: "live-settings-som"
+  som: "live-settings-som",
+  tema: "live-settings-tema"
 } as const;
 
-function Section(props: { children: ReactNode; id: string; title: string }) {
+function Section(props: { children: ReactNode; className?: string; id: string; title: string }) {
   return (
-    <section aria-labelledby={props.id} className="min-w-0 space-y-2">
+    <section aria-labelledby={props.id} className={cn("min-w-0 space-y-2", props.className)}>
       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle" id={props.id}>
         {props.title}
       </h3>
@@ -132,7 +140,7 @@ function Check(props: { checked: boolean; label: string; onChange: (on: boolean)
   );
 }
 
-export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sections, showMedia }: LiveSettingsProps) {
+export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onToggleTheme, sections, showMedia, theme }: LiveSettingsProps) {
   const copy = WEBINAR_COPY.aoVivo;
   const config = copy.config;
   const ids = LIVE_SETTINGS_SECTION_IDS;
@@ -183,6 +191,15 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
       ) : null}
       {sections.aguardandoSala ? <p className={cn(NOTE, "mb-3")}>{config.foraDaSala}</p> : null}
       <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        {onToggleTheme && theme ? (
+          <Section className="sm:hidden" id={ids.tema} title={WEBINAR_COPY.salaV2.tema.titulo}>
+            <button className={cn(PANEL_BUTTON, FOCUS)} onClick={onToggleTheme} type="button">
+              {theme === "light" ? <Moon aria-hidden="true" className="size-4" /> : <Sun aria-hidden="true" className="size-4" />}
+              {theme === "light" ? WEBINAR_COPY.salaV2.tema.escuro : WEBINAR_COPY.salaV2.tema.claro}
+            </button>
+          </Section>
+        ) : null}
+
         {sections.volume !== "oculta" ? (
           <Section id={ids.som} title={copy.som}>
             <div className="flex items-center gap-3">

@@ -99,7 +99,7 @@ test("a sala gravada monta o cabecalho V2 com os dados dela: a data e a hora de 
   assert.doesNotMatch(encerrada, /assistindo/, "encerrada, sem contador");
 });
 
-test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay; quem apresenta embaixo a esquerda", () => {
+test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay sem selo embaixo; quem apresenta embaixo a esquerda", () => {
   const props = { coverUrl: null, payload: payload(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
   const caixa = (html) => {
     const inicio = html.indexOf('data-room-slot="stage-box"');
@@ -123,7 +123,9 @@ test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da
 
   const replay = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
   assert.match(replay, /data-room-badges="top"><span class="[^"]*">Replay<\/span><\/div>/);
-  assert.match(replay, /data-room-badge="presenter"/);
+  // No Replay a barra de controles da Bunny ocupa a base do video (play, tempo, tela cheia): nenhum selo embaixo, nem
+  // quem apresenta nem o Assistente, para nao cobrir os controles.
+  assert.doesNotMatch(replay, /data-room-badge="presenter"|data-room-badge="assistant"/, "no Replay, nada embaixo");
 
   // Fora do acesso (D41) e no vertical, nenhum selo no palco (o vertical tem o topo dele).
   assert.doesNotMatch(render(room.WebinarRoom, { ...props, design: "vertical" }), /data-room-badges|data-room-badge=/);
@@ -408,7 +410,11 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   );
   // F3 (V2-4): a caixa do palco leva a margem da coluna de miniaturas (0 na gravada) e os selos vem logo depois do palco.
   assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
-  assert.match(html, /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute right-3 [^"]*bottom-14"/, "as bolhas no canto do palco, acima da linha dos selos de baixo");
+  assert.match(
+    html,
+    /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute right-3 [^"]*bottom-14 max-h-\[calc\(100%-3\.5rem\)\]"/,
+    "as bolhas no canto do palco, acima da linha dos selos de baixo, sem passar do topo de um palco baixo (375 px)"
+  );
   assert.match(html, /<div class="contents" data-room-slot="sales">/);
   assert.match(html, /<div class="contents" data-room-slot="dock"><div class="contents" data-room-slot="offer"><p aria-live="polite" class="sr-only" data-room-offer-announce="">/, "o card da Oferta no canto do palco (layout stage)");
   assert.match(html, /<header class="flex h-14/, "o cabecalho V2 (V2-3)");

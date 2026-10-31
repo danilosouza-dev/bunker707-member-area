@@ -16,9 +16,10 @@ import { RoomButton, RoomIconButton } from "./room-ui";
 // titulo em 22/800 com reticencias e, embaixo, a linha da data ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo
 // Souza", room-layout-model.ts); a direita, "{n} assistindo", um traco e o botao de tema. Abaixo de lg: o titulo em
 // 15/800, a linha "com Danilo Souza · 128 assistindo", o tema a partir de sm (abaixo de sm o cabecalho nao tem largura,
-// V2-18) e o Sair. Sem selos: "Ao vivo", "Gravando", "Sessão das 20:00" e "Replay" ficam no palco (V2-4,
-// room-stage-badges.tsx). "{n} assistindo" (o numero real, ou o somado da Simulacao) some no Replay e com a sessao
-// encerrada: a sala passa `presentNow` nulo. As cores vem dos tokens do tema da sala (docs/31 V2-11); o Sair fica no
+// V2-18, e na live o tema fica na linha Tema do painel Configurações) e o Sair. Sem selos: "Ao vivo", "Gravando",
+// "Sessão das 20:00", "Replay" e "Aguardando o apresentador" ficam no palco (V2-4, room-stage-badges.tsx). "{n}
+// assistindo" (o numero real, ou o somado da Simulacao) some no Replay e com a sessao encerrada: a sala passa
+// `presentNow` nulo. As cores vem dos tokens do tema da sala (docs/31 V2-11); o Sair fica no
 // acento, a unica cor da marca fora do video (V2-11).
 
 export type RoomHeaderProps = {

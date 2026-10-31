@@ -110,16 +110,38 @@ export function useRoomDialogLock(rootRef: RefObject<HTMLElement | null>, active
   }, [active, rootRef]);
 }
 
+/** Na tela: um controle escondido pela largura (display:none, como o tema abaixo de sm) nao tem offsetParent. */
+const focusShown = (element: HTMLElement) => element.offsetParent !== null;
+
+/**
+ * Para onde o foco volta quando a peca que o tinha saiu: o primeiro [data-room-first-focus] que esta na tela ou, sem
+ * ele, o primeiro controle da sala que esta na tela. Um controle escondido pela largura (o botao de tema abaixo de sm,
+ * docs/31 V2-18) ignora o focus() e deixaria o foco no body: fica de fora, como na trava do Tab (trapRoomFocus).
+ */
+export function roomFocusTarget(root: Pick<HTMLElement, "querySelectorAll"> | null): HTMLElement | null {
+  if (!root) {
+    return null;
+  }
+  for (const selector of ["[data-room-first-focus]", ROOM_FOCUSABLE]) {
+    const target = Array.from(root.querySelectorAll<HTMLElement>(selector)).find(focusShown);
+    if (target) {
+      return target;
+    }
+  }
+  return null;
+}
+
 /**
  * O foco caiu fora da sala porque a peca que o tinha saiu (o painel, a gaveta ou o compositor quando a sala fica
  * indisponivel, D41): volta para o primeiro [data-room-first-focus] ou, sem ele, para o primeiro controle da sala (o
- * topo), e nunca fica no body, onde o Esc e a trava do Tab deixariam de valer. Devolve se moveu o foco.
+ * topo), os dois so entre os que estao na tela (roomFocusTarget), e nunca fica no body, onde o Esc e a trava do Tab
+ * deixariam de valer. Devolve se moveu o foco.
  */
-export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelector"> | null, active: Element | null): boolean {
+export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null, active: Element | null): boolean {
   if (!root || (active !== null && root.contains(active))) {
     return false;
   }
-  const target = root.querySelector<HTMLElement>("[data-room-first-focus]") ?? root.querySelector<HTMLElement>(ROOM_FOCUSABLE);
+  const target = roomFocusTarget(root);
   if (!target) {
     return false;
   }
@@ -132,7 +154,7 @@ export function trapRoomFocus(event: Pick<ReactKeyboardEvent, "key" | "preventDe
   if (event.key !== "Tab" || !root) {
     return;
   }
-  const focusable = Array.from(root.querySelectorAll<HTMLElement>(ROOM_FOCUSABLE)).filter((element) => element.offsetParent !== null || element === document.activeElement);
+  const focusable = Array.from(root.querySelectorAll<HTMLElement>(ROOM_FOCUSABLE)).filter((element) => focusShown(element) || element === document.activeElement);
   if (focusable.length === 0) {
     return;
   }
@@ -377,6 +399,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const stageVars = { "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px` } as CSSProperties;
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
   const writable = (live || phase === "replay") && !unavailable;
+  // Os selos de baixo (quem apresenta e o Assistente) so com o video no ar e sem a barra de controles da Bunny: no
+  // Replay ela ocupa a base do video (play, tempo, tela cheia), e o selo ficaria por cima dela.
+  const bottomBadges = writable && kind !== "replay";
 
   // O palco e montado uma vez e fica sempre no mesmo lugar (corpo > coluna > caixa): girar so troca classes.
   const stage = (
@@ -504,8 +529,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {stage}
             {vertical || unavailable ? null : (
               <RoomStageBadges
-                assistantOn={writable && assistant.state.enabled}
-                presenterName={writable ? presenterName : null}
+                assistantOn={bottomBadges && assistant.state.enabled}
+                presenterName={bottomBadges ? presenterName : null}
                 recording={false}
                 topLeft={topLeft}
               />
