@@ -360,14 +360,11 @@ test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes d
   assert.match(room, /function closeSettings\(focusButton = false\) \{[\s\S]*?returnFocusFrom\(LIVE_SETTINGS_ID\);[\s\S]*?setSettingsOpen\(false\);/);
 });
 
-test("no ar: 'Ao vivo · 00:42:10', {n} assistindo, Gravando, Entrar na sala no palco 16:9 com os atributos do sinal de midia, as quatro abas e o painel a direita", () => {
+test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (V2-4); o cabecalho com {n} assistindo e a linha da data (V2-3); Entrar na sala, as quatro abas e o painel a direita", () => {
   const html = sala({ payload: payload({ live: { recording: true } }) });
   assert.match(html, /data-room-kind="live"/);
   assert.match(html, /data-room-phase="live"/);
   assert.match(html, /data-room-screen="open"/);
-  assert.match(html, /Ao vivo · 00:42:10/);
-  assert.match(html, /7 assistindo/);
-  assert.match(html, />Gravando</);
   assert.match(html, />Entrar na sala</);
   assert.match(html, /aria-label="Vídeo da live"[^>]*data-lesson-id="webinar:cccccccc-0000-4000-8000-000000000002" data-lesson-player-kind="iframe" data-lesson-player-stage/);
   assert.match(html, /data-live-frame/, "o lugar do iframe");
@@ -379,17 +376,34 @@ test("no ar: 'Ao vivo · 00:42:10', {n} assistindo, Gravando, Entrar na sala no 
   assert.match(html, /lg:w-\[360px\]/);
   assert.match(html, /order-last[^"]*lg:order-first/, "no celular as abas ficam embaixo (a gaveta)");
   assert.match(html, /aria-label="Escreva uma mensagem"/);
-  assert.doesNotMatch(sala(), />Gravando</, "sem gravador, sem o selo");
 
-  // A 375 px o cabecalho cabe com a marca, o tempo e o Gravando: no celular, so o tempo (a frase inteira no title e
-  // para o leitor de tela) e so o ponto vermelho (a palavra para o leitor de tela).
-  assert.match(html, /title="Ao vivo · 00:42:10"/);
-  assert.match(html, /<span aria-hidden="true" class="sm:hidden">00:42:10<\/span>/);
-  assert.match(html, /<span class="sr-only sm:hidden">Ao vivo · 00:42:10<\/span>/);
-  assert.match(html, /title="Gravando"/);
-  assert.match(html, /<span class="max-sm:sr-only" data-testid="live-recording">Gravando<\/span>/);
-  assert.match(html, /<img[^>]*class="[^"]*\blg:hidden\b[^"]*" data-room-brand="icon"/, "o Icone da escola abaixo de lg");
-  assert.match(html, /class="hidden shrink-0 items-center gap-3 lg:flex" data-room-brand="logo"/, "a logo so a partir de lg (o ponto em que a sala vira computador)");
+  // Os selos saem do cabecalho e vao para o palco (V2-4): Ao vivo e Gravando em cima a esquerda, quem apresenta embaixo.
+  const cabecalho = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
+  const palcoInicio = html.indexOf("data-lesson-player-stage");
+  // O palco vai do atributo do sinal de midia ate a nossa barra (o filho seguinte da coluna do palco).
+  const palco = html.slice(palcoInicio, html.indexOf('data-testid="live-controls"'));
+  assert.ok(palcoInicio > 0 && palco.length > 0, "o palco");
+  assert.doesNotMatch(cabecalho, /Ao vivo|Gravando|room-on-air|live-recording/, "nenhum selo no cabecalho");
+  assert.match(palco, /data-testid="room-on-air" title="Ao vivo · 00:42:10"/, "o Ao vivo no palco, a frase inteira no title");
+  assert.match(palco, /<span class="hidden sm:inline">Ao vivo · 00:42:10<\/span>/, "no computador, a frase inteira");
+  assert.match(palco, /<span aria-hidden="true" class="sm:hidden">00:42:10<\/span>/, "no celular, so o tempo");
+  assert.match(palco, /<span class="sr-only sm:hidden">Ao vivo · 00:42:10<\/span>/, "e o leitor de tela ouve a frase");
+  assert.match(palco, /data-testid="live-recording" title="Gravando">[\s\S]*?Gravando<\/span>/, "o Gravando no palco");
+  assert.match(palco, /data-room-badge="presenter"[\s\S]*?>Danilo S\. · Apresentador</, "quem apresenta, embaixo a esquerda");
+  assert.ok(palco.indexOf('data-testid="room-on-air"') < palco.indexOf('data-testid="live-recording"'), "o Gravando ao lado do Ao vivo");
+  // A coluna de miniaturas do iframe (213 px e o puxador de 9 px sem toque) ate a F8 medir: o selo do Assistente para antes.
+  assert.match(html, /data-room-stage="idle" role="region" style="--room-video-right:222px"/);
+  assert.doesNotMatch(html, /data-room-badge="assistant"/, "o Assistente desligado (o servidor ainda nao leu o estado)");
+  assert.doesNotMatch(sala(), /Gravando/, "sem gravador, sem o selo");
+
+  // O cabecalho (V2-3): o titulo, a linha da data com a duracao e quem apresenta, "{n} assistindo" e, no celular, a linha
+  // com quem apresenta e quantos assistem.
+  assert.match(cabecalho, /<h1 [^>]*>Aula de IA<\/h1>/);
+  assert.match(cabecalho, /data-room-line="date">Quinta, 5 de novembro · 19:15 · 60 min · com Danilo S\.<\/p>/);
+  assert.match(cabecalho, /data-testid="room-mobile-line">com Danilo S\. · 7 assistindo<\/p>/);
+  assert.match(cabecalho, /data-testid="room-present">[\s\S]*?7 assistindo<\/p>/);
+  assert.match(cabecalho, /class="hidden shrink-0 items-center lg:flex" data-room-brand="logo"/, "a logo so a partir de lg (o ponto em que a sala vira computador)");
+  assert.doesNotMatch(cabecalho, /data-room-brand="icon"/, "abaixo de lg, sem marca: o titulo tem a largura");
 
   const comEnquete = sala({ payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }) });
   assert.match(comEnquete, /role="tab"[^>]*>Enquetes</);
@@ -443,7 +457,10 @@ test("encerrada: o palco diz que acabou e, com o replay, Assistir o replay; a ba
   assert.match(html, /Essa live acabou\. O replay fica pronto em algumas horas\./);
   assert.doesNotMatch(html, /Assistir o replay/);
   assert.doesNotMatch(html, /data-testid="live-controls"/);
-  assert.match(html, /Encerrada/);
+  // Redesign V2, F3 (V2-3 e V2-4): o cabecalho nao tem selo; o fim fica no palco, sem "Ao vivo", sem contador.
+  const cabecalho = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
+  assert.doesNotMatch(cabecalho, /Encerrada|Ao vivo/);
+  assert.doesNotMatch(html, /assistindo|data-testid="room-on-air"|data-room-badge=/, "encerrada: sem contador e sem selos no palco");
 
   const comReplay = sala({ payload: { ...fim, webinar: { ...fim.webinar, replaySessionId: "dddddddd-0000-4000-8000-000000000009" } } });
   assert.match(comReplay, /href="\/webinarios\/aula-de-ia\/sala\?sessao=dddddddd-0000-4000-8000-000000000009"[^>]*>Assistir o replay</);

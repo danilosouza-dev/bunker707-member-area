@@ -11,6 +11,8 @@ import type { RoomSimulationState } from "./use-room-simulation";
 // na sala vertical). Os dois sao so visuais (aria-hidden): o leitor de tela nunca ouve cada entrada, e os avisos de
 // venda chegam por uma regiao aria-live="polite" no maximo um por minuto. Com prefers-reduced-motion, nada desliza.
 // Sem nada ligado na sessao, nada aparece. webinar-room.tsx monta os dois; o estado vem de use-room-simulation.ts.
+// Redesign V2, F3 (docs/31 V2-4): no palco, o aviso de venda fica abaixo da linha dos selos de cima (o canto de cima a
+// esquerda e do "Ao vivo" e do "Gravando").
 
 const COPY = WEBINAR_COPY.simulacao.aluno;
 
@@ -64,7 +66,7 @@ export function RoomSimulationSales({ layout, offsetMs, reducedMotion, state }: 
           aria-hidden="true"
           className={cn(
             "pointer-events-none absolute z-10 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-[12px] border border-white/15 bg-black/75 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm",
-            layout === "vertical" ? "inset-x-0 top-14 mx-auto w-fit" : "left-3 top-3",
+            layout === "vertical" ? "inset-x-0 top-14 mx-auto w-fit" : "left-4 top-14",
             !reducedMotion && "animate-in fade-in-0 slide-in-from-top-2 duration-300"
           )}
           data-room-simulation-sale=""

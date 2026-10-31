@@ -1,52 +1,38 @@
 "use client";
 
-import { Moon, Radio, Sun, Users, X } from "lucide-react";
+import { LogOut, Moon, Sun, Users } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState, type ReactNode } from "react";
-import { usePlatformLogoImage, usePlatformSchoolIcon } from "@/components/platform-branding";
+import { useEffect, useState } from "react";
+import { usePlatformLogoImage } from "@/components/platform-branding";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { offsetLabel } from "@/lib/webinar-room-client";
 import type { RoomTheme } from "@/lib/webinar-room-prefs";
-import { cn } from "@/lib/utils";
-import { isDefaultSchoolIcon } from "@/server/communications/message-meta";
-import { RoomBadge, RoomIconButton } from "./room-ui";
+import { RoomButton, RoomIconButton } from "./room-ui";
 
-// O cabecalho da Sala (docs/30 §1.3 e §1.6): titulo, o selo "Ao vivo" com o tempo no ar so quando a equipe ligou
-// na Simulacao da sessao (D10; senao "Sessao das 20:00" e o tempo decorrido), o numero real de presentes
-// ("{n} assistindo") e Sair (sem Minimizar: docs/31 V2-2). No Replay: o selo Replay, sem contador. A 375 px fica
-// menor, na mesma linha.
-// Na Live ao vivo (fase 3): "Ao vivo · 00:42:10" pelo inicio de verdade (a sala monta a frase a cada segundo), na
-// espera "Aguardando o apresentador", no fim "Encerrada", e o selo Gravando ao lado quando o gravador esta gravando.
-// A sala cobre o cabecalho da area (onde a logo mora): a partir de lg (o ponto em que a sala vira computador, DESKTOP
-// em live-room.tsx), a logo de Marca (ou "Bunker707" sem logo) e um traco; abaixo de lg, o Icone da escola de 24 px.
-// Entre sm e lg o cabecalho ja tem o "{n} assistindo" e o Sair com texto: os 125 px da logo cobririam os selos
-// e zerariam o titulo (a 667 px, celular deitado). Sem link: sair da live passa pela confirmacao (askToLeave). Abaixo
-// de sm o "Ao vivo · 00:42:10" vira o icone e "00:42:10" (a frase inteira no title e para o leitor de tela) e o
-// Gravando vira so o ponto vermelho, para sobrar largura para o titulo antes do Sair.
-// Redesign V2, F2 (docs/31 V2-11 e V2-12): as cores vem dos tokens do tema da sala (claro ou escuro) e, antes do Sair,
-// o botao redondo de tema (Sol com "Tema claro" no escuro, Lua com "Tema escuro" no claro).
+// O cabecalho da Sala (docs/31 V2-3 e V2-18; docs/30 §1.3), o mesmo na Live ao vivo, na gravada e no Replay, sem fundo
+// nem borda (a sala aparece por tras), 56 px. A partir de lg (o ponto em que a sala vira computador, DESKTOP em
+// live-room.tsx): a logo de Marca (ou "Bunker707" sem logo, sem link: sair passa pela confirmacao, askToLeave), o
+// titulo em 22/800 com reticencias e, embaixo, a linha da data ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo
+// Souza", room-layout-model.ts); a direita, "{n} assistindo", um traco e o botao de tema. Abaixo de lg: o titulo em
+// 15/800, a linha "com Danilo Souza · 128 assistindo", o tema a partir de sm (abaixo de sm o cabecalho nao tem largura,
+// V2-18) e o Sair. Sem selos: "Ao vivo", "Gravando", "Sessão das 20:00" e "Replay" ficam no palco (V2-4,
+// room-stage-badges.tsx). "{n} assistindo" (o numero real, ou o somado da Simulacao) some no Replay e com a sessao
+// encerrada: a sala passa `presentNow` nulo. As cores vem dos tokens do tema da sala (docs/31 V2-11); o Sair fica no
+// acento, a unica cor da marca fora do video (V2-11).
 
 export type RoomHeaderProps = {
-  /** Fase 3: o selo a mais ao lado do titulo (Gravando). */
-  badge?: ReactNode;
-  /** Replay: o player e livre, sem relogio nem contador. Live: a sala ao vivo (fase 3). */
-  kind: "live" | "replay" | "simulated";
-  /** Live: "Ao vivo · 00:42:10", montado pela sala a cada segundo. */
-  liveLabel?: string;
-  /** Live: so o "00:42:10", a versao curta do celular. */
-  liveTime?: string;
+  /** A linha da data no computador, ja com os trechos juntos (roomDateLine); vazia, a linha sai. */
+  dateLine: string;
+  /** A linha do celular, ja com os trechos juntos (roomMobileLine); vazia, a linha sai. */
+  mobileLine: string;
   onLeave: () => void;
   /** Troca o tema da sala (claro ou escuro), guardado no navegador da pessoa. */
   onToggleTheme: () => void;
-  /** O offset atual em ms (o tempo no ar), lido a cada segundo. */
-  getOffsetMs?: () => number;
-  phase: "ended" | "live" | "waiting";
-  presentNow: number;
-  showLiveBadge: boolean;
+  /** "{n} assistindo"; nulo no Replay e com a sessao encerrada. */
+  presentNow: number | null;
   /** O tema da sala agora (o botao diz para qual vai). */
   theme: RoomTheme;
-  timeLabel: string;
   title: string;
 };
 
@@ -67,113 +53,70 @@ export function RoomElapsed({ getOffsetMs }: { getOffsetMs?: () => number }) {
   return <span className="tabular-nums">{label}</span>;
 }
 
-/** A marca no canto da sala: a logo (computador, a partir de lg) ou o Icone da escola (abaixo de lg), sem link. */
+/** A marca no canto da sala, so a partir de lg: a logo de Marca (ou o nome, sem logo), sem link. */
 function RoomBrand() {
   const logoImage = usePlatformLogoImage();
-  const schoolIcon = usePlatformSchoolIcon();
 
   return (
-    <>
-      <Image
-        alt="Bunker707"
-        className={cn("size-6 shrink-0 rounded-[6px] lg:hidden", isDefaultSchoolIcon(schoolIcon) ? "object-contain" : "object-cover")}
-        data-room-brand="icon"
-        height={24}
-        src={schoolIcon}
-        unoptimized={!canOptimizeImageSrc(schoolIcon)}
-        width={24}
-      />
-      <div className="hidden shrink-0 items-center gap-3 lg:flex" data-room-brand="logo">
-        {logoImage ? (
-          <Image
-            alt="Bunker707"
-            className="h-auto max-h-8 w-[112px] shrink-0 object-contain object-left"
-            height={35}
-            src={logoImage}
-            unoptimized={!canOptimizeImageSrc(logoImage)}
-            width={306}
-          />
-        ) : (
-          <span className="whitespace-nowrap text-sm font-black uppercase tracking-wide text-room-fg-strong">Bunker707</span>
-        )}
-        <span aria-hidden="true" className="h-5 w-px bg-room-divider" />
-      </div>
-    </>
+    <div className="hidden shrink-0 items-center lg:flex" data-room-brand="logo">
+      {logoImage ? (
+        <Image
+          alt="Bunker707"
+          className="h-auto max-h-8 w-[112px] shrink-0 object-contain object-left"
+          height={35}
+          src={logoImage}
+          unoptimized={!canOptimizeImageSrc(logoImage)}
+          width={306}
+        />
+      ) : (
+        <span className="whitespace-nowrap text-sm font-black uppercase tracking-wide text-room-fg-strong">Bunker707</span>
+      )}
+    </div>
   );
 }
 
 /** O botao de tema (docs/31 V2-12): redondo, 40 px; o nome diz para qual tema vai. */
-export function RoomThemeButton({ onToggle, theme }: { onToggle: () => void; theme: RoomTheme }) {
+export function RoomThemeButton({ className, onToggle, theme }: { className?: string; onToggle: () => void; theme: RoomTheme }) {
   const copy = WEBINAR_COPY.salaV2.tema;
   const light = theme === "light";
   return (
-    <RoomIconButton label={light ? copy.escuro : copy.claro} onClick={onToggle} size={40}>
+    <RoomIconButton className={className} label={light ? copy.escuro : copy.claro} onClick={onToggle} size={40}>
       {light ? <Moon aria-hidden="true" /> : <Sun aria-hidden="true" />}
     </RoomIconButton>
   );
 }
 
-export function RoomHeader({ badge, getOffsetMs, kind, liveLabel, liveTime, onLeave, onToggleTheme, phase, presentNow, showLiveBadge, theme, timeLabel, title }: RoomHeaderProps) {
+export function RoomHeader({ dateLine, mobileLine, onLeave, onToggleTheme, presentNow, theme, title }: RoomHeaderProps) {
   const copy = WEBINAR_COPY.sala;
-  const live = kind === "simulated" && phase === "live";
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-room-border bg-room-surface px-3 sm:h-14 sm:gap-3 sm:px-4">
+    <header className="flex h-14 shrink-0 items-center gap-2.5 pl-4 pr-2 sm:pr-4 lg:gap-7 lg:px-4">
       <RoomBrand />
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {kind === "live" ? (
-          phase === "live" ? (
-            <RoomBadge icon={Radio} title={liveLabel} tone="accent">
-              <span className="tabular-nums" data-testid="room-on-air">
-                <span className="hidden sm:inline">{liveLabel}</span>
-                <span aria-hidden="true" className="sm:hidden">
-                  {liveTime ?? liveLabel}
-                </span>
-                <span className="sr-only sm:hidden">{liveLabel}</span>
-              </span>
-            </RoomBadge>
-          ) : (
-            <RoomBadge tone={phase === "ended" ? "muted" : "neutral"}>{phase === "ended" ? WEBINAR_COPY.aluno.situacoes.ended : WEBINAR_COPY.aluno.aguardando}</RoomBadge>
-          )
-        ) : kind === "replay" ? (
-          <RoomBadge tone="solid">{WEBINAR_COPY.aluno.selo.replay}</RoomBadge>
-        ) : live && showLiveBadge ? (
-          <RoomBadge icon={Radio} tone="accent">
-            <span className="hidden sm:inline">{copy.aoVivo} · </span>
-            <span className="sm:hidden">{copy.aoVivo} </span>
-            <RoomElapsed getOffsetMs={getOffsetMs} />
-          </RoomBadge>
-        ) : (
-          <RoomBadge tone="neutral">
-            <span className="hidden sm:inline">{copy.sessaoDas(timeLabel)}</span>
-            <span className="sm:hidden">{timeLabel}</span>
-            {live ? (
-              <>
-                {" · "}
-                <RoomElapsed getOffsetMs={getOffsetMs} />
-              </>
-            ) : null}
-          </RoomBadge>
-        )}
-        {badge}
-        <h1 className="min-w-0 truncate text-sm font-bold text-room-fg-strong sm:text-base">{title}</h1>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:gap-1">
+        <h1 className="min-w-0 truncate text-[15px] font-extrabold leading-5 text-room-fg-strong lg:text-[22px] lg:leading-7">{title}</h1>
+        {dateLine ? (
+          <p className="hidden min-w-0 truncate text-xs font-medium text-room-fg-subtle lg:block" data-room-line="date">
+            {dateLine}
+          </p>
+        ) : null}
+        {mobileLine ? (
+          <p className="min-w-0 truncate text-[11px] font-medium text-room-fg-subtle lg:hidden" data-testid="room-mobile-line">
+            {mobileLine}
+          </p>
+        ) : null}
       </div>
-      {kind !== "replay" && phase !== "ended" ? (
-        <p className="hidden shrink-0 items-center gap-1.5 text-xs font-semibold text-room-fg-muted sm:flex" data-testid="room-present">
-          <Users aria-hidden="true" className="size-3.5" />
+      {presentNow !== null ? (
+        <p className="hidden shrink-0 items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-room-fg-muted lg:flex" data-testid="room-present">
+          <Users aria-hidden="true" className="size-4" />
           {copy.assistindo(presentNow)}
         </p>
       ) : null}
-      <div className="flex shrink-0 items-center gap-1">
-        <RoomThemeButton onToggle={onToggleTheme} theme={theme} />
-        <button aria-label={copy.sair} className={cn(headerButtonClassName)} onClick={onLeave} title={copy.sair} type="button">
-          <X aria-hidden="true" className="size-4" />
-          <span className="hidden sm:inline">{copy.sair}</span>
-        </button>
-      </div>
+      <span aria-hidden="true" className="hidden h-7 w-px shrink-0 bg-room-divider lg:block" />
+      <RoomThemeButton className="hidden sm:grid" onToggle={onToggleTheme} theme={theme} />
+      <RoomButton onClick={onLeave} variant="accent">
+        <LogOut aria-hidden="true" />
+        {copy.sair}
+      </RoomButton>
     </header>
   );
 }
-
-const headerButtonClassName =
-  "inline-flex h-10 min-w-10 items-center justify-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-room-fg transition-colors hover:bg-room-control-hover hover:text-room-fg-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus motion-reduce:transition-none sm:px-3 sm:text-sm";

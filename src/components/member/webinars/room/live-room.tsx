@@ -13,7 +13,8 @@ import type { LiveRoomInfo } from "@/server/webinars/live-model";
 import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls } from "./live-controls";
-import { LiveCameraDialog, LiveChatOverlay, LiveMicDialog, LiveParticipantsTab, LiveRecordingBadge } from "./live-notices";
+import { useRoomAssistant } from "./assistant/use-room-assistant";
+import { LiveCameraDialog, LiveChatOverlay, LiveMicDialog, LiveParticipantsTab } from "./live-notices";
 import {
   barFocusLost,
   cameraClick,
@@ -43,9 +44,11 @@ import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
+import { roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBubbles } from "./room-reactions";
+import { RoomStageBadges } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
@@ -55,9 +58,9 @@ import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion 
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
 // da gravada (/webinarios/[slug]/sala?sessao=) e no mesmo dialogo de tela cheia (aria-modal, foco preso, Esc pede
-// confirmacao com a live no ar). O cabecalho ("Ao vivo · 00:42:10" pelo inicio de verdade, "{n} assistindo", o selo
-// Gravando e Sair; sem Minimizar, docs/31 V2-2), o palco com o iframe (live-stage.tsx: Entrar na sala, Reconectando…,
-// a sala trancada, em breve, encerrada), a nossa barra (live-controls.tsx), as abas Chat / Perguntas / Participantes /
+// confirmacao com a live no ar). O cabecalho ("{n} assistindo" e Sair; sem Minimizar, docs/31 V2-2), o palco com os
+// selos ("Ao vivo · 00:42:10" pelo inicio de verdade e o Gravando) e o iframe (live-stage.tsx: Entrar na sala,
+// Reconectando…, a sala trancada, em breve, encerrada), a nossa barra (live-controls.tsx), as abas Chat / Perguntas / Participantes /
 // Enquetes (a de Enquetes so com enquete aberta; no celular, gaveta pela aba de baixo e as 3 ultimas mensagens por cima
 // do palco com ela fechada) e os avisos de gravacao da camera e do microfone (live-notices.tsx). O chat, as perguntas, as enquetes,
 // as reacoes e o sinal de presenca sao os da fase 2; o offset do chat e do servidor. Silenciado no chat: o campo da
@@ -79,6 +82,10 @@ import { ROOM_FOCUSABLE, trapRoomFocus, useRoomDialogLock, useRoomReducedMotion 
 // Redesign V2, F2 (docs/31 V2-11 e V2-12): o tema claro ou escuro da pessoa fica no data-room-theme do dialogo (as
 // superficies fora do video usam os tokens --room-*) e entra no iframe pelo LiveEmbedLook so na montagem (Entrar na
 // sala, Tentar de novo, a volta depois da queda): o motor nao tem comando de tema, e trocar no meio nao remonta.
+// Redesign V2, F3 (docs/31 V2-3 e V2-4): o cabecalho tem a linha da data (com a duracao e o apresentador) e, no
+// celular, "com {apresentador} · {n} assistindo"; "Ao vivo · 00:42:10", "Gravando", quem apresenta e o Assistente
+// ficam no palco (room-stage-badges.tsx), antes da coluna de miniaturas do iframe (--room-video-right). O estado do
+// Assistente e lido uma vez pela sala e desce para o chat e as Perguntas.
 
 type Tab = "chat" | "enquetes" | "participantes" | "perguntas";
 
@@ -152,6 +159,15 @@ function readIOS() {
   }
 }
 
+/** Um aparelho com toque (como o motor conta: maxTouchPoints): o puxador da coluna de miniaturas fica mais largo. */
+function readTouch() {
+  try {
+    return navigator.maxTouchPoints > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Celular: sem desfocar o fundo e sem a secao de atalhos do teclado. */
 function readMobile() {
   try {
@@ -206,6 +222,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const cinemaPreferred = useSyncExternalStore(subscribeNothing, readCinemaPreferred, () => false);
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
   const isMobile = useSyncExternalStore(subscribeNothing, readMobile, () => false);
+  const touch = useSyncExternalStore(subscribeNothing, readTouch, () => false);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
   const [theme, setTheme] = useRoomTheme();
   // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala).
@@ -401,6 +418,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // Fase 4f: o chat no idioma do aluno (Perfil > Privacidade); sem idioma, desligado ou no "ver como", passa como veio.
   const translation = useRoomTranslation({ enabled: !readOnly && !blocked, messages: chat.messages, sessionId, webinarId });
   const reactions = useRoomReactions({ enabled: !readOnly && writable && !blocked, getOffsetMs, onRefused: onWriteRefused, reducedMotion, sessionId, webinarId });
+  // O Assistente lido uma vez pela sala: o selo do palco, o chat e as Perguntas usam o mesmo estado.
+  const assistant = useRoomAssistant({ enabled: !readOnly && !blocked, sessionId, webinarId });
 
   useRoomHeartbeat({
     enabled: !readOnly && writable && !blocked,
@@ -428,6 +447,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O aviso passageiro; sem ele, o toque em Microfone / Câmera que espera a troca daquele aparelho (o que vai acontecer).
   const notice = liveNoticePhrase(room.signals.notice === "mic_released" ? null : room.signals.notice) ?? pendingTogglePhrase(room.pendingToggle, room.signals);
   const stage = stageNames(room.signals.participants, presenterName);
+  const startedAt = live.startedAt ?? session.session.startedAt;
+  // "{n} assistindo" some com a live encerrada (no cabecalho do computador e na linha do celular).
+  const presentShown = phase === "ended" ? null : presentNow;
+  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
+  // A coluna de miniaturas do iframe fica a direita do video ate a F8 medir a largura (docs/31 V2-A5).
+  const videoRightPx = stageVideoRightPx({ columnShown: true, touch });
 
   function leave() {
     room.hangUp();
@@ -623,17 +649,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       role="dialog"
     >
       <RoomHeader
-        badge={recording && !blocked ? <LiveRecordingBadge /> : null}
-        kind="live"
-        liveLabel={liveOnAirLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
-        liveTime={liveElapsedLabel(live.startedAt ?? session.session.startedAt, nowMs, skewMs)}
+        dateLine={dateLine}
+        mobileLine={mobileLine}
         onLeave={askToLeave}
         onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
-        phase={phase}
-        presentNow={presentNow}
-        showLiveBadge
+        presentNow={presentShown}
         theme={theme}
-        timeLabel=""
         title={session.webinar.title}
       />
 
@@ -668,7 +689,17 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
             sessionId={sessionId}
             stageRef={stageRef}
             title={session.webinar.title}
+            videoRightPx={videoRightPx}
           >
+            {/* Os selos ficam com a sala de pe, como a barra: a live encerrada, removido ou banido os tiram. */}
+            {barShown ? (
+              <RoomStageBadges
+                assistantOn={phase === "live" && assistant.state.enabled}
+                presenterName={phase === "live" ? presenterName : null}
+                recording={recording}
+                topLeft={phase === "live" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : null}
+              />
+            ) : null}
             <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
             {!drawerVisible && !blocked && !settingsTakeover ? <LiveChatOverlay messages={overlayMessages(translation.messages)} /> : null}
           </LiveStage>
@@ -770,6 +801,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   ) : null}
                   <RoomTranslationBar state={translation} />
                   <RoomChatPanel
+                    assistant={assistant}
                     chatMode={session.session.chatMode}
                     consented={session.me.consented}
                     defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
@@ -803,6 +835,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               {tab === "perguntas" ? (
                 <RoomQuestionsTab
                   allowAnonymous={session.session.anonymousQuestions}
+                  assistant={assistant}
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                   enabled={!readOnly}

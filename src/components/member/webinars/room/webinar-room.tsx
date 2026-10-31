@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { presenceStateOf, revealedMessages, roomPhaseAt, targetOffsetMs } from "@/lib/webinar-room-client";
@@ -9,15 +9,18 @@ import { formatCountdown, saoPauloTime } from "@/lib/webinar-time";
 import type { StudentRoomPayload } from "@/server/webinars/student-model";
 import { roomHref } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
+import { useRoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
 import { RoomChatPanel } from "./room-chat";
 import { RoomHeader } from "./room-header";
+import { roomDateLine, roomMobileLine, stageVideoRightPx } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
 import { RoomReactionBar, RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomStage } from "./room-stage";
+import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomOrientation } from "./use-room-orientation";
@@ -29,7 +32,7 @@ import { RoomDock } from "./vertical/room-dock";
 import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer } from "./vertical/vertical-drawer";
-import { drawerTabFor, roomSkeleton, themeForDesign, type RoomDesign } from "./vertical/vertical-model";
+import { drawerTabFor, roomSkeleton, themeForDesign, verticalBadge, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
 
 // A Sala da Live gravada e do Replay (docs/30 §1.3 adaptado a §1.6, §1.7 e §9): um dialogo de tela cheia por cima
@@ -51,6 +54,10 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // girar troca so as classes, o player nao remonta e o chat, o relogio, o som e o estado continuam.
 // Redesign V2, F2 (docs/31 V2-11 e V2-12): o tema claro ou escuro da pessoa (use-room-prefs.ts) fica no atributo
 // data-room-theme do dialogo, e as superficies fora do video usam os tokens --room-*; o vertical e sempre escuro.
+// Redesign V2, F3 (docs/31 V2-3 e V2-4): o cabecalho tem a linha da data (com a duracao e o apresentador) e, no
+// celular, "com {apresentador} · {n} assistindo"; o selo do momento (a regra D10: "Ao vivo" so com a decisao da
+// equipe, senao "Sessão das 20:00"; "Replay"), quem apresenta e o Assistente ficam no palco do desenho normal
+// (room-stage-badges.tsx). O estado do Assistente e lido uma vez pela sala e desce para o chat e as Perguntas.
 
 type Tab = "chat" | "enquetes" | "perguntas";
 
@@ -145,13 +152,15 @@ export type WebinarRoomProps = {
   /** Forca o desenho (a previa e os testes); sem ele, o celular em pe decide (use-room-orientation.ts). */
   design?: RoomDesign;
   payload: StudentRoomPayload;
+  /** O apresentador (a pagina sabe): a linha do cabecalho e o selo do palco; nulo, os dois omitem o nome. */
+  presenterName: string | null;
   /** "Ver como" da equipe: a sala abre e nada e gravado. */
   readOnly: boolean;
   /** A pagina da live (Sair e Esc voltam para ca). */
   webinarHref: string;
 };
 
-export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly, webinarHref }: WebinarRoomProps) {
+export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenterName = null, readOnly, webinarHref }: WebinarRoomProps) {
   const copy = WEBINAR_COPY.sala;
   const router = useRouter();
   const webinarId = payload.webinar.id;
@@ -252,6 +261,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   });
 
   const reactions = useRoomReactions({ enabled: !readOnly && !unavailable && (live || phase === "replay"), getOffsetMs, reducedMotion, sessionId, webinarId });
+  // O Assistente lido uma vez pela sala: o selo do palco, o chat e as Perguntas usam o mesmo estado.
+  const assistant = useRoomAssistant({ enabled: !readOnly && !unavailable, sessionId, webinarId });
 
   const currentOffsetMs = kind === "replay" ? replaySeconds * 1000 : targetOffsetMs({ deviceNowMs: nowMs, skewMs: clock.skewMs, zeroMs });
   const revealed = useMemo(() => revealedMessages(chat.messages, currentOffsetMs), [chat.messages, currentOffsetMs]);
@@ -352,6 +363,18 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
   const composerPhase = phase === "replay" ? "replay" : phase;
   const headerPhase = phase === "replay" ? "live" : phase;
   const skeleton = roomSkeleton(design);
+  // O selo do momento no palco (V2-4), pela mesma regra do topo do vertical (D10).
+  const momentBadge = verticalBadge({ kind, phase: headerPhase, showLiveBadge: session.session.showLiveBadge });
+  const topLeft: RoomStageTopLeft =
+    momentBadge.badge === "replay"
+      ? { kind: "replay" }
+      : momentBadge.badge === "live"
+        ? { getOffsetMs, kind: "recorded_on_air" }
+        : { getOffsetMs: momentBadge.elapsed ? getOffsetMs : undefined, kind: "session", timeLabel };
+  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind, presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const mobileLine = roomMobileLine({ presenterName, presentNow: momentBadge.showCount ? shownCount : null }).join(" · ");
+  // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
+  const stageVars = { "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px` } as CSSProperties;
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
   const writable = (live || phase === "replay") && !unavailable;
 
@@ -387,6 +410,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
       <RoomTranslationBar state={translation} />
       <RoomChatPanel
         aboveComposer={<RoomSimulationJoins layout="stage" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
+        assistant={assistant}
         chatMode={session.session.chatMode}
         consented={session.me.consented}
         defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
@@ -411,6 +435,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
     ) : tab === "perguntas" ? (
       <RoomQuestionsTab
         allowAnonymous={session.session.anonymousQuestions}
+        assistant={assistant}
         consented={session.me.consented}
         defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
         enabled={!readOnly}
@@ -449,15 +474,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
         />
       ) : (
         <RoomHeader
-          getOffsetMs={getOffsetMs}
-          kind={kind}
+          dateLine={dateLine}
+          mobileLine={mobileLine}
           onLeave={askToLeave}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
-          phase={headerPhase}
-          presentNow={shownCount}
-          showLiveBadge={session.session.showLiveBadge}
+          presentNow={momentBadge.showCount ? shownCount : null}
           theme={theme}
-          timeLabel={timeLabel}
           title={session.webinar.title}
         />
       )}
@@ -478,10 +500,18 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
-          <div className={skeleton.stageBox} data-room-slot="stage-box">
+          <div className={skeleton.stageBox} data-room-slot="stage-box" style={stageVars}>
             {stage}
+            {vertical || unavailable ? null : (
+              <RoomStageBadges
+                assistantOn={writable && assistant.state.enabled}
+                presenterName={writable ? presenterName : null}
+                recording={false}
+                topLeft={topLeft}
+              />
+            )}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
-              <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
+              <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />
             </div>
             <div className={cn(skeleton.sales, vertical ? "z-30" : null)} data-room-slot="sales">
               {unavailable ? null : (

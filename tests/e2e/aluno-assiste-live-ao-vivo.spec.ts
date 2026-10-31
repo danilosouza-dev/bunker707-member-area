@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
-import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
@@ -23,10 +23,10 @@ import {
 // aceite), a mao levantada vai por toggleRaiseHand, o microfone liberado pelo apresentador abre o aviso com Falar /
 // Agora não e so o Falar manda toggleAudio. O chat e as reacoes sao os nossos; nenhum texto da pagina cita o Jitsi; a
 // 375 px a sala cabe sem rolagem lateral e os botoes da barra tem 44 px. A IA Diretor fica na pagina da live e some na
-// sala (o botao flutuante cobria o Enviar do chat); o cabecalho da sala tem a marca da escola e, a 375 px com a
-// gravacao ligada, o tempo curto e o ponto do Gravando cabem antes do Sair (sem Minimizar nem pilula, docs/31 V2-2;
-// o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px (celular deitado) o
-// Icone da escola fica no lugar da logo e os selos inteiros terminam antes do "{n} assistindo". O botao Configurações
+// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "com {apresentador} ·
+// {n} assistindo" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem Minimizar nem
+// pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px
+// (celular deitado) o cabecalho continua o do celular, sem marca, e os selos ficam no palco. O botao Configurações
 // abre o painel de som e aparelhos: antes da liberacao nada troca de aparelho (nem pede o microfone); depois do Falar o
 // microfone escolhido chega a sala so pelo id, o alto-falante tambem, a camera so depois do aviso de gravacao,
 // Reduzir ruído e Economizar dados viram os comandos do iframe (o ruido so depois que a faixa nova entra) e nenhuma
@@ -41,6 +41,8 @@ import {
 // recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
+/** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
+const APRESENTADOR = ESCOLA_DE_TESTE.contas.produtor.nome;
 const aoVivo = WEBINAR_COPY.aoVivo;
 const SALA = new RegExp(`/webinarios/${slug}/sala\\?sessao=`);
 const PARTICIPANTE = "aluna-na-sala-0001";
@@ -525,7 +527,7 @@ test("a volta depois de uma queda, com a camera desligada: trocar a camera e toc
   expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
 });
 
-test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho cabe com o Gravando; sem Minimizar, o Sair pede a confirmacao e fecha a sala", async ({ page }) => {
+test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho tem o titulo, quem apresenta e quantos assistem; Ao vivo e Gravando no palco; sem Minimizar, o Sair pede a confirmacao e fecha a sala", async ({ page }) => {
   await page.setViewportSize({ height: 740, width: 375 });
   const { dialogo, sala } = await entrarNaSala(page);
   await expect(dialogo.getByRole("tab", { name: WEBINAR_COPY.sala.abas.chat })).toBeVisible();
@@ -589,31 +591,49 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(configuracoes).toBeFocused();
   await page.setViewportSize({ height: 740, width: 375 });
 
-  // O cabecalho com a gravacao ligada (o duble avisa, como o gravador): o Icone da escola de 24 px, o tempo curto e so o
-  // ponto do Gravando terminam antes do Sair, e sobra largura para o titulo.
+  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "com
+  // {apresentador} · {n} assistindo" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o leitor de
+  // tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
-  const gravando = cabecalho.locator(`[title="${aoVivo.gravando}"]`);
+  const palcoDaSala = dialogo.locator("[data-lesson-player-stage]");
+  const gravando = palcoDaSala.getByTestId("live-recording");
+  const noAr = palcoDaSala.getByTestId("room-on-air");
   await expect(gravando).toBeVisible();
-  const icone = cabecalho.getByRole("img", { name: "Bunker707" });
-  await expect(icone).toBeVisible();
+  await expect(noAr).toBeVisible();
+  await expect(noAr).toHaveAttribute("title", /^Ao vivo · \d{2}:\d{2}:\d{2}$/);
+  await expect(palcoDaSala.getByText(`${APRESENTADOR} · Apresentador`)).toBeVisible();
+  await expect(cabecalho.getByTestId("live-recording")).toHaveCount(0);
+  await expect(cabecalho.getByTestId("room-on-air")).toHaveCount(0);
+  await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
+  const tituloDoCabecalho = cabecalho.getByRole("heading", { level: 1, name: titulo });
+  await expect(tituloDoCabecalho).toBeVisible();
+  const linha = cabecalho.getByTestId("room-mobile-line");
+  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
   // Sem Minimizar (docs/31 V2-2): o cabecalho termina no Sair.
   await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
   const sair = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair });
+  await expect(sair).toBeVisible();
+  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
   const caixas = {
     gravando: await gravando.boundingBox(),
-    icone: await icone.boundingBox(),
-    noAr: await cabecalho.locator('[title^="Ao vivo"]').boundingBox(),
+    linha: await linha.boundingBox(),
+    noAr: await noAr.boundingBox(),
+    palco: await palcoDaSala.boundingBox(),
     sair: await sair.boundingBox(),
-    titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
+    titulo: await tituloDoCabecalho.boundingBox()
   };
-  expect(caixas.icone?.width ?? 0).toBeCloseTo(24, 0);
   const bordaDoSair = caixas.sair?.x ?? 0;
   expect(bordaDoSair).toBeGreaterThan(0);
-  expect((caixas.noAr?.x ?? Number.POSITIVE_INFINITY) + (caixas.noAr?.width ?? 0), "o selo Ao vivo").toBeLessThanOrEqual(bordaDoSair);
-  expect((caixas.gravando?.x ?? Number.POSITIVE_INFINITY) + (caixas.gravando?.width ?? 0), "o ultimo selo").toBeLessThanOrEqual(bordaDoSair);
+  expect(fim(caixas.sair), "o Sair cabe na tela").toBeLessThanOrEqual(375);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect((caixas.titulo?.x ?? Number.POSITIVE_INFINITY) + (caixas.titulo?.width ?? 0)).toBeLessThanOrEqual(bordaDoSair);
+  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoSair);
+  expect(fim(caixas.linha), "a linha do celular termina antes do Sair").toBeLessThanOrEqual(bordaDoSair);
+  // Os selos dentro do palco: o Ao vivo no canto de cima a esquerda e o Gravando ao lado, sem sair do palco.
+  expect(caixas.noAr?.x ?? -1).toBeGreaterThanOrEqual(caixas.palco?.x ?? 0);
+  expect(caixas.noAr?.y ?? -1).toBeGreaterThanOrEqual(caixas.palco?.y ?? 0);
+  expect(caixas.gravando?.x ?? -1).toBeGreaterThan(caixas.noAr?.x ?? 0);
+  expect(fim(caixas.gravando)).toBeLessThanOrEqual(fim(caixas.palco));
 
   // O Sair, com a live no ar, abre a confirmacao; o Sair dela volta para a pagina da live, onde a IA Diretor reaparece.
   // Nenhuma pilula fica no canto.
@@ -627,9 +647,9 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
-test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com a gravacao ligada, os selos terminam antes de quem assiste e o titulo tem largura", async ({ page }) => {
-  // Entre sm (640 px) e lg (1024 px, onde a sala vira computador) o cabecalho ja tem a frase inteira do Ao vivo, a
-  // palavra Gravando, o "{n} assistindo" e o Sair com texto: a logo de 125 px so entra em lg.
+test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador} · {n} assistindo', sem marca) e os selos Ao vivo e Gravando no palco", async ({ page }) => {
+  // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo, a linha da
+  // data e o "{n} assistindo" da direita so entram em lg; o contador fica na linha de baixo do titulo.
   await page.setViewportSize({ height: 740, width: 667 });
   const { dialogo, sala } = await entrarNaSala(page);
   // O iPhone SE deitado: 667 x 375 (a altura nao muda o cabecalho; a entrada usa a de cima para o Entrar na sala caber).
@@ -637,28 +657,32 @@ test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com
 
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
-  await expect(cabecalho.getByTestId("live-recording")).toBeVisible();
-  const icone = cabecalho.locator('[data-room-brand="icon"]');
-  await expect(icone).toBeVisible();
-  await expect(cabecalho.locator('[data-room-brand="logo"]')).toBeHidden();
-  const presentes = cabecalho.getByTestId("room-present");
-  await expect(presentes).toBeVisible();
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(palco.getByTestId("live-recording")).toBeVisible();
+  await expect(palco.getByTestId("room-on-air")).toBeVisible();
+  // A partir de sm o selo traz a frase inteira; so uma versao fica visivel.
+  await expect(palco.getByText(/^Ao vivo · \d{2}:\d{2}:\d{2}$/).filter({ visible: true })).toBeVisible();
+  await expect(cabecalho.getByTestId("live-recording")).toHaveCount(0);
+  await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
+  await expect(cabecalho.getByTestId("room-present")).toBeHidden();
+  const linha = cabecalho.getByTestId("room-mobile-line");
+  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
+  // A partir de sm o botao de tema volta ao cabecalho, antes do Sair.
+  await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 
+  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
   const caixas = {
-    gravando: await cabecalho.locator(`[title="${aoVivo.gravando}"]`).boundingBox(),
-    icone: await icone.boundingBox(),
-    noAr: await cabecalho.locator('[title^="Ao vivo"]').boundingBox(),
-    presentes: await presentes.boundingBox(),
+    linha: await linha.boundingBox(),
+    palco: await palco.boundingBox(),
+    tema: await cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro }).boundingBox(),
     titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
   };
-  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
-  expect(caixas.icone?.width ?? 0).toBeCloseTo(24, 0);
-  const bordaDosPresentes = caixas.presentes?.x ?? 0;
-  expect(bordaDosPresentes).toBeGreaterThan(0);
-  expect(fim(caixas.noAr), "o selo Ao vivo").toBeLessThanOrEqual(bordaDosPresentes);
-  expect(fim(caixas.gravando), "o ultimo selo termina antes de quem assiste").toBeLessThanOrEqual(bordaDosPresentes);
+  const bordaDoTema = caixas.tema?.x ?? 0;
+  expect(bordaDoTema).toBeGreaterThan(0);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDosPresentes);
+  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoTema);
+  expect(fim(caixas.linha)).toBeLessThanOrEqual(bordaDoTema);
+  expect(fim(caixas.palco), "o palco cabe na largura").toBeLessThanOrEqual(667);
 });
 
 // O Chrome fixa a Permissions-Policy no carregamento do documento, e a navegacao interna do Next nao carrega outro:

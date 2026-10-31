@@ -5,15 +5,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // A Sala desenhada (docs/30 §1.3 adaptado a §1.6, §1.7, §8.5 e §9; docs/18 §2.2): os pedacos desenhados no Node,
-// sem navegador. O cabecalho (o selo "Ao vivo" so com a decisao da equipe; senao "Sessao das 20:00"; Replay sem
-// contador; "{n} assistindo"), o palco nos estados (espera com a contagem, no ar com o iframe da Bunny coberto e
-// "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (os selos Equipe / Apresentador /
+// sem navegador. O cabecalho V2 (docs/31 V2-3: o titulo, a linha da data com a duracao e quem apresenta, "{n}
+// assistindo", o tema e o Sair; Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
+// decisao da equipe, senao "Sessao das 20:00"; Replay; quem apresenta), o palco nos estados (espera com a contagem,
+// no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (os selos Equipe / Apresentador /
 // Assistente, a pendente "Aguardando a equipe", a fixada, o compositor desligado e no modo lento), o aceite com o
 // texto exato de §8.5 e os dois botoes, a barra de reacoes com seis botoes de 44 px, a sala inteira como dialogo
 // (aria-modal, as abas, a 375 px: palco na largura, campo no rodape) e os botoes Entrar / Assistir o replay. A marca no
 // cabecalho (a sala cobre o topo da area): a logo de Marca a partir de lg (o ponto em que a sala vira computador),
-// "Bunker707" sem logo, o Icone da escola de 24 px abaixo de lg, sem link; e o "Ao vivo · 00:42:10" curto no celular da
-// Live ao vivo.
+// "Bunker707" sem logo, sem link; abaixo de lg, nenhuma marca (V2-18).
 // Fase 4d: sem o celular em pe (deitado, tablet, computador e a primeira pintura do servidor) a sala continua no
 // desenho normal, igual a antes; as caixas novas do esqueleto (bolhas, aviso de venda, doca e lugar da Oferta) sao
 // `contents` e nao mudam nada na tela. O desenho vertical e testado em tests/webinarios-sala-vertical-*.test.mjs.
@@ -36,43 +36,112 @@ const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
 
-test("cabecalho: Ao vivo com o tempo so com a decisao da equipe; senao Sessao das 20:00; Replay sem contador; {n} assistindo; o tema e o Sair, sem Minimizar (V2-2)", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
-  const live = render(header.RoomHeader, base);
-  assert.match(live, /Ao vivo/);
-  assert.match(live, /42:10/, "o tempo no ar");
-  assert.match(live, /3 assistindo/);
-  assert.doesNotMatch(live, /Minimizar/, "sem Minimizar (docs/31 V2-2)");
-  assert.deepEqual(
-    [...live.matchAll(/<button aria-label="([^"]+)"/g)].map(([, nome]) => nome),
-    ["Tema claro", "Sair"],
-    "os botoes do cabecalho: o tema (V2-12) e o Sair"
-  );
-  assert.match(live, /<button aria-label="Sair"[^>]*title="Sair" type="button">/);
-  assert.doesNotMatch(live, /Sessão das/);
+/** As props do cabecalho V2 (V2-3), como a sala monta: a linha da data e a do celular ja juntas. */
+const HEADER = {
+  dateLine: "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza",
+  mobileLine: "com Danilo Souza · 3 assistindo",
+  onLeave: noop,
+  onToggleTheme: noop,
+  presentNow: 3,
+  theme: "dark",
+  title: "Aula de IA"
+};
+/** O nome de cada botao, na ordem: o aria-label ou, sem ele, o texto. */
+const buttonNames = (html) =>
+  [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => attrs.match(/aria-label="([^"]+)"/)?.[1] ?? inner.replace(/<[^>]+>/g, "").trim());
 
-  const plain = render(header.RoomHeader, { ...base, showLiveBadge: false });
-  assert.match(plain, /Sessão das 20:00/);
-  assert.doesNotMatch(plain, /Ao vivo/, "sem a decisao, nada de Ao vivo");
+test("cabecalho (V2-3): o titulo, a linha da data com a duracao e quem apresenta, {n} assistindo, o tema e o Sair; nenhum selo e sem Minimizar (V2-2)", () => {
+  const html = render(header.RoomHeader, HEADER);
+  assert.match(html, /<header class="flex h-14 shrink-0 items-center /, "56 px");
+  assert.doesNotMatch(html.match(/<header [^>]*>/)?.[0] ?? "", /bg-room-surface|border-b/, "transparente, sem a borda");
+  assert.match(html, /<h1 class="[^"]*text-\[15px\] font-extrabold[^"]*lg:text-\[22px\][^"]*">Aula de IA<\/h1>/, "15/800 no celular, 22/800 no computador");
+  assert.match(html, /<p class="hidden [^"]*lg:block" data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "a linha da data so no computador");
+  assert.match(html, /<p class="[^"]*lg:hidden" data-testid="room-mobile-line">com Danilo Souza · 3 assistindo<\/p>/, "a linha do celular abaixo de lg");
+  assert.match(html, /<p class="hidden [^"]*lg:flex" data-testid="room-present">[\s\S]*?3 assistindo<\/p>/, "{n} assistindo a direita no computador");
+  assert.ok(html.indexOf('data-testid="room-present"') < html.indexOf('aria-label="Tema claro"'), "o contador, o traco e o tema");
+  assert.match(html, /<span aria-hidden="true" class="hidden h-7 w-px shrink-0 bg-room-divider lg:block"><\/span><button aria-label="Tema claro"/, "o traco antes do tema");
+  assert.deepEqual(buttonNames(html), ["Tema claro", "Sair"], "os botoes do cabecalho: o tema (V2-12) e o Sair");
+  assert.match(html, /<button aria-label="Tema claro" class="[^"]*\bhidden sm:grid\b/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18)");
+  assert.match(html, /<button class="[^"]*bg-\[var\(--accent\)\][^"]*" type="button"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg>Sair<\/button>/, "o Sair no acento, com o texto");
+  assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
-  const replay = render(header.RoomHeader, { ...base, kind: "replay" });
-  assert.match(replay, />Replay</);
+  // Replay e sessao encerrada: a sala passa o contador nulo; a linha do celular fica so com quem apresenta.
+  const replay = render(header.RoomHeader, { ...HEADER, dateLine: "60 min · com Danilo Souza", mobileLine: "com Danilo Souza", presentNow: null });
+  assert.doesNotMatch(replay, /assistindo|room-present/, "o replay nao tem contador");
+  assert.match(replay, /data-room-line="date">60 min · com Danilo Souza</);
+  // Sem linha (nada a dizer), o paragrafo nao entra.
+  const vazio = render(header.RoomHeader, { ...HEADER, dateLine: "", mobileLine: "" });
+  assert.doesNotMatch(vazio, /data-room-line="date"|room-mobile-line/);
+  assert.equal(render(header.RoomHeader, { ...HEADER, presentNow: 1 }).includes(">1 assistindo<"), true);
+});
+
+test("a sala gravada monta o cabecalho V2 com os dados dela: a data e a hora de Sao Paulo, a duracao e quem apresenta; no Replay, sem data, sem hora e sem contador", () => {
+  // A sessao marcada para as 20:00 de Sao Paulo (T0), no ar ha 2 min.
+  const noAr = (extra = {}, sessionExtra = {}) => payload(extra, { offsetMs: 120_000, scheduledAt: new Date(T0).toISOString(), ...sessionExtra });
+  const props = { coverUrl: null, payload: noAr(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
+  const cabecalho = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
+  const gravada = cabecalho(render(room.WebinarRoom, props));
+  assert.match(gravada, /data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-testid="room-mobile-line">com Danilo Souza · 2 assistindo<\/p>/);
+  assert.match(gravada, /data-testid="room-present">[\s\S]*?2 assistindo<\/p>/);
+  assert.doesNotMatch(gravada, /Ao vivo|Sessão das/, "o selo do momento fica no palco");
+
+  const semApresentador = cabecalho(render(room.WebinarRoom, { ...props, presenterName: null }));
+  assert.match(semApresentador, /data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
+  assert.match(semApresentador, /data-testid="room-mobile-line">2 assistindo<\/p>/);
+
+  const replay = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
+  assert.match(replay, /data-room-line="date">60 min · com Danilo Souza<\/p>/, "no replay sem data nem hora");
+  assert.match(replay, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
   assert.doesNotMatch(replay, /assistindo/, "o replay nao tem contador");
-  assert.equal(render(header.RoomHeader, { ...base, presentNow: 1 }).includes("1 assistindo"), true);
+
+  const encerrada = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { roomPhase: "ended", status: "ended" }) }));
+  assert.doesNotMatch(encerrada, /assistindo/, "encerrada, sem contador");
+});
+
+test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay; quem apresenta embaixo a esquerda", () => {
+  const props = { coverUrl: null, payload: payload(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
+  const caixa = (html) => {
+    const inicio = html.indexOf('data-room-slot="stage-box"');
+    return html.slice(inicio, html.indexOf('data-room-slot="bubbles"', inicio));
+  };
+
+  // O tempo no ar anda pelo relogio do aparelho (RoomElapsed): aqui so a forma.
+  const aoVivo = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: true }) }));
+  assert.match(aoVivo, /data-room-badges="top"><span class="[^"]*bg-\[var\(--accent\)\][^"]*" data-testid="room-on-air">/, "o Ao vivo vermelho em cima a esquerda");
+  assert.match(aoVivo, /<span class="max-sm:sr-only">Ao vivo · <\/span><span class="tabular-nums">[0-9:]+<\/span>/, "o tempo no ar; no celular so o tempo (a frase para o leitor de tela)");
+  assert.doesNotMatch(aoVivo, /Sessão das/);
+  assert.match(aoVivo, /data-room-badge="presenter"[\s\S]*?>Danilo Souza · Apresentador</);
+
+  const sessao = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: false }) }));
+  assert.match(sessao, /data-room-badges="top"><span class="[^"]*bg-black\/60[^"]*">Sessão das 19:58 · <span class="tabular-nums">[0-9:]+<\/span><\/span>/, "sem a decisao, Sessao das 19:58 e o tempo, neutro sobre o video");
+  assert.doesNotMatch(sessao, /Ao vivo|room-on-air/, "sem a decisao, nada de Ao vivo");
+
+  const espera = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { offsetMs: -4 * MIN, roomPhase: "waiting", scheduledAt: new Date(T0 + 4 * MIN).toISOString(), showLiveBadge: false }) }));
+  assert.match(espera, /data-room-badges="top"><span class="[^"]*">Sessão das 20:04<\/span>/, "na espera, so a hora");
+  assert.doesNotMatch(espera, /data-room-badge="presenter"/, "sem o video no ar, sem o selo de quem apresenta");
+
+  const replay = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
+  assert.match(replay, /data-room-badges="top"><span class="[^"]*">Replay<\/span><\/div>/);
+  assert.match(replay, /data-room-badge="presenter"/);
+
+  // Fora do acesso (D41) e no vertical, nenhum selo no palco (o vertical tem o topo dele).
+  assert.doesNotMatch(render(room.WebinarRoom, { ...props, design: "vertical" }), /data-room-badges|data-room-badge=/);
+  // Sem a gravada ter a coluna de miniaturas, os selos de baixo vao ate a borda do video.
+  assert.match(render(room.WebinarRoom, props), /data-room-slot="stage-box" style="--room-video-right:0px"/);
 });
 
 test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
   const botao = (html, nome) => html.match(new RegExp(`<button aria-label="${nome}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
 
   // No escuro, o Sol com "Tema claro"; no claro, a Lua com "Tema escuro" (o nome diz o que o clique faz).
-  const escuro = botao(render(header.RoomHeader, base), "Tema claro");
+  const escuro = botao(render(header.RoomHeader, HEADER), "Tema claro");
   assert.match(escuro, /title="Tema claro" type="button"/);
   assert.match(escuro, /lucide-sun/);
   const classes = (escuro.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
   assert.ok(classes.includes("size-10") && classes.includes("rounded-full"), "redondo, 40 px");
   assert.doesNotMatch(escuro, /aria-pressed/, "o nome muda com o tema: nada de aria-pressed");
-  const claroHtml = render(header.RoomHeader, { ...base, theme: "light" });
+  const claroHtml = render(header.RoomHeader, { ...HEADER, theme: "light" });
   assert.doesNotMatch(claroHtml, /Tema claro/);
   const claro = botao(claroHtml, "Tema escuro");
   assert.match(claro, /lucide-moon/);
@@ -94,58 +163,37 @@ test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o
   assert.doesNotMatch(vertical, /Tema claro|Tema escuro/);
 });
 
-test("cabecalho: a marca sem link; a logo de Marca a partir de lg (ou Bunker707 sem logo) com o traco; o Icone da escola de 24 px abaixo de lg", () => {
-  const base = { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onToggleTheme: noop, phase: "live", presentNow: 3, showLiveBadge: true, theme: "dark", timeLabel: "20:00", title: "Aula de IA" };
+test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunker707 sem logo); abaixo de lg, nenhuma marca e o titulo tem a largura", () => {
   const comMarca = (marca, props = {}) =>
-    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...base, ...props })));
+    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...HEADER, ...props })));
   const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
   const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
   const ICONE = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/icone.png";
 
-  // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg, com o traco.
+  // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg.
   const semLogo = comMarca({ logoImage: null });
-  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<span aria-hidden="true" class="h-5 w-px bg-room-divider"><\/span>/);
-  assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center gap-3 lg:flex"/, "a logo e o traco so a partir de lg");
+  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<\/div>/);
+  assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center lg:flex"/, "a marca so a partir de lg");
   assert.doesNotMatch(semLogo, /<img[^>]*class="[^"]*w-\[112px\]/, "sem logo, nenhuma imagem de logo");
 
   // Com a logo enviada em Marca: a imagem com o nome da escola, 112 px no maximo 32 de altura, alinhada a esquerda.
-  const comLogo = comMarca({ logoImage: LOGO });
+  const comLogo = comMarca({ logoImage: LOGO, schoolIcon: ICONE });
   const logo = comLogo.match(/<img[^>]*w-\[112px\][^>]*>/)?.[0] ?? "";
   assert.match(logo, /alt="Bunker707"/);
   assert.match(logo, new RegExp(`src="${LOGO.replace(/[.]/g, "\\.")}"`));
   assert.match(logo, /class="h-auto max-h-8 w-\[112px\] shrink-0 object-contain object-left"/);
   assert.doesNotMatch(comLogo, />Bunker707</, "com a logo, sem o nome em texto");
 
-  // O Icone da escola no celular: o simbolo padrao sem nada em Marca; o enviado preenche o quadrado.
-  const icone = tag(semLogo, "icon");
-  assert.match(icone, /^<img/);
-  assert.match(icone, /alt="Bunker707"/);
-  assert.match(icone, /src="\/brand\/icon-bunker\.svg"/);
-  assert.match(icone, /class="size-6 shrink-0 rounded-\[6px\] lg:hidden object-contain"/, "24 px, so abaixo de lg");
-  // A troca e no ponto da sala (lg, DESKTOP em live-room.tsx), nunca em sm: entre 640 e 1023 px o cabecalho ja tem o
-  // "{n} assistindo" e o Sair com texto, e os 125 px da logo cobririam os selos e zerariam o titulo.
+  // Abaixo de lg o cabecalho e o titulo, a linha do celular, o tema (a partir de sm) e o Sair (V2-18): sem o Icone.
   for (const html of [semLogo, comLogo]) {
-    assert.doesNotMatch(tag(html, "logo"), /\bsm:flex\b/, "a logo nao entra em sm");
-    assert.doesNotMatch(tag(html, "icon"), /\bsm:hidden\b/, "o icone nao sai em sm");
-  }
-  const enviado = tag(comMarca({ logoImage: LOGO, schoolIcon: ICONE }), "icon");
-  assert.match(enviado, new RegExp(`src="${ICONE.replace(/[.]/g, "\\.")}"`));
-  assert.match(enviado, /object-cover/);
-
-  // Sem link: sair da live passa pela confirmacao (askToLeave), nunca por um clique na logo.
-  for (const html of [semLogo, comLogo]) {
+    assert.equal(tag(html, "icon"), "", "sem o Icone da escola");
+    assert.doesNotMatch(html, new RegExp(ICONE.replace(/[.]/g, "\\.")));
+    // Sem link: sair da live passa pela confirmacao (askToLeave), nunca por um clique na logo.
     assert.doesNotMatch(html, /<a\b/);
+    // A marca vem antes do titulo; o titulo continua encolhendo.
+    assert.ok(html.indexOf('data-room-brand="logo"') < html.indexOf("<h1"));
+    assert.match(html, /<h1 class="min-w-0 truncate/);
   }
-  // A marca vem antes do selo e do titulo; o titulo continua encolhendo.
-  assert.ok(comLogo.indexOf('data-room-brand="logo"') < comLogo.indexOf("<h1"));
-  assert.match(comLogo, /<h1 class="min-w-0 truncate/);
-
-  // Live ao vivo: no celular, so o icone e "00:42:10" (a frase inteira no title e para o leitor de tela).
-  const aoVivo = comMarca({ logoImage: null }, { kind: "live", liveLabel: "Ao vivo · 00:42:10", liveTime: "00:42:10", showLiveBadge: true });
-  assert.match(aoVivo, /title="Ao vivo · 00:42:10"/);
-  assert.match(aoVivo, /<span class="hidden sm:inline">Ao vivo · 00:42:10<\/span>/, "no computador, a frase inteira");
-  assert.match(aoVivo, /<span aria-hidden="true" class="sm:hidden">00:42:10<\/span>/, "no celular, so o tempo");
-  assert.match(aoVivo, /<span class="sr-only sm:hidden">Ao vivo · 00:42:10<\/span>/, "e o leitor de tela ouve a frase");
 });
 
 test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar som, encerrada com Assistir de novo; os atributos do sinal de midia", () => {
@@ -358,11 +406,12 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
     /^(?:<link rel="preload" as="image" href="[^"]+"\/>)*<div aria-label="Aula de IA" aria-modal="true" class="z-\[60\] text-room-fg fixed inset-0 flex flex-col bg-room-bg" data-room-design="normal" data-room-phase="live" data-room-theme="dark" role="dialog"/,
     "o dialogo, no tema escuro"
   );
-  assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
-  assert.match(html, /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute bottom-3 right-3/, "as bolhas no canto do palco");
+  // F3 (V2-4): a caixa do palco leva a margem da coluna de miniaturas (0 na gravada) e os selos vem logo depois do palco.
+  assert.match(html, /<div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-room-slot="body"><div class="relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col" data-room-slot="stage-column"><div class="relative lg:min-h-0 lg:flex-1" data-room-slot="stage-box" style="--room-video-right:0px"><div class="relative bg-black aspect-video w-full lg:aspect-auto lg:h-full"/, "o palco 16:9 na largura, como era");
+  assert.match(html, /<div class="contents" data-room-slot="bubbles"><div aria-hidden="true" class="pointer-events-none absolute right-3 [^"]*bottom-14"/, "as bolhas no canto do palco, acima da linha dos selos de baixo");
   assert.match(html, /<div class="contents" data-room-slot="sales">/);
   assert.match(html, /<div class="contents" data-room-slot="dock"><div class="contents" data-room-slot="offer"><p aria-live="polite" class="sr-only" data-room-offer-announce="">/, "o card da Oferta no canto do palco (layout stage)");
-  assert.match(html, /<header class="flex h-12/, "o cabecalho de sempre");
+  assert.match(html, /<header class="flex h-14/, "o cabecalho V2 (V2-3)");
   assert.match(html, /data-testid="room-panel"/);
   assert.match(html, /role="group"><button aria-label="Curtir"/, "a barra de reacoes embaixo do palco");
   assert.doesNotMatch(html, /data-room-vertical|data-room-drawer|Comente…|Perguntas e enquetes/, "nada do desenho vertical");

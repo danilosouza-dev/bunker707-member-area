@@ -4,7 +4,7 @@ import { Radio, Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomMessage } from "@/lib/webinar-room-client";
-import { RoomBadge, RoomButton } from "./room-ui";
+import { RoomButton } from "./room-ui";
 import { trapRoomFocus } from "./webinar-room";
 
 // Os avisos e pedacos pequenos da sala ao vivo (docs/30 §1.3, §1.4, §1.7, §8.5 e §9; fase 3): os dois avisos de
@@ -13,8 +13,9 @@ import { trapRoomFocus } from "./webinar-room";
 // aria-modal, o foco preso nos dois botoes: no Ligar câmera, que o proprio clique abriu; no Agora não do microfone,
 // que abre sozinho; o foco volta a quem o tinha ao fechar; Esc = Agora não, sem fechar a sala); a aba
 // Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos); o chat por cima do palco no
-// celular (as 3 ultimas, com a gaveta fechada); e o selo Gravando. Redesign V2, F2 (docs/31 V2-11): o cartao dos
-// avisos, a aba Participantes e o selo usam os tokens do tema da sala; o chat por cima do palco e igual nos dois temas.
+// celular (as 3 ultimas, com a gaveta fechada). Redesign V2, F2 (docs/31 V2-11): o cartao dos avisos e a aba
+// Participantes usam os tokens do tema da sala; o chat por cima do palco e igual nos dois temas. F3 (V2-4): o selo
+// Gravando saiu do cabecalho para o palco (room-stage-badges.tsx).
 
 type ConsentDialogProps = {
   cancelLabel: string;
@@ -188,21 +189,5 @@ export function LiveChatOverlay({ messages }: { messages: readonly RoomMessage[]
         </li>
       ))}
     </ol>
-  );
-}
-
-/**
- * O selo Gravando (o gravador gravando: a voz e a imagem de quem liga entram no replay). No celular, so o ponto
- * vermelho (a palavra fica no title e para o leitor de tela), para o titulo da sala caber no cabecalho.
- */
-export function LiveRecordingBadge() {
-  const gravando = WEBINAR_COPY.aoVivo.gravando;
-  return (
-    <RoomBadge className="max-sm:px-1.5" title={gravando} tone="warning">
-      <span aria-hidden="true" className="inline-block size-2 rounded-full bg-red-500 motion-safe:animate-pulse" />
-      <span className="max-sm:sr-only" data-testid="live-recording">
-        {gravando}
-      </span>
-    </RoomBadge>
   );
 }

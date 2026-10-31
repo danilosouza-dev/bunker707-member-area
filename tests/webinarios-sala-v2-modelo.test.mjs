@@ -7,6 +7,8 @@ import "./support/transpile-tsx.mjs";
 // viewOnJoin, filmstripStep e stagePollFor), no lugar das conferencias de texto do codigo-fonte que elas substituem.
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
+// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
+// tira da direita do video (room-layout-model.ts).
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -110,4 +112,53 @@ test("themeForDesign: o desenho normal usa o tema da pessoa; o vertical e sempre
     ["vertical", "normal", "vertical"].map((design) => vertical.themeForDesign(design, guardado)),
     ["dark", "light", "dark"]
   );
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a linha do celular e a margem da coluna de miniaturas
+ * ---------------------------------------------------------------------------------------------- */
+
+const time = await import("../src/lib/webinar-time.ts");
+const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
+
+test("formatWebinarDayLong: o dia da semana e o mes por extenso no horario de Sao Paulo", () => {
+  assert.equal(time.formatWebinarDayLong("2026-11-05T23:00:00.000Z"), "Quinta, 5 de novembro");
+  assert.equal(time.formatWebinarDayLong("2026-10-30T23:00:00.000Z"), "Sexta, 30 de outubro");
+  // 23:30 de Sao Paulo ja e o dia seguinte em UTC: vale o dia de Sao Paulo.
+  assert.equal(time.formatWebinarDayLong("2026-10-31T02:30:00.000Z"), "Sexta, 30 de outubro");
+  assert.equal(time.formatWebinarDayLong("2026-03-01T15:00:00.000Z"), "Domingo, 1 de março");
+  assert.equal(time.formatWebinarDayLong(null), "");
+  assert.equal(time.formatWebinarDayLong("nao e data"), "");
+});
+
+test("roomDateLine (V2-3): a data, a hora, a duracao e quem apresenta; no Replay sem data e sem hora; o trecho sem valor sai", () => {
+  const base = { durationMinutes: 60, kind: "live", presenterName: "Danilo Souza", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const linha = (extra = {}) => layout.roomDateLine({ ...base, ...extra }).join(" · ");
+  assert.deepEqual(layout.roomDateLine(base), ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"], "os trechos");
+  assert.equal(linha(), "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza");
+  assert.equal(linha({ kind: "simulated" }), "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza", "a gravada como a live");
+  assert.equal(linha({ presenterName: null }), "Quinta, 5 de novembro · 20:00 · 60 min", "sem apresentador, sem o trecho");
+  assert.equal(linha({ presenterName: "   " }), "Quinta, 5 de novembro · 20:00 · 60 min", "nome em branco tambem");
+  assert.equal(linha({ kind: "replay" }), "60 min · com Danilo Souza", "no replay sem data nem hora");
+  assert.equal(linha({ durationMinutes: 0 }), "Quinta, 5 de novembro · 20:00 · com Danilo Souza", "duracao zero omite o trecho");
+  assert.equal(linha({ durationMinutes: -5 }), "Quinta, 5 de novembro · 20:00 · com Danilo Souza");
+  assert.equal(linha({ durationMinutes: null }), "Quinta, 5 de novembro · 20:00 · com Danilo Souza");
+  assert.equal(linha({ scheduledAt: null }), "60 min · com Danilo Souza", "sem a hora marcada, so o resto");
+  assert.equal(linha({ durationMinutes: 0, kind: "replay", presenterName: null }), "", "nada a dizer: a linha fica vazia");
+});
+
+test("roomMobileLine (V2-18): 'com {apresentador} · {n} assistindo'; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 128 }).join(" · "), "com Danilo Souza · 128 assistindo");
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "com Danilo Souza · 1 assistindo");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 0 }), ["0 assistindo"], "sem apresentador, so o contador (zero tambem e numero)");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: null }), []);
+});
+
+test("stageVideoRightPx: a coluna de miniaturas do iframe (213 px) mais o puxador (9 px; 21 px com toque); sem a coluna, 0", () => {
+  assert.equal(layout.stageVideoRightPx({ columnShown: true, touch: false }), 222);
+  assert.equal(layout.stageVideoRightPx({ columnShown: true, touch: true }), 234);
+  assert.equal(layout.stageVideoRightPx({ columnShown: true }), 222, "sem saber do toque, o puxador do mouse");
+  assert.equal(layout.stageVideoRightPx({ columnShown: false, touch: true }), 0);
+  assert.equal(layout.stageVideoRightPx({ columnShown: false }), 0);
 });

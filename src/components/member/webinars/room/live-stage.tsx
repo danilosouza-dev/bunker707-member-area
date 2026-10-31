@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle, Radio, RefreshCw } from "lucide-react";
-import type { ReactNode, RefObject } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import { MemberButton, MemberButtonLink } from "@/components/member/ui/member-button";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -40,6 +40,11 @@ export type LiveStageProps = {
   /** O palco inteiro (Tela cheia poe este elemento em tela cheia, com as reacoes por cima). */
   stageRef: RefObject<HTMLDivElement | null>;
   title: string;
+  /**
+   * Redesign V2, F3 (docs/31 V2-4): quanto a coluna de miniaturas do iframe ocupa a direita do video (px), na variavel
+   * --room-video-right: os selos de baixo e as pilulas do chat param antes dela (room-layout-model.ts).
+   */
+  videoRightPx?: number;
 };
 
 function Cover({ children, coverUrl, tone = "default" }: { children?: ReactNode; coverUrl: string | null; tone?: "default" | "dim" }) {
@@ -63,7 +68,7 @@ export function liveStageState(screen: LiveScreen, entry: LiveEntry): string {
 }
 
 export function LiveStage(props: LiveStageProps) {
-  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, replayHref, screen, sessionId, stageRef, title } = props;
+  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, replayHref, screen, sessionId, stageRef, title, videoRightPx = 0 } = props;
   const copy = WEBINAR_COPY.aoVivo;
   const phrase = liveScreenPhrase(screen, { hasReplay: replayHref !== null });
   const open = screen === "open";
@@ -81,6 +86,7 @@ export function LiveStage(props: LiveStageProps) {
       data-room-stage={liveStageState(screen, entry)}
       ref={stageRef}
       role="region"
+      style={{ "--room-video-right": `${videoRightPx}px` } as CSSProperties}
     >
       {/* O iframe da sala entra aqui (nunca troca de lugar: abrir o painel ou girar so mudam classes). */}
       <div className="absolute inset-0 [&_iframe]:size-full [&_iframe]:border-0" data-live-frame ref={frameRef} />

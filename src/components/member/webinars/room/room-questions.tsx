@@ -8,7 +8,7 @@ import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint } from "./assistant/assistant-hint";
-import { useRoomAssistant } from "./assistant/use-room-assistant";
+import { useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 import { RoomBadge, RoomButton } from "./room-ui";
@@ -83,6 +83,7 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
 
 export function RoomQuestionsTab({
   allowAnonymous,
+  assistant: sharedAssistant,
   consented,
   defaultDisplayMode,
   enabled,
@@ -95,6 +96,8 @@ export function RoomQuestionsTab({
   webinarId
 }: {
   allowAnonymous: boolean;
+  /** Redesign V2, F3: o Assistente que a sala ja le; com ele, a aba nao le de novo. */
+  assistant?: RoomAssistant;
   consented: boolean;
   defaultDisplayMode: DisplayNameMode;
   enabled: boolean;
@@ -110,7 +113,8 @@ export function RoomQuestionsTab({
   webinarId: string;
 }) {
   const copy = WEBINAR_COPY.sala;
-  const assistant = useRoomAssistant({ enabled: enabled && !readOnly, sessionId, webinarId });
+  const ownAssistant = useRoomAssistant({ enabled: !sharedAssistant && enabled && !readOnly, sessionId, webinarId });
+  const assistant = sharedAssistant ?? ownAssistant;
   const [questions, setQuestions] = useState<RoomQuestion[]>([]);
   const [waiting, setWaiting] = useState<string | null>(null);
   const [filter, setFilter] = useState<"answered" | "all">("all");

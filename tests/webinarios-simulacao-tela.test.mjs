@@ -36,6 +36,7 @@ const form = await import("../src/components/admin/v2/communication/webinars/sim
 const roomSimulation = await import("../src/components/member/webinars/room/room-simulation.tsx");
 const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const roomLayout = await import("../src/components/member/webinars/room/room-layout-model.ts");
 const model = await import("../src/server/webinars/simulation-model.ts");
 const { SIMULATION_LIMITS } = await import("../src/server/webinars/model.ts");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
@@ -276,8 +277,19 @@ test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; se
   const state = roomSimulationStateOf(roomData);
   assert.equal(state.displayCount(3, 5_000), 43);
   assert.equal(state.displayCount(3, 16_000), 58);
-  const markup = html(createElement(header.RoomHeader, { getOffsetMs: () => 16_000, kind: "simulated", onLeave: () => undefined, phase: "live", presentNow: state.displayCount(3, 16_000), showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA" }));
-  assert.match(markup, /58 assistindo/);
+  const markup = html(
+    createElement(header.RoomHeader, {
+      dateLine: "Quinta, 5 de novembro · 20:00 · 60 min",
+      mobileLine: roomLayout.roomMobileLine({ presenterName: null, presentNow: state.displayCount(3, 16_000) }).join(" · "),
+      onLeave: () => undefined,
+      onToggleTheme: () => undefined,
+      presentNow: state.displayCount(3, 16_000),
+      theme: "dark",
+      title: "Aula de IA"
+    })
+  );
+  assert.match(markup, /data-testid="room-present">[\s\S]*?58 assistindo</, "no computador");
+  assert.match(markup, /data-testid="room-mobile-line">58 assistindo</, "e na linha do celular");
 
   const nada = roomSimulationStateOf(model.EMPTY_SIMULATION_ROOM);
   assert.equal(nada.displayCount(3, 16_000), 3);
@@ -301,7 +313,7 @@ test("sala: 'Ana M. entrou' no chat por 8 s (so visual, sem anunciar), 'saiu' ta
 
   const aviso = html(createElement(roomSimulation.RoomSimulationSales, props(31_000)));
   assert.match(aviso, /data-room-simulation-sale=""[^>]*>|data-room-simulation-sale=""/);
-  assert.match(aviso, /<div aria-hidden="true"[^>]*left-3 top-3/, "por cima do palco, discreto");
+  assert.match(aviso, /<div aria-hidden="true"[^>]*left-4 top-14/, "por cima do palco, discreto, abaixo dos selos de cima (docs/31 V2-4)");
   assert.match(aviso, /aria-live="polite"[^>]*>Aviso: Carlos acabou de garantir a vaga na Formação</);
   assert.match(textOf(aviso), /Carlos acabou de garantir a vaga na Formação/);
   const depois = html(createElement(roomSimulation.RoomSimulationSales, props(34_000)));

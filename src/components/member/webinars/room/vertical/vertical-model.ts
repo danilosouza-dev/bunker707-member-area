@@ -206,7 +206,7 @@ export function roomSkeleton(design: RoomDesign): RoomSkeleton {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * O topo do vertical: o selo e o contador pela mesma regra do cabecalho (room-header.tsx)
+ * O topo do vertical: o selo e o contador pela mesma regra dos selos do palco (room-stage-badges.tsx)
  * ---------------------------------------------------------------------------------------------- */
 
 export type VerticalBadge = {
@@ -218,7 +218,10 @@ export type VerticalBadge = {
   showCount: boolean;
 };
 
-/** O selo do topo: a mesma regra de RoomHeader (showLiveBadge so vale com a sessao gravada no ar). */
+/**
+ * O selo do momento (D10): o topo do vertical e, no desenho normal, o selo de cima do palco e o contador do cabecalho
+ * (docs/31 V2-4; showLiveBadge so vale com a sessao gravada no ar).
+ */
 export function verticalBadge(input: { kind: "replay" | "simulated"; phase: "ended" | "live" | "waiting"; showLiveBadge: boolean }): VerticalBadge {
   if (input.kind === "replay") {
     return { badge: "replay", elapsed: false, showCount: false };

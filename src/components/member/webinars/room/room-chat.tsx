@@ -9,7 +9,7 @@ import { ASSISTANT_WAIT_MS, assistantRepliesToMe, mentionsAssistant, studentAtAs
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type DisplayNameMode, type SimulatedPhase } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
-import { useRoomAssistant } from "./assistant/use-room-assistant";
+import { useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
 import { RoomBadge, RoomButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
@@ -30,6 +30,11 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
   aboveComposer?: ReactNode;
+  /**
+   * Redesign V2, F3: o Assistente que a sala ja le (o mesmo estado do selo do palco, docs/31 V2-4). Com ele, o painel
+   * nao le de novo; sem ele (a gaveta antiga, os testes), o painel le sozinho como antes.
+   */
+  assistant?: RoomAssistant;
   busy?: boolean;
   chatMode: ChatMode;
   consented: boolean;
@@ -168,9 +173,10 @@ function composerHint(state: ComposerState, phase: SimulatedPhase | "replay"): s
 }
 
 export function RoomChatPanel(props: RoomChatPanelProps) {
-  const { aboveComposer = null, busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, sessionId = null, slowUntilMs, webinarId = null } = props;
+  const { aboveComposer = null, assistant: sharedAssistant, busy = false, chatMode, consented, defaultDisplayMode, error, messages, notice = null, nowMs, onRemoveMine, onSend, phase, pinned, readOnly, sessionId = null, slowUntilMs, webinarId = null } = props;
   const copy = WEBINAR_COPY.sala;
-  const assistant = useRoomAssistant({ enabled: !readOnly, sessionId, webinarId });
+  const ownAssistant = useRoomAssistant({ enabled: !sharedAssistant && !readOnly, sessionId, webinarId });
+  const assistant = sharedAssistant ?? ownAssistant;
   const repliesToMe = useMemo(() => assistantRepliesToMe(messages), [messages]);
   const [assistantCalls, setAssistantCalls] = useState<number[]>([]);
   const [waiting, setWaiting] = useState<{ base: number } | null>(null);

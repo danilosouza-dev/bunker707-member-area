@@ -122,7 +122,13 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
             webinarHref={backHref}
           />
         ) : (
-          <WebinarRoom coverUrl={data.page.view.coverUrl} payload={data.payload} readOnly={Boolean(accessPreviewMode)} webinarHref={backHref} />
+          <WebinarRoom
+            coverUrl={data.page.view.coverUrl}
+            payload={data.payload}
+            presenterName={data.page.view.presenterName}
+            readOnly={Boolean(accessPreviewMode)}
+            webinarHref={backHref}
+          />
         )
       ) : null}
       <MemberFooter branding={shellData.branding} />

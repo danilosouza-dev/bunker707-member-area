@@ -228,11 +228,12 @@ test("os lugares do vertical: o aviso de venda no topo (abaixo da barra), a pilu
   assert.ok(dockHtml.indexOf("data-room-vertical-chat") < dockHtml.indexOf('data-room-slot="offer"'), "e abaixo das mensagens");
 
   assert.match(elementWith(html, 'data-room-slot="bubbles"'), /absolute bottom-\[46%\] right-0[\s\S]*data-testid="room-reactions"/);
+  assert.match(elementWith(html, 'data-room-slot="bubbles"'), /class="pointer-events-none absolute right-3 [^"]*bottom-3" data-testid="room-reactions"/, "no vertical as bolhas continuam onde eram (no palco elas sobem acima dos selos)");
 
   // No desenho normal, os mesmos componentes com o desenho do palco.
   const normal = sala("normal");
   assert.match(normal, /data-stub-offer="stage"/);
-  assert.match(elementWith(normal, 'data-room-slot="sales"'), /left-3 top-3/);
+  assert.match(elementWith(normal, 'data-room-slot="sales"'), /left-4 top-14/, "abaixo dos selos de cima do palco (docs/31 V2-4)");
   assert.match(elementWith(normal, 'data-room-slot="offer"'), /^<div class="contents" data-room-slot="offer">/);
 
   // No "ver como" a equipe ve o card como o aluno, sem gravar clique (RoomOffer com readOnly).

@@ -35,6 +35,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomChatPanel } = await import("../src/components/member/webinars/room/room-chat.tsx");
 const { RoomQuestionItem } = await import("../src/components/member/webinars/room/room-questions.tsx");
+const { RoomStageBadges } = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const { AssistantHandoff } = await import("../src/components/member/webinars/room/assistant/assistant-handoff.tsx");
 const { AssistantHint, assistantHintText } = await import("../src/components/member/webinars/room/assistant/assistant-hint.tsx");
 const { AttendancePanel } = await import("../src/components/admin/v2/communication/webinars/assistant/attendance-panel.tsx");
@@ -102,6 +103,31 @@ test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 
   const semIds = chat({ sessionId: null, webinarId: null });
   assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o selo)");
   assert.match(textOf(semIds), /Assistente/);
+});
+
+test("o Assistente lido pela sala (docs/31 V2-4): o chat usa o estado que a sala passa, sem ler de novo; sem ele, o painel le sozinho como antes", () => {
+  // O servidor nao roda efeitos: sem a prop, o estado do proprio painel e o desligado ate a primeira leitura no navegador.
+  const sozinho = chat();
+  assert.doesNotMatch(sozinho, /data-assistant-hint="call"/, "sem a prop, nada lido ainda");
+  // Com o estado da sala (ligado, ninguem atendendo), a dica "@assistente" aparece ja na primeira pintura: o painel usa
+  // o estado recebido, e a leitura dele fica desligada (enabled false), sem um segundo pedido por minuto.
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  const comSala = chat({ assistant: daSala });
+  assert.match(comSala, /data-assistant-hint="call"/);
+  assert.match(textOf(comSala), new RegExp(COPY.aluno.chamarAssistente.replace(/[.@]/g, "\\$&")));
+  assert.equal(count(comSala, /data-testid="assistant-handoff"/g), 1, "o Falar com a equipe continua na resposta a mim");
+  // Desligado na sala: nada de dica, mesmo com o painel podendo ler.
+  assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } } }), /data-assistant-hint="call"/);
+});
+
+test("o selo Assistente no palco (docs/31 V2-4): aparece com o Assistente ligado, embaixo a direita antes da coluna de miniaturas, so a partir de lg; some sem ele", () => {
+  const ligado = render(RoomStageBadges, { assistantOn: true, presenterName: null, recording: false, topLeft: null });
+  const selo = ligado.match(/<span [^>]*data-room-badge="assistant">[\s\S]*?<\/span>/)?.[0] ?? "";
+  assert.match(selo, /lucide-sparkles/);
+  assert.match(textOf(selo), /^Assistente$/);
+  assert.match(selo, /class="[^"]*\bbottom-4 right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*\bhidden lg:inline-flex"/, "antes da coluna e so no computador (no celular o canto e do Modo cinema)");
+  assert.match(selo, /bg-room-on-video-bg[^"]*text-room-on-video-fg/, "os tokens de cima do video (a pilula branca no claro)");
+  assert.equal(render(RoomStageBadges, { assistantOn: false, presenterName: null, recording: false, topLeft: null }), "", "desligado (e sem mais nada), nenhum selo");
 });
 
 test("a linha do Assistente: respondendo, limite, a dica @assistente e a equipe responde depois; nada sem o que dizer", () => {
