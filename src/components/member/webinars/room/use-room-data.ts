@@ -187,6 +187,8 @@ export function useRoomHeartbeat(input: {
 
 export type ChatFeed = {
   error: string | null;
+  /** A primeira leitura do chat chegou (o contador do balao conta o que veio depois dela, panelUnreadSeen). */
+  loaded: boolean;
   messages: RoomMessage[];
   /** O replay pulou: a janela recomeca no novo ponto. */
   seeked: () => void;
@@ -199,6 +201,7 @@ export type ChatFeed = {
 export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => number; initialServerTime: string; sessionId: string; webinarId: string }): ChatFeed {
   const { enabled, initialServerTime, sessionId, webinarId } = input;
   const [messages, setMessages] = useState<RoomMessage[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [slowUntilMs, setSlowUntilMs] = useState<number | null>(null);
   const windowRef = useRef<ChatWindow | null>(null);
@@ -235,6 +238,7 @@ export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => 
         }
         windowRef.current = answer.data.window;
         setMessages((previous) => (seeked ? mergeMessages(previous.filter((message) => message.mine), answer.data.messages) : mergeMessages(previous, answer.data.messages)));
+        setLoaded(true);
         setError(null);
       } catch (failure) {
         if (!stopped) {
@@ -295,7 +299,7 @@ export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => 
     return answer.removed;
   }, [webinarId]);
 
-  return { error, messages, removeMine, seeked, send, slowUntilMs };
+  return { error, loaded, messages, removeMine, seeked, send, slowUntilMs };
 }
 
 /* ------------------------------------------------------------------------------------------------

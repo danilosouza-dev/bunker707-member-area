@@ -9,8 +9,8 @@ import "./support/transpile-tsx.mjs";
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
 // F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
 // tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
-// F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao, o primeiro foco e quando
-// as 2 ultimas mensagens ficam em pilulas sobre o palco.
+// F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
+// mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -358,12 +358,79 @@ test("unreadCount (V2-7): conta as mensagens que chegaram depois de o painel fec
   assert.equal(layout.unreadCount(vistas, chat), 2, "c e e; a minha (d) nao conta");
   assert.equal(layout.unreadCount(new Set(), [mensagem("x", 1, { mine: true })]), 0, "so as minhas: nada novo");
   assert.equal(layout.unreadCount(new Set(chat.map((item) => item.id)), chat), 0, "tudo ja visto");
-  // O painel que monta fechado (a escolha guardada): a primeira leitura do chat chega depois, com o historico. So conta
-  // o que e mais novo que o fechar.
+  // Com o offset do fechar (a gravada e o Replay, onde o zero nao muda): so conta o que e mais novo que ele.
   assert.equal(layout.unreadCount(new Set(), chat, 8_000), 2, "o historico (a e b) nao e novo; c e e sim");
   assert.equal(layout.unreadCount(new Set(), chat, 10_000), 0, "a mensagem do mesmo instante do fechar ja estava na tela");
   // Reusa a contagem das mensagens novas da sala (o leitor de tela ja anunciava "N mensagens novas").
   assert.equal(layout.unreadCount(vistas, chat), client.newMessageCount(vistas, chat.filter((item) => !item.mine)));
+});
+
+const salaModelo = await import("../src/server/webinars/room-model.ts");
+
+/** O offset da live como o servidor da (o zero e a ancora, ou o inicio, ou a hora marcada) e a sala calcula. */
+const HORA_MARCADA = Date.parse("2026-11-05T23:00:00.000Z");
+const minutos = (n) => n * 60_000;
+const offsetDaLive = (nowMs, { anchorMin = null, startedMin = null } = {}) =>
+  salaModelo.sessionOffsetMs(
+    {
+      kind: "live",
+      recordingAnchorAt: anchorMin === null ? null : new Date(HORA_MARCADA + minutos(anchorMin)).toISOString(),
+      scheduledAt: new Date(HORA_MARCADA).toISOString(),
+      startedAt: startedMin === null ? null : new Date(HORA_MARCADA + minutos(startedMin)).toISOString()
+    },
+    nowMs
+  );
+
+test("o contador do balao na Live ao vivo (V2-7): a live que comeca atrasada e a ancora da gravacao mudam o zero do offset, e a mensagem nova depois do fechar conta assim mesmo", () => {
+  const antiga = mensagem("antiga", -minutos(2));
+
+  // Caso 1: o painel fecha na espera, 8 min depois da hora marcada; a live comeca aos +10 min e a mensagem chega 30 s depois.
+  const fechouNaEspera = offsetDaLive(HORA_MARCADA + minutos(8));
+  assert.equal(fechouNaEspera, 480_000);
+  const marca1 = layout.panelUnreadMark({ chatLoaded: true, kind: "live", messages: [antiga], offsetMs: fechouNaEspera });
+  const nova1 = mensagem("nova-1", offsetDaLive(HORA_MARCADA + minutos(10.5), { startedMin: 10 }));
+  assert.equal(nova1.offsetMs, 30_000, "o zero andou para o inicio: o offset da nova e menor que o do fechar");
+  assert.equal(layout.panelUnreadCount(marca1, [antiga, nova1]), 1, "a nova conta");
+  assert.equal(layout.unreadCount(marca1.seenIds, [antiga, nova1], fechouNaEspera), 0, "pelo offset do fechar, ela sumiria do contador");
+
+  // Caso 2: o painel fecha aos 10 min de live, a ancora entra aos 12 min e a mensagem chega 1 min depois.
+  const fechouNoAr = offsetDaLive(HORA_MARCADA + minutos(10), { startedMin: 0 });
+  assert.equal(fechouNoAr, 600_000);
+  const marca2 = layout.panelUnreadMark({ chatLoaded: true, kind: "live", messages: [antiga], offsetMs: fechouNoAr });
+  const nova2 = mensagem("nova-2", offsetDaLive(HORA_MARCADA + minutos(13), { anchorMin: 12, startedMin: 0 }));
+  assert.equal(nova2.offsetMs, 60_000);
+  assert.equal(layout.panelUnreadCount(marca2, [antiga, nova2]), 1, "a nova conta");
+  // O servidor recalcula pela ancora o offset do que ja havia: a mesma mensagem com outro offset continua vista.
+  assert.equal(layout.panelUnreadCount(marca2, [{ ...antiga, offsetMs: -minutos(14) }, nova2]), 1);
+  assert.equal(layout.panelUnreadCount(marca2, [antiga, nova2, mensagem("minha", 61_000, { mine: true })]), 1, "a do aluno nunca");
+  assert.deepEqual(marca2.afterOffsetMs, null, "na live a marca nao guarda o offset");
+});
+
+test("o contador do balao na gravada e no Replay (V2-7): o zero nao muda, entao a marca guarda tambem o offset do fechar", () => {
+  const chat = [mensagem("a", 1_000), mensagem("b", 2_000), mensagem("c", 9_000)];
+  for (const kind of ["simulated", "replay"]) {
+    const marca = layout.panelUnreadMark({ chatLoaded: true, kind, messages: chat.slice(0, 2), offsetMs: 8_000 });
+    assert.equal(marca.afterOffsetMs, 8_000, kind);
+    assert.equal(layout.panelUnreadCount(marca, chat), 1, `${kind}: c chegou depois do fechar`);
+    // No Replay o aluno volta o video: o que fica antes do fechar ja era do chat.
+    assert.equal(layout.panelUnreadCount(marca, [mensagem("antes", 3_000), ...chat]), 1, kind);
+  }
+});
+
+test("o painel que fecha antes da primeira leitura do chat (ja monta fechado): essa leitura vira o visto, e so o que chega depois conta", () => {
+  for (const kind of ["live", "simulated", "replay"]) {
+    const marca = layout.panelUnreadMark({ chatLoaded: false, kind, messages: [], offsetMs: 0 });
+    assert.equal(marca.seenIds, null, kind);
+    assert.equal(layout.panelUnreadCount(marca, [mensagem("x", 5)]), 0, `${kind}: antes da leitura, nada`);
+    assert.equal(layout.panelUnreadSeen(marca, { chatLoaded: false, messages: [] }), marca, "sem a leitura, a mesma marca");
+    // A primeira leitura traz o historico (na live, offsets menores que zero na espera ou o que veio antes da ancora).
+    const historico = [mensagem("h1", -minutos(3)), mensagem("h2", -minutos(1))];
+    const vista = layout.panelUnreadSeen(marca, { chatLoaded: true, messages: historico });
+    assert.deepEqual([...vista.seenIds].sort(), ["h1", "h2"], kind);
+    assert.equal(layout.panelUnreadCount(vista, historico), 0, `${kind}: o historico nao e novo`);
+    assert.equal(layout.panelUnreadCount(vista, [...historico, mensagem("nova", 10)]), 1, `${kind}: a nova conta`);
+    assert.equal(layout.panelUnreadSeen(vista, { chatLoaded: true, messages: [...historico, mensagem("nova", 10)] }), vista, "depois da leitura, a marca nao muda");
+  }
 });
 
 test("firstFocusTarget: o primeiro foco da sala na aba Chat com o painel na tela; fechado, no balao da barra", () => {
@@ -387,6 +454,29 @@ test("chatPillsShown (V2-8): as pilulas so no desenho normal, com o painel fecha
   for (const [extra, esperado, motivo] of linhas) {
     assert.equal(layout.chatPillsShown({ ...base, ...extra }), esperado, motivo);
   }
+});
+
+test("o card da Oferta no palco (V2-4 e V2-8): na tela, tira as pilulas do chat e o selo do Assistente; fechado pelo aluno, os dois voltam; a janela seguinte mostra de novo", () => {
+  const card = { closedKey: null, enabled: true, hasView: true, shown: true, windowKey: "oferta-1@120000" };
+  const canto = (offer) => {
+    const offerShown = layout.offerOnScreen(offer);
+    return {
+      assistente: layout.stageAssistantShown({ assistantEnabled: true, bottomBadges: true, offerShown }),
+      pilulas: layout.chatPillsShown({ blocked: false, design: "normal", offerShown, panelShown: false, settingsTakeover: false })
+    };
+  };
+  assert.deepEqual(canto({ ...card, shown: false }), { assistente: true, pilulas: true }, "antes da janela, o canto e das pilulas e do selo");
+  assert.equal(layout.offerOnScreen(card), true);
+  assert.deepEqual(canto(card), { assistente: false, pilulas: false }, "o card no palco tem o canto");
+  const fechado = { ...card, closedKey: card.windowKey };
+  assert.equal(layout.offerOnScreen(fechado), false);
+  assert.deepEqual(canto(fechado), { assistente: true, pilulas: true }, "o aluno fechou o card: os dois voltam");
+  assert.equal(layout.offerOnScreen({ ...fechado, windowKey: "oferta-1@600000" }), true, "a janela seguinte mostra de novo");
+  assert.equal(layout.offerOnScreen({ ...card, enabled: false }), false, "fora da sessao no ar (ou no ver como sem a oferta), nada");
+  assert.equal(layout.offerOnScreen({ ...card, hasView: false, windowKey: null }), false, "sem o desenho da oferta, nada");
+  // O selo do Assistente so com os selos de baixo (o video no ar, sem a barra da Bunny do Replay) e o Assistente ligado.
+  assert.equal(layout.stageAssistantShown({ assistantEnabled: true, bottomBadges: false, offerShown: false }), false);
+  assert.equal(layout.stageAssistantShown({ assistantEnabled: false, bottomBadges: true, offerShown: false }), false);
 });
 
 test("overlayMessages (V2-8): sem contagem, as 2 ultimas mensagens (a mais nova por ultimo), tambem no computador", () => {

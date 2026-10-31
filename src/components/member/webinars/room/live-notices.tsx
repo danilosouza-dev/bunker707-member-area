@@ -143,8 +143,11 @@ export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; o
   );
 }
 
-/** A aba Participantes (docs/30 §1.3): quem esta no palco e quantos alunos estao na sala, nunca a lista dos alunos. */
-export function LiveParticipantsTab({ stage, students }: { stage: readonly string[]; students: number }) {
+/**
+ * A aba Participantes (docs/30 §1.3): quem esta no palco e quantos alunos estao na sala, nunca a lista dos alunos. Sem
+ * numero (`students` nulo: a sessao encerrada, quando o cabecalho tambem tira o "{n} assistindo"), so o palco.
+ */
+export function LiveParticipantsTab({ stage, students }: { stage: readonly string[]; students: number | null }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3" data-testid="live-participants">
@@ -161,10 +164,12 @@ export function LiveParticipantsTab({ stage, students }: { stage: readonly strin
           </ul>
         ) : null}
       </section>
-      <p className="flex items-center gap-2 text-sm text-room-fg">
-        <Users aria-hidden="true" className="size-4" />
-        {copy.alunosNaSala(Math.max(0, students))}
-      </p>
+      {students === null ? null : (
+        <p className="flex items-center gap-2 text-sm text-room-fg">
+          <Users aria-hidden="true" className="size-4" />
+          {copy.alunosNaSala(Math.max(0, students))}
+        </p>
+      )}
     </div>
   );
 }

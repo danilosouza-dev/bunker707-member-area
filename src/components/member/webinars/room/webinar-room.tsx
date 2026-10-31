@@ -18,7 +18,7 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomMobileLine, roomPanelShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomMobileLine, roomPanelShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollsTab } from "./room-polls";
@@ -373,8 +373,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const barShown = !vertical && !unavailable && phase !== "ended";
   const reactionsShown = reactionsOpen && barShown;
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover: false });
-  // O contador do balao: as mensagens novas desde que o painel fechou (o offset do video da sessao).
-  const unread = useRoomPanelUnread({ messages: translation.messages, offsetMs: currentOffsetMs, panelShown });
+  // O contador do balao: as mensagens novas desde que o painel fechou (os ids e o offset do video da sessao, cujo zero
+  // nao muda: a hora marcada na gravada, o player no Replay).
+  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, panelShown });
   const firstFocus = firstFocusTarget({ panelShown });
 
   const leave = useCallback(() => {
@@ -619,8 +620,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         webinarId={webinarId}
       />
     ) : shownTab === "participantes" ? (
-      // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada); nunca a lista de alunos.
-      <LiveParticipantsTab stage={panelStageNames(presenterName)} students={shownCount} />
+      // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
+      // no cabecalho); nunca a lista de alunos.
+      <LiveParticipantsTab stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
     ) : (
       <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} readOnly={readOnly || phase === "ended"} sessionId={sessionId} webinarId={webinarId} />
     );
@@ -681,7 +683,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {stage}
             {vertical || unavailable ? null : (
               <RoomStageBadges
-                assistantOn={bottomBadges && assistant.state.enabled && !offerShown}
+                assistantOn={stageAssistantShown({ assistantEnabled: assistant.state.enabled, bottomBadges, offerShown })}
                 presenterName={bottomBadges ? presenterName : null}
                 recording={false}
                 topLeft={topLeft}
@@ -689,7 +691,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             )}
             {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
-              <RoomChatPills messages={overlayMessages(translation.messages)} raised={kind === "replay"} />
+              <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
             ) : null}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
               <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />

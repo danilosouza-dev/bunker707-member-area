@@ -614,10 +614,14 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   assert.match(html, /12 alunos na sala/);
   assert.equal((html.match(/<li/g) ?? []).length, 2, "so o palco vira lista");
   assert.match(render(notices.LiveParticipantsTab, { stage: [], students: 1 }), /1 aluno na sala/);
+  // A live encerrada: o cabecalho tira o "{n} assistindo" e a aba tambem fica sem numero (so o palco).
+  const encerrada = render(notices.LiveParticipantsTab, { stage: ["Danilo S."], students: null });
+  assert.match(encerrada, /Danilo S\./);
+  assert.doesNotMatch(encerrada, /na sala/);
 
   // As pilulas (V2-8): as 2 ultimas (overlayMessages), a mais nova embaixo, sobre o video, tambem no computador.
   const mensagens = ["a", "b", "c"].map((id) => ({ body: `texto ${id}`, displayName: id === "c" ? "Bruna Souza" : "Ana S.", id, kind: "message", mine: false, offsetMs: 0, pending: false, pinned: false, replyToId: null, role: "student" }));
-  const pilulas = render(pillsModule.RoomChatPills, { messages: overlayMessages(mensagens) });
+  const pilulas = render(pillsModule.RoomChatPills, { kind: "live", messages: overlayMessages(mensagens) });
   assert.equal((pilulas.match(/<li/g) ?? []).length, 2);
   assert.doesNotMatch(pilulas, /texto a/, "so as 2 ultimas");
   assert.ok(pilulas.indexOf("texto b") < pilulas.indexOf("texto c"), "a mais nova embaixo");
@@ -633,9 +637,11 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   const pilula = pilulas.match(/<li class="([^"]*)">/)?.[1].split(" ") ?? [];
   assert.ok(["h-8", "rounded-full", "bg-black/55", "text-white"].every((classe) => pilula.includes(classe)), pilula.join(" "));
   assert.match(pilulas, /<span aria-hidden="true" class="[^"]*size-\[22px\][^"]*"><span class="[^"]*">BS<\/span><\/span><span class="[^"]*font-semibold[^"]*">Bruna Souza<\/span> <span class="min-w-0 truncate">texto c<\/span>/);
-  // No Replay, acima da barra de controles da Bunny.
-  assert.match(render(pillsModule.RoomChatPills, { messages: overlayMessages(mensagens), raised: true }), /^<div class="[^"]*\bbottom-20\b[^"]*" data-testid="room-chat-pills">/);
-  assert.equal(render(pillsModule.RoomChatPills, { messages: [] }), "", "sem mensagem, nada no palco");
+  // No Replay, acima da barra de controles da Bunny, e com o nome da aba do painel ("Chat da live").
+  const doReplay = render(pillsModule.RoomChatPills, { kind: "replay", messages: overlayMessages(mensagens) });
+  assert.match(doReplay, /^<div class="[^"]*\bbottom-20\b[^"]*" data-testid="room-chat-pills"><ol aria-label="Chat da live"/);
+  assert.match(render(pillsModule.RoomChatPills, { kind: "simulated", messages: overlayMessages(mensagens) }), /^<div class="[^"]*\bbottom-14\b[^"]*" data-testid="room-chat-pills"><ol aria-label="Chat"/);
+  assert.equal(render(pillsModule.RoomChatPills, { kind: "live", messages: [] }), "", "sem mensagem, nada no palco");
 });
 
 test("o painel (V2-7): as abas em pilula na lista 'Painel da sala', a escolhida com aria-selected, o X 'Fechar o painel' no computador; fechado, o aside fica hidden e o conteudo continua montado", () => {
@@ -672,7 +678,8 @@ test("o painel (V2-7): as abas em pilula na lista 'Painel da sala', a escolhida 
   assert.match(aberto, /<button aria-label="Fechar o painel" class="[^"]*\bhidden\b[^"]*\blg:grid\b[^"]*" title="Fechar o painel" type="button">/);
   assert.match(aberto, /<div aria-labelledby="room-tabbtn-chat" class="[^"]*" id="room-tab-chat" role="tabpanel"><textarea/);
   // Fechado: o aside hidden, e o campo com o rascunho continua no HTML (montado).
-  const fechado = painel({ firstFocus: false, open: false });
+  // O primeiro foco pela regra pura: fechado, ele vai para o balao, nunca para a aba escondida.
+  const fechado = painel({ firstFocus: layout.firstFocusTarget({ panelShown: false }) === "tab", open: false });
   assert.match(fechado, /^<aside class="[^"]*" data-testid="room-panel" hidden="" id="room-panel">/);
   assert.match(fechado, /<textarea aria-label="[^"]+">rascunho<\/textarea>/);
   assert.doesNotMatch(fechado, /data-room-first-focus/, "fechado, o primeiro foco e o balao");
@@ -699,11 +706,12 @@ test("o balao com o painel fechado (V2-7 e V2-8): o contador vermelho das mensag
   const aberto = balao({ open: true, unread: 5 });
   assert.match(aberto, /aria-label="Esconder o chat" aria-pressed="true"/);
   assert.doesNotMatch(aberto, /data-room-unread/);
-  // Fechado, o balao recebe o primeiro foco da sala (a aba Chat esta escondida).
-  assert.match(balao({ firstFocus: true, open: false }), /data-room-first-focus=""/);
-  assert.doesNotMatch(balao({ open: true }), /data-room-first-focus/);
+  // Fechado, o balao recebe o primeiro foco da sala (a aba Chat esta escondida), pela regra pura.
+  const focoNoBalao = layout.firstFocusTarget({ panelShown: false }) === "panel-toggle";
+  assert.match(balao({ firstFocus: focoNoBalao, open: false }), /data-room-first-focus=""/);
+  assert.doesNotMatch(balao({ firstFocus: layout.firstFocusTarget({ panelShown: true }) === "panel-toggle", open: true }), /data-room-first-focus/);
   // A barra da live leva o contador e o primeiro foco ao balao.
-  const naBarra = barra({ panelFirstFocus: true, panelOpen: false, panelUnread: 2 });
+  const naBarra = barra({ panelFirstFocus: focoNoBalao, panelOpen: false, panelUnread: 2 });
   assert.match(naBarra, /<button aria-controls="room-panel" aria-label="Mostrar o chat, 2 mensagens novas" aria-pressed="false"[^>]*data-room-first-focus=""/);
 });
 

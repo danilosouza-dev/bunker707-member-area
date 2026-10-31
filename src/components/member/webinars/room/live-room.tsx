@@ -464,8 +464,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const presentNow = heartbeatPresent ?? session.presentNow;
   const openPolls = session.polls.filter((poll) => poll.status === "open");
   const tabs = panelTabsFor({ kind: "live", openPolls: openPolls.length, tab });
-  // O contador do balao: as mensagens novas desde que o painel fechou (o offset da sala pelo relogio corrigido).
-  const unread = useRoomPanelUnread({ messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, panelShown });
+  // O contador do balao: as mensagens novas desde que o painel fechou. Na live so os ids contam (o zero do offset anda
+  // quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
+  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, panelShown });
   const firstFocus = firstFocusTarget({ panelShown });
   const replayHref = session.webinar.replaySessionId ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const scheduledMs = Date.parse(session.session.scheduledAt);
@@ -740,7 +741,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               ) : null}
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
               {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
-              {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills messages={overlayMessages(translation.messages)} /> : null}
+              {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} /> : null}
               {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
               {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
             </LiveStage>
@@ -870,7 +871,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                 webinarId={webinarId}
               />
             ) : null}
-            {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentNow} /> : null}
+            {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentShown} /> : null}
             {tab === "enquetes" ? (
               <RoomPollsTab enabled={!readOnly} getOffsetMs={getOffsetMs} initial={session.polls} onRefused={onWriteRefused} readOnly={readOnly || !writable} sessionId={sessionId} webinarId={webinarId} />
             ) : null}

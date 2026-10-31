@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { OfferPill, OfferStageCard } from "./offer/offer-card-view";
 import { useOfferReducedMotion, useRoomOffer } from "./offer/use-room-offer";
+import { offerOnScreen } from "./room-layout-model";
 
 // O card da Oferta na sala da Live gravada e do Replay (docs/30 §1.6, §5.1 e §6.6), no palco (`stage`) ou como a
 // pilula da sala vertical (`vertical`). webinar-room.tsx monta este componente no palco; a sala vertical (4d) monta com
@@ -34,8 +35,8 @@ export function RoomOffer({ enabled, getOffsetMs, layout, onShownChange, readOnl
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   const view = state.view;
-  const visible = state.shown && view !== null && state.windowKey !== closedKey;
-  const onScreen = enabled && visible;
+  // Na tela pela regra pura (offerOnScreen): a mesma que tira do canto as pilulas do chat e o selo do Assistente.
+  const onScreen = offerOnScreen({ closedKey, enabled, hasView: view !== null, shown: state.shown, windowKey: state.windowKey });
   useEffect(() => {
     onShownChange?.(onScreen);
     // Fora da tela (ou desmontado), o canto volta para as pilulas e o selo.
@@ -61,7 +62,7 @@ export function RoomOffer({ enabled, getOffsetMs, layout, onShownChange, readOnl
       <p aria-live="polite" className="sr-only" data-room-offer-announce="">
         {state.announcement}
       </p>
-      {visible && view ? (
+      {onScreen && view ? (
         layout === "stage" ? (
           <OfferStageCard {...common} onClose={() => setClosedKey(state.windowKey)} view={view} />
         ) : (

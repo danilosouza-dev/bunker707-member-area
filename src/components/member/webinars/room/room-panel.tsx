@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomMessage } from "@/lib/webinar-room-client";
-import { unreadCount, type RoomKind, type RoomPanelTab } from "./room-layout-model";
+import { panelUnreadCount, panelUnreadMark, panelUnreadSeen, type PanelUnreadMark, type RoomKind, type RoomPanelTab } from "./room-layout-model";
 import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
 
 // O painel da sala (docs/31 V2-7 e V2-8), o mesmo na Live ao vivo, na gravada e no Replay (desenho normal): a partir
@@ -97,7 +97,7 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
       <div
         aria-labelledby={`room-tabbtn-${tab}`}
         className={cn(
-          "mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b",
+          "mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b",
           contentClassName
         )}
         id={`room-tab-${tab}`}
@@ -111,19 +111,23 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
 
 /**
  * O contador do balao (V2-7 e V2-8): quantas mensagens de outras pessoas chegaram desde que o painel fechou. Ao fechar,
- * a sala guarda as mensagens que estavam na tela e o offset daquele instante (`offsetMs`); abrir zera. O painel que ja
- * monta fechado (a escolha guardada) conta a partir da montagem: a primeira leitura do chat que chega depois nao e nova.
+ * a sala guarda a marca do fechar (panelUnreadMark: os ids das mensagens na tela e, fora da Live ao vivo, o offset
+ * daquele instante); abrir zera. O painel que fecha antes da primeira leitura do chat (ele ja monta fechado, a escolha
+ * guardada) toma essa leitura como vista (panelUnreadSeen).
  */
-type PanelClosedAt = { ids: ReadonlySet<string>; offsetMs: number };
-
-export function useRoomPanelUnread(input: { messages: readonly RoomMessage[]; offsetMs: number; panelShown: boolean }): number {
-  const { messages, offsetMs, panelShown } = input;
-  const closedAt = (): PanelClosedAt => ({ ids: new Set<string>(messages.map(({ id }) => id)), offsetMs });
-  const [since, setSince] = useState<PanelClosedAt | null>(() => (panelShown ? null : closedAt()));
+export function useRoomPanelUnread(input: { chatLoaded: boolean; kind: RoomKind; messages: readonly RoomMessage[]; offsetMs: number; panelShown: boolean }): number {
+  const { chatLoaded, kind, messages, offsetMs, panelShown } = input;
+  const markNow = () => panelUnreadMark({ chatLoaded, kind, messages, offsetMs });
+  const [mark, setMark] = useState<PanelUnreadMark | null>(() => (panelShown ? null : markNow()));
   const [wasShown, setWasShown] = useState(panelShown);
   if (wasShown !== panelShown) {
     setWasShown(panelShown);
-    setSince(panelShown ? null : closedAt());
+    setMark(panelShown ? null : markNow());
+  } else if (mark) {
+    const seen = panelUnreadSeen(mark, { chatLoaded, messages });
+    if (seen !== mark) {
+      setMark(seen);
+    }
   }
-  return panelShown || !since ? 0 : unreadCount(since.ids, messages, since.offsetMs);
+  return panelShown || !mark ? 0 : panelUnreadCount(mark, messages);
 }

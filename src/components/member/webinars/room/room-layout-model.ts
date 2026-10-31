@@ -2,9 +2,10 @@
 // (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do iframe tira da direita do video, onde os
 // selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
 // quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
-// contador de mensagens novas do balao, o primeiro foco e quando as pilulas do chat ficam no palco (V2-7 e V2-8). Sem
-// "use client" e com imports relativos: tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le
-// o relogio nem a tela: tudo chega por parametro.
+// contador de mensagens novas do balao, o primeiro foco, quando as pilulas do chat ficam no palco (V2-7 e V2-8) e quando
+// o card da Oferta tira do canto as pilulas e o selo do Assistente. Sem "use client" e com imports relativos:
+// tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
+// parametro.
 
 import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
@@ -186,13 +187,46 @@ export function panelStageNames(presenterName: string | null): string[] {
 
 /**
  * Quantas mensagens novas chegaram com o painel fechado (o contador do balao, V2-7 e V2-8): as que nao estavam na
- * tela quando o painel fechou (`seenIds`), sem as do proprio aluno. `afterOffsetMs` e o offset da sala quando o painel
- * fechou: a mensagem mais antiga que ele (a primeira leitura do chat que chega depois de o painel abrir fechado, ao
- * recarregar) ja era do chat e nao conta como nova.
+ * tela quando o painel fechou (`seenIds`), sem as do proprio aluno. `afterOffsetMs` (so onde o zero do offset nunca
+ * muda, panelUnreadMark) e o offset da sala quando o painel fechou: a mensagem mais antiga que ele ja era do chat e nao
+ * conta como nova.
  */
 export function unreadCount(seenIds: ReadonlySet<string>, messages: readonly RoomMessage[], afterOffsetMs: number | null = null): number {
   const others = messages.filter((message) => !message.mine && (afterOffsetMs === null || message.offsetMs > afterOffsetMs));
   return newMessageCount(seenIds, others);
+}
+
+/**
+ * O que a sala guarda quando o painel fecha, para o contador do balao: os ids das mensagens que estavam na tela
+ * (`seenIds`; nulo enquanto o chat nao fez a primeira leitura, panelUnreadSeen) e, na gravada e no Replay, o offset
+ * daquele instante (`afterOffsetMs`). Na Live ao vivo o offset fica de fora: o zero dele anda (a hora marcada na
+ * espera, o inicio quando a live comeca atrasada, a ancora da gravacao depois, que o servidor recalcula), e a mensagem
+ * nova nasceria com um offset menor que o do fechar. La so os ids contam.
+ */
+export type PanelUnreadMark = { afterOffsetMs: number | null; seenIds: ReadonlySet<string> | null };
+
+export function panelUnreadMark(input: { chatLoaded: boolean; kind: RoomKind; messages: readonly RoomMessage[]; offsetMs: number }): PanelUnreadMark {
+  return {
+    afterOffsetMs: input.kind === "live" ? null : input.offsetMs,
+    seenIds: input.chatLoaded ? new Set(input.messages.map(({ id }) => id)) : null
+  };
+}
+
+/**
+ * O painel fechou antes da primeira leitura do chat (ele ja monta fechado, a escolha guardada): o que essa leitura
+ * trouxe ja era do chat, entao vira o visto. Antes dela, e depois de a marca ter os ids, a marca fica como estava (a
+ * mesma, para a tela nao repintar).
+ */
+export function panelUnreadSeen(mark: PanelUnreadMark, input: { chatLoaded: boolean; messages: readonly RoomMessage[] }): PanelUnreadMark {
+  if (mark.seenIds !== null || !input.chatLoaded) {
+    return mark;
+  }
+  return { ...mark, seenIds: new Set(input.messages.map(({ id }) => id)) };
+}
+
+/** O numero do balao pela marca do fechar: nada antes da primeira leitura do chat. */
+export function panelUnreadCount(mark: PanelUnreadMark, messages: readonly RoomMessage[]): number {
+  return mark.seenIds ? unreadCount(mark.seenIds, messages, mark.afterOffsetMs) : 0;
 }
 
 /**
@@ -211,4 +245,22 @@ export function firstFocusTarget(input: { panelShown: boolean }): "panel-toggle"
  */
 export function chatPillsShown(input: { blocked: boolean; design: RoomDesign; offerShown: boolean; panelShown: boolean; settingsTakeover: boolean }): boolean {
   return input.design === "normal" && !input.panelShown && !input.blocked && !input.settingsTakeover && !input.offerShown;
+}
+
+/**
+ * O card da Oferta na tela (RoomOffer avisa a sala por onShownChange): ligado (a sessao no ar ou o Replay), com a
+ * janela da oferta aberta e o desenho pronto, e nao fechado pelo aluno nesta janela (`closedKey`; a janela seguinte
+ * mostra de novo). Enquanto ele esta la, as pilulas do chat (chatPillsShown) e o selo do Assistente
+ * (stageAssistantShown) saem do canto.
+ */
+export function offerOnScreen(input: { closedKey: string | null; enabled: boolean; hasView: boolean; shown: boolean; windowKey: string | null }): boolean {
+  return input.enabled && input.shown && input.hasView && input.windowKey !== null && input.windowKey !== input.closedKey;
+}
+
+/**
+ * O selo do Assistente embaixo a direita do palco da gravada (V2-4): com o Assistente ligado e os selos de baixo na
+ * tela (o video no ar, sem a barra da Bunny do Replay), menos com o card da Oferta, que tem o canto.
+ */
+export function stageAssistantShown(input: { assistantEnabled: boolean; bottomBadges: boolean; offerShown: boolean }): boolean {
+  return input.bottomBadges && input.assistantEnabled && !input.offerShown;
 }

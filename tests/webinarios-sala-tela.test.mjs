@@ -476,6 +476,13 @@ test("a aba Participantes da gravada (V2-7): quem apresenta e o mesmo numero do 
   const semNome = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames(null), students: shownCount });
   assert.equal((semNome.match(/<li/g) ?? []).length, 0);
   assert.match(semNome, /58 alunos na sala/);
+  // A sessao encerrada: o cabecalho tira o numero (verticalBadge, showCount) e a aba tambem, pela mesma condicao.
+  const numeroDaAba = (phase) => (vertical.verticalBadge({ kind: "simulated", phase, showLiveBadge: true }).showCount ? shownCount : null);
+  assert.match(render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("live") }), /58 alunos na sala/);
+  assert.match(render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("waiting") }), /58 alunos na sala/);
+  const encerrada = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("ended") });
+  assert.match(encerrada, /Danilo Souza/, "encerrada, quem apresentou continua");
+  assert.doesNotMatch(encerrada, /na sala/, "encerrada, sem o ultimo numero recebido (o sinal de presenca ja parou)");
 });
 
 test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura sao o normal; as caixas novas sao contents; o card da Oferta e o aviso de venda no palco", () => {
