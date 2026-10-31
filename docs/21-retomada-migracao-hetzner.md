@@ -23,8 +23,9 @@
 > **Atualização de 30/10/2026 (produção):** os webinários (fases 1 a 4) estão em produção: promoção #142, imagem
 > `hetzner-sha-e15f6d4`. O `deploy-membros` aplicou as onze migrações de `202610280001` a `202610300007`. Os `WEBINAR_*`
 > entraram pelo `secrets-membros`, e o compose os repassa ao app (#141). O Jitsi (C) atende a produção
-> (`docs/20` §8B, estado de 30/10/2026). Fica só com o produtor a gravação automática por hora (`JIBRI_SECRETS` com a
-> Bunny e `GITHUB_INFRA_TOKEN`); sem ela a live funciona e grava pelo navegador.
+> (`docs/20` §8B, estado de 30/10/2026). A gravação automática por hora foi ligada em 31/10/2026: o `JIBRI_SECRETS` tem a
+> Bunny e o `GITHUB_INFRA_TOKEN`, e as chaves foram para o app pelo `secrets-membros` com `DO_JIBRI=sim`. O token vence em
+> 1 ano: renovar no GitHub e repetir o `secrets-membros` com `DO_JIBRI=sim`.
 >
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a

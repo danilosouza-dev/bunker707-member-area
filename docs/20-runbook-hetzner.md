@@ -528,8 +528,12 @@ espera o pedido da equipe. O app ja funciona sem os dois servidores (a Live grav
 recebeu os `WEBINAR_*` por `secrets-membros` (o mesmo `WEBINAR_JWT_SECRET` do C e da Vercel) e o compose os repassa
 (#141). O C passou a atender a producao: `ROOM_GUARD_URL` em `membros.<dominio>` e `MEET_FRAME_ANCESTORS` com as duas
 origens (`exec-meet` + `deploy-meet` da `main` com `SEM_LIVE_2H=sim`). Os banimentos da Vercel de teste deixam de
-barrar na sala (o token de 15 min continua valendo). Gravacao automatica (D) ainda sem `JIBRI_SECRETS` e sem
-`GITHUB_INFRA_TOKEN`: o console oferece a reserva (Gravar no navegador ou Enviar gravacao).
+barrar na sala (o token de 15 min continua valendo). **Gravacao automatica (D) ligada em 31/10/2026**: o produtor criou o
+segredo `JIBRI_SECRETS` (biblioteca "Lives Bunker 707" da Bunny Stream, Frankfurt com replica em Sao Paulo; o segredo do
+webhook; o `GITHUB_INFRA_TOKEN` fine-grained da conta dona do repositorio, so "Actions: Read and write" neste repositorio,
+com validade de 1 ano: renovar antes de vencer e rodar de novo o `secrets-membros` com `DO_JIBRI=sim`) e as chaves foram
+para o app pelo `secrets-membros` com `DO_JIBRI=sim`. Sem o token valido, o console volta a oferecer a reserva (Gravar
+no navegador ou Enviar gravacao).
 
 ### 8B.1 O que e cada servidor e quanto custa
 
@@ -579,6 +583,13 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `WEBINAR_RECORDER_WEBHOOK_SECRET`; opcionais `WEBINAR_RECORDER_WEBHOOK_URL` e `BUNNY_COLLECTION_ID`) so entra nos
   passos de `jibri-up` e `jibri-down`, nunca no ambiente do job inteiro. O `WEBINAR_RECORDER_WEBHOOK_SECRET` tambem vai
   para o app (`secrets-membros`): e o HMAC que o webhook do gravador confere (`docs/30` §5.3).
+- **As chaves do app que repetem o gravador vem do proprio `JIBRI_SECRETS`** (30/10/2026): `secrets-membros` com
+  `opcoes` `DO_JIBRI=sim` e sem `payload` copia para o `.env` do app, pelo SSH, `BUNNY_API_KEY` -> `BUNNY_STREAM_API_KEY`,
+  `BUNNY_LIBRARY_ID` -> `BUNNY_STREAM_LIBRARY_ID`, `WEBINAR_RECORDER_WEBHOOK_SECRET` e `GITHUB_INFRA_TOKEN` (so as linhas
+  presentes; `app_env_from_jibri` em `infra/cloud/lib.sh`, valores mascarados no log). Assim o produtor cadastra um segredo
+  so, na tela do GitHub, e nada passa pelo chat. O `GITHUB_INFRA_TOKEN` pode ficar no `JIBRI_SECRETS`: o gravador le so as
+  chaves dele. O `WEBINAR_RECORDER_WEBHOOK_SECRET` do app de producao foi gerado em 30/10/2026 e entregue ao produtor num
+  arquivo, para o `JIBRI_SECRETS`.
 - `status-meet`: DNS de `meet.<dominio>`, o site, a marca fora da interface e os gravadores vivos com tempo ligado e
   custo; avisa quando um gravador passa de 6 h ligado.
 - **No dia em que a producao (`membros.<dominio>`) passar a usar a sala ao vivo**, junto com a troca do `ROOM_GUARD_URL`
