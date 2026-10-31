@@ -528,8 +528,12 @@ espera o pedido da equipe. O app ja funciona sem os dois servidores (a Live grav
 recebeu os `WEBINAR_*` por `secrets-membros` (o mesmo `WEBINAR_JWT_SECRET` do C e da Vercel) e o compose os repassa
 (#141). O C passou a atender a producao: `ROOM_GUARD_URL` em `membros.<dominio>` e `MEET_FRAME_ANCESTORS` com as duas
 origens (`exec-meet` + `deploy-meet` da `main` com `SEM_LIVE_2H=sim`). Os banimentos da Vercel de teste deixam de
-barrar na sala (o token de 15 min continua valendo). Gravacao automatica (D) ainda sem `JIBRI_SECRETS` e sem
-`GITHUB_INFRA_TOKEN`: o console oferece a reserva (Gravar no navegador ou Enviar gravacao).
+barrar na sala (o token de 15 min continua valendo). **Gravacao automatica (D) ligada em 31/10/2026**: o produtor criou o
+segredo `JIBRI_SECRETS` (biblioteca "Lives Bunker 707" da Bunny Stream, Frankfurt com replica em Sao Paulo; o segredo do
+webhook; o `GITHUB_INFRA_TOKEN` fine-grained da conta dona do repositorio, so "Actions: Read and write" neste repositorio,
+com validade de 1 ano: renovar antes de vencer e rodar de novo o `secrets-membros` com `DO_JIBRI=sim`) e as chaves foram
+para o app pelo `secrets-membros` com `DO_JIBRI=sim`. Sem o token valido, o console volta a oferecer a reserva (Gravar
+no navegador ou Enviar gravacao).
 
 ### 8B.1 O que e cada servidor e quanto custa
 
