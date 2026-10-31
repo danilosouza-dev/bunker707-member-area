@@ -25,6 +25,7 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // resposta chegar ou o teto de tempo passar), o aviso do limite do minuto e, na resposta do Assistente a uma mensagem
 // do proprio aluno, "Falar com a equipe" (a sala ao vivo usa este mesmo painel: tudo vale la tambem). Redesign V2, F2
 // (docs/31 V2-11): as cores vem dos tokens do tema da sala; na gaveta e no chat por cima do vertical, sempre o escuro.
+// A confirmacao de remover as minhas mensagens usa o aviso, como a de Sair: o acento fica so no Sair.
 
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
@@ -321,11 +322,11 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       </div>
 
       {confirmRemove ? (
-        <div className="mx-3 mt-2 rounded-[12px] border border-[var(--accent)]/40 bg-[var(--accent)]/10 p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
-          <p className="text-sm font-bold text-room-fg-strong">{WEBINAR_COPY.privacidade.confirmar}</p>
+        <div className="mx-3 mt-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
+          <p className="text-sm font-bold text-room-warn-fg">{WEBINAR_COPY.privacidade.confirmar}</p>
           <p className="mt-1 text-xs leading-5 text-room-fg-muted">{WEBINAR_COPY.privacidade.confirmarTexto}</p>
           <div className="mt-2 flex gap-2">
-            <RoomButton onClick={() => void removeMine()} size="sm" variant="danger">
+            <RoomButton onClick={() => void removeMine()} size="sm" variant="secondary">
               {copy.removerMinhasMensagens}
             </RoomButton>
             <RoomButton onClick={() => setConfirmRemove(false)} size="sm" variant="ghost">

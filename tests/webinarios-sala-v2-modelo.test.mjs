@@ -94,3 +94,20 @@ test("storedDeferredPolls: so as enquetes da sessao aberta; outra sessao ou valo
   assert.deepEqual(prefs.storedDeferredPolls("{nao e json", sessao), { later: [], seen: [] });
   assert.deepEqual(prefs.storedDeferredPolls(JSON.stringify({ later: [1, "", "p2"], seen: "p3", sessionId: sessao }), sessao), { later: ["p2"], seen: [] }, "so ids de verdade");
 });
+
+// F2 (V2-12 e V2-18): o tema do dialogo. O HTML do servidor sempre sai escuro (nada guardado ainda), entao so a regra
+// pura prova que o vertical 9:16, que fica todo sobre o video, ignora o claro guardado e que o normal o respeita.
+const vertical = await import("../src/components/member/webinars/room/vertical/vertical-model.ts");
+
+test("themeForDesign: o desenho normal usa o tema da pessoa; o vertical e sempre escuro, mesmo com o claro guardado", () => {
+  assert.equal(vertical.themeForDesign("vertical", "light"), "dark", "o claro guardado nao chega ao vertical");
+  assert.equal(vertical.themeForDesign("vertical", "dark"), "dark");
+  assert.equal(vertical.themeForDesign("normal", "light"), "light", "no normal, o claro guardado vale");
+  assert.equal(vertical.themeForDesign("normal", "dark"), "dark");
+  // Girar o aparelho com o claro guardado: em pe escuro, deitado claro, em pe de novo escuro (a escolha nao se perde).
+  const guardado = prefs.storedRoomTheme("light");
+  assert.deepEqual(
+    ["vertical", "normal", "vertical"].map((design) => vertical.themeForDesign(design, guardado)),
+    ["dark", "light", "dark"]
+  );
+});

@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 // escuro, globals.css), no lugar do MemberButton e do MemberChip nas superficies fora do video: a confirmacao de Sair,
 // Enviar, as enquetes, as perguntas, o aceite e os avisos. MemberButton e MemberChip sao so escuros e valem para a area
 // inteira: muda-los vazaria o tema para fora da sala. Sobre o video (as capas do palco) o MemberButton continua. Os
-// cantos dos botoes com texto seguem Marca › Estilo (--member-button-radius); os circulos sao sempre redondos.
+// cantos dos botoes com texto seguem Marca › Estilo (--member-button-radius); os circulos sao sempre redondos. O acento
+// (#e50914) so onde o V2-11 deixa: o `danger` e so o Sair (a confirmacao de Sair; tests/webinarios-sala-tokens.guard);
+// a remocao das minhas mensagens usa o aviso e o `secondary`. O `ghost` e o selo `outline` usam --room-icon, o zinc 300
+// do MemberButton e do MemberChip no escuro: o chat por cima do video e o aceite do vertical continuam como estavam.
 
 export type RoomButtonVariant = "accent" | "danger" | "ghost" | "primary" | "secondary";
 export type RoomButtonSize = "lg" | "md" | "sm";
@@ -21,7 +24,7 @@ const buttonBase = cn(
 const buttonVariants: Record<RoomButtonVariant, string> = {
   accent: "bg-[var(--accent)] text-white hover:bg-[var(--accent)]/90",
   danger: "border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-room-fg-strong hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/20",
-  ghost: "text-room-fg-muted hover:bg-room-control hover:text-room-fg-strong",
+  ghost: "text-room-icon hover:bg-room-control hover:text-room-fg-strong",
   primary: "bg-room-active-bg font-extrabold text-room-active-fg hover:bg-room-active-bg/85",
   secondary: "border border-room-border-strong bg-room-control text-room-fg-strong hover:bg-room-control-hover"
 };
@@ -90,9 +93,9 @@ const badgeTones: Record<RoomBadgeTone, string> = {
   accent: "border-[var(--accent)]/40 bg-[var(--accent)]/15 text-room-fg-strong",
   muted: "border-transparent bg-transparent px-0 text-room-fg-subtle",
   neutral: "border-room-border bg-room-control text-room-fg",
-  outline: "border-room-border-strong bg-transparent text-room-fg-muted",
+  outline: "border-room-border-strong bg-transparent text-room-icon",
   solid: "border-transparent bg-room-active-bg text-room-active-fg",
-  success: "border-room-speaking/30 bg-room-speaking/10 text-room-speaking",
+  success: "border-room-speaking/30 bg-room-speaking/10 text-room-success-fg",
   warning: "border-room-warn-border bg-room-warn-bg text-room-warn-fg"
 };
 

@@ -9,6 +9,7 @@
 
 import { WEBINAR_COPY } from "../../../../../lib/webinar-copy";
 import type { ComposerState, RoomMessage } from "../../../../../lib/webinar-room-client";
+import type { RoomTheme } from "../../../../../lib/webinar-room-prefs";
 import type { SimulatedPhase } from "../../../../../server/webinars/model";
 
 export const ROOM_DESIGNS = ["normal", "vertical"] as const;
@@ -169,6 +170,15 @@ export type RoomSkeleton = {
 };
 
 const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-room-warn-border bg-room-warn-bg px-3 py-2";
+
+/**
+ * O tema do dialogo da sala (o data-room-theme, docs/31 V2-12): no desenho normal, o da pessoa (claro ou escuro); o
+ * vertical 9:16 fica todo sobre o video e continua como no docs/30 (V2-18), sempre escuro, mesmo com o claro guardado.
+ * Girar o aparelho troca o desenho e, com ele, o tema, sem perder a escolha guardada.
+ */
+export function themeForDesign(design: RoomDesign, theme: RoomTheme): RoomTheme {
+  return design === "vertical" ? "dark" : theme;
+}
 
 /** As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco e os lugares por cima). */
 export function roomSkeleton(design: RoomDesign): RoomSkeleton {

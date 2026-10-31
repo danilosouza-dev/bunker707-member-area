@@ -29,7 +29,7 @@ import { RoomDock } from "./vertical/room-dock";
 import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer } from "./vertical/vertical-drawer";
-import { drawerTabFor, roomSkeleton, type RoomDesign } from "./vertical/vertical-model";
+import { drawerTabFor, roomSkeleton, themeForDesign, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
 
 // A Sala da Live gravada e do Replay (docs/30 §1.3 adaptado a §1.6, §1.7 e §9): um dialogo de tela cheia por cima
@@ -431,7 +431,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, readOnly,
       className={skeleton.root}
       data-room-design={design}
       data-room-phase={phase}
-      data-room-theme={vertical ? "dark" : theme}
+      data-room-theme={themeForDesign(design, theme)}
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"

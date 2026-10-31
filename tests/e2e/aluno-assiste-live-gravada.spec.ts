@@ -3,6 +3,7 @@ import { expect, paginaFalsaPlayerJs, test } from "./fixtures";
 import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveGravadaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
+import { ROOM_THEME_KEY } from "../../src/lib/webinar-room-prefs";
 
 // Webinarios, fase 2a (docs/30 §1.6, §6.6, §8.5, §9 e §10.2): a aluna entra na Live gravada 90 s depois do inicio
 // pela pagina da live (Entrar), o player falso da Bunny (servido no endereco real pela pagina falsa) recebe
@@ -13,7 +14,8 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 // escola. Sem Minimizar e sem pilula (docs/31 V2-2): o topo do vertical tem so o Sair.
 // Fase 4d (docs/30 §1.6 e §6.6): com o celular em pe (375 x 740) a sala abre na Sala Live vertical 9:16 (o video
 // cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
-// deitado, volta ao desenho normal com as abas, sem trocar de sala.
+// deitado, volta ao desenho normal com as abas, sem trocar de sala. O tema claro guardado (docs/31 V2-12) so vale no
+// desenho normal: o vertical fica sobre o video e e sempre escuro, e girar troca o tema junto com o desenho.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
@@ -126,12 +128,22 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 });
 
-test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; deitado, volta ao desenho normal; o Sair do topo pede a confirmação e fecha a sala", async ({ page }) => {
+test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; com o tema claro guardado, o vertical fica escuro; deitado, volta ao desenho normal no claro; o Sair do topo pede a confirmação e fecha a sala", async ({ page }) => {
   const sala = WEBINAR_COPY.sala;
   const vertical = WEBINAR_COPY.vertical;
+  // A aluna escolheu o tema claro antes (guardado no navegador dela).
+  await page.addInitScript((chave) => {
+    try {
+      window.localStorage.setItem(chave, "light");
+    } catch {
+      // Sem armazenamento, a sala fica no escuro e a conferencia abaixo falha com a causa.
+    }
+  }, ROOM_THEME_KEY);
   await page.setViewportSize({ height: 740, width: 375 });
   const dialogo = await entrarNaSala(page);
   await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
+  // O vertical 9:16 fica sobre o video: sempre escuro, mesmo com o claro guardado.
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
 
   const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
   expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
@@ -164,12 +176,14 @@ test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo c
   // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
   await page.setViewportSize({ height: 375, width: 740 });
   await expect(dialogo).toHaveAttribute("data-room-design", "normal");
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
   await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
 
   // De volta a 375 px em pe: o topo tem so o Sair, com 44 px; ele pede a confirmacao (a sessao esta no ar) e o Sair
   // dela volta para a pagina da live, onde a IA Diretor reaparece.
   await page.setViewportSize({ height: 740, width: 375 });
   await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
   const sairDoTopo = dialogo.getByRole("button", { exact: true, name: sala.sair });
   await expect(sairDoTopo).toHaveCount(1);
   const caixaDoSair = await sairDoTopo.boundingBox();

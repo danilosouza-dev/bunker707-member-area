@@ -1365,6 +1365,8 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --color-room-active-fg: var(--room-active-fg);
   --color-room-focus: var(--room-focus);
   --color-room-speaking: var(--room-speaking);
+  --color-room-success-fg: var(--room-success-fg);
+  --color-room-poll-bar: var(--room-poll-bar);
   --color-room-warn-bg: var(--room-warn-bg);
   --color-room-warn-fg: var(--room-warn-fg);
   --color-room-warn-border: var(--room-warn-border);
@@ -1506,6 +1508,9 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
  * variaveis: as cores entram pelas classes bg-room-*, text-room-* e border-room-* (o @theme inline acima). O que fica
  * sobre o video (as capas do palco, os selos Ao vivo e Gravando, as pilulas do chat, a Oferta e o veu da enquete) e
  * igual nos dois temas e nao passa por aqui. Os dois blocos tem os mesmos nomes (tests/webinarios-sala-tokens.guard).
+ * Texto pequeno com 4,5:1 nos dois temas (docs/12): no claro, o cinza --room-fg-subtle e #63636b (o #71717a ficava
+ * abaixo sobre #ededeb e #f4f4f3), e o texto de sucesso e --room-success-fg, nunca --room-speaking (feito para o ponto
+ * e a borda de quem fala; o #16a34a nao chega a 3:1 no claro). A barra do resultado da enquete e --room-poll-bar.
  */
 [data-room-theme="dark"] {
   color-scheme: dark;
@@ -1540,6 +1545,8 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-active-fg: #000000;
   --room-focus: #ffffff;
   --room-speaking: #34d399;
+  --room-success-fg: #a7f3d0;
+  --room-poll-bar: rgba(255, 255, 255, 0.16);
   --room-warn-bg: rgba(245, 158, 11, 0.1);
   --room-warn-fg: #fef3c7;
   --room-warn-border: rgba(251, 191, 36, 0.3);
@@ -1564,7 +1571,7 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-fg: #141414;
   --room-fg-strong: #141414;
   --room-fg-muted: #52525b;
-  --room-fg-subtle: #71717a;
+  --room-fg-subtle: #63636b;
   --room-icon: #52525b;
   --room-meta-name: #3f3f46;
   --room-bubble-other-fg: #141414;
@@ -1580,6 +1587,8 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-active-fg: #ffffff;
   --room-focus: #141414;
   --room-speaking: #16a34a;
+  --room-success-fg: #166534;
+  --room-poll-bar: rgba(0, 0, 0, 0.16);
   --room-warn-bg: #fffbeb;
   --room-warn-fg: #92400e;
   --room-warn-border: rgba(217, 119, 6, 0.3);

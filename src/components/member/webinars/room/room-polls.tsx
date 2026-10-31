@@ -11,7 +11,8 @@ import { RoomBadge, RoomButton } from "./room-ui";
 // unica ou multipla num fieldset com legend, Enviar, depois "Resposta enviada"; o resultado so quando a equipe
 // compartilhou (barras, anunciadas uma vez); encerrada com o selo. Le ao abrir e a cada 15 s enquanto aberta. Na live
 // (fase 3) a resposta recusada (409 banned) e contada a sala (`onRefused`). Redesign V2, F2 (docs/31 V2-11): as cores
-// vem dos tokens do tema da sala.
+// vem dos tokens do tema da sala; a barra do resultado e --room-poll-bar (aparece sobre o card nos dois temas) e a
+// porcentagem fica no texto principal, com 4,5:1 mesmo sobre a barra cheia.
 
 const REFRESH_MS = 15_000;
 
@@ -62,7 +63,7 @@ export function RoomPollCard({ onAnswer, poll, readOnly }: { onAnswer: (poll: St
 
           return (
             <label className={cn("relative block overflow-hidden rounded-[10px] border px-3 py-2 text-sm", selected ? "border-room-active-bg" : "border-room-input-border")} key={option.id}>
-              {poll.results ? <span aria-hidden="true" className="absolute inset-y-0 left-0 bg-room-control-hover" style={{ width: `${percent}%` }} /> : null}
+              {poll.results ? <span aria-hidden="true" className="absolute inset-y-0 left-0 bg-room-poll-bar" style={{ width: `${percent}%` }} /> : null}
               <span className="relative flex items-center gap-2">
                 <input
                   checked={selected}
@@ -74,7 +75,7 @@ export function RoomPollCard({ onAnswer, poll, readOnly }: { onAnswer: (poll: St
                   value={option.id}
                 />
                 <span className="min-w-0 flex-1 text-room-fg">{option.label}</span>
-                {poll.results ? <span className="tabular-nums text-xs font-bold text-room-fg-muted">{percent}%</span> : null}
+                {poll.results ? <span className="tabular-nums text-xs font-bold text-room-fg">{percent}%</span> : null}
               </span>
             </label>
           );
@@ -86,7 +87,7 @@ export function RoomPollCard({ onAnswer, poll, readOnly }: { onAnswer: (poll: St
             {copy.enquete.enviar}
           </RoomButton>
         ) : (
-          <p className="text-xs font-semibold text-room-speaking">{answered ? copy.enquete.respondida : ""}</p>
+          <p className="text-xs font-semibold text-room-success-fg">{answered ? copy.enquete.respondida : ""}</p>
         )}
         {poll.results ? (
           <p className="text-[11px] text-room-fg-subtle">
