@@ -21,7 +21,7 @@ import {
   type ConsoleSnapshot
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
-import { consoleTopActionsFor } from "@/server/webinars/console-v2-model";
+import { consolePresenceBadge, consoleTopActionsFor } from "@/server/webinars/console-v2-model";
 import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
 import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
 import { WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
@@ -580,7 +580,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       onRefresh={() => void refresh()}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       polling={polling}
-      presentLabel={session ? copy.presentNow(snapshot?.presentNow ?? 0) : null}
+      presentLabel={session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null}
       reportHref={webinarReportHref(webinar.id)}
       roomLocked={live?.roomLocked === true}
       sessionId={sessionId}

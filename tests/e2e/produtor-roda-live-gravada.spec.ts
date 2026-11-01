@@ -6,7 +6,8 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 // O produtor roda uma Live gravada (docs/30 §2.2 "Roteiro de chat", §2.4 e §10.2; fase 2b): importa um CSV no
 // Roteiro de chat (a previa com a contagem, Importar), salva uma enquete pronta, abre o console da sessao marcada,
 // abre a sessao pela mao (o roteiro pronto entra no chat), manda uma mensagem da equipe e lanca a enquete; a 375 px
-// o console cabe sem rolar de lado. Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
+// o console cabe sem rolar de lado e a 1280 x 720 a pagina nao rola (o console tem a altura da janela e cada parte rola
+// por dentro, docs/31 V2-13). Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
 // marcada ha 1 min, so para esta rodada; a aluna nao participa aqui (a Sala dela esta em aluno-assiste-live-gravada).
 // Fase 4 (docs/30 §2.2 e §2.4): o editor da Live gravada ganhou os cards Oferta e Assistente e o console da sessao
 // gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais.
@@ -111,5 +112,23 @@ test.describe("produtor", () => {
 
     const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
     expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
+  });
+
+  test("a 1280 x 720 o console tem a altura da janela e a pagina nao rola: so o painel rola por dentro", async ({ page }) => {
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeVisible();
+    await expect(page.getByRole("list", { name: "Chat" })).toBeVisible();
+
+    // Os rotulos so para o leitor de tela do painel (como o "Escreva para a turma" do chat) ficam dentro do painel que
+    // rola; fora dele, esticariam o documento e a pagina inteira rolaria para fora da tela.
+    const alturas = await page.evaluate(() => {
+      window.scrollTo({ behavior: "instant", top: 100_000 });
+      return { pagina: document.documentElement.scrollHeight, rolou: window.scrollY, tela: window.innerHeight };
+    });
+    expect(alturas.pagina).toBeLessThanOrEqual(alturas.tela);
+    expect(alturas.rolou).toBe(0);
+    await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeInViewport();
   });
 });

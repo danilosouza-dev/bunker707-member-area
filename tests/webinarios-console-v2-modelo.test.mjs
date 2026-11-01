@@ -66,6 +66,7 @@ test("isAdminFullScreenPath: so o console da sessao de um webinario fica em tela
 
 test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o painel com a largura por faixa; sem palco, so o painel no meio com 720 px no maximo", () => {
   const live = layout.consoleSkeleton({ hasStage: true, panelOpen: true });
+  const has = (classes, name) => classes.split(" ").includes(name);
   for (const parte of ["stage", "bar", "stageColumn"]) {
     assert.equal(typeof live[parte], "string", `com palco: ${parte}`);
   }
@@ -73,6 +74,16 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.match(live.stage, /(?:^| )aspect-video(?: |$)/, "16:9 abaixo de lg");
   assert.match(live.stage, /(?:^| )lg:flex-1(?: |$)/, "a altura que sobra a partir de lg");
   assert.match(live.stage, /(?:^| )rounded-2xl(?: |$)/, "16 px de canto");
+  // Com o card Configurações aberto e a fila da Sala de espera na coluna (ate G6 e G7), o palco nao some: guarda 240 px
+  // e a coluna rola por dentro, entao a barra continua ao alcance (a raiz nao rola a partir de lg).
+  assert.ok(has(live.stage, "lg:min-h-60"), "o piso de 240 px do palco a partir de lg");
+  assert.ok(!has(live.stage, "lg:min-h-0"), "sem o piso zero, que deixava o palco encolher a nada");
+  assert.ok(has(live.stageColumn, "lg:overflow-y-auto"), "a coluna do palco rola por dentro a partir de lg");
+  assert.ok(has(live.stageColumn, "relative"), "a coluna e a referencia do que fica por cima do palco e dos rotulos dela");
+  // Cada parte que rola e `relative`: sem isso os rotulos sr-only (absolute) tomam a pagina como referencia, esticam o
+  // documento por baixo da raiz de altura fixa e a pagina inteira rola para fora da tela (na gravada, 1594 px a 1280 x 720).
+  assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
+  assert.ok(has(live.panel, "lg:overflow-y-auto"), "o painel rola por dentro");
   for (const largura of ["lg:w-80", "xl:w-[360px]", "2xl:w-[440px]"]) {
     assert.ok(live.panel.split(" ").includes(largura), `o painel com ${largura}`);
   }
@@ -90,6 +101,9 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.equal(gravada.stageColumn, null);
   assert.ok(gravada.panel.split(" ").includes("max-w-[720px]"), "a coluna de ate 720 px");
   assert.ok(gravada.panel.split(" ").includes("mx-auto"), "no meio");
+  assert.ok(has(gravada.panel, "relative"), "sem palco o painel tambem e a referencia dos rotulos dele");
+  assert.ok(has(gravada.panel, "lg:overflow-y-auto"), "sem palco o painel rola por dentro");
+  assert.ok(has(gravada.root, "lg:overflow-hidden"), "a raiz nao rola a partir de lg: cada parte rola por dentro");
   assert.equal(layout.consoleSkeleton({ hasStage: false, panelOpen: false }).panel, gravada.panel, "sem palco o painel nunca fecha");
   assert.equal(layout.CONSOLE_PANEL_ID, "console-panel");
   assert.equal(layout.CONSOLE_SETTINGS_ID, "console-live-settings");
@@ -114,6 +128,17 @@ test("consoleSessionOptionLabel: \"Sessão de 30/10 às 20:00 · no ar\" pela si
   for (const status of ["scheduled", "waiting", "live", "ended", "cancelled"]) {
     assert.doesNotMatch(v2.consoleSessionOptionLabel({ kind: "live", scheduledAt: at, status }), /2026/, `${status}: sem o ano`);
   }
+});
+
+test("consolePresenceBadge: os presentes com o pico, que nunca fica abaixo dos presentes; sem pico, so os presentes", () => {
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12 }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 10, presentNow: 12 }), "12 presentes · pico 12", "o pico do cache de 60 s atrasado nao fica abaixo do retrato de 5 s");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 12 }), "12 presentes", "o Replay e antes de comecar, sem pico");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 1 }), "1 presente");
+  assert.equal(v2.consolePresenceBadge({ peak: 3, presentNow: 1 }), "1 presente · pico 3");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 0 }), "0 presentes");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: Number.NaN }), "0 presentes", "um retrato sem numero conta zero");
+  assert.equal(v2.consolePresenceBadge({ peak: Number.NaN, presentNow: 4 }), "4 presentes", "um pico sem numero nao entra");
 });
 
 test("consoleTopActionsFor: a matriz dos botoes de situacao do topo pela especie, pela situacao, pelo papel e pela permissao", () => {

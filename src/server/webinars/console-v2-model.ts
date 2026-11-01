@@ -1,7 +1,7 @@
 // O console V2 de quem apresenta (docs/31 V2-12 a V2-15, fase 2 do redesign), a parte pura: o rotulo de cada sessao
-// no seletor do topo e os botoes de situacao do topo pela espécie e pela situacao da sessao. Sem React e com imports
-// relativos: tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node. Cada fatia da fase 2 acrescenta
-// aqui as regras da tela dela.
+// no seletor do topo, o selo dos presentes com o pico e os botoes de situacao do topo pela espécie e pela situacao da
+// sessao. Sem React e com imports relativos: tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node.
+// Cada fatia da fase 2 acrescenta aqui as regras da tela dela.
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarDayMonthTime } from "../../lib/webinar-time";
@@ -19,6 +19,20 @@ const copy = WEBINAR_COPY.consoleV2;
 export function consoleSessionOptionLabel(session: { kind: SessionKind; scheduledAt: string; status: SessionStatus }): string {
   const when = formatWebinarDayMonthTime(session.scheduledAt);
   return session.kind === "replay" ? copy.replayDe(when) : copy.sessaoDe(when, copy.fases[session.status]);
+}
+
+/**
+ * O selo dos presentes (V2-13; no topo da gravada e do Replay, e no palco da live a partir de G5): "12 presentes ·
+ * pico 14". Os presentes vem do retrato de 5 s e o pico do relatorio em cache de 60 s (console-presence-model.ts), entao
+ * o pico mostrado e o maior dos dois: sem isso o selo poderia dizer "12 presentes · pico 10". Sem pico (o Replay, antes
+ * de comecar ou sem a leitura), so "12 presentes".
+ */
+export function consolePresenceBadge(input: { peak: number | null; presentNow: number }): string {
+  const present = Number.isFinite(input.presentNow) ? Math.max(0, Math.round(input.presentNow)) : 0;
+  if (input.peak === null || !Number.isFinite(input.peak)) {
+    return copy.presentes(present);
+  }
+  return copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
 }
 
 /** Os botoes de situacao do topo do console, na ordem em que aparecem. */

@@ -16,7 +16,9 @@ import type { WebinarSession } from "@/server/webinars/model";
 // viva so para o leitor de tela), os selos do momento e dos presentes, um traco, o Tema (36 px, o nome diz para qual
 // vai) e os botoes de situacao da sessao (consoleTopActionsFor: Abrir a sala, Começar para todos, Trancar, Encerrar
 // live, Abrir e Encerrar sessão da gravada, Ver relatório). Abaixo de lg o topo quebra em duas linhas: a seta e o
-// titulo; depois o seletor e os botoes, que rolam de lado sem barra. As cores pelos tokens do tema do console.
+// titulo; depois o seletor e os botoes, que rolam de lado sem barra. A partir de lg e uma faixa so de 56 px; se os
+// botoes nao couberem (a 1024 px, com muitos botoes ou um relogio longo), a linha rola de lado com uma barra fina, para
+// o ultimo botao nunca sumir sem sinal. As cores pelos tokens do tema do console.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -41,7 +43,7 @@ type ConsoleTopBarProps = {
   onRefresh: () => void;
   onToggleTheme: () => void;
   polling: ConsolePolling;
-  /** "7 presentes agora"; nulo sem sessao. */
+  /** "7 presentes · pico 9" (consolePresenceBadge); nulo sem sessao. */
   presentLabel: string | null;
   reportHref: string;
   roomLocked: boolean;
@@ -139,7 +141,7 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
         </h1>
       </div>
 
-      <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 [scrollbar-width:none] lg:flex-initial [&::-webkit-scrollbar]:hidden">
+      <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 max-lg:[scrollbar-width:none] lg:flex-initial lg:[scrollbar-color:var(--room-border-strong)_transparent] lg:[scrollbar-width:thin] max-lg:[&::-webkit-scrollbar]:hidden">
         <div className="relative shrink-0">
           <label className="sr-only" htmlFor="console-session">
             {v2.rotuloSessao}

@@ -245,12 +245,19 @@ test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor
   const h1 = markup.slice(markup.indexOf("<h1"), markup.indexOf("</h1>"));
   assert.equal(textOf(`${h1}</h1>`), "Console da sessão Aula de IA", "o h1 com o console e o titulo");
   assert.match(text, /No ar há \d+:\d\d/);
-  assert.match(markup, /data-console-present="">7 presentes agora</);
+  assert.match(markup, /data-console-present="">7 presentes</, "o selo dos presentes no topo da gravada, sem o pico antes da leitura da presenca");
   assert.match(text, /Encerrar sessão/);
   assert.doesNotMatch(text, /Abrir sessão/, "a sessao no ar nao abre de novo");
   assert.match(markup, /<button(?=[^>]*aria-label="Tema claro")[^>]*>/, "o Tema diz para qual vai");
   assert.match(markup, /<button(?=[^>]*aria-label="Atualizar")[^>]*>/);
   assert.match(markup, /<span aria-live="polite" class="sr-only" data-console-polling="idle"><\/span>/, "a leitura so para o leitor de tela");
+  // A segunda linha do topo (o seletor e os botoes): abaixo de lg rola de lado sem barra; a partir de lg, se os botoes
+  // nao couberem, rola com uma barra fina, para o ultimo botao nunca sumir sem sinal.
+  const linha = (markup.match(/data-console-slot="top"[\s\S]*?<\/h1><\/div><div class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(linha.includes("overflow-x-auto"), "a linha rola de lado");
+  assert.ok(linha.includes("max-lg:[scrollbar-width:none]"), "sem barra so abaixo de lg");
+  assert.ok(linha.includes("lg:[scrollbar-width:thin]"), "a barra fina a partir de lg");
+  assert.ok(!linha.includes("[scrollbar-width:none]"), "a barra nunca some em toda largura");
 
   const select = markup.slice(markup.indexOf('id="console-session"'), markup.indexOf("</select>"));
   assert.match(markup, /<label class="sr-only" for="console-session">Sessão<\/label>/, "o nome do seletor so para o leitor de tela");
@@ -425,6 +432,8 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   };
   const presence = consolePresenceOf(view, 4 * MIN + 30_000);
   const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
+  // O selo do topo da gravada (V2-13): os presentes do retrato de 5 s e o pico da presenca.
+  assert.match(markup, /data-console-present="">7 presentes · pico 9</);
   const painel = markup.slice(markup.indexOf('id="console-presence-title"'));
   const text = textOf(painel);
   assert.match(text, />Presença Atualiza a cada minuto\. Só alunos; o roteiro e o Assistente não entram\. Presentes agora 7 Pico 9 em 03:00 Mensagens no último minuto 4 média de 1,2 por minuto nos últimos 30 min Últimos 30 minutos/);

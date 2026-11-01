@@ -17,6 +17,10 @@ export const CONSOLE_V2_COPY = {
   atualizar: "Atualizar",
   atualizando: "Atualizando…",
   semResposta: "Sem resposta do servidor; tentando de novo.",
+  /** O selo dos presentes pelo retrato de 5 s, sem o pico (o Replay, antes de comecar). */
+  presentes: (n: number) => (n === 1 ? "1 presente" : `${n} presentes`),
+  /** "12 presentes · pico 14" (consolePresenceBadge: o pico nunca abaixo dos presentes). */
+  presentesComPico: (n: number, pico: number) => `${n === 1 ? "1 presente" : `${n} presentes`} · pico ${pico}`,
   /** Fecha o aviso de erro da faixa abaixo do topo. */
   fecharAviso: "Fechar",
   /** O esqueleto da tela enquanto o console carrega, so para o leitor de tela. */
