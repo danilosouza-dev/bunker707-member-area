@@ -41,8 +41,8 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // (configOverwrite do papel, nonce da pagina), renova o token antes do `exp` sem derrubar a sala, junta os sinais do
 // iframe num reducer (quem esta, maos, sala de espera, gravacao), e faz sozinho o que a sala precisa de quem a
 // comanda: ao virar moderador, a sala de espera certa (Sessao de pratica, Sala de espera, tranca), a moderacao de audio
-// (o aluno so fala depois de Liberar), a de tela compartilhada (so moderador compartilha), a de video quando o webinario
-// nao tem camera de aluno e o "seguir a visao do apresentador"; o "Gravar" da fila dispara uma vez no ready; a ancora sai no recordingStatusChanged ligado (uma vez).
+// (o aluno so fala depois de Liberar), a de video quando o webinario nao tem camera de aluno e o "seguir a visao do
+// apresentador" (a de tela nao liga pelo IFrame API da tag: docs/31 §5.4); o "Gravar" da fila dispara uma vez no ready; a ancora sai no recordingStatusChanged ligado (uma vez).
 // Quem apresenta (host e co-apresentador) ganha o card Configurações (live-settings-card.tsx): os aparelhos pelo hook
 // useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do vídeo: setVideoQuality
 // mudaria o envio do palco) e o ruido, o fundo e o espelho como acoes sem estado (efeitosNoIframe: a barra do iframe
@@ -347,9 +347,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
 
   const wantedLobby = desiredLobby({ practiceSession: webinar.practiceSession !== false, roomLocked: live?.roomLocked === true, status, waitingRoom: webinar.waitingRoom === true });
 
-  // Ao virar moderador: moderacao de audio (o aluno so fala depois de Liberar), de tela compartilhada (so moderador
-  // compartilha), de video sem camera de aluno, seguir a visao do apresentador (so o Apresentador) e a sala de espera
-  // da situacao (presenterSetupCommands).
+  // Ao virar moderador: moderacao de audio (o aluno so fala depois de Liberar), de video sem camera de aluno e seguir a
+  // visao do apresentador (so o Apresentador), pelo presenterSetupCommands; a sala de espera da situacao vem no efeito
+  // do toggleLobby. Nada de moderacao de tela: ela nao liga pelo IFrame API da tag (docs/31 §5.4).
   useEffect(() => {
     if (!joined || !room.moderator || !presenter || setupDone.current) {
       return;

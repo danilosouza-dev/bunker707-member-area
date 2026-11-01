@@ -368,18 +368,32 @@ test("mapa aluno -> participante: o mesmo id em duas contas nao liga nenhuma (o 
   assert.equal(row.name, "Bia R.");
 });
 
-test("ao virar moderador, o apresentador liga a moderacao de audio e de tela compartilhada; a de video so sem camera de aluno; seguir a visao so o Apresentador", () => {
+test("ao virar moderador, o apresentador liga a moderacao de audio; a de video so sem camera de aluno; seguir a visao so o Apresentador", () => {
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "host" }), [
     ["toggleModeration", true, "audio"],
-    ["toggleModeration", true, "desktop"],
     ["setFollowMe", true]
   ]);
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: false, role: "co_host" }), [
     ["toggleModeration", true, "audio"],
-    ["toggleModeration", true, "desktop"],
     ["toggleModeration", true, "video"]
   ]);
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team" }), [], "a Equipe nao comanda a sala");
+});
+
+test("ao virar moderador, nenhum papel manda a moderacao de tela: na tag o 'desktop' do toggleModeration liga de novo a de audio (docs/31 §5.4)", () => {
+  for (const role of ["host", "co_host", "team"]) {
+    for (const allowStudentCamera of [true, false]) {
+      const commands = model.presenterSetupCommands({ allowStudentCamera, role });
+      assert.ok(
+        commands.every((command) => !command.includes("desktop")),
+        `${role} com allowStudentCamera=${allowStudentCamera} nao manda nada com "desktop"`
+      );
+      assert.ok(
+        commands.filter(([name, enabled, mediaType]) => name === "toggleModeration" && enabled === true && mediaType === "audio").length <= 1,
+        `${role} com allowStudentCamera=${allowStudentCamera} liga a moderacao de audio no maximo uma vez`
+      );
+    }
+  }
 });
 
 test("cartao Gravação: o preparo que nao respondeu em 25 min vale como sem gravador (Preparar de novo e a reserva), nunca Preparando 1 min para sempre", () => {

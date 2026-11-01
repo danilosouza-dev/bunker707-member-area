@@ -257,18 +257,18 @@ export function liveControlsFor(input: { canPublish: boolean; moderator: boolean
 
 /**
  * O que o navegador do Apresentador (ou do co-apresentador) manda a sala ao virar moderador, na ordem: a moderacao de
- * audio (o aluno so fala depois de Liberar), a de tela compartilhada (`desktop`: so moderador compartilha, mesmo que um
- * cliente adulterado ignore a barra e as features do token; docs/30 §8.1), a de video quando o webinario nao tem
- * camera de aluno e, so o Apresentador, seguir a visao dele.
+ * audio (o aluno so fala depois de Liberar), a de video quando o webinario nao tem camera de aluno e, so o
+ * Apresentador, seguir a visao dele. Nada de moderacao de tela: na tag fixada o 'toggle-moderation' do IFrame API so
+ * distingue `video` e qualquer outro valor liga a de audio (modules/API/API.js), entao a de tela nao liga por aqui. A
+ * tela e decidida pela liberacao (docs/31 §5.3). O vigia do console para a tela do cliente padrao, que obedece ao
+ * pedido de mudo; um cliente modificado que ignora o pedido continua mandando a tela, porque sem a moderacao de tela o
+ * servidor so repassa o pedido (video-menu/actions.any.ts; docs/30 §8.1).
  */
 export function presenterSetupCommands(input: { allowStudentCamera: boolean; role: ConsoleRoomRole }): [string, ...unknown[]][] {
   if (input.role !== "host" && input.role !== "co_host") {
     return [];
   }
-  const commands: [string, ...unknown[]][] = [
-    ["toggleModeration", true, "audio"],
-    ["toggleModeration", true, "desktop"]
-  ];
+  const commands: [string, ...unknown[]][] = [["toggleModeration", true, "audio"]];
   if (!input.allowStudentCamera) {
     commands.push(["toggleModeration", true, "video"]);
   }

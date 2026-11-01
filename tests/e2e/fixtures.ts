@@ -1703,6 +1703,9 @@ export function ambienteDaSalaAoVivo(): AmbienteDaSalaAoVivo {
 
 export type ComandoDaSalaFalsa = { args: unknown[]; comando: string };
 
+/** Um sinal que a sala falsa mandou aos ouvintes da pagina (disparado pelo teste ou pelo eco de um comando). */
+export type SinalDaSalaFalsa = { evento: string; payload: unknown };
+
 /** O que a pagina passou ao construtor do JitsiMeetExternalAPI na montagem mais nova (ainda nao descartada). */
 export type MontagemDaSalaFalsa = {
   configOverwrite: Record<string, unknown>;
@@ -1730,6 +1733,8 @@ export type SalaFalsaDoJitsi = {
   montagens(): Promise<number>;
   /** Quantas vezes o navegador pediu o external_api.js. */
   pedidosDoScript(): number;
+  /** Os sinais que a montagem mais nova mandou aos ouvintes da pagina, na ordem: os do teste e os do eco. */
+  sinais(): Promise<SinalDaSalaFalsa[]>;
 };
 
 type EstadoDaSalaFalsa = {
@@ -1744,6 +1749,7 @@ type EstadoDaSalaFalsa = {
     jwt: string | null;
     noPalco: boolean;
     roomName: string | null;
+    sinais?: SinalDaSalaFalsa[];
     tituloDoIframe: string | null;
   }[];
 };
@@ -1783,8 +1789,11 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * executeCommand (anotado), getParticipantsInfo, isAudioMuted / isVideoMuted e dispose. window.__salaFalsa.disparar
  * manda um sinal aos ouvintes da montagem mais nova. Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
- * proprio participante e hangup responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao
- * ligou, alguem bateu na sala de espera) o teste dispara.
+ * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
+ * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
+ * tambem, liga ou desliga a de audio) e hangup responde videoConferenceLeft; o resto (o apresentador liberou o
+ * microfone, a gravacao ligou, alguem bateu na sala de espera) o teste dispara. Cada sinal mandado aos ouvintes (o
+ * disparado pelo teste e o do eco) fica anotado, na ordem, em `sinais`.
  *
  * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
  * isMultipleAudioInputSupported e setAudioInputDevice / setAudioOutputDevice / setVideoInputDevice(rotulo, id), cada
@@ -1869,12 +1878,15 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       tituloDoIframe: null
     };
     Object.defineProperty(montagem, "estado", { enumerable: false, value: estado });
+    // Os sinais mandados aos ouvintes desta montagem, na ordem (fora do JSON da montagem, como o estado).
+    Object.defineProperty(montagem, "sinais", { enumerable: false, value: [] });
     Object.defineProperty(montagem, "emitir", {
       enumerable: false,
       value: (evento, payload) => {
         if (montagem.descartada) {
           return;
         }
+        montagem.sinais.push({ evento: String(evento), payload: copia(payload) });
         for (const ouvinte of Array.from(ouvintes.get(evento) || [])) {
           try {
             ouvinte(payload);
@@ -1926,6 +1938,9 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
         } else if (comando === "toggleRaiseHand") {
           estado.maoLevantada = !estado.maoLevantada;
           montagem.emitir("raiseHandUpdated", { handRaised: estado.maoLevantada ? Date.now() : 0, id: estado.proprioId });
+        } else if (comando === "toggleModeration") {
+          // Como o 'toggle-moderation' da tag: so "video" e a de video; qualquer outro tipo cai na de audio.
+          montagem.emitir("moderationStatusChanged", { enabled: args[0] === true, mediaType: args[1] === "video" ? "video" : "audio" });
         } else if (comando === "hangup") {
           montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
         }
@@ -2177,7 +2192,13 @@ export async function salaFalsaDoJitsi(
       return montagem as unknown as MontagemDaSalaFalsa;
     },
     montagens: () => page.evaluate(() => (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa?.montagens.length ?? 0),
-    pedidosDoScript: () => pedidos
+    pedidosDoScript: () => pedidos,
+    sinais: () =>
+      page.evaluate(() => {
+        const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+        const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop();
+        return atual?.sinais ?? [];
+      })
   };
 }
 

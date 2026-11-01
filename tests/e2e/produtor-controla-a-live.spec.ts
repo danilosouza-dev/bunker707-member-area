@@ -111,10 +111,16 @@ test.describe("produtor", () => {
     // Moderador: o aluno so fala depois de Liberar, e a Sessao de pratica liga a sala de espera.
     const moderacao = await sala.esperarComando("toggleModeration");
     expect(moderacao.args).toEqual([true, "audio"]);
-    // E a tela compartilhada: so moderador compartilha, mesmo com um cliente que ignore a barra e as features do token.
-    await expect.poll(async () => (await sala.comandos()).some((item) => item.comando === "toggleModeration" && JSON.stringify(item.args) === JSON.stringify([true, "desktop"]))).toBe(true);
     const pratica = await sala.esperarComando("toggleLobby");
     expect(pratica.args).toEqual([true]);
+    // Nada de moderacao de tela (docs/31 §5.4): na tag o "desktop" do toggleModeration liga de novo a de audio. A
+    // moderacao de audio sai uma vez so, e o motor responde com a de audio.
+    const moderacoes = (await sala.comandos()).filter((item) => item.comando === "toggleModeration");
+    expect(moderacoes.filter((item) => item.args.includes("desktop"))).toEqual([]);
+    expect(moderacoes.filter((item) => JSON.stringify(item.args) === JSON.stringify([true, "audio"]))).toHaveLength(1);
+    await expect
+      .poll(async () => (await sala.sinais()).filter((sinal) => sinal.evento === "moderationStatusChanged").map((sinal) => sinal.payload))
+      .toContainEqual({ enabled: true, mediaType: "audio" });
 
     let antes = (await sala.comandos()).length;
     await page.getByRole("button", { exact: true, name: consoleAoVivo.comecarParaTodos }).click();

@@ -386,8 +386,8 @@ test("fontes: o iframe pelo useJitsiMeet com o token do join-token e o nonce da 
   assert.match(panel, /tokenRefreshDelayMs\(/, "o token novo antes do exp");
   assert.match(panel, /name === "recordingStatusChanged" && shouldMarkAnchor\(/, "a ancora sai do recordingStatusChanged");
   assert.match(panel, /shouldAutoStartRecording\([\s\S]*?command\("startRecording", \{ mode: "file" \}\)/, "o Gravar da fila dispara sozinho");
-  // A moderacao de audio, de tela compartilhada e de video (sem camera de aluno) e o seguir a visao saem de
-  // presenterSetupCommands (live-console-model), mandados um a um ao virar moderador.
+  // A moderacao de audio e a de video (sem camera de aluno) e o seguir a visao saem de presenterSetupCommands
+  // (live-console-model), mandados um a um ao virar moderador; a de tela nao liga pelo IFrame API (docs/31 §5.4).
   assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
   assert.match(panel, /command\("toggleLobby", value\)/);
 
