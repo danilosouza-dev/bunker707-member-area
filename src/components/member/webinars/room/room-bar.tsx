@@ -41,16 +41,19 @@ export const ROOM_REACTIONS_POPOVER =
 export const ROOM_SETTINGS_POPOVER =
   "order-first mx-2 mt-2 flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-room-border bg-room-surface lg:absolute lg:bottom-full lg:right-0 lg:z-40 lg:order-none lg:mx-0 lg:mb-3 lg:mt-0 lg:w-[380px] lg:rounded-[var(--member-cover-radius)] lg:shadow-[0_16px_40px_rgba(0,0,0,0.35)]";
 
+const ROOM_BAR =
+  "mx-2 my-2 flex h-16 shrink-0 items-center justify-between gap-0.5 overflow-x-auto rounded-[14px] border border-room-border bg-room-surface px-1.5 [scrollbar-width:none] lg:mx-0 lg:my-0 lg:grid lg:h-[72px] lg:grid-cols-[minmax(max-content,1fr)_auto_minmax(max-content,1fr)] lg:gap-3 lg:overflow-visible lg:rounded-[var(--member-cover-radius)] lg:px-3 [&::-webkit-scrollbar]:hidden";
+
 /**
  * A barra: o grupo "Controles da sala" com as tres zonas; no console, `as` "nav" ("Controles de quem apresenta", o
- * <nav> do prototipo), sem o papel de grupo.
+ * <nav> do prototipo), sem o papel de grupo, e o `className` dele (as colunas da grade); a sala nao passa nenhum.
  */
-export function RoomBar({ as = "group", center, label, left, right }: { as?: "group" | "nav"; center: ReactNode; label: string; left: ReactNode; right: ReactNode }) {
+export function RoomBar({ as = "group", center, className, label, left, right }: { as?: "group" | "nav"; center: ReactNode; className?: string; label: string; left: ReactNode; right: ReactNode }) {
   const Shell = as === "nav" ? "nav" : "div";
   return (
     <Shell
       aria-label={label}
-      className="mx-2 my-2 flex h-16 shrink-0 items-center justify-between gap-0.5 overflow-x-auto rounded-[14px] border border-room-border bg-room-surface px-1.5 [scrollbar-width:none] lg:mx-0 lg:my-0 lg:grid lg:h-[72px] lg:grid-cols-[minmax(max-content,1fr)_auto_minmax(max-content,1fr)] lg:gap-3 lg:overflow-visible lg:rounded-[var(--member-cover-radius)] lg:px-3 [&::-webkit-scrollbar]:hidden"
+      className={className ? cn(ROOM_BAR, className) : ROOM_BAR}
       data-room-bar=""
       role={as === "nav" ? undefined : "group"}
     >

@@ -52,6 +52,8 @@ export function DropdownMenuContent({ children }) { return createElement("div", 
 export function DropdownMenuGroup({ children }) { return createElement("div", { role: "group" }, children); }
 export function DropdownMenuLabel({ children }) { return createElement("div", { "data-menu-label": "" }, children); }
 export function DropdownMenuSeparator() { return createElement("hr", { "data-menu-separator": "" }); }
+export function DropdownMenuRadioGroup({ children, value, ...props }) { return createElement("div", { "data-menu-value": value, role: "group", ...pass(props) }, children); }
+export function DropdownMenuRadioItem({ children, closeOnClick, value, ...props }) { return createElement("div", { "data-menu-item": "", "data-value": value, role: "menuitemradio", ...pass(props) }, children); }
 export function DropdownMenuItem({ children, disabled, render }) {
   return render ? cloneElement(render, { "data-menu-item": "", role: "menuitem" }, children) : createElement("div", { "aria-disabled": disabled || undefined, "data-menu-item": "", role: "menuitem" }, children);
 }`,
@@ -145,6 +147,15 @@ const textOf = (markup) =>
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const count = (markup, pattern) => (markup.match(pattern) ?? []).length;
+/** O pedaco do painel de uma aba (`tab`) ou de uma entrada do ⋯ (`more`): da tag dela ate a seguinte. */
+const pane = (markup, kind, name) => {
+  const at = markup.indexOf(`data-console-${kind}="${name}"`);
+  assert.ok(at >= 0, `o painel tem ${kind} ${name}`);
+  const next = markup.slice(at + 1).search(/data-console-(?:tab|more)="/);
+  const end = next < 0 ? markup.indexOf("</aside>", at) : markup.lastIndexOf("<", at + 1 + next);
+  return markup.slice(markup.lastIndexOf("<", at), end);
+};
+const hiddenPane = (block) => /^<[^>]*\shidden=""/.test(block);
 
 const NOW = Date.parse("2026-11-05T23:05:00.000Z");
 const MIN = 60_000;
@@ -318,9 +329,23 @@ test("chat: pendente com Liberar, promover so com o aceite (sem ele, o motivo), 
   assert.match(text, /1:00/, "o minuto do video de cada mensagem");
 });
 
-test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas", () => {
+test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
   const text = textOf(markup);
+  // A gravada (docs/31 V2-15): as abas Chat e Perguntas; o ⋯ com Enquetes, Roteiro, Oferta e Atendimento (sem a leitura
+  // da presenca, sem a Presença); tudo montado, so o Chat na tela, e sem o X (sem palco o painel nunca fecha).
+  assert.deepEqual(Array.from(markup.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas 2"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento"]);
+  assert.ok(!hiddenPane(pane(markup, "tab", "chat")), "o Chat na tela");
+  for (const [kind, name] of [["tab", "perguntas"], ["more", "enquetes"], ["more", "roteiro"], ["more", "oferta"], ["more", "atendimento"]]) {
+    assert.ok(hiddenPane(pane(markup, kind, name)), `${name} escondido`);
+  }
+  assert.doesNotMatch(markup, /Fechar o painel/);
+  const roteiro = pane(markup, "more", "roteiro");
+  assert.match(roteiro, /^<section aria-label="Roteiro"/);
+  assert.equal(count(roteiro, /data-script-fired="true"/g), 1, "o roteiro na entrada Roteiro");
+  assert.match(pane(markup, "more", "enquetes"), /data-console-polls-templates/, "as enquetes na entrada Enquetes");
+  assert.match(pane(markup, "tab", "perguntas"), /data-console-questions/, "as perguntas na aba Perguntas");
 
   assert.match(text, /1 entrou · 1 a caminho · 1 pelo botão/);
   assert.equal(count(markup, /data-script-fired="true"/g), 1);
@@ -376,6 +401,10 @@ test("fase 4c: o painel Atendimento entra no console (le pela propria acao) e a 
   const text = textOf(markup);
   assert.match(text, /Atendimento/);
   assert.match(text, /Carregando o atendimento…/);
+  // O Atendimento fica no ⋯ (docs/31 V2-15), montado e escondido: a leitura e a batida de 30 s continuam com outra aba.
+  const atendimento = pane(markup, "more", "atendimento");
+  assert.ok(hiddenPane(atendimento));
+  assert.match(textOf(atendimento), /Carregando o atendimento…/);
   const block = markup.slice(markup.indexOf('data-console-message="m-ia"'), markup.indexOf("</li>", markup.indexOf('data-console-message="m-ia"')));
   assert.match(block, /data-message-source="ai"/);
   assert.match(textOf(block), /Assistente/);
@@ -433,6 +462,10 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   };
   const presence = consolePresenceOf(view, 4 * MIN + 30_000);
   const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
+  // A Presença no ⋯ (docs/31 V2-15), so com a leitura da presenca, montada e escondida.
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.ok(hiddenPane(pane(markup, "more", "presenca")));
+  assert.match(pane(markup, "more", "presenca"), /id="console-presence-title"/);
   // O selo do topo da gravada (V2-13): os presentes do retrato de 5 s e o pico da presenca.
   assert.match(markup, /data-console-present="">7 presentes · pico 9</);
   const painel = markup.slice(markup.indexOf('id="console-presence-title"'));
@@ -442,7 +475,9 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   assert.equal((painel.match(/<rect /g) ?? []).length, 5, "um minuto por barra, do 0 ao 4");
   assert.match(painel, /<title>03:00 · 9 presentes<\/title>/);
 
-  assert.doesNotMatch(textOf(render({ sessions, snapshot: snapshot({ presence: null }), webinar })), /Mensagens no último minuto/);
+  const semPresenca = render({ sessions, snapshot: snapshot({ presence: null }), webinar });
+  assert.doesNotMatch(textOf(semPresenca), /Mensagens no último minuto/);
+  assert.doesNotMatch(semPresenca, /data-console-more="presenca"/, "sem a leitura, sem a entrada Presença");
 });
 
 test("Refazer tradução: cada mensagem do chat ganha o botao so com a traducao ligada no ambiente", () => {

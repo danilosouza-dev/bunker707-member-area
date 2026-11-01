@@ -41,6 +41,7 @@ const { roomSimulationStateOf } = await import("../src/components/member/webinar
 const pollLayer = await import("../src/components/member/webinars/room/room-poll-layer.tsx");
 const pollsTab = await import("../src/components/member/webinars/room/room-polls.tsx");
 const questionsModule = await import("../src/components/member/webinars/room/room-questions.tsx");
+const panelModule = await import("../src/components/member/webinars/room/room-panel.tsx");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const MIN = 60_000;
@@ -831,4 +832,42 @@ test("Perfil › Privacidade › Chat das lives: o texto e o botao Remover minha
   assert.doesNotMatch(html, /Remover de todas as lives\?/, "a confirmacao so depois do clique");
   const preview = render(privacy.WebinarChatPrivacy, { readOnly: true });
   assert.match(preview, /<button[^>]+disabled/);
+});
+
+
+/* ------------------------------------------------------------------------------------------------
+ * O RoomTabList (docs/31 V2-15): a linha das abas sai do RoomPanel para o console usar, e a sala fica com o mesmo HTML
+ * ---------------------------------------------------------------------------------------------- */
+
+// O HTML do RoomPanel antes da extracao (G7 da fase 2), byte a byte: a sala nao muda nada com o RoomTabList.
+const PAINEL_DA_SALA_ANTES = {
+  live: "<aside class=\"flex gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3\" data-testid=\"room-panel\" id=\"room-panel\"><div class=\"flex shrink-0 items-center gap-2 px-2 lg:px-0\"><div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" data-room-first-focus=\"\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button><button aria-controls=\"room-tab-participantes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-participantes\" role=\"tab\" type=\"button\">Participantes</button><button aria-controls=\"room-tab-enquetes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-enquetes\" role=\"tab\" type=\"button\">Enquetes<span aria-hidden=\"true\" class=\"ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle\"></span></button></div><button aria-label=\"Fechar o painel\" class=\"shrink-0 place-items-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none [&amp;_svg]:shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus size-10 [&amp;_svg]:size-[18px] border border-room-border-strong bg-room-surface text-room-icon hover:bg-room-control-hover hover:text-room-fg-strong hidden lg:grid\" title=\"Fechar o painel\" type=\"button\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-x\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"></path><path d=\"m6 6 12 12\"></path></svg></button></div><div aria-labelledby=\"room-tabbtn-perguntas\" class=\"mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b x-y\" id=\"room-tab-perguntas\" role=\"tabpanel\">conteudo</div></aside>",
+  replayFechado: "<aside class=\"gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3 pt-2 lg:pt-0\" data-testid=\"room-panel\" hidden=\"\" id=\"room-panel\"><div class=\"flex shrink-0 items-center gap-2 px-2 lg:px-0\"><div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat da live</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button></div></div><div aria-labelledby=\"room-tabbtn-chat\" class=\"mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b\" id=\"room-tab-chat\" role=\"tabpanel\">c</div></aside>"
+};
+
+test("o painel da sala com o RoomTabList: o mesmo HTML de antes (as quatro abas com o ponto da enquete, o primeiro foco no Chat, o X; o Replay fechado sem o X)", () => {
+  const live = render(panelModule.RoomPanel, { children: "conteudo", className: "flex", closable: true, contentClassName: "x-y", firstFocus: true, id: "room-panel", kind: "live", onClose: noop, onTab: noop, open: true, pollOpen: true, tab: "perguntas", tabs: ["chat", "perguntas", "participantes", "enquetes"] });
+  assert.equal(live, PAINEL_DA_SALA_ANTES.live);
+  const replay = render(panelModule.RoomPanel, { children: "c", closable: false, firstFocus: false, id: "room-panel", kind: "replay", onClose: noop, onTab: noop, open: false, pollOpen: false, tab: "chat", tabs: ["chat", "perguntas"] });
+  assert.equal(replay, PAINEL_DA_SALA_ANTES.replayFechado);
+  // As abas de hoje, pelo texto: Chat, Perguntas, Participantes e Enquetes (o Replay diz "Chat da live").
+  assert.deepEqual(Array.from(live.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas", "Participantes", "Enquetes"]);
+  assert.deepEqual(Array.from(replay.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat da live", "Perguntas"]);
+});
+
+test("RoomTabList fora da sala (o console): os ids pelo prefixo, o numero no nome da aba (tambem o zero), nenhuma aba escolhida quando o painel mostra outra coisa, sem o primeiro foco", () => {
+  const tabs = [
+    { label: "Chat", value: "chat" },
+    { count: 3, label: "Perguntas", value: "perguntas" },
+    { count: 0, label: "Mãos", value: "maos" }
+  ];
+  const html = render(panelModule.RoomTabList, { firstFocusValue: null, idPrefix: "console", label: "Painel do console", onSelect: noop, open: true, tab: "maos", tabs });
+  assert.match(html, /^<div aria-label="Painel do console"[^>]*role="tablist">/);
+  assert.deepEqual(Array.from(html.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas 3", "Mãos 0"]);
+  assert.deepEqual(Array.from(html.matchAll(/aria-controls="([^"]+)"/g)).map((match) => match[1]), ["console-tab-chat", "console-tab-perguntas", "console-tab-maos"]);
+  assert.deepEqual(Array.from(html.matchAll(/id="([^"]+)"/g)).map((match) => match[1]), ["console-tabbtn-chat", "console-tabbtn-perguntas", "console-tabbtn-maos"]);
+  assert.deepEqual(Array.from(html.matchAll(/aria-selected="(true|false)"/g)).map((match) => match[1]), ["false", "false", "true"]);
+  assert.doesNotMatch(html, /data-room-first-focus/);
+  const nenhuma = render(panelModule.RoomTabList, { firstFocusValue: null, idPrefix: "console", label: "Painel do console", onSelect: noop, open: true, tab: null, tabs });
+  assert.doesNotMatch(nenhuma, /aria-selected="true"/, "com o ⋯ escolhido, nenhuma aba fica escolhida");
 });

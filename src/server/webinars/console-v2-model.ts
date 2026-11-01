@@ -1,8 +1,9 @@
 // O console V2 de quem apresenta (docs/31 V2-12 a V2-15, fase 2 do redesign), a parte pura: o rotulo de cada sessao
 // no seletor do topo, o selo dos presentes com o pico, os botoes de situacao do topo pela espécie e pela situacao da
 // sessao, o palco da live (V2-4 e V2-A5): o selo do momento, o de quem esta no video grande e quem decide a coluna de
-// miniaturas, e a barra de quem apresenta (V2-14): os botoes de cada papel e o circulo Gravar. Sem React e com imports
-// relativos: tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node.
+// miniaturas, a barra de quem apresenta (V2-14): os botoes de cada papel e o circulo Gravar, e o painel com abas
+// (V2-15): as abas, as entradas do ⋯ e os numeros das abas. Sem React e com imports relativos:
+// tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node.
 // Cada fatia da fase 2 acrescenta aqui as regras da tela dela.
 
 import { liveElapsedLabel, liveOnAirLabel, stageOwnerId } from "../../components/member/webinars/room/live-room-model";
@@ -13,7 +14,7 @@ import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarDayMonthTime } from "../../lib/webinar-time";
 import { canEndSession, canOpenSession, consoleClockLabel, consoleClockMs, consolePhaseOf, type ConsolePhase } from "./console-model";
 import { liveSessionButtons, type ConsoleRoomRole, type LiveControls, type LiveRoomState, type RecorderCard } from "./live-console-model";
-import type { SessionKind, SessionStatus, WebinarSession } from "./model";
+import type { SessionKind, SessionStatus, WebinarKind, WebinarQuestion, WebinarSession } from "./model";
 
 const copy = WEBINAR_COPY.consoleV2;
 
@@ -193,11 +194,11 @@ export type ConsoleBarItems = { center: ConsoleBarItem[]; left: ConsoleBarItem[]
  * A barra de quem apresenta (V2-14), pelo papel do console na sala. A esquerda, a Sala de espera: "Sala de espera · 2"
  * com Admitir todos quando alguem bate e o papel admite (controls.admit); sem ninguem batendo, a frase da sala
  * (lobbyNotice: a Sessão de prática, a sala trancada, a Sala de espera ligada) numa pilula quieta; sem nada, a zona fica
- * vazia. No centro, para o Apresentador: Microfone, Câmera, Compartilhar tela e Gravar; o co-apresentador sem Gravar; a
- * Equipe sem midia (como antes do V2). O Compartilhar tela so com o nosso circulo valendo no navegador
+ * vazia. No centro, para o Apresentador: Microfone, Câmera, Compartilhar tela, Gravar, Mãos e Lançar enquete; o
+ * co-apresentador sem Gravar; a Equipe so Mãos e Lançar enquete (sem midia, como antes do V2). Mãos e Lançar enquete
+ * abrem o painel (a aba Mãos e o ⋯ › Enquetes). O Compartilhar tela so com o nosso circulo valendo no navegador
  * (consoleScreenShareMode "ours"; no outro, o botao de tela do proprio motor fica no video, V2-A39). A direita, a visao
- * (para todos no Apresentador), Configurações (so quem apresenta, com a sala neste ambiente) e o painel. Mãos e Lançar
- * enquete entram com o painel com abas.
+ * (para todos no Apresentador), Configurações (so quem apresenta, com a sala neste ambiente) e o painel.
  */
 export function consoleBarItemsFor(input: {
   controls: Pick<LiveControls, "admit">;
@@ -220,6 +221,7 @@ export function consoleBarItemsFor(input: {
       center.push("record");
     }
   }
+  center.push("hands", "poll");
   const right: ConsoleBarItem[] = ["view"];
   if (presenter && input.meetConfigured) {
     right.push("settings");
@@ -228,27 +230,100 @@ export function consoleBarItemsFor(input: {
   return { center, left: lobby ? ["lobby"] : [], lobby, right };
 }
 
-/** O circulo Gravar da barra: ligado (gravando), girando (na fila), se o clique vale e o title, que diz o porque. */
-export type ConsoleRecordButton = { active: boolean; busy: boolean; enabled: boolean; title: string };
+/**
+ * O circulo Gravar da barra: ligado (gravando), girando (na fila), se o clique vale, se o clique abre o ⋯ › Gravação do
+ * painel (o preparo) e o title, que diz o porque.
+ */
+export type ConsoleRecordButton = { active: boolean; busy: boolean; enabled: boolean; opensPanel: boolean; title: string };
 
 /**
  * O circulo Gravar da barra do Apresentador (V2-14), pelos estados do cartao Gravação (recorderCard): "record" grava
  * (o mesmo pedido de antes, requestRecording e o startRecording do arquivo), "recording" fica ligado e o clique para,
- * "queued" gira (o clique ja esta na fila e a gravacao comeca sozinha) e o resto fica desligado com o motivo no title
- * (o "prepare" ate o painel com abas, quando o clique abre a Gravação; por enquanto o Preparar fica no cartao). Fora da
- * sala nada liga; sem messaging.publish o "record" fica desligado com a frase de quem publica, e o "recording" para.
+ * "queued" gira (o clique ja esta na fila e a gravacao comeca sozinha), "prepare" abre o ⋯ › Gravação do painel, onde
+ * fica o Preparar (o title diz o porque, tambem fora da sala: o gravador se prepara antes da live), e o resto fica
+ * desligado com o motivo no title. Fora da sala nada grava; sem messaging.publish o "record" fica desligado com a frase
+ * de quem publica, e o "recording" para.
  */
 export function consoleRecordButton(input: { canPublish: boolean; card: Pick<RecorderCard, "action" | "label" | "note">; joined: boolean; open: boolean }): ConsoleRecordButton {
   const live = WEBINAR_COPY.consoleAoVivo;
   const { card } = input;
   switch (card.action) {
     case "recording":
-      return { active: true, busy: false, enabled: input.joined, title: live.pararGravacao };
+      return { active: true, busy: false, enabled: input.joined, opensPanel: false, title: live.pararGravacao };
     case "queued":
-      return { active: false, busy: true, enabled: false, title: card.note ?? live.gravarNaFila };
+      return { active: false, busy: true, enabled: false, opensPanel: false, title: card.note ?? live.gravarNaFila };
     case "record":
-      return { active: false, busy: false, enabled: input.joined && input.canPublish, title: input.canPublish ? live.gravar : live.soQuemPublica };
+      return { active: false, busy: false, enabled: input.joined && input.canPublish, opensPanel: false, title: input.canPublish ? live.gravar : live.soQuemPublica };
+    case "prepare":
+      return { active: false, busy: false, enabled: true, opensPanel: true, title: card.note ?? card.label };
     default:
-      return { active: false, busy: false, enabled: false, title: input.open ? (card.note ?? card.label) : live.recusas.notRecording };
+      return { active: false, busy: false, enabled: false, opensPanel: false, title: input.open ? (card.note ?? card.label) : live.recusas.notRecording };
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * G7 (V2-15): o painel com abas
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As abas do painel do console, na ordem da tela. */
+export const CONSOLE_TABS = ["chat", "perguntas", "maos", "pessoas"] as const;
+export type ConsoleTab = (typeof CONSOLE_TABS)[number];
+
+/** As entradas do ⋯ do painel, na ordem do V2-15. */
+export const CONSOLE_MORE_ENTRIES = ["enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
+export type ConsoleMoreEntry = (typeof CONSOLE_MORE_ENTRIES)[number];
+
+/** O que o painel mostra: uma aba ou uma entrada do ⋯ (nunca as duas: com uma entrada, nenhuma aba fica escolhida). */
+export type ConsolePanelView = { more: ConsoleMoreEntry } | { tab: ConsoleTab };
+
+/**
+ * As abas do painel (V2-15): na live, Chat, Perguntas, Mãos e Pessoas; na gravada e no Replay, so Chat e Perguntas
+ * (ninguem levanta a mao nem esta numa sala de video).
+ */
+export function consoleTabsFor(input: { kind: SessionKind }): ConsoleTab[] {
+  return input.kind === "live" ? [...CONSOLE_TABS] : ["chat", "perguntas"];
+}
+
+/**
+ * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
+ * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
+ */
+export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
+  const entries: ConsoleMoreEntry[] = ["enquetes"];
+  if (input.webinarKind === "simulated") {
+    entries.push("roteiro");
+  }
+  if (input.kind !== "live") {
+    entries.push("oferta");
+  }
+  entries.push("atendimento");
+  if (input.hasPresence) {
+    entries.push("presenca");
+  }
+  if (input.kind === "live") {
+    entries.push("gravacao");
+  }
+  return entries;
+}
+
+/**
+ * Os numeros das abas (V2-15 e V2-A37): "Perguntas 3" conta so as abertas (a fila que espera a equipe) e "Mãos 2" as
+ * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat fica sem numero na aba (o
+ * "{n} aguardando" vai no cabecalho dele) e Pessoas tambem.
+ */
+export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "status">[] }): { maos: number; perguntas: number } {
+  const hands = Number.isFinite(input.hands) ? Math.max(0, Math.floor(input.hands)) : 0;
+  return { maos: hands, perguntas: input.questions.filter((question) => question.status === "open").length };
+}
+
+/**
+ * A vista que vale agora: a escolhida, se a aba ou a entrada ainda existe nesta sessao (a Presença some sem a leitura,
+ * a troca de sessao muda as abas); senao, o Chat.
+ */
+export function consolePanelViewOf(input: { entries: readonly ConsoleMoreEntry[]; tabs: readonly ConsoleTab[]; view: ConsolePanelView }): ConsolePanelView {
+  const { view } = input;
+  if ("tab" in view) {
+    return input.tabs.includes(view.tab) ? view : { tab: "chat" };
+  }
+  return input.entries.includes(view.more) ? view : { tab: "chat" };
 }

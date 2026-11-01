@@ -1790,7 +1790,9 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * window.__salaFalsa.disparar manda um sinal aos ouvintes da montagem mais nova. Os papeis, como a tag: o
  * participantRoleChanged disparado grava o papel; o participantJoined disparado com `papel` (quem ja era moderador
  * quando a pagina entrou) grava o papel e o emite sem ele, porque o participantJoined de verdade nao traz papel; so o
- * getRoomsInfo devolve os papeis (o proprio participante moderador e quem entrou participante, sem papel gravado). Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
+ * getRoomsInfo devolve os papeis (o proprio participante moderador e quem entrou participante, sem papel gravado) e,
+ * como a tag, o audioMuted e o videoMuted de quem entrou (pelo participantMuted disparado; sem ele, mudos). Com
+ * `ecoar`, como o Jitsi de verdade: toggleVideo responde
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
  * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
  * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
@@ -1872,6 +1874,8 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       // O papel de cada um na sala (id -> "moderator" | "participant" | "none"): o participantRoleChanged disparado e o
       // "papel" do participantJoined disparado gravam; o getRoomsInfo devolve.
       papeis: {},
+      // O mudo de cada um (id -> { audio, video }), pelo participantMuted disparado; o getRoomsInfo devolve.
+      mudos: {},
       participantes: [],
       permitido,
       proprioId: null,
@@ -1985,7 +1989,8 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
     const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
     // As salas e o papel de cada um, como o getRoomsInfo da tag (breakout-rooms/functions.ts): so a sala principal, o
-    // proprio participante primeiro (moderador sem papel gravado) e quem entrou (participante sem papel gravado).
+    // proprio participante primeiro (moderador sem papel gravado) e quem entrou (participante sem papel gravado, com o
+    // audioMuted e o videoMuted da tag: o que o participantMuted disparado disse, ou mudo).
     this.getRoomsInfo = () => {
       anotar("getRoomsInfo", []);
       return Promise.resolve({
@@ -1994,7 +1999,13 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
             isMainRoom: true,
             participants: [
               { id: estado.proprioId, role: estado.papeis[estado.proprioId] ?? "moderator" },
-              ...estado.participantes.map((pessoa) => ({ displayName: pessoa.displayName, id: pessoa.id, role: estado.papeis[pessoa.id] ?? "participant" }))
+              ...estado.participantes.map((pessoa) => ({
+                audioMuted: estado.mudos[pessoa.id]?.audio ?? true,
+                displayName: pessoa.displayName,
+                id: pessoa.id,
+                role: estado.papeis[pessoa.id] ?? "participant",
+                videoMuted: estado.mudos[pessoa.id]?.video ?? true
+              }))
             ]
           }
         ]
@@ -2106,6 +2117,8 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       estado.papeis[dados.id] = dados.role;
     } else if (evento === "participantLeft" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
+    } else if (evento === "participantMuted" && typeof dados.id === "string" && typeof dados.isMuted === "boolean" && (dados.mediaType === "audio" || dados.mediaType === "video")) {
+      estado.mudos[dados.id] = { ...estado.mudos[dados.id], [dados.mediaType]: dados.isMuted };
     } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
       // A camera ligada pela barra do proprio iframe (o apresentador): o navegador deu a permissao da camera.
       estado.videoMudo = dados.muted;

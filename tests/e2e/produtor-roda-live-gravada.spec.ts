@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { LIVE_GRAVADA_DE_TESTE, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
@@ -10,11 +11,24 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 // por dentro, docs/31 V2-13). Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
 // marcada ha 1 min, so para esta rodada; a aluna nao participa aqui (a Sala dela esta em aluno-assiste-live-gravada).
 // Fase 4 (docs/30 §2.2 e §2.4): o editor da Live gravada ganhou os cards Oferta e Assistente e o console da sessao
-// gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais.
+// gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais. O painel com abas
+// (docs/31 V2-15): o Chat na tela; o Roteiro, as Enquetes, a Oferta e o Atendimento no ⋯ "Mais painéis", montados e
+// escondidos ate a pessoa escolher.
 
 const { id, titulo } = LIVE_GRAVADA_DE_TESTE;
 const SESSAO = "bbbbbbbb-0000-4000-8000-0000000000e1";
 const CSV = ["Tempo;Nome;Papel;Mensagem", "0:05;Duda;Aluno;Boa noite, turma!", "0:10;Equipe;Equipe;Bem-vindos ao encontro", "abc;Lia;Aluno;tempo torto"].join("\n");
+const entradas = WEBINAR_COPY.consoleV2.entradas;
+
+/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela. */
+async function abrirNoMais(page: Page, entrada: string) {
+  await page.locator("[data-console-more-trigger]").click();
+  await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
+  const secao = page.locator(`section[aria-label="${entrada}"]`);
+  await expect(secao).toBeVisible();
+  await expect(page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.maisEscolhido(entrada) })).toBeVisible();
+  return secao;
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -80,14 +94,28 @@ test.describe("produtor", () => {
     await expect(page.getByText("Sessão aberta. O roteiro pronto entrou no chat.")).toBeVisible();
     await expect(page.getByRole("button", { exact: true, name: "Encerrar sessão" })).toBeVisible();
 
-    // Fase 4: na sessao gravada o console tem tambem a Oferta (Mostrar agora / Esconder) e o Atendimento.
-    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.console.titulo })).toBeVisible();
-    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.console.titulo })).toBeVisible();
+    // O painel com abas da gravada (docs/31 V2-15): Chat e Perguntas, sem Mãos nem Pessoas, e o Chat na tela.
+    await expect(page.getByRole("tab")).toHaveText(["Chat", /^Perguntas/]);
+    await expect(page.getByRole("tab", { exact: true, name: "Chat" })).toHaveAttribute("aria-selected", "true");
 
+    // Fase 4: na sessao gravada o console tem tambem a Oferta (Mostrar agora / Esconder) e o Atendimento, no ⋯.
+    const oferta = await abrirNoMais(page, entradas.oferta);
+    await expect(oferta.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.console.titulo })).toBeVisible();
+    const atendimento = await abrirNoMais(page, entradas.atendimento);
+    await expect(atendimento.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.console.titulo })).toBeVisible();
+    await expect(oferta).toBeHidden();
+    await expect(page.getByRole("tab", { exact: true, name: "Chat" })).toHaveAttribute("aria-selected", "false");
+
+    // O roteiro pronto entrou: a fila no ⋯ › Roteiro.
+    const roteiro = await abrirNoMais(page, entradas.roteiro);
+    await expect(roteiro.locator("[data-script-fired='true']")).toHaveCount(2);
+
+    // De volta ao Chat: as mensagens do roteiro estao la.
+    await page.getByRole("tab", { exact: true, name: "Chat" }).click();
+    await expect(roteiro).toBeHidden();
     const chat = page.getByRole("list", { name: "Chat" });
     await expect(chat.getByText("Boa noite, turma!")).toBeVisible();
     await expect(chat.getByText("Bem-vindos ao encontro")).toBeVisible();
-    await expect(page.locator("[data-script-fired='true']")).toHaveCount(2);
 
     await page.getByPlaceholder("Escreva para a turma").fill("Bem-vindos à sessão de teste");
     await page.getByRole("button", { exact: true, name: "Enviar" }).click();
@@ -95,7 +123,7 @@ test.describe("produtor", () => {
     await expect(chat.getByText("Bem-vindos à sessão de teste")).toBeVisible();
     await expect(chat.getByText("Apresentador").first()).toBeVisible();
 
-    const enquetes = page.getByRole("region", { name: "Enquetes" });
+    const enquetes = (await abrirNoMais(page, entradas.enquetes)).getByRole("region", { name: "Enquetes" });
     await enquetes.getByRole("button", { exact: true, name: "Abrir" }).click();
     await expect(enquetes.getByText("Nesta sessão")).toBeVisible();
     await expect(enquetes.getByText("0 respostas")).toBeVisible();

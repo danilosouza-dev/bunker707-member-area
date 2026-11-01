@@ -275,15 +275,17 @@ const live = await import("../src/server/webinars/live-console-model.ts");
 
 const barra = (extra = {}) => v2.consoleBarItemsFor({ controls: { admit: true }, knocking: 2, lobbyNotice: null, meetConfigured: true, role: "host", screenShare: "ours", ...extra });
 
-test("consoleBarItemsFor: o Apresentador [Sala de espera | Microfone, Câmera, Compartilhar tela, Gravar | visao, Configurações, painel]; o co-apresentador sem Gravar; a Equipe so a visao e o painel", () => {
+test("consoleBarItemsFor: o Apresentador [Sala de espera | Microfone, Câmera, Compartilhar tela, Gravar, Mãos, Lançar enquete | visao, Configurações, painel]; o co-apresentador sem Gravar; a Equipe so Mãos, Lançar enquete, a visao e o painel", () => {
   const host = barra();
-  assert.deepEqual([host.left, host.center, host.right], [["lobby"], ["mic", "camera", "share", "record"], ["view", "settings", "panel"]]);
+  assert.deepEqual([host.left, host.center, host.right], [["lobby"], ["mic", "camera", "share", "record", "hands", "poll"], ["view", "settings", "panel"]]);
   assert.deepEqual(host.lobby, { count: 2, kind: "knocking" });
   const coHost = barra({ role: "co_host" });
-  assert.deepEqual([coHost.left, coHost.center, coHost.right], [["lobby"], ["mic", "camera", "share"], ["view", "settings", "panel"]]);
-  // A Equipe nao admite (controls.admit falso) nem tem midia no console.
+  assert.deepEqual([coHost.left, coHost.center, coHost.right], [["lobby"], ["mic", "camera", "share", "hands", "poll"], ["view", "settings", "panel"]]);
+  // A Equipe nao admite (controls.admit falso) nem tem midia no console; Mãos e Lançar enquete so abrem o painel.
   const equipe = barra({ controls: { admit: false }, knocking: 0, role: "team" });
-  assert.deepEqual([equipe.left, equipe.center, equipe.right, equipe.lobby], [[], [], ["view", "panel"], null]);
+  assert.deepEqual([equipe.left, equipe.center, equipe.right, equipe.lobby], [[], ["hands", "poll"], ["view", "panel"], null]);
+  // A Equipe com a sala no ambiente continua sem Configurações (so quem apresenta configura a propria midia).
+  assert.deepEqual(barra({ controls: { admit: false }, role: "team" }).right, ["view", "panel"]);
 });
 
 test("consoleBarItemsFor: sem ninguem batendo, a frase da sala numa pilula quieta ou a zona vazia; quem bate sem poder admitir ve so a frase; sem a sala no ambiente, sem Configurações; o Compartilhar tela so com o nosso circulo valendo", () => {
@@ -295,8 +297,9 @@ test("consoleBarItemsFor: sem ninguem batendo, a frase da sala numa pilula quiet
   assert.deepEqual(barra({ controls: { admit: false }, lobbyNotice: frase, role: "team" }).lobby, { kind: "notice", text: frase }, "a Equipe ve a frase, sem o Admitir todos");
   assert.deepEqual(barra({ knocking: Number.NaN }).lobby, null, "contagem estragada vira ninguem");
   assert.deepEqual(barra({ meetConfigured: false }).right, ["view", "panel"]);
-  assert.deepEqual(barra({ screenShare: "engine" }).center, ["mic", "camera", "record"], "o botao de tela do motor fica no video (V2-A39)");
-  assert.deepEqual(barra({ role: "co_host", screenShare: "engine" }).center, ["mic", "camera"]);
+  assert.deepEqual(barra({ screenShare: "engine" }).center, ["mic", "camera", "record", "hands", "poll"], "o botao de tela do motor fica no video (V2-A39)");
+  assert.deepEqual(barra({ role: "co_host", screenShare: "engine" }).center, ["mic", "camera", "hands", "poll"]);
+  assert.deepEqual(barra({ role: "team", screenShare: "engine" }).center, ["hands", "poll"], "a Equipe nunca tem a tela");
 });
 
 test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores com Chromium; Firefox, Safari e todo navegador do iPhone e do iPad ficam com o botao do motor (V2-A39, ate o spike da tela)", () => {
@@ -358,20 +361,74 @@ test("menuKickPlan: o Remover do ⋮ da miniatura pelo nosso com o aluno ligado 
   assert.equal(live.menuKickPlan({ person: null, role: null, staff: false }), "unknown");
 });
 
-test("consoleRecordButton: o circulo Gravar pelo cartao Gravação; grava com a maquina pronta, para gravando, gira na fila e fica desligado com o motivo no resto; fora da sala nada liga", () => {
+test("consoleRecordButton: o circulo Gravar pelo cartao Gravação; grava com a maquina pronta, para gravando, gira na fila, abre o ⋯ › Gravação para preparar e fica desligado com o motivo no resto; fora da sala nada grava", () => {
   const copy = WEBINAR_COPY.consoleAoVivo;
   const card = (action, extra = {}) => ({ action, label: "Pronto", note: null, ...extra });
   const base = { canPublish: true, joined: true, open: true };
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record") }), { active: false, busy: false, enabled: true, title: copy.gravar });
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record"), joined: false }), { active: false, busy: false, enabled: false, title: copy.gravar });
-  assert.deepEqual(v2.consoleRecordButton({ ...base, canPublish: false, card: card("record") }), { active: false, busy: false, enabled: false, title: copy.soQuemPublica });
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording") }), { active: true, busy: false, enabled: true, title: copy.pararGravacao });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record") }), { active: false, busy: false, enabled: true, opensPanel: false, title: copy.gravar });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record"), joined: false }), { active: false, busy: false, enabled: false, opensPanel: false, title: copy.gravar });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, canPublish: false, card: card("record") }), { active: false, busy: false, enabled: false, opensPanel: false, title: copy.soQuemPublica });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording") }), { active: true, busy: false, enabled: true, opensPanel: false, title: copy.pararGravacao });
   assert.deepEqual(v2.consoleRecordButton({ ...base, canPublish: false, card: card("recording") }).enabled, true, "parar nao pede messaging.publish");
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording"), joined: false }), { active: true, busy: false, enabled: false, title: copy.pararGravacao });
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("queued", { note: "Preparando a gravação, 4 min. A gravação começa sozinha." }) }), { active: false, busy: true, enabled: false, title: "Preparando a gravação, 4 min. A gravação começa sozinha." });
-  // O Preparar fica no cartao ate o painel com abas: o circulo diz o porque.
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("prepare", { note: copy.gravacaoNaoPreparada }) }), { active: false, busy: false, enabled: false, title: copy.gravacaoNaoPreparada });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording"), joined: false }), { active: true, busy: false, enabled: false, opensPanel: false, title: copy.pararGravacao });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("queued", { note: "Preparando a gravação, 4 min. A gravação começa sozinha." }) }), { active: false, busy: true, enabled: false, opensPanel: false, title: "Preparando a gravação, 4 min. A gravação começa sozinha." });
+  // O gravador por preparar: o clique abre o ⋯ › Gravação do painel (o Preparar mora la), com o porque no title; vale
+  // tambem fora da sala e antes da live (o gravador se prepara antes de abrir) e sem messaging.publish (o Preparar diz
+  // que so quem publica liga a maquina).
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("prepare", { note: copy.gravacaoNaoPreparada }) }), { active: false, busy: false, enabled: true, opensPanel: true, title: copy.gravacaoNaoPreparada });
+  assert.deepEqual(v2.consoleRecordButton({ canPublish: false, card: card("prepare", { note: copy.disparoAusente }), joined: false, open: false }), { active: false, busy: false, enabled: true, opensPanel: true, title: copy.disparoAusente });
+  assert.equal(v2.consoleRecordButton({ ...base, card: card("prepare") }).title, "Pronto", "sem frase, o rotulo da situacao");
   assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("none", { label: "Enviando para a Bunny" }) }).title, "Enviando para a Bunny", "sem frase, o rotulo da situacao");
-  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("none", { note: copy.gravacaoPronta }), open: false }), { active: false, busy: false, enabled: false, title: copy.recusas.notRecording }, "fora da espera e do ar, a frase de quando grava");
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("none", { note: copy.gravacaoPronta }), open: false }), { active: false, busy: false, enabled: false, opensPanel: false, title: copy.recusas.notRecording }, "fora da espera e do ar, a frase de quando grava");
   assert.equal(v2.consoleRecordButton({ ...base, card: card("release") }).enabled, false);
+  assert.equal(v2.consoleRecordButton({ ...base, card: card("release") }).opensPanel, false, "o Desligar fica no cartao, o circulo so diz o porque");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * G7 (V2-15): o painel com abas
+ * ---------------------------------------------------------------------------------------------- */
+
+test("consoleTabsFor: a live com Chat, Perguntas, Mãos e Pessoas; a gravada e o Replay so com Chat e Perguntas", () => {
+  assert.deepEqual(v2.consoleTabsFor({ kind: "live" }), ["chat", "perguntas", "maos", "pessoas"]);
+  assert.deepEqual(v2.consoleTabsFor({ kind: "simulated" }), ["chat", "perguntas"]);
+  assert.deepEqual(v2.consoleTabsFor({ kind: "replay" }), ["chat", "perguntas"]);
+  // Uma lista nova a cada chamada: quem a muda nao estraga a ordem das outras.
+  const live = v2.consoleTabsFor({ kind: "live" });
+  live.pop();
+  assert.deepEqual(v2.consoleTabsFor({ kind: "live" }), ["chat", "perguntas", "maos", "pessoas"]);
+  assert.deepEqual([...v2.CONSOLE_TABS], ["chat", "perguntas", "maos", "pessoas"]);
+});
+
+test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Roteiro so no webinario gravado, Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "presenca", "gravacao"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "gravacao"], "antes de comecar, sem a Presença");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro");
+  for (const entries of [v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" })]) {
+    assert.deepEqual(entries, v2.CONSOLE_MORE_ENTRIES.filter((entry) => entries.includes(entry)), "sempre na ordem do V2-15");
+  }
+});
+
+test("consoleTabCounts: Perguntas conta so as abertas; Mãos, as maos levantadas (contagem estragada vira zero)", () => {
+  const questions = [{ status: "open" }, { status: "answered" }, { status: "open" }, { status: "dismissed" }];
+  assert.deepEqual(v2.consoleTabCounts({ hands: 2, questions }), { maos: 2, perguntas: 2 });
+  assert.deepEqual(v2.consoleTabCounts({ hands: 0, questions: [] }), { maos: 0, perguntas: 0 });
+  assert.deepEqual(v2.consoleTabCounts({ hands: Number.NaN, questions: [{ status: "answered" }] }), { maos: 0, perguntas: 0 });
+  assert.equal(v2.consoleTabCounts({ hands: -3, questions }).maos, 0);
+  assert.equal(v2.consoleTabCounts({ hands: 2.7, questions }).maos, 2);
+});
+
+test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nesta sessao; senao, o Chat", () => {
+  const tabs = v2.consoleTabsFor({ kind: "live" });
+  const entries = v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { tab: "maos" } }), { tab: "maos" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { more: "gravacao" } }), { more: "gravacao" });
+  // A Presença some sem a leitura dela; a gravada nao tem Mãos nem Gravação.
+  const semPresenca = v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries: semPresenca, tabs, view: { more: "presenca" } }), { tab: "chat" });
+  const gravada = { entries: v2.consoleMoreEntriesFor({ hasPresence: false, kind: "simulated", webinarKind: "simulated" }), tabs: v2.consoleTabsFor({ kind: "simulated" }) };
+  assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
+  assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });
+  assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "roteiro" } }), { more: "roteiro" });
 });

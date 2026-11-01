@@ -1,6 +1,6 @@
 "use client";
 
-import { Circle, MonitorDown, Power, Square, Timer } from "lucide-react";
+import { MonitorDown, Power, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import {
@@ -16,12 +16,12 @@ import type { SessionStatus } from "@/server/webinars/model";
 import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
 
-// O cartao Gravacao do console (docs/30 §1.4, §2.4, §6.4 passos 3, 7 e 11, §6.5 e §6.7): a situacao do gravador por
-// hora (os nomes do card Gravacao), Preparar gravacao (o pedido da maquina; sem o pedido automatico neste ambiente, a
-// frase da reserva), Gravar (startRecording de arquivo com a maquina pronta; preparando, o clique fica na fila e a
-// gravacao comeca sozinha no ready; sem maquina, desligado com "Gravacao nao preparada para esta live"), Parar gravacao,
-// Gravar no navegador (a reserva de D3: a gravacao local do proprio navegador), Desligar o gravador depois do envio, ha
-// quanto tempo a maquina esta ligada, e a ancora com a diferenca para o inicio do arquivo. So o Apresentador grava.
+// O cartao Gravacao do console (docs/30 §1.4, §2.4, §6.4 passos 3, 7 e 11, §6.5 e §6.7), no ⋯ › Gravação do painel
+// (docs/31 V2-15): a situacao do gravador por hora (os nomes do card Gravacao), Preparar gravacao (o pedido da maquina;
+// sem o pedido automatico neste ambiente, a frase da reserva), Gravar no navegador (a reserva de D3: a gravacao local
+// do proprio navegador), Desligar o gravador depois do envio, ha quanto tempo a maquina esta ligada, e a ancora com a
+// diferenca para o inicio do arquivo. Gravar e Parar ficam so no circulo Gravar da barra de quem apresenta
+// (console-bar.tsx, docs/31 V2-14): dois Gravar na pagina seriam duas fontes do mesmo clique. So o Apresentador grava.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 
@@ -33,9 +33,7 @@ type LiveRecorderProps = {
   nowMs: number;
   onBrowserRecord: () => void;
   onPrepare: () => void;
-  onRecord: () => void;
   onRelease: () => void;
-  onStop: () => void;
   recorder: LiveConsoleRecorder;
   recording: { mode: string | null; on: boolean };
   status: SessionStatus;
@@ -43,7 +41,7 @@ type LiveRecorderProps = {
   unavailable: boolean;
 };
 
-export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onBrowserRecord, onPrepare, onRecord, onRelease, onStop, recorder, recording, status, unavailable }: LiveRecorderProps) {
+export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onBrowserRecord, onPrepare, onRelease, recorder, recording, status, unavailable }: LiveRecorderProps) {
   const card = recorderCard({ nowMs, recorder, recordingOn: recording.on, status });
   const local = recording.on && recording.mode === "local";
   const open = status === "waiting" || status === "live";
@@ -85,18 +83,6 @@ export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onB
           <Button className="px-3" disabled={!controls.sessionEnabled || busy} onClick={onPrepare} title={controls.sessionEnabled ? undefined : LIVE_CONSOLE_COPY.soQuemPublica} type="button" variant="secondary">
             <Power aria-hidden="true" className="size-4" />
             {copy.prepararGravacao}
-          </Button>
-        ) : null}
-        {controls.record && open && card.action !== "recording" ? (
-          <Button className="px-3" disabled={busy || !joined || !canPublish || card.action !== "record"} onClick={onRecord} type="button">
-            <Circle aria-hidden="true" className="size-4 fill-current text-[var(--error)]" />
-            {copy.gravar}
-          </Button>
-        ) : null}
-        {controls.record && card.action === "recording" ? (
-          <Button className="px-3" disabled={!joined} onClick={onStop} type="button" variant="secondary">
-            <Square aria-hidden="true" className="size-4" />
-            {copy.pararGravacao}
           </Button>
         ) : null}
         {controls.record && open && card.fallback && !recording.on ? (

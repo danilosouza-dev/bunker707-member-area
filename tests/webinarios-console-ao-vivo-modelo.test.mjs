@@ -528,6 +528,75 @@ test("reducer da sala: quem compartilha a tela pelo contentSharingParticipantsCh
   assert.deepEqual(event({ ...state, sharing: ["p-co"] }, "videoConferenceLeft", {}), model.EMPTY_ROOM, "saiu da sala: ninguem compartilha");
 });
 
+test("reducer da sala: o microfone e a camera de cada um pelo participantMuted (so audio e video, o proprio console fora) e pelo getRoomsInfo (quem ja estava); quem sai e quem e removido somem; as linhas da aba Pessoas leem daqui, sem sinal desligado", () => {
+  let state = { ...model.EMPTY_ROOM, selfId: "p-eu" };
+  assert.deepEqual(model.EMPTY_ROOM.media, {}, "ninguem com microfone ou camera ao entrar");
+  state = event(state, "participantJoined", { displayName: "Ana S.", id: "p-ana" });
+  state = event(state, "participantJoined", { displayName: "Bia R.", id: "p-bia" });
+  // A faixa de microfone da Ana entra aberta; a camera dela, fechada. A tela vem do contentSharingParticipantsChanged.
+  state = event(state, "participantMuted", { id: "p-ana", isMuted: false, mediaType: "audio" });
+  state = event(state, "participantMuted", { id: "p-ana", isMuted: true, mediaType: "video" });
+  assert.deepEqual(state.media, { "p-ana": { audio: true, video: false } });
+  for (const [payload, motivo] of [
+    [{ id: "p-ana", isMuted: false, mediaType: "desktop" }, "a tela nao entra em media"],
+    [{ id: "p-eu", isMuted: false, mediaType: "audio" }, "o proprio console fica fora"],
+    [{ id: "<b>", isMuted: false, mediaType: "audio" }, "id fora do formato"],
+    [{ id: "p-ana", isMuted: "nao", mediaType: "audio" }, "isMuted sem booleano"],
+    [{ id: "p-ana", mediaType: "video" }, "sem isMuted"],
+    [{ id: "p-ana", isMuted: false, mediaType: "audio" }, "o mesmo estado de antes"]
+  ]) {
+    assert.equal(event(state, "participantMuted", payload), state, motivo);
+  }
+  // A camera abre depois; o microfone fecha.
+  state = event(state, "participantMuted", { id: "p-ana", isMuted: false, mediaType: "video" });
+  state = event(state, "participantMuted", { id: "p-ana", isMuted: true, mediaType: "audio" });
+  assert.deepEqual(state.media["p-ana"], { audio: false, video: true });
+
+  // Quem ja estava quando o console entrou: o getRoomsInfo traz o microfone e a camera (audioMuted e videoMuted); sem o
+  // campo, o que o console ja sabia fica.
+  state = model.liveRoomReducer(state, {
+    info: {
+      rooms: [
+        {
+          isMainRoom: true,
+          participants: [
+            { displayName: "Eu", id: "p-eu", role: "moderator" },
+            { audioMuted: false, displayName: "Co T.", id: "p-co", role: "moderator", videoMuted: false },
+            { audioMuted: true, displayName: "Bia R.", id: "p-bia", role: "participant", videoMuted: true },
+            { displayName: "Ana S.", id: "p-ana", role: "participant" }
+          ]
+        }
+      ]
+    },
+    type: "roomsInfo"
+  });
+  assert.deepEqual(state.media, { "p-ana": { audio: false, video: true }, "p-bia": { audio: false, video: false }, "p-co": { audio: true, video: true } });
+  assert.ok(!Object.hasOwn(state.media, "p-eu"), "o proprio console fica fora tambem pelo getRoomsInfo");
+
+  // As linhas da aba Pessoas: o microfone, a camera e quem compartilha a tela; sem sinal, desligados.
+  state = event(state, "participantJoined", { displayName: "Caio", id: "p-caio" });
+  state = event(state, "contentSharingParticipantsChanged", { data: ["p-co"] });
+  assert.deepEqual(
+    model.roomRows(state, []).map((row) => [row.id, row.audio, row.video, row.sharing]),
+    [
+      ["p-ana", false, true, false],
+      ["p-bia", false, false, false],
+      ["p-co", true, true, true],
+      ["p-caio", false, false, false]
+    ]
+  );
+  // O RoomPerson continua so com o id e o nome.
+  assert.deepEqual(state.people[0], { id: "p-ana", name: "Ana S." });
+
+  // Quem sai da sala e quem e removido somem de media; a saida do console zera tudo.
+  state = event(state, "participantLeft", { id: "p-ana" });
+  assert.ok(!Object.hasOwn(state.media, "p-ana"), "participantLeft limpa");
+  state = model.liveRoomReducer(state, { id: "p-bia", type: "kicked" });
+  assert.ok(!Object.hasOwn(state.media, "p-bia"), "o Remover limpa");
+  assert.deepEqual(Object.keys(state.media), ["p-co"]);
+  assert.deepEqual(event(state, "videoConferenceLeft", {}).media, {}, "saiu da sala: tudo zera");
+});
+
 test("papeis pelo getRoomsInfo: quem veio na sala principal ganha o papel e entra na lista; o proprio console, id invalido e papel fora da lista ficam fora; um participantRoleChanged depois troca o papel", () => {
   let state = { ...model.EMPTY_ROOM, selfId: "p-eu" };
   state = event(state, "participantJoined", { displayName: "Ana S.", id: "p-ana" });

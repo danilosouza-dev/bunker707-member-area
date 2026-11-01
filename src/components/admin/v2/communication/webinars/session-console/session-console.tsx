@@ -21,7 +21,16 @@ import {
   type ConsoleSnapshot
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
-import { consolePresenceBadge, consoleStageTopLeft, consoleTopActionsFor } from "@/server/webinars/console-v2-model";
+import {
+  consoleMoreEntriesFor,
+  consolePanelViewOf,
+  consolePresenceBadge,
+  consoleStageTopLeft,
+  consoleTabCounts,
+  consoleTabsFor,
+  consoleTopActionsFor,
+  type ConsolePanelView
+} from "@/server/webinars/console-v2-model";
 import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
 import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
 import { WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
@@ -43,7 +52,7 @@ import {
   undoSessionBan,
   unbanStudent
 } from "@/server/webinars/live-actions";
-import { LIVE_CONSOLE_COPY, desiredLobby, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { LIVE_CONSOLE_COPY, desiredLobby, handRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
 import { answerQuestion, closePoll, endSessionNow, launchPoll, moderateMessage, openSessionNow, sendTeamMessage, setQuestionStatus, setSessionChatMode } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
@@ -56,8 +65,10 @@ import { adminToast } from "../../../toast";
 import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleBar } from "./console-bar";
 import { ConsoleChat } from "./console-chat";
-import { CONSOLE_PANEL_ID, consoleSkeleton } from "./console-layout-model";
+import { CONSOLE_TAB_ID_PREFIX, consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
+import { ConsolePanel } from "./console-panel";
+import { ConsolePeopleTab } from "./console-people-tab";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
@@ -67,9 +78,8 @@ import { ConsoleStage } from "./console-stage";
 import { ConsoleTopBar, type ConsolePolling } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
-import { LiveControls } from "./live-controls";
 import { LiveHands } from "./live-hands";
-import { LivePersonMenu, LiveParticipants, type PersonAction } from "./live-participants";
+import { LivePersonMenu, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
@@ -97,10 +107,13 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // o Gravando, os presentes com o pico e quem esta no video grande, e o topo fica sem esses selos (os presentes voltam
 // ao topo so abaixo de sm, onde o palco nao os mostra); na gravada e no Replay (sem palco) o momento e os presentes
 // continuam no topo. Embaixo do palco, a barra de quem apresenta (console-bar.tsx, docs/31 V2-14): a Sala de espera,
-// Microfone, Câmera, Compartilhar tela, Gravar, a visao, Configurações e o balao do painel (aberto ou fechado,
-// guardado em chave propria); o ⋮ da miniatura do video manda o Remover do aluno ligado a linha para o nosso Remover
-// (onKickPerson). Ate o painel com abas, Silenciar todos, Fechar câmeras, Permitir câmeras e a fila da Sala de espera
-// ficam no topo do painel (LiveControls), e os cards de antes ficam empilhados nele.
+// Microfone, Câmera, Compartilhar tela, Gravar, Mãos, Lançar enquete, a visao, Configurações e o balao do painel
+// (aberto ou fechado, guardado em chave propria); o ⋮ da miniatura do video manda o Remover do aluno ligado a linha para
+// o nosso Remover (onKickPerson). O painel com abas (console-panel.tsx, docs/31 V2-15): Chat, Perguntas, Mãos e
+// Pessoas na live (Chat e Perguntas na gravada e no Replay), com o numero das perguntas abertas e das maos, e o ⋯ com
+// Enquetes, Roteiro, Oferta, Atendimento, Presença e Gravação conforme a sessao; tudo montado, o que nao esta na tela
+// com `hidden`. A aba e a entrada escolhidas ficam so na memoria da pagina; Mãos, Lançar enquete e o Gravar por
+// preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -140,6 +153,8 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useConsoleTheme();
   const [panelOpen, setPanelOpen] = useConsolePanelOpen();
+  /** A aba ou a entrada do ⋯ escolhida no painel, so na memoria da pagina (o Chat ao abrir). */
+  const [panelView, setPanelView] = useState<ConsolePanelView>({ tab: "chat" });
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
   const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
   const session = snapshot?.session ?? null;
@@ -530,7 +545,13 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     session && phase
       ? consoleTopActionsFor({ canPublish: permissions.canPublish, controls: room.controls, kind: session.kind, phase, status: session.status })
       : [];
+  // Sem palco (a gravada e o Replay) o painel nunca fecha: ele e o corpo inteiro.
+  const panelShown = live === null || panelOpen;
   const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen });
+  const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
+  const entries = session ? consoleMoreEntriesFor({ hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
+  const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
+  const counts = consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] });
   const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
@@ -556,6 +577,25 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       default:
         return;
     }
+  }
+
+  /**
+   * Abre o painel na aba ou na entrada do ⋯ (Mãos, Lançar enquete e o Gravar por preparar, na barra) e leva o foco a ela,
+   * depois de o painel aparecer.
+   */
+  function openPanel(view: ConsolePanelView) {
+    setPanelOpen(true);
+    setPanelView(view);
+    window.requestAnimationFrame(() => {
+      const target = "tab" in view ? document.getElementById(`${CONSOLE_TAB_ID_PREFIX}-tabbtn-${view.tab}`) : document.querySelector<HTMLElement>("[data-console-more-trigger]");
+      target?.focus();
+    });
+  }
+
+  /** O X do painel: o foco vai ao balao da barra antes de o painel sumir (senao ele cairia no body). */
+  function closePanel() {
+    document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]')?.focus();
+    setPanelOpen(false);
   }
 
   const readOnly = Boolean(session) && !canAct;
@@ -635,8 +675,10 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                     busyKey={busyKey}
                     canPublish={permissions.canPublish}
                     handle={room}
+                    handsCount={counts.maos}
                     live={live}
                     nowMs={nowMs}
+                    onOpenPanel={openPanel}
                     onRecord={recordNow}
                     onStopRecording={stopRecording}
                     onTogglePanel={() => setPanelOpen(!panelOpen)}
@@ -646,98 +688,118 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                 </div>
               </div>
             ) : null}
-            <div className={skeleton.panel} data-console-slot="panel" id={CONSOLE_PANEL_ID}>
-              {/* Ate o painel com abas (a aba Pessoas): as acoes de todos e a fila da Sala de espera no topo do painel. */}
-              {live ? <LiveControls handle={room} /> : null}
-              <ConsoleChat
-                busyKey={busyKey}
-                canAct={canAct}
-                currentUserId={currentUserId}
-                hostUserId={webinar.hostUserId}
-                messages={snapshot.messages}
-                onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
-                onEditAssistant={(messageId: string, body: string) =>
-                  run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
-                }
-                onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
-                onRetranslate={
-                  translationEnabled
-                    ? (messageId: string) =>
-                        void run(
-                          `moderate:${messageId}`,
-                          () => clearMessageTranslations({ messageId }),
-                          (cleared) => adminToast.success(cleared.removed > 0 ? WEBINAR_COPY.traducao.console.refeita(cleared.removed) : WEBINAR_COPY.traducao.console.semTraducao)
-                        )
-                    : null
-                }
-                onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
-                personMenu={live ? chatPersonMenu : null}
-                pinnedMessageId={snapshot.pinnedMessageId}
-                session={session}
-              />
-              {live ? (
-                <>
-                  <LiveHands handle={room} people={live.people} />
-                  <LiveParticipants busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} people={live.people} />
-                  <LiveRecorder
+            <ConsolePanel
+              className={skeleton.panel}
+              closable={live !== null}
+              counts={counts}
+              entries={entries}
+              more={{
+                atendimento: (
+                  // docs/30 §2.4 e D24 (fase 4c): o Atendimento le pelo proprio pedido e sobe as marcas para as Perguntas; fica
+                  // montado (a batida de 30 s de quem atende) com qualquer aba na tela.
+                  <ConsoleAttendance canAct={canAct} currentUserId={currentUserId} key={session.id} onSnapshot={setAttendance} sessionId={session.id} webinarId={webinar.id} />
+                ),
+                enquetes: (
+                  <ConsolePolls
                     busyKey={busyKey}
-                    canPublish={permissions.canPublish}
-                    controls={room.controls}
-                    joined={room.joined}
-                    nowMs={nowMs}
-                    onBrowserRecord={() => room.command("startRecording", { mode: "local", onlySelf: false })}
-                    onPrepare={() => void run("live:rec-prepare", () => prepareRecorder({ sessionId: session.id }))}
-                    onRecord={recordNow}
-                    onRelease={() => void run("live:rec-release", () => releaseRecorder({ sessionId: session.id }))}
-                    onStop={stopRecording}
-                    recorder={live.recorder}
-                    recording={room.room.recording}
-                    status={session.status}
-                    unavailable={recordUnavailable}
+                    canAct={canAct}
+                    launched={snapshot.polls.launched}
+                    onClose={(pollId: string, shareResults: boolean) => void run(`poll:${pollId}`, () => closePoll({ pollId, sessionId: session.id, shareResults }))}
+                    onLaunch={(pollId: string) => void run(`poll:${pollId}`, () => launchPoll({ pollId, sessionId: session.id }))}
+                    templates={snapshot.polls.templates}
                   />
-                  {live.recording ? (
-                    <LiveAlignChat
+                ),
+                gravacao: live ? (
+                  <>
+                    <LiveRecorder
                       busyKey={busyKey}
-                      canWrite={permissions.canWrite}
-                      key={`${live.recording.id}:${live.recording.anchorOffsetMs}`}
-                      messages={snapshot.messages}
-                      onSave={(anchorOffsetMs) => {
-                        const recordingId = live.recording?.id;
-                        if (recordingId) {
-                          void run("live:align", () => alignChat({ anchorOffsetMs, recordingId }), () => adminToast.success(liveCopy.alinharSalvo));
-                        }
-                      }}
-                      recording={live.recording}
+                      canPublish={permissions.canPublish}
+                      controls={room.controls}
+                      joined={room.joined}
+                      nowMs={nowMs}
+                      onBrowserRecord={() => room.command("startRecording", { mode: "local", onlySelf: false })}
+                      onPrepare={() => void run("live:rec-prepare", () => prepareRecorder({ sessionId: session.id }))}
+                      onRelease={() => void run("live:rec-release", () => releaseRecorder({ sessionId: session.id }))}
+                      recorder={live.recorder}
+                      recording={room.room.recording}
+                      status={session.status}
+                      unavailable={recordUnavailable}
                     />
-                  ) : null}
-                  <LiveAttachRecording busyKey={busyKey} canWrite={permissions.canWrite} onAttach={attach} recording={live.recording} />
-                </>
-              ) : null}
-              {/* docs/30 §2.4: o painel Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache. */}
-              {snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null}
-              {/* Fase 4 (docs/30 §2.4): Atendimento (4c) e Oferta (4b, na sessao gravada e no replay), pontos de encaixe com leitura propria. */}
-              <ConsoleAttendance canAct={canAct} currentUserId={currentUserId} key={session.id} onSnapshot={setAttendance} sessionId={session.id} webinarId={webinar.id} />
-              {session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null}
-              {webinar.kind === "simulated" ? (
-                <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />
-              ) : null}
-              <ConsolePolls
-                busyKey={busyKey}
-                canAct={canAct}
-                launched={snapshot.polls.launched}
-                onClose={(pollId: string, shareResults: boolean) => void run(`poll:${pollId}`, () => closePoll({ pollId, sessionId: session.id, shareResults }))}
-                onLaunch={(pollId: string) => void run(`poll:${pollId}`, () => launchPoll({ pollId, sessionId: session.id }))}
-                templates={snapshot.polls.templates}
-              />
-              <ConsoleQuestions
-                busyKey={busyKey}
-                canAct={canAct}
-                marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
-                onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
-                onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
-                questions={snapshot.questions}
-              />
-            </div>
+                    {live.recording ? (
+                      <LiveAlignChat
+                        busyKey={busyKey}
+                        canWrite={permissions.canWrite}
+                        key={`${live.recording.id}:${live.recording.anchorOffsetMs}`}
+                        messages={snapshot.messages}
+                        onSave={(anchorOffsetMs) => {
+                          const recordingId = live.recording?.id;
+                          if (recordingId) {
+                            void run("live:align", () => alignChat({ anchorOffsetMs, recordingId }), () => adminToast.success(liveCopy.alinharSalvo));
+                          }
+                        }}
+                        recording={live.recording}
+                      />
+                    ) : null}
+                    <LiveAttachRecording busyKey={busyKey} canWrite={permissions.canWrite} onAttach={attach} recording={live.recording} />
+                  </>
+                ) : null,
+                // Fase 4b (docs/30 §2.4): a Oferta na sessao gravada e no Replay, com a propria leitura.
+                oferta: session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null,
+                // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache.
+                presenca: snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null,
+                roteiro:
+                  webinar.kind === "simulated" ? (
+                    <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />
+                  ) : null
+              }}
+              onClose={closePanel}
+              onView={setPanelView}
+              open={panelShown}
+              panes={{
+                chat: (
+                  <ConsoleChat
+                    busyKey={busyKey}
+                    canAct={canAct}
+                    currentUserId={currentUserId}
+                    hostUserId={webinar.hostUserId}
+                    messages={snapshot.messages}
+                    onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
+                    onEditAssistant={(messageId: string, body: string) =>
+                      run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
+                    }
+                    onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
+                    onRetranslate={
+                      translationEnabled
+                        ? (messageId: string) =>
+                            void run(
+                              `moderate:${messageId}`,
+                              () => clearMessageTranslations({ messageId }),
+                              (cleared) => adminToast.success(cleared.removed > 0 ? WEBINAR_COPY.traducao.console.refeita(cleared.removed) : WEBINAR_COPY.traducao.console.semTraducao)
+                            )
+                        : null
+                    }
+                    onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
+                    personMenu={live ? chatPersonMenu : null}
+                    pinnedMessageId={snapshot.pinnedMessageId}
+                    session={session}
+                  />
+                ),
+                maos: live ? <LiveHands handle={room} people={live.people} /> : null,
+                perguntas: (
+                  <ConsoleQuestions
+                    busyKey={busyKey}
+                    canAct={canAct}
+                    marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
+                    onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
+                    onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
+                    questions={snapshot.questions}
+                  />
+                ),
+                pessoas: live ? <ConsolePeopleTab busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} people={live.people} /> : null
+              }}
+              tabs={tabs}
+              view={shownView}
+            />
           </div>
         )}
       </ConsoleShell>

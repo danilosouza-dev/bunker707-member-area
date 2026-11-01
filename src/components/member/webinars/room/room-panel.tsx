@@ -21,6 +21,8 @@ import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
 // lado do palco, com 288 px (roomSkeleton).
 // O contador de mensagens novas do balao (useRoomPanelUnread) conta o que chegou desde que o painel fechou. Cores pelos
 // tokens do tema da sala; o acento so no ponto da aba Enquetes com enquete aberta.
+// A linha das abas e o RoomTabList, que o painel com abas do console de quem apresenta (docs/31 V2-15) tambem usa, com
+// outras abas, os numeros no nome ("Perguntas 3") e os ids pelo `idPrefix`; na sala o HTML e o de antes.
 
 export type RoomPanelProps = {
   /** O conteudo da aba escolhida. */
@@ -60,10 +62,32 @@ function tabLabel(tab: RoomPanelTab, kind: RoomKind) {
   }
 }
 
-export function RoomPanel({ children, className, closable, contentClassName, firstFocus, id, kind, onClose, onTab, open, pollOpen, tab, tabs }: RoomPanelProps) {
-  const copy = WEBINAR_COPY.salaV2.painel;
+/** Uma aba da linha: o valor (que da os ids), o nome, o numero no nome ("Perguntas 3") e o ponto do acento. */
+export type RoomTabListTab<T extends string = string> = { count?: number; dot?: boolean; label: string; value: T };
+
+export type RoomTabListProps<T extends string = string> = {
+  /** A aba que leva o data-room-first-focus (o primeiro foco da sala); nula sem ele. */
+  firstFocusValue: T | null;
+  /** O comeco dos ids: `${idPrefix}-tab-{valor}` no painel da aba e `${idPrefix}-tabbtn-{valor}` na aba ("room" na sala). */
+  idPrefix: string;
+  /** O nome da lista, para o leitor de tela. */
+  label: string;
+  onSelect: (value: T) => void;
+  /** O painel na tela: so entao a linha rola ate a aba escolhida. */
+  open: boolean;
+  /** A aba escolhida; nula quando o painel mostra outra coisa (o ⋯ do console). */
+  tab: T | null;
+  tabs: readonly RoomTabListTab<T>[];
+};
+
+/**
+ * A linha das abas em pilula (role tablist): cada aba com a largura do rotulo inteiro (nunca reticencias), crescendo
+ * para encher a linha; quando nao cabem, a linha rola de lado sem barra e a aba escolhida entra inteira na vista
+ * (tabScrollLeft) ao trocar de aba, ao mudar a lista e ao abrir.
+ */
+export function RoomTabList<T extends string>({ firstFocusValue, idPrefix, label, onSelect, open, tab, tabs }: RoomTabListProps<T>) {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const tabsKey = tabs.join(" ");
+  const tabsKey = tabs.map((item) => item.value).join(" ");
 
   // A aba escolhida inteira na vista quando a linha rola (as quatro abas): ao trocar de aba, ao mudar a lista e ao abrir.
   useLayoutEffect(() => {
@@ -86,6 +110,40 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
   }, [open, tab, tabsKey]);
 
   return (
+    <div
+      aria-label={label}
+      className="flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&::-webkit-scrollbar]:hidden"
+      ref={listRef}
+      role="tablist"
+    >
+      {tabs.map(({ count, dot, label: name, value }) => (
+        <button
+          aria-controls={`${idPrefix}-tab-${value}`}
+          aria-selected={tab === value}
+          className={cn(
+            "h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px]",
+            ROOM_FOCUS,
+            tab === value ? "bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]" : "font-semibold text-room-fg-muted hover:text-room-fg-strong"
+          )}
+          data-room-first-focus={firstFocusValue === value ? "" : undefined}
+          id={`${idPrefix}-tabbtn-${value}`}
+          key={value}
+          onClick={() => onSelect(value)}
+          role="tab"
+          type="button"
+        >
+          {count === undefined ? name : `${name} ${count}`}
+          {dot ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle" /> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function RoomPanel({ children, className, closable, contentClassName, firstFocus, id, kind, onClose, onTab, open, pollOpen, tab, tabs }: RoomPanelProps) {
+  const copy = WEBINAR_COPY.salaV2.painel;
+
+  return (
     <aside
       className={cn(className, "gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3", closable ? null : "pt-2 lg:pt-0")}
       data-testid="room-panel"
@@ -93,33 +151,15 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
       id={id}
     >
       <div className="flex shrink-0 items-center gap-2 px-2 lg:px-0">
-        <div
-          aria-label={copy.rotulo}
-          className="flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&::-webkit-scrollbar]:hidden"
-          ref={listRef}
-          role="tablist"
-        >
-          {tabs.map((value) => (
-            <button
-              aria-controls={`room-tab-${value}`}
-              aria-selected={tab === value}
-              className={cn(
-                "h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px]",
-                ROOM_FOCUS,
-                tab === value ? "bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]" : "font-semibold text-room-fg-muted hover:text-room-fg-strong"
-              )}
-              data-room-first-focus={firstFocus && value === "chat" ? "" : undefined}
-              id={`room-tabbtn-${value}`}
-              key={value}
-              onClick={() => onTab(value)}
-              role="tab"
-              type="button"
-            >
-              {tabLabel(value, kind)}
-              {value === "enquetes" && pollOpen ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle" /> : null}
-            </button>
-          ))}
-        </div>
+        <RoomTabList
+          firstFocusValue={firstFocus ? "chat" : null}
+          idPrefix="room"
+          label={copy.rotulo}
+          onSelect={onTab}
+          open={open}
+          tab={tab}
+          tabs={tabs.map((value) => ({ dot: value === "enquetes" && pollOpen, label: tabLabel(value, kind), value }))}
+        />
         {closable ? (
           <RoomIconButton className="hidden lg:grid" label={copy.fechar} onClick={onClose} size={40} tone="outline">
             <X aria-hidden="true" />

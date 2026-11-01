@@ -2,9 +2,9 @@
 // o retrato da sala que a rota de 5 s devolve (gravador, gravacao, quem foi removido, silenciado ou banido e o mapa
 // aluno -> participante da sala), quem ve qual botao (Apresentador, co-apresentador, Equipe moderadora ou nao; quem
 // publica), o que a sala de espera deve estar fazendo, a fila de maos levantadas e quem esta na sala pelos sinais do
-// iframe do console (um reducer so, com os papeis tambem pelo getRoomsInfo), o vigia da tela (quem compartilha sem
-// poder, docs/31 §5.4), quando o "Gravar" da fila dispara sozinho e quando a ancora e marcada (uma vez), o cartao
-// Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
+// iframe do console (um reducer so, com os papeis, o microfone e a camera de cada um tambem pelo getRoomsInfo), o vigia
+// da tela (quem compartilha sem poder, docs/31 §5.4), quando o "Gravar" da fila dispara sozinho e quando a ancora e
+// marcada (uma vez), o cartao Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
 // relativos: tests/webinarios-console-ao-vivo-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio: tudo
 // recebe `nowMs`. As frases vem de WEBINAR_COPY; as que ainda faltam la ficam em LIVE_CONSOLE_COPY (pedido no
 // relatorio da frente), conferidas pela PROIBIDAS_WEBINARIO no teste.
@@ -316,6 +316,8 @@ export function lobbyNotice(input: { lobby: boolean; roomLocked: boolean; status
 export type JitsiRole = "moderator" | "none" | "participant";
 
 export type RoomPerson = { id: string; name: string };
+/** O microfone e a camera de uma pessoa na sala: true no ar, false desligado, ausente sem sinal (desligado). */
+export type ParticipantMedia = { audio?: boolean; video?: boolean };
 export type RaisedHand = { id: string; raisedAt: number };
 export type KnockingPerson = { id: string; name: string };
 
@@ -328,6 +330,12 @@ export type LiveRoomState = {
   filmstripVisible: boolean;
   hands: RaisedHand[];
   knocking: KnockingPerson[];
+  /**
+   * O microfone e a camera de cada um no ar (true) ou desligados (false), pelo participantMuted (o estado inicial de cada
+   * faixa remota e cada troca) e pelo getRoomsInfo (quem ja estava quando o console entrou); a tela fica em `sharing`.
+   * Sem sinal (quem nunca abriu o microfone nao tem faixa), desligado: a aba Pessoas le assim.
+   */
+  media: Record<string, ParticipantMedia>;
   /** O proprio console e moderador na sala (participantRoleChanged do proprio id). */
   moderator: boolean;
   /**
@@ -358,6 +366,7 @@ export const EMPTY_ROOM: LiveRoomState = {
   filmstripVisible: true,
   hands: [],
   knocking: [],
+  media: {},
   moderator: false,
   onStageId: null,
   people: [],
@@ -422,10 +431,13 @@ export function raisedAtOf(payload: unknown, nowMs: number): number | null {
 function withoutId(state: LiveRoomState, id: string): LiveRoomState {
   const roles = { ...state.roles };
   delete roles[id];
+  const media = { ...state.media };
+  delete media[id];
   return {
     ...state,
     hands: state.hands.filter((hand) => hand.id !== id),
     knocking: state.knocking.filter((person) => person.id !== id),
+    media,
     people: state.people.filter((person) => person.id !== id),
     roles,
     sharing: state.sharing.filter((other) => other !== id),
@@ -531,6 +543,18 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
     }
     case "contentSharingParticipantsChanged":
       return { ...state, sharing: sharingIdsOf(payload) };
+    case "participantMuted": {
+      // { id, isMuted, mediaType }: so o microfone e a camera (a tela vem do contentSharingParticipantsChanged).
+      const mediaType = field(payload, "mediaType");
+      const muted = field(payload, "isMuted");
+      if (!id || id === state.selfId || (mediaType !== "audio" && mediaType !== "video") || typeof muted !== "boolean") {
+        return state;
+      }
+      if (state.media[id]?.[mediaType] === !muted) {
+        return state;
+      }
+      return { ...state, media: { ...state.media, [id]: { ...state.media[id], [mediaType]: !muted } } };
+    }
     case "tileViewChanged": {
       const enabled = field(payload, "enabled");
       return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
@@ -566,10 +590,12 @@ export function sharingIdsOf(payload: unknown): string[] {
 }
 
 /**
- * Os papeis pelo getRoomsInfo() do IFrame API ({ rooms: [{ isMainRoom, participants: [{ id, role, displayName }] }] }):
- * quem ja era moderador quando o console entrou so aparece ali (o participantJoined nao traz o papel, e o
- * participantRoleChanged so sai na troca). Le a sala principal (ou a primeira), grava o papel de cada um com id valido e
- * papel conhecido e poe em `people` quem ainda nao esta, com o nome. O proprio console fica fora: o papel dele continua
+ * Os papeis pelo getRoomsInfo() do IFrame API ({ rooms: [{ isMainRoom, participants: [{ id, role, displayName,
+ * audioMuted, videoMuted }] }] }): quem ja era moderador quando o console entrou so aparece ali (o participantJoined nao
+ * traz o papel, e o participantRoleChanged so sai na troca). Le a sala principal (ou a primeira), grava o papel de cada
+ * um com id valido e papel conhecido, o microfone e a camera (`media`, para quem ja estava na sala: o participantMuted
+ * dessas faixas pode ter saido antes de o console ouvir) e poe em `people` quem ainda nao esta, com o nome. O proprio
+ * console fica fora: o papel dele continua
  * pelo participantRoleChanged, que sai para o papel local. Um participantRoleChanged depois da resposta vence, porque
  * chega depois (o iframe responde e avisa na ordem). Fora da sala (sem `selfId`: antes do videoConferenceJoined ou
  * depois da saida) a resposta nao muda nada: ela traz o proprio console, que sem o id viraria uma linha a mais e ficaria
@@ -590,6 +616,7 @@ export function applyConsoleRoomsInfo(state: LiveRoomState, info: unknown): Live
   }
   let people = state.people;
   const roles = { ...state.roles };
+  const media = { ...state.media };
   for (const participant of participants) {
     const id = field(participant, "id");
     if (typeof id !== "string" || !PARTICIPANT_ID.test(id) || id === state.selfId) {
@@ -599,11 +626,20 @@ export function applyConsoleRoomsInfo(state: LiveRoomState, info: unknown): Live
     if (role) {
       roles[id] = role;
     }
+    const audioMuted = field(participant, "audioMuted");
+    const videoMuted = field(participant, "videoMuted");
+    if (typeof audioMuted === "boolean" || typeof videoMuted === "boolean") {
+      media[id] = {
+        ...media[id],
+        ...(typeof audioMuted === "boolean" ? { audio: !audioMuted } : {}),
+        ...(typeof videoMuted === "boolean" ? { video: !videoMuted } : {})
+      };
+    }
     if (!people.some((person) => person.id === id)) {
       people = [...people, { id, name: text(field(participant, "displayName")) ?? "" }];
     }
   }
-  return { ...state, people, roles };
+  return { ...state, media, people, roles };
 }
 
 /** Quem tem papel conhecido de nao moderador na sala (participante ou sem papel); um id sem papel lido nunca entra. */
@@ -784,13 +820,19 @@ export function lowerHandMessage(): string {
  * ---------------------------------------------------------------------------------------------- */
 
 export type RoomRow = {
+  /** O microfone no ar (participantMuted ou getRoomsInfo); sem sinal, desligado. */
+  audio: boolean;
   /** Da equipe: moderador na sala, o proprio console ou marcado no retrato. */
   staff: boolean;
   id: string;
   name: string;
   onStage: boolean;
   person: LiveConsolePerson | null;
+  /** Compartilha a tela agora (contentSharingParticipantsChanged). */
+  sharing: boolean;
   spotlight: boolean;
+  /** A camera no ar (participantMuted ou getRoomsInfo); sem sinal, desligada. */
+  video: boolean;
 };
 
 /** Quem esta na sala agora, com o aluno do retrato quando o id do participante bate (para remover, silenciar e banir). */
@@ -798,13 +840,17 @@ export function roomRows(state: LiveRoomState, people: readonly LiveConsolePerso
   const byParticipant = new Map(people.filter((person) => person.participantId).map((person) => [person.participantId as string, person]));
   return state.people.map((entry) => {
     const person = byParticipant.get(entry.id) ?? null;
+    const media = Object.hasOwn(state.media, entry.id) ? state.media[entry.id] : undefined;
     return {
+      audio: media?.audio === true,
       id: entry.id,
       name: person?.displayName ?? (entry.name || LIVE_CONSOLE_COPY.equipe),
       onStage: state.stage.includes(entry.id),
       person,
+      sharing: state.sharing.includes(entry.id),
       spotlight: state.spotlight === entry.id,
-      staff: state.roles[entry.id] === "moderator" || person?.staff === true
+      staff: state.roles[entry.id] === "moderator" || person?.staff === true,
+      video: media?.video === true
     };
   });
 }

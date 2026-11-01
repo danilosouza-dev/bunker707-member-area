@@ -3,7 +3,7 @@ import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { WEBINAR_ADMIN_COPY, webinarAdminHref } from "../../src/server/webinars/editor-model";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
-import { CONSOLE_ROOM_RULES } from "../../src/server/webinars/live-console-model";
+import { CONSOLE_ROOM_RULES, lowerHandMessage } from "../../src/server/webinars/live-console-model";
 import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
@@ -49,7 +49,10 @@ import {
 // editor, o Trancar no topo, o tema (escuro por padrao, guardado ao recarregar, levado ao iframe so na montagem: trocar
 // com a sala no ar nao remonta) e a confirmacao de Encerrar live no portal dentro da raiz do console, no tema dela. O
 // palco do console (docs/31 V2-4 e V2-A5): o selo Gravando no palco e a coluna de miniaturas do Apresentador com o
-// motor (nenhum toggleFilmStrip pela propria largura), com os selos de cima a direita descontando a coluna.
+// motor (nenhum toggleFilmStrip pela propria largura), com os selos de cima a direita descontando a coluna. O painel
+// com abas (docs/31 V2-15): Silenciar todos e as linhas da sala na aba Pessoas, as frases do preparo no ⋯ › Gravação;
+// Mãos (o numero na barra) abre a aba Mãos, Abaixar todas as mãos manda um sinal so, para todos; Lançar enquete abre o ⋯
+// › Enquetes e o Gravar por preparar, o ⋯ › Gravação; o microfone de cada linha vem do participantMuted.
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -59,8 +62,26 @@ const APRESENTADOR = "produtor-na-sala-0001";
 const ALUNA_NA_SALA = "aluna-na-sala-0002";
 const COAPRESENTADOR = "cohost-na-sala-0003";
 const SEM_REGISTRO = "sem-registro-0004";
-/** A barra de quem apresenta, embaixo do palco (o Gravar e o Admitir todos tambem existem no painel, ate as abas). */
+/** A barra de quem apresenta, embaixo do palco (o Admitir todos tambem existe na aba Pessoas do painel). */
 const barraDe = (page: Page) => page.locator('[data-console-slot="bar"]');
+const consoleV2 = WEBINAR_COPY.consoleV2;
+
+/** Abre uma aba do painel do console pelo nome (o numero pode vir junto, "Mãos 1"). */
+async function abrirAba(page: Page, nome: string) {
+  const aba = page.getByRole("tab", { name: new RegExp(`^${nome}`) });
+  await aba.click();
+  await expect(aba).toHaveAttribute("aria-selected", "true");
+  return page.locator(`#${(await aba.getAttribute("aria-controls")) ?? ""}`);
+}
+
+/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela. */
+async function abrirNoMais(page: Page, entrada: string) {
+  await page.locator("[data-console-more-trigger]").click();
+  await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
+  const secao = page.locator(`section[aria-label="${entrada}"]`);
+  await expect(secao).toBeVisible();
+  return secao;
+}
 /** O nosso Compartilhar tela so nos navegadores com Chromium; no WebKit, o botao de tela do proprio motor (V2-A39). */
 const barraDoMotor = (browserName: string) => (browserName === "chromium" ? [] : ["desktop"]);
 
@@ -164,8 +185,10 @@ test.describe("produtor", () => {
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).status).toBe("live");
     expect((await sala.esperarComando("toggleLobby", { depoisDe: antes })).args).toEqual([false]);
 
+    // Silenciar todos fica na aba Pessoas (docs/31 V2-14), com as linhas de quem esta na sala.
+    const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
     antes = (await sala.comandos()).length;
-    await page.getByRole("button", { exact: true, name: consoleAoVivo.silenciarTodos }).click();
+    await pessoas.getByRole("button", { exact: true, name: consoleAoVivo.silenciarTodos }).click();
     expect((await sala.esperarComando("muteEveryone", { depoisDe: antes })).args).toEqual(["audio"]);
 
     // Trancar a sala fica no topo (V2-13), com o estado no aria-pressed.
@@ -182,8 +205,9 @@ test.describe("produtor", () => {
     // A aluna aparece na sala; Remover da sala grava o banimento da sessao e tira o participante do iframe.
     const aluna = await contaDeTeste("aluna");
     await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_NA_SALA });
-    const linha = page.locator(`[data-live-participant="${ALUNA_NA_SALA}"]`);
+    const linha = pessoas.locator(`[data-live-participant="${ALUNA_NA_SALA}"]`);
     await expect(linha).toHaveAttribute("data-live-user", aluna.id, { timeout: 15_000 });
+    await expect(linha).toBeVisible();
     antes = (await sala.comandos()).length;
     await linha.getByRole("button", { name: /^Mais ações para / }).click();
     await page.getByRole("menuitem", { exact: true, name: consoleAoVivo.removerDaSala }).click();
@@ -247,14 +271,16 @@ test.describe("produtor", () => {
 
     const sala = await abrirConsole(page);
     await entrarComoApresentador(sala);
-    await expect(page.getByText(/Preparando a gravação/).first()).toBeVisible();
+    // A situacao do gravador fica no ⋯ › Gravação do painel (docs/31 V2-15).
+    const gravacao = await abrirNoMais(page, consoleV2.entradas.gravacao);
+    await expect(gravacao.getByText(/Preparando a gravação/).first()).toBeVisible();
 
     const antes = (await sala.comandos()).length;
     const gravar = barraDe(page).getByRole("button", { exact: true, name: consoleAoVivo.gravar });
     await expect(gravar).toBeEnabled({ timeout: 15_000 });
     await gravar.click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).recording_requested_at !== null).toBe(true);
-    await expect(page.getByText(consoleAoVivo.gravarNaFila).first()).toBeVisible({ timeout: 15_000 });
+    await expect(gravacao.getByText(consoleAoVivo.gravarNaFila).first()).toBeVisible({ timeout: 15_000 });
     expect((await sala.comandos()).slice(antes).some((item) => item.comando === "startRecording")).toBe(false);
 
     const pronto = await chamarWebhookDoGravador({ room: roomName, sessionId: sessaoId, state: "ready" });
@@ -607,5 +633,74 @@ test.describe("produtor", () => {
     await expect.poll(margemDosSelos).toBe("222px");
     expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toEqual([]);
     expect(await sala.montagens(), "o mesmo iframe").toBe(1);
+  });
+
+  test("o painel com abas (docs/31 V2-15): Mãos com o numero na barra abre a aba Mãos, Abaixar todas as mãos manda um sinal so, para todos; o microfone da linha pelo participantMuted; Lançar enquete abre o ⋯ › Enquetes; o Gravar por preparar abre o ⋯ › Gravação", async ({ page }) => {
+    // O gravador por preparar (nada pedido), como antes da primeira gravacao.
+    unwrap(
+      await createLocalAdminClient()
+        .from("webinar_sessions")
+        .update({ recorder_release_requested_at: null, recorder_requested_at: null, recorder_status: "none", recording_anchor_at: null, recording_requested_at: null })
+        .eq("id", sessaoId),
+      "Voltando o gravador para por preparar"
+    );
+    const sala = await abrirConsole(page);
+    await entrarComoApresentador(sala);
+    const barra = barraDe(page);
+
+    // A aluna levanta a mao: o circulo Mãos da barra mostra quantas e, no clique, o painel abre na aba Mãos, com o foco
+    // nela.
+    await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_NA_SALA });
+    const maosSemNinguem = barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(0) });
+    await expect(maosSemNinguem).toBeVisible();
+    await sala.disparar("raiseHandUpdated", { handRaised: Date.now(), id: ALUNA_NA_SALA });
+    const maos = barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(1) });
+    await expect(maos).toBeVisible();
+    await expect(maos.locator("[data-console-hands-count]")).toHaveText("1");
+    await maos.click();
+    const abaMaos = page.getByRole("tab", { name: /^Mãos/ });
+    await expect(abaMaos).toHaveAttribute("aria-selected", "true");
+    await expect(abaMaos).toHaveText(`${consoleV2.abas.maos} 1`);
+    await expect(abaMaos).toBeFocused();
+    const painelMaos = page.locator(`#${(await abaMaos.getAttribute("aria-controls")) ?? ""}`);
+    await expect(painelMaos.locator(`[data-live-hand="${ALUNA_NA_SALA}"]`)).toBeVisible();
+
+    // Abaixar todas as mãos: um sinal so, com o destino vazio (cada aluno so abaixa a propria mao levantada).
+    let antes = (await sala.comandos()).length;
+    await painelMaos.getByRole("button", { exact: true, name: consoleAoVivo.abaixarTodas }).click();
+    expect((await sala.esperarComando("sendEndpointTextMessage", { depoisDe: antes })).args).toEqual(["", lowerHandMessage()]);
+    await page.waitForTimeout(500);
+    expect((await sala.comandos()).slice(antes).filter((item) => item.comando === "sendEndpointTextMessage")).toHaveLength(1);
+    await expect(barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(0) })).toBeVisible();
+
+    // O microfone de cada linha da aba Pessoas vem do participantMuted (sem sinal, desligado).
+    const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
+    const linha = pessoas.locator(`[data-live-participant="${ALUNA_NA_SALA}"]`);
+    await expect(linha.locator("[data-live-mic]")).toHaveAttribute("data-live-mic", "off");
+    await sala.disparar("participantMuted", { id: ALUNA_NA_SALA, isMuted: false, mediaType: "audio" });
+    await expect(linha.locator("[data-live-mic]")).toHaveAttribute("data-live-mic", "on");
+    await expect(linha).toContainText(consoleV2.pessoas.midia.microfoneLigado);
+
+    // Lançar enquete abre o ⋯ › Enquetes (a secao na tela, o foco no ⋯ com o nome dela).
+    await barra.getByRole("button", { exact: true, name: consoleV2.barra.lancarEnquete }).click();
+    await expect(page.locator('section[aria-label="Enquetes"]')).toBeVisible();
+    await expect(page.getByRole("button", { exact: true, name: consoleV2.maisEscolhido(consoleV2.entradas.enquetes) })).toBeFocused();
+    await expect(pessoas).toBeHidden();
+
+    // O Gravar com o gravador por preparar abre o ⋯ › Gravação, onde fica o Preparar.
+    const gravar = barra.getByRole("button", { exact: true, name: consoleAoVivo.gravar });
+    await expect(gravar).toHaveAttribute("aria-controls", "console-panel");
+    antes = (await sala.comandos()).length;
+    await gravar.click();
+    const gravacao = page.locator('section[aria-label="Gravação"]');
+    await expect(gravacao).toBeVisible();
+    await expect(gravacao.getByRole("button", { exact: true, name: consoleAoVivo.prepararGravacao })).toBeVisible();
+    expect((await sala.comandos()).slice(antes).some((item) => item.comando === "startRecording"), "abrir o painel nao grava").toBe(false);
+
+    // O X fecha o painel (montado) e o foco vai ao balao da barra.
+    await page.getByRole("button", { exact: true, name: consoleV2.fecharPainel }).click();
+    await expect(page.locator("#console-panel")).toBeHidden();
+    await expect(barra.getByRole("button", { exact: true, name: consoleV2.painel.mostrar })).toBeFocused();
+    expect(await sala.montagens(), "abrir e fechar o painel nao remonta a sala").toBe(1);
   });
 });

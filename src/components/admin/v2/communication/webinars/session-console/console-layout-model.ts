@@ -14,6 +14,13 @@
 export const CONSOLE_PANEL_ID = "console-panel";
 /** As configuracoes de quem apresenta (o aria-controls do botao Configurações). */
 export const CONSOLE_SETTINGS_ID = "console-live-settings";
+/** O comeco dos ids das abas do painel: `console-tab-{aba}` no painel da aba e `console-tabbtn-{aba}` na aba. */
+export const CONSOLE_TAB_ID_PREFIX = "console";
+/**
+ * O cartao das abas sem SectionCard (Mãos e Pessoas, docs/31 V2-15): os cantos de Marca › Estilo, como o cartao da aba
+ * da sala, a borda e o fundo do tema.
+ */
+export const CONSOLE_PANE_CARD = "flex min-w-0 flex-col gap-4 rounded-[var(--member-cover-radius)] border border-room-border bg-room-surface p-4";
 
 export type ConsoleSkeleton = {
   /** A barra de quem apresenta, embaixo do palco; nula sem palco. */
@@ -34,9 +41,10 @@ export type ConsoleSkeleton = {
  * As classes de cada parte do console. Com palco (a live): o palco 16:9 abaixo de lg e, a partir de lg, a altura que
  * sobra da coluna, nunca menos de 240 px; o painel com 320 px de 1024 a 1279, 360 de 1280 a 1535 e 440 a partir de
  * 1536 (a largura do prototipo), e fechado ele some (montado) e o palco toma a largura. Sem palco, o painel nunca
- * fecha. A coluna do palco rola por dentro quando o que fica nela passa da altura (enquanto o card Configurações e a
- * Sala de espera ainda ficam ali, ate G6 e G7): o palco guarda o piso e a barra continua ao alcance. A folga de 4 px
- * (-m-1 com p-1) deixa o anel de foco dos botoes da borda inteiro dentro da rolagem.
+ * fecha. A coluna do palco (so o palco e a barra; as Configurações abrem por cima) rola por dentro numa janela baixa
+ * demais: o palco guarda o piso e a barra continua ao alcance. A folga de 4 px (-m-1 com p-1) deixa o anel de foco dos
+ * botoes da borda inteiro dentro da rolagem. O painel com abas (console-panel.tsx) tem a linha das abas fixa e o corpo
+ * que rola.
  */
 export function consoleSkeleton(input: { hasStage: boolean; panelOpen: boolean }): ConsoleSkeleton {
   const panelBase = "relative flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto";
