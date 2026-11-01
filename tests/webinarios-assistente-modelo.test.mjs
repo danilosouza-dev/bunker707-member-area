@@ -229,6 +229,11 @@ test("a fila do Atendimento: abertas da aba, respondidas pelo Assistente com Fal
       message("m-ia-equipe", "@assistente nao entendi"),
       message("m-respondida", "@assistente e ai?"),
       message("r1", "respondi", { replyToId: "m-respondida", role: "team", source: "team" }),
+      // A resposta do co-apresentador (role co_host desde a 202611010001, docs/31 V2-A12) tambem e da equipe.
+      message("m-co-respondida", "@assistente e o link?"),
+      message("r2", "esta fixado", { replyToId: "m-co-respondida", role: "co_host", source: "team" }),
+      message("m-host-respondida", "@assistente que horas?"),
+      message("r3", "as 20h", { replyToId: "m-host-respondida", role: "host", source: "team" }),
       message("m-comum", "boa noite"),
       message("m-pergunta", "tem bonus", { kind: "question" }),
       message("m-ligada", "e o prazo", { kind: "question" }),

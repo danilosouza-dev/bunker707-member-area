@@ -278,7 +278,7 @@ export function consoleChatQueue<T extends Pick<ChatMessage, "approved" | "creat
 export type ConsoleMessageMeta = {
   /** De onde veio, so para a equipe: Roteiro ou Chat original (a turma nunca ve). */
   origin: string | null;
-  /** O papel na linha de baixo: Apresentador, Equipe ou Assistente; o aluno, nenhum; com a origem, nenhum. */
+  /** O papel na linha de baixo: Apresentador, Co-apresentador, Equipe ou Assistente; o aluno, nenhum; com a origem, nenhum. */
   role: string | null;
   /** A hora em Sao Paulo ("20:42"): na live a gravada, na gravada a hora marcada mais o offset, no Replay nenhuma. */
   time: string;

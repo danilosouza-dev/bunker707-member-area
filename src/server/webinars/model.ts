@@ -515,7 +515,8 @@ export function registrationEventMetadata(input: { campaignId?: string | null; s
  * script-model.ts e report-model.ts.
  * ---------------------------------------------------------------------------------------------- */
 
-export const CHAT_ROLES = ["host", "team", "student", "guest", "ai"] as const;
+/** O papel de quem escreveu. `co_host` (o co-apresentador, docs/31 V2-A12) pede a migracao 202611010001 (o check novo). */
+export const CHAT_ROLES = ["host", "co_host", "team", "student", "guest", "ai"] as const;
 export type ChatRole = (typeof CHAT_ROLES)[number];
 
 export const CHAT_SOURCES = ["original", "audience", "team", "scripted", "ai"] as const;

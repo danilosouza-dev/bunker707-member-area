@@ -136,7 +136,7 @@ function ownRoleLabel(role: ConsoleRoomRole): string {
   if (role === "host") {
     return WEBINAR_COPY.sala.selos.apresentador;
   }
-  return role === "co_host" ? copy.palco.coApresentador : WEBINAR_COPY.sala.selos.equipe;
+  return role === "co_host" ? WEBINAR_COPY.sala.selos.coApresentador : WEBINAR_COPY.sala.selos.equipe;
 }
 
 /**

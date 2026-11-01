@@ -318,13 +318,22 @@ test("chat por cima do video continua com o item de antes (V2-18): o nome em cim
   const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, openPollQuestion: null, pinned: null, replay: false };
   const html = render(verticalChat.VerticalChat, {
     ...base,
-    messages: [msg("e", { body: "boa noite", displayName: "Marina R.", offsetMs: 41 * 60_000, role: "team" }), msg("m", { body: "minha duvida", mine: true, pending: true })]
+    messages: [
+      msg("e", { body: "boa noite", displayName: "Marina R.", offsetMs: 41 * 60_000, role: "team" }),
+      msg("c", { body: "o link", displayName: "Rui P.", offsetMs: 42 * 60_000, role: "co_host" }),
+      msg("m", { body: "minha duvida", mine: true, pending: true })
+    ]
   });
   // O RoomMessageItem: o prefixo do papel para o leitor de tela, o nome em negrito e o selo; o texto na linha de baixo.
   assert.match(
     html,
     /<li class="rounded-\[10px\] px-2 py-1\.5" data-room-message="e"><p class="[^"]*"><span class="sr-only">Equipe: <\/span><span class="font-bold text-room-fg-strong">Marina R\.<\/span><span class="[^"]*\brounded-full border\b[^"]*"><span class="truncate">Equipe<\/span><\/span><\/p><p class="[^"]*">boa noite<\/p><\/li>/
   );
+  // O co-apresentador com o papel proprio (docs/31 V2-A12), no mesmo tom da Equipe.
+  const equipe = html.match(/data-room-message="e">[\s\S]*?<span class="([^"]*\brounded-full border\b[^"]*)"><span class="truncate">Equipe</)?.[1];
+  assert.match(html, /data-room-message="c"><p class="[^"]*"><span class="sr-only">Co-apresentador: <\/span><span class="font-bold text-room-fg-strong">Rui P\.<\/span><span class="([^"]*)"><span class="truncate">Co-apresentador<\/span>/);
+  assert.ok(equipe, "o selo da Equipe");
+  assert.equal(html.match(/data-room-message="c">[\s\S]*?<span class="([^"]*\brounded-full border\b[^"]*)"><span class="truncate">Co-apresentador</)?.[1], equipe, "o selo no tom da Equipe");
   // A minha so com o fundo de destaque; a pendente com o selo "Aguardando a equipe".
   assert.match(html, /<li class="rounded-\[10px\] px-2 py-1\.5 bg-room-control" data-room-message="m">[\s\S]*?<span class="truncate">Aguardando a equipe<\/span>[\s\S]*?minha duvida<\/p><\/li>/);
   // Nada do balao do painel: sem avatar, sem lado, sem a linha "nome · papel · hora".

@@ -81,6 +81,7 @@ export type RoomChatPanelProps = {
 
 const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: RoomBadgeTone }>> = {
   ai: { label: WEBINAR_COPY.sala.selos.assistente, tone: "outline" },
+  co_host: { label: WEBINAR_COPY.sala.selos.coApresentador, tone: "neutral" },
   host: { label: WEBINAR_COPY.sala.selos.apresentador, tone: "accent" },
   team: { label: WEBINAR_COPY.sala.selos.equipe, tone: "neutral" }
 };
@@ -138,7 +139,7 @@ export type RoomChatBubbleProps = {
 /**
  * Uma mensagem do painel no estilo do Zoom (docs/31 V2-9): o avatar de 28 px (so as iniciais) de um lado, o balao (os
  * outros a esquerda em --room-surface-2; a minha a direita em --room-bubble-mine-bg, com o avatar a direita) e, embaixo,
- * "nome · papel · hora" em 11 px; na minha, "Você · hora" (o avatar continua com as minhas iniciais). O papel so para Apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
+ * "nome · papel · hora" em 11 px; na minha, "Você · hora" (o avatar continua com as minhas iniciais). O papel so para Apresentador, Co-apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
  * so para quem ve (aria-hidden): o leitor de tela ouve "{nome}, {papel}, {hora}: " antes do texto, nunca o texto antes
  * do autor; "Aguardando a equipe" fica lido, depois do texto. O "Falar com a equipe" do Assistente vem depois da linha.
  * O console de quem apresenta usa o mesmo balao (V2-9 vale para a sala e o console), com a origem no lugar do papel,

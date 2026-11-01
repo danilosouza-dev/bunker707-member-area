@@ -311,6 +311,7 @@ test("o chat por cima: as ultimas 6 mensagens, quantas ficam na gaveta; o anunci
   assert.equal(model.verticalChatAnnouncement([msg("1", { body: "o link", displayName: "Equipe", role: "team" })]), "Equipe: Equipe: o link");
   assert.equal(model.verticalChatAnnouncement([msg("1", { body: "resposta", displayName: "Assistente", role: "ai" })]), "Assistente: Assistente: resposta");
   assert.equal(model.verticalChatAnnouncement([msg("1", { body: "bem-vindos", displayName: "Danilo", role: "host" })]), "Apresentador: Danilo: bem-vindos");
+  assert.equal(model.verticalChatAnnouncement([msg("1", { body: "o link", displayName: "Rui P.", role: "co_host" })]), "Co-apresentador: Rui P.: o link", "docs/31 V2-A12");
   assert.equal(model.verticalChatAnnouncement(many), "9 mensagens novas", "em rajada so a contagem");
 });
 

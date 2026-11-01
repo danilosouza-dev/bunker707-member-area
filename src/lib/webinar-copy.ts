@@ -217,7 +217,8 @@ export const WEBINAR_COPY = {
     responderComo: { anonimo: "Aluno (anônimo)", apelido: "Apelido", nome: "Primeiro nome e inicial" },
     sair: "Sair",
     sairConfirmar: "Sair da sala?",
-    selos: { apresentador: "Apresentador", assistente: "Assistente", equipe: "Equipe" },
+    /* O papel no chat e no palco; "Co-apresentador" e uma frase so, sem feminino (docs/31 V2-A12). */
+    selos: { apresentador: "Apresentador", assistente: "Assistente", coApresentador: "Co-apresentador", equipe: "Equipe" },
     sessao: "Sessão",
     sessaoDas: (hora: string) => `Sessão das ${hora}`,
     tentarDeNovo: "Tentar de novo",

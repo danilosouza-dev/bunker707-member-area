@@ -31,10 +31,11 @@ export const CONSOLE_V2_COPY = {
 
   /* O palco (V2-4 e V2-13): os selos sobre o video. */
   palco: {
-    /** O selo de baixo a esquerda: "Você · Apresentador", "Você · Co-apresentador" ou "Ana · Apresentador". */
-    selo: (nome: string, papel: string) => `${nome} · ${papel}`,
-    /** O papel do co-apresentador no proprio selo (uma frase so, sem feminino). */
-    coApresentador: "Co-apresentador"
+    /**
+     * O selo de baixo a esquerda: "Você · Apresentador", "Você · Co-apresentador" ou "Ana · Apresentador" (o papel sai
+     * de WEBINAR_COPY.sala.selos, o mesmo do chat).
+     */
+    selo: (nome: string, papel: string) => `${nome} · ${papel}`
   },
 
   /* A barra de quem apresenta (V2-14), embaixo do palco. */

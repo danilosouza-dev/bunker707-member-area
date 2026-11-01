@@ -133,14 +133,17 @@ export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; sen
 }
 
 /**
- * O papel na linha de baixo do balao: so Apresentador, Equipe e Assistente; o aluno e o convidado, nenhum. O
- * co-apresentador sai como Equipe ate o papel proprio no chat (a fase 2, com a migracao antes do merge).
+ * O papel na linha de baixo do balao: so Apresentador, Co-apresentador, Equipe e Assistente; o aluno e o convidado,
+ * nenhum. O co-apresentador grava `co_host` desde a fase 2 do redesign (docs/31 V2-A12, migracao 202611010001); as
+ * mensagens dele de antes ficaram como `team` e continuam saindo como Equipe.
  */
 export function chatRoleLabel(role: ChatRole): string | null {
   const selos = WEBINAR_COPY.sala.selos;
   switch (role) {
     case "ai":
       return selos.assistente;
+    case "co_host":
+      return selos.coApresentador;
     case "host":
       return selos.apresentador;
     case "team":

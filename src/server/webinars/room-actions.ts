@@ -61,6 +61,7 @@ import {
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
 import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
   type ChatMessage,
@@ -76,10 +77,10 @@ import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
 import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
 import { questionSentMetadata } from "./room-rules";
-import { sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
+import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertSessionRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -155,8 +156,25 @@ function serverOffsetMs(session: WebinarSession, nowMs: number): number | null {
   return Number.isFinite(offset) ? Math.max(CHAT_LIMITS.offsetMinMs, Math.min(CHAT_LIMITS.offsetMaxMs, Math.round(offset))) : null;
 }
 
-function teamRole(webinar: WebinarRow, userId: string): "host" | "team" {
-  return webinar.host_user_id === userId ? "host" : "team";
+/**
+ * O papel da mensagem da equipe no chat (docs/31 V2-A12): `host` para o Apresentador (webinars.host_user_id),
+ * `co_host` para quem e co-apresentador do webinario com o prazo valendo (webinar_presenters, pela mesma regra da sala,
+ * roomRoleFor) e `team` para o resto. O Apresentador nem le a tabela. O `co_host` pede a migracao 202611010001.
+ */
+async function teamRoleFor(db: WebinarsDb, input: { nowMs: number; userId: string; webinar: Pick<WebinarRow, "host_user_id" | "id"> }): Promise<"co_host" | "host" | "team"> {
+  if (input.webinar.host_user_id === input.userId) {
+    return "host";
+  }
+  const own = (await listPresenterRows(db, [input.webinar.id])).filter((row) => row.user_id === input.userId);
+  const grant = roomRoleFor({
+    hostUserId: null,
+    nowMs: input.nowMs,
+    presenters: own.map(presenterFromRow),
+    staff: true,
+    userId: input.userId,
+    validUntilByUser: new Map(own.map((row) => [row.user_id, row.valid_until]))
+  });
+  return grant.role === "co_host" ? "co_host" : "team";
 }
 
 function teamDisplayName(user: { email?: string; user_metadata: Record<string, unknown> }) {
@@ -292,8 +310,9 @@ export async function endSessionNow(input: { sessionId: string }): Promise<Actio
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `team` para o resto,
- * source `team`, aprovada, no offset do relogio do servidor (nunca o do navegador).
+ * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `co_host` para o
+ * co-apresentador, `team` para o resto (teamRoleFor), source `team`, aprovada, no offset do relogio do servidor (nunca o
+ * do navegador).
  */
 export async function sendTeamMessage(input: { body: string; kind?: "answer" | "message" | "system"; replyToId?: string | null; sessionId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
   return runAdminAction("messaging.write", teamChatSchema, input, async ({ input: data, user }) => {
@@ -315,7 +334,7 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
     }
 
-    const role = teamRole(webinar, user.id);
+    const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
     const inserted = await insertChatMessage(db, {
       approved: true,
       author_user_id: user.id,
@@ -765,6 +784,8 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
     }
 
     const { session, webinar } = await loadSession(db, question.session_id);
+    // O papel antes de gravar: uma falha ao ler webinar_presenters nao deixa a pergunta respondida sem a linha do chat.
+    const role = answerText ? await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar }) : null;
     const updated = await updateQuestionRow(db, question.id, {
       answer_text: answerText ?? question.answer_text,
       answered_at: now.toISOString(),
@@ -782,7 +803,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
     let message: ChatMessage | null = null;
     const offset = serverOffsetMs(session, now.getTime());
 
-    if (answerText && offset !== null && canTeamActOn(session)) {
+    if (answerText && role && offset !== null && canTeamActOn(session)) {
       const inserted = await insertChatMessage(db, {
         approved: true,
         author_user_id: user.id,
@@ -792,7 +813,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
         master: session.kind === "live",
         offset_ms: offset,
         reply_to_id: question.message_id,
-        role: teamRole(webinar, user.id),
+        role,
         session_id: session.id,
         source: "team",
         webinar_id: webinar.id

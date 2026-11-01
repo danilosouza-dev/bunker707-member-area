@@ -565,8 +565,8 @@ type AiRequestRef = { status: AssistantRequestStatus; targetId: string; targetKi
 /**
  * A fila do painel Atendimento: as perguntas abertas da aba Perguntas, as respondidas pelo Assistente em que o aluno
  * pediu a equipe, e as mensagens do chat da turma que chamaram o Assistente sem resposta dele, que pediram a equipe ou
- * que sao pergunta sem a linha da aba. Sai da fila o que a equipe ja respondeu (uma resposta da equipe no chat ligada
- * a mensagem). Ordem: "Pediu a equipe" primeiro, depois a mais antiga.
+ * que sao pergunta sem a linha da aba. Sai da fila o que a equipe ja respondeu (uma resposta do Apresentador, do
+ * co-apresentador ou da Equipe no chat ligada a mensagem). Ordem: "Pediu a equipe" primeiro, depois a mais antiga.
  */
 export function attendanceQueueOf(input: {
   aiRequests: readonly AiRequestRef[];
@@ -576,7 +576,7 @@ export function attendanceQueueOf(input: {
 }): AttendanceQueueItem[] {
   const ai = new Map(input.aiRequests.map((request) => [`${request.targetKind}:${request.targetId}`, request.status]));
   const linked = new Set(input.questions.map((question) => question.messageId).filter((id): id is string => Boolean(id)));
-  const teamReplied = new Set(input.messages.filter((message) => (message.role === "team" || message.role === "host") && message.replyToId).map((message) => message.replyToId as string));
+  const teamReplied = new Set(input.messages.filter((message) => (message.role === "team" || message.role === "host" || message.role === "co_host") && message.replyToId).map((message) => message.replyToId as string));
   const items: AttendanceQueueItem[] = [];
 
   for (const question of input.questions) {

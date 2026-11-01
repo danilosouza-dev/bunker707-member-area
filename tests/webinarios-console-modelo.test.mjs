@@ -220,6 +220,7 @@ test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela h
   assert.equal(meta("live", { createdAt: "" }).time, "");
 
   assert.equal(meta("live", { role: "host", source: "team" }).role, "Apresentador");
+  assert.equal(meta("live", { role: "co_host", source: "team" }).role, "Co-apresentador", "o papel proprio do co-apresentador (V2-A12), o mesmo da sala");
   assert.equal(meta("live", { role: "team", source: "team" }).role, "Equipe");
   assert.equal(meta("live", { role: "ai", source: "ai" }).role, "Assistente");
   assert.equal(meta("live", { role: "guest" }).role, null, "o convidado sem papel, como na sala");

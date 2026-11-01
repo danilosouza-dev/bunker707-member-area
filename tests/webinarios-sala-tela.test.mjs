@@ -327,7 +327,7 @@ const chatMeta = (item) =>
     .replace(/\s+/g, " ")
     .trim();
 
-test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel · hora'; a minha a direita; o papel so para Apresentador, Equipe e Assistente; sem etiqueta colorida", () => {
+test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel · hora'; a minha a direita; o papel so para Apresentador, Co-apresentador, Equipe e Assistente; sem etiqueta colorida", () => {
   const base = {
     chatMode: "open",
     consented: true,
@@ -340,7 +340,8 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
       naLive("3", 1000, { displayName: "Danilo", role: "host" }),
       naLive("4", 1000, { displayName: "Assistente", role: "ai" }),
       naLive("5", 43 * MIN, { mine: true, pending: true }),
-      naLive("6", 1000, { displayName: "Convidada", role: "guest" })
+      naLive("6", 1000, { displayName: "Convidada", role: "guest" }),
+      naLive("7", 1000, { displayName: "Rui P.", role: "co_host" })
     ],
     nowMs: T0,
     onRemoveMine: async () => 0,
@@ -360,6 +361,8 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
   assert.equal(chatMeta(chatItem(html, "3")), "Danilo · Apresentador · 20:00");
   assert.equal(chatMeta(chatItem(html, "4")), "Assistente · Assistente · 20:00");
   assert.equal(chatMeta(chatItem(html, "6")), "Convidada · 20:00", "o convidado sem papel");
+  assert.equal(chatMeta(chatItem(html, "7")), "Rui P. · Co-apresentador · 20:00", "o co-apresentador com o papel proprio (V2-A12)");
+  assert.match(chatItem(html, "7"), /<span class="sr-only">Rui P\., Co-apresentador, 20:00: <\/span>texto 7/);
   // A pendente: "Aguardando a equipe" como texto na linha de baixo (e lido: fica fora do aria-hidden). A minha mensagem
   // diz "Você" no lugar do meu nome (o protótipo: "Você · 20:43").
   assert.equal(chatMeta(chatItem(html, "5")), "Você · 20:43 · Aguardando a equipe");
@@ -385,7 +388,7 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
   assert.doesNotMatch(marina, /flex-row-reverse/);
 
   // Nenhuma etiqueta colorida no item (o selo de papel e o da pendente saem): nem RoomBadge nem MemberChip.
-  const itens = ["1", "2", "3", "4", "5", "6"].map((id) => chatItem(html, id)).join("");
+  const itens = ["1", "2", "3", "4", "5", "6", "7"].map((id) => chatItem(html, id)).join("");
   assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-room-accent/);
 
   // Na live o zero nao entra: o "Comecar para todos" e a ancora mudam o zero sem recalcular o que ja esta na tela.

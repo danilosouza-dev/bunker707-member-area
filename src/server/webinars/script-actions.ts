@@ -259,7 +259,8 @@ export async function exportScriptCsv(input: { webinarId: string }): Promise<Act
 
 /**
  * [messaging.write] O chat real de uma sessao (turma, chat original e equipe) no CSV do roteiro, para reaproveitar
- * numa Live gravada. Mensagens apagadas e as do roteiro ficam de fora.
+ * numa Live gravada. Mensagens apagadas e as do roteiro ficam de fora. O Apresentador, o co-apresentador e a Equipe
+ * viram a persona `team`; o resto, `student`.
  */
 export async function exportSessionChatCsv(input: { sessionId: string }): Promise<ActionResult<ExportedCsv>> {
   return runAdminAction("messaging.write", sessionIdInputSchema, input, async ({ input: data, user }) => {
@@ -273,7 +274,7 @@ export async function exportSessionChatCsv(input: { sessionId: string }): Promis
     const webinar = await requireWebinarRow(db, session.webinar_id);
     const lines = (await listAllSessionChatRows(db, session.id))
       .filter((row) => row.approved && row.kind !== "system" && (row.source === "audience" || row.source === "original" || row.source === "team"))
-      .map((row) => ({ body: row.body, offsetMs: row.offset_ms, personaName: row.display_name, personaRole: (row.role === "team" || row.role === "host" ? "team" : "student") as "student" | "team" }));
+      .map((row) => ({ body: row.body, offsetMs: row.offset_ms, personaName: row.display_name, personaRole: (row.role === "team" || row.role === "host" || row.role === "co_host" ? "team" : "student") as "student" | "team" }));
 
     await recordAudit(db, {
       action: "webinar.chat_exported",

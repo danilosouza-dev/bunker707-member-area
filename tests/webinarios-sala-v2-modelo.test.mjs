@@ -530,9 +530,10 @@ test("chatTimeLabel (V2-9): na live, a hora em que o servidor gravou; na gravada
   assert.equal(client.chatTimeLabel({ kind: "replay", offsetMs: 41 * 60_000, sentAt: "2026-11-05T23:41:00.000Z", zeroMs: zero }), "");
 });
 
-test("chatRoleLabel (V2-9): o papel so para Apresentador, Equipe e Assistente; o aluno e o convidado, nenhum", () => {
+test("chatRoleLabel (V2-9 e V2-A12): o papel so para Apresentador, Co-apresentador, Equipe e Assistente; o aluno e o convidado, nenhum", () => {
   assert.equal(client.chatRoleLabel("host"), "Apresentador");
-  assert.equal(client.chatRoleLabel("team"), "Equipe", "o co-apresentador tambem sai como Equipe ate a fase 2");
+  assert.equal(client.chatRoleLabel("co_host"), "Co-apresentador", "o papel proprio desde a 202611010001 (uma frase so, sem feminino)");
+  assert.equal(client.chatRoleLabel("team"), "Equipe", "a Equipe, e as mensagens do co-apresentador de antes da 202611010001");
   assert.equal(client.chatRoleLabel("ai"), "Assistente");
   assert.equal(client.chatRoleLabel("student"), null);
   assert.equal(client.chatRoleLabel("guest"), null);

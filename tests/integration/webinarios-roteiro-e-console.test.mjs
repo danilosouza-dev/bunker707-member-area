@@ -404,3 +404,13 @@ test("10. Virar pergunta (docs/31 V2-15): a pendente comum do aluno e liberada e
   const historico = unwrap(await db.from("student_events").select("event_type").eq("user_id", aluno.id).eq("event_type", "webinar_question_sent"), "Lendo o historico do aluno");
   assert.deepEqual(historico, [], "quem perguntou foi a equipe");
 });
+
+test("11. o Co-apresentador no chat (docs/31 V2-A12, migracao 202611010001): o banco aceita role co_host e a leitura do console o devolve; um papel fora da lista da 23514", async () => {
+  const linha = { approved: true, author_user_id: produtor.id, body: "Do co-apresentador", display_name: "Rui P.", offset_ms: 95_000, session_id: SESSAO, source: "team", webinar_id: webinarId };
+  const [gravada] = unwrap(await db.from("webinar_chat_messages").insert({ ...linha, role: "co_host" }).select("id, role"), "Gravando a mensagem do co-apresentador");
+  assert.equal(gravada.role, "co_host");
+  const retrato = await consoleQueries.getConsoleSnapshot(webinarId, SESSAO);
+  assert.equal(retrato.messages.find((message) => message.id === gravada.id)?.role, "co_host", "o console le o papel como gravado (nunca vira aluno)");
+  const fora = await db.from("webinar_chat_messages").insert({ ...linha, body: "Papel fora da lista", role: "moderator" });
+  assert.equal(fora.error?.code, "23514", "o check webinar_chat_messages_role_v5 recusa");
+});

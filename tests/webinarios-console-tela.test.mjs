@@ -384,10 +384,24 @@ test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha 
   // Na live: a hora em que o servidor gravou (20:42), e toda mensagem nasce na linha mestre (D31): sem o selo.
   const ao = (extra) => message({ createdAt: "2026-11-05T23:42:00.000Z", ...extra });
   const live = session({ kind: "live" });
-  const liveMarkup = render({ sessions: [live], snapshot: snapshot({ messages: [ao({ id: "m-live", master: true }), ao({ id: "m-live-equipe", master: true, role: "team", source: "team", authorUserId: "u-bia", displayName: "Bia E." })], session: live }), webinar: { ...webinar, kind: "live" } });
+  const liveMarkup = render({
+    sessions: [live],
+    snapshot: snapshot({
+      messages: [
+        ao({ id: "m-live", master: true }),
+        ao({ id: "m-live-equipe", master: true, role: "team", source: "team", authorUserId: "u-bia", displayName: "Bia E." }),
+        ao({ id: "m-live-co", master: true, role: "co_host", source: "team", authorUserId: "u-rui", displayName: "Rui P." })
+      ],
+      session: live
+    }),
+    webinar: { ...webinar, kind: "live" }
+  });
   const liveChat = pane(liveMarkup, "tab", "chat");
   assert.equal(chatMeta(chatItem(liveChat, "m-live")), "Ana M. · 20:42");
   assert.equal(chatMeta(chatItem(liveChat, "m-live-equipe")), "Bia E. · Equipe · 20:42");
+  // O co-apresentador com o papel proprio (V2-A12), como na sala, na linha e no leitor de tela.
+  assert.equal(chatMeta(chatItem(liveChat, "m-live-co")), "Rui P. · Co-apresentador · 20:42");
+  assert.match(chatItem(liveChat, "m-live-co"), /<span class="sr-only">Rui P\., Co-apresentador, 20:42: <\/span>/);
   assert.doesNotMatch(textOf(liveChat), /Nas próximas turmas/, "na live o selo sairia em todas");
 
   // No Replay, nenhuma hora.
