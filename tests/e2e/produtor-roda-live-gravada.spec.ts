@@ -158,7 +158,9 @@ test.describe("produtor", () => {
     await page.waitForLoadState("networkidle");
     const chat = page.getByRole("log", { name: "Chat" });
     await expect.poll(() => chat.evaluate((lista) => lista.scrollHeight > lista.clientHeight + 16)).toBe(true);
-    await expect(chat.getByText("Mensagem da equipe 40", { exact: true })).toBeInViewport();
+    // O texto da mensagem divide o paragrafo com o autor so para o leitor de tela ("Equipe T.: ..."): a busca e por
+    // trecho, como nos outros passos deste arquivo (o exato nunca bate).
+    await expect(chat.getByText("Mensagem da equipe 40")).toBeInViewport();
 
     // Com o Roteiro na tela (o Chat escondido), chega uma mensagem nova pelo retrato (o Atualizar pede agora; o de 5 s
     // traria do mesmo jeito). A lista escondida continua montada; o localizador pelo papel (role=log) nao enxerga o que
@@ -170,11 +172,11 @@ test.describe("produtor", () => {
     const nova = "Chegou com o chat escondido";
     unwrap(await db.from("webinar_chat_messages").insert(daEquipe(nova, Date.now(), 200_000)), "Gravando a mensagem nova");
     await page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.atualizar }).click();
-    await expect(listaEscondida.getByText(nova, { exact: true })).toBeAttached({ timeout: 15_000 });
+    await expect(listaEscondida.getByText(nova)).toBeAttached({ timeout: 15_000 });
 
     // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista.
     await page.getByRole("tab", { exact: true, name: "Chat" }).click();
-    await expect(chat.getByText(nova, { exact: true })).toBeInViewport();
+    await expect(chat.getByText(nova)).toBeInViewport();
     expect(await chat.evaluate((lista) => lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 1), "a lista no fim").toBe(true);
   });
 
