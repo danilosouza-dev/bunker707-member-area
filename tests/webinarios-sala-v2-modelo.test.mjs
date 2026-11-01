@@ -7,7 +7,8 @@ import "./support/transpile-tsx.mjs";
 // viewOnJoin, filmstripStep e stagePollFor), no lugar das conferencias de texto do codigo-fonte que elas substituem.
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
-// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
+// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (no estilo do YouTube, roomMetaLine, com o numero primeiro), a
+// do celular (tambem com o numero primeiro) e a margem que a coluna de miniaturas do iframe
 // tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
@@ -129,6 +130,7 @@ test("themeForDesign: o desenho normal usa o tema da pessoa; o vertical e sempre
 
 const time = await import("../src/lib/webinar-time.ts");
 const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 test("formatWebinarDayLong: o dia da semana e o mes por extenso no horario de Sao Paulo", () => {
   assert.equal(time.formatWebinarDayLong("2026-11-05T23:00:00.000Z"), "Quinta, 5 de novembro");
@@ -156,12 +158,41 @@ test("roomDateLine (V2-3): a data, a hora, a duracao e quem apresenta; no Replay
   assert.equal(linha({ durationMinutes: 0, kind: "replay", presenterName: null }), "", "nada a dizer: a linha fica vazia");
 });
 
-test("roomMobileLine (V2-18): 'com {apresentador} · {n} assistindo'; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 128 }).join(" · "), "com Danilo Souza · 128 assistindo");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "com Danilo Souza · 1 assistindo");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 0 }), ["0 assistindo"], "sem apresentador, so o contador (zero tambem e numero)");
+test("roomMetaLine (V2-3, no estilo do YouTube): o numero primeiro ('3 assistindo agora') e depois os trechos da data; sem contador (Replay, encerrada), a linha comeca na data; no Replay, sem data", () => {
+  const base = { durationMinutes: 60, kind: "live", presentNow: 3, presenterName: "Danilo Souza", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const meta = (extra = {}) => layout.roomMetaLine({ ...base, ...extra });
+  assert.deepEqual(meta(), { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] });
+  assert.deepEqual(meta().rest, layout.roomDateLine(base), "o resto e a linha da data de sempre");
+  assert.deepEqual(meta({ presentNow: null }), { present: null, rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] }, "encerrada: sem o numero, comeca na data");
+  assert.deepEqual(meta({ kind: "replay", presentNow: null }), { present: null, rest: ["60 min", "com Danilo Souza"] }, "no Replay: sem o numero, sem data e sem hora");
+  assert.deepEqual(meta({ kind: "simulated", presentNow: 58 }).present, "58 assistindo agora", "a gravada com o numero somado da Simulacao");
+  assert.equal(meta({ presentNow: 1 }).present, "1 assistindo agora");
+  assert.equal(meta({ presentNow: 0 }).present, "0 assistindo agora", "zero tambem e numero");
+  assert.equal(meta({ presentNow: -4 }).present, "0 assistindo agora", "nunca negativo");
+  assert.equal(meta({ presentNow: 2.6 }).present, "3 assistindo agora", "inteiro");
+  assert.equal(meta({ presentNow: Number.NaN }).present, null, "sem numero de verdade, sem o trecho");
+  assert.equal(meta({ presentNow: 1234 }).present, "1.234 assistindo agora", "o milhar como no Brasil");
+});
+
+test("roomMobileLine (V2-18, no estilo do YouTube): '{n} assistindo agora · com {apresentador}', o numero primeiro; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 3 }).join(" · "), "3 assistindo agora · com Danilo Souza");
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "1 assistindo agora · com Danilo Souza");
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1234 }).join(" · "), "1.234 assistindo agora · com Danilo Souza");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador: so o apresentador");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 3 }), ["3 assistindo agora"], "sem apresentador, so o numero");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: "   ", presentNow: 0 }), ["0 assistindo agora"], "nome em branco tambem; zero tambem e numero");
   assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: null }), []);
+});
+
+test("assistindoAgora: '1 assistindo agora' e, com mais de um, o numero com o milhar do pt-BR", () => {
+  const { assistindoAgora } = WEBINAR_COPY.salaV2.cabecalho;
+  assert.equal(assistindoAgora(1), "1 assistindo agora");
+  assert.equal(assistindoAgora(0), "0 assistindo agora");
+  assert.equal(assistindoAgora(128), "128 assistindo agora");
+  assert.equal(assistindoAgora(1234), "1.234 assistindo agora");
+  assert.equal(assistindoAgora(1_234_567), "1.234.567 assistindo agora");
+  // O "{n} assistindo" de antes fica para o topo do vertical (vertical-top-bar.tsx).
+  assert.equal(WEBINAR_COPY.sala.assistindo(128), "128 assistindo");
 });
 
 test("stageVideoRightPx: a coluna de miniaturas do iframe (213 px) mais o puxador (9 px; 21 px com toque); sem a coluna, 0", () => {

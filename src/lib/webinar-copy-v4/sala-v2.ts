@@ -4,11 +4,14 @@
 
 export const SALA_V2_COPY = {
   /**
-   * O cabecalho (V2-3): a linha da data no computador ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo Souza") e a
-   * linha do celular ("com Danilo Souza · 128 assistindo"); os trechos se juntam com " · ". Sem a logo de Marca, o
+   * O cabecalho (V2-3, no estilo do YouTube): a linha de baixo do titulo no computador comeca pelo numero ("128
+   * assistindo agora · Quinta, 30 de outubro · 20:00 · 60 min · com Danilo Souza") e a do celular tambem ("128
+   * assistindo agora · com Danilo Souza"); os trechos se juntam com " · ", e o milhar sai como no Brasil ("1.234
+   * assistindo agora"). O "{n} assistindo" de WEBINAR_COPY.sala fica para o topo do vertical. Sem a logo de Marca, o
    * nome da escola em texto no lugar dela (e o alt da logo).
    */
   cabecalho: {
+    assistindoAgora: (n: number) => (n === 1 ? "1 assistindo agora" : `${n.toLocaleString("pt-BR")} assistindo agora`),
     com: (nome: string) => `com ${nome}`,
     duracao: (minutos: number) => `${minutos} min`,
     marca: "Bunker707"

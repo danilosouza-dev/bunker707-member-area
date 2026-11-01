@@ -18,7 +18,7 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomEscapeStep, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
@@ -685,7 +685,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       : momentBadge.badge === "live"
         ? { getOffsetMs, kind: "recorded_on_air" }
         : { getOffsetMs: momentBadge.elapsed ? getOffsetMs : undefined, kind: "session", timeLabel };
-  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind, presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind, presentNow: momentBadge.showCount ? shownCount : null, presenterName, scheduledAt: session.session.scheduledAt });
   const mobileLine = roomMobileLine({ presenterName, presentNow: momentBadge.showCount ? shownCount : null }).join(" · ");
   // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
   const stageVars = { "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px` } as CSSProperties;
@@ -802,8 +802,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         />
       ) : (
         <RoomHeader
-          dateLine={dateLine}
           leaveInBar={barShown}
+          metaLine={metaLine}
           mobileLine={mobileLine}
           onLeave={askToLeave}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}

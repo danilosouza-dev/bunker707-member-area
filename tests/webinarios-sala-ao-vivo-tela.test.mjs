@@ -506,7 +506,7 @@ test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes d
   assert.match(room, /function closeSettings\(focusButton = false\) \{[\s\S]*?returnFocusFrom\(LIVE_SETTINGS_ID\);[\s\S]*?setSettingsOpen\(false\);/);
 });
 
-test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (V2-4); o cabecalho com {n} assistindo e a linha da data (V2-3); Entrar na sala, as quatro abas e o painel a direita", () => {
+test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (V2-4); o cabecalho com a linha que comeca por {n} assistindo agora (V2-3); Entrar na sala, as quatro abas e o painel a direita", () => {
   const html = sala({ payload: payload({ live: { recording: true } }) });
   assert.match(html, /data-room-kind="live"/);
   assert.match(html, /data-room-phase="live"/);
@@ -549,12 +549,11 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (
   assert.doesNotMatch(html, /data-room-badge="assistant"/, "o Assistente desligado (o servidor ainda nao leu o estado)");
   assert.doesNotMatch(sala(), /Gravando/, "sem gravador, sem o selo");
 
-  // O cabecalho (V2-3): o titulo, a linha da data com a duracao e quem apresenta, "{n} assistindo" e, no celular, a linha
-  // com quem apresenta e quantos assistem.
+  // O cabecalho (V2-3, no estilo do YouTube): o titulo e a linha que comeca pelo numero, com a data, a duracao e quem
+  // apresenta; no celular, o numero primeiro e quem apresenta.
   assert.match(cabecalho, /<h1 [^>]*>Aula de IA<\/h1>/);
-  assert.match(cabecalho, /data-room-line="date">Quinta, 5 de novembro · 19:15 · 60 min · com Danilo S\.<\/p>/);
-  assert.match(cabecalho, /data-testid="room-mobile-line">com Danilo S\. · 7 assistindo<\/p>/);
-  assert.match(cabecalho, /data-testid="room-present">[\s\S]*?7 assistindo<\/p>/);
+  assert.match(cabecalho, /data-room-line="meta"><span data-testid="room-present">7 assistindo agora<\/span> · Quinta, 5 de novembro · 19:15 · 60 min · com Danilo S\.<\/p>/);
+  assert.match(cabecalho, /data-testid="room-mobile-line">7 assistindo agora · com Danilo S\.<\/p>/);
   assert.match(cabecalho, /class="hidden shrink-0 items-center lg:flex" data-room-brand="logo"/, "a logo so a partir de lg (o ponto em que a sala vira computador)");
   assert.doesNotMatch(cabecalho, /data-room-brand="icon"/, "abaixo de lg, sem marca: o titulo tem a largura");
 

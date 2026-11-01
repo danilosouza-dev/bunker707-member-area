@@ -1,6 +1,7 @@
-// O desenho da sala do aluno V2 (docs/31 §1), a parte pura: os trechos da linha da data no cabecalho do computador
-// (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do iframe tira da direita do video, onde os
-// selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
+// O desenho da sala do aluno V2 (docs/31 §1), a parte pura: a linha de baixo do titulo no cabecalho do computador, com
+// o numero de agora e os trechos da data (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do
+// iframe tira da direita do video, onde os selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da
+// barra da gravada e do Replay (V2-6),
 // quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
 // contador de mensagens novas do balao, o primeiro foco, quando as pilulas do chat ficam no palco (V2-7 e V2-8) e quando
 // o card da Oferta tira do canto as pilulas e o selo do Assistente; na sala no estilo do YouTube, as teclas dos menus
@@ -45,18 +46,43 @@ export function roomDateLine(input: { durationMinutes: number | null; kind: Room
   return parts;
 }
 
+/** "128 assistindo agora" (o numero inteiro, nunca negativo); nulo sem contador (o Replay e a sessao encerrada passam nulo). */
+function presentPhrase(presentNow: number | null): string | null {
+  if (typeof presentNow !== "number" || !Number.isFinite(presentNow)) {
+    return null;
+  }
+  return WEBINAR_COPY.salaV2.cabecalho.assistindoAgora(Math.max(0, Math.round(presentNow)));
+}
+
+/** A linha de baixo do titulo no computador: o numero de agora (ou nulo) e os trechos da data que vem depois dele. */
+export type RoomMetaLine = { present: string | null; rest: string[] };
+
 /**
- * A linha do cabecalho abaixo de lg (V2-18), em trechos: "com Danilo Souza" e "128 assistindo". Sem contador (o Replay
+ * A linha de baixo do titulo no computador, no estilo do YouTube: o numero primeiro ("128 assistindo agora", que a tela
+ * marca para o e2e) e depois os trechos da data (roomDateLine), que a tela junta com " · ". Sem contador (o Replay e a
+ * sessao encerrada), a linha comeca na data; no Replay, sem data e sem hora, na duracao.
+ */
+export function roomMetaLine(input: { durationMinutes: number | null; kind: RoomKind; presentNow: number | null; presenterName: string | null; scheduledAt: string | null }): RoomMetaLine {
+  return {
+    present: presentPhrase(input.presentNow),
+    rest: roomDateLine({ durationMinutes: input.durationMinutes, kind: input.kind, presenterName: input.presenterName, scheduledAt: input.scheduledAt })
+  };
+}
+
+/**
+ * A linha do cabecalho abaixo de lg (V2-18), em trechos, com o numero primeiro como no computador: "128 assistindo
+ * agora" e "com Danilo Souza" (antes o numero vinha por ultimo e era o primeiro a ser cortado). Sem contador (o Replay
  * e a sessao encerrada passam nulo), so o apresentador; sem apresentador, so o contador.
  */
 export function roomMobileLine(input: { presenterName: string | null; presentNow: number | null }): string[] {
   const parts: string[] = [];
+  const present = presentPhrase(input.presentNow);
+  if (present) {
+    parts.push(present);
+  }
   const presenter = input.presenterName?.trim();
   if (presenter) {
     parts.push(WEBINAR_COPY.salaV2.cabecalho.com(presenter));
-  }
-  if (typeof input.presentNow === "number" && Number.isFinite(input.presentNow)) {
-    parts.push(WEBINAR_COPY.sala.assistindo(Math.max(0, Math.round(input.presentNow))));
   }
   return parts;
 }

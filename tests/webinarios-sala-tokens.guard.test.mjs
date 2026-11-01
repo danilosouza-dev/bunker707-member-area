@@ -465,7 +465,7 @@ test("o acento (#e50914) so no Sair: o RoomButton danger e so o Sair das confirm
   }
 });
 
-test("o RoomButton cheio no acento (accent) e so o Sair: o do cabecalho e o da barra (docs/31 V2-6 e V2-11)", () => {
+test("o vermelho cheio (o RoomButton accent e a RoomPill red) e so o Sair: o do cabecalho e o da barra (docs/31 V2-6 e V2-11)", () => {
   const ROOM = "src/components/member/webinars/room";
   const usos = [];
   const visitar = (pasta) => {
@@ -475,16 +475,22 @@ test("o RoomButton cheio no acento (accent) e so o Sair: o do cabecalho e o da b
         visitar(caminho);
       } else if (/\.tsx?$/.test(nome)) {
         const codigo = semComentarios(ler(caminho));
+        // O botao de texto: o rotulo e o filho. A abertura da tag pode ter "=>" (onClick={() => ...}): so o ">"
+        // sozinho a fecha.
         for (const [, filhos] of codigo.matchAll(/<RoomButton\b(?:=>|[^>])*?\bvariant="accent"(?:=>|[^>])*>([\s\S]*?)<\/RoomButton>/g)) {
-          usos.push({ caminho, filhos: filhos.trim() });
+          usos.push({ caminho, rotulo: filhos.trim() });
+        }
+        // A pilula do YouTube (room-pill.tsx): o rotulo e o label, na tag que fecha sozinha ou com filhos.
+        for (const [tag] of codigo.matchAll(/<RoomPill\b(?:=>|[^>])*?\btone="red"(?:=>|[^>])*>/g)) {
+          usos.push({ caminho, rotulo: tag.match(/\blabel=(\{[^}]*\})/)?.[1] ?? "(sem label)" });
         }
         assert.doesNotMatch(codigo, /roomButtonClassName\(\{[^}]*variant:\s*"accent"/, `${caminho}: accent so no RoomButton do Sair`);
       }
     }
   };
   visitar(ROOM);
-  assert.deepEqual(usos.map((uso) => uso.caminho).sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
+  assert.deepEqual([...new Set(usos.map((uso) => uso.caminho))].sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
   for (const uso of usos) {
-    assert.match(uso.filhos, /\{copy\.sair\}/, `${uso.caminho}: ${uso.filhos}`);
+    assert.match(uso.rotulo, /\{copy\.sair\}/, `${uso.caminho}: ${uso.rotulo}`);
   }
 });

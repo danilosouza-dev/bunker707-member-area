@@ -22,6 +22,11 @@ import { tooltipStep, type TooltipEvent, type TooltipState } from "./room-layout
 export type RoomTooltipProps = {
   /** O botao (ou o envoltorio dele) que chama a dica. */
   children: ReactElement;
+  /**
+   * A classe do envoltorio (o padrao e so o `relative inline-flex`), para quem esconde o botao numa largura: com a
+   * classe no envoltorio, o botao escondido nao deixa um item vazio (e o vao dele) na linha do pai.
+   */
+  className?: string;
   /** O texto da dica: o nome do botao, ou o motivo do desligado. */
   label: string;
   /** Acima do botao (a barra) ou abaixo (o topo e o cabecalho do painel). */
@@ -49,7 +54,7 @@ function focusVisible(target: EventTarget): boolean {
   }
 }
 
-export function RoomTooltip({ children, label, side, wide = false }: RoomTooltipProps) {
+export function RoomTooltip({ children, className, label, side, wide = false }: RoomTooltipProps) {
   const [tip, setTip] = useState<TooltipTip>(HIDDEN);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   // Quem segura a dica, cada um no seu: o ponteiro em cima (do botao ou da propria dica) e o foco do teclado no botao.
@@ -124,7 +129,7 @@ export function RoomTooltip({ children, label, side, wide = false }: RoomTooltip
 
   return (
     <span
-      className="relative inline-flex"
+      className={cn("relative inline-flex", className)}
       onBlur={onBlur}
       onFocus={onFocus}
       // O toque no botao esconde a dica na hora (o menu ou o painel que ele abre fica no mesmo lado).

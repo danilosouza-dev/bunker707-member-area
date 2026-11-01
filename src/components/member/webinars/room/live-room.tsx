@@ -57,8 +57,8 @@ import {
   liveStageMoment,
   panelTabsFor,
   panelToggleStep,
-  roomDateLine,
   roomEscapeStep,
+  roomMetaLine,
   roomMobileLine,
   roomPanelShown,
   stageVideoRightPx,
@@ -551,9 +551,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const notice = liveNoticePhrase(room.signals.notice === "mic_released" ? null : room.signals.notice) ?? pendingTogglePhrase(room.pendingToggle, room.signals);
   const stage = stageNames(room.signals.participants, presenterName);
   const startedAt = live.startedAt ?? session.session.startedAt;
-  // "{n} assistindo" some com a live encerrada (no cabecalho do computador e na linha do celular).
+  // "{n} assistindo agora" some com a live encerrada (no cabecalho do computador e na linha do celular).
   const presentShown = phase === "ended" ? null : presentNow;
-  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presentNow: presentShown, presenterName, scheduledAt: session.session.scheduledAt });
   const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
@@ -828,8 +828,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       role="dialog"
     >
       <RoomHeader
-        dateLine={dateLine}
         leaveInBar={barShown}
+        metaLine={metaLine}
         mobileLine={mobileLine}
         onLeave={askToLeave}
         onToggleTheme={toggleTheme}

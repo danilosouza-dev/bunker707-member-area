@@ -27,10 +27,10 @@ import {
 // aceite), a mao levantada vai por toggleRaiseHand, o microfone liberado pelo apresentador abre o aviso com Falar /
 // Agora não e so o Falar manda toggleAudio. O chat e as reacoes sao os nossos; nenhum texto da pagina cita o Jitsi; a
 // 375 px a sala cabe sem rolagem lateral e os botoes da barra tem 44 px. A IA Diretor fica na pagina da live e some na
-// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "com {apresentador} ·
-// {n} assistindo" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem Minimizar nem
-// pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px
-// (celular deitado) o cabecalho continua o do celular, sem marca, os selos ficam no palco e Configurações aberto deixa
+// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "{n} assistindo
+// agora · com {apresentador}" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem
+// Minimizar nem pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor
+// reaparece); a 667 px (celular deitado) o cabecalho continua o do celular, sem marca, os selos ficam no palco e Configurações aberto deixa
 // o palco com 96 px, acima do painel. O botao Configurações abre o painel de som e aparelhos: antes da liberacao nada
 // troca de aparelho (nem pede o microfone); depois do Falar o microfone escolhido chega a sala so pelo id, o
 // alto-falante tambem, a camera so depois do aviso de gravacao,
@@ -124,6 +124,14 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   // confirmacao).
   await expect(dialogo.getByRole("img", { name: "Bunker707" })).toBeVisible();
   await expect(dialogo.getByRole("link", { name: "Bunker707" })).toHaveCount(0);
+  // O topo no estilo do YouTube a 1280 px: 64 px, a linha de baixo do titulo comecando pelo numero de agora e o tema
+  // redondo sem contorno.
+  const topo = dialogo.locator("header").first();
+  await expect.poll(async () => (await topo.boundingBox())?.height ?? 0).toBe(64);
+  await expect(topo.locator('[data-room-line="meta"]')).toHaveText(/^\d+ assistindo agora · /);
+  const botaoDoTema = topo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro });
+  await expect(botaoDoTema).toBeVisible();
+  expect(await botaoDoTema.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("0px");
 
   // O external_api.js do nosso hostname, uma vez; o iframe no palco com o nosso titulo e o allow de §8.4.
   expect(sala.pedidosDoScript()).toBe(1);
@@ -1049,9 +1057,9 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(painel).toHaveCount(0);
   await page.setViewportSize({ height: 740, width: 375 });
 
-  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "com
-  // {apresentador} · {n} assistindo" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o leitor de
-  // tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
+  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "{n}
+  // assistindo agora · com {apresentador}" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o
+  // leitor de tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
   const palcoDaSala = dialogo.locator("[data-lesson-player-stage]");
@@ -1067,7 +1075,7 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   const tituloDoCabecalho = cabecalho.getByRole("heading", { level: 1, name: titulo });
   await expect(tituloDoCabecalho).toBeVisible();
   const linha = cabecalho.getByTestId("room-mobile-line");
-  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
+  await expect(linha).toHaveText(new RegExp(`^\\d+ assistindo agora · com ${APRESENTADOR}$`));
   // Sem Minimizar (docs/31 V2-2): o cabecalho termina no Sair.
   await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
   const sair = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair });
@@ -1105,9 +1113,9 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
-test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador} · {n} assistindo', sem marca) e os selos Ao vivo e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
-  // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo, a linha da
-  // data e o "{n} assistindo" da direita so entram em lg; o contador fica na linha de baixo do titulo.
+test("a 667 px (celular deitado): o cabecalho do celular (titulo e '{n} assistindo agora · com {apresentador}', sem marca) e os selos Ao vivo e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
+  // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo e a linha de
+  // baixo do titulo com o numero e a data so entram em lg; o numero fica no comeco da linha do celular.
   await page.setViewportSize({ height: 740, width: 667 });
   const { dialogo, sala } = await entrarNaSala(page);
   // O iPhone SE deitado: 667 x 375 (a altura nao muda o cabecalho; a entrada usa a de cima para o Entrar na sala caber).
@@ -1124,7 +1132,7 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresen
   await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
   await expect(cabecalho.getByTestId("room-present")).toBeHidden();
   const linha = cabecalho.getByTestId("room-mobile-line");
-  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
+  await expect(linha).toHaveText(new RegExp(`^\\d+ assistindo agora · com ${APRESENTADOR}$`));
   // A partir de sm o botao de tema volta ao cabecalho, antes do Sair.
   await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 

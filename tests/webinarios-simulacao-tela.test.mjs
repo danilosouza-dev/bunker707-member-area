@@ -279,7 +279,7 @@ test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; se
   assert.equal(state.displayCount(3, 16_000), 58);
   const markup = html(
     createElement(header.RoomHeader, {
-      dateLine: "Quinta, 5 de novembro · 20:00 · 60 min",
+      metaLine: roomLayout.roomMetaLine({ durationMinutes: 60, kind: "simulated", presentNow: state.displayCount(3, 16_000), presenterName: null, scheduledAt: "2026-11-05T23:00:00.000Z" }),
       mobileLine: roomLayout.roomMobileLine({ presenterName: null, presentNow: state.displayCount(3, 16_000) }).join(" · "),
       onLeave: () => undefined,
       onToggleTheme: () => undefined,
@@ -288,8 +288,9 @@ test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; se
       title: "Aula de IA"
     })
   );
-  assert.match(markup, /data-testid="room-present">[\s\S]*?58 assistindo</, "no computador");
-  assert.match(markup, /data-testid="room-mobile-line">58 assistindo</, "e na linha do celular");
+  assert.match(markup, /data-testid="room-present">58 assistindo agora</, "no computador, no comeco da linha");
+  assert.match(markup, /data-room-line="meta"><span data-testid="room-present">58 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min</);
+  assert.match(markup, /data-testid="room-mobile-line">58 assistindo agora</, "e na linha do celular");
 
   const nada = roomSimulationStateOf(model.EMPTY_SIMULATION_ROOM);
   assert.equal(nada.displayCount(3, 16_000), 3);
