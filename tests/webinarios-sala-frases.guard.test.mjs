@@ -158,8 +158,8 @@ test("Configurações tomou o lugar do Como usar, com a frase provisoria de LIVE
   assert.match(controls, /LIVE_ROOM_COPY\.configuracoes/);
   assert.doesNotMatch(controls, /comoUsar|Keyboard/, "o Como usar virou o painel Configurações");
   assert.match(ler(`${ROOM}/live-room-model.ts`), /export const LIVE_ROOM_COPY = \{/);
-  // Sem a logo de Marca, o nome da escola em texto (e o alt da logo) pela mesma frase (docs/31 V2-3).
+  // O alt da logo e, sem a logo de Marca, o nome da escola em texto pela mesma frase (docs/31 V2-3): a PlatformLogo
+  // escreve o alt quando nao ha imagem (tests/webinarios-sala-tela.test.mjs desenha os dois casos).
   const header = semComentarios(ler(`${ROOM}/room-header.tsx`));
-  assert.match(header, /alt=\{copy\.marca\}/);
-  assert.match(header, />\{copy\.marca\}</);
+  assert.match(header, /<PlatformLogo alt=\{copy\.marca\}/);
 });

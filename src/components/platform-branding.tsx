@@ -4,7 +4,8 @@ import { createContext, useContext } from "react";
 import type { PlatformBrandingConfig } from "@/lib/platform-types";
 import { normalizeSchoolIcon } from "@/server/communications/message-meta";
 
-const defaultLogoImage = "/brand/logo-bunker.svg";
+/** A logo padrao da area (toda branca, feita para o fundo escuro): a da Marca quando nada foi enviado. */
+export const DEFAULT_PLATFORM_LOGO = "/brand/logo-bunker.svg";
 
 const PlatformBrandingContext = createContext<PlatformBrandingConfig | undefined>(undefined);
 
@@ -20,7 +21,7 @@ export function PlatformBrandingProvider({
 
 export function usePlatformLogoImage() {
   const branding = useContext(PlatformBrandingContext);
-  return branding === undefined ? defaultLogoImage : branding.logoImage;
+  return branding === undefined ? DEFAULT_PLATFORM_LOGO : branding.logoImage;
 }
 
 /** Icone da escola de Marca (quadrado): o enviado em Marca ou, sem ele, o simbolo padrao (SCHOOL_DEFAULT_ICON). */

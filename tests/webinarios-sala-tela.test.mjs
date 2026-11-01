@@ -25,6 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
 const branding = await import("../src/components/platform-branding.tsx");
+const platformLogo = await import("../src/components/platform-logo.tsx");
 const stage = await import("../src/components/member/webinars/room/room-stage.tsx");
 const chat = await import("../src/components/member/webinars/room/room-chat.tsx");
 const reactions = await import("../src/components/member/webinars/room/room-reactions.tsx");
@@ -205,29 +206,45 @@ test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o
   assert.doesNotMatch(vertical, /Tema claro|Tema escuro/);
 });
 
-test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunker707 sem logo); abaixo de lg, nenhuma marca e o titulo tem a largura", () => {
+test("cabecalho: a logo da sala e a do topo da area (PlatformLogo), a mesma tag, so a partir de lg e sem link; sem logo, o mesmo nome em texto; abaixo de lg, nenhuma marca", () => {
   const comMarca = (marca, props = {}) =>
     renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...HEADER, ...props })));
   const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
+  const imagem = (html) => html.match(/<img[^>]*>/)?.[0] ?? "";
+  const daArea = (props) => render(platformLogo.PlatformLogo, { alt: "Bunker707", ...props });
+  const classes = (html) => (html.match(/class="([^"]*)"/)?.[1] ?? "").split(" ").sort();
+  const classesDaImagem = (html) => (html.match(/<img[^>]*class="([^"]*)"/)?.[1] ?? "").split(" ");
   const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
   const ICONE = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/icone.png";
 
-  // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg.
-  const semLogo = comMarca({ logoImage: null });
-  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<\/div>/);
-  assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center lg:flex"/, "a marca so a partir de lg");
-  assert.doesNotMatch(semLogo, /<img[^>]*class="[^"]*w-\[112px\]/, "sem logo, nenhuma imagem de logo");
-
-  // Com a logo enviada em Marca: a imagem com o nome da escola, 112 px no maximo 32 de altura, alinhada a esquerda.
+  // A logo padrao (sem Marca) e a enviada em Marca: na sala, a mesma tag que o topo da area desenha, atributo por
+  // atributo (as classes, width 306 e height 35, o alt e o arquivo); nenhum tamanho proprio da sala.
+  const semMarca = renderToStaticMarkup(createElement(header.RoomHeader, HEADER));
   const comLogo = comMarca({ logoImage: LOGO, schoolIcon: ICONE });
-  const logo = comLogo.match(/<img[^>]*w-\[112px\][^>]*>/)?.[0] ?? "";
-  assert.match(logo, /alt="Bunker707"/);
-  assert.match(logo, new RegExp(`src="${LOGO.replace(/[.]/g, "\\.")}"`));
-  assert.match(logo, /class="h-auto max-h-8 w-\[112px\] shrink-0 object-contain object-left"/);
-  assert.doesNotMatch(comLogo, />Bunker707</, "com a logo, sem o nome em texto");
+  for (const [html, src] of [[semMarca, branding.DEFAULT_PLATFORM_LOGO], [comLogo, LOGO]]) {
+    const daSala = imagem(html);
+    assert.ok(daSala, `a logo ${src} na sala`);
+    assert.equal(daSala, imagem(daArea({ src })), `a logo ${src} igual a do topo da area`);
+    assert.match(daSala, /width="306"/);
+    assert.match(daSala, /height="35"/);
+    const lista = classesDaImagem(daSala);
+    assert.ok(!lista.includes("w-[112px]"), "sem a largura antiga da sala (112 px)");
+    assert.deepEqual(lista.filter((nome) => nome.startsWith("max-h-")), ["max-h-10"], "no maximo 40 de altura, como no topo da area (antes, 32)");
+    assert.doesNotMatch(daSala, /brightness-0/, "no escuro, a logo como e");
+    assert.doesNotMatch(html, />Bunker707</, "com a logo, sem o nome em texto");
+  }
+  assert.match(imagem(semMarca), /src="\/brand\/logo-bunker\.svg"/, "sem Marca, a logo padrao");
+
+  // Sem logo em Marca: o mesmo nome em texto do topo da area (o tamanho e o peso dele), na cor forte do tema da sala.
+  const semLogo = comMarca({ logoImage: null });
+  const nome = semLogo.match(/data-room-brand="logo"[^>]*>\s*(<span [^>]*>Bunker707<\/span>)\s*<\/div>/)?.[1] ?? "";
+  assert.ok(nome, "o nome em texto dentro da marca");
+  assert.deepEqual(classes(nome), [...classes(daArea({ src: null })), "text-room-fg-strong"].sort(), "o nome do topo da area mais a cor do tema");
+  assert.doesNotMatch(semLogo, /<img/, "sem logo, nenhuma imagem");
 
   // Abaixo de lg o cabecalho e o titulo, a linha do celular, o tema (a partir de sm) e o Sair (V2-18): sem o Icone.
-  for (const html of [semLogo, comLogo]) {
+  for (const html of [semMarca, semLogo, comLogo]) {
+    assert.match(tag(html, "logo"), /class="hidden shrink-0 items-center lg:flex"/, "a marca so a partir de lg");
     assert.equal(tag(html, "icon"), "", "sem o Icone da escola");
     assert.doesNotMatch(html, new RegExp(ICONE.replace(/[.]/g, "\\.")));
     // Sem link: sair da live passa pela confirmacao (askToLeave), nunca por um clique na logo.
@@ -238,19 +255,39 @@ test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunke
   }
 });
 
-test("cabecalho no tema claro (V2-3): a marca vira o nome da escola em texto (a logo de Marca e feita para a area escura e sumiria sobre o fundo claro); o traco so com '{n} assistindo'", () => {
+test("cabecalho no tema claro (V2-3, opcao C): a logo padrao fica preta (brightness-0); a enviada em Marca, feita para a area escura, vira o nome em texto; no escuro, nenhum filtro", () => {
   const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
-  const comMarca = (props = {}) =>
-    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: { logoImage: LOGO } }, createElement(header.RoomHeader, { ...HEADER, ...props })));
+  const comMarca = (marca, props = {}) =>
+    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...HEADER, ...props })));
   const marca = (html) => html.slice(html.indexOf("data-room-brand"), html.indexOf("<h1"));
-  const claro = comMarca({ theme: "light" });
-  assert.doesNotMatch(marca(claro), /<img/, "no claro, nenhuma imagem de logo");
-  assert.match(marca(claro), /<span class="[^"]*\btext-room-fg-strong\b[^"]*">Bunker707<\/span>/, "o nome da escola, no texto forte do tema");
-  assert.match(marca(comMarca({ theme: "dark" })), /<img[^>]*alt="Bunker707"/, "no escuro, a logo de Marca");
+  const classes = (html) => (html.match(/<img[^>]*class="([^"]*)"/)?.[1] ?? "").split(" ");
+
+  // Claro com a logo padrao (toda branca): a mesma imagem, com o filtro que a deixa preta sobre o fundo claro.
+  const padraoClaro = marca(comMarca({ logoImage: branding.DEFAULT_PLATFORM_LOGO }, { theme: "light" }));
+  assert.match(padraoClaro, /<img[^>]*alt="Bunker707"[^>]*src="\/brand\/logo-bunker\.svg"/);
+  assert.ok(classes(padraoClaro).includes("brightness-0"), "a logo padrao em preto");
+  assert.deepEqual(
+    classes(padraoClaro).filter((nome) => nome !== "brightness-0"),
+    classes(render(platformLogo.PlatformLogo, { alt: "Bunker707", src: branding.DEFAULT_PLATFORM_LOGO })),
+    "fora o filtro, as classes do topo da area"
+  );
+  assert.ok(classes(marca(renderToStaticMarkup(createElement(header.RoomHeader, { ...HEADER, theme: "light" })))).includes("brightness-0"), "sem Marca, a padrao tambem");
+
+  // Claro com a logo enviada: o nome da escola em texto, na cor forte do tema.
+  const enviadaClaro = marca(comMarca({ logoImage: LOGO }, { theme: "light" }));
+  assert.doesNotMatch(enviadaClaro, /<img/, "no claro, a logo enviada nao aparece");
+  assert.match(enviadaClaro, /<span class="[^"]*\btext-room-fg-strong\b[^"]*">Bunker707<\/span>/, "o nome da escola, no texto forte do tema");
+
+  // Escuro: as duas logos sem o filtro.
+  for (const logoImage of [branding.DEFAULT_PLATFORM_LOGO, LOGO]) {
+    const escuro = marca(comMarca({ logoImage }, { theme: "dark" }));
+    assert.match(escuro, /<img[^>]*alt="Bunker707"/, `no escuro, a logo ${logoImage}`);
+    assert.ok(!classes(escuro).includes("brightness-0"), `no escuro, ${logoImage} sem filtro`);
+  }
 
   // O traco separa "{n} assistindo" do botao de tema: sem o contador (o Replay, a sessao encerrada), ele sai junto.
-  assert.match(comMarca(), /data-testid="room-present"[\s\S]*?<span aria-hidden="true" class="[^"]*\bbg-room-divider\b/);
-  const semContador = comMarca({ presentNow: null });
+  assert.match(comMarca({ logoImage: LOGO }), /data-testid="room-present"[\s\S]*?<span aria-hidden="true" class="[^"]*\bbg-room-divider\b/);
+  const semContador = comMarca({ logoImage: LOGO }, { presentNow: null });
   assert.doesNotMatch(semContador, /room-present/);
   assert.doesNotMatch(semContador, /bg-room-divider/, "sem o contador, sem o traco sozinho");
 });

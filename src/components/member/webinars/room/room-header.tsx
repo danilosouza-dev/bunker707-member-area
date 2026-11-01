@@ -1,10 +1,9 @@
 "use client";
 
 import { LogOut, Moon, Sun, Users } from "lucide-react";
-import Image from "next/image";
 import { useEffect, useState } from "react";
-import { usePlatformLogoImage } from "@/components/platform-branding";
-import { canOptimizeImageSrc } from "@/lib/image-hosts";
+import { DEFAULT_PLATFORM_LOGO, usePlatformLogoImage } from "@/components/platform-branding";
+import { PlatformLogo } from "@/components/platform-logo";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { offsetLabel } from "@/lib/webinar-room-client";
 import type { RoomTheme } from "@/lib/webinar-room-prefs";
@@ -12,8 +11,8 @@ import { RoomButton, RoomIconButton } from "./room-ui";
 
 // O cabecalho da Sala (docs/31 V2-3 e V2-18; docs/30 §1.3), o mesmo na Live ao vivo, na gravada e no Replay, sem fundo
 // nem borda (a sala aparece por tras), 56 px. A partir de lg (o ponto em que a sala vira computador, DESKTOP em
-// live-room.tsx): a logo de Marca (ou "Bunker707" sem logo, ou no tema claro, sem link: sair passa pela confirmacao,
-// askToLeave; a logo de Marca e uma so, desenhada para a area escura, e a padrao e branca), o
+// live-room.tsx): a logo da area, a mesma do topo (PlatformLogo; "Bunker707" sem logo; no tema claro a padrao em preto e
+// a enviada como o nome em texto; sem link: sair passa pela confirmacao, askToLeave), o
 // titulo em 22/800 com reticencias e, embaixo, a linha da data ("Quinta, 30 de outubro · 20:00 · 60 min · com Danilo
 // Souza", room-layout-model.ts); a direita, "{n} assistindo", um traco (so com o contador) e o botao de tema. Abaixo de lg: o titulo em
 // 15/800, a linha "com Danilo Souza · 128 assistindo", o tema a partir de sm (abaixo de sm o cabecalho nao tem largura,
@@ -60,29 +59,20 @@ export function RoomElapsed({ getOffsetMs }: { getOffsetMs?: () => number }) {
 }
 
 /**
- * A marca no canto da sala, so a partir de lg: a logo de Marca (ou o nome, sem logo), sem link. No tema claro, sempre o
- * nome: a logo de Marca e uma so, feita para a area escura (a padrao e toda branca), e sumiria sobre o fundo claro, como
- * no tom Claro do login (docs/12).
+ * A marca no canto da sala, so a partir de lg: a mesma logo do topo da area (PlatformLogo, as mesmas classes, a mesma
+ * caixa e o mesmo arquivo), sem link e sem o menu, a 16 px da borda como o palco. No tema claro (opcao C, docs/31
+ * V2-A58): a logo padrao, toda branca, fica preta (brightness-0); a enviada em Marca e uma so, feita para a area escura,
+ * e vira o nome em texto, como no tom Claro do login (docs/12).
  */
 function RoomBrand({ theme }: { theme: RoomTheme }) {
   const copy = WEBINAR_COPY.salaV2.cabecalho;
   const platformLogo = usePlatformLogoImage();
-  const logoImage = theme === "light" ? null : platformLogo;
+  const light = theme === "light";
+  const src = light && platformLogo !== DEFAULT_PLATFORM_LOGO ? null : platformLogo;
 
   return (
     <div className="hidden shrink-0 items-center lg:flex" data-room-brand="logo">
-      {logoImage ? (
-        <Image
-          alt={copy.marca}
-          className="h-auto max-h-8 w-[112px] shrink-0 object-contain object-left"
-          height={35}
-          src={logoImage}
-          unoptimized={!canOptimizeImageSrc(logoImage)}
-          width={306}
-        />
-      ) : (
-        <span className="whitespace-nowrap text-sm font-black uppercase tracking-wide text-room-fg-strong">{copy.marca}</span>
-      )}
+      <PlatformLogo alt={copy.marca} className={light ? "brightness-0" : undefined} src={src} textClassName="text-room-fg-strong" />
     </div>
   );
 }

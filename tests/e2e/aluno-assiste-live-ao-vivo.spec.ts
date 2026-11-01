@@ -42,6 +42,8 @@ import {
 // nao abre nunca vira "ligado" na barra nem no historico), o pedido acaba na queda e o painel diz que falta a permissao
 // (nunca "nenhum aparelho"); na volta depois de uma queda, a Câmera tocada no meio da troca da camera desligada espera a
 // faixa da troca, e o botao que espera mostra o estado real com o circulo girando e a frase do que vem.
+// A logo da sala (docs/31 V2-3) e a do topo da area: a mesma largura, a mesma altura e o mesmo arquivo no Chromium (1x)
+// e no WebKit (2x), a 16 px da borda, sem o menu; no tema claro a logo padrao fica preta.
 // O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
 // recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
 // cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
@@ -234,6 +236,33 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   expect(textos).not.toMatch(/jitsi/i);
 });
 
+test("a logo da sala e a do topo da area (docs/31 V2-3): a mesma largura, a mesma altura e o mesmo arquivo no Chromium (1x) e no WebKit (2x), a 16 px da borda, sem o menu", async ({ page }) => {
+  /** A caixa da logo depois de carregada (a altura sai da proporcao do arquivo) e o arquivo que o navegador escolheu. */
+  const caixaDaLogo = async (img: Locator) => {
+    await expect(img).toBeVisible();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.currentSrc !== "")).toBe(true);
+    const box = await img.boundingBox();
+    const currentSrc = new URL(await img.evaluate((el: HTMLImageElement) => el.currentSrc));
+    return { altura: box!.height, currentSrc: currentSrc.pathname + currentSrc.search, largura: box!.width, x: box!.x };
+  };
+
+  // Na pagina da live: a logo do topo da area.
+  await salaFalsaDoJitsi(page);
+  await page.goto(`/webinarios/${slug}`);
+  await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
+  const daArea = await caixaDaLogo(page.locator("[data-member-topbar] img[alt='Bunker707']"));
+
+  // Entrar: a sala cobre o topo da area, e a logo do cabecalho dela e a mesma (antes, 112 px contra 150).
+  await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  await expect(page).toHaveURL(SALA);
+  const dialogo = page.getByRole("dialog", { name: titulo });
+  const daSala = await caixaDaLogo(dialogo.locator("[data-room-brand] img"));
+  expect(daSala.largura).toBe(daArea.largura);
+  expect(daSala.altura).toBeCloseTo(daArea.altura, 1);
+  expect(daSala.currentSrc).toBe(daArea.currentSrc);
+  expect(daSala.x).toBe(16);
+});
+
 test("o chat e as reacoes sao os nossos: o aceite na primeira mensagem, a mensagem no chat e Palmas pela nossa rota", async ({ page }) => {
   const { dialogo } = await entrarNaSala(page);
 
@@ -268,6 +297,10 @@ test("o tema: Tema claro troca a sala na hora e fica guardado ao recarregar; o i
   await expect(dialogo).toHaveAttribute("data-room-theme", "light");
   await expect(dialogo.getByRole("button", { exact: true, name: tema.escuro })).toBeVisible();
   expect(await page.locator("html").getAttribute("data-room-theme")).toBeNull();
+  // A logo padrao, toda branca, continua a mesma imagem e fica preta sobre o fundo claro (opcao C, docs/31 V2-A58).
+  const logo = dialogo.locator("[data-room-brand] img");
+  await expect(logo).toBeVisible();
+  await expect(logo).toHaveCSS("filter", "brightness(0)");
 
   // Recarregar mantem o claro (guardado no navegador da aluna).
   await page.reload();
