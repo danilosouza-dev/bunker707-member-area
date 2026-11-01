@@ -3,9 +3,9 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // A sala no estilo do YouTube (docs/31; docs/18 §2.2), as regras puras, sem navegador: as teclas dos menus da sala
-// (menuKeyStep e menuOpenKey, o RoomMenu) e o tempo da dica (tooltipStep, a RoomTooltip: aparece em 150 ms, some em 75,
-// o ponteiro pode ir ate ela e o Esc so para ali quando ela estava na tela). As fatias seguintes acrescentam aqui as
-// regras delas.
+// (menuKeyStep e menuOpenKey, o RoomMenu) e o tempo da dica (tooltipStep, a RoomTooltip: aparece em 150 ms, some em 75
+// so quando o ponteiro e o foco do teclado saem, o ponteiro pode ir ate ela e o Esc so para ali quando ela estava na
+// tela). As fatias seguintes acrescentam aqui as regras delas.
 
 const model = await import("../src/components/member/webinars/room/room-layout-model.ts");
 
@@ -87,6 +87,27 @@ test("tooltipStep: aparece so 150 ms depois do ponteiro ou do foco, some em 75, 
   assert.equal(tooltipStep("shown", { kind: "elapsed" }).state, "shown");
   assert.equal(tooltipStep("hidden", { kind: "elapsed" }).state, "hidden");
   assert.equal(tooltipStep("hidden", { kind: "leave" }).state, "hidden");
+});
+
+test("tooltipStep: o ponteiro e o foco do teclado seguram a dica cada um no seu; ela so sai quando os dois saem", () => {
+  const { tooltipStep } = model;
+  const passos = (inicio, eventos) => eventos.reduce((estado, evento) => tooltipStep(estado, evento).state, inicio);
+
+  // O foco do teclado no botao e a dica na tela: o ponteiro passa e sai, e ela fica (WCAG 1.4.13, persistente).
+  assert.deepEqual(tooltipStep("shown", { focused: true, kind: "leave" }), { delayMs: null, state: "shown", stopped: false });
+  assert.equal(passos("hidden", [{ kind: "focus" }, { kind: "elapsed" }, { kind: "enter" }, { focused: true, kind: "leave" }]), "shown");
+  // Ainda esperando para aparecer pelo foco: o ponteiro que passa nao cancela a espera.
+  assert.deepEqual(tooltipStep("showing", { focused: true, kind: "leave" }), { delayMs: 150, state: "showing", stopped: false });
+  // O ponteiro em cima e o foco que sai (o Tab para o proximo): ela fica.
+  assert.deepEqual(tooltipStep("shown", { hovered: true, kind: "blur" }), { delayMs: null, state: "shown", stopped: false });
+  assert.equal(passos("hidden", [{ kind: "enter" }, { kind: "focus" }, { kind: "elapsed" }, { hovered: true, kind: "blur" }]), "shown");
+  // Quando o outro tambem sai, ela sai: 75 ms saindo e some.
+  assert.equal(passos("shown", [{ hovered: true, kind: "blur" }, { focused: false, kind: "leave" }]), "hiding");
+  assert.equal(passos("shown", [{ focused: true, kind: "leave" }, { hovered: false, kind: "blur" }, { kind: "elapsed" }]), "hidden");
+  // Saindo pelo ponteiro e o foco do teclado chega a tempo: ela volta.
+  assert.equal(passos("hiding", [{ kind: "focus" }]), "shown");
+  // O Esc vence os dois: esconde na hora, com o ponteiro em cima e o foco no botao.
+  assert.equal(passos("shown", [{ hovered: true, kind: "blur" }, { kind: "escape" }]), "hidden");
 });
 
 test("tooltipStep: o Esc esconde na hora e so para ali (stopped) quando a dica estava na tela; senao ele segue para a sala", () => {

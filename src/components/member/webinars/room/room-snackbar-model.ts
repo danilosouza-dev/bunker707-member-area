@@ -39,6 +39,25 @@ export function snackbarRemainingMs(input: { durationMs: number; elapsedMs: numb
   return Math.max(0, input.durationMs - Math.max(0, input.elapsedMs));
 }
 
+/** O que segura o tempo do aviso, cada um no seu: o ponteiro em cima e o foco dentro. */
+export type SnackbarHold = { focus: boolean; pointer: boolean };
+
+/** Nada segurando: o tempo conta. */
+export const SNACKBAR_HOLD_FREE: SnackbarHold = { focus: false, pointer: false };
+
+/**
+ * Um passo da pausa do aviso (WCAG 2.2.1): o tempo para com o ponteiro em cima OU o foco dentro, e so volta a contar
+ * quando os dois saem. `change` e o que mudou (o ponteiro entrou ou saiu, o foco entrou ou saiu, ou o foco conferido na
+ * tela depois que a caixa trocou ou saiu, levando junto o botao focado). `paused` e o novo valor so quando ele muda
+ * (null: nada a dizer a quem mostra; o foco que anda do texto para a acao, ou o ponteiro que sai com o foco dentro).
+ */
+export function snackbarHoldStep(hold: SnackbarHold, change: Partial<SnackbarHold>): { hold: SnackbarHold; paused: boolean | null } {
+  const next = { ...hold, ...change };
+  const before = hold.focus || hold.pointer;
+  const after = next.focus || next.pointer;
+  return { hold: next, paused: before === after ? null : after };
+}
+
 /**
  * Onde o aviso fica: no palco (`stage`), preso ao pe da tela (`screen`), logo acima do campo da folha aberta (`sheet`)
  * ou no pe da coluna do painel ao lado (`side`). A classe de cada lugar e de quem mostra o aviso.

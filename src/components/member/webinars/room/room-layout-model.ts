@@ -376,18 +376,27 @@ export function menuOpenKey(key: string): boolean {
 export type TooltipState = "hidden" | "hiding" | "shown" | "showing";
 
 /**
- * O que chega a dica: o ponteiro entra ou sai (`toTooltip`: ele foi para a propria dica), o foco do teclado entra ou
- * sai, o Esc, e o fim da espera (`elapsed`, depois do tempo que tooltipStep devolveu).
+ * O que chega a dica: o ponteiro entra ou sai (`toTooltip`: ele foi para a propria dica; `focused`: o foco do teclado
+ * continua no botao), o foco do teclado entra ou sai (`hovered`: o ponteiro continua em cima), o Esc, e o fim da espera
+ * (`elapsed`, depois do tempo que tooltipStep devolveu).
  */
-export type TooltipEvent = { kind: "blur" } | { kind: "elapsed" } | { kind: "enter" } | { kind: "escape" } | { kind: "focus" } | { kind: "leave"; toTooltip?: boolean };
+export type TooltipEvent =
+  | { hovered?: boolean; kind: "blur" }
+  | { kind: "elapsed" }
+  | { kind: "enter" }
+  | { kind: "escape" }
+  | { kind: "focus" }
+  | { focused?: boolean; kind: "leave"; toTooltip?: boolean };
 
 /** Os tempos da dica do YouTube: aparece 150 ms depois do ponteiro ou do foco e some em 75 ms. */
 export const TOOLTIP_DELAYS_MS = { hide: 75, show: 150 } as const;
 
 /**
  * Um passo da dica da sala (o tooltip do YouTube; WCAG 1.4.13). O ponteiro ou o foco do teclado a chamam, e ela so
- * aparece depois de 150 ms (`showing` ainda nao esta na tela); quando eles saem, ela fica 75 ms saindo, e quem volta
- * nesse tempo a mantem. O ponteiro que vai do botao para a propria dica nao a esconde (da para ler um texto comprido).
+ * aparece depois de 150 ms (`showing` ainda nao esta na tela); so quando os dois saem ela fica 75 ms saindo, e quem
+ * volta nesse tempo a mantem: o ponteiro que passa e sai nao a esconde com o foco do teclado ainda no botao, nem o foco
+ * que sai com o ponteiro ainda em cima (WCAG 1.4.13, persistente). O ponteiro que vai do botao para a propria dica
+ * tambem nao a esconde (da para ler um texto comprido).
  * O Esc a esconde na hora e so para ali (`stopped`: o Esc nao chega a sala, que perguntaria se quer sair) quando ela
  * estava na tela. `delayMs` e a espera ate o proximo `elapsed` (null: nenhuma).
  */
@@ -405,7 +414,8 @@ function tooltipNext(state: TooltipState, event: TooltipEvent): TooltipState {
       return state === "hidden" ? "showing" : state === "hiding" ? "shown" : state;
     case "leave":
     case "blur":
-      if (event.kind === "leave" && event.toTooltip) {
+      // O outro (o foco no botao, o ponteiro em cima ou sobre a propria dica) ainda a segura.
+      if (event.kind === "leave" ? event.toTooltip || event.focused : event.hovered) {
         return state;
       }
       return state === "showing" ? "hidden" : state === "shown" ? "hiding" : state;

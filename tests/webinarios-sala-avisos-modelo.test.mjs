@@ -4,8 +4,8 @@ import "./support/transpile-tsx.mjs";
 
 // O aviso da sala no estilo do YouTube (o snackbar invertido; docs/31; docs/18 §2.2), as regras puras, sem navegador:
 // um aviso de cada vez (o novo troca, o mesmo tipo so reinicia o tempo), o tempo que falta com a pausa do ponteiro e do
-// foco (WCAG 2.2.1) e o lugar do aviso no computador, no celular em pe e deitado. Quem liga o aviso (a sala e o
-// console) acrescenta aqui as regras dele.
+// foco (WCAG 2.2.1), que so acaba quando os dois saem, e o lugar do aviso no computador, no celular em pe e deitado.
+// Quem liga o aviso (a sala e o console) acrescenta aqui as regras dele.
 
 const model = await import("../src/components/member/webinars/room/room-snackbar-model.ts");
 
@@ -45,6 +45,43 @@ test("snackbarRemainingMs: conta so fora da pausa, para com o ponteiro ou o foco
   assert.equal(model.snackbarRemainingMs({ durationMs: seis, elapsedMs: 6000, paused: false }), 0);
   assert.equal(model.snackbarRemainingMs({ durationMs: seis, elapsedMs: 8200, paused: false }), 0);
   assert.equal(model.snackbarRemainingMs({ durationMs: seis, elapsedMs: -50, paused: false }), 6000);
+});
+
+test("snackbarHoldStep: o ponteiro em cima ou o foco dentro param o tempo; ele so volta a contar quando os dois saem, e quem mostra so ouve a mudanca", () => {
+  const { SNACKBAR_HOLD_FREE, snackbarHoldStep } = model;
+  assert.deepEqual(SNACKBAR_HOLD_FREE, { focus: false, pointer: false });
+  /** Aplica as mudancas em ordem e devolve o que quem mostra ouviu (so as mudancas do pausado) e onde parou. */
+  const sequencia = (mudancas, inicio = SNACKBAR_HOLD_FREE) => {
+    const ouviu = [];
+    let hold = inicio;
+    for (const mudanca of mudancas) {
+      const passo = snackbarHoldStep(hold, mudanca);
+      hold = passo.hold;
+      if (passo.paused !== null) {
+        ouviu.push(passo.paused ? "pausa" : "conta");
+      }
+    }
+    return { hold, ouviu };
+  };
+
+  // Cada um sozinho: entra e sai.
+  assert.deepEqual(sequencia([{ pointer: true }, { pointer: false }]).ouviu, ["pausa", "conta"]);
+  assert.deepEqual(sequencia([{ focus: true }, { focus: false }]).ouviu, ["pausa", "conta"]);
+  // O foco na acao, o ponteiro entra e sai: o foco continua dentro, nada volta a contar; so a saida do foco conta.
+  assert.deepEqual(sequencia([{ focus: true }, { pointer: true }, { pointer: false }]).ouviu, ["pausa"]);
+  assert.deepEqual(sequencia([{ focus: true }, { pointer: true }, { pointer: false }, { focus: false }]).ouviu, ["pausa", "conta"]);
+  // O ponteiro em cima e o foco que sai: continua parado ate o ponteiro sair.
+  assert.deepEqual(sequencia([{ pointer: true }, { focus: true }, { focus: false }]).ouviu, ["pausa"]);
+  assert.deepEqual(sequencia([{ pointer: true }, { focus: true }, { focus: false }, { pointer: false }]).ouviu, ["pausa", "conta"]);
+  // O foco que anda do texto para a acao (outro focusin) e o mesmo valor de novo nao repetem nada.
+  assert.deepEqual(sequencia([{ focus: true }, { focus: true }, { pointer: false }]).ouviu, ["pausa"]);
+  // A caixa trocou e levou o botao focado: o foco conferido na tela (fora) volta a contar, se o ponteiro nao esta em cima.
+  assert.deepEqual(sequencia([{ focus: false }], { focus: true, pointer: false }), { hold: SNACKBAR_HOLD_FREE, ouviu: ["conta"] });
+  assert.deepEqual(sequencia([{ focus: false }], { focus: true, pointer: true }).ouviu, []);
+  // O passo nao muda o estado de quem chamou.
+  const antes = { focus: true, pointer: false };
+  snackbarHoldStep(antes, { focus: false });
+  assert.deepEqual(antes, { focus: true, pointer: false });
 });
 
 test("snackbarPlacement: no palco a partir de lg; em pe, nunca sobre o video (acima do campo da folha aberta ou preso ao pe da tela); deitado, no pe do painel ao lado ou no palco", () => {

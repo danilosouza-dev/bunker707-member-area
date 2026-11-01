@@ -10,7 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 // RoomIconButton. O clique do desligado com motivo e conferido pelo elemento de React: chama o onBlocked, nunca o
 // onClick. O console continua com as pecas de hoje (o padrao do RoomIconButton e o contador com o mesmo HTML).
 // Y3: o menu (RoomMenu, que a Visão do vídeo passa a usar), a dica (RoomTooltip, que o servidor nunca desenha) e o aviso
-// invertido (RoomSnackbar, ainda sem ligar); a escolha no menu e a acao e a pausa do aviso pelos elementos de React.
+// invertido (RoomSnackbar, ainda sem ligar); a escolha no menu e a acao e a pausa do aviso (o ponteiro e o foco, cada um
+// no seu) pelos elementos de React; a caixa da dica (RoomTooltipBubble) pelo HTML dela.
 
 const pill = await import("../src/components/member/webinars/room/room-pill.tsx");
 const chipBar = await import("../src/components/member/webinars/room/room-chip-bar.tsx");
@@ -456,6 +457,30 @@ test("a dica (RoomTooltip): o HTML do servidor tem so o envoltorio e o botao; a 
   assert.equal(longa.match(/Muitos alunos/g)?.length, 1, "o motivo so uma vez: no sr-only do aria-describedby");
 });
 
+test("a caixa da dica (RoomTooltipBubble): o cinza da dica com o recuo de 8, acima ou abaixo; uma linha, e o motivo comprido corta na terceira linha num texto de dentro, nunca na caixa do recuo", () => {
+  const curta = render(tooltipModule.RoomTooltipBubble, { hiding: false, label: "Tela cheia", side: "above", wide: false });
+  assert.match(curta, /^<span aria-hidden="true" class="[^"]*" data-room-tooltip="">Tela cheia<\/span>$/);
+  const caixa = classesDe(abertura(curta, "span"));
+  assert.deepEqual(
+    temTodas(caixa, ["absolute", "z-50", "rounded-[4px]", "bg-room-tooltip-bg", "p-2", "text-xs", "leading-[18px]", "text-room-tooltip-fg", "bottom-full", "mb-2", "whitespace-nowrap", "opacity-100", "motion-reduce:transition-none"]),
+    [],
+    caixa.join(" ")
+  );
+  const abaixo = classesDe(abertura(render(tooltipModule.RoomTooltipBubble, { hiding: true, label: "Ordenar", side: "below", wide: false }), "span"));
+  assert.deepEqual(temTodas(abaixo, ["top-full", "mt-2", "opacity-0"]), []);
+
+  const motivo = "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.";
+  const larga = render(tooltipModule.RoomTooltipBubble, { hiding: false, label: motivo, side: "above", wide: true });
+  const fora = classesDe(abertura(larga, "span"));
+  assert.deepEqual(temTodas(fora, ["p-2", "max-w-[280px]", "whitespace-normal"]), []);
+  // O corte das 3 linhas vale na borda do recuo: na caixa com p-2, o topo da quarta linha apareceria embaixo.
+  assert.ok(!fora.some((classe) => classe.startsWith("line-clamp")), fora.join(" "));
+  const dentro = /<span aria-hidden="true"[^>]*><span class="([^"]*)">([^<]*)<\/span><\/span>$/.exec(larga);
+  assert.ok(dentro, larga);
+  assert.deepEqual(dentro[1].split(" "), ["line-clamp-3"]);
+  assert.equal(dentro[2], motivo);
+});
+
 test("o aviso (RoomSnackbar): a regiao polida sempre montada e vazia sem aviso; com aviso, a caixa invertida, o texto com o live-notice, a acao como pilula de texto com o nome exato, sem icone nem X", () => {
   for (const placement of ["stage", "screen", "sheet", "side"]) {
     const vazio = render(snackModule.RoomSnackbar, { className: "absolute bottom-2 left-2", placement, snack: null });
@@ -498,15 +523,34 @@ test("o aviso (RoomSnackbar): a regiao polida sempre montada e vazia sem aviso; 
   assert.ok(comAcao.indexOf('data-testid="live-notice"') < comAcao.indexOf("<button"), "a acao a direita do texto");
 });
 
-test("o aviso: a acao chama onAction com a chave dela; o ponteiro em cima e o foco dentro pausam o tempo, e a saida deles volta a contar", () => {
+/** Desenha o aviso dentro de uma renderizacao (os ganchos precisam dela) e devolve a arvore de React, com os ouvintes. */
+function avisoComArvore(registro) {
+  let arvore = null;
+  function Captura() {
+    arvore = snackModule.RoomSnackbar({
+      onAction: (key) => registro.push(`acao ${key}`),
+      onPauseChange: (paused) => registro.push(paused ? "pausa" : "conta"),
+      placement: "stage",
+      snack: { action: { key: "settings", label: WEBINAR_COPY.aoVivo.configuracoes }, key: "no-audio", text: "Não está chegando som do seu microfone." }
+    });
+    return arvore;
+  }
+  renderToStaticMarkup(createElement(Captura));
+  const { props } = arvore;
+  return {
+    /** O foco sai do aviso (para fora) ou anda dentro dele (do texto para a acao). */
+    blur: (paraFora) => props.onBlur({ currentTarget: { contains: () => !paraFora }, relatedTarget: paraFora ? null : {} }),
+    focus: () => props.onFocus(),
+    pointerEnter: () => props.onPointerEnter(),
+    pointerLeave: () => props.onPointerLeave(),
+    props
+  };
+}
+
+test("o aviso: a acao chama onAction com a chave dela; o ponteiro em cima e o foco dentro pausam o tempo, e a saida de cada um sozinho volta a contar", () => {
   const registro = [];
-  const arvore = snackModule.RoomSnackbar({
-    onAction: (key) => registro.push(`acao ${key}`),
-    onPauseChange: (paused) => registro.push(paused ? "pausa" : "conta"),
-    placement: "stage",
-    snack: { action: { key: "settings", label: WEBINAR_COPY.aoVivo.configuracoes }, key: "no-audio", text: "Não está chegando som do seu microfone." }
-  });
-  const pilula = [arvore.props.children.props.children].flat().find((filho) => filho?.type === pill.RoomPill);
+  const aviso = avisoComArvore(registro);
+  const pilula = [aviso.props.children.props.children].flat().find((filho) => filho?.type === pill.RoomPill);
   assert.ok(pilula, "a acao e uma RoomPill");
   assert.equal(pilula.props.tone, "text");
   assert.equal(pilula.props.size ?? "m", "m");
@@ -514,11 +558,34 @@ test("o aviso: a acao chama onAction com a chave dela; o ponteiro em cima e o fo
   assert.deepEqual(registro, ["acao settings"]);
 
   registro.length = 0;
-  arvore.props.onPointerEnter();
-  arvore.props.onPointerLeave();
-  arvore.props.onFocus();
+  aviso.pointerEnter();
+  aviso.pointerLeave();
+  aviso.focus();
   // O foco que passa do texto para a acao continua dentro: nada muda.
-  arvore.props.onBlur({ currentTarget: { contains: () => true }, relatedTarget: {} });
-  arvore.props.onBlur({ currentTarget: { contains: () => false }, relatedTarget: null });
+  aviso.blur(false);
+  aviso.focus();
+  aviso.blur(true);
   assert.deepEqual(registro, ["pausa", "conta", "pausa", "conta"]);
+});
+
+test("o aviso: com o foco dentro, o ponteiro que entra e sai nao volta a contar; com o ponteiro em cima, o foco que sai tambem nao; so a saida dos dois conta (WCAG 2.2.1)", () => {
+  // O teclado parado na acao e o ponteiro que passa por cima: o tempo continua parado ate o foco sair.
+  const registro = [];
+  const comFoco = avisoComArvore(registro);
+  comFoco.focus();
+  comFoco.pointerEnter();
+  comFoco.pointerLeave();
+  assert.deepEqual(registro, ["pausa"], "o foco continua na acao: nenhum conta");
+  comFoco.blur(true);
+  assert.deepEqual(registro, ["pausa", "conta"]);
+
+  // O inverso: o ponteiro em cima e o foco que entra e sai.
+  registro.length = 0;
+  const comPonteiro = avisoComArvore(registro);
+  comPonteiro.pointerEnter();
+  comPonteiro.focus();
+  comPonteiro.blur(true);
+  assert.deepEqual(registro, ["pausa"], "o ponteiro continua em cima: nenhum conta");
+  comPonteiro.pointerLeave();
+  assert.deepEqual(registro, ["pausa", "conta"]);
 });
