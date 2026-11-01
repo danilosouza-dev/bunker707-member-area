@@ -778,7 +778,7 @@ quebra.
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes, na ordem dos
 nomes (a `202610300001` e depois as seis), antes de trocar o app. A fase 4 nao cria servidor novo.
 
-### 9.11 Webinarios redesign V2, fase 2: migracoes `202611010001` e `202611010002` antes do merge (01/11/2026)
+### 9.11 Webinarios redesign V2, fase 2: migracao `202611010001` aplicada na nuvem de teste (01/11/2026); `202611010002` na fase 2b
 
 A fase 2 do redesign V2 (`docs/31`) tem duas migracoes. Elas vem **depois** da `202610300007` (§9.10), na ordem, e
 nenhuma muda as de antes (a guarda `tests/webinarios-v5.guard.test.mjs` prende o hash acumulado das 63 anteriores e o
@@ -794,8 +794,9 @@ spike da tela, e entra nesta secao quando for escrita.
 resposta escrita de quem e co-apresentador do webinario (`webinar_presenters` com o prazo valendo). Sem a migracao, esse
 insert da `23514` no check antigo e a mensagem do co-apresentador falha; o Apresentador, a Equipe, o aluno e o resto do
 app seguem. O aviso de migracao pendente aponta `WEBINARS_MIGRATION = "202611010001"`, a mais nova (aplicar ate ela
-inclui todas as de antes), e o co-apresentador tem a propria constante, `WEBINARS_COHOST_MIGRATION`. A migracao sozinha
-nao atrapalha o app de antes: o check novo aceita tudo que ele grava.
+inclui todas as de antes). O co-apresentador nao tem constante propria: o insert dele sem a migracao chega como o erro
+comum da acao, nunca como o aviso de migracao pendente (por isso a migracao vem antes do merge). A migracao sozinha nao
+atrapalha o app de antes: o check novo aceita tudo que ele grava.
 
 **Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o nome do check foi conferido antes de escrever o arquivo, so lendo:
 `select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.webinar_chat_messages'::regclass
@@ -819,9 +820,13 @@ select conname, convalidated, pg_get_constraintdef(oid) from pg_constraint
 
 A idempotencia se confere rodando a secao 1 de novo (sem erro, nada muda). Estado em 01/11/2026: escrita e conferida
 num Postgres 16 local (o arquivo inteiro duas vezes numa transacao so, as secoes uma a uma com o `lock_timeout`, o
-insert com `co_host` aceito e um papel fora da lista recusado com `23514`); **ainda nao aplicada na nuvem de teste**. Ela
-e aplicada antes do merge da PR da fase 2a, e este paragrafo ganha a data. Se a migracao mudar antes disso, atualizar
-junto o hash da guarda.
+insert com `co_host` aceito e um papel fora da lista recusado com `23514`) e **aplicada na nuvem de teste em
+01/11/2026**, antes do merge da PR da fase 2a: as duas secoes, uma por chamada; a conferencia do cabecalho deu uma linha,
+`webinar_chat_messages_role_v5`, com `co_host` e `convalidated = true`; e a versao `202611010001`
+(`webinars_v5_coapresentador`) ficou gravada em `supabase_migrations.schema_migrations`. Se o arquivo mudar depois
+disso, ele nao roda de novo na nuvem de teste: a mudanca vira uma migracao nova, e a guarda (o hash) avisa.
 
-**Producao (Hetzner)**: nada manual. A producao precisa das duas antes da promocao `dev` -> `main` que levar o codigo de
-cada uma: o `deploy-membros` roda o `migrate.sh` antes de recriar o app (`infra/scripts/deploy.sh`), na ordem dos nomes.
+**Producao (Hetzner)**: nada manual, mas na ordem certa. A producao precisa da `202611010001` antes da promocao `dev` ->
+`main` que levar o codigo da fase 2a (e da `202611010002` antes da que levar o da fase 2b): o `deploy-membros` roda o
+`migrate.sh` antes de recriar o app (`infra/scripts/deploy.sh`), na ordem dos nomes, entao basta a promocao passar pelo
+`deploy-membros`. Na producao, nenhuma das duas ainda.
