@@ -79,7 +79,7 @@ import { ConsoleTopBar, type ConsolePolling } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
 import { LiveHands } from "./live-hands";
-import { LivePersonMenu, type PersonAction } from "./live-participants";
+import { LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
@@ -519,20 +519,20 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     }
   }
 
+  // Os itens da pessoa no ⋯ de uma mensagem da turma (Silenciar, Remover, Banir); nada para a equipe e para quem o
+  // retrato nao liga. Sem o participante (participantId nulo), os itens da sala ficam de fora.
   function chatPersonMenu(message: ConsoleMessage) {
     const person = message.authorUserId ? (livePeople.get(message.authorUserId) ?? null) : null;
 
-    if (!person || person.staff) {
+    if (!person || person.staff || !livePersonMenuGroups({ controls: room.controls, participantId: null, person }).any) {
       return null;
     }
 
     return (
-      <LivePersonMenu
-        busy={busyKey === `person:${person.userId}`}
+      <LivePersonMenuItems
         canPublish={permissions.canPublish}
         controls={room.controls}
         joined={room.joined}
-        name={person.displayName}
         onAction={(action) => onPersonAction(person, person.participantId, action)}
         participantId={null}
         person={person}
@@ -781,6 +781,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                     onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
                     personMenu={live ? chatPersonMenu : null}
                     pinnedMessageId={snapshot.pinnedMessageId}
+                    questions={snapshot.questions}
                     session={session}
                   />
                 ),

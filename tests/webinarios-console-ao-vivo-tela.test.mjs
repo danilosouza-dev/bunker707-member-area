@@ -440,16 +440,19 @@ test("Mãos e Pessoas (docs/31 V2-15): as abas com o numero (Mãos 0), vazias, o
   assert.match(textOf(barred), /Desfazer: Removido da sala/);
   assert.match(textOf(barred), new RegExp(escape(copy.desfazerBanimento)));
 
-  const chat = markup.slice(markup.indexOf('data-console-message="m-ana"'), markup.indexOf("</li>", markup.indexOf('data-console-message="m-ana"')));
-  assert.match(chat, /aria-label="Mais ações para Ana M\."/);
+  // O ⋯ de cada mensagem da turma (docs/31 V2-15) traz os itens da pessoa, sem os da sala (a mensagem nao diz o participante).
+  const chatItem = (html, id) => html.slice(html.lastIndexOf("<li", html.indexOf(`data-room-message="${id}"`)), html.indexOf("</li>", html.indexOf(`data-room-message="${id}"`)));
+  const chat = chatItem(markup, "m-ana");
+  assert.match(chat, new RegExp(`aria-label="${escape(consoleV2Copy.chat.maisAcoes("Ana M."))}"`));
   for (const label of ["Silenciar 5 min", "Silenciar 15 min", "Silenciar 60 min", "Silenciar até o fim", copy.removerDaSala, copy.banir]) {
     assert.match(textOf(chat), new RegExp(escape(label)), label);
   }
-  const equipe = markup.slice(markup.indexOf('data-console-message="m-equipe"'), markup.indexOf("</li>", markup.indexOf('data-console-message="m-equipe"')));
+  assert.doesNotMatch(textOf(chat), new RegExp(`${escape(copy.destacar)}|${escape(copy.convidarPalco)}|${escape(copy.fecharCamera)}`), "sem os itens da sala");
+  const equipe = chatItem(markup, "m-equipe");
   assert.doesNotMatch(equipe, /Mais ações/, "a equipe nao tem o ⋯ de moderacao");
 
   const semPublicar = render(snapshot(), { permissions: { canPublish: false, canWrite: true } });
-  const banir = semPublicar.slice(semPublicar.indexOf('data-console-message="m-ana"'));
+  const banir = chatItem(semPublicar, "m-ana");
   assert.match(banir, /<div aria-disabled="true" data-menu-item="" role="menuitem">Banir<\/div>/, "Banir so com messaging.publish");
 });
 

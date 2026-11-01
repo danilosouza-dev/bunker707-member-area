@@ -130,13 +130,68 @@ test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentua
 
 test("acoes de uma mensagem: liberar so a pendente, fixar so a liberada e nao fixada, promover so a da turma com aceite e ainda fora da linha mestre", () => {
   const message = (extra) => ({ approved: true, authorUserId: "u1", body: "oi", createdAt: "", displayName: "Ana M.", id: "m1", kind: "message", master: false, offsetMs: 0, pinnedAt: null, promotable: true, replyToId: null, role: "student", scriptItemId: null, sessionId: "s1", source: "audience", webinarId: "w1", ...extra });
-  assert.deepEqual(console_.messageActions(message({}), null), { approve: false, delete: true, pin: true, promote: true, unpin: false });
-  assert.deepEqual(console_.messageActions(message({ approved: false }), null), { approve: true, delete: true, pin: false, promote: false, unpin: false });
-  assert.deepEqual(console_.messageActions(message({}), "m1"), { approve: false, delete: true, pin: false, promote: true, unpin: true });
+  assert.deepEqual(console_.messageActions(message({}), null), { approve: false, delete: true, pin: true, promote: true, question: true, unpin: false });
+  assert.deepEqual(console_.messageActions(message({ approved: false }), null), { approve: true, delete: true, pin: false, promote: false, question: true, unpin: false });
+  assert.deepEqual(console_.messageActions(message({}), "m1"), { approve: false, delete: true, pin: false, promote: true, question: true, unpin: true });
   assert.equal(console_.messageActions(message({ promotable: false }), null).promote, false, "sem aceite nao promove");
   assert.equal(console_.messageActions(message({ master: true, source: "original" }), null).promote, false);
   assert.equal(console_.messageActions(message({ role: "team", source: "team" }), null).promote, false);
   assert.equal(console_.messageActions(message({ source: "scripted" }), null).promote, false);
+});
+
+test("Virar pergunta (docs/31 V2-15): so a mensagem comum de um aluno da turma, com autor e ainda sem pergunta; a pergunta pelo chat moderado, a equipe, o roteiro e o Assistente, nunca", () => {
+  const message = (extra) => ({ approved: true, authorUserId: "u1", body: "oi", createdAt: "", displayName: "Ana M.", id: "m1", kind: "message", master: false, offsetMs: 0, pinnedAt: null, promotable: true, replyToId: null, role: "student", scriptItemId: null, sessionId: "s1", source: "audience", webinarId: "w1", ...extra });
+  const question = (extra, options) => console_.messageActions(message(extra), null, options).question;
+  assert.equal(question({}), true);
+  assert.equal(question({ approved: false }), true, "a pendente tambem (o Virar pergunta libera junto)");
+  assert.equal(question({}, { hasQuestion: false }), true);
+  assert.equal(question({}, { hasQuestion: true }), false, "a que ja virou pergunta");
+  assert.equal(question({ kind: "question" }), false, "a pergunta pelo chat moderado: o Liberar ja a abre");
+  assert.equal(question({ approved: false, kind: "question" }), false);
+  assert.equal(question({ kind: "answer" }), false);
+  assert.equal(question({ authorUserId: null }), false, "sem autor nao ha pergunta (ela pede o aluno)");
+  assert.equal(question({ role: "team", source: "team" }), false, "a equipe");
+  assert.equal(question({ authorUserId: null, scriptItemId: "i1", source: "scripted" }), false, "o roteiro");
+  assert.equal(question({ authorUserId: null, kind: "answer", role: "ai", source: "ai" }), false, "o Assistente");
+  assert.equal(question({ master: true, source: "original" }), false, "a linha mestre de outra turma");
+});
+
+test("o chat do console em duas partes: as pendentes saem da lista, da mais velha para a mais nova (sem hora, depois, na ordem); a lista so com as liberadas, na ordem do retrato", () => {
+  const at = (minute) => new Date(T0 + minute * MIN).toISOString();
+  const messages = [
+    { approved: true, createdAt: at(1), id: "a" },
+    { approved: false, createdAt: at(5), id: "p-nova" },
+    { approved: false, createdAt: "", id: "p-sem-hora" },
+    { approved: true, createdAt: at(0), id: "b" },
+    { approved: false, createdAt: at(2), id: "p-velha" },
+    { approved: false, createdAt: at(2), id: "p-mesma-hora" },
+    { approved: false, createdAt: "", id: "p-sem-hora-2" }
+  ];
+  const { log, pending } = console_.consoleChatQueue(messages);
+  assert.deepEqual(log.map((message) => message.id), ["a", "b"], "a ordem do retrato, sem as pendentes");
+  assert.deepEqual(pending.map((message) => message.id), ["p-velha", "p-mesma-hora", "p-nova", "p-sem-hora", "p-sem-hora-2"]);
+  assert.deepEqual(console_.consoleChatQueue([]), { log: [], pending: [] });
+});
+
+test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela hora gravada, a da gravada pela hora marcada mais o offset, nenhuma no Replay; o papel como a sala e a origem so para a equipe", () => {
+  // T0 e 20:00 em Sao Paulo; a mensagem foi gravada as 20:42 e esta no minuto 1 do video.
+  const message = (extra) => ({ createdAt: new Date(T0 + 42 * MIN).toISOString(), offsetMs: MIN, role: "student", source: "audience", ...extra });
+  const meta = (kind, extra) => console_.consoleMessageMeta({ kind, message: message(extra), scheduledAt: new Date(T0).toISOString() });
+  assert.deepEqual(meta("live", {}), { origin: null, role: null, time: "20:42" }, "na live, a hora gravada (o offset nao serve)");
+  assert.deepEqual(meta("simulated", {}), { origin: null, role: null, time: "20:01" }, "na gravada, a hora marcada mais o offset");
+  assert.deepEqual(meta("replay", {}), { origin: null, role: null, time: "" }, "no Replay, nenhuma hora");
+  assert.equal(console_.consoleMessageMeta({ kind: "simulated", message: message({}), scheduledAt: "" }).time, "", "sem a hora marcada, nenhuma");
+  assert.equal(meta("live", { createdAt: "" }).time, "");
+
+  assert.equal(meta("live", { role: "host", source: "team" }).role, "Apresentador");
+  assert.equal(meta("live", { role: "team", source: "team" }).role, "Equipe");
+  assert.equal(meta("live", { role: "ai", source: "ai" }).role, "Assistente");
+  assert.equal(meta("live", { role: "guest" }).role, null, "o convidado sem papel, como na sala");
+  // A origem: o roteiro (com o papel da persona) e o chat original de outra turma; a turma de hoje e a equipe, nenhuma.
+  assert.deepEqual(meta("simulated", { source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
+  assert.deepEqual(meta("simulated", { role: "team", source: "scripted" }), { origin: "Roteiro", role: "Equipe", time: "20:01" });
+  assert.equal(meta("simulated", { source: "original" }).origin, "Chat original");
+  assert.equal(meta("simulated", { role: "team", source: "team" }).origin, null);
 });
 
 test("quem pode escrever e o modo lento: as opcoes e a ida e volta das escolhas", () => {

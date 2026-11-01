@@ -293,40 +293,139 @@ test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor
   assert.doesNotMatch(agendadaMarkup, /data-console-on-air=""/, "sem o ponto com a sessao escolhida fora do ar");
 });
 
-test("chat: pendente com Liberar, promover so com o aceite (sem ele, o motivo), a fixada com Desafixar, Apagar em todas, selos de origem, quem pode escrever e modo lento", () => {
+/** O item de uma mensagem no chat do console (o card da pendente ou o balao da lista), do <li> ao </li>. */
+const chatItem = (markup, id) => {
+  const at = markup.lastIndexOf("<li", markup.indexOf(`data-room-message="${id}"`));
+  assert.ok(at >= 0, `a mensagem ${id} no chat`);
+  return markup.slice(at, markup.indexOf("</li>", at) + 5);
+};
+/** A linha de baixo do balao: so o texto, de "nome · papel · hora" ate as acoes. */
+const chatMeta = (item) => {
+  const actions = item.indexOf("data-console-message-actions");
+  return textOf(item.slice(item.indexOf("data-room-message-meta"), actions < 0 ? undefined : item.lastIndexOf("<", actions)).replace(/^[^>]*>/, ""));
+};
+/** O <select> de um seletor compacto do cabecalho, da tag ao </select>. */
+const selectOf = (markup, id) => markup.slice(markup.lastIndexOf("<select", markup.indexOf(`id="${id}"`)), markup.indexOf("</select>", markup.indexOf(`id="${id}"`)));
+
+test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compactos com o rotulo visivel (o modo lento desligado com o chat desligado) e '1 aguardando'; a pendente num card ambar com Liberar, Recusar e Virar pergunta; a lista em role=log so com as liberadas", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
-  const text = textOf(markup);
-  const messageBlock = (id) => markup.slice(markup.indexOf(`data-console-message="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-console-message="${id}"`)));
+  const chat = pane(markup, "tab", "chat");
 
-  assert.equal(count(markup, /data-console-message=/g), 4);
-  const pendente = textOf(messageBlock("m-pendente"));
-  assert.match(pendente, /Na moderação/);
-  assert.match(pendente, /Liberar/);
-  assert.doesNotMatch(pendente, /Aprovar para as próximas turmas/, "promove depois de liberar");
-  assert.doesNotMatch(pendente, /Fixar/, "fixa depois de liberar");
+  // Os seletores compactos: o rotulo visivel ligado ao <select> nativo, os mesmos valores de antes, sem as pilulas.
+  assert.match(chat, /<label[^>]*for="console-chat-mode">Quem escreve:<\/label><select(?=[^>]*id="console-chat-mode")[^>]*>/);
+  assert.match(chat, /<label[^>]*for="console-slow-mode">Modo lento:<\/label><select(?=[^>]*id="console-slow-mode")[^>]*>/);
+  assert.deepEqual(Array.from(selectOf(chat, "console-chat-mode").matchAll(/<option value="([^"]+)"[^>]*>([^<]+)</g)).map((match) => `${match[1]}=${match[2]}`), ["open=Aberto", "moderated=Moderado", "team_only=Só a equipe", "off=Desligado"]);
+  assert.match(selectOf(chat, "console-chat-mode"), /<option value="open" selected="">/);
+  assert.deepEqual(Array.from(selectOf(chat, "console-slow-mode").matchAll(/<option value="([^"]+)"/g)).map((match) => match[1]), ["off", "10", "20", "30", "60"]);
+  assert.doesNotMatch(selectOf(chat, "console-slow-mode"), /^<select[^>]*disabled=""/);
+  assert.doesNotMatch(chat, /role="radiogroup"|Quem pode escrever/, "sem as pilulas nem o rotulo de antes");
+  const desligado = pane(render({ sessions, snapshot: snapshot({ session: session({ chatMode: "off" }) }), webinar }), "tab", "chat");
+  assert.match(selectOf(desligado, "console-chat-mode"), /<option value="off" selected="">/);
+  assert.match(selectOf(desligado, "console-slow-mode"), /^<select[^>]*disabled=""/, "o modo lento desligado com o chat desligado");
+  assert.match(chat, /data-console-chat-waiting="">1 aguardando</, "quantas esperam a equipe, no cabecalho");
 
-  const semAceite = textOf(messageBlock("m-sem-aceite"));
-  assert.match(semAceite, /Sem consentimento do aluno/);
-  assert.doesNotMatch(semAceite, /Aprovar para as próximas turmas/);
-  assert.match(semAceite, /Fixar/);
+  // A pendente sai da lista e vira o card ambar no topo: "Na moderação · nome · hora", o texto e os tres botoes.
+  const pendente = chatItem(chat, "m-pendente");
+  assert.match(pendente, /^<li class="[^"]*\bbg-room-warn-bg\b[^"]*" data-console-pending=""/);
+  assert.match(pendente, /<p class="[^"]*\btext-room-warn-fg\b[^"]*">Na moderação · Ana M\. · 20:01<\/p>/, "a hora da gravada: a hora marcada mais o offset");
+  assert.deepEqual(Array.from(pendente.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
+  assert.ok(chat.indexOf("data-console-chat-queue") < chat.indexOf('role="log"'), "o card antes da lista");
+  assert.ok(chat.indexOf('data-room-message="m-pendente"') < chat.indexOf('role="log"'), "a pendente fora da lista");
 
-  const equipe = textOf(messageBlock("m-equipe"));
-  assert.match(equipe, /Apresentador/);
-  assert.match(equipe, /Fixada/);
-  assert.match(equipe, /Desafixar/);
-  assert.doesNotMatch(equipe, /Aprovar para as próximas turmas/);
+  // Mais velha primeiro; a pergunta que o aluno fez pelo chat moderado fica so com Liberar e Recusar (o Liberar ja a abre).
+  const fila = pane(
+    render({ sessions, snapshot: snapshot({ messages: [message({ approved: false, body: "Nova", createdAt: new Date(NOW - MIN).toISOString(), id: "m-nova" }), message({ approved: false, body: "Vai ter replay?", createdAt: new Date(NOW - 3 * MIN).toISOString(), id: "m-pergunta", kind: "question" })] }), webinar }),
+    "tab",
+    "chat"
+  );
+  assert.deepEqual(Array.from(fila.matchAll(/data-console-pending="" data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-pergunta", "m-nova"]);
+  assert.match(fila, /data-console-chat-waiting="">2 aguardando</);
+  assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M."]);
+  assert.match(fila, /<li[^>]*>Nenhuma mensagem ainda\.<\/li>/, "so pendentes: a lista vazia");
 
-  const roteiro = textOf(messageBlock("m-roteiro"));
-  assert.match(roteiro, /Roteiro/);
-  assert.equal(count(markup, /Apagar: /g), 4, "Apagar em todas");
-  assert.match(text, /Quem pode escrever/);
-  assert.match(text, /Modo lento/);
-  for (const label of ["Aberto", "Moderado", "Só a equipe", "Desligado", "10 s", "60 s"]) {
-    assert.match(text, new RegExp(label), label);
+  // A lista: o <ol role=log> com o nome Chat, so com as liberadas, cada uma no balao.
+  assert.match(chat, /<ol aria-label="Chat"[^>]*data-console-chat=""[^>]*role="log"/);
+  const log = chat.slice(chat.indexOf('role="log"'));
+  assert.deepEqual(Array.from(log.matchAll(/data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-sem-aceite", "m-equipe", "m-roteiro"]);
+  const logClasses = chat.match(/<ol aria-label="Chat" class="([^"]*)"/)?.[1].split(" ") ?? [];
+  assert.ok(logClasses.includes("lg:flex-1") && logClasses.includes("lg:min-h-0") && logClasses.includes("overflow-y-auto"), "a partir de lg a lista enche a aba e rola por dentro");
+  assert.ok(logClasses.includes("max-lg:max-h-[60vh]") && !logClasses.includes("max-h-[60vh]"), "o teto de 60vh so abaixo de lg, com a pagina rolando");
+  assert.match(pane(markup, "tab", "chat"), /^<div[^>]*class="[^"]*\blg:flex-1\b[^"]*"[^>]*data-console-tab="chat"/, "a aba do Chat enche o corpo do painel");
+
+  // Sem nenhuma pendente, nem o card nem o "aguardando".
+  const semPendente = pane(render({ sessions, snapshot: snapshot({ messages: messages.filter((item) => item.approved) }), webinar }), "tab", "chat");
+  assert.doesNotMatch(semPendente, /data-console-chat-queue|data-console-chat-waiting/);
+});
+
+test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha a direita com Você, a origem so para a equipe, Fixada e Nas próximas turmas (fora da live); na live a hora gravada e sem o selo das proximas turmas", () => {
+  const mestre = message({ authorUserId: "u-bruna", body: "Da turma passada", displayName: "Bruna S.", id: "m-mestre", master: true, source: "original" });
+  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, mestre] }), webinar });
+  const chat = pane(markup, "tab", "chat");
+
+  assert.equal(chatMeta(chatItem(chat, "m-sem-aceite")), "Aluno 231 · 20:01", "o aluno sem papel; a hora marcada mais o offset");
+  assert.equal(chatMeta(chatItem(chat, "m-roteiro")), "Duda · Roteiro · 20:01", "a origem do roteiro, so para a equipe");
+  assert.equal(chatMeta(chatItem(chat, "m-mestre")), "Bruna S. · Chat original · 20:01 · Nas próximas turmas");
+  // A minha (o autor e quem esta no console): a direita, "Você · papel · hora", e a fixada diz Fixada.
+  const minha = chatItem(chat, "m-equipe");
+  assert.match(minha, /^<li class="[^"]*\bflex-row-reverse\b[^"]*" data-mine="" data-room-message="m-equipe">/);
+  assert.equal(chatMeta(minha), "Você · Apresentador · 20:01 · Fixada");
+  assert.match(minha, /<span class="sr-only">Você, Apresentador, 20:01: <\/span>Bem-vindos!/, "o leitor de tela ouve o autor antes do texto");
+  assert.equal(count(chat, /data-mine=""/g), 1, "so a minha");
+  assert.doesNotMatch(chat, /data-room-message-meta="">[\s\S]{0,200}1:00</, "a hora, nunca o minuto do video");
+
+  // Na live: a hora em que o servidor gravou (20:42), e toda mensagem nasce na linha mestre (D31): sem o selo.
+  const ao = (extra) => message({ createdAt: "2026-11-05T23:42:00.000Z", ...extra });
+  const live = session({ kind: "live" });
+  const liveMarkup = render({ sessions: [live], snapshot: snapshot({ messages: [ao({ id: "m-live", master: true }), ao({ id: "m-live-equipe", master: true, role: "team", source: "team", authorUserId: "u-bia", displayName: "Bia E." })], session: live }), webinar: { ...webinar, kind: "live" } });
+  const liveChat = pane(liveMarkup, "tab", "chat");
+  assert.equal(chatMeta(chatItem(liveChat, "m-live")), "Ana M. · 20:42");
+  assert.equal(chatMeta(chatItem(liveChat, "m-live-equipe")), "Bia E. · Equipe · 20:42");
+  assert.doesNotMatch(textOf(liveChat), /Nas próximas turmas/, "na live o selo sairia em todas");
+
+  // No Replay, nenhuma hora.
+  const replay = session({ kind: "replay", status: "live" });
+  const replayChat = pane(render({ sessions: [replay], snapshot: snapshot({ session: replay }), webinar }), "tab", "chat");
+  assert.equal(chatMeta(chatItem(replayChat, "m-sem-aceite")), "Aluno 231");
+});
+
+test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar ou Desafixar, Virar pergunta, Apagar) em botoes de 24 px que aparecem com o mouse ou o foco e sempre no toque; o ⋯ com Aprovar para as próximas turmas (sem aceite, o porque); a caixa com o Enviar redondo", () => {
+  const promovivel = message({ authorUserId: "u-caio", body: "Com aceite", displayName: "Caio R.", id: "m-com-aceite" });
+  const virou = message({ authorUserId: "u-dani", body: "Ja perguntou", displayName: "Dani P.", id: "m-virou" });
+  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, promovivel, virou], questions: [question({ id: "q-virou", messageId: "m-virou" })] }), webinar });
+  const chat = pane(markup, "tab", "chat");
+  const linha = (id) => {
+    const item = chatItem(chat, id);
+    return item.slice(item.indexOf("data-console-message-actions"));
+  };
+  const nomes = (block) => Array.from(block.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
+
+  assert.deepEqual(nomes(linha("m-com-aceite")), ["Fixar: Caio R.", "Virar pergunta: Caio R.", "Apagar: Caio R.", "Mais ações da mensagem de Caio R."]);
+  assert.match(textOf(linha("m-com-aceite")), /Aprovar para as próximas turmas/, "no ⋯");
+  assert.deepEqual(nomes(linha("m-sem-aceite")), ["Fixar: Aluno 231", "Virar pergunta: Aluno 231", "Apagar: Aluno 231", "Mais ações da mensagem de Aluno 231"]);
+  assert.match(textOf(linha("m-sem-aceite")), /Sem consentimento do aluno/, "sem o aceite, o ⋯ diz por que");
+  assert.doesNotMatch(textOf(linha("m-sem-aceite")), /Aprovar para as próximas turmas/);
+  assert.deepEqual(nomes(linha("m-virou")), ["Fixar: Dani P.", "Apagar: Dani P.", "Mais ações da mensagem de Dani P."], "a que ja virou pergunta fica sem o botao");
+  // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno) e sem o ⋯ (nada para eles la).
+  assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T."]);
+  assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda"]);
+
+  // Os botoes da linha: 24 px de altura no minimo. Com o mouse, as acoes ficam escondidas (sem lugar na linha) e aparecem
+  // com o mouse, o foco ou o ⋯ aberto, no canto do item (a minha, a esquerda); na tela de toque, sempre na linha.
+  const acoesDe = (id) => chatItem(chat, id).match(/<span class="([^"]*)" data-console-message-actions="">/)?.[1].split(" ") ?? [];
+  const acoes = acoesDe("m-com-aceite");
+  for (const classe of ["pointer-fine:opacity-0", "pointer-fine:group-hover:opacity-100", "pointer-fine:group-focus-within:opacity-100", "pointer-fine:has-[[data-popup-open]]:opacity-100", "pointer-fine:absolute", "pointer-fine:right-0"]) {
+    assert.ok(acoes.includes(classe), classe);
   }
-  assert.match(markup, /placeholder="Escreva para a turma"/);
-  assert.match(text, /Enviar/);
-  assert.match(text, /1:00/, "o minuto do video de cada mensagem");
+  assert.ok(!acoes.includes("opacity-0"), "no toque, sempre a mostra");
+  assert.ok(acoesDe("m-equipe").includes("pointer-fine:left-0"), "a minha: as acoes do lado de dentro");
+  assert.match(chatItem(chat, "m-com-aceite"), /^<li class="[^"]*\bgroup\b[^"]*\brelative\b/, "o item e o grupo e a referencia das acoes");
+  for (const [, classes] of linha("m-com-aceite").matchAll(/<button[^>]*class="([^"]*)"/g)) {
+    assert.ok(classes.split(" ").includes("min-h-6"), "24 px de altura");
+  }
+
+  // A caixa: o campo de 44 px no minimo e o Enviar redondo de 44 px com o nome.
+  assert.match(chat, /<textarea(?=[^>]*\bmin-h-11\b)(?=[^>]*id="console-composer")(?=[^>]*placeholder="Escreva para a turma")[^>]*>/);
+  assert.match(chat, /<button(?=[^>]*aria-label="Enviar")(?=[^>]*\bsize-11\b)(?=[^>]*\brounded-full\b)[^>]*>/);
 });
 
 test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {
@@ -405,11 +504,10 @@ test("fase 4c: o painel Atendimento entra no console (le pela propria acao) e a 
   const atendimento = pane(markup, "more", "atendimento");
   assert.ok(hiddenPane(atendimento));
   assert.match(textOf(atendimento), /Carregando o atendimento…/);
-  const block = markup.slice(markup.indexOf('data-console-message="m-ia"'), markup.indexOf("</li>", markup.indexOf('data-console-message="m-ia"')));
-  assert.match(block, /data-message-source="ai"/);
-  assert.match(textOf(block), /Assistente/);
-  assert.match(textOf(block), /Corrigir resposta/);
-  assert.match(textOf(block), /Apagar/, "apagar segue pela moderacao");
+  const block = chatItem(markup, "m-ia");
+  assert.equal(chatMeta(block), "Assistente · Assistente · 20:01", "o selo Assistente na linha de baixo, como na sala");
+  assert.match(textOf(block.slice(block.indexOf('aria-label="Mais ações da mensagem de Assistente"'))), /Corrigir resposta/, "Corrigir resposta no ⋯ da resposta");
+  assert.match(block, /aria-label="Apagar: Assistente"/, "apagar segue pela moderacao");
   assert.equal(count(markup, />Corrigir resposta</g), 1, "so na resposta do Assistente");
 
   const ended = textOf(render({ sessions, snapshot: snapshot({ messages: [ai], session: sessions[2] }), webinar }));
@@ -480,9 +578,15 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   assert.doesNotMatch(semPresenca, /data-console-more="presenca"/, "sem a leitura, sem a entrada Presença");
 });
 
-test("Refazer tradução: cada mensagem do chat ganha o botao so com a traducao ligada no ambiente", () => {
+test("Refazer tradução: cada mensagem do chat ganha o item no ⋯ so com a traducao ligada no ambiente", () => {
   const desligada = render({ sessions, snapshot: snapshot(), webinar });
-  assert.doesNotMatch(desligada, /data-console-retranslate=""/);
+  assert.doesNotMatch(desligada, /Refazer tradução/);
+  // Sem a traducao, a equipe e o roteiro nao tem nada no ⋯; com ela, toda mensagem liberada ganha o ⋯ com o item.
+  assert.doesNotMatch(chatItem(desligada, "m-roteiro"), /Mais ações da mensagem/);
   const ligada = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions, snapshot: snapshot(), webinar }, permissions: both, serverNow: NOW, translationEnabled: true }));
-  assert.match(ligada, /<button[^>]*aria-label="Refazer tradução: [^"]+"[^>]*data-console-retranslate=""/);
+  for (const [id, name] of [["m-sem-aceite", "Aluno 231"], ["m-equipe", "Produtor T."], ["m-roteiro", "Duda"]]) {
+    const item = chatItem(ligada, id);
+    assert.match(textOf(item.slice(item.indexOf(`aria-label="Mais ações da mensagem de ${name}"`))), /Refazer tradução/, id);
+  }
+  assert.equal(count(pane(ligada, "tab", "chat"), />Refazer tradução</g), 4, "tambem no card da pendente");
 });

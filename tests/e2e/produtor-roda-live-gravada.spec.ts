@@ -113,7 +113,7 @@ test.describe("produtor", () => {
     // De volta ao Chat: as mensagens do roteiro estao la.
     await page.getByRole("tab", { exact: true, name: "Chat" }).click();
     await expect(roteiro).toBeHidden();
-    const chat = page.getByRole("list", { name: "Chat" });
+    const chat = page.getByRole("log", { name: "Chat" });
     await expect(chat.getByText("Boa noite, turma!")).toBeVisible();
     await expect(chat.getByText("Bem-vindos ao encontro")).toBeVisible();
 
@@ -136,7 +136,7 @@ test.describe("produtor", () => {
     await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeVisible();
-    await expect(page.getByRole("list", { name: "Chat" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "Chat" })).toBeVisible();
 
     const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
     expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
@@ -147,7 +147,7 @@ test.describe("produtor", () => {
     await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeVisible();
-    await expect(page.getByRole("list", { name: "Chat" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "Chat" })).toBeVisible();
 
     // Os rotulos so para o leitor de tela do painel (como o "Escreva para a turma" do chat) ficam dentro do painel que
     // rola; fora dele, esticariam o documento e a pagina inteira rolaria para fora da tela.

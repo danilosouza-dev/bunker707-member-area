@@ -682,6 +682,70 @@ test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quan
   assert.equal(perguntaDe(anonima.id).deleted_at, null);
 });
 
+test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta sem o historico do aluno (a pendente e liberada junto); a pergunta pelo chat moderado segue o Liberar; nao duplica; a equipe, o roteiro, o Assistente e a resposta dao 409", async () => {
+  const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
+  const longa = "x".repeat(700);
+  const pendente = message({ approved: false, author_user_id: ALUNO, body: longa, display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, offset_ms: 30_000 });
+  const perguntaPeloChat = message({ approved: false, author_user_id: ALUNA, body: "vai ter replay?", kind: "question", offset_ms: 50_000 });
+  const liberada = message({ author_user_id: ALUNA, body: "como faço o agente?" });
+  const daEquipe = message({ author_user_id: HOST, display_name: "Produtor T.", role: "host", source: "team" });
+  const doRoteiro = message({ display_name: "Duda", source: "scripted" });
+  const doAssistente = message({ display_name: "Assistente", kind: "answer", role: "ai", source: "ai" });
+  const resposta = message({ author_user_id: ALUNA, kind: "answer" });
+  const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [pendente, perguntaPeloChat, liberada, daEquipe, doRoteiro, doAssistente, resposta] })));
+  const linha = (id) => db.tables.webinar_chat_messages.find((row) => row.id === id);
+  const perguntasDe = (id) => db.tables.webinar_questions.filter((row) => row.message_id === id);
+  const eventos = () => db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
+
+  // A pendente comum: libera (quem e quando) e vira pergunta com o message_id, o texto cortado em 500 e anonima pelo
+  // "Aluno {n}"; quem perguntou foi a equipe, entao nada no historico do aluno.
+  const virou = ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
+  assert.equal(virou.message.approved, true);
+  assert.deepEqual([linha(pendente.id).approved, linha(pendente.id).approved_by], [true, HOST]);
+  assert.equal(perguntasDe(pendente.id).length, 1);
+  const [aberta] = perguntasDe(pendente.id);
+  assert.deepEqual([aberta.anonymous, aberta.body.length, aberta.offset_ms, aberta.session_id, aberta.status, aberta.user_id], [true, 500, 30_000, SESSAO_NO_AR, "open", ALUNO]);
+  assert.equal(eventos().length, 0, "sem webinar_question_sent: a pergunta foi da equipe");
+
+  // A ja liberada: so cria a pergunta (a linha nao muda).
+  const antes = { ...linha(liberada.id) };
+  ok(await roomActions.moderateMessage({ action: "question", messageId: liberada.id }));
+  assert.equal(perguntasDe(liberada.id).length, 1);
+  assert.deepEqual([perguntasDe(liberada.id)[0].anonymous, perguntasDe(liberada.id)[0].display_name], [false, "Ana M."]);
+  assert.deepEqual(linha(liberada.id), antes, "a mensagem liberada fica como estava");
+
+  // A pergunta pelo chat moderado: o mesmo do Liberar (libera, abre a pergunta e grava UM webinar_question_sent do autor).
+  ok(await roomActions.moderateMessage({ action: "question", messageId: perguntaPeloChat.id }));
+  assert.equal(linha(perguntaPeloChat.id).approved, true);
+  assert.equal(perguntasDe(perguntaPeloChat.id).length, 1);
+  assert.deepEqual(
+    eventos().map((row) => [row.user_id, row.metadata.question_id]),
+    [[ALUNA, perguntasDe(perguntaPeloChat.id)[0].id]]
+  );
+
+  // De novo: nem a pergunta nem o evento duplicam.
+  for (const id of [pendente.id, liberada.id, perguntaPeloChat.id]) {
+    ok(await roomActions.moderateMessage({ action: "question", messageId: id }));
+    assert.equal(perguntasDe(id).length, 1, `${id} nao duplica`);
+  }
+  assert.equal(eventos().length, 1, "o evento tambem nao duplica");
+
+  // Sem aluno nao ha pergunta (ela pede o user_id): a equipe, o roteiro, o Assistente; a resposta tambem nao vira.
+  for (const outra of [daEquipe, doRoteiro, doAssistente, resposta]) {
+    const recusada = await roomActions.moderateMessage({ action: "question", messageId: outra.id });
+    assert.deepEqual([recusada.ok, recusada.status], [false, 409], outra.source);
+    assert.match(recusada.error, /aluno/i);
+    assert.equal(perguntasDe(outra.id).length, 0);
+  }
+
+  // A auditoria: a acao e os ids, nunca o texto.
+  const auditadas = audits(db, "webinar.moderated").filter((row) => row.metadata.action === "question");
+  assert.equal(auditadas.length, 6, "uma por pedido aceito");
+  assert.deepEqual(Object.keys(auditadas[0].metadata).sort(), ["action", "message_id", "session_id", "source", "with_reason"]);
+  assert.equal(auditadas[0].metadata.message_id, pendente.id);
+  assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /xxxxx|como faço|vai ter replay/);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Abrir, encerrar e a Simulacao
  * ---------------------------------------------------------------------------------------------- */

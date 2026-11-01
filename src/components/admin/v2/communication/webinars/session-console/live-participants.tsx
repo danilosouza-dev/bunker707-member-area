@@ -20,8 +20,9 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // destaque, Convidar ao palco / Tirar do palco, Fechar camera (Apresentador e co-apresentador), Silenciar no chat
 // 5/15/60/ate o fim, Remover da sala (com o kickParticipant depois da acao) e Banir (so quem publica; confirmacao). A
 // equipe nunca recebe os itens de remover, silenciar ou banir. Embaixo, quem foi removido, silenciado ou banido nesta
-// sessao, com Desfazer. LivePersonMenu tambem serve o ⋯ das mensagens do chat; o menu abre no portal da raiz do
-// console, no tema dela (a ponte dos tokens do admin e as classes da sala no conteudo).
+// sessao, com Desfazer. Os itens do ⋯ (LivePersonMenuItems) tambem entram no ⋯ de cada mensagem da turma no chat
+// (docs/31 V2-15), junto dos itens da mensagem; o menu abre no portal da raiz do console, no tema dela (a ponte dos
+// tokens do admin e as classes da sala no conteudo).
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const pessoas = WEBINAR_COPY.consoleV2.pessoas;
@@ -32,12 +33,10 @@ export type PersonAction =
   | { kind: BanKind; type: "undo" }
   | { on: boolean; type: "spotlight" | "stage" };
 
-type LivePersonMenuProps = {
-  busy: boolean;
+type LivePersonMenuItemsProps = {
   canPublish: boolean;
   controls: LiveControls;
   joined: boolean;
-  name: string;
   onAction: (action: PersonAction) => void;
   onStage?: boolean;
   /** O participante na sala (nulo: nao esta no iframe; so as acoes do servidor valem). */
@@ -46,22 +45,26 @@ type LivePersonMenuProps = {
   spotlight?: boolean;
 };
 
-/** O ⋯ de uma pessoa (na sala ou no chat); nada quando nao ha acao para este papel. */
-export function LivePersonMenu({ busy, canPublish, controls, joined, name, onAction, onStage = false, participantId, person, spotlight = false }: LivePersonMenuProps) {
-  const portal = useConsolePortal();
+type LivePersonMenuProps = LivePersonMenuItemsProps & { busy: boolean; name: string };
+
+/**
+ * Os grupos do ⋯ de uma pessoa por papel: destacar e o palco (no iframe, quem apresenta), fechar a camera, silenciar no
+ * chat, remover e banir (so aluno; a equipe nunca). Nenhum: o ⋯ nao aparece.
+ */
+export function livePersonMenuGroups({ controls, participantId, person }: Pick<LivePersonMenuItemsProps, "controls" | "participantId" | "person">) {
   const inRoom = participantId !== null;
   const student = person !== null && !person.staff;
-  const roomItems = inRoom && controls.stage;
-  const cameraItem = inRoom && controls.cameras;
-  const chatItems = student && controls.chatMute;
-  const kickItem = student && controls.kick;
-  const banItem = student && controls.ban;
+  const groups = { ban: student && controls.ban, camera: inRoom && controls.cameras, chat: student && controls.chatMute, kick: student && controls.kick, room: inRoom && controls.stage };
+  return { ...groups, any: groups.room || groups.camera || groups.chat || groups.kick || groups.ban };
+}
 
-  if (!roomItems && !cameraItem && !chatItems && !kickItem && !banItem) {
+/** O ⋯ de uma pessoa (na aba Pessoas); nada quando nao ha acao para este papel. */
+export function LivePersonMenu({ busy, name, ...props }: LivePersonMenuProps) {
+  const portal = useConsolePortal();
+
+  if (!livePersonMenuGroups(props).any) {
     return null;
   }
-
-  const ban = person?.ban;
 
   return (
     <DropdownMenu>
@@ -73,60 +76,77 @@ export function LivePersonMenu({ busy, canPublish, controls, joined, name, onAct
         <MoreHorizontal aria-hidden="true" className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className={cn(adminMenuPopup, "w-60 bg-room-surface text-room-fg")} container={portal}>
-        {roomItems ? (
-          <>
-            <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ on: !spotlight, type: "spotlight" })}>
-              {spotlight ? copy.tirarDestaque : copy.destacar}
-            </DropdownMenuItem>
-            <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ on: !onStage, type: "stage" })}>
-              {onStage ? copy.tirarPalco : copy.convidarPalco}
-            </DropdownMenuItem>
-          </>
-        ) : null}
-        {cameraItem ? (
-          <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ type: "closeCamera" })}>
-            {copy.fecharCamera}
-          </DropdownMenuItem>
-        ) : null}
-        {(roomItems || cameraItem) && (chatItems || kickItem || banItem) ? <DropdownMenuSeparator className={adminMenuSeparator} /> : null}
-        {chatItems
-          ? ban?.muted
-            ? (
-                <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ kind: "muted", type: "undo" })}>
-                  {`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(ban)}`}
-                </DropdownMenuItem>
-              )
-            : MUTE_CHOICES.map((choice) => (
-                <DropdownMenuItem className={adminMenuItem} key={choice.label} onClick={() => onAction({ minutes: choice.minutes, type: "mute" })}>
-                  {choice.label}
-                </DropdownMenuItem>
-              ))
-          : null}
-        {kickItem ? (
-          ban?.kicked ? (
-            <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ kind: "kicked", type: "undo" })}>
-              {`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido}`}
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ type: "kick" })}>
-              {copy.removerDaSala}
-            </DropdownMenuItem>
-          )
-        ) : null}
-        {banItem ? (
-          ban?.banned ? (
-            <DropdownMenuItem className={adminMenuItem} disabled={!canPublish} onClick={() => onAction({ type: "unban" })}>
-              {copy.desfazerBanimento}
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem className={cn(adminMenuItem, "text-[var(--error)]")} disabled={!canPublish} onClick={() => onAction({ type: "ban" })}>
-              {copy.banir}
-            </DropdownMenuItem>
-          )
-        ) : null}
-        {banItem && !canPublish ? <p className="px-2.5 py-1 text-xs leading-4 text-[var(--text-tertiary)]">{LIVE_CONSOLE_COPY.soQuemPublica}</p> : null}
+        <LivePersonMenuItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Os itens do ⋯ de uma pessoa, para o ⋯ dela e para o ⋯ de uma mensagem dela no chat; nada sem acao para o papel. */
+export function LivePersonMenuItems({ canPublish, controls, joined, onAction, onStage = false, participantId, person, spotlight = false }: LivePersonMenuItemsProps) {
+  const { any, ban: banItem, camera: cameraItem, chat: chatItems, kick: kickItem, room: roomItems } = livePersonMenuGroups({ controls, participantId, person });
+
+  if (!any) {
+    return null;
+  }
+
+  const ban = person?.ban;
+
+  return (
+    <>
+      {roomItems ? (
+        <>
+          <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ on: !spotlight, type: "spotlight" })}>
+            {spotlight ? copy.tirarDestaque : copy.destacar}
+          </DropdownMenuItem>
+          <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ on: !onStage, type: "stage" })}>
+            {onStage ? copy.tirarPalco : copy.convidarPalco}
+          </DropdownMenuItem>
+        </>
+      ) : null}
+      {cameraItem ? (
+        <DropdownMenuItem className={adminMenuItem} disabled={!joined} onClick={() => onAction({ type: "closeCamera" })}>
+          {copy.fecharCamera}
+        </DropdownMenuItem>
+      ) : null}
+      {(roomItems || cameraItem) && (chatItems || kickItem || banItem) ? <DropdownMenuSeparator className={adminMenuSeparator} /> : null}
+      {chatItems
+        ? ban?.muted
+          ? (
+              <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ kind: "muted", type: "undo" })}>
+                {`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(ban)}`}
+              </DropdownMenuItem>
+            )
+          : MUTE_CHOICES.map((choice) => (
+              <DropdownMenuItem className={adminMenuItem} key={choice.label} onClick={() => onAction({ minutes: choice.minutes, type: "mute" })}>
+                {choice.label}
+              </DropdownMenuItem>
+            ))
+        : null}
+      {kickItem ? (
+        ban?.kicked ? (
+          <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ kind: "kicked", type: "undo" })}>
+            {`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido}`}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem className={adminMenuItem} onClick={() => onAction({ type: "kick" })}>
+            {copy.removerDaSala}
+          </DropdownMenuItem>
+        )
+      ) : null}
+      {banItem ? (
+        ban?.banned ? (
+          <DropdownMenuItem className={adminMenuItem} disabled={!canPublish} onClick={() => onAction({ type: "unban" })}>
+            {copy.desfazerBanimento}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem className={cn(adminMenuItem, "text-[var(--error)]")} disabled={!canPublish} onClick={() => onAction({ type: "ban" })}>
+            {copy.banir}
+          </DropdownMenuItem>
+        )
+      ) : null}
+      {banItem && !canPublish ? <p className="px-2.5 py-1 text-xs leading-4 text-[var(--text-tertiary)]">{LIVE_CONSOLE_COPY.soQuemPublica}</p> : null}
+    </>
   );
 }
 

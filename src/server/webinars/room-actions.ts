@@ -93,6 +93,7 @@ const MESSAGE_MISSING_MESSAGE = "Essa mensagem não existe mais.";
 const NO_CONSENT_MESSAGE = "Sem consentimento do aluno: a mensagem não entra nas próximas turmas.";
 const ONLY_AUDIENCE_PROMOTES_MESSAGE = "Só uma mensagem da turma de hoje entra nas próximas turmas.";
 const PIN_NEEDS_APPROVAL_MESSAGE = "Libere a mensagem antes de fixar.";
+const ONLY_AUDIENCE_QUESTION_MESSAGE = "Só uma mensagem de aluno da turma vira pergunta.";
 const POLL_MISSING_MESSAGE = "Essa enquete não existe mais.";
 const POLL_NOT_TEMPLATE_MESSAGE = "Essa enquete já é de uma sessão; abra pelo modelo.";
 const POLL_NOT_OPEN_MESSAGE = "Essa enquete não está aberta.";
@@ -361,14 +362,16 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 }
 
 /**
- * A pergunta que o aluno mandou pelo chat moderado so entra na aba Perguntas quando a equipe libera a mensagem
- * (antes disso ninguem alem do autor a ve). Anonima quando o nome gravado e o "Aluno {n}" do proprio aluno.
+ * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
+ * equipe): o texto cortado em 500 (o limite da pergunta), o `message_id` e anonima quando o nome gravado e o "Aluno {n}"
+ * do proprio aluno. Sem autor, nada (a pergunta pede o aluno). Quem chama confere antes se a mensagem ja tem pergunta.
  */
-async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
-  if (message.kind !== "question" || message.source !== "audience" || !message.author_user_id || (await fetchQuestionRowByMessage(db, message.id))) {
-    return;
+async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
+  const userId = message.author_user_id;
+  if (!userId) {
+    return null;
   }
-  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(message.author_user_id, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
   const question = await insertQuestionRow(db, {
     anonymous,
     body: message.body.slice(0, 500),
@@ -376,24 +379,55 @@ async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): P
     message_id: message.id,
     offset_ms: message.offset_ms,
     session_id: message.session_id,
-    user_id: message.author_user_id
+    user_id: userId
   });
+  return { anonymous, questionId: question.id, userId };
+}
+
+/**
+ * A pergunta que o aluno mandou pelo chat moderado so entra na aba Perguntas quando a equipe libera a mensagem
+ * (antes disso ninguem alem do autor a ve), com o `webinar_question_sent` no historico do aluno (foi ele que perguntou).
+ */
+async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
+  if (message.kind !== "question" || message.source !== "audience" || !message.author_user_id || (await fetchQuestionRowByMessage(db, message.id))) {
+    return;
+  }
+  const created = await insertQuestionOfMessage(db, message);
+  if (!created) {
+    return;
+  }
   await recordEvents(db, [
     {
       entity_id: message.session_id,
       entity_type: "webinar",
       event_type: "webinar_question_sent",
-      metadata: questionSentMetadata({ anonymous, offsetMs: message.offset_ms, questionId: question.id }),
-      user_id: message.author_user_id
+      metadata: questionSentMetadata({ anonymous: created.anonymous, offsetMs: message.offset_ms, questionId: created.questionId }),
+      user_id: created.userId
     }
   ]);
 }
 
 /**
+ * O Virar pergunta da equipe (docs/31 V2-15) depois da troca da mensagem: a pergunta que o aluno fez pelo chat moderado
+ * segue o Liberar (a pergunta e o historico do aluno); a mensagem comum vira pergunta sem o `webinar_question_sent`,
+ * porque quem perguntou foi a equipe. A mensagem que ja tem pergunta (apagada ou nao) fica como esta.
+ */
+async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
+  if (message.kind === "question") {
+    await openQuestionOfMessage(db, message);
+    return;
+  }
+  if (!(await fetchQuestionRowByMessage(db, message.id))) {
+    await insertQuestionOfMessage(db, message);
+  }
+}
+
+/**
  * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
  * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
- * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao) e promover a linha mestre
- * (master + source `original`, so mensagem da turma cujo autor mantem o aceite).
+ * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao), promover a linha mestre
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite) e Virar pergunta (docs/31 V2-15: so
+ * mensagem ou pergunta de aluno da turma; a pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
   return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
@@ -411,12 +445,14 @@ export async function moderateMessage(input: { action: ModerationAction; message
       throw new WebinarError(SESSION_MISSING_MESSAGE, 404);
     }
 
-    let patch: ChatMessagePatch;
+    const approvePatch: ChatMessagePatch = { approved: true, approved_at: nowIso, approved_by: user.id };
+    // Nulo: nada muda na linha (o Virar pergunta de uma mensagem ja liberada).
+    let patch: ChatMessagePatch | null;
     let pinnedMessageId = sessionRow.pinned_message_id;
 
     switch (data.action) {
       case "approve":
-        patch = { approved: true, approved_at: nowIso, approved_by: user.id };
+        patch = approvePatch;
         break;
       case "delete":
         patch = { deleted_at: nowIso, deleted_by: user.id, deleted_reason: "team" };
@@ -444,19 +480,28 @@ export async function moderateMessage(input: { action: ModerationAction; message
         patch = { approved: true, approved_at: message.approved_at ?? nowIso, approved_by: message.approved_by ?? user.id, master: true, source: "original" };
         break;
       }
+      case "question":
+        // A pergunta pede o aluno (webinar_questions.user_id): nada da equipe, do roteiro, do Assistente, nem resposta.
+        if (message.source !== "audience" || !message.author_user_id || (message.kind !== "message" && message.kind !== "question")) {
+          throw new WebinarError(ONLY_AUDIENCE_QUESTION_MESSAGE, 409);
+        }
+        patch = message.approved ? null : approvePatch;
+        break;
       default:
         throw new WebinarError("Ação inválida.", 400);
     }
 
     // O estado de antes da troca (a linha lida pode ser a mesma referencia que a escrita devolve).
     const wasApproved = message.approved;
-    const updated = await updateChatMessageRow(db, message.id, patch);
+    const updated = patch ? await updateChatMessageRow(db, message.id, patch) : message;
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
     }
 
-    if (data.action === "approve" && !wasApproved) {
+    if (data.action === "question") {
+      await questionOfMessageByTeam(db, updated);
+    } else if (data.action === "approve" && !wasApproved) {
       await openQuestionOfMessage(db, updated);
       // A resposta do Assistente que esperava a equipe (chat moderado): a pergunta da aba fica respondida so agora.
       if (message.role === "ai") {
@@ -487,8 +532,8 @@ export async function moderateMessage(input: { action: ModerationAction; message
     });
     revalidateConsole(sessionRow.webinar_id);
 
-    // Apagar e promover mudam as contagens do chat no relatorio (so mensagens audience/original nao apagadas).
-    if (data.action === "delete" || data.action === "promote" || data.action === "approve") {
+    // Apagar, promover, liberar e virar pergunta mudam as contagens do relatorio (o chat audience/original nao apagado e as perguntas).
+    if (data.action === "delete" || data.action === "promote" || data.action === "approve" || data.action === "question") {
       invalidateReport();
     }
 

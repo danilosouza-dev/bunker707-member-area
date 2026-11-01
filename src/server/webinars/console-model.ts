@@ -5,6 +5,7 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
+import { chatRoleLabel, chatTimeLabel } from "../../lib/webinar-room-client";
 import { saoPauloDate } from "../../lib/webinar-time";
 import { WEBINAR_ADMIN_COPY } from "./editor-model";
 import {
@@ -218,16 +219,66 @@ export type ConsoleMessage = ChatMessage & {
   promotable: boolean;
 };
 
-/** O que a mesa pode fazer com uma mensagem (docs/30 §2.4 e §5.2). */
-export function messageActions(message: ConsoleMessage, pinnedMessageId: string | null): { approve: boolean; delete: boolean; pin: boolean; promote: boolean; unpin: boolean } {
+export type MessageActions = { approve: boolean; delete: boolean; pin: boolean; promote: boolean; question: boolean; unpin: boolean };
+
+/**
+ * O que a mesa pode fazer com uma mensagem (docs/30 §2.4 e §5.2; docs/31 V2-15). Virar pergunta so para a mensagem
+ * comum de um aluno da turma (a pergunta pede o aluno) que ainda nao virou pergunta (`hasQuestion`: alguma pergunta do
+ * retrato com o `messageId` dela). A pergunta que o aluno fez pelo chat moderado fica sem o botao: o Liberar ja a abre.
+ */
+export function messageActions(message: ConsoleMessage, pinnedMessageId: string | null, { hasQuestion = false }: { hasQuestion?: boolean } = {}): MessageActions {
   const pinned = pinnedMessageId === message.id;
   return {
     approve: !message.approved,
     delete: true,
     pin: !pinned && message.approved,
     promote: message.source === "audience" && !message.master && message.approved && message.promotable,
+    question: message.kind === "message" && message.source === "audience" && Boolean(message.authorUserId) && !hasQuestion,
     unpin: pinned
   };
+}
+
+/**
+ * O chat do console em duas partes (docs/31 V2-15): as pendentes do chat moderado saem da lista e viram a fila dos cards
+ * da moderacao, da mais velha para a mais nova (pela hora gravada; sem hora, na ordem em que chegaram, depois das
+ * outras); a lista fica so com as liberadas, na ordem do retrato.
+ */
+export function consoleChatQueue<T extends Pick<ChatMessage, "approved" | "createdAt">>(messages: readonly T[]): { log: T[]; pending: T[] } {
+  const log: T[] = [];
+  const waiting: { at: number; index: number; message: T }[] = [];
+  messages.forEach((message, index) => {
+    if (message.approved) {
+      log.push(message);
+      return;
+    }
+    const at = Date.parse(message.createdAt);
+    waiting.push({ at: Number.isFinite(at) ? at : Number.POSITIVE_INFINITY, index, message });
+  });
+  waiting.sort((a, b) => (a.at === b.at ? a.index - b.index : a.at < b.at ? -1 : 1));
+  return { log, pending: waiting.map((entry) => entry.message) };
+}
+
+export type ConsoleMessageMeta = {
+  /** De onde veio, so para a equipe: Roteiro ou Chat original (a turma nunca ve). */
+  origin: string | null;
+  /** O papel na linha de baixo: Apresentador, Equipe ou Assistente; o aluno, nenhum. */
+  role: string | null;
+  /** A hora em Sao Paulo ("20:42"): na live a gravada, na gravada a hora marcada mais o offset, no Replay nenhuma. */
+  time: string;
+};
+
+/**
+ * A linha de baixo do balao no console (docs/31 V2-9): o papel e a hora como a sala mostra (chatRoleLabel e
+ * chatTimeLabel, com o `createdAt` da live e a hora marcada da gravada) e a origem, que so a equipe ve.
+ */
+export function consoleMessageMeta(input: { kind: WebinarSession["kind"]; message: Pick<ChatMessage, "createdAt" | "offsetMs" | "role" | "source">; scheduledAt: string }): ConsoleMessageMeta {
+  const { message } = input;
+  const sources = WEBINAR_ADMIN_COPY.console.chat.sources;
+  const origin = message.source === "scripted" ? sources.scripted : message.source === "original" ? sources.original : null;
+  const role = chatRoleLabel(message.role);
+  const zeroMs = Date.parse(input.scheduledAt);
+  const time = chatTimeLabel({ kind: input.kind, offsetMs: message.offsetMs, sentAt: message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
+  return { origin, role, time };
 }
 
 export const CHAT_MODE_OPTIONS: readonly { label: string; value: ChatMode }[] = [

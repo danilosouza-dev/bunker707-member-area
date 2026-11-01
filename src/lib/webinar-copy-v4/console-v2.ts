@@ -92,5 +92,22 @@ export const CONSOLE_V2_COPY = {
     compartilhando: "Compartilhando",
     /** O microfone e a camera de cada pessoa, so para o leitor de tela (sem sinal do video, desligados). */
     midia: { cameraDesligada: "Câmera desligada", cameraLigada: "Câmera ligada", microfoneDesligado: "Microfone desligado", microfoneLigado: "Microfone ligado" }
+  },
+
+  /**
+   * A aba Chat (V2-15 e V2-9): os dois seletores compactos com o rotulo visivel, as pendentes do chat moderado e as acoes
+   * de cada mensagem. "Na moderação", Liberar, Fixar, Apagar e Enviar continuam em WEBINAR_ADMIN_COPY.console.chat.
+   */
+  chat: {
+    quemEscreve: "Quem escreve:",
+    modoLento: "Modo lento:",
+    /** Quantas mensagens esperam a equipe no chat moderado: "1 aguardando". */
+    aguardando: (n: number) => `${n} aguardando`,
+    /** Recusar a pendente: ela some para todos, como Apagar. */
+    recusar: "Recusar",
+    /** A mensagem do aluno vira pergunta na aba Perguntas. */
+    virarPergunta: "Virar pergunta",
+    /** O ⋯ de cada mensagem, com o nome de quem escreveu. */
+    maisAcoes: (nome: string) => `Mais ações da mensagem de ${nome}`
   }
 } as const;

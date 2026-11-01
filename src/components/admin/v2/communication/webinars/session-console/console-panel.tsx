@@ -23,8 +23,8 @@ import { useConsolePortal } from "./console-shell";
 // a aba e a entrada que nao estao na tela ganham `hidden` (a batida de 30 s do Atendimento, o rascunho do chat e o HTML
 // do servidor com tudo continuam). A aba e a entrada escolhidas ficam so na memoria da pagina (SessionConsole); o
 // painel aberto ou fechado, na chave do console. O corpo rola por dentro a partir de lg e e `relative` (os rotulos so
-// para o leitor de tela rolam com ele). O menu abre no portal da raiz do console, no tema dela. Nenhuma frase escrita
-// aqui.
+// para o leitor de tela rolam com ele); a aba Chat enche o corpo e rola so a lista dela. O menu abre no portal da raiz
+// do console, no tema dela. Nenhuma frase escrita aqui.
 
 const copy = WEBINAR_COPY.consoleV2;
 
@@ -79,7 +79,8 @@ export function ConsolePanel({ className, closable, counts, entries, more, onClo
         {tabs.map((value) => (
           <div
             aria-labelledby={`${CONSOLE_TAB_ID_PREFIX}-tabbtn-${value}`}
-            className="flex min-w-0 flex-col gap-4"
+            // O Chat enche a aba a partir de lg (a lista rola por dentro, a caixa fica no fim); as outras crescem e o corpo rola.
+            className={cn("flex min-w-0 flex-col gap-4", value === "chat" && "lg:min-h-0 lg:flex-1")}
             data-console-tab={value}
             hidden={tab !== value}
             id={`${CONSOLE_TAB_ID_PREFIX}-tab-${value}`}
