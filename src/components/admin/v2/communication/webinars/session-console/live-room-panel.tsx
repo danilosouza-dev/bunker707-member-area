@@ -269,18 +269,22 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   /**
    * Le os papeis pelo getRoomsInfo (quem ja moderava quando o console entrou so aparece ali), no maximo uma vez a cada
    * CONSOLE_ROOM_RULES.roomsInfoMs, como a sala do aluno. A resposta so vale do iframe em que foi pedida (o mesmo
-   * `api.current`) e sem saida da sala no meio.
+   * `api.current`) e sem saida da sala desde o agendamento: a saida cancela o pedido que espera (no onEvent), e a
+   * contagem lida aqui, na hora de agendar, descarta o que ja estava a caminho.
    */
   const readRoomsInfo = useCallback(() => {
     if (roomsInfoTimerRef.current !== null) {
       return;
     }
     const wait = Math.max(0, roomsInfoAtRef.current + CONSOLE_ROOM_RULES.roomsInfoMs - Date.now());
+    const leftCount = leftCountRef.current;
     roomsInfoTimerRef.current = window.setTimeout(() => {
       roomsInfoTimerRef.current = null;
+      if (leftCountRef.current !== leftCount) {
+        return;
+      }
       roomsInfoAtRef.current = Date.now();
       const asked = frameRef.current?.current ?? null;
-      const leftCount = leftCountRef.current;
       let pending: Promise<unknown> | undefined;
       try {
         pending = asked?.getRoomsInfo?.();
@@ -317,6 +321,12 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
         setupDone.current = false;
         lobbySent.current = null;
         leftCountRef.current += 1;
+        // O getRoomsInfo agendado antes da saida nao sai: o iframe que saiu ainda responde, com o proprio console, e a
+        // sala vazia (sem selfId) nao saberia tira-lo.
+        if (roomsInfoTimerRef.current !== null) {
+          window.clearTimeout(roomsInfoTimerRef.current);
+          roomsInfoTimerRef.current = null;
+        }
         setVideoOn(false);
       }
       // Os papeis de quem ja estava (o participantJoined nao traz o papel) e de quem compartilha sem papel lido.

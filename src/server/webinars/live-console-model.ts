@@ -522,9 +522,14 @@ export function sharingIdsOf(payload: unknown): string[] {
  * participantRoleChanged so sai na troca). Le a sala principal (ou a primeira), grava o papel de cada um com id valido e
  * papel conhecido e poe em `people` quem ainda nao esta, com o nome. O proprio console fica fora: o papel dele continua
  * pelo participantRoleChanged, que sai para o papel local. Um participantRoleChanged depois da resposta vence, porque
- * chega depois (o iframe responde e avisa na ordem).
+ * chega depois (o iframe responde e avisa na ordem). Fora da sala (sem `selfId`: antes do videoConferenceJoined ou
+ * depois da saida) a resposta nao muda nada: ela traz o proprio console, que sem o id viraria uma linha a mais e ficaria
+ * depois de entrar de novo com outro id.
  */
 export function applyConsoleRoomsInfo(state: LiveRoomState, info: unknown): LiveRoomState {
+  if (state.selfId === null) {
+    return state;
+  }
   const rooms = field(info, "rooms");
   if (!Array.isArray(rooms)) {
     return state;

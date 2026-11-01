@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
+import { CONSOLE_ROOM_RULES } from "../../src/server/webinars/live-console-model";
 import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
@@ -35,7 +36,8 @@ import {
 // reaplicado (nem o ruido depois da troca do microfone, nem o desfoque na camera que liga), nada de setVideoQuality
 // (quem apresenta nao baixa o proprio palco) e o Esc e o proprio botao fecham o card com o foco no botao. O vigia da
 // tela (docs/31 §5.4): quem compartilha com papel conhecido de participante tem a tela parada por
-// muteRemoteParticipant(id, 'desktop'); o papel de quem ja moderava quando o console entrou vem do getRoomsInfo.
+// muteRemoteParticipant(id, 'desktop'); o papel de quem ja moderava quando o console entrou vem do getRoomsInfo, e a
+// saida da sala cancela o getRoomsInfo que esperava (o iframe que saiu responderia com o proprio console).
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -379,5 +381,39 @@ test.describe("produtor", () => {
     const comandos = await sala.comandos();
     expect(comandos.filter((item) => (item.comando === "rejectParticipant" || item.comando === "muteEveryone") && item.args.includes("desktop"))).toEqual([]);
     expect(await pedidosDeParar()).toEqual([[ALUNA_NA_SALA, "desktop"]]);
+  });
+
+  test("a saida da sala cancela o getRoomsInfo que esperava: nenhum pedido sai depois do videoConferenceLeft e, de volta com outro id, nenhuma linha da sala de antes", async ({ page }) => {
+    const ANTES = "produtor-antes-0004";
+    const DE_VOLTA = "produtor-volta-0005";
+    const ALUNA_DE_ANTES = "aluna-antes-0006";
+    const ALUNA_DE_AGORA = "aluna-agora-0007";
+    const sala = await abrirConsole(page);
+    await sala.esperarMontada();
+    await sala.disparar("videoConferenceJoined", { displayName: "Produtor T.", id: ANTES, roomName });
+    await sala.disparar("participantRoleChanged", { id: ANTES, role: "moderator" });
+    // O primeiro getRoomsInfo sai na entrada; o de quem entra logo depois espera o intervalo.
+    await sala.esperarComando("getRoomsInfo");
+    await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_DE_ANTES });
+    await expect(page.locator(`[data-live-participant="${ALUNA_DE_ANTES}"]`)).toHaveCount(1);
+
+    // O console sai (o hangup da barra do iframe) com o pedido ainda esperando: ele nao sai, e a lista fica vazia.
+    const antesDaSaida = (await sala.comandos()).length;
+    await sala.disparar("videoConferenceLeft", {});
+    await page.waitForTimeout(CONSOLE_ROOM_RULES.roomsInfoMs + 1_500);
+    expect((await sala.comandos()).slice(antesDaSaida).filter((item) => item.comando === "getRoomsInfo"), "nenhum getRoomsInfo depois da saida").toEqual([]);
+    await expect(page.locator("[data-live-participant]")).toHaveCount(0);
+
+    // De volta, num iframe novo e com outro id: so quem esta na sala nova, sem o console de antes nem a aluna de antes.
+    await page.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+    await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+    await sala.disparar("videoConferenceJoined", { displayName: "Produtor T.", id: DE_VOLTA, roomName });
+    await sala.disparar("participantRoleChanged", { id: DE_VOLTA, role: "moderator" });
+    await sala.esperarComando("getRoomsInfo");
+    await sala.disparar("participantJoined", { displayName: "Bia T.", id: ALUNA_DE_AGORA });
+    await expect(page.locator(`[data-live-participant="${ALUNA_DE_AGORA}"]`)).toHaveCount(1);
+    await expect(page.locator(`[data-live-participant="${ANTES}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-live-participant="${DE_VOLTA}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-live-participant="${ALUNA_DE_ANTES}"]`)).toHaveCount(0);
   });
 });

@@ -487,6 +487,35 @@ test("papeis pelo getRoomsInfo: quem veio na sala principal ganha o papel e entr
   assert.equal(model.applyConsoleRoomsInfo(demoted, info).roles["p-co"], "moderator");
 });
 
+test("papeis pelo getRoomsInfo: fora da sala (antes de entrar ou depois de sair) a resposta nao muda nada; a do iframe que saiu nao deixa o proprio console como linha depois de entrar de novo", () => {
+  const answer = (id) => ({ rooms: [{ isMainRoom: true, participants: [{ displayName: "Produtor T.", id, role: "moderator" }, { displayName: "Aluna", id: "aluna01", role: "participant" }] }] });
+
+  // Antes do videoConferenceJoined: sem o proprio id, nada entra.
+  assert.equal(model.liveRoomReducer(model.EMPTY_ROOM, { info: answer("old1234"), type: "roomsInfo" }), model.EMPTY_ROOM);
+
+  // Entrou, virou moderador, alguem entrou e o console saiu (hangup): a sala volta vazia.
+  let state = event(model.EMPTY_ROOM, "videoConferenceJoined", { id: "old1234" });
+  state = event(state, "participantRoleChanged", { id: "old1234", role: "moderator" });
+  state = event(state, "participantJoined", { displayName: "Aluna", id: "aluna01" });
+  state = event(state, "videoConferenceLeft", {});
+  assert.equal(state.selfId, null);
+  // A resposta que o iframe que saiu ainda manda (com o proprio console e quem estava) nao muda nada.
+  const afterLeft = model.liveRoomReducer(state, { info: answer("old1234"), type: "roomsInfo" });
+  assert.equal(afterLeft, state);
+  // Entrou de novo com outro id: nenhuma linha do console de antes, nem de quem estava na sala de antes.
+  state = event(afterLeft, "videoConferenceJoined", { id: "new5678" });
+  assert.deepEqual(state.people, []);
+  assert.deepEqual(state.roles, {});
+  assert.deepEqual(model.roomRows(state, []), []);
+
+  // Dentro da sala de novo, a resposta seguinte vale (o proprio id novo fica fora).
+  state = model.liveRoomReducer(state, { info: answer("new5678"), type: "roomsInfo" });
+  assert.deepEqual(
+    model.roomRows(state, []).map((row) => [row.id, row.name, row.staff]),
+    [["aluna01", "Aluna", false]]
+  );
+});
+
 test("vigia da tela: so quem compartilha com papel conhecido de nao moderador e sem liberacao tem a tela parada; o id sem papel (quem ja moderava quando o console entrou) espera o papel", () => {
   const base = { grants: [], justGranted: [], roles: {}, selfId: "p-eu", sharing: [] };
   const stop = (extra) => model.screenSharesToStop({ ...base, ...extra });
@@ -501,7 +530,7 @@ test("vigia da tela: so quem compartilha com papel conhecido de nao moderador e 
   assert.deepEqual(stop({ grants: ["p-ana"], roles: { "p-ana": "participant" }, sharing: ["p-ana"] }), [], "a liberada continua");
   assert.deepEqual(stop({ justGranted: ["p-ana"], roles: { "p-ana": "participant" }, sharing: ["p-ana"] }), [], "a recem liberada continua");
   assert.deepEqual(stop({ roles: { "p-ana": "participant" }, sharing: [] }), [], "ninguem compartilhando: ninguem");
-  assert.deepEqual(stop({ roles: { constructor: "participant" }, sharing: ["toString"] }), [], "nome de propriedade do objeto nao vira papel");
+  assert.deepEqual(stop({ roles: Object.create({ "p-ana": "participant" }), sharing: ["p-ana"] }), [], "papel herdado do prototipo nao conta como papel lido");
   assert.deepEqual(
     stop({ roles: { "p-ana": "participant", "p-bia": "participant", "p-co": "moderator" }, sharing: ["p-co", "p-ana", "p-host", "p-bia", "p-eu"] }),
     ["p-ana", "p-bia"],
