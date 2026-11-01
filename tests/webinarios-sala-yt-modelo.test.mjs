@@ -146,3 +146,48 @@ test("railStep (o trilho a direita): o item fechado abre o painel naquela aba, o
   const fechou = passo({});
   assert.equal(model.roomPanelShown({ barShown: true, panelOpen: fechou.panelOpen, settingsTakeover: false }), false);
 });
+
+// Y8: as Perguntas no estilo do YouTube (room-questions-model.ts): o filtro dos chips, o vazio que diz o filtro e a
+// linha de chips que rola de lado.
+const questionsModel = await import("../src/components/member/webinars/room/room-questions-model.ts");
+const { WEBINAR_COPY: COPY } = await import("../src/lib/webinar-copy.ts");
+
+test("questionsShown: Todas mostra tudo; Sem resposta so a aberta (nunca a dispensada); Respondidas so a respondida; Minhas toda minha, inclusive a minha dispensada", () => {
+  const pergunta = (id, status, mine) => ({ id, mine, status });
+  const lista = [pergunta("aberta", "open", false), pergunta("respondida", "answered", false), pergunta("dispensada-minha", "dismissed", true), pergunta("minha-aberta", "open", true)];
+  const ids = (filtro) => questionsModel.questionsShown(lista, filtro).map((item) => item.id);
+  assert.deepEqual(ids("all"), ["aberta", "respondida", "dispensada-minha", "minha-aberta"]);
+  assert.deepEqual(ids("open"), ["aberta", "minha-aberta"], "a dispensada nao e sem resposta");
+  assert.deepEqual(ids("answered"), ["respondida"]);
+  assert.deepEqual(ids("mine"), ["dispensada-minha", "minha-aberta"], "a minha dispensada entra em Minhas");
+  // Uma copia: filtrar nunca mexe na lista lida.
+  assert.notEqual(questionsModel.questionsShown(lista, "all"), lista);
+  assert.equal(lista.length, 4);
+});
+
+test("questionsEmptyPhrase: o vazio diz o filtro; os chips e a ordem tem os nomes das frases", () => {
+  const novas = COPY.salaV2.perguntas;
+  assert.equal(questionsModel.questionsEmptyPhrase("all"), COPY.sala.semPerguntas);
+  assert.equal(questionsModel.questionsEmptyPhrase("open"), "Nenhuma pergunta sem resposta.");
+  assert.equal(questionsModel.questionsEmptyPhrase("answered"), "Nenhuma pergunta respondida ainda.");
+  assert.equal(questionsModel.questionsEmptyPhrase("mine"), "Você ainda não fez perguntas.");
+  assert.deepEqual(questionsModel.QUESTIONS_FILTERS.map(questionsModel.questionsFilterLabel), ["Todas", novas.semResposta, "Respondidas", novas.minhas]);
+  assert.deepEqual(questionsModel.QUESTIONS_ORDERS.map(questionsModel.questionsOrderLabel), ["Mais votadas", "Mais recentes"]);
+});
+
+test("chipArrows: no comeco so a seta da direita, no meio as duas, no fim so a da esquerda e, cabendo, nenhuma (com a folga de 1 px)", () => {
+  const setas = (scrollLeft, clientWidth = 374, scrollWidth = 420) => questionsModel.chipArrows({ clientWidth, scrollLeft, scrollWidth });
+  assert.deepEqual(setas(0), { left: false, right: true }, "no comeco");
+  assert.deepEqual(setas(20), { left: true, right: true }, "no meio");
+  assert.deepEqual(setas(46), { left: true, right: false }, "no fim");
+  assert.deepEqual(setas(45.5), { left: true, right: false }, "o fim com o scrollLeft fracionado");
+  assert.deepEqual(setas(0.5), { left: false, right: true }, "o comeco com o scrollLeft fracionado");
+  assert.deepEqual(setas(0, 420, 420), { left: false, right: false }, "cabendo");
+  assert.deepEqual(setas(0, 500, 420), { left: false, right: false }, "sobrando");
+});
+
+test("chipScrollBy: o clique na seta rola 80 % da largura visivel, para o lado da seta", () => {
+  assert.equal(questionsModel.chipScrollBy({ clientWidth: 374, direction: 1 }), 299);
+  assert.equal(questionsModel.chipScrollBy({ clientWidth: 374, direction: -1 }), -299);
+  assert.equal(questionsModel.chipScrollBy({ clientWidth: 100, direction: 1 }), 80);
+});

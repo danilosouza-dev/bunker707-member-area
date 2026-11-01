@@ -60,6 +60,21 @@ export const SALA_V2_COPY = {
     mostrarComNovas: (novas: string) => `Mostrar o chat, ${novas}`,
     rotulo: "Painel da sala"
   },
+  /**
+   * As Perguntas no estilo do YouTube (a partir de lg): os chips de filtro numa linha so (Todas, Sem resposta,
+   * Respondidas, Minhas; "Todas" e "Respondidas" vem de WEBINAR_COPY.sala.filtros), o grupo "Filtrar perguntas", o
+   * botao de ordenar do cabecalho ("Ordenar perguntas", com Mais votadas e Mais recentes de WEBINAR_COPY.sala.ordem) e
+   * o vazio que diz o filtro (o de "Todas" e WEBINAR_COPY.sala.semPerguntas).
+   */
+  perguntas: {
+    filtrar: "Filtrar perguntas",
+    minhas: "Minhas",
+    ordenar: "Ordenar perguntas",
+    semResposta: "Sem resposta",
+    vazioMinhas: "Você ainda não fez perguntas.",
+    vazioRespondidas: "Nenhuma pergunta respondida ainda.",
+    vazioSemResposta: "Nenhuma pergunta sem resposta."
+  },
   /** Os selos do palco (V2-4): quem apresenta, embaixo a esquerda, sobre o video. */
   selos: {
     apresentador: (nome: string) => `${nome} · Apresentador`

@@ -24,7 +24,8 @@ import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
 import { deferPoll, deferredPollCard, markPollResultSeen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
-import { RoomQuestionsTab } from "./room-questions";
+import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
+import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
@@ -358,6 +359,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [iframe, setIframe] = useState<HTMLIFrameElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<RoomPanelTab>("chat");
+  // As Perguntas no estilo do YouTube: o filtro e a ordem sao da sala (trocar de aba nao os perde) e o numero do
+  // cabecalho e o tamanho da lista com o filtro de agora, nulo ate a primeira leitura.
+  const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
+  const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
+  const [questionsCount, setQuestionsCount] = useState<number | null>(null);
   const [muted, setMuted] = useState(kind === "simulated");
   /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" so volta sem a barra (soundCoverShown). */
   const [soundTouched, setSoundTouched] = useState(false);
@@ -786,6 +792,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         readOnly={readOnly || phase === "ended"}
         sessionId={sessionId}
         webinarId={webinarId}
+        // A gaveta do vertical continua com o filtro e a ordem da aba e o desenho de antes.
+        {...(vertical
+          ? {}
+          : { filter: questionsFilter, look: "comment" as const, onCount: setQuestionsCount, onFilter: setQuestionsFilter, onOrder: setQuestionsOrder, order: questionsOrder })}
       />
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
@@ -974,7 +984,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               pollOpen={openPolls.length > 0}
               tab={tab}
               tabs={tabs}
-              titleCount={tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : null}
+              titleAction={tab === "perguntas" ? <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} /> : undefined}
+              titleCount={
+                tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null
+              }
             >
               {tabContent}
             </RoomPanel>

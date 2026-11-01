@@ -1,7 +1,7 @@
 "use client";
 
-import { ThumbsUp } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { ListSortDescending, ThumbsUp } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
@@ -11,7 +11,21 @@ import { AssistantHint } from "./assistant/assistant-hint";
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
-import { RoomBadge, RoomButton } from "./room-ui";
+import { RoomChip, RoomChipBar } from "./room-chip-bar";
+import { menuOpenKey } from "./room-layout-model";
+import { RoomMenu } from "./room-menu";
+import {
+  QUESTIONS_FILTERS,
+  QUESTIONS_ORDERS,
+  questionsEmptyPhrase,
+  questionsFilterLabel,
+  questionsOrderLabel,
+  questionsShown,
+  type QuestionsFilter,
+  type QuestionsOrder
+} from "./room-questions-model";
+import { RoomTooltip } from "./room-tooltip";
+import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 
 // A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima so quando a equipe deixou ligada), a
 // lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
@@ -23,8 +37,17 @@ import { RoomBadge, RoomButton } from "./room-ui";
 // equipe"; depois de perguntar, "O Assistente esta respondendo..." (com ele ligado e sem atendente para a pergunta)
 // ate a resposta chegar, ou "A equipe responde depois pelo sino" quando ninguem esta atendendo. Redesign V2, F2
 // (docs/31 V2-11): as cores vem dos tokens do tema da sala.
+// A sala no estilo do YouTube (docs/31; spec §7.3): com `look="comment"` (o desenho normal), a partir de lg os filtros
+// viram uma linha so de chips (Todas, Sem resposta, Respondidas, Minhas; RoomChipBar) e a ordem vai para o botao de
+// ordenar do cabecalho do painel (RoomQuestionsOrderButton, com o menu); o vazio diz o filtro. O filtro e a ordem sao
+// da sala (trocar de aba nao os perde), e o numero do cabecalho e o tamanho da lista com o filtro de agora (onCount,
+// so depois da primeira leitura). Abaixo de lg ficam as duas linhas de antes. Sem as props (a gaveta do vertical), o
+// filtro e a ordem sao da aba e o HTML e o de antes.
 
 const REFRESH_MS = 15_000;
+
+/** O id do menu de ordenar (o aria-controls do botao do cabecalho). */
+export const QUESTIONS_ORDER_MENU_ID = "room-questions-order";
 
 /** A pergunta como a rota devolve na fase 4c: de quem e a resposta e se o aluno ja pediu a equipe. */
 export type RoomQuestion = StudentQuestion & { answerSource?: AnswerSource | null; handoffRequested?: boolean };
@@ -81,16 +104,89 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
   );
 }
 
+/**
+ * O ordenar das Perguntas no cabecalho do painel (a partir de lg): o circulo sem fundo com o ListSortDescending, a dica
+ * "Ordenar perguntas" no lugar do title e o menu abaixo, alinhado a direita, com Mais votadas e Mais recentes. O Esc
+ * fecha so o menu e devolve o foco ao botao (nunca chega a sala, que perguntaria se quer sair).
+ */
+export function RoomQuestionsOrderButton({ onOrder, order }: { onOrder: (order: QuestionsOrder) => void; order: QuestionsOrder }) {
+  const copy = WEBINAR_COPY.salaV2.perguntas;
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+
+  /** Fecha e devolve o foco ao botao (no WebKit o toque nao foca o botao, e o foco cairia no body). */
+  function close() {
+    buttonRef.current?.focus();
+    setOpen(false);
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (!open && menuOpenKey(event.key)) {
+      // O Enter e o Espaco nao viram o clique (que fecharia o menu que acabou de abrir): o foco ja vai para a opcao.
+      event.preventDefault();
+      setOpen(true);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <RoomTooltip label={copy.ordenar} side="below">
+        <RoomIconButton
+          aria-controls={QUESTIONS_ORDER_MENU_ID}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className="[&_svg]:size-6"
+          label={copy.ordenar}
+          onClick={() => (open ? close() : setOpen(true))}
+          onKeyDown={onKeyDown}
+          ref={buttonRef}
+          size={40}
+          tone="ghost"
+          withTitle={false}
+        >
+          <ListSortDescending aria-hidden="true" strokeWidth={1.75} />
+        </RoomIconButton>
+      </RoomTooltip>
+      <RoomMenu
+        align="end"
+        groups={[
+          {
+            items: QUESTIONS_ORDERS.map((value) => ({ checked: value === order, key: value, label: questionsOrderLabel(value), onSelect: () => onOrder(value), radio: true }))
+          }
+        ]}
+        id={QUESTIONS_ORDER_MENU_ID}
+        label={copy.ordenar}
+        onClose={() => setOpen(false)}
+        open={open}
+        placement="below"
+        triggerRef={buttonRef}
+      />
+    </div>
+  );
+}
+
 export function RoomQuestionsTab({
   allowAnonymous,
   assistant: sharedAssistant,
   consented,
   defaultDisplayMode,
   enabled,
+  filter: filterProp,
   getOffsetMs,
+  look = "classic",
   notice = null,
   onConsented,
+  onCount,
+  onFilter,
+  onOrder,
   onRefused,
+  order: orderProp,
   readOnly,
   sessionId,
   webinarId
@@ -101,13 +197,23 @@ export function RoomQuestionsTab({
   consented: boolean;
   defaultDisplayMode: DisplayNameMode;
   enabled: boolean;
+  /** O filtro, quando e da sala (o desenho normal); sem ele, o filtro e da aba (a gaveta do vertical). */
+  filter?: QuestionsFilter;
   getOffsetMs: () => number;
+  /** "comment": os chips a partir de lg (o desenho normal); "classic": as duas linhas de antes (a gaveta do vertical). */
+  look?: "classic" | "comment";
   /** Fase 3: a frase que toma o lugar do campo (silenciado no chat, sala que ainda nao abriu). */
   notice?: string | null;
   /** O aceite foi gravado junto da pergunta: a sala relê a sessao para o chat saber. */
   onConsented: () => void;
+  /** O tamanho da lista com o filtro de agora (o numero do cabecalho), depois da primeira leitura. */
+  onCount?: (count: number) => void;
+  onFilter?: (filter: QuestionsFilter) => void;
+  onOrder?: (order: QuestionsOrder) => void;
   /** Fase 3: uma escrita recusada (409 banned / muted) e contada a sala. */
   onRefused?: (error: unknown) => void;
+  /** A ordem, quando e da sala; sem ela, a ordem e da aba. */
+  order?: QuestionsOrder;
   readOnly: boolean;
   sessionId: string;
   webinarId: string;
@@ -116,9 +222,14 @@ export function RoomQuestionsTab({
   const ownAssistant = useRoomAssistant({ enabled: ownAssistantEnabled({ enabled, readOnly, shared: sharedAssistant }), sessionId, webinarId });
   const assistant = sharedAssistant ?? ownAssistant;
   const [questions, setQuestions] = useState<RoomQuestion[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"answered" | "all">("all");
-  const [order, setOrder] = useState<"recentes" | "votadas">("votadas");
+  const [ownFilter, setOwnFilter] = useState<QuestionsFilter>("all");
+  const [ownOrder, setOwnOrder] = useState<QuestionsOrder>("votadas");
+  const filter = filterProp ?? ownFilter;
+  const order = orderProp ?? ownOrder;
+  const setFilter = onFilter ?? setOwnFilter;
+  const setOrder = onOrder ?? setOwnOrder;
   const [draft, setDraft] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -129,6 +240,7 @@ export function RoomQuestionsTab({
     try {
       const answer = await getQuestions(webinarId, sessionId, order);
       setQuestions(answer.data.questions as RoomQuestion[]);
+      setLoaded(true);
     } catch {
       // A proxima leitura vem em 15 s.
     }
@@ -219,13 +331,32 @@ export function RoomQuestionsTab({
     }
   }
 
-  const visible = filter === "answered" ? questions.filter((question) => question.status === "answered") : questions;
+  const visible = questionsShown(questions, filter);
   const waitedQuestion = waiting ? questions.find((question) => question.id === waiting) : null;
   const waitingNow = Boolean(waitedQuestion && waitedQuestion.status === "open");
+  const visibleCount = visible.length;
+
+  // O numero do cabecalho: so depois da primeira leitura, e a sala so pinta de novo quando ele muda.
+  useEffect(() => {
+    if (loaded) {
+      onCount?.(visibleCount);
+    }
+  }, [loaded, onCount, visibleCount]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-questions">
-      <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
+      {look === "comment" ? (
+        <div className="hidden shrink-0 lg:block">
+          <RoomChipBar label={WEBINAR_COPY.salaV2.perguntas.filtrar} role="group" selectedKey={filter} variant="panel">
+            {QUESTIONS_FILTERS.map((value) => (
+              <RoomChip as="toggle" key={value} onClick={() => setFilter(value)} selected={filter === value}>
+                {questionsFilterLabel(value)}
+              </RoomChip>
+            ))}
+          </RoomChipBar>
+        </div>
+      ) : null}
+      <div className={cn("flex flex-wrap items-center gap-1.5 px-3 pt-2", look === "comment" ? "lg:hidden" : null)}>
         <div aria-label={copy.filtros.todas} className="flex gap-1" role="group">
           {(["all", "answered"] as const).map((value) => (
             <button aria-pressed={filter === value} className={pillClassName(filter === value)} key={value} onClick={() => setFilter(value)} type="button">
@@ -242,7 +373,13 @@ export function RoomQuestionsTab({
         </div>
       </div>
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-        {visible.length === 0 ? <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li> : null}
+        {visible.length === 0 ? (
+          look === "comment" ? (
+            <li className="mt-6 text-center text-sm leading-5 text-room-fg-subtle">{questionsEmptyPhrase(filter)}</li>
+          ) : (
+            <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li>
+          )
+        ) : null}
         {visible.map((question) => (
           <RoomQuestionItem
             footer={

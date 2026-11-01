@@ -55,6 +55,9 @@ import {
 // estava aberta, as 2 ultimas mensagens ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome
 // do Chat do trilho ("Chat, 1 mensagem nova") e reabrir tira o contador. O trilho: o item Perguntas abre o painel na
 // aba e, aberto, fecha com o foco nele; com o painel em Perguntas a mensagem nova tambem entra no Chat do trilho.
+// As Perguntas no estilo do YouTube (Y8): a linha de chips que rola de lado (a seta e o Tab trazem o chip escondido, e
+// o escolhido fica inteiro na vista) e o ordenar do cabecalho com o menu (o Esc fecha so o menu); o filtro e a ordem
+// sao da sala e continuam depois de trocar de aba.
 // A enquete no palco (docs/31 V2-10): aberta pela equipe, ela abre centrada dentro do palco mesmo com o painel fechado,
 // sem pegar o foco; "Responder depois" a recolhe para o card "Enquete aberta · você deixou para depois" do chat (o
 // foco vai ao Chat do trilho), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
@@ -566,6 +569,89 @@ test("o trilho a direita (a sala no estilo do YouTube): o item Perguntas abre o 
   await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
   await expect(chatDoTrilho.locator("[data-room-unread]")).toHaveCount(0);
   await expect(chat.getByRole("log").getByText("nova do produtor com as Perguntas abertas")).toBeVisible();
+});
+
+test("as Perguntas no estilo do YouTube (Y8): a 1280 o chip Minhas fica fora da vista e chega pela seta e pelo Tab, e escolhido fica inteiro na vista; a 1440 o ordenar do cabecalho abre o menu, o Esc fecha so o menu com o foco de volta ao botao, e trocar de aba nao perde o filtro nem a ordem", async ({ page }) => {
+  const abas = WEBINAR_COPY.sala.abas;
+  const novas = WEBINAR_COPY.salaV2.perguntas;
+  const ordem = WEBINAR_COPY.sala.ordem;
+  await page.setViewportSize({ height: 800, width: 1280 });
+  const { dialogo } = await entrarNaSala(page);
+  const painel = dialogo.getByTestId("room-panel");
+  await itemDoTrilho(dialogo, abas.perguntas).click();
+  await expect(painel.getByRole("heading", { level: 2, name: abas.perguntas })).toBeVisible();
+
+  // A linha de chips (Todas, Sem resposta, Respondidas, Minhas) nao cabe no painel de 352 px: Minhas fica fora da vista.
+  const filtros = painel.getByRole("group", { name: novas.filtrar });
+  await expect(filtros.getByRole("button")).toHaveText([WEBINAR_COPY.sala.filtros.todas, novas.semResposta, WEBINAR_COPY.sala.filtros.respondidas, novas.minhas]);
+  const todas = filtros.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.filtros.todas });
+  const minhas = filtros.getByRole("button", { exact: true, name: novas.minhas });
+  await expect(todas).toHaveAttribute("aria-pressed", "true");
+  /** O chip inteiro dentro da caixa que rola. */
+  const inteiroNaVista = (chip: Locator) =>
+    chip.evaluate((element) => {
+      const caixa = element.closest('[role="group"]')?.getBoundingClientRect();
+      const chipBox = element.getBoundingClientRect();
+      return Boolean(caixa) && chipBox.left >= (caixa?.left ?? 0) - 0.5 && chipBox.right <= (caixa?.right ?? 0) + 0.5;
+    });
+  await expect.poll(() => inteiroNaVista(minhas)).toBe(false);
+  const setaDireita = painel.locator('[data-room-chip-arrow="right"]');
+  const setaEsquerda = painel.locator('[data-room-chip-arrow="left"]');
+  await expect(setaDireita).toBeVisible();
+  await expect(setaEsquerda).toHaveCount(0);
+
+  // A seta da direita (so do ponteiro: fora do Tab e do leitor de tela) traz Minhas; no fim, so a seta da esquerda.
+  await expect(setaDireita).toHaveAttribute("aria-hidden", "true");
+  await expect(setaDireita).toHaveAttribute("tabindex", "-1");
+  await setaDireita.click();
+  await expect.poll(() => inteiroNaVista(minhas)).toBe(true);
+  await expect(setaDireita).toHaveCount(0);
+  await expect(setaEsquerda).toBeVisible();
+  await setaEsquerda.click();
+  await expect.poll(() => inteiroNaVista(minhas)).toBe(false);
+
+  // Pelo Tab tambem: o chip focado rola para a vista.
+  await todas.focus();
+  for (let vez = 0; vez < 3; vez += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(minhas).toBeFocused();
+  await expect.poll(() => inteiroNaVista(minhas)).toBe(true);
+
+  // Escolhido, Minhas fica ligado e inteiro na vista, e so ele.
+  await page.keyboard.press("Enter");
+  await expect(minhas).toHaveAttribute("aria-pressed", "true");
+  await expect(todas).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => inteiroNaVista(minhas)).toBe(true);
+
+  // A 1440, o ordenar do cabecalho: o menu abre com o foco na ordem marcada; o Esc fecha so o menu (nada de "sair da
+  // sala") e o foco volta ao botao.
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const ordenar = painel.getByRole("button", { exact: true, name: novas.ordenar });
+  await expect(ordenar).toHaveAttribute("aria-haspopup", "menu");
+  await ordenar.click();
+  const menu = dialogo.getByRole("menu", { name: novas.ordenar });
+  await expect(menu).toBeVisible();
+  await expect(ordenar).toHaveAttribute("aria-expanded", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(ordenar).toBeFocused();
+  await expect(ordenar).toHaveAttribute("aria-expanded", "false");
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+
+  // Mais recentes, escolhida, fecha o menu; trocar de aba e voltar nao perde a ordem nem o filtro (sao da sala).
+  await ordenar.click();
+  await menu.getByRole("menuitemradio", { exact: true, name: ordem.maisRecentes }).click();
+  await expect(menu).toBeHidden();
+  await itemDoTrilho(dialogo, abas.chat).click();
+  await expect(painel.getByRole("heading", { level: 2, name: abas.chat })).toBeVisible();
+  await itemDoTrilho(dialogo, abas.perguntas).click();
+  await expect(minhas).toHaveAttribute("aria-pressed", "true");
+  await ordenar.click();
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisRecentes })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toHaveAttribute("aria-checked", "false");
 });
 
 test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {

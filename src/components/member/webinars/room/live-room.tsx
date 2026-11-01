@@ -69,7 +69,8 @@ import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
 import { deferPoll, deferredPollCard, markPollResultSeen, pollToReopen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
-import { RoomQuestionsTab } from "./room-questions";
+import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
+import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomStageBadges } from "./room-stage-badges";
@@ -252,6 +253,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<RoomPanelTab>("chat");
+  // As Perguntas no estilo do YouTube: o filtro e a ordem sao da sala (trocar de aba nao os perde) e o numero do
+  // cabecalho e o tamanho da lista com o filtro de agora, nulo ate a primeira leitura.
+  const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
+  const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
+  const [questionsCount, setQuestionsCount] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
@@ -992,7 +998,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               pollOpen={openPolls.length > 0}
               tab={tab}
               tabs={tabs}
-              titleCount={tab === "participantes" ? presentShown : tab === "enquetes" ? openPolls.length : null}
+              titleAction={tab === "perguntas" ? <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} /> : undefined}
+              titleCount={tab === "participantes" ? presentShown : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null}
             >
               {tab === "chat" ? (
                 <>
@@ -1039,10 +1046,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                   enabled={!readOnly}
+                  filter={questionsFilter}
                   getOffsetMs={getOffsetMs}
+                  look="comment"
                   notice={readOnly ? null : composerNotice}
                   onConsented={() => void refreshSession()}
+                  onCount={setQuestionsCount}
+                  onFilter={setQuestionsFilter}
+                  onOrder={setQuestionsOrder}
                   onRefused={onWriteRefused}
+                  order={questionsOrder}
                   readOnly={readOnly || phase === "ended"}
                   sessionId={sessionId}
                   webinarId={webinarId}
