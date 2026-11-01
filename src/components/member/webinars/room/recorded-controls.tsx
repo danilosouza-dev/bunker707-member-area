@@ -11,8 +11,9 @@ import { RoomReactionBar } from "./room-reactions";
 // fileira fixa de reacoes embaixo do palco: o Sair (a partir de lg; abaixo, no cabecalho), Reagir (as seis reacoes num
 // painel por cima do palco no computador, no fluxo acima da barra no celular), o Som so na gravada (o player travado
 // nao tem barra; o mesmo mudo do "Ativar som"), a Tela cheia do palco so com o navegador que deixa, e o balao que abre e
-// fecha o painel do chat. Sem Configurações (nao ha aparelhos) e sem a visao do video. O desenho vertical 9:16 continua
-// com o compositor dele (docs/30 §1.6). Nada aqui fala com a rede: a sala grava a reacao e manda o mudo ao player.
+// fecha o painel do chat, so abaixo de lg (a partir de lg, o trilho a direita, room-rail.tsx). Sem Configurações (nao
+// ha aparelhos) e sem a visao do video. O desenho vertical 9:16 continua com o compositor dele (docs/30 §1.6). Nada
+// aqui fala com a rede: a sala grava a reacao e manda o mudo ao player.
 
 /** O painel das reacoes da gravada e do Replay (o botao Reagir aponta para ele). */
 export const ROOM_REACTIONS_ID = "room-reactions";
@@ -76,7 +77,7 @@ export function RecordedControls(props: RecordedControlsProps) {
           />
         );
       case "panel":
-        return <RoomPanelToggle firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
+        return <RoomPanelToggle className="lg:hidden" firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
       default:
         return null;
     }

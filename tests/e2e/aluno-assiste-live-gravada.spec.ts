@@ -17,7 +17,8 @@ import { ROOM_THEME_KEY } from "../../src/lib/webinar-room-prefs";
 // cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
 // deitado, volta ao desenho normal com as abas, sem trocar de sala. O tema claro guardado (docs/31 V2-12) so vale no
 // desenho normal: o vertical fica sobre o video e e sempre escuro, e girar troca o tema junto com o desenho.
-// A barra do desenho normal (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava; o balao esconde e mostra o chat.
+// A barra do desenho normal (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava; a 1280 px o Chat do trilho a
+// direita (a sala no estilo do YouTube) esconde e mostra o chat.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
@@ -122,7 +123,7 @@ test("a mensagem nova: o aceite na primeira (o texto de §8.5), a mensagem apare
   await expect(sala.getByRole("group", { name: /Ao enviar mensagens neste chat/ })).toHaveCount(0);
 });
 
-test("no desenho normal, a barra da sala (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava pela nossa rota; o Esc fecha as reacoes antes de pedir para sair; o balao esconde e mostra o chat", async ({ page }) => {
+test("no desenho normal, a barra da sala (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava pela nossa rota; o Esc fecha as reacoes antes de pedir para sair; a 1280 px o Chat do trilho esconde e mostra o chat (o balao fica so abaixo de lg)", async ({ page }) => {
   const sala = await entrarNaSala(page);
   await expect(sala).toHaveAttribute("data-room-design", "normal");
   // As reacoes so abrem pelo Reagir (a fileira fixa embaixo do palco saiu).
@@ -138,14 +139,22 @@ test("no desenho normal, a barra da sala (docs/31 V2-6): Reagir abre as seis rea
   await expect(sala.locator("#room-reactions")).toHaveCount(0);
   await expect(sala.getByRole("alertdialog", { name: "Sair da sala?" })).toHaveCount(0);
 
-  // O balao: Esconder o chat esconde o painel (montado); Mostrar o chat reabre.
+  // A 1280 px (o padrao do projeto) o trilho a direita abre e fecha o painel: o Chat aberto esconde o painel (montado) e
+  // o mesmo item o reabre; o balao da barra fica so abaixo de lg. Com a sessao gravada, o trilho tem Participantes.
   const painel = WEBINAR_COPY.salaV2.painel;
   const chat = sala.getByTestId("room-panel");
-  await sala.getByRole("button", { exact: true, name: painel.esconder }).click();
+  const trilho = sala.getByRole("navigation", { name: painel.rotulo });
+  await expect(trilho.getByRole("button")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+  await expect(sala.getByRole("button", { exact: true, name: painel.esconder })).toBeHidden();
+  const chatDoTrilho = trilho.getByRole("button", { name: new RegExp(`^${WEBINAR_COPY.sala.abas.chat}`) });
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+  await chatDoTrilho.click();
   await expect(chat).toBeHidden();
   await expect(chat).toHaveCount(1);
-  await sala.getByRole("button", { exact: true, name: painel.mostrar }).click();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "false");
+  await chatDoTrilho.click();
   await expect(chat).toBeVisible();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
 });
 
 test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live", async ({ page }) => {

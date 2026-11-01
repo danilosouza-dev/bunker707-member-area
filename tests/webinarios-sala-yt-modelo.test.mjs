@@ -5,7 +5,8 @@ import "./support/transpile-tsx.mjs";
 // A sala no estilo do YouTube (docs/31; docs/18 §2.2), as regras puras, sem navegador: as teclas dos menus da sala
 // (menuKeyStep e menuOpenKey, o RoomMenu) e o tempo da dica (tooltipStep, a RoomTooltip: aparece em 150 ms, some em 75
 // so quando o ponteiro e o foco do teclado saem, o ponteiro pode ir ate ela e o Esc so para ali quando ela estava na
-// tela). As fatias seguintes acrescentam aqui as regras delas.
+// tela), e o toque no trilho a direita (railStep: abre naquela aba, fecha no item aberto so com a barra na tela). As
+// fatias seguintes acrescentam aqui as regras delas.
 
 const model = await import("../src/components/member/webinars/room/room-layout-model.ts");
 
@@ -117,4 +118,31 @@ test("tooltipStep: o Esc esconde na hora e so para ali (stopped) quando a dica e
   // Ainda esperando para aparecer: a espera acaba, e o Esc segue (a sala fecha a camada de cima ou pergunta se quer sair).
   assert.deepEqual(model.tooltipStep("showing", { kind: "escape" }), { delayMs: null, state: "hidden", stopped: false });
   assert.deepEqual(model.tooltipStep("hidden", { kind: "escape" }), { delayMs: null, state: "hidden", stopped: false });
+});
+
+test("railStep (o trilho a direita): o item fechado abre o painel naquela aba, outro item troca a aba e mantem aberto, o item aberto fecha; sem a barra (encerrada) o item aberto nao fecha", () => {
+  const passo = (extra) => model.railStep({ closable: true, item: "chat", panelShown: true, tab: "chat", ...extra });
+
+  // O painel fechado: qualquer item abre o painel na aba dele (tambem o da aba que estava escolhida antes de fechar).
+  assert.deepEqual(passo({ item: "perguntas", panelShown: false, tab: "chat" }), { panelOpen: true, tab: "perguntas" });
+  assert.deepEqual(passo({ item: "chat", panelShown: false, tab: "chat" }), { panelOpen: true, tab: "chat" }, "a aba de antes, com o painel fechado, abre");
+  // O painel aberto noutra aba: troca a aba e continua aberto (nunca fecha e abre de novo).
+  assert.deepEqual(passo({ item: "participantes", tab: "chat" }), { panelOpen: true, tab: "participantes" });
+  assert.deepEqual(passo({ item: "chat", tab: "enquetes" }), { panelOpen: true, tab: "chat" });
+  // O item da aba que esta na tela fecha o painel, com a barra na tela; a aba fica, para reabrir no mesmo lugar.
+  assert.deepEqual(passo({ item: "perguntas", tab: "perguntas" }), { panelOpen: false, tab: "perguntas" });
+  assert.deepEqual(passo({}), { panelOpen: false, tab: "chat" });
+
+  // Sem a barra (a sessao encerrada) o painel fica sempre na tela: o toque no item aberto nao fecha nada (a regra antiga
+  // do balao, setPanelOpen(!panelOpen), deixaria o painel fechado sem nenhum jeito de reabrir).
+  assert.deepEqual(passo({ closable: false }), { panelOpen: true, tab: "chat" });
+  assert.deepEqual(passo({ closable: false, item: "perguntas", tab: "perguntas" }), { panelOpen: true, tab: "perguntas" });
+  // E continua trocando de aba.
+  assert.deepEqual(passo({ closable: false, item: "perguntas" }), { panelOpen: true, tab: "perguntas" });
+
+  // Depois do passo, o painel na tela pela regra da sala (roomPanelShown): o fechar so vale com a barra.
+  const encerrada = passo({ closable: false });
+  assert.equal(model.roomPanelShown({ barShown: false, panelOpen: encerrada.panelOpen, settingsTakeover: false }), true);
+  const fechou = passo({});
+  assert.equal(model.roomPanelShown({ barShown: true, panelOpen: fechou.panelOpen, settingsTakeover: false }), false);
 });

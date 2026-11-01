@@ -360,6 +360,41 @@ test("returnFocusFromPanel: o painel fechou com o foco nele (ou no body): o foco
   assert.equal(salaAoVivo.returnFocusFromPanel(null, aba, painel), false);
 });
 
+test("returnFocusFromPanel com a aba (o trilho a direita, a partir de lg): o X fechou o painel em Perguntas e o foco vai ao item Perguntas do trilho, nao ao primeiro que controla o painel", () => {
+  const focados = [];
+  const no = (nome, extra = {}) => ({ focus: () => focados.push(nome), nome, offsetParent: {}, ...extra });
+  const fechar = no("X Fechar o painel");
+  const balao = no("balao", { offsetParent: null });
+  const trilhoChat = no("trilho Chat");
+  const trilhoPerguntas = no("trilho Perguntas");
+  const tema = no("Tema claro");
+  const painel = { contains: (node) => node === fechar };
+  // A ordem do DOM: o balao (lg:hidden a partir de lg) e depois os itens do trilho, que tambem controlam o painel.
+  const raiz = ({ perguntas = [trilhoPerguntas] } = {}) => ({
+    contains: (node) => [fechar, balao, trilhoChat, trilhoPerguntas, tema].includes(node),
+    querySelectorAll: (selector) =>
+      selector === '[data-room-rail="perguntas"]'
+        ? perguntas
+        : selector === '[aria-controls="room-panel"]'
+          ? [balao, trilhoChat, ...perguntas]
+          : selector === salaAoVivo.ROOM_FOCUSABLE
+            ? [tema]
+            : []
+  });
+
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), fechar, painel, "perguntas"), true);
+  assert.deepEqual(focados, ["trilho Perguntas"], "o item da aba que estava aberta");
+  // Sem a aba (o painel fechado pelo balao no celular), o primeiro na tela que controla o painel: o Chat do trilho aqui.
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), fechar, painel), true);
+  assert.equal(focados.at(-1), "trilho Chat");
+  // O item da aba fora da tela (abaixo de lg o trilho some): cai no primeiro que controla o painel na tela.
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ perguntas: [{ ...trilhoPerguntas, offsetParent: null }] }), fechar, painel, "perguntas"), true);
+  assert.equal(focados.at(-1), "trilho Chat");
+  // O foco no proprio item do trilho que fechou o painel fica la (o item fecha o painel com o foco nele).
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), trilhoPerguntas, painel, "perguntas"), false);
+  assert.equal(focados.length, 3);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador do balao, o primeiro foco e as pilulas do chat
  * ---------------------------------------------------------------------------------------------- */

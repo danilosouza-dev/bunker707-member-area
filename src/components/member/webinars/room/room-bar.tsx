@@ -146,10 +146,12 @@ export function RoomLeaveButton({ onLeave }: { onLeave: () => void }) {
  * circulo claro, so na tela) e se chama "Esconder o chat"; fechado, "Mostrar o chat" e, com mensagens novas de outras
  * pessoas desde que fechou, o contador vermelho no canto (o numero so na tela; o leitor de tela ouve "Mostrar o chat, 3
  * mensagens novas"). O estado vai em aria-expanded com o aria-controls do painel: o nome e a acao, o expanded e o
- * estado. Com o painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida). No console, o painel
- * dele (`controls`) e as frases dele (`labels`: "Esconder o painel" e "Mostrar o painel").
+ * estado. Com o painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida). Na sala no estilo
+ * do YouTube o balao fica so abaixo de lg (`className`); a partir de lg o trilho a direita (room-rail.tsx) faz o papel
+ * dele. No console, o painel dele (`controls`) e as frases dele (`labels`: "Esconder o painel" e "Mostrar o painel").
  */
 export function RoomPanelToggle({
+  className,
   controls = ROOM_PANEL_ID,
   firstFocus = false,
   labels = WEBINAR_COPY.salaV2.painel,
@@ -157,6 +159,8 @@ export function RoomPanelToggle({
   open,
   unread = 0
 }: {
+  /** As classes da largura: na sala o balao fica so abaixo de lg (a partir de lg, o trilho abre e fecha o painel). */
+  className?: string;
   controls?: string;
   firstFocus?: boolean;
   labels?: { esconder: string; mostrar: string; mostrarComNovas: (novas: string) => string };
@@ -168,7 +172,7 @@ export function RoomPanelToggle({
   const count = open ? 0 : Math.max(0, Math.floor(unread));
   const label = open ? copy.esconder : count > 0 ? copy.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(count)) : copy.mostrar;
   return (
-    <RoomBarButton active={open} controls={controls} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
+    <RoomBarButton active={open} className={className} controls={controls} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
       <RoomCountBadge count={count} />
     </RoomBarButton>
   );

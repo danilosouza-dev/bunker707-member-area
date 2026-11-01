@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 // painel e do palco, que um teste de tela nao alcanca (o servidor pinta o computador e nada aberto: sem o celular com
 // Configurações aberto, sem o painel fechado e sem o card da Oferta). O comportamento de cada regra fica em
 // tests/webinarios-sala-v2-modelo.test.mjs (roomPanelShown, panelToggleStep, liveSkeletonState, panelTabsFor,
-// chatPillsShown, firstFocusTarget, panelUnreadMark, offerOnScreen e stageAssistantShown); o e2e da sala ao vivo abre
+// chatPillsShown, firstFocusTarget, panelUnreadMark, offerOnScreen e stageAssistantShown) e o do trilho a direita em
+// tests/webinarios-sala-yt-modelo.test.mjs (railStep); o e2e da sala ao vivo abre
 // Configurações no celular em pe e deitado e fecha o painel pelo X. Aqui so se confere que live-room.tsx,
 // webinar-room.tsx e room-offer.tsx usam as regras, e nao uma copia delas.
 
@@ -31,10 +32,27 @@ test("o painel do chat e o palco da live saem das regras puras: o takeover do ce
   assert.doesNotMatch(room, /LiveChatOverlay/, "o chat por cima do palco so no celular saiu");
 });
 
-test("o balao com Configurações aberto no celular: fecha Configurações e mostra o chat; a aba nunca abre nem fecha o painel (V2-7)", () => {
+test("o balao com Configurações aberto no celular: fecha Configurações e mostra o chat; a aba da linha so troca de aba; o trilho abre e fecha pela regra pura (railStep) nas duas salas", () => {
   assert.match(room, /function togglePanel\(\) \{\s*const step = panelToggleStep\(\{ panelShown, settingsTakeover \}\);\s*if \(step\.closeSettings\) \{\s*closeSettings\(\);\s*\}\s*setPanelOpen\(step\.panelOpen\);\s*\}/);
   assert.doesNotMatch(room, /setPanelOpen\(!panelOpen\)/, "a aba de baixo que abria e fechava saiu: o balao manda");
   assert.match(room, /onTab=\{setTab\}/);
+  // O trilho a direita (a partir de lg): o item abre naquela aba e, aberto, fecha so com a barra na tela (railStep), nunca
+  // por um setPanelOpen(!panelOpen) que fecharia o painel da sessao encerrada sem jeito de reabrir.
+  for (const [nome, fonte] of [
+    ["live-room", room],
+    ["webinar-room", recorded]
+  ]) {
+    assert.match(fonte, /function onRail\(item: RoomPanelTab\) \{\s*const step = railStep\(\{ closable: barShown, item, panelShown, tab \}\);\s*setTab\(step\.tab\);\s*setPanelOpen\(step\.panelOpen\);/, nome);
+    assert.match(fonte, /<RoomRail kind=\{?[^ ]+ onItem=\{onRail\} panelShown=\{panelShown\} pollOpen=\{openPolls\.length > 0\} tab=\{tab\} tabs=\{tabs\} unread=\{unread\} \/>/, nome);
+    // O X devolve o foco ao item do trilho da aba que estava aberta.
+    assert.match(fonte, /returnFocusFromPanel\(rootRef\.current, document\.activeElement, document\.getElementById\(ROOM_PANEL_ID\), tab\);/, nome);
+  }
+  // O trilho fica com o painel: na live, fora da frase de removido ou banido; na gravada, nunca no vertical nem fora do
+  // acesso (D41).
+  assert.match(room, /\{blocked \? null : \(\s*<>\s*\{\s*\}\s*<RoomPanel[\s\S]*?<\/RoomPanel>\s*\{\s*\}\s*<RoomRail /);
+  assert.match(recorded, /\{vertical \|\| unavailable \? null : \(\s*<>\s*\{\s*\}\s*<RoomPanel[\s\S]*?<\/RoomPanel>\s*\{\s*\}\s*<RoomRail /);
+  assert.equal(room.match(/<RoomRail /g)?.length, 1);
+  assert.equal(recorded.match(/<RoomRail /g)?.length, 1);
 });
 
 test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foco, o contador do balao e o X (V2-7 e V2-8)", () => {
@@ -48,7 +66,9 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
     assert.match(fonte, /panelFirstFocus=\{firstFocus === "panel-toggle"\}/, nome);
     assert.match(fonte, /panelUnread=\{unread\}/, nome);
     assert.match(fonte, /<RoomPanel\s+className=\{skeleton\.panel\}\s+closable=\{barShown\}[\s\S]*?firstFocus=\{firstFocus === "tab"\}\s+id=\{ROOM_PANEL_ID\}[\s\S]*?onClose=\{\(\) => setPanelOpen\(false\)\}[\s\S]*?open=\{panelShown\}/, nome);
-    assert.match(fonte, /const unread = useRoomPanelUnread\(\{ chatLoaded: chat\.loaded, kind[^,]*, messages: translation\.messages, offsetMs: [^,]+, panelShown \}\);/, nome);
+    // O contador do balao e do Chat do trilho conta enquanto o Chat nao esta na tela (o painel fechado ou noutra aba).
+    assert.match(fonte, /const chatShown = panelShown && tab === "chat";/, nome);
+    assert.match(fonte, /const unread = useRoomPanelUnread\(\{ chatLoaded: chat\.loaded, kind[^,]*, messages: translation\.messages, offsetMs: [^,]+, chatShown \}\);/, nome);
   }
   // A live diz que e a live: o contador dela conta so pelos ids (panelUnreadMark), porque o zero do offset anda.
   assert.match(room, /useRoomPanelUnread\(\{ chatLoaded: chat\.loaded, kind: "live",/);

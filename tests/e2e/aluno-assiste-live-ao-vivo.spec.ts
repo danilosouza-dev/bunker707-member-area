@@ -47,21 +47,23 @@ import {
 // O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
 // recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
 // cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
-// A barra (docs/31 V2-6 a V2-8): no computador o Sair fica nela e o balao "Esconder o chat" esconde o painel (o palco
-// cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe (a 360 px
-// tambem), os circulos tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
-// O painel fechado (docs/31 V2-7 e V2-8): o X "Fechar o painel" fecha e devolve o foco ao balao, as 2 ultimas mensagens
-// ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome do balao ("Mostrar o chat, 1 mensagem
-// nova") e reabrir tira o contador.
+// A barra (docs/31 V2-6 a V2-8; a sala no estilo do YouTube): no computador o Sair fica nela e o Chat do trilho a
+// direita esconde o painel (o palco cresce, o iframe nao remonta), guardado ao recarregar; o mesmo item reabre. A 375
+// px o trilho sai e o balao volta a barra, que cabe (a 360 px tambem), os circulos tem 44 px e a Tela cheia (ou o Modo
+// cinema) fica no canto do palco.
+// O painel fechado (docs/31 V2-7 e V2-8): o X "Fechar o painel" fecha e devolve o foco ao item do trilho da aba que
+// estava aberta, as 2 ultimas mensagens ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome
+// do Chat do trilho ("Chat, 1 mensagem nova") e reabrir tira o contador. O trilho: o item Perguntas abre o painel na
+// aba e, aberto, fecha com o foco nele; com o painel em Perguntas a mensagem nova tambem entra no Chat do trilho.
 // A enquete no palco (docs/31 V2-10): aberta pela equipe, ela abre centrada dentro do palco mesmo com o painel fechado,
 // sem pegar o foco; "Responder depois" a recolhe para o card "Enquete aberta · você deixou para depois" do chat (o
-// foco vai ao balao), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
+// foco vai ao Chat do trilho), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
 // "Enviar resposta" grava pela nossa rota (201) e a aba Enquetes diz "Resposta enviada".
 // A Visão do vídeo (docs/31 V2-16 e V2-A5): Grade vai por setTileView(true) sem remontar o iframe; o botao diz o que o
 // motor mostra (o tileViewChanged), nunca a escolha guardada; o Esc no menu so fecha o menu; ao recarregar e entrar, a
-// Grade guardada volta depois do videoConferenceJoined. A 1280 px com o painel aberto o iframe fica abaixo de 1013 px e
-// a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna quando o motor confirma); com o
-// painel fechado ela volta.
+// Grade guardada volta depois do videoConferenceJoined. Com o painel aberto (a grade do YouTube, V2-A53) o iframe fica
+// abaixo de 1013 px ja a 1440 px e a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna
+// quando o motor confirma); com o painel fechado pelo trilho ela volta.
 // O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
 // mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe; o foco que estava nele volta para a sala.
 
@@ -113,6 +115,14 @@ async function entrarNaSala(page: Page, opcoes: Parameters<typeof salaFalsaDoJit
   await expect(page.getByRole("button", { name: /IA Diretor/ })).toHaveCount(0);
 
   return { dialogo, montagem, sala };
+}
+
+/**
+ * O item do trilho a direita (a sala no estilo do YouTube, a partir de lg) pelo comeco do nome: o rotulo da aba, e no
+ * Chat com mensagens novas, "Chat, 1 mensagem nova".
+ */
+function itemDoTrilho(dialogo: Locator, rotulo: string) {
+  return dialogo.getByRole("navigation", { name: WEBINAR_COPY.salaV2.painel.rotulo }).getByRole("button", { name: new RegExp(`^${rotulo}`) });
 }
 
 test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camera com o aviso, mao levantada, o microfone liberado com Falar e recolhido pela equipe; nada cita o Jitsi", async ({ page }) => {
@@ -341,7 +351,7 @@ test("o tema: Tema claro troca a sala na hora e fica guardado ao recarregar; o i
   expect(await sala.montagens()).toBe(1);
 });
 
-test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat esconde o painel e o palco cresce sem remontar o iframe; recarregar mantem fechado e Mostrar o chat reabre; o Sair fica na barra; a 375 px a barra cabe, os circulos tem 44 px e a Tela cheia fica no palco", async ({ page }) => {
+test("o trilho e o balao do chat (docs/31 V2-6 a V2-8; a sala no estilo do YouTube): no computador o Chat do trilho esconde o painel e o palco cresce sem remontar o iframe; recarregar mantem fechado e o Chat do trilho reabre; o Sair fica na barra; a 375 px a barra cabe, os circulos tem 44 px, o balao volta e a Tela cheia fica no palco", async ({ page }) => {
   const painel = WEBINAR_COPY.salaV2.painel;
   await page.setViewportSize({ height: 900, width: 1440 });
   const { dialogo, sala } = await entrarNaSala(page);
@@ -351,35 +361,40 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   const larguraAntes = (await palco.boundingBox())?.width ?? 0;
   expect(larguraAntes).toBeGreaterThan(0);
 
-  // Aberto, o balao fica ligado e controla o painel (aria-expanded, nunca aria-pressed com o nome que muda); fechar
-  // esconde o painel (sem desmontar) e o palco toma a largura.
-  const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
-  await expect(esconder).toHaveAttribute("aria-expanded", "true");
-  expect(await esconder.getAttribute("aria-pressed")).toBeNull();
-  await expect(esconder).toHaveAttribute("aria-controls", "room-panel");
-  await esconder.click();
+  // No computador o trilho a direita abre e fecha o painel (o balao e as abas ficam so abaixo de lg). O Chat aberto
+  // controla o painel (aria-expanded, nunca aria-pressed); tocar nele esconde o painel (sem desmontar) e o palco toma a
+  // largura.
+  const chatDoTrilho = itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.chat);
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toBeHidden();
+  await expect(chat.getByRole("tablist")).toBeHidden();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+  expect(await chatDoTrilho.getAttribute("aria-pressed")).toBeNull();
+  await expect(chatDoTrilho).toHaveAttribute("aria-controls", "room-panel");
+  await chatDoTrilho.click();
   await expect(chat).toBeHidden();
   await expect(chat).toHaveCount(1);
-  await expect(dialogo.getByRole("button", { exact: true, name: painel.mostrar })).toHaveAttribute("aria-expanded", "false");
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "false");
   await expect.poll(async () => (await palco.boundingBox())?.width ?? 0).toBeGreaterThan(larguraAntes + 300);
   expect(await sala.montagens(), "abrir e fechar o painel so troca classes: o iframe e o mesmo").toBe(1);
 
-  // A escolha fica guardada no navegador: recarregar mantem fechado; Mostrar o chat reabre.
+  // A escolha fica guardada no navegador: recarregar mantem fechado; o Chat do trilho reabre.
   await page.reload();
   await expect(dialogo).toHaveAttribute("data-room-kind", "live");
   await expect(dialogo.getByTestId("room-panel")).toBeHidden();
-  await dialogo.getByRole("button", { exact: true, name: painel.mostrar }).click();
+  await chatDoTrilho.click();
   await expect(dialogo.getByTestId("room-panel")).toBeVisible();
-  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toHaveAttribute("aria-expanded", "true");
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
 
   // No computador o Sair fica na barra, a esquerda; o do cabecalho so aparece abaixo de lg.
   const barra = dialogo.getByRole("group", { name: aoVivo.barra });
   await expect(barra.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toBeVisible();
   await expect(dialogo.locator("header").first().getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toHaveCount(0);
 
-  // A 375 px: a barra cabe na largura (sem rolar por dentro), os circulos tem 44 px e a Tela cheia (ou o Modo cinema)
-  // sai da barra e fica no canto do palco.
+  // A 375 px: o trilho sai e o balao volta a barra; a barra cabe na largura (sem rolar por dentro), os circulos tem 44
+  // px e a Tela cheia (ou o Modo cinema) sai da barra e fica no canto do palco.
   await page.setViewportSize({ height: 740, width: 375 });
+  await expect(dialogo.getByRole("navigation", { name: painel.rotulo })).toBeHidden();
+  await expect(barra.getByRole("button", { exact: true, name: painel.esconder })).toBeVisible();
   const caixaDaBarra = await barra.boundingBox();
   expect(caixaDaBarra?.x ?? -1).toBeGreaterThanOrEqual(0);
   expect((caixaDaBarra?.x ?? 0) + (caixaDaBarra?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(375);
@@ -405,16 +420,18 @@ test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat escon
   expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem em 360 px").toBe(true);
 });
 
-test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; as 2 ultimas mensagens ficam em pilulas no palco; a mensagem nova do produtor entra no nome do balao e reabrir zera o contador", async ({ browser, page }) => {
+test("o painel fechado (docs/31 V2-7 e V2-8; a sala no estilo do YouTube): o X fecha e o foco vai ao Chat do trilho; as 2 ultimas mensagens ficam em pilulas no palco; a mensagem nova do produtor entra no nome do Chat do trilho e reabrir zera o contador", async ({ browser, page }) => {
   const painel = WEBINAR_COPY.salaV2.painel;
   await page.setViewportSize({ height: 900, width: 1440 });
   const { dialogo } = await entrarNaSala(page);
   const chat = dialogo.getByTestId("room-panel");
   const palco = dialogo.locator("[data-lesson-player-stage]");
   await expect(chat).toBeVisible();
-  // As abas em pilula na lista "Painel da sala" (a mesma regra nas tres salas): Chat, Perguntas e Participantes.
-  const abas = chat.getByRole("tablist", { name: painel.rotulo });
-  await expect(abas.getByRole("tab")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+  // O trilho "Painel da sala" a direita (a mesma regra das abas nas tres salas): Chat, Perguntas e Participantes; o
+  // titulo do painel diz a aba aberta.
+  const trilho = dialogo.getByRole("navigation", { name: painel.rotulo });
+  await expect(trilho.getByRole("button")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+  await expect(chat.getByRole("heading", { level: 2, name: WEBINAR_COPY.sala.abas.chat })).toBeVisible();
 
   // O produtor escreve no chat da live pela rota da sala (a primeira mensagem com o aceite).
   const produtor = await abrirComoProdutor(browser);
@@ -437,12 +454,14 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await expect.poll(() => lista.evaluate((elemento) => elemento.scrollHeight > elemento.clientHeight + 16)).toBe(true);
     await expect(lista.getByText("segunda do produtor no painel")).toBeInViewport();
 
-    // O X fecha o painel (montado e escondido) e o foco vai ao balao, que o reabre.
+    // O X fecha o painel (montado e escondido) e o foco vai ao item do trilho da aba que estava aberta, que o reabre;
+    // o trilho continua na tela.
     await chat.getByRole("button", { exact: true, name: painel.fechar }).click();
     await expect(chat).toBeHidden();
-    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    const mostrar = itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.chat);
     await expect(mostrar).toBeFocused();
     await expect(mostrar).toHaveAttribute("aria-expanded", "false");
+    await expect(trilho).toBeVisible();
 
     // As 2 ultimas mensagens em pilulas dentro do palco (tambem no computador), a mais nova embaixo.
     const pilulas = palco.getByTestId("room-chat-pills");
@@ -450,19 +469,21 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await expect(pilulas.locator("li").nth(0)).toContainText("primeira do produtor no painel");
     await expect(pilulas.locator("li").nth(1)).toContainText("segunda do produtor no painel");
 
-    // Uma mensagem nova com o painel fechado: o balao diz quantas chegaram, e as pilulas andam.
+    // Uma mensagem nova com o painel fechado: o Chat do trilho diz quantas chegaram (o nome comeca pelo rotulo), e as
+    // pilulas andam.
     await escrever("terceira do produtor no painel");
-    const comNovas = dialogo.getByRole("button", { exact: true, name: painel.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(1)) });
+    const comNovas = trilho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.trilho.comNovas(WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.mensagensNovas(1)) });
     await expect(comNovas).toBeVisible({ timeout: 15_000 });
     await expect(comNovas.locator("[data-room-unread]")).toHaveText("1");
     await expect(pilulas.locator("li").nth(1)).toContainText("terceira do produtor no painel");
     await expect(pilulas).not.toContainText("primeira do produtor no painel");
 
-    // Reabrir mostra o chat e tira o contador (e as pilulas, porque o chat esta na tela).
+    // Reabrir mostra o chat e tira o contador do item aberto (e as pilulas, porque o chat esta na tela).
     await comNovas.click();
     await expect(chat).toBeVisible();
-    const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
+    const esconder = itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.chat);
     await expect(esconder).toHaveAttribute("aria-expanded", "true");
+    await expect(esconder).toHaveAccessibleName(WEBINAR_COPY.sala.abas.chat);
     await expect(esconder.locator("[data-room-unread]")).toHaveCount(0);
     await expect(palco.getByTestId("room-chat-pills")).toHaveCount(0);
     // A lista escondida nao rolou com a mensagem nova: reabrir a leva ao fim (chatListOnShow), e a nova fica na vista.
@@ -474,8 +495,80 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
   }
 });
 
-test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {
+test("o trilho a direita (a sala no estilo do YouTube): o item Perguntas abre o painel na aba e, aberto, fecha com o foco nele; fechado, o trilho continua; o X devolve o foco ao item da aba aberta; com o painel em Perguntas, a mensagem nova de outra pessoa entra no Chat do trilho", async ({ browser, page }) => {
   const painel = WEBINAR_COPY.salaV2.painel;
+  const abas = WEBINAR_COPY.sala.abas;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo } = await entrarNaSala(page);
+  const chat = dialogo.getByTestId("room-panel");
+  const trilho = dialogo.getByRole("navigation", { name: painel.rotulo });
+  const chatDoTrilho = itemDoTrilho(dialogo, abas.chat);
+  const perguntas = itemDoTrilho(dialogo, abas.perguntas);
+  await expect(chat).toBeVisible();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+  // O trilho fica a 16 px da borda direita da janela, com 48 px, e o topo junto com o do painel.
+  const caixaDoTrilho = await trilho.boundingBox();
+  const caixaDoPainel = await chat.boundingBox();
+  expect(Math.round((caixaDoTrilho?.x ?? 0) + (caixaDoTrilho?.width ?? 0))).toBe(1440 - 16);
+  expect(Math.round(caixaDoTrilho?.width ?? 0)).toBe(48);
+  expect(Math.round(caixaDoTrilho?.y ?? 0)).toBe(Math.round(caixaDoPainel?.y ?? -1));
+  // 24 px entre o painel e o trilho.
+  expect(Math.round((caixaDoTrilho?.x ?? 0) - ((caixaDoPainel?.x ?? 0) + (caixaDoPainel?.width ?? 0)))).toBe(24);
+
+  // O item Perguntas abre o painel na aba Perguntas: o item fica aberto, o titulo do painel diz o nome da aba e o
+  // campo da pergunta esta na tela.
+  await perguntas.click();
+  await expect(perguntas).toHaveAttribute("aria-expanded", "true");
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "false");
+  await expect(chat.getByRole("heading", { level: 2, name: abas.perguntas })).toBeVisible();
+  await expect(chat.getByRole("textbox", { name: WEBINAR_COPY.sala.suaPergunta })).toBeVisible();
+
+  // Com o painel em Perguntas, o Chat nao esta na tela: a mensagem nova de outra pessoa entra no Chat do trilho, com o
+  // numero e o nome "Chat, 1 mensagem nova" (antes do trilho, o painel aberto em qualquer aba zerava o numero).
+  const produtor = await abrirComoProdutor(browser);
+  try {
+    const resposta = await produtor.pagina.request.post(`/api/webinars/${LIVE_AO_VIVO_DE_TESTE.id}/chat`, {
+      data: { body: "nova do produtor com as Perguntas abertas", consent: true, consentVersion: CHAT_CONSENT_VERSION, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId }
+    });
+    expect(resposta.status()).toBe(201);
+  } finally {
+    await produtor.fechar();
+  }
+  const comNova = trilho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.trilho.comNovas(abas.chat, WEBINAR_COPY.sala.mensagensNovas(1)) });
+  await expect(comNova).toBeVisible({ timeout: 15_000 });
+  await expect(comNova.locator("[data-room-unread]")).toHaveText("1");
+  await expect(perguntas).toHaveAttribute("aria-expanded", "true");
+
+  // O mesmo item fecha o painel, e o foco fica nele (pelo teclado: no WebKit o clique nao foca o botao); fechado, o
+  // trilho continua na tela, sem item aberto, com o numero no Chat.
+  await perguntas.focus();
+  await page.keyboard.press("Enter");
+  await expect(chat).toBeHidden();
+  await expect(perguntas).toBeFocused();
+  await expect(perguntas).toHaveAttribute("aria-expanded", "false");
+  await expect(trilho).toBeVisible();
+  await expect(comNova).toBeVisible();
+  // O palco vai ate 24 px antes do trilho.
+  const caixaDaColuna = await dialogo.locator('[data-room-slot="stage-column"]').boundingBox();
+  expect(Math.round((caixaDoTrilho?.x ?? 0) - ((caixaDaColuna?.x ?? 0) + (caixaDaColuna?.width ?? 0)))).toBe(24);
+
+  // Reaberto em Perguntas, o X devolve o foco ao item da aba que estava aberta (nao ao Chat).
+  await page.keyboard.press("Enter");
+  await expect(chat).toBeVisible();
+  await expect(chat.getByRole("heading", { level: 2, name: abas.perguntas })).toBeVisible();
+  await chat.getByRole("button", { exact: true, name: painel.fechar }).click();
+  await expect(chat).toBeHidden();
+  await expect(perguntas).toBeFocused();
+
+  // O Chat do trilho abre o Chat e tira o numero; a mensagem nova esta na lista.
+  await comNova.click();
+  await expect(chat).toBeVisible();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+  await expect(chatDoTrilho.locator("[data-room-unread]")).toHaveCount(0);
+  await expect(chat.getByRole("log").getByText("nova do produtor com as Perguntas abertas")).toBeVisible();
+});
+
+test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {
   const enquete = WEBINAR_COPY.salaV2.enquete;
   const pergunta = "Qual parte da live ajudou mais?";
   await page.setViewportSize({ height: 900, width: 1440 });
@@ -488,8 +581,9 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
   const chat = dialogo.getByTestId("room-panel");
   const palco = dialogo.locator("[data-lesson-player-stage]");
 
-  // O painel fechado pelo balao (guardado no navegador): a enquete abre assim mesmo.
-  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  // O painel fechado pelo Chat do trilho (guardado no navegador): a enquete abre assim mesmo.
+  const chatDoTrilho = itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.chat);
+  await chatDoTrilho.click();
   await expect(chat).toBeHidden();
 
   const { optionIds, pollId } = await abrirEnqueteDeTeste({ options: ["O chat", "As perguntas"], question: pergunta, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId, webinarId: LIVE_AO_VIVO_DE_TESTE.id });
@@ -514,13 +608,15 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     expect(await camada.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(false);
     await expect(palco.locator("[data-room-poll-said]")).toHaveText(enquete.anuncioAberta(pergunta));
 
-    // Responder depois: a camada sai e o foco vai ao balao (o card do chat esta no painel fechado).
+    // Responder depois: a camada sai e o foco vai ao Chat do trilho (o card do chat esta no painel fechado; o balao fica
+    // so abaixo de lg).
     await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
     await expect(palco.getByRole("dialog")).toHaveCount(0);
-    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    const mostrar = chatDoTrilho;
     await expect(mostrar).toBeFocused();
+    await expect(mostrar).toHaveAttribute("aria-expanded", "false");
     // O atalho E (V2-10) traz a enquete deixada para depois de volta ao palco, com o foco na primeira opcao; deixada para
-    // depois de novo, o foco volta ao balao.
+    // depois de novo, o foco volta ao Chat do trilho.
     await page.keyboard.press("e");
     await expect(camada).toBeVisible();
     await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
@@ -562,20 +658,23 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     expect(envio.status()).toBe(201);
     expect(envio.request().postDataJSON()).toMatchObject({ optionIds: [optionIds[1]], pollId, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId });
 
-    // Enviada: a camada sai, o foco vai ao balao, a regiao viva diz "Resposta enviada" e a aba Enquetes tambem.
+    // Enviada: a camada sai, o foco vai ao Chat do trilho (o painel esta aberto no Chat), a regiao viva diz "Resposta
+    // enviada" e a aba Enquetes tambem.
     await expect(palco.getByRole("dialog")).toHaveCount(0);
-    await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toBeFocused();
+    await expect(chatDoTrilho).toBeFocused();
+    await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
     await expect(palco.locator("[data-room-poll-said]")).toHaveText(WEBINAR_COPY.sala.enquete.respondida);
-    // Respondida, o atalho E abre a aba Enquetes (nada volta ao palco).
+    // Com a enquete aberta, o trilho ganha o Enquetes por ultimo, com o ponto do acento.
+    const enquetesDoTrilho = itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.enquetes);
+    await expect(enquetesDoTrilho).toBeInViewport({ ratio: 1 });
+    await expect(enquetesDoTrilho).toHaveAttribute("aria-expanded", "false");
+    // Respondida, o atalho E abre a aba Enquetes no painel (nada volta ao palco): o item Enquetes do trilho fica aberto e
+    // o titulo do painel diz Enquetes, com o numero de enquetes abertas.
     await page.keyboard.press("e");
-    const abaEnquetes = chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes });
-    await expect(abaEnquetes).toHaveAttribute("aria-selected", "true");
-    // As quatro abas nao cabem nos 320 px do painel e a linha rola de lado: Enquetes, a ultima, comeca fora da vista. O
-    // atalho nao move o foco (nada rola a aba sozinho): a aba escolhida entra inteira na vista pela rolagem da lista
-    // (tabScrollLeft, docs/31 V2-A18). O ratio 1 conta o corte da lista que rola, antes do clique (que rolaria sozinho).
-    await expect(abaEnquetes).toBeInViewport({ ratio: 1 });
+    await expect(enquetesDoTrilho).toHaveAttribute("aria-expanded", "true");
+    await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "false");
+    await expect(chat.getByRole("heading", { level: 2, name: new RegExp(`^${WEBINAR_COPY.sala.abas.enquetes}\\s*1$`) })).toBeVisible();
     await expect(palco.getByRole("dialog")).toHaveCount(0);
-    await abaEnquetes.click();
     await expect(dialogo.getByTestId("room-polls").getByText(WEBINAR_COPY.sala.enquete.respondida)).toBeVisible();
   } finally {
     // A enquete aberta ficaria no meio do palco dos testes seguintes.
@@ -583,10 +682,9 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
   }
 });
 
-test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade por comando sem remontar, o botao diz o que o motor mostra, a Grade guardada volta na entrada; a 1280 px a coluna sai com o painel aberto e volta com ele fechado", async ({ page }) => {
+test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16, V2-A5 e V2-A53): Grade por comando sem remontar, o botao diz o que o motor mostra, a Grade guardada volta na entrada; com o painel aberto a coluna sai (a grade do YouTube) e volta com ele fechado pelo trilho", async ({ page }) => {
   test.setTimeout(120_000);
   const visao = WEBINAR_COPY.salaV2.visao;
-  const painel = WEBINAR_COPY.salaV2.painel;
   await page.setViewportSize({ height: 900, width: 1440 });
   const { dialogo, sala } = await entrarNaSala(page);
   const barra = dialogo.getByRole("group", { name: aoVivo.barra });
@@ -598,7 +696,8 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   // A margem que os selos descontam, lida pelo CSSOM: o servidor pinta 0px, e depois que o valor muda o navegador
   // reescreve o atributo style no formato dele ("--room-video-right: 222px;"), que uma regex do atributo nao pegaria.
   const margemDosSelos = () => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-right").trim());
-  // A 1440 px com o painel aberto o iframe tem cerca de 1072 px: a coluna fica, e os selos param antes dela.
+  // A 1440 px com o painel aberto (a grade do YouTube, docs/31 V2-A53) o iframe tem cerca de 924 px: a sala ja pediu
+  // para tirar a coluna, mas ela fica na tela ate o motor confirmar, e os selos param antes dela.
   await expect.poll(margemDosSelos).toBe("222px");
 
   // O menu abre com o foco na opcao marcada; o Esc fecha so o menu (nada de "sair da sala") e o foco volta ao botao.
@@ -687,16 +786,18 @@ test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade
   await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
   expect((await sala.esperarComando("setTileView")).args).toEqual([true]);
 
-  // A 1280 px com o painel aberto o iframe fica com cerca de 912 px (abaixo de 1013): a coluna sai por toggleFilmStrip.
-  antes = (await sala.comandos()).length;
+  // Com o painel aberto, a grade do YouTube (docs/31 V2-A53) deixa o iframe abaixo de 1013 px ja a 1440 px (cerca de
+  // 924): a coluna sai por toggleFilmStrip logo depois da entrada; a 1280 px (cerca de 808) ela continua fora, sem outro
+  // comando (um toggleFilmStrip a mais a poria de volta).
+  await sala.esperarComando("toggleFilmStrip");
   await page.setViewportSize({ height: 800, width: 1280 });
-  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
-  // O motor confirma (a coluna escondida): os selos vao ate a borda. Fechar o painel deixa o iframe com mais de 1013 px
-  // e a coluna volta.
+  // O motor confirma (a coluna escondida): os selos vao ate a borda.
   await sala.disparar("filmstripDisplayChanged", { visible: false });
   await expect.poll(margemDosSelos).toBe("0px");
+  expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toHaveLength(1);
+  // Fechar o painel pelo Chat do trilho deixa o iframe com mais de 1013 px (cerca de 1176) e a coluna volta.
   antes = (await sala.comandos()).length;
-  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await itemDoTrilho(dialogo, WEBINAR_COPY.sala.abas.chat).click();
   await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
   await sala.disparar("filmstripDisplayChanged", { visible: true });
   await expect.poll(margemDosSelos).toBe("222px");

@@ -18,13 +18,14 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
 import { deferPoll, deferredPollCard, markPollResultSeen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsTab } from "./room-questions";
+import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomStage } from "./room-stage";
@@ -85,6 +86,10 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // vertical com o som desligado (soundCoverShown); a Tela cheia da caixa do palco sai com a barra (leaveStageFullscreen);
 // a enquete e o card do chat so depois da hidratacao; o Esc fecha a camada de cima primeiro (roomEscapeStep); a
 // confirmacao de Sair leva o foco ao Voltar e o devolve a quem a abriu (useRoomConfirmFocus).
+// A sala no estilo do YouTube (docs/31): a partir de lg, o trilho a direita (room-rail.tsx) no lugar do balao e das
+// abas, irmao do painel e nunca no vertical; o item abre o painel naquela aba e, aberto, fecha (railStep). O painel
+// vira o cartao do YouTube com o cabecalho (o nome da aba, o numero e o X); o contador do Chat do trilho conta enquanto
+// o Chat nao esta na tela (chatShown), e o X devolve o foco ao item da aba que estava aberta.
 
 function subscribeNothing() {
   return () => undefined;
@@ -189,15 +194,18 @@ export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelectorA
 }
 
 /**
- * O painel do chat fechou (docs/31 V2-7 e V2-8: o balao, a aba ativa tocada de novo no celular, a escolha guardada lida
- * depois da primeira pintura) com o foco dentro dele, ou ja fora da sala: o foco vai para o balao da barra (o que reabre
- * o painel) ou, sem ele na tela, para o primeiro controle da sala na tela (roomFocusTarget). Um foco em outro lugar da
- * sala fica onde esta. Devolve se moveu o foco.
+ * O painel do chat fechou (docs/31 V2-7 e V2-8: o X, o balao, a escolha guardada lida depois da primeira pintura) com o
+ * foco dentro dele, ou ja fora da sala: o foco vai, nesta ordem, para o item do trilho da aba que estava aberta (`tab`,
+ * a partir de lg, a sala no estilo do YouTube), para o primeiro botao que controla o painel na tela (o balao abaixo de
+ * lg, o item Chat do trilho a partir de lg) ou para o primeiro controle da sala na tela (roomFocusTarget). Um foco em
+ * outro lugar da sala (o proprio item do trilho que fechou o painel, o cabecalho) fica onde esta. Devolve se moveu o
+ * foco.
  */
 export function returnFocusFromPanel(
   root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null,
   active: Element | null,
-  panel: Pick<HTMLElement, "contains"> | null
+  panel: Pick<HTMLElement, "contains"> | null,
+  tab?: RoomPanelTab
 ): boolean {
   if (!root) {
     return false;
@@ -206,8 +214,8 @@ export function returnFocusFromPanel(
   if (!lost) {
     return false;
   }
-  const toggle = Array.from(root.querySelectorAll<HTMLElement>(`[aria-controls="${ROOM_PANEL_ID}"]`)).find(focusShown);
-  const target = toggle ?? roomFocusTarget(root);
+  const rail = tab ? firstShown(root, `[data-room-rail="${tab}"]`) : undefined;
+  const target = rail ?? firstShown(root, `[aria-controls="${ROOM_PANEL_ID}"]`) ?? roomFocusTarget(root);
   if (!target) {
     return false;
   }
@@ -223,8 +231,9 @@ function firstShown(root: Pick<HTMLElement, "querySelectorAll">, selector: strin
 /**
  * A enquete saiu do palco (docs/31 V2-10: enviada, deixada para depois, o resultado fechado, encerrada pela equipe)
  * com o foco nela, que caiu no body: o foco vai para o "Responder agora" do card do chat, se ele esta na tela; senao
- * para o balao da barra; senao para o primeiro controle da sala na tela (roomFocusTarget). Um foco que continua na
- * sala fica onde esta. Devolve se moveu o foco.
+ * para o primeiro botao que controla o painel na tela (o balao da barra abaixo de lg, o item Chat do trilho a partir de
+ * lg); senao para o primeiro controle da sala na tela (roomFocusTarget). Um foco que continua na sala fica onde esta.
+ * Devolve se moveu o foco.
  */
 export function returnFocusFromPoll(root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null, active: Element | null): boolean {
   if (!root || (active !== null && root.contains(active))) {
@@ -484,9 +493,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const barShown = !vertical && !unavailable && phase !== "ended";
   const reactionsShown = reactionsOpen && barShown;
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover: false });
-  // O contador do balao: as mensagens novas desde que o painel fechou (os ids e o offset do video da sessao, cujo zero
-  // nao muda: a hora marcada na gravada, o player no Replay).
-  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, panelShown });
+  // O Chat na tela: o painel na tela e na aba Chat (com ele fechado ou noutra aba, o contador conta).
+  const chatShown = panelShown && tab === "chat";
+  // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela (os ids e o offset do
+  // video da sessao, cujo zero nao muda: a hora marcada na gravada, o player no Replay).
+  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, chatShown });
   const firstFocus = firstFocusTarget({ panelShown });
   // A enquete no meio do palco so no desenho normal com a sala de pe (como a barra); o card do chat, a deixada para
   // depois.
@@ -533,15 +544,15 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   }, [barShown]);
 
   // O painel do chat fechou com o foco nele (ou a escolha guardada chegou depois da primeira pintura): o foco vai ao
-  // balao da barra.
+  // item do trilho da aba que estava aberta (a partir de lg) ou ao balao da barra (abaixo de lg).
   const panelShownRef = useRef(panelShown);
   useLayoutEffect(() => {
     const was = panelShownRef.current;
     panelShownRef.current = panelShown;
     if (was && !panelShown) {
-      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
+      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID), tab);
     }
-  }, [panelShown]);
+  }, [panelShown, tab]);
 
   // A enquete saiu do palco (ou trocou por outra) com o foco nela: o foco vai ao Responder agora, ao balao ou a sala.
   const stagePollKeyRef = useRef(stagePollKey);
@@ -623,6 +634,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   function answerPollNow(pollId: string) {
     setDeferred(resumePoll(deferred, pollId));
     setPollFocus((previous) => ({ key: `answer:${pollId}`, n: (previous?.n ?? 0) + 1 }));
+  }
+
+  /** Um item do trilho (a partir de lg): abre o painel naquela aba ou, no item aberto, fecha (so com a barra na tela). */
+  function onRail(item: RoomPanelTab) {
+    const step = railStep({ closable: barShown, item, panelShown, tab });
+    setTab(step.tab);
+    setPanelOpen(step.panelOpen);
   }
 
   function unmute() {
@@ -942,22 +960,27 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         </div>
 
         {vertical || unavailable ? null : (
-          // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
-          <RoomPanel
-            className={skeleton.panel}
-            closable={barShown}
-            firstFocus={firstFocus === "tab"}
-            id={ROOM_PANEL_ID}
-            kind={kind}
-            onClose={() => setPanelOpen(false)}
-            onTab={setTab}
-            open={panelShown}
-            pollOpen={openPolls.length > 0}
-            tab={tab}
-            tabs={tabs}
-          >
-            {tabContent}
-          </RoomPanel>
+          <>
+            {/* Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam). */}
+            <RoomPanel
+              className={skeleton.panel}
+              closable={barShown}
+              firstFocus={firstFocus === "tab"}
+              id={ROOM_PANEL_ID}
+              kind={kind}
+              onClose={() => setPanelOpen(false)}
+              onTab={setTab}
+              open={panelShown}
+              pollOpen={openPolls.length > 0}
+              tab={tab}
+              tabs={tabs}
+              titleCount={tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : null}
+            >
+              {tabContent}
+            </RoomPanel>
+            {/* O trilho a direita, a partir de lg (nunca no vertical): abre e fecha o painel em cada aba. */}
+            <RoomRail kind={kind} onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+          </>
         )}
       </div>
 

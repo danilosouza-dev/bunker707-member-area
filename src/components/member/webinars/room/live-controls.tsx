@@ -36,6 +36,8 @@ import { RoomViewMenu } from "./room-view-menu";
 // Redesign V2, F8 (docs/31 V2-16): a Visão do vídeo (room-view-menu.tsx) entra na zona da direita, antes de
 // Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala. O menu dela, Reagir e
 // Configurações nunca ficam abertos juntos (a sala decide: o menu abre por cima do palco, onde o painel o cobriria).
+// Na sala no estilo do YouTube o balao fica so abaixo de lg: a partir de lg o trilho a direita (room-rail.tsx) abre e
+// fecha o painel.
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -185,7 +187,7 @@ export function LiveControls(props: LiveControlsProps) {
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
       case "panel":
-        return <RoomPanelToggle firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
+        return <RoomPanelToggle className="lg:hidden" firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
     }
   }
 

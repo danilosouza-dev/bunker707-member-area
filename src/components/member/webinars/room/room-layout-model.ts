@@ -5,7 +5,7 @@
 // quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
 // contador de mensagens novas do balao, o primeiro foco, quando as pilulas do chat ficam no palco (V2-7 e V2-8) e quando
 // o card da Oferta tira do canto as pilulas e o selo do Assistente; na sala no estilo do YouTube, as teclas dos menus
-// (RoomMenu) e o tempo da dica (RoomTooltip). Sem "use client" e com imports relativos: os testes de modelo
+// (RoomMenu), o tempo da dica (RoomTooltip) e o toque no trilho a direita (RoomRail). Sem "use client" e com imports relativos: os testes de modelo
 // (tests/webinarios-sala-v2-modelo.test.mjs, tests/webinarios-sala-yt-modelo.test.mjs) carregam direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
 // parametro.
 
@@ -176,6 +176,19 @@ export function panelToggleStep(input: { panelShown: boolean; settingsTakeover: 
 }
 
 /**
+ * O toque num item do trilho a direita (a sala no estilo do YouTube, a partir de lg): com o painel fechado ou aberto
+ * noutra aba, abre o painel naquela aba; no item da aba que esta na tela, fecha o painel, so quando ele pode fechar
+ * (`closable`: com a barra na tela, roomPanelShown). Sem a barra (a sessao encerrada) o painel nunca fecha, e o toque
+ * no item aberto nao faz nada. A sala calcula o `panelShown` (roomPanelShown) e passa a aba de agora.
+ */
+export function railStep(input: { closable: boolean; item: RoomPanelTab; panelShown: boolean; tab: RoomPanelTab }): { panelOpen: boolean; tab: RoomPanelTab } {
+  if (!input.panelShown || input.tab !== input.item) {
+    return { panelOpen: true, tab: input.item };
+  }
+  return { panelOpen: !input.closable, tab: input.tab };
+}
+
+/**
  * O esqueleto da Live ao vivo (V2-6 a V2-8, roomSkeleton): o palco cresce com o painel do chat fora da tela (o balao,
  * ou Configurações no celular), no Modo cinema e na frase de removido ou banido. No celular com Configurações aberto
  * (`settingsTakeover`) o palco divide a coluna com o painel no fluxo e guarda no minimo 96 px (`stageMin`): quem
@@ -288,8 +301,9 @@ export function panelUnreadCount(mark: PanelUnreadMark, messages: readonly RoomM
 }
 
 /**
- * Onde o foco entra quando a sala abre (o [data-room-first-focus]): na aba Chat com o painel na tela; com ele fechado,
- * no balao da barra, que o reabre (a aba escondida nao recebe foco).
+ * Onde o foco entra quando a sala abre abaixo de lg (o [data-room-first-focus]): na aba Chat com o painel na tela; com
+ * ele fechado, no balao da barra, que o reabre (a aba escondida nao recebe foco). A partir de lg o Chat do trilho a
+ * direita tem sempre a marca, e a sala foca o primeiro na tela (roomFocusTarget): la a aba e o balao estao escondidos.
  */
 export function firstFocusTarget(input: { panelShown: boolean }): "panel-toggle" | "tab" {
   return input.panelShown ? "tab" : "panel-toggle";

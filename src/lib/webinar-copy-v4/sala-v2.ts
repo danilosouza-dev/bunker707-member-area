@@ -50,7 +50,8 @@ export const SALA_V2_COPY = {
   /**
    * O painel do chat (V2-6 a V2-8): o balao da barra diz o que faz ("Esconder o chat" com o painel aberto, "Mostrar o
    * chat" com ele fechado e, com mensagens novas, "Mostrar o chat, 3 mensagens novas", a contagem que vem de
-   * WEBINAR_COPY.sala.mensagensNovas), o X do painel fecha e a lista das abas se chama "Painel da sala".
+   * WEBINAR_COPY.sala.mensagensNovas), o X do painel fecha e a lista das abas (abaixo de lg) e o trilho a direita (a
+   * partir de lg, no estilo do YouTube) se chamam "Painel da sala": cada um so numa largura. O balao fica so abaixo de lg.
    */
   painel: {
     esconder: "Esconder o chat",
@@ -71,6 +72,14 @@ export const SALA_V2_COPY = {
     claro: "Tema claro",
     escuro: "Tema escuro",
     titulo: "Tema"
+  },
+  /**
+   * O trilho a direita (a sala no estilo do YouTube, a partir de lg): cada item tem o nome da aba ("Chat" tambem no
+   * Replay); o Chat com mensagens novas de outras pessoas se chama "Chat, 3 mensagens novas" (a contagem vem de
+   * WEBINAR_COPY.sala.mensagensNovas), com o rotulo visivel no comeco do nome.
+   */
+  trilho: {
+    comNovas: (rotulo: string, novas: string) => `${rotulo}, ${novas}`
   },
   /**
    * A visao do video da live (V2-16), no botao da barra a partir de lg: o nome diz o que o video mostra agora ("Visão do
