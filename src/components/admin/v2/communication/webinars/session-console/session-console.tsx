@@ -1,33 +1,30 @@
 "use client";
 
-import { CircleStop, DoorOpen, Play, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
+import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
-import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import type { ModerationAction } from "@/server/webinars/chat-schemas";
 import {
   CONSOLE_POLL_MS,
-  canEndSession,
-  canOpenSession,
   canTeamActOn,
   consoleClockLabel,
   consoleClockMs,
   consoleOffsetMs,
-  consolePhaseLabel,
   consolePhaseOf,
-  consolePhaseTone,
   scriptQueue,
   type ConsoleMessage,
   type ConsoleSnapshot
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
+import { consoleTopActionsFor } from "@/server/webinars/console-v2-model";
 import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
 import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
-import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
+import { WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
 import {
   alignChat,
   attachRecording,
@@ -46,28 +43,26 @@ import {
   undoSessionBan,
   unbanStudent
 } from "@/server/webinars/live-actions";
-import { LIVE_CONSOLE_COPY, desiredLobby, liveSessionButtons, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { LIVE_CONSOLE_COPY, desiredLobby, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
 import { answerQuestion, closePoll, endSessionNow, launchPoll, moderateMessage, openSessionNow, sendTeamMessage, setQuestionStatus, setSessionChatMode } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
 import { fireScriptItem } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
-import { adminInputClass, adminTextareaClass } from "../../../form";
-import { AdminLinkButton } from "../../../link-button";
-import { AdminPage } from "../../../page-container";
-import { PageHeader } from "../../../page-header";
+import { adminTextareaClass } from "../../../form";
 import { ConfirmDialog } from "../../../settings/kit";
-import { StatusChip } from "../../../status-chip";
 import { adminToast } from "../../../toast";
-import { useAdminTopbarTitle } from "../../../topbar-title";
 import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleChat } from "./console-chat";
+import { CONSOLE_PANEL_ID, consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
 import { ConsoleScript } from "./console-script";
+import { ConsoleShell } from "./console-shell";
+import { ConsoleTopBar, type ConsolePolling } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
 import { LiveControls } from "./live-controls";
@@ -91,12 +86,18 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // D24): o painel Atendimento (console-attendance.tsx, com a propria leitura) devolve as marcas das perguntas para o
 // painel Perguntas, e o Chat ganha "Corrigir resposta" nas respostas do Assistente (editAssistantAnswer). O painel
 // Presenca (console-presence.tsx) abre a coluna da direita com o pico, as mensagens por minuto e os ultimos 30 minutos.
+// Console V2 (docs/31 V2-12 e V2-13, fase 2 do redesign): a tela cheia, sem a barra lateral do admin (a moldura sabe
+// pelo caminho, isAdminFullScreenPath), na raiz com o tema (ConsoleShell, escuro por padrao, guardado em chave
+// propria), o topo enxuto (ConsoleTopBar: a seta, o titulo, o seletor, o Atualizar, o momento e os presentes, o Tema e
+// os botoes de situacao de consoleTopActionsFor) e o esqueleto de consoleSkeleton, que nunca move o iframe. O tema vai
+// ao iframe so na montagem (o look); trocar com a sala no ar nao remonta. As confirmacoes abrem no portal da raiz
+// (container={portalRef}). Ate as proximas fatias, o palco de antes com os controles embaixo fica na coluna do palco
+// e os cards de antes ficam empilhados no painel.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
 
 type Failure = { message: string; status: number };
-type Polling = "idle" | "offline" | "updating";
 
 type SessionConsoleProps = {
   currentUserId: string;
@@ -119,7 +120,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   const [tick, setTick] = useState(() => Date.now());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [polling, setPolling] = useState<Polling>("idle");
+  const [polling, setPolling] = useState<ConsolePolling>("idle");
   const [confirming, setConfirming] = useState<"end" | "open" | null>(null);
   const [confirmingLiveEnd, setConfirmingLiveEnd] = useState(false);
   const [banTarget, setBanTarget] = useState<BanTarget | null>(null);
@@ -127,6 +128,11 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   const [recordUnavailable, setRecordUnavailable] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceSnapshot | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  /** Onde as confirmacoes e os menus do console abrem: dentro da raiz, no tema (o ConsoleShell liga o ref ao div). */
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const [theme, setTheme] = useConsoleTheme();
+  // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
   const session = snapshot?.session ?? null;
   const sessionId = session?.id ?? null;
   const webinar = data.webinar;
@@ -173,14 +179,13 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     currentUserId,
     enabled: live !== null,
     live,
+    look,
     nonce,
     onAnchor: markAnchor,
     onBrowserRecording,
     session,
     webinar
   });
-
-  useAdminTopbarTitle(copy.title);
 
   // O relogio da tela anda a cada segundo; o skew foi medido na carga (hora do servidor menos a do aparelho).
   useEffect(() => {
@@ -509,201 +514,166 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     );
   }
 
-  const liveButtons = session && live ? liveSessionButtons(session.status) : null;
   const sessionDisabledTitle = room.controls.sessionEnabled ? undefined : LIVE_CONSOLE_COPY.soQuemPublica;
+  const topActions =
+    session && phase
+      ? consoleTopActionsFor({ canPublish: permissions.canPublish, controls: room.controls, kind: session.kind, phase, status: session.status })
+      : [];
+  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: true });
 
-  const sessionLabel = (item: SessionConsoleData["sessions"][number]) =>
-    item.kind === "replay" ? `${copy.phases.replay} · ${formatSaoPauloDateTime(item.scheduledAt)}` : `${WEBINAR_ADMIN_COPY.fields.sessionSaved(formatSaoPauloDateTime(item.scheduledAt))} · ${copy.phases[item.status === "live" ? "live" : item.status === "waiting" ? "waiting" : item.status === "ended" ? "ended" : item.status === "cancelled" ? "cancelled" : "scheduled"]}`;
+  function onTopAction(id: "end_live" | "end_session" | "open_room" | "open_session" | "start") {
+    switch (id) {
+      case "open_room":
+        void openRoom();
+        return;
+      case "start":
+        void startForAll();
+        return;
+      case "end_live":
+        setConfirmingLiveEnd(true);
+        return;
+      case "open_session":
+        setConfirming("open");
+        return;
+      case "end_session":
+        setConfirming("end");
+        return;
+      default:
+        return;
+    }
+  }
+
+  const readOnly = Boolean(session) && !canAct;
+  const onlyPublishers = live !== null && room.controls.session && !room.controls.sessionEnabled;
+  const banner =
+    failure || readOnly || onlyPublishers ? (
+      <>
+        {failure ? (
+          <ErrorBanner
+            action={
+              <Button className="px-3 text-[var(--text-secondary)]" onClick={() => setFailure(null)} type="button" variant="ghost">
+                {WEBINAR_COPY.consoleV2.fecharAviso}
+              </Button>
+            }
+            title={failure.status === 409 ? WEBINAR_ADMIN_COPY.failures.conflictTitle : WEBINAR_ADMIN_COPY.failures.generic}
+          >
+            {failure.message}
+          </ErrorBanner>
+        ) : null}
+        {readOnly ? <p className="text-[13px] leading-5 text-room-fg-muted">{copy.readOnly}</p> : null}
+        {onlyPublishers ? <p className="text-[13px] leading-5 text-room-fg-muted">{LIVE_CONSOLE_COPY.soQuemPublica}</p> : null}
+      </>
+    ) : null;
+
+  const top = (
+    <ConsoleTopBar
+      actions={topActions}
+      busyKey={busyKey}
+      canWrite={permissions.canWrite}
+      className={skeleton.top}
+      clockLabel={session && phase ? consoleClockLabel(clockMs, phase) : ""}
+      disabledTitle={sessionDisabledTitle}
+      editorHref={webinarAdminHref(webinar.id)}
+      onAction={onTopAction}
+      onChangeSession={changeSession}
+      onLock={lockRoom}
+      onRefresh={() => void refresh()}
+      onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
+      polling={polling}
+      presentLabel={session ? copy.presentNow(snapshot?.presentNow ?? 0) : null}
+      reportHref={webinarReportHref(webinar.id)}
+      roomLocked={live?.roomLocked === true}
+      sessionId={sessionId}
+      sessions={data.sessions}
+      theme={theme}
+      title={webinar.title}
+    />
+  );
 
   return (
-    <AdminPage className="gap-6 pb-28">
-      <PageHeader
-        actions={
-          <>
-            <AdminLinkButton href={webinarAdminHref(webinar.id)} variant="secondary">
-              {copy.backToEditor}
-            </AdminLinkButton>
-            {phase === "ended" ? (
-              <AdminLinkButton href={webinarReportHref(webinar.id)} variant="secondary">
-                {copy.report}
-              </AdminLinkButton>
-            ) : null}
-            {session && !live && permissions.canPublish && session.kind !== "replay" && canOpenSession(session.status) ? (
-              <Button className="px-4" disabled={busyKey !== null} onClick={() => setConfirming("open")} type="button">
-                <Play aria-hidden="true" className="size-4" />
-                {copy.open}
-              </Button>
-            ) : null}
-            {session && !live && permissions.canPublish && session.kind !== "replay" && canEndSession(session.status) ? (
-              <Button className="border-[var(--error-border)] bg-[var(--error-bg)] px-4 text-[var(--error)] hover:bg-[var(--error-bg)] hover:brightness-125" disabled={busyKey !== null} onClick={() => setConfirming("end")} type="button" variant="secondary">
-                <CircleStop aria-hidden="true" className="size-4" />
-                {copy.end}
-              </Button>
-            ) : null}
-            {liveButtons && room.controls.session && liveButtons.open ? (
-              <Button className="px-4" disabled={busyKey !== null || !room.controls.sessionEnabled} onClick={() => void openRoom()} title={sessionDisabledTitle} type="button" variant="secondary">
-                <DoorOpen aria-hidden="true" className="size-4" />
-                {liveCopy.abrirSala}
-              </Button>
-            ) : null}
-            {liveButtons && room.controls.session && liveButtons.start ? (
-              <Button className="px-4" disabled={busyKey !== null || !room.controls.sessionEnabled} onClick={() => void startForAll()} title={sessionDisabledTitle} type="button">
-                <Play aria-hidden="true" className="size-4" />
-                {liveCopy.comecarParaTodos}
-              </Button>
-            ) : null}
-            {liveButtons && room.controls.session && liveButtons.end ? (
-              <Button
-                className="border-[var(--error-border)] bg-[var(--error-bg)] px-4 text-[var(--error)] hover:bg-[var(--error-bg)] hover:brightness-125"
-                disabled={busyKey !== null || !room.controls.sessionEnabled}
-                onClick={() => setConfirmingLiveEnd(true)}
-                title={sessionDisabledTitle}
-                type="button"
-                variant="secondary"
-              >
-                <CircleStop aria-hidden="true" className="size-4" />
-                {liveCopy.encerrarLive}
-              </Button>
-            ) : null}
-          </>
-        }
-        breadcrumb={[
-          { href: WEBINARS_HREF, label: WEBINAR_ADMIN_COPY.header.breadcrumbList },
-          { href: webinarAdminHref(webinar.id), label: webinar.title },
-          { label: copy.breadcrumb }
-        ]}
-        description={
-          session && phase ? (
-            <span className="flex flex-wrap items-center gap-2" data-console-status="">
-              <StatusChip tone={consolePhaseTone(phase)}>{consolePhaseLabel(phase)}</StatusChip>
-              <span className="tabular-nums" data-console-clock="">
-                {consoleClockLabel(clockMs, phase)}
-              </span>
-              <span className="tabular-nums" data-console-present="">
-                · {copy.presentNow(snapshot?.presentNow ?? 0)}
-              </span>
-            </span>
-          ) : (
-            copy.description
-          )
-        }
-        title={copy.title}
-      />
-
-      {failure ? (
-        <ErrorBanner
-          action={
-            <Button className="px-3 text-[var(--text-secondary)]" onClick={() => setFailure(null)} type="button" variant="ghost">
-              Fechar
-            </Button>
-          }
-          title={failure.status === 409 ? WEBINAR_ADMIN_COPY.failures.conflictTitle : WEBINAR_ADMIN_COPY.failures.generic}
-        >
-          {failure.message}
-        </ErrorBanner>
-      ) : null}
-
-      <div className="flex min-w-0 flex-wrap items-end gap-3">
-        <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]" htmlFor="console-session">
-          {copy.sessionPicker}
-          <select className={cn(adminInputClass, "w-full max-w-sm sm:w-80")} disabled={data.sessions.length === 0} id="console-session" onChange={(event) => changeSession(event.target.value)} value={sessionId ?? ""}>
-            {data.sessions.length === 0 ? <option value="">—</option> : null}
-            {data.sessions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {sessionLabel(item)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="flex items-center gap-2 pb-2 text-xs leading-5 text-[var(--text-tertiary)]">
-          <Button aria-label={copy.refresh} className="px-2 text-[var(--text-secondary)]" disabled={!sessionId || polling === "updating"} onClick={() => void refresh()} type="button" variant="ghost">
-            <RefreshCw aria-hidden="true" className={cn("size-4", polling === "updating" && "animate-spin motion-reduce:animate-none")} />
-          </Button>
-          <span aria-live="polite" data-console-polling={polling}>
-            {polling === "updating" ? copy.updating : polling === "offline" ? copy.offline : ""}
-          </span>
-        </div>
-      </div>
-
-      {!snapshot || !session ? (
-        <EmptyState description={WEBINAR_ADMIN_COPY.simulation.noSessions} title={WEBINAR_ADMIN_COPY.fields.sessionsEmpty} />
-      ) : (
-        <>
-          {!canAct ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.readOnly}</p> : null}
-          {live && room.controls.session && !room.controls.sessionEnabled ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{LIVE_CONSOLE_COPY.soQuemPublica}</p> : null}
-          {live ? (
-            <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]" data-live-console="">
-              <div className="flex min-w-0 flex-col gap-6">
-                <LiveRoomPanel busy={busyKey !== null} handle={room} live={live} session={session} stageRef={stageRef}>
-                  <LiveControls busyKey={busyKey} canWrite={permissions.canWrite} handle={room} onLock={lockRoom} roomLocked={live.roomLocked} />
-                </LiveRoomPanel>
-                <LiveRecorder
-                  busyKey={busyKey}
-                  canPublish={permissions.canPublish}
-                  controls={room.controls}
-                  joined={room.joined}
-                  nowMs={nowMs}
-                  onBrowserRecord={() => room.command("startRecording", { mode: "local", onlySelf: false })}
-                  onPrepare={() => void run("live:rec-prepare", () => prepareRecorder({ sessionId: session.id }))}
-                  onRecord={recordNow}
-                  onRelease={() => void run("live:rec-release", () => releaseRecorder({ sessionId: session.id }))}
-                  onStop={stopRecording}
-                  recorder={live.recorder}
-                  recording={room.room.recording}
-                  status={session.status}
-                  unavailable={recordUnavailable}
-                />
-                {live.recording ? (
-                  <LiveAlignChat
-                    busyKey={busyKey}
-                    canWrite={permissions.canWrite}
-                    key={`${live.recording.id}:${live.recording.anchorOffsetMs}`}
-                    messages={snapshot.messages}
-                    onSave={(anchorOffsetMs) => {
-                      const recordingId = live.recording?.id;
-                      if (recordingId) {
-                        void run("live:align", () => alignChat({ anchorOffsetMs, recordingId }), () => adminToast.success(liveCopy.alinharSalvo));
-                      }
-                    }}
-                    recording={live.recording}
-                  />
-                ) : null}
-                <LiveAttachRecording busyKey={busyKey} canWrite={permissions.canWrite} onAttach={attach} recording={live.recording} />
-              </div>
-              <div className="flex min-w-0 flex-col gap-6">
-                <LiveHands handle={room} people={live.people} />
-                <LiveParticipants busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} people={live.people} />
-              </div>
+    <>
+      <ConsoleShell banner={banner} classNames={skeleton} portalRef={portalRef} theme={theme} top={top}>
+        {!snapshot || !session ? (
+          <div className={skeleton.body}>
+            <div className={skeleton.panel}>
+              <EmptyState description={WEBINAR_ADMIN_COPY.simulation.noSessions} title={WEBINAR_ADMIN_COPY.fields.sessionsEmpty} />
             </div>
-          ) : null}
-          <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-            <ConsoleChat
-              busyKey={busyKey}
-              canAct={canAct}
-              currentUserId={currentUserId}
-              hostUserId={webinar.hostUserId}
-              messages={snapshot.messages}
-              onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
-              onEditAssistant={(messageId: string, body: string) =>
-                run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
-              }
-              onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
-              onRetranslate={
-                translationEnabled
-                  ? (messageId: string) =>
-                      void run(
-                        `moderate:${messageId}`,
-                        () => clearMessageTranslations({ messageId }),
-                        (cleared) => adminToast.success(cleared.removed > 0 ? WEBINAR_COPY.traducao.console.refeita(cleared.removed) : WEBINAR_COPY.traducao.console.semTraducao)
-                      )
-                  : null
-              }
-              onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
-              personMenu={live ? chatPersonMenu : null}
-              pinnedMessageId={snapshot.pinnedMessageId}
-              session={session}
-            />
-            <div className="flex min-w-0 flex-col gap-6">
+          </div>
+        ) : (
+          <div className={skeleton.body} data-console-slot="body">
+            {live && skeleton.stageColumn ? (
+              <div className={skeleton.stageColumn} data-console-slot="stage-column" data-live-console="">
+                <LiveRoomPanel busy={busyKey !== null} handle={room} live={live} session={session} stageClassName={skeleton.stage ?? ""} stageRef={stageRef} />
+                <div className={skeleton.bar ?? ""} data-console-slot="bar">
+                  <LiveControls handle={room} />
+                </div>
+              </div>
+            ) : null}
+            <div className={skeleton.panel} data-console-slot="panel" id={CONSOLE_PANEL_ID}>
+              <ConsoleChat
+                busyKey={busyKey}
+                canAct={canAct}
+                currentUserId={currentUserId}
+                hostUserId={webinar.hostUserId}
+                messages={snapshot.messages}
+                onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
+                onEditAssistant={(messageId: string, body: string) =>
+                  run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
+                }
+                onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
+                onRetranslate={
+                  translationEnabled
+                    ? (messageId: string) =>
+                        void run(
+                          `moderate:${messageId}`,
+                          () => clearMessageTranslations({ messageId }),
+                          (cleared) => adminToast.success(cleared.removed > 0 ? WEBINAR_COPY.traducao.console.refeita(cleared.removed) : WEBINAR_COPY.traducao.console.semTraducao)
+                        )
+                    : null
+                }
+                onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
+                personMenu={live ? chatPersonMenu : null}
+                pinnedMessageId={snapshot.pinnedMessageId}
+                session={session}
+              />
+              {live ? (
+                <>
+                  <LiveHands handle={room} people={live.people} />
+                  <LiveParticipants busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} people={live.people} />
+                  <LiveRecorder
+                    busyKey={busyKey}
+                    canPublish={permissions.canPublish}
+                    controls={room.controls}
+                    joined={room.joined}
+                    nowMs={nowMs}
+                    onBrowserRecord={() => room.command("startRecording", { mode: "local", onlySelf: false })}
+                    onPrepare={() => void run("live:rec-prepare", () => prepareRecorder({ sessionId: session.id }))}
+                    onRecord={recordNow}
+                    onRelease={() => void run("live:rec-release", () => releaseRecorder({ sessionId: session.id }))}
+                    onStop={stopRecording}
+                    recorder={live.recorder}
+                    recording={room.room.recording}
+                    status={session.status}
+                    unavailable={recordUnavailable}
+                  />
+                  {live.recording ? (
+                    <LiveAlignChat
+                      busyKey={busyKey}
+                      canWrite={permissions.canWrite}
+                      key={`${live.recording.id}:${live.recording.anchorOffsetMs}`}
+                      messages={snapshot.messages}
+                      onSave={(anchorOffsetMs) => {
+                        const recordingId = live.recording?.id;
+                        if (recordingId) {
+                          void run("live:align", () => alignChat({ anchorOffsetMs, recordingId }), () => adminToast.success(liveCopy.alinharSalvo));
+                        }
+                      }}
+                      recording={live.recording}
+                    />
+                  ) : null}
+                  <LiveAttachRecording busyKey={busyKey} canWrite={permissions.canWrite} onAttach={attach} recording={live.recording} />
+                </>
+              ) : null}
               {/* docs/30 §2.4: o painel Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache. */}
               {snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null}
               {/* Fase 4 (docs/30 §2.4): Atendimento (4c) e Oferta (4b, na sessao gravada e no replay), pontos de encaixe com leitura propria. */}
@@ -730,11 +700,12 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
               />
             </div>
           </div>
-        </>
-      )}
+        )}
+      </ConsoleShell>
 
       <ConfirmDialog
         busy={busyKey === "open" || busyKey === "end"}
+        container={portalRef}
         confirmLabel={confirming === "end" ? copy.endConfirm.confirmLabel : copy.openConfirm.confirmLabel}
         description={confirming === "end" ? copy.endConfirm.description : copy.openConfirm.description}
         destructive={confirming === "end"}
@@ -750,6 +721,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
 
       <ConfirmDialog
         busy={busyKey === "live:end"}
+        container={portalRef}
         cancelLabel={liveCopy.cancelar}
         confirmLabel={liveCopy.encerrarLive}
         description={liveCopy.encerrarConfirmarTexto}
@@ -762,6 +734,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
 
       <ConfirmDialog
         busy={banTarget !== null && busyKey === `person:${banTarget.userId}`}
+        container={portalRef}
         cancelLabel={liveCopy.cancelar}
         confirmLabel={liveCopy.banir}
         description={liveCopy.banirConfirmarTexto}
@@ -785,6 +758,6 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
           <textarea className={cn(adminTextareaClass, "min-h-16")} id="console-ban-reason" maxLength={200} onChange={(event) => setBanReason(event.target.value)} rows={2} value={banReason} />
         </label>
       </ConfirmDialog>
-    </AdminPage>
+    </>
   );
 }

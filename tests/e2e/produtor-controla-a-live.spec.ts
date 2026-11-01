@@ -1,5 +1,7 @@
 import type { Page } from "@playwright/test";
+import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
+import { WEBINAR_ADMIN_COPY, webinarAdminHref } from "../../src/server/webinars/editor-model";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
 import { CONSOLE_ROOM_RULES } from "../../src/server/webinars/live-console-model";
 import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
@@ -37,7 +39,10 @@ import {
 // (quem apresenta nao baixa o proprio palco) e o Esc e o proprio botao fecham o card com o foco no botao. O vigia da
 // tela (docs/31 §5.4): quem compartilha com papel conhecido de participante tem a tela parada por
 // muteRemoteParticipant(id, 'desktop'); o papel de quem ja moderava quando o console entrou vem do getRoomsInfo, e a
-// saida da sala cancela o getRoomsInfo que esperava (o iframe que saiu responderia com o proprio console).
+// saida da sala cancela o getRoomsInfo que esperava (o iframe que saiu responderia com o proprio console). O console V2
+// (docs/31 V2-12 e V2-13): a tela cheia, sem a barra lateral e sem a barra superior do admin, a seta de voltar ao
+// editor, o Trancar no topo, o tema (escuro por padrao, guardado ao recarregar, levado ao iframe so na montagem: trocar
+// com a sala no ar nao remonta) e a confirmacao de Encerrar live no portal dentro da raiz do console, no tema dela.
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -98,7 +103,14 @@ test.describe("produtor", () => {
     const ambiente = ambienteDaSalaAoVivo();
     const sala = await abrirConsole(page);
 
-    await page.getByRole("button", { exact: true, name: consoleAoVivo.abrirSala }).click();
+    // A tela cheia (docs/31 V2-13): sem a barra lateral nem as areas do admin; a seta leva de volta ao editor.
+    await expect(page.locator("[data-console-root]")).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Menu do admin" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Áreas do admin" })).toHaveCount(0);
+    await expect(page.getByRole("link", { exact: true, name: WEBINAR_ADMIN_COPY.console.backToEditor })).toHaveAttribute("href", webinarAdminHref(id));
+    const topo = page.locator('[data-console-slot="top"]');
+
+    await topo.getByRole("button", { exact: true, name: consoleAoVivo.abrirSala }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).status).toBe("waiting");
 
     // O console entra sozinho com a sala aberta: o token de moderador do Apresentador, a sala da sessao.
@@ -128,7 +140,7 @@ test.describe("produtor", () => {
       .toContainEqual({ enabled: true, mediaType: "audio" });
 
     let antes = (await sala.comandos()).length;
-    await page.getByRole("button", { exact: true, name: consoleAoVivo.comecarParaTodos }).click();
+    await topo.getByRole("button", { exact: true, name: consoleAoVivo.comecarParaTodos }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).status).toBe("live");
     expect((await sala.esperarComando("toggleLobby", { depoisDe: antes })).args).toEqual([false]);
 
@@ -136,12 +148,14 @@ test.describe("produtor", () => {
     await page.getByRole("button", { exact: true, name: consoleAoVivo.silenciarTodos }).click();
     expect((await sala.esperarComando("muteEveryone", { depoisDe: antes })).args).toEqual(["audio"]);
 
+    // Trancar a sala fica no topo (V2-13), com o estado no aria-pressed.
     antes = (await sala.comandos()).length;
-    await page.getByRole("button", { exact: true, name: consoleAoVivo.trancar }).click();
+    await topo.getByRole("button", { exact: true, name: consoleAoVivo.trancar }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).room_locked).toBe(true);
     expect((await sala.esperarComando("toggleLobby", { depoisDe: antes })).args).toEqual([true]);
+    await expect(topo.getByRole("button", { exact: true, name: consoleAoVivo.destrancar })).toHaveAttribute("aria-pressed", "true");
     antes = (await sala.comandos()).length;
-    await page.getByRole("button", { exact: true, name: consoleAoVivo.destrancar }).click();
+    await topo.getByRole("button", { exact: true, name: consoleAoVivo.destrancar }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).room_locked).toBe(false);
     expect((await sala.esperarComando("toggleLobby", { depoisDe: antes })).args).toEqual([false]);
 
@@ -415,5 +429,44 @@ test.describe("produtor", () => {
     await expect(page.locator(`[data-live-participant="${ANTES}"]`)).toHaveCount(0);
     await expect(page.locator(`[data-live-participant="${DE_VOLTA}"]`)).toHaveCount(0);
     await expect(page.locator(`[data-live-participant="${ALUNA_DE_ANTES}"]`)).toHaveCount(0);
+  });
+
+  test("o tema do console (docs/31 V2-12): escuro por padrao, Tema claro troca a raiz na hora e fica guardado ao recarregar; o iframe monta no tema guardado e trocar com a sala no ar nao remonta; a confirmacao de Encerrar live abre no portal da raiz", async ({ page }) => {
+    const tema = WEBINAR_COPY.salaV2.tema;
+    const sala = await abrirConsole(page);
+    const raiz = page.locator("[data-console-root]");
+
+    // A sessao esta no ar: o console entra sozinho, no tema de antes de escolher (escuro).
+    await expect(raiz).toHaveAttribute("data-room-theme", "dark");
+    expect((await sala.esperarMontada()).configOverwrite[THEME_HASH_KEY]).toBe("dark");
+    await page.getByRole("button", { exact: true, name: tema.claro }).click();
+    await expect(raiz).toHaveAttribute("data-room-theme", "light");
+    await expect(page.getByRole("button", { exact: true, name: tema.escuro })).toBeVisible();
+    expect(await sala.montagens(), "trocar o tema nao remonta a sala").toBe(1);
+    // So a raiz do console muda: o documento continua sem o atributo.
+    expect(await page.locator("html").getAttribute("data-room-theme")).toBeNull();
+
+    // Recarregar mantem o claro (a chave propria do console), e o iframe monta nele.
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(raiz).toHaveAttribute("data-room-theme", "light");
+    const montagem = await sala.esperarMontada();
+    expect(montagem.configOverwrite[THEME_HASH_KEY]).toBe("light");
+    await sala.disparar("videoConferenceJoined", { displayName: "Produtor T.", id: APRESENTADOR, roomName });
+    await sala.disparar("participantRoleChanged", { id: APRESENTADOR, role: "moderator" });
+    await page.getByRole("button", { exact: true, name: tema.escuro }).click();
+    await expect(raiz).toHaveAttribute("data-room-theme", "dark");
+    expect(await sala.montagens(), "com a sala no ar, o iframe continua o mesmo").toBe(1);
+
+    // A confirmacao de Encerrar live abre dentro da raiz (no portal do console, no tema dela); Cancelar fecha sem
+    // encerrar.
+    await page.getByRole("button", { exact: true, name: tema.claro }).click();
+    await page.locator('[data-console-slot="top"]').getByRole("button", { exact: true, name: consoleAoVivo.encerrarLive }).click();
+    const confirmacao = page.locator("[data-console-root] [data-console-portal]").getByRole("dialog");
+    await expect(confirmacao).toBeVisible();
+    await expect(confirmacao.getByText(consoleAoVivo.encerrarConfirmar)).toBeVisible();
+    await confirmacao.getByRole("button", { exact: true, name: consoleAoVivo.cancelar }).click();
+    await expect(confirmacao).toHaveCount(0);
+    expect((await sessaoAoVivoNoBanco()).status).toBe("live");
   });
 });

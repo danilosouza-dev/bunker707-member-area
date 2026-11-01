@@ -231,33 +231,47 @@ function render(data, permissions = both) {
   return html(createElement(SessionConsole, { currentUserId: "u-host", data, permissions, serverNow: NOW }));
 }
 
-test("cabecalho: trilha, fase No ar com o relogio, presentes agora, Voltar ao editor e Encerrar sessão (so para quem publica); o seletor lista as sessoes", () => {
+test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor, o titulo em duas linhas, o momento e os presentes, Encerrar sessão (so para quem publica); o seletor lista as sessoes sem o ano e com a situacao em minuscula", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
   const text = textOf(markup);
 
-  assert.match(text, /Webinários \/ Aula de IA \/ Console/);
-  assert.match(text, /Console da sessão/);
-  assert.match(text, /No ar/);
+  // A raiz do console: o tema (escuro antes de ler o navegador) e a ponte dos tokens do admin no mesmo elemento.
+  assert.match(markup, /^<div(?=[^>]*data-console-root="")(?=[^>]*data-room-theme="dark")[^>]*>/, "a raiz com o tema e a ponte");
+  assert.equal(count(markup, /data-room-theme=/g), 1, "um tema so, o da raiz");
+  assert.match(markup, /<div data-console-portal=""><\/div>/, "o portal das confirmacoes e dos menus dentro da raiz");
+  // O topo sem a trilha: a seta (so o icone, com o nome) leva ao editor, e o h1 diz o console e o webinario.
+  assert.doesNotMatch(text, /Webinários \/ Aula de IA \/ Console/, "a trilha saiu");
+  assert.match(markup, /<a aria-label="Voltar ao editor"[^>]*href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111"/, "a seta de voltar ao editor");
+  const h1 = markup.slice(markup.indexOf("<h1"), markup.indexOf("</h1>"));
+  assert.equal(textOf(`${h1}</h1>`), "Console da sessão Aula de IA", "o h1 com o console e o titulo");
   assert.match(text, /No ar há \d+:\d\d/);
-  assert.match(text, /7 presentes agora/);
-  assert.match(markup, /href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111"/, "Voltar ao editor");
+  assert.match(markup, /data-console-present="">7 presentes agora</);
   assert.match(text, /Encerrar sessão/);
   assert.doesNotMatch(text, /Abrir sessão/, "a sessao no ar nao abre de novo");
+  assert.match(markup, /<button(?=[^>]*aria-label="Tema claro")[^>]*>/, "o Tema diz para qual vai");
+  assert.match(markup, /<button(?=[^>]*aria-label="Atualizar")[^>]*>/);
+  assert.match(markup, /<span aria-live="polite" class="sr-only" data-console-polling="idle"><\/span>/, "a leitura so para o leitor de tela");
 
   const select = markup.slice(markup.indexOf('id="console-session"'), markup.indexOf("</select>"));
+  assert.match(markup, /<label class="sr-only" for="console-session">Sessão<\/label>/, "o nome do seletor so para o leitor de tela");
   assert.equal(count(select, /<option/g), 3, "as tres sessoes no seletor");
   assert.match(select, new RegExp(`<option value="${S_LIVE}" selected=""`), "a sessao pedida vem marcada");
-  assert.match(textOf(select), /No ar/);
-  assert.match(textOf(select), /Agendada/);
-  assert.match(textOf(select), /Encerrada/);
+  assert.deepEqual(
+    Array.from(select.matchAll(/<option[^>]*>([^<]*)<\/option>/g)).map((match) => match[1]),
+    ["Sessão de 5/11 às 20:00 · no ar", "Sessão de 6/11 às 20:05 · agendada", "Sessão de 5/11 às 18:05 · encerrada"],
+    "sem o ano e com a situacao gravada em minuscula"
+  );
+  assert.match(markup, /data-console-on-air=""/, "o ponto verde com a sessao escolhida no ar");
 
   const soEscreve = textOf(render({ sessions, snapshot: snapshot(), webinar }, { canPublish: false, canWrite: true }));
   assert.doesNotMatch(soEscreve, /Encerrar sessão|Abrir sessão/, "sem messaging.publish nao abre nem encerra");
 
-  const agendada = textOf(render({ sessions, snapshot: snapshot({ session: sessions[1] }), webinar }));
+  const agendadaMarkup = render({ sessions, snapshot: snapshot({ session: sessions[1] }), webinar });
+  const agendada = textOf(agendadaMarkup);
   assert.match(agendada, /Abrir sessão/);
-  assert.match(agendada, /Agendada/);
+  assert.match(agendada, /Começa em/);
   assert.doesNotMatch(agendada, /Encerrar sessão/);
+  assert.doesNotMatch(agendadaMarkup, /data-console-on-air=""/, "sem o ponto com a sessao escolhida fora do ar");
 });
 
 test("chat: pendente com Liberar, promover so com o aceite (sem ele, o motivo), a fixada com Desafixar, Apagar em todas, selos de origem, quem pode escrever e modo lento", () => {
@@ -335,7 +349,7 @@ test("sessao encerrada: so leitura (sem Soltar agora, Liberar nem Enviar habilit
   const markup = render({ sessions, snapshot: ended, webinar });
   const text = textOf(markup);
 
-  assert.match(text, /Encerrada/);
+  assert.match(markup, /<option value="bbbbbbbb-2222-4222-8222-333333333333" selected="">Sessão de 5\/11 às 18:05 · encerrada<\/option>/);
   assert.match(markup, /data-console-clock="">Durou 1:00:00</, "o relogio parou no encerramento (1 h depois da hora marcada), nao conta ate agora (2 h)");
   assert.match(text, /Esta sessão não aceita mais ações da equipe\./);
   assert.match(markup, /href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111\/relatorio"/, "Ver relatório");

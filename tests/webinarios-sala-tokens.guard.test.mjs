@@ -137,13 +137,15 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
   }
 });
 
-test("data-room-theme fica so no dialogo da sala: nunca no :root, no html ou no body", () => {
+test("data-room-theme fica so no dialogo da sala e na raiz do console (com data-console-root): nunca no :root, no html ou no body", () => {
   // No CSS: so os dois blocos, sem :root, html ou body na frente nem :has() de fora.
   const seletores = [...css.matchAll(/([^{}]*\[data-room-theme[^{}]*)\{/g)].map(([, seletor]) => seletor.trim());
   assert.deepEqual(seletores.sort(), ['[data-room-theme="dark"]', '[data-room-theme="light"]']);
   assert.doesNotMatch(css, /(?::root|html|body)[^{,]*data-room-theme/);
 
-  // No codigo: o atributo so nas duas salas, como atributo do dialogo; ninguem o poe no documento.
+  // No codigo: o atributo so nas duas salas, como atributo do dialogo, e na raiz do console de quem apresenta (a casca e
+  // o esqueleto do carregamento), no mesmo elemento que o data-console-root (a ponte dos tokens do admin); ninguem o
+  // poe no documento.
   const quem = [];
   const visitar = (pasta) => {
     for (const nome of readdirSync(path.join(root, pasta))) {
@@ -156,11 +158,20 @@ test("data-room-theme fica so no dialogo da sala: nunca no :root, no html ou no 
     }
   };
   visitar("src");
-  assert.deepEqual(quem.sort(), ["src/components/member/webinars/room/live-room.tsx", "src/components/member/webinars/room/webinar-room.tsx"]);
+  const CONSOLE = "src/components/admin/v2/communication/webinars/session-console";
+  const raizesDoConsole = [`${CONSOLE}/console-shell.tsx`, `${CONSOLE}/session-console-skeleton.tsx`];
+  const salas = ["src/components/member/webinars/room/live-room.tsx", "src/components/member/webinars/room/webinar-room.tsx"];
+  assert.deepEqual(quem.sort(), [...raizesDoConsole, ...salas].sort());
   for (const arquivo of quem) {
     const codigo = semComentarios(ler(arquivo));
-    assert.equal((codigo.match(/data-room-theme=/g) ?? []).length, 1, `${arquivo}: um so atributo, o do dialogo`);
-    assert.match(codigo, /role="dialog"/);
+    assert.equal((codigo.match(/data-room-theme=/g) ?? []).length, 1, `${arquivo}: um so atributo`);
+    if (raizesDoConsole.includes(arquivo)) {
+      // A raiz do console nao e dialogo: o tema e a ponte no mesmo elemento.
+      assert.match(codigo, /<div(?=[^>]*\sdata-console-root="")(?=[^>]*\sdata-room-theme=)[^>]*>/, `${arquivo}: o tema na raiz com data-console-root`);
+      assert.doesNotMatch(codigo, /role="dialog"/, arquivo);
+    } else {
+      assert.match(codigo, /role="dialog"/);
+    }
     assert.doesNotMatch(codigo, /documentElement|document\.body\.(?:dataset|setAttribute)/, arquivo);
   }
   // A gravada e o replay passam pela regra do vertical (sempre escuro), testada em webinarios-sala-v2-modelo.

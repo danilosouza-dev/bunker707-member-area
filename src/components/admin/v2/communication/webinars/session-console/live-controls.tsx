@@ -1,29 +1,25 @@
 "use client";
 
-import { Lock, LockOpen, MicOff, Video, VideoOff } from "lucide-react";
+import { MicOff, Video, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { LIVE_CONSOLE_COPY } from "@/server/webinars/live-console-model";
 import type { LiveRoomHandle } from "./live-room-panel";
 
-// Os controles da sala ao redor do palco (docs/30 §1.4 e §2.9): Silenciar todos (muteEveryone de audio), Fechar todas
-// as cameras (muteEveryone de video), Permitir cameras dos alunos (toggleModeration de video), Trancar / Destrancar a
-// sala (room_locked no servidor + toggleLobby), a Sala de espera com Admitir / Admitir todos (answerKnockingParticipant)
-// e a opcao "Permitir que o aluno abra o microfone sozinho", visivel e desligada (fixa assim na v1). Cada botao so
+// Os controles da sala embaixo do palco (docs/30 §1.4 e §2.9): Silenciar todos (muteEveryone de audio), Fechar todas
+// as cameras (muteEveryone de video), Permitir cameras dos alunos (toggleModeration de video), a Sala de espera com
+// Admitir / Admitir todos (answerKnockingParticipant) e a opcao "Permitir que o aluno abra o microfone sozinho", visivel
+// e desligada (fixa assim na v1). Trancar / Destrancar a sala fica no topo do console (docs/31 V2-13). Cada botao so
 // aparece para o papel que pode (live-console-model.liveControlsFor) e so liga com o console dentro da sala.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 
 type LiveControlsProps = {
-  busyKey: string | null;
-  canWrite: boolean;
   handle: LiveRoomHandle;
-  onLock: (locked: boolean) => void;
-  roomLocked: boolean;
 };
 
-export function LiveControls({ busyKey, canWrite, handle, onLock, roomLocked }: LiveControlsProps) {
+export function LiveControls({ handle }: LiveControlsProps) {
   const { controls, joined, room } = handle;
   const knocking = room.knocking;
 
@@ -67,19 +63,6 @@ export function LiveControls({ busyKey, canWrite, handle, onLock, roomLocked }: 
               {copy.permitirCameras}
             </Button>
           </>
-        ) : null}
-        {controls.lock ? (
-          <Button
-            aria-pressed={roomLocked}
-            className="px-3"
-            disabled={!canWrite || busyKey === "live:lock"}
-            onClick={() => onLock(!roomLocked)}
-            type="button"
-            variant="secondary"
-          >
-            {roomLocked ? <LockOpen aria-hidden="true" className="size-4" /> : <Lock aria-hidden="true" className="size-4" />}
-            {roomLocked ? copy.destrancar : copy.trancar}
-          </Button>
         ) : null}
       </div>
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -236,17 +236,19 @@ function render(snap, { currentUserId = HOST, permissions = both } = {}) {
   return html(createElement(SessionConsole, { currentUserId, data: { sessions: [snap.session], snapshot: snap, webinar }, nonce: "nonce-de-teste", permissions, serverNow: NOW }));
 }
 
-const LIVE_FILES = [
-  "session-console.tsx",
-  "live-room-panel.tsx",
-  "live-controls.tsx",
-  "live-hands.tsx",
-  "live-participants.tsx",
-  "live-recorder.tsx",
-  "live-align-chat.tsx",
-  "live-attach-recording.tsx",
-  "live-settings-card.tsx"
-].map((name) => `src/components/admin/v2/communication/webinars/session-console/${name}`);
+/** Os .tsx do console, achados pela pasta (uma peca nova entra sozinha, uma apagada sai sozinha). */
+const CONSOLE_DIR = "src/components/admin/v2/communication/webinars/session-console";
+const CONSOLE_FILES = readdirSync(new URL(`${CONSOLE_DIR}/`, root))
+  .filter((name) => name.endsWith(".tsx"))
+  .sort()
+  .map((name) => `${CONSOLE_DIR}/${name}`);
+const consoleFile = (name) => {
+  const path = `${CONSOLE_DIR}/${name}`;
+  assert.ok(CONSOLE_FILES.includes(path), `arquivo esperado: ${path}`);
+  return path;
+};
+/** As pecas da sala ao vivo no console (live-*.tsx): as frases delas sao de WEBINAR_COPY. */
+const LIVE_FILES = CONSOLE_FILES.filter((path) => /\/live-[^/]+\.tsx$/.test(path));
 
 test("topo da Live ao vivo: Começar para todos e Encerrar live na espera, Abrir a sala na agendada, Encerrar live no ar; sem messaging.publish desligados com a explicacao", () => {
   const espera = textOf(render(snapshot({ session: session({ startedAt: null, status: "waiting" }) })));
@@ -269,6 +271,40 @@ test("topo da Live ao vivo: Começar para todos e Encerrar live na espera, Abrir
   assert.match(textOf(semPublicar), new RegExp(escape(LIVE_CONSOLE_COPY.soQuemPublica)));
   const encerrar = semPublicar.slice(semPublicar.lastIndexOf("<button", semPublicar.indexOf(copy.encerrarLive)), semPublicar.indexOf(copy.encerrarLive));
   assert.match(encerrar, /disabled=""/, "Encerrar live desligado sem messaging.publish");
+});
+
+test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Trancar a sala (aria-pressed) ao lado de Encerrar live, e o palco na coluna do palco, com os controles embaixo e os cards no painel", () => {
+  const markup = render(snapshot());
+  assert.match(markup, /^<div(?=[^>]*data-console-root="")(?=[^>]*data-room-theme="dark")[^>]*>/);
+  const top = markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
+  assert.ok(top.length > 0, "o topo");
+  // Os botoes de situacao no topo, na ordem: no ar, Trancar a sala e Encerrar live; o Trancar diz o estado.
+  const nomes = Array.from(top.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]);
+  assert.deepEqual(nomes, [copy.trancar, copy.encerrarLive]);
+  assert.match(top, new RegExp(`<button(?=[^>]*aria-pressed="false")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.trancar)}</button>`));
+  const trancada = render(snapshot({ live: liveBlock({ roomLocked: true }) }));
+  const topoTrancado = trancada.slice(trancada.indexOf('data-console-slot="top"'), trancada.indexOf("</header>"));
+  assert.match(topoTrancado, new RegExp(`<button(?=[^>]*aria-pressed="true")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.destrancar)}</button>`));
+  // A Equipe nao tranca a sala (so quem apresenta).
+  assert.doesNotMatch(textOf(render(snapshot(), { currentUserId: "u-equipe" })), new RegExp(escape(copy.trancar)));
+  // A agendada mostra Abrir a sala, Começar para todos e Trancar (a Sessão de prática tranca antes de abrir).
+  const agendada = render(snapshot({ session: session({ startedAt: null, status: "scheduled" }) }));
+  const topoAgendado = agendada.slice(agendada.indexOf('data-console-slot="top"'), agendada.indexOf("</header>"));
+  assert.deepEqual(Array.from(topoAgendado.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]), [copy.abrirSala, copy.comecarParaTodos, copy.trancar]);
+
+  // O iframe no palco, dentro da coluna do palco; os controles no lugar da barra, embaixo; os cards no painel.
+  const coluna = markup.indexOf('data-console-slot="stage-column"');
+  const palco = markup.indexOf('data-console-slot="stage"');
+  const iframe = markup.indexOf('data-live-stage=""');
+  const barra = markup.indexOf('data-console-slot="bar"');
+  const controles = markup.indexOf("data-live-controls");
+  const painel = markup.indexOf('data-console-slot="panel"');
+  assert.ok(coluna >= 0 && coluna < palco && palco < iframe && iframe < barra && barra < controles && controles < painel, "coluna > palco > iframe, depois a barra e o painel");
+  assert.equal(count(markup, /data-live-stage=""/g), 1, "um palco so");
+  assert.match(markup, /<div[^>]*data-console-slot="panel"[^>]*id="console-panel"/);
+  for (const marca of ["data-console-chat", "data-live-hands", "data-live-recorder"]) {
+    assert.ok(markup.indexOf(marca) > painel, `${marca} no painel`);
+  }
 });
 
 test("palco: a sala abrindo no meio com os controles do Apresentador ao redor; sem a sala no ambiente, a frase e o resto do console funciona", () => {
@@ -378,10 +414,11 @@ test("a Live gravada não ganha a sala: nada de palco, gravador ou participantes
 });
 
 test("fontes: o iframe pelo useJitsiMeet com o token do join-token e o nonce da página; os comandos do IFrame API ligados aos botões; a âncora no recordingStatusChanged; o Gravar da fila uma vez", () => {
-  const panel = stripComments(read(LIVE_FILES[1]));
+  const panel = stripComments(read(consoleFile("live-room-panel.tsx")));
   assert.match(panel, /useJitsiMeet\(\{/);
   assert.match(panel, /\/api\/webinars\/\$\{encodeURIComponent\(webinarId\)\}\/join-token/);
-  assert.match(panel, /liveConfigOverwrite\(token\.reply\.role, token\.reply\.settings\)/);
+  // O tema do console vai ao iframe na montagem (docs/31 V2-12), pelo mesmo `look` da sala do aluno.
+  assert.match(panel, /liveConfigOverwrite\(token\.reply\.role, token\.reply\.settings, look\)/);
   assert.match(panel, /nonce: input\.nonce/);
   assert.match(panel, /tokenRefreshDelayMs\(/, "o token novo antes do exp");
   assert.match(panel, /name === "recordingStatusChanged" && shouldMarkAnchor\(/, "a ancora sai do recordingStatusChanged");
@@ -391,20 +428,19 @@ test("fontes: o iframe pelo useJitsiMeet com o token do join-token e o nonce da 
   assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
   assert.match(panel, /command\("toggleLobby", value\)/);
 
-  const controls = stripComments(read(LIVE_FILES[2]));
+  const controls = stripComments(read(consoleFile("live-controls.tsx")));
   assert.match(controls, /command\("muteEveryone", "audio"\)[\s\S]*?copy\.silenciarTodos/);
   assert.match(controls, /command\("muteEveryone", "video"\)[\s\S]*?copy\.fecharCameras/);
   assert.match(controls, /command\("answerKnockingParticipant", id, true\)/);
-  assert.match(controls, /onLock\(!roomLocked\)/);
   assert.match(panel, /command\("toggleModeration", !allowed, "video"\)/, "Permitir câmeras dos alunos");
 
-  const hands = stripComments(read(LIVE_FILES[3]));
+  const hands = stripComments(read(consoleFile("live-hands.tsx")));
   assert.match(hands, /command\("askToUnmute", id\)/);
   assert.match(hands, /command\("muteRemoteParticipant", id, "audio"\)/);
   assert.match(hands, /command\("rejectParticipant", id, "audio"\)/);
   assert.match(hands, /command\("sendEndpointTextMessage", id, lowerHandMessage\(\)\)/);
 
-  const main = stripComments(read(LIVE_FILES[0]));
+  const main = stripComments(read(consoleFile("session-console.tsx")));
   assert.match(main, /kickFromSession\(\{ sessionId, userId \}\), \(\) => \{[\s\S]*?room\.command\("kickParticipant", participantId\)/, "Remover: o servidor primeiro, depois o iframe");
   assert.match(main, /banStudent\([\s\S]*?room\.command\("kickParticipant", target\.participantId\)/);
   assert.match(main, /requestRecording\(\{ sessionId \}\)[\s\S]*?reply\.action === "start"[\s\S]*?room\.command\("startRecording", \{ mode: "file" \}\)/);
@@ -438,9 +474,13 @@ function literalTexts(path) {
   return found;
 }
 
-test("frases: os .tsx da live só desenham textos de WEBINAR_COPY ou das provisórias; nenhum texto de tela cita o motor da sala nem as palavras proibidas", () => {
-  for (const path of LIVE_FILES.slice(1)) {
+test("frases: os .tsx do console só desenham textos dos arquivos de frases (as peças da live, de WEBINAR_COPY ou das provisórias); nenhum texto de tela cita o motor da sala nem as palavras proibidas", () => {
+  assert.ok(CONSOLE_FILES.length >= 15, `os .tsx do console: ${CONSOLE_FILES.length}`);
+  for (const path of CONSOLE_FILES) {
     assert.deepEqual(literalTexts(path), [], `${path}: texto solto no JSX`);
+  }
+  assert.ok(LIVE_FILES.includes(consoleFile("live-room-panel.tsx")));
+  for (const path of LIVE_FILES) {
     const source = stripComments(read(path));
     assert.doesNotMatch(source, /WEBINAR_ADMIN_COPY/, `${path}: as frases da sala ao vivo sao de WEBINAR_COPY`);
   }
@@ -604,18 +644,18 @@ test("o card de quem apresenta: Microfone, Alto-falante e Câmera com o aparelho
 });
 
 test("fontes do card: os aparelhos pelo useJitsiDevices do console, a troca só com a secao pronta e só de quem apresenta, a engrenagem só de aparelhos pelo papel, o dialogo de fundo pelo toggleVirtualBackgroundDialog e nada de setVideoQuality", () => {
-  const panel = stripComments(read(LIVE_FILES[1]));
+  const panel = stripComments(read(consoleFile("live-room-panel.tsx")));
   assert.match(panel, /useJitsiDevices\(\{[\s\S]*?podeTrocar: \(kind\) => deviceSettingsRef\.current !== null && deviceSectionReady\(deviceSettingsRef\.current, kind\)/);
   assert.match(panel, /deviceSettingsRef\.current = presenter \? deviceSettings : null;/, "so quem apresenta troca");
   assert.match(panel, /chooseDevice = \(kind: DeviceKind, option: DeviceOption\) => presenter && deviceSectionReady\(deviceSettings, kind\) && escolher\(kind, option\)/);
   assert.match(panel, /deviceSettingsFor\(\{[\s\S]*?role,[\s\S]*?videoOn: joined && videoOn/);
   assert.match(panel, /devicesSignalRef\.current\(name, payload\)/, "deviceListChanged e o ruido de volta numa entrada nova");
-  assert.match(panel, /useMemo\(\(\) => liveInterfaceConfigOverwrite\(tokenRole\), \[tokenRole\]\)/, "a engrenagem so de aparelhos depende do papel");
+  assert.match(panel, /useMemo\(\(\) => liveInterfaceConfigOverwrite\(tokenRole, look\), \[tokenRole, look\]\)/, "a engrenagem so de aparelhos depende do papel (e o visual do tema, na montagem)");
   assert.match(panel, /<LiveSettingsCard[\s\S]*?cameraOn=\{handle\.videoOn\}[\s\S]*?onChoose=\{handle\.chooseDevice\}/);
   // Ruido, fundo e espelho sem estado nem reaplicacao: a barra do iframe de quem apresenta tambem os muda.
   assert.match(panel, /useJitsiDevices\(\{[\s\S]*?efeitosNoIframe: true,/);
 
-  const cardSource = stripComments(read(LIVE_FILES[LIVE_FILES.length - 1]));
+  const cardSource = stripComments(read(consoleFile("live-settings-card.tsx")));
   assert.match(cardSource, /onClick=\{devices\.maisFundos\}/);
   assert.match(cardSource, /event\.key === "Escape"/);
   for (const source of [panel, cardSource]) {

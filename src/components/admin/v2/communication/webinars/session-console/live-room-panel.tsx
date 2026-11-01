@@ -1,12 +1,12 @@
 "use client";
 
 import { DoorOpen, LogIn, RefreshCw, Settings2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
-import { CONSOLE_EXTRA_EVENTS, JITSI_LISTENED_EVENTS, liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type ConsoleListenedEvent } from "@/lib/jitsi-room-config";
+import { CONSOLE_EXTRA_EVENTS, JITSI_LISTENED_EVENTS, liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type ConsoleListenedEvent, type LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { ConsoleWebinar } from "@/server/webinars/console-queries";
@@ -36,7 +36,6 @@ import {
 } from "@/server/webinars/live-console-model";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
-import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
 import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 
@@ -57,8 +56,10 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do vídeo: setVideoQuality
 // mudaria o envio do palco) e o ruido, o fundo e o espelho como acoes sem estado (efeitosNoIframe: a barra do iframe
 // tambem os muda); a Equipe no console nao tem barra de midia (docs/30 §1.4, pendencia).
-// LiveRoomPanel desenha o palco, a situacao da sala, o botao Configurações (o card abre acima do palco) e os controles
-// ao redor (live-controls.tsx).
+// O tema do console (docs/31 V2-12) entra no iframe pelo `look` so na montagem, como na sala do aluno: o
+// configOverwrite e o interfaceConfigOverwrite mudam com ele, mas o useJitsiMeet nao remonta por isso.
+// LiveRoomPanel desenha, na coluna do palco do console V2, a situacao da sala, o botao Configurações (o card abre acima
+// do palco) e o palco; os controles (live-controls.tsx) ficam embaixo, no lugar da barra.
 // Nenhum texto cita o motor da sala.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
@@ -151,6 +152,8 @@ type UseLiveRoomInput = {
   /** Falso fora da Live ao vivo: nada e pedido nem montado. */
   enabled: boolean;
   live: LiveConsoleSnapshot | null;
+  /** O tema do console (e o Palco), levado ao iframe na montagem. */
+  look: LiveEmbedLook;
   nonce?: string | null;
   /** A ancora (markRecordingAnchor); devolve se deu certo. */
   onAnchor: () => Promise<boolean>;
@@ -180,7 +183,7 @@ async function fetchJoinToken(webinarId: string, sessionId: string): Promise<Tok
 }
 
 export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
-  const { container, enabled, live, session, webinar } = input;
+  const { container, enabled, live, look, session, webinar } = input;
   const [testing, setTesting] = useState(false);
   const [token, setToken] = useState<TokenState>({ error: null, reply: null });
   // "Tentar de novo" sem token (o primeiro pedido falhou): pede outro.
@@ -251,10 +254,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     };
   }, [sessionId, tokenAttempt, wantsRoom, webinar.id]);
 
-  const configOverwrite = useMemo(() => (token.reply ? liveConfigOverwrite(token.reply.role, token.reply.settings) : {}), [token.reply]);
+  const configOverwrite = useMemo(() => (token.reply ? liveConfigOverwrite(token.reply.role, token.reply.settings, look) : {}), [token.reply, look]);
   // Quem apresenta abre a engrenagem do iframe so na aba de aparelhos (o papel vem do join-token).
   const tokenRole = token.reply?.role ?? null;
-  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(tokenRole), [tokenRole]);
+  const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(tokenRole, look), [tokenRole, look]);
 
   const markAnchor = useCallback(async () => {
     for (let attempt = 0; attempt < ANCHOR_RETRIES; attempt += 1) {
@@ -535,10 +538,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
 
 type LiveRoomPanelProps = {
   busy: boolean;
-  children?: ReactNode;
   handle: LiveRoomHandle;
   live: LiveConsoleSnapshot;
   session: WebinarSession;
+  /** As classes do palco (consoleSkeleton): 16:9 abaixo de lg, a altura que sobra da coluna a partir de lg. */
+  stageClassName: string;
   /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */
   stageRef: RefObject<HTMLDivElement | null>;
 };
@@ -569,13 +573,13 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]):
 }
 
 /**
- * O palco do console: o iframe da sala no meio, a situacao (Gravando, sala trancada, sala de espera), o botao
- * Configurações de quem apresenta e os controles ao redor. O card de aparelhos abre ACIMA do palco: logo depois do
+ * O palco do console: a situacao da sala (Gravando, sala trancada, quantas pessoas), o botao Configurações de quem
+ * apresenta, o iframe da sala e o aviso da sala de espera. O card de aparelhos abre ACIMA do palco: logo depois do
  * botao no teclado (o Tab do botao entra no card, nao nos botoes da barra do iframe, e o Esc fica a mao) e na tela
- * (abaixo de um palco 16:9, num notebook, ele ficaria fora da tela e o clique pareceria nao fazer nada). Fechar pelo
- * proprio botao manda o foco a ele antes de o card sumir (o WebKit nao foca o botao no clique).
+ * (abaixo do palco ele ficaria fora da tela e o clique pareceria nao fazer nada). Fechar pelo proprio botao manda o
+ * foco a ele antes de o card sumir (o WebKit nao foca o botao no clique). O no [data-live-stage] nunca muda de pai.
  */
-export function LiveRoomPanel({ busy, children, handle, live, session, stageRef }: LiveRoomPanelProps) {
+export function LiveRoomPanel({ busy, handle, live, session, stageClassName, stageRef }: LiveRoomPanelProps) {
   const settingsButton = useRef<HTMLButtonElement | null>(null);
   const message = frameMessage(handle, session.status);
   const showSettings = presents(handle.role) && handle.meetConfigured;
@@ -584,10 +588,12 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
   const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
   const showRetry = handle.frameStatus === "failed" || (handle.tokenError === "failed" && handle.frameStatus === "idle");
 
+  const hasStatus = recording || live.roomLocked || handle.joined || showSettings;
+
   return (
-    <SectionCard
-      actions={
-        <span className="flex flex-wrap items-center gap-2">
+    <>
+      {hasStatus ? (
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2" data-live-room-status="">
           {recording ? <StatusChip tone="error">{copy.gravador.recording}</StatusChip> : null}
           {live.roomLocked ? <StatusChip tone="warning">{copy.salaTrancada}</StatusChip> : null}
           {handle.joined ? <StatusChip tone="muted">{LIVE_CONSOLE_COPY.naSala(handle.room.people.length + 1)}</StatusChip> : null}
@@ -595,7 +601,7 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
             <Button
               aria-controls={LIVE_SETTINGS_CARD_ID}
               aria-expanded={handle.settingsOpen}
-              className="px-3"
+              className="ml-auto px-3"
               onClick={() => {
                 if (handle.settingsOpen) {
                   settingsButton.current?.focus();
@@ -610,12 +616,8 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
               {copy.configuracoes}
             </Button>
           ) : null}
-        </span>
-      }
-      bodyClassName="flex min-w-0 flex-col gap-4"
-      title={LIVE_CONSOLE_COPY.salaAoVivo}
-      titleId="console-live-room-title"
-    >
+        </div>
+      ) : null}
       {showSettings && handle.settingsOpen ? (
         <LiveSettingsCard
           cameraOn={handle.videoOn}
@@ -628,8 +630,8 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
           sections={handle.deviceSettings}
         />
       ) : null}
-      <div className="relative w-full min-w-0 overflow-hidden rounded-lg bg-black" data-live-frame-status={handle.frameStatus}>
-        <div aria-label={WEBINAR_COPY.aoVivo.palco} className="aspect-video w-full [&_iframe]:size-full [&_iframe]:border-0" data-live-stage="" ref={stageRef} role="region" />
+      <div className={stageClassName} data-console-slot="stage" data-live-frame-status={handle.frameStatus}>
+        <div aria-label={WEBINAR_COPY.aoVivo.palco} className="absolute inset-0 [&_iframe]:size-full [&_iframe]:border-0" data-live-stage="" ref={stageRef} role="region" />
         {message ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center" data-live-stage-message="">
             <p className="max-w-md text-sm leading-5 text-white/85">{message}</p>
@@ -659,11 +661,10 @@ export function LiveRoomPanel({ busy, children, handle, live, session, stageRef 
         ) : null}
       </div>
       {notice ? (
-        <p className={cn("text-[13px] leading-5", live.roomLocked ? "text-[var(--warning)]" : "text-[var(--text-secondary)]")} data-live-notice="">
+        <p className={cn("shrink-0 text-[13px] leading-5", live.roomLocked ? "text-[var(--warning)]" : "text-[var(--text-secondary)]")} data-live-notice="">
           {notice}
         </p>
       ) : null}
-      {children}
-    </SectionCard>
+    </>
   );
 }

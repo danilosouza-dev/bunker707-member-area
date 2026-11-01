@@ -201,6 +201,18 @@ export function isAdminV2Href(href: string) {
   return matchesAdminPath(normalizeAdminPath(href), ADMIN_HOME_HREF);
 }
 
+/** O console da sessao de um webinario (/admin/comunicacao/webinarios/{id}/sala), com ou sem a barra no fim. */
+const FULL_SCREEN_PATH = /^\/admin\/comunicacao\/webinarios\/[^/]+\/sala\/?$/;
+
+/**
+ * As telas do admin em tela cheia (docs/31 V2-13): a moldura nao desenha a barra lateral, a gaveta do celular nem a
+ * barra superior, e a tela ocupa a janela inteira. Hoje so o console da sessao de um webinario. O caminho vem do
+ * usePathname, sem a busca (?sessao=).
+ */
+export function isAdminFullScreenPath(pathname: string | null | undefined): boolean {
+  return typeof pathname === "string" && FULL_SCREEN_PATH.test(pathname);
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Barra superior (prototipo aprovado, `topbarScope`)
  * ---------------------------------------------------------------------------------------------- */
