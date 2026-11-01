@@ -1380,6 +1380,29 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --color-room-success-border: var(--room-success-border);
   --color-room-hover-overlay: var(--room-hover-overlay);
   --color-room-press-overlay: var(--room-press-overlay);
+  --color-room-panel: var(--room-panel);
+  --color-room-panel-border: var(--room-panel-border);
+  --color-room-menu: var(--room-menu);
+  --color-room-fg-disabled: var(--room-fg-disabled);
+  --color-room-press-inverse: var(--room-press-inverse);
+  --color-room-active-hover: var(--room-active-hover);
+  --color-room-thread-line: var(--room-thread-line);
+  --color-room-thread-line-hover: var(--room-thread-line-hover);
+  --color-room-field-line: var(--room-field-line);
+  --color-room-field-line-draft: var(--room-field-line-draft);
+  --color-room-cta-bg: var(--room-cta-bg);
+  --color-room-cta-hover: var(--room-cta-hover);
+  --color-room-cta-fg: var(--room-cta-fg);
+  --color-room-cta-press: var(--room-cta-press);
+  --color-room-link: var(--room-link);
+  --color-room-snackbar-bg: var(--room-snackbar-bg);
+  --color-room-snackbar-fg: var(--room-snackbar-fg);
+  --color-room-snackbar-action: var(--room-snackbar-action);
+  --color-room-snackbar-action-hover: var(--room-snackbar-action-hover);
+  --color-room-snackbar-ring: var(--room-snackbar-ring);
+  --color-room-tooltip-bg: var(--room-tooltip-bg);
+  --color-room-tooltip-fg: var(--room-tooltip-fg);
+  --color-room-accent-hover: var(--room-accent-hover);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -1518,9 +1541,13 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
  * variaveis: as cores entram pelas classes bg-room-*, text-room-* e border-room-* (o @theme inline acima). O que fica
  * sobre o video (as capas do palco, os selos Ao vivo e Gravando, as pilulas do chat, a Oferta e o veu da enquete) e
  * igual nos dois temas e nao passa por aqui. Os dois blocos tem os mesmos nomes (tests/webinarios-sala-tokens.guard).
- * Texto pequeno com 4,5:1 nos dois temas (docs/12): no claro, o cinza --room-fg-subtle e #63636b (o #71717a ficava
- * abaixo sobre #ededeb e #f4f4f3), e o texto de sucesso e --room-success-fg, nunca --room-speaking (feito para o ponto
- * e a borda de quem fala; o #16a34a nao chega a 3:1 no claro). A barra do resultado da enquete e --room-poll-bar.
+ * Texto pequeno com 4,5:1 e traco, icone e estado com 3:1 nos dois temas (docs/12; os pares em
+ * tests/webinarios-sala-tokens.guard, PARES_YT). O texto, o secundario, o tonal, o ativo e o foco sao os do YouTube
+ * (a sala no estilo do YouTube, docs/31): o fundo --room-bg continua o nosso, porque o iframe do motor pinta o mesmo.
+ * O texto de sucesso e --room-success-fg, nunca --room-speaking (feito para o ponto e a borda de quem fala; o #16a34a
+ * nao chega a 3:1 no claro). A barra do resultado da enquete e --room-poll-bar. O pressionado do azul (--room-cta-press)
+ * escurece nos dois temas: o clarear branco do YouTube no claro deixaria o texto do Enviar pressionado a 3,95:1. As duas
+ * sombras (--room-menu-shadow e --room-snackbar-shadow) nao tem classe.
  * O vermelho das pecas da sala (Ao vivo, o contador da barra, o ponto da aba e o Sair) e --room-accent, igual nos dois
  * temas: o --accent do shadcn e cinza no admin, e o console tambem as usa. O Encerrar do console e --room-danger-*.
  */
@@ -1538,24 +1565,24 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-tab-on-bg: #ffffff;
   --room-tab-on-fg: #000000;
   --room-tab-on-shadow: none;
-  --room-fg: #f7f7f4;
-  --room-fg-strong: #ffffff;
-  --room-fg-muted: #a1a1aa;
-  --room-fg-subtle: #a1a1aa;
-  --room-icon: #d4d4d8;
+  --room-fg: #f1f1f1;
+  --room-fg-strong: #f1f1f1;
+  --room-fg-muted: #aaaaaa;
+  --room-fg-subtle: #aaaaaa;
+  --room-icon: #f1f1f1;
   --room-meta-name: #d4d4d8;
   --room-bubble-other-fg: #f4f4f5;
   --room-bubble-mine-bg: #ffffff;
   --room-bubble-mine-fg: #000000;
   --room-border: rgba(255, 255, 255, 0.1);
   --room-border-strong: rgba(255, 255, 255, 0.12);
-  --room-divider: rgba(255, 255, 255, 0.14);
+  --room-divider: rgba(255, 255, 255, 0.2);
   --room-input-border: rgba(255, 255, 255, 0.15);
-  --room-control: rgba(255, 255, 255, 0.08);
-  --room-control-hover: rgba(255, 255, 255, 0.16);
-  --room-active-bg: #ffffff;
-  --room-active-fg: #000000;
-  --room-focus: #ffffff;
+  --room-control: rgba(255, 255, 255, 0.1);
+  --room-control-hover: rgba(255, 255, 255, 0.2);
+  --room-active-bg: #f1f1f1;
+  --room-active-fg: #0f0f0f;
+  --room-focus: #f1f1f1;
   --room-speaking: #34d399;
   --room-success-fg: #a7f3d0;
   --room-poll-bar: rgba(255, 255, 255, 0.16);
@@ -1571,7 +1598,35 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-success-bg: rgba(52, 211, 153, 0.12);
   --room-success-border: rgba(52, 211, 153, 0.3);
   --room-hover-overlay: rgba(255, 255, 255, 0.04);
-  --room-press-overlay: rgba(255, 255, 255, 0.07);
+  --room-press-overlay: rgba(255, 255, 255, 0.1);
+
+  /* A sala no estilo do YouTube (docs/31): o painel, o menu, o desligado, o pressionado invertido, o fio, a linha do
+     campo, o azul do envio e do link, o aviso invertido, a dica e o Sair com o ponteiro. */
+  --room-panel: #212121;
+  --room-panel-border: rgba(255, 255, 255, 0.2);
+  --room-menu: #282828;
+  --room-menu-shadow: 0 4px 32px 0 rgba(0, 0, 0, 0.1);
+  --room-fg-disabled: #717171;
+  --room-press-inverse: rgba(0, 0, 0, 0.2);
+  --room-active-hover: #d9d9d9;
+  --room-thread-line: #3f3f3f;
+  --room-thread-line-hover: #e5e5e5;
+  --room-field-line: rgba(255, 255, 255, 0.2);
+  --room-field-line-draft: #717171;
+  --room-cta-bg: #3ea6ff;
+  --room-cta-hover: #65b8ff;
+  --room-cta-fg: #0f0f0f;
+  --room-cta-press: rgba(0, 0, 0, 0.2);
+  --room-link: #3ea6ff;
+  --room-snackbar-bg: #f1f1f1;
+  --room-snackbar-fg: #0f0f0f;
+  --room-snackbar-action: #065fd4;
+  --room-snackbar-action-hover: #def1ff;
+  --room-snackbar-ring: rgba(0, 0, 0, 0.24);
+  --room-snackbar-shadow: 0 0 0 1px var(--room-snackbar-ring), 0 4px 24px 0 rgba(0, 0, 0, 0.5);
+  --room-tooltip-bg: rgba(97, 97, 97, 0.9);
+  --room-tooltip-fg: #ffffff;
+  --room-accent-hover: #c30811;
 }
 
 [data-room-theme="light"] {
@@ -1588,24 +1643,24 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-tab-on-bg: #ffffff;
   --room-tab-on-fg: #141414;
   --room-tab-on-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --room-fg: #141414;
-  --room-fg-strong: #141414;
-  --room-fg-muted: #52525b;
-  --room-fg-subtle: #63636b;
-  --room-icon: #52525b;
+  --room-fg: #0f0f0f;
+  --room-fg-strong: #0f0f0f;
+  --room-fg-muted: #606060;
+  --room-fg-subtle: #606060;
+  --room-icon: #0f0f0f;
   --room-meta-name: #3f3f46;
   --room-bubble-other-fg: #141414;
   --room-bubble-mine-bg: #141414;
   --room-bubble-mine-fg: #ffffff;
   --room-border: rgba(0, 0, 0, 0.08);
   --room-border-strong: rgba(0, 0, 0, 0.1);
-  --room-divider: rgba(0, 0, 0, 0.12);
+  --room-divider: rgba(0, 0, 0, 0.2);
   --room-input-border: rgba(0, 0, 0, 0.12);
-  --room-control: #f4f4f3;
-  --room-control-hover: #e9e9e7;
-  --room-active-bg: #141414;
-  --room-active-fg: #ffffff;
-  --room-focus: #141414;
+  --room-control: rgba(0, 0, 0, 0.05);
+  --room-control-hover: rgba(0, 0, 0, 0.1);
+  --room-active-bg: #0f0f0f;
+  --room-active-fg: #f1f1f1;
+  --room-focus: #0f0f0f;
   --room-speaking: #16a34a;
   --room-success-fg: #166534;
   --room-poll-bar: rgba(0, 0, 0, 0.16);
@@ -1621,7 +1676,34 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-success-bg: #ecfdf5;
   --room-success-border: rgba(22, 163, 74, 0.3);
   --room-hover-overlay: rgba(0, 0, 0, 0.04);
-  --room-press-overlay: rgba(0, 0, 0, 0.07);
+  --room-press-overlay: rgba(0, 0, 0, 0.1);
+
+  /* A sala no estilo do YouTube: os mesmos nomes do escuro, na mesma ordem. */
+  --room-panel: #ffffff;
+  --room-panel-border: rgba(0, 0, 0, 0.2);
+  --room-menu: #ffffff;
+  --room-menu-shadow: 0 4px 32px 0 rgba(0, 0, 0, 0.1);
+  --room-fg-disabled: #909090;
+  --room-press-inverse: rgba(255, 255, 255, 0.2);
+  --room-active-hover: #272727;
+  --room-thread-line: #e5e5e5;
+  --room-thread-line-hover: #3f3f3f;
+  --room-field-line: rgba(0, 0, 0, 0.2);
+  --room-field-line-draft: #909090;
+  --room-cta-bg: #065fd4;
+  --room-cta-hover: #0556bf;
+  --room-cta-fg: #f1f1f1;
+  --room-cta-press: rgba(0, 0, 0, 0.2);
+  --room-link: #065fd4;
+  --room-snackbar-bg: #0f0f0f;
+  --room-snackbar-fg: #f1f1f1;
+  --room-snackbar-action: #3ea6ff;
+  --room-snackbar-action-hover: #263850;
+  --room-snackbar-ring: rgba(255, 255, 255, 0.32);
+  --room-snackbar-shadow: 0 0 0 1px var(--room-snackbar-ring), 0 4px 24px 0 rgba(0, 0, 0, 0.5);
+  --room-tooltip-bg: rgba(97, 97, 97, 0.9);
+  --room-tooltip-fg: #ffffff;
+  --room-accent-hover: #c30811;
 }
 
 /*
