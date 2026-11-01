@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 // Guarda dos tokens da sala do webinario (docs/31 V2-11 e V2-12; docs/18 §2.7, por isso .guard): o texto do CSS e dos
 // componentes, que nenhum teste de tela alcanca. O tema claro e o escuro moram em dois blocos de globals.css, cada um
 // com TODOS os --room-* (um nome que falta num deles deixaria a cor vazia so naquele tema); cada --color-room-* do
-// @theme inline aponta para um --room-* que existe; as superficies fora do video nao voltam aos hex fixos de antes; e o
-// atributo data-room-theme fica so no dialogo da sala, nunca no :root nem no html (a area continua escura).
+// @theme inline aponta para um --room-* que existe; as superficies fora do video nao voltam aos hex fixos de antes; o
+// atributo data-room-theme fica so no dialogo da sala, nunca no :root nem no html (a area continua escura); e a ponte
+// do console de quem apresenta ([data-console-root], docs/31 V2-12 e V2-13) redefine cada token do admin por um --room-*.
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const ler = (caminho) => readFileSync(path.join(root, caminho), "utf8");
@@ -70,6 +71,32 @@ test("cada --color-room-* do @theme inline aponta para um --room-* definido (as 
   );
 });
 
+test("a ponte do console ([data-console-root]) redefine cada token do admin, e cada valor e um --room-* que existe", () => {
+  // Os nomes do bloco do admin (o primeiro "[data-scope=admin] {", junto com o :root:has dele), menos os que nao mudam
+  // com o tema: as series --chart-* (que leem --series-*), a curva --ease-admin e o --radius.
+  const fica = (nome) => /^--chart-/.test(nome) || nome === "--ease-admin" || nome === "--radius";
+  const admin = [...bloco('[data-scope="admin"]').matchAll(/(--[a-z0-9-]+)\s*:/g)].map(([, nome]) => nome);
+  assert.ok(admin.includes("--surface-0") && admin.includes("--popover") && admin.includes("--ring"), `o bloco do admin: ${admin.join(" ")}`);
+  const esperados = admin.filter((nome) => !fica(nome)).sort();
+
+  const corpo = bloco("[data-console-root]");
+  const ponte = new Map([...corpo.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map(([, nome, valor]) => [nome, valor.trim()]));
+  assert.deepEqual([...ponte.keys()].sort(), esperados, "cada token do admin que muda com o tema, e so eles");
+  for (const [nome, valor] of ponte) {
+    const alvo = /^var\((--room-[a-z0-9-]+)\)$/.exec(valor);
+    assert.ok(alvo, `${nome}: so var(--room-*), nenhum valor literal (${valor})`);
+    assert.ok(ESCURO.has(alvo[1]) && CLARO.has(alvo[1]), `${nome}: ${alvo[1]} existe nos dois temas`);
+  }
+  // O que o console precisa de cada lado: o foco do anel do admin, o hover do shadcn (cinza) e o vermelho da marca.
+  assert.equal(ponte.get("--focus-ring"), "var(--room-focus)");
+  assert.equal(ponte.get("--accent"), "var(--room-surface-2)");
+  assert.equal(ponte.get("--brand-red"), "var(--room-accent)");
+  assert.equal(ESCURO.get("--room-accent"), "#e50914");
+  assert.equal(CLARO.get("--room-accent"), "#e50914");
+  // Um bloco so: um segundo [data-console-root] poderia vencer este.
+  assert.equal(css.match(/\[data-console-root\][^{]*\{/g)?.length, 1);
+});
+
 test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #111, #0f0f0f, #161616, #1b1b1b, #121212)", () => {
   const ROOM = "src/components/member/webinars/room";
   const arquivos = [
@@ -110,13 +137,15 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
   }
 });
 
-test("data-room-theme fica so no dialogo da sala: nunca no :root, no html ou no body", () => {
+test("data-room-theme fica so no dialogo da sala e na raiz do console (com data-console-root): nunca no :root, no html ou no body", () => {
   // No CSS: so os dois blocos, sem :root, html ou body na frente nem :has() de fora.
   const seletores = [...css.matchAll(/([^{}]*\[data-room-theme[^{}]*)\{/g)].map(([, seletor]) => seletor.trim());
   assert.deepEqual(seletores.sort(), ['[data-room-theme="dark"]', '[data-room-theme="light"]']);
   assert.doesNotMatch(css, /(?::root|html|body)[^{,]*data-room-theme/);
 
-  // No codigo: o atributo so nas duas salas, como atributo do dialogo; ninguem o poe no documento.
+  // No codigo: o atributo so nas duas salas, como atributo do dialogo, e na raiz do console de quem apresenta (a casca e
+  // o esqueleto do carregamento), no mesmo elemento que o data-console-root (a ponte dos tokens do admin); ninguem o
+  // poe no documento.
   const quem = [];
   const visitar = (pasta) => {
     for (const nome of readdirSync(path.join(root, pasta))) {
@@ -129,11 +158,20 @@ test("data-room-theme fica so no dialogo da sala: nunca no :root, no html ou no 
     }
   };
   visitar("src");
-  assert.deepEqual(quem.sort(), ["src/components/member/webinars/room/live-room.tsx", "src/components/member/webinars/room/webinar-room.tsx"]);
+  const CONSOLE = "src/components/admin/v2/communication/webinars/session-console";
+  const raizesDoConsole = [`${CONSOLE}/console-shell.tsx`, `${CONSOLE}/session-console-skeleton.tsx`];
+  const salas = ["src/components/member/webinars/room/live-room.tsx", "src/components/member/webinars/room/webinar-room.tsx"];
+  assert.deepEqual(quem.sort(), [...raizesDoConsole, ...salas].sort());
   for (const arquivo of quem) {
     const codigo = semComentarios(ler(arquivo));
-    assert.equal((codigo.match(/data-room-theme=/g) ?? []).length, 1, `${arquivo}: um so atributo, o do dialogo`);
-    assert.match(codigo, /role="dialog"/);
+    assert.equal((codigo.match(/data-room-theme=/g) ?? []).length, 1, `${arquivo}: um so atributo`);
+    if (raizesDoConsole.includes(arquivo)) {
+      // A raiz do console nao e dialogo: o tema e a ponte no mesmo elemento.
+      assert.match(codigo, /<div(?=[^>]*\sdata-console-root="")(?=[^>]*\sdata-room-theme=)[^>]*>/, `${arquivo}: o tema na raiz com data-console-root`);
+      assert.doesNotMatch(codigo, /role="dialog"/, arquivo);
+    } else {
+      assert.match(codigo, /role="dialog"/);
+    }
     assert.doesNotMatch(codigo, /documentElement|document\.body\.(?:dataset|setAttribute)/, arquivo);
   }
   // A gravada e o replay passam pela regra do vertical (sempre escuro), testada em webinarios-sala-v2-modelo.
@@ -219,6 +257,10 @@ for (const [nomeDoTema, tema] of [
     conferir("active-fg sobre active-bg", cor("active-fg"), sobre(cor("active-bg"), painel));
     conferir("bubble-mine-fg sobre bubble-mine-bg", cor("bubble-mine-fg"), sobre(cor("bubble-mine-bg"), painel));
     conferir("tab-on-fg sobre tab-on-bg", cor("tab-on-fg"), sobre(cor("tab-on-bg"), painel));
+    // O Encerrar do console (RoomButton stop, o --error da ponte) e o selo de sucesso do admin pela ponte (StatusChip),
+    // os dois sobre o painel (docs/31 V2-13).
+    conferir("danger-fg sobre danger-bg", cor("danger-fg"), sobre(cor("danger-bg"), painel));
+    conferir("success-fg sobre success-bg", cor("success-fg"), sobre(cor("success-bg"), painel));
     assert.deepEqual(falhas, [], `pares abaixo de 4,5:1 no tema ${nomeDoTema}`);
 
     // A barra do resultado aparece sobre o card e sobre o dialogo do palco (a porcentagem escrita leva o dado; a barra

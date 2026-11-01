@@ -111,10 +111,13 @@ export function meetPermissionsAllowList(domain: string | null): string {
 }
 
 /**
- * A barra do iframe por papel (docs/30 §6.3): o apresentador e o co-apresentador usam a do iframe (microfone, camera,
- * tela, mao, participantes, gravar so o host, seguranca, fundo, configuracoes e sair; a engrenagem abre so a aba de
- * aparelhos, liveInterfaceConfigOverwrite); aluno e Equipe usam so a nossa. Os controles de Zoom (silenciar todos,
- * fechar cameras, liberar, remover, trancar, destacar) sao botoes nossos que chamam executeCommand.
+ * A barra do iframe por papel na pagina da sala (docs/30 §6.3; a superficie "room" de liveConfigOverwrite): o
+ * apresentador e o co-apresentador que entram pela pagina do aluno usam a do iframe (microfone, camera, tela, mao,
+ * participantes, gravar so o host, seguranca, fundo, configuracoes e sair; a engrenagem abre so a aba de aparelhos,
+ * liveInterfaceConfigOverwrite); aluno e Equipe usam so a nossa. No console (a superficie "console"), quem apresenta
+ * tambem usa a nossa barra (docs/31 V2-14) e o liveConfigOverwrite troca esta lista pela vazia (ou so pelo botao de
+ * tela do motor, consoleScreenShareMode). Os controles de Zoom (silenciar todos, fechar cameras, liberar, remover,
+ * trancar, destacar) sao botoes nossos que chamam executeCommand.
  */
 export function toolbarButtonsFor(role: LiveRoomRole, settings: Pick<LiveEmbedSettings, "allowStudentCamera">): string[] {
   switch (role) {
@@ -142,6 +145,50 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
   return role === "host" || role === "co_host";
 }
 
+/** Onde o iframe entra: a pagina da sala (o aluno, e quem apresenta por ela) ou o console de quem apresenta. */
+export type LiveEmbedSurface = "console" | "room";
+
+/**
+ * Quem desenha o Compartilhar tela de quem apresenta no console (docs/31 V2-14 e V2-A39): o nosso circulo da barra
+ * (toggleShareScreen pelo IFrame API) ou o botao de tela do proprio motor (toolbarButtons ["desktop"], que aparece ao
+ * passar o mouse no video).
+ */
+export type ConsoleScreenShareMode = "engine" | "ours";
+
+const CHROMIUM = /\b(?:Chrome|Chromium)\/\d/;
+const NOT_CHROMIUM = /\b(?:Firefox|FxiOS)\//;
+/** O celular e o tablet: o Chrome do Android traz "Chrome/" mas nao tem getDisplayMedia. */
+const MOBILE = /\b(?:Android|Mobile)\b/;
+
+/**
+ * O Compartilhar tela de quem apresenta no console, pelo navegador (docs/31 V2-A39), ate o spike da tela (§5.3)
+ * confirmar ou trocar: o nosso circulo so nos navegadores de computador com Chromium (Chrome, Edge, Opera, Brave, que
+ * trazem "Chrome/" no userAgent), onde o getDisplayMedia pedido pelo comando dentro do iframe de outra origem foi
+ * conferido; no Firefox, no Safari, em todo navegador do iPhone e do iPad (o Chrome de la e WebKit, "CriOS/") e no
+ * Android, o botao do proprio motor. No celular e no tablet nao ha tela compartilhada: sem getDisplayMedia o motor nao
+ * age no comando nem mostra o botao dele (isDesktopSharingEnabled), e o nosso circulo seria um botao que nao faz nada.
+ * Sem o userAgent, o do motor, que funciona em todos. O recurso tambem conta: sem o getDisplayMedia na pagina
+ * (`displayMedia` falso), o do motor, mesmo com o userAgent de computador (o Chrome do Android ou do tablet no "site para
+ * computador" manda o de Linux, sem Android nem Mobile). Lido uma vez no navegador, nunca no servidor.
+ */
+export function consoleScreenShareMode(userAgent: string | null | undefined, features: { displayMedia?: boolean } = {}): ConsoleScreenShareMode {
+  const agent = typeof userAgent === "string" ? userAgent : "";
+  if (features.displayMedia === false) {
+    return "engine";
+  }
+  return CHROMIUM.test(agent) && !NOT_CHROMIUM.test(agent) && !MOBILE.test(agent) ? "ours" : "engine";
+}
+
+/**
+ * O que o ⋮ da miniatura do motor avisa em vez de fazer, no console de quem apresenta (docs/31 V2-14 e V2-A29): o
+ * "Pedir para ligar o microfone" vira o nosso Liberar e o Remover passa pelo nosso servidor (o registro da sessao)
+ * antes do kickParticipant. O motor manda o participantMenuButtonClick { key, participantId, preventExecution }.
+ */
+export const CONSOLE_PARTICIPANT_MENU_BUTTONS = [
+  { key: "ask-unmute", preventExecution: true },
+  { key: "kick", preventExecution: true }
+] as const;
+
 /**
  * O configOverwrite do iframe (docs/30 §5.4, §6.3, §8.1 e D26). O chat, as enquetes e as reacoes do Jitsi ficam
  * sempre desligados (D5: sao os nossos); todo mundo entra mudo e com a camera fechada; o aluno nao tem menu sobre
@@ -153,12 +200,26 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
  * §8.5); o toggleAudio depois do Falar e o toggleVideo depois do aviso da camera pedem a permissao na hora certa. O
  * aluno bate sozinho na sala de espera (`lobby.autoKnock`): com a sala trancada ou a Sala de espera ligada, ele fica
  * na fila sem precisar achar o botao do iframe.
+ * No console (`surface` "console", docs/31 V2-14), o Apresentador e o co-apresentador usam a NOSSA barra: o iframe
+ * deles fica sem a barra do motor (`toolbarButtons` vazio, ou so o botao de tela do motor onde o nosso circulo nao
+ * vale, `screenShare` "engine"), sem o `toolbarConfig` e sem os atalhos (o ESPACO, que liga o microfone enquanto
+ * aperta, e o F, que esconderia a coluna de todos pelo seguir a visao), e o ⋮ da miniatura avisa o Liberar e o Remover
+ * em vez de faze-los (CONSOLE_PARTICIPANT_MENU_BUTTONS). A pagina da sala (`surface` "room", o padrao) fica como era,
+ * inclusive para quem apresenta por ela.
  */
-export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
+export function liveConfigOverwrite(
+  role: LiveRoomRole,
+  settings: LiveEmbedSettings,
+  lookInput?: LiveEmbedLook | null,
+  surface: LiveEmbedSurface = "room",
+  screenShare: ConsoleScreenShareMode = "ours"
+): Record<string, unknown> {
   const height = sendHeightFor(role, settings);
   const student = role === "student";
   const audience = role === "student" || role === "team";
   const look = normalizeLook(lookInput);
+  // Quem apresenta no console: a barra e nossa (docs/31 V2-14).
+  const ourPresenterBar = surface === "console" && presents(role);
   return {
     ...(audience ? { disableInitialGUM: true } : {}),
     ...(student ? { lobby: { autoKnock: true } } : {}),
@@ -195,7 +256,8 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     ...(audience ? { disableLocalVideoFlip: true } : {}),
     disableSelfView: false,
     // Sem atalhos do iframe para o aluno e a Equipe: a camera e o microfone so pela nossa barra (o aviso de gravacao).
-    disableShortcuts: audience,
+    // No console, quem apresenta tambem fica sem eles: o microfone e a camera pela nossa barra.
+    disableShortcuts: audience || ourPresenterBar,
     hideConferenceSubject: true,
     hideConferenceTimer: true,
     hideDisplayName: false,
@@ -204,11 +266,13 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     readOnlyName: true,
     // Sem conversa privada pelo menu da miniatura (D5: o chat e o nosso); "disablePrivateChat" na raiz nao existe na tag.
     remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disablePrivateChat: "all", disabled: student },
+    // O Liberar e o Remover do ⋮ da miniatura pelos nossos (so no console de quem apresenta).
+    ...(ourPresenterBar ? { participantMenuButtonsWithNotifyClick: CONSOLE_PARTICIPANT_MENU_BUTTONS.map((button) => ({ ...button })) } : {}),
     resolution: height,
     startWithAudioMuted: true,
     startWithVideoMuted: true,
-    ...(presents(role) ? { toolbarConfig: { alwaysVisible: true } } : {}),
-    toolbarButtons: toolbarButtonsFor(role, settings)
+    ...(presents(role) && !ourPresenterBar ? { toolbarConfig: { alwaysVisible: true } } : {}),
+    toolbarButtons: ourPresenterBar ? (screenShare === "engine" ? ["desktop"] : []) : toolbarButtonsFor(role, settings)
   };
 }
 
@@ -279,6 +343,24 @@ export const JITSI_LISTENED_EVENTS = [
   "largeVideoChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
+
+/**
+ * Os sinais que so o console de quem apresenta escuta, alem dos da sala: o console monta com
+ * [...JITSI_LISTENED_EVENTS, ...CONSOLE_EXTRA_EVENTS] e a pagina do aluno nao os registra (cada sinal registrado passa
+ * pela fila da sala em toda pagina de aluno). Nenhum vai ao servidor (toRoomEvent devolve nulo).
+ * - contentSharingParticipantsChanged: os ids donos das faixas de tela nao mudas, no payload { data: string[] }
+ *   (API.js:1742-1747 da tag stable-11248), para o vigia da tela do console (docs/31 §5.4).
+ * - screenSharingStatusChanged: a propria tela de quem apresenta ({ on, details }), o estado do Compartilhar tela da
+ *   barra (docs/31 V2-14); o seletor de tela cancelado nao avisa nada.
+ * - moderationStatusChanged: a moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }), o "Câmeras
+ *   livres" pela de video, tambem quando outro console a muda.
+ * - participantMuted: o mudo de cada faixa remota ({ id, isMuted, mediaType }), que sai uma vez por faixa na entrada e
+ *   a cada troca (a lista de Pessoas do console); numa sala cheia, sao muitos, por isso so o console registra.
+ * - participantMenuButtonClick: o ⋮ da miniatura avisou um item em vez de faze-lo ({ key, participantId,
+ *   preventExecution }, CONSOLE_PARTICIPANT_MENU_BUTTONS).
+ */
+export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "moderationStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
+export type ConsoleListenedEvent = JitsiListenedEvent | (typeof CONSOLE_EXTRA_EVENTS)[number];
 
 /**
  * O sinal que o console manda (sendEndpointTextMessage, com o texto JSON { type }) para o aluno abaixar a propria mao:

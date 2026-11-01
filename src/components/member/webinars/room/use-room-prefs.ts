@@ -2,11 +2,14 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
+  CONSOLE_PANEL_KEY,
+  CONSOLE_THEME_KEY,
   deferredPollsValue,
   ROOM_PANEL_KEY,
   ROOM_POLLS_KEY,
   ROOM_THEME_KEY,
   ROOM_VIEW_KEY,
+  storedConsoleTheme,
   storedDeferredPolls,
   storedPanelOpen,
   storedRoomTheme,
@@ -23,7 +26,8 @@ import {
 // V2-12). A enquete no palco e o card "deixou para depois" dependem do que esta guardado: a sala so os desenha depois
 // da hidratacao (useRoomHydrated), senao a enquete deixada para depois piscaria no palco a cada carga. Outra aba muda
 // pelo evento "storage"; a mesma aba, pelo aviso aos ouvintes. Sem armazenamento (aba privada, bloqueado), vale a
-// memoria ate recarregar. Toda leitura e escrita fica em try/catch.
+// memoria ate recarregar. Toda leitura e escrita fica em try/catch. O console de quem apresenta (docs/31 V2-12 e V2-13)
+// usa o mesmo molde com as chaves proprias dele (useConsoleTheme e useConsolePanelOpen, abaixo).
 
 type PrefStore = {
   read: () => string | null;
@@ -102,6 +106,8 @@ const themeStore = prefStore(ROOM_THEME_KEY);
 const panelStore = prefStore(ROOM_PANEL_KEY);
 const viewStore = prefStore(ROOM_VIEW_KEY);
 const pollsStore = prefStore(ROOM_POLLS_KEY);
+const consoleThemeStore = prefStore(CONSOLE_THEME_KEY);
+const consolePanelStore = prefStore(CONSOLE_PANEL_KEY);
 
 function useStoredValue(store: PrefStore): string | null {
   return useSyncExternalStore(store.subscribe, store.read, serverSnapshot);
@@ -134,4 +140,18 @@ export function useDeferredPolls(sessionId: string): [DeferredPolls, (polls: Def
   const polls = useMemo(() => storedDeferredPolls(raw, sessionId), [raw, sessionId]);
   const setPolls = useCallback((next: DeferredPolls) => pollsStore.write(deferredPollsValue(sessionId, next)), [sessionId]);
   return [polls, setPolls];
+}
+
+/** O tema do console de quem apresenta (escuro por padrao), na chave propria (docs/31 V2-12 e V2-13). */
+export function useConsoleTheme(): [RoomTheme, (theme: RoomTheme) => void] {
+  const theme = storedConsoleTheme(useStoredValue(consoleThemeStore));
+  const setTheme = useCallback((next: RoomTheme) => consoleThemeStore.write(next), []);
+  return [theme, setTheme];
+}
+
+/** O painel do console aberto (o padrao) ou fechado, na chave propria. */
+export function useConsolePanelOpen(): [boolean, (open: boolean) => void] {
+  const open = storedPanelOpen(useStoredValue(consolePanelStore));
+  const setOpen = useCallback((next: boolean) => consolePanelStore.write(next ? "1" : "0"), []);
+  return [open, setOpen];
 }

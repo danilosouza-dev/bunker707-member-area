@@ -33,6 +33,10 @@ test("@assistente chama sem diferenciar maiusculas, como palavra (nem @assistent
   assert.equal(modelo.withoutMention("quanto custa @assistente?"), "quanto custa ?");
   assert.equal(modelo.assistantQuestionText("@assistente   e a garantia?"), "e a garantia?");
   assert.equal(modelo.assistantQuestionText("@assistente"), "@assistente", "so a mencao: vai o texto como veio");
+  // No tamanho de uma pergunta, contado por caractere: o emoji no corte fica inteiro, nunca a metade solta do par.
+  const pergunta = modelo.assistantQuestionText(`${"a".repeat(499)}😀${"b".repeat(100)}`);
+  assert.equal(Array.from(pergunta).length, 500);
+  assert.ok(pergunta.endsWith("😀"));
 });
 
 test("quem chama: @assistente, a aba Perguntas, e o Responder tudo so para pergunta da turma (tipo pergunta ou com ?)", () => {
@@ -229,6 +233,11 @@ test("a fila do Atendimento: abertas da aba, respondidas pelo Assistente com Fal
       message("m-ia-equipe", "@assistente nao entendi"),
       message("m-respondida", "@assistente e ai?"),
       message("r1", "respondi", { replyToId: "m-respondida", role: "team", source: "team" }),
+      // A resposta do co-apresentador (role co_host desde a 202611010001, docs/31 V2-A12) tambem e da equipe.
+      message("m-co-respondida", "@assistente e o link?"),
+      message("r2", "esta fixado", { replyToId: "m-co-respondida", role: "co_host", source: "team" }),
+      message("m-host-respondida", "@assistente que horas?"),
+      message("r3", "as 20h", { replyToId: "m-host-respondida", role: "host", source: "team" }),
       message("m-comum", "boa noite"),
       message("m-pergunta", "tem bonus", { kind: "question" }),
       message("m-ligada", "e o prazo", { kind: "question" }),

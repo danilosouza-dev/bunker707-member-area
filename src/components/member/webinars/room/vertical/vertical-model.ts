@@ -291,6 +291,7 @@ export function verticalChatTail(messages: readonly RoomMessage[], limit: number
 
 const ROLE_PREFIX: Partial<Record<RoomMessage["role"], string>> = {
   ai: WEBINAR_COPY.sala.selos.assistente,
+  co_host: WEBINAR_COPY.sala.selos.coApresentador,
   host: WEBINAR_COPY.sala.selos.apresentador,
   team: WEBINAR_COPY.sala.selos.equipe
 };

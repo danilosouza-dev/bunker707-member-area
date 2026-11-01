@@ -515,7 +515,8 @@ export function registrationEventMetadata(input: { campaignId?: string | null; s
  * script-model.ts e report-model.ts.
  * ---------------------------------------------------------------------------------------------- */
 
-export const CHAT_ROLES = ["host", "team", "student", "guest", "ai"] as const;
+/** O papel de quem escreveu. `co_host` (o co-apresentador, docs/31 V2-A12) pede a migracao 202611010001 (o check novo). */
+export const CHAT_ROLES = ["host", "co_host", "team", "student", "guest", "ai"] as const;
 export type ChatRole = (typeof CHAT_ROLES)[number];
 
 export const CHAT_SOURCES = ["original", "audience", "team", "scripted", "ai"] as const;
@@ -583,6 +584,17 @@ export const CHAT_LIMITS = {
   simulationAck: 600,
   chatPageMax: 200
 } as const;
+
+/**
+ * O texto de uma pergunta feita de uma mensagem (o Liberar e o Virar pergunta do console, a pergunta pelo chat aberto,
+ * a pergunta ao Assistente): no maximo CHAT_LIMITS.question caracteres, contados como o check char_length do banco (por
+ * caractere, nao por unidade UTF-16). Nunca corta um emoji ao meio: a metade solta de um par faz o Postgres recusar o
+ * texto inteiro.
+ */
+export function questionBodyOf(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= CHAT_LIMITS.question ? text : chars.slice(0, CHAT_LIMITS.question).join("");
+}
 
 /** Os ritmos da sala (docs/30 §5.1, §6.6, M1 a M4) e os pesos dos "mais quentes" (M3); o SQL repete os mesmos numeros. */
 export const ROOM_RULES = {

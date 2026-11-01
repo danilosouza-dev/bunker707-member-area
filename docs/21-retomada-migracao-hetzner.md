@@ -777,3 +777,57 @@ quebra.
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes, na ordem dos
 nomes (a `202610300001` e depois as seis), antes de trocar o app. A fase 4 nao cria servidor novo.
+
+### 9.11 Webinarios redesign V2, fase 2: migracao `202611010001` aplicada na nuvem de teste (01/11/2026); `202611010002` na fase 2b
+
+A fase 2 do redesign V2 (`docs/31`) tem duas migracoes. Elas vem **depois** da `202610300007` (§9.10), na ordem, e
+nenhuma muda as de antes (a guarda `tests/webinarios-v5.guard.test.mjs` prende o hash acumulado das 63 anteriores e o
+do arquivo novo). A fase 2 vai em duas PRs: a fase 2a (o console de quem apresenta e o Co-apresentador no chat) leva so
+a `202611010001`; a `202611010002` (a liberacao da tela de um aluno, `docs/31` §5.3) vem com a fase 2b, depois do
+spike da tela, e entra nesta secao quando for escrita.
+
+| Ordem | Arquivo | O que faz | Secoes | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611010001_webinars_v5_coapresentador.sql` | o Co-apresentador no chat (`docs/31` V2-9 e V2-A12): o check sem nome de `webinar_chat_messages.role` (da `202610290001`, que o Postgres chama `webinar_chat_messages_role_check`) sai e entra o check `webinar_chat_messages_role_v5`, com a mesma lista mais `co_host` | 2: 1 o drop do check antigo e o check novo `not valid`, dentro do bloco que so roda sem o check novo -> 2 o `validate` | `webinars_v5_coapresentador` |
+
+**Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): o app novo grava `role = 'co_host'` na mensagem e na
+resposta escrita de quem e co-apresentador do webinario (`webinar_presenters` com o prazo valendo). Sem a migracao, esse
+insert da `23514` no check antigo e a mensagem do co-apresentador falha; na resposta escrita a pergunta ja ficou
+respondida antes do insert, e o aluno a ve respondida na aba Perguntas sem a linha no chat, sem o aviso no sino e sem a
+auditoria. O Apresentador, a Equipe, o aluno e o resto do app seguem. O aviso de migracao pendente aponta `WEBINARS_MIGRATION = "202611010001"`, a mais nova (aplicar ate ela
+inclui todas as de antes). O co-apresentador nao tem constante propria: o insert dele sem a migracao chega como o erro
+comum da acao, nunca como o aviso de migracao pendente (por isso a migracao vem antes do merge). A migracao sozinha nao
+atrapalha o app de antes: o check novo aceita tudo que ele grava.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o nome do check foi conferido antes de escrever o arquivo, so lendo:
+`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.webinar_chat_messages'::regclass
+and contype = 'c';` deu `webinar_chat_messages_role_check`, `CHECK (role = ANY (ARRAY['host', 'team', 'student',
+'guest', 'ai']))`, validado. Pelo MCP do Supabase, `execute_sql`, **uma secao por chamada e na ordem**, cada uma
+comecando com `set lock_timeout = '5s';`: o bloqueio forte do `add constraint` fica so na secao 1, que nao le as linhas;
+o `validate` da secao 2 roda em outra transacao e deixa ler e gravar enquanto confere. A secao 1 tem um `drop
+constraint`: se o MCP pedir confirmacao e a janela expirar (como na 9.7), mandar o arquivo inteiro para o SQL Editor (e
+idempotente). Pelo `apply_migration` ou pelo `migrate.sh`, o arquivo roda numa transacao so e o bloqueio forte dura ate o
+fim do `validate`; a tabela e pequena, entao o custo e baixo. Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611010001', 'webinars_v5_coapresentador')
+on conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferencia depois de aplicar (a consulta do cabecalho da migracao):
+
+```sql
+select conname, convalidated, pg_get_constraintdef(oid) from pg_constraint
+  where conrelid = 'public.webinar_chat_messages'::regclass and contype = 'c'
+  and pg_get_constraintdef(oid) like '%role%'; -- 1 linha: webinar_chat_messages_role_v5, com co_host, convalidated = true
+```
+
+A idempotencia se confere rodando a secao 1 de novo (sem erro, nada muda). Estado em 01/11/2026: escrita e conferida
+num Postgres 16 local (o arquivo inteiro duas vezes numa transacao so, as secoes uma a uma com o `lock_timeout`, o
+insert com `co_host` aceito e um papel fora da lista recusado com `23514`) e **aplicada na nuvem de teste em
+01/11/2026**, antes do merge da PR da fase 2a: as duas secoes, uma por chamada; a conferencia do cabecalho deu uma linha,
+`webinar_chat_messages_role_v5`, com `co_host` e `convalidated = true`; e a versao `202611010001`
+(`webinars_v5_coapresentador`) ficou gravada em `supabase_migrations.schema_migrations`. Se o arquivo mudar depois
+disso, ele nao roda de novo na nuvem de teste: a mudanca vira uma migracao nova, e a guarda (o hash) avisa.
+
+**Producao (Hetzner)**: nada manual, mas na ordem certa. A producao precisa da `202611010001` antes da promocao `dev` ->
+`main` que levar o codigo da fase 2a (e da `202611010002` antes da que levar o da fase 2b): o `deploy-membros` roda o
+`migrate.sh` antes de recriar o app (`infra/scripts/deploy.sh`), na ordem dos nomes, entao basta a promocao passar pelo
+`deploy-membros`. Na producao, nenhuma das duas ainda.

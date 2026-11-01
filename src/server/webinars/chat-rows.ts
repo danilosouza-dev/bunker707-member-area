@@ -83,6 +83,7 @@ export function chatMessageFromRow(row: ChatMessageRow): ChatMessage {
     offsetMs: row.offset_ms,
     pinnedAt: row.pinned_at,
     replyToId: row.reply_to_id,
+    // `co_host` desde a 202611010001 (docs/31 V2-A12); um papel que este app nao conhece vira aluno, nunca equipe.
     role: oneOf<ChatRole>(CHAT_ROLES, row.role, "student"),
     scriptItemId: row.script_item_id,
     sessionId: row.session_id,

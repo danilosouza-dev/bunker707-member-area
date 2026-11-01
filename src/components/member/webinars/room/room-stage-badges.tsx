@@ -1,6 +1,7 @@
 "use client";
 
 import { Mic, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { RoomElapsed } from "./room-header";
@@ -15,6 +16,9 @@ import { RoomElapsed } from "./room-header";
 // o tempo (a frase inteira no title e para o leitor de tela). Nada aqui recebe o toque: o video por baixo continua
 // clicavel. O "Ao vivo" e o "Gravando" sao iguais nos dois temas (sobre o video); o apresentador e o Assistente usam os
 // tokens --room-on-video-* (docs/31 V2-11). Os data-testid room-on-air e live-recording sao os de antes, no palco.
+// O console de quem apresenta (docs/31 V2-13) usa as mesmas pecas e passa o que so ele tem: o selo do momento fora do ar
+// (`label`, neutro como o "waiting"), o papel do selo de baixo ("Você · Co-apresentador") e o canto de cima a direita
+// (os presentes com o pico, antes da coluna de miniaturas). A sala nao passa nada disso, e o HTML dela fica igual.
 
 /** O selo de cima a esquerda: o momento da sala. */
 export type RoomStageTopLeft =
@@ -26,16 +30,26 @@ export type RoomStageTopLeft =
   | { getOffsetMs?: () => number; kind: "session"; timeLabel: string }
   | { kind: "replay" }
   /** A Live ao vivo antes do "Começar para todos", com a sala aberta: "Aguardando o apresentador", neutro sobre o video. */
-  | { kind: "waiting" };
+  | { kind: "waiting" }
+  /** O console fora do ar: a frase do momento ("Começa em 4:59", "Durou 1:00:00"), neutra sobre o video como a espera. */
+  | { kind: "label"; label: string };
 
 export type RoomStageBadgesProps = {
   /** O Assistente de IA ligado na sessao (o estado lido pela sala, useRoomAssistant). */
   assistantOn: boolean;
   /** Quem apresenta (a pagina sabe); nulo, o selo de baixo a esquerda sai. */
   presenterName: string | null;
+  /** O papel no selo de baixo a esquerda (o console: "Co-apresentador"); sem ele, "Apresentador", como na sala. */
+  presenterRole?: string;
   /** O gravador gravando (a Live ao vivo). */
   recording: boolean;
   topLeft: RoomStageTopLeft | null;
+  /**
+   * O canto de cima a direita (o console: os presentes com o pico), sempre antes da coluna de miniaturas do iframe, na
+   * mesma linha e na mesma distancia da borda dos selos da esquerda; a partir de sm (no celular ele cairia sobre o selo
+   * do momento, e o console mostra os presentes no topo).
+   */
+  topRight?: ReactNode;
 };
 
 const PILL =
@@ -45,7 +59,7 @@ const DOT = "inline-block size-1.5 shrink-0 rounded-full lg:size-2";
 const ON_VIDEO = "bg-black/60 font-semibold text-white";
 /** O apresentador e o Assistente: os tokens do tema (no claro, a pilula branca). */
 const ON_VIDEO_THEMED = "bg-room-on-video-bg font-semibold text-room-on-video-fg";
-const ON_AIR = "bg-[var(--accent)] font-bold tabular-nums text-white";
+const ON_AIR = "bg-room-accent font-bold tabular-nums text-white";
 
 function TopLeft({ topLeft }: { topLeft: RoomStageTopLeft }) {
   const copy = WEBINAR_COPY.sala;
@@ -89,10 +103,25 @@ function TopLeft({ topLeft }: { topLeft: RoomStageTopLeft }) {
           {WEBINAR_COPY.aluno.aguardando}
         </span>
       );
+    case "label":
+      return (
+        <span className={cn(PILL, ON_VIDEO, "tabular-nums")} data-room-badge="moment">
+          {topLeft.label}
+        </span>
+      );
   }
 }
 
-export function RoomStageBadges({ assistantOn, presenterName, recording, topLeft }: RoomStageBadgesProps) {
+/** Uma pilula sobre o video, igual nos dois temas (a do "Gravando"), para o que o console poe no canto de cima a direita. */
+export function RoomStagePill({ children, className, ...props }: { children: ReactNode; className?: string; "data-room-badge"?: string; title?: string }) {
+  return (
+    <span className={cn(PILL, ON_VIDEO, className)} {...props}>
+      {children}
+    </span>
+  );
+}
+
+export function RoomStageBadges({ assistantOn, presenterName, presenterRole, recording, topLeft, topRight }: RoomStageBadgesProps) {
   const gravando = WEBINAR_COPY.aoVivo.gravando;
   const presenter = presenterName?.trim() ?? "";
 
@@ -103,7 +132,7 @@ export function RoomStageBadges({ assistantOn, presenterName, recording, topLeft
           {topLeft ? <TopLeft topLeft={topLeft} /> : null}
           {recording ? (
             <span className={cn(PILL, ON_VIDEO)} data-testid="live-recording" title={gravando}>
-              <span aria-hidden="true" className={cn(DOT, "bg-[var(--accent)] motion-safe:animate-pulse")} />
+              <span aria-hidden="true" className={cn(DOT, "bg-room-accent motion-safe:animate-pulse")} />
               {gravando}
             </span>
           ) : null}
@@ -112,8 +141,16 @@ export function RoomStageBadges({ assistantOn, presenterName, recording, topLeft
       {presenter ? (
         <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-2 left-2 z-20 max-w-[calc(100%-3.5rem)] lg:bottom-4 lg:left-4")} data-room-badge="presenter">
           <Mic aria-hidden="true" />
-          <span className="min-w-0 truncate">{WEBINAR_COPY.salaV2.selos.apresentador(presenter)}</span>
+          <span className="min-w-0 truncate">{presenterRole === undefined ? WEBINAR_COPY.salaV2.selos.apresentador(presenter) : WEBINAR_COPY.consoleV2.palco.selo(presenter, presenterRole)}</span>
         </span>
+      ) : null}
+      {topRight ? (
+        <div
+          className="pointer-events-none absolute right-[calc(var(--room-video-right)+8px)] top-2 z-20 hidden items-center gap-1.5 sm:flex lg:right-[calc(var(--room-video-right)+16px)] lg:top-4 lg:gap-2"
+          data-room-badges="top-right"
+        >
+          {topRight}
+        </div>
       ) : null}
       {assistantOn ? (
         <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-4 right-[calc(var(--room-video-right)+16px)] z-20 hidden lg:inline-flex")} data-room-badge="assistant">

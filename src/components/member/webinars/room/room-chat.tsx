@@ -81,6 +81,7 @@ export type RoomChatPanelProps = {
 
 const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: RoomBadgeTone }>> = {
   ai: { label: WEBINAR_COPY.sala.selos.assistente, tone: "outline" },
+  co_host: { label: WEBINAR_COPY.sala.selos.coApresentador, tone: "neutral" },
   host: { label: WEBINAR_COPY.sala.selos.apresentador, tone: "accent" },
   team: { label: WEBINAR_COPY.sala.selos.equipe, tone: "neutral" }
 };
@@ -111,23 +112,50 @@ export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode
   );
 }
 
+/** A coluna do balao e da linha de baixo na sala: ate 270 px, 230 px a partir de lg (o painel de 320 px). */
+const BUBBLE_COLUMN = "flex min-w-0 max-w-[270px] flex-col gap-1 lg:max-w-[230px]";
+
+export type RoomChatBubbleProps = {
+  footer?: ReactNode;
+  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role">;
+  /**
+   * O console: o que entra na linha de baixo depois da hora (Fixada, as acoes da mensagem). Com ele, a linha e um <div>
+   * (os botoes e o menu nao cabem num <p>) e o item ganha o `group` e o `relative` (as acoes aparecem com o mouse ou o
+   * foco, por cima da linha).
+   */
+  metaActions?: ReactNode;
+  /** O que a pendente diz na linha de baixo (padrao: o "Aguardando a equipe" do aluno). */
+  pendingLabel?: string;
+  /**
+   * O console (docs/31 V2-15): o que a linha diz no lugar do papel, o papel ou a origem que so a equipe ve (Roteiro,
+   * Chat original); nulo, nada. Sem a prop, o papel como a sala mostra (chatRoleLabel).
+   */
+  roleLabel?: string | null;
+  time: string;
+  /** A largura da coluna do balao (padrao: a da sala, BUBBLE_COLUMN). */
+  widthClassName?: string;
+};
+
 /**
  * Uma mensagem do painel no estilo do Zoom (docs/31 V2-9): o avatar de 28 px (so as iniciais) de um lado, o balao (os
  * outros a esquerda em --room-surface-2; a minha a direita em --room-bubble-mine-bg, com o avatar a direita) e, embaixo,
- * "nome · papel · hora" em 11 px; na minha, "Você · hora" (o avatar continua com as minhas iniciais). O papel so para Apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
+ * "nome · papel · hora" em 11 px; na minha, "Você · hora" (o avatar continua com as minhas iniciais). O papel so para Apresentador, Co-apresentador, Equipe e Assistente (chatRoleLabel). A linha de baixo e
  * so para quem ve (aria-hidden): o leitor de tela ouve "{nome}, {papel}, {hora}: " antes do texto, nunca o texto antes
  * do autor; "Aguardando a equipe" fica lido, depois do texto. O "Falar com a equipe" do Assistente vem depois da linha.
+ * O console de quem apresenta usa o mesmo balao (V2-9 vale para a sala e o console), com a origem no lugar do papel,
+ * as acoes e a largura dele; sem essas props, o HTML e o da sala.
  */
-export function RoomChatBubble({ footer = null, message, time }: { footer?: ReactNode; message: RoomMessage; time: string }) {
-  const role = chatRoleLabel(message.role);
+export function RoomChatBubble({ footer = null, message, metaActions = null, pendingLabel = WEBINAR_COPY.sala.aguardandoEquipe, roleLabel, time, widthClassName }: RoomChatBubbleProps) {
+  const role = roleLabel === undefined ? chatRoleLabel(message.role) : roleLabel;
   const mine = message.mine;
   const name = mine ? WEBINAR_COPY.salaV2.chat.voce : message.displayName;
   const author = [name, role, time].filter((part): part is string => Boolean(part));
+  const Meta = metaActions ? "div" : "p";
 
   return (
-    <li className={cn("flex items-end gap-2", mine ? "flex-row-reverse" : undefined)} data-mine={mine ? "" : undefined} data-room-message={message.id}>
+    <li className={cn("flex items-end gap-2", mine ? "flex-row-reverse" : undefined, metaActions ? "group relative" : undefined)} data-mine={mine ? "" : undefined} data-room-message={message.id}>
       <MemberAvatar name={message.displayName} size="xs" />
-      <div className={cn("flex min-w-0 max-w-[270px] flex-col gap-1 lg:max-w-[230px]", mine ? "items-end" : "items-start")}>
+      <div className={cn(widthClassName ? cn("flex min-w-0 flex-col gap-1", widthClassName) : BUBBLE_COLUMN, mine ? "items-end" : "items-start")}>
         <p
           className={cn(
             "max-w-full whitespace-pre-line break-words rounded-[12px] px-3 py-2 text-[13px] leading-[18px]",
@@ -137,7 +165,7 @@ export function RoomChatBubble({ footer = null, message, time }: { footer?: Reac
           <span className="sr-only">{WEBINAR_COPY.salaV2.chat.autor(author)}</span>
           {message.body}
         </p>
-        <p className={cn("flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-room-fg-subtle", mine ? "justify-end pr-1" : "pl-1")} data-room-message-meta="">
+        <Meta className={cn("flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-room-fg-subtle", mine ? "justify-end pr-1" : "pl-1")} data-room-message-meta="">
           <span aria-hidden="true" className="inline-flex flex-wrap items-center gap-1.5">
             <span className="font-semibold text-room-meta-name">{name}</span>
             {role ? (
@@ -156,10 +184,11 @@ export function RoomChatBubble({ footer = null, message, time }: { footer?: Reac
           {message.pending ? (
             <>
               <span aria-hidden="true">·</span>
-              <span className="font-semibold text-room-warn-fg">{WEBINAR_COPY.sala.aguardandoEquipe}</span>
+              <span className="font-semibold text-room-warn-fg">{pendingLabel}</span>
             </>
           ) : null}
-        </p>
+          {metaActions}
+        </Meta>
         {footer}
       </div>
     </li>

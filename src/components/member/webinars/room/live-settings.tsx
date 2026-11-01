@@ -29,6 +29,8 @@ import { LIVE_ROOM_COPY } from "./live-room-model";
 // Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala. F3 (V2-12 e V2-18): abaixo de sm o botao
 // de tema sai do cabecalho (nao ha largura) e a linha Tema entra no topo do painel, com o mesmo nome do botao ("Tema
 // claro" no escuro, "Tema escuro" no claro); a partir de sm ela some, porque o cabecalho tem o botao.
+// O console de quem apresenta (docs/31 V2-14, console-bar.tsx) abre este mesmo painel pela barra dele, com
+// `presenterBar` "ours": a camera nunca ligada diz para liga-la pela barra (a nossa), nao pela do video.
 
 /** O que o painel le e chama do useJitsiDevices (os testes passam um objeto com o mesmo formato). */
 export type LiveSettingsDevices = Pick<
@@ -44,6 +46,11 @@ export type LiveSettingsProps = {
   onChoose: (kind: DeviceKind, option: DeviceOption) => void;
   /** Fechar: o painel fecha e o foco volta ao botao Configurações da barra. */
   onClose?: () => void;
+  /**
+   * De quem e a barra de midia de quem apresenta: a do proprio iframe ("engine", quem apresenta pela pagina da sala) ou a
+   * nossa ("ours", o console, docs/31 V2-14). Muda so a frase da camera nunca ligada: onde liga-la.
+   */
+  presenterBar?: "engine" | "ours";
   /** A sala ao vivo: troca o tema (com `theme`, a linha Tema aparece abaixo de sm). */
   onToggleTheme?: () => void;
   sections: DeviceSettings;
@@ -140,7 +147,7 @@ function Check(props: { checked: boolean; label: string; onChange: (on: boolean)
   );
 }
 
-export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onToggleTheme, sections, showMedia, theme }: LiveSettingsProps) {
+export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onToggleTheme, presenterBar = "engine", sections, showMedia, theme }: LiveSettingsProps) {
   const copy = WEBINAR_COPY.aoVivo;
   const config = copy.config;
   const ids = LIVE_SETTINGS_SECTION_IDS;
@@ -259,7 +266,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onT
             ) : sections.camera === "pronta" ? (
               <>
                 {cameraFechada ? (
-                  <p className={NOTE}>{config.cameraNaBarraDoVideo}</p>
+                  <p className={NOTE}>{presenterBar === "ours" ? config.cameraAguardando : config.cameraNaBarraDoVideo}</p>
                 ) : (
                   <DeviceSelect kind="videoInput" labelledBy={ids.camera} onChoose={onChoose} options={devices.lists.videoInput} value={devices.current.videoInput} />
                 )}

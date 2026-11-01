@@ -109,7 +109,9 @@ export function jitsiTokenClaims(input: JitsiTokenInput): Record<string, unknown
     user.moderator = true;
     user.affiliation = "owner";
   }
-  // Todo papel leva as features (o aluno tambem): sem a claim, o Jitsi da tag fixada deixa compartilhar a tela e gravar.
+  // Todo papel leva as features (o aluno tambem): sem a claim, o Jitsi da tag fixada liga os botoes de tela e de gravar
+  // do proprio motor. Elas so desligam esses botoes e o atalho: o toggleShareScreen do IFrame API nao as confere, e quem
+  // para a tela de um aluno e o vigia do console (docs/30 §8.1, docs/31 §5.4).
   const context: Record<string, unknown> = {
     features: {
       livestreaming: false,

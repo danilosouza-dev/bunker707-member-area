@@ -17,10 +17,11 @@ const INTERFACE_WHITELIST = new Set(
 );
 
 // react/features/base/config/configWhitelist.ts @ stable/jitsi-meet_11248: so as chaves que o liveConfigOverwrite
-// manda (a lista inteira tem ~190 chaves; o teste confere as nossas). Uma entrada com ponto (`prejoinConfig.enabled`)
+// manda (a lista inteira tem ~190 chaves; o teste confere as nossas; participantMenuButtonsWithNotifyClick, so do
+// console de quem apresenta, esta na linha 201). Uma entrada com ponto (`prejoinConfig.enabled`)
 // libera so aquele campo do objeto; o app descarta o resto e qualquer chave fora da lista, sem avisar.
 const CONFIG_WHITELIST = new Set(
-  "breakoutRooms channelLastN connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
+  "breakoutRooms channelLastN connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby participantMenuButtonsWithNotifyClick prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
     " "
   )
 );
@@ -105,13 +106,15 @@ test("configOverwrite: o tema no hash, a coluna com 213 px fixados na entrada (o
   assert.deepEqual(soAFileira, ["filmstrip"], "a fileira embaixo so muda a filmstrip");
 });
 
-test("tudo o que o configOverwrite manda esta na whitelist do IFrame API, menos o tema, que vai so para o hash", () => {
-  for (const role of ["student", "team", "host", "co_host"]) {
-    for (const [key, value] of Object.entries(embed.liveConfigOverwrite(role, settings, { layout: "stage_duo", theme: "light" }))) {
-      if (key === embed.THEME_HASH_KEY) {
-        continue;
+test("tudo o que o configOverwrite manda esta na whitelist do IFrame API, menos o tema, que vai so para o hash (na sala e no console, com o botao de tela nosso ou do motor)", () => {
+  for (const [surface, screenShare] of [["room", "ours"], ["console", "ours"], ["console", "engine"]]) {
+    for (const role of ["student", "team", "host", "co_host"]) {
+      for (const [key, value] of Object.entries(embed.liveConfigOverwrite(role, settings, { layout: "stage_duo", theme: "light" }, surface, screenShare))) {
+        if (key === embed.THEME_HASH_KEY) {
+          continue;
+        }
+        assert.ok(configAllowed(key, value), `${surface}, ${role}: ${key} precisa estar na whitelist do config da tag fixada`);
       }
-      assert.ok(configAllowed(key, value), `${role}: ${key} precisa estar na whitelist do config da tag fixada`);
     }
   }
   assert.ok(!CONFIG_WHITELIST.has(embed.THEME_HASH_KEY), "o tema nao e uma chave do motor: o app a descarta e o hash fica para o CSS");

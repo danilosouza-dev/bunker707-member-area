@@ -34,12 +34,24 @@ export const adminToast = {
   }
 };
 
-export function AdminToaster() {
+/** Onde os avisos abrem: no canto de baixo a direita (o admin) ou em cima, no meio, abaixo do topo (o console). */
+type AdminToasterPlacement = "bottom-right" | "console";
+
+/**
+ * O tema dos avisos: escuro, como todo o admin. O console de quem apresenta monta o dele dentro da raiz com o tema
+ * escolhido (docs/31 V2-12); as cores ja vem dos tokens, que a ponte do console redefine. No console os avisos abrem em
+ * cima, no meio, logo abaixo do topo (a altura vem da variavel --console-toast-top da raiz): embaixo a direita eles
+ * cobriam o campo e o Enviar do chat, presos no canto de baixo do painel.
+ */
+export function AdminToaster({ placement = "bottom-right", theme = "dark" }: { placement?: AdminToasterPlacement; theme?: "dark" | "light" }) {
+  const inConsole = placement === "console";
   return (
     <Toaster
       closeButton={false}
-      position="bottom-right"
-      theme="dark"
+      mobileOffset={inConsole ? { top: "var(--console-toast-top)" } : undefined}
+      offset={inConsole ? { top: "var(--console-toast-top)" } : undefined}
+      position={inConsole ? "top-center" : "bottom-right"}
+      theme={theme}
       toastOptions={{
         style: {
           background: "var(--surface-3)",

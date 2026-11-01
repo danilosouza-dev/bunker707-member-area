@@ -38,8 +38,9 @@ config.desktopSharingFrameRate = { min: 5, max: 30 };
 
 // Barra padrao = a minima (docs/30 §6.3 e §8.1): quem abre a sala direto pelo endereco com o token nao ganha tela
 // compartilhada, gravar, seguranca nem a lista de participantes. O host e o co-apresentador recebem a barra deles pelo
-// configOverwrite do iframe; aluno e Equipe usam a nossa (barra vazia). E so uma barreira no cliente: a tela e a
-// gravacao tambem saem pelas features do token (context.features) e pela moderacao de 'desktop' que o apresentador liga.
+// configOverwrite do iframe; aluno e Equipe usam a nossa (barra vazia). E so uma barreira no cliente: as features do
+// token (context.features) desligam tambem o botao e o atalho da tela do proprio motor, mas o comando de tela do
+// IFrame API nao as confere (docs/30 §8.1).
 config.toolbarButtons = ['camera', 'raisehand', 'fullscreen', 'hangup'];
 
 // A reserva "Gravar no navegador" do console (docs/30 §6.7) usa a gravacao local: fica ligada de forma explicita,

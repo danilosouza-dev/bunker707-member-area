@@ -5,9 +5,10 @@
 // Modulo puro: os unicos imports sao as frases da fase 4, uma por frente, em src/lib/webinar-copy-v4/ (cada frente e
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
 // .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
-// entra do mesmo jeito em WEBINAR_COPY.salaV2.
+// entra do mesmo jeito em WEBINAR_COPY.salaV2, e o console V2 de quem apresenta (docs/31 V2-13 a V2-15) em .consoleV2.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
+import { CONSOLE_V2_COPY } from "./webinar-copy-v4/console-v2";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
@@ -216,7 +217,8 @@ export const WEBINAR_COPY = {
     responderComo: { anonimo: "Aluno (anônimo)", apelido: "Apelido", nome: "Primeiro nome e inicial" },
     sair: "Sair",
     sairConfirmar: "Sair da sala?",
-    selos: { apresentador: "Apresentador", assistente: "Assistente", equipe: "Equipe" },
+    /* O papel no chat e no palco; "Co-apresentador" e uma frase so, sem feminino (docs/31 V2-A12). */
+    selos: { apresentador: "Apresentador", assistente: "Assistente", coApresentador: "Co-apresentador", equipe: "Equipe" },
     sessao: "Sessão",
     sessaoDas: (hora: string) => `Sessão das ${hora}`,
     tentarDeNovo: "Tentar de novo",
@@ -359,13 +361,14 @@ export const WEBINAR_COPY = {
     desligarGravador: "Desligar o gravador",
     duracaoMinutos: "Duração do vídeo (minutos)",
     enderecoPlayer: "Endereço do player",
+    /** O exemplo dentro do campo vazio do Endereço do player (o placeholder). */
+    enderecoPlayerExemplo: "https://iframe.mediadelivery.net/embed/…",
     gravacao: "Gravação",
     gravacaoNoNavegador: "Gravando no navegador",
     mensagemDoChat: "Mensagem do chat",
     microfoneLiberado: "Microfone liberado",
     microfoneSozinho: "Permitir que o aluno abra o microfone sozinho",
     microfoneSozinhoTexto: "Desligado nesta versão: o aluno só fala depois de Liberar.",
-    naSala: (n: number) => (n === 1 ? "1 pessoa na sala" : `${n} pessoas na sala`),
     noVideo: (texto: string) => `No vídeo: ${texto}`,
     removidosESilenciados: "Removidos, silenciados e banidos",
     semGravacao: "Nenhum vídeo ligado a esta sessão ainda.",
@@ -408,10 +411,8 @@ export const WEBINAR_COPY = {
     banirConfirmarTexto: "O aluno sai da sala e não entra em nenhuma live até a equipe desfazer.",
     cancelar: "Cancelar",
     comecarParaTodos: "Começar para todos",
-    /** O card Configurações de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
+    /** O botao Configurações da barra de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
     configuracoes: "Configurações",
-    configuracoesTexto: "Escolha o microfone, o alto-falante e a câmera que você usa nesta sala.",
-    configuracoesDesfocar: "Ligue a câmera na barra do vídeo para desfocar o fundo.",
     confirmar: "Confirmar",
     convidarPalco: "Convidar ao palco",
     desfazerBanimento: "Desfazer banimento",
@@ -437,14 +438,11 @@ export const WEBINAR_COPY = {
     gravarNaFila: "A gravação começa sozinha quando o gravador ficar pronto.",
     liberar: "Liberar",
     ligarVideoBunny: "Ligar um vídeo da Bunny",
-    maoLevantada: (n: number) => `Mão levantada (${n})`,
     maquinaHa: (horas: string) => `Máquina ligada há ${horas}`,
     motivo: "Motivo (opcional)",
     nenhumaMao: "Ninguém levantou a mão.",
     ninguemEsperando: "Ninguém esperando para entrar.",
-    participantes: "Participantes",
     pararGravacao: "Parar gravação",
-    permitirCameras: "Permitir câmeras dos alunos",
     prepararGravacao: "Preparar gravação",
     preparandoGravacao: (minutos: number) => `Preparando a gravação, ${minutos} min`,
     preparandoGravacaoSemMedida: "Preparando a gravação, em alguns minutos",
@@ -630,7 +628,9 @@ export const WEBINAR_COPY = {
   jit: JIT_COPY,
   traducao: TRADUCAO_COPY,
   /* A sala do aluno V2 (docs/31 §1): src/lib/webinar-copy-v4/sala-v2.ts. */
-  salaV2: SALA_V2_COPY
+  salaV2: SALA_V2_COPY,
+  /* O console V2 de quem apresenta (docs/31 V2-13 a V2-15): src/lib/webinar-copy-v4/console-v2.ts. */
+  consoleV2: CONSOLE_V2_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

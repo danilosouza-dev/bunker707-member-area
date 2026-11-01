@@ -137,7 +137,10 @@ test("as doze tabelas novas sao so do service_role; nenhuma politica para authen
 
 test("os checks do banco batem com as listas, os limites e os ritmos do app (model.ts)", () => {
   const code = sqlCodeOf(read(MIGRATION));
-  assert.match(code, new RegExp(`role text not null check \\(role in \\(${sqlList(model.CHAT_ROLES)}\\)\\)`));
+  // A 0029 e imutavel (ja aplicada) e tem a lista de antes; o `co_host` entrou pelo check novo da 202611010001
+  // (tests/webinarios-v5.guard.test.mjs confere a lista dele com model.CHAT_ROLES).
+  assert.match(code, new RegExp(`role text not null check \\(role in \\(${sqlList(["host", "team", "student", "guest", "ai"])}\\)\\)`));
+  assert.deepEqual(model.CHAT_ROLES.filter((role) => role !== "co_host"), ["host", "team", "student", "guest", "ai"], "fora o co_host, a lista do app e a da 0029");
   assert.match(code, new RegExp(`source text not null check \\(source in \\(${sqlList(model.CHAT_SOURCES)}\\)\\)`));
   assert.match(code, new RegExp(`kind text not null default 'message' check \\(kind in \\(${sqlList(model.MESSAGE_KINDS)}\\)\\)`));
   assert.match(code, new RegExp(`reaction text not null check \\(reaction in \\(${sqlList(model.REACTIONS)}\\)\\)`));

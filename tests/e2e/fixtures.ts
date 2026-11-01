@@ -1703,6 +1703,9 @@ export function ambienteDaSalaAoVivo(): AmbienteDaSalaAoVivo {
 
 export type ComandoDaSalaFalsa = { args: unknown[]; comando: string };
 
+/** Um sinal que a sala falsa mandou aos ouvintes da pagina (disparado pelo teste ou pelo eco de um comando). */
+export type SinalDaSalaFalsa = { evento: string; payload: unknown };
+
 /** O que a pagina passou ao construtor do JitsiMeetExternalAPI na montagem mais nova (ainda nao descartada). */
 export type MontagemDaSalaFalsa = {
   configOverwrite: Record<string, unknown>;
@@ -1720,6 +1723,12 @@ export type MontagemDaSalaFalsa = {
 export type SalaFalsaDoJitsi = {
   /** Os comandos (executeCommand) recebidos pela montagem mais nova, na ordem. */
   comandos(): Promise<ComandoDaSalaFalsa[]>;
+  /**
+   * Quem ja compartilha a tela na sala da montagem mais nova (os outros participantes), sem sinal nenhum: o
+   * getContentSharingParticipants da entrada traz esses ids, como a tag. O contentSharingParticipantsChanged disparado
+   * tambem grava a lista.
+   */
+  definirTelas(ids: string[]): Promise<void>;
   /** Dispara um sinal do IFrame API para os ouvintes da montagem mais nova. */
   disparar(evento: string, payload?: Record<string, unknown>): Promise<void>;
   /** Espera um comando com este nome a partir da posicao `depoisDe` (o tamanho da lista antes do clique). */
@@ -1730,9 +1739,12 @@ export type SalaFalsaDoJitsi = {
   montagens(): Promise<number>;
   /** Quantas vezes o navegador pediu o external_api.js. */
   pedidosDoScript(): number;
+  /** Os sinais que a montagem mais nova mandou aos ouvintes da pagina, na ordem: os do teste e os do eco. */
+  sinais(): Promise<SinalDaSalaFalsa[]>;
 };
 
 type EstadoDaSalaFalsa = {
+  definirTelas(ids: string[]): void;
   disparar(evento: string, payload: Record<string, unknown>): void;
   montagens: {
     allowDoIframe: string | null;
@@ -1744,6 +1756,7 @@ type EstadoDaSalaFalsa = {
     jwt: string | null;
     noPalco: boolean;
     roomName: string | null;
+    sinais?: SinalDaSalaFalsa[];
     tituloDoIframe: string | null;
   }[];
 };
@@ -1780,11 +1793,27 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * O external_api.js de mentira (docs/30 §10.1): define window.JitsiMeetExternalAPI com o construtor
  * (dominio, { roomName, jwt, configOverwrite, interfaceConfigOverwrite, parentNode, width, height }) que guarda o que
  * recebeu, poe um iframe vazio no parentNode (o getIFrame) e implementa addListener / removeListener (e on / off),
- * executeCommand (anotado), getParticipantsInfo, isAudioMuted / isVideoMuted e dispose. window.__salaFalsa.disparar
- * manda um sinal aos ouvintes da montagem mais nova. Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
+ * executeCommand (anotado), getParticipantsInfo, getRoomsInfo (anotado), isAudioMuted / isVideoMuted e dispose.
+ * window.__salaFalsa.disparar manda um sinal aos ouvintes da montagem mais nova. Os papeis, como a tag: o
+ * participantRoleChanged disparado grava o papel; o participantJoined disparado com `papel` (quem ja era moderador
+ * quando a pagina entrou) grava o papel e o emite sem ele, porque o participantJoined de verdade nao traz papel; so o
+ * getRoomsInfo devolve os papeis (o proprio participante moderador e quem entrou participante, sem papel gravado) e,
+ * como a tag, o audioMuted e o videoMuted de quem entrou (pelo participantMuted disparado; sem ele, mudos). Com
+ * `ecoar`, como o Jitsi de verdade: toggleVideo responde
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
- * proprio participante e hangup responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao
- * ligou, alguem bateu na sala de espera) o teste dispara.
+ * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
+ * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
+ * tambem, liga ou desliga a de audio; diferente da tag, o eco sai mesmo sem a pagina ser moderadora, que a tag ignora o
+ * comando sem moderador, entao o teste confere o comando, nunca o poder de quem o manda), toggleShareScreen({ enable })
+ * liga ou desliga a propria tela e responde
+ * screenSharingStatusChanged { on, details } e contentSharingParticipantsChanged { data } (como a tag, a lista inteira:
+ * as telas dos outros, em `telas`, mais o proprio id quando a propria tela esta no ar), e hangup
+ * responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao ligou, alguem bateu na sala de
+ * espera) o teste dispara. As leituras que a tag responde por Promise: isSharingScreen (a propria tela),
+ * isModerationOn(tipo) (pela moderacao que o eco ligou, com o mesmo "so video e video") e getContentSharingParticipants,
+ * que resolve { sharingParticipantIds } como a tag, nunca uma lista solta: as telas dos outros (o
+ * contentSharingParticipantsChanged disparado e o definirTelas gravam) e a propria. Cada sinal mandado aos ouvintes (o
+ * disparado pelo teste e o do eco) fica anotado, na ordem, em `sinais`.
  *
  * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
  * isMultipleAudioInputSupported e setAudioInputDevice / setAudioOutputDevice / setVideoInputDevice(rotulo, id), cada
@@ -1848,7 +1877,18 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       audioMudo: true,
       // O userSelectedCameraDeviceId: gravado na hora do setVideoInputDevice.
       cameraEscolhida: null,
+      // A propria tela no ar (o toggleShareScreen do eco).
+      compartilhando: false,
+      // As telas dos outros participantes (o contentSharingParticipantsChanged disparado e o definirTelas).
+      telas: [],
+      // A moderacao de cada tipo, pelo toggleModeration do eco (o isModerationOn le).
+      moderacao: { audio: false, video: false },
       maoLevantada: false,
+      // O papel de cada um na sala (id -> "moderator" | "participant" | "none"): o participantRoleChanged disparado e o
+      // "papel" do participantJoined disparado gravam; o getRoomsInfo devolve.
+      papeis: {},
+      // O mudo de cada um (id -> { audio, video }), pelo participantMuted disparado; o getRoomsInfo devolve.
+      mudos: {},
       participantes: [],
       permitido,
       proprioId: null,
@@ -1869,12 +1909,15 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       tituloDoIframe: null
     };
     Object.defineProperty(montagem, "estado", { enumerable: false, value: estado });
+    // Os sinais mandados aos ouvintes desta montagem, na ordem (fora do JSON da montagem, como o estado).
+    Object.defineProperty(montagem, "sinais", { enumerable: false, value: [] });
     Object.defineProperty(montagem, "emitir", {
       enumerable: false,
       value: (evento, payload) => {
         if (montagem.descartada) {
           return;
         }
+        montagem.sinais.push({ evento: String(evento), payload: copia(payload) });
         for (const ouvinte of Array.from(ouvintes.get(evento) || [])) {
           try {
             ouvinte(payload);
@@ -1926,6 +1969,20 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
         } else if (comando === "toggleRaiseHand") {
           estado.maoLevantada = !estado.maoLevantada;
           montagem.emitir("raiseHandUpdated", { handRaised: estado.maoLevantada ? Date.now() : 0, id: estado.proprioId });
+        } else if (comando === "toggleModeration") {
+          // Como o 'toggle-moderation' da tag: so "video" e a de video; qualquer outro tipo cai na de audio.
+          const tipo = args[1] === "video" ? "video" : "audio";
+          estado.moderacao[tipo] = args[0] === true;
+          montagem.emitir("moderationStatusChanged", { enabled: args[0] === true, mediaType: tipo });
+        } else if (comando === "toggleShareScreen") {
+          // Como o 'toggle-share-screen' da tag: { enable } liga ou desliga; sem ele, alterna. Sem mudanca, nada sai.
+          const pedido = args[0] && typeof args[0] === "object" ? args[0].enable : undefined;
+          const quer = typeof pedido === "boolean" ? pedido : !estado.compartilhando;
+          if (quer !== estado.compartilhando) {
+            estado.compartilhando = quer;
+            montagem.emitir("screenSharingStatusChanged", { details: { sourceType: "screen" }, on: quer });
+            montagem.emitir("contentSharingParticipantsChanged", { data: [...estado.telas, ...(quer && estado.proprioId ? [estado.proprioId] : [])] });
+          }
         } else if (comando === "hangup") {
           montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
         }
@@ -1937,9 +1994,36 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     // Verdadeiro sem faixa de microfone (MICROFONE_FALHA: o getUserMedia nunca abriu).
     this.isAudioMuted = () => Promise.resolve(MICROFONE_FALHA || estado.audioMudo);
     this.isVideoMuted = () => Promise.resolve(estado.videoMudo);
+    this.isSharingScreen = () => Promise.resolve(estado.compartilhando);
+    // Como o 'is-moderation-on' da tag: sem o tipo, a de audio; so "video" e a de video.
+    this.isModerationOn = (tipo) => Promise.resolve(estado.moderacao[tipo === "video" ? "video" : "audio"]);
+    this.getContentSharingParticipants = () => Promise.resolve({ sharingParticipantIds: [...estado.telas, ...(estado.compartilhando && estado.proprioId ? [estado.proprioId] : [])] });
 
     // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
     const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
+    // As salas e o papel de cada um, como o getRoomsInfo da tag (breakout-rooms/functions.ts): so a sala principal, o
+    // proprio participante primeiro (moderador sem papel gravado) e quem entrou (participante sem papel gravado, com o
+    // audioMuted e o videoMuted da tag: o que o participantMuted disparado disse, ou mudo).
+    this.getRoomsInfo = () => {
+      anotar("getRoomsInfo", []);
+      return Promise.resolve({
+        rooms: [
+          {
+            isMainRoom: true,
+            participants: [
+              { id: estado.proprioId, role: estado.papeis[estado.proprioId] ?? "moderator" },
+              ...estado.participantes.map((pessoa) => ({
+                audioMuted: estado.mudos[pessoa.id]?.audio ?? true,
+                displayName: pessoa.displayName,
+                id: pessoa.id,
+                role: estado.papeis[pessoa.id] ?? "participant",
+                videoMuted: estado.mudos[pessoa.id]?.video ?? true
+              }))
+            ]
+          }
+        ]
+      });
+    };
     const TIPOS = { audioInput: "audioinput", audioOutput: "audiooutput", videoInput: "videoinput" };
     // A permissao de cada lista: microfones e alto-falantes pelo microfone, cameras pela camera.
     const liberado = (tipo) => (tipo === "videoInput" ? estado.permitido.video : estado.permitido.audio);
@@ -2029,14 +2113,25 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     if (!atual) {
       throw new Error("Nenhuma sala montada para receber " + evento);
     }
-    const dados = payload || {};
+    let dados = payload || {};
     const estado = atual.estado;
     if (evento === "videoConferenceJoined" && typeof dados.id === "string") {
       estado.proprioId = dados.id;
     } else if (evento === "participantJoined" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id).concat({ displayName: dados.displayName || "", id: dados.id });
+      // O papel de quem ja era moderador ao entrar: so o getRoomsInfo o conta. O participantJoined de verdade nao traz
+      // papel, entao o "papel" sai do sinal emitido.
+      if (typeof dados.papel === "string") {
+        estado.papeis[dados.id] = dados.papel;
+      }
+      const { papel: _papel, ...semPapel } = dados;
+      dados = semPapel;
+    } else if (evento === "participantRoleChanged" && typeof dados.id === "string" && typeof dados.role === "string") {
+      estado.papeis[dados.id] = dados.role;
     } else if (evento === "participantLeft" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
+    } else if (evento === "participantMuted" && typeof dados.id === "string" && typeof dados.isMuted === "boolean" && (dados.mediaType === "audio" || dados.mediaType === "video")) {
+      estado.mudos[dados.id] = { ...estado.mudos[dados.id], [dados.mediaType]: dados.isMuted };
     } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
       // A camera ligada pela barra do proprio iframe (o apresentador): o navegador deu a permissao da camera.
       estado.videoMudo = dados.muted;
@@ -2045,8 +2140,18 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     } else if (evento === "audioMuteStatusChanged" && typeof dados.muted === "boolean") {
       estado.audioMudo = dados.muted;
       estado.permitido.audio = estado.permitido.audio || !dados.muted;
+    } else if (evento === "contentSharingParticipantsChanged" && Array.isArray(dados.data)) {
+      // A lista inteira de quem compartilha: as telas dos outros ficam gravadas (o getContentSharingParticipants le).
+      estado.telas = dados.data.filter((id) => typeof id === "string" && id !== estado.proprioId);
     }
     atual.emitir(evento, dados);
+  };
+  sala.definirTelas = (ids) => {
+    const atual = vivas().pop();
+    if (!atual) {
+      throw new Error("Nenhuma sala montada para as telas");
+    }
+    atual.estado.telas = ids.filter((id) => typeof id === "string");
   };
 })();
 `;
@@ -2132,6 +2237,17 @@ export async function salaFalsaDoJitsi(
 
   return {
     comandos: lerComandos,
+    async definirTelas(ids) {
+      await page.evaluate((lista) => {
+        const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+
+        if (!sala) {
+          throw new Error("A sala falsa nao foi carregada.");
+        }
+
+        sala.definirTelas(lista);
+      }, ids);
+    },
     async disparar(evento, payload = {}) {
       await page.evaluate(
         ([nome, dados]) => {
@@ -2177,7 +2293,13 @@ export async function salaFalsaDoJitsi(
       return montagem as unknown as MontagemDaSalaFalsa;
     },
     montagens: () => page.evaluate(() => (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa?.montagens.length ?? 0),
-    pedidosDoScript: () => pedidos
+    pedidosDoScript: () => pedidos,
+    sinais: () =>
+      page.evaluate(() => {
+        const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+        const atual = sala?.montagens.filter((montagem) => !montagem.descartada).pop();
+        return atual?.sinais ?? [];
+      })
   };
 }
 

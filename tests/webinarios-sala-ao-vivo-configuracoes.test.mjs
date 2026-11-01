@@ -1063,8 +1063,9 @@ test("removido ou banido abaixo de sm: o painel (com a aba Chat, o [data-room-fi
   assert.equal(roomFocusTarget(null), null);
 });
 
-test("o card Configurações do console abre acima do palco (logo depois do botao no teclado, antes da barra do iframe) e o proprio botao fecha mandando o foco a ele", async () => {
-  const { LiveRoomPanel } = await import("../src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
+test("as Configurações do console abrem pela barra de quem apresenta, logo depois do botao no teclado (o Tab do botao entra nelas), com a frase de ligar a camera pela barra; a Equipe e a sala sem configuração ficam sem o botao", async () => {
+  const { ConsoleBar } = await import("../src/components/admin/v2/communication/webinars/session-console/console-bar.tsx");
+  const live = await import("../src/server/webinars/live-console-model.ts");
   const secoes = settings.deviceSettingsFor({
     allowStudentCamera: true,
     cameraConsented: false,
@@ -1075,41 +1076,70 @@ test("o card Configurações do console abre acima do palco (logo depois do bota
     outputChangeAvailable: true,
     outputs: SAIDAS,
     role: "host",
-    videoOn: true
+    videoOn: false
   });
   const handle = {
+    audioOn: false,
+    camerasAllowed: true,
     chooseDevice: noop,
+    command: () => true,
+    controls: live.liveControlsFor({ canPublish: true, moderator: true, role: "host" }),
     deviceSettings: secoes,
-    devices: aparelhos(),
+    devices: aparelhos({ lists: { ...aparelhos().lists, videoInput: [] } }),
+    dispatch: noop,
     frameStatus: "joined",
     joined: true,
     lobby: false,
     meetConfigured: true,
     retry: noop,
     role: "host",
-    room: { people: [], recording: { on: false } },
+    room: live.EMPTY_ROOM,
+    screenShare: "ours",
+    setCamerasAllowed: noop,
     setSettingsOpen: noop,
     settingsOpen: true,
+    sharing: false,
     startTesting: noop,
+    syncFilmstrip: noop,
+    syncLobby: noop,
     testing: false,
     tokenError: null,
-    videoOn: true
+    videoOn: false
   };
-  const markup = renderToStaticMarkup(
-    createElement(LiveRoomPanel, { busy: false, handle, live: { recorder: { status: "idle" }, roomLocked: false }, session: { status: "live" }, stageRef: { current: null } })
-  );
-  const card = markup.indexOf('id="console-live-settings"');
-  const palco = markup.indexOf("data-live-stage=");
+  const barra = (extra = {}) =>
+    renderToStaticMarkup(
+      createElement(ConsoleBar, {
+        busyKey: null,
+        canPublish: true,
+        handle: { ...handle, ...extra },
+        live: { recorder: { anchorAt: null, dispatchConfigured: true, driftMs: null, estimateMinutes: null, fileStartedAt: null, recordingRequestedAt: null, releaseRequestedAt: null, requestedAt: null, status: "ready" }, roomLocked: false },
+        nowMs: Date.parse("2026-11-05T23:05:00.000Z"),
+        onRecord: noop,
+        onStopRecording: noop,
+        onTogglePanel: noop,
+        panelOpen: true,
+        session: { status: "live" }
+      })
+    );
+  const markup = barra();
   const botao = markup.indexOf('aria-controls="console-live-settings"');
-  assert.ok(botao >= 0 && card > botao, "o card depois do botao");
-  assert.ok(palco > card, "e antes do palco (o Tab do botao entra no card, nao na barra do iframe)");
-  const fechado = renderToStaticMarkup(
-    createElement(LiveRoomPanel, { busy: false, handle: { ...handle, settingsOpen: false }, live: { recorder: { status: "idle" }, roomLocked: false }, session: { status: "live" }, stageRef: { current: null } })
-  );
+  const card = markup.indexOf('id="console-live-settings"');
+  assert.ok(botao >= 0 && card > botao, "as Configurações logo depois do botao");
+  assert.match(markup.slice(markup.lastIndexOf("<button", botao), markup.indexOf(">", botao)), /data-room-bar-item="settings"/, "o botao e o da barra");
+  assert.equal(markup.slice(markup.indexOf("</button>", botao), card).match(/<(button|a|select|input)\b/g), null, "nada que receba o foco entre o botao e as Configurações");
+  assert.match(markup, /aria-expanded="true"/);
+  // O painel da sala, com a frase de ligar a camera pela barra (a nossa), sem a faixa de volume nem os atalhos da sala.
+  const texto = textoDe(markup.slice(card));
+  assert.match(markup.slice(card), /data-testid="live-settings"/);
+  assert.ok(texto.includes(config.cameraAguardando), "a camera nunca ligada: liga-la pela barra");
+  assert.ok(!texto.includes(config.cameraNaBarraDoVideo), "a barra do video nao existe mais no console");
+  assert.doesNotMatch(markup, /type="range"|type="radio"/, "sem volume nem qualidade");
+  assert.ok(!texto.includes(WEBINAR_COPY.aoVivo.atalhoReagir), "sem os atalhos da sala");
+  const fechado = barra({ settingsOpen: false });
   assert.equal(fechado.indexOf('id="console-live-settings"'), -1);
-
-  const fonte = semComentarios(ler("src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx"));
-  assert.match(fonte, /onClick=\{\(\) => \{\s*if \(handle\.settingsOpen\) \{\s*settingsButton\.current\?\.focus\(\);\s*\}\s*handle\.setSettingsOpen\(!handle\.settingsOpen\);/);
+  assert.match(fechado, /aria-controls="console-live-settings"[^>]*aria-expanded="false"/);
+  assert.doesNotMatch(barra({ role: "team" }), /data-room-bar-item="settings"/, "a Equipe nao tem barra de midia no console");
+  assert.doesNotMatch(barra({ meetConfigured: false }), /data-room-bar-item="settings"/, "sem a sala no ambiente, nada a configurar");
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1139,6 +1169,22 @@ test("o iframe: allow com speaker-selection; o aluno e a Equipe continuam sem ba
     assert.deepEqual(config.toolbarConfig, { alwaysVisible: true }, `${role}: as setinhas nao somem`);
     assert.deepEqual(embed.liveInterfaceConfigOverwrite(role).SETTINGS_SECTIONS, ["devices"], `${role}: so a aba de aparelhos`);
     assert.equal(config.disableLocalVideoFlip, undefined, `${role}: o espelho tambem pela barra do iframe (o card e sem estado)`);
+  }
+});
+
+test("o iframe do console (a superficie console, docs/31 V2-14): quem apresenta fica sem a barra do motor e sem os atalhos, com o botao de tela do motor so onde o nosso circulo nao vale e a engrenagem so de aparelhos; a Equipe como na sala", () => {
+  const qualidade = { allowStudentCamera: true, screenFps: 30, stage: 1080 };
+  for (const role of ["host", "co_host"]) {
+    const nossa = embed.liveConfigOverwrite(role, qualidade, null, "console");
+    assert.deepEqual(nossa.toolbarButtons, [], `${role}: a barra e a nossa`);
+    assert.equal(nossa.toolbarConfig, undefined, `${role}: sem barra do motor, nada a deixar visivel`);
+    assert.equal(nossa.disableShortcuts, true, `${role}: sem o ESPACO e o F do motor`);
+    assert.equal(nossa.disableInitialGUM, undefined, `${role}: o navegador pede o microfone na entrada, como antes`);
+    assert.deepEqual(embed.liveConfigOverwrite(role, qualidade, null, "console", "engine").toolbarButtons, ["desktop"], `${role}: so o botao de tela do motor onde o nosso nao vale`);
+    assert.deepEqual(embed.liveInterfaceConfigOverwrite(role).SETTINGS_SECTIONS, ["devices"], `${role}: o dialogo de fundo do motor continua so com os aparelhos`);
+  }
+  for (const role of ["student", "team"]) {
+    assert.deepEqual(embed.liveConfigOverwrite(role, qualidade, null, "console"), embed.liveConfigOverwrite(role, qualidade), `${role}: igual a sala`);
   }
 });
 
