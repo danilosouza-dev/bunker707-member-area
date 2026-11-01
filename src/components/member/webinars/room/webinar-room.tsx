@@ -15,7 +15,7 @@ import { overlayMessages } from "./live-room-model";
 import type { ChatPostBody } from "./room-api";
 import { RecordedControls, ROOM_REACTIONS_ID } from "./recorded-controls";
 import { ROOM_PANEL_ID } from "./room-bar";
-import { RoomChatPanel } from "./room-chat";
+import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
 import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
@@ -364,6 +364,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
   const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
   const [questionsCount, setQuestionsCount] = useState<number | null>(null);
+  // O ⋮ do cabecalho do Chat abre a confirmacao de remover as minhas mensagens, que fica no chat.
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [muted, setMuted] = useState(kind === "simulated");
   /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" so volta sem a barra (soundCoverShown). */
   const [soundTouched, setSoundTouched] = useState(false);
@@ -752,22 +754,26 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       ) : null}
       <RoomTranslationBar state={translation} />
       <RoomChatPanel
-        aboveComposer={<RoomSimulationJoins layout="stage" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
+        aboveComposer={<RoomSimulationJoins layout="stage" look={vertical ? "classic" : "comment"} offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
         assistant={assistant}
         chatMode={session.session.chatMode}
         consented={session.me.consented}
         defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
         displayName={session.me.displayName}
         error={chat.error}
+        look={vertical ? "classic" : "comment"}
         messages={translation.messages}
         nowMs={nowMs}
         onRemoveMine={chat.removeMine}
+        onRemoveOpenChange={setRemoveOpen}
         onSend={sendChat}
         phase={composerPhase}
         pinned={session.pinned}
         readOnly={readOnly}
+        removeOpen={removeOpen}
         sessionId={sessionId}
         shown={vertical || panelShown}
+        skewMs={clock.skewMs}
         slowUntilMs={chat.slowUntilMs}
         timeKind={kind}
         webinarId={webinarId}
@@ -800,7 +806,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
       // no cabecalho); nunca a lista de alunos.
-      <LiveParticipantsTab stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
+      <LiveParticipantsTab presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
     ) : (
       <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || phase === "ended"} />
     );
@@ -984,7 +990,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               pollOpen={openPolls.length > 0}
               tab={tab}
               tabs={tabs}
-              titleAction={tab === "perguntas" ? <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} /> : undefined}
+              titleAction={
+                tab === "perguntas" ? (
+                  <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} />
+                ) : tab === "chat" ? (
+                  <RoomChatMoreButton onRemove={() => setRemoveOpen(true)} readOnly={readOnly} />
+                ) : undefined
+              }
               titleCount={
                 tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null
               }

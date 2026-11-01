@@ -716,15 +716,26 @@ test("removido e banido: a frase toma o lugar da sala (sem iframe montado, sem b
 });
 
 test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca a lista de alunos; com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8)", () => {
-  const html = render(notices.LiveParticipantsTab, { stage: ["Danilo S.", "Carla P."], students: 12 });
+  const html = render(notices.LiveParticipantsTab, { presenterKnown: true, stage: ["Danilo S.", "Carla P."], students: 12 });
   assert.match(html, />No palco</);
   assert.match(html, /Danilo S\./);
   assert.match(html, /Carla P\./);
   assert.match(html, /12 alunos na sala/);
   assert.equal((html.match(/<li/g) ?? []).length, 2, "so o palco vira lista");
-  assert.match(render(notices.LiveParticipantsTab, { stage: [], students: 1 }), /1 aluno na sala/);
+  // No estilo do YouTube: "No palco" em 14/20 peso 500 sem caixa alta; cada nome numa linha de 40 px com o avatar de 24;
+  // o selo "Apresentador" so no primeiro, quando a sala sabe quem apresenta; o numero numa linha de 40 com o icone de 20.
+  assert.match(html, /<h3 class="flex h-10 items-center text-sm font-medium leading-5 text-room-fg-subtle">No palco<\/h3>/);
+  assert.doesNotMatch(html, /uppercase|var\(--accent\)|lucide-radio/, "sem a caixa alta e sem o icone no acento");
+  const itens = [...html.matchAll(/<li class="([^"]*)">([\s\S]*?)<\/li>/g)];
+  assert.ok(itens.every(([, classes]) => /\bh-10\b/.test(classes)), "as linhas de 40 px");
+  assert.match(itens[0][2], /class="[^"]*\bsize-6\b[^"]*"><span[^>]*>DS<\/span><\/span><span class="[^"]*\btext-sm\b[^"]*\bleading-5\b[^"]*\btext-room-fg\b[^"]*">Danilo S\.<\/span><span class="[^"]*\bbg-room-control\b[^"]*">Apresentador<\/span>$/);
+  assert.doesNotMatch(itens[1][2], /Apresentador/, "o selo so no primeiro");
+  assert.match(html, /<p class="flex h-10 items-center gap-3 text-sm leading-5 text-room-fg"><svg[^>]*lucide-users[^"]*size-5[^>]*>[\s\S]*?<\/svg>12 alunos na sala<\/p>/);
+  // Sem saber quem apresenta (a live ainda sem o nome), nenhum selo.
+  assert.doesNotMatch(render(notices.LiveParticipantsTab, { presenterKnown: false, stage: ["Danilo S."], students: 12 }), /Apresentador/);
+  assert.match(render(notices.LiveParticipantsTab, { presenterKnown: false, stage: [], students: 1 }), /1 aluno na sala/);
   // A live encerrada: o cabecalho tira o "{n} assistindo" e a aba tambem fica sem numero (so o palco).
-  const encerrada = render(notices.LiveParticipantsTab, { stage: ["Danilo S."], students: null });
+  const encerrada = render(notices.LiveParticipantsTab, { presenterKnown: true, stage: ["Danilo S."], students: null });
   assert.match(encerrada, /Danilo S\./);
   assert.doesNotMatch(encerrada, /na sala/);
 

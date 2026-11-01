@@ -78,9 +78,14 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
 });
 
 test("a gravada: Participantes com quem apresenta e o numero do cabecalho; as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
-  assert.match(recorded, /<LiveParticipantsTab stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do cabecalho, pela mesma condicao");
+  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do cabecalho, pela mesma condicao");
   assert.match(recorded, /presentNow=\{momentBadge\.showCount \? shownCount : null\}/, "o cabecalho");
-  assert.match(room, /<LiveParticipantsTab stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do cabecalho, que some com a live encerrada");
+  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do cabecalho, que some com a live encerrada");
+  // O chat no estilo do YouTube (o comentario): a gravada passa o balao de antes so para a gaveta do vertical, e as duas
+  // salas contam o tempo do comentario do agora do servidor (skewMs).
+  assert.match(recorded, /error=\{chat\.error\}\s+look=\{vertical \? "classic" : "comment"\}\s+messages=\{translation\.messages\}/, "a gravada: o comentario no desenho normal, o balao na gaveta do vertical");
+  assert.match(recorded, /<RoomChatPanel[\s\S]*?skewMs=\{clock\.skewMs\}/);
+  assert.match(room, /<RoomChatPanel[\s\S]*?skewMs=\{skewMs\}/);
   assert.match(recorded, /onShownChange=\{setOfferShown\}/);
   // O card avisa a sala pela mesma regra que decide se ele aparece (offerOnScreen).
   assert.match(offer, /const onScreen = offerOnScreen\(\{ closedKey, enabled, hasView: view !== null, shown: state\.shown, windowKey: state\.windowKey \}\);/);

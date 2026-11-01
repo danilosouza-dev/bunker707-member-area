@@ -47,7 +47,7 @@ import {
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
-import { RoomChatPanel } from "./room-chat";
+import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
 import {
@@ -258,6 +258,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
   const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
   const [questionsCount, setQuestionsCount] = useState<number | null>(null);
+  // O ⋮ do cabecalho do Chat abre a confirmacao de remover as minhas mensagens, que fica no chat.
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
@@ -998,7 +1000,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               pollOpen={openPolls.length > 0}
               tab={tab}
               tabs={tabs}
-              titleAction={tab === "perguntas" ? <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} /> : undefined}
+              titleAction={
+                tab === "perguntas" ? (
+                  <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} />
+                ) : tab === "chat" ? (
+                  <RoomChatMoreButton onRemove={() => setRemoveOpen(true)} readOnly={readOnly} />
+                ) : undefined
+              }
               titleCount={tab === "participantes" ? presentShown : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null}
             >
               {tab === "chat" ? (
@@ -1016,6 +1024,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                     notice={readOnly ? null : composerNotice}
                     nowMs={nowMs}
                     onRemoveMine={chat.removeMine}
+                    onRemoveOpenChange={setRemoveOpen}
                     onSend={async (body) => {
                       try {
                         const answer = await chat.send(body);
@@ -1031,8 +1040,10 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                     phase={phase}
                     pinned={session.pinned}
                     readOnly={readOnly}
+                    removeOpen={removeOpen}
                     sessionId={sessionId}
                     shown={panelShown}
+                    skewMs={skewMs}
                     slowUntilMs={chat.slowUntilMs}
                     timeKind="live"
                     webinarId={webinarId}
@@ -1061,7 +1072,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   webinarId={webinarId}
                 />
               ) : null}
-              {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentShown} /> : null}
+              {tab === "participantes" ? <LiveParticipantsTab presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
               {tab === "enquetes" ? (
                 <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || !writable} />
               ) : null}

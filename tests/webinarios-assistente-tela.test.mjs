@@ -5,8 +5,8 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // O Assistente e o Atendimento desenhados (docs/30 §1.3, §1.6, §2.2, §2.4, §6.6, §9 e D24; docs/18 §2.2), no Node com
-// react-dom/server e as Server Actions como dubles: no chat da sala, o papel Assistente na linha de baixo do balao (e o
-// "Assistente, Assistente, 20:10:" do leitor de tela, antes do texto; docs/31 V2-9) e "Falar com a equipe" so na
+// react-dom/server e as Server Actions como dubles: no chat da sala (o comentario do YouTube), o selo Assistente no lugar
+// do nome (e o "Assistente, há 2 minutos:" do leitor de tela, antes do texto, sem repetir o papel) e "Falar com a equipe" so na
 // resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
 // linha da dica (respondendo, limite, "@assistente", a equipe responde depois); o pronto do pedido; na aba Perguntas,
 // o selo na resposta do Assistente; o painel Atendimento do console (Atender / Pausar, Responder tudo e os avisos de
@@ -74,13 +74,15 @@ function chat(props = {}) {
       msg("a-outro", { body: "Tem bonus.", displayName: "Assistente", kind: "answer", replyToId: "m-outro", role: "ai" }),
       msg("t-1", { body: "Oi, turma!", displayName: "Bia E.", role: "team" })
     ],
-    nowMs: NOW,
+    // O agora do servidor, 2 minutos depois das mensagens (o aparelho atrasado 1 minuto, com o skew).
+    nowMs: NOW + 60_000,
     onRemoveMine: async () => 0,
     onSend: async () => ({ pending: false }),
     phase: "live",
     pinned: null,
     readOnly: false,
     sessionId: "s1",
+    skewMs: 60_000,
     slowUntilMs: null,
     timeKind: "live",
     webinarId: "w1",
@@ -88,17 +90,26 @@ function chat(props = {}) {
   });
 }
 
-test("chat da sala: o papel Assistente (e 'Assistente, Assistente, 20:10:' para o leitor de tela, antes do texto) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
+test("chat da sala: o selo Assistente no lugar do nome (e 'Assistente, há 2 minutos:' para o leitor de tela, antes do texto, sem repetir o papel) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
   const markup = chat();
-  const bloco = (id) => markup.slice(markup.indexOf(`data-room-message="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-room-message="${id}"`)));
-  // No estilo do Zoom (docs/31 V2-9): o leitor de tela ouve o autor, o papel e a hora antes do texto; a linha
-  // "Assistente · Assistente · 20:10" embaixo do balao e so para quem ve; o "Falar com a equipe" vem depois dela, no li.
-  assert.match(textOf(bloco("a-minha")), /Assistente, Assistente, 20:10: Custa R\$ 997\. Assistente · Assistente · 20:10 Falar com a equipe/, "o prefixo do leitor de tela, o texto, a linha de baixo e o pedido");
-  assert.match(bloco("a-minha"), /data-room-message-meta=""><span aria-hidden="true"/);
-  assert.match(bloco("a-minha"), /data-testid="assistant-handoff"/);
+  // O comentario do Chat vai do data-room-message ate o proximo <li ou o fim da lista.
+  const bloco = (id) => {
+    const inicio = markup.indexOf(`data-room-message="${id}"`);
+    const fins = [markup.indexOf("<li", inicio), markup.indexOf("</ol>", inicio)].filter((fim) => fim > inicio);
+    return markup.slice(inicio, Math.min(...fins));
+  };
+  // No estilo do YouTube (o comentario): a linha do autor (o selo no lugar do nome e o tempo) e so para quem ve; o
+  // leitor de tela ouve o papel e o tempo antes do texto, uma vez so; o "Falar com a equipe" vem na linha de acoes.
+  assert.match(textOf(bloco("a-minha")), /> Assistente há 2 minutos Assistente, há 2 minutos: Custa R\$ 997\. Falar com a equipe$/, "a linha do autor, o prefixo do leitor de tela, o texto e o pedido");
+  assert.match(bloco("a-minha"), /<p aria-hidden="true" class="[^"]*" data-room-message-meta=""><span class="[^"]*\bbg-room-control\b[^"]*">Assistente<\/span><time /, "so o selo, com o nome dentro");
+  assert.doesNotMatch(textOf(bloco("a-minha")), /Assistente, Assistente/, "o papel nao se repete");
+  assert.match(bloco("a-minha"), /lucide-sparkles/, "o avatar do Assistente");
+  assert.match(bloco("a-minha"), /<div class="-ml-2 mt-1 flex min-h-8 items-center"><div><button[^>]*data-testid="assistant-handoff"/, "o pedido na linha de acoes");
   assert.match(textOf(bloco("a-minha")), new RegExp(COPY.aluno.falarComAEquipe));
   assert.doesNotMatch(bloco("a-outro"), /assistant-handoff/, "a resposta a outro aluno nao tem o botao");
-  assert.match(textOf(bloco("a-outro")), /Assistente, Assistente, 20:10: Tem bonus\./, "mas leva o papel");
+  assert.match(textOf(bloco("a-outro")), /Assistente, há 2 minutos: Tem bonus\./, "mas leva o selo");
+  // O "@assistente" da pergunta do aluno em peso 600.
+  assert.match(bloco("m-minha"), /<span class="font-semibold">@assistente<\/span> quanto custa\?/);
   assert.doesNotMatch(bloco("t-1"), /assistant-handoff/);
   assert.equal(count(markup, /data-testid="assistant-handoff"/g), 1);
 
@@ -164,9 +175,16 @@ test("a linha do Assistente: respondendo, limite, a dica @assistente e a equipe 
   assert.equal(render(AssistantHint, { state: "none" }), "");
 });
 
-test("Falar com a equipe: o botao; depois, o pronto (e o sino quando ninguem esta atendendo)", () => {
+test("Falar com a equipe: o botao em pilula S de texto, sem icone; depois, o pronto (e o sino quando ninguem esta atendendo)", () => {
   const botao = render(AssistantHandoff, { attendantsOnline: 0, onRequest: async () => true });
   assert.match(textOf(botao), /Falar com a equipe/);
+  // A pilula S de texto do YouTube (spec §8.3): 32 px, raio total, sem fundo, 12/18 peso 500, sem o Headset.
+  const classes = (/<button[^>]*class="([^"]*)"/.exec(botao)?.[1] ?? "").split(/\s+/);
+  for (const classe of ["h-8", "px-3", "rounded-full", "bg-transparent", "text-room-fg", "text-xs", "font-medium", "leading-[18px]"]) {
+    assert.ok(classes.includes(classe), `o pedido tem ${classe}`);
+  }
+  assert.doesNotMatch(botao, /<svg/, "sem icone");
+  assert.match(botao, /data-testid="assistant-handoff"/);
   assert.doesNotMatch(botao, /disabled=""/);
   assert.match(render(AssistantHandoff, { attendantsOnline: 0, onRequest: async () => true, readOnly: true }), /disabled=""/);
   assert.equal(textOf(render(AssistantHandoff, { attendantsOnline: 0, done: true, onRequest: async () => true })), `${COPY.aluno.pedidoEnviado} ${COPY.aluno.equipeRespondeDepois}`);

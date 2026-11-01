@@ -1,17 +1,32 @@
 "use client";
 
-import { MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
+import { EllipsisVertical, MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { chatRoleLabel, chatTimeLabel, composerState, type ChatTimeKind, type ComposerState, type RoomMessage } from "@/lib/webinar-room-client";
+import {
+  chatAgoLabel,
+  chatRoleLabel,
+  chatTimeAt,
+  chatTimeLabel,
+  commentSegments,
+  composerState,
+  roleBadgeOnly,
+  type ChatTimeKind,
+  type ComposerState,
+  type RoomMessage
+} from "@/lib/webinar-room-client";
 import { ASSISTANT_WAIT_MS, assistantRepliesToMe, mentionsAssistant, studentAtAssistantLimit } from "@/server/webinars/assistant-model";
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type DisplayNameMode, type SimulatedPhase } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
+import { RoomComment, RoomCommentAvatar, type RoomCommentTime } from "./room-comment";
+import { menuOpenKey } from "./room-layout-model";
+import { RoomMenu } from "./room-menu";
+import { RoomTooltip } from "./room-tooltip";
 import { RoomBadge, RoomButton, RoomIconButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
 
@@ -33,6 +48,17 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // hora: na live, a que o servidor gravou (`sentAt`); na gravada, a hora marcada mais o offset; no Replay, nenhuma. O
 // chat por cima do video no vertical (vertical-chat.tsx) continua com o item de antes (RoomMessageItem, V2-18); a
 // gaveta do vertical abre este mesmo painel, com o balao.
+// A sala no estilo do YouTube (docs/31; spec §7.4 e §8): no desenho normal (`look="comment"`, o padrao) cada mensagem e
+// o comentario do YouTube (RoomComment): o avatar de 24, o nome sem "@", o selo tonal do papel, o tempo relativo
+// ("há 2 minutos", contra o agora do servidor: `skewMs`) com a hora exata no title, e o texto 14/20 com o "@assistente"
+// em peso 600; a minha a esquerda como as outras, com "Você"; a pendente e o "Falar com a equipe" na linha de acoes; o
+// Assistente com o selo no lugar do nome. A fixada vira um comentario no bloco do topo, fora do log, com "Fixada pela
+// equipe" acima do nome. A lista comeca em cima e o chat curto fica embaixo pelo margin-top auto do primeiro item
+// (nunca justify-content: flex-end, que deixaria as antigas fora do alcance); quando a lista muda de tamanho, quem
+// estava no fim continua no fim. A partir de lg o ⋯ sai da linha do campo e vira o ⋮ do cabecalho do painel
+// (RoomChatMoreButton); abaixo de lg, onde o cabecalho nao aparece, o ⋯ fica na linha do campo, como antes. A
+// confirmacao de remover continua aqui, aberta pela sala (`removeOpen`). A gaveta do vertical passa `look="classic"`, o
+// balao de antes. O console continua com o RoomChatBubble.
 
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
@@ -77,6 +103,13 @@ export type RoomChatPanelProps = {
   webinarId?: string | null;
   /** So na gravada: o zero da sessao em ms (a hora marcada), para a hora das mensagens. */
   zeroMs?: number | null;
+  /** "comment": o comentario do YouTube (o desenho normal, o padrao); "classic": o balao de antes (a gaveta do vertical). */
+  look?: "classic" | "comment";
+  /** No comentario: a confirmacao de remover as minhas mensagens aberta pela sala (o ⋮ do cabecalho do painel). */
+  onRemoveOpenChange?: (open: boolean) => void;
+  removeOpen?: boolean;
+  /** A diferenca do relogio do aparelho para o do servidor: o tempo do comentario conta do agora do servidor. */
+  skewMs?: number;
 };
 
 const ROLE_BADGES: Partial<Record<ChatRole, { label: string; tone: RoomBadgeTone }>> = {
@@ -209,6 +242,118 @@ function RoomPinned({ message }: { message: RoomMessage }) {
   );
 }
 
+/** De quem e a mensagem, para o comentario: o nome ("Você" na minha), o papel, o avatar e o que o leitor de tela ouve. */
+function commentAuthor(message: RoomMessage, time: RoomCommentTime | null) {
+  const role = chatRoleLabel(message.role);
+  const name = message.mine ? WEBINAR_COPY.salaV2.chat.voce : message.displayName;
+  const badgeOnly = roleBadgeOnly(name, role);
+  const parts = (badgeOnly ? [role, time?.label] : [name, role, time?.label]).filter((part): part is string => Boolean(part));
+  const avatar = message.role === "ai" ? "assistant" : badgeOnly && message.role === "team" ? "team" : "person";
+  return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts) } as const;
+}
+
+/** O texto do comentario: o "@assistente" em peso 600 (sem azul), o resto como veio. */
+function CommentBody({ body }: { body: string }) {
+  return (
+    <>
+      {commentSegments(body).map((segment, index) =>
+        segment.mention ? (
+          <span className="font-semibold" key={index}>
+            {segment.text}
+          </span>
+        ) : (
+          segment.text
+        )
+      )}
+    </>
+  );
+}
+
+/** Uma mensagem do chat da sala como o comentario do YouTube (RoomComment). */
+function RoomChatComment({ actions = null, as = "li", headline = null, message, time }: { actions?: ReactNode; as?: "div" | "li"; headline?: ReactNode; message: RoomMessage; time: RoomCommentTime | null }) {
+  const author = commentAuthor(message, time);
+  return (
+    <RoomComment
+      actions={actions}
+      as={as}
+      avatar={<RoomCommentAvatar kind={author.avatar} name={message.displayName} />}
+      body={<CommentBody body={message.body} />}
+      headline={headline}
+      id={message.id}
+      meta={{ name: author.name, role: author.role, time }}
+      mine={message.mine}
+      pending={message.pending}
+      srAuthor={author.srAuthor}
+    />
+  );
+}
+
+/**
+ * O ⋮ "Mais opções" do cabecalho do painel no Chat (a partir de lg): o circulo sem fundo com a dica no lugar do title e
+ * o menu abaixo, alinhado a direita, com "Remover minhas mensagens" (que abre a confirmacao no chat). O Esc fecha so o
+ * menu e devolve o foco ao botao. No "ver como", a opcao fica desligada.
+ */
+export function RoomChatMoreButton({ onRemove, readOnly = false }: { onRemove: () => void; readOnly?: boolean }) {
+  const label = WEBINAR_COPY.salaV2.chat.maisOpcoes;
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+
+  /** Fecha e devolve o foco ao botao (no WebKit o toque nao foca o botao, e o foco cairia no body). */
+  function close() {
+    buttonRef.current?.focus();
+    setOpen(false);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (!open && menuOpenKey(event.key)) {
+      // O Enter e o Espaco nao viram o clique (que fecharia o menu que acabou de abrir): o foco ja vai para a opcao.
+      event.preventDefault();
+      setOpen(true);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <RoomTooltip label={label} side="below">
+        <RoomIconButton
+          aria-controls={CHAT_MORE_MENU_ID}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className="[&_svg]:size-6"
+          label={label}
+          onClick={() => (open ? close() : setOpen(true))}
+          onKeyDown={onKeyDown}
+          ref={buttonRef}
+          size={40}
+          tone="ghost"
+          withTitle={false}
+        >
+          <EllipsisVertical aria-hidden="true" strokeWidth={1.75} />
+        </RoomIconButton>
+      </RoomTooltip>
+      <RoomMenu
+        align="end"
+        groups={[{ items: [{ disabled: readOnly, key: "remove", label: WEBINAR_COPY.sala.removerMinhasMensagens, onSelect: onRemove }] }]}
+        id={CHAT_MORE_MENU_ID}
+        label={label}
+        onClose={() => setOpen(false)}
+        open={open}
+        placement="below"
+        triggerRef={buttonRef}
+      />
+    </div>
+  );
+}
+
+/** O id do menu ⋮ do Chat (o aria-controls do botao do cabecalho). */
+export const CHAT_MORE_MENU_ID = "room-chat-more";
+
 export type ConsentChoice = { displayMode: DisplayNameMode; nickname: string };
 
 /** O aceite (docs/30 §8.5): o texto exato, como o nome aparece e os dois botoes. */
@@ -299,16 +444,20 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     consented,
     defaultDisplayMode,
     error,
+    look = "comment",
     messages,
     notice = null,
     nowMs,
     onRemoveMine,
+    onRemoveOpenChange,
     onSend,
     phase,
     pinned,
     readOnly,
+    removeOpen,
     sessionId = null,
     shown = true,
+    skewMs = 0,
     slowUntilMs,
     timeKind,
     webinarId = null,
@@ -334,7 +483,10 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [ownConfirmRemove, setOwnConfirmRemove] = useState(false);
+  // No comentario, a confirmacao e aberta pelo ⋮ do cabecalho do painel (a sala guarda o aberto).
+  const confirmRemove = removeOpen ?? ownConfirmRemove;
+  const setConfirmRemove = onRemoveOpenChange ?? setOwnConfirmRemove;
   const [announce, setAnnounce] = useState("");
   const listRef = useRef<HTMLOListElement | null>(null);
   const knownRef = useRef<Set<string>>(new Set());
@@ -367,6 +519,22 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   useLayoutEffect(() => {
     chatListOnShow(listRef.current, { shown, stick: stickRef.current });
   }, [shown]);
+
+  // No comentario, a lista muda de tamanho (o campo que abre, a fixada, a faixa da traducao): quem estava no fim volta
+  // ao fim depois do novo tamanho; quem tinha subido para ler fica onde estava.
+  useEffect(() => {
+    const list = listRef.current;
+    if (look !== "comment" || !list || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (stickRef.current) {
+        list.scrollTop = list.scrollHeight;
+      }
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [look]);
 
   function handleScroll() {
     const list = listRef.current;
@@ -463,6 +631,140 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     </div>
   );
 
+  /** O tempo do comentario: "há 2 minutos" contra o agora do servidor, a hora exata no title; no Replay, nenhum. */
+  function commentTime(message: RoomMessage): RoomCommentTime | null {
+    const input = { kind: timeKind, offsetMs: message.offsetMs, sentAt: message.sentAt, zeroMs };
+    const at = chatTimeAt(input);
+    const label = chatAgoLabel({ ...input, nowMs: nowMs + skewMs });
+    return at === null || !label ? null : { iso: new Date(at).toISOString(), label, title: chatTimeLabel(input) };
+  }
+
+  const removeBox = confirmRemove ? (
+    <div className="mx-3 my-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
+      <p className="text-sm font-bold text-room-warn-fg">{WEBINAR_COPY.privacidade.confirmar}</p>
+      <p className="mt-1 text-xs leading-5 text-room-fg-muted">{WEBINAR_COPY.privacidade.confirmarTexto}</p>
+      <div className="mt-2 flex gap-2">
+        <RoomButton onClick={() => void removeMine()} size="sm" variant="secondary">
+          {copy.removerMinhasMensagens}
+        </RoomButton>
+        <RoomButton onClick={() => setConfirmRemove(false)} size="sm" variant="ghost">
+          {WEBINAR_COPY.admin.cancelar}
+        </RoomButton>
+      </div>
+    </div>
+  ) : null;
+
+  const consentBox =
+    consentOpen && !consented && !notice ? (
+      <RoomConsentBox
+        busy={sending}
+        defaultDisplayMode={defaultDisplayMode}
+        onAccept={(choice) =>
+          void deliver({
+            anonymous: choice.displayMode === "anonymous",
+            consent: true,
+            consentVersion: CHAT_CONSENT_VERSION,
+            displayMode: choice.displayMode,
+            ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {})
+          })
+        }
+        onCancel={() => setConsentOpen(false)}
+      />
+    ) : null;
+
+  // Abaixo de lg o cabecalho do painel nao aparece: o ⋯ de antes continua na linha do campo so ali (o celular como hoje).
+  const mobileMenu = <div className="shrink-0 lg:hidden">{menu}</div>;
+
+  if (look === "comment") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
+        {pinned ? (
+          <div className="shrink-0 border-b border-room-panel-border px-4 py-3" data-testid="room-pinned">
+            <RoomChatComment
+              as="div"
+              headline={
+                <>
+                  <Pin aria-hidden="true" className="size-3 shrink-0" strokeWidth={2} />
+                  {WEBINAR_COPY.salaV2.chat.fixadaPelaEquipe}
+                </>
+              }
+              message={pinned}
+              time={commentTime(pinned)}
+            />
+          </div>
+        ) : null}
+
+        <ol
+          aria-label={copy.abas.chat}
+          aria-live={single ? "polite" : "off"}
+          aria-relevant="additions"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 pt-4 [scrollbar-color:transparent_transparent] [scrollbar-gutter:stable] [scrollbar-width:thin]"
+          onScroll={handleScroll}
+          ref={listRef}
+          role="log"
+        >
+          {messages.length === 0 ? <li className="mt-2 text-center text-sm leading-5 text-room-fg-subtle">{error ?? copy.semMensagens}</li> : null}
+          {messages.map((message) => {
+            const repliedTo = repliesToMe.get(message.id);
+            return (
+              <RoomChatComment
+                actions={
+                  repliedTo && !readOnly && webinarId && sessionId ? (
+                    <AssistantHandoff attendantsOnline={assistant.state.attendantsOnline} onRequest={() => assistant.handoff("chat", repliedTo)} readOnly={readOnly} />
+                  ) : null
+                }
+                key={message.id}
+                message={message}
+                time={commentTime(message)}
+              />
+            );
+          })}
+        </ol>
+        <p aria-live="polite" className="sr-only">
+          {announce}
+        </p>
+        {aboveComposer}
+
+        {removeBox}
+        {consentBox}
+
+        {notice ? (
+          <div className="flex items-center gap-2 border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            {mobileMenu}
+            <p className="min-w-0 flex-1 px-1 py-1 text-sm font-semibold text-room-warn-fg" data-testid="room-chat-notice" role="status">
+              {notice}
+            </p>
+          </div>
+        ) : (
+          <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
+            <div className="flex items-center gap-2">
+              {mobileMenu}
+              {/* 16 px abaixo de lg: o Safari do iPhone da zoom no foco de um campo menor (o campo novo entra no Y11). */}
+              <textarea
+                aria-label={copy.escreva}
+                className="h-11 min-w-0 flex-1 resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-base leading-5 text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50 lg:text-[13px]"
+                disabled={state.disabled || readOnly || busy}
+                maxLength={CHAT_LIMITS.body}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={hint || copy.escreva}
+                rows={1}
+                value={draft}
+              />
+              <RoomIconButton disabled={state.disabled || readOnly || sending || !draft.trim()} label={copy.enviar} size={44} tone="primary" type="submit">
+                <SendHorizontal aria-hidden="true" />
+              </RoomIconButton>
+            </div>
+            <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-room-warn-fg" : "text-room-fg-subtle")}>
+              {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
+            </p>
+            <AssistantHint state={assistantHint} />
+          </form>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
       {pinned ? <RoomPinned message={pinned} /> : null}
@@ -498,37 +800,9 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       </p>
       {aboveComposer}
 
-      {confirmRemove ? (
-        <div className="mx-3 my-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
-          <p className="text-sm font-bold text-room-warn-fg">{WEBINAR_COPY.privacidade.confirmar}</p>
-          <p className="mt-1 text-xs leading-5 text-room-fg-muted">{WEBINAR_COPY.privacidade.confirmarTexto}</p>
-          <div className="mt-2 flex gap-2">
-            <RoomButton onClick={() => void removeMine()} size="sm" variant="secondary">
-              {copy.removerMinhasMensagens}
-            </RoomButton>
-            <RoomButton onClick={() => setConfirmRemove(false)} size="sm" variant="ghost">
-              {WEBINAR_COPY.admin.cancelar}
-            </RoomButton>
-          </div>
-        </div>
-      ) : null}
+      {removeBox}
 
-      {consentOpen && !consented && !notice ? (
-        <RoomConsentBox
-          busy={sending}
-          defaultDisplayMode={defaultDisplayMode}
-          onAccept={(choice) =>
-            void deliver({
-              anonymous: choice.displayMode === "anonymous",
-              consent: true,
-              consentVersion: CHAT_CONSENT_VERSION,
-              displayMode: choice.displayMode,
-              ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {})
-            })
-          }
-          onCancel={() => setConsentOpen(false)}
-        />
-      ) : null}
+      {consentBox}
 
       {notice ? (
         <div className="flex items-center gap-2 border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">

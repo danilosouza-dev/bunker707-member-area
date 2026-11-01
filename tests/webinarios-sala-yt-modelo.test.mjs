@@ -191,3 +191,66 @@ test("chipScrollBy: o clique na seta rola 80 % da largura visivel, para o lado d
   assert.equal(questionsModel.chipScrollBy({ clientWidth: 374, direction: -1 }), -299);
   assert.equal(questionsModel.chipScrollBy({ clientWidth: 100, direction: 1 }), 80);
 });
+
+// Y9: o comentario do YouTube no chat (src/lib/webinar-room-client.ts): o tempo relativo, o "@assistente" em trechos e
+// o nome igual ao papel.
+const roomClient = await import("../src/lib/webinar-room-client.ts");
+const assistantModel = await import("../src/server/webinars/assistant-model.ts");
+
+test("chatAgoLabel: a live pelo sentAt, a gravada pelo zero mais o offset, o Replay sem tempo, o futuro preso em agora e o skew contando", () => {
+  const ZERO = Date.parse("2026-11-05T23:00:00.000Z");
+  const MIN = 60_000;
+  const agora = ZERO + 43 * MIN;
+  // A live: a hora que o servidor gravou, contra o agora do servidor.
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: agora, offsetMs: 0, sentAt: new Date(ZERO + 41 * MIN).toISOString() }), "há 2 minutos");
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: agora, offsetMs: 41 * MIN, sentAt: null, zeroMs: ZERO }), "", "a live sem sentAt fica sem tempo (nunca a conta pelo zero)");
+  // A gravada: o zero (a hora marcada) mais o offset.
+  assert.equal(roomClient.chatAgoLabel({ kind: "simulated", nowMs: agora, offsetMs: 33 * MIN, sentAt: null, zeroMs: ZERO }), "há 10 minutos");
+  assert.equal(roomClient.chatAgoLabel({ kind: "simulated", nowMs: agora, offsetMs: 33 * MIN, zeroMs: null }), "", "sem o zero, sem tempo");
+  // O Replay: nenhum tempo.
+  assert.equal(roomClient.chatAgoLabel({ kind: "replay", nowMs: agora, offsetMs: 33 * MIN, sentAt: new Date(ZERO).toISOString(), zeroMs: ZERO }), "");
+  // O futuro (a minha mensagem a frente do player na gravada, o relogio atrasado): sempre "agora", nunca "em 2 minutos".
+  assert.equal(roomClient.chatAgoLabel({ kind: "simulated", nowMs: agora, offsetMs: 45 * MIN, zeroMs: ZERO }), "agora");
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: agora, offsetMs: 0, sentAt: new Date(agora + 5 * MIN).toISOString() }), "agora");
+  // Abaixo de 45 s, "agora".
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: agora, offsetMs: 0, sentAt: new Date(agora - 30_000).toISOString() }), "agora");
+  // O skew conta: com o aparelho 3 minutos atrasado, so o agora do aparelho daria "agora"; a sala passa o agora do
+  // aparelho mais a diferenca para o servidor.
+  const skewMs = 3 * MIN;
+  const doAparelho = agora - skewMs;
+  const sentAt = new Date(ZERO + 41 * MIN).toISOString();
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: doAparelho, offsetMs: 0, sentAt }), "agora");
+  assert.equal(roomClient.chatAgoLabel({ kind: "live", nowMs: doAparelho + skewMs, offsetMs: 0, sentAt }), "há 2 minutos");
+  // O instante (o dateTime do <time>) pela mesma regra.
+  assert.equal(roomClient.chatTimeAt({ kind: "simulated", offsetMs: 33 * MIN, zeroMs: ZERO }), ZERO + 33 * MIN);
+  assert.equal(roomClient.chatTimeAt({ kind: "replay", offsetMs: 33 * MIN, zeroMs: ZERO }), null);
+});
+
+test("commentSegments: o '@assistente' em trecho proprio (a mencao primeiro, ou no meio, em qualquer caixa), pela mesma regra do servidor", () => {
+  assert.deepEqual(roomClient.commentSegments("@assistente o certificado sai quando?"), [
+    { mention: true, text: "@assistente" },
+    { mention: false, text: " o certificado sai quando?" }
+  ]);
+  assert.deepEqual(roomClient.commentSegments("Oi @Assistente, tudo bem?"), [
+    { mention: false, text: "Oi " },
+    { mention: true, text: "@Assistente" },
+    { mention: false, text: ", tudo bem?" }
+  ]);
+  assert.deepEqual(roomClient.commentSegments("sem mencao"), [{ mention: false, text: "sem mencao" }]);
+  assert.deepEqual(roomClient.commentSegments(""), []);
+  // A mesma regra do mentionsAssistant (copiada, sem o navegador carregar o modelo do Assistente).
+  for (const texto of ["@assistente", "x@assistente", "@assistentes", "nome@assistente.com", "(@assistente)", "@ASSISTENTE!", "oi\n@assistente", "@assistente_x", "@assistente @assistente", "@assistente@assistente", "ola"]) {
+    const trechos = roomClient.commentSegments(texto);
+    assert.equal(trechos.some((trecho) => trecho.mention), assistantModel.mentionsAssistant(texto), texto);
+    assert.equal(trechos.map((trecho) => trecho.text).join(""), texto, `${texto}: os trechos refazem o texto`);
+  }
+});
+
+test("roleBadgeOnly: o nome igual ao papel (sem acento nem caixa) mostra so o selo; um nome de pessoa ou sem papel, nao", () => {
+  assert.equal(roomClient.roleBadgeOnly("Assistente", "Assistente"), true);
+  assert.equal(roomClient.roleBadgeOnly("equipe ", "Equipe"), true);
+  assert.equal(roomClient.roleBadgeOnly("Equípe", "Equipe"), true, "sem acento");
+  assert.equal(roomClient.roleBadgeOnly("Marina R.", "Equipe"), false);
+  assert.equal(roomClient.roleBadgeOnly("Assistente", null), false, "sem papel");
+  assert.equal(roomClient.roleBadgeOnly("", "Equipe"), false);
+});

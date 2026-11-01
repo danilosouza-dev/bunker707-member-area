@@ -17,12 +17,15 @@ export const SALA_V2_COPY = {
     marca: "Bunker707"
   },
   /**
-   * O chat no estilo do Zoom (V2-9): o leitor de tela ouve quem escreveu antes do texto ("Marina R., Equipe, 20:41: ",
-   * so os trechos que existem: o aluno nao tem papel e o Replay nao tem hora); a linha "nome · papel · hora" embaixo do
-   * balao e so para quem ve. O menu ⋯ da linha do campo leva o Remover minhas mensagens.
+   * O chat da sala no estilo do YouTube (o comentario; no console e na gaveta do vertical, o balao do Zoom, V2-9): o
+   * leitor de tela ouve quem escreveu antes do texto ("Marina R., Equipe, há 2 minutos: ", so os trechos que existem: o
+   * aluno nao tem papel, o Replay nao tem tempo e, com o nome igual ao papel, so o papel: "Assistente, há 2 minutos: ");
+   * a linha do autor e so para quem ve. A fixada leva "Fixada pela equipe" acima do nome. O menu ⋮ "Mais opções" do
+   * cabecalho do painel (o ⋯ da linha do campo no balao) leva o Remover minhas mensagens.
    */
   chat: {
     autor: (partes: readonly string[]) => `${partes.join(", ")}: `,
+    fixadaPelaEquipe: "Fixada pela equipe",
     maisOpcoes: "Mais opções",
     /** O nome da minha mensagem na linha de baixo do balao e para o leitor de tela (o protótipo: "Você · 20:43"). */
     voce: "Você"
