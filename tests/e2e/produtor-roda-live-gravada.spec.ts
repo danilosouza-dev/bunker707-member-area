@@ -161,13 +161,16 @@ test.describe("produtor", () => {
     await expect(chat.getByText("Mensagem da equipe 40", { exact: true })).toBeInViewport();
 
     // Com o Roteiro na tela (o Chat escondido), chega uma mensagem nova pelo retrato (o Atualizar pede agora; o de 5 s
-    // traria do mesmo jeito).
+    // traria do mesmo jeito). A lista escondida continua montada; o localizador pelo papel (role=log) nao enxerga o que
+    // esta escondido, entao aqui ela e lida pelo atributo dela.
     await abrirNoMais(page, entradas.roteiro);
-    await expect(chat).toBeHidden();
+    const listaEscondida = page.locator("[data-console-chat]");
+    await expect(listaEscondida).toBeAttached();
+    await expect(listaEscondida).toBeHidden();
     const nova = "Chegou com o chat escondido";
     unwrap(await db.from("webinar_chat_messages").insert(daEquipe(nova, Date.now(), 200_000)), "Gravando a mensagem nova");
     await page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.atualizar }).click();
-    await expect(chat.getByText(nova, { exact: true })).toBeAttached({ timeout: 15_000 });
+    await expect(listaEscondida.getByText(nova, { exact: true })).toBeAttached({ timeout: 15_000 });
 
     // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista.
     await page.getByRole("tab", { exact: true, name: "Chat" }).click();

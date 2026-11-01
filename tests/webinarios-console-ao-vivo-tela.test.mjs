@@ -136,6 +136,7 @@ const { SessionConsole } = await import("../src/components/admin/v2/communicatio
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const { LIVE_CONSOLE_COPY } = await import("../src/server/webinars/live-console-model.ts");
 const { ConsoleBar } = await import("../src/components/admin/v2/communication/webinars/session-console/console-bar.tsx");
+const { ConsoleTopBar } = await import("../src/components/admin/v2/communication/webinars/session-console/console-top-bar.tsx");
 const { ConsolePanel } = await import("../src/components/admin/v2/communication/webinars/session-console/console-panel.tsx");
 const { ConsolePeopleTab } = await import("../src/components/admin/v2/communication/webinars/session-console/console-people-tab.tsx");
 const { CONSOLE_PANEL_ID, CONSOLE_SETTINGS_ID } = await import("../src/components/admin/v2/communication/webinars/session-console/console-layout-model.ts");
@@ -404,6 +405,55 @@ test("Atualizar e sem resposta (docs/31 V2-13 e V2-A50): o sem resposta do retra
   assert.deepEqual(regiao(deVolta), ["idle", consoleV2Copy.conectadoDeNovo]);
   assert.deepEqual(regiao(render(snapshot())), ["idle", ""], "na carga, nada");
   assert.deepEqual(regiao(renderPoll({ notice: "atualizando", offline: false })), ["idle", consoleV2Copy.atualizando]);
+});
+
+test("Atualizar durante a leitura (docs/31 V2-13): o icone gira e o botao continua ligado (desligado, o foco do teclado cairia no comeco da pagina a cada 5 s); so sem sessao ele fica desligado", () => {
+  const topo = (extra = {}) =>
+    html(
+      createElement(ConsoleTopBar, {
+        actions: [],
+        busyKey: null,
+        canWrite: true,
+        className: "",
+        clockLabel: "",
+        editorHref: `/admin/comunicacao/webinarios/${WEBINAR}`,
+        onAction() {},
+        onChangeSession() {},
+        onLock() {},
+        onRefresh() {},
+        onToggleTheme() {},
+        poll: { notice: "", offline: false },
+        presentLabel: null,
+        reading: false,
+        reportHref: `/admin/comunicacao/webinarios/${WEBINAR}/relatorio`,
+        roomLocked: false,
+        sessionId: S_LIVE,
+        sessions: [session()],
+        theme: "dark",
+        title: "Aula aberta",
+        ...extra
+      })
+    );
+  const atualizar = (markup) => {
+    const found = markup.match(new RegExp(`(<button[^>]*aria-label="${escape(consoleV2Copy.atualizar)}"[^>]*>)([\\s\\S]*?)</button>`));
+    assert.ok(found, "o topo tem o Atualizar");
+    return { botao: found[1], icone: found[2] };
+  };
+  const polling = (markup) => markup.match(/data-console-polling="([a-z]+)"/)?.[1];
+
+  const lendo = topo({ reading: true });
+  assert.doesNotMatch(atualizar(lendo).botao, /\sdisabled=""/, "lendo, o Atualizar continua ligado");
+  assert.match(atualizar(lendo).icone, /<svg[^>]*class="[^"]*\banimate-spin\b/, "lendo, o icone gira");
+  assert.equal(polling(lendo), "updating");
+
+  const parado = topo();
+  assert.doesNotMatch(atualizar(parado).botao, /\sdisabled=""/);
+  assert.doesNotMatch(atualizar(parado).icone, /\banimate-spin\b/, "parado, o icone fica quieto");
+  assert.equal(polling(parado), "idle");
+
+  for (const semSessao of [topo({ sessionId: null, sessions: [] }), topo({ reading: true, sessionId: null, sessions: [] })]) {
+    assert.match(atualizar(semSessao).botao, /\sdisabled=""/, "sem sessao nao ha o que ler");
+  }
 });
 
 test("palco: a sala abrindo no meio, o Trancar no topo e as acoes de todos na aba Pessoas (Câmeras livres em aria-pressed); sem a sala no ambiente, a frase e o resto do console funciona", () => {

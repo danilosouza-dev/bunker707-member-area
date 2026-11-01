@@ -260,6 +260,30 @@ test("o console usa as regras puras, nao uma copia delas: as abas, o ⋯, o topo
   assert.match(semComentarios(ler("src/components/admin/v2/admin-shell.tsx")), /\bisAdminFullScreenPath\(/, "a moldura sem a barra lateral pelo caminho");
 });
 
+test("as ligacoes que o HTML do servidor nao alcanca: a lista do chat volta ao fim quando a aba Chat volta a tela, so o clique do Atualizar fala na regiao viva e os avisos do console abrem abaixo do topo", () => {
+  // O chat escondido (outra aba, uma entrada do ⋯, o painel fechado) nao rola com o que chega: ao voltar, chatListOnShow
+  // leva quem estava no fim ao fim. A regra e testada sozinha (webinarios-sala-v2-modelo); aqui, que o console a chama
+  // a cada troca do `shown` e que o `shown` so e verdadeiro com o painel e a aba Chat na tela.
+  assert.match(fonte("console-chat.tsx"), /useLayoutEffect\(\(\) => \{\s*chatListOnShow\(listRef\.current, \{ shown, stick: stickToEnd\.current \}\);\s*\}, \[shown\]\);/);
+  const main = fonte("session-console.tsx");
+  assert.match(main, /<ConsoleChat\b[\s\S]*?\sshown=\{panelShown && "tab" in shownView && shownView\.tab === "chat"\}/);
+
+  // So o clique no Atualizar diz "Atualizando…" (consolePollStep com origin "click"); o laco de 5 s, a volta a aba e o
+  // retrato depois de uma acao leem quietos, sem a origem (o padrao "auto").
+  const chamadas = Array.from(main.matchAll(/(?<![.\w])refresh\(([^)]*)\)/g), (found) => found[1].trim());
+  assert.deepEqual(chamadas.filter((origem) => origem !== ""), ['"click"'], "uma chamada so com a origem, a do clique");
+  assert.match(main, /onRefresh=\{\(\) => void refresh\("click"\)\}/);
+  assert.match(main, /document\.visibilityState === "visible"\) \{\s*await refresh\(\);/, "o laco de 5 s");
+  assert.match(main, /const onVisible = \(\) => \{\s*if \(document\.visibilityState === "visible"\) \{\s*void refresh\(\);/, "a volta a aba");
+  assert.match(main, /onOk\?\.\(result\.data\);\s*await refresh\(\);/, "o retrato depois de uma acao");
+  assert.match(main, /origin === "click" && readsRef\.current > 0/, "o clique durante uma leitura nao pede outra");
+
+  // Os avisos do console abrem em cima, no meio, abaixo do topo (no canto de baixo cobriam o campo do chat); a moldura
+  // nao monta o dela na tela cheia.
+  assert.match(fonte("console-shell.tsx"), /<AdminToaster placement="console" theme=\{theme\} \/>/);
+  assert.match(semComentarios(ler("src/components/admin/v2/admin-shell.tsx")), /\{fullScreen \? null : <AdminToaster \/>\}/);
+});
+
 test("o [data-live-stage] (o pai do iframe) e escrito uma vez so, no palco do console, e nunca muda de pai", () => {
   const usos = FONTES.flatMap((caminho) => Array.from(semComentarios(ler(caminho)).matchAll(/\bdata-live-stage(?=[=\s>])/g), () => caminho));
   assert.deepEqual(usos, [`${CONSOLE}/console-stage.tsx`]);

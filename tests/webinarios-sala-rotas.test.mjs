@@ -548,6 +548,20 @@ test("POST chat: Participar como anonimo vira Aluno {n} estavel; apelido; a perg
   assert.notEqual(userId, sessao.user.id);
 });
 
+test("POST chat: a pergunta pelo chat aberto com um emoji na casa 500 corta por caractere (questionBodyOf), nunca no meio do emoji; a mensagem do chat fica inteira", async () => {
+  const { db } = montar();
+  // 601 unidades UTF-16: o emoji ocupa a 500a e a 501a. Cortado por unidade, sobraria a metade dele (o Postgres recusa).
+  const corpo = `${"a".repeat(499)}😀${"b".repeat(100)}`;
+  const pergunta = await enviar({ body: corpo, kind: "question", ...comAceite });
+  assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
+  const linha = db.tables.webinar_questions.find((row) => row.message_id === pergunta.body.data.message.id);
+  assert.ok(linha, "a pergunta abriu a linha em webinar_questions");
+  assert.equal(Array.from(linha.body).length, 500, "500 caracteres");
+  assert.ok(linha.body.endsWith("😀"), "o emoji inteiro no fim");
+  assert.doesNotMatch(linha.body, /[\uD800-\uDBFF]$/, "sem metade de emoji no fim");
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === pergunta.body.data.message.id).body, corpo, "a mensagem do chat com o texto todo");
+});
+
 test("POST chat: fora da hora e do modo (409 not_started / ended / chat_off / team_only); o replay sempre aceita e grava o offset do corpo", async () => {
   montar({ scheduledAt: Date.now() + HOUR });
   assert.equal((await enviar({ body: "cedo", ...comAceite })).body.reason, "not_started");
