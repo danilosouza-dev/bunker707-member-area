@@ -18,7 +18,8 @@ import { useConsolePortal } from "./console-shell";
 // ⋯ "Mais painéis", um botao de menu fora da lista das abas (um tab que abrisse seis paineis nao seria um tab), com as
 // entradas da sessao (consoleMoreEntriesFor) como opcoes de radio; com uma escolhida, ele fica no estilo da aba ativa
 // e diz o nome dela, e nenhuma aba fica escolhida. O conteudo de uma entrada e uma <section> com o nome dela, nao um
-// tabpanel. O X "Fechar o painel" so a partir de lg e so na live (sem palco o painel nunca fecha). Tudo fica montado:
+// tabpanel, e um grupo, nao uma regiao: o cartao de dentro (SectionCard) ja e a regiao com o titulo, e o leitor de tela
+// nao lista "Enquetes" dentro de "Enquetes". O X "Fechar o painel" so a partir de lg e so na live (sem palco o painel nunca fecha). Tudo fica montado:
 // a aba e a entrada que nao estao na tela ganham `hidden` (a batida de 30 s do Atendimento, o rascunho do chat e o HTML
 // do servidor com tudo continuam). A aba e a entrada escolhidas ficam so na memoria da pagina (SessionConsole); o
 // painel aberto ou fechado, na chave do console. O corpo rola por dentro a partir de lg e e `relative` (os rotulos so
@@ -89,7 +90,7 @@ export function ConsolePanel({ className, closable, counts, entries, more, onClo
           </div>
         ))}
         {entries.map((entry) => (
-          <section aria-label={copy.entradas[entry]} className="flex min-w-0 flex-col gap-4" data-console-more={entry} hidden={chosen !== entry} key={entry}>
+          <section aria-label={copy.entradas[entry]} className="flex min-w-0 flex-col gap-4" data-console-more={entry} hidden={chosen !== entry} key={entry} role="group">
             {more[entry]}
           </section>
         ))}

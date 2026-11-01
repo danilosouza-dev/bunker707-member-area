@@ -20,11 +20,11 @@ const SESSAO = "bbbbbbbb-0000-4000-8000-0000000000e1";
 const CSV = ["Tempo;Nome;Papel;Mensagem", "0:05;Duda;Aluno;Boa noite, turma!", "0:10;Equipe;Equipe;Bem-vindos ao encontro", "abc;Lia;Aluno;tempo torto"].join("\n");
 const entradas = WEBINAR_COPY.consoleV2.entradas;
 
-/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela. */
+/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
 async function abrirNoMais(page: Page, entrada: string) {
   await page.locator("[data-console-more-trigger]").click();
   await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
-  const secao = page.locator(`section[aria-label="${entrada}"]`);
+  const secao = page.locator("section[data-console-more]").and(page.getByRole("group", { exact: true, name: entrada }));
   await expect(secao).toBeVisible();
   await expect(page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.maisEscolhido(entrada) })).toBeVisible();
   return secao;

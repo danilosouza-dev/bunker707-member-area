@@ -182,9 +182,11 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
           />
         );
       case "record":
+        // Com o gravador por preparar o circulo so abre o ⋯ › Gravação: sem aria-pressed (como Mãos e Lançar enquete),
+        // para o leitor de tela nao anunciar um liga e desliga que o clique nao faz.
         return (
           <RoomBarButton
-            active={record.active}
+            active={record.opensPanel ? undefined : record.active}
             busy={record.busy || recordBusy}
             className={record.active ? "border border-room-danger-border bg-room-danger-bg text-room-danger-fg hover:bg-room-danger-bg/80" : undefined}
             controls={record.opensPanel ? CONSOLE_PANEL_ID : undefined}

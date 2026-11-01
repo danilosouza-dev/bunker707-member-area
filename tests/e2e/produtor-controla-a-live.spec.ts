@@ -74,11 +74,11 @@ async function abrirAba(page: Page, nome: string) {
   return page.locator(`#${(await aba.getAttribute("aria-controls")) ?? ""}`);
 }
 
-/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela. */
+/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
 async function abrirNoMais(page: Page, entrada: string) {
   await page.locator("[data-console-more-trigger]").click();
   await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
-  const secao = page.locator(`section[aria-label="${entrada}"]`);
+  const secao = page.locator("section[data-console-more]").and(page.getByRole("group", { exact: true, name: entrada }));
   await expect(secao).toBeVisible();
   return secao;
 }
