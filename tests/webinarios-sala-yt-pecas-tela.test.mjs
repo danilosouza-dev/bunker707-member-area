@@ -9,11 +9,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 // compacta de menu, o grupo segmentado, o chip (filtro e aba), o contador extraido do balao e o "ghost" sem title do
 // RoomIconButton. O clique do desligado com motivo e conferido pelo elemento de React: chama o onBlocked, nunca o
 // onClick. O console continua com as pecas de hoje (o padrao do RoomIconButton e o contador com o mesmo HTML).
+// Y3: o menu (RoomMenu, que a Visão do vídeo passa a usar), a dica (RoomTooltip, que o servidor nunca desenha) e o aviso
+// invertido (RoomSnackbar, ainda sem ligar); a escolha no menu e a acao e a pausa do aviso pelos elementos de React.
 
 const pill = await import("../src/components/member/webinars/room/room-pill.tsx");
 const chipBar = await import("../src/components/member/webinars/room/room-chip-bar.tsx");
 const ui = await import("../src/components/member/webinars/room/room-ui.tsx");
 const bar = await import("../src/components/member/webinars/room/room-bar.tsx");
+const menuModule = await import("../src/components/member/webinars/room/room-menu.tsx");
+const tooltipModule = await import("../src/components/member/webinars/room/room-tooltip.tsx");
+const snackModule = await import("../src/components/member/webinars/room/room-snackbar.tsx");
+const viewMenuModule = await import("../src/components/member/webinars/room/room-view-menu.tsx");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const { LogOut, Mic, PanelRight, SmilePlus, VenetianMask, Volume2, Maximize2, X } = await import("lucide-react");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
@@ -265,4 +272,253 @@ test("o RoomIconButton ghost da sala: sem fundo, sem contorno e, com withTitle={
   const controle = abertura(render(ui.RoomIconButton, { active: true, label: "Som", tone: "control" }));
   assert.match(controle, /aria-pressed="true"[^>]*title="Som"/);
   assert.ok(classesDe(controle).includes("bg-room-active-bg"));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Y3: o menu, a dica e o aviso
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Desenha o menu dentro de uma renderizacao (os ganchos precisam dela) e devolve tambem a arvore de React. */
+function menuComArvore(props) {
+  let arvore = null;
+  function Captura() {
+    arvore = menuModule.RoomMenu(props);
+    return arvore;
+  }
+  const html = renderToStaticMarkup(createElement(Captura));
+  // As opcoes sao os elementos com o item e a escolha (o RoomMenuOption, ainda sem desenhar).
+  const opcoes = [];
+  const visitar = (no) => {
+    if (Array.isArray(no)) {
+      no.forEach(visitar);
+      return;
+    }
+    if (!no || typeof no !== "object" || !("props" in no)) {
+      return;
+    }
+    if (no.props.item && typeof no.props.onSelect === "function") {
+      opcoes.push(no);
+    }
+    visitar(no.props.children);
+  };
+  visitar(arvore);
+  return { html, opcoes };
+}
+
+const MENU_PROPS = (extra = {}) => ({
+  align: "end",
+  groups: [],
+  id: "menu-teste",
+  label: "Filtrar e ordenar",
+  onClose: noop,
+  open: true,
+  placement: "below",
+  triggerRef: { current: null },
+  ...extra
+});
+
+test("o menu aberto (RoomMenu): role=menu com o nome, a superficie do menu do YouTube, as opcoes de 40 px (44 abaixo de lg), a escolhida com o Check, o grupo com o rotulo e o traco entre os grupos", () => {
+  const escolhas = [];
+  const { html } = menuComArvore(
+    MENU_PROPS({
+      groups: [
+        {
+          items: [
+            { checked: false, key: "all", label: "Todas", onSelect: () => escolhas.push("all"), radio: true },
+            { checked: true, key: "answered", label: "Respondidas", onSelect: () => escolhas.push("answered"), radio: true }
+          ],
+          label: "Mostrar"
+        },
+        {
+          items: [
+            { checked: true, key: "votadas", label: "Mais votadas", onSelect: noop, radio: true },
+            { checked: false, key: "recentes", label: "Mais recentes", onSelect: noop, radio: true }
+          ],
+          label: "Ordenar"
+        }
+      ]
+    })
+  );
+  const caixa = abertura(html, "div");
+  assert.match(caixa, /^<div aria-label="Filtrar e ordenar" class="[^"]*" id="menu-teste" role="menu">$/, "aberto, sem o hidden");
+  assert.deepEqual(
+    temTodas(classesDe(caixa), ["absolute", "z-40", "min-w-32", "max-w-[400px]", "rounded-[12px]", "bg-room-menu", "py-2", "shadow-[var(--room-menu-shadow)]", "top-full", "mt-2", "right-0"]),
+    [],
+    caixa
+  );
+
+  // As opcoes: menuitemradio com aria-checked, fora da ordem do Tab, 40 px no computador e 44 no toque.
+  const opcoes = [...html.matchAll(/<button\b[^>]*role="menuitemradio"[^>]*>[\s\S]*?<\/button>/g)].map(([trecho]) => trecho);
+  assert.equal(opcoes.length, 4);
+  for (const opcao of opcoes) {
+    const tag = abertura(opcao);
+    assert.match(tag, /^<button aria-checked="(true|false)"/);
+    assert.match(tag, /\stabindex="-1"/);
+    assert.deepEqual(temTodas(classesDe(tag), ["h-10", "max-lg:h-11", "w-full", "gap-4", "pl-4", "pr-9", "text-sm", "leading-5", "text-room-fg", "hover:bg-room-control", "focus-visible:outline-2", "focus-visible:outline-offset-[-2px]", "focus-visible:outline-current"]), [], tag);
+    assert.doesNotMatch(tag, /\stitle=/);
+  }
+  const marcadas = opcoes.filter((opcao) => /aria-checked="true"/.test(opcao));
+  assert.deepEqual(marcadas.map((opcao) => /<span class="flex-1">([^<]+)<\/span>/.exec(opcao)?.[1]), ["Respondidas", "Mais votadas"]);
+  // A escolhida: o fundo tonal e o Check de 20 (o estado nao depende so do fundo); as outras, sem o Check.
+  for (const opcao of opcoes) {
+    const marcada = /aria-checked="true"/.test(opcao);
+    assert.equal(classesDe(abertura(opcao)).includes("bg-room-control"), marcada, opcao);
+    assert.equal(/lucide-check[^"]*size-5/.test(opcao), marcada, opcao);
+  }
+
+  // Os grupos: role=group com o nome, o rotulo 12/18 do secundario em cima (fora do nome, que ja e o do grupo) e o
+  // traco de 1 px entre eles.
+  const grupos = [...html.matchAll(/<div aria-label="([^"]+)" role="group"><div aria-hidden="true" class="([^"]*)" role="presentation">([^<]+)<\/div>/g)];
+  assert.deepEqual(grupos.map(([, nome, , rotulo]) => [nome, rotulo]), [["Mostrar", "Mostrar"], ["Ordenar", "Ordenar"]]);
+  assert.deepEqual(temTodas(grupos[0][2].split(" "), ["px-4", "py-1", "text-xs", "leading-[18px]", "text-room-fg-subtle"]), []);
+  const tracos = [...html.matchAll(/<div class="([^"]*)" role="separator"><\/div>/g)];
+  assert.equal(tracos.length, 1, "um traco entre os dois grupos");
+  assert.deepEqual(temTodas(tracos[0][1].split(" "), ["my-2", "h-px", "bg-room-divider"]), []);
+  assert.ok(html.indexOf('role="separator"') > html.indexOf("Respondidas") && html.indexOf('role="separator"') < html.indexOf("Mais votadas"));
+  assert.deepEqual(escolhas, [], "desenhar nao escolhe nada");
+});
+
+test("o menu: uma acao e menuitem sem aria-checked, com o icone de 24; fechado fica no HTML com o hidden; acima e abaixo, e os tres alinhamentos", () => {
+  const acao = menuComArvore(MENU_PROPS({ groups: [{ items: [{ icon: X, key: "clear", label: "Remover minhas mensagens", onSelect: noop }] }] })).html;
+  const tag = abertura(acao);
+  assert.match(tag, /\srole="menuitem"/);
+  assert.doesNotMatch(tag, /aria-checked/);
+  assert.match(acao, /lucide-x[^"]*size-6/, "o icone da opcao, de 24");
+  assert.doesNotMatch(acao, /role="group"|role="separator"/, "um grupo sem nome: as opcoes direto no menu");
+
+  const fechado = abertura(menuComArvore(MENU_PROPS({ open: false })).html, "div");
+  assert.match(fechado, /\shidden="" id="menu-teste" role="menu">$/);
+
+  const lugar = (placement, align) => classesDe(abertura(menuComArvore(MENU_PROPS({ align, placement })).html, "div"));
+  assert.deepEqual(temTodas(lugar("above", "start"), ["bottom-full", "mb-2", "left-0"]), []);
+  assert.deepEqual(temTodas(lugar("below", "end"), ["top-full", "mt-2", "right-0"]), []);
+  assert.deepEqual(temTodas(lugar("above", "center"), ["left-1/2", "-translate-x-1/2"]), []);
+});
+
+test("o menu: a escolha chama a acao e fecha com o foco de volta ao botao (onClose(true)); a opcao desligada continua na lista, mas nao faz nada", () => {
+  const registro = [];
+  const botao = { focus: () => registro.push("foco no botao") };
+  const { html, opcoes } = menuComArvore(
+    MENU_PROPS({
+      groups: [
+        {
+          items: [
+            { checked: true, key: "votadas", label: "Mais votadas", onSelect: () => registro.push("votadas"), radio: true },
+            { disabled: true, key: "recentes", label: "Mais recentes", onSelect: () => registro.push("recentes"), radio: true }
+          ]
+        }
+      ],
+      onClose: (refocus) => registro.push(`fechou ${refocus}`),
+      triggerRef: { current: botao }
+    })
+  );
+  assert.equal(opcoes.length, 2);
+  opcoes[0].props.onSelect(opcoes[0].props.item);
+  assert.deepEqual(registro, ["votadas", "foco no botao", "fechou true"], "a acao, o foco antes de o menu sumir e o fechar");
+
+  registro.length = 0;
+  opcoes[1].props.onSelect(opcoes[1].props.item);
+  assert.deepEqual(registro, [], "desligada: nada acontece e o menu fica aberto");
+  const desligada = abertura(html.slice(html.indexOf("Mais votadas")));
+  assert.match(desligada, /\saria-disabled="true"/);
+  assert.doesNotMatch(desligada, /\sdisabled=""/, "continua focavel, como pede o menu da WAI-ARIA");
+  assert.ok(classesDe(desligada).includes("text-room-fg-disabled"), desligada);
+});
+
+test("a Visão do vídeo usa o RoomMenu: a superficie do menu do YouTube, as opcoes de 40 px com o icone, e o Check so na marcada", () => {
+  const html = render(viewMenuModule.RoomViewMenu, { disabled: false, onChoose: noop, onOpenChange: noop, open: true, shown: "grid" });
+  const caixa = abertura(html.slice(html.indexOf('<div aria-label="Visão do vídeo"')), "div");
+  assert.deepEqual(temTodas(classesDe(caixa), ["bg-room-menu", "rounded-[12px]", "shadow-[var(--room-menu-shadow)]", "z-40", "bottom-full", "right-0"]), [], caixa);
+  assert.ok(!classesDe(caixa).includes("bg-room-surface"), "a superficie antiga sai");
+  const opcoes = [...html.matchAll(/<button aria-checked="(true|false)"[^>]*data-room-view="([a-z]+)"[^>]*role="menuitemradio"[^>]*>([\s\S]*?)<\/button>/g)];
+  assert.deepEqual(opcoes.map(([, marcada, view]) => [view, marcada]), [["stage", "false"], ["grid", "true"]]);
+  for (const [, marcada, view, dentro] of opcoes) {
+    assert.match(dentro, view === "grid" ? /lucide-layout-grid/ : /lucide-panel-right/);
+    assert.equal(/lucide-check/.test(dentro), marcada === "true", view);
+  }
+});
+
+test("a dica (RoomTooltip): o HTML do servidor tem so o envoltorio e o botao; a dica e desenhada so no navegador e so quando aparece", () => {
+  const html = renderToStaticMarkup(
+    createElement(tooltipModule.RoomTooltip, { label: "Tela cheia", side: "above" }, createElement(pill.RoomPill, { icon: Maximize2, label: "Tela cheia", shape: "circle" }))
+  );
+  assert.match(html, /^<span class="relative inline-flex"><button aria-label="Tela cheia"[^>]*>[\s\S]*<\/button><\/span>$/);
+  assert.doesNotMatch(html, /data-room-tooltip|bg-room-tooltip-bg|\stitle=/);
+  assert.doesNotMatch(textoSemTags(html), /Tela cheia/, "o nome fica so no aria-label do botao");
+  const longa = renderToStaticMarkup(
+    createElement(
+      tooltipModule.RoomTooltip,
+      { label: "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.", side: "above", wide: true },
+      createElement(pill.RoomPill, { disabledReason: "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.", icon: Mic, label: "Microfone" })
+    )
+  );
+  assert.doesNotMatch(longa, /data-room-tooltip/);
+  assert.equal(longa.match(/Muitos alunos/g)?.length, 1, "o motivo so uma vez: no sr-only do aria-describedby");
+});
+
+test("o aviso (RoomSnackbar): a regiao polida sempre montada e vazia sem aviso; com aviso, a caixa invertida, o texto com o live-notice, a acao como pilula de texto com o nome exato, sem icone nem X", () => {
+  for (const placement of ["stage", "screen", "sheet", "side"]) {
+    const vazio = render(snackModule.RoomSnackbar, { className: "absolute bottom-2 left-2", placement, snack: null });
+    assert.equal(vazio, `<div aria-atomic="true" aria-live="polite" class="absolute bottom-2 left-2" data-room-snackbar="${placement}" role="status"></div>`);
+  }
+
+  const semAcao = render(snackModule.RoomSnackbar, { placement: "stage", snack: { key: "hand-lowered", text: "A equipe abaixou a sua mão." } });
+  assert.match(semAcao, /^<div aria-atomic="true" aria-live="polite" data-room-snackbar="stage" role="status"><div class="[^"]*">/);
+  const caixa = classesDe(abertura(semAcao.slice(semAcao.indexOf("><") + 1), "div"));
+  assert.deepEqual(
+    temTodas(caixa, ["flex", "min-h-12", "w-full", "max-w-[448px]", "items-center", "rounded-[8px]", "bg-room-snackbar-bg", "text-room-snackbar-fg", "shadow-[var(--room-snackbar-shadow)]", "motion-safe:animate-[room-snack-in_0.5s_ease]", "lg:min-w-[288px]"]),
+    [],
+    caixa.join(" ")
+  );
+  const texto = abertura(semAcao, "p");
+  assert.match(texto, /\sdata-testid="live-notice"/);
+  // A margem de 8 e 12 em volta do texto (a do YouTube), nao o recuo: o corte das 2 linhas vale na borda do recuo.
+  assert.deepEqual(temTodas(classesDe(texto), ["flex-1", "mx-3", "my-2", "text-sm", "leading-5", "line-clamp-2"]), []);
+  assert.ok(!classesDe(texto).some((classe) => /^p[xy]?-/.test(classe)), texto);
+  assert.match(semAcao, /data-testid="live-notice">A equipe abaixou a sua mão\.<\/p><\/div><\/div>$/, "a frase inteira, e nada depois dela");
+  assert.doesNotMatch(semAcao, /<svg|<button|aria-label/, "nenhum icone, nenhum X");
+
+  const configuracoes = WEBINAR_COPY.aoVivo.configuracoes;
+  const comAcao = render(snackModule.RoomSnackbar, {
+    onAction: noop,
+    placement: "stage",
+    snack: { action: { key: "settings", label: configuracoes }, key: "no-audio", text: "Não está chegando som do seu microfone." }
+  });
+  const botoes = [...comAcao.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)];
+  assert.equal(botoes.length, 1, "so a acao");
+  assert.equal(botoes[0][1], configuracoes, "o nome exato da frase, so o texto");
+  const acao = abertura(botoes[0][0]);
+  assert.doesNotMatch(acao, /aria-label|\stitle=/);
+  assert.deepEqual(
+    temTodas(classesDe(acao), ["h-10", "px-4", "rounded-full", "font-medium", "bg-transparent", "mr-3", "text-room-snackbar-action", "hover:bg-room-snackbar-action-hover", "focus-visible:outline-room-snackbar-fg"]),
+    [],
+    acao
+  );
+  assert.ok(!classesDe(acao).includes("text-room-fg") && !classesDe(acao).includes("hover:bg-room-control-hover"), "a cor da acao do aviso vence a da pilula de texto");
+  assert.ok(comAcao.indexOf('data-testid="live-notice"') < comAcao.indexOf("<button"), "a acao a direita do texto");
+});
+
+test("o aviso: a acao chama onAction com a chave dela; o ponteiro em cima e o foco dentro pausam o tempo, e a saida deles volta a contar", () => {
+  const registro = [];
+  const arvore = snackModule.RoomSnackbar({
+    onAction: (key) => registro.push(`acao ${key}`),
+    onPauseChange: (paused) => registro.push(paused ? "pausa" : "conta"),
+    placement: "stage",
+    snack: { action: { key: "settings", label: WEBINAR_COPY.aoVivo.configuracoes }, key: "no-audio", text: "Não está chegando som do seu microfone." }
+  });
+  const pilula = [arvore.props.children.props.children].flat().find((filho) => filho?.type === pill.RoomPill);
+  assert.ok(pilula, "a acao e uma RoomPill");
+  assert.equal(pilula.props.tone, "text");
+  assert.equal(pilula.props.size ?? "m", "m");
+  pilula.props.onClick();
+  assert.deepEqual(registro, ["acao settings"]);
+
+  registro.length = 0;
+  arvore.props.onPointerEnter();
+  arvore.props.onPointerLeave();
+  arvore.props.onFocus();
+  // O foco que passa do texto para a acao continua dentro: nada muda.
+  arvore.props.onBlur({ currentTarget: { contains: () => true }, relatedTarget: {} });
+  arvore.props.onBlur({ currentTarget: { contains: () => false }, relatedTarget: null });
+  assert.deepEqual(registro, ["pausa", "conta", "pausa", "conta"]);
 });

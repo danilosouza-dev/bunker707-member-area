@@ -1707,6 +1707,21 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
 }
 
 /*
+ * O aviso da sala no estilo do YouTube (RoomSnackbar, docs/31): entra subindo do pe com a opacidade, como o snackbar do
+ * YouTube (0,5 s ease); sem movimento com prefers-reduced-motion (a classe so liga com motion-safe).
+ */
+@keyframes room-snack-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*
  * Console de quem apresenta (docs/31 V2-12 e V2-13): a raiz do console leva data-console-root junto com o
  * data-room-theme. Este bloco liga os tokens do admin (o bloco do admin acima) aos --room-* do tema do console, e assim
  * as pecas do admin que o console usa (SectionCard, StatusChip, Button, PillGroup, os campos, o Atendimento e a Oferta)
