@@ -132,6 +132,16 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   const botaoDoTema = topo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro });
   await expect(botaoDoTema).toBeVisible();
   expect(await botaoDoTema.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("0px");
+  // A dica do tema (o ultimo botao do topo, a 20 px da borda) fica presa a borda direita dele e inteira na janela:
+  // centrada, ela passava da borda.
+  await botaoDoTema.hover();
+  const dicaDoTema = topo.locator("[data-room-tooltip]");
+  await expect(dicaDoTema).toHaveText(WEBINAR_COPY.salaV2.tema.claro);
+  await expect(dicaDoTema).toBeInViewport({ ratio: 1 });
+  const [caixaDoTema, caixaDaDica] = [await botaoDoTema.boundingBox(), await dicaDoTema.boundingBox()];
+  expect((caixaDaDica?.x ?? 0) + (caixaDaDica?.width ?? 0)).toBeLessThanOrEqual((caixaDoTema?.x ?? 0) + (caixaDoTema?.width ?? 0) + 0.5);
+  await topo.getByRole("heading", { level: 1 }).hover();
+  await expect(dicaDoTema).toHaveCount(0);
 
   // O external_api.js do nosso hostname, uma vez; o iframe no palco com o nosso titulo e o allow de §8.4.
   expect(sala.pedidosDoScript()).toBe(1);
@@ -1133,7 +1143,7 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e '{n} assistin
   await expect(cabecalho.getByTestId("room-present")).toBeHidden();
   const linha = cabecalho.getByTestId("room-mobile-line");
   await expect(linha).toHaveText(new RegExp(`^\\d+ assistindo agora · com ${APRESENTADOR}$`));
-  // A partir de sm o botao de tema volta ao cabecalho, antes do Sair.
+  // A partir de sm o botao de tema volta ao cabecalho, depois do Sair: o tema e sempre o ultimo.
   await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 
   // Deitado, o corpo fica em linha (roomSkeleton): o palco ocupa o que sobra acima da barra e o painel do chat fica ao
@@ -1156,14 +1166,16 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e '{n} assistin
   const caixas = {
     linha: await linha.boundingBox(),
     palco: await palco.boundingBox(),
+    sair: await cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair }).boundingBox(),
     tema: await cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro }).boundingBox(),
     titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
   };
-  const bordaDoTema = caixas.tema?.x ?? 0;
-  expect(bordaDoTema).toBeGreaterThan(0);
+  const bordaDoSair = caixas.sair?.x ?? 0;
+  expect(bordaDoSair).toBeGreaterThan(0);
+  expect(fim(caixas.sair), "o Sair antes do tema").toBeLessThanOrEqual(caixas.tema?.x ?? 0);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoTema);
-  expect(fim(caixas.linha)).toBeLessThanOrEqual(bordaDoTema);
+  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoSair);
+  expect(fim(caixas.linha)).toBeLessThanOrEqual(bordaDoSair);
   expect(fim(caixas.palco), "o palco cabe na largura").toBeLessThanOrEqual(667);
 
   // Configurações deitado: o painel fica no fluxo e toma o lugar do chat; a caixa do palco guarda no minimo 96 px e o

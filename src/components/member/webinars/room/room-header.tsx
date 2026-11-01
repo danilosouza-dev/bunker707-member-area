@@ -20,14 +20,17 @@ import { RoomIconButton } from "./room-ui";
 // e, embaixo, a linha que comeca pelo numero ("128 assistindo agora · Quinta, 30 de outubro · 20:00 · 60 min · com
 // Danilo Souza", roomMetaLine) em 14/20 peso 500; a direita, o botao de tema redondo sem contorno, centrado sobre o
 // trilho do painel (o lg:pr-5: o circulo de 40 sobre o trilho de 48, que fica a 16 da borda), com a dica no lugar do
-// title. Abaixo de lg: o titulo em 15/20 peso 700, a linha "128 assistindo agora · com Danilo Souza" em 12/16, o tema
-// a partir de sm (abaixo de sm o cabecalho nao tem largura, V2-18, e na live o tema fica na linha Tema do painel
-// Configurações) e o Sair em pilula S vermelha, com o toque de 44 px. Sem selos: "Ao vivo", "Gravando", "Sessão das
-// 20:00", "Replay" e "Aguardando o apresentador" ficam no palco (V2-4, room-stage-badges.tsx). O numero de agora (o
-// real, ou o somado da Simulacao) some no Replay e com a sessao encerrada: a sala passa `presentNow` nulo. As cores vem
-// dos tokens do tema da sala (docs/31 V2-11); o Sair fica no acento, a unica cor da marca fora do video (V2-11). Com a
-// barra da sala na tela (V2-6, `leaveInBar`), o Sair do computador fica nela e o do cabecalho so aparece abaixo de lg;
-// sem a barra (a live ou a sessao encerrada, fora do acesso), o do cabecalho fica em todas as larguras.
+// title, presa a borda direita do botao (centrada, ela sairia da janela). Abaixo de lg: o titulo em 15/20 peso 700, a
+// linha "128 assistindo agora · com Danilo Souza" em 12/16, o Sair em pilula S vermelha, com o toque de 44 px, e o
+// tema a partir de sm (abaixo de sm o cabecalho nao tem largura, V2-18, e na live o tema fica na linha Tema do painel
+// Configurações). O Sair vem antes do tema, e o tema e sempre o ultimo: sem a barra (a partir de lg o Sair fica no
+// topo), o tema continua sobre o trilho, e o fim da sessao nao troca os dois de lugar em nenhuma largura. Sem selos:
+// "Ao vivo", "Gravando", "Sessão das 20:00", "Replay" e "Aguardando o apresentador" ficam no palco (V2-4,
+// room-stage-badges.tsx). O numero de agora (o real, ou o somado da Simulacao) some no Replay e com a sessao encerrada:
+// a sala passa `presentNow` nulo. As cores vem dos tokens do tema da sala (docs/31 V2-11); o Sair fica no acento, a
+// unica cor da marca fora do video (V2-11). Com a barra da sala na tela (V2-6, `leaveInBar`), o Sair do computador fica
+// nela e o do cabecalho so aparece abaixo de lg; sem a barra (a sessao encerrada ou fora do acesso, na live e na
+// gravada), o do cabecalho fica em todas as larguras.
 
 export type RoomHeaderProps = {
   /** A barra da sala esta na tela com o Sair dela (a partir de lg): o Sair do cabecalho fica so abaixo de lg. */
@@ -84,15 +87,17 @@ function RoomBrand({ theme }: { theme: RoomTheme }) {
 
 /**
  * O botao de tema (docs/31 V2-12, no estilo do YouTube): redondo, 40 px, sem contorno e sem fundo, o icone de 24 e o
- * tonal so com o ponteiro; o nome diz para qual tema vai, e a dica (abaixo) mostra o nome no lugar do title. A classe
- * vai no envoltorio da dica, para o botao escondido nao deixar um vao vazio no cabecalho.
+ * tonal so com o ponteiro; o nome diz para qual tema vai, e a dica (abaixo) mostra o nome no lugar do title. A dica fica
+ * presa a borda direita do botao (`align="end"`): o botao e o ultimo do cabecalho, a 20 px da borda a partir de lg, e a
+ * dica centrada ("Tema escuro" tem uns 89 px) sairia da janela. A classe vai no envoltorio da dica, para o botao
+ * escondido nao deixar um vao vazio no cabecalho.
  */
 export function RoomThemeButton({ className, onToggle, theme }: { className?: string; onToggle: () => void; theme: RoomTheme }) {
   const copy = WEBINAR_COPY.salaV2.tema;
   const light = theme === "light";
   const name = light ? copy.escuro : copy.claro;
   return (
-    <RoomTooltip className={className} label={name} side="below">
+    <RoomTooltip align="end" className={className} label={name} side="below">
       <RoomIconButton className="[&_svg]:size-6" label={name} onClick={onToggle} size={40} tone="ghost" withTitle={false}>
         {light ? <Moon aria-hidden="true" strokeWidth={1.75} /> : <Sun aria-hidden="true" strokeWidth={1.75} />}
       </RoomIconButton>
@@ -127,8 +132,8 @@ export function RoomHeader({ leaveInBar = false, metaLine, mobileLine, onLeave, 
           </p>
         ) : null}
       </div>
-      <RoomThemeButton className="hidden sm:inline-flex" onToggle={onToggleTheme} theme={theme} />
       <RoomPill className={leaveInBar ? "lg:hidden" : undefined} icon={LogOut} label={copy.sair} onClick={onLeave} size="s" tone="red" touch44 />
+      <RoomThemeButton className="hidden sm:inline-flex" onToggle={onToggleTheme} theme={theme} />
     </header>
   );
 }

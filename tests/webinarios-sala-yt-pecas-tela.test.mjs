@@ -457,7 +457,7 @@ test("a dica (RoomTooltip): o HTML do servidor tem so o envoltorio e o botao; a 
   assert.equal(longa.match(/Muitos alunos/g)?.length, 1, "o motivo so uma vez: no sr-only do aria-describedby");
 });
 
-test("a caixa da dica (RoomTooltipBubble): o cinza da dica com o recuo de 8, acima ou abaixo; uma linha, e o motivo comprido corta na terceira linha num texto de dentro, nunca na caixa do recuo", () => {
+test("a caixa da dica (RoomTooltipBubble): o cinza da dica com o recuo de 8, acima ou abaixo, centrada no botao ou presa a borda direita dele; uma linha, e o motivo comprido corta na terceira linha num texto de dentro, nunca na caixa do recuo", () => {
   const curta = render(tooltipModule.RoomTooltipBubble, { hiding: false, label: "Tela cheia", side: "above", wide: false });
   assert.match(curta, /^<span aria-hidden="true" class="[^"]*" data-room-tooltip="">Tela cheia<\/span>$/);
   const caixa = classesDe(abertura(curta, "span"));
@@ -466,8 +466,16 @@ test("a caixa da dica (RoomTooltipBubble): o cinza da dica com o recuo de 8, aci
     [],
     caixa.join(" ")
   );
+  // Centrada no botao, o padrao (a barra, o painel e o console).
+  assert.deepEqual(temTodas(caixa, ["left-1/2", "-translate-x-1/2"]), [], caixa.join(" "));
+  assert.ok(!caixa.includes("right-0"), caixa.join(" "));
   const abaixo = classesDe(abertura(render(tooltipModule.RoomTooltipBubble, { hiding: true, label: "Ordenar", side: "below", wide: false }), "span"));
-  assert.deepEqual(temTodas(abaixo, ["top-full", "mt-2", "opacity-0"]), []);
+  assert.deepEqual(temTodas(abaixo, ["top-full", "mt-2", "opacity-0", "left-1/2", "-translate-x-1/2"]), []);
+  // Presa a borda direita do botao (align="end"), para o botao na ponta direita da janela: sem o centro e sem o
+  // deslocamento de metade da largura, a dica cresce para a esquerda e nunca passa da borda direita do botao.
+  const naPonta = classesDe(abertura(render(tooltipModule.RoomTooltipBubble, { align: "end", hiding: false, label: "Tema escuro", side: "below", wide: false }), "span"));
+  assert.deepEqual(temTodas(naPonta, ["absolute", "right-0", "top-full", "mt-2", "w-max", "whitespace-nowrap", "bg-room-tooltip-bg"]), [], naPonta.join(" "));
+  assert.ok(!naPonta.includes("left-1/2") && !naPonta.includes("-translate-x-1/2"), naPonta.join(" "));
 
   const motivo = "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.";
   const larga = render(tooltipModule.RoomTooltipBubble, { hiding: false, label: motivo, side: "above", wide: true });

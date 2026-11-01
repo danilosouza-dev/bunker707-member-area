@@ -65,7 +65,8 @@ test("Entrar 90 s depois do inicio: a sala abre, o player falso recebe setCurren
   await expect(palco.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
   await expect(palco.getByTestId("room-on-air")).toBeVisible();
   await expect(sala.locator("header").getByText(/^Ao vivo/)).toHaveCount(0);
-  // "{n} assistindo" a direita no computador; a linha do celular (com o mesmo numero) fica escondida.
+  // "{n} assistindo agora" no comeco da linha de baixo do titulo no computador; a linha do celular (com o mesmo numero)
+  // fica escondida.
   await expect(sala.getByTestId("room-present")).toHaveText(/1 assistindo/);
   await expect(sala.getByText(/1 assistindo/).filter({ visible: true })).toBeVisible();
   // A sala cobre o topo da area: no computador, a logo da escola no cabecalho da sala, sem link.

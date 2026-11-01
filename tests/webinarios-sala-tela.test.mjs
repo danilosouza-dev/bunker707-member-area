@@ -25,6 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 // pela sala; a gravada abre a enquete no palco so no desenho normal.
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const tooltip = await import("../src/components/member/webinars/room/room-tooltip.tsx");
 const branding = await import("../src/components/platform-branding.tsx");
 const platformLogo = await import("../src/components/platform-logo.tsx");
 const stage = await import("../src/components/member/webinars/room/room-stage.tsx");
@@ -89,7 +90,7 @@ const HEADER = {
 const buttonNames = (html) =>
   [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => attrs.match(/aria-label="([^"]+)"/)?.[1] ?? inner.replace(/<[^>]+>/g, "").trim());
 
-test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha que comeca por '3 assistindo agora', o tema e o Sair; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
+test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha que comeca por '3 assistindo agora', o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
   const html = render(header.RoomHeader, HEADER);
   const casca = (html.match(/<header class="([^"]*)">/)?.[1] ?? "").split(" ");
   assert.ok(casca.includes("h-14") && casca.includes("lg:h-16"), `56 px no celular, 64 a partir de lg: ${casca.join(" ")}`);
@@ -112,7 +113,10 @@ test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 2
   assert.ok(["text-xs", "leading-4", "font-medium", "lg:hidden"].every((classe) => celular.includes(classe)), `a linha do celular em 12/16 abaixo de lg: ${celular.join(" ")}`);
   assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, dentro da linha (o canto direito saiu)");
   assert.doesNotMatch(html, /bg-room-divider|lucide-users/, "sem o traco e sem o icone de pessoas no cabecalho");
-  assert.deepEqual(buttonNames(html), ["Tema claro", "Sair"], "os botoes do cabecalho: o tema (V2-12) e o Sair");
+  // O Sair antes do tema, com a barra e sem ela: o tema e sempre o ultimo (a partir de lg, sobre o trilho, tambem sem a
+  // barra, quando o Sair do cabecalho fica em toda largura), e o fim da sessao nao troca os dois de lugar.
+  assert.deepEqual(buttonNames(html), ["Sair", "Tema claro"], "os botoes do cabecalho sem a barra: o Sair e o tema (V2-12)");
+  assert.deepEqual(buttonNames(render(header.RoomHeader, { ...HEADER, leaveInBar: true })), ["Sair", "Tema claro"], "com a barra, a mesma ordem");
   assert.match(html, /<span class="relative hidden sm:inline-flex"><button aria-label="Tema claro"/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18), sem deixar um vao vazio");
   assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
@@ -187,7 +191,7 @@ test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da
   assert.match(render(room.WebinarRoom, props), /data-room-slot="stage-box" style="--room-video-right:0px"/);
 });
 
-test("o tema da sala (V2-12, no estilo do YouTube): o botao redondo de 40 px sem contorno e sem fundo diz para qual tema vai, sem title (a dica mostra o nome); o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
+test("o tema da sala (V2-12, no estilo do YouTube): o botao redondo de 40 px sem contorno e sem fundo diz para qual tema vai, sem title (a dica mostra o nome, presa a borda direita do botao); o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
   const botao = (html, nome) => html.match(new RegExp(`<button aria-label="${nome}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
 
   // No escuro, o Sol com "Tema claro"; no claro, a Lua com "Tema escuro" (o nome diz o que o clique faz).
@@ -208,6 +212,13 @@ test("o tema da sala (V2-12, no estilo do YouTube): o botao redondo de 40 px sem
   assert.doesNotMatch(claroHtml, /Tema claro/);
   const claro = botao(claroHtml, "Tema escuro");
   assert.match(claro, /lucide-moon/);
+  // A dica do tema abaixo do botao e presa a borda direita dele: o tema e o ultimo do cabecalho (a 20 px da borda a
+  // partir de lg, a 16 entre sm e lg), e a dica centrada ("Tema escuro", uns 89 px) passaria da borda da janela.
+  for (const [tema, nome] of [["dark", "Tema claro"], ["light", "Tema escuro"]]) {
+    const dica = header.RoomThemeButton({ onToggle: noop, theme: tema });
+    assert.equal(dica.type, tooltip.RoomTooltip, tema);
+    assert.deepEqual({ align: dica.props.align, label: dica.props.label, side: dica.props.side }, { align: "end", label: nome, side: "below" }, tema);
+  }
 
   // A sala inteira: o atributo no dialogo (nunca no html), o escuro antes de ler o navegador, as cores pelos tokens.
   const props = { coverUrl: null, payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" };

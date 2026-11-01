@@ -5,8 +5,9 @@ import { cn } from "@/lib/utils";
 import { tooltipStep, type TooltipEvent, type TooltipState } from "./room-layout-model";
 
 // A dica da sala no estilo do YouTube (docs/31, a sala no estilo do YouTube; o tooltip do YouTube): a caixa cinza de
-// 90 %, texto branco 12/18, 8 px por dentro, raio 4, a 8 px do botao, centrada nele; acima na barra, abaixo no topo e
-// no cabecalho do painel. Uma linha; `wide` (o motivo de um desligado) quebra em ate 3 linhas, com 280 px no maximo.
+// 90 %, texto branco 12/18, 8 px por dentro, raio 4, a 8 px do botao, centrada nele (ou, com `align="end"`, presa a
+// borda direita dele: o botao na ponta direita da janela, como o tema do topo, nao deixa a dica sair da tela); acima na
+// barra, abaixo no topo e no cabecalho do painel. Uma linha; `wide` (o motivo de um desligado) quebra em ate 3 linhas, com 280 px no maximo.
 // Fica nos botoes sem rotulo na tela (os circulos, as metades do segmentado, a compacta da Visão, o tema, o X, o
 // ordenar e o ⋮) e no desligado com motivo, no lugar do title nativo. O texto ja e o nome acessivel do botao (ou o
 // motivo do aria-describedby), entao a dica e sempre aria-hidden.
@@ -19,7 +20,14 @@ import { tooltipStep, type TooltipEvent, type TooltipState } from "./room-layout
 // motivo comprido (`wide`) corta na terceira linha num texto de dentro, para o recuo da caixa nao mostrar o topo da
 // quarta. So tokens --room-*.
 
+export type RoomTooltipAlign = "center" | "end";
+
 export type RoomTooltipProps = {
+  /**
+   * Centrada no botao (o padrao) ou presa a borda direita dele (`end`), para o botao na ponta direita da janela: a
+   * dica centrada passaria da borda quando e mais larga que o dobro da distancia do centro do botao ate ela.
+   */
+  align?: RoomTooltipAlign;
   /** O botao (ou o envoltorio dele) que chama a dica. */
   children: ReactElement;
   /**
@@ -54,7 +62,7 @@ function focusVisible(target: EventTarget): boolean {
   }
 }
 
-export function RoomTooltip({ children, className, label, side, wide = false }: RoomTooltipProps) {
+export function RoomTooltip({ align = "center", children, className, label, side, wide = false }: RoomTooltipProps) {
   const [tip, setTip] = useState<TooltipTip>(HIDDEN);
   const tipRef = useRef<HTMLSpanElement | null>(null);
   // Quem segura a dica, cada um no seu: o ponteiro em cima (do botao ou da propria dica) e o foco do teclado no botao.
@@ -138,7 +146,7 @@ export function RoomTooltip({ children, className, label, side, wide = false }: 
       onPointerLeave={onPointerLeave}
     >
       {children}
-      {visible ? <RoomTooltipBubble hiding={state === "hiding"} label={label} ref={tipRef} side={side} wide={wide} /> : null}
+      {visible ? <RoomTooltipBubble align={align} hiding={state === "hiding"} label={label} ref={tipRef} side={side} wide={wide} /> : null}
     </span>
   );
 }
@@ -148,12 +156,27 @@ export function RoomTooltip({ children, className, label, side, wide = false }: 
  * HTML do servidor nunca a tem). Com `wide`, o corte das 3 linhas fica num texto de dentro: o corte vale na borda do
  * recuo, e no recuo de 8 px da caixa o topo da quarta linha apareceria embaixo das reticencias.
  */
-export function RoomTooltipBubble({ hiding, label, ref, side, wide }: { hiding: boolean; label: string; ref?: Ref<HTMLSpanElement>; side: "above" | "below"; wide: boolean }) {
+export function RoomTooltipBubble({
+  align = "center",
+  hiding,
+  label,
+  ref,
+  side,
+  wide
+}: {
+  align?: RoomTooltipAlign;
+  hiding: boolean;
+  label: string;
+  ref?: Ref<HTMLSpanElement>;
+  side: "above" | "below";
+  wide: boolean;
+}) {
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "absolute left-1/2 z-50 w-max -translate-x-1/2 rounded-[4px] bg-room-tooltip-bg p-2 text-left text-xs font-normal leading-[18px] text-room-tooltip-fg transition-opacity duration-75 motion-reduce:transition-none",
+        "absolute z-50 w-max rounded-[4px] bg-room-tooltip-bg p-2 text-left text-xs font-normal leading-[18px] text-room-tooltip-fg transition-opacity duration-75 motion-reduce:transition-none",
+        align === "end" ? "right-0" : "left-1/2 -translate-x-1/2",
         side === "above" ? "bottom-full mb-2" : "top-full mt-2",
         wide ? "max-w-[280px] whitespace-normal" : "whitespace-nowrap",
         hiding ? "opacity-0" : "opacity-100"
