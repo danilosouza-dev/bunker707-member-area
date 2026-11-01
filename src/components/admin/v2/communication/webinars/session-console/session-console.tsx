@@ -93,8 +93,9 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // os botoes de situacao de consoleTopActionsFor) e o esqueleto de consoleSkeleton, que nunca move o iframe. O tema vai
 // ao iframe so na montagem (o look); trocar com a sala no ar nao remonta. As confirmacoes abrem no portal da raiz
 // (container={portalRef}). Na live, o palco (console-stage.tsx, docs/31 V2-4) leva o momento ("Ao vivo · 00:42:10"),
-// o Gravando, os presentes com o pico e quem esta no video grande, e o topo fica sem esses selos; na gravada e no
-// Replay (sem palco) o momento e os presentes continuam no topo. Ate as proximas fatias, os controles de antes e o
+// o Gravando, os presentes com o pico e quem esta no video grande, e o topo fica sem esses selos (os presentes voltam
+// ao topo so abaixo de sm, onde o palco nao os mostra); na gravada e no Replay (sem palco) o momento e os presentes
+// continuam no topo. Ate as proximas fatias, os controles de antes e o
 // botao Configurações ficam embaixo do palco e os cards de antes ficam empilhados no painel.
 
 const copy = WEBINAR_ADMIN_COPY.console;
@@ -524,9 +525,9 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       : [];
   const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: true });
   const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
-  // O nome do apresentador da pagina para o selo de outro moderador no video grande; no console do proprio
-  // Apresentador, nenhum (ele mesmo e "Você", e o outro moderador ali e o co-apresentador, pelo nome da sala).
-  const presenterName = live && webinar.hostUserId && webinar.hostUserId !== currentUserId ? (live.people.find((person) => person.userId === webinar.hostUserId)?.displayName ?? null) : null;
+  // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
+  // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
+  const presenterName = live ? (webinar.presenterName ?? null) : null;
 
   function onTopAction(id: "end_live" | "end_session" | "open_room" | "open_session" | "start") {
     switch (id) {
@@ -587,7 +588,8 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       onRefresh={() => void refresh()}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       polling={polling}
-      presentLabel={live ? null : presentLabel}
+      presentLabel={presentLabel}
+      presentNarrowOnly={live !== null}
       reportHref={webinarReportHref(webinar.id)}
       roomLocked={live?.roomLocked === true}
       sessionId={sessionId}

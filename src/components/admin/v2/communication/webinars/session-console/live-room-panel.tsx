@@ -4,7 +4,7 @@ import { Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
-import { filmstripStep, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
+import { onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import { CONSOLE_EXTRA_EVENTS, JITSI_LISTENED_EVENTS, liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type ConsoleListenedEvent, type LiveEmbedLook } from "@/lib/jitsi-room-config";
@@ -15,6 +15,8 @@ import {
   CONSOLE_ROOM_RULES,
   EMPTY_ROOM,
   browserRecordingChange,
+  consoleFilmstripPendingAfter,
+  consoleFilmstripShouldToggle,
   consoleRoomRole,
   desiredLobby,
   liveControlsFor,
@@ -60,8 +62,10 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // O palco (docs/31 V2-4, V2-13 e V2-A5; console-stage.tsx) le daqui o que o motor mostra: o Palco ou a Grade
 // (tileViewChanged), a coluna de miniaturas (filmstripDisplayChanged) e quem esta no video grande (o largeVideoChanged
 // chega sem dados: o id vem de onStageParticipantOf, a acao `onStage`). O primeiro sinal de um iframe novo (Tentar de
-// novo, Entrar na sala) volta isso ao padrao do motor (a acao `frame`) e solta o toggleFilmStrip que esperava; o
-// syncFilmstrip manda um toggleFilmStrip por vez, so quando o que o palco quer difere do que o motor mostra.
+// novo, Entrar na sala) volta isso ao padrao do motor (a acao `frame`); o syncFilmstrip manda um toggleFilmStrip por
+// vez, so quando o que o palco quer difere do que o motor mostra (consoleFilmstripShouldToggle), e o
+// filmstripDisplayChanged, a entrada e o iframe novo soltam o que esperava (consoleFilmstripPendingAfter), como na sala
+// do aluno.
 // Ate a barra de quem apresenta (G6), o botao Configurações fica provisorio ao lado dos controles embaixo do palco
 // (LiveSettingsToggle), com o card logo depois dele, e a frase da sala de espera fica entre o palco e os controles
 // (LiveLobbyNotice). Nenhum texto cita o motor da sala.
@@ -156,7 +160,7 @@ export type LiveRoomHandle = {
 
 type UseLiveRoomInput = {
   canPublish: boolean;
-  /** Onde o iframe entra (o palco do LiveRoomPanel). */
+  /** Onde o iframe entra (o palco do ConsoleStage, console-stage.tsx). */
   container: RefObject<HTMLDivElement | null>;
   currentUserId: string;
   /** Falso fora da Live ao vivo: nada e pedido nem montado. */
@@ -334,13 +338,16 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const onEvent = useCallback(
     (name: ConsoleListenedEvent, payload: unknown) => {
       const frame = frameRef.current?.current ?? null;
-      if (frame !== null && frame !== signalFrameRef.current) {
+      const newFrame = frame !== null && frame !== signalFrameRef.current;
+      if (newFrame) {
         // O primeiro sinal de um iframe novo: o motor dele comeca no Palco, com a coluna (inclusive o seguir a visao que
-        // chega antes do videoConferenceJoined parte dai), e nenhum toggleFilmStrip do anterior espera.
+        // chega antes do videoConferenceJoined parte dai).
         signalFrameRef.current = frame;
-        filmstripSentRef.current = null;
         dispatch({ type: "frame" });
       }
+      // O motor respondeu ao toggleFilmStrip (ou a coluna mudou por outra causa), a entrada ou um iframe novo: nenhum
+      // espera, e a conta da coluna pode mandar o proximo.
+      filmstripSentRef.current = consoleFilmstripPendingAfter({ name, newFrame, pending: filmstripSentRef.current });
       if (name === "largeVideoChanged") {
         // O motor manda sem dados: o id de quem esta no video grande fica no IFrame API.
         dispatch({ id: onStageParticipantOf(frame), type: "onStage" });
@@ -536,7 +543,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
 
   const syncFilmstrip = useCallback(
     (step: { visible: boolean; wanted: boolean }) => {
-      if (filmstripStep(step) === null || filmstripSentRef.current === step.visible) {
+      if (!consoleFilmstripShouldToggle({ pending: filmstripSentRef.current, visible: step.visible, wanted: step.wanted })) {
         return;
       }
       if (command("toggleFilmStrip")) {

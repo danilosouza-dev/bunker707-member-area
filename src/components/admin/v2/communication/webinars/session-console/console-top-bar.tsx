@@ -13,9 +13,10 @@ import type { WebinarSession } from "@/server/webinars/model";
 // O topo do console V2 (docs/31 V2-13), da esquerda para a direita: a seta de voltar ao editor (36 px, so o icone), o
 // titulo em duas linhas ("Console da sessão" e o nome do webinario, o h1 inteiro), o seletor de sessoes (o <select>
 // nativo, com o ponto verde fora dele so com a sessao escolhida no ar), o Atualizar (a leitura do retrato, com a regiao
-// viva so para o leitor de tela), os selos do momento e dos presentes, um traco, o Tema (36 px, o nome diz para qual
-// vai) e os botoes de situacao da sessao (consoleTopActionsFor: Abrir a sala, Começar para todos, Trancar, Encerrar
-// live, Abrir e Encerrar sessão da gravada, Ver relatório). Abaixo de lg o topo quebra em duas linhas: a seta e o
+// viva so para o leitor de tela), os selos do momento e dos presentes (na live, o momento fica no palco e os presentes
+// so abaixo de sm, onde o palco nao tem o selo deles), um traco, o Tema (36 px, o nome diz para qual vai) e os botoes
+// de situacao da sessao (consoleTopActionsFor: Abrir a sala, Começar para todos, Trancar, Encerrar live, Abrir e
+// Encerrar sessão da gravada, Ver relatório). Abaixo de lg o topo quebra em duas linhas: a seta e o
 // titulo; depois o seletor e os botoes, que rolam de lado sem barra. A partir de lg e uma faixa so de 56 px; se os
 // botoes nao couberem (a 1024 px, com muitos botoes ou um relogio longo), a linha rola de lado com uma barra fina, para
 // o ultimo botao nunca sumir sem sinal. As cores pelos tokens do tema do console.
@@ -45,6 +46,8 @@ type ConsoleTopBarProps = {
   polling: ConsolePolling;
   /** "7 presentes · pico 9" (consolePresenceBadge); nulo sem sessao. */
   presentLabel: string | null;
+  /** Os presentes so abaixo de sm (a live: a partir dai eles ficam no palco, em cima a direita). */
+  presentNarrowOnly?: boolean;
   reportHref: string;
   roomLocked: boolean;
   sessionId: string | null;
@@ -174,7 +177,7 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
           {props.polling === "updating" ? v2.atualizando : props.polling === "offline" ? v2.semResposta : ""}
         </span>
         {props.clockLabel || props.presentLabel ? (
-          <span className="flex shrink-0 items-center gap-2" data-console-status="">
+          <span className={cn("flex shrink-0 items-center gap-2", !props.clockLabel && props.presentNarrowOnly && "sm:hidden")} data-console-status="">
             {props.clockLabel ? (
               <RoomBadge size="md">
                 <span className="tabular-nums" data-console-clock="">
@@ -183,7 +186,7 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
               </RoomBadge>
             ) : null}
             {props.presentLabel ? (
-              <RoomBadge size="md">
+              <RoomBadge className={cn(props.presentNarrowOnly && "sm:hidden")} size="md">
                 <span className="tabular-nums" data-console-present="">
                   {props.presentLabel}
                 </span>

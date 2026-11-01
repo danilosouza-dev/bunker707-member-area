@@ -312,7 +312,7 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   }
 });
 
-test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esquerda e os presentes com o pico em cima a direita, dentro do palco; o topo da live sem o momento nem os presentes; os chips do card de antes saem", async () => {
+test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esquerda e os presentes com o pico em cima a direita, dentro do palco e na linha dos da esquerda; o topo da live sem o momento e com os presentes so abaixo de sm; os chips do card de antes saem", async () => {
   const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
   const view = {
     chat: { hot: [], perMinute: [], students: 0, top: [], total: 0 },
@@ -324,8 +324,18 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   // "Ao vivo · 00:05:00": o inicio de verdade 5 min antes, pelo relogio do servidor.
   assert.match(stage, /data-testid="room-on-air"[^>]*title="Ao vivo · 00:05:00"/);
   assert.match(stage, /data-testid="live-recording"/, "o gravador gravando: o selo no palco");
-  // Os presentes do retrato de 5 s (3) e o pico do relatorio em cache (5), em cima a direita, antes da coluna de miniaturas.
-  assert.match(stage, /<div class="[^"]*right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*" data-room-badges="top-right">/);
+  // Os presentes do retrato de 5 s (3) e o pico do relatorio em cache (5), em cima a direita, antes da coluna de
+  // miniaturas, a partir de sm, na mesma linha e na mesma distancia da borda dos selos da esquerda.
+  const classesOf = (marca) => (stage.match(new RegExp(`<div class="([^"]*)" ${marca}>`)) ?? [])[1]?.split(" ") ?? [];
+  const direita = classesOf('data-room-badges="top-right"');
+  const esquerda = classesOf('data-room-badges="top"');
+  assert.ok(direita.includes("hidden") && direita.includes("sm:flex"), "a partir de sm");
+  for (const [lado, base] of [["right-[calc(var(--room-video-right)+8px)]", "left-2"], ["lg:right-[calc(var(--room-video-right)+16px)]", "lg:left-4"]]) {
+    assert.ok(direita.includes(lado) && esquerda.includes(base), `${lado} como ${base}`);
+  }
+  for (const topo of ["top-2", "lg:top-4"]) {
+    assert.ok(direita.includes(topo) && esquerda.includes(topo), `os dois cantos com ${topo}`);
+  }
   const presentes = (palco) => textOf(palco.slice(palco.indexOf(">", palco.indexOf('data-room-badge="present"')) + 1, palco.indexOf("</span>", palco.indexOf('data-room-badge="present"'))));
   assert.match(stage, /data-room-badges="top-right"><span[^>]*data-room-badge="present"/);
   assert.equal(presentes(stage), "3 presentes · pico 5");
@@ -334,9 +344,11 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   // Sem o motor dizendo quem esta no video grande, nenhum selo de baixo (nunca um nome por palpite).
   assert.doesNotMatch(stage, /data-room-badge="presenter"/);
 
-  // O topo da live fica sem o momento e sem os presentes: estao no palco.
+  // O topo da live fica sem o momento (esta no palco) e com os presentes so abaixo de sm, onde o palco nao mostra o selo
+  // deles (no celular ele cairia sobre o selo do momento).
   const top = markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
-  assert.doesNotMatch(top, /data-console-clock|data-console-present/);
+  assert.doesNotMatch(top, /data-console-clock/);
+  assert.match(top, /<span class="[^"]*\bsm:hidden\b[^"]*" data-console-status=""><span class="[^"]*\bsm:hidden\b[^"]*"><span class="truncate"><span class="tabular-nums" data-console-present="">3 presentes · pico 5<\/span>/);
   // Os chips do card de antes (Gravando, Sala trancada, "{n} pessoas na sala") saem; o "Gravando" e so o do palco.
   assert.doesNotMatch(markup, /data-live-room-status/);
   assert.equal(count(markup, /data-testid="live-recording"/g), 1);

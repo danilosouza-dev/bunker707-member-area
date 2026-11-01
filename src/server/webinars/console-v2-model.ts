@@ -139,15 +139,17 @@ function ownRoleLabel(role: ConsoleRoomRole): string {
  * O selo de baixo a esquerda do palco do console (V2-4 e V2-13): so dentro da sala e no Palco (na Grade nao ha video
  * grande) e com o motor tendo dito quem esta no video grande (onStageId; a tela compartilhada `<id>-v1` vale pelo
  * dono, stageOwnerId). O proprio console ali: "Você" e o papel dele ("Você · Apresentador", "Você · Co-apresentador").
- * Outro moderador ali (o papel de cada um pelo participantRoleChanged e pelo getRoomsInfo): o nome do apresentador da
- * pagina, como o selo da sala do aluno (V2-A25), ou, sem ele, o nome com que essa pessoa esta na sala, com
- * "Apresentador". Sem papel conhecido, um aluno no video grande ou nenhum nome: nada (nunca um nome por palpite).
+ * Outro moderador ali (o papel de cada um pelo participantRoleChanged e pelo getRoomsInfo): o selo que o aluno ve, o
+ * nome do apresentador da pagina com "Apresentador" para qualquer moderador (V2-A25), tambem no console do proprio
+ * Apresentador com o co-apresentador no video grande. Nunca o nome da sala com "Apresentador": o co-apresentador ou a
+ * Equipe ali sairiam com o papel de quem apresenta. Sem o nome da pagina, sem papel conhecido ou com um aluno no video
+ * grande: nada (nunca um nome por palpite), como a sala do aluno (presenterBadgeFor).
  */
 export function consoleStageBadgeFor(input: {
   joined: boolean;
   presenterName: string | null;
   role: ConsoleRoomRole;
-  room: Pick<LiveRoomState, "onStageId" | "people" | "roles" | "selfId" | "viewShown">;
+  room: Pick<LiveRoomState, "onStageId" | "roles" | "selfId" | "viewShown">;
 }): ConsoleStageBadge | null {
   const { room } = input;
   if (!input.joined || room.viewShown === "grid" || room.onStageId === null) {
@@ -160,7 +162,7 @@ export function consoleStageBadgeFor(input: {
   if (!Object.hasOwn(room.roles, owner) || room.roles[owner] !== "moderator") {
     return null;
   }
-  const name = input.presenterName?.trim() || room.people.find((person) => person.id === owner)?.name.trim() || "";
+  const name = input.presenterName?.trim();
   return name ? { name, role: WEBINAR_COPY.sala.selos.apresentador } : null;
 }
 

@@ -221,16 +221,21 @@ const sala = (extra = {}) => ({
 });
 const selo = (room, extra = {}) => v2.consoleStageBadgeFor({ joined: true, presenterName: "Produtor T.", role: "host", room, ...extra });
 
-test("consoleStageBadgeFor: o proprio console no video grande e \"Você\" com o papel dele (tambem a propria tela); outro moderador, o nome do apresentador da pagina; sem papel, um aluno, a Grade ou fora da sala, nada", () => {
+test("consoleStageBadgeFor: o proprio console no video grande e \"Você\" com o papel dele (tambem a propria tela); outro moderador, o nome do apresentador da pagina (V2-A25), nunca o nome da sala com o papel de quem apresenta; sem papel, um aluno, a Grade ou fora da sala, nada", () => {
   assert.deepEqual(selo(sala({ onStageId: EU })), { name: "Você", role: "Apresentador" });
   assert.deepEqual(selo(sala({ onStageId: `${EU}-v1` })), { name: "Você", role: "Apresentador" }, "a tela do Apresentador vale pelo dono");
   assert.deepEqual(selo(sala({ onStageId: EU }), { role: "co_host" }), { name: "Você", role: "Co-apresentador" });
   assert.deepEqual(selo(sala({ onStageId: EU }), { role: "team" }), { name: "Você", role: WEBINAR_COPY.sala.selos.equipe });
-  // Outro moderador (o papel pelo participantRoleChanged ou pelo getRoomsInfo): o nome do apresentador da pagina; sem
-  // ele, o nome com que essa pessoa esta na sala.
+  // Outro moderador (o papel pelo participantRoleChanged ou pelo getRoomsInfo): o selo que o aluno ve, o nome do
+  // apresentador da pagina com "Apresentador" (V2-A25), no console do co-apresentador e no do proprio Apresentador.
   assert.deepEqual(selo(sala({ onStageId: CO }), { role: "co_host" }), { name: "Produtor T.", role: "Apresentador" });
-  assert.deepEqual(selo(sala({ onStageId: `${CO}-v1` }), { presenterName: null }), { name: "Co T.", role: "Apresentador" });
-  assert.equal(selo(sala({ onStageId: CO, people: [] }), { presenterName: "  " }), null, "sem nome nenhum, nada");
+  assert.deepEqual(selo(sala({ onStageId: CO })), { name: "Produtor T.", role: "Apresentador" }, "o co-apresentador no video grande do console do Apresentador");
+  assert.deepEqual(selo(sala({ onStageId: `${CO}-v1` }), { role: "team" }), { name: "Produtor T.", role: "Apresentador" }, "a tela de outro moderador vale pelo dono");
+  // Sem o nome da pagina, nada: o co-apresentador nunca sai como "Co T. · Apresentador" pelo nome da sala.
+  assert.equal(selo(sala({ onStageId: CO }), { presenterName: null }), null);
+  assert.equal(selo(sala({ onStageId: `${CO}-v1` }), { presenterName: null }), null);
+  assert.equal(selo(sala({ onStageId: CO }), { presenterName: "  " }), null, "so espacos nao e nome");
+  assert.deepEqual(selo(sala({ onStageId: EU }), { presenterName: null }), { name: "Você", role: "Apresentador" }, "o proprio console nao depende do nome da pagina");
   // O dono sem papel lido (quem ja moderava quando o console entrou, antes do getRoomsInfo): nada, nunca por palpite.
   assert.equal(selo(sala({ onStageId: CO, roles: {} })), null);
   assert.equal(selo(sala({ onStageId: ALUNA })), null, "um aluno no video grande");

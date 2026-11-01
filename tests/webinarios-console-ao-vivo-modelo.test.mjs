@@ -450,6 +450,61 @@ test("reducer da sala: a visao (tileViewChanged), a coluna de miniaturas (filmst
   assert.equal(novo.selfId, grade.selfId);
 });
 
+test("coluna de miniaturas pela largura no console do co-apresentador e da Equipe (docs/31 V2-A5): um toggleFilmStrip por vez, e a coluna que volta depois da resposta do motor (o seguir a visao, o atalho F) sai de novo", async () => {
+  const { columnWanted } = await import("../src/components/member/webinars/room/live-room-model.ts");
+  // O console como o useLiveRoom e o ConsoleStage o rodam: cada sinal passa pelo reducer e solta (ou nao) o pedido que
+  // espera; a cada estado novo, a conta da coluna manda o toggleFilmStrip, que o motor responde com a coluna invertida.
+  let state = { ...model.EMPTY_ROOM, selfId: "c0c0c0c0" };
+  let pending = null;
+  const sent = [];
+  const signal = (name, payload = {}, newFrame = false) => {
+    pending = model.consoleFilmstripPendingAfter({ name, newFrame, pending });
+    state = event(state, name, payload);
+  };
+  // A 1280 px o painel deixa o iframe com cerca de 872 px, abaixo do que a coluna pede: o palco nao a quer.
+  const sync = (frameWidth = 872) => {
+    const step = { pending, visible: state.filmstripVisible, wanted: columnWanted({ frameWidth, view: state.viewShown }) };
+    if (model.consoleFilmstripShouldToggle(step)) {
+      sent.push(step.visible);
+      pending = step.visible;
+    }
+  };
+
+  signal("videoConferenceJoined", { id: "c0c0c0c0" }, true);
+  sync();
+  assert.deepEqual(sent, [true], "na entrada o motor mostra a coluna: um toggleFilmStrip");
+  sync();
+  sync(900);
+  assert.deepEqual(sent, [true], "enquanto o motor nao responde, nenhum outro (dois seguidos deixariam a coluna como estava)");
+  signal("participantJoined", { displayName: "Ana S.", id: "a1a1a1a1" });
+  sync();
+  assert.deepEqual(sent, [true], "outro sinal nao solta o pedido");
+
+  signal("filmstripDisplayChanged", { visible: false });
+  sync();
+  assert.equal(pending, null, "a resposta do motor solta o pedido");
+  assert.deepEqual(sent, [true], "a coluna ja saiu: nada a mandar");
+
+  // A coluna volta por outra causa (o seguir a visao de quem apresenta, o F dentro do iframe): sai de novo.
+  signal("filmstripDisplayChanged", { visible: true });
+  sync();
+  assert.deepEqual(sent, [true, true], "a coluna que voltou por cima do iframe estreito sai de novo");
+  signal("filmstripDisplayChanged", { visible: false });
+
+  // O painel fecha e o iframe cresce: a coluna volta, uma vez.
+  sync(1400);
+  sync(1400);
+  assert.deepEqual(sent, [true, true, false]);
+  signal("filmstripDisplayChanged", { visible: true });
+  sync(1400);
+  assert.deepEqual(sent, [true, true, false], "o palco quer a coluna e ela esta na tela");
+
+  // Um iframe novo ou uma nova entrada soltam o pedido que esperava do anterior.
+  assert.equal(model.consoleFilmstripPendingAfter({ name: "participantJoined", newFrame: true, pending: true }), null);
+  assert.equal(model.consoleFilmstripPendingAfter({ name: "videoConferenceJoined", newFrame: false, pending: false }), null);
+  assert.equal(model.consoleFilmstripPendingAfter({ name: "largeVideoChanged", newFrame: false, pending: false }), false);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * O vigia da tela (docs/31 §5.4): quem compartilha, os papeis pelo getRoomsInfo e quem tem a tela parada
  * ---------------------------------------------------------------------------------------------- */

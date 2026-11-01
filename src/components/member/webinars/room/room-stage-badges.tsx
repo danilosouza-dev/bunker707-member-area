@@ -45,8 +45,9 @@ export type RoomStageBadgesProps = {
   recording: boolean;
   topLeft: RoomStageTopLeft | null;
   /**
-   * O canto de cima a direita (o console: os presentes com o pico), sempre antes da coluna de miniaturas do iframe; a
-   * partir de sm (no celular ele cairia sobre o selo do momento).
+   * O canto de cima a direita (o console: os presentes com o pico), sempre antes da coluna de miniaturas do iframe, na
+   * mesma linha e na mesma distancia da borda dos selos da esquerda; a partir de sm (no celular ele cairia sobre o selo
+   * do momento, e o console mostra os presentes no topo).
    */
   topRight?: ReactNode;
 };
@@ -144,7 +145,10 @@ export function RoomStageBadges({ assistantOn, presenterName, presenterRole, rec
         </span>
       ) : null}
       {topRight ? (
-        <div className="pointer-events-none absolute right-[calc(var(--room-video-right)+16px)] top-4 z-20 hidden items-center gap-2 sm:flex" data-room-badges="top-right">
+        <div
+          className="pointer-events-none absolute right-[calc(var(--room-video-right)+8px)] top-2 z-20 hidden items-center gap-1.5 sm:flex lg:right-[calc(var(--room-video-right)+16px)] lg:top-4 lg:gap-2"
+          data-room-badges="top-right"
+        >
           {topRight}
         </div>
       ) : null}

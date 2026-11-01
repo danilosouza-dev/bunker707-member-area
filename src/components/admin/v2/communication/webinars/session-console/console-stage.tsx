@@ -17,12 +17,13 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // O palco da live no console de quem apresenta (docs/31 V2-4, V2-13 e V2-A5): o pai do iframe ([data-live-stage], o
 // mesmo ref do useLiveRoom, que nunca muda de pai), os selos por cima do video e as capas. Em cima a esquerda, "Ao vivo ·
 // 00:42:10" com a sala no ar ou a frase do momento fora dele (consoleStageTopLeft) e "Gravando" enquanto o gravador
-// grava; em cima a direita, "12 presentes · pico 14" (consolePresenceBadge); embaixo a esquerda, quem esta no video
-// grande com o papel ("Você · Apresentador", consoleStageBadgeFor). Sem o selo do Assistente (o retrato do console nao
-// traz o estado, V2-A41). As capas (Testar sala, Tentar de novo, Entrar na sala) sao RoomButton nos tokens do tema, com
-// o anel de foco branco: o palco e preto nos dois temas, e o anel do tema claro (quase preto) sumiria sobre ele. O anel
-// do admin vem da regra global de foco (globals.css, var(--focus-ring), fora de @layer), entao a camada das capas troca
-// a variavel, nao a classe do botao.
+// grava; em cima a direita, "12 presentes · pico 14" (consolePresenceBadge, a partir de sm; abaixo, no topo); embaixo
+// a esquerda, quem esta no video grande com o papel ("Você · Apresentador", ou o selo que o aluno ve com outro
+// moderador ali, consoleStageBadgeFor). Sem o selo do Assistente (o retrato do console nao traz o estado, V2-A41). As
+// capas (Testar sala, Tentar de novo, Entrar na sala) sao RoomButton nos tokens do tema, com o anel de foco branco: o
+// palco e preto nos dois temas, e o anel do tema claro (quase preto) sumiria sobre ele. O anel do admin vem da regra
+// global de foco (globals.css, var(--focus-ring), fora de @layer), entao a camada das capas troca a variavel, nao a
+// classe do botao.
 // A coluna de miniaturas (V2-A5): a largura do palco pelo useStageGeometry; os selos de cima a direita descontam a
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
@@ -41,7 +42,7 @@ type ConsoleStageProps = {
   live: LiveConsoleSnapshot;
   /** "12 presentes · pico 14" (consolePresenceBadge); nulo, o canto de cima a direita fica vazio. */
   presentLabel: string | null;
-  /** O nome do apresentador da pagina (o selo de outro moderador no video grande); nulo, o nome com que ele esta na sala. */
+  /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
   presenterName: string | null;
   session: WebinarSession;
   /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */

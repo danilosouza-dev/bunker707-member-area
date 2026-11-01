@@ -55,6 +55,11 @@ export type ConsoleWebinar = {
   kind: WebinarKind;
   /** Card Sala: a Sessao de pratica liga a sala de espera ate Comecar para todos. */
   practiceSession: boolean;
+  /**
+   * O nome do apresentador da pagina (o nome do perfil de quem apresenta, o mesmo que a sala do aluno mostra): o selo de
+   * outro moderador no video grande do palco (docs/31 V2-A25). Nulo sem apresentador, sem nome ou se a leitura falhar.
+   */
+  presenterName: string | null;
   /** A duracao do video da gravacao base, quando a Bunny informou; senao a duracao prevista vale. */
   recordingDurationSeconds: number | null;
   slug: string;
@@ -450,6 +455,21 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
 }
 
 /** A pagina do console: o webinario, as sessoes para o seletor e o retrato da sessao escolhida (ou a padrao). */
+/** O nome do perfil de quem apresenta (so o nome; nada de e-mail). E um detalhe do selo: sem ele, o console continua. */
+async function loadPresenterName(db: WebinarsDb, hostUserId: string | null): Promise<string | null> {
+  if (!hostUserId) {
+    return null;
+  }
+  try {
+    const { data, error } = await db.from("profiles").select("full_name").eq("id", hostUserId).maybeSingle();
+    assertNoDbError(error, "Webinarios: nome do apresentador no console");
+    return (data as { full_name: string | null } | null)?.full_name?.trim() || null;
+  } catch (error) {
+    console.error(`[admin/webinarios] nome do apresentador do console: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date()): Promise<SessionConsoleData | null> {
   const db = webinarsDb();
   const row = await fetchWebinarRow(db, webinarId);
@@ -458,7 +478,7 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
     return null;
   }
 
-  const [sessionRows, recordings] = await Promise.all([listSessionRows(db, [row.id]), listRecordingRows(db, [row.id])]);
+  const [sessionRows, recordings, presenterName] = await Promise.all([listSessionRows(db, [row.id]), listRecordingRows(db, [row.id]), loadPresenterName(db, row.host_user_id)]);
   const sessions = consoleSessionsFor(
     sessionRows.map((session) => consoleSessionOf(sessionFromRow(session))),
     now.getTime(),
@@ -479,6 +499,7 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
       id: row.id,
       kind,
       practiceSession: roomSettings.practiceSession,
+      presenterName,
       recordingDurationSeconds: baseRecordingOf(recordings)?.duration_seconds ?? null,
       slug: row.slug,
       title: row.title,

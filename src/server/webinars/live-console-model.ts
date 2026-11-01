@@ -673,6 +673,32 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
   }
 }
 
+/**
+ * O toggleFilmStrip que espera a resposta do motor no console do co-apresentador e da Equipe (a coluna pela largura,
+ * consoleColumnPolicy "width"): o `filmstripVisible` de quando ele saiu, ou nulo com nenhum esperando.
+ */
+export type ConsoleFilmstripPending = boolean | null;
+
+/**
+ * Manda o toggleFilmStrip agora? So quando o palco quer outra coisa que o motor mostra (`wanted` diferente de `visible`,
+ * o filmstripStep da sala do aluno) e nenhum espera a resposta a este mesmo estado: o comando inverte a coluna, e dois
+ * seguidos a deixariam como estava.
+ */
+export function consoleFilmstripShouldToggle(input: { pending: ConsoleFilmstripPending; visible: boolean; wanted: boolean }): boolean {
+  return input.wanted !== input.visible && input.pending !== input.visible;
+}
+
+/**
+ * O pedido que espera depois de um sinal do iframe, como na sala do aluno (use-live-room.ts): o filmstripDisplayChanged
+ * (a resposta do motor, ou a coluna que mudou por outra causa, como o seguir a visao de quem apresenta ou o atalho F
+ * dentro do iframe), a entrada (videoConferenceJoined) e o primeiro sinal de um iframe novo soltam o pedido, e a conta
+ * da coluna pode mandar o proximo. Sem isso, a coluna que volta depois da resposta ficaria por cima do iframe estreito
+ * enquanto ele vivesse. Os outros sinais deixam o pedido como esta.
+ */
+export function consoleFilmstripPendingAfter(input: { name: string; newFrame: boolean; pending: ConsoleFilmstripPending }): ConsoleFilmstripPending {
+  return input.newFrame || input.name === "filmstripDisplayChanged" || input.name === "videoConferenceJoined" ? null : input.pending;
+}
+
 /** O sinal que o console manda (sendEndpointTextMessage) para o aluno abaixar a propria mao: o IFrame API nao abaixa a mao de outro. */
 export { LOWER_HAND_SIGNAL, RECORDING_SIGNAL };
 

@@ -246,6 +246,7 @@ test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor
   assert.equal(textOf(`${h1}</h1>`), "Console da sessão Aula de IA", "o h1 com o console e o titulo");
   assert.match(text, /No ar há \d+:\d\d/);
   assert.match(markup, /data-console-present="">7 presentes</, "o selo dos presentes no topo da gravada, sem o pico antes da leitura da presenca");
+  assert.doesNotMatch(markup.slice(markup.lastIndexOf("<span", markup.indexOf("data-console-status")), markup.indexOf("data-console-present")), /sm:hidden/, "fora da live (sem palco) os presentes ficam no topo em toda largura");
   assert.match(text, /Encerrar sessão/);
   assert.doesNotMatch(text, /Abrir sessão/, "a sessao no ar nao abre de novo");
   assert.match(markup, /<button(?=[^>]*aria-label="Tema claro")[^>]*>/, "o Tema diz para qual vai");
