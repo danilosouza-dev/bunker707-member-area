@@ -116,7 +116,7 @@ export function RoomPanel({ children, className, closable, contentClassName, fir
               type="button"
             >
               {tabLabel(value, kind)}
-              {value === "enquetes" && pollOpen ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-[var(--accent)] align-middle" /> : null}
+              {value === "enquetes" && pollOpen ? <span aria-hidden="true" className="ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle" /> : null}
             </button>
           ))}
         </div>

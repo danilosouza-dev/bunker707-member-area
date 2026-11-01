@@ -317,7 +317,7 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   // O Sair na barra so a partir de lg, no acento, com o nome visivel em toda largura (a pilula cabe a 1024 px).
   const sair = html.match(/<button[^>]*data-room-bar-item="leave"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
   assert.match(sair, /class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b/, "o Sair da barra so a partir de lg (abaixo, no cabecalho)");
-  assert.match(sair, /bg-\[var\(--accent\)\]/, "no acento");
+  assert.match(sair, /bg-room-accent/, "no acento");
   assert.match(sair, /<\/svg>Sair<\/button>$/, "o nome Sair visivel ao lado do icone, sem o sr-only de antes");
   assert.doesNotMatch(sair, /sr-only|size-11/, "nunca so o icone entre lg e xl");
   // A Tela cheia sai da barra abaixo de lg (vai para o canto do palco).
@@ -672,7 +672,7 @@ test("o mesmo esqueleto da gravada (V2-6): corpo > coluna > caixa do palco, a ba
   }
   // O Sair: na barra a partir de lg; o do cabecalho fica so abaixo de lg.
   const cabecalho = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
-  assert.match(cabecalho, /<button class="[^"]*bg-\[var\(--accent\)\][^"]*\blg:hidden" type="button">[\s\S]*?Sair<\/button>/);
+  assert.match(cabecalho, /<button class="[^"]*bg-room-accent[^"]*\blg:hidden" type="button">[\s\S]*?Sair<\/button>/);
   assert.match(html, /data-room-bar-item="leave"/);
 
   // Encerrada: sem a barra, o Sair do cabecalho vale em toda largura e o painel fica na tela (o balao saiu junto).
@@ -786,7 +786,7 @@ test("o painel (V2-7): as abas em pilula na lista 'Painel da sala', a escolhida 
   // A escolhida no fundo claro do tema (sem o sublinhado vermelho de antes: o acento so no ponto de Enquetes).
   const escolhida = (aberto.match(/<button aria-controls="room-tab-chat" aria-selected="true" class="([^"]*)"/)?.[1] ?? "").split(" ");
   assert.ok(escolhida.includes("bg-room-tab-on-bg") && escolhida.includes("text-room-tab-on-fg"), escolhida.join(" "));
-  assert.doesNotMatch(aberto, /bg-\[var\(--accent\)\]/, "sem enquete aberta, nada no acento");
+  assert.doesNotMatch(aberto, /bg-room-accent/, "sem enquete aberta, nada no acento");
   // O X do computador fecha o painel (abaixo de lg o balao, logo acima, faz isso).
   assert.match(aberto, /<button aria-label="Fechar o painel" class="[^"]*\bhidden\b[^"]*\blg:grid\b[^"]*" title="Fechar o painel" type="button">/);
   assert.match(aberto, /<div aria-labelledby="room-tabbtn-chat" class="[^"]*" id="room-tab-chat" role="tabpanel"><textarea/);
@@ -799,7 +799,7 @@ test("o painel (V2-7): as abas em pilula na lista 'Painel da sala', a escolhida 
   // Sem a barra (encerrada) o painel fica na tela: sem o X. Com enquete aberta, a aba Enquetes com o ponto.
   assert.doesNotMatch(painel({ closable: false }), /Fechar o painel/);
   const comEnquete = painel({ pollOpen: true, tabs: layout.panelTabsFor({ kind: "live", openPolls: 1, tab: "chat" }) });
-  assert.match(comEnquete, /role="tab" type="button">Enquetes<span aria-hidden="true" class="[^"]*bg-\[var\(--accent\)\][^"]*"><\/span><\/button>/);
+  assert.match(comEnquete, /role="tab" type="button">Enquetes<span aria-hidden="true" class="[^"]*bg-room-accent[^"]*"><\/span><\/button>/);
   // O Replay chama o Chat de "Chat da live" e nao tem Participantes.
   const replay = painel({ kind: "replay", tabs: layout.panelTabsFor({ kind: "replay", openPolls: 0, tab: "chat" }) });
   assert.match(replay, /role="tab" type="button">Chat da live<\/button>/);
@@ -811,7 +811,7 @@ test("o balao com o painel fechado (V2-7 e V2-8): o contador vermelho das mensag
   const tres = balao({ open: false, unread: 3 });
   assert.match(tres, /^<button aria-controls="room-panel" aria-expanded="false" aria-label="Mostrar o chat, 3 mensagens novas"/);
   const contador = tres.match(/<span aria-hidden="true" class="([^"]*)" data-room-unread="">3<\/span>/)?.[1].split(" ") ?? [];
-  assert.ok(["absolute", "h-[18px]", "min-w-[18px]", "bg-[var(--accent)]", "text-[11px]", "font-bold", "shadow-[0_0_0_2px_var(--room-surface)]"].every((classe) => contador.includes(classe)), contador.join(" "));
+  assert.ok(["absolute", "h-[18px]", "min-w-[18px]", "bg-room-accent", "text-[11px]", "font-bold", "shadow-[0_0_0_2px_var(--room-surface)]"].every((classe) => contador.includes(classe)), contador.join(" "));
   assert.match(balao({ open: false, unread: 1 }), /aria-label="Mostrar o chat, 1 mensagem nova"/);
   // Sem novas, so "Mostrar o chat"; aberto, "Esconder o chat" e nunca o contador (abrir zera).
   assert.match(balao({ open: false, unread: 0 }), /aria-expanded="false" aria-label="Mostrar o chat"/);

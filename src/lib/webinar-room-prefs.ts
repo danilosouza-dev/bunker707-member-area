@@ -1,7 +1,9 @@
 // O que a sala do webinario guarda no navegador de cada pessoa (docs/31 V2-7, V2-10, V2-12 e V2-16): o tema, o painel
 // aberto ou fechado, a visao do video e as enquetes que ficaram para depois. Modulo puro (o Node le nos testes): so as
 // chaves e as leituras do valor guardado. Quem le e escreve no localStorage e src/components/member/webinars/room/
-// use-room-prefs.ts; um valor que falta, vem estragado ou de outra versao vira o padrao.
+// use-room-prefs.ts; um valor que falta, vem estragado ou de outra versao vira o padrao. O console de quem apresenta
+// (docs/31 V2-12 e V2-13) guarda o tema e o painel em chaves proprias: o localStorage e o mesmo da area (mesma origem),
+// e a chave da sala misturaria a escolha do produtor no console com a da sala que ele abre como aluno.
 
 /** O tema da sala (o mesmo do iframe, LiveRoomTheme): escuro por padrao. */
 export type RoomTheme = "dark" | "light";
@@ -14,6 +16,8 @@ export const ROOM_THEME_KEY = "bunker707:webinar-sala-tema";
 export const ROOM_PANEL_KEY = "bunker707:webinar-sala-painel";
 export const ROOM_VIEW_KEY = "bunker707:webinar-sala-visao";
 export const ROOM_POLLS_KEY = "bunker707:webinar-sala-enquetes";
+export const CONSOLE_THEME_KEY = "bunker707:webinar-console-tema";
+export const CONSOLE_PANEL_KEY = "bunker707:webinar-console-painel";
 
 export const NO_DEFERRED_POLLS: DeferredPolls = Object.freeze({ later: [], seen: [] }) as DeferredPolls;
 
@@ -22,7 +26,12 @@ export function storedRoomTheme(value: string | null | undefined): RoomTheme {
   return value === "light" ? "light" : "dark";
 }
 
-/** O painel guardado: aberto por padrao, fechado so com "0". */
+/** O tema guardado do console: a mesma regra da sala (so "light" e o claro), sobre CONSOLE_THEME_KEY. */
+export function storedConsoleTheme(value: string | null | undefined): RoomTheme {
+  return storedRoomTheme(value);
+}
+
+/** O painel guardado (o da sala e o do console, cada um na sua chave): aberto por padrao, fechado so com "0". */
 export function storedPanelOpen(value: string | null | undefined): boolean {
   return value !== "0";
 }

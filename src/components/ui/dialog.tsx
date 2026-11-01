@@ -39,13 +39,16 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 function DialogContent({
   className,
   children,
+  container,
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
+  /** Onde o dialogo entra no DOM (o console de quem apresenta, docs/31 V2-12); sem ele, o body. */
+  container?: HTMLElement | React.RefObject<HTMLElement | null> | null
   showCloseButton?: boolean
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={container}>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"

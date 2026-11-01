@@ -45,7 +45,7 @@ const DOT = "inline-block size-1.5 shrink-0 rounded-full lg:size-2";
 const ON_VIDEO = "bg-black/60 font-semibold text-white";
 /** O apresentador e o Assistente: os tokens do tema (no claro, a pilula branca). */
 const ON_VIDEO_THEMED = "bg-room-on-video-bg font-semibold text-room-on-video-fg";
-const ON_AIR = "bg-[var(--accent)] font-bold tabular-nums text-white";
+const ON_AIR = "bg-room-accent font-bold tabular-nums text-white";
 
 function TopLeft({ topLeft }: { topLeft: RoomStageTopLeft }) {
   const copy = WEBINAR_COPY.sala;
@@ -103,7 +103,7 @@ export function RoomStageBadges({ assistantOn, presenterName, recording, topLeft
           {topLeft ? <TopLeft topLeft={topLeft} /> : null}
           {recording ? (
             <span className={cn(PILL, ON_VIDEO)} data-testid="live-recording" title={gravando}>
-              <span aria-hidden="true" className={cn(DOT, "bg-[var(--accent)] motion-safe:animate-pulse")} />
+              <span aria-hidden="true" className={cn(DOT, "bg-room-accent motion-safe:animate-pulse")} />
               {gravando}
             </span>
           ) : null}

@@ -1335,7 +1335,7 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  /* A sala do webinario (docs/31 V2-11): os valores moram em [data-room-theme], logo depois do bloco do admin. */
+  /* A sala do webinario e o console (docs/31 V2-11 e V2-13): os valores moram em [data-room-theme], depois do admin. */
   --color-room-bg: var(--room-bg);
   --color-room-surface: var(--room-surface);
   --color-room-surface-2: var(--room-surface-2);
@@ -1372,6 +1372,14 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --color-room-warn-border: var(--room-warn-border);
   --color-room-on-video-bg: var(--room-on-video-bg);
   --color-room-on-video-fg: var(--room-on-video-fg);
+  --color-room-accent: var(--room-accent);
+  --color-room-danger-bg: var(--room-danger-bg);
+  --color-room-danger-border: var(--room-danger-border);
+  --color-room-danger-fg: var(--room-danger-fg);
+  --color-room-success-bg: var(--room-success-bg);
+  --color-room-success-border: var(--room-success-border);
+  --color-room-hover-overlay: var(--room-hover-overlay);
+  --color-room-press-overlay: var(--room-press-overlay);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -1502,15 +1510,19 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
 }
 
 /*
- * Sala do webinario (docs/31 V2-11 e V2-12): o tema claro e o escuro so dentro da sala. O atributo data-room-theme
- * fica so no dialogo da sala (live-room.tsx e webinar-room.tsx), nunca no :root nem no html: a area continua escura.
- * A sala nao usa portal, entao o escopo no dialogo alcanca tudo. O desenho vertical 9:16 forca o escuro. Somente
+ * Sala do webinario e console de quem apresenta (docs/31 V2-11, V2-12 e V2-13): o tema claro e o escuro so dentro da
+ * sala e do console. O atributo data-room-theme fica so no dialogo da sala (live-room.tsx e webinar-room.tsx) e na raiz
+ * do console (data-console-root, com a ponte dos tokens do admin logo abaixo), nunca no :root nem no html: a area e o
+ * resto do admin continuam escuros. A sala nao usa portal, entao o escopo no dialogo alcanca tudo; o console leva os
+ * seus portais (menus e confirmacoes) para dentro da raiz pelo container. O desenho vertical 9:16 forca o escuro. Somente
  * variaveis: as cores entram pelas classes bg-room-*, text-room-* e border-room-* (o @theme inline acima). O que fica
  * sobre o video (as capas do palco, os selos Ao vivo e Gravando, as pilulas do chat, a Oferta e o veu da enquete) e
  * igual nos dois temas e nao passa por aqui. Os dois blocos tem os mesmos nomes (tests/webinarios-sala-tokens.guard).
  * Texto pequeno com 4,5:1 nos dois temas (docs/12): no claro, o cinza --room-fg-subtle e #63636b (o #71717a ficava
  * abaixo sobre #ededeb e #f4f4f3), e o texto de sucesso e --room-success-fg, nunca --room-speaking (feito para o ponto
  * e a borda de quem fala; o #16a34a nao chega a 3:1 no claro). A barra do resultado da enquete e --room-poll-bar.
+ * O vermelho das pecas da sala (Ao vivo, o contador da barra, o ponto da aba e o Sair) e --room-accent, igual nos dois
+ * temas: o --accent do shadcn e cinza no admin, e o console tambem as usa. O Encerrar do console e --room-danger-*.
  */
 [data-room-theme="dark"] {
   color-scheme: dark;
@@ -1552,6 +1564,14 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-warn-border: rgba(251, 191, 36, 0.3);
   --room-on-video-bg: rgba(0, 0, 0, 0.6);
   --room-on-video-fg: #ffffff;
+  --room-accent: #e50914;
+  --room-danger-bg: rgba(239, 68, 68, 0.1);
+  --room-danger-border: rgba(248, 113, 113, 0.3);
+  --room-danger-fg: #fca5a5;
+  --room-success-bg: rgba(52, 211, 153, 0.12);
+  --room-success-border: rgba(52, 211, 153, 0.3);
+  --room-hover-overlay: rgba(255, 255, 255, 0.04);
+  --room-press-overlay: rgba(255, 255, 255, 0.07);
 }
 
 [data-room-theme="light"] {
@@ -1594,6 +1614,74 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
   --room-warn-border: rgba(217, 119, 6, 0.3);
   --room-on-video-bg: #ffffff;
   --room-on-video-fg: #141414;
+  --room-accent: #e50914;
+  --room-danger-bg: #fef2f2;
+  --room-danger-border: rgba(220, 38, 38, 0.3);
+  --room-danger-fg: #b91c1c;
+  --room-success-bg: #ecfdf5;
+  --room-success-border: rgba(22, 163, 74, 0.3);
+  --room-hover-overlay: rgba(0, 0, 0, 0.04);
+  --room-press-overlay: rgba(0, 0, 0, 0.07);
+}
+
+/*
+ * Console de quem apresenta (docs/31 V2-12 e V2-13): a raiz do console leva data-console-root junto com o
+ * data-room-theme. Este bloco liga os tokens do admin (o bloco do admin acima) aos --room-* do tema do console, e assim
+ * as pecas do admin que o console usa (SectionCard, StatusChip, Button, PillGroup, os campos, o Atendimento e a Oferta)
+ * mudam de tema sem reescrever cada uma; o anel de foco do admin (fora de @layer, abaixo) passa a --room-focus. Os do
+ * shadcn (--background, --popover, --primary, --accent, --border, --input, --ring...) tambem sao redefinidos: no admin
+ * eles valem var(--surface-*) resolvido no :root, e o filho herda o valor ja resolvido, entao trocar so as --surface-*
+ * aqui nao mudaria nenhum deles. O --accent do shadcn continua o fundo do hover (cinza): o vermelho das pecas da sala e
+ * --room-accent. Somente var(--room-*), nenhum valor literal (tests/webinarios-sala-tokens.guard); --chart-*,
+ * --ease-admin e --radius ficam como estao.
+ */
+[data-console-root] {
+  --surface-0: var(--room-bg);
+  --surface-1: var(--room-surface);
+  --surface-2: var(--room-surface-2);
+  --surface-3: var(--room-surface);
+  --border-subtle: var(--room-border);
+  --border-strong: var(--room-border-strong);
+  --border-stronger: var(--room-input-border);
+  --hover-overlay: var(--room-hover-overlay);
+  --press-overlay: var(--room-press-overlay);
+  --text-primary: var(--room-fg-strong);
+  --text-secondary: var(--room-fg-muted);
+  --text-tertiary: var(--room-fg-subtle);
+  --text-disabled: var(--room-fg-subtle);
+  --success: var(--room-success-fg);
+  --success-bg: var(--room-success-bg);
+  --success-border: var(--room-success-border);
+  --warning: var(--room-warn-fg);
+  --warning-bg: var(--room-warn-bg);
+  --warning-border: var(--room-warn-border);
+  --error: var(--room-danger-fg);
+  --error-bg: var(--room-danger-bg);
+  --error-border: var(--room-danger-border);
+  --brand-red: var(--room-accent);
+  --focus-ring: var(--room-focus);
+  --series-1: var(--room-fg-strong);
+  --series-2: var(--room-fg-muted);
+  --series-previous: var(--room-fg-subtle);
+
+  --background: var(--room-bg);
+  --foreground: var(--room-fg-strong);
+  --card: var(--room-surface);
+  --card-foreground: var(--room-fg);
+  --popover: var(--room-surface);
+  --popover-foreground: var(--room-fg);
+  --primary: var(--room-active-bg);
+  --primary-foreground: var(--room-active-fg);
+  --secondary: var(--room-surface-2);
+  --secondary-foreground: var(--room-fg-strong);
+  --muted: var(--room-surface-2);
+  --muted-foreground: var(--room-fg-muted);
+  --accent: var(--room-surface-2);
+  --accent-foreground: var(--room-fg-strong);
+  --destructive: var(--room-danger-fg);
+  --border: var(--room-border);
+  --input: var(--room-border-strong);
+  --ring: var(--room-focus);
 }
 
 /*

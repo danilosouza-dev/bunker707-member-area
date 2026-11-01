@@ -148,7 +148,7 @@ export function RoomPanelToggle({ firstFocus = false, onToggle, open, unread = 0
       {count > 0 ? (
         <span
           aria-hidden="true"
-          className="absolute right-0.5 top-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--accent)] px-[5px] text-[11px] font-bold leading-none tabular-nums text-white shadow-[0_0_0_2px_var(--room-surface)]"
+          className="absolute right-0.5 top-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-room-accent px-[5px] text-[11px] font-bold leading-none tabular-nums text-white shadow-[0_0_0_2px_var(--room-surface)]"
           data-room-unread=""
         >
           {count}

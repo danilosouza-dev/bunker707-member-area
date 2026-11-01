@@ -34,12 +34,16 @@ export const adminToast = {
   }
 };
 
-export function AdminToaster() {
+/**
+ * O tema dos avisos: escuro, como todo o admin. O console de quem apresenta monta o dele dentro da raiz com o tema
+ * escolhido (docs/31 V2-12); as cores ja vem dos tokens, que a ponte do console redefine.
+ */
+export function AdminToaster({ theme = "dark" }: { theme?: "dark" | "light" }) {
   return (
     <Toaster
       closeButton={false}
       position="bottom-right"
-      theme="dark"
+      theme={theme}
       toastOptions={{
         style: {
           background: "var(--surface-3)",

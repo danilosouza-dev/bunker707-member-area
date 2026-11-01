@@ -98,7 +98,7 @@ test("cabecalho (V2-3): o titulo, a linha da data com a duracao e quem apresenta
   assert.match(html, /<span aria-hidden="true" class="hidden h-7 w-px shrink-0 bg-room-divider lg:block"><\/span><button aria-label="Tema claro"/, "o traco antes do tema");
   assert.deepEqual(buttonNames(html), ["Tema claro", "Sair"], "os botoes do cabecalho: o tema (V2-12) e o Sair");
   assert.match(html, /<button aria-label="Tema claro" class="[^"]*\bhidden sm:grid\b/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18)");
-  assert.match(html, /<button class="[^"]*bg-\[var\(--accent\)\][^"]*" type="button"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg>Sair<\/button>/, "o Sair no acento, com o texto");
+  assert.match(html, /<button class="[^"]*bg-room-accent[^"]*" type="button"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg>Sair<\/button>/, "o Sair no acento, com o texto");
   assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
   // Replay e sessao encerrada: a sala passa o contador nulo; a linha do celular fica so com quem apresenta.
@@ -144,7 +144,7 @@ test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da
 
   // O tempo no ar anda pelo relogio do aparelho (RoomElapsed): aqui so a forma.
   const aoVivo = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: true }) }));
-  assert.match(aoVivo, /data-room-badges="top"><span class="[^"]*bg-\[var\(--accent\)\][^"]*" data-testid="room-on-air">/, "o Ao vivo vermelho em cima a esquerda");
+  assert.match(aoVivo, /data-room-badges="top"><span class="[^"]*bg-room-accent[^"]*" data-testid="room-on-air">/, "o Ao vivo vermelho em cima a esquerda");
   assert.match(aoVivo, /<span class="max-sm:sr-only">Ao vivo · <\/span><span class="tabular-nums">[0-9:]+<\/span>/, "o tempo no ar; no celular so o tempo (a frase para o leitor de tela)");
   assert.doesNotMatch(aoVivo, /Sessão das/);
   assert.match(aoVivo, /data-room-badge="presenter"[\s\S]*?>Danilo Souza · Apresentador</);
@@ -385,7 +385,7 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
 
   // Nenhuma etiqueta colorida no item (o selo de papel e o da pendente saem): nem RoomBadge nem MemberChip.
   const itens = ["1", "2", "3", "4", "5", "6"].map((id) => chatItem(html, id)).join("");
-  assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-\[var\(--accent\)\]/);
+  assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-room-accent/);
 
   // Na live o zero nao entra: o "Comecar para todos" e a ancora mudam o zero sem recalcular o que ja esta na tela.
   const zeroMudou = render(chat.RoomChatPanel, { ...base, zeroMs: T0 + 7 * MIN });
