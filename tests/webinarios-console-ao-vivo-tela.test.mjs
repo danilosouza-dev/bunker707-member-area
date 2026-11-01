@@ -276,15 +276,16 @@ test("topo da Live ao vivo: Começar para todos e Encerrar live na espera, Abrir
   assert.match(encerrar, /disabled=""/, "Encerrar live desligado sem messaging.publish");
 });
 
-test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Trancar a sala (aria-pressed) ao lado de Encerrar live, e o palco na coluna do palco, com a barra de quem apresenta embaixo e os controles e os cards no painel", () => {
+test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Trancar a sala (o nome diz a acao, sem aria-pressed) ao lado de Encerrar live, e o palco na coluna do palco, com a barra de quem apresenta embaixo e os controles e os cards no painel", () => {
   const markup = render(snapshot());
   assert.match(markup, /^<div(?=[^>]*data-console-root="")(?=[^>]*data-room-theme="dark")[^>]*>/);
   const top = markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
   assert.ok(top.length > 0, "o topo");
-  // Os botoes de situacao no topo, na ordem: no ar, Trancar a sala e Encerrar live; o Trancar diz o estado.
+  // Os botoes de situacao no topo, na ordem: no ar, Trancar a sala e Encerrar live. O Trancar diz a acao no nome, sem
+  // aria-pressed: "Destrancar a sala, pressionado" se lia como o contrario (V2-7).
   const nomes = Array.from(top.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]);
   assert.deepEqual(nomes, [copy.trancar, copy.encerrarLive]);
-  assert.match(top, new RegExp(`<button(?=[^>]*aria-pressed="false")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.trancar)}</button>`));
+  assert.match(top, new RegExp(`<button(?![^>]*aria-pressed)[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.trancar)}</button>`));
   // As pecas da sala no topo (V2-13): o Encerrar live na variante stop (os tokens --room-danger-*, 36 px), o Trancar no
   // secondary, e o Atualizar e o Tema em 36 px com o canto dos botoes com texto (--member-button-radius), nunca redondos.
   const aberturaDe = (label) => top.slice(top.lastIndexOf("<button", top.indexOf(`${label}</button>`)), top.indexOf(">", top.lastIndexOf("<button", top.indexOf(`${label}</button>`))) + 1);
@@ -300,7 +301,8 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   }
   const trancada = render(snapshot({ live: liveBlock({ roomLocked: true }) }));
   const topoTrancado = trancada.slice(trancada.indexOf('data-console-slot="top"'), trancada.indexOf("</header>"));
-  assert.match(topoTrancado, new RegExp(`<button(?=[^>]*aria-pressed="true")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.destrancar)}</button>`));
+  assert.match(topoTrancado, new RegExp(`<button(?![^>]*aria-pressed)[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.destrancar)}</button>`));
+  assert.doesNotMatch(topoTrancado, /aria-pressed/, "nenhum botao do topo com aria-pressed");
   // A Equipe nao tranca a sala (so quem apresenta).
   assert.doesNotMatch(textOf(render(snapshot(), { currentUserId: "u-equipe" })), new RegExp(escape(copy.trancar)));
   // A agendada mostra Abrir a sala, Começar para todos e Trancar (a Sessão de prática tranca antes de abrir).
@@ -383,6 +385,25 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   assert.match(testar, /bg-room-control/, "Testar sala no botao da sala");
   assert.doesNotMatch(testar, /data-slot="button"/, "nao o botao do admin");
   assert.equal(presentes(palcoAgendado), "3 presentes");
+});
+
+test("Atualizar e sem resposta (docs/31 V2-13 e V2-A50): o sem resposta do retrato fica na tela, na faixa abaixo do topo, e a regiao viva so diz a passagem; o Atualizar nunca fica desligado pela leitura", () => {
+  const renderPoll = (initialPoll) => html(createElement(SessionConsole, { currentUserId: HOST, data: { sessions: [session()], snapshot: snapshot(), webinar }, initialPoll, nonce: null, permissions: both, serverNow: NOW }));
+  const topOf = (markup) => markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
+  const regiao = (markup) => topOf(markup).match(/<span aria-live="polite" class="sr-only" data-console-polling="([a-z]+)">([^<]*)<\/span>/)?.slice(1) ?? [];
+
+  const semResposta = renderPoll({ notice: "semResposta", offline: true });
+  assert.match(semResposta, new RegExp(`<p class="[^"]*\\btext-room-warn-fg\\b[^"]*" data-console-offline="">${escape(consoleV2Copy.semResposta)}</p>`), "na tela, abaixo do topo");
+  assert.ok(semResposta.indexOf("data-console-offline") > semResposta.indexOf("</header>"), "a faixa vem depois do topo");
+  assert.deepEqual(regiao(semResposta), ["offline", consoleV2Copy.semResposta]);
+  assert.doesNotMatch(topOf(semResposta).match(/<button[^>]*aria-label="Atualizar"[^>]*>/)?.[0] ?? "", /\sdisabled=""/, "o Atualizar continua ligado");
+
+  // De volta: a faixa sai e a regiao viva diz a volta; o resto do tempo ela fica quieta.
+  const deVolta = renderPoll({ notice: "conectado", offline: false });
+  assert.doesNotMatch(deVolta, /data-console-offline/);
+  assert.deepEqual(regiao(deVolta), ["idle", consoleV2Copy.conectadoDeNovo]);
+  assert.deepEqual(regiao(render(snapshot())), ["idle", ""], "na carga, nada");
+  assert.deepEqual(regiao(renderPoll({ notice: "atualizando", offline: false })), ["idle", consoleV2Copy.atualizando]);
 });
 
 test("palco: a sala abrindo no meio, o Trancar no topo e as acoes de todos na aba Pessoas (Câmeras livres em aria-pressed); sem a sala no ambiente, a frase e o resto do console funciona", () => {
@@ -688,7 +709,16 @@ test("barra de quem apresenta (V2-14): o <nav> com a Sala de espera, Microfone, 
   assert.doesNotMatch(nav, /lg:grid-cols-\[minmax\(max-content,1fr\)/, "a grade da sala fica so na sala");
   const pilula = zone(markup, "left").match(/<div[^>]*data-console-lobby="knocking"[^>]*>/)?.[0] ?? "";
   assert.match(pilula, new RegExp(`title="${escape(consoleV2.barra.salaDeEspera(2))}"`));
-  assert.ok((pilula.match(/class="([^"]*)"/)?.[1] ?? "").split(" ").includes("shrink"), "a pilula encolhe");
+  const classesDaPilula = (pilula.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(classesDaPilula.includes("shrink"), "a partir de lg a pilula encolhe");
+  // Abaixo de lg a pilula fica do tamanho do conteudo e a barra rola de lado (V2-A42): encolhida, ela sumia e o Admitir
+  // todos vazava por baixo do Microfone.
+  for (const classe of ["max-lg:shrink-0", "max-lg:max-w-none"]) {
+    assert.ok(classesDaPilula.includes(classe), `a pilula com ${classe}`);
+  }
+  const frase = bar(handleFor("host"), { live: { recorder: recorder(), roomLocked: true } });
+  const pilulaQuieta = (zone(frase, "left").match(/<span[^>]*data-console-lobby="notice"[^>]*>/)?.[0].match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(pilulaQuieta.includes("max-lg:shrink-0") && pilulaQuieta.includes("max-lg:max-w-none"), "a frase da sala inteira abaixo de lg");
   assert.match(item(markup, "poll"), /class="[^"]*\blg:max-xl:hidden\b/);
   assert.doesNotMatch(item(bar(handleFor("host"), { panelOpen: false }), "poll"), /lg:max-xl:hidden/);
   // Os nomes sao fixos e o estado vai em aria-pressed (o motor diz, nunca o clique).
@@ -973,6 +1003,10 @@ test("aba Pessoas (V2-14): Silenciar todos, Fechar todas as câmeras e Câmeras 
   }
   assert.match(host, /aria-pressed="true"[^>]*>(?:(?!<\/button>).)*Câmeras livres/s, "as cameras livres pelo que o motor disse");
   assert.match(tab(handleFor("host", { camerasAllowed: false, room })), /aria-pressed="false"[^>]*>(?:(?!<\/button>).)*Câmeras livres/s);
+  // Ligado e desligado tambem se distinguem na tela (WCAG 1.4.11): o ligado no estilo do botao ativo da sala.
+  const livres = (markup) => (markup.match(/<button(?=[^>]*aria-pressed=)[^>]*class="([^"]*)"[^>]*>(?:(?!<\/button>).)*Câmeras livres/s)?.[1] ?? "").split(" ");
+  assert.ok(livres(host).includes("bg-room-active-bg") && livres(host).includes("text-room-active-fg"), "ligado: o fundo do ativo");
+  assert.ok(!livres(tab(handleFor("host", { camerasAllowed: false, room }))).includes("bg-room-active-bg"), "desligado: o botao comum");
   // A Sala de espera: quem bate, com Admitir e Admitir todos.
   assert.match(text, new RegExp(escape(copy.esperando(1))));
   assert.match(host, /<li[^>]*data-live-knocking="k-1"[^>]*>[\s\S]*?aria-label="Admitir: Caio"/);

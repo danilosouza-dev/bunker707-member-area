@@ -18,8 +18,12 @@ export const CONSOLE_V2_COPY = {
   /** O nome do seletor de sessoes, so para o leitor de tela. */
   rotuloSessao: "Sessão",
   atualizar: "Atualizar",
+  /** A regiao viva do Atualizar (so para o leitor de tela): o clique no Atualizar. */
   atualizando: "Atualizando…",
+  /** A faixa abaixo do topo, na tela, enquanto o retrato nao responde (e a regiao viva, na passagem). */
   semResposta: "Sem resposta do servidor; tentando de novo.",
+  /** A regiao viva quando o retrato volta a responder. */
+  conectadoDeNovo: "Conectado de novo.",
   /** O selo dos presentes pelo retrato de 5 s, sem o pico (o Replay, antes de comecar). */
   presentes: (n: number) => (n === 1 ? "1 presente" : `${n} presentes`),
   /** "12 presentes · pico 14" (consolePresenceBadge: o pico nunca abaixo dos presentes). */

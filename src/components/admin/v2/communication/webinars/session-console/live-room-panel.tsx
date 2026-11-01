@@ -33,7 +33,7 @@ import {
   presenterSetupCommands,
   recordingSignalMessage,
   rolesToRead,
-  screenSharesToStop,
+  screenShareWatchStep,
   sharingIdsOf,
   shouldAutoStartRecording,
   shouldEnterRoom,
@@ -59,8 +59,9 @@ import { adminToast } from "../../../toast";
 // O vigia da tela (docs/31 §5.4): o console escuta tambem CONSOLE_EXTRA_EVENTS (quem compartilha a tela), le os papeis
 // pelo getRoomsInfo (quem ja era moderador quando o console entrou nunca gera participantRoleChanged) e, no navegador de
 // quem apresenta e modera, manda muteRemoteParticipant(id, 'desktop') a quem compartilha com papel conhecido de
-// participante e sem liberacao (screenSharesToStop), uma vez por id ate ele parar. Nunca rejectParticipant nem
-// muteEveryone de tela: o primeiro recusaria o audio, o segundo pegaria o co-apresentador. Para o cliente padrao; um
+// participante e sem liberacao (screenShareWatchStep), uma vez por id ate ele parar e de novo se ele voltar a
+// compartilhar. Nunca rejectParticipant nem muteEveryone de tela: o primeiro recusaria o audio, o segundo pegaria o
+// co-apresentador. Para o cliente padrao; um
 // cliente modificado que ignora o pedido de mudo continua mandando a tela (docs/31 §7).
 // Quem apresenta (host e co-apresentador) ganha as Configurações da barra (console-bar.tsx, o LiveSettings da sala): os
 // aparelhos pelo hook useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do
@@ -138,7 +139,8 @@ let screenShareModeRead: ConsoleScreenShareMode | null = null;
 function readScreenShareMode(): ConsoleScreenShareMode {
   if (screenShareModeRead === null) {
     try {
-      screenShareModeRead = consoleScreenShareMode(navigator.userAgent);
+      // O recurso tambem: o Chrome do Android no "site para computador" manda o userAgent do computador, sem a tela.
+      screenShareModeRead = consoleScreenShareMode(navigator.userAgent, { displayMedia: typeof navigator.mediaDevices?.getDisplayMedia === "function" });
     } catch {
       screenShareModeRead = "engine";
     }
@@ -280,8 +282,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const roomsInfoTimerRef = useRef<number | null>(null);
   /** Quantas vezes o console saiu da sala: a resposta de um getRoomsInfo pedido antes da saida nao vale. */
   const leftCountRef = useRef(0);
-  /** Quem ja recebeu o pedido de parar a tela, ate sair de `sharing` (o vigia nao repete o mesmo pedido). */
-  const stoppedRef = useRef(new Set<string>());
+  /** Quem ja recebeu o pedido de parar a tela, ate sair de `sharing` (o vigia nao repete o mesmo pedido; screenShareWatchStep). */
+  const stoppedRef = useRef<ReadonlySet<string>>(new Set<string>());
   /** O iframe do ultimo sinal: o primeiro sinal de um iframe novo volta a visao e a coluna ao padrao do motor. */
   const signalFrameRef = useRef<JitsiMeetApi | null>(null);
   /** O `filmstripVisible` de quando o ultimo toggleFilmStrip saiu (nulo: nenhum esperando a resposta do motor). */
@@ -470,9 +472,23 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
       const frame = frameRef.current?.current ?? null;
       const newFrame = frame !== null && frame !== signalFrameRef.current;
       if (newFrame) {
-        // O primeiro sinal de um iframe novo: o motor dele comeca no Palco, com a coluna (inclusive o seguir a visao que
-        // chega antes do videoConferenceJoined parte dai).
+        // O primeiro sinal de um iframe novo vale como uma saida do anterior, antes do proprio sinal: depois de um erro
+        // fatal o Tentar de novo monta outro sem o videoConferenceLeft (os sinais do descartado nao chegam). A sala
+        // volta ao comeco (a acao `frame`: o motor dele no Palco, com a coluna, sem o papel nem quem estava), o
+        // preparo de quem apresenta (o seguir a visao nao e guardado pelo motor) e a sala de espera saem de novo, as
+        // leituras pedidas ao anterior nao valem e o vigia esquece os pedidos que foram para ele.
         signalFrameRef.current = frame;
+        setupDone.current = false;
+        lobbySent.current = null;
+        leftCountRef.current += 1;
+        if (roomsInfoTimerRef.current !== null) {
+          window.clearTimeout(roomsInfoTimerRef.current);
+          roomsInfoTimerRef.current = null;
+        }
+        stoppedRef.current = new Set();
+        setVideoOn(false);
+        setAudioOn(false);
+        setSharing(false);
         dispatch({ type: "frame" });
       }
       // O motor respondeu ao toggleFilmStrip (ou a coluna mudou por outra causa), a entrada ou um iframe novo: nenhum
@@ -655,19 +671,24 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   }, [command, joined, presenter, role, room.moderator, webinar.allowStudentCamera]);
 
   // O vigia da tela: quem compartilha com papel conhecido de participante e sem liberacao tem a tela parada, uma vez por
-  // id ate sair de `sharing` (so o navegador de quem apresenta e modera: o comando exige moderador).
+  // id ate sair de `sharing`, e de novo se voltar a compartilhar (screenShareWatchStep; so o navegador de quem apresenta
+  // e modera: o comando exige moderador).
   useEffect(() => {
-    const stopped = stoppedRef.current;
-    for (const id of Array.from(stopped)) {
-      if (!room.sharing.includes(id)) {
-        stopped.delete(id);
-      }
-    }
+    const step = screenShareWatchStep({
+      grants: NO_SCREEN_GRANTS,
+      justGranted: NO_SCREEN_GRANTS,
+      roles: room.roles,
+      selfId: room.selfId,
+      sharing: room.sharing,
+      stopped: Array.from(stoppedRef.current)
+    });
+    const stopped = new Set(step.stopped);
+    stoppedRef.current = stopped;
     if (!joined || !room.moderator || !presenter) {
       return;
     }
-    for (const id of screenSharesToStop({ grants: NO_SCREEN_GRANTS, justGranted: NO_SCREEN_GRANTS, roles: room.roles, selfId: room.selfId, sharing: room.sharing })) {
-      if (!stopped.has(id) && command("muteRemoteParticipant", id, "desktop")) {
+    for (const id of step.toStop) {
+      if (command("muteRemoteParticipant", id, "desktop")) {
         stopped.add(id);
       }
     }

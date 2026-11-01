@@ -33,7 +33,7 @@ import {
 import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
 import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
-import { CHAT_CONSENT_VERSION, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
+import { CHAT_CONSENT_VERSION, ROOM_RULES, questionBodyOf, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
 import { liveBanState, liveWriteRefusal, presenceOffsetMs, type LiveBanState } from "./live-model";
 import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { presenceBucket, sessionOffsetMs, simulatedPhase, toStudentMessage } from "./room-model";
@@ -275,7 +275,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   if (body.kind === "question" && approved) {
     const question = await insertQuestionRow(db, {
       anonymous: mode === "anonymous",
-      body: text.slice(0, 500),
+      body: questionBodyOf(text),
       display_name: displayName,
       message_id: row.id,
       offset_ms: offsetMs,

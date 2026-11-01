@@ -444,10 +444,35 @@ test("reducer da sala: a visao (tileViewChanged), a coluna de miniaturas (filmst
   const grade = event(event(state, "tileViewChanged", { enabled: true }), "filmstripDisplayChanged", { visible: false });
   const saiu = event(grade, "videoConferenceLeft", {});
   assert.deepEqual(saiu, { ...model.EMPTY_ROOM, filmstripVisible: false, viewShown: "grid" });
-  // O primeiro sinal de um iframe novo: o Palco com a coluna e ninguem lido no video grande; o resto fica.
+  // O primeiro sinal de um iframe novo: a sala do comeco (o Palco com a coluna, ninguem lido no video grande, sem o
+  // proprio id nem o papel do iframe de antes).
   const novo = model.liveRoomReducer(grade, { type: "frame" });
   assert.deepEqual([novo.viewShown, novo.filmstripVisible, novo.onStageId], ["stage", true, null]);
-  assert.equal(novo.selfId, grade.selfId);
+  assert.deepEqual(novo, model.EMPTY_ROOM);
+});
+
+test("Tentar de novo depois de um erro fatal (sem a saida do iframe que caiu): o primeiro sinal do iframe novo zera a sala, e ninguem do iframe morto fica como moderador, na lista, com a mao, compartilhando ou gravando", () => {
+  let state = event({ ...model.EMPTY_ROOM }, "videoConferenceJoined", { id: "p-eu" });
+  state = event(state, "participantRoleChanged", { id: "p-eu", role: "moderator" });
+  state = event(state, "participantJoined", { displayName: "Aluna A", id: "aluna-a" });
+  state = event(state, "participantJoined", { displayName: "Aluna B", id: "aluna-b" });
+  state = event(state, "raiseHandUpdated", { handRaised: NOW, id: "aluna-a" });
+  state = event(state, "participantRoleChanged", { id: "aluna-b", role: "participant" });
+  state = event(state, "contentSharingParticipantsChanged", { data: ["aluna-b"] });
+  state = event(state, "recordingStatusChanged", { mode: "file", on: true });
+  assert.equal(state.moderator, true);
+  assert.equal(state.recording.on, true);
+  // O errorOccurred fatal nao manda o videoConferenceLeft: o iframe novo entra sem a saida. A aluna A saiu durante a
+  // queda; a B continua e compartilha de novo no iframe novo.
+  state = model.liveRoomReducer(state, { type: "frame" });
+  state = event(state, "videoConferenceJoined", { id: "p-eu-2" });
+  state = event(state, "participantJoined", { displayName: "Aluna B", id: "aluna-b" });
+  assert.equal(state.moderator, false, "o papel so volta pelo participantRoleChanged do iframe novo (o preparo de quem apresenta sai de novo)");
+  assert.deepEqual(state.people.map((person) => person.id), ["aluna-b"], "sem a linha fantasma de quem nao voltou");
+  assert.deepEqual([state.hands, state.sharing, state.recording.on], [[], [], false]);
+  assert.deepEqual(model.roomRows(state, []).map((row) => row.id), ["aluna-b"]);
+  state = event(state, "participantRoleChanged", { id: "p-eu-2", role: "moderator" });
+  assert.equal(state.moderator, true);
 });
 
 test("coluna de miniaturas pela largura no console do co-apresentador e da Equipe (docs/31 V2-A5): um toggleFilmStrip por vez, e a coluna que volta depois da resposta do motor (o seguir a visao, o atalho F) sai de novo", async () => {
@@ -705,6 +730,42 @@ test("vigia da tela: so quem compartilha com papel conhecido de nao moderador e 
   assert.deepEqual(watch(state), [], "o papel de moderador lido: a tela dele continua");
   state = event(state, "contentSharingParticipantsChanged", { data: ["p-co", "p-ana"] });
   assert.deepEqual(watch(state), ["p-ana"], "a aluna que compartilha sem liberacao");
+});
+
+test("vigia da tela, passo a passo (screenShareWatchStep): o pedido de parar sai uma vez por id enquanto ele compartilha; quem parou e volta a compartilhar recebe de novo; o proprio console e o id sem papel nunca", () => {
+  const roles = { "p-ana": "participant", "p-bia": "participant", "p-co": "moderator" };
+  const step = (sharing, stopped, extra = {}) => model.screenShareWatchStep({ grants: [], justGranted: [], roles, selfId: "p-eu", sharing, stopped, ...extra });
+  // O console como o efeito do useLiveRoom o roda: o pedido sai e o id fica guardado so se o comando saiu.
+  let stopped = [];
+  const sent = [];
+  const run = (sharing, accepts = () => true) => {
+    const next = step(sharing, stopped);
+    stopped = next.stopped;
+    for (const id of next.toStop) {
+      if (accepts(id)) {
+        sent.push(id);
+        stopped = [...stopped, id];
+      }
+    }
+  };
+  run(["p-ana"]);
+  assert.deepEqual(sent, ["p-ana"], "a aluna sem liberacao");
+  run(["p-ana"]);
+  run(["p-ana", "p-co"]);
+  assert.deepEqual(sent, ["p-ana"], "enquanto ela continua em sharing, nenhum pedido repetido; o moderador continua");
+  run([]);
+  assert.deepEqual(stopped, [], "parou: sai dos guardados");
+  run(["p-ana"]);
+  assert.deepEqual(sent, ["p-ana", "p-ana"], "voltou a compartilhar: o pedido sai de novo");
+  // O comando que nao saiu (sem sala montada) tenta de novo no passo seguinte.
+  run(["p-ana", "p-bia"], (id) => id !== "p-bia");
+  assert.deepEqual(sent, ["p-ana", "p-ana"]);
+  run(["p-ana", "p-bia"]);
+  assert.deepEqual(sent, ["p-ana", "p-ana", "p-bia"]);
+  // O proprio console, o id sem papel lido e a liberada nunca recebem o pedido.
+  assert.deepEqual(step(["p-eu", "p-novo"], []).toStop, []);
+  assert.deepEqual(step(["p-ana"], [], { grants: ["p-ana"] }).toStop, []);
+  assert.deepEqual(step(["p-ana"], ["p-ana", "p-velho"]).stopped, ["p-ana"], "quem nao compartilha mais sai dos guardados");
 });
 
 test("vigia da tela: o getRoomsInfo e pedido so por quem compartilha sem papel lido, nunca pelo proprio console", () => {

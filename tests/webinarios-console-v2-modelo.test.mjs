@@ -84,6 +84,10 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   // documento por baixo da raiz de altura fixa e a pagina inteira rola para fora da tela (na gravada, 1594 px a 1280 x 720).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
   assert.ok(has(live.panel, "lg:overflow-y-auto"), "o painel rola por dentro");
+  // O painel rola por dentro (o overflow-x tambem fica auto): a folga de 4 px a direita guarda o anel de foco do X.
+  assert.ok(has(live.panel, "lg:pr-1"), "a folga do anel do X a direita");
+  // Os avisos do console abrem em cima, no meio, abaixo do topo (duas linhas abaixo de lg, 56 px a partir de lg).
+  assert.ok(has(live.root, "[--console-toast-top:7.5rem]") && has(live.root, "lg:[--console-toast-top:4.5rem]"), "a altura dos avisos abaixo do topo");
   for (const largura of ["lg:w-80", "xl:w-[360px]", "2xl:w-[440px]"]) {
     assert.ok(live.panel.split(" ").includes(largura), `o painel com ${largura}`);
   }
@@ -103,6 +107,7 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.ok(gravada.panel.split(" ").includes("mx-auto"), "no meio");
   assert.ok(has(gravada.panel, "relative"), "sem palco o painel tambem e a referencia dos rotulos dele");
   assert.ok(has(gravada.panel, "lg:overflow-y-auto"), "sem palco o painel rola por dentro");
+  assert.ok(has(gravada.panel, "lg:pr-1"), "sem palco, a folga do anel do ⋯ a direita");
   assert.ok(has(gravada.root, "lg:overflow-hidden"), "a raiz nao rola a partir de lg: cada parte rola por dentro");
   assert.equal(layout.consoleSkeleton({ hasStage: false, panelOpen: false }).panel, gravada.panel, "sem palco o painel nunca fecha");
   assert.equal(layout.CONSOLE_PANEL_ID, "console-panel");
@@ -321,6 +326,14 @@ test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores de co
   for (const agent of [firefox, safari, chromeNoIphone, firefoxNoIpad, chromeNoAndroid, tabletAndroid, samsung, "", null, undefined]) {
     assert.equal(embed.consoleScreenShareMode(agent), "engine", String(agent));
   }
+  // O recurso tambem conta: o Chrome do Android ou do tablet no "site para computador" manda o userAgent de Linux, sem
+  // Android nem Mobile, e nao tem o getDisplayMedia.
+  const chromeAndroidComoComputador = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  assert.equal(embed.consoleScreenShareMode(chromeAndroidComoComputador), "ours", "so pelo userAgent, parece um computador");
+  assert.equal(embed.consoleScreenShareMode(chromeAndroidComoComputador, { displayMedia: false }), "engine", "sem o getDisplayMedia, o do motor");
+  assert.equal(embed.consoleScreenShareMode(chrome, { displayMedia: true }), "ours", "o Chrome de computador com o recurso");
+  assert.equal(embed.consoleScreenShareMode(chrome, { displayMedia: false }), "engine");
+  assert.equal(embed.consoleScreenShareMode(firefox, { displayMedia: true }), "engine", "o recurso nao abre o nosso circulo fora do Chromium");
 });
 
 test("liveConfigOverwrite no console: host e co-apresentador sem a barra do motor (ou so com o botao de tela dele), sem toolbarConfig, sem atalhos e com o ⋮ da miniatura avisando o Liberar e o Remover; a superficie da sala e a Equipe como antes; o interfaceConfig igual nas duas", () => {
@@ -435,4 +448,54 @@ test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nest
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "roteiro" } }), { more: "roteiro" });
+});
+
+test("consolePollStep (docs/31 V2-13 e V2-A50): a regiao viva do Atualizar so fala o clique, a passagem para sem resposta e a volta; o laco de 5 s fica quieto; o sem resposta fica na tela ate uma leitura responder", () => {
+  let poll = v2.CONSOLE_POLL_START;
+  const step = (origin, which) => (poll = v2.consolePollStep(poll, { origin, step: which }));
+  assert.deepEqual(poll, { notice: "", offline: false });
+  // O laco de 5 s e o retrato depois de uma acao: nada muda (o mesmo objeto, nenhum desenho a mais).
+  const antes = poll;
+  step("auto", "start");
+  step("auto", "ok");
+  assert.equal(poll, antes, "o laco nao fala nada");
+  // O clique: "Atualizando…" e, na resposta, nada.
+  step("click", "start");
+  assert.deepEqual(poll, { notice: "atualizando", offline: false });
+  step("click", "ok");
+  assert.deepEqual(poll, { notice: "", offline: false });
+  // Sem resposta: a passagem fala e liga a faixa; as tentativas seguintes do laco ficam quietas.
+  step("auto", "start");
+  step("auto", "fail");
+  assert.deepEqual(poll, { notice: "semResposta", offline: true });
+  const semResposta = poll;
+  step("auto", "start");
+  step("auto", "fail");
+  assert.equal(poll, semResposta, "o laco sem resposta nao repete o aviso a cada 5 s");
+  // O clique sem resposta: "Atualizando…" e de novo o sem resposta (a pessoa pediu).
+  step("click", "start");
+  assert.deepEqual(poll, { notice: "atualizando", offline: true }, "a faixa continua enquanto le");
+  step("click", "fail");
+  assert.deepEqual(poll, { notice: "semResposta", offline: true });
+  // A volta: a faixa sai e a regiao diz que conectou de novo, pelo laco ou pelo clique.
+  step("auto", "start");
+  step("auto", "ok");
+  assert.deepEqual(poll, { notice: "conectado", offline: false });
+  const deVolta = poll;
+  step("auto", "start");
+  step("auto", "ok");
+  assert.equal(poll, deVolta, "depois da volta, o laco fica quieto");
+  assert.equal(WEBINAR_COPY.consoleV2.conectadoDeNovo, "Conectado de novo.");
+});
+
+test("consoleRowFocusAfter (WCAG 2.4.3; Mãos e a Sala de espera): o foco vai a linha que fica no lugar da que saiu ou foi para o fim, a ultima se ela era a ultima, e nulo com a lista vazia", () => {
+  const ids = ["a", "b", "c"];
+  assert.equal(v2.consoleRowFocusAfter({ id: "a", ids, move: "remove" }), "b", "Liberar a primeira: a seguinte");
+  assert.equal(v2.consoleRowFocusAfter({ id: "b", ids, move: "remove" }), "c");
+  assert.equal(v2.consoleRowFocusAfter({ id: "c", ids, move: "remove" }), "b", "a ultima: a anterior, que virou a ultima");
+  assert.equal(v2.consoleRowFocusAfter({ id: "a", ids: ["a"], move: "remove" }), null, "a lista vazia: o cabecalho");
+  assert.equal(v2.consoleRowFocusAfter({ id: "a", ids, move: "end" }), "b", "Pular: a linha que subiu para o lugar");
+  assert.equal(v2.consoleRowFocusAfter({ id: "c", ids, move: "end" }), "c", "Pular a ultima: ela fica no lugar");
+  assert.equal(v2.consoleRowFocusAfter({ id: "x", ids, move: "remove" }), "a", "fora da lista: a primeira");
+  assert.equal(v2.consoleRowFocusAfter({ id: "x", ids: [], move: "remove" }), null);
 });

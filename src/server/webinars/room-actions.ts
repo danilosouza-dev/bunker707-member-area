@@ -70,6 +70,7 @@ import {
   type PollDraft,
   type PresenceSummary,
   type SlowModeSeconds,
+  questionBodyOf,
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
@@ -382,8 +383,9 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 
 /**
  * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
- * equipe): o texto cortado em 500 (o limite da pergunta), o `message_id` e anonima quando o nome gravado e o "Aluno {n}"
- * do proprio aluno. Sem autor, nada (a pergunta pede o aluno). Quem chama confere antes se a mensagem ja tem pergunta.
+ * equipe): o texto cortado em 500 caracteres (o limite da pergunta, sem partir um emoji: questionBodyOf), o
+ * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno. Sem autor, nada (a pergunta pede o
+ * aluno). Quem chama confere antes se a mensagem ja tem pergunta.
  */
 async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
   const userId = message.author_user_id;
@@ -393,7 +395,7 @@ async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow):
   const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
   const question = await insertQuestionRow(db, {
     anonymous,
-    body: message.body.slice(0, 500),
+    body: questionBodyOf(message.body),
     display_name: message.display_name,
     message_id: message.id,
     offset_ms: message.offset_ms,
@@ -503,6 +505,11 @@ export async function moderateMessage(input: { action: ModerationAction; message
         // A pergunta pede o aluno (webinar_questions.user_id): nada da equipe, do roteiro, do Assistente, nem resposta.
         if (message.source !== "audience" || !message.author_user_id || (message.kind !== "message" && message.kind !== "question")) {
           throw new WebinarError(ONLY_AUDIENCE_QUESTION_MESSAGE, 409);
+        }
+        // Uma pergunta nova so na sessao que ainda aceita a equipe (o console esconde o botao; um console parado ou o
+        // pedido direto numa sessao encerrada, cancelada ou no Replay nao cria linha nem muda o relatorio).
+        if (!canTeamActOn(sessionFromRow(sessionRow))) {
+          throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
         }
         patch = message.approved ? null : approvePatch;
         break;

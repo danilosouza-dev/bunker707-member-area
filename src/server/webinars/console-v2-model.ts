@@ -327,3 +327,60 @@ export function consolePanelViewOf(input: { entries: readonly ConsoleMoreEntry[]
   }
   return input.entries.includes(view.more) ? view : { tab: "chat" };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * A leitura do retrato (o Atualizar do topo, V2-13 e V2-A50)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que a regiao viva do Atualizar diz, so para o leitor de tela (vazio: nada). */
+export type ConsolePollNotice = "" | "atualizando" | "conectado" | "semResposta";
+/** A leitura do retrato: o que a regiao viva diz e se a ultima leitura ficou sem resposta (a faixa visivel). */
+export type ConsolePoll = { notice: ConsolePollNotice; offline: boolean };
+/** Quem pediu a leitura: o clique no Atualizar ou o resto (o laco de 5 s, a volta a aba, o retrato depois de uma acao). */
+export type ConsolePollOrigin = "auto" | "click";
+
+export const CONSOLE_POLL_START: ConsolePoll = { notice: "", offline: false };
+
+/**
+ * Um passo da leitura do retrato (docs/31 V2-13 e V2-A50): a regiao viva so fala quando algo muda para quem ouve. O
+ * "Atualizando…" so no clique no Atualizar (o laco de 5 s e o retrato depois de cada acao nao falam nada); o "Sem
+ * resposta" so na passagem para sem resposta (as tentativas seguintes do laco ficam quietas, e o clique o repete); o
+ * "Conectado de novo" na volta. O `offline` liga a faixa visivel abaixo do topo, ate a primeira leitura que responde. Sem
+ * mudanca, devolve o mesmo objeto (nenhum desenho a mais).
+ */
+export function consolePollStep(poll: ConsolePoll, input: { origin: ConsolePollOrigin; step: "fail" | "ok" | "start" }): ConsolePoll {
+  const click = input.origin === "click";
+  switch (input.step) {
+    case "start":
+      return click && poll.notice !== "atualizando" ? { ...poll, notice: "atualizando" } : poll;
+    case "ok":
+      if (poll.offline) {
+        return { notice: "conectado", offline: false };
+      }
+      return click && poll.notice !== "" ? { notice: "", offline: false } : poll;
+    case "fail":
+      return !poll.offline || (click && poll.notice !== "semResposta") ? { notice: "semResposta", offline: true } : poll;
+    default:
+      return poll;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O foco quando a linha do botao sai da lista (Mãos e a Sala de espera, WCAG 2.4.3)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * A linha que recebe o foco quando a do botao clicado sai da lista (`move: "remove"`: Liberar, Abaixar a mão, Silenciar,
+ * Admitir) ou vai para o fim (`"end"`: Pular), como o consoleChatFocusAfter do chat (docs/31 V2-15): a linha que fica na
+ * mesma posicao depois da troca (a seguinte) ou, sem ela, a ultima. Nula com a lista vazia: quem chama leva o foco ao
+ * cabecalho. Quem chama foca antes da troca, porque a linha escolhida ja esta na tela.
+ */
+export function consoleRowFocusAfter(input: { id: string; ids: readonly string[]; move: "end" | "remove" }): string | null {
+  const index = input.ids.indexOf(input.id);
+  const rest = input.ids.filter((id) => id !== input.id);
+  const after = input.move === "end" && index >= 0 ? [...rest, input.id] : rest;
+  if (after.length === 0) {
+    return null;
+  }
+  return after[Math.min(Math.max(0, index), after.length - 1)] ?? null;
+}

@@ -585,6 +585,17 @@ export const CHAT_LIMITS = {
   chatPageMax: 200
 } as const;
 
+/**
+ * O texto de uma pergunta feita de uma mensagem (o Liberar e o Virar pergunta do console, a pergunta pelo chat aberto,
+ * a pergunta ao Assistente): no maximo CHAT_LIMITS.question caracteres, contados como o check char_length do banco (por
+ * caractere, nao por unidade UTF-16). Nunca corta um emoji ao meio: a metade solta de um par faz o Postgres recusar o
+ * texto inteiro.
+ */
+export function questionBodyOf(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= CHAT_LIMITS.question ? text : chars.slice(0, CHAT_LIMITS.question).join("");
+}
+
 /** Os ritmos da sala (docs/30 §5.1, §6.6, M1 a M4) e os pesos dos "mais quentes" (M3); o SQL repete os mesmos numeros. */
 export const ROOM_RULES = {
   heartbeatSeconds: 15,

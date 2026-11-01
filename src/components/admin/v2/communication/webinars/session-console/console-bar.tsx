@@ -35,11 +35,15 @@ const live = WEBINAR_COPY.consoleAoVivo;
 const aoVivo = WEBINAR_COPY.aoVivo;
 
 /**
- * A grade da barra do console: a zona da esquerda (a Sala de espera) fica com o que sobra e nunca alarga a barra (a
- * pilula encolhe e o texto vira reticencias, com o texto inteiro no title); o centro e a direita, como na sala. Com o
- * painel aberto a 1024 px a coluna do palco tem 656 px, e os nove circulos com a pilula nao cabiam.
+ * A grade da barra do console: a partir de lg, a zona da esquerda (a Sala de espera) fica com o que sobra e nunca alarga
+ * a barra (a pilula encolhe e o texto vira reticencias, com o texto inteiro no title); o centro e a direita, como na
+ * sala. Com o painel aberto a 1024 px a coluna do palco tem 656 px, e os nove circulos com a pilula nao cabiam. Abaixo de
+ * lg a pilula fica do tamanho do conteudo (LOBBY_PILL) e a barra rola de lado (V2-A42): encolhida, ela sumia e o Admitir
+ * todos vazava por baixo do Microfone.
  */
 const CONSOLE_BAR_GRID = "lg:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)]";
+/** A pilula da Sala de espera: inteira abaixo de lg (a barra rola), encolhida com reticencias a partir de lg. */
+const LOBBY_PILL = "min-w-0 max-w-[220px] shrink max-lg:max-w-none max-lg:shrink-0 xl:max-w-[288px] 2xl:max-w-[460px]";
 
 /**
  * As Configurações abertas: a partir de lg, como na sala (ROOM_SETTINGS_POPOVER, por cima do palco, alinhado a direita
@@ -114,6 +118,9 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
     for (const person of room.knocking) {
       handle.command("answerKnockingParticipant", person.id, true);
     }
+    // A pilula com o botao some (ou vira a frase): o foco vai antes ao primeiro circulo do centro (o Microfone de quem
+    // apresenta, as Mãos da Equipe), senao cairia no comeco da pagina.
+    rootRef.current?.querySelector<HTMLButtonElement>('[data-room-bar-item="mic"]:not(:disabled), [data-room-bar-item="hands"]')?.focus();
     handle.dispatch({ type: "admitAll" });
   }
 
@@ -125,7 +132,7 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
     if (state.kind === "knocking") {
       return (
         <div
-          className="flex h-9 min-w-0 max-w-[220px] shrink items-center gap-2 rounded-full border border-room-border-strong pl-3 pr-1.5 text-xs font-semibold text-room-fg-strong xl:max-w-[288px] 2xl:max-w-[460px]"
+          className={cn("flex h-9 items-center gap-2 rounded-full border border-room-border-strong pl-3 pr-1.5 text-xs font-semibold text-room-fg-strong", LOBBY_PILL)}
           data-console-lobby="knocking"
           key="lobby"
           title={copy.barra.salaDeEspera(state.count)}
@@ -139,7 +146,7 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
     }
     return (
       <span
-        className="min-w-0 max-w-[220px] shrink truncate rounded-full border border-room-border px-3 py-1.5 text-xs text-room-fg-muted xl:max-w-[288px] 2xl:max-w-[460px]"
+        className={cn("truncate rounded-full border border-room-border px-3 py-1.5 text-xs text-room-fg-muted", LOBBY_PILL)}
         data-console-lobby="notice"
         key="lobby"
         title={state.text}

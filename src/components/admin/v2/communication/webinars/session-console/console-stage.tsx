@@ -20,10 +20,11 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // grava; em cima a direita, "12 presentes · pico 14" (consolePresenceBadge, a partir de sm; abaixo, no topo); embaixo
 // a esquerda, quem esta no video grande com o papel ("Você · Apresentador", ou o selo que o aluno ve com outro
 // moderador ali, consoleStageBadgeFor). Sem o selo do Assistente (o retrato do console nao traz o estado, V2-A41). As
-// capas (Testar sala, Tentar de novo, Entrar na sala) sao RoomButton nos tokens do tema, com o anel de foco branco: o
-// palco e preto nos dois temas, e o anel do tema claro (quase preto) sumiria sobre ele. O anel do admin vem da regra
-// global de foco (globals.css, var(--focus-ring), fora de @layer), entao a camada das capas troca a variavel, nao a
-// classe do botao.
+// capas (Testar sala, Tentar de novo, Entrar na sala) sao RoomButton nos tokens do tema, sobre o veu escuro da sala e
+// com o anel de foco branco: o iframe cobre o palco e, no tema claro, o fundo dele e claro ate o video grande aparecer
+// (a folha da instancia), entao o veu garante o fundo da frase branca e do anel nos dois temas; o anel do tema claro
+// (quase preto) sumiria sobre o veu. O anel do admin vem da regra global de foco (globals.css, var(--focus-ring), fora
+// de @layer), entao a camada das capas troca a variavel, nao a classe do botao.
 // A coluna de miniaturas (V2-A5): a largura do palco pelo useStageGeometry; os selos de cima a direita descontam a
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
@@ -31,8 +32,12 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // Nenhum texto cita o motor da sala.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
-/** A camada das capas: o anel de foco branco sobre o palco preto, nos dois temas (a regra global le --focus-ring). */
-const COVER = "[--focus-ring:white]";
+/**
+ * A camada das capas: o veu escuro da sala (bg-black/70, como as capas da sala do aluno) por cima do iframe, cujo fundo e
+ * o do tema (claro no tema claro, ate o video grande aparecer), e o anel de foco branco sobre ele, nos dois temas (a
+ * regra global le --focus-ring).
+ */
+const COVER = "bg-black/70 [--focus-ring:white]";
 
 type ConsoleStageProps = {
   busy: boolean;

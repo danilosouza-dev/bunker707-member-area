@@ -17,8 +17,8 @@ export const CONSOLE_SETTINGS_ID = "console-live-settings";
 /** O comeco dos ids das abas do painel: `console-tab-{aba}` no painel da aba e `console-tabbtn-{aba}` na aba. */
 export const CONSOLE_TAB_ID_PREFIX = "console";
 /**
- * O cartao das abas sem SectionCard (Mãos e Pessoas, docs/31 V2-15): os cantos de Marca › Estilo, como o cartao da aba
- * da sala, a borda e o fundo do tema.
+ * O cartao das abas sem SectionCard (Mãos e Pessoas, docs/31 V2-15): a borda e o fundo do tema e os cantos do estilo
+ * discreto do :root (10 px), porque o admin nao le a Marca › Estilo (a sala le; docs/31 V2-A52).
  */
 export const CONSOLE_PANE_CARD = "flex min-w-0 flex-col gap-4 rounded-[var(--member-cover-radius)] border border-room-border bg-room-surface p-4";
 
@@ -43,18 +43,20 @@ export type ConsoleSkeleton = {
  * 1536 (a largura do prototipo), e fechado ele some (montado) e o palco toma a largura. Sem palco, o painel nunca
  * fecha. A coluna do palco (so o palco e a barra; as Configurações abrem por cima) rola por dentro numa janela baixa
  * demais: o palco guarda o piso e a barra continua ao alcance. A folga de 4 px (-m-1 com p-1) deixa o anel de foco dos
- * botoes da borda inteiro dentro da rolagem. O painel com abas (console-panel.tsx) tem a linha das abas fixa e o corpo
- * que rola.
+ * botoes da borda inteiro dentro da rolagem; no painel, que tambem rola por dentro, a folga de 4 px a direita (lg:pr-1)
+ * guarda o anel do X "Fechar o painel" (e o do ⋯, na gravada e no Replay). O painel com abas (console-panel.tsx) tem a
+ * linha das abas fixa e o corpo que rola. Os avisos (adminToast) abrem em cima, no meio, logo abaixo do topo (a variavel
+ * --console-toast-top da raiz: o topo tem duas linhas abaixo de lg), longe do campo do chat, preso no canto de baixo.
  */
 export function consoleSkeleton(input: { hasStage: boolean; panelOpen: boolean }): ConsoleSkeleton {
-  const panelBase = "relative flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto";
+  const panelBase = "relative flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1";
   return {
     banner: "flex shrink-0 flex-col gap-2 px-4 pt-4",
     bar: input.hasStage ? "min-w-0 shrink-0" : null,
     body: "flex min-w-0 flex-col gap-4 p-4 lg:min-h-0 lg:flex-1 lg:flex-row",
     // Fechado, so `hidden` (sem o `flex`, que disputaria o display com ele).
     panel: input.hasStage ? (input.panelOpen ? `${panelBase} lg:w-80 lg:flex-none xl:w-[360px] 2xl:w-[440px]` : "hidden") : `${panelBase} mx-auto w-full max-w-[720px]`,
-    root: "flex min-h-dvh flex-col bg-room-bg text-room-fg lg:h-dvh lg:overflow-hidden",
+    root: "flex min-h-dvh flex-col bg-room-bg text-room-fg [--console-toast-top:7.5rem] lg:h-dvh lg:overflow-hidden lg:[--console-toast-top:4.5rem]",
     stage: input.hasStage ? "relative aspect-video w-full min-w-0 overflow-hidden rounded-2xl bg-black lg:aspect-auto lg:min-h-60 lg:flex-1" : null,
     stageColumn: input.hasStage ? "relative flex min-w-0 flex-col gap-3 lg:-m-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:p-1" : null,
     top: "flex shrink-0 flex-col gap-2 border-b border-room-border bg-room-surface px-4 py-2 lg:h-14 lg:flex-row lg:items-center lg:gap-6 lg:py-0"

@@ -237,8 +237,17 @@ test("o console usa as regras puras, nao uma copia delas: as abas, o ⋯, o topo
   assert.match(bar, /\bconsoleBarItemsFor\(/);
   assert.match(bar, /\bconsoleRecordButton\(/);
   const panel = fonte("live-room-panel.tsx");
-  for (const regra of ["screenSharesToStop", "rolesToRead", "menuKickPlan", "participantMenuClickOf", "consoleFilmstripShouldToggle", "consoleScreenShareMode"]) {
+  for (const regra of ["screenShareWatchStep", "rolesToRead", "menuKickPlan", "participantMenuClickOf", "consoleFilmstripShouldToggle", "consoleScreenShareMode"]) {
     assert.match(panel, new RegExp(`\\b${regra}\\(`), `live-room-panel.tsx chama ${regra}`);
+  }
+  // O primeiro sinal de um iframe novo vale como a saida do anterior (o Tentar de novo depois de um erro fatal nao recebe
+  // o videoConferenceLeft): o preparo de quem apresenta, a sala de espera, as leituras e os pedidos do vigia recomecam.
+  const novo = panel.slice(panel.indexOf("if (newFrame) {"), panel.indexOf('dispatch({ type: "frame" });'));
+  for (const reset of ["setupDone.current = false;", "lobbySent.current = null;", "leftCountRef.current += 1;", "stoppedRef.current = new Set();", "setSharing(false);"]) {
+    assert.ok(novo.includes(reset), `o iframe novo faz ${reset}`);
+  }
+  for (const [fonteDe, regra] of [["console-people-tab.tsx", "consoleRowFocusAfter"], ["live-hands.tsx", "consoleRowFocusAfter"], ["session-console.tsx", "consolePollStep"]]) {
+    assert.match(fonte(fonteDe), new RegExp(`\\b${regra}\\(`), `${fonteDe} chama ${regra}`);
   }
   const stage = fonte("console-stage.tsx");
   assert.match(stage, /\bconsoleColumnPolicy\(/);
@@ -290,10 +299,13 @@ test("nenhum texto promete barrar um cliente adulterado: o vigia so para o clien
 
 test("os sinais que so o console ouve ficam fora da lista da sala do aluno (cada sinal da lista passa pela sala em toda pagina de aluno)", async () => {
   const embed = await import("../src/lib/jitsi-room-config.ts");
-  for (const sinal of ["participantMuted", "moderationStatusChanged", "participantMenuButtonClick"]) {
+  // Os cinco, inclusive os da tela: um sinal nas duas listas passaria duas vezes pelo console (a juncao abaixo).
+  assert.deepEqual([...embed.CONSOLE_EXTRA_EVENTS].sort(), ["contentSharingParticipantsChanged", "moderationStatusChanged", "participantMenuButtonClick", "participantMuted", "screenSharingStatusChanged"]);
+  for (const sinal of embed.CONSOLE_EXTRA_EVENTS) {
     assert.ok(!embed.JITSI_LISTENED_EVENTS.includes(sinal), `${sinal} fora da sala do aluno`);
-    assert.ok(embed.CONSOLE_EXTRA_EVENTS.includes(sinal), `${sinal} no console`);
   }
+  assert.equal(new Set(embed.JITSI_LISTENED_EVENTS).size, embed.JITSI_LISTENED_EVENTS.length, "a lista da sala sem nome repetido");
+  assert.equal(new Set(embed.CONSOLE_EXTRA_EVENTS).size, embed.CONSOLE_EXTRA_EVENTS.length, "a lista do console sem nome repetido");
   // O console monta com a lista da sala mais a dele.
   assert.match(fonte("live-room-panel.tsx"), /\[\.\.\.JITSI_LISTENED_EVENTS, \.\.\.CONSOLE_EXTRA_EVENTS\]/);
 });

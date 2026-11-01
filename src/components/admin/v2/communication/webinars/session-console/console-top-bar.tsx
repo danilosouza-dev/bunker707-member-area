@@ -6,17 +6,20 @@ import { ROOM_FOCUS, RoomBadge, RoomButton, RoomIconButton, roomButtonClassName 
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomTheme } from "@/lib/webinar-room-prefs";
 import { cn } from "@/lib/utils";
-import { consoleSessionOptionLabel, type ConsoleTopAction, type ConsoleTopActionId } from "@/server/webinars/console-v2-model";
+import { consoleSessionOptionLabel, type ConsolePoll, type ConsolePollNotice, type ConsoleTopAction, type ConsoleTopActionId } from "@/server/webinars/console-v2-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import type { WebinarSession } from "@/server/webinars/model";
 
 // O topo do console V2 (docs/31 V2-13), da esquerda para a direita: a seta de voltar ao editor (36 px, so o icone), o
 // titulo em duas linhas ("Console da sessão" e o nome do webinario, o h1 inteiro), o seletor de sessoes (o <select>
-// nativo, com o ponto verde fora dele so com a sessao escolhida no ar), o Atualizar (a leitura do retrato, com a regiao
-// viva so para o leitor de tela), os selos do momento e dos presentes (na live, o momento fica no palco e os presentes
-// so abaixo de sm, onde o palco nao tem o selo deles), um traco, o Tema (36 px, o nome diz para qual vai) e os botoes
-// de situacao da sessao (consoleTopActionsFor: Abrir a sala, Começar para todos, Trancar, Encerrar live, Abrir e
-// Encerrar sessão da gravada, Ver relatório). Abaixo de lg o topo quebra em duas linhas: a seta e o
+// nativo, com o ponto verde fora dele so com a sessao escolhida no ar), o Atualizar (a leitura do retrato: o icone gira
+// enquanto le, o botao nunca fica desligado por isso, e a regiao viva so para o leitor de tela fala o clique, a falta de
+// resposta e a volta, consolePollStep; o sem resposta tambem fica na tela, na faixa abaixo do topo, docs/31 V2-A50), os
+// selos do momento e dos presentes (na live, o momento fica no palco e os presentes so abaixo de sm, onde o palco nao
+// tem o selo deles), um traco, o Tema (36 px, o nome diz para qual vai) e os botoes de situacao da sessao
+// (consoleTopActionsFor: Abrir a sala, Começar para todos, Trancar, Encerrar live, Abrir e Encerrar sessão da gravada,
+// Ver relatório). O Trancar diz a acao no nome (Trancar a sala ou Destrancar a sala), sem aria-pressed: o nome que muda
+// com aria-pressed se lia como o contrario (docs/31 V2-7). Abaixo de lg o topo quebra em duas linhas: a seta e o
 // titulo; depois o seletor e os botoes, que rolam de lado sem barra. A partir de lg e uma faixa so de 56 px; se os
 // botoes nao couberem (a 1024 px, com muitos botoes ou um relogio longo), a linha rola de lado com uma barra fina, para
 // o ultimo botao nunca sumir sem sinal. As cores pelos tokens do tema do console.
@@ -26,7 +29,8 @@ const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const v2 = WEBINAR_COPY.consoleV2;
 const tema = WEBINAR_COPY.salaV2.tema;
 
-export type ConsolePolling = "idle" | "offline" | "updating";
+/** O que a regiao viva do Atualizar diz (consolePollStep). */
+const POLL_NOTICE: Record<ConsolePollNotice, string> = { "": "", atualizando: v2.atualizando, conectado: v2.conectadoDeNovo, semResposta: v2.semResposta };
 
 type ConsoleTopBarProps = {
   actions: readonly ConsoleTopAction[];
@@ -43,11 +47,14 @@ type ConsoleTopBarProps = {
   onLock: (locked: boolean) => void;
   onRefresh: () => void;
   onToggleTheme: () => void;
-  polling: ConsolePolling;
+  /** A leitura do retrato: a regiao viva e o sem resposta (consolePollStep). */
+  poll: ConsolePoll;
   /** "7 presentes · pico 9" (consolePresenceBadge); nulo sem sessao. */
   presentLabel: string | null;
   /** Os presentes so abaixo de sm (a live: a partir dai eles ficam no palco, em cima a direita). */
   presentNarrowOnly?: boolean;
+  /** Uma leitura do retrato a caminho: o icone do Atualizar gira. */
+  reading: boolean;
   reportHref: string;
   roomLocked: boolean;
   sessionId: string | null;
@@ -89,7 +96,6 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
       case "lock":
         return (
           <RoomButton
-            aria-pressed={props.roomLocked}
             disabled={!props.canWrite || busyKey === "live:lock"}
             key={action.id}
             onClick={() => props.onLock(!props.roomLocked)}
@@ -170,11 +176,11 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
           </select>
           <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 text-room-icon" />
         </div>
-        <RoomIconButton disabled={!props.sessionId || props.polling === "updating"} label={v2.atualizar} onClick={props.onRefresh} size={36} square>
-          <RefreshCw aria-hidden="true" className={cn(props.polling === "updating" && "animate-spin motion-reduce:animate-none")} />
+        <RoomIconButton disabled={!props.sessionId} label={v2.atualizar} onClick={props.onRefresh} size={36} square>
+          <RefreshCw aria-hidden="true" className={cn(props.reading && "animate-spin motion-reduce:animate-none")} />
         </RoomIconButton>
-        <span aria-live="polite" className="sr-only" data-console-polling={props.polling}>
-          {props.polling === "updating" ? v2.atualizando : props.polling === "offline" ? v2.semResposta : ""}
+        <span aria-live="polite" className="sr-only" data-console-polling={props.poll.offline ? "offline" : props.reading ? "updating" : "idle"}>
+          {POLL_NOTICE[props.poll.notice]}
         </span>
         {props.clockLabel || props.presentLabel ? (
           <span className={cn("flex shrink-0 items-center gap-2", !props.clockLabel && props.presentNarrowOnly && "sm:hidden")} data-console-status="">

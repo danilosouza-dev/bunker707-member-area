@@ -14,6 +14,7 @@ import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import {
   ASSISTANT_LIMITS,
   CHAT_LIMITS,
+  questionBodyOf,
   toTime,
   type AnswerSource,
   type AssistantRequestStatus,
@@ -355,10 +356,10 @@ export function assistantSystemPrompt(context: string): string {
   ].join("\n");
 }
 
-/** A pergunta que vai para a IA: sem o "@assistente", no tamanho de uma pergunta. */
+/** A pergunta que vai para a IA: sem o "@assistente", no tamanho de uma pergunta (sem partir um emoji ao meio). */
 export function assistantQuestionText(body: string): string {
   const text = withoutMention(body) || body.trim();
-  return text.slice(0, CHAT_LIMITS.question);
+  return questionBodyOf(text);
 }
 
 /** O texto da resposta como entra no chat (e na pergunta): sem markdown de enfeite, no maximo o limite; vazio = nulo. */

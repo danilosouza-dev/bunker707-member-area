@@ -22,14 +22,18 @@ import {
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
 import {
+  CONSOLE_POLL_START,
   consoleMoreEntriesFor,
   consolePanelViewOf,
+  consolePollStep,
   consolePresenceBadge,
   consoleStageTopLeft,
   consoleTabCounts,
   consoleTabsFor,
   consoleTopActionsFor,
-  type ConsolePanelView
+  type ConsolePanelView,
+  type ConsolePoll,
+  type ConsolePollOrigin
 } from "@/server/webinars/console-v2-model";
 import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
 import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
@@ -75,7 +79,7 @@ import { ConsoleQuestions } from "./console-questions";
 import { ConsoleScript } from "./console-script";
 import { ConsoleShell } from "./console-shell";
 import { ConsoleStage } from "./console-stage";
-import { ConsoleTopBar, type ConsolePolling } from "./console-top-bar";
+import { ConsoleTopBar } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
 import { LiveHands } from "./live-hands";
@@ -89,8 +93,9 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // quatro paineis: Chat (moderacao, quem pode escrever, modo lento, a mensagem da equipe), Roteiro (Soltar agora),
 // Enquetes (abrir, encerrar, compartilhar) e Perguntas (responder, ao vivo, dispensar, reabrir). O retrato vem do
 // servidor a cada 5 s pela rota /api/admin/webinars/[id]/console; cada acao busca o retrato de novo ao terminar.
-// Erros ficam num banner (nunca toast); sucesso vira toast. Na Live ao vivo (fase 3, docs/30 §1.4, §2.4, §6.4 e §6.7)
-// o topo troca Abrir/Encerrar por Abrir a sala (Sessao de pratica), Comecar para todos e Encerrar live (com
+// Erros ficam num banner (nunca toast); sucesso vira toast (menos a mensagem da equipe, que aparece na lista). Na Live
+// ao vivo (fase 3, docs/30 §1.4, §2.4, §6.4 e §6.7) o topo troca Abrir/Encerrar por Abrir a sala (Sessao de pratica),
+// Comecar para todos e Encerrar live (com
 // confirmacao: para a gravacao, encerra no servidor e fecha a sala para todos), e a mesa ganha a sala no meio
 // (live-room-panel.tsx: o iframe pelo useJitsiMeet com os botoes nossos ao redor), Mao levantada, Participantes (com o
 // ⋯ de remover, silenciar e banir, tambem no chat), o cartao Gravacao, "Alinhar chat" e "Enviar gravacao". Sem a sala
@@ -123,6 +128,8 @@ type Failure = { message: string; status: number };
 type SessionConsoleProps = {
   currentUserId: string;
   data: SessionConsoleData;
+  /** A leitura do retrato na montagem (o teste de tela; o console sempre comeca respondendo). */
+  initialPoll?: ConsolePoll;
   /** O nonce da pagina (cabecalho x-nonce do src/proxy.ts) para o <script> da sala ao vivo. */
   nonce?: string | null;
   permissions: WebinarPermissions;
@@ -134,14 +141,18 @@ type SessionConsoleProps = {
 
 type BanTarget = { name: string; participantId: string | null; userId: string };
 
-export function SessionConsole({ currentUserId, data, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
+export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ConsoleSnapshot | null>(data.snapshot);
   const [skew] = useState(() => serverNow - Date.now());
   const [tick, setTick] = useState(() => Date.now());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [polling, setPolling] = useState<ConsolePolling>("idle");
+  // A leitura do retrato: o que a regiao viva do Atualizar diz e a faixa do sem resposta (consolePollStep); e quantas
+  // leituras estao a caminho (o giro do icone; o clique no Atualizar durante uma leitura fica sem efeito).
+  const [poll, setPoll] = useState<ConsolePoll>(initialPoll);
+  const [reading, setReading] = useState(false);
+  const readsRef = useRef(0);
   const [confirming, setConfirming] = useState<"end" | "open" | null>(null);
   const [confirmingLiveEnd, setConfirmingLiveEnd] = useState(false);
   const [banTarget, setBanTarget] = useState<BanTarget | null>(null);
@@ -208,7 +219,14 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     onAnchor: markAnchor,
     onBrowserRecording,
     // O Remover do ⋮ da miniatura do video com o aluno ligado a linha: o mesmo Remover da lista (o registro, depois o motor).
-    onKickPerson: (person, participantId) => onPersonAction(person, participantId, { type: "kick" }),
+    // O ⋮ do motor nao fica desligado com outra acao da mesa em andamento: em vez de nada acontecer, o aviso de tentar de novo.
+    onKickPerson: (person, participantId) => {
+      if (busyKey) {
+        adminToast.info(WEBINAR_COPY.consoleV2.pessoas.tenteDeNovo);
+        return;
+      }
+      onPersonAction(person, participantId, { type: "kick" });
+    },
     session,
     webinar
   });
@@ -220,27 +238,40 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     return () => window.clearInterval(id);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (!sessionId) {
-      return;
-    }
-
-    setPolling("updating");
-
-    try {
-      const response = await fetch(`/api/admin/webinars/${webinar.id}/console?sessao=${encodeURIComponent(sessionId)}`, { cache: "no-store", credentials: "same-origin" });
-
-      if (!response.ok) {
-        throw new Error(String(response.status));
+  /**
+   * Le o retrato de novo. So o clique no Atualizar fala na regiao viva ("Atualizando…"); o laco de 5 s, a volta a aba e o
+   * retrato depois de cada acao ficam quietos, e o sem resposta so fala na passagem (consolePollStep). O Atualizar nunca
+   * fica desligado durante a leitura (o foco do teclado cairia no comeco da pagina a cada 5 s): o clique so nao faz nada.
+   */
+  const refresh = useCallback(
+    async (origin: ConsolePollOrigin = "auto") => {
+      if (!sessionId || (origin === "click" && readsRef.current > 0)) {
+        return;
       }
 
-      const body = (await response.json()) as { data: ConsoleSnapshot };
-      setSnapshot(body.data);
-      setPolling("idle");
-    } catch {
-      setPolling("offline");
-    }
-  }, [sessionId, webinar.id]);
+      readsRef.current += 1;
+      setReading(true);
+      setPoll((current) => consolePollStep(current, { origin, step: "start" }));
+
+      try {
+        const response = await fetch(`/api/admin/webinars/${webinar.id}/console?sessao=${encodeURIComponent(sessionId)}`, { cache: "no-store", credentials: "same-origin" });
+
+        if (!response.ok) {
+          throw new Error(String(response.status));
+        }
+
+        const body = (await response.json()) as { data: ConsoleSnapshot };
+        setSnapshot(body.data);
+        setPoll((current) => consolePollStep(current, { origin, step: "ok" }));
+      } catch {
+        setPoll((current) => consolePollStep(current, { origin, step: "fail" }));
+      } finally {
+        readsRef.current -= 1;
+        setReading(readsRef.current > 0);
+      }
+    },
+    [sessionId, webinar.id]
+  );
 
   // A cada 5 s (so com a aba visivel) e ao voltar para a aba.
   useEffect(() => {
@@ -600,9 +631,17 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
 
   const readOnly = Boolean(session) && !canAct;
   const onlyPublishers = live !== null && room.controls.session && !room.controls.sessionEnabled;
+  // Sem resposta do retrato, na tela (docs/31 V2-A50): o chat, as pendentes, as perguntas e os presentes param de
+  // atualizar, e quem apresenta precisa saber que modera dados velhos.
+  const offline = Boolean(sessionId) && poll.offline;
   const banner =
-    failure || readOnly || onlyPublishers ? (
+    failure || offline || readOnly || onlyPublishers ? (
       <>
+        {offline ? (
+          <p className="text-[13px] leading-5 font-medium text-room-warn-fg" data-console-offline="">
+            {WEBINAR_COPY.consoleV2.semResposta}
+          </p>
+        ) : null}
         {failure ? (
           <ErrorBanner
             action={
@@ -632,11 +671,12 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       onAction={onTopAction}
       onChangeSession={changeSession}
       onLock={lockRoom}
-      onRefresh={() => void refresh()}
+      onRefresh={() => void refresh("click")}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
-      polling={polling}
+      poll={poll}
       presentLabel={presentLabel}
       presentNarrowOnly={live !== null}
+      reading={reading}
       reportHref={webinarReportHref(webinar.id)}
       roomLocked={live?.roomLocked === true}
       sessionId={sessionId}
@@ -779,10 +819,14 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                             )
                         : null
                     }
-                    onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
+                    // Sem aviso: a mensagem enviada aparece na lista, como na sala do aluno.
+                    onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }))}
                     personMenu={live ? chatPersonMenu : null}
                     pinnedMessageId={snapshot.pinnedMessageId}
                     session={session}
+                    // A lista escondida (outra aba, uma entrada do ⋯, o painel fechado) nao rola com o que chega: ao
+                    // voltar, quem estava no fim volta ao fim.
+                    shown={panelShown && "tab" in shownView && shownView.tab === "chat"}
                   />
                 ),
                 maos: live ? <LiveHands handle={room} people={live.people} /> : null,

@@ -345,13 +345,15 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M."]);
   assert.match(fila, /<li[^>]*>Nenhuma mensagem ainda\.<\/li>/, "so pendentes: a lista vazia");
 
-  // A lista: o <ol role=log> com o nome Chat, so com as liberadas, cada uma no balao.
-  assert.match(chat, /<ol aria-label="Chat"[^>]*data-console-chat=""[^>]*role="log"/);
+  // A lista: a caixa que rola e o role=log com o nome Chat; dentro dela a <ol> continua lista (o role=log na propria <ol>
+  // tirava dela o papel de lista, e os itens ficavam sem lista), so com as liberadas, cada uma no balao.
+  assert.match(chat, /<div aria-label="Chat"[^>]*data-console-chat=""[^>]*role="log"><ol class="[^"]*">/);
+  assert.doesNotMatch(chat, /<ol[^>]*role="log"/, "a <ol> sem o papel de log");
   // Sem leitura automatica: quem modera le a lista, e cada mensagem nova chegaria lida junto com os botoes dela.
-  assert.match(chat, /<ol aria-label="Chat" aria-live="off"[^>]*role="log"/);
+  assert.match(chat, /<div aria-label="Chat" aria-live="off"[^>]*role="log"/);
   const log = chat.slice(chat.indexOf('role="log"'));
   assert.deepEqual(Array.from(log.matchAll(/data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-sem-aceite", "m-equipe", "m-roteiro"]);
-  const logClasses = chat.match(/<ol aria-label="Chat" aria-live="off" class="([^"]*)"/)?.[1].split(" ") ?? [];
+  const logClasses = chat.match(/<div aria-label="Chat" aria-live="off" class="([^"]*)"/)?.[1].split(" ") ?? [];
   assert.ok(logClasses.includes("lg:flex-1") && logClasses.includes("lg:min-h-0") && logClasses.includes("overflow-y-auto"), "a partir de lg a lista enche a aba e rola por dentro");
   assert.ok(logClasses.includes("max-lg:max-h-[60vh]") && !logClasses.includes("max-h-[60vh]"), "o teto de 60vh so abaixo de lg, com a pagina rolando");
   assert.match(pane(markup, "tab", "chat"), /^<div[^>]*class="[^"]*\blg:flex-1\b[^"]*"[^>]*data-console-tab="chat"/, "a aba do Chat enche o corpo do painel");
@@ -453,6 +455,32 @@ test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar o
   // A caixa: o campo de 44 px no minimo e o Enviar redondo de 44 px com o nome.
   assert.match(chat, /<textarea(?=[^>]*\bmin-h-11\b)(?=[^>]*id="console-composer")(?=[^>]*placeholder="Escreva para a turma")[^>]*>/);
   assert.match(chat, /<button(?=[^>]*aria-label="Enviar")(?=[^>]*\bsize-11\b)(?=[^>]*\brounded-full\b)[^>]*>/);
+  assert.doesNotMatch(chat.match(/<textarea[^>]*id="console-composer"[^>]*>/)?.[0] ?? "", /\s(?:readOnly|disabled)=""/i, "fora do envio, o campo livre");
+});
+
+test("caixa da equipe durante o envio (docs/31 V2-15, WCAG 2.4.3): o campo fica somente leitura, nunca desligado (desligado, o foco do Enter cairia no comeco da pagina), e o Enviar desligado; sem poder agir, desligado", () => {
+  const props = {
+    askedMessageIds: [],
+    busyKey: "send",
+    canAct: true,
+    currentUserId: "u-host",
+    hostUserId: "u-host",
+    messages,
+    onChatMode() {},
+    onModerate() {},
+    onSend: async () => true,
+    pinnedMessageId: null,
+    session: session()
+  };
+  const campo = (markup) => markup.match(/<textarea[^>]*id="console-composer"[^>]*>/)?.[0] ?? "";
+  const enviando = html(createElement(ConsoleChat, props));
+  assert.match(campo(enviando), /\sreadOnly=""/i, "somente leitura durante o envio");
+  assert.doesNotMatch(campo(enviando), /\sdisabled=""/, "nunca desligado so pelo envio");
+  assert.match(enviando, /<button(?=[^>]*aria-label="Enviar")(?=[^>]*disabled="")[^>]*>/, "o Enviar desligado durante o envio");
+  // Outra acao da mesa em andamento nao mexe no campo.
+  assert.doesNotMatch(campo(html(createElement(ConsoleChat, { ...props, busyKey: "moderate:m-ana" }))), /\s(?:readOnly|disabled)=""/i);
+  const semAcao = campo(html(createElement(ConsoleChat, { ...props, busyKey: null, canAct: false })));
+  assert.match(semAcao, /\sdisabled=""/, "a sessao que nao aceita a equipe desliga o campo");
 });
 
 test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {

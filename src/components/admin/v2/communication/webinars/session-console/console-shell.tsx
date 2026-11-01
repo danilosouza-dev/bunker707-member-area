@@ -8,7 +8,7 @@ import { AdminToaster } from "../../../toast";
 // escolhido. O data-room-theme (os --room-* da sala) e o data-console-root (a ponte que redefine os tokens do admin por
 // eles, globals.css) ficam no MESMO elemento. Nao e dialogo nem camada por cima: os menus e as confirmacoes do console
 // vao para o [data-console-portal], dentro da raiz, e seguem o tema; os avisos (adminToast) tambem, pelo AdminToaster
-// montado aqui com o tema (a moldura nao monta o dela na tela cheia). O ref do portal nasce no SessionConsole, que e o
+// montado aqui com o tema (a moldura nao monta o dela na tela cheia), em cima, no meio, abaixo do topo. O ref do portal nasce no SessionConsole, que e o
 // pai das confirmacoes: elas recebem o container direto; os menus dos filhos leem o mesmo ref por useConsolePortal().
 
 const ConsolePortalContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
@@ -41,7 +41,7 @@ export function ConsoleShell({ banner, children, classNames, portalRef, theme, t
         {children}
       </ConsolePortalContext.Provider>
       <div data-console-portal="" ref={portalRef} />
-      <AdminToaster theme={theme} />
+      <AdminToaster placement="console" theme={theme} />
     </div>
   );
 }

@@ -734,9 +734,13 @@ test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quan
   assert.equal(perguntaDe(anonima.id).deleted_at, null);
 });
 
-test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta sem o historico do aluno (a pendente e liberada junto); a pergunta pelo chat moderado segue o Liberar; nao duplica; a equipe, o roteiro, o Assistente e a resposta dao 409", async () => {
+test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta sem o historico do aluno (a pendente e liberada junto); o texto cortado em 500 caracteres sem partir um emoji; a pergunta pelo chat moderado segue o Liberar; nao duplica; a equipe, o roteiro, o Assistente e a resposta dao 409; a sessao encerrada tambem", async () => {
   const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
   const longa = "x".repeat(700);
+  // O emoji (um par de unidades UTF-16) nas posicoes 499 e 500: o corte por unidade deixava a metade solta, que o
+  // Postgres recusa (22P02), com a pendente ja liberada e sem a pergunta.
+  const comEmoji = message({ author_user_id: ALUNA, body: `${"a".repeat(499)}😀${"b".repeat(100)}` });
+  const naEncerrada = message({ author_user_id: ALUNA, body: "e o replay?", session_id: SESSAO_ENCERRADA });
   const pendente = message({ approved: false, author_user_id: ALUNO, body: longa, display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, offset_ms: 30_000 });
   const perguntaPeloChat = message({ approved: false, author_user_id: ALUNA, body: "vai ter replay?", kind: "question", offset_ms: 50_000 });
   const liberada = message({ author_user_id: ALUNA, body: "como faço o agente?" });
@@ -744,7 +748,7 @@ test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta se
   const doRoteiro = message({ display_name: "Duda", source: "scripted" });
   const doAssistente = message({ display_name: "Assistente", kind: "answer", role: "ai", source: "ai" });
   const resposta = message({ author_user_id: ALUNA, kind: "answer" });
-  const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [pendente, perguntaPeloChat, liberada, daEquipe, doRoteiro, doAssistente, resposta] })));
+  const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [pendente, perguntaPeloChat, liberada, daEquipe, doRoteiro, doAssistente, resposta, comEmoji, naEncerrada] })));
   const linha = (id) => db.tables.webinar_chat_messages.find((row) => row.id === id);
   const perguntasDe = (id) => db.tables.webinar_questions.filter((row) => row.message_id === id);
   const eventos = () => db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
@@ -758,6 +762,20 @@ test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta se
   const [aberta] = perguntasDe(pendente.id);
   assert.deepEqual([aberta.anonymous, aberta.body.length, aberta.offset_ms, aberta.session_id, aberta.status, aberta.user_id], [true, 500, 30_000, SESSAO_NO_AR, "open", ALUNO]);
   assert.equal(eventos().length, 0, "sem webinar_question_sent: a pergunta foi da equipe");
+
+  // O corte conta caracteres, como o check char_length(body) <= 500 do banco: o emoji fica inteiro, nunca pela metade.
+  ok(await roomActions.moderateMessage({ action: "question", messageId: comEmoji.id }));
+  const [doEmoji] = perguntasDe(comEmoji.id);
+  assert.equal(Array.from(doEmoji.body).length, 500, "500 caracteres");
+  assert.doesNotMatch(doEmoji.body, /[\uD800-\uDBFF]$/, "sem a metade solta do par no fim");
+  assert.ok(doEmoji.body.endsWith("😀"), "o emoji inteiro");
+
+  // A sessao encerrada nao aceita mais a equipe: nenhuma pergunta nova, e a mensagem fica como estava.
+  const antesDaEncerrada = { ...linha(naEncerrada.id) };
+  const encerrada = await roomActions.moderateMessage({ action: "question", messageId: naEncerrada.id });
+  assert.deepEqual([encerrada.ok, encerrada.status], [false, 409]);
+  assert.equal(perguntasDe(naEncerrada.id).length, 0);
+  assert.deepEqual(linha(naEncerrada.id), antesDaEncerrada);
 
   // A ja liberada: so cria a pergunta (a linha nao muda).
   const antes = { ...linha(liberada.id) };
@@ -792,7 +810,7 @@ test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta se
 
   // A auditoria: a acao e os ids, nunca o texto.
   const auditadas = audits(db, "webinar.moderated").filter((row) => row.metadata.action === "question");
-  assert.equal(auditadas.length, 6, "uma por pedido aceito");
+  assert.equal(auditadas.length, 7, "uma por pedido aceito");
   assert.deepEqual(Object.keys(auditadas[0].metadata).sort(), ["action", "message_id", "session_id", "source", "with_reason"]);
   assert.equal(auditadas[0].metadata.message_id, pendente.id);
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /xxxxx|como faço|vai ter replay/);

@@ -118,8 +118,8 @@ test.describe("produtor", () => {
     await expect(chat.getByText("Bem-vindos ao encontro")).toBeVisible();
 
     await page.getByPlaceholder("Escreva para a turma").fill("Bem-vindos à sessão de teste");
+    // Sem aviso: a mensagem enviada aparece na lista (o aviso cobria o campo, preso no canto de baixo do painel).
     await page.getByRole("button", { exact: true, name: "Enviar" }).click();
-    await expect(page.getByText("Mensagem enviada.")).toBeVisible();
     await expect(chat.getByText("Bem-vindos à sessão de teste")).toBeVisible();
     await expect(chat.getByText("Apresentador").first()).toBeVisible();
 
@@ -129,6 +129,50 @@ test.describe("produtor", () => {
     await expect(enquetes.getByText("0 respostas")).toBeVisible();
     await expect(enquetes.getByRole("button", { exact: true, name: "Encerrar" })).toBeVisible();
     await expect(enquetes.getByRole("button", { exact: true, name: "Abrir" })).toHaveCount(0);
+  });
+
+  test("o chat volta ao fim quando a aba Chat volta a tela (docs/31 V2-15): a mensagem que chegou com o Roteiro na tela aparece ao voltar ao Chat", async ({ page }) => {
+    const db = createLocalAdminClient();
+    const agora = Date.now();
+    const daEquipe = (body: string, createdAt: number, offsetMs: number) => ({
+      approved: true,
+      author_user_id: null,
+      body,
+      created_at: new Date(createdAt).toISOString(),
+      display_name: "Equipe T.",
+      kind: "message",
+      master: false,
+      offset_ms: offsetMs,
+      role: "team",
+      session_id: SESSAO,
+      source: "team",
+      webinar_id: id
+    });
+    // Mensagens o bastante para a lista rolar (sem rolagem o teste passaria sem o cuidado da volta).
+    unwrap(
+      await db.from("webinar_chat_messages").insert(Array.from({ length: 40 }, (_, index) => daEquipe(`Mensagem da equipe ${index + 1}`, agora - (40 - index) * 1_000, 60_000 + index * 1_000))),
+      "Gravando o chat comprido da sessao"
+    );
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
+    await page.waitForLoadState("networkidle");
+    const chat = page.getByRole("log", { name: "Chat" });
+    await expect.poll(() => chat.evaluate((lista) => lista.scrollHeight > lista.clientHeight + 16)).toBe(true);
+    await expect(chat.getByText("Mensagem da equipe 40", { exact: true })).toBeInViewport();
+
+    // Com o Roteiro na tela (o Chat escondido), chega uma mensagem nova pelo retrato (o Atualizar pede agora; o de 5 s
+    // traria do mesmo jeito).
+    await abrirNoMais(page, entradas.roteiro);
+    await expect(chat).toBeHidden();
+    const nova = "Chegou com o chat escondido";
+    unwrap(await db.from("webinar_chat_messages").insert(daEquipe(nova, Date.now(), 200_000)), "Gravando a mensagem nova");
+    await page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.atualizar }).click();
+    await expect(chat.getByText(nova, { exact: true })).toBeAttached({ timeout: 15_000 });
+
+    // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista.
+    await page.getByRole("tab", { exact: true, name: "Chat" }).click();
+    await expect(chat.getByText(nova, { exact: true })).toBeInViewport();
+    expect(await chat.evaluate((lista) => lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 1), "a lista no fim").toBe(true);
   });
 
   test("a 375 px o console cabe sem rolar de lado", async ({ page }) => {

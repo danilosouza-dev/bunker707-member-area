@@ -4,6 +4,7 @@ import { MicOff, Video, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
+import { consoleRowFocusAfter } from "@/server/webinars/console-v2-model";
 import { LIVE_CONSOLE_COPY, handRows, roomRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import { CONSOLE_PANE_CARD } from "./console-layout-model";
 import { LiveParticipants, type PersonAction } from "./live-participants";
@@ -17,10 +18,17 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // "Na sala · 3", o microfone, a camera, o Compartilhando e o ⋯ de cada um, e os removidos, silenciados e banidos com
 // Desfazer) e o rodape "3 na sala · 2 com a mão levantada". Cada botao so aparece para o papel que pode
 // (liveControlsFor) e so liga com o console dentro da sala. O Silenciar todos tambem silencia o co-apresentador e a
-// Equipe no palco: o motor so deixa de fora o proprio console (docs/31 V2-A40).
+// Equipe no palco: o motor so deixa de fora o proprio console (docs/31 V2-A40). O "Câmeras livres" ligado fica no
+// estilo de ativo da sala (o fundo do botao ativo, com 3:1 ou mais nos dois temas), alem do aria-pressed. O Admitir leva
+// o foco ao Admitir da pessoa seguinte (consoleRowFocusAfter) e, sem ninguem, ao titulo Sala de espera, como o Admitir
+// todos: o botao sai da tela e o foco nao cai no comeco da pagina.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const pessoas = WEBINAR_COPY.consoleV2.pessoas;
+/** O titulo da Sala de espera (recebe o foco quando o ultimo Admitir sai). */
+const LOBBY_TITLE_ID = "console-live-lobby-title";
+/** O "Câmeras livres" ligado: o estilo do botao ativo da sala, com contraste nos dois temas (WCAG 1.4.11). */
+const PRESSED = "border-room-active-bg bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85";
 
 type ConsolePeopleTabProps = {
   busyKey: string | null;
@@ -36,8 +44,16 @@ export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people
   const inRoom = roomRows(room, people).length;
   const hands = handRows(room, people).length;
 
+  /** O foco antes de a linha sair: o Admitir da pessoa que fica no lugar ou, sem ninguem, o titulo da Sala de espera. */
+  function focusAfterAdmit(id: string | null) {
+    const next = id ? consoleRowFocusAfter({ id, ids: knocking.map((person) => person.id), move: "remove" }) : null;
+    const button = next ? document.querySelector<HTMLButtonElement>(`[data-live-knocking="${CSS.escape(next)}"] button:not(:disabled)`) : null;
+    (button ?? document.getElementById(LOBBY_TITLE_ID))?.focus();
+  }
+
   function admit(id: string) {
     if (handle.command("answerKnockingParticipant", id, true)) {
+      focusAfterAdmit(id);
       handle.dispatch({ id, type: "admit" });
     }
   }
@@ -46,6 +62,7 @@ export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people
     for (const person of knocking) {
       handle.command("answerKnockingParticipant", person.id, true);
     }
+    focusAfterAdmit(null);
     handle.dispatch({ type: "admitAll" });
   }
 
@@ -67,7 +84,7 @@ export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people
               </Button>
               <Button
                 aria-pressed={handle.camerasAllowed}
-                className={cn("px-3", handle.camerasAllowed && "border-[var(--border-strong)]")}
+                className={cn("px-3", handle.camerasAllowed && PRESSED)}
                 disabled={!joined}
                 onClick={() => handle.setCamerasAllowed(!handle.camerasAllowed)}
                 type="button"
@@ -92,9 +109,9 @@ export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people
       ) : null}
 
       {controls.admit ? (
-        <section aria-labelledby="console-live-lobby-title" className="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-live-lobby="">
+        <section aria-labelledby={LOBBY_TITLE_ID} className="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-live-lobby="">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <h3 className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id="console-live-lobby-title">
+            <h3 className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id={LOBBY_TITLE_ID} tabIndex={-1}>
               {copy.salaDeEspera}
             </h3>
             {knocking.length > 0 ? (

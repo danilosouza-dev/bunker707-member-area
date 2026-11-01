@@ -395,7 +395,10 @@ export type LiveRoomAction =
   | { id: string | null; type: "spotlight" }
   /** Quem esta no video grande, lido do IFrame API no largeVideoChanged (onStageParticipantOf). */
   | { id: string | null; type: "onStage" }
-  /** O primeiro sinal de um iframe novo: o motor dele comeca no Palco, com a coluna e sem ninguem lido no video grande. */
+  /**
+   * O primeiro sinal de um iframe novo (Entrar na sala, Tentar de novo, tambem depois de um erro fatal, que nao manda a
+   * saida): tudo volta ao comeco, o motor dele no Palco, com a coluna e sem ninguem lido no video grande.
+   */
   | { type: "frame" };
 
 function field(payload: unknown, key: string): unknown {
@@ -665,6 +668,25 @@ export function screenSharesToStop(input: {
   return input.sharing.filter((id) => id !== input.selfId && knownNonModerator(input.roles, id) && !input.grants.includes(id) && !input.justGranted.includes(id));
 }
 
+/**
+ * Um passo do vigia da tela (docs/31 §5.4), a cada mudanca de quem compartilha e de cada papel: `stopped` e quem ja
+ * recebeu o pedido de parar e continua em `sharing` (quem parou sai e, se voltar a compartilhar, recebe o pedido de
+ * novo); `toStop`, a quem o pedido sai agora (screenSharesToStop, menos quem ja o recebeu). Quem chama manda o
+ * muteRemoteParticipant(id, 'desktop') de cada id de `toStop` e so guarda em `stopped` o que saiu.
+ */
+export function screenShareWatchStep(input: {
+  grants: readonly string[];
+  justGranted: readonly string[];
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+  sharing: readonly string[];
+  stopped: readonly string[];
+}): { stopped: string[]; toStop: string[] } {
+  const stopped = input.stopped.filter((id) => input.sharing.includes(id));
+  const toStop = screenSharesToStop(input).filter((id) => !stopped.includes(id));
+  return { stopped, toStop };
+}
+
 /** O item do ⋮ da miniatura que o motor avisou (participantMenuButtonClick { key, participantId, preventExecution }). */
 export type ParticipantMenuClick = { key: "ask-unmute" | "kick"; participantId: string };
 
@@ -683,7 +705,9 @@ export function participantMenuClickOf(payload: unknown): ParticipantMenuClick |
 
 /**
  * O Remover do ⋮ da miniatura do motor no console (docs/31 V2-14 e V2-A29; o motor so avisa, preventExecution):
- * - "staff": quem e da equipe (`staff`) ou modera a sala (o papel "moderator") nunca sai, como no nosso Remover;
+ * - "staff": quem e da equipe na lista da sessao (`staff`) ou modera a sala (o papel "moderator") nunca sai, como no
+ *   nosso Remover. A Equipe sem moderacao que so entrou pelo console nao esta na lista (o console nao grava
+ *   webinar_room_joined): com o papel de participante ela cai no "engine", como o aluno sem linha (docs/31 V2-A29);
  * - "ours": o aluno ligado a linha (`person`, pelo ultimo webinar_room_joined) sai pelo nosso Remover, que grava
  *   webinar_session_bans antes do kickParticipant (sem o registro ele voltaria com um token novo);
  * - "engine": sem o aluno ligado (ainda sem webinar_room_joined, ou o mesmo id para duas contas) e com o papel
@@ -756,7 +780,9 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
     case "onStage":
       return { ...state, onStageId: typeof action.id === "string" && PARTICIPANT_ID.test(action.id) ? action.id : null };
     case "frame":
-      return { ...state, filmstripVisible: EMPTY_ROOM.filmstripVisible, onStageId: null, viewShown: EMPTY_ROOM.viewShown };
+      // Um iframe novo e uma sala nova: o que o de antes sabia (o papel, quem estava, as maos, quem compartilha, a
+      // gravacao, a visao) nao vale para ele. Depois de um erro fatal o Tentar de novo monta outro sem a saida chegar.
+      return EMPTY_ROOM;
     case "reset":
       return EMPTY_ROOM;
     default:

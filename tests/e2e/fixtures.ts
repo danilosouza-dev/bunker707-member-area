@@ -1723,6 +1723,12 @@ export type MontagemDaSalaFalsa = {
 export type SalaFalsaDoJitsi = {
   /** Os comandos (executeCommand) recebidos pela montagem mais nova, na ordem. */
   comandos(): Promise<ComandoDaSalaFalsa[]>;
+  /**
+   * Quem ja compartilha a tela na sala da montagem mais nova (os outros participantes), sem sinal nenhum: o
+   * getContentSharingParticipants da entrada traz esses ids, como a tag. O contentSharingParticipantsChanged disparado
+   * tambem grava a lista.
+   */
+  definirTelas(ids: string[]): Promise<void>;
   /** Dispara um sinal do IFrame API para os ouvintes da montagem mais nova. */
   disparar(evento: string, payload?: Record<string, unknown>): Promise<void>;
   /** Espera um comando com este nome a partir da posicao `depoisDe` (o tamanho da lista antes do clique). */
@@ -1738,6 +1744,7 @@ export type SalaFalsaDoJitsi = {
 };
 
 type EstadoDaSalaFalsa = {
+  definirTelas(ids: string[]): void;
   disparar(evento: string, payload: Record<string, unknown>): void;
   montagens: {
     allowDoIframe: string | null;
@@ -1799,11 +1806,13 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * tambem, liga ou desliga a de audio; diferente da tag, o eco sai mesmo sem a pagina ser moderadora, que a tag ignora o
  * comando sem moderador, entao o teste confere o comando, nunca o poder de quem o manda), toggleShareScreen({ enable })
  * liga ou desliga a propria tela e responde
- * screenSharingStatusChanged { on, details } e contentSharingParticipantsChanged { data } (o proprio id ou nada), e hangup
+ * screenSharingStatusChanged { on, details } e contentSharingParticipantsChanged { data } (como a tag, a lista inteira:
+ * as telas dos outros, em `telas`, mais o proprio id quando a propria tela esta no ar), e hangup
  * responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao ligou, alguem bateu na sala de
  * espera) o teste dispara. As leituras que a tag responde por Promise: isSharingScreen (a propria tela),
  * isModerationOn(tipo) (pela moderacao que o eco ligou, com o mesmo "so video e video") e getContentSharingParticipants,
- * que resolve { sharingParticipantIds } como a tag, nunca uma lista solta. Cada sinal mandado aos ouvintes (o
+ * que resolve { sharingParticipantIds } como a tag, nunca uma lista solta: as telas dos outros (o
+ * contentSharingParticipantsChanged disparado e o definirTelas gravam) e a propria. Cada sinal mandado aos ouvintes (o
  * disparado pelo teste e o do eco) fica anotado, na ordem, em `sinais`.
  *
  * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
@@ -1870,6 +1879,8 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       cameraEscolhida: null,
       // A propria tela no ar (o toggleShareScreen do eco).
       compartilhando: false,
+      // As telas dos outros participantes (o contentSharingParticipantsChanged disparado e o definirTelas).
+      telas: [],
       // A moderacao de cada tipo, pelo toggleModeration do eco (o isModerationOn le).
       moderacao: { audio: false, video: false },
       maoLevantada: false,
@@ -1970,7 +1981,7 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
           if (quer !== estado.compartilhando) {
             estado.compartilhando = quer;
             montagem.emitir("screenSharingStatusChanged", { details: { sourceType: "screen" }, on: quer });
-            montagem.emitir("contentSharingParticipantsChanged", { data: quer && estado.proprioId ? [estado.proprioId] : [] });
+            montagem.emitir("contentSharingParticipantsChanged", { data: [...estado.telas, ...(quer && estado.proprioId ? [estado.proprioId] : [])] });
           }
         } else if (comando === "hangup") {
           montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
@@ -1986,7 +1997,7 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     this.isSharingScreen = () => Promise.resolve(estado.compartilhando);
     // Como o 'is-moderation-on' da tag: sem o tipo, a de audio; so "video" e a de video.
     this.isModerationOn = (tipo) => Promise.resolve(estado.moderacao[tipo === "video" ? "video" : "audio"]);
-    this.getContentSharingParticipants = () => Promise.resolve({ sharingParticipantIds: estado.compartilhando && estado.proprioId ? [estado.proprioId] : [] });
+    this.getContentSharingParticipants = () => Promise.resolve({ sharingParticipantIds: [...estado.telas, ...(estado.compartilhando && estado.proprioId ? [estado.proprioId] : [])] });
 
     // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
     const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
@@ -2129,8 +2140,18 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     } else if (evento === "audioMuteStatusChanged" && typeof dados.muted === "boolean") {
       estado.audioMudo = dados.muted;
       estado.permitido.audio = estado.permitido.audio || !dados.muted;
+    } else if (evento === "contentSharingParticipantsChanged" && Array.isArray(dados.data)) {
+      // A lista inteira de quem compartilha: as telas dos outros ficam gravadas (o getContentSharingParticipants le).
+      estado.telas = dados.data.filter((id) => typeof id === "string" && id !== estado.proprioId);
     }
     atual.emitir(evento, dados);
+  };
+  sala.definirTelas = (ids) => {
+    const atual = vivas().pop();
+    if (!atual) {
+      throw new Error("Nenhuma sala montada para as telas");
+    }
+    atual.estado.telas = ids.filter((id) => typeof id === "string");
   };
 })();
 `;
@@ -2216,6 +2237,17 @@ export async function salaFalsaDoJitsi(
 
   return {
     comandos: lerComandos,
+    async definirTelas(ids) {
+      await page.evaluate((lista) => {
+        const sala = (window as unknown as { __salaFalsa?: EstadoDaSalaFalsa }).__salaFalsa;
+
+        if (!sala) {
+          throw new Error("A sala falsa nao foi carregada.");
+        }
+
+        sala.definirTelas(lista);
+      }, ids);
+    },
     async disparar(evento, payload = {}) {
       await page.evaluate(
         ([nome, dados]) => {

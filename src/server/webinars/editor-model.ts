@@ -451,7 +451,6 @@ export const WEBINAR_ADMIN_COPY = {
     deleted: "Rascunho excluído.",
     duplicated: "Cópia criada como rascunho.",
     ended: "Sessão encerrada. O relatório fica pronto em instantes.",
-    messageSent: "Mensagem enviada.",
     nothingToSave: "Nenhuma mudança para salvar.",
     opened: "Sessão aberta. O roteiro pronto entrou no chat.",
     phrasesResolved: "Frases conferidas na transcrição.",

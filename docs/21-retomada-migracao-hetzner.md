@@ -792,8 +792,9 @@ spike da tela, e entra nesta secao quando for escrita.
 
 **Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): o app novo grava `role = 'co_host'` na mensagem e na
 resposta escrita de quem e co-apresentador do webinario (`webinar_presenters` com o prazo valendo). Sem a migracao, esse
-insert da `23514` no check antigo e a mensagem do co-apresentador falha; o Apresentador, a Equipe, o aluno e o resto do
-app seguem. O aviso de migracao pendente aponta `WEBINARS_MIGRATION = "202611010001"`, a mais nova (aplicar ate ela
+insert da `23514` no check antigo e a mensagem do co-apresentador falha; na resposta escrita a pergunta ja ficou
+respondida antes do insert, e o aluno a ve respondida na aba Perguntas sem a linha no chat, sem o aviso no sino e sem a
+auditoria. O Apresentador, a Equipe, o aluno e o resto do app seguem. O aviso de migracao pendente aponta `WEBINARS_MIGRATION = "202611010001"`, a mais nova (aplicar ate ela
 inclui todas as de antes). O co-apresentador nao tem constante propria: o insert dele sem a migracao chega como o erro
 comum da acao, nunca como o aviso de migracao pendente (por isso a migracao vem antes do merge). A migracao sozinha nao
 atrapalha o app de antes: o check novo aceita tudo que ele grava.

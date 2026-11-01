@@ -167,10 +167,15 @@ const MOBILE = /\b(?:Android|Mobile)\b/;
  * conferido; no Firefox, no Safari, em todo navegador do iPhone e do iPad (o Chrome de la e WebKit, "CriOS/") e no
  * Android, o botao do proprio motor. No celular e no tablet nao ha tela compartilhada: sem getDisplayMedia o motor nao
  * age no comando nem mostra o botao dele (isDesktopSharingEnabled), e o nosso circulo seria um botao que nao faz nada.
- * Sem o userAgent, o do motor, que funciona em todos. Lido uma vez no navegador, nunca no servidor.
+ * Sem o userAgent, o do motor, que funciona em todos. O recurso tambem conta: sem o getDisplayMedia na pagina
+ * (`displayMedia` falso), o do motor, mesmo com o userAgent de computador (o Chrome do Android ou do tablet no "site para
+ * computador" manda o de Linux, sem Android nem Mobile). Lido uma vez no navegador, nunca no servidor.
  */
-export function consoleScreenShareMode(userAgent: string | null | undefined): ConsoleScreenShareMode {
+export function consoleScreenShareMode(userAgent: string | null | undefined, features: { displayMedia?: boolean } = {}): ConsoleScreenShareMode {
   const agent = typeof userAgent === "string" ? userAgent : "";
+  if (features.displayMedia === false) {
+    return "engine";
+  }
   return CHROMIUM.test(agent) && !NOT_CHROMIUM.test(agent) && !MOBILE.test(agent) ? "ours" : "engine";
 }
 

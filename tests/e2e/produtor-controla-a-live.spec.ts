@@ -52,7 +52,11 @@ import {
 // motor (nenhum toggleFilmStrip pela propria largura), com os selos de cima a direita descontando a coluna. O painel
 // com abas (docs/31 V2-15): Silenciar todos e as linhas da sala na aba Pessoas, as frases do preparo no ⋯ › Gravação;
 // Mãos (o numero na barra) abre a aba Mãos, Abaixar todas as mãos manda um sinal so, para todos; Lançar enquete abre o ⋯
-// › Enquetes e o Gravar por preparar, o ⋯ › Gravação; o microfone de cada linha vem do participantMuted.
+// › Enquetes e o Gravar por preparar, o ⋯ › Gravação; o microfone de cada linha vem do participantMuted. Com a sala falsa
+// sem eco (ecoar: false), o clique so manda o comando e o estado espera o sinal do motor (o seletor de tela cancelado
+// nao acende o circulo); o Tentar de novo depois de um erro fatal (sem a saida do iframe que caiu) manda o preparo de
+// quem apresenta ao iframe novo e zera a lista da sala; o vigia para de novo quem volta a compartilhar e quem ja
+// compartilhava quando o console entrou (sala.definirTelas).
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -122,8 +126,8 @@ async function entrarComoApresentador(sala: SalaFalsaDoJitsi) {
   return montagem;
 }
 
-async function abrirConsole(page: Page) {
-  const sala = await salaFalsaDoJitsi(page);
+async function abrirConsole(page: Page, opcoes: Parameters<typeof salaFalsaDoJitsi>[1] = {}) {
+  const sala = await salaFalsaDoJitsi(page, opcoes);
   await page.goto(CONSOLE);
   await page.waitForLoadState("networkidle");
   return sala;
@@ -205,12 +209,13 @@ test.describe("produtor", () => {
     await sala.disparar("moderationStatusChanged", { enabled: livresAntes, mediaType: "audio" });
     await expect(livres).toHaveAttribute("aria-pressed", String(livresAntes));
 
-    // Trancar a sala fica no topo (V2-13), com o estado no aria-pressed.
+    // Trancar a sala fica no topo (V2-13): o nome diz a acao (Trancar ou Destrancar), sem aria-pressed, que com o nome
+    // que muda se lia como o contrario (V2-7).
     antes = (await sala.comandos()).length;
     await topo.getByRole("button", { exact: true, name: consoleAoVivo.trancar }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).room_locked).toBe(true);
     expect((await sala.esperarComando("toggleLobby", { depoisDe: antes })).args).toEqual([true]);
-    await expect(topo.getByRole("button", { exact: true, name: consoleAoVivo.destrancar })).toHaveAttribute("aria-pressed", "true");
+    await expect(topo.getByRole("button", { exact: true, name: consoleAoVivo.destrancar })).not.toHaveAttribute("aria-pressed");
     antes = (await sala.comandos()).length;
     await topo.getByRole("button", { exact: true, name: consoleAoVivo.destrancar }).click();
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).room_locked).toBe(false);
@@ -500,20 +505,29 @@ test.describe("produtor", () => {
     expect((await sala.esperarComando("askToUnmute", { depoisDe: antes })).args).toEqual([ALUNA_NA_SALA]);
 
     // O Remover de quem ainda nao aparece na lista da sessao (sem webinar_room_joined), com o papel de participante pelo
-    // getRoomsInfo: sai pelo motor na hora, e o console avisa que a pessoa pode voltar.
+    // getRoomsInfo: sai pelo motor na hora, e o console avisa que a pessoa pode voltar. Sem sono: o clique sai de novo a
+    // cada segundo ate o papel lido chegar (antes dele, o console so pede para tentar de novo e le os papeis).
     antes = (await sala.comandos()).length;
     await sala.disparar("participantJoined", { displayName: "Visitante T.", id: SEM_REGISTRO });
-    await sala.esperarComando("getRoomsInfo", { depoisDe: antes });
-    await page.waitForTimeout(500);
-    antes = (await sala.comandos()).length;
-    await sala.disparar("participantMenuButtonClick", { key: "kick", participantId: SEM_REGISTRO, preventExecution: true });
-    expect((await sala.esperarComando("kickParticipant", { depoisDe: antes })).args).toEqual([SEM_REGISTRO]);
+    const removeu = async () => (await sala.comandos()).slice(antes).some((item) => item.comando === "kickParticipant");
+    await expect
+      .poll(
+        async () => {
+          if (!(await removeu())) {
+            await sala.disparar("participantMenuButtonClick", { key: "kick", participantId: SEM_REGISTRO, preventExecution: true });
+          }
+          return removeu();
+        },
+        { intervals: [1_000], timeout: 15_000 }
+      )
+      .toBe(true);
+    expect((await sala.comandos()).slice(antes).filter((item) => item.comando === "kickParticipant").map((item) => item.args)).toEqual([[SEM_REGISTRO]]);
     await expect(page.getByText(WEBINAR_COPY.consoleV2.pessoas.removidoSemRegistro)).toBeVisible();
     await expect(page.locator(`[data-live-participant="${SEM_REGISTRO}"]`)).toHaveCount(0);
     expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/jitsi/i);
   });
 
-  test("o vigia da tela: quem ja moderava quando o console entrou (o papel so pelo getRoomsInfo) continua compartilhando; a aluna sem liberacao tem a tela parada por muteRemoteParticipant de tela, uma vez; a tela do proprio console fica", async ({ page }) => {
+  test("o vigia da tela: quem ja moderava quando o console entrou (o papel so pelo getRoomsInfo) continua compartilhando; a aluna sem liberacao tem a tela parada por muteRemoteParticipant de tela, uma vez enquanto compartilha e de novo quando volta a compartilhar; a tela do proprio console fica", async ({ page }) => {
     const sala = await abrirConsole(page);
     await entrarComoApresentador(sala);
     const pedidosDeParar = async () => (await sala.comandos()).filter((item) => item.comando === "muteRemoteParticipant" && item.args[1] === "desktop").map((item) => item.args);
@@ -545,10 +559,29 @@ test.describe("produtor", () => {
     await page.waitForTimeout(1_500);
     expect((await sala.comandos()).slice(antes).filter((item) => item.comando === "muteRemoteParticipant" || item.comando === "getRoomsInfo")).toEqual([]);
 
+    // A aluna parou (saiu da lista acima) e volta a compartilhar: o pedido de parar sai de novo, uma vez (docs/31 §5.4).
+    antes = (await sala.comandos()).length;
+    await sala.disparar("contentSharingParticipantsChanged", { data: [APRESENTADOR, ALUNA_NA_SALA] });
+    expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([ALUNA_NA_SALA, "desktop"]);
+
     // Nunca a recusa de tela (no motor ela recusa o audio) nem o mudo de tela de todos (pegaria o co-apresentador).
     const comandos = await sala.comandos();
     expect(comandos.filter((item) => (item.comando === "rejectParticipant" || item.comando === "muteEveryone") && item.args.includes("desktop"))).toEqual([]);
-    expect(await pedidosDeParar()).toEqual([[ALUNA_NA_SALA, "desktop"]]);
+    expect(await pedidosDeParar(), "um pedido por vez que ela compartilhou").toEqual([
+      [ALUNA_NA_SALA, "desktop"],
+      [ALUNA_NA_SALA, "desktop"]
+    ]);
+  });
+
+  test("o vigia da tela com quem ja compartilhava quando o console entrou: a leitura da entrada (getContentSharingParticipants) traz a tela da aluna, e o pedido de parar sai quando o papel dela chega", async ({ page }) => {
+    const sala = await abrirConsole(page);
+    await sala.esperarMontada();
+    // A aluna ja compartilhava (o console recarregou, ou entrou depois dela): nenhum sinal novo de tela vai chegar.
+    await sala.definirTelas([ALUNA_NA_SALA]);
+    await entrarComoApresentador(sala);
+    await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_NA_SALA });
+    expect((await sala.esperarComando("muteRemoteParticipant")).args).toEqual([ALUNA_NA_SALA, "desktop"]);
+    expect((await sala.comandos()).filter((item) => item.comando === "muteRemoteParticipant" && item.args[1] === "desktop")).toHaveLength(1);
   });
 
   test("a saida da sala cancela o getRoomsInfo que esperava: nenhum pedido sai depois do videoConferenceLeft e, de volta com outro id, nenhuma linha da sala de antes", async ({ page }) => {
@@ -680,10 +713,13 @@ test.describe("produtor", () => {
     const painelMaos = page.locator(`#${(await abaMaos.getAttribute("aria-controls")) ?? ""}`);
     await expect(painelMaos.locator(`[data-live-hand="${ALUNA_NA_SALA}"]`)).toBeVisible();
 
-    // Abaixar todas as mãos: um sinal so, com o destino vazio (cada aluno so abaixa a propria mao levantada).
+    // Abaixar todas as mãos: um sinal so, com o destino vazio (cada aluno so abaixa a propria mao levantada). Pelo
+    // teclado, o botao sai da tela com a fila e o foco vai a aba Mãos, nunca ao comeco da pagina (WCAG 2.4.3).
     let antes = (await sala.comandos()).length;
-    await painelMaos.getByRole("button", { exact: true, name: consoleAoVivo.abaixarTodas }).click();
+    await painelMaos.getByRole("button", { exact: true, name: consoleAoVivo.abaixarTodas }).focus();
+    await page.keyboard.press("Enter");
     expect((await sala.esperarComando("sendEndpointTextMessage", { depoisDe: antes })).args).toEqual(["", lowerHandMessage()]);
+    await expect(abaMaos).toBeFocused();
     await page.waitForTimeout(500);
     expect((await sala.comandos()).slice(antes).filter((item) => item.comando === "sendEndpointTextMessage")).toHaveLength(1);
     await expect(barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(0) })).toBeVisible();
@@ -717,5 +753,71 @@ test.describe("produtor", () => {
     await expect(page.locator("#console-panel")).toBeHidden();
     await expect(barra.getByRole("button", { exact: true, name: consoleV2.painel.mostrar })).toBeFocused();
     expect(await sala.montagens(), "abrir e fechar o painel nao remonta a sala").toBe(1);
+  });
+
+  test("o estado vem do motor, nunca do clique (docs/31 V2-14), com a sala falsa sem eco: Microfone, Câmeras livres e (no Chromium) Compartilhar tela so mudam quando o motor avisa; o seletor de tela cancelado deixa o circulo apagado e o clique seguinte pede de novo para ligar", async ({ browserName, page }) => {
+    const sala = await abrirConsole(page, { ecoar: false });
+    await entrarComoApresentador(sala);
+    const barra = barraDe(page);
+
+    // Microfone: o clique so manda o comando; sem o audioMuteStatusChanged, o circulo fica como estava.
+    const microfone = barra.getByRole("button", { exact: true, name: aoVivo.microfone });
+    await expect(microfone).toHaveAttribute("aria-pressed", "false");
+    let antes = (await sala.comandos()).length;
+    await microfone.click();
+    await sala.esperarComando("toggleAudio", { depoisDe: antes });
+    await expect(microfone).toHaveAttribute("aria-pressed", "false");
+    await sala.disparar("audioMuteStatusChanged", { muted: false });
+    await expect(microfone).toHaveAttribute("aria-pressed", "true");
+
+    if (browserName === "chromium") {
+      // O seletor de tela cancelado nao avisa nada: o segundo clique pede de novo para ligar (o estado nao mudou no
+      // primeiro), e o circulo so acende com o screenSharingStatusChanged.
+      const tela = barra.getByRole("button", { exact: true, name: consoleV2.barra.compartilharTela });
+      antes = (await sala.comandos()).length;
+      await tela.click();
+      expect((await sala.esperarComando("toggleShareScreen", { depoisDe: antes })).args).toEqual([{ enable: true }]);
+      antes = (await sala.comandos()).length;
+      await tela.click();
+      expect((await sala.esperarComando("toggleShareScreen", { depoisDe: antes })).args).toEqual([{ enable: true }]);
+      await expect(tela).toHaveAttribute("aria-pressed", "false");
+      await sala.disparar("screenSharingStatusChanged", { details: { sourceType: "screen" }, on: true });
+      await expect(tela).toHaveAttribute("aria-pressed", "true");
+    }
+
+    // Câmeras livres: dois cliques mandam o mesmo pedido (o estado so muda pelo moderationStatusChanged de video).
+    const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
+    const livres = pessoas.getByRole("button", { exact: true, name: consoleV2.pessoas.cameras });
+    const livresAntes = (await livres.getAttribute("aria-pressed")) === "true";
+    for (let vez = 0; vez < 2; vez += 1) {
+      antes = (await sala.comandos()).length;
+      await livres.click();
+      expect((await sala.esperarComando("toggleModeration", { depoisDe: antes })).args).toEqual([livresAntes, "video"]);
+    }
+    await expect(livres).toHaveAttribute("aria-pressed", String(livresAntes));
+    await sala.disparar("moderationStatusChanged", { enabled: livresAntes, mediaType: "video" });
+    await expect(livres).toHaveAttribute("aria-pressed", String(!livresAntes));
+  });
+
+  test("Tentar de novo depois de um erro fatal (o iframe que caiu nao manda a saida): o iframe novo recebe de novo o preparo de quem apresenta (a moderacao de audio e o seguir a visao, que o motor nao guarda) e a lista da sala recomeca, sem quem nao voltou", async ({ page }) => {
+    const QUEM_SAIU = "aluna-saiu-0008";
+    const sala = await abrirConsole(page);
+    await entrarComoApresentador(sala);
+    expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
+    await sala.disparar("participantJoined", { displayName: "Aluna que saiu", id: QUEM_SAIU });
+    const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
+    await expect(pessoas.locator(`[data-live-participant="${QUEM_SAIU}"]`)).toHaveCount(1);
+
+    // O erro fatal: o palco mostra Tentar de novo e nenhum videoConferenceLeft chega.
+    await sala.disparar("errorOccurred", { error: { isFatal: true, name: "conference.connectionError.otherError" } });
+    await page.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.tentarDeNovo }).click();
+    await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+
+    // O iframe novo (os comandos e os sinais abaixo sao os dele): a entrada e o papel de moderador de novo.
+    await entrarComoApresentador(sala);
+    expect((await sala.esperarComando("toggleModeration")).args).toEqual([true, "audio"]);
+    expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
+    await expect(pessoas.locator(`[data-live-participant="${QUEM_SAIU}"]`)).toHaveCount(0);
+    await expect(pessoas.locator(`[data-live-participant="${APRESENTADOR}"]`)).toHaveCount(0);
   });
 });

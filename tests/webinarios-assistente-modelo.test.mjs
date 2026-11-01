@@ -33,6 +33,10 @@ test("@assistente chama sem diferenciar maiusculas, como palavra (nem @assistent
   assert.equal(modelo.withoutMention("quanto custa @assistente?"), "quanto custa ?");
   assert.equal(modelo.assistantQuestionText("@assistente   e a garantia?"), "e a garantia?");
   assert.equal(modelo.assistantQuestionText("@assistente"), "@assistente", "so a mencao: vai o texto como veio");
+  // No tamanho de uma pergunta, contado por caractere: o emoji no corte fica inteiro, nunca a metade solta do par.
+  const pergunta = modelo.assistantQuestionText(`${"a".repeat(499)}😀${"b".repeat(100)}`);
+  assert.equal(Array.from(pergunta).length, 500);
+  assert.ok(pergunta.endsWith("😀"));
 });
 
 test("quem chama: @assistente, a aba Perguntas, e o Responder tudo so para pergunta da turma (tipo pergunta ou com ?)", () => {
