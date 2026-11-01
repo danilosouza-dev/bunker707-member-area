@@ -361,13 +361,14 @@ export const WEBINAR_COPY = {
     desligarGravador: "Desligar o gravador",
     duracaoMinutos: "Duração do vídeo (minutos)",
     enderecoPlayer: "Endereço do player",
+    /** O exemplo dentro do campo vazio do Endereço do player (o placeholder). */
+    enderecoPlayerExemplo: "https://iframe.mediadelivery.net/embed/…",
     gravacao: "Gravação",
     gravacaoNoNavegador: "Gravando no navegador",
     mensagemDoChat: "Mensagem do chat",
     microfoneLiberado: "Microfone liberado",
     microfoneSozinho: "Permitir que o aluno abra o microfone sozinho",
     microfoneSozinhoTexto: "Desligado nesta versão: o aluno só fala depois de Liberar.",
-    naSala: (n: number) => (n === 1 ? "1 pessoa na sala" : `${n} pessoas na sala`),
     noVideo: (texto: string) => `No vídeo: ${texto}`,
     removidosESilenciados: "Removidos, silenciados e banidos",
     semGravacao: "Nenhum vídeo ligado a esta sessão ainda.",
@@ -410,9 +411,8 @@ export const WEBINAR_COPY = {
     banirConfirmarTexto: "O aluno sai da sala e não entra em nenhuma live até a equipe desfazer.",
     cancelar: "Cancelar",
     comecarParaTodos: "Começar para todos",
-    /** O card Configurações de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
+    /** O botao Configurações da barra de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
     configuracoes: "Configurações",
-    configuracoesTexto: "Escolha o microfone, o alto-falante e a câmera que você usa nesta sala.",
     confirmar: "Confirmar",
     convidarPalco: "Convidar ao palco",
     desfazerBanimento: "Desfazer banimento",

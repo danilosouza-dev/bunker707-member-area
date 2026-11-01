@@ -1,25 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import "./support/resolve-extensionless-ts.mjs";
 
-// O console da equipe na Live ao vivo desenhado (docs/30 §1.4, §2.4, §2.9, §6.3, §6.4 e §6.7; docs/18 §1.1): o topo
-// com Abrir a sala / Comecar para todos / Encerrar live (desligados com a explicacao sem messaging.publish), o palco
-// com a sala no meio (o iframe pelo useJitsiMeet, o token pelo join-token, o nonce da pagina) ou "A sala ao vivo ainda
-// nao esta configurada", os botoes nossos ao redor (Silenciar todos, Fechar todas as cameras, Permitir cameras, Trancar,
-// Sala de espera, o microfone do aluno desligado e fixo), Mao levantada, Participantes com os barrados e Desfazer, o
-// cartao Gravacao (Preparar, a reserva, a fila, Gravando, a ancora), Alinhar chat com a previa, Enviar gravacao e o ⋯
-// do autor no chat. Nas fontes: os comandos do IFrame API ligados aos botoes (muteEveryone, toggleLobby, kickParticipant,
-// askToUnmute, startRecording...), a ancora no recordingStatusChanged, as frases so de WEBINAR_COPY (ou das provisorias
-// de live-console-model.ts) e nenhum "Jitsi" em texto de tela. O palco do console V2 (docs/31 V2-4 e V2-13): o
-// "Ao vivo", o Gravando e os presentes com o pico dentro do palco, o topo da live sem eles. A barra de quem apresenta
-// (docs/31 V2-14): a Sala de espera, Microfone, Câmera, Compartilhar tela e Gravar com o estado em aria-pressed, o
-// "Palco para todos ▾", Configurações e o balao do painel; as Configurações (o painel da sala) so para o Apresentador e
-// o co-apresentador, logo depois do botao, com Microfone, Alto-falante e Câmera, Reduzir ruído, Espelhar, Desfocar o
-// fundo e Mais opções de fundo, sem Qualidade do vídeo nem volume, e nas fontes a troca so com a secao pronta e o
-// dialogo de fundo pelo toggleVirtualBackgroundDialog.
+// O console da equipe na Live ao vivo desenhado (docs/30 §1.4, §2.4, §2.9, §6.3, §6.4 e §6.7; docs/31 V2-4 e V2-12 a
+// V2-15; docs/18 §1.1), pelo HTML do servidor: o topo com os botoes de situacao (Abrir a sala, Começar para todos,
+// Trancar, Encerrar live, desligados com a explicacao sem messaging.publish), o palco com a sala no meio ou "A sala ao
+// vivo ainda nao esta configurada", os selos do palco (o "Ao vivo", o Gravando, os presentes com o pico) e o topo da
+// live sem eles; a barra de quem apresenta (a Sala de espera, Microfone, Câmera, Compartilhar tela e Gravar com o estado
+// em aria-pressed, Mãos, Lançar enquete, o "Palco para todos ▾", Configurações e o balao do painel), com as
+// Configurações de quem apresenta (Microfone, Alto-falante e Câmera, Reduzir ruído, Espelhar, Desfocar o fundo e Mais
+// opções de fundo, sem Qualidade do vídeo nem volume); o painel com abas (Chat, Perguntas, Mãos, Pessoas e o ⋯ com
+// Enquetes, Atendimento, Presença e Gravação) e a aba Pessoas com as acoes de todos, as linhas e os barrados com
+// Desfazer; e nenhum texto de tela que cite o motor da sala. As fontes (os comandos do IFrame API ligados aos botoes, a
+// ancora, as frases escritas direto no JSX) ficam em tests/webinarios-console-v2.guard.test.mjs.
 
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
 
@@ -157,8 +153,6 @@ const textOf = (markup) =>
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
-const read = (path) => readFileSync(new URL(path, root), "utf8");
-const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const count = (markup, pattern) => (markup.match(pattern) ?? []).length;
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** O pedaco do painel de uma aba (`tab`) ou de uma entrada do ⋯ (`more`): da tag dela ate a seguinte. */
@@ -259,20 +253,6 @@ function render(snap, { currentUserId = HOST, permissions = both } = {}) {
   return html(createElement(SessionConsole, { currentUserId, data: { sessions: [snap.session], snapshot: snap, webinar }, nonce: "nonce-de-teste", permissions, serverNow: NOW }));
 }
 
-/** Os .tsx do console, achados pela pasta (uma peca nova entra sozinha, uma apagada sai sozinha). */
-const CONSOLE_DIR = "src/components/admin/v2/communication/webinars/session-console";
-const CONSOLE_FILES = readdirSync(new URL(`${CONSOLE_DIR}/`, root))
-  .filter((name) => name.endsWith(".tsx"))
-  .sort()
-  .map((name) => `${CONSOLE_DIR}/${name}`);
-const consoleFile = (name) => {
-  const path = `${CONSOLE_DIR}/${name}`;
-  assert.ok(CONSOLE_FILES.includes(path), `arquivo esperado: ${path}`);
-  return path;
-};
-/** As pecas da sala ao vivo no console (live-*.tsx): as frases delas sao de WEBINAR_COPY. */
-const LIVE_FILES = CONSOLE_FILES.filter((path) => /\/live-[^/]+\.tsx$/.test(path));
-
 test("topo da Live ao vivo: Começar para todos e Encerrar live na espera, Abrir a sala na agendada, Encerrar live no ar; sem messaging.publish desligados com a explicacao", () => {
   const espera = textOf(render(snapshot({ session: session({ startedAt: null, status: "waiting" }) })));
   assert.match(espera, new RegExp(escape(copy.comecarParaTodos)));
@@ -305,6 +285,19 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   const nomes = Array.from(top.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]);
   assert.deepEqual(nomes, [copy.trancar, copy.encerrarLive]);
   assert.match(top, new RegExp(`<button(?=[^>]*aria-pressed="false")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.trancar)}</button>`));
+  // As pecas da sala no topo (V2-13): o Encerrar live na variante stop (os tokens --room-danger-*, 36 px), o Trancar no
+  // secondary, e o Atualizar e o Tema em 36 px com o canto dos botoes com texto (--member-button-radius), nunca redondos.
+  const aberturaDe = (label) => top.slice(top.lastIndexOf("<button", top.indexOf(`${label}</button>`)), top.indexOf(">", top.lastIndexOf("<button", top.indexOf(`${label}</button>`))) + 1);
+  const encerrar = aberturaDe(copy.encerrarLive);
+  for (const classe of ["border-room-danger-border", "bg-room-danger-bg", "text-room-danger-fg", "h-9", "rounded-[var(--member-button-radius)]"]) {
+    assert.ok(encerrar.split(/["\s]/).includes(classe), `Encerrar live com ${classe}: ${encerrar}`);
+  }
+  assert.ok(aberturaDe(copy.trancar).split(/["\s]/).includes("bg-room-control"), "Trancar no secondary");
+  for (const nome of [consoleV2Copy.atualizar, WEBINAR_COPY.salaV2.tema.claro]) {
+    const icone = new RegExp(`<button[^>]*aria-label="${escape(nome)}"[^>]*>`).exec(top)?.[0] ?? "";
+    const classes = icone.split(/["\s]/);
+    assert.ok(classes.includes("size-9") && classes.includes("rounded-[var(--member-button-radius)]") && !classes.includes("rounded-full"), `${nome} em 36 px e quadrado: ${icone}`);
+  }
   const trancada = render(snapshot({ live: liveBlock({ roomLocked: true }) }));
   const topoTrancado = trancada.slice(trancada.indexOf('data-console-slot="top"'), trancada.indexOf("</header>"));
   assert.match(topoTrancado, new RegExp(`<button(?=[^>]*aria-pressed="true")[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.destrancar)}</button>`));
@@ -376,9 +369,7 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   // Os chips do card de antes (Gravando, Sala trancada, "{n} pessoas na sala") saem; o "Gravando" e so o do palco.
   assert.doesNotMatch(markup, /data-live-room-status/);
   assert.equal(count(markup, /data-testid="live-recording"/g), 1);
-  for (const pessoas of [1, 2, 3]) {
-    assert.ok(!textOf(markup).includes(LIVE_CONSOLE_COPY.naSala(pessoas)), `sem "${LIVE_CONSOLE_COPY.naSala(pessoas)}"`);
-  }
+  assert.doesNotMatch(textOf(markup), /\b(?:1 pessoa|\d+ pessoas) na sala\b/, 'sem o chip "{n} pessoas na sala"');
 
   // Sem o pico (antes da leitura da presenca), so os presentes; fora do ar, a frase do momento no lugar do "Ao vivo".
   const agendada = render(snapshot({ session: session({ scheduledAt: new Date(NOW + 10 * MIN).toISOString(), startedAt: null, status: "scheduled" }) }));
@@ -550,81 +541,9 @@ test("a Live gravada não ganha a sala: nada de palco, gravador ou participantes
   assert.doesNotMatch(textOf(markup), new RegExp(escape(copy.encerrarLive)));
 });
 
-test("fontes: o iframe pelo useJitsiMeet com o token do join-token e o nonce da página; os comandos do IFrame API ligados aos botões; a âncora no recordingStatusChanged; o Gravar da fila uma vez", () => {
-  const panel = stripComments(read(consoleFile("live-room-panel.tsx")));
-  assert.match(panel, /useJitsiMeet\(\{/);
-  assert.match(panel, /\/api\/webinars\/\$\{encodeURIComponent\(webinarId\)\}\/join-token/);
-  // O tema do console vai ao iframe na montagem (docs/31 V2-12), pelo mesmo `look` da sala do aluno.
-  // A superficie console (docs/31 V2-14): quem apresenta usa a nossa barra; o Compartilhar tela pelo navegador.
-  assert.match(panel, /liveConfigOverwrite\(token\.reply\.role, token\.reply\.settings, look, "console", screenShare\)/);
-  assert.match(panel, /nonce: input\.nonce/);
-  assert.match(panel, /tokenRefreshDelayMs\(/, "o token novo antes do exp");
-  assert.match(panel, /name === "recordingStatusChanged" && shouldMarkAnchor\(/, "a ancora sai do recordingStatusChanged");
-  assert.match(panel, /shouldAutoStartRecording\([\s\S]*?command\("startRecording", \{ mode: "file" \}\)/, "o Gravar da fila dispara sozinho");
-  // A moderacao de audio e a de video (sem camera de aluno) e o seguir a visao saem de presenterSetupCommands
-  // (live-console-model), mandados um a um ao virar moderador; a de tela nao liga pelo IFrame API (docs/31 §5.4).
-  assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
-  assert.match(panel, /command\("toggleLobby", value\)/);
-
-  // As acoes de todos e a Sala de espera foram para a aba Pessoas (docs/31 V2-14; o live-controls.tsx saiu).
-  assert.ok(!CONSOLE_FILES.some((path) => path.endsWith("/live-controls.tsx")), "o live-controls.tsx saiu: as pecas estao na aba Pessoas");
-  const controls = stripComments(read(consoleFile("console-people-tab.tsx")));
-  assert.match(controls, /command\("muteEveryone", "audio"\)[\s\S]*?copy\.silenciarTodos/);
-  assert.match(controls, /command\("muteEveryone", "video"\)[\s\S]*?copy\.fecharCameras/);
-  assert.match(controls, /command\("answerKnockingParticipant", id, true\)/);
-  assert.match(panel, /command\("toggleModeration", !allowed, "video"\)/, "Câmeras livres");
-
-  const hands = stripComments(read(consoleFile("live-hands.tsx")));
-  assert.match(hands, /command\("askToUnmute", id\)/);
-  assert.match(hands, /command\("muteRemoteParticipant", id, "audio"\)/);
-  assert.match(hands, /command\("rejectParticipant", id, "audio"\)/);
-  assert.match(hands, /command\("sendEndpointTextMessage", id, lowerHandMessage\(\)\)/);
-
-  const main = stripComments(read(consoleFile("session-console.tsx")));
-  assert.match(main, /kickFromSession\(\{ sessionId, userId \}\), \(\) => \{[\s\S]*?room\.command\("kickParticipant", participantId\)/, "Remover: o servidor primeiro, depois o iframe");
-  assert.match(main, /banStudent\([\s\S]*?room\.command\("kickParticipant", target\.participantId\)/);
-  assert.match(main, /requestRecording\(\{ sessionId \}\)[\s\S]*?reply\.action === "start"[\s\S]*?room\.command\("startRecording", \{ mode: "file" \}\)/);
-  assert.match(main, /room\.command\("stopRecording"/);
-  assert.match(main, /endLiveSession\(\{ sessionId \}\), \(\) => \{\s*room\.command\("endConference"\);\s*room\.command\("hangup"\);/);
-  assert.match(main, /startLiveSession\(\{ sessionId \}\), \(\) =>\s*room\.syncLobby\(desiredLobby\(/, "Começar para todos desliga a sala de espera");
-  assert.match(main, /setRoomLock\(\{ locked, sessionId \}\), \(\) =>\s*room\.syncLobby\(/, "Trancar liga a sala de espera");
-  assert.match(main, /room\.command\("askToUnmute", participantId\);\s*room\.command\("approveVideo", participantId\);/, "Convidar ao palco");
-  assert.match(main, /room\.command\("setLargeVideoParticipant", participantId\);\s*room\.command\("pinParticipant", participantId\);/, "Destacar");
-  assert.match(main, /markRecordingAnchor\(\{ sessionId \}\)/);
-
-  const page = stripComments(read("src/app/admin/(v2)/comunicacao/webinarios/[id]/sala/page.tsx"));
-  assert.match(page, /headers\(\)/);
-  assert.match(page, /nonce=\{requestHeaders\.get\("x-nonce"\)\}/);
-});
-
-/** Os textos escritos direto no JSX (texto entre tags e rotulos em aspas), pela arvore do TypeScript. */
-function literalTexts(path) {
-  const file = ts.createSourceFile(path, read(path), ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
-  const found = [];
-  const visit = (node) => {
-    if (ts.isJsxText(node) && /[A-Za-zÀ-ú]{2,}/.test(node.getText())) {
-      found.push(node.getText().trim());
-    }
-    if (ts.isJsxAttribute(node) && ["alt", "aria-label", "placeholder", "title"].includes(node.name.getText()) && node.initializer && ts.isStringLiteral(node.initializer) && !node.initializer.text.startsWith("https://")) {
-      found.push(node.initializer.text);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return found;
-}
-
-test("frases: os .tsx do console só desenham textos dos arquivos de frases (as peças da live, de WEBINAR_COPY ou das provisórias); nenhum texto de tela cita o motor da sala nem as palavras proibidas", () => {
-  assert.ok(CONSOLE_FILES.length >= 15, `os .tsx do console: ${CONSOLE_FILES.length}`);
-  for (const path of CONSOLE_FILES) {
-    assert.deepEqual(literalTexts(path), [], `${path}: texto solto no JSX`);
-  }
-  assert.ok(LIVE_FILES.includes(consoleFile("live-room-panel.tsx")));
-  for (const path of LIVE_FILES) {
-    const source = stripComments(read(path));
-    assert.doesNotMatch(source, /WEBINAR_ADMIN_COPY/, `${path}: as frases da sala ao vivo sao de WEBINAR_COPY`);
-  }
-
+// As frases escritas direto no JSX e as fontes (os comandos do IFrame API ligados aos botoes) ficam na guarda
+// tests/webinarios-console-v2.guard.test.mjs; aqui, o texto que o console desenha.
+test("frases: nenhum texto de tela do console cita o motor da sala nem as palavras proibidas", () => {
   for (const markup of [render(snapshot()), render(snapshot({ live: liveBlock({ meetConfigured: false, recorder: recorder({ dispatchConfigured: false }) }) }))]) {
     const lower = textOf(markup).toLocaleLowerCase("pt-BR");
     assert.ok(!lower.includes("jitsi"), "nenhum Jitsi em texto de tela");
@@ -936,28 +855,6 @@ test("as Configurações de quem apresenta: Microfone, Alto-falante e Câmera co
     }
   }
 });
-
-test("fontes da barra e das Configurações: os aparelhos pelo useJitsiDevices do console, a troca só com a secao pronta e só de quem apresenta, a engrenagem só de aparelhos pelo papel, o Esc que fecha e nada de setVideoQuality", () => {
-  const panel = stripComments(read(consoleFile("live-room-panel.tsx")));
-  assert.match(panel, /useJitsiDevices\(\{[\s\S]*?podeTrocar: \(kind\) => deviceSettingsRef\.current !== null && deviceSectionReady\(deviceSettingsRef\.current, kind\)/);
-  assert.match(panel, /deviceSettingsRef\.current = presenter \? deviceSettings : null;/, "so quem apresenta troca");
-  assert.match(panel, /chooseDevice = \(kind: DeviceKind, option: DeviceOption\) => presenter && deviceSectionReady\(deviceSettings, kind\) && escolher\(kind, option\)/);
-  assert.match(panel, /deviceSettingsFor\(\{[\s\S]*?role,[\s\S]*?videoOn: joined && videoOn/);
-  assert.match(panel, /devicesSignalRef\.current\(name, payload\)/, "deviceListChanged e o ruido de volta numa entrada nova");
-  assert.match(panel, /useMemo\(\(\) => liveInterfaceConfigOverwrite\(tokenRole, look\), \[tokenRole, look\]\)/, "a engrenagem so de aparelhos depende do papel (e o visual do tema, na montagem)");
-  // Ruido, fundo e espelho sem estado nem reaplicacao: o menu da miniatura e o dialogo de fundo do motor tambem os mudam.
-  assert.match(panel, /useJitsiDevices\(\{[\s\S]*?efeitosNoIframe: true,/);
-
-  const barSource = stripComments(read(consoleFile("console-bar.tsx")));
-  assert.match(barSource, /<LiveSettings[\s\S]*?cameraOn=\{handle\.videoOn\}[\s\S]*?onChoose=\{handle\.chooseDevice\}[\s\S]*?presenterBar="ours"/);
-  assert.match(barSource, /event\.key === "Escape"/);
-  for (const source of [panel, barSource]) {
-    assert.doesNotMatch(source, /setVideoQuality|qualidade\(|volume\(|toggleNoiseSuppression/, "quem apresenta nao baixa o proprio palco");
-  }
-  const hook = stripComments(read("src/components/webinars/use-jitsi-devices.ts"));
-  assert.match(hook, /const maisFundos = useCallback\(\(\) => \{\s*executeCommand\("toggleVirtualBackgroundDialog"\);/);
-});
-
 
 /* ------------------------------------------------------------------------------------------------
  * O painel com abas (docs/31 V2-15) e a aba Pessoas (V2-14)

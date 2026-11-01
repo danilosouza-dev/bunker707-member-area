@@ -38,7 +38,6 @@ export const LIVE_CONSOLE_COPY = {
   microfoneLiberado: copy.microfoneLiberado,
   microfoneSozinho: copy.microfoneSozinho,
   microfoneSozinhoTexto: copy.microfoneSozinhoTexto,
-  naSala: copy.naSala,
   noPalco: WEBINAR_COPY.aoVivo.noPalco,
   noVideo: copy.noVideo,
   removidosESilenciados: copy.removidosESilenciados,

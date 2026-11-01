@@ -1796,7 +1796,9 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
  * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
  * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
- * tambem, liga ou desliga a de audio), toggleShareScreen({ enable }) liga ou desliga a propria tela e responde
+ * tambem, liga ou desliga a de audio; diferente da tag, o eco sai mesmo sem a pagina ser moderadora, que a tag ignora o
+ * comando sem moderador, entao o teste confere o comando, nunca o poder de quem o manda), toggleShareScreen({ enable })
+ * liga ou desliga a propria tela e responde
  * screenSharingStatusChanged { on, details } e contentSharingParticipantsChanged { data } (o proprio id ou nada), e hangup
  * responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao ligou, alguem bateu na sala de
  * espera) o teste dispara. As leituras que a tag responde por Promise: isSharingScreen (a propria tela),

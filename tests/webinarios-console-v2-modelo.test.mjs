@@ -302,7 +302,7 @@ test("consoleBarItemsFor: sem ninguem batendo, a frase da sala numa pilula quiet
   assert.deepEqual(barra({ role: "team", screenShare: "engine" }).center, ["hands", "poll"], "a Equipe nunca tem a tela");
 });
 
-test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores com Chromium; Firefox, Safari e todo navegador do iPhone e do iPad ficam com o botao do motor (V2-A39, ate o spike da tela)", () => {
+test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores de computador com Chromium; Firefox, Safari, todo navegador do iPhone e do iPad e o Android ficam com o botao do motor (V2-A39, ate o spike da tela)", () => {
   const chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   const edge = `${chrome} Edg/131.0.0.0`;
   const opera = `${chrome} OPR/116.0.0.0`;
@@ -314,7 +314,11 @@ test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores com C
   const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
   const chromeNoIphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1";
   const firefoxNoIpad = "Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/132.0 Mobile/15E148 Safari/605.1.15";
-  for (const agent of [firefox, safari, chromeNoIphone, firefoxNoIpad, "", null, undefined]) {
+  // O Chrome do Android traz "Chrome/" mas nao tem getDisplayMedia: o circulo nao faria nada (o motor tambem esconde o dele).
+  const chromeNoAndroid = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+  const tabletAndroid = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  const samsung = "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36";
+  for (const agent of [firefox, safari, chromeNoIphone, firefoxNoIpad, chromeNoAndroid, tabletAndroid, samsung, "", null, undefined]) {
     assert.equal(embed.consoleScreenShareMode(agent), "engine", String(agent));
   }
 });

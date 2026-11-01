@@ -157,17 +157,21 @@ export type ConsoleScreenShareMode = "engine" | "ours";
 
 const CHROMIUM = /\b(?:Chrome|Chromium)\/\d/;
 const NOT_CHROMIUM = /\b(?:Firefox|FxiOS)\//;
+/** O celular e o tablet: o Chrome do Android traz "Chrome/" mas nao tem getDisplayMedia. */
+const MOBILE = /\b(?:Android|Mobile)\b/;
 
 /**
  * O Compartilhar tela de quem apresenta no console, pelo navegador (docs/31 V2-A39), ate o spike da tela (§5.3)
- * confirmar ou trocar: o nosso circulo so nos navegadores com Chromium (Chrome, Edge, Opera, Brave, que trazem
- * "Chrome/" no userAgent), onde o getDisplayMedia pedido pelo comando dentro do iframe de outra origem foi conferido;
- * no Firefox, no Safari e em todo navegador do iPhone e do iPad (o Chrome de la e WebKit, "CriOS/"), o botao do proprio
- * motor. Sem o userAgent, o do motor, que funciona em todos. Lido uma vez no navegador, nunca no servidor.
+ * confirmar ou trocar: o nosso circulo so nos navegadores de computador com Chromium (Chrome, Edge, Opera, Brave, que
+ * trazem "Chrome/" no userAgent), onde o getDisplayMedia pedido pelo comando dentro do iframe de outra origem foi
+ * conferido; no Firefox, no Safari, em todo navegador do iPhone e do iPad (o Chrome de la e WebKit, "CriOS/") e no
+ * Android, o botao do proprio motor. No celular e no tablet nao ha tela compartilhada: sem getDisplayMedia o motor nao
+ * age no comando nem mostra o botao dele (isDesktopSharingEnabled), e o nosso circulo seria um botao que nao faz nada.
+ * Sem o userAgent, o do motor, que funciona em todos. Lido uma vez no navegador, nunca no servidor.
  */
 export function consoleScreenShareMode(userAgent: string | null | undefined): ConsoleScreenShareMode {
   const agent = typeof userAgent === "string" ? userAgent : "";
-  return CHROMIUM.test(agent) && !NOT_CHROMIUM.test(agent) ? "ours" : "engine";
+  return CHROMIUM.test(agent) && !NOT_CHROMIUM.test(agent) && !MOBILE.test(agent) ? "ours" : "engine";
 }
 
 /**

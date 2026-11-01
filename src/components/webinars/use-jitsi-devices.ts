@@ -17,8 +17,10 @@
 // ruido quando a troca do microfone acaba e, num iframe novo (a entrada, a volta depois de uma queda, a live seguinte), o
 // que o painel mostra (o ruido ligado ou desligado e o fundo desligado na entrada, porque o iframe guarda os dois da
 // live anterior; a qualidade; o desfoque ligado quando a camera ligar, uma vez: panelEffectsOnSignal), e guarda o
-// espelho no navegador da pagina (o iframe guarda o dele de uma live para outra e a api nao deixa ler). Quem apresenta (`efeitosNoIframe`) muda ruido,
-// fundo e espelho tambem pela barra do iframe: o hook so manda o comando, sem guardar nem reaplicar nada. O volume
+// espelho no navegador da pagina (o iframe guarda o dele de uma live para outra e a api nao deixa ler). Quem apresenta
+// (`efeitosNoIframe`) muda ruido, fundo e espelho tambem dentro do iframe (pela pagina da sala, a barra do motor; no
+// console, o menu da propria miniatura e o dialogo de fundo do motor): o hook so manda o comando, sem guardar nem
+// reaplicar nada. O volume
 // (setParticipantVolume em todos e em quem entrar depois, junto com o botao Som da sala) vai por executeCommand. Nada
 // aqui fala com o nosso servidor e nenhuma frase de tela mora aqui (os nomes reserva chegam por `nomesReserva`).
 
@@ -45,8 +47,9 @@ export type UseJitsiDevicesInput = {
    */
   antesDeTrocar?: (kind: DeviceKind) => DeviceSwitchHooks | void;
   /**
-   * Quem apresenta: ruido, fundo e espelho tambem mudam pela barra do iframe (a setinha do microfone, o fundo, a
-   * engrenagem), entao o hook so manda o comando, sem guardar estado nem reaplicar nada por cima da escolha feita la.
+   * Quem apresenta: ruido, fundo e espelho tambem mudam dentro do iframe (pela pagina da sala, a barra do motor, com a
+   * setinha do microfone, o fundo e a engrenagem; no console, o menu da propria miniatura, com o Inverter, e o dialogo de
+   * fundo do motor), entao o hook so manda o comando, sem guardar estado nem reaplicar nada por cima da escolha feita la.
    */
   efeitosNoIframe?: boolean;
   /** O executeCommand do useJitsiMeet (falso sem sala montada). */
@@ -79,7 +82,7 @@ export type UseJitsiDevices = DevicesSnapshot & {
   fundo: (on: boolean) => void;
   /** "Mais opções de fundo": o dialogo de fundo do proprio iframe (toggleVirtualBackgroundDialog). */
   maisFundos: () => void;
-  /** O espelho do aluno guardado na pagina; nulo antes de ler e para quem apresenta (a barra do iframe tambem muda). */
+  /** O espelho do aluno guardado na pagina; nulo antes de ler e para quem apresenta (dentro do iframe tambem muda). */
   mirror: boolean | null;
   /** O volume que cada participante recebe agora (o Som da barra e a faixa). */
   nivel: () => number;
@@ -156,7 +159,7 @@ export function useJitsiDevices(input: UseJitsiDevicesInput): UseJitsiDevices {
   const storedMirrorOn = useSyncExternalStore(subscribeMirror, readMirror, serverMirror);
   const [quality, setQuality] = useState<ReceiveQuality>("automatica");
   const [volumePercent, setVolumePercent] = useState(100);
-  /** O que o aluno ligou pelo painel (quem apresenta nao guarda: a barra do iframe tambem muda). */
+  /** O que o aluno ligou pelo painel (quem apresenta nao guarda: dentro do iframe tambem muda). */
   const effectsRef = useRef<PanelEffects>(INITIAL_PANEL_EFFECTS);
   /** O aparelho em uso da ultima leitura (a escolha do aparelho que ja esta em uso nao troca nada). */
   const currentRef = useRef<DevicesSnapshot["current"]>(EMPTY_DEVICES.current);
@@ -376,7 +379,7 @@ export function useJitsiDevices(input: UseJitsiDevicesInput): UseJitsiDevices {
   );
 
   const espelhar = useCallback(() => {
-    // O comando so inverte; o aluno guarda o novo valor na pagina (quem apresenta tambem inverte pela barra do iframe).
+    // O comando so inverte; o aluno guarda o novo valor na pagina (quem apresenta tambem inverte dentro do iframe).
     if (executeCommand("toggleCameraMirror") && !latest.current.efeitosNoIframe) {
       writeMirror(!readMirror());
     }

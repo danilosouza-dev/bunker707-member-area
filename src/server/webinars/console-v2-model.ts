@@ -29,7 +29,7 @@ export function consoleSessionOptionLabel(session: { kind: SessionKind; schedule
 }
 
 /**
- * O selo dos presentes (V2-13; no topo da gravada e do Replay, e no palco da live a partir de G5): "12 presentes ·
+ * O selo dos presentes (V2-13; no topo da gravada e do Replay, e no palco da live): "12 presentes ·
  * pico 14". Os presentes vem do retrato de 5 s e o pico do relatorio em cache de 60 s (console-presence-model.ts), entao
  * o pico mostrado e o maior dos dois: sem isso o selo poderia dizer "12 presentes · pico 10". Sem pico (o Replay, antes
  * de comecar ou sem a leitura), so "12 presentes".
@@ -100,7 +100,7 @@ export function consoleTopActionsFor(input: ConsoleTopActionsInput): ConsoleTopA
 }
 
 /* ------------------------------------------------------------------------------------------------
- * G5 (V2-4, V2-13 e V2-A5): o palco da live no console
+ * O palco da live no console (V2-4, V2-13 e V2-A5)
  * ---------------------------------------------------------------------------------------------- */
 
 /** O selo de cima a esquerda do palco do console: o "Ao vivo" da sala ou a frase do momento, neutra sobre o video. */
@@ -181,7 +181,7 @@ export function consoleColumnPolicy(role: ConsoleRoomRole): "engine" | "width" {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * G6 (V2-14): a barra de quem apresenta
+ * A barra de quem apresenta (V2-14)
  * ---------------------------------------------------------------------------------------------- */
 
 /** O que a zona da esquerda da barra mostra: quem bate na sala de espera (com Admitir todos) ou a frase da sala. */
@@ -262,7 +262,7 @@ export function consoleRecordButton(input: { canPublish: boolean; card: Pick<Rec
 }
 
 /* ------------------------------------------------------------------------------------------------
- * G7 (V2-15): o painel com abas
+ * O painel com abas (V2-15)
  * ---------------------------------------------------------------------------------------------- */
 
 /** As abas do painel do console, na ordem da tela. */

@@ -10,7 +10,7 @@ import { assertSections, cumulativeHash, fileHash, migrationFiles, read, sqlCode
 // - duas secoes MCP, idempotente; o unico drop e o do check antigo, dentro do bloco que so roda sem o check novo; o
 //   check novo entra `not valid` na secao 1 e a secao 2 so o valida;
 // - a lista do check e a do app (model.CHAT_ROLES); nada de delete, truncate, politica, tabela nova nem grant;
-// - o aviso de migracao pendente aponta esta (WEBINARS_MIGRATION) e o co-apresentador tem a propria constante.
+// - o aviso de migracao pendente aponta esta (WEBINARS_MIGRATION), sem constante propria para o co-apresentador.
 
 const MIGRATION = "supabase/migrations/202611010001_webinars_v5_coapresentador.sql";
 const model = await import("../src/server/webinars/model.ts");
@@ -74,7 +74,8 @@ test("a lista do check novo e a do app (model.CHAT_ROLES, com co_host); o aviso 
   assert.match(code, new RegExp(`add constraint webinar_chat_messages_role_v5\\s*check \\(role in \\(${sqlList(model.CHAT_ROLES)}\\)\\) not valid;`));
   assert.equal((code.match(/check \(role in \(/g) ?? []).length, 1, "um check so");
   assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611010001";/);
-  assert.match(dbSource, /export const WEBINARS_COHOST_MIGRATION = "202611010001";/);
+  // Sem constante propria: o insert do co_host sem a migracao da o erro comum da acao, nunca o aviso (docs/21 §9.11).
+  assert.doesNotMatch(dbSource, /WEBINARS_COHOST_MIGRATION/);
   // O nome que o Postgres deu ao check de coluna da 0029 (conferido na nuvem de teste antes de escrever a migracao).
   assert.match(sqlCodeOf(read("supabase/migrations/202610290001_webinars_v2_chat.sql")), /create table if not exists public\.webinar_chat_messages \([\s\S]*?\n  role text not null check \(role in \(/);
 });

@@ -83,7 +83,7 @@ export function LiveAttachRecording({ busyKey, canWrite, onAttach, recording }: 
         <form className="flex min-w-0 flex-col gap-3" data-live-attach-form="" onSubmit={(event) => void submit(event)}>
           <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.enviarGravacaoTexto}</p>
           <AdminField id="console-attach-embed" label={LIVE_CONSOLE_COPY.enderecoPlayer} optional>
-            <input className={adminInputClass} id="console-attach-embed" inputMode="url" maxLength={2048} onChange={(event) => setEmbedUrl(event.target.value)} placeholder="https://iframe.mediadelivery.net/embed/…" type="url" value={embedUrl} />
+            <input className={adminInputClass} id="console-attach-embed" inputMode="url" maxLength={2048} onChange={(event) => setEmbedUrl(event.target.value)} placeholder={copy.enderecoPlayerExemplo} type="url" value={embedUrl} />
           </AdminField>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <AdminField id="console-attach-library" label={LIVE_CONSOLE_COPY.biblioteca} optional>

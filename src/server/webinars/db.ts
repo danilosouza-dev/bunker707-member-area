@@ -23,9 +23,9 @@ export type WebinarsDb = SupabaseClient;
  * oferta congelado, a venda reembolsada fora) so saem com a 202610300007. O redesign V2, fase 2 (docs/31), vem depois:
  * a 202611010001 troca o check de webinar_chat_messages.role para aceitar `co_host` (o Co-apresentador no chat,
  * V2-A12) e e a mais nova, entao o aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21 §9.11). Sem ela,
- * so a mensagem do co-apresentador falha (23514 no check antigo); o resto le e grava como antes. Cada parte da fase 4
- * e o co-apresentador tem a propria constante abaixo, para o aviso de migracao pendente apontar a certa onde so aquela
- * parte falta.
+ * so a mensagem do co-apresentador falha (23514 no check antigo, que chega a ele como o erro comum da acao, sem o aviso
+ * de migracao pendente); o resto le e grava como antes. Cada parte da fase 4 tem a propria constante abaixo, para o
+ * aviso de migracao pendente apontar a certa onde so aquela parte falta.
  */
 export const WEBINARS_MIGRATION = "202611010001";
 
@@ -43,9 +43,6 @@ export const WEBINARS_JIT_MIGRATION = "202610300005";
 
 /** 4f: a traducao do chat e do roteiro (webinar_viewer_prefs, webinar_text_translations). */
 export const WEBINARS_TRANSLATION_MIGRATION = "202610300006";
-
-/** Redesign V2, fase 2: o check de webinar_chat_messages.role com `co_host` (o Co-apresentador no chat, docs/31 V2-A12). */
-export const WEBINARS_COHOST_MIGRATION = "202611010001";
 
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();

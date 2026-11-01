@@ -9,6 +9,7 @@ import "./support/resolve-extensionless-ts.mjs";
 
 const console_ = await import("../src/server/webinars/console-model.ts");
 const room = await import("../src/server/webinars/room-model.ts");
+const { WEBINAR_ADMIN_COPY } = await import("../src/server/webinars/editor-model.ts");
 
 const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const MIN = 60_000;
@@ -55,9 +56,9 @@ test("a fase pelo relogio: agendada ate 15 min antes, na espera, no ar ate o fim
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "replay", status: "live" }, DURATION, T0), "replay");
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "live", status: "waiting" }, DURATION, T0 + MIN), "waiting", "a live ao vivo segue a situacao gravada");
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "live" }, DURATION, T0 + 3 * HOUR), "scheduled");
+  // Cada fase tem o nome do editor (WEBINAR_ADMIN_COPY.console.phases), que o card de sessoes e o JIT mostram.
   for (const phase of console_.CONSOLE_PHASES) {
-    assert.ok(console_.consolePhaseLabel(phase).length > 0, phase);
-    assert.ok(["error", "muted", "neutral", "success", "warning"].includes(console_.consolePhaseTone(phase)));
+    assert.ok(WEBINAR_ADMIN_COPY.console.phases[phase].length > 0, phase);
   }
 });
 

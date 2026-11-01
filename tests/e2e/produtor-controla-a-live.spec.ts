@@ -191,6 +191,20 @@ test.describe("produtor", () => {
     await pessoas.getByRole("button", { exact: true, name: consoleAoVivo.silenciarTodos }).click();
     expect((await sala.esperarComando("muteEveryone", { depoisDe: antes })).args).toEqual(["audio"]);
 
+    // Câmeras livres (V2-14): o clique manda a moderacao de video e o aria-pressed segue o motor (o eco do
+    // moderationStatusChanged de video), nunca o clique; a moderacao ligada por outro console tambem chega, e a de audio
+    // nao mexe nas cameras.
+    const livres = pessoas.getByRole("button", { exact: true, name: consoleV2.pessoas.cameras });
+    const livresAntes = (await livres.getAttribute("aria-pressed")) === "true";
+    antes = (await sala.comandos()).length;
+    await livres.click();
+    expect((await sala.esperarComando("toggleModeration", { depoisDe: antes })).args).toEqual([livresAntes, "video"]);
+    await expect(livres).toHaveAttribute("aria-pressed", String(!livresAntes));
+    await sala.disparar("moderationStatusChanged", { enabled: !livresAntes, mediaType: "video" });
+    await expect(livres).toHaveAttribute("aria-pressed", String(livresAntes));
+    await sala.disparar("moderationStatusChanged", { enabled: livresAntes, mediaType: "audio" });
+    await expect(livres).toHaveAttribute("aria-pressed", String(livresAntes));
+
     // Trancar a sala fica no topo (V2-13), com o estado no aria-pressed.
     antes = (await sala.comandos()).length;
     await topo.getByRole("button", { exact: true, name: consoleAoVivo.trancar }).click();
@@ -551,7 +565,8 @@ test.describe("produtor", () => {
     await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_DE_ANTES });
     await expect(page.locator(`[data-live-participant="${ALUNA_DE_ANTES}"]`)).toHaveCount(1);
 
-    // O console sai (o hangup da barra do iframe) com o pedido ainda esperando: ele nao sai, e a lista fica vazia.
+    // O console sai da sala (o videoConferenceLeft do motor; o iframe de quem apresenta nao tem mais o hangup da barra
+    // dele) com o pedido ainda esperando: ele nao sai, e a lista fica vazia.
     const antesDaSaida = (await sala.comandos()).length;
     await sala.disparar("videoConferenceLeft", {});
     await page.waitForTimeout(CONSOLE_ROOM_RULES.roomsInfoMs + 1_500);

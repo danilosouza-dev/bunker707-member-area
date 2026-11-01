@@ -61,25 +61,6 @@ export function consolePhaseOf(session: Pick<WebinarSession, "kind" | "recording
   return session.status === "waiting" ? "waiting" : "scheduled";
 }
 
-export function consolePhaseLabel(phase: ConsolePhase): string {
-  return WEBINAR_ADMIN_COPY.console.phases[phase];
-}
-
-export function consolePhaseTone(phase: ConsolePhase): "error" | "muted" | "neutral" | "success" | "warning" {
-  switch (phase) {
-    case "live":
-      return "success";
-    case "waiting":
-      return "warning";
-    case "cancelled":
-      return "error";
-    case "ended":
-      return "muted";
-    default:
-      return "neutral";
-  }
-}
-
 /** "Abrir sessao" so antes de ela estar no ar; "Encerrar sessao" so com ela na espera ou no ar (docs/30 §2.3). */
 export function canOpenSession(status: SessionStatus): boolean {
   return status === "scheduled" || status === "waiting";
