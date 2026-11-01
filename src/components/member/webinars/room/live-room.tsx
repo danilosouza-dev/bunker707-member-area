@@ -1056,7 +1056,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   assistant={assistant}
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                  displayName={session.me.displayName}
                   enabled={!readOnly}
+                  ended={phase === "ended"}
                   filter={questionsFilter}
                   getOffsetMs={getOffsetMs}
                   look="comment"

@@ -52,27 +52,6 @@ const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc?autoplay=true&muted=true&controls=false";
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
-/**
- * A caixa de um campo pelas classes do Tailwind (a escala de 4 px; a linha do text-base e 24 px), no celular ou a partir
- * de lg (o lg: por cima): a altura, a borda, o respiro de cima e de baixo e a altura da linha, em px.
- */
-function caixaDoCampo(classes, largura) {
-  const valer = largura === "lg" ? [...classes.filter((name) => !name.includes(":")), ...classes.filter((name) => name.startsWith("lg:")).map((name) => name.slice(3))] : classes.filter((name) => !name.includes(":"));
-  const px = (valor) => (valor.startsWith("[") ? Number.parseFloat(valor.slice(1)) : Number(valor) * 4);
-  const caixa = { altura: 0, borda: 0, linha: 0, respiro: 0 };
-  let linhaDoTexto = 0;
-  for (const name of valer) {
-    const [prefixo, ...resto] = name.split("-");
-    const valor = resto.join("-");
-    if (prefixo === "h" && valor) caixa.altura = px(valor);
-    if (name === "border") caixa.borda = 1;
-    if (prefixo === "py" && valor) caixa.respiro = px(valor);
-    if (prefixo === "leading" && valor) caixa.linha = px(valor);
-    if (name === "text-base") linhaDoTexto = 24;
-  }
-  caixa.linha ||= linhaDoTexto;
-  return caixa;
-}
 /** A mensagem da Live ao vivo, com a hora que o servidor gravou (sentAt): a live das 20:00 mais o offset dado. */
 const naLive = (id, offsetMs, extra = {}) => msg(id, { offsetMs, sentAt: new Date(T0 + offsetMs).toISOString(), ...extra });
 
@@ -338,8 +317,15 @@ test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no 
     createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
   const apelido = render(chat.RoomConsentBox, { defaultDisplayMode: "nickname", onAccept: noop, onCancel: noop });
+  // O campo do YouTube (Y11) no chat e nas Perguntas da sala: 16/22 abaixo de lg e 14/20 a partir de lg.
+  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, defaultDisplayMode: "first_name_initial", displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
+  const perguntasDaSala = renderToStaticMarkup(
+    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+  );
   const classes = (tag) => (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
   for (const [nome, tag] of [
+    ["o chat", campoDoChat.match(/<textarea aria-label="Escreva uma mensagem"[^>]*>/)?.[0] ?? ""],
+    ["a pergunta da sala", perguntasDaSala.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
     ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
     ["o apelido", apelido.match(/<input aria-label="Apelido"[^>]*>/)?.[0] ?? apelido.match(/<input[^>]*placeholder="[^"]*"[^>]*>/)?.[0] ?? ""]
   ]) {
@@ -563,29 +549,28 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   assert.doesNotMatch(lista[1], /justify-end/);
   assert.match(html, /role="log"><li class="flex mb-4 first:mt-auto" data-room-message="1">/);
 
-  // A linha do campo: o ⋯ so abaixo de lg (a partir de lg ele e o ⋮ do cabecalho do painel), o campo (44 px, 16 px
-  // abaixo de lg) e o Enviar redondo de 44 px.
+  // O campo "Adicione um comentário" do YouTube (RoomCommentField, Y11): o ⋯ so abaixo de lg, antes do avatar (a partir
+  // de lg ele e o ⋮ do cabecalho do painel), o avatar com as minhas iniciais e o textarea sem caixa (16 px abaixo de lg).
+  // Fechado, nada de Cancelar nem de Enviar (eles so aparecem com o campo aberto, pelo foco).
   const form = html.slice(html.indexOf("<form"), html.indexOf("</form>"));
-  assert.match(form, /^<form[^>]*><div class="flex items-center gap-2"><div class="shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[^>]*aria-haspopup="menu">[\s\S]*?<\/div><\/div><textarea/, "o menu so abaixo de lg, antes do campo");
+  assert.match(form, /^<form class="[^"]*\bborder-room-panel-border\b[^"]*"><div class="mr-4 flex items-start"><div class="mr-3 shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[^>]*aria-haspopup="menu">[\s\S]*?<\/div><\/div><span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>AS<\/span><\/span>/, "o menu so abaixo de lg, antes do avatar com as iniciais");
   assert.equal((html.match(/aria-label="Mais opções"/g) ?? []).length, 1, "um menu so no chat");
   assert.doesNotMatch(html.slice(0, html.indexOf("<form")), /Mais opções/, "nada de menu acima da lista");
-  assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\bh-11\b[^"]*\btext-base\b[^"]*\blg:text-\[13px\][^"]*"/);
-  // A linha cabe no campo de altura fixa (a caixa conta a borda, box-sizing do Tailwind): borda + respiro + linha <=
-  // altura, no celular e a partir de lg. Com a linha de 24 px nos 44 px sobravam 22 e o Chrome do Windows e do Linux
-  // mostrava a barra de rolar.
-  const campo = form.match(/<textarea [^>]*class="([^"]*)"/)[1].split(/\s+/);
-  for (const largura of ["celular", "lg"]) {
-    const caixa = caixaDoCampo(campo, largura);
-    assert.ok(caixa.altura > 0 && caixa.linha > 0, `${largura}: a altura e a linha vem das classes`);
-    assert.ok(2 * caixa.borda + 2 * caixa.respiro + caixa.linha <= caixa.altura, `${largura}: ${JSON.stringify(caixa)} cabe sem rolar`);
-  }
+  assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\btext-base\b[^"]*\blg:text-sm\b[^"]*"/);
+  assert.doesNotMatch(form, /lg:text-\[13px\]|rounded-\[12px\]|bg-room-input-bg/, "o campo sem caixa");
   assert.match(form, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
-  assert.match(form, /<\/textarea><button aria-label="Enviar" class="[^"]*\bsize-11\b[^"]*\bbg-room-active-bg\b[^"]*" title="Enviar" type="submit" disabled="">/);
+  assert.doesNotMatch(form, /type="submit"|>Enviar<|>Cancelar</, "fechado, sem o envio e sem o Cancelar");
+  assert.doesNotMatch(form, /SendHorizontal|lucide-send/);
 
-  // Com a frase no lugar do campo (silenciado, sala que nao abriu), a frase e, abaixo de lg, o menu.
+  // Com a frase no lugar do campo (silenciado, sala que nao abriu), a frase e, abaixo de lg, o menu (o celular como
+  // hoje); a faixa tem a folga do iPhone do campo.
   const comFrase = render(chat.RoomChatPanel, { ...base, notice: "Você está sem escrever no chat até 20:15." });
   assert.doesNotMatch(comFrase, /<textarea/);
-  assert.match(comFrase, /<div class="shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[\s\S]*data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.</);
+  const frase = comFrase.match(/<div class="([^"]*)"><div class="mr-3 shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[\s\S]*?<p class="([^"]*)" data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.<\/p>/);
+  assert.ok(frase, "a frase com o menu so abaixo de lg");
+  assert.deepEqual(temTodasAs(frase[1], ["border-t", "border-room-panel-border", "p-4", "max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]"]), []);
+  assert.deepEqual(temTodasAs(frase[2], ["text-sm", "leading-5", "text-room-warn-fg"]), []);
+  assert.doesNotMatch(frase[2], /font-semibold/);
 
   // A confirmacao de remover continua no chat, aberta pela sala (o ⋮ do cabecalho).
   assert.doesNotMatch(html, /role="alertdialog"/);
@@ -630,6 +615,21 @@ test("o aceite (§8.5): o texto palavra por palavra, como o nome aparece, Entend
   assert.match(html, /Primeiro nome e inicial/);
   assert.match(html, /Apelido/);
   assert.match(html, /role="group"/);
+  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca, tonal e de texto; os radios ficam.
+  const cartao = html.match(/^<div class="([^"]*)" data-testid="room-consent" role="group"/);
+  assert.ok(cartao, "o cartao do aceite");
+  assert.deepEqual(temTodasAs(cartao[1], ["rounded-[12px]", "bg-room-control", "p-4"]), []);
+  const pilula = (nome) => html.match(new RegExp(`<button class="([^"]*)" type="button">${nome}</button>`))?.[1] ?? "";
+  assert.deepEqual(temTodasAs(pilula("Entendi e quero participar"), ["h-10", "rounded-full", "bg-room-active-bg", "text-room-active-fg"]), []);
+  assert.deepEqual(temTodasAs(pilula("Participar como anônimo"), ["h-10", "rounded-full", "bg-room-control", "text-room-fg"]), []);
+  assert.deepEqual(temTodasAs(pilula("Cancelar"), ["h-10", "rounded-full", "bg-transparent", "text-room-fg"]), []);
+  assert.equal((html.match(/type="radio"/g) ?? []).length, 2, "os dois radios de como o nome aparece");
+  // Na gaveta do vertical (classic), a faixa e os botoes de antes.
+  const classico = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop, variant: "classic" });
+  assert.match(classico, /^<div class="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group"/);
+  assert.doesNotMatch(classico, /rounded-full|rounded-\[12px\]/, "sem o cartao e sem as pilulas");
+  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 3, "os tres botoes de antes");
+  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto e os radios iguais nos dois");
   assert.equal(
     WEBINAR_COPY.sala.consentimento,
     "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."

@@ -14,6 +14,8 @@ import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, ty
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 import { RoomChip, RoomChipBar } from "./room-chip-bar";
 import { RoomComment, RoomCommentAvatar, RoomCommentThread, type RoomCommentTime } from "./room-comment";
+import { RoomCommentField, RoomCommentFieldNotice } from "./room-comment-field";
+import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
 import { RoomPill } from "./room-pill";
@@ -330,7 +332,9 @@ export function RoomQuestionsTab({
   assistant: sharedAssistant,
   consented,
   defaultDisplayMode,
+  displayName,
   enabled,
+  ended = false,
   filter: filterProp,
   getOffsetMs,
   look = "classic",
@@ -351,7 +355,11 @@ export function RoomQuestionsTab({
   assistant?: RoomAssistant;
   consented: boolean;
   defaultDisplayMode: DisplayNameMode;
+  /** O meu nome (as iniciais do avatar do campo no `comment`); antes do aceite, a pessoa. */
+  displayName?: string | null;
   enabled: boolean;
+  /** A sessao acabou: no `comment`, "Essa live acabou." no lugar do campo. */
+  ended?: boolean;
   /** O filtro, quando e da sala (o desenho normal); sem ele, o filtro e da aba (a gaveta do vertical). */
   filter?: QuestionsFilter;
   getOffsetMs: () => number;
@@ -388,6 +396,8 @@ export function RoomQuestionsTab({
   const setFilter = onFilter ?? setOwnFilter;
   const setOrder = onOrder ?? setOwnOrder;
   const [draft, setDraft] = useState("");
+  // O campo do YouTube aberto (no comentario): liga no foco, desliga no Cancelar e depois do envio.
+  const [expanded, setExpanded] = useState(false);
   const [anonymous, setAnonymous] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -438,6 +448,7 @@ export function RoomQuestionsTab({
       const answer = await postQuestion(webinarId, { ...consent, anonymous: allowAnonymous && anonymous, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
       setQuestions((previous) => [answer.question, ...previous.filter((question) => question.id !== answer.question.id)]);
       setDraft("");
+      setExpanded((previous) => composerExpandedStep(previous, { draft: "", type: "sent" }));
       // Fase 4c: o Assistente responde (ligado, e sem atendente quando nao ha "Responder tudo"); senao, sem ninguem
       // atendendo, a equipe responde depois pelo sino.
       const { attendantsOnline, enabled: assistantOn, replyAll } = assistant.state;
@@ -460,8 +471,8 @@ export function RoomQuestionsTab({
     }
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
+  function submit(event?: FormEvent) {
+    event?.preventDefault();
     if (!draft.trim() || readOnly) {
       return;
     }
@@ -508,6 +519,8 @@ export function RoomQuestionsTab({
     );
   }
 
+  // No comentario, a frase que toma o lugar do campo: o silenciado, a sala que nao abriu e a live que acabou.
+  const fieldNotice = notice ?? (look === "comment" && ended ? copy.encerrada : null);
   const visible = questionsShown(questions, filter);
   const waitedQuestion = waiting ? questions.find((question) => question.id === waiting) : null;
   const waitingNow = Boolean(waitedQuestion && waitedQuestion.status === "open");
@@ -559,8 +572,51 @@ export function RoomQuestionsTab({
           ))}
         </ul>
       )}
-      {consentOpen && !consented && !notice ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
-      {notice ? (
+      {consentOpen && !consented && !fieldNotice ? (
+        <RoomConsentBox
+          busy={sending}
+          defaultDisplayMode={defaultDisplayMode}
+          onAccept={(choice) => void deliver(choice)}
+          onCancel={() => setConsentOpen(false)}
+          variant={look === "comment" ? "card" : "classic"}
+        />
+      ) : null}
+      {look === "comment" ? (
+        fieldNotice ? (
+          <RoomCommentFieldNotice testId="room-questions-notice">{fieldNotice}</RoomCommentFieldNotice>
+        ) : (
+          <RoomCommentField
+            allowAnonymous={allowAnonymous}
+            anonymous={anonymous}
+            ariaLabel={copy.suaPergunta}
+            avatar={{ name: consented ? (displayName ?? null) : null }}
+            busy={sending}
+            disabled={readOnly}
+            expanded={expanded}
+            maxLength={CHAT_LIMITS.question}
+            mode="mod-enter"
+            onAnonymousChange={setAnonymous}
+            onCancel={() => {
+              setDraft("");
+              setConsentOpen(false);
+            }}
+            onChange={setDraft}
+            onExpandedChange={setExpanded}
+            onSubmit={() => submit()}
+            placeholder={copy.fazerPergunta}
+            status={
+              <>
+                <p aria-live="polite" className="mt-1 text-room-fg-subtle empty:mt-0">
+                  {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : "")}
+                </p>
+                <AssistantHint className="mt-1 px-0 text-xs leading-[18px]" state={waitingNow ? "waiting" : "none"} />
+              </>
+            }
+            submitLabel={WEBINAR_COPY.salaV2.perguntas.perguntar}
+            value={draft}
+          />
+        )
+      ) : notice ? (
         <p className="border-t border-room-border bg-room-composer px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-room-warn-fg" data-testid="room-questions-notice" role="status">
           {notice}
         </p>

@@ -24,8 +24,11 @@ import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hi
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import type { ChatPostBody } from "./room-api";
 import { RoomComment, RoomCommentAvatar, type RoomCommentTime } from "./room-comment";
+import { RoomCommentField, RoomCommentFieldNotice } from "./room-comment-field";
+import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
+import { RoomPill } from "./room-pill";
 import { RoomTooltip } from "./room-tooltip";
 import { RoomBadge, RoomButton, RoomIconButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
@@ -356,16 +359,40 @@ export const CHAT_MORE_MENU_ID = "room-chat-more";
 
 export type ConsentChoice = { displayMode: DisplayNameMode; nickname: string };
 
-/** O aceite (docs/30 §8.5): o texto exato, como o nome aparece e os dois botoes. */
-export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }: { busy?: boolean; defaultDisplayMode: DisplayNameMode; onAccept: (choice: ConsentChoice) => void; onCancel: () => void }) {
+/**
+ * O aceite (docs/30 §8.5): o texto exato, como o nome aparece e os dois botoes. Na sala no estilo do YouTube (`card`, o
+ * padrao; spec §9.4), um cartao de raio 12 com as pilulas (a branca, a tonal e a de texto); na gaveta do vertical
+ * (`classic`), a faixa e os botoes de antes.
+ */
+export function RoomConsentBox({
+  busy,
+  defaultDisplayMode,
+  onAccept,
+  onCancel,
+  variant = "card"
+}: {
+  busy?: boolean;
+  defaultDisplayMode: DisplayNameMode;
+  onAccept: (choice: ConsentChoice) => void;
+  onCancel: () => void;
+  variant?: "card" | "classic";
+}) {
   const copy = WEBINAR_COPY.sala;
   const id = useId();
   const [mode, setMode] = useState<DisplayNameMode>(defaultDisplayMode === "anonymous" ? "first_name_initial" : defaultDisplayMode);
   const [nickname, setNickname] = useState("");
   const nicknameInvalid = mode === "nickname" && (nickname.trim().length < CHAT_LIMITS.nicknameMin || nickname.trim().length > CHAT_LIMITS.nicknameMax);
+  const card = variant === "card";
+  const accept = () => onAccept({ displayMode: mode, nickname: nickname.trim() });
+  const acceptAnonymous = () => onAccept({ displayMode: "anonymous", nickname: "" });
 
   return (
-    <div className="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group" aria-labelledby={`${id}-title`}>
+    <div
+      className={card ? "mx-4 my-2 shrink-0 rounded-[12px] bg-room-control p-4" : "border-t border-room-border bg-room-pinned px-3 py-3"}
+      data-testid="room-consent"
+      role="group"
+      aria-labelledby={`${id}-title`}
+    >
       <p className="text-sm leading-6 text-room-fg" id={`${id}-title`}>
         {copy.consentimento}
       </p>
@@ -391,17 +418,25 @@ export function RoomConsentBox({ busy, defaultDisplayMode, onAccept, onCancel }:
           />
         ) : null}
       </fieldset>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <RoomButton disabled={busy || nicknameInvalid} onClick={() => onAccept({ displayMode: mode, nickname: nickname.trim() })} size="sm" variant="primary">
-          {copy.consentimentoBotao}
-        </RoomButton>
-        <RoomButton disabled={busy} onClick={() => onAccept({ displayMode: "anonymous", nickname: "" })} size="sm" variant="secondary">
-          {copy.participarComoAnonimo}
-        </RoomButton>
-        <RoomButton disabled={busy} onClick={onCancel} size="sm" variant="ghost">
-          {WEBINAR_COPY.admin.cancelar}
-        </RoomButton>
-      </div>
+      {card ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <RoomPill disabled={busy || nicknameInvalid} label={copy.consentimentoBotao} onClick={accept} tone="white" />
+          <RoomPill disabled={busy} label={copy.participarComoAnonimo} onClick={acceptAnonymous} tone="tonal" />
+          <RoomPill disabled={busy} label={WEBINAR_COPY.admin.cancelar} onClick={onCancel} tone="text" />
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <RoomButton disabled={busy || nicknameInvalid} onClick={accept} size="sm" variant="primary">
+            {copy.consentimentoBotao}
+          </RoomButton>
+          <RoomButton disabled={busy} onClick={acceptAnonymous} size="sm" variant="secondary">
+            {copy.participarComoAnonimo}
+          </RoomButton>
+          <RoomButton disabled={busy} onClick={onCancel} size="sm" variant="ghost">
+            {WEBINAR_COPY.admin.cancelar}
+          </RoomButton>
+        </div>
+      )}
     </div>
   );
 }
@@ -443,6 +478,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     chatMode,
     consented,
     defaultDisplayMode,
+    displayName,
     error,
     look = "comment",
     messages,
@@ -479,6 +515,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     return () => window.clearTimeout(id);
   }, [waiting]);
   const [draft, setDraft] = useState("");
+  // O campo do YouTube aberto (no comentario): liga no foco, desliga no Cancelar e depois do envio (composerExpandedStep).
+  const [expanded, setExpanded] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -553,6 +591,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     try {
       const answer = await onSend({ body: text, kind: "message", ...extra });
       setDraft("");
+      setExpanded((previous) => composerExpandedStep(previous, { draft: "", type: "sent" }));
       setConsentOpen(false);
       setStatus(answer.pending ? copy.aguardandoEquipe : null);
       // Fase 4c: chamou o Assistente (ligado): "respondendo" ate a resposta chegar; no limite do minuto, o aviso.
@@ -659,6 +698,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
       <RoomConsentBox
         busy={sending}
         defaultDisplayMode={defaultDisplayMode}
+        variant={look === "comment" ? "card" : "classic"}
         onAccept={(choice) =>
           void deliver({
             anonymous: choice.displayMode === "anonymous",
@@ -673,7 +713,9 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     ) : null;
 
   // Abaixo de lg o cabecalho do painel nao aparece: o ⋯ de antes continua na linha do campo so ali (o celular como hoje).
-  const mobileMenu = <div className="shrink-0 lg:hidden">{menu}</div>;
+  const mobileMenu = <div className="mr-3 shrink-0 lg:hidden">{menu}</div>;
+  // A frase que toma o lugar do campo: o silenciado, a sala que nao abriu e, com a sessao encerrada, "Essa live acabou.".
+  const fieldNotice = notice ?? (state.reason === "ended" && hint ? hint : null);
 
   if (look === "comment") {
     return (
@@ -728,38 +770,40 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         {removeBox}
         {consentBox}
 
-        {notice ? (
-          <div className="flex items-center gap-2 border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-            {mobileMenu}
-            <p className="min-w-0 flex-1 px-1 py-1 text-sm font-semibold text-room-warn-fg" data-testid="room-chat-notice" role="status">
-              {notice}
-            </p>
-          </div>
+        {fieldNotice ? (
+          <RoomCommentFieldNotice leading={mobileMenu} testId="room-chat-notice">
+            {fieldNotice}
+          </RoomCommentFieldNotice>
         ) : (
-          <form className="border-t border-room-border bg-room-composer p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" onSubmit={submit}>
-            <div className="flex items-center gap-2">
-              {mobileMenu}
-              {/* 16 px abaixo de lg: o Safari do iPhone da zoom no foco de um campo menor (o campo novo entra no Y11). */}
-              <textarea
-                aria-label={copy.escreva}
-                className="h-11 min-w-0 flex-1 resize-none rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2.5 text-base leading-5 text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle disabled:opacity-50 lg:text-[13px]"
-                disabled={state.disabled || readOnly || busy}
-                maxLength={CHAT_LIMITS.body}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={hint || copy.escreva}
-                rows={1}
-                value={draft}
-              />
-              <RoomIconButton disabled={state.disabled || readOnly || sending || !draft.trim()} label={copy.enviar} size={44} tone="primary" type="submit">
-                <SendHorizontal aria-hidden="true" />
-              </RoomIconButton>
-            </div>
-            <p aria-live="polite" className={cn("mt-1 min-h-4 px-1 text-[11px]", status && status !== copy.aguardandoEquipe ? "text-room-warn-fg" : "text-room-fg-subtle")}>
-              {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
-            </p>
-            <AssistantHint state={assistantHint} />
-          </form>
+          <RoomCommentField
+            ariaLabel={copy.escreva}
+            avatar={{ name: consented ? displayName : null }}
+            busy={sending}
+            disabled={state.disabled || readOnly || busy}
+            expanded={expanded}
+            hint={assistantHint === "call" ? <AssistantHint className="px-0 text-xs leading-[18px]" state="call" /> : null}
+            leading={mobileMenu}
+            maxLength={CHAT_LIMITS.body}
+            mode="enter"
+            onCancel={() => {
+              setDraft("");
+              setConsentOpen(false);
+            }}
+            onChange={setDraft}
+            onExpandedChange={setExpanded}
+            onSubmit={() => submit()}
+            placeholder={hint || copy.escreva}
+            status={
+              <>
+                <p aria-live="polite" className={cn("mt-1 empty:mt-0", status && status !== copy.aguardandoEquipe ? "text-room-warn-fg" : "text-room-fg-subtle")}>
+                  {status ?? (readOnly ? WEBINAR_COPY.aluno.previaSemGravar : hint)}
+                </p>
+                {assistantHint === "waiting" || assistantHint === "limit" ? <AssistantHint className="mt-1 px-0 text-xs leading-[18px]" state={assistantHint} /> : null}
+              </>
+            }
+            submitLabel={copy.enviar}
+            value={draft}
+          />
         )}
       </div>
     );

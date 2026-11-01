@@ -4,7 +4,7 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
 import { CHAT_CONSENT_VERSION } from "../../src/server/webinars/model";
 import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
-import { createLocalAdminClient } from "../support/local-db.mjs";
+import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
   abrirComoProdutor,
@@ -652,6 +652,156 @@ test("as Perguntas no estilo do YouTube (Y8): a 1280 o chip Minhas fica fora da 
   await ordenar.click();
   await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisRecentes })).toHaveAttribute("aria-checked", "true");
   await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toHaveAttribute("aria-checked", "false");
+});
+
+test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Enter quebra a linha e o Ctrl+Enter pergunta com a Anônima; o voto marca o polegar; a resposta escrita da equipe chega no fio '1 resposta' aberto na minha; os chips filtram e o ordenar rele", async ({ page }) => {
+  const sala = WEBINAR_COPY.sala;
+  const novas = WEBINAR_COPY.salaV2.perguntas;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo } = await entrarNaSala(page);
+  const painel = dialogo.getByTestId("room-panel");
+  await itemDoTrilho(dialogo, sala.abas.perguntas).click();
+  await expect(painel.getByRole("heading", { level: 2, name: sala.abas.perguntas })).toBeVisible();
+
+  // Fechado, o campo nao tem o rodape; o foco (o fill) abre: a Anonima, o Cancelar e o Perguntar.
+  const campo = painel.getByRole("textbox", { name: sala.suaPergunta });
+  const perguntar = painel.getByRole("button", { exact: true, name: novas.perguntar });
+  await expect(perguntar).toHaveCount(0);
+  const pergunta = `o replay fica ate quando? ${Date.now()}`;
+  await campo.fill(pergunta);
+  await expect(perguntar).toBeVisible();
+  await expect(painel.getByRole("button", { exact: true, name: WEBINAR_COPY.admin.cancelar })).toBeVisible();
+  const anonima = painel.getByRole("button", { exact: true, name: sala.anonima });
+  await expect(anonima).toHaveAttribute("aria-pressed", "false");
+  await anonima.click();
+  await expect(anonima).toHaveAttribute("aria-pressed", "true");
+
+  // Nas Perguntas o Enter quebra a linha (nada vai ao servidor); o Ctrl ou o ⌘ com o Enter pergunta.
+  await campo.press("End");
+  await campo.press("Enter");
+  await expect(campo).toHaveValue(`${pergunta}\n`);
+  const enviou = page.waitForResponse((response) => response.url().endsWith("/questions") && response.request().method() === "POST");
+  await campo.press("ControlOrMeta+Enter");
+  // A primeira pergunta abre o aceite do chat quando a aluna ainda nao aceitou (os testes deste arquivo rodam em serie).
+  const aceite = dialogo.getByRole("group", { name: /Ao enviar mensagens neste chat/ });
+  const primeiro = await Promise.race([enviou.then(() => "enviou"), aceite.waitFor({ state: "visible" }).then(() => "aceite", () => "nada")]);
+  if (primeiro === "aceite") {
+    await aceite.getByRole("button", { exact: true, name: sala.consentimentoBotao }).click();
+  }
+  const resposta = await enviou;
+  expect(resposta.status()).toBe(201);
+  const { question } = (await resposta.json()) as { question: { anonymous: boolean; id: string } };
+  expect(question.anonymous).toBe(true);
+  // Depois de perguntar, o campo fecha e fica vazio.
+  await expect(campo).toHaveValue("");
+  await expect(perguntar).toHaveCount(0);
+
+  // A minha pergunta como comentario: "Anônima" no lugar do nome, e o voto marca o polegar e o numero.
+  const minha = painel.locator(`[data-room-question="${question.id}"]`);
+  await expect(minha).toContainText(pergunta);
+  await expect(minha.getByText(sala.anonima, { exact: true })).toBeVisible();
+  const curtir = minha.getByRole("button", { exact: true, name: sala.curtir });
+  await expect(curtir).toHaveAttribute("aria-pressed", "false");
+  const votou = page.waitForResponse((response) => response.url().includes(`/questions/${question.id}/vote`) && response.request().method() === "POST");
+  await curtir.click();
+  expect((await votou).status()).toBeLessThan(300);
+  await expect(curtir).toHaveAttribute("aria-pressed", "true");
+  await expect(minha.getByText(sala.curtidas(1), { exact: true })).toHaveCount(1);
+  await expect(minha.getByRole("button", { name: novas.respostas(1) })).toHaveCount(0);
+
+  // A equipe responde por escrito (como o console grava a resposta); a releitura (trocar de aba e voltar le de novo) traz
+  // o fio "1 resposta" ja aberto na minha, com a resposta da Equipe.
+  const textoDaResposta = "Fica disponível por 7 dias.";
+  unwrap(
+    await createLocalAdminClient()
+      .from("webinar_questions")
+      .update({ answer_source: "team", answer_text: textoDaResposta, answered_at: new Date().toISOString(), answered_live: false, status: "answered" })
+      .eq("id", question.id),
+    "Respondendo a pergunta por escrito"
+  );
+  await itemDoTrilho(dialogo, sala.abas.chat).click();
+  await itemDoTrilho(dialogo, sala.abas.perguntas).click();
+  const fio = minha.getByRole("button", { name: novas.respostas(1) });
+  await expect(fio).toHaveAttribute("aria-expanded", "true");
+  const blocoDaResposta = minha.locator(`#resposta-${question.id}`);
+  await expect(blocoDaResposta).toBeVisible();
+  await expect(blocoDaResposta).toContainText(textoDaResposta);
+  await expect(blocoDaResposta.getByText(sala.selos.equipe, { exact: true })).toBeVisible();
+  // O clique fecha o fio (a resposta continua no HTML, escondida) e abre de novo.
+  await fio.click();
+  await expect(fio).toHaveAttribute("aria-expanded", "false");
+  await expect(blocoDaResposta).toBeHidden();
+  await fio.click();
+  await expect(blocoDaResposta).toBeVisible();
+
+  // Os chips filtram: em Sem resposta a minha (respondida) sai; em Respondidas ela volta.
+  const filtros = painel.getByRole("group", { name: novas.filtrar });
+  await filtros.getByRole("button", { exact: true, name: novas.semResposta }).click();
+  await expect(minha).toHaveCount(0);
+  await filtros.getByRole("button", { exact: true, name: sala.filtros.respondidas }).click();
+  await expect(minha).toBeVisible();
+
+  // O ordenar do cabecalho rele a lista na ordem escolhida.
+  const releu = page.waitForRequest((request) => request.method() === "GET" && request.url().includes("/questions?") && request.url().includes("ordem=recentes"));
+  await painel.getByRole("button", { exact: true, name: novas.ordenar }).click();
+  await dialogo.getByRole("menu", { name: novas.ordenar }).getByRole("menuitemradio", { exact: true, name: sala.ordem.maisRecentes }).click();
+  await releu;
+  await expect(minha).toBeVisible();
+});
+
+test("o chat com mais de uma tela (Y11): a lista rola ate a primeira mensagem; com a aluna no fim, o foco no campo abre o rodape e a ultima mensagem continua inteira na vista", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo } = await entrarNaSala(page);
+  const painel = dialogo.getByTestId("room-panel");
+  const lista = painel.getByRole("log");
+  await expect(painel.getByRole("heading", { level: 2, name: WEBINAR_COPY.sala.abas.chat })).toBeVisible();
+  // Uma janela baixa, para a lista transbordar com poucas mensagens.
+  await page.setViewportSize({ height: 420, width: 1440 });
+  // A equipe escreve pelo banco (fora da rajada do chat), depois da entrada: a consulta de 5 s traz as novas.
+  const agora = Date.now();
+  const marca = `rolagem ${agora}`;
+  unwrap(
+    await createLocalAdminClient()
+      .from("webinar_chat_messages")
+      .insert(
+        Array.from({ length: 12 }, (_, index) => ({
+          approved: true,
+          author_user_id: null,
+          body: `${marca}: mensagem ${index + 1}`,
+          created_at: new Date(agora + index).toISOString(),
+          display_name: "Equipe T.",
+          kind: "message",
+          master: false,
+          offset_ms: 300_000 + index * 1_000,
+          role: "team",
+          session_id: LIVE_AO_VIVO_DE_TESTE.sessaoId,
+          source: "team",
+          webinar_id: LIVE_AO_VIVO_DE_TESTE.id
+        }))
+      ),
+    "Gravando as mensagens da equipe"
+  );
+  // O texto do comentario comeca pelo autor so para o leitor de tela: a mensagem e o fim do texto.
+  const primeira = lista.getByText(new RegExp(`${marca}: mensagem 1$`));
+  const ultima = lista.getByText(new RegExp(`${marca}: mensagem 12$`));
+  await expect(ultima).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => lista.evaluate((elemento) => elemento.scrollHeight > elemento.clientHeight + 16)).toBe(true);
+  await expect(ultima).toBeInViewport();
+
+  // A lista comeca em cima: rolada ate o topo, a primeira aparece (nunca fica fora do alcance).
+  await lista.evaluate((elemento) => {
+    elemento.scrollTop = 0;
+  });
+  await expect(primeira).toBeInViewport();
+
+  // De volta ao fim, o foco no campo abre o rodape (a lista encolhe) e a ultima continua inteira na vista.
+  await lista.evaluate((elemento) => {
+    elemento.scrollTop = elemento.scrollHeight;
+  });
+  await expect(ultima).toBeInViewport({ ratio: 1 });
+  await painel.getByRole("textbox", { name: WEBINAR_COPY.sala.escreva }).focus();
+  await expect(painel.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.enviar })).toBeVisible();
+  await expect(ultima).toBeInViewport({ ratio: 1 });
 });
 
 test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {

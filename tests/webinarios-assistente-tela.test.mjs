@@ -125,17 +125,23 @@ test("chat da sala: o selo Assistente no lugar do nome (e 'Assistente, há 2 min
 
 test("o Assistente lido pela sala (docs/31 V2-4): o chat usa o estado que a sala passa, sem ler de novo; sem ele, o painel le sozinho como antes", () => {
   // O servidor nao roda efeitos: sem a prop, o estado do proprio painel e o desligado ate a primeira leitura no navegador.
-  const sozinho = chat();
+  // A linha da dica aparece direto no campo de antes (a gaveta do vertical, look classic); no campo do YouTube ela so
+  // aparece com o campo aberto (o foco), que o servidor nunca pinta.
+  const sozinho = chat({ look: "classic" });
   assert.doesNotMatch(sozinho, /data-assistant-hint="call"/, "sem a prop, nada lido ainda");
   // Com o estado da sala (ligado, ninguem atendendo), a dica "@assistente" aparece ja na primeira pintura: o painel usa
   // o estado recebido, e a leitura dele fica desligada (enabled false), sem um segundo pedido por minuto.
   const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
-  const comSala = chat({ assistant: daSala });
+  const comSala = chat({ assistant: daSala, look: "classic" });
   assert.match(comSala, /data-assistant-hint="call"/);
   assert.match(textOf(comSala), new RegExp(COPY.aluno.chamarAssistente.replace(/[.@]/g, "\\$&")));
   assert.equal(count(comSala, /data-testid="assistant-handoff"/g), 1, "o Falar com a equipe continua na resposta a mim");
   // Desligado na sala: nada de dica, mesmo com o painel podendo ler.
-  assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } } }), /data-assistant-hint="call"/);
+  assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } }, look: "classic" }), /data-assistant-hint="call"/);
+  // No campo do YouTube fechado, nada de dica (ela entra no `hint`, so com o campo aberto); o pedido continua.
+  const fechado = chat({ assistant: daSala });
+  assert.doesNotMatch(fechado, /data-assistant-hint/);
+  assert.equal(count(fechado, /data-testid="assistant-handoff"/g), 1);
 });
 
 test("ownAssistantEnabled: o chat e a aba Perguntas so leem o Assistente sozinhos sem o estado da sala e fora do so leitura (nada de um segundo pedido por minuto)", () => {

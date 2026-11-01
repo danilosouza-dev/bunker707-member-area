@@ -220,3 +220,120 @@ test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de ante
   assert.match(classico, /<p class="mt-1\.5 whitespace-pre-line text-sm leading-5 text-room-fg">Fica 7 dias\.<\/p>/);
   assert.doesNotMatch(classico, /aria-expanded|resposta-q2|room-thread-line/);
 });
+
+// Y11: o campo "Adicione um comentário" do YouTube (RoomCommentField, spec §9) desenhado direto: fechado, aberto com e
+// sem texto, a Anonima das Perguntas e a frase que toma o lugar do campo.
+const fieldModule = await import("../src/components/member/webinars/room/room-comment-field.tsx");
+const SAFE_AREA = "max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]";
+const CAMPO = {
+  ariaLabel: "Escreva uma mensagem",
+  avatar: { name: "Ana S." },
+  expanded: false,
+  maxLength: 1000,
+  mode: "enter",
+  onCancel: noop,
+  onChange: noop,
+  onExpandedChange: noop,
+  onSubmit: noop,
+  placeholder: "Escreva uma mensagem",
+  submitLabel: "Enviar",
+  value: ""
+};
+const campo = (extra = {}) => render(fieldModule.RoomCommentField, { ...CAMPO, ...extra });
+/** O <button> pelo texto visivel. */
+const botaoPeloTexto = (html, texto) => html.match(new RegExp(`<button[^>]*>(?:<svg[\\s\\S]*?</svg>)?${texto}</button>`))?.[0] ?? "";
+
+test("Y11: o campo fechado: a faixa com a linha em cima e a folga do iPhone, o avatar com as iniciais, o textarea sem caixa (16 px abaixo de lg, 14 a partir de lg) com a linha de 1 px; sem Cancelar e sem envio", () => {
+  const html = campo();
+  const faixa = html.match(/^<form class="([^"]*)">/);
+  assert.ok(faixa, "a faixa e o form");
+  assert.ok(classesDe(`<b class="${faixa[1]}">`).includes(SAFE_AREA), "a classe exata da folga do iPhone");
+  for (const classe of ["border-t", "border-room-panel-border", "p-4"]) {
+    assert.ok(classesDe(`<b class="${faixa[1]}">`).includes(classe), `a faixa tem ${classe}`);
+  }
+  assert.match(html, /<div class="mr-4 flex items-start"><span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>AS<\/span><\/span>/, "o avatar de 24 com as iniciais");
+  const area = html.match(/<textarea [^>]*>/)?.[0] ?? "";
+  assert.match(area, /aria-label="Escreva uma mensagem"/);
+  assert.match(area, /placeholder="Escreva uma mensagem"/);
+  assert.match(area, /maxLength="1000"/i);
+  assert.match(area, /rows="1"/);
+  const classes = classesDe(area);
+  for (const classe of ["text-base", "leading-[22px]", "lg:text-sm", "lg:leading-5", "bg-transparent", "resize-none", "pb-1"]) {
+    assert.ok(classes.includes(classe), `o campo tem ${classe}`);
+  }
+  assert.ok(!classes.includes("text-sm") && !classes.some((classe) => classe.startsWith("rounded") || classe === "border"), "sem caixa e sem os 14 px abaixo de lg");
+  assert.match(html, /<div class="relative border-b border-room-field-line"><textarea/, "a linha de 1 px do campo vazio");
+  assert.match(html, /<span aria-hidden="true" class="[^"]*\bh-0\.5\b[^"]*\bbg-room-fg\b[^"]*\bmotion-reduce:transition-none\b[^"]*\bscale-x-0"><\/span>/, "a linha do foco escondida");
+  assert.doesNotMatch(html, />Cancelar<|>Enviar<|type="submit"/, "fechado, nada de rodape");
+
+  // Sem nome (antes do aceite), a pessoa no lugar das iniciais.
+  assert.match(campo({ avatar: { name: null } }), /lucide-user-round/);
+});
+
+test("Y11: o campo aberto com texto: a dica, o Cancelar de texto e o Enviar azul (type=submit, ligado); vazio, o envio desligado; com rascunho e sem o foco, a linha mais forte", () => {
+  const html = campo({ expanded: true, hint: "Escreva @assistente para perguntar ao Assistente.", value: "oi pessoal" });
+  assert.match(html, /<div class="mt-1\.5 text-xs leading-\[18px\] text-room-fg-subtle">Escreva @assistente para perguntar ao Assistente\.<\/div>/);
+  assert.match(html, /<div class="mt-2 flex flex-wrap items-center gap-2"><div class="ml-auto flex items-center gap-2">/, "o rodape, com o Cancelar e o envio a direita");
+  const cancelar = botaoPeloTexto(html, "Cancelar");
+  assert.ok(classesDe(cancelar).includes("bg-transparent") && classesDe(cancelar).includes("h-10"), "o Cancelar e a pilula M de texto");
+  const enviar = botaoPeloTexto(html, "Enviar");
+  assert.match(enviar, /type="submit"/);
+  assert.doesNotMatch(enviar, /disabled=""/);
+  for (const classe of ["bg-room-cta-bg", "text-room-cta-fg", "h-10", "rounded-full"]) {
+    assert.ok(classesDe(enviar).includes(classe), `o Enviar tem ${classe}`);
+  }
+  // Sem o foco no servidor: aberto com rascunho, a linha de 1 px mais forte.
+  assert.match(html, /<div class="relative border-b border-room-field-line-draft"><textarea/);
+  assert.doesNotMatch(html, /VenetianMask|lucide-venetian-mask|>Anônima</, "a Anonima so nas Perguntas");
+
+  // Aberto e vazio: o envio desligado, no tom do desligado.
+  const vazio = botaoPeloTexto(campo({ expanded: true }), "Enviar");
+  assert.match(vazio, /disabled=""/);
+  assert.ok(classesDe(vazio).includes("disabled:text-room-fg-disabled"), "o envio desligado em --room-fg-disabled");
+  // Ocupado, o envio desligado tambem.
+  assert.match(botaoPeloTexto(campo({ busy: true, expanded: true, value: "oi" }), "Enviar"), /aria-busy="true"[^>]*disabled=""|disabled=""[^>]*aria-busy="true"/);
+});
+
+test("Y11: nas Perguntas com a Anonima ligada: a pilula S tonal com aria-pressed e a mascara cheia, o avatar da mascara e o envio Perguntar", () => {
+  const html = campo({ allowAnonymous: true, anonymous: true, ariaLabel: "Sua pergunta", expanded: true, maxLength: 500, mode: "mod-enter", placeholder: "Fazer uma pergunta", submitLabel: WEBINAR_COPY.salaV2.perguntas.perguntar, value: "tem replay?" });
+  const anonima = html.match(/<button aria-pressed="true" class="([^"]*)" type="button"><svg([^>]*)>[\s\S]*?<\/svg>Anônima<\/button>/);
+  assert.ok(anonima, "a pilula Anonima ligada");
+  for (const classe of ["h-8", "rounded-full", "bg-room-control", "text-xs"]) {
+    assert.ok(classesDe(`<b class="${anonima[1]}">`).includes(classe), `a Anonima tem ${classe}`);
+  }
+  assert.match(anonima[2], /fill="currentColor"/, "a mascara cheia");
+  assert.match(anonima[2], /lucide-venetian-mask/);
+  assert.match(html, /<div class="mr-4 flex items-start"><span aria-hidden="true" class="[^"]*"><svg[^>]*lucide-venetian-mask/, "o avatar do campo vira a mascara");
+  assert.match(botaoPeloTexto(html, "Perguntar"), /type="submit"/);
+  // Desligada: a mascara vazia e o avatar com as iniciais.
+  const desligada = campo({ allowAnonymous: true, anonymous: false, expanded: true, mode: "mod-enter" });
+  assert.match(desligada, /<button aria-pressed="false" class="[^"]*" type="button"><svg[^>]*fill="none"[^>]*lucide-venetian-mask/);
+  assert.match(desligada, /<span[^>]*>AS<\/span>/);
+});
+
+test("Y11: a frase no lugar do campo: role=status, 14/20 no tom de aviso, com a mesma faixa e a mesma folga do iPhone", () => {
+  const html = render(fieldModule.RoomCommentFieldNotice, { children: "Essa live acabou.", testId: "room-questions-notice" });
+  const faixa = html.match(/^<div class="([^"]*)"><p class="([^"]*)" data-testid="room-questions-notice" role="status">Essa live acabou\.<\/p><\/div>$/);
+  assert.ok(faixa, "a frase dentro da faixa");
+  for (const classe of ["border-t", "border-room-panel-border", "p-4", SAFE_AREA]) {
+    assert.ok(classesDe(`<b class="${faixa[1]}">`).includes(classe), `a faixa tem ${classe}`);
+  }
+  for (const classe of ["text-sm", "leading-5", "text-room-warn-fg"]) {
+    assert.ok(classesDe(`<b class="${faixa[2]}">`).includes(classe), `a frase tem ${classe}`);
+  }
+});
+
+test("Y11: as Perguntas da sala: o campo do YouTube (Ctrl+Enter, Perguntar) no lugar do de antes e, com a live encerrada, 'Essa live acabou.' no lugar do campo; o 'ver como' continua desligado com a frase dele", () => {
+  const html = render(questionsModule.RoomQuestionsTab, { ...PERGUNTAS, displayName: "Ana S.", look: "comment" });
+  assert.match(html, /<form class="[^"]*\bborder-room-panel-border\b[^"]*"><div class="mr-4 flex items-start"><span aria-hidden="true" class="[^"]*"><span[^>]*>AS<\/span><\/span><div class="ml-3 min-w-0 flex-1"><div class="relative border-b border-room-field-line"><textarea aria-label="Sua pergunta"/);
+  assert.match(html, /maxLength="500"/i);
+  assert.doesNotMatch(html, /rows="2"|bg-room-composer|Fazer uma pergunta<\/button>/, "nada do campo de antes");
+  const encerrada = render(questionsModule.RoomQuestionsTab, { ...PERGUNTAS, ended: true, look: "comment", readOnly: true });
+  assert.doesNotMatch(encerrada, /<textarea/);
+  assert.match(encerrada, /data-testid="room-questions-notice" role="status">Essa live acabou\.<\/p>/);
+  const verComo = render(questionsModule.RoomQuestionsTab, { ...PERGUNTAS, look: "comment", readOnly: true });
+  assert.match(verComo, /<textarea[^>]*disabled=""/);
+  assert.match(verComo, new RegExp(WEBINAR_COPY.aluno.previaSemGravar.replace(/\./g, "\\.")));
+  // A gaveta do vertical: o campo de antes.
+  assert.match(render(questionsModule.RoomQuestionsTab, PERGUNTAS), /<form class="border-t border-room-border bg-room-composer[^"]*"><textarea aria-label="Sua pergunta"[^>]*rows="2"/);
+});

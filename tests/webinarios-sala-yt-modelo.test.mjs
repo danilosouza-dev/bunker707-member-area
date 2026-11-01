@@ -297,3 +297,40 @@ test("questionStatusOf: Respondida ao vivo, Dispensada (so o autor a recebe) e n
   assert.equal(COPY.salaV2.perguntas.respostas(1), "1 resposta");
   assert.equal(COPY.salaV2.perguntas.respostas(3), "3 respostas");
 });
+
+// Y11: o campo "Adicione um comentário" (room-composer-model.ts): quando ele fica aberto, a linha embaixo e o que o
+// Enter faz no chat e nas Perguntas.
+const composerModel = await import("../src/components/member/webinars/room/room-composer-model.ts");
+
+test("composerExpandedStep: o foco abre; o blur com rascunho fica aberto (o clique no Enviar tira o foco antes do click); o blur vazio fecha; o Cancelar e o envio fecham", () => {
+  const passo = (estado, type, draft = "") => composerModel.composerExpandedStep(estado, { draft, type });
+  assert.equal(passo(false, "focus"), true, "o foco abre");
+  assert.equal(passo(true, "focus", "oi"), true);
+  // O clique no Enviar: o mousedown tira o foco do campo antes do click; com rascunho, o rodape continua ate o click.
+  assert.equal(passo(true, "blur", "minha pergunta"), true, "o blur com rascunho fica aberto");
+  assert.equal(passo(true, "blur", ""), false, "o blur sem rascunho fecha");
+  assert.equal(passo(false, "blur", "texto"), false, "o blur nunca abre");
+  assert.equal(passo(true, "cancel", "texto"), false, "o Cancelar fecha");
+  assert.equal(passo(true, "sent", ""), false, "o envio fecha");
+});
+
+test("composerLine: com o foco a linha de 2 px, aberto com rascunho e sem o foco a de 1 px mais forte, senao a do campo vazio", () => {
+  assert.equal(composerModel.composerLine({ draft: "", expanded: true, focused: true }), "focus");
+  assert.equal(composerModel.composerLine({ draft: "oi", expanded: true, focused: true }), "focus");
+  assert.equal(composerModel.composerLine({ draft: "oi", expanded: true, focused: false }), "draft");
+  assert.equal(composerModel.composerLine({ draft: "", expanded: false, focused: false }), "idle");
+  assert.equal(composerModel.composerLine({ draft: "oi", expanded: false, focused: false }), "idle", "fechado, a linha do campo vazio");
+});
+
+test("composerKey: no chat o Enter envia e o Shift+Enter quebra; nas Perguntas o Enter quebra e o Ctrl ou o ⌘ com o Enter envia; o IME nunca envia", () => {
+  const tecla = (mode, extra = {}) => composerModel.composerKey({ composing: false, ctrl: false, key: "Enter", meta: false, mode, shift: false, ...extra });
+  assert.equal(tecla("enter"), "submit", "o Enter envia no chat");
+  assert.equal(tecla("enter", { shift: true }), "newline", "o Shift+Enter quebra no chat");
+  assert.equal(tecla("mod-enter"), "newline", "o Enter quebra nas Perguntas");
+  assert.equal(tecla("mod-enter", { ctrl: true }), "submit", "o Ctrl+Enter envia nas Perguntas");
+  assert.equal(tecla("mod-enter", { meta: true }), "submit", "o ⌘+Enter envia nas Perguntas");
+  assert.equal(tecla("mod-enter", { shift: true }), "newline");
+  assert.equal(tecla("enter", { composing: true }), null, "o IME confirma o texto, nunca envia");
+  assert.equal(tecla("mod-enter", { composing: true, ctrl: true }), null);
+  assert.equal(tecla("enter", { key: "a" }), null, "outra tecla, nada");
+});

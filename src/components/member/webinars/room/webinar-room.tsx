@@ -802,6 +802,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         {...(vertical
           ? {}
           : {
+              displayName: session.me.displayName,
+              ended: phase === "ended",
               filter: questionsFilter,
               look: "comment" as const,
               onCount: setQuestionsCount,
