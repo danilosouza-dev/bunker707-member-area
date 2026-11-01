@@ -33,7 +33,9 @@ import {
 // barra do iframe (antes, a frase de liga-la), Ligar a redução de ruído vira setNoiseSuppressionEnabled({ enabled }),
 // Desfocar / Tirar o efeito do fundo, Inverter a minha imagem e Mais opções de fundo sao acoes sem estado e nada e
 // reaplicado (nem o ruido depois da troca do microfone, nem o desfoque na camera que liga), nada de setVideoQuality
-// (quem apresenta nao baixa o proprio palco) e o Esc e o proprio botao fecham o card com o foco no botao.
+// (quem apresenta nao baixa o proprio palco) e o Esc e o proprio botao fecham o card com o foco no botao. O vigia da
+// tela (docs/31 §5.4): quem compartilha com papel conhecido de participante tem a tela parada por
+// muteRemoteParticipant(id, 'desktop'); o papel de quem ja moderava quando o console entrou vem do getRoomsInfo.
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -41,6 +43,7 @@ const aoVivo = WEBINAR_COPY.aoVivo;
 const CONSOLE = `/admin/comunicacao/webinarios/${id}/sala?sessao=${sessaoId}`;
 const APRESENTADOR = "produtor-na-sala-0001";
 const ALUNA_NA_SALA = "aluna-na-sala-0002";
+const COAPRESENTADOR = "cohost-na-sala-0003";
 
 test.describe.configure({ mode: "serial" });
 
@@ -338,5 +341,43 @@ test.describe("produtor", () => {
     await expect(card).toHaveCount(0);
     await expect(botao).toBeFocused();
     expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/jitsi/i);
+  });
+
+  test("o vigia da tela: quem ja moderava quando o console entrou (o papel so pelo getRoomsInfo) continua compartilhando; a aluna sem liberacao tem a tela parada por muteRemoteParticipant de tela, uma vez; a tela do proprio console fica", async ({ page }) => {
+    const sala = await abrirConsole(page);
+    await entrarComoApresentador(sala);
+    const pedidosDeParar = async () => (await sala.comandos()).filter((item) => item.comando === "muteRemoteParticipant" && item.args[1] === "desktop").map((item) => item.args);
+
+    // O co-apresentador ja estava na sala: o participantJoined nao traz o papel e nenhum participantRoleChanged sai. A
+    // tela dele chega sem papel conhecido: o console pede o getRoomsInfo e nunca para a tela de quem ainda nao tem papel.
+    let antes = (await sala.comandos()).length;
+    await sala.disparar("participantJoined", { displayName: "Co T.", id: COAPRESENTADOR, papel: "moderator" });
+    expect((await sala.sinais()).filter((sinal) => sinal.evento === "participantJoined").map((sinal) => sinal.payload)).toContainEqual({ displayName: "Co T.", id: COAPRESENTADOR });
+    await sala.disparar("contentSharingParticipantsChanged", { data: [COAPRESENTADOR] });
+    await sala.esperarComando("getRoomsInfo", { depoisDe: antes });
+    // O papel lido pelo getRoomsInfo: a linha dele vira Equipe, e a tela continua.
+    await expect(page.locator(`[data-live-participant="${COAPRESENTADOR}"]`)).toContainText(WEBINAR_COPY.sala.selos.equipe, { timeout: 15_000 });
+    await page.waitForTimeout(1_000);
+    expect(await pedidosDeParar(), "o moderador continua compartilhando").toEqual([]);
+
+    // A aluna compartilha sem liberacao (o cliente padrao que chama o comando de tela pelo DevTools): o papel de
+    // participante chega pelo getRoomsInfo e o pedido de parar sai so para ela.
+    antes = (await sala.comandos()).length;
+    await sala.disparar("participantJoined", { displayName: "Aluna T.", id: ALUNA_NA_SALA });
+    await sala.disparar("contentSharingParticipantsChanged", { data: [COAPRESENTADOR, ALUNA_NA_SALA] });
+    expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([ALUNA_NA_SALA, "desktop"]);
+    await page.waitForTimeout(1_500);
+    expect(await pedidosDeParar(), "um pedido so, e so para a aluna").toEqual([[ALUNA_NA_SALA, "desktop"]]);
+
+    // A tela do proprio console nunca e parada (nem pede o getRoomsInfo por ela).
+    antes = (await sala.comandos()).length;
+    await sala.disparar("contentSharingParticipantsChanged", { data: [APRESENTADOR] });
+    await page.waitForTimeout(1_500);
+    expect((await sala.comandos()).slice(antes).filter((item) => item.comando === "muteRemoteParticipant" || item.comando === "getRoomsInfo")).toEqual([]);
+
+    // Nunca a recusa de tela (no motor ela recusa o audio) nem o mudo de tela de todos (pegaria o co-apresentador).
+    const comandos = await sala.comandos();
+    expect(comandos.filter((item) => (item.comando === "rejectParticipant" || item.comando === "muteEveryone") && item.args.includes("desktop"))).toEqual([]);
+    expect(await pedidosDeParar()).toEqual([[ALUNA_NA_SALA, "desktop"]]);
   });
 });

@@ -414,3 +414,115 @@ test("Gravar no navegador: so o Apresentador, so a gravacao local (a do gravador
   assert.equal(model.browserRecordingChange({ payload: { mode: "local", on: true }, role: "co_host" }), null);
   assert.deepEqual(JSON.parse(model.recordingSignalMessage(true)), { on: true, type: model.RECORDING_SIGNAL });
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * O vigia da tela (docs/31 §5.4): quem compartilha, os papeis pelo getRoomsInfo e quem tem a tela parada
+ * ---------------------------------------------------------------------------------------------- */
+
+test("reducer da sala: quem compartilha a tela pelo contentSharingParticipantsChanged (so ids validos, sem repetir, ate 50); quem sai deixa de compartilhar", () => {
+  let state = { ...model.EMPTY_ROOM, selfId: "p-eu" };
+  assert.deepEqual(model.EMPTY_ROOM.sharing, [], "ninguem compartilha ao entrar");
+  state = event(state, "participantJoined", { displayName: "Ana S.", id: "p-ana" });
+  state = event(state, "contentSharingParticipantsChanged", { data: ["p-ana", "p-co", "p-ana", "<b>", 7, "p-eu"] });
+  assert.deepEqual(state.sharing, ["p-ana", "p-co", "p-eu"], "o proprio console fica na lista (o vigia o pula)");
+  assert.deepEqual(event(state, "contentSharingParticipantsChanged", { data: "p-ana" }).sharing, [], "payload fora do formato: ninguem");
+  assert.deepEqual(event(state, "contentSharingParticipantsChanged", {}).sharing, []);
+  const many = Array.from({ length: 60 }, (_, index) => `p-${index}`);
+  assert.equal(event(state, "contentSharingParticipantsChanged", { data: many }).sharing.length, 50);
+
+  state = event(state, "participantLeft", { id: "p-ana" });
+  assert.deepEqual(state.sharing, ["p-co", "p-eu"], "quem saiu da sala deixa de compartilhar");
+  assert.deepEqual(model.liveRoomReducer(state, { id: "p-co", type: "kicked" }).sharing, ["p-eu"]);
+  state = event(state, "contentSharingParticipantsChanged", { data: [] });
+  assert.deepEqual(state.sharing, [], "a lista nova troca a de antes");
+  assert.deepEqual(event({ ...state, sharing: ["p-co"] }, "videoConferenceLeft", {}), model.EMPTY_ROOM, "saiu da sala: ninguem compartilha");
+});
+
+test("papeis pelo getRoomsInfo: quem veio na sala principal ganha o papel e entra na lista; o proprio console, id invalido e papel fora da lista ficam fora; um participantRoleChanged depois troca o papel", () => {
+  let state = { ...model.EMPTY_ROOM, selfId: "p-eu" };
+  state = event(state, "participantJoined", { displayName: "Ana S.", id: "p-ana" });
+  const info = {
+    rooms: [
+      { id: "sala-de-apoio", isMainRoom: false, participants: [{ displayName: "Outra", id: "p-outra", role: "moderator" }] },
+      {
+        isMainRoom: true,
+        participants: [
+          { displayName: "Eu", id: "p-eu", role: "moderator" },
+          { displayName: "Co T.", id: "p-co", role: "moderator" },
+          { displayName: "Ana S.", id: "p-ana", role: "participant" },
+          { displayName: "Sem papel", id: "p-sem", role: "owner" },
+          { displayName: "<b>", id: "<b>", role: "participant" },
+          null,
+          { displayName: "Visitante", id: "p-vis", role: "none" }
+        ]
+      }
+    ]
+  };
+  const next = model.liveRoomReducer(state, { info, type: "roomsInfo" });
+  assert.deepEqual(next.roles, { "p-ana": "participant", "p-co": "moderator", "p-vis": "none" }, "so a sala principal, sem o proprio console, sem papel fora da lista");
+  assert.equal(next.moderator, false, "o papel do proprio console continua pelo participantRoleChanged");
+  assert.deepEqual(
+    next.people.map((person) => [person.id, person.name]),
+    [
+      ["p-ana", "Ana S."],
+      ["p-co", "Co T."],
+      ["p-sem", "Sem papel"],
+      ["p-vis", "Visitante"]
+    ],
+    "quem ainda nao estava entra com o nome; ninguem repete"
+  );
+  assert.equal(model.applyConsoleRoomsInfo(state, info).roles["p-co"], "moderator", "a mesma conta pela funcao pura");
+
+  // Sem a sala principal marcada, a primeira; sem resposta, nada muda.
+  const first = model.applyConsoleRoomsInfo(state, { rooms: [{ participants: [{ id: "p-co", role: "moderator" }] }] });
+  assert.equal(first.roles["p-co"], "moderator");
+  assert.equal(model.applyConsoleRoomsInfo(state, null), state);
+  assert.equal(model.applyConsoleRoomsInfo(state, { rooms: "x" }), state);
+  assert.equal(model.applyConsoleRoomsInfo(state, { rooms: [{ participants: null }] }), state);
+
+  // O participantRoleChanged depois da resposta vence (o iframe responde e avisa na ordem).
+  const demoted = event(next, "participantRoleChanged", { id: "p-co", role: "participant" });
+  assert.equal(demoted.roles["p-co"], "participant");
+  // E a resposta seguinte troca o papel de novo, pelo que o iframe sabe agora.
+  assert.equal(model.applyConsoleRoomsInfo(demoted, info).roles["p-co"], "moderator");
+});
+
+test("vigia da tela: so quem compartilha com papel conhecido de nao moderador e sem liberacao tem a tela parada; o id sem papel (quem ja moderava quando o console entrou) espera o papel", () => {
+  const base = { grants: [], justGranted: [], roles: {}, selfId: "p-eu", sharing: [] };
+  const stop = (extra) => model.screenSharesToStop({ ...base, ...extra });
+
+  assert.deepEqual(stop({ roles: { "p-ana": "participant" }, sharing: ["p-ana"] }), ["p-ana"], "a aluna com papel de participante");
+  assert.deepEqual(stop({ roles: { "p-vis": "none" }, sharing: ["p-vis"] }), ["p-vis"], "sem papel na sala (none) tambem e parado");
+  assert.deepEqual(stop({ roles: { "p-co": "moderator" }, sharing: ["p-co"] }), [], "o co-apresentador (moderador) continua");
+  // O caso que o plano de antes quebrava: o Apresentador ja compartilhava quando o co-apresentador abriu o console, e
+  // o papel dele so vem do getRoomsInfo. Sem papel lido, nunca e parado.
+  assert.deepEqual(stop({ roles: {}, sharing: ["p-host"] }), [], "sem papel lido, o vigia espera");
+  assert.deepEqual(stop({ roles: { "p-eu": "participant" }, sharing: ["p-eu"] }), [], "a tela do proprio console nunca");
+  assert.deepEqual(stop({ grants: ["p-ana"], roles: { "p-ana": "participant" }, sharing: ["p-ana"] }), [], "a liberada continua");
+  assert.deepEqual(stop({ justGranted: ["p-ana"], roles: { "p-ana": "participant" }, sharing: ["p-ana"] }), [], "a recem liberada continua");
+  assert.deepEqual(stop({ roles: { "p-ana": "participant" }, sharing: [] }), [], "ninguem compartilhando: ninguem");
+  assert.deepEqual(stop({ roles: { constructor: "participant" }, sharing: ["toString"] }), [], "nome de propriedade do objeto nao vira papel");
+  assert.deepEqual(
+    stop({ roles: { "p-ana": "participant", "p-bia": "participant", "p-co": "moderator" }, sharing: ["p-co", "p-ana", "p-host", "p-bia", "p-eu"] }),
+    ["p-ana", "p-bia"],
+    "na ordem de quem compartilha"
+  );
+
+  // O reducer e o vigia juntos: o co-apresentador que ja estava compartilha antes de o papel chegar.
+  let state = event({ ...model.EMPTY_ROOM, selfId: "p-eu" }, "participantJoined", { displayName: "Co T.", id: "p-co" });
+  state = event(state, "contentSharingParticipantsChanged", { data: ["p-co"] });
+  const watch = (room) => model.screenSharesToStop({ grants: [], justGranted: [], roles: room.roles, selfId: room.selfId, sharing: room.sharing });
+  assert.deepEqual(watch(state), [], "antes do getRoomsInfo, nada");
+  state = model.liveRoomReducer(state, { info: { rooms: [{ isMainRoom: true, participants: [{ id: "p-co", role: "moderator" }, { id: "p-ana", role: "participant" }] }] }, type: "roomsInfo" });
+  assert.deepEqual(watch(state), [], "o papel de moderador lido: a tela dele continua");
+  state = event(state, "contentSharingParticipantsChanged", { data: ["p-co", "p-ana"] });
+  assert.deepEqual(watch(state), ["p-ana"], "a aluna que compartilha sem liberacao");
+});
+
+test("vigia da tela: o getRoomsInfo e pedido so por quem compartilha sem papel lido, nunca pelo proprio console", () => {
+  assert.deepEqual(model.rolesToRead({ roles: { "p-ana": "participant", "p-co": "moderator" }, selfId: "p-eu", sharing: ["p-ana", "p-host", "p-eu", "p-co", "p-novo"] }), ["p-host", "p-novo"]);
+  assert.deepEqual(model.rolesToRead({ roles: {}, selfId: "p-eu", sharing: [] }), []);
+  assert.deepEqual(model.rolesToRead({ roles: {}, selfId: "p-eu", sharing: ["p-eu"] }), [], "a tela do proprio console nao pede nada");
+  assert.deepEqual(model.rolesToRead({ roles: {}, selfId: "p-eu", sharing: ["constructor"] }), ["constructor"], "nome de propriedade do objeto nao conta como papel lido");
+  assert.equal(model.CONSOLE_ROOM_RULES.roomsInfoMs, 5_000, "no maximo uma vez a cada 5 s, como a sala do aluno");
+});

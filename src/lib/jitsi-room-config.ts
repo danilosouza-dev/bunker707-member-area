@@ -281,6 +281,16 @@ export const JITSI_LISTENED_EVENTS = [
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
 /**
+ * Os sinais que so o console de quem apresenta escuta, alem dos da sala: o console monta com
+ * [...JITSI_LISTENED_EVENTS, ...CONSOLE_EXTRA_EVENTS] e a pagina do aluno nao os registra (cada sinal registrado passa
+ * pela fila da sala em toda pagina de aluno). Nenhum vai ao servidor (toRoomEvent devolve nulo).
+ * - contentSharingParticipantsChanged: os ids donos das faixas de tela nao mudas, no payload { data: string[] }
+ *   (API.js:1742-1747 da tag stable-11248), para o vigia da tela do console (docs/31 §5.4).
+ */
+export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged"] as const;
+export type ConsoleListenedEvent = JitsiListenedEvent | (typeof CONSOLE_EXTRA_EVENTS)[number];
+
+/**
  * O sinal que o console manda (sendEndpointTextMessage, com o texto JSON { type }) para o aluno abaixar a propria mao:
  * o IFrame API nao tem comando para abaixar a mao de outro participante (docs/30 §1.4).
  */

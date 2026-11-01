@@ -2,8 +2,9 @@
 // o retrato da sala que a rota de 5 s devolve (gravador, gravacao, quem foi removido, silenciado ou banido e o mapa
 // aluno -> participante da sala), quem ve qual botao (Apresentador, co-apresentador, Equipe moderadora ou nao; quem
 // publica), o que a sala de espera deve estar fazendo, a fila de maos levantadas e quem esta na sala pelos sinais do
-// iframe do console (um reducer so), quando o "Gravar" da fila dispara sozinho e quando a ancora e marcada (uma vez), o
-// cartao Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
+// iframe do console (um reducer so, com os papeis tambem pelo getRoomsInfo), o vigia da tela (quem compartilha sem
+// poder, docs/31 §5.4), quando o "Gravar" da fila dispara sozinho e quando a ancora e marcada (uma vez), o cartao
+// Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
 // relativos: tests/webinarios-console-ao-vivo-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio: tudo
 // recebe `nowMs`. As frases vem de WEBINAR_COPY; as que ainda faltam la ficam em LIVE_CONSOLE_COPY (pedido no
 // relatorio da frente), conferidas pela PROIBIDAS_WEBINARIO no teste.
@@ -325,9 +326,14 @@ export type LiveRoomState = {
   moderator: boolean;
   people: RoomPerson[];
   recording: { mode: string | null; on: boolean };
-  /** O papel de cada um na sala (participantRoleChanged pode chegar antes ou depois do participantJoined). */
+  /**
+   * O papel de cada um na sala: o participantRoleChanged (pode chegar antes ou depois do participantJoined) e o
+   * getRoomsInfo (quem ja era moderador quando o console entrou nunca gera participantRoleChanged: applyConsoleRoomsInfo).
+   */
   roles: Record<string, JitsiRole>;
   selfId: string | null;
+  /** Quem compartilha a tela agora (contentSharingParticipantsChanged: os donos das faixas de tela nao mudas). */
+  sharing: string[];
   /** Quem esta com o microfone liberado (Liberar), na ordem. */
   speaking: string[];
   spotlight: string | null;
@@ -343,14 +349,22 @@ export const EMPTY_ROOM: LiveRoomState = {
   recording: { mode: null, on: false },
   roles: {},
   selfId: null,
+  sharing: [],
   speaking: [],
   spotlight: null,
   stage: []
 };
 
+/** O getRoomsInfo do iframe (os papeis de quem ja estava na sala) no maximo uma vez neste intervalo, como a sala do aluno. */
+export const CONSOLE_ROOM_RULES = { roomsInfoMs: 5_000 } as const;
+
+/** O teto de ids lidos de um contentSharingParticipantsChanged (a sala nunca tem tantas telas ao mesmo tempo). */
+const SHARING_LIMIT = 50;
+
 export type LiveRoomAction =
   | { name: string; nowMs: number; payload: unknown; type: "event" }
   | { people: readonly unknown[]; type: "seed" }
+  | { info: unknown; type: "roomsInfo" }
   | { id: string; type: "lowerHand" | "skipHand" | "release" | "silence" | "admit" | "kicked" }
   | { type: "lowerAll" | "admitAll" | "reset" }
   | { id: string; on: boolean; type: "stage" }
@@ -394,6 +408,7 @@ function withoutId(state: LiveRoomState, id: string): LiveRoomState {
     knocking: state.knocking.filter((person) => person.id !== id),
     people: state.people.filter((person) => person.id !== id),
     roles,
+    sharing: state.sharing.filter((other) => other !== id),
     speaking: state.speaking.filter((other) => other !== id),
     spotlight: state.spotlight === id ? null : state.spotlight,
     stage: state.stage.filter((other) => other !== id)
@@ -473,9 +488,97 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
       const mode = text(field(payload, "mode"));
       return { ...state, recording: { mode, on: field(payload, "on") === true } };
     }
+    case "contentSharingParticipantsChanged":
+      return { ...state, sharing: sharingIdsOf(payload) };
     default:
       return state;
   }
+}
+
+/**
+ * Os ids de quem compartilha a tela no contentSharingParticipantsChanged ({ data: string[] }): so os ids no formato do
+ * participante, sem repetir, ate SHARING_LIMIT. Payload fora do formato vira a lista vazia.
+ */
+export function sharingIdsOf(payload: unknown): string[] {
+  const data = field(payload, "data");
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const raw of data) {
+    if (ids.length >= SHARING_LIMIT) {
+      break;
+    }
+    if (typeof raw === "string" && PARTICIPANT_ID.test(raw) && !ids.includes(raw)) {
+      ids.push(raw);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Os papeis pelo getRoomsInfo() do IFrame API ({ rooms: [{ isMainRoom, participants: [{ id, role, displayName }] }] }):
+ * quem ja era moderador quando o console entrou so aparece ali (o participantJoined nao traz o papel, e o
+ * participantRoleChanged so sai na troca). Le a sala principal (ou a primeira), grava o papel de cada um com id valido e
+ * papel conhecido e poe em `people` quem ainda nao esta, com o nome. O proprio console fica fora: o papel dele continua
+ * pelo participantRoleChanged, que sai para o papel local. Um participantRoleChanged depois da resposta vence, porque
+ * chega depois (o iframe responde e avisa na ordem).
+ */
+export function applyConsoleRoomsInfo(state: LiveRoomState, info: unknown): LiveRoomState {
+  const rooms = field(info, "rooms");
+  if (!Array.isArray(rooms)) {
+    return state;
+  }
+  const main = rooms.find((room) => field(room, "isMainRoom") === true) ?? rooms[0];
+  const participants = field(main, "participants");
+  if (!Array.isArray(participants)) {
+    return state;
+  }
+  let people = state.people;
+  const roles = { ...state.roles };
+  for (const participant of participants) {
+    const id = field(participant, "id");
+    if (typeof id !== "string" || !PARTICIPANT_ID.test(id) || id === state.selfId) {
+      continue;
+    }
+    const role = roleOf(field(participant, "role"));
+    if (role) {
+      roles[id] = role;
+    }
+    if (!people.some((person) => person.id === id)) {
+      people = [...people, { id, name: text(field(participant, "displayName")) ?? "" }];
+    }
+  }
+  return { ...state, people, roles };
+}
+
+/** Quem tem papel conhecido de nao moderador na sala (participante ou sem papel); um id sem papel lido nunca entra. */
+function knownNonModerator(roles: Readonly<Record<string, JitsiRole>>, id: string): boolean {
+  const role = Object.hasOwn(roles, id) ? roles[id] : undefined;
+  return role === "participant" || role === "none";
+}
+
+/**
+ * O vigia da tela (docs/31 §5.4): quem o console de quem apresenta para com muteRemoteParticipant(id, 'desktop'). Sao
+ * os ids de `sharing` que nao sao o proprio console, com papel CONHECIDO de nao moderador (`roles` "participant" ou
+ * "none") e sem liberacao (`grants`, e `justGranted` para a liberacao que acabou de sair e o retrato ainda nao trouxe).
+ * Um id sem papel nunca sai: quem ja era moderador quando o console entrou so tem o papel depois do getRoomsInfo, e
+ * parar a tela dele seria parar a do proprio Apresentador. O vigia para o cliente padrao, que obedece ao pedido de mudo;
+ * um cliente modificado que ignora o pedido continua mandando a tela (docs/31 §7).
+ */
+export function screenSharesToStop(input: {
+  grants: readonly string[];
+  justGranted: readonly string[];
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+  sharing: readonly string[];
+}): string[] {
+  return input.sharing.filter((id) => id !== input.selfId && knownNonModerator(input.roles, id) && !input.grants.includes(id) && !input.justGranted.includes(id));
+}
+
+/** Os ids de `sharing` sem papel lido (fora o proprio console): o console pede o getRoomsInfo para conhece-los. */
+export function rolesToRead(input: { roles: Readonly<Record<string, JitsiRole>>; selfId: string | null; sharing: readonly string[] }): string[] {
+  return input.sharing.filter((id) => id !== input.selfId && !Object.hasOwn(input.roles, id));
 }
 
 /** Um reducer so para tudo o que a mesa sabe da sala pelo iframe e pelos proprios cliques. */
@@ -483,6 +586,8 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
   switch (action.type) {
     case "event":
       return onEvent(state, action.name, action.payload, action.nowMs);
+    case "roomsInfo":
+      return applyConsoleRoomsInfo(state, action.info);
     case "seed": {
       let people = state.people;
       for (const raw of action.people) {

@@ -1786,8 +1786,11 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * O external_api.js de mentira (docs/30 §10.1): define window.JitsiMeetExternalAPI com o construtor
  * (dominio, { roomName, jwt, configOverwrite, interfaceConfigOverwrite, parentNode, width, height }) que guarda o que
  * recebeu, poe um iframe vazio no parentNode (o getIFrame) e implementa addListener / removeListener (e on / off),
- * executeCommand (anotado), getParticipantsInfo, isAudioMuted / isVideoMuted e dispose. window.__salaFalsa.disparar
- * manda um sinal aos ouvintes da montagem mais nova. Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
+ * executeCommand (anotado), getParticipantsInfo, getRoomsInfo (anotado), isAudioMuted / isVideoMuted e dispose.
+ * window.__salaFalsa.disparar manda um sinal aos ouvintes da montagem mais nova. Os papeis, como a tag: o
+ * participantRoleChanged disparado grava o papel; o participantJoined disparado com `papel` (quem ja era moderador
+ * quando a pagina entrou) grava o papel e o emite sem ele, porque o participantJoined de verdade nao traz papel; so o
+ * getRoomsInfo devolve os papeis (o proprio participante moderador e quem entrou participante, sem papel gravado). Com `ecoar`, como o Jitsi de verdade: toggleVideo responde
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
  * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
  * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
@@ -1858,6 +1861,9 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       // O userSelectedCameraDeviceId: gravado na hora do setVideoInputDevice.
       cameraEscolhida: null,
       maoLevantada: false,
+      // O papel de cada um na sala (id -> "moderator" | "participant" | "none"): o participantRoleChanged disparado e o
+      // "papel" do participantJoined disparado gravam; o getRoomsInfo devolve.
+      papeis: {},
       participantes: [],
       permitido,
       proprioId: null,
@@ -1955,6 +1961,22 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
 
     // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
     const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });
+    // As salas e o papel de cada um, como o getRoomsInfo da tag (breakout-rooms/functions.ts): so a sala principal, o
+    // proprio participante primeiro (moderador sem papel gravado) e quem entrou (participante sem papel gravado).
+    this.getRoomsInfo = () => {
+      anotar("getRoomsInfo", []);
+      return Promise.resolve({
+        rooms: [
+          {
+            isMainRoom: true,
+            participants: [
+              { id: estado.proprioId, role: estado.papeis[estado.proprioId] ?? "moderator" },
+              ...estado.participantes.map((pessoa) => ({ displayName: pessoa.displayName, id: pessoa.id, role: estado.papeis[pessoa.id] ?? "participant" }))
+            ]
+          }
+        ]
+      });
+    };
     const TIPOS = { audioInput: "audioinput", audioOutput: "audiooutput", videoInput: "videoinput" };
     // A permissao de cada lista: microfones e alto-falantes pelo microfone, cameras pela camera.
     const liberado = (tipo) => (tipo === "videoInput" ? estado.permitido.video : estado.permitido.audio);
@@ -2044,12 +2066,21 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     if (!atual) {
       throw new Error("Nenhuma sala montada para receber " + evento);
     }
-    const dados = payload || {};
+    let dados = payload || {};
     const estado = atual.estado;
     if (evento === "videoConferenceJoined" && typeof dados.id === "string") {
       estado.proprioId = dados.id;
     } else if (evento === "participantJoined" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id).concat({ displayName: dados.displayName || "", id: dados.id });
+      // O papel de quem ja era moderador ao entrar: so o getRoomsInfo o conta. O participantJoined de verdade nao traz
+      // papel, entao o "papel" sai do sinal emitido.
+      if (typeof dados.papel === "string") {
+        estado.papeis[dados.id] = dados.papel;
+      }
+      const { papel: _papel, ...semPapel } = dados;
+      dados = semPapel;
+    } else if (evento === "participantRoleChanged" && typeof dados.id === "string" && typeof dados.role === "string") {
+      estado.papeis[dados.id] = dados.role;
     } else if (evento === "participantLeft" && typeof dados.id === "string") {
       estado.participantes = estado.participantes.filter((pessoa) => pessoa.id !== dados.id);
     } else if (evento === "videoMuteStatusChanged" && typeof dados.muted === "boolean") {
