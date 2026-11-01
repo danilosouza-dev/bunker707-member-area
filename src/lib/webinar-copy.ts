@@ -4,13 +4,15 @@
 // e tests/webinarios-frases.test.mjs (PROIBIDAS_WEBINARIO em src/lib/webinar-copy.ts, abaixo).
 // Modulo puro: os unicos imports sao as frases da fase 4, uma por frente, em src/lib/webinar-copy-v4/ (cada frente e
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
-// .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto.
+// .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
+// entra do mesmo jeito em WEBINAR_COPY.salaV2.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
+import { SALA_V2_COPY } from "./webinar-copy-v4/sala-v2";
 import { SEGUIMENTO_COPY } from "./webinar-copy-v4/seguimento";
 import { SIMULACAO_COPY } from "./webinar-copy-v4/simulacao";
 import { TRADUCAO_COPY } from "./webinar-copy-v4/traducao";
@@ -200,7 +202,6 @@ export const WEBINAR_COPY = {
     fazerPergunta: "Fazer uma pergunta",
     filtros: { respondidas: "Respondidas", todas: "Todas" },
     fixada: "Fixada pela equipe",
-    minimizar: "Minimizar",
     modoLento: (segundos: number) => `Você pode enviar de novo em ${segundos} s`,
     naoComecou: "Essa sessão ainda não abriu. Volte na hora marcada.",
     ordem: { maisRecentes: "Mais recentes", maisVotadas: "Mais votadas" },
@@ -229,7 +230,6 @@ export const WEBINAR_COPY = {
     erroEnviar: "Não foi possível enviar. Tente de novo.",
     mensagensNovas: (n: number) => (n === 1 ? "1 mensagem nova" : `${n} mensagens novas`),
     reacoes: { clap: "Palmas", fire: "Fogo", laugh: "Risos", like: "Curtir", love: "Amei", wow: "Uau" },
-    salaMinimizada: "Sala minimizada",
     semEnquetes: "Nenhuma enquete aberta.",
     semMensagens: "Ainda não há mensagens.",
     semPerguntas: "Nenhuma pergunta ainda.",
@@ -335,8 +335,7 @@ export const WEBINAR_COPY = {
     trocandoCameraDesliga: "Trocando a câmera. Ela desliga quando a troca terminar.",
     trocandoCameraLiga: "Trocando a câmera. Ela liga quando a troca terminar.",
     trocandoMicrofoneDesliga: "Trocando o microfone. Ele desliga quando a troca terminar.",
-    trocandoMicrofoneLiga: "Trocando o microfone. Ele liga quando a troca terminar.",
-    voltarParaLive: "Voltar para a live"
+    trocandoMicrofoneLiga: "Trocando o microfone. Ele liga quando a troca terminar."
   },
   /** A faixa do topo de todas as paginas (fase 3; docs/30 §1.1, §1.5 e §2.7). */
   faixa: {
@@ -629,7 +628,9 @@ export const WEBINAR_COPY = {
   assistente: ASSISTENTE_COPY,
   vertical: VERTICAL_COPY,
   jit: JIT_COPY,
-  traducao: TRADUCAO_COPY
+  traducao: TRADUCAO_COPY,
+  /* A sala do aluno V2 (docs/31 §1): src/lib/webinar-copy-v4/sala-v2.ts. */
+  salaV2: SALA_V2_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

@@ -147,17 +147,18 @@ function elementWith(html, attribute) {
 /** O texto que a pessoa le (sem as tags, sem os atributos, sem o CSS embutido). */
 const textOf = (html) => html.replace(/<style>[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ");
 
-test("o desenho vertical: dialogo de tela cheia, o selo Ao vivo e o contador SOMADO no topo, Minimizar e Sair com 44 px", () => {
+test("o desenho vertical: dialogo de tela cheia, o selo Ao vivo e o contador SOMADO no topo, so o Sair com 44 px (sem Minimizar, V2-2)", () => {
   const html = sala("vertical");
-  assert.match(html, /^<div aria-label="Aula de IA" aria-modal="true" class="[^"]*fixed inset-0[^"]*overflow-hidden[^"]*" data-room-design="vertical" data-room-phase="live" role="dialog"/);
+  assert.match(html, /^<div aria-label="Aula de IA" aria-modal="true" class="[^"]*fixed inset-0[^"]*overflow-hidden[^"]*" data-room-design="vertical" data-room-phase="live" data-room-theme="dark" role="dialog"/, "sempre escuro (V2-12): o vertical fica sobre o video");
   const top = elementWith(html, "data-room-vertical-top");
   assert.match(top, /data-room-vertical-badge="live">Ao vivo · /, "o selo Ao vivo com o tempo no ar (a decisao da equipe, D10)");
   assert.match(top, /data-testid="room-present"[\s\S]*122 assistindo/, "o real (2) mais a parte simulada (120) daquele instante");
   assert.match(top, /<h1[^>]*>Aula de IA<\/h1>/);
-  assert.match(top, /<button aria-label="Minimizar" class="[^"]*size-11/);
+  assert.doesNotMatch(html, /Minimizar|room-pill|data-room-minimized/, "sem Minimizar e sem pilula");
+  assert.equal(top.match(/<button[^>]*>/g)?.length, 1, "o topo tem um botao so");
   assert.match(top, /<button aria-label="Sair" class="[^"]*size-11/);
   assert.doesNotMatch(html, /role="tablist"/, "sem o painel de abas do desenho normal");
-  assert.doesNotMatch(html, /lg:w-\[360px\]/);
+  assert.doesNotMatch(html, /data-testid="room-panel"/, "sem o painel do desenho normal (a gaveta faz o papel dele)");
   assert.doesNotMatch(html, /<header class="flex h-12/, "sem o cabecalho do desenho normal");
 });
 
@@ -227,11 +228,12 @@ test("os lugares do vertical: o aviso de venda no topo (abaixo da barra), a pilu
   assert.ok(dockHtml.indexOf("data-room-vertical-chat") < dockHtml.indexOf('data-room-slot="offer"'), "e abaixo das mensagens");
 
   assert.match(elementWith(html, 'data-room-slot="bubbles"'), /absolute bottom-\[46%\] right-0[\s\S]*data-testid="room-reactions"/);
+  assert.match(elementWith(html, 'data-room-slot="bubbles"'), /class="pointer-events-none absolute right-3 [^"]*bottom-3" data-testid="room-reactions"/, "no vertical as bolhas continuam onde eram (no palco elas sobem acima dos selos)");
 
   // No desenho normal, os mesmos componentes com o desenho do palco.
   const normal = sala("normal");
   assert.match(normal, /data-stub-offer="stage"/);
-  assert.match(elementWith(normal, 'data-room-slot="sales"'), /left-3 top-3/);
+  assert.match(elementWith(normal, 'data-room-slot="sales"'), /left-4 top-14/, "abaixo dos selos de cima do palco (docs/31 V2-4)");
   assert.match(elementWith(normal, 'data-room-slot="offer"'), /^<div class="contents" data-room-slot="offer">/);
 
   // No "ver como" a equipe ve o card como o aluno, sem gravar clique (RoomOffer com readOnly).
@@ -265,7 +267,8 @@ test("o compositor compacto: o mesmo campo (Escreva uma mensagem, limite do chat
 test("375 px e 44 px: todo botao tem 44 px, nada com largura fixa maior que a tela, nenhuma frase cita o motor de video", () => {
   for (const html of [sala("vertical"), sala("vertical", { sessionExtra: { kind: "replay", offsetMs: null, roomPhase: null } })]) {
     const buttons = html.match(/<button[^>]*>/g) ?? [];
-    assert.ok(buttons.length >= 6, `achou os botoes (${buttons.length})`);
+    // Sem Minimizar desde o V2-2: um botao a menos no topo.
+    assert.ok(buttons.length >= 5, `achou os botoes (${buttons.length})`);
     for (const button of buttons) {
       assert.match(button, /\b(size-11|h-11|min-h-11|h-12)\b/, `44 px: ${button.slice(0, 120)}`);
     }
@@ -309,6 +312,23 @@ test("chat por cima: so as ultimas 6 e Ver mais mensagens (44 px); vazio fica va
   assert.doesNotMatch(empty, /<li/, "por cima do video, nada de lista vazia");
   const failed = render(verticalChat.VerticalChat, { ...base, error: "O chat não carregou. Tente de novo.", messages: [] });
   assert.match(failed, /O chat não carregou\. Tente de novo\./);
+});
+
+test("chat por cima do video continua com o item de antes (V2-18): o nome em cima com o selo do papel e a pendente, o texto embaixo; nada do balao do painel (V2-9)", () => {
+  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, openPollQuestion: null, pinned: null, replay: false };
+  const html = render(verticalChat.VerticalChat, {
+    ...base,
+    messages: [msg("e", { body: "boa noite", displayName: "Marina R.", offsetMs: 41 * 60_000, role: "team" }), msg("m", { body: "minha duvida", mine: true, pending: true })]
+  });
+  // O RoomMessageItem: o prefixo do papel para o leitor de tela, o nome em negrito e o selo; o texto na linha de baixo.
+  assert.match(
+    html,
+    /<li class="rounded-\[10px\] px-2 py-1\.5" data-room-message="e"><p class="[^"]*"><span class="sr-only">Equipe: <\/span><span class="font-bold text-room-fg-strong">Marina R\.<\/span><span class="[^"]*\brounded-full border\b[^"]*"><span class="truncate">Equipe<\/span><\/span><\/p><p class="[^"]*">boa noite<\/p><\/li>/
+  );
+  // A minha so com o fundo de destaque; a pendente com o selo "Aguardando a equipe".
+  assert.match(html, /<li class="rounded-\[10px\] px-2 py-1\.5 bg-room-control" data-room-message="m">[\s\S]*?<span class="truncate">Aguardando a equipe<\/span>[\s\S]*?minha duvida<\/p><\/li>/);
+  // Nada do balao do painel: sem avatar, sem lado, sem a linha "nome · papel · hora".
+  assert.doesNotMatch(html, /data-mine|data-room-message-meta|flex-row-reverse|bg-room-bubble-mine-bg|size-7/);
 });
 
 test("compositor: Abrir o chat quando fechado (sem campo), o modo lento com a contagem, so a equipe, a gaveta aberta", () => {
@@ -382,7 +402,7 @@ test("a doca: no normal as caixas nao geram caixa (contents); no vertical o grup
   assert.match(vertical, /data-room-offer-pill=""[\s\S]*Só hoje[\s\S]*12:34/);
   assert.match(vertical, /<p>campo<\/p><\/div>$/);
   assert.match(render(dock.RoomDock, { chat: null, composer: null, design: "vertical", hidden: true, offer: null }), /^<div[^>]*class="[^"]*\bhidden\b/, "com a gaveta aberta a doca some");
-  assert.match(render(dock.RoomDock, { chat: null, composer: null, design: "normal", hidden: true, offer: null }), /^<div class="hidden" data-room-slot="dock">/, "minimizada");
+  assert.match(render(dock.RoomDock, { chat: null, composer: null, design: "normal", hidden: true, offer: null }), /^<div class="hidden" data-room-slot="dock">/, "escondida, tambem no normal");
 });
 
 test("a gaveta: as mesmas abas (Chat da live no replay), 44 px, Voltar para o video, o rodape de girar; sem animacao com prefers-reduced-motion", () => {
@@ -402,8 +422,10 @@ test("a gaveta: as mesmas abas (Chat da live no replay), 44 px, Voltar para o vi
   assert.match(replay, />Chat da live/);
 });
 
-test("o topo sozinho: os botoes de 44 px e o titulo truncado a 375 px; so os botoes recebem o toque", () => {
-  const html = render(topBar.VerticalTopBar, { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, onMinimize: noop, phase: "live", presentNow: 1, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA com um titulo bem comprido" });
+test("o topo sozinho: so o Sair, de 44 px, e o titulo truncado a 375 px; so o botao recebe o toque", () => {
+  const html = render(topBar.VerticalTopBar, { getOffsetMs: () => 2_530_000, kind: "simulated", onLeave: noop, phase: "live", presentNow: 1, showLiveBadge: true, timeLabel: "20:00", title: "Aula de IA com um titulo bem comprido" });
+  assert.equal(html.match(/<button[^>]*>/g)?.length, 1, "sem Minimizar (V2-2)");
+  assert.match(html, /<div class="pointer-events-auto flex shrink-0 items-center gap-1"><button aria-label="Sair" class="grid size-11 /);
   assert.match(html, /Ao vivo · <span class="tabular-nums">42:10<\/span>/);
   assert.match(html, /1 assistindo/);
   assert.match(html, /<header class="pointer-events-none/);
@@ -417,16 +439,19 @@ test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba o
   const body = { nome: "body" };
   const campo = { nome: "campo da aba Perguntas" };
   const sair = controle("Sair da confirmacao");
-  const minimizar = controle("Minimizar do topo");
-  const raiz = ({ dentro = [], primeiro = null, topo = minimizar } = {}) => ({
+  const sairDoTopo = controle("Sair do topo");
+  const raiz = ({ dentro = [], primeiro = null, topo = sairDoTopo } = {}) => ({
     contains: (node) => dentro.includes(node),
-    querySelector: (selector) => (selector === "[data-room-first-focus]" ? primeiro : selector === room.ROOM_FOCUSABLE ? topo : null)
+    querySelectorAll: (selector) => {
+      const achado = selector === "[data-room-first-focus]" ? primeiro : selector === room.ROOM_FOCUSABLE ? topo : null;
+      return achado ? [achado] : [];
+    }
   });
 
   // A gaveta (e o compositor com o botao dela) saiu com o foco no campo: o foco caiu no body e volta para o topo da sala,
   // onde o Esc ainda sai e o Tab continua preso.
   assert.equal(room.refocusRoom(raiz(), body), true);
-  assert.deepEqual(focados, ["Minimizar do topo"]);
+  assert.deepEqual(focados, ["Sair do topo"]);
   // Com a confirmacao de saida aberta, o [data-room-first-focus] dela vem primeiro.
   assert.equal(room.refocusRoom(raiz({ primeiro: sair }), null), true, "sem elemento ativo tambem conta como fora");
   assert.deepEqual(focados.at(-1), "Sair da confirmacao");
@@ -436,10 +461,20 @@ test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba o
   assert.equal(room.refocusRoom(raiz({ topo: null }), body), false, "sem controle nenhum, nada a focar");
   assert.equal(focados.length, 2);
 
-  // A sala chama a volta do foco no mesmo quadro em que fica indisponivel (antes da proxima tecla), so aberta (a
-  // pilula minimizada nao rouba o foco da pagina).
+  // Abaixo de sm o primeiro controle do topo e o botao de tema, escondido pela largura (display:none, sem offsetParent):
+  // o focus() nele nao faz nada e o foco ficaria no body. Ele fica de fora, e o foco vai para o Sair, o seguinte na tela.
+  const temaEscondido = { ...controle("Tema claro, escondido"), offsetParent: null };
+  const sairNaTela = { ...controle("Sair do topo, na tela"), offsetParent: {} };
+  const abaixoDeSm = { contains: () => false, querySelectorAll: (selector) => (selector === room.ROOM_FOCUSABLE ? [temaEscondido, sairNaTela] : []) };
+  assert.equal(room.refocusRoom(abaixoDeSm, body), true);
+  assert.deepEqual(focados.at(-1), "Sair do topo, na tela", "o botao escondido nunca recebe o foco");
+  assert.equal(focados.includes("Tema claro, escondido"), false);
+  assert.equal(room.refocusRoom({ contains: () => false, querySelectorAll: () => [temaEscondido] }, body), false, "so com controles escondidos, nada a focar");
+
+  // A sala chama a volta do foco no mesmo quadro em que fica indisponivel (antes da proxima tecla); sem Minimizar (V2-2)
+  // a sala esta sempre aberta.
   const roomSource = readFileSync(new URL("../src/components/member/webinars/room/webinar-room.tsx", import.meta.url), "utf8");
-  assert.match(roomSource, /useLayoutEffect\(\(\) => \{\s*if \(unavailable && !minimized\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);\s*\}\s*\}, \[minimized, unavailable\]\);/);
+  assert.match(roomSource, /useLayoutEffect\(\(\) => \{\s*if \(unavailable\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);\s*\}\s*\}, \[unavailable\]\);/);
   assert.match(roomSource, /composer=\{\s*vertical && !unavailable \?/, "o compositor (com o botao da gaveta) sai com a sala indisponivel");
-  assert.match(roomSource, /const drawerVisible = vertical && drawerOpen && !minimized && !unavailable;/);
+  assert.match(roomSource, /const drawerVisible = vertical && drawerOpen && !unavailable;/);
 });

@@ -607,7 +607,7 @@ test("o Falar sempre segura o 'ligado' do iframe ate a faixa abrir, com ou sem a
   assert.match(turnMicOn, /audioMutedNow\(api\)/, "o isAudioMuted do iframe do pedido");
   assert.match(turnMicOn, /micAskRef\.current = null;\s*if \(outcome\.action === "denied"\) \{\s*setSignals\(micRequestDenied\);\s*\} else \{\s*handleSignal\("audioMuteStatusChanged", outcome\.signal\);/);
   const onEvent = sala.slice(sala.indexOf("const onEvent = useCallback("), sala.indexOf("const configOverwrite = useMemo("));
-  assert.match(onEvent, /const ask = micAskStep\(micAskRef\.current, name, payload\);\s*micAskRef\.current = ask\.next;\s*if \(ask\.release !== null\) \{\s*handleSignal\("audioMuteStatusChanged", ask\.release\);\s*\}\s*if \(ask\.swallow\) \{\s*return;\s*\}/);
+  assert.match(onEvent, /const ask = micAskOnSignal\(micAskRef\.current, name, payload, ownIdRef\.current\);\s*micAskRef\.current = ask\.next;\s*if \(ask\.release !== null\) \{\s*handleSignal\("audioMuteStatusChanged", ask\.release\);\s*\}\s*if \(ask\.swallow\) \{\s*return;\s*\}/);
   assert.match(onEvent, /if \(name === "videoConferenceJoined"\) \{[\s\S]*?micAskRef\.current = null;/, "um iframe novo nao herda o pedido");
   assert.doesNotMatch(sala, /micStuckRef/, "o 'preso' e o proprio pedido de pe");
 });
@@ -673,7 +673,7 @@ test("o pedido do microfone acaba na queda e no iframe novo: o 'ligado' guardado
   assert.match(queda, /const handleDrop = useCallback\(\(\) => \{\s*micAskRef\.current = null;\s*joinedApiRef\.current = null;/);
   const onEvent = sala.slice(sala.indexOf("const onEvent = useCallback("), sala.indexOf("const configOverwrite = useMemo("));
   assert.match(onEvent, /const frame = meetApiRef\.current\?\.current \?\? null;\s*if \(\(name === "audioMuteStatusChanged" \|\| name === "videoMuteStatusChanged"\) && \(frame === null \|\| joinedApiRef\.current !== frame\)\) \{\s*return;\s*\}/);
-  assert.ok(onEvent.indexOf("joinedApiRef.current !== frame") < onEvent.indexOf("micAskStep("), "antes do pedido do microfone e do lote");
+  assert.ok(onEvent.indexOf("joinedApiRef.current !== frame") < onEvent.indexOf("micAskOnSignal("), "antes do pedido do microfone e do lote");
   assert.match(onEvent, /if \(name === "videoConferenceJoined"\) \{[\s\S]*?joinedApiRef\.current = frame;/);
   assert.match(sala, /meetApiRef\.current = jitsi\.api;/);
   assert.match(sala, /const hangUp = useCallback\(\(\) => \{\s*leavingRef\.current = true;\s*micAskRef\.current = null;/);
@@ -969,11 +969,14 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
       onCamera: noop,
       onFullscreen: noop,
       onHand: noop,
+      onLeave: noop,
       onMic: noop,
       onReact: noop,
       onSound: noop,
+      onTogglePanel: noop,
       onToggleReactions: noop,
       onToggleSettings: noop,
+      panelOpen: true,
       reactionsDisabled: false,
       reactionsOpen: false,
       settingsOpen: false,
@@ -987,7 +990,7 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
   const camera = barra.match(/<button aria-busy="true"[^>]*aria-label="Câmera"[\s\S]*?<\/button>/)?.[0] ?? "";
   assert.match(camera, /aria-pressed="true"/);
   assert.match(camera, /title="Desligar câmera"/);
-  assert.match(camera, /<svg[^>]*class="[^"]*lucide-loader-circle[^"]*size-5 animate-spin motion-reduce:animate-none/);
+  assert.match(camera, /<svg[^>]*class="[^"]*lucide-loader-circle[^"]*size-5 lg:size-\[22px\] animate-spin motion-reduce:animate-none/);
   assert.doesNotMatch(camera, /lucide-video/);
   assert.doesNotMatch(barra, /<button aria-busy="true"[^>]*aria-label="Microfone"/);
   const microfone = barra.match(/<button[^>]*aria-label="Microfone"[\s\S]*?<\/button>/)?.[0] ?? "";
@@ -1022,12 +1025,13 @@ test("o painel e o foco: o proprio botao Configurações fecha mandando o foco a
   // Fechar pelo botao: closeSettings(true), que foca o botao antes de o painel sumir (o WebKit nao foca no clique).
   assert.match(tela, /function toggleSettings\(\) \{\s*if \(settingsOpen\) \{\s*closeSettings\(true\);\s*return;\s*\}/);
   // A barra some: o painel e as reacoes fecham (o celular devolve a gaveta; o Esc seguinte sai da sala).
-  assert.match(tela, /const barShown = !minimized && !blocked && screen !== "ended";/);
+  // Quando a barra aparece e regra pura (liveBarShown, tests/webinarios-sala-v2-modelo.test.mjs); sem Minimizar (V2-2).
+  assert.match(tela, /const barShown = liveBarShown\(\{ blocked, screen \}\);/);
   assert.match(tela, /if \(barWasShown !== barShown\) \{\s*setBarWasShown\(barShown\);\s*if \(!barShown\) \{\s*setSettingsOpen\(false\);\s*setReactionsOpen\(false\);\s*\}\s*\}/);
   assert.match(tela, /const settingsTakeover = settingsShown && !desktop;/);
-  assert.match(tela, /\} else if \(reactionsShown \|\| settingsShown\) \{/);
+  assert.match(tela, /roomEscapeStep\(\{ confirmLeave, popoverOpen: reactionsShown \|\| settingsShown \|\| viewMenuShown, stagePoll: stagePoll\?\.mode \?\? null \}\)/);
   assert.match(tela, /\{!barShown \? null : \(\s*<LiveControls/);
-  assert.match(tela, /if \(root && !minimized && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*const first = root\.querySelector<HTMLElement>\("\[data-room-first-focus\]"\);\s*\(first \?\? root\.querySelector<HTMLElement>\(ROOM_FOCUSABLE\)\)\?\.focus\(\);/);
+  assert.match(tela, /if \(root && barFocusLost\(\{ active: document\.activeElement, barShown, barWasShown: was, body: document\.body \}\)\) \{\s*roomFocusTarget\(root\)\?\.focus\(\);/);
 
   const body = { nome: "body" };
   assert.equal(model.barFocusLost({ active: body, barShown: false, barWasShown: true, body }), true, "o foco estava no painel quando a live acabou");
@@ -1035,6 +1039,28 @@ test("o painel e o foco: o proprio botao Configurações fecha mandando o foco a
   assert.equal(model.barFocusLost({ active: { nome: "chat" }, barShown: false, barWasShown: true, body }), false, "o foco estava em outro lugar");
   assert.equal(model.barFocusLost({ active: body, barShown: true, barWasShown: true, body }), false);
   assert.equal(model.barFocusLost({ active: body, barShown: false, barWasShown: false, body }), false);
+});
+
+test("removido ou banido abaixo de sm: o painel (com a aba Chat, o [data-room-first-focus]) sai e o foco vai para o primeiro controle NA TELA, nunca para o tema escondido pela largura", async () => {
+  const { roomFocusTarget, ROOM_FOCUSABLE } = await import("../src/components/member/webinars/room/webinar-room.tsx");
+  // display:none (o botao de tema abaixo de sm, o Sair da barra abaixo de lg) nao tem offsetParent.
+  const escondido = (nome) => ({ nome, offsetParent: null });
+  const naTela = (nome) => ({ nome, offsetParent: {} });
+  const raiz = (porSeletor) => ({ querySelectorAll: (selector) => porSeletor[selector] ?? [] });
+
+  // A frase de removido toma a sala: sem painel, sem [data-room-first-focus]; o cabecalho tem o tema (escondido) e o Sair.
+  const removido = raiz({ [ROOM_FOCUSABLE]: [escondido("Tema claro"), naTela("Sair")] });
+  assert.equal(roomFocusTarget(removido)?.nome, "Sair", "o primeiro controle que aparece");
+  // Com a sala de pe, a aba Chat ([data-room-first-focus]) vem antes de tudo.
+  const deP = raiz({ "[data-room-first-focus]": [naTela("Chat")], [ROOM_FOCUSABLE]: [escondido("Tema claro"), naTela("Sair"), naTela("Chat")] });
+  assert.equal(roomFocusTarget(deP)?.nome, "Chat");
+  // Um [data-room-first-focus] escondido tambem fica de fora (o seguinte dele na tela, ou o primeiro controle).
+  const primeiroEscondido = raiz({ "[data-room-first-focus]": [escondido("Chat"), naTela("Sair da confirmacao")], [ROOM_FOCUSABLE]: [naTela("Sair")] });
+  assert.equal(roomFocusTarget(primeiroEscondido)?.nome, "Sair da confirmacao");
+  assert.equal(roomFocusTarget(raiz({ "[data-room-first-focus]": [escondido("Chat")], [ROOM_FOCUSABLE]: [naTela("Sair")] }))?.nome, "Sair");
+  // Nada na tela (ou sem raiz): nada a focar.
+  assert.equal(roomFocusTarget(raiz({ [ROOM_FOCUSABLE]: [escondido("Tema claro")] })), null);
+  assert.equal(roomFocusTarget(null), null);
 });
 
 test("o card Configurações do console abre acima do palco (logo depois do botao no teclado, antes da barra do iframe) e o proprio botao fecha mandando o foco a ele", async () => {
@@ -1423,6 +1449,29 @@ test("o painel tem Fechar quando a sala passa onClose (o foco volta ao botao Con
   const tela = semComentarios(ler("src/components/member/webinars/room/live-room.tsx"));
   assert.match(tela, /onClose=\{\(\) => closeSettings\(true\)\}/);
   assert.match(tela, /function closeSettings\(focusButton = false\) \{\s*if \(focusButton\) \{\s*panelButton\(LIVE_SETTINGS_ID\)\?\.focus\(\);/);
+});
+
+test("a linha Tema do painel (docs/31 V2-12 e V2-18): so abaixo de sm, onde o cabecalho nao tem o botao; o botao diz para qual tema vai, como o do cabecalho", () => {
+  // As frases sao as do botao do cabecalho (WEBINAR_COPY.salaV2.tema), com o titulo da linha.
+  const tema = WEBINAR_COPY.salaV2.tema;
+  assert.deepEqual([tema.titulo, tema.claro, tema.escuro], ["Tema", "Tema claro", "Tema escuro"]);
+  const secao = (html) => html.match(/<section aria-labelledby="live-settings-tema"[^>]*>[\s\S]*?<\/section>/)?.[0] ?? "";
+
+  // No escuro: o Sol com "Tema claro", 44 px, numa secao que some a partir de sm (la o cabecalho tem o botao).
+  const escuro = secao(painel(aluno(), { onToggleTheme: noop, theme: "dark" }));
+  assert.match(escuro, /^<section aria-labelledby="live-settings-tema" class="min-w-0 space-y-2 sm:hidden">/);
+  assert.match(escuro, /<h3 [^>]*id="live-settings-tema">Tema<\/h3>/);
+  assert.match(escuro, /<button class="[^"]*\bh-11\b[^"]*" type="button"><svg[^>]*lucide-sun[^>]*>[\s\S]*?<\/svg>Tema claro<\/button>/);
+  // No claro: a Lua com "Tema escuro".
+  const claro = secao(painel(aluno(), { onToggleTheme: noop, theme: "light" }));
+  assert.match(claro, /<svg[^>]*lucide-moon[^>]*>[\s\S]*?<\/svg>Tema escuro<\/button>/);
+  assert.doesNotMatch(claro, /Tema claro/);
+  // A linha vem primeiro: no celular e o que cabe sem rolar o painel.
+  const html = painel(aluno(), { onToggleTheme: noop, theme: "dark" });
+  assert.ok(html.indexOf('id="live-settings-tema"') < html.indexOf('id="live-settings-som"'), "antes do Som");
+  // Sem o tema da sala, nada de linha Tema.
+  assert.equal(secao(painel(aluno())), "");
+  assert.equal(secao(painel(aluno(), { theme: "dark" })), "", "sem quem troca, sem a linha");
 });
 
 /* ------------------------------------------------------------------------------------------------

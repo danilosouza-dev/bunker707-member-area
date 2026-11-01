@@ -43,9 +43,15 @@ export const STAGE_BACKGROUND = "#000000";
  * (CLIENT_RESIZED), nao na entrada: ao abrir, a coluna fica com 213 px em qualquer largura; depois do primeiro resize o
  * iframe precisa de 1013 px para a coluna inteira e, abaixo de 980 px, as miniaturas voltam a flutuar sobre o video
  * (resizeFilmStrip muda so a largura atual; no proximo resize o motor volta a esta). A pagina trata isso na fase 1:
- * escolhe a largura, esconde a coluna (toggleFilmStrip) ou monta a fileira embaixo pela largura do iframe.
+ * mede o iframe e esconde a coluna (toggleFilmStrip) abaixo de FILMSTRIP_COLUMN_MIN_FRAME.
  */
 export const FILMSTRIP_COLUMN_WIDTH = 213;
+/**
+ * A menor largura do iframe com a coluna de miniaturas inteira ao lado do video grande (docs/31 V2-A5): o motor limita
+ * a coluna a (largura - 800) depois do primeiro resize, entao abaixo de 1013 px a sala esconde a coluna (toggleFilmStrip)
+ * e o video grande fica com a largura toda; no celular (o iframe de cerca de 374 px) ela tambem some.
+ */
+export const FILMSTRIP_COLUMN_MIN_FRAME = 800 + FILMSTRIP_COLUMN_WIDTH;
 /** A altura das miniaturas na fileira embaixo (FILM_STRIP_MAX_HEIGHT vale como altura no horizontal); 16:9. */
 export const THUMBNAIL_HEIGHT = 120;
 export const THUMBNAIL_RATIO = 16 / 9;
@@ -247,6 +253,10 @@ export const JITSI_LISTENED_EVENTS = [
   "audioMuteStatusChanged",
   "videoMuteStatusChanged",
   "moderationParticipantApproved",
+  // A equipe recolheu o microfone (o "Tirar do palco" e o Silenciar do console mandam rejectParticipant de audio): o
+  // Microfone sai da barra do aluno mesmo ja desligado, quando nenhum mudo chega (docs/31 V2-19). Nao vai ao servidor
+  // (toRoomEvent devolve nulo): o silencio da equipe ja vira linha pelo audioMuteStatusChanged.
+  "moderationParticipantRejected",
   "recordingStatusChanged",
   "knockingParticipant",
   // O "Abaixar a mão" do console chega ao aluno por sendEndpointTextMessage (o IFrame API nao abaixa a mao de outro).
@@ -257,7 +267,16 @@ export const JITSI_LISTENED_EVENTS = [
   // recusou o microfone ou a camera (o aviso na barra). Nenhum dos tres vai ao servidor (toRoomEvent devolve nulo).
   "deviceListChanged",
   "micError",
-  "cameraError"
+  "cameraError",
+  // A visao do video (docs/31 V2-16 e V2-A5): a grade ligada ou desligada (o setTileView do aluno, ou o seguir a visao da
+  // equipe) e a coluna de miniaturas na tela ou escondida (o toggleFilmStrip pela largura do iframe). O botao da barra
+  // diz o que o motor mostra; nenhum dos dois vai ao servidor (toRoomEvent devolve nulo).
+  "tileViewChanged",
+  "filmstripDisplayChanged",
+  // Quem esta no video grande mudou (o destaque da equipe, o orador, a tela compartilhada): o selo "{nome} ·
+  // Apresentador" do palco so fica com alguem da equipe ali (docs/31 V2-4). O motor manda sem dados (o id fica no IFrame
+  // API); nao vai ao servidor (toRoomEvent devolve nulo).
+  "largeVideoChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -333,7 +352,12 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "deviceListChanged":
     case "micError":
     case "cameraError":
-      // So a tela usa (a lista do painel Configurações e o aviso na barra): o servidor nao aceita estes nomes.
+    case "moderationParticipantRejected":
+    case "tileViewChanged":
+    case "filmstripDisplayChanged":
+    case "largeVideoChanged":
+      // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
+      // video, a coluna de miniaturas e quem esta no video grande): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

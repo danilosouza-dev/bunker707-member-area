@@ -16,6 +16,16 @@ export type RoomAssistant = {
   state: StudentAssistantState;
 };
 
+/**
+ * O painel (o chat ou a aba Perguntas) le o Assistente sozinho so quando a sala nao passou o estado dela (docs/31
+ * V2-4: a sala le uma vez e desce pela prop `assistant`) e fora do so leitura; com o estado da sala, a leitura propria
+ * fica desligada e nao ha um segundo pedido por minuto. `enabled` e a aba que pode ler (a Perguntas desligada no "ver
+ * como"); sem ele, so o so leitura decide.
+ */
+export function ownAssistantEnabled(input: { enabled?: boolean; readOnly: boolean; shared: RoomAssistant | null | undefined }): boolean {
+  return !input.shared && input.enabled !== false && !input.readOnly;
+}
+
 export function useRoomAssistant(input: { enabled: boolean; sessionId?: string | null; webinarId?: string | null }): RoomAssistant {
   const { enabled, sessionId, webinarId } = input;
   const [state, setState] = useState<StudentAssistantState>(ASSISTANT_OFF);

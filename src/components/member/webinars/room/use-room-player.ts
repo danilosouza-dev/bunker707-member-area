@@ -11,7 +11,7 @@ import { lockDecision, roomMediaLessonId, targetOffsetMs } from "@/lib/webinar-r
 // |atual − alvo| > 2 s, setCurrentTime(alvo); a cada `seeked` fora do alvo, volta; um `pause` vira `play` de novo
 // (nao ha pausa na sessao); no fim do video, encerrada. No Replay o player e livre e so avisa o segundo (o chat
 // segue). O sinal de midia da aula (lesson-media-signal) e anunciado com o id da sessao: o pop-up nunca abre
-// com o player tocando, inclusive com a sala minimizada. Nada aqui fala com a rede.
+// com o player tocando. Nada aqui fala com a rede.
 
 export type RoomPlayerState = { bridge: EmbedBridge; currentSeconds: number | null; ended: boolean; playing: boolean };
 

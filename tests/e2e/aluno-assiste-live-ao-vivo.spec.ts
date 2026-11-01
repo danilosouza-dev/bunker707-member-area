@@ -1,11 +1,16 @@
 import type { Locator, Page } from "@playwright/test";
+import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
-import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { CHAT_CONSENT_VERSION } from "../../src/server/webinars/model";
+import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
+  abrirComoProdutor,
+  abrirEnqueteDeTeste,
   ambienteDaSalaAoVivo,
+  apagarEnqueteDeTeste,
   eventosDaLiveAoVivo,
   expect,
   salaFalsaDoJitsi,
@@ -22,11 +27,13 @@ import {
 // aceite), a mao levantada vai por toggleRaiseHand, o microfone liberado pelo apresentador abre o aviso com Falar /
 // Agora não e so o Falar manda toggleAudio. O chat e as reacoes sao os nossos; nenhum texto da pagina cita o Jitsi; a
 // 375 px a sala cabe sem rolagem lateral e os botoes da barra tem 44 px. A IA Diretor fica na pagina da live e some na
-// sala (o botao flutuante cobria o Enviar do chat e o X da pilula); o cabecalho da sala tem a marca da escola e, a 375 px
-// com a gravacao ligada, o tempo curto e o ponto do Gravando cabem antes de Minimizar; a 667 px (celular deitado) o
-// Icone da escola fica no lugar da logo e os selos inteiros terminam antes do "{n} assistindo". O botao Configurações
-// abre o painel de som e aparelhos: antes da liberacao nada troca de aparelho (nem pede o microfone); depois do Falar o
-// microfone escolhido chega a sala so pelo id, o alto-falante tambem, a camera so depois do aviso de gravacao,
+// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "com {apresentador} ·
+// {n} assistindo" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem Minimizar nem
+// pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor reaparece); a 667 px
+// (celular deitado) o cabecalho continua o do celular, sem marca, os selos ficam no palco e Configurações aberto deixa
+// o palco com 96 px, acima do painel. O botao Configurações abre o painel de som e aparelhos: antes da liberacao nada
+// troca de aparelho (nem pede o microfone); depois do Falar o microfone escolhido chega a sala so pelo id, o
+// alto-falante tambem, a camera so depois do aviso de gravacao,
 // Reduzir ruído e Economizar dados viram os comandos do iframe (o ruido so depois que a faixa nova entra) e nenhuma
 // troca vira "a equipe fechou" nem linha no historico; a Câmera tocada no meio de uma troca espera a faixa nova; a
 // equipe que silencia logo depois da troca do microfone chega como a equipe, e o foco do controle que some com a secao
@@ -35,8 +42,30 @@ import {
 // nao abre nunca vira "ligado" na barra nem no historico), o pedido acaba na queda e o painel diz que falta a permissao
 // (nunca "nenhum aparelho"); na volta depois de uma queda, a Câmera tocada no meio da troca da camera desligada espera a
 // faixa da troca, e o botao que espera mostra o estado real com o circulo girando e a frase do que vem.
+// O tema da sala (docs/31 V2-12): Tema claro troca a sala na hora (so o dialogo, nunca o html), fica guardado ao
+// recarregar e chega ao iframe na montagem (bunkerTheme); trocar com a aluna dentro nao remonta o iframe. A 375 px o
+// cabecalho fica sem o botao (V2-18) e o tema troca pela linha Tema do painel Configurações.
+// A barra (docs/31 V2-6 a V2-8): no computador o Sair fica nela e o balao "Esconder o chat" esconde o painel (o palco
+// cresce, o iframe nao remonta), guardado ao recarregar; "Mostrar o chat" reabre. A 375 px a barra cabe (a 360 px
+// tambem), os circulos tem 44 px e a Tela cheia (ou o Modo cinema) fica no canto do palco.
+// O painel fechado (docs/31 V2-7 e V2-8): o X "Fechar o painel" fecha e devolve o foco ao balao, as 2 ultimas mensagens
+// ficam em pilulas dentro do palco, a mensagem nova do produtor aparece no nome do balao ("Mostrar o chat, 1 mensagem
+// nova") e reabrir tira o contador.
+// A enquete no palco (docs/31 V2-10): aberta pela equipe, ela abre centrada dentro do palco mesmo com o painel fechado,
+// sem pegar o foco; "Responder depois" a recolhe para o card "Enquete aberta · você deixou para depois" do chat (o
+// foco vai ao balao), que continua ao recarregar; "Responder agora" a traz de volta com o foco na primeira opcao, e
+// "Enviar resposta" grava pela nossa rota (201) e a aba Enquetes diz "Resposta enviada".
+// A Visão do vídeo (docs/31 V2-16 e V2-A5): Grade vai por setTileView(true) sem remontar o iframe; o botao diz o que o
+// motor mostra (o tileViewChanged), nunca a escolha guardada; o Esc no menu so fecha o menu; ao recarregar e entrar, a
+// Grade guardada volta depois do videoConferenceJoined. A 1280 px com o painel aberto o iframe fica abaixo de 1013 px e
+// a coluna de miniaturas sai (toggleFilmStrip; os selos deixam de descontar a coluna quando o motor confirma); com o
+// painel fechado ela volta.
+// O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
+// mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe; o foco que estava nele volta para a sala.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
+/** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
+const APRESENTADOR = ESCOLA_DE_TESTE.contas.produtor.nome;
 const aoVivo = WEBINAR_COPY.aoVivo;
 const SALA = new RegExp(`/webinarios/${slug}/sala\\?sessao=`);
 const PARTICIPANTE = "aluna-na-sala-0001";
@@ -84,7 +113,7 @@ async function entrarNaSala(page: Page, opcoes: Parameters<typeof salaFalsaDoJit
   return { dialogo, montagem, sala };
 }
 
-test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camera com o aviso, mao levantada e o microfone liberado com Falar; nada cita o Jitsi", async ({ page }) => {
+test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camera com o aviso, mao levantada, o microfone liberado com Falar e recolhido pela equipe; nada cita o Jitsi", async ({ page }) => {
   const ambiente = ambienteDaSalaAoVivo();
   const { dialogo, montagem, sala } = await entrarNaSala(page);
   // Dentro da sala a faixa "Ao vivo agora" nunca aparece (docs/30 §1.1).
@@ -160,7 +189,23 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleAudio")).toBe(false);
   await avisoMicrofone.getByRole("button", { exact: true, name: aoVivo.falar }).click();
   await sala.esperarComando("toggleAudio", { depoisDe: antes });
-  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.microfone })).toHaveAttribute("aria-pressed", "true");
+  const botaoMicrofone = dialogo.getByRole("button", { exact: true, name: aoVivo.microfone });
+  await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "true");
+
+  // A equipe recolhe o microfone (o "Tirar do palco" do console manda rejectParticipant de audio) com ele ja desligado
+  // pela propria aluna, quando nenhum mudo chega: o Microfone sai da barra e o aviso da equipe aparece (V2-19).
+  const antesDeDesligar = (await sala.comandos()).length;
+  await botaoMicrofone.click();
+  await sala.esperarComando("toggleAudio", { depoisDe: antesDeDesligar });
+  await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "false");
+  // O foco fica no Microfone (o WebKit nao foca o botao no clique): quando ele some, o foco volta para dentro da sala,
+  // nunca para o body, onde o Esc, os atalhos e a trava do Tab deixariam de valer.
+  await botaoMicrofone.focus();
+  await sala.disparar("moderationParticipantRejected", { id: PARTICIPANTE, mediaType: "audio" });
+  await expect(botaoMicrofone).toHaveCount(0);
+  await expect(dialogo.getByTestId("live-notice")).toContainText(aoVivo.microfoneSilenciado);
+  await expect(page.locator("body")).not.toBeFocused();
+  await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
 
   // Os sinais do iframe viram registros so com codigos (o lote sai a cada 10 s): a camera com o aceite e a mao.
   await expect
@@ -207,6 +252,418 @@ test("o chat e as reacoes sao os nossos: o aceite na primeira mensagem, a mensag
   await dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.reagir }).click();
   await dialogo.getByRole("button", { exact: true, name: "Palmas" }).click();
   expect((await reacao).status()).toBe(201);
+});
+
+test("o tema: Tema claro troca a sala na hora e fica guardado ao recarregar; o iframe monta no tema guardado e trocar com a aluna dentro nao remonta", async ({ page }) => {
+  const tema = WEBINAR_COPY.salaV2.tema;
+  const sala = await salaFalsaDoJitsi(page);
+  await page.goto(`/webinarios/${slug}`);
+  await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  await expect(page).toHaveURL(SALA);
+  const dialogo = page.getByRole("dialog", { name: titulo });
+
+  // Escuro por padrao; o botao diz para qual tema vai. So o dialogo da sala muda: o html continua sem o atributo.
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await dialogo.getByRole("button", { exact: true, name: tema.claro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+  await expect(dialogo.getByRole("button", { exact: true, name: tema.escuro })).toBeVisible();
+  expect(await page.locator("html").getAttribute("data-room-theme")).toBeNull();
+
+  // Recarregar mantem o claro (guardado no navegador da aluna).
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+
+  // Entrar na sala: o iframe monta com o tema guardado (no hash, para o CSS da instancia).
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await token).status()).toBe(200);
+  const montagem = await sala.esperarMontada();
+  expect(montagem.configOverwrite[THEME_HASH_KEY]).toBe("light");
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect(await sala.montagens()).toBe(1);
+
+  // Trocar o tema com a aluna dentro: a sala muda na hora e o iframe continua o mesmo (o motor nao tem comando de tema).
+  await dialogo.getByRole("button", { exact: true, name: tema.escuro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect(await sala.montagens()).toBe(1);
+});
+
+test("o balao do chat (docs/31 V2-6 a V2-8): no computador Esconder o chat esconde o painel e o palco cresce sem remontar o iframe; recarregar mantem fechado e Mostrar o chat reabre; o Sair fica na barra; a 375 px a barra cabe, os circulos tem 44 px e a Tela cheia fica no palco", async ({ page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo, sala } = await entrarNaSala(page);
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(chat).toBeVisible();
+  const larguraAntes = (await palco.boundingBox())?.width ?? 0;
+  expect(larguraAntes).toBeGreaterThan(0);
+
+  // Aberto, o balao fica ligado e controla o painel (aria-expanded, nunca aria-pressed com o nome que muda); fechar
+  // esconde o painel (sem desmontar) e o palco toma a largura.
+  const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
+  await expect(esconder).toHaveAttribute("aria-expanded", "true");
+  expect(await esconder.getAttribute("aria-pressed")).toBeNull();
+  await expect(esconder).toHaveAttribute("aria-controls", "room-panel");
+  await esconder.click();
+  await expect(chat).toBeHidden();
+  await expect(chat).toHaveCount(1);
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.mostrar })).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => (await palco.boundingBox())?.width ?? 0).toBeGreaterThan(larguraAntes + 300);
+  expect(await sala.montagens(), "abrir e fechar o painel so troca classes: o iframe e o mesmo").toBe(1);
+
+  // A escolha fica guardada no navegador: recarregar mantem fechado; Mostrar o chat reabre.
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  await expect(dialogo.getByTestId("room-panel")).toBeHidden();
+  await dialogo.getByRole("button", { exact: true, name: painel.mostrar }).click();
+  await expect(dialogo.getByTestId("room-panel")).toBeVisible();
+  await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toHaveAttribute("aria-expanded", "true");
+
+  // No computador o Sair fica na barra, a esquerda; o do cabecalho so aparece abaixo de lg.
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  await expect(barra.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toBeVisible();
+  await expect(dialogo.locator("header").first().getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toHaveCount(0);
+
+  // A 375 px: a barra cabe na largura (sem rolar por dentro), os circulos tem 44 px e a Tela cheia (ou o Modo cinema)
+  // sai da barra e fica no canto do palco.
+  await page.setViewportSize({ height: 740, width: 375 });
+  const caixaDaBarra = await barra.boundingBox();
+  expect(caixaDaBarra?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((caixaDaBarra?.x ?? 0) + (caixaDaBarra?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(375);
+  expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem sem rolar a barra").toBe(true);
+  for (const nome of [WEBINAR_COPY.sala.reagir, aoVivo.levantarMao, aoVivo.som, aoVivo.configuracoes, painel.esconder]) {
+    const caixa = await barra.getByRole("button", { exact: true, name: nome }).boundingBox();
+    expect(caixa?.height, nome).toBeGreaterThanOrEqual(44);
+    expect(caixa?.width, nome).toBeGreaterThanOrEqual(44);
+  }
+  const telaCheia = new RegExp(`^(?:${aoVivo.telaCheia}|${aoVivo.modoCinema})$`);
+  await expect(barra.getByRole("button", { name: telaCheia })).toHaveCount(0);
+  await expect(barra.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair })).toHaveCount(0);
+  const noPalco = palco.getByRole("button", { name: telaCheia });
+  await expect(noPalco).toBeVisible();
+  const caixaDoPalco = await palco.boundingBox();
+  const caixaDoCanto = await noPalco.boundingBox();
+  expect(caixaDoCanto?.x ?? -1).toBeGreaterThanOrEqual(caixaDoPalco?.x ?? 0);
+  expect((caixaDoCanto?.y ?? 0) + (caixaDoCanto?.height ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.y ?? 0) + (caixaDoPalco?.height ?? 0));
+  expect((caixaDoCanto?.x ?? 0) + (caixaDoCanto?.width ?? 0)).toBeLessThanOrEqual((caixaDoPalco?.x ?? 0) + (caixaDoPalco?.width ?? 0));
+
+  // A 360 px (os Android pequenos) a barra tambem cabe sem rolar por dentro (a rolagem dela fica escondida).
+  await page.setViewportSize({ height: 740, width: 360 });
+  expect(await barra.evaluate((elemento) => elemento.scrollWidth <= elemento.clientWidth), "os circulos cabem em 360 px").toBe(true);
+});
+
+test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; as 2 ultimas mensagens ficam em pilulas no palco; a mensagem nova do produtor entra no nome do balao e reabrir zera o contador", async ({ browser, page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo } = await entrarNaSala(page);
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(chat).toBeVisible();
+  // As abas em pilula na lista "Painel da sala" (a mesma regra nas tres salas): Chat, Perguntas e Participantes.
+  const abas = chat.getByRole("tablist", { name: painel.rotulo });
+  await expect(abas.getByRole("tab")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+
+  // O produtor escreve no chat da live pela rota da sala (a primeira mensagem com o aceite).
+  const produtor = await abrirComoProdutor(browser);
+  const escrever = async (texto: string) => {
+    const resposta = await produtor.pagina.request.post(`/api/webinars/${LIVE_AO_VIVO_DE_TESTE.id}/chat`, {
+      data: { body: texto, consent: true, consentVersion: CHAT_CONSENT_VERSION, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId }
+    });
+    expect(resposta.status(), texto).toBe(201);
+  };
+  const lista = chat.getByRole("log");
+  try {
+    // Uma janela baixa, para a lista do chat transbordar: a 1440 x 900, com poucas mensagens, ela nem rolava, e o fim da
+    // lista ao reabrir (abaixo) passava sem o chatListOnShow. A rajada do chat (5 por 60 s) limita o produtor a 4 aqui.
+    await page.setViewportSize({ height: 380, width: 1440 });
+    await escrever("abre a conversa do produtor no painel");
+    await escrever("primeira do produtor no painel");
+    await escrever("segunda do produtor no painel");
+    await expect(lista.getByText("segunda do produtor no painel")).toBeVisible({ timeout: 15_000 });
+    // A lista transborda e o aluno esta no fim dela (a mensagem que chega rola quem esta no fim).
+    await expect.poll(() => lista.evaluate((elemento) => elemento.scrollHeight > elemento.clientHeight + 16)).toBe(true);
+    await expect(lista.getByText("segunda do produtor no painel")).toBeInViewport();
+
+    // O X fecha o painel (montado e escondido) e o foco vai ao balao, que o reabre.
+    await chat.getByRole("button", { exact: true, name: painel.fechar }).click();
+    await expect(chat).toBeHidden();
+    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    await expect(mostrar).toBeFocused();
+    await expect(mostrar).toHaveAttribute("aria-expanded", "false");
+
+    // As 2 ultimas mensagens em pilulas dentro do palco (tambem no computador), a mais nova embaixo.
+    const pilulas = palco.getByTestId("room-chat-pills");
+    await expect(pilulas.locator("li")).toHaveCount(2);
+    await expect(pilulas.locator("li").nth(0)).toContainText("primeira do produtor no painel");
+    await expect(pilulas.locator("li").nth(1)).toContainText("segunda do produtor no painel");
+
+    // Uma mensagem nova com o painel fechado: o balao diz quantas chegaram, e as pilulas andam.
+    await escrever("terceira do produtor no painel");
+    const comNovas = dialogo.getByRole("button", { exact: true, name: painel.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(1)) });
+    await expect(comNovas).toBeVisible({ timeout: 15_000 });
+    await expect(comNovas.locator("[data-room-unread]")).toHaveText("1");
+    await expect(pilulas.locator("li").nth(1)).toContainText("terceira do produtor no painel");
+    await expect(pilulas).not.toContainText("primeira do produtor no painel");
+
+    // Reabrir mostra o chat e tira o contador (e as pilulas, porque o chat esta na tela).
+    await comNovas.click();
+    await expect(chat).toBeVisible();
+    const esconder = dialogo.getByRole("button", { exact: true, name: painel.esconder });
+    await expect(esconder).toHaveAttribute("aria-expanded", "true");
+    await expect(esconder.locator("[data-room-unread]")).toHaveCount(0);
+    await expect(palco.getByTestId("room-chat-pills")).toHaveCount(0);
+    // A lista escondida nao rolou com a mensagem nova: reabrir a leva ao fim (chatListOnShow), e a nova fica na vista.
+    // Sem ele, a lista ficava onde estava ao fechar, com a nova inteira abaixo do corte.
+    await expect(lista.getByText("terceira do produtor no painel")).toBeInViewport();
+    expect(await lista.evaluate((elemento) => elemento.scrollTop + elemento.clientHeight >= elemento.scrollHeight - 1), "a lista no fim").toBe(true);
+  } finally {
+    await produtor.fechar();
+  }
+});
+
+test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada no palco sem pegar o foco; Responder depois recolhe para o card do chat, que fica ao recarregar; Responder agora volta ao palco e Enviar resposta grava", async ({ page }) => {
+  const painel = WEBINAR_COPY.salaV2.painel;
+  const enquete = WEBINAR_COPY.salaV2.enquete;
+  const pergunta = "Qual parte da live ajudou mais?";
+  await page.setViewportSize({ height: 900, width: 1440 });
+  await salaFalsaDoJitsi(page);
+  await page.goto(`/webinarios/${slug}`);
+  await page.getByRole("main").getByRole("link", { exact: true, name: WEBINAR_COPY.aluno.entrar }).click();
+  await expect(page).toHaveURL(SALA);
+  const dialogo = page.getByRole("dialog", { name: titulo });
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  const chat = dialogo.getByTestId("room-panel");
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+
+  // O painel fechado pelo balao (guardado no navegador): a enquete abre assim mesmo.
+  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await expect(chat).toBeHidden();
+
+  const { optionIds, pollId } = await abrirEnqueteDeTeste({ options: ["O chat", "As perguntas"], question: pergunta, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId, webinarId: LIVE_AO_VIVO_DE_TESTE.id });
+  try {
+    await page.reload();
+    await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+    await expect(chat).toBeHidden();
+    const camada = palco.getByRole("dialog", { name: pergunta });
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("heading", { level: 2, name: pergunta })).toBeVisible();
+    await expect(camada.getByRole("radio")).toHaveCount(2);
+    // Centrada sobre o palco, dentro dele.
+    const caixaDoPalco = await palco.boundingBox();
+    const caixaDaEnquete = await camada.boundingBox();
+    expect(caixaDoPalco && caixaDaEnquete).toBeTruthy();
+    if (caixaDoPalco && caixaDaEnquete) {
+      expect(Math.abs(caixaDaEnquete.x + caixaDaEnquete.width / 2 - (caixaDoPalco.x + caixaDoPalco.width / 2))).toBeLessThan(2);
+      expect(Math.abs(caixaDaEnquete.y + caixaDaEnquete.height / 2 - (caixaDoPalco.y + caixaDoPalco.height / 2))).toBeLessThan(2);
+      expect(caixaDaEnquete.width).toBeLessThanOrEqual(440);
+    }
+    // Aberta sozinha, ela nao pega o foco (o leitor de tela ouve "Enquete aberta" pela regiao viva).
+    expect(await camada.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(false);
+    await expect(palco.locator("[data-room-poll-said]")).toHaveText(enquete.anuncioAberta(pergunta));
+
+    // Responder depois: a camada sai e o foco vai ao balao (o card do chat esta no painel fechado).
+    await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    const mostrar = dialogo.getByRole("button", { exact: true, name: painel.mostrar });
+    await expect(mostrar).toBeFocused();
+    // O atalho E (V2-10) traz a enquete deixada para depois de volta ao palco, com o foco na primeira opcao; deixada para
+    // depois de novo, o foco volta ao balao.
+    await page.keyboard.press("e");
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
+    await camada.getByRole("button", { exact: true, name: enquete.responderDepois }).click();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await expect(mostrar).toBeFocused();
+    await mostrar.click();
+    await expect(chat).toBeVisible();
+    const card = chat.getByRole("region", { name: enquete.deixouParaDepois });
+    await expect(card).toContainText(pergunta);
+
+    // Recarregar mantem no "depois": o card no chat e nada no palco.
+    await page.reload();
+    await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+    await expect(card).toBeVisible();
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+
+    // Responder agora: a enquete volta ao palco com o foco na primeira opcao, e o card sai.
+    await card.getByRole("button", { exact: true, name: enquete.responderAgora }).click();
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
+    await expect(card).toHaveCount(0);
+    // O Esc com o foco na enquete vale como Responder depois: ela volta ao card do chat, o foco vai ao Responder agora e a
+    // sala nao pergunta se quer sair. Responder agora a traz de novo.
+    await page.keyboard.press("Escape");
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await expect(card).toBeVisible();
+    await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+    await expect(card.getByRole("button", { exact: true, name: enquete.responderAgora })).toBeFocused();
+    await card.getByRole("button", { exact: true, name: enquete.responderAgora }).click();
+    await expect(camada).toBeVisible();
+    await expect(camada.getByRole("radio", { name: "O chat" })).toBeFocused();
+    const enviar = camada.getByRole("button", { exact: true, name: enquete.enviarResposta });
+    await expect(enviar).toBeDisabled();
+    await camada.getByRole("radio", { name: "As perguntas" }).check();
+    const resposta = page.waitForResponse((response) => response.url().endsWith("/polls") && response.request().method() === "POST");
+    await enviar.click();
+    const envio = await resposta;
+    expect(envio.status()).toBe(201);
+    expect(envio.request().postDataJSON()).toMatchObject({ optionIds: [optionIds[1]], pollId, sessionId: LIVE_AO_VIVO_DE_TESTE.sessaoId });
+
+    // Enviada: a camada sai, o foco vai ao balao, a regiao viva diz "Resposta enviada" e a aba Enquetes tambem.
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await expect(dialogo.getByRole("button", { exact: true, name: painel.esconder })).toBeFocused();
+    await expect(palco.locator("[data-room-poll-said]")).toHaveText(WEBINAR_COPY.sala.enquete.respondida);
+    // Respondida, o atalho E abre a aba Enquetes (nada volta ao palco).
+    await page.keyboard.press("e");
+    const abaEnquetes = chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes });
+    await expect(abaEnquetes).toHaveAttribute("aria-selected", "true");
+    // As quatro abas nao cabem nos 320 px do painel e a linha rola de lado: Enquetes, a ultima, comeca fora da vista. O
+    // atalho nao move o foco (nada rola a aba sozinho): a aba escolhida entra inteira na vista pela rolagem da lista
+    // (tabScrollLeft, docs/31 V2-A18). O ratio 1 conta o corte da lista que rola, antes do clique (que rolaria sozinho).
+    await expect(abaEnquetes).toBeInViewport({ ratio: 1 });
+    await expect(palco.getByRole("dialog")).toHaveCount(0);
+    await abaEnquetes.click();
+    await expect(dialogo.getByTestId("room-polls").getByText(WEBINAR_COPY.sala.enquete.respondida)).toBeVisible();
+  } finally {
+    // A enquete aberta ficaria no meio do palco dos testes seguintes.
+    await apagarEnqueteDeTeste(pollId);
+  }
+});
+
+test("a visão do vídeo e a coluna de miniaturas (docs/31 V2-16 e V2-A5): Grade por comando sem remontar, o botao diz o que o motor mostra, a Grade guardada volta na entrada; a 1280 px a coluna sai com o painel aberto e volta com ele fechado", async ({ page }) => {
+  test.setTimeout(120_000);
+  const visao = WEBINAR_COPY.salaV2.visao;
+  const painel = WEBINAR_COPY.salaV2.painel;
+  await page.setViewportSize({ height: 900, width: 1440 });
+  const { dialogo, sala } = await entrarNaSala(page);
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  const noPalco = barra.getByRole("button", { exact: true, name: visao.atual(visao.palco) });
+  await expect(noPalco).toBeEnabled();
+  await expect(noPalco).toHaveAttribute("aria-haspopup", "menu");
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  // A margem que os selos descontam, lida pelo CSSOM: o servidor pinta 0px, e depois que o valor muda o navegador
+  // reescreve o atributo style no formato dele ("--room-video-right: 222px;"), que uma regex do atributo nao pegaria.
+  const margemDosSelos = () => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-right").trim());
+  // A 1440 px com o painel aberto o iframe tem cerca de 1072 px: a coluna fica, e os selos param antes dela.
+  await expect.poll(margemDosSelos).toBe("222px");
+
+  // O menu abre com o foco na opcao marcada; o Esc fecha so o menu (nada de "sair da sala") e o foco volta ao botao.
+  await noPalco.click();
+  const menu = dialogo.getByRole("menu", { name: visao.rotulo });
+  await expect(menu).toBeVisible();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+
+  // Nunca dois abertos juntos: com Configurações aberto, o botao da visao fecha o painel (que cobriria o menu) e abre o
+  // menu com o foco na opcao marcada.
+  const configuracoes = dialogo.getByRole("button", { exact: true, name: aoVivo.configuracoes });
+  await configuracoes.click();
+  await expect(dialogo.getByTestId("live-settings")).toBeVisible();
+  await noPalco.click();
+  await expect(dialogo.locator("#live-room-settings")).toHaveCount(0);
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  // O atalho R com o foco no menu: Reagir abre, o menu fecha e o foco vai ao botao da visao (nunca ao body); o Esc
+  // seguinte fecha Reagir sem pedir para sair.
+  await page.keyboard.press("r");
+  await expect(dialogo.locator("#live-room-reactions")).toBeVisible();
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.locator("#live-room-reactions")).toHaveCount(0);
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+  // O proprio botao fecha o menu com o foco numa opcao (no WebKit o clique nao foca o botao: o evento sem mover o foco
+  // imita isso): o foco vai ao botao, e o Esc seguinte ainda chega a sala (pede para sair).
+  await noPalco.click();
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: visao.palco })).toBeFocused();
+  await noPalco.dispatchEvent("click");
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.getByRole("alertdialog", { name: WEBINAR_COPY.sala.sairConfirmar })).toBeVisible();
+  // A confirmacao recebe o foco no Voltar (o Enter seguinte nao tira ninguem da live); o Esc a fecha e o foco volta para
+  // quem a abriu (o botao da visao), nunca para o body.
+  await expect(dialogo.getByRole("alertdialog").getByRole("button", { exact: true, name: WEBINAR_COPY.sala.voltar })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialogo.getByRole("alertdialog")).toHaveCount(0);
+  await expect(noPalco).toBeFocused();
+  // Um toque fora do botao e do menu (o titulo, que nao recebe foco) fecha o menu.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await dialogo.getByRole("heading", { level: 1 }).click();
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  // O clique no video tira o foco da pagina (ele entra no iframe do motor): o menu fecha.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent("blur")));
+  await expect(menu).toBeHidden();
+
+  // Grade: por comando (setTileView), sem remontar o iframe.
+  let antes = (await sala.comandos()).length;
+  await noPalco.click();
+  await menu.getByRole("menuitemradio", { exact: true, name: visao.grade }).click();
+  await expect(menu).toBeHidden();
+  expect((await sala.esperarComando("setTileView", { depoisDe: antes })).args).toEqual([true]);
+  expect(await sala.montagens(), "trocar a visao nao remonta o iframe").toBe(1);
+
+  // O botao diz o que o motor mostra: a Grade quando ele avisa; o Palco quando a equipe volta todos ao Palco, mesmo com
+  // a Grade guardada.
+  await sala.disparar("tileViewChanged", { enabled: true });
+  await expect(barra.getByRole("button", { exact: true, name: visao.atual(visao.grade) })).toBeVisible();
+  // Na Grade, nenhuma coluna a descontar.
+  await expect.poll(margemDosSelos).toBe("0px");
+  await sala.disparar("tileViewChanged", { enabled: false });
+  await expect(noPalco).toBeVisible();
+
+  // Recarregar e entrar de novo: a Grade guardada volta por setTileView(true), so depois do videoConferenceJoined.
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await token).status()).toBe(200);
+  await sala.esperarMontada();
+  expect((await sala.comandos()).some((item) => item.comando === "setTileView"), "antes da entrada, nenhum comando").toBe(false);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  expect((await sala.esperarComando("setTileView")).args).toEqual([true]);
+
+  // A 1280 px com o painel aberto o iframe fica com cerca de 912 px (abaixo de 1013): a coluna sai por toggleFilmStrip.
+  antes = (await sala.comandos()).length;
+  await page.setViewportSize({ height: 800, width: 1280 });
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  // O motor confirma (a coluna escondida): os selos vao ate a borda. Fechar o painel deixa o iframe com mais de 1013 px
+  // e a coluna volta.
+  await sala.disparar("filmstripDisplayChanged", { visible: false });
+  await expect.poll(margemDosSelos).toBe("0px");
+  antes = (await sala.comandos()).length;
+  await dialogo.getByRole("button", { exact: true, name: painel.esconder }).click();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: true });
+  await expect.poll(margemDosSelos).toBe("222px");
+  expect(await sala.montagens(), "a coluna e por comando: o iframe e o mesmo").toBe(1);
+
+  // A sala cai com o menu aberto: o menu fecha de vez e o foco fica na sala (nunca no body); na volta o botao religa
+  // sem reabrir o menu sozinho.
+  await noPalco.click();
+  await expect(menu).toBeVisible();
+  await sala.disparar("videoConferenceLeft", {});
+  await expect(menu).toBeHidden();
+  await expect(noPalco).toBeDisabled();
+  await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
+  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(noPalco).toBeEnabled();
+  await expect(noPalco).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeHidden();
 });
 
 test("Configurações: antes da liberacao nada troca de aparelho; a camera so depois do aviso, o alto-falante e o microfone so depois do Falar, Reduzir ruído e Economizar dados chegam a sala; nenhuma troca vira aviso falso nem linha no historico", async ({ page }) => {
@@ -485,7 +942,7 @@ test("a volta depois de uma queda, com a camera desligada: trocar a camera e toc
   expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
 });
 
-test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho cabe com o Gravando; o X da pilula fecha a sala", async ({ page }) => {
+test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho tem o titulo, quem apresenta e quantos assistem; Ao vivo e Gravando no palco; sem Minimizar, o Sair pede a confirmacao e fecha a sala", async ({ page }) => {
   await page.setViewportSize({ height: 740, width: 375 });
   const { dialogo, sala } = await entrarNaSala(page);
   await expect(dialogo.getByRole("tab", { name: WEBINAR_COPY.sala.abas.chat })).toBeVisible();
@@ -547,45 +1004,77 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await configuracoes.dispatchEvent("click");
   await expect(painel).toHaveCount(0);
   await expect(configuracoes).toBeFocused();
+  // Abaixo de sm o cabecalho nao tem o botao de tema (V2-18): o tema fica na linha Tema do painel, com o mesmo nome.
+  const tema = WEBINAR_COPY.salaV2.tema;
+  await expect(dialogo.locator("header").first().getByRole("button", { exact: true, name: tema.claro })).toBeHidden();
+  await configuracoes.click();
+  await painel.getByRole("button", { exact: true, name: tema.claro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+  await painel.getByRole("button", { exact: true, name: tema.escuro }).click();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar }).click();
+  await expect(painel).toHaveCount(0);
   await page.setViewportSize({ height: 740, width: 375 });
 
-  // O cabecalho com a gravacao ligada (o duble avisa, como o gravador): o Icone da escola de 24 px, o tempo curto e so o
-  // ponto do Gravando terminam antes de Minimizar, e sobra largura para o titulo.
+  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "com
+  // {apresentador} · {n} assistindo" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o leitor de
+  // tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
-  const gravando = cabecalho.locator(`[title="${aoVivo.gravando}"]`);
+  const palcoDaSala = dialogo.locator("[data-lesson-player-stage]");
+  const gravando = palcoDaSala.getByTestId("live-recording");
+  const noAr = palcoDaSala.getByTestId("room-on-air");
   await expect(gravando).toBeVisible();
-  const icone = cabecalho.getByRole("img", { name: "Bunker707" });
-  await expect(icone).toBeVisible();
-  const minimizar = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.minimizar });
+  await expect(noAr).toBeVisible();
+  await expect(noAr).toHaveAttribute("title", /^Ao vivo · \d{2}:\d{2}:\d{2}$/);
+  await expect(palcoDaSala.getByText(`${APRESENTADOR} · Apresentador`)).toBeVisible();
+  await expect(cabecalho.getByTestId("live-recording")).toHaveCount(0);
+  await expect(cabecalho.getByTestId("room-on-air")).toHaveCount(0);
+  await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
+  const tituloDoCabecalho = cabecalho.getByRole("heading", { level: 1, name: titulo });
+  await expect(tituloDoCabecalho).toBeVisible();
+  const linha = cabecalho.getByTestId("room-mobile-line");
+  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
+  // Sem Minimizar (docs/31 V2-2): o cabecalho termina no Sair.
+  await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
+  const sair = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair });
+  await expect(sair).toBeVisible();
+  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
   const caixas = {
     gravando: await gravando.boundingBox(),
-    icone: await icone.boundingBox(),
-    minimizar: await minimizar.boundingBox(),
-    noAr: await cabecalho.locator('[title^="Ao vivo"]').boundingBox(),
-    titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
+    linha: await linha.boundingBox(),
+    noAr: await noAr.boundingBox(),
+    palco: await palcoDaSala.boundingBox(),
+    sair: await sair.boundingBox(),
+    titulo: await tituloDoCabecalho.boundingBox()
   };
-  expect(caixas.icone?.width ?? 0).toBeCloseTo(24, 0);
-  const bordaDoMinimizar = caixas.minimizar?.x ?? 0;
-  expect(bordaDoMinimizar).toBeGreaterThan(0);
-  expect((caixas.noAr?.x ?? Number.POSITIVE_INFINITY) + (caixas.noAr?.width ?? 0), "o selo Ao vivo").toBeLessThanOrEqual(bordaDoMinimizar);
-  expect((caixas.gravando?.x ?? Number.POSITIVE_INFINITY) + (caixas.gravando?.width ?? 0), "o ultimo selo").toBeLessThanOrEqual(bordaDoMinimizar);
+  const bordaDoSair = caixas.sair?.x ?? 0;
+  expect(bordaDoSair).toBeGreaterThan(0);
+  expect(fim(caixas.sair), "o Sair cabe na tela").toBeLessThanOrEqual(375);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect((caixas.titulo?.x ?? Number.POSITIVE_INFINITY) + (caixas.titulo?.width ?? 0)).toBeLessThanOrEqual(bordaDoMinimizar);
+  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoSair);
+  expect(fim(caixas.linha), "a linha do celular termina antes do Sair").toBeLessThanOrEqual(bordaDoSair);
+  // Os selos dentro do palco: o Ao vivo no canto de cima a esquerda e o Gravando ao lado, sem sair do palco.
+  expect(caixas.noAr?.x ?? -1).toBeGreaterThanOrEqual(caixas.palco?.x ?? 0);
+  expect(caixas.noAr?.y ?? -1).toBeGreaterThanOrEqual(caixas.palco?.y ?? 0);
+  expect(caixas.gravando?.x ?? -1).toBeGreaterThan(caixas.noAr?.x ?? 0);
+  expect(fim(caixas.gravando)).toBeLessThanOrEqual(fim(caixas.palco));
 
-  // Minimizar: a pilula no canto de baixo, onde ficava a IA Diretor; o X dela (Sair) recebe o clique e fecha a sala.
-  await minimizar.click();
-  const pilula = page.getByTestId("room-pill");
-  await expect(pilula).toBeVisible();
-  await pilula.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair }).click();
+  // O Sair, com a live no ar, abre a confirmacao; o Sair dela volta para a pagina da live, onde a IA Diretor reaparece.
+  // Nenhuma pilula fica no canto.
+  await sair.click();
+  const confirmacao = dialogo.getByRole("alertdialog", { name: WEBINAR_COPY.sala.sairConfirmar });
+  await expect(confirmacao).toBeVisible();
+  await confirmacao.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair }).click();
   await expect(page).toHaveURL(`/webinarios/${slug}`);
+  await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
   await expect(page.getByTestId("room-pill")).toHaveCount(0);
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
-test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com a gravacao ligada, os selos terminam antes de quem assiste e o titulo tem largura", async ({ page }) => {
-  // Entre sm (640 px) e lg (1024 px, onde a sala vira computador) o cabecalho ja tem a frase inteira do Ao vivo, a
-  // palavra Gravando, o "{n} assistindo" e Minimizar/Sair com texto: a logo de 125 px so entra em lg.
+test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador} · {n} assistindo', sem marca) e os selos Ao vivo e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
+  // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo, a linha da
+  // data e o "{n} assistindo" da direita so entram em lg; o contador fica na linha de baixo do titulo.
   await page.setViewportSize({ height: 740, width: 667 });
   const { dialogo, sala } = await entrarNaSala(page);
   // O iPhone SE deitado: 667 x 375 (a altura nao muda o cabecalho; a entrada usa a de cima para o Entrar na sala caber).
@@ -593,28 +1082,71 @@ test("a 667 px (celular deitado): ate o computador fica o Icone da escola e, com
 
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   const cabecalho = dialogo.locator("header").first();
-  await expect(cabecalho.getByTestId("live-recording")).toBeVisible();
-  const icone = cabecalho.locator('[data-room-brand="icon"]');
-  await expect(icone).toBeVisible();
-  await expect(cabecalho.locator('[data-room-brand="logo"]')).toBeHidden();
-  const presentes = cabecalho.getByTestId("room-present");
-  await expect(presentes).toBeVisible();
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  await expect(palco.getByTestId("live-recording")).toBeVisible();
+  await expect(palco.getByTestId("room-on-air")).toBeVisible();
+  // A partir de sm o selo traz a frase inteira; so uma versao fica visivel.
+  await expect(palco.getByText(/^Ao vivo · \d{2}:\d{2}:\d{2}$/).filter({ visible: true })).toBeVisible();
+  await expect(cabecalho.getByTestId("live-recording")).toHaveCount(0);
+  await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
+  await expect(cabecalho.getByTestId("room-present")).toBeHidden();
+  const linha = cabecalho.getByTestId("room-mobile-line");
+  await expect(linha).toHaveText(new RegExp(`^com ${APRESENTADOR} · \\d+ assistindo$`));
+  // A partir de sm o botao de tema volta ao cabecalho, antes do Sair.
+  await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 
+  // Deitado, o corpo fica em linha (roomSkeleton): o palco ocupa o que sobra acima da barra e o painel do chat fica ao
+  // lado. A barra, o balao, a Tela cheia do canto do palco, as abas e o campo do chat cabem na tela (antes, o palco 16:9
+  // na largura empurrava tudo para baixo dela, e o toBeVisible passava com eles fora da tela).
+  await expect(dialogo.locator("[data-room-bar]")).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.painel.esconder })).toBeInViewport({ ratio: 1 });
+  // O circulo do canto: a Tela cheia deitada fica na tela; o Modo cinema (o navegador sem tela cheia) sai do canto
+  // deitado, porque ali ele nao mudaria nada (docs/31 V2-A27).
+  const canto = palco.locator("[data-room-stage-corner]");
+  if ((await canto.getAttribute("aria-label")) === WEBINAR_COPY.aoVivo.modoCinema) {
+    await expect(canto).toBeHidden();
+  } else {
+    await expect(canto).toBeInViewport({ ratio: 1 });
+  }
+  await expect(dialogo.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.chat })).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("textbox", { name: WEBINAR_COPY.sala.escreva })).toBeInViewport({ ratio: 1 });
+
+  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
   const caixas = {
-    gravando: await cabecalho.locator(`[title="${aoVivo.gravando}"]`).boundingBox(),
-    icone: await icone.boundingBox(),
-    noAr: await cabecalho.locator('[title^="Ao vivo"]').boundingBox(),
-    presentes: await presentes.boundingBox(),
+    linha: await linha.boundingBox(),
+    palco: await palco.boundingBox(),
+    tema: await cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro }).boundingBox(),
     titulo: await cabecalho.getByRole("heading", { level: 1 }).boundingBox()
   };
-  const fim = (caixa: { width: number; x: number } | null) => (caixa?.x ?? Number.POSITIVE_INFINITY) + (caixa?.width ?? 0);
-  expect(caixas.icone?.width ?? 0).toBeCloseTo(24, 0);
-  const bordaDosPresentes = caixas.presentes?.x ?? 0;
-  expect(bordaDosPresentes).toBeGreaterThan(0);
-  expect(fim(caixas.noAr), "o selo Ao vivo").toBeLessThanOrEqual(bordaDosPresentes);
-  expect(fim(caixas.gravando), "o ultimo selo termina antes de quem assiste").toBeLessThanOrEqual(bordaDosPresentes);
+  const bordaDoTema = caixas.tema?.x ?? 0;
+  expect(bordaDoTema).toBeGreaterThan(0);
   expect(caixas.titulo?.width ?? 0, "sobra largura para o titulo").toBeGreaterThan(0);
-  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDosPresentes);
+  expect(fim(caixas.titulo)).toBeLessThanOrEqual(bordaDoTema);
+  expect(fim(caixas.linha)).toBeLessThanOrEqual(bordaDoTema);
+  expect(fim(caixas.palco), "o palco cabe na largura").toBeLessThanOrEqual(667);
+
+  // Configurações deitado: o painel fica no fluxo e toma o lugar do chat; a caixa do palco guarda no minimo 96 px e o
+  // palco acaba antes do painel (nunca por baixo dele): quem encolhe e o painel, que rola por dentro, e a barra continua
+  // na tela.
+  const configuracoes = dialogo.getByRole("button", { exact: true, name: aoVivo.configuracoes });
+  await configuracoes.click();
+  const painel = dialogo.getByTestId("live-settings");
+  await expect(painel).toBeVisible();
+  await expect(dialogo.getByTestId("room-panel")).toBeHidden();
+  const deitado = {
+    caixa: await dialogo.locator('[data-room-slot="stage-box"]').boundingBox(),
+    painel: await dialogo.locator("#live-room-settings").boundingBox(),
+    palco: await palco.boundingBox()
+  };
+  expect(deitado.caixa?.height ?? 0, "a caixa do palco com no minimo 96 px").toBeGreaterThanOrEqual(96);
+  expect(deitado.palco?.height ?? 0, "o palco com no minimo 96 px").toBeGreaterThanOrEqual(96);
+  expect((deitado.palco?.y ?? 0) + (deitado.palco?.height ?? 0), "o palco acaba antes do painel").toBeLessThanOrEqual((deitado.painel?.y ?? 0) + 1);
+  await expect(configuracoes).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar })).toBeInViewport({ ratio: 1 });
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.config.fechar }).click();
+  await expect(painel).toHaveCount(0);
+  await expect(dialogo.getByTestId("room-panel")).toBeVisible();
+  await expect(dialogo.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.chat })).toBeInViewport({ ratio: 1 });
 });
 
 // O Chrome fixa a Permissions-Policy no carregamento do documento, e a navegacao interna do Next nao carrega outro:

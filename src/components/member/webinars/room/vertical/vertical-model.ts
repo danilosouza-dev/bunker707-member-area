@@ -1,15 +1,16 @@
 // A Sala Live vertical 9:16 (docs/30 §1.6, §6.6, §1.7 e §9), a parte pura: quando a sala usa o desenho do celular em
-// pe, o esqueleto da sala nos dois desenhos (e minimizada) e o que muda no topo e no chat. E a mesma pagina, a mesma
-// sessao, o mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo
-// lugar da arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho ou minimizar troca so as
-// classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
+// pe, o esqueleto da sala nos dois desenhos e o que muda no topo e no chat. E a mesma pagina, a mesma sessao, o
+// mesmo relogio e as mesmas rotas; so o desenho muda. O palco (o iframe do player) fica SEMPRE no mesmo lugar da
+// arvore (corpo > coluna do palco > caixa do palco > palco): girar o aparelho troca so as classes desses tres, o React nao remonta o player e o navegador nao recarrega o iframe (mover um iframe no DOM
 // recarrega o video). Por isso o desenho vertical nao e outra arvore: e o mesmo esqueleto com outras classes e as
-// pecas por cima (topo, chat, gaveta). Vale para a Live gravada e o Replay; a Live ao vivo fica de fora ate o palco
-// ser gravado em 9:16 (live-room.tsx nao usa nada daqui). Modulo puro (sem React e sem rede): os testes carregam pelo
-// Node direto; os imports sao relativos.
+// pecas por cima (topo, chat, gaveta). O desenho vertical vale para a Live gravada e o Replay; a Live ao vivo fica de
+// fora dele ate o palco ser gravado em 9:16, mas usa o esqueleto do desenho normal (roomSkeleton("normal"), docs/31
+// V2-6: o mesmo corpo, a mesma coluna e a mesma caixa do palco). Modulo puro (sem React e sem rede): os testes carregam
+// pelo Node direto; os imports sao relativos.
 
 import { WEBINAR_COPY } from "../../../../../lib/webinar-copy";
 import type { ComposerState, RoomMessage } from "../../../../../lib/webinar-room-client";
+import type { RoomTheme } from "../../../../../lib/webinar-room-prefs";
 import type { SimulatedPhase } from "../../../../../server/webinars/model";
 
 export const ROOM_DESIGNS = ["normal", "vertical"] as const;
@@ -132,8 +133,9 @@ export function subscribePortraitPhone(matchMedia: PortraitMatchMedia, callback:
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * O caminho do palco a partir do dialogo (data-room-slot de cada nivel). E o mesmo no desenho normal, no vertical e
- * minimizada: a prova de que girar ou minimizar nao remonta o player (tests/webinarios-sala-vertical-modelo.test.mjs).
+ * O caminho do palco a partir do dialogo (data-room-slot de cada nivel). E o mesmo no desenho normal e no vertical: a
+ * prova de que girar nao remonta o player (tests/webinarios-sala-vertical-modelo.test.mjs). Nao ha mais Minimizar
+ * (docs/31 V2-2).
  */
 export const ROOM_STAGE_PATH = ["body", "stage-column", "stage-box"] as const;
 
@@ -161,6 +163,8 @@ export type RoomSkeleton = {
   bubbles: string;
   /** A confirmacao de Sair (no vertical, um cartao por cima, abaixo do topo). */
   confirm: string;
+  /** O painel do chat (o aside do RoomPanel: aqui so se ele ocupa a coluna no celular; no vertical nao existe: a gaveta faz o papel dele). */
+  panel: string;
   root: string;
   /** O lugar do aviso de venda simulado (no vertical, o topo abaixo da barra; o toast fica em top-14 dele). */
   sales: string;
@@ -168,30 +172,58 @@ export type RoomSkeleton = {
   stageColumn: string;
 };
 
-const MINIMIZED_ROOT =
-  "fixed bottom-4 right-4 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-[16px] border border-white/15 bg-[#121212] shadow-[0_18px_48px_rgba(0,0,0,0.6)]";
-const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/30 bg-amber-500/10 px-3 py-2";
+/**
+ * O estado que muda as classes do desenho normal (docs/31 V2-6 a V2-8), o mesmo nas duas salas: o painel do chat na
+ * tela (`panelShown`), o palco que cresce para ocupar a coluna (`stageGrows`: o painel fechado, a frase de removido ou
+ * banido, o Modo cinema) e o Modo cinema (`cinema`: o chat fica embaixo, menor). `stageMin`: o palco que cresce divide
+ * a coluna com um painel no fluxo (Configurações no celular, na live) e guarda no minimo 96 px; quem encolhe e o
+ * painel, que rola por dentro (no celular deitado a coluna tem uns 320 px).
+ */
+export type RoomSkeletonState = { cinema: boolean; panelShown: boolean; stageGrows: boolean; stageMin?: boolean };
 
-/** As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco e os lugares por cima). */
-export function roomSkeleton(design: RoomDesign, minimized: boolean): RoomSkeleton {
-  if (minimized) {
-    // A propria sala vira a pilula de 56 px; o palco fica no mesmo lugar da arvore, por cima da miniatura da pilula.
-    return {
-      body: "contents",
-      bubbles: "hidden",
-      confirm: NORMAL_CONFIRM,
-      root: `z-[60] text-white ${MINIMIZED_ROOT}`,
-      sales: "hidden",
-      stageBox: "relative size-full",
-      stageColumn: "absolute left-0 top-0 h-14 w-24 overflow-hidden rounded-l-[14px] bg-black"
-    };
-  }
+const SKELETON_DEFAULT: RoomSkeletonState = { cinema: false, panelShown: true, stageGrows: false };
+
+/** As classes juntas, sem as vazias (o modulo e puro: sem o cn, que traz o tailwind-merge). */
+function classes(...parts: Array<string | null | false>): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+const NORMAL_CONFIRM = "flex flex-wrap items-center justify-between gap-2 border-b border-room-warn-border bg-room-warn-bg px-3 py-2";
+
+/**
+ * O tema do dialogo da sala (o data-room-theme, docs/31 V2-12): no desenho normal, o da pessoa (claro ou escuro); o
+ * vertical 9:16 fica todo sobre o video e continua como no docs/30 (V2-18), sempre escuro, mesmo com o claro guardado.
+ * Girar o aparelho troca o desenho e, com ele, o tema, sem perder a escolha guardada.
+ */
+export function themeForDesign(design: RoomDesign, theme: RoomTheme): RoomTheme {
+  return design === "vertical" ? "dark" : theme;
+}
+
+/**
+ * O palco que cresce (o painel fechado, removido ou banido, o Modo cinema): a caixa ocupa a coluna e o palco dentro
+ * dela deixa o 16:9 para ocupar a caixa (o player e o iframe se ajustam por dentro). So CSS, o mesmo palco. O minimo
+ * fica na caixa (min-h-0, ou 96 px com `stageMin`): e ela que divide a coluna com a barra e o painel.
+ */
+const STAGE_GROWS = "flex-1 [&>[data-room-stage]]:aspect-auto [&>[data-room-stage]]:flex-1";
+
+/**
+ * As classes de cada peca da sala (o dialogo, o corpo, a coluna e a caixa do palco, o painel e os lugares por cima). O
+ * desenho normal e o mesmo na Live ao vivo, na gravada e no Replay (docs/31 V2-6): a partir de lg, o corpo com recuo de
+ * 16 px, o palco com cantos de 16 px (os do video grande do iframe, que sao fixos) e a barra embaixo, a 12 px; abaixo de
+ * lg, em pe, o palco na largura e a barra logo abaixo. Abaixo de lg deitado (o celular de lado, o tablet ou a janela
+ * mais larga que alta, `max-lg:landscape:`) o palco 16:9 na largura empurraria a barra, o balao e o chat para fora da
+ * tela (667 x 375, 960 x 600): o corpo fica em linha como no computador, a coluna do palco cresce, o palco ocupa o que
+ * sobra acima da barra e o painel fica ao lado (288 px, room-panel.tsx). O `state` muda so as classes: o palco nunca
+ * sai do lugar.
+ */
+export function roomSkeleton(design: RoomDesign, state: RoomSkeletonState = SKELETON_DEFAULT): RoomSkeleton {
   if (design === "vertical") {
     return {
       body: "relative min-h-0 flex-1",
       bubbles: "pointer-events-none absolute bottom-[46%] right-0 h-44 w-20",
       confirm:
         "absolute inset-x-3 top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-amber-400/30 bg-[#1f1a0c]/95 px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.55)]",
+      panel: "hidden",
       root: "z-[60] text-white fixed inset-0 flex flex-col overflow-hidden bg-black",
       sales: "pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] h-28",
       stageBox: `absolute inset-0 ${VERTICAL_STAGE_COVER}`,
@@ -199,18 +231,28 @@ export function roomSkeleton(design: RoomDesign, minimized: boolean): RoomSkelet
     };
   }
   return {
-    body: "flex min-h-0 flex-1 flex-col lg:flex-row",
+    body: "flex min-h-0 flex-1 flex-col max-lg:landscape:flex-row lg:flex-row lg:gap-4 lg:px-4 lg:pb-4",
     bubbles: "contents",
     confirm: NORMAL_CONFIRM,
-    root: "z-[60] text-white fixed inset-0 flex flex-col bg-[#0b0b0b]",
+    // A largura (320 px a partir de lg), as abas e o cartao ficam no RoomPanel (room-panel.tsx, docs/31 V2-7).
+    panel: classes("flex min-h-0 flex-col", state.panelShown && !state.cinema ? "flex-1" : "flex-none"),
+    root: "z-[60] text-room-fg fixed inset-0 flex flex-col bg-room-bg",
     sales: "contents",
-    stageBox: "relative lg:min-h-0 lg:flex-1",
-    stageColumn: "relative shrink-0 bg-black lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col"
+    stageBox: classes(
+      "relative flex flex-col bg-black max-lg:landscape:flex-1 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:rounded-[16px] [&:fullscreen>[data-room-stage]]:aspect-auto [&:fullscreen>[data-room-stage]]:h-full",
+      // Deitado, o minimo e o mesmo do celular em pe: 96 px com Configurações no lugar do chat, senao nenhum.
+      state.stageMin ? "max-lg:landscape:min-h-24" : "max-lg:landscape:min-h-0",
+      state.stageGrows ? classes(state.stageMin ? "min-h-24" : "min-h-0", STAGE_GROWS) : null
+    ),
+    stageColumn: classes(
+      "relative flex flex-col max-lg:landscape:min-h-0 max-lg:landscape:min-w-0 max-lg:landscape:flex-1 lg:min-h-0 lg:min-w-0 lg:flex-1 lg:gap-3",
+      state.stageGrows ? "min-h-0 flex-1" : "shrink-0"
+    )
   };
 }
 
 /* ------------------------------------------------------------------------------------------------
- * O topo do vertical: o selo e o contador pela mesma regra do cabecalho (room-header.tsx)
+ * O topo do vertical: o selo e o contador pela mesma regra dos selos do palco (room-stage-badges.tsx)
  * ---------------------------------------------------------------------------------------------- */
 
 export type VerticalBadge = {
@@ -222,7 +264,10 @@ export type VerticalBadge = {
   showCount: boolean;
 };
 
-/** O selo do topo: a mesma regra de RoomHeader (showLiveBadge so vale com a sessao gravada no ar). */
+/**
+ * O selo do momento (D10): o topo do vertical e, no desenho normal, o selo de cima do palco e o contador do cabecalho
+ * (docs/31 V2-4; showLiveBadge so vale com a sessao gravada no ar).
+ */
 export function verticalBadge(input: { kind: "replay" | "simulated"; phase: "ended" | "live" | "waiting"; showLiveBadge: boolean }): VerticalBadge {
   if (input.kind === "replay") {
     return { badge: "replay", elapsed: false, showCount: false };
@@ -298,12 +343,12 @@ export function drawerTabFor(input: { current: "chat" | "enquetes" | "perguntas"
  * O card aberto pela pilula da Oferta
  * ---------------------------------------------------------------------------------------------- */
 
-/** A folga entre o card aberto e o topo (Minimizar e Sair) e o minimo de altura que ainda mostra o botao. */
+/** A folga entre o card aberto e o topo (o Sair) e o minimo de altura que ainda mostra o botao. */
 export const OFFER_PILL_PANEL = { gapPx: 12, minPx: 160 } as const;
 
 /**
  * A altura maxima do card aberto pela pilula (sala vertical): do topo da pilula ate logo abaixo da barra do topo
- * (Minimizar e Sair), para o Fechar nunca sair da tela nem ficar debaixo do Sair num celular baixo (o card rola por
+ * (o Sair), para o Fechar nunca sair da tela nem ficar debaixo do Sair num celular baixo (o card rola por
  * dentro). Sem as medidas (servidor), nulo: vale o teto do CSS.
  */
 export function offerPillPanelMaxHeight(input: { gapPx?: number; panelMarginPx?: number; pillTop: number | null; topBarBottom: number | null }): number | null {

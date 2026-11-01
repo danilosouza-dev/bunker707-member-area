@@ -453,6 +453,8 @@ test("janela do chat: a linha mestre vem deslocada pela ancora (100 s na live = 
   );
   assert.equal(janela.body.data.messages[0].role, "student");
   assert.ok(!("source" in janela.body.data.messages[0]), "a origem fica so no banco");
+  // Na gravada, nenhuma hora gravada (docs/31 V2-9): a da linha mestre diria quando foi a live de origem.
+  assert.deepEqual(janela.body.data.messages.map((message) => message.sentAt), [null, null]);
 
   const desde = iso(Date.now() - 2000);
   const novas = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${encodeURIComponent(desde)}`), contexto()));
@@ -482,6 +484,7 @@ test("janela do chat na gravada: nunca passa da janela a frente do relogio do se
 
   const replay = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${REPLAY}&from=880000&to=920000`), contexto()));
   assert.deepEqual(replay.body.data.messages.map((message) => message.body), ["spoiler do minuto 15"], "no replay o aluno pula pelo video");
+  assert.equal(replay.body.data.messages[0].sentAt, null, "a linha mestre de 30 dias atras nao leva a data ao navegador");
   assert.deepEqual(replay.body.data.window, { fromMs: 880_000, toMs: 920_000 });
 });
 

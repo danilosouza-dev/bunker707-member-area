@@ -639,6 +639,13 @@ export type StudentChatMessage = {
   pinned: boolean;
   replyToId: string | null;
   role: ChatRole;
+  /**
+   * A hora do servidor em que a mensagem foi gravada (`created_at`), so na Live ao vivo: a hora embaixo do balao
+   * (docs/31 V2-9). O offset da live nao serve para isso: a mensagem da espera conta da hora marcada, o "Comecar para
+   * todos" muda o zero sem recalcular e so a ancora recalcula. Nula na gravada e no Replay: a linha mestre levaria ao
+   * navegador a data da live de origem (la a hora e a hora marcada mais o offset).
+   */
+  sentAt: string | null;
 };
 
 export type ScriptItem = {

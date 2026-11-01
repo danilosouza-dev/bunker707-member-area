@@ -286,7 +286,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
     questionId = question.id;
   }
 
-  return { events, message: toStudentMessage(chatMessageFromRow(row), userId), offsetMs, pending: !approved, questionId };
+  return { events, message: toStudentMessage(chatMessageFromRow(row), userId, session.kind), offsetMs, pending: !approved, questionId };
 }
 
 export type RemoveChatResult = { events: StudentEventInsert[]; removed: number };

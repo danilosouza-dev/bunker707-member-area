@@ -126,7 +126,7 @@ test("sala vertical num celular baixo (375x548): o card da pilula tem teto e rol
   const maxHeight = offerPillPanelMaxHeight({ pillTop: 444, topBarBottom: 52 });
   assert.equal(maxHeight, 444 - 8 - 52 - OFFER_PILL_PANEL.gapPx);
   const panelTop = 444 - 8 - maxHeight;
-  assert.ok(panelTop >= 52, "o topo do card (e o Fechar) fica abaixo de Minimizar e Sair");
+  assert.ok(panelTop >= 52, "o topo do card (e o Fechar) fica abaixo do Sair");
   assert.ok(panelTop + 44 <= 548, "e dentro da viewport");
   assert.equal(offerPillPanelMaxHeight({ pillTop: null, topBarBottom: 52 }), null, "sem medida (servidor), vale o CSS");
   assert.equal(offerPillPanelMaxHeight({ pillTop: 120, topBarBottom: 52 }), OFFER_PILL_PANEL.minPx, "nunca menor que o minimo");

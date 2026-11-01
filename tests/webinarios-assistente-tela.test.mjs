@@ -5,8 +5,9 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // O Assistente e o Atendimento desenhados (docs/30 §1.3, §1.6, §2.2, §2.4, §6.6, §9 e D24; docs/18 §2.2), no Node com
-// react-dom/server e as Server Actions como dubles: no chat da sala, o selo Assistente (e o "Assistente:" do leitor de
-// tela) e "Falar com a equipe" so na resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
+// react-dom/server e as Server Actions como dubles: no chat da sala, o papel Assistente na linha de baixo do balao (e o
+// "Assistente, Assistente, 20:10:" do leitor de tela, antes do texto; docs/31 V2-9) e "Falar com a equipe" so na
+// resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
 // linha da dica (respondendo, limite, "@assistente", a equipe responde depois); o pronto do pedido; na aba Perguntas,
 // o selo na resposta do Assistente; o painel Atendimento do console (Atender / Pausar, Responder tudo e os avisos de
 // Assistente desligado, quem atende com as perguntas abertas, "Ninguem atendendo", a fila com origem, Pediu a equipe,
@@ -35,8 +36,10 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomChatPanel } = await import("../src/components/member/webinars/room/room-chat.tsx");
 const { RoomQuestionItem } = await import("../src/components/member/webinars/room/room-questions.tsx");
+const { RoomStageBadges } = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const { AssistantHandoff } = await import("../src/components/member/webinars/room/assistant/assistant-handoff.tsx");
 const { AssistantHint, assistantHintText } = await import("../src/components/member/webinars/room/assistant/assistant-hint.tsx");
+const { ownAssistantEnabled } = await import("../src/components/member/webinars/room/assistant/use-room-assistant.ts");
 const { AttendancePanel } = await import("../src/components/admin/v2/communication/webinars/assistant/attendance-panel.tsx");
 const { AssistantCardBody } = await import("../src/components/admin/v2/communication/webinars/assistant-card.tsx");
 const editorModel = await import("../src/components/admin/v2/communication/webinars/assistant/assistant-editor-model.ts");
@@ -54,7 +57,8 @@ const NOW = Date.parse("2026-11-05T23:10:00.000Z");
  * A sala do aluno
  * ---------------------------------------------------------------------------------------------- */
 
-const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
+// Na Live ao vivo, a hora embaixo do balao e a que o servidor gravou (sentAt): as 20:10 de Sao Paulo.
+const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: "2026-11-05T23:10:00.000Z", ...extra });
 
 function chat(props = {}) {
   return render(RoomChatPanel, {
@@ -78,19 +82,23 @@ function chat(props = {}) {
     readOnly: false,
     sessionId: "s1",
     slowUntilMs: null,
+    timeKind: "live",
     webinarId: "w1",
     ...props
   });
 }
 
-test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
+test("chat da sala: o papel Assistente (e 'Assistente, Assistente, 20:10:' para o leitor de tela, antes do texto) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
   const markup = chat();
   const bloco = (id) => markup.slice(markup.indexOf(`data-room-message="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-room-message="${id}"`)));
-  assert.match(textOf(bloco("a-minha")), /Assistente: Assistente Assistente Custa R\$ 997\./, "o prefixo do leitor de tela, o nome e o selo");
+  // No estilo do Zoom (docs/31 V2-9): o leitor de tela ouve o autor, o papel e a hora antes do texto; a linha
+  // "Assistente · Assistente · 20:10" embaixo do balao e so para quem ve; o "Falar com a equipe" vem depois dela, no li.
+  assert.match(textOf(bloco("a-minha")), /Assistente, Assistente, 20:10: Custa R\$ 997\. Assistente · Assistente · 20:10 Falar com a equipe/, "o prefixo do leitor de tela, o texto, a linha de baixo e o pedido");
+  assert.match(bloco("a-minha"), /data-room-message-meta=""><span aria-hidden="true"/);
   assert.match(bloco("a-minha"), /data-testid="assistant-handoff"/);
   assert.match(textOf(bloco("a-minha")), new RegExp(COPY.aluno.falarComAEquipe));
   assert.doesNotMatch(bloco("a-outro"), /assistant-handoff/, "a resposta a outro aluno nao tem o botao");
-  assert.match(textOf(bloco("a-outro")), /Assistente/, "mas leva o selo");
+  assert.match(textOf(bloco("a-outro")), /Assistente, Assistente, 20:10: Tem bonus\./, "mas leva o papel");
   assert.doesNotMatch(bloco("t-1"), /assistant-handoff/);
   assert.equal(count(markup, /data-testid="assistant-handoff"/g), 1);
 
@@ -100,8 +108,47 @@ test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 
   assert.doesNotMatch(verComo, /data-testid="assistant-hint"/);
 
   const semIds = chat({ sessionId: null, webinarId: null });
-  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o selo)");
+  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o papel)");
   assert.match(textOf(semIds), /Assistente/);
+});
+
+test("o Assistente lido pela sala (docs/31 V2-4): o chat usa o estado que a sala passa, sem ler de novo; sem ele, o painel le sozinho como antes", () => {
+  // O servidor nao roda efeitos: sem a prop, o estado do proprio painel e o desligado ate a primeira leitura no navegador.
+  const sozinho = chat();
+  assert.doesNotMatch(sozinho, /data-assistant-hint="call"/, "sem a prop, nada lido ainda");
+  // Com o estado da sala (ligado, ninguem atendendo), a dica "@assistente" aparece ja na primeira pintura: o painel usa
+  // o estado recebido, e a leitura dele fica desligada (enabled false), sem um segundo pedido por minuto.
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  const comSala = chat({ assistant: daSala });
+  assert.match(comSala, /data-assistant-hint="call"/);
+  assert.match(textOf(comSala), new RegExp(COPY.aluno.chamarAssistente.replace(/[.@]/g, "\\$&")));
+  assert.equal(count(comSala, /data-testid="assistant-handoff"/g), 1, "o Falar com a equipe continua na resposta a mim");
+  // Desligado na sala: nada de dica, mesmo com o painel podendo ler.
+  assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } } }), /data-assistant-hint="call"/);
+});
+
+test("ownAssistantEnabled: o chat e a aba Perguntas so leem o Assistente sozinhos sem o estado da sala e fora do so leitura (nada de um segundo pedido por minuto)", () => {
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  // Com o estado da sala (as duas salas passam o dela, docs/31 V2-4): a leitura propria desligada, em qualquer caso.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: daSala }), false, "o chat com a sala");
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: daSala }), false, "a aba Perguntas com a sala");
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: { ...daSala, state: { ...daSala.state, enabled: false } } }), false, "o Assistente desligado na sala tambem conta como estado");
+  // Sem a sala (o chat solto, os paineis antigos): o painel le, menos no so leitura e com a aba desligada.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: null }), true);
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: true, shared: undefined }), false, "no 'ver como', nada lido");
+  assert.equal(ownAssistantEnabled({ enabled: false, readOnly: false, shared: undefined }), false, "a aba Perguntas desligada");
+});
+
+test("o selo Assistente no palco (docs/31 V2-4): aparece com o Assistente ligado, embaixo a direita antes da coluna de miniaturas, so a partir de lg; some sem ele", () => {
+  const ligado = render(RoomStageBadges, { assistantOn: true, presenterName: null, recording: false, topLeft: null });
+  const selo = ligado.match(/<span [^>]*data-room-badge="assistant">[\s\S]*?<\/span>/)?.[0] ?? "";
+  assert.match(selo, /lucide-sparkles/);
+  assert.match(textOf(selo), /^Assistente$/);
+  assert.match(selo, /class="[^"]*\bbottom-4 right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*\bhidden lg:inline-flex"/, "antes da coluna e so no computador (no celular o canto e do Modo cinema)");
+  assert.match(selo, /bg-room-on-video-bg[^"]*text-room-on-video-fg/, "os tokens de cima do video (a pilula branca no claro)");
+  assert.equal(render(RoomStageBadges, { assistantOn: false, presenterName: null, recording: false, topLeft: null }), "", "desligado (e sem mais nada), nenhum selo");
 });
 
 test("a linha do Assistente: respondendo, limite, a dica @assistente e a equipe responde depois; nada sem o que dizer", () => {
