@@ -758,6 +758,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
               panes={{
                 chat: (
                   <ConsoleChat
+                    askedMessageIds={snapshot.askedMessageIds}
                     busyKey={busyKey}
                     canAct={canAct}
                     currentUserId={currentUserId}
@@ -767,7 +768,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                     onEditAssistant={(messageId: string, body: string) =>
                       run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
                     }
-                    onModerate={(action: ModerationAction, messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
+                    onModerate={(action: ModerationAction, messageId: string) => run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
                     onRetranslate={
                       translationEnabled
                         ? (messageId: string) =>
@@ -781,7 +782,6 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                     onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }), () => adminToast.success(WEBINAR_ADMIN_COPY.toasts.messageSent))}
                     personMenu={live ? chatPersonMenu : null}
                     pinnedMessageId={snapshot.pinnedMessageId}
-                    questions={snapshot.questions}
                     session={session}
                   />
                 ),

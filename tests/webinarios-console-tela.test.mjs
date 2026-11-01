@@ -134,6 +134,7 @@ registerHooks({
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { SessionConsole } = await import("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx");
+const { ConsoleChat } = await import("../src/components/admin/v2/communication/webinars/session-console/console-chat.tsx");
 
 const html = (element) => renderToStaticMarkup(element);
 const textOf = (markup) =>
@@ -219,6 +220,7 @@ const question = (extra = {}) => ({ anonymous: false, answerText: null, answered
 
 function snapshot(extra = {}) {
   return {
+    askedMessageIds: [],
     messages,
     pinnedMessageId: "m-equipe",
     polls: {
@@ -345,9 +347,11 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
 
   // A lista: o <ol role=log> com o nome Chat, so com as liberadas, cada uma no balao.
   assert.match(chat, /<ol aria-label="Chat"[^>]*data-console-chat=""[^>]*role="log"/);
+  // Sem leitura automatica: quem modera le a lista, e cada mensagem nova chegaria lida junto com os botoes dela.
+  assert.match(chat, /<ol aria-label="Chat" aria-live="off"[^>]*role="log"/);
   const log = chat.slice(chat.indexOf('role="log"'));
   assert.deepEqual(Array.from(log.matchAll(/data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-sem-aceite", "m-equipe", "m-roteiro"]);
-  const logClasses = chat.match(/<ol aria-label="Chat" class="([^"]*)"/)?.[1].split(" ") ?? [];
+  const logClasses = chat.match(/<ol aria-label="Chat" aria-live="off" class="([^"]*)"/)?.[1].split(" ") ?? [];
   assert.ok(logClasses.includes("lg:flex-1") && logClasses.includes("lg:min-h-0") && logClasses.includes("overflow-y-auto"), "a partir de lg a lista enche a aba e rola por dentro");
   assert.ok(logClasses.includes("max-lg:max-h-[60vh]") && !logClasses.includes("max-h-[60vh]"), "o teto de 60vh so abaixo de lg, com a pagina rolando");
   assert.match(pane(markup, "tab", "chat"), /^<div[^>]*class="[^"]*\blg:flex-1\b[^"]*"[^>]*data-console-tab="chat"/, "a aba do Chat enche o corpo do painel");
@@ -359,11 +363,15 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
 
 test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha a direita com Você, a origem so para a equipe, Fixada e Nas próximas turmas (fora da live); na live a hora gravada e sem o selo das proximas turmas", () => {
   const mestre = message({ authorUserId: "u-bruna", body: "Da turma passada", displayName: "Bruna S.", id: "m-mestre", master: true, source: "original" });
-  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, mestre] }), webinar });
+  const personaHost = message({ authorUserId: null, body: "Sou do roteiro", displayName: "Rafa", id: "m-roteiro-host", role: "host", scriptItemId: "i-b", source: "scripted" });
+  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, mestre, personaHost] }), webinar });
   const chat = pane(markup, "tab", "chat");
 
   assert.equal(chatMeta(chatItem(chat, "m-sem-aceite")), "Aluno 231 · 20:01", "o aluno sem papel; a hora marcada mais o offset");
   assert.equal(chatMeta(chatItem(chat, "m-roteiro")), "Duda · Roteiro · 20:01", "a origem do roteiro, so para a equipe");
+  // Papel ou origem: a persona do roteiro com o papel de quem apresenta diz so Roteiro, na linha e no leitor de tela.
+  assert.equal(chatMeta(chatItem(chat, "m-roteiro-host")), "Rafa · Roteiro · 20:01");
+  assert.match(chatItem(chat, "m-roteiro-host"), /<span class="sr-only">Rafa, Roteiro, 20:01: <\/span>Sou do roteiro/);
   assert.equal(chatMeta(chatItem(chat, "m-mestre")), "Bruna S. · Chat original · 20:01 · Nas próximas turmas");
   // A minha (o autor e quem esta no console): a direita, "Você · papel · hora", e a fixada diz Fixada.
   const minha = chatItem(chat, "m-equipe");
@@ -391,7 +399,8 @@ test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha 
 test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar ou Desafixar, Virar pergunta, Apagar) em botoes de 24 px que aparecem com o mouse ou o foco e sempre no toque; o ⋯ com Aprovar para as próximas turmas (sem aceite, o porque); a caixa com o Enviar redondo", () => {
   const promovivel = message({ authorUserId: "u-caio", body: "Com aceite", displayName: "Caio R.", id: "m-com-aceite" });
   const virou = message({ authorUserId: "u-dani", body: "Ja perguntou", displayName: "Dani P.", id: "m-virou" });
-  const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, promovivel, virou], questions: [question({ id: "q-virou", messageId: "m-virou" })] }), webinar });
+  // A que ja virou pergunta vem no askedMessageIds do retrato (apagada ou nao, sem o teto da lista das perguntas).
+  const markup = render({ sessions, snapshot: snapshot({ askedMessageIds: ["m-virou"], messages: [...messages, promovivel, virou], questions: [] }), webinar });
   const chat = pane(markup, "tab", "chat");
   const linha = (id) => {
     const item = chatItem(chat, id);
@@ -408,6 +417,10 @@ test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar o
   // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno) e sem o ⋯ (nada para eles la).
   assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T."]);
   assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda"]);
+  // Cada botao da linha e do card e um ponto de volta do foco (a posicao entre os do item): o ⋯ e o ultimo.
+  const marcados = (block) => Array.from(block.matchAll(/<button(?=[^>]*data-console-action="")[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
+  assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
+  assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
 
   // Os botoes da linha: 24 px de altura no minimo. Com o mouse, as acoes ficam escondidas (sem lugar na linha) e aparecem
   // com o mouse, o foco ou o ⋯ aberto, no canto do item (a minha, a esquerda); na tela de toque, sempre na linha.
@@ -512,6 +525,35 @@ test("fase 4c: o painel Atendimento entra no console (le pela propria acao) e a 
 
   const ended = textOf(render({ sessions, snapshot: snapshot({ messages: [ai], session: sessions[2] }), webinar }));
   assert.doesNotMatch(ended, /Corrigir resposta/, "sessao encerrada: so leitura");
+});
+
+test("Corrigir resposta aberto (docs/31 V2-15): as acoes da linha saem do item em edicao (presas ao fim dele, cobririam o Cancelar e o Salvar correção) e o campo recebe o foco; as outras mensagens continuam com as delas", () => {
+  const ai = message({ authorUserId: null, body: "Custa R$ 997.", displayName: "Assistente", id: "m-ia", kind: "answer", promotable: false, replyToId: "m-ana", role: "ai", source: "ai" });
+  const props = {
+    askedMessageIds: [],
+    busyKey: null,
+    canAct: true,
+    currentUserId: "u-host",
+    hostUserId: "u-host",
+    messages: [...messages, ai],
+    onChatMode() {},
+    onEditAssistant: async () => true,
+    onModerate() {},
+    onSend: async () => true,
+    pinnedMessageId: null,
+    session: session()
+  };
+  const fechado = html(createElement(ConsoleChat, props));
+  assert.match(chatItem(fechado, "m-ia"), /data-console-message-actions=""/, "sem a correcao, as acoes na linha");
+  assert.doesNotMatch(fechado, /data-console-edit=/);
+
+  const aberto = html(createElement(ConsoleChat, { ...props, initialEditing: { body: "Custa R$ 997 à vista.", id: "m-ia" } }));
+  const item = chatItem(aberto, "m-ia");
+  assert.match(item, /data-console-edit="m-ia"/, "a correcao embaixo do balao");
+  assert.match(item, /<textarea(?=[^>]*autofocus="")(?=[^>]*id="console-edit-m-ia")[^>]*>Custa R\$ 997 à vista\.<\/textarea>/, "o campo com o foco (o ⋯ de onde a correcao abriu sai da tela)");
+  assert.deepEqual(Array.from(item.matchAll(/<button[^>]*>([^<]+)<\/button>/g)).map((match) => match[1]), ["Cancelar", "Salvar correção"], "so os botoes da correcao no item");
+  assert.doesNotMatch(item, /data-console-message-actions|aria-label="(?:Fixar|Apagar|Mais ações da mensagem de Assistente)/, "sem as acoes da linha por cima do Salvar correção");
+  assert.match(chatItem(aberto, "m-sem-aceite"), /data-console-message-actions=""/, "as outras mensagens com as acoes delas");
 });
 
 test("paginas e rota: a pagina do console com as guardas e a migracao pendente; a rota de 5 s so com messaging.write e sem cache; as acoes com a permissao de §2.6", () => {

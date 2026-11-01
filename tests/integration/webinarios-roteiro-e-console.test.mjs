@@ -397,6 +397,8 @@ test("10. Virar pergunta (docs/31 V2-15): a pendente comum do aluno e liberada e
   assert.equal(virou.message.approved, true);
   const perguntas = async () => unwrap(await db.from("webinar_questions").select("body, message_id, offset_ms, session_id, status, user_id").eq("message_id", pendente.id), "Lendo a pergunta da mensagem");
   assert.deepEqual(await perguntas(), [{ body: "Dá para ligar no WhatsApp?", message_id: pendente.id, offset_ms: 90_000, session_id: SESSAO, status: "open", user_id: aluno.id }]);
+  // O retrato do console marca a mensagem que virou pergunta (o Virar pergunta sai da linha), pela tabela das perguntas.
+  assert.ok((await consoleQueries.getConsoleSnapshot(webinarId, SESSAO)).askedMessageIds.includes(pendente.id));
   ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
   assert.equal((await perguntas()).length, 1, "de novo nao duplica");
   const historico = unwrap(await db.from("student_events").select("event_type").eq("user_id", aluno.id).eq("event_type", "webinar_question_sent"), "Lendo o historico do aluno");

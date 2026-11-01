@@ -154,6 +154,42 @@ test("Virar pergunta (docs/31 V2-15): so a mensagem comum de um aluno da turma, 
   assert.equal(question({ authorUserId: null, scriptItemId: "i1", source: "scripted" }), false, "o roteiro");
   assert.equal(question({ authorUserId: null, kind: "answer", role: "ai", source: "ai" }), false, "o Assistente");
   assert.equal(question({ master: true, source: "original" }), false, "a linha mestre de outra turma");
+
+  // O console confere na tabela das perguntas so as que podem virar pergunta (o askedMessageIds do retrato), sem repetir.
+  assert.equal(console_.turnsIntoQuestion(message({})), true);
+  assert.equal(console_.turnsIntoQuestion(message({ kind: "question" })), false);
+  assert.deepEqual(
+    console_.askableMessageIds([
+      message({ id: "m-aluno" }),
+      message({ id: "m-pergunta", kind: "question" }),
+      message({ id: "m-equipe", role: "team", source: "team" }),
+      message({ authorUserId: null, id: "m-roteiro", source: "scripted" }),
+      message({ id: "m-sem-autor", authorUserId: null }),
+      message({ approved: false, id: "m-pendente" }),
+      message({ id: "m-aluno" })
+    ]),
+    ["m-aluno", "m-pendente"]
+  );
+  assert.deepEqual(console_.askableMessageIds([]), []);
+});
+
+test("o foco depois de uma acao do chat do console (WCAG 2.4.3): o item que ficou, o botao da mesma posicao; o que saiu, o item que tomou o lugar dele; a parte vazia, o cabecalho ou a caixa", () => {
+  const now = { log: ["l1", "l2", "l3"], pending: ["p1", "p3"] };
+  // A acao falhou ou o item ficou (Fixar vira Desafixar; o Virar pergunta saiu e o Apagar tomou a posicao dele).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l2", index: 1, position: 1 }, now), { area: "log", id: "l2", position: 1 });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p1", index: 0, position: 2 }, now), { area: "queue", id: "p1", position: 2 });
+  // O Liberar ou o Recusar tirou o card do meio: o seguinte, que ficou no lugar dele, no primeiro botao (o Liberar).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p2", index: 1, position: 0 }, now), { area: "queue", id: "p3", position: 0 });
+  // O ultimo saiu: o anterior. O liberado vai para a lista, mas o foco continua na fila (moderar em sequencia).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p4", index: 2, position: 1 }, now), { area: "queue", id: "p3", position: 0 });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "l1", index: 0, position: 0 }, { log: ["l1"], pending: ["p1"] }), { area: "queue", id: "p1", position: 0 });
+  // O Apagar tirou o balao: o seguinte da lista.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l0", index: 0, position: 2 }, now), { area: "log", id: "l1", position: 0 });
+  // A fila esvaziou: o cabecalho; a lista esvaziou: a caixa da equipe.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p1", index: 0, position: 0 }, { log: ["l1", "p1"], pending: [] }), { area: "header" });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l1", index: 0, position: 0 }, { log: [], pending: ["p1"] }), { area: "composer" });
+  // Sem a posicao do item (nao achado na hora do clique), o primeiro.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "lx", index: -1, position: 0 }, now), { area: "log", id: "l1", position: 0 });
 });
 
 test("o chat do console em duas partes: as pendentes saem da lista, da mais velha para a mais nova (sem hora, depois, na ordem); a lista so com as liberadas, na ordem do retrato", () => {
@@ -173,7 +209,7 @@ test("o chat do console em duas partes: as pendentes saem da lista, da mais velh
   assert.deepEqual(console_.consoleChatQueue([]), { log: [], pending: [] });
 });
 
-test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela hora gravada, a da gravada pela hora marcada mais o offset, nenhuma no Replay; o papel como a sala e a origem so para a equipe", () => {
+test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela hora gravada, a da gravada pela hora marcada mais o offset, nenhuma no Replay; o papel ou a origem, que so a equipe ve", () => {
   // T0 e 20:00 em Sao Paulo; a mensagem foi gravada as 20:42 e esta no minuto 1 do video.
   const message = (extra) => ({ createdAt: new Date(T0 + 42 * MIN).toISOString(), offsetMs: MIN, role: "student", source: "audience", ...extra });
   const meta = (kind, extra) => console_.consoleMessageMeta({ kind, message: message(extra), scheduledAt: new Date(T0).toISOString() });
@@ -187,9 +223,11 @@ test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela h
   assert.equal(meta("live", { role: "team", source: "team" }).role, "Equipe");
   assert.equal(meta("live", { role: "ai", source: "ai" }).role, "Assistente");
   assert.equal(meta("live", { role: "guest" }).role, null, "o convidado sem papel, como na sala");
-  // A origem: o roteiro (com o papel da persona) e o chat original de outra turma; a turma de hoje e a equipe, nenhuma.
+  // A origem: o roteiro e o chat original de outra turma; a turma de hoje e a equipe, nenhuma.
   assert.deepEqual(meta("simulated", { source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
-  assert.deepEqual(meta("simulated", { role: "team", source: "scripted" }), { origin: "Roteiro", role: "Equipe", time: "20:01" });
+  // "Papel ou origem": com a origem, o papel fica de fora (a persona do roteiro com o papel de quem apresenta diz Roteiro).
+  assert.deepEqual(meta("simulated", { role: "team", source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
+  assert.deepEqual(meta("simulated", { role: "host", source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
   assert.equal(meta("simulated", { source: "original" }).origin, "Chat original");
   assert.equal(meta("simulated", { role: "team", source: "team" }).origin, null);
 });

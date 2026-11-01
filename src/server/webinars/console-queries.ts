@@ -14,7 +14,7 @@ import "server-only";
 
 import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
 import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
-import { consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
+import { askableMessageIds, consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
 import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
 import { sessionRecordingOf, sessionVideoDurationMs } from "./export-queries";
@@ -119,6 +119,21 @@ async function inChunks<T>(ids: readonly string[], read: (chunk: string[]) => Pr
   }
 
   return rows;
+}
+
+/**
+ * As mensagens do retrato que ja viraram pergunta (docs/31 V2-15): a pergunta com o `message_id` delas nesta sessao,
+ * apagada ou nao (o moderateMessage confere do mesmo jeito, pelo fetchQuestionRowByMessage) e sem o teto da lista das
+ * perguntas. So os ids, pelo indice da sessao, em pedacos (o `in` vai na URL).
+ */
+async function loadAskedMessageIds(db: WebinarsDb, sessionId: string, messageIds: readonly string[]): Promise<string[]> {
+  const rows = await inChunks(messageIds, async (chunk) => {
+    const { data, error } = await db.from("webinar_questions").select("message_id").eq("session_id", sessionId).in("message_id", chunk);
+    assertNoDbError(error, "Webinarios: mensagens que viraram pergunta");
+    return (data ?? []) as { message_id: string | null }[];
+  });
+
+  return Array.from(new Set(rows.map((row) => row.message_id).filter((id): id is string => Boolean(id))));
 }
 
 /** Quem ainda tem o aceite do chat valendo (uma linha sem revoked_at), para o "Aprovar para as proximas turmas". */
@@ -429,17 +444,21 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   ]);
   const authors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
   const audienceAuthors = chatRows.filter((row) => row.source === "audience" && row.author_user_id).map((row) => row.author_user_id as string);
-  const [consented, live, presence] = await Promise.all([
+  const chatMessages = chatRows.map(chatMessageFromRow);
+  const askable = askableMessageIds(chatMessages);
+  const [consented, live, presence, askedMessageIds] = await Promise.all([
     authors.length > 0 ? loadConsentFlags(db, authors) : Promise.resolve(new Set<string>()),
     session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
-    loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs)
+    loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs),
+    askable.length > 0 ? loadAskedMessageIds(db, session.id, askable) : Promise.resolve([])
   ]);
-  const messages: ConsoleMessage[] = chatRows.map((row) => ({
-    ...chatMessageFromRow(row),
-    promotable: row.author_user_id !== null && consented.has(row.author_user_id)
+  const messages: ConsoleMessage[] = chatMessages.map((message) => ({
+    ...message,
+    promotable: message.authorUserId !== null && consented.has(message.authorUserId)
   }));
 
   return {
+    askedMessageIds,
     live,
     messages,
     pinnedMessageId: session.pinnedMessageId,

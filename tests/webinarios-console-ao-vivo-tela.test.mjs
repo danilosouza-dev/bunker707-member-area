@@ -237,6 +237,7 @@ const message = (extra = {}) => ({ approved: true, authorUserId: ANA, body: "Boa
 
 function snapshot(extra = {}) {
   return {
+    askedMessageIds: [],
     live: liveBlock(),
     messages: [message(), message({ authorUserId: HOST, body: "Bem-vindos", displayName: "Produtor T.", id: "m-equipe", role: "host", source: "team" })],
     pinnedMessageId: null,
