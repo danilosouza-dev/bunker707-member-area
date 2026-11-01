@@ -20,6 +20,9 @@ import { ROOM_FOCUS } from "./room-ui";
 // ficaria na opcao que some, caindo no body); o Tab, um toque fora, um clique no video (o foco que entra no iframe tira
 // o foco da pagina) e o foco que sai para outro controle da sala fecham. O menu abre por cima do palco (z-40, acima da
 // enquete do palco, z-30). As cores vem dos tokens do tema da sala (V2-11). Nenhuma frase escrita aqui.
+// No console do Apresentador (docs/31 V2-14, `forAll`), o mesmo menu e o "Palco para todos ▾": o botao diz o que o
+// video mostra para todos ("Palco para todos" ou "Grade para todos"; o seguir a visao, sempre ligado, leva o
+// setTileView dele a todos), e as opcoes continuam Palco e Grade.
 
 /** O menu da visao (o aria-controls do botao). */
 export const ROOM_VIEW_MENU_ID = "room-view-menu";
@@ -35,6 +38,8 @@ function viewName(view: RoomView): string {
 export type RoomViewMenuProps = {
   /** Fora da sala (antes de entrar, reconectando, o "ver como"): sem iframe, nada a mudar. */
   disabled: boolean;
+  /** O console do Apresentador: a escolha vale para todos (o botao diz "Palco para todos" ou "Grade para todos"). */
+  forAll?: boolean;
   onChoose: (view: RoomView) => void;
   /** Abrir (o botao, as setas no botao) ou fechar (a escolha, o Esc, o Tab, um toque fora, o clique no video). */
   onOpenChange: (open: boolean) => void;
@@ -44,13 +49,19 @@ export type RoomViewMenuProps = {
   shown: RoomView;
 };
 
-export function RoomViewMenu({ disabled, onChoose, onOpenChange, open, shown }: RoomViewMenuProps) {
+/** O nome do botao "para todos" do console: o que o video mostra para todos agora. */
+function forAllName(view: RoomView): string {
+  const copy = WEBINAR_COPY.consoleV2.visao;
+  return view === "grid" ? copy.gradeParaTodos : copy.palcoParaTodos;
+}
+
+export function RoomViewMenu({ disabled, forAll = false, onChoose, onOpenChange, open, shown }: RoomViewMenuProps) {
   const copy = WEBINAR_COPY.salaV2.visao;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuShown = open && !disabled;
   const Icon = VIEW_ICONS[shown];
-  const label = copy.atual(viewName(shown));
+  const label = forAll ? forAllName(shown) : copy.atual(viewName(shown));
   // O ultimo onOpenChange da sala (os ouvintes abaixo so mudam quando o menu abre ou fecha, para o foco nao voltar a
   // opcao marcada a cada pintura).
   const onOpenChangeRef = useRef(onOpenChange);
@@ -178,7 +189,7 @@ export function RoomViewMenu({ disabled, onChoose, onOpenChange, open, shown }: 
         type="button"
       >
         <Icon aria-hidden="true" className="size-[18px]" />
-        <span className="hidden xl:inline">{viewName(shown)}</span>
+        <span className="hidden xl:inline">{forAll ? label : viewName(shown)}</span>
         <ChevronDown aria-hidden="true" className="hidden size-3.5 xl:block" />
       </button>
       <div

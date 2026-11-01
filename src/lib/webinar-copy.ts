@@ -412,7 +412,6 @@ export const WEBINAR_COPY = {
     /** O card Configurações de quem apresenta (docs/30 §1.4): microfone, alto-falante e câmera desta sala. */
     configuracoes: "Configurações",
     configuracoesTexto: "Escolha o microfone, o alto-falante e a câmera que você usa nesta sala.",
-    configuracoesDesfocar: "Ligue a câmera na barra do vídeo para desfocar o fundo.",
     confirmar: "Confirmar",
     convidarPalco: "Convidar ao palco",
     desfazerBanimento: "Desfazer banimento",

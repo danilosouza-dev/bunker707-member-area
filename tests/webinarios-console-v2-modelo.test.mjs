@@ -265,3 +265,113 @@ test("consoleStageTopLeft: no ar com o inicio, \"Ao vivo · 00:42:10\" pelo relo
   assert.equal(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: { ...base, status: "cancelled" }, skewMs: 0 }), null, "cancelada");
   assert.equal(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: { ...agendada, scheduledAt: "2026-11-05T23:00:00.000Z", status: "waiting" }, skewMs: 0 }), null, "na espera depois da hora, sem o inicio");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * G6 (V2-14): a barra de quem apresenta, o iframe do console, o Compartilhar tela pelo navegador e o ⋮ da miniatura
+ * ---------------------------------------------------------------------------------------------- */
+
+const embed = await import("../src/lib/jitsi-room-config.ts");
+const live = await import("../src/server/webinars/live-console-model.ts");
+
+const barra = (extra = {}) => v2.consoleBarItemsFor({ controls: { admit: true }, knocking: 2, lobbyNotice: null, meetConfigured: true, role: "host", screenShare: "ours", ...extra });
+
+test("consoleBarItemsFor: o Apresentador [Sala de espera | Microfone, Câmera, Compartilhar tela, Gravar | visao, Configurações, painel]; o co-apresentador sem Gravar; a Equipe so a visao e o painel", () => {
+  const host = barra();
+  assert.deepEqual([host.left, host.center, host.right], [["lobby"], ["mic", "camera", "share", "record"], ["view", "settings", "panel"]]);
+  assert.deepEqual(host.lobby, { count: 2, kind: "knocking" });
+  const coHost = barra({ role: "co_host" });
+  assert.deepEqual([coHost.left, coHost.center, coHost.right], [["lobby"], ["mic", "camera", "share"], ["view", "settings", "panel"]]);
+  // A Equipe nao admite (controls.admit falso) nem tem midia no console.
+  const equipe = barra({ controls: { admit: false }, knocking: 0, role: "team" });
+  assert.deepEqual([equipe.left, equipe.center, equipe.right, equipe.lobby], [[], [], ["view", "panel"], null]);
+});
+
+test("consoleBarItemsFor: sem ninguem batendo, a frase da sala numa pilula quieta ou a zona vazia; quem bate sem poder admitir ve so a frase; sem a sala no ambiente, sem Configurações; o Compartilhar tela so com o nosso circulo valendo", () => {
+  const frase = WEBINAR_COPY.consoleAoVivo.sessaoDePratica;
+  assert.deepEqual(barra({ knocking: 0, lobbyNotice: frase }).lobby, { kind: "notice", text: frase });
+  assert.deepEqual(barra({ knocking: 0, lobbyNotice: frase }).left, ["lobby"]);
+  const vazia = barra({ knocking: 0 });
+  assert.deepEqual([vazia.left, vazia.lobby], [[], null], "sem nada, a zona fica vazia");
+  assert.deepEqual(barra({ controls: { admit: false }, lobbyNotice: frase, role: "team" }).lobby, { kind: "notice", text: frase }, "a Equipe ve a frase, sem o Admitir todos");
+  assert.deepEqual(barra({ knocking: Number.NaN }).lobby, null, "contagem estragada vira ninguem");
+  assert.deepEqual(barra({ meetConfigured: false }).right, ["view", "panel"]);
+  assert.deepEqual(barra({ screenShare: "engine" }).center, ["mic", "camera", "record"], "o botao de tela do motor fica no video (V2-A39)");
+  assert.deepEqual(barra({ role: "co_host", screenShare: "engine" }).center, ["mic", "camera"]);
+});
+
+test("consoleScreenShareMode: o nosso Compartilhar tela so nos navegadores com Chromium; Firefox, Safari e todo navegador do iPhone e do iPad ficam com o botao do motor (V2-A39, ate o spike da tela)", () => {
+  const chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  const edge = `${chrome} Edg/131.0.0.0`;
+  const opera = `${chrome} OPR/116.0.0.0`;
+  const chromium = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chromium/131.0.0.0 Chrome/131.0.0.0 Safari/537.36";
+  for (const agent of [chrome, edge, opera, chromium]) {
+    assert.equal(embed.consoleScreenShareMode(agent), "ours", agent);
+  }
+  const firefox = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.7; rv:132.0) Gecko/20100101 Firefox/132.0";
+  const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
+  const chromeNoIphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1";
+  const firefoxNoIpad = "Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/132.0 Mobile/15E148 Safari/605.1.15";
+  for (const agent of [firefox, safari, chromeNoIphone, firefoxNoIpad, "", null, undefined]) {
+    assert.equal(embed.consoleScreenShareMode(agent), "engine", String(agent));
+  }
+});
+
+test("liveConfigOverwrite no console: host e co-apresentador sem a barra do motor (ou so com o botao de tela dele), sem toolbarConfig, sem atalhos e com o ⋮ da miniatura avisando o Liberar e o Remover; a superficie da sala e a Equipe como antes; o interfaceConfig igual nas duas", () => {
+  const settings = { allowStudentCamera: false, screenFps: 30, stage: 1080 };
+  for (const role of ["host", "co_host"]) {
+    const sala = embed.liveConfigOverwrite(role, settings);
+    const console = embed.liveConfigOverwrite(role, settings, { theme: "light" }, "console");
+    assert.deepEqual(console.toolbarButtons, [], role);
+    assert.ok(!("toolbarConfig" in console), `${role}: sem toolbarConfig`);
+    assert.equal(console.disableShortcuts, true, role);
+    assert.deepEqual(console.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }]);
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine").toolbarButtons, ["desktop"], `${role}: o botao de tela do motor`);
+    // So a barra, os atalhos e o ⋮ mudam: o resto e o da sala (o envio do palco, o mudo, o menu da miniatura).
+    const diferentes = Object.keys({ ...sala, ...console }).filter((key) => JSON.stringify(sala[key]) !== JSON.stringify(console[key]));
+    assert.deepEqual(diferentes.sort(), ["bunkerTheme", "disableShortcuts", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"], role);
+    // A pagina da sala com o papel de quem apresenta continua com a barra do motor.
+    assert.ok(sala.toolbarButtons.includes("desktop") && sala.toolbarButtons.includes("hangup"), `${role}: na sala, a barra do motor`);
+    assert.deepEqual(sala.toolbarConfig, { alwaysVisible: true });
+    assert.equal(sala.disableShortcuts, false);
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "room"), sala, "room e o padrao");
+  }
+  for (const role of ["student", "team"]) {
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), embed.liveConfigOverwrite(role, settings), `${role}: igual a sala`);
+  }
+  // O interfaceConfig e o mesmo nas duas superficies (so o papel e o visual): o dialogo de fundo do motor, que o
+  // Mais opções de fundo abre, continua so com os aparelhos.
+  for (const role of ["host", "co_host"]) {
+    assert.deepEqual(embed.liveInterfaceConfigOverwrite(role, { theme: "light" }).SETTINGS_SECTIONS, ["devices"], role);
+  }
+});
+
+test("menuKickPlan: o Remover do ⋮ da miniatura pelo nosso com o aluno ligado a linha; pelo motor sem ele e com o papel de participante; nada para a equipe ou quem modera; sem papel, tentar de novo", () => {
+  const person = { ban: { banned: false, kicked: false, muted: false, mutedUntil: null }, displayName: "Ana M.", joinedAt: null, participantId: "p-ana", staff: false, userId: "u-ana" };
+  assert.equal(live.menuKickPlan({ person, role: "participant", staff: false }), "ours");
+  assert.equal(live.menuKickPlan({ person, role: undefined, staff: false }), "ours", "com o aluno ligado, o papel nao importa");
+  assert.equal(live.menuKickPlan({ person: null, role: "participant", staff: false }), "engine");
+  assert.equal(live.menuKickPlan({ person: null, role: "none", staff: false }), "engine");
+  assert.equal(live.menuKickPlan({ person: null, role: "moderator", staff: false }), "staff");
+  assert.equal(live.menuKickPlan({ person: { ...person, staff: true }, role: "participant", staff: true }), "staff");
+  assert.equal(live.menuKickPlan({ person, role: "moderator", staff: false }), "staff", "quem modera a sala nunca sai pelo ⋮");
+  assert.equal(live.menuKickPlan({ person: null, role: undefined, staff: false }), "unknown");
+  assert.equal(live.menuKickPlan({ person: null, role: null, staff: false }), "unknown");
+});
+
+test("consoleRecordButton: o circulo Gravar pelo cartao Gravação; grava com a maquina pronta, para gravando, gira na fila e fica desligado com o motivo no resto; fora da sala nada liga", () => {
+  const copy = WEBINAR_COPY.consoleAoVivo;
+  const card = (action, extra = {}) => ({ action, label: "Pronto", note: null, ...extra });
+  const base = { canPublish: true, joined: true, open: true };
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record") }), { active: false, busy: false, enabled: true, title: copy.gravar });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("record"), joined: false }), { active: false, busy: false, enabled: false, title: copy.gravar });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, canPublish: false, card: card("record") }), { active: false, busy: false, enabled: false, title: copy.soQuemPublica });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording") }), { active: true, busy: false, enabled: true, title: copy.pararGravacao });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, canPublish: false, card: card("recording") }).enabled, true, "parar nao pede messaging.publish");
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("recording"), joined: false }), { active: true, busy: false, enabled: false, title: copy.pararGravacao });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("queued", { note: "Preparando a gravação, 4 min. A gravação começa sozinha." }) }), { active: false, busy: true, enabled: false, title: "Preparando a gravação, 4 min. A gravação começa sozinha." });
+  // O Preparar fica no cartao ate o painel com abas: o circulo diz o porque.
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("prepare", { note: copy.gravacaoNaoPreparada }) }), { active: false, busy: false, enabled: false, title: copy.gravacaoNaoPreparada });
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("none", { label: "Enviando para a Bunny" }) }).title, "Enviando para a Bunny", "sem frase, o rotulo da situacao");
+  assert.deepEqual(v2.consoleRecordButton({ ...base, card: card("none", { note: copy.gravacaoPronta }), open: false }), { active: false, busy: false, enabled: false, title: copy.recusas.notRecording }, "fora da espera e do ar, a frase de quando grava");
+  assert.equal(v2.consoleRecordButton({ ...base, card: card("release") }).enabled, false);
+});

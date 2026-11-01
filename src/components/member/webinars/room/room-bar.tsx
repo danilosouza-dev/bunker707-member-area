@@ -4,7 +4,7 @@ import { LoaderCircle, LogOut, MessageCircle } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import type { RoomBarItem } from "./room-layout-model";
+import type { ConsoleBarItem, RoomBarItem } from "./room-layout-model";
 import { ROOM_FOCUS, RoomButton } from "./room-ui";
 
 // A barra da sala do aluno (docs/31 V2-6 e V2-18), a mesma na Live ao vivo (live-controls.tsx), na gravada e no Replay
@@ -20,6 +20,8 @@ import { ROOM_FOCUS, RoomButton } from "./room-ui";
 // ele faz e o aria-expanded diz se o painel esta na tela (nunca aria-pressed com um nome que muda: "Esconder o chat,
 // pressionado" se leria como o contrario). As cores vem dos tokens do tema da sala (docs/31 V2-11): o circulo inativo em
 // --room-control, o ativo em --room-active-bg; o acento so no Sair.
+// A barra de quem apresenta no console (docs/31 V2-14, console-bar.tsx) usa a mesma casca, como navegacao (`as` "nav",
+// com o nome dela), e o mesmo balao, que la abre e fecha o painel do console (`controls` e `labels` dele).
 
 /** O painel do chat (o aside das duas salas): o balao da barra o controla. */
 export const ROOM_PANEL_ID = "room-panel";
@@ -39,14 +41,18 @@ export const ROOM_REACTIONS_POPOVER =
 export const ROOM_SETTINGS_POPOVER =
   "order-first mx-2 mt-2 flex min-h-0 flex-col overflow-hidden rounded-[14px] border border-room-border bg-room-surface lg:absolute lg:bottom-full lg:right-0 lg:z-40 lg:order-none lg:mx-0 lg:mb-3 lg:mt-0 lg:w-[380px] lg:rounded-[var(--member-cover-radius)] lg:shadow-[0_16px_40px_rgba(0,0,0,0.35)]";
 
-/** A barra: o grupo "Controles da sala" com as tres zonas. */
-export function RoomBar({ center, label, left, right }: { center: ReactNode; label: string; left: ReactNode; right: ReactNode }) {
+/**
+ * A barra: o grupo "Controles da sala" com as tres zonas; no console, `as` "nav" ("Controles de quem apresenta", o
+ * <nav> do prototipo), sem o papel de grupo.
+ */
+export function RoomBar({ as = "group", center, label, left, right }: { as?: "group" | "nav"; center: ReactNode; label: string; left: ReactNode; right: ReactNode }) {
+  const Shell = as === "nav" ? "nav" : "div";
   return (
-    <div
+    <Shell
       aria-label={label}
       className="mx-2 my-2 flex h-16 shrink-0 items-center justify-between gap-0.5 overflow-x-auto rounded-[14px] border border-room-border bg-room-surface px-1.5 [scrollbar-width:none] lg:mx-0 lg:my-0 lg:grid lg:h-[72px] lg:grid-cols-[minmax(max-content,1fr)_auto_minmax(max-content,1fr)] lg:gap-3 lg:overflow-visible lg:rounded-[var(--member-cover-radius)] lg:px-3 [&::-webkit-scrollbar]:hidden"
       data-room-bar=""
-      role="group"
+      role={as === "nav" ? undefined : "group"}
     >
       <div className="contents lg:flex lg:min-w-0 lg:items-center lg:justify-start" data-room-bar-zone="left">
         {left}
@@ -57,7 +63,7 @@ export function RoomBar({ center, label, left, right }: { center: ReactNode; lab
       <div className="contents lg:flex lg:min-w-0 lg:items-center lg:justify-end lg:gap-2" data-room-bar-zone="right">
         {right}
       </div>
-    </div>
+    </Shell>
   );
 }
 
@@ -77,8 +83,8 @@ export type RoomBarButtonProps = {
   /** O primeiro foco da sala (data-room-first-focus): o balao com o painel do chat fechado. */
   firstFocus?: boolean;
   icon: ComponentType<{ "aria-hidden"?: boolean | "true"; className?: string }>;
-  /** Qual botao da barra e (data-room-bar-item: os testes e a tela leem). */
-  item: RoomBarItem;
+  /** Qual botao da barra e (data-room-bar-item: os testes e a tela leem); no console, os da barra de quem apresenta. */
+  item: RoomBarItem | ConsoleBarItem;
   label: string;
   onClick: () => void;
   shortcut?: string;
@@ -137,14 +143,29 @@ export function RoomLeaveButton({ onLeave }: { onLeave: () => void }) {
  * circulo claro, so na tela) e se chama "Esconder o chat"; fechado, "Mostrar o chat" e, com mensagens novas de outras
  * pessoas desde que fechou, o contador vermelho no canto (o numero so na tela; o leitor de tela ouve "Mostrar o chat, 3
  * mensagens novas"). O estado vai em aria-expanded com o aria-controls do painel: o nome e a acao, o expanded e o
- * estado. Com o painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida).
+ * estado. Com o painel fechado e o primeiro foco da sala (`firstFocus`: a aba Chat esta escondida). No console, o painel
+ * dele (`controls`) e as frases dele (`labels`: "Esconder o painel" e "Mostrar o painel").
  */
-export function RoomPanelToggle({ firstFocus = false, onToggle, open, unread = 0 }: { firstFocus?: boolean; onToggle: () => void; open: boolean; unread?: number }) {
-  const copy = WEBINAR_COPY.salaV2.painel;
+export function RoomPanelToggle({
+  controls = ROOM_PANEL_ID,
+  firstFocus = false,
+  labels = WEBINAR_COPY.salaV2.painel,
+  onToggle,
+  open,
+  unread = 0
+}: {
+  controls?: string;
+  firstFocus?: boolean;
+  labels?: { esconder: string; mostrar: string; mostrarComNovas: (novas: string) => string };
+  onToggle: () => void;
+  open: boolean;
+  unread?: number;
+}) {
+  const copy = labels;
   const count = open ? 0 : Math.max(0, Math.floor(unread));
   const label = open ? copy.esconder : count > 0 ? copy.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(count)) : copy.mostrar;
   return (
-    <RoomBarButton active={open} controls={ROOM_PANEL_ID} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
+    <RoomBarButton active={open} controls={controls} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
       {count > 0 ? (
         <span
           aria-hidden="true"

@@ -32,5 +32,32 @@ export const CONSOLE_V2_COPY = {
     selo: (nome: string, papel: string) => `${nome} · ${papel}`,
     /** O papel do co-apresentador no proprio selo (uma frase so, sem feminino). */
     coApresentador: "Co-apresentador"
+  },
+
+  /* A barra de quem apresenta (V2-14), embaixo do palco. */
+  barra: {
+    /** O nome da barra (o <nav>). */
+    rotulo: "Controles de quem apresenta",
+    /** O circulo da propria tela (o nome do V2-6). */
+    compartilharTela: "Compartilhar tela",
+    /** A pilula da esquerda com quem bate na sala de espera: "Sala de espera · 2". */
+    salaDeEspera: (n: number) => `Sala de espera · ${n}`
+  },
+  /** O balao da direita da barra, que abre e fecha o painel do console. */
+  painel: {
+    esconder: "Esconder o painel",
+    mostrar: "Mostrar o painel",
+    mostrarComNovas: (novas: string) => `Mostrar o painel, ${novas}`
+  },
+  /** O "Palco para todos ▾" do Apresentador: o que o video mostra para todos agora (o seguir a visao leva a todos). */
+  visao: {
+    palcoParaTodos: "Palco para todos",
+    gradeParaTodos: "Grade para todos"
+  },
+  /** O Remover do ⋮ da miniatura do video (V2-A29), quando ele nao passa pelo nosso Remover. */
+  pessoas: {
+    removidoSemRegistro: "A pessoa saiu da sala, mas pode voltar: ela ainda não aparece na lista da sessão.",
+    equipeNaoSai: "Quem é da equipe não é removido da sala.",
+    tenteDeNovo: "Ainda não dá para remover esta pessoa. Tente de novo em alguns segundos."
   }
 } as const;

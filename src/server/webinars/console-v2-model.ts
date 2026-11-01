@@ -1,15 +1,18 @@
 // O console V2 de quem apresenta (docs/31 V2-12 a V2-15, fase 2 do redesign), a parte pura: o rotulo de cada sessao
 // no seletor do topo, o selo dos presentes com o pico, os botoes de situacao do topo pela espécie e pela situacao da
-// sessao e o palco da live (V2-4 e V2-A5): o selo do momento, o de quem esta no video grande e quem decide a coluna de
-// miniaturas. Sem React e com imports relativos: tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node.
+// sessao, o palco da live (V2-4 e V2-A5): o selo do momento, o de quem esta no video grande e quem decide a coluna de
+// miniaturas, e a barra de quem apresenta (V2-14): os botoes de cada papel e o circulo Gravar. Sem React e com imports
+// relativos: tests/webinarios-console-v2-modelo.test.mjs carrega direto pelo Node.
 // Cada fatia da fase 2 acrescenta aqui as regras da tela dela.
 
 import { liveElapsedLabel, liveOnAirLabel, stageOwnerId } from "../../components/member/webinars/room/live-room-model";
+import type { ConsoleBarItem } from "../../components/member/webinars/room/room-layout-model";
 import type { RoomStageTopLeft } from "../../components/member/webinars/room/room-stage-badges";
+import type { ConsoleScreenShareMode } from "../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarDayMonthTime } from "../../lib/webinar-time";
 import { canEndSession, canOpenSession, consoleClockLabel, consoleClockMs, consolePhaseOf, type ConsolePhase } from "./console-model";
-import { liveSessionButtons, type ConsoleRoomRole, type LiveRoomState } from "./live-console-model";
+import { liveSessionButtons, type ConsoleRoomRole, type LiveControls, type LiveRoomState, type RecorderCard } from "./live-console-model";
 import type { SessionKind, SessionStatus, WebinarSession } from "./model";
 
 const copy = WEBINAR_COPY.consoleV2;
@@ -174,4 +177,78 @@ export function consoleStageBadgeFor(input: {
  */
 export function consoleColumnPolicy(role: ConsoleRoomRole): "engine" | "width" {
   return role === "host" ? "engine" : "width";
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * G6 (V2-14): a barra de quem apresenta
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que a zona da esquerda da barra mostra: quem bate na sala de espera (com Admitir todos) ou a frase da sala. */
+export type ConsoleBarLobby = { count: number; kind: "knocking" } | { kind: "notice"; text: string };
+
+/** As tres zonas da barra de quem apresenta, na ordem da tela, e o que a Sala de espera mostra. */
+export type ConsoleBarItems = { center: ConsoleBarItem[]; left: ConsoleBarItem[]; lobby: ConsoleBarLobby | null; right: ConsoleBarItem[] };
+
+/**
+ * A barra de quem apresenta (V2-14), pelo papel do console na sala. A esquerda, a Sala de espera: "Sala de espera · 2"
+ * com Admitir todos quando alguem bate e o papel admite (controls.admit); sem ninguem batendo, a frase da sala
+ * (lobbyNotice: a Sessão de prática, a sala trancada, a Sala de espera ligada) numa pilula quieta; sem nada, a zona fica
+ * vazia. No centro, para o Apresentador: Microfone, Câmera, Compartilhar tela e Gravar; o co-apresentador sem Gravar; a
+ * Equipe sem midia (como antes do V2). O Compartilhar tela so com o nosso circulo valendo no navegador
+ * (consoleScreenShareMode "ours"; no outro, o botao de tela do proprio motor fica no video, V2-A39). A direita, a visao
+ * (para todos no Apresentador), Configurações (so quem apresenta, com a sala neste ambiente) e o painel. Mãos e Lançar
+ * enquete entram com o painel com abas.
+ */
+export function consoleBarItemsFor(input: {
+  controls: Pick<LiveControls, "admit">;
+  knocking: number;
+  lobbyNotice: string | null;
+  meetConfigured: boolean;
+  role: ConsoleRoomRole;
+  screenShare: ConsoleScreenShareMode;
+}): ConsoleBarItems {
+  const knocking = Number.isFinite(input.knocking) ? Math.max(0, Math.floor(input.knocking)) : 0;
+  const lobby: ConsoleBarLobby | null = input.controls.admit && knocking > 0 ? { count: knocking, kind: "knocking" } : input.lobbyNotice ? { kind: "notice", text: input.lobbyNotice } : null;
+  const presenter = input.role === "host" || input.role === "co_host";
+  const center: ConsoleBarItem[] = [];
+  if (presenter) {
+    center.push("mic", "camera");
+    if (input.screenShare === "ours") {
+      center.push("share");
+    }
+    if (input.role === "host") {
+      center.push("record");
+    }
+  }
+  const right: ConsoleBarItem[] = ["view"];
+  if (presenter && input.meetConfigured) {
+    right.push("settings");
+  }
+  right.push("panel");
+  return { center, left: lobby ? ["lobby"] : [], lobby, right };
+}
+
+/** O circulo Gravar da barra: ligado (gravando), girando (na fila), se o clique vale e o title, que diz o porque. */
+export type ConsoleRecordButton = { active: boolean; busy: boolean; enabled: boolean; title: string };
+
+/**
+ * O circulo Gravar da barra do Apresentador (V2-14), pelos estados do cartao Gravação (recorderCard): "record" grava
+ * (o mesmo pedido de antes, requestRecording e o startRecording do arquivo), "recording" fica ligado e o clique para,
+ * "queued" gira (o clique ja esta na fila e a gravacao comeca sozinha) e o resto fica desligado com o motivo no title
+ * (o "prepare" ate o painel com abas, quando o clique abre a Gravação; por enquanto o Preparar fica no cartao). Fora da
+ * sala nada liga; sem messaging.publish o "record" fica desligado com a frase de quem publica, e o "recording" para.
+ */
+export function consoleRecordButton(input: { canPublish: boolean; card: Pick<RecorderCard, "action" | "label" | "note">; joined: boolean; open: boolean }): ConsoleRecordButton {
+  const live = WEBINAR_COPY.consoleAoVivo;
+  const { card } = input;
+  switch (card.action) {
+    case "recording":
+      return { active: true, busy: false, enabled: input.joined, title: live.pararGravacao };
+    case "queued":
+      return { active: false, busy: true, enabled: false, title: card.note ?? live.gravarNaFila };
+    case "record":
+      return { active: false, busy: false, enabled: input.joined && input.canPublish, title: input.canPublish ? live.gravar : live.soQuemPublica };
+    default:
+      return { active: false, busy: false, enabled: false, title: input.open ? (card.note ?? card.label) : live.recusas.notRecording };
+  }
 }

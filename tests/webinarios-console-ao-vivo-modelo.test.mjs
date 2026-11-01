@@ -645,3 +645,37 @@ test("vigia da tela: o getRoomsInfo e pedido so por quem compartilha sem papel l
   assert.deepEqual(model.rolesToRead({ roles: {}, selfId: "p-eu", sharing: ["constructor"] }), ["constructor"], "nome de propriedade do objeto nao conta como papel lido");
   assert.equal(model.CONSOLE_ROOM_RULES.roomsInfoMs, 5_000, "no maximo uma vez a cada 5 s, como a sala do aluno");
 });
+
+test("reducer da sala: a equipe recolhe pelo moderationParticipantRejected (de outro console ou do motor): sem o microfone a pessoa sai de quem fala e do palco, sem a camera so do palco; a camera aprovada poe no palco", () => {
+  let state = { ...model.EMPTY_ROOM, selfId: "p-eu" };
+  state = model.liveRoomReducer(state, { id: "p-a", type: "release" });
+  state = model.liveRoomReducer(state, { id: "p-b", on: true, type: "stage" });
+  state = model.liveRoomReducer(state, { id: "p-b", type: "release" });
+  assert.deepEqual([state.speaking, state.stage], [["p-a", "p-b"], ["p-b"]]);
+
+  const semMicrofone = event(state, "moderationParticipantRejected", { id: "p-b", mediaType: "audio" });
+  assert.deepEqual([semMicrofone.speaking, semMicrofone.stage], [["p-a"], []], "o microfone recolhido tira de quem fala e do palco");
+  const semCamera = event(state, "moderationParticipantRejected", { id: "p-b", mediaType: "video" });
+  assert.deepEqual([semCamera.speaking, semCamera.stage], [["p-a", "p-b"], []], "a camera recolhida tira so do palco");
+  assert.deepEqual(event(state, "moderationParticipantRejected", { id: "p-a", mediaType: "audio" }).speaking, ["p-b"]);
+  assert.equal(event(state, "moderationParticipantRejected", { id: "p-x", mediaType: "audio" }), state, "quem nao estava em nada: nada muda");
+  assert.equal(event(state, "moderationParticipantRejected", { id: "p-a", mediaType: "desktop" }), state, "outro tipo: nada muda");
+  assert.equal(event(state, "moderationParticipantRejected", { mediaType: "audio" }), state, "sem id: nada muda");
+
+  // A camera aprovada (o Convidar ao palco de outro console): no palco, uma vez, e fora da fila de maos.
+  let comMao = event(state, "raiseHandUpdated", { handRaised: NOW, id: "p-c" });
+  comMao = event(comMao, "moderationParticipantApproved", { id: "p-c", mediaType: "video" });
+  assert.deepEqual([comMao.stage, comMao.hands], [["p-b", "p-c"], []]);
+  assert.deepEqual(event(comMao, "moderationParticipantApproved", { id: "p-c", mediaType: "video" }).stage, ["p-b", "p-c"], "a mesma pessoa nao entra duas vezes");
+  assert.deepEqual(event(comMao, "moderationParticipantApproved", { id: "p-c", mediaType: "video" }).speaking, ["p-a", "p-b"], "a camera nao libera o microfone");
+  assert.equal(event(state, "moderationParticipantApproved", { id: "p-eu", mediaType: "video" }), state, "o proprio console nunca entra na lista");
+});
+
+test("o ⋮ da miniatura do motor: so o Liberar e o Remover que o console pediu para avisar, com o id no formato do participante", () => {
+  assert.deepEqual(model.participantMenuClickOf({ key: "ask-unmute", participantId: "p-ana", preventExecution: true }), { key: "ask-unmute", participantId: "p-ana" });
+  assert.deepEqual(model.participantMenuClickOf({ key: "kick", participantId: "p-ana" }), { key: "kick", participantId: "p-ana" });
+  assert.equal(model.participantMenuClickOf({ key: "mute", participantId: "p-ana" }), null, "um item que o console nao pediu");
+  assert.equal(model.participantMenuClickOf({ key: "kick", participantId: "<b>" }), null, "id fora do formato");
+  assert.equal(model.participantMenuClickOf({ key: "kick" }), null);
+  assert.equal(model.participantMenuClickOf(null), null);
+});

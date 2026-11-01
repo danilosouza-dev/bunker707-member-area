@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
+import { useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
@@ -54,6 +54,7 @@ import { adminTextareaClass } from "../../../form";
 import { ConfirmDialog } from "../../../settings/kit";
 import { adminToast } from "../../../toast";
 import { ConsoleAttendance } from "./console-attendance";
+import { ConsoleBar } from "./console-bar";
 import { ConsoleChat } from "./console-chat";
 import { CONSOLE_PANEL_ID, consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
@@ -70,7 +71,7 @@ import { LiveControls } from "./live-controls";
 import { LiveHands } from "./live-hands";
 import { LivePersonMenu, LiveParticipants, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
-import { LiveLobbyNotice, LiveSettingsToggle, useLiveRoom } from "./live-room-panel";
+import { useLiveRoom } from "./live-room-panel";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
@@ -95,8 +96,11 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // (container={portalRef}). Na live, o palco (console-stage.tsx, docs/31 V2-4) leva o momento ("Ao vivo · 00:42:10"),
 // o Gravando, os presentes com o pico e quem esta no video grande, e o topo fica sem esses selos (os presentes voltam
 // ao topo so abaixo de sm, onde o palco nao os mostra); na gravada e no Replay (sem palco) o momento e os presentes
-// continuam no topo. Ate as proximas fatias, os controles de antes e o
-// botao Configurações ficam embaixo do palco e os cards de antes ficam empilhados no painel.
+// continuam no topo. Embaixo do palco, a barra de quem apresenta (console-bar.tsx, docs/31 V2-14): a Sala de espera,
+// Microfone, Câmera, Compartilhar tela, Gravar, a visao, Configurações e o balao do painel (aberto ou fechado,
+// guardado em chave propria); o ⋮ da miniatura do video manda o Remover do aluno ligado a linha para o nosso Remover
+// (onKickPerson). Ate o painel com abas, Silenciar todos, Fechar câmeras, Permitir câmeras e a fila da Sala de espera
+// ficam no topo do painel (LiveControls), e os cards de antes ficam empilhados nele.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -135,6 +139,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
   /** Onde as confirmacoes e os menus do console abrem: dentro da raiz, no tema (o ConsoleShell liga o ref ao div). */
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useConsoleTheme();
+  const [panelOpen, setPanelOpen] = useConsolePanelOpen();
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
   const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
   const session = snapshot?.session ?? null;
@@ -187,6 +192,8 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     nonce,
     onAnchor: markAnchor,
     onBrowserRecording,
+    // O Remover do ⋮ da miniatura do video com o aluno ligado a linha: o mesmo Remover da lista (o registro, depois o motor).
+    onKickPerson: (person, participantId) => onPersonAction(person, participantId, { type: "kick" }),
     session,
     webinar
   });
@@ -523,7 +530,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
     session && phase
       ? consoleTopActionsFor({ canPublish: permissions.canPublish, controls: room.controls, kind: session.kind, phase, status: session.status })
       : [];
-  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: true });
+  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen });
   const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
@@ -623,16 +630,25 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
                   stageRef={stageRef}
                   topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
                 />
-                <LiveLobbyNotice handle={room} live={live} session={session} />
                 <div className={skeleton.bar ?? ""} data-console-slot="bar">
-                  <div className="flex min-w-0 flex-col gap-4">
-                    <LiveControls handle={room} />
-                    <LiveSettingsToggle handle={room} />
-                  </div>
+                  <ConsoleBar
+                    busyKey={busyKey}
+                    canPublish={permissions.canPublish}
+                    handle={room}
+                    live={live}
+                    nowMs={nowMs}
+                    onRecord={recordNow}
+                    onStopRecording={stopRecording}
+                    onTogglePanel={() => setPanelOpen(!panelOpen)}
+                    panelOpen={panelOpen}
+                    session={session}
+                  />
                 </div>
               </div>
             ) : null}
             <div className={skeleton.panel} data-console-slot="panel" id={CONSOLE_PANEL_ID}>
+              {/* Ate o painel com abas (a aba Pessoas): as acoes de todos e a fila da Sala de espera no topo do painel. */}
+              {live ? <LiveControls handle={room} /> : null}
               <ConsoleChat
                 busyKey={busyKey}
                 canAct={canAct}

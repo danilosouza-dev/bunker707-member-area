@@ -1,15 +1,22 @@
 "use client";
 
-import { Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
-import { Button } from "@/components/ui/button";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import { onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
-import { CONSOLE_EXTRA_EVENTS, JITSI_LISTENED_EVENTS, liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type ConsoleListenedEvent, type LiveEmbedLook } from "@/lib/jitsi-room-config";
+import {
+  CONSOLE_EXTRA_EVENTS,
+  JITSI_LISTENED_EVENTS,
+  consoleScreenShareMode,
+  liveConfigOverwrite,
+  liveInterfaceConfigOverwrite,
+  tokenRefreshDelayMs,
+  type ConsoleListenedEvent,
+  type ConsoleScreenShareMode,
+  type LiveEmbedLook
+} from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { cn } from "@/lib/utils";
 import type { ConsoleWebinar } from "@/server/webinars/console-queries";
 import {
   CONSOLE_ROOM_RULES,
@@ -21,7 +28,8 @@ import {
   desiredLobby,
   liveControlsFor,
   liveRoomReducer,
-  lobbyNotice,
+  menuKickPlan,
+  participantMenuClickOf,
   presenterSetupCommands,
   recordingSignalMessage,
   rolesToRead,
@@ -31,6 +39,7 @@ import {
   shouldEnterRoom,
   shouldMarkAnchor,
   type ConsoleRoomRole,
+  type LiveConsolePerson,
   type LiveConsoleSnapshot,
   type LiveControls,
   type LiveRoomAction,
@@ -38,7 +47,7 @@ import {
 } from "@/server/webinars/live-console-model";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
-import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
+import { adminToast } from "../../../toast";
 
 // A sala da Live ao vivo no console (docs/30 §1.4, §2.4, §6.3, §6.4 e §8.1; fase 3): o hook useLiveRoom pede o token
 // (POST /api/webinars/[id]/join-token, o mesmo do aluno: o papel vem do servidor), monta o iframe pelo useJitsiMeet
@@ -53,10 +62,11 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // participante e sem liberacao (screenSharesToStop), uma vez por id ate ele parar. Nunca rejectParticipant nem
 // muteEveryone de tela: o primeiro recusaria o audio, o segundo pegaria o co-apresentador. Para o cliente padrao; um
 // cliente modificado que ignora o pedido de mudo continua mandando a tela (docs/31 §7).
-// Quem apresenta (host e co-apresentador) ganha o card Configurações (live-settings-card.tsx): os aparelhos pelo hook
-// useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do vídeo: setVideoQuality
-// mudaria o envio do palco) e o ruido, o fundo e o espelho como acoes sem estado (efeitosNoIframe: a barra do iframe
-// tambem os muda); a Equipe no console nao tem barra de midia (docs/30 §1.4, pendencia).
+// Quem apresenta (host e co-apresentador) ganha as Configurações da barra (console-bar.tsx, o LiveSettings da sala): os
+// aparelhos pelo hook useJitsiDevices, com as secoes de deviceSettingsFor do papel da sala (nunca a Qualidade do
+// vídeo: setVideoQuality mudaria o envio do palco) e o ruido, o fundo e o espelho como acoes sem estado
+// (efeitosNoIframe: o menu da propria miniatura, com o Inverter, e o dialogo de fundo do motor tambem os mudam); a
+// Equipe no console nao tem barra de midia (docs/30 §1.4, pendencia).
 // O tema do console (docs/31 V2-12) entra no iframe pelo `look` so na montagem, como na sala do aluno: o
 // configOverwrite e o interfaceConfigOverwrite mudam com ele, mas o useJitsiMeet nao remonta por isso.
 // O palco (docs/31 V2-4, V2-13 e V2-A5; console-stage.tsx) le daqui o que o motor mostra: o Palco ou a Grade
@@ -66,11 +76,18 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // vez, so quando o que o palco quer difere do que o motor mostra (consoleFilmstripShouldToggle), e o
 // filmstripDisplayChanged, a entrada e o iframe novo soltam o que esperava (consoleFilmstripPendingAfter), como na sala
 // do aluno.
-// Ate a barra de quem apresenta (G6), o botao Configurações fica provisorio ao lado dos controles embaixo do palco
-// (LiveSettingsToggle), com o card logo depois dele, e a frase da sala de espera fica entre o palco e os controles
-// (LiveLobbyNotice). Nenhum texto cita o motor da sala.
+// A barra de quem apresenta (docs/31 V2-14, console-bar.tsx) e nossa: o iframe do console monta com a superficie
+// "console" (liveConfigOverwrite: sem a barra do motor, sem os atalhos, o ⋮ da miniatura avisando o Liberar e o
+// Remover). Os estados vem do motor, nunca do clique: o microfone pelo audioMuteStatusChanged, a camera pelo
+// videoMuteStatusChanged, a propria tela pelo screenSharingStatusChanged (o seletor cancelado nao avisa) e o "Câmeras
+// livres" pelo moderationStatusChanged de video; na entrada, as leituras do IFrame API (isAudioMuted, isSharingScreen,
+// isModerationOn, getContentSharingParticipants), que sao Promise: cada uma so vale do iframe em que foi pedida e sem
+// saida da sala no meio (readFrame). O Compartilhar tela e o nosso circulo so nos navegadores com Chromium; nos outros,
+// o botao de tela do proprio motor (consoleScreenShareMode, lido uma vez no navegador; docs/31 V2-A39, ate o spike da
+// tela). O ⋮ da miniatura: o "Pedir para ligar o microfone" vira o nosso Liberar e o Remover segue menuKickPlan (o nosso
+// Remover com o aluno ligado a linha, o do motor sem ele e com papel de participante, nada para a equipe ou sem papel).
+// Nenhum texto cita o motor da sala.
 
-const copy = WEBINAR_COPY.consoleAoVivo;
 const ANCHOR_RETRIES = 3;
 const ANCHOR_RETRY_MS = 2_000;
 /** Os sinais do iframe do console: os da sala e os que so o console usa (quem compartilha a tela). */
@@ -115,18 +132,42 @@ function presents(role: ConsoleRoomRole): boolean {
   return role === "host" || role === "co_host";
 }
 
+/** O Compartilhar tela deste navegador (consoleScreenShareMode), lido uma vez; no servidor, o nosso circulo. */
+let screenShareModeRead: ConsoleScreenShareMode | null = null;
+
+function readScreenShareMode(): ConsoleScreenShareMode {
+  if (screenShareModeRead === null) {
+    try {
+      screenShareModeRead = consoleScreenShareMode(navigator.userAgent);
+    } catch {
+      screenShareModeRead = "engine";
+    }
+  }
+  return screenShareModeRead;
+}
+
+function serverScreenShareMode(): ConsoleScreenShareMode {
+  return "ours";
+}
+
+function mutedOf(payload: unknown): unknown {
+  return payload && typeof payload === "object" ? (payload as { muted?: unknown }).muted : undefined;
+}
+
 type TokenState = { error: "failed" | "meet_unconfigured" | null; reply: JoinTokenReply | null };
 
 export type LiveRoomHandle = {
+  /** O proprio microfone no ar (audioMuteStatusChanged e, na entrada, isAudioMuted), dentro da sala. */
+  audioOn: boolean;
   /** Os botoes de cada papel (live-console-model.liveControlsFor). */
   controls: LiveControls;
-  /** As cameras dos alunos estao liberadas (moderacao de video desligada). */
+  /** As cameras dos alunos estao liberadas (a moderacao de video desligada, pelo moderationStatusChanged do motor). */
   camerasAllowed: boolean;
   /** Troca o aparelho quando a secao do card esta pronta (so quem apresenta, dentro da sala); falso quando nao trocou. */
   chooseDevice: (kind: DeviceKind, option: DeviceOption) => boolean;
   /** Manda um comando ao iframe; falso sem sala montada. */
   command: (name: string, ...args: unknown[]) => boolean;
-  /** As secoes do card Configurações (deviceSettingsFor com o papel da sala; nunca a Qualidade do vídeo). */
+  /** As secoes das Configurações (deviceSettingsFor com o papel da sala; nunca a Qualidade do vídeo). */
   deviceSettings: DeviceSettings;
   /** Os aparelhos, o ruido, o fundo e o espelho de quem apresenta (useJitsiDevices: os metodos da api do iframe). */
   devices: UseJitsiDevices;
@@ -139,10 +180,15 @@ export type LiveRoomHandle = {
   retry: () => void;
   role: ConsoleRoomRole;
   room: LiveRoomState;
+  /** Quem desenha o Compartilhar tela neste navegador: o nosso circulo ou o botao do proprio motor (V2-A39). */
+  screenShare: ConsoleScreenShareMode;
+  /** Pede ao motor para ligar ou desligar a moderacao de video (o estado so muda quando o motor avisa). */
   setCamerasAllowed: (allowed: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
-  /** O card Configurações aberto (os aparelhos sao relidos ao abrir). */
+  /** As Configurações abertas (os aparelhos sao relidos ao abrir). */
   settingsOpen: boolean;
+  /** A propria tela no ar (screenSharingStatusChanged e, na entrada, isSharingScreen), dentro da sala. */
+  sharing: boolean;
   /** A propria camera no ar (videoMuteStatusChanged), dentro da sala. */
   videoOn: boolean;
   startTesting: () => void;
@@ -173,6 +219,8 @@ type UseLiveRoomInput = {
   onAnchor: () => Promise<boolean>;
   /** A reserva "Gravar no navegador" ligou ou desligou (setBrowserRecording: o selo Gravando do aluno). */
   onBrowserRecording?: (on: boolean) => void;
+  /** O Remover do ⋮ da miniatura com o aluno ligado a linha: o nosso Remover (o registro da sessao, depois o motor). */
+  onKickPerson?: (person: LiveConsolePerson, participantId: string) => void;
   session: WebinarSession | null;
   webinar: Pick<ConsoleWebinar, "allowStudentCamera" | "hostUserId" | "id" | "practiceSession" | "waitingRoom">;
 };
@@ -203,20 +251,28 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   // "Tentar de novo" sem token (o primeiro pedido falhou): pede outro.
   const [tokenAttempt, setTokenAttempt] = useState(0);
   const [room, dispatch] = useReducer(liveRoomReducer, EMPTY_ROOM);
+  // Antes do motor dizer (moderationStatusChanged, isModerationOn), o que o webinario pede: sem camera de aluno, quem
+  // apresenta liga a moderacao de video ao entrar.
   const [camerasAllowed, setCamerasAllowedState] = useState(webinar.allowStudentCamera !== false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** A propria camera no ar (videoMuteStatusChanged): o Desfocar o fundo so vale com o video ligado. */
   const [videoOn, setVideoOn] = useState(false);
+  /** O proprio microfone no ar (audioMuteStatusChanged e, na entrada, isAudioMuted). */
+  const [audioOn, setAudioOn] = useState(false);
+  /** A propria tela no ar (screenSharingStatusChanged e, na entrada, isSharingScreen). */
+  const [sharing, setSharing] = useState(false);
   const lobbySent = useRef<boolean | null>(null);
   const setupDone = useRef(false);
   const anchorMarked = useRef(false);
   const autoStartedFor = useRef<string | null>(null);
   const latest = useRef(input);
   const commandRef = useRef<(name: string, ...args: unknown[]) => boolean>(() => false);
-  /** O que o card Configurações faz com cada sinal (o aoSinal do useJitsiDevices) e o que ele le na hora da troca. */
+  /** O que as Configurações fazem com cada sinal (o aoSinal do useJitsiDevices) e o que ele le na hora da troca. */
   const devicesSignalRef = useRef<(name: string, payload: unknown) => void>(() => undefined);
   const deviceSettingsRef = useRef<DeviceSettings | null>(null);
   const roomRef = useRef(room);
+  /** Os botoes do papel agora (o ⋮ da miniatura so libera e remove com eles). */
+  const controlsRef = useRef<LiveControls | null>(null);
   /** O IFrame API montado agora (o `api` do useJitsiMeet): o getRoomsInfo e pedido a ele, e a resposta so vale dele. */
   const frameRef = useRef<RefObject<JitsiMeetApi | null> | null>(null);
   /** O getRoomsInfo no maximo uma vez a cada CONSOLE_ROOM_RULES.roomsInfoMs: a hora do ultimo e o pedido que espera. */
@@ -239,6 +295,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const presenter = presents(role);
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
   const isMobile = useSyncExternalStore(subscribeNothing, readMobile, () => false);
+  const screenShare = useSyncExternalStore(subscribeNothing, readScreenShareMode, serverScreenShareMode);
 
   useEffect(() => {
     latest.current = input;
@@ -272,7 +329,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     };
   }, [sessionId, tokenAttempt, wantsRoom, webinar.id]);
 
-  const configOverwrite = useMemo(() => (token.reply ? liveConfigOverwrite(token.reply.role, token.reply.settings, look) : {}), [token.reply, look]);
+  // A superficie console: quem apresenta usa a nossa barra (o Compartilhar tela pelo navegador, consoleScreenShareMode).
+  const configOverwrite = useMemo(() => (token.reply ? liveConfigOverwrite(token.reply.role, token.reply.settings, look, "console", screenShare) : {}), [token.reply, look, screenShare]);
   // Quem apresenta abre a engrenagem do iframe so na aba de aparelhos (o papel vem do join-token).
   const tokenRole = token.reply?.role ?? null;
   const interfaceConfigOverwrite = useMemo(() => liveInterfaceConfigOverwrite(tokenRole, look), [tokenRole, look]);
@@ -335,6 +393,78 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     []
   );
 
+  /**
+   * Uma leitura do IFrame API (Promise): pedida ao iframe montado agora, a resposta so vale dele e sem saida da sala
+   * desde o pedido (a mesma conta do readRoomsInfo). Uma resposta de um iframe ja descartado nao muda nada.
+   */
+  const readFrame = useCallback(<T,>(read: (frame: JitsiMeetApi) => Promise<T> | undefined, apply: (value: T) => void) => {
+    const asked = frameRef.current?.current ?? null;
+    const leftCount = leftCountRef.current;
+    let pending: Promise<T> | undefined;
+    try {
+      pending = asked ? read(asked) : undefined;
+    } catch {
+      pending = undefined;
+    }
+    if (!asked || !pending) {
+      return;
+    }
+    void Promise.resolve(pending)
+      .then((value) => {
+        if (frameRef.current?.current === asked && leftCountRef.current === leftCount) {
+          apply(value);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  /**
+   * O ⋮ da miniatura do motor (participantMenuButtonClick, so no console de quem apresenta): o "Pedir para ligar o
+   * microfone" e o nosso Liberar (askToUnmute, e a pessoa passa a quem fala); o Remover segue menuKickPlan.
+   */
+  const onMenuClick = useCallback(
+    (payload: unknown) => {
+      const click = participantMenuClickOf(payload);
+      const controls = controlsRef.current;
+      if (!click || !controls) {
+        return;
+      }
+      const { participantId } = click;
+      if (click.key === "ask-unmute") {
+        if (controls.release && commandRef.current("askToUnmute", participantId)) {
+          dispatch({ id: participantId, type: "release" });
+        }
+        return;
+      }
+      if (!controls.kick) {
+        return;
+      }
+      const person = latest.current.live?.people.find((item) => item.participantId === participantId) ?? null;
+      const roles = roomRef.current.roles;
+      const plan = menuKickPlan({ person, role: Object.hasOwn(roles, participantId) ? roles[participantId] : undefined, staff: person?.staff === true });
+      switch (plan) {
+        case "ours":
+          if (person) {
+            latest.current.onKickPerson?.(person, participantId);
+          }
+          return;
+        case "engine":
+          if (commandRef.current("kickParticipant", participantId)) {
+            dispatch({ id: participantId, type: "kicked" });
+            adminToast.info(WEBINAR_COPY.consoleV2.pessoas.removidoSemRegistro);
+          }
+          return;
+        case "staff":
+          adminToast.info(WEBINAR_COPY.consoleV2.pessoas.equipeNaoSai);
+          return;
+        default:
+          readRoomsInfo();
+          adminToast.info(WEBINAR_COPY.consoleV2.pessoas.tenteDeNovo);
+      }
+    },
+    [readRoomsInfo]
+  );
+
   const onEvent = useCallback(
     (name: ConsoleListenedEvent, payload: unknown) => {
       const frame = frameRef.current?.current ?? null;
@@ -365,6 +495,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
           roomsInfoTimerRef.current = null;
         }
         setVideoOn(false);
+        setAudioOn(false);
+        setSharing(false);
       }
       // Os papeis de quem ja estava (o participantJoined nao traz o papel) e de quem compartilha sem papel lido.
       if (name === "videoConferenceJoined" || name === "participantJoined") {
@@ -372,11 +504,48 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
       } else if (name === "contentSharingParticipantsChanged" && rolesToRead({ roles: roomRef.current.roles, selfId: roomRef.current.selfId, sharing: sharingIdsOf(payload) }).length > 0) {
         readRoomsInfo();
       }
-      if (name === "videoMuteStatusChanged") {
-        const muted = payload && typeof payload === "object" ? (payload as { muted?: unknown }).muted : undefined;
-        setVideoOn(muted === false);
+      // Na entrada, o que o motor ja tem: o proprio microfone e a propria tela, a moderacao de video e quem compartilha
+      // a tela (o vigia tambem le daqui quem ja compartilhava). Cada resposta so vale deste iframe e desta entrada.
+      if (name === "videoConferenceJoined") {
+        readFrame(
+          (frame) => frame.isAudioMuted?.(),
+          (muted) => setAudioOn(muted === false)
+        );
+        readFrame(
+          (frame) => frame.isSharingScreen?.(),
+          (on) => setSharing(on === true)
+        );
+        readFrame(
+          (frame) => frame.isModerationOn?.("video"),
+          (on) => {
+            if (typeof on === "boolean") {
+              setCamerasAllowedState(!on);
+            }
+          }
+        );
+        readFrame(
+          (frame) => frame.getContentSharingParticipants?.(),
+          (info) => {
+            const ids = info && typeof info === "object" ? (info as { sharingParticipantIds?: unknown }).sharingParticipantIds : undefined;
+            dispatch({ name: "contentSharingParticipantsChanged", nowMs: Date.now(), payload: { data: ids }, type: "event" });
+          }
+        );
       }
-      // O card Configurações: a lista nova (deviceListChanged, um fone que entrou), o ruido de volta numa entrada nova
+      if (name === "videoMuteStatusChanged") {
+        setVideoOn(mutedOf(payload) === false);
+      } else if (name === "audioMuteStatusChanged") {
+        setAudioOn(mutedOf(payload) === false);
+      } else if (name === "screenSharingStatusChanged") {
+        setSharing(payload !== null && typeof payload === "object" && (payload as { on?: unknown }).on === true);
+      } else if (name === "moderationStatusChanged") {
+        const moderation = payload && typeof payload === "object" ? (payload as { enabled?: unknown; mediaType?: unknown }) : {};
+        if (moderation.mediaType === "video" && typeof moderation.enabled === "boolean") {
+          setCamerasAllowedState(!moderation.enabled);
+        }
+      } else if (name === "participantMenuButtonClick") {
+        onMenuClick(payload);
+      }
+      // As Configurações: a lista nova (deviceListChanged, um fone que entrou), o ruido de volta numa entrada nova
       // e o desfoque de volta na camera que liga.
       devicesSignalRef.current(name, payload);
       if (name === "recordingStatusChanged" && shouldMarkAnchor({ alreadyMarked: anchorMarked.current, anchorAt: latest.current.live?.recorder.anchorAt ?? null, payload, role })) {
@@ -391,7 +560,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
         commandRef.current("sendEndpointTextMessage", "", recordingSignalMessage(browserRecording));
       }
     },
-    [markAnchor, readRoomsInfo, role]
+    [markAnchor, onMenuClick, readFrame, readRoomsInfo, role]
   );
 
   const meet = useJitsiMeet({
@@ -412,8 +581,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
 
   const devices = useJitsiDevices({
     api,
-    // Quem apresenta tambem muda ruido, fundo e espelho pela barra do iframe: o hook so manda o comando, sem guardar
-    // estado nem reaplicar nada por cima da escolha feita la.
+    // Quem apresenta tambem muda o espelho pelo menu da propria miniatura (Inverter) e o fundo pelo dialogo de fundo do
+    // motor (Mais opções de fundo): o hook so manda o comando, sem guardar estado nem reaplicar nada por cima da
+    // escolha feita la.
     efeitosNoIframe: true,
     executeCommand: command,
     joined,
@@ -446,6 +616,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     devicesSignalRef.current = devices.aoSinal;
     deviceSettingsRef.current = presenter ? deviceSettings : null;
     roomRef.current = room;
+    controlsRef.current = controls;
     frameRef.current = api;
   });
 
@@ -532,11 +703,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const hasToken = token.reply !== null;
   const retry = useCallback(() => (hasToken ? meetRetry() : setTokenAttempt((attempt) => attempt + 1)), [hasToken, meetRetry]);
 
+  // So o comando: o estado muda quando o motor avisa (moderationStatusChanged de video), tambem quando outro console muda.
   const setCamerasAllowed = useCallback(
     (allowed: boolean) => {
-      if (command("toggleModeration", !allowed, "video")) {
-        setCamerasAllowedState(allowed);
-      }
+      command("toggleModeration", !allowed, "video");
     },
     [command]
   );
@@ -557,6 +727,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const chooseDevice = (kind: DeviceKind, option: DeviceOption) => presenter && deviceSectionReady(deviceSettings, kind) && escolher(kind, option);
 
   return {
+    audioOn: joined && audioOn,
     camerasAllowed,
     chooseDevice,
     command,
@@ -571,9 +742,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     retry,
     role,
     room,
+    screenShare,
     setCamerasAllowed,
     setSettingsOpen,
     settingsOpen,
+    sharing: joined && sharing,
     startTesting: () => setTesting(true),
     syncFilmstrip,
     syncLobby,
@@ -581,67 +754,4 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     videoOn: joined && videoOn,
     tokenError: token.error
   };
-}
-
-/**
- * O botao Configurações de quem apresenta (o Apresentador e o co-apresentador, com a sala configurada), provisorio ao
- * lado dos controles embaixo do palco ate a barra de quem apresenta (G6), com o card logo depois dele: no teclado, o
- * Tab do botao entra no card. Fechar pelo proprio botao manda o foco a ele antes de o card sumir (o WebKit nao foca o
- * botao no clique).
- */
-export function LiveSettingsToggle({ handle }: { handle: LiveRoomHandle }) {
-  const settingsButton = useRef<HTMLButtonElement | null>(null);
-  if (!presents(handle.role) || !handle.meetConfigured) {
-    return null;
-  }
-
-  return (
-    <div className="flex min-w-0 flex-col items-start gap-3" data-live-settings-toggle="">
-      <Button
-        aria-controls={LIVE_SETTINGS_CARD_ID}
-        aria-expanded={handle.settingsOpen}
-        className="px-3"
-        onClick={() => {
-          if (handle.settingsOpen) {
-            settingsButton.current?.focus();
-          }
-          handle.setSettingsOpen(!handle.settingsOpen);
-        }}
-        ref={settingsButton}
-        type="button"
-        variant="secondary"
-      >
-        <Settings2 aria-hidden="true" className="size-4" />
-        {copy.configuracoes}
-      </Button>
-      {handle.settingsOpen ? (
-        <div className="w-full min-w-0">
-          <LiveSettingsCard
-            cameraOn={handle.videoOn}
-            devices={handle.devices}
-            onChoose={handle.chooseDevice}
-            onClose={() => {
-              settingsButton.current?.focus();
-              handle.setSettingsOpen(false);
-            }}
-            sections={handle.deviceSettings}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** A frase da sala de espera, da tranca e da Sessão de prática (lobbyNotice), entre o palco e os controles. */
-export function LiveLobbyNotice({ handle, live, session }: { handle: Pick<LiveRoomHandle, "lobby">; live: Pick<LiveConsoleSnapshot, "roomLocked">; session: Pick<WebinarSession, "status"> }) {
-  const notice = lobbyNotice({ lobby: handle.lobby, roomLocked: live.roomLocked, status: session.status });
-  if (!notice) {
-    return null;
-  }
-
-  return (
-    <p className={cn("shrink-0 text-[13px] leading-5", live.roomLocked ? "text-[var(--warning)]" : "text-[var(--text-secondary)]")} data-live-notice="">
-      {notice}
-    </p>
-  );
 }

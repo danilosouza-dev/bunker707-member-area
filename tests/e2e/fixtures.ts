@@ -1794,8 +1794,12 @@ export const DISPOSITIVOS_PADRAO_DA_SALA_FALSA: DispositivosDaSalaFalsa = {
  * videoMuteStatusChanged, toggleAudio responde audioMuteStatusChanged, toggleRaiseHand responde raiseHandUpdated do
  * proprio participante, toggleModeration(ligada, tipo) responde moderationStatusChanged { enabled, mediaType } com o
  * tipo como a tag stable-11248 o le (o 'toggle-moderation' so distingue "video": qualquer outro valor, "desktop"
- * tambem, liga ou desliga a de audio) e hangup responde videoConferenceLeft; o resto (o apresentador liberou o
- * microfone, a gravacao ligou, alguem bateu na sala de espera) o teste dispara. Cada sinal mandado aos ouvintes (o
+ * tambem, liga ou desliga a de audio), toggleShareScreen({ enable }) liga ou desliga a propria tela e responde
+ * screenSharingStatusChanged { on, details } e contentSharingParticipantsChanged { data } (o proprio id ou nada), e hangup
+ * responde videoConferenceLeft; o resto (o apresentador liberou o microfone, a gravacao ligou, alguem bateu na sala de
+ * espera) o teste dispara. As leituras que a tag responde por Promise: isSharingScreen (a propria tela),
+ * isModerationOn(tipo) (pela moderacao que o eco ligou, com o mesmo "so video e video") e getContentSharingParticipants,
+ * que resolve { sharingParticipantIds } como a tag, nunca uma lista solta. Cada sinal mandado aos ouvintes (o
  * disparado pelo teste e o do eco) fica anotado, na ordem, em `sinais`.
  *
  * Os aparelhos (o painel Configurações): getAvailableDevices, getCurrentDevices, isDeviceChangeAvailable,
@@ -1860,6 +1864,10 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
       audioMudo: true,
       // O userSelectedCameraDeviceId: gravado na hora do setVideoInputDevice.
       cameraEscolhida: null,
+      // A propria tela no ar (o toggleShareScreen do eco).
+      compartilhando: false,
+      // A moderacao de cada tipo, pelo toggleModeration do eco (o isModerationOn le).
+      moderacao: { audio: false, video: false },
       maoLevantada: false,
       // O papel de cada um na sala (id -> "moderator" | "participant" | "none"): o participantRoleChanged disparado e o
       // "papel" do participantJoined disparado gravam; o getRoomsInfo devolve.
@@ -1946,7 +1954,18 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
           montagem.emitir("raiseHandUpdated", { handRaised: estado.maoLevantada ? Date.now() : 0, id: estado.proprioId });
         } else if (comando === "toggleModeration") {
           // Como o 'toggle-moderation' da tag: so "video" e a de video; qualquer outro tipo cai na de audio.
-          montagem.emitir("moderationStatusChanged", { enabled: args[0] === true, mediaType: args[1] === "video" ? "video" : "audio" });
+          const tipo = args[1] === "video" ? "video" : "audio";
+          estado.moderacao[tipo] = args[0] === true;
+          montagem.emitir("moderationStatusChanged", { enabled: args[0] === true, mediaType: tipo });
+        } else if (comando === "toggleShareScreen") {
+          // Como o 'toggle-share-screen' da tag: { enable } liga ou desliga; sem ele, alterna. Sem mudanca, nada sai.
+          const pedido = args[0] && typeof args[0] === "object" ? args[0].enable : undefined;
+          const quer = typeof pedido === "boolean" ? pedido : !estado.compartilhando;
+          if (quer !== estado.compartilhando) {
+            estado.compartilhando = quer;
+            montagem.emitir("screenSharingStatusChanged", { details: { sourceType: "screen" }, on: quer });
+            montagem.emitir("contentSharingParticipantsChanged", { data: quer && estado.proprioId ? [estado.proprioId] : [] });
+          }
         } else if (comando === "hangup") {
           montagem.emitir("videoConferenceLeft", { roomName: montagem.roomName });
         }
@@ -1958,6 +1977,10 @@ function scriptDaSalaFalsa(ecoar: boolean, dispositivos: DispositivosDaSalaFalsa
     // Verdadeiro sem faixa de microfone (MICROFONE_FALHA: o getUserMedia nunca abriu).
     this.isAudioMuted = () => Promise.resolve(MICROFONE_FALHA || estado.audioMudo);
     this.isVideoMuted = () => Promise.resolve(estado.videoMudo);
+    this.isSharingScreen = () => Promise.resolve(estado.compartilhando);
+    // Como o 'is-moderation-on' da tag: sem o tipo, a de audio; so "video" e a de video.
+    this.isModerationOn = (tipo) => Promise.resolve(estado.moderacao[tipo === "video" ? "video" : "audio"]);
+    this.getContentSharingParticipants = () => Promise.resolve({ sharingParticipantIds: estado.compartilhando && estado.proprioId ? [estado.proprioId] : [] });
 
     // Os aparelhos (o painel Configuracoes). Cada chamada fica anotada, como os comandos.
     const anotar = (nome, args) => montagem.comandos.push({ args: copia(args), comando: nome });

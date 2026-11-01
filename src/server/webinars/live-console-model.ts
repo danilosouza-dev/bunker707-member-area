@@ -501,10 +501,29 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
       return { ...state, knocking: [...state.knocking, { id: knockId, name: text(field(participant, "name")) ?? text(field(participant, "displayName")) ?? "" }] };
     }
     case "moderationParticipantApproved": {
-      if (!id || field(payload, "mediaType") !== "audio" || state.speaking.includes(id)) {
+      const mediaType = field(payload, "mediaType");
+      if (!id || id === state.selfId) {
+        return state;
+      }
+      // A camera aprovada (o Convidar ao palco de outro console, ou o Permitir câmera do proprio motor): no palco.
+      if (mediaType === "video") {
+        return state.stage.includes(id) ? state : { ...state, hands: state.hands.filter((hand) => hand.id !== id), stage: [...state.stage, id] };
+      }
+      if (mediaType !== "audio" || state.speaking.includes(id)) {
         return state;
       }
       return { ...state, hands: state.hands.filter((hand) => hand.id !== id), speaking: [...state.speaking, id] };
+    }
+    case "moderationParticipantRejected": {
+      // A equipe recolheu (o Silenciar, o Tirar do palco e o Silenciar todos de qualquer console, ou o motor): sem o
+      // microfone, a pessoa sai de quem fala e do palco; sem a camera, so do palco.
+      const mediaType = field(payload, "mediaType");
+      if (!id || (mediaType !== "audio" && mediaType !== "video")) {
+        return state;
+      }
+      const stage = state.stage.filter((other) => other !== id);
+      const speaking = mediaType === "audio" ? state.speaking.filter((other) => other !== id) : state.speaking;
+      return stage.length === state.stage.length && speaking.length === state.speaking.length ? state : { ...state, speaking, stage };
     }
     case "recordingStatusChanged": {
       const mode = text(field(payload, "mode"));
@@ -609,6 +628,43 @@ export function screenSharesToStop(input: {
   sharing: readonly string[];
 }): string[] {
   return input.sharing.filter((id) => id !== input.selfId && knownNonModerator(input.roles, id) && !input.grants.includes(id) && !input.justGranted.includes(id));
+}
+
+/** O item do ⋮ da miniatura que o motor avisou (participantMenuButtonClick { key, participantId, preventExecution }). */
+export type ParticipantMenuClick = { key: "ask-unmute" | "kick"; participantId: string };
+
+/**
+ * O participantMenuButtonClick do motor como o console o le: so os dois itens que o console pediu para avisar
+ * (CONSOLE_PARTICIPANT_MENU_BUTTONS, o Liberar e o Remover) e o id no formato do participante; o resto vira nulo.
+ */
+export function participantMenuClickOf(payload: unknown): ParticipantMenuClick | null {
+  const key = field(payload, "key");
+  const participantId = field(payload, "participantId");
+  if ((key !== "ask-unmute" && key !== "kick") || typeof participantId !== "string" || !PARTICIPANT_ID.test(participantId)) {
+    return null;
+  }
+  return { key, participantId };
+}
+
+/**
+ * O Remover do ⋮ da miniatura do motor no console (docs/31 V2-14 e V2-A29; o motor so avisa, preventExecution):
+ * - "staff": quem e da equipe (`staff`) ou modera a sala (o papel "moderator") nunca sai, como no nosso Remover;
+ * - "ours": o aluno ligado a linha (`person`, pelo ultimo webinar_room_joined) sai pelo nosso Remover, que grava
+ *   webinar_session_bans antes do kickParticipant (sem o registro ele voltaria com um token novo);
+ * - "engine": sem o aluno ligado (ainda sem webinar_room_joined, ou o mesmo id para duas contas) e com o papel
+ *   conhecido de participante, o kickParticipant do motor na hora: tirar ja quem atrapalha vale mais que esperar o
+ *   retrato, e a tela avisa que a pessoa pode voltar;
+ * - "unknown": sem o papel lido, nada sai (pode ser alguem que ja moderava quando o console entrou); o console le os
+ *   papeis de novo (getRoomsInfo) e pede para tentar de novo.
+ */
+export function menuKickPlan(input: { person: LiveConsolePerson | null; role: JitsiRole | null | undefined; staff: boolean }): "engine" | "ours" | "staff" | "unknown" {
+  if (input.staff || input.role === "moderator") {
+    return "staff";
+  }
+  if (input.person) {
+    return "ours";
+  }
+  return input.role === "participant" || input.role === "none" ? "engine" : "unknown";
 }
 
 /** Os ids de `sharing` sem papel lido (fora o proprio console): o console pede o getRoomsInfo para conhece-los. */

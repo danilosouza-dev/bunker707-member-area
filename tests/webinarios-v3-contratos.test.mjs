@@ -163,6 +163,17 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.deepEqual(coHost.toolbarButtons, ["microphone", "camera", "desktop", "raisehand", "participants-pane", "security", "select-background", "settings", "hangup"], "o co-apresentador: o mesmo do host sem gravar");
   assert.deepEqual(coHost.toolbarConfig, { alwaysVisible: true });
   assert.equal(embed.liveConfigOverwrite("team", settings).toolbarConfig, undefined, "a Equipe segue o aluno: sem a barra do iframe");
+  // No console (docs/31 V2-14) a barra de quem apresenta e a nossa: o iframe fica sem a do motor e sem os atalhos, e o
+  // ⋮ da miniatura avisa o Liberar e o Remover; a pagina da sala (o padrao) fica como acima.
+  for (const role of ["host", "co_host"]) {
+    const noConsole = embed.liveConfigOverwrite(role, settings, null, "console");
+    assert.deepEqual(noConsole.toolbarButtons, [], role);
+    assert.equal(noConsole.toolbarConfig, undefined, role);
+    assert.equal(noConsole.disableShortcuts, true, role);
+    assert.deepEqual(noConsole.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }], role);
+    assert.deepEqual(noConsole.constraints, embed.liveConfigOverwrite(role, settings).constraints, `${role}: o palco no mesmo envio`);
+    assert.equal(embed.liveConfigOverwrite(role, settings).participantMenuButtonsWithNotifyClick, undefined, `${role}: na sala, o ⋮ do motor age sozinho`);
+  }
   for (const role of ["student", "team"]) {
     const semBarra = embed.liveConfigOverwrite(role, settings);
     assert.ok(!semBarra.toolbarButtons.includes("settings") && !semBarra.toolbarButtons.includes("select-background"), `${role}: sem engrenagem nem fundo do iframe`);

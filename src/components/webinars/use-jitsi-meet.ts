@@ -20,6 +20,8 @@ export type JitsiMeetApi = {
   executeCommand(command: string, ...args: unknown[]): void;
   /** { audioInput, audioOutput, videoInput }: as listas de aparelhos (sem a permissao, sem rotulo e sem id). */
   getAvailableDevices?(): Promise<unknown>;
+  /** Quem compartilha a tela agora: resolve { sharingParticipantIds } (nunca uma lista solta). */
+  getContentSharingParticipants?(): Promise<{ sharingParticipantIds?: unknown }>;
   /** { audioInput, audioOutput, videoInput }: o aparelho em uso de cada tipo. */
   getCurrentDevices?(): Promise<unknown>;
   getIFrame?(): HTMLIFrameElement | null;
@@ -31,11 +33,15 @@ export type JitsiMeetApi = {
   /** 'output': o navegador deixa trocar o alto-falante (falso no Safari). */
   isDeviceChangeAvailable?(deviceType?: "input" | "output"): Promise<boolean>;
   isMultipleAudioInputSupported?(): Promise<boolean>;
+  /** A moderacao daquele tipo esta ligada (sem o tipo, a de audio). */
+  isModerationOn?(mediaType?: "audio" | "video"): Promise<boolean>;
   /**
    * A moderacao daquele tipo segura o participante (ligada, e ele nao e moderador nem foi aprovado): o Ligar câmera
    * recusado pela equipe nao pede nada ao navegador, e a permissao da camera continua "prompt".
    */
   isParticipantForceMuted?(participantId: string, mediaType?: "audio" | "video"): Promise<boolean>;
+  /** O proprio participante compartilha a tela agora. */
+  isSharingScreen?(): Promise<boolean>;
   removeListener?(event: string, listener: (payload: unknown) => void): void;
   /**
    * Os tres trocam o aparelho: com rotulo, o iframe procura o PRIMEIRO de rotulo identico; com o rotulo vazio, usa o id
