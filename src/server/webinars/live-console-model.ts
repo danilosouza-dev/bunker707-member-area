@@ -320,10 +320,21 @@ export type RaisedHand = { id: string; raisedAt: number };
 export type KnockingPerson = { id: string; name: string };
 
 export type LiveRoomState = {
+  /**
+   * A coluna de miniaturas do iframe na tela (o ultimo filmstripDisplayChanged): visivel ao entrar, como o motor comeca.
+   * O palco do console desconta a coluna nos selos de cima a direita (stageColumnShown) e, no co-apresentador e na
+   * Equipe, decide o toggleFilmStrip pela largura (consoleColumnPolicy, docs/31 V2-A5).
+   */
+  filmstripVisible: boolean;
   hands: RaisedHand[];
   knocking: KnockingPerson[];
   /** O proprio console e moderador na sala (participantRoleChanged do proprio id). */
   moderator: boolean;
+  /**
+   * Quem esta no video grande (o largeVideoChanged chega sem dados: o console le o id do IFrame API, onStageParticipantOf,
+   * e manda a acao `onStage`); a tela compartilhada vem como `<id>-v1`. Nulo: o motor ainda nao disse.
+   */
+  onStageId: string | null;
   people: RoomPerson[];
   recording: { mode: string | null; on: boolean };
   /**
@@ -339,12 +350,16 @@ export type LiveRoomState = {
   spotlight: string | null;
   /** Quem foi convidado ao palco (microfone e camera liberados). */
   stage: string[];
+  /** O que o motor mostra (o ultimo tileViewChanged): o Palco ou a Grade, a mudanca de quem apresenta ou o seguir a visao. */
+  viewShown: "grid" | "stage";
 };
 
 export const EMPTY_ROOM: LiveRoomState = {
+  filmstripVisible: true,
   hands: [],
   knocking: [],
   moderator: false,
+  onStageId: null,
   people: [],
   recording: { mode: null, on: false },
   roles: {},
@@ -352,7 +367,8 @@ export const EMPTY_ROOM: LiveRoomState = {
   sharing: [],
   speaking: [],
   spotlight: null,
-  stage: []
+  stage: [],
+  viewShown: "stage"
 };
 
 /** O getRoomsInfo do iframe (os papeis de quem ja estava na sala) no maximo uma vez neste intervalo, como a sala do aluno. */
@@ -368,7 +384,11 @@ export type LiveRoomAction =
   | { id: string; type: "lowerHand" | "skipHand" | "release" | "silence" | "admit" | "kicked" }
   | { type: "lowerAll" | "admitAll" | "reset" }
   | { id: string; on: boolean; type: "stage" }
-  | { id: string | null; type: "spotlight" };
+  | { id: string | null; type: "spotlight" }
+  /** Quem esta no video grande, lido do IFrame API no largeVideoChanged (onStageParticipantOf). */
+  | { id: string | null; type: "onStage" }
+  /** O primeiro sinal de um iframe novo: o motor dele comeca no Palco, com a coluna e sem ninguem lido no video grande. */
+  | { type: "frame" };
 
 function field(payload: unknown, key: string): unknown {
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>)[key] : undefined;
@@ -441,7 +461,9 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
       return id ? { ...withoutId(state, id), selfId: id } : state;
     case "videoConferenceLeft":
     case "readyToClose":
-      return EMPTY_ROOM;
+      // A visao e a coluna ficam, como na sala do aluno: o mesmo iframe pode voltar sozinho, com o motor como estava
+      // (fora do iframe o palco nao conta a coluna, stageColumnShown). Um iframe novo volta ao padrao pela acao `frame`.
+      return { ...EMPTY_ROOM, filmstripVisible: state.filmstripVisible, viewShown: state.viewShown };
     case "participantJoined":
       if (!id || id === state.selfId) {
         return state;
@@ -490,6 +512,14 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
     }
     case "contentSharingParticipantsChanged":
       return { ...state, sharing: sharingIdsOf(payload) };
+    case "tileViewChanged": {
+      const enabled = field(payload, "enabled");
+      return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
+    }
+    case "filmstripDisplayChanged": {
+      const visible = field(payload, "visible");
+      return typeof visible === "boolean" ? { ...state, filmstripVisible: visible } : state;
+    }
     default:
       return state;
   }
@@ -632,6 +662,10 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
         : { ...state, speaking: state.speaking.filter((id) => id !== action.id), spotlight: state.spotlight === action.id ? null : state.spotlight, stage: state.stage.filter((id) => id !== action.id) };
     case "spotlight":
       return { ...state, spotlight: action.id };
+    case "onStage":
+      return { ...state, onStageId: typeof action.id === "string" && PARTICIPANT_ID.test(action.id) ? action.id : null };
+    case "frame":
+      return { ...state, filmstripVisible: EMPTY_ROOM.filmstripVisible, onStageId: null, viewShown: EMPTY_ROOM.viewShown };
     case "reset":
       return EMPTY_ROOM;
     default:

@@ -13,8 +13,10 @@ import "./support/resolve-extensionless-ts.mjs";
 // cartao Gravacao (Preparar, a reserva, a fila, Gravando, a ancora), Alinhar chat com a previa, Enviar gravacao e o ⋯
 // do autor no chat. Nas fontes: os comandos do IFrame API ligados aos botoes (muteEveryone, toggleLobby, kickParticipant,
 // askToUnmute, startRecording...), a ancora no recordingStatusChanged, as frases so de WEBINAR_COPY (ou das provisorias
-// de live-console-model.ts) e nenhum "Jitsi" em texto de tela. O card Configurações de quem apresenta (docs/30 §1.4):
-// o botao nas acoes do palco so para o Apresentador e o co-apresentador, o card com Microfone, Alto-falante e Câmera,
+// de live-console-model.ts) e nenhum "Jitsi" em texto de tela. O palco do console V2 (docs/31 V2-4 e V2-13): o
+// "Ao vivo", o Gravando e os presentes com o pico dentro do palco, o topo da live sem eles. O card Configurações de quem
+// apresenta (docs/30 §1.4): o botao embaixo do palco (provisorio ate a barra) so para o Apresentador e o
+// co-apresentador, o card com Microfone, Alto-falante e Câmera,
 // Reduzir ruído, Espelhar, Desfocar o fundo e Mais opções de fundo, sem Qualidade do vídeo nem volume, e nas fontes a
 // troca so com a secao pronta e o dialogo de fundo pelo toggleVirtualBackgroundDialog.
 
@@ -29,6 +31,9 @@ const pass = `function pass(props) { const out = {}; for (const [key, value] of 
 const fail = `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });`;
 
 const STUBS = {
+  // O palco do console usa os selos da sala (room-stage-badges.tsx), que importam o cabecalho da sala (com a capa).
+  "next/image": `import { createElement } from "react";
+export default function Image({ fill, priority, sizes, unoptimized, style, ...props }) { return createElement("img", { ...props, "data-next-image": "", style }); }`,
   "next/navigation": `export function useRouter() { return { back() {}, push() {}, refresh() {}, replace() {} }; }
 export function usePathname() { return "/admin/comunicacao/webinarios"; }
 export function useSearchParams() { return new URLSearchParams(); }
@@ -307,6 +312,52 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   }
 });
 
+test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esquerda e os presentes com o pico em cima a direita, dentro do palco; o topo da live sem o momento nem os presentes; os chips do card de antes saem", async () => {
+  const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
+  const view = {
+    chat: { hot: [], perMinute: [], students: 0, top: [], total: 0 },
+    presence: { avgPresent: 2, curve: [{ b: 1, n: 2 }, { b: 3, n: 5 }], drops: [], peak: { b: 3, n: 5 }, reachedEnd: 0, unique: 5, watchAvgSeconds: 0, watchMaxSeconds: 0 }
+  };
+  const presence = consolePresenceOf(view, 4 * MIN);
+  const markup = render(snapshot({ live: liveBlock({ recorder: recorder({ status: "recording" }) }), presence }));
+  const stage = markup.slice(markup.indexOf('data-console-slot="stage"'), markup.indexOf('data-console-slot="bar"'));
+  // "Ao vivo · 00:05:00": o inicio de verdade 5 min antes, pelo relogio do servidor.
+  assert.match(stage, /data-testid="room-on-air"[^>]*title="Ao vivo · 00:05:00"/);
+  assert.match(stage, /data-testid="live-recording"/, "o gravador gravando: o selo no palco");
+  // Os presentes do retrato de 5 s (3) e o pico do relatorio em cache (5), em cima a direita, antes da coluna de miniaturas.
+  assert.match(stage, /<div class="[^"]*right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*" data-room-badges="top-right">/);
+  const presentes = (palco) => textOf(palco.slice(palco.indexOf(">", palco.indexOf('data-room-badge="present"')) + 1, palco.indexOf("</span>", palco.indexOf('data-room-badge="present"'))));
+  assert.match(stage, /data-room-badges="top-right"><span[^>]*data-room-badge="present"/);
+  assert.equal(presentes(stage), "3 presentes · pico 5");
+  // Antes de entrar no iframe nenhuma coluna na tela: os selos vao ate a borda.
+  assert.match(markup, /data-console-slot="stage"[^>]*style="--room-video-right:0px"/);
+  // Sem o motor dizendo quem esta no video grande, nenhum selo de baixo (nunca um nome por palpite).
+  assert.doesNotMatch(stage, /data-room-badge="presenter"/);
+
+  // O topo da live fica sem o momento e sem os presentes: estao no palco.
+  const top = markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
+  assert.doesNotMatch(top, /data-console-clock|data-console-present/);
+  // Os chips do card de antes (Gravando, Sala trancada, "{n} pessoas na sala") saem; o "Gravando" e so o do palco.
+  assert.doesNotMatch(markup, /data-live-room-status/);
+  assert.equal(count(markup, /data-testid="live-recording"/g), 1);
+  for (const pessoas of [1, 2, 3]) {
+    assert.ok(!textOf(markup).includes(LIVE_CONSOLE_COPY.naSala(pessoas)), `sem "${LIVE_CONSOLE_COPY.naSala(pessoas)}"`);
+  }
+
+  // Sem o pico (antes da leitura da presenca), so os presentes; fora do ar, a frase do momento no lugar do "Ao vivo".
+  const agendada = render(snapshot({ session: session({ scheduledAt: new Date(NOW + 10 * MIN).toISOString(), startedAt: null, status: "scheduled" }) }));
+  const palcoAgendado = agendada.slice(agendada.indexOf('data-console-slot="stage"'), agendada.indexOf('data-console-slot="bar"'));
+  assert.doesNotMatch(palcoAgendado, /room-on-air|live-recording/);
+  assert.match(palcoAgendado, /data-room-badge="moment">Começa em 10:00</);
+  // As capas nos botoes da sala (nos tokens do tema), com o anel de foco branco sobre o palco preto nos dois temas: a
+  // regra de foco do admin le --focus-ring, e o anel do tema claro (quase preto) sumiria sobre o video.
+  assert.match(palcoAgendado, /<div class="[^"]*\[--focus-ring:white\][^"]*" data-live-stage-message="">/);
+  const testar = palcoAgendado.slice(palcoAgendado.lastIndexOf("<button", palcoAgendado.indexOf(copy.testarSala)), palcoAgendado.indexOf(copy.testarSala));
+  assert.match(testar, /bg-room-control/, "Testar sala no botao da sala");
+  assert.doesNotMatch(testar, /data-slot="button"/, "nao o botao do admin");
+  assert.equal(presentes(palcoAgendado), "3 presentes");
+});
+
 test("palco: a sala abrindo no meio com os controles do Apresentador ao redor; sem a sala no ambiente, a frase e o resto do console funciona", () => {
   const markup = render(snapshot());
   const text = textOf(markup);
@@ -549,13 +600,14 @@ const aparelhos = (extra = {}) => ({
 const card = (sections, extra = {}) => html(createElement(LiveSettingsCard, { cameraOn: true, devices: aparelhos(), onChoose: noop, onClose: noop, sections, ...extra }));
 const openTag = (markup, pattern) => markup.match(new RegExp(`<button(?=[^>]*${pattern})[^>]*>`))?.[0] ?? "";
 
-test("Configurações no console: o botão nas ações do palco só para o Apresentador e o co-apresentador (aria-expanded, aria-controls); a Equipe e a sala sem configuração ficam sem", () => {
+test("Configurações no console: o botão embaixo do palco, ao lado dos controles (provisório até a barra), só para o Apresentador e o co-apresentador (aria-expanded, aria-controls); a Equipe e a sala sem configuração ficam sem", () => {
   const host = render(snapshot());
   const botao = openTag(host, `aria-controls="${LIVE_SETTINGS_CARD_ID}"`);
   assert.ok(botao, "o botao Configurações do Apresentador");
   assert.match(botao, /aria-expanded="false"/);
   assert.match(textOf(host.slice(host.indexOf(botao), host.indexOf("</button>", host.indexOf(botao)))), new RegExp(`^${escape(copy.configuracoes)}$`));
-  assert.ok(host.indexOf(botao) < host.indexOf("data-live-stage"), "nas acoes do card do palco, acima do palco");
+  assert.ok(host.indexOf(botao) > host.indexOf('data-console-slot="bar"') && host.indexOf(botao) > host.indexOf("data-live-controls"), "embaixo do palco, com os controles");
+  assert.ok(host.indexOf(botao) < host.indexOf('data-console-slot="panel"'), "antes do painel");
   assert.doesNotMatch(host, /data-live-settings=""/, "o card so abre no clique");
 
   assert.doesNotMatch(render(snapshot(), { currentUserId: "u-equipe" }), new RegExp(`aria-controls="${LIVE_SETTINGS_CARD_ID}"`), "a Equipe nao tem barra de midia no console (pendencia)");

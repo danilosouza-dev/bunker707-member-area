@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { adminInputClass } from "../../../form";
 
-// O card Configurações de quem apresenta no console (docs/30 §1.4 e §5.4), aberto pelo botao Configurações nas acoes do
-// palco (live-room-panel.tsx), so para o Apresentador e o co-apresentador: Microfone (a escolha, Ligar / Desligar a
+// O card Configurações de quem apresenta no console (docs/30 §1.4 e §5.4), aberto pelo botao Configurações embaixo do
+// palco (LiveSettingsToggle, live-room-panel.tsx), so para o Apresentador e o co-apresentador: Microfone (a escolha, Ligar / Desligar a
 // redução de ruído), Alto-falante (so quando o navegador deixa trocar a saida e ha duas com nome) e Câmera (a escolha,
 // ou, com a lista vazia e a camera fechada, a frase de liga-la na barra do video; Inverter a minha imagem; Desfocar o
 // fundo / Tirar o efeito do fundo com a camera ligada e fora do celular; e Mais opções de fundo, o dialogo de fundo do

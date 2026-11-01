@@ -1063,8 +1063,8 @@ test("removido ou banido abaixo de sm: o painel (com a aba Chat, o [data-room-fi
   assert.equal(roomFocusTarget(null), null);
 });
 
-test("o card Configurações do console abre acima do palco (logo depois do botao no teclado, antes da barra do iframe) e o proprio botao fecha mandando o foco a ele", async () => {
-  const { LiveRoomPanel } = await import("../src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
+test("o card Configurações do console abre logo depois do botao (no teclado, o Tab do botao entra no card) e o proprio botao fecha mandando o foco a ele; a Equipe fica sem o botao", async () => {
+  const { LiveSettingsToggle } = await import("../src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
   const secoes = settings.deviceSettingsFor({
     allowStudentCamera: true,
     cameraConsented: false,
@@ -1095,18 +1095,16 @@ test("o card Configurações do console abre acima do palco (logo depois do bota
     tokenError: null,
     videoOn: true
   };
-  const markup = renderToStaticMarkup(
-    createElement(LiveRoomPanel, { busy: false, handle, live: { recorder: { status: "idle" }, roomLocked: false }, session: { status: "live" }, stageRef: { current: null } })
-  );
+  const markup = renderToStaticMarkup(createElement(LiveSettingsToggle, { handle }));
   const card = markup.indexOf('id="console-live-settings"');
-  const palco = markup.indexOf("data-live-stage=");
   const botao = markup.indexOf('aria-controls="console-live-settings"');
-  assert.ok(botao >= 0 && card > botao, "o card depois do botao");
-  assert.ok(palco > card, "e antes do palco (o Tab do botao entra no card, nao na barra do iframe)");
-  const fechado = renderToStaticMarkup(
-    createElement(LiveRoomPanel, { busy: false, handle: { ...handle, settingsOpen: false }, live: { recorder: { status: "idle" }, roomLocked: false }, session: { status: "live" }, stageRef: { current: null } })
-  );
+  assert.ok(botao >= 0 && card > botao, "o card logo depois do botao");
+  assert.equal(markup.slice(markup.indexOf("</button>", botao), card).match(/<(button|a|select|input)\b/g), null, "nada que receba o foco entre o botao e o card");
+  const fechado = renderToStaticMarkup(createElement(LiveSettingsToggle, { handle: { ...handle, settingsOpen: false } }));
   assert.equal(fechado.indexOf('id="console-live-settings"'), -1);
+  assert.match(fechado, /aria-expanded="false"/);
+  assert.equal(renderToStaticMarkup(createElement(LiveSettingsToggle, { handle: { ...handle, role: "team" } })), "", "a Equipe nao tem barra de midia no console");
+  assert.equal(renderToStaticMarkup(createElement(LiveSettingsToggle, { handle: { ...handle, meetConfigured: false } })), "", "sem a sala no ambiente, nada a configurar");
 
   const fonte = semComentarios(ler("src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx"));
   assert.match(fonte, /onClick=\{\(\) => \{\s*if \(handle\.settingsOpen\) \{\s*settingsButton\.current\?\.focus\(\);\s*\}\s*handle\.setSettingsOpen\(!handle\.settingsOpen\);/);

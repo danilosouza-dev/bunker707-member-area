@@ -416,6 +416,41 @@ test("Gravar no navegador: so o Apresentador, so a gravacao local (a do gravador
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * O palco do console (docs/31 V2-4 e V2-A5): o que o motor mostra e quem esta no video grande
+ * ---------------------------------------------------------------------------------------------- */
+
+test("reducer da sala: a visao (tileViewChanged), a coluna de miniaturas (filmstripDisplayChanged, visivel ao entrar) e quem esta no video grande (onStage); um iframe novo volta ao padrao do motor e a saida guarda a visao", () => {
+  assert.deepEqual([model.EMPTY_ROOM.viewShown, model.EMPTY_ROOM.filmstripVisible, model.EMPTY_ROOM.onStageId], ["stage", true, null], "o motor comeca no Palco, com a coluna");
+  let state = { ...model.EMPTY_ROOM, selfId: "e0e0e0e0" };
+  state = event(state, "tileViewChanged", { enabled: true });
+  assert.equal(state.viewShown, "grid");
+  state = event(state, "tileViewChanged", { enabled: false });
+  assert.equal(state.viewShown, "stage");
+  assert.equal(event(state, "tileViewChanged", {}), state, "sem o booleano, nada muda");
+  state = event(state, "filmstripDisplayChanged", { visible: false });
+  assert.equal(state.filmstripVisible, false);
+  assert.equal(event(state, "filmstripDisplayChanged", { visible: "nao" }), state);
+  state = event(state, "filmstripDisplayChanged", { visible: true });
+  assert.equal(state.filmstripVisible, true);
+
+  // Quem esta no video grande: o id lido do IFrame API (a tela compartilhada `<id>-v1` tambem); fora do formato, ninguem.
+  state = model.liveRoomReducer(state, { id: "c0c0c0c0", type: "onStage" });
+  assert.equal(state.onStageId, "c0c0c0c0");
+  assert.equal(model.liveRoomReducer(state, { id: "e0e0e0e0-v1", type: "onStage" }).onStageId, "e0e0e0e0-v1");
+  assert.equal(model.liveRoomReducer(state, { id: "<b>", type: "onStage" }).onStageId, null);
+  assert.equal(model.liveRoomReducer(state, { id: null, type: "onStage" }).onStageId, null);
+
+  // Saiu da sala: tudo zera menos a visao e a coluna (o mesmo iframe pode voltar com o motor como estava).
+  const grade = event(event(state, "tileViewChanged", { enabled: true }), "filmstripDisplayChanged", { visible: false });
+  const saiu = event(grade, "videoConferenceLeft", {});
+  assert.deepEqual(saiu, { ...model.EMPTY_ROOM, filmstripVisible: false, viewShown: "grid" });
+  // O primeiro sinal de um iframe novo: o Palco com a coluna e ninguem lido no video grande; o resto fica.
+  const novo = model.liveRoomReducer(grade, { type: "frame" });
+  assert.deepEqual([novo.viewShown, novo.filmstripVisible, novo.onStageId], ["stage", true, null]);
+  assert.equal(novo.selfId, grade.selfId);
+});
+
+/* ------------------------------------------------------------------------------------------------
  * O vigia da tela (docs/31 §5.4): quem compartilha, os papeis pelo getRoomsInfo e quem tem a tela parada
  * ---------------------------------------------------------------------------------------------- */
 

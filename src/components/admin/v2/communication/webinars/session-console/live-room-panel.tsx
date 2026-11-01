@@ -1,9 +1,10 @@
 "use client";
 
-import { DoorOpen, LogIn, RefreshCw, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
+import { filmstripStep, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import { CONSOLE_EXTRA_EVENTS, JITSI_LISTENED_EVENTS, liveConfigOverwrite, liveInterfaceConfigOverwrite, tokenRefreshDelayMs, type ConsoleListenedEvent, type LiveEmbedLook } from "@/lib/jitsi-room-config";
@@ -13,7 +14,6 @@ import type { ConsoleWebinar } from "@/server/webinars/console-queries";
 import {
   CONSOLE_ROOM_RULES,
   EMPTY_ROOM,
-  LIVE_CONSOLE_COPY,
   browserRecordingChange,
   consoleRoomRole,
   desiredLobby,
@@ -36,7 +36,6 @@ import {
 } from "@/server/webinars/live-console-model";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
-import { StatusChip } from "../../../status-chip";
 import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 
 // A sala da Live ao vivo no console (docs/30 §1.4, §2.4, §6.3, §6.4 e §8.1; fase 3): o hook useLiveRoom pede o token
@@ -58,9 +57,14 @@ import { LIVE_SETTINGS_CARD_ID, LiveSettingsCard } from "./live-settings-card";
 // tambem os muda); a Equipe no console nao tem barra de midia (docs/30 §1.4, pendencia).
 // O tema do console (docs/31 V2-12) entra no iframe pelo `look` so na montagem, como na sala do aluno: o
 // configOverwrite e o interfaceConfigOverwrite mudam com ele, mas o useJitsiMeet nao remonta por isso.
-// LiveRoomPanel desenha, na coluna do palco do console V2, a situacao da sala, o botao Configurações (o card abre acima
-// do palco) e o palco; os controles (live-controls.tsx) ficam embaixo, no lugar da barra.
-// Nenhum texto cita o motor da sala.
+// O palco (docs/31 V2-4, V2-13 e V2-A5; console-stage.tsx) le daqui o que o motor mostra: o Palco ou a Grade
+// (tileViewChanged), a coluna de miniaturas (filmstripDisplayChanged) e quem esta no video grande (o largeVideoChanged
+// chega sem dados: o id vem de onStageParticipantOf, a acao `onStage`). O primeiro sinal de um iframe novo (Tentar de
+// novo, Entrar na sala) volta isso ao padrao do motor (a acao `frame`) e solta o toggleFilmStrip que esperava; o
+// syncFilmstrip manda um toggleFilmStrip por vez, so quando o que o palco quer difere do que o motor mostra.
+// Ate a barra de quem apresenta (G6), o botao Configurações fica provisorio ao lado dos controles embaixo do palco
+// (LiveSettingsToggle), com o card logo depois dele, e a frase da sala de espera fica entre o palco e os controles
+// (LiveLobbyNotice). Nenhum texto cita o motor da sala.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const ANCHOR_RETRIES = 3;
@@ -138,6 +142,12 @@ export type LiveRoomHandle = {
   /** A propria camera no ar (videoMuteStatusChanged), dentro da sala. */
   videoOn: boolean;
   startTesting: () => void;
+  /**
+   * A coluna de miniaturas pela largura (o co-apresentador e a Equipe, consoleColumnPolicy): o toggleFilmStrip so quando
+   * o que o palco quer difere do que o motor mostra (filmstripStep) e um por vez (o seguinte espera a resposta do motor:
+   * o comando inverte a coluna, dois seguidos a deixariam como estava).
+   */
+  syncFilmstrip: (input: { visible: boolean; wanted: boolean }) => void;
   /** Liga ou desliga a sala de espera agora (so manda quando muda). */
   syncLobby: (value: boolean) => void;
   testing: boolean;
@@ -212,6 +222,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const leftCountRef = useRef(0);
   /** Quem ja recebeu o pedido de parar a tela, ate sair de `sharing` (o vigia nao repete o mesmo pedido). */
   const stoppedRef = useRef(new Set<string>());
+  /** O iframe do ultimo sinal: o primeiro sinal de um iframe novo volta a visao e a coluna ao padrao do motor. */
+  const signalFrameRef = useRef<JitsiMeetApi | null>(null);
+  /** O `filmstripVisible` de quando o ultimo toggleFilmStrip saiu (nulo: nenhum esperando a resposta do motor). */
+  const filmstripSentRef = useRef<boolean | null>(null);
   const sessionId = session?.id ?? null;
   const status = session?.status ?? "scheduled";
   const meetConfigured = enabled && live?.meetConfigured === true && token.error !== "meet_unconfigured";
@@ -319,7 +333,20 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
 
   const onEvent = useCallback(
     (name: ConsoleListenedEvent, payload: unknown) => {
-      dispatch({ name, nowMs: Date.now(), payload, type: "event" });
+      const frame = frameRef.current?.current ?? null;
+      if (frame !== null && frame !== signalFrameRef.current) {
+        // O primeiro sinal de um iframe novo: o motor dele comeca no Palco, com a coluna (inclusive o seguir a visao que
+        // chega antes do videoConferenceJoined parte dai), e nenhum toggleFilmStrip do anterior espera.
+        signalFrameRef.current = frame;
+        filmstripSentRef.current = null;
+        dispatch({ type: "frame" });
+      }
+      if (name === "largeVideoChanged") {
+        // O motor manda sem dados: o id de quem esta no video grande fica no IFrame API.
+        dispatch({ id: onStageParticipantOf(frame), type: "onStage" });
+      } else {
+        dispatch({ name, nowMs: Date.now(), payload, type: "event" });
+      }
       if (name === "videoConferenceLeft" || name === "readyToClose") {
         setupDone.current = false;
         lobbySent.current = null;
@@ -507,6 +534,18 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     [command]
   );
 
+  const syncFilmstrip = useCallback(
+    (step: { visible: boolean; wanted: boolean }) => {
+      if (filmstripStep(step) === null || filmstripSentRef.current === step.visible) {
+        return;
+      }
+      if (command("toggleFilmStrip")) {
+        filmstripSentRef.current = step.visible;
+      }
+    },
+    [command]
+  );
+
   const escolher = devices.escolher;
   const chooseDevice = (kind: DeviceKind, option: DeviceOption) => presenter && deviceSectionReady(deviceSettings, kind) && escolher(kind, option);
 
@@ -529,6 +568,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     setSettingsOpen,
     settingsOpen,
     startTesting: () => setTesting(true),
+    syncFilmstrip,
     syncLobby,
     testing,
     videoOn: joined && videoOn,
@@ -536,135 +576,65 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   };
 }
 
-type LiveRoomPanelProps = {
-  busy: boolean;
-  handle: LiveRoomHandle;
-  live: LiveConsoleSnapshot;
-  session: WebinarSession;
-  /** As classes do palco (consoleSkeleton): 16:9 abaixo de lg, a altura que sobra da coluna a partir de lg. */
-  stageClassName: string;
-  /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */
-  stageRef: RefObject<HTMLDivElement | null>;
-};
-
-function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]): string | null {
-  if (!handle.meetConfigured) {
-    return copy.salaEmBreve;
-  }
-  if (status === "ended" || status === "cancelled") {
-    return WEBINAR_COPY.sala.encerrada;
-  }
-  if (status === "scheduled" && !handle.testing) {
-    return copy.abrirSalaTexto;
-  }
-  if (handle.tokenError === "failed" && handle.frameStatus === "idle") {
-    return WEBINAR_COPY.aoVivo.erroAbrir;
-  }
-  switch (handle.frameStatus) {
-    case "joined":
-      return null;
-    case "failed":
-      return WEBINAR_COPY.aoVivo.naoConseguimosVoltar;
-    case "left":
-      return null;
-    default:
-      return WEBINAR_COPY.aoVivo.abrindo;
-  }
-}
-
 /**
- * O palco do console: a situacao da sala (Gravando, sala trancada, quantas pessoas), o botao Configurações de quem
- * apresenta, o iframe da sala e o aviso da sala de espera. O card de aparelhos abre ACIMA do palco: logo depois do
- * botao no teclado (o Tab do botao entra no card, nao nos botoes da barra do iframe, e o Esc fica a mao) e na tela
- * (abaixo do palco ele ficaria fora da tela e o clique pareceria nao fazer nada). Fechar pelo proprio botao manda o
- * foco a ele antes de o card sumir (o WebKit nao foca o botao no clique). O no [data-live-stage] nunca muda de pai.
+ * O botao Configurações de quem apresenta (o Apresentador e o co-apresentador, com a sala configurada), provisorio ao
+ * lado dos controles embaixo do palco ate a barra de quem apresenta (G6), com o card logo depois dele: no teclado, o
+ * Tab do botao entra no card. Fechar pelo proprio botao manda o foco a ele antes de o card sumir (o WebKit nao foca o
+ * botao no clique).
  */
-export function LiveRoomPanel({ busy, handle, live, session, stageClassName, stageRef }: LiveRoomPanelProps) {
+export function LiveSettingsToggle({ handle }: { handle: LiveRoomHandle }) {
   const settingsButton = useRef<HTMLButtonElement | null>(null);
-  const message = frameMessage(handle, session.status);
-  const showSettings = presents(handle.role) && handle.meetConfigured;
-  const recording = handle.room.recording.on || live.recorder.status === "recording";
-  const notice = lobbyNotice({ lobby: handle.lobby, roomLocked: live.roomLocked, status: session.status });
-  const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
-  const showRetry = handle.frameStatus === "failed" || (handle.tokenError === "failed" && handle.frameStatus === "idle");
-
-  const hasStatus = recording || live.roomLocked || handle.joined || showSettings;
+  if (!presents(handle.role) || !handle.meetConfigured) {
+    return null;
+  }
 
   return (
-    <>
-      {hasStatus ? (
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2" data-live-room-status="">
-          {recording ? <StatusChip tone="error">{copy.gravador.recording}</StatusChip> : null}
-          {live.roomLocked ? <StatusChip tone="warning">{copy.salaTrancada}</StatusChip> : null}
-          {handle.joined ? <StatusChip tone="muted">{LIVE_CONSOLE_COPY.naSala(handle.room.people.length + 1)}</StatusChip> : null}
-          {showSettings ? (
-            <Button
-              aria-controls={LIVE_SETTINGS_CARD_ID}
-              aria-expanded={handle.settingsOpen}
-              className="ml-auto px-3"
-              onClick={() => {
-                if (handle.settingsOpen) {
-                  settingsButton.current?.focus();
-                }
-                handle.setSettingsOpen(!handle.settingsOpen);
-              }}
-              ref={settingsButton}
-              type="button"
-              variant="secondary"
-            >
-              <Settings2 aria-hidden="true" className="size-4" />
-              {copy.configuracoes}
-            </Button>
-          ) : null}
+    <div className="flex min-w-0 flex-col items-start gap-3" data-live-settings-toggle="">
+      <Button
+        aria-controls={LIVE_SETTINGS_CARD_ID}
+        aria-expanded={handle.settingsOpen}
+        className="px-3"
+        onClick={() => {
+          if (handle.settingsOpen) {
+            settingsButton.current?.focus();
+          }
+          handle.setSettingsOpen(!handle.settingsOpen);
+        }}
+        ref={settingsButton}
+        type="button"
+        variant="secondary"
+      >
+        <Settings2 aria-hidden="true" className="size-4" />
+        {copy.configuracoes}
+      </Button>
+      {handle.settingsOpen ? (
+        <div className="w-full min-w-0">
+          <LiveSettingsCard
+            cameraOn={handle.videoOn}
+            devices={handle.devices}
+            onChoose={handle.chooseDevice}
+            onClose={() => {
+              settingsButton.current?.focus();
+              handle.setSettingsOpen(false);
+            }}
+            sections={handle.deviceSettings}
+          />
         </div>
       ) : null}
-      {showSettings && handle.settingsOpen ? (
-        <LiveSettingsCard
-          cameraOn={handle.videoOn}
-          devices={handle.devices}
-          onChoose={handle.chooseDevice}
-          onClose={() => {
-            settingsButton.current?.focus();
-            handle.setSettingsOpen(false);
-          }}
-          sections={handle.deviceSettings}
-        />
-      ) : null}
-      <div className={stageClassName} data-console-slot="stage" data-live-frame-status={handle.frameStatus}>
-        <div aria-label={WEBINAR_COPY.aoVivo.palco} className="absolute inset-0 [&_iframe]:size-full [&_iframe]:border-0" data-live-stage="" ref={stageRef} role="region" />
-        {message ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center" data-live-stage-message="">
-            <p className="max-w-md text-sm leading-5 text-white/85">{message}</p>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {canTest ? (
-                <Button className="px-3" disabled={busy} onClick={handle.startTesting} type="button" variant="secondary">
-                  <DoorOpen aria-hidden="true" className="size-4" />
-                  {copy.testarSala}
-                </Button>
-              ) : null}
-              {showRetry ? (
-                <Button className="px-3" onClick={handle.retry} type="button" variant="secondary">
-                  <RefreshCw aria-hidden="true" className="size-4" />
-                  {WEBINAR_COPY.sala.tentarDeNovo}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-        {handle.frameStatus === "left" ? (
-          <div className="absolute inset-0 flex items-center justify-center p-4">
-            <Button className="px-3" onClick={handle.retry} type="button" variant="secondary">
-              <LogIn aria-hidden="true" className="size-4" />
-              {WEBINAR_COPY.aoVivo.entrarNaSala}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      {notice ? (
-        <p className={cn("shrink-0 text-[13px] leading-5", live.roomLocked ? "text-[var(--warning)]" : "text-[var(--text-secondary)]")} data-live-notice="">
-          {notice}
-        </p>
-      ) : null}
-    </>
+    </div>
+  );
+}
+
+/** A frase da sala de espera, da tranca e da Sessão de prática (lobbyNotice), entre o palco e os controles. */
+export function LiveLobbyNotice({ handle, live, session }: { handle: Pick<LiveRoomHandle, "lobby">; live: Pick<LiveConsoleSnapshot, "roomLocked">; session: Pick<WebinarSession, "status"> }) {
+  const notice = lobbyNotice({ lobby: handle.lobby, roomLocked: live.roomLocked, status: session.status });
+  if (!notice) {
+    return null;
+  }
+
+  return (
+    <p className={cn("shrink-0 text-[13px] leading-5", live.roomLocked ? "text-[var(--warning)]" : "text-[var(--text-secondary)]")} data-live-notice="">
+      {notice}
+    </p>
   );
 }

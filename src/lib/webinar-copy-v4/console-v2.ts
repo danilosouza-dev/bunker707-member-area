@@ -24,5 +24,13 @@ export const CONSOLE_V2_COPY = {
   /** Fecha o aviso de erro da faixa abaixo do topo. */
   fecharAviso: "Fechar",
   /** O esqueleto da tela enquanto o console carrega, so para o leitor de tela. */
-  carregando: "Carregando o console da sessão"
+  carregando: "Carregando o console da sessão",
+
+  /* O palco (V2-4 e V2-13): os selos sobre o video. */
+  palco: {
+    /** O selo de baixo a esquerda: "Você · Apresentador", "Você · Co-apresentador" ou "Ana · Apresentador". */
+    selo: (nome: string, papel: string) => `${nome} · ${papel}`,
+    /** O papel do co-apresentador no proprio selo (uma frase so, sem feminino). */
+    coApresentador: "Co-apresentador"
+  }
 } as const;

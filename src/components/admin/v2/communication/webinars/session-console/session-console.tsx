@@ -21,7 +21,7 @@ import {
   type ConsoleSnapshot
 } from "@/server/webinars/console-model";
 import type { SessionConsoleData } from "@/server/webinars/console-queries";
-import { consolePresenceBadge, consoleTopActionsFor } from "@/server/webinars/console-v2-model";
+import { consolePresenceBadge, consoleStageTopLeft, consoleTopActionsFor } from "@/server/webinars/console-v2-model";
 import { editAssistantAnswer } from "@/server/webinars/assistant-actions";
 import type { AttendanceSnapshot } from "@/server/webinars/assistant-queries";
 import { WEBINAR_ADMIN_COPY, webinarAdminHref, webinarConsoleHref, webinarReportHref, type WebinarPermissions } from "@/server/webinars/editor-model";
@@ -62,6 +62,7 @@ import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
 import { ConsoleScript } from "./console-script";
 import { ConsoleShell } from "./console-shell";
+import { ConsoleStage } from "./console-stage";
 import { ConsoleTopBar, type ConsolePolling } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
@@ -69,7 +70,7 @@ import { LiveControls } from "./live-controls";
 import { LiveHands } from "./live-hands";
 import { LivePersonMenu, LiveParticipants, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
-import { LiveRoomPanel, useLiveRoom } from "./live-room-panel";
+import { LiveLobbyNotice, LiveSettingsToggle, useLiveRoom } from "./live-room-panel";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
@@ -91,8 +92,10 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // propria), o topo enxuto (ConsoleTopBar: a seta, o titulo, o seletor, o Atualizar, o momento e os presentes, o Tema e
 // os botoes de situacao de consoleTopActionsFor) e o esqueleto de consoleSkeleton, que nunca move o iframe. O tema vai
 // ao iframe so na montagem (o look); trocar com a sala no ar nao remonta. As confirmacoes abrem no portal da raiz
-// (container={portalRef}). Ate as proximas fatias, o palco de antes com os controles embaixo fica na coluna do palco
-// e os cards de antes ficam empilhados no painel.
+// (container={portalRef}). Na live, o palco (console-stage.tsx, docs/31 V2-4) leva o momento ("Ao vivo · 00:42:10"),
+// o Gravando, os presentes com o pico e quem esta no video grande, e o topo fica sem esses selos; na gravada e no
+// Replay (sem palco) o momento e os presentes continuam no topo. Ate as proximas fatias, os controles de antes e o
+// botao Configurações ficam embaixo do palco e os cards de antes ficam empilhados no painel.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -520,6 +523,10 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       ? consoleTopActionsFor({ canPublish: permissions.canPublish, controls: room.controls, kind: session.kind, phase, status: session.status })
       : [];
   const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: true });
+  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
+  // O nome do apresentador da pagina para o selo de outro moderador no video grande; no console do proprio
+  // Apresentador, nenhum (ele mesmo e "Você", e o outro moderador ali e o co-apresentador, pelo nome da sala).
+  const presenterName = live && webinar.hostUserId && webinar.hostUserId !== currentUserId ? (live.people.find((person) => person.userId === webinar.hostUserId)?.displayName ?? null) : null;
 
   function onTopAction(id: "end_live" | "end_session" | "open_room" | "open_session" | "start") {
     switch (id) {
@@ -571,7 +578,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       busyKey={busyKey}
       canWrite={permissions.canWrite}
       className={skeleton.top}
-      clockLabel={session && phase ? consoleClockLabel(clockMs, phase) : ""}
+      clockLabel={session && phase && !live ? consoleClockLabel(clockMs, phase) : ""}
       disabledTitle={sessionDisabledTitle}
       editorHref={webinarAdminHref(webinar.id)}
       onAction={onTopAction}
@@ -580,7 +587,7 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
       onRefresh={() => void refresh()}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       polling={polling}
-      presentLabel={session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null}
+      presentLabel={live ? null : presentLabel}
       reportHref={webinarReportHref(webinar.id)}
       roomLocked={live?.roomLocked === true}
       sessionId={sessionId}
@@ -603,9 +610,23 @@ export function SessionConsole({ currentUserId, data, nonce = null, permissions,
           <div className={skeleton.body} data-console-slot="body">
             {live && skeleton.stageColumn ? (
               <div className={skeleton.stageColumn} data-console-slot="stage-column" data-live-console="">
-                <LiveRoomPanel busy={busyKey !== null} handle={room} live={live} session={session} stageClassName={skeleton.stage ?? ""} stageRef={stageRef} />
+                <ConsoleStage
+                  busy={busyKey !== null}
+                  className={skeleton.stage ?? ""}
+                  handle={room}
+                  live={live}
+                  presentLabel={presentLabel}
+                  presenterName={presenterName}
+                  session={session}
+                  stageRef={stageRef}
+                  topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
+                />
+                <LiveLobbyNotice handle={room} live={live} session={session} />
                 <div className={skeleton.bar ?? ""} data-console-slot="bar">
-                  <LiveControls handle={room} />
+                  <div className="flex min-w-0 flex-col gap-4">
+                    <LiveControls handle={room} />
+                    <LiveSettingsToggle handle={room} />
+                  </div>
                 </div>
               </div>
             ) : null}

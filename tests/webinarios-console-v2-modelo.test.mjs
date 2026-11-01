@@ -197,3 +197,66 @@ test("consoleTopActionsFor: a matriz dos botoes de situacao do topo pela especie
   // A ordem fixa do topo.
   assert.deepEqual(v2.CONSOLE_TOP_ACTIONS, ["open_room", "start", "lock", "end_live", "open_session", "end_session", "report"]);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * G5 (V2-4, V2-13 e V2-A5): o palco da live no console
+ * ---------------------------------------------------------------------------------------------- */
+
+const { EMPTY_ROOM } = await import("../src/server/webinars/live-console-model.ts");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
+
+// Os ids de endpoint do motor sao hex de 8 caracteres, sem hifen; a tela compartilhada e o participante virtual `<id>-v1`.
+const EU = "e0e0e0e0";
+const CO = "c0c0c0c0";
+const ALUNA = "a1a1a1a1";
+const sala = (extra = {}) => ({
+  ...EMPTY_ROOM,
+  people: [
+    { id: CO, name: "Co T." },
+    { id: ALUNA, name: "Ana M." }
+  ],
+  roles: { [ALUNA]: "participant", [CO]: "moderator" },
+  selfId: EU,
+  ...extra
+});
+const selo = (room, extra = {}) => v2.consoleStageBadgeFor({ joined: true, presenterName: "Produtor T.", role: "host", room, ...extra });
+
+test("consoleStageBadgeFor: o proprio console no video grande e \"Você\" com o papel dele (tambem a propria tela); outro moderador, o nome do apresentador da pagina; sem papel, um aluno, a Grade ou fora da sala, nada", () => {
+  assert.deepEqual(selo(sala({ onStageId: EU })), { name: "Você", role: "Apresentador" });
+  assert.deepEqual(selo(sala({ onStageId: `${EU}-v1` })), { name: "Você", role: "Apresentador" }, "a tela do Apresentador vale pelo dono");
+  assert.deepEqual(selo(sala({ onStageId: EU }), { role: "co_host" }), { name: "Você", role: "Co-apresentador" });
+  assert.deepEqual(selo(sala({ onStageId: EU }), { role: "team" }), { name: "Você", role: WEBINAR_COPY.sala.selos.equipe });
+  // Outro moderador (o papel pelo participantRoleChanged ou pelo getRoomsInfo): o nome do apresentador da pagina; sem
+  // ele, o nome com que essa pessoa esta na sala.
+  assert.deepEqual(selo(sala({ onStageId: CO }), { role: "co_host" }), { name: "Produtor T.", role: "Apresentador" });
+  assert.deepEqual(selo(sala({ onStageId: `${CO}-v1` }), { presenterName: null }), { name: "Co T.", role: "Apresentador" });
+  assert.equal(selo(sala({ onStageId: CO, people: [] }), { presenterName: "  " }), null, "sem nome nenhum, nada");
+  // O dono sem papel lido (quem ja moderava quando o console entrou, antes do getRoomsInfo): nada, nunca por palpite.
+  assert.equal(selo(sala({ onStageId: CO, roles: {} })), null);
+  assert.equal(selo(sala({ onStageId: ALUNA })), null, "um aluno no video grande");
+  assert.equal(selo(sala({ onStageId: EU, viewShown: "grid" })), null, "na Grade nao ha video grande");
+  assert.equal(selo(sala({ onStageId: null })), null, "o motor ainda nao disse quem esta ali");
+  assert.equal(selo(sala({ onStageId: EU }), { joined: false }), null, "fora da sala");
+  // A frase do selo: o nome e o papel, com o ponto do meio.
+  assert.equal(WEBINAR_COPY.consoleV2.palco.selo("Você", "Co-apresentador"), "Você · Co-apresentador");
+});
+
+test("consoleColumnPolicy: o Apresentador deixa a coluna de miniaturas com o motor (o seguir a visao levaria a escolha a todos); o co-apresentador e a Equipe seguem a largura, como o aluno", () => {
+  assert.equal(v2.consoleColumnPolicy("host"), "engine");
+  assert.equal(v2.consoleColumnPolicy("co_host"), "width");
+  assert.equal(v2.consoleColumnPolicy("team"), "width");
+});
+
+test("consoleStageTopLeft: no ar com o inicio, \"Ao vivo · 00:42:10\" pelo relogio do servidor; agendada, \"Começa em\"; encerrada, \"Durou\"; sem frase, nada", () => {
+  const now = Date.parse("2026-11-05T23:42:10.000Z");
+  const base = { endedAt: null, kind: "live", recordingAnchorAt: null, scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: "2026-11-05T23:00:00.000Z", status: "live" };
+  assert.deepEqual(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: base, skewMs: 0 }), { kind: "on_air", label: "Ao vivo · 00:42:10", short: "00:42:10" });
+  // O aparelho 10 s atrasado: o skew do servidor corrige.
+  assert.equal(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now - 10_000, session: base, skewMs: 10_000 })?.label, "Ao vivo · 00:42:10");
+  const agendada = { ...base, scheduledAt: "2026-11-05T23:50:00.000Z", startedAt: null, status: "scheduled" };
+  assert.deepEqual(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: agendada, skewMs: 0 }), { kind: "label", label: "Começa em 7:50" });
+  const encerrada = { ...base, endedAt: "2026-11-06T00:00:00.000Z", status: "ended" };
+  assert.deepEqual(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now + 3_600_000, session: encerrada, skewMs: 0 }), { kind: "label", label: "Durou 1:00:00" });
+  assert.equal(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: { ...base, status: "cancelled" }, skewMs: 0 }), null, "cancelada");
+  assert.equal(v2.consoleStageTopLeft({ durationMs: 3_600_000, nowMs: now, session: { ...agendada, scheduledAt: "2026-11-05T23:00:00.000Z", status: "waiting" }, skewMs: 0 }), null, "na espera depois da hora, sem o inicio");
+});

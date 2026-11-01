@@ -31,8 +31,8 @@ import {
 // (recording_requested_at) e dispara sozinho quando o webhook manda `ready`. O `next start` do e2e roda como producao,
 // onde o duble do pedido ao GitHub (WEBINAR_RECORDER_DISPATCH=fake) nao vale: a maquina "pedida" e a sessao posta em
 // `preparing` no banco, como o jibri-up deixaria. O card Configurações de quem apresenta (docs/30 §1.4): a barra do
-// iframe do Apresentador com a engrenagem so de aparelhos, o fundo e sempre visivel; o botao Configurações abre o card
-// acima do palco, o microfone e o alto-falante chegam a sala pelos metodos da api so com o id, a camera so depois de ligada na
+// iframe do Apresentador com a engrenagem so de aparelhos, o fundo e sempre visivel; o botao Configurações (embaixo do
+// palco) abre o card logo depois dele, o microfone e o alto-falante chegam a sala pelos metodos da api so com o id, a camera so depois de ligada na
 // barra do iframe (antes, a frase de liga-la), Ligar a redução de ruído vira setNoiseSuppressionEnabled({ enabled }),
 // Desfocar / Tirar o efeito do fundo, Inverter a minha imagem e Mais opções de fundo sao acoes sem estado e nada e
 // reaplicado (nem o ruido depois da troca do microfone, nem o desfoque na camera que liga), nada de setVideoQuality
@@ -42,7 +42,9 @@ import {
 // saida da sala cancela o getRoomsInfo que esperava (o iframe que saiu responderia com o proprio console). O console V2
 // (docs/31 V2-12 e V2-13): a tela cheia, sem a barra lateral e sem a barra superior do admin, a seta de voltar ao
 // editor, o Trancar no topo, o tema (escuro por padrao, guardado ao recarregar, levado ao iframe so na montagem: trocar
-// com a sala no ar nao remonta) e a confirmacao de Encerrar live no portal dentro da raiz do console, no tema dela.
+// com a sala no ar nao remonta) e a confirmacao de Encerrar live no portal dentro da raiz do console, no tema dela. O
+// palco do console (docs/31 V2-4 e V2-A5): o selo Gravando no palco e a coluna de miniaturas do Apresentador com o
+// motor (nenhum toggleFilmStrip pela propria largura), com os selos de cima a direita descontando a coluna.
 
 const { id, roomName, sessaoId } = LIVE_AO_VIVO_DE_TESTE;
 const consoleAoVivo = WEBINAR_COPY.consoleAoVivo;
@@ -202,7 +204,8 @@ test.describe("produtor", () => {
     const sessao = await sessaoAoVivoNoBanco();
     expect(sessao.recorder_status).toBe("recording");
     expect(Math.abs(Date.parse(sessao.recording_anchor_at ?? "") - clique)).toBeLessThan(60_000);
-    await expect(page.getByText(consoleAoVivo.gravador.recording, { exact: true }).first()).toBeVisible();
+    // O selo Gravando e o do palco (docs/31 V2-4), em cima a esquerda, por cima do video.
+    await expect(page.locator('[data-console-slot="stage"]').getByTestId("live-recording")).toBeVisible();
   });
 
   test("Gravar antes de o gravador ficar pronto: Preparando a gravacao, o clique na fila e a gravacao comeca sozinha quando o webhook manda ready", async ({ page }) => {
@@ -239,10 +242,10 @@ test.describe("produtor", () => {
     await expect.poll(async () => (await sessaoAoVivoNoBanco()).recording_anchor_at !== null, { timeout: 15_000 }).toBe(true);
     const sessao = await sessaoAoVivoNoBanco();
     expect([sessao.recorder_status, sessao.recording_requested_at]).toEqual(["recording", null]);
-    await expect(page.getByText(consoleAoVivo.gravador.recording, { exact: true }).first()).toBeVisible();
+    await expect(page.locator('[data-console-slot="stage"]').getByTestId("live-recording")).toBeVisible();
   });
 
-  test("Configurações do console: a engrenagem e o fundo na barra do iframe; o card (acima do palco) troca o microfone, o alto-falante e (com a camera ligada) a camera pelo id; ruido, fundo e espelho sao acoes sem estado e nada e reaplicado; sem setVideoQuality; Esc e o proprio botao fecham com o foco no botao", async ({ page }) => {
+  test("Configurações do console: a engrenagem e o fundo na barra do iframe; o card (logo depois do botao, embaixo do palco) troca o microfone, o alto-falante e (com a camera ligada) a camera pelo id; ruido, fundo e espelho sao acoes sem estado e nada e reaplicado; sem setVideoQuality; Esc e o proprio botao fecham com o foco no botao", async ({ page }) => {
     const sala = await abrirConsole(page);
     const montagem = await entrarComoApresentador(sala);
 
@@ -334,13 +337,17 @@ test.describe("produtor", () => {
     await expect(card.getByRole("slider")).toHaveCount(0);
     await expect(card.getByRole("checkbox")).toHaveCount(0);
 
-    // O card vem logo depois do botao no teclado (acima do palco, antes dos botoes da barra do iframe).
+    // O card vem logo depois do botao no teclado (o botao fica embaixo do palco, ao lado dos controles, ate a barra de
+    // quem apresenta).
     const ordem = await page.evaluate(() => {
       const cartao = document.querySelector("[data-live-settings]");
+      const botaoDoCard = document.querySelector('[aria-controls="console-live-settings"]');
       const palco = document.querySelector("[data-live-stage]");
-      return cartao && palco ? cartao.compareDocumentPosition(palco) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
+      return cartao && botaoDoCard && palco
+        ? Boolean(botaoDoCard.compareDocumentPosition(cartao) & Node.DOCUMENT_POSITION_FOLLOWING) && Boolean(palco.compareDocumentPosition(botaoDoCard) & Node.DOCUMENT_POSITION_FOLLOWING)
+        : false;
     });
-    expect(ordem, "o card antes do palco").toBeTruthy();
+    expect(ordem, "o palco, o botao e o card, nessa ordem").toBe(true);
 
     // O foco no card (o WebKit nao foca o botao no clique): o Esc fecha e devolve o foco ao Configurações.
     await maisFundos.focus();
@@ -468,5 +475,30 @@ test.describe("produtor", () => {
     await confirmacao.getByRole("button", { exact: true, name: consoleAoVivo.cancelar }).click();
     await expect(confirmacao).toHaveCount(0);
     expect((await sessaoAoVivoNoBanco()).status).toBe("live");
+  });
+
+  test("a coluna de miniaturas do Apresentador fica com o motor (docs/31 V2-A5): a 1280 px, com o iframe abaixo de 1013 px, o console do host nunca manda toggleFilmStrip, e os presentes em cima a direita descontam a coluna", async ({ page }) => {
+    // A 1280 px o painel tem 360 px: o iframe fica com cerca de 872 px, abaixo dos 1013 px que a coluna pede.
+    await page.setViewportSize({ height: 720, width: 1280 });
+    const sala = await abrirConsole(page);
+    await entrarComoApresentador(sala);
+    const palco = page.locator('[data-console-slot="stage"]');
+    expect(await palco.locator("[data-live-stage]").evaluate((elemento) => Math.round(elemento.getBoundingClientRect().width))).toBeLessThan(1013);
+
+    // O motor mostra a coluna (o padrao dele): o console do Apresentador nao a tira, e os selos param antes dela.
+    await sala.disparar("filmstripDisplayChanged", { visible: true });
+    const margemDosSelos = () => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-right").trim());
+    await expect.poll(margemDosSelos).toBe("222px");
+    await expect(palco.locator('[data-room-badges="top-right"]')).toBeVisible();
+    await page.waitForTimeout(1_500);
+    expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip"), "nenhum toggleFilmStrip do Apresentador").toEqual([]);
+
+    // Na Grade nao ha coluna: os selos vao ate a borda, e nada muda no motor.
+    await sala.disparar("tileViewChanged", { enabled: true });
+    await expect.poll(margemDosSelos).toBe("0px");
+    await sala.disparar("tileViewChanged", { enabled: false });
+    await expect.poll(margemDosSelos).toBe("222px");
+    expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toEqual([]);
+    expect(await sala.montagens(), "o mesmo iframe").toBe(1);
   });
 });
