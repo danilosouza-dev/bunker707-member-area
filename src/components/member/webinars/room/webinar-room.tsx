@@ -801,7 +801,15 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         // A gaveta do vertical continua com o filtro e a ordem da aba e o desenho de antes.
         {...(vertical
           ? {}
-          : { filter: questionsFilter, look: "comment" as const, onCount: setQuestionsCount, onFilter: setQuestionsFilter, onOrder: setQuestionsOrder, order: questionsOrder })}
+          : {
+              filter: questionsFilter,
+              look: "comment" as const,
+              onCount: setQuestionsCount,
+              onFilter: setQuestionsFilter,
+              onOrder: setQuestionsOrder,
+              order: questionsOrder,
+              serverNowMs: nowMs + clock.skewMs
+            })}
       />
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como

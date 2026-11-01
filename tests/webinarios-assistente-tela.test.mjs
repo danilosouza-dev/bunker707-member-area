@@ -193,12 +193,29 @@ test("Falar com a equipe: o botao em pilula S de texto, sem icone; depois, o pro
 
 test("aba Perguntas: a resposta do Assistente leva o selo (e o 'Assistente:' do leitor de tela) e o pedido abaixo", () => {
   const pergunta = { anonymous: false, answerSource: "ai", answerText: "Sim, ha certificado.", answeredLive: false, body: "Tem certificado?", createdAt: new Date(NOW).toISOString(), displayName: "Ana S.", handoffRequested: false, id: "q1", mine: true, status: "answered", upvotes: 2, voted: false };
+  // A gaveta do vertical (look classic): o cartao de antes.
   const markup = render(RoomQuestionItem, { footer: createElement("span", { "data-rodape": "" }, "rodape"), onVote: noop, question: pergunta });
   assert.match(markup, /data-testid="question-answer-assistant"/);
   assert.match(textOf(markup), /Respondida por escrito Assistente Assistente: Sim, ha certificado\./);
   assert.match(markup, /data-rodape/);
   const daEquipe = render(RoomQuestionItem, { onVote: noop, question: { ...pergunta, answerSource: "team" } });
   assert.doesNotMatch(daEquipe, /question-answer-assistant/);
+
+  // A sala (look comment, Y10): a resposta fica no fio "1 resposta", no bloco #resposta-q1, presente mesmo fechado; o
+  // fio diz que foi por escrito, e o "Falar com a equipe" vai na linha de acoes da resposta.
+  /** O bloco da resposta, do #resposta- ate o fim do item. */
+  const respostaDe = (html) => html.slice(html.indexOf('id="resposta-q1">') + 'id="resposta-q1">'.length);
+  for (const threadOpen of [true, false]) {
+    const fio = render(RoomQuestionItem, { footer: createElement("span", { "data-rodape": "" }, "rodape"), look: "comment", onVote: noop, question: pergunta, threadOpen });
+    assert.match(fio, /<div class="[^"]*" data-testid="question-answer-assistant"( hidden="")? id="resposta-q1">/, `o bloco da resposta (aberto: ${threadOpen})`);
+    assert.equal(/data-testid="question-answer-assistant" hidden=""/.test(fio), !threadOpen);
+    assert.match(textOf(respostaDe(fio)), /^Assistente Assistente: Sim, ha certificado\. rodape/);
+    assert.match(respostaDe(fio), /data-rodape/, "o pedido na resposta");
+    assert.doesNotMatch(fio, /Respondida por escrito/);
+  }
+  const fioDaEquipe = render(RoomQuestionItem, { look: "comment", onVote: noop, question: { ...pergunta, answerSource: "team", mine: false }, threadOpen: false });
+  assert.doesNotMatch(fioDaEquipe, /question-answer-assistant/);
+  assert.match(textOf(respostaDe(fioDaEquipe)), /^Equipe Equipe: Sim, ha certificado\./);
 });
 
 /* ------------------------------------------------------------------------------------------------

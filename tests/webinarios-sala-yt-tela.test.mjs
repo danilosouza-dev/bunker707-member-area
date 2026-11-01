@@ -108,3 +108,115 @@ test("Y8: sem as props (a gaveta do vertical), as Perguntas tem o HTML de antes:
   assert.match(html, /<button aria-pressed="true" class="[^"]*" type="button">Mais votadas<\/button>/);
   assert.match(html, /<li class="py-6 text-center text-sm text-room-fg-subtle">Nenhuma pergunta ainda\.<\/li>/);
 });
+
+// Y10: a pergunta como o comentario do YouTube (spec §8.4 e §8.5): o polegar com o numero, a situacao na linha de
+// acoes e a resposta escrita no fio "1 resposta", aberto na minha e fechado nas outras, com a hora da resposta (V2-A66).
+const AGORA = Date.parse("2026-11-05T23:30:00.000Z");
+const pergunta = (id, extra = {}) => ({
+  anonymous: false,
+  answerSource: null,
+  answerText: null,
+  answeredAt: null,
+  answeredLive: false,
+  body: `pergunta ${id}`,
+  createdAt: new Date(AGORA - 2 * 60_000).toISOString(),
+  displayName: "Ana M.",
+  id,
+  mine: false,
+  status: "open",
+  upvotes: 0,
+  voted: false,
+  ...extra
+});
+const LISTA = [
+  pergunta("q1", { answeredLive: true, status: "answered", upvotes: 18, voted: true }),
+  pergunta("q2", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), mine: true, status: "answered" }),
+  pergunta("q3", { answerSource: "ai", answerText: "Sim, ha certificado.", answeredAt: new Date(AGORA - 60_000).toISOString(), displayName: "Caio F.", status: "answered", upvotes: 2 }),
+  pergunta("q4", { anonymous: true, displayName: "Aluno 123" }),
+  pergunta("q5", { mine: true, status: "dismissed" })
+];
+const listaDePerguntas = (extra = {}) => render(questionsModule.RoomQuestionList, { emptyPhrase: "vazio", footerFor: () => null, onVote: noop, questions: LISTA, serverNowMs: AGORA, ...extra });
+/** O item de uma pergunta, do <li data-room-question> ate o proximo item (ou o fim da lista). */
+const itemDe = (html, id) => {
+  const inicio = html.lastIndexOf("<li", html.indexOf(`data-room-question="${id}"`));
+  const fim = html.indexOf('<li class="', inicio + 3);
+  return html.slice(inicio, fim === -1 ? undefined : fim);
+};
+
+test("Y10: a pergunta votada: o polegar Curtir com aria-pressed e o icone cheio, o numero so para quem ve e o sr-only '18 curtidas'; 'Respondida ao vivo' logo depois do numero, sem margem propria; sem cartao", () => {
+  const html = listaDePerguntas();
+  assert.match(html, /^<ul class="min-h-0 flex-1 overflow-y-auto px-4 pt-2">/, "a lista sem cartao, 16 px dos lados");
+  const q1 = itemDe(html, "q1");
+  assert.doesNotMatch(q1, /rounded-\[12px\]|bg-room-surface-2|border-room-border/, "sem o cartao de antes");
+  const voto = q1.match(/<button aria-pressed="true" aria-label="Curtir" class="([^"]*)" type="button"><svg[^>]*>/);
+  assert.ok(voto, "o voto com o nome fixo Curtir e aria-pressed");
+  const classes = classesDe(`<b class="${voto[1]}">`);
+  for (const classe of ["size-8", "rounded-full", "bg-transparent", "hover:bg-room-control-hover", "max-lg:size-11", "[&_svg]:size-[18px]"]) {
+    assert.ok(classes.includes(classe), `o voto tem ${classe}`);
+  }
+  assert.match(voto[0], /fill="currentColor"[^>]*stroke-width="2"[^>]*lucide-thumbs-up/, "o polegar cheio, traco 2");
+  // O numero (aria-hidden, no tom forte quando votado), o sr-only e a situacao em seguida, sem margem.
+  const linha = q1.match(/<\/button><span aria-hidden="true" class="([^"]*)">18<\/span><span class="sr-only">18 curtidas<\/span><span class="([^"]*)">Respondida ao vivo<\/span><\/div>/);
+  assert.ok(linha, "o numero, o sr-only e a situacao, nessa ordem");
+  assert.deepEqual(classesDe(`<b class="${linha[1]}">`).sort(), ["leading-[18px]", "mr-2", "tabular-nums", "text-room-fg", "text-xs"]);
+  assert.deepEqual(classesDe(`<b class="${linha[2]}">`).sort(), ["leading-[18px]", "text-room-success-fg", "text-xs"], "a situacao sem margem propria");
+  assert.doesNotMatch(q1, /aria-expanded|resposta-q1/, "so ao vivo, sem fio");
+
+  // Nao votada: o polegar vazio e o numero no tom fraco.
+  const q3 = itemDe(html, "q3");
+  assert.match(q3, /<button aria-pressed="false" aria-label="Curtir"[^>]*><svg[^>]*fill="none"/);
+  assert.match(q3, /<span aria-hidden="true" class="mr-2 text-xs leading-\[18px\] tabular-nums text-room-fg-subtle">2<\/span><span class="sr-only">2 curtidas<\/span>/);
+  // Dispensada (so o autor a ve), no tom fraco.
+  assert.match(itemDe(html, "q5"), /<span class="text-xs leading-\[18px\] text-room-fg-subtle">Dispensada<\/span>/);
+  // Nada de "Não gostei" nem do ⋮ por comentario.
+  assert.doesNotMatch(html, /Não gostei|thumbs-down|ellipsis-vertical|Mais opções/);
+});
+
+test("Y10: o fio '1 resposta': aberto na minha, com o selo Equipe e a hora da resposta; fechado na de outro, com a resposta no HTML e hidden; a Anonima com a mascara", () => {
+  const html = listaDePerguntas();
+  const q2 = itemDe(html, "q2");
+  assert.match(q2, /^<li class="group\/comment relative mb-4" data-mine="" data-room-question="q2">/, "o comentario com o fio pega o ponteiro para a linha");
+  // A linha do avatar (de 28 px ate o fim do comentario) e a curva ate o botao, decorativas.
+  assert.match(q2, /<span aria-hidden="true" class="absolute bottom-0 left-3 w-px bg-room-thread-line group-hover\/comment:bg-room-thread-line-hover top-7"><\/span>/);
+  assert.match(q2, /<span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\] border-b border-l border-room-thread-line\b[^"]*\bleft-3 top-0 h-\[30px\]"><\/span>/);
+  const botao = q2.match(/<button aria-controls="resposta-q2" aria-expanded="true" class="([^"]*)" type="button">1 resposta<svg[^>]*lucide-chevron-up[^>]*>/);
+  assert.ok(botao, "o botao aberto, com a seta para cima");
+  for (const classe of ["ml-6", "mt-3", "h-10", "rounded-full", "px-4", "text-sm", "font-medium", "text-room-fg", "hover:bg-room-control-hover"]) {
+    assert.ok(classesDe(`<b class="${botao[1]}">`).includes(classe), `o botao do fio tem ${classe}`);
+  }
+  assert.doesNotMatch(botao[1], /room-cta|room-link/, "sem azul");
+  // Aberta, a linha continua ate a curva de 12 x 24 da resposta.
+  const resposta = q2.match(/<div class="relative ml-9 mt-3" id="resposta-q2">([\s\S]*)$/);
+  assert.ok(resposta, "a resposta aberta, sem hidden, alinhada ao texto");
+  assert.match(resposta[1], /^<span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-3 h-6"><\/span>/);
+  assert.match(resposta[1], /lucide-users-round/, "o avatar da Equipe");
+  assert.match(resposta[1], /<span class="inline-flex h-5 [^"]*">Equipe<\/span><time [^>]*dateTime="2026-11-05T23:27:00\.000Z" title="20:27">há 3 minutos<\/time>/, "so o selo e a hora da resposta");
+  assert.match(resposta[1], /<span class="sr-only">Equipe, há 3 minutos: <\/span>Fica 7 dias\./);
+
+  // A de outro: fechada, com a seta para baixo, e a resposta do Assistente no HTML com hidden.
+  const q3 = itemDe(html, "q3");
+  assert.match(q3, /<button aria-controls="resposta-q3" aria-expanded="false"[^>]*>1 resposta<svg[^>]*lucide-chevron-down/);
+  assert.match(q3, /<div class="relative ml-9 mt-3" data-testid="question-answer-assistant" hidden="" id="resposta-q3">/);
+  assert.match(q3, /lucide-sparkles/, "o avatar do Assistente");
+  assert.match(q3, /<span class="sr-only">Assistente, há 1 minuto: <\/span>Sim, ha certificado\./);
+  // Fechada, so a linha do comentario e a curva ate o botao (sem a continuacao).
+  assert.equal((q3.match(/w-px bg-room-thread-line/g) ?? []).length, 1);
+
+  // A Anonima: o nome e o avatar da mascara (nunca o nome guardado); a minha: "Você".
+  const q4 = itemDe(html, "q4");
+  assert.match(q4, /lucide-venetian-mask/);
+  assert.match(q4, /<span class="sr-only">Anônima, há 2 minutos: <\/span>/);
+  assert.doesNotMatch(q4, /Aluno 123/);
+  assert.match(q2, /<span class="sr-only">Você, há 2 minutos: <\/span>pergunta q2/);
+  // Sem o agora do servidor, sem tempo (nunca um tempo errado).
+  assert.doesNotMatch(listaDePerguntas({ serverNowMs: undefined }), /<time/);
+});
+
+test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de antes", () => {
+  const classico = render(questionsModule.RoomQuestionItem, { onVote: noop, question: LISTA[1] });
+  assert.match(classico, /^<li class="rounded-\[12px\] border border-room-border bg-room-surface-2 p-3" data-room-question="q2">/);
+  assert.match(classico, /aria-label="Curtir" aria-pressed="false"/);
+  assert.match(classico, />Respondida por escrito</);
+  assert.match(classico, /<p class="mt-1\.5 whitespace-pre-line text-sm leading-5 text-room-fg">Fica 7 dias\.<\/p>/);
+  assert.doesNotMatch(classico, /aria-expanded|resposta-q2|room-thread-line/);
+});

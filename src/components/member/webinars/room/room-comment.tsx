@@ -1,11 +1,12 @@
 "use client";
 
-import { Sparkles, UserRound, UsersRound, VenetianMask, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronUp, Sparkles, UserRound, UsersRound, VenetianMask, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { roleBadgeOnly } from "@/lib/webinar-room-client";
+import { ROOM_FOCUS } from "./room-ui";
 
 // O comentario do YouTube na sala do aluno (docs/31, a sala no estilo do YouTube; spec §8.1 a §8.3 e §8.5): so da sala
 // (o console e a gaveta do vertical continuam com o balao do Zoom, RoomChatBubble). O avatar de 24 px a esquerda (as
@@ -15,6 +16,9 @@ import { roleBadgeOnly } from "@/lib/webinar-room-client";
 // a vontade e a linha de acoes de 32 px que comeca 8 px antes do texto (so com algo dentro). A linha do autor e so para
 // quem ve (aria-hidden): o leitor de tela ouve o `srAuthor` ("Marina R., Equipe, há 2 minutos: ") antes do texto. Com o
 // nome igual ao papel (o Assistente), so o selo, com o nome dentro. So tokens --room-*; nenhuma frase escrita aqui.
+// O fio (a pergunta com a resposta escrita, spec §8.4; A §4.6 e §4.7): a linha de 1 px no centro do avatar, de 28 px
+// abaixo do topo ate o fim do comentario, a curva de 12 x 30 ate o botao "1 resposta" e, aberto, a linha que segue ate
+// a curva de 12 x 24 do avatar da resposta; com o ponteiro no comentario, a linha clareia. Tudo decorativo (aria-hidden).
 
 export type RoomCommentAvatarKind = "anonymous" | "assistant" | "person" | "team" | "unknown";
 
@@ -50,29 +54,39 @@ export type RoomCommentProps = {
   actions?: ReactNode;
   /** O avatar (RoomCommentAvatar). */
   avatar: ReactNode;
-  /** "li" na lista; "div" fora dela (a fixada, no bloco do topo). */
+  /** "li" na lista; "div" fora dela (a fixada, no bloco do topo; a resposta no fio). */
   as?: "div" | "li";
   /** O texto do comentario (os trechos com o "@assistente"). */
   body: ReactNode;
   /** A linha de cima, opcional (a fixada: o alfinete e "Fixada pela equipe"). */
   headline?: ReactNode;
   id: string;
+  /** O que o id marca: a mensagem do chat (data-room-message), a pergunta (data-room-question) ou a resposta do fio. */
+  marker?: "answer" | "message" | "question";
   meta: { name: string; role: string | null; time: RoomCommentTime | null };
   mine?: boolean;
   /** A minha mensagem esperando a equipe: "Aguardando a equipe" na linha de acoes, alinhado ao texto. */
   pending?: boolean;
   /** O que o leitor de tela ouve antes do texto ("Marina R., Equipe, há 2 minutos: "). */
   srAuthor: string;
-  /** O fio (a resposta da pergunta), depois das acoes. */
+  /** O fio (RoomCommentThread: o botao "1 resposta" e a resposta), embaixo do comentario, com a linha do avatar. */
   thread?: ReactNode;
 };
 
-export function RoomComment({ actions = null, as: Tag = "li", avatar, body, headline = null, id, meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
+/** A linha do fio: 1 px no centro do avatar (x 12), que clareia com o ponteiro no comentario. */
+const THREAD_LINE = "absolute bottom-0 left-3 w-px bg-room-thread-line group-hover/comment:bg-room-thread-line-hover";
+/** A curva do fio (o "L" arredondado do YouTube), de x 12 ate o botao ou o avatar da resposta. */
+const THREAD_CURVE = "absolute w-3 rounded-bl-[16px] border-b border-l border-room-thread-line group-hover/comment:border-room-thread-line-hover";
+
+const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question" } as const;
+
+export function RoomComment({ actions = null, as: Tag = "li", avatar, body, headline = null, id, marker = "message", meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
   const badgeOnly = roleBadgeOnly(meta.name, meta.role);
   const hasActions = pending || Boolean(actions);
+  const marks = { "data-mine": mine ? "" : undefined, [MARKERS[marker]]: id };
 
-  return (
-    <Tag className={cn("flex", Tag === "li" ? "mb-4 first:mt-auto" : null)} data-mine={mine ? "" : undefined} data-room-message={id}>
+  const row = (
+    <>
       {avatar}
       <div className="ml-3 min-w-0 flex-1">
         {headline ? <p className="flex items-center gap-1.5 text-xs leading-[18px] text-room-fg-subtle">{headline}</p> : null}
@@ -101,8 +115,74 @@ export function RoomComment({ actions = null, as: Tag = "li", avatar, body, head
             {actions}
           </div>
         ) : null}
-        {thread}
       </div>
+    </>
+  );
+
+  if (!thread) {
+    return (
+      <Tag className={cn("flex", Tag === "li" ? "mb-4 first:mt-auto" : null)} {...marks}>
+        {row}
+      </Tag>
+    );
+  }
+  return (
+    <Tag className={cn("group/comment relative", Tag === "li" ? "mb-4" : null)} {...marks}>
+      <div className="relative flex">
+        <span aria-hidden="true" className={cn(THREAD_LINE, "top-7")} />
+        {row}
+      </div>
+      {thread}
     </Tag>
+  );
+}
+
+/**
+ * O fio do comentario: o botao "1 resposta" (40 px, raio 20, 14/20 peso 500, sem azul, a 24 px da borda e 12 abaixo
+ * do comentario, com a seta de 24) e a resposta, que fica sempre no HTML (`hidden` fechada: o aria-controls aponta
+ * para um no que existe), alinhada ao texto do comentario (x 36).
+ */
+export function RoomCommentThread({
+  answerTestId,
+  children,
+  controlsId,
+  expanded,
+  label,
+  onToggle
+}: {
+  /** O data-testid do bloco da resposta (a do Assistente). */
+  answerTestId?: string;
+  /** A resposta (um RoomComment as="div"). */
+  children: ReactNode;
+  controlsId: string;
+  expanded: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  const Chevron = expanded ? ChevronUp : ChevronDown;
+  return (
+    <>
+      <div className="relative">
+        <span aria-hidden="true" className={cn(THREAD_CURVE, "left-3 top-0 h-[30px]")} />
+        {expanded ? <span aria-hidden="true" className={cn(THREAD_LINE, "top-0")} /> : null}
+        <button
+          aria-controls={controlsId}
+          aria-expanded={expanded}
+          className={cn(
+            "ml-6 mt-3 inline-flex h-10 items-center whitespace-nowrap rounded-full px-4 text-sm font-medium leading-5 text-room-fg hover:bg-room-control-hover active:shadow-[inset_0_0_0_999px_var(--room-press-overlay)]",
+            ROOM_FOCUS
+          )}
+          onClick={onToggle}
+          type="button"
+        >
+          {label}
+          <Chevron aria-hidden="true" className="-mr-1.5 ml-1.5 size-6" strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="relative ml-9 mt-3" data-testid={answerTestId} hidden={!expanded} id={controlsId}>
+        <span aria-hidden="true" className={cn(THREAD_CURVE, "-left-6 -top-3 h-6")} />
+        {children}
+      </div>
+    </>
   );
 }

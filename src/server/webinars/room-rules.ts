@@ -137,6 +137,8 @@ export function pollAnswerProblem(poll: Pick<Poll, "kind" | "options" | "status"
 export type StudentQuestion = {
   anonymous: boolean;
   answerText: string | null;
+  /** Quando a resposta saiu (a hora do fio "1 resposta" na sala, docs/31 V2-A66); null enquanto nao respondida. */
+  answeredAt: string | null;
   answeredLive: boolean;
   body: string;
   createdAt: string;
@@ -157,6 +159,7 @@ export function toStudentQuestion(question: WebinarQuestion, viewerUserId: strin
   return {
     anonymous: question.anonymous,
     answerText: question.answerText,
+    answeredAt: question.answeredAt,
     answeredLive: question.answeredLive,
     body: question.body,
     createdAt: question.createdAt,

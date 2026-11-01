@@ -254,3 +254,46 @@ test("roleBadgeOnly: o nome igual ao papel (sem acento nem caixa) mostra so o se
   assert.equal(roomClient.roleBadgeOnly("Assistente", null), false, "sem papel");
   assert.equal(roomClient.roleBadgeOnly("", "Equipe"), false);
 });
+
+// Y10: a pergunta como o comentario do YouTube (room-questions-model.ts): o fio "1 resposta" so com a resposta
+// escrita, aberto na minha e fechado nas outras (com o clique do aluno trocando o padrao), e a situacao na linha de acoes.
+test("questionHasThread e questionThreadOpenByDefault: so a resposta escrita tem fio; a minha com texto abre, a minha so ao vivo sem texto nao tem fio, a de outro com texto fica fechada", () => {
+  const pergunta = (extra) => ({ answerText: null, answeredLive: false, id: "q", mine: false, status: "open", ...extra });
+  const minhaEscrita = pergunta({ answerText: "Fica 7 dias.", mine: true, status: "answered" });
+  const minhaAoVivo = pergunta({ answeredLive: true, mine: true, status: "answered" });
+  const deOutroEscrita = pergunta({ answerText: "Sim.", status: "answered" });
+  assert.equal(questionsModel.questionHasThread(minhaEscrita), true);
+  assert.equal(questionsModel.questionThreadOpenByDefault(minhaEscrita), true, "a minha com texto abre");
+  assert.equal(questionsModel.questionHasThread(minhaAoVivo), false, "so ao vivo, sem texto, nao tem fio");
+  assert.equal(questionsModel.questionThreadOpenByDefault(minhaAoVivo), false);
+  assert.equal(questionsModel.questionHasThread(deOutroEscrita), true);
+  assert.equal(questionsModel.questionThreadOpenByDefault(deOutroEscrita), false, "a de outro com texto fica fechada");
+  assert.equal(questionsModel.questionHasThread(pergunta({ answerText: "   ", mine: true, status: "answered" })), false, "texto so de espacos nao e resposta");
+  assert.equal(questionsModel.questionHasThread(pergunta({ answerText: "Sim.", mine: true })), false, "a aberta de novo nao mostra a resposta antiga");
+});
+
+test("questionThreadOpen: o clique troca o padrao e continua valendo; a minha respondida depois abre sozinha", () => {
+  const minha = { answerText: null, answeredLive: false, id: "q1", mine: true, status: "open" };
+  const deOutro = { answerText: "Sim.", answeredLive: false, id: "q2", mine: false, status: "answered" };
+  const nenhum = new Set();
+  assert.equal(questionsModel.questionThreadOpen(minha, nenhum), false, "sem resposta, sem fio");
+  // A equipe responde por escrito: na releitura, a minha abre sozinha.
+  const respondida = { ...minha, answerText: "Fica 7 dias.", status: "answered" };
+  assert.equal(questionsModel.questionThreadOpen(respondida, nenhum), true);
+  // O clique fecha a minha e abre a de outro; um segundo clique volta ao padrao.
+  const clicadas = new Set(["q1", "q2"]);
+  assert.equal(questionsModel.questionThreadOpen(respondida, clicadas), false);
+  assert.equal(questionsModel.questionThreadOpen(deOutro, nenhum), false);
+  assert.equal(questionsModel.questionThreadOpen(deOutro, clicadas), true);
+  assert.equal(questionsModel.questionThreadOpen({ ...deOutro, answerText: null, answeredLive: true }, clicadas), false, "sem texto nunca abre, nem clicada");
+});
+
+test("questionStatusOf: Respondida ao vivo, Dispensada (so o autor a recebe) e nada nas outras", () => {
+  assert.equal(questionsModel.questionStatusOf({ answeredLive: true, status: "answered" }), "live");
+  assert.equal(questionsModel.questionStatusOf({ answeredLive: false, status: "answered" }), null, "a escrita: o fio ja diz");
+  assert.equal(questionsModel.questionStatusOf({ answeredLive: false, status: "dismissed" }), "dismissed");
+  assert.equal(questionsModel.questionStatusOf({ answeredLive: false, status: "open" }), null);
+  assert.equal(questionsModel.questionStatusOf({ answeredLive: true, status: "open" }), null, "aberta de novo: sem o ao vivo de antes");
+  assert.equal(COPY.salaV2.perguntas.respostas(1), "1 resposta");
+  assert.equal(COPY.salaV2.perguntas.respostas(3), "3 respostas");
+});

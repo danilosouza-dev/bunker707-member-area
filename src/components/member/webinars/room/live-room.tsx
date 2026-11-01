@@ -1068,6 +1068,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   onRefused={onWriteRefused}
                   order={questionsOrder}
                   readOnly={readOnly || phase === "ended"}
+                  serverNowMs={nowMs + skewMs}
                   sessionId={sessionId}
                   webinarId={webinarId}
                 />

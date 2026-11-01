@@ -67,12 +67,14 @@ export const SALA_V2_COPY = {
    * As Perguntas no estilo do YouTube (a partir de lg): os chips de filtro numa linha so (Todas, Sem resposta,
    * Respondidas, Minhas; "Todas" e "Respondidas" vem de WEBINAR_COPY.sala.filtros), o grupo "Filtrar perguntas", o
    * botao de ordenar do cabecalho ("Ordenar perguntas", com Mais votadas e Mais recentes de WEBINAR_COPY.sala.ordem) e
-   * o vazio que diz o filtro (o de "Todas" e WEBINAR_COPY.sala.semPerguntas).
+   * o vazio que diz o filtro (o de "Todas" e WEBINAR_COPY.sala.semPerguntas). Cada pergunta e um comentario, e a
+   * resposta escrita da Equipe ou do Assistente fica no fio "1 resposta", que abre e fecha.
    */
   perguntas: {
     filtrar: "Filtrar perguntas",
     minhas: "Minhas",
     ordenar: "Ordenar perguntas",
+    respostas: (n: number) => (n === 1 ? "1 resposta" : `${n} respostas`),
     semResposta: "Sem resposta",
     vazioMinhas: "Você ainda não fez perguntas.",
     vazioRespondidas: "Nenhuma pergunta respondida ainda.",

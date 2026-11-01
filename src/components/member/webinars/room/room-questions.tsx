@@ -4,6 +4,7 @@ import { ListSortDescending, ThumbsUp } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import { chatAgoLabel, chatTimeAt, chatTimeLabel } from "@/lib/webinar-room-client";
 import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
 import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
@@ -12,8 +13,10 @@ import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./ass
 import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 import { RoomChip, RoomChipBar } from "./room-chip-bar";
+import { RoomComment, RoomCommentAvatar, RoomCommentThread, type RoomCommentTime } from "./room-comment";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
+import { RoomPill } from "./room-pill";
 import {
   QUESTIONS_FILTERS,
   QUESTIONS_ORDERS,
@@ -21,6 +24,9 @@ import {
   questionsFilterLabel,
   questionsOrderLabel,
   questionsShown,
+  questionHasThread,
+  questionStatusOf,
+  questionThreadOpen,
   type QuestionsFilter,
   type QuestionsOrder
 } from "./room-questions-model";
@@ -42,7 +48,10 @@ import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 // ordenar do cabecalho do painel (RoomQuestionsOrderButton, com o menu); o vazio diz o filtro. O filtro e a ordem sao
 // da sala (trocar de aba nao os perde), e o numero do cabecalho e o tamanho da lista com o filtro de agora (onCount,
 // so depois da primeira leitura). Abaixo de lg ficam as duas linhas de antes. Sem as props (a gaveta do vertical), o
-// filtro e a ordem sao da aba e o HTML e o de antes.
+// filtro e a ordem sao da aba e o HTML e o de antes. Y10 (spec §8.4): no `comment` cada pergunta e o comentario do
+// YouTube (RoomComment: "Anônima" com a mascara, "Você" na minha, o tempo relativo contra o agora do servidor), com o
+// polegar e o numero, a situacao (Respondida ao vivo, Dispensada) na linha de acoes e a resposta escrita da Equipe ou do
+// Assistente no fio "1 resposta", aberto na minha e fechado nas outras, com a hora da resposta (V2-A66). Sem cartao.
 
 const REFRESH_MS = 15_000;
 
@@ -52,8 +61,105 @@ export const QUESTIONS_ORDER_MENU_ID = "room-questions-order";
 /** A pergunta como a rota devolve na fase 4c: de quem e a resposta e se o aluno ja pediu a equipe. */
 export type RoomQuestion = StudentQuestion & { answerSource?: AnswerSource | null; handoffRequested?: boolean };
 
-export function RoomQuestionItem({ footer = null, onVote, question }: { footer?: ReactNode; onVote: (question: RoomQuestion) => void; question: RoomQuestion }) {
+/** O tempo do comentario e da resposta: "há 2 minutos" contra o agora do servidor, a hora exata no title. */
+function questionTime(iso: string | null | undefined, serverNowMs: number | undefined): RoomCommentTime | null {
+  if (!iso || serverNowMs === undefined) {
+    return null;
+  }
+  const input = { kind: "live" as const, offsetMs: 0, sentAt: iso };
+  const at = chatTimeAt(input);
+  const label = chatAgoLabel({ ...input, nowMs: serverNowMs });
+  return at === null || !label ? null : { iso: new Date(at).toISOString(), label, title: chatTimeLabel(input) };
+}
+
+type RoomQuestionItemProps = {
+  /** O "Falar com a equipe" da resposta do Assistente na minha pergunta. */
+  footer?: ReactNode;
+  /** "comment": o comentario do YouTube com o fio (a sala); "classic": o cartao de antes (a gaveta do vertical). */
+  look?: "classic" | "comment";
+  onToggleThread?: (questionId: string) => void;
+  onVote: (question: RoomQuestion) => void;
+  question: RoomQuestion;
+  /** O agora do servidor (o relogio da sala com o skew), para o tempo relativo. */
+  serverNowMs?: number;
+  /** O fio aberto (questionThreadOpen). */
+  threadOpen?: boolean;
+};
+
+/** A pergunta como o comentario do YouTube: o polegar com o numero, a situacao e o fio "1 resposta". */
+function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverNowMs, threadOpen = false }: Omit<RoomQuestionItemProps, "look">) {
+  const sala = WEBINAR_COPY.sala;
+  const novas = WEBINAR_COPY.salaV2;
+  const name = question.anonymous ? sala.anonima : question.mine ? novas.chat.voce : question.displayName;
+  const time = questionTime(question.createdAt, serverNowMs);
+  const status = questionStatusOf(question);
+  const ai = question.answerSource === "ai";
+  const badge = ai ? sala.selos.assistente : sala.selos.equipe;
+  const answerTime = questionTime(question.answeredAt, serverNowMs);
+  const autor = (parts: Array<string | undefined>) => novas.chat.autor(parts.filter((part): part is string => Boolean(part)));
+
+  return (
+    <RoomComment
+      actions={
+        <>
+          <RoomPill
+            aria-pressed={question.voted}
+            className="max-lg:size-11"
+            icon={ThumbsUp}
+            iconFilled={question.voted}
+            label={sala.curtir}
+            onClick={() => onVote(question)}
+            shape="circle"
+            size="s"
+            tone="text"
+          />
+          <span aria-hidden="true" className={cn("mr-2 text-xs leading-[18px] tabular-nums", question.voted ? "text-room-fg" : "text-room-fg-subtle")}>
+            {question.upvotes.toLocaleString("pt-BR")}
+          </span>
+          <span className="sr-only">{sala.curtidas(question.upvotes)}</span>
+          {status ? (
+            <span className={cn("text-xs leading-[18px]", status === "live" ? "text-room-success-fg" : "text-room-fg-subtle")}>{status === "live" ? sala.respondidaAoVivo : sala.dispensada}</span>
+          ) : null}
+        </>
+      }
+      avatar={<RoomCommentAvatar kind={question.anonymous ? "anonymous" : "person"} name={question.displayName} />}
+      body={question.body}
+      id={question.id}
+      marker="question"
+      meta={{ name, role: null, time }}
+      mine={question.mine}
+      srAuthor={autor([name, time?.label])}
+      thread={
+        questionHasThread(question) ? (
+          <RoomCommentThread
+            answerTestId={ai ? "question-answer-assistant" : undefined}
+            controlsId={`resposta-${question.id}`}
+            expanded={threadOpen}
+            label={novas.perguntas.respostas(1)}
+            onToggle={() => onToggleThread?.(question.id)}
+          >
+            <RoomComment
+              actions={footer}
+              as="div"
+              avatar={<RoomCommentAvatar kind={ai ? "assistant" : "team"} />}
+              body={question.answerText}
+              id={question.id}
+              marker="answer"
+              meta={{ name: badge, role: badge, time: answerTime }}
+              srAuthor={autor([badge, answerTime?.label])}
+            />
+          </RoomCommentThread>
+        ) : null
+      }
+    />
+  );
+}
+
+export function RoomQuestionItem({ footer = null, look = "classic", onToggleThread, onVote, question, serverNowMs, threadOpen }: RoomQuestionItemProps) {
   const copy = WEBINAR_COPY.sala;
+  if (look === "comment") {
+    return <RoomQuestionComment footer={footer} onToggleThread={onToggleThread} onVote={onVote} question={question} serverNowMs={serverNowMs} threadOpen={threadOpen} />;
+  }
 
   return (
     <li className="rounded-[12px] border border-room-border bg-room-surface-2 p-3" data-room-question={question.id}>
@@ -101,6 +207,54 @@ export function RoomQuestionItem({ footer = null, onVote, question }: { footer?:
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * A lista das Perguntas no `comment` (Y10): sem cartao, 16 px dos lados e entre as perguntas. O fio aberto e o padrao
+ * (aberto na minha) trocado pelos cliques do aluno, guardados aqui por id (questionThreadOpen).
+ */
+export function RoomQuestionList({
+  emptyPhrase,
+  footerFor,
+  onVote,
+  questions,
+  serverNowMs
+}: {
+  emptyPhrase: string;
+  footerFor: (question: RoomQuestion) => ReactNode;
+  onVote: (question: RoomQuestion) => void;
+  questions: readonly RoomQuestion[];
+  serverNowMs?: number;
+}) {
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
+
+  function toggleThread(questionId: string) {
+    setToggled((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(questionId)) {
+        next.add(questionId);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <ul className="min-h-0 flex-1 overflow-y-auto px-4 pt-2">
+      {questions.length === 0 ? <li className="mt-6 text-center text-sm leading-5 text-room-fg-subtle">{emptyPhrase}</li> : null}
+      {questions.map((question) => (
+        <RoomQuestionItem
+          footer={footerFor(question)}
+          key={question.id}
+          look="comment"
+          onToggleThread={toggleThread}
+          onVote={onVote}
+          question={question}
+          serverNowMs={serverNowMs}
+          threadOpen={questionThreadOpen(question, toggled)}
+        />
+      ))}
+    </ul>
   );
 }
 
@@ -188,6 +342,7 @@ export function RoomQuestionsTab({
   onRefused,
   order: orderProp,
   readOnly,
+  serverNowMs,
   sessionId,
   webinarId
 }: {
@@ -215,6 +370,8 @@ export function RoomQuestionsTab({
   /** A ordem, quando e da sala; sem ela, a ordem e da aba. */
   order?: QuestionsOrder;
   readOnly: boolean;
+  /** O agora do servidor (o relogio da sala com o skew), para o tempo das perguntas no `comment`. */
+  serverNowMs?: number;
   sessionId: string;
   webinarId: string;
 }) {
@@ -331,6 +488,26 @@ export function RoomQuestionsTab({
     }
   }
 
+  /** O "Falar com a equipe" da resposta do Assistente na minha pergunta (fora do "ver como"). */
+  function handoffFor(question: RoomQuestion): ReactNode {
+    if (!question.mine || question.answerSource !== "ai" || readOnly) {
+      return null;
+    }
+    return (
+      <AssistantHandoff
+        attendantsOnline={assistant.state.attendantsOnline}
+        done={question.handoffRequested === true}
+        onRequest={async () => {
+          const requested = await assistant.handoff("question", question.id);
+          if (requested) {
+            setQuestions((previous) => previous.map((item) => (item.id === question.id ? { ...item, handoffRequested: true } : item)));
+          }
+          return requested;
+        }}
+      />
+    );
+  }
+
   const visible = questionsShown(questions, filter);
   const waitedQuestion = waiting ? questions.find((question) => question.id === waiting) : null;
   const waitingNow = Boolean(waitedQuestion && waitedQuestion.status === "open");
@@ -372,37 +549,16 @@ export function RoomQuestionsTab({
           ))}
         </div>
       </div>
-      <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
-        {visible.length === 0 ? (
-          look === "comment" ? (
-            <li className="mt-6 text-center text-sm leading-5 text-room-fg-subtle">{questionsEmptyPhrase(filter)}</li>
-          ) : (
-            <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li>
-          )
-        ) : null}
-        {visible.map((question) => (
-          <RoomQuestionItem
-            footer={
-              question.mine && question.answerSource === "ai" && !readOnly ? (
-                <AssistantHandoff
-                  attendantsOnline={assistant.state.attendantsOnline}
-                  done={question.handoffRequested === true}
-                  onRequest={async () => {
-                    const requested = await assistant.handoff("question", question.id);
-                    if (requested) {
-                      setQuestions((previous) => previous.map((item) => (item.id === question.id ? { ...item, handoffRequested: true } : item)));
-                    }
-                    return requested;
-                  }}
-                />
-              ) : null
-            }
-            key={question.id}
-            onVote={(item) => void vote(item)}
-            question={question}
-          />
-        ))}
-      </ul>
+      {look === "comment" ? (
+        <RoomQuestionList emptyPhrase={questionsEmptyPhrase(filter)} footerFor={handoffFor} onVote={(item) => void vote(item)} questions={visible} serverNowMs={serverNowMs} />
+      ) : (
+        <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
+          {visible.length === 0 ? <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li> : null}
+          {visible.map((question) => (
+            <RoomQuestionItem footer={handoffFor(question)} key={question.id} onVote={(item) => void vote(item)} question={question} />
+          ))}
+        </ul>
+      )}
       {consentOpen && !consented && !notice ? <RoomConsentBox busy={sending} defaultDisplayMode={defaultDisplayMode} onAccept={(choice) => void deliver(choice)} onCancel={() => setConsentOpen(false)} /> : null}
       {notice ? (
         <p className="border-t border-room-border bg-room-composer px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-sm font-semibold text-room-warn-fg" data-testid="room-questions-notice" role="status">

@@ -80,3 +80,38 @@ export function chipArrows(input: { clientWidth: number; scrollLeft: number; scr
 export function chipScrollBy(input: { clientWidth: number; direction: -1 | 1 }): number {
   return Math.round(input.clientWidth * 0.8) * input.direction;
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Y10: a pergunta como o comentario do YouTube, com o fio "1 resposta" (spec §8.4)
+ * ---------------------------------------------------------------------------------------------- */
+
+type ThreadQuestion = Pick<StudentQuestion, "answerText" | "mine" | "status">;
+
+/** A pergunta tem fio: a resposta escrita da Equipe ou do Assistente (a respondida so ao vivo nao tem texto). */
+export function questionHasThread(question: ThreadQuestion): boolean {
+  return question.status === "answered" && Boolean(question.answerText?.trim());
+}
+
+/** O fio nasce aberto na minha pergunta respondida por escrito e fechado nas outras. */
+export function questionThreadOpenByDefault(question: ThreadQuestion): boolean {
+  return question.mine && questionHasThread(question);
+}
+
+/**
+ * O fio esta aberto: o padrao (aberto na minha) trocado pelo clique do aluno (`toggled`, os ids que ele abriu ou
+ * fechou). Assim a minha pergunta respondida depois abre sozinha, e o clique continua valendo nas releituras.
+ */
+export function questionThreadOpen(question: ThreadQuestion & Pick<StudentQuestion, "id">, toggled: ReadonlySet<string>): boolean {
+  return questionHasThread(question) && questionThreadOpenByDefault(question) !== toggled.has(question.id);
+}
+
+/**
+ * A situacao na linha de acoes, logo depois do numero: "Respondida ao vivo" ou "Dispensada" (so o autor ve a
+ * dispensada); a respondida por escrito nao precisa, o fio ja diz.
+ */
+export function questionStatusOf(question: Pick<StudentQuestion, "answeredLive" | "status">): "dismissed" | "live" | null {
+  if (question.status === "dismissed") {
+    return "dismissed";
+  }
+  return question.status === "answered" && question.answeredLive ? "live" : null;
+}
