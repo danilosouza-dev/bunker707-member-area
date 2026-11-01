@@ -172,6 +172,8 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "live-notices.tsx",
     "live-room.tsx",
     "webinar-room.tsx",
+    "room-pill.tsx",
+    "room-chip-bar.tsx",
     ...readdirSync(path.join(root, ROOM, "assistant")).map((nome) => `assistant/${nome}`)
   ].map((nome) => `${ROOM}/${nome}`);
   arquivos.push("src/components/member/webinars/translation/room-translation-bar.tsx", `${ROOM}/vertical/vertical-model.ts`);

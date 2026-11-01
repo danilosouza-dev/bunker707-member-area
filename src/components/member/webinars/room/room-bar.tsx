@@ -5,7 +5,7 @@ import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { ConsoleBarItem, RoomBarItem } from "./room-layout-model";
-import { ROOM_FOCUS, RoomButton } from "./room-ui";
+import { ROOM_FOCUS, RoomButton, RoomCountBadge } from "./room-ui";
 
 // A barra da sala do aluno (docs/31 V2-6 e V2-18), a mesma na Live ao vivo (live-controls.tsx), na gravada e no Replay
 // (recorded-controls.tsx). A partir de lg, 72 px com tres zonas: o Sair em vermelho a esquerda, os circulos de 48 px
@@ -169,15 +169,7 @@ export function RoomPanelToggle({
   const label = open ? copy.esconder : count > 0 ? copy.mostrarComNovas(WEBINAR_COPY.sala.mensagensNovas(count)) : copy.mostrar;
   return (
     <RoomBarButton active={open} controls={controls} expanded={open} firstFocus={firstFocus} icon={MessageCircle} item="panel" label={label} onClick={onToggle}>
-      {count > 0 ? (
-        <span
-          aria-hidden="true"
-          className="absolute right-0.5 top-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-room-accent px-[5px] text-[11px] font-bold leading-none tabular-nums text-white shadow-[0_0_0_2px_var(--room-surface)]"
-          data-room-unread=""
-        >
-          {count}
-        </span>
-      ) : null}
+      <RoomCountBadge count={count} />
     </RoomBarButton>
   );
 }
