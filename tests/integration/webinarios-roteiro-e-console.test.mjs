@@ -384,23 +384,41 @@ test("9. a rota de 5 s do console: 403 para o analista, 404 para a sessao de out
   assert.equal(data.polls.launched.length, 1);
 });
 
-test("10. Virar pergunta (docs/31 V2-15): a pendente comum do aluno e liberada e vira a linha de webinar_questions com o message_id, sem o webinar_question_sent; de novo, nao duplica", async () => {
+test("10. Virar pergunta (docs/31 V2-15): na sessao encerrada e 409 sem pergunta; no ar, a pendente comum do aluno e liberada e vira a linha de webinar_questions com o message_id, sem o webinar_question_sent; de novo, nao duplica", async () => {
   actAs(produtor);
-  const [pendente] = unwrap(
-    await db
-      .from("webinar_chat_messages")
-      .insert({ approved: false, author_user_id: aluno.id, body: "Dá para ligar no WhatsApp?", display_name: "Aluno 231", offset_ms: 90_000, role: "student", session_id: SESSAO, source: "audience", webinar_id: webinarId })
-      .select("id"),
-    "Gravando a mensagem pendente do aluno"
+  const pendenteNa = async (sessionId, body) => {
+    const [linha] = unwrap(
+      await db
+        .from("webinar_chat_messages")
+        .insert({ approved: false, author_user_id: aluno.id, body, display_name: "Aluno 231", offset_ms: 90_000, role: "student", session_id: sessionId, source: "audience", webinar_id: webinarId })
+        .select("id"),
+      "Gravando a mensagem pendente do aluno"
+    );
+    return linha;
+  };
+  const perguntasDe = async (messageId) => unwrap(await db.from("webinar_questions").select("body, message_id, offset_ms, session_id, status, user_id").eq("message_id", messageId), "Lendo a pergunta da mensagem");
+
+  // A SESSAO foi encerrada no teste 7: o pedido direto nao cria pergunta nem libera a pendente.
+  const tarde = await pendenteNa(SESSAO, "Ainda dá para perguntar?");
+  const recusado = await roomActions.moderateMessage({ action: "question", messageId: tarde.id });
+  assert.deepEqual([recusado.ok, recusado.status], [false, 409], "sessao encerrada nao aceita o Virar pergunta");
+  assert.deepEqual(await perguntasDe(tarde.id), []);
+  assert.equal(unwrap(await db.from("webinar_chat_messages").select("approved").eq("id", tarde.id).single(), "Lendo a pendente").approved, false);
+
+  // Uma segunda sessao do mesmo webinario, no ar.
+  const SESSAO_NO_AR = "bbbbbbbb-0000-4000-8000-0000000000b2";
+  unwrap(
+    await db.from("webinar_sessions").insert({ id: SESSAO_NO_AR, kind: "simulated", recording_id: LIVE_GRAVADA_DE_TESTE.gravacaoId, scheduled_at: new Date(Date.now() - 2 * MIN).toISOString(), started_at: new Date(Date.now() - 2 * MIN).toISOString(), status: "live", webinar_id: webinarId }),
+    "Gravando a sessao no ar"
   );
+  const pendente = await pendenteNa(SESSAO_NO_AR, "Dá para ligar no WhatsApp?");
   const virou = ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
   assert.equal(virou.message.approved, true);
-  const perguntas = async () => unwrap(await db.from("webinar_questions").select("body, message_id, offset_ms, session_id, status, user_id").eq("message_id", pendente.id), "Lendo a pergunta da mensagem");
-  assert.deepEqual(await perguntas(), [{ body: "Dá para ligar no WhatsApp?", message_id: pendente.id, offset_ms: 90_000, session_id: SESSAO, status: "open", user_id: aluno.id }]);
+  assert.deepEqual(await perguntasDe(pendente.id), [{ body: "Dá para ligar no WhatsApp?", message_id: pendente.id, offset_ms: 90_000, session_id: SESSAO_NO_AR, status: "open", user_id: aluno.id }]);
   // O retrato do console marca a mensagem que virou pergunta (o Virar pergunta sai da linha), pela tabela das perguntas.
-  assert.ok((await consoleQueries.getConsoleSnapshot(webinarId, SESSAO)).askedMessageIds.includes(pendente.id));
+  assert.ok((await consoleQueries.getConsoleSnapshot(webinarId, SESSAO_NO_AR)).askedMessageIds.includes(pendente.id));
   ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
-  assert.equal((await perguntas()).length, 1, "de novo nao duplica");
+  assert.equal((await perguntasDe(pendente.id)).length, 1, "de novo nao duplica");
   const historico = unwrap(await db.from("student_events").select("event_type").eq("user_id", aluno.id).eq("event_type", "webinar_question_sent"), "Lendo o historico do aluno");
   assert.deepEqual(historico, [], "quem perguntou foi a equipe");
 });
