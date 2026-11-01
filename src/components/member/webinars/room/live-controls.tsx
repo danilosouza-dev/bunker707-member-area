@@ -99,7 +99,10 @@ export const LIVE_SETTINGS_ID = "live-room-settings";
 
 /**
  * A Tela cheia (ou o Modo cinema) no celular (V2-18): um circulo de 32 px no canto de baixo a direita do palco, sobre o
- * video, com o mesmo nome e a mesma acao do botao da barra (que so aparece a partir de lg).
+ * video, com o mesmo nome e a mesma acao do botao da barra (que so aparece a partir de lg). O Modo cinema sai do canto
+ * com o celular deitado (docs/31 V2-A27): a sala ja fica em linha, com o palco no que sobra ao lado do chat, e o
+ * cinema nao mudaria nada na tela. O estado fica e volta a valer em pe. A Tela cheia deitada fica (ela poe o palco na
+ * tela inteira).
  */
 export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" | "cinemaOn" | "fullscreenOn" | "onFullscreen">) {
   const copy = WEBINAR_COPY.aoVivo;
@@ -107,7 +110,7 @@ export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" 
   return (
     <RoomIconButton
       active={props.cinemaMode ? props.cinemaOn : props.fullscreenOn}
-      className="absolute bottom-2 right-2 z-30 lg:hidden"
+      className={cn("absolute bottom-2 right-2 z-30 lg:hidden", props.cinemaMode ? "max-lg:landscape:hidden" : null)}
       data-room-stage-corner=""
       label={props.cinemaMode ? copy.modoCinema : copy.telaCheia}
       onClick={props.onFullscreen}

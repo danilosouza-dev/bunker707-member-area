@@ -363,11 +363,27 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   assert.ok(nomes(barra({ cinemaMode: true })).includes("Modo cinema"), "no iPhone, Modo cinema no lugar de Tela cheia");
   assert.ok(!nomes(barra({ cinemaMode: true })).includes("Tela cheia"));
   assert.match(barra({ joined: false }), /aria-label="Levantar a mão"[^>]*disabled=""/, "fora da sala, a mao espera");
+  // A equipe recolheu o microfone sem o mudo (docs/31 V2-A16): com o som no ar o Microfone fica na barra, ligado, para o
+  // aluno se calar; desligado, ele sai. Quem apresenta (sem a nossa barra de midia) nunca tem o nosso Microfone.
+  const recolhidoNoAr = barra({ audioOn: true, micAllowed: false, showMedia: true });
+  assert.ok(nomes(recolhidoNoAr).includes("Microfone"), "o som no ar: o Microfone na barra");
+  assert.match(recolhidoNoAr, /<button aria-label="Microfone" aria-pressed="true"[^>]*data-room-bar-item="mic"/, "ligado");
+  assert.ok(noCelular(recolhidoNoAr).some(({ item }) => item === "mic"), "tambem no celular");
+  assert.ok(!nomes(barra({ audioOn: false, micAllowed: false, showMedia: true })).includes("Microfone"), "desligado, o Microfone sai");
+  assert.ok(!nomes(barra({ audioOn: true, micAllowed: false, showMedia: false })).includes("Microfone"), "quem apresenta usa a barra do iframe");
 
   // No celular a Tela cheia (ou o Modo cinema) fica no canto do palco: um circulo de 32 px sobre o video, so abaixo de lg.
   const canto = (props) => render(controls.LiveStageFullscreen, { cinemaMode: false, cinemaOn: false, fullscreenOn: false, onFullscreen: noop, ...props });
   assert.match(canto(), /^<button aria-label="Tela cheia" aria-pressed="false" class="[^"]*\bsize-8\b[^"]*bg-black\/60 text-white[^"]*absolute bottom-2 right-2 z-30 lg:hidden"/);
   assert.match(canto({ cinemaMode: true, cinemaOn: true }), /^<button aria-label="Modo cinema" aria-pressed="true"/);
+  // Deitado abaixo de lg o Modo cinema sai do canto (docs/31 V2-A27): a sala em linha ja da ao palco o que sobra ao lado
+  // do chat, e o cinema nao mudaria nada na tela (a 844 x 390 as caixas sao as mesmas com e sem ele). A Tela cheia fica.
+  const classesDoCanto = (html) => (html.match(/^<button [^>]*class="([^"]*)"/)?.[1] ?? "").split(" ");
+  for (const cinemaOn of [false, true]) {
+    const classes = classesDoCanto(canto({ cinemaMode: true, cinemaOn }));
+    assert.ok(classes.includes("max-lg:landscape:hidden") && classes.includes("lg:hidden"), `o Modo cinema so em pe abaixo de lg: ${classes.join(" ")}`);
+  }
+  assert.ok(!classesDoCanto(canto()).includes("max-lg:landscape:hidden"), "a Tela cheia deitada fica no canto");
 
   // Host e co-apresentador que entram por aqui usam a barra do iframe: sem mao, camera e microfone nossos, e sem a
   // Visão do vídeo (o seguir a visao levaria a escolha de quem apresenta a todos).
@@ -647,6 +663,13 @@ test("o mesmo esqueleto da gravada (V2-6): corpo > coluna > caixa do palco, a ba
   // No celular a Tela cheia fica no canto do palco, dentro dele (a da barra so aparece a partir de lg).
   const palco = html.slice(html.indexOf("data-lesson-player-stage"), html.indexOf('data-testid="live-controls"'));
   assert.match(palco, /<button aria-label="Tela cheia"[^>]*class="[^"]*absolute bottom-2 right-2 z-30 lg:hidden"[^>]*data-room-stage-corner=""/);
+  // O palco da live: 16:9 em pe; deitado abaixo de lg (V2-6) ele deixa o 16:9 e ocupa o que sobra na caixa, acima da
+  // barra. Sem as tres classes, a 844 x 390 o palco 16:9 (556 x 313) passava da caixa de 254 px e os 59 px de baixo,
+  // com o circulo do canto, ficavam embaixo da barra.
+  const classesDoPalco = (html.match(/<div aria-label="Vídeo da live" class="([^"]*)"/)?.[1] ?? "").split(" ");
+  for (const classe of ["aspect-video", "max-lg:landscape:aspect-auto", "max-lg:landscape:min-h-0", "max-lg:landscape:flex-1", "lg:aspect-auto", "lg:min-h-0", "lg:flex-1"]) {
+    assert.ok(classesDoPalco.includes(classe), `${classe} em ${classesDoPalco.join(" ")}`);
+  }
   // O Sair: na barra a partir de lg; o do cabecalho fica so abaixo de lg.
   const cabecalho = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
   assert.match(cabecalho, /<button class="[^"]*bg-\[var\(--accent\)\][^"]*\blg:hidden" type="button">[\s\S]*?Sair<\/button>/);

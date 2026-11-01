@@ -690,11 +690,21 @@ export function onStageParticipantOf(api: unknown): string | null {
 }
 
 /**
+ * O dono de quem esta no video grande: a tela compartilhada e um participante virtual com o id da fonte, `<id>-v1`, e
+ * o dono e o id antes do hifen (getVirtualScreenshareParticipantOwnerId da tag stable-11248). Os ids de endpoint do
+ * motor sao hex de 8 caracteres, sem hifen: o id de uma pessoa volta igual.
+ */
+export function stageOwnerId(onStageId: string): string {
+  return onStageId.split("-")[0];
+}
+
+/**
  * O selo "{nome} · Apresentador" embaixo a esquerda do palco da Live ao vivo (V2-4): so com a sala no iframe e o motor
  * no Palco (na Grade nao ha video grande: o selo cairia sobre a miniatura de qualquer um) e com um moderador no video
- * grande (quem apresenta, ou quem a equipe destacou da equipe). O aluno com o microfone liberado que vira o orador, ou
- * o aluno que a equipe destacou, fica sem o selo. Antes de o motor dizer quem esta no video grande (`onStageId` nulo)
- * ou fora do iframe, o selo de antes (o apresentador da pagina). Sem nome, nenhum.
+ * grande (quem apresenta, ou quem a equipe destacou da equipe), tambem com a tela que ele compartilha no video grande
+ * (o participante virtual `<id>-v1`, pelo dono: stageOwnerId). O aluno com o microfone liberado que vira o orador, ou
+ * o aluno que a equipe destacou (e a tela dele, na fase 2), fica sem o selo. Antes de o motor dizer quem esta no video
+ * grande (`onStageId` nulo) ou fora do iframe, o selo de antes (o apresentador da pagina). Sem nome, nenhum.
  */
 export function presenterBadgeFor(input: { joined: boolean; presenterName: string | null; signals: Pick<LiveSignalState, "onStageId" | "participants" | "viewShown"> }): string | null {
   const name = input.presenterName?.trim() || null;
@@ -708,7 +718,7 @@ export function presenterBadgeFor(input: { joined: boolean; presenterName: strin
   if (onStage === null) {
     return name;
   }
-  return input.signals.participants.moderators.includes(onStage) ? name : null;
+  return input.signals.participants.moderators.includes(stageOwnerId(onStage)) ? name : null;
 }
 
 /**
@@ -1244,14 +1254,14 @@ export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): b
  * o microfone esta ligado (`audioOn`), mesmo recolhido pela equipe sem o mudo (docs/31 V2-A16): o aluno sempre tem
  * como se calar; desligado, ele sai.
  */
-export function liveBarItems(input: { allowStudentCamera: boolean | null; audioOn?: boolean; micAllowed: boolean; showMedia: boolean }): RoomBarItems {
+export function liveBarItems(input: { allowStudentCamera: boolean | null; audioOn: boolean; micAllowed: boolean; showMedia: boolean }): RoomBarItems {
   const center: RoomBarItem[] = ["react"];
   if (input.showMedia) {
     center.push("hand");
     if (input.allowStudentCamera === true) {
       center.push("camera");
     }
-    if (input.micAllowed || input.audioOn === true) {
+    if (input.micAllowed || input.audioOn) {
       center.push("mic");
     }
   }

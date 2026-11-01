@@ -19,6 +19,7 @@ const recorded = semComentarios(readFileSync(path.join(root, "src/components/mem
 const offer = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-offer.tsx"), "utf8"));
 const hook = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/use-live-room.ts"), "utf8"));
 const chatPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-chat.tsx"), "utf8"));
+const roomPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-panel.tsx"), "utf8"));
 
 test("o painel do chat e o palco da live saem das regras puras: o takeover do celular so abaixo de lg, o painel por roomPanelShown e o esqueleto por liveSkeletonState", () => {
   assert.match(room, /const settingsTakeover = settingsShown && !desktop;/, "Configurações toma o lugar do chat so no celular");
@@ -51,6 +52,9 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
   }
   // A live diz que e a live: o contador dela conta so pelos ids (panelUnreadMark), porque o zero do offset anda.
   assert.match(room, /useRoomPanelUnread\(\{ chatLoaded: chat\.loaded, kind: "live",/);
+  // A aba escolhida entra inteira na vista quando as quatro nao cabem (docs/31 V2-A18): a lista rola pela regra pura
+  // (tabScrollLeft, no modelo) ao trocar de aba, ao mudar a lista e ao abrir; o e2e da enquete confere a aba na vista.
+  assert.match(roomPanel, /const next = tabScrollLeft\(\{[\s\S]*?\}\);\s*if \(next !== list\.scrollLeft\) \{\s*list\.scrollLeft = next;\s*\}\s*\}, \[open, tab, tabsKey\]\);/);
 });
 
 test("a gravada: Participantes com quem apresenta e o numero do cabecalho; as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {

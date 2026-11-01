@@ -373,10 +373,18 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     });
     expect(resposta.status(), texto).toBe(201);
   };
+  const lista = chat.getByRole("log");
   try {
+    // Uma janela baixa, para a lista do chat transbordar: a 1440 x 900, com poucas mensagens, ela nem rolava, e o fim da
+    // lista ao reabrir (abaixo) passava sem o chatListOnShow. A rajada do chat (5 por 60 s) limita o produtor a 4 aqui.
+    await page.setViewportSize({ height: 380, width: 1440 });
+    await escrever("abre a conversa do produtor no painel");
     await escrever("primeira do produtor no painel");
     await escrever("segunda do produtor no painel");
-    await expect(chat.getByRole("log").getByText("segunda do produtor no painel")).toBeVisible({ timeout: 15_000 });
+    await expect(lista.getByText("segunda do produtor no painel")).toBeVisible({ timeout: 15_000 });
+    // A lista transborda e o aluno esta no fim dela (a mensagem que chega rola quem esta no fim).
+    await expect.poll(() => lista.evaluate((elemento) => elemento.scrollHeight > elemento.clientHeight + 16)).toBe(true);
+    await expect(lista.getByText("segunda do produtor no painel")).toBeInViewport();
 
     // O X fecha o painel (montado e escondido) e o foco vai ao balao, que o reabre.
     await chat.getByRole("button", { exact: true, name: painel.fechar }).click();
@@ -407,7 +415,9 @@ test("o painel fechado (docs/31 V2-7 e V2-8): o X fecha e o foco vai ao balao; a
     await expect(esconder.locator("[data-room-unread]")).toHaveCount(0);
     await expect(palco.getByTestId("room-chat-pills")).toHaveCount(0);
     // A lista escondida nao rolou com a mensagem nova: reabrir a leva ao fim (chatListOnShow), e a nova fica na vista.
-    await expect(chat.getByRole("log").getByText("terceira do produtor no painel")).toBeInViewport();
+    // Sem ele, a lista ficava onde estava ao fechar, com a nova inteira abaixo do corte.
+    await expect(lista.getByText("terceira do produtor no painel")).toBeInViewport();
+    expect(await lista.evaluate((elemento) => elemento.scrollTop + elemento.clientHeight >= elemento.scrollHeight - 1), "a lista no fim").toBe(true);
   } finally {
     await produtor.fechar();
   }
@@ -507,9 +517,14 @@ test("a enquete no palco (docs/31 V2-10): com o painel fechado ela abre centrada
     await expect(palco.locator("[data-room-poll-said]")).toHaveText(WEBINAR_COPY.sala.enquete.respondida);
     // Respondida, o atalho E abre a aba Enquetes (nada volta ao palco).
     await page.keyboard.press("e");
-    await expect(chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes })).toHaveAttribute("aria-selected", "true");
+    const abaEnquetes = chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes });
+    await expect(abaEnquetes).toHaveAttribute("aria-selected", "true");
+    // As quatro abas nao cabem nos 320 px do painel e a linha rola de lado: Enquetes, a ultima, comeca fora da vista. O
+    // atalho nao move o foco (nada rola a aba sozinho): a aba escolhida entra inteira na vista pela rolagem da lista
+    // (tabScrollLeft, docs/31 V2-A18). O ratio 1 conta o corte da lista que rola, antes do clique (que rolaria sozinho).
+    await expect(abaEnquetes).toBeInViewport({ ratio: 1 });
     await expect(palco.getByRole("dialog")).toHaveCount(0);
-    await chat.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.enquetes }).click();
+    await abaEnquetes.click();
     await expect(dialogo.getByTestId("room-polls").getByText(WEBINAR_COPY.sala.enquete.respondida)).toBeVisible();
   } finally {
     // A enquete aberta ficaria no meio do palco dos testes seguintes.
@@ -1085,7 +1100,14 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresen
   // na largura empurrava tudo para baixo dela, e o toBeVisible passava com eles fora da tela).
   await expect(dialogo.locator("[data-room-bar]")).toBeInViewport({ ratio: 1 });
   await expect(dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.painel.esconder })).toBeInViewport({ ratio: 1 });
-  await expect(palco.locator("[data-room-stage-corner]")).toBeInViewport({ ratio: 1 });
+  // O circulo do canto: a Tela cheia deitada fica na tela; o Modo cinema (o navegador sem tela cheia) sai do canto
+  // deitado, porque ali ele nao mudaria nada (docs/31 V2-A27).
+  const canto = palco.locator("[data-room-stage-corner]");
+  if ((await canto.getAttribute("aria-label")) === WEBINAR_COPY.aoVivo.modoCinema) {
+    await expect(canto).toBeHidden();
+  } else {
+    await expect(canto).toBeInViewport({ ratio: 1 });
+  }
   await expect(dialogo.getByRole("tab", { exact: true, name: WEBINAR_COPY.sala.abas.chat })).toBeInViewport({ ratio: 1 });
   await expect(dialogo.getByRole("textbox", { name: WEBINAR_COPY.sala.escreva })).toBeInViewport({ ratio: 1 });
 

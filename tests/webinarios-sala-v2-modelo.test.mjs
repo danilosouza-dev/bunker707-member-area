@@ -810,6 +810,13 @@ test("presenterBadgeFor (V2-4): o selo do apresentador so com alguem da equipe n
   assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "host" })), "Danilo S.", "o apresentador no video grande");
   assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "aluna" })), null, "a aluna que fala (ou que a equipe destacou) no video grande: sem o selo");
   assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "eu" })), null, "o proprio aluno no video grande: sem o selo");
+  // A tela compartilhada no video grande e o participante virtual `<id>-v1` da tag (o _electParticipantInLargeVideo):
+  // a do apresentador leva o selo, pelo dono; a de um aluno (fase 2) ou a do proprio aluno, nao.
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "host-v1" })), "Danilo S.", "a tela do apresentador no video grande");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "aluna-v1" })), null, "a tela de um aluno no video grande");
+  assert.equal(selo(sinal(estado, "largeVideoChanged", { id: "eu-v1" })), null, "a tela do proprio aluno");
+  assert.equal(model.stageOwnerId("a1b2c3d4-v1"), "a1b2c3d4");
+  assert.equal(model.stageOwnerId("a1b2c3d4"), "a1b2c3d4", "o id de uma pessoa (hex de 8, sem hifen) volta igual");
   assert.equal(selo(sinal(sinal(estado, "largeVideoChanged", { id: "host" }), "tileViewChanged", { enabled: true })), null, "na Grade nao ha video grande");
   assert.equal(selo(sinal(estado, "largeVideoChanged", { id: null })), "Danilo S.", "sem o id (o metodo do IFrame API faltou): o selo de antes");
   assert.equal(selo(estado, false), "Danilo S.", "fora do iframe (a capa Entrar na sala), o de antes");
