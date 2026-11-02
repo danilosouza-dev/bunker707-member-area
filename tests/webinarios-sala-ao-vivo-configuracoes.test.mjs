@@ -433,12 +433,24 @@ test("o Ligar câmera recusado pelo navegador (a tag nao avisa cameraError no to
   assert.equal(negada.expectVideo, false);
   assert.equal(model.liveNoticePhrase(negada.notice), WEBINAR_COPY.aoVivo.cameraNegada);
   assert.equal(model.cameraConsentEndedByDenial(true, "denied"), true, "o aceite pendente sai: o proximo clique abre o aviso de novo");
-  // A permissao dada (ou sem como saber): a moderacao de video recusou, como antes.
+  // A permissao dada (ou sem como saber) e o motor sem resposta (forceMuted nulo): a moderacao de video, como antes.
   for (const permissao of ["granted", null]) {
     assert.equal(model.cameraRequestUnanswered(pedindo, permissao).notice, "camera_blocked", String(permissao));
     assert.equal(model.cameraConsentEndedByDenial(true, permissao), false, String(permissao));
   }
   assert.equal(model.cameraRequestUnanswered(pedindo).notice, "camera_blocked");
+  // O caso que o produtor viu (02/11/2026): as Câmeras livres (o motor diz que o aluno NAO esta preso, forceMuted false)
+  // e a camera que nao abriu no prazo (ocupada por outra janela no mesmo computador): "nao conseguimos abrir a sua
+  // camera", nunca "a camera dos alunos esta desligada"; e a camera que abrir depois tira o aviso.
+  for (const permissao of ["granted", null]) {
+    const falhou = model.cameraRequestUnanswered(pedindo, permissao, false);
+    assert.equal(falhou.notice, "camera_failed", String(permissao));
+    assert.equal(model.liveNoticePhrase(falhou.notice), WEBINAR_COPY.aoVivo.cameraFalhou);
+    assert.equal(model.applyLiveSignal(falhou, { name: "videoMuteStatusChanged", ownId: "eu", payload: { muted: false } }).notice, null, "a camera abriu depois: o aviso sai");
+  }
+  // A recusa do navegador e o pedido sem resposta continuam valendo mesmo com o motor dizendo que o aluno esta livre.
+  assert.equal(model.cameraRequestUnanswered(pedindo, "denied", false).notice, "camera_denied");
+  assert.equal(model.cameraRequestUnanswered(pedindo, "prompt", false).notice, "camera_unanswered");
   // O pedido do navegador fechado no X (a permissao continua 'prompt'): a camera nao foi liberada, nunca "a camera dos
   // alunos esta desligada"; o aceite fica (a camera que abrir depois vai com ele e tira o aviso).
   const semResposta = model.cameraRequestUnanswered(pedindo, "prompt");

@@ -73,6 +73,11 @@ export const LIVE_ROOM_RULES = {
    * prazo do microfone com a permissao do site dada (micAnswerDelayMs: a faixa abre em centenas de ms).
    */
   cameraAnswerMs: 5_000,
+  /**
+   * Ligar a camera com a permissao do site dada: o tempo de a camera abrir (o getUserMedia do iframe, a faixa nova na
+   * conferencia). 10 s, e nao os 5 do microfone: a camera demora mais a abrir, e o aviso cedo demais culpava a equipe.
+   */
+  cameraOpenMs: 10_000,
   /** O mesmo prazo com o pedido de permissao do navegador ainda aberto (o aluno le e responde); o do microfone tambem. */
   cameraPromptMs: 30_000,
   /**
@@ -819,7 +824,7 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       const closedByTeam = !on && state.videoOn && !state.expectVideo;
       // A camera ligou depois do aviso "camera desligada" ou "nao liberada" (o aluno so respondeu ao pedido do navegador
       // depois do prazo).
-      const notice = closedByTeam ? "camera_closed" : on && (state.notice === "camera_blocked" || state.notice === "camera_unanswered") ? null : state.notice;
+      const notice = closedByTeam ? "camera_closed" : on && (state.notice === "camera_blocked" || state.notice === "camera_failed" || state.notice === "camera_unanswered") ? null : state.notice;
       return { ...state, expectVideo: false, notice, videoOn: on };
     }
     case "audioMuteStatusChanged": {
@@ -911,27 +916,30 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
  * aluno (a equipe desligou as cameras dos alunos no meio da live: o iframe recusa sem pedir nada ao navegador, e a
  * permissao fica como estava) diz que a camera dos alunos esta desligada; a permissao negada, que o navegador bloqueou;
  * o pedido do navegador ainda sem resposta (`prompt`: fechado no X, ou aberto), que a camera nao foi liberada (o aceite
- * fica, e a camera que abrir depois tira o aviso); com a permissao dada ou sem como saber, a camera dos alunos
- * desligada (o caso de antes).
+ * fica, e a camera que abrir depois tira o aviso). Com a permissao dada e o motor dizendo que o aluno NAO esta preso
+ * (`forceMuted` false: as cameras livres), a camera e que nao abriu (ocupada por outro programa ou outra janela, ou
+ * lenta): camera_failed, e nunca "a camera dos alunos esta desligada", que culpava a equipe com as cameras livres. Sem
+ * resposta do motor (`forceMuted` nulo), a camera dos alunos desligada, como antes.
  */
 export function cameraRequestUnanswered(state: LiveSignalState, permission: string | null = null, forceMuted: boolean | null = null): LiveSignalState {
   if (!state.expectVideo || state.videoOn) {
     return state;
   }
-  const notice: LiveNotice = forceMuted === true ? "camera_blocked" : permission === "denied" ? "camera_denied" : permission === "prompt" ? "camera_unanswered" : "camera_blocked";
+  const notice: LiveNotice =
+    forceMuted === true ? "camera_blocked" : permission === "denied" ? "camera_denied" : permission === "prompt" ? "camera_unanswered" : forceMuted === false ? "camera_failed" : "camera_blocked";
   return { ...state, expectVideo: false, notice };
 }
 
 /**
  * Quanto esperar a camera ligar antes de dizer que ela nao ligou: com a permissao ja negada, nada (o navegador recusa
  * na hora); com o pedido de permissao do navegador ainda por responder (`prompt`, comum no celular), o prazo cobre a
- * resposta (30 s); com a permissao dada (ou sem como saber), 5 s.
+ * resposta (30 s); com a permissao dada (ou sem como saber), o tempo de a camera abrir (10 s).
  */
 export function cameraAnswerDelayMs(permission: string | null | undefined): number {
   if (permission === "denied") {
     return 0;
   }
-  return permission === "prompt" ? LIVE_ROOM_RULES.cameraPromptMs : LIVE_ROOM_RULES.cameraAnswerMs;
+  return permission === "prompt" ? LIVE_ROOM_RULES.cameraPromptMs : LIVE_ROOM_RULES.cameraOpenMs;
 }
 
 /**
