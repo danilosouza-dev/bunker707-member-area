@@ -110,8 +110,9 @@ test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, 
     // A confirmacao de Sair: o foco entra no Voltar e volta para quem a abriu.
     assert.match(fonte, /const rememberLeaveOpener = useRoomConfirmFocus\(rootRef, confirmLeave\);/, nome);
     assert.match(fonte, /rememberLeaveOpener\(\);\s*setConfirmLeave\(true\);/, nome);
-    assert.match(fonte, /data-room-confirm="" role="alertdialog"/, nome);
-    assert.match(fonte, /<RoomButton data-room-first-focus onClick=\{\(\) => setConfirmLeave\(false\)\}/, "o primeiro foco da confirmacao e o Voltar");
+    // A janela no centro (RoomLeaveDialog): o Voltar fecha, o Sair sai, e o Tab fica preso nela enquanto esta aberta.
+    assert.match(fonte, /\{confirmLeave \? <RoomLeaveDialog onCancel=\{\(\) => setConfirmLeave\(false\)\} onLeave=\{leave\} \/> : null\}/, nome);
+    assert.match(fonte, /trapRoomFocus\(event, confirmLeave \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\);/, nome);
   }
   // O chat reaberto vai ao fim (chatListOnShow) nas duas salas; a gaveta do vertical monta de novo a cada abertura.
   assert.match(room, /shown=\{panelShown\}/);

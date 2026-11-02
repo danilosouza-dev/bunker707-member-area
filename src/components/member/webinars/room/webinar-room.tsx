@@ -13,6 +13,7 @@ import { useRoomAssistant } from "./assistant/use-room-assistant";
 import { LiveParticipantsTab } from "./live-notices";
 import { overlayMessages } from "./live-room-model";
 import type { ChatPostBody } from "./room-api";
+import { RoomLeaveDialog } from "./room-leave-dialog";
 import { RecordedControls, ROOM_REACTIONS_ID } from "./recorded-controls";
 import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
@@ -32,7 +33,6 @@ import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
-import { RoomButton } from "./room-ui";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
@@ -638,7 +638,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       }
       return;
     }
-    trapRoomFocus(event, rootRef.current);
+    trapRoomFocus(event, confirmLeave ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
   }
 
   /** "Responder agora" do card do chat: a enquete volta ao palco e o foco vai para a primeira opcao. */
@@ -867,19 +867,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         />
       )}
 
-      {confirmLeave ? (
-        <div className={skeleton.confirm} data-room-confirm="" role="alertdialog" aria-label={copy.sairConfirmar}>
-          <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
-          <div className="flex gap-2">
-            <RoomButton onClick={leave} size="sm" variant="danger">
-              {copy.sair}
-            </RoomButton>
-            <RoomButton data-room-first-focus onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
-              {copy.voltar}
-            </RoomButton>
-          </div>
-        </div>
-      ) : null}
+      {confirmLeave ? <RoomLeaveDialog onCancel={() => setConfirmLeave(false)} onLeave={leave} /> : null}
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">

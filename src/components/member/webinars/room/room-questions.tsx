@@ -138,7 +138,7 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverN
             answerTestId={ai ? "question-answer-assistant" : undefined}
             controlsId={`resposta-${question.id}`}
             expanded={threadOpen}
-            label={novas.perguntas.respostas(1)}
+            label={threadOpen ? novas.perguntas.ocultarRespostas : novas.perguntas.respostas(1)}
             onToggle={() => onToggleThread?.(question.id)}
           >
             <RoomComment

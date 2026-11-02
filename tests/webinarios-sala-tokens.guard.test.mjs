@@ -462,7 +462,8 @@ test("o acento (#e50914) so no Sair: o RoomButton danger e so o Sair das confirm
     }
   };
   visitar(ROOM);
-  assert.ok(usos.length >= 2, `o Sair das duas salas: ${usos.join(" | ")}`);
+  // A confirmacao e uma peca so (RoomLeaveDialog), usada pela sala ao vivo e pela gravada.
+  assert.deepEqual(usos, [`${ROOM}/room-leave-dialog.tsx: {copy.sair}`], "o Sair da janela de confirmacao das duas salas");
   for (const uso of usos) {
     assert.match(uso, /: \{copy\.sair\}$/, uso);
   }

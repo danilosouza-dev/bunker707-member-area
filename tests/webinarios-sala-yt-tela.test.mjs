@@ -172,29 +172,36 @@ test("Y10: a pergunta votada: o polegar Curtir com aria-pressed e o icone cheio,
   assert.doesNotMatch(html, /Não gostei|thumbs-down|ellipsis-vertical|Mais opções/);
 });
 
-test("Y10: o fio '1 resposta': aberto na minha, com o selo Equipe e a hora da resposta; fechado na de outro, com a resposta no HTML e hidden; a Anonima com a mascara", () => {
+test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hora) vem antes do botao 'Ocultar respostas' e a linha desce ate ele; fechado na de outro, '1 resposta' com a resposta no HTML e hidden; a Anonima com a mascara", () => {
   const html = listaDePerguntas();
   const q2 = itemDe(html, "q2");
   assert.match(q2, /^<li class="group\/comment relative mb-4" data-mine="" data-room-question="q2">/, "o comentario com o fio pega o ponteiro para a linha");
   // A linha do avatar (de 28 px ate o fim do comentario) e a curva ate o botao, decorativas.
   assert.match(q2, /<span aria-hidden="true" class="absolute bottom-0 left-3 w-px bg-room-thread-line group-hover\/comment:bg-room-thread-line-hover top-7"><\/span>/);
   assert.match(q2, /<span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\] border-b border-l border-room-thread-line\b[^"]*\bleft-3 top-0 h-\[30px\]"><\/span>/);
-  const botao = q2.match(/<button aria-controls="resposta-q2" aria-expanded="true" class="([^"]*)" type="button">1 resposta<svg[^>]*lucide-chevron-up[^>]*>/);
-  assert.ok(botao, "o botao aberto, com a seta para cima");
+  // Aberto, o botao vira "Ocultar respostas" e desce para depois da resposta (order-2 no fio em coluna; o elemento e o
+  // mesmo, para o foco ficar nele).
+  assert.equal(WEBINAR_COPY.salaV2.perguntas.ocultarRespostas, "Ocultar respostas");
+  assert.match(q2, /<div class="flex flex-col"><div class="relative order-2">/, "o botao vai para depois da resposta");
+  const botao = q2.match(/<button aria-controls="resposta-q2" aria-expanded="true" class="([^"]*)" type="button">Ocultar respostas<svg[^>]*lucide-chevron-up[^>]*>/);
+  assert.ok(botao, "o botao aberto, Ocultar respostas com a seta para cima");
   for (const classe of ["ml-6", "mt-3", "h-10", "rounded-full", "px-4", "text-sm", "font-medium", "text-room-fg", "hover:bg-room-control-hover"]) {
     assert.ok(classesDe(`<b class="${botao[1]}">`).includes(classe), `o botao do fio tem ${classe}`);
   }
   assert.doesNotMatch(botao[1], /room-cta|room-link/, "sem azul");
-  // Aberta, a linha continua ate a curva de 12 x 24 da resposta.
-  const resposta = q2.match(/<div class="relative ml-9 mt-3" id="resposta-q2">([\s\S]*)$/);
+  // Aberta, a resposta vem primeiro (order-1): a linha desce por ela (de x 12, ate o botao que vem depois) e a curva de
+  // 12 x 24 chega ao avatar dela.
+  const resposta = q2.match(/<div class="relative ml-9 mt-3 order-1" id="resposta-q2">([\s\S]*)$/);
   assert.ok(resposta, "a resposta aberta, sem hidden, alinhada ao texto");
-  assert.match(resposta[1], /^<span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-3 h-6"><\/span>/);
+  assert.match(resposta[1], /^<span aria-hidden="true" class="absolute -left-6 -top-3 bottom-0 w-px bg-room-thread-line group-hover\/comment:bg-room-thread-line-hover"><\/span>/);
+  assert.match(resposta[1], /^<span[^>]*><\/span><span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-3 h-6"><\/span>/);
   assert.match(resposta[1], /lucide-users-round/, "o avatar da Equipe");
   assert.match(resposta[1], /<span class="inline-flex h-5 [^"]*">Equipe<\/span><time [^>]*dateTime="2026-11-05T23:27:00\.000Z" title="20:27">há 3 minutos<\/time>/, "so o selo e a hora da resposta");
   assert.match(resposta[1], /<span class="sr-only">Equipe, há 3 minutos: <\/span>Fica 7 dias\./);
 
   // A de outro: fechada, com a seta para baixo, e a resposta do Assistente no HTML com hidden.
   const q3 = itemDe(html, "q3");
+  assert.match(q3, /<div class="flex flex-col"><div class="relative"><span/, "fechado, o botao fica logo abaixo do comentario");
   assert.match(q3, /<button aria-controls="resposta-q3" aria-expanded="false"[^>]*>1 resposta<svg[^>]*lucide-chevron-down/);
   assert.match(q3, /<div class="relative ml-9 mt-3" data-testid="question-answer-assistant" hidden="" id="resposta-q3">/);
   assert.match(q3, /lucide-sparkles/, "o avatar do Assistente");
@@ -336,4 +343,26 @@ test("Y11: as Perguntas da sala: o campo do YouTube (Ctrl+Enter, Perguntar) no l
   assert.match(verComo, new RegExp(WEBINAR_COPY.aluno.previaSemGravar.replace(/\./g, "\\.")));
   // A gaveta do vertical: o campo de antes.
   assert.match(render(questionsModule.RoomQuestionsTab, PERGUNTAS), /<form class="border-t border-room-border bg-room-composer[^"]*"><textarea aria-label="Sua pergunta"[^>]*rows="2"/);
+});
+
+test("o Sair da sala pergunta numa janela no centro (alertdialog modal sobre um veu), com o titulo, o texto e o Voltar antes do Sair", async () => {
+  const { RoomLeaveDialog } = await import("../src/components/member/webinars/room/room-leave-dialog.tsx");
+  const sala = WEBINAR_COPY.sala;
+  const html = render(RoomLeaveDialog, { onCancel: noop, onLeave: noop });
+  // O veu cobre a sala inteira e centraliza a janela.
+  assert.match(html, /^<div class="absolute inset-0 z-\[80\] flex items-center justify-center bg-black\/60 p-4" data-room-confirm-backdrop="">/);
+  const janela = html.match(/<div aria-describedby="([^"]+)" aria-labelledby="([^"]+)" aria-modal="true" class="([^"]*)" data-room-confirm="" role="alertdialog">([\s\S]*)<\/div><\/div>$/);
+  assert.ok(janela, "a janela com o papel alertdialog, modal, com titulo e texto ligados");
+  const [, textoId, tituloId, classes, dentro] = janela;
+  for (const classe of ["max-w-[400px]", "rounded-xl", "bg-room-menu", "p-6"]) {
+    assert.ok(classes.split(" ").includes(classe), `a janela tem ${classe}`);
+  }
+  assert.ok(dentro.includes(`id="${tituloId}">${sala.sairConfirmar}</h2>`), "o titulo e o nome da janela");
+  assert.ok(dentro.includes(`id="${textoId}">${sala.sairConfirmarTexto}</p>`), "o texto descreve a janela");
+  // Os botoes: o Voltar primeiro, com o primeiro foco; o Sair depois. Nenhum fica so com icone.
+  const botoes = [...dentro.matchAll(/<button([^>]*)>([^<]*)<\/button>/g)].map(([, atributos, rotulo]) => ({ foco: /data-room-first-focus/.test(atributos), rotulo }));
+  assert.deepEqual(botoes, [
+    { foco: true, rotulo: sala.voltar },
+    { foco: false, rotulo: sala.sair }
+  ]);
 });

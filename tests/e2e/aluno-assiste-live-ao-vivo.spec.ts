@@ -750,18 +750,28 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   );
   await itemDoTrilho(dialogo, sala.abas.chat).click();
   await itemDoTrilho(dialogo, sala.abas.perguntas).click();
-  const fio = minha.getByRole("button", { name: novas.respostas(1) });
+  // O botao do fio e o mesmo nos dois estados (o nome muda): aberto, "Ocultar respostas" depois da resposta, como no
+  // YouTube; fechado, "1 resposta" logo abaixo da pergunta.
+  const fio = minha.locator(`button[aria-controls="resposta-${question.id}"]`);
   await expect(fio).toHaveAttribute("aria-expanded", "true");
+  await expect(fio).toHaveAccessibleName(novas.ocultarRespostas);
   const blocoDaResposta = minha.locator(`#resposta-${question.id}`);
   await expect(blocoDaResposta).toBeVisible();
   await expect(blocoDaResposta).toContainText(textoDaResposta);
   await expect(blocoDaResposta.getByText(sala.selos.equipe, { exact: true })).toBeVisible();
-  // O clique fecha o fio (a resposta continua no HTML, escondida) e abre de novo.
+  const caixaDaResposta = await blocoDaResposta.boundingBox();
+  const caixaDoBotao = await fio.boundingBox();
+  expect(caixaDoBotao!.y, "o Ocultar respostas fica depois da resposta").toBeGreaterThanOrEqual(caixaDaResposta!.y + caixaDaResposta!.height - 1);
+  // O clique fecha o fio (a resposta continua no HTML, escondida), o botao volta a "1 resposta" com o foco nele, e abre
+  // de novo.
   await fio.click();
   await expect(fio).toHaveAttribute("aria-expanded", "false");
+  await expect(fio).toHaveAccessibleName(novas.respostas(1));
+  await expect(fio).toBeFocused();
   await expect(blocoDaResposta).toBeHidden();
   await fio.click();
   await expect(blocoDaResposta).toBeVisible();
+  await expect(fio).toBeFocused();
 
   // Os chips filtram: em Sem resposta a minha (respondida) sai; em Respondidas ela volta.
   const filtros = painel.getByRole("group", { name: novas.filtrar });

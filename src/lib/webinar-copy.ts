@@ -217,6 +217,7 @@ export const WEBINAR_COPY = {
     responderComo: { anonimo: "Aluno (anônimo)", apelido: "Apelido", nome: "Primeiro nome e inicial" },
     sair: "Sair",
     sairConfirmar: "Sair da sala?",
+    sairConfirmarTexto: "O vídeo para e você volta para a página do webinário.",
     /* O papel no chat e no palco; "Co-apresentador" e uma frase so, sem feminino (docs/31 V2-A12). */
     selos: { apresentador: "Apresentador", assistente: "Assistente", coApresentador: "Co-apresentador", equipe: "Equipe" },
     sessao: "Sessão",
