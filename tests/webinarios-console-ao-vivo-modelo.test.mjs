@@ -369,31 +369,108 @@ test("mapa aluno -> participante: o mesmo id em duas contas nao liga nenhuma (o 
 });
 
 test("ao virar moderador, o apresentador liga a moderacao de audio; a de video so sem camera de aluno; seguir a visao so o Apresentador", () => {
-  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "host" }), [
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "host", selfUnmute: false }), [
     ["toggleModeration", true, "audio"],
     ["setFollowMe", true]
   ]);
-  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: false, role: "co_host" }), [
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: false, role: "co_host", selfUnmute: false }), [
     ["toggleModeration", true, "audio"],
     ["toggleModeration", true, "video"]
   ]);
-  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team" }), [], "a Equipe nao comanda a sala");
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team", selfUnmute: false }), [], "a Equipe nao comanda a sala");
+});
+
+test("microfone sozinho ligado (docs/31 caminho A): o preparo nao manda a moderacao de audio (o vigia decide); o resto fica", () => {
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "host", selfUnmute: true }), [["setFollowMe", true]]);
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: false, role: "co_host", selfUnmute: true }), [["toggleModeration", true, "video"]]);
+  assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team", selfUnmute: true }), []);
 });
 
 test("ao virar moderador, nenhum papel manda a moderacao de tela: na tag o 'desktop' do toggleModeration liga de novo a de audio (docs/31 §5.4)", () => {
   for (const role of ["host", "co_host", "team"]) {
     for (const allowStudentCamera of [true, false]) {
-      const commands = model.presenterSetupCommands({ allowStudentCamera, role });
-      assert.ok(
-        commands.every((command) => !command.includes("desktop")),
-        `${role} com allowStudentCamera=${allowStudentCamera} nao manda nada com "desktop"`
-      );
-      assert.ok(
-        commands.filter(([name, enabled, mediaType]) => name === "toggleModeration" && enabled === true && mediaType === "audio").length <= 1,
-        `${role} com allowStudentCamera=${allowStudentCamera} liga a moderacao de audio no maximo uma vez`
-      );
+      for (const selfUnmute of [true, false]) {
+        const commands = model.presenterSetupCommands({ allowStudentCamera, role, selfUnmute });
+        assert.ok(
+          commands.every((command) => !command.includes("desktop")),
+          `${role} com allowStudentCamera=${allowStudentCamera} e selfUnmute=${selfUnmute} nao manda nada com "desktop"`
+        );
+        const audio = commands.filter(([name, enabled, mediaType]) => name === "toggleModeration" && enabled === true && mediaType === "audio").length;
+        assert.equal(audio, role !== "team" && !selfUnmute ? 1 : 0, `${role} com selfUnmute=${selfUnmute}: a moderacao de audio uma vez so com a politica desligada`);
+      }
     }
   }
+});
+
+/* O vigia do microfone sozinho (micLimitStep, teto MIC_LIMIT = 4). */
+const vigia = (extra = {}) => ({
+  audio: {},
+  lastToggleMs: null,
+  moderationOn: false,
+  nowMs: NOW,
+  order: [],
+  policy: true,
+  roles: {},
+  selfId: "p-eu",
+  ...extra
+});
+/** n alunos com o microfone no ar, abertos na ordem a1, a2, ... */
+const falando = (n) => {
+  const ids = Array.from({ length: n }, (_, index) => `a${index + 1}`);
+  return { audio: Object.fromEntries(ids.map((id) => [id, true])), order: ids, roles: Object.fromEntries(ids.map((id) => [id, "participant"])) };
+};
+
+test("vigia do microfone: abaixo de 4 quer a moderacao desligada; com 4 quer ligada; com 5 silencia o mais recente", () => {
+  assert.equal(model.MIC_LIMIT, 4);
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: true })), { mute: [], toggle: false }, "3 falando: todos podem abrir");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: false })), { mute: [], toggle: null }, "o motor ja esta como o querido: nada");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), moderationOn: false })), { mute: [], toggle: true }, "4 falando: lota");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(5), moderationOn: true })), { mute: ["a5"], toggle: null }, "o quinto que abriu e silenciado");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: null })), { mute: [], toggle: false }, "sem leitura do motor, manda o querido");
+});
+
+test("vigia do microfone: o silenciado e o 5º que abriu pela ordem, nunca o primeiro da lista (a ordem das chaves nao conta)", () => {
+  // As chaves na ordem contraria a de quem abriu: o desenho sem ordem silenciaria o a1, que abriu primeiro.
+  const audio = { a5: true, a4: true, a3: true, a2: true, a1: true };
+  const roles = { a1: "participant", a2: "participant", a3: "participant", a4: "participant", a5: "participant" };
+  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: true, order: ["a1", "a2", "a3", "a4", "a5"], roles })).mute, ["a5"]);
+  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: true, order: ["a3", "a1", "a5", "a2", "a4"], roles })).mute, ["a4"]);
+  // micOpenOrder: quem fechou sai, quem continua fica no lugar, quem abriu agora vai para o fim.
+  assert.deepEqual(model.micOpenOrder(["a1", "a2", "a3"], { a1: true, a3: true, a9: true }), ["a1", "a3", "a9"]);
+  assert.deepEqual(model.micOpenOrder([], { a2: true, a1: false }), ["a2"]);
+});
+
+test("vigia do microfone: moderadores, quem nao tem papel lido e o proprio console nao contam", () => {
+  const audio = { a1: true, a2: true, a3: true, co: true, eu: true, novo: true, sem: true };
+  const roles = { a1: "participant", a2: "none", a3: "participant", co: "moderator", eu: "participant", novo: "participant" };
+  const order = ["co", "eu", "a1", "a2", "a3", "sem"];
+  assert.deepEqual(model.micLimitStep(vigia({ audio: { ...audio, novo: false }, moderationOn: true, order, roles, selfId: "eu" })), { mute: [], toggle: false }, "3 alunos contam, nao 6");
+  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: false, order: [...order, "novo"], roles, selfId: "eu" })), { mute: [], toggle: true }, "o quarto aluno lota");
+});
+
+test("vigia do microfone: a histerese segura o segundo toggle antes de 2 s; a politica desligada nao faz nada", () => {
+  assert.equal(model.MIC_LIMIT_TOGGLE_MS, 2_000);
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), lastToggleMs: NOW - 1_999, moderationOn: false })), { mute: [], toggle: null }, "1,999 s depois: espera");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), lastToggleMs: NOW - 2_000, moderationOn: false })), { mute: [], toggle: true }, "2 s depois: manda");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(5), lastToggleMs: NOW - 100, moderationOn: false })).mute, ["a5"], "o mudo nao espera a histerese");
+  assert.deepEqual(model.micLimitStep(vigia({ ...falando(9), moderationOn: false, policy: false })), { mute: [], toggle: null }, "politica desligada: o preparo ja ligou a moderacao");
+});
+
+test("fechar o microfone da turma: liga a moderacao de audio, silencia os alunos com o microfone no ar fora do palco e libera de novo quem esta no palco ou foi liberado; nunca muteEveryone", () => {
+  const commands = model.micCloseCommands({
+    media: { a1: { audio: true }, a2: { audio: false }, co: { audio: true }, eu: { audio: true }, palco: { audio: true }, sem: { audio: true }, vez: { audio: true } },
+    roles: { a1: "participant", a2: "participant", co: "moderator", eu: "participant", palco: "participant", vez: "participant" },
+    selfId: "eu",
+    speaking: ["vez"],
+    stage: ["palco", "eu"]
+  });
+  assert.deepEqual(commands, [
+    ["toggleModeration", true, "audio"],
+    ["muteRemoteParticipant", "a1", "audio"],
+    ["askToUnmute", "palco"],
+    ["askToUnmute", "vez"]
+  ]);
+  assert.ok(commands.every(([name]) => name !== "muteEveryone" && name !== "rejectParticipant"));
 });
 
 test("cartao Gravação: o preparo que nao respondeu em 25 min vale como sem gravador (Preparar de novo e a reserva), nunca Preparando 1 min para sempre", () => {

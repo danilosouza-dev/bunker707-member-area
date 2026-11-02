@@ -110,7 +110,7 @@ const { liveRoomConfigured } = await import("../src/server/webinars/live-model.t
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const actions = await import("../src/server/webinars/actions.ts");
 const queries = await import("../src/server/webinars/queries.ts");
-const { RecordingCard } = await import("../src/components/admin/v2/communication/webinars/webinar-editor-cards.tsx");
+const { RecordingCard, RoomCard } = await import("../src/components/admin/v2/communication/webinars/webinar-editor-cards.tsx");
 const { WebinarEditor } = await import("../src/components/admin/v2/communication/webinars/webinar-editor.tsx");
 const { WebinarsTable } = await import("../src/components/admin/v2/communication/webinars/webinars-table.tsx");
 
@@ -298,6 +298,24 @@ test("card Gravacao: o rotulo de cada recorder_status (§2.2); Preparar gravaç�
   assert.equal(card("none", { liveRoomReady: false }).roomMissingNote, WEBINAR_COPY.consoleAoVivo.salaEmBreve);
   assert.equal(liveRoomConfigured({}), false, "sem WEBINAR_MEET_DOMAIN nem o segredo, a sala nao existe");
   assert.equal(liveRoomConfigured({ WEBINAR_JWT_SECRET: "s".repeat(40), WEBINAR_MEET_DOMAIN: "meet.exemplo.test" }), true);
+});
+
+test("card Sala: o microfone sozinho liga na Live ao vivo (o teto na dica) e fica desligado na gravada; o clique muda so a chave do room_settings", () => {
+  const micSelf = (markup) => markup.match(/<button[^>]*id="webinar-room-micSelf"[^>]*>/)?.[0] ?? "";
+  const card = (draft, onChange = () => {}) => html(createElement(RoomCard, { disabled: false, draft, errorFor: () => undefined, now: Date.now(), onBlur() {}, onChange }));
+
+  const live = { ...model.emptyWebinarDraft("live"), roomSettings: { ...model.defaultRoomSettings(), selfUnmute: true } };
+  const ligado = card(live);
+  assert.match(micSelf(ligado), /aria-checked="true"/);
+  assert.doesNotMatch(micSelf(ligado), /\sdisabled=""/, "na Live ao vivo o switch funciona");
+  assert.match(textOf(ligado), new RegExp(vm.WEBINAR_ADMIN_COPY.fields.micSelfHint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(micSelf(card({ ...live, roomSettings: model.defaultRoomSettings() })), /aria-checked="false"/, "o padrao e desligado");
+
+  const gravada = { ...model.emptyWebinarDraft("simulated"), roomSettings: { ...model.defaultRoomSettings(), selfUnmute: true } };
+  const desligado = card(gravada);
+  assert.match(micSelf(desligado), /\sdisabled=""/, "na Live gravada nao ha microfone");
+  assert.match(micSelf(desligado), /aria-checked="false"/);
+  assert.match(textOf(desligado), /Desligado nesta versão\./);
 });
 
 test("card Gravacao na tela: a situacao do gravador, os links para o console, a frase de quem nao publica e o aviso sem a sala", () => {

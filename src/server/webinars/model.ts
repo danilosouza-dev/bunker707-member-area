@@ -125,6 +125,8 @@ export type RoomSettings = {
   practiceSession: boolean;
   questions: boolean;
   reactions: boolean;
+  /** Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar, com teto no console de quem apresenta. */
+  selfUnmute: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
@@ -280,6 +282,7 @@ export function defaultRoomSettings(): RoomSettings {
     practiceSession: true,
     questions: true,
     reactions: true,
+    selfUnmute: false,
     slowModeSeconds: null,
     waitingRoom: false
   };

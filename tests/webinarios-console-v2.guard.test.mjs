@@ -368,7 +368,8 @@ test("o iframe pelo useJitsiMeet com o token do join-token e o nonce da pagina; 
   assert.match(panel, /shouldAutoStartRecording\([\s\S]*?command\("startRecording", \{ mode: "file" \}\)/, "o Gravar da fila dispara sozinho");
   // A moderacao de audio e a de video (sem camera de aluno) e o seguir a visao saem de presenterSetupCommands
   // (live-console-model), mandados um a um ao virar moderador; a de tela nao liga pelo IFrame API (docs/31 §5.4).
-  assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
+  // Com o microfone sozinho (docs/31 caminho A), o preparo le a politica do retrato (selfUnmute).
+  assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role, selfUnmute(?:: [^}]+)? \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
   assert.match(panel, /command\("toggleLobby", value\)/);
   // Câmeras livres: so o comando; o estado vem do moderationStatusChanged de video (o e2e confere o eco).
   assert.match(panel, /command\("toggleModeration", !allowed, "video"\)/, "Câmeras livres");

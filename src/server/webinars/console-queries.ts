@@ -378,7 +378,8 @@ export async function loadLiveConsole(db: WebinarsDb, input: { authors: readonly
       status
     },
     recording: liveRecordingOf(recording, nowMs),
-    roomLocked: session.room_locked === true
+    roomLocked: session.room_locked === true,
+    selfUnmute: roomSettingsOfRow(input.webinar.room_settings).selfUnmute
   };
 }
 

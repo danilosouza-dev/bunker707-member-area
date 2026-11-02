@@ -134,6 +134,9 @@ export const unbanUserSchema = z.object({ reason: z.string().trim().max(200, LIV
 /** Trancar / destrancar a sala (webinar_sessions.room_locked; o navegador do apresentador chama toggleLobby). */
 export const roomLockSchema = z.object({ locked: z.boolean(), sessionId: sessionIdSchema });
 
+/** O microfone sozinho ao vivo (docs/31, caminho A): a chave selfUnmute do room_settings. */
+export const selfUnmuteSchema = z.object({ allowed: z.boolean(), sessionId: sessionIdSchema });
+
 /** A reserva "Gravar no navegador" ligou ou desligou (o selo Gravando do aluno). */
 export const browserRecordingSchema = z.object({ on: z.boolean(), sessionId: sessionIdSchema });
 

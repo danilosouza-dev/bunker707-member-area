@@ -367,7 +367,9 @@ export const WEBINAR_ADMIN_COPY = {
     micOff: "Todos entram sem microfone",
     micOffHint: "Fixo nesta versão.",
     micSelf: "Permitir que o aluno abra o microfone sozinho",
-    micSelfHint: "Desligado nesta versão.",
+    micSelfHint: "Até 4 alunos falam ao mesmo tempo; quando lota, os outros esperam.",
+    /** Na Live gravada nao ha microfone (docs/30): o switch fica desligado com a dica de antes. */
+    micSelfRecordedHint: "Desligado nesta versão.",
     newCommentsVisible: "Comentários novos aparecem para a turma",
     newCommentsHistory: "Entram no histórico só depois de aprovados",
     newCommentsHistoryHint: "Fixo: a equipe aprova no console.",

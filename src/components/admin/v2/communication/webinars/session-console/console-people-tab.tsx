@@ -1,6 +1,6 @@
 "use client";
 
-import { MicOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,8 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // A aba Pessoas do console de quem apresenta (docs/31 V2-14 e V2-15, "como no Zoom"), de cima para baixo: as acoes de
 // todos (Silenciar todos, o muteEveryone de audio; Fechar todas as câmeras, o de video; e o "Câmeras livres", a
 // moderacao de video desligada, com o estado em aria-pressed pelo que o motor diz: o moderationStatusChanged de video e
-// o isModerationOn na entrada, nunca o clique), a caixa desligada e fixa do microfone que o aluno abre sozinho, a Sala
+// o isModerationOn na entrada, nunca o clique), o microfone sozinho (docs/31 caminho A: o botao com aria-pressed pelo
+// que foi gravado, so para quem apresenta, com o teto de 4 alunos na frase de baixo), a Sala
 // de espera com Admitir por pessoa e Admitir todos (answerKnockingParticipant), quem esta na sala (LiveParticipants:
 // "Na sala · 3", o microfone, a camera, o Compartilhando e o ⋯ de cada um, e os removidos, silenciados e banidos com
 // Desfazer) e o rodape "3 na sala · 2 com a mão levantada". Cada botao so aparece para o papel que pode
@@ -27,6 +28,8 @@ const copy = WEBINAR_COPY.consoleAoVivo;
 const pessoas = WEBINAR_COPY.consoleV2.pessoas;
 /** O titulo da Sala de espera (recebe o foco quando o ultimo Admitir sai). */
 const LOBBY_TITLE_ID = "console-live-lobby-title";
+/** A frase do microfone sozinho (o teto), ligada ao botao. */
+const MIC_SELF_HINT_ID = "console-live-mic-self-hint";
 /** O "Câmeras livres" ligado: o estilo do botao ativo da sala, com contraste nos dois temas (WCAG 1.4.11). */
 const PRESSED = "border-room-active-bg bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85";
 
@@ -35,10 +38,12 @@ type ConsolePeopleTabProps = {
   canPublish: boolean;
   handle: LiveRoomHandle;
   onAction: (person: LiveConsolePerson | null, participantId: string | null, action: PersonAction) => void;
+  /** O microfone sozinho (setSelfUnmute: grava, depois o console manda a sala). */
+  onSelfUnmute: (allowed: boolean) => void;
   people: readonly LiveConsolePerson[];
 };
 
-export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people }: ConsolePeopleTabProps) {
+export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, onSelfUnmute, people }: ConsolePeopleTabProps) {
   const { controls, joined, room } = handle;
   const knocking = room.knocking;
   const inRoom = roomRows(room, people).length;
@@ -99,13 +104,23 @@ export function ConsolePeopleTab({ busyKey, canPublish, handle, onAction, people
       ) : null}
 
       {controls.release ? (
-        <label className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-          <input checked={false} className="mt-0.5 size-4 shrink-0" disabled readOnly type="checkbox" />
-          <span className="flex min-w-0 flex-col">
-            <span className="text-[var(--text-primary)]">{LIVE_CONSOLE_COPY.microfoneSozinho}</span>
-            <span>{LIVE_CONSOLE_COPY.microfoneSozinhoTexto}</span>
-          </span>
-        </label>
+        <div className="flex min-w-0 flex-col items-start gap-1" data-live-mic-self="">
+          <Button
+            aria-describedby={MIC_SELF_HINT_ID}
+            aria-pressed={handle.selfUnmute}
+            className={cn("px-3", handle.selfUnmute && PRESSED)}
+            disabled={!joined}
+            onClick={() => onSelfUnmute(!handle.selfUnmute)}
+            type="button"
+            variant="secondary"
+          >
+            <Mic aria-hidden="true" className="size-4" />
+            {LIVE_CONSOLE_COPY.microfoneSozinho}
+          </Button>
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]" id={MIC_SELF_HINT_ID}>
+            {LIVE_CONSOLE_COPY.microfoneSozinhoTexto}
+          </p>
+        </div>
       ) : null}
 
       {controls.admit ? (

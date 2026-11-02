@@ -52,6 +52,7 @@ import {
   requestRecording,
   setBrowserRecording,
   setRoomLock,
+  setSelfUnmute,
   startLiveSession,
   undoSessionBan,
   unbanStudent
@@ -419,6 +420,15 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     void run("live:lock", () => setRoomLock({ locked, sessionId }), () =>
       room.syncLobby(desiredLobby({ practiceSession: webinar.practiceSession !== false, roomLocked: locked, status: session.status, waitingRoom: webinar.waitingRoom === true }))
     );
+  }
+
+  // O microfone sozinho (docs/31 caminho A): grava (so quem apresenta, conferido no servidor), depois o console manda a sala.
+  function selfUnmuteNow(allowed: boolean) {
+    if (!sessionId || !live) {
+      return;
+    }
+
+    void run("live:mic-self", () => setSelfUnmute({ allowed, sessionId }), () => room.applySelfUnmute(allowed));
   }
 
   /* Live ao vivo: gravacao */
@@ -840,7 +850,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     questions={snapshot.questions}
                   />
                 ),
-                pessoas: live ? <ConsolePeopleTab busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} people={live.people} /> : null
+                pessoas: live ? <ConsolePeopleTab busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} onSelfUnmute={selfUnmuteNow} people={live.people} /> : null
               }}
               tabs={tabs}
               view={shownView}
