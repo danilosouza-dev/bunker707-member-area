@@ -716,7 +716,10 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   }
   const resposta = await enviou;
   expect(resposta.status()).toBe(201);
-  const { question } = (await resposta.json()) as { question: { anonymous: boolean; id: string } };
+  // A rota da sala responde no envelope { data } (room-route.ts ok()).
+  const {
+    data: { question }
+  } = (await resposta.json()) as { data: { question: { anonymous: boolean; id: string } } };
   expect(question.anonymous).toBe(true);
   // Depois de perguntar, o campo fecha e fica vazio.
   await expect(campo).toHaveValue("");
