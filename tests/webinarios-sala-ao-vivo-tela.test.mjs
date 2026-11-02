@@ -236,7 +236,7 @@ test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o c
   assert.match(html, /aria-live="polite"/);
   const roomCode = semComentarios(FONTES.room);
   assert.match(roomCode, /useRoomDialogLock\(rootRef, true\)/, "sem Minimizar (V2-2), a trava vale sempre");
-  assert.match(roomCode, /trapRoomFocus\(event, rootRef\.current\)/);
+  assert.match(roomCode, /trapRoomFocus\(event, confirmLeave \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\)/);
   assert.match(roomCode, /if \(\(phase === "live" \|\| joined\) && !blocked\) \{\s*rememberLeaveOpener\(\);\s*setConfirmLeave\(true\)/, "Esc e Sair pedem confirmacao com a live no ar (e guardam quem a abriu, para o foco voltar la)");
 
   const hook = semComentarios(FONTES.hook);

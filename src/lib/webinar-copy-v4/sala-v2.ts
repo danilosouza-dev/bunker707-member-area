@@ -86,6 +86,8 @@ export const SALA_V2_COPY = {
   perguntas: {
     filtrar: "Filtrar perguntas",
     minhas: "Minhas",
+    /* O botao do fio aberto, depois das respostas (como o "Ocultar respostas" do YouTube). */
+    ocultarRespostas: "Ocultar respostas",
     ordenar: "Ordenar perguntas",
     perguntar: "Perguntar",
     respostas: (n: number) => (n === 1 ? "1 resposta" : `${n} respostas`),

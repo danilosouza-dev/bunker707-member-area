@@ -49,6 +49,7 @@ import {
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
+import { RoomLeaveDialog } from "./room-leave-dialog";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
@@ -78,7 +79,6 @@ import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
 import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION, snackToRestore } from "./room-snackbar-model";
 import { RoomStageBadges } from "./room-stage-badges";
-import { RoomButton } from "./room-ui";
 import { ROOM_VIEW_MENU_ID } from "./room-view-menu";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
 import { useRoomTranslation } from "./use-room-translation";
@@ -834,7 +834,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       return;
     }
     if (event.key === "Tab") {
-      trapRoomFocus(event, rootRef.current);
+      trapRoomFocus(event, confirmLeave ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -957,19 +957,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         title={session.webinar.title}
       />
 
-      {confirmLeave ? (
-        <div aria-label={copy.sairConfirmar} className={skeleton.confirm} data-room-confirm="" role="alertdialog">
-          <p className="text-sm font-semibold text-room-warn-fg">{copy.sairConfirmar}</p>
-          <div className="flex gap-2">
-            <RoomButton onClick={leave} size="sm" variant="danger">
-              {copy.sair}
-            </RoomButton>
-            <RoomButton data-room-first-focus onClick={() => setConfirmLeave(false)} size="sm" variant="secondary">
-              {copy.voltar}
-            </RoomButton>
-          </div>
-        </div>
-      ) : null}
+      {confirmLeave ? <RoomLeaveDialog onCancel={() => setConfirmLeave(false)} onLeave={leave} /> : null}
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">

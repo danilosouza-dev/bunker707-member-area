@@ -77,6 +77,8 @@ export type RoomCommentProps = {
 const THREAD_LINE = "absolute bottom-0 left-3 w-px bg-room-thread-line group-hover/comment:bg-room-thread-line-hover";
 /** A curva do fio (o "L" arredondado do YouTube), de x 12 ate o botao ou o avatar da resposta. */
 const THREAD_CURVE = "absolute w-3 rounded-bl-[16px] border-b border-l border-room-thread-line group-hover/comment:border-room-thread-line-hover";
+/** Aberto, a linha passa pela resposta (em x 12 do comentario) ate o botao "Ocultar respostas", que vem depois dela. */
+const THREAD_LINE_TO_TOGGLE = "absolute -left-6 -top-3 bottom-0 w-px bg-room-thread-line group-hover/comment:bg-room-thread-line-hover";
 
 const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question" } as const;
 
@@ -140,7 +142,8 @@ export function RoomComment({ actions = null, as: Tag = "li", avatar, body, head
 /**
  * O fio do comentario: o botao "1 resposta" (40 px, raio 20, 14/20 peso 500, sem azul, a 24 px da borda e 12 abaixo
  * do comentario, com a seta de 24) e a resposta, que fica sempre no HTML (`hidden` fechada: o aria-controls aponta
- * para um no que existe), alinhada ao texto do comentario (x 36).
+ * para um no que existe), alinhada ao texto do comentario (x 36). Aberto, o botao vira "Ocultar respostas" (o `label`
+ * vem de quem chama) e desce para depois da resposta.
  */
 export function RoomCommentThread({
   answerTestId,
@@ -160,11 +163,13 @@ export function RoomCommentThread({
   onToggle: () => void;
 }) {
   const Chevron = expanded ? ChevronUp : ChevronDown;
+  // Como no YouTube: fechado, o botao "1 resposta" logo abaixo do comentario; aberto, a resposta vem primeiro e o botao
+  // "Ocultar respostas" fica por ultimo, com a linha do avatar descendo pela resposta ate a curva dele. O botao e o
+  // mesmo elemento nos dois estados (so a ordem do flex muda), para o foco continuar nele ao abrir e ao fechar.
   return (
-    <>
-      <div className="relative">
+    <div className="flex flex-col">
+      <div className={cn("relative", expanded ? "order-2" : null)}>
         <span aria-hidden="true" className={cn(THREAD_CURVE, "left-3 top-0 h-[30px]")} />
-        {expanded ? <span aria-hidden="true" className={cn(THREAD_LINE, "top-0")} /> : null}
         <button
           aria-controls={controlsId}
           aria-expanded={expanded}
@@ -179,10 +184,11 @@ export function RoomCommentThread({
           <Chevron aria-hidden="true" className="-mr-1.5 ml-1.5 size-6" strokeWidth={1.75} />
         </button>
       </div>
-      <div className="relative ml-9 mt-3" data-testid={answerTestId} hidden={!expanded} id={controlsId}>
+      <div className={cn("relative ml-9 mt-3", expanded ? "order-1" : null)} data-testid={answerTestId} hidden={!expanded} id={controlsId}>
+        {expanded ? <span aria-hidden="true" className={THREAD_LINE_TO_TOGGLE} /> : null}
         <span aria-hidden="true" className={cn(THREAD_CURVE, "-left-6 -top-3 h-6")} />
         {children}
       </div>
-    </>
+    </div>
   );
 }
