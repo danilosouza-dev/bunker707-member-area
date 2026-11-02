@@ -65,6 +65,7 @@ Evitar:
 - Paletas novas por secao.
 - Gradientes coloridos decorativos.
 - Roxo/azul dominante, bege dominante ou laranja/marrom dominante.
+- Exceção (01/11/2026, `docs/31` V2-A54): na sala do webinário, o azul do YouTube só nas ações de enviar (Enviar, Perguntar), nos links de ação e na ação do aviso; em nenhum outro lugar da área.
 
 ## Iconografia
 
@@ -274,6 +275,7 @@ Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo
 
 - Atualizacao 13/10/2026 (pedido do produtor, referencia "sidebar do YouTube", sempre escuro, sem troca de tema): o cabecalho mostra sempre hamburguer (40 px, redondo) + logo inteira, em todas as larguras; nao ha trilho de icones nem recuo do conteudo. No modo de cantos arredondados a capa do destaque recua 64 px a partir de 640 px (perto da Netflix) e a logo fica nessa linha (hamburguer a 16 px + 40 px + 8 px); o cabecalho recua o mesmo a direita, para a foto do perfil alinhar. O trilho de icones de 72/80 px desta mesma data foi descartado pelo produtor.
 - Gaveta `src/components/member/shell/member-sidebar.tsx`: abre por cima da pagina com veu escuro, em todas as larguras; largura `min(300px, 86vw)`, altura total, hamburguer que fecha + logo inteira no topo, grupos `Estudar` e `Conta e ajuda` separados so por uma linha (o nome do grupo fica para o leitor de tela).
+- Logo da área (01/11/2026): um componente só, `PlatformLogo` (`src/components/platform-logo.tsx`), no topo da área, na gaveta e no cabeçalho da sala do webinário, com as mesmas classes (150 px de largura, no máximo 40 de altura), a mesma caixa e o mesmo arquivo. Na sala, sem link e sem menu; no tema claro da sala, a logo padrão fica preta e a enviada em Marca vira o nome em texto (`docs/31` V2-3 e V2-A58).
 - Item com 48 px de altura, texto 15 px e icone Lucide proprio de 24 px com traco 1,5 (Inicio `House`, Minha jornada `Route`, Continue assistindo `CirclePlay`, Minhas compras `LibraryBig`, Favoritos `Bookmark`, Materiais `FolderOpen`, Suporte `LifeBuoy`, Perfil `CircleUser`; a `Compass` e so da IA Diretor). Normal em peso regular `zinc-300`, hover `white/[0.06]`; ativo com fundo `white/[0.1]`, texto branco em negrito e icone preenchido a 18 %. Sem barra nem icone vermelho (decisao de 13/10/2026: o vermelho fica para a marca e para "ao vivo"); foco visivel.
 - Sem rodape de conta: perfil e `Sair` ficam so no menu da conta do topo. Produtor/admin ve no topo da gaveta o cartao `Área do produtor` com `Ir para o admin` e `Modo de visualização`.
 - Menu da conta no avatar do topo (`member-account-menu.tsx`, so o avatar, sem nome nem seta, como no YouTube; o nome aparece no painel): `Perfil`, `Minhas compras`, `Suporte` e `Sair`; fecha ao clicar fora, com `Esc` ou ao perder o foco; setas percorrem os itens.
@@ -382,6 +384,19 @@ Regras em `docs/24` §10.3. A linha de acoes saiu; conferido a 1440 e a 375 px (
 - **Seletor**: o mesmo (`flex h-10 gap-1`, seis botoes de 40 px), agora `mt-2` na linha logo abaixo da linha do Reagir.
 - **Bolinha de nao lida**: `absolute left-[5px] top-[30px] size-2` na margem da esquerda, na altura do meio do circulo.
 - **Previa**: o excluir parado (`aria-hidden`, `data-card-delete`) quando o aluno pode excluir; sem ele quando nao.
+
+## Sala do webinário: a linguagem do YouTube (01/11/2026)
+
+Só na sala do aluno (o desenho normal da Live ao vivo, da gravada e do Replay), pelos tokens `--room-*` de `globals.css`; o console e o vertical 9:16 continuam com as peças de antes (`docs/31` §9). Cor só por token, nunca hex no componente; a guarda dos tokens confere 4,5:1 no texto e 3:1 em traço, ícone e estado, nos dois temas.
+
+- Tipografia: a Inter da área com a escala do YouTube (12/18, 14/20, 16/22 e 20/28; 400 no texto, 500 em nome, pílula, chip e selo, 700 nos títulos). Ícones da lucide, nunca os do YouTube.
+- Pílulas: M com 40 px e raio 20, S com 32 px e raio 16, nos estilos tonal, texto, branco, vermelho (só o Sair) e azul (só o envio); o círculo é a pílula sem rótulo, com o nome acessível. Nenhuma tem `title`: o nome aparece na dica. Desligada com motivo, fica focável (`aria-disabled`) e diz o motivo.
+- Chip: 32 px, raio 8, tonal; o escolhido fica claro no escuro e escuro no claro. A linha de chips rola de lado com as setas e o degradê só do lado que esconde chip.
+- Comentário (chat e Perguntas): avatar de 24 px, nome sem arroba, selo tonal do papel, tempo relativo ("há 2 minutos") com a hora exata ao passar o ponteiro, e a resposta escrita no fio "1 resposta".
+- Campo "Adicione um comentário": sem caixa, com a linha de 1 px que vira 2 px no foco; os botões (Cancelar, a Anônima, o envio azul) só aparecem com o campo aberto.
+- Aviso: invertido (claro no tema escuro e escuro no claro), com o anel de 1 px e a sombra que o separam do vídeo; um de cada vez, 6 s, com pausa no ponteiro e no foco. Os erros continuam no lugar onde aconteceram.
+- Dica: caixa cinza translúcida com texto branco, depois de 150 ms, só no navegador; o Esc a fecha antes de chegar à sala.
+- Menu: a superfície própria do menu, opções de 40 px (44 abaixo de 1024 px), o Check na escolhida; o Esc fecha e devolve o foco ao botão.
 
 ## Modal de detalhes
 
