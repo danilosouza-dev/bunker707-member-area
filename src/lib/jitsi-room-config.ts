@@ -148,6 +148,15 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
 /** Onde o iframe entra: a pagina da sala (o aluno, e quem apresenta por ela) ou o console de quem apresenta. */
 export type LiveEmbedSurface = "console" | "room";
 
+/** O motor calado na pagina da sala (V2-20): sem avisos, sem o selo do topo e, para a plateia, sem o som da mao. */
+function roomEngineQuiet(audience: boolean): Record<string, unknown> {
+  return {
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    ...(audience ? { disabledSounds: ["RAISE_HAND_SOUND"] } : {}),
+    notifications: []
+  };
+}
+
 /**
  * Quem desenha o Compartilhar tela de quem apresenta no console (docs/31 V2-14 e V2-A39): o nosso circulo da barra
  * (toggleShareScreen pelo IFrame API) ou o botao de tela do proprio motor (toolbarButtons ["desktop"], que aparece ao
@@ -227,6 +236,15 @@ export function liveConfigOverwrite(
     [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
+    // Na pagina da sala, nenhum aviso do motor na tela, para nenhum papel (docs/31 V2-20, a sala no estilo do YouTube):
+    // os que importam viram o aviso da pagina (RoomSnackbar) pelo notificationTriggered, que o motor manda mesmo com o
+    // aviso escondido (notifications/actions.ts:143-145 da tag fixada; configWhitelist.ts:190). Sai tambem o selo do
+    // motor no topo (o "✋ 1" das maos e o de gravacao: conferenceInfo, configWhitelist.ts:80), que o palco ja tem nos
+    // selos da pagina, e, para o aluno e a Equipe, o som da mao de cada aluno para a turma (disabledSounds,
+    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia. O console fica sem nenhuma das tres chaves:
+    // ninguem la ouve o notificationTriggered, e quem apresenta continua vendo os avisos do motor (a gravacao que nao
+    // comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
+    ...(surface === "room" ? roomEngineQuiet(audience) : {}),
     // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
     // pagina (docs/31 V2-4).
     hideDominantSpeakerBadge: true,
@@ -340,7 +358,15 @@ export const JITSI_LISTENED_EVENTS = [
   // Quem esta no video grande mudou (o destaque da equipe, o orador, a tela compartilhada): o selo "{nome} ·
   // Apresentador" do palco so fica com alguem da equipe ali (docs/31 V2-4). O motor manda sem dados (o id fica no IFrame
   // API); nao vai ao servidor (toRoomEvent devolve nulo).
-  "largeVideoChanged"
+  "largeVideoChanged",
+  // Um aviso que o motor teria mostrado (o configOverwrite manda notifications: [], e o motor avisa mesmo assim): so as
+  // chaves da lista fechada viram o aviso da pagina (engineNoticeOf, room-snackbar-model.ts), nunca o texto do motor.
+  // Dispara pouco, e nao vai ao servidor (toRoomEvent devolve nulo). Os sinais so do console ficam em CONSOLE_EXTRA_EVENTS.
+  "notificationTriggered",
+  // A moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }): o microfone sozinho (docs/31 caminho
+  // A) so abre com a de audio desligada, e o vigia do console a liga quando lota. Dispara pouco (so quando a equipe ou o
+  // vigia muda a moderacao) e nao vai ao servidor (toRoomEvent devolve nulo).
+  "moderationStatusChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -352,14 +378,12 @@ export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
  *   (API.js:1742-1747 da tag stable-11248), para o vigia da tela do console (docs/31 §5.4).
  * - screenSharingStatusChanged: a propria tela de quem apresenta ({ on, details }), o estado do Compartilhar tela da
  *   barra (docs/31 V2-14); o seletor de tela cancelado nao avisa nada.
- * - moderationStatusChanged: a moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }), o "Câmeras
- *   livres" pela de video, tambem quando outro console a muda.
  * - participantMuted: o mudo de cada faixa remota ({ id, isMuted, mediaType }), que sai uma vez por faixa na entrada e
  *   a cada troca (a lista de Pessoas do console); numa sala cheia, sao muitos, por isso so o console registra.
  * - participantMenuButtonClick: o ⋮ da miniatura avisou um item em vez de faze-lo ({ key, participantId,
  *   preventExecution }, CONSOLE_PARTICIPANT_MENU_BUTTONS).
  */
-export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "moderationStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
+export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
 export type ConsoleListenedEvent = JitsiListenedEvent | (typeof CONSOLE_EXTRA_EVENTS)[number];
 
 /**
@@ -438,8 +462,11 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "tileViewChanged":
     case "filmstripDisplayChanged":
     case "largeVideoChanged":
+    case "notificationTriggered":
+    case "moderationStatusChanged":
       // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
-      // video, a coluna de miniaturas e quem esta no video grande): o servidor nao aceita estes nomes.
+      // video, a coluna de miniaturas, quem esta no video grande, o aviso do motor e a moderacao de audio do microfone
+      // sozinho): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

@@ -159,6 +159,7 @@ test("o desenho vertical: dialogo de tela cheia, o selo Ao vivo e o contador SOM
   assert.match(top, /<button aria-label="Sair" class="[^"]*size-11/);
   assert.doesNotMatch(html, /role="tablist"/, "sem o painel de abas do desenho normal");
   assert.doesNotMatch(html, /data-testid="room-panel"/, "sem o painel do desenho normal (a gaveta faz o papel dele)");
+  assert.doesNotMatch(html, /data-room-rail|aria-label="Painel da sala"/, "nem o trilho a direita (o vertical nunca o monta)");
   assert.doesNotMatch(html, /<header class="flex h-12/, "sem o cabecalho do desenho normal");
 });
 

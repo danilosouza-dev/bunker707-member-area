@@ -60,7 +60,7 @@ export function DropdownMenuRadioGroup({ children, value, ...props }) { return c
 export function DropdownMenuRadioItem({ children, closeOnClick, value, ...props }) { return createElement("div", { "data-menu-item": "", "data-value": value, role: "menuitemradio", ...pass(props) }, children); }
 export function DropdownMenuItem({ children, disabled }) { return createElement("div", { "aria-disabled": disabled || undefined, "data-menu-item": "", role: "menuitem" }, children); }`,
   "@/server/webinars/live-actions": `${fail}
-export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail;`,
+export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
   // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas.
@@ -224,6 +224,7 @@ function liveBlock(extra = {}) {
     recorder: recorder(),
     recording: null,
     roomLocked: false,
+    selfUnmute: false,
     ...extra
   };
 }
@@ -470,7 +471,9 @@ test("palco: a sala abrindo no meio, o Trancar no topo e as acoes de todos na ab
   }
   // O nome de antes (a frase saiu de WEBINAR_COPY.consoleAoVivo), escrito aqui para conferir que nao volta.
   assert.ok(!text.includes("Permitir câmeras dos alunos"), "o nome de antes saiu: Câmeras livres (V2-14)");
-  assert.match(pessoas, /<input(?=[^>]*type="checkbox")(?=[^>]*disabled="")(?![^>]*checked="")[^>]*>/, "o microfone do aluno fica desligado e fixo");
+  // O microfone sozinho (docs/31 caminho A): um botao com aria-pressed pelo que foi gravado, desligado fora da sala.
+  assert.match(pessoas, /<button(?=[^>]*aria-pressed="false")(?=[^>]*disabled="")[^>]*>(?:(?!<\/button>).)*Permitir que o aluno abra o microfone sozinho/s, "o microfone sozinho desligado e fora da sala");
+  assert.ok(!pessoas.includes('type="checkbox"'), "a caixa fixa de antes saiu");
   assert.match(pessoas, /aria-pressed="false"[^>]*>(?:(?!<\/button>).)*Câmeras livres/s, "o webinário sem câmera de aluno começa com as câmeras bloqueadas");
 
   const semSala = textOf(render(snapshot({ live: liveBlock({ meetConfigured: false }) })));
@@ -681,6 +684,8 @@ const aparelhos = (extra = {}) => ({
 /** O LiveRoomHandle feito a mao (o que a barra le do useLiveRoom), dentro da sala e moderador. */
 function handleFor(role = "host", extra = {}) {
   return {
+    applySelfUnmute: noop,
+    audioModeration: false,
     audioOn: false,
     camerasAllowed: false,
     chooseDevice: noop,
@@ -697,6 +702,7 @@ function handleFor(role = "host", extra = {}) {
     role,
     room: { ...liveModel.EMPTY_ROOM, selfId: "p-eu" },
     screenShare: "ours",
+    selfUnmute: false,
     setCamerasAllowed: noop,
     setSettingsOpen: noop,
     settingsOpen: false,
@@ -1028,6 +1034,25 @@ test("ConsolePanel: com uma entrada do ⋯ escolhida, ela fica na tela, nenhuma 
   assert.doesNotMatch(panelOf({ closable: false }), new RegExp(escape(consoleV2Copy.fecharPainel)));
 });
 
+test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase do teto; a Equipe nao o ve", () => {
+  const people = liveBlock().people;
+  const tab = (handle) => html(createElement(ConsolePeopleTab, { busyKey: null, canPublish: true, handle, onAction: noop, onSelfUnmute: noop, people }));
+  const botao = (markup) => markup.match(/<button[^>]*>(?:(?!<\/button>).)*Permitir que o aluno abra o microfone sozinho(?:(?!<\/button>).)*<\/button>/s)?.[0] ?? "";
+  for (const role of ["host", "co_host"]) {
+    const ligado = botao(tab(handleFor(role, { selfUnmute: true })));
+    assert.match(ligado, /aria-pressed="true"/, `${role}: ligado`);
+    assert.doesNotMatch(ligado, /\sdisabled=""/, `${role}: dentro da sala, o botao funciona`);
+    assert.match(botao(tab(handleFor(role, { selfUnmute: false }))), /aria-pressed="false"/, `${role}: desligado`);
+  }
+  const host = tab(handleFor("host", { selfUnmute: true }));
+  const hint = host.match(/<button[^>]*aria-describedby="([^"]+)"[^>]*aria-pressed="true"/)?.[1];
+  assert.ok(hint, "o botao aponta para a frase");
+  assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase do teto embaixo do botao");
+  assert.match(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, new RegExp(`^Até ${liveModel.MIC_LIMIT} alunos`), "o teto sai do MIC_LIMIT");
+  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(6), "Até 6 alunos falam ao mesmo tempo; quando lota, os outros esperam.", "outro teto, outra frase");
+  assert.equal(botao(tab(handleFor("team", { selfUnmute: true }))), "", "a Equipe nao muda o microfone da turma");
+});
+
 test("aba Pessoas (V2-14): Silenciar todos, Fechar todas as câmeras e Câmeras livres (aria-pressed pelo motor) para quem apresenta; a Sala de espera com Admitir; as linhas com o microfone, a camera e o Compartilhando; o rodape com quem esta na sala e as maos; a Equipe sem as acoes de midia", () => {
   const room = {
     ...liveModel.EMPTY_ROOM,
@@ -1044,7 +1069,7 @@ test("aba Pessoas (V2-14): Silenciar todos, Fechar todas as câmeras e Câmeras 
     sharing: ["p-co"]
   };
   const people = liveBlock().people;
-  const tab = (handle) => html(createElement(ConsolePeopleTab, { busyKey: null, canPublish: true, handle, onAction: noop, people }));
+  const tab = (handle) => html(createElement(ConsolePeopleTab, { busyKey: null, canPublish: true, handle, onAction: noop, onSelfUnmute: noop, people }));
   const host = tab(handleFor("host", { camerasAllowed: true, room }));
   const text = textOf(host);
   assert.match(host, /^<div class="[^"]*\bbg-room-surface\b[^"]*" data-console-people="">/, "o cartao da aba pelo token do tema");

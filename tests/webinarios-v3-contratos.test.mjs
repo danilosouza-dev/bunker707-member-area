@@ -183,6 +183,16 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.equal(embed.liveConfigOverwrite("co_host", { ...settings, screenFps: 15, stage: 720 }).desktopSharingFrameRate.max, 15);
   assert.equal(embed.liveConfigOverwrite("team", settings).constraints.video.height.max, 360);
   assert.equal(embed.liveConfigOverwrite("host", settings).disableChat, true, "o chat e sempre o nosso (D5)");
+  // Nenhum aviso do motor na tela (os que importam viram o aviso da pagina), nem o selo do motor no topo; o som da mao
+  // de cada aluno so sai para o aluno e a Equipe (quem apresenta continua ouvindo).
+  assert.deepEqual(aluno.notifications, []);
+  assert.deepEqual(aluno.conferenceInfo, { alwaysVisible: [], autoHide: [] });
+  assert.deepEqual(aluno.disabledSounds, ["RAISE_HAND_SOUND"]);
+  assert.deepEqual(host.notifications, [], "tambem quem apresenta pela pagina da sala");
+  assert.equal(host.disabledSounds, undefined);
+  // O console continua com os avisos do motor ate os avisos do console entrarem (V2-A59): ninguem la ouve o notificationTriggered.
+  assert.equal(embed.liveConfigOverwrite("co_host", settings, null, "console").notifications, undefined);
+  assert.equal(embed.liveConfigOverwrite("host", settings, null, "console").conferenceInfo, undefined);
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite()).toLowerCase().includes("jitsi"));
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite("host")).toLowerCase().includes("jitsi"));
   assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");
@@ -334,9 +344,12 @@ test("as linhas da sessao: as colunas da fase 3 com padroes seguros quando o dub
     meetConfigured: true,
     practice: false,
     recording: true,
+    selfUnmute: false,
     startedAt: iso(NOW),
     status: "live"
   });
+  // O microfone sozinho vem do room_settings (docs/31 caminho A); sem a chave, desligado.
+  assert.equal(live.liveRoomInfoOf({ ...nova, startedAt: iso(NOW), status: "live" }, true, { practiceSession: false, selfUnmute: true, waitingRoom: false }).selfUnmute, true);
   // A sala de espera e a Sessao de pratica que o aluno le (a mesma regra do console, desiredLobby).
   const pratica = live.liveRoomInfoOf({ ...nova, roomLocked: false, startedAt: null, status: "waiting" }, true, { practiceSession: true, waitingRoom: false });
   assert.deepEqual([pratica.lobby, pratica.practice], [true, true]);

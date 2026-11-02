@@ -191,6 +191,11 @@ test("a pergunta do aluno: mine e voted; a dispensada so para o autor; o cursor 
   assert.equal(rules.toStudentQuestion(question, "u2", false).voted, false);
   assert.equal(rules.toStudentQuestion({ ...question, status: "dismissed" }, "u2", false), null);
   assert.equal(rules.toStudentQuestion({ ...question, status: "dismissed" }, "u1", false).status, "dismissed");
+  // A hora da resposta chega ao aluno (o fio "1 resposta" mostra "há N minutos", docs/31 V2-A66); quem respondeu, nunca.
+  const respondida = rules.toStudentQuestion({ ...question, answerText: "Fica 7 dias.", answeredAt: "2026-11-05T23:20:00.000Z", answeredBy: "u-equipe", status: "answered" }, "u2", false);
+  assert.equal(respondida.answeredAt, "2026-11-05T23:20:00.000Z");
+  assert.equal(rules.toStudentQuestion(question, "u2", false).answeredAt, null);
+  assert.ok(!("answeredBy" in respondida), "o id de quem respondeu fica no servidor");
 
   const rows = [{ created_at: "2026-11-05T23:00:01.000Z", id: "m1" }, { created_at: "2026-11-05T23:00:02.000Z", id: "m2" }];
   assert.deepEqual(rules.nextChatCursor(rows, null, "now"), { after: "m2", since: "2026-11-05T23:00:02.000Z" });

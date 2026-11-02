@@ -23,10 +23,10 @@ import { RoomViewMenu } from "./room-view-menu";
 // rolagem propria numa coluna curta). Cada botao tem 44 px a 375 px e o nome acessivel e exatamente a frase (o e2e
 // clica por ela); o estado vai em aria-pressed / aria-expanded (com a troca daquele aparelho no meio, o toque em
 // Microfone / Câmera espera ela acabar: o botao continua com o estado REAL, porque o microfone e a camera seguem no ar
-// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e a linha de aviso diz o
-// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe,
-// microfone silenciado, camera bloqueada, o navegador que recusou o microfone ou a camera) saem numa linha com
-// aria-live. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
+// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e o aviso da sala diz o
+// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe, microfone silenciado,
+// camera bloqueada, o navegador que recusou o microfone ou a camera) saem no aviso da sala (RoomSnackbarHost, no palco),
+// nao mais numa linha embaixo da barra. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
 // ativo em branco com texto preto no escuro, quase preto com texto branco no claro).
 // Redesign V2, F4 (docs/31 V2-6 e V2-18): a barra de tres zonas (room-bar.tsx, a ordem por liveBarItems): o Sair a
 // esquerda, a partir de lg; no centro os circulos de 48 px sem rotulo (44 px abaixo de lg), com o Som antes da Tela
@@ -36,6 +36,8 @@ import { RoomViewMenu } from "./room-view-menu";
 // Redesign V2, F8 (docs/31 V2-16): a Visão do vídeo (room-view-menu.tsx) entra na zona da direita, antes de
 // Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala. O menu dela, Reagir e
 // Configurações nunca ficam abertos juntos (a sala decide: o menu abre por cima do palco, onde o painel o cobriria).
+// Na sala no estilo do YouTube o balao fica so abaixo de lg: a partir de lg o trilho a direita (room-rail.tsx) abre e
+// fecha o painel.
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -52,10 +54,10 @@ export type LiveControlsProps = {
   /** Dentro da sala (a mao e a camera so funcionam com o iframe no ar). */
   joined: boolean;
   micAllowed: boolean;
+  /** O microfone sozinho lotado (micBlocked): o Microfone fica desligado com o motivo, focavel; o clique so avisa. */
+  micBlocked?: boolean;
   /** O toque em Microfone esperando a troca de microfone acabar (`audioOn` continua com o estado real). */
   micWaiting?: boolean;
-  /** O aviso passageiro da barra. */
-  notice: string | null;
   onCamera: () => void;
   onFullscreen: () => void;
   onHand: () => void;
@@ -81,6 +83,8 @@ export type LiveControlsProps = {
   /** "Ver como" ou a sala sem escrita (encerrada, antes de abrir): as reacoes ficam desligadas. */
   reactionsDisabled: boolean;
   reactionsOpen: boolean;
+  /** O microfone sozinho (docs/31 caminho A): o Microfone fica na barra sem o Liberar. */
+  selfUnmute?: boolean;
   /** O painel Configurações (live-settings.tsx), desenhado pela sala; aparece aberto acima da barra. */
   settings?: ReactNode;
   settingsOpen: boolean;
@@ -124,7 +128,7 @@ export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" 
 
 export function LiveControls(props: LiveControlsProps) {
   const copy = WEBINAR_COPY.aoVivo;
-  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, showMedia: props.showMedia });
+  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, selfUnmute: props.selfUnmute, showMedia: props.showMedia });
 
   function control(item: RoomBarItem) {
     switch (item) {
@@ -160,7 +164,19 @@ export function LiveControls(props: LiveControlsProps) {
           />
         );
       case "mic":
-        return <RoomBarButton active={props.audioOn} busy={props.micWaiting} disabled={!props.joined} icon={props.audioOn ? Mic : MicOff} item={item} key={item} label={copy.microfone} onClick={props.onMic} />;
+        return (
+          <RoomBarButton
+            active={props.audioOn}
+            busy={props.micWaiting}
+            disabled={!props.joined}
+            disabledReason={props.micBlocked ? copy.microfoneLotado : undefined}
+            icon={props.audioOn ? Mic : MicOff}
+            item={item}
+            key={item}
+            label={copy.microfone}
+            onClick={props.onMic}
+          />
+        );
       case "sound":
         return <RoomBarButton active={props.soundOn} icon={props.soundOn ? Volume2 : VolumeX} item={item} key={item} label={copy.som} onClick={props.onSound} />;
       case "fullscreen":
@@ -185,7 +201,7 @@ export function LiveControls(props: LiveControlsProps) {
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
       case "panel":
-        return <RoomPanelToggle firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
+        return <RoomPanelToggle className="lg:hidden" firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
     }
   }
 
@@ -206,10 +222,6 @@ export function LiveControls(props: LiveControlsProps) {
           {props.settings}
         </div>
       ) : null}
-
-      <p aria-live="polite" className={cn("shrink-0 px-3 text-center text-xs font-semibold text-room-warn-fg", props.notice ? "pb-2" : "sr-only")} data-testid="live-notice" role="status">
-        {props.notice ?? ""}
-      </p>
     </div>
   );
 }

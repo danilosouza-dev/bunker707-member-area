@@ -346,9 +346,14 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.equal(console.disableShortcuts, true, role);
     assert.deepEqual(console.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }]);
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine").toolbarButtons, ["desktop"], `${role}: o botao de tela do motor`);
-    // So a barra, os atalhos e o ⋮ mudam: o resto e o da sala (o envio do palco, o mudo, o menu da miniatura).
+    // So a barra, os atalhos, o ⋮ e os avisos do motor mudam (no console eles continuam, V2-A59): o resto e o da sala
+    // (o envio do palco, o mudo, o menu da miniatura).
     const diferentes = Object.keys({ ...sala, ...console }).filter((key) => JSON.stringify(sala[key]) !== JSON.stringify(console[key]));
-    assert.deepEqual(diferentes.sort(), ["bunkerTheme", "disableShortcuts", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"], role);
+    assert.deepEqual(
+      diferentes.sort(),
+      ["bunkerTheme", "conferenceInfo", "disableShortcuts", "notifications", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"],
+      role
+    );
     // A pagina da sala com o papel de quem apresenta continua com a barra do motor.
     assert.ok(sala.toolbarButtons.includes("desktop") && sala.toolbarButtons.includes("hangup"), `${role}: na sala, a barra do motor`);
     assert.deepEqual(sala.toolbarConfig, { alwaysVisible: true });
@@ -356,7 +361,9 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "room"), sala, "room e o padrao");
   }
   for (const role of ["student", "team"]) {
-    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), embed.liveConfigOverwrite(role, settings), `${role}: igual a sala`);
+    // Igual a sala, menos o motor calado da sala (V2-20): no console ninguem ouve o notificationTriggered.
+    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, settings)).filter(([key]) => !["conferenceInfo", "disabledSounds", "notifications"].includes(key)));
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), semAvisos, `${role}: igual a sala, com os avisos do motor`);
   }
   // O interfaceConfig e o mesmo nas duas superficies (so o papel e o visual): o dialogo de fundo do motor, que o
   // Mais opções de fundo abre, continua so com os aparelhos.

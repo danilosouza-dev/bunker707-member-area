@@ -155,3 +155,17 @@ test("isHttpsUrlText: so https (ou o loopback de teste), sem usuario e senha no 
   assert.equal(schemas.isHttpsUrlText("javascript:alert(1)"), false);
   assert.equal(schemas.isHttpsUrlText("nao e endereco"), false);
 });
+
+test("microfone sozinho (docs/31 caminho A): o room_settings sem a chave le desligado, o padrao e desligado e o schema recusa um nao booleano", async () => {
+  const { roomSettingsOfRow } = await import("../src/server/webinars/rows.ts");
+  assert.equal(model.defaultRoomSettings().selfUnmute, false);
+  assert.equal(roomSettingsOfRow({ chatMode: "open", practiceSession: true }).selfUnmute, false, "a linha de antes, sem a chave");
+  assert.equal(roomSettingsOfRow({ selfUnmute: true }).selfUnmute, true);
+  assert.equal(roomSettingsOfRow({ selfUnmute: "true" }).selfUnmute, false, "so o booleano liga");
+  assert.equal(roomSettingsOfRow(null).selfUnmute, false);
+
+  const room = model.defaultRoomSettings();
+  assert.equal(schemas.roomSettingsSchema.safeParse({ ...room, selfUnmute: true }).success, true);
+  assert.equal(schemas.roomSettingsSchema.safeParse({ ...room, selfUnmute: "sim" }).success, false);
+  assert.equal(schemas.webinarDraftSchema.safeParse(liveDraft({ roomSettings: { ...room, selfUnmute: true } })).data.roomSettings.selfUnmute, true);
+});

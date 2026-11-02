@@ -15,18 +15,21 @@ import { overlayMessages } from "./live-room-model";
 import type { ChatPostBody } from "./room-api";
 import { RecordedControls, ROOM_REACTIONS_ID } from "./recorded-controls";
 import { ROOM_PANEL_ID } from "./room-bar";
-import { RoomChatPanel } from "./room-chat";
+import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, roomDateLine, roomEscapeStep, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
 import { deferPoll, deferredPollCard, markPollResultSeen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
-import { RoomQuestionsTab } from "./room-questions";
+import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
+import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
+import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
+import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
@@ -85,6 +88,10 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // vertical com o som desligado (soundCoverShown); a Tela cheia da caixa do palco sai com a barra (leaveStageFullscreen);
 // a enquete e o card do chat so depois da hidratacao; o Esc fecha a camada de cima primeiro (roomEscapeStep); a
 // confirmacao de Sair leva o foco ao Voltar e o devolve a quem a abriu (useRoomConfirmFocus).
+// A sala no estilo do YouTube (docs/31): a partir de lg, o trilho a direita (room-rail.tsx) no lugar do balao e das
+// abas, irmao do painel e nunca no vertical; o item abre o painel naquela aba e, aberto, fecha (railStep). O painel
+// vira o cartao do YouTube com o cabecalho (o nome da aba, o numero e o X); o contador do Chat do trilho conta enquanto
+// o Chat nao esta na tela (chatShown), e o X devolve o foco ao item da aba que estava aberta.
 
 function subscribeNothing() {
   return () => undefined;
@@ -189,15 +196,18 @@ export function refocusRoom(root: Pick<HTMLElement, "contains" | "querySelectorA
 }
 
 /**
- * O painel do chat fechou (docs/31 V2-7 e V2-8: o balao, a aba ativa tocada de novo no celular, a escolha guardada lida
- * depois da primeira pintura) com o foco dentro dele, ou ja fora da sala: o foco vai para o balao da barra (o que reabre
- * o painel) ou, sem ele na tela, para o primeiro controle da sala na tela (roomFocusTarget). Um foco em outro lugar da
- * sala fica onde esta. Devolve se moveu o foco.
+ * O painel do chat fechou (docs/31 V2-7 e V2-8: o X, o balao, a escolha guardada lida depois da primeira pintura) com o
+ * foco dentro dele, ou ja fora da sala: o foco vai, nesta ordem, para o item do trilho da aba que estava aberta (`tab`,
+ * a partir de lg, a sala no estilo do YouTube), para o primeiro botao que controla o painel na tela (o balao abaixo de
+ * lg, o item Chat do trilho a partir de lg) ou para o primeiro controle da sala na tela (roomFocusTarget). Um foco em
+ * outro lugar da sala (o proprio item do trilho que fechou o painel, o cabecalho) fica onde esta. Devolve se moveu o
+ * foco.
  */
 export function returnFocusFromPanel(
   root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null,
   active: Element | null,
-  panel: Pick<HTMLElement, "contains"> | null
+  panel: Pick<HTMLElement, "contains"> | null,
+  tab?: RoomPanelTab
 ): boolean {
   if (!root) {
     return false;
@@ -206,8 +216,8 @@ export function returnFocusFromPanel(
   if (!lost) {
     return false;
   }
-  const toggle = Array.from(root.querySelectorAll<HTMLElement>(`[aria-controls="${ROOM_PANEL_ID}"]`)).find(focusShown);
-  const target = toggle ?? roomFocusTarget(root);
+  const rail = tab ? firstShown(root, `[data-room-rail="${tab}"]`) : undefined;
+  const target = rail ?? firstShown(root, `[aria-controls="${ROOM_PANEL_ID}"]`) ?? roomFocusTarget(root);
   if (!target) {
     return false;
   }
@@ -223,8 +233,9 @@ function firstShown(root: Pick<HTMLElement, "querySelectorAll">, selector: strin
 /**
  * A enquete saiu do palco (docs/31 V2-10: enviada, deixada para depois, o resultado fechado, encerrada pela equipe)
  * com o foco nela, que caiu no body: o foco vai para o "Responder agora" do card do chat, se ele esta na tela; senao
- * para o balao da barra; senao para o primeiro controle da sala na tela (roomFocusTarget). Um foco que continua na
- * sala fica onde esta. Devolve se moveu o foco.
+ * para o primeiro botao que controla o painel na tela (o balao da barra abaixo de lg, o item Chat do trilho a partir de
+ * lg); senao para o primeiro controle da sala na tela (roomFocusTarget). Um foco que continua na sala fica onde esta.
+ * Devolve se moveu o foco.
  */
 export function returnFocusFromPoll(root: Pick<HTMLElement, "contains" | "querySelectorAll"> | null, active: Element | null): boolean {
   if (!root || (active !== null && root.contains(active))) {
@@ -349,6 +360,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [iframe, setIframe] = useState<HTMLIFrameElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<RoomPanelTab>("chat");
+  // As Perguntas no estilo do YouTube: o filtro e a ordem sao da sala (trocar de aba nao os perde) e o numero do
+  // cabecalho e o tamanho da lista com o filtro de agora, nulo ate a primeira leitura.
+  const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
+  const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
+  const [questionsCount, setQuestionsCount] = useState<number | null>(null);
+  // O ⋮ do cabecalho do Chat abre a confirmacao de remover as minhas mensagens, que fica no chat.
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [muted, setMuted] = useState(kind === "simulated");
   /** O primeiro toque no som (o "Ativar som" ou o Som da barra): depois dele a capa "Ativar som" so volta sem a barra (soundCoverShown). */
   const [soundTouched, setSoundTouched] = useState(false);
@@ -484,9 +502,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const barShown = !vertical && !unavailable && phase !== "ended";
   const reactionsShown = reactionsOpen && barShown;
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover: false });
-  // O contador do balao: as mensagens novas desde que o painel fechou (os ids e o offset do video da sessao, cujo zero
-  // nao muda: a hora marcada na gravada, o player no Replay).
-  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, panelShown });
+  // O aviso da sala (RoomSnackbar), sem motor: so os sucessos do chat e das Perguntas, no desenho normal.
+  const snackbar = useRoomSnackbarController();
+  // O Chat na tela: o painel na tela e na aba Chat (com ele fechado ou noutra aba, o contador conta).
+  const chatShown = panelShown && tab === "chat";
+  // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela (os ids e o offset do
+  // video da sessao, cujo zero nao muda: a hora marcada na gravada, o player no Replay).
+  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, chatShown });
   const firstFocus = firstFocusTarget({ panelShown });
   // A enquete no meio do palco so no desenho normal com a sala de pe (como a barra); o card do chat, a deixada para
   // depois.
@@ -533,15 +555,15 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   }, [barShown]);
 
   // O painel do chat fechou com o foco nele (ou a escolha guardada chegou depois da primeira pintura): o foco vai ao
-  // balao da barra.
+  // item do trilho da aba que estava aberta (a partir de lg) ou ao balao da barra (abaixo de lg).
   const panelShownRef = useRef(panelShown);
   useLayoutEffect(() => {
     const was = panelShownRef.current;
     panelShownRef.current = panelShown;
     if (was && !panelShown) {
-      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
+      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID), tab);
     }
-  }, [panelShown]);
+  }, [panelShown, tab]);
 
   // A enquete saiu do palco (ou trocou por outra) com o foco nela: o foco vai ao Responder agora, ao balao ou a sala.
   const stagePollKeyRef = useRef(stagePollKey);
@@ -625,6 +647,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     setPollFocus((previous) => ({ key: `answer:${pollId}`, n: (previous?.n ?? 0) + 1 }));
   }
 
+  /** Um item do trilho (a partir de lg): abre o painel naquela aba ou, no item aberto, fecha (so com a barra na tela). */
+  function onRail(item: RoomPanelTab) {
+    const step = railStep({ closable: barShown, item, panelShown, tab });
+    setTab(step.tab);
+    setPanelOpen(step.panelOpen);
+  }
+
   function unmute() {
     setMuted(false);
     setSoundTouched(true);
@@ -685,10 +714,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       : momentBadge.badge === "live"
         ? { getOffsetMs, kind: "recorded_on_air" }
         : { getOffsetMs: momentBadge.elapsed ? getOffsetMs : undefined, kind: "session", timeLabel };
-  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind, presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind, presentNow: momentBadge.showCount ? shownCount : null, presenterName, scheduledAt: session.session.scheduledAt });
   const mobileLine = roomMobileLine({ presenterName, presentNow: momentBadge.showCount ? shownCount : null }).join(" · ");
   // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
-  const stageVars = { "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px` } as CSSProperties;
+  // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
+  const stageVars = {
+    "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px`,
+    ...(snackbar.stageOffsetPx > 0 ? { "--room-snackbar-offset": `${snackbar.stageOffsetPx}px` } : {})
+  } as CSSProperties;
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
   const writable = (live || phase === "replay") && !unavailable;
   // Os selos de baixo (quem apresenta e o Assistente) so com o video no ar e sem a barra de controles da Bunny: no
@@ -728,22 +761,26 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       ) : null}
       <RoomTranslationBar state={translation} />
       <RoomChatPanel
-        aboveComposer={<RoomSimulationJoins layout="stage" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
+        aboveComposer={<RoomSimulationJoins layout="stage" look={vertical ? "classic" : "comment"} offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
         assistant={assistant}
         chatMode={session.session.chatMode}
         consented={session.me.consented}
         defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
         displayName={session.me.displayName}
         error={chat.error}
+        look={vertical ? "classic" : "comment"}
         messages={translation.messages}
         nowMs={nowMs}
         onRemoveMine={chat.removeMine}
+        onRemoveOpenChange={setRemoveOpen}
         onSend={sendChat}
         phase={composerPhase}
         pinned={session.pinned}
         readOnly={readOnly}
+        removeOpen={removeOpen}
         sessionId={sessionId}
         shown={vertical || panelShown}
+        skewMs={clock.skewMs}
         slowUntilMs={chat.slowUntilMs}
         timeKind={kind}
         webinarId={webinarId}
@@ -768,16 +805,31 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         readOnly={readOnly || phase === "ended"}
         sessionId={sessionId}
         webinarId={webinarId}
+        // A gaveta do vertical continua com o filtro e a ordem da aba e o desenho de antes.
+        {...(vertical
+          ? {}
+          : {
+              displayName: session.me.displayName,
+              ended: phase === "ended",
+              filter: questionsFilter,
+              look: "comment" as const,
+              onCount: setQuestionsCount,
+              onFilter: setQuestionsFilter,
+              onOrder: setQuestionsOrder,
+              order: questionsOrder,
+              serverNowMs: nowMs + clock.skewMs
+            })}
       />
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
       // no cabecalho); nunca a lista de alunos.
-      <LiveParticipantsTab stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
+      <LiveParticipantsTab presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
     ) : (
       <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || phase === "ended"} />
     );
 
-  return (
+  // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
+  const page = (
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
@@ -788,6 +840,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
+      // A altura do campo do painel (abaixo de lg, o aviso fica acima dele).
+      style={snackbar.composerPx > 0 ? ({ "--room-composer-h": `${snackbar.composerPx}px` } as CSSProperties) : undefined}
     >
       {vertical ? (
         <VerticalTopBar
@@ -802,8 +856,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         />
       ) : (
         <RoomHeader
-          dateLine={dateLine}
           leaveInBar={barShown}
+          metaLine={metaLine}
           mobileLine={mobileLine}
           onLeave={askToLeave}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
@@ -843,6 +897,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
               <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
             ) : null}
+            {/* O aviso da sala (os sucessos do chat e das Perguntas), so no desenho normal; o vertical nao muda. */}
+            {vertical || unavailable ? null : <RoomSnackbarHost panelShown={panelShown} />}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
               <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />
             </div>
@@ -942,22 +998,36 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         </div>
 
         {vertical || unavailable ? null : (
-          // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
-          <RoomPanel
-            className={skeleton.panel}
-            closable={barShown}
-            firstFocus={firstFocus === "tab"}
-            id={ROOM_PANEL_ID}
-            kind={kind}
-            onClose={() => setPanelOpen(false)}
-            onTab={setTab}
-            open={panelShown}
-            pollOpen={openPolls.length > 0}
-            tab={tab}
-            tabs={tabs}
-          >
-            {tabContent}
-          </RoomPanel>
+          <>
+            {/* Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam). */}
+            <RoomPanel
+              className={skeleton.panel}
+              closable={barShown}
+              firstFocus={firstFocus === "tab"}
+              id={ROOM_PANEL_ID}
+              kind={kind}
+              onClose={() => setPanelOpen(false)}
+              onTab={setTab}
+              open={panelShown}
+              pollOpen={openPolls.length > 0}
+              tab={tab}
+              tabs={tabs}
+              titleAction={
+                tab === "perguntas" ? (
+                  <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} />
+                ) : tab === "chat" ? (
+                  <RoomChatMoreButton onRemove={() => setRemoveOpen(true)} readOnly={readOnly} />
+                ) : undefined
+              }
+              titleCount={
+                tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null
+              }
+            >
+              {tabContent}
+            </RoomPanel>
+            {/* O trilho a direita, a partir de lg (nunca no vertical): abre e fecha o painel em cada aba. */}
+            <RoomRail kind={kind} onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+          </>
         )}
       </div>
 
@@ -977,4 +1047,5 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       ) : null}
     </div>
   );
+  return <RoomSnackbarProvider value={snackbar}>{page}</RoomSnackbarProvider>;
 }

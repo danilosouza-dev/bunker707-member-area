@@ -23,8 +23,12 @@ export type RoomSimulationViewProps = {
   state: RoomSimulationState;
 };
 
-/** A linha "Ana M. entrou" no chat (acima do campo de mensagem). */
-export function RoomSimulationJoins({ layout, offsetMs, reducedMotion, state }: RoomSimulationViewProps) {
+/**
+ * A linha "Ana M. entrou" no chat (acima do campo de mensagem). No chat da sala no estilo do YouTube (`look="comment"`),
+ * em 12/18 alinhada a coluna do texto dos comentarios (36 px depois da borda da lista); a gaveta do vertical continua
+ * com a de antes.
+ */
+export function RoomSimulationJoins({ layout, look = "classic", offsetMs, reducedMotion, state }: RoomSimulationViewProps & { look?: "classic" | "comment" }) {
   const join = visibleJoin(state.joins, offsetMs);
   if (!join) {
     return null;
@@ -36,7 +40,11 @@ export function RoomSimulationJoins({ layout, offsetMs, reducedMotion, state }: 
       aria-hidden="true"
       className={cn(
         "flex min-w-0 items-center gap-1.5 text-xs",
-        layout === "vertical" ? "px-1 text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]" : "mx-3 mt-2 text-room-fg-subtle",
+        layout === "vertical"
+          ? "px-1 text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]"
+          : look === "comment"
+            ? "mx-4 mb-2 pl-9 leading-[18px] text-room-fg-subtle"
+            : "mx-3 mt-2 text-room-fg-subtle",
         !reducedMotion && "animate-in fade-in-0 slide-in-from-bottom-1 duration-300"
       )}
       data-room-simulation-join={join.left ? "saiu" : "entrou"}

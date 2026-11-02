@@ -15,7 +15,8 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // pelo sendEndpointTextMessage e tira da fila), Pular (vai para o fim), Abaixar todas as maos (o mesmo sinal uma vez so,
 // para todos, com o destino vazio: cada aluno so abaixa a propria mao levantada, lowerHandRequested), e quem esta com o
 // microfone liberado com Silenciar (muteRemoteParticipant + rejectParticipant de audio). Liberar e Silenciar sao do
-// Apresentador e do co-apresentador; abaixar e pular, de toda a Equipe. O numero da aba e o do circulo Mãos da barra.
+// Apresentador e do co-apresentador; abaixar e pular, de toda a Equipe. Com o microfone sozinho ligado (docs/31
+// V2-A62), o Liberar some: o aluno abre sozinho. O numero da aba e o do circulo Mãos da barra.
 // O foco nunca cai no comeco da pagina quando a linha do botao sai ou vai para o fim (WCAG 2.4.3; consoleRowFocusAfter):
 // antes da troca ele vai ao botao da mesma posicao na linha que fica no lugar (ou na ultima); com a lista vazia, a aba
 // Mãos do painel.
@@ -105,7 +106,7 @@ export function LiveHands({ handle, people }: LiveHandsProps) {
                 <span className="truncate">{hand.name}</span>
               </span>
               <span className="flex min-w-0 flex-wrap items-center gap-1">
-                {controls.release ? (
+                {controls.release && !handle.selfUnmute ? (
                   <Button aria-label={`${copy.liberar}: ${hand.name}`} className="h-8! px-2 text-[13px]" disabled={!joined} onClick={(event) => release(event, hand.id)} type="button" variant="secondary">
                     <Mic aria-hidden="true" className="size-4" />
                     {copy.liberar}

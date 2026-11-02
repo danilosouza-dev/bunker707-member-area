@@ -63,9 +63,11 @@ const iconSizes: Record<RoomIconButtonSize, string> = {
 
 /**
  * Um circulo com icone (o tema e o X do painel em "outline"; os da barra em "control", com o ativo pelo token
- * --room-active-bg; o Enviar do chat em "primary", cheio como o ativo; sobre o video em "video", igual nos dois temas).
- * O nome acessivel e o `label`, que tambem vai no title; `active` liga o aria-pressed. `square` troca o circulo pelo
- * canto dos botoes com texto (--member-button-radius), como os botoes do topo do console.
+ * --room-active-bg; o Enviar do chat em "primary", cheio como o ativo; sobre o video em "video", igual nos dois temas;
+ * na sala no estilo do YouTube, o "ghost": sem fundo e sem contorno, o tonal do hover e o pressionado por dentro).
+ * O nome acessivel e o `label`, que tambem vai no title (o padrao, o do console); a sala passa `withTitle={false}`,
+ * porque a dica dela (RoomTooltip) mostra o nome. `active` liga o aria-pressed. `square` troca o circulo pelo canto dos
+ * botoes com texto (--member-button-radius), como os botoes do topo do console.
  */
 export function RoomIconButton({
   active,
@@ -75,13 +77,16 @@ export function RoomIconButton({
   square = false,
   tone = "outline",
   type = "button",
+  withTitle = true,
   ...props
 }: Omit<ComponentProps<"button">, "aria-label" | "aria-pressed" | "title"> & {
   active?: boolean;
   label: string;
   size?: RoomIconButtonSize;
   square?: boolean;
-  tone?: "control" | "outline" | "primary" | "video";
+  tone?: "control" | "ghost" | "outline" | "primary" | "video";
+  /** O title com o nome (padrao true, o console); a sala desliga e mostra a dica dela. */
+  withTitle?: boolean;
 }) {
   return (
     <button
@@ -95,6 +100,8 @@ export function RoomIconButton({
         iconSizes[size],
         tone === "outline"
           ? "border border-room-border-strong bg-room-surface text-room-icon hover:bg-room-control-hover hover:text-room-fg-strong"
+          : tone === "ghost"
+            ? "bg-transparent text-room-icon hover:bg-room-control-hover active:shadow-[inset_0_0_0_999px_var(--room-press-overlay)]"
           : tone === "video"
             ? "bg-black/60 text-white hover:bg-black/75 focus-visible:outline-white"
             : tone === "primary" || active
@@ -102,10 +109,40 @@ export function RoomIconButton({
             : "bg-room-control text-room-fg-strong hover:bg-room-control-hover",
         className
       )}
-      title={label}
+      title={withTitle ? label : undefined}
       type={type}
       {...props}
     />
+  );
+}
+
+export type RoomCountBadgeRing = "bg" | "panel" | "surface";
+
+/** O anel de 2 px no fundo de onde o contador fica (a barra e o console no painel; o trilho no fundo da sala). */
+const countBadgeRings: Record<RoomCountBadgeRing, string> = {
+  bg: "shadow-[0_0_0_2px_var(--room-bg)]",
+  panel: "shadow-[0_0_0_2px_var(--room-panel)]",
+  surface: "shadow-[0_0_0_2px_var(--room-surface)]"
+};
+
+/**
+ * O contador vermelho no canto de cima a direita (as mensagens novas do balao e do Chat do trilho, docs/31 V2-8): o
+ * numero so na tela (aria-hidden; o nome do botao diz quantas), com o anel no fundo de onde ele fica. Nada com zero.
+ * O pai e o `relative` que o posiciona.
+ */
+export function RoomCountBadge({ count, ring = "surface" }: { count: number; ring?: RoomCountBadgeRing }) {
+  const value = Math.max(0, Math.floor(count));
+  if (value < 1) {
+    return null;
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={`absolute right-0.5 top-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-room-accent px-[5px] text-[11px] font-bold leading-none tabular-nums text-white ${countBadgeRings[ring]}`}
+      data-room-unread=""
+    >
+      {value}
+    </span>
   );
 }
 

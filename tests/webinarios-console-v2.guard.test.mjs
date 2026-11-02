@@ -324,7 +324,9 @@ test("nenhum texto promete barrar um cliente adulterado: o vigia so para o clien
 test("os sinais que so o console ouve ficam fora da lista da sala do aluno (cada sinal da lista passa pela sala em toda pagina de aluno)", async () => {
   const embed = await import("../src/lib/jitsi-room-config.ts");
   // Os cinco, inclusive os da tela: um sinal nas duas listas passaria duas vezes pelo console (a juncao abaixo).
-  assert.deepEqual([...embed.CONSOLE_EXTRA_EVENTS].sort(), ["contentSharingParticipantsChanged", "moderationStatusChanged", "participantMenuButtonClick", "participantMuted", "screenSharingStatusChanged"]);
+  // O moderationStatusChanged passou para a lista da sala (o microfone sozinho do aluno, docs/31 caminho A).
+  assert.deepEqual([...embed.CONSOLE_EXTRA_EVENTS].sort(), ["contentSharingParticipantsChanged", "participantMenuButtonClick", "participantMuted", "screenSharingStatusChanged"]);
+  assert.ok(embed.JITSI_LISTENED_EVENTS.includes("moderationStatusChanged"), "a sala do aluno ouve a moderacao");
   for (const sinal of embed.CONSOLE_EXTRA_EVENTS) {
     assert.ok(!embed.JITSI_LISTENED_EVENTS.includes(sinal), `${sinal} fora da sala do aluno`);
   }
@@ -368,7 +370,8 @@ test("o iframe pelo useJitsiMeet com o token do join-token e o nonce da pagina; 
   assert.match(panel, /shouldAutoStartRecording\([\s\S]*?command\("startRecording", \{ mode: "file" \}\)/, "o Gravar da fila dispara sozinho");
   // A moderacao de audio e a de video (sem camera de aluno) e o seguir a visao saem de presenterSetupCommands
   // (live-console-model), mandados um a um ao virar moderador; a de tela nao liga pelo IFrame API (docs/31 §5.4).
-  assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
+  // Com o microfone sozinho (docs/31 caminho A), o preparo le a politica do retrato (selfUnmute).
+  assert.match(panel, /presenterSetupCommands\(\{ allowStudentCamera: webinar\.allowStudentCamera !== false, role, selfUnmute(?:: [^}]+)? \}\)\)\s*\{\s*command\(name, \.\.\.args\);/, "os comandos do apresentador ao virar moderador");
   assert.match(panel, /command\("toggleLobby", value\)/);
   // Câmeras livres: so o comando; o estado vem do moderationStatusChanged de video (o e2e confere o eco).
   assert.match(panel, /command\("toggleModeration", !allowed, "video"\)/, "Câmeras livres");

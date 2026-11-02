@@ -2,7 +2,6 @@
 
 import { ArrowRight, LayoutDashboard, LoaderCircle, Menu, Search, ShieldCheck } from "lucide-react";
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
@@ -14,6 +13,7 @@ import { directorLauncherAllowedOn, getMemberSidebarSections } from "@/component
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
+import { PlatformLogo } from "@/components/platform-logo";
 import type { LiveNowBanner as LiveNowBannerComponent } from "@/components/member/webinars/live-now-banner";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
@@ -22,7 +22,6 @@ import { isAdminPath } from "@/lib/auth/redirect";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
-import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
 import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
 import { popupPageKeyOf } from "@/server/communications/popup-display-model";
@@ -343,19 +342,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
           >
-            {logoImage ? (
-              <Image
-                alt="Bunker707"
-                className="h-auto max-h-10 w-[124px] object-contain object-left sm:w-[150px]"
-                height={35}
-                priority
-                src={logoImage}
-                unoptimized={!canOptimizeImageSrc(logoImage)}
-                width={306}
-              />
-            ) : (
-              <span className="text-lg font-black uppercase tracking-wide text-white sm:text-xl">Bunker707</span>
-            )}
+            <PlatformLogo alt="Bunker707" priority src={logoImage} textClassName="text-white" />
           </Link>
 
           {menuInHeader ? (

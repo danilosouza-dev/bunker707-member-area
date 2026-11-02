@@ -7,7 +7,8 @@ import "./support/transpile-tsx.mjs";
 // viewOnJoin, filmstripStep e stagePollFor), no lugar das conferencias de texto do codigo-fonte que elas substituem.
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
-// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho, a do celular e a margem que a coluna de miniaturas do iframe
+// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (no estilo do YouTube, roomMetaLine, com o numero primeiro), a
+// do celular (tambem com o numero primeiro) e a margem que a coluna de miniaturas do iframe
 // tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
@@ -129,6 +130,7 @@ test("themeForDesign: o desenho normal usa o tema da pessoa; o vertical e sempre
 
 const time = await import("../src/lib/webinar-time.ts");
 const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 test("formatWebinarDayLong: o dia da semana e o mes por extenso no horario de Sao Paulo", () => {
   assert.equal(time.formatWebinarDayLong("2026-11-05T23:00:00.000Z"), "Quinta, 5 de novembro");
@@ -156,12 +158,41 @@ test("roomDateLine (V2-3): a data, a hora, a duracao e quem apresenta; no Replay
   assert.equal(linha({ durationMinutes: 0, kind: "replay", presenterName: null }), "", "nada a dizer: a linha fica vazia");
 });
 
-test("roomMobileLine (V2-18): 'com {apresentador} · {n} assistindo'; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 128 }).join(" · "), "com Danilo Souza · 128 assistindo");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "com Danilo Souza · 1 assistindo");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 0 }), ["0 assistindo"], "sem apresentador, so o contador (zero tambem e numero)");
+test("roomMetaLine (V2-3, no estilo do YouTube): o numero primeiro ('3 assistindo agora') e depois os trechos da data; sem contador (Replay, encerrada), a linha comeca na data; no Replay, sem data", () => {
+  const base = { durationMinutes: 60, kind: "live", presentNow: 3, presenterName: "Danilo Souza", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const meta = (extra = {}) => layout.roomMetaLine({ ...base, ...extra });
+  assert.deepEqual(meta(), { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] });
+  assert.deepEqual(meta().rest, layout.roomDateLine(base), "o resto e a linha da data de sempre");
+  assert.deepEqual(meta({ presentNow: null }), { present: null, rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] }, "encerrada: sem o numero, comeca na data");
+  assert.deepEqual(meta({ kind: "replay", presentNow: null }), { present: null, rest: ["60 min", "com Danilo Souza"] }, "no Replay: sem o numero, sem data e sem hora");
+  assert.deepEqual(meta({ kind: "simulated", presentNow: 58 }).present, "58 assistindo agora", "a gravada com o numero somado da Simulacao");
+  assert.equal(meta({ presentNow: 1 }).present, "1 assistindo agora");
+  assert.equal(meta({ presentNow: 0 }).present, "0 assistindo agora", "zero tambem e numero");
+  assert.equal(meta({ presentNow: -4 }).present, "0 assistindo agora", "nunca negativo");
+  assert.equal(meta({ presentNow: 2.6 }).present, "3 assistindo agora", "inteiro");
+  assert.equal(meta({ presentNow: Number.NaN }).present, null, "sem numero de verdade, sem o trecho");
+  assert.equal(meta({ presentNow: 1234 }).present, "1.234 assistindo agora", "o milhar como no Brasil");
+});
+
+test("roomMobileLine (V2-18, no estilo do YouTube): '{n} assistindo agora · com {apresentador}', o numero primeiro; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 3 }).join(" · "), "3 assistindo agora · com Danilo Souza");
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "1 assistindo agora · com Danilo Souza");
+  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1234 }).join(" · "), "1.234 assistindo agora · com Danilo Souza");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador: so o apresentador");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 3 }), ["3 assistindo agora"], "sem apresentador, so o numero");
+  assert.deepEqual(layout.roomMobileLine({ presenterName: "   ", presentNow: 0 }), ["0 assistindo agora"], "nome em branco tambem; zero tambem e numero");
   assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: null }), []);
+});
+
+test("assistindoAgora: '1 assistindo agora' e, com mais de um, o numero com o milhar do pt-BR", () => {
+  const { assistindoAgora } = WEBINAR_COPY.salaV2.cabecalho;
+  assert.equal(assistindoAgora(1), "1 assistindo agora");
+  assert.equal(assistindoAgora(0), "0 assistindo agora");
+  assert.equal(assistindoAgora(128), "128 assistindo agora");
+  assert.equal(assistindoAgora(1234), "1.234 assistindo agora");
+  assert.equal(assistindoAgora(1_234_567), "1.234.567 assistindo agora");
+  // O "{n} assistindo" de antes fica para o topo do vertical (vertical-top-bar.tsx).
+  assert.equal(WEBINAR_COPY.sala.assistindo(128), "128 assistindo");
 });
 
 test("stageVideoRightPx: a coluna de miniaturas do iframe (213 px) mais o puxador (9 px; 21 px com toque); sem a coluna, 0", () => {
@@ -327,6 +358,41 @@ test("returnFocusFromPanel: o painel fechou com o foco nele (ou no body): o foco
   assert.equal(focados.at(-1), "Tema claro");
   assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ controles: [], toggles: [] }), aba, painel), false, "nada na tela, nada a focar");
   assert.equal(salaAoVivo.returnFocusFromPanel(null, aba, painel), false);
+});
+
+test("returnFocusFromPanel com a aba (o trilho a direita, a partir de lg): o X fechou o painel em Perguntas e o foco vai ao item Perguntas do trilho, nao ao primeiro que controla o painel", () => {
+  const focados = [];
+  const no = (nome, extra = {}) => ({ focus: () => focados.push(nome), nome, offsetParent: {}, ...extra });
+  const fechar = no("X Fechar o painel");
+  const balao = no("balao", { offsetParent: null });
+  const trilhoChat = no("trilho Chat");
+  const trilhoPerguntas = no("trilho Perguntas");
+  const tema = no("Tema claro");
+  const painel = { contains: (node) => node === fechar };
+  // A ordem do DOM: o balao (lg:hidden a partir de lg) e depois os itens do trilho, que tambem controlam o painel.
+  const raiz = ({ perguntas = [trilhoPerguntas] } = {}) => ({
+    contains: (node) => [fechar, balao, trilhoChat, trilhoPerguntas, tema].includes(node),
+    querySelectorAll: (selector) =>
+      selector === '[data-room-rail="perguntas"]'
+        ? perguntas
+        : selector === '[aria-controls="room-panel"]'
+          ? [balao, trilhoChat, ...perguntas]
+          : selector === salaAoVivo.ROOM_FOCUSABLE
+            ? [tema]
+            : []
+  });
+
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), fechar, painel, "perguntas"), true);
+  assert.deepEqual(focados, ["trilho Perguntas"], "o item da aba que estava aberta");
+  // Sem a aba (o painel fechado pelo balao no celular), o primeiro na tela que controla o painel: o Chat do trilho aqui.
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), fechar, painel), true);
+  assert.equal(focados.at(-1), "trilho Chat");
+  // O item da aba fora da tela (abaixo de lg o trilho some): cai no primeiro que controla o painel na tela.
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz({ perguntas: [{ ...trilhoPerguntas, offsetParent: null }] }), fechar, painel, "perguntas"), true);
+  assert.equal(focados.at(-1), "trilho Chat");
+  // O foco no proprio item do trilho que fechou o painel fica la (o item fecha o painel com o foco nele).
+  assert.equal(salaAoVivo.returnFocusFromPanel(raiz(), trilhoPerguntas, painel, "perguntas"), false);
+  assert.equal(focados.length, 3);
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1056,4 +1122,27 @@ test("liveBarItems (V2-A16): o Microfone fica na barra enquanto o microfone esta
   // Sem o audioOn (quem apresenta, o padrao), a regra de antes.
   assert.equal(model.liveBarItems({ allowStudentCamera: false, micAllowed: false, showMedia: true }).center.includes("mic"), false);
   assert.equal(model.liveBarItems({ allowStudentCamera: false, audioOn: true, micAllowed: false, showMedia: false }).center.includes("mic"), false, "quem apresenta usa a barra do iframe");
+});
+
+test("microfone sozinho (docs/31 caminho A): o Microfone aparece sem o Liberar; lotado (micBlocked) com a moderacao ligada ou ainda nao lida, livre so com ela desligada, e nunca com o microfone ligado; micClick nos tres casos", () => {
+  const centro = (input) => model.liveBarItems({ allowStudentCamera: false, audioOn: false, micAllowed: false, showMedia: true, ...input }).center;
+  assert.deepEqual(centro({ selfUnmute: true }), ["react", "hand", "mic", "sound", "fullscreen"], "com a politica, sem micAllowed");
+  assert.ok(!centro({ selfUnmute: false }).includes("mic"), "sem a politica, a regra de antes");
+  assert.ok(!centro({ selfUnmute: true, showMedia: false }).includes("mic"), "quem apresenta usa a barra do iframe");
+
+  const base = { audioModeration: null, audioOn: false, micAllowed: false, selfUnmute: true };
+  assert.equal(model.micBlocked(base), true, "moderacao desconhecida: bloqueado (o seguro)");
+  assert.equal(model.micBlocked({ ...base, audioModeration: false }), false, "moderacao desligada: livre");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true }), true, "moderacao ligada: lotado");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true, audioOn: true }), false, "com o microfone ligado nunca bloqueia (V2-A16)");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true, micAllowed: true }), false, "liberado pelo apresentador");
+  assert.equal(model.micBlocked({ ...base, selfUnmute: false }), false, "sem a politica nao ha lotado");
+
+  assert.equal(model.micClick({ ...base, audioModeration: false, consented: false }), "ask", "o primeiro abrir passa pelo aviso de gravacao");
+  assert.equal(model.micClick({ ...base, audioModeration: false, consented: true }), "toggle", "depois do aviso, direto");
+  assert.equal(model.micClick({ ...base, audioModeration: true, consented: true }), "blocked", "lotado: so o aviso");
+  assert.equal(model.micClick({ ...base, audioModeration: null, consented: false }), "blocked", "sem saber, nao abre nem pergunta");
+  assert.equal(model.micClick({ ...base, audioModeration: true, audioOn: true, consented: true }), "toggle", "ligado, o aluno sempre se cala");
+  assert.equal(model.micClick({ ...base, micAllowed: true, consented: false, selfUnmute: false }), "toggle", "o Liberar de sempre (o Falar ja aceito)");
+  assert.equal(model.liveNoticePhrase("mic_full"), WEBINAR_COPY.aoVivo.microfoneLotado);
 });

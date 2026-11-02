@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { announceLiveRoomMedia } from "@/lib/lesson-media-signal";
@@ -24,16 +24,18 @@ import {
   liveBarShown,
   liveComposerNotice,
   liveElapsedLabel,
-  liveNoticePhrase,
   liveOnAirLabel,
   livePhaseOf,
   liveRoomScreen,
   liveShortcutOf,
   localBanStillValid,
   mergeBan,
+  micBlocked,
+  micClick,
   micFocusLost,
   overlayMessages,
   pendingTogglePhrase,
+  pendingToggleSnack,
   prefersCinemaMode,
   presenterBadgeFor,
   screenBlocksRoom,
@@ -47,7 +49,7 @@ import {
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
-import { RoomChatPanel } from "./room-chat";
+import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
 import {
@@ -57,8 +59,9 @@ import {
   liveStageMoment,
   panelTabsFor,
   panelToggleStep,
-  roomDateLine,
+  railStep,
   roomEscapeStep,
+  roomMetaLine,
   roomMobileLine,
   roomPanelShown,
   stageVideoRightPx,
@@ -68,8 +71,12 @@ import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
 import { deferPoll, deferredPollCard, markPollResultSeen, pollToReopen, resultsOnArrival, resumePoll, stagePollFor } from "./room-poll-model";
 import { RoomPollsTab } from "./room-polls";
-import { RoomQuestionsTab } from "./room-questions";
+import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
+import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
+import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
+import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
+import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION, snackToRestore } from "./room-snackbar-model";
 import { RoomStageBadges } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
 import { ROOM_VIEW_MENU_ID } from "./room-view-menu";
@@ -135,6 +142,10 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // alguem da equipe no video grande (presenterBadgeFor); a enquete e o card do chat so depois da hidratacao, sem os
 // resultados que ja vinham na pagina; o Esc fecha a camada de cima primeiro (roomEscapeStep); a confirmacao de Sair
 // leva o foco ao Voltar e o devolve a quem a abriu (useRoomConfirmFocus); o Microfone fica enquanto o som esta no ar.
+// A sala no estilo do YouTube (docs/31): a partir de lg, o trilho a direita (room-rail.tsx) no lugar do balao e das
+// abas, irmao do painel e fora da frase de removido ou banido; o item abre o painel naquela aba e, aberto, fecha (railStep). O painel
+// vira o cartao do YouTube com o cabecalho (o nome da aba, o numero e o X); o contador do Chat do trilho conta enquanto
+// o Chat nao esta na tela (chatShown), e o X devolve o foco ao item da aba que estava aberta.
 
 export type LiveWebinarRoomProps = {
   coverUrl: string | null;
@@ -226,7 +237,7 @@ function readCinemaPreferred() {
 
 /** A resposta sem o bloco `live` (um servidor antigo): o ambiente sem a sala ao vivo, nada quebra. */
 function liveInfoOf(payload: StudentRoomPayload): LiveRoomInfo {
-  return payload.live ?? { lobby: false, locked: false, meetConfigured: false, practice: false, recording: false, startedAt: payload.session.startedAt, status: payload.session.status };
+  return payload.live ?? { lobby: false, locked: false, meetConfigured: false, practice: false, recording: false, selfUnmute: false, startedAt: payload.session.startedAt, status: payload.session.status };
 }
 
 export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readOnly, staff, webinarHref }: LiveWebinarRoomProps) {
@@ -246,6 +257,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.parse(payload.serverTime));
   const [tab, setTab] = useState<RoomPanelTab>("chat");
+  // As Perguntas no estilo do YouTube: o filtro e a ordem sao da sala (trocar de aba nao os perde) e o numero do
+  // cabecalho e o tamanho da lista com o filtro de agora, nulo ate a primeira leitura.
+  const [questionsFilter, setQuestionsFilter] = useState<QuestionsFilter>("all");
+  const [questionsOrder, setQuestionsOrder] = useState<QuestionsOrder>("votadas");
+  const [questionsCount, setQuestionsCount] = useState<number | null>(null);
+  // O ⋮ do cabecalho do Chat abre a confirmacao de remover as minhas mensagens, que fica no chat.
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
@@ -254,6 +272,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [cameraAsk, setCameraAsk] = useState(false);
   const [cameraConsented, setCameraConsented] = useState(false);
+  // O microfone sozinho (docs/31 caminho A): o primeiro abrir passa pelo aviso de gravacao; o aceite fica na pagina.
+  const [micAsk, setMicAsk] = useState(false);
+  const [micConsented, setMicConsented] = useState(false);
   const [fullscreenOn, setFullscreenOn] = useState(false);
   const [cinemaOn, setCinemaOn] = useState(false);
   const [local, setLocal] = useState<LocalState>(NO_LOCAL);
@@ -319,12 +340,15 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     lobby: live.lobby === true,
     look,
     nonce,
+    onAudioModerationChanged: refreshSession,
     onCameraConsentEnded,
     onRefused,
     sessionId,
     settingsOpen,
     webinarId
   });
+  // O aviso da sala (RoomSnackbar): o aviso da barra que sai da tela e solto no hook, para poder voltar.
+  const snackbar = useRoomSnackbarController({ onGone: room.clearNotice });
   const screen = liveRoomScreen({ ...screenInput, inRoom: entryInRoom(room.entry) });
   const blocked = screenBlocksRoom(screen);
   // A nossa barra (e com ela o painel Configurações e as reacoes) so existe com a sala no ar: a live encerrada, removido
@@ -343,7 +367,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // No celular, o painel Configurações aberto toma o lugar do painel do chat: o palco encolhe e a nossa barra fica na
   // tela (o botao que fecha o painel nunca sai da tela); o balao fecha Configurações e abre o chat.
   const settingsTakeover = settingsShown && !desktop;
-  // O painel do chat: o balao da barra abre e fecha (tambem no computador); sem a barra ele fica na tela.
+  // O painel do chat: o balao da barra (abaixo de lg) e o trilho (a partir de lg) abrem e fecham; sem a barra ele fica
+  // na tela.
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover });
 
   // A barra sumiu com o foco nela (no painel, nas reacoes, num botao): o foco volta para a sala, nunca para o body (onde
@@ -390,7 +415,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O Microfone saiu da barra com o foco nele (a equipe recolheu ou silenciou o microfone, docs/31 V2-19): o botao sai
   // do DOM e o foco cai no body; a sala o manda de volta para dentro dela, como quando a barra inteira some. Com o
   // microfone ainda ligado ele fica (o recolhimento sem o mudo: o aluno sempre tem como se calar), como em liveBarItems.
-  const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn);
+  const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn || live.selfUnmute === true);
+  // Lotado (o vigia do console ligou a moderacao de audio, ou ela ainda nao foi lida): o Microfone fica, desligado com o motivo.
+  const micInput = {
+    audioModeration: room.signals.audioModeration,
+    audioOn: room.signals.audioOn,
+    consented: micConsented,
+    micAllowed: room.signals.micAllowed,
+    selfUnmute: live.selfUnmute === true
+  };
+  const micFull = micBlocked(micInput);
   const micShownRef = useRef(micShown);
   useLayoutEffect(() => {
     const was = micShownRef.current;
@@ -538,22 +572,27 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const stagePoll = barShown && hydrated ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: [...deferred.seen, ...arrivedResults] }) : null;
   const stagePollKey = stagePoll ? `${stagePoll.mode}:${stagePoll.poll.id}` : null;
   const laterPoll = barShown && hydrated ? deferredPollCard({ deferredIds: deferred.later, polls }) : null;
-  // O contador do balao: as mensagens novas desde que o painel fechou. Na live so os ids contam (o zero do offset anda
-  // quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
-  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, panelShown });
+  // O Chat na tela: o painel na tela e na aba Chat (com ele fechado ou noutra aba, o contador conta).
+  const chatShown = panelShown && tab === "chat";
+  // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela. Na live so os ids contam
+  // (o zero do offset anda quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
+  const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, chatShown });
   const firstFocus = firstFocusTarget({ panelShown });
   const replayHref = session.webinar.replaySessionId ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const scheduledMs = Date.parse(session.session.scheduledAt);
   const countdown = screen === "waiting" ? formatCountdown(scheduledMs, nowMs + skewMs) : "";
   const composerNotice = liveComposerNotice({ ban, nowMs, status });
   const recording = isRecording(room.signals, live);
-  // O aviso passageiro; sem ele, o toque em Microfone / Câmera que espera a troca daquele aparelho (o que vai acontecer).
-  const notice = liveNoticePhrase(room.signals.notice === "mic_released" ? null : room.signals.notice) ?? pendingTogglePhrase(room.pendingToggle, room.signals);
+  // O aviso da barra no aviso da sala; sem ele, o toque em Microfone / Câmera que espera a troca daquele aparelho (o que
+  // vai acontecer), enquanto durar.
+  const pendingPhrase = pendingTogglePhrase(room.pendingToggle, room.signals);
+  const roomNotice = room.notice;
+  const notice = useMemo(() => roomNotice ?? pendingToggleSnack(pendingPhrase), [pendingPhrase, roomNotice]);
   const stage = stageNames(room.signals.participants, presenterName);
   const startedAt = live.startedAt ?? session.session.startedAt;
-  // "{n} assistindo" some com a live encerrada (no cabecalho do computador e na linha do celular).
+  // "{n} assistindo agora" some com a live encerrada (no cabecalho do computador e na linha do celular).
   const presentShown = phase === "ended" ? null : presentNow;
-  const dateLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presentNow: presentShown, presenterName, scheduledAt: session.session.scheduledAt });
   const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
@@ -574,6 +613,53 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.
   const rememberLeaveOpener = useRoomConfirmFocus(rootRef, confirmLeave);
 
+  // O aviso da barra (ou o da troca de aparelho) entra no aviso da sala; quando ele sai daqui (o microfone abriu depois
+  // do aviso do prazo, a troca acabou), sai de la tambem.
+  const snackbarApi = snackbar.api;
+  const shownNoticeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (notice) {
+      shownNoticeRef.current = notice.key;
+      snackbarApi.show(notice);
+      return;
+    }
+    if (shownNoticeRef.current) {
+      snackbarApi.clear(shownNoticeRef.current);
+      shownNoticeRef.current = null;
+    }
+  }, [notice, snackbarApi]);
+  // A troca de aparelho ainda em andamento volta depois do aviso que tomou o lugar dela (o sucesso do chat ou das
+  // Perguntas): sem isto ela sumiria de vez, porque o `notice` continua o mesmo.
+  const restoreSnack = snackToRestore(notice, snackbar.snack);
+  useEffect(() => {
+    if (restoreSnack) {
+      snackbarApi.show(restoreSnack);
+    }
+  }, [restoreSnack, snackbarApi]);
+
+  // A gravacao que comecou com o aluno ja na sala (o motor, o "Gravar no navegador" ou a sessao relida): "Esta live
+  // começou a ser gravada." no aviso, no lugar do aviso do motor. Ja ligada na entrada, so o selo Gravando.
+  const showRoomNotice = room.showNotice;
+  const recordingSeenRef = useRef({ joined, on: recording });
+  useEffect(() => {
+    const before = recordingSeenRef.current;
+    recordingSeenRef.current = { joined, on: recording };
+    if (shouldAnnounceRecording(before.on, recording, before.joined && joined)) {
+      showRoomNotice("recording_started");
+    }
+  }, [joined, recording, showRoomNotice]);
+
+  /** A acao do aviso: Configurações abre o painel (o foco vai ao botao dele, porque o aviso sai). */
+  function onSnackAction(key: string) {
+    if (key !== SNACK_SETTINGS_ACTION) {
+      return;
+    }
+    panelButton(LIVE_SETTINGS_ID)?.focus();
+    if (!settingsOpen) {
+      toggleSettings();
+    }
+  }
+
   /** Sair e Esc: com a live no ar (ou dentro do iframe), pergunta antes (docs/30 §1.7). */
   function askToLeave() {
     if ((phase === "live" || joined) && !blocked) {
@@ -587,15 +673,15 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   useRoomDialogLock(rootRef, true);
 
   // O painel do chat fechou com o foco nele (o X, a escolha guardada lida depois da primeira pintura): o foco vai ao
-  // balao da barra, nunca fica no body.
+  // item do trilho da aba que estava aberta (a partir de lg) ou ao balao da barra (abaixo de lg), nunca fica no body.
   const panelShownRef = useRef(panelShown);
   useLayoutEffect(() => {
     const was = panelShownRef.current;
     panelShownRef.current = panelShown;
     if (was && !panelShown) {
-      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID));
+      returnFocusFromPanel(rootRef.current, document.activeElement, document.getElementById(ROOM_PANEL_ID), tab);
     }
-  }, [panelShown]);
+  }, [panelShown, tab]);
 
   // A enquete saiu do palco (ou trocou por outra) com o foco nela: o foco vai ao Responder agora, ao balao ou a sala.
   const stagePollKeyRef = useRef(stagePollKey);
@@ -640,6 +726,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     if (step.closeSettings) {
       closeSettings();
     }
+    setPanelOpen(step.panelOpen);
+  }
+
+  /** Um item do trilho (a partir de lg): abre o painel naquela aba ou, no item aberto, fecha (so com a barra na tela). */
+  function onRail(item: RoomPanelTab) {
+    const step = railStep({ closable: barShown, item, panelShown, tab });
+    setTab(step.tab);
     setPanelOpen(step.panelOpen);
   }
 
@@ -778,6 +871,29 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }
 
+  function onMic() {
+    const action = micClick(micInput);
+    if (action === "blocked") {
+      room.showNotice("mic_full");
+    } else if (action === "ask") {
+      // O PRIMEIRO abrir do microfone sozinho passa pelo aviso de gravacao; so Falar chega ao iframe.
+      setMicAsk(true);
+    } else {
+      room.toggleMic();
+    }
+  }
+
+  function confirmMic() {
+    setMicAsk(false);
+    setMicConsented(true);
+    // A sala pode ter lotado com o aviso aberto: o aviso de lotado, sem abrir.
+    if (micFull) {
+      room.showNotice("mic_full");
+      return;
+    }
+    room.acceptMic();
+  }
+
   /** Uma escolha do painel: a secao tem de estar pronta agora (o aluno nunca troca antes do consentimento). */
   function chooseDevice(kind: DeviceKind, option: DeviceOption) {
     if (deviceSectionReady(deviceSettings, kind)) {
@@ -814,7 +930,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown, settingsTakeover });
   const skeleton = roomSkeleton("normal", skeletonState);
 
-  return (
+  // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
+  const page = (
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
@@ -826,10 +943,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
+      // A altura do campo do painel (abaixo de lg, o aviso fica acima dele).
+      style={snackbar.composerPx > 0 ? ({ "--room-composer-h": `${snackbar.composerPx}px` } as CSSProperties) : undefined}
     >
       <RoomHeader
-        dateLine={dateLine}
         leaveInBar={barShown}
+        metaLine={metaLine}
         mobileLine={mobileLine}
         onLeave={askToLeave}
         onToggleTheme={toggleTheme}
@@ -854,7 +973,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
-          <div className={skeleton.stageBox} data-room-slot="stage-box">
+          <div
+            className={skeleton.stageBox}
+            data-room-slot="stage-box"
+            // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
+            style={snackbar.stageOffsetPx > 0 ? ({ "--room-snackbar-offset": `${snackbar.stageOffsetPx}px` } as CSSProperties) : undefined}
+          >
             <LiveStage
               className={cn(
                 "w-full max-lg:landscape:aspect-auto max-lg:landscape:min-h-0 max-lg:landscape:flex-1 lg:aspect-auto lg:min-h-0 lg:flex-1",
@@ -887,6 +1011,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
               {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
               {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} /> : null}
+              {/* O aviso da sala: no palco a partir de lg; abaixo, preso ao pe da tela, nunca sobre o video em pe. */}
+              {blocked ? null : <RoomSnackbarHost onAction={onSnackAction} panelShown={panelShown} />}
               {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
               {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
               {/* A enquete no meio do palco (V2-10), por cima do video, das capas e das pilulas. */}
@@ -919,13 +1045,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               handRaised={room.signals.handRaised}
               joined={joined}
               micAllowed={room.signals.micAllowed}
+              micBlocked={micFull}
               micWaiting={room.pendingToggle.audioInput}
-              notice={notice}
               onCamera={onCamera}
               onFullscreen={toggleFullscreen}
               onHand={room.toggleHand}
               onLeave={askToLeave}
-              onMic={room.toggleMic}
+              onMic={onMic}
               onReact={reactions.react}
               onSound={room.toggleSound}
               onTogglePanel={togglePanel}
@@ -952,6 +1078,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               }
               settingsOpen={settingsShown}
               showMedia={ourBar}
+              selfUnmute={live.selfUnmute === true}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
               viewMenuOpen={viewMenuShown}
@@ -961,85 +1088,111 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         </div>
 
         {blocked ? null : (
-          // Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam).
-          <RoomPanel
-            className={skeleton.panel}
-            closable={barShown}
-            contentClassName={cn("max-lg:landscape:max-h-none lg:max-h-none", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
-            firstFocus={firstFocus === "tab"}
-            id={ROOM_PANEL_ID}
-            kind="live"
-            onClose={() => setPanelOpen(false)}
-            onTab={setTab}
-            open={panelShown}
-            pollOpen={openPolls.length > 0}
-            tab={tab}
-            tabs={tabs}
-          >
-            {tab === "chat" ? (
-              <>
-                {laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
-                <RoomTranslationBar state={translation} />
-                <RoomChatPanel
+          <>
+            {/* Fechado, o painel fica montado e escondido (o rascunho, o aceite e a aba continuam). */}
+            <RoomPanel
+              className={skeleton.panel}
+              closable={barShown}
+              contentClassName={cn("max-lg:landscape:max-h-none lg:max-h-none", cinemaOn ? "max-h-[38vh] min-h-[10rem]" : undefined)}
+              firstFocus={firstFocus === "tab"}
+              id={ROOM_PANEL_ID}
+              kind="live"
+              onClose={() => setPanelOpen(false)}
+              onTab={setTab}
+              open={panelShown}
+              pollOpen={openPolls.length > 0}
+              tab={tab}
+              tabs={tabs}
+              titleAction={
+                tab === "perguntas" ? (
+                  <RoomQuestionsOrderButton onOrder={setQuestionsOrder} order={questionsOrder} />
+                ) : tab === "chat" ? (
+                  <RoomChatMoreButton onRemove={() => setRemoveOpen(true)} readOnly={readOnly} />
+                ) : undefined
+              }
+              titleCount={tab === "participantes" ? presentShown : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null}
+            >
+              {tab === "chat" ? (
+                <>
+                  {laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
+                  <RoomTranslationBar state={translation} />
+                  <RoomChatPanel
+                    assistant={assistant}
+                    chatMode={session.session.chatMode}
+                    consented={session.me.consented}
+                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                    displayName={session.me.displayName}
+                    error={chat.error}
+                    messages={translation.messages}
+                    notice={readOnly ? null : composerNotice}
+                    nowMs={nowMs}
+                    onRemoveMine={chat.removeMine}
+                    onRemoveOpenChange={setRemoveOpen}
+                    onSend={async (body) => {
+                      try {
+                        const answer = await chat.send(body);
+                        if (!session.me.consented) {
+                          void refreshSession();
+                        }
+                        return answer;
+                      } catch (error) {
+                        onWriteRefused(error);
+                        throw error;
+                      }
+                    }}
+                    phase={phase}
+                    pinned={session.pinned}
+                    readOnly={readOnly}
+                    removeOpen={removeOpen}
+                    sessionId={sessionId}
+                    shown={panelShown}
+                    skewMs={skewMs}
+                    slowUntilMs={chat.slowUntilMs}
+                    timeKind="live"
+                    webinarId={webinarId}
+                  />
+                </>
+              ) : null}
+              {tab === "perguntas" ? (
+                <RoomQuestionsTab
+                  allowAnonymous={session.session.anonymousQuestions}
                   assistant={assistant}
-                  chatMode={session.session.chatMode}
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                   displayName={session.me.displayName}
-                  error={chat.error}
-                  messages={translation.messages}
+                  enabled={!readOnly}
+                  ended={phase === "ended"}
+                  filter={questionsFilter}
+                  getOffsetMs={getOffsetMs}
+                  look="comment"
                   notice={readOnly ? null : composerNotice}
-                  nowMs={nowMs}
-                  onRemoveMine={chat.removeMine}
-                  onSend={async (body) => {
-                    try {
-                      const answer = await chat.send(body);
-                      if (!session.me.consented) {
-                        void refreshSession();
-                      }
-                      return answer;
-                    } catch (error) {
-                      onWriteRefused(error);
-                      throw error;
-                    }
-                  }}
-                  phase={phase}
-                  pinned={session.pinned}
-                  readOnly={readOnly}
+                  onConsented={() => void refreshSession()}
+                  onCount={setQuestionsCount}
+                  onFilter={setQuestionsFilter}
+                  onOrder={setQuestionsOrder}
+                  onRefused={onWriteRefused}
+                  order={questionsOrder}
+                  readOnly={readOnly || phase === "ended"}
+                  serverNowMs={nowMs + skewMs}
                   sessionId={sessionId}
-                  shown={panelShown}
-                  slowUntilMs={chat.slowUntilMs}
-                  timeKind="live"
                   webinarId={webinarId}
                 />
-              </>
-            ) : null}
-            {tab === "perguntas" ? (
-              <RoomQuestionsTab
-                allowAnonymous={session.session.anonymousQuestions}
-                assistant={assistant}
-                consented={session.me.consented}
-                defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-                enabled={!readOnly}
-                getOffsetMs={getOffsetMs}
-                notice={readOnly ? null : composerNotice}
-                onConsented={() => void refreshSession()}
-                onRefused={onWriteRefused}
-                readOnly={readOnly || phase === "ended"}
-                sessionId={sessionId}
-                webinarId={webinarId}
-              />
-            ) : null}
-            {tab === "participantes" ? <LiveParticipantsTab stage={stage} students={presentShown} /> : null}
-            {tab === "enquetes" ? (
-              <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || !writable} />
-            ) : null}
-          </RoomPanel>
+              ) : null}
+              {tab === "participantes" ? <LiveParticipantsTab presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
+              {tab === "enquetes" ? (
+                <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || !writable} />
+              ) : null}
+            </RoomPanel>
+            {/* O trilho a direita, a partir de lg: abre e fecha o painel em cada aba. */}
+            <RoomRail kind="live" onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+          </>
         )}
       </div>
 
       {cameraAsk ? <LiveCameraDialog onCancel={() => setCameraAsk(false)} onConfirm={confirmCamera} /> : null}
       {room.signals.micPrompt && !blocked ? <LiveMicDialog onCancel={room.declineMic} onConfirm={room.acceptMic} /> : null}
+      {micAsk && !room.signals.micPrompt && !blocked ? <LiveMicDialog onCancel={() => setMicAsk(false)} onConfirm={confirmMic} title={WEBINAR_COPY.aoVivo.microfoneSozinhoTitulo} /> : null}
     </div>
   );
+  return <RoomSnackbarProvider value={snackbar}>{page}</RoomSnackbarProvider>;
 }

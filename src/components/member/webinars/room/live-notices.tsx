@@ -1,8 +1,9 @@
 "use client";
 
-import { Radio, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import { RoomCommentAvatar, RoomRoleBadge } from "./room-comment";
 import { RoomButton } from "./room-ui";
 import { trapRoomFocus } from "./webinar-room";
 
@@ -126,14 +127,17 @@ export function LiveCameraDialog({ onCancel, onConfirm }: { onCancel: () => void
   );
 }
 
-/** O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. */
-export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+/**
+ * O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. No primeiro abrir do
+ * microfone sozinho (docs/31 caminho A), o mesmo aviso com o titulo da politica (`title`), sem "O apresentador liberou".
+ */
+export function LiveMicDialog({ onCancel, onConfirm, title }: { onCancel: () => void; onConfirm: () => void; title?: string }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
     <ConsentDialog
       cancelLabel={copy.agoraNao}
       confirmLabel={copy.falar}
-      heading={copy.microfoneLiberado}
+      heading={title ?? copy.microfoneLiberado}
       initialFocus="cancel"
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -145,28 +149,32 @@ export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; o
 
 /**
  * A aba Participantes (docs/30 §1.3): quem esta no palco e quantos alunos estao na sala, nunca a lista dos alunos. Sem
- * numero (`students` nulo: a sessao encerrada, quando o cabecalho tambem tira o "{n} assistindo"), so o palco.
+ * numero (`students` nulo: a sessao encerrada, quando o cabecalho tambem tira o "{n} assistindo"), so o palco. No
+ * estilo do YouTube (spec §7.4): "No palco" em 14/20 peso 500 sem caixa alta, cada nome numa linha de 40 px com o
+ * avatar de 24 e o nome em 14/20, o selo "Apresentador" so no primeiro quando a sala sabe quem apresenta
+ * (`presenterKnown`), e "{n} alunos na sala" numa linha de 40 px com o icone de 20. So os nomes do palco viram lista.
  */
-export function LiveParticipantsTab({ stage, students }: { stage: readonly string[]; students: number | null }) {
+export function LiveParticipantsTab({ presenterKnown, stage, students }: { presenterKnown: boolean; stage: readonly string[]; students: number | null }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3" data-testid="live-participants">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-1" data-testid="live-participants">
       <section>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.noPalco}</h2>
+        <h3 className="flex h-10 items-center text-sm font-medium leading-5 text-room-fg-subtle">{copy.noPalco}</h3>
         {stage.length > 0 ? (
-          <ul className="mt-2 space-y-1.5">
-            {stage.map((name) => (
-              <li className="flex items-center gap-2 text-sm font-semibold text-room-fg-strong" key={name}>
-                <Radio aria-hidden="true" className="size-3.5 text-[var(--accent)]" />
-                {name}
+          <ul>
+            {stage.map((name, index) => (
+              <li className="flex h-10 min-w-0 items-center gap-3" key={name}>
+                <RoomCommentAvatar kind="person" name={name} />
+                <span className="min-w-0 truncate text-sm leading-5 text-room-fg">{name}</span>
+                {presenterKnown && index === 0 ? <RoomRoleBadge>{WEBINAR_COPY.sala.selos.apresentador}</RoomRoleBadge> : null}
               </li>
             ))}
           </ul>
         ) : null}
       </section>
       {students === null ? null : (
-        <p className="flex items-center gap-2 text-sm text-room-fg">
-          <Users aria-hidden="true" className="size-4" />
+        <p className="flex h-10 items-center gap-3 text-sm leading-5 text-room-fg">
+          <Users aria-hidden="true" className="size-5 shrink-0" strokeWidth={1.75} />
           {copy.alunosNaSala(Math.max(0, students))}
         </p>
       )}

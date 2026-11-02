@@ -99,6 +99,7 @@ export function VerticalComposer(props: VerticalComposerProps) {
               })
             }
             onCancel={() => setConsentOpen(false)}
+            variant="classic"
           />
         </div>
       ) : null}

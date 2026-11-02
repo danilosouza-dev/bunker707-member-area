@@ -272,6 +272,11 @@ export type LiveRoomInfo = {
   practice: boolean;
   /** O selo "Gravando" para todos (a maquina do gravador gravando, ou a gravacao no navegador do Apresentador). */
   recording: boolean;
+  /**
+   * O microfone sozinho (webinars.room_settings.selfUnmute, docs/31 caminho A): o aluno abre o microfone sem o Liberar
+   * enquanto o motor nao tiver a moderacao de audio ligada (o vigia do console liga no teto).
+   */
+  selfUnmute: boolean;
   startedAt: string | null;
   status: SessionStatus;
 };
@@ -279,7 +284,7 @@ export type LiveRoomInfo = {
 export function liveRoomInfoOf(
   session: Pick<WebinarSession, "recorderStatus" | "roomLocked" | "startedAt" | "status"> & { browserRecordingAt?: string | null },
   meetConfigured: boolean,
-  roomSettings: { practiceSession: boolean; waitingRoom: boolean } = { practiceSession: false, waitingRoom: false }
+  roomSettings: { practiceSession: boolean; selfUnmute?: boolean; waitingRoom: boolean } = { practiceSession: false, waitingRoom: false }
 ): LiveRoomInfo {
   return {
     lobby: desiredLobby({ practiceSession: roomSettings.practiceSession, roomLocked: session.roomLocked, status: session.status, waitingRoom: roomSettings.waitingRoom }),
@@ -287,6 +292,7 @@ export function liveRoomInfoOf(
     meetConfigured,
     practice: roomSettings.practiceSession && (session.status === "scheduled" || session.status === "waiting"),
     recording: session.recorderStatus === "recording" || Boolean(session.browserRecordingAt),
+    selfUnmute: roomSettings.selfUnmute === true,
     startedAt: session.startedAt,
     status: session.status
   };

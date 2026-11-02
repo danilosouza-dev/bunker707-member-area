@@ -6,9 +6,10 @@
 // tests/webinarios-sala-navegador.test.mjs carrega direto pelo Node. Os pedidos ficam em src/components/member/webinars/room/room-api.ts.
 
 import type { EmbedBridge } from "./lesson-embed-bridge";
+import { formatMemberRelativeTime } from "./member-format";
 import { WEBINAR_COPY } from "./webinar-copy";
 import { saoPauloTime } from "./webinar-time";
-import { ROOM_RULES, type ChatMode, type ChatRole, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
+import { ASSISTANT_LIMITS, ROOM_RULES, type ChatMode, type ChatRole, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
 import { initialChatWindow, needsResync, nextChatWindow, playerTargetSeconds, seekChatWindow, visibleMessages, type ChatWindow } from "../server/webinars/room-model";
 
 export { clockSkewMs, initialChatWindow, nextChatWindow, offsetLabel, playerTargetSeconds, seekChatWindow, visibleMessages } from "../server/webinars/room-model";
@@ -130,6 +131,65 @@ export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; sen
   }
   const at = new Date(input.zeroMs + input.offsetMs);
   return Number.isNaN(at.getTime()) ? "" : saoPauloTime(at.toISOString());
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O comentario do YouTube no chat da sala (docs/31, a sala no estilo do YouTube; spec §8)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O instante da mensagem em ms, pela mesma regra da hora (chatTimeLabel): na live, o `sentAt` que o servidor gravou;
+ * na gravada, a hora marcada mais o offset; no Replay (ou sem o dado), nenhum.
+ */
+export function chatTimeAt(input: { kind: ChatTimeKind; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): number | null {
+  const at = input.kind === "live" ? Date.parse(input.sentAt ?? "") : input.kind === "simulated" && typeof input.zeroMs === "number" ? input.zeroMs + input.offsetMs : Number.NaN;
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * O tempo do comentario ("há 2 minutos", "agora" abaixo de 45 s), contra o agora do servidor (`nowMs` com o skew).
+ * Sempre preso no passado: a minha mensagem na gravada pode estar a frente do player, e o relogio do aparelho pode
+ * estar atrasado. No Replay, "" (sem tempo, V2-A15); a hora exata fica no title (chatTimeLabel).
+ */
+export function chatAgoLabel(input: { kind: ChatTimeKind; nowMs: number; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): string {
+  const at = chatTimeAt(input);
+  return at === null || !Number.isFinite(input.nowMs) ? "" : formatMemberRelativeTime(Math.min(at, input.nowMs), input.nowMs);
+}
+
+// A mesma regra do "@assistente" do servidor (mentionsAssistant, src/server/webinars/assistant-model.ts), copiada aqui
+// para o navegador nao carregar o modelo do Assistente (o teste confere as duas contra os mesmos textos): a palavra
+// inteira, sem diferenciar maiusculas; nem "@assistentes" nem "x@assistente" (e-mail) contam.
+const MENTION_SEGMENT = new RegExp(`(^|[^\\p{L}\\p{N}_@.])(${ASSISTANT_LIMITS.mention.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![\\p{L}\\p{N}_])`, "giu");
+
+/** O texto do comentario em trechos: o "@assistente" (em peso 600 na sala) separado do resto, na ordem. */
+export function commentSegments(body: string): Array<{ mention: boolean; text: string }> {
+  const segments: Array<{ mention: boolean; text: string }> = [];
+  let cursor = 0;
+  for (const match of body.matchAll(MENTION_SEGMENT)) {
+    const start = (match.index ?? 0) + match[1].length;
+    if (start > cursor) {
+      segments.push({ mention: false, text: body.slice(cursor, start) });
+    }
+    segments.push({ mention: true, text: match[2] });
+    cursor = start + match[2].length;
+  }
+  if (cursor < body.length) {
+    segments.push({ mention: false, text: body.slice(cursor) });
+  }
+  return segments;
+}
+
+/** Sem acento, sem caixa e sem os espacos das pontas, para comparar um nome com um papel. */
+function foldName(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("pt-BR").trim();
+}
+
+/**
+ * O nome e o proprio papel (a resposta do Assistente, a Equipe que escreve como Equipe): o comentario mostra so o selo,
+ * com o nome dentro, e o leitor de tela nao repete o papel.
+ */
+export function roleBadgeOnly(displayName: string, roleLabel: string | null): boolean {
+  return roleLabel !== null && foldName(displayName) !== "" && foldName(displayName) === foldName(roleLabel);
 }
 
 /**

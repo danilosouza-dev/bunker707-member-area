@@ -634,7 +634,14 @@ export function RoomCard({ disabled, draft, onChange }: CardProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <AdminSwitch checked description={copy.micOffHint} disabled id="webinar-room-micOff" label={copy.micOff} onCheckedChange={() => undefined} />
-      <AdminSwitch checked={false} description={copy.micSelfHint} disabled id="webinar-room-micSelf" label={copy.micSelf} onCheckedChange={() => undefined} />
+      <AdminSwitch
+        checked={draft.kind === "live" && room.selfUnmute}
+        description={draft.kind === "live" ? copy.micSelfHint : copy.micSelfRecordedHint}
+        disabled={disabled || draft.kind !== "live"}
+        id="webinar-room-micSelf"
+        label={copy.micSelf}
+        onCheckedChange={(selfUnmute) => setRoom({ selfUnmute })}
+      />
       <AdminSwitch
         checked={draft.allowStudentCamera}
         description={copy.allowStudentCameraHint}

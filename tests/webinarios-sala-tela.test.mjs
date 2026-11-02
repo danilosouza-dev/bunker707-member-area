@@ -5,13 +5,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // A Sala desenhada (docs/30 §1.3 adaptado a §1.6, §1.7, §8.5 e §9; docs/18 §2.2): os pedacos desenhados no Node,
-// sem navegador. O cabecalho V2 (docs/31 V2-3: o titulo, a linha da data com a duracao e quem apresenta, "{n}
-// assistindo", o tema e o Sair; Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
+// sem navegador. O cabecalho V2 no estilo do YouTube (docs/31 V2-3: 64 px a partir de lg, o titulo, a linha que comeca
+// por "{n} assistindo agora" com a data, a duracao e quem apresenta, o tema sem contorno e o Sair em pilula vermelha;
+// Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
 // decisao da equipe, senao "Sessao das 20:00"; Replay; quem apresenta), o palco nos estados (espera com a contagem,
-// no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (V2-9:
-// o balao primeiro e "nome · papel · hora" embaixo, a minha a direita, o papel so para Apresentador, Equipe e Assistente,
-// sem etiqueta colorida; a pendente "Aguardando a equipe", a fixada, o menu ⋯ na linha do campo, o compositor desligado
-// e no modo lento), o aceite com o
+// no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (no
+// estilo do YouTube, o comentario: o avatar de 24, o nome, o selo tonal do papel e o tempo relativo, a minha com "Você"
+// sem inverter, a pendente "Aguardando a equipe" na linha de acoes, a fixada no bloco do topo, o ⋮ no cabecalho do
+// painel, o compositor desligado e no modo lento; o balao do Zoom fica no console e na gaveta do vertical), o aceite com o
 // texto exato de §8.5 e os dois botoes, a barra de reacoes com seis botoes de 44 px, a sala inteira como dialogo
 // (aria-modal, as abas, a 375 px: palco na largura, campo no rodape) e os botoes Entrar / Assistir o replay. A marca no
 // cabecalho (a sala cobre o topo da area): a logo de Marca a partir de lg (o ponto em que a sala vira computador),
@@ -24,7 +25,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 // pela sala; a gravada abre a enquete no palco so no desenho normal.
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const tooltip = await import("../src/components/member/webinars/room/room-tooltip.tsx");
 const branding = await import("../src/components/platform-branding.tsx");
+const platformLogo = await import("../src/components/platform-logo.tsx");
 const stage = await import("../src/components/member/webinars/room/room-stage.tsx");
 const chat = await import("../src/components/member/webinars/room/room-chat.tsx");
 const reactions = await import("../src/components/member/webinars/room/room-reactions.tsx");
@@ -49,34 +52,13 @@ const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const EMBED = "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc?autoplay=true&muted=true&controls=false";
 const noop = () => undefined;
 const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 1000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
-/**
- * A caixa de um campo pelas classes do Tailwind (a escala de 4 px; a linha do text-base e 24 px), no celular ou a partir
- * de lg (o lg: por cima): a altura, a borda, o respiro de cima e de baixo e a altura da linha, em px.
- */
-function caixaDoCampo(classes, largura) {
-  const valer = largura === "lg" ? [...classes.filter((name) => !name.includes(":")), ...classes.filter((name) => name.startsWith("lg:")).map((name) => name.slice(3))] : classes.filter((name) => !name.includes(":"));
-  const px = (valor) => (valor.startsWith("[") ? Number.parseFloat(valor.slice(1)) : Number(valor) * 4);
-  const caixa = { altura: 0, borda: 0, linha: 0, respiro: 0 };
-  let linhaDoTexto = 0;
-  for (const name of valer) {
-    const [prefixo, ...resto] = name.split("-");
-    const valor = resto.join("-");
-    if (prefixo === "h" && valor) caixa.altura = px(valor);
-    if (name === "border") caixa.borda = 1;
-    if (prefixo === "py" && valor) caixa.respiro = px(valor);
-    if (prefixo === "leading" && valor) caixa.linha = px(valor);
-    if (name === "text-base") linhaDoTexto = 24;
-  }
-  caixa.linha ||= linhaDoTexto;
-  return caixa;
-}
 /** A mensagem da Live ao vivo, com a hora que o servidor gravou (sentAt): a live das 20:00 mais o offset dado. */
 const naLive = (id, offsetMs, extra = {}) => msg(id, { offsetMs, sentAt: new Date(T0 + offsetMs).toISOString(), ...extra });
 
-/** As props do cabecalho V2 (V2-3), como a sala monta: a linha da data e a do celular ja juntas. */
+/** As props do cabecalho V2 (V2-3), como a sala monta: a linha do computador (roomMetaLine) e a do celular ja junta. */
 const HEADER = {
-  dateLine: "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza",
-  mobileLine: "com Danilo Souza · 3 assistindo",
+  metaLine: { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] },
+  mobileLine: "3 assistindo agora · com Danilo Souza",
   onLeave: noop,
   onToggleTheme: noop,
   presentNow: 3,
@@ -87,53 +69,71 @@ const HEADER = {
 const buttonNames = (html) =>
   [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => attrs.match(/aria-label="([^"]+)"/)?.[1] ?? inner.replace(/<[^>]+>/g, "").trim());
 
-test("cabecalho (V2-3): o titulo, a linha da data com a duracao e quem apresenta, {n} assistindo, o tema e o Sair; nenhum selo e sem Minimizar (V2-2)", () => {
+test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha que comeca por '3 assistindo agora', o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
   const html = render(header.RoomHeader, HEADER);
-  assert.match(html, /<header class="flex h-14 shrink-0 items-center /, "56 px");
+  const casca = (html.match(/<header class="([^"]*)">/)?.[1] ?? "").split(" ");
+  assert.ok(casca.includes("h-14") && casca.includes("lg:h-16"), `56 px no celular, 64 a partir de lg: ${casca.join(" ")}`);
+  assert.ok(casca.includes("pl-4") && casca.includes("lg:pr-5") && casca.includes("lg:gap-7"), "a logo a 16 px, o tema centrado sobre o trilho, 28 px entre a logo e o titulo");
   assert.doesNotMatch(html.match(/<header [^>]*>/)?.[0] ?? "", /bg-room-surface|border-b/, "transparente, sem a borda");
-  assert.match(html, /<h1 class="[^"]*text-\[15px\] font-extrabold[^"]*lg:text-\[22px\][^"]*">Aula de IA<\/h1>/, "15/800 no celular, 22/800 no computador");
-  assert.match(html, /<p class="hidden [^"]*lg:block" data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "a linha da data so no computador");
-  assert.match(html, /<p class="[^"]*lg:hidden" data-testid="room-mobile-line">com Danilo Souza · 3 assistindo<\/p>/, "a linha do celular abaixo de lg");
-  assert.match(html, /<p class="hidden [^"]*lg:flex" data-testid="room-present">[\s\S]*?3 assistindo<\/p>/, "{n} assistindo a direita no computador");
-  assert.ok(html.indexOf('data-testid="room-present"') < html.indexOf('aria-label="Tema claro"'), "o contador, o traco e o tema");
-  assert.match(html, /<span aria-hidden="true" class="hidden h-7 w-px shrink-0 bg-room-divider lg:block"><\/span><button aria-label="Tema claro"/, "o traco antes do tema");
-  assert.deepEqual(buttonNames(html), ["Tema claro", "Sair"], "os botoes do cabecalho: o tema (V2-12) e o Sair");
-  assert.match(html, /<button aria-label="Tema claro" class="[^"]*\bhidden sm:grid\b/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18)");
-  assert.match(html, /<button class="[^"]*bg-room-accent[^"]*" type="button"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg>Sair<\/button>/, "o Sair no acento, com o texto");
+  const titulo = (html.match(/<h1 class="([^"]*)">Aula de IA<\/h1>/)?.[1] ?? "").split(" ");
+  for (const classe of ["text-[15px]", "font-bold", "leading-5", "lg:text-xl", "lg:leading-7", "truncate", "text-room-fg-strong"]) {
+    assert.ok(titulo.includes(classe), `${classe} no titulo: ${titulo.join(" ")}`);
+  }
+  assert.ok(!titulo.includes("font-extrabold") && !titulo.some((nome) => nome.startsWith("lg:text-[")), "sem o 22/800 de antes");
+  // A linha do computador: o numero primeiro, marcado para o e2e, e depois a data, a hora, a duracao e quem apresenta.
+  assert.match(
+    html,
+    /<p class="hidden [^"]*lg:block" data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/,
+    "a linha do computador comeca pelo numero"
+  );
+  const meta = (html.match(/<p class="([^"]*)" data-room-line="meta">/)?.[1] ?? "").split(" ");
+  assert.ok(["text-sm", "font-medium", "leading-5", "text-room-fg-subtle", "truncate"].every((classe) => meta.includes(classe)), `14/20 peso 500, com reticencias: ${meta.join(" ")}`);
+  const celular = (html.match(/<p class="([^"]*)" data-testid="room-mobile-line">3 assistindo agora · com Danilo Souza<\/p>/)?.[1] ?? "").split(" ");
+  assert.ok(["text-xs", "leading-4", "font-medium", "lg:hidden"].every((classe) => celular.includes(classe)), `a linha do celular em 12/16 abaixo de lg: ${celular.join(" ")}`);
+  assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, dentro da linha (o canto direito saiu)");
+  assert.doesNotMatch(html, /bg-room-divider|lucide-users/, "sem o traco e sem o icone de pessoas no cabecalho");
+  // O Sair antes do tema, com a barra e sem ela: o tema e sempre o ultimo (a partir de lg, sobre o trilho, tambem sem a
+  // barra, quando o Sair do cabecalho fica em toda largura), e o fim da sessao nao troca os dois de lugar.
+  assert.deepEqual(buttonNames(html), ["Sair", "Tema claro"], "os botoes do cabecalho sem a barra: o Sair e o tema (V2-12)");
+  assert.deepEqual(buttonNames(render(header.RoomHeader, { ...HEADER, leaveInBar: true })), ["Sair", "Tema claro"], "com a barra, a mesma ordem");
+  assert.match(html, /<span class="relative hidden sm:inline-flex"><button aria-label="Tema claro"/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18), sem deixar um vao vazio");
   assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
-  // Replay e sessao encerrada: a sala passa o contador nulo; a linha do celular fica so com quem apresenta.
-  const replay = render(header.RoomHeader, { ...HEADER, dateLine: "60 min · com Danilo Souza", mobileLine: "com Danilo Souza", presentNow: null });
+  // Replay e sessao encerrada: a sala passa o contador nulo; a linha comeca na data (no Replay, na duracao).
+  const replay = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: ["60 min", "com Danilo Souza"] }, mobileLine: "com Danilo Souza", presentNow: null });
   assert.doesNotMatch(replay, /assistindo|room-present/, "o replay nao tem contador");
-  assert.match(replay, /data-room-line="date">60 min · com Danilo Souza</);
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "sem o numero, a linha comeca na duracao");
+  // O contador nulo tira o numero da linha mesmo que ela o traga.
+  assert.doesNotMatch(render(header.RoomHeader, { ...HEADER, presentNow: null }), /room-present|assistindo agora<\/span>/);
+  // So o numero, sem data: sem o separador sozinho no fim.
+  assert.match(render(header.RoomHeader, { ...HEADER, metaLine: { present: "1 assistindo agora", rest: [] }, presentNow: 1 }), /data-room-line="meta"><span data-testid="room-present">1 assistindo agora<\/span><\/p>/);
   // Sem linha (nada a dizer), o paragrafo nao entra.
-  const vazio = render(header.RoomHeader, { ...HEADER, dateLine: "", mobileLine: "" });
-  assert.doesNotMatch(vazio, /data-room-line="date"|room-mobile-line/);
-  assert.equal(render(header.RoomHeader, { ...HEADER, presentNow: 1 }).includes(">1 assistindo<"), true);
+  const vazio = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: [] }, mobileLine: "", presentNow: null });
+  assert.doesNotMatch(vazio, /data-room-line="meta"|room-mobile-line/);
 });
 
-test("a sala gravada monta o cabecalho V2 com os dados dela: a data e a hora de Sao Paulo, a duracao e quem apresenta; no Replay, sem data, sem hora e sem contador", () => {
+test("a sala gravada monta o cabecalho V2 com os dados dela: o numero primeiro, a data e a hora de Sao Paulo, a duracao e quem apresenta; no Replay, sem data, sem hora e sem contador", () => {
   // A sessao marcada para as 20:00 de Sao Paulo (T0), no ar ha 2 min.
   const noAr = (extra = {}, sessionExtra = {}) => payload(extra, { offsetMs: 120_000, scheduledAt: new Date(T0).toISOString(), ...sessionExtra });
   const props = { coverUrl: null, payload: noAr(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
   const cabecalho = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
   const gravada = cabecalho(render(room.WebinarRoom, props));
-  assert.match(gravada, /data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
-  assert.match(gravada, /data-testid="room-mobile-line">com Danilo Souza · 2 assistindo<\/p>/);
-  assert.match(gravada, /data-testid="room-present">[\s\S]*?2 assistindo<\/p>/);
+  assert.match(gravada, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-testid="room-mobile-line">2 assistindo agora · com Danilo Souza<\/p>/);
   assert.doesNotMatch(gravada, /Ao vivo|Sessão das/, "o selo do momento fica no palco");
 
   const semApresentador = cabecalho(render(room.WebinarRoom, { ...props, presenterName: null }));
-  assert.match(semApresentador, /data-room-line="date">Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
-  assert.match(semApresentador, /data-testid="room-mobile-line">2 assistindo<\/p>/);
+  assert.match(semApresentador, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
+  assert.match(semApresentador, /data-testid="room-mobile-line">2 assistindo agora<\/p>/);
 
   const replay = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
-  assert.match(replay, /data-room-line="date">60 min · com Danilo Souza<\/p>/, "no replay sem data nem hora");
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "no replay sem o numero, sem data e sem hora: a linha comeca em 60 min");
   assert.match(replay, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
   assert.doesNotMatch(replay, /assistindo/, "o replay nao tem contador");
 
   const encerrada = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { roomPhase: "ended", status: "ended" }) }));
   assert.doesNotMatch(encerrada, /assistindo/, "encerrada, sem contador");
+  assert.match(encerrada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "encerrada, a linha comeca na data");
 });
 
 test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay sem selo embaixo; quem apresenta embaixo a esquerda", () => {
@@ -170,20 +170,34 @@ test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da
   assert.match(render(room.WebinarRoom, props), /data-room-slot="stage-box" style="--room-video-right:0px"/);
 });
 
-test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
+test("o tema da sala (V2-12, no estilo do YouTube): o botao redondo de 40 px sem contorno e sem fundo diz para qual tema vai, sem title (a dica mostra o nome, presa a borda direita do botao); o dialogo leva o data-room-theme, escuro na primeira pintura; o vertical e sempre escuro e sem o botao", () => {
   const botao = (html, nome) => html.match(new RegExp(`<button aria-label="${nome}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
 
   // No escuro, o Sol com "Tema claro"; no claro, a Lua com "Tema escuro" (o nome diz o que o clique faz).
   const escuro = botao(render(header.RoomHeader, HEADER), "Tema claro");
-  assert.match(escuro, /title="Tema claro" type="button"/);
+  assert.match(escuro, /^<button aria-label="Tema claro" class="[^"]*" type="button">/, "o nome no aria-label");
+  assert.doesNotMatch(escuro, /title=/, "sem o title nativo: a dica da sala (RoomTooltip) mostra o nome");
   assert.match(escuro, /lucide-sun/);
-  const classes = (escuro.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.match(escuro, /stroke-width="1.75"/, "o traco de 1,75 no icone de 24");
+  const classes = (escuro.match(/class="([^"]*)"/)?.[1] ?? "").replaceAll("&amp;", "&").split(" ");
   assert.ok(classes.includes("size-10") && classes.includes("rounded-full"), "redondo, 40 px");
+  assert.ok(classes.includes("[&_svg]:size-6") && !classes.includes("[&_svg]:size-[18px]"), "o icone de 24");
+  assert.ok(!classes.includes("border") && !classes.some((nome) => nome.startsWith("border-")), "sem contorno (V2-12)");
+  assert.ok(classes.includes("bg-transparent") && classes.includes("hover:bg-room-control-hover"), "sem fundo; o tonal so com o ponteiro");
+  assert.ok(!classes.includes("bg-room-surface"), "sem o fundo do outline de antes");
   assert.doesNotMatch(escuro, /aria-pressed/, "o nome muda com o tema: nada de aria-pressed");
+  assert.doesNotMatch(render(header.RoomHeader, HEADER), /data-room-tooltip/, "a dica so aparece no navegador, com o ponteiro ou o foco");
   const claroHtml = render(header.RoomHeader, { ...HEADER, theme: "light" });
   assert.doesNotMatch(claroHtml, /Tema claro/);
   const claro = botao(claroHtml, "Tema escuro");
   assert.match(claro, /lucide-moon/);
+  // A dica do tema abaixo do botao e presa a borda direita dele: o tema e o ultimo do cabecalho (a 20 px da borda a
+  // partir de lg, a 16 entre sm e lg), e a dica centrada ("Tema escuro", uns 89 px) passaria da borda da janela.
+  for (const [tema, nome] of [["dark", "Tema claro"], ["light", "Tema escuro"]]) {
+    const dica = header.RoomThemeButton({ onToggle: noop, theme: tema });
+    assert.equal(dica.type, tooltip.RoomTooltip, tema);
+    assert.deepEqual({ align: dica.props.align, label: dica.props.label, side: dica.props.side }, { align: "end", label: nome, side: "below" }, tema);
+  }
 
   // A sala inteira: o atributo no dialogo (nunca no html), o escuro antes de ler o navegador, as cores pelos tokens.
   const props = { coverUrl: null, payload: payload(), readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
@@ -193,8 +207,10 @@ test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o
   assert.equal((normal.match(/data-room-theme=/g) ?? []).length, 1, "um so lugar: o dialogo");
   assert.match(normal, /<button aria-label="Tema claro"/);
   assert.match(normal, /data-testid="room-panel"/);
-  // O painel (V2-7): o cartao da aba pelo token do tema; a lista das abas e a aba escolhida tambem.
-  assert.match(normal.match(/<div aria-labelledby="room-tabbtn-chat" class="[^"]*"/)?.[0] ?? "", /\bbg-room-surface\b/, "o cartao da aba pelo token do tema");
+  // O painel (V2-7): a partir de lg o cartao do YouTube pelo token do painel; abaixo de lg, o cartao da aba e a lista das
+  // abas pelos tokens de antes.
+  assert.match(normal.match(/<aside aria-labelledby="room-panel-title" class="[^"]*"/)?.[0] ?? "", /\blg:bg-room-panel\b/, "o cartao do painel pelo token do tema");
+  assert.match(normal.match(/<div aria-labelledby="room-tabbtn-chat" class="[^"]*"/)?.[0] ?? "", /\bbg-room-surface\b[^"]*\blg:bg-transparent\b/, "o cartao da aba abaixo de lg");
   assert.match(normal, /role="tablist"/);
   assert.match(normal.match(/<div aria-label="Painel da sala" class="[^"]*"/)?.[0] ?? "", /\bbg-room-tabs\b/, "a lista das abas pelo token");
 
@@ -205,29 +221,45 @@ test("o tema da sala (V2-12): o botao redondo de 40 px diz para qual tema vai; o
   assert.doesNotMatch(vertical, /Tema claro|Tema escuro/);
 });
 
-test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunker707 sem logo); abaixo de lg, nenhuma marca e o titulo tem a largura", () => {
+test("cabecalho: a logo da sala e a do topo da area (PlatformLogo), a mesma tag, so a partir de lg e sem link; sem logo, o mesmo nome em texto; abaixo de lg, nenhuma marca", () => {
   const comMarca = (marca, props = {}) =>
     renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...HEADER, ...props })));
   const tag = (html, nome) => html.match(new RegExp(`<[a-z]+[^>]*data-room-brand="${nome}"[^>]*>`))?.[0] ?? "";
+  const imagem = (html) => html.match(/<img[^>]*>/)?.[0] ?? "";
+  const daArea = (props) => render(platformLogo.PlatformLogo, { alt: "Bunker707", ...props });
+  const classes = (html) => (html.match(/class="([^"]*)"/)?.[1] ?? "").split(" ").sort();
+  const classesDaImagem = (html) => (html.match(/<img[^>]*class="([^"]*)"/)?.[1] ?? "").split(" ");
   const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
   const ICONE = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/icone.png";
 
-  // Sem logo em Marca: o nome em texto pequeno, dentro do bloco que so aparece a partir de lg.
-  const semLogo = comMarca({ logoImage: null });
-  assert.match(semLogo, /data-room-brand="logo"[^>]*>\s*<span class="[^"]*text-sm font-black[^"]*">Bunker707<\/span>\s*<\/div>/);
-  assert.match(tag(semLogo, "logo"), /class="hidden shrink-0 items-center lg:flex"/, "a marca so a partir de lg");
-  assert.doesNotMatch(semLogo, /<img[^>]*class="[^"]*w-\[112px\]/, "sem logo, nenhuma imagem de logo");
-
-  // Com a logo enviada em Marca: a imagem com o nome da escola, 112 px no maximo 32 de altura, alinhada a esquerda.
+  // A logo padrao (sem Marca) e a enviada em Marca: na sala, a mesma tag que o topo da area desenha, atributo por
+  // atributo (as classes, width 306 e height 35, o alt e o arquivo); nenhum tamanho proprio da sala.
+  const semMarca = renderToStaticMarkup(createElement(header.RoomHeader, HEADER));
   const comLogo = comMarca({ logoImage: LOGO, schoolIcon: ICONE });
-  const logo = comLogo.match(/<img[^>]*w-\[112px\][^>]*>/)?.[0] ?? "";
-  assert.match(logo, /alt="Bunker707"/);
-  assert.match(logo, new RegExp(`src="${LOGO.replace(/[.]/g, "\\.")}"`));
-  assert.match(logo, /class="h-auto max-h-8 w-\[112px\] shrink-0 object-contain object-left"/);
-  assert.doesNotMatch(comLogo, />Bunker707</, "com a logo, sem o nome em texto");
+  for (const [html, src] of [[semMarca, branding.DEFAULT_PLATFORM_LOGO], [comLogo, LOGO]]) {
+    const daSala = imagem(html);
+    assert.ok(daSala, `a logo ${src} na sala`);
+    assert.equal(daSala, imagem(daArea({ src })), `a logo ${src} igual a do topo da area`);
+    assert.match(daSala, /width="306"/);
+    assert.match(daSala, /height="35"/);
+    const lista = classesDaImagem(daSala);
+    assert.ok(!lista.includes("w-[112px]"), "sem a largura antiga da sala (112 px)");
+    assert.deepEqual(lista.filter((nome) => nome.startsWith("max-h-")), ["max-h-10"], "no maximo 40 de altura, como no topo da area (antes, 32)");
+    assert.doesNotMatch(daSala, /brightness-0/, "no escuro, a logo como e");
+    assert.doesNotMatch(html, />Bunker707</, "com a logo, sem o nome em texto");
+  }
+  assert.match(imagem(semMarca), /src="\/brand\/logo-bunker\.svg"/, "sem Marca, a logo padrao");
+
+  // Sem logo em Marca: o mesmo nome em texto do topo da area (o tamanho e o peso dele), na cor forte do tema da sala.
+  const semLogo = comMarca({ logoImage: null });
+  const nome = semLogo.match(/data-room-brand="logo"[^>]*>\s*(<span [^>]*>Bunker707<\/span>)\s*<\/div>/)?.[1] ?? "";
+  assert.ok(nome, "o nome em texto dentro da marca");
+  assert.deepEqual(classes(nome), [...classes(daArea({ src: null })), "text-room-fg-strong"].sort(), "o nome do topo da area mais a cor do tema");
+  assert.doesNotMatch(semLogo, /<img/, "sem logo, nenhuma imagem");
 
   // Abaixo de lg o cabecalho e o titulo, a linha do celular, o tema (a partir de sm) e o Sair (V2-18): sem o Icone.
-  for (const html of [semLogo, comLogo]) {
+  for (const html of [semMarca, semLogo, comLogo]) {
+    assert.match(tag(html, "logo"), /class="hidden shrink-0 items-center lg:flex"/, "a marca so a partir de lg");
     assert.equal(tag(html, "icon"), "", "sem o Icone da escola");
     assert.doesNotMatch(html, new RegExp(ICONE.replace(/[.]/g, "\\.")));
     // Sem link: sair da live passa pela confirmacao (askToLeave), nunca por um clique na logo.
@@ -238,21 +270,46 @@ test("cabecalho: a marca sem link e so a partir de lg (a logo de Marca, ou Bunke
   }
 });
 
-test("cabecalho no tema claro (V2-3): a marca vira o nome da escola em texto (a logo de Marca e feita para a area escura e sumiria sobre o fundo claro); o traco so com '{n} assistindo'", () => {
+test("cabecalho no tema claro (V2-3, opcao C): a logo padrao fica preta (brightness-0); a enviada em Marca, feita para a area escura, vira o nome em texto; no escuro, nenhum filtro", () => {
   const LOGO = "https://projeto.supabase.co/storage/v1/object/public/platform-assets/marca/logo.png";
-  const comMarca = (props = {}) =>
-    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: { logoImage: LOGO } }, createElement(header.RoomHeader, { ...HEADER, ...props })));
+  const comMarca = (marca, props = {}) =>
+    renderToStaticMarkup(createElement(branding.PlatformBrandingProvider, { branding: marca }, createElement(header.RoomHeader, { ...HEADER, ...props })));
   const marca = (html) => html.slice(html.indexOf("data-room-brand"), html.indexOf("<h1"));
-  const claro = comMarca({ theme: "light" });
-  assert.doesNotMatch(marca(claro), /<img/, "no claro, nenhuma imagem de logo");
-  assert.match(marca(claro), /<span class="[^"]*\btext-room-fg-strong\b[^"]*">Bunker707<\/span>/, "o nome da escola, no texto forte do tema");
-  assert.match(marca(comMarca({ theme: "dark" })), /<img[^>]*alt="Bunker707"/, "no escuro, a logo de Marca");
+  const classes = (html) => (html.match(/<img[^>]*class="([^"]*)"/)?.[1] ?? "").split(" ");
 
-  // O traco separa "{n} assistindo" do botao de tema: sem o contador (o Replay, a sessao encerrada), ele sai junto.
-  assert.match(comMarca(), /data-testid="room-present"[\s\S]*?<span aria-hidden="true" class="[^"]*\bbg-room-divider\b/);
-  const semContador = comMarca({ presentNow: null });
-  assert.doesNotMatch(semContador, /room-present/);
-  assert.doesNotMatch(semContador, /bg-room-divider/, "sem o contador, sem o traco sozinho");
+  // Claro com a logo padrao (toda branca): a mesma imagem, com o filtro que a deixa preta sobre o fundo claro.
+  const padraoClaro = marca(comMarca({ logoImage: branding.DEFAULT_PLATFORM_LOGO }, { theme: "light" }));
+  assert.match(padraoClaro, /<img[^>]*alt="Bunker707"[^>]*src="\/brand\/logo-bunker\.svg"/);
+  assert.ok(classes(padraoClaro).includes("brightness-0"), "a logo padrao em preto");
+  assert.deepEqual(
+    classes(padraoClaro).filter((nome) => nome !== "brightness-0"),
+    classes(render(platformLogo.PlatformLogo, { alt: "Bunker707", src: branding.DEFAULT_PLATFORM_LOGO })),
+    "fora o filtro, as classes do topo da area"
+  );
+  assert.ok(classes(marca(renderToStaticMarkup(createElement(header.RoomHeader, { ...HEADER, theme: "light" })))).includes("brightness-0"), "sem Marca, a padrao tambem");
+
+  // Claro com a logo enviada: o nome da escola em texto, na cor forte do tema.
+  const enviadaClaro = marca(comMarca({ logoImage: LOGO }, { theme: "light" }));
+  assert.doesNotMatch(enviadaClaro, /<img/, "no claro, a logo enviada nao aparece");
+  assert.match(enviadaClaro, /<span class="[^"]*\btext-room-fg-strong\b[^"]*">Bunker707<\/span>/, "o nome da escola, no texto forte do tema");
+
+  // Escuro: as duas logos sem o filtro.
+  for (const logoImage of [branding.DEFAULT_PLATFORM_LOGO, LOGO]) {
+    const escuro = marca(comMarca({ logoImage }, { theme: "dark" }));
+    assert.match(escuro, /<img[^>]*alt="Bunker707"/, `no escuro, a logo ${logoImage}`);
+    assert.ok(!classes(escuro).includes("brightness-0"), `no escuro, ${logoImage} sem filtro`);
+  }
+
+  // O numero saiu do canto e foi para o comeco da linha de baixo do titulo: nenhum traco entre ele e o tema, com ou sem
+  // o contador, nos dois temas.
+  for (const theme of ["dark", "light"]) {
+    const comContador = comMarca({ logoImage: LOGO }, { theme });
+    assert.match(comContador, /data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span>/, `${theme}: o numero na linha`);
+    assert.doesNotMatch(comContador, /bg-room-divider/, `${theme}: sem o traco`);
+    const semContador = comMarca({ logoImage: LOGO }, { presentNow: null, theme });
+    assert.doesNotMatch(semContador, /room-present/);
+    assert.doesNotMatch(semContador, /bg-room-divider/, `${theme}: sem o contador, tambem sem traco`);
+  }
 });
 
 test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat, a pergunta e o apelido do aceite", () => {
@@ -260,8 +317,15 @@ test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no 
     createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
   const apelido = render(chat.RoomConsentBox, { defaultDisplayMode: "nickname", onAccept: noop, onCancel: noop });
+  // O campo do YouTube (Y11) no chat e nas Perguntas da sala: 16/22 abaixo de lg e 14/20 a partir de lg.
+  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, defaultDisplayMode: "first_name_initial", displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
+  const perguntasDaSala = renderToStaticMarkup(
+    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+  );
   const classes = (tag) => (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
   for (const [nome, tag] of [
+    ["o chat", campoDoChat.match(/<textarea aria-label="Escreva uma mensagem"[^>]*>/)?.[0] ?? ""],
+    ["a pergunta da sala", perguntasDaSala.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
     ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
     ["o apelido", apelido.match(/<input aria-label="Apelido"[^>]*>/)?.[0] ?? apelido.match(/<input[^>]*placeholder="[^"]*"[^>]*>/)?.[0] ?? ""]
   ]) {
@@ -321,13 +385,18 @@ const chatItem = (html, id) => {
   const inicio = html.lastIndexOf("<li", html.indexOf(`data-room-message="${id}"`));
   return html.slice(inicio, html.indexOf("</li>", inicio) + 5);
 };
+/** As classes esperadas que faltam numa lista de classes (o & do HTML de volta). */
+const temTodasAs = (classes, esperadas) => {
+  const lista = classes.replace(/&amp;/g, "&").split(/\s+/);
+  return esperadas.filter((classe) => !lista.includes(classe));
+};
 const chatMeta = (item) =>
   (item.match(/<p [^>]*data-room-message-meta="">([\s\S]*?)<\/p>/)?.[1] ?? "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel · hora'; a minha a direita; o papel so para Apresentador, Co-apresentador, Equipe e Assistente; sem etiqueta colorida", () => {
+test("o chat da sala e o comentario do YouTube (V2-9 trocado): o avatar de 24, o nome, o selo tonal e o tempo relativo na linha do autor (so para quem ve), o autor antes do texto para o leitor de tela; a minha com Você e sem inverter; o Replay sem tempo", () => {
   const base = {
     chatMode: "open",
     consented: true,
@@ -343,69 +412,88 @@ test("chat no estilo do Zoom (V2-9): o balao primeiro e, embaixo, 'nome · papel
       naLive("6", 1000, { displayName: "Convidada", role: "guest" }),
       naLive("7", 1000, { displayName: "Rui P.", role: "co_host" })
     ],
-    nowMs: T0,
+    // O agora do aparelho; com o skew, o do servidor (20:43).
+    nowMs: T0 + 43 * MIN - 2 * MIN,
     onRemoveMine: async () => 0,
     onSend: async () => ({ pending: false }),
     phase: "live",
     pinned: null,
     readOnly: false,
+    skewMs: 2 * MIN,
     slowUntilMs: null,
-    // A live: a hora de cada mensagem e a que o servidor gravou (sentAt), nunca o zero mais o offset.
+    // A live: o instante de cada mensagem e o que o servidor gravou (sentAt), nunca o zero mais o offset.
     timeKind: "live"
   };
   const html = render(chat.RoomChatPanel, base);
 
-  // A linha de baixo: o nome, o papel (so dos quatro) e a hora; o aluno e o convidado sem papel.
-  assert.equal(chatMeta(chatItem(html, "2")), "Marina R. · Equipe · 20:41");
-  assert.equal(chatMeta(chatItem(html, "1")), "Bia C. · 20:42", "o aluno sem papel");
-  assert.equal(chatMeta(chatItem(html, "3")), "Danilo · Apresentador · 20:00");
-  assert.equal(chatMeta(chatItem(html, "4")), "Assistente · Assistente · 20:00");
-  assert.equal(chatMeta(chatItem(html, "6")), "Convidada · 20:00", "o convidado sem papel");
-  assert.equal(chatMeta(chatItem(html, "7")), "Rui P. · Co-apresentador · 20:00", "o co-apresentador com o papel proprio (V2-A12)");
-  assert.match(chatItem(html, "7"), /<span class="sr-only">Rui P\., Co-apresentador, 20:00: <\/span>texto 7/);
-  // A pendente: "Aguardando a equipe" como texto na linha de baixo (e lido: fica fora do aria-hidden). A minha mensagem
-  // diz "Você" no lugar do meu nome (o protótipo: "Você · 20:43").
-  assert.equal(chatMeta(chatItem(html, "5")), "Você · 20:43 · Aguardando a equipe");
-  assert.match(chatItem(html, "5"), /<\/span><span aria-hidden="true">·<\/span><span class="[^"]*">Aguardando a equipe<\/span><\/p>/);
+  // A linha do autor: o nome, o selo (so dos quatro papeis) e o tempo; o aluno e o convidado sem selo.
+  assert.equal(chatMeta(chatItem(html, "2")), "Marina R. Equipe há 2 minutos");
+  assert.equal(chatMeta(chatItem(html, "1")), "Bia C. há 1 minuto", "o aluno sem selo");
+  assert.equal(chatMeta(chatItem(html, "3")), "Danilo Apresentador há 43 minutos");
+  assert.equal(chatMeta(chatItem(html, "6")), "Convidada há 43 minutos", "o convidado sem selo");
+  assert.equal(chatMeta(chatItem(html, "7")), "Rui P. Co-apresentador há 43 minutos", "o co-apresentador com o papel proprio (V2-A12)");
+  // O Assistente: o nome igual ao papel, so o selo, e o leitor de tela nao repete o papel.
+  assert.equal(chatMeta(chatItem(html, "4")), "Assistente há 43 minutos");
+  assert.match(chatItem(html, "4"), /<span class="sr-only">Assistente, há 43 minutos: <\/span>texto 4/);
+  assert.match(chatItem(html, "4"), /lucide-sparkles/, "o avatar do Assistente");
 
-  // O balao primeiro; a linha de baixo e so para quem ve; o leitor de tela ouve o autor antes do texto.
   const marina = chatItem(html, "2");
-  assert.ok(marina.indexOf("texto 2") < marina.indexOf("data-room-message-meta"), "o balao antes da linha de baixo");
-  assert.match(marina, /<p class="[^"]*\bbg-room-surface-2\b[^"]*"><span class="sr-only">Marina R\., Equipe, 20:41: <\/span>texto 2<\/p>/);
-  assert.match(marina, /data-room-message-meta=""><span aria-hidden="true"[^>]*><span class="[^"]*\btext-room-meta-name\b[^"]*">Marina R\.<\/span>/);
-  assert.match(chatItem(html, "1"), /<span class="sr-only">Bia C\., 20:42: <\/span>texto 1/, "sem papel, so o nome e a hora");
-  // O avatar de 28 px so com as iniciais (docs/30 §8.5), escondido do leitor de tela.
-  assert.match(marina, /^<li class="flex items-end gap-2" data-room-message="2"><span aria-hidden="true" class="[^"]*\bsize-7\b[^"]*"><span class="[^"]*">MR<\/span><\/span>/);
+  // O item: o avatar de 24 (as iniciais), a coluna do texto, e o chat curto embaixo pelo margin-top auto do primeiro.
+  assert.match(marina, /^<li class="flex mb-4 first:mt-auto" data-room-message="2"><span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span class="[^"]*">MR<\/span><\/span><div class="ml-3 min-w-0 flex-1">/);
+  // A linha do autor e so para quem ve; o selo tonal de 20 px; o tempo num <time> com a hora exata no title.
+  const linha = marina.match(/<p aria-hidden="true" class="([^"]*)" data-room-message-meta="">([\s\S]*?)<\/p>/);
+  assert.ok(linha, "a linha do autor com aria-hidden");
+  assert.deepEqual(temTodasAs(linha[1], ["mb-0.5", "flex", "h-5", "items-center", "gap-1"]), []);
+  assert.match(linha[2], /<span class="[^"]*\btruncate\b[^"]*\btext-xs\b[^"]*\bfont-medium\b[^"]*\btext-room-fg\b[^"]*">Marina R\.<\/span>/);
+  const selo = linha[2].match(/<span class="([^"]*)">Equipe<\/span>/);
+  assert.ok(selo, "o selo do papel");
+  assert.deepEqual(temTodasAs(selo[1], ["inline-flex", "h-5", "rounded-full", "bg-room-control", "px-1.5", "text-xs", "font-medium", "leading-[18px]", "text-room-fg"]), []);
+  assert.match(linha[2], /<time class="[^"]*\btext-room-fg-subtle\b[^"]*" dateTime="2026-11-05T23:41:00\.000Z" title="20:41">há 2 minutos<\/time>/);
+  // O texto 14/20 com o autor antes, para o leitor de tela.
+  assert.match(marina, /<p class="whitespace-pre-wrap text-sm leading-5 text-room-fg \[overflow-wrap:anywhere\]"><span class="sr-only">Marina R\., Equipe, há 2 minutos: <\/span>texto 2<\/p>/);
+  assert.match(chatItem(html, "1"), /<span class="sr-only">Bia C\., há 1 minuto: <\/span>texto 1/, "sem papel, so o nome e o tempo");
+  assert.doesNotMatch(marina, /@Marina/, "o nome sem @");
 
-  // A minha: a direita (a linha invertida, o avatar a direita), no balao do meu tema.
+  // A minha: a esquerda como as outras (sem inverter), com Você, o avatar com as minhas iniciais e o data-mine; a
+  // pendente diz "Aguardando a equipe" na linha de acoes.
   const minha = chatItem(html, "5");
-  assert.match(minha, /^<li class="[^"]*\bflex-row-reverse\b[^"]*" data-mine="" data-room-message="5">/);
-  assert.match(minha, /<p class="[^"]*\bbg-room-bubble-mine-bg\b[^"]*\btext-room-bubble-mine-fg\b[^"]*"><span class="sr-only">Você, 20:43: <\/span>texto 5<\/p>/);
-  // O avatar continua com as minhas iniciais (do nome de exibicao), so o nome escrito vira "Você".
-  assert.match(minha, /<span aria-hidden="true" class="[^"]*\bsize-7\b[^"]*"><span class="[^"]*">AS<\/span><\/span>/);
+  assert.match(minha, /^<li class="flex mb-4 first:mt-auto" data-mine="" data-room-message="5">/);
+  assert.equal(chatMeta(minha), "Você agora");
+  assert.match(minha, /<span class="sr-only">Você, agora: <\/span>texto 5/);
+  assert.match(minha, /<span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span class="[^"]*">AS<\/span><\/span>/);
   assert.doesNotMatch(minha, /Ana S\./, "o meu nome de exibicao nao aparece escrito na minha mensagem");
+  assert.match(minha, /<div class="-ml-2 mt-1 flex min-h-8 items-center"><span class="ml-2 text-xs leading-\[18px\] text-room-warn-fg">Aguardando a equipe<\/span><\/div>/);
+  assert.doesNotMatch(html, /flex-row-reverse/);
   assert.equal((html.match(/data-mine=""/g) ?? []).length, 1, "so a minha");
-  assert.doesNotMatch(marina, /flex-row-reverse/);
-
-  // Nenhuma etiqueta colorida no item (o selo de papel e o da pendente saem): nem RoomBadge nem MemberChip.
-  const itens = ["1", "2", "3", "4", "5", "6", "7"].map((id) => chatItem(html, id)).join("");
-  assert.doesNotMatch(itens, /rounded-full border|h-\[22px\]|bg-room-accent/);
+  // Sem acoes, sem a linha de acoes.
+  assert.doesNotMatch(marina, /min-h-8/);
+  // Nada do balao do Zoom no desenho normal.
+  assert.doesNotMatch(html, /bg-room-surface-2|bg-room-bubble-mine-bg|text-room-meta-name/);
 
   // Na live o zero nao entra: o "Comecar para todos" e a ancora mudam o zero sem recalcular o que ja esta na tela.
   const zeroMudou = render(chat.RoomChatPanel, { ...base, zeroMs: T0 + 7 * MIN });
-  assert.equal(chatMeta(chatItem(zeroMudou, "2")), "Marina R. · Equipe · 20:41", "o zero novo nao desloca a hora");
+  assert.equal(chatMeta(chatItem(zeroMudou, "2")), "Marina R. Equipe há 2 minutos", "o zero novo nao desloca o tempo");
   const semHoraGravada = render(chat.RoomChatPanel, { ...base, messages: [msg("2", { displayName: "Marina R.", offsetMs: 41 * MIN, role: "team", sentAt: null })], zeroMs: T0 });
-  assert.equal(chatMeta(chatItem(semHoraGravada, "2")), "Marina R. · Equipe", "sem a hora gravada, sem hora (nunca a conta pelo zero)");
+  assert.equal(chatMeta(chatItem(semHoraGravada, "2")), "Marina R. Equipe", "sem a hora gravada, sem tempo (nunca a conta pelo zero)");
+  assert.doesNotMatch(chatItem(semHoraGravada, "2"), /<time/);
 
-  // Na gravada, a hora marcada mais o offset (a mensagem nao traz a hora gravada); no Replay, nenhuma hora (nem para
-  // o leitor de tela).
+  // Na gravada, a hora marcada mais o offset; no Replay, nenhum tempo (nem para o leitor de tela).
   const gravada = render(chat.RoomChatPanel, { ...base, messages: base.messages.map((message) => ({ ...message, sentAt: null })), timeKind: "simulated", zeroMs: T0 });
-  assert.equal(chatMeta(chatItem(gravada, "2")), "Marina R. · Equipe · 20:41");
+  assert.equal(chatMeta(chatItem(gravada, "2")), "Marina R. Equipe há 2 minutos");
+  assert.match(chatItem(gravada, "2"), /dateTime="2026-11-05T23:41:00\.000Z" title="20:41"/);
   const replay = render(chat.RoomChatPanel, { ...base, phase: "replay", timeKind: "replay", zeroMs: T0 });
-  assert.equal(chatMeta(chatItem(replay, "2")), "Marina R. · Equipe");
+  assert.equal(chatMeta(chatItem(replay, "2")), "Marina R. Equipe");
+  assert.doesNotMatch(replay, /<time/);
   assert.match(chatItem(replay, "2"), /<span class="sr-only">Marina R\., Equipe: <\/span>texto 2/);
-  // Sem dizer de que sala e (a prop e obrigatoria no tipo: o typecheck pega quem esquece), tambem sem hora.
-  assert.equal(chatMeta(chatItem(render(chat.RoomChatPanel, { ...base, timeKind: undefined }), "2")), "Marina R. · Equipe");
+
+  // O "@assistente" do texto em peso 600, sem azul.
+  const mencao = render(chat.RoomChatPanel, { ...base, messages: [naLive("m", 42 * MIN, { body: "@assistente o certificado sai quando?", displayName: "Bia C." })] });
+  assert.match(chatItem(mencao, "m"), /<\/span><span class="font-semibold">@assistente<\/span> o certificado sai quando\?<\/p>/);
+
+  // A gaveta do vertical (look classic) continua com o balao de antes.
+  const classico = render(chat.RoomChatPanel, { ...base, look: "classic" });
+  assert.match(chatItem(classico, "2"), /^<li class="flex items-end gap-2" data-room-message="2">/);
+  assert.match(classico, /bg-room-surface-2/);
 });
 
 test("o balao da sala (RoomChatBubble) sem as props do console (a origem, as acoes, o rotulo da pendente e a largura) da o HTML de antes, letra por letra", () => {
@@ -420,7 +508,7 @@ test("o balao da sala (RoomChatBubble) sem as props do console (a origem, as aco
   assert.equal(render(chat.RoomChatBubble, { footer: createElement("p", null, "rodape"), message: msg("3"), time: "" }), antes.semHora);
 });
 
-test("chat: a fixada, a lista em role=log; o menu ⋯ na linha do campo; compositor desligado, so a equipe, modo lento e encerrada", () => {
+test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o chat curto embaixo; o ⋮ no cabecalho do painel a partir de lg (o ⋯ da linha do campo so abaixo de lg); compositor desligado, so a equipe, modo lento e encerrada", () => {
   const base = {
     chatMode: "open",
     consented: true,
@@ -441,32 +529,66 @@ test("chat: a fixada, a lista em role=log; o menu ⋯ na linha do campo; composi
   const html = render(chat.RoomChatPanel, base);
   assert.match(html, /role="log"/);
   assert.match(html, /aria-live="off"/, "em lista cheia o leitor de tela ouve so a contagem");
-  assert.match(html, /<div class="[^"]*\bbg-room-pinned\b[^"]*" data-testid="room-pinned">[\s\S]*?Fixada pela equipe[\s\S]*?link da apostila/);
+  // A fixada: um bloco fora do log, no topo, com a linha de 1 px embaixo; o comentario com "Fixada pela equipe" e o
+  // alfinete acima do nome (o nome igual ao papel: so o selo).
+  const fixada = html.match(/<div class="([^"]*)" data-testid="room-pinned">([\s\S]*?)<ol /);
+  assert.ok(fixada, "a fixada antes da lista");
+  assert.deepEqual(temTodasAs(fixada[1], ["border-b", "border-room-panel-border", "px-4", "py-3"]), []);
+  assert.doesNotMatch(fixada[1], /bg-room-pinned|uppercase/);
+  assert.match(fixada[2], /^<div class="flex" data-room-message="p">/, "o comentario fora da lista nao e um <li>");
+  assert.match(fixada[2], /lucide-pin[^"]*size-3[\s\S]*?Fixada pela equipe<\/p><p aria-hidden="true"[^>]*data-room-message-meta="">[\s\S]*?>Equipe<\/span>/, "Fixada pela equipe acima da linha do autor");
+  assert.match(fixada[2], /<span class="sr-only">Equipe: <\/span>link da apostila/);
   // Sai a linha do rotulo "Chat" (repetia o nome da aba): o nome fica so na lista.
   assert.doesNotMatch(html, />Chat</);
   assert.match(html, /<ol aria-label="Chat"/);
+  // A lista que rola: comeca em cima, e o chat curto fica embaixo pelo margin-top auto do primeiro item (nunca
+  // justify-content: flex-end, que deixaria as antigas fora do alcance).
+  const lista = html.match(/<ol aria-label="Chat" aria-live="off" aria-relevant="additions" class="([^"]*)" role="log">/);
+  assert.ok(lista, "o log");
+  assert.deepEqual(temTodasAs(lista[1], ["flex", "min-h-0", "flex-1", "flex-col", "overflow-y-auto", "overscroll-contain", "px-4", "pt-4", "[scrollbar-gutter:stable]", "[scrollbar-width:thin]"]), []);
+  assert.doesNotMatch(lista[1], /justify-end/);
+  assert.match(html, /role="log"><li class="flex mb-4 first:mt-auto" data-room-message="1">/);
 
-  // A linha do campo: o menu ⋯ a esquerda (40 px), o campo (44 px, 16 px abaixo de lg) e o Enviar redondo de 44 px.
+  // O campo "Adicione um comentário" do YouTube (RoomCommentField, Y11): o ⋯ so abaixo de lg, antes do avatar (a partir
+  // de lg ele e o ⋮ do cabecalho do painel), o avatar com as minhas iniciais e o textarea sem caixa (16 px abaixo de lg).
+  // Fechado, nada de Cancelar nem de Enviar (eles so aparecem com o campo aberto, pelo foco).
   const form = html.slice(html.indexOf("<form"), html.indexOf("</form>"));
-  assert.match(form, /<button aria-label="Mais opções" class="[^"]*\bsize-10\b[^"]*"[^>]*aria-expanded="false" aria-haspopup="menu">[\s\S]*<textarea/, "o menu antes do campo");
-  assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\bh-11\b[^"]*\btext-base\b[^"]*\blg:text-\[13px\][^"]*"/);
-  // A linha cabe no campo de altura fixa (a caixa conta a borda, box-sizing do Tailwind): borda + respiro + linha <=
-  // altura, no celular e a partir de lg. Com a linha de 24 px nos 44 px sobravam 22 e o Chrome do Windows e do Linux
-  // mostrava a barra de rolar.
-  const campo = form.match(/<textarea [^>]*class="([^"]*)"/)[1].split(/\s+/);
-  for (const largura of ["celular", "lg"]) {
-    const caixa = caixaDoCampo(campo, largura);
-    assert.ok(caixa.altura > 0 && caixa.linha > 0, `${largura}: a altura e a linha vem das classes`);
-    assert.ok(2 * caixa.borda + 2 * caixa.respiro + caixa.linha <= caixa.altura, `${largura}: ${JSON.stringify(caixa)} cabe sem rolar`);
-  }
-  assert.match(form, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
-  assert.match(form, /<\/textarea><button aria-label="Enviar" class="[^"]*\bsize-11\b[^"]*\bbg-room-active-bg\b[^"]*" title="Enviar" type="submit" disabled="">/);
+  assert.match(form, /^<form class="[^"]*\bborder-room-panel-border\b[^"]*"><div class="mr-4 flex items-start"><div class="mr-3 shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[^>]*aria-haspopup="menu">[\s\S]*?<\/div><\/div><span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>AS<\/span><\/span>/, "o menu so abaixo de lg, antes do avatar com as iniciais");
+  assert.equal((html.match(/aria-label="Mais opções"/g) ?? []).length, 1, "um menu so no chat");
   assert.doesNotMatch(html.slice(0, html.indexOf("<form")), /Mais opções/, "nada de menu acima da lista");
+  assert.match(form, /<textarea aria-label="Escreva uma mensagem" class="[^"]*\btext-base\b[^"]*\blg:text-sm\b[^"]*"/);
+  assert.doesNotMatch(form, /lg:text-\[13px\]|rounded-\[12px\]|bg-room-input-bg/, "o campo sem caixa");
+  assert.match(form, new RegExp(`maxlength="${CHAT_LIMITS.body}"`, "i"));
+  assert.doesNotMatch(form, /type="submit"|>Enviar<|>Cancelar</, "fechado, sem o envio e sem o Cancelar");
+  assert.doesNotMatch(form, /SendHorizontal|lucide-send/);
 
-  // Com a frase no lugar do campo (silenciado, sala que nao abriu), o menu continua na linha.
+  // Com a frase no lugar do campo (silenciado, sala que nao abriu), a frase e, abaixo de lg, o menu (o celular como
+  // hoje); a faixa tem a folga do iPhone do campo.
   const comFrase = render(chat.RoomChatPanel, { ...base, notice: "Você está sem escrever no chat até 20:15." });
   assert.doesNotMatch(comFrase, /<textarea/);
-  assert.match(comFrase, /aria-label="Mais opções"[\s\S]*data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.</);
+  const frase = comFrase.match(/<div class="([^"]*)"><div class="mr-3 shrink-0 lg:hidden"><div class="relative shrink-0"><button aria-label="Mais opções"[\s\S]*?<p class="([^"]*)" data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.<\/p>/);
+  assert.ok(frase, "a frase com o menu so abaixo de lg");
+  assert.deepEqual(temTodasAs(frase[1], ["border-t", "border-room-panel-border", "p-4", "max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]"]), []);
+  assert.deepEqual(temTodasAs(frase[2], ["text-sm", "leading-5", "text-room-warn-fg"]), []);
+  assert.doesNotMatch(frase[2], /font-semibold/);
+
+  // A confirmacao de remover continua no chat, aberta pela sala (o ⋮ do cabecalho).
+  assert.doesNotMatch(html, /role="alertdialog"/);
+  assert.ok(render(chat.RoomChatPanel, { ...base, removeOpen: true }).includes(`role="alertdialog" aria-label="${WEBINAR_COPY.privacidade.confirmar}"`), "aberta pela sala");
+
+  // O ⋮ "Mais opções" do cabecalho: o circulo sem fundo e sem title com o EllipsisVertical, e o menu fechado abaixo e a
+  // direita com "Remover minhas mensagens"; no "ver como", a opcao desligada.
+  const mais = render(chat.RoomChatMoreButton, { onRemove: noop });
+  const botaoMais = mais.match(/<button\b[^>]*>/)?.[0] ?? "";
+  assert.match(botaoMais, /aria-label="Mais opções"/);
+  assert.match(botaoMais, /aria-haspopup="menu"/);
+  assert.match(botaoMais, /aria-expanded="false"/);
+  assert.match(botaoMais, /aria-controls="room-chat-more"/);
+  assert.doesNotMatch(botaoMais, /\stitle=/);
+  assert.deepEqual(temTodasAs(/class="([^"]*)"/.exec(botaoMais)?.[1] ?? "", ["bg-transparent", "size-10", "[&_svg]:size-6"]), []);
+  assert.match(mais, /lucide-ellipsis-vertical/);
+  assert.match(mais, /<div aria-label="Mais opções" class="[^"]*\btop-full\b[^"]*\bright-0\b[^"]*" hidden="" id="room-chat-more" role="menu"><button class="[^"]*" role="menuitem" tabindex="-1" type="button"><span class="flex-1">Remover minhas mensagens<\/span><\/button><\/div>/);
+  assert.match(render(chat.RoomChatMoreButton, { onRemove: noop, readOnly: true }), /aria-disabled="true"[^>]*role="menuitem"|role="menuitem"[^>]*aria-disabled="true"/);
 
   const off = render(chat.RoomChatPanel, { ...base, chatMode: "off" });
   assert.match(off, /O chat está desligado nesta sessão\./);
@@ -493,6 +615,21 @@ test("o aceite (§8.5): o texto palavra por palavra, como o nome aparece, Entend
   assert.match(html, /Primeiro nome e inicial/);
   assert.match(html, /Apelido/);
   assert.match(html, /role="group"/);
+  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca, tonal e de texto; os radios ficam.
+  const cartao = html.match(/^<div class="([^"]*)" data-testid="room-consent" role="group"/);
+  assert.ok(cartao, "o cartao do aceite");
+  assert.deepEqual(temTodasAs(cartao[1], ["rounded-[12px]", "bg-room-control", "p-4"]), []);
+  const pilula = (nome) => html.match(new RegExp(`<button class="([^"]*)" type="button">${nome}</button>`))?.[1] ?? "";
+  assert.deepEqual(temTodasAs(pilula("Entendi e quero participar"), ["h-10", "rounded-full", "bg-room-active-bg", "text-room-active-fg"]), []);
+  assert.deepEqual(temTodasAs(pilula("Participar como anônimo"), ["h-10", "rounded-full", "bg-room-control", "text-room-fg"]), []);
+  assert.deepEqual(temTodasAs(pilula("Cancelar"), ["h-10", "rounded-full", "bg-transparent", "text-room-fg"]), []);
+  assert.equal((html.match(/type="radio"/g) ?? []).length, 2, "os dois radios de como o nome aparece");
+  // Na gaveta do vertical (classic), a faixa e os botoes de antes.
+  const classico = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop, variant: "classic" });
+  assert.match(classico, /^<div class="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group"/);
+  assert.doesNotMatch(classico, /rounded-full|rounded-\[12px\]/, "sem o cartao e sem as pilulas");
+  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 3, "os tres botoes de antes");
+  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto e os radios iguais nos dois");
   assert.equal(
     WEBINAR_COPY.sala.consentimento,
     "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
@@ -548,11 +685,16 @@ test("a barra da gravada e do Replay (V2-6): Reagir abre as seis reacoes num pai
   assert.match(barra({ reactionsDisabled: true, reactionsOpen: true }), /aria-label="Curtir"[^>]*disabled=""/, "no ver como e antes do zero, desligadas");
 });
 
-test("o Sair do cabecalho com a barra na tela (leaveInBar): so abaixo de lg; sem a barra, em toda largura", () => {
-  const sair = (html) => html.match(/<button class="([^"]*)" type="button"><svg[^>]*lucide-log-out/)?.[1] ?? "";
-  assert.ok(sair(render(header.RoomHeader, { ...HEADER, leaveInBar: true })).split(" ").includes("lg:hidden"));
-  assert.ok(!sair(render(header.RoomHeader, HEADER)).split(" ").includes("lg:hidden"), "o padrao: sem a barra");
-  assert.ok(sair(render(header.RoomHeader, HEADER)).length > 0);
+test("o Sair do cabecalho em pilula S vermelha (32 px, o toque de 44 abaixo de lg) com o rotulo; com a barra na tela (leaveInBar), so abaixo de lg; sem a barra, em toda largura", () => {
+  const sair = (html) => html.match(/<button class="([^"]*)" type="button"><svg[^>]*lucide-log-out[^>]*>[\s\S]*?<\/svg>Sair<\/button>/)?.[1].split(" ") ?? [];
+  const comBarra = sair(render(header.RoomHeader, { ...HEADER, leaveInBar: true }));
+  for (const classe of ["bg-room-accent", "text-white", "hover:bg-room-accent-hover", "h-8", "rounded-full", "text-xs", "after:-inset-1.5", "lg:after:hidden", "lg:hidden"]) {
+    assert.ok(comBarra.includes(classe), `${classe} no Sair: ${comBarra.join(" ")}`);
+  }
+  const semBarra = sair(render(header.RoomHeader, HEADER));
+  assert.ok(semBarra.length > 0 && semBarra.includes("bg-room-accent") && semBarra.includes("h-8"), "sem a barra, a mesma pilula");
+  assert.ok(!semBarra.includes("lg:hidden"), "o padrao: sem a barra, em toda largura");
+  assert.doesNotMatch(render(header.RoomHeader, HEADER), /title="Sair"|aria-label="Sair"/, "o nome e o proprio rotulo, sem title");
 });
 
 function payload(extra = {}, sessionExtra = {}) {
@@ -603,10 +745,15 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
   assert.match(live, /<iframe[^>]+mediadelivery/);
   assert.match(live, /Ativar som/);
   assert.match(live, /fixed inset-0 flex flex-col/, "tela cheia por cima da area");
-  // O painel de 320 px a direita no computador (V2-7), com as abas em pilula na lista "Painel da sala".
-  const aside = live.match(/<aside class="([^"]*)" data-testid="room-panel" id="room-panel">/)?.[1].split(" ") ?? [];
-  assert.ok(aside.includes("lg:w-80") && aside.includes("lg:flex-none"), aside.join(" "));
-  assert.match(live, /<div aria-label="Painel da sala" class="[^"]*" role="tablist">/);
+  // O painel a direita no computador com a largura da grade do YouTube (de 320 a 514 px) e o trilho "Painel da sala"
+  // depois dele; abaixo de lg, as abas em pilula na lista "Painel da sala", na linha que some a partir de lg. O mesmo
+  // nome em dois papeis, cada um so numa largura.
+  const aside = live.match(/<aside aria-labelledby="room-panel-title" class="([^"]*)" data-testid="room-panel" id="room-panel">/)?.[1].split(" ") ?? [];
+  assert.ok(aside.includes("lg:w-[clamp(320px,27.5vw,514px)]") && aside.includes("lg:flex-none") && !aside.includes("lg:w-80"), aside.join(" "));
+  assert.match(live, /<div class="[^"]*\blg:hidden"><div aria-label="Painel da sala" class="[^"]*" role="tablist">/);
+  assert.match(live, /<\/aside><nav aria-label="Painel da sala" class="[^"]*\blg:flex\b[^"]*">/);
+  assert.equal((live.match(/aria-label="Painel da sala"/g) ?? []).length, 2, "na nav e no tablist");
+  assert.deepEqual([...live.matchAll(/data-room-rail="([a-z]+)"/g)].map(([, aba]) => aba), ["chat", "perguntas", "participantes"], "a gravada tem Participantes no trilho");
   assert.match(live, /aspect-video w-full/, "o palco na largura a 375 px");
   assert.match(live, /data-testid="room-panel"/);
   assert.doesNotMatch(live, /room-pill|data-room-minimized|Minimizar/, "sem Minimizar e sem pilula (docs/31 V2-2)");
@@ -649,6 +796,8 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
   assert.match(replay, /role="tab"[^>]*>Chat da live</);
   assert.match(replay, /role="tab"[^>]*>Perguntas</);
   assert.doesNotMatch(replay, /role="tab"[^>]*>Participantes</, "no Replay ninguem esta presente: sem Participantes");
+  assert.deepEqual([...replay.matchAll(/data-room-rail="([a-z]+)"/g)].map(([, aba]) => aba), ["chat", "perguntas"]);
+  assert.match(replay, /id="room-panel-title">Chat da live<\/h2>/, "no titulo do painel, Chat da live; no trilho, Chat");
   assert.doesNotMatch(replay, /Ativar som/, "o replay tem a barra do player");
 
   const preview = render(room.WebinarRoom, { coverUrl: null, payload: payload(), readOnly: true, webinarHref: "/x" });
@@ -751,20 +900,21 @@ test("a aba Participantes da gravada (V2-7): quem apresenta e o mesmo numero do 
   const simulacao = roomSimulationStateOf({ counter: [{ atMs: 0, extra: 40 }, { atMs: 15_000, extra: 55 }], enabled: true, joins: [], saleNotices: [] });
   const shownCount = simulacao.displayCount(3, 16_000);
   assert.equal(shownCount, 58);
-  const html = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: shownCount });
+  const html = render(notices.LiveParticipantsTab, { presenterKnown: true, stage: layout.panelStageNames("Danilo Souza"), students: shownCount });
   assert.match(html, />No palco</);
   assert.match(html, /Danilo Souza/);
   assert.match(html, /58 alunos na sala/, "o mesmo numero do cabecalho: a sala nao se contradiz");
   assert.equal((html.match(/<li/g) ?? []).length, 1, "so quem apresenta vira lista");
+  assert.match(html, /Danilo Souza<\/span><span class="[^"]*\bbg-room-control\b[^"]*">Apresentador<\/span><\/li>/, "a gravada sabe quem apresenta: o selo");
   // Sem o nome de quem apresenta, so o numero.
-  const semNome = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames(null), students: shownCount });
+  const semNome = render(notices.LiveParticipantsTab, { presenterKnown: false, stage: layout.panelStageNames(null), students: shownCount });
   assert.equal((semNome.match(/<li/g) ?? []).length, 0);
   assert.match(semNome, /58 alunos na sala/);
   // A sessao encerrada: o cabecalho tira o numero (verticalBadge, showCount) e a aba tambem, pela mesma condicao.
   const numeroDaAba = (phase) => (vertical.verticalBadge({ kind: "simulated", phase, showLiveBadge: true }).showCount ? shownCount : null);
-  assert.match(render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("live") }), /58 alunos na sala/);
-  assert.match(render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("waiting") }), /58 alunos na sala/);
-  const encerrada = render(notices.LiveParticipantsTab, { stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("ended") });
+  assert.match(render(notices.LiveParticipantsTab, { presenterKnown: true, stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("live") }), /58 alunos na sala/);
+  assert.match(render(notices.LiveParticipantsTab, { presenterKnown: true, stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("waiting") }), /58 alunos na sala/);
+  const encerrada = render(notices.LiveParticipantsTab, { presenterKnown: true, stage: layout.panelStageNames("Danilo Souza"), students: numeroDaAba("ended") });
   assert.match(encerrada, /Danilo Souza/, "encerrada, quem apresentou continua");
   assert.doesNotMatch(encerrada, /na sala/, "encerrada, sem o ultimo numero recebido (o sinal de presenca ja parou)");
 });
@@ -804,14 +954,14 @@ test("o desenho normal continua igual (fase 4d): o padrao e a primeira pintura s
   const barra = coluna.slice(coluna.indexOf('data-testid="recorded-controls"'));
   assert.deepEqual([...barra.matchAll(/data-room-bar-item="([a-z]+)"/g)].map(([, item]) => item), ["leave", "react", "sound", "panel"], "sem a Tela cheia no servidor (so com o navegador que deixa)");
   assert.match(barra, /<button aria-controls="room-reactions" aria-expanded="false" aria-label="Reagir"/);
-  assert.match(barra, /<button aria-controls="room-panel" aria-expanded="true" aria-label="Esconder o chat"/);
+  assert.match(barra, /<button aria-controls="room-panel" aria-expanded="true" aria-label="Esconder o chat" class="[^"]*\blg:hidden\b[^"]*"/, "o balao so abaixo de lg");
   // O Som da gravada: o video comeca mudo (aria-pressed falso); antes do zero, sem player, nao ha o que ligar.
   assert.match(barra, /<button aria-label="Som" aria-pressed="false" class="[^"]*" data-room-bar-item="sound" title="Som" type="button">/);
   const antes = render(room.WebinarRoom, { coverUrl: null, payload: payload({}, { offsetMs: -4 * MIN, roomPhase: "waiting", scheduledAt: new Date(T0 + 4 * MIN).toISOString() }), readOnly: false, webinarHref: "/x" });
   assert.match(antes, /<button aria-label="Som" aria-pressed="false"[^>]*data-room-bar-item="sound" disabled=""/);
   assert.match(barra, /<button class="[^"]*\bhidden\b[^"]*\blg:inline-flex\b[^"]*"[^>]*data-room-bar-item="leave"><svg[\s\S]*?<\/svg>Sair<\/button>/, "o Sair da barra a partir de lg, com o nome visivel em toda largura (a pilula cabe a 1024 px)");
   assert.match(html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /\blg:hidden" type="button">[\s\S]*?Sair<\/button>/, "o Sair do cabecalho so abaixo de lg");
-  assert.match(html, /<aside class="[^"]*" data-testid="room-panel" id="room-panel">/, "o painel do chat que o balao controla");
+  assert.match(html, /<aside aria-labelledby="room-panel-title" class="[^"]*" data-testid="room-panel" id="room-panel">/, "o painel do chat que o balao e o trilho controlam");
   assert.doesNotMatch(html, /data-room-vertical|data-room-drawer|Comente…|Perguntas e enquetes/, "nada do desenho vertical");
 });
 
@@ -854,20 +1004,32 @@ test("Perfil › Privacidade › Chat das lives: o texto e o botao Remover minha
  * O RoomTabList (docs/31 V2-15): a linha das abas sai do RoomPanel para o console usar, e a sala fica com o mesmo HTML
  * ---------------------------------------------------------------------------------------------- */
 
-// O HTML do RoomPanel antes da extracao (G7 da fase 2), byte a byte: a sala nao muda nada com o RoomTabList.
-const PAINEL_DA_SALA_ANTES = {
-  live: "<aside class=\"flex gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3\" data-testid=\"room-panel\" id=\"room-panel\"><div class=\"flex shrink-0 items-center gap-2 px-2 lg:px-0\"><div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" data-room-first-focus=\"\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button><button aria-controls=\"room-tab-participantes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-participantes\" role=\"tab\" type=\"button\">Participantes</button><button aria-controls=\"room-tab-enquetes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-enquetes\" role=\"tab\" type=\"button\">Enquetes<span aria-hidden=\"true\" class=\"ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle\"></span></button></div><button aria-label=\"Fechar o painel\" class=\"shrink-0 place-items-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none [&amp;_svg]:shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus size-10 [&amp;_svg]:size-[18px] border border-room-border-strong bg-room-surface text-room-icon hover:bg-room-control-hover hover:text-room-fg-strong hidden lg:grid\" title=\"Fechar o painel\" type=\"button\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-x\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"></path><path d=\"m6 6 12 12\"></path></svg></button></div><div aria-labelledby=\"room-tabbtn-perguntas\" class=\"mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b x-y\" id=\"room-tab-perguntas\" role=\"tabpanel\">conteudo</div></aside>",
-  replayFechado: "<aside class=\"gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-80 lg:flex-none lg:gap-3 pt-2 lg:pt-0\" data-testid=\"room-panel\" hidden=\"\" id=\"room-panel\"><div class=\"flex shrink-0 items-center gap-2 px-2 lg:px-0\"><div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat da live</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button></div></div><div aria-labelledby=\"room-tabbtn-chat\" class=\"mx-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface lg:mx-0 lg:rounded-[var(--member-cover-radius)] lg:border-b\" id=\"room-tab-chat\" role=\"tabpanel\">c</div></aside>"
+// O HTML da linha das abas (o RoomTabList, que o console tambem usa) antes da sala no estilo do YouTube, byte a byte: no
+// painel da sala ela so ganhou um envoltorio que a esconde a partir de lg (as abas viram o trilho a direita).
+const LINHA_DAS_ABAS_ANTES = {
+  live: "<div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" data-room-first-focus=\"\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button><button aria-controls=\"room-tab-participantes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-participantes\" role=\"tab\" type=\"button\">Participantes</button><button aria-controls=\"room-tab-enquetes\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-enquetes\" role=\"tab\" type=\"button\">Enquetes<span aria-hidden=\"true\" class=\"ml-1 inline-block size-1.5 rounded-full bg-room-accent align-middle\"></span></button></div>",
+  replay: "<div aria-label=\"Painel da sala\" class=\"flex h-11 min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-[calc(var(--member-button-radius)+4px)] border border-room-tabs-border bg-room-tabs p-1 [scrollbar-width:none] lg:h-auto lg:gap-1 [&amp;::-webkit-scrollbar]:hidden\" role=\"tablist\"><button aria-controls=\"room-tab-chat\" aria-selected=\"true\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus bg-room-tab-on-bg font-bold text-room-tab-on-fg shadow-[var(--room-tab-on-shadow)]\" id=\"room-tabbtn-chat\" role=\"tab\" type=\"button\">Chat da live</button><button aria-controls=\"room-tab-perguntas\" aria-selected=\"false\" class=\"h-[34px] shrink-0 grow whitespace-nowrap rounded-[var(--member-button-radius)] px-1.5 text-xs transition-colors motion-reduce:transition-none lg:h-10 lg:text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus font-semibold text-room-fg-muted hover:text-room-fg-strong\" id=\"room-tabbtn-perguntas\" role=\"tab\" type=\"button\">Perguntas</button></div>"
 };
 
-test("o painel da sala com o RoomTabList: o mesmo HTML de antes (as quatro abas com o ponto da enquete, o primeiro foco no Chat, o X; o Replay fechado sem o X)", () => {
+test("o painel da sala no estilo do YouTube, por partes: a linha das abas de antes (so abaixo de lg), o cabecalho com o h2 e o X so com a barra, e a aba escolhida ligada a aba da linha", () => {
   const live = render(panelModule.RoomPanel, { children: "conteudo", className: "flex", closable: true, contentClassName: "x-y", firstFocus: true, id: "room-panel", kind: "live", onClose: noop, onTab: noop, open: true, pollOpen: true, tab: "perguntas", tabs: ["chat", "perguntas", "participantes", "enquetes"] });
-  assert.equal(live, PAINEL_DA_SALA_ANTES.live);
   const replay = render(panelModule.RoomPanel, { children: "c", closable: false, firstFocus: false, id: "room-panel", kind: "replay", onClose: noop, onTab: noop, open: false, pollOpen: false, tab: "chat", tabs: ["chat", "perguntas"] });
-  assert.equal(replay, PAINEL_DA_SALA_ANTES.replayFechado);
-  // As abas de hoje, pelo texto: Chat, Perguntas, Participantes e Enquetes (o Replay diz "Chat da live").
+  // A linha das abas: o mesmo HTML de antes (as quatro abas com o ponto da enquete e o primeiro foco no Chat), dentro do
+  // envoltorio que some a partir de lg e sem o X (que foi para o cabecalho).
+  assert.ok(live.includes(`<div class="flex shrink-0 items-center gap-2 px-2 lg:hidden">${LINHA_DAS_ABAS_ANTES.live}</div>`), "a linha da live");
+  assert.ok(replay.includes(`<div class="flex shrink-0 items-center gap-2 px-2 lg:hidden">${LINHA_DAS_ABAS_ANTES.replay}</div>`), "a linha do Replay fechado");
   assert.deepEqual(Array.from(live.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas", "Participantes", "Enquetes"]);
   assert.deepEqual(Array.from(replay.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat da live", "Perguntas"]);
+  // O aside: o nome pelo h2 do cabecalho, a classe do esqueleto primeiro, fechado hidden e montado.
+  assert.match(live, /^<aside aria-labelledby="room-panel-title" class="flex gap-2 [^"]*" data-testid="room-panel" id="room-panel">/);
+  assert.match(replay, /^<aside aria-labelledby="room-panel-title" class="gap-2 [^"]*\bpt-2 lg:pt-0" data-testid="room-panel" hidden="" id="room-panel">/, "sem o X, o recuo de cima de antes abaixo de lg");
+  // O cabecalho, depois da linha: o nome da aba escolhida no h2 e o X so com a barra (closable).
+  assert.match(live, /<div class="hidden h-14 shrink-0 items-center py-1 pl-4 pr-0\.5 lg:flex"><h2 class="[^"]*" id="room-panel-title">Perguntas<\/h2><span class="relative inline-flex"><button aria-label="Fechar o painel" class="[^"]*" type="button">/);
+  assert.match(replay, /<div class="hidden h-14 shrink-0 items-center py-1 pl-4 pr-0\.5 lg:flex"><h2 class="[^"]*" id="room-panel-title">Chat da live<\/h2><\/div>/, "sem a barra, sem o X");
+  assert.ok(live.indexOf('role="tablist"') < live.indexOf('id="room-panel-title"') && live.indexOf('id="room-panel-title"') < live.indexOf('role="tabpanel"'), "a linha, o cabecalho e a aba, nessa ordem");
+  // A aba escolhida ligada a aba da linha (o leitor de tela abaixo de lg), com as classes de quem chama no fim.
+  assert.match(live, /<div aria-labelledby="room-tabbtn-perguntas" class="[^"]*\bx-y" id="room-tab-perguntas" role="tabpanel">conteudo<\/div><\/aside>$/);
+  assert.match(replay, /<div aria-labelledby="room-tabbtn-chat" class="[^"]*" id="room-tab-chat" role="tabpanel">c<\/div><\/aside>$/);
 });
 
 test("RoomTabList fora da sala (o console): os ids pelo prefixo, o numero no nome da aba (tambem o zero), nenhuma aba escolhida quando o painel mostra outra coisa, sem o primeiro foco", () => {

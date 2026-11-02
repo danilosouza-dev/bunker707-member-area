@@ -8,7 +8,8 @@ import type { RoomKind } from "./room-layout-model";
 // desenho normal e tambem no computador, no lugar do chat por cima do palco que so o celular tinha: as 2 ultimas
 // (overlayMessages), a mais nova embaixo, numa coluna de ate 380 px centrada entre a borda esquerda do video e a coluna
 // de miniaturas do iframe (--room-video-right), a 56 px da base, acima da linha dos selos de baixo (V2-4); no Replay
-// mais alto, acima da barra de controles da Bunny. Pilulas de 32 px em preto a 55 % com o avatar de 22 px (so as
+// mais alto, acima da barra de controles da Bunny; com o aviso da sala no palco, sobem a altura dele e mais 8 px
+// (--room-snackbar-offset, do palco). Pilulas de 32 px em preto a 55 % com o avatar de 22 px (so as
 // iniciais do nome de exibicao, docs/30 §8.5), o nome e o texto com reticencias. Iguais nos dois temas (ficam sobre o
 // video). Nada aqui recebe o toque: o video e a barra da Bunny por baixo continuam clicaveis. O leitor de tela chama a
 // lista pelo nome da aba do painel ("Chat da live" no Replay). Quando aparecem, a sala decide (chatPillsShown,
@@ -21,7 +22,7 @@ export function RoomChatPills({ kind, messages }: { kind: RoomKind; messages: re
   const replay = kind === "replay";
   return (
     <div
-      className={cn("pointer-events-none absolute left-0 right-[var(--room-video-right)] z-20 flex justify-center px-3", replay ? "bottom-20" : "bottom-14")}
+      className={cn("pointer-events-none absolute left-0 right-[var(--room-video-right)] z-20 flex justify-center px-3", replay ? "bottom-[calc(5rem+var(--room-snackbar-offset,0px))]" : "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px))]")}
       data-testid="room-chat-pills"
     >
       <ol aria-label={replay ? WEBINAR_COPY.sala.abas.chatDaLive : WEBINAR_COPY.sala.abas.chat} aria-live="polite" className="flex w-full min-w-0 max-w-[380px] flex-col gap-1.5" role="log">

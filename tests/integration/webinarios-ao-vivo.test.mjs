@@ -295,8 +295,8 @@ test("3. removido 409 kicked e banido 409 banned (linhas reais); silenciado nao 
   assert.deepEqual(leitura.body.data.me.ban, { banned: false, kicked: false, muted: true, mutedUntil: leitura.body.data.me.ban.mutedUntil });
   assert.equal(Date.parse(leitura.body.data.me.ban.mutedUntil), Date.parse(ate));
   const live = leitura.body.data.live;
-  assert.deepEqual(Object.keys(live).sort(), ["lobby", "locked", "meetConfigured", "practice", "recording", "startedAt", "status"]);
-  assert.deepEqual([live.lobby, live.locked, live.meetConfigured, live.practice, live.recording, live.status], [false, false, true, false, false, "live"]);
+  assert.deepEqual(Object.keys(live).sort(), ["lobby", "locked", "meetConfigured", "practice", "recording", "selfUnmute", "startedAt", "status"]);
+  assert.deepEqual([live.lobby, live.locked, live.meetConfigured, live.practice, live.recording, live.selfUnmute, live.status], [false, false, true, false, false, false, "live"]);
   assert.ok(!JSON.stringify(leitura.body).includes(roomName), "a sessao nunca leva o nome da sala");
   unwrap(await db.from("webinar_session_bans").delete().eq("session_id", sessaoId).eq("user_id", aluna.id), "Desfazendo o silencio");
 });

@@ -12,6 +12,7 @@ import {
   answerDeviceSwitch,
   applyLiveSignal,
   applyRoomsInfo,
+  audioModerationRefreshInMs,
   cameraAnswerDelayMs,
   cameraConsentEndedByDenial,
   cameraConsentEndedByError,
@@ -36,6 +37,7 @@ import {
   joinFailureOf,
   joinTimeoutOutcome,
   LIVE_ROOM_RULES,
+  liveNoticeSnack,
   lowerHandRequested,
   micAskCheck,
   micAskOnSignal,
@@ -45,7 +47,6 @@ import {
   onStageParticipantOf,
   queueRoomEvent,
   reconnectStep,
-  recordingSignalOf,
   remoteParticipantIds,
   requeueBatch,
   roomEventsOutcome,
@@ -66,6 +67,7 @@ import {
   type SwitchGate
 } from "./live-room-model";
 import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from "./room-api";
+import type { RoomSnack } from "./room-snackbar-model";
 import { useRoomView } from "./use-room-prefs";
 
 // A sala ao vivo do aluno por dentro (docs/30 §1.3, §5.1, §5.4, §6.3, §8.5 e §9; fase 3), fora do desenho:
@@ -270,6 +272,11 @@ export type UseLiveRoomInput = {
   nonce: string | null;
   /** Um erro de camera encerrou o aceite pendente do aviso de gravacao: o proximo clique em Câmera abre o aviso de novo. */
   onCameraConsentEnded: () => void;
+  /**
+   * A moderacao de audio mudou (o moderationStatusChanged de audio): a sala rele a sessao, porque o microfone sozinho
+   * (docs/31 caminho A) pode ter mudado junto no console.
+   */
+  onAudioModerationChanged?: () => void;
   /** O join-token recusou (409 / 503 / 404) ou um lote de sinais voltou 409 / 404: a sala troca de tela. */
   onRefused: (failure: Exclude<LiveJoinFailure, "error">) => void;
   sessionId: string;
@@ -291,6 +298,10 @@ export type LiveRoomController = {
   jitsiStatus: JitsiStatus;
   reply: JoinTokenReply | null;
   retryNow: () => void;
+  /** O aviso saiu da tela (o tempo acabou, outro tomou o lugar ou a acao foi usada): o mesmo aviso pode voltar. */
+  clearNotice: (key: string) => void;
+  /** O aviso da barra para o aviso da sala (RoomSnackbar), ou nulo; o "microfone liberado" e o dialogo, nunca aviso. */
+  notice: RoomSnack | null;
   showNotice: (notice: LiveNotice) => void;
   signals: LiveSignalState;
   soundOn: boolean;
@@ -347,6 +358,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   const lobbyRef = useRef(lobby);
   const canSwitchRef = useRef(input.canSwitchDevice);
   const consentEndedRef = useRef(input.onCameraConsentEnded);
+  const audioModerationRef = useRef(input.onAudioModerationChanged);
+  /** A releitura da sessao ja marcada depois de uma troca da moderacao de audio (audioModerationRefreshInMs). */
+  const audioModerationPendingRef = useRef(false);
   /** As trocas de camera em andamento (o painel Configurações) e o numero da ultima. */
   const switchesRef = useRef<Record<DeviceSwitchKind, DeviceSwitch | null>>({ audioInput: null, videoInput: null });
   const switchSeqRef = useRef(0);
@@ -382,6 +396,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     lobbyRef.current = lobby;
     canSwitchRef.current = input.canSwitchDevice;
     consentEndedRef.current = input.onCameraConsentEnded;
+    audioModerationRef.current = input.onAudioModerationChanged;
     refusedRef.current = input.onRefused;
     signalsRef.current = signals;
     joinedRef.current = entry === "joined";
@@ -546,15 +561,13 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       const consented = consent.consented;
       pushEvent(toRoomEvent(name, payload, { extra: consented ? { consented: true } : undefined, nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
       if (name === "endpointTextMessageReceived") {
-        // "Abaixar a mão" do console: com a mao levantada (lowerHandRequested).
-        if (lowerHandRequested(signalsRef.current, payload) && commandRef.current("toggleRaiseHand")) {
-          setSignals(toggleHandLocally);
+        // "Abaixar a mão" do console (com a mao levantada, lowerHandRequested): so com o toggleRaiseHand aceito pelo
+        // iframe a barra abaixa e o aviso "A equipe abaixou a sua mão." entra. A gravacao no navegador do Apresentador
+        // (so de quem modera): o selo Gravando na hora. Os dois pelo applyLiveSignal.
+        if (lowerHandRequested(signalsRef.current, payload) && !commandRef.current("toggleRaiseHand")) {
+          return;
         }
-        // A gravacao no navegador do Apresentador (so de quem modera): o selo Gravando na hora.
-        const recordingOn = recordingSignalOf(signalsRef.current, payload);
-        if (recordingOn !== null) {
-          setSignals((previous) => ({ ...previous, recording: recordingOn }));
-        }
+        setSignals((previous) => applyLiveSignal(previous, { name, ownId: ownIdRef.current, payload }));
         return;
       }
       setSignals((previous) => applyLiveSignal(switchKind ? expectDeviceSwitch(previous, switchKind) : previous, { name, ownId: ownIdRef.current, payload }));
@@ -613,6 +626,27 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         if (viewCommand) {
           commandRef.current(...viewCommand);
         }
+        // A moderacao de audio que o motor ja tem (o microfone sozinho so abre com ela desligada), como o console le na
+        // entrada; a resposta so vale deste iframe e desta entrada.
+        void Promise.resolve(frame?.isModerationOn?.("audio"))
+          .then((on) => {
+            if (typeof on === "boolean" && !leavingRef.current && joinedApiRef.current === frame) {
+              handleSignal("moderationStatusChanged", { enabled: on, mediaType: "audio" });
+            }
+          })
+          .catch(() => undefined);
+      }
+      if (name === "moderationStatusChanged" && field(payload, "mediaType") === "audio") {
+        // Espalhada e juntada: a turma inteira recebe o sinal no mesmo instante, e o vigia do teto troca a moderacao
+        // a cada 2 s no pior caso.
+        const delayMs = audioModerationRefreshInMs(audioModerationPendingRef.current, Math.random());
+        if (delayMs !== null) {
+          audioModerationPendingRef.current = true;
+          later(() => {
+            audioModerationPendingRef.current = false;
+            audioModerationRef.current?.();
+          }, delayMs);
+        }
       }
       if (name === "filmstripDisplayChanged") {
         // O motor respondeu (ou a equipe mudou a coluna de todos): a conta da coluna pode mandar o proximo.
@@ -656,7 +690,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       }
       handleSignal(name, payload);
     },
-    [handleSignal, readRoomsInfo, setGate]
+    [handleSignal, later, readRoomsInfo, setGate]
   );
 
   const configOverwrite = useMemo(() => (reply ? liveConfigOverwrite(reply.role, reply.settings, look) : {}), [reply, look]);
@@ -827,15 +861,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     };
   }, [inRoom, refuse, reply, sessionId, webinarId]);
 
-  // Os avisos passageiros da barra somem sozinhos.
-  const notice = signals.notice;
-  useEffect(() => {
-    if (!notice || notice === "mic_released") {
-      return;
-    }
-    const id = window.setTimeout(() => setSignals((previous) => (previous.notice === notice ? { ...previous, notice: null } : previous)), LIVE_ROOM_RULES.noticeMs);
-    return () => window.clearTimeout(id);
-  }, [notice]);
+  // O aviso da barra no aviso da sala (RoomSnackbar): o tempo, a pausa e um de cada vez sao de quem mostra, que avisa
+  // pelo clearNotice quando ele sai da tela (o mesmo aviso pode entao voltar). O notificationTriggered do motor ja chega
+  // aqui pelo applyLiveSignal (engineNoticeOf: so o microfone ligado sem som).
+  const notice = useMemo(() => liveNoticeSnack(signals.notice), [signals.notice]);
+  const clearNotice = useCallback((key: string) => setSignals((previous) => (previous.notice === key ? { ...previous, notice: null } : previous)), []);
 
   const enter = useCallback(() => {
     leavingRef.current = false;
@@ -1084,8 +1114,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     devices,
     enter,
     entry,
+    clearNotice,
     hangUp,
     jitsiStatus: jitsi.status,
+    notice,
     pendingToggle,
     reply,
     retryNow,

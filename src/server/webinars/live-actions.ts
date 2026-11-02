@@ -6,8 +6,8 @@
 // desfazer, Enviar gravacao / Ligar um video da Bunny e "Alinhar chat". Os comandos da sala (silenciar todos, liberar,
 // remover do iframe, trancar, gravar) saem do navegador de quem esta no console (executeCommand); aqui fica o que o
 // banco guarda. Sempre a sessao `live` do webinario (outra: 409). Permissoes de §2.6: abrir, comecar, encerrar, o
-// gravador, a ancora e banir pedem messaging.publish; trancar, silenciar, remover, desfazer, enviar a gravacao e
-// alinhar, messaging.write. Ninguem da equipe e removido, silenciado nem banido (409). Toda acao grava recordAudit so
+// gravador, a ancora e banir pedem messaging.publish; trancar, silenciar, remover, desfazer, enviar a gravacao,
+// alinhar e o microfone sozinho (so quem apresenta), messaging.write. Ninguem da equipe e removido, silenciado nem banido (409). Toda acao grava recordAudit so
 // com ids e contagens (o motivo digitado pela equipe vira um booleano) e revalida o console. O relogio e o do servidor.
 
 import { revalidatePath } from "next/cache";
@@ -18,6 +18,7 @@ import { recordAudit } from "@/server/audit/log";
 import { invalidateWebinars } from "./cache";
 import { canEndSession, canOpenSession } from "./console-model";
 import { WebinarError, WebinarFieldError, assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
+import { roomRoleFor } from "./jitsi-token";
 import { LIVE_ACTION_MESSAGES } from "./live-console-model";
 import { muteUntilIso } from "./live-model";
 import {
@@ -28,6 +29,7 @@ import {
   browserRecordingSchema,
   releaseRecorderSchema,
   roomLockSchema,
+  selfUnmuteSchema,
   sessionActionSchema,
   unbanStudentSchema,
   unbanUserSchema,
@@ -49,9 +51,9 @@ import type { PresenceSummary, SessionStatus } from "./model";
 import { recorderDispatcherFrom, type DispatchOutcome } from "./recorder-dispatch";
 import { canReleaseRecorder, canRequestRecorder, prepareEstimateMinutes, recordButtonAction, recorderPrepareStale, type RecorderStatus } from "./recorder-model";
 import { parseBunnyEmbed } from "./room-model";
-import { RECORDING_COLUMNS, recorderStatusOf, sessionFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
+import { RECORDING_COLUMNS, presenterFromRow, recorderStatusOf, sessionFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import { createReplayForSession, finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertRecordingRow, requireWebinarRow, updateRecordingRow, updateSessionRow } from "./store";
+import { fetchSessionRow, insertRecordingRow, listPresenterRows, requireWebinarRow, updateRecordingRow, updateSessionRow, updateWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 const BUNNY_LIBRARY = /^\d{1,12}$/;
@@ -61,6 +63,7 @@ export type LiveRoomOpened = { changed: boolean; sessionId: string; status: Sess
 export type LiveStarted = { changed: boolean; notified: number; sessionId: string };
 export type LiveEnded = { replayCreated: boolean; sessionId: string; summary: PresenceSummary | null };
 export type RoomLock = { locked: boolean; sessionId: string };
+export type SelfUnmuteSaved = { allowed: boolean; sessionId: string };
 export type RecorderPrepared = { recorderStatus: RecorderStatus; sessionId: string };
 export type RecorderReleased = { force: boolean; sessionId: string };
 /** O pedido da maquina recusado pelo ambiente (sem GITHUB_INFRA_TOKEN) ou pelo GitHub: a tela mostra a reserva. */
@@ -318,6 +321,61 @@ export async function setRoomLock(input: { locked: boolean; sessionId: string })
     revalidateConsole(webinar.id);
 
     return { locked: data.locked, sessionId: row.id };
+  });
+}
+
+/**
+ * Quem apresenta o webinario: o Apresentador (webinars.host_user_id) ou um co-apresentador com o prazo valendo
+ * (webinar_presenters, pela mesma regra da sala, roomRoleFor). O Apresentador nem le a tabela.
+ */
+async function presentsWebinar(db: WebinarsDb, webinar: WebinarRow, userId: string, nowMs: number): Promise<boolean> {
+  if (webinar.host_user_id === userId) {
+    return true;
+  }
+  const own = (await listPresenterRows(db, [webinar.id])).filter((row) => row.user_id === userId);
+  const grant = roomRoleFor({
+    hostUserId: null,
+    nowMs,
+    presenters: own.map(presenterFromRow),
+    staff: true,
+    userId,
+    validUntilByUser: new Map(own.map((row) => [row.user_id, row.valid_until]))
+  });
+  return grant.role === "co_host";
+}
+
+/**
+ * [messaging.write] O microfone sozinho ao vivo (docs/31, caminho A, sem migracao): so o Apresentador ou um
+ * co-apresentador (conferido aqui; a Equipe recebe 403), com a sessao aberta. Grava so a chave `selfUnmute` no
+ * room_settings do webinario, com a guarda do `updated_at` lido (o editor aberto noutra aba recebe o conflito, 409).
+ * Os comandos da sala (a moderacao de audio, o vigia de 4 alunos) saem do navegador de quem apresenta depois do sucesso.
+ */
+export async function setSelfUnmute(input: { allowed: boolean; sessionId: string }): Promise<ActionResult<SelfUnmuteSaved>> {
+  return runAdminAction("messaging.write", selfUnmuteSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const { row, webinar } = await loadLiveSession(db, data.sessionId);
+
+    if (isClosed(row)) {
+      throw new WebinarError(LIVE_ACTION_MESSAGES.closed, 409);
+    }
+
+    if (!(await presentsWebinar(db, webinar, user.id, Date.now()))) {
+      throw new WebinarError(LIVE_ACTION_MESSAGES.presenterOnly, 403);
+    }
+
+    const current = webinar.room_settings && typeof webinar.room_settings === "object" && !Array.isArray(webinar.room_settings) ? (webinar.room_settings as Record<string, unknown>) : {};
+    await updateWebinarRow(db, webinar.id, { room_settings: { ...current, selfUnmute: data.allowed } }, { expectedUpdatedAt: webinar.updated_at });
+
+    await recordAudit(db, {
+      action: "webinar.self_unmute",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { allowed: data.allowed, session_id: row.id }
+    });
+    revalidateWebinar(webinar.id);
+
+    return { allowed: data.allowed, sessionId: row.id };
   });
 }
 

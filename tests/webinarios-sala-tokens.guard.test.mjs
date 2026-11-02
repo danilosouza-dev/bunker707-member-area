@@ -40,13 +40,14 @@ test("os dois temas definem os mesmos --room-*, cada um com o color-scheme dele"
   assert.deepEqual([...CLARO.keys()].sort(), [...ESCURO.keys()].sort(), "todo --room-* nos DOIS blocos");
   assert.match(bloco('[data-room-theme="dark"]'), /color-scheme:\s*dark;/);
   assert.match(bloco('[data-room-theme="light"]'), /color-scheme:\s*light;/);
-  // Os valores do texto aprovado (V2-11): o fundo, o painel e o ativo de cada tema.
+  // Os valores fixos: o fundo (V2-11, o mesmo que o iframe do motor pinta), o painel do console e o ativo do YouTube
+  // (a sala no estilo do YouTube, docs/31).
   assert.equal(ESCURO.get("--room-bg"), "#141414");
   assert.equal(CLARO.get("--room-bg"), "#f4f4f3");
   assert.equal(ESCURO.get("--room-surface"), "#171717");
   assert.equal(CLARO.get("--room-surface"), "#ffffff");
-  assert.equal(ESCURO.get("--room-active-bg"), "#ffffff");
-  assert.equal(CLARO.get("--room-active-bg"), "#141414");
+  assert.equal(ESCURO.get("--room-active-bg"), "#f1f1f1");
+  assert.equal(CLARO.get("--room-active-bg"), "#0f0f0f");
   // Nenhum --room-* fora dos dois blocos (um terceiro lugar poderia vencer um deles).
   const fora = semComentariosCss(CSS)
     .replace(/\[data-room-theme="(?:dark|light)"\]\s*\{[^}]*\}/g, "")
@@ -63,12 +64,66 @@ test("cada --color-room-* do @theme inline aponta para um --room-* definido (as 
     assert.equal(alvo, nome, `--color-${nome} aponta para --${nome}`);
     assert.ok(ESCURO.has(`--${alvo}`), `--${alvo} definido`);
   }
-  // Toda cor do tema tem a classe; so a sombra da aba ativa fica de fora (nao e cor).
+  // Toda cor do tema tem a classe; so as tres sombras ficam de fora (nao sao cor): a da aba ativa, a do menu e a do aviso.
   const comClasse = new Set(cores.map(([, nome]) => `--${nome}`));
   assert.deepEqual(
-    [...ESCURO.keys()].filter((nome) => !comClasse.has(nome)),
-    ["--room-tab-on-shadow"]
+    [...ESCURO.keys()].filter((nome) => !comClasse.has(nome)).sort(),
+    ["--room-menu-shadow", "--room-snackbar-shadow", "--room-tab-on-shadow"]
   );
+});
+
+/** Os nomes que a sala no estilo do YouTube acrescenta (docs/31), as duas sombras sem classe. */
+const NOVOS_YT = [
+  "--room-panel",
+  "--room-panel-border",
+  "--room-menu",
+  "--room-menu-shadow",
+  "--room-fg-disabled",
+  "--room-press-inverse",
+  "--room-active-hover",
+  "--room-thread-line",
+  "--room-thread-line-hover",
+  "--room-field-line",
+  "--room-field-line-draft",
+  "--room-cta-bg",
+  "--room-cta-hover",
+  "--room-cta-fg",
+  "--room-cta-press",
+  "--room-link",
+  "--room-snackbar-bg",
+  "--room-snackbar-fg",
+  "--room-snackbar-action",
+  "--room-snackbar-action-hover",
+  "--room-snackbar-ring",
+  "--room-snackbar-shadow",
+  "--room-tooltip-bg",
+  "--room-tooltip-fg",
+  "--room-accent-hover"
+];
+
+test("a sala no estilo do YouTube: cada nome novo nos dois blocos, na mesma ordem, e cada cor nova com a classe", () => {
+  assert.equal(NOVOS_YT.length, 25);
+  const tema = css.slice(css.indexOf("@theme inline {"));
+  const corpo = tema.slice(0, tema.indexOf("}"));
+  for (const nome of NOVOS_YT) {
+    assert.ok(ESCURO.has(nome) && CLARO.has(nome), `${nome} nos dois blocos`);
+    const classe = `--color-${nome.slice(2)}: var(${nome});`;
+    if (nome.endsWith("-shadow")) {
+      assert.ok(!corpo.includes(classe), `${nome}: a sombra fica sem classe`);
+    } else {
+      assert.ok(corpo.includes(classe), `${nome}: a classe no @theme inline`);
+    }
+  }
+  const ordem = (mapa) => [...mapa.keys()].filter((nome) => NOVOS_YT.includes(nome));
+  assert.deepEqual(ordem(ESCURO), NOVOS_YT, "a ordem do escuro");
+  assert.deepEqual(ordem(CLARO), NOVOS_YT, "a ordem do claro");
+  // A sombra do aviso leva o anel de 1 px do proprio tema (o anel sobre o video, docs/31).
+  for (const mapa of [ESCURO, CLARO]) {
+    assert.match(mapa.get("--room-snackbar-shadow"), /^0 0 0 1px var\(--room-snackbar-ring\),/);
+  }
+  // O texto forte e o principal tem o mesmo valor; o nome fica porque o codigo de hoje o usa.
+  assert.equal(ESCURO.get("--room-fg-strong"), ESCURO.get("--room-fg"));
+  assert.equal(CLARO.get("--room-fg-strong"), CLARO.get("--room-fg"));
 });
 
 test("a ponte do console ([data-console-root]) redefine cada token do admin, e cada valor e um --room-* que existe", () => {
@@ -117,6 +172,14 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "live-notices.tsx",
     "live-room.tsx",
     "webinar-room.tsx",
+    "room-pill.tsx",
+    "room-chip-bar.tsx",
+    "room-comment.tsx",
+    "room-comment-field.tsx",
+    "room-menu.tsx",
+    "room-tooltip.tsx",
+    "room-snackbar.tsx",
+    "room-rail.tsx",
     ...readdirSync(path.join(root, ROOM, "assistant")).map((nome) => `assistant/${nome}`)
   ].map((nome) => `${ROOM}/${nome}`);
   arquivos.push("src/components/member/webinars/translation/room-translation-bar.tsx", `${ROOM}/vertical/vertical-model.ts`);
@@ -179,8 +242,10 @@ test("data-room-theme fica so no dialogo da sala e na raiz do console (com data-
 });
 
 /* --------------------------------------------------------------------------------------------------------------
- * O contraste dos dois temas (docs/12: texto pequeno com 4,5:1). Os valores saem dos dois blocos de globals.css;
- * um fundo translucido e composto sobre o painel (--room-surface, ele mesmo sobre --room-bg), como a sala desenha.
+ * O contraste dos dois temas (docs/12: texto pequeno com 4,5:1; traco, icone e estado com 3:1). Os valores saem dos
+ * dois blocos de globals.css. Primeiro os fundos que o console e o vertical continuam usando (--room-surface e os
+ * outros que ficam): um fundo translucido e composto sobre o painel (--room-surface, ele mesmo sobre --room-bg). Depois
+ * os pares da sala no estilo do YouTube (PARES_YT, docs/31), cada fundo uma pilha de camadas de baixo para cima.
  * -------------------------------------------------------------------------------------------------------------- */
 
 function rgba(valor) {
@@ -270,6 +335,114 @@ for (const [nomeDoTema, tema] of [
   });
 }
 
+/**
+ * Os pares da sala no estilo do YouTube (docs/31; os numeros esperados de cada tema na especificacao do redesign).
+ * A frente e o fundo sao nomes de token sem o prefixo --room- ou uma cor literal (#ffffff, o texto do Sair; #000000, o
+ * palco do motor, preto nos dois temas). O fundo e uma pilha: a primeira camada e opaca, e cada uma das seguintes e
+ * composta sobre a de baixo. O --room-panel e o --room-menu sao opacos.
+ */
+const PARES_YT = [
+  // Texto, 4,5:1.
+  ...[
+    ["bg"],
+    ["panel"],
+    ["menu"],
+    ["bg", "control"],
+    ["bg", "control-hover"],
+    ["bg", "control-hover", "press-overlay"],
+    ["panel", "control"],
+    ["panel", "control-hover"],
+    ["menu", "control"],
+    ["menu", "control-hover"],
+    ["menu", "control", "poll-bar"]
+  ].map((fundo) => ({ rotulo: "texto", frente: "fg", fundo, minimo: 4.5 })),
+  ...[["bg"], ["panel"], ["menu"], ["panel", "control"]].map((fundo) => ({ rotulo: "texto", frente: "fg-subtle", fundo, minimo: 4.5 })),
+  ...[["active-bg"], ["active-hover"], ["active-hover", "press-inverse"]].map((fundo) => ({ rotulo: "texto", frente: "active-fg", fundo, minimo: 4.5 })),
+  ...[["cta-bg"], ["cta-hover"], ["cta-hover", "cta-press"]].map((fundo) => ({ rotulo: "texto", frente: "cta-fg", fundo, minimo: 4.5 })),
+  ...[["accent"], ["accent-hover"], ["accent-hover", "press-inverse"]].map((fundo) => ({ rotulo: "texto", frente: "#ffffff", fundo, minimo: 4.5 })),
+  { rotulo: "texto", frente: "link", fundo: ["panel"], minimo: 4.5 },
+  { rotulo: "texto", frente: "snackbar-fg", fundo: ["snackbar-bg"], minimo: 4.5 },
+  { rotulo: "texto", frente: "snackbar-action", fundo: ["snackbar-bg"], minimo: 4.5 },
+  { rotulo: "texto", frente: "snackbar-action", fundo: ["snackbar-action-hover"], minimo: 4.5 },
+  ...[["bg", "tooltip-bg"], ["panel", "tooltip-bg"], ["#000000", "tooltip-bg"]].map((fundo) => ({ rotulo: "texto", frente: "tooltip-fg", fundo, minimo: 4.5 })),
+  { rotulo: "texto", frente: "warn-fg", fundo: ["panel"], minimo: 4.5 },
+  { rotulo: "texto", frente: "success-fg", fundo: ["panel"], minimo: 4.5 },
+  // Traco e estado, 3:1: a linha do campo com rascunho e com foco, o anel de foco, os icones, o ativo contra o tonal, o
+  // ponto vermelho e o contorno da opcao escolhida da enquete.
+  { rotulo: "traco", frente: "field-line-draft", fundo: ["panel"], minimo: 3 },
+  { rotulo: "traco", frente: "fg", fundo: ["panel"], minimo: 3 },
+  ...[["bg"], ["panel"], ["menu"]].map((fundo) => ({ rotulo: "traco", frente: "focus", fundo, minimo: 3 })),
+  ...[["bg"], ["panel", "control"]].map((fundo) => ({ rotulo: "traco", frente: "icon", fundo, minimo: 3 })),
+  ...[["panel", "control"], ["bg", "control"]].map((fundo) => ({ rotulo: "estado", frente: "active-bg", fundo, minimo: 3 })),
+  ...[["panel"], ["bg"]].map((fundo) => ({ rotulo: "estado", frente: "accent", fundo, minimo: 3 })),
+  { rotulo: "traco", frente: "fg", fundo: ["menu", "control"], minimo: 3 }
+];
+
+/** Uma camada (token sem o prefixo, ou cor literal) do tema. */
+function camada(tema, nome) {
+  if (nome.startsWith("#")) {
+    return rgba(nome);
+  }
+  const valor = tema.get(`--room-${nome}`);
+  assert.ok(valor, `--room-${nome} existe`);
+  return rgba(valor);
+}
+
+/** A pilha de camadas resolvida numa cor opaca, de baixo para cima. */
+function pilha(tema, camadas) {
+  const [base, ...resto] = camadas.map((nome) => camada(tema, nome));
+  assert.equal(base[3], 1, `a primeira camada e opaca: ${camadas.join(" + ")}`);
+  return resto.reduce((abaixo, cima) => sobre(cima, abaixo), base);
+}
+
+/** O contraste de um par no tema (a frente com alfa e composta sobre o proprio fundo). */
+function contrasteDoPar(tema, par) {
+  const fundo = pilha(tema, par.fundo);
+  const frente = camada(tema, par.frente);
+  return contraste(frente[3] === 1 ? frente : sobre(frente, fundo), fundo);
+}
+
+/** Os pares abaixo do minimo, com o valor. */
+function falhasYt(tema, pares = PARES_YT) {
+  return pares
+    .map((par) => ({ par, valor: contrasteDoPar(tema, par) }))
+    .filter(({ par, valor }) => valor < par.minimo)
+    .map(({ par, valor }) => `${par.rotulo} ${par.frente} sobre ${par.fundo.join(" + ")}: ${valor.toFixed(2)} (minimo ${par.minimo})`);
+}
+
+for (const [nomeDoTema, tema] of [
+  ["escuro", ESCURO],
+  ["claro", CLARO]
+]) {
+  test(`tema ${nomeDoTema}: os pares da sala no estilo do YouTube com o minimo de cada um (texto 4,5:1; traco e estado 3:1)`, () => {
+    assert.ok(PARES_YT.length >= 45, `pares: ${PARES_YT.length}`);
+    assert.deepEqual(falhasYt(tema), [], `pares abaixo do minimo no tema ${nomeDoTema}`);
+  });
+}
+
+test("os dois pares claros guardados pelo nome: o secundario sobre o tonal do painel e o Enviar pressionado", () => {
+  const secundario = { rotulo: "texto", frente: "fg-subtle", fundo: ["panel", "control"], minimo: 4.5 };
+  const pressionado = { rotulo: "texto", frente: "cta-fg", fundo: ["cta-hover", "cta-press"], minimo: 4.5 };
+  const naLista = (alvo) => PARES_YT.some((par) => par.frente === alvo.frente && par.fundo.join("+") === alvo.fundo.join("+"));
+  assert.ok(naLista(secundario), "o par do secundario esta na lista");
+  assert.ok(naLista(pressionado), "o par do Enviar pressionado esta na lista");
+
+  // O secundario do claro (#606060) sobre o tonal do painel: 5,6:1, mais que o cinza de antes (#63636b, 5,3:1).
+  const agora = contrasteDoPar(CLARO, secundario);
+  const antes = contrasteDoPar(new Map([...CLARO, ["--room-fg-subtle", "#63636b"]]), secundario);
+  assert.equal(CLARO.get("--room-fg-subtle"), "#606060");
+  assert.ok(agora >= 4.5 && agora > antes, `agora ${agora.toFixed(2)}, antes ${antes.toFixed(2)}`);
+
+  // O pressionado do azul escurece nos dois temas. Com o clarear branco do YouTube no claro (rgba(255,255,255,0.2)), o
+  // texto do Enviar pressionado cai a 3,95:1, e a guarda reprova o par.
+  assert.equal(CLARO.get("--room-cta-press"), "rgba(0, 0, 0, 0.2)");
+  assert.ok(contrasteDoPar(CLARO, pressionado) >= 4.5);
+  const comBranco = new Map([...CLARO, ["--room-cta-press", "rgba(255, 255, 255, 0.2)"]]);
+  const falhas = falhasYt(comBranco);
+  assert.equal(falhas.length, 1, `so o Enviar pressionado cai: ${falhas.join(" | ")}`);
+  assert.match(falhas[0], /^texto cta-fg sobre cta-hover \+ cta-press: 3\.95 \(minimo 4\.5\)$/);
+});
+
 test("o acento (#e50914) so no Sair: o RoomButton danger e so o Sair das confirmacoes (docs/31 V2-11)", () => {
   const ROOM = "src/components/member/webinars/room";
   const usos = [];
@@ -295,7 +468,7 @@ test("o acento (#e50914) so no Sair: o RoomButton danger e so o Sair das confirm
   }
 });
 
-test("o RoomButton cheio no acento (accent) e so o Sair: o do cabecalho e o da barra (docs/31 V2-6 e V2-11)", () => {
+test("o vermelho cheio (o RoomButton accent e a RoomPill red) e so o Sair: o do cabecalho e o da barra (docs/31 V2-6 e V2-11)", () => {
   const ROOM = "src/components/member/webinars/room";
   const usos = [];
   const visitar = (pasta) => {
@@ -305,16 +478,22 @@ test("o RoomButton cheio no acento (accent) e so o Sair: o do cabecalho e o da b
         visitar(caminho);
       } else if (/\.tsx?$/.test(nome)) {
         const codigo = semComentarios(ler(caminho));
+        // O botao de texto: o rotulo e o filho. A abertura da tag pode ter "=>" (onClick={() => ...}): so o ">"
+        // sozinho a fecha.
         for (const [, filhos] of codigo.matchAll(/<RoomButton\b(?:=>|[^>])*?\bvariant="accent"(?:=>|[^>])*>([\s\S]*?)<\/RoomButton>/g)) {
-          usos.push({ caminho, filhos: filhos.trim() });
+          usos.push({ caminho, rotulo: filhos.trim() });
+        }
+        // A pilula do YouTube (room-pill.tsx): o rotulo e o label, na tag que fecha sozinha ou com filhos.
+        for (const [tag] of codigo.matchAll(/<RoomPill\b(?:=>|[^>])*?\btone="red"(?:=>|[^>])*>/g)) {
+          usos.push({ caminho, rotulo: tag.match(/\blabel=(\{[^}]*\})/)?.[1] ?? "(sem label)" });
         }
         assert.doesNotMatch(codigo, /roomButtonClassName\(\{[^}]*variant:\s*"accent"/, `${caminho}: accent so no RoomButton do Sair`);
       }
     }
   };
   visitar(ROOM);
-  assert.deepEqual(usos.map((uso) => uso.caminho).sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
+  assert.deepEqual([...new Set(usos.map((uso) => uso.caminho))].sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
   for (const uso of usos) {
-    assert.match(uso.filhos, /\{copy\.sair\}/, `${uso.caminho}: ${uso.filhos}`);
+    assert.match(uso.rotulo, /\{copy\.sair\}/, `${uso.caminho}: ${uso.rotulo}`);
   }
 });

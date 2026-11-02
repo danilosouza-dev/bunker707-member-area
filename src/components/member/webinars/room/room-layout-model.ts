@@ -1,10 +1,12 @@
-// O desenho da sala do aluno V2 (docs/31 §1), a parte pura: os trechos da linha da data no cabecalho do computador
-// (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do iframe tira da direita do video, onde os
-// selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
+// O desenho da sala do aluno V2 (docs/31 §1), a parte pura: a linha de baixo do titulo no cabecalho do computador, com
+// o numero de agora e os trechos da data (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do
+// iframe tira da direita do video, onde os selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da
+// barra da gravada e do Replay (V2-6),
 // quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
 // contador de mensagens novas do balao, o primeiro foco, quando as pilulas do chat ficam no palco (V2-7 e V2-8) e quando
-// o card da Oferta tira do canto as pilulas e o selo do Assistente. Sem "use client" e com imports relativos:
-// tests/webinarios-sala-v2-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
+// o card da Oferta tira do canto as pilulas e o selo do Assistente; na sala no estilo do YouTube, as teclas dos menus
+// (RoomMenu), o tempo da dica (RoomTooltip) e o toque no trilho a direita (RoomRail). Sem "use client" e com imports relativos: os testes de modelo
+// (tests/webinarios-sala-v2-modelo.test.mjs, tests/webinarios-sala-yt-modelo.test.mjs) carregam direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
 // parametro.
 
 import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
@@ -44,18 +46,43 @@ export function roomDateLine(input: { durationMinutes: number | null; kind: Room
   return parts;
 }
 
+/** "128 assistindo agora" (o numero inteiro, nunca negativo); nulo sem contador (o Replay e a sessao encerrada passam nulo). */
+function presentPhrase(presentNow: number | null): string | null {
+  if (typeof presentNow !== "number" || !Number.isFinite(presentNow)) {
+    return null;
+  }
+  return WEBINAR_COPY.salaV2.cabecalho.assistindoAgora(Math.max(0, Math.round(presentNow)));
+}
+
+/** A linha de baixo do titulo no computador: o numero de agora (ou nulo) e os trechos da data que vem depois dele. */
+export type RoomMetaLine = { present: string | null; rest: string[] };
+
 /**
- * A linha do cabecalho abaixo de lg (V2-18), em trechos: "com Danilo Souza" e "128 assistindo". Sem contador (o Replay
+ * A linha de baixo do titulo no computador, no estilo do YouTube: o numero primeiro ("128 assistindo agora", que a tela
+ * marca para o e2e) e depois os trechos da data (roomDateLine), que a tela junta com " · ". Sem contador (o Replay e a
+ * sessao encerrada), a linha comeca na data; no Replay, sem data e sem hora, na duracao.
+ */
+export function roomMetaLine(input: { durationMinutes: number | null; kind: RoomKind; presentNow: number | null; presenterName: string | null; scheduledAt: string | null }): RoomMetaLine {
+  return {
+    present: presentPhrase(input.presentNow),
+    rest: roomDateLine({ durationMinutes: input.durationMinutes, kind: input.kind, presenterName: input.presenterName, scheduledAt: input.scheduledAt })
+  };
+}
+
+/**
+ * A linha do cabecalho abaixo de lg (V2-18), em trechos, com o numero primeiro como no computador: "128 assistindo
+ * agora" e "com Danilo Souza" (antes o numero vinha por ultimo e era o primeiro a ser cortado). Sem contador (o Replay
  * e a sessao encerrada passam nulo), so o apresentador; sem apresentador, so o contador.
  */
 export function roomMobileLine(input: { presenterName: string | null; presentNow: number | null }): string[] {
   const parts: string[] = [];
+  const present = presentPhrase(input.presentNow);
+  if (present) {
+    parts.push(present);
+  }
   const presenter = input.presenterName?.trim();
   if (presenter) {
     parts.push(WEBINAR_COPY.salaV2.cabecalho.com(presenter));
-  }
-  if (typeof input.presentNow === "number" && Number.isFinite(input.presentNow)) {
-    parts.push(WEBINAR_COPY.sala.assistindo(Math.max(0, Math.round(input.presentNow))));
   }
   return parts;
 }
@@ -146,6 +173,19 @@ export function panelToggleStep(input: { panelShown: boolean; settingsTakeover: 
     return { closeSettings: true, panelOpen: true };
   }
   return { closeSettings: false, panelOpen: !input.panelShown };
+}
+
+/**
+ * O toque num item do trilho a direita (a sala no estilo do YouTube, a partir de lg): com o painel fechado ou aberto
+ * noutra aba, abre o painel naquela aba; no item da aba que esta na tela, fecha o painel, so quando ele pode fechar
+ * (`closable`: com a barra na tela, roomPanelShown). Sem a barra (a sessao encerrada) o painel nunca fecha, e o toque
+ * no item aberto nao faz nada. A sala calcula o `panelShown` (roomPanelShown) e passa a aba de agora.
+ */
+export function railStep(input: { closable: boolean; item: RoomPanelTab; panelShown: boolean; tab: RoomPanelTab }): { panelOpen: boolean; tab: RoomPanelTab } {
+  if (!input.panelShown || input.tab !== input.item) {
+    return { panelOpen: true, tab: input.item };
+  }
+  return { panelOpen: !input.closable, tab: input.tab };
 }
 
 /**
@@ -261,8 +301,9 @@ export function panelUnreadCount(mark: PanelUnreadMark, messages: readonly RoomM
 }
 
 /**
- * Onde o foco entra quando a sala abre (o [data-room-first-focus]): na aba Chat com o painel na tela; com ele fechado,
- * no balao da barra, que o reabre (a aba escondida nao recebe foco).
+ * Onde o foco entra quando a sala abre abaixo de lg (o [data-room-first-focus]): na aba Chat com o painel na tela; com
+ * ele fechado, no balao da barra, que o reabre (a aba escondida nao recebe foco). A partir de lg o Chat do trilho a
+ * direita tem sempre a marca, e a sala foca o primeiro na tela (roomFocusTarget): la a aba e o balao estao escondidos.
  */
 export function firstFocusTarget(input: { panelShown: boolean }): "panel-toggle" | "tab" {
   return input.panelShown ? "tab" : "panel-toggle";
@@ -329,4 +370,98 @@ export function soundCoverShown(input: { barShown: boolean; kind: "replay" | "si
  */
 export function stageAssistantShown(input: { assistantEnabled: boolean; bottomBadges: boolean; offerShown: boolean }): boolean {
   return input.bottomBadges && input.assistantEnabled && !input.offerShown;
+}
+
+/** O que uma tecla faz dentro de um menu aberto da sala (RoomMenu): andar ate uma opcao, fechar ou nada. */
+export type MenuKeyStep = { kind: "close"; refocus: boolean } | { index: number; kind: "move" } | { kind: "none" };
+
+/**
+ * As teclas dentro de um menu aberto da sala (o RoomMenu; o menu da WAI-ARIA): as setas andam com volta (da ultima
+ * opcao para a primeira e ao contrario), Home e End vao as pontas, o Esc fecha e devolve o foco ao botao que abriu
+ * (`refocus`), e o Tab fecha sem mexer no foco, que segue para o proximo controle. `index` e a opcao com o foco (fora
+ * da lista, a seta para baixo vai a primeira e a para cima a ultima); sem opcoes, so o Esc e o Tab fazem alguma coisa.
+ */
+export function menuKeyStep(input: { count: number; index: number; key: string }): MenuKeyStep {
+  const { count, key } = input;
+  if (key === "Escape") {
+    return { kind: "close", refocus: true };
+  }
+  if (key === "Tab") {
+    return { kind: "close", refocus: false };
+  }
+  if (count <= 0) {
+    return { kind: "none" };
+  }
+  const index = input.index >= 0 && input.index < count ? input.index : -1;
+  switch (key) {
+    case "ArrowDown":
+      return { index: index < 0 ? 0 : (index + 1) % count, kind: "move" };
+    case "ArrowUp":
+      return { index: index < 0 ? count - 1 : (index - 1 + count) % count, kind: "move" };
+    case "Home":
+      return { index: 0, kind: "move" };
+    case "End":
+      return { index: count - 1, kind: "move" };
+    default:
+      return { kind: "none" };
+  }
+}
+
+/** As teclas que abrem um menu com o foco no botao dele: a seta para baixo, o Enter e o Espaco. */
+export function menuOpenKey(key: string): boolean {
+  return key === "ArrowDown" || key === "Enter" || key === " ";
+}
+
+/** A dica da sala (RoomTooltip): escondida, esperando para aparecer, na tela, ou saindo (ainda na tela). */
+export type TooltipState = "hidden" | "hiding" | "shown" | "showing";
+
+/**
+ * O que chega a dica: o ponteiro entra ou sai (`toTooltip`: ele foi para a propria dica; `focused`: o foco do teclado
+ * continua no botao), o foco do teclado entra ou sai (`hovered`: o ponteiro continua em cima), o Esc, e o fim da espera
+ * (`elapsed`, depois do tempo que tooltipStep devolveu).
+ */
+export type TooltipEvent =
+  | { hovered?: boolean; kind: "blur" }
+  | { kind: "elapsed" }
+  | { kind: "enter" }
+  | { kind: "escape" }
+  | { kind: "focus" }
+  | { focused?: boolean; kind: "leave"; toTooltip?: boolean };
+
+/** Os tempos da dica do YouTube: aparece 150 ms depois do ponteiro ou do foco e some em 75 ms. */
+export const TOOLTIP_DELAYS_MS = { hide: 75, show: 150 } as const;
+
+/**
+ * Um passo da dica da sala (o tooltip do YouTube; WCAG 1.4.13). O ponteiro ou o foco do teclado a chamam, e ela so
+ * aparece depois de 150 ms (`showing` ainda nao esta na tela); so quando os dois saem ela fica 75 ms saindo, e quem
+ * volta nesse tempo a mantem: o ponteiro que passa e sai nao a esconde com o foco do teclado ainda no botao, nem o foco
+ * que sai com o ponteiro ainda em cima (WCAG 1.4.13, persistente). O ponteiro que vai do botao para a propria dica
+ * tambem nao a esconde (da para ler um texto comprido).
+ * O Esc a esconde na hora e so para ali (`stopped`: o Esc nao chega a sala, que perguntaria se quer sair) quando ela
+ * estava na tela. `delayMs` e a espera ate o proximo `elapsed` (null: nenhuma).
+ */
+export function tooltipStep(state: TooltipState, event: TooltipEvent): { delayMs: number | null; state: TooltipState; stopped: boolean } {
+  const next = tooltipNext(state, event);
+  const delayMs = next === "showing" ? TOOLTIP_DELAYS_MS.show : next === "hiding" ? TOOLTIP_DELAYS_MS.hide : null;
+  const stopped = event.kind === "escape" && (state === "shown" || state === "hiding");
+  return { delayMs, state: next, stopped };
+}
+
+function tooltipNext(state: TooltipState, event: TooltipEvent): TooltipState {
+  switch (event.kind) {
+    case "enter":
+    case "focus":
+      return state === "hidden" ? "showing" : state === "hiding" ? "shown" : state;
+    case "leave":
+    case "blur":
+      // O outro (o foco no botao, o ponteiro em cima ou sobre a propria dica) ainda a segura.
+      if (event.kind === "leave" ? event.toTooltip || event.focused : event.hovered) {
+        return state;
+      }
+      return state === "showing" ? "hidden" : state === "shown" ? "hiding" : state;
+    case "escape":
+      return "hidden";
+    case "elapsed":
+      return state === "showing" ? "shown" : state === "hiding" ? "hidden" : state;
+  }
 }

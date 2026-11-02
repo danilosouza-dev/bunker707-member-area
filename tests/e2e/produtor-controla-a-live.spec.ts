@@ -164,6 +164,11 @@ test.describe("produtor", () => {
     expect(montagem.configOverwrite.toolbarButtons).toEqual(barraDoMotor(browserName));
     expect(montagem.configOverwrite).not.toHaveProperty("toolbarConfig");
     expect(montagem.configOverwrite.disableShortcuts).toBe(true);
+    // O console continua com os avisos do motor (ninguem la ouve o notificationTriggered, V2-A59) e quem apresenta
+    // continua ouvindo a mao.
+    expect(montagem.configOverwrite).not.toHaveProperty("notifications");
+    expect(montagem.configOverwrite).not.toHaveProperty("conferenceInfo");
+    expect(montagem.configOverwrite).not.toHaveProperty("disabledSounds");
     expect(montagem.configOverwrite.participantMenuButtonsWithNotifyClick).toEqual([
       { key: "ask-unmute", preventExecution: true },
       { key: "kick", preventExecution: true }
@@ -819,5 +824,64 @@ test.describe("produtor", () => {
     expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
     await expect(pessoas.locator(`[data-live-participant="${QUEM_SAIU}"]`)).toHaveCount(0);
     await expect(pessoas.locator(`[data-live-participant="${APRESENTADOR}"]`)).toHaveCount(0);
+  });
+
+  test("microfone sozinho (docs/31 caminho A): com a politica no banco, o preparo nao manda a moderacao de audio; 5 alunos com o microfone aberto fazem o vigia ligar a moderacao e silenciar o quinto; o botao da aba Pessoas grava e, ao desligar, fecha o microfone da turma; Tentar de novo com a politica ligada nao fecha o microfone", async ({ page }) => {
+    const db = createLocalAdminClient();
+    const lido = unwrap(await db.from("webinars").select("room_settings").eq("id", id).single(), "Lendo o room_settings da live de teste") as { room_settings: Record<string, unknown> | null };
+    const original = lido.room_settings ?? {};
+    const politicaNoBanco = async () =>
+      (unwrap(await createLocalAdminClient().from("webinars").select("room_settings").eq("id", id).single(), "Lendo o microfone sozinho") as { room_settings: { selfUnmute?: unknown } }).room_settings.selfUnmute;
+    const audioLigado = (args: unknown[]) => JSON.stringify(args) === JSON.stringify([true, "audio"]);
+    unwrap(await db.from("webinars").update({ room_settings: { ...original, selfUnmute: true } }).eq("id", id), "Ligando o microfone sozinho");
+
+    try {
+      const sala = await abrirConsole(page);
+      await entrarComoApresentador(sala);
+      expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
+      expect((await sala.comandos()).filter((item) => item.comando === "toggleModeration" && audioLigado(item.args))).toEqual([]);
+
+      // Cinco alunos abrem o microfone, nessa ordem: com o quarto a sala lota, e o quinto e silenciado.
+      const alunos = ["mic-aluno-0011", "mic-aluno-0012", "mic-aluno-0013", "mic-aluno-0014", "mic-aluno-0015"];
+      for (const aluno of alunos) {
+        await sala.disparar("participantJoined", { displayName: aluno, id: aluno });
+        await sala.disparar("participantRoleChanged", { id: aluno, role: "participant" });
+      }
+      let antes = (await sala.comandos()).length;
+      for (const aluno of alunos) {
+        await sala.disparar("participantMuted", { id: aluno, isMuted: false, mediaType: "audio" });
+      }
+      await expect
+        .poll(async () => (await sala.comandos()).slice(antes).some((item) => item.comando === "toggleModeration" && audioLigado(item.args)), { timeout: 15_000 })
+        .toBe(true);
+      expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([alunos[4], "audio"]);
+      expect((await sala.comandos()).filter((item) => item.comando === "muteEveryone" || item.comando === "rejectParticipant")).toEqual([]);
+
+      // O botao da aba Pessoas mostra a politica gravada; desligar grava no banco e fecha o microfone da turma.
+      const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
+      const botao = pessoas.getByRole("button", { exact: true, name: consoleAoVivo.microfoneSozinho });
+      await expect(botao).toHaveAttribute("aria-pressed", "true");
+      antes = (await sala.comandos()).length;
+      await botao.click();
+      await expect.poll(politicaNoBanco).toBe(false);
+      await expect(botao).toHaveAttribute("aria-pressed", "false");
+      await expect
+        .poll(async () => (await sala.comandos()).slice(antes).some((item) => item.comando === "toggleModeration" && audioLigado(item.args)))
+        .toBe(true);
+      expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([alunos[0], "audio"]);
+
+      // Liga de novo e o iframe cai: o preparo do iframe novo nao fecha o microfone da turma.
+      await botao.click();
+      await expect.poll(politicaNoBanco).toBe(true);
+      await expect(botao).toHaveAttribute("aria-pressed", "true");
+      await sala.disparar("errorOccurred", { error: { isFatal: true, name: "conference.connectionError.otherError" } });
+      await page.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.tentarDeNovo }).click();
+      await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+      await entrarComoApresentador(sala);
+      expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
+      expect((await sala.comandos()).filter((item) => item.comando === "toggleModeration" && audioLigado(item.args))).toEqual([]);
+    } finally {
+      unwrap(await createLocalAdminClient().from("webinars").update({ room_settings: original }).eq("id", id), "Voltando o room_settings da live de teste");
+    }
   });
 });
