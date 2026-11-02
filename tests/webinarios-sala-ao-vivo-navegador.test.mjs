@@ -674,8 +674,8 @@ test("a camera: o aceite vai no proximo sinal da camera mesmo depois do prazo; o
   assert.deepEqual(model.consentForVideoSignal(true, "errorOccurred", { error: { name: "gum.permission_denied" } }), { consented: false, pending: false }, "a permissao negada encerra o aceite");
   assert.deepEqual(model.consentForVideoSignal(true, "errorOccurred", { error: { name: "conference.connectionError" } }), { consented: false, pending: true });
   assert.equal(model.cameraAnswerDelayMs("prompt"), 30_000, "com o pedido do navegador aberto, 30 s");
-  assert.equal(model.cameraAnswerDelayMs("granted"), 5_000);
-  assert.equal(model.cameraAnswerDelayMs(null), 5_000);
+  assert.equal(model.cameraAnswerDelayMs("granted"), 10_000, "a camera tem 10 s para abrir");
+  assert.equal(model.cameraAnswerDelayMs(null), 10_000);
 });
 
 test("No palco: quem ja moderava quando o aluno entrou vem do getRoomsInfo (o participantJoined nao traz o papel); o proprio aluno e alunos ficam fora", () => {
