@@ -29,6 +29,7 @@ import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
+import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
@@ -501,6 +502,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const barShown = !vertical && !unavailable && phase !== "ended";
   const reactionsShown = reactionsOpen && barShown;
   const panelShown = roomPanelShown({ barShown, panelOpen, settingsTakeover: false });
+  // O aviso da sala (RoomSnackbar), sem motor: so os sucessos do chat e das Perguntas, no desenho normal.
+  const snackbar = useRoomSnackbarController();
   // O Chat na tela: o painel na tela e na aba Chat (com ele fechado ou noutra aba, o contador conta).
   const chatShown = panelShown && tab === "chat";
   // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela (os ids e o offset do
@@ -714,7 +717,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind, presentNow: momentBadge.showCount ? shownCount : null, presenterName, scheduledAt: session.session.scheduledAt });
   const mobileLine = roomMobileLine({ presenterName, presentNow: momentBadge.showCount ? shownCount : null }).join(" · ");
   // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
-  const stageVars = { "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px` } as CSSProperties;
+  // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
+  const stageVars = {
+    "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px`,
+    ...(snackbar.stageOffsetPx > 0 ? { "--room-snackbar-offset": `${snackbar.stageOffsetPx}px` } : {})
+  } as CSSProperties;
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
   const writable = (live || phase === "replay") && !unavailable;
   // Os selos de baixo (quem apresenta e o Assistente) so com o video no ar e sem a barra de controles da Bunny: no
@@ -821,7 +828,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || phase === "ended"} />
     );
 
-  return (
+  // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
+  const page = (
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
@@ -832,6 +840,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
+      // A altura do campo do painel (abaixo de lg, o aviso fica acima dele).
+      style={snackbar.composerPx > 0 ? ({ "--room-composer-h": `${snackbar.composerPx}px` } as CSSProperties) : undefined}
     >
       {vertical ? (
         <VerticalTopBar
@@ -887,6 +897,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
               <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
             ) : null}
+            {/* O aviso da sala (os sucessos do chat e das Perguntas), so no desenho normal; o vertical nao muda. */}
+            {vertical || unavailable ? null : <RoomSnackbarHost panelShown={panelShown} />}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
               <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />
             </div>
@@ -1035,4 +1047,5 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       ) : null}
     </div>
   );
+  return <RoomSnackbarProvider value={snackbar}>{page}</RoomSnackbarProvider>;
 }

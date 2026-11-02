@@ -19,6 +19,7 @@ import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
 import { RoomPill } from "./room-pill";
+import { useRoomSnackbar } from "./room-snackbar";
 import {
   QUESTIONS_FILTERS,
   QUESTIONS_ORDERS,
@@ -402,6 +403,19 @@ export function RoomQuestionsTab({
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  // No comentario, "Pergunta enviada." vai ao aviso da sala (o erro e a instrucao do aceite continuam embaixo do campo);
+  // a gaveta do vertical segue com a frase. A faixa do campo diz a altura dela, para o aviso ficar acima (abaixo de lg).
+  const snackbar = useRoomSnackbar();
+  const roomSnackbar = look === "comment" ? snackbar : null;
+  const onFieldHeight = useCallback((px: number) => roomSnackbar?.composer("questions", px), [roomSnackbar]);
+  /** O sucesso do envio: no aviso da sala, ou na frase de hoje. */
+  const sent = (text: string) => {
+    if (roomSnackbar) {
+      roomSnackbar.show({ key: "question_sent", text });
+    } else {
+      setStatus(text);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -454,10 +468,10 @@ export function RoomQuestionsTab({
       const { attendantsOnline, enabled: assistantOn, replyAll } = assistant.state;
       if (assistantOn && (replyAll || attendantsOnline === 0)) {
         setWaiting(answer.question.id);
-        setStatus(copy.perguntaEnviada);
+        sent(copy.perguntaEnviada);
       } else {
         setWaiting(null);
-        setStatus(attendantsOnline === 0 && !assistantOn ? `${copy.perguntaEnviada} ${WEBINAR_COPY.assistente.aluno.equipeRespondeDepois}` : copy.perguntaEnviada);
+        sent(attendantsOnline === 0 && !assistantOn ? `${copy.perguntaEnviada} ${WEBINAR_COPY.assistente.aluno.equipeRespondeDepois}` : copy.perguntaEnviada);
       }
       setConsentOpen(false);
       if (choice) {
@@ -602,6 +616,7 @@ export function RoomQuestionsTab({
             }}
             onChange={setDraft}
             onExpandedChange={setExpanded}
+            onHeightChange={onFieldHeight}
             onSubmit={() => submit()}
             placeholder={copy.fazerPergunta}
             status={

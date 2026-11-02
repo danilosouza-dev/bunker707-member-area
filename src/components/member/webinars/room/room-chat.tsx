@@ -1,7 +1,7 @@
 "use client";
 
 import { EllipsisVertical, MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -29,6 +29,7 @@ import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
 import { RoomPill } from "./room-pill";
+import { useRoomSnackbar, useRoomSnackbarListInset } from "./room-snackbar";
 import { RoomTooltip } from "./room-tooltip";
 import { RoomBadge, RoomButton, RoomIconButton, type RoomBadgeTone } from "./room-ui";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
@@ -531,6 +532,12 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   const stickRef = useRef(true);
   const state = composerState({ chatMode, consented, nowMs, phase, slowUntilMs });
   const hint = composerHint(state, phase);
+  // No comentario, o sucesso vai ao aviso da sala (o erro continua na frase embaixo do campo); a gaveta do vertical
+  // segue com a frase. A faixa do campo diz a altura dela, para o aviso ficar acima (abaixo de lg).
+  const snackbar = useRoomSnackbar();
+  const roomSnackbar = look === "comment" ? snackbar : null;
+  const listInset = useRoomSnackbarListInset();
+  const onFieldHeight = useCallback((px: number) => roomSnackbar?.composer("chat", px), [roomSnackbar]);
 
   // Mensagens novas: anuncia "N mensagens novas" em rajada; a lista rola so quando o aluno esta no fim.
   useEffect(() => {
@@ -635,7 +642,12 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     setMenuOpen(false);
     try {
       const removed = await onRemoveMine();
-      setStatus(removed > 0 ? WEBINAR_COPY.privacidade.feito(removed) : WEBINAR_COPY.privacidade.nadaParaRemover);
+      const done = removed > 0 ? WEBINAR_COPY.privacidade.feito(removed) : WEBINAR_COPY.privacidade.nadaParaRemover;
+      if (roomSnackbar) {
+        roomSnackbar.show({ key: "chat_removed", text: done });
+      } else {
+        setStatus(done);
+      }
     } catch (failure) {
       setStatus(failure instanceof Error ? failure.message : copy.erroEnviar);
     }
@@ -744,6 +756,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
           onScroll={handleScroll}
           ref={listRef}
           role="log"
+          // O respiro do aviso acima do campo da folha aberta (abaixo de lg): a mensagem mais nova fica acima dele.
+          style={listInset > 0 ? { paddingBottom: listInset } : undefined}
         >
           {messages.length === 0 ? <li className="mt-2 text-center text-sm leading-5 text-room-fg-subtle">{error ?? copy.semMensagens}</li> : null}
           {messages.map((message) => {
@@ -791,6 +805,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
             }}
             onChange={setDraft}
             onExpandedChange={setExpanded}
+            onHeightChange={onFieldHeight}
             onSubmit={() => submit()}
             placeholder={hint || copy.escreva}
             status={

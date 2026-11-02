@@ -23,10 +23,10 @@ import { RoomViewMenu } from "./room-view-menu";
 // rolagem propria numa coluna curta). Cada botao tem 44 px a 375 px e o nome acessivel e exatamente a frase (o e2e
 // clica por ela); o estado vai em aria-pressed / aria-expanded (com a troca daquele aparelho no meio, o toque em
 // Microfone / Câmera espera ela acabar: o botao continua com o estado REAL, porque o microfone e a camera seguem no ar
-// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e a linha de aviso diz o
-// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe,
-// microfone silenciado, camera bloqueada, o navegador que recusou o microfone ou a camera) saem numa linha com
-// aria-live. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
+// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e o aviso da sala diz o
+// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe, microfone silenciado,
+// camera bloqueada, o navegador que recusou o microfone ou a camera) saem no aviso da sala (RoomSnackbarHost, no palco),
+// nao mais numa linha embaixo da barra. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
 // ativo em branco com texto preto no escuro, quase preto com texto branco no claro).
 // Redesign V2, F4 (docs/31 V2-6 e V2-18): a barra de tres zonas (room-bar.tsx, a ordem por liveBarItems): o Sair a
 // esquerda, a partir de lg; no centro os circulos de 48 px sem rotulo (44 px abaixo de lg), com o Som antes da Tela
@@ -56,8 +56,6 @@ export type LiveControlsProps = {
   micAllowed: boolean;
   /** O toque em Microfone esperando a troca de microfone acabar (`audioOn` continua com o estado real). */
   micWaiting?: boolean;
-  /** O aviso passageiro da barra. */
-  notice: string | null;
   onCamera: () => void;
   onFullscreen: () => void;
   onHand: () => void;
@@ -208,10 +206,6 @@ export function LiveControls(props: LiveControlsProps) {
           {props.settings}
         </div>
       ) : null}
-
-      <p aria-live="polite" className={cn("shrink-0 px-3 text-center text-xs font-semibold text-room-warn-fg", props.notice ? "pb-2" : "sr-only")} data-testid="live-notice" role="status">
-        {props.notice ?? ""}
-      </p>
     </div>
   );
 }

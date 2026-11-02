@@ -36,6 +36,7 @@ import {
   joinFailureOf,
   joinTimeoutOutcome,
   LIVE_ROOM_RULES,
+  liveNoticeSnack,
   lowerHandRequested,
   micAskCheck,
   micAskOnSignal,
@@ -45,7 +46,6 @@ import {
   onStageParticipantOf,
   queueRoomEvent,
   reconnectStep,
-  recordingSignalOf,
   remoteParticipantIds,
   requeueBatch,
   roomEventsOutcome,
@@ -66,6 +66,7 @@ import {
   type SwitchGate
 } from "./live-room-model";
 import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from "./room-api";
+import type { RoomSnack } from "./room-snackbar-model";
 import { useRoomView } from "./use-room-prefs";
 
 // A sala ao vivo do aluno por dentro (docs/30 §1.3, §5.1, §5.4, §6.3, §8.5 e §9; fase 3), fora do desenho:
@@ -291,6 +292,10 @@ export type LiveRoomController = {
   jitsiStatus: JitsiStatus;
   reply: JoinTokenReply | null;
   retryNow: () => void;
+  /** O aviso saiu da tela (o tempo acabou, outro tomou o lugar ou a acao foi usada): o mesmo aviso pode voltar. */
+  clearNotice: (key: string) => void;
+  /** O aviso da barra para o aviso da sala (RoomSnackbar), ou nulo; o "microfone liberado" e o dialogo, nunca aviso. */
+  notice: RoomSnack | null;
   showNotice: (notice: LiveNotice) => void;
   signals: LiveSignalState;
   soundOn: boolean;
@@ -546,15 +551,13 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       const consented = consent.consented;
       pushEvent(toRoomEvent(name, payload, { extra: consented ? { consented: true } : undefined, nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
       if (name === "endpointTextMessageReceived") {
-        // "Abaixar a mão" do console: com a mao levantada (lowerHandRequested).
-        if (lowerHandRequested(signalsRef.current, payload) && commandRef.current("toggleRaiseHand")) {
-          setSignals(toggleHandLocally);
+        // "Abaixar a mão" do console (com a mao levantada, lowerHandRequested): so com o toggleRaiseHand aceito pelo
+        // iframe a barra abaixa e o aviso "A equipe abaixou a sua mão." entra. A gravacao no navegador do Apresentador
+        // (so de quem modera): o selo Gravando na hora. Os dois pelo applyLiveSignal.
+        if (lowerHandRequested(signalsRef.current, payload) && !commandRef.current("toggleRaiseHand")) {
+          return;
         }
-        // A gravacao no navegador do Apresentador (so de quem modera): o selo Gravando na hora.
-        const recordingOn = recordingSignalOf(signalsRef.current, payload);
-        if (recordingOn !== null) {
-          setSignals((previous) => ({ ...previous, recording: recordingOn }));
-        }
+        setSignals((previous) => applyLiveSignal(previous, { name, ownId: ownIdRef.current, payload }));
         return;
       }
       setSignals((previous) => applyLiveSignal(switchKind ? expectDeviceSwitch(previous, switchKind) : previous, { name, ownId: ownIdRef.current, payload }));
@@ -827,15 +830,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     };
   }, [inRoom, refuse, reply, sessionId, webinarId]);
 
-  // Os avisos passageiros da barra somem sozinhos.
-  const notice = signals.notice;
-  useEffect(() => {
-    if (!notice || notice === "mic_released") {
-      return;
-    }
-    const id = window.setTimeout(() => setSignals((previous) => (previous.notice === notice ? { ...previous, notice: null } : previous)), LIVE_ROOM_RULES.noticeMs);
-    return () => window.clearTimeout(id);
-  }, [notice]);
+  // O aviso da barra no aviso da sala (RoomSnackbar): o tempo, a pausa e um de cada vez sao de quem mostra, que avisa
+  // pelo clearNotice quando ele sai da tela (o mesmo aviso pode entao voltar). O notificationTriggered do motor ja chega
+  // aqui pelo applyLiveSignal (engineNoticeOf: so o microfone ligado sem som).
+  const notice = useMemo(() => liveNoticeSnack(signals.notice), [signals.notice]);
+  const clearNotice = useCallback((key: string) => setSignals((previous) => (previous.notice === key ? { ...previous, notice: null } : previous)), []);
 
   const enter = useCallback(() => {
     leavingRef.current = false;
@@ -1084,8 +1083,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     devices,
     enter,
     entry,
+    clearNotice,
     hangUp,
     jitsiStatus: jitsi.status,
+    notice,
     pendingToggle,
     reply,
     retryNow,

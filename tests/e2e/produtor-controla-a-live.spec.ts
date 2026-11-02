@@ -164,6 +164,9 @@ test.describe("produtor", () => {
     expect(montagem.configOverwrite.toolbarButtons).toEqual(barraDoMotor(browserName));
     expect(montagem.configOverwrite).not.toHaveProperty("toolbarConfig");
     expect(montagem.configOverwrite.disableShortcuts).toBe(true);
+    // Nenhum aviso do motor no console (os que importam viram o nosso); quem apresenta continua ouvindo a mao.
+    expect(montagem.configOverwrite.notifications).toEqual([]);
+    expect(montagem.configOverwrite).not.toHaveProperty("disabledSounds");
     expect(montagem.configOverwrite.participantMenuButtonsWithNotifyClick).toEqual([
       { key: "ask-unmute", preventExecution: true },
       { key: "kick", preventExecution: true }

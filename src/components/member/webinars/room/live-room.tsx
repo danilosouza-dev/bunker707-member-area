@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { announceLiveRoomMedia } from "@/lib/lesson-media-signal";
@@ -24,7 +24,6 @@ import {
   liveBarShown,
   liveComposerNotice,
   liveElapsedLabel,
-  liveNoticePhrase,
   liveOnAirLabel,
   livePhaseOf,
   liveRoomScreen,
@@ -34,6 +33,7 @@ import {
   micFocusLost,
   overlayMessages,
   pendingTogglePhrase,
+  pendingToggleSnack,
   prefersCinemaMode,
   presenterBadgeFor,
   screenBlocksRoom,
@@ -73,6 +73,8 @@ import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
 import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
+import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
+import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION } from "./room-snackbar-model";
 import { RoomStageBadges } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
 import { ROOM_VIEW_MENU_ID } from "./room-view-menu";
@@ -339,6 +341,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     settingsOpen,
     webinarId
   });
+  // O aviso da sala (RoomSnackbar): o aviso da barra que sai da tela e solto no hook, para poder voltar.
+  const snackbar = useRoomSnackbarController({ onGone: room.clearNotice });
   const screen = liveRoomScreen({ ...screenInput, inRoom: entryInRoom(room.entry) });
   const blocked = screenBlocksRoom(screen);
   // A nossa barra (e com ela o painel Configurações e as reacoes) so existe com a sala no ar: a live encerrada, removido
@@ -564,8 +568,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const countdown = screen === "waiting" ? formatCountdown(scheduledMs, nowMs + skewMs) : "";
   const composerNotice = liveComposerNotice({ ban, nowMs, status });
   const recording = isRecording(room.signals, live);
-  // O aviso passageiro; sem ele, o toque em Microfone / Câmera que espera a troca daquele aparelho (o que vai acontecer).
-  const notice = liveNoticePhrase(room.signals.notice === "mic_released" ? null : room.signals.notice) ?? pendingTogglePhrase(room.pendingToggle, room.signals);
+  // O aviso da barra no aviso da sala; sem ele, o toque em Microfone / Câmera que espera a troca daquele aparelho (o que
+  // vai acontecer), enquanto durar.
+  const pendingPhrase = pendingTogglePhrase(room.pendingToggle, room.signals);
+  const roomNotice = room.notice;
+  const notice = useMemo(() => roomNotice ?? pendingToggleSnack(pendingPhrase), [pendingPhrase, roomNotice]);
   const stage = stageNames(room.signals.participants, presenterName);
   const startedAt = live.startedAt ?? session.session.startedAt;
   // "{n} assistindo agora" some com a live encerrada (no cabecalho do computador e na linha do celular).
@@ -590,6 +597,45 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.
   const rememberLeaveOpener = useRoomConfirmFocus(rootRef, confirmLeave);
+
+  // O aviso da barra (ou o da troca de aparelho) entra no aviso da sala; quando ele sai daqui (o microfone abriu depois
+  // do aviso do prazo, a troca acabou), sai de la tambem.
+  const snackbarApi = snackbar.api;
+  const shownNoticeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (notice) {
+      shownNoticeRef.current = notice.key;
+      snackbarApi.show(notice);
+      return;
+    }
+    if (shownNoticeRef.current) {
+      snackbarApi.clear(shownNoticeRef.current);
+      shownNoticeRef.current = null;
+    }
+  }, [notice, snackbarApi]);
+
+  // A gravacao que comecou com o aluno ja na sala (o motor, o "Gravar no navegador" ou a sessao relida): "Esta live
+  // começou a ser gravada." no aviso, no lugar do aviso do motor. Ja ligada na entrada, so o selo Gravando.
+  const showRoomNotice = room.showNotice;
+  const recordingSeenRef = useRef({ joined, on: recording });
+  useEffect(() => {
+    const before = recordingSeenRef.current;
+    recordingSeenRef.current = { joined, on: recording };
+    if (shouldAnnounceRecording(before.on, recording, before.joined && joined)) {
+      showRoomNotice("recording_started");
+    }
+  }, [joined, recording, showRoomNotice]);
+
+  /** A acao do aviso: Configurações abre o painel (o foco vai ao botao dele, porque o aviso sai). */
+  function onSnackAction(key: string) {
+    if (key !== SNACK_SETTINGS_ACTION) {
+      return;
+    }
+    panelButton(LIVE_SETTINGS_ID)?.focus();
+    if (!settingsOpen) {
+      toggleSettings();
+    }
+  }
 
   /** Sair e Esc: com a live no ar (ou dentro do iframe), pergunta antes (docs/30 §1.7). */
   function askToLeave() {
@@ -838,7 +884,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown, settingsTakeover });
   const skeleton = roomSkeleton("normal", skeletonState);
 
-  return (
+  // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
+  const page = (
     <div
       aria-label={session.webinar.title}
       aria-modal="true"
@@ -850,6 +897,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       onKeyDown={handleKeyDown}
       ref={rootRef}
       role="dialog"
+      // A altura do campo do painel (abaixo de lg, o aviso fica acima dele).
+      style={snackbar.composerPx > 0 ? ({ "--room-composer-h": `${snackbar.composerPx}px` } as CSSProperties) : undefined}
     >
       <RoomHeader
         leaveInBar={barShown}
@@ -878,7 +927,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
-          <div className={skeleton.stageBox} data-room-slot="stage-box">
+          <div
+            className={skeleton.stageBox}
+            data-room-slot="stage-box"
+            // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
+            style={snackbar.stageOffsetPx > 0 ? ({ "--room-snackbar-offset": `${snackbar.stageOffsetPx}px` } as CSSProperties) : undefined}
+          >
             <LiveStage
               className={cn(
                 "w-full max-lg:landscape:aspect-auto max-lg:landscape:min-h-0 max-lg:landscape:flex-1 lg:aspect-auto lg:min-h-0 lg:flex-1",
@@ -911,6 +965,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
               {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
               {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} /> : null}
+              {/* O aviso da sala: no palco a partir de lg; abaixo, preso ao pe da tela, nunca sobre o video em pe. */}
+              {blocked ? null : <RoomSnackbarHost onAction={onSnackAction} panelShown={panelShown} />}
               {/* No celular a Tela cheia (ou o Modo cinema) fica no canto do palco; a partir de lg, na barra. */}
               {barShown ? <LiveStageFullscreen cinemaMode={cinemaPreferred} cinemaOn={cinemaOn} fullscreenOn={fullscreenOn} onFullscreen={toggleFullscreen} /> : null}
               {/* A enquete no meio do palco (V2-10), por cima do video, das capas e das pilulas. */}
@@ -944,7 +1000,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               joined={joined}
               micAllowed={room.signals.micAllowed}
               micWaiting={room.pendingToggle.audioInput}
-              notice={notice}
               onCamera={onCamera}
               onFullscreen={toggleFullscreen}
               onHand={room.toggleHand}
@@ -1090,4 +1145,5 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       {room.signals.micPrompt && !blocked ? <LiveMicDialog onCancel={room.declineMic} onConfirm={room.acceptMic} /> : null}
     </div>
   );
+  return <RoomSnackbarProvider value={snackbar}>{page}</RoomSnackbarProvider>;
 }

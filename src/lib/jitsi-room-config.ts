@@ -227,6 +227,15 @@ export function liveConfigOverwrite(
     [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
+    // Nenhum aviso do motor na tela, para nenhum papel e nas duas superficies (docs/31, a sala no estilo do YouTube): os
+    // que importam viram o aviso da pagina (RoomSnackbar) pelo notificationTriggered, que o motor manda mesmo com o
+    // aviso escondido (notifications/actions.ts:143-145 da tag fixada; configWhitelist.ts:190). Sai tambem o selo do
+    // motor no topo (o "✋ 1" das maos e o de gravacao: conferenceInfo, configWhitelist.ts:80), que o palco ja tem nos
+    // selos da pagina, e, para o aluno e a Equipe, o som da mao de cada aluno para a turma (disabledSounds,
+    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia.
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    ...(audience ? { disabledSounds: ["RAISE_HAND_SOUND"] } : {}),
+    notifications: [],
     // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
     // pagina (docs/31 V2-4).
     hideDominantSpeakerBadge: true,
@@ -340,7 +349,11 @@ export const JITSI_LISTENED_EVENTS = [
   // Quem esta no video grande mudou (o destaque da equipe, o orador, a tela compartilhada): o selo "{nome} ·
   // Apresentador" do palco so fica com alguem da equipe ali (docs/31 V2-4). O motor manda sem dados (o id fica no IFrame
   // API); nao vai ao servidor (toRoomEvent devolve nulo).
-  "largeVideoChanged"
+  "largeVideoChanged",
+  // Um aviso que o motor teria mostrado (o configOverwrite manda notifications: [], e o motor avisa mesmo assim): so as
+  // chaves da lista fechada viram o aviso da pagina (engineNoticeOf, room-snackbar-model.ts), nunca o texto do motor.
+  // Dispara pouco, e nao vai ao servidor (toRoomEvent devolve nulo). Os sinais so do console ficam em CONSOLE_EXTRA_EVENTS.
+  "notificationTriggered"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -438,8 +451,9 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "tileViewChanged":
     case "filmstripDisplayChanged":
     case "largeVideoChanged":
+    case "notificationTriggered":
       // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
-      // video, a coluna de miniaturas e quem esta no video grande): o servidor nao aceita estes nomes.
+      // video, a coluna de miniaturas, quem esta no video grande e o aviso do motor): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

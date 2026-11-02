@@ -97,3 +97,98 @@ test("snackbarPlacement: no palco a partir de lg; em pe, nunca sobre o video (ac
   assert.equal(lugar(false, true, true), "side", "o painel ao lado: no pe da coluna dele");
   assert.equal(lugar(false, true, false), "stage", "o painel fechado: no palco");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * A sala liga o aviso (Y14): o motor sem avisos, os do motor que viram nossos e a gravacao que comecou
+ * ---------------------------------------------------------------------------------------------- */
+
+const embed = await import("../src/lib/jitsi-room-config.ts");
+const live = await import("../src/components/member/webinars/room/live-room-model.ts");
+const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
+const AJUSTES = { allowStudentCamera: true, screenFps: 30, stage: 1080 };
+
+test("o motor sem avisos: notifications vazio e o selo do topo vazio para os 4 papeis nas 2 superficies; o som da mao sai so para o aluno e a Equipe", () => {
+  for (const surface of ["room", "console"]) {
+    for (const role of ["student", "team", "host", "co_host"]) {
+      const config = embed.liveConfigOverwrite(role, AJUSTES, null, surface);
+      assert.deepEqual(config.notifications, [], `${surface}, ${role}: nenhum aviso do motor`);
+      assert.deepEqual(config.conferenceInfo, { alwaysVisible: [], autoHide: [] }, `${surface}, ${role}: sem o "✋ 1" nem o selo de gravacao do motor`);
+      const plateia = role === "student" || role === "team";
+      assert.deepEqual(config.disabledSounds, plateia ? ["RAISE_HAND_SOUND"] : undefined, `${surface}, ${role}: o som da mao`);
+    }
+  }
+  // A sala ouve o aviso do motor, que nunca vai ao servidor, e o console continua com a lista da sala mais a dele.
+  assert.ok(embed.JITSI_LISTENED_EVENTS.includes("notificationTriggered"));
+  assert.ok(!embed.CONSOLE_EXTRA_EVENTS.includes("notificationTriggered"));
+  assert.equal(embed.toRoomEvent("notificationTriggered", { title: "toolbar.noAudioSignalTitle" }, { nowIso: "2026-11-05T23:00:00.000Z", ownId: "eu" }), null);
+});
+
+test("engineNoticeOf: so a lista fechada vira aviso nosso, com a nossa frase; o microfone sem som so com ele ligado, e a tela so no console", () => {
+  const sala = { audioOn: true, surface: "room" };
+  const semSom = model.engineNoticeOf({ title: "toolbar.noAudioSignalTitle" }, sala);
+  assert.deepEqual(semSom, { action: { key: model.SNACK_SETTINGS_ACTION, label: "Configurações" }, key: "mic_no_signal", text: "Não está chegando som do seu microfone." });
+  assert.equal(semSom.action.label, WEBINAR_COPY.aoVivo.configuracoes, "o nome do botao da barra");
+  assert.deepEqual(model.engineNoticeOf({ description: "toolbar.noAudioSignalDesc", title: "toolbar.noAudioSignalTitle" }, sala), semSom, "a descricao do motor nao muda a frase");
+  assert.equal(model.engineNoticeOf({ title: "toolbar.noAudioSignalTitle" }, { audioOn: false, surface: "room" }), null, "com o microfone desligado, nada");
+  // Os avisos do motor que somem sem substituto, o texto do motor e o payload estranho.
+  for (const payload of [
+    { title: "notify.raisedHand" },
+    { description: "notify.raisedHand", title: "notify.somebody" },
+    { title: "notify.nextToSpeak" },
+    { title: "dialog.thankYou" },
+    { title: "notify.kickParticipant" },
+    { title: 42 },
+    { description: { key: "x" }, title: "toolbar.noAudioSignalTitle" },
+    { name: "Fulano", title: "toolbar.noAudioSignalTitle" },
+    { text: "Olá", title: "toolbar.noAudioSignalTitle" },
+    {},
+    null,
+    "toolbar.noAudioSignalTitle"
+  ]) {
+    assert.equal(model.engineNoticeOf(payload, sala), null, JSON.stringify(payload));
+  }
+  // A tela: so no console, cada descricao com a frase dela; na sala, nada.
+  const negada = { description: "dialog.screenSharingPermissionDeniedError", title: "dialog.screenSharingFailedTitle" };
+  const falhou = { description: "dialog.screenSharingFailed", title: "dialog.screenSharingFailedTitle" };
+  assert.equal(model.engineNoticeOf(negada, sala), null);
+  assert.equal(model.engineNoticeOf(falhou, sala), null);
+  const noConsole = { audioOn: false, surface: "console" };
+  assert.deepEqual(model.engineNoticeOf(negada, noConsole), { key: "screen_denied", text: WEBINAR_COPY.salaV2.avisos.telaNegada });
+  assert.deepEqual(model.engineNoticeOf(falhou, noConsole), { key: "screen_failed", text: WEBINAR_COPY.salaV2.avisos.telaFalhou });
+  assert.equal(model.engineNoticeOf({ title: "dialog.screenSharingFailedTitle" }, noConsole), null, "sem a descricao conhecida, nada");
+});
+
+test("shouldAnnounceRecording: so a gravacao que liga com o aluno ja na sala avisa; ja ligada na entrada, desligar ou fora da sala, nada", () => {
+  assert.equal(model.shouldAnnounceRecording(false, true, true), true, "ligou depois da entrada");
+  assert.equal(model.shouldAnnounceRecording(true, true, true), false, "ja ligada na entrada");
+  assert.equal(model.shouldAnnounceRecording(true, false, true), false, "desligou");
+  assert.equal(model.shouldAnnounceRecording(false, false, true), false);
+  assert.equal(model.shouldAnnounceRecording(false, true, false), false, "fora da sala (ou na virada da entrada)");
+  assert.equal(live.liveNoticePhrase("recording_started"), "Esta live começou a ser gravada.");
+});
+
+test("applyLiveSignal: o Abaixar a mão do console vira 'A equipe abaixou a sua mão.'; o aviso do motor sem som vira o nosso, com Configurações", () => {
+  const texto = JSON.stringify({ type: embed.LOWER_HAND_SIGNAL });
+  const pedido = { eventData: { name: "endpoint-text-message", text: texto }, senderInfo: { id: "host-1" } };
+  const levantada = { ...live.INITIAL_LIVE_SIGNALS, handRaised: true };
+  const abaixada = live.applyLiveSignal(levantada, { name: "endpointTextMessageReceived", ownId: "eu", payload: pedido });
+  assert.equal(abaixada.handRaised, false);
+  assert.equal(abaixada.notice, "hand_lowered");
+  assert.deepEqual(live.liveNoticeSnack(abaixada.notice), { key: "hand_lowered", text: "A equipe abaixou a sua mão." });
+  // Com a mao ja abaixada, nada muda (nem aviso).
+  assert.equal(live.applyLiveSignal(live.INITIAL_LIVE_SIGNALS, { name: "endpointTextMessageReceived", ownId: "eu", payload: pedido }), live.INITIAL_LIVE_SIGNALS);
+  // A gravacao no navegador de quem modera continua ligando o selo, sem aviso de mao.
+  const moderada = { ...live.INITIAL_LIVE_SIGNALS, participants: { moderators: ["host-1"], names: {} } };
+  const gravando = { ...pedido, eventData: { name: "endpoint-text-message", text: JSON.stringify({ on: true, type: embed.RECORDING_SIGNAL }) } };
+  const comSelo = live.applyLiveSignal(moderada, { name: "endpointTextMessageReceived", ownId: "eu", payload: gravando });
+  assert.equal(comSelo.recording, true);
+  assert.equal(comSelo.notice, null);
+  // O motor avisou o microfone sem som: so com o microfone ligado, e o aviso tem a acao Configurações.
+  const ligado = { ...live.INITIAL_LIVE_SIGNALS, audioOn: true };
+  const semSom = live.applyLiveSignal(ligado, { name: "notificationTriggered", ownId: "eu", payload: { title: "toolbar.noAudioSignalTitle" } });
+  assert.equal(semSom.notice, "mic_no_signal");
+  assert.deepEqual(live.liveNoticeSnack(semSom.notice), model.engineSnack("mic_no_signal"));
+  assert.equal(live.liveNoticeSnack(semSom.notice).action.label, "Configurações");
+  assert.equal(live.applyLiveSignal(live.INITIAL_LIVE_SIGNALS, { name: "notificationTriggered", ownId: "eu", payload: { title: "toolbar.noAudioSignalTitle" } }), live.INITIAL_LIVE_SIGNALS);
+  assert.equal(live.applyLiveSignal(ligado, { name: "notificationTriggered", ownId: "eu", payload: { title: "notify.raisedHand" } }), ligado);
+});

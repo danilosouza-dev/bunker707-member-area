@@ -4,6 +4,18 @@
 
 export const SALA_V2_COPY = {
   /**
+   * Os avisos da sala no estilo do YouTube (o aviso invertido, RoomSnackbar): os do motor somem, e so estes, mais os
+   * passageiros da barra de antes e os sucessos do chat e das Perguntas, aparecem no aviso. A acao do microfone sem som
+   * e o "Configurações" da barra (WEBINAR_COPY.aoVivo.configuracoes), que abre o painel. As duas da tela sao do console.
+   */
+  avisos: {
+    gravacaoComecou: "Esta live começou a ser gravada.",
+    maoAbaixada: "A equipe abaixou a sua mão.",
+    semSomDoMicrofone: "Não está chegando som do seu microfone.",
+    telaFalhou: "Não deu para compartilhar a tela. Tente de novo.",
+    telaNegada: "O navegador não deixou compartilhar a tela. Libere nas permissões do site."
+  },
+  /**
    * O cabecalho (V2-3, no estilo do YouTube): a linha de baixo do titulo no computador comeca pelo numero ("128
    * assistindo agora · Quinta, 30 de outubro · 20:00 · 60 min · com Danilo Souza") e a do celular tambem ("128
    * assistindo agora · com Danilo Souza"); os trechos se juntam com " · ", e o milhar sai como no Brasil ("1.234

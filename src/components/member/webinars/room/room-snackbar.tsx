@@ -1,8 +1,30 @@
 "use client";
 
-import { useEffect, useRef, type FocusEvent as ReactFocusEvent } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FocusEvent as ReactFocusEvent,
+  type ReactNode
+} from "react";
+import { cn } from "@/lib/utils";
+import { LIVE_ROOM_RULES } from "./live-room-model";
 import { RoomPill } from "./room-pill";
-import { SNACKBAR_HOLD_FREE, snackbarHoldStep, type RoomSnack, type SnackbarHold, type SnackbarPlacement } from "./room-snackbar-model";
+import {
+  nextSnackbar,
+  SNACKBAR_HOLD_FREE,
+  snackbarHoldStep,
+  snackbarPlacement,
+  snackbarRemainingMs,
+  type RoomSnack,
+  type SnackbarHold,
+  type SnackbarPlacement
+} from "./room-snackbar-model";
 
 // O aviso da sala no estilo do YouTube (docs/31, a sala no estilo do YouTube; o snackbar do YouTube): a caixa
 // invertida (clara no tema escuro, escura no claro) de raio 8, de 288 a 448 px a partir de lg (abaixo, a largura que o
@@ -101,6 +123,242 @@ export function RoomSnackbar({ className, onAction, onPauseChange, placement, sn
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Quem mostra o aviso: o estado (um de cada vez, os 6 s com a pausa), o contexto e o lugar na tela
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que as pecas de dentro da sala usam: mostrar e tirar um aviso, e dizer a altura do campo (abaixo de lg). */
+export type RoomSnackbarApi = {
+  /** Tira o aviso desse tipo, se e ele que esta na tela. */
+  clear: (key: string) => void;
+  /** A altura da faixa do campo de cada lugar (o chat, as Perguntas); 0 quando ela sai. O aviso fica acima da maior. */
+  composer: (source: string, px: number) => void;
+  /** Mostra o aviso: o novo troca o atual na hora, e o mesmo tipo so reinicia o tempo (nextSnackbar). */
+  show: (snack: RoomSnack) => void;
+};
+
+/** O estado do aviso da sala, de quem desenha a sala (o palco e a raiz do dialogo leem as medidas daqui). */
+export type RoomSnackbarController = {
+  api: RoomSnackbarApi;
+  /** A maior faixa de campo na tela (o --room-composer-h da raiz do dialogo). */
+  composerPx: number;
+  /** O respiro da lista do chat (a altura do aviso e os vaos), so com o aviso acima do campo da folha aberta. */
+  listInsetPx: number;
+  /** A caixa do aviso mudou (a altura, 0 sem aviso, e o lugar): quem mostra mede. */
+  onBox: (box: { height: number; placement: SnackbarPlacement }) => void;
+  onPauseChange: (paused: boolean) => void;
+  snack: RoomSnack | null;
+  /** Quanto as pilulas do palco sobem (o --room-snackbar-offset do palco), so com o aviso no palco. */
+  stageOffsetPx: number;
+};
+
+/** O vao entre o aviso e o que fica acima dele (as pilulas do palco, a ultima mensagem do chat). */
+const SNACKBAR_GAP_PX = 8;
+
+/**
+ * O estado do aviso da sala: um de cada vez (nextSnackbar), os 6 s de LIVE_ROOM_RULES.noticeMs contados so fora da pausa
+ * (o ponteiro em cima ou o foco dentro, snackbarRemainingMs) e o aviso "enquanto durar" (persistent) sem tempo.
+ * `onGone` ouve cada aviso que sai da tela (o tempo acabou, outro tomou o lugar, a acao ou o clear): a sala ao vivo
+ * solta o aviso da barra para ele poder voltar.
+ */
+export function useRoomSnackbarController(input: { durationMs?: number; onGone?: (key: string) => void } = {}): RoomSnackbarController {
+  const durationMs = input.durationMs ?? LIVE_ROOM_RULES.noticeMs;
+  const [shown, setShown] = useState<{ snack: RoomSnack | null; tick: number }>({ snack: null, tick: 0 });
+  const [paused, setPaused] = useState(false);
+  const [box, setBox] = useState<{ height: number; placement: SnackbarPlacement }>({ height: 0, placement: "stage" });
+  const [composerPx, setComposerPx] = useState(0);
+  const snackRef = useRef<RoomSnack | null>(null);
+  const tickRef = useRef(0);
+  // O tempo ja contado do aviso de agora (o `tick` de quando ele entrou ou recomecou), fora das pausas.
+  const elapsedRef = useRef({ ms: 0, tick: 0 });
+  const composersRef = useRef<Record<string, number>>({});
+  const onGoneRef = useRef(input.onGone);
+  useEffect(() => {
+    onGoneRef.current = input.onGone;
+  });
+
+  const api = useMemo<RoomSnackbarApi>(() => {
+    function put(snack: RoomSnack | null) {
+      tickRef.current += 1;
+      elapsedRef.current = { ms: 0, tick: tickRef.current };
+      snackRef.current = snack;
+      setShown({ snack, tick: tickRef.current });
+    }
+    return {
+      clear(key) {
+        if (snackRef.current?.key !== key) {
+          return;
+        }
+        put(null);
+        onGoneRef.current?.(key);
+      },
+      composer(source, px) {
+        const height = Math.max(0, Math.round(px));
+        if (composersRef.current[source] === height) {
+          return;
+        }
+        composersRef.current = { ...composersRef.current, [source]: height };
+        setComposerPx(Math.max(0, ...Object.values(composersRef.current)));
+      },
+      show(incoming) {
+        const current = snackRef.current;
+        const step = nextSnackbar(current, incoming);
+        put(step.snack);
+        if (current && !step.restart) {
+          onGoneRef.current?.(current.key);
+        }
+      }
+    };
+  }, []);
+
+  const { snack, tick } = shown;
+  useEffect(() => {
+    if (!snack || snack.persistent) {
+      return;
+    }
+    const counted = elapsedRef.current.tick === tick ? elapsedRef.current.ms : 0;
+    const remaining = snackbarRemainingMs({ durationMs, elapsedMs: counted, paused });
+    if (remaining === null) {
+      return;
+    }
+    const startedAt = Date.now();
+    const id = window.setTimeout(() => api.clear(snack.key), remaining);
+    return () => {
+      window.clearTimeout(id);
+      // A pausa (ou o mesmo aviso que sai) guarda o que ja contou; o aviso que entrou ou recomecou ja zerou o tempo.
+      if (elapsedRef.current.tick === tick) {
+        elapsedRef.current = { ms: elapsedRef.current.ms + (Date.now() - startedAt), tick };
+      }
+    };
+  }, [api, durationMs, paused, snack, tick]);
+
+  const onBox = useCallback((next: { height: number; placement: SnackbarPlacement }) => {
+    setBox((previous) => (previous.height === next.height && previous.placement === next.placement ? previous : next));
+  }, []);
+
+  const visible = snack !== null && box.height > 0;
+  const stageOffsetPx = visible && box.placement === "stage" ? box.height + SNACKBAR_GAP_PX : 0;
+  // A lista termina no campo, e o aviso fica 8 px acima dele: a ultima mensagem fica 8 px acima do aviso.
+  const listInsetPx = visible && box.placement === "sheet" ? box.height + SNACKBAR_GAP_PX * 2 : 0;
+  return useMemo(
+    () => ({ api, composerPx, listInsetPx, onBox, onPauseChange: setPaused, snack, stageOffsetPx }),
+    [api, composerPx, listInsetPx, onBox, snack, stageOffsetPx]
+  );
+}
+
+const RoomSnackbarApiContext = createContext<RoomSnackbarApi | null>(null);
+const RoomSnackbarStateContext = createContext<RoomSnackbarController | null>(null);
+
+/** O aviso da sala para as pecas de dentro (o chat, as Perguntas, quem mostra). `value` vem de useRoomSnackbarController. */
+export function RoomSnackbarProvider({ children, value }: { children: ReactNode; value: RoomSnackbarController }) {
+  return (
+    <RoomSnackbarApiContext.Provider value={value.api}>
+      <RoomSnackbarStateContext.Provider value={value}>{children}</RoomSnackbarStateContext.Provider>
+    </RoomSnackbarApiContext.Provider>
+  );
+}
+
+/** Mostrar e tirar o aviso da sala; nulo fora dela (a gaveta do vertical e o console seguem com a frase no lugar). */
+export function useRoomSnackbar(): RoomSnackbarApi | null {
+  return useContext(RoomSnackbarApiContext);
+}
+
+/** O respiro da lista do chat com o aviso acima do campo da folha aberta (abaixo de lg); 0 nos outros lugares. */
+export function useRoomSnackbarListInset(): number {
+  return useContext(RoomSnackbarStateContext)?.listInsetPx ?? 0;
+}
+
+const DESKTOP_QUERY = "(min-width: 1024px)";
+const LANDSCAPE_QUERY = "(orientation: landscape)";
+
+function subscribeQuery(query: string, callback: () => void): () => void {
+  try {
+    const media = window.matchMedia(query);
+    media.addEventListener("change", callback);
+    return () => media.removeEventListener("change", callback);
+  } catch {
+    return () => undefined;
+  }
+}
+
+function readQuery(query: string): boolean {
+  try {
+    return window.matchMedia(query).matches;
+  } catch {
+    return false;
+  }
+}
+
+const subscribeDesktop = (callback: () => void) => subscribeQuery(DESKTOP_QUERY, callback);
+const subscribeLandscape = (callback: () => void) => subscribeQuery(LANDSCAPE_QUERY, callback);
+const readDesktop = () => readQuery(DESKTOP_QUERY);
+const readLandscape = () => readQuery(LANDSCAPE_QUERY);
+const serverFalse = () => false;
+
+/**
+ * A classe de cada lugar (snackbarPlacement): no palco, no canto de baixo a esquerda, 8 px acima do selo de quem
+ * apresenta (a partir de lg; no celular deitado com o painel fechado, mais perto da borda); abaixo de lg, em pe, preso ao
+ * pe da tela, acima do campo da folha aberta (--room-composer-h, da raiz do dialogo) ou na folga do safe-area; deitado,
+ * no pe da coluna do painel ao lado. No palco a largura acompanha a frase, ate 448 px.
+ */
+const SNACKBAR_PLACE: Record<SnackbarPlacement, string> = {
+  screen: "fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+8px)] z-[61]",
+  sheet: "fixed inset-x-2 bottom-[calc(var(--room-composer-h,0px)+8px)] z-[61]",
+  side: "fixed right-2 w-[272px] bottom-[calc(var(--room-composer-h,0px)+8px)] z-[61]",
+  stage: "absolute bottom-[42px] left-2 z-30 max-w-[calc(100%-1rem)] lg:bottom-14 lg:left-4 lg:max-w-[calc(100%-2rem)]"
+};
+
+/**
+ * Quem mostra o aviso da sala, dentro do palco: le o estado do RoomSnackbarProvider, escolhe o lugar pela largura, pela
+ * orientacao e pelo painel (snackbarPlacement) e mede a caixa (a altura vai as pilulas do palco e ao respiro do chat).
+ * Fora da caixa nada recebe o toque: o video por baixo continua clicavel. A acao chega a quem desenha a sala (`onAction`)
+ * e o aviso sai.
+ */
+export function RoomSnackbarHost({ onAction, panelShown }: { onAction?: (key: string) => void; panelShown: boolean }) {
+  const controller = useContext(RoomSnackbarStateContext);
+  const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, serverFalse);
+  const landscape = useSyncExternalStore(subscribeLandscape, readLandscape, serverFalse);
+  const placement = snackbarPlacement({ desktop, landscape, panelShown });
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const onBox = controller?.onBox;
+
+  useEffect(() => {
+    const element = boxRef.current;
+    if (!element || !onBox) {
+      return;
+    }
+    const report = () => onBox({ height: element.offsetHeight, placement });
+    report();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onBox, placement]);
+
+  if (!controller) {
+    return null;
+  }
+  const { api, onPauseChange, snack } = controller;
+  return (
+    <div className={cn("pointer-events-none", SNACKBAR_PLACE[placement])} data-room-snackbar-host="" ref={boxRef}>
+      <RoomSnackbar
+        className="[&>*]:pointer-events-auto"
+        onAction={(key) => {
+          onAction?.(key);
+          if (snack) {
+            api.clear(snack.key);
+          }
+        }}
+        onPauseChange={onPauseChange}
+        placement={placement}
+        snack={snack}
+      />
     </div>
   );
 }

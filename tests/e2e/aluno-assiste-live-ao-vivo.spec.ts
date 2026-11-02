@@ -184,6 +184,10 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
     disableReactions: true,
     disableShortcuts: true,
     lobby: { autoKnock: true },
+    // Nenhum aviso do motor na tela (os que importam viram o aviso da sala), nem o selo do motor no topo nem o som da mao.
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    disabledSounds: ["RAISE_HAND_SOUND"],
+    notifications: [],
     readOnlyName: true,
     startWithAudioMuted: true,
     startWithVideoMuted: true
@@ -224,6 +228,28 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   await sala.esperarComando("toggleAudio", { depoisDe: antes });
   const botaoMicrofone = dialogo.getByRole("button", { exact: true, name: aoVivo.microfone });
   await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "true");
+
+  // Os avisos do motor ficam escondidos (notifications: []): o motor avisa o microfone ligado sem som e o aviso nosso
+  // aparece no palco, com Configurações, que abre o painel (o foco vai ao botao da barra e o aviso sai).
+  const aviso = dialogo.getByTestId("live-notice");
+  await sala.disparar("notificationTriggered", { title: "toolbar.noAudioSignalTitle" });
+  await expect(aviso).toHaveText(WEBINAR_COPY.salaV2.avisos.semSomDoMicrofone);
+  await dialogo.locator("[data-room-snackbar]").getByRole("button", { exact: true, name: aoVivo.configuracoes }).click();
+  const painelDeConfiguracoes = dialogo.getByTestId("live-settings");
+  await expect(painelDeConfiguracoes).toBeVisible();
+  await expect(aviso).toHaveCount(0);
+  const botaoConfiguracoes = dialogo.getByRole("button", { exact: true, name: aoVivo.configuracoes });
+  await expect(botaoConfiguracoes).toBeFocused();
+  await botaoConfiguracoes.click();
+  await expect(painelDeConfiguracoes).toHaveCount(0);
+  // O aviso do motor fora da lista (a mao levantada de outra pessoa) nao mostra nada, nem o texto do motor.
+  await sala.disparar("notificationTriggered", { description: "notify.raisedHand", title: "notify.somebody" });
+  await page.evaluate(() => new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto))));
+  expect(await aviso.count()).toBe(0);
+  // A gravacao que liga com a aluna ja na sala: o aviso nosso, no lugar do "Gravando" do motor.
+  await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
+  await expect(aviso).toHaveText(WEBINAR_COPY.salaV2.avisos.gravacaoComecou);
+  await expect(dialogo.locator("[data-lesson-player-stage]").getByTestId("live-recording")).toBeVisible();
 
   // A equipe recolhe o microfone (o "Tirar do palco" do console manda rejectParticipant de audio) com ele ja desligado
   // pela propria aluna, quando nenhum mudo chega: o Microfone sai da barra e o aviso da equipe aparece (V2-19).
@@ -1107,7 +1133,7 @@ test("Configurações: antes da liberacao nada troca de aparelho; a camera so de
   expect((await sala.esperarComando("setVideoInputDevice", { depoisDe: antes })).args).toEqual(["", "cam-usb"]);
   await sala.esperarComando("trocaConcluida", { depoisDe: antes });
   await page.waitForTimeout(300);
-  expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
+  expect((await aviso.allTextContents()).join(" ")).not.toContain(aoVivo.cameraFechadaPelaEquipe);
   const botaoCamera = dialogo.getByRole("button", { exact: true, name: aoVivo.camera });
   await expect(botaoCamera).toHaveAttribute("aria-pressed", "true");
   await expect(camera).toHaveValue("cam-usb");
@@ -1135,7 +1161,7 @@ test("Configurações: antes da liberacao nada troca de aparelho; a camera so de
   await expect(aviso).not.toContainText(aoVivo.trocandoCameraDesliga);
   await page.waitForTimeout(300);
   await expect(botaoCamera).toHaveAttribute("aria-pressed", "false");
-  expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
+  expect((await aviso.allTextContents()).join(" ")).not.toContain(aoVivo.cameraFechadaPelaEquipe);
 
   // O microfone: a liberacao do apresentador e o Falar; antes disso, nada de escolha nem de troca.
   await expect(painel.getByRole("combobox", { exact: true, name: aoVivo.microfone })).toHaveCount(0);
@@ -1166,7 +1192,7 @@ test("Configurações: antes da liberacao nada troca de aparelho; a camera so de
   await microfone.selectOption({ label: "Fone USB" });
   expect((await sala.esperarComando("setAudioInputDevice", { depoisDe: antes })).args).toEqual(["", "mic-usb"]);
   await page.waitForTimeout(300);
-  expect(await aviso.textContent()).not.toContain(aoVivo.microfoneSilenciado);
+  expect((await aviso.allTextContents()).join(" ")).not.toContain(aoVivo.microfoneSilenciado);
   await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "true");
   expect((await sala.esperarComando("setNoiseSuppressionEnabled", { depoisDe: antes })).args).toEqual([{ enabled: true }]);
   const ordemDoMicrofone = (await sala.comandos()).slice(antes).map((item) => item.comando);
@@ -1327,7 +1353,7 @@ test("a volta depois de uma queda, com a camera desligada: trocar a camera e toc
   await expect(botaoCamera).not.toHaveAttribute("aria-busy", "true");
   await page.waitForTimeout(500);
   await expect(botaoCamera).toHaveAttribute("aria-pressed", "true");
-  expect(await aviso.textContent()).not.toContain(aoVivo.cameraFechadaPelaEquipe);
+  expect((await aviso.allTextContents()).join(" ")).not.toContain(aoVivo.cameraFechadaPelaEquipe);
 });
 
 test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nossa barra tem botoes de 44 px; o cabecalho tem o titulo, quem apresenta e quantos assistem; Ao vivo e Gravando no palco; sem Minimizar, o Sair pede a confirmacao e fecha a sala", async ({ page }) => {
@@ -1408,6 +1434,21 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   // assistindo agora · com {apresentador}" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o
   // leitor de tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
+  // O aviso da gravacao que comecou, em pe: preso ao pe da tela, acima do campo da folha aberta, nunca sobre o video; a
+  // ultima mensagem do chat fica acima dele (a lista ganha o respiro da altura do aviso).
+  const avisoDaGravacao = dialogo.getByTestId("live-notice");
+  await expect(avisoDaGravacao).toHaveText(WEBINAR_COPY.salaV2.avisos.gravacaoComecou);
+  const caixaDoAviso = dialogo.locator("[data-room-snackbar] > div");
+  const caixaDoVideo = await dialogo.locator("[data-room-stage]").boundingBox();
+  const topoDoAviso = async () => (await caixaDoAviso.boundingBox())?.y ?? 0;
+  expect(await topoDoAviso(), "o aviso nao cruza o palco").toBeGreaterThanOrEqual((caixaDoVideo?.y ?? 0) + (caixaDoVideo?.height ?? Number.POSITIVE_INFINITY));
+  const ultimaDoChat = dialogo.getByTestId("room-chat").getByRole("log").locator(":scope > li").last();
+  await expect
+    .poll(async () => {
+      const caixa = await ultimaDoChat.boundingBox();
+      return (caixa?.y ?? 0) + (caixa?.height ?? 0) <= (await topoDoAviso()) + 0.5;
+    })
+    .toBe(true);
   const cabecalho = dialogo.locator("header").first();
   const palcoDaSala = dialogo.locator("[data-lesson-player-stage]");
   const gravando = palcoDaSala.getByTestId("live-recording");

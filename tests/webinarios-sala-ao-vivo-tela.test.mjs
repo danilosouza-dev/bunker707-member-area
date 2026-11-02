@@ -24,10 +24,11 @@ const settingsPanel = await import("../src/components/member/webinars/room/live-
 const panelModule = await import("../src/components/member/webinars/room/room-panel.tsx");
 const railModule = await import("../src/components/member/webinars/room/room-rail.tsx");
 const pillsModule = await import("../src/components/member/webinars/room/room-chat-pills.tsx");
+const snackbarModule = await import("../src/components/member/webinars/room/room-snackbar.tsx");
 const barModule = await import("../src/components/member/webinars/room/room-bar.tsx");
 const viewMenuModule = await import("../src/components/member/webinars/room/room-view-menu.tsx");
 const { deviceSettingsFor } = await import("../src/lib/jitsi-device-settings.ts");
-const { LIVE_ROOM_COPY, liveBarItems, overlayMessages } = await import("../src/components/member/webinars/room/live-room-model.ts");
+const { LIVE_ROOM_COPY, liveBarItems, liveNoticeSnack, overlayMessages } = await import("../src/components/member/webinars/room/live-room-model.ts");
 const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
@@ -236,7 +237,6 @@ const barra = (props = {}) =>
     handRaised: false,
     joined: true,
     micAllowed: false,
-    notice: null,
     onCamera: noop,
     onFullscreen: noop,
     onHand: noop,
@@ -408,7 +408,39 @@ test("a barra do aluno (V2-6): o Sair a esquerda, Reagir, Levantar a mão, Câme
   }
   assert.doesNotMatch(aberto, /<select/, "antes do Falar e do aviso da camera, nenhuma escolha de aparelho");
   assert.ok(aberto.includes(WEBINAR_COPY.aoVivo.config.microfoneAguardando));
-  assert.match(barra({ notice: WEBINAR_COPY.aoVivo.cameraFechadaPelaEquipe }), /aria-live="polite"[^>]*role="status">A equipe fechou a sua câmera\.</);
+  // Os avisos passageiros sairam da barra: nenhuma linha de aviso embaixo dela (o aviso da sala fica no palco).
+  assert.doesNotMatch(html, /data-testid="live-notice"|role="status"/, "a barra sem a linha de aviso");
+  assert.doesNotMatch(aberto, /data-testid="live-notice"/);
+});
+
+test("o aviso da sala (RoomSnackbarHost): a regiao polida no palco a partir de lg; com o microfone sem som, a frase no live-notice e Configurações como botao; sem aviso, a regiao vazia", () => {
+  const avisoDe = (snack) => {
+    const value = {
+      api: { clear: noop, composer: noop, show: noop },
+      composerPx: 0,
+      listInsetPx: 0,
+      onBox: noop,
+      onPauseChange: noop,
+      snack,
+      stageOffsetPx: 0
+    };
+    return renderToStaticMarkup(createElement(snackbarModule.RoomSnackbarProvider, { value }, createElement(snackbarModule.RoomSnackbarHost, { panelShown: false })));
+  };
+  const semSom = avisoDe(liveNoticeSnack("mic_no_signal"));
+  // A regiao viva, polida e atomica; o lugar de antes da hidratacao (preso ao pe da tela) muda no navegador.
+  assert.match(semSom, /^<div class="pointer-events-none [^"]*" data-room-snackbar-host=""><div aria-atomic="true" aria-live="polite" class="\[&amp;&gt;\*\]:pointer-events-auto" data-room-snackbar="screen" role="status">/);
+  assert.match(semSom, /data-testid="live-notice">Não está chegando som do seu microfone\.<\/p>/);
+  assert.match(semSom, /<button[^>]*>Configurações<\/button>/, "a acao com o nome exato, como botao");
+  // Os avisos da barra de antes, sem acao.
+  const fechada = avisoDe(liveNoticeSnack("camera_closed"));
+  assert.match(fechada, /data-testid="live-notice">A equipe fechou a sua câmera\.<\/p><\/div><\/div><\/div>$/);
+  assert.doesNotMatch(fechada, /<button/);
+  assert.equal(liveNoticeSnack("mic_released"), null, "o microfone liberado e o dialogo Falar / Agora não, nunca aviso");
+  assert.equal(liveNoticeSnack(null), null);
+  // Sem aviso, a regiao continua montada e vazia (o leitor de tela ouve o que chega).
+  assert.match(avisoDe(null), /role="status"><\/div><\/div>$/);
+  // Fora do provider (o console, a gaveta do vertical), nada.
+  assert.equal(render(snackbarModule.RoomSnackbarHost, { panelShown: false }), "");
 });
 
 test("a Visão do vídeo (V2-16): 'Visão do vídeo: Palco' desligada antes de entrar, so a partir de lg, com o menu de duas opcoes (Palco e Grade) e sem a palavra proibida", () => {
@@ -747,8 +779,9 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   assert.ok(pilulas.indexOf("texto b") < pilulas.indexOf("texto c"), "a mais nova embaixo");
   assert.match(pilulas, /<ol aria-label="Chat" aria-live="polite" class="[^"]*" role="log">/);
   const caixa = (pilulas.match(/^<div class="([^"]*)" data-testid="room-chat-pills">/)?.[1] ?? "").split(" ");
-  // Centradas entre a borda esquerda do video e a coluna de miniaturas do iframe, a 56 px da base; nada recebe o toque.
-  for (const classe of ["pointer-events-none", "absolute", "left-0", "right-[var(--room-video-right)]", "bottom-14", "justify-center"]) {
+  // Centradas entre a borda esquerda do video e a coluna de miniaturas do iframe, a 56 px da base (mais a altura do aviso
+  // da sala no palco, --room-snackbar-offset); nada recebe o toque.
+  for (const classe of ["pointer-events-none", "absolute", "left-0", "right-[var(--room-video-right)]", "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px))]", "justify-center"]) {
     assert.ok(caixa.includes(classe), `${classe} em ${caixa.join(" ")}`);
   }
   assert.ok(!caixa.includes("lg:hidden"), "tambem no computador");
@@ -759,8 +792,8 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   assert.match(pilulas, /<span aria-hidden="true" class="[^"]*size-\[22px\][^"]*"><span class="[^"]*">BS<\/span><\/span><span class="[^"]*font-semibold[^"]*">Bruna Souza<\/span> <span class="min-w-0 truncate">texto c<\/span>/);
   // No Replay, acima da barra de controles da Bunny, e com o nome da aba do painel ("Chat da live").
   const doReplay = render(pillsModule.RoomChatPills, { kind: "replay", messages: overlayMessages(mensagens) });
-  assert.match(doReplay, /^<div class="[^"]*\bbottom-20\b[^"]*" data-testid="room-chat-pills"><ol aria-label="Chat da live"/);
-  assert.match(render(pillsModule.RoomChatPills, { kind: "simulated", messages: overlayMessages(mensagens) }), /^<div class="[^"]*\bbottom-14\b[^"]*" data-testid="room-chat-pills"><ol aria-label="Chat"/);
+  assert.match(doReplay, /^<div class="[^"]* bottom-\[calc\(5rem\+var\(--room-snackbar-offset,0px\)\)\]" data-testid="room-chat-pills"><ol aria-label="Chat da live"/);
+  assert.match(render(pillsModule.RoomChatPills, { kind: "simulated", messages: overlayMessages(mensagens) }), /^<div class="[^"]* bottom-\[calc\(3\.5rem\+var\(--room-snackbar-offset,0px\)\)\]" data-testid="room-chat-pills"><ol aria-label="Chat"/);
   assert.equal(render(pillsModule.RoomChatPills, { kind: "live", messages: [] }), "", "sem mensagem, nada no palco");
 });
 

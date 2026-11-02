@@ -100,7 +100,11 @@ export function RoomCommentField({
     }
     const observer = new ResizeObserver(() => onHeightChange(strip.offsetHeight));
     observer.observe(strip);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      // A faixa saiu (a frase no lugar do campo, a aba fechada): o aviso nao fica mais acima dela.
+      onHeightChange(0);
+    };
   }, [onHeightChange]);
 
   function step(type: ComposerEvent["type"], draft = value) {

@@ -951,7 +951,10 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
   assert.match(tela, /audioOn=\{room\.signals\.audioOn\}/);
   assert.match(tela, /cameraWaiting=\{room\.pendingToggle\.videoInput\}/);
   assert.match(tela, /micWaiting=\{room\.pendingToggle\.audioInput\}/);
-  assert.match(tela, /const notice = liveNoticePhrase\(room\.signals\.notice === "mic_released" \? null : room\.signals\.notice\) \?\? pendingTogglePhrase\(room\.pendingToggle, room\.signals\);/);
+  // O aviso da barra no aviso da sala (RoomSnackbarHost) e, sem ele, o da troca que espera, enquanto durar.
+  assert.match(tela, /const pendingPhrase = pendingTogglePhrase\(room\.pendingToggle, room\.signals\);\s*const roomNotice = room\.notice;\s*const notice = useMemo\(\(\) => roomNotice \?\? pendingToggleSnack\(pendingPhrase\), \[pendingPhrase, roomNotice\]\);/);
+  assert.equal(model.pendingToggleSnack(null), null);
+  assert.deepEqual(model.pendingToggleSnack(WEBINAR_COPY.aoVivo.trocandoCameraLiga), { key: model.DEVICE_SWITCH_SNACK, persistent: true, text: WEBINAR_COPY.aoVivo.trocandoCameraLiga }, "sem tempo: some quando a troca acaba");
   assert.equal(model.pendingToggleShown, undefined, "nenhum estado pedido no botao");
   const barra = renderToStaticMarkup(
     createElement(LiveControls, {
@@ -965,7 +968,6 @@ test("Câmera tocada no meio da troca de camera: o toque espera a faixa nova e v
       joined: true,
       micAllowed: true,
       micWaiting: false,
-      notice: null,
       onCamera: noop,
       onFullscreen: noop,
       onHand: noop,

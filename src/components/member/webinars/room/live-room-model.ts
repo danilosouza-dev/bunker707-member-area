@@ -19,6 +19,7 @@ import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
 import type { RoomBarItem, RoomBarItems } from "./room-layout-model";
+import { engineNoticeOf, engineSnack, type RoomSnack } from "./room-snackbar-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Frases da barra e do painel Configurações (WEBINAR_COPY.aoVivo; o nome do objeto ficou para os componentes e testes)
@@ -580,11 +581,14 @@ export type LiveNotice =
   | "camera_denied"
   | "camera_failed"
   | "camera_unanswered"
+  | "hand_lowered"
   | "mic_denied"
   | "mic_failed"
+  | "mic_no_signal"
   | "mic_released"
   | "mic_silenced"
-  | "mic_unanswered";
+  | "mic_unanswered"
+  | "recording_started";
 
 export type LiveParticipants = { moderators: string[]; names: Record<string, string> };
 
@@ -794,6 +798,18 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       return { ...state, expectVideo: false, notice: mediaErrorNotice("camera", payload) };
     case "recordingStatusChanged":
       return { ...state, recording: field(payload, "on") === true };
+    case "endpointTextMessageReceived": {
+      // "Abaixar a mão" do console (com a mao levantada; quem recebe ja mandou o toggleRaiseHand): a barra abaixa na hora
+      // e o aviso diz quem abaixou. A gravacao no navegador do Apresentador (so de quem modera): o selo Gravando na hora.
+      if (lowerHandRequested(state, payload)) {
+        return { ...state, handRaised: false, notice: "hand_lowered" };
+      }
+      const recordingOn = recordingSignalOf(state, payload);
+      return recordingOn === null ? state : { ...state, recording: recordingOn };
+    }
+    case "notificationTriggered":
+      // Um aviso do motor (escondido pelo notifications: []): na sala, so o microfone ligado sem som vira aviso nosso.
+      return engineNoticeOf(payload, { audioOn: state.audioOn, surface: "room" })?.key === "mic_no_signal" ? { ...state, notice: "mic_no_signal" } : state;
     case "tileViewChanged": {
       const enabled = field(payload, "enabled");
       return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
@@ -1364,9 +1380,35 @@ export function liveNoticePhrase(notice: LiveNotice | null): string | null {
       return WEBINAR_COPY.aoVivo.cameraSemResposta;
     case "mic_unanswered":
       return WEBINAR_COPY.aoVivo.microfoneSemResposta;
+    case "hand_lowered":
+      return WEBINAR_COPY.salaV2.avisos.maoAbaixada;
+    case "mic_no_signal":
+      return WEBINAR_COPY.salaV2.avisos.semSomDoMicrofone;
+    case "recording_started":
+      return WEBINAR_COPY.salaV2.avisos.gravacaoComecou;
     default:
       return null;
   }
+}
+
+/**
+ * O aviso da sala (RoomSnackbar) de um aviso da barra: o tipo e a chave (o mesmo tipo repetido so reinicia o tempo), a
+ * frase e, no microfone sem som, a acao Configurações. O "microfone liberado" nao e aviso: e o dialogo Falar / Agora não.
+ */
+export function liveNoticeSnack(notice: LiveNotice | null): RoomSnack | null {
+  if (notice === "mic_no_signal") {
+    return engineSnack("mic_no_signal");
+  }
+  const text = notice === "mic_released" ? null : liveNoticePhrase(notice);
+  return notice && text ? { key: notice, text } : null;
+}
+
+/** A chave do aviso "enquanto durar" da troca de aparelho (pendingTogglePhrase): um so, que troca de frase no lugar. */
+export const DEVICE_SWITCH_SNACK = "device_switch";
+
+/** O aviso da troca de aparelho em andamento (o toque que espera a troca acabar), sem tempo: some quando a troca acaba. */
+export function pendingToggleSnack(phrase: string | null): RoomSnack | null {
+  return phrase ? { key: DEVICE_SWITCH_SNACK, persistent: true, text: phrase } : null;
 }
 
 /** O selo Gravando: o ultimo sinal do iframe vale; antes dele, a sessao (o gravador gravando). */
