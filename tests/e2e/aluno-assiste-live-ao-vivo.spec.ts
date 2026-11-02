@@ -1171,7 +1171,8 @@ test("Configurações: antes da liberacao nada troca de aparelho; a camera so de
   await expect(botaoCamera).not.toHaveAttribute("aria-busy", "true");
   await expect(botaoCamera).toHaveAttribute("aria-pressed", "false");
   await expect(botaoCamera.locator("svg.animate-spin")).toHaveCount(0);
-  await expect(aviso).not.toContainText(aoVivo.trocandoCameraDesliga);
+  // O aviso da sala (RoomSnackbar, Y14) so existe enquanto mostra algo: sem aviso, nenhum elemento com a frase da troca.
+  await expect(aviso.filter({ hasText: aoVivo.trocandoCameraDesliga })).toHaveCount(0);
   await page.waitForTimeout(300);
   await expect(botaoCamera).toHaveAttribute("aria-pressed", "false");
   expect((await aviso.allTextContents()).join(" ")).not.toContain(aoVivo.cameraFechadaPelaEquipe);
