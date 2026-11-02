@@ -54,11 +54,19 @@ after(async () => {
   actAs(null);
   await seedEscolaDeTeste(db);
   await limparWebinarios(db);
-  unwrap(await db.from("admin_audit_log").delete().eq("entity_id", webinarId).eq("action", "webinar.self_unmute"), "Apagando a auditoria de teste");
+  // A auditoria e append-only (o service_role so insere e le): as linhas ficam, e o teste conta so as novas.
 });
+
+async function auditoriaDoMicrofone() {
+  return unwrap(
+    await db.from("admin_audit_log").select("id,action,actor_id,metadata").eq("entity_id", webinarId).eq("action", "webinar.self_unmute").order("occurred_at", { ascending: true }),
+    "Lendo a auditoria do microfone sozinho"
+  );
+}
 
 test("setSelfUnmute grava so a chave selfUnmute, o co-apresentador consegue, a Equipe recebe 403 e o retrato devolve a politica", async () => {
   const antes = await roomSettings();
+  const linhasDeAntes = new Set((await auditoriaDoMicrofone()).map((row) => row.id));
   assert.ok(!Object.hasOwn(antes, "selfUnmute") || antes.selfUnmute === false, "a live de teste comeca sem o microfone sozinho");
 
   actAs(produtor);
@@ -82,10 +90,7 @@ test("setSelfUnmute grava so a chave selfUnmute, o co-apresentador consegue, a E
   assert.equal(recusa.status, 403);
   assert.equal((await roomSettings()).selfUnmute, false);
 
-  const auditoria = unwrap(
-    await db.from("admin_audit_log").select("action,actor_id,metadata").eq("entity_id", webinarId).eq("action", "webinar.self_unmute").order("occurred_at", { ascending: true }),
-    "Lendo a auditoria do microfone sozinho"
-  );
+  const auditoria = (await auditoriaDoMicrofone()).filter((row) => !linhasDeAntes.has(row.id));
   assert.deepEqual(
     auditoria.map((row) => [row.actor_id, row.metadata.allowed, row.metadata.session_id]),
     [
