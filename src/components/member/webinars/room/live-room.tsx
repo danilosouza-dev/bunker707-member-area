@@ -76,7 +76,7 @@ import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
-import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION } from "./room-snackbar-model";
+import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION, snackToRestore } from "./room-snackbar-model";
 import { RoomStageBadges } from "./room-stage-badges";
 import { RoomButton } from "./room-ui";
 import { ROOM_VIEW_MENU_ID } from "./room-view-menu";
@@ -628,6 +628,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       shownNoticeRef.current = null;
     }
   }, [notice, snackbarApi]);
+  // A troca de aparelho ainda em andamento volta depois do aviso que tomou o lugar dela (o sucesso do chat ou das
+  // Perguntas): sem isto ela sumiria de vez, porque o `notice` continua o mesmo.
+  const restoreSnack = snackToRestore(notice, snackbar.snack);
+  useEffect(() => {
+    if (restoreSnack) {
+      snackbarApi.show(restoreSnack);
+    }
+  }, [restoreSnack, snackbarApi]);
 
   // A gravacao que comecou com o aluno ja na sala (o motor, o "Gravar no navegador" ou a sessao relida): "Esta live
   // começou a ser gravada." no aviso, no lugar do aviso do motor. Ja ligada na entrada, so o selo Gravando.

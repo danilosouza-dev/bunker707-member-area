@@ -30,6 +30,15 @@ export function nextSnackbar(current: RoomSnack | null, incoming: RoomSnack): { 
 }
 
 /**
+ * O aviso "enquanto durar" (`persistent`, a troca de aparelho) que outro tomou o lugar (o "Pergunta enviada.", a
+ * mensagem removida) volta quando a caixa fica vazia e ele ainda vale: devolve o aviso para mostrar de novo, ou nulo.
+ * Os passageiros nunca voltam (quem os mostrou ja os tirou pelo onGone).
+ */
+export function snackToRestore(notice: RoomSnack | null, shown: RoomSnack | null): RoomSnack | null {
+  return notice?.persistent === true && shown === null ? notice : null;
+}
+
+/**
  * Quanto falta para o aviso sumir: `durationMs` (os 6 s da sala) menos o tempo ja contado (`elapsedMs`, so o tempo
  * fora das pausas), nunca abaixo de 0 (0: some agora). Em pausa (o ponteiro em cima ou o foco dentro) nao some: null,
  * e o tempo volta a contar de onde parou quando a pausa acaba.

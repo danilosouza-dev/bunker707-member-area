@@ -309,6 +309,7 @@ test("card Sala: o microfone sozinho liga na Live ao vivo (o teto na dica) e fic
   assert.match(micSelf(ligado), /aria-checked="true"/);
   assert.doesNotMatch(micSelf(ligado), /\sdisabled=""/, "na Live ao vivo o switch funciona");
   assert.match(textOf(ligado), new RegExp(vm.WEBINAR_ADMIN_COPY.fields.micSelfHint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(textOf(ligado), new RegExp(`Até ${model.MIC_LIMIT} alunos falam ao mesmo tempo`), "o teto da dica sai do MIC_LIMIT");
   assert.match(micSelf(card({ ...live, roomSettings: model.defaultRoomSettings() })), /aria-checked="false"/, "o padrao e desligado");
 
   const gravada = { ...model.emptyWebinarDraft("simulated"), roomSettings: { ...model.defaultRoomSettings(), selfUnmute: true } };

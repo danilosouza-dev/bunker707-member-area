@@ -190,7 +190,9 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.deepEqual(aluno.disabledSounds, ["RAISE_HAND_SOUND"]);
   assert.deepEqual(host.notifications, [], "tambem quem apresenta pela pagina da sala");
   assert.equal(host.disabledSounds, undefined);
-  assert.deepEqual(embed.liveConfigOverwrite("co_host", settings, null, "console").notifications, []);
+  // O console continua com os avisos do motor ate os avisos do console entrarem (V2-A59): ninguem la ouve o notificationTriggered.
+  assert.equal(embed.liveConfigOverwrite("co_host", settings, null, "console").notifications, undefined);
+  assert.equal(embed.liveConfigOverwrite("host", settings, null, "console").conferenceInfo, undefined);
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite()).toLowerCase().includes("jitsi"));
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite("host")).toLowerCase().includes("jitsi"));
   assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");

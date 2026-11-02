@@ -148,6 +148,15 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
 /** Onde o iframe entra: a pagina da sala (o aluno, e quem apresenta por ela) ou o console de quem apresenta. */
 export type LiveEmbedSurface = "console" | "room";
 
+/** O motor calado na pagina da sala (V2-20): sem avisos, sem o selo do topo e, para a plateia, sem o som da mao. */
+function roomEngineQuiet(audience: boolean): Record<string, unknown> {
+  return {
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    ...(audience ? { disabledSounds: ["RAISE_HAND_SOUND"] } : {}),
+    notifications: []
+  };
+}
+
 /**
  * Quem desenha o Compartilhar tela de quem apresenta no console (docs/31 V2-14 e V2-A39): o nosso circulo da barra
  * (toggleShareScreen pelo IFrame API) ou o botao de tela do proprio motor (toolbarButtons ["desktop"], que aparece ao
@@ -227,15 +236,15 @@ export function liveConfigOverwrite(
     [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
-    // Nenhum aviso do motor na tela, para nenhum papel e nas duas superficies (docs/31, a sala no estilo do YouTube): os
-    // que importam viram o aviso da pagina (RoomSnackbar) pelo notificationTriggered, que o motor manda mesmo com o
+    // Na pagina da sala, nenhum aviso do motor na tela, para nenhum papel (docs/31 V2-20, a sala no estilo do YouTube):
+    // os que importam viram o aviso da pagina (RoomSnackbar) pelo notificationTriggered, que o motor manda mesmo com o
     // aviso escondido (notifications/actions.ts:143-145 da tag fixada; configWhitelist.ts:190). Sai tambem o selo do
     // motor no topo (o "✋ 1" das maos e o de gravacao: conferenceInfo, configWhitelist.ts:80), que o palco ja tem nos
     // selos da pagina, e, para o aluno e a Equipe, o som da mao de cada aluno para a turma (disabledSounds,
-    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia.
-    conferenceInfo: { alwaysVisible: [], autoHide: [] },
-    ...(audience ? { disabledSounds: ["RAISE_HAND_SOUND"] } : {}),
-    notifications: [],
+    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia. O console fica sem nenhuma das tres chaves:
+    // ninguem la ouve o notificationTriggered, e quem apresenta continua vendo os avisos do motor (a gravacao que nao
+    // comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
+    ...(surface === "room" ? roomEngineQuiet(audience) : {}),
     // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
     // pagina (docs/31 V2-4).
     hideDominantSpeakerBadge: true,

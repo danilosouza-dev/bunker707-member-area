@@ -487,7 +487,8 @@ export function RoomQuestionsTab({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (!draft.trim() || readOnly) {
+    // Com o envio em andamento, o Ctrl+Enter de novo nao manda a mesma pergunta outra vez.
+    if (!draft.trim() || readOnly || sending) {
       return;
     }
     if (!consented) {

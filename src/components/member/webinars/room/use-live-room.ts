@@ -12,6 +12,7 @@ import {
   answerDeviceSwitch,
   applyLiveSignal,
   applyRoomsInfo,
+  audioModerationRefreshInMs,
   cameraAnswerDelayMs,
   cameraConsentEndedByDenial,
   cameraConsentEndedByError,
@@ -358,6 +359,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   const canSwitchRef = useRef(input.canSwitchDevice);
   const consentEndedRef = useRef(input.onCameraConsentEnded);
   const audioModerationRef = useRef(input.onAudioModerationChanged);
+  /** A releitura da sessao ja marcada depois de uma troca da moderacao de audio (audioModerationRefreshInMs). */
+  const audioModerationPendingRef = useRef(false);
   /** As trocas de camera em andamento (o painel Configurações) e o numero da ultima. */
   const switchesRef = useRef<Record<DeviceSwitchKind, DeviceSwitch | null>>({ audioInput: null, videoInput: null });
   const switchSeqRef = useRef(0);
@@ -634,7 +637,16 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
           .catch(() => undefined);
       }
       if (name === "moderationStatusChanged" && field(payload, "mediaType") === "audio") {
-        audioModerationRef.current?.();
+        // Espalhada e juntada: a turma inteira recebe o sinal no mesmo instante, e o vigia do teto troca a moderacao
+        // a cada 2 s no pior caso.
+        const delayMs = audioModerationRefreshInMs(audioModerationPendingRef.current, Math.random());
+        if (delayMs !== null) {
+          audioModerationPendingRef.current = true;
+          later(() => {
+            audioModerationPendingRef.current = false;
+            audioModerationRef.current?.();
+          }, delayMs);
+        }
       }
       if (name === "filmstripDisplayChanged") {
         // O motor respondeu (ou a equipe mudou a coluna de todos): a conta da coluna pode mandar o proximo.
@@ -678,7 +690,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       }
       handleSignal(name, payload);
     },
-    [handleSignal, readRoomsInfo, setGate]
+    [handleSignal, later, readRoomsInfo, setGate]
   );
 
   const configOverwrite = useMemo(() => (reply ? liveConfigOverwrite(reply.role, reply.settings, look) : {}), [reply, look]);

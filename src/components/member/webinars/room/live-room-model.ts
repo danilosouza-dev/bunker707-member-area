@@ -97,7 +97,13 @@ export const LIVE_ROOM_RULES = {
   /** Um token que falhou ao renovar tenta de novo depois disto. */
   tokenRetryMs: 60_000,
   /** O nome de quem esta no palco, cortado aqui (vem do iframe). */
-  nameMax: 60
+  nameMax: 60,
+  /**
+   * A moderacao de audio mudou: a sala rele a sessao (o microfone sozinho pode ter mudado junto no console) depois de
+   * uma espera sorteada ate isto, para a turma inteira nao pedir no mesmo segundo (o vigia do teto troca a moderacao a
+   * cada 2 s no pior caso). As trocas dentro da espera viram uma releitura so.
+   */
+  audioModerationSpreadMs: 10_000
 } as const;
 
 /* ------------------------------------------------------------------------------------------------
@@ -262,6 +268,18 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
     default:
       return WEBINAR_COPY.aoVivo.erroAbrir;
   }
+}
+
+/**
+ * A releitura da sessao depois de uma troca da moderacao de audio: nulo com uma ja marcada (as trocas que chegam dentro
+ * da espera viram uma so); senao, a espera sorteada pelo `random` (0 a 1, o Math.random) ate audioModerationSpreadMs.
+ */
+export function audioModerationRefreshInMs(pending: boolean, random: number): number | null {
+  if (pending) {
+    return null;
+  }
+  const share = Number.isFinite(random) ? Math.min(Math.max(random, 0), 1) : 0;
+  return Math.floor(share * LIVE_ROOM_RULES.audioModerationSpreadMs);
 }
 
 /** Depois de quanto tempo pedir outro token (ms): o contrato de jitsi-room-config (5 min antes do exp, piso de 10 s). */

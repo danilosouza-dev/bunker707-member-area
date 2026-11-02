@@ -391,6 +391,30 @@ test("microfone sozinho (docs/31 caminho A): a sala guarda a moderacao de audio 
   assert.deepEqual([aprovadoDesligado.micPrompt, aprovadoDesligado.notice], [true, "mic_released"]);
 });
 
+test("a troca da moderacao de audio rele a sessao espalhada e juntada: a espera sorteada ate 10 s, e com uma ja marcada nenhuma outra", () => {
+  const teto = model.LIVE_ROOM_RULES.audioModerationSpreadMs;
+  assert.equal(teto, 10_000, "a turma espalhada em 10 s (o vigia troca a cada 2 s no pior caso)");
+  assert.equal(model.audioModerationRefreshInMs(false, 0), 0);
+  assert.equal(model.audioModerationRefreshInMs(false, 0.5), 5_000);
+  assert.equal(model.audioModerationRefreshInMs(false, 0.99999), 9_999, "nunca chega ao teto");
+  // As trocas que chegam com uma releitura marcada viram a mesma releitura.
+  assert.equal(model.audioModerationRefreshInMs(true, 0.3), null);
+  // O sorteio torto fica dentro da janela.
+  assert.equal(model.audioModerationRefreshInMs(false, 2), teto);
+  assert.equal(model.audioModerationRefreshInMs(false, -1), 0);
+  assert.equal(model.audioModerationRefreshInMs(false, Number.NaN), 0);
+  // Mil alunos com o mesmo sinal: as releituras se espalham pela janela inteira, sem cair no mesmo instante.
+  let semente = 7;
+  const sorteio = () => ((semente = (semente * 48271) % 2147483647) / 2147483647);
+  const esperas = Array.from({ length: 1000 }, () => model.audioModerationRefreshInMs(false, sorteio()));
+  const porSegundo = new Map();
+  for (const ms of esperas) {
+    porSegundo.set(Math.floor(ms / 1000), (porSegundo.get(Math.floor(ms / 1000)) ?? 0) + 1);
+  }
+  assert.equal(porSegundo.size, 10, "um pedaco da turma em cada segundo");
+  assert.ok(Math.max(...porSegundo.values()) < 200, "nenhum segundo com a turma inteira");
+});
+
 test("o recolhimento encerra o pedido do Falar (micAskOnSignal, V2-19): o \"ligado\" guardado nunca traz o Microfone de volta, nem com o mudo da equipe depois", () => {
   const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
   const barra = (estado) => model.liveBarItems({ allowStudentCamera: true, micAllowed: estado.micAllowed, showMedia: true }).center;

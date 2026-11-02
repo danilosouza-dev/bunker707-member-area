@@ -164,8 +164,10 @@ test.describe("produtor", () => {
     expect(montagem.configOverwrite.toolbarButtons).toEqual(barraDoMotor(browserName));
     expect(montagem.configOverwrite).not.toHaveProperty("toolbarConfig");
     expect(montagem.configOverwrite.disableShortcuts).toBe(true);
-    // Nenhum aviso do motor no console (os que importam viram o nosso); quem apresenta continua ouvindo a mao.
-    expect(montagem.configOverwrite.notifications).toEqual([]);
+    // O console continua com os avisos do motor (ninguem la ouve o notificationTriggered, V2-A59) e quem apresenta
+    // continua ouvindo a mao.
+    expect(montagem.configOverwrite).not.toHaveProperty("notifications");
+    expect(montagem.configOverwrite).not.toHaveProperty("conferenceInfo");
     expect(montagem.configOverwrite).not.toHaveProperty("disabledSounds");
     expect(montagem.configOverwrite.participantMenuButtonsWithNotifyClick).toEqual([
       { key: "ask-unmute", preventExecution: true },

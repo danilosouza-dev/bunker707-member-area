@@ -123,9 +123,19 @@ export function RoomCommentField({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    const action = composerKey({ composing: event.nativeEvent.isComposing, ctrl: event.ctrlKey, key: event.key, meta: event.metaKey, mode, shift: event.shiftKey });
-    if (action === "submit") {
+    const action = composerKey({
+      blocked: busy || disabled,
+      composing: event.nativeEvent.isComposing,
+      ctrl: event.ctrlKey,
+      key: event.key,
+      meta: event.metaKey,
+      mode,
+      shift: event.shiftKey
+    });
+    if (action === "submit" || action === "hold") {
       event.preventDefault();
+    }
+    if (action === "submit") {
       onSubmit();
     }
   }
@@ -142,7 +152,9 @@ export function RoomCommentField({
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    onSubmit();
+    if (!busy && !disabled) {
+      onSubmit();
+    }
   }
 
   return (

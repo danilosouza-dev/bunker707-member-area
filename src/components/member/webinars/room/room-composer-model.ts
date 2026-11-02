@@ -35,14 +35,21 @@ export function composerLine(input: { draft: string; expanded: boolean; focused:
 /**
  * O que a tecla faz: no chat ("enter"), o Enter envia e o Shift+Enter quebra a linha; nas Perguntas ("mod-enter"), o
  * Enter quebra a linha e o Ctrl ou o ⌘ com o Enter envia. Durante a composicao de um IME (o acento, o japones), nunca
- * envia: o Enter confirma o texto. Outras teclas, nada.
+ * envia: o Enter confirma o texto. Outras teclas, nada. Com o envio em andamento ou o campo desligado (`blocked`), a
+ * tecla de envio fica parada ("hold": nem envia de novo, nem quebra a linha), para o mesmo texto nao ir duas vezes.
  */
-export function composerKey(input: { composing: boolean; ctrl: boolean; key: string; meta: boolean; mode: "enter" | "mod-enter"; shift: boolean }): "newline" | "submit" | null {
+export function composerKey(input: {
+  blocked?: boolean;
+  composing: boolean;
+  ctrl: boolean;
+  key: string;
+  meta: boolean;
+  mode: "enter" | "mod-enter";
+  shift: boolean;
+}): "hold" | "newline" | "submit" | null {
   if (input.key !== "Enter" || input.composing) {
     return null;
   }
-  if (input.mode === "enter") {
-    return input.shift ? "newline" : "submit";
-  }
-  return input.ctrl || input.meta ? "submit" : "newline";
+  const action = input.mode === "enter" ? (input.shift ? "newline" : "submit") : input.ctrl || input.meta ? "submit" : "newline";
+  return action === "submit" && input.blocked ? "hold" : action;
 }

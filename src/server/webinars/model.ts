@@ -131,6 +131,9 @@ export type RoomSettings = {
   waitingRoom: boolean;
 };
 
+/** O teto do microfone sozinho (docs/31 V2-A60): quantos alunos falam ao mesmo tempo; as frases do editor e do console saem daqui. */
+export const MIC_LIMIT = 4;
+
 export type ReminderSettings = { email: boolean; h1: boolean; h24: boolean };
 
 export type ReminderTexts = {

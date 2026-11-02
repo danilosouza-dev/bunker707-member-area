@@ -13,7 +13,7 @@ import { LOWER_HAND_SIGNAL, RECORDING_SIGNAL } from "../../lib/jitsi-room-config
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloTime } from "../../lib/webinar-time";
 import { desiredLobby, MUTE_MINUTES_OPTIONS, type LiveBanState, type MuteMinutes } from "./live-model";
-import type { DisplayNameMode, SessionStatus } from "./model";
+import { MIC_LIMIT, type DisplayNameMode, type SessionStatus } from "./model";
 import { RECORDER_LABELS, canReleaseRecorder, canRequestRecorder, recorderMachineAlive, recorderPrepareStale, recordButtonAction, type RecorderStatus } from "./recorder-model";
 import { anonymousNumber, displayNameFor, firstNameInitial } from "./room-model";
 
@@ -37,7 +37,7 @@ export const LIVE_CONSOLE_COPY = {
   mensagemDoChat: copy.mensagemDoChat,
   microfoneLiberado: copy.microfoneLiberado,
   microfoneSozinho: copy.microfoneSozinho,
-  microfoneSozinhoTexto: copy.microfoneSozinhoTexto,
+  microfoneSozinhoTexto: copy.microfoneSozinhoTexto(MIC_LIMIT),
   noPalco: WEBINAR_COPY.aoVivo.noPalco,
   noVideo: copy.noVideo,
   removidosESilenciados: copy.removidosESilenciados,
@@ -690,8 +690,8 @@ export function screenShareWatchStep(input: {
   return { stopped, toStop };
 }
 
-/** O teto do microfone sozinho (docs/31 V2-A60): quantos alunos falam ao mesmo tempo. */
-export const MIC_LIMIT = 4;
+/** O teto do microfone sozinho (docs/31 V2-A60), do model: quantos alunos falam ao mesmo tempo. */
+export { MIC_LIMIT };
 /** O vigia do microfone liga ou desliga a moderacao de audio no maximo uma vez neste intervalo (cada troca avisa a sala toda). */
 export const MIC_LIMIT_TOGGLE_MS = 2_000;
 

@@ -334,3 +334,14 @@ test("composerKey: no chat o Enter envia e o Shift+Enter quebra; nas Perguntas o
   assert.equal(tecla("mod-enter", { composing: true, ctrl: true }), null);
   assert.equal(tecla("enter", { key: "a" }), null, "outra tecla, nada");
 });
+
+test("composerKey: com o envio em andamento ou o campo desligado, a tecla de envio fica parada e o mesmo texto nao vai duas vezes", () => {
+  const tecla = (mode, extra = {}) => composerModel.composerKey({ composing: false, ctrl: false, key: "Enter", meta: false, mode, shift: false, ...extra });
+  assert.equal(tecla("mod-enter", { blocked: true, ctrl: true }), "hold", "o Ctrl+Enter durante o envio da pergunta nao envia de novo");
+  assert.equal(tecla("mod-enter", { blocked: true, meta: true }), "hold", "o ⌘+Enter tambem");
+  assert.equal(tecla("enter", { blocked: true }), "hold", "o Enter durante o envio do chat nao envia de novo nem quebra a linha");
+  assert.equal(tecla("mod-enter", { blocked: true }), "newline", "o Enter sozinho nas Perguntas continua quebrando a linha");
+  assert.equal(tecla("enter", { blocked: true, shift: true }), "newline", "o Shift+Enter continua quebrando a linha");
+  assert.equal(tecla("enter", { blocked: true, composing: true }), null, "o IME continua sem enviar");
+  assert.equal(tecla("mod-enter", { blocked: false, ctrl: true }), "submit", "livre, envia");
+});

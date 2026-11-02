@@ -372,7 +372,8 @@ export const WEBINAR_COPY = {
     mensagemDoChat: "Mensagem do chat",
     microfoneLiberado: "Microfone liberado",
     microfoneSozinho: "Permitir que o aluno abra o microfone sozinho",
-    microfoneSozinhoTexto: "Até 4 alunos falam ao mesmo tempo; quando lota, os outros esperam.",
+    /** O teto vem do MIC_LIMIT (src/server/webinars/model.ts), nunca escrito aqui. */
+    microfoneSozinhoTexto: (limite: number) => `Até ${limite} alunos falam ao mesmo tempo; quando lota, os outros esperam.`,
     noVideo: (texto: string) => `No vídeo: ${texto}`,
     removidosESilenciados: "Removidos, silenciados e banidos",
     semGravacao: "Nenhum vídeo ligado a esta sessão ainda.",

@@ -620,7 +620,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (state.disabled || !draft.trim()) {
+    // Com o envio em andamento, o Enter de novo nao manda a mesma mensagem outra vez.
+    if (state.disabled || !draft.trim() || sending) {
       return;
     }
     if (!consented) {

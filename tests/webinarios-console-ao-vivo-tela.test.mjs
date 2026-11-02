@@ -1048,7 +1048,8 @@ test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-p
   const hint = host.match(/<button[^>]*aria-describedby="([^"]+)"[^>]*aria-pressed="true"/)?.[1];
   assert.ok(hint, "o botao aponta para a frase");
   assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase do teto embaixo do botao");
-  assert.match(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, /Até 4 alunos/);
+  assert.match(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, new RegExp(`^Até ${liveModel.MIC_LIMIT} alunos`), "o teto sai do MIC_LIMIT");
+  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(6), "Até 6 alunos falam ao mesmo tempo; quando lota, os outros esperam.", "outro teto, outra frase");
   assert.equal(botao(tab(handleFor("team", { selfUnmute: true }))), "", "a Equipe nao muda o microfone da turma");
 });
 

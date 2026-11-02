@@ -12,6 +12,22 @@ const model = await import("../src/components/member/webinars/room/room-snackbar
 const MAO = { key: "hand-lowered", text: "A equipe abaixou a sua mão." };
 const SEM_SOM = { action: { key: "settings", label: "Configurações" }, key: "no-audio", text: "Não está chegando som do seu microfone." };
 
+test("snackToRestore: a troca de aparelho em andamento volta depois do sucesso que tomou o lugar dela; o passageiro nunca volta", () => {
+  const TROCA = { key: "device_switch", persistent: true, text: "Trocando o microfone." };
+  const ENVIADA = { key: "question_sent", text: "Pergunta enviada." };
+  // A troca na tela; o sucesso das Perguntas toma o lugar.
+  const comSucesso = model.nextSnackbar(TROCA, ENVIADA).snack;
+  assert.equal(comSucesso, ENVIADA);
+  assert.equal(model.snackToRestore(TROCA, comSucesso), null, "com o sucesso na tela, nada volta por cima dele");
+  // O sucesso sumiu no tempo dele e a troca segue: ela volta.
+  assert.equal(model.snackToRestore(TROCA, null), TROCA);
+  // Na tela de novo, nada mais a fazer; a troca acabou, nada volta.
+  assert.equal(model.snackToRestore(TROCA, TROCA), null);
+  assert.equal(model.snackToRestore(null, null), null);
+  // O aviso passageiro que saiu nao volta (o onGone ja o tirou).
+  assert.equal(model.snackToRestore(MAO, null), null);
+});
+
 test("nextSnackbar: um de cada vez; o novo troca o atual na hora, e o mesmo tipo so reinicia o tempo, sem entrar de novo", () => {
   // Nada na tela: o aviso entra.
   assert.deepEqual(model.nextSnackbar(null, MAO), { restart: false, snack: MAO });
@@ -107,14 +123,20 @@ const live = await import("../src/components/member/webinars/room/live-room-mode
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const AJUSTES = { allowStudentCamera: true, screenFps: 30, stage: 1080 };
 
-test("o motor sem avisos: notifications vazio e o selo do topo vazio para os 4 papeis nas 2 superficies; o som da mao sai so para o aluno e a Equipe", () => {
-  for (const surface of ["room", "console"]) {
-    for (const role of ["student", "team", "host", "co_host"]) {
-      const config = embed.liveConfigOverwrite(role, AJUSTES, null, surface);
-      assert.deepEqual(config.notifications, [], `${surface}, ${role}: nenhum aviso do motor`);
-      assert.deepEqual(config.conferenceInfo, { alwaysVisible: [], autoHide: [] }, `${surface}, ${role}: sem o "✋ 1" nem o selo de gravacao do motor`);
-      const plateia = role === "student" || role === "team";
-      assert.deepEqual(config.disabledSounds, plateia ? ["RAISE_HAND_SOUND"] : undefined, `${surface}, ${role}: o som da mao`);
+test("o motor sem avisos na sala: notifications vazio e o selo do topo vazio para os 4 papeis; o som da mao sai so para o aluno e a Equipe; o console como antes", () => {
+  for (const role of ["student", "team", "host", "co_host"]) {
+    const config = embed.liveConfigOverwrite(role, AJUSTES, null, "room");
+    assert.deepEqual(config.notifications, [], `sala, ${role}: nenhum aviso do motor`);
+    assert.deepEqual(config.conferenceInfo, { alwaysVisible: [], autoHide: [] }, `sala, ${role}: sem o "✋ 1" nem o selo de gravacao do motor`);
+    const plateia = role === "student" || role === "team";
+    assert.deepEqual(config.disabledSounds, plateia ? ["RAISE_HAND_SOUND"] : undefined, `sala, ${role}: o som da mao`);
+  }
+  // No console ninguem ouve o notificationTriggered: quem apresenta continua vendo os avisos do motor (a gravacao que
+  // nao comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
+  for (const role of ["student", "team", "host", "co_host"]) {
+    const config = embed.liveConfigOverwrite(role, AJUSTES, null, "console");
+    for (const key of ["notifications", "conferenceInfo", "disabledSounds"]) {
+      assert.ok(!Object.hasOwn(config, key), `console, ${role}: sem a chave ${key}`);
     }
   }
   // A sala ouve o aviso do motor, que nunca vai ao servidor, e o console continua com a lista da sala mais a dele.
