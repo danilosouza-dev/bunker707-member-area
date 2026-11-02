@@ -1,12 +1,17 @@
 "use client";
 
-import { Clapperboard, Hand, LoaderCircle, Maximize2, Mic, MicOff, Minimize2, Settings2, SmilePlus, Video, VideoOff, Volume2, VolumeX } from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
+import { Clapperboard, Hand, Maximize2, Mic, MicOff, Minimize2, Settings2, SmilePlus, Video, VideoOff, Volume2, VolumeX } from "lucide-react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { RoomView } from "@/lib/webinar-room-prefs";
 import type { Reaction } from "@/server/webinars/model";
-import { LIVE_ROOM_COPY } from "./live-room-model";
+import { LIVE_ROOM_COPY, liveBarItems } from "./live-room-model";
+import { ROOM_REACTIONS_POPOVER, ROOM_SETTINGS_POPOVER, RoomBar, RoomBarButton, RoomLeaveButton, RoomPanelToggle } from "./room-bar";
+import type { RoomBarItem } from "./room-layout-model";
 import { RoomReactionBar } from "./room-reactions";
+import { RoomIconButton } from "./room-ui";
+import { RoomViewMenu } from "./room-view-menu";
 
 // A NOSSA barra da sala ao vivo (docs/30 §1.3, §8.5, §9 e D4; fase 3), a do aluno e da Equipe (o iframe deles nao tem
 // barra; host e co-apresentador que entram por esta pagina usam a barra do iframe e aqui so veem Reagir, Tela cheia e
@@ -18,10 +23,21 @@ import { RoomReactionBar } from "./room-reactions";
 // rolagem propria numa coluna curta). Cada botao tem 44 px a 375 px e o nome acessivel e exatamente a frase (o e2e
 // clica por ela); o estado vai em aria-pressed / aria-expanded (com a troca daquele aparelho no meio, o toque em
 // Microfone / Câmera espera ela acabar: o botao continua com o estado REAL, porque o microfone e a camera seguem no ar
-// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e a linha de aviso diz o
-// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe,
-// microfone silenciado, camera bloqueada, o navegador que recusou o microfone ou a camera) saem numa linha com
-// aria-live. Nada aqui fala com a rede.
+// ate la, com aria-busy e o circulo girando no lugar do icone (parado com movimento reduzido), e o aviso da sala diz o
+// que acontece quando a troca terminar). Os avisos passageiros (camera fechada pela equipe, microfone silenciado,
+// camera bloqueada, o navegador que recusou o microfone ou a camera) saem no aviso da sala (RoomSnackbarHost, no palco),
+// nao mais numa linha embaixo da barra. Nada aqui fala com a rede. Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala (o
+// ativo em branco com texto preto no escuro, quase preto com texto branco no claro).
+// Redesign V2, F4 (docs/31 V2-6 e V2-18): a barra de tres zonas (room-bar.tsx, a ordem por liveBarItems): o Sair a
+// esquerda, a partir de lg; no centro os circulos de 48 px sem rotulo (44 px abaixo de lg), com o Som antes da Tela
+// cheia; a direita Configurações e o balao que abre e fecha o painel do chat. A partir de lg, Reagir e Configurações
+// abrem por cima do palco, sem empurrar o video (o iframe nao muda de tamanho); abaixo de lg, no fluxo, como antes. No
+// celular a Tela cheia (ou o Modo cinema) sai da barra e vai para o canto do palco (LiveStageFullscreen).
+// Redesign V2, F8 (docs/31 V2-16): a Visão do vídeo (room-view-menu.tsx) entra na zona da direita, antes de
+// Configurações, so para o aluno e a Equipe e so a partir de lg; desligada fora da sala. O menu dela, Reagir e
+// Configurações nunca ficam abertos juntos (a sala decide: o menu abre por cima do palco, onde o painel o cobriria).
+// Na sala no estilo do YouTube o balao fica so abaixo de lg: a partir de lg o trilho a direita (room-rail.tsx) abre e
+// fecha o painel.
 
 export type LiveControlsProps = {
   /** Microfone ligado (depois de liberado). */
@@ -38,21 +54,37 @@ export type LiveControlsProps = {
   /** Dentro da sala (a mao e a camera so funcionam com o iframe no ar). */
   joined: boolean;
   micAllowed: boolean;
+  /** O microfone sozinho lotado (micBlocked): o Microfone fica desligado com o motivo, focavel; o clique so avisa. */
+  micBlocked?: boolean;
   /** O toque em Microfone esperando a troca de microfone acabar (`audioOn` continua com o estado real). */
   micWaiting?: boolean;
-  /** O aviso passageiro da barra. */
-  notice: string | null;
   onCamera: () => void;
   onFullscreen: () => void;
   onHand: () => void;
+  /** Sair (a partir de lg; com a live no ar, a sala pergunta antes). */
+  onLeave: () => void;
   onMic: () => void;
   onReact: (reaction: Reaction) => void;
   onSound: () => void;
+  /** O balao: abre e fecha o painel do chat. */
+  onTogglePanel: () => void;
   onToggleReactions: () => void;
   onToggleSettings: () => void;
+  /** Palco ou Grade (a Visão do vídeo): sem ele, a barra fica sem o botao. */
+  onView?: (view: RoomView) => void;
+  /** Abrir ou fechar o menu da Visão do vídeo (a sala fecha Reagir e Configurações quando ele abre). */
+  onViewMenu?: (open: boolean) => void;
+  /** O painel do chat esta na tela (o balao fica ligado e se chama "Esconder o chat"). */
+  panelOpen: boolean;
+  /** Com o painel fechado o balao e o primeiro foco da sala (firstFocusTarget). */
+  panelFirstFocus?: boolean;
+  /** As mensagens novas desde que o painel fechou (o contador do balao). */
+  panelUnread?: number;
   /** "Ver como" ou a sala sem escrita (encerrada, antes de abrir): as reacoes ficam desligadas. */
   reactionsDisabled: boolean;
   reactionsOpen: boolean;
+  /** O microfone sozinho (docs/31 caminho A): o Microfone fica na barra sem o Liberar. */
+  selfUnmute?: boolean;
   /** O painel Configurações (live-settings.tsx), desenhado pela sala; aparece aberto acima da barra. */
   settings?: ReactNode;
   settingsOpen: boolean;
@@ -60,113 +92,136 @@ export type LiveControlsProps = {
   showMedia: boolean;
   soundOn: boolean;
   videoOn: boolean;
+  /** O menu da Visão do vídeo aberto (pela sala: nunca junto com Reagir ou Configurações). */
+  viewMenuOpen?: boolean;
+  /** O que o video mostra agora (o ultimo tileViewChanged do motor): o nome do botao da Visão do vídeo. */
+  viewShown?: RoomView;
 };
 
 export const LIVE_REACTIONS_ID = "live-room-reactions";
 export const LIVE_SETTINGS_ID = "live-room-settings";
 
-function BarButton(props: {
-  active?: boolean;
-  /** O toque espera a troca do aparelho acabar. */
-  busy?: boolean;
-  children?: ReactNode;
-  disabled?: boolean;
-  expanded?: boolean;
-  controls?: string;
-  icon: ComponentType<{ "aria-hidden"?: boolean | "true"; className?: string }>;
-  label: string;
-  onClick: () => void;
-  shortcut?: string;
-  title?: string;
-}) {
-  // Ocupado: o circulo girando no lugar do icone (o aria-busy sozinho nao aparece na tela nem e lido em botao).
-  const Icon = props.busy ? LoaderCircle : props.icon;
+/**
+ * A Tela cheia (ou o Modo cinema) no celular (V2-18): um circulo de 32 px no canto de baixo a direita do palco, sobre o
+ * video, com o mesmo nome e a mesma acao do botao da barra (que so aparece a partir de lg). O Modo cinema sai do canto
+ * com o celular deitado (docs/31 V2-A27): a sala ja fica em linha, com o palco no que sobra ao lado do chat, e o
+ * cinema nao mudaria nada na tela. O estado fica e volta a valer em pe. A Tela cheia deitada fica (ela poe o palco na
+ * tela inteira).
+ */
+export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" | "cinemaOn" | "fullscreenOn" | "onFullscreen">) {
+  const copy = WEBINAR_COPY.aoVivo;
+  const Icon = props.cinemaMode ? Clapperboard : props.fullscreenOn ? Minimize2 : Maximize2;
   return (
-    <button
-      aria-busy={props.busy || undefined}
-      aria-controls={props.controls}
-      aria-expanded={props.expanded}
-      aria-keyshortcuts={props.shortcut}
-      aria-label={props.label}
-      aria-pressed={props.expanded === undefined ? props.active : undefined}
-      className={cn(
-        "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-40 motion-reduce:transition-none",
-        props.active ? "bg-white text-black hover:bg-zinc-200" : "bg-white/[0.08] text-zinc-100 hover:bg-white/[0.16]"
-      )}
-      data-live-control={props.label}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      title={props.title ?? props.label}
-      type="button"
+    <RoomIconButton
+      active={props.cinemaMode ? props.cinemaOn : props.fullscreenOn}
+      className={cn("absolute bottom-2 right-2 z-30 lg:hidden", props.cinemaMode ? "max-lg:landscape:hidden" : null)}
+      data-room-stage-corner=""
+      label={props.cinemaMode ? copy.modoCinema : copy.telaCheia}
+      onClick={props.onFullscreen}
+      size={32}
+      tone="video"
     >
-      <Icon aria-hidden="true" className={cn("size-5", props.busy ? "animate-spin motion-reduce:animate-none" : undefined)} />
-      <span aria-hidden="true" className="hidden xl:inline">
-        {props.label}
-      </span>
-      {props.children}
-    </button>
+      <Icon aria-hidden="true" />
+    </RoomIconButton>
   );
 }
 
 export function LiveControls(props: LiveControlsProps) {
   const copy = WEBINAR_COPY.aoVivo;
+  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, selfUnmute: props.selfUnmute, showMedia: props.showMedia });
 
-  return (
-    <div className="relative flex min-h-0 flex-col border-t border-white/10 bg-[#111]" data-testid="live-controls">
-      {props.reactionsOpen ? (
-        <div className="shrink-0 border-b border-white/10" id={LIVE_REACTIONS_ID}>
-          <RoomReactionBar disabled={props.reactionsDisabled} onReact={props.onReact} />
-        </div>
-      ) : null}
-
-      <div
-        aria-label={LIVE_ROOM_COPY.barra}
-        className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] sm:justify-center [&::-webkit-scrollbar]:hidden"
-        role="group"
-      >
-        <BarButton controls={LIVE_REACTIONS_ID} expanded={props.reactionsOpen} icon={SmilePlus} label={WEBINAR_COPY.sala.reagir} onClick={props.onToggleReactions} shortcut="R" />
-        {props.showMedia ? (
-          <BarButton
+  function control(item: RoomBarItem) {
+    switch (item) {
+      case "leave":
+        return <RoomLeaveButton key={item} onLeave={props.onLeave} />;
+      case "react":
+        return <RoomBarButton controls={LIVE_REACTIONS_ID} expanded={props.reactionsOpen} icon={SmilePlus} item={item} key={item} label={WEBINAR_COPY.sala.reagir} onClick={props.onToggleReactions} shortcut="R" />;
+      case "hand":
+        return (
+          <RoomBarButton
             active={props.handRaised}
             disabled={!props.joined}
             icon={Hand}
+            item={item}
+            key={item}
             label={props.handRaised ? copy.abaixarMao : copy.levantarMao}
             onClick={props.onHand}
             shortcut="M"
           />
-        ) : null}
-        {props.showMedia && props.allowStudentCamera ? (
-          <BarButton
+        );
+      case "camera":
+        return (
+          <RoomBarButton
             active={props.videoOn}
             busy={props.cameraWaiting}
             disabled={!props.joined}
             icon={props.videoOn ? Video : VideoOff}
+            item={item}
+            key={item}
             label={copy.camera}
             onClick={props.onCamera}
             title={props.videoOn ? copy.desligarCamera : copy.ligarCamera}
           />
-        ) : null}
-        {props.showMedia && props.micAllowed ? <BarButton active={props.audioOn} busy={props.micWaiting} disabled={!props.joined} icon={props.audioOn ? Mic : MicOff} label={copy.microfone} onClick={props.onMic} /> : null}
-        {props.cinemaMode ? (
-          <BarButton active={props.cinemaOn} icon={Clapperboard} label={copy.modoCinema} onClick={props.onFullscreen} />
+        );
+      case "mic":
+        return (
+          <RoomBarButton
+            active={props.audioOn}
+            busy={props.micWaiting}
+            disabled={!props.joined}
+            disabledReason={props.micBlocked ? copy.microfoneLotado : undefined}
+            icon={props.audioOn ? Mic : MicOff}
+            item={item}
+            key={item}
+            label={copy.microfone}
+            onClick={props.onMic}
+          />
+        );
+      case "sound":
+        return <RoomBarButton active={props.soundOn} icon={props.soundOn ? Volume2 : VolumeX} item={item} key={item} label={copy.som} onClick={props.onSound} />;
+      case "fullscreen":
+        // No celular o mesmo botao fica no canto do palco (LiveStageFullscreen).
+        return props.cinemaMode ? (
+          <RoomBarButton active={props.cinemaOn} className="hidden lg:grid" icon={Clapperboard} item={item} key={item} label={copy.modoCinema} onClick={props.onFullscreen} />
         ) : (
-          <BarButton active={props.fullscreenOn} icon={props.fullscreenOn ? Minimize2 : Maximize2} label={copy.telaCheia} onClick={props.onFullscreen} />
-        )}
-        <BarButton active={props.soundOn} icon={props.soundOn ? Volume2 : VolumeX} label={copy.som} onClick={props.onSound} />
-        <BarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />
-      </div>
+          <RoomBarButton
+            active={props.fullscreenOn}
+            className="hidden lg:grid"
+            icon={props.fullscreenOn ? Minimize2 : Maximize2}
+            item={item}
+            key={item}
+            label={copy.telaCheia}
+            onClick={props.onFullscreen}
+          />
+        );
+      case "view":
+        return props.onView && props.onViewMenu ? (
+          <RoomViewMenu disabled={!props.joined} key={item} onChoose={props.onView} onOpenChange={props.onViewMenu} open={props.viewMenuOpen ?? false} shown={props.viewShown ?? "stage"} />
+        ) : null;
+      case "settings":
+        return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;
+      case "panel":
+        return <RoomPanelToggle className="lg:hidden" firstFocus={props.panelFirstFocus} key={item} onToggle={props.onTogglePanel} open={props.panelOpen} unread={props.panelUnread} />;
+    }
+  }
 
-      {/* Depois da barra no teclado (o Tab do botao Configurações entra no painel) e acima dela na tela; encolhe e rola
-          por dentro quando a coluna e curta (no celular), sem tirar a barra da tela. */}
-      {props.settingsOpen ? (
-        <div className="order-first flex min-h-0 flex-col border-b border-white/10" id={LIVE_SETTINGS_ID}>
-          {props.settings}
+  return (
+    <div className="relative flex min-h-0 flex-col" data-testid="live-controls">
+      {props.reactionsOpen ? (
+        <div className={ROOM_REACTIONS_POPOVER} id={LIVE_REACTIONS_ID}>
+          <RoomReactionBar disabled={props.reactionsDisabled} onReact={props.onReact} />
         </div>
       ) : null}
 
-      <p aria-live="polite" className={cn("shrink-0 px-3 text-center text-xs font-semibold text-amber-100", props.notice ? "pb-2" : "sr-only")} data-testid="live-notice" role="status">
-        {props.notice ?? ""}
-      </p>
+      <RoomBar center={items.center.map(control)} label={LIVE_ROOM_COPY.barra} left={items.left.map(control)} right={items.right.map(control)} />
+
+      {/* Depois da barra no teclado (o Tab do botao Configurações entra no painel) e acima dela na tela; no celular encolhe
+          e rola por dentro quando a coluna e curta, sem tirar a barra da tela; no computador abre por cima do palco. */}
+      {props.settingsOpen ? (
+        <div className={ROOM_SETTINGS_POPOVER} id={LIVE_SETTINGS_ID}>
+          {props.settings}
+        </div>
+      ) : null}
     </div>
   );
 }

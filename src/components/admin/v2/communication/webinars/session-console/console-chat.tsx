@@ -1,73 +1,141 @@
 "use client";
 
-import { Languages, PencilLine, Pin, PinOff, Send, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { ChevronDown, MoreHorizontal, SendHorizontal } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { RoomChatBubble, chatListOnShow } from "@/components/member/webinars/room/room-chat";
+import { ROOM_FOCUS, RoomButton, RoomIconButton } from "@/components/member/webinars/room/room-ui";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { ModerationAction } from "@/server/webinars/chat-schemas";
-import { CHAT_MODE_OPTIONS, SLOW_MODE_CHOICES, messageActions, slowModeChoiceOf, slowModeFromChoice, type ConsoleMessage, type SlowModeChoice } from "@/server/webinars/console-model";
+import {
+  CHAT_MODE_OPTIONS,
+  SLOW_MODE_CHOICES,
+  consoleChatFocusAfter,
+  consoleChatQueue,
+  consoleMessageMeta,
+  messageActions,
+  slowModeChoiceOf,
+  slowModeFromChoice,
+  type ConsoleChatFocusFrom,
+  type ConsoleChatFocusTo,
+  type ConsoleMessage,
+  type MessageActions,
+  type SlowModeChoice
+} from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type ChatMode, type SlowModeSeconds, type WebinarSession } from "@/server/webinars/model";
-import { offsetLabel } from "@/server/webinars/room-model";
-import { PillGroup, adminTextareaClass } from "../../../form";
-import { SectionCard } from "../../../settings/kit";
-import { StatusChip } from "../../../status-chip";
+import { adminMenuItem, adminMenuPopup, adminMenuSeparator } from "../../../styles";
+import { useConsolePortal } from "./console-shell";
 
-// O painel Chat do console (docs/30 §2.4 e §8.3): tudo o que o aluno ve mais os pendentes do chat moderado
-// (Liberar), Apagar, Fixar/Desafixar, "Aprovar para as proximas turmas" (so mensagem da turma com o aceite do
-// autor; sem aceite, a tela diz por que), Quem pode escrever e Modo lento no topo, e a caixa da equipe (Enter envia,
-// Shift+Enter quebra a linha). A lista cola no fim quando a pessoa ja estava no fim. Na Live ao vivo (fase 3), o ⋯ de
-// cada mensagem da turma (`personMenu`) traz Silenciar 5/15/60 min / ate o fim, Remover e Banir do autor. Fase 4c
-// (docs/30 §1.6 e D24): as respostas do Assistente levam o selo Assistente e "Corrigir resposta" (`onEditAssistant`,
-// o texto novo em linha); Apagar segue o mesmo de qualquer mensagem.
+// A aba Chat do console (docs/30 §2.4 e §8.3; docs/31 V2-15 e V2-9), no cartao do painel e pelos tokens do tema do
+// console. Em cima, "Quem escreve" e "Modo lento" em dois seletores compactos (os mesmos valores e a mesma acao de
+// antes; o modo lento desligado com o chat desligado) e, a direita, "{n} aguardando". As pendentes do chat moderado
+// saem da lista e viram cards ambar no topo, a mais velha primeiro: "Na moderação · nome · hora", o texto, Liberar,
+// Recusar (o apagar da pendente) e Virar pergunta (so a mensagem comum de um aluno; a pergunta pelo chat ja vira
+// pergunta no Liberar). A lista (um role=log que rola, com o nome "Chat" e aria-live desligado: quem modera le a lista, e
+// cada mensagem nova chegaria lida com os botoes dela; dentro dele, a <ol> continua lista) usa o balao da sala
+// (RoomChatBubble) com "nome · papel ou origem · hora"
+// embaixo (a origem que so a equipe ve, Roteiro ou Chat original, no lugar do papel), "Fixada" e, fora da live, "Nas
+// próximas turmas" (na live toda mensagem nasce na linha mestre, D31); a minha a direita, com "Você". As acoes de cada
+// mensagem ficam na linha de baixo e aparecem com o mouse ou o foco dentro dela (por cima da linha), sempre na tela de
+// toque: Fixar ou Desafixar, Virar pergunta, Apagar e o ⋯ com Aprovar para as próximas turmas (so com o aceite do
+// autor; sem ele, a frase do porque), Corrigir resposta (Assistente, o texto novo embaixo do balao; com ele aberto, as
+// acoes da linha saem, para nao cobrir o Salvar correção), Refazer tradução e, na live, os itens da pessoa (Silenciar,
+// Remover, Banir; LivePersonMenuItems). Cada botao da linha tem 24 px de altura (WCAG 2.5.8). O foco nunca cai no
+// comeco da pagina quando o botao sai da tela (consoleChatFocusAfter): o Liberar e o Recusar levam ao card seguinte (sem
+// card, ao cabecalho), o Virar pergunta ao botao seguinte da linha, o Apagar ao balao seguinte, e a correcao fechada ao
+// ⋯ da mensagem. Embaixo, a caixa da equipe com o Enviar redondo (Enter envia, Shift+Enter quebra a linha; durante o
+// envio o campo so fica somente leitura, para o foco continuar nele). A lista enche a aba a partir de lg e cola no fim
+// quando a pessoa ja estava no fim, tambem quando a aba volta a tela (`shown`: a lista escondida nao rola com o que
+// chega, chatListOnShow, como na sala). O ⋯ abre no portal da raiz do console.
+// Nenhuma frase escrita aqui.
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
+const v2 = WEBINAR_COPY.consoleV2.chat;
+const assistantCopy = WEBINAR_COPY.assistente.console;
+
+/** Um botao da linha de baixo do balao: o texto de 11 px num alvo de 24 px de altura. */
+const LINE_ACTION = cn("inline-flex min-h-6 items-center rounded-md px-1 text-[11px] font-semibold disabled:pointer-events-none disabled:opacity-45", ROOM_FOCUS);
+/**
+ * As acoes da mensagem. Com o mouse (pointer-fine), elas ficam escondidas e aparecem com o mouse ou o foco dentro do
+ * item e com o ⋯ aberto, por cima da linha de baixo, no canto do item (a direita; na minha, a esquerda): escondidas, nao
+ * ocupam lugar nenhum, e o foco do teclado chega nelas do mesmo jeito. Na tela de toque, sempre a mostra, na linha.
+ */
+const LINE_ACTIONS = cn(
+  "inline-flex flex-wrap items-center gap-0.5 transition-opacity motion-reduce:transition-none",
+  "pointer-fine:absolute pointer-fine:bottom-0 pointer-fine:z-10 pointer-fine:rounded-md pointer-fine:bg-room-surface pointer-fine:px-1",
+  "pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100 pointer-fine:has-[[data-popup-open]]:opacity-100"
+);
+/** O balao do console: o mesmo da sala ate xl; a partir de xl (o painel de 360 e 440 px), ate 320 px. */
+const BUBBLE_WIDTH = "max-w-[270px] lg:max-w-[230px] xl:max-w-[320px]";
+/** O campo da caixa e o da correcao: 16 px abaixo de lg (o Safari do iPhone da zoom num campo menor). */
+const FIELD = "min-w-0 rounded-[12px] border border-room-input-border bg-room-input-bg px-3 text-base leading-5 text-room-fg placeholder:text-room-fg-subtle disabled:opacity-50 lg:text-[13px]";
 
 type ConsoleChatProps = {
+  /** As mensagens que ja viraram pergunta (o `askedMessageIds` do retrato): ficam sem o Virar pergunta. */
+  askedMessageIds: readonly string[];
   busyKey: string | null;
   canAct: boolean;
   currentUserId: string;
   hostUserId: string | null;
   messages: readonly ConsoleMessage[];
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
+  /** A correcao aberta na montagem (o teste de tela; o console sempre comeca sem nenhuma). */
+  initialEditing?: { body: string; id: string } | null;
   /** Fase 4c: "Corrigir resposta" numa resposta do Assistente (devolve se gravou). */
   onEditAssistant?: ((messageId: string, body: string) => Promise<boolean>) | null;
-  onModerate: (action: ModerationAction, messageId: string) => void;
+  /** Devolve, quando pode, a promessa da acao (resolvida com o retrato novo): o foco segue depois dela. */
+  onModerate: (action: ModerationAction, messageId: string) => Promise<boolean> | void;
   /** Fase 4f: "Refazer tradução" (apaga a traducao guardada do texto); nulo com a traducao desligada no ambiente. */
   onRetranslate?: ((messageId: string) => void) | null;
   onSend: (body: string) => Promise<boolean>;
-  /** Fase 3: o ⋯ do autor de uma mensagem da turma (Silenciar no chat, Remover, Banir); nulo fora da Live ao vivo. */
+  /**
+   * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; nulo fora da Live ao
+   * vivo. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao esta no retrato).
+   */
   personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
   pinnedMessageId: string | null;
   session: WebinarSession;
+  /**
+   * A aba Chat na tela (o painel aberto, a aba escolhida). Escondida, a lista nao rola com o que chega; ao voltar, quem
+   * estava no fim volta ao fim. Sem a prop (o teste de tela), na tela.
+   */
+  shown?: boolean;
 };
 
-function roleLabel(message: ConsoleMessage): string | null {
-  if (message.source === "scripted") {
-    return copy.sources.scripted;
-  }
-  if (message.source === "original") {
-    return copy.sources.original;
-  }
-  if (message.source === "ai" || message.role === "ai") {
-    return WEBINAR_COPY.sala.selos.assistente;
-  }
-  if (message.role === "host") {
-    return WEBINAR_COPY.sala.selos.apresentador;
-  }
-  if (message.role === "team") {
-    return WEBINAR_COPY.sala.selos.equipe;
-  }
-  return null;
-}
-
-export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssistant = null, onModerate, onRetranslate = null, onSend, personMenu = null, pinnedMessageId, session }: ConsoleChatProps) {
+export function ConsoleChat({
+  askedMessageIds,
+  busyKey,
+  canAct,
+  currentUserId,
+  initialEditing = null,
+  messages,
+  onChatMode,
+  onEditAssistant = null,
+  onModerate,
+  onRetranslate = null,
+  onSend,
+  personMenu = null,
+  pinnedMessageId,
+  session,
+  shown = true
+}: ConsoleChatProps) {
   const [body, setBody] = useState("");
-  const [editing, setEditing] = useState<{ body: string; id: string } | null>(null);
-  const listRef = useRef<HTMLOListElement>(null);
+  const [editing, setEditing] = useState<{ body: string; id: string } | null>(initialEditing);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const stickToEnd = useRef(true);
+  // Para onde o foco vai no proximo desenho (pelos ids de cada parte depois da acao) e o sinal que pede esse desenho.
+  const focusRequest = useRef<((now: { log: readonly string[]; pending: readonly string[] }) => ConsoleChatFocusTo) | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   const sending = busyKey === "send";
+  const { log, pending } = useMemo(() => consoleChatQueue(messages), [messages]);
+  const asked = useMemo(() => new Set(askedMessageIds), [askedMessageIds]);
+  const modeBusy = !canAct || busyKey === "chat-mode";
+
+  // Pela ultima mensagem, nao pela contagem: o retrato traz no maximo as 200 mais novas, e com 200 a contagem para.
+  const lastLogId = log.at(-1)?.id ?? null;
 
   useEffect(() => {
     const list = listRef.current;
@@ -75,7 +143,60 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssis
     if (list && stickToEnd.current) {
       list.scrollTop = list.scrollHeight;
     }
-  }, [messages.length]);
+  }, [lastLogId]);
+
+  // A aba voltou a tela: a lista escondida nao rolou com o que chegou; quem estava no fim volta ao fim, antes do desenho
+  // (e antes do evento de rolagem que recalcula o stickToEnd).
+  useLayoutEffect(() => {
+    chatListOnShow(listRef.current, { shown, stick: stickToEnd.current });
+  }, [shown]);
+
+  // O foco depois da acao, ja com o retrato novo na tela: so quando ele caiu no comeco da pagina (o botao saiu ou ficou
+  // desligado durante a acao); quem ja foi para outro lugar fica onde esta.
+  useEffect(() => {
+    const request = focusRequest.current;
+
+    if (!request) {
+      return;
+    }
+
+    focusRequest.current = null;
+    const active = document.activeElement;
+
+    if (active && active !== document.body) {
+      return;
+    }
+
+    focusChatTarget(rootRef.current, request({ log: log.map((message) => message.id), pending: pending.map((message) => message.id) }));
+  }, [focusTick, log, pending]);
+
+  function requestFocus(request: (now: { log: readonly string[]; pending: readonly string[] }) => ConsoleChatFocusTo) {
+    focusRequest.current = request;
+    setFocusTick((tick) => tick + 1);
+  }
+
+  /** De onde a acao saiu: a parte, a posicao do item nela e a do botao entre os do item. */
+  function focusFrom(message: ConsoleMessage, button: Element | null): ConsoleChatFocusFrom {
+    const area = pending.some((entry) => entry.id === message.id) ? "queue" : "log";
+    const item = button?.closest("[data-room-message]");
+    const buttons = item ? Array.from(item.querySelectorAll("[data-console-action]")) : [];
+    const index = (area === "queue" ? pending : log).findIndex((entry) => entry.id === message.id);
+    return { area, id: message.id, index, position: button ? Math.max(0, buttons.indexOf(button)) : Number.MAX_SAFE_INTEGER };
+  }
+
+  /** Uma acao de um botao da linha ou do card: depois dela (com o retrato novo), o foco segue. */
+  async function act(action: ModerationAction, message: ConsoleMessage, event: MouseEvent<HTMLButtonElement>) {
+    const from = focusFrom(message, event.currentTarget);
+    await onModerate(action, message.id);
+    requestFocus((now) => consoleChatFocusAfter(from, now));
+  }
+
+  /** Fecha a correcao: o foco volta ao ultimo botao do item (o ⋯ de onde ela abriu). */
+  function closeEditor(message: ConsoleMessage) {
+    const from = focusFrom(message, null);
+    setEditing(null);
+    requestFocus((now) => consoleChatFocusAfter(from, now));
+  }
 
   function trackScroll() {
     const list = listRef.current;
@@ -98,7 +219,7 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssis
     }
   }
 
-  async function saveEdit() {
+  async function saveEdit(message: ConsoleMessage) {
     const text = editing?.body.trim() ?? "";
 
     if (!editing || !text || !onEditAssistant) {
@@ -106,7 +227,10 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssis
     }
 
     if (await onEditAssistant(editing.id, text)) {
-      setEditing(null);
+      closeEditor(message);
+    } else {
+      // O campo ficou desligado durante a gravacao: o foco volta para ele.
+      requestFocus(() => ({ area: "edit", id: message.id }));
     }
   }
 
@@ -117,156 +241,330 @@ export function ConsoleChat({ busyKey, canAct, messages, onChatMode, onEditAssis
     }
   }
 
-  return (
-    <SectionCard bodyClassName="flex min-w-0 flex-col gap-4 p-0" title={copy.title} titleId="console-chat-title">
-      <div className="flex min-w-0 flex-col gap-3 px-4 pt-4">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.whoWrites}</span>
-          <PillGroup ariaLabel={copy.whoWrites} disabled={!canAct || busyKey === "chat-mode"} name="console-chat-mode" onChange={(mode: ChatMode) => onChatMode(mode, session.chatSlowModeSeconds)} options={CHAT_MODE_OPTIONS} value={session.chatMode} />
-        </div>
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.slowMode}</span>
-          <PillGroup
-            ariaLabel={copy.slowMode}
-            disabled={!canAct || busyKey === "chat-mode" || session.chatMode === "off"}
-            name="console-slow-mode"
-            onChange={(choice: SlowModeChoice) => onChatMode(session.chatMode, slowModeFromChoice(choice))}
-            options={SLOW_MODE_CHOICES}
-            value={slowModeChoiceOf(session.chatSlowModeSeconds)}
-          />
+  const metaOf = (message: ConsoleMessage) => consoleMessageMeta({ kind: session.kind, message, scheduledAt: session.scheduledAt });
+  const actionsOf = (message: ConsoleMessage) => messageActions(message, pinnedMessageId, { hasQuestion: asked.has(message.id) });
+
+  /** A correcao da resposta do Assistente, embaixo do balao (ou do texto da pendente). */
+  function editorOf(message: ConsoleMessage): ReactNode {
+    if (editing?.id !== message.id) {
+      return null;
+    }
+
+    const busy = busyKey === `moderate:${message.id}`;
+
+    return (
+      <div className="flex w-full min-w-56 flex-col gap-2" data-console-edit={message.id}>
+        <label className="sr-only" htmlFor={`console-edit-${message.id}`}>
+          {assistantCopy.corrigir}
+        </label>
+        <textarea
+          autoFocus
+          className={cn(FIELD, "min-h-16 w-full py-2")}
+          disabled={busy}
+          id={`console-edit-${message.id}`}
+          maxLength={CHAT_LIMITS.body}
+          onChange={(event) => setEditing({ body: event.target.value, id: message.id })}
+          rows={3}
+          value={editing.body}
+        />
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <RoomButton disabled={busy} onClick={() => closeEditor(message)} size="xs" variant="ghost">
+            {assistantCopy.cancelar}
+          </RoomButton>
+          <RoomButton disabled={busy || !editing.body.trim()} onClick={() => void saveEdit(message)} size="xs" variant="secondary">
+            {assistantCopy.salvarCorrecao}
+          </RoomButton>
         </div>
       </div>
+    );
+  }
 
-      <ol aria-label={copy.title} className="flex max-h-[60vh] min-h-48 min-w-0 flex-col gap-1 overflow-y-auto border-y border-[var(--border-subtle)] px-4 py-3" data-console-chat="" onScroll={trackScroll} ref={listRef}>
-        {messages.length === 0 ? <li className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</li> : null}
-        {messages.map((message) => {
-          const actions = messageActions(message, pinnedMessageId);
-          const busy = busyKey === `moderate:${message.id}`;
-          const label = roleLabel(message);
+  /** O ⋯ da mensagem: o que nao cabe na linha. Nulo quando nao ha nada para esta mensagem. */
+  function menuOf(message: ConsoleMessage, actions: MessageActions, triggerClassName: string): ReactNode {
+    const items: ReactNode[] = [];
 
-          return (
-            <li className={cn("flex min-w-0 flex-col gap-1 rounded-lg px-2 py-2", !message.approved && "bg-[var(--surface-2)]", pinnedMessageId === message.id && "border border-[var(--border-strong)]")} data-console-message={message.id} data-message-source={message.source} key={message.id}>
-              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-[var(--text-tertiary)]">
-                <span className="font-medium text-[var(--text-primary)]">{message.displayName}</span>
-                {label ? <StatusChip tone={message.source === "scripted" ? "muted" : "neutral"}>{label}</StatusChip> : null}
-                <span className="tabular-nums">{offsetLabel(message.offsetMs)}</span>
-                {!message.approved ? <StatusChip tone="warning">{copy.pending}</StatusChip> : null}
-                {pinnedMessageId === message.id ? <StatusChip tone="success">{copy.pinned}</StatusChip> : null}
-                {message.master ? <StatusChip tone="success">{copy.master}</StatusChip> : null}
-              </div>
-              {editing?.id === message.id ? (
-                <div className="flex min-w-0 flex-col gap-2" data-console-edit={message.id}>
-                  <label className="sr-only" htmlFor={`console-edit-${message.id}`}>
-                    {WEBINAR_COPY.assistente.console.corrigir}
-                  </label>
-                  <textarea
-                    className={cn(adminTextareaClass, "min-h-16")}
-                    disabled={busy}
-                    id={`console-edit-${message.id}`}
-                    maxLength={CHAT_LIMITS.body}
-                    onChange={(event) => setEditing({ body: event.target.value, id: message.id })}
-                    rows={3}
-                    value={editing.body}
-                  />
-                  <div className="flex flex-wrap justify-end gap-1">
-                    <Button className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => setEditing(null)} type="button" variant="ghost">
-                      {WEBINAR_COPY.assistente.console.cancelar}
-                    </Button>
-                    <Button className="h-8! px-2 text-[13px]" disabled={busy || !editing.body.trim()} onClick={() => void saveEdit()} type="button" variant="secondary">
-                      {WEBINAR_COPY.assistente.console.salvarCorrecao}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm leading-5 break-words whitespace-pre-wrap text-[var(--text-primary)]">{message.body}</p>
-              )}
-              {canAct ? (
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
-                  {onEditAssistant && message.source === "ai" && editing?.id !== message.id ? (
-                    <Button
-                      aria-label={WEBINAR_COPY.assistente.console.corrigir}
-                      className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
-                      disabled={busy}
-                      onClick={() => setEditing({ body: message.body, id: message.id })}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <PencilLine aria-hidden="true" className="size-4" />
-                      {WEBINAR_COPY.assistente.console.corrigir}
-                    </Button>
-                  ) : null}
-                  {actions.approve ? (
-                    <Button className="h-8! px-2 text-[13px]" disabled={busy} onClick={() => onModerate("approve", message.id)} type="button" variant="secondary">
+    if (actions.promote) {
+      items.push(
+        <DropdownMenuItem className={adminMenuItem} key="promote" onClick={() => onModerate("promote", message.id)}>
+          {copy.promote}
+        </DropdownMenuItem>
+      );
+    } else if (message.approved && message.source === "audience" && !message.master && !message.promotable) {
+      items.push(
+        <p className="px-2.5 py-1 text-xs leading-4 text-[var(--text-tertiary)]" key="no-consent">
+          {copy.noConsent}
+        </p>
+      );
+    }
+
+    if (onEditAssistant && message.source === "ai" && editing?.id !== message.id) {
+      items.push(
+        <DropdownMenuItem className={adminMenuItem} key="edit" onClick={() => setEditing({ body: message.body, id: message.id })}>
+          {assistantCopy.corrigir}
+        </DropdownMenuItem>
+      );
+    }
+
+    if (onRetranslate) {
+      items.push(
+        <DropdownMenuItem className={adminMenuItem} key="retranslate" onClick={() => onRetranslate(message.id)}>
+          {WEBINAR_COPY.traducao.console.refazer}
+        </DropdownMenuItem>
+      );
+    }
+
+    const person = personMenu && message.source === "audience" && message.authorUserId ? personMenu(message) : null;
+
+    if (items.length === 0 && !person) {
+      return null;
+    }
+
+    return (
+      <MessageMenu busy={busyKey === `moderate:${message.id}`} name={message.displayName} triggerClassName={triggerClassName}>
+        {items}
+        {items.length > 0 && person ? <DropdownMenuSeparator className={adminMenuSeparator} /> : null}
+        {person}
+      </MessageMenu>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-[var(--member-cover-radius)] border border-room-border bg-room-surface lg:min-h-0 lg:flex-1" ref={rootRef}>
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-room-border px-3 py-2.5" data-console-chat-header="">
+        <CompactSelect
+          disabled={modeBusy}
+          id="console-chat-mode"
+          label={v2.quemEscreve}
+          onChange={(mode: ChatMode) => onChatMode(mode, session.chatSlowModeSeconds)}
+          options={CHAT_MODE_OPTIONS}
+          value={session.chatMode}
+        />
+        <CompactSelect
+          disabled={modeBusy || session.chatMode === "off"}
+          id="console-slow-mode"
+          label={v2.modoLento}
+          onChange={(choice: SlowModeChoice) => onChatMode(session.chatMode, slowModeFromChoice(choice))}
+          options={SLOW_MODE_CHOICES}
+          value={slowModeChoiceOf(session.chatSlowModeSeconds)}
+        />
+        {pending.length > 0 ? (
+          <span className="ml-auto text-[11px] leading-4 whitespace-nowrap text-room-fg-muted tabular-nums" data-console-chat-waiting="">
+            {v2.aguardando(pending.length)}
+          </span>
+        ) : null}
+      </div>
+
+      {pending.length > 0 ? (
+        <ol aria-label={copy.pending} className="relative flex max-h-56 min-w-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-2.5 lg:max-h-[35%]" data-console-chat-queue="">
+          {pending.map((message) => {
+            const actions = actionsOf(message);
+            const busy = busyKey === `moderate:${message.id}`;
+            const time = metaOf(message).time;
+
+            return (
+              <li className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg px-3 py-2.5" data-console-pending="" data-room-message={message.id} key={message.id}>
+                <p className="text-[11px] leading-4 font-bold text-room-warn-fg">{[copy.pending, message.displayName, time].filter(Boolean).join(" · ")}</p>
+                <p className="text-[13px] leading-[18px] break-words whitespace-pre-line text-room-fg">{message.body}</p>
+                {editorOf(message)}
+                {canAct ? (
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <RoomButton aria-label={`${copy.approve}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("approve", message, event)} size="xs" variant="primary">
                       {copy.approve}
-                    </Button>
-                  ) : null}
-                  {actions.promote ? (
-                    <Button className="h-8! px-2 text-[13px]" disabled={busy} onClick={() => onModerate("promote", message.id)} type="button" variant="secondary">
-                      {copy.promote}
-                    </Button>
-                  ) : message.source === "audience" && !message.master && !message.promotable ? (
-                    <span className="px-1 text-xs leading-5 text-[var(--text-tertiary)]">{copy.noConsent}</span>
-                  ) : null}
-                  {actions.pin ? (
-                    <Button aria-label={`${copy.pin}: ${message.displayName}`} className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => onModerate("pin", message.id)} type="button" variant="ghost">
-                      <Pin aria-hidden="true" className="size-4" />
-                      {copy.pin}
-                    </Button>
-                  ) : null}
-                  {actions.unpin ? (
-                    <Button aria-label={`${copy.unpin}: ${message.displayName}`} className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => onModerate("unpin", message.id)} type="button" variant="ghost">
-                      <PinOff aria-hidden="true" className="size-4" />
-                      {copy.unpin}
-                    </Button>
-                  ) : null}
-                  {onRetranslate ? (
-                    <Button
-                      aria-label={`${WEBINAR_COPY.traducao.console.refazer}: ${message.displayName}`}
-                      className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
-                      data-console-retranslate=""
-                      disabled={busy}
-                      onClick={() => onRetranslate(message.id)}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Languages aria-hidden="true" className="size-4" />
-                      {WEBINAR_COPY.traducao.console.refazer}
-                    </Button>
-                  ) : null}
-                  <Button aria-label={`${copy.delete}: ${message.displayName}`} className="h-8! px-2 text-[13px] text-[var(--error)]" disabled={busy} onClick={() => onModerate("delete", message.id)} type="button" variant="ghost">
-                    <Trash2 aria-hidden="true" className="size-4" />
-                    {copy.delete}
-                  </Button>
-                  {personMenu && message.source === "audience" && message.authorUserId ? personMenu(message) : null}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+                    </RoomButton>
+                    <RoomButton aria-label={`${v2.recusar}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("delete", message, event)} size="xs" variant="secondary">
+                      {v2.recusar}
+                    </RoomButton>
+                    {actions.question ? (
+                      <RoomButton aria-label={`${v2.virarPergunta}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("question", message, event)} size="xs" variant="secondary">
+                        {v2.virarPergunta}
+                      </RoomButton>
+                    ) : null}
+                    {menuOf(message, actions, "size-7 justify-center rounded-full border border-room-border-strong px-0 text-room-fg-strong hover:bg-room-control")}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
 
-      <div className="flex min-w-0 flex-col gap-2 px-4 pb-4">
+      <div
+        aria-label={copy.title}
+        aria-live="off"
+        className="relative flex min-h-48 min-w-0 flex-col overflow-y-auto px-3 pt-3 pb-2 max-lg:max-h-[60vh] lg:min-h-0 lg:flex-1"
+        data-console-chat=""
+        onScroll={trackScroll}
+        ref={listRef}
+        role="log"
+      >
+        <ol className="flex min-w-0 flex-col gap-3.5">
+          {log.length === 0 ? <li className="px-2 py-6 text-center text-[13px] leading-5 text-room-fg-subtle">{copy.empty}</li> : null}
+          {log.map((message) => {
+            const actions = actionsOf(message);
+            const busy = busyKey === `moderate:${message.id}`;
+            const meta = metaOf(message);
+            const pinned = pinnedMessageId === message.id;
+            const mine = message.authorUserId === currentUserId;
+            // Na live toda mensagem nasce na linha mestre (D31): o selo diria o mesmo em todas.
+            const master = message.master && session.kind !== "live";
+            // Com a correcao aberta, as acoes (presas ao fim do item, por cima) cobririam o Cancelar e o Salvar correção.
+            const showActions = canAct && editing?.id !== message.id;
+
+            return (
+              <RoomChatBubble
+                footer={editorOf(message)}
+                key={message.id}
+                message={{ body: message.body, displayName: message.displayName, id: message.id, mine, pending: false, role: message.role }}
+                metaActions={
+                  <>
+                    {pinned ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-semibold text-room-fg-muted">{copy.pinned}</span>
+                      </>
+                    ) : null}
+                    {master ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-semibold text-room-fg-muted">{copy.master}</span>
+                      </>
+                    ) : null}
+                    {showActions ? (
+                      <span className={cn(LINE_ACTIONS, mine ? "pointer-fine:left-0" : "pointer-fine:right-0")} data-console-message-actions="">
+                        <span aria-hidden="true" className="pr-1 pointer-fine:hidden">
+                          ·
+                        </span>
+                        {actions.pin ? (
+                          <button aria-label={`${copy.pin}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("pin", message, event)} type="button">
+                            {copy.pin}
+                          </button>
+                        ) : null}
+                        {actions.unpin ? (
+                          <button aria-label={`${copy.unpin}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("unpin", message, event)} type="button">
+                            {copy.unpin}
+                          </button>
+                        ) : null}
+                        {actions.question ? (
+                          <button aria-label={`${v2.virarPergunta}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("question", message, event)} type="button">
+                            {v2.virarPergunta}
+                          </button>
+                        ) : null}
+                        <button aria-label={`${copy.delete}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-muted hover:text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("delete", message, event)} type="button">
+                          {copy.delete}
+                        </button>
+                        {menuOf(message, actions, "min-w-6 justify-center text-room-fg-muted hover:text-room-fg-strong")}
+                      </span>
+                    ) : null}
+                  </>
+                }
+                roleLabel={meta.origin ?? meta.role}
+                time={meta.time}
+                widthClassName={BUBBLE_WIDTH}
+              />
+            );
+          })}
+        </ol>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 border-t border-room-border bg-room-composer p-2">
         <label className="sr-only" htmlFor="console-composer">
           {copy.composer}
         </label>
+        {/* A linha de 20 px cabe nos 44 px com a borda e o respiro (1 + 10 + 20 + 10 + 1), como o campo da sala. */}
+        {/* Durante o envio o campo so fica somente leitura: desligado, o foco cairia no comeco da pagina a cada Enter. */}
         <textarea
-          className={cn(adminTextareaClass, "min-h-16")}
-          disabled={!canAct || sending}
+          className={cn(FIELD, "min-h-11 flex-1 resize-none py-2.5")}
+          disabled={!canAct}
           id="console-composer"
           maxLength={CHAT_LIMITS.body}
           onChange={(event) => setBody(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={copy.composer}
-          rows={2}
+          readOnly={sending}
+          rows={1}
           value={body}
         />
-        <div className="flex items-center justify-end">
-          <Button className="px-4" disabled={!canAct || sending || !body.trim()} onClick={() => void submit()} type="button">
-            <Send aria-hidden="true" className="size-4" />
-            {copy.send}
-          </Button>
-        </div>
+        <RoomIconButton disabled={!canAct || sending || !body.trim()} label={copy.send} onClick={() => void submit()} size={44} tone="primary">
+          <SendHorizontal aria-hidden="true" />
+        </RoomIconButton>
       </div>
-    </SectionCard>
+    </div>
   );
+}
+
+/** Um seletor compacto do cabecalho do chat: o rotulo visivel, o valor e a seta, em 30 px. */
+function CompactSelect<T extends string>({ disabled, id, label, onChange, options, value }: { disabled: boolean; id: string; label: string; onChange: (value: T) => void; options: readonly { label: string; value: T }[]; value: T }) {
+  return (
+    <div className="relative inline-flex h-[30px] max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-room-border-strong bg-room-control pl-2.5 text-xs">
+      <label className="shrink-0 text-room-fg-muted" htmlFor={id}>
+        {label}
+      </label>
+      <select
+        className={cn("h-full min-w-0 cursor-pointer appearance-none truncate rounded-r-lg bg-transparent pr-7 font-medium text-room-fg-strong disabled:cursor-default disabled:opacity-45", ROOM_FOCUS)}
+        disabled={disabled}
+        id={id}
+        onChange={(event) => {
+          const next = options.find((option) => option.value === event.target.value);
+          if (next) {
+            onChange(next.value);
+          }
+        }}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2.5 size-3 -translate-y-1/2 text-room-fg-muted" />
+    </div>
+  );
+}
+
+/** O ⋯ de uma mensagem, no portal da raiz do console (no tema dela). */
+function MessageMenu({ busy, children, name, triggerClassName }: { busy: boolean; children: ReactNode; name: string; triggerClassName: string }) {
+  const portal = useConsolePortal();
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger aria-label={v2.maisAcoes(name)} className={cn(LINE_ACTION, triggerClassName)} data-console-action="" disabled={busy}>
+        <MoreHorizontal aria-hidden="true" className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className={cn(adminMenuPopup, "w-64 bg-room-surface text-room-fg")} container={portal}>
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Leva o foco ao alvo de consoleChatFocusAfter: o botao do item na posicao pedida (presa ao ultimo), o primeiro seletor
+ * do cabecalho, a caixa ou o campo da correcao. Sem o alvo (ou desligado), a caixa da equipe; desligada, nada.
+ */
+function focusChatTarget(root: HTMLElement | null, target: ConsoleChatFocusTo) {
+  if (!root) {
+    return;
+  }
+
+  const usable = (element: Element | null | undefined): element is HTMLElement => element instanceof HTMLElement && element.isConnected && !element.matches(":disabled");
+  const byId = (id: string) => root.ownerDocument.getElementById(id);
+  let element: Element | null | undefined = null;
+
+  if (target.area === "header") {
+    element = byId("console-chat-mode");
+  } else if (target.area === "composer") {
+    element = byId("console-composer");
+  } else if (target.area === "edit") {
+    element = byId(`console-edit-${target.id}`);
+  } else {
+    const list = root.querySelector(target.area === "queue" ? "[data-console-chat-queue]" : "[data-console-chat]");
+    const item = list ? Array.from(list.querySelectorAll("[data-room-message]")).find((entry) => entry.getAttribute("data-room-message") === target.id) : undefined;
+    const buttons = item ? Array.from(item.querySelectorAll("[data-console-action]")) : [];
+    element = buttons[Math.min(target.position, buttons.length - 1)];
+  }
+
+  const fallback = byId("console-composer");
+  const next = usable(element) ? element : usable(fallback) ? fallback : null;
+  next?.focus();
 }

@@ -61,6 +61,7 @@ import {
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
 import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
   type ChatMessage,
@@ -69,6 +70,7 @@ import {
   type PollDraft,
   type PresenceSummary,
   type SlowModeSeconds,
+  questionBodyOf,
   type WebinarQuestion,
   type WebinarSession
 } from "./model";
@@ -76,10 +78,10 @@ import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
 import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
 import { questionSentMetadata } from "./room-rules";
-import { sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
+import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertSessionRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -93,6 +95,7 @@ const MESSAGE_MISSING_MESSAGE = "Essa mensagem não existe mais.";
 const NO_CONSENT_MESSAGE = "Sem consentimento do aluno: a mensagem não entra nas próximas turmas.";
 const ONLY_AUDIENCE_PROMOTES_MESSAGE = "Só uma mensagem da turma de hoje entra nas próximas turmas.";
 const PIN_NEEDS_APPROVAL_MESSAGE = "Libere a mensagem antes de fixar.";
+const ONLY_AUDIENCE_QUESTION_MESSAGE = "Só uma mensagem de aluno da turma vira pergunta.";
 const POLL_MISSING_MESSAGE = "Essa enquete não existe mais.";
 const POLL_NOT_TEMPLATE_MESSAGE = "Essa enquete já é de uma sessão; abra pelo modelo.";
 const POLL_NOT_OPEN_MESSAGE = "Essa enquete não está aberta.";
@@ -154,8 +157,25 @@ function serverOffsetMs(session: WebinarSession, nowMs: number): number | null {
   return Number.isFinite(offset) ? Math.max(CHAT_LIMITS.offsetMinMs, Math.min(CHAT_LIMITS.offsetMaxMs, Math.round(offset))) : null;
 }
 
-function teamRole(webinar: WebinarRow, userId: string): "host" | "team" {
-  return webinar.host_user_id === userId ? "host" : "team";
+/**
+ * O papel da mensagem da equipe no chat (docs/31 V2-A12): `host` para o Apresentador (webinars.host_user_id),
+ * `co_host` para quem e co-apresentador do webinario com o prazo valendo (webinar_presenters, pela mesma regra da sala,
+ * roomRoleFor) e `team` para o resto. O Apresentador nem le a tabela. O `co_host` pede a migracao 202611010001.
+ */
+async function teamRoleFor(db: WebinarsDb, input: { nowMs: number; userId: string; webinar: Pick<WebinarRow, "host_user_id" | "id"> }): Promise<"co_host" | "host" | "team"> {
+  if (input.webinar.host_user_id === input.userId) {
+    return "host";
+  }
+  const own = (await listPresenterRows(db, [input.webinar.id])).filter((row) => row.user_id === input.userId);
+  const grant = roomRoleFor({
+    hostUserId: null,
+    nowMs: input.nowMs,
+    presenters: own.map(presenterFromRow),
+    staff: true,
+    userId: input.userId,
+    validUntilByUser: new Map(own.map((row) => [row.user_id, row.valid_until]))
+  });
+  return grant.role === "co_host" ? "co_host" : "team";
 }
 
 function teamDisplayName(user: { email?: string; user_metadata: Record<string, unknown> }) {
@@ -291,8 +311,9 @@ export async function endSessionNow(input: { sessionId: string }): Promise<Actio
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `team` para o resto,
- * source `team`, aprovada, no offset do relogio do servidor (nunca o do navegador).
+ * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `co_host` para o
+ * co-apresentador, `team` para o resto (teamRoleFor), source `team`, aprovada, no offset do relogio do servidor (nunca o
+ * do navegador).
  */
 export async function sendTeamMessage(input: { body: string; kind?: "answer" | "message" | "system"; replyToId?: string | null; sessionId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
   return runAdminAction("messaging.write", teamChatSchema, input, async ({ input: data, user }) => {
@@ -314,7 +335,7 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
     }
 
-    const role = teamRole(webinar, user.id);
+    const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
     const inserted = await insertChatMessage(db, {
       approved: true,
       author_user_id: user.id,
@@ -361,39 +382,73 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 }
 
 /**
+ * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
+ * equipe): o texto cortado em 500 caracteres (o limite da pergunta, sem partir um emoji: questionBodyOf), o
+ * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno. Sem autor, nada (a pergunta pede o
+ * aluno). Quem chama confere antes se a mensagem ja tem pergunta.
+ */
+async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
+  const userId = message.author_user_id;
+  if (!userId) {
+    return null;
+  }
+  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const question = await insertQuestionRow(db, {
+    anonymous,
+    body: questionBodyOf(message.body),
+    display_name: message.display_name,
+    message_id: message.id,
+    offset_ms: message.offset_ms,
+    session_id: message.session_id,
+    user_id: userId
+  });
+  return { anonymous, questionId: question.id, userId };
+}
+
+/**
  * A pergunta que o aluno mandou pelo chat moderado so entra na aba Perguntas quando a equipe libera a mensagem
- * (antes disso ninguem alem do autor a ve). Anonima quando o nome gravado e o "Aluno {n}" do proprio aluno.
+ * (antes disso ninguem alem do autor a ve), com o `webinar_question_sent` no historico do aluno (foi ele que perguntou).
  */
 async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
   if (message.kind !== "question" || message.source !== "audience" || !message.author_user_id || (await fetchQuestionRowByMessage(db, message.id))) {
     return;
   }
-  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(message.author_user_id, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
-  const question = await insertQuestionRow(db, {
-    anonymous,
-    body: message.body.slice(0, 500),
-    display_name: message.display_name,
-    message_id: message.id,
-    offset_ms: message.offset_ms,
-    session_id: message.session_id,
-    user_id: message.author_user_id
-  });
+  const created = await insertQuestionOfMessage(db, message);
+  if (!created) {
+    return;
+  }
   await recordEvents(db, [
     {
       entity_id: message.session_id,
       entity_type: "webinar",
       event_type: "webinar_question_sent",
-      metadata: questionSentMetadata({ anonymous, offsetMs: message.offset_ms, questionId: question.id }),
-      user_id: message.author_user_id
+      metadata: questionSentMetadata({ anonymous: created.anonymous, offsetMs: message.offset_ms, questionId: created.questionId }),
+      user_id: created.userId
     }
   ]);
 }
 
 /**
+ * O Virar pergunta da equipe (docs/31 V2-15) depois da troca da mensagem: a pergunta que o aluno fez pelo chat moderado
+ * segue o Liberar (a pergunta e o historico do aluno); a mensagem comum vira pergunta sem o `webinar_question_sent`,
+ * porque quem perguntou foi a equipe. A mensagem que ja tem pergunta (apagada ou nao) fica como esta.
+ */
+async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow): Promise<void> {
+  if (message.kind === "question") {
+    await openQuestionOfMessage(db, message);
+    return;
+  }
+  if (!(await fetchQuestionRowByMessage(db, message.id))) {
+    await insertQuestionOfMessage(db, message);
+  }
+}
+
+/**
  * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
  * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
- * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao) e promover a linha mestre
- * (master + source `original`, so mensagem da turma cujo autor mantem o aceite).
+ * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao), promover a linha mestre
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite) e Virar pergunta (docs/31 V2-15: so
+ * mensagem ou pergunta de aluno da turma; a pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
   return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
@@ -411,12 +466,14 @@ export async function moderateMessage(input: { action: ModerationAction; message
       throw new WebinarError(SESSION_MISSING_MESSAGE, 404);
     }
 
-    let patch: ChatMessagePatch;
+    const approvePatch: ChatMessagePatch = { approved: true, approved_at: nowIso, approved_by: user.id };
+    // Nulo: nada muda na linha (o Virar pergunta de uma mensagem ja liberada).
+    let patch: ChatMessagePatch | null;
     let pinnedMessageId = sessionRow.pinned_message_id;
 
     switch (data.action) {
       case "approve":
-        patch = { approved: true, approved_at: nowIso, approved_by: user.id };
+        patch = approvePatch;
         break;
       case "delete":
         patch = { deleted_at: nowIso, deleted_by: user.id, deleted_reason: "team" };
@@ -444,19 +501,33 @@ export async function moderateMessage(input: { action: ModerationAction; message
         patch = { approved: true, approved_at: message.approved_at ?? nowIso, approved_by: message.approved_by ?? user.id, master: true, source: "original" };
         break;
       }
+      case "question":
+        // A pergunta pede o aluno (webinar_questions.user_id): nada da equipe, do roteiro, do Assistente, nem resposta.
+        if (message.source !== "audience" || !message.author_user_id || (message.kind !== "message" && message.kind !== "question")) {
+          throw new WebinarError(ONLY_AUDIENCE_QUESTION_MESSAGE, 409);
+        }
+        // Uma pergunta nova so na sessao que ainda aceita a equipe (o console esconde o botao; um console parado ou o
+        // pedido direto numa sessao encerrada, cancelada ou no Replay nao cria linha nem muda o relatorio).
+        if (!canTeamActOn(sessionFromRow(sessionRow))) {
+          throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
+        }
+        patch = message.approved ? null : approvePatch;
+        break;
       default:
         throw new WebinarError("Ação inválida.", 400);
     }
 
     // O estado de antes da troca (a linha lida pode ser a mesma referencia que a escrita devolve).
     const wasApproved = message.approved;
-    const updated = await updateChatMessageRow(db, message.id, patch);
+    const updated = patch ? await updateChatMessageRow(db, message.id, patch) : message;
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
     }
 
-    if (data.action === "approve" && !wasApproved) {
+    if (data.action === "question") {
+      await questionOfMessageByTeam(db, updated);
+    } else if (data.action === "approve" && !wasApproved) {
       await openQuestionOfMessage(db, updated);
       // A resposta do Assistente que esperava a equipe (chat moderado): a pergunta da aba fica respondida so agora.
       if (message.role === "ai") {
@@ -487,8 +558,8 @@ export async function moderateMessage(input: { action: ModerationAction; message
     });
     revalidateConsole(sessionRow.webinar_id);
 
-    // Apagar e promover mudam as contagens do chat no relatorio (so mensagens audience/original nao apagadas).
-    if (data.action === "delete" || data.action === "promote" || data.action === "approve") {
+    // Apagar, promover, liberar e virar pergunta mudam as contagens do relatorio (o chat audience/original nao apagado e as perguntas).
+    if (data.action === "delete" || data.action === "promote" || data.action === "approve" || data.action === "question") {
       invalidateReport();
     }
 
@@ -720,6 +791,8 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
     }
 
     const { session, webinar } = await loadSession(db, question.session_id);
+    // O papel antes de gravar: uma falha ao ler webinar_presenters nao deixa a pergunta respondida sem a linha do chat.
+    const role = answerText ? await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar }) : null;
     const updated = await updateQuestionRow(db, question.id, {
       answer_text: answerText ?? question.answer_text,
       answered_at: now.toISOString(),
@@ -737,7 +810,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
     let message: ChatMessage | null = null;
     const offset = serverOffsetMs(session, now.getTime());
 
-    if (answerText && offset !== null && canTeamActOn(session)) {
+    if (answerText && role && offset !== null && canTeamActOn(session)) {
       const inserted = await insertChatMessage(db, {
         approved: true,
         author_user_id: user.id,
@@ -747,7 +820,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
         master: session.kind === "live",
         offset_ms: offset,
         reply_to_id: question.message_id,
-        role: teamRole(webinar, user.id),
+        role,
         session_id: session.id,
         source: "team",
         webinar_id: webinar.id

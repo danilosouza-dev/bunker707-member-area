@@ -1,13 +1,14 @@
 "use client";
 
-import { Headset } from "lucide-react";
 import { useState } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import { RoomPill } from "../room-pill";
 
 // "Falar com a equipe" (docs/30 §1.6 e D24): aparece na resposta do Assistente ao proprio aluno (no chat e na aba
 // Perguntas). Um clique marca o pedido; depois, a frase de pronto (e, sem ninguem atendendo agora, que a equipe
 // responde depois pelo sino). A falha mostra a frase do servidor e deixa tentar de novo. No "ver como", desligado.
+// Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala. No estilo do YouTube (spec §8.3), o botao e a
+// pilula S de texto, sem icone, na linha de acoes do comentario.
 
 export type AssistantHandoffProps = {
   /** Ninguem da equipe atendendo agora: a frase de pronto diz que a resposta chega pelo sino. */
@@ -25,7 +26,7 @@ export function AssistantHandoff({ attendantsOnline, done = false, onRequest, re
 
   if (state === "done" || done) {
     return (
-      <p className="mt-1 text-[12px] leading-4 text-zinc-400" data-testid="assistant-handoff-done" role="status">
+      <p className="mt-1 text-[12px] leading-4 text-room-fg-subtle" data-testid="assistant-handoff-done" role="status">
         {copy.pedidoEnviado}
         {attendantsOnline === 0 ? ` ${copy.equipeRespondeDepois}` : ""}
       </p>
@@ -44,13 +45,10 @@ export function AssistantHandoff({ attendantsOnline, done = false, onRequest, re
   }
 
   return (
-    <div className="mt-1">
-      <MemberButton className="h-8 px-2.5 text-[12px]" data-testid="assistant-handoff" disabled={readOnly || state === "sending"} onClick={() => void request()} size="sm" variant="ghost">
-        <Headset aria-hidden="true" className="size-3.5" />
-        {copy.falarComAEquipe}
-      </MemberButton>
+    <div>
+      <RoomPill data-testid="assistant-handoff" disabled={readOnly || state === "sending"} label={copy.falarComAEquipe} onClick={() => void request()} size="s" tone="text" />
       {error ? (
-        <p className="mt-0.5 text-[11px] text-amber-200" role="alert">
+        <p className="mt-0.5 text-[11px] text-room-warn-fg" role="alert">
           {error}
         </p>
       ) : null}

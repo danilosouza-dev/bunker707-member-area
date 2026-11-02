@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { LIVE_GRAVADA_DE_TESTE, limparWebinarios, seedLiveGravadaEncerradaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
@@ -6,14 +7,28 @@ import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 // O produtor roda uma Live gravada (docs/30 §2.2 "Roteiro de chat", §2.4 e §10.2; fase 2b): importa um CSV no
 // Roteiro de chat (a previa com a contagem, Importar), salva uma enquete pronta, abre o console da sessao marcada,
 // abre a sessao pela mao (o roteiro pronto entra no chat), manda uma mensagem da equipe e lanca a enquete; a 375 px
-// o console cabe sem rolar de lado. Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
+// o console cabe sem rolar de lado e a 1280 x 720 a pagina nao rola (o console tem a altura da janela e cada parte rola
+// por dentro, docs/31 V2-13). Usa a Live gravada de teste da 2c (webinario e gravacao) mais uma sessao
 // marcada ha 1 min, so para esta rodada; a aluna nao participa aqui (a Sala dela esta em aluno-assiste-live-gravada).
 // Fase 4 (docs/30 §2.2 e §2.4): o editor da Live gravada ganhou os cards Oferta e Assistente e o console da sessao
-// gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais.
+// gravada, os paineis Oferta e Atendimento; o roteiro, as enquetes e o chat da equipe seguem iguais. O painel com abas
+// (docs/31 V2-15): o Chat na tela; o Roteiro, as Enquetes, a Oferta e o Atendimento no ⋯ "Mais painéis", montados e
+// escondidos ate a pessoa escolher.
 
 const { id, titulo } = LIVE_GRAVADA_DE_TESTE;
 const SESSAO = "bbbbbbbb-0000-4000-8000-0000000000e1";
 const CSV = ["Tempo;Nome;Papel;Mensagem", "0:05;Duda;Aluno;Boa noite, turma!", "0:10;Equipe;Equipe;Bem-vindos ao encontro", "abc;Lia;Aluno;tempo torto"].join("\n");
+const entradas = WEBINAR_COPY.consoleV2.entradas;
+
+/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
+async function abrirNoMais(page: Page, entrada: string) {
+  await page.locator("[data-console-more-trigger]").click();
+  await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
+  const secao = page.locator("section[data-console-more]").and(page.getByRole("group", { exact: true, name: entrada }));
+  await expect(secao).toBeVisible();
+  await expect(page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.maisEscolhido(entrada) })).toBeVisible();
+  return secao;
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -79,22 +94,36 @@ test.describe("produtor", () => {
     await expect(page.getByText("Sessão aberta. O roteiro pronto entrou no chat.")).toBeVisible();
     await expect(page.getByRole("button", { exact: true, name: "Encerrar sessão" })).toBeVisible();
 
-    // Fase 4: na sessao gravada o console tem tambem a Oferta (Mostrar agora / Esconder) e o Atendimento.
-    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.console.titulo })).toBeVisible();
-    await expect(page.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.console.titulo })).toBeVisible();
+    // O painel com abas da gravada (docs/31 V2-15): Chat e Perguntas, sem Mãos nem Pessoas, e o Chat na tela.
+    await expect(page.getByRole("tab")).toHaveText(["Chat", /^Perguntas/]);
+    await expect(page.getByRole("tab", { exact: true, name: "Chat" })).toHaveAttribute("aria-selected", "true");
 
-    const chat = page.getByRole("list", { name: "Chat" });
+    // Fase 4: na sessao gravada o console tem tambem a Oferta (Mostrar agora / Esconder) e o Atendimento, no ⋯.
+    const oferta = await abrirNoMais(page, entradas.oferta);
+    await expect(oferta.getByRole("region", { exact: true, name: WEBINAR_COPY.oferta.console.titulo })).toBeVisible();
+    const atendimento = await abrirNoMais(page, entradas.atendimento);
+    await expect(atendimento.getByRole("region", { exact: true, name: WEBINAR_COPY.assistente.console.titulo })).toBeVisible();
+    await expect(oferta).toBeHidden();
+    await expect(page.getByRole("tab", { exact: true, name: "Chat" })).toHaveAttribute("aria-selected", "false");
+
+    // O roteiro pronto entrou: a fila no ⋯ › Roteiro.
+    const roteiro = await abrirNoMais(page, entradas.roteiro);
+    await expect(roteiro.locator("[data-script-fired='true']")).toHaveCount(2);
+
+    // De volta ao Chat: as mensagens do roteiro estao la.
+    await page.getByRole("tab", { exact: true, name: "Chat" }).click();
+    await expect(roteiro).toBeHidden();
+    const chat = page.getByRole("log", { name: "Chat" });
     await expect(chat.getByText("Boa noite, turma!")).toBeVisible();
     await expect(chat.getByText("Bem-vindos ao encontro")).toBeVisible();
-    await expect(page.locator("[data-script-fired='true']")).toHaveCount(2);
 
     await page.getByPlaceholder("Escreva para a turma").fill("Bem-vindos à sessão de teste");
+    // Sem aviso: a mensagem enviada aparece na lista (o aviso cobria o campo, preso no canto de baixo do painel).
     await page.getByRole("button", { exact: true, name: "Enviar" }).click();
-    await expect(page.getByText("Mensagem enviada.")).toBeVisible();
     await expect(chat.getByText("Bem-vindos à sessão de teste")).toBeVisible();
     await expect(chat.getByText("Apresentador").first()).toBeVisible();
 
-    const enquetes = page.getByRole("region", { name: "Enquetes" });
+    const enquetes = (await abrirNoMais(page, entradas.enquetes)).getByRole("region", { name: "Enquetes" });
     await enquetes.getByRole("button", { exact: true, name: "Abrir" }).click();
     await expect(enquetes.getByText("Nesta sessão")).toBeVisible();
     await expect(enquetes.getByText("0 respostas")).toBeVisible();
@@ -102,14 +131,81 @@ test.describe("produtor", () => {
     await expect(enquetes.getByRole("button", { exact: true, name: "Abrir" })).toHaveCount(0);
   });
 
+  test("o chat volta ao fim quando a aba Chat volta a tela (docs/31 V2-15): a mensagem que chegou com o Roteiro na tela aparece ao voltar ao Chat", async ({ page }) => {
+    const db = createLocalAdminClient();
+    const agora = Date.now();
+    const daEquipe = (body: string, createdAt: number, offsetMs: number) => ({
+      approved: true,
+      author_user_id: null,
+      body,
+      created_at: new Date(createdAt).toISOString(),
+      display_name: "Equipe T.",
+      kind: "message",
+      master: false,
+      offset_ms: offsetMs,
+      role: "team",
+      session_id: SESSAO,
+      source: "team",
+      webinar_id: id
+    });
+    // Mensagens o bastante para a lista rolar (sem rolagem o teste passaria sem o cuidado da volta).
+    unwrap(
+      await db.from("webinar_chat_messages").insert(Array.from({ length: 40 }, (_, index) => daEquipe(`Mensagem da equipe ${index + 1}`, agora - (40 - index) * 1_000, 60_000 + index * 1_000))),
+      "Gravando o chat comprido da sessao"
+    );
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
+    await page.waitForLoadState("networkidle");
+    const chat = page.getByRole("log", { name: "Chat" });
+    await expect.poll(() => chat.evaluate((lista) => lista.scrollHeight > lista.clientHeight + 16)).toBe(true);
+    // O texto da mensagem divide o paragrafo com o autor so para o leitor de tela ("Equipe T.: ..."): a busca e por
+    // trecho, como nos outros passos deste arquivo (o exato nunca bate).
+    await expect(chat.getByText("Mensagem da equipe 40")).toBeInViewport();
+
+    // Com o Roteiro na tela (o Chat escondido), chega uma mensagem nova pelo retrato (o Atualizar pede agora; o de 5 s
+    // traria do mesmo jeito). A lista escondida continua montada; o localizador pelo papel (role=log) nao enxerga o que
+    // esta escondido, entao aqui ela e lida pelo atributo dela.
+    await abrirNoMais(page, entradas.roteiro);
+    const listaEscondida = page.locator("[data-console-chat]");
+    await expect(listaEscondida).toBeAttached();
+    await expect(listaEscondida).toBeHidden();
+    const nova = "Chegou com o chat escondido";
+    unwrap(await db.from("webinar_chat_messages").insert(daEquipe(nova, Date.now(), 200_000)), "Gravando a mensagem nova");
+    await page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.atualizar }).click();
+    await expect(listaEscondida.getByText(nova)).toBeAttached({ timeout: 15_000 });
+
+    // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista.
+    await page.getByRole("tab", { exact: true, name: "Chat" }).click();
+    await expect(chat.getByText(nova)).toBeInViewport();
+    expect(await chat.evaluate((lista) => lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 1), "a lista no fim").toBe(true);
+  });
+
   test("a 375 px o console cabe sem rolar de lado", async ({ page }) => {
     await page.setViewportSize({ height: 740, width: 375 });
     await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeVisible();
-    await expect(page.getByRole("list", { name: "Chat" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "Chat" })).toBeVisible();
 
     const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
     expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
+  });
+
+  test("a 1280 x 720 o console tem a altura da janela e a pagina nao rola: so o painel rola por dentro", async ({ page }) => {
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await page.goto(`/admin/comunicacao/webinarios/${id}/sala?sessao=${SESSAO}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeVisible();
+    await expect(page.getByRole("log", { name: "Chat" })).toBeVisible();
+
+    // Os rotulos so para o leitor de tela do painel (como o "Escreva para a turma" do chat) ficam dentro do painel que
+    // rola; fora dele, esticariam o documento e a pagina inteira rolaria para fora da tela.
+    const alturas = await page.evaluate(() => {
+      window.scrollTo({ behavior: "instant", top: 100_000 });
+      return { pagina: document.documentElement.scrollHeight, rolou: window.scrollY, tela: window.innerHeight };
+    });
+    expect(alturas.pagina).toBeLessThanOrEqual(alturas.tela);
+    expect(alturas.rolou).toBe(0);
+    await expect(page.getByRole("heading", { level: 1, name: "Console da sessão" })).toBeInViewport();
   });
 });

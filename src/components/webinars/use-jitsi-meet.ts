@@ -5,9 +5,10 @@
 // session-console): carrega o external_api.js do Jitsi proprio (https://<dominio>/external_api.js, nunca meet.jit.si)
 // por um <script> com o nonce da pagina (a CSP com 'strict-dynamic' de src/proxy.ts aceita sem origem nova em
 // script-src), monta o JitsiMeetExternalAPI dentro do `container` com o token, a sala e o configOverwrite do papel
-// (src/lib/jitsi-room-config.ts), repassa os sinais combinados (JITSI_LISTENED_EVENTS) para `onEvent` e devolve
-// `executeCommand` para os botoes nossos. O token novo (pedido antes do `exp`) NAO remonta a sala no ar: ele fica para a
-// proxima montagem (retry ou queda), assim a live nunca cai por troca de token. Nenhuma frase de tela aqui.
+// (src/lib/jitsi-room-config.ts), repassa os sinais combinados (JITSI_LISTENED_EVENTS, ou a lista `events` de quem
+// monta: o console acrescenta CONSOLE_EXTRA_EVENTS) para `onEvent` e devolve `executeCommand` para os botoes nossos. O
+// token novo (pedido antes do `exp`) NAO remonta a sala no ar: ele fica para a proxima montagem (retry ou queda), assim
+// a live nunca cai por troca de token. Nenhuma frase de tela aqui.
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { JITSI_IFRAME_ALLOW, JITSI_LISTENED_EVENTS, externalApiUrl, type JitsiListenedEvent } from "@/lib/jitsi-room-config";
@@ -19,6 +20,8 @@ export type JitsiMeetApi = {
   executeCommand(command: string, ...args: unknown[]): void;
   /** { audioInput, audioOutput, videoInput }: as listas de aparelhos (sem a permissao, sem rotulo e sem id). */
   getAvailableDevices?(): Promise<unknown>;
+  /** Quem compartilha a tela agora: resolve { sharingParticipantIds } (nunca uma lista solta). */
+  getContentSharingParticipants?(): Promise<{ sharingParticipantIds?: unknown }>;
   /** { audioInput, audioOutput, videoInput }: o aparelho em uso de cada tipo. */
   getCurrentDevices?(): Promise<unknown>;
   getIFrame?(): HTMLIFrameElement | null;
@@ -30,11 +33,15 @@ export type JitsiMeetApi = {
   /** 'output': o navegador deixa trocar o alto-falante (falso no Safari). */
   isDeviceChangeAvailable?(deviceType?: "input" | "output"): Promise<boolean>;
   isMultipleAudioInputSupported?(): Promise<boolean>;
+  /** A moderacao daquele tipo esta ligada (sem o tipo, a de audio). */
+  isModerationOn?(mediaType?: "audio" | "video"): Promise<boolean>;
   /**
    * A moderacao daquele tipo segura o participante (ligada, e ele nao e moderador nem foi aprovado): o Ligar câmera
    * recusado pela equipe nao pede nada ao navegador, e a permissao da camera continua "prompt".
    */
   isParticipantForceMuted?(participantId: string, mediaType?: "audio" | "video"): Promise<boolean>;
+  /** O proprio participante compartilha a tela agora. */
+  isSharingScreen?(): Promise<boolean>;
   removeListener?(event: string, listener: (payload: unknown) => void): void;
   /**
    * Os tres trocam o aparelho: com rotulo, o iframe procura o PRIMEIRO de rotulo identico; com o rotulo vazio, usa o id
@@ -106,18 +113,23 @@ export function loadJitsiExternalApi(domain: string, explicitNonce?: string | nu
   return promise;
 }
 
-export type UseJitsiMeetInput = {
+export type UseJitsiMeetInput<E extends string = JitsiListenedEvent> = {
   configOverwrite: Record<string, unknown>;
   /** Onde o iframe entra (o palco). */
   container: RefObject<HTMLElement | null>;
   domain: string | null;
   /** Falso = nada e montado (sem token, sala fechada, aluno removido, aba de pre-visualizacao). */
   enabled: boolean;
+  /**
+   * Os sinais escutados, lidos na montagem. Sem a lista, JITSI_LISTENED_EVENTS (a sala do aluno); o console passa
+   * [...JITSI_LISTENED_EVENTS, ...CONSOLE_EXTRA_EVENTS] com E = ConsoleListenedEvent. Trocar a lista nao remonta.
+   */
+  events?: readonly E[];
   interfaceConfigOverwrite?: Record<string, unknown>;
   jwt: string | null;
   nonce?: string | null;
-  /** Cada sinal de JITSI_LISTENED_EVENTS com o payload cru do IFrame API (quem usa filtra; so codigos vao ao servidor). */
-  onEvent?: (name: JitsiListenedEvent, payload: unknown) => void;
+  /** Cada sinal da lista com o payload cru do IFrame API (quem usa filtra; so codigos vao ao servidor). */
+  onEvent?: (name: E, payload: unknown) => void;
   room: string | null;
 };
 
@@ -132,7 +144,7 @@ export type UseJitsiMeet = {
   status: JitsiStatus;
 };
 
-export function useJitsiMeet(input: UseJitsiMeetInput): UseJitsiMeet {
+export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJitsiMeetInput<E>): UseJitsiMeet {
   const { container, domain, enabled, room } = input;
   const api = useRef<JitsiMeetApi | null>(null);
   const latest = useRef(input);
@@ -176,18 +188,21 @@ export function useJitsiMeet(input: UseJitsiMeetInput): UseJitsiMeet {
           iframe.setAttribute("allow", JITSI_IFRAME_ALLOW);
         }
         setStatus("joining");
-        for (const name of JITSI_LISTENED_EVENTS) {
-          instance.addListener(name, (payload) => {
+        // Sem a lista, a da sala (o E padrao e o JitsiListenedEvent dela).
+        const events = current.events ?? (JITSI_LISTENED_EVENTS as readonly string[] as readonly E[]);
+        for (const name of events) {
+          const signal: string = name;
+          instance.addListener(signal, (payload) => {
             if (disposed) {
               return;
             }
-            if (name === "videoConferenceJoined") {
+            if (signal === "videoConferenceJoined") {
               const id = payload && typeof payload === "object" ? (payload as Record<string, unknown>).id : null;
               setParticipantId(typeof id === "string" ? id : null);
               setStatus("joined");
-            } else if (name === "videoConferenceLeft" || name === "readyToClose") {
+            } else if (signal === "videoConferenceLeft" || signal === "readyToClose") {
               setStatus("left");
-            } else if (name === "errorOccurred") {
+            } else if (signal === "errorOccurred") {
               const error = payload && typeof payload === "object" ? ((payload as Record<string, unknown>).error ?? payload) : null;
               if (error && typeof error === "object" && (error as Record<string, unknown>).isFatal === true) {
                 setStatus("failed");

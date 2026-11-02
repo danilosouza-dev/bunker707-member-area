@@ -1,11 +1,15 @@
 // A Sala da Live gravada e do Replay no navegador, a parte pura (docs/30 §1.6, §6.6 e §9): a decisao da trava do
 // player (esperar, recolocar no alvo, encerrar), a fase pelo relogio corrigido, a janela do chat e quando pedir a
 // seguinte, a fusao das mensagens sem repetir, o estado de presenca que o sinal de 15 s manda, o compositor do
-// chat (desligado, modo lento, aceite), as bolhas das reacoes e a sala perdida (404). Sem React e sem rede:
+// chat (desligado, modo lento, aceite), a hora e o papel embaixo do balao do chat (docs/31 V2-9), as bolhas das reacoes
+// e a sala perdida (404). Sem React e sem rede:
 // tests/webinarios-sala-navegador.test.mjs carrega direto pelo Node. Os pedidos ficam em src/components/member/webinars/room/room-api.ts.
 
 import type { EmbedBridge } from "./lesson-embed-bridge";
-import { ROOM_RULES, type ChatMode, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
+import { formatMemberRelativeTime } from "./member-format";
+import { WEBINAR_COPY } from "./webinar-copy";
+import { saoPauloTime } from "./webinar-time";
+import { ASSISTANT_LIMITS, ROOM_RULES, type ChatMode, type ChatRole, type PresenceState, type Reaction, type SimulatedPhase, type StudentChatMessage } from "../server/webinars/model";
 import { initialChatWindow, needsResync, nextChatWindow, playerTargetSeconds, seekChatWindow, visibleMessages, type ChatWindow } from "../server/webinars/room-model";
 
 export { clockSkewMs, initialChatWindow, nextChatWindow, offsetLabel, playerTargetSeconds, seekChatWindow, visibleMessages } from "../server/webinars/room-model";
@@ -96,9 +100,117 @@ export function revealedMessages(messages: readonly RoomMessage[], playerOffsetM
   return visibleMessages(messages, playerOffsetMs).concat(messages.filter((message) => message.mine && message.offsetMs > playerOffsetMs));
 }
 
-/** Quantas mensagens novas chegaram desde a ultima contagem (o leitor de tela anuncia "N mensagens novas" em rajada). */
+/**
+ * Quantas mensagens novas chegaram desde a ultima contagem (o leitor de tela anuncia "N mensagens novas" em rajada; o
+ * contador do balao da sala com o painel fechado conta por ela, unreadCount em room-layout-model.ts, docs/31 V2-7).
+ */
 export function newMessageCount(previousIds: ReadonlySet<string>, revealed: readonly RoomMessage[]): number {
   return revealed.reduce((count, message) => (previousIds.has(message.id) ? count : count + 1), 0);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O item do chat no estilo do Zoom (docs/31 V2-9): a hora e o papel da linha "nome · papel · hora"
+ * ---------------------------------------------------------------------------------------------- */
+
+/** De que sala e o chat: a Live ao vivo, a gravada (simulada) ou o Replay (o mesmo RoomKind de room-layout-model.ts). */
+export type ChatTimeKind = "live" | "replay" | "simulated";
+
+/**
+ * A hora da mensagem em Sao Paulo ("20:41"). Na live, a hora em que o servidor gravou a mensagem (`sentAt`): o offset
+ * nao serve, porque a mensagem da espera conta da hora marcada, o "Comecar para todos" muda o zero sem recalcular, e
+ * o que ja esta na tela guarda o offset de antes da ancora. Na gravada, a hora marcada mais o offset (o roteiro ja
+ * nasce com created_at = scheduled_at + offset, e a linha mestre nao leva a data da live de origem). No Replay,
+ * nenhuma: o payload nao traz o inicio da live original, e uma hora errada seria pior que nenhuma.
+ */
+export function chatTimeLabel(input: { kind: ChatTimeKind; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): string {
+  if (input.kind === "live") {
+    return saoPauloTime(input.sentAt);
+  }
+  if (input.kind !== "simulated" || typeof input.zeroMs !== "number") {
+    return "";
+  }
+  const at = new Date(input.zeroMs + input.offsetMs);
+  return Number.isNaN(at.getTime()) ? "" : saoPauloTime(at.toISOString());
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O comentario do YouTube no chat da sala (docs/31, a sala no estilo do YouTube; spec §8)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O instante da mensagem em ms, pela mesma regra da hora (chatTimeLabel): na live, o `sentAt` que o servidor gravou;
+ * na gravada, a hora marcada mais o offset; no Replay (ou sem o dado), nenhum.
+ */
+export function chatTimeAt(input: { kind: ChatTimeKind; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): number | null {
+  const at = input.kind === "live" ? Date.parse(input.sentAt ?? "") : input.kind === "simulated" && typeof input.zeroMs === "number" ? input.zeroMs + input.offsetMs : Number.NaN;
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * O tempo do comentario ("há 2 minutos", "agora" abaixo de 45 s), contra o agora do servidor (`nowMs` com o skew).
+ * Sempre preso no passado: a minha mensagem na gravada pode estar a frente do player, e o relogio do aparelho pode
+ * estar atrasado. No Replay, "" (sem tempo, V2-A15); a hora exata fica no title (chatTimeLabel).
+ */
+export function chatAgoLabel(input: { kind: ChatTimeKind; nowMs: number; offsetMs: number; sentAt?: string | null; zeroMs?: number | null }): string {
+  const at = chatTimeAt(input);
+  return at === null || !Number.isFinite(input.nowMs) ? "" : formatMemberRelativeTime(Math.min(at, input.nowMs), input.nowMs);
+}
+
+// A mesma regra do "@assistente" do servidor (mentionsAssistant, src/server/webinars/assistant-model.ts), copiada aqui
+// para o navegador nao carregar o modelo do Assistente (o teste confere as duas contra os mesmos textos): a palavra
+// inteira, sem diferenciar maiusculas; nem "@assistentes" nem "x@assistente" (e-mail) contam.
+const MENTION_SEGMENT = new RegExp(`(^|[^\\p{L}\\p{N}_@.])(${ASSISTANT_LIMITS.mention.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![\\p{L}\\p{N}_])`, "giu");
+
+/** O texto do comentario em trechos: o "@assistente" (em peso 600 na sala) separado do resto, na ordem. */
+export function commentSegments(body: string): Array<{ mention: boolean; text: string }> {
+  const segments: Array<{ mention: boolean; text: string }> = [];
+  let cursor = 0;
+  for (const match of body.matchAll(MENTION_SEGMENT)) {
+    const start = (match.index ?? 0) + match[1].length;
+    if (start > cursor) {
+      segments.push({ mention: false, text: body.slice(cursor, start) });
+    }
+    segments.push({ mention: true, text: match[2] });
+    cursor = start + match[2].length;
+  }
+  if (cursor < body.length) {
+    segments.push({ mention: false, text: body.slice(cursor) });
+  }
+  return segments;
+}
+
+/** Sem acento, sem caixa e sem os espacos das pontas, para comparar um nome com um papel. */
+function foldName(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("pt-BR").trim();
+}
+
+/**
+ * O nome e o proprio papel (a resposta do Assistente, a Equipe que escreve como Equipe): o comentario mostra so o selo,
+ * com o nome dentro, e o leitor de tela nao repete o papel.
+ */
+export function roleBadgeOnly(displayName: string, roleLabel: string | null): boolean {
+  return roleLabel !== null && foldName(displayName) !== "" && foldName(displayName) === foldName(roleLabel);
+}
+
+/**
+ * O papel na linha de baixo do balao: so Apresentador, Co-apresentador, Equipe e Assistente; o aluno e o convidado,
+ * nenhum. O co-apresentador grava `co_host` desde a fase 2 do redesign (docs/31 V2-A12, migracao 202611010001); as
+ * mensagens dele de antes ficaram como `team` e continuam saindo como Equipe.
+ */
+export function chatRoleLabel(role: ChatRole): string | null {
+  const selos = WEBINAR_COPY.sala.selos;
+  switch (role) {
+    case "ai":
+      return selos.assistente;
+    case "co_host":
+      return selos.coApresentador;
+    case "host":
+      return selos.apresentador;
+    case "team":
+      return selos.equipe;
+    default:
+      return null;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------

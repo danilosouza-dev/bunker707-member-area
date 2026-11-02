@@ -163,6 +163,17 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.deepEqual(coHost.toolbarButtons, ["microphone", "camera", "desktop", "raisehand", "participants-pane", "security", "select-background", "settings", "hangup"], "o co-apresentador: o mesmo do host sem gravar");
   assert.deepEqual(coHost.toolbarConfig, { alwaysVisible: true });
   assert.equal(embed.liveConfigOverwrite("team", settings).toolbarConfig, undefined, "a Equipe segue o aluno: sem a barra do iframe");
+  // No console (docs/31 V2-14) a barra de quem apresenta e a nossa: o iframe fica sem a do motor e sem os atalhos, e o
+  // ⋮ da miniatura avisa o Liberar e o Remover; a pagina da sala (o padrao) fica como acima.
+  for (const role of ["host", "co_host"]) {
+    const noConsole = embed.liveConfigOverwrite(role, settings, null, "console");
+    assert.deepEqual(noConsole.toolbarButtons, [], role);
+    assert.equal(noConsole.toolbarConfig, undefined, role);
+    assert.equal(noConsole.disableShortcuts, true, role);
+    assert.deepEqual(noConsole.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }], role);
+    assert.deepEqual(noConsole.constraints, embed.liveConfigOverwrite(role, settings).constraints, `${role}: o palco no mesmo envio`);
+    assert.equal(embed.liveConfigOverwrite(role, settings).participantMenuButtonsWithNotifyClick, undefined, `${role}: na sala, o ⋮ do motor age sozinho`);
+  }
   for (const role of ["student", "team"]) {
     const semBarra = embed.liveConfigOverwrite(role, settings);
     assert.ok(!semBarra.toolbarButtons.includes("settings") && !semBarra.toolbarButtons.includes("select-background"), `${role}: sem engrenagem nem fundo do iframe`);
@@ -172,16 +183,43 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.equal(embed.liveConfigOverwrite("co_host", { ...settings, screenFps: 15, stage: 720 }).desktopSharingFrameRate.max, 15);
   assert.equal(embed.liveConfigOverwrite("team", settings).constraints.video.height.max, 360);
   assert.equal(embed.liveConfigOverwrite("host", settings).disableChat, true, "o chat e sempre o nosso (D5)");
+  // Nenhum aviso do motor na tela (os que importam viram o aviso da pagina), nem o selo do motor no topo; o som da mao
+  // de cada aluno so sai para o aluno e a Equipe (quem apresenta continua ouvindo).
+  assert.deepEqual(aluno.notifications, []);
+  assert.deepEqual(aluno.conferenceInfo, { alwaysVisible: [], autoHide: [] });
+  assert.deepEqual(aluno.disabledSounds, ["RAISE_HAND_SOUND"]);
+  assert.deepEqual(host.notifications, [], "tambem quem apresenta pela pagina da sala");
+  assert.equal(host.disabledSounds, undefined);
+  // O console continua com os avisos do motor ate os avisos do console entrarem (V2-A59): ninguem la ouve o notificationTriggered.
+  assert.equal(embed.liveConfigOverwrite("co_host", settings, null, "console").notifications, undefined);
+  assert.equal(embed.liveConfigOverwrite("host", settings, null, "console").conferenceInfo, undefined);
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite()).toLowerCase().includes("jitsi"));
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite("host")).toLowerCase().includes("jitsi"));
   assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");
   assert.deepEqual(embed.liveInterfaceConfigOverwrite("host").SETTINGS_SECTIONS, ["devices"], "a engrenagem do host so com os aparelhos");
   assert.deepEqual(embed.liveInterfaceConfigOverwrite("co_host").SETTINGS_SECTIONS, ["devices"]);
+  // O visual da V2 (docs/31 §3) entra para todos os papeis; so a engrenagem muda por papel.
   assert.deepEqual(
     Object.keys(embed.liveInterfaceConfigOverwrite("host")).sort(),
-    ["DISABLE_JOIN_LEAVE_NOTIFICATIONS", "MOBILE_APP_PROMO", "SETTINGS_SECTIONS", "SHOW_CHROME_EXTENSION_BANNER"],
+    [
+      "CONNECTION_INDICATOR_DISABLED",
+      "DEFAULT_BACKGROUND",
+      "DISABLE_JOIN_LEAVE_NOTIFICATIONS",
+      "DISABLE_VIDEO_BACKGROUND",
+      "FILM_STRIP_MAX_HEIGHT",
+      "LOCAL_THUMBNAIL_RATIO",
+      "REMOTE_THUMBNAIL_RATIO",
+      "SETTINGS_SECTIONS",
+      "SHOW_CHROME_EXTENSION_BANNER",
+      "VERTICAL_FILMSTRIP",
+      "VIDEO_LAYOUT_FIT",
+      "VIDEO_QUALITY_LABEL_DISABLED"
+    ],
     "o resto do interfaceConfig igual para todos"
   );
+  const semPapel = { ...embed.liveInterfaceConfigOverwrite("host") };
+  delete semPapel.SETTINGS_SECTIONS;
+  assert.deepEqual(embed.liveInterfaceConfigOverwrite("student"), semPapel, "o aluno recebe o mesmo visual, sem a engrenagem");
   assert.equal(embed.JITSI_IFRAME_ALLOW, "camera; microphone; display-capture; autoplay; fullscreen; speaker-selection");
   assert.deepEqual(live.liveEmbedSettings({ allowStudentCamera: false, quality: { screenFps: 15, stage: 720 } }), { allowStudentCamera: false, screenFps: 15, stage: 720 });
 
@@ -306,9 +344,12 @@ test("as linhas da sessao: as colunas da fase 3 com padroes seguros quando o dub
     meetConfigured: true,
     practice: false,
     recording: true,
+    selfUnmute: false,
     startedAt: iso(NOW),
     status: "live"
   });
+  // O microfone sozinho vem do room_settings (docs/31 caminho A); sem a chave, desligado.
+  assert.equal(live.liveRoomInfoOf({ ...nova, startedAt: iso(NOW), status: "live" }, true, { practiceSession: false, selfUnmute: true, waitingRoom: false }).selfUnmute, true);
   // A sala de espera e a Sessao de pratica que o aluno le (a mesma regra do console, desiredLobby).
   const pratica = live.liveRoomInfoOf({ ...nova, roomLocked: false, startedAt: null, status: "waiting" }, true, { practiceSession: true, waitingRoom: false });
   assert.deepEqual([pratica.lobby, pratica.practice], [true, true]);

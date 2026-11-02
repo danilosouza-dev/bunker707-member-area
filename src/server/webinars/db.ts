@@ -19,12 +19,16 @@ export type WebinarsDb = SupabaseClient;
  * webinar_sessions.jit em toda leitura de sessao (SESSION_COLUMNS), da 202610300005: sem qualquer uma das duas, tudo
  * aqui cai no aviso de migracao pendente. As migracoes da fase 4 vem depois da 202610300001, em ordem e sem buraco
  * (202610300002 a 202610300007: 4a, 4b, 4c, 4e, 4f e os ajustes da revisao; a 4d, Sala Live vertical, nao tem dado
- * novo nem migracao), aplicadas na nuvem de teste antes do merge (docs/21 §9.10). A 202610300007 e a mais
- * nova: os numeros da revisao (quem viu a oferta congelado, a venda reembolsada fora) so saem com ela, entao o aviso a
- * aponta. Cada parte da fase 4 tem a propria constante abaixo, para o aviso de migracao pendente apontar a certa onde
- * so aquela parte falta.
+ * novo nem migracao), aplicadas na nuvem de teste antes do merge (docs/21 §9.10); os numeros da revisao (quem viu a
+ * oferta congelado, a venda reembolsada fora) so saem com a 202610300007. O redesign V2, fase 2 (docs/31), vem depois:
+ * a 202611010001 troca o check de webinar_chat_messages.role para aceitar `co_host` (o Co-apresentador no chat,
+ * V2-A12) e e a mais nova, entao o aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21 §9.11). Sem ela,
+ * a linha do chat do co-apresentador falha (23514 no check antigo, que chega a ele como o erro comum da acao, sem o
+ * aviso de migracao pendente): a mensagem nao entra e, na resposta escrita, a pergunta ja ficou respondida antes do
+ * insert, sem a linha no chat, sem o aviso no sino e sem a auditoria; o resto le e grava como antes. Cada parte da fase 4 tem a propria constante abaixo, para o
+ * aviso de migracao pendente apontar a certa onde so aquela parte falta.
  */
-export const WEBINARS_MIGRATION = "202610300007";
+export const WEBINARS_MIGRATION = "202611010001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";

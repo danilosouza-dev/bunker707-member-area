@@ -116,6 +116,9 @@ elif [ "$role" = "meet" ]; then
         [ "${SEM_LIVE_2H:-}" = "sim" ] || die "O Jitsi ja esta no ar em $server. Um novo deploy-meet recria containers e derruba a sala: confirme que nao ha live nas proximas 2 h com SEM_LIVE_2H=sim nas opcoes (docs/20 §8B.6)."
         log "Atualizando o stack (tag do .env.example do commit, se mudou) e a configuracao"
         remote "SEM_LIVE_2H=sim bash infra/jitsi/scripts/update.sh --server"
+        # O web copia custom-config.js e custom-interface_config.js so na partida (oneshot da imagem): recria sempre,
+        # para a configuracao nova (o carregador do CSS e o ?v= dele) chegar ao config.js servido (docs/31 §3).
+        remote "$jitsi_compose up -d --force-recreate --no-deps web"
         remote "$jitsi_compose up -d && bash -c '. infra/jitsi/scripts/_env.sh; reconnect_focus'"
     else
         log "Primeira subida do stack do Jitsi (imagens, compose up)"

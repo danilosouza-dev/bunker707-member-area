@@ -16,6 +16,58 @@ export type LiveRoomRole = "co_host" | "host" | "student" | "team";
 /** O que o card Qualidade e o card Sala decidem para o iframe (docs/30 §2.2 e D26). */
 export type LiveEmbedSettings = { allowStudentCamera: boolean; screenFps: 15 | 30; stage: 720 | 1080 };
 
+/** O tema da sala (docs/31 V2-12): a escolha da pessoa, guardada no navegador dela; escuro por padrao. */
+export type LiveRoomTheme = "dark" | "light";
+/**
+ * Os layouts do video que o motor permite (docs/31 V2-16): o palco com a coluna de miniaturas, o palco com a fileira
+ * embaixo, a grade (tile view, ligada por comando depois de entrar) e o palco duplo (ate 2 no palco, stage filmstrip).
+ */
+export type LiveRoomLayout = "grid" | "stage" | "stage_bottom" | "stage_duo";
+/** O visual pedido por pessoa (docs/31 §3): entra no iframe pelo interfaceConfig e, o tema, pelo hash (o CSS da instancia le). */
+export type LiveEmbedLook = { layout?: LiveRoomLayout | null; theme?: LiveRoomTheme | null };
+export const DEFAULT_LOOK: Readonly<Required<{ [K in keyof LiveEmbedLook]: NonNullable<LiveEmbedLook[K]> }>> = { layout: "stage", theme: "dark" };
+const ROOM_THEMES: readonly LiveRoomTheme[] = ["dark", "light"];
+const ROOM_LAYOUTS: readonly LiveRoomLayout[] = ["grid", "stage", "stage_bottom", "stage_duo"];
+/**
+ * O fundo atras do video grande nos dois temas: preto, como num player. Aparece quando sobra espaco: na tela
+ * compartilhada (nunca cortada) e quando a camera precisaria de mais de 30 % de zoom para preencher o palco.
+ */
+export const STAGE_BACKGROUND = "#000000";
+/**
+ * A coluna de miniaturas (Palco, Palco duplo e a grade), conferido na tag fixada (docs/31 §3): `filmstrip.initialWidth`
+ * grava a largura na entrada e, com a coluna "redimensionavel" (o puxador fica invisivel pelo CSS da instancia) e pelo
+ * menos 180 px, o motor estreita o video grande em vez de cobrir a borda dele com as miniaturas (LargeVideo.web.tsx).
+ * Com a coluna redimensionavel a miniatura remota tem sempre 120 px de altura e a local tem largura / 16:9 (floor), por
+ * isso 213 px (119 x 120). A coluna e redimensionavel sem toque sempre, e com toque so a partir de 920 px (ai o
+ * puxador ocupa 21 px, nao 9). O motor limita a coluna a (largura do iframe - 800), mas so quando a janela redimensiona
+ * (CLIENT_RESIZED), nao na entrada: ao abrir, a coluna fica com 213 px em qualquer largura; depois do primeiro resize o
+ * iframe precisa de 1013 px para a coluna inteira e, abaixo de 980 px, as miniaturas voltam a flutuar sobre o video
+ * (resizeFilmStrip muda so a largura atual; no proximo resize o motor volta a esta). A pagina trata isso na fase 1:
+ * mede o iframe e esconde a coluna (toggleFilmStrip) abaixo de FILMSTRIP_COLUMN_MIN_FRAME.
+ */
+export const FILMSTRIP_COLUMN_WIDTH = 213;
+/**
+ * A menor largura do iframe com a coluna de miniaturas inteira ao lado do video grande (docs/31 V2-A5): o motor limita
+ * a coluna a (largura - 800) depois do primeiro resize, entao abaixo de 1013 px a sala esconde a coluna (toggleFilmStrip)
+ * e o video grande fica com a largura toda; no celular (o iframe de cerca de 374 px) ela tambem some.
+ */
+export const FILMSTRIP_COLUMN_MIN_FRAME = 800 + FILMSTRIP_COLUMN_WIDTH;
+/** A altura das miniaturas na fileira embaixo (FILM_STRIP_MAX_HEIGHT vale como altura no horizontal); 16:9. */
+export const THUMBNAIL_HEIGHT = 120;
+export const THUMBNAIL_RATIO = 16 / 9;
+/**
+ * A chave que leva o tema no hash do iframe (`#config.bunkerTheme="light"`). O app descarta chaves fora da whitelist,
+ * mas o hash fica na URL e o custom-config.js da instancia o le antes do app subir (docs/31 §3).
+ */
+export const THEME_HASH_KEY = "bunkerTheme";
+
+/** O visual conferido: valor desconhecido ou ausente vira o padrao (escuro, palco). */
+export function normalizeLook(look?: LiveEmbedLook | null): { layout: LiveRoomLayout; theme: LiveRoomTheme } {
+  const theme = look?.theme && ROOM_THEMES.includes(look.theme) ? look.theme : DEFAULT_LOOK.theme;
+  const layout = look?.layout && ROOM_LAYOUTS.includes(look.layout) ? look.layout : DEFAULT_LOOK.layout;
+  return { layout, theme };
+}
+
 /** Teto da camera do aluno e da Equipe fora do palco (D26). */
 export const STUDENT_CAMERA_MAX_HEIGHT = 360;
 /** Cada um recebe no maximo o palco + 8 miniaturas (custom-config.js: channelLastN = 9). */
@@ -59,10 +111,13 @@ export function meetPermissionsAllowList(domain: string | null): string {
 }
 
 /**
- * A barra do iframe por papel (docs/30 §6.3): o apresentador e o co-apresentador usam a do iframe (microfone, camera,
- * tela, mao, participantes, gravar so o host, seguranca, fundo, configuracoes e sair; a engrenagem abre so a aba de
- * aparelhos, liveInterfaceConfigOverwrite); aluno e Equipe usam so a nossa. Os controles de Zoom (silenciar todos,
- * fechar cameras, liberar, remover, trancar, destacar) sao botoes nossos que chamam executeCommand.
+ * A barra do iframe por papel na pagina da sala (docs/30 §6.3; a superficie "room" de liveConfigOverwrite): o
+ * apresentador e o co-apresentador que entram pela pagina do aluno usam a do iframe (microfone, camera, tela, mao,
+ * participantes, gravar so o host, seguranca, fundo, configuracoes e sair; a engrenagem abre so a aba de aparelhos,
+ * liveInterfaceConfigOverwrite); aluno e Equipe usam so a nossa. No console (a superficie "console"), quem apresenta
+ * tambem usa a nossa barra (docs/31 V2-14) e o liveConfigOverwrite troca esta lista pela vazia (ou so pelo botao de
+ * tela do motor, consoleScreenShareMode). Os controles de Zoom (silenciar todos, fechar cameras, liberar, remover,
+ * trancar, destacar) sao botoes nossos que chamam executeCommand.
  */
 export function toolbarButtonsFor(role: LiveRoomRole, settings: Pick<LiveEmbedSettings, "allowStudentCamera">): string[] {
   switch (role) {
@@ -90,6 +145,59 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
   return role === "host" || role === "co_host";
 }
 
+/** Onde o iframe entra: a pagina da sala (o aluno, e quem apresenta por ela) ou o console de quem apresenta. */
+export type LiveEmbedSurface = "console" | "room";
+
+/** O motor calado na pagina da sala (V2-20): sem avisos, sem o selo do topo e, para a plateia, sem o som da mao. */
+function roomEngineQuiet(audience: boolean): Record<string, unknown> {
+  return {
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    ...(audience ? { disabledSounds: ["RAISE_HAND_SOUND"] } : {}),
+    notifications: []
+  };
+}
+
+/**
+ * Quem desenha o Compartilhar tela de quem apresenta no console (docs/31 V2-14 e V2-A39): o nosso circulo da barra
+ * (toggleShareScreen pelo IFrame API) ou o botao de tela do proprio motor (toolbarButtons ["desktop"], que aparece ao
+ * passar o mouse no video).
+ */
+export type ConsoleScreenShareMode = "engine" | "ours";
+
+const CHROMIUM = /\b(?:Chrome|Chromium)\/\d/;
+const NOT_CHROMIUM = /\b(?:Firefox|FxiOS)\//;
+/** O celular e o tablet: o Chrome do Android traz "Chrome/" mas nao tem getDisplayMedia. */
+const MOBILE = /\b(?:Android|Mobile)\b/;
+
+/**
+ * O Compartilhar tela de quem apresenta no console, pelo navegador (docs/31 V2-A39), ate o spike da tela (§5.3)
+ * confirmar ou trocar: o nosso circulo so nos navegadores de computador com Chromium (Chrome, Edge, Opera, Brave, que
+ * trazem "Chrome/" no userAgent), onde o getDisplayMedia pedido pelo comando dentro do iframe de outra origem foi
+ * conferido; no Firefox, no Safari, em todo navegador do iPhone e do iPad (o Chrome de la e WebKit, "CriOS/") e no
+ * Android, o botao do proprio motor. No celular e no tablet nao ha tela compartilhada: sem getDisplayMedia o motor nao
+ * age no comando nem mostra o botao dele (isDesktopSharingEnabled), e o nosso circulo seria um botao que nao faz nada.
+ * Sem o userAgent, o do motor, que funciona em todos. O recurso tambem conta: sem o getDisplayMedia na pagina
+ * (`displayMedia` falso), o do motor, mesmo com o userAgent de computador (o Chrome do Android ou do tablet no "site para
+ * computador" manda o de Linux, sem Android nem Mobile). Lido uma vez no navegador, nunca no servidor.
+ */
+export function consoleScreenShareMode(userAgent: string | null | undefined, features: { displayMedia?: boolean } = {}): ConsoleScreenShareMode {
+  const agent = typeof userAgent === "string" ? userAgent : "";
+  if (features.displayMedia === false) {
+    return "engine";
+  }
+  return CHROMIUM.test(agent) && !NOT_CHROMIUM.test(agent) && !MOBILE.test(agent) ? "ours" : "engine";
+}
+
+/**
+ * O que o ⋮ da miniatura do motor avisa em vez de fazer, no console de quem apresenta (docs/31 V2-14 e V2-A29): o
+ * "Pedir para ligar o microfone" vira o nosso Liberar e o Remover passa pelo nosso servidor (o registro da sessao)
+ * antes do kickParticipant. O motor manda o participantMenuButtonClick { key, participantId, preventExecution }.
+ */
+export const CONSOLE_PARTICIPANT_MENU_BUTTONS = [
+  { key: "ask-unmute", preventExecution: true },
+  { key: "kick", preventExecution: true }
+] as const;
+
 /**
  * O configOverwrite do iframe (docs/30 §5.4, §6.3, §8.1 e D26). O chat, as enquetes e as reacoes do Jitsi ficam
  * sempre desligados (D5: sao os nossos); todo mundo entra mudo e com a camera fechada; o aluno nao tem menu sobre
@@ -101,23 +209,64 @@ function presents(role: LiveRoomRole | null | undefined): boolean {
  * §8.5); o toggleAudio depois do Falar e o toggleVideo depois do aviso da camera pedem a permissao na hora certa. O
  * aluno bate sozinho na sala de espera (`lobby.autoKnock`): com a sala trancada ou a Sala de espera ligada, ele fica
  * na fila sem precisar achar o botao do iframe.
+ * No console (`surface` "console", docs/31 V2-14), o Apresentador e o co-apresentador usam a NOSSA barra: o iframe
+ * deles fica sem a barra do motor (`toolbarButtons` vazio, ou so o botao de tela do motor onde o nosso circulo nao
+ * vale, `screenShare` "engine"), sem o `toolbarConfig` e sem os atalhos (o ESPACO, que liga o microfone enquanto
+ * aperta, e o F, que esconderia a coluna de todos pelo seguir a visao), e o ⋮ da miniatura avisa o Liberar e o Remover
+ * em vez de faze-los (CONSOLE_PARTICIPANT_MENU_BUTTONS). A pagina da sala (`surface` "room", o padrao) fica como era,
+ * inclusive para quem apresenta por ela.
  */
-export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSettings): Record<string, unknown> {
+export function liveConfigOverwrite(
+  role: LiveRoomRole,
+  settings: LiveEmbedSettings,
+  lookInput?: LiveEmbedLook | null,
+  surface: LiveEmbedSurface = "room",
+  screenShare: ConsoleScreenShareMode = "ours"
+): Record<string, unknown> {
   const height = sendHeightFor(role, settings);
   const student = role === "student";
   const audience = role === "student" || role === "team";
+  const look = normalizeLook(lookInput);
+  // Quem apresenta no console: a barra e nossa (docs/31 V2-14).
+  const ourPresenterBar = surface === "console" && presents(role);
   return {
     ...(audience ? { disableInitialGUM: true } : {}),
     ...(student ? { lobby: { autoKnock: true } } : {}),
+    // O tema vai no hash para o CSS da instancia (docs/31 §3); o app ignora a chave, que fica fora da whitelist.
+    [THEME_HASH_KEY]: look.theme,
     breakoutRooms: { hideAddRoomButton: true, hideAutoAssignButton: true, hideJoinRoomButton: true },
     channelLastN: CHANNEL_LAST_N,
+    // Na pagina da sala, nenhum aviso do motor na tela, para nenhum papel (docs/31 V2-20, a sala no estilo do YouTube):
+    // os que importam viram o aviso da pagina (RoomSnackbar) pelo notificationTriggered, que o motor manda mesmo com o
+    // aviso escondido (notifications/actions.ts:143-145 da tag fixada; configWhitelist.ts:190). Sai tambem o selo do
+    // motor no topo (o "✋ 1" das maos e o de gravacao: conferenceInfo, configWhitelist.ts:80), que o palco ja tem nos
+    // selos da pagina, e, para o aluno e a Equipe, o som da mao de cada aluno para a turma (disabledSounds,
+    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia. O console fica sem nenhuma das tres chaves:
+    // ninguem la ouve o notificationTriggered, e quem apresenta continua vendo os avisos do motor (a gravacao que nao
+    // comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
+    ...(surface === "room" ? roomEngineQuiet(audience) : {}),
+    // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
+    // pagina (docs/31 V2-4).
+    hideDominantSpeakerBadge: true,
+    // Sem a grade automatica do motor: com 3 ou mais pessoas ele abriria a grade sozinho, e o "seguir a visao" do host a
+    // levaria a todos. A Grade e por comando (setTileView), e o valor explicito vence esta chave (video-layout/functions.any.ts).
+    disableTileView: true,
+    // O indicador de conexao nas miniaturas: esta chave do config vale sempre; CONNECTION_INDICATOR_DISABLED e a legada.
+    connectionIndicators: { disabled: true },
+    // A coluna com a largura fixada na entrada (o video grande ao lado, nao por baixo) e, no palco duplo, 2 no palco;
+    // a fileira embaixo com o tamanho do interfaceConfig.
+    filmstrip:
+      look.layout === "stage_bottom"
+        ? { disableResizable: true, stageFilmstripParticipants: 1 }
+        : { alwaysShowResizeBar: false, disableResizable: false, initialWidth: FILMSTRIP_COLUMN_WIDTH, stageFilmstripParticipants: look.layout === "stage_duo" ? 2 : 1 },
+    // A grade mostra no maximo o que cada um recebe (o palco + 8 miniaturas, D26).
+    tileView: { numberOfVisibleTiles: CHANNEL_LAST_N },
     constraints: { video: { height: { ideal: height, max: height, min: 180 } } },
     desktopSharingFrameRate: { max: settings.screenFps, min: 5 },
     disableChat: true,
     disableDeepLinking: true,
     disableInviteFunctions: true,
     disablePolls: true,
-    disablePrivateChat: true,
     disableReactions: true,
     disableRemoteMute: student,
     // Sem o "Flip" no menu da propria miniatura para o aluno e a Equipe: o espelho so pelo nosso painel, que guarda a
@@ -125,20 +274,23 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
     ...(audience ? { disableLocalVideoFlip: true } : {}),
     disableSelfView: false,
     // Sem atalhos do iframe para o aluno e a Equipe: a camera e o microfone so pela nossa barra (o aviso de gravacao).
-    disableShortcuts: audience,
+    // No console, quem apresenta tambem fica sem eles: o microfone e a camera pela nossa barra.
+    disableShortcuts: audience || ourPresenterBar,
     hideConferenceSubject: true,
     hideConferenceTimer: true,
     hideDisplayName: false,
+    // So `prejoinConfig.enabled` esta na whitelist da tag fixada; o `prejoinPageEnabled` antigo era ignorado.
     prejoinConfig: { enabled: false },
-    prejoinPageEnabled: false,
     readOnlyName: true,
-    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disabled: student },
+    // Sem conversa privada pelo menu da miniatura (D5: o chat e o nosso); "disablePrivateChat" na raiz nao existe na tag.
+    remoteVideoMenu: { disableGrantModerator: true, disableKick: student || role === "team", disablePrivateChat: "all", disabled: student },
+    // O Liberar e o Remover do ⋮ da miniatura pelos nossos (so no console de quem apresenta).
+    ...(ourPresenterBar ? { participantMenuButtonsWithNotifyClick: CONSOLE_PARTICIPANT_MENU_BUTTONS.map((button) => ({ ...button })) } : {}),
     resolution: height,
-    startAudioOnly: false,
     startWithAudioMuted: true,
     startWithVideoMuted: true,
-    ...(presents(role) ? { toolbarConfig: { alwaysVisible: true } } : {}),
-    toolbarButtons: toolbarButtonsFor(role, settings)
+    ...(presents(role) && !ourPresenterBar ? { toolbarConfig: { alwaysVisible: true } } : {}),
+    toolbarButtons: ourPresenterBar ? (screenShare === "engine" ? ["desktop"] : []) : toolbarButtonsFor(role, settings)
   };
 }
 
@@ -148,12 +300,26 @@ export function liveConfigOverwrite(role: LiveRoomRole, settings: LiveEmbedSetti
  * moderador, perfil e idioma, que o console ja decide). O aluno e a Equipe nao tem engrenagem (a barra deles e a nossa);
  * sem o papel (a chamada antiga), o mesmo do aluno.
  */
-export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null): Record<string, unknown> {
+export function liveInterfaceConfigOverwrite(role?: LiveRoomRole | null, lookInput?: LiveEmbedLook | null): Record<string, unknown> {
+  const look = normalizeLook(lookInput);
   return {
+    // O visual da V2 (docs/31 §3): a camera preenche o palco cortando ate 30 % (both + MAXIMUM_ZOOMING_COEFFICIENT da
+    // tag) e o que sobra e preto liso (sem a copia desfocada do video por tras), sem o indicador de conexao nem o
+    // rotulo de qualidade, as miniaturas em 16:9, e a fileira na coluna (palco, grade, palco duplo) ou embaixo.
+    // Legada (a tag so a traduz quando o config nao define connectionIndicators); o configOverwrite manda a chave nova.
+    CONNECTION_INDICATOR_DISABLED: true,
+    DEFAULT_BACKGROUND: STAGE_BACKGROUND,
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
-    MOBILE_APP_PROMO: false,
+    DISABLE_VIDEO_BACKGROUND: true,
+    FILM_STRIP_MAX_HEIGHT: THUMBNAIL_HEIGHT,
+    LOCAL_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
+    // MOBILE_APP_PROMO fica fora da whitelist do iframe (a tag ignora); a instancia ja desliga no custom-interface_config.js.
+    REMOTE_THUMBNAIL_RATIO: THUMBNAIL_RATIO,
     ...(presents(role) ? { SETTINGS_SECTIONS: ["devices"] } : {}),
-    SHOW_CHROME_EXTENSION_BANNER: false
+    SHOW_CHROME_EXTENSION_BANNER: false,
+    VERTICAL_FILMSTRIP: look.layout !== "stage_bottom",
+    VIDEO_LAYOUT_FIT: "both",
+    VIDEO_QUALITY_LABEL_DISABLED: true
   };
 }
 
@@ -169,6 +335,10 @@ export const JITSI_LISTENED_EVENTS = [
   "audioMuteStatusChanged",
   "videoMuteStatusChanged",
   "moderationParticipantApproved",
+  // A equipe recolheu o microfone (o "Tirar do palco" e o Silenciar do console mandam rejectParticipant de audio): o
+  // Microfone sai da barra do aluno mesmo ja desligado, quando nenhum mudo chega (docs/31 V2-19). Nao vai ao servidor
+  // (toRoomEvent devolve nulo): o silencio da equipe ja vira linha pelo audioMuteStatusChanged.
+  "moderationParticipantRejected",
   "recordingStatusChanged",
   "knockingParticipant",
   // O "Abaixar a mão" do console chega ao aluno por sendEndpointTextMessage (o IFrame API nao abaixa a mao de outro).
@@ -179,9 +349,42 @@ export const JITSI_LISTENED_EVENTS = [
   // recusou o microfone ou a camera (o aviso na barra). Nenhum dos tres vai ao servidor (toRoomEvent devolve nulo).
   "deviceListChanged",
   "micError",
-  "cameraError"
+  "cameraError",
+  // A visao do video (docs/31 V2-16 e V2-A5): a grade ligada ou desligada (o setTileView do aluno, ou o seguir a visao da
+  // equipe) e a coluna de miniaturas na tela ou escondida (o toggleFilmStrip pela largura do iframe). O botao da barra
+  // diz o que o motor mostra; nenhum dos dois vai ao servidor (toRoomEvent devolve nulo).
+  "tileViewChanged",
+  "filmstripDisplayChanged",
+  // Quem esta no video grande mudou (o destaque da equipe, o orador, a tela compartilhada): o selo "{nome} ·
+  // Apresentador" do palco so fica com alguem da equipe ali (docs/31 V2-4). O motor manda sem dados (o id fica no IFrame
+  // API); nao vai ao servidor (toRoomEvent devolve nulo).
+  "largeVideoChanged",
+  // Um aviso que o motor teria mostrado (o configOverwrite manda notifications: [], e o motor avisa mesmo assim): so as
+  // chaves da lista fechada viram o aviso da pagina (engineNoticeOf, room-snackbar-model.ts), nunca o texto do motor.
+  // Dispara pouco, e nao vai ao servidor (toRoomEvent devolve nulo). Os sinais so do console ficam em CONSOLE_EXTRA_EVENTS.
+  "notificationTriggered",
+  // A moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }): o microfone sozinho (docs/31 caminho
+  // A) so abre com a de audio desligada, e o vigia do console a liga quando lota. Dispara pouco (so quando a equipe ou o
+  // vigia muda a moderacao) e nao vai ao servidor (toRoomEvent devolve nulo).
+  "moderationStatusChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
+
+/**
+ * Os sinais que so o console de quem apresenta escuta, alem dos da sala: o console monta com
+ * [...JITSI_LISTENED_EVENTS, ...CONSOLE_EXTRA_EVENTS] e a pagina do aluno nao os registra (cada sinal registrado passa
+ * pela fila da sala em toda pagina de aluno). Nenhum vai ao servidor (toRoomEvent devolve nulo).
+ * - contentSharingParticipantsChanged: os ids donos das faixas de tela nao mudas, no payload { data: string[] }
+ *   (API.js:1742-1747 da tag stable-11248), para o vigia da tela do console (docs/31 §5.4).
+ * - screenSharingStatusChanged: a propria tela de quem apresenta ({ on, details }), o estado do Compartilhar tela da
+ *   barra (docs/31 V2-14); o seletor de tela cancelado nao avisa nada.
+ * - participantMuted: o mudo de cada faixa remota ({ id, isMuted, mediaType }), que sai uma vez por faixa na entrada e
+ *   a cada troca (a lista de Pessoas do console); numa sala cheia, sao muitos, por isso so o console registra.
+ * - participantMenuButtonClick: o ⋮ da miniatura avisou um item em vez de faze-lo ({ key, participantId,
+ *   preventExecution }, CONSOLE_PARTICIPANT_MENU_BUTTONS).
+ */
+export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
+export type ConsoleListenedEvent = JitsiListenedEvent | (typeof CONSOLE_EXTRA_EVENTS)[number];
 
 /**
  * O sinal que o console manda (sendEndpointTextMessage, com o texto JSON { type }) para o aluno abaixar a propria mao:
@@ -255,7 +458,15 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "deviceListChanged":
     case "micError":
     case "cameraError":
-      // So a tela usa (a lista do painel Configurações e o aviso na barra): o servidor nao aceita estes nomes.
+    case "moderationParticipantRejected":
+    case "tileViewChanged":
+    case "filmstripDisplayChanged":
+    case "largeVideoChanged":
+    case "notificationTriggered":
+    case "moderationStatusChanged":
+      // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
+      // video, a coluna de miniaturas, quem esta no video grande, o aviso do motor e a moderacao de audio do microfone
+      // sozinho): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

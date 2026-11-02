@@ -5,8 +5,9 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // O Assistente e o Atendimento desenhados (docs/30 §1.3, §1.6, §2.2, §2.4, §6.6, §9 e D24; docs/18 §2.2), no Node com
-// react-dom/server e as Server Actions como dubles: no chat da sala, o selo Assistente (e o "Assistente:" do leitor de
-// tela) e "Falar com a equipe" so na resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
+// react-dom/server e as Server Actions como dubles: no chat da sala (o comentario do YouTube), o selo Assistente no lugar
+// do nome (e o "Assistente, há 2 minutos:" do leitor de tela, antes do texto, sem repetir o papel) e "Falar com a equipe" so na
+// resposta do Assistente a uma mensagem do proprio aluno (nunca no "ver como"); a
 // linha da dica (respondendo, limite, "@assistente", a equipe responde depois); o pronto do pedido; na aba Perguntas,
 // o selo na resposta do Assistente; o painel Atendimento do console (Atender / Pausar, Responder tudo e os avisos de
 // Assistente desligado, quem atende com as perguntas abertas, "Ninguem atendendo", a fila com origem, Pediu a equipe,
@@ -35,8 +36,10 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomChatPanel } = await import("../src/components/member/webinars/room/room-chat.tsx");
 const { RoomQuestionItem } = await import("../src/components/member/webinars/room/room-questions.tsx");
+const { RoomStageBadges } = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const { AssistantHandoff } = await import("../src/components/member/webinars/room/assistant/assistant-handoff.tsx");
 const { AssistantHint, assistantHintText } = await import("../src/components/member/webinars/room/assistant/assistant-hint.tsx");
+const { ownAssistantEnabled } = await import("../src/components/member/webinars/room/assistant/use-room-assistant.ts");
 const { AttendancePanel } = await import("../src/components/admin/v2/communication/webinars/assistant/attendance-panel.tsx");
 const { AssistantCardBody } = await import("../src/components/admin/v2/communication/webinars/assistant-card.tsx");
 const editorModel = await import("../src/components/admin/v2/communication/webinars/assistant/assistant-editor-model.ts");
@@ -54,7 +57,8 @@ const NOW = Date.parse("2026-11-05T23:10:00.000Z");
  * A sala do aluno
  * ---------------------------------------------------------------------------------------------- */
 
-const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", ...extra });
+// Na Live ao vivo, a hora embaixo do balao e a que o servidor gravou (sentAt): as 20:10 de Sao Paulo.
+const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", id, kind: "message", mine: false, offsetMs: 600_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: "2026-11-05T23:10:00.000Z", ...extra });
 
 function chat(props = {}) {
   return render(RoomChatPanel, {
@@ -70,27 +74,42 @@ function chat(props = {}) {
       msg("a-outro", { body: "Tem bonus.", displayName: "Assistente", kind: "answer", replyToId: "m-outro", role: "ai" }),
       msg("t-1", { body: "Oi, turma!", displayName: "Bia E.", role: "team" })
     ],
-    nowMs: NOW,
+    // O agora do servidor, 2 minutos depois das mensagens (o aparelho atrasado 1 minuto, com o skew).
+    nowMs: NOW + 60_000,
     onRemoveMine: async () => 0,
     onSend: async () => ({ pending: false }),
     phase: "live",
     pinned: null,
     readOnly: false,
     sessionId: "s1",
+    skewMs: 60_000,
     slowUntilMs: null,
+    timeKind: "live",
     webinarId: "w1",
     ...props
   });
 }
 
-test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
+test("chat da sala: o selo Assistente no lugar do nome (e 'Assistente, há 2 minutos:' para o leitor de tela, antes do texto, sem repetir o papel) e 'Falar com a equipe' so na resposta do Assistente a mensagem do proprio aluno", () => {
   const markup = chat();
-  const bloco = (id) => markup.slice(markup.indexOf(`data-room-message="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-room-message="${id}"`)));
-  assert.match(textOf(bloco("a-minha")), /Assistente: Assistente Assistente Custa R\$ 997\./, "o prefixo do leitor de tela, o nome e o selo");
-  assert.match(bloco("a-minha"), /data-testid="assistant-handoff"/);
+  // O comentario do Chat vai do data-room-message ate o proximo <li ou o fim da lista.
+  const bloco = (id) => {
+    const inicio = markup.indexOf(`data-room-message="${id}"`);
+    const fins = [markup.indexOf("<li", inicio), markup.indexOf("</ol>", inicio)].filter((fim) => fim > inicio);
+    return markup.slice(inicio, Math.min(...fins));
+  };
+  // No estilo do YouTube (o comentario): a linha do autor (o selo no lugar do nome e o tempo) e so para quem ve; o
+  // leitor de tela ouve o papel e o tempo antes do texto, uma vez so; o "Falar com a equipe" vem na linha de acoes.
+  assert.match(textOf(bloco("a-minha")), /> Assistente há 2 minutos Assistente, há 2 minutos: Custa R\$ 997\. Falar com a equipe$/, "a linha do autor, o prefixo do leitor de tela, o texto e o pedido");
+  assert.match(bloco("a-minha"), /<p aria-hidden="true" class="[^"]*" data-room-message-meta=""><span class="[^"]*\bbg-room-control\b[^"]*">Assistente<\/span><time /, "so o selo, com o nome dentro");
+  assert.doesNotMatch(textOf(bloco("a-minha")), /Assistente, Assistente/, "o papel nao se repete");
+  assert.match(bloco("a-minha"), /lucide-sparkles/, "o avatar do Assistente");
+  assert.match(bloco("a-minha"), /<div class="-ml-2 mt-1 flex min-h-8 items-center"><div><button[^>]*data-testid="assistant-handoff"/, "o pedido na linha de acoes");
   assert.match(textOf(bloco("a-minha")), new RegExp(COPY.aluno.falarComAEquipe));
   assert.doesNotMatch(bloco("a-outro"), /assistant-handoff/, "a resposta a outro aluno nao tem o botao");
-  assert.match(textOf(bloco("a-outro")), /Assistente/, "mas leva o selo");
+  assert.match(textOf(bloco("a-outro")), /Assistente, há 2 minutos: Tem bonus\./, "mas leva o selo");
+  // O "@assistente" da pergunta do aluno em peso 600.
+  assert.match(bloco("m-minha"), /<span class="font-semibold">@assistente<\/span> quanto custa\?/);
   assert.doesNotMatch(bloco("t-1"), /assistant-handoff/);
   assert.equal(count(markup, /data-testid="assistant-handoff"/g), 1);
 
@@ -100,8 +119,53 @@ test("chat da sala: o selo Assistente (e 'Assistente:' para o leitor de tela) e 
   assert.doesNotMatch(verComo, /data-testid="assistant-hint"/);
 
   const semIds = chat({ sessionId: null, webinarId: null });
-  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o selo)");
+  assert.doesNotMatch(semIds, /data-testid="assistant-handoff"/, "sem o webinario e a sessao, nada de pedido (so o papel)");
   assert.match(textOf(semIds), /Assistente/);
+});
+
+test("o Assistente lido pela sala (docs/31 V2-4): o chat usa o estado que a sala passa, sem ler de novo; sem ele, o painel le sozinho como antes", () => {
+  // O servidor nao roda efeitos: sem a prop, o estado do proprio painel e o desligado ate a primeira leitura no navegador.
+  // A linha da dica aparece direto no campo de antes (a gaveta do vertical, look classic); no campo do YouTube ela so
+  // aparece com o campo aberto (o foco), que o servidor nunca pinta.
+  const sozinho = chat({ look: "classic" });
+  assert.doesNotMatch(sozinho, /data-assistant-hint="call"/, "sem a prop, nada lido ainda");
+  // Com o estado da sala (ligado, ninguem atendendo), a dica "@assistente" aparece ja na primeira pintura: o painel usa
+  // o estado recebido, e a leitura dele fica desligada (enabled false), sem um segundo pedido por minuto.
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  const comSala = chat({ assistant: daSala, look: "classic" });
+  assert.match(comSala, /data-assistant-hint="call"/);
+  assert.match(textOf(comSala), new RegExp(COPY.aluno.chamarAssistente.replace(/[.@]/g, "\\$&")));
+  assert.equal(count(comSala, /data-testid="assistant-handoff"/g), 1, "o Falar com a equipe continua na resposta a mim");
+  // Desligado na sala: nada de dica, mesmo com o painel podendo ler.
+  assert.doesNotMatch(chat({ assistant: { ...daSala, state: { attendantsOnline: 0, enabled: false, replyAll: false } }, look: "classic" }), /data-assistant-hint="call"/);
+  // No campo do YouTube fechado, nada de dica (ela entra no `hint`, so com o campo aberto); o pedido continua.
+  const fechado = chat({ assistant: daSala });
+  assert.doesNotMatch(fechado, /data-assistant-hint/);
+  assert.equal(count(fechado, /data-testid="assistant-handoff"/g), 1);
+});
+
+test("ownAssistantEnabled: o chat e a aba Perguntas so leem o Assistente sozinhos sem o estado da sala e fora do so leitura (nada de um segundo pedido por minuto)", () => {
+  const daSala = { handoff: async () => true, state: { attendantsOnline: 0, enabled: true, replyAll: false } };
+  // Com o estado da sala (as duas salas passam o dela, docs/31 V2-4): a leitura propria desligada, em qualquer caso.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: daSala }), false, "o chat com a sala");
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: daSala }), false, "a aba Perguntas com a sala");
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: { ...daSala, state: { ...daSala.state, enabled: false } } }), false, "o Assistente desligado na sala tambem conta como estado");
+  // Sem a sala (o chat solto, os paineis antigos): o painel le, menos no so leitura e com a aba desligada.
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: false, shared: null }), true);
+  assert.equal(ownAssistantEnabled({ enabled: true, readOnly: false, shared: undefined }), true);
+  assert.equal(ownAssistantEnabled({ readOnly: true, shared: undefined }), false, "no 'ver como', nada lido");
+  assert.equal(ownAssistantEnabled({ enabled: false, readOnly: false, shared: undefined }), false, "a aba Perguntas desligada");
+});
+
+test("o selo Assistente no palco (docs/31 V2-4): aparece com o Assistente ligado, embaixo a direita antes da coluna de miniaturas, so a partir de lg; some sem ele", () => {
+  const ligado = render(RoomStageBadges, { assistantOn: true, presenterName: null, recording: false, topLeft: null });
+  const selo = ligado.match(/<span [^>]*data-room-badge="assistant">[\s\S]*?<\/span>/)?.[0] ?? "";
+  assert.match(selo, /lucide-sparkles/);
+  assert.match(textOf(selo), /^Assistente$/);
+  assert.match(selo, /class="[^"]*\bbottom-4 right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*\bhidden lg:inline-flex"/, "antes da coluna e so no computador (no celular o canto e do Modo cinema)");
+  assert.match(selo, /bg-room-on-video-bg[^"]*text-room-on-video-fg/, "os tokens de cima do video (a pilula branca no claro)");
+  assert.equal(render(RoomStageBadges, { assistantOn: false, presenterName: null, recording: false, topLeft: null }), "", "desligado (e sem mais nada), nenhum selo");
 });
 
 test("a linha do Assistente: respondendo, limite, a dica @assistente e a equipe responde depois; nada sem o que dizer", () => {
@@ -117,9 +181,16 @@ test("a linha do Assistente: respondendo, limite, a dica @assistente e a equipe 
   assert.equal(render(AssistantHint, { state: "none" }), "");
 });
 
-test("Falar com a equipe: o botao; depois, o pronto (e o sino quando ninguem esta atendendo)", () => {
+test("Falar com a equipe: o botao em pilula S de texto, sem icone; depois, o pronto (e o sino quando ninguem esta atendendo)", () => {
   const botao = render(AssistantHandoff, { attendantsOnline: 0, onRequest: async () => true });
   assert.match(textOf(botao), /Falar com a equipe/);
+  // A pilula S de texto do YouTube (spec §8.3): 32 px, raio total, sem fundo, 12/18 peso 500, sem o Headset.
+  const classes = (/<button[^>]*class="([^"]*)"/.exec(botao)?.[1] ?? "").split(/\s+/);
+  for (const classe of ["h-8", "px-3", "rounded-full", "bg-transparent", "text-room-fg", "text-xs", "font-medium", "leading-[18px]"]) {
+    assert.ok(classes.includes(classe), `o pedido tem ${classe}`);
+  }
+  assert.doesNotMatch(botao, /<svg/, "sem icone");
+  assert.match(botao, /data-testid="assistant-handoff"/);
   assert.doesNotMatch(botao, /disabled=""/);
   assert.match(render(AssistantHandoff, { attendantsOnline: 0, onRequest: async () => true, readOnly: true }), /disabled=""/);
   assert.equal(textOf(render(AssistantHandoff, { attendantsOnline: 0, done: true, onRequest: async () => true })), `${COPY.aluno.pedidoEnviado} ${COPY.aluno.equipeRespondeDepois}`);
@@ -128,12 +199,29 @@ test("Falar com a equipe: o botao; depois, o pronto (e o sino quando ninguem est
 
 test("aba Perguntas: a resposta do Assistente leva o selo (e o 'Assistente:' do leitor de tela) e o pedido abaixo", () => {
   const pergunta = { anonymous: false, answerSource: "ai", answerText: "Sim, ha certificado.", answeredLive: false, body: "Tem certificado?", createdAt: new Date(NOW).toISOString(), displayName: "Ana S.", handoffRequested: false, id: "q1", mine: true, status: "answered", upvotes: 2, voted: false };
+  // A gaveta do vertical (look classic): o cartao de antes.
   const markup = render(RoomQuestionItem, { footer: createElement("span", { "data-rodape": "" }, "rodape"), onVote: noop, question: pergunta });
   assert.match(markup, /data-testid="question-answer-assistant"/);
   assert.match(textOf(markup), /Respondida por escrito Assistente Assistente: Sim, ha certificado\./);
   assert.match(markup, /data-rodape/);
   const daEquipe = render(RoomQuestionItem, { onVote: noop, question: { ...pergunta, answerSource: "team" } });
   assert.doesNotMatch(daEquipe, /question-answer-assistant/);
+
+  // A sala (look comment, Y10): a resposta fica no fio "1 resposta", no bloco #resposta-q1, presente mesmo fechado; o
+  // fio diz que foi por escrito, e o "Falar com a equipe" vai na linha de acoes da resposta.
+  /** O bloco da resposta, do #resposta- ate o fim do item. */
+  const respostaDe = (html) => html.slice(html.indexOf('id="resposta-q1">') + 'id="resposta-q1">'.length);
+  for (const threadOpen of [true, false]) {
+    const fio = render(RoomQuestionItem, { footer: createElement("span", { "data-rodape": "" }, "rodape"), look: "comment", onVote: noop, question: pergunta, threadOpen });
+    assert.match(fio, /<div class="[^"]*" data-testid="question-answer-assistant"( hidden="")? id="resposta-q1">/, `o bloco da resposta (aberto: ${threadOpen})`);
+    assert.equal(/data-testid="question-answer-assistant" hidden=""/.test(fio), !threadOpen);
+    assert.match(textOf(respostaDe(fio)), /^Assistente Assistente: Sim, ha certificado\. rodape/);
+    assert.match(respostaDe(fio), /data-rodape/, "o pedido na resposta");
+    assert.doesNotMatch(fio, /Respondida por escrito/);
+  }
+  const fioDaEquipe = render(RoomQuestionItem, { look: "comment", onVote: noop, question: { ...pergunta, answerSource: "team", mine: false }, threadOpen: false });
+  assert.doesNotMatch(fioDaEquipe, /question-answer-assistant/);
+  assert.match(textOf(respostaDe(fioDaEquipe)), /^Equipe Equipe: Sim, ha certificado\./);
 });
 
 /* ------------------------------------------------------------------------------------------------

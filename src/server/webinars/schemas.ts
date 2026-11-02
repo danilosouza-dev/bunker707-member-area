@@ -95,6 +95,7 @@ export const roomSettingsSchema: z.ZodType<RoomSettings> = z.object({
   practiceSession: z.boolean(),
   questions: z.boolean(),
   reactions: z.boolean(),
+  selfUnmute: z.boolean(),
   slowModeSeconds: z.union([z.literal(10), z.literal(20), z.literal(30), z.literal(60), z.null()], { error: "Escolha 10, 20, 30 ou 60 segundos." }),
   waitingRoom: z.boolean()
 });

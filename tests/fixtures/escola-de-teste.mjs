@@ -1242,6 +1242,34 @@ export async function seedLiveAoVivoDeTeste(db, { comecouHa = 60_000, equipeMode
   return { scheduledAt, startedAt };
 }
 
+/**
+ * Uma enquete aberta agora numa sessao, como o console a lanca (docs/31 V2-10; tabelas da 202610290001): a copia na
+ * sessao, sem modelo, resposta unica, nao anonima, `opened_at` agora, com as opcoes na ordem dada. Grava pelo cliente
+ * de servico (o service_role). Devolve o id da enquete e os das opcoes, na mesma ordem. A sessao de teste que apaga as
+ * enquetes do webinario (seedLiveAoVivoDeTeste) leva esta junto; quem precisa da sala sem ela no meio do arquivo apaga
+ * pelo id.
+ */
+export async function abrirEnqueteDeTeste(db, { options, question, sessionId, webinarId }) {
+  const enquete = unwrap(
+    await db
+      .from("webinar_polls")
+      .insert({ anonymous: false, kind: "single", opened_at: new Date().toISOString(), position: 0, question, session_id: sessionId, status: "open", webinar_id: webinarId })
+      .select("id")
+      .single(),
+    "Abrindo a enquete de teste (a migracao 202610290001 esta aplicada?)"
+  );
+  const opcoes = unwrap(
+    await db
+      .from("webinar_poll_options")
+      .insert(options.map((label, position) => ({ label, poll_id: enquete.id, position })))
+      .select("id, position")
+      .order("position", { ascending: true }),
+    "Gravando as opcoes da enquete de teste"
+  );
+
+  return { optionIds: opcoes.map((opcao) => opcao.id), pollId: enquete.id };
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Webinarios, fase 4 (docs/30 §1.6, §3.2, §3.3, §3.5, §4.2, §4.3, §8.6 e §11; migracoes 202610300002 a 202610300007): a live ao
  * vivo encerrada dos paineis, a Oferta da Live gravada no ar, a Simulacao da sessao encerrada e o "Comeca quando voce

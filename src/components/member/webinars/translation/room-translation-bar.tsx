@@ -12,7 +12,8 @@ import type { RoomTranslationState } from "../room/use-room-translation";
 // hora, sem sair da sala), "Chat traduzido para English" com "Ver original" (a original a um toque; de novo, "Ver
 // traducao") e "Traduzindo…" enquanto alguma mensagem mostrada espera o lote. So aparece com a traducao ligada para
 // o aluno (ambiente e banco; nunca no "ver como"). A interface da sala segue em portugues; as legendas do video ficam
-// de fora. Controles com 44 px de altura no celular (docs/30 §1.7).
+// de fora. Controles com 44 px de altura no celular (docs/30 §1.7). As cores vem dos tokens do tema da sala (docs/31
+// V2-11): a faixa so aparece dentro do dialogo da sala, que leva o data-room-theme.
 
 const ORIGINAL = "original";
 
@@ -30,12 +31,12 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
   const name = language ? copy.idiomas[language] : null;
 
   return (
-    <div className={cn("flex min-h-11 flex-wrap items-center justify-between gap-x-2 border-b border-white/10 px-3 text-xs text-zinc-400", className)} data-testid="room-translation">
+    <div className={cn("flex min-h-11 flex-wrap items-center justify-between gap-x-2 border-b border-room-border px-3 text-xs text-room-fg-subtle", className)} data-testid="room-translation">
       <span className="inline-flex min-w-0 items-center gap-1.5">
         <Languages aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2} />
         <span className="truncate">{active && name ? (state.showOriginal ? copy.chatOriginal : copy.chatTraduzido(name)) : copy.idiomaDaSala}</span>
         {active && state.translating && !state.showOriginal ? (
-          <span aria-live="polite" className="shrink-0 text-zinc-500">
+          <span aria-live="polite" className="shrink-0 text-room-fg-subtle">
             {copy.traduzindo}
           </span>
         ) : null}
@@ -44,7 +45,7 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
         {active && (state.translated > 0 || state.showOriginal) ? (
           <button
             aria-pressed={state.showOriginal}
-            className="inline-flex min-h-11 shrink-0 items-center rounded-[8px] px-2 font-semibold text-zinc-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+            className="inline-flex min-h-11 shrink-0 items-center rounded-[8px] px-2 font-semibold text-room-fg hover:text-room-fg-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-room-focus"
             onClick={() => state.toggleOriginal?.()}
             type="button"
           >
@@ -55,7 +56,7 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
           {copy.idiomaDaSala}
         </label>
         <select
-          className="min-h-11 rounded-[8px] border border-white/15 bg-transparent px-2 text-xs font-semibold text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60 disabled:opacity-60"
+          className="min-h-11 rounded-[8px] border border-room-input-border bg-transparent px-2 text-xs font-semibold text-room-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-room-focus disabled:opacity-60"
           data-room-translation-language=""
           disabled={state.choosing}
           id={`${id}-idioma`}
@@ -65,18 +66,18 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
           }}
           value={language ?? ORIGINAL}
         >
-          <option className="bg-[#161616]" value={ORIGINAL}>
+          <option className="bg-room-surface" value={ORIGINAL}>
             {copy.comoFoiEscrito}
           </option>
           {CHAT_LANGUAGES.map((option) => (
-            <option className="bg-[#161616]" key={option} lang={option} value={option}>
+            <option className="bg-room-surface" key={option} lang={option} value={option}>
               {copy.idiomas[option]}
             </option>
           ))}
         </select>
       </span>
       {state.chooseError ? (
-        <p aria-live="polite" className="w-full pb-2 text-xs font-medium text-red-300">
+        <p aria-live="polite" className="w-full pb-2 text-xs font-medium text-room-warn-fg">
           {state.chooseError}
         </p>
       ) : null}

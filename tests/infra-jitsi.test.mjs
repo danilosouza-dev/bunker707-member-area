@@ -298,8 +298,19 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window.
-  for (const source of [customConfig, customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. A unica excecao e o carregador do CSS
+  // nosso (docs/31 §3), entre as marcas (uma vez so): ele so le o hash e cria um <link> para um caminho desta origem.
+  assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
+  const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
+  assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
+  for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.doesNotMatch(
+    loader[1],
+    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
+    "o carregador nao busca nada, nao roda script e nao navega"
+  );
+  assert.doesNotMatch(loader[1], /https?:|wss?:|['"]\/\//, "o <link> fica nesta origem (nem endereco sem esquema)");
+  assert.match(loader[1], /link\.href = '\/css\/bunker707\.css\?v=[0-9a-f]{8}';/, "o v e o comeco do sha256 da folha (infra-jitsi-css.guard confere o valor)");
 });
 
 test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos locais com CA interna, nada impresso, e nao repete sem --force", () => {
@@ -933,6 +944,37 @@ test("deploy-meet, secrets-meet e update.sh reiniciam o jicofo depois do up -d c
   assert.match(deploy, /\$jitsi_compose up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus'/);
   assert.match(secrets, /--profile borda up -d && bash -c '\. infra\/jitsi\/scripts\/_env\.sh; reconnect_focus;/);
   assert.match(update, /compose up -d\n\s+reconnect_focus\n/);
+});
+
+// Redesign V2, fase 0 (docs/31 §3): o carregador do CSS nosso no custom-config.js, avaliado como o navegador faria (o
+// config.js roda inline no <head>, com document e window). So age com config.bunkerTheme no hash: a instancia e uma so
+// e atende a producao; o app de antes e o gravador nao mandam a chave e seguem com o visual padrao do motor. A folha,
+// a montagem e o smoke tem a guarda em tests/infra-jitsi-css.guard.test.mjs.
+test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = sha256 da folha) e grava o tema; sem a chave, nada", () => {
+  const v = createHash("sha256").update(readFileSync(join(jitsiDir, "web", "bunker707.css"))).digest("hex").slice(0, 8);
+  const run = (hash) => {
+    const head = { children: [], appendChild(element) { this.children.push(element); } };
+    const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+    const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
+    vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
+    return { link: head.children[0] ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
+  };
+  const link = { href: `/css/bunker707.css?v=${v}`, rel: "stylesheet", tag: "link" };
+  // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22light%22&config.disableChat=true"), { link, theme: "light" });
+  assert.deepEqual(run('#config.bunkerTheme="dark"'), { link, theme: "dark" });
+  const nada = { link: null, theme: null };
+  assert.deepEqual(run("#config.disableChat=true"), nada, "o app de antes (sem a chave) fica com o visual padrao do motor");
+  assert.deepEqual(run(""), nada);
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.iAmRecorder=true"), nada, "o gravador abre a sala sem a chave: a gravacao sai como antes");
+  assert.deepEqual(run("#config.bunkerTheme="), nada, "chave sem valor");
+  assert.deepEqual(run("#config.bunkerTheme=%22%22"), nada);
+  assert.deepEqual(run("#config.bunkerTheme=%22sepia%22"), nada, "valor desconhecido");
+  assert.deepEqual(run("#config.bunkerTheme=%22lightning%22"), nada, "so light ou dark inteiros");
+  // Sem document (o teste de cima avalia o arquivo so com config) nada quebra: o resto do config.js continua valendo.
+  const config = { videoQuality: {} };
+  vm.runInNewContext(customConfig, { config });
+  assert.equal(config.channelLastN, 9);
 });
 
 // A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o

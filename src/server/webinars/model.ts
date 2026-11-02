@@ -125,9 +125,14 @@ export type RoomSettings = {
   practiceSession: boolean;
   questions: boolean;
   reactions: boolean;
+  /** Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar, com teto no console de quem apresenta. */
+  selfUnmute: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
+
+/** O teto do microfone sozinho (docs/31 V2-A60): quantos alunos falam ao mesmo tempo; as frases do editor e do console saem daqui. */
+export const MIC_LIMIT = 4;
 
 export type ReminderSettings = { email: boolean; h1: boolean; h24: boolean };
 
@@ -280,6 +285,7 @@ export function defaultRoomSettings(): RoomSettings {
     practiceSession: true,
     questions: true,
     reactions: true,
+    selfUnmute: false,
     slowModeSeconds: null,
     waitingRoom: false
   };
@@ -515,7 +521,8 @@ export function registrationEventMetadata(input: { campaignId?: string | null; s
  * script-model.ts e report-model.ts.
  * ---------------------------------------------------------------------------------------------- */
 
-export const CHAT_ROLES = ["host", "team", "student", "guest", "ai"] as const;
+/** O papel de quem escreveu. `co_host` (o co-apresentador, docs/31 V2-A12) pede a migracao 202611010001 (o check novo). */
+export const CHAT_ROLES = ["host", "co_host", "team", "student", "guest", "ai"] as const;
 export type ChatRole = (typeof CHAT_ROLES)[number];
 
 export const CHAT_SOURCES = ["original", "audience", "team", "scripted", "ai"] as const;
@@ -584,6 +591,17 @@ export const CHAT_LIMITS = {
   chatPageMax: 200
 } as const;
 
+/**
+ * O texto de uma pergunta feita de uma mensagem (o Liberar e o Virar pergunta do console, a pergunta pelo chat aberto,
+ * a pergunta ao Assistente): no maximo CHAT_LIMITS.question caracteres, contados como o check char_length do banco (por
+ * caractere, nao por unidade UTF-16). Nunca corta um emoji ao meio: a metade solta de um par faz o Postgres recusar o
+ * texto inteiro.
+ */
+export function questionBodyOf(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= CHAT_LIMITS.question ? text : chars.slice(0, CHAT_LIMITS.question).join("");
+}
+
 /** Os ritmos da sala (docs/30 §5.1, §6.6, M1 a M4) e os pesos dos "mais quentes" (M3); o SQL repete os mesmos numeros. */
 export const ROOM_RULES = {
   heartbeatSeconds: 15,
@@ -639,6 +657,13 @@ export type StudentChatMessage = {
   pinned: boolean;
   replyToId: string | null;
   role: ChatRole;
+  /**
+   * A hora do servidor em que a mensagem foi gravada (`created_at`), so na Live ao vivo: a hora embaixo do balao
+   * (docs/31 V2-9). O offset da live nao serve para isso: a mensagem da espera conta da hora marcada, o "Comecar para
+   * todos" muda o zero sem recalcular e so a ancora recalcula. Nula na gravada e no Replay: a linha mestre levaria ao
+   * navegador a data da live de origem (la a hora e a hora marcada mais o offset).
+   */
+  sentAt: string | null;
 };
 
 export type ScriptItem = {

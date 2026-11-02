@@ -1,11 +1,10 @@
 "use client";
 
 import { Menu } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { PlatformLogo } from "@/components/platform-logo";
 import type { AccessPreviewMode } from "@/lib/access-preview";
-import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { cn } from "@/lib/utils";
 import { getMemberSidebarSections } from "./member-shell-model";
 import { memberNavigationIcons } from "./member-navigation-icons";
@@ -190,18 +189,7 @@ export function MemberSidebar({
             href={homeHref}
             onClick={(event) => onNavigate(event, homeHref)}
           >
-            {logoImage ? (
-              <Image
-                alt="Bunker707"
-                className="h-auto max-h-10 w-[124px] object-contain object-left sm:w-[150px]"
-                height={35}
-                src={logoImage}
-                unoptimized={!canOptimizeImageSrc(logoImage)}
-                width={306}
-              />
-            ) : (
-              <span className="text-lg font-black uppercase text-white">Bunker707</span>
-            )}
+            <PlatformLogo alt="Bunker707" src={logoImage ?? null} textClassName="text-white" />
           </Link>
         </div>
 

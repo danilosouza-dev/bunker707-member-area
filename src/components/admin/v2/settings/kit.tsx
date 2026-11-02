@@ -1,7 +1,7 @@
 "use client";
 
 import { MoreHorizontal } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { useId, type ReactNode, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -172,6 +172,11 @@ type ConfirmDialogProps = {
   cancelLabel?: string;
   children?: ReactNode;
   confirmLabel: string;
+  /**
+   * Onde a confirmacao entra no DOM: o console de quem apresenta passa a propria raiz, para ela ficar sob os tokens do
+   * tema dele (docs/31 V2-12). Sem ele, o body, como em todo o admin.
+   */
+  container?: HTMLElement | RefObject<HTMLElement | null> | null;
   description?: ReactNode;
   /** true pinta o botao de confirmar como acao destrutiva. */
   destructive?: boolean;
@@ -186,6 +191,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancelar",
   children,
   confirmLabel,
+  container,
   description,
   destructive = false,
   onConfirm,
@@ -197,6 +203,7 @@ export function ConfirmDialog({
     <Dialog onOpenChange={(next) => (!busy ? onOpenChange(next) : undefined)} open={open}>
       <DialogContent
         className="max-w-md rounded-xl border border-[var(--border-strong)] bg-[var(--surface-3)] text-[var(--text-primary)]"
+        container={container}
         showCloseButton={false}
       >
         <DialogHeader className="gap-1 px-5 pt-5 pb-2">

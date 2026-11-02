@@ -164,7 +164,7 @@ export function OfferPill(props: OfferPillProps) {
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const [maxHeight, setMaxHeight] = useState<number | null>(null);
 
-  // Aberto: o card cabe entre a pilula e a barra do topo (Minimizar e Sair), medido agora e a cada giro ou teclado; o
+  // Aberto: o card cabe entre a pilula e a barra do topo (o Sair), medido agora e a cada giro ou teclado; o
   // resto rola por dentro. O teto do CSS vale antes da medida.
   useEffect(() => {
     if (!open) {

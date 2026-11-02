@@ -7,7 +7,10 @@ import { REACTIONS, type Reaction } from "@/server/webinars/model";
 
 // A barra de reacoes do aluno (docs/30 §1.3 e §9): as seis reacoes de webinar_reactions, botoes de 44 px, uma por
 // segundo; as reacoes sobem flutuando pelo canto do palco por 3 s, sem som; com prefers-reduced-motion ficam
-// paradas 1,5 s e somem (motion-reduce). Nenhuma reacao e anunciada ao leitor de tela.
+// paradas 1,5 s e somem (motion-reduce). Nenhuma reacao e anunciada ao leitor de tela. Redesign V2, F2 (docs/31
+// V2-11): a barra usa os tokens do tema da sala; as bolhas ficam sobre o video e sao iguais nos dois temas. F3 (V2-4):
+// no palco, as bolhas sobem acima dos selos de baixo. F4 (V2-6): no desenho normal as seis reacoes abrem pelo Reagir da
+// barra (por cima do palco no computador, acima da barra no celular), nas duas salas; o vertical continua com a dele.
 
 export const REACTION_GLYPHS: Record<Reaction, string> = { clap: "👏", fire: "🔥", laugh: "😂", like: "👍", love: "❤️", wow: "😮" };
 
@@ -19,7 +22,7 @@ export function RoomReactionBar({ disabled, onReact }: { disabled: boolean; onRe
       {REACTIONS.map((reaction) => (
         <button
           aria-label={copy.reacoes[reaction]}
-          className="grid size-11 shrink-0 place-items-center rounded-full text-xl transition-transform hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-110 disabled:opacity-40 motion-reduce:transition-none"
+          className="grid size-11 shrink-0 place-items-center rounded-full text-xl transition-transform hover:bg-room-control-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus active:scale-110 disabled:opacity-40 motion-reduce:transition-none"
           disabled={disabled}
           key={reaction}
           onClick={() => onReact(reaction)}
@@ -33,10 +36,20 @@ export function RoomReactionBar({ disabled, onReact }: { disabled: boolean; onRe
   );
 }
 
-/** As bolhas no canto do palco: sobem 3 s (motion-safe) ou ficam paradas (motion-reduce); o excesso vira um contador discreto. */
-export function RoomReactionBubbles({ bubbles, overflow }: { bubbles: readonly ReactionBubble[]; overflow: number }) {
+/**
+ * As bolhas no canto do palco: sobem 3 s (motion-safe) ou ficam paradas (motion-reduce); o excesso vira um contador
+ * discreto. No palco (`stage`, o padrao) elas nascem acima da linha dos selos de baixo (docs/31 V2-4), com a coluna
+ * nunca mais alta que o palco acima dessa linha (a 375 px o palco 16:9 tem cerca de 211 px: os 160 px da coluna a 56
+ * px da base passariam do topo dele e pintariam por cima do cabecalho); no vertical, o lugar delas ja fica acima do
+ * chat e continua como era.
+ */
+export function RoomReactionBubbles({ bubbles, layout = "stage", overflow }: { bubbles: readonly ReactionBubble[]; layout?: "stage" | "vertical"; overflow: number }) {
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute bottom-3 right-3 flex h-40 w-16 flex-col-reverse items-center overflow-hidden" data-testid="room-reactions">
+    <div
+      aria-hidden="true"
+      className={cn("pointer-events-none absolute right-3 flex h-40 w-16 flex-col-reverse items-center overflow-hidden", layout === "vertical" ? "bottom-3" : "bottom-14 max-h-[calc(100%-3.5rem)]")}
+      data-testid="room-reactions"
+    >
       {bubbles.map((bubble, index) => (
         <span
           className={cn("absolute bottom-0 text-2xl motion-safe:animate-[room-reaction_3s_ease-out_forwards] motion-reduce:opacity-80")}

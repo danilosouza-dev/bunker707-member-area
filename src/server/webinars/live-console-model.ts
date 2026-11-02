@@ -2,8 +2,9 @@
 // o retrato da sala que a rota de 5 s devolve (gravador, gravacao, quem foi removido, silenciado ou banido e o mapa
 // aluno -> participante da sala), quem ve qual botao (Apresentador, co-apresentador, Equipe moderadora ou nao; quem
 // publica), o que a sala de espera deve estar fazendo, a fila de maos levantadas e quem esta na sala pelos sinais do
-// iframe do console (um reducer so), quando o "Gravar" da fila dispara sozinho e quando a ancora e marcada (uma vez), o
-// cartao Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
+// iframe do console (um reducer so, com os papeis, o microfone e a camera de cada um tambem pelo getRoomsInfo), o vigia
+// da tela (quem compartilha sem poder, docs/31 §5.4), quando o "Gravar" da fila dispara sozinho e quando a ancora e
+// marcada (uma vez), o cartao Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
 // relativos: tests/webinarios-console-ao-vivo-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio: tudo
 // recebe `nowMs`. As frases vem de WEBINAR_COPY; as que ainda faltam la ficam em LIVE_CONSOLE_COPY (pedido no
 // relatorio da frente), conferidas pela PROIBIDAS_WEBINARIO no teste.
@@ -12,7 +13,7 @@ import { LOWER_HAND_SIGNAL, RECORDING_SIGNAL } from "../../lib/jitsi-room-config
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloTime } from "../../lib/webinar-time";
 import { desiredLobby, MUTE_MINUTES_OPTIONS, type LiveBanState, type MuteMinutes } from "./live-model";
-import type { DisplayNameMode, SessionStatus } from "./model";
+import { MIC_LIMIT, type DisplayNameMode, type SessionStatus } from "./model";
 import { RECORDER_LABELS, canReleaseRecorder, canRequestRecorder, recorderMachineAlive, recorderPrepareStale, recordButtonAction, type RecorderStatus } from "./recorder-model";
 import { anonymousNumber, displayNameFor, firstNameInitial } from "./room-model";
 
@@ -36,8 +37,7 @@ export const LIVE_CONSOLE_COPY = {
   mensagemDoChat: copy.mensagemDoChat,
   microfoneLiberado: copy.microfoneLiberado,
   microfoneSozinho: copy.microfoneSozinho,
-  microfoneSozinhoTexto: copy.microfoneSozinhoTexto,
-  naSala: copy.naSala,
+  microfoneSozinhoTexto: copy.microfoneSozinhoTexto(MIC_LIMIT),
   noPalco: WEBINAR_COPY.aoVivo.noPalco,
   noVideo: copy.noVideo,
   removidosESilenciados: copy.removidosESilenciados,
@@ -107,6 +107,8 @@ export type LiveConsoleSnapshot = {
   recorder: LiveConsoleRecorder;
   recording: LiveConsoleRecording | null;
   roomLocked: boolean;
+  /** O microfone sozinho (webinars.room_settings.selfUnmute, docs/31 caminho A), relido a cada retrato. */
+  selfUnmute: boolean;
 };
 
 /** Uma linha de webinar_room_joined (student_events) como a consulta devolve. */
@@ -257,18 +259,19 @@ export function liveControlsFor(input: { canPublish: boolean; moderator: boolean
 
 /**
  * O que o navegador do Apresentador (ou do co-apresentador) manda a sala ao virar moderador, na ordem: a moderacao de
- * audio (o aluno so fala depois de Liberar), a de tela compartilhada (`desktop`: so moderador compartilha, mesmo que um
- * cliente adulterado ignore a barra e as features do token; docs/30 §8.1), a de video quando o webinario nao tem
- * camera de aluno e, so o Apresentador, seguir a visao dele.
+ * audio (o aluno so fala depois de Liberar; com o microfone sozinho ligado, nao sai), a de video quando o webinario nao tem camera de aluno e, so o
+ * Apresentador, seguir a visao dele. Nada de moderacao de tela: na tag fixada o 'toggle-moderation' do IFrame API so
+ * distingue `video` e qualquer outro valor liga a de audio (modules/API/API.js), entao a de tela nao liga por aqui. A
+ * tela e decidida pela liberacao (docs/31 §5.3). O vigia do console para a tela do cliente padrao, que obedece ao
+ * pedido de mudo; um cliente modificado que ignora o pedido continua mandando a tela, porque sem a moderacao de tela o
+ * servidor so repassa o pedido (video-menu/actions.any.ts; docs/30 §8.1).
  */
-export function presenterSetupCommands(input: { allowStudentCamera: boolean; role: ConsoleRoomRole }): [string, ...unknown[]][] {
+export function presenterSetupCommands(input: { allowStudentCamera: boolean; role: ConsoleRoomRole; selfUnmute: boolean }): [string, ...unknown[]][] {
   if (input.role !== "host" && input.role !== "co_host") {
     return [];
   }
-  const commands: [string, ...unknown[]][] = [
-    ["toggleModeration", true, "audio"],
-    ["toggleModeration", true, "desktop"]
-  ];
+  // Com o microfone sozinho ligado, nada de audio aqui: o vigia (micLimitStep) decide a moderacao pela conta.
+  const commands: [string, ...unknown[]][] = input.selfUnmute ? [] : [["toggleModeration", true, "audio"]];
   if (!input.allowStudentCamera) {
     commands.push(["toggleModeration", true, "video"]);
   }
@@ -315,46 +318,91 @@ export function lobbyNotice(input: { lobby: boolean; roomLocked: boolean; status
 export type JitsiRole = "moderator" | "none" | "participant";
 
 export type RoomPerson = { id: string; name: string };
+/** O microfone e a camera de uma pessoa na sala: true no ar, false desligado, ausente sem sinal (desligado). */
+export type ParticipantMedia = { audio?: boolean; video?: boolean };
 export type RaisedHand = { id: string; raisedAt: number };
 export type KnockingPerson = { id: string; name: string };
 
 export type LiveRoomState = {
+  /**
+   * A coluna de miniaturas do iframe na tela (o ultimo filmstripDisplayChanged): visivel ao entrar, como o motor comeca.
+   * O palco do console desconta a coluna nos selos de cima a direita (stageColumnShown) e, no co-apresentador e na
+   * Equipe, decide o toggleFilmStrip pela largura (consoleColumnPolicy, docs/31 V2-A5).
+   */
+  filmstripVisible: boolean;
   hands: RaisedHand[];
   knocking: KnockingPerson[];
+  /**
+   * O microfone e a camera de cada um no ar (true) ou desligados (false), pelo participantMuted (o estado inicial de cada
+   * faixa remota e cada troca) e pelo getRoomsInfo (quem ja estava quando o console entrou); a tela fica em `sharing`.
+   * Sem sinal (quem nunca abriu o microfone nao tem faixa), desligado: a aba Pessoas le assim.
+   */
+  media: Record<string, ParticipantMedia>;
   /** O proprio console e moderador na sala (participantRoleChanged do proprio id). */
   moderator: boolean;
+  /**
+   * Quem esta no video grande (o largeVideoChanged chega sem dados: o console le o id do IFrame API, onStageParticipantOf,
+   * e manda a acao `onStage`); a tela compartilhada vem como `<id>-v1`. Nulo: o motor ainda nao disse.
+   */
+  onStageId: string | null;
   people: RoomPerson[];
   recording: { mode: string | null; on: boolean };
-  /** O papel de cada um na sala (participantRoleChanged pode chegar antes ou depois do participantJoined). */
+  /**
+   * O papel de cada um na sala: o participantRoleChanged (pode chegar antes ou depois do participantJoined) e o
+   * getRoomsInfo (quem ja era moderador quando o console entrou nunca gera participantRoleChanged: applyConsoleRoomsInfo).
+   */
   roles: Record<string, JitsiRole>;
   selfId: string | null;
+  /** Quem compartilha a tela agora (contentSharingParticipantsChanged: os donos das faixas de tela nao mudas). */
+  sharing: string[];
   /** Quem esta com o microfone liberado (Liberar), na ordem. */
   speaking: string[];
   spotlight: string | null;
   /** Quem foi convidado ao palco (microfone e camera liberados). */
   stage: string[];
+  /** O que o motor mostra (o ultimo tileViewChanged): o Palco ou a Grade, a mudanca de quem apresenta ou o seguir a visao. */
+  viewShown: "grid" | "stage";
 };
 
 export const EMPTY_ROOM: LiveRoomState = {
+  filmstripVisible: true,
   hands: [],
   knocking: [],
+  media: {},
   moderator: false,
+  onStageId: null,
   people: [],
   recording: { mode: null, on: false },
   roles: {},
   selfId: null,
+  sharing: [],
   speaking: [],
   spotlight: null,
-  stage: []
+  stage: [],
+  viewShown: "stage"
 };
+
+/** O getRoomsInfo do iframe (os papeis de quem ja estava na sala) no maximo uma vez neste intervalo, como a sala do aluno. */
+export const CONSOLE_ROOM_RULES = { roomsInfoMs: 5_000 } as const;
+
+/** O teto de ids lidos de um contentSharingParticipantsChanged (a sala nunca tem tantas telas ao mesmo tempo). */
+const SHARING_LIMIT = 50;
 
 export type LiveRoomAction =
   | { name: string; nowMs: number; payload: unknown; type: "event" }
   | { people: readonly unknown[]; type: "seed" }
+  | { info: unknown; type: "roomsInfo" }
   | { id: string; type: "lowerHand" | "skipHand" | "release" | "silence" | "admit" | "kicked" }
   | { type: "lowerAll" | "admitAll" | "reset" }
   | { id: string; on: boolean; type: "stage" }
-  | { id: string | null; type: "spotlight" };
+  | { id: string | null; type: "spotlight" }
+  /** Quem esta no video grande, lido do IFrame API no largeVideoChanged (onStageParticipantOf). */
+  | { id: string | null; type: "onStage" }
+  /**
+   * O primeiro sinal de um iframe novo (Entrar na sala, Tentar de novo, tambem depois de um erro fatal, que nao manda a
+   * saida): tudo volta ao comeco, o motor dele no Palco, com a coluna e sem ninguem lido no video grande.
+   */
+  | { type: "frame" };
 
 function field(payload: unknown, key: string): unknown {
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>)[key] : undefined;
@@ -388,12 +436,16 @@ export function raisedAtOf(payload: unknown, nowMs: number): number | null {
 function withoutId(state: LiveRoomState, id: string): LiveRoomState {
   const roles = { ...state.roles };
   delete roles[id];
+  const media = { ...state.media };
+  delete media[id];
   return {
     ...state,
     hands: state.hands.filter((hand) => hand.id !== id),
     knocking: state.knocking.filter((person) => person.id !== id),
+    media,
     people: state.people.filter((person) => person.id !== id),
     roles,
+    sharing: state.sharing.filter((other) => other !== id),
     speaking: state.speaking.filter((other) => other !== id),
     spotlight: state.spotlight === id ? null : state.spotlight,
     stage: state.stage.filter((other) => other !== id)
@@ -426,7 +478,9 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
       return id ? { ...withoutId(state, id), selfId: id } : state;
     case "videoConferenceLeft":
     case "readyToClose":
-      return EMPTY_ROOM;
+      // A visao e a coluna ficam, como na sala do aluno: o mesmo iframe pode voltar sozinho, com o motor como estava
+      // (fora do iframe o palco nao conta a coluna, stageColumnShown). Um iframe novo volta ao padrao pela acao `frame`.
+      return { ...EMPTY_ROOM, filmstripVisible: state.filmstripVisible, viewShown: state.viewShown };
     case "participantJoined":
       if (!id || id === state.selfId) {
         return state;
@@ -464,18 +518,292 @@ function onEvent(state: LiveRoomState, name: string, payload: unknown, nowMs: nu
       return { ...state, knocking: [...state.knocking, { id: knockId, name: text(field(participant, "name")) ?? text(field(participant, "displayName")) ?? "" }] };
     }
     case "moderationParticipantApproved": {
-      if (!id || field(payload, "mediaType") !== "audio" || state.speaking.includes(id)) {
+      const mediaType = field(payload, "mediaType");
+      if (!id || id === state.selfId) {
+        return state;
+      }
+      // A camera aprovada (o Convidar ao palco de outro console, ou o Permitir câmera do proprio motor): no palco.
+      if (mediaType === "video") {
+        return state.stage.includes(id) ? state : { ...state, hands: state.hands.filter((hand) => hand.id !== id), stage: [...state.stage, id] };
+      }
+      if (mediaType !== "audio" || state.speaking.includes(id)) {
         return state;
       }
       return { ...state, hands: state.hands.filter((hand) => hand.id !== id), speaking: [...state.speaking, id] };
+    }
+    case "moderationParticipantRejected": {
+      // A equipe recolheu (o Silenciar, o Tirar do palco e o Silenciar todos de qualquer console, ou o motor): sem o
+      // microfone, a pessoa sai de quem fala e do palco; sem a camera, so do palco.
+      const mediaType = field(payload, "mediaType");
+      if (!id || (mediaType !== "audio" && mediaType !== "video")) {
+        return state;
+      }
+      const stage = state.stage.filter((other) => other !== id);
+      const speaking = mediaType === "audio" ? state.speaking.filter((other) => other !== id) : state.speaking;
+      return stage.length === state.stage.length && speaking.length === state.speaking.length ? state : { ...state, speaking, stage };
     }
     case "recordingStatusChanged": {
       const mode = text(field(payload, "mode"));
       return { ...state, recording: { mode, on: field(payload, "on") === true } };
     }
+    case "contentSharingParticipantsChanged":
+      return { ...state, sharing: sharingIdsOf(payload) };
+    case "participantMuted": {
+      // { id, isMuted, mediaType }: so o microfone e a camera (a tela vem do contentSharingParticipantsChanged).
+      const mediaType = field(payload, "mediaType");
+      const muted = field(payload, "isMuted");
+      if (!id || id === state.selfId || (mediaType !== "audio" && mediaType !== "video") || typeof muted !== "boolean") {
+        return state;
+      }
+      if (state.media[id]?.[mediaType] === !muted) {
+        return state;
+      }
+      return { ...state, media: { ...state.media, [id]: { ...state.media[id], [mediaType]: !muted } } };
+    }
+    case "tileViewChanged": {
+      const enabled = field(payload, "enabled");
+      return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
+    }
+    case "filmstripDisplayChanged": {
+      const visible = field(payload, "visible");
+      return typeof visible === "boolean" ? { ...state, filmstripVisible: visible } : state;
+    }
     default:
       return state;
   }
+}
+
+/**
+ * Os ids de quem compartilha a tela no contentSharingParticipantsChanged ({ data: string[] }): so os ids no formato do
+ * participante, sem repetir, ate SHARING_LIMIT. Payload fora do formato vira a lista vazia.
+ */
+export function sharingIdsOf(payload: unknown): string[] {
+  const data = field(payload, "data");
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const raw of data) {
+    if (ids.length >= SHARING_LIMIT) {
+      break;
+    }
+    if (typeof raw === "string" && PARTICIPANT_ID.test(raw) && !ids.includes(raw)) {
+      ids.push(raw);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Os papeis pelo getRoomsInfo() do IFrame API ({ rooms: [{ isMainRoom, participants: [{ id, role, displayName,
+ * audioMuted, videoMuted }] }] }): quem ja era moderador quando o console entrou so aparece ali (o participantJoined nao
+ * traz o papel, e o participantRoleChanged so sai na troca). Le a sala principal (ou a primeira), grava o papel de cada
+ * um com id valido e papel conhecido, o microfone e a camera (`media`, para quem ja estava na sala: o participantMuted
+ * dessas faixas pode ter saido antes de o console ouvir) e poe em `people` quem ainda nao esta, com o nome. O proprio
+ * console fica fora: o papel dele continua
+ * pelo participantRoleChanged, que sai para o papel local. Um participantRoleChanged depois da resposta vence, porque
+ * chega depois (o iframe responde e avisa na ordem). Fora da sala (sem `selfId`: antes do videoConferenceJoined ou
+ * depois da saida) a resposta nao muda nada: ela traz o proprio console, que sem o id viraria uma linha a mais e ficaria
+ * depois de entrar de novo com outro id.
+ */
+export function applyConsoleRoomsInfo(state: LiveRoomState, info: unknown): LiveRoomState {
+  if (state.selfId === null) {
+    return state;
+  }
+  const rooms = field(info, "rooms");
+  if (!Array.isArray(rooms)) {
+    return state;
+  }
+  const main = rooms.find((room) => field(room, "isMainRoom") === true) ?? rooms[0];
+  const participants = field(main, "participants");
+  if (!Array.isArray(participants)) {
+    return state;
+  }
+  let people = state.people;
+  const roles = { ...state.roles };
+  const media = { ...state.media };
+  for (const participant of participants) {
+    const id = field(participant, "id");
+    if (typeof id !== "string" || !PARTICIPANT_ID.test(id) || id === state.selfId) {
+      continue;
+    }
+    const role = roleOf(field(participant, "role"));
+    if (role) {
+      roles[id] = role;
+    }
+    const audioMuted = field(participant, "audioMuted");
+    const videoMuted = field(participant, "videoMuted");
+    if (typeof audioMuted === "boolean" || typeof videoMuted === "boolean") {
+      media[id] = {
+        ...media[id],
+        ...(typeof audioMuted === "boolean" ? { audio: !audioMuted } : {}),
+        ...(typeof videoMuted === "boolean" ? { video: !videoMuted } : {})
+      };
+    }
+    if (!people.some((person) => person.id === id)) {
+      people = [...people, { id, name: text(field(participant, "displayName")) ?? "" }];
+    }
+  }
+  return { ...state, media, people, roles };
+}
+
+/** Quem tem papel conhecido de nao moderador na sala (participante ou sem papel); um id sem papel lido nunca entra. */
+function knownNonModerator(roles: Readonly<Record<string, JitsiRole>>, id: string): boolean {
+  const role = Object.hasOwn(roles, id) ? roles[id] : undefined;
+  return role === "participant" || role === "none";
+}
+
+/**
+ * O vigia da tela (docs/31 §5.4): quem o console de quem apresenta para com muteRemoteParticipant(id, 'desktop'). Sao
+ * os ids de `sharing` que nao sao o proprio console, com papel CONHECIDO de nao moderador (`roles` "participant" ou
+ * "none") e sem liberacao (`grants`, e `justGranted` para a liberacao que acabou de sair e o retrato ainda nao trouxe).
+ * Um id sem papel nunca sai: quem ja era moderador quando o console entrou so tem o papel depois do getRoomsInfo, e
+ * parar a tela dele seria parar a do proprio Apresentador. O vigia para o cliente padrao, que obedece ao pedido de mudo;
+ * um cliente modificado que ignora o pedido continua mandando a tela (docs/31 §7).
+ */
+export function screenSharesToStop(input: {
+  grants: readonly string[];
+  justGranted: readonly string[];
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+  sharing: readonly string[];
+}): string[] {
+  return input.sharing.filter((id) => id !== input.selfId && knownNonModerator(input.roles, id) && !input.grants.includes(id) && !input.justGranted.includes(id));
+}
+
+/**
+ * Um passo do vigia da tela (docs/31 §5.4), a cada mudanca de quem compartilha e de cada papel: `stopped` e quem ja
+ * recebeu o pedido de parar e continua em `sharing` (quem parou sai e, se voltar a compartilhar, recebe o pedido de
+ * novo); `toStop`, a quem o pedido sai agora (screenSharesToStop, menos quem ja o recebeu). Quem chama manda o
+ * muteRemoteParticipant(id, 'desktop') de cada id de `toStop` e so guarda em `stopped` o que saiu.
+ */
+export function screenShareWatchStep(input: {
+  grants: readonly string[];
+  justGranted: readonly string[];
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+  sharing: readonly string[];
+  stopped: readonly string[];
+}): { stopped: string[]; toStop: string[] } {
+  const stopped = input.stopped.filter((id) => input.sharing.includes(id));
+  const toStop = screenSharesToStop(input).filter((id) => !stopped.includes(id));
+  return { stopped, toStop };
+}
+
+/** O teto do microfone sozinho (docs/31 V2-A60), do model: quantos alunos falam ao mesmo tempo. */
+export { MIC_LIMIT };
+/** O vigia do microfone liga ou desliga a moderacao de audio no maximo uma vez neste intervalo (cada troca avisa a sala toda). */
+export const MIC_LIMIT_TOGGLE_MS = 2_000;
+
+/**
+ * A ordem em que os microfones abriram (o vigia silencia os mais recentes): quem fechou sai, quem continua fica no
+ * lugar e quem abriu agora entra no fim. Quem ja falava quando o console entrou (sem ordem conhecida) entra na ordem
+ * das chaves.
+ */
+export function micOpenOrder(previous: readonly string[], audio: Readonly<Record<string, boolean>>): string[] {
+  const kept = previous.filter((id) => audio[id] === true);
+  const added = Object.keys(audio).filter((id) => audio[id] === true && !kept.includes(id));
+  return [...kept, ...added];
+}
+
+/**
+ * Um passo do vigia do microfone sozinho (docs/31, caminho A; o molde do vigia da tela), no navegador de quem apresenta:
+ * - a politica desligada: nada (o preparo ja ligou a moderacao de audio);
+ * - conta os ids com papel conhecido de nao moderador ("participant" ou "none") e o microfone no ar, sem o proprio;
+ * - abaixo de MIC_LIMIT, quer a moderacao desligada (todos podem abrir); com MIC_LIMIT ou mais, ligada (ninguem mais
+ *   abre, e quem ja fala continua) e silencia os mais recentes acima do teto, pela `order` de quando abriram;
+ * - `toggle` so quando o motor (`moderationOn`, nulo sem leitura) difere do querido e no maximo a cada
+ *   MIC_LIMIT_TOGGLE_MS; nunca muteEveryone (pegaria o co-apresentador) nem rejectParticipant.
+ */
+export function micLimitStep(input: {
+  audio: Readonly<Record<string, boolean>>;
+  lastToggleMs: number | null;
+  moderationOn: boolean | null;
+  nowMs: number;
+  order: readonly string[];
+  policy: boolean;
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+}): { mute: string[]; toggle: boolean | null } {
+  if (!input.policy) {
+    return { mute: [], toggle: null };
+  }
+  const talking = Object.keys(input.audio).filter((id) => input.audio[id] === true && id !== input.selfId && knownNonModerator(input.roles, id));
+  // Sem lugar na ordem (indexOf -1), conta como o mais antigo: o vigia nunca silencia quem ja falava antes dele.
+  const ordered = [...talking].sort((a, b) => input.order.indexOf(a) - input.order.indexOf(b));
+  const wanted = ordered.length >= MIC_LIMIT;
+  const free = input.lastToggleMs === null || input.nowMs - input.lastToggleMs >= MIC_LIMIT_TOGGLE_MS;
+  return { mute: ordered.slice(MIC_LIMIT), toggle: input.moderationOn !== wanted && free ? wanted : null };
+}
+
+/**
+ * Fechar o microfone da turma (o microfone sozinho desligado ao vivo, docs/31 caminho A), na ordem: a moderacao de
+ * audio ligada; o mudo a quem tem papel conhecido de nao moderador e o microfone no ar fora do palco e de quem foi
+ * liberado; e o askToUnmute de novo a quem esta no palco ou foi liberado (religar a moderacao zera a lista do motor,
+ * que so guarda quem pode falar enquanto ela esta ligada). Nunca muteEveryone (pegaria o co-apresentador).
+ */
+export function micCloseCommands(input: {
+  media: Readonly<Record<string, ParticipantMedia>>;
+  roles: Readonly<Record<string, JitsiRole>>;
+  selfId: string | null;
+  speaking: readonly string[];
+  stage: readonly string[];
+}): [string, ...unknown[]][] {
+  const allowed = [...new Set([...input.stage, ...input.speaking])].filter((id) => id !== input.selfId);
+  const commands: [string, ...unknown[]][] = [["toggleModeration", true, "audio"]];
+  for (const [id, media] of Object.entries(input.media)) {
+    if (media.audio === true && id !== input.selfId && knownNonModerator(input.roles, id) && !allowed.includes(id)) {
+      commands.push(["muteRemoteParticipant", id, "audio"]);
+    }
+  }
+  for (const id of allowed) {
+    commands.push(["askToUnmute", id]);
+  }
+  return commands;
+}
+
+/** O item do ⋮ da miniatura que o motor avisou (participantMenuButtonClick { key, participantId, preventExecution }). */
+export type ParticipantMenuClick = { key: "ask-unmute" | "kick"; participantId: string };
+
+/**
+ * O participantMenuButtonClick do motor como o console o le: so os dois itens que o console pediu para avisar
+ * (CONSOLE_PARTICIPANT_MENU_BUTTONS, o Liberar e o Remover) e o id no formato do participante; o resto vira nulo.
+ */
+export function participantMenuClickOf(payload: unknown): ParticipantMenuClick | null {
+  const key = field(payload, "key");
+  const participantId = field(payload, "participantId");
+  if ((key !== "ask-unmute" && key !== "kick") || typeof participantId !== "string" || !PARTICIPANT_ID.test(participantId)) {
+    return null;
+  }
+  return { key, participantId };
+}
+
+/**
+ * O Remover do ⋮ da miniatura do motor no console (docs/31 V2-14 e V2-A29; o motor so avisa, preventExecution):
+ * - "staff": quem e da equipe na lista da sessao (`staff`) ou modera a sala (o papel "moderator") nunca sai, como no
+ *   nosso Remover. A Equipe sem moderacao que so entrou pelo console nao esta na lista (o console nao grava
+ *   webinar_room_joined): com o papel de participante ela cai no "engine", como o aluno sem linha (docs/31 V2-A29);
+ * - "ours": o aluno ligado a linha (`person`, pelo ultimo webinar_room_joined) sai pelo nosso Remover, que grava
+ *   webinar_session_bans antes do kickParticipant (sem o registro ele voltaria com um token novo);
+ * - "engine": sem o aluno ligado (ainda sem webinar_room_joined, ou o mesmo id para duas contas) e com o papel
+ *   conhecido de participante, o kickParticipant do motor na hora: tirar ja quem atrapalha vale mais que esperar o
+ *   retrato, e a tela avisa que a pessoa pode voltar;
+ * - "unknown": sem o papel lido, nada sai (pode ser alguem que ja moderava quando o console entrou); o console le os
+ *   papeis de novo (getRoomsInfo) e pede para tentar de novo.
+ */
+export function menuKickPlan(input: { person: LiveConsolePerson | null; role: JitsiRole | null | undefined; staff: boolean }): "engine" | "ours" | "staff" | "unknown" {
+  if (input.staff || input.role === "moderator") {
+    return "staff";
+  }
+  if (input.person) {
+    return "ours";
+  }
+  return input.role === "participant" || input.role === "none" ? "engine" : "unknown";
+}
+
+/** Os ids de `sharing` sem papel lido (fora o proprio console): o console pede o getRoomsInfo para conhece-los. */
+export function rolesToRead(input: { roles: Readonly<Record<string, JitsiRole>>; selfId: string | null; sharing: readonly string[] }): string[] {
+  return input.sharing.filter((id) => id !== input.selfId && !Object.hasOwn(input.roles, id));
 }
 
 /** Um reducer so para tudo o que a mesa sabe da sala pelo iframe e pelos proprios cliques. */
@@ -483,6 +811,8 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
   switch (action.type) {
     case "event":
       return onEvent(state, action.name, action.payload, action.nowMs);
+    case "roomsInfo":
+      return applyConsoleRoomsInfo(state, action.info);
     case "seed": {
       let people = state.people;
       for (const raw of action.people) {
@@ -522,11 +852,43 @@ export function liveRoomReducer(state: LiveRoomState, action: LiveRoomAction): L
         : { ...state, speaking: state.speaking.filter((id) => id !== action.id), spotlight: state.spotlight === action.id ? null : state.spotlight, stage: state.stage.filter((id) => id !== action.id) };
     case "spotlight":
       return { ...state, spotlight: action.id };
+    case "onStage":
+      return { ...state, onStageId: typeof action.id === "string" && PARTICIPANT_ID.test(action.id) ? action.id : null };
+    case "frame":
+      // Um iframe novo e uma sala nova: o que o de antes sabia (o papel, quem estava, as maos, quem compartilha, a
+      // gravacao, a visao) nao vale para ele. Depois de um erro fatal o Tentar de novo monta outro sem a saida chegar.
+      return EMPTY_ROOM;
     case "reset":
       return EMPTY_ROOM;
     default:
       return state;
   }
+}
+
+/**
+ * O toggleFilmStrip que espera a resposta do motor no console do co-apresentador e da Equipe (a coluna pela largura,
+ * consoleColumnPolicy "width"): o `filmstripVisible` de quando ele saiu, ou nulo com nenhum esperando.
+ */
+export type ConsoleFilmstripPending = boolean | null;
+
+/**
+ * Manda o toggleFilmStrip agora? So quando o palco quer outra coisa que o motor mostra (`wanted` diferente de `visible`,
+ * o filmstripStep da sala do aluno) e nenhum espera a resposta a este mesmo estado: o comando inverte a coluna, e dois
+ * seguidos a deixariam como estava.
+ */
+export function consoleFilmstripShouldToggle(input: { pending: ConsoleFilmstripPending; visible: boolean; wanted: boolean }): boolean {
+  return input.wanted !== input.visible && input.pending !== input.visible;
+}
+
+/**
+ * O pedido que espera depois de um sinal do iframe, como na sala do aluno (use-live-room.ts): o filmstripDisplayChanged
+ * (a resposta do motor, ou a coluna que mudou por outra causa, como o seguir a visao de quem apresenta ou o atalho F
+ * dentro do iframe), a entrada (videoConferenceJoined) e o primeiro sinal de um iframe novo soltam o pedido, e a conta
+ * da coluna pode mandar o proximo. Sem isso, a coluna que volta depois da resposta ficaria por cima do iframe estreito
+ * enquanto ele vivesse. Os outros sinais deixam o pedido como esta.
+ */
+export function consoleFilmstripPendingAfter(input: { name: string; newFrame: boolean; pending: ConsoleFilmstripPending }): ConsoleFilmstripPending {
+  return input.newFrame || input.name === "filmstripDisplayChanged" || input.name === "videoConferenceJoined" ? null : input.pending;
 }
 
 /** O sinal que o console manda (sendEndpointTextMessage) para o aluno abaixar a propria mao: o IFrame API nao abaixa a mao de outro. */
@@ -558,13 +920,19 @@ export function lowerHandMessage(): string {
  * ---------------------------------------------------------------------------------------------- */
 
 export type RoomRow = {
+  /** O microfone no ar (participantMuted ou getRoomsInfo); sem sinal, desligado. */
+  audio: boolean;
   /** Da equipe: moderador na sala, o proprio console ou marcado no retrato. */
   staff: boolean;
   id: string;
   name: string;
   onStage: boolean;
   person: LiveConsolePerson | null;
+  /** Compartilha a tela agora (contentSharingParticipantsChanged). */
+  sharing: boolean;
   spotlight: boolean;
+  /** A camera no ar (participantMuted ou getRoomsInfo); sem sinal, desligada. */
+  video: boolean;
 };
 
 /** Quem esta na sala agora, com o aluno do retrato quando o id do participante bate (para remover, silenciar e banir). */
@@ -572,13 +940,17 @@ export function roomRows(state: LiveRoomState, people: readonly LiveConsolePerso
   const byParticipant = new Map(people.filter((person) => person.participantId).map((person) => [person.participantId as string, person]));
   return state.people.map((entry) => {
     const person = byParticipant.get(entry.id) ?? null;
+    const media = Object.hasOwn(state.media, entry.id) ? state.media[entry.id] : undefined;
     return {
+      audio: media?.audio === true,
       id: entry.id,
       name: person?.displayName ?? (entry.name || LIVE_CONSOLE_COPY.equipe),
       onStage: state.stage.includes(entry.id),
       person,
+      sharing: state.sharing.includes(entry.id),
       spotlight: state.spotlight === entry.id,
-      staff: state.roles[entry.id] === "moderator" || person?.staff === true
+      staff: state.roles[entry.id] === "moderator" || person?.staff === true,
+      video: media?.video === true
     };
   });
 }

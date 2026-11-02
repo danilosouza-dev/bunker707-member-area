@@ -11,12 +11,15 @@
 // direto pelo Node. Nada aqui le o relogio de verdade nem a rede: a hora e o resto chegam por parametro.
 
 import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
-import { LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
+import { FILMSTRIP_COLUMN_MIN_FRAME, LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { roomAccessLost } from "../../../../lib/webinar-room-client";
+import type { RoomView } from "../../../../lib/webinar-room-prefs";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
+import type { RoomBarItem, RoomBarItems } from "./room-layout-model";
+import { engineNoticeOf, engineSnack, type RoomSnack } from "./room-snackbar-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Frases da barra e do painel Configurações (WEBINAR_COPY.aoVivo; o nome do objeto ficou para os componentes e testes)
@@ -56,8 +59,13 @@ export const LIVE_ROOM_RULES = {
   reconnectBaseMs: 2_000,
   /** Sem a entrada confirmada depois disto, a montagem conta como queda. */
   joinTimeoutMs: 30_000,
-  /** As ultimas mensagens por cima do palco com a gaveta fechada (celular). */
-  overlayMessages: 3,
+  /** As ultimas mensagens em pilulas sobre o palco com o painel do chat fechado (docs/31 V2-8, tambem no computador). */
+  overlayMessages: 2,
+  /**
+   * A largura do iframe parou de mudar ha este tanto (abrir ou fechar o painel, girar, a janela arrastada): a sala refaz
+   * a conta da coluna de miniaturas (docs/31 V2-A5).
+   */
+  frameSettleMs: 250,
   /** Os avisos passageiros da barra (camera fechada pela equipe, microfone silenciado) somem depois disto. */
   noticeMs: 6_000,
   /**
@@ -65,6 +73,11 @@ export const LIVE_ROOM_RULES = {
    * prazo do microfone com a permissao do site dada (micAnswerDelayMs: a faixa abre em centenas de ms).
    */
   cameraAnswerMs: 5_000,
+  /**
+   * Ligar a camera com a permissao do site dada: o tempo de a camera abrir (o getUserMedia do iframe, a faixa nova na
+   * conferencia). 10 s, e nao os 5 do microfone: a camera demora mais a abrir, e o aviso cedo demais culpava a equipe.
+   */
+  cameraOpenMs: 10_000,
   /** O mesmo prazo com o pedido de permissao do navegador ainda aberto (o aluno le e responde); o do microfone tambem. */
   cameraPromptMs: 30_000,
   /**
@@ -89,7 +102,13 @@ export const LIVE_ROOM_RULES = {
   /** Um token que falhou ao renovar tenta de novo depois disto. */
   tokenRetryMs: 60_000,
   /** O nome de quem esta no palco, cortado aqui (vem do iframe). */
-  nameMax: 60
+  nameMax: 60,
+  /**
+   * A moderacao de audio mudou: a sala rele a sessao (o microfone sozinho pode ter mudado junto no console) depois de
+   * uma espera sorteada ate isto, para a turma inteira nao pedir no mesmo segundo (o vigia do teto troca a moderacao a
+   * cada 2 s no pior caso). As trocas dentro da espera viram uma releitura so.
+   */
+  audioModerationSpreadMs: 10_000
 } as const;
 
 /* ------------------------------------------------------------------------------------------------
@@ -254,6 +273,18 @@ export function joinFailurePhrase(failure: LiveJoinFailure, input: { hasReplay: 
     default:
       return WEBINAR_COPY.aoVivo.erroAbrir;
   }
+}
+
+/**
+ * A releitura da sessao depois de uma troca da moderacao de audio: nulo com uma ja marcada (as trocas que chegam dentro
+ * da espera viram uma so); senao, a espera sorteada pelo `random` (0 a 1, o Math.random) ate audioModerationSpreadMs.
+ */
+export function audioModerationRefreshInMs(pending: boolean, random: number): number | null {
+  if (pending) {
+    return null;
+  }
+  const share = Number.isFinite(random) ? Math.min(Math.max(random, 0), 1) : 0;
+  return Math.floor(share * LIVE_ROOM_RULES.audioModerationSpreadMs);
 }
 
 /** Depois de quanto tempo pedir outro token (ms): o contrato de jitsi-room-config (5 min antes do exp, piso de 10 s). */
@@ -507,11 +538,38 @@ export function cameraClick(input: { allowStudentCamera: boolean; consented: boo
   return input.consented ? "toggle" : "ask";
 }
 
+/**
+ * O microfone sozinho lotado (docs/31 caminho A): com a politica ligada, sem a liberacao do apresentador e com o
+ * microfone desligado, a moderacao de audio ligada (o vigia do console ligou no teto) ou ainda nao lida (o seguro: sem
+ * saber, nao abre). Com o microfone ligado nunca bloqueia: o aluno sempre pode se calar (docs/31 V2-A16).
+ */
+export function micBlocked(input: { audioModeration: boolean | null; audioOn: boolean; micAllowed: boolean; selfUnmute: boolean }): boolean {
+  return input.selfUnmute && !input.micAllowed && !input.audioOn && input.audioModeration !== false;
+}
+
+/**
+ * O clique em Microfone, no molde da Câmera: ligado ou liberado pelo apresentador (o Falar ja aceito), alterna;
+ * lotado (micBlocked), `blocked` (o aviso, sem abrir); o PRIMEIRO abrir do microfone sozinho passa pelo aviso de
+ * gravacao (`ask`); depois, direto.
+ */
+export function micClick(input: { audioModeration: boolean | null; audioOn: boolean; consented: boolean; micAllowed: boolean; selfUnmute: boolean }): "ask" | "blocked" | "toggle" {
+  if (input.audioOn || input.micAllowed) {
+    return "toggle";
+  }
+  if (micBlocked(input)) {
+    return "blocked";
+  }
+  return input.consented ? "toggle" : "ask";
+}
+
 function field(payload: unknown, key: string): unknown {
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>)[key] : undefined;
 }
 
-/** O apresentador liberou o microfone DESTE participante (moderationParticipantApproved com mediaType audio). */
+/**
+ * O sinal da moderacao de audio e DESTE participante (o payload { id, mediaType: "audio" }): o apresentador liberou o
+ * microfone (moderationParticipantApproved) ou a equipe o recolheu (moderationParticipantRejected).
+ */
 export function isOwnMicApproval(payload: unknown, ownId: string | null): boolean {
   const id = field(payload, "id");
   return ownId !== null && typeof id === "string" && id === ownId && field(payload, "mediaType") === "audio";
@@ -570,20 +628,35 @@ export type LiveNotice =
   | "camera_denied"
   | "camera_failed"
   | "camera_unanswered"
+  | "hand_lowered"
   | "mic_denied"
   | "mic_failed"
+  | "mic_full"
+  | "mic_no_signal"
   | "mic_released"
   | "mic_silenced"
-  | "mic_unanswered";
+  | "mic_unanswered"
+  | "recording_started";
 
 export type LiveParticipants = { moderators: string[]; names: Record<string, string> };
 
 export type LiveSignalState = {
+  /**
+   * A moderacao de audio do motor (o moderationStatusChanged de audio e, na entrada, o isModerationOn): ligada, so quem
+   * foi aprovado abre o microfone. Nulo: ainda nao lida. Nao zera na entrada (o sinal pode chegar antes dela); um
+   * iframe novo volta a nulo (signalsForNewFrame).
+   */
+  audioModeration: boolean | null;
   audioOn: boolean;
   /** O proximo audioMuteStatusChanged foi pedido por nos (Falar, Microfone ou a troca do microfone): nao e a equipe silenciando. */
   expectAudio: boolean;
   /** O proximo videoMuteStatusChanged foi pedido por nos (Câmera ou a troca da camera): nao e a equipe fechando. */
   expectVideo: boolean;
+  /**
+   * A coluna de miniaturas do iframe na tela (o ultimo filmstripDisplayChanged; visivel ao entrar). Fora do iframe, nao
+   * ha coluna: o selo do Assistente e as pilulas do chat vao ate a borda.
+   */
+  filmstripVisible: boolean;
   handRaised: boolean;
   /** O apresentador liberou e o aluno aceitou: o botao Microfone aparece. */
   micAllowed: boolean;
@@ -591,22 +664,34 @@ export type LiveSignalState = {
   micPrompt: boolean;
   notice: LiveNotice | null;
   participants: LiveParticipants;
+  /**
+   * Quem esta no video grande agora (o ultimo largeVideoChanged do motor; onStageParticipantOf): o selo "{nome} ·
+   * Apresentador" so vale com um moderador ali (presenterBadgeFor). Nulo: o motor ainda nao disse (vale o selo de
+   * antes).
+   */
+  onStageId: string | null;
   /** O ultimo recordingStatusChanged (nulo: nenhum ainda; vale o `live.recording` da sessao). */
   recording: boolean | null;
   videoOn: boolean;
+  /** O que o motor mostra (o ultimo tileViewChanged): a Grade ou o Palco. O botao da visao diz isto, nunca a escolha guardada. */
+  viewShown: RoomView;
 };
 
 export const INITIAL_LIVE_SIGNALS: LiveSignalState = {
+  audioModeration: null,
   audioOn: false,
   expectAudio: false,
   expectVideo: false,
+  filmstripVisible: false,
   handRaised: false,
   micAllowed: false,
   micPrompt: false,
   notice: null,
+  onStageId: null,
   participants: { moderators: [], names: {} },
   recording: null,
-  videoOn: false
+  videoOn: false,
+  viewShown: "stage"
 };
 
 function cleanName(value: unknown): string | null {
@@ -635,31 +720,111 @@ export function mediaErrorNotice(media: "camera" | "mic", payload: unknown): Liv
 }
 
 /**
+ * Um iframe NOVO comecou a mandar sinais (a primeira montagem, Tentar de novo, a remontagem depois da queda): o que o
+ * motor mostra volta ao padrao dele (o Palco, com a coluna de miniaturas na tela) e ninguem esta no video grande para
+ * nos ainda. A sala chama isto no PRIMEIRO sinal do iframe montado agora, antes de aplica-lo: assim o seguir a visao da
+ * equipe (a Grade, a coluna escondida), que o motor aplica com as presencas de quem ja esta na sala, antes da entrada do
+ * proprio aluno, fica valendo. O mesmo iframe que volta sozinho depois de uma queda nao passa por aqui.
+ */
+export function signalsForNewFrame(state: LiveSignalState): LiveSignalState {
+  return { ...state, audioModeration: null, filmstripVisible: true, onStageId: null, viewShown: "stage" };
+}
+
+/**
+ * Quem o motor pos no video grande (o largeVideoChanged chega sem dados): o id que o IFrame API guarda do ultimo
+ * on-stage-participant-changed (_getOnStageParticipant, um metodo privado do external_api.js da tag stable-11248).
+ * Sem o metodo, com erro ou sem id: nulo (a sala fica como se nao soubesse).
+ */
+export function onStageParticipantOf(api: unknown): string | null {
+  const read = api && typeof api === "object" ? (api as { _getOnStageParticipant?: unknown })._getOnStageParticipant : undefined;
+  if (typeof read !== "function") {
+    return null;
+  }
+  try {
+    const id: unknown = read.call(api);
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * O dono de quem esta no video grande: a tela compartilhada e um participante virtual com o id da fonte, `<id>-v1`, e
+ * o dono e o id antes do hifen (getVirtualScreenshareParticipantOwnerId da tag stable-11248). Os ids de endpoint do
+ * motor sao hex de 8 caracteres, sem hifen: o id de uma pessoa volta igual.
+ */
+export function stageOwnerId(onStageId: string): string {
+  return onStageId.split("-")[0];
+}
+
+/**
+ * O selo "{nome} · Apresentador" embaixo a esquerda do palco da Live ao vivo (V2-4): so com a sala no iframe e o motor
+ * no Palco (na Grade nao ha video grande: o selo cairia sobre a miniatura de qualquer um) e com um moderador no video
+ * grande (quem apresenta, ou quem a equipe destacou da equipe), tambem com a tela que ele compartilha no video grande
+ * (o participante virtual `<id>-v1`, pelo dono: stageOwnerId). O aluno com o microfone liberado que vira o orador, ou
+ * o aluno que a equipe destacou (e a tela dele, na fase 2), fica sem o selo. Antes de o motor dizer quem esta no video
+ * grande (`onStageId` nulo) ou fora do iframe, o selo de antes (o apresentador da pagina). Sem nome, nenhum.
+ */
+export function presenterBadgeFor(input: { joined: boolean; presenterName: string | null; signals: Pick<LiveSignalState, "onStageId" | "participants" | "viewShown"> }): string | null {
+  const name = input.presenterName?.trim() || null;
+  if (!name || !input.joined) {
+    return name;
+  }
+  if (input.signals.viewShown === "grid") {
+    return null;
+  }
+  const onStage = input.signals.onStageId;
+  if (onStage === null) {
+    return name;
+  }
+  return input.signals.participants.moderators.includes(stageOwnerId(onStage)) ? name : null;
+}
+
+/**
  * O estado da nossa barra depois de um sinal do iframe. Entrar zera tudo (todo mundo entra mudo e com a camera
- * fechada); a mao e o papel so contam quando sao do proprio participante; a camera ou o microfone que fecham sem o
+ * fechada), menos o que o motor ja mostra (a visao e a coluna, signalsForNewFrame) e quem esta na sala e no palco; a
+ * mao e o papel so contam quando sao do proprio participante; a camera ou o microfone que fecham sem o
  * nosso pedido viram o aviso "A equipe fechou a sua câmera" / "A equipe silenciou o seu microfone" (e o microfone some
- * da barra); a liberacao do proprio microfone abre o dialogo Falar / Agora não; quem tem papel de moderador entra na
- * lista "No palco" (nunca a lista de alunos); o micError / cameraError vira o aviso na barra e encerra a espera do
- * nosso pedido. Na tag stable-11248 eles so chegam da troca de aparelho do painel (o set*Device): o Falar e o Ligar
- * câmera vao pelo toggleAudio / toggleVideo, cuja recusa nao avisa nada, e a sala confere a permissao do navegador
- * (micAskCheck, cameraRequestUnanswered).
+ * da barra); a liberacao do proprio microfone abre o dialogo Falar / Agora não, e a equipe que o recolhe tira o
+ * Microfone da barra mesmo desligado; quem tem papel de moderador entra na lista "No palco" (nunca a lista de alunos);
+ * o micError / cameraError vira o aviso na barra e encerra a espera do nosso pedido. Na tag stable-11248 eles so
+ * chegam da troca de aparelho do painel (o set*Device): o Falar e o Ligar câmera vao pelo toggleAudio / toggleVideo,
+ * cuja recusa nao avisa nada, e a sala confere a permissao do navegador (micAskCheck, cameraRequestUnanswered).
  */
 export function applyLiveSignal(state: LiveSignalState, input: { name: string; ownId: string | null; payload: unknown }): LiveSignalState {
   const { name, ownId, payload } = input;
   const id = field(payload, "id");
   switch (name) {
     case "videoConferenceJoined":
-      return { ...INITIAL_LIVE_SIGNALS, participants: state.participants, recording: state.recording };
+      // As presencas de quem ja esta na sala chegam antes da do proprio aluno: os participantJoined, o seguir a visao da
+      // equipe (tileViewChanged, filmstripDisplayChanged) e quem esta no video grande ja valem e ficam. O padrao do
+      // motor (o Palco com a coluna) volta so com um iframe novo (signalsForNewFrame).
+      return {
+        ...INITIAL_LIVE_SIGNALS,
+        audioModeration: state.audioModeration,
+        filmstripVisible: state.filmstripVisible,
+        onStageId: state.onStageId,
+        participants: state.participants,
+        recording: state.recording,
+        viewShown: state.viewShown
+      };
     case "videoConferenceLeft":
       // Fora da sala ninguem esta no palco para nos (a lista volta com os participantJoined da proxima entrada) e a
-      // liberacao do microfone era do participante que saiu (quem volta entra com outro id, mudo).
-      return { ...INITIAL_LIVE_SIGNALS, recording: state.recording };
+      // liberacao do microfone era do participante que saiu (quem volta entra com outro id, mudo). A visao e a coluna
+      // ficam: o mesmo iframe pode voltar sozinho, com o motor como estava (fora do iframe, a sala nao conta a coluna:
+      // stageColumnShown).
+      return { ...INITIAL_LIVE_SIGNALS, audioModeration: state.audioModeration, filmstripVisible: state.filmstripVisible, recording: state.recording, viewShown: state.viewShown };
+    case "largeVideoChanged": {
+      // A sala troca o payload vazio do motor pelo id lido do IFrame API (onStageParticipantOf).
+      const onStage = field(payload, "id");
+      return { ...state, onStageId: typeof onStage === "string" && onStage.length > 0 ? onStage : null };
+    }
     case "videoMuteStatusChanged": {
       const on = field(payload, "muted") === false;
       const closedByTeam = !on && state.videoOn && !state.expectVideo;
       // A camera ligou depois do aviso "camera desligada" ou "nao liberada" (o aluno so respondeu ao pedido do navegador
       // depois do prazo).
-      const notice = closedByTeam ? "camera_closed" : on && (state.notice === "camera_blocked" || state.notice === "camera_unanswered") ? null : state.notice;
+      const notice = closedByTeam ? "camera_closed" : on && (state.notice === "camera_blocked" || state.notice === "camera_failed" || state.notice === "camera_unanswered") ? null : state.notice;
       return { ...state, expectVideo: false, notice, videoOn: on };
     }
     case "audioMuteStatusChanged": {
@@ -677,13 +842,52 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
     case "raiseHandUpdated":
       return ownId !== null && id === ownId ? { ...state, handRaised: Boolean(field(payload, "handRaised")) } : state;
     case "moderationParticipantApproved":
-      return isOwnMicApproval(payload, ownId) ? { ...state, micPrompt: true, notice: "mic_released" } : state;
+      // Com o microfone ja ligado (o microfone sozinho, ou o askToUnmute de novo de quem esta no palco quando a moderacao
+      // religa), a aprovacao so vale: o Falar nao abre de novo.
+      if (!isOwnMicApproval(payload, ownId)) {
+        return state;
+      }
+      return state.audioOn ? { ...state, micAllowed: true } : { ...state, micPrompt: true, notice: "mic_released" };
+    case "moderationStatusChanged": {
+      // A moderacao de audio ligada zera as aprovacoes no motor (so os moderadores ficam): a liberacao de antes nao vale
+      // mais, e o Microfone so volta com uma aprovacao nova. A de video nao mexe no microfone.
+      const enabled = field(payload, "enabled");
+      if (field(payload, "mediaType") !== "audio" || typeof enabled !== "boolean") {
+        return state;
+      }
+      return { ...state, audioModeration: enabled, micAllowed: enabled ? false : state.micAllowed };
+    }
+    case "moderationParticipantRejected":
+      // A equipe recolheu o microfone deste aluno (o "Tirar do palco" ou o Silenciar do console): o Microfone sai da
+      // barra e o Falar / Agora não fecha, mesmo com o microfone ja desligado, quando nenhum audioMuteStatusChanged chega
+      // (docs/31 V2-19). O de outro participante e o de video nao mexem na barra.
+      return isOwnMicApproval(payload, ownId) ? { ...state, expectAudio: false, micAllowed: false, micPrompt: false, notice: "mic_silenced" } : state;
     case "micError":
       return { ...state, expectAudio: false, notice: mediaErrorNotice("mic", payload) };
     case "cameraError":
       return { ...state, expectVideo: false, notice: mediaErrorNotice("camera", payload) };
     case "recordingStatusChanged":
       return { ...state, recording: field(payload, "on") === true };
+    case "endpointTextMessageReceived": {
+      // "Abaixar a mão" do console (com a mao levantada; quem recebe ja mandou o toggleRaiseHand): a barra abaixa na hora
+      // e o aviso diz quem abaixou. A gravacao no navegador do Apresentador (so de quem modera): o selo Gravando na hora.
+      if (lowerHandRequested(state, payload)) {
+        return { ...state, handRaised: false, notice: "hand_lowered" };
+      }
+      const recordingOn = recordingSignalOf(state, payload);
+      return recordingOn === null ? state : { ...state, recording: recordingOn };
+    }
+    case "notificationTriggered":
+      // Um aviso do motor (escondido pelo notifications: []): na sala, so o microfone ligado sem som vira aviso nosso.
+      return engineNoticeOf(payload, { audioOn: state.audioOn, surface: "room" })?.key === "mic_no_signal" ? { ...state, notice: "mic_no_signal" } : state;
+    case "tileViewChanged": {
+      const enabled = field(payload, "enabled");
+      return typeof enabled === "boolean" ? { ...state, viewShown: enabled ? "grid" : "stage" } : state;
+    }
+    case "filmstripDisplayChanged": {
+      const visible = field(payload, "visible");
+      return typeof visible === "boolean" ? { ...state, filmstripVisible: visible } : state;
+    }
     case "participantJoined": {
       const display = cleanName(field(payload, "displayName"));
       return typeof id === "string" && id !== ownId && display ? { ...state, participants: { ...state.participants, names: { ...state.participants.names, [id]: display } } } : state;
@@ -712,27 +916,30 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
  * aluno (a equipe desligou as cameras dos alunos no meio da live: o iframe recusa sem pedir nada ao navegador, e a
  * permissao fica como estava) diz que a camera dos alunos esta desligada; a permissao negada, que o navegador bloqueou;
  * o pedido do navegador ainda sem resposta (`prompt`: fechado no X, ou aberto), que a camera nao foi liberada (o aceite
- * fica, e a camera que abrir depois tira o aviso); com a permissao dada ou sem como saber, a camera dos alunos
- * desligada (o caso de antes).
+ * fica, e a camera que abrir depois tira o aviso). Com a permissao dada e o motor dizendo que o aluno NAO esta preso
+ * (`forceMuted` false: as cameras livres), a camera e que nao abriu (ocupada por outro programa ou outra janela, ou
+ * lenta): camera_failed, e nunca "a camera dos alunos esta desligada", que culpava a equipe com as cameras livres. Sem
+ * resposta do motor (`forceMuted` nulo), a camera dos alunos desligada, como antes.
  */
 export function cameraRequestUnanswered(state: LiveSignalState, permission: string | null = null, forceMuted: boolean | null = null): LiveSignalState {
   if (!state.expectVideo || state.videoOn) {
     return state;
   }
-  const notice: LiveNotice = forceMuted === true ? "camera_blocked" : permission === "denied" ? "camera_denied" : permission === "prompt" ? "camera_unanswered" : "camera_blocked";
+  const notice: LiveNotice =
+    forceMuted === true ? "camera_blocked" : permission === "denied" ? "camera_denied" : permission === "prompt" ? "camera_unanswered" : forceMuted === false ? "camera_failed" : "camera_blocked";
   return { ...state, expectVideo: false, notice };
 }
 
 /**
  * Quanto esperar a camera ligar antes de dizer que ela nao ligou: com a permissao ja negada, nada (o navegador recusa
  * na hora); com o pedido de permissao do navegador ainda por responder (`prompt`, comum no celular), o prazo cobre a
- * resposta (30 s); com a permissao dada (ou sem como saber), 5 s.
+ * resposta (30 s); com a permissao dada (ou sem como saber), o tempo de a camera abrir (10 s).
  */
 export function cameraAnswerDelayMs(permission: string | null | undefined): number {
   if (permission === "denied") {
     return 0;
   }
-  return permission === "prompt" ? LIVE_ROOM_RULES.cameraPromptMs : LIVE_ROOM_RULES.cameraAnswerMs;
+  return permission === "prompt" ? LIVE_ROOM_RULES.cameraPromptMs : LIVE_ROOM_RULES.cameraOpenMs;
 }
 
 /**
@@ -836,10 +1043,10 @@ export function expectAudioToggle(state: LiveSignalState): LiveSignalState {
  * permissao do site, a do sistema (o macOS que bloqueou o navegador), o microfone ocupado ou o fone desplugado. Entao
  * TODO pedido segura o "ligado" ate a faixa abrir de verdade (isAudioMuted do iframe falso), com ou sem a permissao do
  * site dada. O pedido e um so, ligado ao iframe em que o toggleAudio foi (`api`), e acaba so com a faixa aberta (o
- * "ligado" vai), o mudo (micAskStep), a recusa do navegador, outro toque, outro iframe ou a saida; nunca por prazo (o
- * getUserMedia aberto continua esperando o aluno: quem libera depois abre a faixa sem sinal nenhum). Enquanto ele
- * durar, o iframe pode estar com o "ligado" sem faixa: o proximo toque abre outro pedido, e o "ligado" que nao vier de
- * novo como sinal a sala cria quando a faixa abrir.
+ * "ligado" vai), o mudo (micAskStep), a equipe que recolhe o microfone (micAskRecalled), a recusa do navegador, outro
+ * toque, outro iframe ou a saida; nunca por prazo (o getUserMedia aberto continua esperando o aluno: quem libera depois
+ * abre a faixa sem sinal nenhum). Enquanto ele durar, o iframe pode estar com o "ligado" sem faixa: o proximo toque
+ * abre outro pedido, e o "ligado" que nao vier de novo como sinal a sala cria quando a faixa abrir.
  */
 export type MicAsk = {
   /** O IFrame API em que o toggleAudio foi: outro (a queda, a volta, a sala desmontada) encerra o pedido. */
@@ -889,6 +1096,26 @@ export function micAskStep(current: MicAsk | null, name: string, payload: unknow
     return { next: { ...current, held: payload }, release: null, swallow: true };
   }
   return { next: null, release: current.held, swallow: false };
+}
+
+/**
+ * A equipe recolheu o microfone deste aluno (moderationParticipantRejected de audio do proprio id, docs/31 V2-19): o
+ * pedido do Falar em andamento acaba ali, sem passar o "ligado" guardado. Assim o Microfone que saiu da barra
+ * (applyLiveSignal) nunca volta por um "ligado" antigo (micAskCheck devolve "gone"), e o mudo que a equipe manda junto
+ * passa direto, sem nada guardado antes dele.
+ */
+export function micAskRecalled(name: string, payload: unknown, ownId: string | null): boolean {
+  return name === "moderationParticipantRejected" && isOwnMicApproval(payload, ownId);
+}
+
+/**
+ * O passo do pedido do microfone em cada sinal do iframe, como o onEvent da sala o da (use-live-room.ts): o
+ * recolhimento do proprio microfone pela equipe (micAskRecalled) encerra o pedido ANTES do passo, entao o "ligado"
+ * guardado nunca sai (nem a barra, nem o servidor) e a conferencia seguinte da "gone"; os outros sinais seguem o
+ * micAskStep.
+ */
+export function micAskOnSignal(current: MicAsk | null, name: string, payload: unknown, ownId: string | null): { next: MicAsk | null; release: unknown; swallow: boolean } {
+  return micAskStep(micAskRecalled(name, payload, ownId) ? null : current, name, payload);
 }
 
 export type MicAskOutcome =
@@ -1099,11 +1326,104 @@ export function pendingTogglePhrase(pending: Record<DeviceSwitchKind, boolean>, 
 }
 
 /**
+ * A nossa barra (e com ela o painel Configurações e as reacoes) so existe com a sala no ar: a live encerrada, removido,
+ * banido ou fora do acesso a tiram (docs/30 §1.7). Nao ha mais Minimizar (docs/31 V2-2): a sala nunca encolhe.
+ */
+export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): boolean {
+  return !input.blocked && input.screen !== "ended";
+}
+
+/**
+ * Os botoes da nossa barra (docs/31 V2-6), nas tres zonas: o Sair a esquerda; no centro Reagir, a mao (so com a nossa
+ * barra de midia: aluno e Equipe), a Câmera (so com a camera dos alunos permitida no webinario; nula antes do token),
+ * o Microfone (so depois de o apresentador liberar e do Falar), o Som e a Tela cheia (ou o Modo cinema); a direita,
+ * a Visão do vídeo (Palco ou Grade, so com a nossa barra de midia: quem apresenta muda a visao pelo console, e o seguir
+ * a visao a levaria a todos), Configurações e o balao do chat. O Som vem antes da Tela cheia. A tela decide o que some
+ * pela largura (o Sair, a Tela cheia e a Visão do vídeo saem da barra abaixo de lg). O Microfone tambem fica enquanto
+ * o microfone esta ligado (`audioOn`), mesmo recolhido pela equipe sem o mudo (docs/31 V2-A16): o aluno sempre tem
+ * como se calar; desligado, ele sai. Com o microfone sozinho (`selfUnmute`, docs/31 caminho A), o Microfone fica sempre,
+ * sem o Liberar (lotado, desligado com o motivo: micBlocked).
+ */
+export function liveBarItems(input: { allowStudentCamera: boolean | null; audioOn: boolean; micAllowed: boolean; selfUnmute?: boolean; showMedia: boolean }): RoomBarItems {
+  const center: RoomBarItem[] = ["react"];
+  if (input.showMedia) {
+    center.push("hand");
+    if (input.allowStudentCamera === true) {
+      center.push("camera");
+    }
+    if (input.micAllowed || input.audioOn || input.selfUnmute === true) {
+      center.push("mic");
+    }
+  }
+  center.push("sound", "fullscreen");
+  return { center, left: ["leave"], right: input.showMedia ? ["view", "settings", "panel"] : ["settings", "panel"] };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A visao do video (docs/31 V2-16) e a coluna de miniaturas pela largura do iframe (V2-A5)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O comando que a sala manda depois de cada videoConferenceJoined (a entrada, Tentar de novo, a volta depois da queda):
+ * so a Grade guardada vira setTileView(true). O Palco guardado nao manda nada: o iframe ja entra no Palco, e forcar o
+ * Palco desfaria a grade que a equipe ligou para todos (o seguir a visao so reaplica quando a equipe muda).
+ */
+export function viewOnJoin(stored: RoomView): ["setTileView", true] | null {
+  return stored === "grid" ? ["setTileView", true] : null;
+}
+
+/**
+ * A sala quer a coluna de miniaturas a direita do video grande: so no Palco (na Grade as miniaturas sao a propria
+ * grade) e com o iframe de FILMSTRIP_COLUMN_MIN_FRAME (1013 px) ou mais, a largura em que o motor da a coluna inteira
+ * sem estreitar as miniaturas nem as deixar flutuar sobre o video. No celular (o iframe de cerca de 374 px) ela some.
+ */
+export function columnWanted(input: { frameWidth: number; view: RoomView }): boolean {
+  return input.view === "stage" && Number.isFinite(input.frameWidth) && input.frameWidth >= FILMSTRIP_COLUMN_MIN_FRAME;
+}
+
+/**
+ * O toggleFilmStrip so quando o que a sala quer difere do que o motor mostra (o ultimo filmstripDisplayChanged): o
+ * comando inverte a coluna, entao manda-lo com os dois iguais a tiraria (ou poria) por engano.
+ */
+export function filmstripStep(input: { visible: boolean; wanted: boolean }): "toggle" | null {
+  return input.wanted === input.visible ? null : "toggle";
+}
+
+/**
+ * A coluna de miniaturas esta na tela agora (o que os selos de baixo e as pilulas descontam, --room-video-right): so
+ * dentro do iframe (`joined`), com o motor no Palco (o ultimo tileViewChanged, nunca a escolha guardada) e com a coluna
+ * visivel (o ultimo filmstripDisplayChanged). Antes de entrar, fora do iframe e na Grade, nenhuma coluna.
+ */
+export function stageColumnShown(signals: Pick<LiveSignalState, "filmstripVisible" | "viewShown">, joined: boolean): boolean {
+  return joined && signals.viewShown === "stage" && signals.filmstripVisible;
+}
+
+/**
+ * O menu da Visão do vídeo fechou por ficar desligado (a reconexao, a saida do iframe, a barra que sumiu) com o foco na
+ * opcao que sumiu, ou ja no body: a sala manda o foco para dentro dela (roomFocusTarget; o botao do menu esta desligado
+ * ou fora da tela), nunca o deixa no body, onde o Esc, os atalhos e a trava do Tab deixariam de valer. Com o foco em
+ * outro lugar (o video, outro controle), nada. Fechado pelo aluno, o proprio menu e a sala ja levam o foco ao botao.
+ */
+export function viewMenuFocusLost(input: { active: unknown; body: unknown; inMenu: boolean }): boolean {
+  return input.inMenu || input.active === input.body || input.active === null;
+}
+
+/**
  * A nossa barra acabou de sumir (a live encerrada, removido ou banido) e o foco caiu no body (estava num botao dela,
  * no painel Configurações ou nas reacoes, que sumiram juntos): a sala manda o foco de volta para dentro dela.
  */
 export function barFocusLost(input: { active: unknown; barShown: boolean; barWasShown: boolean; body: unknown }): boolean {
   return input.barWasShown && !input.barShown && (input.active === input.body || input.active === null);
+}
+
+/**
+ * O Microfone acabou de sair da barra (a equipe o recolheu ou silenciou: micAllowed de verdadeiro para falso; ou a
+ * reconexao, que entra mudo) com o foco nele: o foco caiu no body, e a sala o manda de volta para dentro dela
+ * (roomFocusTarget), como no barFocusLost, porque no body o Esc, os atalhos e a trava do Tab deixariam de valer. Com o
+ * foco em outro lugar (o video, outro controle) ou o Microfone que continua na barra, nada.
+ */
+export function micFocusLost(input: { active: unknown; body: unknown; micShown: boolean; micWasShown: boolean }): boolean {
+  return input.micWasShown && !input.micShown && (input.active === input.body || input.active === null);
 }
 
 /** Levantar / Abaixar a mão: a barra muda na hora; o raiseHandUpdated do iframe confirma. */
@@ -1134,9 +1454,37 @@ export function liveNoticePhrase(notice: LiveNotice | null): string | null {
       return WEBINAR_COPY.aoVivo.cameraSemResposta;
     case "mic_unanswered":
       return WEBINAR_COPY.aoVivo.microfoneSemResposta;
+    case "mic_full":
+      return WEBINAR_COPY.aoVivo.microfoneLotado;
+    case "hand_lowered":
+      return WEBINAR_COPY.salaV2.avisos.maoAbaixada;
+    case "mic_no_signal":
+      return WEBINAR_COPY.salaV2.avisos.semSomDoMicrofone;
+    case "recording_started":
+      return WEBINAR_COPY.salaV2.avisos.gravacaoComecou;
     default:
       return null;
   }
+}
+
+/**
+ * O aviso da sala (RoomSnackbar) de um aviso da barra: o tipo e a chave (o mesmo tipo repetido so reinicia o tempo), a
+ * frase e, no microfone sem som, a acao Configurações. O "microfone liberado" nao e aviso: e o dialogo Falar / Agora não.
+ */
+export function liveNoticeSnack(notice: LiveNotice | null): RoomSnack | null {
+  if (notice === "mic_no_signal") {
+    return engineSnack("mic_no_signal");
+  }
+  const text = notice === "mic_released" ? null : liveNoticePhrase(notice);
+  return notice && text ? { key: notice, text } : null;
+}
+
+/** A chave do aviso "enquanto durar" da troca de aparelho (pendingTogglePhrase): um so, que troca de frase no lugar. */
+export const DEVICE_SWITCH_SNACK = "device_switch";
+
+/** O aviso da troca de aparelho em andamento (o toque que espera a troca acabar), sem tempo: some quando a troca acaba. */
+export function pendingToggleSnack(phrase: string | null): RoomSnack | null {
+  return phrase ? { key: DEVICE_SWITCH_SNACK, persistent: true, text: phrase } : null;
 }
 
 /** O selo Gravando: o ultimo sinal do iframe vale; antes dele, a sessao (o gravador gravando). */
@@ -1199,7 +1547,7 @@ export function prefersCinemaMode(input: { fullscreenEnabled: boolean; userAgent
   return /iPhone|iPod/i.test(input.userAgent) || !input.fullscreenEnabled;
 }
 
-/** As ultimas mensagens para o chat por cima do palco (celular, gaveta fechada). */
+/** As ultimas mensagens para as pilulas do chat sobre o palco (o painel fechado; as duas salas, V2-8). */
 export function overlayMessages<T>(messages: readonly T[], count: number = LIVE_ROOM_RULES.overlayMessages): T[] {
   return count > 0 ? messages.slice(-count) : [];
 }

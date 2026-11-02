@@ -25,7 +25,6 @@ const ts = require("typescript");
  * tira a linha daqui. Classe nova de exemplo, so as que o codigo ja usa (docs/27 §13.11.1).
  */
 const KNOWN_BEFORE_L6A = [
-  "-ml-1",
   "bg-[linear-gradient(90deg,rgba(0,0,0,.94),rgba(0,0,0,.54)_45%,rgba(0,0,0,.28)),linear-gradient(0deg,rgba(0,0,0,.82),transparent_55%)]",
   "bg-background/80",
   "bg-muted/20",

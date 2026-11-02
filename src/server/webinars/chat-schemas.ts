@@ -187,7 +187,8 @@ export const fireScriptItemSchema = z.object({ itemId: uuidSchema, sessionId: se
 /** A mensagem da equipe no chat da sessao (role team, source team). */
 export const teamChatSchema = z.object({ body: bodySchema, kind: z.enum(["message", "answer", "system"]).default("message"), replyToId: uuidSchema.nullable().optional(), sessionId: sessionIdSchema });
 
-export const MODERATION_ACTIONS = ["approve", "delete", "pin", "unpin", "promote"] as const;
+/** "question" (docs/31 V2-15): Virar pergunta, so mensagem da turma com autor (a pendente tambem e liberada). */
+export const MODERATION_ACTIONS = ["approve", "delete", "pin", "unpin", "promote", "question"] as const;
 export type ModerationAction = (typeof MODERATION_ACTIONS)[number];
 
 export const moderateMessageSchema = z.object({

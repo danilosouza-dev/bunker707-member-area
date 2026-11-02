@@ -28,6 +28,7 @@ import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatu
 import { webinarReportHref } from "./report-page-model";
 import { jitActive, jitSummary, withJitPublishProblems } from "./jit-model";
 import {
+  MIC_LIMIT,
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
   accessModeAnchorsAudience,
@@ -218,7 +219,6 @@ export const WEBINAR_ADMIN_COPY = {
       unpin: "Desafixar",
       whoWrites: "Quem pode escrever"
     },
-    description: "A mesa da equipe durante a sessão: chat, roteiro, enquetes e perguntas.",
     end: "Encerrar sessão",
     endConfirm: {
       confirmLabel: "Encerrar sessão",
@@ -226,7 +226,6 @@ export const WEBINAR_ADMIN_COPY = {
       title: "Encerrar a sessão agora?"
     },
     lasted: (text: string) => `Durou ${text}`,
-    offline: "Sem resposta do servidor; tentando de novo.",
     onAirFor: (text: string) => `No ar há ${text}`,
     open: "Abrir sessão",
     openConfirm: {
@@ -248,7 +247,6 @@ export const WEBINAR_ADMIN_COPY = {
       templates: "Prontas",
       title: "Enquetes"
     },
-    presentNow: (count: number) => (count === 1 ? "1 presente agora" : `${count} presentes agora`),
     questions: {
       anonymous: "Anônima",
       answerLive: "Respondida ao vivo",
@@ -262,7 +260,6 @@ export const WEBINAR_ADMIN_COPY = {
       votes: (count: number) => (count === 1 ? "1 voto" : `${count} votos`)
     },
     readOnly: "Esta sessão não aceita mais ações da equipe.",
-    refresh: "Atualizar",
     report: "Ver relatório",
     script: {
       due: (text: string) => `Entra em ${text}`,
@@ -274,10 +271,8 @@ export const WEBINAR_ADMIN_COPY = {
       summary: (fired: number, pending: number, manual: number) => `${fired} ${fired === 1 ? "entrou" : "entraram"} · ${pending} a caminho · ${manual} pelo botão`,
       title: "Roteiro"
     },
-    sessionPicker: "Sessão",
     startsIn: (text: string) => `Começa em ${text}`,
-    title: "Console da sessão",
-    updating: "Atualizando…"
+    title: "Console da sessão"
   },
   fields: {
     accessModes: {
@@ -373,7 +368,9 @@ export const WEBINAR_ADMIN_COPY = {
     micOff: "Todos entram sem microfone",
     micOffHint: "Fixo nesta versão.",
     micSelf: "Permitir que o aluno abra o microfone sozinho",
-    micSelfHint: "Desligado nesta versão.",
+    micSelfHint: WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(MIC_LIMIT),
+    /** Na Live gravada nao ha microfone (docs/30): o switch fica desligado com a dica de antes. */
+    micSelfRecordedHint: "Desligado nesta versão.",
     newCommentsVisible: "Comentários novos aparecem para a turma",
     newCommentsHistory: "Entram no histórico só depois de aprovados",
     newCommentsHistoryHint: "Fixo: a equipe aprova no console.",
@@ -457,7 +454,6 @@ export const WEBINAR_ADMIN_COPY = {
     deleted: "Rascunho excluído.",
     duplicated: "Cópia criada como rascunho.",
     ended: "Sessão encerrada. O relatório fica pronto em instantes.",
-    messageSent: "Mensagem enviada.",
     nothingToSave: "Nenhuma mudança para salvar.",
     opened: "Sessão aberta. O roteiro pronto entrou no chat.",
     phrasesResolved: "Frases conferidas na transcrição.",

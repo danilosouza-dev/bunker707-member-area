@@ -453,6 +453,8 @@ test("janela do chat: a linha mestre vem deslocada pela ancora (100 s na live = 
   );
   assert.equal(janela.body.data.messages[0].role, "student");
   assert.ok(!("source" in janela.body.data.messages[0]), "a origem fica so no banco");
+  // Na gravada, nenhuma hora gravada (docs/31 V2-9): a da linha mestre diria quando foi a live de origem.
+  assert.deepEqual(janela.body.data.messages.map((message) => message.sentAt), [null, null]);
 
   const desde = iso(Date.now() - 2000);
   const novas = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${encodeURIComponent(desde)}`), contexto()));
@@ -482,6 +484,7 @@ test("janela do chat na gravada: nunca passa da janela a frente do relogio do se
 
   const replay = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${REPLAY}&from=880000&to=920000`), contexto()));
   assert.deepEqual(replay.body.data.messages.map((message) => message.body), ["spoiler do minuto 15"], "no replay o aluno pula pelo video");
+  assert.equal(replay.body.data.messages[0].sentAt, null, "a linha mestre de 30 dias atras nao leva a data ao navegador");
   assert.deepEqual(replay.body.data.window, { fromMs: 880_000, toMs: 920_000 });
 });
 
@@ -543,6 +546,20 @@ test("POST chat: Participar como anonimo vira Aluno {n} estavel; apelido; a perg
   assert.deepEqual(eventos(db2, "webinar_question_sent")[0].metadata, { anonymous: false, offset_ms: linhaDaPergunta.offset_ms, question_id: linhaDaPergunta.id });
   assert.equal(db2.tables.webinar_chat_consents[0].user_id, sessao.user.id);
   assert.notEqual(userId, sessao.user.id);
+});
+
+test("POST chat: a pergunta pelo chat aberto com um emoji na casa 500 corta por caractere (questionBodyOf), nunca no meio do emoji; a mensagem do chat fica inteira", async () => {
+  const { db } = montar();
+  // 601 unidades UTF-16: o emoji ocupa a 500a e a 501a. Cortado por unidade, sobraria a metade dele (o Postgres recusa).
+  const corpo = `${"a".repeat(499)}😀${"b".repeat(100)}`;
+  const pergunta = await enviar({ body: corpo, kind: "question", ...comAceite });
+  assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
+  const linha = db.tables.webinar_questions.find((row) => row.message_id === pergunta.body.data.message.id);
+  assert.ok(linha, "a pergunta abriu a linha em webinar_questions");
+  assert.equal(Array.from(linha.body).length, 500, "500 caracteres");
+  assert.ok(linha.body.endsWith("😀"), "o emoji inteiro no fim");
+  assert.doesNotMatch(linha.body, /[\uD800-\uDBFF]$/, "sem metade de emoji no fim");
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === pergunta.body.data.message.id).body, corpo, "a mensagem do chat com o texto todo");
 });
 
 test("POST chat: fora da hora e do modo (409 not_started / ended / chat_off / team_only); o replay sempre aceita e grava o offset do corpo", async () => {

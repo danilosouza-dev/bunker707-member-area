@@ -29,6 +29,7 @@ import {
   buildAdminNavHref,
   formatAdminNavCount,
   getActiveAdminNavChild,
+  isAdminFullScreenPath,
   isAdminNavSectionActive,
   normalizeAdminPath,
   type AdminNavCounts,
@@ -44,7 +45,9 @@ import { AdminTopbarTitleProvider } from "./topbar-title";
 // (o produtor pode recolher para 64 px, so com icones, e expandir de novo pelo botao da barra superior;
 // a escolha fica no cookie ADMIN_SIDEBAR_COOKIE), barra superior de 56 px e a area principal. Abaixo de 768 px a barra lateral vira
 // uma gaveta de min(280 px, 86 % da tela) sobre veu escuro, sem botao X (fecha no veu, no Esc ou ao
-// navegar).
+// navegar). As telas em tela cheia (isAdminFullScreenPath: o console da sessao de um webinario, docs/31 V2-13) ficam
+// com a mesma raiz, o link de pular e o #admin-main, sem a barra lateral, a gaveta, a barra superior, o recuo e os
+// avisos: o console monta os avisos dele dentro da propria raiz, no tema escolhido.
 
 const SIDEBAR_ID = "admin-sidebar";
 const emptyCounts: AdminNavCounts = {};
@@ -291,6 +294,7 @@ type AdminShellV2Props = {
 /** Moldura do Admin Bunker707: barra lateral, barra superior e area principal. */
 export function AdminShellV2({ access: accessSnapshot, account, children, counts = emptyCounts, initialCollapsed = false, products = [] }: AdminShellV2Props) {
   const pathname = usePathname() ?? ADMIN_HOME_HREF;
+  const fullScreen = isAdminFullScreenPath(pathname);
   const access = useMemo(() => fromAccessSnapshot(accessSnapshot), [accessSnapshot]);
   const navItems = useMemo(() => visibleAdminNav(access), [access]);
   const homeHref = adminHomeHref(access);
@@ -315,6 +319,11 @@ export function AdminShellV2({ access: accessSnapshot, account, children, counts
   }
 
   const sharedProps = { account, counts, homeHref, isGroupOpen, navItems, onToggleGroup: toggleGroup, pathname };
+  const main = (
+    <main className={cn("min-w-0 outline-none", fullScreen ? "min-h-dvh" : "flex-1")} id="admin-main" tabIndex={-1}>
+      {children}
+    </main>
+  );
 
   return (
     <AdminTopbarTitleProvider>
@@ -326,59 +335,65 @@ export function AdminShellV2({ access: accessSnapshot, account, children, counts
           Pular para o conteúdo
         </a>
 
-        <aside
-          aria-label="Menu do admin"
-          className={cn(
-            "fixed inset-y-0 left-0 z-40 hidden border-r border-[var(--border-subtle)] bg-[var(--surface-0)] transition-[width] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none md:block",
-            collapsed ? "w-16" : "w-60"
-          )}
-          data-collapsed={collapsed || undefined}
-          id={SIDEBAR_ID}
-        >
-          <Sidebar {...sharedProps} collapsed={collapsed} idPrefix="sidebar" />
-        </aside>
+        {fullScreen ? null : (
+          <aside
+            aria-label="Menu do admin"
+            className={cn(
+              "fixed inset-y-0 left-0 z-40 hidden border-r border-[var(--border-subtle)] bg-[var(--surface-0)] transition-[width] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none md:block",
+              collapsed ? "w-16" : "w-60"
+            )}
+            data-collapsed={collapsed || undefined}
+            id={SIDEBAR_ID}
+          >
+            <Sidebar {...sharedProps} collapsed={collapsed} idPrefix="sidebar" />
+          </aside>
+        )}
 
-        <Dialog.Root onOpenChange={setDrawerOpen} open={drawerOpen}>
-          <Dialog.Portal>
-            <Dialog.Backdrop
-              className={cn(
-                "fixed inset-0 z-50 bg-black/60 md:hidden",
-                "transition-opacity duration-200 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none"
-              )}
+        {fullScreen ? null : (
+          <Dialog.Root onOpenChange={setDrawerOpen} open={drawerOpen}>
+            <Dialog.Portal>
+              <Dialog.Backdrop
+                className={cn(
+                  "fixed inset-0 z-50 bg-black/60 md:hidden",
+                  "transition-opacity duration-200 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none"
+                )}
+              />
+              <Dialog.Popup
+                aria-label="Menu do admin"
+                className={cn(
+                  "fixed inset-y-0 left-0 z-50 w-[min(280px,86vw)] bg-[var(--surface-1)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-[var(--text-primary)] shadow-[24px_0_48px_rgba(0,0,0,0.4)] outline-none md:hidden",
+                  "transition-transform duration-200 ease-[var(--ease-admin)] data-ending-style:-translate-x-full data-starting-style:-translate-x-full motion-reduce:transition-none"
+                )}
+              >
+                <Dialog.Title className="sr-only">Menu do admin</Dialog.Title>
+                <Sidebar {...sharedProps} idPrefix="drawer" onNavigate={() => setDrawerOpen(false)} />
+              </Dialog.Popup>
+            </Dialog.Portal>
+          </Dialog.Root>
+        )}
+
+        {fullScreen ? (
+          main
+        ) : (
+          <div
+            className={cn(
+              "flex min-h-dvh min-w-0 flex-col transition-[padding] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none",
+              collapsed ? "md:pl-16" : "md:pl-60"
+            )}
+          >
+            <AdminTopbar
+              access={access}
+              drawerOpen={drawerOpen}
+              onOpenDrawer={() => setDrawerOpen(true)}
+              onToggleSidebar={toggleCollapsed}
+              products={products}
+              sidebarCollapsed={collapsed}
+              sidebarId={SIDEBAR_ID}
             />
-            <Dialog.Popup
-              aria-label="Menu do admin"
-              className={cn(
-                "fixed inset-y-0 left-0 z-50 w-[min(280px,86vw)] bg-[var(--surface-1)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-[var(--text-primary)] shadow-[24px_0_48px_rgba(0,0,0,0.4)] outline-none md:hidden",
-                "transition-transform duration-200 ease-[var(--ease-admin)] data-ending-style:-translate-x-full data-starting-style:-translate-x-full motion-reduce:transition-none"
-              )}
-            >
-              <Dialog.Title className="sr-only">Menu do admin</Dialog.Title>
-              <Sidebar {...sharedProps} idPrefix="drawer" onNavigate={() => setDrawerOpen(false)} />
-            </Dialog.Popup>
-          </Dialog.Portal>
-        </Dialog.Root>
-
-        <div
-          className={cn(
-            "flex min-h-dvh min-w-0 flex-col transition-[padding] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none",
-            collapsed ? "md:pl-16" : "md:pl-60"
-          )}
-        >
-          <AdminTopbar
-            access={access}
-            drawerOpen={drawerOpen}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onToggleSidebar={toggleCollapsed}
-            products={products}
-            sidebarCollapsed={collapsed}
-            sidebarId={SIDEBAR_ID}
-          />
-          <main className="min-w-0 flex-1 outline-none" id="admin-main" tabIndex={-1}>
-            {children}
-          </main>
-        </div>
-        <AdminToaster />
+            {main}
+          </div>
+        )}
+        {fullScreen ? null : <AdminToaster />}
       </div>
     </AdminTopbarTitleProvider>
   );

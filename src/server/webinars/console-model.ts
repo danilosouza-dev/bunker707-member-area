@@ -5,6 +5,7 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
+import { chatRoleLabel, chatTimeLabel } from "../../lib/webinar-room-client";
 import { saoPauloDate } from "../../lib/webinar-time";
 import { WEBINAR_ADMIN_COPY } from "./editor-model";
 import {
@@ -58,25 +59,6 @@ export function consolePhaseOf(session: Pick<WebinarSession, "kind" | "recording
     return "live";
   }
   return session.status === "waiting" ? "waiting" : "scheduled";
-}
-
-export function consolePhaseLabel(phase: ConsolePhase): string {
-  return WEBINAR_ADMIN_COPY.console.phases[phase];
-}
-
-export function consolePhaseTone(phase: ConsolePhase): "error" | "muted" | "neutral" | "success" | "warning" {
-  switch (phase) {
-    case "live":
-      return "success";
-    case "waiting":
-      return "warning";
-    case "cancelled":
-      return "error";
-    case "ended":
-      return "muted";
-    default:
-      return "neutral";
-  }
 }
 
 /** "Abrir sessao" so antes de ela estar no ar; "Encerrar sessao" so com ela na espera ou no ar (docs/30 §2.3). */
@@ -218,16 +200,112 @@ export type ConsoleMessage = ChatMessage & {
   promotable: boolean;
 };
 
-/** O que a mesa pode fazer com uma mensagem (docs/30 §2.4 e §5.2). */
-export function messageActions(message: ConsoleMessage, pinnedMessageId: string | null): { approve: boolean; delete: boolean; pin: boolean; promote: boolean; unpin: boolean } {
+export type MessageActions = { approve: boolean; delete: boolean; pin: boolean; promote: boolean; question: boolean; unpin: boolean };
+
+/**
+ * A mensagem que a equipe pode transformar em pergunta (docs/31 V2-15): so a mensagem comum de um aluno da turma (a
+ * pergunta pede o aluno, `webinar_questions.user_id`). A pergunta que o aluno fez pelo chat moderado fica de fora: o
+ * Liberar ja a abre.
+ */
+export function turnsIntoQuestion(message: Pick<ChatMessage, "authorUserId" | "kind" | "source">): boolean {
+  return message.kind === "message" && message.source === "audience" && Boolean(message.authorUserId);
+}
+
+/**
+ * As mensagens do retrato que o console confere na tabela das perguntas (o `askedMessageIds` do retrato): so as que
+ * podem virar pergunta, sem repetir.
+ */
+export function askableMessageIds(messages: readonly Pick<ChatMessage, "authorUserId" | "id" | "kind" | "source">[]): string[] {
+  return Array.from(new Set(messages.filter(turnsIntoQuestion).map((message) => message.id)));
+}
+
+/**
+ * O que a mesa pode fazer com uma mensagem (docs/30 §2.4 e §5.2; docs/31 V2-15). Virar pergunta so para a mensagem
+ * que `turnsIntoQuestion` aceita e que ainda nao virou pergunta (`hasQuestion`: o id dela no `askedMessageIds` do
+ * retrato, que conta tambem a pergunta apagada, como o servidor confere).
+ */
+export function messageActions(message: ConsoleMessage, pinnedMessageId: string | null, { hasQuestion = false }: { hasQuestion?: boolean } = {}): MessageActions {
   const pinned = pinnedMessageId === message.id;
   return {
     approve: !message.approved,
     delete: true,
     pin: !pinned && message.approved,
     promote: message.source === "audience" && !message.master && message.approved && message.promotable,
+    question: turnsIntoQuestion(message) && !hasQuestion,
     unpin: pinned
   };
+}
+
+/**
+ * O chat do console em duas partes (docs/31 V2-15): as pendentes do chat moderado saem da lista e viram a fila dos cards
+ * da moderacao, da mais velha para a mais nova (pela hora gravada; sem hora, na ordem em que chegaram, depois das
+ * outras); a lista fica so com as liberadas, na ordem do retrato.
+ */
+export function consoleChatQueue<T extends Pick<ChatMessage, "approved" | "createdAt">>(messages: readonly T[]): { log: T[]; pending: T[] } {
+  const log: T[] = [];
+  const waiting: { at: number; index: number; message: T }[] = [];
+  messages.forEach((message, index) => {
+    if (message.approved) {
+      log.push(message);
+      return;
+    }
+    const at = Date.parse(message.createdAt);
+    waiting.push({ at: Number.isFinite(at) ? at : Number.POSITIVE_INFINITY, index, message });
+  });
+  waiting.sort((a, b) => (a.at === b.at ? a.index - b.index : a.at < b.at ? -1 : 1));
+  return { log, pending: waiting.map((entry) => entry.message) };
+}
+
+export type ConsoleMessageMeta = {
+  /** De onde veio, so para a equipe: Roteiro ou Chat original (a turma nunca ve). */
+  origin: string | null;
+  /** O papel na linha de baixo: Apresentador, Co-apresentador, Equipe ou Assistente; o aluno, nenhum; com a origem, nenhum. */
+  role: string | null;
+  /** A hora em Sao Paulo ("20:42"): na live a gravada, na gravada a hora marcada mais o offset, no Replay nenhuma. */
+  time: string;
+};
+
+/**
+ * A linha de baixo do balao no console (docs/31 V2-9): "{nome} · {papel ou origem} · {hora}". A origem, que so a
+ * equipe ve (Roteiro, Chat original), fica no lugar do papel: a persona do roteiro com o papel de quem apresenta sai
+ * "Roteiro", como o console de antes dizia. Sem origem, o papel como a sala mostra (chatRoleLabel). A hora pelo
+ * chatTimeLabel, com o `createdAt` da live e a hora marcada da gravada.
+ */
+export function consoleMessageMeta(input: { kind: WebinarSession["kind"]; message: Pick<ChatMessage, "createdAt" | "offsetMs" | "role" | "source">; scheduledAt: string }): ConsoleMessageMeta {
+  const { message } = input;
+  const sources = WEBINAR_ADMIN_COPY.console.chat.sources;
+  const origin = message.source === "scripted" ? sources.scripted : message.source === "original" ? sources.original : null;
+  const role = origin ? null : chatRoleLabel(message.role);
+  const zeroMs = Date.parse(input.scheduledAt);
+  const time = chatTimeLabel({ kind: input.kind, offsetMs: message.offsetMs, sentAt: message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
+  return { origin, role, time };
+}
+
+/** De onde saiu uma acao do chat do console: o card da fila ou o balao da lista, a posicao dele e a do botao no item. */
+export type ConsoleChatFocusFrom = { area: "log" | "queue"; id: string; index: number; position: number };
+
+/**
+ * Para onde o foco vai: um botao de um item (pela posicao, presa ao ultimo botao do item), o primeiro seletor do
+ * cabecalho, a caixa da equipe ou o campo da correcao aberta.
+ */
+export type ConsoleChatFocusTo = { area: "log" | "queue"; id: string; position: number } | { area: "composer" } | { area: "edit"; id: string } | { area: "header" };
+
+/**
+ * O foco depois de uma acao que pode tirar o botao da tela (WCAG 2.4.3): o Liberar e o Recusar tiram o card da fila, o
+ * Virar pergunta some da linha quando a pergunta chega, o Apagar tira o balao. Com o item ainda na mesma parte, o botao
+ * da mesma posicao (o seguinte, quando o clicado saiu; o mesmo, quando a acao falhou). Sem ele, o item que ficou no
+ * lugar dele (o seguinte; o anterior, quando era o ultimo), no primeiro botao. Com a parte vazia, a fila devolve o foco
+ * ao cabecalho e a lista, a caixa da equipe. `now` sao os ids de cada parte depois da acao.
+ */
+export function consoleChatFocusAfter(from: ConsoleChatFocusFrom, now: { log: readonly string[]; pending: readonly string[] }): ConsoleChatFocusTo {
+  const ids = from.area === "queue" ? now.pending : now.log;
+  if (ids.includes(from.id)) {
+    return { area: from.area, id: from.id, position: from.position };
+  }
+  if (ids.length > 0) {
+    return { area: from.area, id: ids[Math.min(Math.max(from.index, 0), ids.length - 1)], position: 0 };
+  }
+  return from.area === "queue" ? { area: "header" } : { area: "composer" };
 }
 
 export const CHAT_MODE_OPTIONS: readonly { label: string; value: ChatMode }[] = [
@@ -293,6 +371,11 @@ export function ackSentenceMatches(input: { ackText: string | null | undefined; 
 export type ConsolePollView = Poll & { counts: PollCounts };
 
 export type ConsoleSnapshot = {
+  /**
+   * As mensagens do retrato que ja viraram pergunta (docs/31 V2-15), com a pergunta apagada ou nao e sem o teto da
+   * lista `questions`: so as que `askableMessageIds` confere. A que esta aqui fica sem o Virar pergunta.
+   */
+  askedMessageIds: string[];
   /**
    * Fase 3: so na sessao `live` (gravador, gravacao, removidos/silenciados/banidos, o mapa aluno -> participante e se a
    * sala existe neste ambiente); nulo nas outras. Nunca o nome da sala nem token: o iframe pede o join-token.

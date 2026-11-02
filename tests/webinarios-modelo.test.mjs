@@ -170,3 +170,15 @@ test("registro do historico (§4.7): so ids e codigos, com a origem cortada em 8
   assert.equal(model.REMINDER_RULES.h1OnlyBelowMinutes, 50);
   assert.equal(model.REMINDER_RULES.autoEndMinutesAfter, 120);
 });
+
+test("questionBodyOf: o texto da pergunta feita de uma mensagem em ate 500 caracteres, contados como o char_length do banco; nunca parte um emoji ao meio", () => {
+  assert.equal(model.questionBodyOf("curta"), "curta");
+  assert.equal(model.questionBodyOf("x".repeat(700)).length, 500);
+  const corte = model.questionBodyOf(`${"a".repeat(499)}😀${"b".repeat(100)}`);
+  assert.equal(Array.from(corte).length, 500, "500 caracteres, nao 500 unidades UTF-16");
+  assert.ok(corte.endsWith("😀"), "o emoji inteiro");
+  assert.doesNotMatch(corte, /[\uD800-\uDBFF]$/, "sem a metade solta do par");
+  const emojis = "😀".repeat(600);
+  assert.equal(Array.from(model.questionBodyOf(emojis)).length, 500);
+  assert.equal(model.questionBodyOf("😀".repeat(500)), "😀".repeat(500), "exatamente 500 caracteres: inteiro");
+});

@@ -99,6 +99,34 @@ export function formatWebinarWhen(iso: string | null | undefined): string {
   return `${fields.weekday}, ${Number(fields.day)}/${Number(fields.month)} às ${fields.hour}:${fields.minute}`;
 }
 
+/** "30/10 às 20:00" (o seletor de sessoes do console, docs/31 V2-13): como formatWebinarWhen, sem o dia da semana. */
+export function formatWebinarDayMonthTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return "";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const fields = saoPauloFields(date);
+  return `${Number(fields.day)}/${Number(fields.month)} às ${fields.hour}:${fields.minute}`;
+}
+
+const MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"] as const;
+
+/** "Quinta, 30 de outubro" no horario de Sao Paulo (a linha da data no cabecalho da sala, docs/31 V2-3). */
+export function formatWebinarDayLong(iso: string | null | undefined): string {
+  if (!iso) {
+    return "";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const fields = saoPauloFields(date);
+  return `${fields.weekday}, ${Number(fields.day)} de ${MONTHS[Number(fields.month) - 1] ?? ""}`;
+}
+
 /** "05/11/2026" no horario de Sao Paulo (e-mails e lista do admin). */
 export function saoPauloDate(iso: string | null | undefined): string {
   if (!iso) {

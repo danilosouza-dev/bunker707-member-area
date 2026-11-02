@@ -9,6 +9,7 @@ import "./support/resolve-extensionless-ts.mjs";
 
 const console_ = await import("../src/server/webinars/console-model.ts");
 const room = await import("../src/server/webinars/room-model.ts");
+const { WEBINAR_ADMIN_COPY } = await import("../src/server/webinars/editor-model.ts");
 
 const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const MIN = 60_000;
@@ -55,9 +56,9 @@ test("a fase pelo relogio: agendada ate 15 min antes, na espera, no ar ate o fim
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "replay", status: "live" }, DURATION, T0), "replay");
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "live", status: "waiting" }, DURATION, T0 + MIN), "waiting", "a live ao vivo segue a situacao gravada");
   assert.equal(console_.consolePhaseOf({ ...simulated, kind: "live" }, DURATION, T0 + 3 * HOUR), "scheduled");
+  // Cada fase tem o nome do editor (WEBINAR_ADMIN_COPY.console.phases), que o card de sessoes e o JIT mostram.
   for (const phase of console_.CONSOLE_PHASES) {
-    assert.ok(console_.consolePhaseLabel(phase).length > 0, phase);
-    assert.ok(["error", "muted", "neutral", "success", "warning"].includes(console_.consolePhaseTone(phase)));
+    assert.ok(WEBINAR_ADMIN_COPY.console.phases[phase].length > 0, phase);
   }
 });
 
@@ -130,13 +131,107 @@ test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentua
 
 test("acoes de uma mensagem: liberar so a pendente, fixar so a liberada e nao fixada, promover so a da turma com aceite e ainda fora da linha mestre", () => {
   const message = (extra) => ({ approved: true, authorUserId: "u1", body: "oi", createdAt: "", displayName: "Ana M.", id: "m1", kind: "message", master: false, offsetMs: 0, pinnedAt: null, promotable: true, replyToId: null, role: "student", scriptItemId: null, sessionId: "s1", source: "audience", webinarId: "w1", ...extra });
-  assert.deepEqual(console_.messageActions(message({}), null), { approve: false, delete: true, pin: true, promote: true, unpin: false });
-  assert.deepEqual(console_.messageActions(message({ approved: false }), null), { approve: true, delete: true, pin: false, promote: false, unpin: false });
-  assert.deepEqual(console_.messageActions(message({}), "m1"), { approve: false, delete: true, pin: false, promote: true, unpin: true });
+  assert.deepEqual(console_.messageActions(message({}), null), { approve: false, delete: true, pin: true, promote: true, question: true, unpin: false });
+  assert.deepEqual(console_.messageActions(message({ approved: false }), null), { approve: true, delete: true, pin: false, promote: false, question: true, unpin: false });
+  assert.deepEqual(console_.messageActions(message({}), "m1"), { approve: false, delete: true, pin: false, promote: true, question: true, unpin: true });
   assert.equal(console_.messageActions(message({ promotable: false }), null).promote, false, "sem aceite nao promove");
   assert.equal(console_.messageActions(message({ master: true, source: "original" }), null).promote, false);
   assert.equal(console_.messageActions(message({ role: "team", source: "team" }), null).promote, false);
   assert.equal(console_.messageActions(message({ source: "scripted" }), null).promote, false);
+});
+
+test("Virar pergunta (docs/31 V2-15): so a mensagem comum de um aluno da turma, com autor e ainda sem pergunta; a pergunta pelo chat moderado, a equipe, o roteiro e o Assistente, nunca", () => {
+  const message = (extra) => ({ approved: true, authorUserId: "u1", body: "oi", createdAt: "", displayName: "Ana M.", id: "m1", kind: "message", master: false, offsetMs: 0, pinnedAt: null, promotable: true, replyToId: null, role: "student", scriptItemId: null, sessionId: "s1", source: "audience", webinarId: "w1", ...extra });
+  const question = (extra, options) => console_.messageActions(message(extra), null, options).question;
+  assert.equal(question({}), true);
+  assert.equal(question({ approved: false }), true, "a pendente tambem (o Virar pergunta libera junto)");
+  assert.equal(question({}, { hasQuestion: false }), true);
+  assert.equal(question({}, { hasQuestion: true }), false, "a que ja virou pergunta");
+  assert.equal(question({ kind: "question" }), false, "a pergunta pelo chat moderado: o Liberar ja a abre");
+  assert.equal(question({ approved: false, kind: "question" }), false);
+  assert.equal(question({ kind: "answer" }), false);
+  assert.equal(question({ authorUserId: null }), false, "sem autor nao ha pergunta (ela pede o aluno)");
+  assert.equal(question({ role: "team", source: "team" }), false, "a equipe");
+  assert.equal(question({ authorUserId: null, scriptItemId: "i1", source: "scripted" }), false, "o roteiro");
+  assert.equal(question({ authorUserId: null, kind: "answer", role: "ai", source: "ai" }), false, "o Assistente");
+  assert.equal(question({ master: true, source: "original" }), false, "a linha mestre de outra turma");
+
+  // O console confere na tabela das perguntas so as que podem virar pergunta (o askedMessageIds do retrato), sem repetir.
+  assert.equal(console_.turnsIntoQuestion(message({})), true);
+  assert.equal(console_.turnsIntoQuestion(message({ kind: "question" })), false);
+  assert.deepEqual(
+    console_.askableMessageIds([
+      message({ id: "m-aluno" }),
+      message({ id: "m-pergunta", kind: "question" }),
+      message({ id: "m-equipe", role: "team", source: "team" }),
+      message({ authorUserId: null, id: "m-roteiro", source: "scripted" }),
+      message({ id: "m-sem-autor", authorUserId: null }),
+      message({ approved: false, id: "m-pendente" }),
+      message({ id: "m-aluno" })
+    ]),
+    ["m-aluno", "m-pendente"]
+  );
+  assert.deepEqual(console_.askableMessageIds([]), []);
+});
+
+test("o foco depois de uma acao do chat do console (WCAG 2.4.3): o item que ficou, o botao da mesma posicao; o que saiu, o item que tomou o lugar dele; a parte vazia, o cabecalho ou a caixa", () => {
+  const now = { log: ["l1", "l2", "l3"], pending: ["p1", "p3"] };
+  // A acao falhou ou o item ficou (Fixar vira Desafixar; o Virar pergunta saiu e o Apagar tomou a posicao dele).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l2", index: 1, position: 1 }, now), { area: "log", id: "l2", position: 1 });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p1", index: 0, position: 2 }, now), { area: "queue", id: "p1", position: 2 });
+  // O Liberar ou o Recusar tirou o card do meio: o seguinte, que ficou no lugar dele, no primeiro botao (o Liberar).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p2", index: 1, position: 0 }, now), { area: "queue", id: "p3", position: 0 });
+  // O ultimo saiu: o anterior. O liberado vai para a lista, mas o foco continua na fila (moderar em sequencia).
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p4", index: 2, position: 1 }, now), { area: "queue", id: "p3", position: 0 });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "l1", index: 0, position: 0 }, { log: ["l1"], pending: ["p1"] }), { area: "queue", id: "p1", position: 0 });
+  // O Apagar tirou o balao: o seguinte da lista.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l0", index: 0, position: 2 }, now), { area: "log", id: "l1", position: 0 });
+  // A fila esvaziou: o cabecalho; a lista esvaziou: a caixa da equipe.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "queue", id: "p1", index: 0, position: 0 }, { log: ["l1", "p1"], pending: [] }), { area: "header" });
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "l1", index: 0, position: 0 }, { log: [], pending: ["p1"] }), { area: "composer" });
+  // Sem a posicao do item (nao achado na hora do clique), o primeiro.
+  assert.deepEqual(console_.consoleChatFocusAfter({ area: "log", id: "lx", index: -1, position: 0 }, now), { area: "log", id: "l1", position: 0 });
+});
+
+test("o chat do console em duas partes: as pendentes saem da lista, da mais velha para a mais nova (sem hora, depois, na ordem); a lista so com as liberadas, na ordem do retrato", () => {
+  const at = (minute) => new Date(T0 + minute * MIN).toISOString();
+  const messages = [
+    { approved: true, createdAt: at(1), id: "a" },
+    { approved: false, createdAt: at(5), id: "p-nova" },
+    { approved: false, createdAt: "", id: "p-sem-hora" },
+    { approved: true, createdAt: at(0), id: "b" },
+    { approved: false, createdAt: at(2), id: "p-velha" },
+    { approved: false, createdAt: at(2), id: "p-mesma-hora" },
+    { approved: false, createdAt: "", id: "p-sem-hora-2" }
+  ];
+  const { log, pending } = console_.consoleChatQueue(messages);
+  assert.deepEqual(log.map((message) => message.id), ["a", "b"], "a ordem do retrato, sem as pendentes");
+  assert.deepEqual(pending.map((message) => message.id), ["p-velha", "p-mesma-hora", "p-nova", "p-sem-hora", "p-sem-hora-2"]);
+  assert.deepEqual(console_.consoleChatQueue([]), { log: [], pending: [] });
+});
+
+test("a linha de baixo do balao no console (docs/31 V2-9): a hora da live pela hora gravada, a da gravada pela hora marcada mais o offset, nenhuma no Replay; o papel ou a origem, que so a equipe ve", () => {
+  // T0 e 20:00 em Sao Paulo; a mensagem foi gravada as 20:42 e esta no minuto 1 do video.
+  const message = (extra) => ({ createdAt: new Date(T0 + 42 * MIN).toISOString(), offsetMs: MIN, role: "student", source: "audience", ...extra });
+  const meta = (kind, extra) => console_.consoleMessageMeta({ kind, message: message(extra), scheduledAt: new Date(T0).toISOString() });
+  assert.deepEqual(meta("live", {}), { origin: null, role: null, time: "20:42" }, "na live, a hora gravada (o offset nao serve)");
+  assert.deepEqual(meta("simulated", {}), { origin: null, role: null, time: "20:01" }, "na gravada, a hora marcada mais o offset");
+  assert.deepEqual(meta("replay", {}), { origin: null, role: null, time: "" }, "no Replay, nenhuma hora");
+  assert.equal(console_.consoleMessageMeta({ kind: "simulated", message: message({}), scheduledAt: "" }).time, "", "sem a hora marcada, nenhuma");
+  assert.equal(meta("live", { createdAt: "" }).time, "");
+
+  assert.equal(meta("live", { role: "host", source: "team" }).role, "Apresentador");
+  assert.equal(meta("live", { role: "co_host", source: "team" }).role, "Co-apresentador", "o papel proprio do co-apresentador (V2-A12), o mesmo da sala");
+  assert.equal(meta("live", { role: "team", source: "team" }).role, "Equipe");
+  assert.equal(meta("live", { role: "ai", source: "ai" }).role, "Assistente");
+  assert.equal(meta("live", { role: "guest" }).role, null, "o convidado sem papel, como na sala");
+  // A origem: o roteiro e o chat original de outra turma; a turma de hoje e a equipe, nenhuma.
+  assert.deepEqual(meta("simulated", { source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
+  // "Papel ou origem": com a origem, o papel fica de fora (a persona do roteiro com o papel de quem apresenta diz Roteiro).
+  assert.deepEqual(meta("simulated", { role: "team", source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
+  assert.deepEqual(meta("simulated", { role: "host", source: "scripted" }), { origin: "Roteiro", role: null, time: "20:01" });
+  assert.equal(meta("simulated", { source: "original" }).origin, "Chat original");
+  assert.equal(meta("simulated", { role: "team", source: "team" }).origin, null);
 });
 
 test("quem pode escrever e o modo lento: as opcoes e a ida e volta das escolhas", () => {

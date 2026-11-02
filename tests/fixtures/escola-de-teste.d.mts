@@ -113,6 +113,10 @@ export function seedLiveAoVivoDeTeste(
   db: unknown,
   opcoes?: { comecouHa?: number; equipeModera?: boolean; status?: "live" | "scheduled" | "waiting" }
 ): Promise<{ scheduledAt: string; startedAt: string | null }>;
+export function abrirEnqueteDeTeste(
+  db: unknown,
+  opcoes: { options: string[]; question: string; sessionId: string; webinarId: string }
+): Promise<{ optionIds: string[]; pollId: string }>;
 
 /* Webinarios, fase 4 (docs/30 §11): as sementes dos paineis, da Oferta, da Simulacao e do "Comeca quando voce entra". */
 export const LIVE_AO_VIVO_ENCERRADA_DE_TESTE: { id: string; sessaoId: string; slug: string; titulo: string };

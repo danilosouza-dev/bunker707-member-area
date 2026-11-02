@@ -1,11 +1,10 @@
 "use client";
 
-import { Radio, Users, X } from "lucide-react";
+import { Users } from "lucide-react";
 import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
-import { MemberChip } from "@/components/member/ui/member-chip";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import type { RoomMessage } from "@/lib/webinar-room-client";
+import { RoomCommentAvatar, RoomRoleBadge } from "./room-comment";
+import { RoomButton } from "./room-ui";
 import { trapRoomFocus } from "./webinar-room";
 
 // Os avisos e pedacos pequenos da sala ao vivo (docs/30 §1.3, §1.4, §1.7, §8.5 e §9; fase 3): os dois avisos de
@@ -13,8 +12,10 @@ import { trapRoomFocus } from "./webinar-room";
 // microfone, quando o apresentador libera, com Falar / Agora não), cada um um dialogo de verdade (role="dialog",
 // aria-modal, o foco preso nos dois botoes: no Ligar câmera, que o proprio clique abriu; no Agora não do microfone,
 // que abre sozinho; o foco volta a quem o tinha ao fechar; Esc = Agora não, sem fechar a sala); a aba
-// Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos); o chat por cima do palco no
-// celular (as 3 ultimas, com a gaveta fechada); o selo Gravando; e a pilula do Minimizar (56 px).
+// Participantes (quem esta no palco e o numero de alunos, nunca a lista de alunos; tambem na gravada, com o numero do
+// cabecalho). Redesign V2, F2 (docs/31 V2-11): o cartao dos avisos e a aba Participantes usam os tokens do tema da
+// sala. F3 (V2-4): o selo Gravando saiu do cabecalho para o palco (room-stage-badges.tsx). F5 (V2-8): o chat por cima
+// do palco virou as pilulas das duas salas (room-chat-pills.tsx).
 
 type ConsentDialogProps = {
   cancelLabel: string;
@@ -79,31 +80,31 @@ function ConsentDialog({ cancelLabel, confirmLabel, heading, initialFocus, onCan
         aria-describedby={`${id}-text`}
         aria-labelledby={heading ? `${id}-heading` : `${id}-text`}
         aria-modal="true"
-        className="w-full max-w-md rounded-[16px] border border-white/15 bg-[#161616] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.6)]"
+        className="w-full max-w-md rounded-[16px] border border-room-border-strong bg-room-surface p-5 shadow-[0_18px_48px_rgba(0,0,0,0.6)]"
         data-testid={testId}
         onKeyDown={handleKeyDown}
         ref={rootRef}
         role="dialog"
       >
         {heading ? (
-          <p className="text-base font-bold text-white" id={`${id}-heading`}>
+          <p className="text-base font-bold text-room-fg-strong" id={`${id}-heading`}>
             {heading}
           </p>
         ) : null}
         <div className={heading ? "mt-2 space-y-2" : "space-y-2"} id={`${id}-text`}>
           {texts.map((text) => (
-            <p className="text-sm leading-6 text-zinc-100" key={text}>
+            <p className="text-sm leading-6 text-room-fg" key={text}>
               {text}
             </p>
           ))}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <MemberButton className="min-h-11" onClick={onConfirm} ref={confirmRef} size="lg" variant="primary">
+          <RoomButton className="min-h-11" onClick={onConfirm} ref={confirmRef} size="lg" variant="primary">
             {confirmLabel}
-          </MemberButton>
-          <MemberButton className="min-h-11" onClick={onCancel} ref={cancelRef} size="lg" variant="secondary">
+          </RoomButton>
+          <RoomButton className="min-h-11" onClick={onCancel} ref={cancelRef} size="lg" variant="secondary">
             {cancelLabel}
-          </MemberButton>
+          </RoomButton>
         </div>
       </div>
     </div>
@@ -126,14 +127,17 @@ export function LiveCameraDialog({ onCancel, onConfirm }: { onCancel: () => void
   );
 }
 
-/** O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. */
-export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+/**
+ * O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. No primeiro abrir do
+ * microfone sozinho (docs/31 caminho A), o mesmo aviso com o titulo da politica (`title`), sem "O apresentador liberou".
+ */
+export function LiveMicDialog({ onCancel, onConfirm, title }: { onCancel: () => void; onConfirm: () => void; title?: string }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
     <ConsentDialog
       cancelLabel={copy.agoraNao}
       confirmLabel={copy.falar}
-      heading={copy.microfoneLiberado}
+      heading={title ?? copy.microfoneLiberado}
       initialFocus="cancel"
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -143,96 +147,37 @@ export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; o
   );
 }
 
-/** A aba Participantes (docs/30 §1.3): quem esta no palco e quantos alunos estao na sala, nunca a lista dos alunos. */
-export function LiveParticipantsTab({ stage, students }: { stage: readonly string[]; students: number }) {
+/**
+ * A aba Participantes (docs/30 §1.3): quem esta no palco e quantos alunos estao na sala, nunca a lista dos alunos. Sem
+ * numero (`students` nulo: a sessao encerrada, quando o cabecalho tambem tira o "{n} assistindo"), so o palco. No
+ * estilo do YouTube (spec §7.4): "No palco" em 14/20 peso 500 sem caixa alta, cada nome numa linha de 40 px com o
+ * avatar de 24 e o nome em 14/20, o selo "Apresentador" so no primeiro quando a sala sabe quem apresenta
+ * (`presenterKnown`), e "{n} alunos na sala" numa linha de 40 px com o icone de 20. So os nomes do palco viram lista.
+ */
+export function LiveParticipantsTab({ presenterKnown, stage, students }: { presenterKnown: boolean; stage: readonly string[]; students: number | null }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3" data-testid="live-participants">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-1" data-testid="live-participants">
       <section>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{copy.noPalco}</h2>
+        <h3 className="flex h-10 items-center text-sm font-medium leading-5 text-room-fg-subtle">{copy.noPalco}</h3>
         {stage.length > 0 ? (
-          <ul className="mt-2 space-y-1.5">
-            {stage.map((name) => (
-              <li className="flex items-center gap-2 text-sm font-semibold text-white" key={name}>
-                <Radio aria-hidden="true" className="size-3.5 text-[var(--accent)]" />
-                {name}
+          <ul>
+            {stage.map((name, index) => (
+              <li className="flex h-10 min-w-0 items-center gap-3" key={name}>
+                <RoomCommentAvatar kind="person" name={name} />
+                <span className="min-w-0 truncate text-sm leading-5 text-room-fg">{name}</span>
+                {presenterKnown && index === 0 ? <RoomRoleBadge>{WEBINAR_COPY.sala.selos.apresentador}</RoomRoleBadge> : null}
               </li>
             ))}
           </ul>
         ) : null}
       </section>
-      <p className="flex items-center gap-2 text-sm text-zinc-200">
-        <Users aria-hidden="true" className="size-4" />
-        {copy.alunosNaSala(Math.max(0, students))}
-      </p>
-    </div>
-  );
-}
-
-/** O chat por cima do palco no celular com a gaveta fechada: as ultimas mensagens, com degrade para o contraste. */
-export function LiveChatOverlay({ messages }: { messages: readonly RoomMessage[] }) {
-  if (messages.length === 0) {
-    return null;
-  }
-  return (
-    <ol
-      aria-label={WEBINAR_COPY.sala.abas.chat}
-      aria-live="polite"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-20 space-y-1 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-2 pt-8 lg:hidden"
-      data-testid="live-chat-overlay"
-      role="log"
-    >
-      {messages.map((message) => (
-        <li className="truncate text-[13px] leading-5 text-white" key={message.id}>
-          <span className="font-bold">{message.displayName}</span> <span className="text-zinc-100">{message.body}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/**
- * O selo Gravando (o gravador gravando: a voz e a imagem de quem liga entram no replay). No celular, so o ponto
- * vermelho (a palavra fica no title e para o leitor de tela), para o titulo da sala caber no cabecalho.
- */
-export function LiveRecordingBadge() {
-  const gravando = WEBINAR_COPY.aoVivo.gravando;
-  return (
-    <MemberChip className="max-sm:px-1.5" title={gravando} tone="warning">
-      <span aria-hidden="true" className="inline-block size-2 rounded-full bg-red-500 motion-safe:animate-pulse" />
-      <span className="max-sm:sr-only" data-testid="live-recording">
-        {gravando}
-      </span>
-    </MemberChip>
-  );
-}
-
-/**
- * O miolo da pilula do Minimizar (56 px; a propria sala encolhida e o data-testid="room-pill"): Ao vivo, o titulo,
- * Voltar e Sair; o palco pequeno fica ao lado, no mesmo lugar.
- */
-export function LivePillInfo({ live, onLeave, onRestore, title }: { live: boolean; onLeave: () => void; onRestore: () => void; title: string }) {
-  const copy = WEBINAR_COPY.sala;
-  return (
-    <>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1 text-[11px] font-semibold text-zinc-300">
-          {live ? <Radio aria-hidden="true" className="size-3 text-[var(--accent)]" /> : null}
-          {live ? copy.aoVivo : copy.salaMinimizada}
+      {students === null ? null : (
+        <p className="flex h-10 items-center gap-3 text-sm leading-5 text-room-fg">
+          <Users aria-hidden="true" className="size-5 shrink-0" strokeWidth={1.75} />
+          {copy.alunosNaSala(Math.max(0, students))}
         </p>
-        <p className="truncate text-sm font-bold text-white">{title}</p>
-      </div>
-      <button
-        className="h-9 shrink-0 rounded-full bg-white px-3 text-xs font-extrabold text-black hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-        onClick={onRestore}
-        title={WEBINAR_COPY.aoVivo.voltarParaLive}
-        type="button"
-      >
-        {copy.voltar}
-      </button>
-      <button aria-label={copy.sair} className="grid size-9 shrink-0 place-items-center rounded-full text-zinc-300 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white" onClick={onLeave} type="button">
-        <X aria-hidden="true" className="size-4" />
-      </button>
-    </>
+      )}
+    </div>
   );
 }

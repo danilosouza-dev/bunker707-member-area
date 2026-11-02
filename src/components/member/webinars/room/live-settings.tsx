@@ -1,11 +1,12 @@
 "use client";
 
-import { ImagePlus, X } from "lucide-react";
+import { ImagePlus, Moon, Sun, X } from "lucide-react";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import type { UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import type { DeviceKind, DeviceOption, DeviceSettings, ReceiveQuality } from "@/lib/jitsi-device-settings";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { RoomTheme } from "@/lib/webinar-room-prefs";
 import { LIVE_ROOM_COPY } from "./live-room-model";
 
 // O painel Configurações da sala ao vivo (docs/30 §1.3, §8.5, §9 e D4), aberto pelo botao Configurações da nossa barra
@@ -25,6 +26,11 @@ import { LIVE_ROOM_COPY } from "./live-room-model";
 // tem a barra do iframe, que tambem muda ruido, fundo e espelho: para ele, as mesmas acoes sem estado do card do console
 // (Ligar / Desligar a redução de ruído, Inverter a minha imagem, Desfocar o fundo / Tirar o efeito do fundo). Os campos tem 44 px; o nome de cada lista e o titulo da secao;
 // o painel encolhe e rola por dentro numa coluna curta; nada aqui fala com a rede e nenhuma frase e escrita direto.
+// Redesign V2, F2 (docs/31 V2-11): as cores vem dos tokens do tema da sala. F3 (V2-12 e V2-18): abaixo de sm o botao
+// de tema sai do cabecalho (nao ha largura) e a linha Tema entra no topo do painel, com o mesmo nome do botao ("Tema
+// claro" no escuro, "Tema escuro" no claro); a partir de sm ela some, porque o cabecalho tem o botao.
+// O console de quem apresenta (docs/31 V2-14, console-bar.tsx) abre este mesmo painel pela barra dele, com
+// `presenterBar` "ours": a camera nunca ligada diz para liga-la pela barra (a nossa), nao pela do video.
 
 /** O que o painel le e chama do useJitsiDevices (os testes passam um objeto com o mesmo formato). */
 export type LiveSettingsDevices = Pick<
@@ -40,14 +46,25 @@ export type LiveSettingsProps = {
   onChoose: (kind: DeviceKind, option: DeviceOption) => void;
   /** Fechar: o painel fecha e o foco volta ao botao Configurações da barra. */
   onClose?: () => void;
+  /**
+   * De quem e a barra de midia de quem apresenta: a do proprio iframe ("engine", quem apresenta pela pagina da sala) ou a
+   * nossa ("ours", o console, docs/31 V2-14). Muda so a frase da camera nunca ligada: onde liga-la.
+   */
+  presenterBar?: "engine" | "ours";
+  /** A sala ao vivo: troca o tema (com `theme`, a linha Tema aparece abaixo de sm). */
+  onToggleTheme?: () => void;
   sections: DeviceSettings;
   /** Aluno e Equipe: o atalho da mao e os efeitos com estado (host e co-apresentador usam a barra do iframe). */
   showMedia: boolean;
+  /** O tema da sala agora (a linha Tema diz para qual vai). */
+  theme?: RoomTheme;
 };
 
-const NOTE = "text-xs leading-5 text-zinc-400";
-const ROW = "flex min-h-11 cursor-pointer items-center gap-3 text-sm text-zinc-100";
-const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
+const NOTE = "text-xs leading-5 text-room-fg-subtle";
+const ROW = "flex min-h-11 cursor-pointer items-center gap-3 text-sm text-room-fg";
+const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus";
+/** O botao sem estado do painel (Fechar e as acoes de quem apresenta): o circulo inativo da barra. */
+const PANEL_BUTTON = "inline-flex h-11 items-center gap-2 rounded-full bg-room-control px-4 text-sm font-semibold text-room-fg-strong hover:bg-room-control-hover";
 const QUALITY_CHOICES: readonly ReceiveQuality[] = ["automatica", "economizar"];
 
 /** O id do titulo de cada secao (o nome acessivel da lista que mora nela). */
@@ -57,13 +74,14 @@ export const LIVE_SETTINGS_SECTION_IDS = {
   camera: "live-settings-camera",
   microfone: "live-settings-microfone",
   qualidade: "live-settings-qualidade",
-  som: "live-settings-som"
+  som: "live-settings-som",
+  tema: "live-settings-tema"
 } as const;
 
-function Section(props: { children: ReactNode; id: string; title: string }) {
+function Section(props: { children: ReactNode; className?: string; id: string; title: string }) {
   return (
-    <section aria-labelledby={props.id} className="min-w-0 space-y-2">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400" id={props.id}>
+    <section aria-labelledby={props.id} className={cn("min-w-0 space-y-2", props.className)}>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle" id={props.id}>
         {props.title}
       </h3>
       {props.children}
@@ -79,7 +97,7 @@ function DeviceSelect(props: { kind: DeviceKind; labelledBy: string; onChoose: L
   return (
     <select
       aria-labelledby={props.labelledBy}
-      className={cn("h-11 w-full min-w-0 truncate rounded-[10px] border border-white/15 bg-[#161616] px-3 text-sm text-white", FOCUS)}
+      className={cn("h-11 w-full min-w-0 truncate rounded-[10px] border border-room-input-border bg-room-input-bg px-3 text-sm text-room-fg", FOCUS)}
       data-live-device={props.kind}
       onChange={(event) => {
         const option = props.options.find((item) => item.deviceId === event.target.value);
@@ -103,7 +121,7 @@ function DeviceSelect(props: { kind: DeviceKind; labelledBy: string; onChoose: L
 function Action(props: { children: ReactNode; onClick: () => void }) {
   return (
     <button
-      className={cn("inline-flex h-11 items-center gap-2 rounded-full bg-white/[0.08] px-4 text-sm font-semibold text-zinc-100 hover:bg-white/[0.16]", FOCUS)}
+      className={cn(PANEL_BUTTON, FOCUS)}
       onClick={props.onClick}
       type="button"
     >
@@ -123,13 +141,13 @@ export function panelFocusLost(input: { active: unknown; body: unknown; last: { 
 function Check(props: { checked: boolean; label: string; onChange: (on: boolean) => void }) {
   return (
     <label className={ROW}>
-      <input checked={props.checked} className={cn("size-5 shrink-0 accent-white", FOCUS)} onChange={(event) => props.onChange(event.target.checked)} type="checkbox" />
+      <input checked={props.checked} className={cn("size-5 shrink-0 accent-room-active-bg", FOCUS)} onChange={(event) => props.onChange(event.target.checked)} type="checkbox" />
       <span className="min-w-0">{props.label}</span>
     </label>
   );
 }
 
-export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sections, showMedia }: LiveSettingsProps) {
+export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, onToggleTheme, presenterBar = "engine", sections, showMedia, theme }: LiveSettingsProps) {
   const copy = WEBINAR_COPY.aoVivo;
   const config = copy.config;
   const ids = LIVE_SETTINGS_SECTION_IDS;
@@ -168,7 +186,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
       {onClose ? (
         <div className="mb-2 flex justify-end">
           <button
-            className={cn("inline-flex h-11 items-center gap-1.5 rounded-full bg-white/[0.08] px-4 text-sm font-semibold text-zinc-100 hover:bg-white/[0.16]", FOCUS)}
+            className={cn(PANEL_BUTTON, "gap-1.5", FOCUS)}
             onClick={onClose}
             ref={closeRef}
             type="button"
@@ -179,14 +197,25 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
         </div>
       ) : null}
       {sections.aguardandoSala ? <p className={cn(NOTE, "mb-3")}>{config.foraDaSala}</p> : null}
-      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+      {/* Duas colunas do sm ao lg (o painel na largura da coluna); a partir de lg o painel tem 380 px por cima do palco
+          e fica numa coluna so, sem cortar os nomes dos aparelhos. */}
+      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-1">
+        {onToggleTheme && theme ? (
+          <Section className="sm:hidden" id={ids.tema} title={WEBINAR_COPY.salaV2.tema.titulo}>
+            <button className={cn(PANEL_BUTTON, FOCUS)} onClick={onToggleTheme} type="button">
+              {theme === "light" ? <Moon aria-hidden="true" className="size-4" /> : <Sun aria-hidden="true" className="size-4" />}
+              {theme === "light" ? WEBINAR_COPY.salaV2.tema.escuro : WEBINAR_COPY.salaV2.tema.claro}
+            </button>
+          </Section>
+        ) : null}
+
         {sections.volume !== "oculta" ? (
           <Section id={ids.som} title={copy.som}>
             <div className="flex items-center gap-3">
               <input
                 aria-label={config.volume}
                 aria-valuetext={config.volumeValor(devices.volumePercent)}
-                className={cn("h-11 min-w-0 flex-1 cursor-pointer accent-white", FOCUS)}
+                className={cn("h-11 min-w-0 flex-1 cursor-pointer accent-room-active-bg", FOCUS)}
                 max={100}
                 min={0}
                 onChange={(event) => devices.volume(Number(event.target.value))}
@@ -194,7 +223,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
                 type="range"
                 value={devices.volumePercent}
               />
-              <span aria-hidden="true" className="w-11 shrink-0 text-right text-xs tabular-nums text-zinc-300">
+              <span aria-hidden="true" className="w-11 shrink-0 text-right text-xs tabular-nums text-room-fg-muted">
                 {config.volumeValor(devices.volumePercent)}
               </span>
             </div>
@@ -237,7 +266,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
             ) : sections.camera === "pronta" ? (
               <>
                 {cameraFechada ? (
-                  <p className={NOTE}>{config.cameraNaBarraDoVideo}</p>
+                  <p className={NOTE}>{presenterBar === "ours" ? config.cameraAguardando : config.cameraNaBarraDoVideo}</p>
                 ) : (
                   <DeviceSelect kind="videoInput" labelledBy={ids.camera} onChoose={onChoose} options={devices.lists.videoInput} value={devices.current.videoInput} />
                 )}
@@ -274,7 +303,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
                 <label className={ROW} key={choice}>
                   <input
                     checked={devices.quality === choice}
-                    className={cn("size-5 shrink-0 accent-white", FOCUS)}
+                    className={cn("size-5 shrink-0 accent-room-active-bg", FOCUS)}
                     name={ids.qualidade}
                     onChange={() => devices.qualidade(choice)}
                     type="radio"
@@ -290,7 +319,7 @@ export function LiveSettings({ cameraOn = false, devices, onChoose, onClose, sec
 
         {sections.atalhos ? (
           <Section id={ids.atalhos} title={LIVE_ROOM_COPY.atalhos}>
-            <ul className="space-y-0.5 text-xs leading-5 text-zinc-300">
+            <ul className="space-y-0.5 text-xs leading-5 text-room-fg-muted">
               <li>{LIVE_ROOM_COPY.atalhoReagir}</li>
               {showMedia ? <li>{LIVE_ROOM_COPY.atalhoMao}</li> : null}
               <li>{LIVE_ROOM_COPY.atalhoEnquete}</li>

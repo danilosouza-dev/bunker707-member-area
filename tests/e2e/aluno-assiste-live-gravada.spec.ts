@@ -3,16 +3,22 @@ import { expect, paginaFalsaPlayerJs, test } from "./fixtures";
 import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveGravadaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
+import { ROOM_THEME_KEY } from "../../src/lib/webinar-room-prefs";
 
 // Webinarios, fase 2a (docs/30 §1.6, §6.6, §8.5, §9 e §10.2): a aluna entra na Live gravada 90 s depois do inicio
 // pela pagina da live (Entrar), o player falso da Bunny (servido no endereco real pela pagina falsa) recebe
 // setCurrentTime(~90) da trava, "Ativar som" liga o som, a linha mestre aparece no segundo certo (a de 100 s
 // chega; a de 20 min nao), a mensagem nova aparece numa segunda aba pela consulta de 5 s depois do aceite
-// (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. A IA Diretor fica
-// na pagina da live e some na sala (o botao flutuante cobria o X da pilula), e o cabecalho da sala tem a logo da escola.
+// (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. O selo Ao vivo fica
+// no palco (docs/31 V2-4) e o "{n} assistindo" no cabecalho (V2-3). A IA Diretor fica
+// na pagina da live e some na sala (o botao flutuante cobria o Enviar do chat), e o cabecalho da sala tem a logo da
+// escola. Sem Minimizar e sem pilula (docs/31 V2-2): o topo do vertical tem so o Sair.
 // Fase 4d (docs/30 §1.6 e §6.6): com o celular em pe (375 x 740) a sala abre na Sala Live vertical 9:16 (o video
 // cobrindo a tela, o campo compacto embaixo, Reagir abrindo as reacoes, a gaveta com o Chat, Perguntas e Enquetes);
-// deitado, volta ao desenho normal com as abas, sem trocar de sala.
+// deitado, volta ao desenho normal com as abas, sem trocar de sala. O tema claro guardado (docs/31 V2-12) so vale no
+// desenho normal: o vertical fica sobre o video e e sempre escuro, e girar troca o tema junto com o desenho.
+// A barra do desenho normal (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava; a 1280 px o Chat do trilho a
+// direita (a sala no estilo do YouTube) esconde e mostra o chat.
 
 const { slug, textos, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
@@ -55,9 +61,15 @@ async function entrarNaSala(page: Page) {
 test("Entrar 90 s depois do inicio: a sala abre, o player falso recebe setCurrentTime(~90), Ativar som liga o som e o selo Ao vivo aparece com o contador", async ({ page }) => {
   const sala = await entrarNaSala(page);
   await expect(sala).toHaveAttribute("data-room-phase", "live");
-  // O selo tem duas versoes (computador e celular): so uma fica visivel.
-  await expect(sala.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
-  await expect(sala.getByText(/1 assistindo/)).toBeVisible();
+  // O selo Ao vivo fica no palco (docs/31 V2-4), uma versao so; no cabecalho, nenhum selo.
+  const palco = sala.locator('[data-room-slot="stage-box"]');
+  await expect(palco.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
+  await expect(palco.getByTestId("room-on-air")).toBeVisible();
+  await expect(sala.locator("header").getByText(/^Ao vivo/)).toHaveCount(0);
+  // "{n} assistindo agora" no comeco da linha de baixo do titulo no computador; a linha do celular (com o mesmo numero)
+  // fica escondida.
+  await expect(sala.getByTestId("room-present")).toHaveText(/1 assistindo/);
+  await expect(sala.getByText(/1 assistindo/).filter({ visible: true })).toBeVisible();
   // A sala cobre o topo da area: no computador, a logo da escola no cabecalho da sala, sem link.
   await expect(sala.getByRole("img", { name: "Bunker707" })).toBeVisible();
   await expect(sala.getByRole("link", { name: "Bunker707" })).toHaveCount(0);
@@ -111,13 +123,52 @@ test("a mensagem nova: o aceite na primeira (o texto de §8.5), a mensagem apare
   await expect(sala.getByRole("group", { name: /Ao enviar mensagens neste chat/ })).toHaveCount(0);
 });
 
+test("no desenho normal, a barra da sala (docs/31 V2-6): Reagir abre as seis reacoes e Curtir grava pela nossa rota; o Esc fecha as reacoes antes de pedir para sair; a 1280 px o Chat do trilho esconde e mostra o chat (o balao fica so abaixo de lg)", async ({ page }) => {
+  const sala = await entrarNaSala(page);
+  await expect(sala).toHaveAttribute("data-room-design", "normal");
+  // As reacoes so abrem pelo Reagir (a fileira fixa embaixo do palco saiu).
+  await expect(sala.getByRole("button", { exact: true, name: "Curtir" })).toHaveCount(0);
+  const reagir = sala.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.reagir });
+  await expect(reagir).toHaveAttribute("aria-controls", "room-reactions");
+  await reagir.click();
+  await expect(reagir).toHaveAttribute("aria-expanded", "true");
+  const reacao = page.waitForResponse((response) => response.url().endsWith("/reactions") && response.request().method() === "POST");
+  await sala.locator("#room-reactions").getByRole("button", { exact: true, name: "Curtir" }).click();
+  expect((await reacao).status()).toBe(201);
+  await page.keyboard.press("Escape");
+  await expect(sala.locator("#room-reactions")).toHaveCount(0);
+  await expect(sala.getByRole("alertdialog", { name: "Sair da sala?" })).toHaveCount(0);
+
+  // A 1280 px (o padrao do projeto) o trilho a direita abre e fecha o painel: o Chat aberto esconde o painel (montado) e
+  // o mesmo item o reabre; o balao da barra fica so abaixo de lg. Com a sessao gravada, o trilho tem Participantes.
+  const painel = WEBINAR_COPY.salaV2.painel;
+  const chat = sala.getByTestId("room-panel");
+  const trilho = sala.getByRole("navigation", { name: painel.rotulo });
+  await expect(trilho.getByRole("button")).toHaveText([WEBINAR_COPY.sala.abas.chat, WEBINAR_COPY.sala.abas.perguntas, WEBINAR_COPY.sala.abas.participantes]);
+  await expect(sala.getByRole("button", { exact: true, name: painel.esconder })).toBeHidden();
+  const chatDoTrilho = trilho.getByRole("button", { name: new RegExp(`^${WEBINAR_COPY.sala.abas.chat}`) });
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+  await chatDoTrilho.click();
+  await expect(chat).toBeHidden();
+  await expect(chat).toHaveCount(1);
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "false");
+  await chatDoTrilho.click();
+  await expect(chat).toBeVisible();
+  await expect(chatDoTrilho).toHaveAttribute("aria-expanded", "true");
+});
+
 test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live", async ({ page }) => {
   const sala = await entrarNaSala(page);
   await page.keyboard.press("Escape");
   const confirmacao = sala.getByRole("alertdialog", { name: "Sair da sala?" });
   await expect(confirmacao).toBeVisible();
+  // O foco entra no Voltar da confirmacao; o Voltar a fecha e o foco volta para a sala, nunca para o body (onde o Esc e a
+  // trava do Tab deixariam de valer).
+  await expect(confirmacao.getByRole("button", { exact: true, name: "Voltar" })).toBeFocused();
   await confirmacao.getByRole("button", { exact: true, name: "Voltar" }).click();
   await expect(confirmacao).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
+  await expect.poll(() => sala.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
 
   await sala.getByRole("button", { exact: true, name: "Sair" }).first().click();
   await sala.getByRole("alertdialog", { name: "Sair da sala?" }).getByRole("button", { exact: true, name: "Sair" }).click();
@@ -125,12 +176,22 @@ test("Esc pede confirmacao enquanto esta no ar; Sair volta para a pagina da live
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 });
 
-test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; deitado, volta ao desenho normal; o X da pilula fecha a sala", async ({ page }) => {
+test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo cobre a largura, Reagir e as reações têm 44 px, o campo fica no rodapé e a gaveta abre o Chat; com o tema claro guardado, o vertical fica escuro; deitado, volta ao desenho normal no claro; o Sair do topo pede a confirmação e fecha a sala", async ({ page }) => {
   const sala = WEBINAR_COPY.sala;
   const vertical = WEBINAR_COPY.vertical;
+  // A aluna escolheu o tema claro antes (guardado no navegador dela).
+  await page.addInitScript((chave) => {
+    try {
+      window.localStorage.setItem(chave, "light");
+    } catch {
+      // Sem armazenamento, a sala fica no escuro e a conferencia abaixo falha com a causa.
+    }
+  }, ROOM_THEME_KEY);
   await page.setViewportSize({ height: 740, width: 375 });
   const dialogo = await entrarNaSala(page);
   await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
+  // O vertical 9:16 fica sobre o video: sempre escuro, mesmo com o claro guardado.
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
 
   const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
   expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
@@ -156,23 +217,36 @@ test("a 375 px em pé: a Sala Live vertical cabe sem rolagem lateral, o vídeo c
   await gaveta.getByRole("button", { exact: true, name: vertical.voltarAoVideo }).click();
   await expect(gaveta).toHaveCount(0);
 
-  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
-  await expect(page.getByTestId("room-pill")).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: titulo })).toBeVisible();
-  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: sala.voltar }).click();
-  await expect(dialogo.getByRole("textbox", { name: sala.escreva })).toBeVisible();
+  // Sem Minimizar (docs/31 V2-2): nada encolhe a sala, e a pagina da live nao fica desenhada por baixo dela (o titulo
+  // da pagina seria um segundo h1).
+  await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
+  await expect(page.getByTestId("room-pill")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1, name: titulo })).toHaveCount(1);
 
-  // Deitado (740 x 375): o desenho normal com as abas, na mesma sala.
+  // Deitado (740 x 375): o desenho normal com as abas, na mesma sala, em linha (o palco ao lado do painel): a barra, o
+  // balao e as abas cabem na tela (toBeVisible passava com eles abaixo dela).
   await page.setViewportSize({ height: 375, width: 740 });
   await expect(dialogo).toHaveAttribute("data-room-design", "normal");
-  await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeVisible();
+  await expect(dialogo).toHaveAttribute("data-room-theme", "light");
+  await expect(dialogo.getByRole("tab", { name: sala.abas.chat })).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.locator("[data-room-bar]")).toBeInViewport({ ratio: 1 });
+  await expect(dialogo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.painel.esconder })).toBeInViewport({ ratio: 1 });
 
-  // De volta a 375 px em pe: o X da pilula (Sair) fica no canto de baixo, onde ficava a IA Diretor: o clique chega
-  // nele e fecha a sala.
+  // De volta a 375 px em pe: o topo tem so o Sair, com 44 px; ele pede a confirmacao (a sessao esta no ar) e o Sair
+  // dela volta para a pagina da live, onde a IA Diretor reaparece.
   await page.setViewportSize({ height: 740, width: 375 });
-  await dialogo.getByRole("button", { exact: true, name: sala.minimizar }).click();
-  await page.getByTestId("room-pill").getByRole("button", { exact: true, name: "Sair" }).click();
+  await expect(dialogo).toHaveAttribute("data-room-design", "vertical");
+  await expect(dialogo).toHaveAttribute("data-room-theme", "dark");
+  const sairDoTopo = dialogo.getByRole("button", { exact: true, name: sala.sair });
+  await expect(sairDoTopo).toHaveCount(1);
+  const caixaDoSair = await sairDoTopo.boundingBox();
+  expect(caixaDoSair?.height).toBeGreaterThanOrEqual(44);
+  expect(caixaDoSair?.width).toBeGreaterThanOrEqual(44);
+  await sairDoTopo.click();
+  const confirmacao = dialogo.getByRole("alertdialog", { name: sala.sairConfirmar });
+  await expect(confirmacao).toBeVisible();
+  await confirmacao.getByRole("button", { exact: true, name: sala.sair }).click();
   await expect(page).toHaveURL(`/webinarios/${slug}`);
-  await expect(page.getByTestId("room-pill")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });

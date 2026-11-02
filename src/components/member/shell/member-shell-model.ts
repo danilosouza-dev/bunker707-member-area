@@ -78,7 +78,8 @@ export function getDirectorGreeting(name: string | null | undefined) {
 
 /**
  * O botao flutuante da IA Diretor fica em toda pagina da area, menos na sala do Webinario (/webinarios/<slug>/sala):
- * a sala e um dialogo de tela cheia e o botao cobriria o Enviar do chat e o X da pilula minimizada (docs/30 §1.3).
+ * a sala e um dialogo de tela cheia e o botao cobriria o Enviar do chat (docs/30 §1.3). Sem Minimizar (docs/31 V2-2):
+ * a IA Diretor volta quando o aluno sai da sala.
  */
 export function directorLauncherAllowedOn(pathname: string | null | undefined) {
   return !isWebinarRoomPath(pathname);

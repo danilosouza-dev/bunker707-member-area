@@ -596,6 +596,58 @@ test("a mensagem da equipe: role host para o Apresentador, source team, aprovada
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /Bem-vindos/);
 });
 
+test("o Co-apresentador no chat (docs/31 V2-A12): quem e co-apresentador do webinario com o prazo valendo grava role co_host (mensagem e resposta escrita); vencido, de outro webinario ou da Equipe da sala, team; o Apresentador, host", async () => {
+  const CO = "eeeeeeee-5555-4555-8555-555555555551";
+  const CO_VENCIDO = "eeeeeeee-5555-4555-8555-555555555552";
+  const CO_COM_PRAZO = "eeeeeeee-5555-4555-8555-555555555553";
+  const EQUIPE_DA_SALA = "eeeeeeee-5555-4555-8555-555555555554";
+  const CO_DE_OUTRO = "eeeeeeee-5555-4555-8555-555555555555";
+  const presenter = (user_id, extra = {}) => ({ can_moderate_room: true, created_at: agora(), role: "co_host", user_id, valid_until: null, webinar_id: WEBINAR, ...extra });
+  const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 0, user_id: ALUNA };
+  const db = usar(
+    bancoEmMemoria(
+      cenario({
+        webinar_presenters: [
+          presenter(CO),
+          presenter(CO_VENCIDO, { valid_until: new Date(Date.now() - MIN).toISOString() }),
+          presenter(CO_COM_PRAZO, { valid_until: new Date(Date.now() + 60 * MIN).toISOString() }),
+          presenter(EQUIPE_DA_SALA, { role: "team" }),
+          presenter(CO_DE_OUTRO, { webinar_id: randomUUID() })
+        ],
+        webinar_questions: [pergunta]
+      })
+    )
+  );
+  const original = actionStubs.role;
+  const como = async (id, body) => {
+    actionStubs.role = { ...original, user: { ...original.user, id, user_metadata: { full_name: "Rui Pereira" } } };
+    try {
+      return ok(await roomActions.sendTeamMessage({ body, sessionId: SESSAO_NO_AR })).message;
+    } finally {
+      actionStubs.role = original;
+    }
+  };
+
+  const doCo = await como(CO, "Oi, turma");
+  assert.deepEqual([doCo.role, doCo.source, doCo.approved, doCo.displayName], ["co_host", "team", true, "Rui P."]);
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === doCo.id).role, "co_host", "o papel gravado no banco");
+  assert.equal(audits(db, "webinar.team_message").at(-1).metadata.role, "co_host");
+  assert.equal((await como(CO_COM_PRAZO, "Com prazo")).role, "co_host", "o prazo ainda valendo");
+  assert.equal((await como(CO_VENCIDO, "Vencido")).role, "team", "com o valid_until vencido, Equipe");
+  assert.equal((await como(EQUIPE_DA_SALA, "Da sala")).role, "team", "a Equipe da sala continua Equipe");
+  assert.equal((await como(CO_DE_OUTRO, "De outro")).role, "team", "co-apresentador de outro webinario");
+  assert.equal(ok(await roomActions.sendTeamMessage({ body: "Do Apresentador", sessionId: SESSAO_NO_AR })).message.role, "host");
+
+  // A resposta escrita a uma pergunta tambem vai com o papel de quem responde.
+  actionStubs.role = { ...original, user: { ...original.user, id: CO, user_metadata: { full_name: "Rui Pereira" } } };
+  try {
+    const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", questionId: pergunta.id }));
+    assert.equal(resposta.message.role, "co_host");
+  } finally {
+    actionStubs.role = original;
+  }
+});
+
 test("moderacao: liberar grava quem e quando; fixar uma por sessao; apagar some com motivo team e tira a fixada; promover so a da turma com aceite", async () => {
   const pendente = message({ approved: false, author_user_id: ALUNA });
   const semAceite = message({ author_user_id: ALUNO, display_name: "Aluno 231" });
@@ -680,6 +732,88 @@ test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quan
   assert.ok(perguntaDe(comNome.id).deleted_at, "a pergunta some junto");
   assert.equal(perguntaDe(comNome.id).deleted_reason, "team");
   assert.equal(perguntaDe(anonima.id).deleted_at, null);
+});
+
+test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta sem o historico do aluno (a pendente e liberada junto); o texto cortado em 500 caracteres sem partir um emoji; a pergunta pelo chat moderado segue o Liberar; nao duplica; a equipe, o roteiro, o Assistente e a resposta dao 409; a sessao encerrada tambem", async () => {
+  const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
+  const longa = "x".repeat(700);
+  // O emoji (um par de unidades UTF-16) nas posicoes 499 e 500: o corte por unidade deixava a metade solta, que o
+  // Postgres recusa (22P02), com a pendente ja liberada e sem a pergunta.
+  const comEmoji = message({ author_user_id: ALUNA, body: `${"a".repeat(499)}😀${"b".repeat(100)}` });
+  const naEncerrada = message({ author_user_id: ALUNA, body: "e o replay?", session_id: SESSAO_ENCERRADA });
+  const pendente = message({ approved: false, author_user_id: ALUNO, body: longa, display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, offset_ms: 30_000 });
+  const perguntaPeloChat = message({ approved: false, author_user_id: ALUNA, body: "vai ter replay?", kind: "question", offset_ms: 50_000 });
+  const liberada = message({ author_user_id: ALUNA, body: "como faço o agente?" });
+  const daEquipe = message({ author_user_id: HOST, display_name: "Produtor T.", role: "host", source: "team" });
+  const doRoteiro = message({ display_name: "Duda", source: "scripted" });
+  const doAssistente = message({ display_name: "Assistente", kind: "answer", role: "ai", source: "ai" });
+  const resposta = message({ author_user_id: ALUNA, kind: "answer" });
+  const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [pendente, perguntaPeloChat, liberada, daEquipe, doRoteiro, doAssistente, resposta, comEmoji, naEncerrada] })));
+  const linha = (id) => db.tables.webinar_chat_messages.find((row) => row.id === id);
+  const perguntasDe = (id) => db.tables.webinar_questions.filter((row) => row.message_id === id);
+  const eventos = () => db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
+
+  // A pendente comum: libera (quem e quando) e vira pergunta com o message_id, o texto cortado em 500 e anonima pelo
+  // "Aluno {n}"; quem perguntou foi a equipe, entao nada no historico do aluno.
+  const virou = ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
+  assert.equal(virou.message.approved, true);
+  assert.deepEqual([linha(pendente.id).approved, linha(pendente.id).approved_by], [true, HOST]);
+  assert.equal(perguntasDe(pendente.id).length, 1);
+  const [aberta] = perguntasDe(pendente.id);
+  assert.deepEqual([aberta.anonymous, aberta.body.length, aberta.offset_ms, aberta.session_id, aberta.status, aberta.user_id], [true, 500, 30_000, SESSAO_NO_AR, "open", ALUNO]);
+  assert.equal(eventos().length, 0, "sem webinar_question_sent: a pergunta foi da equipe");
+
+  // O corte conta caracteres, como o check char_length(body) <= 500 do banco: o emoji fica inteiro, nunca pela metade.
+  ok(await roomActions.moderateMessage({ action: "question", messageId: comEmoji.id }));
+  const [doEmoji] = perguntasDe(comEmoji.id);
+  assert.equal(Array.from(doEmoji.body).length, 500, "500 caracteres");
+  assert.doesNotMatch(doEmoji.body, /[\uD800-\uDBFF]$/, "sem a metade solta do par no fim");
+  assert.ok(doEmoji.body.endsWith("😀"), "o emoji inteiro");
+
+  // A sessao encerrada nao aceita mais a equipe: nenhuma pergunta nova, e a mensagem fica como estava.
+  const antesDaEncerrada = { ...linha(naEncerrada.id) };
+  const encerrada = await roomActions.moderateMessage({ action: "question", messageId: naEncerrada.id });
+  assert.deepEqual([encerrada.ok, encerrada.status], [false, 409]);
+  assert.equal(perguntasDe(naEncerrada.id).length, 0);
+  assert.deepEqual(linha(naEncerrada.id), antesDaEncerrada);
+
+  // A ja liberada: so cria a pergunta (a linha nao muda).
+  const antes = { ...linha(liberada.id) };
+  ok(await roomActions.moderateMessage({ action: "question", messageId: liberada.id }));
+  assert.equal(perguntasDe(liberada.id).length, 1);
+  assert.deepEqual([perguntasDe(liberada.id)[0].anonymous, perguntasDe(liberada.id)[0].display_name], [false, "Ana M."]);
+  assert.deepEqual(linha(liberada.id), antes, "a mensagem liberada fica como estava");
+
+  // A pergunta pelo chat moderado: o mesmo do Liberar (libera, abre a pergunta e grava UM webinar_question_sent do autor).
+  ok(await roomActions.moderateMessage({ action: "question", messageId: perguntaPeloChat.id }));
+  assert.equal(linha(perguntaPeloChat.id).approved, true);
+  assert.equal(perguntasDe(perguntaPeloChat.id).length, 1);
+  assert.deepEqual(
+    eventos().map((row) => [row.user_id, row.metadata.question_id]),
+    [[ALUNA, perguntasDe(perguntaPeloChat.id)[0].id]]
+  );
+
+  // De novo: nem a pergunta nem o evento duplicam.
+  for (const id of [pendente.id, liberada.id, perguntaPeloChat.id]) {
+    ok(await roomActions.moderateMessage({ action: "question", messageId: id }));
+    assert.equal(perguntasDe(id).length, 1, `${id} nao duplica`);
+  }
+  assert.equal(eventos().length, 1, "o evento tambem nao duplica");
+
+  // Sem aluno nao ha pergunta (ela pede o user_id): a equipe, o roteiro, o Assistente; a resposta tambem nao vira.
+  for (const outra of [daEquipe, doRoteiro, doAssistente, resposta]) {
+    const recusada = await roomActions.moderateMessage({ action: "question", messageId: outra.id });
+    assert.deepEqual([recusada.ok, recusada.status], [false, 409], outra.source);
+    assert.match(recusada.error, /aluno/i);
+    assert.equal(perguntasDe(outra.id).length, 0);
+  }
+
+  // A auditoria: a acao e os ids, nunca o texto.
+  const auditadas = audits(db, "webinar.moderated").filter((row) => row.metadata.action === "question");
+  assert.equal(auditadas.length, 7, "uma por pedido aceito");
+  assert.deepEqual(Object.keys(auditadas[0].metadata).sort(), ["action", "message_id", "session_id", "source", "with_reason"]);
+  assert.equal(auditadas[0].metadata.message_id, pendente.id);
+  assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /xxxxx|como faço|vai ter replay/);
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -947,6 +1081,7 @@ test("o chat de uma sessao vira CSV do roteiro: so turma, chat original e equipe
           message({ body: "Segunda", offset_ms: 20_000, session_id: SESSAO_ENCERRADA }),
           message({ body: "Primeira", offset_ms: 10_000, session_id: SESSAO_ENCERRADA }),
           message({ body: "Da equipe", display_name: "Produtor T.", offset_ms: 15_000, role: "host", session_id: SESSAO_ENCERRADA, source: "team" }),
+          message({ body: "Do co-apresentador", display_name: "Rui P.", offset_ms: 17_000, role: "co_host", session_id: SESSAO_ENCERRADA, source: "team" }),
           message({ body: "Do roteiro", offset_ms: 5_000, session_id: SESSAO_ENCERRADA, source: "scripted" }),
           message({ approved: false, body: "Pendente", offset_ms: 1_000, session_id: SESSAO_ENCERRADA }),
           message({ body: "Apagada", deleted_at: agora(), offset_ms: 2_000, session_id: SESSAO_ENCERRADA })
@@ -956,7 +1091,8 @@ test("o chat de uma sessao vira CSV do roteiro: so turma, chat original e equipe
   );
   const exportado = ok(await scriptActions.exportSessionChatCsv({ sessionId: SESSAO_ENCERRADA }));
   const linhas = exportado.csv.replace(/^﻿/, "").trim().split("\r\n");
-  assert.deepEqual(linhas, ["Tempo;Nome;Papel;Mensagem", "00:10;Ana M.;Aluno;Primeira", "00:15;Produtor T.;Equipe;Da equipe", "00:20;Ana M.;Aluno;Segunda"]);
-  assert.equal(exportado.rows, 3);
+  // O Apresentador e o co-apresentador (V2-A12) viram a persona da Equipe.
+  assert.deepEqual(linhas, ["Tempo;Nome;Papel;Mensagem", "00:10;Ana M.;Aluno;Primeira", "00:15;Produtor T.;Equipe;Da equipe", "00:17;Rui P.;Equipe;Do co-apresentador", "00:20;Ana M.;Aluno;Segunda"]);
+  assert.equal(exportado.rows, 4);
   assert.equal(audits(db, "webinar.chat_exported")[0].metadata.session_id, SESSAO_ENCERRADA);
 });

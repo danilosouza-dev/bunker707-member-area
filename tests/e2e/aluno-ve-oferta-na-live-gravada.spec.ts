@@ -152,7 +152,7 @@ test("ao voltar (a página recarregada e a sala aberta de novo) o card mostra a 
   }
 });
 
-test("no celular baixo em pé (375x548) a pílula abre o card com o Fechar dentro da tela e abaixo de Minimizar e Sair", async ({ page }) => {
+test("no celular baixo em pé (375x548) a pílula abre o card com o Fechar dentro da tela e abaixo do Sair", async ({ page }) => {
   await page.setViewportSize({ height: 548, width: 375 });
   const sala = await entrarNaSala(page);
   const pilula = sala.locator("[data-room-offer-pill]");

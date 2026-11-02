@@ -419,7 +419,8 @@ const TODAS = () => [
   () => live.unbanStudent({ userId: ALUNA }),
   () => live.attachRecording({ embedUrl: `https://iframe.mediadelivery.net/embed/42/${VIDEO}`, sessionId: S_ENCERRADA }),
   () => live.alignChat({ anchorOffsetMs: 2000, recordingId: randomUUID() }),
-  () => live.setBrowserRecording({ on: true, sessionId: S_NO_AR })
+  () => live.setBrowserRecording({ on: true, sessionId: S_NO_AR }),
+  () => live.setSelfUnmute({ allowed: true, sessionId: S_NO_AR })
 ];
 
 /* ------------------------------------------------------------------------------------------------
@@ -460,6 +461,8 @@ test("analista sem messaging.publish: abrir, começar, encerrar, o gravador, a a
   // Enviar a gravação e Alinhar chat sao messaging.write (docs/30 §5.2): o analista sem publish tambem faz.
   const enviada = ok(await live.attachRecording({ durationSeconds: 60, embedUrl: `https://iframe.mediadelivery.net/embed/42/${VIDEO}`, sessionId: S_ENCERRADA }));
   ok(await live.alignChat({ anchorOffsetMs: 2000, recordingId: enviada.recordingId }));
+  // O microfone sozinho e messaging.write (o papel de quem apresenta e conferido a parte).
+  ok(await live.setSelfUnmute({ allowed: true, sessionId: S_NO_AR }));
   // A gravacao no navegador e do Apresentador (messaging.publish), como o Gravar.
   falha(await live.setBrowserRecording({ on: true, sessionId: S_NO_AR }), 403);
 });
@@ -532,6 +535,51 @@ test("Trancar e destrancar gravam room_locked e a auditoria; sessao encerrada re
     [true, false]
   );
   falha(await live.setRoomLock({ locked: true, sessionId: S_ENCERRADA }), 409);
+});
+
+test("microfone sozinho (docs/31 caminho A): o Apresentador e o co-apresentador gravam so a chave selfUnmute do room_settings com a auditoria; a Equipe recebe a recusa; sessao encerrada 409; a versao do webinario muda", async () => {
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  const webinar = () => db.tables.webinars[0];
+  const antes = webinar().updated_at;
+
+  assert.deepEqual(ok(await live.setSelfUnmute({ allowed: true, sessionId: S_NO_AR })), { allowed: true, sessionId: S_NO_AR });
+  assert.deepEqual(webinar().room_settings, { chatMode: "open", practiceSession: true, selfUnmute: true, waitingRoom: false }, "so a chave entra; o resto fica igual");
+  assert.notEqual(webinar().updated_at, antes, "a versao do webinario muda (o editor aberto recebe o conflito)");
+  assert.deepEqual(audits(db, "webinar.self_unmute").map((row) => row.metadata), [{ allowed: true, session_id: S_NO_AR }]);
+  assert.ok(estado.revalidados.some((path) => String(path).endsWith(`/${WEBINAR}/sala`)), "o console e revalidado");
+
+  // O co-apresentador tambem fecha o microfone da turma.
+  actionStubs.role = { role: "editor", user: { email: "co@bunker707.test", id: COAPRESENTADOR, user_metadata: { full_name: "Carla Dias" } } };
+  try {
+    ok(await live.setSelfUnmute({ allowed: false, sessionId: S_NO_AR }));
+    assert.equal(webinar().room_settings.selfUnmute, false);
+    assert.equal(webinar().room_settings.chatMode, "open");
+
+    // A Equipe sem ser apresentadora recebe a recusa, e nada muda.
+    actionStubs.role = { role: "editor", user: { email: "equipe@bunker707.test", id: EQUIPE, user_metadata: { full_name: "Equipe Teste" } } };
+    const recusa = falha(await live.setSelfUnmute({ allowed: true, sessionId: S_NO_AR }), 403);
+    assert.equal(recusa.error, LIVE_ACTION_MESSAGES.presenterOnly);
+    assert.equal(webinar().room_settings.selfUnmute, false);
+
+    // O co-apresentador com o prazo vencido tambem nao.
+    db.tables.webinar_presenters[0].valid_until = new Date(Date.now() - MIN).toISOString();
+    actionStubs.role = { role: "editor", user: { email: "co@bunker707.test", id: COAPRESENTADOR, user_metadata: { full_name: "Carla Dias" } } };
+    falha(await live.setSelfUnmute({ allowed: true, sessionId: S_NO_AR }), 403);
+  } finally {
+    actionStubs.role = { role: "owner", user: { email: "produtor.teste@bunker707.test", id: HOST, user_metadata: { full_name: "Produtor de Teste" } } };
+  }
+
+  falha(await live.setSelfUnmute({ allowed: true, sessionId: S_ENCERRADA }), 409);
+  falha(await live.setSelfUnmute({ allowed: true, sessionId: S_GRAVADA }), 409);
+  assert.equal(audits(db, "webinar.self_unmute").length, 2, "as recusas nao gravam auditoria");
+});
+
+test("microfone sozinho: o retrato da live devolve a politica do room_settings (sem a chave, desligada)", async () => {
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  const now = new Date();
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).live.selfUnmute, false, "a linha de antes, sem a chave");
+  db.tables.webinars[0].room_settings = { ...db.tables.webinars[0].room_settings, selfUnmute: true };
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).live.selfUnmute, true);
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -848,6 +896,7 @@ test("toda ação que muda algo grava a auditoria só com ids e contagens (nada 
   ok(await live.openLiveRoom({ sessionId: S_MARCADA }));
   ok(await live.startLiveSession({ sessionId: S_MARCADA }));
   ok(await live.setRoomLock({ locked: true, sessionId: S_MARCADA }));
+  ok(await live.setSelfUnmute({ allowed: true, sessionId: S_MARCADA }));
   ok(await live.prepareRecorder({ sessionId: S_MARCADA }));
   ok(await live.requestRecording({ sessionId: S_MARCADA }));
   ok(await live.markRecordingAnchor({ sessionId: S_MARCADA }));
@@ -866,6 +915,7 @@ test("toda ação que muda algo grava a auditoria só com ids e contagens (nada 
       "webinar.room_opened",
       "webinar.live_started",
       "webinar.room_locked",
+      "webinar.self_unmute",
       "webinar.recorder_requested",
       "webinar.recording_requested",
       "webinar.recording_anchor",

@@ -7,9 +7,9 @@ import "./support/admin-action-stubs.mjs";
 // nunca entra, 429 espera o Retry-After, a rede devolve o lote, 409 banned troca a sala), quando pedir outro token, a
 // frase de cada recusa do join-token e de cada tela, as tentativas de voltar depois de uma queda, o relogio "Ao vivo ·
 // 00:42:10" com relogio falso, a hora do silencio em Sao Paulo, o que os sinais do iframe mudam na nossa barra (a
-// camera fechada pela equipe, o microfone liberado so do proprio participante, a mao, quem esta no palco), os atalhos,
-// o Modo cinema do iPhone, o sinal de midia que segura o pop-up e a decisao da pagina da Sala na live (a equipe abre
-// a Sessao de pratica; o aluno ve a espera; cancelada e sem vaga recusam).
+// camera fechada pela equipe, o microfone liberado so do proprio participante e o recolhido pela equipe, a mao, quem esta
+// no palco), os atalhos, o Modo cinema do iPhone, o sinal de midia que segura o pop-up e a decisao da pagina da Sala na
+// live (a equipe abre a Sessao de pratica; o aluno ve a espera; cancelada e sem vaga recusam).
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 const jitsi = await import("../src/lib/jitsi-room-config.ts");
@@ -316,6 +316,151 @@ test("o microfone: so a liberacao do proprio participante (mediaType audio) abre
   assert.equal(caiu.micAllowed, false, "quem volta entra com outro id, mudo");
 });
 
+test("o microfone recolhido pela equipe (V2-19): o rejectParticipant de audio do proprio aluno tira o Microfone da barra mesmo desligado; o de outro e o de video nao mexem", () => {
+  // O sinal e escutado, mas nunca vai ao servidor (o silencio da equipe ja vira linha pelo audioMuteStatusChanged).
+  assert.ok(jitsi.JITSI_LISTENED_EVENTS.includes("moderationParticipantRejected"), "a sala escuta o sinal");
+  assert.equal(jitsi.toRoomEvent("moderationParticipantRejected", { id: "eu", mediaType: "audio" }, { nowIso: at(), ownId: "eu" }), null, "nada vai ao servidor");
+
+  const base = model.applyLiveSignal(model.INITIAL_LIVE_SIGNALS, { name: "videoConferenceJoined", ownId: "eu", payload: { id: "eu" } });
+  const liberado = model.applyLiveSignal(base, { name: "moderationParticipantApproved", ownId: "eu", payload: { id: "eu", mediaType: "audio" } });
+  const falando = model.applyLiveSignal(model.acceptMic(liberado), { name: "audioMuteStatusChanged", ownId: "eu", payload: { muted: false } });
+  // O proprio aluno desligou pelo Microfone: o botao continua na barra, desligado (nenhum mudo da equipe vai chegar).
+  const desligado = model.applyLiveSignal(model.expectAudioToggle(falando), { name: "audioMuteStatusChanged", ownId: "eu", payload: { muted: true } });
+  assert.equal(desligado.micAllowed, true);
+  assert.equal(desligado.audioOn, false);
+  const barra = (estado) => model.liveBarItems({ allowStudentCamera: true, micAllowed: estado.micAllowed, showMedia: true }).center;
+  assert.ok(barra(desligado).includes("mic"), "antes de recolher, o Microfone esta na barra");
+
+  const recolhido = model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "audio" } });
+  assert.equal(recolhido.micAllowed, false, "a equipe recolheu: o botao some");
+  assert.equal(recolhido.micPrompt, false);
+  assert.equal(recolhido.expectAudio, false);
+  assert.equal(recolhido.notice, "mic_silenced");
+  assert.equal(model.liveNoticePhrase(recolhido.notice), WEBINAR_COPY.aoVivo.microfoneSilenciado);
+  assert.ok(!barra(recolhido).includes("mic"), "o Microfone sai da barra");
+  assert.deepEqual({ ...recolhido, micAllowed: true, notice: desligado.notice }, desligado, "so o microfone e o aviso mudam");
+
+  // Com o Falar / Agora não aberto (liberado e ainda sem resposta), recolher fecha o aviso e o Microfone nunca aparece.
+  const semResposta = model.applyLiveSignal(liberado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "audio" } });
+  assert.equal(semResposta.micPrompt, false);
+  assert.equal(semResposta.micAllowed, false);
+  // O Falar ja pedido deixa de esperar o proximo mudo como nosso: o mudo que vier depois e da equipe (o pedido em si
+  // acaba pelo micAskRecalled, no teste seguinte).
+  assert.equal(model.applyLiveSignal(model.acceptMic(liberado), { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "audio" } }).expectAudio, false);
+
+  // O de outro participante, o de video, o sem id e o de antes de entrar (sem o proprio id) deixam o estado igual.
+  assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "outro", mediaType: "audio" } }), desligado);
+  assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { id: "eu", mediaType: "video" } }), desligado);
+  assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: "eu", payload: { mediaType: "audio" } }), desligado);
+  assert.equal(model.applyLiveSignal(desligado, { name: "moderationParticipantRejected", ownId: null, payload: { id: "eu", mediaType: "audio" } }), desligado);
+});
+
+test("microfone sozinho (docs/31 caminho A): a sala guarda a moderacao de audio do moderationStatusChanged, que nao zera na entrada; ligada, a liberacao de antes deixa de valer; o approved com o microfone ligado nao abre o Falar", () => {
+  const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
+  assert.ok(jitsi.JITSI_LISTENED_EVENTS.includes("moderationStatusChanged"), "a sala do aluno escuta a moderacao");
+  assert.equal(jitsi.toRoomEvent("moderationStatusChanged", { enabled: true, mediaType: "audio" }, { nowIso: at(), ownId: "eu" }), null, "nada vai ao servidor");
+  assert.equal(model.INITIAL_LIVE_SIGNALS.audioModeration, null, "sem leitura, nao se sabe");
+
+  // O sinal pode chegar antes da entrada: a entrada (e a saida) guardam o que o motor disse.
+  const antes = sinal(model.INITIAL_LIVE_SIGNALS, "moderationStatusChanged", { enabled: false, mediaType: "audio" });
+  assert.equal(antes.audioModeration, false);
+  const dentro = sinal(antes, "videoConferenceJoined", { id: "eu" });
+  assert.equal(dentro.audioModeration, false, "a entrada nao zera a moderacao");
+  assert.equal(sinal(dentro, "videoConferenceLeft", {}).audioModeration, false);
+  assert.equal(model.signalsForNewFrame(dentro).audioModeration, null, "um iframe novo le de novo");
+  // A de video e o payload torto nao mexem.
+  assert.equal(sinal(dentro, "moderationStatusChanged", { enabled: true, mediaType: "video" }), dentro);
+  assert.equal(sinal(dentro, "moderationStatusChanged", { enabled: "sim", mediaType: "audio" }), dentro);
+
+  // O aluno abriu sozinho (o microfone ligado marca micAllowed); o vigia ligou a moderacao: a liberacao sai, o
+  // Microfone fica pelo audioOn; fechado, so uma aprovacao nova o libera.
+  const falando = sinal(model.acceptMic(dentro), "audioMuteStatusChanged", { muted: false });
+  assert.equal(falando.micAllowed, true);
+  const lotou = sinal(falando, "moderationStatusChanged", { enabled: true, mediaType: "audio" });
+  assert.deepEqual([lotou.audioModeration, lotou.micAllowed, lotou.audioOn], [true, false, true]);
+  const fechou = sinal(model.expectAudioToggle(lotou), "audioMuteStatusChanged", { muted: true });
+  assert.equal(model.micBlocked({ ...fechou, selfUnmute: true }), true, "fechado com a sala lotada: bloqueado");
+  const liberou = sinal(fechou, "moderationStatusChanged", { enabled: false, mediaType: "audio" });
+  assert.equal(model.micBlocked({ ...liberou, selfUnmute: true }), false, "a moderacao desligada: livre de novo");
+
+  // O approved com o microfone ja ligado (o askToUnmute de novo de quem esta no palco) so libera: o Falar nao abre.
+  const aprovadoLigado = sinal(lotou, "moderationParticipantApproved", { id: "eu", mediaType: "audio" });
+  assert.deepEqual([aprovadoLigado.micPrompt, aprovadoLigado.micAllowed, aprovadoLigado.notice], [false, true, lotou.notice]);
+  // Desligado, o approved abre o Falar como sempre.
+  const aprovadoDesligado = sinal(fechou, "moderationParticipantApproved", { id: "eu", mediaType: "audio" });
+  assert.deepEqual([aprovadoDesligado.micPrompt, aprovadoDesligado.notice], [true, "mic_released"]);
+});
+
+test("a troca da moderacao de audio rele a sessao espalhada e juntada: a espera sorteada ate 10 s, e com uma ja marcada nenhuma outra", () => {
+  const teto = model.LIVE_ROOM_RULES.audioModerationSpreadMs;
+  assert.equal(teto, 10_000, "a turma espalhada em 10 s (o vigia troca a cada 2 s no pior caso)");
+  assert.equal(model.audioModerationRefreshInMs(false, 0), 0);
+  assert.equal(model.audioModerationRefreshInMs(false, 0.5), 5_000);
+  assert.equal(model.audioModerationRefreshInMs(false, 0.99999), 9_999, "nunca chega ao teto");
+  // As trocas que chegam com uma releitura marcada viram a mesma releitura.
+  assert.equal(model.audioModerationRefreshInMs(true, 0.3), null);
+  // O sorteio torto fica dentro da janela.
+  assert.equal(model.audioModerationRefreshInMs(false, 2), teto);
+  assert.equal(model.audioModerationRefreshInMs(false, -1), 0);
+  assert.equal(model.audioModerationRefreshInMs(false, Number.NaN), 0);
+  // Mil alunos com o mesmo sinal: as releituras se espalham pela janela inteira, sem cair no mesmo instante.
+  let semente = 7;
+  const sorteio = () => ((semente = (semente * 48271) % 2147483647) / 2147483647);
+  const esperas = Array.from({ length: 1000 }, () => model.audioModerationRefreshInMs(false, sorteio()));
+  const porSegundo = new Map();
+  for (const ms of esperas) {
+    porSegundo.set(Math.floor(ms / 1000), (porSegundo.get(Math.floor(ms / 1000)) ?? 0) + 1);
+  }
+  assert.equal(porSegundo.size, 10, "um pedaco da turma em cada segundo");
+  assert.ok(Math.max(...porSegundo.values()) < 200, "nenhum segundo com a turma inteira");
+});
+
+test("o recolhimento encerra o pedido do Falar (micAskOnSignal, V2-19): o \"ligado\" guardado nunca traz o Microfone de volta, nem com o mudo da equipe depois", () => {
+  const sinal = (estado, name, payload) => model.applyLiveSignal(estado, { name, ownId: "eu", payload });
+  const barra = (estado) => model.liveBarItems({ allowStudentCamera: true, micAllowed: estado.micAllowed, showMedia: true }).center;
+  // O sinal da moderacao de audio do proprio aluno: a liberacao (Approved) e o recolhimento (Rejected) usam o mesmo.
+  const proprioAudio = { id: "eu", mediaType: "audio" };
+  const liberado = sinal(sinal(model.INITIAL_LIVE_SIGNALS, "videoConferenceJoined", { id: "eu" }), "moderationParticipantApproved", proprioAudio);
+  // Falar (como o turnMicOn): o pedido abre antes do toggleAudio, e o "ligado" que o iframe manda na hora fica guardado
+  // ate a faixa abrir (nem a barra, nem o servidor).
+  const api = { iframe: 1 };
+  const ligado = model.micAskStep(model.startMicAsk(null, { api, id: 1, nowMs: 0, permission: "prompt" }), "audioMuteStatusChanged", { muted: false });
+  assert.equal(ligado.swallow, true);
+  assert.ok(ligado.next.held, "o ligado esta guardado");
+
+  // A equipe recolhe antes de a faixa abrir: o passo do onEvent (micAskOnSignal, a mesma funcao que a sala chama) encerra
+  // o pedido sem soltar nem engolir nada, e o Microfone sai da barra.
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", proprioAudio, "eu"), true);
+  const passo = model.micAskOnSignal(ligado.next, "moderationParticipantRejected", proprioAudio, "eu");
+  assert.deepEqual(passo, { next: null, release: null, swallow: false });
+  const pedido = passo.next;
+  const recolhido = sinal(model.acceptMic(liberado), "moderationParticipantRejected", proprioAudio);
+  assert.ok(!barra(recolhido).includes("mic"));
+  // A faixa que abre depois: a conferencia do turnMicOn para ("gone"), e nenhum "ligado" chega a barra.
+  assert.deepEqual(model.micAskCheck(pedido, 1, { api, muted: false, nowMs: 100, permission: "granted" }), { action: "gone" });
+  // O mudo que a equipe manda junto passa direto, sem nada guardado antes dele: o Microfone continua fora, com o aviso.
+  const mudo = model.micAskOnSignal(pedido, "audioMuteStatusChanged", { muted: true }, "eu");
+  assert.equal(mudo.release, null);
+  assert.equal(mudo.swallow, false);
+  const depoisDoMudo = sinal(recolhido, "audioMuteStatusChanged", { muted: true });
+  assert.equal(depoisDoMudo.micAllowed, false);
+  assert.equal(depoisDoMudo.notice, "mic_silenced");
+  assert.ok(!barra(depoisDoMudo).includes("mic"));
+
+  // Sem o fim do pedido, a faixa aberta soltaria o "ligado" guardado e o Microfone voltaria a barra (o que a regra evita).
+  const semFim = model.micAskCheck(ligado.next, 1, { api, muted: false, nowMs: 100, permission: "granted" });
+  assert.equal(semFim.action, "release");
+  assert.ok(barra(sinal(recolhido, "audioMuteStatusChanged", semFim.signal)).includes("mic"));
+
+  // So o recolhimento do proprio microfone encerra o pedido: o de outro, o de video, o de antes de entrar (sem o
+  // proprio id), a liberacao e os mudos seguem pelo micAskStep.
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", { id: "outro", mediaType: "audio" }, "eu"), false);
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", { id: "eu", mediaType: "video" }, "eu"), false);
+  assert.equal(model.micAskRecalled("moderationParticipantRejected", proprioAudio, null), false);
+  assert.equal(model.micAskRecalled("moderationParticipantApproved", proprioAudio, "eu"), false);
+  assert.equal(model.micAskRecalled("audioMuteStatusChanged", { muted: true }, "eu"), false);
+});
+
 test("a mao, o selo Gravando e o palco: so a mao do proprio; quem modera entra no palco, alunos nunca; o Som conhece todos", () => {
   let estado = model.applyLiveSignal(model.INITIAL_LIVE_SIGNALS, { name: "videoConferenceJoined", ownId: "eu", payload: { id: "eu" } });
   estado = model.toggleHandLocally(estado);
@@ -359,9 +504,10 @@ test("os atalhos R, M e E (nunca escrevendo, nunca com Ctrl/Alt/Cmd), o Modo cin
   assert.equal(model.prefersCinemaMode({ fullscreenEnabled: true, userAgent: "Mozilla/5.0 (Macintosh) Chrome/130" }), false);
   assert.equal(model.prefersCinemaMode({ fullscreenEnabled: false, userAgent: "Mozilla/5.0 (Linux; Android 14) Chrome/130" }), true);
 
-  assert.deepEqual(model.overlayMessages([1, 2, 3, 4, 5]), [3, 4, 5]);
+  // As pilulas do chat sobre o palco com o painel fechado (docs/31 V2-8): as 2 ultimas, tambem no computador.
+  assert.deepEqual(model.overlayMessages([1, 2, 3, 4, 5]), [4, 5]);
   assert.deepEqual(model.overlayMessages([1]), [1]);
-  assert.equal(model.LIVE_ROOM_RULES.overlayMessages, 3);
+  assert.equal(model.LIVE_ROOM_RULES.overlayMessages, 2);
 });
 
 test("as frases da barra (LIVE_ROOM_COPY aponta para WEBINAR_COPY.aoVivo) passam pela PROIBIDAS_WEBINARIO e nao citam o motor de video", () => {
@@ -528,8 +674,8 @@ test("a camera: o aceite vai no proximo sinal da camera mesmo depois do prazo; o
   assert.deepEqual(model.consentForVideoSignal(true, "errorOccurred", { error: { name: "gum.permission_denied" } }), { consented: false, pending: false }, "a permissao negada encerra o aceite");
   assert.deepEqual(model.consentForVideoSignal(true, "errorOccurred", { error: { name: "conference.connectionError" } }), { consented: false, pending: true });
   assert.equal(model.cameraAnswerDelayMs("prompt"), 30_000, "com o pedido do navegador aberto, 30 s");
-  assert.equal(model.cameraAnswerDelayMs("granted"), 5_000);
-  assert.equal(model.cameraAnswerDelayMs(null), 5_000);
+  assert.equal(model.cameraAnswerDelayMs("granted"), 10_000, "a camera tem 10 s para abrir");
+  assert.equal(model.cameraAnswerDelayMs(null), 10_000);
 });
 
 test("No palco: quem ja moderava quando o aluno entrou vem do getRoomsInfo (o participantJoined nao traz o papel); o proprio aluno e alunos ficam fora", () => {

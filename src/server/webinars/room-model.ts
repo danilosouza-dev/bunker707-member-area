@@ -3,7 +3,7 @@
 // presenca (M1, M2) e o endereco do player da Bunny. Sem "server-only", imports relativos: tests/webinarios-*.test.mjs
 // carregam direto pelo Node. Nada aqui le o banco nem o relogio de verdade: tudo recebe `nowMs`.
 
-import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type DisplayNameMode, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
+import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type DisplayNameMode, type SessionKind, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
 import { ROOM_OPENS_MINUTES_BEFORE } from "./room-opens";
 
 /** A sala abre para o aluno este tanto antes da hora marcada (num modulo folha, para o contador do just-in-time). */
@@ -196,9 +196,11 @@ export function displayNameFor(input: { anonymousNumber: number; fullName: strin
 
 /**
  * O que o aluno recebe de uma mensagem (docs/30 §5.1): `scripted` vai com o papel da persona (ja gravado em
- * `role`), a origem fica so no banco; `ai` continua `ai` (selo Assistente); as pendentes so do proprio autor.
+ * `role`), a origem fica so no banco; `ai` continua `ai` (selo Assistente); as pendentes so do proprio autor. A hora
+ * em que foi gravada (`sentAt`) so na sessao `live` (docs/31 V2-9): na gravada e no Replay, a linha mestre diria a
+ * data da live de origem.
  */
-export function toStudentMessage(message: ChatMessage, viewerUserId: string | null, offsetMs: number = message.offsetMs): StudentChatMessage {
+export function toStudentMessage(message: ChatMessage, viewerUserId: string | null, sessionKind: SessionKind, offsetMs: number = message.offsetMs): StudentChatMessage {
   return {
     body: message.body,
     displayName: message.displayName,
@@ -209,7 +211,8 @@ export function toStudentMessage(message: ChatMessage, viewerUserId: string | nu
     pending: !message.approved,
     pinned: message.pinnedAt != null,
     replyToId: message.replyToId,
-    role: message.role
+    role: message.role,
+    sentAt: sessionKind === "live" ? message.createdAt : null
   };
 }
 
