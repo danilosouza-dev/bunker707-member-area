@@ -342,9 +342,12 @@ test("as linhas da sessao: as colunas da fase 3 com padroes seguros quando o dub
     meetConfigured: true,
     practice: false,
     recording: true,
+    selfUnmute: false,
     startedAt: iso(NOW),
     status: "live"
   });
+  // O microfone sozinho vem do room_settings (docs/31 caminho A); sem a chave, desligado.
+  assert.equal(live.liveRoomInfoOf({ ...nova, startedAt: iso(NOW), status: "live" }, true, { practiceSession: false, selfUnmute: true, waitingRoom: false }).selfUnmute, true);
   // A sala de espera e a Sessao de pratica que o aluno le (a mesma regra do console, desiredLobby).
   const pratica = live.liveRoomInfoOf({ ...nova, roomLocked: false, startedAt: null, status: "waiting" }, true, { practiceSession: true, waitingRoom: false });
   assert.deepEqual([pratica.lobby, pratica.practice], [true, true]);

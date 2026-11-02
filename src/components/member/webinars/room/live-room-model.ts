@@ -515,6 +515,30 @@ export function cameraClick(input: { allowStudentCamera: boolean; consented: boo
   return input.consented ? "toggle" : "ask";
 }
 
+/**
+ * O microfone sozinho lotado (docs/31 caminho A): com a politica ligada, sem a liberacao do apresentador e com o
+ * microfone desligado, a moderacao de audio ligada (o vigia do console ligou no teto) ou ainda nao lida (o seguro: sem
+ * saber, nao abre). Com o microfone ligado nunca bloqueia: o aluno sempre pode se calar (docs/31 V2-A16).
+ */
+export function micBlocked(input: { audioModeration: boolean | null; audioOn: boolean; micAllowed: boolean; selfUnmute: boolean }): boolean {
+  return input.selfUnmute && !input.micAllowed && !input.audioOn && input.audioModeration !== false;
+}
+
+/**
+ * O clique em Microfone, no molde da Câmera: ligado ou liberado pelo apresentador (o Falar ja aceito), alterna;
+ * lotado (micBlocked), `blocked` (o aviso, sem abrir); o PRIMEIRO abrir do microfone sozinho passa pelo aviso de
+ * gravacao (`ask`); depois, direto.
+ */
+export function micClick(input: { audioModeration: boolean | null; audioOn: boolean; consented: boolean; micAllowed: boolean; selfUnmute: boolean }): "ask" | "blocked" | "toggle" {
+  if (input.audioOn || input.micAllowed) {
+    return "toggle";
+  }
+  if (micBlocked(input)) {
+    return "blocked";
+  }
+  return input.consented ? "toggle" : "ask";
+}
+
 function field(payload: unknown, key: string): unknown {
   return payload && typeof payload === "object" ? (payload as Record<string, unknown>)[key] : undefined;
 }
@@ -584,6 +608,7 @@ export type LiveNotice =
   | "hand_lowered"
   | "mic_denied"
   | "mic_failed"
+  | "mic_full"
   | "mic_no_signal"
   | "mic_released"
   | "mic_silenced"
@@ -593,6 +618,12 @@ export type LiveNotice =
 export type LiveParticipants = { moderators: string[]; names: Record<string, string> };
 
 export type LiveSignalState = {
+  /**
+   * A moderacao de audio do motor (o moderationStatusChanged de audio e, na entrada, o isModerationOn): ligada, so quem
+   * foi aprovado abre o microfone. Nulo: ainda nao lida. Nao zera na entrada (o sinal pode chegar antes dela); um
+   * iframe novo volta a nulo (signalsForNewFrame).
+   */
+  audioModeration: boolean | null;
   audioOn: boolean;
   /** O proximo audioMuteStatusChanged foi pedido por nos (Falar, Microfone ou a troca do microfone): nao e a equipe silenciando. */
   expectAudio: boolean;
@@ -624,6 +655,7 @@ export type LiveSignalState = {
 };
 
 export const INITIAL_LIVE_SIGNALS: LiveSignalState = {
+  audioModeration: null,
   audioOn: false,
   expectAudio: false,
   expectVideo: false,
@@ -672,7 +704,7 @@ export function mediaErrorNotice(media: "camera" | "mic", payload: unknown): Liv
  * proprio aluno, fica valendo. O mesmo iframe que volta sozinho depois de uma queda nao passa por aqui.
  */
 export function signalsForNewFrame(state: LiveSignalState): LiveSignalState {
-  return { ...state, filmstripVisible: true, onStageId: null, viewShown: "stage" };
+  return { ...state, audioModeration: null, filmstripVisible: true, onStageId: null, viewShown: "stage" };
 }
 
 /**
@@ -746,6 +778,7 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       // motor (o Palco com a coluna) volta so com um iframe novo (signalsForNewFrame).
       return {
         ...INITIAL_LIVE_SIGNALS,
+        audioModeration: state.audioModeration,
         filmstripVisible: state.filmstripVisible,
         onStageId: state.onStageId,
         participants: state.participants,
@@ -757,7 +790,7 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
       // liberacao do microfone era do participante que saiu (quem volta entra com outro id, mudo). A visao e a coluna
       // ficam: o mesmo iframe pode voltar sozinho, com o motor como estava (fora do iframe, a sala nao conta a coluna:
       // stageColumnShown).
-      return { ...INITIAL_LIVE_SIGNALS, filmstripVisible: state.filmstripVisible, recording: state.recording, viewShown: state.viewShown };
+      return { ...INITIAL_LIVE_SIGNALS, audioModeration: state.audioModeration, filmstripVisible: state.filmstripVisible, recording: state.recording, viewShown: state.viewShown };
     case "largeVideoChanged": {
       // A sala troca o payload vazio do motor pelo id lido do IFrame API (onStageParticipantOf).
       const onStage = field(payload, "id");
@@ -786,7 +819,21 @@ export function applyLiveSignal(state: LiveSignalState, input: { name: string; o
     case "raiseHandUpdated":
       return ownId !== null && id === ownId ? { ...state, handRaised: Boolean(field(payload, "handRaised")) } : state;
     case "moderationParticipantApproved":
-      return isOwnMicApproval(payload, ownId) ? { ...state, micPrompt: true, notice: "mic_released" } : state;
+      // Com o microfone ja ligado (o microfone sozinho, ou o askToUnmute de novo de quem esta no palco quando a moderacao
+      // religa), a aprovacao so vale: o Falar nao abre de novo.
+      if (!isOwnMicApproval(payload, ownId)) {
+        return state;
+      }
+      return state.audioOn ? { ...state, micAllowed: true } : { ...state, micPrompt: true, notice: "mic_released" };
+    case "moderationStatusChanged": {
+      // A moderacao de audio ligada zera as aprovacoes no motor (so os moderadores ficam): a liberacao de antes nao vale
+      // mais, e o Microfone so volta com uma aprovacao nova. A de video nao mexe no microfone.
+      const enabled = field(payload, "enabled");
+      if (field(payload, "mediaType") !== "audio" || typeof enabled !== "boolean") {
+        return state;
+      }
+      return { ...state, audioModeration: enabled, micAllowed: enabled ? false : state.micAllowed };
+    }
     case "moderationParticipantRejected":
       // A equipe recolheu o microfone deste aluno (o "Tirar do palco" ou o Silenciar do console): o Microfone sai da
       // barra e o Falar / Agora não fecha, mesmo com o microfone ja desligado, quando nenhum audioMuteStatusChanged chega
@@ -1268,16 +1315,17 @@ export function liveBarShown(input: { blocked: boolean; screen: LiveScreen }): b
  * a visao a levaria a todos), Configurações e o balao do chat. O Som vem antes da Tela cheia. A tela decide o que some
  * pela largura (o Sair, a Tela cheia e a Visão do vídeo saem da barra abaixo de lg). O Microfone tambem fica enquanto
  * o microfone esta ligado (`audioOn`), mesmo recolhido pela equipe sem o mudo (docs/31 V2-A16): o aluno sempre tem
- * como se calar; desligado, ele sai.
+ * como se calar; desligado, ele sai. Com o microfone sozinho (`selfUnmute`, docs/31 caminho A), o Microfone fica sempre,
+ * sem o Liberar (lotado, desligado com o motivo: micBlocked).
  */
-export function liveBarItems(input: { allowStudentCamera: boolean | null; audioOn: boolean; micAllowed: boolean; showMedia: boolean }): RoomBarItems {
+export function liveBarItems(input: { allowStudentCamera: boolean | null; audioOn: boolean; micAllowed: boolean; selfUnmute?: boolean; showMedia: boolean }): RoomBarItems {
   const center: RoomBarItem[] = ["react"];
   if (input.showMedia) {
     center.push("hand");
     if (input.allowStudentCamera === true) {
       center.push("camera");
     }
-    if (input.micAllowed || input.audioOn) {
+    if (input.micAllowed || input.audioOn || input.selfUnmute === true) {
       center.push("mic");
     }
   }
@@ -1380,6 +1428,8 @@ export function liveNoticePhrase(notice: LiveNotice | null): string | null {
       return WEBINAR_COPY.aoVivo.cameraSemResposta;
     case "mic_unanswered":
       return WEBINAR_COPY.aoVivo.microfoneSemResposta;
+    case "mic_full":
+      return WEBINAR_COPY.aoVivo.microfoneLotado;
     case "hand_lowered":
       return WEBINAR_COPY.salaV2.avisos.maoAbaixada;
     case "mic_no_signal":

@@ -1123,3 +1123,26 @@ test("liveBarItems (V2-A16): o Microfone fica na barra enquanto o microfone esta
   assert.equal(model.liveBarItems({ allowStudentCamera: false, micAllowed: false, showMedia: true }).center.includes("mic"), false);
   assert.equal(model.liveBarItems({ allowStudentCamera: false, audioOn: true, micAllowed: false, showMedia: false }).center.includes("mic"), false, "quem apresenta usa a barra do iframe");
 });
+
+test("microfone sozinho (docs/31 caminho A): o Microfone aparece sem o Liberar; lotado (micBlocked) com a moderacao ligada ou ainda nao lida, livre so com ela desligada, e nunca com o microfone ligado; micClick nos tres casos", () => {
+  const centro = (input) => model.liveBarItems({ allowStudentCamera: false, audioOn: false, micAllowed: false, showMedia: true, ...input }).center;
+  assert.deepEqual(centro({ selfUnmute: true }), ["react", "hand", "mic", "sound", "fullscreen"], "com a politica, sem micAllowed");
+  assert.ok(!centro({ selfUnmute: false }).includes("mic"), "sem a politica, a regra de antes");
+  assert.ok(!centro({ selfUnmute: true, showMedia: false }).includes("mic"), "quem apresenta usa a barra do iframe");
+
+  const base = { audioModeration: null, audioOn: false, micAllowed: false, selfUnmute: true };
+  assert.equal(model.micBlocked(base), true, "moderacao desconhecida: bloqueado (o seguro)");
+  assert.equal(model.micBlocked({ ...base, audioModeration: false }), false, "moderacao desligada: livre");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true }), true, "moderacao ligada: lotado");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true, audioOn: true }), false, "com o microfone ligado nunca bloqueia (V2-A16)");
+  assert.equal(model.micBlocked({ ...base, audioModeration: true, micAllowed: true }), false, "liberado pelo apresentador");
+  assert.equal(model.micBlocked({ ...base, selfUnmute: false }), false, "sem a politica nao ha lotado");
+
+  assert.equal(model.micClick({ ...base, audioModeration: false, consented: false }), "ask", "o primeiro abrir passa pelo aviso de gravacao");
+  assert.equal(model.micClick({ ...base, audioModeration: false, consented: true }), "toggle", "depois do aviso, direto");
+  assert.equal(model.micClick({ ...base, audioModeration: true, consented: true }), "blocked", "lotado: so o aviso");
+  assert.equal(model.micClick({ ...base, audioModeration: null, consented: false }), "blocked", "sem saber, nao abre nem pergunta");
+  assert.equal(model.micClick({ ...base, audioModeration: true, audioOn: true, consented: true }), "toggle", "ligado, o aluno sempre se cala");
+  assert.equal(model.micClick({ ...base, micAllowed: true, consented: false, selfUnmute: false }), "toggle", "o Liberar de sempre (o Falar ja aceito)");
+  assert.equal(model.liveNoticePhrase("mic_full"), WEBINAR_COPY.aoVivo.microfoneLotado);
+});

@@ -127,14 +127,17 @@ export function LiveCameraDialog({ onCancel, onConfirm }: { onCancel: () => void
   );
 }
 
-/** O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. */
-export function LiveMicDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+/**
+ * O apresentador liberou o microfone (docs/30 §1.3 e §8.5): o aviso de gravacao; so Falar liga. No primeiro abrir do
+ * microfone sozinho (docs/31 caminho A), o mesmo aviso com o titulo da politica (`title`), sem "O apresentador liberou".
+ */
+export function LiveMicDialog({ onCancel, onConfirm, title }: { onCancel: () => void; onConfirm: () => void; title?: string }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
     <ConsentDialog
       cancelLabel={copy.agoraNao}
       confirmLabel={copy.falar}
-      heading={copy.microfoneLiberado}
+      heading={title ?? copy.microfoneLiberado}
       initialFocus="cancel"
       onCancel={onCancel}
       onConfirm={onConfirm}

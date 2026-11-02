@@ -1109,7 +1109,7 @@ test("GET session da live: o bloco live (sem o nome da sala, o token nem a situa
   const resposta = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${LIVE}`), contexto()));
   assert.equal(resposta.status, 200, JSON.stringify(resposta.body));
   const { data } = resposta.body;
-  assert.deepEqual(data.live, { lobby: false, locked: false, meetConfigured: true, practice: false, recording: true, startedAt: sessaoLive(db).started_at, status: "live" });
+  assert.deepEqual(data.live, { lobby: false, locked: false, meetConfigured: true, practice: false, recording: true, selfUnmute: false, startedAt: sessaoLive(db).started_at, status: "live" });
   assert.deepEqual(data.session.join, { ok: true });
   assert.deepEqual(data.me.ban, { banned: false, kicked: false, muted: false, mutedUntil: null });
   assert.equal(data.presentNow, 1, "o balde 3 e o de agora pelo inicio (pela ancora seria o 1)");
@@ -1150,4 +1150,8 @@ test("GET session da live: o bloco live (sem o nome da sala, o token nem a situa
   assert.deepEqual([aberta.live.lobby, aberta.live.practice], [false, false]);
   sessaoLive(agendada).room_locked = true;
   assert.equal((await ler()).live.lobby, true, "a sala trancada liga a sala de espera para quem chega");
+  // O microfone sozinho (docs/31 caminho A) vem do room_settings do webinario, relido a cada leitura da sessao.
+  assert.equal((await ler()).live.selfUnmute, false, "sem a chave, desligado");
+  agendada.tables.webinars[0].room_settings.selfUnmute = true;
+  assert.equal((await ler()).live.selfUnmute, true);
 });

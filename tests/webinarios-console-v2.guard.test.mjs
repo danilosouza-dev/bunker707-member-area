@@ -324,7 +324,9 @@ test("nenhum texto promete barrar um cliente adulterado: o vigia so para o clien
 test("os sinais que so o console ouve ficam fora da lista da sala do aluno (cada sinal da lista passa pela sala em toda pagina de aluno)", async () => {
   const embed = await import("../src/lib/jitsi-room-config.ts");
   // Os cinco, inclusive os da tela: um sinal nas duas listas passaria duas vezes pelo console (a juncao abaixo).
-  assert.deepEqual([...embed.CONSOLE_EXTRA_EVENTS].sort(), ["contentSharingParticipantsChanged", "moderationStatusChanged", "participantMenuButtonClick", "participantMuted", "screenSharingStatusChanged"]);
+  // O moderationStatusChanged passou para a lista da sala (o microfone sozinho do aluno, docs/31 caminho A).
+  assert.deepEqual([...embed.CONSOLE_EXTRA_EVENTS].sort(), ["contentSharingParticipantsChanged", "participantMenuButtonClick", "participantMuted", "screenSharingStatusChanged"]);
+  assert.ok(embed.JITSI_LISTENED_EVENTS.includes("moderationStatusChanged"), "a sala do aluno ouve a moderacao");
   for (const sinal of embed.CONSOLE_EXTRA_EVENTS) {
     assert.ok(!embed.JITSI_LISTENED_EVENTS.includes(sinal), `${sinal} fora da sala do aluno`);
   }

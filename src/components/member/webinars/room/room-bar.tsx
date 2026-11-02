@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle, LogOut, MessageCircle } from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
+import { useId, type ComponentType, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { ConsoleBarItem, RoomBarItem } from "./room-layout-model";
@@ -81,6 +81,11 @@ export type RoomBarButtonProps = {
   /** O painel que o botao abre (Reagir, Configurações) ou controla (o balao). */
   controls?: string;
   disabled?: boolean;
+  /**
+   * Desligado com motivo (o Microfone lotado do microfone sozinho): aria-disabled no lugar do disabled, focavel, com o
+   * motivo num sr-only ligado pelo aria-describedby e no title; o clique continua (quem chama so avisa).
+   */
+  disabledReason?: string;
   /** Os botoes que abrem um painel por cima (Reagir, Configurações): aria-expanded no lugar do aria-pressed. */
   expanded?: boolean;
   /** O primeiro foco da sala (data-room-first-focus): o balao com o painel do chat fechado. */
@@ -99,16 +104,20 @@ export type RoomBarButtonProps = {
 export function RoomBarButton(props: RoomBarButtonProps) {
   // Ocupado: o circulo girando no lugar do icone (o aria-busy sozinho nao aparece na tela nem e lido em botao).
   const Icon = props.busy ? LoaderCircle : props.icon;
-  return (
+  const reasonId = useId();
+  const reason = props.disabledReason;
+  const button = (
     <button
       aria-busy={props.busy || undefined}
       aria-controls={props.controls}
+      aria-describedby={reason ? reasonId : undefined}
+      aria-disabled={reason ? true : undefined}
       aria-expanded={props.expanded}
       aria-keyshortcuts={props.shortcut}
       aria-label={props.label}
       aria-pressed={props.expanded === undefined ? props.active : undefined}
       className={cn(
-        "relative grid size-11 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-40 motion-reduce:transition-none lg:size-12",
+        "relative grid size-11 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-40 aria-disabled:opacity-40 motion-reduce:transition-none lg:size-12",
         ROOM_FOCUS,
         props.active ? "bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85" : "bg-room-control text-room-fg-strong hover:bg-room-control-hover",
         props.className
@@ -117,12 +126,23 @@ export function RoomBarButton(props: RoomBarButtonProps) {
       data-room-first-focus={props.firstFocus ? "" : undefined}
       disabled={props.disabled}
       onClick={props.onClick}
-      title={props.title ?? props.label}
+      title={reason ?? props.title ?? props.label}
       type="button"
     >
       <Icon aria-hidden="true" className={cn("size-5 lg:size-[22px]", props.busy ? "animate-spin motion-reduce:animate-none" : undefined)} />
       {props.children}
     </button>
+  );
+  if (!reason) {
+    return button;
+  }
+  return (
+    <>
+      {button}
+      <span className="sr-only" id={reasonId}>
+        {reason}
+      </span>
+    </>
   );
 }
 

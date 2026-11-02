@@ -180,7 +180,7 @@ test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so lig
   // nao liga o microfone com o Enter seguinte); a camera, que o proprio clique abriu, em Ligar câmera. O foco volta a
   // quem o tinha ao fechar.
   const noticesCode = semComentarios(ler("src/components/member/webinars/room/live-notices.tsx"));
-  assert.match(noticesCode, /confirmLabel=\{copy\.falar\}\s*heading=\{copy\.microfoneLiberado\}\s*initialFocus="cancel"/);
+  assert.match(noticesCode, /confirmLabel=\{copy\.falar\}\s*heading=\{title \?\? copy\.microfoneLiberado\}\s*initialFocus="cancel"/);
   assert.match(noticesCode, /confirmLabel=\{copy\.ligarCamera\}\s*initialFocus="confirm"/);
   assert.match(noticesCode, /const previous = document\.activeElement;[\s\S]*?return \(\) => \{\s*focusBackTarget\(previous, document\)\?\.focus\(\);/);
   const campo = { disabled: false, focus() {} };
@@ -197,6 +197,34 @@ test("o aviso de gravacao da camera vem antes do toggleVideo; o microfone so lig
   assert.match(mic, />Falar</);
   assert.match(mic, />Agora não</);
   assert.match(mic, /aria-modal="true"/);
+
+  // O primeiro abrir do microfone sozinho (docs/31 caminho A): o mesmo aviso de gravacao, com o titulo da politica.
+  const sozinho = render(notices.LiveMicDialog, { onCancel: noop, onConfirm: noop, title: WEBINAR_COPY.aoVivo.microfoneSozinhoTitulo });
+  assert.ok(sozinho.includes(WEBINAR_COPY.aoVivo.avisoMicrofone), "o texto de gravacao e o mesmo");
+  assert.ok(sozinho.includes(WEBINAR_COPY.aoVivo.microfoneSozinhoTitulo));
+  assert.doesNotMatch(sozinho, /O apresentador liberou/);
+  assert.match(sozinho, />Falar</);
+});
+
+test("microfone sozinho (docs/31 caminho A): o Microfone na barra sem o Liberar; lotado, desligado com motivo (aria-disabled, focavel, sem disabled) e o motivo no sr-only do aria-describedby", () => {
+  const botao = (html) => html.match(/<button[^>]*data-room-bar-item="mic"[^>]*>/)?.[0] ?? "";
+  const livre = barra({ selfUnmute: true });
+  assert.ok(botao(livre), "o Microfone aparece sem micAllowed");
+  assert.doesNotMatch(botao(livre), /aria-disabled="/);
+  assert.doesNotMatch(botao(livre), /\sdisabled=""/);
+
+  const lotado = barra({ micBlocked: true, selfUnmute: true });
+  const tag = botao(lotado);
+  assert.match(tag, /aria-disabled="true"/);
+  assert.doesNotMatch(tag, /\sdisabled=""/, "focavel: o Tab chega nele");
+  const descrito = tag.match(/aria-describedby="([^"]+)"/)?.[1];
+  assert.ok(descrito, "o botao aponta para o motivo");
+  const motivo = lotado.match(new RegExp(`<span[^>]*id="${descrito.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>([^<]*)</span>`));
+  assert.ok(motivo, "o sr-only existe");
+  assert.match(motivo[0], /class="sr-only"/);
+  assert.equal(motivo[1], WEBINAR_COPY.aoVivo.microfoneLotado);
+  assert.equal(WEBINAR_COPY.aoVivo.microfoneLotado, "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.");
+  assert.ok(!barra({ selfUnmute: false }).includes('data-room-bar-item="mic"'), "sem a politica, so depois do Liberar");
 });
 
 test("a sala e um dialogo aria-modal com o foco preso e Esc com confirmacao; o chat em role=log com aria-live; os sinais vao pelo sendBeacon no pagehide", () => {

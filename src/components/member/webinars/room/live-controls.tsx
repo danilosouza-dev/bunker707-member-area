@@ -54,6 +54,8 @@ export type LiveControlsProps = {
   /** Dentro da sala (a mao e a camera so funcionam com o iframe no ar). */
   joined: boolean;
   micAllowed: boolean;
+  /** O microfone sozinho lotado (micBlocked): o Microfone fica desligado com o motivo, focavel; o clique so avisa. */
+  micBlocked?: boolean;
   /** O toque em Microfone esperando a troca de microfone acabar (`audioOn` continua com o estado real). */
   micWaiting?: boolean;
   onCamera: () => void;
@@ -81,6 +83,8 @@ export type LiveControlsProps = {
   /** "Ver como" ou a sala sem escrita (encerrada, antes de abrir): as reacoes ficam desligadas. */
   reactionsDisabled: boolean;
   reactionsOpen: boolean;
+  /** O microfone sozinho (docs/31 caminho A): o Microfone fica na barra sem o Liberar. */
+  selfUnmute?: boolean;
   /** O painel Configurações (live-settings.tsx), desenhado pela sala; aparece aberto acima da barra. */
   settings?: ReactNode;
   settingsOpen: boolean;
@@ -124,7 +128,7 @@ export function LiveStageFullscreen(props: Pick<LiveControlsProps, "cinemaMode" 
 
 export function LiveControls(props: LiveControlsProps) {
   const copy = WEBINAR_COPY.aoVivo;
-  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, showMedia: props.showMedia });
+  const items = liveBarItems({ allowStudentCamera: props.allowStudentCamera, audioOn: props.audioOn, micAllowed: props.micAllowed, selfUnmute: props.selfUnmute, showMedia: props.showMedia });
 
   function control(item: RoomBarItem) {
     switch (item) {
@@ -160,7 +164,19 @@ export function LiveControls(props: LiveControlsProps) {
           />
         );
       case "mic":
-        return <RoomBarButton active={props.audioOn} busy={props.micWaiting} disabled={!props.joined} icon={props.audioOn ? Mic : MicOff} item={item} key={item} label={copy.microfone} onClick={props.onMic} />;
+        return (
+          <RoomBarButton
+            active={props.audioOn}
+            busy={props.micWaiting}
+            disabled={!props.joined}
+            disabledReason={props.micBlocked ? copy.microfoneLotado : undefined}
+            icon={props.audioOn ? Mic : MicOff}
+            item={item}
+            key={item}
+            label={copy.microfone}
+            onClick={props.onMic}
+          />
+        );
       case "sound":
         return <RoomBarButton active={props.soundOn} icon={props.soundOn ? Volume2 : VolumeX} item={item} key={item} label={copy.som} onClick={props.onSound} />;
       case "fullscreen":

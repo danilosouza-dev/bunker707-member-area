@@ -322,6 +322,10 @@ export const WEBINAR_COPY = {
     /** O pedido do microfone do navegador ficou sem resposta (fechado no X, ou ainda aberto) no fim do prazo. */
     microfoneSemResposta: "O microfone não foi liberado no navegador. Toque em Microfone e escolha Permitir.",
     microfoneSilenciado: "A equipe silenciou o seu microfone.",
+    /** O microfone sozinho (docs/31 caminho A): o titulo do aviso de gravacao no primeiro abrir. */
+    microfoneSozinhoTitulo: "Esta live deixa você abrir o microfone.",
+    /** O microfone sozinho lotado: a mesma frase no motivo do botao, na dica e no aviso. */
+    microfoneLotado: "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.",
     maoLevantada: "Mão levantada",
     modoCinema: "Modo cinema",
     naoConseguimosVoltar: "Não conseguimos voltar.",

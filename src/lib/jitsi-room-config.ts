@@ -353,7 +353,11 @@ export const JITSI_LISTENED_EVENTS = [
   // Um aviso que o motor teria mostrado (o configOverwrite manda notifications: [], e o motor avisa mesmo assim): so as
   // chaves da lista fechada viram o aviso da pagina (engineNoticeOf, room-snackbar-model.ts), nunca o texto do motor.
   // Dispara pouco, e nao vai ao servidor (toRoomEvent devolve nulo). Os sinais so do console ficam em CONSOLE_EXTRA_EVENTS.
-  "notificationTriggered"
+  "notificationTriggered",
+  // A moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }): o microfone sozinho (docs/31 caminho
+  // A) so abre com a de audio desligada, e o vigia do console a liga quando lota. Dispara pouco (so quando a equipe ou o
+  // vigia muda a moderacao) e nao vai ao servidor (toRoomEvent devolve nulo).
+  "moderationStatusChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
 
@@ -365,14 +369,12 @@ export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];
  *   (API.js:1742-1747 da tag stable-11248), para o vigia da tela do console (docs/31 §5.4).
  * - screenSharingStatusChanged: a propria tela de quem apresenta ({ on, details }), o estado do Compartilhar tela da
  *   barra (docs/31 V2-14); o seletor de tela cancelado nao avisa nada.
- * - moderationStatusChanged: a moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }), o "Câmeras
- *   livres" pela de video, tambem quando outro console a muda.
  * - participantMuted: o mudo de cada faixa remota ({ id, isMuted, mediaType }), que sai uma vez por faixa na entrada e
  *   a cada troca (a lista de Pessoas do console); numa sala cheia, sao muitos, por isso so o console registra.
  * - participantMenuButtonClick: o ⋮ da miniatura avisou um item em vez de faze-lo ({ key, participantId,
  *   preventExecution }, CONSOLE_PARTICIPANT_MENU_BUTTONS).
  */
-export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "moderationStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
+export const CONSOLE_EXTRA_EVENTS = ["contentSharingParticipantsChanged", "screenSharingStatusChanged", "participantMuted", "participantMenuButtonClick"] as const;
 export type ConsoleListenedEvent = JitsiListenedEvent | (typeof CONSOLE_EXTRA_EVENTS)[number];
 
 /**
@@ -452,8 +454,10 @@ export function toRoomEvent(name: string, payload: unknown, input: { extra?: { c
     case "filmstripDisplayChanged":
     case "largeVideoChanged":
     case "notificationTriggered":
+    case "moderationStatusChanged":
       // So a tela usa (a lista do painel Configurações, o aviso na barra, o microfone recolhido pela equipe, a visao do
-      // video, a coluna de miniaturas, quem esta no video grande e o aviso do motor): o servidor nao aceita estes nomes.
+      // video, a coluna de miniaturas, quem esta no video grande, o aviso do motor e a moderacao de audio do microfone
+      // sozinho): o servidor nao aceita estes nomes.
       return null;
     default:
       return null;

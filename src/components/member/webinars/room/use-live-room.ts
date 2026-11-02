@@ -271,6 +271,11 @@ export type UseLiveRoomInput = {
   nonce: string | null;
   /** Um erro de camera encerrou o aceite pendente do aviso de gravacao: o proximo clique em Câmera abre o aviso de novo. */
   onCameraConsentEnded: () => void;
+  /**
+   * A moderacao de audio mudou (o moderationStatusChanged de audio): a sala rele a sessao, porque o microfone sozinho
+   * (docs/31 caminho A) pode ter mudado junto no console.
+   */
+  onAudioModerationChanged?: () => void;
   /** O join-token recusou (409 / 503 / 404) ou um lote de sinais voltou 409 / 404: a sala troca de tela. */
   onRefused: (failure: Exclude<LiveJoinFailure, "error">) => void;
   sessionId: string;
@@ -352,6 +357,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   const lobbyRef = useRef(lobby);
   const canSwitchRef = useRef(input.canSwitchDevice);
   const consentEndedRef = useRef(input.onCameraConsentEnded);
+  const audioModerationRef = useRef(input.onAudioModerationChanged);
   /** As trocas de camera em andamento (o painel Configurações) e o numero da ultima. */
   const switchesRef = useRef<Record<DeviceSwitchKind, DeviceSwitch | null>>({ audioInput: null, videoInput: null });
   const switchSeqRef = useRef(0);
@@ -387,6 +393,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     lobbyRef.current = lobby;
     canSwitchRef.current = input.canSwitchDevice;
     consentEndedRef.current = input.onCameraConsentEnded;
+    audioModerationRef.current = input.onAudioModerationChanged;
     refusedRef.current = input.onRefused;
     signalsRef.current = signals;
     joinedRef.current = entry === "joined";
@@ -616,6 +623,18 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         if (viewCommand) {
           commandRef.current(...viewCommand);
         }
+        // A moderacao de audio que o motor ja tem (o microfone sozinho so abre com ela desligada), como o console le na
+        // entrada; a resposta so vale deste iframe e desta entrada.
+        void Promise.resolve(frame?.isModerationOn?.("audio"))
+          .then((on) => {
+            if (typeof on === "boolean" && !leavingRef.current && joinedApiRef.current === frame) {
+              handleSignal("moderationStatusChanged", { enabled: on, mediaType: "audio" });
+            }
+          })
+          .catch(() => undefined);
+      }
+      if (name === "moderationStatusChanged" && field(payload, "mediaType") === "audio") {
+        audioModerationRef.current?.();
       }
       if (name === "filmstripDisplayChanged") {
         // O motor respondeu (ou a equipe mudou a coluna de todos): a conta da coluna pode mandar o proximo.

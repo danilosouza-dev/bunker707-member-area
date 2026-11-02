@@ -30,6 +30,8 @@ import {
   liveShortcutOf,
   localBanStillValid,
   mergeBan,
+  micBlocked,
+  micClick,
   micFocusLost,
   overlayMessages,
   pendingTogglePhrase,
@@ -235,7 +237,7 @@ function readCinemaPreferred() {
 
 /** A resposta sem o bloco `live` (um servidor antigo): o ambiente sem a sala ao vivo, nada quebra. */
 function liveInfoOf(payload: StudentRoomPayload): LiveRoomInfo {
-  return payload.live ?? { lobby: false, locked: false, meetConfigured: false, practice: false, recording: false, startedAt: payload.session.startedAt, status: payload.session.status };
+  return payload.live ?? { lobby: false, locked: false, meetConfigured: false, practice: false, recording: false, selfUnmute: false, startedAt: payload.session.startedAt, status: payload.session.status };
 }
 
 export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readOnly, staff, webinarHref }: LiveWebinarRoomProps) {
@@ -270,6 +272,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [cameraAsk, setCameraAsk] = useState(false);
   const [cameraConsented, setCameraConsented] = useState(false);
+  // O microfone sozinho (docs/31 caminho A): o primeiro abrir passa pelo aviso de gravacao; o aceite fica na pagina.
+  const [micAsk, setMicAsk] = useState(false);
+  const [micConsented, setMicConsented] = useState(false);
   const [fullscreenOn, setFullscreenOn] = useState(false);
   const [cinemaOn, setCinemaOn] = useState(false);
   const [local, setLocal] = useState<LocalState>(NO_LOCAL);
@@ -335,6 +340,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     lobby: live.lobby === true,
     look,
     nonce,
+    onAudioModerationChanged: refreshSession,
     onCameraConsentEnded,
     onRefused,
     sessionId,
@@ -409,7 +415,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O Microfone saiu da barra com o foco nele (a equipe recolheu ou silenciou o microfone, docs/31 V2-19): o botao sai
   // do DOM e o foco cai no body; a sala o manda de volta para dentro dela, como quando a barra inteira some. Com o
   // microfone ainda ligado ele fica (o recolhimento sem o mudo: o aluno sempre tem como se calar), como em liveBarItems.
-  const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn);
+  const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn || live.selfUnmute === true);
+  // Lotado (o vigia do console ligou a moderacao de audio, ou ela ainda nao foi lida): o Microfone fica, desligado com o motivo.
+  const micInput = {
+    audioModeration: room.signals.audioModeration,
+    audioOn: room.signals.audioOn,
+    consented: micConsented,
+    micAllowed: room.signals.micAllowed,
+    selfUnmute: live.selfUnmute === true
+  };
+  const micFull = micBlocked(micInput);
   const micShownRef = useRef(micShown);
   useLayoutEffect(() => {
     const was = micShownRef.current;
@@ -848,6 +863,29 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }
 
+  function onMic() {
+    const action = micClick(micInput);
+    if (action === "blocked") {
+      room.showNotice("mic_full");
+    } else if (action === "ask") {
+      // O PRIMEIRO abrir do microfone sozinho passa pelo aviso de gravacao; so Falar chega ao iframe.
+      setMicAsk(true);
+    } else {
+      room.toggleMic();
+    }
+  }
+
+  function confirmMic() {
+    setMicAsk(false);
+    setMicConsented(true);
+    // A sala pode ter lotado com o aviso aberto: o aviso de lotado, sem abrir.
+    if (micFull) {
+      room.showNotice("mic_full");
+      return;
+    }
+    room.acceptMic();
+  }
+
   /** Uma escolha do painel: a secao tem de estar pronta agora (o aluno nunca troca antes do consentimento). */
   function chooseDevice(kind: DeviceKind, option: DeviceOption) {
     if (deviceSectionReady(deviceSettings, kind)) {
@@ -999,12 +1037,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               handRaised={room.signals.handRaised}
               joined={joined}
               micAllowed={room.signals.micAllowed}
+              micBlocked={micFull}
               micWaiting={room.pendingToggle.audioInput}
               onCamera={onCamera}
               onFullscreen={toggleFullscreen}
               onHand={room.toggleHand}
               onLeave={askToLeave}
-              onMic={room.toggleMic}
+              onMic={onMic}
               onReact={reactions.react}
               onSound={room.toggleSound}
               onTogglePanel={togglePanel}
@@ -1031,6 +1070,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               }
               settingsOpen={settingsShown}
               showMedia={ourBar}
+              selfUnmute={live.selfUnmute === true}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
               viewMenuOpen={viewMenuShown}
@@ -1143,6 +1183,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
       {cameraAsk ? <LiveCameraDialog onCancel={() => setCameraAsk(false)} onConfirm={confirmCamera} /> : null}
       {room.signals.micPrompt && !blocked ? <LiveMicDialog onCancel={room.declineMic} onConfirm={room.acceptMic} /> : null}
+      {micAsk && !room.signals.micPrompt && !blocked ? <LiveMicDialog onCancel={() => setMicAsk(false)} onConfirm={confirmMic} title={WEBINAR_COPY.aoVivo.microfoneSozinhoTitulo} /> : null}
     </div>
   );
   return <RoomSnackbarProvider value={snackbar}>{page}</RoomSnackbarProvider>;

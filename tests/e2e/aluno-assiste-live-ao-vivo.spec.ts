@@ -1610,3 +1610,55 @@ test("entrar na sala pela faixa Ao vivo agora do Inicio, sem recarregar a pagina
     expect(documento.liberado, "camera, microfone e tela para o Jitsi").toEqual([true, true, true]);
   }
 });
+
+test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfone esta na barra sem o Liberar; o primeiro clique abre o aviso com o titulo da politica e so o Falar manda toggleAudio; lotado (moderationStatusChanged de audio ligado), o Microfone fica focavel com o motivo e o clique so avisa", async ({ page }) => {
+  const db = createLocalAdminClient();
+  const lido = unwrap(await db.from("webinars").select("room_settings").eq("id", LIVE_AO_VIVO_DE_TESTE.id).single(), "Lendo o room_settings da live de teste") as { room_settings: Record<string, unknown> | null };
+  const original = lido.room_settings ?? {};
+  unwrap(await db.from("webinars").update({ room_settings: { ...original, selfUnmute: true } }).eq("id", LIVE_AO_VIVO_DE_TESTE.id), "Ligando o microfone sozinho");
+
+  try {
+    const { dialogo, sala } = await entrarNaSala(page);
+    const botaoMicrofone = dialogo.getByRole("button", { exact: true, name: aoVivo.microfone });
+    await expect(botaoMicrofone).toBeVisible();
+    await expect(botaoMicrofone).not.toHaveAttribute("aria-disabled", "true");
+
+    // O primeiro clique: o aviso de gravacao com o titulo da politica (sem "O apresentador liberou"); nada chega a sala.
+    const antes = (await sala.comandos()).length;
+    await botaoMicrofone.click();
+    const aviso = page.getByTestId("live-mic-dialog");
+    await expect(aviso).toBeVisible();
+    await expect(aviso).toContainText(aoVivo.microfoneSozinhoTitulo);
+    await expect(aviso).toContainText(aoVivo.avisoMicrofone);
+    await expect(aviso).not.toContainText(aoVivo.microfoneLiberado);
+    expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleAudio")).toBe(false);
+    await aviso.getByRole("button", { exact: true, name: aoVivo.falar }).click();
+    await sala.esperarComando("toggleAudio", { depoisDe: antes });
+    await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "true");
+
+    // Depois do aceite, o clique so alterna: fecha sem aviso.
+    const antesDeFechar = (await sala.comandos()).length;
+    await botaoMicrofone.click();
+    await sala.esperarComando("toggleAudio", { depoisDe: antesDeFechar });
+    await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "false");
+    await expect(aviso).toHaveCount(0);
+
+    // Lotado: o vigia do console ligou a moderacao de audio. O Microfone fica, focavel, com o motivo; o clique so avisa.
+    await sala.disparar("moderationStatusChanged", { enabled: true, mediaType: "audio" });
+    await expect(botaoMicrofone).toHaveAttribute("aria-disabled", "true");
+    await expect(botaoMicrofone).not.toHaveAttribute("disabled", /.*/);
+    await expect(botaoMicrofone).toHaveAccessibleDescription(aoVivo.microfoneLotado);
+    await botaoMicrofone.focus();
+    await expect(botaoMicrofone).toBeFocused();
+    const antesDoLotado = (await sala.comandos()).length;
+    await page.keyboard.press("Enter");
+    await expect(dialogo.getByTestId("live-notice")).toHaveText(aoVivo.microfoneLotado);
+    expect((await sala.comandos()).slice(antesDoLotado).some((item) => item.comando === "toggleAudio")).toBe(false);
+
+    // A moderacao desligada de novo (a conta caiu abaixo do teto): o Microfone volta a abrir direto.
+    await sala.disparar("moderationStatusChanged", { enabled: false, mediaType: "audio" });
+    await expect(botaoMicrofone).not.toHaveAttribute("aria-disabled", "true");
+  } finally {
+    unwrap(await createLocalAdminClient().from("webinars").update({ room_settings: original }).eq("id", LIVE_AO_VIVO_DE_TESTE.id), "Voltando o room_settings da live de teste");
+  }
+});
