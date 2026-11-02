@@ -789,8 +789,16 @@ test("o chat com mais de uma tela (Y11): a lista rola ate a primeira mensagem; c
   // A equipe escreve pelo banco (fora da rajada do chat), depois da entrada: a consulta de 5 s traz as novas.
   const agora = Date.now();
   const marca = `rolagem ${agora}`;
+  // A sala ordena o chat pelo momento da live (offset_ms): as mensagens novas levam o momento de agora desde o inicio da
+  // sessao, para entrarem no fim da lista, depois das que os testes anteriores deixaram.
+  const db = createLocalAdminClient();
+  const { started_at: inicioDaLive } = unwrap(
+    await db.from("webinar_sessions").select("started_at").eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId).single(),
+    "Lendo o inicio da live de teste"
+  ) as { started_at: string };
+  const momentoDeAgora = agora - Date.parse(inicioDaLive);
   unwrap(
-    await createLocalAdminClient()
+    await db
       .from("webinar_chat_messages")
       .insert(
         Array.from({ length: 12 }, (_, index) => ({
@@ -801,7 +809,7 @@ test("o chat com mais de uma tela (Y11): a lista rola ate a primeira mensagem; c
           display_name: "Equipe T.",
           kind: "message",
           master: false,
-          offset_ms: 300_000 + index * 1_000,
+          offset_ms: momentoDeAgora + index,
           role: "team",
           session_id: LIVE_AO_VIVO_DE_TESTE.sessaoId,
           source: "team",
@@ -817,11 +825,13 @@ test("o chat com mais de uma tela (Y11): a lista rola ate a primeira mensagem; c
   await expect.poll(() => lista.evaluate((elemento) => elemento.scrollHeight > elemento.clientHeight + 16)).toBe(true);
   await expect(ultima).toBeInViewport();
 
-  // A lista comeca em cima: rolada ate o topo, a primeira aparece (nunca fica fora do alcance).
+  // A lista comeca em cima: rolada ate o topo, o primeiro item aparece (nunca fica fora do alcance). O primeiro item e a
+  // mensagem mais antiga da sessao, que pode ser de um teste anterior; a "mensagem 1" daqui fica antes da 12.
   await lista.evaluate((elemento) => {
     elemento.scrollTop = 0;
   });
-  await expect(primeira).toBeInViewport();
+  await expect(lista.locator(":scope > li").first()).toBeInViewport();
+  await expect(primeira).toBeAttached();
 
   // De volta ao fim, o foco no campo abre o rodape (a lista encolhe) e a ultima continua inteira na vista.
   await lista.evaluate((elemento) => {
