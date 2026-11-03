@@ -871,5 +871,32 @@ Como ligar e desligar: docs/20 §4A.7 (rotina da equipe). Em resumo:
 | Testar live na dev (o C atende a Vercel) | `restaurar` com `PAPEIS=meet` -> testar -> `snapshot` com `CONFIRMAR=apagar PAPEIS=meet` |
 | Lancamento | `restaurar` alguns dias antes (estoque do CX23 intermitente), `deploy-membros`, a virada da secao 8 item 4, e a producao fica ligada |
 
-Estado: ver a secao 10.1, preenchida na execucao.
+Estado: secao 10.1.
+
+### 10.1 Execucao de 03/11/2026 (pelo workflow, da branch `claude/beautiful-edison-a1xgc0`)
+
+| Hora (UTC) | Etapa | Resultado |
+|---|---|---|
+| 19:03 | `status-meet` (da `main`) | um gravador esquecido: `bunker707-jibri-6e0b699c-...` (cpx42), ligado havia 18 h, EUR 2,39. O `jibri-up` de 00:52 (pedido pelo app) parou no passo 5 com `permission denied` no Docker e ninguem rodou o `jibri-down` |
+| 19:05 e 19:07 | `jibri-down`, depois com `FORCAR=1` | o primeiro recusou, como deve (app com o gravador em `preparing`); a maquina nao tinha pasta de gravacoes nem container no ar, entao o segundo apagou sem perder nada. Causa provavel: a conexao SSH reaproveitada foi aberta antes do cloud-init por o `deploy` no grupo `docker` (tarefa separada sugerida ao produtor) |
+| 19:09 | `status-ssh` | A, B e C saudaveis; A em `b2966ea` (a `main`), B em `e7c7854`, C em `1e1505b`; backups de 03:31 (A) e 03:58 (B) |
+| 19:11 | `snapshot` `PAPEIS=meet` | desligou pelo sistema, 2,45 GB, servidor e DNS apagados |
+| 19:15 | `restaurar` `PAPEIS=meet` | volta em cerca de 1,5 min no cx23 de fsn1 (o IPv4 voltou o mesmo, o IPv6 mudou), JVB com o IP novo, smoke verde |
+| 19:18 | `snapshot` `PAPEIS=meet` | segundo snapshot do C, 2,46 GB |
+| 19:22 | `snapshot` `PAPEIS=marketing` | backup novo 19:22:31, 3,13 GB |
+| 19:26 | `snapshot` `PAPEIS=membros` | backup novo 19:26:41, 6,5 GB |
+| 19:30 | `restaurar` `PAPEIS=membros` | volta em cerca de 2 min, banco saudavel, app `sha-b2966ea`, smoke verde (app, Auth, REST, Storage, Realtime, Studio fechado) |
+| 19:34 | `restaurar` `PAPEIS=marketing` | volta em cerca de 1 min, smoke verde (login, `mtc.js`, cron e worker) |
+| 19:42 | `snapshot` `PAPEIS=membros,marketing` | backups novos 19:43 e 19:44, 6,51 GB e 3,13 GB |
+
+**Estado ao fim do dia**: nenhum servidor ligado; 6 snapshots protegidos (dois de cada papel), 24,18 GB, cerca de EUR
+0,35 por mes; Storage Box `bunker707-backups` (hel1) com os backups de 30 dias, cerca de EUR 4,00 por mes. Os tres
+papeis ja fizeram a volta completa uma vez. Para ligar: `restaurar` (ou `PAPEIS=...`), da branch acima ate o merge.
+
+Pendente:
+
+1. PR desta branch para a `dev` e a promocao para a `main` (com o ok do produtor): ate la, `snapshot` e `restaurar`
+   precisam rodar desta branch ou da `dev`.
+2. O gravador que falha no meio do `jibri-up` e fica ligado (tarefa separada, sugerida em 03/11/2026).
+3. Decidir, depois de algumas voltas, se a Storage Box continua (EUR 4,00 por mes) ou vai (os snapshots ficam).
 
