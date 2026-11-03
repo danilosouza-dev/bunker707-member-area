@@ -23,7 +23,12 @@ case "$role" in
     meet) server="$MEET_NAME" ;;
     *) if [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi ;;
 esac
-server_exists "$server" || die "Servidor $server nao existe: rode provision.sh antes (provision-meet para o Jitsi)."
+if ! server_exists "$server"; then
+    # Producao guardada (docs/20 §4A.7): o servidor volta do snapshot, nao do zero.
+    snap_role="$role"; [ "$server" = "$MEMBROS_NAME" ] && snap_role=membros
+    [ -z "$(latest_snapshot "$snap_role")" ] || die "A producao do $role esta guardada em snapshot: rode a etapa restaurar$([ "$snap_role" = meet ] && printf ' (PAPEIS=meet traz so o Jitsi)') e depois este deploy de novo."
+    die "Servidor $server nao existe: rode provision.sh antes (provision-meet para o Jitsi)."
+fi
 ip=$(server_ip4 "$server"); target="$DEPLOY_USER@$ip"
 box=$(storage_box_json)
 sb_user=$(printf '%s' "$box" | jq -r '.username // .user // empty'); sb_host=$(printf '%s' "$box" | jq -r '.server // .host // empty')

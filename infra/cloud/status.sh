@@ -15,6 +15,8 @@ if [ "$role" = "meet" ]; then
     log "Servidor C ($MEET_NAME)"
     if server_exists "$MEET_NAME"; then
         hzj server describe "$MEET_NAME" | jq -r '"  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status), criado \(.created[:10])"'
+    elif [ -n "$(latest_snapshot meet)" ]; then
+        echo "  guardado em snapshot (etapa restaurar com PAPEIS=meet traz de volta; docs/20 §4A.7)."
     else
         echo "  nao existe (etapa provision-meet, com CONFIRMADO=sim, cria)."
     fi
@@ -61,7 +63,10 @@ if [ "$role" = "meet" ]; then
 fi
 
 log "Servidores"
-hzj server list | jq -r '.[] | select(.labels.app=="bunker707") | "  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status), criado \(.created[:10])"'
+servers=$(hzj server list | jq -r '.[] | select(.labels.app=="bunker707") | "  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status), criado \(.created[:10])"')
+if [ -n "$servers" ]; then printf '%s\n' "$servers"; else echo "  nenhum servidor existe agora."; fi
+log "Snapshots (producao guardada; etapa restaurar traz de volta, docs/20 §4A.7)"
+if hzj image list --type snapshot | jq -e '[.[] | select(.labels.app=="bunker707")] | length > 0' >/dev/null; then snapshots_summary; else echo "  nenhum."; fi
 log "Storage Box"
 box=$(storage_box_json); [ -n "$box" ] && printf '%s' "$box" | jq -r '"  \(.name): \(.storage_box_type.name // .type // "?"), \(.username // .user // "?")@\(.server // .host // "?"), usado \((.stats.size // 0)/1024/1024/1024*100|round/100) GB"' || echo "  (nenhum)"
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then

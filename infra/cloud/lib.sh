@@ -38,6 +38,8 @@ SSH_KEY_NAME="${SSH_KEY_NAME:-bunker707-deploy}"
 case "${SKIP_MARKETING:-}" in ""|0|false|no) SKIP_MARKETING="" ;; *) SKIP_MARKETING=1 ;; esac
 # Webinarios (docs/30 §6.1): servidor C do Jitsi e os gravadores por hora, um por sessao (bunker707-jibri-<sessao>).
 MEET_NAME="${MEET_NAME:-bunker707-meet}"
+# O tipo pedido nas opcoes, antes do padrao: o restaurar usa o do snapshot quando ninguem pede outro.
+MEET_TYPE_FORCED="${MEET_TYPE:-}"
 MEET_TYPE="${MEET_TYPE:-cx23}"
 JIBRI_NAME_PREFIX="${JIBRI_NAME_PREFIX:-bunker707-jibri-}"
 JIBRI_TYPE="${JIBRI_TYPE:-cpx42}"
@@ -80,6 +82,59 @@ hz() { HCLOUD_TOKEN="$HCLOUD_TOKEN" hcloud --quiet --no-experimental-warnings "$
 hzj() { HCLOUD_TOKEN="$HCLOUD_TOKEN" hcloud --no-experimental-warnings "$@" -o json; }
 
 server_exists() { hz server describe "$1" >/dev/null 2>&1; }
+server_status() { hzj server describe "$1" | jq -r '.status // empty'; }
+# Desliga pelo sistema (ACPI): o systemd para o Docker, os containers recebem o aviso e o Postgres fecha limpo antes
+# da imagem. Sem resposta em ~3 min, corta a energia (o Postgres se recupera pelo WAL, como depois de uma queda).
+server_shutdown() {  # server_shutdown NOME
+    local i
+    [ "$(server_status "$1")" = "off" ] && { echo "  ja estava desligado."; return 0; }
+    hz server shutdown "$1" >/dev/null 2>&1 || true
+    for ((i = 0; i < ${SHUTDOWN_TRIES:-36}; i++)); do
+        [ "$(server_status "$1")" = "off" ] && { echo "  desligado pelo sistema."; return 0; }
+        sleep "${SHUTDOWN_SLEEP:-5}"
+    done
+    warn "$1 nao desligou pelo sistema a tempo; cortando a energia."
+    hz server poweroff "$1" >/dev/null 2>&1 || true
+    for ((i = 0; i < 24; i++)); do
+        [ "$(server_status "$1")" = "off" ] && return 0
+        sleep "${SHUTDOWN_SLEEP:-5}"
+    done
+    die "$1 nao desligou (status $(server_status "$1"))."
+}
+
+# ---- papeis que a producao guarda em snapshot (snapshot.sh e restaurar.sh; docs/20 §4A.7) ---------------
+# membros (A: app + Supabase), marketing (B: Mautic) e meet (C: Jitsi). PAPEIS nas opcoes escolhe alguns deles
+# (ex.: PAPEIS=meet so para um teste de live na dev). Com SKIP_MARKETING o Mautic mora no A e nao e papel proprio.
+# Sai sempre na mesma ordem (membros, marketing, meet), sem repetir.
+guard_roles() {
+    local all="membros marketing meet" r out=""
+    [ -n "${SKIP_MARKETING:-}" ] && all="membros meet"
+    for r in ${PAPEIS:-}; do
+        case " $all " in *" $r "*) ;; *) die "PAPEIS: '$r' nao e um papel desta producao (use: $all)." ;; esac
+    done
+    for r in $all; do
+        case " ${PAPEIS:-$all} " in *" $r "*) out="${out:+$out }$r" ;; esac
+    done
+    [ -n "$out" ] || die "PAPEIS vazio (use: $all)."
+    printf '%s' "$out"
+}
+role_server() {  # role_server PAPEL -> nome do servidor
+    case "$1" in
+        membros) printf '%s' "$MEMBROS_NAME" ;;
+        marketing) printf '%s' "$MARKETING_NAME" ;;
+        meet) printf '%s' "$MEET_NAME" ;;
+        *) die "papel invalido: $1" ;;
+    esac
+}
+# latest_snapshot PAPEL -> id do snapshot disponivel mais recente do papel (labels app=bunker707, papel=PAPEL)
+latest_snapshot() {
+    hzj image list --type snapshot | jq -r --arg r "$1" '[.[] | select(.labels.app=="bunker707" and .labels.papel==$r and .status=="available")] | sort_by(.created) | last | .id // empty'
+}
+# snapshots_summary: os snapshots guardados, com tamanho e o custo do mes (EUR 0,0143 por GB comprimido, docs/19 §3.2).
+snapshots_summary() {
+    hzj image list --type snapshot | jq -r '[.[] | select(.labels.app=="bunker707")] | sort_by(.created) | .[] | "  \(.id)  \(.labels.papel // "?")  \(.labels.tipo // "?")  \(.image_size // 0 | . * 100 | round / 100) GB  criado \(.created[:16])"'
+    hzj image list --type snapshot | jq -r '[.[] | select(.labels.app=="bunker707") | (.image_size // 0)] | add // 0 | "  total: \(. * 100 | round / 100) GB, cerca de EUR \(. * 0.0143 * 100 | round / 100) por mes"'
+}
 # Pelo JSON: `hz` passa --quiet, que na CLI 1.70.1 descarta a saida de `server ip`.
 server_ip4() {
     local ip; ip=$(hzj server describe "$1" | jq -r '.public_net.ipv4.ip // empty')
@@ -340,27 +395,56 @@ cf_zone_setting() {  # cf_zone_setting CHAVE VALOR
     printf '  %s = %s\n' "$1" "$2"
 }
 
-# cf_apply_dns: os quatro nomes (membros, api, studio -> servidor A; marketing -> B ou A) apontando para os
-# IPs atuais, proxied; SSL Full (strict); "Always Use HTTPS" desligado (o Let's Encrypt valida por HTTP
-# atraves da Cloudflare; um redirecionamento na borda faria a validacao bater num origin sem certificado).
+# cf_apply_dns: os quatro nomes (membros, api, studio -> servidor A; marketing -> B, ou A com SKIP_MARKETING)
+# apontando para os IPs atuais, proxied; SSL Full (strict); "Always Use HTTPS" desligado (o Let's Encrypt valida
+# por HTTP atraves da Cloudflare; um redirecionamento na borda faria a validacao bater num origin sem certificado).
+# O restaurar chama as partes de cada papel que voltou.
 cf_apply_dns() {
-    local m4 m6 k4 k6 sub
+    cf_apply_dns_membros
+    cf_apply_dns_marketing
+    cf_zone_tls
+}
+cf_apply_dns_membros() {
+    local m4 m6 sub subs
     m4=$(server_ip4 "$MEMBROS_NAME"); m6=$(server_ip6 "$MEMBROS_NAME")
-    for sub in "${APP_DOMAIN%%.*}" "${API_DOMAIN%%.*}" "${STUDIO_DOMAIN%%.*}"; do
+    subs="${APP_DOMAIN%%.*} ${API_DOMAIN%%.*} ${STUDIO_DOMAIN%%.*}"
+    [ -n "${SKIP_MARKETING:-}" ] && subs="$subs ${MAUTIC_DOMAIN%%.*}"
+    for sub in $subs; do
         cf_dns_upsert "$sub" A "$m4" true
         [ -n "$m6" ] && cf_dns_upsert "$sub" AAAA "$m6" true
     done
-    if [ -n "${SKIP_MARKETING:-}" ] || ! server_exists "$MARKETING_NAME"; then k4="$m4"; k6="$m6"; else k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME"); fi
+    return 0
+}
+cf_apply_dns_marketing() {
+    local k4 k6
+    [ -z "${SKIP_MARKETING:-}" ] || return 0  # o Mautic mora no A: o nome vai com o membros
+    if ! server_exists "$MARKETING_NAME"; then
+        echo "  ${MAUTIC_DOMAIN}: $MARKETING_NAME nao existe (guardado?); sem registro."
+        return 0
+    fi
+    k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME")
     cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" A "$k4" true
     [ -n "$k6" ] && cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true
+    return 0
+}
+cf_zone_tls() {
     cf_zone_setting ssl strict
     cf_zone_setting always_use_https off
 }
-# cf_remove_dns: apaga os registros A/AAAA dos quatro nomes (servidores guardados em snapshot).
+# cf_remove_dns [PAPEL ...]: apaga os registros A/AAAA dos nomes de cada papel guardado em snapshot (padrao: os tres).
+# membros: membros, api e studio (e marketing com SKIP_MARKETING); marketing: marketing; meet: meet.
 cf_remove_dns() {
-    local zone sub fqdn ids id
+    local zone sub fqdn ids id r subs=""
+    for r in ${*:-membros marketing meet}; do
+        case "$r" in
+            membros) subs="$subs ${APP_DOMAIN%%.*} ${API_DOMAIN%%.*} ${STUDIO_DOMAIN%%.*}"; [ -n "${SKIP_MARKETING:-}" ] && subs="$subs ${MAUTIC_DOMAIN%%.*}" ;;
+            marketing) subs="$subs ${MAUTIC_DOMAIN%%.*}" ;;
+            meet) subs="$subs ${MEET_DOMAIN%%.*}" ;;
+            *) die "cf_remove_dns: papel invalido: $r" ;;
+        esac
+    done
     zone=$(cf_zone_id)
-    for sub in "${APP_DOMAIN%%.*}" "${API_DOMAIN%%.*}" "${STUDIO_DOMAIN%%.*}" "${MAUTIC_DOMAIN%%.*}"; do
+    for sub in $subs; do
         fqdn="$sub.$ZONE_NAME"
         ids=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '.result[] | select(.type=="A" or .type=="AAAA") | .id')
         for id in $ids; do cf_api DELETE "/zones/$zone/dns_records/$id" >/dev/null; done

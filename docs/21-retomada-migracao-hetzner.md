@@ -1,5 +1,11 @@
 # 21. Retomada: migracao para a Hetzner (estado em 19/10/2026)
 
+> **Atualizacao de 03/11/2026 (producao guardada):** a pedido do produtor, a producao inteira (A `bunker707-membros`,
+> B `bunker707-marketing` e C `bunker707-meet`) passa a ficar **guardada em snapshot** e so e ligada para os testes da
+> equipe: ninguem de fora usa a producao ate o lancamento. Ligada, custava cerca de EUR 25 por mes; guardada, cerca de
+> EUR 4,50 (o Storage Box fica). Antes de qualquer `deploy-*`, live ou teste na producao: etapa `restaurar` (secao 10;
+> operacao em docs/20 §4A.7). O `status` mostra o que esta guardado. Leia a secao 10 antes da 8.
+>
 > **Atualizacao de 19/10/2026 (segunda sessao):** a revisao da secao 4.1 foi feita (secao 7) e a execucao da
 > 4.3 comecou. O produtor decidiu CX23 (4 GB) para os dois servidores, mantidos ligados (secao 8). Leia as
 > secoes 7 e 8 antes da 4.
@@ -42,9 +48,9 @@ Contexto completo: docs/19 (secao 0, decisao) e docs/20 (secoes 4A e 8A, operaca
 | Arquitetura | Dois servidores proprios na Hetzner Cloud: `bunker707-membros` (app Next.js + Supabase self-hosted + Caddy, banco junto com o app) e `bunker707-marketing` (Mautic 7.2.1 + MySQL 8.4.11 + Caddy). Cloudflare na frente. Backup no Storage Box. |
 | Por que assim | Banco junto: o Supabase e uma unidade e a latencia app/banco pesa; escala pequena. Mautic separado: PHP publico com mais falhas de seguranca, carga em rajada, ciclo de vida proprio. Detalhe em docs/19 §0.2 e §0.3. |
 | Disponibilidade | Queda de 15 a 20 minutos e aceitavel para o produtor. Sem alta disponibilidade; crescimento por rescale e, depois, banco separado (docs/19 §0.5). |
-| Staging e producao | Vercel + Supabase cloud continuam como staging (desenvolvimento). A Hetzner e a producao. Em 19/10/2026 o plano de "snapshot e apagar" foi revisto: com o estoque da linha CX intermitente, apagar o servidor arrisca nao conseguir recriar o tipo barato. Os servidores ficam ligados (secao 8). |
+| Staging e producao | Vercel + Supabase cloud continuam como staging (desenvolvimento). A Hetzner e a producao. Em 19/10/2026 o plano de "snapshot e apagar" foi revisto: com o estoque da linha CX intermitente, apagar o servidor arrisca nao conseguir recriar o tipo barato, e os servidores ficaram ligados (secao 8). **Em 03/11/2026 o produtor decidiu guardar a producao em snapshot** enquanto ela so servir para a equipe testar (secao 10): a volta usa sempre o mesmo tipo (CX23) e para, sem subir num tipo mais caro, se faltar estoque. No lancamento, a producao volta a ficar ligada o tempo todo. |
 | E-mail | Resend (dominio `mail.bunker707.com.br`, verificado) ate a conta do Amazon SES existir. Mautic ja instalado e enviando pelo Resend; a troca para o SES e so `MAUTIC_MAILER_DSN`. |
-| Custo | Ate US$ 10 por mes no servidor da area de membros. Em 19/10/2026: CX23 (2 vCPU, 4 GB, EUR 6,49) nos dois servidores, porque o CX33 estava sem estoque e subiu para EUR 9,99 (acima de US$ 10). Ver secao 8. Mautic tem custo fixo (servidor) e nao cobra por contato (docs/19 §0.8). |
+| Custo | Ate US$ 10 por mes no servidor da area de membros. Em 19/10/2026: CX23 (2 vCPU, 4 GB, EUR 6,49) nos dois servidores, porque o CX33 estava sem estoque e subiu para EUR 9,99 (acima de US$ 10). Ver secao 8. Mautic tem custo fixo (servidor) e nao cobra por contato (docs/19 §0.8). Desde 03/11/2026, com a producao guardada: cerca de EUR 4,50 por mes (Storage Box e snapshots) e cerca de EUR 0,01 por hora por servidor ligado (secao 10). |
 | Execucao | 100% pela IA, sem nada na maquina do produtor (ele so tem creditos na nuvem). |
 
 ## 2. Por que a execucao e pelo GitHub Actions
@@ -831,3 +837,39 @@ disso, ele nao roda de novo na nuvem de teste: a mudanca vira uma migracao nova,
 `main` que levar o codigo da fase 2a (e da `202611010002` antes da que levar o da fase 2b): o `deploy-membros` roda o
 `migrate.sh` antes de recriar o app (`infra/scripts/deploy.sh`), na ordem dos nomes, entao basta a promocao passar pelo
 `deploy-membros`. Na producao, nenhuma das duas ainda.
+
+## 10. Producao guardada em snapshot (03/11/2026)
+
+**Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a
+usa ate o lancamento. Ela fica guardada em snapshot e e ligada so quando for preciso, como o gravador por hora. A
+caixa de backup (Storage Box) fica, pelo menos ate a primeira volta conferida. Pedido junto: "se der errado, nao
+perder o que ja temos". Por isso a guarda tem duas copias independentes antes de apagar cada servidor (backup novo no
+Storage Box e snapshot protegido), e a volta foi testada antes de deixar tudo guardado.
+
+O que mudou nos scripts (`infra/cloud/snapshot.sh`, `restaurar.sh`, `lib.sh`; testes em
+`tests/infra-guardar-producao.test.mjs`, com hcloud, curl e ssh de mentira):
+
+- o C (Jitsi) entrou na guarda e na volta; `PAPEIS` escolhe os papeis (`membros`, `marketing`, `meet`);
+- backup novo do A e do B antes de qualquer imagem; se falhar, nada e apagado;
+- desligar pelo sistema antes da imagem (o Postgres fecha limpo); snapshot com o tipo e o local de origem nas labels,
+  protegido contra exclusao; o servidor so e apagado com o snapshot pronto (senao volta a ligar); ficam os 2 mais
+  novos de cada papel;
+- a volta usa o tipo do snapshot (CX23) e nunca sobe sozinha num tipo mais caro: antes, sem `MEMBROS_TYPE`, o
+  `restaurar` pedia ao `plan` uma maquina de 8 GB (CX33 a EUR 9,99 ou CPX32 a EUR 35,49);
+- na volta do C, o `JVB_ADVERTISE_IPS` passa a ser o IP novo; os stacks sobem e o smoke roda nos tres;
+- `deploy-*`, `jibri-up` e `status` reconhecem a producao guardada ("rode restaurar").
+
+**Enquanto esta mudanca nao estiver na `main`**, `snapshot` e `restaurar` precisam rodar da branch que a trouxe ou da
+`dev` depois do merge (o workflow aceita essas etapas de qualquer branch). Da `main` antiga, o `restaurar` nao traz o
+C e escolheria uma maquina de 8 GB.
+
+Como ligar e desligar: docs/20 §4A.7 (rotina da equipe). Em resumo:
+
+| Para | Etapas |
+|---|---|
+| Testar algo na producao | `restaurar` -> `deploy-membros` da `main` (se a main andou) -> `status` -> testar -> `snapshot` com `CONFIRMAR=apagar` |
+| Testar live na dev (o C atende a Vercel) | `restaurar` com `PAPEIS=meet` -> testar -> `snapshot` com `CONFIRMAR=apagar PAPEIS=meet` |
+| Lancamento | `restaurar` alguns dias antes (estoque do CX23 intermitente), `deploy-membros`, a virada da secao 8 item 4, e a producao fica ligada |
+
+Estado: ver a secao 10.1, preenchida na execucao.
+

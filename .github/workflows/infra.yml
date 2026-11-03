@@ -51,7 +51,7 @@ on:
           - chave-backup
           - carga
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1)"
         type: string
         required: false
         default: ""
