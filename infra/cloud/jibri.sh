@@ -59,7 +59,10 @@ up() {
     webhook_url=$(jibri_secret_opt WEBINAR_RECORDER_WEBHOOK_URL "$RECORDER_WEBHOOK_URL")
     collection=$(jibri_secret_opt BUNNY_COLLECTION_ID "")
     install_hcloud; deploy_key
-    server_exists "$MEET_NAME" || die "O servidor $MEET_NAME nao existe: rode provision-meet e deploy-meet antes."
+    if ! server_exists "$MEET_NAME"; then
+        [ -z "$(latest_snapshot meet)" ] || die "O servidor $MEET_NAME esta guardado em snapshot: rode restaurar com PAPEIS=meet antes (docs/20 §4A.7)."
+        die "O servidor $MEET_NAME nao existe: rode provision-meet e deploy-meet antes."
+    fi
 
     log "1/6 O que o gravador precisa do servidor C ($MEET_NAME)"
     local meet_ip meet_target envc; meet_ip=$(server_ip4 "$MEET_NAME"); meet_target="$DEPLOY_USER@$meet_ip"; envc="$REMOTE_DIR/infra/jitsi/.env"

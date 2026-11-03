@@ -7,7 +7,7 @@
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
 #   provision-meet, deploy-meet, secrets-meet, exec-meet, status-meet (servidor C do Jitsi; CONFIRMADO=sim),
 #   jibri-up, jibri-down, exec-jibri (gravador por hora; SESSAO=<id> e CONFIRMADO=sim; docs/20 §8B),
-#   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots),
+#   snapshot (guarda a producao e apaga os servidores; CONFIRMAR=apagar), restaurar (volta no mesmo tipo; PAPEIS=meet),
 #   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
 #   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup),
 #   carga (teste de carga: VUS alunos navegando pelo dominio publico; dados de teste apagados no fim)
