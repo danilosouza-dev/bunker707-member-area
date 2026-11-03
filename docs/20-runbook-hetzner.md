@@ -284,7 +284,7 @@ Como a chave do Resend chega a sessao da IA sem passar pelo chat, a combinar com
 
 Decisao de 18/10/2026, revista em 19/10/2026 (servidores ligados, por causa do estoque intermitente do CX23) e **retomada pelo produtor em 03/11/2026**: enquanto a producao so servir para a equipe testar (nenhum aluno, nenhuma venda), ela fica guardada em snapshot e so e ligada quando a equipe precisar dela, como o gravador por hora (§8B.5). Na Hetzner, servidor desligado e cobrado por inteiro (docs/19 §3.4); o jeito barato de guardar e snapshot + apagar (EUR 0,0143 por GB comprimido por mes). Ligada, a producao custa cerca de EUR 25 por mes sem IVA (tres CX23, tres IPv4 e o Storage Box); guardada, cerca de EUR 4,50 (o Storage Box fica, com os backups), ou menos de EUR 0,50 sem ele. **No dia em que entrarem alunos ou vendas reais, a producao volta a ficar ligada o tempo todo**: guardada, o aluno nao entra, a venda chega num servidor que nao existe e o acesso nao e liberado, e o tick (avisos, pop-ups, fluxos) para.
 
-**Guardar: etapa `snapshot` com `CONFIRMAR=apagar`** (`PAPEIS=meet`, `marketing` ou `membros` guarda so os pedidos; padrao, os tres). Para cada papel que existe:
+**Guardar: etapa `snapshot` com `CONFIRMAR=apagar`** (`PAPEIS=meet`, `marketing` ou `membros` guarda so os pedidos, varios separados por virgula, como `PAPEIS=membros,marketing`, porque as opcoes do workflow sao separadas por espaco; padrao, os tres). Para cada papel que existe:
 
 1. backup novo do A e do B no Storage Box (o C nao guarda dado de aluno). Se falhar, a etapa para antes de apagar qualquer coisa (`SEM_BACKUP=1` pula, so com motivo);
 2. desliga pelo sistema (ACPI: o Postgres fecha limpo; so corta a energia se o servidor nao responder em cerca de 3 min);

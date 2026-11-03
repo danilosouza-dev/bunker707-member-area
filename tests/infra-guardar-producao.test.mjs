@@ -211,7 +211,7 @@ function setup({ servers = [], images = [], unavailable = [], records = [], imag
   const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
   const hz = () => JSON.parse(readFileSync(hzState, "utf8"));
   const cf = () => JSON.parse(readFileSync(cfState, "utf8"));
-  return { runScript, calls, hz, cf };
+  return { runScript, calls, hz, cf, envFor: env };
 }
 
 const hzCall = (calls, prefix) => calls.findIndex((c) => c.tool === "hcloud" && c.args.join(" ").startsWith(prefix));
@@ -375,6 +375,12 @@ test("restaurar nunca sobe num tipo mais caro sozinho; PAPEIS=meet traz so o Jit
   assert.match(refused.stderr, /Sem estoque de cx23 em fsn1 nbg1 hel1\. Nada mais caro foi criado/);
   assert.deepEqual(noStock.hz().servers, []);
   assert.ok(hzCalls(noStock.calls(), "server create").every((c) => c.args.includes("cx23")), "nem tentou o cx33 ou o cpx32");
+
+  const twoRoles = setup({ images: [...images, oldImage(703, "marketing", "2026-11-03T10:02:00.000Z")] });
+  // Pelo run.sh, como o workflow chama: as opcoes vem separadas por espaco, entao varios papeis vao por virgula.
+  const viaRun = spawnSync("bash", [join(cloudDir, "run.sh"), "restaurar"], { encoding: "utf8", env: { ...process.env, ...twoRoles.envFor({ OPCOES: "PAPEIS=marketing,membros" }) } });
+  assert.equal(viaRun.status, 0, viaRun.stdout + viaRun.stderr);
+  assert.deepEqual(twoRoles.hz().servers.map((s) => s.name), ["bunker707-membros", "bunker707-marketing"], "dois papeis por virgula nas opcoes do workflow, na ordem de sempre; o meet fica guardado");
 
   const meetOnly = setup({ images });
   const meet = meetOnly.runScript("restaurar.sh", { PAPEIS: "meet" });

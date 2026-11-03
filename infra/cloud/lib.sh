@@ -104,16 +104,18 @@ server_shutdown() {  # server_shutdown NOME
 
 # ---- papeis que a producao guarda em snapshot (snapshot.sh e restaurar.sh; docs/20 §4A.7) ---------------
 # membros (A: app + Supabase), marketing (B: Mautic) e meet (C: Jitsi). PAPEIS nas opcoes escolhe alguns deles
-# (ex.: PAPEIS=meet so para um teste de live na dev). Com SKIP_MARKETING o Mautic mora no A e nao e papel proprio.
+# (ex.: PAPEIS=meet so para um teste de live na dev; varios separados por virgula, PAPEIS=membros,marketing, porque as
+# opcoes do workflow sao separadas por espaco). Com SKIP_MARKETING o Mautic mora no A e nao e papel proprio.
 # Sai sempre na mesma ordem (membros, marketing, meet), sem repetir.
 guard_roles() {
-    local all="membros marketing meet" r out=""
+    local all="membros marketing meet" r out="" asked="${PAPEIS:-}"
     [ -n "${SKIP_MARKETING:-}" ] && all="membros meet"
-    for r in ${PAPEIS:-}; do
-        case " $all " in *" $r "*) ;; *) die "PAPEIS: '$r' nao e um papel desta producao (use: $all)." ;; esac
+    asked="${asked//,/ }"
+    for r in $asked; do
+        case " $all " in *" $r "*) ;; *) die "PAPEIS: '$r' nao e um papel desta producao (use: $all, separados por virgula)." ;; esac
     done
     for r in $all; do
-        case " ${PAPEIS:-$all} " in *" $r "*) out="${out:+$out }$r" ;; esac
+        case " ${asked:-$all} " in *" $r "*) out="${out:+$out }$r" ;; esac
     done
     [ -n "$out" ] || die "PAPEIS vazio (use: $all)."
     printf '%s' "$out"
