@@ -794,7 +794,9 @@ test("jibri.sh e provision-meet recusam sem CONFIRMADO=sim antes de tocar na Het
   assert.match(viaRun.stderr, /CONFIRMADO=sim/);
 
   // down: so com uploaded (ou sem gravacao), MP4 sem marca .uploaded segura, FORCAR=1 passa por cima e avisa.
-  assert.match(jibriSource, /case "\$rs" in uploaded\|ready\|unavailable\|gone\) ok_to_delete=1 ;; esac/);
+  // preparing entrou em 03/11/2026: sem o `ready` nao ha gravacao; o MP4 da maquina continua conferido logo abaixo
+  // (o comportamento esta em tests/infra-gravador-falha.test.mjs).
+  assert.match(jibriSource, /case "\$rs" in uploaded\|ready\|preparing\|unavailable\|gone\) ok_to_delete=1 ;; esac/);
   assert.match(jibriSource, /\[ -f \\"\\\$f\.uploaded\\" \] \|\| echo/, "procura MP4 sem a marca .uploaded na maquina");
   assert.match(jibriSource, /case "\$\{FORCAR:-\$\{FORCE:-\}\}" in 1\|sim\|true\) forced=1 ;; esac/);
   assert.match(jibriSource, /\[ -z "\$ok_to_delete" \] && \[ -z "\$forced" \]/);
@@ -802,7 +804,10 @@ test("jibri.sh e provision-meet recusam sem CONFIRMADO=sim antes de tocar na Het
   assert.match(jibriSource, /"state\\":\\"ready\\"/);
   assert.match(jibriSource, /"state\\":\\"unavailable\\"/);
   assert.match(jibriSource, /hz server delete "\$name"/);
-  assert.ok(jibriSource.indexOf("fw_close_all\n        log \"Apagando $name\"") < jibriSource.indexOf('hz server delete "$name"'), "a 22 e fechada antes de o servidor sumir (o trap nao acharia o IP)");
+  const downStart = jibriSource.indexOf("down() {");
+  assert.ok(downStart > 0 && jibriSource.indexOf("fw_close_all\n        log \"Apagando $name\"", downStart) < jibriSource.indexOf('hz server delete "$name"', downStart), "a 22 e fechada antes de o servidor sumir (o trap nao acharia o IP)");
+  // O on_failure do up (apaga o gravador criado que nao ficou pronto) roda no trap do lib.sh, depois do fw_close_all.
+  assert.match(libSource, /fw_close_all \|\| rc=1; if \[ "\$rc" != 0 \] && declare -F on_failure >\/dev\/null; then on_failure; fi; exit \$rc/);
   assert.match(jibriSource, /print_cost/, "o custo por hora e impresso");
   assert.match(jibriSource, /--label papel=jibri --label sessao="\$SESSAO"/, "o servidor leva a sessao na label");
   assert.match(jibriSource, /JIBRI_FALLBACK_TYPES:-ccx23 cpx32/);

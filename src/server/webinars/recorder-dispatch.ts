@@ -18,24 +18,33 @@ export type DispatchOutcome =
 
 export type RecorderDispatcher = {
   kind: "fake" | "github";
-  /** jibri-down da sessao (com `force`, FORCAR=1: apaga mesmo sem a confirmacao do envio). */
-  release(sessionId: string, options?: { force?: boolean }): Promise<DispatchOutcome>;
+  /**
+   * jibri-down da sessao (com `force`, FORCAR=1: apaga mesmo sem a confirmacao do envio; com `onlyIfPreparing`,
+   * SO_SE_PREPARANDO=sim: so apaga com o app ainda em preparing, para o preparo abandonado do tick).
+   */
+  release(sessionId: string, options?: ReleaseOptions): Promise<DispatchOutcome>;
   /** jibri-up da sessao (cria a maquina; ela chama o webhook com `ready` ou `unavailable`). */
   request(sessionId: string): Promise<DispatchOutcome>;
 };
 
+export type ReleaseOptions = { force?: boolean; onlyIfPreparing?: boolean };
+
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TOKEN = /^[A-Za-z0-9_]{20,255}$/;
 
-/** As OPCOES da etapa (infra/cloud/jibri.sh): CONFIRMADO=sim e a sessao; FORCAR=1 so na devolucao forcada. */
-export function recorderStepOptions(step: RecorderStep, sessionId: string, options: { force?: boolean } = {}): string {
-  return ["CONFIRMADO=sim", `SESSAO=${sessionId}`, ...(step === "jibri-down" && options.force ? ["FORCAR=1"] : [])].join(" ");
+/**
+ * As OPCOES da etapa (infra/cloud/jibri.sh): CONFIRMADO=sim e a sessao; na devolucao, FORCAR=1 so a forcada e
+ * SO_SE_PREPARANDO=sim so a do preparo abandonado.
+ */
+export function recorderStepOptions(step: RecorderStep, sessionId: string, options: ReleaseOptions = {}): string {
+  const extra = step === "jibri-down" ? [...(options.force ? ["FORCAR=1"] : []), ...(options.onlyIfPreparing ? ["SO_SE_PREPARANDO=sim"] : [])] : [];
+  return ["CONFIRMADO=sim", `SESSAO=${sessionId}`, ...extra].join(" ");
 }
 
 /** O pedido de workflow_dispatch pronto (para o adaptador e para os testes conferirem sem rede). */
-export function recorderDispatchRequest(input: { force?: boolean; sessionId: string; step: RecorderStep; token: string }): { body: string; headers: Record<string, string>; method: "POST"; url: string } {
+export function recorderDispatchRequest(input: { force?: boolean; onlyIfPreparing?: boolean; sessionId: string; step: RecorderStep; token: string }): { body: string; headers: Record<string, string>; method: "POST"; url: string } {
   return {
-    body: JSON.stringify({ inputs: { etapa: input.step, opcoes: recorderStepOptions(input.step, input.sessionId, { force: input.force }) }, ref: INFRA_REF }),
+    body: JSON.stringify({ inputs: { etapa: input.step, opcoes: recorderStepOptions(input.step, input.sessionId, { force: input.force, onlyIfPreparing: input.onlyIfPreparing }) }, ref: INFRA_REF }),
     headers: {
       accept: "application/vnd.github+json",
       authorization: `Bearer ${input.token}`,
@@ -51,11 +60,11 @@ type FetchLike = (url: string, init: { body: string; headers: Record<string, str
 
 /** O adaptador de verdade: um workflow_dispatch por pedido (204 = aceito; o resto vira `github_error` com o status). */
 export function githubRecorderDispatcher(token: string, fetchImpl: FetchLike): RecorderDispatcher {
-  async function dispatch(step: RecorderStep, sessionId: string, force?: boolean): Promise<DispatchOutcome> {
+  async function dispatch(step: RecorderStep, sessionId: string, options: ReleaseOptions = {}): Promise<DispatchOutcome> {
     if (!SESSION_ID.test(sessionId)) {
       return { ok: false, reason: "invalid_session", step };
     }
-    const request = recorderDispatchRequest({ force, sessionId, step, token });
+    const request = recorderDispatchRequest({ force: options.force, onlyIfPreparing: options.onlyIfPreparing, sessionId, step, token });
     try {
       const response = await fetchImpl(request.url, { body: request.body, headers: request.headers, method: request.method, signal: AbortSignal.timeout(15_000) });
       return response.ok ? { ok: true, step } : { ok: false, reason: "github_error", status: response.status, step };
@@ -65,12 +74,12 @@ export function githubRecorderDispatcher(token: string, fetchImpl: FetchLike): R
   }
   return {
     kind: "github",
-    release: (sessionId, options) => dispatch("jibri-down", sessionId, options?.force),
+    release: (sessionId, options) => dispatch("jibri-down", sessionId, options),
     request: (sessionId) => dispatch("jibri-up", sessionId)
   };
 }
 
-export type FakeDispatch = { force: boolean; sessionId: string; step: RecorderStep };
+export type FakeDispatch = { force: boolean; onlyIfPreparing?: true; sessionId: string; step: RecorderStep };
 
 /** O duble: anota os pedidos (jibri-up / jibri-down) e responde ok; nada sai para a rede. */
 export function fakeRecorderDispatcher(log: FakeDispatch[] = []): RecorderDispatcher & { log: FakeDispatch[] } {
@@ -78,7 +87,7 @@ export function fakeRecorderDispatcher(log: FakeDispatch[] = []): RecorderDispat
     kind: "fake",
     log,
     release: async (sessionId, options) => {
-      log.push({ force: options?.force === true, sessionId, step: "jibri-down" });
+      log.push({ force: options?.force === true, ...(options?.onlyIfPreparing ? { onlyIfPreparing: true as const } : {}), sessionId, step: "jibri-down" });
       return { ok: true, step: "jibri-down" };
     },
     request: async (sessionId) => {
