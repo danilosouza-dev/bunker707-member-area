@@ -647,6 +647,8 @@ Jitsi, que o aluno entra sem microfone e so com o token do app, e rodar o roteir
 - O `jibri-down` de uma sessao cujo servidor ja nao existe manda o `gone` de novo ao app (o primeiro pode ter se
   perdido); sem isso o job pediria a devolucao a cada 2 h para sempre.
 - Um gravador esquecido custa por hora: `status-meet` avisa depois de 6 h; a regra e apagar no mesmo dia.
+- **Falha no preparo (correcao de 03/11/2026)**: o `jibri-up` que falha depois de criar a maquina, antes do HEALTHY, apaga a maquina e o firewall dela, refaz a 5222 do C e avisa `unavailable` (o console mostra a reserva na hora). Para investigar uma falha, rode de novo com `MANTER_SE_FALHAR=1`: a maquina fica, e depois `jibri-down`. Um gravador que ja existia nunca e apagado pelo `jibri-up`. A causa de 03/11 (o SSH reaproveitado sem o grupo `docker`, `permission denied` no `docker compose up`) foi corrigida: o `jibri-up` troca de conexao depois do cloud-init e confere `docker info`.
+- O `jibri-down` aceita `preparing` como "nao houve gravacao" (o MP4 na maquina continua conferido). O job do app pede sozinho o `jibri-down` com `SO_SE_PREPARANDO=sim` para o preparo abandonado (`preparing` ha mais de 70 min): ele so apaga se o app ainda disser `preparing`, entao o gravador que ficou pronto nesse meio tempo fica (`docs/30` §6.7).
 
 ### 8B.6 Atualizar o Jitsi
 

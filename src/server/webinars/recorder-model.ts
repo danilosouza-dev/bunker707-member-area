@@ -130,7 +130,14 @@ export const RECORDER_RULES = {
    * `preparing` para sempre. Passado este prazo do pedido (acima da mediana do preparo + os 5 min de saude), o preparo
    * vale como sem gravador: Preparar de novo (o jibri-up e idempotente e reenvia o `ready`) e a reserva.
    */
-  prepareTimeoutMinutes: 25
+  prepareTimeoutMinutes: 25,
+  /**
+   * O preparo abandonado: ainda `preparing` este tanto depois do pedido, acima do limite do job do workflow (60 min,
+   * .github/workflows/infra.yml), entao o jibri-up ja terminou sem `ready` nem `unavailable` (cancelado, tempo
+   * esgotado, aviso perdido). O tick pede o jibri-down com SO_SE_PREPARANDO=sim: a maquina que existir e apagada so se
+   * o app ainda disser preparing e nao houver MP4 nela (03/11/2026: um gravador assim ficou 18 h ligado).
+   */
+  prepareReleaseMinutes: 70
 } as const;
 
 /** O preparo passou do prazo sem `ready` nem `unavailable` (recorder_requested_at ha mais de 25 min; sem a hora, tambem). */
@@ -140,6 +147,15 @@ export function recorderPrepareStale(input: { nowMs: number; requestedAt: string
   }
   const requested = input.requestedAt ? new Date(input.requestedAt).getTime() : Number.NaN;
   return !Number.isFinite(requested) || input.nowMs - requested > RECORDER_RULES.prepareTimeoutMinutes * 60_000;
+}
+
+/** O preparo abandonado (recorder_requested_at ha mais de 70 min, ainda `preparing`; sem a hora, tambem): o tick devolve a maquina. */
+export function recorderPrepareAbandoned(input: { nowMs: number; requestedAt: string | null | undefined; status: RecorderStatus }): boolean {
+  if (input.status !== "preparing") {
+    return false;
+  }
+  const requested = input.requestedAt ? new Date(input.requestedAt).getTime() : Number.NaN;
+  return !Number.isFinite(requested) || input.nowMs - requested > RECORDER_RULES.prepareReleaseMinutes * 60_000;
 }
 
 /**

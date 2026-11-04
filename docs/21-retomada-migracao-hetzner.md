@@ -897,6 +897,6 @@ Pendente:
 
 1. PR desta branch para a `dev` e a promocao para a `main` (com o ok do produtor): ate la, `snapshot` e `restaurar`
    precisam rodar desta branch ou da `dev`.
-2. O gravador que falha no meio do `jibri-up` e fica ligado (tarefa separada, sugerida em 03/11/2026).
+2. (Corrigido em 04/11/2026.) O gravador que falha no meio do `jibri-up` e ficava ligado: a causa (SSH reaproveitado sem o grupo `docker`), a limpeza na falha e a devolucao do preparo abandonado pelo job (`docs/30` §6.7, `docs/20` §8B.5).
 3. Decidir, depois de algumas voltas, se a Storage Box continua (EUR 4,00 por mes) ou vai (os snapshots ficam).
 

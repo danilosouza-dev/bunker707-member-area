@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # O gravador por hora (docs/30 §6.7; docs/20 §8B.5): cria a maquina do Jibri antes da live e a apaga no fim.
 #   CONFIRMADO=sim SESSAO=<id da sessao> bash infra/cloud/jibri.sh up        etapa jibri-up
-#   CONFIRMADO=sim [SESSAO=<id>] [FORCAR=1] bash infra/cloud/jibri.sh down    etapa jibri-down (sem SESSAO: todos)
+#   CONFIRMADO=sim [SESSAO=<id>] [FORCAR=1 | SO_SE_PREPARANDO=sim] bash infra/cloud/jibri.sh down   etapa jibri-down (sem SESSAO: todos)
 #   [SESSAO=<id>] COMANDO='...' bash infra/cloud/jibri.sh exec                 etapa exec-jibri (em /opt/jibri)
 # Opcoes: JIBRI_TYPE (cpx42: 8 vCPU e 16 GB para 1080p a 30 quadros, D26), LOCATION e FALLBACK_LOCATIONS,
 # JIBRI_FALLBACK_TYPES (ccx23 cpx32; o cpx32 grava em 720p), JIBRI_RECORDING_RESOLUTION (1920x1080).
@@ -10,9 +10,14 @@
 # up: cria bunker707-jibri-<sessao> (labels app, papel=jibri, sessao) com o cloud-init de infra/jitsi/jibri (Docker
 #     e a imagem; sem segredo), grava /opt/jibri/.env por SSH (senhas e dominios lidos do .env do servidor C,
 #     segredos de JIBRI_SECRETS), abre a 5222 do C so para o IP dele, sobe o container, espera o Jibri ficar
-#     HEALTHY e avisa o app (state=ready). Sem estoque em tipo algum: state=unavailable.
-# down: so apaga quando o app diz que a gravacao esta na Bunny (uploaded) ou que nao houve gravacao, e quando
-#     nao ha MP4 sem a marca .uploaded na maquina; FORCAR=1 apaga mesmo assim. Avisa o app (state=gone).
+#     HEALTHY e avisa o app (state=ready). Sem estoque em tipo algum: state=unavailable. Se falhar depois de criar a
+#     maquina e antes do HEALTHY, apaga a maquina criada nesta execucao (nao ha gravacao possivel antes do `ready`) e
+#     avisa state=unavailable; MANTER_SE_FALHAR=1 deixa a maquina para investigar. Um gravador que ja existia nunca e
+#     apagado pelo up.
+# down: so apaga quando o app diz que a gravacao esta na Bunny (uploaded) ou que nao houve gravacao (ready,
+#     preparing, unavailable, gone), e quando nao ha MP4 sem a marca .uploaded na maquina; FORCAR=1 apaga mesmo assim.
+#     SO_SE_PREPARANDO=sim (o job do app com o preparo vencido) so apaga com o app ainda em preparing (ou sem maquina):
+#     o gravador que ficou pronto nesse meio tempo fica. Avisa o app (state=gone).
 # Nada e criado nem apagado sem CONFIRMADO=sim (o ok do produtor no chat, docs/20). Custa por hora a partir do
 # minuto em que o servidor existe. Nunca imprime segredo. Idempotente: rodar de novo completa o que faltou.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
@@ -47,6 +52,30 @@ hours_since() {  # hours_since ISO8601
 ssh_alive() { ssh "${SSH_OPTS[@]}" -o ConnectTimeout=8 "$1" true 2>/dev/null; }
 
 # ====== up ==============================================================================================
+# Falha do up depois de criar a maquina nesta execucao e antes do HEALTHY: nenhuma gravacao pode existir (o app so grava
+# com o gravador pronto), entao a maquina e o firewall dela sao apagados, a 5222 do C e refeita sem ela e o app recebe
+# `unavailable` (a reserva aparece no console na hora). Sem isso ela ficava ligada cobrando por hora: em 03/11/2026, 18 h
+# de cpx42 depois de um `permission denied` no Docker. Chamada pelo trap de saida do lib.sh (fw_open_ssh).
+JIBRI_CREATED_NOW=""; JIBRI_HEALTHY=""
+on_failure() {
+    [ -n "$JIBRI_CREATED_NOW" ] && [ -z "$JIBRI_HEALTHY" ] || return 0
+    local name="$JIBRI_CREATED_NOW" code
+    case "${MANTER_SE_FALHAR:-}" in
+        1|sim|true) warn "MANTER_SE_FALHAR=1: $name fica ligado (cobrando por hora) para investigar com exec-jibri; apague com jibri-down SESSAO=$SESSAO CONFIRMADO=sim." ;;
+        *)
+            printf '::error::O preparo do gravador falhou depois de criar %s: apagando a maquina (nenhuma gravacao existia).\n' "$name"
+            if hz server delete "$name"; then
+                hz firewall delete "$(fw_name "$name")" >/dev/null 2>&1 || warn "firewall $(fw_name "$name") nao apagado (apague no console da Hetzner)."
+                jibri_cidrs_refresh
+                if server_exists "$MEET_NAME"; then fw_ensure "$MEET_NAME" || warn "a regra 5222 do $MEET_NAME nao foi refeita: rode jibri-down."; fi
+                echo "  $name apagado."
+            else
+                printf '::error::%s NAO foi apagado: rode jibri-down com SESSAO=%s CONFIRMADO=sim.\n' "$name" "$SESSAO"
+            fi ;;
+    esac
+    code=$(recorder_request POST "" "{\"sessionId\":\"$SESSAO\",\"state\":\"unavailable\"}")
+    echo "  app avisado (state=unavailable): $code"
+}
 up() {
     [ "${CONFIRMADO:-}" = "sim" ] || die "jibri-up cria um servidor cobrado por hora. Confirme com CONFIRMADO=sim nas opcoes, depois do ok do produtor no chat (docs/20 §8B.5)."
     need HCLOUD_TOKEN JIBRI_SECRETS SESSAO
@@ -109,7 +138,7 @@ up() {
                 if hz server create --name "$name" --type "$t" --image ubuntu-24.04 --location "$l" \
                     --ssh-key "$SSH_KEY_NAME" --firewall "$(fw_name "$name")" --user-data-from-file "$ud" \
                     --label app=bunker707 --label papel=jibri --label sessao="$SESSAO" >/dev/null 2>"$WORK_DIR/create-$name.err"; then
-                    created=1; type="$t"; loc="$l"; break 2
+                    created=1; type="$t"; loc="$l"; JIBRI_CREATED_NOW="$name"; break 2
                 fi
                 if grep -qiE 'unavailable|not available|resource_limit|capacity' "$WORK_DIR/create-$name.err"; then
                     warn "$t indisponivel em $l: $(tr -d '\n' < "$WORK_DIR/create-$name.err" | cut -c1-160)"
@@ -133,7 +162,14 @@ up() {
     local ip target envj; ip=$(server_ip4 "$name"); target="$DEPLOY_USER@$ip"; envj="$JIBRI_REMOTE_DIR/.env"
     fw_open_ssh "$name"; wait_ssh "$target"
     rsh "$target" "cloud-init status --wait >/dev/null 2>&1 || true; for i in \$(seq 90); do [ -f '$JIBRI_REMOTE_DIR/.cloud-init-done' ] && break; sleep 5; done; test -f '$JIBRI_REMOTE_DIR/.cloud-init-done'" \
-        || die "O cloud-init do $name nao terminou (Docker e imagem do Jibri). Veja: exec-jibri com 'sudo tail -n 50 /var/log/cloud-init-output.log'."
+        || die "O cloud-init do $name nao terminou (Docker e imagem do Jibri). Para investigar, rode de novo com MANTER_SE_FALHAR=1 e veja exec-jibri com 'sudo tail -n 50 /var/log/cloud-init-output.log'."
+    # O cloud-init poe o deploy no grupo docker (usermod) depois que o SSH ja abriu, e a conexao mestra (ControlMaster,
+    # reaproveitada por rsh e rcopy) guarda os grupos do login: sem trocar de conexao, o `docker compose up` do passo 5
+    # recusa o socket (permission denied, 03/11/2026). Fecha a mestra; a proxima chamada abre outra, ja no grupo.
+    ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "$target" 2>/dev/null || true
+    wait_ssh "$target" 10
+    rsh "$target" "docker info >/dev/null 2>&1" \
+        || die "O Docker do $name nao responde para o $DEPLOY_USER (grupo docker?). Para investigar, rode de novo com MANTER_SE_FALHAR=1 e veja exec-jibri com 'id; sudo tail -n 30 /var/log/cloud-init-output.log'."
     rcopy "$JITSI_DIR/jibri/docker-compose.yml" "$target:$JIBRI_REMOTE_DIR/docker-compose.yml"
     rcopy "$JITSI_DIR/jibri/finalize.sh" "$target:$JIBRI_REMOTE_DIR/finalize.sh"
     rcopy "$JITSI_DIR/scripts/jibri-status.sh" "$target:$JIBRI_REMOTE_DIR/jibri-status.sh"
@@ -178,8 +214,10 @@ up() {
     done
     if [ -z "$healthy" ]; then
         rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose logs --no-color --tail 60 jibri" || true
-        die "O Jibri nao ficou HEALTHY em 5 min. Conferir: a 5222 do $MEET_NAME aberta para $ip (firewall e ufw), as senhas do Jibri iguais as do .env do C, e 'exec-jibri' com 'bash jibri-status.sh'."
+        die "O Jibri nao ficou HEALTHY em 5 min. Conferir: a 5222 do $MEET_NAME aberta para $ip (firewall e ufw), as senhas do Jibri iguais as do .env do C, e (com MANTER_SE_FALHAR=1) 'exec-jibri' com 'bash jibri-status.sh'."
     fi
+    # Daqui em diante o gravador esta pronto: uma falha (o aviso ao app) nao apaga mais a maquina.
+    JIBRI_HEALTHY=1
     echo "  saude: $(printf '%s' "$out" | tr -d '\n' | cut -c1-140)"
 
     log "6/6 Avisando o app (state=ready)"
@@ -202,6 +240,8 @@ down() {
     if [ -n "${SESSAO:-}" ]; then valid_sessao "$SESSAO"; names=$(jibri_name "$SESSAO"); else names=$(hzj server list --selector papel=jibri | jq -r '.[].name'); fi
     [ -n "$names" ] || { echo "Nenhum gravador ligado (label papel=jibri)."; return 0; }
     case "${FORCAR:-${FORCE:-}}" in 1|sim|true) forced=1 ;; esac
+    local only_preparing=""
+    case "${SO_SE_PREPARANDO:-}" in 1|sim|true) only_preparing=1 ;; esac
     for name in $names; do
         if ! server_exists "$name"; then
             # A maquina ja foi apagada, mas o primeiro "gone" pode ter se perdido: avisa o app de novo, senao o job
@@ -220,7 +260,15 @@ down() {
         code=$(recorder_request GET "/$sessao" "")
         rs=$(jq -r '.recorderStatus // empty' "$WORK_DIR/recorder-response" 2>/dev/null || true)
         echo "  app ($code): recorderStatus=${rs:-?} $(tr -d '\n' < "$WORK_DIR/recorder-response" 2>/dev/null | cut -c1-160)"
-        case "$rs" in uploaded|ready|unavailable|gone) ok_to_delete=1 ;; esac   # ready/unavailable/gone = nao houve gravacao
+        if [ -n "$only_preparing" ]; then
+            case "$rs" in
+                preparing|unavailable|gone) ;;
+                *) echo "  o app diz recorderStatus=${rs:-?}: o gravador saiu do preparo (ou o app nao respondeu); nada apagado (SO_SE_PREPARANDO)."; continue ;;
+            esac
+        fi
+        # ready/preparing/unavailable/gone = nao houve gravacao (o app so grava com o gravador pronto); o MP4 na maquina
+        # e conferido logo abaixo de qualquer jeito.
+        case "$rs" in uploaded|ready|preparing|unavailable|gone) ok_to_delete=1 ;; esac
         # 2. A maquina ainda tem MP4 sem a marca .uploaded do finalize.sh?
         ip=$(server_ip4 "$name"); target="$DEPLOY_USER@$ip"
         fw_open_ssh "$name"
