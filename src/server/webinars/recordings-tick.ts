@@ -15,7 +15,9 @@
 //   3. Devolver a maquina: `uploaded` (o MP4 esta na Bunny), ou `ready` com a sessao encerrada ha 30 min (maquina que
 //      nao gravou), ou `ready` numa live agendada remarcada para longe (o preparo da nova data a mais de 60 min: a
 //      maquina nao fica ligada ate la, e o passo 1 pede outra na nova janela), sem pedido de devolucao ou com o ultimo
-//      ha mais de 2 h sem `gone`: jibri-down e a hora do pedido.
+//      ha mais de 2 h sem `gone`: jibri-down e a hora do pedido. E o preparo abandonado (`preparing` ha mais de 70 min,
+//      recorderPrepareAbandoned: o jibri-up ja terminou sem avisar): jibri-down com SO_SE_PREPARANDO=sim, que so apaga
+//      com o app ainda em preparing e sem MP4 na maquina (03/11/2026: um gravador assim ficou 18 h ligado).
 //      Nunca em recording / uploading / upload_failed (canReleaseRecorder); `unavailable` nao tem maquina;
 //   4. Aviso de 6 h: a maquina viva ha mais de 6 h (recorderOverdue) vira uma notificacao no sino (kind 'webinar') do
 //      Apresentador e dos co-apresentadores, uma vez por pedido de maquina (recorder_alerted_at);
@@ -38,7 +40,7 @@ import { webinarConsoleHref } from "./editor-model";
 import { liveSessionEndsAtMs } from "./live-model";
 import { listLiveSessionsByRecorder, listProcessingRecordings, listRecordingsToPurge, updateLiveSession, updateRecorderStatus } from "./live-store";
 import { toTime } from "./model";
-import { RECORDER_RULES, RECORDER_STATUSES, canReleaseRecorder, recorderMachineAlive, recorderOverdue } from "./recorder-model";
+import { RECORDER_RULES, RECORDER_STATUSES, canReleaseRecorder, recorderMachineAlive, recorderOverdue, recorderPrepareAbandoned } from "./recorder-model";
 import type { RecorderDispatcher } from "./recorder-dispatch";
 import { parseBunnyEmbed } from "./room-model";
 import { RECORDING_COLUMNS, recorderStatusOf, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
@@ -329,19 +331,25 @@ async function checkProcessingRecordings(ctx: TickContext, bunny: BunnyStreamCli
 
 /**
  * A maquina pode voltar: o MP4 esta na Bunny, ou ela nao gravou e a sessao encerrou ha 30 min, ou ela esta pronta
- * (`ready`, nunca `preparing`, que ainda nao tem maquina confirmada) numa live agendada cujo preparo ficou para mais de
- * 60 min daqui (remarcada para outro dia: a maquina nao fica ligada ate la; o preparo automatico pede outra na nova
- * janela); sem pedido recente.
+ * (`ready`; a remarcacao nunca devolve `preparing`, que ainda nao tem maquina confirmada) numa live agendada cujo
+ * preparo ficou para mais de 60 min daqui (remarcada para outro dia: a maquina nao fica ligada ate la; o preparo
+ * automatico pede outra na nova janela), ou o preparo foi abandonado (`preparing` ha mais de 70 min:
+ * recorderPrepareAbandoned; o jibri-down vai com SO_SE_PREPARANDO=sim); sem pedido recente.
  */
 export function shouldReleaseRecorder(session: SessionRow, nowMs: number): boolean {
   const status = recorderStatusOf(session.recorder_status);
+  const abandoned = recorderPrepareAbandoned({ nowMs, requestedAt: session.recorder_requested_at ?? null, status });
 
-  if (session.kind !== "live" || !canReleaseRecorder(status)) {
+  if (session.kind !== "live" || (!canReleaseRecorder(status) && !abandoned)) {
     return false;
   }
 
   if (session.recorder_release_requested_at && nowMs - toTime(session.recorder_release_requested_at) < RECORDER_RULES.releaseRetryMinutes * MINUTE_MS) {
     return false;
+  }
+
+  if (abandoned) {
+    return true;
   }
 
   if (status === "uploaded") {
@@ -360,10 +368,11 @@ export function shouldReleaseRecorder(session: SessionRow, nowMs: number): boole
 }
 
 async function releaseRecorders(ctx: TickContext, dispatcher: RecorderDispatcher) {
-  const sessions = (await listLiveSessionsByRecorder(ctx.db, ["uploaded", "ready"])).filter((session) => shouldReleaseRecorder(session, ctx.nowMs));
+  const sessions = (await listLiveSessionsByRecorder(ctx.db, ["uploaded", "ready", "preparing"])).filter((session) => shouldReleaseRecorder(session, ctx.nowMs));
 
   await eachItem(ctx, sessions, (session) => `devolucao da maquina da sessao ${session.id}`, async (session) => {
-    const outcome = await dispatcher.release(session.id);
+    // O preparo abandonado so apaga com o app ainda em preparing (o gravador que ficou pronto nesse meio tempo fica).
+    const outcome = await dispatcher.release(session.id, recorderStatusOf(session.recorder_status) === "preparing" ? { onlyIfPreparing: true } : {});
 
     if (!outcome.ok) {
       console.error(`[webinarios] maquina da sessao ${session.id} nao devolvida (${outcome.reason}${outcome.status ? ` ${outcome.status}` : ""}); o tick tenta de novo.`);

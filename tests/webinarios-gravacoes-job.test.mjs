@@ -548,6 +548,33 @@ test("a maquina que a equipe desligou perto da hora (gone dentro da janela) nao 
   assert.equal(dispatcher.log.length, 0);
 });
 
+test("preparo abandonado: preparing ha mais de 70 min do pedido volta com SO_SE_PREPARANDO (o jibri-up ja terminou sem avisar); 70 min ainda nao; de novo depois de 2 h; nunca ready nem recording por isso", async () => {
+  const id = (n) => `acacacac-0000-4000-8000-0000000002${String(n).padStart(2, "0")}`;
+  const pedido = HORA_MARCADA - 30 * MIN;
+  const db = escola({
+    sessoes: [
+      sessaoRow(id(1), { recorder_requested_at: iso(pedido), recorder_status: "preparing", status: "live" }),
+      sessaoRow(id(2), { recorder_requested_at: iso(pedido + 10 * MIN), recorder_status: "preparing", status: "live" }),
+      sessaoRow(id(3), { recorder_requested_at: iso(pedido), recorder_status: "recording", status: "live" })
+    ]
+  });
+  const dispatcher = fakeRecorderDispatcher([]);
+
+  assert.equal((await rodar(db, pedido + 70 * MIN, { dispatcher })).released, 0, "no limite ainda nao: o jibri-up pode estar no fim do job");
+  const result = await rodar(db, pedido + 71 * MIN, { dispatcher });
+  assert.equal(result.released, 1);
+  assert.deepEqual(dispatcher.log, [{ force: false, onlyIfPreparing: true, sessionId: id(1), step: "jibri-down" }], "so apaga se o app ainda disser preparing");
+  assert.equal(sessaoDe(db, id(1)).recorder_release_requested_at, iso(pedido + 71 * MIN));
+  assert.equal(sessaoDe(db, id(1)).recorder_status, "preparing", "a situacao muda pelo webhook do jibri-down (gone), nao pelo tick");
+
+  await rodar(db, pedido + 81 * MIN, { dispatcher });
+  assert.deepEqual(dispatcher.log.map((item) => item.sessionId), [id(1), id(2)], "a segunda, 10 min depois");
+
+  await rodar(db, pedido + 71 * MIN + 2 * HOUR, { dispatcher });
+  assert.deepEqual(dispatcher.log.slice(2).map((item) => item.sessionId), [id(1)], "2 h sem gone: pede de novo");
+  assert.ok(!dispatcher.log.some((item) => item.sessionId === id(3)), "a que grava nunca");
+});
+
 /* ------------------------------------------------------------------------------------------------
  * 4. Aviso de 6 h
  * ---------------------------------------------------------------------------------------------- */

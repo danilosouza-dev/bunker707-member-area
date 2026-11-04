@@ -262,13 +262,15 @@ runner_ip() { curl -fsS --max-time 15 https://checkip.amazonaws.com | tr -d '[:s
 # O trap e armado ANTES de abrir, e uma falha ao fechar vira falha da etapa (nunca verde com a 22 aberta).
 # Cancelamento ou timeout do job matam o script sem trap: o servidor fica anotado em fw-abertos, e o passo
 # final do workflow (run.sh fechar-ssh, `if: always()`) fecha o que ficou.
+# Um script que define on_failure (jibri.sh up: apagar o gravador criado que nao ficou pronto) tem a funcao chamada no
+# mesmo trap, depois de fechar a 22, quando a saida e com erro.
 fw_open_ssh() {  # fw_open_ssh SERVER_NAME
     local name me; name=$(fw_name "$1"); me=$(runner_ip)
     log "Abrindo SSH do $1 para $me"
     fw_rules_for "$1" "$(cidr_or_empty "$me")" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-open-$name.json"
     FW_OPENED="${FW_OPENED:-} $1"
     printf '%s\n' "$1" >> "$WORK_DIR/fw-abertos"
-    trap 'rc=$?; set +e; fw_close_all || rc=1; exit $rc' EXIT
+    trap 'rc=$?; set +e; fw_close_all || rc=1; if [ "$rc" != 0 ] && declare -F on_failure >/dev/null; then on_failure; fi; exit $rc' EXIT
     hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-open-$name.json"
 }
 fw_close_all() {

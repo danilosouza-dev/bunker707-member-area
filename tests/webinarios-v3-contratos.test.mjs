@@ -241,6 +241,13 @@ test("o gravador: Gravar pela situacao, quem pode pedir e devolver a maquina, av
   assert.equal(rec.recorderPrepareStale({ nowMs: NOW, requestedAt: iso(NOW - prazo - 1000), status: "preparing" }), true);
   assert.equal(rec.recorderPrepareStale({ nowMs: NOW, requestedAt: null, status: "preparing" }), true, "sem a hora do pedido: vencido");
   assert.equal(rec.recorderPrepareStale({ nowMs: NOW, requestedAt: iso(NOW - prazo - 1000), status: "ready" }), false);
+  // O preparo abandonado (03/11/2026): ainda preparing depois do limite do job do workflow (60 min); o tick devolve.
+  const abandono = rec.RECORDER_RULES.prepareReleaseMinutes * 60_000;
+  assert.ok(rec.RECORDER_RULES.prepareReleaseMinutes > 60, "acima do timeout-minutes do job do infra.yml: o jibri-up ja terminou");
+  assert.equal(rec.recorderPrepareAbandoned({ nowMs: NOW, requestedAt: iso(NOW - abandono + 1000), status: "preparing" }), false);
+  assert.equal(rec.recorderPrepareAbandoned({ nowMs: NOW, requestedAt: iso(NOW - abandono - 1000), status: "preparing" }), true);
+  assert.equal(rec.recorderPrepareAbandoned({ nowMs: NOW, requestedAt: null, status: "preparing" }), true, "sem a hora do pedido: abandonado");
+  assert.equal(rec.recorderPrepareAbandoned({ nowMs: NOW, requestedAt: iso(NOW - abandono - 1000), status: "ready" }), false, "so o preparo");
   assert.ok(rec.canRequestRecorder("preparing", { stale: true }), "Preparar de novo depois do prazo");
   assert.equal(rec.recordButtonAction("preparing", { stale: true }), "unavailable", "o vencido nao entra na fila: a reserva");
   assert.ok(rec.canReleaseRecorder("uploaded") && rec.canReleaseRecorder("ready"));
@@ -271,6 +278,9 @@ test("o pedido ao workflow: jibri-up e jibri-down pela API do GitHub, so com o t
   assert.equal(pedido.headers.authorization, `Bearer ghp_${"x".repeat(36)}`);
   assert.equal(dispatch.recorderStepOptions("jibri-down", SESSION, { force: true }), `CONFIRMADO=sim SESSAO=${SESSION} FORCAR=1`);
   assert.equal(dispatch.recorderStepOptions("jibri-up", SESSION, { force: true }), `CONFIRMADO=sim SESSAO=${SESSION}`, "FORCAR so na devolucao");
+  assert.equal(dispatch.recorderStepOptions("jibri-down", SESSION, { onlyIfPreparing: true }), `CONFIRMADO=sim SESSAO=${SESSION} SO_SE_PREPARANDO=sim`);
+  assert.equal(dispatch.recorderStepOptions("jibri-up", SESSION, { onlyIfPreparing: true }), `CONFIRMADO=sim SESSAO=${SESSION}`, "SO_SE_PREPARANDO so na devolucao");
+  assert.deepEqual(JSON.parse(dispatch.recorderDispatchRequest({ onlyIfPreparing: true, sessionId: SESSION, step: "jibri-down", token: "ghp_" + "x".repeat(36) }).body).inputs, { etapa: "jibri-down", opcoes: `CONFIRMADO=sim SESSAO=${SESSION} SO_SE_PREPARANDO=sim` });
 
   const chamadas = [];
   const github = dispatch.recorderDispatcherFrom({ GITHUB_INFRA_TOKEN: "github_pat_" + "a".repeat(40) }, async (url, init) => {
