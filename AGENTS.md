@@ -32,7 +32,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/18-padrao-de-testes.md` (padrao de testes, dados de teste e rotina: toda PR de funcionalidade ou correcao traz teste de comportamento)
 - `docs/19-infra-hetzner-e-email.md` (infra propria na Hetzner, custos verificados, e-mail transacional no Resend e cronograma; vale para qualquer trabalho de deploy, e-mail ou infra)
 - `docs/20-runbook-hetzner.md` (servidor proprio na Hetzner: `infra/`, Dockerfile, deploy, backup, incidentes; nada cobrado e criado sem ok do produtor no chat)
-- `docs/21-retomada-migracao-hetzner.md` (estado da migracao para a Hetzner e proximos passos, na ordem; ler primeiro ao retomar esse trabalho)
+- `docs/21-retomada-migracao-hetzner.md` (estado da migracao para a Hetzner e proximos passos, na ordem; ler primeiro ao retomar esse trabalho; desde 03/11/2026 a producao fica guardada em snapshot, secao 10)
 - `docs/22-comunicacao-notificacoes-e-pop-ups.md` (Comunicacao v1: sino do aluno, avisos e pop-ups criados pela equipe, segmentos por regras, envio pelo tick e limites fixos; vale para qualquer trabalho em Comunicacao, sino ou pop-ups)
 - `docs/23-comunicacao-v2-fluxos.md` (Comunicacao v2: quem envia e icone de cada notificacao, tempo no sino, audio ouvido, notificacoes seguintes no editor e Fluxos com regras num motor so no tick, visitas de pagina e o limite de 3 por dia; vale para qualquer trabalho em Comunicacao, sino, notificacoes seguintes ou fluxos)
 - `docs/24-comunicacao-v3a-sino-e-avisos.md` (Comunicacao v3a: CRUD dos avisos no menu, editar e excluir a notificacao enviada, "Mostrar de novo" no pop-up "Uma vez", lixeira do aluno, cartao clicavel, Mudar resposta, reacoes, enquetes, regras novas e o sino numa consulta so com a primeira pagina guardada no navegador; vale para qualquer trabalho em Comunicacao, sino, avisos, reacoes ou enquetes)
@@ -71,7 +71,7 @@ Use `docs/11-inventario-coleta-astron.md` as the detailed UX/functionality refer
 - PostHog for product analytics
 - Sentry for monitoring
 - Trigger.dev or Inngest for background jobs
-- Hetzner in production (`main`, `deploy-membros`); Vercel + Supabase cloud as the test environment (`dev`, team-created accounts only). Flow: task branch -> PR to `dev` -> producer tests -> PR `dev` -> `main` -> deploy (`CONTRIBUTING.md`)
+- Hetzner in production (`main`, `deploy-membros`; kept in snapshot until launch since 03/11/2026: `restaurar` before any deploy or test there, `snapshot` with `CONFIRMAR=apagar` after, docs/20 §4A.7 and docs/21 §10); Vercel + Supabase cloud as the test environment (`dev`, team-created accounts only). Flow: task branch -> PR to `dev` -> producer tests -> PR `dev` -> `main` -> deploy (`CONTRIBUTING.md`)
 
 ## Engineering Conventions
 

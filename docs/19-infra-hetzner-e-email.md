@@ -22,7 +22,7 @@ Esta secao resume a decisao tomada em 18/10/2026 e substitui a recomendacao da s
 | Backup | Storage Box bx11 (1 TB), restic por SFTP (porta 23), um repositorio por servidor (`/bunker707/restic` e `/bunker707/restic-mautic`). |
 | E-mail | Resend (dominio `mail.bunker707.com.br`, verificado em 17/10/2026) ate o Amazon SES existir. SMTP na porta 587 para o Auth e para o Mautic; API para o app. |
 | Quem executa | A IA, pelo workflow `Infra (Hetzner)` do GitHub Actions. O produtor cola dois tokens nos segredos do repositorio e liga o 2FA; nenhum passo na maquina dele. |
-| Staging e producao | Vercel + Supabase cloud seguem como ambiente de desenvolvimento (staging). A Hetzner e a producao: migrada por completo como ensaio real, guardada em snapshot (centavos por mes) com os servidores apagados, e recriada dos snapshots quando o produtor disser "vai" (docs/20, secao 4A.7). Servidor desligado na Hetzner continua sendo cobrado; por isso snapshot, nao desligar. |
+| Staging e producao | Vercel + Supabase cloud seguem como ambiente de desenvolvimento (staging). A Hetzner e a producao: migrada por completo como ensaio real, guardada em snapshot (centavos por mes) com os servidores apagados, e recriada dos snapshots quando o produtor disser "vai" (docs/20, secao 4A.7). Servidor desligado na Hetzner continua sendo cobrado; por isso snapshot, nao desligar. Em 19/10/2026 os servidores ficaram ligados (estoque do CX23 intermitente); em 03/11/2026 o produtor voltou ao snapshot enquanto a producao so servir para a equipe testar (docs/20 §4A.7, docs/21 §10). |
 
 ### 0.2 Por que o banco fica junto com o app (servidor A)
 

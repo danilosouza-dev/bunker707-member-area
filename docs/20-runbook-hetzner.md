@@ -1,6 +1,6 @@
 # 20. Runbook: Bunker707 na Hetzner (servidor proprio)
 
-Data: 17/10/2026; atualizado em 18/10/2026. Estado em 18/10/2026: **decisao tomada de migrar agora** (docs/19, secao 0), em dois servidores (membros e marketing), executada pela IA pelo workflow do GitHub Actions (secao 4A). Nada e criado na Hetzner ate a etapa `provision` rodar com o ok do produtor no chat; a partir dela custa dinheiro. As secoes 5 a 8 dizem o que as etapas fazem e mantem o caminho manual como referencia. As secoes 4A e 8A foram acrescentadas em 18/10/2026 sem renumerar as demais.
+Data: 17/10/2026; atualizado em 18/10/2026. **Desde 03/11/2026 a producao (A, B e C) fica guardada em snapshot e so e ligada para os testes da equipe (secao 4A.7).** Estado em 18/10/2026: **decisao tomada de migrar agora** (docs/19, secao 0), em dois servidores (membros e marketing), executada pela IA pelo workflow do GitHub Actions (secao 4A). Nada e criado na Hetzner ate a etapa `provision` rodar com o ok do produtor no chat; a partir dela custa dinheiro. As secoes 5 a 8 dizem o que as etapas fazem e mantem o caminho manual como referencia. As secoes 4A e 8A foram acrescentadas em 18/10/2026 sem renumerar as demais.
 
 Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na secao 17.
 
@@ -33,7 +33,7 @@ Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na s
 
 **Ensaio local feito em 17/10/2026** (Mac M-series, Docker Desktop): `docker compose up` sobe os 13 containers em cerca de 25 s, as 37 migracoes do repositorio aplicam em 3,5 s no Postgres 17, a escola de teste entra pelo gateway, a aluna de teste faz login pelo navegador e abre a home com "Minhas compras". RAM ociosa: **1,27 GiB** no total (secao 4.3).
 
-**Custo estimado por mes** (precos de referencia de 17/10/2026, docs/19, secao 0.6; conferir no `plan`): com estoque da linha CX, CX33 (EUR 8,49) + CX23 (EUR 5,49) + 2 IPv4 (EUR 1,00) + Storage Box bx11 (EUR 3,20) = EUR 18,18. Sem estoque, CPX32 (EUR 35,49) ou CCX13 (EUR 42,99) para o servidor A e o menor tipo com 4 GB que o `plan` listar para o B. Servidor desligado continua cobrando; o jeito barato de "pausar" e snapshot + apagar.
+**Custo estimado por mes** (precos de referencia de 17/10/2026, docs/19, secao 0.6; conferir no `plan`): com estoque da linha CX, CX33 (EUR 8,49) + CX23 (EUR 5,49) + 2 IPv4 (EUR 1,00) + Storage Box bx11 (EUR 3,20) = EUR 18,18. Sem estoque, CPX32 (EUR 35,49) ou CCX13 (EUR 42,99) para o servidor A e o menor tipo com 4 GB que o `plan` listar para o B. Servidor desligado continua cobrando; o jeito barato de "pausar" e snapshot + apagar, e desde 03/11/2026 a producao fica guardada assim fora dos testes da equipe (secao 4A.7).
 
 ---
 
@@ -282,13 +282,32 @@ Como a chave do Resend chega a sessao da IA sem passar pelo chat, a combinar com
 
 ### 4A.7 Guardar a producao sem pagar servidor parado (snapshot)
 
-Decisao de 18/10/2026: a Vercel + Supabase cloud continuam como ambiente de desenvolvimento (staging) e a Hetzner e a producao, mas a producao so fica ligada quando o produtor disser "vai". Na Hetzner, servidor desligado e cobrado por inteiro (docs/19, secao 3.4); o jeito barato de guardar e snapshot + apagar: EUR 0,0143 por GB comprimido por mes (uns 10 GB usados dao cerca de EUR 0,15). O roteiro:
+Decisao de 18/10/2026, revista em 19/10/2026 (servidores ligados, por causa do estoque intermitente do CX23) e **retomada pelo produtor em 03/11/2026**: enquanto a producao so servir para a equipe testar (nenhum aluno, nenhuma venda), ela fica guardada em snapshot e so e ligada quando a equipe precisar dela, como o gravador por hora (§8B.5). Na Hetzner, servidor desligado e cobrado por inteiro (docs/19 §3.4); o jeito barato de guardar e snapshot + apagar (EUR 0,0143 por GB comprimido por mes). Ligada, a producao custa cerca de EUR 25 por mes sem IVA (tres CX23, tres IPv4 e o Storage Box); guardada, cerca de EUR 4,50 (o Storage Box fica, com os backups), ou menos de EUR 0,50 sem ele. **No dia em que entrarem alunos ou vendas reais, a producao volta a ficar ligada o tempo todo**: guardada, o aluno nao entra, a venda chega num servidor que nao existe e o acesso nao e liberado, e o tick (avisos, pop-ups, fluxos) para.
 
-1. Migracao completa como ensaio real: `plan`, `provision`, `deploy-membros`, `deploy-marketing`, `secrets-*`, `equipe`, `status`. A cobranca e por hora: algumas horas de CX33 + CX23 custam centavos.
-2. `snapshot` com `CONFIRMAR=apagar`: os dois servidores viram imagens (labels `app=bunker707`, `papel=membros|marketing`) e sao apagados; os registros DNS somem (os nomes param de responder). A Storage Box fica por padrao (EUR 3,20 por mes, com os backups); `APAGAR_STORAGE_BOX=1` apaga tudo e o custo mensal vira so os snapshots.
-3. Quando for a hora: `restaurar` (servidores novos a partir dos snapshots, DNS refeito) e `status`. Os certificados do Caddy, o banco, o `.env` e a chave de transferencia vem no snapshot. Se o snapshot tiver mais de alguns dias, rodar `deploy-membros` e `deploy-marketing` em seguida para subir o commit atual.
+**Guardar: etapa `snapshot` com `CONFIRMAR=apagar`** (`PAPEIS=meet`, `marketing` ou `membros` guarda so os pedidos, varios separados por virgula, como `PAPEIS=membros,marketing`, porque as opcoes do workflow sao separadas por espaco; padrao, os tres). Para cada papel que existe:
 
-Sem snapshot (por exemplo, se a producao ainda nao tiver nada de valor), o caminho equivalente e `provision` + `deploy-*` do zero, que leva uns 20 minutos.
+1. backup novo do A e do B no Storage Box (o C nao guarda dado de aluno). Se falhar, a etapa para antes de apagar qualquer coisa (`SEM_BACKUP=1` pula, so com motivo);
+2. desliga pelo sistema (ACPI: o Postgres fecha limpo; so corta a energia se o servidor nao responder em cerca de 3 min);
+3. snapshot com as labels `app=bunker707`, `papel`, `origem`, `tipo` e `local` (o tipo e o local de origem, que o `restaurar` usa);
+4. o servidor so e apagado com o snapshot disponivel, e o snapshot fica protegido contra exclusao. Se o snapshot nao ficar pronto, nada e apagado e o servidor volta a ligar;
+5. os registros DNS do papel somem (os nomes param de responder);
+6. ficam os `MANTER_SNAPSHOTS` (2) mais novos do papel; o mais velho sai.
+
+Com um gravador vivo o C nao e guardado (`FORCAR=1` passa por cima). Firewalls, chave SSH e Storage Box ficam. `APAGAR_STORAGE_BOX=1` apaga o box com os backups: nao usar antes de uma volta conferida, e so com o ok do produtor.
+
+**Duas copias independentes antes de cada servidor sumir**: o snapshot (Hetzner, mesmo projeto, protegido) e o backup restic no Storage Box (hel1, outro datacenter, com 30 dias de backups e snapshots diarios do proprio box). Se um snapshot nao voltar, ha o anterior (ficam 2) e, por ultimo, o caminho da secao 10.2 (servidor novo + backup).
+
+**Trazer de volta: etapa `restaurar`** (`PAPEIS=meet` traz so o Jitsi, por exemplo para um teste de live na dev). Para cada papel com snapshot e sem servidor:
+
+1. o tipo e o do servidor de origem (label `tipo`, hoje `cx23`), tentado no local de origem e depois em `LOCATION` e `FALLBACK_LOCATIONS`; `MEMBROS_TYPE`, `MARKETING_TYPE` ou `MEET_TYPE` forcam outro, com o ok do produtor. **Sem estoque do tipo em nenhum local, a etapa para e avisa: nunca sobe sozinha num tipo mais caro.** Um disco maior tambem nao volta mais para o tipo pequeno (o snapshot so cabe num disco do mesmo tamanho ou maior);
+2. firewall, DNS do papel (o `meet` sem proxy), stacks de pe com `up -d`, saude e smoke; no C, `JVB_ADVERTISE_IPS` passa a ser o IP novo (o Jitsi anuncia o IP publico para a midia);
+3. avisa quando o commit no servidor e outro que o do checkout: `deploy-membros` da `main` (ou `deploy-meet` com `SEM_LIVE_2H=sim`).
+
+Os certificados do Caddy, o banco, os `.env`, os timers de backup e a chave de transferencia vem no snapshot, e o snapshot continua guardado depois da volta. A cobranca e por hora a partir da criacao (cerca de EUR 0,01 por hora por CX23). O `status` lista os snapshots com o custo; `deploy-*` e `jibri-up` com o servidor guardado param com "rode restaurar".
+
+**Rotina da equipe.** As promocoes para a `main` seguem normais; o deploy so acontece com a producao ligada: `restaurar` -> `deploy-membros` (aplica de uma vez todas as migracoes pendentes) -> `status` -> testar -> `snapshot` com `CONFIRMAR=apagar`. Teste de live na dev (o C atende a Vercel tambem): `restaurar` com `PAPEIS=meet` (cerca de 15 min), testar, `snapshot` com `CONFIRMAR=apagar PAPEIS=meet`. Risco que fica: o estoque do CX23 e intermitente; num dia de teste da para esperar, e no lancamento a producao e ligada alguns dias antes.
+
+Sem snapshot nenhum, o caminho equivalente e `provision` + `deploy-*` do zero, que leva uns 20 minutos (e nasce sem os dados).
 
 ---
 
@@ -516,7 +535,7 @@ Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker)
 
 ## 8B. Webinarios: servidor C do Jitsi e o gravador por hora (servidor D) (29/10/2026)
 
-O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Estado em 29/10/2026**: o C existe (`provision-meet`
+O desenho esta no `docs/30` §6 e §7; aqui fica so a operacao. **Desde 03/11/2026 o C fica guardado em snapshot junto com a producao (§4A.7)**: para uma live (na dev ou na producao), `restaurar` com `PAPEIS=meet` antes e `snapshot` com `CONFIRMAR=apagar PAPEIS=meet` depois; o `jibri-up` com o C guardado para com "rode restaurar". **Estado em 29/10/2026**: o C existe (`provision-meet`
 com o ok do produtor no chat: `bunker707-meet`, cx23 em fsn1, EUR 6,49/mes sem IVA pela API, 2.31.106.201,
 `meet.bunker707.com.br` so DNS). Em seguida, no mesmo dia: `deploy-meet` da `dev` com
 `APP_DOMAIN=bunker707-member-area.vercel.app` (o `ROOM_GUARD_URL` do C aponta para a Vercel de teste, §8B.3),
@@ -539,7 +558,7 @@ no navegador ou Enviar gravacao).
 
 | Servidor | Papel | Tipo | Cobranca |
 |---|---|---|---|
-| C, `bunker707-meet` | a Live ao vivo: Jitsi proprio (web, prosody, jicofo, jvb) atras do Caddy, em `meet.<dominio>` | cx23 (`MEET_TYPE`) | mensal, a partir da criacao (preco lido pela API na hora; referencia `docs/30` §7.5) |
+| C, `bunker707-meet` | a Live ao vivo: Jitsi proprio (web, prosody, jicofo, jvb) atras do Caddy, em `meet.<dominio>` | cx23 (`MEET_TYPE`) | por hora enquanto existir, com teto mensal (preco lido pela API na hora; referencia `docs/30` §7.5); desde 03/11/2026 guardado em snapshot fora das lives e dos testes (§4A.7) |
 | D, `bunker707-jibri-<sessao>` | grava uma live em 1080p e envia o MP4 para a Bunny | cpx42 (`JIBRI_TYPE`; reserva ccx23 e cpx32, este em 720p) | por hora, so durante a live (uma live de 2,5 h ~ EUR 0,28) |
 
 O C nao guarda dado de aluno (chat, presenca e relatorio ficam no banco do A), por isso nao tem Storage Box nem backup:
@@ -695,6 +714,8 @@ sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao c
 mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
 
 ## 9. Deploy de nova versao do app
+
+**Com a producao guardada (secao 4A.7), `restaurar` antes do `deploy-membros`** (a etapa para com "rode restaurar" se o servidor nao existir) e `snapshot` com `CONFIRMAR=apagar` depois do teste.
 
 Desde 19/10/2026 a etapa so roda a partir da `main` (passo "Deploy so da main" do workflow): o caminho e branch da tarefa -> PR para `dev` (teste na Vercel com o Supabase da nuvem) -> PR `dev` -> `main` -> `deploy-membros` (ambientes em `CONTRIBUTING.md`). Em 18/10/2026 o caminho de producao passou a ser a etapa `deploy-membros` (secao 4A.3): ela constroi a imagem no runner com as `NEXT_PUBLIC_*` lidas do `.env` do servidor (`SUPABASE_PUBLIC_URL`, `SUPABASE_PUBLISHABLE_KEY` e, se preenchidos, PostHog e Sentry), publica `ghcr.io/<repositorio>:hetzner-sha-<commit>` e, no servidor, roda o `infra/scripts/deploy.sh --image` descrito abaixo. Nao ha variaveis `NEXT_PUBLIC_*` no GitHub. O `build-image.yml` continua rodando a cada push na `main` e em PR que mexe no build (Dockerfile, package.json, next.config) para conferir que o build passa; a imagem que ele publica (`sha-<commit>`) nao leva as `NEXT_PUBLIC_*` do servidor e nao e a de producao; por isso a de producao tem o prefixo `hetzner-`.
 
