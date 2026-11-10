@@ -1,6 +1,6 @@
 # 32. Produto licenciado: a área de membros instalada no servidor do comprador, com Licença anual ou vitalícia, instalação por um comando e módulos vendidos à parte (proposta, 10/11/2026)
 
-Data: 10/11/2026. Status: **proposta em discussão**. Em 10/11/2026 o produtor respondeu duas vezes à primeira versão desta página e tomou as decisões listadas logo abaixo; o resto continua esperando a decisão dele. Nada foi construído e nenhum arquivo de código foi alterado para produzir este documento.
+Data: 10/11/2026. Status: **proposta em discussão**. Em 10/11/2026 o produtor respondeu quatro vezes à primeira versão desta página e tomou as decisões listadas logo abaixo; o resto continua esperando a decisão dele. As primeiras peças da fase 1 já foram construídas (§16); o resto continua proposta.
 
 Pedido do produtor (04/11/2026, em duas mensagens): vender a área de membros como produto que o comprador instala na estrutura dele, no servidor próprio dele; controle profissional de licenças (o comprador compra 1, 2, 3 ou mais e não pode revender, copiar nem passar adiante; "se piratear, estraga o produto"); os webinários como um segundo produto, acoplado como plugin; uma aula, dentro da nossa área de membros, que ensina a instalar com IA (Claude Code ou Codex); o serviço de instalação para quem não quiser instalar sozinho; e uma instalação "de um clique", por um script que faça tudo em qualquer servidor (Hetzner, Contabo, Hostinger, HostGator) e que a IA consiga rodar e consertar quando algo der errado.
 
@@ -23,7 +23,11 @@ Pedido do produtor (04/11/2026, em duas mensagens): vender a área de membros co
 **E numa terceira mensagem, no mesmo dia:**
 
 11. **Decidiu:** a área de membros vendida fica neste repositório; o Emissor e o Painel de licenças vão para um repositório privado próprio, `bunker-licensing`, criado pelo produtor em 10/11/2026 (§11.2). A mudança foi feita no mesmo dia.
-12. **Decidiu:** os testes do produto são feitos na Hetzner, simulando um cliente novo de verdade, e não na Vercel. Proposta desta página, a confirmar: um servidor novo e vazio, como o de um comprador, num projeto da Hetzner separado da nossa produção, criado para cada ensaio e apagado depois. A nossa escola não serve de servidor de teste: instalar por cima dela arriscaria a escola e não simularia um cliente novo. O primeiro ensaio vem quando o instalador existir (fase 1); até lá, os testes rodam no CI, com o banco local.
+12. **Decidiu:** o produto vendido é testado na Hetzner, simulando um cliente novo de verdade, porque a Vercel não simula um comprador instalando no servidor dele. A nossa escola não serve de servidor de teste: instalar por cima dela arriscaria a escola e não simularia um cliente novo. Confirmado na quarta mensagem (item 13).
+
+**E numa quarta mensagem, no mesmo dia:**
+
+13. **Decidiu:** o servidor de ensaio (`bunker707-teste`, na Hetzner) serve só para simular um comprador real: um servidor novo e vazio, separado da nossa produção, em que a área é instalada do zero como um cliente instalaria. Com tudo funcionando, o ensaio acabou e o servidor é apagado, para não ficar pagando por ele. Depois o produtor vai abrir contas na Contabo e em outros provedores, para ensaiar em cada um (§3.1 e §12). **O teste da área de membros não muda:** a `dev` continua publicada na Vercel, com o Supabase da nuvem, e é lá que as mudanças do dia a dia são testadas; a `main` continua indo para a produção na Hetzner (docs/21). O primeiro ensaio vem quando o instalador existir (fase 1); até lá, os testes do produto rodam no CI, com o banco local, e nenhum servidor de ensaio é criado.
 
 O que essas respostas mudaram, e o que ainda depende dele, está no §13.
 
