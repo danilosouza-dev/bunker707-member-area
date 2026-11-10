@@ -1,0 +1,71 @@
+# Borda do servidor do Emissor de licencas (infra/licencas/docker-compose.yml; docs/32 §11.2; docs/20 §8C.4). Dois
+# sites, um por nome, cada um para uma porta local do compose do Emissor:
+#   LICENCAS_API_SITE_ADDRESS     a API publica das Instalacoes -> 127.0.0.1:EMISSOR_PORTA_NO_HOST, so /v1/* e /health.
+#                                 O nome tem registro A sem proxy da Cloudflare: nenhum desafio de robos, so IPv4, e o
+#                                 IP de quem pediu e o da propria conexao.
+#   LICENCAS_PAINEL_SITE_ADDRESS  o Painel de licencas da equipe -> 127.0.0.1:PAINEL_PORTA_NO_HOST. Proxy da Cloudflare
+#                                 com o Access na frente; aqui, so para LICENCAS_PAINEL_IPS e so com o token do Access
+#                                 no pedido (o Painel confere a assinatura dele a cada pedido).
+# O Emissor confia so no gateway da rede dele (EMISSOR_PROXIES_CONFIAVEIS=172.30.70.1, por onde este Caddy chega) e le
+# o IP de quem pediu no X-Forwarded-For, da direita para a esquerda: por isso cada site escreve ali um IP so, o certo,
+# e o que veio de fora no cabecalho nunca passa. Dominio puro no endereco = HTTPS automatico (Let's Encrypt).
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		# Painel atras da Cloudflare: o IP real vem em CF-Connecting-IP, aceito so das faixas dela. Nenhum outro
+		# cabecalho escolhe o IP (um X-Forwarded-For vindo do navegador nunca vale).
+		import /etc/caddy/cloudflare-trusted-proxies.caddyfile
+		client_ip_headers CF-Connecting-IP
+		# Quem chama a API e servidor (fetch do Node): sem HTTP/3, que o firewall tambem nao abre.
+		protocols h1 h2
+	}
+}
+
+(sem_server) {
+	header -Server
+}
+
+{$LICENCAS_API_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	@api path /v1/* /health
+	handle @api {
+		# O Emissor recusa acima de 32 KB; aqui o corte e antes de chegar nele.
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy 127.0.0.1:{$EMISSOR_PORTA_NO_HOST} {
+			# O IP da conexao, nunca o de um cabecalho: e para ele que a conferencia inicial bate nas portas 80 e 443.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# O Painel e qualquer outro caminho nao existem neste nome.
+	handle {
+		respond 404
+	}
+}
+
+{$LICENCAS_PAINEL_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	# As duas travas do lote fundador (docs/32 §11.2): a lista de IPs e o login do Cloudflare Access. O cabecalho
+	# Cf-Access-Jwt-Assertion so existe no pedido que passou pelo Access; o Painel confere a assinatura dele, e o
+	# Caddy repassa esse cabecalho e o Cf-Access-Authenticated-User-Email como vieram.
+	@permitido {
+		client_ip {$LICENCAS_PAINEL_IPS}
+		header Cf-Access-Jwt-Assertion *
+	}
+	handle @permitido {
+		reverse_proxy 127.0.0.1:{$PAINEL_PORTA_NO_HOST} {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	handle {
+		respond 403
+	}
+}

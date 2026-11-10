@@ -1,0 +1,36 @@
+# Borda do servidor do Emissor de licencas (bunker707-licencas; docs/32 D39 e §11.2; docs/20 §8C). So o Caddy: o
+# Emissor, o Postgres dele e, depois, o Painel sobem pelo compose.yaml do proprio bunker-licensing, que o
+# deploy-licencas tira da imagem <tag>-implantacao do GHCR e poe em /opt/bunker707/emissor (fora deste diretorio).
+#
+# O Caddy roda na rede do servidor (network_mode: host) para chegar nas portas que o compose do Emissor publica so em
+# 127.0.0.1 (EMISSOR_PORTA_NO_HOST e PAINEL_PORTA_NO_HOST, lidas do .env do Emissor pelo deploy-licencas). Por esse
+# caminho o Emissor ve a conexao vindo do gateway da rede `borda` dele (172.30.70.1), o proxy confiavel padrao de
+# EMISSOR_PROXIES_CONFIAVEIS, e le o IP de quem pediu no X-Forwarded-For que este Caddy escreve (caddy/Caddyfile).
+#
+# As variaveis vem de infra/licencas/.env no servidor, escrito pelo deploy-licencas (.env.example lista todas).
+name: bunker707-licencas-borda
+
+services:
+  caddy:
+    container_name: bunker707-licencas-caddy
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LICENCAS_API_SITE_ADDRESS: ${LICENCAS_API_DOMAIN:?LICENCAS_API_DOMAIN vazio no infra/licencas/.env}
+      LICENCAS_PAINEL_SITE_ADDRESS: ${LICENCAS_PAINEL_DOMAIN:?LICENCAS_PAINEL_DOMAIN vazio no infra/licencas/.env}
+      # Sem lista, ninguem abre o Painel (127.0.0.1 so casa com o proprio servidor).
+      LICENCAS_PAINEL_IPS: ${LICENCAS_PAINEL_IPS:-127.0.0.1/32}
+      EMISSOR_PORTA_NO_HOST: ${EMISSOR_PORTA_NO_HOST:-8080}
+      PAINEL_PORTA_NO_HOST: ${PAINEL_PORTA_NO_HOST:-8081}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL vazio no infra/licencas/.env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../compose/caddy/cloudflare-trusted-proxies.caddyfile:/etc/caddy/cloudflare-trusted-proxies.caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  # Os certificados do Let's Encrypt: nunca `docker compose down -v` (o Let's Encrypt limita as emissoes por semana).
+  caddy-data:
+  caddy-config:

@@ -115,6 +115,14 @@ infra/
     status.sh                   servidores, Storage Box, DNS, respostas publicas; com SSH=1, o interior de cada servidor
     deploy-key.mjs              chave SSH Ed25519 derivada do HCLOUD_TOKEN (HKDF), formato OpenSSH
     cloud-init.yaml             primeiro boot: so o usuario deploy com a chave; o resto e o bootstrap.sh
+    licencas.sh                 (10/11/2026) servidor do Emissor de licencas: plan, dns, segredos, deploy, backup,
+                                restaurar, ensaio e status (secao 8C); a criacao e o provision.sh licencas
+    licencas-chave.mjs          confere no runner a chave de emissao, o certificado e as raizes antes do secrets-licencas
+  licencas/                     (10/11/2026) o lado nosso do servidor bunker707-licencas (secao 8C)
+    docker-compose.yml          so o Caddy, na rede do servidor; o Emissor sobe pelo compose do bunker-licensing
+    caddy/Caddyfile             a API (sem proxy da Cloudflare) e o Painel (Access + lista de IPs), cada um numa porta
+    .env.example                as variaveis do lado nosso no servidor (nomes, portas, backup)
+    scripts/                    _env.sh, implantar.sh, backup.sh (de hora em hora), restore.sh (e --ensaio), smoke.sh
   mautic/                       (18/10/2026) stack do Mautic (secao 8A)
     docker-compose.yml          MySQL 8.4.11, Mautic 7.2.1 (web, cron, worker) e Caddy (perfil borda)
     compose.colocado.yml        plano B: entra na rede do compose principal, sem Caddy proprio
@@ -238,6 +246,7 @@ Valores padrao de `infra/cloud/lib.sh`: zona `bunker707.com.br`; local `fsn1` co
 | `carga` | `carga.sh`: teste de carga pelo dominio publico (Cloudflare). Cria um aluno (`carga@bunker707.test`, senha derivada do token, nunca impressa) e um curso de teste (`carga-*`, 2 modulos, 6 aulas), roda o k6 (imagem fixada por digest) no runner com `VUS` alunos (padrao 100; 1 min subindo, `DURACAO` no pico, padrao 3m) abrindo home, curso, aula e minhas compras com pausa de `PAUSA_MIN` a `PAUSA_MAX` s (1 a 4), mede CPU e memoria do servidor a cada 15 s e imprime mediana, p95 e maximo por pagina. Limites: p95 abaixo de 2 s por pagina, menos de 1% de erro e nenhuma pagina caindo no login. Aluno e curso sao apagados no fim, mesmo com erro (trap). | `HCLOUD_TOKEN` |
 | `chave-backup` | para cada servidor existente, deriva do `HCLOUD_TOKEN` a senha de recuperacao dos backups (`deploy-key.mjs --secret`, nunca impressa) e a cadastra como segunda chave do repositorio restic do papel (`backup.sh --add-key`); idempotente. O `deploy-*` faz o mesmo depois do `--init`. Sem o `.env` do servidor, o token abre o backup (secao 10.2). | `HCLOUD_TOKEN` |
 | `fechar-ssh` | passo final de todo disparo (`if: always()`): manda TERM aos scripts orfaos de um passo cancelado (o trap deles fecha a porta) e reescreve sem a 22 as regras dos servidores anotados em `fw-abertos`. Pode ser disparada a mao; sem nada anotado, nao faz nada. | `HCLOUD_TOKEN` |
+| `plan-licencas`, `provision-licencas`, `dns-licencas`, `secrets-licencas`, `deploy-licencas`, `backup-licencas`, `restaurar-licencas`, `ensaio-licencas`, `status-licencas`, `exec-licencas` | o servidor do Emissor de licencas, `bunker707-licencas` (secao 8C). Todas, menos `plan-licencas` e `status-licencas`, so rodam da `main`; criar pede `CONFIRMADO=sim` depois do ok do produtor e restaurar pede `CONFIRMAR=restaurar`. O snapshot e o restaurar da producao nunca tocam neste servidor | `HCLOUD_TOKEN`; DNS e deploy tambem `CLOUDFLARE_API_TOKEN`; os segredos `LICENCAS_*` (secao 8C.5) |
 | `restaurar` | `restaurar.sh`: para cada papel sem servidor, cria um novo a partir do snapshot mais recente daquele papel (tipo do `plan`, que so considera discos do tamanho do servidor de origem ou maiores, porque um snapshot nao cabe em disco menor; ou `MEMBROS_TYPE`/`MARKETING_TYPE`), aplica o firewall, confere os containers por SSH e refaz o DNS. Tudo volta como estava, so com IP novo; nao precisa de deploy. | `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN` |
 
 Ordem na migracao: `plan` -> `provision` -> `deploy-membros` -> `deploy-marketing` -> `secrets-membros` -> `secrets-marketing` -> `equipe` -> `status`. Todas sao idempotentes: rodar de novo completa o que faltou ou atualiza (um `deploy-membros` repetido e um deploy de nova versao). O `generate-secrets.sh` so roda quando o `.env` ainda nao existe: para mudar `STUDIO_ALLOWED_IPS` ou `MAUTIC_ADMIN_IPS` depois, editar o `.env` por `exec-*` e recriar o Caddy (`docker compose ... up -d caddy`).
@@ -714,6 +723,163 @@ A reserva **Gravar no navegador** do console usa a gravacao local do Jitsi, liga
 Antes de cada live: **Testar sala** no console (com a sessao ainda agendada, o Apresentador entra na sala da propria
 sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao chega a **Pronto**. Durante: o console
 mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
+
+## 8C. Emissor de licencas: o servidor `bunker707-licencas` (10/11/2026)
+
+O desenho esta no `docs/32` (§10, §11.2 e D39; o codigo, no repositorio privado `bunker-licensing`); aqui fica so a
+operacao. **Decisao do produtor (D39):** o Emissor e o Painel de licencas rodam num servidor so deles desde o comeco, o
+tipo e o local mais baratos da Hetzner, mesmo que mais lento, porque so a equipe abre o Painel e as Instalacoes conferem
+uma vez por dia. **Estado em 10/11/2026: as etapas existem e foram testadas so com a Hetzner e a Cloudflare de mentira
+(`tests/infra-licencas*.test.mjs`); nada foi criado.** Nada e criado nem cobrado sem o ok do produtor no chat.
+
+### 8C.1 O que roda e quanto custa
+
+| Peca | Onde | Observacao |
+|---|---|---|
+| Servidor | `bunker707-licencas`, o mais barato que o `plan-licencas` acha no dia, x86 ou ARM, em qualquer local que a API informa | minimo: 2 GB de memoria, 20 GB de disco, 1 vCPU (`LICENCAS_MIN_*`). O Emissor (Node) e, depois, o Painel usam uns 100 a 200 MB; o Postgres 16 com o banco pequeno, 50 a 150 MB; o Caddy, uns 30 MB; Docker e Ubuntu, uns 400 MB. Os 2 GB deixam folga para o `pg_dump`, o restic, o `apt` e a troca de imagem (o bootstrap ainda poe 2 GB de swap). Disco nao pesa: todo tipo da Hetzner tem 40 GB ou mais |
+| IPv4 | um, obrigatorio | a API e a conferencia inicial so falam IPv4 (`docs/32` §11.2) |
+| Emissor e Postgres 16 | `/opt/bunker707/emissor` (compose.yaml do `bunker-licensing`, `.env` e `segredos/`) | a imagem vem do GHCR (8C.2); nada e construido no servidor |
+| Caddy 2.11.7 | `infra/licencas/docker-compose.yml`, na rede do servidor | as duas portas locais do compose do Emissor (8C.4) |
+| Backup | o Storage Box que ja existe (`bunker707-backups`), repositorio `bunker707/restic-licencas` | de hora em hora (8C.6) |
+
+**Custo, a confirmar com o produtor antes do `provision-licencas`:** o preco do dia sai do `plan-licencas` (sem IVA),
+mais o IPv4 (cerca de EUR 0,50 por mes). Referencia conhecida: o CX23 (x86, 4 GB) custava EUR 6,49 por mes pela API em
+19/10/2026 (docs/21 §8); um ARM (CAX) ou outro local pode sair mais barato, e o plano escolhe sozinho. O Storage Box nao
+muda de preco (o banco do Emissor tem poucos MB). Sem snapshot: o servidor fica ligado o tempo todo, porque as
+Instalacoes dos compradores dependem dele. Com o servidor no ar, a cobranca e por hora ate o teto do mes.
+
+### 8C.2 A imagem do Emissor e os arquivos de implantacao (GHCR)
+
+Como a producao hoje (secao 9): a imagem e construida no GitHub e o servidor so puxa, entrando no GHCR com o
+`GITHUB_TOKEN` efemero do job (vence com ele) e saindo no fim. A diferenca e que a imagem do Emissor e publicada pelo
+CI do proprio `bunker-licensing`, e o `deploy-licencas` deste repositorio a puxa:
+
+- `ghcr.io/danilosouza-dev/bunker-licensing:<tag>` (`main` e `sha-<commit>`), amd64 e arm64;
+- `ghcr.io/danilosouza-dev/bunker-licensing:<tag>-implantacao`, uma imagem sem programa com o `compose.yaml` e o
+  `.env.example` do mesmo commit, que o deploy copia para `/opt/bunker707/emissor`. Assim o servidor roda sempre o
+  compose do mesmo commit da imagem, sem copia dele aqui e sem clonar o repositorio privado.
+
+Duas coisas fora deste repositorio, antes do primeiro `deploy-licencas` (a IA nao mexe no `bunker-licensing` daqui):
+
+1. o job de publicacao no CI do `bunker-licensing` (o YAML esta em docs/21 §11.3);
+2. **o produtor da leitura do pacote a este repositorio, uma vez**: GitHub > pacote `bunker-licensing` > Package
+   settings > Manage Actions access > Add repository > `bunker707-member-area`, papel Read. Sem isso o servidor nao
+   puxa a imagem ("Nao consegui puxar ... Manage Actions access").
+
+`LICENCAS_TAG=sha-<commit>` nas opcoes implanta uma versao exata (padrao `main`); o digest implantado fica em
+`/opt/bunker707/emissor/.imagem` e o historico em `.imagens`. Voltar uma versao e o mesmo deploy com a tag anterior,
+**desde que as duas tenham as mesmas migracoes**: o migrador do Emissor para quando o banco tem uma migracao que a
+imagem nao conhece; sem isso, o caminho e restaurar o backup de antes (8C.6).
+
+### 8C.3 Ordem para subir (da primeira vez)
+
+| Passo | Quem | O que |
+|---|---|---|
+| 1 | produtor | **Cerimonia das chaves**, no computador dele, de preferencia sem internet (README do `bunker-licensing`): as duas raizes e a chave de emissao. Os arquivos das raizes e as senhas delas ficam fora de qualquer servidor, em dois lugares, e uma copia com o depositario da continuidade (`docs/32` A23). **A chave raiz nunca vai para o GitHub nem para servidor nenhum** |
+| 2 | produtor | Os segredos do GitHub (8C.5), neste repositorio: Settings > Secrets and variables > Actions. Nunca no chat |
+| 3 | produtor | No `bunker-licensing`: o job de publicacao (docs/21 §11.3) e o acesso do pacote a este repositorio (8C.2) |
+| 4 | IA | `plan-licencas` (de qualquer branch): mostra os tipos, os precos por local e a escolha. Reportar o custo ao produtor |
+| 5 | produtor | O ok no chat, com o preco |
+| 6 | IA | `provision-licencas` da `main`, com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<preco aprovado>`: cria o servidor, o firewall `bunker707-licencas-fw`, o bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Se o preco do dia passou do aprovado, para sem criar nada |
+| 7 | IA | `dns-licencas` da `main`: registros A (8C.4) |
+| 8 | produtor | Cloudflare Zero Trust > Access > Applications > Self-hosted: aplicacao para `licencas.bunker707.com.br`, politica com os e-mails da equipe (o token da Cloudflare da infra nao tem permissao para criar). Sem ela o Painel responde 403 a todo mundo |
+| 9 | IA | `secrets-licencas` da `main` (8C.5) |
+| 10 | IA | `deploy-licencas` da `main`, com `PRODUCER_IP=<ip>` ou `LICENCAS_PAINEL_IPS=<ip1>,<ip2>` (quem abre o Painel; sem isso, ninguem). Ele confere o DNS, puxa a imagem, escreve o `.env` do compose, aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy e liga o backup de hora em hora |
+| 11 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
+| 12 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
+
+Toda etapa e idempotente: rodar de novo completa o que faltou. Um `deploy-licencas` repetido e uma atualizacao.
+
+### 8C.4 DNS, Cloudflare e Caddy
+
+| Nome (variavel em `infra/cloud/lib.sh`) | Registro | Proxy | Para que |
+|---|---|---|---|
+| `licencas-api.bunker707.com.br` (`LICENCAS_API_DOMAIN`) | so A | **sem** proxy | a API publica das Instalacoes. Sem o proxy, nenhum desafio de robos da Cloudflare barra a conferencia feita por servidor (o Bot Fight Mode do plano gratis vale para a zona inteira e nao tem excecao por regra), e o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. O nome vai gravado no produto vendido: trocar depois pede versao nova para todos |
+| `licencas.bunker707.com.br` (`LICENCAS_PAINEL_DOMAIN`) | so A | **com** proxy | o Painel de licencas da equipe, atras do Cloudflare Access |
+
+`dns-licencas` apaga qualquer AAAA dos dois nomes e nunca cria um. O `deploy-licencas` para se o DNS nao estiver
+assim (sem isso o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo). Consequencia de a API ficar
+fora do proxy: o IP do servidor fica publico, a API nao tem o WAF nem a protecao contra ataque da Cloudflare (a defesa e
+o limite de pedidos do proprio Emissor, o firewall e o Caddy), e por isso 80 e 443 ficam abertas para qualquer lugar.
+Por isso o Painel tem duas travas no Caddy: a lista de IPs (`client_ip`, com o IP real lido do `CF-Connecting-IP` so
+quando a conexao vem das faixas da Cloudflare) e o cabecalho `Cf-Access-Jwt-Assertion` presente; quem chega direto no
+IP sem passar pelo Access recebe 403, e o Painel ainda confere a assinatura do token a cada pedido.
+
+O Caddy roda na rede do servidor e manda cada nome para uma porta local do compose do Emissor, pelos nomes do
+`.env.example` do `bunker-licensing`: a API para `EMISSOR_PORTA_NO_HOST` (8080) e o Painel para `PAINEL_PORTA_NO_HOST`
+(8081). **Suposicao a confirmar quando o Painel chegar ao `bunker-licensing`**: o nome `PAINEL_PORTA_NO_HOST` e a
+porta 8081 (o deploy le os dois do `.env` do compose a cada rodada; se o nome for outro, mudar aqui e no
+`infra/licencas/docker-compose.yml`). Na API o Caddy so passa `/v1/*` e `/health` e corta o corpo acima de 64 KB.
+
+O IP de quem pediu: o Emissor confia so no gateway da rede `borda` dele (`EMISSOR_PROXIES_CONFIAVEIS=172.30.70.1`, por
+onde o Caddy chega) e le o `X-Forwarded-For` da direita para a esquerda. O Caddy escreve ali um IP so: na API, o IP da
+propria conexao (`{remote_host}`; o que vier no cabecalho e ignorado), e no Painel o IP real da Cloudflare
+(`{client_ip}`). Por isso as faixas da Cloudflare nao precisam entrar em `EMISSOR_PROXIES_CONFIAVEIS`. Se um dia a API
+passar para tras do proxy, trocar `{remote_host}` por `{client_ip}` e desligar o IPv6 da zona (docs/21 §11.4).
+
+### 8C.5 Segredos (etapa `secrets-licencas`)
+
+Segredos do repositorio no GitHub, cada um entregue so a etapa que o usa:
+
+| Segredo | O que e | Vai para |
+|---|---|---|
+| `LICENCAS_RAIZES` | a lista JSON das duas raizes **publicas**, como a cerimonia imprime: `[{"rid":"...","publicKey":"..."},...]` | `EMISSOR_RAIZES` no `.env` do compose (deploy) e a conferencia do secrets |
+| `LICENCAS_EMISSAO_CHAVE` | o conteudo do arquivo `emissao-*.pem` (cifrado com senha) | `segredos/emissao.pem` |
+| `LICENCAS_EMISSAO_SENHA` | a senha da chave de emissao (16 ou mais caracteres) | `segredos/emissao-senha` |
+| `LICENCAS_EMISSAO_CERTIFICADO` | a saida JSON de `bin/chaves.ts emissao` | `segredos/emissao-certificado.json` |
+| `LICENCAS_RESEND_CHAVE` | uma chave do Resend so de envio, restrita a `mail.bunker707.com.br`, so do Emissor | `segredos/resend-chave` (o nome que o compose do Emissor deve usar quando a fila de e-mail chegar) |
+| `LICENCAS_BANCO_SENHA` (opcional) | a senha do banco | `segredos/postgres-senha`; sem ela, a senha nasce no servidor e nunca sai dele |
+
+Antes de qualquer coisa sair do runner, `infra/cloud/licencas-chave.mjs` confere: a chave esta cifrada e abre com a
+senha; **ela nao e uma das raizes** (se alguem colar a raiz no lugar, a etapa para e nada sai); o certificado e dessa
+chave, serve para licenca, esta no prazo e foi assinado por uma das raizes. No servidor, cada valor chega pelo stdin
+do SSH (nunca em linha de comando) e vira um arquivo `1000:1000` (o usuario `node` do container) com `0400`, dentro de
+`segredos/` (`0700`, dono `deploy`), trocado de uma vez. Servicos do Emissor ja no ar sao recriados para ler o
+arquivo novo. A senha do banco so le na primeira subida do Postgres: trocar a de um banco que ja existe exige
+`TROCAR_SENHA_BANCO=sim`, que muda a senha dentro do banco antes do arquivo. A raiz nunca e segredo daqui.
+
+Trocar a chave de emissao (a cada ~400 dias, ou se vazar): nova `bin/chaves.ts emissao` com outro `--kid`, trocar os
+tres segredos `LICENCAS_EMISSAO_*` no GitHub e rodar `secrets-licencas`. As licencas ja emitidas continuam valendo.
+
+### 8C.6 Backup, restauracao e ensaio
+
+- **Backup** (`infra/licencas/scripts/backup.sh`, timer `bunker707-licencas-backup`, de hora em hora no minuto 17 UTC,
+  como `deploy`): `pg_dump -Fc` do banco do Emissor de dentro do container, pelo restic, para
+  `sftp:storagebox:bunker707/restic-licencas` (o Storage Box que ja existe, com a chave SSH derivada do token que o
+  `provision-licencas` instala). Os segredos nao entram: voltam pelo `secrets-licencas`. Cada backup sai marcado
+  `com-dados` ou `vazio` (banco sem Licenca nem Instalacao).
+- **Retencao:** os de hora em hora das ultimas 48 horas e um por dia dos ultimos 30 dias (`BACKUP_KEEP_HOURLY`,
+  `BACKUP_KEEP_DAILY`), agrupados pelo host; o `prune` roda uma vez por dia, as 03 UTC, e no `backup-licencas`, que tambem
+  confere 10% dos dados. Os dois ultimos dumps ficam tambem em `/var/backups/bunker707-licencas/stage`.
+- **Senhas:** a `RESTIC_PASSWORD` nasce no servidor (`infra/licencas/.env`) e nunca sai dele; a segunda chave do
+  repositorio e a de recuperacao, derivada do `HCLOUD_TOKEN` (a mesma regra da secao 10.2). Num servidor novo, depois de
+  um perdido, o `deploy-licencas` adota o repositorio antigo por essa chave, sem criar outro.
+- **Restaurar** (`restaurar-licencas` da `main`, com `CONFIRMAR=restaurar`; `SNAPSHOT=<id>` escolhe o backup, e sem ele
+  vale o mais novo `com-dados`, para o servidor novo e vazio de uma recuperacao nunca passar na frente do backup bom):
+  confere o arquivo, faz um backup do banco como esta, para o Emissor (o banco fica), troca o banco, sobe tudo (as
+  migracoes mais novas que o backup rodam antes) e confere o `/health`. Depois vale a **readocao** (`docs/32` §11.2): a
+  Instalacao ativada depois do backup apresenta o segredo e a licenca guardada na conferencia seguinte (em ate 24 h, ou
+  na hora pelo Verificar agora) e e aceita de volta, com o alerta `instalacao.readotada` no Painel. O que a equipe fez
+  no Painel depois do backup precisa ser refeito.
+- **Servidor perdido:** `provision-licencas` (com o ok do produtor), `dns-licencas`, `secrets-licencas`,
+  `deploy-licencas` (sobe vazio e faz backups `vazio`), `restaurar-licencas` com `CONFIRMAR=restaurar`. As Instalacoes
+  nao sentem nada enquanto o arquivo guardado valer (30 ou 90 dias, `docs/32` §2.1).
+- **Ensaio** (`ensaio-licencas`): restaura o backup num Postgres descartavel, sem rede, no proprio servidor, confere as
+  migracoes e conta Licencas, Instalacoes e eventos, compara com o banco em uso e apaga tudo. Nao para o Emissor nem
+  toca no banco. Rodar depois do primeiro deploy, uma vez por trimestre e antes de todo `restaurar-licencas` (com o
+  mesmo `SNAPSHOT`).
+
+### 8C.7 Incidentes
+
+| Sintoma | O que fazer |
+|---|---|
+| `deploy-licencas` para em "Nao consegui puxar ... -implantacao" | o CI do `bunker-licensing` publicou a imagem e os arquivos de implantacao? O pacote da leitura a este repositorio (8C.2)? A tag existe? |
+| `deploy-licencas` para em "DNS do Emissor fora do lugar" | `dns-licencas` e deploy de novo |
+| `/health` com `"ok":false` | `exec-licencas` com `COMANDO='cd /opt/bunker707/emissor && docker compose logs --tail 100 emissor'`: configuracao, chave, certificado vencido ou banco. O certificado vencido pede a troca da chave de emissao (8C.5) |
+| Instalacoes recebendo erro de rede, com o servidor no ar | `status-licencas` (as respostas publicas); o Caddy (`docker logs bunker707-licencas-caddy`); o certificado do Let's Encrypt; um AAAA que voltou no nome da API |
+| O Painel responde 403 para a equipe | o IP mudou: `deploy-licencas` com `PRODUCER_IP` ou `LICENCAS_PAINEL_IPS` novos; ou o Access nao esta na frente do nome |
+| Servidor perdido | 8C.6, "Servidor perdido" |
+| A chave de emissao vazou | trocar a chave (8C.5), olhar a auditoria no Painel e levar ao produtor: o certificado da chave vazada continua valendo no produto ate vencer, e o que fazer com as licencas assinadas por ela e decisao do desenho (`docs/32` §10) |
 
 ## 9. Deploy de nova versao do app
 

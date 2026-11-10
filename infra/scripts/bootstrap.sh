@@ -17,7 +17,8 @@
 #   8. CLI do Supabase (release oficial, versao pinada) para migrate.sh;
 #   9. pasta /opt/bunker707 para o repositorio.
 # Variaveis: SSH_PUBLIC_KEY, DEPLOY_USER (deploy), SSH_PORT (22), SWAP_GB (2), AUTO_REBOOT (true),
-#            SUPABASE_CLI_VERSION (2.121.0), REPO_DIR (/opt/bunker707).
+#            SUPABASE_CLI_VERSION (2.121.0), REPO_DIR (/opt/bunker707), SEM_SUPABASE_CLI (1 = pula o passo 8;
+#            o servidor do Emissor de licencas nao tem Supabase, docs/20 §8C).
 # Depois dele: docs/20-runbook-hetzner.md, "Primeiro deploy".
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -201,7 +202,9 @@ fi
 free -h | sed 's/^/  /'
 
 log "8/9 CLI do Supabase $SUPABASE_CLI_VERSION"
-if ! supabase --version 2>/dev/null | grep -q "$SUPABASE_CLI_VERSION"; then
+if [ -n "${SEM_SUPABASE_CLI:-}" ]; then
+    echo "  pulada (SEM_SUPABASE_CLI): este servidor nao tem Supabase."
+elif ! supabase --version 2>/dev/null | grep -q "$SUPABASE_CLI_VERSION"; then
     arch=$(dpkg --print-architecture)
     deb="/tmp/supabase_${SUPABASE_CLI_VERSION}_linux_${arch}.deb"
     curl -fsSL -o "$deb" "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_${arch}.deb"
@@ -215,7 +218,7 @@ if ! supabase --version 2>/dev/null | grep -q "$SUPABASE_CLI_VERSION"; then
     dpkg -i "$deb" >/dev/null
     rm -f "$deb"
 fi
-supabase --version
+[ -n "${SEM_SUPABASE_CLI:-}" ] || supabase --version
 restic self-update >/dev/null 2>&1 || true
 restic version
 

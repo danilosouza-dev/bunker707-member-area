@@ -1,8 +1,9 @@
 // Hetzner, Cloudflare, app e servidores de mentira para rodar os scripts de verdade de infra/cloud sem rede (docs/18 §2.5).
-// O hcloud guarda servidores, imagens e firewalls num JSON e recusa criar o tipo sem estoque; o curl responde como a
-// Cloudflare (DNS num JSON), como o checkip e como o webhook do gravador no app; o ssh e o scp anotam o comando e
-// respondem ao backup, ao commit, ao docker, a saude do Jibri e aos .env lidos por get_env. Tudo vai para um log so,
-// na ordem em que aconteceu. Usado por tests/infra-guardar-producao.test.mjs e tests/infra-gravador-falha.test.mjs.
+// O hcloud guarda servidores, imagens, firewalls, chaves SSH, tipos e o Storage Box num JSON e recusa criar o tipo sem
+// estoque; o curl responde como a Cloudflare (DNS num JSON), como o checkip e como o webhook do gravador no app; o ssh e o
+// scp anotam o comando e respondem ao backup, ao commit, ao docker, a saude do Jibri, aos .env lidos por get_env e ao que
+// o teste escolher em SSH_SHIM_REPLIES. Tudo vai para um log so, na ordem em que aconteceu. Usado por
+// tests/infra-guardar-producao.test.mjs, tests/infra-gravador-falha.test.mjs e tests/infra-licencas.test.mjs.
 
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -72,6 +73,13 @@ if (group === "image") {
   if (verb === "delete") { if (!image) fail("image not found"); if (image.protection?.delete) fail("image is protected"); state.images = state.images.filter((i) => i !== image); save(); process.exit(0); }
 }
 if (group === "server-type" && verb === "describe") { const t = state.serverTypes[target]; if (!t) fail("server type not found"); out({ name: target, ...t }); process.exit(0); }
+if (group === "server-type" && verb === "list") { out(Object.entries(state.serverTypes).map(([name, t]) => ({ name, ...t }))); process.exit(0); }
+if (group === "ssh-key") {
+  const key = (state.sshKeys || []).find((k) => k.name === target);
+  if (verb === "describe") { if (!key) fail("ssh key not found"); out(key); process.exit(0); }
+  if (verb === "create") { state.sshKeys = [...(state.sshKeys || []), { name: flag("--name"), public_key: flag("--public-key") }]; save(); process.exit(0); }
+}
+if (group === "storage-box" && verb === "describe" && state.storageBox) { out(state.storageBox); process.exit(0); }
 if (group === "firewall") {
   const fw = state.firewalls.find((f) => f.name === target);
   if (verb === "describe") { if (!fw) fail("firewall not found"); out(fw); process.exit(0); }
@@ -147,6 +155,10 @@ if (!control && command !== "true") { try { stdin = fs.readFileSync(0, "utf8"); 
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: stdin.slice(0, 80) }) + "\n");
 if (control) process.exit(0);
 const flagOn = (name) => Boolean(process.env[name]);
+// Respostas escolhidas pelo teste: [{ contem, saida, codigo }], a primeira cujo trecho aparece no comando.
+const replies = process.env.SSH_SHIM_REPLIES ? JSON.parse(process.env.SSH_SHIM_REPLIES) : [];
+const reply = replies.find((r) => command.includes(r.contem));
+if (reply) { if (reply.saida) process.stdout.write(reply.saida); process.exit(reply.codigo ?? 0); }
 // get_env (lib.sh): grep -E '^CHAVE=' arquivo | head -n1 | cut -d= -f2-, respondido pelo mapa SSH_SHIM_ENV.
 const key = /grep -E '\^([A-Z0-9_]+)='/.exec(command);
 if (key && command.includes("cut -d= -f2-")) {
@@ -210,7 +222,7 @@ export const hzCalls = (calls, prefix) => calls.filter((c) => c.tool === "hcloud
  * Uma conta de mentira: servidores, imagens, DNS e firewalls iniciais; `runScript(script, env, args)` roda o script de
  * infra/cloud com os binarios de mentira na frente do PATH; `calls()` le o log na ordem; `hz()` e `cf()` o estado.
  */
-export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls } = {}) {
+export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls, tipos, storageBox, sshKeys } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "bunker707-infra-"));
   tempDirs.push(dir);
   const shims = join(dir, "shims");
@@ -227,13 +239,14 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   const cfState = join(dir, "cloudflare.json");
   const log = join(dir, "chamadas.log");
   const fws = firewalls ?? ["bunker707-membros", "bunker707-marketing", "bunker707-meet"].map((s) => ({ name: `${s}-fw`, applied_to: [], rules: [] }));
-  writeFileSync(hzState, JSON.stringify({ servers, images, firewalls: fws, serverTypes, unavailable, imageStatus, nextImageId: 9000, nextIp: 10 }));
+  writeFileSync(hzState, JSON.stringify({ servers, images, firewalls: fws, serverTypes: tipos ?? serverTypes, unavailable, imageStatus, storageBox, sshKeys, nextImageId: 9000, nextIp: 10 }));
   writeFileSync(cfState, JSON.stringify({ records, settings: {}, nextId: 1 }));
   const work = join(dir, "work");
   mkdirSync(work);
   const env = (extra = {}) => {
     const base = { ...process.env };
-    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO"]) delete base[name];
+    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "GITHUB_REF", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "CONFIRMAR", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO", "SNAPSHOT", "SSH", "TROCAR_SENHA_BANCO", "SEM_BACKUP_ANTES"]) delete base[name];
+    for (const name of Object.keys(base)) if (name.startsWith("LICENCAS_")) delete base[name];
     return {
       ...base,
       PATH: `${shims}:${process.env.PATH}`,

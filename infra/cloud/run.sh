@@ -10,7 +10,10 @@
 #   snapshot (guarda a producao e apaga os servidores; CONFIRMAR=apagar), restaurar (volta no mesmo tipo; PAPEIS=meet),
 #   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
 #   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup),
-#   carga (teste de carga: VUS alunos navegando pelo dominio publico; dados de teste apagados no fim)
+#   carga (teste de carga: VUS alunos navegando pelo dominio publico; dados de teste apagados no fim),
+#   plan-licencas, provision-licencas, dns-licencas, secrets-licencas, deploy-licencas, backup-licencas,
+#   restaurar-licencas, ensaio-licencas, status-licencas, exec-licencas (servidor do Emissor de licencas, docs/20 §8C;
+#   o que muda alguma coisa so da main; criar com CONFIRMADO=sim, restaurar com CONFIRMAR=restaurar)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -22,12 +25,14 @@ for kv in ${OPCOES:-}; do
         *) echo "opcao ignorada (formato CHAVE=VALOR): $kv" >&2 ;;
     esac
 done
-exec_remote() {  # exec_remote membros|marketing|meet: roda COMANDO como deploy em REMOTE_DIR
+exec_remote() {  # exec_remote membros|marketing|meet|licencas: roda COMANDO como deploy em REMOTE_DIR
     . "$here/lib.sh"
+    [ "$1" != "licencas" ] || licencas_so_da_main
     need HCLOUD_TOKEN COMANDO; install_hcloud; deploy_key
     case "$1" in
         membros) server="$MEMBROS_NAME" ;;
         meet) server="$MEET_NAME" ;;
+        licencas) server="$LICENCAS_NAME" ;;
         *) if [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi ;;
     esac
     ip=$(server_ip4 "$server"); fw_open_ssh "$server"; wait_ssh "$DEPLOY_USER@$ip"
@@ -58,6 +63,16 @@ case "$etapa" in
     snapshot) bash "$here/snapshot.sh" ;;
     restaurar) bash "$here/restaurar.sh" ;;
     carga) bash "$here/carga.sh" ;;
+    plan-licencas) bash "$here/licencas.sh" plan ;;
+    provision-licencas) bash "$here/provision.sh" licencas ;;
+    dns-licencas) bash "$here/licencas.sh" dns ;;
+    secrets-licencas) bash "$here/licencas.sh" segredos ;;
+    deploy-licencas) bash "$here/licencas.sh" deploy ;;
+    backup-licencas) bash "$here/licencas.sh" backup ;;
+    restaurar-licencas) bash "$here/licencas.sh" restaurar ;;
+    ensaio-licencas) bash "$here/licencas.sh" ensaio ;;
+    status-licencas) bash "$here/licencas.sh" status ;;
+    exec-licencas) exec_remote licencas ;;
     chave-backup)
         . "$here/lib.sh"; need HCLOUD_TOKEN; install_hcloud; deploy_key
         for role in membros marketing; do
@@ -76,5 +91,5 @@ case "$etapa" in
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,13p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,16p "$0"; exit 2 ;;
 esac

@@ -5,6 +5,11 @@
 #   bash infra/cloud/provision.sh meet     so o servidor C do Jitsi (bunker707-meet; docs/30 §6 e docs/20 §8B),
 #                                          com CONFIRMADO=sim: firewall proprio, bootstrap, transfer.key e o
 #                                          DNS meet.<dominio> SEM proxy da Cloudflare; nada de Storage Box
+#   bash infra/cloud/provision.sh licencas so o servidor do Emissor de licencas (bunker707-licencas; docs/32 D39 e
+#                                          docs/20 §8C), com CONFIRMADO=sim e so da main: o tipo e o local mais
+#                                          baratos do plan-licencas (LICENCAS_PRECO_MAX para se o preco subiu),
+#                                          firewall proprio, bootstrap (Docker, restic) e a chave do Storage Box
+#                                          que ja existe; o DNS e a etapa dns-licencas
 # Variaveis: HCLOUD_TOKEN, CLOUDFLARE_API_TOKEN, e as de lib.sh (LOCATION, PRODUCER_EMAIL, PRODUCER_IP,
 # SKIP_MARKETING, MEMBROS_TYPE, MARKETING_TYPE, MEET_TYPE). Sem *_TYPE, usa a escolha mais barata de plan.sh
 # (o meet nao passa pelo plan: cx23 por padrao, docs/30 D1).
@@ -16,11 +21,17 @@
 
 . "$(dirname -- "$0")/lib.sh"
 role="${1:-}"
-[ -z "$role" ] || [ "$role" = "meet" ] || die "uso: provision.sh [meet]"
+[ -z "$role" ] || [ "$role" = "meet" ] || [ "$role" = "licencas" ] || die "uso: provision.sh [meet|licencas]"
 if [ "$role" = "meet" ]; then
     [ "${CONFIRMADO:-}" = "sim" ] || die "provision-meet cria o servidor C do Jitsi (cobrado por mes a partir de agora). Confirme com CONFIRMADO=sim nas opcoes, depois do ok do produtor no chat (docs/20 §8B.2)."
 fi
-need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
+if [ "$role" = "licencas" ]; then
+    licencas_so_da_main
+    [ "${CONFIRMADO:-}" = "sim" ] || die "provision-licencas cria o servidor do Emissor de licencas (cobrado por mes a partir de agora). Rode plan-licencas, mostre o preco ao produtor e, com o ok dele no chat, confirme com CONFIRMADO=sim (e LICENCAS_PRECO_MAX com o preco aprovado) nas opcoes (docs/20 §8C.3)."
+    need HCLOUD_TOKEN
+else
+    need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
+fi
 install_hcloud
 deploy_key
 
@@ -59,17 +70,17 @@ create_server() {  # create_server NOME TIPO LOCAL PAPEL
     done
     die "Nenhum local tem $type disponivel para esta conta. Rode plan.sh e force outro tipo (MEMBROS_TYPE/MARKETING_TYPE/MEET_TYPE)."
 }
-# bootstrap_server NOME: por SSH como root, infra/scripts/bootstrap.sh e a chave RSA de transferencia de
-# segredos (so o servidor abre); imprime a transfer.pub em base64 para o envelope. Deixa a 22 aberta para o
-# chamador (fw_open_ssh ja feito).
+# bootstrap_server NOME [VAR=VALOR ...]: por SSH como root, infra/scripts/bootstrap.sh (com as variaveis a mais) e a
+# chave RSA de transferencia de segredos (so o servidor abre); imprime a transfer.pub em base64 para o envelope.
+# Deixa a 22 aberta para o chamador (fw_open_ssh ja feito).
 bootstrap_server() {
-    local name="$1" ip; ip=$(server_ip4 "$name")
+    local name="$1" ip; ip=$(server_ip4 "$name"); shift
     wait_ssh "root@$ip"
     # O cloud-init do primeiro boot ainda esta instalando pacotes quando o SSH abre: esperar, senao o apt
     # do bootstrap disputa a trava do dpkg.
     rsh "root@$ip" "cloud-init status --wait >/dev/null 2>&1 || true"
     rcopy "$REPO_ROOT/infra/scripts/bootstrap.sh" "root@$ip:/root/bootstrap.sh"
-    rsh "root@$ip" "SSH_PUBLIC_KEY='$pub' DEPLOY_USER='$DEPLOY_USER' REPO_DIR='$REMOTE_DIR' bash /root/bootstrap.sh" | tail -n 15
+    rsh "root@$ip" "$* SSH_PUBLIC_KEY='$pub' DEPLOY_USER='$DEPLOY_USER' REPO_DIR='$REMOTE_DIR' bash /root/bootstrap.sh" | tail -n 15
     # Chave RSA para receber segredos (chave do Resend etc.) cifrados pela sessao do Claude: so o servidor abre.
     rsh "root@$ip" "install -d -m 700 /etc/bunker707 && [ -f /etc/bunker707/transfer.key ] || { openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /etc/bunker707/transfer.key && chmod 600 /etc/bunker707/transfer.key && openssl pkey -in /etc/bunker707/transfer.key -pubout -out /etc/bunker707/transfer.pub; }"
     rsh "root@$ip" "chown -R '$DEPLOY_USER:$DEPLOY_USER' '$REMOTE_DIR'"
@@ -80,6 +91,57 @@ print_transfer_pub() {
     echo "  transfer.pub ($name), base64 numa linha (para infra/cloud/envelope.sh):"
     rsh "root@$ip" "base64 -w0 /etc/bunker707/transfer.pub"; echo
 }
+# install_backup_key IP ARQUIVO: a chave de backup (SFTP no Storage Box, derivada do token) em
+# ~deploy/.ssh/id_ed25519_storagebox, pelo stdin do SSH como root.
+install_backup_key() {
+    local ip="$1" key="$2"
+    rsh "root@$ip" "install -d -m 700 -o '$DEPLOY_USER' -g '$DEPLOY_USER' /home/$DEPLOY_USER/.ssh && cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chmod 600 /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox" < "$key"
+    rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$key.pub"
+    echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
+}
+
+# ====== servidor do Emissor de licencas (provision-licencas) =============================================
+if [ "$role" = "licencas" ]; then
+    log "1/5 Chave SSH '$SSH_KEY_NAME' no projeto da Hetzner"
+    ensure_project_ssh_key
+    if server_exists "$LICENCAS_NAME"; then
+        log "2/5 Servidor $LICENCAS_NAME"
+        echo "  ja existe: $(hzj server describe "$LICENCAS_NAME" | jq -r '"\(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.status)"') (nada criado; o bootstrap confere de novo)"
+        fw_ensure "$LICENCAS_NAME"
+    else
+        log "2/5 Tipo e local: o mais barato que serve hoje (plan-licencas)"
+        bash "$CLOUD_DIR/licencas.sh" plan
+        # shellcheck disable=SC1091
+        . "$WORK_DIR/plan-licencas.env"
+        if [ -n "${LICENCAS_PRECO_MAX:-}" ]; then
+            awk -v p="$LICENCAS_PRICE" -v m="$LICENCAS_PRECO_MAX" 'BEGIN { exit !(p + 0 <= m + 0) }' \
+                || die "O mais barato hoje ($LICENCAS_TYPE em $LICENCAS_LOCATION, EUR $LICENCAS_PRICE/mes) passa do LICENCAS_PRECO_MAX=$LICENCAS_PRECO_MAX aprovado pelo produtor. Nada foi criado: mostre o preco novo a ele."
+        fi
+        log "3/5 Servidor $LICENCAS_NAME ($LICENCAS_TYPE em $LICENCAS_LOCATION, EUR $LICENCAS_PRICE/mes sem IVA, mais o IPv4)"
+        fw_ensure "$LICENCAS_NAME"
+        # Sem estoque na hora: so os outros locais com o mesmo tipo e o mesmo preco que o plan achou (o preco aprovado).
+        FALLBACK_LOCATIONS="$LICENCAS_FALLBACK_LOCATIONS"
+        create_server "$LICENCAS_NAME" "$LICENCAS_TYPE" "$LICENCAS_LOCATION" licencas
+    fi
+    fw_apply "$LICENCAS_NAME"
+    hz server poweron "$LICENCAS_NAME" >/dev/null 2>&1 || true
+
+    log "4/5 Bootstrap do $LICENCAS_NAME (ufw, Docker, fail2ban, swap, restic; sem a CLI do Supabase) e a chave do Storage Box"
+    backup_key="$WORK_DIR/storagebox_key"
+    node "$CLOUD_DIR/deploy-key.mjs" --out "$backup_key" --info bunker707-backup-key-v1 >/dev/null
+    fw_open_ssh "$LICENCAS_NAME"
+    bootstrap_server "$LICENCAS_NAME" SEM_SUPABASE_CLI=1
+    install_backup_key "$(server_ip4 "$LICENCAS_NAME")" "$backup_key"
+    fw_close_all
+    rm -f "$backup_key" "$backup_key.pub"
+    [ -n "$(storage_box_json)" ] || warn "O Storage Box $STORAGE_BOX_NAME nao existe: o deploy-licencas para sem ele (o Emissor nao sobe sem backup)."
+
+    log "5/5 Resumo"
+    hzj server describe "$LICENCAS_NAME" | jq -r '"  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status)"'
+    echo "  firewall: 80 e 443 de qualquer lugar (API publica; o Painel so passa pela Cloudflare e pela lista de IPs do Caddy), 22 so durante as etapas."
+    echo "Proximo: dns-licencas, secrets-licencas e deploy-licencas, todas da main (docs/20 §8C.3)."
+    exit 0
+fi
 
 # ====== servidor C do Jitsi (provision-meet) =============================================================
 if [ "$role" = "meet" ]; then
@@ -176,9 +238,7 @@ for role in $roles; do
     ip=$(server_ip4 "$name")
     fw_open_ssh "$name"
     bootstrap_server "$name"
-    rsh "root@$ip" "install -d -m 700 -o '$DEPLOY_USER' -g '$DEPLOY_USER' /home/$DEPLOY_USER/.ssh && cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chmod 600 /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox" < "$backup_key"
-    rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$backup_key.pub"
-    echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
+    install_backup_key "$ip" "$backup_key"
     print_transfer_pub "$name"
     fw_close_all
 done

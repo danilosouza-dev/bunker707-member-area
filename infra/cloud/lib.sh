@@ -13,6 +13,8 @@
 #   SKIP_MARKETING=1       Mautic no mesmo servidor do app (colocacao), sem o segundo servidor
 #   MEET_TYPE              tipo do servidor C do Jitsi (cx23); JIBRI_TYPE, o do gravador por hora (cpx42)
 #   JIBRI_SECRETS          segredo do repositorio com as linhas CHAVE=VALOR do gravador (docs/20 §8B.3)
+#   LICENCAS_*             o servidor do Emissor de licencas (bunker707-licencas, docs/32 D39; docs/20 §8C): nomes,
+#                          imagem e minimos abaixo; LICENCAS_TYPE e LICENCAS_LOCATION forcam o tipo e o local
 # Nunca imprime segredos; o que precisa ser guardado vai mascarado para o log do Actions (::add-mask::).
 
 set -euo pipefail
@@ -52,6 +54,27 @@ MAUTIC_DOMAIN="${MAUTIC_DOMAIN:-marketing.$ZONE_NAME}"
 MEET_DOMAIN="${MEET_DOMAIN:-meet.$ZONE_NAME}"
 # Webhook do gravador no app (docs/30 §5.3); JIBRI_SECRETS pode trazer outro WEBINAR_RECORDER_WEBHOOK_URL.
 RECORDER_WEBHOOK_URL="${WEBINAR_RECORDER_WEBHOOK_URL:-https://$APP_DOMAIN/api/webhooks/recorder}"
+
+# Emissor de licencas (docs/32 D39 e §11.2; docs/20 §8C): servidor so dele, o tipo e o local mais baratos que servem.
+LICENCAS_NAME="${LICENCAS_NAME:-bunker707-licencas}"
+# O Painel de licencas (so a equipe: proxy da Cloudflare com o Access, e lista de IPs no Caddy) e a API publica das
+# Instalacoes (registro A sem proxy da Cloudflare: nenhum desafio de robos e so IPv4, que a conferencia inicial pede).
+# O nome da API vai gravado no produto vendido: trocar depois pede versao nova para todos os compradores.
+LICENCAS_PAINEL_DOMAIN="${LICENCAS_PAINEL_DOMAIN:-licencas.$ZONE_NAME}"
+LICENCAS_API_DOMAIN="${LICENCAS_API_DOMAIN:-licencas-api.$ZONE_NAME}"
+# Imagem do Emissor publicada pelo CI do bunker-licensing no GHCR; a tag <tag>-implantacao traz o compose.yaml e o
+# .env.example do mesmo commit (docs/20 §8C.2).
+LICENCAS_IMAGEM="${LICENCAS_IMAGEM:-ghcr.io/danilosouza-dev/bunker-licensing}"
+LICENCAS_TAG="${LICENCAS_TAG:-main}"
+# No servidor: o compose do Emissor, o .env dele e segredos/ ficam em REMOTE_DIR/emissor, fora do que o sync_repo troca.
+LICENCAS_EMISSOR_DIR="${LICENCAS_EMISSOR_DIR:-$REMOTE_DIR/emissor}"
+# Backup de hora em hora no Storage Box que ja existe, num repositorio restic so dele.
+LICENCAS_RESTIC_REPOSITORY="${LICENCAS_RESTIC_REPOSITORY:-sftp:storagebox:bunker707/restic-licencas}"
+# O minimo para Node (Emissor e, depois, o Painel), Postgres 16 e Caddy num servidor so (docs/20 §8C.1).
+LICENCAS_MIN_RAM_GB="${LICENCAS_MIN_RAM_GB:-2}"
+LICENCAS_MIN_DISK_GB="${LICENCAS_MIN_DISK_GB:-20}"
+LICENCAS_MIN_VCPU="${LICENCAS_MIN_VCPU:-1}"
+LICENCAS_ARQUITETURAS="${LICENCAS_ARQUITETURAS:-x86 arm}"
 
 HCLOUD_VERSION="${HCLOUD_VERSION:-1.70.1}"
 HCLOUD_SHA256="${HCLOUD_SHA256:-85182e0d51f9a26abeefd79b37de8a7fb51215d54c59ee290c3c9141e8aa887e}"
@@ -216,11 +239,32 @@ rules.append({"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0",
 print(json.dumps(rules))
 PY
 }
+# fw_rules_licencas [cidr ...]: o servidor do Emissor (docs/20 §8C.4). A API publica tem registro A sem proxy da
+# Cloudflare (as Instalacoes conferem de qualquer lugar, por IPv4), entao 80 e 443 vem de qualquer lugar: 80 para o
+# Let's Encrypt e o redirecionamento, 443 para a API e para o Painel, que so passa da Cloudflare (Access) e da lista de
+# IPs do Caddy. Sem HTTP/3 (o Caddy dele fala h1 e h2). 22 so dos CIDRs informados, como nos outros servidores.
+fw_rules_licencas() {
+    python3 -I - "$@" <<'PY'
+import json, sys
+ssh = [c for c in sys.argv[1:] if c]
+anywhere = ["0.0.0.0/0", "::/0"]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules += [
+    {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt e redirecionamento)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (API das Instalacoes; o Painel so pela Cloudflare e pela lista de IPs)"},
+    {"direction": "in", "protocol": "icmp", "source_ips": anywhere, "description": "ping do monitor"},
+]
+print(json.dumps(rules))
+PY
+}
 # fw_rules_for SERVER_NAME [cidr ...]: o conjunto de regras de cada papel, pelo nome do servidor.
 fw_rules_for() {
     local name="$1"; shift
     case "$name" in
         "$MEET_NAME") fw_rules_meet "$@" ;;
+        "$LICENCAS_NAME") fw_rules_licencas "$@" ;;
         "$JIBRI_NAME_PREFIX"*) fw_rules_jibri "$@" ;;
         *) fw_rules "$@" ;;
     esac
@@ -257,6 +301,17 @@ if [ -n "$PRODUCER_IP" ]; then
     python3 -I -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1], strict=False); sys.exit(0 if n.prefixlen >= (24 if n.version == 4 else 48) else 1)' \
         "$(cidr_or_empty "$PRODUCER_IP")" 2>/dev/null || die "PRODUCER_IP invalido ou amplo demais (no minimo /24 ou /48): $PRODUCER_IP"
 fi
+# small_cidrs NOME VALOR: a lista (virgula ou espaco) de IPs ou redes pequenas (no maximo /24 ou /48), em CIDR e
+# separada por espaco, ou a etapa para. Para listas de acesso que vao a uma configuracao (o Painel de licencas).
+small_cidrs() {
+    local name="$1" item out=""
+    for item in ${2//,/ }; do
+        python3 -I -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1], strict=False); sys.exit(0 if n.prefixlen >= (24 if n.version == 4 else 48) else 1)' \
+            "$(cidr_or_empty "$item")" 2>/dev/null || die "$name tem um IP invalido ou uma rede ampla demais (no minimo /24 ou /48): $item"
+        out="${out:+$out }$(cidr_or_empty "$item")"
+    done
+    printf '%s' "$out"
+}
 runner_ip() { curl -fsS --max-time 15 https://checkip.amazonaws.com | tr -d '[:space:]'; }
 # Abre a porta 22 para esta maquina (e o produtor, se PRODUCER_IP) e fecha de novo ao sair do script.
 # O trap e armado ANTES de abrir, e uma falha ao fechar vira falha da etapa (nunca verde com a 22 aberta).
@@ -314,10 +369,11 @@ wait_ssh() {  # wait_ssh user@host [tentativas]
 }
 # Envia o repositorio (o commit atual) para REMOTE_DIR, sem tocar em .env, volumes e dados.
 # As migracoes sao trocadas inteiras: uma renomeada ou removida no repositorio nao pode sobrar no servidor
-# para o migrate.sh aplicar.
-sync_repo() {  # sync_repo user@host
-    local target="$1"
-    git -C "$REPO_ROOT" archive --format=tar HEAD | rsh "$target" "mkdir -p '$REMOTE_DIR' && rm -rf '$REMOTE_DIR/supabase/migrations' && tar -x -C '$REMOTE_DIR'"
+# para o migrate.sh aplicar. Com caminhos, envia so eles (o servidor de licencas recebe so a infra dele, nunca o
+# codigo do produto).
+sync_repo() {  # sync_repo user@host [caminho ...]
+    local target="$1"; shift
+    git -C "$REPO_ROOT" archive --format=tar HEAD -- "$@" | rsh "$target" "mkdir -p '$REMOTE_DIR' && rm -rf '$REMOTE_DIR/supabase/migrations' && tar -x -C '$REMOTE_DIR'"
     rsh "$target" "echo '$(git -C "$REPO_ROOT" rev-parse HEAD)' > '$REMOTE_DIR/.deployed-commit'"
 }
 # set_env user@host ARQUIVO CHAVE VALOR: grava CHAVE=VALOR no .env remoto (troca a linha ou acrescenta).
@@ -357,9 +413,14 @@ remote_auth_curl() {
 # Senha de recuperacao dos backups: derivada do HCLOUD_TOKEN e cadastrada como segunda chave do repositorio
 # restic do papel. Sem o .env do servidor (servidor perdido), quem tem o token abre o backup (docs/20 §10.2).
 # A senha vai pelo stdin do SSH para um arquivo temporario 0600 no servidor, apagado em seguida.
-backup_recovery_key() {  # backup_recovery_key user@host membros|marketing
+backup_recovery_key() {  # backup_recovery_key user@host membros|marketing|licencas
     local target="$1" script f="$WORK_DIR/restic-recovery"
-    case "$2" in membros) script=infra/scripts/backup.sh ;; marketing) script=infra/mautic/scripts/backup.sh ;; *) die "papel invalido: $2" ;; esac
+    case "$2" in
+        membros) script=infra/scripts/backup.sh ;;
+        marketing) script=infra/mautic/scripts/backup.sh ;;
+        licencas) script=infra/licencas/scripts/backup.sh ;;
+        *) die "papel invalido: $2" ;;
+    esac
     node "$CLOUD_DIR/deploy-key.mjs" --secret --info bunker707-restic-recovery-v1 --out "$f" 2>/dev/null
     rsh "$target" "umask 077; k=\$(mktemp); cat > \"\$k\"; cd '$REMOTE_DIR' && bash $script --add-key=\"\$k\"; rc=\$?; rm -f \"\$k\"; exit \$rc" < "$f"
     rm -f "$f"
@@ -463,6 +524,51 @@ cf_apply_dns_meet() {
     cf_dns_upsert "$sub" A "$ip4" false
     [ -n "$ip6" ] && cf_dns_upsert "$sub" AAAA "$ip6" false
     return 0
+}
+
+# cf_dns_delete NOME TIPO: apaga os registros do tipo para NOME.ZONE_NAME (nenhum = nada a fazer).
+cf_dns_delete() {
+    local zone fqdn ids id; zone=$(cf_zone_id); fqdn="$1.$ZONE_NAME"
+    ids=$(cf_api GET "/zones/$zone/dns_records?type=$2&name=$fqdn" | jq -r '.result[].id')
+    for id in $ids; do cf_api DELETE "/zones/$zone/dns_records/$id" >/dev/null; done
+    [ -z "$ids" ] || printf '  %-10s %-6s apagado(s): %s\n' "$fqdn" "$2" "$(printf '%s\n' "$ids" | grep -c .)"
+}
+
+# ---- Emissor de licencas (bunker707-licencas; docs/32 D39; docs/20 §8C) ------------------------------
+# licencas_sub DOMINIO: o nome dentro da zona (licencas-api.bunker707.com.br -> licencas-api); fora da zona, para.
+licencas_sub() {
+    case "$1" in
+        *."$ZONE_NAME") printf '%s' "${1%."$ZONE_NAME"}" ;;
+        *) die "$1 nao esta na zona $ZONE_NAME (LICENCAS_PAINEL_DOMAIN e LICENCAS_API_DOMAIN ficam nela)." ;;
+    esac
+}
+# cf_apply_dns_licencas: so registros A, nunca AAAA (docs/32 §11.2). O Painel com o proxy da Cloudflare (o Access so
+# funciona assim); a API sem proxy: nenhum desafio de robos barra a conferencia feita por servidor, e o nome so
+# resolve para IPv4, o unico em que a conferencia inicial bate de volta. AAAA que exista nos dois nomes e apagado.
+cf_apply_dns_licencas() {
+    local ip4 painel api; ip4=$(server_ip4 "$LICENCAS_NAME")
+    painel=$(licencas_sub "$LICENCAS_PAINEL_DOMAIN"); api=$(licencas_sub "$LICENCAS_API_DOMAIN")
+    cf_dns_upsert "$painel" A "$ip4" true
+    cf_dns_upsert "$api" A "$ip4" false
+    cf_dns_delete "$painel" AAAA
+    cf_dns_delete "$api" AAAA
+}
+# licencas_dns_confere: o DNS dos dois nomes como o cf_apply_dns_licencas deixa, apontando para o servidor de agora.
+# O deploy so sobe o Caddy com isso certo: antes, o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo.
+licencas_dns_confere() {
+    local ip4 zone pair fqdn want got problems=""; ip4=$(server_ip4 "$LICENCAS_NAME"); zone=$(cf_zone_id)
+    for pair in "$LICENCAS_PAINEL_DOMAIN:true" "$LICENCAS_API_DOMAIN:false"; do
+        fqdn="${pair%:*}"; want="A $ip4 proxy=${pair##*:}"
+        got=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '[.result[] | select(.type=="A" or .type=="AAAA") | "\(.type) \(.content) proxy=\(.proxied)"] | join(", ")')
+        [ "$got" = "$want" ] || problems="$problems $fqdn (esperado: $want; achado: ${got:-nada})"
+    done
+    [ -z "$problems" ] || die "DNS do Emissor fora do lugar:$problems. Rode dns-licencas antes do deploy-licencas."
+}
+# Toda etapa que muda o servidor de licencas so roda da main (a do workflow ja barra; esta e a segunda trava, para o
+# script chamado de outro lugar no Actions). Fora do Actions (terminal com os tokens), nao ha branch a conferir.
+licencas_so_da_main() {
+    [ -z "${GITHUB_ACTIONS:-}" ] || [ "${GITHUB_REF:-}" = "refs/heads/main" ] \
+        || die "As etapas que mudam o servidor de licencas so rodam da main (recebido: ${GITHUB_REF:-sem branch}). Fluxo: tarefa -> dev -> main -> servidor."
 }
 
 # ---- Storage Box ------------------------------------------------------------------------------------
