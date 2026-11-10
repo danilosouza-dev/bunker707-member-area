@@ -838,6 +838,44 @@ disso, ele nao roda de novo na nuvem de teste: a mudanca vira uma migracao nova,
 `migrate.sh` antes de recriar o app (`infra/scripts/deploy.sh`), na ordem dos nomes, entao basta a promocao passar pelo
 `deploy-membros`. Na producao, nenhuma das duas ainda.
 
+### 9.12 Fio das Perguntas: migracao `202611100001` antes do merge (10/11/2026)
+
+O fio das Perguntas (`docs/30` §1.3, §2.4 e D63) tem uma migracao so, que vem **depois** da `202611010001` (§9.11) e
+nao muda as de antes (a guarda `tests/webinarios-v6.guard.test.mjs` prende o hash acumulado das 64 anteriores e o do
+arquivo novo).
+
+| Ordem | Arquivo | O que faz | Secoes | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611100001_webinars_v6_respostas.sql` | cria `webinar_question_replies` (as respostas no fio de uma pergunta, depois da primeira resposta da equipe), com tres indices; RLS ligada, sem acesso para `anon` e `authenticated`, so o `service_role` | 1: a tabela, o comentario, os indices e as permissoes | `webinars_v6_respostas` |
+
+**Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migracao o app novo continua de pe. As perguntas
+aparecem como antes (o fio le vazio, `chat-store.listQuestionReplyRows`), a foto do perfil funciona e "Remover minhas
+mensagens" segue; so **responder no fio** (o aluno e a equipe) falha com o aviso de migracao pendente, que aponta
+`WEBINARS_MIGRATION = "202611100001"`. A migracao sozinha nao atrapalha o app de antes: e uma tabela nova que ele nao le.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (e idempotente; nao tem `drop` nem `delete`, entao nao pede confirmacao). Depois, gravar a versao:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611100001', 'webinars_v6_respostas') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferencia depois de aplicar (a do cabecalho da migracao):
+
+```sql
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name = 'webinar_question_replies'; -- 1 linha
+select has_table_privilege('authenticated', 'public.webinar_question_replies', 'select'); -- false
+select relrowsecurity from pg_class where oid = 'public.webinar_question_replies'::regclass; -- true
+```
+
+Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up`), onde a integracao
+`tests/integration/webinarios-fio-e-foto.test.mjs` e o ponta a ponta `aluno-responde-no-fio` rodam contra ela. **Na nuvem
+de teste, pendente**: a conta do Supabase ligada a sessao que escreveu a migracao nao tinha acesso ao projeto de teste
+(o MCP respondeu "sem permissao"), entao a aplicacao ficou com o produtor, pelo SQL Editor, antes do merge da PR. Quando
+aplicar, atualizar este paragrafo com a data.
+
+**Producao (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
+basta a promocao `dev` -> `main` que levar este codigo passar pelo `deploy-membros`.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

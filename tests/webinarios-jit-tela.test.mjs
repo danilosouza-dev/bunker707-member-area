@@ -245,7 +245,7 @@ test("pagina do aluno: 'A próxima sessão começa em {n} min' com o Entrar, sem
   assert.doesNotMatch(text, /Garantir vaga|Escolha a sessão|Sessão das 10:00/, "nem vaga nem a lista de sessoes jit");
   assert.match(text, /Começa quando você entra/);
   assert.match(text, /Duração: 1h 00min/);
-  assert.match(text, /Apresentador: Ana/);
+  assert.match(text, /Ana · Apresentador/, "quem apresenta, na linha de fatos do destaque");
   assert.doesNotMatch(markup, /sala\?sessao=cccccccc/, "nenhum link para a sessao jit de outro aluno");
 
   const comecou = textOf(html(pageView.WebinarPageView, pagina(vista(sp("2026-10-29T10:03:00")), sp("2026-10-29T10:03:00"))));

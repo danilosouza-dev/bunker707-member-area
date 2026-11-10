@@ -37,6 +37,29 @@ export function formatCountdown(targetMs: number, nowMs: number): string {
   return parts.join(" ");
 }
 
+/**
+ * "No ar há 12 min", "No ar há 1 h 5 min" ou "Começou agora" (o primeiro minuto), para a pagina do webinario com a live
+ * no ar (docs/31 V2-17); vazio sem a hora do inicio ou com ela no futuro.
+ */
+export function onAirLabel(startedAtIso: string | null | undefined, nowMs: number): string {
+  const startedMs = startedAtIso ? new Date(startedAtIso).getTime() : Number.NaN;
+  if (!Number.isFinite(startedMs) || startedMs > nowMs) {
+    return "";
+  }
+  // O mesmo formato da contagem ("1 h 5 min"), contado para tras.
+  const elapsed = formatCountdown(nowMs + (nowMs - startedMs), nowMs);
+  return elapsed && elapsed !== "menos de 1 min" ? `No ar há ${elapsed}` : "Começou agora";
+}
+
+/**
+ * O tamanho do titulo no destaque da pagina do webinario: o titulo curto fica grande (56 px no computador), o medio
+ * desce um degrau e o comprido outro, para um titulo de 100 letras nao ocupar a tela inteira.
+ */
+export function heroTitleScale(title: string): "lg" | "md" | "sm" {
+  const length = Array.from(title.trim()).length;
+  return length <= 40 ? "lg" : length <= 80 ? "md" : "sm";
+}
+
 /** "Começa em 2 d 4 h 12 min"; vazio quando ja passou (a tela decide o que mostrar). */
 export function countdownLabel(targetIso: string, nowMs: number): string {
   const text = formatCountdown(new Date(targetIso).getTime(), nowMs);

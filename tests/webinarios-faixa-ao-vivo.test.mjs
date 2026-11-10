@@ -446,6 +446,101 @@ test("pagina do Webinario: Aguardando o apresentador com o Entrar quando a equip
   assert.doesNotMatch(encerrada, /\/sala\?sessao=/);
 });
 
+test("pagina do Webinario no padrao da area (docs/31 V2-17): o destaque com os cantos e o recuo da area, o caminho, o titulo grande, a linha de fatos, a contagem e o Garantir vaga sem esticar; a capa de fundo e nitida ao lado; Como funciona embaixo", () => {
+  const classesDe = (tag) => (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? "").replace(/&amp;/g, "&").split(/\s+/).filter(Boolean);
+  const texto = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  // Agendada para daqui a 2 dias, com capa.
+  const agendada = render(pageView.WebinarPageView, paginaDoWebinario({ coverUrl: "https://exemplo.test/capa.jpg", description: "Uma aula sobre agentes." }, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [], new Map(), T0));
+
+  // O destaque usa as medidas do destaque da area (Marca > Estilo), como a pagina do curso; nada de cartao em volta.
+  const hero = agendada.match(/<section class="([^"]*)" data-webinar-hero="">/);
+  assert.ok(hero, "o destaque");
+  for (const classe of ["mx-[var(--member-hero-inset)]", "mt-[var(--member-hero-top)]", "rounded-[var(--member-hero-radius)]", "overflow-hidden"]) {
+    assert.ok(classesDe(`<b class="${hero[1]}">`).includes(classe), `o destaque tem ${classe}`);
+  }
+  assert.match(agendada, /opacity-\[var\(--member-hero-fade\)\]/, "o esfumacado de baixo segue o estilo da area");
+  assert.doesNotMatch(agendada.slice(agendada.indexOf("data-webinar-hero"), agendada.indexOf("data-webinar-action")), /rounded-\[12px\] border|border-dashed/, "sem cartao dentro do destaque");
+
+  // A capa duas vezes: desfocada no fundo (decorativa) e nitida no cartao vertical.
+  assert.equal((agendada.match(/src="https:\/\/exemplo\.test\/capa\.jpg"/g) ?? []).length, 2);
+  assert.match(agendada, /<img[^>]*aria-hidden="true"[^>]*class="[^"]*\bblur-3xl\b[^"]*"/, "o fundo desfocado, fora da leitura");
+  assert.match(agendada, /<div class="[^"]*\baspect-\[2\/3\][^"]*\brounded-\[var\(--member-cover-radius\)\][^"]*" data-webinar-cover="">/, "a capa nitida 2:3 com o canto da area");
+
+  // O caminho: Início › Webinários › o titulo (o ultimo e a pagina de agora).
+  const caminho = agendada.match(/<nav aria-label="Você está em"[^>]*>([\s\S]*?)<\/nav>/);
+  assert.ok(caminho, "o caminho");
+  assert.deepEqual(Array.from(caminho[1].matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g), (match) => `${match[2]}=${match[1]}`), ["Início=/", "Webinários=/webinarios"]);
+  assert.match(caminho[1], /<span aria-current="page"[^>]*>Aula de IA<\/span>/);
+
+  // O titulo e o unico h1, grande (o curto), e a descricao vem em seguida.
+  assert.equal((agendada.match(/<h1\b/g) ?? []).length, 1);
+  const h1 = agendada.match(/<h1 class="([^"]*)">Aula de IA<\/h1>/);
+  assert.ok(h1, "o titulo");
+  for (const classe of ["font-black", "break-words", "text-[32px]", "sm:text-5xl", "lg:text-[56px]"]) {
+    assert.ok(classesDe(`<b class="${h1[1]}">`).includes(classe), `o titulo tem ${classe}`);
+  }
+  assert.match(texto(agendada), /Uma aula sobre agentes\./);
+
+  // A linha de fatos: a data em Sao Paulo, a duracao e quem apresenta, cada um com o nome para o leitor de tela.
+  const fatos = texto(agendada.match(/<ul class="[^"]*" data-webinar-facts="">([\s\S]*?)<\/ul>/)[1]);
+  assert.match(fatos, /^Quando: \S+, \d+\/\d+ às \d{2}:\d{2} \(horário de Brasília\)/);
+  assert.match(fatos, /Duração: 1h 00min/);
+  assert.match(fatos, /Ana · Apresentador$/);
+  assert.equal((agendada.match(/horário de Brasília/g) ?? []).length, 1, "a data uma vez so");
+
+  // A contagem em destaque e o Garantir vaga com a largura do texto (a linha inteira so no celular).
+  assert.match(texto(agendada), /Começa em 2 d/);
+  const vaga = agendada.match(/<button class="([^"]*)"[^>]*>Garantir vaga<\/button>/);
+  assert.ok(vaga, "o Garantir vaga");
+  for (const classe of ["w-full", "sm:w-auto", "sm:min-w-[220px]"]) {
+    assert.ok(classesDe(`<b class="${vaga[1]}">`).includes(classe), `o Garantir vaga tem ${classe}`);
+  }
+  assert.match(agendada, /<div class="grid justify-items-start gap-2">/, "o botao nao estica na coluna");
+
+  // Embaixo do destaque, no recuo das fileiras: Como funciona, em tres linhas numeradas.
+  assert.match(agendada, /<div class="[^"]*px-\[var\(--member-row-inset\)\][^"]*">/);
+  const como = agendada.slice(agendada.indexOf('id="como-funciona"'));
+  assert.match(como, />Como funciona</);
+  assert.deepEqual(Array.from(como.matchAll(/<li class="[^"]*"><span aria-hidden="true"[^>]*>(\d)<\/span><span class="min-w-0">([^<]+)<\/span><\/li>/g), (match) => match[1]), ["1", "2", "3"]);
+  assert.match(texto(como), /Na hora, o botão Entrar aparece nesta página/);
+
+  // Sem capa: nenhum cartao vazio, so o texto (o fundo neutro).
+  const semCapa = render(pageView.WebinarPageView, paginaDoWebinario({}, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [], new Map(), T0));
+  assert.doesNotMatch(semCapa, /data-webinar-cover|<img/);
+  assert.match(semCapa, /<article class="[^"]*lg:max-w-\[760px\][^"]*">/);
+
+  // O titulo comprido desce de tamanho (nunca a tela inteira de titulo).
+  const medio = "Agentes de IA na prática: do prompt ao produto em uma tarde";
+  const longo = "Cópia de Live teste com um título bem comprido para ver a quebra em várias linhas do destaque da página";
+  assert.match(render(pageView.WebinarPageView, paginaDoWebinario({ title: medio }, { scheduledAt: iso(T0 + 60 * MIN) }, [], new Map(), T0)), /<h1 class="[^"]*lg:text-\[44px\][^"]*">/);
+  assert.match(render(pageView.WebinarPageView, paginaDoWebinario({ title: longo }, { scheduledAt: iso(T0 + 60 * MIN) }, [], new Map(), T0)), /<h1 class="[^"]*lg:text-4xl[^"]*">/);
+});
+
+test("pagina do Webinario, as situacoes no destaque: no ar diz 'No ar há' e troca o Como funciona por Antes de entrar; com a vaga, o selo fica so junto dos botoes; encerrada e cancelada sem as tres linhas", () => {
+  const texto = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  // No ar ha 12 minutos, com a sala aberta.
+  const noAr = render(pageView.WebinarPageView, { ...paginaDoWebinario({}, { startedAt: iso(T0), status: "live" }, [], new Map(), T0 + 12 * MIN), liveRoomConfigured: true });
+  assert.match(texto(noAr), /Ao vivo\. No ar há 12 min/, "o leitor de tela ouve Ao vivo antes do tempo");
+  assert.match(noAr, /data-webinar-status="live"/);
+  assert.match(texto(noAr.slice(noAr.indexOf('id="como-funciona"'))), /Antes de entrar 1 Ligue o som do aparelho antes de entrar\./);
+  assert.doesNotMatch(noAr, /Como funciona/);
+
+  // Com a vaga garantida: o selo da situacao no topo some (ele fica junto dos botoes, com o icone).
+  const comVaga = render(pageView.WebinarPageView, paginaDoWebinario({}, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [vaga()], new Map(), T0));
+  assert.equal((comVaga.match(/Vaga garantida/g) ?? []).length, 1, "Vaga garantida uma vez so");
+  assert.match(texto(comVaga), /Cancelar minha vaga/);
+  // Sem a vaga, o selo de cima diz Agendado.
+  assert.match(render(pageView.WebinarPageView, paginaDoWebinario({}, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [], new Map(), T0)), />Agendado</);
+
+  // Encerrada e cancelada: a frase no destaque, sem as tres linhas embaixo.
+  const encerrada = render(pageView.WebinarPageView, paginaDoWebinario({}, { endedAt: iso(T0 + HOUR), startedAt: iso(T0), status: "ended" }, [], new Map(), T0 + 2 * HOUR));
+  assert.match(encerrada, /data-webinar-status="ended"/);
+  assert.doesNotMatch(encerrada, /como-funciona/);
+  const cancelada = render(pageView.WebinarPageView, paginaDoWebinario({ cancelReason: "O apresentador teve um imprevisto.", cancelledAt: iso(T0) }, { scheduledAt: iso(T0 + HOUR) }, [], new Map(), T0));
+  assert.match(texto(cancelada), /Essa live foi cancelada\. O apresentador teve um imprevisto\./);
+  assert.doesNotMatch(cancelada, /como-funciona|Garantir vaga/);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * A rota GET /api/webinars/live-now com o banco falso
  * ---------------------------------------------------------------------------------------------- */

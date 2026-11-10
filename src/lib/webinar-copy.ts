@@ -74,6 +74,29 @@ export const WEBINAR_COPY = {
     menuDescricao: "Lives ao vivo e gravadas da escola",
     naoDisponivel: "Esta live não está disponível para você.",
     outlook: "Outlook",
+    /**
+     * A pagina do webinario no padrao da area (docs/31 V2-17, 10/11/2026): o caminho do topo, os nomes dos fatos para o
+     * leitor de tela e as tres linhas de "Como funciona" (antes) e "Antes de entrar" (com a sala aberta). So o que vale
+     * para a Live ao vivo e para a gravada, com qualquer configuracao da sala.
+     */
+    pagina: {
+      antesDeEntrar: "Antes de entrar",
+      caminho: "Você está em",
+      comoFunciona: "Como funciona",
+      inicio: "Início",
+      passos: {
+        antes: [
+          "Na hora, o botão Entrar aparece nesta página e a sala abre em tela cheia.",
+          "Chat, perguntas e enquetes ficam ao lado do vídeo.",
+          "Você entra só assistindo, com câmera e microfone desligados."
+        ],
+        naHora: [
+          "Ligue o som do aparelho antes de entrar.",
+          "Chat, perguntas e enquetes ficam ao lado do vídeo.",
+          "Para voltar a esta página, use o Sair dentro da sala."
+        ]
+      }
+    },
     previaSemGravar: "No modo de visualização, nada é gravado.",
     proximaLive: "Próxima live",
     proximas: "Próximas",

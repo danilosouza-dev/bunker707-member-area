@@ -259,6 +259,8 @@ As paginas internas do aluno (Minhas compras, Favoritos, Minha jornada, Continue
 - `MemberProgressBar`: trilho fino; vermelho em andamento, verde em 100%.
 - Esqueletos (`member-skeletons.tsx`): todo `loading.tsx` de pagina do aluno desenha a forma final (barra do topo de 64 px, cabecalho, grade ou lista) com `motion-safe:animate-pulse`, sem o marcador do loading global, para o spinner sumir assim que o endereco muda.
 
+Página de detalhe com destaque (a do curso, `src/app/conteudo/[id]/page.tsx`, e a do webinário, `src/components/member/webinars/webinar-page-view.tsx`, desde 10/11/2026): o destaque no topo com `--member-hero-inset`, `--member-hero-top`, `--member-hero-radius` e `--member-hero-fade`, a luz do `HeroGlow`, o caminho no topo, o título em `font-black` e o texto começando no recuo da página; o que vem embaixo usa o recuo das fileiras (`--member-row-inset`). Quando a capa é vertical (2:3), ela enche o fundo do destaque desfocada e escurecida e aparece nítida ao lado do texto. A ação principal fica no destaque, sem cartão em volta, com a largura do texto (a linha inteira só no celular).
+
 Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo, "08/01/2026", "08/01/2026 às 14:30", "há 2 dias"). Rotas e itens da barra lateral vem de `src/lib/member-navigation.ts`.
 
 ## Estilo escolhido pelo produtor (Marca > Estilo)
@@ -397,6 +399,10 @@ Só na sala do aluno (o desenho normal da Live ao vivo, da gravada e do Replay),
 - Aviso: invertido (claro no tema escuro e escuro no claro), com o anel de 1 px e a sombra que o separam do vídeo; um de cada vez, 6 s, com pausa no ponteiro e no foco. Os erros continuam no lugar onde aconteceram.
 - Dica: caixa cinza translúcida com texto branco, depois de 150 ms, só no navegador; o Esc a fecha antes de chegar à sala.
 - Menu: a superfície própria do menu, opções de 40 px (44 abaixo de 1024 px), o Check na escolhida; o Esc fecha e devolve o foco ao botão.
+- Seletor em pílula (`RoomSelectPill`, 10/11/2026): a pílula tonal (32 px no S, 40 px no M) com o rótulo, o valor em peso 500 e a seta, sobre o seletor nativo sem a aparência dele. Sem contorno no clique; pelo teclado, o anel de foco na pílula inteira. Usada no Idioma do chat da sala e nos seletores do console.
+- Avatar com foto (10/11/2026): o avatar do comentário e do campo mostra a foto do perfil quando o servidor a manda (a da equipe sempre; a do aluno só com o aceite do chat em dia e nunca no anônimo, `docs/30` §8.5); senão, as iniciais.
+- Fio de respostas (10/11/2026): cada resposta depois da primeira é um comentário com a própria curva saindo da linha do fio; o campo de responder (`RoomReplyField`) é o último item do fio, com o avatar de quem responde, a linha de baixo que clareia no foco, o Cancelar de texto e o envio azul.
+- Foco dos campos de digitar no console (10/11/2026): a própria peça mostra o foco (a linha de baixo clareia; a borda do campo com caixa passa ao tom do foco). O anel de 2 px afastado do admin fica para botões, links e abas.
 
 ## Modal de detalhes
 
