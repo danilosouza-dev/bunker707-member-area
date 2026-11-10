@@ -89,7 +89,7 @@ import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, touchSessionRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -505,6 +505,12 @@ export async function moderateMessage(input: { action: ModerationAction; message
         patch = { deleted_at: nowIso, deleted_by: user.id, deleted_reason: "team" };
         break;
       case "pin":
+        // Fixar e por na frente da turma (a Na tela, docs/30 §2.4): so na sessao que ainda aceita a equipe (o console
+        // esconde o botao; um console parado ou o pedido direto numa sessao encerrada, cancelada ou no Replay nao muda
+        // nada). Desafixar continua sempre permitido.
+        if (!canTeamActOn(sessionFromRow(sessionRow))) {
+          throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
+        }
         if (!message.approved) {
           throw new WebinarError(PIN_NEEDS_APPROVAL_MESSAGE, 409);
         }
@@ -745,6 +751,8 @@ export async function launchPoll(input: { pollId: string; sessionId: string }): 
       template.options.map((option) => option.label)
     );
 
+    // O carimbo por ultimo (a enquete ja gravada): a sala rele as enquetes em 5 a 10 s (o pollsKey da Na tela mudou).
+    await touchSessionRow(db, session.id);
     await recordAudit(db, {
       action: "webinar.poll_launched",
       actorId: user.id,
@@ -783,6 +791,10 @@ export async function closePoll(input: { pollId: string; sessionId: string; shar
       throw new WebinarError(POLL_NOT_OPEN_MESSAGE, 409);
     }
 
+    // O carimbo por ultimo (encerrar ou compartilhar ja gravado): a sala rele as enquetes em 5 a 10 s.
+    if (row.session_id) {
+      await touchSessionRow(db, row.session_id);
+    }
     await recordAudit(db, {
       action: "webinar.poll_closed",
       actorId: user.id,

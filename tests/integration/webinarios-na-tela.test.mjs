@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
+import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
@@ -10,12 +11,13 @@ import {
   seedEscolaDeTeste,
   seedLiveAoVivoDeTeste,
   seedLiveGravadaDeTeste,
-  SENHA_DE_TESTE
+  SENHA_DE_TESTE,
+  usuarioDeTeste
 } from "../fixtures/escola-de-teste.mjs";
 
 // A "Na tela" e o banco do adendo (especificacao de 10/11/2026, §4; adendo R7 a R9) contra o banco LOCAL de verdade, com
-// a migracao 202611100002 aplicada. Esta e a parte do banco (a primeira fatia); os caminhos do app (salvar, mostrar, a
-// consulta do chat com o carimbo, as metricas pela rota) entram neste mesmo arquivo nas fatias seguintes.
+// a migracao 202611100002 aplicada. A parte do banco e a consulta do chat com o carimbo; os outros caminhos do app
+// (salvar, mostrar, as metricas pela rota) entram neste mesmo arquivo nas fatias seguintes.
 // - o aluno logado nao le as duas tabelas nem roda a funcao do relatorio (so o service_role);
 // - os checks do item (o QR Code com link de ate 240 caracteres, o banner com imagem ou titulo, o botao com link, a
 //   imagem so da nossa pasta e com as medidas, "No meio" sem fechar nunca Grande) e o gatilho do updated_at;
@@ -24,7 +26,10 @@ import {
 //   equipe;
 // - R7: a sessao `live` aceita as regras simuladas e o resumo, nunca o selo "Ao vivo" da gravada;
 // - R9: a foto do personagem so com o caminho da pasta webinars/personas, e na mensagem so na scripted;
-//   webinar_open_session copia a foto do item para a mensagem da gravada e nao solta o roteiro da live ao abrir.
+//   webinar_open_session copia a foto do item para a mensagem da gravada e nao solta o roteiro da live ao abrir;
+// - a consulta de 5 s do chat com o carimbo (`tela`, o updated_at da sessao como o PostgREST devolve): o carimbo velho
+//   traz o banner numa chamada, com a imagem pela origem do Supabase local; o mesmo carimbo, nada; tirar da tela e
+//   atualizar a sessao (store.touchSessionRow) traz o estado sem o banner; GET .../session leva o mesmo estado.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -34,6 +39,10 @@ const AO_VIVO = LIVE_AO_VIVO_DE_TESTE;
 const IMAGEM = "webinars/screen/0123456789abcdef01234567.webp";
 const FOTO = "webinars/personas/89abcdef0123456789abcdef.webp";
 const pessoas = [contas.aluna.id, contas.alunoSemAcesso.id, contas.produtor.id];
+const chatRoute = await import("../../src/app/api/webinars/[id]/chat/route.ts");
+const sessionRoute = await import("../../src/app/api/webinars/[id]/session/route.ts");
+const { touchSessionRow } = await import("../../src/server/webinars/store.ts");
+const { resetRoomLimits } = await import("../../src/server/webinars/room-limits.ts");
 
 /** O erro do insert (ou null quando entrou), para conferir o codigo do check. */
 async function codigoDoInsert(table, row) {
@@ -225,4 +234,42 @@ test("7. webinar_open_session: a gravada solta o roteiro com a foto do personage
   const sessao = unwrap(await db.from("webinar_sessions").select("status, started_at").eq("id", AO_VIVO.sessaoId).single(), "Lendo a live");
   assert.equal(sessao.status, "live");
   assert.ok(sessao.started_at, "o Comecar para todos continua marcando o started_at");
+});
+
+test("8. a consulta de 5 s do chat com o carimbo: o velho traz o banner numa chamada, o mesmo nada; tirar da tela e mudar o carimbo traz o estado sem ele", async () => {
+  resetRoomLimits();
+  unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", GRAVADA.sessaoId), "Zerando as exibicoes da gravada");
+  const snapshot = { body: "Vagas até sexta.", buttonLabel: "Quero entrar", closable: true, image: { alt: "Foguete", height: 360, path: IMAGEM, width: 640 }, linkUrl: "https://bunker707.com.br/turma", name: "Turma", place: "bottom_right", size: "m", title: "Turma nova", v: 1 };
+  const mostrada = unwrap(await db.from("webinar_screen_displays").insert({ kind: "banner", session_id: GRAVADA.sessaoId, snapshot }).select("id").single(), "Mostrando o banner");
+  // O dado antes, o carimbo depois.
+  await touchSessionRow(db, GRAVADA.sessaoId);
+  const contexto = { params: Promise.resolve({ id: GRAVADA.id }) };
+  const consultar = async (tela) => {
+    actAs(usuarioDeTeste(contas.aluna));
+    const query = new URLSearchParams({ sessao: GRAVADA.sessaoId, since: new Date(Date.now() - 5000).toISOString(), ...(tela === undefined ? {} : { tela }) });
+    const resposta = await chatRoute.GET(new Request(`http://localhost/api/webinars/${GRAVADA.id}/chat?${query}`), contexto);
+    const body = await resposta.json();
+    assert.equal(resposta.status, 200, JSON.stringify(body));
+    return body.data.screen;
+  };
+
+  const estado = await consultar("2026-01-01T00:00:00+00:00");
+  const linha = unwrap(await db.from("webinar_sessions").select("updated_at").eq("id", GRAVADA.sessaoId).single(), "Lendo o carimbo");
+  assert.equal(estado.stamp, linha.updated_at, "o carimbo e o updated_at como o PostgREST devolve");
+  assert.ok(estado.stamp.length <= 40, "cabe no tela (40 caracteres)");
+  assert.deepEqual(estado.items.map((item) => [item.displayId, item.kind, item.title]), [[mostrada.id, "banner", "Turma nova"]]);
+  assert.equal(estado.items[0].image.url, `${supabaseUrl}/storage/v1/object/public/content-assets/${IMAGEM}`, "pela origem do nosso Supabase");
+  assert.equal(await consultar(estado.stamp), null, "o mesmo carimbo: nada");
+  assert.equal(await consultar(), null, "sem tela: nada");
+
+  const sessao = await sessionRoute.GET(new Request(`http://localhost/api/webinars/${GRAVADA.id}/session?sessao=${GRAVADA.sessaoId}`), contexto);
+  const corpo = await sessao.json();
+  assert.equal(sessao.status, 200, JSON.stringify(corpo));
+  assert.deepEqual(corpo.data.screen, estado, "GET session leva o mesmo estado");
+
+  unwrap(await db.from("webinar_screen_displays").update({ hidden_at: new Date().toISOString(), hidden_reason: "team" }).eq("id", mostrada.id), "Tirando da tela");
+  await touchSessionRow(db, GRAVADA.sessaoId);
+  const depois = await consultar(estado.stamp);
+  assert.notEqual(depois.stamp, estado.stamp, "o carimbo mudou");
+  assert.deepEqual(depois.items, [], "o banner saiu");
 });

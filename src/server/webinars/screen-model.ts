@@ -17,9 +17,7 @@
 
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
 import { linkDomain, safeHttpsUrl } from "../../lib/webinar-links";
-import { storagePublicPath } from "../communications/popup-design-model";
-import { freeStorageOrigin } from "../communications/popup-free-render";
-import type { StudentChatMessage } from "./model";
+import type { StudentChatMessage, WebinarSession } from "./model";
 
 /* ------------------------------------------------------------------------------------------------
  * Listas e limites (os checks da 202611100002)
@@ -83,18 +81,51 @@ export const SCREEN_IMAGE_FOLDER = "webinars/screen";
 /** O nome pelo conteudo que persistImageAsset grava: 24 hex do sha256 + .webp. */
 export const SCREEN_IMAGE_PATH_PATTERN = /^webinars\/screen\/[a-f0-9]{24}\.webp$/;
 
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])$/;
+/** Nome de maquina so com letras, numeros, ponto e hifen (ou [::1]): o URL do WHATWG deixa passar aspas e ";". */
+const SAFE_HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$|^\[::1\]$/;
+
 /**
- * O endereco publico da imagem: a origem conferida do nosso Supabase (freeStorageOrigin: https, http so na propria
- * maquina) + o caminho publico do bucket, so quando o caminho e um dos nossos. Senao null (nada e desenhado).
+ * A origem conferida do nosso Supabase: https (http so na propria maquina, o Supabase local dos testes), maquina so com
+ * [a-z0-9.-], sem usuario, senha, caminho, query nem fragmento; senao null. A mesma construcao de
+ * communications/popup-free-render.freeStorageOrigin (o teste confere as duas), repetida aqui para a sala nunca
+ * importar nada do pop-up da Comunicacao.
+ */
+export function screenStorageOriginOf(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim() || value.length > 2_048) {
+    return null;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  const secure = url.protocol === "https:";
+  const loopback = url.protocol === "http:" && LOOPBACK_HOST.test(url.hostname);
+
+  if ((!secure && !loopback) || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
+    return null;
+  }
+
+  return SAFE_HOSTNAME.test(url.hostname) ? url.origin : null;
+}
+
+/**
+ * O endereco publico da imagem: a origem conferida do nosso Supabase + o caminho publico do bucket, so quando o caminho
+ * e um dos nossos. Senao null (nada e desenhado).
  */
 export function screenImageUrl(path: string | null | undefined, origin: string | null | undefined): string | null {
   if (typeof path !== "string" || !SCREEN_IMAGE_PATH_PATTERN.test(path)) {
     return null;
   }
 
-  const safeOrigin = freeStorageOrigin(origin);
+  const safeOrigin = screenStorageOriginOf(origin);
 
-  return safeOrigin ? `${safeOrigin}${storagePublicPath(SCREEN_IMAGE_BUCKET, path)}` : null;
+  return safeOrigin ? `${safeOrigin}/storage/v1/object/public/${SCREEN_IMAGE_BUCKET}/${path}` : null;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -352,6 +383,38 @@ export type StudentScreenState = {
   pollsKey: string;
   stamp: string;
 };
+
+/**
+ * Se a sessao mostra alguma coisa na frente da turma: a Live ao vivo e a gravada, na espera e no ar. No Replay (sem
+ * equipe; um banner repetido depois poderia anunciar um prazo vencido) e na sessao encerrada ou cancelada, nada.
+ */
+export function screenShowsIn(session: Pick<WebinarSession, "kind" | "status">): boolean {
+  return session.kind !== "replay" && session.status !== "ended" && session.status !== "cancelled";
+}
+
+/**
+ * O resumo das enquetes da sessao (id, situacao e resultado compartilhado, na ordem do id): muda quando uma enquete e
+ * lancada, encerrada ou tem o resultado compartilhado, e so entao a sala rele GET .../polls. Curto (a quantidade e um
+ * FNV-1a de 32 bits em hexadecimal), porque vai em todo estado; vazio sem enquete.
+ */
+export function pollsKeyOf(polls: readonly { id: string; resultsShared: boolean; status: string }[]): string {
+  if (polls.length === 0) {
+    return "";
+  }
+
+  const text = [...polls]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((poll) => `${poll.id}:${poll.status}:${poll.resultsShared ? 1 : 0}`)
+    .join("|");
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return `${polls.length}-${hash.toString(16).padStart(8, "0")}`;
+}
 
 /** O estado vazio (Replay, sessao encerrada ou cancelada, banco sem a migracao): nada na tela. */
 export function emptyScreenState(stamp: string): StudentScreenState {

@@ -63,12 +63,15 @@ const replayOffsetSchema = offsetSchema.optional();
 /**
  * GET /chat?sessao=&from=&to= (a janela por offset, em ms: a linha mestre + as linhas da sessao) ou
  * ?sessao=&since=<ISO>&after=<id> (so as mensagens novas da sessao desde o instante; o id desempata o mesmo instante).
+ * Na consulta de mensagens novas, `tela` e o carimbo da Na tela que o navegador tem (o updated_at da sessao): a
+ * resposta leva o estado so quando ele mudou (docs/30 §5.1).
  */
 export const chatWindowQuerySchema = z.object({
   after: uuidSchema.optional(),
   from: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional(),
   sessao: sessionIdSchema,
   since: z.iso.datetime({ offset: true }).optional(),
+  tela: z.string().max(40).optional(),
   to: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional()
 });
 

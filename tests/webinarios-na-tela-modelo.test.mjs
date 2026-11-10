@@ -15,12 +15,15 @@ import "./support/resolve-extensionless-ts.mjs";
 // - o QR Code: a versao e os modulos batem com o que a qrcode.react desenha (nivel M, margem 4), o lado nunca abaixo de
 //   3 px por modulo nem acima da altura livre menos 56 px, e o aviso de codigo denso;
 // - o resumo, os nomes das exibicoes, o nome padrao do item e os numeros da funcao do relatorio;
+// - na sala: o resumo das enquetes (pollsKey), quando a Na tela aparece, o estado que a sala adota (o da sessao sempre,
+//   o do chat so com outro carimbo) e o que o aluno fechou (por exibicao, guardado na aba);
 // - as frases novas (WEBINAR_COPY.naTela) passam pela PROIBIDAS_WEBINARIO e estao como a especificacao escreve.
 
 const model = await import("../src/server/webinars/screen-model.ts");
 const schemas = await import("../src/server/webinars/screen-schemas.ts");
 const rows = await import("../src/server/webinars/screen-rows.ts");
 const { NA_TELA_COPY } = await import("../src/lib/webinar-copy-v4/na-tela.ts");
+const sala = await import("../src/components/member/webinars/room/screen/room-screen-model.ts");
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 const WEBINAR = "3b0c6a8e-1f2d-4c5b-9a7e-0d1c2b3a4f5e";
@@ -227,6 +230,13 @@ test("o item do aluno: o id da exibicao, a imagem com o endereco da nossa origem
   assert.equal(model.studentScreenItem(rows.screenDisplayFromRow(exibicao({ kind: "poll", poll_id: SESSAO, snapshot: { name: "Pergunta", v: 1 } })), ORIGEM), null);
 });
 
+test("a origem conferida e a mesma regra do Livre da Comunicacao (sem a sala importar o pop-up)", async () => {
+  const { freeStorageOrigin } = await import("../src/server/communications/popup-free-render.ts");
+  for (const origem of [ORIGEM, `${ORIGEM}/`, "http://127.0.0.1:55321", "http://localhost:54321", "http://[::1]:5432", "http://abcdefgh.supabase.co", "https://abc.supabase.co/x", "https://u:s@abc.supabase.co", "https://abc.supabase.co?x=1", "https://abc.supabase.co#a", "https://ab\"c.co", "ftp://abc.co", "javascript:alert(1)", " ", "", null, undefined, 42]) {
+    assert.equal(model.screenStorageOriginOf(origem), freeStorageOrigin(origem), String(origem));
+  }
+});
+
 test("o endereco da imagem so sai da nossa origem conferida: origem com caminho, http de fora ou caminho de outra pasta viram null", () => {
   assert.equal(model.screenImageUrl(IMAGEM, ORIGEM), `${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM}`);
   assert.equal(model.screenImageUrl(IMAGEM, "http://127.0.0.1:55321"), `http://127.0.0.1:55321/storage/v1/object/public/content-assets/${IMAGEM}`, "http so na propria maquina");
@@ -362,4 +372,51 @@ test("as frases da Na tela entram em WEBINAR_COPY.naTela, passam pela PROIBIDAS_
   assert.equal(NA_TELA_COPY.relatorio.colunas.taxa, "Clicaram ÷ viram");
   assert.equal(Object.keys(NA_TELA_COPY.lugares).join(), model.SCREEN_PLACES.join(), "um nome para cada posicao, na ordem da grade");
   assert.equal(Object.keys(NA_TELA_COPY.tamanhos).join(), model.SCREEN_SIZES.join());
+});
+
+test("o resumo das enquetes (pollsKey): muda com a enquete lancada, encerrada ou compartilhada; nao depende da ordem; vazio sem enquete", () => {
+  const a = { id: "a", resultsShared: false, status: "open" };
+  const b = { id: "b", resultsShared: false, status: "closed" };
+  const base = model.pollsKeyOf([a, b]);
+  assert.match(base, /^2-[0-9a-f]{8}$/);
+  assert.equal(model.pollsKeyOf([b, a]), base, "a ordem da leitura nao muda o resumo");
+  assert.notEqual(model.pollsKeyOf([a]), base, "lancada");
+  assert.notEqual(model.pollsKeyOf([{ ...a, status: "closed" }, b]), base, "encerrada");
+  assert.notEqual(model.pollsKeyOf([a, { ...b, resultsShared: true }]), base, "resultado compartilhado");
+  assert.equal(model.pollsKeyOf([]), "");
+});
+
+test("quando a Na tela aparece: a Live ao vivo e a gravada, na espera e no ar; nunca no Replay nem na sessao encerrada ou cancelada", () => {
+  for (const kind of ["live", "simulated"]) {
+    for (const status of ["scheduled", "waiting", "live"]) {
+      assert.equal(model.screenShowsIn({ kind, status }), true, `${kind} ${status}`);
+    }
+    assert.equal(model.screenShowsIn({ kind, status: "ended" }), false);
+    assert.equal(model.screenShowsIn({ kind, status: "cancelled" }), false);
+  }
+  assert.equal(model.screenShowsIn({ kind: "replay", status: "live" }), false);
+  assert.deepEqual(model.emptyScreenState("s1"), { items: [], pinned: null, pinnedPollId: null, pollsKey: "", stamp: "s1" });
+});
+
+test("a sala adota o estado da sessao sempre e o do chat so com outro carimbo; o que o aluno fechou some (so o que pode fechar)", () => {
+  const item = (displayId, closable = true) => ({ body: null, buttonLabel: null, closable, displayId, image: null, kind: "banner", linkUrl: null, place: "center", shownAt: "x", size: "m", title: "T" });
+  const atual = { ...model.emptyScreenState("s1"), items: [item("d1")] };
+  const igual = { ...model.emptyScreenState("s1"), items: [] };
+  const novo = { ...model.emptyScreenState("s2"), items: [item("d2")] };
+  assert.equal(sala.adoptScreen(atual, igual, "chat"), atual, "o chat com o mesmo carimbo nao troca");
+  assert.equal(sala.adoptScreen(atual, novo, "chat"), novo);
+  assert.equal(sala.adoptScreen(atual, igual, "session"), igual, "a sessao sempre vale");
+  assert.equal(sala.adoptScreen(atual, null, "chat"), atual);
+  assert.equal(sala.adoptScreen(atual, undefined, "session"), atual, "a pagina de antes, sem o estado");
+  assert.equal(sala.adoptScreen(null, novo, "chat"), novo);
+
+  assert.equal(sala.screenClosedKey("s1"), "bunker707:webinar-sala-tela-fechados:s1");
+  assert.deepEqual(sala.storedClosedIds(null), []);
+  assert.deepEqual(sala.storedClosedIds("estragado"), []);
+  assert.deepEqual(sala.storedClosedIds(JSON.stringify(["d1", 3, "", "d2"])), ["d1", "d2"]);
+  const guardado = sala.closedIdsValue(["d1"], "d2");
+  assert.deepEqual(JSON.parse(guardado), ["d1", "d2"]);
+  assert.deepEqual(JSON.parse(sala.closedIdsValue(["d1"], "d1")), ["d1"], "sem repetir");
+  const itens = [item("d1"), item("d2", false), item("d3")];
+  assert.deepEqual(sala.visibleScreenItems(itens, ["d1", "d2"]).map((entry) => entry.displayId), ["d2", "d3"], "o que nao pode fechar continua, mesmo com o id guardado");
 });

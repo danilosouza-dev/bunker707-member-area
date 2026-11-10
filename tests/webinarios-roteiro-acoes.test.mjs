@@ -1032,6 +1032,45 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
   assert.equal(audits(db, "webinar.polls_saved").length, 2);
 });
 
+test("Na tela: fixar numa sessao encerrada e recusado (409) e desafixar continua; lancar e encerrar a enquete gravam e so depois mudam o carimbo da sessao", async () => {
+  const antiga = message({ author_user_id: HOST, display_name: "Produtor T.", pinned_at: agora(), role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const outra = message({ author_user_id: HOST, display_name: "Produtor T.", role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const base = cenario({ webinar_chat_messages: [antiga, outra] });
+  base.webinar_sessions.find((row) => row.id === SESSAO_ENCERRADA).pinned_message_id = antiga.id;
+  const db = usar(bancoEmMemoria(base));
+  const sessao = (id) => db.tables.webinar_sessions.find((row) => row.id === id);
+
+  // Fixar e por na frente da turma: so na sessao que ainda aceita a equipe (o console esconde o botao; o pedido direto
+  // numa sessao encerrada nao muda nada).
+  const fixar = await roomActions.moderateMessage({ action: "pin", messageId: outra.id });
+  assert.deepEqual([fixar.ok, fixar.status, fixar.error], [false, 409, "Essa sessão não aceita mais ações da equipe."]);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, antiga.id, "a fixada de antes continua");
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === outra.id).pinned_at ?? null, null);
+  // Desafixar continua sempre permitido (tirar da frente da turma nunca e bloqueado).
+  const desafixada = ok(await roomActions.moderateMessage({ action: "unpin", messageId: antiga.id }));
+  assert.equal(desafixada.pinnedMessageId, null);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, null);
+  assert.deepEqual(audits(db, "webinar.moderated").map((row) => row.metadata.action), ["unpin"]);
+
+  // Lancar: a copia da enquete e gravada e, por ultimo, a linha da sessao (o carimbo que a consulta de 5 s compara).
+  const modelo = ok(await roomActions.savePolls({ polls: [{ kind: "single", options: [{ label: "Sim" }, { label: "Não" }], question: "Vem?" }], webinarId: WEBINAR })).polls[0];
+  db.calls.length = 0;
+  const aberta = ok(await roomActions.launchPoll({ pollId: modelo.id, sessionId: SESSAO_NO_AR }));
+  const escritas = () => db.calls.filter((call) => call.op !== "select" && call.table !== "admin_audit_log").map((call) => `${call.op} ${call.table}`);
+  assert.deepEqual(escritas(), ["insert webinar_polls", "insert webinar_poll_options", "update webinar_sessions"]);
+  const carimbo = db.calls.find((call) => call.op === "update" && call.table === "webinar_sessions");
+  assert.deepEqual(Object.keys(carimbo.payload), ["updated_at"], "so o carimbo muda na sessao");
+  assert.deepEqual(carimbo.filters, [["eq", "id", SESSAO_NO_AR]]);
+
+  // Encerrar (e compartilhar): a enquete primeiro, o carimbo depois.
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR, shareResults: true }));
+  assert.deepEqual(escritas(), ["update webinar_polls", "update webinar_sessions"]);
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR }));
+  assert.deepEqual(escritas(), ["update webinar_sessions"], "encerrar de novo nao muda a enquete, mas o carimbo sim");
+});
+
 test("perguntas: responder por escrito vira linha da equipe no chat e marca respondida; ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 3, user_id: ALUNA };
   const outra = { ...pergunta, body: "E certificado?", id: randomUUID() };

@@ -37,6 +37,7 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
+import { useRoomScreen } from "./screen/use-room-screen";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
@@ -417,8 +418,19 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     return targetOffsetMs({ deviceNowMs: Date.now(), skewMs: clock.skewRef.current ?? 0, zeroMs });
   }, [clock.skewRef, kind, zeroMs]);
 
+  // A Na tela (docs/30 §5.1): a fixada e o que mais a equipe poe na frente da turma, pela leitura da sessao e pela
+  // consulta de 5 s do chat (com o carimbo). No Replay nada vem da Na tela: a fixada continua a da leitura da sessao.
+  const naTela = useRoomScreen({ sessionId, sessionPinned: session.pinned, sessionScreen: kind === "replay" ? null : session.screen });
   // O chat liga ja na espera (a sala de espera tem chat, docs/30 §1.6): so o "ver como" fica sem nada.
-  const chat = useRoomChat({ enabled: !readOnly && !unavailable, getPlayerOffsetMs: getOffsetMs, initialServerTime: payload.serverTime, sessionId, webinarId });
+  const chat = useRoomChat({
+    enabled: !readOnly && !unavailable,
+    getPlayerOffsetMs: getOffsetMs,
+    getScreenStamp: naTela.getStamp,
+    initialServerTime: payload.serverTime,
+    onScreen: naTela.onChatScreen,
+    sessionId,
+    webinarId
+  });
   const chatSeeked = chat.seeked;
 
   const onTime = useCallback(
@@ -473,8 +485,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // ou a pilula do vertical). Os tres sao pontos de encaixe preenchidos pelas frentes.
   const simulation = useRoomSimulation({ enabled: !readOnly && !unavailable && kind === "simulated" && phase !== "ended", getOffsetMs, sessionId, webinarId });
   const translation = useRoomTranslation({ enabled: !readOnly && !unavailable, messages: revealed, sessionId, webinarId });
-  // As enquetes da sala (a releitura da sessao e, com uma aberta, a leitura de 15 s): o palco, o card do chat e a aba.
-  const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, sessionId, sessionPolls: session.polls, webinarId });
+  // As enquetes da sala (a releitura da sessao e, quando o resumo da Na tela muda, uma leitura): o palco, o card do chat e a aba.
+  const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, pollsKey: naTela.pollsKey, sessionId, sessionPolls: session.polls, webinarId });
   const polls = roomPolls.polls;
   const [deferred, setDeferred] = useDeferredPolls(sessionId);
   // O que depende do guardado (o "depois", os resultados vistos) so depois da hidratacao: sem isso, a enquete deixada
@@ -777,7 +789,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         onRemoveOpenChange={setRemoveOpen}
         onSend={sendChat}
         phase={composerPhase}
-        pinned={session.pinned}
+        pinned={naTela.pinned}
         readOnly={readOnly}
         removeOpen={removeOpen}
         sessionId={sessionId}
@@ -906,7 +918,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                     onMore={() => openDrawer("chat")}
                     onOpenPoll={() => openDrawer("poll")}
                     openPollQuestion={openPolls[0]?.question ?? null}
-                    pinned={session.pinned}
+                    pinned={naTela.pinned}
                     replay={kind === "replay"}
                   />
                 ) : null

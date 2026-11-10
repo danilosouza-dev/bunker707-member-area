@@ -14,6 +14,7 @@ import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
 import type { StudentPoll, StudentQuestion, StudentQuestionReply } from "@/server/webinars/room-rules";
+import type { StudentScreenState } from "@/server/webinars/screen-model";
 import type { StudentSessionPayload } from "@/server/webinars/student-model";
 import { WebinarsRequestError } from "../webinars-client";
 import { liveApiPath } from "./live-room-model";
@@ -95,14 +96,20 @@ export function beaconLeave(webinarId: string, body: { offsetSeconds: number; se
  * ---------------------------------------------------------------------------------------------- */
 
 export type ChatWindowAnswer = { messages: StudentChatMessage[]; mode: "window"; serverTime: string; window: ChatWindow };
-export type ChatRecentAnswer = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; serverTime: string };
+/** `screen`: o estado da Na tela quando o carimbo mandado em `tela` ficou velho; nulo (ou ausente, servidor de antes) no resto. */
+export type ChatRecentAnswer = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; screen?: StudentScreenState | null; serverTime: string };
 
 export function getChatWindow(webinarId: string, sessionId: string, window: ChatWindow, signal?: AbortSignal) {
   return getJson<ChatWindowAnswer>(roomApiPath(webinarId, "chat", { from: window.fromMs, sessao: sessionId, to: window.toMs }), WEBINAR_COPY.sala.erroCarregarChat, signal);
 }
 
-export function getRecentChat(webinarId: string, sessionId: string, cursor: ChatCursor, signal?: AbortSignal) {
-  return getJson<ChatRecentAnswer>(roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since }), WEBINAR_COPY.sala.erroCarregarChat, signal);
+/** As mensagens novas depois do cursor (a consulta de 5 s); com `screenStamp`, o carimbo da Na tela que a sala tem (`tela`). */
+export function getRecentChat(webinarId: string, sessionId: string, cursor: ChatCursor, screenStamp?: string | null, signal?: AbortSignal) {
+  return getJson<ChatRecentAnswer>(
+    roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since, tela: screenStamp }),
+    WEBINAR_COPY.sala.erroCarregarChat,
+    signal
+  );
 }
 
 /** O aceite vai junto da primeira escrita (consent + versao). A sala nao manda mais como o aluno aparece (D64): e sempre o primeiro nome com a inicial. */
@@ -206,4 +213,4 @@ export function beaconRoomEvents(webinarId: string, body: string): boolean {
   return false;
 }
 
-export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply };
+export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply, StudentScreenState };

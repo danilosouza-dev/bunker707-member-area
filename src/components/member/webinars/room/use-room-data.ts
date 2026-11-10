@@ -15,6 +15,7 @@ import {
 } from "@/lib/webinar-room-client";
 import { ROOM_RULES, type PresenceState, type Reaction } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
+import type { StudentScreenState } from "@/server/webinars/screen-model";
 import type { StudentRoomPayload } from "@/server/webinars/student-model";
 import {
   beaconLeave,
@@ -34,7 +35,8 @@ import {
 // Os dados vivos da Sala (docs/30 §5.1 e §6.6), fora do desenho: o relogio do servidor (skew a cada 60 s e ao
 // voltar para a aba, pela rota da sessao, que tambem renova fixada, enquetes, modo do chat e presentes), o sinal
 // de presenca de 15 s (e o de saida por sendBeacon), o chat (a janela por offset pedida quando o player se
-// aproxima do fim da atual e a consulta de 5 s das mensagens novas, fundidas sem repetir) e as reacoes (as
+// aproxima do fim da atual e a consulta de 5 s das mensagens novas, fundidas sem repetir; a Na tela pega carona nela
+// com o carimbo, screen/use-room-screen.ts) e as reacoes (as
 // contagens dos ultimos segundos viram bolhas). Tudo para quando a sala fecha; nada roda no "ver como". O 404 da
 // releitura da sessao e do sinal de presenca (a pessoa saiu do "Quem pode" no meio da live, D41) avisa a sala, que
 // desmonta o video e mostra "Esta live não está disponível para você." (roomAccessLost).
@@ -198,7 +200,17 @@ export type ChatFeed = {
   slowUntilMs: number | null;
 };
 
-export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => number; initialServerTime: string; sessionId: string; webinarId: string }): ChatFeed {
+export function useRoomChat(input: {
+  enabled: boolean;
+  getPlayerOffsetMs: () => number;
+  /** A Na tela: o carimbo que a sala tem (vai em `tela` na consulta de 5 s); nulo, a consulta vai sem ele. */
+  getScreenStamp?: () => string | null;
+  initialServerTime: string;
+  /** A Na tela: o estado que a consulta de 5 s trouxe (so quando o carimbo mudou). */
+  onScreen?: (screen: StudentScreenState) => void;
+  sessionId: string;
+  webinarId: string;
+}): ChatFeed {
   const { enabled, initialServerTime, sessionId, webinarId } = input;
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -208,10 +220,12 @@ export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => 
   const seekedRef = useRef(false);
   const cursorRef = useRef<ChatCursor>(initialChatCursor(initialServerTime));
   const offsetRef = useRef(input.getPlayerOffsetMs);
+  const screenRef = useRef({ getStamp: input.getScreenStamp, onScreen: input.onScreen });
   const busyRef = useRef(false);
 
   useEffect(() => {
     offsetRef.current = input.getPlayerOffsetMs;
+    screenRef.current = { getStamp: input.getScreenStamp, onScreen: input.onScreen };
   });
 
   useEffect(() => {
@@ -250,13 +264,17 @@ export function useRoomChat(input: { enabled: boolean; getPlayerOffsetMs: () => 
     };
     const poll = async () => {
       try {
-        const answer = await getRecentChat(webinarId, sessionId, cursorRef.current);
+        const answer = await getRecentChat(webinarId, sessionId, cursorRef.current, screenRef.current.getStamp?.() ?? null);
         if (stopped) {
           return;
         }
         cursorRef.current = answer.data.next;
         if (answer.data.messages.length > 0) {
           setMessages((previous) => mergeMessages(previous, answer.data.messages));
+        }
+        // A Na tela pega carona: o estado so vem quando o carimbo da sessao mudou.
+        if (answer.data.screen) {
+          screenRef.current.onScreen?.(answer.data.screen);
         }
       } catch {
         // A proxima consulta vem em 5 s.

@@ -209,6 +209,17 @@ export async function updateSessionRow(db: WebinarsDb, id: string, patch: Sessio
   return rows[0] ?? null;
 }
 
+/**
+ * Muda o carimbo da sessao (webinar_sessions.updated_at, que o gatilho set_webinar_sessions_updated_at poe na hora do
+ * banco) sem mexer em mais nada: o sinal de que o que a turma ve mudou (a Na tela, docs/30 §5.1; a consulta de 5 s do
+ * chat compara o carimbo). Quem mexe no que a turma ve grava o dado ANTES e chama isto DEPOIS: assim nenhuma leitura
+ * guarda um estado velho com um carimbo novo.
+ */
+export async function touchSessionRow(db: WebinarsDb, id: string): Promise<void> {
+  const { error } = await db.from("webinar_sessions").update({ updated_at: new Date().toISOString() }).eq("id", id);
+  assertNoDbError(error, "Webinarios: atualizar o carimbo da sessao");
+}
+
 export async function deleteSessionRows(db: WebinarsDb, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) {
     return;

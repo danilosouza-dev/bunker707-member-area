@@ -40,6 +40,7 @@ import {
 } from "./model";
 import type { JoinRefusal } from "./room-model";
 import type { StudentPoll } from "./room-rules";
+import type { StudentScreenState } from "./screen-model";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -410,10 +411,17 @@ export type StudentRoomExtras = {
     /** O primeiro nome com a inicial do sobrenome, depois do aceite; nulo antes. */
     displayName: string | null;
   };
+  /** A mensagem fixada (o mesmo que screen.pinned na live e na gravada); continua para a pagina aberta com o codigo de antes. */
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
   presentNow: number;
   replaySessionId: string | null;
+  /**
+   * A Na tela (docs/30 §5.1): o que a turma ve na frente da sessao (fixadas, banner e QR Code), o carimbo da sessao e o
+   * resumo das enquetes. O navegador sempre adota este; a consulta de 5 s do chat traz outro so quando o carimbo muda.
+   * Vazio no Replay e na sessao encerrada ou cancelada.
+   */
+  screen: StudentScreenState;
   session: {
     chatMode: ChatMode;
     chatSlowModeSeconds: number | null;
@@ -438,6 +446,7 @@ export type StudentSessionPayload = {
   polls?: StudentPoll[];
   presentNow?: number;
   registeredCount: number | null;
+  screen?: StudentScreenState;
   serverTime: string;
   session: {
     endedAt: string | null;
@@ -454,12 +463,13 @@ export type StudentSessionPayload = {
 };
 
 /** A resposta completa da Sala: a fase 1 mais tudo o que `room` traz (o que o navegador da sala recebe). */
-export type StudentRoomPayload = Omit<StudentSessionPayload, "live" | "me" | "pinned" | "polls" | "presentNow" | "session" | "video" | "webinar"> & {
+export type StudentRoomPayload = Omit<StudentSessionPayload, "live" | "me" | "pinned" | "polls" | "presentNow" | "screen" | "session" | "video" | "webinar"> & {
   live: LiveRoomInfo | null;
   me: { calendarUrl: string | null; registered: boolean; registeredAt: string | null } & StudentRoomExtras["me"];
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
   presentNow: number;
+  screen: StudentScreenState;
   session: StudentSessionPayload["session"] & StudentRoomExtras["session"];
   video: StudentRoomVideo | null;
   webinar: { durationMinutes: number; id: string; kind: WebinarKind; replaySessionId: string | null; slug: string; title: string };
@@ -506,6 +516,7 @@ export function buildSessionPayload(
     pinned: room.pinned,
     polls: room.polls,
     presentNow: room.presentNow,
+    screen: room.screen,
     session: { ...base.session, ...room.session },
     video: room.video,
     webinar: { ...base.webinar, replaySessionId: room.replaySessionId }

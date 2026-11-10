@@ -85,6 +85,7 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomTranslation } from "./use-room-translation";
 import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { useRoomPolls } from "./use-room-polls";
+import { useRoomScreen } from "./screen/use-room-screen";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useStageGeometry } from "./use-stage-geometry";
 import { returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
@@ -531,14 +532,25 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   const getOffsetMs = useCallback(() => Date.now() + (skewRef.current ?? 0) - zeroMs, [skewRef, zeroMs]);
 
-  const chat = useRoomChat({ enabled: !readOnly && !blocked, getPlayerOffsetMs: getOffsetMs, initialServerTime: payload.serverTime, sessionId, webinarId });
+  // A Na tela (docs/30 §5.1): a fixada e o que mais a equipe poe na frente da turma, pela leitura da sessao e pela
+  // consulta de 5 s do chat (com o carimbo).
+  const naTela = useRoomScreen({ sessionId, sessionPinned: session.pinned, sessionScreen: session.screen });
+  const chat = useRoomChat({
+    enabled: !readOnly && !blocked,
+    getPlayerOffsetMs: getOffsetMs,
+    getScreenStamp: naTela.getStamp,
+    initialServerTime: payload.serverTime,
+    onScreen: naTela.onChatScreen,
+    sessionId,
+    webinarId
+  });
   // Fase 4f: o chat no idioma do aluno (Perfil > Privacidade); sem idioma, desligado ou no "ver como", passa como veio.
   const translation = useRoomTranslation({ enabled: !readOnly && !blocked, messages: chat.messages, sessionId, webinarId });
   const reactions = useRoomReactions({ enabled: !readOnly && writable && !blocked, getOffsetMs, onRefused: onWriteRefused, reducedMotion, sessionId, webinarId });
   // O Assistente lido uma vez pela sala: o selo do palco, o chat e as Perguntas usam o mesmo estado.
   const assistant = useRoomAssistant({ enabled: !readOnly && !blocked, sessionId, webinarId });
-  // As enquetes da sala (a releitura da sessao e, com uma aberta, a leitura de 15 s): o palco, o card do chat e a aba.
-  const roomPolls = useRoomPolls({ enabled: !readOnly && !blocked, getOffsetMs, onRefused: onWriteRefused, sessionId, sessionPolls: session.polls, webinarId });
+  // As enquetes da sala (a releitura da sessao e, quando o resumo da Na tela muda, uma leitura): o palco, o card do chat e a aba.
+  const roomPolls = useRoomPolls({ enabled: !readOnly && !blocked, getOffsetMs, onRefused: onWriteRefused, pollsKey: naTela.pollsKey, sessionId, sessionPolls: session.polls, webinarId });
   const polls = roomPolls.polls;
   const [deferred, setDeferred] = useDeferredPolls(sessionId);
   // O que depende do guardado (o "depois", os resultados vistos) so depois da hidratacao: sem isso, a enquete deixada
@@ -1131,7 +1143,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                       }
                     }}
                     phase={phase}
-                    pinned={session.pinned}
+                    pinned={naTela.pinned}
                     readOnly={readOnly}
                     removeOpen={removeOpen}
                     sessionId={sessionId}

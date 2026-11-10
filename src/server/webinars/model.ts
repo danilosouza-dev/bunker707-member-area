@@ -713,6 +713,12 @@ export type StudentChatMessage = {
   displayName: string;
   id: string;
   kind: MessageKind;
+  /**
+   * Os enderecos `https://` do texto viram link (src/lib/webinar-links.ts, linkSegments): so na mensagem escrita pela
+   * equipe (papel Apresentador, Co-apresentador ou Equipe, vinda do console ou do roteiro), decidido no servidor
+   * (room-model.messageHasLinks). Mensagem de aluno, personagem de aluno do roteiro e o Assistente: sempre texto.
+   */
+  links: boolean;
   mine: boolean;
   offsetMs: number;
   pending: boolean;

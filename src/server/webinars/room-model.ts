@@ -237,11 +237,24 @@ export function displayNameFor(input: { fullName: string | null | undefined }): 
   return firstNameInitial(input.fullName).slice(0, CHAT_LIMITS.displayName);
 }
 
+/** Os papeis da equipe e as origens da equipe: so a mensagem que junta os dois tem link (especificacao "Na tela", §8.1). */
+const LINK_ROLES: readonly ChatMessage["role"][] = ["host", "co_host", "team"];
+const LINK_SOURCES: readonly ChatSource[] = ["team", "scripted"];
+
+/**
+ * Se os enderecos `https://` da mensagem viram link para o aluno: papel Apresentador, Co-apresentador ou Equipe E
+ * origem equipe (o console) ou roteiro (a fala de um personagem da equipe). O aluno, o personagem de aluno do roteiro e
+ * o Assistente nunca: ninguem espalha link de golpe pelo chat.
+ */
+export function messageHasLinks(message: Pick<ChatMessage, "role" | "source">): boolean {
+  return LINK_ROLES.includes(message.role) && LINK_SOURCES.includes(message.source);
+}
+
 /**
  * O que o aluno recebe de uma mensagem (docs/30 §5.1): `scripted` vai com o papel da persona (ja gravado em
  * `role`), a origem fica so no banco; `ai` continua `ai` (selo Assistente); as pendentes so do proprio autor. A hora
  * em que foi gravada (`sentAt`) so na sessao `live` (docs/31 V2-9): na gravada e no Replay, a linha mestre diria a
- * data da live de origem.
+ * data da live de origem. `links` pela regra de messageHasLinks.
  */
 export function toStudentMessage(
   message: ChatMessage,
@@ -257,6 +270,7 @@ export function toStudentMessage(
     displayName: message.displayName,
     id: message.id,
     kind: message.kind,
+    links: messageHasLinks(message),
     mine: Boolean(viewerUserId) && message.authorUserId === viewerUserId,
     offsetMs,
     pending: !message.approved,
