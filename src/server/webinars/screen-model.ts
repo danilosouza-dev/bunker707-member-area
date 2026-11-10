@@ -10,7 +10,9 @@
 //   caracteres cabe na 11), os modulos com a margem de 4, o lado em px (128 / 176 / 232, nunca menos de 3 px por
 //   modulo e nunca mais que a altura livre menos 56 px) e o aviso de codigo denso;
 // - o endereco da imagem montado pela origem conferida do nosso Supabase (so o caminho fica no banco);
-// - o resumo e os nomes que o console e o relatorio mostram;
+// - o resumo e os nomes que o console e o relatorio mostram, os tipos da pilula do palco do console e o estado do botao
+//   de cada item pronto (screenItemShowState: Mostrar, Mostrar no lugar do atual, Na tela ou Mostrar de novo, pela copia
+//   mostrada comparada com o item, sem relogio), que o Mostrar do servidor usa tambem;
 // - os tipos do item, da exibicao e do estado que a sala recebe (StudentScreenItem, StudentScreenState) e a conversao
 //   da exibicao (com a copia congelada ja conferida pelo zod em screen-rows.ts) no item do aluno;
 // - os nomes dos registros das metricas (student_events).
@@ -45,6 +47,12 @@ export type ScreenHiddenReason = (typeof SCREEN_HIDDEN_REASONS)[number];
 /** Onde cada tipo nasce no formulario: o banner embaixo a direita, o QR Code em cima a direita. */
 export const SCREEN_DEFAULT_PLACE: Readonly<Record<ScreenKind, ScreenPlace>> = { banner: "bottom_right", qr: "top_right" };
 export const SCREEN_DEFAULT_SIZE: ScreenSize = "m";
+
+/**
+ * A migracao da Na tela, para o aviso do console no navegador (db.ts e "server-only"): a mesma de
+ * db.WEBINARS_SCREEN_MIGRATION (tests/webinarios-na-tela-console-tela.test.mjs confere).
+ */
+export const SCREEN_MIGRATION = "202611100002";
 
 export const SCREEN_LIMITS = {
   /** O nome que so a equipe ve. */
@@ -225,6 +233,14 @@ export function screenDisplayLabel(kind: ScreenDisplayKind, name: string): strin
   return NA_TELA_COPY.exibicao[kind](name);
 }
 
+/**
+ * Os tipos de cartao que estao na tela agora, o banner antes do QR Code: a pilula neutra "Na tela: Banner · QR Code" do
+ * palco do console da Live ao vivo (la os cartoes nao sao desenhados). Vazio sem banner nem QR Code.
+ */
+export function screenStageKinds(active: readonly { hiddenAt: string | null; kind: ScreenDisplayKind }[]): ScreenKind[] {
+  return SCREEN_KINDS.filter((kind) => active.some((display) => display.kind === kind && display.hiddenAt === null));
+}
+
 /* ------------------------------------------------------------------------------------------------
  * O QR Code (desenhado no navegador pela qrcode.react, nivel M, margem de 4 modulos)
  * ---------------------------------------------------------------------------------------------- */
@@ -361,6 +377,55 @@ export function snapshotOfItem(item: ScreenItem): ScreenSnapshot {
     title: item.title,
     v: 1
   };
+}
+
+/**
+ * Se a copia mostrada e a mesma que o item daria agora, no que a turma ve (o nome, que so a equipe ve, fica de fora):
+ * igual, o item esta na tela como esta; diferente, ele foi editado depois de mostrado.
+ */
+export function screenSnapshotMatches(snapshot: ScreenSnapshot | null, item: ScreenItem): boolean {
+  if (!snapshot) {
+    return false;
+  }
+
+  const now = snapshotOfItem(item);
+  const sameImage =
+    snapshot.image === null || now.image === null
+      ? snapshot.image === now.image
+      : snapshot.image.path === now.image.path && snapshot.image.alt === now.image.alt && snapshot.image.width === now.image.width && snapshot.image.height === now.image.height;
+
+  return (
+    sameImage &&
+    snapshot.body === now.body &&
+    snapshot.buttonLabel === now.buttonLabel &&
+    snapshot.closable === now.closable &&
+    snapshot.linkUrl === now.linkUrl &&
+    snapshot.place === now.place &&
+    snapshot.size === now.size &&
+    snapshot.title === now.title
+  );
+}
+
+/**
+ * O botao principal de um item pronto no console (Prontos) e o que o Mostrar faz no servidor: "show" (nada desse tipo na
+ * tela: Mostrar), "replace" (outro do mesmo tipo esta: Mostrar no lugar do atual), "on" (e ele, como esta: o selo Na
+ * tela e Tirar da tela; o Mostrar nao grava nada) ou "again" (e ele, mas foi editado depois de mostrado: Mostrar de novo,
+ * uma exibicao nova).
+ */
+export type ScreenItemShowState = "again" | "on" | "replace" | "show";
+
+export function screenItemShowState(item: ScreenItem, active: readonly Pick<ScreenDisplay, "hiddenAt" | "itemId" | "kind" | "snapshot">[]): ScreenItemShowState {
+  const current = active.find((display) => display.kind === item.kind && display.hiddenAt === null);
+
+  if (!current) {
+    return "show";
+  }
+
+  if (current.itemId !== item.id) {
+    return "replace";
+  }
+
+  return current.snapshot && "place" in current.snapshot && screenSnapshotMatches(current.snapshot, item) ? "on" : "again";
 }
 
 /** O banner ou o QR Code como a sala recebe: o id da exibicao, os textos, o link e a imagem com o endereco ja montado. */

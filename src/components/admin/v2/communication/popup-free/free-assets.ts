@@ -4,7 +4,8 @@ import type { PopupVideoMimeType } from "@/server/communications/popup-design-mo
 import { uploadPopupFreeImage } from "@/server/communications/popup-free-actions";
 import { POPUP_DESIGN_COPY, videoDurationHint, videoFileProblem, videoMimeTypeOf } from "../popup-design/popup-design-editor-model";
 import { readVideoDuration, uploadPopupVideo } from "../popup-design/video-upload";
-import { FREE_IMAGE_COPY_PROBLEMS, FREE_IMAGE_QUALITIES, freeImageFileProblem, freeImageTargetSize, pickFreeImageEncoding } from "./free-inspector-model";
+import { encodeWebp, prepareFreeImage } from "./free-image-prepare";
+import { FREE_IMAGE_COPY_PROBLEMS, freeImageTargetSize } from "./free-inspector-model";
 
 // Envios do editor Livre (docs/27 §5.2; spec §4.6), pacote I. Imagem: o navegador abre o JPG/PNG/WebP, reduz o
 // lado maior ate 1.600 px num canvas (a transparencia fica: o canvas comeca transparente e nada e pintado por
@@ -12,98 +13,10 @@ import { FREE_IMAGE_COPY_PROBLEMS, FREE_IMAGE_QUALITIES, freeImageFileProblem, f
 // que confere de novo e devolve caminho e medidas do servidor. Video: o mesmo envio do Personalizado
 // (video-upload.ts, direto ao Storage); a capa e um quadro do ARQUIVO LOCAL escolhido (nunca de um video que ja
 // esta no Storage: precisaria de CORS no canvas), na proporcao do video, enviado como imagem; se o navegador nao
-// abre o arquivo (WebM num Safari antigo), segue sem capa.
+// abre o arquivo (WebM num Safari antigo), segue sem capa. O preparo da imagem (prepareFreeImage, que aceita outros
+// limites: o banner da Na tela dos webinarios usa 1.280 px e 200.000 bytes) mora em free-image-prepare.ts, sem envio.
 
 export type FreeUploadedImage = { height: number; path: string; width: number };
-
-type Drawable = { close: () => void; height: number; source: CanvasImageSource; width: number };
-
-/** Abre a imagem escolhida (createImageBitmap; senao um <img> com endereco local). */
-async function openImage(file: Blob): Promise<Drawable> {
-  if (typeof createImageBitmap === "function") {
-    try {
-      const bitmap = await createImageBitmap(file);
-
-      return { close: () => bitmap.close(), height: bitmap.height, source: bitmap, width: bitmap.width };
-    } catch {
-      // segue para o <img>
-    }
-  }
-
-  const url = URL.createObjectURL(file);
-
-  try {
-    const image = new Image();
-
-    image.decoding = "async";
-    image.src = url;
-    await image.decode();
-
-    return { close: () => URL.revokeObjectURL(url), height: image.naturalHeight, source: image, width: image.naturalWidth };
-  } catch {
-    URL.revokeObjectURL(url);
-    throw new Error(FREE_IMAGE_COPY_PROBLEMS.open);
-  }
-}
-
-/** Desenha na medida final e tenta as qualidades ate caber; null = nenhuma coube (ou o navegador nao faz WebP). */
-function encodeWebp(source: CanvasImageSource, size: { height: number; width: number }): string | null {
-  const canvas = document.createElement("canvas");
-
-  canvas.width = size.width;
-  canvas.height = size.height;
-
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return null;
-  }
-
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.clearRect(0, 0, size.width, size.height);
-  context.drawImage(source, 0, 0, size.width, size.height);
-
-  const attempts = FREE_IMAGE_QUALITIES.map((quality) => ({ dataUrl: canvas.toDataURL("image/webp", quality), quality }));
-  const choice = pickFreeImageEncoding(attempts);
-
-  canvas.width = 0;
-  canvas.height = 0;
-
-  return choice?.dataUrl ?? null;
-}
-
-/** O arquivo escolhido como data URL WebP pronto para enviar (ou lanca com a frase para a tela). */
-export async function prepareFreeImage(file: File): Promise<string> {
-  const problem = freeImageFileProblem(file);
-
-  if (problem) {
-    throw new Error(problem);
-  }
-
-  const image = await openImage(file);
-
-  try {
-    const size = freeImageTargetSize({ height: image.height, width: image.width });
-
-    if (!size) {
-      throw new Error(FREE_IMAGE_COPY_PROBLEMS.sides);
-    }
-
-    const dataUrl = encodeWebp(image.source, size);
-
-    if (!dataUrl) {
-      // O navegador devolveu PNG (sem WebP) ou nem a menor qualidade coube.
-      const probe = document.createElement("canvas").toDataURL("image/webp", 0.5);
-
-      throw new Error(probe.startsWith("data:image/webp") ? FREE_IMAGE_COPY_PROBLEMS.tooLarge : FREE_IMAGE_COPY_PROBLEMS.webp);
-    }
-
-    return dataUrl;
-  } finally {
-    image.close();
-  }
-}
 
 /** Envia um data URL WebP e devolve caminho e medidas lidas pelo servidor. */
 export async function uploadFreeImageDataUrl(dataUrl: string): Promise<FreeUploadedImage> {

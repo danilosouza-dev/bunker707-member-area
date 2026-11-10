@@ -1140,6 +1140,18 @@ test("imagem: conta de reduzir até 1.600 px e as qualidades até caber", () => 
   assert.equal(panel.freeDataUrlBytes("data:image/webp;base64,QUJD"), 3);
   assert.equal(panel.freeDataUrlBytes("data:image/webp;base64,QUI="), 2);
 
+  // Outros limites (o banner da Na tela dos webinarios: 1.280 px e 200.000 bytes); sem eles, os do Livre de sempre.
+  assert.deepEqual(model.FREE_IMAGE_LIMITS, { bytes: 420_000, side: { max: 1600, min: 16 } });
+  const naTela = { bytes: 200_000, side: { max: 1280, min: 16 } };
+  assert.deepEqual(panel.freeImageTargetSize({ height: 1800, width: 3200 }, naTela), { height: 720, width: 1280 });
+  assert.deepEqual(panel.freeImageTargetSize({ height: 1000, width: 1200 }, naTela), { height: 1000, width: 1200 }, "abaixo do lado, nunca aumenta");
+  assert.equal(panel.freeImageTargetSize({ height: 12, width: 1600 }, naTela), null, "1.600 × 12 vira 1.280 × 10");
+  const medio = `data:image/webp;base64,${"A".repeat(Math.ceil((300_000 * 4) / 3))}`;
+  const leve = `data:image/webp;base64,${"A".repeat(Math.ceil((150_000 * 4) / 3))}`;
+  assert.equal(panel.pickFreeImageEncoding([{ dataUrl: medio, quality: 0.86 }]).quality, 0.86, "no Livre, 300.000 bytes cabem");
+  assert.equal(panel.pickFreeImageEncoding([{ dataUrl: medio, quality: 0.86 }, { dataUrl: leve, quality: 0.75 }], naTela).quality, 0.75, "com 200.000, so a mais leve");
+  assert.equal(panel.pickFreeImageEncoding([{ dataUrl: medio, quality: 0.6 }], naTela), null);
+
   // Formato e tamanho do arquivo de origem.
   assert.equal(panel.freeImageFileProblem({ size: 1000, type: "image/gif" }), "Envie uma imagem JPG, PNG ou WebP.");
   assert.equal(panel.freeImageFileProblem({ size: 30 * 1024 * 1024, type: "image/png" }), "A imagem passa de 20 MB. Use uma menor.");

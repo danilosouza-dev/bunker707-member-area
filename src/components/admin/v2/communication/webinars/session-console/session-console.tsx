@@ -76,6 +76,8 @@ import {
   unpinPoll
 } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
+import { archiveScreenItem, hideScreenItem, saveScreenItem, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
+import { screenStageKinds } from "@/server/webinars/screen-model";
 import { fireScriptItem } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
@@ -95,6 +97,8 @@ import { ConsolePeopleTab } from "./console-people-tab";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
+import { ConsoleScreen, consoleScreenCount } from "./console-screen";
+import type { ScreenItemSaveInput } from "./console-screen-form";
 import { ConsoleScript } from "./console-script";
 import { ConsoleShell } from "./console-shell";
 import { ConsoleStage } from "./console-stage";
@@ -142,7 +146,11 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // especificacao de 10/11/2026, R1 e R2): o Chat recebe a fixada lida pela chave (o bloco Fixada agora), o relogio para
 // o "há 2 min" e o "Fixar ao enviar" (sendTeamMessage com `pin`, aviso "Mensagem fixada."); as Enquetes recebem a
 // enquete fixada do retrato (pinnedPollId), o Fixar e o Desafixar (pinPoll, unpinPoll) e o "Abrir e fixar" (launchPoll
-// com `pin`), com os avisos "Enquete fixada." e "Enquete desafixada.".
+// com `pin`), com os avisos "Enquete fixada." e "Enquete desafixada.". A entrada Na tela (R3 e R4, console-screen.tsx):
+// o que esta na tela com os numeros, os prontos e os formularios do banner e do QR Code (saveScreenItem, depois
+// showScreenItem no Mostrar agora; uploadScreenImage; showScreenItem, hideScreenItem e archiveScreenItem), com os avisos
+// "Na tela dos alunos em até 5 s.", "Saiu da tela.", "Salvo nos prontos." e "Excluído dos prontos."; o contador da
+// entrada (consoleScreenCount) e, no palco da live, a pilula "Na tela: Banner · QR Code" (screenStageKinds).
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -636,6 +644,44 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
   }
 
+  /* Na tela: o banner e o QR Code */
+
+  /**
+   * O Salvar do formulario do banner e do QR Code: salva e, no Mostrar agora, mostra na sessao. Devolve o resultado do
+   * salvar para o formulario pôr os erros nos campos (nulo com outra acao em andamento); a falha do Mostrar depois de
+   * salvo vai para o banner do console (o item ja esta nos prontos).
+   */
+  async function saveScreen(input: ScreenItemSaveInput, show: boolean) {
+    if (!sessionId || busyKey) {
+      return null;
+    }
+
+    setBusyKey("screen:save");
+    setFailure(null);
+    const saved = await saveScreenItem(input);
+
+    if (!saved.ok) {
+      setBusyKey(null);
+      return saved;
+    }
+
+    if (show) {
+      const shown = await showScreenItem({ itemId: saved.data.item.id, sessionId });
+
+      if (shown.ok) {
+        adminToast.success(naTelaCopy.avisos.naTela);
+      } else {
+        setFailure({ message: shown.error, status: shown.status });
+      }
+    } else {
+      adminToast.success(naTelaCopy.avisos.salvo);
+    }
+
+    setBusyKey(null);
+    await refresh();
+    return saved;
+  }
+
   async function confirmBan() {
     if (!sessionId || !banTarget) {
       return;
@@ -686,7 +732,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
   const entries = session ? consoleMoreEntriesFor({ hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
-  const counts = consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] });
+  const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
+  const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
+  const stageKinds = screenStageKinds(screen.active);
   const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
@@ -825,6 +873,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   live={live}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
+                  screenLabel={stageKinds.length > 0 ? naTelaCopy.pilulaPalco(stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind])) : null}
                   session={session}
                   stageRef={stageRef}
                   topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
@@ -922,6 +971,34 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 oferta: session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null,
                 // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache.
                 presenca: snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null,
+                tela:
+                  session.kind !== "replay" ? (
+                    <ConsoleScreen
+                      busyKey={busyKey}
+                      canAct={canAct}
+                      nowMs={nowMs}
+                      onArchive={(itemId: string) => run(`screen:${itemId}`, () => archiveScreenItem({ id: itemId }), () => adminToast.success(naTelaCopy.avisos.excluido))}
+                      onHide={(displayId: string) => void run(`screen:${displayId}`, () => hideScreenItem({ displayId }), () => adminToast.success(naTelaCopy.avisos.saiu))}
+                      onSave={saveScreen}
+                      onShow={(itemId: string) =>
+                        void run(`screen:${itemId}`, () => showScreenItem({ itemId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.naTela))
+                      }
+                      onUnpinMessage={(messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action: "unpin", messageId }))}
+                      onUnpinPoll={(pollId: string) =>
+                        void run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
+                          if (result.unpinned) {
+                            adminToast.success(naTelaCopy.avisos.enqueteDesafixada);
+                          }
+                        })
+                      }
+                      onUpload={(image: string) => uploadScreenImage({ image })}
+                      pinned={snapshot.pinned ?? null}
+                      polls={snapshot.polls.launched}
+                      screen={screen}
+                      webinarId={webinar.id}
+                      webinarSlug={webinar.slug}
+                    />
+                  ) : null,
                 roteiro:
                   webinar.kind === "simulated" ? (
                     <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />

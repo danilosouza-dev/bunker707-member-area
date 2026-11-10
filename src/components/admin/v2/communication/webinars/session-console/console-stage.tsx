@@ -1,6 +1,6 @@
 "use client";
 
-import { DoorOpen, LogIn, RefreshCw, Users } from "lucide-react";
+import { DoorOpen, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 import { columnWanted, stageColumnShown } from "@/components/member/webinars/room/live-room-model";
 import { stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
@@ -29,7 +29,9 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
 // gravador) e o co-apresentador e a Equipe tiram ou poem a coluna pela largura, como o aluno (columnWanted).
-// Nenhum texto cita o motor da sala.
+// Nenhum texto cita o motor da sala. A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §6.1): os cartoes do banner
+// e do QR Code nao sao desenhados neste palco (o menu das miniaturas do motor precisa continuar livre); com algum deles
+// na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 /**
@@ -49,6 +51,8 @@ type ConsoleStageProps = {
   presentLabel: string | null;
   /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
   presenterName: string | null;
+  /** "Na tela: Banner · QR Code" (a Na tela, com o banner ou o QR Code na frente da turma); nulo, a pilula nao aparece. */
+  screenLabel?: string | null;
   session: WebinarSession;
   /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */
   stageRef: RefObject<HTMLDivElement | null>;
@@ -87,7 +91,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], 
   }
 }
 
-export function ConsoleStage({ busy, className, handle, live, presentLabel, presenterName, session, stageRef, topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, live, presentLabel, presenterName, screenLabel = null, session, stageRef, topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
@@ -126,11 +130,21 @@ export function ConsoleStage({ busy, className, handle, live, presentLabel, pres
         recording={recording}
         topLeft={topLeft}
         topRight={
-          presentLabel ? (
-            <RoomStagePill className="tabular-nums" data-room-badge="present">
-              <Users aria-hidden="true" />
-              {presentLabel}
-            </RoomStagePill>
+          presentLabel || screenLabel ? (
+            <>
+              {presentLabel ? (
+                <RoomStagePill className="tabular-nums" data-room-badge="present">
+                  <Users aria-hidden="true" />
+                  {presentLabel}
+                </RoomStagePill>
+              ) : null}
+              {screenLabel ? (
+                <RoomStagePill data-room-badge="screen">
+                  <PictureInPicture2 aria-hidden="true" />
+                  {screenLabel}
+                </RoomStagePill>
+              ) : null}
+            </>
           ) : null
         }
       />

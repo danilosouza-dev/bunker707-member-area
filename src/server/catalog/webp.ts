@@ -3,7 +3,8 @@
 // imagem lateral e 1920×1080 para a de fundo, alvo ≤ 250 KB); o servidor nao confia no navegador: le as
 // dimensoes no cabecalho do WebP antes de enviar ao Storage. Modulo puro (sem Buffer, sem "server-only")
 // para tests/catalog-server.test.mjs carregar direto pelo Node. As medidas sao as mesmas de IMAGE_SPECS
-// (src/components/admin/v2/products/cover-crop.ts); tests/member-area-foundation.test.mjs confere.
+// (src/components/admin/v2/products/cover-crop.ts); tests/member-area-foundation.test.mjs confere. A imagem do banner
+// da Na tela (webinarios, docs/30 §2.4) usa tambem webpIsAnimated: WebP animado e recusado.
 
 export type ProductImageSlot = "cover" | "hero";
 /** Slots aceitos pelo servidor: os do produto, os da Area de membros (login) e a imagem dos avisos (Comunicacao). */
@@ -88,6 +89,38 @@ export function readWebpDimensions(bytes: Uint8Array): { height: number; width: 
   }
 
   return null;
+}
+
+/** O bit de animacao das flags do VP8X (Rsv 2 | ICC | Alpha | EXIF | XMP | Animation | Rsv). */
+const VP8X_ANIMATION_FLAG = 0x02;
+
+/**
+ * Se o WebP e animado (a imagem da Na tela recusa: movimento que ninguem pausa, docs/30 §9). Olha a flag de animacao do
+ * VP8X e percorre os chunks do RIFF que couberem nos bytes recebidos atras de ANIM ou ANMF (basta o cabecalho: a flag
+ * fica no byte 20). Qualquer coisa que nao seja WebP devolve false (quem chama ja recusou pelo cabecalho).
+ */
+export function webpIsAnimated(bytes: Uint8Array): boolean {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 21 || fourCC(bytes, 0) !== "RIFF" || fourCC(bytes, 8) !== "WEBP") {
+    return false;
+  }
+
+  if (fourCC(bytes, 12) === "VP8X" && (bytes[20] & VP8X_ANIMATION_FLAG) !== 0) {
+    return true;
+  }
+
+  // Cada chunk: 4 bytes do nome, 4 do tamanho (little-endian) e o conteudo, com 1 byte de folga quando o tamanho e impar.
+  for (let offset = 12; offset + 8 <= bytes.length; ) {
+    const name = fourCC(bytes, offset);
+
+    if (name === "ANIM" || name === "ANMF") {
+      return true;
+    }
+
+    const size = (bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24)) >>> 0;
+    offset += 8 + size + (size % 2);
+  }
+
+  return false;
 }
 
 const webpDataUrlPattern = /^data:image\/webp;base64,([A-Za-z0-9+/=]+)$/;

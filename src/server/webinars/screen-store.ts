@@ -6,7 +6,8 @@
 // console seguem como antes; toda ESCRITA sobe o PendingMigrationError (assertNoDbError), e a acao responde com o aviso
 // de migracao pendente (WEBINARS_SCREEN_MIGRATION). Nenhuma leitura daqui entra nas leituras de sempre da sessao.
 // A troca de uma exibicao (showScreenDisplayRow: tirar a do mesmo tipo e gravar a nova, uma tentativa a mais no 23505
-// do indice unico) e a peca comum do Fixar da enquete (room-actions.ts) e do Mostrar do banner e do QR Code.
+// do indice unico) e a peca comum do Fixar da enquete (room-actions.ts) e do Mostrar do banner e do QR Code
+// (screen-actions.ts, que le tambem onde um item pronto esta na tela antes de excluir).
 
 import "server-only";
 
@@ -108,6 +109,16 @@ export async function archiveScreenItemRow(db: WebinarsDb, id: string, nowIso: s
 export async function readActiveScreenDisplayRows(db: WebinarsDb, sessionId: string): Promise<ScreenDisplayRow[]> {
   const { data, error } = await db.from("webinar_screen_displays").select(SCREEN_DISPLAY_COLUMNS).eq("session_id", sessionId).is("hidden_at", null);
   assertNoDbError(error, "Webinarios: Na tela, o que esta na tela");
+  return (data ?? []) as ScreenDisplayRow[];
+}
+
+/**
+ * As exibicoes ainda na tela de um item pronto, em qualquer sessao (o Excluir recusa enquanto o item esta na frente de
+ * uma turma). Sem a troca por vazio: sem a migracao sobe o PendingMigrationError.
+ */
+export async function readActiveScreenDisplayRowsOfItem(db: WebinarsDb, itemId: string): Promise<ScreenDisplayRow[]> {
+  const { data, error } = await db.from("webinar_screen_displays").select(SCREEN_DISPLAY_COLUMNS).eq("item_id", itemId).is("hidden_at", null);
+  assertNoDbError(error, "Webinarios: Na tela, onde o item esta na tela");
   return (data ?? []) as ScreenDisplayRow[];
 }
 
