@@ -41,7 +41,8 @@ type AdminToasterPlacement = "bottom-right" | "console";
  * O tema dos avisos: escuro, como todo o admin. O console de quem apresenta monta o dele dentro da raiz com o tema
  * escolhido (docs/31 V2-12); as cores ja vem dos tokens, que a ponte do console redefine. No console os avisos abrem em
  * cima, no meio, logo abaixo do topo (a altura vem da variavel --console-toast-top da raiz): embaixo a direita eles
- * cobriam o campo e o Enviar do chat, presos no canto de baixo do painel.
+ * cobriam o campo e o Enviar do chat, presos no canto de baixo do painel. No console o aviso tem o desenho invertido do
+ * aviso da sala (docs/31 §10).
  */
 export function AdminToaster({ placement = "bottom-right", theme = "dark" }: { placement?: AdminToasterPlacement; theme?: "dark" | "light" }) {
   const inConsole = placement === "console";
@@ -53,13 +54,25 @@ export function AdminToaster({ placement = "bottom-right", theme = "dark" }: { p
       position={inConsole ? "top-center" : "bottom-right"}
       theme={theme}
       toastOptions={{
-        style: {
-          background: "var(--surface-3)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: "8px",
-          color: "var(--text-primary)",
-          fontSize: "14px"
-        }
+        // No console, o aviso invertido da sala no estilo do YouTube (docs/31 §10, o RoomSnackbar): o fundo claro no
+        // escuro e o escuro no claro, sem contorno, raio 8 e a sombra do aviso; no admin, o cartao de sempre.
+        style: inConsole
+          ? {
+              background: "var(--room-snackbar-bg)",
+              border: "none",
+              borderRadius: "8px",
+              boxShadow: "var(--room-snackbar-shadow)",
+              color: "var(--room-snackbar-fg)",
+              fontSize: "14px",
+              lineHeight: "20px"
+            }
+          : {
+              background: "var(--surface-3)",
+              border: "1px solid var(--border-strong)",
+              borderRadius: "8px",
+              color: "var(--text-primary)",
+              fontSize: "14px"
+            }
       }}
     />
   );

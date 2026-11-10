@@ -1,21 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, type ReactNode } from "react";
+import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
+import { roomPillClassName } from "@/components/member/webinars/room/room-pill";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { AttendanceQuestionMark } from "@/server/webinars/assistant-queries";
 import { sortQuestionsForBoard } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type QuestionStatus, type WebinarQuestion } from "@/server/webinars/model";
-import { adminTextareaClass } from "../../../form";
-import { SectionCard } from "../../../settings/kit";
-import { StatusChip } from "../../../status-chip";
 
-// O painel Perguntas do console (docs/30 §2.4): a fila por votos (as abertas primeiro), Responder por escrito (vai
-// para o chat como linha da equipe), Respondida ao vivo, Dispensar e Reabrir. Fase 4c (docs/30 §1.6 e D24), com as
-// marcas do Atendimento (`marks`): "Respondida pelo Assistente", "Pediu a equipe" (e a caixa de resposta de volta na
-// respondida pelo Assistente em que o aluno pediu a equipe) e com quem esta a pergunta.
+// O painel Perguntas do console (docs/30 §2.4; o estilo do YouTube, docs/31 §10): a fila por votos (as abertas
+// primeiro), cada pergunta como o comentario do YouTube da sala, direto no cartao do painel (sem cartao proprio), com
+// uma linha fina entre elas: o avatar de 24 (a mascara na Anonima), a linha do autor (o nome, os votos e os selos
+// tonais: a situacao, e as marcas do Atendimento da fase 4c, docs/30 §1.6 e D24: "Respondida pelo Assistente", "Pediu a
+// equipe" e com quem esta), o texto e, com a resposta escrita, a resposta como a do fio (o icone da equipe e o texto).
+// Na aberta (ou na respondida pelo Assistente em que o aluno pediu a equipe), o campo da resposta com a linha embaixo,
+// como o campo da sala, e as pilulas Responder por escrito (vai para o chat como linha da equipe; branca, desligada sem
+// texto), Respondida ao vivo e Dispensar; na que saiu da fila, Reabrir. Nenhuma frase escrita aqui.
 
 const copy = WEBINAR_ADMIN_COPY.console.questions;
 
@@ -29,7 +31,20 @@ type ConsoleQuestionsProps = {
   questions: readonly WebinarQuestion[];
 };
 
-const STATUS_TONE: Record<QuestionStatus, "muted" | "neutral" | "success"> = { answered: "success", dismissed: "muted", open: "neutral" };
+type ChipTone = "neutral" | "success" | "warning";
+
+const CHIP_TONES: Record<ChipTone, string> = {
+  neutral: "bg-room-control text-room-fg",
+  success: "bg-room-success-bg text-room-success-fg",
+  warning: "bg-room-warn-bg text-room-warn-fg"
+};
+
+/** O selo tonal do YouTube (o do papel no comentario da sala), com o tom da situacao. */
+function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: ChipTone }) {
+  return <span className={cn("inline-flex h-5 shrink-0 items-center rounded-full px-1.5 text-xs leading-[18px] font-medium", CHIP_TONES[tone])}>{children}</span>;
+}
+
+const STATUS_TONE: Record<QuestionStatus, ChipTone> = { answered: "success", dismissed: "neutral", open: "neutral" };
 
 export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onStatus, questions }: ConsoleQuestionsProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -48,66 +63,81 @@ export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onSt
   }
 
   return (
-    <SectionCard title={copy.title} titleId="console-questions-title">
-      {board.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</p> : null}
-      <ol className="flex max-h-[60vh] min-w-0 flex-col gap-3 overflow-y-auto" data-console-questions="">
+    <div className="flex min-w-0 flex-col" data-console-questions-pane="">
+      {board.length === 0 ? <p className="py-6 text-center text-sm leading-5 text-room-fg-subtle">{copy.empty}</p> : null}
+      <ol className="flex min-w-0 flex-col max-lg:max-h-[60vh] max-lg:overflow-y-auto" data-console-questions="">
         {board.map((question) => {
           const busy = busyKey === `question:${question.id}`;
           const mark = marks?.[question.id] ?? null;
           const backToTeam = question.status === "answered" && mark?.answerSource === "ai" && mark.handoffRequested;
           const canAnswer = question.status === "open" || backToTeam;
+          const name = question.anonymous ? copy.anonymous : question.displayName;
+          const draft = answers[question.id] ?? "";
 
           return (
-            <li className={cn("flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2", question.status === "dismissed" && "opacity-70")} data-console-question={question.id} data-question-status={question.status} key={question.id}>
-              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs leading-5 text-[var(--text-tertiary)]">
-                <span className="font-medium text-[var(--text-primary)]">{question.anonymous ? copy.anonymous : question.displayName}</span>
-                <span className="tabular-nums">{copy.votes(question.upvotes)}</span>
-                <StatusChip tone={STATUS_TONE[question.status]}>{question.answeredLive && question.status === "answered" ? copy.answerLive : copy.statuses[question.status]}</StatusChip>
-                {mark?.answerSource === "ai" ? <StatusChip tone="neutral">{WEBINAR_COPY.assistente.console.respondidaPeloAssistente}</StatusChip> : null}
-                {mark?.handoffRequested ? <StatusChip tone="warning">{WEBINAR_COPY.assistente.console.pediuEquipe}</StatusChip> : null}
-                {mark?.assignedName && question.status === "open" ? <StatusChip tone="success">{WEBINAR_COPY.assistente.console.assumida(mark.assignedName)}</StatusChip> : null}
-              </div>
-              <p className="text-sm leading-5 break-words whitespace-pre-wrap text-[var(--text-primary)]">{question.body}</p>
-              {question.answerText ? <p className="rounded-md bg-[var(--surface-2)] px-2 py-1 text-[13px] leading-5 text-[var(--text-secondary)]">{question.answerText}</p> : null}
-              {canAct && canAnswer ? (
-                <div className="flex min-w-0 flex-col gap-2">
-                  <label className="sr-only" htmlFor={`console-answer-${question.id}`}>
-                    {copy.answerPlaceholder}
-                  </label>
-                  <textarea
-                    className={cn(adminTextareaClass, "min-h-14")}
-                    disabled={busy}
-                    id={`console-answer-${question.id}`}
-                    maxLength={CHAT_LIMITS.answer}
-                    onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
-                    placeholder={copy.answerPlaceholder}
-                    rows={2}
-                    value={answers[question.id] ?? ""}
-                  />
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    <Button className="h-8! px-2 text-[13px]" disabled={busy || !(answers[question.id] ?? "").trim()} onClick={() => void answer(question)} type="button" variant="secondary">
-                      {copy.answerWritten}
-                    </Button>
-                    <Button className="h-8! px-2 text-[13px]" disabled={busy} onClick={() => void onAnswer(question.id, "", true)} type="button" variant="secondary">
-                      {copy.answerLive}
-                    </Button>
-                    <Button className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => onStatus(question.id, "dismissed")} type="button" variant="ghost">
-                      {copy.dismiss}
-                    </Button>
+            <li
+              className={cn("flex min-w-0 gap-3 border-b border-room-border py-4 first:pt-1 last:border-b-0", question.status === "dismissed" && "opacity-70")}
+              data-console-question={question.id}
+              data-question-status={question.status}
+              key={question.id}
+            >
+              <RoomCommentAvatar kind={question.anonymous ? "anonymous" : "person"} name={question.anonymous ? undefined : question.displayName} />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-[18px]">
+                  <span className="truncate font-medium text-room-fg">{name}</span>
+                  <span className="tabular-nums text-room-fg-subtle">{copy.votes(question.upvotes)}</span>
+                  <Chip tone={STATUS_TONE[question.status]}>{question.answeredLive && question.status === "answered" ? copy.answerLive : copy.statuses[question.status]}</Chip>
+                  {mark?.answerSource === "ai" ? <Chip>{WEBINAR_COPY.assistente.console.respondidaPeloAssistente}</Chip> : null}
+                  {mark?.handoffRequested ? <Chip tone="warning">{WEBINAR_COPY.assistente.console.pediuEquipe}</Chip> : null}
+                  {mark?.assignedName && question.status === "open" ? <Chip tone="success">{WEBINAR_COPY.assistente.console.assumida(mark.assignedName)}</Chip> : null}
+                </div>
+                <p className="mt-1 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg">{question.body}</p>
+                {question.answerText ? (
+                  <div className="mt-3 flex min-w-0 gap-3" data-console-answer="">
+                    <RoomCommentAvatar kind="team" />
+                    <p className="min-w-0 flex-1 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg-muted">{question.answerText}</p>
                   </div>
-                </div>
-              ) : null}
-              {canAct && question.status !== "open" ? (
-                <div>
-                  <Button className="h-8! px-2 text-[13px] text-[var(--text-secondary)]" disabled={busy} onClick={() => onStatus(question.id, "open")} type="button" variant="ghost">
-                    {copy.reopen}
-                  </Button>
-                </div>
-              ) : null}
+                ) : null}
+                {canAct && canAnswer ? (
+                  <div className="mt-3 flex min-w-0 flex-col gap-2">
+                    <label className="sr-only" htmlFor={`console-answer-${question.id}`}>
+                      {copy.answerPlaceholder}
+                    </label>
+                    <textarea
+                      className="block min-h-6 w-full resize-none border-b border-room-field-line bg-transparent pb-1 text-base leading-[22px] text-room-fg outline-none placeholder:text-room-fg-subtle focus:border-room-fg disabled:text-room-fg-disabled lg:text-sm lg:leading-5"
+                      disabled={busy}
+                      id={`console-answer-${question.id}`}
+                      maxLength={CHAT_LIMITS.answer}
+                      onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+                      placeholder={copy.answerPlaceholder}
+                      rows={draft.includes("\n") || draft.length > 60 ? 3 : 1}
+                      value={draft}
+                    />
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <button className={roomPillClassName({ size: "s", tone: "white" })} disabled={busy || !draft.trim()} onClick={() => void answer(question)} type="button">
+                        {copy.answerWritten}
+                      </button>
+                      <button className={roomPillClassName({ size: "s", tone: "tonal" })} disabled={busy} onClick={() => void onAnswer(question.id, "", true)} type="button">
+                        {copy.answerLive}
+                      </button>
+                      <button className={roomPillClassName({ size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "dismissed")} type="button">
+                        {copy.dismiss}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {canAct && question.status !== "open" ? (
+                  <div className="mt-2">
+                    <button className={roomPillClassName({ className: "-ml-3", size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "open")} type="button">
+                      {copy.reopen}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </li>
           );
         })}
       </ol>
-    </SectionCard>
+    </div>
   );
 }
