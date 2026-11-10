@@ -264,8 +264,22 @@ export type WebinarRegistration = {
 };
 
 /** Situacao do webinario como a lista do admin mostra (docs/30 §2.3). */
-export const WEBINAR_SITUATIONS = ["draft", "scheduled", "in_progress", "ended", "cancelled"] as const;
+export const WEBINAR_SITUATIONS = ["draft", "scheduled", "in_progress", "ended", "cancelled", "archived"] as const;
 export type WebinarSituation = (typeof WEBINAR_SITUATIONS)[number];
+
+/**
+ * O webinario tem dados de aluno (docs/30 §2.3, Excluir o arquivado; decisao do produtor de 10/11/2026)? Sim quando
+ * alguma tabela bateu o teto da leitura (`truncated`: turma de verdade) ou quando alguem que deixou dado nao e da equipe
+ * (`staffIds`: admin_roles, o apresentador e quem apresenta). So sem dado de aluno o arquivado pode ser excluido: o
+ * webinario de teste da equipe sai dos paineis; o que teve turma fica, porque o historico alimenta os numeros.
+ */
+export function webinarHasStudentData(input: { staffIds: readonly string[]; truncated: boolean; userIds: readonly (string | null)[] }): boolean {
+  if (input.truncated) {
+    return true;
+  }
+  const staff = new Set(input.staffIds);
+  return input.userIds.some((userId) => typeof userId === "string" && userId !== "" && !staff.has(userId));
+}
 
 /** O que a pagina do aluno mostra (docs/30 §1.2). */
 export const STUDENT_PHASES = ["scheduled", "registered", "sold_out", "waiting", "live", "ended", "cancelled"] as const;
@@ -382,14 +396,15 @@ export function webinarSituation(
   sessions: readonly WebinarSession[],
   now: number
 ): WebinarSituation {
+  // Arquivado vence tudo (o encerrado e o cancelado que a equipe tirou da lista, docs/30 §2.3).
+  if (webinar.status === "archived") {
+    return "archived";
+  }
   if (webinar.cancelledAt) {
     return "cancelled";
   }
   if (webinar.status === "draft") {
     return "draft";
-  }
-  if (webinar.status === "archived") {
-    return "ended";
   }
   const real = sessions.filter((session) => session.kind !== "replay" && session.status !== "cancelled");
   if (real.some((session) => session.status === "live" || session.status === "waiting")) {

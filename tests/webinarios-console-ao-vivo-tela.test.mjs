@@ -1002,10 +1002,11 @@ test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯
   assert.match(cabecalho, /<h2 [^>]*id="console-panel-title">Chat<\/h2>/);
   assert.match(cabecalho, new RegExp(`<button aria-label="${escape(consoleV2Copy.fecharPainel)}" class="[^"]*\\bbg-transparent\\b[^"]*" type="button">`));
   assert.match(markup, /<div class="h-14 shrink-0 items-center py-1 pl-4 pr-0\.5 hidden lg:flex" data-console-panel-header="">/, "o cabecalho so a partir de lg");
-  // O trilho a direita, depois do painel: Chat, Perguntas (com o numero das abertas), Mãos e Pessoas, e o Mais.
+  // O trilho a direita, depois do painel: as abas (Chat, Perguntas com o numero das abertas, Mãos, Pessoas) e as
+  // entradas da sessao, todas na tela (o HTML do servidor nao mede a altura: o Mais so aparece no navegador, numa janela baixa).
   const trilho = markup.slice(markup.indexOf('data-console-slot="rail"'));
   assert.ok(markup.indexOf('data-console-slot="rail"') > markup.indexOf('data-console-slot="panel"'), "o trilho depois do painel");
-  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "mais"]);
+  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "enquetes", "atendimento", "presenca", "gravacao"]);
   assert.match(trilho, /<button aria-controls="console-panel" aria-expanded="true"[^>]*data-console-rail="chat"/, "o Chat aberto");
   assert.match(trilho, new RegExp(`aria-label="${escape(consoleV2Copy.trilho.comNumero("Perguntas", consoleV2Copy.trilho.abertas(2)))}"[^>]*data-console-rail="perguntas"`), "Perguntas com o numero no nome");
   // A Equipe tem as mesmas abas e entradas.
@@ -1064,28 +1065,41 @@ test("ConsolePanel: com uma entrada do ⋯ escolhida, ela fica na tela, nenhuma 
   assert.match(semPalco, /<div class="h-14 shrink-0 items-center py-1 pl-4 pr-0\.5 sr-only" data-console-panel-header="">/);
 });
 
-test("ConsoleRail (docs/31 §10): os itens das abas com o rotulo embaixo e o numero no nome, aria-expanded so no aberto, e o Mais com o menu das entradas; o Mais aberto diz qual entrada", () => {
+test("ConsoleRail (docs/31 §10): as abas e as entradas da sessao no trilho, com o rotulo embaixo e o numero no nome, aria-expanded so no aberto; numa altura que nao comporta, o ultimo lugar e o Mais, com os que nao couberam", () => {
   const railOf = (extra = {}) =>
     html(createElement(ConsoleRail, { className: "hidden lg:flex", counts: { maos: 1, perguntas: 0 }, entries: ["enquetes", "gravacao"], onItem: noop, panelShown: true, tabs: ["chat", "perguntas", "maos", "pessoas"], view: { tab: "maos" }, ...extra }));
+  const itensDe = (markup) =>
+    Array.from(markup.matchAll(/<button aria-controls="console-panel" aria-expanded="(true|false)"(?: aria-label="([^"]*)")?[^>]*data-console-rail="([a-z]+)"[^>]*>[\s\S]*?<span class="[^"]*">([^<]+)<\/span><\/button>/g)).map((match) => [match[3], match[1], match[2] ?? null, match[4]]);
   const markup = railOf();
   assert.match(markup, /^<nav aria-label="Painel do console" class="hidden lg:flex" data-console-slot="rail">/);
-  const itens = Array.from(markup.matchAll(/<button aria-controls="console-panel" aria-expanded="(true|false)"(?: aria-label="([^"]*)")?[^>]*data-console-rail="([a-z]+)"[^>]*>[\s\S]*?<span class="[^"]*">([^<]+)<\/span><\/button>/g)).map((match) => [match[3], match[1], match[2] ?? null, match[4]]);
-  assert.deepEqual(itens, [
+  // Sem medida (o HTML do servidor), todos os itens, sem o Mais.
+  assert.deepEqual(itensDe(markup), [
     ["chat", "false", null, "Chat"],
     ["perguntas", "false", null, "Perguntas"],
     ["maos", "true", consoleV2Copy.trilho.comNumero("Mãos", consoleV2Copy.trilho.maos(1)), "Mãos"],
-    ["pessoas", "false", null, "Pessoas"]
+    ["pessoas", "false", null, "Pessoas"],
+    ["enquetes", "false", null, "Enquetes"],
+    ["gravacao", "false", null, "Gravação"]
   ]);
+  assert.doesNotMatch(markup, /data-console-rail="mais"/, "tudo cabe: sem o Mais");
   // O contador vermelho so com numero (as maos), e so na tela (o nome ja diz).
   assert.equal(count(markup, /data-room-unread=""/g), 1);
-  // O Mais: o botao do menu com as entradas como radio; com uma entrada na tela, o rotulo e o nome dizem qual.
-  assert.match(markup, new RegExp(`<button aria-haspopup="menu"[^>]*aria-label="${escape(consoleV2Copy.mais)}"`));
-  const comEntrada = railOf({ view: { more: "gravacao" } });
-  assert.match(comEntrada, new RegExp(`aria-label="${escape(consoleV2Copy.maisEscolhido("Gravação"))}"`));
-  assert.doesNotMatch(comEntrada, /aria-expanded="true"/, "nenhuma aba aberta com a entrada na tela");
+  // A entrada na tela fica aberta no proprio item.
+  assert.match(railOf({ view: { more: "gravacao" } }), /<button aria-controls="console-panel" aria-expanded="true"[^>]*data-console-rail="gravacao"/);
   // Fechado o painel, nenhum item aberto.
   assert.doesNotMatch(railOf({ panelShown: false }), /aria-expanded="true"/);
+
+  // Numa altura de 4 lugares (64 + 16 cada), 3 itens e o Mais com os 3 que nao couberam, na ordem.
+  const baixa = railOf({ initialAvailable: 4 * 64 + 3 * 16, view: { more: "gravacao" } });
+  assert.deepEqual(itensDe(baixa).map(([chave]) => chave), ["chat", "perguntas", "maos"]);
+  assert.deepEqual(Array.from(baixa.matchAll(/data-console-more-item="([a-z]+)"/g)).map((match) => match[1]), ["pessoas", "enquetes", "gravacao"]);
+  // Com um dos que estao no Mais na tela, o Mais diz qual (no nome e no rotulo).
+  const mais = baixa.slice(baixa.indexOf("<button", baixa.indexOf('data-console-rail="mais"') - 400));
+  assert.match(baixa, new RegExp(`aria-label="${escape(consoleV2Copy.maisEscolhido("Gravação"))}"[^>]*data-console-rail="mais"`));
+  assert.match(mais, /data-console-rail="mais"[\s\S]*?>Gravação<\/span>/);
+  assert.match(baixa, /data-menu-value="gravacao"/, "a opcao escolhida marcada no menu");
 });
+
 
 test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase do teto; a Equipe nao o ve", () => {
   const people = liveBlock().people;
@@ -1193,4 +1207,19 @@ test("Sair do console com a sala no ar (docs/31 §10): a janela com o titulo, o 
   assert.equal(count(saindo, /<button[^>]*\sdisabled=""/g), 3, "nada mais clicavel enquanto sai");
   // Fechada, nada.
   assert.doesNotMatch(janela({ open: false }), /data-console-leave/);
+});
+
+test("palco do console com a sala que nao abre (docs/31 §10): antes de entrar, a falha diz que nao foi possivel abrir a sala (o servidor de video fora do ar); depois de ter entrado, Não conseguimos voltar; as duas com Tentar de novo", async () => {
+  const { ConsoleStage } = await import("../src/components/admin/v2/communication/webinars/session-console/console-stage.tsx");
+  const palco = (handle) =>
+    html(
+      createElement(ConsoleStage, { busy: false, className: "", handle, live: liveBlock(), presentLabel: null, presenterName: null, session: session(), stageRef: { current: null }, topLeft: null })
+    );
+  const nuncaEntrou = textOf(palco(handleFor("host", { frameStatus: "failed", joined: false })));
+  assert.match(nuncaEntrou, new RegExp(escape(WEBINAR_COPY.aoVivo.erroAbrir)));
+  assert.doesNotMatch(nuncaEntrou, new RegExp(escape(WEBINAR_COPY.aoVivo.naoConseguimosVoltar)));
+  assert.match(nuncaEntrou, new RegExp(escape(WEBINAR_COPY.sala.tentarDeNovo)));
+  // Ja dentro (o primeiro desenho com a sala de pe), a falha seguinte e uma queda.
+  const caiu = textOf(palco(handleFor("host", { frameStatus: "failed", joined: true })));
+  assert.match(caiu, new RegExp(escape(WEBINAR_COPY.aoVivo.naoConseguimosVoltar)));
 });

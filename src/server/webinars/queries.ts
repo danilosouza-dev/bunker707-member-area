@@ -40,6 +40,7 @@ import {
   defaultJitSettings,
   nextSession,
   toTime,
+  webinarHasStudentData,
   webinarSituation,
   type JitSettings,
   type Poll,
@@ -52,7 +53,7 @@ import {
   type WebinarTranscriptFormat
 } from "./model";
 import { sessionFromRow, webinarFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
-import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows, listWebinarRows } from "./store";
+import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows, listWebinarRows, webinarDataAuthors } from "./store";
 
 /* ------------------------------------------------------------------------------------------------
  * A lista (docs/30 §2.1)
@@ -62,6 +63,8 @@ export type WebinarListItem = {
   coverUrl: string | null;
   createdAt: string;
   createdByName: string | null;
+  /** O arquivado sem dados de aluno pode ser excluido (webinarHasStudentData, so lido nos arquivados da pagina); os outros, falso. */
+  deletable: boolean;
   id: string;
   kind: WebinarKind;
   kindLabel: string;
@@ -172,6 +175,7 @@ function toListItem(row: WebinarRow, input: { names: Map<string, string>; now: n
     coverUrl: row.cover_url,
     createdAt: row.created_at,
     createdByName: row.created_by ? (input.names.get(row.created_by) ?? null) : null,
+    deletable: false,
     id: row.id,
     kind: webinar.kind,
     kindLabel: webinarKindLabel(webinar.kind),
@@ -244,8 +248,12 @@ export async function listWebinarsForAdmin(input: {
   const sessions = groupSessions(sessionRows.filter((row) => !isJitSession(row)));
   const all = rows.map((row) => toListItem(row, { names, now, registered, sessions }));
   const filters = input.filters ?? {};
+  // Sem filtro de situacao, os arquivados ficam de fora (docs/30 §2.3): eles aparecem so no filtro Arquivado.
   const filtered = all.filter(
-    (item) => (!filters.kind || item.kind === filters.kind) && (!filters.situation || item.situation === filters.situation) && matchesWebinarSearch(item.title, filters.q ?? "")
+    (item) =>
+      (!filters.kind || item.kind === filters.kind) &&
+      (filters.situation ? item.situation === filters.situation : item.situation !== "archived") &&
+      matchesWebinarSearch(item.title, filters.q ?? "")
   );
   // Proximos primeiro (hora marcada mais perto), depois os sem hora e os passados (mais recentes primeiro).
   const sorted = [...filtered].sort((left, right) => {
@@ -268,9 +276,18 @@ export async function listWebinarsForAdmin(input: {
     return rightPast - leftPast;
   });
   const from = (page - 1) * WEBINARS_PAGE_SIZE;
+  const pageItems = sorted.slice(from, from + WEBINARS_PAGE_SIZE);
+  // So os arquivados da pagina leem quem deixou dados (o Excluir aparece so sem dados de aluno; o servidor confere de novo).
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const items = await Promise.all(
+    pageItems.map(async (item) => {
+      const row = rowsById.get(item.id);
+      return item.situation === "archived" && row ? { ...item, deletable: !webinarHasStudentData(await webinarDataAuthors(db, row)) } : item;
+    })
+  );
 
   return {
-    items: sorted.slice(from, from + WEBINARS_PAGE_SIZE),
+    items,
     numbers: periodNumbers(rows, sessions, registered, input.period),
     page,
     pageSize: WEBINARS_PAGE_SIZE,
@@ -292,6 +309,8 @@ export type WebinarEditorData = {
   createdAt: string;
   /** Nome de quem decidiu a Simulacao de cada sessao (simulation_decided_by -> nome), para o card. */
   deciderNames: Record<string, string>;
+  /** O arquivado sem dados de aluno pode ser excluido (o menu mostra Excluir); os outros, falso. */
+  deletable: boolean;
   draft: WebinarDraft;
   id: string;
   /** Fase 4e: as regras do "Comeca quando voce entra" (o padrao, desligado, na Live ao vivo). */
@@ -374,6 +393,7 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     cancelledAt: webinar.cancelledAt,
     createdAt: webinar.createdAt,
     deciderNames: Object.fromEntries(deciderNames),
+    deletable: row.status === "archived" ? !webinarHasStudentData(await webinarDataAuthors(db, row)) : false,
     draft: { ...webinarDraftOf(webinar), sessions: draftSessionsOf(sessions) },
     id: webinar.id,
     jit,

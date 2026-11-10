@@ -122,7 +122,7 @@ const DEVICE_OPTIONS: readonly { label: string; value: PreviewDevice }[] = [
 ];
 
 const COUNT_DEBOUNCE_MS = 500;
-const READ_ONLY_SITUATIONS: readonly WebinarSituation[] = ["in_progress", "ended", "cancelled"];
+const READ_ONLY_SITUATIONS: readonly WebinarSituation[] = ["in_progress", "ended", "cancelled", "archived"];
 
 function scrollBehavior(): ScrollBehavior {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
@@ -479,6 +479,8 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const webinarActions = useWebinarActions({ onDeleted: () => router.push(WEBINARS_HREF), permissions });
   const actionTarget: WebinarActionTarget | null = savedVersion
     ? {
+        // O arquivado sem dados de aluno pode ser excluido (lido no servidor); o arquivado aqui e so o que a pagina carregou.
+        deletable: savedVersion.situation === "archived" && initial?.deletable === true,
         id: savedVersion.id,
         // O tipo gravado (o do rascunho na tela so vale depois de salvar).
         kind: saved.kind,

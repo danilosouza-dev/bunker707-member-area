@@ -703,7 +703,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     setPanelOpen(true);
     setPanelView(view);
     window.requestAnimationFrame(() => {
-      visibleConsoleTabControl(document, "tab" in view ? view.tab : "mais")?.focus();
+      visibleConsoleTabControl(document, "tab" in view ? view.tab : view.more)?.focus();
     });
   }
 
@@ -712,17 +712,21 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
    * ele cairia no body); sem o trilho na tela, ao balao da barra.
    */
   function closePanel() {
-    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : "mais") ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
+    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : shownView.more) ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
     target?.focus();
     setPanelOpen(false);
   }
 
-  /** O toque num item do trilho: a aba abre ou fecha o painel (consoleRailStep); a entrada escolhida no Mais so abre. */
+  /**
+   * O toque num item do trilho (uma aba ou uma entrada, no trilho ou no Mais): abre o painel nele ou, no que ja esta na
+   * tela, fecha o painel (consoleRailStep).
+   */
   function onRail(item: ConsolePanelView) {
-    const next = "more" in item ? { panelOpen: true, view: item } : consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
+    const next = consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
     setPanelView(next.view);
     setPanelOpen(next.panelOpen);
   }
+
 
   const readOnly = Boolean(session) && !canAct;
   const onlyPublishers = live !== null && room.controls.session && !room.controls.sessionEnabled;

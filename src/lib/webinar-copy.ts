@@ -155,8 +155,10 @@ export const WEBINAR_COPY = {
     abas: { gravadas: "Lives gravadas", lista: "Webinários", aoVivo: "Lives ao vivo" },
     abrirConsole: "Abrir o console",
     abrirSala: "Abrir a sala",
+    arquivar: "Arquivar",
     cancelar: "Cancelar",
     comecarParaTodos: "Começar para todos",
+    desarquivar: "Desarquivar",
     duplicar: "Duplicar",
     encerrarLive: "Encerrar live",
     excluir: "Excluir",
@@ -166,6 +168,7 @@ export const WEBINAR_COPY = {
     semDados: "Sem dados no período",
     semLivesAoVivo: "Sem lives ao vivo ainda",
     situacoes: {
+      archived: "Arquivado",
       cancelled: "Cancelado",
       draft: "Rascunho",
       ended: "Encerrado",

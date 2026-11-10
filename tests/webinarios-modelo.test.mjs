@@ -39,10 +39,12 @@ function session(extra = {}) {
 
 const published = { cancelledAt: null, durationMinutes: 60, status: "published" };
 
-test("situacao da lista (§2.3): rascunho, agendado, em andamento, encerrado e cancelado", () => {
+test("situacao da lista (§2.3): rascunho, agendado, em andamento, encerrado, cancelado e arquivado", () => {
   assert.equal(model.webinarSituation({ ...published, status: "draft" }, [], now), "draft");
-  assert.equal(model.webinarSituation({ ...published, cancelledAt: iso(now) }, [session()], now), "cancelled", "cancelado vale acima de tudo");
-  assert.equal(model.webinarSituation({ ...published, status: "archived" }, [], now), "ended");
+  assert.equal(model.webinarSituation({ ...published, cancelledAt: iso(now) }, [session()], now), "cancelled", "cancelado vale acima das sessoes");
+  // Arquivado vence tudo, tambem o cancelado arquivado (docs/30 §2.3, 10/11/2026).
+  assert.equal(model.webinarSituation({ ...published, status: "archived" }, [], now), "archived");
+  assert.equal(model.webinarSituation({ ...published, cancelledAt: iso(now), status: "archived" }, [session()], now), "archived");
   assert.equal(model.webinarSituation(published, [], now), "scheduled", "publicado sem sessao ainda: agendado");
   assert.equal(model.webinarSituation(published, [session()], now), "scheduled");
   assert.equal(model.webinarSituation(published, [session({ status: "waiting" })], now), "in_progress");
@@ -181,4 +183,13 @@ test("questionBodyOf: o texto da pergunta feita de uma mensagem em ate 500 carac
   const emojis = "😀".repeat(600);
   assert.equal(Array.from(model.questionBodyOf(emojis)).length, 500);
   assert.equal(model.questionBodyOf("😀".repeat(500)), "😀".repeat(500), "exatamente 500 caracteres: inteiro");
+});
+
+test("webinarHasStudentData (docs/30 §2.3, Excluir o arquivado): sem ninguem, ou so a equipe, nao; um aluno, ou uma tabela no teto da leitura, sim", () => {
+  const has = (input) => model.webinarHasStudentData({ staffIds: [], truncated: false, userIds: [], ...input });
+  assert.equal(has({}), false, "ninguem deixou dado");
+  assert.equal(has({ staffIds: ["u-produtor", "u-co"], userIds: ["u-produtor", "u-co", null] }), false, "so a equipe (e linhas sem pessoa)");
+  assert.equal(has({ staffIds: ["u-produtor"], userIds: ["u-produtor", "u-aluna"] }), true, "uma aluna basta");
+  assert.equal(has({ staffIds: ["u-produtor"], truncated: true, userIds: ["u-produtor"] }), true, "alguma tabela bateu o teto: turma de verdade");
+  assert.equal(has({ userIds: [""] }), false, "id vazio nao e pessoa");
 });

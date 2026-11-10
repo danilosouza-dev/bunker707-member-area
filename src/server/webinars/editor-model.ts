@@ -451,7 +451,9 @@ export const WEBINAR_ADMIN_COPY = {
   toasts: {
     cancelled: "Live cancelada. Quem tinha vaga recebe o aviso pelo sino e por e-mail.",
     chatExported: "CSV do chat pronto.",
-    deleted: "Rascunho excluído.",
+    archived: "Webinário arquivado. Ele sai da lista e da área do aluno; o relatório continua aqui.",
+    deleted: "Webinário excluído.",
+    unarchived: "Webinário de volta à lista.",
     duplicated: "Cópia criada como rascunho.",
     ended: "Sessão encerrada. O relatório fica pronto em instantes.",
     nothingToSave: "Nenhuma mudança para salvar.",
@@ -480,10 +482,21 @@ export const WEBINAR_ADMIN_COPY = {
       reasonLabel: "Motivo (vai no e-mail)",
       title: (title: string) => `Cancelar “${title}”?`
     },
+    archive: {
+      confirmLabel: "Arquivar",
+      description: "Ele sai da lista e da área do aluno: a página e o replay fecham. O relatório e os números continuam, e dá para desarquivar quando quiser.",
+      title: (title: string) => `Arquivar “${title}”?`
+    },
     delete: {
       confirmLabel: "Excluir",
       description: "O rascunho sai da lista. Nenhum aluno viu nada.",
       title: "Excluir este rascunho?"
+    },
+    /** Excluir o arquivado (so sem dados de aluno): o teste da equipe sai de vez, tambem dos paineis. */
+    deleteArchived: {
+      confirmLabel: "Excluir de vez",
+      description: "Só a equipe usou este webinário, então ele sai de vez, também dos painéis. Isso não tem volta.",
+      title: (title: string) => `Excluir “${title}”?`
     },
     end: {
       confirmLabel: "Encerrar live",
@@ -507,6 +520,7 @@ export const WEBINAR_ADMIN_COPY = {
     sessionsIncomplete: "Informe data e hora de cada sessão."
   },
   menu: {
+    archive: WEBINAR_COPY.admin.arquivar,
     cancel: WEBINAR_COPY.admin.cancelar,
     delete: WEBINAR_COPY.admin.excluir,
     duplicate: WEBINAR_COPY.admin.duplicar,
@@ -519,6 +533,7 @@ export const WEBINAR_ADMIN_COPY = {
     publish: WEBINAR_COPY.admin.publicar,
     publishReplay: "Publicar replay",
     save: WEBINAR_COPY.admin.salvar,
+    unarchive: WEBINAR_COPY.admin.desarquivar,
     viewReport: WEBINAR_COPY.admin.verRelatorio
   },
   /** Por que um botao da sala ao vivo esta desligado para quem so escreve na Comunicacao (docs/30 §2.6). */
@@ -552,6 +567,7 @@ export const WEBINAR_LIST_TABS = [
 export type WebinarListTab = (typeof WEBINAR_LIST_TABS)[number]["value"];
 
 const SITUATION_PARAM_VALUES: Record<WebinarSituation, string> = {
+  archived: "arquivado",
   cancelled: "cancelado",
   draft: "rascunho",
   ended: "encerrado",
@@ -749,6 +765,7 @@ export function webinarSituationTone(situation: WebinarSituation): WebinarTone {
     case "cancelled":
       return "error";
     case "ended":
+    case "archived":
       return "muted";
     default:
       return "neutral";
@@ -759,7 +776,7 @@ export function webinarKindLabel(kind: WebinarKind) {
   return WEBINAR_COPY.admin.tipos[kind];
 }
 
-export const WEBINAR_ACTIONS = ["open", "save", "publish", "open_room", "cancel", "duplicate", "delete", "open_console", "end", "view_report", "publish_replay"] as const;
+export const WEBINAR_ACTIONS = ["open", "save", "publish", "open_room", "cancel", "duplicate", "delete", "open_console", "end", "view_report", "publish_replay", "archive", "unarchive"] as const;
 export type WebinarAction = (typeof WEBINAR_ACTIONS)[number];
 
 export type WebinarPermissions = { canPublish: boolean; canWrite: boolean };
@@ -800,7 +817,7 @@ export function webinarActionHref(action: WebinarAction, id: string, kind?: Webi
   }
 }
 
-const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end", "open_room"];
+const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end", "open_room", "archive", "unarchive"];
 
 /**
  * Por que a acao aparece desligada (docs/30 §2.6): quem so escreve na Comunicacao ve os botoes da sala que pedem
@@ -820,6 +837,7 @@ export function webinarActionBlockedReason(action: WebinarAction, permissions: W
 }
 
 export const WEBINAR_ACTION_LABELS: Record<WebinarAction, string> = {
+  archive: WEBINAR_ADMIN_COPY.menu.archive,
   cancel: WEBINAR_ADMIN_COPY.menu.cancel,
   delete: WEBINAR_ADMIN_COPY.menu.delete,
   duplicate: WEBINAR_ADMIN_COPY.menu.duplicate,
@@ -830,29 +848,38 @@ export const WEBINAR_ACTION_LABELS: Record<WebinarAction, string> = {
   publish: WEBINAR_ADMIN_COPY.menu.publish,
   publish_replay: WEBINAR_ADMIN_COPY.menu.publishReplay,
   save: WEBINAR_ADMIN_COPY.menu.save,
+  unarchive: WEBINAR_ADMIN_COPY.menu.unarchive,
   view_report: WEBINAR_ADMIN_COPY.menu.viewReport
 };
 
-/** Os botoes do topo por situacao, na ordem da tabela de §2.3. */
+/**
+ * Os botoes do topo por situacao, na ordem da tabela de §2.3. Arquivar e do encerrado e do cancelado; o arquivado tem
+ * Desarquivar e, so sem dados de aluno (`deletable`, webinarActionsFor), Excluir (decisao do produtor de 10/11/2026).
+ */
 export const WEBINAR_HEADER_ACTIONS: Record<WebinarSituation, readonly WebinarAction[]> = {
-  cancelled: ["duplicate"],
+  archived: ["view_report", "unarchive", "duplicate", "delete"],
+  cancelled: ["duplicate", "archive"],
   draft: ["save", "publish", "delete"],
-  ended: ["view_report", "publish_replay", "duplicate"],
+  ended: ["view_report", "publish_replay", "duplicate", "archive"],
   in_progress: ["open_console", "end"],
   scheduled: ["save", "open_room", "cancel", "duplicate"]
 };
+
+/** O que a acao precisa saber do webinario alem da situacao: no arquivado, se ele pode ser excluido (sem dados de aluno). */
+export type WebinarActionOptions = { deletable?: boolean };
 
 /**
  * O que aparece para a pessoa com o webinario nesta situacao (o servidor confere de novo): os botoes do topo de
  * §2.3 mais Abrir e Duplicar, que o menu "…" da lista oferece em qualquer situacao (§2.1). Sem messaging.publish, os
  * botoes da sala ao vivo ficam (desligados, webinarActionBlockedReason) e os outros de quem publica saem.
  */
-export function webinarActionsFor(situation: WebinarSituation, permissions: WebinarPermissions, kind?: WebinarKind | null): WebinarAction[] {
+export function webinarActionsFor(situation: WebinarSituation, permissions: WebinarPermissions, kind?: WebinarKind | null, options: WebinarActionOptions = {}): WebinarAction[] {
   if (!permissions.canWrite) {
     return [];
   }
 
-  const actions: WebinarAction[] = ["open", ...WEBINAR_HEADER_ACTIONS[situation]];
+  // O arquivado so e excluido sem dados de aluno (o servidor confere de novo, webinarHasStudentData).
+  const actions: WebinarAction[] = ["open", ...WEBINAR_HEADER_ACTIONS[situation].filter((action) => situation !== "archived" || action !== "delete" || options.deletable === true)];
 
   if (!actions.includes("duplicate")) {
     actions.push("duplicate");
@@ -873,7 +900,7 @@ export type WebinarMenuEntry = {
   soon: boolean;
 };
 
-const MENU_ORDER: readonly WebinarAction[] = ["open", "open_room", "open_console", "view_report", "publish_replay", "duplicate", "cancel", "end", "delete"];
+const MENU_ORDER: readonly WebinarAction[] = ["open", "open_room", "open_console", "view_report", "publish_replay", "duplicate", "unarchive", "archive", "cancel", "end", "delete"];
 const DESTRUCTIVE_ACTIONS = new Set<WebinarAction>(["cancel", "delete", "end"]);
 
 /**
@@ -881,8 +908,8 @@ const DESTRUCTIVE_ACTIONS = new Set<WebinarAction>(["cancel", "delete", "end"]);
  * ficam na Revisao do editor; `exclude` tira o que a tela ja mostra como botao. `kind` decide o Encerrar live (link
  * para o console na Live ao vivo).
  */
-export function webinarMenuEntries(situation: WebinarSituation, permissions: WebinarPermissions, exclude: readonly WebinarAction[] = [], kind?: WebinarKind | null): WebinarMenuEntry[] {
-  const available = new Set(webinarActionsFor(situation, permissions, kind).filter((action) => action !== "save" && action !== "publish" && !exclude.includes(action)));
+export function webinarMenuEntries(situation: WebinarSituation, permissions: WebinarPermissions, exclude: readonly WebinarAction[] = [], kind?: WebinarKind | null, options: WebinarActionOptions = {}): WebinarMenuEntry[] {
+  const available = new Set(webinarActionsFor(situation, permissions, kind, options).filter((action) => action !== "save" && action !== "publish" && !exclude.includes(action)));
   const ordered = MENU_ORDER.filter((action) => available.has(action));
 
   return ordered.map((action, index) => {
@@ -954,16 +981,19 @@ export function webinarRowShortcut(item: { id: string; kind: WebinarKind; situat
   return item.situation === "scheduled" && permissions.canPublish ? { action: "open_room", href: webinarConsoleHref(item.id), label: WEBINAR_ACTION_LABELS.open_room } : null;
 }
 
-/** Cancelar, Excluir e o Encerrar live da Live gravada pedem confirmacao; o da Live ao vivo so leva ao console. */
+/**
+ * Cancelar, Arquivar, Excluir e o Encerrar live da Live gravada pedem confirmacao; o da Live ao vivo so leva ao console.
+ * Desarquivar nao (ele so desfaz o Arquivar).
+ */
 export function webinarActionNeedsConfirm(action: WebinarAction, kind?: WebinarKind | null) {
-  return action === "cancel" || action === "delete" || (action === "end" && kind !== "live");
+  return action === "cancel" || action === "archive" || action === "delete" || (action === "end" && kind !== "live");
 }
 
 export type WebinarConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
 
-export type WebinarConfirmableAction = "cancel" | "delete" | "end";
+export type WebinarConfirmableAction = "archive" | "cancel" | "delete" | "end";
 
-export function webinarActionConfirm(action: WebinarConfirmableAction, target: { registeredCount: number; title: string }): WebinarConfirmCopy {
+export function webinarActionConfirm(action: WebinarConfirmableAction, target: { registeredCount: number; situation?: WebinarSituation; title: string }): WebinarConfirmCopy {
   const title = target.title.trim() || WEBINAR_ADMIN_COPY.preview.titlePlaceholder;
 
   if (action === "cancel") {
@@ -972,6 +1002,24 @@ export function webinarActionConfirm(action: WebinarConfirmableAction, target: {
       description: WEBINAR_ADMIN_COPY.confirm.cancel.description(target.registeredCount),
       destructive: true,
       title: WEBINAR_ADMIN_COPY.confirm.cancel.title(title)
+    };
+  }
+
+  if (action === "archive") {
+    return {
+      confirmLabel: WEBINAR_ADMIN_COPY.confirm.archive.confirmLabel,
+      description: WEBINAR_ADMIN_COPY.confirm.archive.description,
+      destructive: false,
+      title: WEBINAR_ADMIN_COPY.confirm.archive.title(title)
+    };
+  }
+
+  if (action === "delete" && target.situation === "archived") {
+    return {
+      confirmLabel: WEBINAR_ADMIN_COPY.confirm.deleteArchived.confirmLabel,
+      description: WEBINAR_ADMIN_COPY.confirm.deleteArchived.description,
+      destructive: true,
+      title: WEBINAR_ADMIN_COPY.confirm.deleteArchived.title(title)
     };
   }
 
@@ -993,11 +1041,13 @@ export function webinarActionConfirm(action: WebinarConfirmableAction, target: {
 }
 
 export const WEBINAR_ACTION_TOASTS: Partial<Record<WebinarAction, string>> = {
+  archive: WEBINAR_ADMIN_COPY.toasts.archived,
   cancel: WEBINAR_ADMIN_COPY.toasts.cancelled,
   delete: WEBINAR_ADMIN_COPY.toasts.deleted,
   duplicate: WEBINAR_ADMIN_COPY.toasts.duplicated,
   end: WEBINAR_ADMIN_COPY.toasts.ended,
-  publish: WEBINAR_ADMIN_COPY.toasts.published
+  publish: WEBINAR_ADMIN_COPY.toasts.published,
+  unarchive: WEBINAR_ADMIN_COPY.toasts.unarchived
 };
 
 export function savedWebinarToast(status: "draft" | "published" | "archived") {

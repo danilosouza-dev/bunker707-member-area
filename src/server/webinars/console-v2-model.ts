@@ -297,6 +297,28 @@ export function consoleRailStep(input: { closable: boolean; item: ConsolePanelVi
   return { panelOpen: !input.closable, view: input.view };
 }
 
+/** A altura de um item do trilho do console (o quadrado de 48 e o rotulo de 16) e o vao entre dois (docs/31 §10). */
+export const CONSOLE_RAIL_ITEM_PX = 64;
+export const CONSOLE_RAIL_GAP_PX = 16;
+
+/**
+ * Quantos itens do trilho ficam na tela (docs/31 §10, ajuste de 10/11/2026): todos, quando a altura do trilho comporta
+ * (as abas e as entradas da sessao, na ordem); senao, o ultimo lugar e do Mais, que leva os que nao couberam. Sem a
+ * medida (o HTML do servidor, o trilho escondido abaixo de lg), todos. Sempre ao menos um lugar.
+ */
+export function consoleRailFit(input: { available: number | null; count: number }): { overflow: number; visible: number } {
+  const count = Math.max(0, Math.floor(input.count));
+  if (input.available === null || !Number.isFinite(input.available) || input.available <= 0) {
+    return { overflow: 0, visible: count };
+  }
+  const slots = Math.max(1, Math.floor((input.available + CONSOLE_RAIL_GAP_PX) / (CONSOLE_RAIL_ITEM_PX + CONSOLE_RAIL_GAP_PX)));
+  if (count <= slots) {
+    return { overflow: 0, visible: count };
+  }
+  const visible = slots - 1;
+  return { overflow: count - visible, visible };
+}
+
 /**
  * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
  * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.

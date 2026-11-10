@@ -63,9 +63,13 @@ test("enderecos: aba, situacao, tipo, busca e pagina no endereco; qualquer troca
       ["Agendado", "scheduled"],
       ["Em andamento", "in_progress"],
       ["Encerrado", "ended"],
-      ["Cancelado", "cancelled"]
+      ["Cancelado", "cancelled"],
+      ["Arquivado", "archived"]
     ]
   );
+  // O filtro Arquivado no endereco (a lista sem filtro deixa os arquivados de fora, docs/30 §2.3).
+  assert.equal(vm.webinarsStateOf({ situacao: "arquivado" }).situation, "archived");
+  assert.equal(vm.webinarsFilterHref({}, { situation: "archived" }), "/admin/comunicacao/webinarios?situacao=arquivado");
   assert.deepEqual(
     vm.WEBINAR_KIND_FILTERS.map((filter) => [filter.label, filter.value]),
     [
@@ -100,13 +104,16 @@ test("situacoes: rotulo, tom e os botoes do topo de §2.3; sem messaging.publish
       ["scheduled", "Agendado", "success"],
       ["in_progress", "Em andamento", "warning"],
       ["ended", "Encerrado", "muted"],
-      ["cancelled", "Cancelado", "error"]
+      ["cancelled", "Cancelado", "error"],
+      ["archived", "Arquivado", "muted"]
     ]
   );
+  // Arquivar e do encerrado e do cancelado; o arquivado tem Desarquivar e Excluir (este so sem dados de aluno, abaixo).
   assert.deepEqual(vm.WEBINAR_HEADER_ACTIONS, {
-    cancelled: ["duplicate"],
+    archived: ["view_report", "unarchive", "duplicate", "delete"],
+    cancelled: ["duplicate", "archive"],
     draft: ["save", "publish", "delete"],
-    ended: ["view_report", "publish_replay", "duplicate"],
+    ended: ["view_report", "publish_replay", "duplicate", "archive"],
     in_progress: ["open_console", "end"],
     scheduled: ["save", "open_room", "cancel", "duplicate"]
   });
@@ -116,7 +123,16 @@ test("situacoes: rotulo, tom e os botoes do topo de §2.3; sem messaging.publish
   assert.deepEqual(vm.webinarActionsFor("draft", writeOnly), ["open", "save", "duplicate"]);
   assert.deepEqual(vm.webinarActionsFor("scheduled", writeOnly), ["open", "save", "open_room", "duplicate"]);
   assert.deepEqual(vm.webinarActionsFor("in_progress", writeOnly), ["open", "open_console", "duplicate"]);
-  assert.deepEqual(vm.webinarActionsFor("ended", both), ["open", "view_report", "publish_replay", "duplicate"]);
+  assert.deepEqual(vm.webinarActionsFor("ended", both), ["open", "view_report", "publish_replay", "duplicate", "archive"]);
+  assert.deepEqual(vm.webinarActionsFor("ended", writeOnly), ["open", "view_report", "publish_replay", "duplicate"], "sem messaging.publish nao arquiva");
+  assert.deepEqual(vm.webinarActionsFor("cancelled", both), ["open", "duplicate", "archive"]);
+  // O arquivado: Excluir so sem dados de aluno (deletable, lido no servidor); com dados (ou sem a leitura), nunca.
+  assert.deepEqual(vm.webinarActionsFor("archived", both), ["open", "view_report", "unarchive", "duplicate"]);
+  assert.deepEqual(vm.webinarActionsFor("archived", both, "live", { deletable: false }), ["open", "view_report", "unarchive", "duplicate"]);
+  assert.deepEqual(vm.webinarActionsFor("archived", both, "live", { deletable: true }), ["open", "view_report", "unarchive", "duplicate", "delete"]);
+  assert.deepEqual(vm.webinarActionsFor("archived", writeOnly, "live", { deletable: true }), ["open", "view_report", "duplicate"], "sem messaging.publish nao desarquiva nem exclui");
+  // O rascunho continua com o Excluir de sempre, com ou sem a leitura.
+  assert.deepEqual(vm.webinarActionsFor("draft", both, "live", { deletable: false }), ["open", "save", "publish", "delete", "duplicate"]);
   assert.deepEqual(vm.webinarActionsFor("cancelled", { canPublish: false, canWrite: false }), [], "sem messaging.write nada aparece");
 });
 
@@ -154,8 +170,19 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
     ["open", "Abrir", false, false, false],
     ["view_report", "Ver relatório", false, false, false],
     ["publish_replay", "Publicar replay", false, false, true],
-    ["duplicate", "Duplicar", false, false, false]
+    ["duplicate", "Duplicar", false, false, false],
+    ["archive", "Arquivar", false, false, false]
   ]);
+  // O arquivado (docs/30 §2.3, 10/11/2026): Desarquivar e, sem dados de aluno, Excluir separado no fim.
+  const arquivado = (deletable) => vm.webinarMenuEntries("archived", both, [], "live", { deletable }).map((entry) => [entry.action, entry.label, entry.destructive, entry.separated]);
+  assert.deepEqual(arquivado(true), [
+    ["open", "Abrir", false, false],
+    ["view_report", "Ver relatório", false, false],
+    ["duplicate", "Duplicar", false, false],
+    ["unarchive", "Desarquivar", false, false],
+    ["delete", "Excluir", true, true]
+  ]);
+  assert.deepEqual(arquivado(false).map(([action]) => action), ["open", "view_report", "duplicate", "unarchive"]);
   assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"]);
   assert.deepEqual([...vm.WEBINAR_LINK_ACTIONS], ["open", "open_room", "open_console", "view_report"]);
   assert.equal(vm.webinarActionHref("open_console", "abc"), "/admin/comunicacao/webinarios/abc/sala");
@@ -165,7 +192,8 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
   assert.equal(vm.webinarConsoleHref("abc", "s1"), "/admin/comunicacao/webinarios/abc/sala?sessao=s1");
   assert.deepEqual(rows("cancelled"), [
     ["open", "Abrir", false, false, false],
-    ["duplicate", "Duplicar", false, false, false]
+    ["duplicate", "Duplicar", false, false, false],
+    ["archive", "Arquivar", false, false, false]
   ]);
   assert.deepEqual(
     rows("scheduled", both, ["open", "open_room"]).map((row) => row[0]),

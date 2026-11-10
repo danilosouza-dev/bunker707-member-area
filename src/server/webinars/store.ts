@@ -442,3 +442,51 @@ export async function fetchWebinarReport(db: WebinarsDb, sessionId: string): Pro
     total: toNumber(row.total)
   }));
 }
+
+/** Ate quantas linhas cada tabela e lida na conferencia de dados de aluno (um teste da equipe tem poucas). */
+export const STUDENT_DATA_PROBE = 500;
+
+/**
+ * Quem deixou dados no webinario (docs/30 §2.3, Excluir o arquivado): os user_id das inscricoes, do chat da turma e
+ * dos pedidos ao Assistente (pelo webinario) e da presenca, das amostras, das perguntas, das respostas de enquete, das
+ * reacoes e dos cliques na oferta (pelas sessoes), e do historico do aluno (student_events do webinario e das
+ * sessoes), ate STUDENT_DATA_PROBE linhas por tabela (`truncated` quando alguma bateu o teto). E a equipe entre eles: o
+ * admin_roles, o apresentador e quem apresenta. Quem decide e webinarHasStudentData (model.ts).
+ */
+export async function webinarDataAuthors(db: WebinarsDb, webinar: Pick<WebinarRow, "host_user_id" | "id">): Promise<{ staffIds: string[]; truncated: boolean; userIds: (string | null)[] }> {
+  const sessionIds = (await listSessionRows(db, [webinar.id])).map((session) => session.id);
+  type Probe = PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string; code?: string | null; hint?: string | null } | null }>;
+  const probes: { column: string; context: string; run: () => Probe }[] = [
+    { column: "user_id", context: "inscricoes", run: () => db.from("webinar_registrations").select("user_id").eq("webinar_id", webinar.id).limit(STUDENT_DATA_PROBE) },
+    { column: "author_user_id", context: "chat", run: () => db.from("webinar_chat_messages").select("author_user_id").eq("webinar_id", webinar.id).eq("source", "audience").limit(STUDENT_DATA_PROBE) },
+    { column: "user_id", context: "Assistente", run: () => db.from("webinar_ai_requests").select("user_id").eq("webinar_id", webinar.id).limit(STUDENT_DATA_PROBE) },
+    { column: "user_id", context: "historico", run: () => db.from("student_events").select("user_id").in("entity_id", [webinar.id, ...sessionIds]).limit(STUDENT_DATA_PROBE) }
+  ];
+  if (sessionIds.length > 0) {
+    for (const table of ["webinar_attendance", "webinar_presence_samples", "webinar_questions", "webinar_poll_answers", "webinar_reactions", "webinar_offer_clicks"]) {
+      probes.push({ column: "user_id", context: table, run: () => db.from(table).select("user_id").in("session_id", sessionIds).limit(STUDENT_DATA_PROBE) });
+    }
+  }
+  const results = await Promise.all(
+    probes.map(async (probe) => {
+      const { data, error } = await probe.run();
+      assertNoDbError(error, `Webinarios: dados de aluno (${probe.context})`);
+      return { column: probe.column, rows: data ?? [] };
+    })
+  );
+  const truncated = results.some((result) => result.rows.length >= STUDENT_DATA_PROBE);
+  const userIds = Array.from(new Set(results.flatMap((result) => result.rows.map((row) => (typeof row[result.column] === "string" ? (row[result.column] as string) : null)))));
+  const wanted = userIds.filter((id): id is string => typeof id === "string");
+  const staffIds = new Set<string>(webinar.host_user_id ? [webinar.host_user_id] : []);
+  for (const presenter of await listPresenterRows(db, [webinar.id])) {
+    staffIds.add(presenter.user_id);
+  }
+  for (let index = 0; index < wanted.length; index += 200) {
+    const { data, error } = await db.from("admin_roles").select("user_id").in("user_id", wanted.slice(index, index + 200));
+    assertNoDbError(error, "Webinarios: equipe entre quem deixou dados");
+    for (const row of (data ?? []) as { user_id: string }[]) {
+      staffIds.add(row.user_id);
+    }
+  }
+  return { staffIds: [...staffIds], truncated, userIds };
+}

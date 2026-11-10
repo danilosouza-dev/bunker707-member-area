@@ -529,3 +529,18 @@ test("consoleRowFocusAfter (WCAG 2.4.3; Mãos e a Sala de espera): o foco vai a 
   assert.equal(v2.consoleRowFocusAfter({ id: "x", ids, move: "remove" }), "a", "fora da lista: a primeira");
   assert.equal(v2.consoleRowFocusAfter({ id: "x", ids: [], move: "remove" }), null);
 });
+
+test("consoleRailFit (docs/31 §10, 10/11/2026): todos os itens quando a altura comporta; senao o ultimo lugar e do Mais; sem medida, todos; sempre ao menos um lugar", async () => {
+  const { CONSOLE_RAIL_GAP_PX, CONSOLE_RAIL_ITEM_PX, consoleRailFit } = await import("../src/server/webinars/console-v2-model.ts");
+  const altura = (lugares) => lugares * CONSOLE_RAIL_ITEM_PX + (lugares - 1) * CONSOLE_RAIL_GAP_PX;
+  assert.deepEqual(consoleRailFit({ available: null, count: 8 }), { overflow: 0, visible: 8 }, "o HTML do servidor: todos");
+  assert.deepEqual(consoleRailFit({ available: 0, count: 8 }), { overflow: 0, visible: 8 }, "escondido (abaixo de lg): sem medida");
+  // A live no computador: 8 itens (4 abas, Enquetes, Atendimento, Presença, Gravação) em 624 px.
+  assert.deepEqual(consoleRailFit({ available: altura(8), count: 8 }), { overflow: 0, visible: 8 }, "cabe exatamente");
+  assert.deepEqual(consoleRailFit({ available: 640, count: 8 }), { overflow: 0, visible: 8 }, "1280 x 720: o trilho tem 640 px");
+  assert.deepEqual(consoleRailFit({ available: altura(8) - 1, count: 8 }), { overflow: 2, visible: 6 }, "1 px a menos: 6 itens e o Mais com 2");
+  assert.deepEqual(consoleRailFit({ available: altura(4), count: 6 }), { overflow: 3, visible: 3 });
+  assert.deepEqual(consoleRailFit({ available: 10, count: 6 }), { overflow: 6, visible: 0 }, "um lugar so: o Mais com tudo");
+  assert.deepEqual(consoleRailFit({ available: altura(3), count: 2 }), { overflow: 0, visible: 2 });
+  assert.deepEqual(consoleRailFit({ available: altura(3), count: 0 }), { overflow: 0, visible: 0 });
+});
