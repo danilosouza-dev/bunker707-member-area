@@ -52,7 +52,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Comunicacao: modelos de notificacao, de pop-up e de design (25/10/2026)](docs/28-comunicacao-modelos.md)
 - [Comunicacao v3b-2: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio do pop-up e players de fora (23/10/2026)](docs/29-comunicacao-v3b2-momentos-relatorio-e-players.md)
 - [Webinarios: lives ao vivo e lives gravadas dentro da area (28/10/2026)](docs/30-webinarios.md)
-- [Produto licenciado: a area de membros instalada no servidor do comprador, com licenca, instalacao por um comando e o add-on de Webinarios (proposta em discussao, 10/11/2026)](docs/32-produto-licenciado.md)
+- [Produto licenciado: a area de membros instalada no servidor do comprador, com licenca anual ou vitalicia, painel de licencas, instalacao por um comando e modulos vendidos a parte (proposta em discussao, 10/11/2026)](docs/32-produto-licenciado.md)
 
 ## Padroes de trabalho
 
