@@ -10,6 +10,10 @@
 // a uma pergunta grava answer_source 'team' (a do Assistente e 'ai'), e a resposta que chega depois (o aluno pediu a
 // equipe, a sessao acabou ou ele saiu da sala) vira aviso no sino (notify.queueWebinarAnswerNotice), na pergunta e na
 // resposta da equipe a uma mensagem do chat; banco sem a 202610300004: a resposta segue e so a marca fica de fora.
+// A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §5.3): o "Fixar ao enviar" (sendTeamMessage com `pin`) usa a
+// mesma rotina de fixar do moderateMessage (pinMessage: a fixada de antes perde o pinned_at e a linha da sessao ganha o
+// pinned_message_id por ultimo, o carimbo que a consulta de 5 s da sala compara); fixar so na sessao que ainda aceita a
+// equipe, desafixar sempre.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
@@ -335,15 +339,43 @@ export async function endSessionNow(input: { sessionId: string }): Promise<Actio
  * ---------------------------------------------------------------------------------------------- */
 
 /**
+ * Fixa uma mensagem ja liberada na sessao (uma fixada por sessao; quem chama confere a sessao e a mensagem): a mensagem
+ * ganha o pinned_at, a fixada de antes perde o dela e a linha da sessao ganha o pinned_message_id POR ULTIMO. Essa
+ * escrita muda o carimbo da sessao (o gatilho poe o updated_at), e a sala so troca o estado da Na tela depois de tudo
+ * gravado (docs/30 §5.1). Devolve a linha fixada (nula quando a mensagem sumiu no meio).
+ */
+async function pinMessage(db: WebinarsDb, sessionRow: Pick<SessionRow, "id" | "pinned_message_id">, message: Pick<ChatMessageRow, "id">, nowIso: string): Promise<ChatMessageRow | null> {
+  const pinned = await updateChatMessageRow(db, message.id, { pinned_at: nowIso });
+
+  if (!pinned) {
+    return null;
+  }
+
+  if (sessionRow.pinned_message_id && sessionRow.pinned_message_id !== message.id) {
+    await updateChatMessageRow(db, sessionRow.pinned_message_id, { pinned_at: null });
+  }
+
+  await updateSessionRow(db, sessionRow.id, { pinned_message_id: message.id });
+  return pinned;
+}
+
+/**
  * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `co_host` para o
  * co-apresentador, `team` para o resto (teamRoleFor), source `team`, aprovada, no offset do relogio do servidor (nunca o
- * do navegador).
+ * do navegador). Com `pin` (o "Fixar ao enviar" do console), depois de gravada ela vira a fixada da sessao pela mesma
+ * rotina do Fixar (pinMessage), e a auditoria leva `pinned: true`.
  */
-export async function sendTeamMessage(input: { body: string; kind?: "answer" | "message" | "system"; replyToId?: string | null; sessionId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
+export async function sendTeamMessage(input: {
+  body: string;
+  kind?: "answer" | "message" | "system";
+  pin?: boolean;
+  replyToId?: string | null;
+  sessionId: string;
+}): Promise<ActionResult<{ message: ChatMessage }>> {
   return runAdminAction("messaging.write", teamChatSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
-    const { session, webinar } = await loadSession(db, data.sessionId);
+    const { row: sessionRow, session, webinar } = await loadSession(db, data.sessionId);
 
     if (session.kind === "replay") {
       throw new WebinarError(REPLAY_NO_CHAT_MESSAGE, 409);
@@ -375,6 +407,8 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       source: "team",
       webinar_id: webinar.id
     });
+    // O "Fixar ao enviar": a mensagem acabou de nascer aprovada, nesta sessao que aceita a equipe (conferido acima).
+    const sent = data.pin ? ((await pinMessage(db, sessionRow, inserted, now.toISOString())) ?? inserted) : inserted;
 
     // Fase 4c: a resposta da equipe a uma mensagem do aluno (a fila do Atendimento) tambem vai para o sino quando ele
     // pediu a equipe ou ja saiu da sala.
@@ -398,10 +432,14 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: { kind: data.kind, message_id: inserted.id, notified, reply: Boolean(data.replyToId), role, session_id: session.id }
+      metadata: { kind: data.kind, message_id: inserted.id, notified, pinned: data.pin, reply: Boolean(data.replyToId), role, session_id: session.id }
     });
 
-    return { message: chatMessageFromRow(inserted) };
+    if (data.pin) {
+      revalidateConsole(webinar.id);
+    }
+
+    return { message: chatMessageFromRow(sent) };
   });
 }
 
@@ -514,7 +552,8 @@ export async function moderateMessage(input: { action: ModerationAction; message
         if (!message.approved) {
           throw new WebinarError(PIN_NEEDS_APPROVAL_MESSAGE, 409);
         }
-        patch = { pinned_at: nowIso };
+        // A troca da linha e da sessao e a rotina do Fixar (pinMessage, abaixo), a mesma do "Fixar ao enviar".
+        patch = null;
         break;
       case "unpin":
         patch = { pinned_at: null };
@@ -553,7 +592,7 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
     // O estado de antes da troca (a linha lida pode ser a mesma referencia que a escrita devolve).
     const wasApproved = message.approved;
-    const updated = patch ? await updateChatMessageRow(db, message.id, patch) : message;
+    const updated = data.action === "pin" ? await pinMessage(db, sessionRow, message, nowIso) : patch ? await updateChatMessageRow(db, message.id, patch) : message;
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
@@ -572,11 +611,6 @@ export async function moderateMessage(input: { action: ModerationAction; message
     }
 
     if (data.action === "pin") {
-      if (pinnedMessageId && pinnedMessageId !== message.id) {
-        await updateChatMessageRow(db, pinnedMessageId, { pinned_at: null });
-      }
-
-      await updateSessionRow(db, sessionRow.id, { pinned_message_id: message.id });
       pinnedMessageId = message.id;
     } else if ((data.action === "unpin" || data.action === "delete") && pinnedMessageId === message.id) {
       await updateSessionRow(db, sessionRow.id, { pinned_message_id: null });

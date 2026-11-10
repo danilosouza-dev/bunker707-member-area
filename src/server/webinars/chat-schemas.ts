@@ -221,8 +221,17 @@ export const resolveScriptPhrasesSchema = z.object({ webinarId: uuidSchema });
 /** "Soltar agora": um item do roteiro (manual ou nao) entra na sessao no minuto atual. */
 export const fireScriptItemSchema = z.object({ itemId: uuidSchema, sessionId: sessionIdSchema });
 
-/** A mensagem da equipe no chat da sessao (role team, source team). */
-export const teamChatSchema = z.object({ body: bodySchema, kind: z.enum(["message", "answer", "system"]).default("message"), replyToId: uuidSchema.nullable().optional(), sessionId: sessionIdSchema });
+/**
+ * A mensagem da equipe no chat da sessao (role team, source team). `pin`: o "Fixar ao enviar" do console (a Na tela,
+ * docs/30 §2.4): publica e fixa num passo, trocando a fixada de antes.
+ */
+export const teamChatSchema = z.object({
+  body: bodySchema,
+  kind: z.enum(["message", "answer", "system"]).default("message"),
+  pin: z.boolean().default(false),
+  replyToId: uuidSchema.nullable().optional(),
+  sessionId: sessionIdSchema
+});
 
 /** "question" (docs/31 V2-15): Virar pergunta, so mensagem da turma com autor (a pendente tambem e liberada). */
 export const MODERATION_ACTIONS = ["approve", "delete", "pin", "unpin", "promote", "question"] as const;

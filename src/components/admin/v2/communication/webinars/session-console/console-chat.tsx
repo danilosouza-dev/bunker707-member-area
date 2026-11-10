@@ -32,6 +32,7 @@ import {
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type ChatMode, type SlowModeSeconds, type WebinarSession } from "@/server/webinars/model";
 import { adminMenuItem, adminMenuPopup, adminMenuSeparator } from "../../../styles";
+import { ConsolePinned, consoleMessageBody } from "./console-pinned";
 import { useConsolePortal } from "./console-shell";
 
 // A aba Chat do console (docs/30 §2.4 e §8.3; docs/31 V2-15; o estilo do YouTube, docs/31 §10), direto no cartao do
@@ -56,10 +57,16 @@ import { useConsolePortal } from "./console-shell";
 // linha; durante o envio o campo continua com o foco). A lista enche a aba a partir de lg e cola no fim quando a pessoa
 // ja estava no fim, tambem quando a aba volta a tela (`shown`: a lista escondida nao rola com o que chega,
 // chatListOnShow, como na sala). O ⋮ abre no portal da raiz do console. Nenhuma frase escrita aqui.
+// A Na tela (docs/30 §2.4; especificacao de 10/11/2026, R1 e §6.2): com o campo aberto, a pilula "Fixar ao enviar"
+// (aria-pressed, desligada por padrao) embaixo do texto: ligada, o Enviar publica e fixa num passo, e ela desliga
+// sozinha depois de cada envio (e no Cancelar). Acima da lista, fora da rolagem, o bloco "Fixada agora"
+// (console-pinned.tsx) com o Desafixar, lido do retrato pela chave (`pinned`, mesmo fora das 200 da lista). Os enderecos
+// `https://` das mensagens da equipe viram link na lista e no bloco (consoleMessageBody); a de aluno continua texto.
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
 const v2 = WEBINAR_COPY.consoleV2.chat;
 const assistantCopy = WEBINAR_COPY.assistente.console;
+const naTelaChat = WEBINAR_COPY.naTela.chat;
 
 /**
  * As acoes da mensagem. Com o mouse (pointer-fine), uma pilula no fundo dos menus por cima do canto de cima a direita do
@@ -90,18 +97,25 @@ type ConsoleChatProps = {
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
   /** A correcao aberta na montagem (o teste de tela; o console sempre comeca sem nenhuma). */
   initialEditing?: { body: string; id: string } | null;
+  /** O campo da equipe aberto na montagem (o teste de tela; o console sempre comeca com ele fechado). */
+  initialComposerOpen?: boolean;
+  /** A hora do servidor agora (o relogio do console): o "há 2 min" do bloco Fixada agora. */
+  nowMs?: number;
   /** Fase 4c: "Corrigir resposta" numa resposta do Assistente (devolve se gravou). */
   onEditAssistant?: ((messageId: string, body: string) => Promise<boolean>) | null;
   /** Devolve, quando pode, a promessa da acao (resolvida com o retrato novo): o foco segue depois dela. */
   onModerate: (action: ModerationAction, messageId: string) => Promise<boolean> | void;
   /** Fase 4f: "Refazer tradução" (apaga a traducao guardada do texto); nulo com a traducao desligada no ambiente. */
   onRetranslate?: ((messageId: string) => void) | null;
-  onSend: (body: string) => Promise<boolean>;
+  /** O envio da equipe; `pin` e o "Fixar ao enviar" ligado (publica e fixa num passo). Devolve se gravou. */
+  onSend: (body: string, pin: boolean) => Promise<boolean>;
   /**
    * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; nulo fora da Live ao
    * vivo. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao esta no retrato).
    */
   personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
+  /** A fixada lida pela chave (snapshot.pinned): o bloco Fixada agora, tambem para uma mensagem fora da lista. */
+  pinned?: ConsoleMessage | null;
   pinnedMessageId: string | null;
   session: WebinarSession;
   /**
@@ -117,21 +131,26 @@ export function ConsoleChat({
   canAct,
   currentUserAvatarUrl = null,
   currentUserId,
+  initialComposerOpen = false,
   initialEditing = null,
   messages,
+  nowMs = Number.NaN,
   onChatMode,
   onEditAssistant = null,
   onModerate,
   onRetranslate = null,
   onSend,
   personMenu = null,
+  pinned = null,
   pinnedMessageId,
   session,
   shown = true
 }: ConsoleChatProps) {
   const [body, setBody] = useState("");
   // O campo da equipe aberto (o rodape com o Cancelar e o Enviar), guardado pela regra da sala (composerExpandedStep).
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initialComposerOpen);
+  // O "Fixar ao enviar": desligado por padrao e de novo depois de cada envio (e no Cancelar).
+  const [pinOnSend, setPinOnSend] = useState(false);
   const [editing, setEditing] = useState<{ body: string; id: string } | null>(initialEditing);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -223,11 +242,18 @@ export function ConsoleChat({
       return;
     }
 
-    if (await onSend(text)) {
+    if (await onSend(text, pinOnSend)) {
       setBody("");
+      setPinOnSend(false);
       setExpanded((current) => composerExpandedStep(current, { draft: "", type: "sent" }));
       stickToEnd.current = true;
     }
+  }
+
+  /** O Desafixar do bloco Fixada agora: o bloco sai da tela, e o foco vai a caixa da equipe (nunca ao comeco da pagina). */
+  async function unpinFromBlock(message: ConsoleMessage) {
+    await onModerate("unpin", message.id);
+    requestFocus(() => ({ area: "composer" }));
   }
 
   async function saveEdit(message: ConsoleMessage) {
@@ -418,6 +444,17 @@ export function ConsoleChat({
         </ol>
       ) : null}
 
+      {pinned ? (
+        <ConsolePinned
+          author={consoleComment({ kind: session.kind, message: pinned, mine: pinned.authorUserId === currentUserId, scheduledAt: session.scheduledAt }).name}
+          busy={busyKey === `moderate:${pinned.id}`}
+          canAct={canAct}
+          message={pinned}
+          nowMs={nowMs}
+          onUnpin={() => void unpinFromBlock(pinned)}
+        />
+      ) : null}
+
       <div
         aria-label={copy.title}
         aria-live="off"
@@ -457,7 +494,7 @@ export function ConsoleChat({
                 actions={editorOf(message)}
                 aside={showActions ? toolbarOf(message, actions) : null}
                 avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={comment.avatar} name={message.displayName} />}
-                body={message.body}
+                body={consoleMessageBody(message)}
                 className="group relative"
                 headline={headline}
                 id={message.id}
@@ -477,10 +514,30 @@ export function ConsoleChat({
         busy={sending}
         disabled={!canAct}
         expanded={expanded}
+        hint={
+          canAct ? (
+            // O clique na pilula nao tira o foco do campo (como o rodape do campo): o campo continua aberto.
+            <div className="flex" data-console-pin-on-send="" onMouseDown={(event) => event.preventDefault()}>
+              <RoomPill
+                aria-pressed={pinOnSend}
+                disabled={sending}
+                icon={Pin}
+                iconFilled={pinOnSend}
+                label={naTelaChat.fixarAoEnviar}
+                onClick={() => setPinOnSend((on) => !on)}
+                size="s"
+                tone={pinOnSend ? "white" : "tonal"}
+              />
+            </div>
+          ) : null
+        }
         id="console-composer"
         maxLength={CHAT_LIMITS.body}
         mode="enter"
-        onCancel={() => setBody("")}
+        onCancel={() => {
+          setBody("");
+          setPinOnSend(false);
+        }}
         onChange={setBody}
         onExpandedChange={setExpanded}
         onSubmit={() => void submit()}

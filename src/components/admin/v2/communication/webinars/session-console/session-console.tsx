@@ -136,10 +136,13 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // Pessoas na live (Chat e Perguntas na gravada e no Replay), com o numero das perguntas abertas e das maos, e o ⋯ com
 // Enquetes, Roteiro, Oferta, Atendimento, Presença e Gravação conforme a sessao; tudo montado, o que nao esta na tela
 // com `hidden`. A aba e a entrada escolhidas ficam so na memoria da pagina; Mãos, Lançar enquete e o Gravar por
-// preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida.
+// preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida. A Na tela (docs/30 §2.4;
+// especificacao de 10/11/2026, R1): o Chat recebe a fixada lida pela chave (o bloco Fixada agora), o relogio para o
+// "há 2 min" e o "Fixar ao enviar" (sendTeamMessage com `pin`, aviso "Mensagem fixada.").
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
+const naTelaCopy = WEBINAR_COPY.naTela.console;
 
 type Failure = { message: string; status: number };
 
@@ -933,9 +936,18 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                             )
                         : null
                     }
-                    // Sem aviso: a mensagem enviada aparece na lista, como na sala do aluno.
-                    onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }))}
+                    nowMs={nowMs}
+                    // Sem aviso: a mensagem enviada aparece na lista, como na sala do aluno. Com o "Fixar ao enviar", o
+                    // aviso "Mensagem fixada." (a Na tela).
+                    onSend={(body: string, pin: boolean) =>
+                      run("send", () => sendTeamMessage({ body, pin, sessionId: session.id }), () => {
+                        if (pin) {
+                          adminToast.success(naTelaCopy.avisos.mensagemFixada);
+                        }
+                      })
+                    }
                     personMenu={live ? chatPersonMenu : null}
+                    pinned={snapshot.pinned ?? null}
                     pinnedMessageId={snapshot.pinnedMessageId}
                     session={session}
                     // A lista escondida (outra aba, uma entrada do ⋯, o painel fechado) nao rola com o que chega: ao
