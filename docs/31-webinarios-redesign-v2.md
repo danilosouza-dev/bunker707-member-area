@@ -345,3 +345,12 @@ Decisão do produtor em 10/11/2026 (`docs/30` D64, com a regra inteira em §1.3 
 - **O que continua aparecendo como antes**: a pergunta e a resposta gravadas como anônimas antes dessa data seguem com o nome **Anônima** e a máscara, sem foto, na sala e no console; a mensagem gravada como **Aluno {n}** segue com esse nome e sem foto.
 
 Uma página aberta com o código de antes que ainda mande o pedido de anônimo ou de apelido recebe a frase "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar." no lugar do envio, e nada é gravado. O alcance dessa recusa na pílula **Anônima** da página antiga está em `docs/30` §8.5 e A34.
+
+### 11.7 Correções da revisão da PR (10/11/2026)
+
+O que a revisão da PR do fio e da página achou e já está corrigido, cada correção com o teste que falhava antes (`docs/18`, a linha "correções da revisão"):
+
+- **A página do webinário** (§11.1): só o fundo do destaque é cortado nos cantos, e a lista do **Adicionar ao calendário** abre inteira; **Começou agora** quando o relógio do aparelho está atrás do início; as três linhas embaixo seguem o que o aluno vê (nenhuma com as vagas esgotadas, **Antes de entrar** com o **Entrar** do **Começa quando você entra** ligado).
+- **Os seletores** (§11.2): o seletor é a pílula inteira também com o ponto verde da sessão no ar; o anel de foco não é cortado no cabeçalho do chat do console nem na faixa do idioma da sala; arrastar ou clicar numa pílula desligada não apaga o anel do próximo Tab.
+- **O campo de responder do fio** (`docs/30` §1.3 e §2.4): o **Responder** de cima não apaga o que foi escrito; **Ocultar respostas** fecha o campo junto; o Esc vale no campo inteiro e o foco volta ao **Responder**; o campo fecha com uma frase quando a pergunta deixa de aceitar resposta; no console, o envio e a lixeira ficam ocupados até o retrato novo, e a resposta pelo campo de cima tira o **Nova resposta do aluno**.
+- **A foto na sala e no console** (`docs/30` §8.5): só a foto enviada pelo Perfil, pela origem do nosso Supabase.

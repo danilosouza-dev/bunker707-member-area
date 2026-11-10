@@ -696,7 +696,10 @@ export async function deleteWebinar(input: { expectedUpdatedAt?: string; id: str
 /**
  * [messaging.publish] Arquiva o webinario encerrado ou cancelado (docs/30 §2.3; decisao do produtor de 10/11/2026, no
  * modelo do Demio): ele sai da lista (fica no filtro Arquivado) e da area do aluno (a pagina, a sala e o replay so
- * abrem para o publicado), e nada se apaga: o relatorio, os paineis e o historico continuam. Desarquivar desfaz.
+ * abrem para o publicado), e arquivar nao apaga nada: o relatorio, os paineis e o historico continuam. A guarda segue
+ * (prune_webinar_history, docs/30 §4.5): o chat original sai quando o webinario passa chat_retention_days arquivado.
+ * Desarquivar devolve o que a guarda ainda nao apagou. A situacao e a da lista (sem as sessoes jit), e o encerrado que
+ * ainda atende pelo "Comeca quando voce entra" nao se arquiva.
  */
 export async function archiveWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; situation: "archived"; updatedAt: string }>> {
   return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {

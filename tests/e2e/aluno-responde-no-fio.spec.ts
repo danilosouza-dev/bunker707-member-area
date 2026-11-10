@@ -70,6 +70,11 @@ test("a aluna responde no fio da propria pergunta", async ({ page }) => {
   const enviar = pergunta.locator("[data-room-reply-field]").getByRole("button", { exact: true, name: novas.responder });
   await expect(enviar).toBeDisabled();
   await campo.fill(RESPOSTA_DA_ALUNA);
+  // O Responder da linha de acoes, clicado de novo, nao apaga o que foi escrito (o envio tem o mesmo nome).
+  const abrir = pergunta.locator("[data-room-reply-open]");
+  await abrir.click();
+  await expect(abrir).toHaveAttribute("aria-expanded", "true");
+  await expect(campo).toHaveValue(RESPOSTA_DA_ALUNA);
   const gravacao = page.waitForResponse((response) => response.url().includes("/questions/") && response.url().endsWith("/replies") && response.request().method() === "POST");
   await enviar.click();
   expect((await gravacao).status()).toBe(201);
@@ -77,6 +82,8 @@ test("a aluna responde no fio da propria pergunta", async ({ page }) => {
   // A resposta entra no fio, o campo fecha e o botao do fio conta as duas.
   await expect(pergunta.locator("[data-room-reply]").filter({ hasText: RESPOSTA_DA_ALUNA })).toBeVisible();
   await expect(pergunta.locator("[data-room-reply-field]")).toHaveCount(0);
+  // O campo saiu com o foco nele: o foco volta ao Responder da pergunta, nunca ao body.
+  await expect(abrir).toBeFocused();
   await pergunta.getByRole("button", { name: novas.ocultarRespostas }).click();
   await expect(pergunta.getByRole("button", { name: novas.respostas(2) })).toBeVisible();
 });
