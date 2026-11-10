@@ -81,6 +81,8 @@ function windowedLimit(max: number, windowMs: number) {
 
 const chatBurst = windowedLimit(ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs);
 const questionBurst = windowedLimit(ROOM_RULES.questionsPerMinute, 60_000);
+// O fio das perguntas: a mesma rajada do chat (5 por 60 s), numa janela so dele.
+const replyBurst = windowedLimit(ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs);
 const reactionSecond = windowedLimit(ROOM_RULES.reactions.perSecond, 1000);
 const reactionMinute = windowedLimit(ROOM_RULES.reactions.perMinute, 60_000);
 const lastSentAt = new Map<string, number>();
@@ -110,6 +112,11 @@ export function takeChatBurst(userId: string, sessionId: string, now = Date.now(
 /** Perguntas: 2 por minuto por aluno e sessao (ROOM_RULES.questionsPerMinute). */
 export function takeQuestionBurst(userId: string, sessionId: string, now = Date.now()): WindowedTake {
   return questionBurst.take(roomKey(userId, sessionId), now);
+}
+
+/** Respostas no fio das perguntas: 5 por 60 s por aluno e sessao (a rajada do chat, numa janela propria). */
+export function takeReplyBurst(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return replyBurst.take(roomKey(userId, sessionId), now);
 }
 
 /** Reacoes: 1 por segundo e 20 por minuto por aluno e sessao; as duas janelas conferidas antes de contar. */
@@ -209,6 +216,7 @@ export function reserveChatSlot(userId: string, sessionId: string, slowModeSecon
 export function resetRoomLimits() {
   chatBurst.clear();
   questionBurst.clear();
+  replyBurst.clear();
   reactionSecond.clear();
   reactionMinute.clear();
   roomEventBatches.clear();

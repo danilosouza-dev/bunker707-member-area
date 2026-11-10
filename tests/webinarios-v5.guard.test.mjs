@@ -68,12 +68,14 @@ test("a 202611010001: duas secoes MCP, idempotente; o unico drop e o do check se
   assert.equal(second.replace(/\s+/g, " "), "alter table public.webinar_chat_messages validate constraint webinar_chat_messages_role_v5;");
 });
 
-test("a lista do check novo e a do app (model.CHAT_ROLES, com co_host); o aviso de migracao pendente aponta a 202611010001", () => {
+test("a lista do check novo e a do app (model.CHAT_ROLES, com co_host); o aviso de migracao pendente aponta a mais nova, que vem depois desta", () => {
   const code = sqlCodeOf(read(MIGRATION));
   assert.ok(model.CHAT_ROLES.includes("co_host"));
   assert.match(code, new RegExp(`add constraint webinar_chat_messages_role_v5\\s*check \\(role in \\(${sqlList(model.CHAT_ROLES)}\\)\\) not valid;`));
   assert.equal((code.match(/check \(role in \(/g) ?? []).length, 1, "um check so");
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611010001";/);
+  // O aviso aponta a migracao mais nova dos webinarios (hoje a do fio das Perguntas, tests/webinarios-v6.guard.test.mjs):
+  // aplicar ate ela inclui esta.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611010001");
   // Sem constante propria: o insert do co_host sem a migracao da o erro comum da acao, nunca o aviso (docs/21 §9.11).
   assert.doesNotMatch(dbSource, /WEBINARS_COHOST_MIGRATION/);
   // O nome que o Postgres deu ao check de coluna da 0029 (conferido na nuvem de teste antes de escrever a migracao).

@@ -172,6 +172,9 @@ test("a enquete do aluno: modelo e rascunho ficam de fora, a encerrada so com re
   const open = rules.toStudentPoll(poll, answers, "u1");
   assert.deepEqual(open.myOptionIds, ["o1"]);
   assert.equal(open.results, null);
+  // D64 (10/11/2026): a enquete do aluno nao leva mais a marca de anonima (a sala nunca usou), nem a de um modelo antigo.
+  assert.deepEqual(Object.keys(open).sort(), ["id", "kind", "myOptionIds", "options", "question", "results", "status"]);
+  assert.ok(!("anonymous" in rules.toStudentPoll({ ...poll, anonymous: true }, answers, "u1")));
   assert.equal(rules.toStudentPoll(poll, answers, "u3").myOptionIds, null);
   const shared = rules.toStudentPoll({ ...poll, resultsSharedAt: "x", status: "closed" }, answers, "u1");
   assert.deepEqual(shared.results, { counts: { o1: 1, o2: 1 }, total: 2 });
@@ -204,6 +207,46 @@ test("a pergunta do aluno: mine e voted; a dispensada so para o autor; o cursor 
   assert.deepEqual(rules.countReactions([{ reaction: "like" }, { reaction: "like" }, { reaction: "x" }], ["like", "love"]), { like: 2, love: 0 });
   assert.deepEqual(rules.chatSentMetadata({ kind: "message", length: 3, messageId: "m", offsetMs: 10 }), { kind: "message", length: 3, message_id: "m", offset_ms: 10 });
   assert.deepEqual(rules.consentRevokedMetadata(1), { consent_version: 1, revoked: true });
+});
+
+test("o fio da pergunta (docs/30 §1.3): so quem perguntou e a equipe escrevem, so depois de respondida e ate o teto; a pergunta do aluno leva o fio, o canReply e a foto (nunca na Anonima)", async () => {
+  const { QUESTION_REPLY_LIMITS } = await import("../src/server/webinars/model.ts");
+  const base = { anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, body: "Vai ter replay?", createdAt: "2026-11-05T23:10:00.000Z", displayName: "Ana M.", id: "q1", messageId: null, offsetMs: 0, sessionId: "s1", status: "open", upvotes: 0, userId: "u1" };
+  const respondida = { ...base, answeredLive: true, status: "answered" };
+
+  // Quem escreve no fio.
+  assert.equal(rules.questionReplyRefusal({ question: respondida, replies: 0, staff: false, userId: "u1" }), null, "quem perguntou, depois da resposta");
+  assert.equal(rules.questionReplyRefusal({ question: respondida, replies: 0, staff: false, userId: "u2" }), "not_owner", "o outro aluno le, mas nao escreve");
+  assert.equal(rules.questionReplyRefusal({ question: respondida, replies: 0, staff: true, userId: "u-equipe" }), null, "a equipe sempre");
+  assert.equal(rules.questionReplyRefusal({ question: base, replies: 0, staff: false, userId: "u1" }), "not_answered", "antes da resposta nao ha o que comentar");
+  assert.equal(rules.questionReplyRefusal({ question: base, replies: 0, staff: true, userId: "u-equipe" }), "not_answered", "a primeira resposta da equipe e o Responder por escrito");
+  assert.equal(rules.questionReplyRefusal({ question: { ...base, status: "dismissed" }, replies: 0, staff: false, userId: "u1" }), "not_answered");
+  assert.equal(rules.questionReplyRefusal({ question: respondida, replies: QUESTION_REPLY_LIMITS.perQuestion, staff: true, userId: "u-equipe" }), "full", "o fio tem teto");
+  assert.equal(rules.questionReplyRefusal({ question: respondida, replies: QUESTION_REPLY_LIMITS.perQuestion - 1, staff: false, userId: "u1" }), null);
+
+  // A resposta como o aluno recebe: "minha" pelo autor; a anonima nunca leva foto.
+  const reply = { anonymous: false, body: "E no app?", createdAt: "2026-11-05T23:21:00.000Z", displayName: "Ana M.", id: "r1", questionId: "q1", role: "student", sessionId: "s1", userId: "u1" };
+  assert.deepEqual(rules.toStudentReply(reply, "u1", "https://exemplo.test/ana.jpg"), { anonymous: false, avatarUrl: "https://exemplo.test/ana.jpg", body: "E no app?", createdAt: "2026-11-05T23:21:00.000Z", displayName: "Ana M.", id: "r1", mine: true, role: "student" });
+  assert.equal(rules.toStudentReply(reply, "u2").mine, false);
+  // Legado: linhas de antes de 10/11/2026 (D64). A resposta gravada numa pergunta Anonima continua sem foto.
+  assert.equal(rules.toStudentReply({ ...reply, anonymous: true }, "u2", "https://exemplo.test/ana.jpg").avatarUrl, null, "a resposta numa pergunta Anonima sem foto");
+  assert.equal(rules.toStudentReply({ ...reply, role: "host", userId: "u-equipe" }, "u1").role, "host");
+
+  // A pergunta do aluno: sem fio por padrao; com o fio, em ordem; canReply so para quem perguntou e so respondida.
+  const semFio = rules.toStudentQuestion(base, "u1", false);
+  assert.deepEqual([semFio.replies, semFio.canReply, semFio.avatarUrl], [[], false, null]);
+  const fio = [rules.toStudentReply(reply, "u1"), rules.toStudentReply({ ...reply, id: "r2", role: "host", userId: "u-equipe" }, "u1")];
+  const minha = rules.toStudentQuestion(respondida, "u1", false, "https://exemplo.test/ana.jpg", fio);
+  assert.deepEqual([minha.canReply, minha.avatarUrl, minha.replies.map((item) => item.id)], [true, "https://exemplo.test/ana.jpg", ["r1", "r2"]]);
+  assert.equal(rules.toStudentQuestion(respondida, "u2", false, null, fio).canReply, false, "o outro aluno le o fio, sem responder");
+  assert.equal(rules.toStudentQuestion(respondida, null, false).canReply, false, "sem aluno (a previa), nunca");
+  // Legado: linhas de antes de 10/11/2026 (D64). A pergunta gravada como Anonima continua sem foto.
+  assert.equal(rules.toStudentQuestion({ ...respondida, anonymous: true }, "u2", false, "https://exemplo.test/ana.jpg").avatarUrl, null, "a pergunta Anonima sem foto");
+  const cheio = Array.from({ length: QUESTION_REPLY_LIMITS.perQuestion }, (_, index) => rules.toStudentReply({ ...reply, id: `r${index}` }, "u1"));
+  assert.equal(rules.toStudentQuestion(respondida, "u1", false, null, cheio).canReply, false, "com o fio cheio, o Responder some");
+
+  // O historico da resposta: so ids e o tamanho, nunca o texto.
+  assert.deepEqual(rules.questionReplySentMetadata({ length: 9, questionId: "q1", replyId: "r1" }), { length: 9, question_id: "q1", reply_id: "r1" });
 });
 
 test("limites na memoria: rajada 5 por 60 s por aluno e sessao (a 6a espera a janela), perguntas 2 por minuto, modo lento conta da ultima mensagem", () => {

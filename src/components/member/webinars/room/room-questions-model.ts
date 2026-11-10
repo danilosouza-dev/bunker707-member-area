@@ -1,7 +1,9 @@
 // As regras puras das Perguntas na sala no estilo do YouTube (docs/31; spec §7.3): o filtro dos chips (Todas, Sem
 // resposta, Respondidas, Minhas) sobre a lista lida, a frase do vazio que diz o filtro, e a linha de chips que rola de
-// lado (as setas so do lado que esconde chip, e o passo do clique). Sem "use client" e com imports relativos: os testes
-// de modelo carregam este arquivo direto no Node.
+// lado (as setas so do lado que esconde chip, e o passo do clique); e o campo de responder do fio (docs/30 §1.3): o
+// "Responder" que abre o campo sem apagar o que ja foi escrito (questionReplyOpenStep) e o campo que fecha quando a
+// pergunta deixa de aceitar resposta (questionReplyGone). Sem "use client" e com imports relativos: os testes de modelo
+// carregam este arquivo direto no Node.
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import type { StudentQuestion } from "../../../../server/webinars/room-rules";
 
@@ -85,11 +87,22 @@ export function chipScrollBy(input: { clientWidth: number; direction: -1 | 1 }):
  * Y10: a pergunta como o comentario do YouTube, com o fio "1 resposta" (spec §8.4)
  * ---------------------------------------------------------------------------------------------- */
 
-type ThreadQuestion = Pick<StudentQuestion, "answerText" | "mine" | "status">;
+type ThreadQuestion = Pick<StudentQuestion, "answerText" | "mine" | "status"> & { replies?: readonly unknown[] };
 
-/** A pergunta tem fio: a resposta escrita da Equipe ou do Assistente (a respondida so ao vivo nao tem texto). */
+/**
+ * Quantas respostas o fio tem: a resposta escrita da Equipe ou do Assistente (uma) mais o que veio depois dela (quem
+ * perguntou e a equipe, docs/30 §1.3). A respondida so ao vivo, sem ninguem ter escrito depois, nao tem fio.
+ */
+export function questionThreadCount(question: ThreadQuestion): number {
+  if (question.status !== "answered") {
+    return 0;
+  }
+  return (question.answerText?.trim() ? 1 : 0) + (question.replies?.length ?? 0);
+}
+
+/** A pergunta tem fio: ao menos uma resposta escrita. */
 export function questionHasThread(question: ThreadQuestion): boolean {
-  return question.status === "answered" && Boolean(question.answerText?.trim());
+  return questionThreadCount(question) > 0;
 }
 
 /** O fio nasce aberto na minha pergunta respondida por escrito e fechado nas outras. */
@@ -103,6 +116,22 @@ export function questionThreadOpenByDefault(question: ThreadQuestion): boolean {
  */
 export function questionThreadOpen(question: ThreadQuestion & Pick<StudentQuestion, "id">, toggled: ReadonlySet<string>): boolean {
   return questionHasThread(question) && questionThreadOpenByDefault(question) !== toggled.has(question.id);
+}
+
+/** O campo de responder do fio (uma pergunta por vez): a pergunta com o campo aberto, o rascunho e o erro. */
+export type QuestionReplyState = { draft: string; openId: string | null; status: string | null };
+
+/**
+ * O "Responder" da linha de acoes: abre o campo naquela pergunta, com o rascunho vazio. Na pergunta que ja esta com o
+ * campo aberto nao muda nada: o envio tem o mesmo nome, e o clique no de cima apagaria o que foi escrito.
+ */
+export function questionReplyOpenStep(state: QuestionReplyState, questionId: string): QuestionReplyState {
+  return state.openId === questionId ? state : { draft: "", openId: questionId, status: null };
+}
+
+/** O campo de responder ficou sem pergunta: ela saiu da lista lida ou deixou de aceitar a minha resposta (reaberta, dispensada, apagada, fio cheio). */
+export function questionReplyGone(questions: readonly Pick<StudentQuestion, "canReply" | "id">[], openId: string | null): boolean {
+  return openId !== null && !questions.some((question) => question.id === openId && question.canReply);
 }
 
 /**

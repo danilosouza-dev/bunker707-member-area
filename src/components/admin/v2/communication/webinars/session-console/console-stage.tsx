@@ -1,7 +1,7 @@
 "use client";
 
 import { DoorOpen, LogIn, RefreshCw, Users } from "lucide-react";
-import { useEffect, type CSSProperties, type RefObject } from "react";
+import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 import { columnWanted, stageColumnShown } from "@/components/member/webinars/room/live-room-model";
 import { stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
 import { RoomStageBadges, RoomStagePill } from "@/components/member/webinars/room/room-stage-badges";
@@ -56,8 +56,13 @@ type ConsoleStageProps = {
   topLeft: ConsoleStageTopLeft | null;
 };
 
-/** A frase por cima do palco quando a sala nao esta no iframe (abrindo, agendada, encerrada, sem a sala no ambiente). */
-function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]): string | null {
+/**
+ * A frase por cima do palco quando a sala nao esta no iframe (abrindo, agendada, encerrada, sem a sala no ambiente). A
+ * falha so diz "Não conseguimos voltar." depois de o console ter entrado nesta pagina (a queda e as tentativas de
+ * voltar); a que acontece antes de entrar (o servidor de video fora do ar, o script que nao carrega) diz que nao foi
+ * possivel abrir a sala, como a falha do token.
+ */
+function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], everJoined: boolean): string | null {
   if (!handle.meetConfigured) {
     return copy.salaEmBreve;
   }
@@ -74,7 +79,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]):
     case "joined":
       return null;
     case "failed":
-      return WEBINAR_COPY.aoVivo.naoConseguimosVoltar;
+      return everJoined ? WEBINAR_COPY.aoVivo.naoConseguimosVoltar : WEBINAR_COPY.aoVivo.erroAbrir;
     case "left":
       return null;
     default:
@@ -99,7 +104,12 @@ export function ConsoleStage({ busy, className, handle, live, presentLabel, pres
     }
   }, [byWidth, filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
 
-  const message = frameMessage(handle, session.status);
+  // O console ja entrou na sala nesta pagina (a falha depois disso e uma queda; antes, a sala que nao abriu).
+  const [everJoined, setEverJoined] = useState(joined);
+  if (joined && !everJoined) {
+    setEverJoined(true);
+  }
+  const message = frameMessage(handle, session.status, everJoined);
   const recording = room.recording.on || live.recorder.status === "recording";
   const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
   const showRetry = handle.frameStatus === "failed" || (handle.tokenError === "failed" && handle.frameStatus === "idle");

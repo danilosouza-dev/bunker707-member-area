@@ -82,12 +82,24 @@ test("mapa aluno -> participante: o webinar_room_joined mais novo de cada aluno 
   assert.equal(joins.size, 2);
 });
 
-test("nome na sala: com o aceite, o modo escolhido; sem o aceite, primeiro nome + inicial ou Aluno {n} no card anonimo; a equipe pelo nome", () => {
+test("nome na sala (D64): sempre o primeiro nome + inicial, com qualquer aceite gravado (apelido, anonimo) e qualquer card Sala antigo; nunca o apelido nem Aluno {n}; a equipe pelo nome", () => {
   const base = { fullName: "Ana Maria Souza", roomDisplayName: "first_name_initial", userId: ANA, webinarId: WEBINAR };
+  assert.equal(model.liveParticipantName({ fullName: "Ana Maria Souza" }), "Ana S.");
   assert.equal(model.liveParticipantName({ ...base, consent: null }), "Ana S.");
-  assert.equal(model.liveParticipantName({ ...base, consent: { displayMode: "nickname", nickname: "Aninha" } }), "Aninha");
-  assert.equal(model.liveParticipantName({ ...base, consent: { displayMode: "anonymous", nickname: null } }), `Aluno ${anonymousNumber(ANA, WEBINAR)}`);
-  assert.equal(model.liveParticipantName({ ...base, consent: null, roomDisplayName: "anonymous" }), `Aluno ${anonymousNumber(ANA, WEBINAR)}`);
+  // Legado: o aceite antigo com apelido ou anonimo e o card Sala "Sempre anônimo" nao mudam mais o nome que a equipe ve.
+  const anonimo = `Aluno ${anonymousNumber(ANA, WEBINAR)}`;
+  for (const [caso, entrada] of [
+    ["aceite com apelido", { ...base, consent: { displayMode: "nickname", nickname: "Aninha" } }],
+    ["aceite anonimo", { ...base, consent: { displayMode: "anonymous", nickname: null } }],
+    ["card Sala anonimo, sem aceite", { ...base, consent: null, roomDisplayName: "anonymous" }],
+    ["card Sala anonimo, aceite com apelido", { ...base, consent: { displayMode: "nickname", nickname: "Aninha" }, roomDisplayName: "anonymous" }],
+    ["card Sala apelido", { ...base, consent: null, roomDisplayName: "nickname" }]
+  ]) {
+    const nome = model.liveParticipantName(entrada);
+    assert.equal(nome, "Ana S.", caso);
+    assert.notEqual(nome, anonimo, caso);
+  }
+  assert.equal(model.liveParticipantName({ fullName: null }), "Aluno", "o perfil sem nome (nunca um numero)");
   assert.equal(model.staffDisplayName("Produtor de Teste"), "Produtor T.");
   assert.equal(model.staffDisplayName(null), "Equipe");
   const sorted = model.sortLivePeople([person({ displayName: "Zeca", userId: BIA }), person({ ban: { ...NO_BAN, kicked: true }, displayName: "Bruno" }), person({ displayName: "Ana" })]);

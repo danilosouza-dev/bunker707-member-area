@@ -36,7 +36,7 @@ import { chatMessageFromRow } from "./chat-rows";
 import { fetchChatMessageRow, fetchQuestionRow, updateQuestionRow } from "./chat-store";
 import { WEBINARS_ASSISTANT_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import type { AssistantKnowledgeItem, AssistantSettings, AssistantTarget, Attendant, AttendantStatus, ChatMessage } from "./model";
-import { fetchSessionRow, requireWebinarRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, requireWebinarRow } from "./store";
 import { webinarAssistantEnabled } from "./v4-env";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
@@ -120,6 +120,7 @@ export async function saveAssistant(input: { items: { answer: string; id?: strin
   return runAdminAction("messaging.write", saveAssistantSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const result = await withAssistantTables(async () => {
       const previous = await fetchAssistantSettings(db, webinar.id);
       const settings = await saveAssistantSettings(db, { settings: data.settings, webinarId: webinar.id });

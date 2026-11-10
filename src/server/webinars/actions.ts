@@ -27,11 +27,11 @@ import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { copyAssistantToWebinar, replyAllDefaultFor } from "./assistant-store";
 import { WEBINAR_CHANGED_MESSAGE, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import { webinarDraftOf } from "./editor-model";
-import { isJitSession, withJitPublishProblems } from "./jit-model";
+import { isJitSession, jitActive, withJitPublishProblems } from "./jit-model";
 import { fetchJitSettings, saveJitSettings } from "./jit-store";
 import { newRoomName } from "./jitsi-token";
 import { ensureSessionRoomName } from "./live-store";
-import { WEBINAR_LIMITS, toTime, webinarSituation, webinarSlug, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
+import { WEBINAR_LIMITS, toTime, webinarHasStudentData, webinarSituation, webinarSlug, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
 import { copyOfferToWebinar } from "./offer-store";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
@@ -60,6 +60,8 @@ import {
   replacePresenterRows,
   requireWebinarRow,
   softDeleteWebinarRow,
+  assertWebinarNotArchived,
+  webinarDataAuthors,
   updateRecordingRow,
   updateSessionRow,
   updateWebinarRow,
@@ -74,7 +76,11 @@ const SLUG_ATTEMPTS = 6;
 const CANCELLED_MESSAGE = "Esse webinário foi cancelado. Duplique para criar outro.";
 const ALREADY_PUBLISHED_MESSAGE = "Esse webinário já foi publicado. Recarregue a página.";
 const ONLY_PUBLISHED_CANCELS = "Só um webinário publicado é cancelado. Um rascunho é excluído.";
-const ONLY_DRAFT_DELETES = "Só um rascunho é excluído. Cancele o webinário publicado.";
+const ONLY_DRAFT_DELETES = "Só um rascunho ou um webinário arquivado é excluído. Arquive o webinário encerrado ou cancelado antes.";
+const HAS_STUDENT_DATA = "Este webinário tem dados de alunos (vagas, presença, chat ou cliques). Ele fica arquivado: o histórico alimenta o relatório e os painéis.";
+const ONLY_FINISHED_ARCHIVES = "Só um webinário encerrado ou cancelado é arquivado.";
+const JIT_BLOCKS_ARCHIVE = "Este webinário ainda atende pelo Começa quando você entra. Desligue no card Sessões e espere a sessão em andamento acabar para arquivar.";
+const NOT_ARCHIVED_MESSAGE = "Esse webinário não está arquivado.";
 const KIND_LOCKED_MESSAGE = "O tipo não muda depois de publicar.";
 const SESSION_MISSING_MESSAGE = "Essa sessão não existe mais.";
 const SESSION_NOT_SCHEDULED_MESSAGE = "Só uma sessão que ainda não começou muda de hora.";
@@ -365,6 +371,9 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
     const bundle = await loadBundle(db, data.id);
     const current = bundle.row;
 
+    // O arquivado fica so de leitura (docs/30 §2.3): desarquivar antes de mexer.
+    assertWebinarNotArchived(current);
+
     if (current.cancelled_at) {
       throw new WebinarError(CANCELLED_MESSAGE, 409);
     }
@@ -645,18 +654,29 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
   });
 }
 
-/** [messaging.publish] Exclui um rascunho (soft delete). O publicado e cancelado, nunca excluido. */
+/**
+ * [messaging.publish] Exclui um rascunho, ou um arquivado sem dados de aluno (soft delete: o webinario sai da lista,
+ * da area do aluno e dos paineis, que leem so os nao apagados). O arquivado com dados de aluno fica (docs/30 §2.3;
+ * decisao do produtor de 10/11/2026): o historico alimenta o relatorio e os paineis. O publicado e cancelado ou
+ * arquivado, nunca excluido direto.
+ */
 export async function deleteWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string }>> {
   return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
+    const archived = row.status === "archived";
 
-    if (row.status !== "draft" || row.cancelled_at) {
+    if (!archived && (row.status !== "draft" || row.cancelled_at)) {
       throw new WebinarError(ONLY_DRAFT_DELETES, 409);
     }
 
     assertSameVersion(row, data.expectedUpdatedAt);
+
+    if (archived && webinarHasStudentData(await webinarDataAuthors(db, row))) {
+      throw new WebinarError(HAS_STUDENT_DATA, 409);
+    }
+
     await softDeleteWebinarRow(db, row.id, now.toISOString());
 
     await recordAudit(db, {
@@ -666,10 +686,87 @@ export async function deleteWebinar(input: { expectedUpdatedAt?: string; id: str
       entityType: "webinar",
       metadata: { kind: row.kind, status: row.status }
     });
-    // So a lista: a pagina do rascunho excluido nao existe mais (a tela volta para a lista).
+    // So a lista: a pagina do webinario excluido nao existe mais (a tela volta para a lista).
     revalidatePath(LIST_PATH);
 
     return { id: row.id };
+  });
+}
+
+/**
+ * [messaging.publish] Arquiva o webinario encerrado ou cancelado (docs/30 §2.3; decisao do produtor de 10/11/2026, no
+ * modelo do Demio): ele sai da lista (fica no filtro Arquivado) e da area do aluno (a pagina, a sala e o replay so
+ * abrem para o publicado), e arquivar nao apaga nada: o relatorio, os paineis e o historico continuam. A guarda segue
+ * (prune_webinar_history, docs/30 §4.5): o chat original sai quando o webinario passa chat_retention_days arquivado.
+ * Desarquivar devolve o que a guarda ainda nao apagou. A situacao e a da lista (sem as sessoes jit), e o encerrado que
+ * ainda atende pelo "Comeca quando voce entra" nao se arquiva.
+ */
+export async function archiveWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; situation: "archived"; updatedAt: string }>> {
+  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await requireWebinarRow(db, data.id);
+    const webinar = webinarFromRow(row);
+    const sessionRows = await listSessionRows(db, [row.id]);
+    // A mesma conta da lista e do editor (queries.ts): sem as sessoes do "Comeca quando voce entra".
+    const situation = webinarSituation(webinar, sessionRows.filter((sessionRow) => !isJitSession(sessionRow)).map(sessionFromRow), now.getTime());
+
+    if (row.status !== "published" || (situation !== "ended" && situation !== "cancelled")) {
+      throw new WebinarError(ONLY_FINISHED_ARCHIVES, 409);
+    }
+
+    // O encerrado que ainda atende pelo "Comeca quando voce entra" (ligado, ou com uma sessao dele em aberto, que o tick
+    // deixaria presa: ele so mexe no publicado) nao se arquiva. O cancelado ja teve as sessoes canceladas no Cancelar.
+    if (situation === "ended") {
+      const jitOpen = sessionRows.some((sessionRow) => isJitSession(sessionRow) && (sessionRow.status === "scheduled" || sessionRow.status === "waiting" || sessionRow.status === "live"));
+
+      if (jitOpen || jitActive(webinar.kind, await jitSettingsFor(db, row.id, webinar.kind))) {
+        throw new WebinarError(JIT_BLOCKS_ARCHIVE, 422);
+      }
+    }
+
+    assertSameVersion(row, data.expectedUpdatedAt);
+    const saved = await updateWebinarRow(db, row.id, { status: "archived" }, { expectedStatuses: ["published"], expectedUpdatedAt: row.updated_at });
+
+    await recordAudit(db, {
+      action: "webinar.archived",
+      actorId: user.id,
+      entityId: row.id,
+      entityType: "webinar",
+      metadata: { kind: row.kind, situation }
+    });
+    revalidateWebinars(row.id);
+
+    return { id: saved.id, situation: "archived", updatedAt: saved.updated_at };
+  });
+}
+
+/** [messaging.publish] Desarquiva: o webinario volta a ser publicado (encerrado ou cancelado, como era) e a lista o mostra de novo. */
+export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; situation: WebinarSituation; updatedAt: string }>> {
+  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await requireWebinarRow(db, data.id);
+
+    if (row.status !== "archived") {
+      throw new WebinarError(NOT_ARCHIVED_MESSAGE, 409);
+    }
+
+    assertSameVersion(row, data.expectedUpdatedAt);
+    const saved = await updateWebinarRow(db, row.id, { status: "published" }, { expectedStatuses: ["archived"], expectedUpdatedAt: row.updated_at });
+    // A situacao como a lista e o editor a contam: sem as sessoes do "Comeca quando voce entra".
+    const sessions = (await listSessionRows(db, [row.id])).filter((sessionRow) => !isJitSession(sessionRow)).map(sessionFromRow);
+
+    await recordAudit(db, {
+      action: "webinar.unarchived",
+      actorId: user.id,
+      entityId: row.id,
+      entityType: "webinar",
+      metadata: { kind: row.kind }
+    });
+    revalidateWebinars(row.id);
+
+    return { id: saved.id, situation: webinarSituation(webinarFromRow(saved), sessions, now.getTime()), updatedAt: saved.updated_at };
   });
 }
 
@@ -686,6 +783,7 @@ export async function rescheduleSession(input: { scheduledAt: string; sessionId:
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(row);
     const session = await fetchSessionRow(db, data.sessionId);
 
     if (!session || session.webinar_id !== row.id) {

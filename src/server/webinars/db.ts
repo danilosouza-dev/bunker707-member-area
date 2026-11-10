@@ -26,9 +26,14 @@ export type WebinarsDb = SupabaseClient;
  * a linha do chat do co-apresentador falha (23514 no check antigo, que chega a ele como o erro comum da acao, sem o
  * aviso de migracao pendente): a mensagem nao entra e, na resposta escrita, a pergunta ja ficou respondida antes do
  * insert, sem a linha no chat, sem o aviso no sino e sem a auditoria; o resto le e grava como antes. Cada parte da fase 4 tem a propria constante abaixo, para o
- * aviso de migracao pendente apontar a certa onde so aquela parte falta.
+ * aviso de migracao pendente apontar a certa onde so aquela parte falta. O fio das Perguntas (docs/30 §1.3,
+ * 10/11/2026) vem depois: a 202611100001 cria webinar_question_replies e e a mais nova, entao o aviso a aponta (aplicar
+ * ate ela inclui todas as de antes; docs/21 §9.12). Sem ela, as perguntas seguem como antes (so a primeira resposta): o
+ * fio le vazio (chat-store.listQuestionReplyRows) e so escrever nele falha, antes de gravar qualquer coisa (a contagem
+ * do fio sem numero vira PendingMigrationError em chat-store.countQuestionReplyRows): a equipe recebe 409 com a frase da
+ * migracao (room-actions.withReplyTable, ao responder e ao apagar); o aluno, o erro comum da rota, sem numero de migracao.
  */
-export const WEBINARS_MIGRATION = "202611010001";
+export const WEBINARS_MIGRATION = "202611100001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -83,4 +88,6 @@ export function isMissingWebinarSchema(error: unknown) {
 }
 
 export const WEBINAR_MISSING_MESSAGE = "Esse webinário não existe mais.";
+/** O arquivado fica so de leitura (docs/30 §2.3): toda escrita do webinario pede o Desarquivar antes. */
+export const WEBINAR_ARCHIVED_MESSAGE = "Esse webinário está arquivado. Desarquive para mexer nele.";
 export const WEBINAR_CHANGED_MESSAGE = "Esse webinário mudou em outra tela. Recarregue a página e tente de novo.";

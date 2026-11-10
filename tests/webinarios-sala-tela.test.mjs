@@ -5,10 +5,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // A Sala desenhada (docs/30 §1.3 adaptado a §1.6, §1.7, §8.5 e §9; docs/18 §2.2): os pedacos desenhados no Node,
-// sem navegador. O cabecalho V2 no estilo do YouTube (docs/31 V2-3: 64 px a partir de lg, o titulo, a linha que comeca
-// por "{n} assistindo agora" com a data, a duracao e quem apresenta, o tema sem contorno e o Sair em pilula vermelha;
-// Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
-// decisao da equipe, senao "Sessao das 20:00"; Replay; quem apresenta), o palco nos estados (espera com a contagem,
+// sem navegador. O cabecalho V2 no estilo do YouTube (docs/31 V2-3: 64 px a partir de lg, o titulo, a linha com a
+// data, a duracao e quem apresenta, sem o numero de quem assiste, o tema sem contorno e o Sair em pilula vermelha), os
+// selos do palco da gravada (V2-4: "Ao vivo" so com a decisao da equipe, senao "Sessao das 20:00"; Replay; quem
+// apresenta; e, ao lado do selo do momento, o selo de quem assiste agora, docs/31 §11.5), o palco nos estados (espera com a contagem,
 // no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (no
 // estilo do YouTube, o comentario: o avatar de 24, o nome, o selo tonal do papel e o tempo relativo, a minha com "Você"
 // sem inverter, a pendente "Aguardando a equipe" na linha de acoes, a fixada no bloco do topo, o ⋮ no cabecalho do
@@ -55,13 +55,12 @@ const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", i
 /** A mensagem da Live ao vivo, com a hora que o servidor gravou (sentAt): a live das 20:00 mais o offset dado. */
 const naLive = (id, offsetMs, extra = {}) => msg(id, { offsetMs, sentAt: new Date(T0 + offsetMs).toISOString(), ...extra });
 
-/** As props do cabecalho V2 (V2-3), como a sala monta: a linha do computador (roomMetaLine) e a do celular ja junta. */
+/** As props do cabecalho V2 (V2-3), como a sala monta: a linha do computador (roomDateLine, ja junta) e a do celular. */
 const HEADER = {
-  metaLine: { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] },
-  mobileLine: "3 assistindo agora · com Danilo Souza",
+  metaLine: "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza",
+  mobileLine: "com Danilo Souza",
   onLeave: noop,
   onToggleTheme: noop,
-  presentNow: 3,
   theme: "dark",
   title: "Aula de IA"
 };
@@ -69,7 +68,7 @@ const HEADER = {
 const buttonNames = (html) =>
   [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => attrs.match(/aria-label="([^"]+)"/)?.[1] ?? inner.replace(/<[^>]+>/g, "").trim());
 
-test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha que comeca por '3 assistindo agora', o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
+test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha da data sem o numero de quem assiste (docs/31 §11.5), o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
   const html = render(header.RoomHeader, HEADER);
   const casca = (html.match(/<header class="([^"]*)">/)?.[1] ?? "").split(" ");
   assert.ok(casca.includes("h-14") && casca.includes("lg:h-16"), `56 px no celular, 64 a partir de lg: ${casca.join(" ")}`);
@@ -80,17 +79,14 @@ test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 2
     assert.ok(titulo.includes(classe), `${classe} no titulo: ${titulo.join(" ")}`);
   }
   assert.ok(!titulo.includes("font-extrabold") && !titulo.some((nome) => nome.startsWith("lg:text-[")), "sem o 22/800 de antes");
-  // A linha do computador: o numero primeiro, marcado para o e2e, e depois a data, a hora, a duracao e quem apresenta.
-  assert.match(
-    html,
-    /<p class="hidden [^"]*lg:block" data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/,
-    "a linha do computador comeca pelo numero"
-  );
+  // A linha do computador: a data, a hora, a duracao e quem apresenta. O numero de quem assiste saiu dela (docs/31
+  // §11.5: virou selo do palco, ao lado do selo do momento).
+  assert.match(html, /<p class="hidden [^"]*lg:block" data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "a linha do computador e so a data");
   const meta = (html.match(/<p class="([^"]*)" data-room-line="meta">/)?.[1] ?? "").split(" ");
   assert.ok(["text-sm", "font-medium", "leading-5", "text-room-fg-subtle", "truncate"].every((classe) => meta.includes(classe)), `14/20 peso 500, com reticencias: ${meta.join(" ")}`);
-  const celular = (html.match(/<p class="([^"]*)" data-testid="room-mobile-line">3 assistindo agora · com Danilo Souza<\/p>/)?.[1] ?? "").split(" ");
+  const celular = (html.match(/<p class="([^"]*)" data-testid="room-mobile-line">com Danilo Souza<\/p>/)?.[1] ?? "").split(" ");
   assert.ok(["text-xs", "leading-4", "font-medium", "lg:hidden"].every((classe) => celular.includes(classe)), `a linha do celular em 12/16 abaixo de lg: ${celular.join(" ")}`);
-  assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, dentro da linha (o canto direito saiu)");
+  assert.doesNotMatch(html, /room-present|assistindo/, "o numero de quem assiste nao fica mais no cabecalho");
   assert.doesNotMatch(html, /bg-room-divider|lucide-users/, "sem o traco e sem o icone de pessoas no cabecalho");
   // O Sair antes do tema, com a barra e sem ela: o tema e sempre o ultimo (a partir de lg, sobre o trilho, tambem sem a
   // barra, quando o Sair do cabecalho fica em toda largura), e o fim da sessao nao troca os dois de lugar.
@@ -99,41 +95,67 @@ test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 2
   assert.match(html, /<span class="relative hidden sm:inline-flex"><button aria-label="Tema claro"/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18), sem deixar um vao vazio");
   assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
-  // Replay e sessao encerrada: a sala passa o contador nulo; a linha comeca na data (no Replay, na duracao).
-  const replay = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: ["60 min", "com Danilo Souza"] }, mobileLine: "com Danilo Souza", presentNow: null });
-  assert.doesNotMatch(replay, /assistindo|room-present/, "o replay nao tem contador");
-  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "sem o numero, a linha comeca na duracao");
-  // O contador nulo tira o numero da linha mesmo que ela o traga.
-  assert.doesNotMatch(render(header.RoomHeader, { ...HEADER, presentNow: null }), /room-present|assistindo agora<\/span>/);
-  // So o numero, sem data: sem o separador sozinho no fim.
-  assert.match(render(header.RoomHeader, { ...HEADER, metaLine: { present: "1 assistindo agora", rest: [] }, presentNow: 1 }), /data-room-line="meta"><span data-testid="room-present">1 assistindo agora<\/span><\/p>/);
+  // No Replay a linha comeca na duracao (sem data e sem hora).
+  const replay = render(header.RoomHeader, { ...HEADER, metaLine: "60 min · com Danilo Souza" });
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/);
   // Sem linha (nada a dizer), o paragrafo nao entra.
-  const vazio = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: [] }, mobileLine: "", presentNow: null });
+  const vazio = render(header.RoomHeader, { ...HEADER, metaLine: "", mobileLine: "" });
   assert.doesNotMatch(vazio, /data-room-line="meta"|room-mobile-line/);
 });
 
-test("a sala gravada monta o cabecalho V2 com os dados dela: o numero primeiro, a data e a hora de Sao Paulo, a duracao e quem apresenta; no Replay, sem data, sem hora e sem contador", () => {
+test("a sala gravada monta o cabecalho V2 com os dados dela: a data e a hora de Sao Paulo, a duracao e quem apresenta, sem o numero de quem assiste; no Replay, sem data e sem hora", () => {
   // A sessao marcada para as 20:00 de Sao Paulo (T0), no ar ha 2 min.
   const noAr = (extra = {}, sessionExtra = {}) => payload(extra, { offsetMs: 120_000, scheduledAt: new Date(T0).toISOString(), ...sessionExtra });
   const props = { coverUrl: null, payload: noAr(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
   const cabecalho = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
   const gravada = cabecalho(render(room.WebinarRoom, props));
-  assert.match(gravada, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
-  assert.match(gravada, /data-testid="room-mobile-line">2 assistindo agora · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
   assert.doesNotMatch(gravada, /Ao vivo|Sessão das/, "o selo do momento fica no palco");
+  assert.doesNotMatch(gravada, /assistindo|room-present/, "o numero de quem assiste fica no palco (docs/31 §11.5)");
 
   const semApresentador = cabecalho(render(room.WebinarRoom, { ...props, presenterName: null }));
-  assert.match(semApresentador, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
-  assert.match(semApresentador, /data-testid="room-mobile-line">2 assistindo agora<\/p>/);
+  assert.match(semApresentador, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
+  assert.doesNotMatch(semApresentador, /room-mobile-line/, "sem apresentador, a linha do celular sai");
 
   const replay = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
-  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "no replay sem o numero, sem data e sem hora: a linha comeca em 60 min");
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "no replay sem data e sem hora: a linha comeca em 60 min");
   assert.match(replay, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
-  assert.doesNotMatch(replay, /assistindo/, "o replay nao tem contador");
 
   const encerrada = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { roomPhase: "ended", status: "ended" }) }));
-  assert.doesNotMatch(encerrada, /assistindo/, "encerrada, sem contador");
-  assert.match(encerrada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "encerrada, a linha comeca na data");
+  assert.match(encerrada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+});
+
+test("o selo de quem assiste agora fica no palco, ao lado do selo do momento (docs/31 §11.5): o icone de pessoas e o numero, com a frase inteira no title e para o leitor de tela; some no Replay e com a sessao encerrada", () => {
+  const props = { coverUrl: null, payload: payload(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
+  const caixa = (html) => {
+    const inicio = html.indexOf('data-room-slot="stage-box"');
+    return html.slice(inicio, html.indexOf('data-room-slot="bubbles"', inicio));
+  };
+  const selo = (html) => html.match(/<span class="([^"]*)" data-testid="room-present" title="([^"]*)">([\s\S]*?)<\/span><\/span>/);
+
+  // Com o "Ao vivo" ligado pela equipe (D10): logo depois do selo vermelho, na mesma fileira de cima a esquerda.
+  const aoVivo = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: true }) }));
+  assert.match(aoVivo, /data-testid="room-on-air">[\s\S]*?<\/span><\/span><span class="[^"]*" data-testid="room-present"/, "o numero vem logo depois do Ao vivo");
+  const [, classes, titulo, dentro] = selo(aoVivo) ?? [];
+  assert.equal(titulo, "2 assistindo agora", "a frase inteira no title");
+  assert.ok((classes ?? "").split(" ").includes("pointer-events-none") && (classes ?? "").includes("bg-black/60") && (classes ?? "").split(" ").includes("tabular-nums"), `a pilula neutra sobre o video, sem receber o toque: ${classes}`);
+  assert.match(dentro ?? "", /^<svg[^>]*lucide-users[^>]*aria-hidden="true"[\s\S]*?<\/svg><span aria-hidden="true">2<\/span><span class="sr-only">2 assistindo agora$/, "o icone de pessoas, o numero para quem ve e a frase para o leitor de tela");
+  assert.equal((aoVivo.match(/data-testid="room-present"/g) ?? []).length, 1, "uma vez so");
+
+  // Sem a decisao da equipe ("Sessão das 19:58"), o numero tambem vem ao lado do selo do momento.
+  const sessao = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: false }) }));
+  assert.match(sessao, /Sessão das 19:58 · <span class="tabular-nums">[0-9:]+<\/span><\/span><span class="[^"]*" data-testid="room-present" title="2 assistindo agora">/);
+
+  // O numero somado da Simulacao e o milhar como no Brasil saem do mesmo selo (roomPresentBadge).
+  const cheia = caixa(render(room.WebinarRoom, { ...props, payload: payload({ presentNow: 1234 }, { showLiveBadge: true }) }));
+  assert.match(cheia, /data-testid="room-present" title="1\.234 assistindo agora">[\s\S]*?<span aria-hidden="true">1\.234<\/span>/);
+
+  // Replay e sessao encerrada: sem contador (a encerrada nem tem selos no palco).
+  const replay = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
+  assert.doesNotMatch(replay, /room-present|assistindo/, "o replay nao tem contador");
+  const encerrada = render(room.WebinarRoom, { ...props, payload: payload({}, { roomPhase: "ended", status: "ended" }) });
+  assert.doesNotMatch(encerrada, /room-present|assistindo/, "encerrada, sem contador");
 });
 
 test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay sem selo embaixo; quem apresenta embaixo a esquerda", () => {
@@ -300,34 +322,32 @@ test("cabecalho no tema claro (V2-3, opcao C): a logo padrao fica preta (brightn
     assert.ok(!classes(escuro).includes("brightness-0"), `no escuro, ${logoImage} sem filtro`);
   }
 
-  // O numero saiu do canto e foi para o comeco da linha de baixo do titulo: nenhum traco entre ele e o tema, com ou sem
-  // o contador, nos dois temas.
+  // O numero de quem assiste saiu do cabecalho (docs/31 §11.5): nenhum contador e nenhum traco antes do tema, nos dois
+  // temas.
   for (const theme of ["dark", "light"]) {
-    const comContador = comMarca({ logoImage: LOGO }, { theme });
-    assert.match(comContador, /data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span>/, `${theme}: o numero na linha`);
-    assert.doesNotMatch(comContador, /bg-room-divider/, `${theme}: sem o traco`);
-    const semContador = comMarca({ logoImage: LOGO }, { presentNow: null, theme });
-    assert.doesNotMatch(semContador, /room-present/);
-    assert.doesNotMatch(semContador, /bg-room-divider/, `${theme}: sem o contador, tambem sem traco`);
+    const cabecalho = comMarca({ logoImage: LOGO }, { theme });
+    assert.match(cabecalho, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, `${theme}: a linha da data`);
+    assert.doesNotMatch(cabecalho, /room-present|bg-room-divider/, `${theme}: sem o contador e sem o traco`);
   }
 });
 
-test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat, a pergunta e o apelido do aceite", () => {
+test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat e a pergunta; o aceite nao tem mais campo (sem apelido, D64)", () => {
   const questions = renderToStaticMarkup(
-    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+    createElement(questionsModule.RoomQuestionsTab, { consented: true, enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
-  const apelido = render(chat.RoomConsentBox, { defaultDisplayMode: "nickname", onAccept: noop, onCancel: noop });
+  // O aceite nao tem mais o campo do apelido (D64): nenhum campo de texto que o iPhone pudesse ampliar.
+  const aceite = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop });
+  assert.doesNotMatch(aceite, /<input|<textarea|Apelido|apelido/);
   // O campo do YouTube (Y11) no chat e nas Perguntas da sala: 16/22 abaixo de lg e 14/20 a partir de lg.
-  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, defaultDisplayMode: "first_name_initial", displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
+  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
   const perguntasDaSala = renderToStaticMarkup(
-    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+    createElement(questionsModule.RoomQuestionsTab, { consented: true, enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
   const classes = (tag) => (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
   for (const [nome, tag] of [
     ["o chat", campoDoChat.match(/<textarea aria-label="Escreva uma mensagem"[^>]*>/)?.[0] ?? ""],
     ["a pergunta da sala", perguntasDaSala.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
-    ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
-    ["o apelido", apelido.match(/<input aria-label="Apelido"[^>]*>/)?.[0] ?? apelido.match(/<input[^>]*placeholder="[^"]*"[^>]*>/)?.[0] ?? ""]
+    ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""]
   ]) {
     const lista = classes(tag);
     assert.ok(lista.includes("text-base") && lista.includes("lg:text-sm"), `${nome}: ${lista.join(" ")}`);
@@ -400,7 +420,6 @@ test("o chat da sala e o comentario do YouTube (V2-9 trocado): o avatar de 24, o
   const base = {
     chatMode: "open",
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
     messages: [
@@ -512,7 +531,6 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   const base = {
     chatMode: "open",
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
     messages: [msg("1", { displayName: "Bia C." }), msg("2", { displayName: "Equipe", role: "team" }), msg("5", { mine: true, pending: true })],
@@ -606,34 +624,41 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   assert.match(empty, /aria-live="polite"/, "com uma mensagem por vez, cada uma e lida");
 });
 
-test("o aceite (§8.5): o texto palavra por palavra, como o nome aparece, Entendi e quero participar e Participar como anonimo", () => {
-  const html = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop });
+test("o aceite (§8.5 e D64): o texto palavra por palavra, Entendi e quero participar e Cancelar; sem radio, sem campo de apelido e sem anonimo", () => {
+  const html = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop });
   assert.ok(html.includes(WEBINAR_COPY.sala.consentimento));
   assert.match(html, /Entendi e quero participar/);
-  assert.match(html, /Participar como anônimo/);
-  assert.match(html, /Como você aparece no chat/);
-  assert.match(html, /Primeiro nome e inicial/);
-  assert.match(html, /Apelido/);
   assert.match(html, /role="group"/);
-  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca, tonal e de texto; os radios ficam.
+  // D64 (10/11/2026): ninguem participa como anonimo nem com apelido. Nao ha escolha de como aparecer.
+  assert.doesNotMatch(html, /an[oô]nim/i, "nenhum botao nem frase de anonimo");
+  assert.doesNotMatch(html, /Apelido|apelido|Como você aparece|Primeiro nome e inicial/);
+  assert.doesNotMatch(html, /<input|<fieldset|<legend|type="radio"|type="text"|<textarea/, "sem radio e sem campo de texto");
+  assert.equal((html.match(/<button/g) ?? []).length, 2, "dois botoes: aceitar e cancelar");
+  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca e de texto.
   const cartao = html.match(/^<div class="([^"]*)" data-testid="room-consent" role="group"/);
   assert.ok(cartao, "o cartao do aceite");
   assert.deepEqual(temTodasAs(cartao[1], ["rounded-[12px]", "bg-room-control", "p-4"]), []);
   const pilula = (nome) => html.match(new RegExp(`<button class="([^"]*)" type="button">${nome}</button>`))?.[1] ?? "";
   assert.deepEqual(temTodasAs(pilula("Entendi e quero participar"), ["h-10", "rounded-full", "bg-room-active-bg", "text-room-active-fg"]), []);
-  assert.deepEqual(temTodasAs(pilula("Participar como anônimo"), ["h-10", "rounded-full", "bg-room-control", "text-room-fg"]), []);
   assert.deepEqual(temTodasAs(pilula("Cancelar"), ["h-10", "rounded-full", "bg-transparent", "text-room-fg"]), []);
-  assert.equal((html.match(/type="radio"/g) ?? []).length, 2, "os dois radios de como o nome aparece");
   // Na gaveta do vertical (classic), a faixa e os botoes de antes.
-  const classico = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop, variant: "classic" });
+  const classico = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop, variant: "classic" });
   assert.match(classico, /^<div class="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group"/);
   assert.doesNotMatch(classico, /rounded-full|rounded-\[12px\]/, "sem o cartao e sem as pilulas");
-  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 3, "os tres botoes de antes");
-  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto e os radios iguais nos dois");
+  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 2, "os dois botoes de antes: aceitar e cancelar");
+  assert.equal((classico.match(/<button/g) ?? []).length, 2);
+  assert.doesNotMatch(classico, /an[oô]nim|Apelido|<input|type="radio"/i);
+  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto igual nos dois");
   assert.equal(
     WEBINAR_COPY.sala.consentimento,
-    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
+    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome com a inicial do sobrenome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
   );
+  // As frases que so serviam a escolha sairam do arquivo de frases; o texto da Privacidade nao fala mais de apelido.
+  for (const chave of ["participarComoAnonimo", "responderComo", "apelidoPlaceholder", "comoAparece"]) {
+    assert.ok(!(chave in WEBINAR_COPY.sala), `WEBINAR_COPY.sala.${chave} saiu`);
+  }
+  assert.doesNotMatch(WEBINAR_COPY.privacidade.texto, /apelido/i);
+  assert.match(WEBINAR_COPY.privacidade.texto, /com o seu primeiro nome e a inicial do sobrenome\.$/);
 });
 
 test("reacoes: seis botoes de 44 px com nome acessivel, as bolhas nunca anunciadas, o contador do excesso", () => {
@@ -699,7 +724,7 @@ test("o Sair do cabecalho em pilula S vermelha (32 px, o toque de 44 abaixo de l
 
 function payload(extra = {}, sessionExtra = {}) {
   return {
-    me: { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null },
+    me: { calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null },
     pinned: null,
     polls: [],
     presentNow: 2,
@@ -770,7 +795,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
 
   const withPoll = render(room.WebinarRoom, {
     coverUrl: null,
-    payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }),
+    payload: payload({ polls: [{ id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }),
     readOnly: false,
     webinarHref: "/x"
   });
@@ -785,7 +810,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
   // So uma enquete encerrada com o resultado: sem a aba (o resultado aparece no palco, V2-10).
   const encerrada = render(room.WebinarRoom, {
     coverUrl: null,
-    payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: ["o1"], options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: { counts: { o1: 3 }, total: 3 }, status: "closed" }] }),
+    payload: payload({ polls: [{ id: "p1", kind: "single", myOptionIds: ["o1"], options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: { counts: { o1: 3 }, total: 3 }, status: "closed" }] }),
     readOnly: false,
     webinarHref: "/x"
   });
@@ -805,7 +830,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
 });
 
 /** Uma enquete do aluno (aberta, resposta unica, com duas opcoes). */
-const enquete = (extra = {}) => ({ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }, { id: "o2", label: "Ainda não" }], question: "Gostou?", results: null, status: "open", ...extra });
+const enquete = (extra = {}) => ({ id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }, { id: "o2", label: "Ainda não" }], question: "Gostou?", results: null, status: "open", ...extra });
 const camada = (props) => render(pollLayer.RoomPollLayer, { onAnswer: async () => undefined, onLater: noop, onSeen: noop, readOnly: false, ...props });
 
 test("a enquete no meio do palco (V2-10): o rotulo pelo tipo, a pergunta em h2, opcoes de 48 px, Responder depois e Enviar resposta; um dialogo sem aria-modal que nao pega o foco e se anuncia", () => {

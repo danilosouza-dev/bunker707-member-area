@@ -34,3 +34,6 @@ tests/e2e/.auth/
 # Python (scripts de infra)
 __pycache__/
 *.pyc
+
+# Worktrees e arquivos locais de agentes (fora do tsconfig, do eslint e do .dockerignore tambem)
+.claude/

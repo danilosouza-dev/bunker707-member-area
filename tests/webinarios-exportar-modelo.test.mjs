@@ -261,12 +261,14 @@ const pergunta = (extra) => ({
   ...extra
 });
 
-test("Q&A: Nº na ordem de chegada, minuto do video, 'Aluno {n}' e e-mail vazio na anonima, situacao, quem respondeu (Assistente, nome da equipe ou Equipe), ao vivo", () => {
+test("Q&A: Nº na ordem de chegada, minuto do video, nome e e-mail de quem perguntou (legado: 'Aluno {n}' e e-mail vazio so na anonima de antes de 10/11/2026), situacao, quem respondeu (Assistente, nome da equipe ou Equipe), ao vivo", () => {
   const rows = model.qaExportRows({
     people,
     questions: [
       pergunta({ answerSource: "ai", answerText: "Sim, pelo app.", answeredAt: "2026-11-05T23:12:00+00:00", body: "Funciona no celular?", createdAt: "2026-11-05T23:11:00+00:00", offsetMs: 660_500, status: "answered", upvotes: 3 }),
+      // Legado: uma pergunta gravada como anonima antes de 10/11/2026 (D64); as novas saem com nome e e-mail.
       pergunta({ anonymous: true, body: "Tem certificado?", createdAt: "2026-11-05T23:05:00.000Z", offsetMs: 300_000, userId: ALUNO }),
+      pergunta({ body: "E a apostila?", createdAt: "2026-11-05T23:17:00.000Z", offsetMs: 1_020_000, userId: ALUNO }),
       pergunta({ answerText: "Fica 7 dias.", answeredAt: "2026-11-05T23:20:00.000Z", answeredBy: EQUIPE, answeredLive: true, body: "Vai ter replay?", createdAt: "2026-11-05T23:15:00.000Z", status: "answered" }),
       pergunta({ answeredBy: "sem-perfil", body: "Spam", createdAt: "2026-11-05T23:16:00.000Z", status: "dismissed" }),
       pergunta({ body: "Antes de comecar", createdAt: "2026-11-05T22:59:00.000Z", offsetMs: -45_000, status: "answered" })
@@ -280,7 +282,10 @@ test("Q&A: Nº na ordem de chegada, minuto do video, 'Aluno {n}' e e-mail vazio 
   assert.deepEqual(rows[3].slice(7, 12), ["Respondida", "Carla Produtora", "Fica 7 dias.", "Sim", "05/11/2026 às 20:20"]);
   assert.deepEqual(rows[4].slice(7, 9), ["Dispensada", "Equipe"]);
   assert.equal(rows[1][3], "Aluno 451", "o mesmo numero que o chat mostra para esse aluno nesse webinario");
-  assert.ok(!rows.flat().includes("bruno@exemplo.test"), "o e-mail da anonima nunca sai");
+  assert.equal(rows[1][4], "", "o e-mail da anonima antiga nunca sai");
+  // A pergunta nova do mesmo aluno (anonymous falso, como toda pergunta desde o D64) sai com o nome e o e-mail dele.
+  assert.deepEqual(rows[5].slice(3, 6), ["Bruno Lima", "bruno@exemplo.test", "E a apostila?"]);
+  assert.equal(rows.length, 6);
 });
 
 const enquete = (extra) => ({
@@ -305,7 +310,7 @@ const enquete = (extra) => ({
   ...extra
 });
 
-test("Poll: uma linha por resposta, a enquete numerada, multipla com ';' na ordem das opcoes, anonima sem nome e e-mail; Survey a parte e vazio so com o cabecalho (A20)", () => {
+test("Poll: uma linha por resposta, a enquete numerada, multipla com ';' na ordem das opcoes, com nome e e-mail (legado: a anonima de antes de 10/11/2026 sem nome e e-mail); Survey a parte e vazio so com o cabecalho (A20)", () => {
   const polls = [enquete({ id: "p2", kind: "multiple", position: 1, question: "O que voce usa?" }), enquete({ anonymous: true, id: "p1" }), enquete({ id: "s1", kind: "survey", position: 2, question: "Nota da live?" })];
   const answers = [
     { createdAt: "2026-11-05T23:21:00.000Z", offsetMs: 1_260_000, optionIds: ["o3", "o1"], pollId: "p2", userId: ALUNA },

@@ -1,21 +1,25 @@
 "use client";
 
-import { Mic, Sparkles } from "lucide-react";
+import { Mic, Sparkles, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { RoomElapsed } from "./room-header";
+import type { RoomPresentBadge } from "./room-layout-model";
 
 // Os selos do palco (docs/31 V2-4), por cima do video, no lugar dos selos do cabecalho: em cima a esquerda, o selo do
 // momento ("Ao vivo · 00:42:10" em vermelho na Live ao vivo; na gravada, a regra D10 do docs/30 §1.6: "Ao vivo" so com
 // a decisao da equipe, senao "Sessão das 20:00" com o tempo; "Replay" no Replay; na Live ao vivo antes de comecar, com
-// a sala aberta, "Aguardando o apresentador", como dizia o cabecalho antes do V2) e, ao lado, "Gravando" enquanto o
-// gravador grava; embaixo a esquerda, "{nome} · Apresentador"; embaixo a direita, "Assistente" com o Assistente de IA
+// a sala aberta, "Aguardando o apresentador", como dizia o cabecalho antes do V2), ao lado dele o selo de quem assiste
+// agora (o icone de pessoas e o numero, "1.234"; a frase inteira, "1.234 assistindo agora", no title e para o leitor de
+// tela; docs/31 §11.5: o numero saiu da linha do titulo e some no Replay e com a sessao encerrada) e, por ultimo,
+// "Gravando" enquanto o gravador grava; embaixo a esquerda, "{nome} · Apresentador"; embaixo a direita, "Assistente" com o Assistente de IA
 // ligado, so a partir de lg (no celular o canto e do Modo cinema) e sempre antes da coluna de miniaturas do iframe
 // (--room-video-right, room-layout-model.ts). Pilulas de 32 px (26 px abaixo de lg); no celular o "Ao vivo" fica so com
 // o tempo (a frase inteira no title e para o leitor de tela). Nada aqui recebe o toque: o video por baixo continua
 // clicavel. O "Ao vivo" e o "Gravando" sao iguais nos dois temas (sobre o video); o apresentador e o Assistente usam os
-// tokens --room-on-video-* (docs/31 V2-11). Os data-testid room-on-air e live-recording sao os de antes, no palco.
+// tokens --room-on-video-* (docs/31 V2-11). Os data-testid room-on-air, room-present e live-recording sao os de antes,
+// no palco.
 // O console de quem apresenta (docs/31 V2-13) usa as mesmas pecas e passa o que so ele tem: o selo do momento fora do ar
 // (`label`, neutro como o "waiting"), o papel do selo de baixo ("Você · Co-apresentador") e o canto de cima a direita
 // (os presentes com o pico, antes da coluna de miniaturas). A sala nao passa nada disso, e o HTML dela fica igual.
@@ -37,6 +41,8 @@ export type RoomStageTopLeft =
 export type RoomStageBadgesProps = {
   /** O Assistente de IA ligado na sessao (o estado lido pela sala, useRoomAssistant). */
   assistantOn: boolean;
+  /** Quem assiste agora (roomPresentBadge), ao lado do selo do momento; nulo ou ausente (o console), o selo sai. */
+  present?: RoomPresentBadge | null;
   /** Quem apresenta (a pagina sabe); nulo, o selo de baixo a esquerda sai. */
   presenterName: string | null;
   /** O papel no selo de baixo a esquerda (o console: "Co-apresentador"); sem ele, "Apresentador", como na sala. */
@@ -121,15 +127,22 @@ export function RoomStagePill({ children, className, ...props }: { children: Rea
   );
 }
 
-export function RoomStageBadges({ assistantOn, presenterName, presenterRole, recording, topLeft, topRight }: RoomStageBadgesProps) {
+export function RoomStageBadges({ assistantOn, present = null, presenterName, presenterRole, recording, topLeft, topRight }: RoomStageBadgesProps) {
   const gravando = WEBINAR_COPY.aoVivo.gravando;
   const presenter = presenterName?.trim() ?? "";
 
   return (
     <>
-      {topLeft || recording ? (
+      {topLeft || present || recording ? (
         <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[calc(100%-1rem)] items-center gap-1.5 lg:left-4 lg:top-4 lg:max-w-[calc(100%-2rem)] lg:gap-2" data-room-badges="top">
           {topLeft ? <TopLeft topLeft={topLeft} /> : null}
+          {present ? (
+            <span className={cn(PILL, ON_VIDEO, "tabular-nums")} data-testid="room-present" title={present.label}>
+              <Users aria-hidden="true" />
+              <span aria-hidden="true">{present.count}</span>
+              <span className="sr-only">{present.label}</span>
+            </span>
+          ) : null}
           {recording ? (
             <span className={cn(PILL, ON_VIDEO)} data-testid="live-recording" title={gravando}>
               <span aria-hidden="true" className={cn(DOT, "bg-room-accent motion-safe:animate-pulse")} />

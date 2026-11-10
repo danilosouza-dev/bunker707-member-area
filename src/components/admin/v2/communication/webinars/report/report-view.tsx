@@ -193,6 +193,7 @@ function ReportBody({ absenteesReady, hasReplay, selected, webinarId }: { absent
             polls.map((poll) => (
               <div className="flex min-w-0 flex-col gap-3" key={poll.id}>
                 <ReportSubheading>{poll.question}</ReportSubheading>
+                {/* Legado: enquetes de antes de 10/11/2026 (D64) marcadas como anonimas. */}
                 {poll.anonymous ? <p className="text-xs leading-5 text-[var(--text-tertiary)]">{COPY.anonima}</p> : null}
                 <ReportBars
                   bars={poll.options.map((option) => ({ id: option.id, label: option.label, percent: option.percent, students: option.students, total: option.total }))}

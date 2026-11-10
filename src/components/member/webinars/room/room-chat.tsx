@@ -18,7 +18,7 @@ import {
   type RoomMessage
 } from "@/lib/webinar-room-client";
 import { ASSISTANT_WAIT_MS, assistantRepliesToMe, mentionsAssistant, studentAtAssistantLimit } from "@/server/webinars/assistant-model";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type DisplayNameMode, type SimulatedPhase } from "@/server/webinars/model";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type ChatRole, type SimulatedPhase } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint, type AssistantHintState } from "./assistant/assistant-hint";
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
@@ -37,7 +37,7 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // O painel do chat da Sala (docs/30 §1.3, §1.6, §8.5 e §9): a lista em role="log" (em rajada, o leitor de tela
 // ouve "N mensagens novas" em vez de cada uma), a mensagem fixada no topo, os selos Equipe / Apresentador /
 // Assistente, a pendente do proprio aluno ("Aguardando a equipe"), o aceite na primeira mensagem (o texto de §8.5,
-// palavra por palavra, com "Entendi e quero participar" e "Participar como anonimo", e como o nome aparece), o
+// palavra por palavra, com "Entendi e quero participar" e Cancelar; sem anonimo e sem apelido desde 10/11/2026, D64), o
 // compositor (desligado, so a equipe, modo lento com a contagem) e o menu "..." com Remover minhas mensagens. Na live
 // (fase 3) o campo da lugar a uma frase (`notice`) quando o aluno esta silenciado no chat (ate a hora em Sao Paulo ou
 // ate o fim) ou antes de a sala abrir. Fase 4c (docs/30 §1.6, §6.6 e D24), com `webinarId` e `sessionId`: a dica
@@ -72,10 +72,11 @@ export type RoomChatPanelProps = {
    * nao le de novo; sem ele (a gaveta antiga, os testes), o painel le sozinho como antes.
    */
   assistant?: RoomAssistant;
+  /** A minha foto do perfil (o avatar do campo, depois do aceite); sem ela, as minhas iniciais. */
+  avatarUrl?: string | null;
   busy?: boolean;
   chatMode: ChatMode;
   consented: boolean;
-  defaultDisplayMode: DisplayNameMode;
   displayName: string | null;
   error: string | null;
   messages: readonly RoomMessage[];
@@ -154,7 +155,7 @@ const BUBBLE_COLUMN = "flex min-w-0 max-w-[270px] flex-col gap-1 lg:max-w-[230px
 
 export type RoomChatBubbleProps = {
   footer?: ReactNode;
-  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role">;
+  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role"> & { avatarUrl?: string | null };
   /**
    * O console: o que entra na linha de baixo depois da hora (Fixada, as acoes da mensagem). Com ele, a linha e um <div>
    * (os botoes e o menu nao cabem num <p>) e o item ganha o `group` e o `relative` (as acoes aparecem com o mouse ou o
@@ -191,7 +192,7 @@ export function RoomChatBubble({ footer = null, message, metaActions = null, pen
 
   return (
     <li className={cn("flex items-end gap-2", mine ? "flex-row-reverse" : undefined, metaActions ? "group relative" : undefined)} data-mine={mine ? "" : undefined} data-room-message={message.id}>
-      <MemberAvatar name={message.displayName} size="xs" />
+      <MemberAvatar imageSrc={message.avatarUrl} name={message.displayName} size="xs" />
       <div className={cn(widthClassName ? cn("flex min-w-0 flex-col gap-1", widthClassName) : BUBBLE_COLUMN, mine ? "items-end" : "items-start")}>
         <p
           className={cn(
@@ -280,7 +281,7 @@ function RoomChatComment({ actions = null, as = "li", headline = null, message, 
     <RoomComment
       actions={actions}
       as={as}
-      avatar={<RoomCommentAvatar kind={author.avatar} name={message.displayName} />}
+      avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={author.avatar} name={message.displayName} />}
       body={<CommentBody body={message.body} />}
       headline={headline}
       id={message.id}
@@ -358,34 +359,16 @@ export function RoomChatMoreButton({ onRemove, readOnly = false }: { onRemove: (
 /** O id do menu ⋮ do Chat (o aria-controls do botao do cabecalho). */
 export const CHAT_MORE_MENU_ID = "room-chat-more";
 
-export type ConsentChoice = { displayMode: DisplayNameMode; nickname: string };
-
 /**
- * O aceite (docs/30 §8.5): o texto exato, como o nome aparece e os dois botoes. Na sala no estilo do YouTube (`card`, o
- * padrao; spec §9.4), um cartao de raio 12 com as pilulas (a branca, a tonal e a de texto); na gaveta do vertical
- * (`classic`), a faixa e os botoes de antes.
+ * O aceite (docs/30 §8.5): o texto exato e os dois botoes, "Entendi e quero participar" e Cancelar. Desde 10/11/2026
+ * (D64) nao ha escolha de como aparecer: todo aluno aparece com o primeiro nome e a inicial do sobrenome, sem apelido e
+ * sem anonimo. Na sala no estilo do YouTube (`card`, o padrao; spec §9.4), um cartao de raio 12 com as pilulas (a
+ * branca e a de texto); na gaveta do vertical (`classic`), a faixa e os botoes de antes.
  */
-export function RoomConsentBox({
-  busy,
-  defaultDisplayMode,
-  onAccept,
-  onCancel,
-  variant = "card"
-}: {
-  busy?: boolean;
-  defaultDisplayMode: DisplayNameMode;
-  onAccept: (choice: ConsentChoice) => void;
-  onCancel: () => void;
-  variant?: "card" | "classic";
-}) {
+export function RoomConsentBox({ busy, onAccept, onCancel, variant = "card" }: { busy?: boolean; onAccept: () => void; onCancel: () => void; variant?: "card" | "classic" }) {
   const copy = WEBINAR_COPY.sala;
   const id = useId();
-  const [mode, setMode] = useState<DisplayNameMode>(defaultDisplayMode === "anonymous" ? "first_name_initial" : defaultDisplayMode);
-  const [nickname, setNickname] = useState("");
-  const nicknameInvalid = mode === "nickname" && (nickname.trim().length < CHAT_LIMITS.nicknameMin || nickname.trim().length > CHAT_LIMITS.nicknameMax);
   const card = variant === "card";
-  const accept = () => onAccept({ displayMode: mode, nickname: nickname.trim() });
-  const acceptAnonymous = () => onAccept({ displayMode: "anonymous", nickname: "" });
 
   return (
     <div
@@ -397,41 +380,15 @@ export function RoomConsentBox({
       <p className="text-sm leading-6 text-room-fg" id={`${id}-title`}>
         {copy.consentimento}
       </p>
-      <fieldset className="mt-3">
-        <legend className="text-xs font-semibold text-room-fg-subtle">{copy.comoAparece}</legend>
-        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
-          {(["first_name_initial", "nickname"] as const).map((option) => (
-            <label className="inline-flex min-h-8 items-center gap-2 text-room-fg" key={option}>
-              <input checked={mode === option} className="accent-room-active-bg" name={`${id}-mode`} onChange={() => setMode(option)} type="radio" value={option} />
-              {option === "nickname" ? copy.responderComo.apelido : copy.responderComo.nome}
-            </label>
-          ))}
-        </div>
-        {mode === "nickname" ? (
-          <input
-            aria-invalid={nicknameInvalid || undefined}
-            aria-label={copy.responderComo.apelido}
-            className="mt-2 h-10 w-full rounded-[10px] border border-room-input-border bg-room-input-bg px-3 text-base text-room-fg outline-none placeholder:text-room-fg-subtle focus-visible:border-room-fg-subtle lg:text-sm"
-            maxLength={CHAT_LIMITS.nicknameMax}
-            onChange={(event) => setNickname(event.target.value)}
-            placeholder={copy.apelidoPlaceholder}
-            value={nickname}
-          />
-        ) : null}
-      </fieldset>
       {card ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          <RoomPill disabled={busy || nicknameInvalid} label={copy.consentimentoBotao} onClick={accept} tone="white" />
-          <RoomPill disabled={busy} label={copy.participarComoAnonimo} onClick={acceptAnonymous} tone="tonal" />
+          <RoomPill disabled={busy} label={copy.consentimentoBotao} onClick={onAccept} tone="white" />
           <RoomPill disabled={busy} label={WEBINAR_COPY.admin.cancelar} onClick={onCancel} tone="text" />
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
-          <RoomButton disabled={busy || nicknameInvalid} onClick={accept} size="sm" variant="primary">
+          <RoomButton disabled={busy} onClick={onAccept} size="sm" variant="primary">
             {copy.consentimentoBotao}
-          </RoomButton>
-          <RoomButton disabled={busy} onClick={acceptAnonymous} size="sm" variant="secondary">
-            {copy.participarComoAnonimo}
           </RoomButton>
           <RoomButton disabled={busy} onClick={onCancel} size="sm" variant="ghost">
             {WEBINAR_COPY.admin.cancelar}
@@ -475,10 +432,10 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   const {
     aboveComposer = null,
     assistant: sharedAssistant,
+    avatarUrl = null,
     busy = false,
     chatMode,
     consented,
-    defaultDisplayMode,
     displayName,
     error,
     look = "comment",
@@ -710,17 +667,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     consentOpen && !consented && !notice ? (
       <RoomConsentBox
         busy={sending}
-        defaultDisplayMode={defaultDisplayMode}
         variant={look === "comment" ? "card" : "classic"}
-        onAccept={(choice) =>
-          void deliver({
-            anonymous: choice.displayMode === "anonymous",
-            consent: true,
-            consentVersion: CHAT_CONSENT_VERSION,
-            displayMode: choice.displayMode,
-            ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {})
-          })
-        }
+        onAccept={() => void deliver({ consent: true, consentVersion: CHAT_CONSENT_VERSION })}
         onCancel={() => setConsentOpen(false)}
       />
     ) : null;
@@ -792,7 +740,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         ) : (
           <RoomCommentField
             ariaLabel={copy.escreva}
-            avatar={{ name: consented ? displayName : null }}
+            avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? displayName : null }}
             busy={sending}
             disabled={state.disabled || readOnly || busy}
             expanded={expanded}

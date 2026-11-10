@@ -2,11 +2,14 @@
 // A25): as colunas de WEBINAR_COPY.exportar.colunas na ordem de §3.7, uma linha por vaga (Registration), por aluno
 // (Attendee, com a variante da Oferta clicada e o aparelho do webinar_joined; sem pais nem rede, A25), por sessao
 // (Performance: a da sessao ou todas do periodo do painel, com a frase de que a simulacao nao entra), por pergunta
-// (Q&A: "Aluno {n}" e o e-mail vazio na anonima; a resposta do Assistente aparece como "Assistente"), por resposta
-// (Poll e Survey: anonima sem nome nem e-mail; sem pesquisa do fim, so o cabecalho) e por item simulado (Simulacao,
+// (Q&A: nome e e-mail de quem perguntou; a resposta do Assistente aparece como "Assistente"), por resposta
+// (Poll e Survey: nome e e-mail de quem respondeu; sem pesquisa do fim, so o cabecalho) e por item simulado (Simulacao,
 // so a sessao gravada, com a frase da simulacao). Datas em Sao Paulo (formatSaoPauloDateTime), arquivo por toCsv
 // (BOM, ponto e virgula, CRLF, sem formula) e o nome por webinarExportFileName. Tambem: o pedido das rotas (os
 // parametros em portugues, validados por webinarExportSchema), os filtros dos paineis nos enderecos e o menu Exportar.
+//
+// Legado: linhas de antes de 10/11/2026 (D64). A pergunta gravada como anonima continua saindo como "Aluno {n}" com o
+// e-mail vazio, e a enquete gravada como anonima sem nome nem e-mail (a promessa da epoca); nada novo e gravado assim.
 //
 // Sem "server-only", imports relativos: tests/webinarios-exportar-*.test.mjs carregam direto pelo Node. M6: nenhuma
 // linha simulada sai num CSV real; os leitores da Performance nunca tocam nas linhas `sim_*` do painel nem no roteiro
@@ -295,6 +298,7 @@ export function performanceRow(facts: PerformanceFacts): CsvCell[] {
  * ---------------------------------------------------------------------------------------------- */
 
 export type QaQuestionInput = {
+  /** Legado: linhas de antes de 10/11/2026 (D64). */
   anonymous: boolean;
   /** De quem e a resposta (202610300004): "ai" sai como "Assistente"; nulo sem a migracao ou sem resposta. */
   answerSource: AnswerSource | null;
@@ -324,8 +328,9 @@ function answeredByLabel(question: QaQuestionInput, people: Record<string, Repor
 }
 
 /**
- * Nº (na ordem em que chegaram), hora, minuto do video, nome ("Aluno {n}" na anonima, o mesmo numero do chat) e
- * e-mail (vazio na anonima), pergunta, votos, situacao, quem respondeu, a resposta, se foi ao vivo e quando.
+ * Nº (na ordem em que chegaram), hora, minuto do video, nome e e-mail de quem perguntou, pergunta, votos, situacao,
+ * quem respondeu, a resposta, se foi ao vivo e quando. Legado: linhas de antes de 10/11/2026 (D64). Na pergunta gravada
+ * como anonima, "Aluno {n}" (o mesmo numero do chat da epoca) e o e-mail vazio.
  */
 export function qaExportRows(input: { people: Record<string, ReportPerson>; questions: readonly QaQuestionInput[]; webinarId: string }): CsvCell[][] {
   return [...input.questions]
@@ -375,7 +380,10 @@ function answersOf(poll: Poll, answers: readonly PollAnswerInput[]) {
   return answers.filter((answer) => answer.pollId === poll.id).sort((left, right) => byInstant(left.createdAt, right.createdAt));
 }
 
-/** Poll: Enquete (o numero dela na sessao), Pergunta, Nome e E-mail (vazios na anonima), Hora, Minuto do video, Resposta(s). */
+/**
+ * Poll: Enquete (o numero dela na sessao), Pergunta, Nome e E-mail, Hora, Minuto do video, Resposta(s). Legado: linhas
+ * de antes de 10/11/2026 (D64). Na enquete gravada como anonima, Nome e E-mail vazios (aqui e na Survey).
+ */
 export function pollExportRows(input: { answers: readonly PollAnswerInput[]; people: Record<string, ReportPerson>; polls: readonly Poll[] }): CsvCell[][] {
   return orderedPolls(input.polls, false).flatMap((poll, index) =>
     answersOf(poll, input.answers).map((answer) => [

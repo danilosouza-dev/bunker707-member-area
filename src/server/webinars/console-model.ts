@@ -178,10 +178,58 @@ export function pollPercent(counts: PollCounts, optionId: string): number {
 
 const QUESTION_ORDER: Record<WebinarQuestion["status"], number> = { answered: 1, dismissed: 2, open: 0 };
 
-/** O quadro: as abertas primeiro (mais votadas, depois as mais antigas), as respondidas, as dispensadas. */
-export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt" | "status" | "upvotes">>(questions: readonly T[]): T[] {
+/**
+ * A pergunta respondida em que o aluno escreveu por ultimo no fio (docs/30 §2.4; decisao do produtor de 10/11/2026): a
+ * conversa esta com a equipe. Conta junto das abertas no numero da aba e sobe para o topo do quadro, com o selo "Nova
+ * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta).
+ */
+export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): boolean {
+  const last = question.replies?.[question.replies.length - 1];
+  if (question.status !== "answered" || last?.role !== "student") {
+    return false;
+  }
+  // A resposta de cima gravada depois da ultima fala do aluno (o campo de cima no "Falar com a equipe", ou Reabrir e
+  // responder de novo) tambem e a equipe respondendo. Sem hora para comparar, continua esperando.
+  return !(toTime(question.answeredAt) >= toTime(last.createdAt));
+}
+
+/** O campo de responder do fio no console: a pergunta com o campo aberto e o rascunho. */
+export type ThreadReplyDraft = { draft: string; id: string };
+
+/** Depois do envio de uma resposta no fio, so o campo daquela pergunta fecha (o de outra pergunta, aberto no meio, fica). */
+export function replyDraftAfterSent(current: ThreadReplyDraft | null, questionId: string): ThreadReplyDraft | null {
+  return current?.id === questionId ? null : current;
+}
+
+/**
+ * Uma escrita do fio no console (a resposta ou a lixeira) que fica ocupada ate o retrato novo chegar, e nao so ate a
+ * acao voltar: entre as duas coisas o campo com o texto enviado e a lixeira da resposta apagada continuariam ligados, e
+ * o segundo clique mandaria a mesma resposta de novo (ou um 404). A chave repetida no meio do envio nao faz nada.
+ */
+export async function whileSettling(input: { key: string; set: (update: (current: readonly string[]) => readonly string[]) => void; settling: readonly string[]; work: () => Promise<boolean> }): Promise<boolean> {
+  if (input.settling.includes(input.key)) {
+    return false;
+  }
+  input.set((current) => [...current, input.key]);
+  try {
+    return await input.work();
+  } finally {
+    input.set((current) => current.filter((entry) => entry !== input.key));
+  }
+}
+
+/** A ordem do quadro: a aberta e a que espera a equipe no fio (0), a respondida (1), a dispensada (2). */
+function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): number {
+  return questionAwaitsTeam(question) ? 0 : QUESTION_ORDER[question.status];
+}
+
+/**
+ * O quadro: primeiro o que pede a equipe (as abertas e as respondidas em que o aluno escreveu por ultimo no fio; as
+ * mais votadas, depois as mais antigas), depois as respondidas e as dispensadas.
+ */
+export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes">>(questions: readonly T[]): T[] {
   return [...questions].sort((a, b) => {
-    const byStatus = QUESTION_ORDER[a.status] - QUESTION_ORDER[b.status];
+    const byStatus = boardRank(a) - boardRank(b);
     if (byStatus !== 0) {
       return byStatus;
     }
@@ -197,7 +245,7 @@ export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt
  * ---------------------------------------------------------------------------------------------- */
 
 export type ConsoleMessage = ChatMessage & {
-  /** Mensagem da turma cujo autor ainda tem o aceite valendo: pode virar linha mestre (promote). */
+  /** Mensagem da turma cujo autor ainda tem o aceite valendo (sem retirada e com o modo de agora, model.chatConsentAllowsReplay): pode virar linha mestre (promote). */
   promotable: boolean;
 };
 

@@ -10,24 +10,39 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { fetchProfile } from "../students/store";
+import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
 import {
   fetchChatWindow,
   fetchConsentRow,
   fetchPinnedMessageRow,
   listPollAnswerRows,
   listPollRows,
+  listQuestionReplyRows,
   listQuestionRows,
   listReactionRowsSince,
   listRecentChatRows,
   listPresentUserIds,
   listStudentVotedQuestionIds
 } from "./chat-store";
-import { chatMessageFromRow, chatMessageFromWindowRow, pollAnswerFromRow, pollFromRow, questionFromRow, type ConsentRow } from "./chat-rows";
+import { chatMessageFromRow, chatMessageFromWindowRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ConsentRow } from "./chat-rows";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, REACTIONS, ROOM_RULES, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar, type WebinarSession } from "./model";
+import {
+  CHAT_LIMITS,
+  REACTIONS,
+  ROOM_RULES,
+  chatConsentIsCurrent,
+  toTime,
+  type ChatMessage,
+  type QuestionReply,
+  type Reaction,
+  type StudentChatMessage,
+  type Webinar,
+  type WebinarQuestion,
+  type WebinarSession
+} from "./model";
 import { loadStudentWebinarById, type StudentWebinarRecord } from "./registrations";
 import {
-  anonymousNumber,
+  authorPhotoUrl,
   bunnyEmbedTokenInput,
   bunnyEmbedUrl,
   canJoinSimulated,
@@ -39,9 +54,10 @@ import {
   sessionOffsetMs,
   simulatedPhase,
   toStudentMessage,
+  type AuthorPhoto,
   type ChatWindow
 } from "./room-model";
-import { countReactions, nextChatCursor, toStudentPoll, toStudentQuestion, type ChatCursor, type StudentPoll, type StudentQuestion } from "./room-rules";
+import { countReactions, nextChatCursor, toStudentPoll, toStudentQuestion, toStudentReply, type ChatCursor, type StudentPoll, type StudentQuestion, type StudentQuestionReply } from "./room-rules";
 import { NO_BAN, liveBanState, liveJoinRefusal, liveRoomConfigured, liveRoomInfoOf, presenceOffsetMs, type LiveBanState } from "./live-model";
 import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { registrationFromRow, type RecordingRow } from "./rows";
@@ -178,33 +194,66 @@ export async function roomContextOf(db: WebinarsDb, record: StudentWebinarRecord
  * ---------------------------------------------------------------------------------------------- */
 
 export type StudentIdentity = {
+  /** A foto do proprio perfil (so o arquivo enviado pelo Perfil, como os outros a veem), para o campo de escrever da sala; nula sem foto. */
+  avatarUrl: string | null;
   consent: ConsentRow | null;
+  /** O aceite em dia: sem retirada, na versao de agora e com o modo de agora (consentIsCurrent). */
   consented: boolean;
-  displayMode: DisplayNameMode | null;
   fullName: string | null;
-  nickname: string | null;
 };
 
+/**
+ * O aceite gravado vale agora (model.chatConsentIsCurrent): sem retirada, na versao de agora e com `display_mode`
+ * "first_name_initial". Uma linha antiga com "anonymous" ou "nickname" (legado: linhas de antes de 10/11/2026, D64)
+ * conta como "sem aceite".
+ */
 export function consentIsCurrent(row: ConsentRow | null): boolean {
-  return Boolean(row && !row.revoked_at && row.consent_version === CHAT_CONSENT_VERSION);
+  return chatConsentIsCurrent(row);
 }
 
 export async function loadStudentIdentity(db: WebinarsDb, userId: string): Promise<StudentIdentity> {
   const [consent, profile] = await Promise.all([fetchConsentRow(db, userId), fetchProfile(db, userId)]);
-  const consented = consentIsCurrent(consent);
-  const mode = consent?.display_mode;
   return {
+    avatarUrl: roomPhotoUrl(userId, profile?.avatar_url),
     consent,
-    consented,
-    displayMode: consented && (mode === "anonymous" || mode === "nickname" || mode === "first_name_initial") ? mode : null,
-    fullName: profile?.full_name ?? null,
-    nickname: consent?.nickname ?? null
+    consented: consentIsCurrent(consent),
+    fullName: profile?.full_name ?? null
   };
 }
 
-/** O nome que aparece no chat para este aluno neste webinario (docs/30 §8.5). */
-export function studentDisplayName(identity: Pick<StudentIdentity, "fullName" | "nickname">, mode: DisplayNameMode, userId: string, webinarId: string): string {
-  return displayNameFor({ anonymousNumber: anonymousNumber(userId, webinarId), fullName: identity.fullName, mode, nickname: identity.nickname });
+/**
+ * O nome do aluno nos webinarios (docs/30 §8.5 e D64): sempre o primeiro nome com a inicial do sobrenome, o mesmo em
+ * todo webinario. Nao depende do aceite gravado nem do card Sala.
+ */
+export function studentDisplayName(identity: Pick<StudentIdentity, "fullName">): string {
+  return displayNameFor({ fullName: identity.fullName });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A foto de quem escreveu (docs/30 §8.5, aceite versao 2)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A mensagem do aluno com a foto de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl). */
+export function studentMessageWithPhoto(message: ChatMessage, viewerUserId: string, sessionKind: WebinarSession["kind"], photos: ReadonlyMap<string, AuthorPhoto>): StudentChatMessage {
+  const avatarUrl = authorPhotoUrl({
+    authorUserId: message.authorUserId,
+    displayName: message.displayName,
+    photo: message.authorUserId ? photos.get(message.authorUserId) : null,
+    source: message.source,
+    viewer: "student",
+    webinarId: message.webinarId
+  });
+  return toStudentMessage(message, viewerUserId, sessionKind, message.offsetMs, avatarUrl);
+}
+
+/** As mensagens do aluno com as fotos: uma leitura (com a memoria de 60 s) para todos os autores da pagina. */
+async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly ChatMessage[], viewerUserId: string, sessionKind: WebinarSession["kind"], nowMs: number): Promise<StudentChatMessage[]> {
+  const photos = await loadAuthorPhotos(
+    db,
+    messages.map((message) => message.authorUserId),
+    nowMs
+  );
+  return messages.map((message) => studentMessageWithPhoto(message, viewerUserId, sessionKind, photos));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -262,17 +311,17 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
   ]);
   const ban = liveBanState({ nowMs: now, sessionBans: bans.sessionBans, userBan: bans.userBan });
   const join = roomJoinFor(context, now, { ...options, ban, practiceSession: webinar.roomSettings.practiceSession });
+  const pinned = pinnedRow && pinnedRow.approved ? (await studentMessagesWithPhotos(db, [chatMessageFromRow(pinnedRow)], userId, session.kind, now))[0] : null;
 
   return {
     live: live ? liveRoomInfoOf(session, liveRoomConfigured(process.env), webinar.roomSettings) : null,
     me: {
+      avatarUrl: identity.avatarUrl,
       ban,
       consented: identity.consented,
-      displayMode: identity.displayMode,
-      displayName: identity.consented && identity.displayMode ? studentDisplayName(identity, identity.displayMode, userId, webinar.id) : null,
-      nickname: identity.nickname
+      displayName: identity.consented ? studentDisplayName(identity) : null
     },
-    pinned: pinnedRow && pinnedRow.approved ? toStudentMessage(chatMessageFromRow(pinnedRow), userId, session.kind) : null,
+    pinned,
     polls,
     presentNow: presentIds.length,
     replaySessionId: openReplaySessionId(context.sessions),
@@ -283,7 +332,6 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       join,
       offsetMs: Number.isFinite(offset) ? Math.round(offset) : null,
       roomPhase: simulated ? simulatedPhase(session, durationMs, now) : null,
-      anonymousQuestions: webinar.roomSettings.anonymousQuestions,
       showLiveBadge: session.showLiveBadge
     },
     video: join.ok && session.kind !== "live" ? roomVideoFor(context, now) : null
@@ -326,7 +374,13 @@ export async function readChatWindow(db: WebinarsDb, context: RoomContext, userI
   const served: ChatWindow = { fromMs: window.fromMs, toMs: Math.min(window.toMs, limit) };
   const rows = await fetchChatWindow(db, { fromMs: served.fromMs, sessionId: context.session.id, toMs: served.toMs, userId });
   return {
-    messages: rows.map((row) => toStudentMessage(chatMessageFromWindowRow(row, context.session.id, context.webinar.id), userId, context.session.kind)),
+    messages: await studentMessagesWithPhotos(
+      db,
+      rows.map((row) => chatMessageFromWindowRow(row, context.session.id, context.webinar.id)),
+      userId,
+      context.session.kind,
+      now
+    ),
     mode: "window",
     serverTime,
     window: served
@@ -344,7 +398,7 @@ export async function readRecentChat(db: WebinarsDb, context: RoomContext, userI
     userId
   });
   return {
-    messages: rows.map((row) => toStudentMessage(chatMessageFromRow(row), userId, context.session.kind)),
+    messages: await studentMessagesWithPhotos(db, rows.map(chatMessageFromRow), userId, context.session.kind, now),
     mode: "recent",
     next: nextChatCursor(rows, cursor, nowIso),
     serverTime: nowIso
@@ -355,10 +409,50 @@ export async function readRecentChat(db: WebinarsDb, context: RoomContext, userI
  * Perguntas, enquetes e reacoes
  * ---------------------------------------------------------------------------------------------- */
 
-export async function listStudentQuestions(db: WebinarsDb, session: Pick<WebinarSession, "id">, userId: string, order: "recent" | "votes"): Promise<StudentQuestion[]> {
-  const rows = await listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"] });
-  const voted = await listStudentVotedQuestionIds(db, { questionIds: rows.map((row) => row.id), userId });
-  return rows.map((row) => toStudentQuestion(questionFromRow(row), userId, voted.has(row.id))).filter((question): question is StudentQuestion => question !== null);
+/** A foto de quem perguntou, pela regra do aluno (nunca na Anonima nem no nome "Aluno {n}"; legado: linhas de antes de 10/11/2026). */
+export function questionPhotoUrl(question: Pick<WebinarQuestion, "anonymous" | "displayName" | "userId">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>, viewer: "student" | "team" = "student"): string | null {
+  return authorPhotoUrl({ anonymous: question.anonymous, authorUserId: question.userId, displayName: question.displayName, photo: photos.get(question.userId), source: "audience", viewer, webinarId });
+}
+
+/** A foto de quem respondeu no fio: a da equipe sempre; a do aluno pela regra dele (nunca na pergunta Anonima; legado: linhas de antes de 10/11/2026). */
+export function replyPhotoUrl(reply: Pick<QuestionReply, "anonymous" | "displayName" | "role" | "userId">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>, viewer: "student" | "team" = "student"): string | null {
+  return authorPhotoUrl({
+    anonymous: reply.anonymous,
+    authorUserId: reply.userId,
+    displayName: reply.displayName,
+    photo: photos.get(reply.userId),
+    source: reply.role === "student" ? "audience" : "team",
+    viewer,
+    webinarId
+  });
+}
+
+/** O fio de cada pergunta da sessao (id da pergunta -> as respostas em ordem), como o aluno recebe. */
+export function studentRepliesByQuestion(replies: readonly QuestionReply[], userId: string, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>): Map<string, StudentQuestionReply[]> {
+  const byQuestion = new Map<string, StudentQuestionReply[]>();
+  for (const reply of replies) {
+    const list = byQuestion.get(reply.questionId) ?? [];
+    list.push(toStudentReply(reply, userId, replyPhotoUrl(reply, webinarId, photos)));
+    byQuestion.set(reply.questionId, list);
+  }
+  return byQuestion;
+}
+
+export async function listStudentQuestions(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, userId: string, order: "recent" | "votes", now = Date.now()): Promise<StudentQuestion[]> {
+  const [rows, replyRows] = await Promise.all([
+    listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"] }),
+    listQuestionReplyRows(db, { sessionId: session.id })
+  ]);
+  const questions = rows.map(questionFromRow);
+  const replies = replyRows.map(questionReplyFromRow);
+  const [voted, photos] = await Promise.all([
+    listStudentVotedQuestionIds(db, { questionIds: rows.map((row) => row.id), userId }),
+    loadAuthorPhotos(db, [...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)], now)
+  ]);
+  const thread = studentRepliesByQuestion(replies, userId, session.webinarId, photos);
+  return questions
+    .map((question) => toStudentQuestion(question, userId, voted.has(question.id), questionPhotoUrl(question, session.webinarId, photos), thread.get(question.id) ?? []))
+    .filter((question): question is StudentQuestion => question !== null);
 }
 
 /** As enquetes da sessao para o aluno: abertas, e encerradas com resultado compartilhado; a resposta dele junto. */

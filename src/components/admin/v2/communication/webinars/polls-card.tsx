@@ -9,18 +9,18 @@ import { CHAT_LIMITS, type Poll, type PollDraft, type PollKind } from "@/server/
 import { savePolls } from "@/server/webinars/room-actions";
 import { ErrorBanner } from "../../error-banner";
 import { PillGroup, adminInputClass } from "../../form";
-import { AdminSwitch } from "../../settings/kit";
 import { adminToast } from "../../toast";
 
 // Card "Enquetes" do editor (docs/30 §2.2 e §2.4; fase 2b): os modelos de enquete do webinario (pergunta, tipo,
-// respostas anonimas, de 2 a 20 opcoes), prontos para a equipe abrir no console da sessao. O card guarda o proprio
-// estado e grava a lista inteira de uma vez (savePolls); as copias ja lancadas numa sessao nao mudam.
+// de 2 a 20 opcoes), prontos para a equipe abrir no console da sessao. O card guarda o proprio estado e grava a lista
+// inteira de uma vez (savePolls); as copias ja lancadas numa sessao nao mudam. Desde 10/11/2026 (D64) nao ha mais
+// "Respostas anônimas": toda enquete salva ou lancada guarda quem respondeu.
 
 const copy = WEBINAR_ADMIN_COPY.polls;
 const MAX_POLLS = 20;
 
 type OptionRow = { id: string | null; key: string; label: string };
-type PollRow = { anonymous: boolean; id: string | null; key: string; kind: PollKind; options: OptionRow[]; question: string };
+type PollRow = { id: string | null; key: string; kind: PollKind; options: OptionRow[]; question: string };
 
 const KIND_OPTIONS: readonly { label: string; value: PollKind }[] = [
   { label: copy.kinds.single, value: "single" },
@@ -36,15 +36,15 @@ function nextKey() {
 }
 
 function rowOf(poll: Poll): PollRow {
-  return { anonymous: poll.anonymous, id: poll.id, key: poll.id, kind: poll.kind, options: poll.options.map((option) => ({ id: option.id, key: option.id, label: option.label })), question: poll.question };
+  return { id: poll.id, key: poll.id, kind: poll.kind, options: poll.options.map((option) => ({ id: option.id, key: option.id, label: option.label })), question: poll.question };
 }
 
 function emptyPoll(): PollRow {
-  return { anonymous: false, id: null, key: nextKey(), kind: "single", options: [{ id: null, key: nextKey(), label: "" }, { id: null, key: nextKey(), label: "" }], question: "" };
+  return { id: null, key: nextKey(), kind: "single", options: [{ id: null, key: nextKey(), label: "" }, { id: null, key: nextKey(), label: "" }], question: "" };
 }
 
 function draftOf(row: PollRow): PollDraft {
-  return { anonymous: row.anonymous, id: row.id, kind: row.kind, options: row.options.map((option) => ({ id: option.id, label: option.label.trim() })), question: row.question.trim() };
+  return { id: row.id, kind: row.kind, options: row.options.map((option) => ({ id: option.id, label: option.label.trim() })), question: row.question.trim() };
 }
 
 function rowProblem(row: PollRow): string | null {
@@ -133,7 +133,6 @@ export function PollsCard({ disabled, initial, webinarId }: PollsCardProps) {
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.kind}</span>
                 <PillGroup ariaLabel={`${copy.kind} da enquete ${index + 1}`} disabled={locked} name={`${idBase}-${row.key}-kind`} onChange={(kind: PollKind) => updatePoll(row.key, { kind })} options={KIND_OPTIONS} value={row.kind} />
               </div>
-              <AdminSwitch checked={row.anonymous} disabled={locked} id={`${idBase}-${row.key}-anonymous`} label={copy.anonymous} onCheckedChange={(anonymous) => updatePoll(row.key, { anonymous })} />
               <div className="flex min-w-0 flex-col gap-2">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.options}</span>
                 {row.options.map((option, position) => (

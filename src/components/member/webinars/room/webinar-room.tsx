@@ -19,7 +19,7 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomEscapeStep, roomMetaLine, roomMobileLine, roomPanelShown, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomDateLine, roomEscapeStep, roomMobileLine, roomPanelShown, roomPresentBadge, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
@@ -714,8 +714,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       : momentBadge.badge === "live"
         ? { getOffsetMs, kind: "recorded_on_air" }
         : { getOffsetMs: momentBadge.elapsed ? getOffsetMs : undefined, kind: "session", timeLabel };
-  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind, presentNow: momentBadge.showCount ? shownCount : null, presenterName, scheduledAt: session.session.scheduledAt });
-  const mobileLine = roomMobileLine({ presenterName, presentNow: momentBadge.showCount ? shownCount : null }).join(" · ");
+  const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind, presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const mobileLine = roomMobileLine(presenterName);
+  // O selo de quem assiste agora (o real, ou o somado da Simulacao), no palco ao lado do selo do momento (docs/31 §11.5).
+  const presentBadge = roomPresentBadge(momentBadge.showCount ? shownCount : null);
   // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
   // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
   const stageVars = {
@@ -765,7 +767,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         assistant={assistant}
         chatMode={session.session.chatMode}
         consented={session.me.consented}
-        defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+        avatarUrl={session.me.avatarUrl ?? null}
         displayName={session.me.displayName}
         error={chat.error}
         look={vertical ? "classic" : "comment"}
@@ -795,10 +797,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       chatTab
     ) : shownTab === "perguntas" ? (
       <RoomQuestionsTab
-        allowAnonymous={session.session.anonymousQuestions}
         assistant={assistant}
         consented={session.me.consented}
-        defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
         enabled={!readOnly}
         getOffsetMs={getOffsetMs}
         onConsented={() => void clock.refresh()}
@@ -809,6 +809,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         {...(vertical
           ? {}
           : {
+              avatarUrl: session.me.avatarUrl ?? null,
               displayName: session.me.displayName,
               ended: phase === "ended",
               filter: questionsFilter,
@@ -861,7 +862,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
           mobileLine={mobileLine}
           onLeave={askToLeave}
           onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
-          presentNow={momentBadge.showCount ? shownCount : null}
           theme={theme}
           title={session.webinar.title}
         />
@@ -876,6 +876,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {vertical || unavailable ? null : (
               <RoomStageBadges
                 assistantOn={stageAssistantShown({ assistantEnabled: assistant.state.enabled, bottomBadges, offerShown })}
+                present={presentBadge}
                 presenterName={bottomBadges ? presenterName : null}
                 recording={false}
                 topLeft={topLeft}
@@ -916,7 +917,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                     chatMode={session.session.chatMode}
                     chatOpen={chatOpen}
                     consented={session.me.consented}
-                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                     drawerId={drawerId}
                     drawerOpen={drawerVisible}
                     nowMs={nowMs}

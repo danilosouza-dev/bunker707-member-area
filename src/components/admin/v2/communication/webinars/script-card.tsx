@@ -45,6 +45,8 @@ type Failure = { message: string; status: number };
 type ScriptCardProps = {
   disabled: boolean;
   hasRecording: boolean;
+  /** O webinario arquivado (docs/30 §2.3): nada se grava; exportar o roteiro e o chat continua. */
+  readOnly?: boolean;
   initialItems: readonly ScriptItem[];
   initialTranscript: TranscriptSummary | null;
   /** As sessoes gravadas (as encerradas oferecem o CSV do chat real). */
@@ -145,7 +147,7 @@ function downloadCsv(csv: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, sessions, webinarId }: ScriptCardProps) {
+export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, readOnly = false, sessions, webinarId }: ScriptCardProps) {
   const idBase = useId();
   const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map(rowOf));
   const [saved, setSaved] = useState<readonly ScriptItem[]>(initialItems);
@@ -163,7 +165,9 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
   const summary = useMemo(() => scriptSummary(saved), [saved]);
   const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map(rowOf).map(draftOf)), [rows, saved]);
   const ended = sessions.filter((session) => session.kind !== "replay" && session.status === "ended");
-  const locked = disabled || busy !== null;
+  // As exportacoes so leem: seguem no arquivado (`readOnly`), que tranca o resto do card.
+  const reading = disabled || busy !== null;
+  const locked = reading || readOnly;
 
   function applySaved(items: ScriptItem[]) {
     setSaved(items);
@@ -325,7 +329,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
           {copy.importCsv}
         </Button>
         <input accept=".csv,text/csv" className="sr-only" data-script-csv-input="" onChange={(event) => void readCsv(event)} ref={csvInput} tabIndex={-1} type="file" />
-        <Button className="px-3" disabled={locked || saved.length === 0} onClick={() => void exportScript()} type="button" variant="secondary">
+        <Button className="px-3" disabled={reading || saved.length === 0} onClick={() => void exportScript()} type="button" variant="secondary">
           <Download aria-hidden="true" className="size-4" />
           {copy.exportCsv}
         </Button>
@@ -491,7 +495,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
         <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4">
           <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]" htmlFor={`${idBase}-chat-session`}>
             {copy.exportChat}
-            <select className={cn(adminInputClass, "max-w-sm")} disabled={locked} id={`${idBase}-chat-session`} onChange={(event) => setChatSession(event.target.value)} value={chatSession}>
+            <select className={cn(adminInputClass, "max-w-sm")} disabled={reading} id={`${idBase}-chat-session`} onChange={(event) => setChatSession(event.target.value)} value={chatSession}>
               <option value="">—</option>
               {ended.map((session) => (
                 <option key={session.id} value={session.id}>
@@ -502,7 +506,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
           </label>
           <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.exportChatHint}</p>
           <div>
-            <Button className="px-3" disabled={locked || !chatSession} onClick={() => void exportChat()} type="button" variant="secondary">
+            <Button className="px-3" disabled={reading || !chatSession} onClick={() => void exportChat()} type="button" variant="secondary">
               <Download aria-hidden="true" className="size-4" />
               {copy.exportCsv}
             </Button>

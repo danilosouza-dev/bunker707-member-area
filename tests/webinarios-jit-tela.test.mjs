@@ -245,7 +245,7 @@ test("pagina do aluno: 'A próxima sessão começa em {n} min' com o Entrar, sem
   assert.doesNotMatch(text, /Garantir vaga|Escolha a sessão|Sessão das 10:00/, "nem vaga nem a lista de sessoes jit");
   assert.match(text, /Começa quando você entra/);
   assert.match(text, /Duração: 1h 00min/);
-  assert.match(text, /Apresentador: Ana/);
+  assert.match(text, /Ana · Apresentador/, "quem apresenta, na linha de fatos do destaque");
   assert.doesNotMatch(markup, /sala\?sessao=cccccccc/, "nenhum link para a sessao jit de outro aluno");
 
   const comecou = textOf(html(pageView.WebinarPageView, pagina(vista(sp("2026-10-29T10:03:00")), sp("2026-10-29T10:03:00"))));
@@ -264,6 +264,14 @@ test("pagina do aluno: 'A próxima sessão começa em {n} min' com o Entrar, sem
   const previa = html(pageView.WebinarPageView, pagina(view, NOW, { accessPreviewMode: "producer" }));
   assert.match(previa, /<button[^>]*disabled=""[^>]*>.*Entrar/s, "no ver como, nada e gravado");
   assert.match(textOf(previa), /No modo de visualização, nada é gravado\./);
+
+  // As tres linhas seguem o Entrar do jit: com a sala aberta, Antes de entrar; antes de abrir e fora do horario, Como funciona.
+  assert.match(text, /Antes de entrar 1 Ligue o som do aparelho antes de entrar\./);
+  assert.doesNotMatch(text, /Como funciona|o botão Entrar aparece/);
+  assert.match(comecou, /Antes de entrar/);
+  assert.doesNotMatch(comecou, /Como funciona/);
+  assert.match(textOf(aCada60), /Como funciona 1 Na hora, o botão Entrar aparece nesta página/);
+  assert.match(textOf(fora), /Como funciona 1 Na hora, o botão Entrar aparece nesta página/);
 });
 
 test("o modelo do aluno: o card do jit, Em andamento enquanto as sessoes correm, Proxima live fora do horario, nunca Replays; nunca vaga", () => {

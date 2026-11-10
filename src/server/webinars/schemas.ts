@@ -11,7 +11,6 @@ import { accessAudienceDefinitionSchema } from "../communications/schemas";
 import {
   ACCESS_MODES,
   CHAT_MODES,
-  DISPLAY_NAME_MODES,
   PRESENTER_ROLES,
   WEBINAR_KINDS,
   WEBINAR_LIMITS,
@@ -86,10 +85,12 @@ export const qualitySchema: z.ZodType<Quality> = z.object({
   stage: z.union([z.literal(720), z.literal(1080)], { error: "Escolha 720p ou 1080p." })
 });
 
+/**
+ * Um rascunho antigo (ou um editor aberto com o codigo de antes de 10/11/2026, D64) ainda pode mandar
+ * `anonymousQuestions` e `displayName`: o objeto do zod descarta as chaves que nao conhece, e o que e gravado nao as tem.
+ */
 export const roomSettingsSchema: z.ZodType<RoomSettings> = z.object({
-  anonymousQuestions: z.boolean(),
   chatMode: z.enum(CHAT_MODES, { error: "Escolha como fica o chat." }),
-  displayName: z.enum(DISPLAY_NAME_MODES, { error: "Escolha como o aluno aparece." }),
   newCommentsVisible: z.boolean(),
   polls: z.boolean(),
   practiceSession: z.boolean(),

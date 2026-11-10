@@ -169,3 +169,76 @@ test("microfone sozinho (docs/31 caminho A): o room_settings sem a chave le desl
   assert.equal(schemas.roomSettingsSchema.safeParse({ ...room, selfUnmute: "sim" }).success, false);
   assert.equal(schemas.webinarDraftSchema.safeParse(liveDraft({ roomSettings: { ...room, selfUnmute: true } })).data.roomSettings.selfUnmute, true);
 });
+
+test("D64 (10/11/2026), card Sala sem anonimato: o padrao e a leitura nao tem anonymousQuestions nem displayName; o rascunho que ainda traz as duas chaves passa e sai sem elas", async () => {
+  const { roomSettingsOfRow } = await import("../src/server/webinars/rows.ts");
+  const CHAVES = ["chatMode", "newCommentsVisible", "polls", "practiceSession", "questions", "reactions", "selfUnmute", "slowModeSeconds", "waitingRoom"];
+  assert.deepEqual(Object.keys(model.defaultRoomSettings()).sort(), CHAVES);
+  assert.deepEqual([...model.DISPLAY_NAME_MODES], ["first_name_initial"]);
+
+  // O webinario antigo: o JSON gravado ainda tem as duas chaves (em qualquer valor). A leitura ignora.
+  for (const antigo of [
+    { anonymousQuestions: true, chatMode: "moderated", displayName: "anonymous", questions: true },
+    { anonymousQuestions: false, chatMode: "moderated", displayName: "nickname", questions: true },
+    { anonymousQuestions: "sim", chatMode: "moderated", displayName: 7, questions: true }
+  ]) {
+    const lido = roomSettingsOfRow(antigo);
+    assert.deepEqual(Object.keys(lido).sort(), CHAVES, JSON.stringify(antigo));
+    assert.deepEqual([lido.chatMode, lido.questions], ["moderated", true], "o resto do card continua lido");
+  }
+
+  // O rascunho do editor (uma pagina aberta com o codigo de antes, ou o JSON antigo devolvido ao salvar) valida sem
+  // as chaves e com elas; o que sai do schema, e vai para o banco, nunca as tem.
+  const room = model.defaultRoomSettings();
+  assert.equal(schemas.roomSettingsSchema.safeParse(room).success, true, "sem as chaves antigas");
+  for (const antigas of [
+    { anonymousQuestions: true, displayName: "anonymous" },
+    { anonymousQuestions: false, displayName: "nickname" },
+    { anonymousQuestions: true, displayName: "first_name_initial" },
+    { anonymousQuestions: "x", displayName: "qualquer coisa" }
+  ]) {
+    const parsed = schemas.roomSettingsSchema.safeParse({ ...room, ...antigas });
+    assert.equal(parsed.success, true, `${JSON.stringify(antigas)}: ${JSON.stringify(parsed.error?.issues)}`);
+    assert.deepEqual(Object.keys(parsed.data).sort(), CHAVES);
+    const rascunho = schemas.webinarDraftSchema.safeParse(liveDraft({ roomSettings: { ...room, ...antigas, chatMode: "moderated" } }));
+    assert.equal(rascunho.success, true, JSON.stringify(rascunho.error?.issues));
+    assert.deepEqual(Object.keys(rascunho.data.roomSettings).sort(), CHAVES);
+    assert.equal(rascunho.data.roomSettings.chatMode, "moderated");
+    const salvar = schemas.saveWebinarSchema.safeParse({ draft: liveDraft({ roomSettings: { ...room, ...antigas } }) });
+    assert.equal(salvar.success, true, JSON.stringify(salvar.error?.issues));
+    assert.ok(!("anonymousQuestions" in salvar.data.draft.roomSettings) && !("displayName" in salvar.data.draft.roomSettings));
+  }
+});
+
+test("D64, os corpos das rotas do aluno: anonymous true, displayMode anonymous ou nickname e qualquer apelido sao recusados com a frase de atualizar a pagina; os inofensivos passam", async () => {
+  const chat = await import("../src/server/webinars/chat-schemas.ts");
+  const frase = "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar.";
+  assert.equal(chat.CHAT_MESSAGES.identity, frase);
+  assert.ok(!("anonymousOff" in chat.CHAT_MESSAGES) && !("nickname" in chat.CHAT_MESSAGES), "as frases da escolha antiga sairam");
+  const corpos = [
+    ["chat", chat.chatPostBodySchema, { body: "oi", sessionId: UUID_A }],
+    ["pergunta", chat.questionBodySchema, { body: "tem replay?", sessionId: UUID_A }],
+    ["resposta no fio", chat.questionReplyBodySchema, { body: "obrigada", sessionId: UUID_A }]
+  ];
+  for (const [nome, schema, base] of corpos) {
+    assert.equal(schema.safeParse(base).success, true, nome);
+    for (const antigo of [{ anonymous: true }, { displayMode: "anonymous" }, { displayMode: "nickname", nickname: "aninha" }, { displayMode: "nickname" }, { nickname: "aninha" }, { anonymous: "true" }]) {
+      const recusado = schema.safeParse({ ...base, consent: true, consentVersion: model.CHAT_CONSENT_VERSION, ...antigo });
+      assert.equal(recusado.success, false, `${nome}: ${JSON.stringify(antigo)}`);
+      assert.equal(recusado.error.issues[0].message, frase, `${nome}: ${JSON.stringify(antigo)} responde com a frase`);
+      assert.equal(chat.refusesLegacyIdentity(antigo), true, JSON.stringify(antigo));
+    }
+    // O que a pagina antiga de quem aparecia com o nome ainda manda: aceito e ignorado.
+    for (const inofensivo of [{ anonymous: false }, { displayMode: "first_name_initial" }, { anonymous: false, displayMode: "first_name_initial" }]) {
+      const aceito = schema.safeParse({ ...base, ...inofensivo });
+      assert.equal(aceito.success, true, `${nome}: ${JSON.stringify(inofensivo)}`);
+      assert.equal(chat.refusesLegacyIdentity(inofensivo), false);
+    }
+  }
+  assert.equal(chat.refusesLegacyIdentity({}), false);
+
+  // A enquete do editor: a pagina antiga ainda manda `anonymous`; a chave e descartada (a acao grava sempre falso).
+  const enquete = chat.pollDraftSchema.safeParse({ anonymous: true, kind: "single", options: [{ label: "Sim" }, { label: "Não" }], question: "Vem?" });
+  assert.equal(enquete.success, true, JSON.stringify(enquete.error?.issues));
+  assert.ok(!("anonymous" in enquete.data));
+});

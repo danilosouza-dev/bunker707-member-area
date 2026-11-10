@@ -89,7 +89,7 @@ async function seedJit() {
       kind: "simulated",
       published_at: new Date(Date.now() - 86_400_000).toISOString(),
       registration_required: false,
-      room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+      room_settings: { chatMode: "open" },
       slug: JIT.slug,
       status: "published",
       title: JIT.titulo

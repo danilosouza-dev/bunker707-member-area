@@ -79,7 +79,7 @@ const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", i
 
 function payload(extra = {}, sessionExtra = {}) {
   return {
-    me: { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null },
+    me: { calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null },
     pinned: null,
     polls: [],
     presentNow: 2,
@@ -210,7 +210,8 @@ test("o chat por cima mostra as mensagens que a traducao devolveu (nunca as reve
   // O mesmo hook vale no desenho normal (o painel do chat mostra as traduzidas tambem).
   const normal = sala("normal");
   assert.match(elementWith(normal, 'data-testid="room-chat"'), /EN: welcome everyone/);
-  assert.match(normal, /122 assistindo/, "o contador somado no cabecalho normal");
+  assert.match(normal, /data-testid="room-present" title="122 assistindo agora">/, "o contador somado no selo do palco do desenho normal (docs/31 §11.5)");
+  assert.doesNotMatch(normal.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /assistindo/, "e fora do cabecalho");
 });
 
 test("os lugares do vertical: o aviso de venda no topo (abaixo da barra), a pilula da Oferta acima do campo, as bolhas a direita", () => {
@@ -285,7 +286,7 @@ test("a enquete aberta vira um botao no chat por cima (abre a gaveta em Enquetes
   const html = sala("vertical", {
     extra: {
       pinned: msg("p", { body: "link da apostila", displayName: "Equipe", pinned: true, role: "team" }),
-      polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }]
+      polls: [{ id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }]
     }
   });
   const chat = elementWith(html, "data-room-vertical-chat");
@@ -346,7 +347,6 @@ test("compositor: Abrir o chat quando fechado (sem campo), o modo lento com a co
     chatMode: "open",
     chatOpen: true,
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     drawerId: "gaveta",
     drawerOpen: false,
     nowMs: T0,
@@ -372,18 +372,21 @@ test("compositor: Abrir o chat quando fechado (sem campo), o modo lento com a co
   assert.match(open, /aria-controls="gaveta" aria-expanded="true" aria-label="Perguntas e enquetes"/);
 });
 
-test("o aceite da primeira mensagem e o MESMO do chat da sala (o texto de §8.5 e os dois botoes) e o envio e o da sala", () => {
+test("o aceite da primeira mensagem e o MESMO do chat da sala (o texto de §8.5, Entendi e quero participar e Cancelar, sem anonimo) e o envio e o da sala", () => {
   const source = readFileSync(new URL("../src/components/member/webinars/room/vertical/vertical-composer.tsx", import.meta.url), "utf8");
   assert.match(source, /import \{ RoomConsentBox \} from "\.\.\/room-chat";/, "o componente do aceite e o da sala");
-  assert.match(source, /consent: true,\s*consentVersion: CHAT_CONSENT_VERSION,/, "o envio leva o aceite e a versao, como no chat da sala");
+  assert.match(source, /consent: true,\s*consentVersion: CHAT_CONSENT_VERSION\b/, "o envio leva o aceite e a versao, como no chat da sala");
+  // D64 (10/11/2026): o envio nao leva mais como o aluno aparece.
+  assert.doesNotMatch(source, /anonymous:|displayMode|nickname|defaultDisplayMode/);
   assert.match(source, /if \(!consented\) \{\s*setConsentOpen\(true\);/, "sem o aceite, a primeira abre o aceite");
   const roomSource = readFileSync(new URL("../src/components/member/webinars/room/webinar-room.tsx", import.meta.url), "utf8");
   assert.equal((roomSource.match(/onSend=\{sendChat\}/g) ?? []).length, 2, "o painel do chat e o compositor compacto usam o mesmo envio");
   assert.match(roomSource, /const answer = await chat\.send\(/);
-  const box = render(RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop });
+  const box = render(RoomConsentBox, { onAccept: noop, onCancel: noop, variant: "classic" });
   assert.ok(box.includes(WEBINAR_COPY.sala.consentimento));
   assert.match(box, /Entendi e quero participar/);
-  assert.match(box, /Participar como anônimo/);
+  assert.match(box, />Cancelar</);
+  assert.doesNotMatch(box, /an[oô]nim|Apelido|<input|type="radio"/i, "sem anonimo, sem apelido e sem escolha (D64)");
 });
 
 test("a doca: no normal as caixas nao geram caixa (contents); no vertical o grupo com o degrade e a pilula de verdade a direita", () => {

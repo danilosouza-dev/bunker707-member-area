@@ -45,7 +45,7 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
   }
 
   const now = new Date();
-  const loaded = await loadUnlessPendingMigration(() => getSessionConsoleData(id, firstParam(query[WEBINAR_SESSION_PARAM]), now));
+  const loaded = await loadUnlessPendingMigration(() => getSessionConsoleData(id, firstParam(query[WEBINAR_SESSION_PARAM]), now, user.id));
 
   if (!loaded.ok) {
     return (

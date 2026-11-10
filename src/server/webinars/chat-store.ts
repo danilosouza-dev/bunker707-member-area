@@ -5,6 +5,7 @@
 
 import "server-only";
 
+import { PendingMigrationError, isPendingMigrationError } from "../db/pending-migration";
 import { WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import {
   ATTENDANCE_COLUMNS,
@@ -15,6 +16,7 @@ import {
   POLL_OPTION_COLUMNS,
   PRESENCE_COLUMNS,
   QUESTION_COLUMNS,
+  QUESTION_REPLY_COLUMNS,
   REACTION_COLUMNS,
   SCRIPT_ITEM_COLUMNS,
   TRANSCRIPT_COLUMNS,
@@ -28,12 +30,13 @@ import {
   type PollOptionRow,
   type PollRow,
   type PresenceRow,
+  type QuestionReplyRow,
   type QuestionRow,
   type ReactionRow,
   type ScriptItemRow,
   type TranscriptRow
 } from "./chat-rows";
-import { CHAT_LIMITS, ROOM_RULES, type DeleteReason } from "./model";
+import { CHAT_LIMITS, ROOM_RULES, type DeleteReason, type DisplayNameMode } from "./model";
 
 const PAGE = 1000;
 
@@ -64,9 +67,13 @@ export async function fetchConsentRow(db: WebinarsDb, userId: string): Promise<C
   return (data as ConsentRow | null) ?? null;
 }
 
-export type ConsentUpsert = { consent_version: number; display_mode: string; nickname: string | null; user_id: string };
+/** O aceite e sempre gravado com o modo de agora e sem apelido (D64): o tipo nao deixa passar outro valor. */
+export type ConsentUpsert = { consent_version: number; display_mode: DisplayNameMode; nickname: null; user_id: string };
 
-/** Grava (ou renova) o aceite; uma retirada anterior e desfeita (revoked_at volta a nulo). */
+/**
+ * Grava (ou renova) o aceite; uma retirada anterior e desfeita (revoked_at volta a nulo). Um aceite antigo com apelido
+ * ou anonimo (legado: linhas de antes de 10/11/2026) e trocado pelo modo de agora, com o apelido apagado.
+ */
 export async function upsertConsentRow(db: WebinarsDb, input: ConsentUpsert, nowIso: string): Promise<ConsentRow> {
   const { data, error } = await db
     .from("webinar_chat_consents")
@@ -221,6 +228,20 @@ export async function softDeleteStudentContent(db: WebinarsDb, input: { nowIso: 
   assertNoDbError(questions.error, "Webinarios: remover perguntas do aluno");
   const answers = await db.from("webinar_poll_answers").update({ deleted_at: input.nowIso }).eq("user_id", input.userId).is("deleted_at", null).select("id");
   assertNoDbError(answers.error, "Webinarios: remover respostas do aluno");
+  // O que o aluno escreveu no fio das perguntas sai junto (sem a 202611100001 nao ha fio: nada a apagar).
+  const replies = await db
+    .from("webinar_question_replies")
+    .update({ deleted_at: input.nowIso, deleted_by: null, deleted_reason: input.reason })
+    .eq("user_id", input.userId)
+    .is("deleted_at", null)
+    .select("id");
+  try {
+    assertNoDbError(replies.error, "Webinarios: remover respostas do fio do aluno");
+  } catch (error) {
+    if (!isPendingMigrationError(error)) {
+      throw error;
+    }
+  }
   return { answers: (answers.data ?? []).length, messages: (messages.data ?? []).length, questions: (questions.data ?? []).length };
 }
 
@@ -384,7 +405,8 @@ export async function fetchPollRow(db: WebinarsDb, id: string): Promise<{ option
 }
 
 export type PollInsert = {
-  anonymous: boolean;
+  /** Sempre falso desde 10/11/2026 (D64): a enquete nova nunca esconde quem respondeu; a coluna fica para as antigas. */
+  anonymous: false;
   created_by: string | null;
   kind: string;
   open_offset_ms?: number | null;
@@ -410,7 +432,7 @@ export async function insertPollRow(db: WebinarsDb, poll: PollInsert, options: r
   return { options: ((created.data ?? []) as PollOptionRow[]).sort((a, b) => a.position - b.position), poll: row };
 }
 
-export type PollPatch = Partial<Pick<PollRow, "anonymous" | "closed_at" | "kind" | "open_offset_ms" | "opened_at" | "position" | "question" | "results_shared_at" | "status">>;
+export type PollPatch = { anonymous?: false } & Partial<Pick<PollRow, "closed_at" | "kind" | "open_offset_ms" | "opened_at" | "position" | "question" | "results_shared_at" | "status">>;
 
 export async function updatePollRow(db: WebinarsDb, id: string, patch: PollPatch, guard: { expectedStatuses?: readonly string[] } = {}): Promise<PollRow | null> {
   let query = db.from("webinar_polls").update(patch).eq("id", id);
@@ -468,6 +490,7 @@ export async function listStudentPollAnswerRows(db: WebinarsDb, input: { session
  * Perguntas
  * ---------------------------------------------------------------------------------------------- */
 
+/** `anonymous`: falso em toda pergunta do aluno (D64); verdadeiro so quando a equipe libera uma mensagem antiga gravada como "Aluno {n}" (legado). */
 export type QuestionInsert = { anonymous: boolean; body: string; display_name: string; message_id?: string | null; offset_ms: number; session_id: string; user_id: string };
 
 export async function insertQuestionRow(db: WebinarsDb, row: QuestionInsert): Promise<QuestionRow> {
@@ -510,6 +533,76 @@ export async function listQuestionRows(db: WebinarsDb, input: { limit?: number; 
   const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));
   assertNoDbError(error, "Webinarios: perguntas da sessao");
   return (data ?? []) as QuestionRow[];
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O fio de uma pergunta (202611100001)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * As respostas do fio das perguntas de uma sessao, da mais antiga para a mais nova, lidas em paginas de 1000 numa
+ * ordem total (created_at, id): o PostgREST corta qualquer resposta em 1000 linhas sem erro (supabase/config.toml,
+ * max_rows) e, na ordem crescente, o corte levaria as respostas mais novas. Sem a 202611100001 nao ha fio: lista
+ * vazia, e as perguntas seguem como antes.
+ */
+export async function listQuestionReplyRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionReplyRow[]> {
+  try {
+    return await fetchAll<QuestionReplyRow>(
+      (from, to) =>
+        db
+          .from("webinar_question_replies")
+          .select(QUESTION_REPLY_COLUMNS)
+          .eq("session_id", input.sessionId)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      "Webinarios: o fio das perguntas"
+    );
+  } catch (failure) {
+    if (isPendingMigrationError(failure)) {
+      return [];
+    }
+    throw failure;
+  }
+}
+
+/** Quantas respostas (nao apagadas) o fio de uma pergunta ja tem. */
+export async function countQuestionReplyRows(db: WebinarsDb, questionId: string): Promise<number> {
+  const { count, error } = await db.from("webinar_question_replies").select("id", { count: "exact", head: true }).eq("question_id", questionId).is("deleted_at", null);
+  assertNoDbError(error, "Webinarios: tamanho do fio da pergunta");
+  // HEAD numa tabela que ainda nao existe: o PostgREST responde 404 sem corpo e o postgrest-js entrega "sem erro e
+  // sem contagem". Com count: "exact" a contagem sempre vem (0 no fio vazio); sem ela, falta a 202611100001.
+  if (typeof count !== "number") {
+    throw new PendingMigrationError("Webinarios: tamanho do fio da pergunta", "webinar_question_replies sem contagem");
+  }
+  return count;
+}
+
+export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id">;
+
+export async function insertQuestionReplyRow(db: WebinarsDb, row: QuestionReplyInsert): Promise<QuestionReplyRow> {
+  const { data, error } = await db.from("webinar_question_replies").insert(row).select(QUESTION_REPLY_COLUMNS).single();
+  assertNoDbError(error, "Webinarios: gravar resposta no fio");
+  return data as QuestionReplyRow;
+}
+
+export async function fetchQuestionReplyRow(db: WebinarsDb, id: string): Promise<QuestionReplyRow | null> {
+  const { data, error } = await db.from("webinar_question_replies").select(QUESTION_REPLY_COLUMNS).eq("id", id).maybeSingle();
+  assertNoDbError(error, "Webinarios: resposta do fio");
+  return (data as QuestionReplyRow | null) ?? null;
+}
+
+/** Apaga (soft) uma resposta do fio; devolve se havia o que apagar. */
+export async function softDeleteQuestionReplyRow(db: WebinarsDb, input: { deletedBy: string | null; id: string; nowIso: string; reason: DeleteReason }): Promise<boolean> {
+  const { data, error } = await db
+    .from("webinar_question_replies")
+    .update({ deleted_at: input.nowIso, deleted_by: input.deletedBy, deleted_reason: input.reason })
+    .eq("id", input.id)
+    .is("deleted_at", null)
+    .select("id");
+  assertNoDbError(error, "Webinarios: apagar resposta do fio");
+  return (data ?? []).length > 0;
 }
 
 export type QuestionPatch = Partial<Pick<QuestionRow, "answer_text" | "answered_at" | "answered_by" | "answered_live" | "deleted_at" | "deleted_reason" | "status" | "upvotes">>;

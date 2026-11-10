@@ -5,7 +5,7 @@ import { useId, useState, type FormEvent } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { composerState } from "@/lib/webinar-room-client";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type DisplayNameMode, type Reaction, type SimulatedPhase } from "@/server/webinars/model";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type ChatMode, type Reaction, type SimulatedPhase } from "@/server/webinars/model";
 import type { ChatPostBody } from "../room-api";
 import { RoomConsentBox } from "../room-chat";
 import { RoomReactionBar } from "../room-reactions";
@@ -14,7 +14,7 @@ import { verticalComposerHint } from "./vertical-model";
 // O rodape da Sala Live vertical (docs/30 §1.6, §8.5 e §9): o campo compacto ("Comente…") com Enviar, Abrir/Fechar o
 // chat, Reagir (abre a barra das seis reacoes) e a gaveta de Perguntas e enquetes, todos com 44 px. O envio e o mesmo
 // do chat da sala (onSend, que chama chat.send da sala): na primeira mensagem sem o aceite abre o MESMO aceite do chat
-// (RoomConsentBox, o texto de §8.5, "Entendi e quero participar" e "Participar como anonimo"); o modo lento, o chat
+// (RoomConsentBox, o texto de §8.5, "Entendi e quero participar" e Cancelar; sem anonimo e sem apelido, D64); o modo lento, o chat
 // desligado, so a equipe e a sessao encerrada aparecem como na sala normal. O campo usa 16 px (o iPhone nao amplia a
 // pagina ao tocar). No "ver como" da equipe o campo fica desligado com a frase de sempre.
 
@@ -22,7 +22,6 @@ export type VerticalComposerProps = {
   chatMode: ChatMode;
   chatOpen: boolean;
   consented: boolean;
-  defaultDisplayMode: DisplayNameMode;
   /** O id da gaveta (aria-controls do botao). */
   drawerId: string;
   drawerOpen: boolean;
@@ -38,7 +37,7 @@ export type VerticalComposerProps = {
 };
 
 export function VerticalComposer(props: VerticalComposerProps) {
-  const { chatMode, chatOpen, consented, defaultDisplayMode, drawerId, drawerOpen, nowMs, onOpenDrawer, onReact, onSend, onToggleChat, phase, reactionsDisabled, readOnly, slowUntilMs } = props;
+  const { chatMode, chatOpen, consented, drawerId, drawerOpen, nowMs, onOpenDrawer, onReact, onSend, onToggleChat, phase, reactionsDisabled, readOnly, slowUntilMs } = props;
   const copy = WEBINAR_COPY.sala;
   const vcopy = WEBINAR_COPY.vertical;
   const reactionsId = useId();
@@ -88,16 +87,7 @@ export function VerticalComposer(props: VerticalComposerProps) {
         <div className="max-h-[45dvh] overflow-y-auto overscroll-contain rounded-[14px] border border-white/10 [text-shadow:none]">
           <RoomConsentBox
             busy={sending}
-            defaultDisplayMode={defaultDisplayMode}
-            onAccept={(choice) =>
-              void deliver({
-                anonymous: choice.displayMode === "anonymous",
-                consent: true,
-                consentVersion: CHAT_CONSENT_VERSION,
-                displayMode: choice.displayMode,
-                ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {})
-              })
-            }
+            onAccept={() => void deliver({ consent: true, consentVersion: CHAT_CONSENT_VERSION })}
             onCancel={() => setConsentOpen(false)}
             variant="classic"
           />

@@ -328,6 +328,11 @@ export function questionVotePath(webinarId: string, questionId: string): string 
   return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/vote`;
 }
 
+/** O fio de uma pergunta (a resposta de quem perguntou). */
+export function questionReplyPath(webinarId: string, questionId: string): string {
+  return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/replies`;
+}
+
 /**
  * A pessoa perdeu a sala (docs/30 §1.1 e D41): as rotas da sala respondem 404 fora do "Quem pode" (saiu do segmento sem
  * o produto, foi reembolsada), com o webinario despublicado ou a sessao que sumiu. So nas rotas sem item proprio (a

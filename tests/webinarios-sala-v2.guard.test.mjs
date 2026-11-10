@@ -21,6 +21,8 @@ const offer = semComentarios(readFileSync(path.join(root, "src/components/member
 const hook = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/use-live-room.ts"), "utf8"));
 const chatPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-chat.tsx"), "utf8"));
 const roomPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-panel.tsx"), "utf8"));
+const questionsTab = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-questions.tsx"), "utf8"));
+const replyField = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-reply-field.tsx"), "utf8"));
 
 test("o painel do chat e o palco da live saem das regras puras: o takeover do celular so abaixo de lg, o painel por roomPanelShown e o esqueleto por liveSkeletonState", () => {
   assert.match(room, /const settingsTakeover = settingsShown && !desktop;/, "Configurações toma o lugar do chat so no celular");
@@ -77,10 +79,20 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
   assert.match(roomPanel, /const next = tabScrollLeft\(\{[\s\S]*?\}\);\s*if \(next !== list\.scrollLeft\) \{\s*list\.scrollLeft = next;\s*\}\s*\}, \[open, tab, tabsKey\]\);/);
 });
 
-test("a gravada: Participantes com quem apresenta e o numero do cabecalho; as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
-  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do cabecalho, pela mesma condicao");
-  assert.match(recorded, /presentNow=\{momentBadge\.showCount \? shownCount : null\}/, "o cabecalho");
-  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do cabecalho, que some com a live encerrada");
+test("a gravada: Participantes com quem apresenta e o numero do selo do palco (docs/31 §11.5); as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
+  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do selo do palco, pela mesma condicao");
+  // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
+  assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
+  assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
+  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do selo do palco, que some com a live encerrada");
+  assert.match(room, /const presentShown = phase === "ended" \? null : presentNow;\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
+  for (const [nome, fonte] of [
+    ["live-room", room],
+    ["webinar-room", recorded]
+  ]) {
+    assert.doesNotMatch(fonte.match(/<RoomHeader[\s\S]*?\/>/)?.[0] ?? "presentNow", /presentNow/, `${nome}: o cabecalho nao recebe mais o numero`);
+  }
   // O chat no estilo do YouTube (o comentario): a gravada passa o balao de antes so para a gaveta do vertical, e as duas
   // salas contam o tempo do comentario do agora do servidor (skewMs).
   assert.match(recorded, /error=\{chat\.error\}\s+look=\{vertical \? "classic" : "comment"\}\s+messages=\{translation\.messages\}/, "a gravada: o comentario no desenho normal, o balao na gaveta do vertical");
@@ -146,4 +158,15 @@ test("as ligacoes da barra da live que o teste de tela nao alcanca: Reagir, Conf
   assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
   assert.match(room, /\} else if \(step === "close_popovers"\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*closeViewMenu\(\);/, "o Esc fecha os tres, com o foco de volta ao botao");
   assert.match(room, /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*frameWidth: geometry\.frameWidth,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
+});
+
+test("o campo de responder do fio ligado as regras puras (docs/30 §1.3): fecha no render quando a pergunta deixa de aceitar resposta (questionReplyGone), o Responder de novo nao apaga (questionReplyOpenStep), o Esc em todo o campo (replyFieldKey) e o foco de volta ao Responder (returnFocusFromReply)", () => {
+  assert.match(questionsTab, /if \(replyOpenId !== null && !replySending && \(!replyWritable \|\| questionReplyGone\(questions, replyOpenId\)\)\) \{\s*closeReply\(\);/);
+  assert.match(questionsTab, /canWrite: replyWritable,/);
+  assert.doesNotMatch(questionsTab, /useEffect\(\(\) => \{[^}]*closeReply\(\)/, "nunca num efeito: o lint recusa");
+  assert.match(questionsTab, /const next = questionReplyOpenStep\(\{ draft: replyDraft, openId: replyOpenId, status: replyStatus \}, questionId\);/);
+  assert.match(replyField, /<form className="flex items-start" data-room-reply-field="" onKeyDown=\{onKeyDown\} onSubmit=\{submit\}>/);
+  assert.doesNotMatch(replyField, /<textarea[^>]*onKeyDown/);
+  assert.match(replyField, /replyFieldKey\(\{ ctrl: event\.ctrlKey, inText: event\.target === areaRef\.current, key: event\.key, meta: event\.metaKey \}\)/);
+  assert.match(questionsTab, /if \(was && !replyOpenId\) \{\s*returnFocusFromReply\(tabRef\.current, document\.activeElement, document\.body, `\[data-room-question="\$\{was\}"\] \[data-room-reply-open\]`\);/);
 });
