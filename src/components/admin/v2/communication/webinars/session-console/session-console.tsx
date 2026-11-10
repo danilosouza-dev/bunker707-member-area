@@ -68,10 +68,12 @@ import {
   launchPoll,
   moderateMessage,
   openSessionNow,
+  pinPoll,
   replyToQuestion,
   sendTeamMessage,
   setQuestionStatus,
-  setSessionChatMode
+  setSessionChatMode,
+  unpinPoll
 } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
 import { fireScriptItem } from "@/server/webinars/script-actions";
@@ -137,8 +139,10 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // Enquetes, Roteiro, Oferta, Atendimento, Presença e Gravação conforme a sessao; tudo montado, o que nao esta na tela
 // com `hidden`. A aba e a entrada escolhidas ficam so na memoria da pagina; Mãos, Lançar enquete e o Gravar por
 // preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida. A Na tela (docs/30 §2.4;
-// especificacao de 10/11/2026, R1): o Chat recebe a fixada lida pela chave (o bloco Fixada agora), o relogio para o
-// "há 2 min" e o "Fixar ao enviar" (sendTeamMessage com `pin`, aviso "Mensagem fixada.").
+// especificacao de 10/11/2026, R1 e R2): o Chat recebe a fixada lida pela chave (o bloco Fixada agora), o relogio para
+// o "há 2 min" e o "Fixar ao enviar" (sendTeamMessage com `pin`, aviso "Mensagem fixada."); as Enquetes recebem a
+// enquete fixada do retrato (pinnedPollId), o Fixar e o Desafixar (pinPoll, unpinPoll) e o "Abrir e fixar" (launchPoll
+// com `pin`), com os avisos "Enquete fixada." e "Enquete desafixada.".
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -861,7 +865,22 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     canAct={canAct}
                     launched={snapshot.polls.launched}
                     onClose={(pollId: string, shareResults: boolean) => void run(`poll:${pollId}`, () => closePoll({ pollId, sessionId: session.id, shareResults }))}
-                    onLaunch={(pollId: string) => void run(`poll:${pollId}`, () => launchPoll({ pollId, sessionId: session.id }))}
+                    onLaunch={(pollId: string, pin: boolean) =>
+                      void run(`poll:${pollId}`, () => launchPoll({ pin, pollId, sessionId: session.id }), (launched) => {
+                        if (pin && launched.pinned) {
+                          adminToast.success(naTelaCopy.avisos.enqueteFixada);
+                        }
+                      })
+                    }
+                    onPin={(pollId: string) => void run(`poll:${pollId}`, () => pinPoll({ pollId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.enqueteFixada))}
+                    onUnpin={(pollId: string) =>
+                      void run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
+                        if (result.unpinned) {
+                          adminToast.success(naTelaCopy.avisos.enqueteDesafixada);
+                        }
+                      })
+                    }
+                    pinnedPollId={snapshot.pinnedPollId ?? null}
                     templates={snapshot.polls.templates}
                   />
                 ),

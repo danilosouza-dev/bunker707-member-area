@@ -320,6 +320,15 @@ export type ScreenSnapshot = {
 /** A copia da enquete fixada: so a pergunta (o resto a sala le de GET .../polls). */
 export type PollPinSnapshot = { name: string; v: 1 };
 
+/**
+ * Se a enquete pode ficar fixada (R2): uma copia lancada numa sessao (nunca o modelo), aberta ou encerrada com o
+ * resultado compartilhado, que e exatamente o que a turma ve na lista de enquetes (room-rules.studentPollOf). Encerrada
+ * sem compartilhar, ela some para a turma, entao nao fixa (e o Encerrar sem compartilhar desafixa).
+ */
+export function pollPinnable(poll: { resultsSharedAt: string | null; sessionId: string | null; status: string }): boolean {
+  return poll.sessionId !== null && (poll.status === "open" || (poll.status === "closed" && poll.resultsSharedAt !== null));
+}
+
 /** Uma exibicao numa sessao (webinar_screen_displays). `snapshot` nulo: a copia nao passou no zod (nada e desenhado). */
 export type ScreenDisplay = {
   createdAt: string;

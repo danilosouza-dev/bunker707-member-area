@@ -5,6 +5,8 @@
 // Banco sem a migracao: toda LEITURA devolve vazio (o padrao de chat-store.listQuestionReplyRows), entao a sala e o
 // console seguem como antes; toda ESCRITA sobe o PendingMigrationError (assertNoDbError), e a acao responde com o aviso
 // de migracao pendente (WEBINARS_SCREEN_MIGRATION). Nenhuma leitura daqui entra nas leituras de sempre da sessao.
+// A troca de uma exibicao (showScreenDisplayRow: tirar a do mesmo tipo e gravar a nova, uma tentativa a mais no 23505
+// do indice unico) e a peca comum do Fixar da enquete (room-actions.ts) e do Mostrar do banner e do QR Code.
 
 import "server-only";
 
@@ -99,7 +101,11 @@ export async function archiveScreenItemRow(db: WebinarsDb, id: string, nowIso: s
  * webinar_screen_displays
  * ---------------------------------------------------------------------------------------------- */
 
-async function readActiveScreenDisplayRows(db: WebinarsDb, sessionId: string): Promise<ScreenDisplayRow[]> {
+/**
+ * O que esta na tela agora numa sessao, SEM a troca por vazio: sem a migracao sobe o PendingMigrationError (as acoes do
+ * console que vao gravar leem por aqui e respondem com o aviso da migracao antes de qualquer escrita).
+ */
+export async function readActiveScreenDisplayRows(db: WebinarsDb, sessionId: string): Promise<ScreenDisplayRow[]> {
   const { data, error } = await db.from("webinar_screen_displays").select(SCREEN_DISPLAY_COLUMNS).eq("session_id", sessionId).is("hidden_at", null);
   assertNoDbError(error, "Webinarios: Na tela, o que esta na tela");
   return (data ?? []) as ScreenDisplayRow[];
@@ -176,6 +182,28 @@ export async function hideActiveScreenDisplayRows(db: WebinarsDb, input: { kind:
   const { data, error } = await query.select(SCREEN_DISPLAY_COLUMNS);
   assertNoDbError(error, "Webinarios: Na tela, tirar da tela");
   return (data ?? []) as ScreenDisplayRow[];
+}
+
+/**
+ * Poe uma exibicao na tela no lugar da do mesmo tipo (o Mostrar e o Fixar da enquete): tira a ativa daquele tipo com o
+ * `hide` (motivo `replaced`) e grava a nova. Dois cliques juntos (ou duas pessoas da equipe) podem gravar a do outro
+ * entre o tirar e o gravar: o indice unico parcial recusa (23505) e a rotina tenta UMA vez mais (tira de novo e grava).
+ * Devolve a nova e as que sairam; nulo quando a segunda tentativa tambem esbarrou (quem chama responde 409). Quem chama
+ * muda o carimbo da sessao depois (touchSessionRow).
+ */
+export async function showScreenDisplayRow(db: WebinarsDb, insert: ScreenDisplayInsert, hide: ScreenDisplayHide): Promise<{ replaced: ScreenDisplayRow[]; row: ScreenDisplayRow } | null> {
+  const replaced: ScreenDisplayRow[] = [];
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    replaced.push(...(await hideActiveScreenDisplayRows(db, { kind: insert.kind, sessionId: insert.session_id }, hide)));
+    const result = await insertScreenDisplayRow(db, insert);
+
+    if (!result.conflict) {
+      return { replaced, row: result.row };
+    }
+  }
+
+  return null;
 }
 
 /** Tira da tela uma exibicao pelo id (so se ainda esta na tela); nula quando ja tinha saido. */

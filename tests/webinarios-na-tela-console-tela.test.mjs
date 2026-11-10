@@ -12,7 +12,10 @@ import "./support/resolve-extensionless-ts.mjs";
 //   3 min" e o Desafixar, tambem para uma mensagem que nao esta entre as da lista (o retrato a le pela chave); sem poder
 //   agir, o bloco sem o Desafixar; os enderecos `https://` das mensagens da equipe viram link (outra aba, rel noopener
 //   noreferrer nofollow, a pontuacao do fim de fora, o texto visivel igual ao href), a mensagem de aluno e o Assistente
-//   continuam texto, e nenhum href que nao seja https.
+//   continuam texto, e nenhum href que nao seja https;
+// - R2, a entrada Enquetes: em "Nesta sessão", o Fixar na aberta e na encerrada com o resultado compartilhado (nunca na
+//   encerrada sem compartilhar), o selo Fixada e o Desafixar na fixada (o pinnedPollId do retrato); em "Prontas", o
+//   "Abrir e fixar" ao lado do Abrir; sem poder agir, nenhum botao de fixar.
 //
 // Os .tsx do app sao transpilados aqui pelo TypeScript (so JSX -> JS). next/navigation vira stub; o Dialog e o
 // DropdownMenu viram versoes sem portal; as Server Actions viram funcoes falsas (como tests/webinarios-console-tela).
@@ -136,6 +139,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { SessionConsole } = await import("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx");
 const { ConsoleChat } = await import("../src/components/admin/v2/communication/webinars/session-console/console-chat.tsx");
 const { ConsoleTeamText, pinnedMinutes } = await import("../src/components/admin/v2/communication/webinars/session-console/console-pinned.tsx");
+const { ConsolePolls } = await import("../src/components/admin/v2/communication/webinars/session-console/console-polls.tsx");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 const naTela = WEBINAR_COPY.naTela;
@@ -149,13 +153,21 @@ const textOf = (markup) =>
     .replace(/\s+/g, " ")
     .trim();
 const count = (markup, pattern) => (markup.match(pattern) ?? []).length;
-/** Um pedaco do html: da tag com o marcador ate o fechamento dela (a tag sem filhos iguais). */
+/** Um pedaco do html: da tag com o marcador ate o fechamento dela (contando as tags iguais dentro dela). */
 function block(markup, marker, tag) {
   const at = markup.indexOf(marker);
   assert.ok(at >= 0, `tem ${marker}`);
   const start = markup.lastIndexOf(`<${tag}`, at);
-  const end = markup.indexOf(`</${tag}>`, at);
-  return markup.slice(start, end + tag.length + 3);
+  const pattern = new RegExp(`<${tag}[\\s>]|</${tag}>`, "g");
+  pattern.lastIndex = start;
+  let depth = 0;
+  for (let match = pattern.exec(markup); match; match = pattern.exec(markup)) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (depth === 0) {
+      return markup.slice(start, match.index + match[0].length);
+    }
+  }
+  return markup.slice(start);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -372,4 +384,108 @@ test("ConsoleTeamText: sem links (a mensagem de aluno), o texto inteiro; com lin
   assert.equal(html(createElement(ConsoleTeamText, { links: false, text: texto })), texto);
   const seis = Array.from({ length: 6 }, (_, index) => `https://site${index}.exemplo.com`).join(" ");
   assert.equal(count(html(createElement(ConsoleTeamText, { links: true, text: seis })), /<a /g), 5);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * R2: a entrada Enquetes
+ * ---------------------------------------------------------------------------------------------- */
+
+const poll = (extra = {}) => ({
+  anonymous: false,
+  closedAt: null,
+  counts: { answers: 2, byOption: { "o-1": 1, "o-2": 1 } },
+  id: "p-1",
+  kind: "single",
+  openOffsetMs: null,
+  openedAt: new Date(NOW - MIN).toISOString(),
+  options: [
+    { id: "o-1", label: "Sim", position: 0 },
+    { id: "o-2", label: "Não", position: 1 }
+  ],
+  position: 0,
+  question: "Vem na próxima?",
+  resultsSharedAt: null,
+  sessionId: S_LIVE,
+  status: "open",
+  templatePollId: "t-1",
+  webinarId: WEBINAR,
+  ...extra
+});
+
+const launched = [
+  poll({ id: "p-fixada", question: "Gostou da aula?", templatePollId: "t-1" }),
+  poll({ id: "p-aberta", question: "Quer o material?", templatePollId: "t-2" }),
+  poll({ closedAt: new Date(NOW - MIN).toISOString(), id: "p-compartilhada", question: "Vem amanhã?", resultsSharedAt: new Date(NOW - MIN).toISOString(), status: "closed", templatePollId: "t-3" }),
+  poll({ closedAt: new Date(NOW - MIN).toISOString(), id: "p-encerrada", question: "Qual horário?", status: "closed", templatePollId: "t-4" })
+];
+const templates = [
+  { ...poll({ id: "t-1", question: "Gostou da aula?", sessionId: null, status: "draft", templatePollId: null }), counts: undefined },
+  { ...poll({ id: "t-9", question: "Nova pergunta?", sessionId: null, status: "draft", templatePollId: null }), counts: undefined }
+];
+
+function pollsProps(extra = {}) {
+  return { busyKey: null, canAct: true, launched, onClose() {}, onLaunch() {}, onPin() {}, onUnpin() {}, pinnedPollId: "p-fixada", templates, ...extra };
+}
+
+/** Os rotulos dos botoes de uma enquete de "Nesta sessão" (ou de uma pronta), na ordem. */
+const botoes = (markup, marker) => Array.from(block(markup, marker, "li").matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((match) => match[1]);
+const chips = (markup, marker) => textOf(block(markup, marker, "li").split("<ul")[0]);
+
+test("Enquetes: Fixar na aberta e na compartilhada, nunca na encerrada sem compartilhar; a fixada com o selo Fixada e o Desafixar; Abrir e fixar ao lado do Abrir nas prontas", () => {
+  const markup = html(createElement(ConsolePolls, pollsProps()));
+  const enquetes = naTela.enquetes;
+  assert.deepEqual([enquetes.fixar, enquetes.desafixar, enquetes.fixada, enquetes.abrirEFixar], ["Fixar", "Desafixar", "Fixada", "Abrir e fixar"]);
+
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-fixada"'), ["Encerrar", "Compartilhar resultado", "Desafixar"]);
+  assert.match(chips(markup, 'data-console-poll="p-fixada"'), /Gostou da aula\? Aberta Fixada/, "o selo Fixada");
+  assert.match(block(markup, 'data-console-poll="p-fixada"', "li"), /data-poll-pinned=""/);
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-aberta"'), ["Encerrar", "Compartilhar resultado", "Fixar"]);
+  assert.doesNotMatch(chips(markup, 'data-console-poll="p-aberta"'), /Fixada/);
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-compartilhada"'), ["Fixar"], "encerrada com o resultado compartilhado: fixa");
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-encerrada"'), ["Compartilhar resultado"], "encerrada sem compartilhar: a turma nao ve, nao fixa");
+  assert.equal(count(markup, /data-console-poll-pin="unpin"/g), 1, "um Desafixar so");
+
+  // Prontas: a copia aberta do modelo t-1 mostra Aberta; o modelo sem copia aberta, Abrir e Abrir e fixar.
+  assert.deepEqual(botoes(markup, 'data-console-poll-template="t-9"'), ["Abrir", "Abrir e fixar"]);
+  assert.deepEqual(botoes(markup, 'data-console-poll-template="t-1"'), [], "a pronta ja aberta, sem os botoes");
+});
+
+test("Enquetes: sem enquete fixada, nenhum selo; ocupada, os botoes desligados; sem poder agir, nenhum Fixar e o Abrir e fixar desligado", () => {
+  const semFixada = html(createElement(ConsolePolls, pollsProps({ pinnedPollId: null })));
+  assert.doesNotMatch(semFixada, /data-poll-pinned|data-console-poll-pin="unpin"/);
+  assert.deepEqual(botoes(semFixada, 'data-console-poll="p-fixada"'), ["Encerrar", "Compartilhar resultado", "Fixar"]);
+
+  const ocupada = html(createElement(ConsolePolls, pollsProps({ busyKey: "poll:p-fixada" })));
+  assert.match(block(ocupada, 'data-console-poll="p-fixada"', "li").match(/<button[^>]*data-console-poll-pin="unpin"[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
+  assert.doesNotMatch(block(ocupada, 'data-console-poll="p-aberta"', "li").match(/<button[^>]*data-console-poll-pin="pin"[^>]*>/)?.[0] ?? "", /\sdisabled=""/, "as outras livres");
+
+  const soLeitura = html(createElement(ConsolePolls, pollsProps({ canAct: false })));
+  assert.doesNotMatch(soLeitura, /data-console-poll-pin=/, "sem poder agir, nem Fixar nem Desafixar");
+  assert.match(chips(soLeitura, 'data-console-poll="p-fixada"'), /Fixada/, "o selo continua");
+  assert.match(soLeitura.match(/<button[^>]*data-console-poll-launch-pin=""[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
+});
+
+test("a enquete fixada pelo retrato chega a entrada Enquetes: o SessionConsole passa snapshot.pinnedPollId", () => {
+  const snapshot = {
+    askedMessageIds: [],
+    barred: null,
+    live: null,
+    messages: [],
+    pinned: null,
+    pinnedMessageId: null,
+    pinnedPollId: "p-aberta",
+    polls: { launched, templates },
+    presentNow: 3,
+    questions: [],
+    scriptFired: {},
+    scriptItems: [],
+    screen: { active: [], items: [], pending: false, stats: {} },
+    serverTime: new Date(NOW).toISOString(),
+    session: session()
+  };
+  const webinar = { durationMinutes: 60, hostUserId: "u-host", id: WEBINAR, kind: "simulated", recordingDurationSeconds: 3600, slug: "aula-de-ia", title: "Aula de IA" };
+  const markup = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions: [snapshot.session], snapshot, webinar }, permissions: { canPublish: true, canWrite: true }, serverNow: NOW }));
+  assert.match(block(markup, 'data-console-poll="p-aberta"', "li"), /data-poll-pinned=""/);
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-aberta"'), ["Encerrar", "Compartilhar resultado", "Desafixar"]);
+  assert.deepEqual(botoes(markup, 'data-console-poll="p-fixada"'), ["Encerrar", "Compartilhar resultado", "Fixar"]);
 });

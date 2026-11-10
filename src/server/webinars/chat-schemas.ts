@@ -263,7 +263,8 @@ export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
 /** Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. */
 export const savePollsSchema = z.object({ polls: z.array(pollDraftSchema).max(20, CHAT_MESSAGES.tooManyPolls), webinarId: uuidSchema });
 
-export const launchPollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema });
+/** Abrir uma enquete pronta na sessao; `pin`: o "Abrir e fixar" do console (a Na tela, R2). */
+export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });
 export const closePollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema, shareResults: z.boolean().default(false) });
 
 export const answerQuestionSchema = z.object({
