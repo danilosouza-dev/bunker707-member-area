@@ -77,10 +77,20 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
   assert.match(roomPanel, /const next = tabScrollLeft\(\{[\s\S]*?\}\);\s*if \(next !== list\.scrollLeft\) \{\s*list\.scrollLeft = next;\s*\}\s*\}, \[open, tab, tabsKey\]\);/);
 });
 
-test("a gravada: Participantes com quem apresenta e o numero do cabecalho; as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
-  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do cabecalho, pela mesma condicao");
-  assert.match(recorded, /presentNow=\{momentBadge\.showCount \? shownCount : null\}/, "o cabecalho");
-  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do cabecalho, que some com a live encerrada");
+test("a gravada: Participantes com quem apresenta e o numero do selo do palco (docs/31 §11.5); as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
+  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do selo do palco, pela mesma condicao");
+  // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
+  assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
+  assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
+  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do selo do palco, que some com a live encerrada");
+  assert.match(room, /const presentShown = phase === "ended" \? null : presentNow;\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
+  for (const [nome, fonte] of [
+    ["live-room", room],
+    ["webinar-room", recorded]
+  ]) {
+    assert.doesNotMatch(fonte.match(/<RoomHeader[\s\S]*?\/>/)?.[0] ?? "presentNow", /presentNow/, `${nome}: o cabecalho nao recebe mais o numero`);
+  }
   // O chat no estilo do YouTube (o comentario): a gravada passa o balao de antes so para a gaveta do vertical, e as duas
   // salas contam o tempo do comentario do agora do servidor (skewMs).
   assert.match(recorded, /error=\{chat\.error\}\s+look=\{vertical \? "classic" : "comment"\}\s+messages=\{translation\.messages\}/, "a gravada: o comentario no desenho normal, o balao na gaveta do vertical");

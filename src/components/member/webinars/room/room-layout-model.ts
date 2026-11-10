@@ -1,7 +1,7 @@
 // O desenho da sala do aluno V2 (docs/31 §1), a parte pura: a linha de baixo do titulo no cabecalho do computador, com
-// o numero de agora e os trechos da data (V2-3), a linha do celular (V2-18), a margem que a coluna de miniaturas do
-// iframe tira da direita do video, onde os selos de baixo (V2-4) e as pilulas do chat nao podem entrar, os botoes da
-// barra da gravada e do Replay (V2-6),
+// os trechos da data (V2-3), a linha do celular (V2-18), o selo de quem assiste agora no palco (docs/31 §11.5), a
+// margem que a coluna de miniaturas do iframe tira da direita do video, onde os selos de baixo (V2-4) e as pilulas do
+// chat nao podem entrar, os botoes da barra da gravada e do Replay (V2-6),
 // quando o painel aparece, o toque no balao (V2-7 e V2-8), o esqueleto da live, as abas do painel nas tres salas, o
 // contador de mensagens novas do balao, o primeiro foco, quando as pilulas do chat ficam no palco (V2-7 e V2-8) e quando
 // o card da Oferta tira do canto as pilulas e o selo do Assistente; na sala no estilo do YouTube, as teclas dos menus
@@ -46,45 +46,29 @@ export function roomDateLine(input: { durationMinutes: number | null; kind: Room
   return parts;
 }
 
-/** "128 assistindo agora" (o numero inteiro, nunca negativo); nulo sem contador (o Replay e a sessao encerrada passam nulo). */
-function presentPhrase(presentNow: number | null): string | null {
+/** O selo de quem assiste agora no palco: o numero que a tela mostra ("1.234") e a frase inteira ("1.234 assistindo agora"). */
+export type RoomPresentBadge = { count: string; label: string };
+
+/**
+ * O selo de quem assiste agora, ao lado do selo do momento no palco (decisao do produtor de 10/11/2026, docs/31 §11.5:
+ * o numero saiu da linha de baixo do titulo): o numero inteiro, nunca negativo, com o milhar como no Brasil, e a frase
+ * inteira para o title e o leitor de tela. Nulo sem contador (o Replay e a sessao encerrada passam nulo): o selo sai.
+ */
+export function roomPresentBadge(presentNow: number | null): RoomPresentBadge | null {
   if (typeof presentNow !== "number" || !Number.isFinite(presentNow)) {
     return null;
   }
-  return WEBINAR_COPY.salaV2.cabecalho.assistindoAgora(Math.max(0, Math.round(presentNow)));
-}
-
-/** A linha de baixo do titulo no computador: o numero de agora (ou nulo) e os trechos da data que vem depois dele. */
-export type RoomMetaLine = { present: string | null; rest: string[] };
-
-/**
- * A linha de baixo do titulo no computador, no estilo do YouTube: o numero primeiro ("128 assistindo agora", que a tela
- * marca para o e2e) e depois os trechos da data (roomDateLine), que a tela junta com " · ". Sem contador (o Replay e a
- * sessao encerrada), a linha comeca na data; no Replay, sem data e sem hora, na duracao.
- */
-export function roomMetaLine(input: { durationMinutes: number | null; kind: RoomKind; presentNow: number | null; presenterName: string | null; scheduledAt: string | null }): RoomMetaLine {
-  return {
-    present: presentPhrase(input.presentNow),
-    rest: roomDateLine({ durationMinutes: input.durationMinutes, kind: input.kind, presenterName: input.presenterName, scheduledAt: input.scheduledAt })
-  };
+  const count = Math.max(0, Math.round(presentNow));
+  return { count: count.toLocaleString("pt-BR"), label: WEBINAR_COPY.salaV2.cabecalho.assistindoAgora(count) };
 }
 
 /**
- * A linha do cabecalho abaixo de lg (V2-18), em trechos, com o numero primeiro como no computador: "128 assistindo
- * agora" e "com Danilo Souza" (antes o numero vinha por ultimo e era o primeiro a ser cortado). Sem contador (o Replay
- * e a sessao encerrada passam nulo), so o apresentador; sem apresentador, so o contador.
+ * A linha do cabecalho abaixo de lg (V2-18): so "com Danilo Souza" (o numero de quem assiste fica no palco, ao lado do
+ * selo do momento, roomPresentBadge). Sem apresentador, vazia: a linha sai.
  */
-export function roomMobileLine(input: { presenterName: string | null; presentNow: number | null }): string[] {
-  const parts: string[] = [];
-  const present = presentPhrase(input.presentNow);
-  if (present) {
-    parts.push(present);
-  }
-  const presenter = input.presenterName?.trim();
-  if (presenter) {
-    parts.push(WEBINAR_COPY.salaV2.cabecalho.com(presenter));
-  }
-  return parts;
+export function roomMobileLine(presenterName: string | null): string {
+  const presenter = presenterName?.trim();
+  return presenter ? WEBINAR_COPY.salaV2.cabecalho.com(presenter) : "";
 }
 
 /**

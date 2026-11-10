@@ -36,6 +36,7 @@ const form = await import("../src/components/admin/v2/communication/webinars/sim
 const roomSimulation = await import("../src/components/member/webinars/room/room-simulation.tsx");
 const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const stageBadges = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const roomLayout = await import("../src/components/member/webinars/room/room-layout-model.ts");
 const model = await import("../src/server/webinars/simulation-model.ts");
 const { SIMULATION_LIMITS } = await import("../src/server/webinars/model.ts");
@@ -273,24 +274,27 @@ const roomData = {
   saleNotices: [{ atMs: 30_000, text: "Carlos acabou de garantir a vaga na Formação" }]
 };
 
-test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; sem regra ligada, so o real", () => {
+test("sala: o selo de quem assiste no palco mostra o real mais a parte simulada daquele instante; sem regra ligada, so o real", () => {
   const state = roomSimulationStateOf(roomData);
   assert.equal(state.displayCount(3, 5_000), 43);
   assert.equal(state.displayCount(3, 16_000), 58);
+  // O numero somado vai para o selo do palco, ao lado do selo do momento (docs/31 §11.5); o cabecalho nao o leva mais.
+  const present = roomLayout.roomPresentBadge(state.displayCount(3, 16_000));
+  assert.deepEqual(present, { count: "58", label: "58 assistindo agora" });
+  const palco = html(createElement(stageBadges.RoomStageBadges, { assistantOn: false, present, presenterName: null, recording: false, topLeft: { kind: "session", timeLabel: "20:00" } }));
+  assert.match(palco, /Sessão das 20:00<\/span><span class="[^"]*" data-testid="room-present" title="58 assistindo agora">[\s\S]*?<span aria-hidden="true">58<\/span><span class="sr-only">58 assistindo agora<\/span>/);
   const markup = html(
     createElement(header.RoomHeader, {
-      metaLine: roomLayout.roomMetaLine({ durationMinutes: 60, kind: "simulated", presentNow: state.displayCount(3, 16_000), presenterName: null, scheduledAt: "2026-11-05T23:00:00.000Z" }),
-      mobileLine: roomLayout.roomMobileLine({ presenterName: null, presentNow: state.displayCount(3, 16_000) }).join(" · "),
+      metaLine: roomLayout.roomDateLine({ durationMinutes: 60, kind: "simulated", presenterName: null, scheduledAt: "2026-11-05T23:00:00.000Z" }).join(" · "),
+      mobileLine: roomLayout.roomMobileLine(null),
       onLeave: () => undefined,
       onToggleTheme: () => undefined,
-      presentNow: state.displayCount(3, 16_000),
       theme: "dark",
       title: "Aula de IA"
     })
   );
-  assert.match(markup, /data-testid="room-present">58 assistindo agora</, "no computador, no comeco da linha");
-  assert.match(markup, /data-room-line="meta"><span data-testid="room-present">58 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min</);
-  assert.match(markup, /data-testid="room-mobile-line">58 assistindo agora</, "e na linha do celular");
+  assert.match(markup, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min</);
+  assert.doesNotMatch(markup, /assistindo|room-present|room-mobile-line/, "o cabecalho sem o numero; sem apresentador, sem a linha do celular");
 
   const nada = roomSimulationStateOf(model.EMPTY_SIMULATION_ROOM);
   assert.equal(nada.displayCount(3, 16_000), 3);

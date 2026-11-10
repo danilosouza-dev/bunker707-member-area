@@ -10,7 +10,7 @@ import { ROOM_THEME_KEY } from "../../src/lib/webinar-room-prefs";
 // setCurrentTime(~90) da trava, "Ativar som" liga o som, a linha mestre aparece no segundo certo (a de 100 s
 // chega; a de 20 min nao), a mensagem nova aparece numa segunda aba pela consulta de 5 s depois do aceite
 // (o texto de §8.5), Esc pede confirmacao e Sair volta para a pagina da live, e a 375 px tudo cabe. O selo Ao vivo fica
-// no palco (docs/31 V2-4) e o "{n} assistindo" no cabecalho (V2-3). A IA Diretor fica
+// no palco (docs/31 V2-4) com quem assiste agora ao lado dele (docs/31 §11.5). A IA Diretor fica
 // na pagina da live e some na sala (o botao flutuante cobria o Enviar do chat), e o cabecalho da sala tem a logo da
 // escola. Sem Minimizar e sem pilula (docs/31 V2-2): o topo do vertical tem so o Sair.
 // Fase 4d (docs/30 §1.6 e §6.6): com o celular em pe (375 x 740) a sala abre na Sala Live vertical 9:16 (o video
@@ -66,10 +66,13 @@ test("Entrar 90 s depois do inicio: a sala abre, o player falso recebe setCurren
   await expect(palco.getByText(/^Ao vivo/).filter({ visible: true })).toBeVisible();
   await expect(palco.getByTestId("room-on-air")).toBeVisible();
   await expect(sala.locator("header").getByText(/^Ao vivo/)).toHaveCount(0);
-  // "{n} assistindo agora" no comeco da linha de baixo do titulo no computador; a linha do celular (com o mesmo numero)
-  // fica escondida.
-  await expect(sala.getByTestId("room-present")).toHaveText(/1 assistindo/);
-  await expect(sala.getByText(/1 assistindo/).filter({ visible: true })).toBeVisible();
+  // Quem assiste agora: o selo com o icone de pessoas e o numero, no palco ao lado do selo do momento (docs/31 §11.5);
+  // a frase inteira fica no title. O cabecalho nao leva mais o numero.
+  const quemAssiste = palco.getByTestId("room-present");
+  await expect(quemAssiste).toBeVisible();
+  await expect(quemAssiste).toHaveAttribute("title", "1 assistindo agora");
+  await expect(quemAssiste.locator("svg")).toBeVisible();
+  await expect(sala.locator("header").getByText(/assistindo/)).toHaveCount(0);
   // A sala cobre o topo da area: no computador, a logo da escola no cabecalho da sala, sem link.
   await expect(sala.getByRole("img", { name: "Bunker707" })).toBeVisible();
   await expect(sala.getByRole("link", { name: "Bunker707" })).toHaveCount(0);

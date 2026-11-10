@@ -62,8 +62,9 @@ import {
   panelToggleStep,
   railStep,
   roomEscapeStep,
-  roomMetaLine,
+  roomDateLine,
   roomMobileLine,
+  roomPresentBadge,
   roomPanelShown,
   stageVideoRightPx,
   type RoomPanelTab
@@ -590,10 +591,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const notice = useMemo(() => roomNotice ?? pendingToggleSnack(pendingPhrase), [pendingPhrase, roomNotice]);
   const stage = stageNames(room.signals.participants, presenterName);
   const startedAt = live.startedAt ?? session.session.startedAt;
-  // "{n} assistindo agora" some com a live encerrada (no cabecalho do computador e na linha do celular).
+  // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   const presentShown = phase === "ended" ? null : presentNow;
-  const metaLine = roomMetaLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presentNow: presentShown, presenterName, scheduledAt: session.session.scheduledAt });
-  const mobileLine = roomMobileLine({ presenterName, presentNow: presentShown }).join(" · ");
+  const presentBadge = roomPresentBadge(presentShown);
+  const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
+  const mobileLine = roomMobileLine(presenterName);
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
   const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals, joined), touch: geometry.touch });
@@ -952,7 +954,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
         mobileLine={mobileLine}
         onLeave={askToLeave}
         onToggleTheme={toggleTheme}
-        presentNow={presentShown}
         theme={theme}
         title={session.webinar.title}
       />
@@ -991,6 +992,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               {barShown ? (
                 <RoomStageBadges
                   assistantOn={phase === "live" && assistant.state.enabled}
+                  present={presentBadge}
                   presenterName={phase === "live" ? presenterBadgeFor({ joined, presenterName, signals: room.signals }) : null}
                   recording={recording}
                   topLeft={stageMoment === "on_air" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : stageMoment === "waiting" ? { kind: "waiting" } : null}

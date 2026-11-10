@@ -210,7 +210,8 @@ test("o chat por cima mostra as mensagens que a traducao devolveu (nunca as reve
   // O mesmo hook vale no desenho normal (o painel do chat mostra as traduzidas tambem).
   const normal = sala("normal");
   assert.match(elementWith(normal, 'data-testid="room-chat"'), /EN: welcome everyone/);
-  assert.match(normal, /122 assistindo/, "o contador somado no cabecalho normal");
+  assert.match(normal, /data-testid="room-present" title="122 assistindo agora">/, "o contador somado no selo do palco do desenho normal (docs/31 §11.5)");
+  assert.doesNotMatch(normal.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /assistindo/, "e fora do cabecalho");
 });
 
 test("os lugares do vertical: o aviso de venda no topo (abaixo da barra), a pilula da Oferta acima do campo, as bolhas a direita", () => {

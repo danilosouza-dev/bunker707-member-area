@@ -7,9 +7,10 @@ import "./support/transpile-tsx.mjs";
 // viewOnJoin, filmstripStep e stagePollFor), no lugar das conferencias de texto do codigo-fonte que elas substituem.
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
-// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (no estilo do YouTube, roomMetaLine, com o numero primeiro), a
-// do celular (tambem com o numero primeiro) e a margem que a coluna de miniaturas do iframe
-// tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
+// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (roomDateLine), a do celular (so quem apresenta), o selo de
+// quem assiste agora no palco (roomPresentBadge, docs/31 §11.5: o numero saiu da linha do titulo), a margem que a coluna
+// de miniaturas do iframe tira da direita do video (room-layout-model.ts) e o selo do momento no palco da live (no ar
+// ou na espera).
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
 // F6 (V2-9): a hora e o papel da linha de baixo do balao do chat (webinar-room-client.ts).
@@ -158,30 +159,30 @@ test("roomDateLine (V2-3): a data, a hora, a duracao e quem apresenta; no Replay
   assert.equal(linha({ durationMinutes: 0, kind: "replay", presenterName: null }), "", "nada a dizer: a linha fica vazia");
 });
 
-test("roomMetaLine (V2-3, no estilo do YouTube): o numero primeiro ('3 assistindo agora') e depois os trechos da data; sem contador (Replay, encerrada), a linha comeca na data; no Replay, sem data", () => {
-  const base = { durationMinutes: 60, kind: "live", presentNow: 3, presenterName: "Danilo Souza", scheduledAt: "2026-11-05T23:00:00.000Z" };
-  const meta = (extra = {}) => layout.roomMetaLine({ ...base, ...extra });
-  assert.deepEqual(meta(), { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] });
-  assert.deepEqual(meta().rest, layout.roomDateLine(base), "o resto e a linha da data de sempre");
-  assert.deepEqual(meta({ presentNow: null }), { present: null, rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] }, "encerrada: sem o numero, comeca na data");
-  assert.deepEqual(meta({ kind: "replay", presentNow: null }), { present: null, rest: ["60 min", "com Danilo Souza"] }, "no Replay: sem o numero, sem data e sem hora");
-  assert.deepEqual(meta({ kind: "simulated", presentNow: 58 }).present, "58 assistindo agora", "a gravada com o numero somado da Simulacao");
-  assert.equal(meta({ presentNow: 1 }).present, "1 assistindo agora");
-  assert.equal(meta({ presentNow: 0 }).present, "0 assistindo agora", "zero tambem e numero");
-  assert.equal(meta({ presentNow: -4 }).present, "0 assistindo agora", "nunca negativo");
-  assert.equal(meta({ presentNow: 2.6 }).present, "3 assistindo agora", "inteiro");
-  assert.equal(meta({ presentNow: Number.NaN }).present, null, "sem numero de verdade, sem o trecho");
-  assert.equal(meta({ presentNow: 1234 }).present, "1.234 assistindo agora", "o milhar como no Brasil");
+test("roomPresentBadge (docs/31 §11.5): o selo de quem assiste agora no palco, com o numero ('1.234') e a frase inteira ('1.234 assistindo agora'); sem contador (Replay, encerrada), nulo", () => {
+  assert.deepEqual(layout.roomPresentBadge(3), { count: "3", label: "3 assistindo agora" });
+  assert.deepEqual(layout.roomPresentBadge(1), { count: "1", label: "1 assistindo agora" });
+  assert.deepEqual(layout.roomPresentBadge(0), { count: "0", label: "0 assistindo agora" }, "zero tambem e numero");
+  assert.deepEqual(layout.roomPresentBadge(-4), { count: "0", label: "0 assistindo agora" }, "nunca negativo");
+  assert.deepEqual(layout.roomPresentBadge(2.6), { count: "3", label: "3 assistindo agora" }, "inteiro");
+  assert.deepEqual(layout.roomPresentBadge(1234), { count: "1.234", label: "1.234 assistindo agora" }, "o milhar como no Brasil");
+  assert.equal(layout.roomPresentBadge(null), null, "o Replay e a encerrada nao tem contador: o selo sai");
+  assert.equal(layout.roomPresentBadge(Number.NaN), null, "sem numero de verdade, sem o selo");
+  assert.equal(layout.roomPresentBadge(Number.POSITIVE_INFINITY), null);
 });
 
-test("roomMobileLine (V2-18, no estilo do YouTube): '{n} assistindo agora · com {apresentador}', o numero primeiro; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 3 }).join(" · "), "3 assistindo agora · com Danilo Souza");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "1 assistindo agora · com Danilo Souza");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1234 }).join(" · "), "1.234 assistindo agora · com Danilo Souza");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador: so o apresentador");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 3 }), ["3 assistindo agora"], "sem apresentador, so o numero");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "   ", presentNow: 0 }), ["0 assistindo agora"], "nome em branco tambem; zero tambem e numero");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: null }), []);
+test("roomMobileLine (V2-18): so 'com {apresentador}' (o numero de quem assiste fica no palco, docs/31 §11.5); sem apresentador, a linha sai", () => {
+  assert.equal(layout.roomMobileLine("Danilo Souza"), "com Danilo Souza");
+  assert.equal(layout.roomMobileLine("  Danilo Souza  "), "com Danilo Souza", "sem os espacos das pontas");
+  assert.equal(layout.roomMobileLine(null), "");
+  assert.equal(layout.roomMobileLine("   "), "", "nome em branco tambem");
+});
+
+test("a linha de baixo do titulo nao leva mais o numero de quem assiste (docs/31 §11.5): roomDateLine nao recebe o contador e o modelo nao exporta mais roomMetaLine", () => {
+  assert.equal(layout.roomMetaLine, undefined, "a linha com o numero saiu");
+  const linha = layout.roomDateLine({ durationMinutes: 60, kind: "live", presenterName: "Danilo Souza", presentNow: 128, scheduledAt: "2026-11-05T23:00:00.000Z" }).join(" · ");
+  assert.equal(linha, "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza");
+  assert.doesNotMatch(linha, /assistindo|128/);
 });
 
 test("assistindoAgora: '1 assistindo agora' e, com mais de um, o numero com o milhar do pt-BR", () => {

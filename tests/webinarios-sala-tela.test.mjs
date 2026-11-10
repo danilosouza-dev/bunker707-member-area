@@ -5,10 +5,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // A Sala desenhada (docs/30 §1.3 adaptado a §1.6, §1.7, §8.5 e §9; docs/18 §2.2): os pedacos desenhados no Node,
-// sem navegador. O cabecalho V2 no estilo do YouTube (docs/31 V2-3: 64 px a partir de lg, o titulo, a linha que comeca
-// por "{n} assistindo agora" com a data, a duracao e quem apresenta, o tema sem contorno e o Sair em pilula vermelha;
-// Replay sem contador), os selos do palco da gravada (V2-4: "Ao vivo" so com a
-// decisao da equipe, senao "Sessao das 20:00"; Replay; quem apresenta), o palco nos estados (espera com a contagem,
+// sem navegador. O cabecalho V2 no estilo do YouTube (docs/31 V2-3: 64 px a partir de lg, o titulo, a linha com a
+// data, a duracao e quem apresenta, sem o numero de quem assiste, o tema sem contorno e o Sair em pilula vermelha), os
+// selos do palco da gravada (V2-4: "Ao vivo" so com a decisao da equipe, senao "Sessao das 20:00"; Replay; quem
+// apresenta; e, ao lado do selo do momento, o selo de quem assiste agora, docs/31 §11.5), o palco nos estados (espera com a contagem,
 // no ar com o iframe da Bunny coberto e "Ativar som", encerrada com "Assistir de novo" quando ha replay), o chat (no
 // estilo do YouTube, o comentario: o avatar de 24, o nome, o selo tonal do papel e o tempo relativo, a minha com "Você"
 // sem inverter, a pendente "Aguardando a equipe" na linha de acoes, a fixada no bloco do topo, o ⋮ no cabecalho do
@@ -55,13 +55,12 @@ const msg = (id, extra = {}) => ({ body: `texto ${id}`, displayName: "Ana S.", i
 /** A mensagem da Live ao vivo, com a hora que o servidor gravou (sentAt): a live das 20:00 mais o offset dado. */
 const naLive = (id, offsetMs, extra = {}) => msg(id, { offsetMs, sentAt: new Date(T0 + offsetMs).toISOString(), ...extra });
 
-/** As props do cabecalho V2 (V2-3), como a sala monta: a linha do computador (roomMetaLine) e a do celular ja junta. */
+/** As props do cabecalho V2 (V2-3), como a sala monta: a linha do computador (roomDateLine, ja junta) e a do celular. */
 const HEADER = {
-  metaLine: { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] },
-  mobileLine: "3 assistindo agora · com Danilo Souza",
+  metaLine: "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza",
+  mobileLine: "com Danilo Souza",
   onLeave: noop,
   onToggleTheme: noop,
-  presentNow: 3,
   theme: "dark",
   title: "Aula de IA"
 };
@@ -69,7 +68,7 @@ const HEADER = {
 const buttonNames = (html) =>
   [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => attrs.match(/aria-label="([^"]+)"/)?.[1] ?? inner.replace(/<[^>]+>/g, "").trim());
 
-test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha que comeca por '3 assistindo agora', o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
+test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 20/28 peso 700, a linha da data sem o numero de quem assiste (docs/31 §11.5), o Sair e, por ultimo, o tema; nenhum selo, sem traco e sem Minimizar (V2-2)", () => {
   const html = render(header.RoomHeader, HEADER);
   const casca = (html.match(/<header class="([^"]*)">/)?.[1] ?? "").split(" ");
   assert.ok(casca.includes("h-14") && casca.includes("lg:h-16"), `56 px no celular, 64 a partir de lg: ${casca.join(" ")}`);
@@ -80,17 +79,14 @@ test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 2
     assert.ok(titulo.includes(classe), `${classe} no titulo: ${titulo.join(" ")}`);
   }
   assert.ok(!titulo.includes("font-extrabold") && !titulo.some((nome) => nome.startsWith("lg:text-[")), "sem o 22/800 de antes");
-  // A linha do computador: o numero primeiro, marcado para o e2e, e depois a data, a hora, a duracao e quem apresenta.
-  assert.match(
-    html,
-    /<p class="hidden [^"]*lg:block" data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/,
-    "a linha do computador comeca pelo numero"
-  );
+  // A linha do computador: a data, a hora, a duracao e quem apresenta. O numero de quem assiste saiu dela (docs/31
+  // §11.5: virou selo do palco, ao lado do selo do momento).
+  assert.match(html, /<p class="hidden [^"]*lg:block" data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "a linha do computador e so a data");
   const meta = (html.match(/<p class="([^"]*)" data-room-line="meta">/)?.[1] ?? "").split(" ");
   assert.ok(["text-sm", "font-medium", "leading-5", "text-room-fg-subtle", "truncate"].every((classe) => meta.includes(classe)), `14/20 peso 500, com reticencias: ${meta.join(" ")}`);
-  const celular = (html.match(/<p class="([^"]*)" data-testid="room-mobile-line">3 assistindo agora · com Danilo Souza<\/p>/)?.[1] ?? "").split(" ");
+  const celular = (html.match(/<p class="([^"]*)" data-testid="room-mobile-line">com Danilo Souza<\/p>/)?.[1] ?? "").split(" ");
   assert.ok(["text-xs", "leading-4", "font-medium", "lg:hidden"].every((classe) => celular.includes(classe)), `a linha do celular em 12/16 abaixo de lg: ${celular.join(" ")}`);
-  assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, dentro da linha (o canto direito saiu)");
+  assert.doesNotMatch(html, /room-present|assistindo/, "o numero de quem assiste nao fica mais no cabecalho");
   assert.doesNotMatch(html, /bg-room-divider|lucide-users/, "sem o traco e sem o icone de pessoas no cabecalho");
   // O Sair antes do tema, com a barra e sem ela: o tema e sempre o ultimo (a partir de lg, sobre o trilho, tambem sem a
   // barra, quando o Sair do cabecalho fica em toda largura), e o fim da sessao nao troca os dois de lugar.
@@ -99,41 +95,67 @@ test("cabecalho no estilo do YouTube (V2-3): 64 px a partir de lg, o titulo em 2
   assert.match(html, /<span class="relative hidden sm:inline-flex"><button aria-label="Tema claro"/, "o tema so a partir de sm (abaixo, o cabecalho nao tem largura, V2-18), sem deixar um vao vazio");
   assert.doesNotMatch(html, /Ao vivo|Sessão das|Replay|Gravando|Minimizar/, "nenhum selo no cabecalho (V2-4) e sem Minimizar (V2-2)");
 
-  // Replay e sessao encerrada: a sala passa o contador nulo; a linha comeca na data (no Replay, na duracao).
-  const replay = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: ["60 min", "com Danilo Souza"] }, mobileLine: "com Danilo Souza", presentNow: null });
-  assert.doesNotMatch(replay, /assistindo|room-present/, "o replay nao tem contador");
-  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "sem o numero, a linha comeca na duracao");
-  // O contador nulo tira o numero da linha mesmo que ela o traga.
-  assert.doesNotMatch(render(header.RoomHeader, { ...HEADER, presentNow: null }), /room-present|assistindo agora<\/span>/);
-  // So o numero, sem data: sem o separador sozinho no fim.
-  assert.match(render(header.RoomHeader, { ...HEADER, metaLine: { present: "1 assistindo agora", rest: [] }, presentNow: 1 }), /data-room-line="meta"><span data-testid="room-present">1 assistindo agora<\/span><\/p>/);
+  // No Replay a linha comeca na duracao (sem data e sem hora).
+  const replay = render(header.RoomHeader, { ...HEADER, metaLine: "60 min · com Danilo Souza" });
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/);
   // Sem linha (nada a dizer), o paragrafo nao entra.
-  const vazio = render(header.RoomHeader, { ...HEADER, metaLine: { present: null, rest: [] }, mobileLine: "", presentNow: null });
+  const vazio = render(header.RoomHeader, { ...HEADER, metaLine: "", mobileLine: "" });
   assert.doesNotMatch(vazio, /data-room-line="meta"|room-mobile-line/);
 });
 
-test("a sala gravada monta o cabecalho V2 com os dados dela: o numero primeiro, a data e a hora de Sao Paulo, a duracao e quem apresenta; no Replay, sem data, sem hora e sem contador", () => {
+test("a sala gravada monta o cabecalho V2 com os dados dela: a data e a hora de Sao Paulo, a duracao e quem apresenta, sem o numero de quem assiste; no Replay, sem data e sem hora", () => {
   // A sessao marcada para as 20:00 de Sao Paulo (T0), no ar ha 2 min.
   const noAr = (extra = {}, sessionExtra = {}) => payload(extra, { offsetMs: 120_000, scheduledAt: new Date(T0).toISOString(), ...sessionExtra });
   const props = { coverUrl: null, payload: noAr(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
   const cabecalho = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
   const gravada = cabecalho(render(room.WebinarRoom, props));
-  assert.match(gravada, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
-  assert.match(gravada, /data-testid="room-mobile-line">2 assistindo agora · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+  assert.match(gravada, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
   assert.doesNotMatch(gravada, /Ao vivo|Sessão das/, "o selo do momento fica no palco");
+  assert.doesNotMatch(gravada, /assistindo|room-present/, "o numero de quem assiste fica no palco (docs/31 §11.5)");
 
   const semApresentador = cabecalho(render(room.WebinarRoom, { ...props, presenterName: null }));
-  assert.match(semApresentador, /data-room-line="meta"><span data-testid="room-present">2 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
-  assert.match(semApresentador, /data-testid="room-mobile-line">2 assistindo agora<\/p>/);
+  assert.match(semApresentador, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min<\/p>/, "sem apresentador, sem o trecho");
+  assert.doesNotMatch(semApresentador, /room-mobile-line/, "sem apresentador, a linha do celular sai");
 
   const replay = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
-  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "no replay sem o numero, sem data e sem hora: a linha comeca em 60 min");
+  assert.match(replay, /data-room-line="meta">60 min · com Danilo Souza<\/p>/, "no replay sem data e sem hora: a linha comeca em 60 min");
   assert.match(replay, /data-testid="room-mobile-line">com Danilo Souza<\/p>/);
-  assert.doesNotMatch(replay, /assistindo/, "o replay nao tem contador");
 
   const encerrada = cabecalho(render(room.WebinarRoom, { ...props, payload: noAr({}, { roomPhase: "ended", status: "ended" }) }));
-  assert.doesNotMatch(encerrada, /assistindo/, "encerrada, sem contador");
-  assert.match(encerrada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, "encerrada, a linha comeca na data");
+  assert.match(encerrada, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/);
+});
+
+test("o selo de quem assiste agora fica no palco, ao lado do selo do momento (docs/31 §11.5): o icone de pessoas e o numero, com a frase inteira no title e para o leitor de tela; some no Replay e com a sessao encerrada", () => {
+  const props = { coverUrl: null, payload: payload(), presenterName: "Danilo Souza", readOnly: false, webinarHref: "/webinarios/aula-de-ia" };
+  const caixa = (html) => {
+    const inicio = html.indexOf('data-room-slot="stage-box"');
+    return html.slice(inicio, html.indexOf('data-room-slot="bubbles"', inicio));
+  };
+  const selo = (html) => html.match(/<span class="([^"]*)" data-testid="room-present" title="([^"]*)">([\s\S]*?)<\/span><\/span>/);
+
+  // Com o "Ao vivo" ligado pela equipe (D10): logo depois do selo vermelho, na mesma fileira de cima a esquerda.
+  const aoVivo = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: true }) }));
+  assert.match(aoVivo, /data-testid="room-on-air">[\s\S]*?<\/span><\/span><span class="[^"]*" data-testid="room-present"/, "o numero vem logo depois do Ao vivo");
+  const [, classes, titulo, dentro] = selo(aoVivo) ?? [];
+  assert.equal(titulo, "2 assistindo agora", "a frase inteira no title");
+  assert.ok((classes ?? "").split(" ").includes("pointer-events-none") && (classes ?? "").includes("bg-black/60") && (classes ?? "").split(" ").includes("tabular-nums"), `a pilula neutra sobre o video, sem receber o toque: ${classes}`);
+  assert.match(dentro ?? "", /^<svg[^>]*lucide-users[^>]*aria-hidden="true"[\s\S]*?<\/svg><span aria-hidden="true">2<\/span><span class="sr-only">2 assistindo agora$/, "o icone de pessoas, o numero para quem ve e a frase para o leitor de tela");
+  assert.equal((aoVivo.match(/data-testid="room-present"/g) ?? []).length, 1, "uma vez so");
+
+  // Sem a decisao da equipe ("Sessão das 19:58"), o numero tambem vem ao lado do selo do momento.
+  const sessao = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { showLiveBadge: false }) }));
+  assert.match(sessao, /Sessão das 19:58 · <span class="tabular-nums">[0-9:]+<\/span><\/span><span class="[^"]*" data-testid="room-present" title="2 assistindo agora">/);
+
+  // O numero somado da Simulacao e o milhar como no Brasil saem do mesmo selo (roomPresentBadge).
+  const cheia = caixa(render(room.WebinarRoom, { ...props, payload: payload({ presentNow: 1234 }, { showLiveBadge: true }) }));
+  assert.match(cheia, /data-testid="room-present" title="1\.234 assistindo agora">[\s\S]*?<span aria-hidden="true">1\.234<\/span>/);
+
+  // Replay e sessao encerrada: sem contador (a encerrada nem tem selos no palco).
+  const replay = caixa(render(room.WebinarRoom, { ...props, payload: payload({}, { kind: "replay", offsetMs: null, roomPhase: null }) }));
+  assert.doesNotMatch(replay, /room-present|assistindo/, "o replay nao tem contador");
+  const encerrada = render(room.WebinarRoom, { ...props, payload: payload({}, { roomPhase: "ended", status: "ended" }) });
+  assert.doesNotMatch(encerrada, /room-present|assistindo/, "encerrada, sem contador");
 });
 
 test("selos do palco da gravada (V2-4, a regra D10): Ao vivo so com a decisao da equipe, senao Sessao das 20:00 com o tempo; Replay sem selo embaixo; quem apresenta embaixo a esquerda", () => {
@@ -300,15 +322,12 @@ test("cabecalho no tema claro (V2-3, opcao C): a logo padrao fica preta (brightn
     assert.ok(!classes(escuro).includes("brightness-0"), `no escuro, ${logoImage} sem filtro`);
   }
 
-  // O numero saiu do canto e foi para o comeco da linha de baixo do titulo: nenhum traco entre ele e o tema, com ou sem
-  // o contador, nos dois temas.
+  // O numero de quem assiste saiu do cabecalho (docs/31 §11.5): nenhum contador e nenhum traco antes do tema, nos dois
+  // temas.
   for (const theme of ["dark", "light"]) {
-    const comContador = comMarca({ logoImage: LOGO }, { theme });
-    assert.match(comContador, /data-room-line="meta"><span data-testid="room-present">3 assistindo agora<\/span>/, `${theme}: o numero na linha`);
-    assert.doesNotMatch(comContador, /bg-room-divider/, `${theme}: sem o traco`);
-    const semContador = comMarca({ logoImage: LOGO }, { presentNow: null, theme });
-    assert.doesNotMatch(semContador, /room-present/);
-    assert.doesNotMatch(semContador, /bg-room-divider/, `${theme}: sem o contador, tambem sem traco`);
+    const cabecalho = comMarca({ logoImage: LOGO }, { theme });
+    assert.match(cabecalho, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza<\/p>/, `${theme}: a linha da data`);
+    assert.doesNotMatch(cabecalho, /room-present|bg-room-divider/, `${theme}: sem o contador e sem o traco`);
   }
 });
 
