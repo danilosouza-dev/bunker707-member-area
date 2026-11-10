@@ -527,7 +527,7 @@ test("o balao da sala (RoomChatBubble) sem as props do console (a origem, as aco
   assert.equal(render(chat.RoomChatBubble, { footer: createElement("p", null, "rodape"), message: msg("3"), time: "" }), antes.semHora);
 });
 
-test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o chat curto embaixo; o ⋮ no cabecalho do painel a partir de lg (o ⋯ da linha do campo so abaixo de lg); compositor desligado, so a equipe, modo lento e encerrada", () => {
+test("chat: a fixada saiu do chat (a area das fixadas do painel, Na tela), a lista em role=log com o chat curto embaixo; o ⋮ no cabecalho do painel a partir de lg (o ⋯ da linha do campo so abaixo de lg); compositor desligado, so a equipe, modo lento e encerrada", () => {
   const base = {
     chatMode: "open",
     consented: true,
@@ -547,15 +547,11 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   const html = render(chat.RoomChatPanel, base);
   assert.match(html, /role="log"/);
   assert.match(html, /aria-live="off"/, "em lista cheia o leitor de tela ouve so a contagem");
-  // A fixada: um bloco fora do log, no topo, com a linha de 1 px embaixo; o comentario com "Fixada pela equipe" e o
-  // alfinete acima do nome (o nome igual ao papel: so o selo).
-  const fixada = html.match(/<div class="([^"]*)" data-testid="room-pinned">([\s\S]*?)<ol /);
-  assert.ok(fixada, "a fixada antes da lista");
-  assert.deepEqual(temTodasAs(fixada[1], ["border-b", "border-room-panel-border", "px-4", "py-3"]), []);
-  assert.doesNotMatch(fixada[1], /bg-room-pinned|uppercase/);
-  assert.match(fixada[2], /^<div class="flex" data-room-message="p">/, "o comentario fora da lista nao e um <li>");
-  assert.match(fixada[2], /lucide-pin[^"]*size-3[\s\S]*?Fixada pela equipe<\/p><p aria-hidden="true"[^>]*data-room-message-meta="">[\s\S]*?>Equipe<\/span>/, "Fixada pela equipe acima da linha do autor");
-  assert.match(fixada[2], /<span class="sr-only">Equipe: <\/span>link da apostila/);
+  // A fixada saiu do chat (Na tela, especificacao de 10/11/2026, §3.1): ela e a area das fixadas do proprio painel, em
+  // toda aba (screen/room-pinned.tsx; o desenho dela em tests/webinarios-na-tela-tela.test.mjs). A fixada que a sala de
+  // antes ainda mandasse para o chat nao aparece aqui: o chat comeca pela lista.
+  assert.doesNotMatch(html, /data-testid="room-pinned"|Fixada pela equipe|link da apostila/);
+  assert.match(html, /^<div class="flex min-h-0 flex-1 flex-col" data-testid="room-chat"><ol /, "a lista e o primeiro filho do chat");
   // Sai a linha do rotulo "Chat" (repetia o nome da aba): o nome fica so na lista.
   assert.doesNotMatch(html, />Chat</);
   assert.match(html, /<ol aria-label="Chat"/);

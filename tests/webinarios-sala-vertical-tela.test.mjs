@@ -299,7 +299,7 @@ test("a enquete aberta vira um botao no chat por cima (abre a gaveta em Enquetes
  * ---------------------------------------------------------------------------------------------- */
 
 test("chat por cima: so as ultimas 6 e Ver mais mensagens (44 px); vazio fica vazio; a falha aparece", () => {
-  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, openPollQuestion: null, pinned: null, replay: false };
+  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, pinned: null, pollButton: null, replay: false };
   const many = Array.from({ length: 9 }, (_, index) => msg(String(index + 1)));
   const html = render(verticalChat.VerticalChat, { ...base, messages: many });
   assert.equal((html.match(/data-room-message=/g) ?? []).length, 6);
@@ -317,7 +317,7 @@ test("chat por cima: so as ultimas 6 e Ver mais mensagens (44 px); vazio fica va
 });
 
 test("chat por cima do video continua com o item de antes (V2-18): o nome em cima com o selo do papel e a pendente, o texto embaixo; nada do balao do painel (V2-9)", () => {
-  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, openPollQuestion: null, pinned: null, replay: false };
+  const base = { error: null, joins: null, onMore: noop, onOpenPoll: noop, pinned: null, pollButton: null, replay: false };
   const html = render(verticalChat.VerticalChat, {
     ...base,
     messages: [

@@ -8,11 +8,18 @@
 // (RoomMenu), o tempo da dica (RoomTooltip) e o toque no trilho a direita (RoomRail). Sem "use client" e com imports relativos: os testes de modelo
 // (tests/webinarios-sala-v2-modelo.test.mjs, tests/webinarios-sala-yt-modelo.test.mjs) carregam direto pelo Node. Nada aqui le o relogio nem a tela: tudo chega por
 // parametro.
+// A Na tela, as fixadas do aluno (especificacao de 10/11/2026, §3.1 e §3.6): quando a mensagem e a enquete fixadas
+// aparecem, qual e a enquete fixada na lista do aluno (e as outras, para a aba Enquetes e o card "deixou para depois"),
+// quando as pilulas do palco e as linhas da faixa aparecem com o painel fechado, o que a pilula da enquete faz, o texto
+// de uma linha da pilula, a dica do corte de 3 (ou 2) linhas antes da medida, o aviso "A equipe fixou uma mensagem."
+// so na chegada de uma fixada nova com o painel fechado e o botao de enquete do chat da sala vertical.
 
 import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { newMessageCount, type RoomMessage } from "../../../../lib/webinar-room-client";
 import { formatWebinarDayLong, saoPauloTime } from "../../../../lib/webinar-time";
+import type { StudentPoll } from "../../../../server/webinars/room-rules";
+import type { RoomSnack } from "./room-snackbar-model";
 import type { RoomDesign, RoomSkeletonState } from "./vertical/vertical-model";
 
 /** O tipo da sala: a Live ao vivo, a Live gravada (simulated) ou o Replay livre. */
@@ -448,4 +455,106 @@ function tooltipNext(state: TooltipState, event: TooltipEvent): TooltipState {
     case "elapsed":
       return state === "showing" ? "shown" : state === "hiding" ? "hidden" : state;
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A Na tela: a mensagem e a enquete fixadas do aluno (especificacao de 10/11/2026, §3.1 e §3.6)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * As fixadas aparecem na Live ao vivo e na gravada, na espera e no ar (§3.6). No Replay (sem equipe), com a sessao
+ * encerrada (ou o video da gravada no fim) e para quem foi removido, banido ou saiu do acesso, nao: a area, as pilulas,
+ * as linhas da faixa e o aviso saem juntos.
+ */
+export function pinnedShownIn(input: { blocked: boolean; kind: RoomKind; phase: string }): boolean {
+  return input.kind !== "replay" && input.phase !== "ended" && !input.blocked;
+}
+
+/**
+ * A enquete fixada, como o aluno a tem (a lista da sala, useRoomPolls): a aberta ou a encerrada com o resultado
+ * compartilhado. A que saiu da lista (encerrada sem compartilhar, que a equipe desafixa) ou que ainda nao chegou na
+ * leitura das enquetes fica de fora: nada fixado aparece sem a enquete de verdade.
+ */
+export function pinnedPollFor(input: { pinnedPollId: string | null; polls: readonly StudentPoll[] }): StudentPoll | null {
+  if (!input.pinnedPollId) {
+    return null;
+  }
+  return input.polls.find((poll) => poll.id === input.pinnedPollId) ?? null;
+}
+
+/**
+ * As enquetes sem a fixada: a aba Enquetes (o cartao fixado nao se repete, ele ja esta na area das fixadas, em toda aba)
+ * e o card "você deixou para depois" (o "Responder depois" da enquete fixada manda para a area das fixadas).
+ */
+export function unpinnedPolls<T extends Pick<StudentPoll, "id">>(polls: readonly T[], pinnedPollId: string | null): T[] {
+  return pinnedPollId ? polls.filter((poll) => poll.id !== pinnedPollId) : [...polls];
+}
+
+/**
+ * As pilulas das fixadas no palco (a partir de 640 px de palco) e as linhas da faixa abaixo dele (o palco mais
+ * estreito): so no desenho normal (o vertical tem a linha dele acima do chat), com o painel fechado (aberto, a area
+ * das fixadas ja esta nele, em toda aba) e fora da frase de removido ou banido e de Configurações no lugar do chat no
+ * celular (o palco fica com 96 px).
+ */
+export function pinnedPillsShown(input: { blocked: boolean; design: RoomDesign; panelShown: boolean; settingsTakeover: boolean }): boolean {
+  return input.design === "normal" && !input.panelShown && !input.blocked && !input.settingsTakeover;
+}
+
+/**
+ * O toque na pilula "Enquete fixada · {pergunta}" (e na linha dela na faixa): a enquete aberta que o aluno ainda nao
+ * respondeu volta ao meio do palco (`stage`, como o Responder agora, deixada para depois ou nao); respondida ou
+ * encerrada com o resultado, abre o painel, onde a area das fixadas a mostra (`panel`).
+ */
+export function pinnedPollPillStep(poll: Pick<StudentPoll, "myOptionIds" | "status">): "panel" | "stage" {
+  return poll.status === "open" && poll.myOptionIds === null ? "stage" : "panel";
+}
+
+/** O texto da mensagem fixada numa linha so (a pilula do palco): os espacos e as quebras viram um espaco. */
+export function pinnedPillText(body: string): string {
+  return body.replace(/\s+/g, " ").trim();
+}
+
+/** Quantos caracteres cabem numa linha da fixada, por baixo (o painel de 320 px e o vertical de 375 px). */
+const PINNED_LINE_CHARS = 38;
+
+/**
+ * A dica do corte antes da medida (o HTML do servidor e a primeira pintura): o texto que pode passar de `lines` linhas
+ * (mais quebras que linhas, ou mais letras do que cabem) ja mostra o "Mostrar tudo"; depois de montar, a sala mede o
+ * corte de verdade e a dica sai (useClampToggle).
+ */
+export function pinnedClampHint(body: string, lines: number): boolean {
+  const text = body.trim();
+  return text.split("\n").length > lines || text.length > lines * PINNED_LINE_CHARS;
+}
+
+/**
+ * O aviso da sala "A equipe fixou uma mensagem." (com Ver): so na chegada de uma fixada nova (o id muda para outro que
+ * nao e nulo) com o painel fechado e as fixadas na tela (`shown`: o desenho normal, sem removido nem banido). A fixada
+ * que ja estava quando a sala abriu (`before` indefinido, a primeira leitura) e a que sai (nulo) nao avisam; aberto, o
+ * painel ja mostra a area das fixadas.
+ */
+export function pinnedNoticeShown(input: { after: string | null; before: string | null | undefined; panelShown: boolean; shown: boolean }): boolean {
+  return input.before !== undefined && input.after !== null && input.after !== input.before && !input.panelShown && input.shown;
+}
+
+/** A acao "Ver" do aviso da fixada: abre o painel no Chat, com o foco na fixada. */
+export const PINNED_SNACK_ACTION = "pinned_view";
+
+/** O aviso da fixada nova (RoomSnackbar): a frase e a acao Ver. */
+export function pinnedSnack(): RoomSnack {
+  const aluno = WEBINAR_COPY.naTela.aluno;
+  return { action: { key: PINNED_SNACK_ACTION, label: aluno.ver }, key: "pinned", text: aluno.avisoFixou };
+}
+
+/**
+ * O botao de enquete do chat da sala vertical (§3.4): com a enquete fixada, "Enquete fixada: {pergunta}", que continua
+ * la depois da resposta (e com o resultado compartilhado); sem ela, a primeira enquete aberta, como antes; sem
+ * nenhuma, nada.
+ */
+export function verticalPollButton(input: { openPolls: readonly Pick<StudentPoll, "question">[]; pinnedPoll: Pick<StudentPoll, "question"> | null }): { label: string; pinned: boolean } | null {
+  if (input.pinnedPoll) {
+    return { label: WEBINAR_COPY.naTela.aluno.enqueteFixadaVertical(input.pinnedPoll.question), pinned: true };
+  }
+  const first = input.openPolls[0];
+  return first ? { label: first.question, pinned: false } : null;
 }

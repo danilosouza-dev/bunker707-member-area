@@ -19,7 +19,31 @@ import { ROOM_PANEL_ID } from "./room-bar";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
 import { RoomHeader } from "./room-header";
-import { chatPillsShown, firstFocusTarget, panelStageNames, panelTabsFor, railStep, roomDateLine, roomEscapeStep, roomMobileLine, roomPanelShown, roomPresentBadge, soundCoverShown, stageAssistantShown, stageVideoRightPx, type RoomPanelTab } from "./room-layout-model";
+import {
+  chatPillsShown,
+  firstFocusTarget,
+  panelStageNames,
+  panelTabsFor,
+  PINNED_SNACK_ACTION,
+  pinnedNoticeShown,
+  pinnedPillsShown,
+  pinnedPollFor,
+  pinnedPollPillStep,
+  pinnedShownIn,
+  pinnedSnack,
+  railStep,
+  roomDateLine,
+  roomEscapeStep,
+  roomMobileLine,
+  roomPanelShown,
+  roomPresentBadge,
+  soundCoverShown,
+  stageAssistantShown,
+  stageVideoRightPx,
+  unpinnedPolls,
+  verticalPollButton,
+  type RoomPanelTab
+} from "./room-layout-model";
 import { RoomOffer } from "./room-offer";
 import { RoomPanel, useRoomPanelUnread } from "./room-panel";
 import { RoomPollLaterCard, RoomPollLayer } from "./room-poll-layer";
@@ -37,6 +61,7 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
+import { RoomPinnedArea, RoomPinnedPills, RoomPinnedStrip, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import { useRoomScreen } from "./screen/use-room-screen";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
@@ -93,6 +118,13 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // abas, irmao do painel e nunca no vertical; o item abre o painel naquela aba e, aberto, fecha (railStep). O painel
 // vira o cartao do YouTube com o cabecalho (o nome da aba, o numero e o X); o contador do Chat do trilho conta enquanto
 // o Chat nao esta na tela (chatShown), e o X devolve o foco ao item da aba que estava aberta.
+// A Na tela, as fixadas (especificacao de 10/11/2026, §3.1 e §3.4; screen/room-pinned.tsx): a mensagem e a enquete
+// fixadas saem da aba Chat e viram a area das fixadas do painel, em todas as abas, e o topo da gaveta do vertical; a
+// enquete fixada nao se repete na aba Enquetes nem vira o card "deixou para depois". Com o painel fechado, as pilulas
+// no palco de 640 px ou mais e as linhas abaixo do palco mais estreito (pinnedPillsShown), e o aviso "A equipe fixou uma
+// mensagem." com Ver na fixada nova. No vertical, a linha de 2 linhas da fixada com o link e o Mostrar tudo, e o botao
+// "Enquete fixada: {pergunta}" (verticalPollButton). Nada disso no Replay, com a sessao encerrada nem fora do acesso
+// (pinnedShownIn).
 
 function subscribeNothing() {
   return () => undefined;
@@ -499,6 +531,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
    */
   const [pollFocus, setPollFocus] = useState<{ key: string; n: number } | null>(null);
   const openPolls = polls.filter((poll) => poll.status === "open");
+  // As fixadas (Na tela): a mensagem e a enquete, so na gravada de pe para a pessoa (nunca no Replay); a enquete fixada
+  // sai da aba Enquetes, do card "deixou para depois" e do card de enquete da gaveta (ela fica na area das fixadas).
+  const pinnedOn = pinnedShownIn({ blocked: unavailable, kind, phase });
+  const pinnedMessage = pinnedOn ? naTela.pinned : null;
+  const pinnedPoll = pinnedOn ? pinnedPollFor({ pinnedPollId: naTela.pinnedPollId, polls }) : null;
+  const pollsTab = unpinnedPolls(polls, pinnedPoll?.id ?? null);
+  const otherOpenPolls = unpinnedPolls(openPolls, pinnedPoll?.id ?? null);
   // As abas do painel pela regra das tres salas (V2-7); a gaveta do vertical continua como no docs/30 §1.6 (Enquetes
   // tambem com o resultado de uma enquete encerrada, sem Participantes).
   const tabs = panelTabsFor({ kind, openPolls: openPolls.length, tab });
@@ -526,7 +565,23 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // depois.
   const stagePoll = barShown && hydrated ? stagePollFor({ deferredIds: deferred.later, polls, seenResultIds: [...deferred.seen, ...arrivedResults] }) : null;
   const stagePollKey = stagePoll ? `${stagePoll.mode}:${stagePoll.poll.id}` : null;
-  const laterPoll = hydrated ? deferredPollCard({ deferredIds: deferred.later, polls }) : null;
+  const laterPoll = hydrated ? deferredPollCard({ deferredIds: deferred.later, polls: pollsTab }) : null;
+  // As fixadas com o painel fechado: as pilulas no palco largo e as linhas abaixo do palco estreito (so no desenho normal).
+  const pinnedShortcuts = pinnedPillsShown({ blocked: unavailable, design, panelShown, settingsTakeover: false });
+  const focusPinned = usePinnedFocus(rootRef);
+  const snackbarApi = snackbar.api;
+
+  // A fixada nova com o painel fechado: "A equipe fixou uma mensagem." com Ver, uma vez por fixada (a que ja estava quando
+  // a sala abriu nao avisa; o vertical nao tem o aviso da sala, a linha da fixada fica acima do chat).
+  const pinnedId = pinnedMessage?.id ?? null;
+  const pinnedSeenRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const before = pinnedSeenRef.current;
+    pinnedSeenRef.current = pinnedId;
+    if (pinnedNoticeShown({ after: pinnedId, before, panelShown, shown: !vertical && !unavailable })) {
+      snackbarApi.show(pinnedSnack());
+    }
+  }, [panelShown, pinnedId, snackbarApi, unavailable, vertical]);
 
   const leave = useCallback(() => {
     router.push(webinarHref);
@@ -666,6 +721,37 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     setPanelOpen(step.panelOpen);
   }
 
+  /**
+   * A pilula ou a linha da fixada (e o Ver do aviso): o painel abre (no Chat, para a mensagem; na aba de agora, para a
+   * enquete: a area esta em toda aba) e o foco vai ao bloco da area.
+   */
+  function showPinned(target: PinnedFocusTarget) {
+    if (target === "message") {
+      setTab("chat");
+    }
+    setPanelOpen(true);
+    focusPinned(target);
+  }
+
+  /** A pilula ou a linha da enquete fixada: falta responder, ela volta ao palco; senao, o painel com a area. */
+  function onPinnedPoll() {
+    if (!pinnedPoll) {
+      return;
+    }
+    if (pinnedPollPillStep(pinnedPoll) === "stage") {
+      answerPollNow(pinnedPoll.id);
+    } else {
+      showPinned("poll");
+    }
+  }
+
+  /** A acao do aviso da sala: Ver abre a fixada. */
+  function onSnackAction(key: string) {
+    if (key === PINNED_SNACK_ACTION) {
+      showPinned("message");
+    }
+  }
+
   function unmute() {
     setMuted(false);
     setSoundTouched(true);
@@ -763,14 +849,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     <>
       {barShown && laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
       {/* O vertical nao tem a enquete no palco: o card de antes abre a aba Enquetes da gaveta. */}
-      {vertical && openPolls.length > 0 ? (
+      {vertical && otherOpenPolls.length > 0 ? (
         <button
           className="mx-3 mt-2 rounded-[12px] border border-room-input-border bg-room-surface-2 px-3 py-2 text-left text-sm hover:border-room-fg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-room-focus"
           onClick={() => setTab("enquetes")}
           type="button"
         >
           <span className="block text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">{copy.abas.enquetes}</span>
-          <span className="block truncate font-bold text-room-fg-strong">{openPolls[0].question}</span>
+          <span className="block truncate font-bold text-room-fg-strong">{otherOpenPolls[0].question}</span>
         </button>
       ) : null}
       <RoomTranslationBar state={translation} />
@@ -789,7 +875,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         onRemoveOpenChange={setRemoveOpen}
         onSend={sendChat}
         phase={composerPhase}
-        pinned={naTela.pinned}
         readOnly={readOnly}
         removeOpen={removeOpen}
         sessionId={sessionId}
@@ -837,9 +922,21 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
       // no cabecalho); nunca a lista de alunos.
       <LiveParticipantsTab presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
-    ) : (
-      <RoomPollsTab onAnswer={roomPolls.answer} polls={polls} readOnly={readOnly || phase === "ended"} />
+    ) : pinnedPoll && pollsTab.length === 0 ? null : (
+      // A enquete fixada fica na area das fixadas, acima: aqui so as outras (e nada, quando ela e a unica).
+      <RoomPollsTab onAnswer={roomPolls.answer} polls={pollsTab} readOnly={readOnly || phase === "ended"} />
     );
+  // A area das fixadas, a mesma no painel e no topo da gaveta do vertical.
+  const pinnedArea =
+    pinnedMessage || pinnedPoll ? (
+      <RoomPinnedArea
+        message={pinnedMessage}
+        onAnswer={roomPolls.answer}
+        poll={pinnedPoll}
+        readOnly={readOnly || phase === "ended"}
+        timing={{ kind, nowMs, skewMs: clock.skewMs, zeroMs }}
+      />
+    ) : null;
 
   // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
   const page = (
@@ -894,12 +991,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                 topLeft={topLeft}
               />
             )}
+            {/* As fixadas com o painel fechado, abaixo dos selos (so com o palco de 640 px ou mais). */}
+            {pinnedShortcuts ? <RoomPinnedPills message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
             {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
               <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
             ) : null}
             {/* O aviso da sala (os sucessos do chat e das Perguntas), so no desenho normal; o vertical nao muda. */}
-            {vertical || unavailable ? null : <RoomSnackbarHost panelShown={panelShown} />}
+            {vertical || unavailable ? null : <RoomSnackbarHost onAction={onSnackAction} panelShown={panelShown} />}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
               <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />
             </div>
@@ -917,8 +1016,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                     messages={translation.messages}
                     onMore={() => openDrawer("chat")}
                     onOpenPoll={() => openDrawer("poll")}
-                    openPollQuestion={openPolls[0]?.question ?? null}
-                    pinned={naTela.pinned}
+                    pinned={pinnedMessage}
+                    pollButton={verticalPollButton({ openPolls, pinnedPoll })}
                     replay={kind === "replay"}
                   />
                 ) : null
@@ -975,6 +1074,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               />
             )}
           </div>
+          {/* O palco mais estreito: as fixadas em linhas logo abaixo dele, acima da barra. */}
+          {pinnedShortcuts ? <RoomPinnedStrip message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
           {barShown ? (
             <RecordedControls
               fullscreenEnabled={fullscreenEnabled}
@@ -1009,6 +1110,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               onClose={() => setPanelOpen(false)}
               onTab={setTab}
               open={panelShown}
+              pinned={pinnedArea}
               pollOpen={openPolls.length > 0}
               tab={tab}
               tabs={tabs}
@@ -1036,6 +1138,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
           id={drawerId}
           onClose={() => setDrawerOpen(false)}
           onTab={setTab}
+          pinned={pinnedArea}
           pollOpen={openPolls.length > 0}
           reducedMotion={reducedMotion}
           replay={kind === "replay"}
