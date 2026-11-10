@@ -235,7 +235,8 @@ let replayCounter = 0;
 
 /**
  * O banco dos webinarios em memoria. As RPCs imitam a migracao: `webinar_open_session` poe a sessao em live
- * (started_at = hora marcada na gravada) e devolve { changed, fired, status }; `webinar_close_session` poe ended,
+ * (started_at = hora marcada na gravada) e devolve { changed, fired, status }; desde a 202611100002 a sessao `live` nao
+ * solta o roteiro ao abrir (fired 0; o tick solta os itens dela pelo started_at); `webinar_close_session` poe ended,
  * grava presence_curve e devolve o resumo; `webinar_report` e `webinar_attendees` devolvem `relatorio` e `presentes`.
  * `replayDuplicado` faz o insert do replay bater no indice unico (23505); `abrir`/`encerrar` trocam as RPCs.
  */
@@ -325,7 +326,7 @@ export function bancoDosWebinarios({
           return { data: { changed: false, fired: 0, status: sessao.status }, error: null };
         }
         const changed = sessao.status !== "live";
-        const fired = sessao.script_fired_at ? 0 : roteiro.filter((item) => item.status === "ready" && item.trigger_kind !== "manual").length;
+        const fired = sessao.script_fired_at || sessao.kind === "live" ? 0 : roteiro.filter((item) => item.status === "ready" && item.trigger_kind !== "manual").length;
         Object.assign(sessao, {
           script_fired_at: sessao.script_fired_at ?? query.args.p_now,
           started_at: sessao.started_at ?? (sessao.kind === "simulated" ? sessao.scheduled_at : query.args.p_now),

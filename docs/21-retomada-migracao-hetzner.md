@@ -886,6 +886,59 @@ mudanca vira uma migracao nova, e a guarda (o hash) avisa.
 **Producao (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
 basta a promocao `dev` -> `main` que levar este codigo passar pelo `deploy-membros`.
 
+### 9.13 Na tela e o banco do adendo: migração `202611100002` antes do merge (10/11/2026)
+
+A "Na tela" (a mensagem e a enquete fixadas, o banner e o QR Code na frente da turma; `docs/30` §2.4 e §4.2,
+`docs/31` §12) tem uma migração só, que vem **depois** da `202611100001` (§9.12) e não muda as de antes (a guarda
+`tests/webinarios-v7.guard.test.mjs` prende o hash acumulado das 65 anteriores e o do arquivo novo). Na mesma migração
+entra o banco do adendo do mesmo dia: a Simulação e o roteiro na Live ao vivo (R7 e R8) e a foto dos personagens do
+roteiro (R9).
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611100002_webinars_v7_na_tela.sql` | cria `webinar_screen_items` (os banners e QR Codes prontos de um webinário) e `webinar_screen_displays` (cada exibição numa sessão, com a cópia congelada; o índice único parcial deixa uma de cada tipo na tela por sessão), as duas só do `service_role`, e a função `webinar_screen_report` (os números por exibição, sem a equipe). Troca o check `webinar_sessions_simulation_not_live_v4` pelo `webinar_sessions_simulation_live_v7` (a sessão `live` aceita as regras simuladas e o resumo, nunca o selo "Ao vivo" da gravada); acrescenta `persona_avatar_path` em `webinar_chat_script_items` e em `webinar_chat_messages` (só o caminho `webinars/personas/<24 hex>.webp`; na mensagem, só na `scripted`); recria `webinar_open_session` com o corpo inteiro de antes, a foto do personagem na mensagem e a live fora do roteiro ao abrir | 7: as duas tabelas; a função; o check novo (`not valid`, com o drop do antigo no mesmo bloco); as colunas da foto e os checks delas (`not valid`); `webinar_open_session`; o `validate` dos três checks | `webinars_v7_na_tela` |
+
+**Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migração o app novo continua de pé. Nenhuma
+coluna dela entra nas listas que o app sempre lê (`SESSION_COLUMNS`, `CHAT_MESSAGE_COLUMNS`, `SCRIPT_ITEM_COLUMNS`); as
+leituras da Na tela devolvem vazio e só as escritas novas caem no aviso de migração pendente, que aponta a
+`202611100002` (`WEBINARS_MIGRATION` e `WEBINARS_SCREEN_MIGRATION`). A migração sozinha não atrapalha o app de antes: as
+tabelas são novas; o check novo aceita tudo que o app de antes grava; as colunas novas ficam nulas; e a live ainda não
+tinha roteiro, então a troca de `webinar_open_session` não muda nada para ele.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (é idempotente). O único `drop` é o do check antigo, dentro do bloco que só roda sem o check novo; se o
+SQL Editor pedir confirmação por causa dele, confirmar. Pelo MCP seção por seção (`execute_sql`, uma por chamada, na
+ordem), as seções 4, 5 e 7 começam com `set lock_timeout = '5s';`. Depois, gravar a versão:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611100002', 'webinars_v7_na_tela') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferência depois de aplicar (a do cabeçalho da migração):
+
+```sql
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_screen_items', 'webinar_screen_displays'); -- 2 linhas
+select has_table_privilege('authenticated', 'public.webinar_screen_items', 'select'),
+       has_table_privilege('authenticated', 'public.webinar_screen_displays', 'select'); -- false, false
+select relrowsecurity from pg_class where oid in ('public.webinar_screen_items'::regclass,
+  'public.webinar_screen_displays'::regclass); -- true, true
+select indexname from pg_indexes where schemaname = 'public' and indexname like 'webinar_screen_%'; -- 3 + 2 pkey
+select * from public.webinar_screen_report(gen_random_uuid()); -- 0 linhas
+select conname, convalidated from pg_constraint where conname in ('webinar_sessions_simulation_not_live_v4',
+  'webinar_sessions_simulation_live_v7', 'webinar_chat_script_items_persona_avatar_v7',
+  'webinar_chat_messages_persona_avatar_v7') order by 1; -- 3 linhas (sem a _v4), convalidated = true
+select table_name from information_schema.columns where table_schema = 'public'
+  and column_name = 'persona_avatar_path' order by 1; -- webinar_chat_messages, webinar_chat_script_items
+```
+
+Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up --local`), com as consultas
+acima conferidas, e a integração `tests/integration/webinarios-na-tela.test.mjs` roda contra ela. **Na nuvem de teste,
+pendente**: o produtor aplica depois da revisão desta parte, antes do merge da PR. Quando aplicar, atualizar este
+parágrafo com a data. Se o arquivo mudar depois disso, ele não roda de novo na nuvem de teste: a mudança vira uma
+migração nova, e a guarda (o hash) avisa.
+
+**Produção (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
+basta a promoção `dev` -> `main` que levar este código passar pelo `deploy-membros`.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

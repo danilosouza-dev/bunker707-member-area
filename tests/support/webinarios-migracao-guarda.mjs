@@ -53,10 +53,25 @@ export function assertSections(migration, count) {
   assert.match(migration, /^-- Idempotente: pode rodar de novo sem efeito\.$/m);
 }
 
-/** Nenhum drop, delete, truncate, create/alter policy nem concurrently fora dos literais. */
-export function assertOnlyAdds(migration) {
+/**
+ * Nenhum drop, delete, truncate, create/alter policy nem concurrently fora dos literais. `replaces` ({ check novo: check
+ * antigo }) e a unica excecao: o check antigo sai com `drop constraint if exists`, logo antes do add do novo e dentro do
+ * mesmo bloco atras da guarda do pg_constraint do novo (rodar de novo nao derruba nem recria nada; a 202611010001 e a
+ * 202611100002).
+ */
+export function assertOnlyAdds(migration, { replaces = {} } = {}) {
   const statements = statementsOf(migration);
-  assert.doesNotMatch(statements, /\bdrop\b/i, "nenhum drop");
+  const allowedDrops = Object.values(replaces).map((old) => `drop constraint if exists ${old}`);
+  const drops = (statements.match(/\bdrop\s+\w+(?:\s+if\s+exists)?\s+[\w.]+/gi) ?? []).map((drop) => drop.replace(/\s+/g, " ").toLowerCase());
+  assert.deepEqual(drops, allowedDrops, allowedDrops.length === 0 ? "nenhum drop" : "so os checks trocados saem");
+  assert.equal((statements.match(/\bdrop\b/gi) ?? []).length, allowedDrops.length, "nenhum outro drop");
+  for (const [name, old] of Object.entries(replaces)) {
+    assert.match(
+      sqlCodeOf(migration),
+      new RegExp(`if not exists \\(select 1 from pg_constraint where conname = '${name}'\\) then\\s*alter table (public\\.\\w+) drop constraint if exists ${old};\\s*alter table \\1 add constraint ${name}\\b`),
+      `${old} sai so junto do add de ${name}, atras da guarda dele`
+    );
+  }
   assert.doesNotMatch(statements, /^\s*delete\b|\bdelete\s+from\b/im, "nenhum delete (so os `on delete` das chaves e o grant)");
   assert.doesNotMatch(statements, /\btruncate\b/i);
   assert.doesNotMatch(statements, /\bcreate\s+policy\b/i);
@@ -74,6 +89,9 @@ export function assertOnlyAdds(migration) {
   // Toda constraint nova tem nome e entra atras da guarda do pg_constraint.
   for (const entry of statements.match(/add constraint (\w+)/g) ?? []) {
     const name = entry.replace("add constraint ", "");
+    if (name in replaces) {
+      continue;
+    }
     assert.match(sqlCodeOf(migration), new RegExp(`if not exists \\(select 1 from pg_constraint where conname = '${name}'\\) then\\s*alter table public\\.\\w+ add constraint ${name}`), name);
   }
   assert.equal((statements.match(/\badd column\b/gi) ?? []).length, (statements.match(/\badd column if not exists\b/gi) ?? []).length, "toda coluna com if not exists");

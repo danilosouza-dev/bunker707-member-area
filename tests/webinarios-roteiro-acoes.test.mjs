@@ -1088,9 +1088,11 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100001).");
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611100002 da Na tela): aplicar ate ela
+  // inclui a do fio.
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100002).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100001)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100002)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });

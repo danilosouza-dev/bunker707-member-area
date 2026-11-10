@@ -50,8 +50,8 @@ test("as migracoes ate a 202610300004 continuam byte a byte; a fase 4 sem buraco
   assert.equal(fileHash(MIGRATION), "a38aecc10f7beff4581ca1826d34f4d63b57bbe382eabffa0c1983bfe642a957", "a 202610300005 mudou: ela ja foi aplicada na nuvem de teste (docs/21 §9.10): a correcao vai numa migracao nova, nunca neste arquivo");
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
   // Toda leitura de sessao le jit (202610300005), e o aviso de migracao pendente aponta a mais nova dos webinarios, a
-  // 202611100001 (aplicar ate ela inclui a 202610300005), como pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs.
-  assert.equal(appMigration, "202611100001", "toda leitura de sessao le jit: o aviso de migracao pendente aponta uma migracao que inclui a 202610300005");
+  // 202611100002 (aplicar ate ela inclui a 202610300005), como pede a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs.
+  assert.equal(appMigration, "202611100002", "toda leitura de sessao le jit: o aviso de migracao pendente aponta uma migracao que inclui a 202610300005");
   assert.ok(appMigration >= "202610300005");
   assert.ok(rows.SESSION_COLUMNS.split(", ").includes("jit"));
   assert.ok(existsSync(new URL(MIGRATION, root)));
