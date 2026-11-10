@@ -52,6 +52,11 @@ export type RoomCommentTime = { iso: string; label: string; title: string };
 export type RoomCommentProps = {
   /** O que vai na linha de acoes ("Falar com a equipe"); sem nada, a linha nao aparece. */
   actions?: ReactNode;
+  /**
+   * O que fica depois do comentario, dentro do item e fora da coluna do texto (a barra de acoes da equipe no console,
+   * docs/31 §10, que se posiciona sozinha); so no comentario sem fio.
+   */
+  aside?: ReactNode;
   /** O avatar (RoomCommentAvatar). */
   avatar: ReactNode;
   /** "li" na lista; "div" fora dela (a fixada, no bloco do topo; a resposta no fio). */
@@ -71,6 +76,8 @@ export type RoomCommentProps = {
   srAuthor: string;
   /** O fio (RoomCommentThread: o botao "1 resposta" e a resposta), embaixo do comentario, com a linha do avatar. */
   thread?: ReactNode;
+  /** Classes a mais no item (o console: `group relative`, para a barra de acoes por cima). */
+  className?: string;
 };
 
 /** A linha do fio: 1 px no centro do avatar (x 12), que clareia com o ponteiro no comentario. */
@@ -82,7 +89,7 @@ const THREAD_LINE_TO_TOGGLE = "absolute -left-6 -top-3 bottom-0 w-px bg-room-thr
 
 const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question" } as const;
 
-export function RoomComment({ actions = null, as: Tag = "li", avatar, body, headline = null, id, marker = "message", meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
+export function RoomComment({ actions = null, as: Tag = "li", aside = null, avatar, body, className, headline = null, id, marker = "message", meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
   const badgeOnly = roleBadgeOnly(meta.name, meta.role);
   const hasActions = pending || Boolean(actions);
   const marks = { "data-mine": mine ? "" : undefined, [MARKERS[marker]]: id };
@@ -123,8 +130,9 @@ export function RoomComment({ actions = null, as: Tag = "li", avatar, body, head
 
   if (!thread) {
     return (
-      <Tag className={cn("flex", Tag === "li" ? "mb-4 first:mt-auto" : null)} {...marks}>
+      <Tag className={cn("flex", Tag === "li" ? "mb-4 first:mt-auto" : null, className)} {...marks}>
         {row}
+        {aside}
       </Tag>
     );
   }

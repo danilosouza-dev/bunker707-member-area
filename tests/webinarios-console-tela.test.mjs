@@ -244,7 +244,7 @@ function render(data, permissions = both) {
   return html(createElement(SessionConsole, { currentUserId: "u-host", data, permissions, serverNow: NOW }));
 }
 
-test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor, o titulo em duas linhas, o momento e os presentes, Encerrar sessão (so para quem publica); o seletor lista as sessoes sem o ano e com a situacao em minuscula", () => {
+test("topo (docs/31 V2-13 e §10): a raiz com o tema escuro, a seta de voltar ao editor, o titulo com a linha de baixo, o momento e os presentes, Encerrar sessão (so para quem publica); o seletor lista as sessoes sem o ano e com a situacao em minuscula", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
   const text = textOf(markup);
 
@@ -252,26 +252,34 @@ test("topo (docs/31 V2-13): a raiz com o tema escuro, a seta de voltar ao editor
   assert.match(markup, /^<div(?=[^>]*data-console-root="")(?=[^>]*data-room-theme="dark")[^>]*>/, "a raiz com o tema e a ponte");
   assert.equal(count(markup, /data-room-theme=/g), 1, "um tema so, o da raiz");
   assert.match(markup, /<div data-console-portal=""><\/div>/, "o portal das confirmacoes e dos menus dentro da raiz");
-  // O topo sem a trilha: a seta (so o icone, com o nome) leva ao editor, e o h1 diz o console e o webinario.
+  // O topo sem a trilha (o topo da sala no estilo do YouTube, docs/31 §10): a seta (o circulo sem fundo, so o icone, com
+  // o nome e a dica) leva ao editor; o h1 e o nome do webinario e, embaixo, a linha "Console da sessão" com o momento e
+  // os presentes da gravada.
   assert.doesNotMatch(text, /Webinários \/ Aula de IA \/ Console/, "a trilha saiu");
-  assert.match(markup, /<a aria-label="Voltar ao editor"[^>]*href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111"/, "a seta de voltar ao editor");
+  assert.match(markup, /<a aria-label="Voltar ao editor" class="[^"]*\brounded-full\b[^"]*" href="\/admin\/comunicacao\/webinarios\/aaaaaaaa-1111-4111-8111-111111111111"/, "a seta de voltar ao editor");
   const h1 = markup.slice(markup.indexOf("<h1"), markup.indexOf("</h1>"));
-  assert.equal(textOf(`${h1}</h1>`), "Console da sessão Aula de IA", "o h1 com o console e o titulo");
-  assert.match(text, /No ar há \d+:\d\d/);
-  assert.match(markup, /data-console-present="">7 presentes</, "o selo dos presentes no topo da gravada, sem o pico antes da leitura da presenca");
-  assert.doesNotMatch(markup.slice(markup.lastIndexOf("<span", markup.indexOf("data-console-status")), markup.indexOf("data-console-present")), /sm:hidden/, "fora da live (sem palco) os presentes ficam no topo em toda largura");
+  assert.equal(textOf(`${h1}</h1>`), "Console da sessão: Aula de IA", "o h1 com o console (so para o leitor de tela) e o titulo");
+  assert.match(h1, /<span class="sr-only">Console da sessão: <\/span>Aula de IA$/, "na tela, so o nome do webinario");
+  assert.match(h1, /\blg:text-xl\b/, "o titulo em 20/28 a partir de lg");
+  const linhaDeBaixo = textOf(markup.slice(markup.indexOf(">", markup.indexOf("data-console-line")) + 1, markup.indexOf("</p>", markup.indexOf("data-console-line"))));
+  assert.match(linhaDeBaixo, /^Console da sessão · No ar há \d+:\d\d · 7 presentes$/, `a linha de baixo: ${linhaDeBaixo}`);
+  assert.match(markup, /data-console-present="">7 presentes</, "os presentes na linha da gravada, sem o pico antes da leitura da presenca");
+  assert.doesNotMatch(markup.slice(markup.lastIndexOf("<span", markup.indexOf("data-console-present")), markup.indexOf("data-console-present")), /sm:hidden/, "fora da live (sem palco) os presentes ficam no topo em toda largura");
   assert.match(text, /Encerrar sessão/);
   assert.doesNotMatch(text, /Abrir sessão/, "a sessao no ar nao abre de novo");
   assert.match(markup, /<button(?=[^>]*aria-label="Tema claro")[^>]*>/, "o Tema diz para qual vai");
   assert.match(markup, /<button(?=[^>]*aria-label="Atualizar")[^>]*>/);
   assert.match(markup, /<span aria-live="polite" class="sr-only" data-console-polling="idle"><\/span>/, "a leitura so para o leitor de tela");
-  // A segunda linha do topo (o seletor e os botoes): abaixo de lg rola de lado sem barra; a partir de lg, se os botoes
-  // nao couberem, rola com uma barra fina, para o ultimo botao nunca sumir sem sinal.
-  const linha = (markup.match(/data-console-slot="top"[\s\S]*?<\/h1><\/div><div class="([^"]*)"/)?.[1] ?? "").split(" ");
-  assert.ok(linha.includes("overflow-x-auto"), "a linha rola de lado");
-  assert.ok(linha.includes("max-lg:[scrollbar-width:none]"), "sem barra so abaixo de lg");
-  assert.ok(linha.includes("lg:[scrollbar-width:thin]"), "a barra fina a partir de lg");
-  assert.ok(!linha.includes("[scrollbar-width:none]"), "a barra nunca some em toda largura");
+  // A segunda linha do topo (o seletor e os botoes): abaixo de lg rola de lado sem barra; a partir de lg fica inteira
+  // (sem rolagem, que cortaria as dicas dos botoes) e quem encolhe e o titulo, com reticencias.
+  const linha = (markup.match(/data-console-slot="top"[\s\S]*?<\/p><\/div><\/div><div class="([^"]*)"/)?.[1] ?? "").split(" ");
+  assert.ok(linha.includes("max-lg:overflow-x-auto"), "a linha rola de lado abaixo de lg");
+  assert.ok(linha.includes("max-lg:[scrollbar-width:none]"), "sem barra abaixo de lg");
+  assert.ok(linha.includes("lg:shrink-0"), "a partir de lg a linha fica inteira");
+  assert.ok(!linha.includes("overflow-x-auto"), "a partir de lg nao rola");
+  // O seletor de sessoes numa pilula tonal do YouTube; o Tema sempre o ultimo.
+  assert.match(markup, /<select class="[^"]*\brounded-full\b[^"]*\bbg-room-control\b[^"]*"[^>]*id="console-session"/);
+  assert.ok(markup.indexOf('aria-label="Tema claro"') > markup.indexOf("Encerrar sessão"), "o Tema por ultimo");
 
   const select = markup.slice(markup.indexOf('id="console-session"'), markup.indexOf("</select>"));
   assert.match(markup, /<label class="sr-only" for="console-session">Sessão<\/label>/, "o nome do seletor so para o leitor de tela");
@@ -301,10 +309,20 @@ const chatItem = (markup, id) => {
   assert.ok(at >= 0, `a mensagem ${id} no chat`);
   return markup.slice(at, markup.indexOf("</li>", at) + 5);
 };
-/** A linha de baixo do balao: so o texto, de "nome · papel · hora" ate as acoes. */
+/** A linha do autor do comentario (docs/31 §10): o nome, o selo e a hora, cada pedaco no seu elemento, juntos com " · ". */
 const chatMeta = (item) => {
-  const actions = item.indexOf("data-console-message-actions");
-  return textOf(item.slice(item.indexOf("data-room-message-meta"), actions < 0 ? undefined : item.lastIndexOf("<", actions)).replace(/^[^>]*>/, ""));
+  const at = item.indexOf("data-room-message-meta");
+  const block = item.slice(item.indexOf(">", at) + 1, item.indexOf("</p>", at));
+  return Array.from(block.matchAll(/>([^<>]+)</g))
+    .map((match) => match[1].trim())
+    .filter(Boolean)
+    .join(" · ");
+};
+/** A linha de cima do comentario (Fixada, Nas próximas turmas), so o texto; vazia sem ela. */
+const chatHeadline = (item) => {
+  const meta = item.indexOf("data-room-message-meta");
+  const head = item.slice(0, item.lastIndexOf("<p", meta)).match(/<p class="flex items-center gap-1\.5[^"]*">([\s\S]*)<\/p>$/);
+  return head ? textOf(head[1]) : "";
 };
 /** O <select> de um seletor compacto do cabecalho, da tag ao </select>. */
 const selectOf = (markup, id) => markup.slice(markup.lastIndexOf("<select", markup.indexOf(`id="${id}"`)), markup.indexOf("</select>", markup.indexOf(`id="${id}"`)));
@@ -363,7 +381,7 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   assert.doesNotMatch(semPendente, /data-console-chat-queue|data-console-chat-waiting/);
 });
 
-test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha a direita com Você, a origem so para a equipe, Fixada e Nas próximas turmas (fora da live); na live a hora gravada e sem o selo das proximas turmas", () => {
+test("chat (docs/31 V2-9 e §10): o comentario do YouTube com o nome, o selo do papel ou da origem e a hora, a minha com Você, a origem so para a equipe, Fixada e Nas próximas turmas em cima (fora da live); na live a hora gravada e sem o selo das proximas turmas", () => {
   const mestre = message({ authorUserId: "u-bruna", body: "Da turma passada", displayName: "Bruna S.", id: "m-mestre", master: true, source: "original" });
   const personaHost = message({ authorUserId: null, body: "Sou do roteiro", displayName: "Rafa", id: "m-roteiro-host", role: "host", scriptItemId: "i-b", source: "scripted" });
   const markup = render({ sessions, snapshot: snapshot({ messages: [...messages, mestre, personaHost] }), webinar });
@@ -374,11 +392,16 @@ test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha 
   // Papel ou origem: a persona do roteiro com o papel de quem apresenta diz so Roteiro, na linha e no leitor de tela.
   assert.equal(chatMeta(chatItem(chat, "m-roteiro-host")), "Rafa · Roteiro · 20:01");
   assert.match(chatItem(chat, "m-roteiro-host"), /<span class="sr-only">Rafa, Roteiro, 20:01: <\/span>Sou do roteiro/);
-  assert.equal(chatMeta(chatItem(chat, "m-mestre")), "Bruna S. · Chat original · 20:01 · Nas próximas turmas");
-  // A minha (o autor e quem esta no console): a direita, "Você · papel · hora", e a fixada diz Fixada.
+  assert.equal(chatMeta(chatItem(chat, "m-mestre")), "Bruna S. · Chat original · 20:01");
+  assert.equal(chatHeadline(chatItem(chat, "m-mestre")), "Nas próximas turmas", "o selo das proximas turmas na linha de cima");
+  // A minha (o autor e quem esta no console): "Você" com o selo do papel e a hora, como as outras, a esquerda (o
+  // comentario do YouTube nao vira de lado), e a fixada diz Fixada na linha de cima.
   const minha = chatItem(chat, "m-equipe");
-  assert.match(minha, /^<li class="[^"]*\bflex-row-reverse\b[^"]*" data-mine="" data-room-message="m-equipe">/);
-  assert.equal(chatMeta(minha), "Você · Apresentador · 20:01 · Fixada");
+  assert.match(minha, /^<li class="[^"]*" data-mine="" data-room-message="m-equipe">/);
+  assert.doesNotMatch(minha, /flex-row-reverse/);
+  assert.equal(chatMeta(minha), "Você · Apresentador · 20:01");
+  assert.equal(chatHeadline(minha), "Fixada");
+  assert.equal(chatHeadline(chatItem(chat, "m-sem-aceite")), "", "sem fixar nem passar para as proximas turmas, sem a linha de cima");
   assert.match(minha, /<span class="sr-only">Você, Apresentador, 20:01: <\/span>Bem-vindos!/, "o leitor de tela ouve o autor antes do texto");
   assert.equal(count(chat, /data-mine=""/g), 1, "so a minha");
   assert.doesNotMatch(chat, /data-room-message-meta="">[\s\S]{0,200}1:00</, "a hora, nunca o minuto do video");
@@ -412,7 +435,7 @@ test("chat (docs/31 V2-9): o balao com 'nome · papel · hora' embaixo, a minha 
   assert.equal(chatMeta(chatItem(replayChat, "m-sem-aceite")), "Aluno 231");
 });
 
-test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar ou Desafixar, Virar pergunta, Apagar) em botoes de 24 px que aparecem com o mouse ou o foco e sempre no toque; o ⋯ com Aprovar para as próximas turmas (sem aceite, o porque); a caixa com o Enviar redondo", () => {
+test("chat (docs/31 V2-15 e §10): as acoes de cada mensagem (Fixar ou Desafixar, Virar pergunta, Apagar) em circulos de 32 px numa pilula por cima do item, que aparece com o mouse ou o foco e fica sempre no toque; o ⋮ com Aprovar para as próximas turmas (sem aceite, o porque); o campo Escreva para a turma", () => {
   const promovivel = message({ authorUserId: "u-caio", body: "Com aceite", displayName: "Caio R.", id: "m-com-aceite" });
   const virou = message({ authorUserId: "u-dani", body: "Ja perguntou", displayName: "Dani P.", id: "m-virou" });
   // A que ja virou pergunta vem no askedMessageIds do retrato (apagada ou nao, sem o teto da lista das perguntas).
@@ -438,27 +461,28 @@ test("chat (docs/31 V2-15): as acoes de cada mensagem na linha de baixo (Fixar o
   assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
   assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
 
-  // Os botoes da linha: 24 px de altura no minimo. Com o mouse, as acoes ficam escondidas (sem lugar na linha) e aparecem
-  // com o mouse, o foco ou o ⋯ aberto, no canto do item (a minha, a esquerda); na tela de toque, sempre na linha.
+  // Os botoes: circulos de 32 px (o toque ganha a area de 44, after:-inset-1.5). Com o mouse, as acoes ficam escondidas
+  // (sem lugar na linha) e aparecem com o mouse, o foco ou o ⋮ aberto, numa pilula por cima do canto de cima a direita do
+  // item (tambem na minha); na tela de toque, sempre na tela, no fim da linha.
   const acoesDe = (id) => chatItem(chat, id).match(/<span class="([^"]*)" data-console-message-actions="">/)?.[1].split(" ") ?? [];
   const acoes = acoesDe("m-com-aceite");
-  for (const classe of ["pointer-fine:opacity-0", "pointer-fine:group-hover:opacity-100", "pointer-fine:group-focus-within:opacity-100", "pointer-fine:has-[[data-popup-open]]:opacity-100", "pointer-fine:absolute", "pointer-fine:right-0"]) {
+  for (const classe of ["pointer-fine:opacity-0", "pointer-fine:group-hover:opacity-100", "pointer-fine:group-focus-within:opacity-100", "pointer-fine:has-[[data-popup-open]]:opacity-100", "pointer-fine:absolute", "pointer-fine:right-0", "pointer-fine:bg-room-menu"]) {
     assert.ok(acoes.includes(classe), classe);
   }
   assert.ok(!acoes.includes("opacity-0"), "no toque, sempre a mostra");
-  assert.ok(acoesDe("m-equipe").includes("pointer-fine:left-0"), "a minha: as acoes do lado de dentro");
+  assert.ok(acoesDe("m-equipe").includes("pointer-fine:right-0"), "a minha: as acoes no mesmo canto");
   assert.match(chatItem(chat, "m-com-aceite"), /^<li class="[^"]*\bgroup\b[^"]*\brelative\b/, "o item e o grupo e a referencia das acoes");
   for (const [, classes] of linha("m-com-aceite").matchAll(/<button[^>]*class="([^"]*)"/g)) {
-    assert.ok(classes.split(" ").includes("min-h-6"), "24 px de altura");
+    assert.ok(classes.split(" ").includes("size-8") && classes.split(" ").includes("rounded-full"), `32 px e redondo: ${classes}`);
   }
 
-  // A caixa: o campo de 44 px no minimo e o Enviar redondo de 44 px com o nome.
-  assert.match(chat, /<textarea(?=[^>]*\bmin-h-11\b)(?=[^>]*id="console-composer")(?=[^>]*placeholder="Escreva para a turma")[^>]*>/);
-  assert.match(chat, /<button(?=[^>]*aria-label="Enviar")(?=[^>]*\bsize-11\b)(?=[^>]*\brounded-full\b)[^>]*>/);
+  // O campo do YouTube: o textarea com o nome e o texto de exemplo, livre fora do envio; o Enviar so com o campo aberto.
+  assert.match(chat, /<textarea(?=[^>]*aria-label="Escreva para a turma")(?=[^>]*id="console-composer")(?=[^>]*placeholder="Escreva para a turma")[^>]*>/);
+  assert.doesNotMatch(chat, /<button[^>]*type="submit"[^>]*>Enviar<\/button>/, "fechado, sem o rodape com o Enviar");
   assert.doesNotMatch(chat.match(/<textarea[^>]*id="console-composer"[^>]*>/)?.[0] ?? "", /\s(?:readOnly|disabled)=""/i, "fora do envio, o campo livre");
 });
 
-test("caixa da equipe durante o envio (docs/31 V2-15, WCAG 2.4.3): o campo fica somente leitura, nunca desligado (desligado, o foco do Enter cairia no comeco da pagina), e o Enviar desligado; sem poder agir, desligado", () => {
+test("caixa da equipe durante o envio (docs/31 V2-15 e §10, WCAG 2.4.3): o campo nunca fica desligado pelo envio (desligado, o foco do Enter cairia no comeco da pagina; o Enter de novo fica parado pelo composerKey); sem poder agir, desligado", () => {
   const props = {
     askedMessageIds: [],
     busyKey: "send",
@@ -474,9 +498,7 @@ test("caixa da equipe durante o envio (docs/31 V2-15, WCAG 2.4.3): o campo fica 
   };
   const campo = (markup) => markup.match(/<textarea[^>]*id="console-composer"[^>]*>/)?.[0] ?? "";
   const enviando = html(createElement(ConsoleChat, props));
-  assert.match(campo(enviando), /\sreadOnly=""/i, "somente leitura durante o envio");
-  assert.doesNotMatch(campo(enviando), /\sdisabled=""/, "nunca desligado so pelo envio");
-  assert.match(enviando, /<button(?=[^>]*aria-label="Enviar")(?=[^>]*disabled="")[^>]*>/, "o Enviar desligado durante o envio");
+  assert.doesNotMatch(campo(enviando), /\sdisabled=""/, "nunca desligado so pelo envio: o foco continua no campo");
   // Outra acao da mesa em andamento nao mexe no campo.
   assert.doesNotMatch(campo(html(createElement(ConsoleChat, { ...props, busyKey: "moderate:m-ana" }))), /\s(?:readOnly|disabled)=""/i);
   const semAcao = campo(html(createElement(ConsoleChat, { ...props, busyKey: null, canAct: false })));
@@ -560,7 +582,8 @@ test("fase 4c: o painel Atendimento entra no console (le pela propria acao) e a 
   assert.ok(hiddenPane(atendimento));
   assert.match(textOf(atendimento), /Carregando o atendimento…/);
   const block = chatItem(markup, "m-ia");
-  assert.equal(chatMeta(block), "Assistente · Assistente · 20:01", "o selo Assistente na linha de baixo, como na sala");
+  // O nome igual ao selo (o Assistente): so o selo, como na sala, e o avatar do Assistente.
+  assert.equal(chatMeta(block), "Assistente · 20:01", "o selo Assistente na linha do autor, como na sala");
   assert.match(textOf(block.slice(block.indexOf('aria-label="Mais ações da mensagem de Assistente"'))), /Corrigir resposta/, "Corrigir resposta no ⋯ da resposta");
   assert.match(block, /aria-label="Apagar: Assistente"/, "apagar segue pela moderacao");
   assert.equal(count(markup, />Corrigir resposta</g), 1, "so na resposta do Assistente");

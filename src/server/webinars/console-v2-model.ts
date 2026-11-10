@@ -285,6 +285,19 @@ export function consoleTabsFor(input: { kind: SessionKind }): ConsoleTab[] {
 }
 
 /**
+ * O toque num item do trilho do console (docs/31 §10, o railStep da sala com as entradas do Mais): com o painel fora da
+ * tela, ou noutra aba ou entrada, abre o painel nela; no item que ja esta na tela, fecha o painel (so com palco; sem
+ * palco o painel e o corpo inteiro e nunca fecha). O estado do painel fica com o console.
+ */
+export function consoleRailStep(input: { closable: boolean; item: ConsolePanelView; panelShown: boolean; view: ConsolePanelView }): { panelOpen: boolean; view: ConsolePanelView } {
+  const same = "tab" in input.item ? "tab" in input.view && input.view.tab === input.item.tab : "more" in input.view && input.view.more === input.item.more;
+  if (!input.panelShown || !same) {
+    return { panelOpen: true, view: input.item };
+  }
+  return { panelOpen: !input.closable, view: input.view };
+}
+
+/**
  * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
  * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
  */

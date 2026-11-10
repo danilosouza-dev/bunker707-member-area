@@ -289,6 +289,8 @@ Campos em branco mostram "—" na prévia; a prévia à direita desenha a págin
 
 ### 2.4 O console da equipe durante a sessão (`/[id]/sala`)
 
+Desde 10/11/2026 o console tem o visual do YouTube da sala (o topo, o trilho com o Mais, o painel em cartão, o comentário no chat e nas Perguntas) e, com a sala no ar, pede confirmação antes de qualquer saída da página, porque sair da página tira quem apresenta da sala (`docs/31` §10).
+
 Uma tela só, para quem está apresentando ou atendendo, com a mesma sala do aluno no meio e, ao redor:
 
 | Painel | O que faz |

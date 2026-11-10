@@ -25,6 +25,7 @@ import {
   CONSOLE_POLL_START,
   consoleMoreEntriesFor,
   consolePanelViewOf,
+  consoleRailStep,
   consolePollStep,
   consolePresenceBadge,
   consoleStageTopLeft,
@@ -70,9 +71,12 @@ import { adminToast } from "../../../toast";
 import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleBar } from "./console-bar";
 import { ConsoleChat } from "./console-chat";
-import { CONSOLE_TAB_ID_PREFIX, consoleSkeleton } from "./console-layout-model";
+import { ConsoleLeaveDialog } from "./console-leave-dialog";
+import { CONSOLE_LEAVE_WAIT_MS, consoleLeaveGuarded, type ConsoleLeaveTarget } from "./console-leave-model";
+import { consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
 import { ConsolePanel } from "./console-panel";
+import { ConsoleRail, visibleConsoleTabControl } from "./console-rail";
 import { ConsolePeopleTab } from "./console-people-tab";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
@@ -87,6 +91,7 @@ import { LiveHands } from "./live-hands";
 import { LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
+import { useConsoleLeaveGuard } from "./use-console-leave-guard";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
@@ -232,6 +237,70 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     webinar
   });
 
+  // Sair da pagina com o console dentro da sala (docs/31 §10): a sala mora nesta pagina, e trocar de pagina na mesma aba
+  // tirava quem apresenta da sala para todos (o video parado para quem assiste) ate ele voltar. A guarda segura o link,
+  // o Voltar do navegador e o seletor de sessoes e pergunta; o Sair confirmado sai da sala antes de trocar de pagina.
+  const [leaveTarget, setLeaveTarget] = useState<ConsoleLeaveTarget | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const guarded = consoleLeaveGuarded({ joined: room.joined });
+  const leaveGuard = useConsoleLeaveGuard({ active: guarded, onAsk: setLeaveTarget });
+  const frameStatusRef = useRef(room.frameStatus);
+
+  useEffect(() => {
+    frameStatusRef.current = room.frameStatus;
+  });
+
+  // Fora da sala (encerrou, caiu), a pergunta que estava aberta nao vale mais: a saida segue sem ela (a troca e lida
+  // no desenho, sem efeito).
+  const [wasGuarded, setWasGuarded] = useState(guarded);
+  if (wasGuarded !== guarded) {
+    setWasGuarded(guarded);
+    if (!guarded && !leaving) {
+      setLeaveTarget(null);
+    }
+  }
+
+  /** O Sair confirmado: solta a guarda, sai da sala (quem assiste ve a saida na hora) e so entao troca de pagina. */
+  async function leaveConsole() {
+    const target = leaveTarget;
+    if (!target || leaving) {
+      return;
+    }
+    setLeaving(true);
+    leaveGuard.allow();
+    if (room.command("hangup")) {
+      const started = Date.now();
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (frameStatusRef.current !== "joined" || Date.now() - started >= CONSOLE_LEAVE_WAIT_MS) {
+            resolve();
+          } else {
+            window.setTimeout(check, 100);
+          }
+        };
+        check();
+      });
+    }
+    if (target.kind === "back") {
+      window.history.back();
+      return;
+    }
+    const next = new URL(target.href, window.location.href);
+    if (next.origin === window.location.origin) {
+      router.push(`${next.pathname}${next.search}${next.hash}`);
+    } else {
+      window.location.assign(next.href);
+    }
+  }
+
+  /** Abrir em nova aba: o mesmo endereco noutra aba; o console e a sala ficam onde estao. */
+  function leaveInNewTab() {
+    if (leaveTarget?.href) {
+      window.open(leaveTarget.href, "_blank", "noopener");
+    }
+    setLeaveTarget(null);
+  }
+
   // O relogio da tela anda a cada segundo; o skew foi medido na carga (hora do servidor menos a do aparelho).
   useEffect(() => {
     const id = window.setInterval(() => setTick(Date.now()), 1_000);
@@ -365,7 +434,13 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   }
 
   function changeSession(nextId: string) {
-    router.push(webinarConsoleHref(webinar.id, nextId));
+    const href = webinarConsoleHref(webinar.id, nextId);
+    // Trocar de sessao remonta o console (a chave da pagina): dentro da sala, pergunta antes, como qualquer saida.
+    if (guarded) {
+      setLeaveTarget({ href, kind: "session" });
+      return;
+    }
+    router.push(href);
   }
 
   /* Live ao vivo: situacao da sessao */
@@ -622,21 +697,31 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
 
   /**
    * Abre o painel na aba ou na entrada do ⋯ (Mãos, Lançar enquete e o Gravar por preparar, na barra) e leva o foco a ela,
-   * depois de o painel aparecer.
+   * depois de o painel aparecer: o item do trilho a partir de lg (com palco), a aba ou o ⋯ do painel abaixo de lg.
    */
   function openPanel(view: ConsolePanelView) {
     setPanelOpen(true);
     setPanelView(view);
     window.requestAnimationFrame(() => {
-      const target = "tab" in view ? document.getElementById(`${CONSOLE_TAB_ID_PREFIX}-tabbtn-${view.tab}`) : document.querySelector<HTMLElement>("[data-console-more-trigger]");
-      target?.focus();
+      visibleConsoleTabControl(document, "tab" in view ? view.tab : "mais")?.focus();
     });
   }
 
-  /** O X do painel: o foco vai ao balao da barra antes de o painel sumir (senao ele cairia no body). */
+  /**
+   * O X do painel (so a partir de lg): o foco vai ao item do trilho do que estava na tela antes de o painel sumir (senao
+   * ele cairia no body); sem o trilho na tela, ao balao da barra.
+   */
   function closePanel() {
-    document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]')?.focus();
+    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : "mais") ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
+    target?.focus();
     setPanelOpen(false);
+  }
+
+  /** O toque num item do trilho: a aba abre ou fecha o painel (consoleRailStep); a entrada escolhida no Mais so abre. */
+  function onRail(item: ConsolePanelView) {
+    const next = "more" in item ? { panelOpen: true, view: item } : consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
+    setPanelView(next.view);
+    setPanelOpen(next.panelOpen);
   }
 
   const readOnly = Boolean(session) && !canAct;
@@ -679,6 +764,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       disabledTitle={sessionDisabledTitle}
       editorHref={webinarAdminHref(webinar.id)}
       onAction={onTopAction}
+      onBlocked={(reason) => adminToast.info(reason)}
       onChangeSession={changeSession}
       onLock={lockRoom}
       onRefresh={() => void refresh("click")}
@@ -741,6 +827,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
             <ConsolePanel
               className={skeleton.panel}
               closable={live !== null}
+              rail={skeleton.rail !== null}
               counts={counts}
               entries={entries}
               more={{
@@ -855,9 +942,12 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
               tabs={tabs}
               view={shownView}
             />
+            {skeleton.rail ? <ConsoleRail className={skeleton.rail} counts={counts} entries={entries} onItem={onRail} panelShown={panelShown} tabs={tabs} view={shownView} /> : null}
           </div>
         )}
       </ConsoleShell>
+
+      <ConsoleLeaveDialog container={portalRef} leaving={leaving} onLeave={() => void leaveConsole()} onNewTab={leaveInNewTab} onStay={() => setLeaveTarget(null)} open={leaveTarget !== null} />
 
       <ConfirmDialog
         busy={busyKey === "open" || busyKey === "end"}
