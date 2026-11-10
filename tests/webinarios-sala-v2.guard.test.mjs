@@ -86,7 +86,8 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
   assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do selo do palco, que some com a live encerrada");
-  assert.match(room, /const presentShown = phase === "ended" \? null : presentNow;\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  // Com a Simulacao na live (adendo de 10/11/2026, R7): o real mais a parte simulada, como na gravada.
+  assert.match(room, /const presentShown = phase === "ended" \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
   assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   for (const [nome, fonte] of [
     ["live-room", room],

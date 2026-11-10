@@ -123,6 +123,11 @@ export const WEBINAR_ADMIN_COPY = {
     simulacao: { description: "Por sessão: o selo que o aluno vê na sala, com a decisão registrada.", title: "Simulação" },
     vagaLembretes: { description: "O e-mail sai pela fila com os outros e-mails da área (Resend).", title: "Vaga e lembretes" }
   },
+  /** A Simulacao e o Roteiro na Live ao vivo (adendo de 10/11/2026, R7 e R8). */
+  cardsLive: {
+    roteiro: { description: "Comentários prontos que entram aos minutos da live ou pelo botão da equipe. Nunca entram nas métricas reais.", title: "Roteiro de chat" },
+    simulacao: { description: "O contador, as entradas e os avisos de venda simulados da live, com a decisão registrada.", title: "Simulação" }
+  },
   /** Roteiro de chat (docs/30 §2.2, §6.6 D6). */
   script: {
     add: "Adicionar mensagem",
@@ -174,6 +179,9 @@ export const WEBINAR_ADMIN_COPY = {
     legal:
       "Pela lei (CDC, art. 37), nunca anuncie uma sessão gravada como ao vivo fora da área de membros. Dentro dela, o selo e os números simulados são sua decisão e ficam registrados com seu nome e a data.",
     needsPublish: "Só quem publica na Comunicação decide o selo.",
+    /** A Live ao vivo (R7): sem selo, a decisao e a da Simulacao. */
+    needsPublishLive: "Só quem publica na Comunicação decide a Simulação.",
+    noLiveSession: "A sessão da live aparece aqui depois de publicar o webinário.",
     noSessions: "Marque as sessões no card Sessões e salve para decidir o selo de cada uma.",
     sessionLabel: (when: string) => `Sessão de ${when}`,
     undecided: "Sem decisão registrada: o selo fica desligado.",
@@ -1097,14 +1105,26 @@ export type WebinarEditorCard = (typeof WEBINAR_EDITOR_CARDS)[number];
  */
 export const WEBINAR_SAVED_ONLY_CARDS: readonly WebinarEditorCard[] = ["simulacao", "roteiro", "enquetes", "oferta", "assistente"];
 
-const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes", "simulacao", "roteiro"];
+/**
+ * So na Live gravada: o card Sessoes (as horas marcadas) e o Roteiro. A Simulacao existe nos dois tipos desde o adendo
+ * de 10/11/2026 (R7: o contador, as entradas e os avisos de venda tambem na Live ao vivo, com o zero no "Começar para
+ * todos").
+ */
+const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes", "roteiro"];
 
-/** Os cards na ordem, por tipo: Sessoes, Simulacao e Roteiro so na Live gravada, Gravacao so na Live ao vivo. */
+/** Os cards na ordem, por tipo: Sessoes e Roteiro so na Live gravada, Gravacao so na Live ao vivo; Simulacao nos dois. */
 export function webinarEditorCards(kind: WebinarKind): WebinarEditorCard[] {
   return WEBINAR_EDITOR_CARDS.filter((card) => (SIMULATED_ONLY_CARDS.includes(card) ? kind === "simulated" : card === "gravacao" ? kind === "live" : true));
 }
 
-export function webinarCardTitle(card: WebinarEditorCard) {
+/** O titulo e a descricao do card; na Live ao vivo, a Simulacao e o Roteiro com a descricao da live (R7 e R8). */
+export function webinarCardTitle(card: WebinarEditorCard, kind: WebinarKind = "simulated") {
+  if (kind === "live" && card === "simulacao") {
+    return WEBINAR_ADMIN_COPY.cardsLive.simulacao;
+  }
+  if (kind === "live" && card === "roteiro") {
+    return WEBINAR_ADMIN_COPY.cardsLive.roteiro;
+  }
   return WEBINAR_ADMIN_COPY.cards[card];
 }
 

@@ -174,6 +174,7 @@ test("salvar: grava o selo, as colunas de §4.3, a frase marcada, quem e quando;
     sale_notices: 1,
     sale_notices_enabled: true,
     session_id: SESSION,
+    session_kind: "simulated",
     show_live_badge: true
   });
   assert.doesNotMatch(JSON.stringify(auditoria), /Carlos|Formação|Decisão/, "nem o texto dos avisos nem a frase na auditoria");
@@ -190,14 +191,17 @@ test("salvar tudo desligado: sem caixa, grava nulo nas regras e a frase de tudo 
   assert.equal(auditorias(db)[0].metadata.numbers_simulated, false);
 });
 
-test("salvar recusa: a live e o replay (409, so a sessao gravada), a encerrada (409), a que nao existe (404) e o banco sem a 202610300003 (409 com a frase)", async () => {
+test("salvar recusa: o replay (409, nunca simula), a encerrada (409, tambem a live encerrada), a que nao existe (404) e o banco sem a 202610300003 (409 com a frase)", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, sessionId });
 
+  // R7 (adendo de 10/11/2026): a live tem Simulacao, mas a desta escola ja encerrou e fica registrada como estava.
   const live = await pedido(LIVE_SESSION);
-  assert.deepEqual([live.status, live.error], [409, WEBINAR_COPY.simulacao.card.soLiveGravada], "a sala ao vivo nunca simula");
+  assert.deepEqual([live.status, live.error], [409, WEBINAR_COPY.simulacao.servidor.encerrada], "a live encerrada nao muda");
   assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null);
-  assert.equal((await pedido(REPLAY)).status, 409, "o Replay livre nunca simula");
+  const replay = await pedido(REPLAY);
+  assert.deepEqual([replay.status, replay.error], [409, WEBINAR_COPY.simulacao.servidor.semReplay], "o Replay livre nunca simula");
+  assert.equal(linha(db, REPLAY).simulated_count_rule, null);
   const encerrada = await pedido(ENDED_SESSION);
   assert.deepEqual([encerrada.status, encerrada.error], [409, WEBINAR_COPY.simulacao.servidor.encerrada]);
   assert.equal((await pedido("eeeeeeee-0000-4000-8000-00000000ffff")).status, 404);
@@ -231,4 +235,102 @@ test("salvar recusa a troca de regra com a sessao ja comecada (no ar, ou com a h
   assert.equal(model.simulationSessionStarted({ scheduledAt: "2026-11-05T23:01:00.000Z", status: "scheduled" }, agora), false);
   assert.equal(model.simulationSessionStarted({ scheduledAt: "2026-11-05T23:00:00+00:00", status: "scheduled" }, agora), true, "compara instantes");
   assert.equal(model.simulationSessionStarted({ scheduledAt: "2026-11-05T23:30:00.000Z", status: "live" }, agora), true);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Simulacao na Live ao vivo (adendo de 10/11/2026, R7)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A escola com o webinario ao vivo: a sessao da live na espera (sem started_at), depois da hora marcada. */
+function escolaAoVivo(sessaoDaLive = {}) {
+  const tables = escolaDaSimulacao({ webinar: { kind: "live" } });
+  Object.assign(linha({ tables }, LIVE_SESSION), {
+    ended_at: null,
+    recording_anchor_at: null,
+    scheduled_at: new Date(Date.now() - 5 * MIN).toISOString(),
+    started_at: null,
+    status: "waiting",
+    ...sessaoDaLive
+  });
+  return tables;
+}
+
+const regrasDaLive = { countRule: contador, joins: entradas, saleNotices: avisos, showLiveBadge: false };
+const fraseDaLive = (rules = regrasDaLive, responsible = "Produtora de Teste") =>
+  model.simulationAckFor({ live: true, nowMs: Date.now(), responsible, rules: model.normalizeSimulationRules(rules) });
+
+/** O banco sem a 202611100002: o check antigo (webinar_sessions_simulation_not_live_v4) recusa a regra na live. */
+function comOCheckAntigo(db) {
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    const chain = from(name);
+    if (name !== "webinar_sessions") {
+      return chain;
+    }
+    const update = chain.update;
+    chain.update = (payload) => {
+      update(payload);
+      chain.then = (resolve, reject) =>
+        Promise.resolve({ data: null, error: { code: "23514", message: 'new row for relation "webinar_sessions" violates check constraint "webinar_sessions_simulation_not_live_v4"' } }).then(resolve, reject);
+      return chain;
+    };
+    return chain;
+  };
+  return db;
+}
+
+test("R7: ler no webinario ao vivo devolve so a sessao da live (nunca o Replay nem a gravada de outro tipo)", async () => {
+  usar(bancoDaSimulacao({ tables: escolaAoVivo({ simulated_count_rule: { base: 300, jitter: 0, mode: "fixed", peak: 300 } }) }));
+  const data = ok(await actions.loadSessionSimulations({ webinarId: WEBINAR }));
+  assert.deepEqual(data.simulations.map((item) => item.sessionId), [LIVE_SESSION]);
+  assert.deepEqual(data.simulations[0].countRule, { base: 300, jitter: 0, mode: "fixed", peak: 300 });
+});
+
+test("R7: a live na espera grava as regras com a frase da live (sem o selo), quem e quando; a frase da gravada nao serve; o selo ligado e erro no campo", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
+  const frase = fraseDaLive();
+  assert.match(frase, /^Decisão do produtor em \d{2}\/\d{2}\/\d{4}: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda são simulados\. Responsável: Produtora de Teste\.$/);
+  assert.doesNotMatch(frase, /selo|Ao vivo"|sessão gravada/, "sem o trecho do selo");
+
+  const comSelo = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: frase, acknowledged: true, sessionId: LIVE_SESSION, showLiveBadge: true });
+  assert.deepEqual([comSelo.status, comSelo.fieldErrors?.showLiveBadge?.[0]], [400, WEBINAR_COPY.simulacao.servidor.liveSemSelo]);
+  const fraseDaGravada = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDeHoje(regrasDaLive), acknowledged: true, sessionId: LIVE_SESSION });
+  assert.deepEqual([fraseDaGravada.status, fraseDaGravada.fieldErrors?.acknowledged?.[0]], [400, WEBINAR_COPY.simulacao.servidor.fraseNaoBate]);
+  const semCaixa = await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION });
+  assert.equal(semCaixa.status, 400, "a caixa continua obrigatoria");
+  assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null, "nada gravado ate aqui");
+
+  const salvo = ok(await actions.saveSessionSimulation({ ...regrasDaLive, ackText: frase, acknowledged: true, sessionId: LIVE_SESSION }));
+  const row = linha(db, LIVE_SESSION);
+  assert.deepEqual(row.simulated_count_rule, { base: 50, jitter: 10, mode: "curve", peak: 300 });
+  assert.deepEqual(row.simulated_joins, { enabled: true, every_seconds: 45, max: 20, names: "generic" });
+  assert.equal(row.show_live_badge, false);
+  assert.equal(row.simulation_ack_text, frase);
+  assert.equal(row.simulation_decided_by, PRODUTORA);
+  assert.equal(salvo.session.kind, "live");
+  const [auditoria] = auditorias(db);
+  assert.equal(auditoria.metadata.session_kind, "live");
+  assert.equal(auditoria.metadata.show_live_badge, false);
+  const escrita = db.calls.queries.find((query) => query.op === "update" && query.table === "webinar_sessions");
+  assert.ok(escrita.filters.some(([op, column, value]) => op === "in" && column === "kind" && value.includes("live") && value.includes("simulated") && !value.includes("replay")));
+});
+
+test("R7: a live que ja comecou (started_at, no ar) recusa a troca com 409; na espera depois da hora marcada ainda muda", async () => {
+  const noAr = usar(bancoDaSimulacao({ tables: escolaAoVivo({ started_at: new Date(Date.now() - 20 * MIN).toISOString(), status: "live" }) }));
+  const recusada = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDaLive(), acknowledged: true, sessionId: LIVE_SESSION });
+  assert.deepEqual([recusada.status, recusada.error], [409, WEBINAR_COPY.simulacao.servidor.liveComecou]);
+  assert.equal(linha(noAr, LIVE_SESSION).simulated_count_rule, null);
+
+  const agora = Date.parse("2026-11-05T23:30:00.000Z");
+  assert.equal(model.simulationSessionStarted({ kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: null, status: "waiting" }, agora), false, "na espera, mesmo depois da hora marcada");
+  assert.equal(model.simulationSessionStarted({ kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: "2026-11-05T23:10:00.000Z", status: "waiting" }, agora), true, "com o started_at");
+  assert.equal(model.simulationSessionStarted({ kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: null, status: "live" }, agora), true);
+});
+
+test("R7: banco sem a 202611100002 (o check antigo da live): 409 com a frase da migracao, nada gravado; a gravada segue gravando", async () => {
+  const db = usar(comOCheckAntigo(bancoDaSimulacao({ tables: escolaAoVivo() })));
+  const pendente = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDaLive(), acknowledged: true, sessionId: LIVE_SESSION });
+  assert.deepEqual([pendente.status, pendente.error], [409, WEBINAR_COPY.simulacao.servidor.precisaMigracaoLive("202611100002")]);
+  assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null);
+  assert.equal(auditorias(db).length, 0);
 });

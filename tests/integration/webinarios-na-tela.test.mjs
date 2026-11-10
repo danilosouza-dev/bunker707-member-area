@@ -50,6 +50,8 @@ import {
 // - a moderacao na Live gravada pelas acoes: silenciada recebe 409 muted no chat e na pergunta (e ainda reage),
 //   removida e recusada na entrada (a sessao com join kicked e sem video; a pagina da sala recusa), o Desfazer
 //   devolve tudo; a equipe nunca e alvo; no Replay, 409; o retrato do console lista os barrados.
+// - R7 pelo app: o produtor decide a Simulacao da live na espera (saveSessionSimulation com a frase da live; o selo
+//   recusado), a aluna recebe a janela pela rota depois do Comecar para todos e o console ve "+300" separado.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -793,4 +795,53 @@ test("14. moderacao na Live gravada pelas acoes: silenciada 409 muted no chat e 
   ok(await liveActions.unbanStudent({ userId: aluna.id }));
   ok(await liveActions.undoSessionBan({ kind: "kicked", sessionId: GRAVADA.sessaoId, userId: aluna.id }));
   assert.deepEqual((await sessaoDaSala(aluna)).body.data.session.join, { ok: true });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * R7 pelo app: a Simulacao na Live ao vivo (adendo de 10/11/2026)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("15. R7 pelo app: o produtor decide a Simulacao da live na espera com a frase da live; no ar, a aluna recebe a janela contada do started_at e o console ve a parte simulada separada", async () => {
+  const simulationActions = await import("../../src/server/webinars/simulation-actions.ts");
+  const simulationModel = await import("../../src/server/webinars/simulation-model.ts");
+  const simulationRoute = await import("../../src/app/api/webinars/[id]/simulation/route.ts");
+  const consoleQueries = await import("../../src/server/webinars/console-queries.ts");
+  const { resetRoomAccessCache } = await import("../../src/server/webinars/room-route.ts");
+  unwrap(
+    await db
+      .from("webinar_sessions")
+      .update({ ended_at: null, show_live_badge: false, simulated_count_rule: null, simulated_joins: null, simulated_sale_notices: null, simulation_ack_text: null, simulation_decided_at: null, simulation_summary: null, started_at: null, status: "waiting" })
+      .eq("id", AO_VIVO.sessaoId),
+    "Voltando a live para a espera"
+  );
+  const regras = { countRule: { base: 300, jitter: 0, mode: "fixed", peak: 300 }, joins: { enabled: false, everySeconds: 60, max: 30, names: "generic" }, saleNotices: { enabled: false, items: [] }, showLiveBadge: false };
+  const frase = simulationModel.simulationAckFor({ live: true, nowMs: Date.now(), responsible: contas.produtor.nome, rules: simulationModel.normalizeSimulationRules(regras) });
+
+  actAs(usuarioDeTeste(contas.produtor));
+  const comSelo = await simulationActions.saveSessionSimulation({ ...regras, ackText: frase, acknowledged: true, sessionId: AO_VIVO.sessaoId, showLiveBadge: true });
+  assert.equal(comSelo.ok, false, "o selo Ao vivo nunca na live");
+  const salvo = await simulationActions.saveSessionSimulation({ ...regras, ackText: frase, acknowledged: true, sessionId: AO_VIVO.sessaoId });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+  const linha = unwrap(await db.from("webinar_sessions").select("simulated_count_rule, simulation_ack_text, show_live_badge").eq("id", AO_VIVO.sessaoId).single(), "Lendo a decisao da live");
+  assert.deepEqual([linha.simulated_count_rule.base, linha.simulation_ack_text, linha.show_live_badge], [300, frase, false]);
+
+  // O Comecar para todos (a RPC), e a aluna pede a janela do minuto 1 ao 3 da live.
+  unwrap(await db.rpc("webinar_open_session", { p_now: new Date(Date.now() - 2 * 60_000).toISOString(), p_session_id: AO_VIVO.sessaoId }), "Comecar para todos");
+  resetRoomAccessCache();
+  actAs(usuarioDeTeste(contas.aluna));
+  const resposta = await simulationRoute.GET(new Request(`http://localhost/api/webinars/${AO_VIVO.id}/simulation?sessao=${AO_VIVO.sessaoId}&from=60000&to=180000`), { params: Promise.resolve({ id: AO_VIVO.id }) });
+  const corpo = await resposta.json();
+  assert.equal(resposta.status, 200, JSON.stringify(corpo));
+  assert.equal(corpo.data.enabled, true);
+  assert.ok(corpo.data.counter.every((point) => point.extra === 300), "+300 para todos");
+
+  const retrato = await consoleQueries.getConsoleSnapshot(AO_VIVO.id, AO_VIVO.sessaoId, new Date());
+  assert.equal(retrato.simulatedNow, 300, "o console ve a parte simulada separada");
+
+  const mudarNoAr = await (async () => {
+    actAs(usuarioDeTeste(contas.produtor));
+    return simulationActions.saveSessionSimulation({ sessionId: AO_VIVO.sessaoId });
+  })();
+  assert.equal(mudarNoAr.status, 409, "no ar, a regra nao muda");
+  actAs(null);
 });

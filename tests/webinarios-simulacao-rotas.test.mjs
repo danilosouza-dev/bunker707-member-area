@@ -24,8 +24,9 @@ import {
 // Simulacao em memoria (tests/support/webinarios-v4-simulacao-banco.mjs) e a sessao do aluno pelo teste. GET
 // .../simulation?sessao=&from=&to=: 401 sem sessao, 400 sem id, sem ?sessao= ou com a janela maior que 120 s, 404 para
 // a sessao de outro webinario; a sessao gravada com regra devolve o contador, as entradas e os avisos da janela, iguais
-// ao modelo e iguais para todos os alunos, sem a semente nem as regras; replay, live, sessao sem regra e banco sem a
-// 202610300003 devolvem enabled false; nada vai para student_events; a resposta e sem cache.
+// ao modelo e iguais para todos os alunos, sem a semente nem as regras; replay, sessao sem regra e banco sem a
+// 202610300003 devolvem enabled false; nada vai para student_events; a resposta e sem cache. R7 (adendo de 10/11/2026):
+// a Live ao vivo com regra e decisao devolve a janela contada do started_at, com a forma pela duracao prevista.
 
 const sessao = (globalThis.__simulacaoRotasSessao ??= { user: null });
 
@@ -135,7 +136,7 @@ test("a sessao gravada com regra: o contador, as entradas e os avisos da janela,
   assert.equal(db.calls.writes.length, 0, "a rota so le");
 });
 
-test("replay, live, sessao sem regra, sessao encerrada antes do minuto e banco sem a 202610300003 devolvem enabled false com listas vazias", async () => {
+test("replay, live sem regra, sessao sem regra, sessao encerrada antes do minuto e banco sem a 202610300003 devolvem enabled false com listas vazias", async () => {
   montar({ sessao: regras });
   const vazio = (from, to) => ({ counter: [], enabled: false, from, joins: [], saleNotices: [], to });
 
@@ -145,7 +146,7 @@ test("replay, live, sessao sem regra, sessao encerrada antes do minuto e banco s
     Object.assign(row, sessionId === LIVE_SESSION ? {} : regras);
     const answer = await ler({ sessionId });
     assert.equal(answer.status, 200, sessionId);
-    assert.deepEqual(answer.body.data, vazio(0, 120_000), sessionId === REPLAY ? "o Replay livre nunca simula" : "a sala ao vivo nunca simula");
+    assert.deepEqual(answer.body.data, vazio(0, 120_000), sessionId === REPLAY ? "o Replay livre nunca simula" : "a live sem regra nao simula");
   }
 
   montar();
@@ -179,4 +180,31 @@ test("CDC (§8.6, D10): a regra gravada sem a decisao registrada (sem a frase ma
 
   montar({ sessao: regras });
   assert.equal((await ler()).body.data.enabled, true, "com a decisao registrada, a sala simula");
+});
+
+test("R7: a Live ao vivo com regra e decisao devolve a janela contada do started_at (a forma pela duracao prevista, sem fim antes do Encerrar live), igual para todos", async () => {
+  const { db } = montar({ webinar: { kind: "live" } });
+  const live = db.tables.webinar_sessions.find((item) => item.id === LIVE_SESSION);
+  Object.assign(live, regras, { ended_at: null, recording_anchor_at: null, scheduled_at: iso(Date.now() - 20 * MIN), started_at: iso(Date.now() - 12 * MIN), status: "live" });
+  const from = 10 * MIN;
+  const to = from + 120_000;
+  const answer = await ler({ from, sessionId: LIVE_SESSION, to });
+  assert.equal(answer.status, 200);
+  const feed = answer.body.data;
+  assert.equal(feed.enabled, true);
+  assert.deepEqual(feed, model.simulationFeed({ durationMs: 60 * MIN, endMs: Number.POSITIVE_INFINITY, fromMs: from, kind: "live", simulation: sessionSimulationFromRow(live), status: "live", toMs: to }));
+  assert.ok(feed.counter.every((point) => point.extra === 40), "Real + 40 fixo");
+  assert.deepEqual(feed.saleNotices, [{ atMs: 11 * MIN, text: "Carlos acabou de garantir a vaga na Formação" }]);
+  novoAluno();
+  assert.deepEqual((await ler({ from, sessionId: LIVE_SESSION, to })).body.data, feed, "outro aluno ve o mesmo");
+  assert.equal(db.calls.writes.length, 0);
+
+  // A live que passou do previsto (60 min) segue somando ate o Encerrar live.
+  const depois = await ler({ from: 70 * MIN, sessionId: LIVE_SESSION, to: 70 * MIN + 60_000 });
+  assert.ok(depois.body.data.counter.every((point) => point.extra === 40));
+
+  // Sem a decisao registrada, nada (como na gravada).
+  Object.assign(live, { simulation_ack_text: null });
+  resetRoomAccessCache();
+  assert.equal((await ler({ from, sessionId: LIVE_SESSION, to })).body.data.enabled, false);
 });

@@ -10,6 +10,7 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { roomMediaLessonId } from "@/lib/webinar-room-client";
 import { formatCountdown } from "@/lib/webinar-time";
 import type { LiveRoomInfo } from "@/server/webinars/live-model";
+import { simulationClockMs } from "@/server/webinars/simulation-model";
 import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { LIVE_REACTIONS_ID, LIVE_SETTINGS_ID, LiveControls, LiveStageFullscreen } from "./live-controls";
@@ -85,6 +86,7 @@ import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
 import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
 import { RoomReactionBubbles } from "./room-reactions";
+import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
 import { shouldAnnounceRecording, SNACK_SETTINGS_ACTION, snackToRestore } from "./room-snackbar-model";
 import { RoomStageBadges } from "./room-stage-badges";
@@ -100,6 +102,7 @@ import { screenPlacement, screenStripForcedLive } from "./screen/room-screen-mod
 import { RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
+import { useRoomSimulation } from "./use-room-simulation";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useStageGeometry } from "./use-stage-geometry";
 import { refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
@@ -640,8 +643,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const notice = useMemo(() => roomNotice ?? pendingToggleSnack(pendingPhrase), [pendingPhrase, roomNotice]);
   const stage = stageNames(room.signals.participants, presenterName);
   const startedAt = live.startedAt ?? session.session.startedAt;
+  // A Simulacao na live (adendo de 10/11/2026, R7): o contador somado ao real, as entradas e os avisos de venda, pelo
+  // relogio desde o started_at (o "Começar para todos"; negativo na espera), nunca pela ancora do chat.
+  const scheduledAt = session.session.scheduledAt;
+  // A sala guarda a funcao num ref a cada desenho (use-room-simulation.ts): sem useCallback.
+  const getSimulationOffsetMs = () => simulationClockMs({ kind: "live", scheduledAt, startedAt }, Date.now() + (skewRef.current ?? 0));
+  const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, webinarId });
+  const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
-  const presentShown = phase === "ended" ? null : presentNow;
+  // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
+  const presentShown = phase === "ended" ? null : simulation.displayCount(presentNow, simulationOffsetMs);
   const presentBadge = roomPresentBadge(presentShown);
   const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine(presenterName);
@@ -1124,8 +1135,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   topLeft={stageMoment === "on_air" ? { kind: "on_air", label: liveOnAirLabel(startedAt, nowMs, skewMs), short: liveElapsedLabel(startedAt, nowMs, skewMs) } : stageMoment === "waiting" ? { kind: "waiting" } : null}
                 />
               ) : null}
-              {/* A Na tela no palco de 640 px ou mais: as fixadas com o painel fechado (abaixo dos selos), o banner e o QR Code. */}
-              {placement.cells.length > 0 || (fullscreenOn && screenItems.length > 0) ? (
+              {/* A Na tela no palco de 640 px ou mais: as fixadas com o painel fechado (abaixo dos selos), o banner e o QR Code; e o
+                  aviso de venda simulado da live (R7), o ultimo da celula de cima a esquerda, como na gravada. */}
+              {placement.cells.length > 0 || (fullscreenOn && screenItems.length > 0) || (!blocked && simulation.enabled) ? (
                 <RoomScreenLayer
                   engineBar={joined && !ourBar}
                   forced={screenForced}
@@ -1134,6 +1146,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   items={screenItems}
                   pinned={pinnedPillsOn ? <RoomPinnedPills message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
                   placement={placement}
+                  topLeftExtra={blocked ? null : <RoomSimulationSales layout="cell" offsetMs={simulationOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
                 />
               ) : null}
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
@@ -1264,6 +1277,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   {laterPoll ? <RoomPollLaterCard onResume={() => answerPollNow(laterPoll.id)} poll={laterPoll} /> : null}
                   <RoomTranslationBar state={translation} />
                   <RoomChatPanel
+                    aboveComposer={<RoomSimulationJoins layout="stage" look="comment" offsetMs={simulationOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
                     assistant={assistant}
                     chatMode={session.session.chatMode}
                     consented={session.me.consented}

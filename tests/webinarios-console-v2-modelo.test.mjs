@@ -572,3 +572,11 @@ test("consoleRailFit (docs/31 §10, 10/11/2026): todos os itens quando a altura 
   assert.deepEqual(consoleRailFit({ available: 640, count: live }), { overflow: 2, visible: 7 }, "1280 x 720: 7 itens e o Mais com 2");
   assert.deepEqual(consoleRailFit({ available: altura(8), count: live }), { overflow: 2, visible: 7 }, "a altura que cabia os 8 de antes: o Mais leva 2");
 });
+
+test("R7 consolePresenceBadge: com o contador simulado ligado, a parte simulada vem separada no fim, so para a equipe; sem ela (nula, zero), so o real", () => {
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 300 }), "12 presentes · pico 14 · +300 simulados");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 1, simulated: 1250 }), "1 presente · +1.250 simulados", "o milhar do Brasil");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 0 }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: null }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: Number.NaN }), "12 presentes · pico 14");
+});

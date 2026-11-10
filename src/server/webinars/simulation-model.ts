@@ -7,6 +7,12 @@
 // conferida igual no navegador e no servidor, e as contas da sala no navegador (a janela a pedir, a fusao das janelas,
 // o numero do instante, a entrada e o aviso visiveis, o aviso anunciado ao leitor de tela).
 //
+// A Live ao vivo (adendo de 10/11/2026, R7) usa as mesmas contas com o zero no started_at (o "Começar para todos"):
+// antes dele, na espera, o offset e negativo e vale o que a gravada faz antes da hora marcada (o numero do zero, sem
+// entradas nem avisos); a forma da faixa e a da duracao prevista do webinario e, passada ela, o numero fica no do fim
+// da forma ate o Encerrar live (a live pode passar do previsto); as entradas e os avisos so param no Encerrar
+// (simulationFeed e simulationTotals com `kind: "live"`). A frase da decisao da live e simulationAckSentenceLive.
+//
 // Sem "server-only", imports relativos: tests/webinarios-simulacao-modelo.test.mjs carrega direto pelo Node. Nenhum
 // numero daqui entra numa metrica real, num CSV real ou numa regra da Comunicacao (D6, M6): os paineis, o relatorio e
 // os segmentos nunca importam este arquivo (o teste confere).
@@ -29,7 +35,7 @@ import {
   type SimulationFeed,
   type SimulationTotals
 } from "./model";
-import { simulationAckSentenceV4, simulationDecisionRecorded, type SimulationAckInput } from "./simulation-ack";
+import { simulationAckSentenceLive, simulationAckSentenceV4, simulationDecisionRecorded, type SimulationAckInput } from "./simulation-ack";
 
 /* ------------------------------------------------------------------------------------------------
  * Constantes
@@ -115,10 +121,11 @@ function curveShape(fraction: number): number {
  * A parte simulada do contador no offset (ms do video): "off" 0; "fixed" a base; "curve" de base ate peak nos
  * primeiros 20 % da duracao, fica e desce de leve nos ultimos 10 %, mais a variacao sorteada pela semente a cada 15 s
  * (de -jitter a +jitter). Um passo de 15 s tem um numero so (todos veem o mesmo); antes do zero vale o numero do zero;
- * do fim do video em diante, 0. Nunca negativo.
+ * do fim do video em diante, 0. Nunca negativo. `hold` (a Live ao vivo, R7): passada a duracao prevista, o numero fica
+ * no do fim da forma (a live pode durar mais que o previsto; quem para e o Encerrar live, pelo `endMs` de quem chama).
  */
-export function counterExtraAt(rule: SimulatedCountRule, seed: number, offsetMs: number, durationMs: number): number {
-  if (rule.mode === "off" || !Number.isFinite(offsetMs) || !(durationMs > 0) || offsetMs >= durationMs) {
+export function counterExtraAt(rule: SimulatedCountRule, seed: number, offsetMs: number, durationMs: number, hold = false): number {
+  if (rule.mode === "off" || !Number.isFinite(offsetMs) || !(durationMs > 0) || (!hold && offsetMs >= durationMs)) {
     return 0;
   }
   const base = Math.max(0, Math.trunc(rule.base));
@@ -128,7 +135,7 @@ export function counterExtraAt(rule: SimulatedCountRule, seed: number, offsetMs:
   const peak = Math.max(base, Math.trunc(rule.peak));
   const at = Math.max(0, Math.floor(offsetMs / STEP_MS) * STEP_MS);
   const step = at / STEP_MS;
-  const value = base + (peak - base) * curveShape(at / durationMs);
+  const value = base + (peak - base) * curveShape(Math.min(1, at / durationMs));
   const jitter = Math.max(0, Math.trunc(rule.jitter));
   const noise = jitter > 0 ? Math.round((seededUnit(seed, STREAM.counterJitter, step) * 2 - 1) * jitter) : 0;
   return Math.max(0, Math.round(value) + noise);
@@ -137,16 +144,24 @@ export function counterExtraAt(rule: SimulatedCountRule, seed: number, offsetMs:
 /**
  * Os pontos do contador numa janela: um a cada 15 s, a partir do passo em que `fromMs` cai (o numero de `fromMs`). A
  * forma da faixa e sempre a do video inteiro (`durationMs`); `endMs` e o fim real (o Encerrar antecipado da equipe):
- * dali em diante, 0, sem espremer a curva no trecho que sobrou.
+ * dali em diante, 0, sem espremer a curva no trecho que sobrou. `hold`: o da Live ao vivo (counterExtraAt).
  */
-export function counterPointsBetween(rule: SimulatedCountRule, seed: number, fromMs: number, toMs: number, durationMs: number, endMs: number = durationMs): { atMs: number; extra: number }[] {
+export function counterPointsBetween(
+  rule: SimulatedCountRule,
+  seed: number,
+  fromMs: number,
+  toMs: number,
+  durationMs: number,
+  endMs: number = durationMs,
+  hold = false
+): { atMs: number; extra: number }[] {
   if (rule.mode === "off" || !(toMs >= fromMs)) {
     return [];
   }
   const points: { atMs: number; extra: number }[] = [];
   const last = Math.min(toMs, fromMs + WINDOW_MS);
   for (let at = Math.floor(fromMs / STEP_MS) * STEP_MS; at <= last; at += STEP_MS) {
-    points.push({ atMs: at, extra: at >= endMs ? 0 : counterExtraAt(rule, seed, at, durationMs) });
+    points.push({ atMs: at, extra: at >= endMs ? 0 : counterExtraAt(rule, seed, at, durationMs, hold) });
   }
   return points;
 }
@@ -263,14 +278,58 @@ export function emptySimulationFeed(fromMs: number, toMs: number): SimulationFee
 /**
  * A sessao gravada ja comecou para a Simulacao (docs/30 §4.3 e §8.6): no ar, ou com a hora marcada (o zero do video)
  * ja passada, mesmo que o status ainda diga agendada (o tick abre a sessao ate 1 min depois). Dai em diante a regra
- * nao muda: o resumo do fim e o que a turma viu com a regra que valia.
+ * nao muda: o resumo do fim e o que a turma viu com a regra que valia. Na Live ao vivo (R7) o zero e o started_at (o
+ * "Começar para todos"): na espera, mesmo depois da hora marcada, a regra ainda muda; com o started_at, no ar ou
+ * encerrada, nao.
  */
-export function simulationSessionStarted(session: { scheduledAt: string; status: SessionStatus }, nowMs: number): boolean {
+export function simulationSessionStarted(session: { kind?: SessionKind; scheduledAt: string; startedAt?: string | null; status: SessionStatus }, nowMs: number): boolean {
   if (session.status === "live" || session.status === "ended") {
     return true;
   }
+  if (session.kind === "live") {
+    return Number.isFinite(toTime(session.startedAt ?? null));
+  }
   const zero = toTime(session.scheduledAt);
   return Number.isFinite(zero) && zero <= nowMs;
+}
+
+/** O offset da espera da Live ao vivo antes do started_at: sempre negativo, no maximo −1 s (o numero do zero). */
+export const LIVE_SIMULATION_WAITING_MAX_MS = -1000;
+
+/**
+ * O relogio da Simulacao (R7): na gravada, desde a hora marcada (o zero do video); na Live ao vivo, desde o started_at
+ * (o "Começar para todos"), nunca pela ancora da gravacao, que so move o chat. Na espera da live, sem started_at, o
+ * offset fica negativo (no maximo −1 s), mesmo depois da hora marcada: vale o numero do zero e nada de entrada nem
+ * aviso, como a gravada antes da hora. O mesmo relogio da presenca da live (live-model.presenceOffsetMs). NaN sem hora.
+ */
+export function simulationClockMs(session: { kind: SessionKind; scheduledAt: string; startedAt?: string | null }, nowMs: number): number {
+  if (session.kind === "live") {
+    const started = toTime(session.startedAt ?? null);
+    if (Number.isFinite(started)) {
+      return nowMs - started;
+    }
+    const scheduled = toTime(session.scheduledAt);
+    return Number.isFinite(scheduled) ? Math.min(nowMs - scheduled, LIVE_SIMULATION_WAITING_MAX_MS) : LIVE_SIMULATION_WAITING_MAX_MS;
+  }
+  return nowMs - toTime(session.scheduledAt);
+}
+
+/** A forma da faixa da Live ao vivo: a duracao prevista do webinario (nunca menos de 1 min). */
+export function liveSimulationShapeMs(durationMinutes: number): number {
+  return Math.max(1, Number.isFinite(durationMinutes) ? durationMinutes : 1) * 60_000;
+}
+
+/**
+ * O fim da Live ao vivo no relogio da Simulacao: o Encerrar live (ended_at − started_at); no ar, sem fim (Infinity).
+ * Encerrada sem ter comecado (direto da espera), 0: nada simulado conta.
+ */
+export function liveSimulationEndOffsetMs(session: { endedAt: string | null; startedAt: string | null }): number {
+  const started = toTime(session.startedAt);
+  const ended = toTime(session.endedAt);
+  if (!Number.isFinite(ended)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Number.isFinite(started) ? Math.max(0, ended - started) : 0;
 }
 
 /**
@@ -288,13 +347,15 @@ export function simulationEndOffsetMs(session: { endedAt: string | null; schedul
 
 /**
  * GET /api/webinars/[id]/simulation (docs/30 §6.6): o contador (so a parte simulada), as entradas e os avisos de venda
- * de [fromMs, toMs] (no maximo 120 s). So na sessao gravada com algo ligado; a live, o replay, a cancelada e a sessao
- * sem regra devolvem `enabled: false` e listas vazias. Nunca a semente nem as regras.
+ * de [fromMs, toMs] (no maximo 120 s). Na sessao gravada e na Live ao vivo (R7) com algo ligado; o replay, a cancelada
+ * e a sessao sem regra devolvem `enabled: false` e listas vazias. Nunca a semente nem as regras. Na live, `durationMs`
+ * e a duracao prevista (so a forma da faixa, que segura o numero do fim dali em diante) e `endMs` o Encerrar live
+ * (liveSimulationEndOffsetMs; no ar, sem fim): as entradas e os avisos so param nele.
  */
 export function simulationFeed(input: {
-  /** A duracao do video (a forma da faixa do contador; nunca a cortada pelo Encerrar). */
+  /** A duracao do video (a forma da faixa do contador; nunca a cortada pelo Encerrar); na live, a prevista. */
   durationMs: number;
-  /** O fim real no relogio do video (simulationEndOffsetMs); sem ele, o fim do video. */
+  /** O fim real no relogio do video (simulationEndOffsetMs; na live, liveSimulationEndOffsetMs); sem ele, o fim do video. */
   endMs?: number;
   fromMs: number;
   kind: SessionKind;
@@ -303,21 +364,36 @@ export function simulationFeed(input: {
   toMs: number;
 }): SimulationFeed {
   const { durationMs, fromMs, simulation } = input;
-  if (input.kind !== "simulated" || input.status === "cancelled" || !simulation || !simulationRulesOn(simulation)) {
+  const live = input.kind === "live";
+  if ((input.kind !== "simulated" && !live) || input.status === "cancelled" || !simulation || !simulationRulesOn(simulation)) {
     return emptySimulationFeed(fromMs, input.toMs);
   }
   const toMs = Math.min(input.toMs, fromMs + WINDOW_MS);
-  const endMs = Math.min(durationMs, input.endMs ?? durationMs);
+  const endMs = live ? (input.endMs ?? Number.POSITIVE_INFINITY) : Math.min(durationMs, input.endMs ?? durationMs);
   // Entradas e avisos so ate o fim real; o contador fica com a forma do video e zera depois do fim.
   const eventsTo = Math.min(toMs, endMs - 1);
+  const limitMs = live ? endMs : durationMs;
   return {
-    counter: counterPointsBetween(simulation.countRule, simulation.seed, fromMs, toMs, durationMs, endMs),
+    counter: counterPointsBetween(simulation.countRule, simulation.seed, fromMs, toMs, durationMs, endMs, live),
     enabled: true,
     from: fromMs,
-    joins: joinsBetween(simulation.joins, simulation.seed, fromMs, eventsTo, durationMs),
-    saleNotices: saleNoticesBetween(simulation.saleNotices, fromMs, eventsTo, durationMs),
+    joins: joinsBetween(simulation.joins, simulation.seed, fromMs, eventsTo, limitMs),
+    saleNotices: saleNoticesBetween(simulation.saleNotices, fromMs, eventsTo, limitMs),
     to: toMs
   };
+}
+
+/**
+ * A parte simulada do contador agora, para o console da equipe (R7: "12 presentes · pico 14 · +300 simulados"): o
+ * numero que a sala soma ao real no offset, pela mesma janela da sala; nulo sem contador ligado (ou sem regra, replay,
+ * cancelada). As entradas e os avisos nao entram aqui. Nunca vai para um numero real.
+ */
+export function simulationCounterNow(input: Omit<Parameters<typeof simulationFeed>[0], "fromMs" | "toMs"> & { offsetMs: number }): number | null {
+  if (!Number.isFinite(input.offsetMs)) {
+    return null;
+  }
+  const feed = simulationFeed({ ...input, fromMs: input.offsetMs, toMs: input.offsetMs });
+  return feed.enabled ? counterExtraFromPoints(feed.counter, input.offsetMs) : null;
 }
 
 /**
@@ -327,22 +403,25 @@ export function simulationFeed(input: {
  * recebeu durante a sessao. E exatamente o que as janelas de simulationFeed mostraram nesse trecho (o teste de
  * propriedade confere); as saidas nao contam como entradas. Um numero so vale para os dois (o video inteiro).
  */
-export function simulationTotals(simulation: Pick<SessionSimulation, "countRule" | "joins" | "saleNotices" | "seed">, span: number | { endMs: number; videoMs: number }): SimulationTotals {
+export function simulationTotals(simulation: Pick<SessionSimulation, "countRule" | "joins" | "saleNotices" | "seed">, span: number | { endMs: number; videoMs: number }, live = false): SimulationTotals {
   const videoMs = typeof span === "number" ? span : span.videoMs;
-  const endMs = Math.min(videoMs, typeof span === "number" ? span : span.endMs);
-  if (!(videoMs > 0) || !(endMs > 0)) {
+  // Na Live ao vivo (R7) a live pode passar do previsto: o fim e o Encerrar live, e o contador segura o numero do fim da forma.
+  const spanEnd = typeof span === "number" ? span : span.endMs;
+  const endMs = live ? Math.min(spanEnd, CHAT_LIMITS.offsetMaxMs) : Math.min(videoMs, spanEnd);
+  if (!(videoMs > 0) || !(endMs > 0) || !Number.isFinite(endMs)) {
     return { counterMax: 0, joinsShown: 0, saleNoticesShown: 0 };
   }
+  const limitMs = live ? endMs : videoMs;
   let counterMax = 0;
   if (simulation.countRule.mode !== "off") {
     for (let at = 0; at < endMs; at += STEP_MS) {
-      counterMax = Math.max(counterMax, counterExtraAt(simulation.countRule, simulation.seed, at, videoMs));
+      counterMax = Math.max(counterMax, counterExtraAt(simulation.countRule, simulation.seed, at, videoMs, live));
     }
   }
   return {
     counterMax,
-    joinsShown: joinsBetween(simulation.joins, simulation.seed, 0, endMs - 1, videoMs).filter((event) => !event.left).length,
-    saleNoticesShown: saleNoticesBetween(simulation.saleNotices, 0, endMs - 1, videoMs).length
+    joinsShown: joinsBetween(simulation.joins, simulation.seed, 0, endMs - 1, limitMs).filter((event) => !event.left).length,
+    saleNoticesShown: saleNoticesBetween(simulation.saleNotices, 0, endMs - 1, limitMs).length
   };
 }
 
@@ -385,9 +464,17 @@ export function simulationAckFlags(rules: SimulationRules): Omit<SimulationAckIn
   };
 }
 
-/** A frase de §8.6 para hoje (data de Sao Paulo) com o nome de quem decide. */
-export function simulationAckFor(input: { nowMs: number; responsible: string; rules: SimulationRules }): string {
-  return simulationAckSentenceV4({ ...simulationAckFlags(input.rules), date: saoPauloDate(new Date(input.nowMs).toISOString()), responsible: input.responsible });
+/**
+ * A frase de §8.6 para hoje (data de Sao Paulo) com o nome de quem decide. `live` (R7): a variante da Live ao vivo,
+ * sem o trecho do selo (simulationAckSentenceLive).
+ */
+export function simulationAckFor(input: { live?: boolean; nowMs: number; responsible: string; rules: SimulationRules }): string {
+  const flags = simulationAckFlags(input.rules);
+  const date = saoPauloDate(new Date(input.nowMs).toISOString());
+  if (input.live) {
+    return simulationAckSentenceLive({ countSimulated: flags.countSimulated, date, joinsSimulated: flags.joinsSimulated, responsible: input.responsible, saleNoticesSimulated: flags.saleNoticesSimulated });
+  }
+  return simulationAckSentenceV4({ ...flags, date, responsible: input.responsible });
 }
 
 /** Texto comparavel: NFC, aspas retas, um espaco so, sem espacos nas pontas. */
@@ -401,14 +488,17 @@ export function normalizeSimulationAck(text: string): string {
 
 /**
  * A frase marcada e a que o servidor montaria agora? Aceita a de hoje e a de ontem (a tela aberta antes da meia-noite),
- * com os espacos e as aspas normalizados. Qualquer outra diferenca (nome, selo, numeros, avisos) recusa.
+ * com os espacos e as aspas normalizados. Qualquer outra diferenca (nome, selo, numeros, avisos, a variante da live)
+ * recusa.
  */
-export function simulationAckMatches(input: { ackText: string | null | undefined; nowMs: number; responsible: string; rules: SimulationRules }): boolean {
+export function simulationAckMatches(input: { ackText: string | null | undefined; live?: boolean; nowMs: number; responsible: string; rules: SimulationRules }): boolean {
   const given = normalizeSimulationAck(input.ackText ?? "");
   if (!given) {
     return false;
   }
-  return [input.nowMs, input.nowMs - 86_400_000].some((nowMs) => normalizeSimulationAck(simulationAckFor({ nowMs, responsible: input.responsible, rules: input.rules })) === given);
+  return [input.nowMs, input.nowMs - 86_400_000].some(
+    (nowMs) => normalizeSimulationAck(simulationAckFor({ live: input.live, nowMs, responsible: input.responsible, rules: input.rules })) === given
+  );
 }
 
 /** A frase cabe na coluna (simulation_ack_text, CHAT_LIMITS.simulationAck). */

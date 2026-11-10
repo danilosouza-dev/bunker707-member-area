@@ -1308,3 +1308,33 @@ test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sesso
   );
   assert.ok(consoleQueries.consoleSessionsFor(sessions, nowMs, "jit-pedida").some((item) => item.id === "jit-pedida"), "a pedida por ?sessao= continua no seletor");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * A Simulacao na Live ao vivo no console (adendo de 10/11/2026, R7)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("R7: o retrato da live no ar leva a parte simulada do contador separada do real (so com a decisao registrada); os presentes continuam o real", async () => {
+  const decisao = {
+    simulated_count_rule: { base: 300, jitter: 0, mode: "fixed", peak: 300 },
+    simulated_joins: null,
+    simulated_sale_notices: null,
+    simulation_ack_text: "Decisão do produtor em 10/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem. Responsável: Produtor de Teste.",
+    simulation_decided_at: new Date(Date.now() - 60 * MIN).toISOString(),
+    simulation_decided_by: HOST,
+    simulation_seed: 99,
+    simulation_summary: null
+  };
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  Object.assign(linha(db, S_NO_AR), decisao);
+  const now = new Date();
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now);
+  assert.equal(retrato.simulatedNow, 300, "+300 simulados, so para a equipe");
+  assert.equal(retrato.presentNow, 0, "o real fica o real");
+
+  Object.assign(linha(db, S_NO_AR), { simulation_ack_text: null });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).simulatedNow, null, "sem a decisao, nada simulado");
+  Object.assign(linha(db, S_NO_AR), decisao, { simulated_count_rule: null, simulated_joins: { enabled: true, every_seconds: 30, max: 10, names: "generic" } });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).simulatedNow, null, "so as entradas: nada a separar no contador");
+  Object.assign(linha(db, S_ENCERRADA), decisao);
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_ENCERRADA, now)).simulatedNow, null, "a live encerrada");
+});

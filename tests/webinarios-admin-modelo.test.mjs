@@ -228,8 +228,12 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
  * ---------------------------------------------------------------------------------------------- */
 
 test("cards por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo; cada campo sabe o card dele", () => {
-  // Fase 2b: Simulacao e Roteiro so na Live gravada; Enquetes nos dois tipos (prontas para o console).
-  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "oferta", "assistente", "qualidade", "gravacao", "replayAula", "revisao"]);
+  // Fase 2b: Enquetes nos dois tipos (prontas para o console). Adendo de 10/11/2026 (R7): a Simulacao tambem na Live ao
+  // vivo, com a descricao da live; Sessoes e Roteiro continuam so na gravada.
+  assert.deepEqual(vm.webinarEditorCards("live"), ["dados", "simulacao", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "oferta", "assistente", "qualidade", "gravacao", "replayAula", "revisao"]);
+  assert.match(vm.webinarCardTitle("simulacao", "live").description, /da live/);
+  assert.match(vm.webinarCardTitle("roteiro", "live").description, /minutos da live ou pelo botão da equipe/);
+  assert.equal(vm.webinarCardTitle("simulacao").description, vm.WEBINAR_ADMIN_COPY.cards.simulacao.description, "a gravada como antes");
   assert.deepEqual(vm.webinarEditorCards("simulated"), ["dados", "sessoes", "simulacao", "roteiro", "quemPode", "vagaLembretes", "avisar", "sala", "enquetes", "oferta", "assistente", "qualidade", "replayAula", "revisao"]);
   assert.deepEqual([...vm.WEBINAR_SAVED_ONLY_CARDS], ["simulacao", "roteiro", "enquetes", "oferta", "assistente"]);
   assert.equal(vm.webinarCardTitle("vagaLembretes").title, "Vaga e lembretes");

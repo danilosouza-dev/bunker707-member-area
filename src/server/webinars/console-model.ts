@@ -508,6 +508,12 @@ export type ConsoleSnapshot = {
   presence?: ConsolePresence | null;
   presentNow: number;
   questions: WebinarQuestion[];
+  /**
+   * A parte simulada do contador agora (adendo de 10/11/2026, R7), so para a equipe ver separada do real ("· +300
+   * simulados"): na gravada e na Live ao vivo com o contador ligado e a decisao registrada; nula sem ele, encerrada ou no
+   * Replay. Nunca entra em `presentNow` nem num numero real.
+   */
+  simulatedNow?: number | null;
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */
   scriptFired: Record<string, string | null>;
   scriptItems: ScriptItem[];
@@ -529,6 +535,19 @@ export function consoleSessionOf<T extends { roomName: string | null }>(session:
  */
 export function consoleOffsetMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
   return sessionOffsetMs(session, untilEnded(session, deviceNowMs + skewMs));
+}
+
+/**
+ * O relogio do roteiro no console (a fila e o "Minuto já passou"): na gravada, o do video (consoleOffsetMs); na Live ao
+ * vivo (adendo de 10/11/2026, R8), desde o started_at (o "Começar para todos", o zero dos itens "Aos {n} minutos da
+ * live"), nunca pela ancora da gravacao, e NaN antes dele (nada passou ainda). Para no encerramento.
+ */
+export function consoleScriptClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
+  if (session.kind === "live") {
+    const startedMs = toTime(session.startedAt);
+    return Number.isFinite(startedMs) ? untilEnded(session, deviceNowMs + skewMs) - startedMs : Number.NaN;
+  }
+  return consoleOffsetMs(session, deviceNowMs, skewMs);
 }
 
 /**

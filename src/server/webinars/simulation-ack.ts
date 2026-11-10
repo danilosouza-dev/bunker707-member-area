@@ -2,7 +2,9 @@
 // webinars.jit_settings.simulation.ackText) exatamente como foi mostrada e marcada. A da fase 2
 // (room-model.ts, simulationAckSentence) cobre so o selo e os numeros de plateia; esta cobre tambem as entradas e os
 // avisos de venda simulados, que a fase 4 liga. Modulo puro, sem imports: o card Simulacao (4b) e o "Comeca quando voce
-// entra" (4e) usam a mesma frase.
+// entra" (4e) usam a mesma frase. A Live ao vivo (adendo de 10/11/2026, R7) tem a variante dela
+// (simulationAckSentenceLive): sem o trecho do selo "Ao vivo" (a live e ao vivo de verdade, e o "nunca e anunciada como ao
+// vivo" fala do selo), com "nesta live ao vivo" e o resto igual; continua obrigatoria e conferida no servidor.
 
 export type SimulationAckInput = {
   badgeOn: boolean;
@@ -29,6 +31,20 @@ export function simulationAckSentenceV4(input: SimulationAckInput): string {
     `${input.badgeOn ? "fica ligado" : "fica desligado"}, os números de plateia ${numbers ? "são simulados" : "são reais"} ` +
     `e os avisos de venda ${input.saleNoticesSimulated ? "são simulados" : "não aparecem"}. ` +
     `Fora da área de membros, esta sessão nunca é anunciada como ao vivo. Responsável: ${input.responsible.trim() || "—"}.`
+  );
+}
+
+/**
+ * A frase da Live ao vivo (R7): os numeros de plateia e os avisos de venda, sem o selo. A data e o responsavel como na
+ * gravada; a conferencia do servidor (simulationAckMatches com `live`) monta esta e compara.
+ */
+export function simulationAckSentenceLive(input: Omit<SimulationAckInput, "badgeOn">): string {
+  const numbers = input.countSimulated || input.joinsSimulated;
+  return (
+    `Decisão do produtor em ${input.date}: nesta live ao vivo, dentro da área de membros, ` +
+    `os números de plateia ${numbers ? "são simulados" : "são reais"} ` +
+    `e os avisos de venda ${input.saleNoticesSimulated ? "são simulados" : "não aparecem"}. ` +
+    `Responsável: ${input.responsible.trim() || "—"}.`
   );
 }
 

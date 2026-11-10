@@ -773,7 +773,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
   const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
   const stageKinds = screenStageKinds(screen.active);
-  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
+  // R7: a parte simulada do contador vem separada no fim ("· +300 simulados"), so para a equipe.
+  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0, simulated: snapshot?.simulatedNow ?? null }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
   const presenterName = live ? (webinar.presenterName ?? null) : null;

@@ -7,8 +7,8 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // A Simulacao completa, a parte pura (docs/30 §1.6, §3.5, §4.3, §6.6, §8.6; D6, D10, M6; docs/18 §2.1): o contador
 // (off / fixed / curve com a variacao sorteada pela semente a cada 15 s, nunca negativo), as entradas e saidas com os
-// nomes genericos (nunca de aluno), os avisos de venda da janela, a janela do aluno (so a sessao gravada; replay e live
-// devolvem enabled false; nunca a semente nem as regras), o resumo do fim igual ao que as janelas mostraram (teste de
+// nomes genericos (nunca de aluno), os avisos de venda da janela, a janela do aluno (a sessao gravada e, desde o adendo
+// de 10/11/2026, a Live ao vivo; o replay devolve enabled false; nunca a semente nem as regras), o resumo do fim igual ao que as janelas mostraram (teste de
 // propriedade com a mesma sequencia de janelas da sala), a frase de §8.6 (hoje e ontem, nome e numeros conferidos) e
 // as contas da sala (fusao, numero do instante, entrada de 8 s, aviso de 4 s, leitor de tela no maximo um por
 // minuto). E a guarda D6/M6: os paineis, o relatorio, as exportacoes e a Comunicacao nunca importam simulation-model.
@@ -153,7 +153,7 @@ test("avisos de venda: so ligados, os da janela e dentro do video, na ordem do m
  * A janela do aluno e o resumo do fim
  * ---------------------------------------------------------------------------------------------- */
 
-test("a janela do aluno: so a sessao gravada com algo ligado; replay, live, cancelada e sem regra devolvem enabled false e listas vazias; nunca a semente nem as regras", () => {
+test("a janela do aluno: a sessao gravada (e a Live ao vivo, R7) com algo ligado; replay, cancelada e sem regra devolvem enabled false e listas vazias; nunca a semente nem as regras", () => {
   const ligada = simulacao({ countRule: { base: 10, jitter: 2, mode: "curve", peak: 90 }, joins: { enabled: true, everySeconds: 20, max: 100, names: "generic" }, saleNotices: { enabled: true, items: [{ offsetMs: 61_000, text: "Ana garantiu" }] } });
   const feed = model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "simulated", simulation: ligada, status: "live", toMs: WINDOW });
   assert.equal(feed.enabled, true);
@@ -163,9 +163,13 @@ test("a janela do aluno: so a sessao gravada com algo ligado; replay, live, canc
   assert.deepEqual(feed.saleNotices, [{ atMs: 61_000, text: "Ana garantiu" }]);
   assert.ok(feed.joins.length >= 6);
 
-  for (const kind of ["replay", "live"]) {
-    assert.deepEqual(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind, simulation: ligada, toMs: WINDOW }), { counter: [], enabled: false, from: 0, joins: [], saleNotices: [], to: WINDOW }, kind);
-  }
+  assert.deepEqual(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "replay", simulation: ligada, toMs: WINDOW }), { counter: [], enabled: false, from: 0, joins: [], saleNotices: [], to: WINDOW }, "replay");
+  // R7 (adendo de 10/11/2026): a Live ao vivo tem a mesma janela, contada do started_at.
+  const daLive = model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "live", simulation: ligada, status: "live", toMs: WINDOW });
+  assert.equal(daLive.enabled, true, "live");
+  assert.deepEqual(daLive.counter, feed.counter, "o mesmo numero no mesmo segundo");
+  assert.deepEqual(daLive.joins, feed.joins);
+  assert.equal(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "live", simulation: ligada, status: "cancelled", toMs: WINDOW }).enabled, false, "live cancelada");
   assert.equal(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "simulated", simulation: ligada, status: "cancelled", toMs: WINDOW }).enabled, false);
   assert.equal(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "simulated", simulation: simulacao(), toMs: WINDOW }).enabled, false, "so o selo nao muda nada na sala");
   assert.equal(model.simulationFeed({ durationMs: HOUR, fromMs: 0, kind: "simulated", simulation: null, toMs: WINDOW }).enabled, false);
@@ -372,4 +376,114 @@ test("D6/M6: os paineis, o relatorio, as exportacoes, o follow-up e a Comunicaca
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
   assert.doesNotMatch(source, /server-only|Math\.random|Date\.now\(/, "modulo puro, sem sorteio fora da semente nem relogio");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Live ao vivo (adendo de 10/11/2026, R7)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("R7: o relogio da live e o started_at (nunca a ancora); na espera, mesmo depois da hora marcada, negativo (no maximo -1 s); a gravada segue a hora marcada", () => {
+  const agora = Date.parse("2026-11-05T23:30:00.000Z");
+  const marcada = "2026-11-05T23:00:00.000Z";
+  assert.equal(model.simulationClockMs({ kind: "live", scheduledAt: marcada, startedAt: "2026-11-05T23:10:00.000Z" }, agora), 20 * MIN, "desde o Começar para todos");
+  assert.equal(model.simulationClockMs({ kind: "live", scheduledAt: marcada, startedAt: null }, agora), -1000, "na espera depois da hora: -1 s");
+  assert.equal(model.simulationClockMs({ kind: "live", scheduledAt: "2026-11-05T23:40:00.000Z", startedAt: null }, agora), -10 * MIN, "na espera antes da hora");
+  assert.equal(model.simulationClockMs({ kind: "simulated", scheduledAt: marcada, startedAt: null }, agora), 30 * MIN, "a gravada pela hora marcada");
+
+  // Na espera vale o mesmo que a gravada antes da hora: o numero do zero, sem entradas nem avisos.
+  const ligada = simulacao({ countRule: { base: 300, jitter: 0, mode: "fixed", peak: 300 }, joins: { enabled: true, everySeconds: 10, max: 50, names: "generic" }, saleNotices: { enabled: true, items: [{ offsetMs: 5_000, text: "Ana garantiu" }] } });
+  const espera = model.simulationFeed({ durationMs: HOUR, endMs: Number.POSITIVE_INFINITY, fromMs: -WINDOW, kind: "live", simulation: ligada, status: "waiting", toMs: -1000 });
+  assert.equal(espera.enabled, true);
+  assert.ok(espera.counter.every((point) => point.extra === 300), "o numero do zero");
+  assert.deepEqual([espera.joins, espera.saleNotices], [[], []]);
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "live", offsetMs: -1000, simulation: ligada, status: "waiting" }), 300);
+});
+
+test("R7: na live a forma da faixa e a duracao prevista; passada ela, o numero fica no do fim da forma (nunca 0) e as entradas e os avisos seguem ate o Encerrar live", () => {
+  const curve = { base: 100, jitter: 0, mode: "curve", peak: 300 };
+  const fimDaForma = model.counterExtraAt(curve, 7, HOUR - STEP, HOUR, true);
+  assert.equal(model.counterExtraAt(curve, 7, 2 * HOUR, HOUR), 0, "a gravada zera do fim do video em diante");
+  assert.equal(model.counterExtraAt(curve, 7, 2 * HOUR, HOUR, true), Math.round(100 + 200 * (1 - model.SIMULATION_CURVE.fallShare)), "a live segura o numero do fim da forma");
+  assert.ok(fimDaForma >= model.counterExtraAt(curve, 7, 2 * HOUR, HOUR, true));
+  for (let at = 0; at < HOUR; at += 10 * STEP) {
+    assert.equal(model.counterExtraAt(curve, 7, at, HOUR, true), model.counterExtraAt(curve, 7, at, HOUR), "dentro do previsto, o mesmo numero da gravada");
+  }
+
+  const ligada = simulacao({ countRule: curve, joins: { enabled: true, everySeconds: 60, max: 500, names: "generic" }, saleNotices: { enabled: true, items: [{ offsetMs: 70 * MIN, text: "Bia garantiu" }] } });
+  const depois = model.simulationFeed({ durationMs: HOUR, fromMs: 70 * MIN - 30_000, kind: "live", simulation: ligada, status: "live", toMs: 70 * MIN + 30_000 });
+  assert.ok(depois.counter.every((point) => point.extra > 0), "o contador segue somando depois do previsto");
+  assert.ok(depois.joins.length > 0, "as entradas seguem");
+  assert.deepEqual(depois.saleNotices, [{ atMs: 70 * MIN, text: "Bia garantiu" }], "o aviso dos 70 min aparece numa live de 60 min previstos");
+  const gravada = model.simulationFeed({ durationMs: HOUR, fromMs: 70 * MIN - 30_000, kind: "simulated", simulation: ligada, status: "live", toMs: 70 * MIN + 30_000 });
+  assert.deepEqual([gravada.joins, gravada.saleNotices], [[], []], "a gravada para no fim do video");
+
+  // O Encerrar live corta tudo, como o Encerrar da gravada.
+  const encerrada = model.simulationFeed({ durationMs: HOUR, endMs: 65 * MIN, fromMs: 64 * MIN, kind: "live", simulation: ligada, status: "ended", toMs: 66 * MIN });
+  assert.ok(encerrada.counter.filter((point) => point.atMs >= 65 * MIN).every((point) => point.extra === 0));
+  assert.ok(encerrada.joins.every((event) => event.atMs < 65 * MIN));
+  assert.equal(model.liveSimulationEndOffsetMs({ endedAt: "2026-11-05T23:55:00.000Z", startedAt: "2026-11-05T23:10:00.000Z" }), 45 * MIN);
+  assert.equal(model.liveSimulationEndOffsetMs({ endedAt: null, startedAt: "2026-11-05T23:10:00.000Z" }), Number.POSITIVE_INFINITY, "no ar, sem fim");
+  assert.equal(model.liveSimulationEndOffsetMs({ endedAt: "2026-11-05T23:55:00.000Z", startedAt: null }), 0, "encerrada direto da espera");
+  assert.equal(model.liveSimulationShapeMs(90), 90 * MIN);
+});
+
+test("R7 propriedade: o resumo da live e o que as janelas da sala mostraram de 0 ao Encerrar live (que passa do previsto)", () => {
+  const rand = sorteio(4242);
+  for (let round = 0; round < 25; round += 1) {
+    const base = Math.floor(rand() * 300);
+    const sim = simulacao({
+      countRule: { base, jitter: Math.floor(rand() * 30), mode: rand() < 0.5 ? "fixed" : "curve", peak: base + Math.floor(rand() * 400) },
+      joins: { enabled: true, everySeconds: 10 + Math.floor(rand() * 90), max: Math.floor(rand() * 300), names: "generic" },
+      saleNotices: { enabled: true, items: Array.from({ length: 1 + Math.floor(rand() * 6) }, (_, index) => ({ offsetMs: Math.floor(rand() * 3 * HOUR), text: `Aviso ${index}` })) },
+      seed: Math.floor(rand() * 2_147_483_647)
+    });
+    const shapeMs = 30 * MIN + Math.floor(rand() * HOUR);
+    const endMs = Math.floor(shapeMs * (0.5 + rand() * 1.5));
+    let current = null;
+    let counterMax = 0;
+    let joinsShown = 0;
+    let saleNoticesShown = 0;
+    for (let offsetMs = -2 * MIN; offsetMs <= endMs + WINDOW; offsetMs += model.SIMULATION_ROOM.checkEveryMs) {
+      const next = model.simulationWindowToFetch({ current, offsetMs });
+      if (!next) {
+        continue;
+      }
+      current = next;
+      const feed = model.simulationFeed({ durationMs: shapeMs, endMs, fromMs: next.fromMs, kind: "live", simulation: sim, status: "ended", toMs: next.toMs });
+      for (const point of feed.counter) {
+        counterMax = Math.max(counterMax, point.extra);
+      }
+      joinsShown += feed.joins.filter((event) => !event.left).length;
+      saleNoticesShown += feed.saleNotices.length;
+    }
+    assert.deepEqual(model.simulationTotals(sim, { endMs, videoMs: shapeMs }, true), { counterMax, joinsShown, saleNoticesShown }, `rodada ${round}`);
+  }
+});
+
+test("R7: a frase da live (sem o selo, 'nesta live ao vivo'), conferida igual no servidor; a da gravada nao serve na live nem a da live na gravada", () => {
+  const nowMs = Date.parse("2026-11-05T15:00:00.000Z");
+  const rules = model.normalizeSimulationRules({ countRule: { base: 300, jitter: 0, mode: "fixed", peak: 300 }, joins: semEntradas, saleNotices: semAvisos, showLiveBadge: false });
+  const live = model.simulationAckFor({ live: true, nowMs, responsible: "Produtora de Teste", rules });
+  assert.equal(live, "Decisão do produtor em 05/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem. Responsável: Produtora de Teste.");
+  const gravada = model.simulationAckFor({ nowMs, responsible: "Produtora de Teste", rules });
+  assert.match(gravada, /nesta sessão gravada/);
+  assert.equal(model.simulationAckMatches({ ackText: live, live: true, nowMs, responsible: "Produtora de Teste", rules }), true);
+  assert.equal(model.simulationAckMatches({ ackText: live, live: true, nowMs: nowMs + 86_400_000, responsible: "Produtora de Teste", rules }), true, "a de ontem tambem");
+  assert.equal(model.simulationAckMatches({ ackText: gravada, live: true, nowMs, responsible: "Produtora de Teste", rules }), false);
+  assert.equal(model.simulationAckMatches({ ackText: live, nowMs, responsible: "Produtora de Teste", rules }), false);
+  assert.equal(model.simulationAckMatches({ ackText: live, live: true, nowMs, responsible: "Outra Pessoa", rules }), false);
+  const tudoReal = model.simulationAckFor({ live: true, nowMs, responsible: "Produtora de Teste", rules: model.normalizeSimulationRules({ countRule: off, joins: semEntradas, saleNotices: semAvisos, showLiveBadge: false }) });
+  assert.match(tudoReal, /os números de plateia são reais e os avisos de venda não aparecem\./);
+});
+
+test("R7 console: a parte simulada do contador agora, separada do real; nula com o contador desligado, sem regra ou no Replay", () => {
+  const fixo = simulacao({ countRule: { base: 300, jitter: 0, mode: "fixed", peak: 300 } });
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "live", offsetMs: 10 * MIN, simulation: fixo, status: "live" }), 300);
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "simulated", offsetMs: 10 * MIN, simulation: fixo, status: "live" }), 300);
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "simulated", offsetMs: 2 * HOUR, simulation: fixo, status: "live" }), 0, "a gravada depois do fim do video");
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "live", offsetMs: 2 * HOUR, simulation: fixo, status: "live" }), 300, "a live que passou do previsto");
+  const soEntradas = simulacao({ joins: { enabled: true, everySeconds: 30, max: 10, names: "generic" } });
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "live", offsetMs: 10 * MIN, simulation: soEntradas, status: "live" }), null, "sem contador, nada a separar");
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "replay", offsetMs: 10 * MIN, simulation: fixo, status: "live" }), null);
+  assert.equal(model.simulationCounterNow({ durationMs: HOUR, kind: "live", offsetMs: Number.NaN, simulation: fixo, status: "live" }), null);
 });

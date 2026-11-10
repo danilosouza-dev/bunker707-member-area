@@ -12,6 +12,8 @@
 // §5.6): o retrato leva a fixada pela chave (o bloco "Fixada agora", mesmo para uma mensagem mais velha que as 200 da
 // lista), a enquete fixada, os banners e QR Codes prontos, o que esta na tela e os numeros de cada exibicao (a funcao
 // webinar_screen_report, guardada 10 s por sessao) e, na Live gravada, os removidos, silenciados e banidos com o nome.
+// Adendo de 10/11/2026 (R7): na gravada e na Live ao vivo com a decisao registrada, a parte simulada do contador agora
+// (`simulatedNow`, uma leitura das regras pela chave so nessas sessoes), so para a equipe ver separada do real.
 
 import "server-only";
 
@@ -20,7 +22,8 @@ import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, qu
 import { fetchPinnedMessageRow, listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionReplyRows, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
 import { askableMessageIds, consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleScreen, type ConsoleSnapshot } from "./console-model";
 import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
-import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
+import { assertNoDbError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
+import { isPendingMigrationError } from "../db/pending-migration";
 import { sessionRecordingOf, sessionVideoDurationMs } from "./export-queries";
 import {
   barredPeople,
@@ -46,6 +49,8 @@ import { reportViewOf } from "./report-queries";
 import { screenDisplayFromRow, screenItemFromRow } from "./screen-rows";
 import { loadScreenStats } from "./screen-queries";
 import { loadConsoleScreenRows } from "./screen-store";
+import { liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationClockMs, simulationCounterNow, simulationDecisionRecorded, simulationEndOffsetMs } from "./simulation-model";
+import { fetchSessionSimulation } from "./simulation-store";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
 import { saoPauloDayKey } from "../../lib/webinar-time";
 
@@ -472,6 +477,43 @@ async function loadConsolePresence(session: WebinarSession, offsetMs: number, no
   }
 }
 
+/**
+ * A parte simulada do contador agora (R7), so para a equipe: na gravada (o relogio e a duracao do video) e na Live ao
+ * vivo (o relogio desde o started_at e a forma pela duracao prevista), com a decisao registrada (simulationDecisionRecorded,
+ * como a sala) e a sessao de pe. Uma leitura das regras pela chave so nesse caso; banco sem a 202610300003 ou a leitura
+ * que falha: nulo (o selo fica so com o real).
+ */
+async function loadConsoleSimulated(db: WebinarsDb, input: { durationMs: number; nowMs: number; session: WebinarSession; webinar: WebinarRow | undefined }): Promise<number | null> {
+  const { session } = input;
+  const live = session.kind === "live";
+  if ((session.kind !== "simulated" && !live) || session.status === "ended" || session.status === "cancelled" || !simulationDecisionRecorded(session)) {
+    return null;
+  }
+  try {
+    const simulation = await fetchSessionSimulation(db, session.id);
+    const offsetMs = simulationClockMs(session, input.nowMs);
+    if (live) {
+      return simulationCounterNow({
+        durationMs: liveSimulationShapeMs(input.webinar?.duration_minutes ?? 1),
+        endMs: liveSimulationEndOffsetMs(session),
+        kind: "live",
+        offsetMs,
+        simulation,
+        status: session.status
+      });
+    }
+    if (!Number.isFinite(input.durationMs) || input.durationMs <= 0) {
+      return null;
+    }
+    return simulationCounterNow({ durationMs: input.durationMs, endMs: simulationEndOffsetMs(session, input.durationMs), kind: "simulated", offsetMs, simulation, status: session.status });
+  } catch (error) {
+    if (!isPendingMigrationError(error) && !isMissingWebinarSchema(error)) {
+      console.error(`[admin/webinarios] parte simulada do console da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+}
+
 /** Nada na Na tela (o Replay: nada aparece na frente da turma, e o console nao tem a entrada). */
 const NO_CONSOLE_SCREEN: ConsoleScreen = { active: [], items: [], pending: false, stats: {} };
 
@@ -517,13 +559,14 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // A fixada pela chave: da lista quando esta entre as 200 mais novas; senao, uma leitura.
   const pinnedInList = session.pinnedMessageId ? (chatRows.find((row) => row.id === session.pinnedMessageId) ?? null) : null;
   const chatAuthors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
-  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred] = await Promise.all([
+  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred, simulatedNow] = await Promise.all([
     chatAuthors.length > 0 ? loadConsentFlags(db, chatAuthors) : Promise.resolve(new Set<string>()),
     pinnedInList ? Promise.resolve(pinnedInList) : fetchPinnedMessageRow(db, session.pinnedMessageId),
     session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
     loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs),
     askable.length > 0 ? loadAskedMessageIds(db, session.id, askable) : Promise.resolve([]),
-    session.kind === "simulated" && input.webinar ? loadBarredPeople(db, { authors: audienceAuthors, nowMs, session: input.session, webinar: input.webinar }) : Promise.resolve(null)
+    session.kind === "simulated" && input.webinar ? loadBarredPeople(db, { authors: audienceAuthors, nowMs, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
+    loadConsoleSimulated(db, { durationMs, nowMs, session, webinar: input.webinar })
   ]);
   const pinnedMessage = pinnedRow && !pinnedRow.deleted_at ? chatMessageFromRow(pinnedRow) : null;
   // A fixada de fora da lista: o aceite e a foto do autor dela tambem (so nesse caso raro, uma leitura a mais).
@@ -577,6 +620,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     scriptItems: scriptRows.map(scriptItemFromRow),
     screen,
     serverTime: input.now.toISOString(),
+    simulatedNow,
     session: consoleSessionOf(session)
   };
 }

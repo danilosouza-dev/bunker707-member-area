@@ -22,7 +22,9 @@ import {
 // Simulacao em memoria e o contexto do tick pelo teste. A sessao gravada encerrada com regra ganha simulation_summary
 // igual a simulationTotals (o maior numero somado, as entradas e os avisos de 0 ao fim, cortado pelo Encerrar da
 // equipe), uma vez so; a sem regra, a que ainda esta no ar e a encerrada ha mais de 6 h ficam como estao; lote de 50;
-// o tick sem tempo nao faz nada; banco sem a 202610300003 registra e sai sem erro; as contagens vao para job_runs.
+// o tick sem tempo nao faz nada; banco sem a 202610300003 registra e sai sem erro; as contagens vao para job_runs. R7
+// (adendo de 10/11/2026): a sessao da Live ao vivo encerrada com regra congela do started_at ao Encerrar live, com a forma
+// pela duracao prevista; a encerrada direto da espera congela zeros.
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -85,7 +87,8 @@ test("congela uma vez: a sessao gravada encerrada com regra ganha os totais do m
 
   const freeze = db.calls.queries.find((query) => query.op === "update" && query.table === "webinar_sessions");
   assert.ok(freeze.filters.some(([op, column, value]) => op === "is" && column === "simulation_summary" && value === null), "so onde ainda e nulo");
-  assert.ok(freeze.filters.some(([op, column, value]) => op === "eq" && column === "kind" && value === "simulated"));
+  // R7: a gravada e a Live ao vivo congelam; o Replay nunca.
+  assert.ok(freeze.filters.some(([op, column, value]) => op === "in" && column === "kind" && value.includes("simulated") && value.includes("live") && !value.includes("replay")));
 });
 
 test("o Encerrar da equipe corta o resumo: encerrada aos 20 min, so o que apareceu ate la", async () => {
@@ -187,4 +190,25 @@ test("CDC (§8.6, D10): a sessao com regra e sem a decisao registrada nao mostro
   assert.equal(model.simulationDecisionRecorded({ simulationAckText: DECISAO.simulation_ack_text, simulationDecidedAt: DECISAO.simulation_decided_at }), true);
   assert.equal(model.simulationDecisionRecorded({ simulationAckText: "", simulationDecidedAt: DECISAO.simulation_decided_at }), false);
   assert.equal(model.simulationDecisionRecorded({ simulationAckText: DECISAO.simulation_ack_text, simulationDecidedAt: null }), false);
+});
+
+test("R7: a Live ao vivo encerrada com regra congela do started_at ao Encerrar live (passando do previsto); a encerrada direto da espera, zeros", async () => {
+  const now = Date.now();
+  const tables = escolaDaSimulacao({ webinar: { duration_minutes: 30, kind: "live" } });
+  const live = tables.webinar_sessions.find((row) => row.kind === "live");
+  // Comecou 50 min depois da hora marcada e durou 45 min (15 min alem dos 30 previstos).
+  Object.assign(live, regras, { ended_at: iso(now - HOUR), scheduled_at: iso(now - HOUR - 95 * MIN), started_at: iso(now - HOUR - 45 * MIN), status: "ended" });
+  const db = montar(tables);
+  const esperado = model.simulationTotals(sessionSimulationFromRow(linha(db, live.id)), { endMs: 45 * MIN, videoMs: 30 * MIN }, true);
+  const [resultado] = await silenciando(() => tick.runSimulationSummariesTick({ db }));
+  assert.equal(resultado.frozen, 1);
+  assert.deepEqual(linha(db, live.id).simulation_summary, { counter_max: esperado.counterMax, joins_shown: esperado.joinsShown, sale_notices_shown: esperado.saleNoticesShown });
+  assert.deepEqual(linha(db, live.id).simulation_summary, { counter_max: 40, joins_shown: 50, sale_notices_shown: 1 }, "45 min: +40, as 50 entradas de 30 s (o limite) e o aviso dos 11 min");
+
+  const daEspera = escolaDaSimulacao({ webinar: { kind: "live" } });
+  const semInicio = daEspera.webinar_sessions.find((row) => row.kind === "live");
+  Object.assign(semInicio, regras, { ended_at: iso(now - HOUR), scheduled_at: iso(now - 2 * HOUR), started_at: null, status: "ended" });
+  const outro = montar(daEspera);
+  await silenciando(() => tick.runSimulationSummariesTick({ db: outro }));
+  assert.deepEqual(linha(outro, semInicio.id).simulation_summary, { counter_max: 0, joins_shown: 0, sale_notices_shown: 0 }, "a live que nunca comecou nao mostrou nada");
 });

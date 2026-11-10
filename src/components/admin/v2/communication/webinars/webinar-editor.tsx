@@ -589,7 +589,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const cardProps = { disabled, draft, errorFor, now, onBlur: touch, onChange: change };
 
   function renderCard(card: WebinarEditorCard): ReactNode {
-    const meta = webinarCardTitle(card);
+    const meta = webinarCardTitle(card, draft.kind);
     const titleId = `webinar-card-${card}`;
 
     switch (card) {
@@ -787,7 +787,15 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
             {savedVersion ? (
-              <SimulationCard canPublish={permissions.canPublish} currentUserName={options.currentUserName} deciderNames={initial?.deciderNames ?? {}} disabled={locked || archived} now={now} sessions={savedSessions} />
+              <SimulationCard
+                canPublish={permissions.canPublish}
+                currentUserName={options.currentUserName}
+                deciderNames={initial?.deciderNames ?? {}}
+                disabled={locked || archived}
+                now={now}
+                sessions={savedSessions}
+                webinarKind={draft.kind}
+              />
             ) : (
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
             )}
