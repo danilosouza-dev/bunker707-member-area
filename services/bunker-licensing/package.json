@@ -1,0 +1,14 @@
+{
+  "name": "bunker-licensing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Emissor de licencas do produto licenciado (docs/32 §11.2). Nunca vai na imagem do comprador.",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "chaves": "node bin/chaves.ts",
+    "typecheck": "tsc -p ."
+  }
+}

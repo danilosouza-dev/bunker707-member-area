@@ -1,0 +1,52 @@
+{
+  "_leia": "Vetor fixo do formato BKL1 (docs/32 §11.4). Ed25519 e deterministico: com as mesmas sementes, o Emissor gera exatamente este texto, e o Verificador do produto o confere. Se um dos dois lados mudar o formato, tests/emissor-assinatura.test.mjs fica vermelho. As sementes sao de teste e nao valem fora daqui.",
+  "sementes": {
+    "raiz": "0101010101010101010101010101010101010101010101010101010101010101",
+    "emissao": "0202020202020202020202020202020202020202020202020202020202020202"
+  },
+  "raiz": {
+    "rid": "raiz-vetor",
+    "publicKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "certificado": {
+    "v": 1,
+    "kid": "emissao-vetor",
+    "rid": "raiz-vetor",
+    "publicKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+    "notBefore": "2026-01-01T00:00:00.000Z",
+    "notAfter": "2030-01-01T00:00:00.000Z"
+  },
+  "licenca": {
+    "v": 1,
+    "kid": "emissao-vetor",
+    "licenseId": "lic_vetor",
+    "holder": {
+      "name": "Escola Vetor"
+    },
+    "installation": {
+      "id": "inst_vetor",
+      "host": "alunos.vetor.test"
+    },
+    "issuedAt": "2026-11-10T12:00:00.000Z",
+    "expiresAt": "2027-02-08T12:00:00.000Z",
+    "delivery": "online",
+    "plan": {
+      "kind": "annual",
+      "validUntil": "2027-11-10T23:59:59.000Z",
+      "steps": [
+        {
+          "degree": "aviso",
+          "from": "2027-10-11T23:59:59.000Z",
+          "reason": "anual_vencendo"
+        }
+      ]
+    },
+    "features": [
+      {
+        "key": "webinars"
+      }
+    ],
+    "grants": []
+  },
+  "token": "BKL1.eyJ2IjoxLCJraWQiOiJlbWlzc2FvLXZldG9yIiwicmlkIjoicmFpei12ZXRvciIsInB1YmxpY0tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEiLCJub3RCZWZvcmUiOiIyMDI2LTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJub3RBZnRlciI6IjIwMzAtMDEtMDFUMDA6MDA6MDAuMDAwWiJ9.MTnkEMRdE4T0ux4UTmXJiiPjBY7dp2IAhDy5KJ8csGrrf6jeTbDLdJfNe2ySmziVas-PsV3kfhDWhsSPN9i4Cw.eyJ2IjoxLCJraWQiOiJlbWlzc2FvLXZldG9yIiwibGljZW5zZUlkIjoibGljX3ZldG9yIiwiaG9sZGVyIjp7Im5hbWUiOiJFc2NvbGEgVmV0b3IifSwiaW5zdGFsbGF0aW9uIjp7ImlkIjoiaW5zdF92ZXRvciIsImhvc3QiOiJhbHVub3MudmV0b3IudGVzdCJ9LCJpc3N1ZWRBdCI6IjIwMjYtMTEtMTBUMTI6MDA6MDAuMDAwWiIsImV4cGlyZXNBdCI6IjIwMjctMDItMDhUMTI6MDA6MDAuMDAwWiIsImRlbGl2ZXJ5Ijoib25saW5lIiwicGxhbiI6eyJraW5kIjoiYW5udWFsIiwidmFsaWRVbnRpbCI6IjIwMjctMTEtMTBUMjM6NTk6NTkuMDAwWiIsInN0ZXBzIjpbeyJkZWdyZWUiOiJhdmlzbyIsImZyb20iOiIyMDI3LTEwLTExVDIzOjU5OjU5LjAwMFoiLCJyZWFzb24iOiJhbnVhbF92ZW5jZW5kbyJ9XX0sImZlYXR1cmVzIjpbeyJrZXkiOiJ3ZWJpbmFycyJ9XSwiZ3JhbnRzIjpbXX0.AfnTwgEPpylcw_LlFQO1Yv8W9xiNBa1vX6ahfBYLJ5WPsB8Pqb1A-Qrp8Wt2AkQGmCG8GiWb7qXQ0MLRLkhTCA"
+}
