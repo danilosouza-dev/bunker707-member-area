@@ -1,7 +1,7 @@
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { WEBINARS_ASSISTANT_MIGRATION, WEBINARS_OFFERS_MIGRATION } from "@/server/webinars/db";
 import { bucketLabel } from "@/server/webinars/report-model";
-import { assistantFacts, offerFacts, offerVariantRows, simulationLines, type SimulationSummary } from "@/server/webinars/report-page-model";
+import { assistantFacts, offerFacts, offerVariantRows, simulationLines, type ScreenReportRow, type SimulationSummary } from "@/server/webinars/report-page-model";
 import type { WebinarReportView } from "@/server/webinars/report-model";
 import { PendingMigrationNotice } from "../../../pending-migration-notice";
 import { ReportBlock, ReportEmpty, ReportFacts, ReportSubheading } from "./report-blocks";
@@ -11,7 +11,11 @@ import { ReportBlock, ReportEmpty, ReportFacts, ReportSubheading } from "./repor
 // Assistente (respostas, tempo medio, corrigidas, apagadas e quem pediu a equipe; fora da Simulacao e das mensagens de
 // aluno e equipe, D24) e a Simulacao completa (o selo com quem decidiu, o contador com os participantes de verdade ao
 // lado, as entradas, os avisos de venda e o roteiro por Solta em; fundo diferente e a frase de que nada dali entra nos
-// outros numeros, D6 e D10). Banco sem a parte: o aviso da migracao so no bloco. Sem hooks: desenha no servidor.
+// outros numeros, D6 e D10). Banco sem a parte: o aviso da migracao so no bloco. O bloco "Na tela" (especificacao de
+// 10/11/2026, §7): uma linha por exibicao de banner, QR Code ou enquete fixada (Item, Entrou aos, Ficou, Viram,
+// Clicaram, Cliques, Fecharam e Clicaram ÷ viram; a enquete fixada so com a entrada e quanto ficou, "—" nos numeros) e a
+// nota do que "Viram" quer dizer embaixo; a pagina so o desenha quando a sessao teve exibicao. Sem hooks: desenha no
+// servidor.
 
 const COPY = WEBINAR_COPY.relatorio;
 const EXPORTAR = WEBINAR_COPY.exportar;
@@ -103,6 +107,63 @@ export function SimulationReportBlock({ report, simulation }: { report: WebinarR
           {COPY.pico}: {report.presence.peak.n} · {bucketLabel(report.presence.peak.b)}
         </p>
       ) : null}
+    </ReportBlock>
+  );
+}
+
+const NA_TELA = WEBINAR_COPY.naTela.relatorio;
+
+/** Um numero da tabela "Na tela": "—" na enquete fixada (as respostas estao no bloco Enquetes). */
+function screenCount(value: number | null) {
+  return value === null ? "—" : integer.format(value);
+}
+
+export function ScreenReportBlock({ rows }: { rows: readonly ScreenReportRow[] }) {
+  const columns = NA_TELA.colunas;
+  const numeric = [columns.viram, columns.clicaram, columns.cliques, columns.fecharam, columns.taxa];
+
+  return (
+    <ReportBlock id="webinario-relatorio-na-tela" title={NA_TELA.titulo}>
+      <div className="min-w-0 overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse text-sm text-[var(--text-secondary)] tabular-nums" data-report-screen="">
+          <caption className="sr-only">{NA_TELA.titulo}</caption>
+          <thead>
+            <tr>
+              <th className={`${headClass} text-left`} scope="col">
+                {columns.item}
+              </th>
+              <th className={`${headClass} text-left`} scope="col">
+                {columns.entrouAos}
+              </th>
+              <th className={`${headClass} text-left`} scope="col">
+                {columns.ficou}
+              </th>
+              {numeric.map((label) => (
+                <th className={`${headClass} text-right`} key={label} scope="col">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr className="last:[&>*]:border-b-0" data-report-screen-row={row.kind} key={row.id}>
+                <th className={`${cellClass} max-w-72 truncate text-left font-normal text-[var(--text-primary)]`} scope="row" title={row.label}>
+                  {row.label}
+                </th>
+                <td className={`${cellClass} whitespace-nowrap`}>{row.enteredAt}</td>
+                <td className={`${cellClass} whitespace-nowrap`}>{row.stayed}</td>
+                <td className={`${cellClass} text-right`}>{screenCount(row.shown)}</td>
+                <td className={`${cellClass} text-right`}>{screenCount(row.clickers)}</td>
+                <td className={`${cellClass} text-right`}>{screenCount(row.clicks)}</td>
+                <td className={`${cellClass} text-right`}>{screenCount(row.closed)}</td>
+                <td className={`${cellClass} text-right`}>{row.rate === null ? "—" : `${row.rate} %`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs leading-5 text-[var(--text-tertiary)]">{NA_TELA.nota}</p>
     </ReportBlock>
   );
 }

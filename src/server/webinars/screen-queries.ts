@@ -12,19 +12,41 @@
 //   chave; id, situacao e resultado das enquetes), mais a foto do autor da fixada, que ja fica 60 s na memoria. Dois
 //   pedidos juntos com a memoria fria esperam a mesma leitura. O `mine` da fixada e de cada aluno, sem consulta;
 // - Replay, sessao encerrada ou cancelada: o estado vazio, sem consulta.
+// As metricas do aluno (especificacao de 10/11/2026, §5.5 e §7; a rota POST .../screen-events): cada evento (viu,
+// clicou, fechou) so vale para uma exibicao de banner ou QR Code daquela sessao. Os ids das exibicoes de cada sessao
+// ficam 30 s na memoria do processo (ate 500 sessoes); um id que a memoria nao conhece rele as exibicoes no maximo uma
+// vez a cada 5 s por sessao e, continuando desconhecido, e descartado em silencio (o lote de outra sessao, um id
+// inventado). A linha de student_events leva entity_type 'webinar', entity_id = a sessao e o metadata { display_id,
+// item_id, kind, form, target, offset_ms }, com o offset do relogio do servidor (o mesmo do chat).
+// O relatorio da sessao (§7): todas as exibicoes da sessao e os numeros de webinar_screen_report (alunos distintos, a
+// equipe de fora), as duas leituras vazias sem a migracao; quem monta as linhas do bloco e report-page-model.ts.
 
 import "server-only";
 
 import { cleanEnvValue } from "../../lib/env-value";
+import type { StudentEventInsert } from "../students/store";
 import { loadAuthorPhotos } from "./author-photos";
 import { chatMessageFromRow } from "./chat-rows";
+import { CHAT_MESSAGES } from "./chat-schemas";
 import { fetchPinnedMessageRow } from "./chat-store";
-import type { WebinarsDb } from "./db";
+import { WebinarError, type WebinarsDb } from "./db";
 import type { ChatMessage, WebinarSession } from "./model";
-import { authorPhotoUrl, toStudentMessage } from "./room-model";
-import { SCREEN_KINDS, emptyScreenState, pollsKeyOf, screenShowsIn, studentScreenItem, type StudentScreenItem, type StudentScreenState } from "./screen-model";
+import { authorPhotoUrl, sessionOffsetMs, toStudentMessage } from "./room-model";
+import {
+  SCREEN_EVENT_TYPES,
+  SCREEN_KINDS,
+  emptyScreenState,
+  pollsKeyOf,
+  screenShowsIn,
+  studentScreenItem,
+  type ScreenDisplay,
+  type ScreenKind,
+  type StudentScreenItem,
+  type StudentScreenState
+} from "./screen-model";
 import { screenDisplayFromRow, screenStatsFromRows, type ScreenStats } from "./screen-rows";
-import { fetchScreenReportRows, listActiveScreenDisplayRows, listSessionPollKeyRows } from "./screen-store";
+import type { ScreenEventsBody } from "./screen-schemas";
+import { fetchScreenReportRows, listActiveScreenDisplayRows, listSessionPollKeyRows, listSessionScreenDisplayRows } from "./screen-store";
 
 /** Quanto o estado de uma sessao vale na memoria do processo (com o mesmo carimbo). */
 export const SCREEN_STATE_TTL_MS = 30_000;
@@ -200,4 +222,133 @@ export async function loadScreenStats(db: WebinarsDb, sessionId: string, nowMs: 
     }
   });
   return value;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * As metricas do aluno: POST .../screen-events (§5.5)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Quanto os ids das exibicoes de uma sessao valem na memoria do processo. */
+export const SCREEN_DISPLAY_IDS_TTL_MS = 30_000;
+/** Um id desconhecido rele as exibicoes da sessao no maximo uma vez neste intervalo. */
+export const SCREEN_DISPLAY_IDS_RETRY_MS = 5_000;
+
+/** O que a rota precisa de cada exibicao: o item e o tipo (so banner e QR Code medem). */
+export type ScreenDisplayKey = { itemId: string | null; kind: ScreenKind };
+
+type DisplayIdsEntry = { at: number; value: Promise<Map<string, ScreenDisplayKey>> };
+
+const displayIdsMemory = new Map<string, DisplayIdsEntry>();
+
+/** Esvazia a memoria dos ids das exibicoes (os testes). */
+export function clearScreenDisplayIdsCache() {
+  displayIdsMemory.clear();
+}
+
+async function readDisplayKeys(db: WebinarsDb, sessionId: string): Promise<Map<string, ScreenDisplayKey>> {
+  const rows = await listSessionScreenDisplayRows(db, sessionId);
+  const keys = new Map<string, ScreenDisplayKey>();
+  for (const row of rows) {
+    const kind = (SCREEN_KINDS as readonly string[]).includes(row.kind) ? (row.kind as ScreenKind) : null;
+    if (kind) {
+      keys.set(row.id.toLowerCase(), { itemId: row.item_id, kind });
+    }
+  }
+  return keys;
+}
+
+function freshDisplayKeys(db: WebinarsDb, sessionId: string, nowMs: number): DisplayIdsEntry {
+  const entry: DisplayIdsEntry = { at: nowMs, value: readDisplayKeys(db, sessionId) };
+  displayIdsMemory.delete(sessionId);
+  while (displayIdsMemory.size >= SCREEN_STATE_CACHE_MAX) {
+    const oldest = displayIdsMemory.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    displayIdsMemory.delete(oldest);
+  }
+  displayIdsMemory.set(sessionId, entry);
+  entry.value.catch(() => {
+    if (displayIdsMemory.get(sessionId) === entry) {
+      displayIdsMemory.delete(sessionId);
+    }
+  });
+  return entry;
+}
+
+/**
+ * As exibicoes de banner e QR Code de uma sessao (id -> item e tipo): da memoria por 30 s; quando algum dos ids pedidos
+ * (`wanted`) nao esta la, rele no maximo uma vez a cada 5 s por sessao (uma exibicao nova, mostrada depois da ultima
+ * leitura). O que continua desconhecido fica de fora (quem chama descarta).
+ */
+export async function sessionScreenDisplayKeys(db: WebinarsDb, sessionId: string, wanted: readonly string[], nowMs: number = Date.now()): Promise<Map<string, ScreenDisplayKey>> {
+  let entry = displayIdsMemory.get(sessionId);
+  if (!entry || nowMs - entry.at >= SCREEN_DISPLAY_IDS_TTL_MS) {
+    entry = freshDisplayKeys(db, sessionId, nowMs);
+  }
+  let keys = await entry.value;
+  if (wanted.some((id) => !keys.has(id)) && nowMs - entry.at >= SCREEN_DISPLAY_IDS_RETRY_MS) {
+    entry = freshDisplayKeys(db, sessionId, nowMs);
+    keys = await entry.value;
+  }
+  return keys;
+}
+
+/**
+ * As linhas de student_events de um lote de metricas da Na tela: so na Live ao vivo e na gravada (o Replay e 404: la
+ * nada aparece na tela); cada evento so de uma exibicao de banner ou QR Code desta sessao (o resto sai em silencio). O
+ * offset e o do relogio do servidor (o do chat da sessao), nulo quando a sessao nao tem relogio.
+ */
+export async function screenEventRows(input: {
+  db: WebinarsDb;
+  events: ScreenEventsBody["events"];
+  nowMs: number;
+  session: Pick<WebinarSession, "id" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">;
+  userId: string;
+}): Promise<StudentEventInsert[]> {
+  const { db, events, nowMs, session, userId } = input;
+  if (session.kind !== "live" && session.kind !== "simulated") {
+    throw new WebinarError(CHAT_MESSAGES.session, 404);
+  }
+  const wanted = events.map((event) => event.displayId.toLowerCase());
+  const keys = await sessionScreenDisplayKeys(db, session.id, wanted, nowMs);
+  const offset = sessionOffsetMs(session, nowMs);
+  const offsetMs = Number.isFinite(offset) ? Math.round(offset) : null;
+
+  return events.flatMap((event, index) => {
+    const displayId = wanted[index];
+    const key = keys.get(displayId);
+    if (!key) {
+      return [];
+    }
+    return [
+      {
+        entity_id: session.id,
+        entity_type: "webinar",
+        event_type: SCREEN_EVENT_TYPES[event.name],
+        metadata: { display_id: displayId, form: event.form, item_id: key.itemId, kind: key.kind, offset_ms: offsetMs, target: event.target ?? null },
+        user_id: userId
+      }
+    ];
+  });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O relatorio da sessao: o bloco "Na tela" (§7)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As exibicoes da sessao (na ordem em que entraram) e os numeros de cada uma (por id da exibicao). */
+export type ScreenReportData = { displays: ScreenDisplay[]; stats: Record<string, ScreenStats> };
+
+/**
+ * O que o bloco "Na tela" do relatorio le: todas as exibicoes da sessao e os numeros de webinar_screen_report (as duas
+ * leituras em paralelo; sem a migracao, as duas voltam vazias e o bloco nao aparece). Objetos simples: entra no cache
+ * de 60 s do relatorio (report-queries.ts).
+ */
+export async function loadScreenReport(db: WebinarsDb, sessionId: string): Promise<ScreenReportData> {
+  const [rows, reportRows] = await Promise.all([listSessionScreenDisplayRows(db, sessionId), fetchScreenReportRows(db, sessionId)]);
+  return {
+    displays: rows.map(screenDisplayFromRow).filter((display): display is ScreenDisplay => display !== null),
+    stats: Object.fromEntries(screenStatsFromRows(reportRows))
+  };
 }

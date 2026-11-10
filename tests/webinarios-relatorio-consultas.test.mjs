@@ -14,7 +14,9 @@ import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, bancoDosWebin
 // quedas, as regras da Simulacao e o roteiro por Solta em (e o aviso so no bloco sem a migracao da parte), as sessoes
 // "Comeca quando voce entra" e os CSVs sem cache (M9). Contra o banco local: tests/integration/webinarios-relatorio.test.mjs.
 
-const cache = (globalThis.__webinariosRelatorioCache ??= { calls: [], entries: new Map(), keyParts: null, options: null });
+// `keyParts` e `options` sao os do primeiro unstable_cache do modulo (o relatorio); `all` guarda todos, na ordem (o
+// segundo e o bloco "Na tela", com a mesma regra de 60 s e a tag).
+const cache = (globalThis.__webinariosRelatorioCache ??= { all: [], calls: [], entries: new Map(), keyParts: null, options: null });
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -24,8 +26,9 @@ registerHooks({
         url: `data:text/javascript,${encodeURIComponent(`
           export function unstable_cache(fn, keyParts, options) {
             const state = globalThis.__webinariosRelatorioCache;
-            state.keyParts = keyParts;
-            state.options = options;
+            state.all.push({ keyParts, options });
+            state.keyParts ??= keyParts;
+            state.options ??= options;
             return async (...args) => {
               const key = JSON.stringify([keyParts, args]);
               state.calls.push(args);
@@ -164,6 +167,14 @@ test("o cache: chave ['webinars-report', 'v1'] + sessao + minuto, 60 s e a tag w
 
   assert.deepEqual(cache.keyParts, ["webinars-report", "v1"]);
   assert.deepEqual(cache.options, { revalidate: 60, tags: ["webinars"] });
+  // O bloco "Na tela" entra no mesmo cache de 60 s por minuto, com a tag webinars, numa chave propria.
+  assert.deepEqual(
+    cache.all.map((entry) => [entry.keyParts, entry.options]),
+    [
+      [["webinars-report", "v1"], { revalidate: 60, tags: ["webinars"] }],
+      [["webinars-report-screen", "v1"], { revalidate: 60, tags: ["webinars"] }]
+    ]
+  );
 
   const primeira = await queries.getWebinarReport(SESSAO_ID, { now: T0 });
   assert.equal(primeira.status, "ok");
@@ -509,4 +520,38 @@ test("a lista por aluno da pagina (§3.4.1): a variante que cada aluno clicou na
   const aoVivo = (await semCacheV4(live))?.selected;
   assert.equal(aoVivo?.offerClicked, null);
   assert.equal(consultas(live, "webinar_offer_clicks").length, 0);
+});
+
+test("o bloco Na tela na pagina: as exibicoes da sessao e os numeros de webinar_screen_report pelo cache de 60 s por minuto; sem sair, ate o fim da sessao; no Replay, nenhuma leitura", async () => {
+  cache.entries.clear();
+  const BANNER_ID = "f1f1f1f1-0000-4000-8000-000000000001";
+  const ENQUETE_FIXADA = "f1f1f1f1-0000-4000-8000-000000000002";
+  const copia = { body: null, buttonLabel: null, closable: true, image: null, linkUrl: "https://bunker707.com.br/turma", name: "Turma de novembro", place: "bottom_right", size: "m", title: "Turma nova", v: 1 };
+  const exibicao = (id, kind, extra) => ({ created_at: "", hidden_at: null, hidden_by: null, hidden_offset_ms: null, hidden_reason: null, id, item_id: null, kind, poll_id: null, session_id: SESSAO_ID, shown_by: null, ...extra });
+  const db = bancoDaPagina({
+    telaNumeros: [{ clickers: "41", clicks: "57", closed: 9, display_id: BANNER_ID, shown: "312" }],
+    telas: [
+      exibicao(BANNER_ID, "banner", { shown_at: "2026-11-05T23:12:30.000Z", shown_offset_ms: 750_000, snapshot: copia }),
+      exibicao(ENQUETE_FIXADA, "poll", { hidden_at: "2026-11-05T23:10:00.000Z", hidden_reason: "team", poll_id: ENQUETE, shown_at: "2026-11-05T22:58:00.000Z", shown_offset_ms: -120_000, snapshot: { name: "Qual ferramenta você usa?", v: 1 } }),
+      exibicao("f1f1f1f1-0000-4000-8000-000000000003", "banner", { session_id: REPLAY_ID, shown_at: "2026-11-05T23:40:00.000Z", snapshot: copia })
+    ]
+  });
+  const pagina = () => queries.loadWebinarReportPage(db, WEBINAR_ID, { now: T0, sessionId: SESSAO_ID, view: async () => (await queries.getWebinarReport(SESSAO_ID, { now: T0 })).view });
+  const page = await pagina();
+  assert.deepEqual(
+    page.selected.screen.map((row) => [row.label, row.enteredAt, row.stayed, row.shown, row.clickers, row.clicks, row.closed, row.rate]),
+    [
+      ["Enquete fixada · Qual ferramenta você usa?", "antes do início", "12 min", null, null, null, null, null],
+      ["Banner · Turma de novembro", "12:30", "19 min", 312, 41, 57, 9, 13]
+    ],
+    "so as exibicoes desta sessao; o banner que nao saiu ficou ate o fim (23:31)"
+  );
+  assert.equal(rpcs(db, "webinar_screen_report").length, 1);
+  assert.deepEqual(rpcs(db, "webinar_screen_report")[0].args, { p_session_id: SESSAO_ID });
+  await pagina();
+  assert.equal(rpcs(db, "webinar_screen_report").length, 1, "mesmo minuto: do cache");
+
+  const replay = await queries.loadWebinarReportPage(db, WEBINAR_ID, { now: T0, sessionId: REPLAY_ID, view: async () => (await queries.getWebinarReport(SESSAO_ID, { now: T0 })).view });
+  assert.deepEqual(replay.selected.screen, [], "no Replay nada aparece na tela");
+  assert.equal(rpcs(db, "webinar_screen_report").length, 1, "nem a funcao");
 });

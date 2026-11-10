@@ -237,7 +237,8 @@ let replayCounter = 0;
  * O banco dos webinarios em memoria. As RPCs imitam a migracao: `webinar_open_session` poe a sessao em live
  * (started_at = hora marcada na gravada) e devolve { changed, fired, status }; desde a 202611100002 a sessao `live` nao
  * solta o roteiro ao abrir (fired 0; o tick solta os itens dela pelo started_at); `webinar_close_session` poe ended,
- * grava presence_curve e devolve o resumo; `webinar_report` e `webinar_attendees` devolvem `relatorio` e `presentes`.
+ * grava presence_curve e devolve o resumo; `webinar_report` e `webinar_attendees` devolvem `relatorio` e `presentes`;
+ * a Na tela: `telas` sao as linhas de webinar_screen_displays e `webinar_screen_report` devolve `telaNumeros`.
  * `replayDuplicado` faz o insert do replay bater no indice unico (23505); `abrir`/`encerrar` trocam as RPCs.
  */
 export function bancoDosWebinarios({
@@ -256,6 +257,8 @@ export function bancoDosWebinarios({
   resumo = resumoDePresenca(),
   roteiro = [],
   sessoes = [sessaoRow()],
+  telas = [],
+  telaNumeros = [],
   vagas = [],
   webinars = [webinarRow()]
 } = {}) {
@@ -312,6 +315,8 @@ export function bancoDosWebinarios({
         return le(perguntas);
       case "webinar_chat_script_items:select":
         return le(roteiro);
+      case "webinar_screen_displays:select":
+        return le(telas);
       case "job_runs:update":
         return { data: null, error: null };
       case "webinar_open_session:rpc": {
@@ -350,6 +355,8 @@ export function bancoDosWebinarios({
         return { data: typeof relatorio === "function" ? relatorio(query.args) : relatorio, error: null };
       case "webinar_attendees:rpc":
         return { data: presentes, error: null };
+      case "webinar_screen_report:rpc":
+        return { data: telaNumeros, error: null };
       default:
         return { data: null, error: null };
     }

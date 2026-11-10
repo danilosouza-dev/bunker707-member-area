@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
-import { MIN, REPLAY, SESSION, WEBINAR, bancoFalso, escola, iso, janelaDoChat } from "./support/webinarios-sala-banco.mjs";
+import { LIVE_SOURCE, MIN, REPLAY, SESSION, WEBINAR, bancoFalso, escola, iso, janelaDoChat } from "./support/webinarios-sala-banco.mjs";
 
 // A "Na tela" nas rotas da sala (docs/30 §5.1; especificacao de 10/11/2026, §5.2 e §9), sem banco: o banco falso das
 // rotas da Sala (tests/support/webinarios-sala-banco.mjs, que conta cada consulta) e a sessao do aluno pelo teste.
@@ -13,7 +13,11 @@ import { MIN, REPLAY, SESSION, WEBINAR, bancoFalso, escola, iso, janelaDoChat } 
 //   o carimbo novo (a equipe tirou da tela) traz o estado novo na consulta seguinte;
 // - Replay: nulo no chat e vazio na sessao; sessao encerrada: o estado vazio, sem leitura da Na tela;
 // - GET .../session leva `screen` (e `pinned` continua para a pagina de antes);
-// - banco sem a 202611100002: as leituras da Na tela voltam vazias e a sala segue.
+// - banco sem a 202611100002: as leituras da Na tela voltam vazias e a sala segue;
+// - as metricas do aluno (POST .../screen-events, §5.5, fatia S11): 202 com as linhas de student_events (o metadata
+//   com display_id, item_id, kind, form, target e o offset do relogio do servidor), a enquete fixada e a exibicao de
+//   outra sessao descartadas em silencio, o id desconhecido relido no maximo uma vez a cada 5 s, o limite de 12 lotes
+//   por minuto (429 com Retry-After), 400 no lote de 7, 401 sem sessao e 404 no Replay.
 
 const sessao = (globalThis.__naTelaRotasSessao ??= { user: null });
 
@@ -57,9 +61,11 @@ process.env.NEXT_PUBLIC_SUPABASE_URL = ORIGEM;
 
 const chatRoute = await import("../src/app/api/webinars/[id]/chat/route.ts");
 const sessionRoute = await import("../src/app/api/webinars/[id]/session/route.ts");
+const screenEventsRoute = await import("../src/app/api/webinars/[id]/screen-events/route.ts");
 const { resetRoomLimits } = await import("../src/server/webinars/room-limits.ts");
+const { resetRoomAccessCache } = await import("../src/server/webinars/room-route.ts");
 const { clearAuthorPhotoCache } = await import("../src/server/webinars/author-photos.ts");
-const { clearScreenStateCache } = await import("../src/server/webinars/screen-queries.ts");
+const { clearScreenDisplayIdsCache, clearScreenStateCache } = await import("../src/server/webinars/screen-queries.ts");
 const { clearSharedPollCounts } = await import("../src/server/webinars/room-queries.ts");
 const screenModel = await import("../src/server/webinars/screen-model.ts");
 
@@ -282,4 +288,119 @@ test("banco sem a 202611100002: as leituras da Na tela voltam vazias e a consult
   assert.equal(screen.pinnedPollId, null);
   assert.equal(screen.pinned.id, MENSAGEM, "a fixada continua (ela nao depende da migracao)");
   assert.equal(screen.stamp, carimbo(db));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * As metricas do aluno: POST .../screen-events (§5.5)
+ * ---------------------------------------------------------------------------------------------- */
+
+const ITEM_DO_BANNER = "eeeeeeee-0000-4000-8000-0000000000ff";
+const DE_OUTRA_SESSAO = "eeeeeeee-0000-4000-8000-000000000005";
+
+/** O lote de metricas do aluno da vez (`sessao.user`); devolve o status, o corpo e os cabecalhos. */
+async function metricas(events, sessionId = SESSION) {
+  const request = new Request(`http://localhost/api/webinars/${WEBINAR}/screen-events`, {
+    body: JSON.stringify({ events, sessionId }),
+    // O sendBeacon manda o corpo JSON em text/plain: a rota le do mesmo jeito.
+    headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    method: "POST"
+  });
+  const response = await screenEventsRoute.POST(request, contexto());
+  return { body: await response.json(), headers: response.headers, status: response.status };
+}
+
+function montarMetricas(opcoes) {
+  resetRoomAccessCache();
+  clearScreenDisplayIdsCache();
+  return montar(opcoes);
+}
+
+test("screen-events: 202 com as linhas de student_events (display_id, item_id, kind, form, target e o offset do servidor); a enquete fixada fica de fora", async () => {
+  const { db, userId } = montarMetricas();
+  const resposta = await metricas([
+    { displayId: BANNER, form: "stage", name: "shown" },
+    { displayId: BANNER, form: "stage", name: "clicked", target: "button" },
+    { displayId: QR.toUpperCase(), form: "strip", name: "clicked", target: "qr_link" },
+    { displayId: QR, form: "vertical", name: "closed" },
+    { displayId: SAIU, form: "stage", name: "closed" },
+    { displayId: FIXADA_ENQUETE, form: "stage", name: "shown" }
+  ]);
+  assert.equal(resposta.status, 202, JSON.stringify(resposta.body));
+  assert.deepEqual(resposta.body.data, { accepted: 5 });
+  const linhas = db.tables.student_events;
+  assert.deepEqual(
+    linhas.map((row) => [row.event_type, row.metadata.display_id, row.metadata.form, row.metadata.target]),
+    [
+      ["webinar_screen_shown", BANNER, "stage", null],
+      ["webinar_screen_clicked", BANNER, "stage", "button"],
+      ["webinar_screen_clicked", QR, "strip", "qr_link"],
+      ["webinar_screen_closed", QR, "vertical", null],
+      ["webinar_screen_closed", SAIU, "stage", null]
+    ],
+    "o id em minusculas; a exibicao que ja saiu ainda conta (o fechar que chegou depois); a enquete fixada nao mede"
+  );
+  for (const linha of linhas) {
+    assert.equal(linha.entity_type, "webinar");
+    assert.equal(linha.entity_id, SESSION);
+    assert.equal(linha.user_id, userId);
+    assert.deepEqual(Object.keys(linha.metadata).sort(), ["display_id", "form", "item_id", "kind", "offset_ms", "target"]);
+    assert.equal(linha.metadata.item_id, ITEM_DO_BANNER);
+    assert.ok(Math.abs(linha.metadata.offset_ms - 10 * MIN) < 5000, `o offset do relogio do servidor (10 min de sessao): ${linha.metadata.offset_ms}`);
+  }
+  assert.deepEqual(linhas.map((row) => row.metadata.kind), ["banner", "banner", "qr", "qr", "banner"]);
+});
+
+test("screen-events: a exibicao de outra sessao e o id inventado saem em silencio; o desconhecido rele as exibicoes no maximo uma vez a cada 5 s", async () => {
+  const { db } = montarMetricas();
+  db.tables.webinar_screen_displays.push(exibicao(DE_OUTRA_SESSAO, "banner", { session_id: LIVE_SOURCE, snapshot: copiaDoBanner }));
+  const leiturasDasExibicoes = () => db.calls.from.filter((table) => table === "webinar_screen_displays").length;
+  const primeira = await metricas([{ displayId: DE_OUTRA_SESSAO, form: "stage", name: "shown" }]);
+  assert.equal(primeira.status, 202);
+  assert.deepEqual(primeira.body.data, { accepted: 0 }, "a exibicao de outra sessao fica de fora");
+  assert.equal(leiturasDasExibicoes(), 1, "a primeira leitura das exibicoes da sessao");
+  const inventado = await metricas([{ displayId: "eeeeeeee-0000-4000-8000-0000000000aa", form: "stage", name: "clicked", target: "card" }]);
+  assert.deepEqual(inventado.body.data, { accepted: 0 });
+  assert.equal(leiturasDasExibicoes(), 1, "dentro de 5 s, o id desconhecido nao rele");
+  const conhecido = await metricas([{ displayId: BANNER, form: "stage", name: "shown" }]);
+  assert.deepEqual(conhecido.body.data, { accepted: 1 });
+  assert.equal(leiturasDasExibicoes(), 1, "o conhecido vem da memoria");
+  assert.equal(db.tables.student_events.length, 1);
+  assert.ok(db.tables.student_events.every((row) => row.metadata.display_id === BANNER));
+});
+
+test("screen-events: a exibicao nova (mostrada depois da ultima leitura) entra depois de 5 s, numa releitura", async (t) => {
+  const { db } = montarMetricas();
+  const NOVA = "eeeeeeee-0000-4000-8000-000000000006";
+  const inicio = Date.now();
+  let agora = inicio;
+  t.mock.method(Date, "now", () => agora);
+  assert.deepEqual((await metricas([{ displayId: BANNER, form: "stage", name: "shown" }])).body.data, { accepted: 1 });
+  db.tables.webinar_screen_displays.push(exibicao(NOVA, "qr", { snapshot: copiaDoQr }));
+  agora = inicio + 2000;
+  assert.deepEqual((await metricas([{ displayId: NOVA, form: "stage", name: "shown" }])).body.data, { accepted: 0 }, "antes de 5 s, a memoria nao conhece");
+  agora = inicio + 6000;
+  assert.deepEqual((await metricas([{ displayId: NOVA, form: "stage", name: "shown" }])).body.data, { accepted: 1 }, "depois de 5 s, rele e aceita");
+  assert.equal(db.calls.from.filter((table) => table === "webinar_screen_displays").length, 2);
+});
+
+test("screen-events: 12 lotes por minuto por aluno e sessao (o 13o e 429 com Retry-After); 400 no lote de 7 e no nome desconhecido; 401 sem sessao; 404 no Replay", async () => {
+  const { db } = montarMetricas();
+  const evento = { displayId: BANNER, form: "stage", name: "clicked", target: "card" };
+  for (let lote = 1; lote <= 12; lote += 1) {
+    assert.equal((await metricas([evento])).status, 202, `lote ${lote}`);
+  }
+  const decimoTerceiro = await metricas([evento]);
+  assert.equal(decimoTerceiro.status, 429);
+  assert.match(decimoTerceiro.headers.get("Retry-After") ?? "", /^\d+$/);
+  assert.equal(db.tables.student_events.length, 12);
+
+  novoAluno();
+  assert.equal((await metricas(Array.from({ length: 7 }, () => evento))).status, 400, "ate 6 por lote");
+  assert.equal((await metricas([{ ...evento, name: "hovered" }])).status, 400);
+  assert.equal((await metricas([{ ...evento, form: "popup" }])).status, 400);
+  const replay = await metricas([evento], REPLAY);
+  assert.equal(replay.status, 404, JSON.stringify(replay.body));
+  sessao.user = null;
+  assert.equal((await metricas([evento])).status, 401);
+  assert.equal(db.tables.student_events.length, 12, "nada gravado fora do caminho certo");
 });

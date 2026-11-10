@@ -9,7 +9,9 @@ import "server-only";
 // a sessao escolhida (?sessao=) com o relatorio, a lista por aluno (nome, e-mail, hora da vaga e aparelho), as
 // enquetes e as perguntas citadas, o trecho da transcricao de cada ponto de queda, o bloco Respostas do Assistente
 // (ligado no webinario ou com resposta) e a Simulacao completa (a decisao do selo, as regras da 202610300003, o
-// resumo congelado e o roteiro por Solta em). Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
+// resumo congelado e o roteiro por Solta em) e o bloco "Na tela" (as exibicoes da sessao com os numeros de
+// webinar_screen_report, no mesmo cache de 60 s por minuto; sem a 202611100002, nenhuma linha e o bloco nao aparece).
+// Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
 // (M9); webinarReportCsv continua servindo o Attendee de sempre. Tudo pela service role; PendingMigrationError sobe
 // para a pagina mostrar o aviso da migracao (WEBINARS_MIGRATION); as partes da fase 4 lidas guardadas mostram o aviso
 // so no bloco delas. Nomes e e-mails so chegam a quem tem messaging.write (a pagina e a rota conferem); nunca nos graficos.
@@ -34,7 +36,7 @@ import {
   type SessionExport
 } from "./export-queries";
 import { offerClickedByUser } from "./export-model";
-import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
+import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, toTime, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
 import {
   absenteesNoticeReady,
   defaultReportSessionId,
@@ -43,15 +45,19 @@ import {
   pollResults,
   reportSessionOptions,
   reportableSessions,
+  screenReportRows,
   webinarReportCsvHref,
   type PollResult,
   type ReportAttendee,
   type ReportPerson,
   type ReportSessionOption,
+  type ScreenReportRow,
   type SimulationRulesSummary,
   type SimulationSummary
 } from "./report-page-model";
 import { buildWebinarReport, readWebinarReportRows, reportUserIds, type WebinarReportView } from "./report-model";
+import { sessionVideoZero } from "./room-model";
+import { loadScreenReport, type ScreenReportData } from "./screen-queries";
 import { sessionFromRow, webinarFromRow } from "./rows";
 import { listSessionOfferClicks } from "./offer-store";
 import { fetchSessionSimulation } from "./simulation-store";
@@ -80,6 +86,21 @@ const cachedReportView = unstable_cache(loadReportView, ["webinars-report", "v1"
 /** A visao do relatorio pela chave do minuto; lanca PendingMigrationError sem a migracao. */
 export function reportViewOf(sessionId: string, now = Date.now()): Promise<WebinarReportView> {
   return cachedReportView(sessionId, webinarReportCacheMinute(now));
+}
+
+async function loadScreenReportData(sessionId: string, _minute: number): Promise<ScreenReportData> {
+  void _minute;
+
+  return loadScreenReport(webinarsDb(), sessionId);
+}
+
+// O bloco "Na tela" no mesmo cache do relatorio (60 s, a chave com o minuto, a tag webinars): as exibicoes e a funcao
+// webinar_screen_report (sem a migracao, as duas leituras voltam vazias).
+const cachedScreenReport = unstable_cache(loadScreenReportData, ["webinars-report-screen", "v1"], { revalidate: 60, tags: [WEBINARS_TAG] });
+
+/** As exibicoes da sessao e os numeros de cada uma, pela chave do minuto. */
+export function screenReportOf(sessionId: string, now = Date.now()): Promise<ScreenReportData> {
+  return cachedScreenReport(sessionId, webinarReportCacheMinute(now));
 }
 
 export type WebinarReportResult = { people: Record<string, ReportPerson>; status: "ok"; view: WebinarReportView } | { status: "error" } | { status: "pending_migration" };
@@ -150,6 +171,8 @@ export type WebinarReportSelection = {
   polls: PollResult[];
   questions: Record<string, ReportQuestionInfo>;
   report: WebinarReportView;
+  /** O bloco "Na tela": uma linha por exibicao (banner, QR Code, enquete fixada); vazio, o bloco nao aparece. */
+  screen: ScreenReportRow[];
   session: WebinarSession;
   simulation: SimulationSummary;
 };
@@ -171,6 +194,8 @@ export type ReportPageOptions = {
   now?: number;
   /** A sessao pedida (?sessao=); fora da lista, vale a padrao. */
   sessionId?: string | null;
+  /** Nos testes, o bloco "Na tela" sem o cache do Next. */
+  screen?: (sessionId: string, now: number) => Promise<ScreenReportData>;
   /** Nos testes, a visao do relatorio sem o cache do Next. */
   view?: (sessionId: string, now: number) => Promise<WebinarReportView>;
 };
@@ -243,7 +268,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
   const report = await (options.view ?? reportViewOf)(session.id, now);
   const simulated = session.kind === "simulated";
   const withOffer = session.kind !== "live";
-  const [facts, pollRows, questionRows, scriptItems, recordings, assistant, rules, fires, clicks] = await Promise.all([
+  const [facts, pollRows, questionRows, scriptItems, recordings, assistant, rules, fires, clicks, screen] = await Promise.all([
     loadAttendeeFacts(db, sessionRow),
     listPollRows(db, { sessionId: session.id, webinarId }),
     report.questions.top.length > 0 ? listQuestionRows(db, { limit: 100, order: "votes", sessionId: session.id }) : Promise.resolve([]),
@@ -252,7 +277,8 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     guarded(() => fetchAssistantSettings(db, webinarId)),
     loadSimulationRules(db, session),
     simulated ? listSimulationScriptFires(db, [session.id]) : Promise.resolve(new Map<string, Map<string, number>>()),
-    withOffer ? unlessMissing(() => listSessionOfferClicks(db, session.id), []) : Promise.resolve([])
+    withOffer ? unlessMissing(() => listSessionOfferClicks(db, session.id), []) : Promise.resolve([]),
+    session.kind === "replay" ? Promise.resolve<ScreenReportData>({ displays: [], stats: {} }) : (options.screen ?? screenReportOf)(session.id, now)
   ]);
   const recording = sessionRecordingOf(recordings, session);
   const transcript = recording && report.presence.drops.length > 0 ? await fetchTranscriptRow(db, recording.id) : null;
@@ -271,6 +297,11 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
   ]);
   const polls: Poll[] = pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options));
   const items = scriptItemRowsOf(scriptItems);
+  const durationMs = sessionVideoDurationMs(session, recording, webinar.durationMinutes);
+  // Quem nao saiu da tela ficou ate o fim da sessao: o fim real; na gravada sem ele, o fim do video (ou agora, antes);
+  // na live no ar, agora.
+  const zeroMs = sessionVideoZero(session);
+  const endMs = session.endedAt ? toTime(session.endedAt) : session.kind === "simulated" && Number.isFinite(zeroMs) ? Math.min(now, zeroMs + durationMs) : now;
 
   page.selected = {
     assistant: {
@@ -280,13 +311,14 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     attendees: toReportAttendees(facts, people),
     csvHref: webinarReportCsvHref(webinarId, session.id),
     dropExcerpts: dropExcerpts(report.presence.drops, transcript ? transcriptCuesOf(transcript.cues) : null),
-    durationMs: sessionVideoDurationMs(session, recording, webinar.durationMinutes),
+    durationMs,
     exportReports: WEBINAR_EXPORT_REPORTS.filter((entry) => entry !== "simulacao" || simulated),
     offerClicked: withOffer ? Object.fromEntries(offerClickedByUser(clicks.map((click) => ({ userId: click.user_id, variantLabel: click.variant_label })))) : null,
     people,
     polls: pollResults(report.polls, polls),
     questions,
     report,
+    screen: screenReportRows({ displays: screen.displays, endMs, stats: screen.stats, zeroMs }),
     session,
     simulation: {
       ackText: session.simulationAckText,

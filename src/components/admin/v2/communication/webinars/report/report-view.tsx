@@ -29,15 +29,16 @@ import { WebinarExportMenu } from "../export-menu";
 import { AttendeesTable } from "./attendees-table";
 import { PresenceCurveCard } from "./presence-curve";
 import { ReportBars, ReportBlock, ReportFacts, ReportNote, ReportRanking, ReportSubheading, type ReportPersonItem } from "./report-blocks";
-import { AssistantReportBlock, OfferReportBlock, SimulationReportBlock } from "./report-extra-blocks";
+import { AssistantReportBlock, OfferReportBlock, ScreenReportBlock, SimulationReportBlock } from "./report-extra-blocks";
 
 // A aba Relatorio de um webinario (docs/30 §2.5, §3.4, §3.5 e §3.7): o seletor de sessao no topo (?sessao=: as horas
 // marcadas que ja comecaram, as "Comeca quando voce entra" dos ultimos 7 dias e o replay), o botao Exportar com os sete
 // CSVs nos nomes do Zoom (a Simulacao so na sessao gravada), os onze numeros (KpiTile, 4 por linha, 2 abaixo de 768 px),
 // a curva "Presentes minuto a minuto" com as 5 maiores quedas e o trecho da transcricao de cada uma, o Chat (mensagens
 // por minuto, Quem mais comentou, Mais quentes com a formula escrita), as Perguntas, as Enquetes por opcao, as Vagas, o
-// Replay, a Oferta (so com oferta), as Respostas do Assistente (fora da Simulacao, D24), a Simulacao completa (fundo
-// diferente e a frase de que nada dali entra nos outros numeros) e a Lista por aluno com o CSV. Nada aqui e estimado:
+// Replay, a Oferta (so com oferta), as Respostas do Assistente (fora da Simulacao, D24), a Na tela (so quando a sessao
+// teve banner, QR Code ou enquete fixada: uma linha por exibicao), a Simulacao completa (fundo diferente e a frase de
+// que nada dali entra nos outros numeros) e a Lista por aluno com o CSV. Nada aqui e estimado:
 // sem dado, "—". Os nomes vem de profiles numa segunda leitura; o e-mail so nos CSVs. Tudo desenha no servidor; so a
 // curva e o menu Exportar sao cliente.
 
@@ -116,7 +117,7 @@ function AbsenteesNoticeButton({ ready, webinarId }: { ready: boolean; webinarId
 }
 
 function ReportBody({ absenteesReady, hasReplay, selected, webinarId }: { absenteesReady: boolean; hasReplay: boolean; selected: WebinarReportSelection; webinarId: string }) {
-  const { assistant, attendees, csvHref, dropExcerpts, durationMs, exportReports, offerClicked, people, polls, questions, report, session, simulation } = selected;
+  const { assistant, attendees, csvHref, dropExcerpts, durationMs, exportReports, offerClicked, people, polls, questions, report, screen, session, simulation } = selected;
   const live = session.status === "live";
   const kpis = reportKpis(report, { hasReplay });
   // O bloco do Assistente: ligado no webinario, com resposta nesta sessao ou o aviso da migracao 202610300004.
@@ -246,6 +247,9 @@ function ReportBody({ absenteesReady, hasReplay, selected, webinarId }: { absent
           {showAssistant ? <AssistantReportBlock pending={assistant.pending} report={report} /> : null}
         </div>
       ) : null}
+
+      {/* A Na tela: so quando a sessao teve exibicao (a pagina de antes, sem o campo, fica igual). */}
+      {screen && screen.length > 0 ? <ScreenReportBlock rows={screen} /> : null}
 
       {session.kind === "simulated" ? <SimulationReportBlock report={report} simulation={simulation} /> : null}
 

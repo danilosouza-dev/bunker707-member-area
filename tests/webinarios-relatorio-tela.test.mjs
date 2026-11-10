@@ -631,3 +631,30 @@ test("'Avisar quem não veio' numa live de duas sessoes: as regras valem para a 
   assert.match(aberto, /title="Abre um aviso novo para quem garantiu vaga em qualquer sessão desta live e não entrou em nenhuma/);
   assert.doesNotMatch(textOf(aberto), /Disponível quando todas as sessões/);
 });
+
+test("o bloco Na tela (especificacao de 10/11/2026, §7): so com exibicao, uma linha por exibicao com as oito colunas, '—' na enquete fixada e sem quem viu, e a nota embaixo", () => {
+  const linhas = [
+    { clickers: 41, clicks: 57, closed: 9, enteredAt: "antes do início", id: "b1", kind: "banner", label: "Banner · Turma de novembro", rate: 13, shown: 312, stayed: "3 min" },
+    { clickers: null, clicks: null, closed: null, enteredAt: "05:00", id: "p1", kind: "poll", label: "Enquete fixada · Qual curso?", rate: null, shown: null, stayed: "1 h 10 min" },
+    { clickers: 0, clicks: 0, closed: 0, enteredAt: "12:30", id: "q1", kind: "qr", label: "QR Code · Inscrição", rate: null, shown: 0, stayed: "45 min" }
+  ];
+  const markup = html(createElement(WebinarReportView, { page: pagina({ selected: { ...pagina().selected, screen: linhas } }) }));
+  const inicio = markup.indexOf('aria-labelledby="webinario-relatorio-na-tela"');
+  assert.ok(inicio > 0, "o bloco");
+  const bloco = markup.slice(markup.lastIndexOf("<section", inicio), markup.indexOf("</section>", inicio) + "</section>".length);
+  assert.match(bloco, /<h2[^>]*id="webinario-relatorio-na-tela">Na tela<\/h2>/);
+  const texto = textOf(bloco);
+  assert.match(texto, /Item Entrou aos Ficou Viram Clicaram Cliques Fecharam Clicaram ÷ viram/, "as oito colunas, na ordem");
+  assert.match(texto, /Banner · Turma de novembro antes do início 3 min 312 41 57 9 13 %/);
+  assert.match(texto, /Enquete fixada · Qual curso\? 05:00 1 h 10 min — — — — —/, "a enquete fixada so com a entrada e quanto ficou");
+  assert.match(texto, /QR Code · Inscrição 12:30 45 min 0 0 0 0 —/, "sem quem viu, a taxa e '—'");
+  assert.match(texto, /Viram: alunos com o item visível na tela por 1 segundo ou mais\. Leituras do QR Code pela câmera não são contadas; só o toque em Abrir o link\.$/, "a nota abaixo da tabela");
+  assert.deepEqual([...bloco.matchAll(/data-report-screen-row="(\w+)"/g)].map(([, kind]) => kind), ["banner", "poll", "qr"]);
+  assert.match(bloco, /<th class="[^"]*" scope="row" title="Banner · Turma de novembro">/, "o item e o cabecalho da linha");
+  // Sem exibicao (ou a pagina de antes, sem o campo), sem o bloco.
+  assert.doesNotMatch(html(createElement(WebinarReportView, { page: pagina({ selected: { ...pagina().selected, screen: [] } }) })), /webinario-relatorio-na-tela/);
+  assert.doesNotMatch(html(createElement(WebinarReportView, { page: pagina() })), /webinario-relatorio-na-tela/);
+  // Depois das Respostas do Assistente e da Oferta, antes da Simulacao e da lista por aluno.
+  const ordem = ["webinario-relatorio-na-tela", "webinario-relatorio-simulacao"].map((id) => markup.indexOf(`aria-labelledby="${id}"`));
+  assert.ok(ordem[0] > 0 && ordem[0] < ordem[1], ordem.join(" "));
+});
