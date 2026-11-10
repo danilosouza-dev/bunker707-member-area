@@ -4,7 +4,7 @@
 // Sem "server-only", sem banco e sem relogio: o resto do Verificador e os testes carregam direto.
 // Sem import com "@/": os testes rodam este arquivo pelo Node, que nao conhece o alias.
 //
-// O produto so confere licencas. Assinar licencas e trabalho do Emissor (services/bunker-licensing),
+// O produto so confere licencas. Assinar licencas e trabalho do Emissor (repositorio proprio bunker-licensing),
 // que nunca vai na imagem do comprador: um emissor dentro do produto daria a quem quisesse piratear um
 // servidor de licencas pronto (docs/32 §11.2). A guarda tests/licenca-sem-emissor.guard.test.mjs
 // impede que codigo de assinatura entre em src/.

@@ -5,7 +5,7 @@ import test from "node:test";
 
 // Guarda de arquitetura (docs/32 §11.2): o produto confere licenças e nunca as assina. Código de assinatura
 // dentro de src/ daria a quem quisesse piratear um emissor de licenças pronto: bastaria trocar a chave
-// pública gravada. Assinar é trabalho do Emissor (services/bunker-licensing), que nunca vai na imagem do
+// pública gravada. Assinar é trabalho do Emissor (repositório próprio bunker-licensing), que nunca vai na imagem do
 // comprador. Os testes assinam pelo dublê de tests/support/licenca-de-teste.mjs.
 
 function arquivos(dir) {

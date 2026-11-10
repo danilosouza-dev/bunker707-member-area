@@ -2,7 +2,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 
 // Dublê do Emissor para os testes do Verificador (docs/32 §11.2 e §11.4). Gera raízes e chaves de emissão
 // de mentira e assina licenças no formato BKL1. Fica só em tests/: o produto nunca assina licença
-// (tests/licenca-sem-emissor.guard.test.mjs). O Emissor de verdade (services/bunker-licensing) terá o
+// (tests/licenca-sem-emissor.guard.test.mjs). O Emissor de verdade (repositório próprio bunker-licensing) terá o
 // mesmo formato; os contextos e o prefixo abaixo são os de src/server/licensing/model.ts.
 
 export const PREFIXO = "BKL1";

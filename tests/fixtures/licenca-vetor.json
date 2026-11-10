@@ -1,5 +1,5 @@
 {
-  "_leia": "Vetor fixo do formato BKL1 (docs/32 §11.4). Ed25519 e deterministico: com as mesmas sementes, o Emissor gera exatamente este texto, e o Verificador do produto o confere. Se um dos dois lados mudar o formato, tests/emissor-assinatura.test.mjs fica vermelho. As sementes sao de teste e nao valem fora daqui.",
+  "_leia": "Vetor fixo do formato BKL1 (docs/32 §11.4). Ed25519 e deterministico: com as mesmas sementes, o Emissor gera exatamente este texto, e o Verificador do produto o confere. O mesmo arquivo existe nos dois repositorios: no bunker-licensing, tests/assinatura.test.mjs exige que o Emissor o reproduza byte a byte; no bunker707-member-area, tests/licenca-vetor.test.mjs exige que o Verificador o confira. Se um lado mudar o formato, o teste dele fica vermelho; mudar o formato pede trocar o arquivo nos dois. As sementes sao de teste e nao valem fora daqui.",
   "sementes": {
     "raiz": "0101010101010101010101010101010101010101010101010101010101010101",
     "emissao": "0202020202020202020202020202020202020202020202020202020202020202"
