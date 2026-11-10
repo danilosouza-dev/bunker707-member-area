@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/transpile-tsx.mjs";
 import { createElement } from "react";
@@ -23,6 +24,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 // F7 (docs/31 V2-10): a enquete no meio do palco (o rotulo, a pergunta em h2, opcoes de 48 px, Responder depois e
 // Enviar resposta; o resultado com as barras e Fechar), o card do chat com Responder agora e a aba Enquetes controlada
 // pela sala; a gravada abre a enquete no palco so no desenho normal.
+// A Na tela, R5 (a moderacao por pessoa na Live gravada, especificacao de 10/11/2026, §3.8): silenciado, o campo do
+// chat da lugar a frase com a hora de Sao Paulo (ou "até o fim desta live") e a sala continua; removido ou banido, a sala
+// inteira da lugar a frase de cada um, sem nada da Na tela; a recusa local ate a proxima leitura e o Desfazer da equipe
+// que devolve o campo e a sala (as regras puras de live-room-model.ts); a pagina de entrada recusa o removido com a
+// mesma frase. O desenho vertical das mesmas regras fica em tests/webinarios-sala-vertical-tela.test.mjs.
 
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
 const tooltip = await import("../src/components/member/webinars/room/room-tooltip.tsx");
@@ -1068,4 +1074,154 @@ test("RoomTabList fora da sala (o console): os ids pelo prefixo, o numero no nom
   assert.doesNotMatch(html, /data-room-first-focus/);
   const nenhuma = render(panelModule.RoomTabList, { firstFocusValue: null, idPrefix: "console", label: "Painel do console", onSelect: noop, open: true, tab: null, tabs });
   assert.doesNotMatch(nenhuma, /aria-selected="true"/, "com o ⋯ escolhido, nenhuma aba fica escolhida");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Na tela, R5: silenciado e removido na Live gravada (o aluno)
+ * ---------------------------------------------------------------------------------------------- */
+
+const liveModel = await import("../src/components/member/webinars/room/live-room-model.ts");
+const SEM_BAN = { banned: false, kicked: false, muted: false, mutedUntil: null };
+const isoDe = (ms) => new Date(ms).toISOString();
+/** O aluno da sessao lida: com o aceite e o banimento que a leitura da sessao trouxe (me.ban). */
+const euCom = (ban = {}) => ({ avatarUrl: null, ban: { ...SEM_BAN, ...ban }, calendarUrl: null, consented: true, displayName: "Ana S.", registered: false, registeredAt: null });
+const salaR5 = (ban, { extra = {}, readOnly = false, sessionExtra = {} } = {}) =>
+  render(room.WebinarRoom, { coverUrl: null, design: "normal", payload: payload({ me: euCom(ban), ...extra }, sessionExtra), presenterName: "Danilo Souza", readOnly, webinarHref: "/webinarios/aula-de-ia" });
+const CAMPO_DO_CHAT = /<textarea aria-label="Escreva uma mensagem"/;
+const AVISO_DO_CAMPO = /<p class="[^"]*" data-testid="room-chat-notice" role="status">([^<]*)<\/p>/;
+/** O banner e a fixada que a equipe pos na frente da turma (a Na tela), para conferir que nada disso fica para o barrado. */
+const FIXADA_R5 = msg("fx", { body: "Material da aula na apostila", displayName: "Equipe", pinned: true, role: "team" });
+const TELA_R5 = {
+  items: [{ body: "Vagas até sexta.", buttonLabel: "Quero entrar", closable: true, displayId: "dddddddd-0000-4000-8000-000000000001", image: null, kind: "banner", linkUrl: "https://exemplo.com/turma", place: "bottom_right", shownAt: isoDe(T0), size: "m", title: "Turma nova" }],
+  pinned: FIXADA_R5,
+  pinnedPollId: null,
+  pollsKey: "",
+  stamp: "s9"
+};
+
+test("R5, silenciado na gravada: o campo do chat da lugar a frase com a hora de Sao Paulo (ou ate o fim desta live); continua assistindo e reagindo; vencido o silencio ou no ver como, o campo", () => {
+  const livre = salaR5({});
+  assert.match(livre, CAMPO_DO_CHAT, "sem silencio, o campo");
+  assert.doesNotMatch(livre, /data-testid="room-chat-notice"/);
+
+  const ate = salaR5({ muted: true, mutedUntil: isoDe(T0 + 15 * MIN) });
+  assert.equal(ate.match(AVISO_DO_CAMPO)?.[1], WEBINAR_COPY.aoVivo.silenciadoAte("20:15"), "a hora de Sao Paulo (T0 e 20:00 la)");
+  assert.equal(ate.match(AVISO_DO_CAMPO)?.[1], "Você está sem escrever no chat até 20:15.");
+  assert.doesNotMatch(ate, CAMPO_DO_CHAT, "o campo saiu");
+  assert.doesNotMatch(ate, /aria-label="Enviar"/);
+  // Continua assistindo (o player) e reagindo (o Reagir da barra ligado); o painel e as abas ficam.
+  assert.match(ate, /<iframe[^>]*src="https:\/\/iframe\.mediadelivery\.net/);
+  const reagir = ate.match(/<button[^>]*aria-label="Reagir"[^>]*>/)?.[0] ?? "";
+  assert.ok(reagir && !/\sdisabled=""/.test(reagir), reagir);
+  assert.match(ate, /role="tab"[^>]*>Perguntas</);
+  assert.doesNotMatch(ate, /data-testid="room-unavailable"/);
+
+  const ateOFim = salaR5({ muted: true, mutedUntil: null });
+  assert.equal(ateOFim.match(AVISO_DO_CAMPO)?.[1], WEBINAR_COPY.aoVivo.silenciadoAteOFim);
+  assert.equal(WEBINAR_COPY.aoVivo.silenciadoAteOFim, "Você está sem escrever no chat até o fim desta live.");
+
+  // O silencio que venceu (a leitura velha ainda o traz) devolve o campo; no "ver como" nada e gravado e nada muda.
+  assert.match(salaR5({ muted: true, mutedUntil: isoDe(T0 - MIN) }), CAMPO_DO_CHAT);
+  assert.doesNotMatch(salaR5({ muted: true, mutedUntil: null }, { readOnly: true }), /data-testid="room-chat-notice"/);
+
+  // As Perguntas recebem a mesma frase e a recusa de uma pergunta tambem muda a sala (a aba e escolhida na sala).
+  const fonte = readFileSync(new URL("../src/components/member/webinars/room/webinar-room.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /<RoomQuestionsTab[^>]*?[\s\S]*?notice=\{composerNotice\}[\s\S]*?onRefused=\{onWriteRefused\}[\s\S]*?\/>/);
+  assert.match(fonte, /const composerNotice = readOnly \? null : mutedPhrase\(ban, nowMs\);/);
+  for (const hook of ["useRoomReactions", "useRoomPolls"]) {
+    assert.match(fonte, new RegExp(`${hook}\\(\\{[^}]*onRefused: onWriteRefused`), `${hook}: o 409 da reacao e da enquete conta`);
+  }
+});
+
+test("R5, removido ou banido na gravada: a sala inteira da lugar a frase de cada um (o mesmo caminho de fora do Quem pode), sem player, painel, campo, Oferta nem nada da Na tela; o cabecalho com o Sair fica", () => {
+  const extra = { pinned: FIXADA_R5, screen: TELA_R5 };
+  // Antes: a fixada e o banner aparecem (com o Ativar som no palco, na faixa abaixo dele).
+  const antes = salaR5({}, { extra });
+  assert.match(antes, /data-room-screen-row="banner"/);
+  assert.match(antes, /Material da aula na apostila/);
+
+  for (const [ban, frase] of [
+    [{ kicked: true }, WEBINAR_COPY.aoVivo.removido],
+    [{ banned: true }, WEBINAR_COPY.aoVivo.banido],
+    [{ banned: true, kicked: true }, WEBINAR_COPY.aoVivo.banido]
+  ]) {
+    const html = salaR5(ban, { extra });
+    assert.match(html, new RegExp(`data-room-stage="unavailable"`), frase);
+    assert.equal(html.match(/data-testid="room-unavailable" role="alert">([^<]*)<\/p>/)?.[1], frase);
+    assert.doesNotMatch(html, /<iframe/, "sem o player");
+    assert.doesNotMatch(html, /role="tablist"|data-testid="room-panel"|data-room-bar-item=/, "sem o painel e sem a barra");
+    assert.doesNotMatch(html, CAMPO_DO_CHAT);
+    assert.doesNotMatch(html, /data-room-screen-|Material da aula na apostila|Turma nova/, "nada da Na tela para o barrado");
+    assert.doesNotMatch(html, /data-room-badge=/, "sem os selos do palco");
+    assert.match(html, /<header[\s\S]*?<button[^>]*>[\s\S]*?Sair[\s\S]*?<\/header>/, "o Sair do cabecalho continua");
+  }
+  assert.equal(WEBINAR_COPY.aoVivo.removido, "Você foi removido desta live.");
+  // A frase de fora do "Quem pode" continua a mesma no palco sem a frase do banimento.
+  const palco = render(stage.RoomStage, { countdownLabel: "", coverUrl: null, embedUrl: null, iframeRef: noop, muted: false, onUnmute: noop, replayHref: null, sessionId: "s", state: "unavailable", title: "Aula" });
+  assert.match(palco, new RegExp(`role="alert">${WEBINAR_COPY.aluno.naoDisponivel}</p>`));
+});
+
+test("R5, a recusa local ate a proxima leitura e o Desfazer: o 409 muda a sala na hora; a leitura mais nova manda e devolve o campo e a sala sem recarregar", () => {
+  const { NO_REFUSED_BAN, mutedPhrase, recordedBanNow, recordedBlockedScreen, refusedBanAfter, writeRefusalOf } = liveModel;
+  const erro = (reason, message) => Object.assign(new Error(message ?? reason), { reason, status: 409 });
+  const agora = (fromSession, refused, readMs) => recordedBanNow({ fromSession, refused, serverTimeIso: isoDe(readMs), skewMs: 0 });
+
+  // O chat recusou com 409 muted antes da releitura: a frase "ate o fim" vale ja, sem a hora.
+  assert.equal(writeRefusalOf(erro("muted")), "muted");
+  const silencio = refusedBanAfter(NO_REFUSED_BAN, "muted", { nowMs: T0, serverTimeIso: isoDe(T0 - 30_000), skewMs: 0 });
+  assert.deepEqual(silencio, { banned: false, kicked: false, muted: true, refusedAtMs: T0 });
+  assert.equal(mutedPhrase(agora(SEM_BAN, silencio, T0 - 30_000), T0), WEBINAR_COPY.aoVivo.silenciadoAteOFim);
+  // A releitura logo depois traz a hora do servidor.
+  assert.equal(mutedPhrase(agora({ ...SEM_BAN, muted: true, mutedUntil: isoDe(T0 + 15 * MIN) }, silencio, T0 + 1_000), T0 + 1_000), "Você está sem escrever no chat até 20:15.");
+  // A equipe desfez: a leitura seguinte, sem o silencio, devolve o campo (a recusa local ja foi coberta por ela).
+  const desfeito = agora(SEM_BAN, silencio, T0 + 60_000);
+  assert.deepEqual(desfeito, SEM_BAN);
+  assert.equal(mutedPhrase(desfeito, T0 + 60_000), null);
+  // Com o relogio do aparelho atrasado 10 s, a leitura de 5 s depois (na hora do servidor) ainda e de antes da recusa.
+  assert.equal(recordedBanNow({ fromSession: SEM_BAN, refused: silencio, serverTimeIso: isoDe(T0 + 5_000), skewMs: 10_000 }).muted, true);
+
+  // Removido: o 409 banned com a frase de removido; a sala da lugar a frase ate a leitura que traz o Desfazer.
+  assert.equal(writeRefusalOf(erro("banned", WEBINAR_COPY.aoVivo.removido)), "kicked");
+  assert.equal(writeRefusalOf(erro("banned", WEBINAR_COPY.aoVivo.banido)), "banned");
+  const removido = refusedBanAfter(NO_REFUSED_BAN, "kicked", { nowMs: T0, serverTimeIso: isoDe(T0 - 30_000), skewMs: 0 });
+  assert.equal(recordedBlockedScreen({ accessLost: false, ban: agora(SEM_BAN, removido, T0 - 30_000) }), "kicked");
+  assert.equal(recordedBlockedScreen({ accessLost: false, ban: agora({ ...SEM_BAN, kicked: true }, removido, T0 + 1_000) }), "kicked", "a releitura confirma");
+  assert.equal(recordedBlockedScreen({ accessLost: false, ban: agora(SEM_BAN, removido, T0 + 60_000) }), null, "o Desfazer devolve a sala");
+
+  // Uma recusa nova soma com a que ainda vale e recomeca a ponte quando a de antes ja foi coberta.
+  const soma = refusedBanAfter(silencio, "kicked", { nowMs: T0 + 2_000, serverTimeIso: isoDe(T0 - 30_000), skewMs: 0 });
+  assert.deepEqual(soma, { banned: false, kicked: true, muted: true, refusedAtMs: T0 + 2_000 });
+  const nova = refusedBanAfter(silencio, "kicked", { nowMs: T0 + 90_000, serverTimeIso: isoDe(T0 + 60_000), skewMs: 0 });
+  assert.deepEqual(nova, { banned: false, kicked: true, muted: false, refusedAtMs: T0 + 90_000 }, "o silencio desfeito nao volta");
+
+  // A ordem da sala ao vivo: fora do acesso antes de banido, banido antes de removido.
+  assert.equal(recordedBlockedScreen({ accessLost: true, ban: { banned: true, kicked: true } }), "unavailable");
+  assert.equal(recordedBlockedScreen({ accessLost: false, ban: { banned: true, kicked: true } }), "banned");
+  assert.equal(recordedBlockedScreen({ accessLost: false, ban: { banned: false, kicked: false } }), null);
+  // A leitura sem me.ban (a pagina de antes) vale como sem banimento.
+  assert.deepEqual(recordedBanNow({ fromSession: undefined, refused: NO_REFUSED_BAN, serverTimeIso: isoDe(T0), skewMs: 0 }), SEM_BAN);
+
+  // A sala usa estas regras: a recusa do chat, da pergunta, da enquete e da reacao muda a sala e rele a sessao.
+  const fonte = readFileSync(new URL("../src/components/member/webinars/room/webinar-room.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /const ban = recordedBanNow\(\{ fromSession: session\.me\.ban, refused, serverTimeIso: session\.serverTime, skewMs: clock\.skewMs \}\);/);
+  assert.match(fonte, /const blockedScreen = recordedBlockedScreen\(\{ accessLost: clock\.accessLost \|\| heartbeatLost, ban \}\);\s*\/\/[^\n]*\n[^\n]*\n\s*const unavailable = blockedScreen !== null;/);
+  assert.match(fonte, /setRefused\(\(previous\) => refusedBanAfter\(previous, refusal, \{[^}]*\}\)\);\s*void refreshSession\(\);/);
+  assert.match(fonte, /\} catch \(error\) \{\s*onWriteRefused\(error\);\s*throw error;\s*\}/, "o envio do chat recusado");
+});
+
+test("R5, a entrada: a pagina da Sala recusa o removido desta sessao da gravada com a mesma frase (a live mostra a frase na propria sala)", async () => {
+  const queries = await import("../src/server/webinars/student-queries.ts");
+  const sessao = (extra = {}) => ({
+    session: { durationMs: 60 * MIN, join: { ok: true }, kind: "simulated", lateJoinMinutes: null, scheduledAt: isoDe(T0), startedAt: null, status: "scheduled", ...extra }
+  });
+  const decide = (payloadDaSessao) => queries.roomPageDecision(payloadDaSessao, { durationMs: 60 * MIN, now: T0 + 5 * MIN, staff: false });
+  assert.deepEqual(decide(sessao()), { ok: true });
+  assert.deepEqual(decide(sessao({ join: { ok: false, reason: "kicked" } })), { ok: false, reason: "kicked" });
+  assert.deepEqual(decide(sessao({ join: { ok: false, reason: "banned" } })), { ok: false, reason: "banned" });
+  assert.deepEqual(decide(sessao({ join: { ok: false, reason: "kicked" }, kind: "live", status: "live" })), { ok: true }, "a live mostra a frase na sala");
+
+  // O que a pagina escreve para cada recusa: o removido com a frase da sala.
+  const pagina = readFileSync(new URL("../src/app/webinarios/[slug]/sala/page.tsx", import.meta.url), "utf8");
+  assert.match(pagina, /data\.reason === "kicked"\s*\?\s*WEBINAR_COPY\.aoVivo\.removido/);
+  assert.match(pagina, /data\.reason === "banned"\s*\?\s*WEBINAR_COPY\.aoVivo\.banido/);
 });

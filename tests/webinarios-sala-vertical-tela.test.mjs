@@ -14,7 +14,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 // com as traduzidas, a entrada simulada no chat, o aviso de venda e a pilula nos lugares do vertical, o compositor
 // compacto com o mesmo campo, os botoes de 44 px, o dialogo e o leitor de tela, nada passando de 375 px e nenhuma frase
 // citando o motor de video. Depois as pecas sozinhas: o chat por cima, o compositor (o mesmo aceite de §8.5), a doca e
-// a gaveta.
+// a gaveta. A Na tela, R5 (a moderacao por pessoa na Live gravada, especificacao de 10/11/2026, §3.8): silenciado, o
+// campo compacto da lugar a frase e Reagir e a gaveta ficam; removido ou banido, o palco mostra a frase de cada um e o
+// chat por cima, o compositor, a gaveta e as linhas da Na tela na doca saem (o Sair do topo fica); a leitura da sessao
+// sem o banimento (o Desfazer da equipe) traz tudo de volta.
 
 const ROOM_DIR = new URL("../src/components/member/webinars/room/", import.meta.url).href;
 const T0 = Date.parse("2026-11-05T23:00:00.000Z");
@@ -498,4 +501,91 @@ test("fora do Quem pode no meio da sessao (D41) com o foco na gaveta, numa aba o
   assert.match(roomSource, /useLayoutEffect\(\(\) => \{\s*if \(unavailable\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);\s*\}\s*\}, \[unavailable\]\);/);
   assert.match(roomSource, /composer=\{\s*vertical && !unavailable \?/, "o compositor (com o botao da gaveta) sai com a sala indisponivel");
   assert.match(roomSource, /const drawerVisible = vertical && drawerOpen && !unavailable;/);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Na tela, R5: silenciado e removido na Live gravada, no desenho vertical
+ * ---------------------------------------------------------------------------------------------- */
+
+const SEM_BAN = { banned: false, kicked: false, muted: false, mutedUntil: null };
+/** O aluno da sessao lida, com o banimento que a leitura trouxe (me.ban). */
+const euCom = (ban = {}) => ({ avatarUrl: null, ban: { ...SEM_BAN, ...ban }, calendarUrl: null, consented: true, displayName: "Ana S.", registered: false, registeredAt: null });
+const TELA_R5 = {
+  items: [{ body: "Vagas até sexta.", buttonLabel: "Quero entrar", closable: true, displayId: "dddddddd-0000-4000-8000-000000000001", image: null, kind: "banner", linkUrl: "https://exemplo.com/turma", place: "bottom_right", shownAt: new Date(T0).toISOString(), size: "m", title: "Turma nova" }],
+  pinned: null,
+  pinnedPollId: null,
+  pollsKey: "",
+  stamp: "s9"
+};
+const verticalR5 = (ban, extra = {}) => sala("vertical", { extra: { me: euCom(ban), screen: TELA_R5, ...extra } });
+
+test("R5 no vertical, silenciado: o campo compacto e o Enviar dao lugar a frase com a hora (ou ate o fim desta live); Fechar o chat, Reagir e a gaveta ficam com 44 px; a leitura sem o silencio devolve o campo", () => {
+  const livre = elementWith(verticalR5({}), "data-room-vertical-composer");
+  assert.match(livre, /<input aria-label="Escreva uma mensagem"/, "sem silencio, o campo");
+
+  const html = verticalR5({ muted: true, mutedUntil: new Date(T0 + 15 * MIN).toISOString() });
+  const composer = elementWith(html, "data-room-vertical-composer");
+  assert.match(composer, /<p class="[^"]*\bmin-h-11\b[^"]*" data-testid="room-chat-notice" role="status">Você está sem escrever no chat até 20:15\.<\/p>/);
+  assert.doesNotMatch(composer, /<input|aria-label="Enviar"/, "o campo e o Enviar sairam");
+  for (const label of ["Fechar o chat", "Reagir", "Perguntas e enquetes"]) {
+    assert.match(composer, new RegExp(`<button[^>]*aria-label="${label}"[^>]*class="[^"]*size-11`), label);
+  }
+  assert.doesNotMatch(composer.match(/<button[^>]*aria-label="Reagir"[^>]*>/)?.[0] ?? "", /\sdisabled=""/, "continua reagindo");
+  assert.match(composer, /<p aria-live="polite" class="[^"]*sr-only"><\/p>/, "sem a dica em cima: a frase ja diz");
+  assert.match(html, /data-room-vertical-chat/, "o chat por cima continua");
+  assert.match(html, /data-room-screen-dock=""/, "e a Na tela tambem");
+
+  const ateOFim = elementWith(verticalR5({ muted: true, mutedUntil: null }), "data-room-vertical-composer");
+  assert.match(ateOFim, new RegExp(`role="status">${WEBINAR_COPY.aoVivo.silenciadoAteOFim}</p>`));
+  // O Desfazer da equipe chega pela leitura da sessao: sem o silencio, o campo volta.
+  assert.match(elementWith(verticalR5({ muted: false }), "data-room-vertical-composer"), /<input aria-label="Escreva uma mensagem"/);
+});
+
+test("R5 no vertical, removido ou banido: o palco mostra a frase de cada um; o chat por cima, o compositor, a doca da Na tela e a gaveta saem; o Sair do topo fica", () => {
+  for (const [ban, frase] of [
+    [{ kicked: true }, WEBINAR_COPY.aoVivo.removido],
+    [{ banned: true }, WEBINAR_COPY.aoVivo.banido]
+  ]) {
+    const html = verticalR5(ban);
+    assert.equal(html.match(/data-testid="room-unavailable" role="alert">([^<]*)<\/p>/)?.[1], frase);
+    assert.doesNotMatch(html, /<iframe/, "sem o player");
+    assert.doesNotMatch(html, /data-room-vertical-composer|data-room-vertical-chat|data-room-drawer-toggle/, "sem o chat por cima e sem o compositor");
+    assert.doesNotMatch(html, /data-room-screen-|Turma nova/, "nada da Na tela");
+    assert.match(html, /<button aria-label="Sair" class="grid size-11 /, "o Sair do topo");
+  }
+  // De volta (a leitura sem o banimento): o compositor e a doca da Na tela.
+  const devolta = verticalR5({ kicked: false });
+  assert.match(devolta, /data-room-vertical-composer/);
+  assert.match(devolta, /data-room-screen-dock=""/);
+});
+
+test("o compositor sozinho com a frase do silencio: sem o campo e sem o aceite; com o chat fechado, so Abrir o chat (nada a trocar)", () => {
+  const base = {
+    chatMode: "open",
+    chatOpen: true,
+    consented: false,
+    drawerId: "gaveta",
+    drawerOpen: false,
+    notice: WEBINAR_COPY.aoVivo.silenciadoAteOFim,
+    nowMs: T0,
+    onOpenDrawer: noop,
+    onReact: noop,
+    onSend: async () => ({ pending: false }),
+    onToggleChat: noop,
+    phase: "live",
+    reactionsDisabled: false,
+    readOnly: false,
+    slowUntilMs: null
+  };
+  const aberto = render(verticalComposer.VerticalComposer, base);
+  assert.match(aberto, new RegExp(`data-testid="room-chat-notice" role="status">${WEBINAR_COPY.aoVivo.silenciadoAteOFim}</p>`));
+  assert.doesNotMatch(aberto, /<input|data-testid="room-consent"/);
+  const fechado = render(verticalComposer.VerticalComposer, { ...base, chatOpen: false });
+  assert.match(fechado, /aria-label="Abrir o chat"/);
+  assert.doesNotMatch(fechado, /room-chat-notice|<input/);
+  // O modo lento e o "so a equipe" nao aparecem por cima da frase.
+  const lento = render(verticalComposer.VerticalComposer, { ...base, slowUntilMs: T0 + 12_000 });
+  assert.doesNotMatch(lento, /Você pode enviar de novo/);
+  // Sem a frase, o campo de sempre.
+  assert.match(render(verticalComposer.VerticalComposer, { ...base, notice: null }), /<input aria-label="Escreva uma mensagem"/);
 });

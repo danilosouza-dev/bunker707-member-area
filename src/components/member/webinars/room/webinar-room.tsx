@@ -11,7 +11,7 @@ import { roomHref } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
 import { useRoomAssistant } from "./assistant/use-room-assistant";
 import { LiveParticipantsTab } from "./live-notices";
-import { overlayMessages } from "./live-room-model";
+import { liveScreenPhrase, mutedPhrase, NO_REFUSED_BAN, overlayMessages, recordedBanNow, recordedBlockedScreen, refusedBanAfter, writeRefusalOf, type RefusedBan } from "./live-room-model";
 import type { ChatPostBody } from "./room-api";
 import { RoomLeaveDialog } from "./room-leave-dialog";
 import { RecordedControls, ROOM_REACTIONS_ID } from "./recorded-controls";
@@ -140,6 +140,14 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // fileira de baixo (ou "No meio") tira as pilulas do chat do palco largo, e um em "Embaixo, à direita" o selo do
 // Assistente (RoomWideHidden, so CSS). Fechar e por exibicao (sessionStorage); quem tem o foco num item que sai volta
 // para a sala (refocusRoom). As metricas (viu, clicou, fechou) vao por useRoomScreenEvents; nada no "ver como".
+// A Na tela, a moderacao por pessoa na Live gravada (especificacao de 10/11/2026, R5 e §3.8), com as regras e as frases
+// da sala ao vivo (live-room-model.ts): o banimento e o da leitura da sessao (me.ban, que traz os desta sessao) mais o
+// que uma escrita recusada contou (409 banned / muted do chat, da pergunta, da enquete, da reacao) ate a proxima
+// leitura. Silenciado: o campo do painel, da gaveta, do vertical e das Perguntas da lugar a "Você está sem escrever no
+// chat até {hora}." (ou "até o fim desta live"); continua assistindo, reagindo e respondendo enquetes. Removido desta
+// sessao ou banido de todas: o mesmo caminho de quem saiu do "Quem pode" (unavailable), com a frase de cada um no palco
+// ("Você foi removido desta live."), sem player, chat, presenca, Oferta, Simulacao nem nada da Na tela; a releitura da
+// sessao continua, e o Desfazer da equipe devolve a sala sem recarregar. Na entrada, a pagina mostra a mesma frase.
 
 function subscribeNothing() {
   return () => undefined;
@@ -443,8 +451,32 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const replayOffsetRef = useRef(0);
   const lastReplaySecondRef = useRef<number | null>(null);
   const serverEnded = session.session.status === "ended" || session.session.status === "cancelled";
-  // Fora do "Quem pode" agora (D41): o player desmonta e nada mais e lido nem gravado.
-  const unavailable = clock.accessLost || heartbeatLost;
+  // A moderacao por pessoa (a Na tela, R5): o que uma escrita recusada contou (409 banned / muted) vale ate a proxima
+  // leitura da sessao, pela regra da sala ao vivo (recordedBanNow); a leitura mais nova manda, entao o Desfazer da equipe
+  // e o silencio que venceu devolvem a sala e o campo sem recarregar.
+  const [refused, setRefused] = useState<RefusedBan>(NO_REFUSED_BAN);
+  const sessionTimeRef = useRef(session.serverTime);
+  useEffect(() => {
+    sessionTimeRef.current = session.serverTime;
+  }, [session.serverTime]);
+  const ban = recordedBanNow({ fromSession: session.me.ban, refused, serverTimeIso: session.serverTime, skewMs: clock.skewMs });
+  const blockedScreen = recordedBlockedScreen({ accessLost: clock.accessLost || heartbeatLost, ban });
+  // Fora do "Quem pode" agora (D41), removido desta sessao ou banido (R5): o player desmonta, nada mais e lido nem
+  // gravado (so a releitura da sessao, que traz o Desfazer) e o palco mostra a frase de cada um.
+  const unavailable = blockedScreen !== null;
+  const refreshSession = clock.refresh;
+  /** Uma escrita da sala foi recusada (409 banned / muted do chat, da pergunta, da enquete, da reacao): a sala muda na hora e a sessao e relida. */
+  const onWriteRefused = useCallback(
+    (error: unknown) => {
+      const refusal = writeRefusalOf(error);
+      if (refusal === null || refusal === "ended") {
+        return;
+      }
+      setRefused((previous) => refusedBanAfter(previous, refusal, { nowMs: Date.now(), serverTimeIso: sessionTimeRef.current, skewMs: clock.skewRef.current ?? 0 }));
+      void refreshSession();
+    },
+    [clock.skewRef, refreshSession]
+  );
 
   // O relogio da sala, a cada segundo (a contagem, o tempo no ar e a revelacao das mensagens).
   useEffect(() => {
@@ -521,7 +553,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     webinarId
   });
 
-  const reactions = useRoomReactions({ enabled: !readOnly && !unavailable && (live || phase === "replay"), getOffsetMs, reducedMotion, sessionId, webinarId });
+  const reactions = useRoomReactions({ enabled: !readOnly && !unavailable && (live || phase === "replay"), getOffsetMs, onRefused: onWriteRefused, reducedMotion, sessionId, webinarId });
   // O Assistente lido uma vez pela sala: o selo do palco, o chat e as Perguntas usam o mesmo estado.
   const assistant = useRoomAssistant({ enabled: !readOnly && !unavailable, sessionId, webinarId });
 
@@ -533,7 +565,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const simulation = useRoomSimulation({ enabled: !readOnly && !unavailable && kind === "simulated" && phase !== "ended", getOffsetMs, sessionId, webinarId });
   const translation = useRoomTranslation({ enabled: !readOnly && !unavailable, messages: revealed, sessionId, webinarId });
   // As enquetes da sala (a releitura da sessao e, quando o resumo da Na tela muda, uma leitura): o palco, o card do chat e a aba.
-  const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, pollsKey: naTela.pollsKey, sessionId, sessionPolls: session.polls, webinarId });
+  const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, onRefused: onWriteRefused, pollsKey: naTela.pollsKey, sessionId, sessionPolls: session.polls, webinarId });
   const polls = roomPolls.polls;
   const [deferred, setDeferred] = useDeferredPolls(sessionId);
   // O que depende do guardado (o "depois", os resultados vistos) so depois da hidratacao: sem isso, a enquete deixada
@@ -723,13 +755,21 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     setDrawerOpen(true);
   }
 
-  /** O envio do chat, o mesmo nos dois desenhos (no replay vai o segundo do video; o aceite novo rele a sessao). */
+  /**
+   * O envio do chat, o mesmo nos dois desenhos (no replay vai o segundo do video; o aceite novo rele a sessao). A recusa
+   * de removido, banido ou silenciado muda a sala na hora (onWriteRefused) e o campo mostra a frase do servidor.
+   */
   async function sendChat(body: Omit<ChatPostBody, "sessionId">) {
-    const answer = await chat.send({ ...body, offsetMs: kind === "replay" ? Math.round(getOffsetMs()) : undefined });
-    if (!session.me.consented) {
-      void clock.refresh();
+    try {
+      const answer = await chat.send({ ...body, offsetMs: kind === "replay" ? Math.round(getOffsetMs()) : undefined });
+      if (!session.me.consented) {
+        void clock.refresh();
+      }
+      return answer;
+    } catch (error) {
+      onWriteRefused(error);
+      throw error;
     }
-    return answer;
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -847,6 +887,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
 
   const timeLabel = saoPauloTime(session.session.scheduledAt);
   const composerPhase = phase === "replay" ? "replay" : phase;
+  // Silenciado no chat (R5): o campo do painel, o da gaveta, o do vertical e o das Perguntas dao lugar a frase com a hora
+  // de Sao Paulo (ou "até o fim desta live"); reagir e responder enquete continuam.
+  const composerNotice = readOnly ? null : mutedPhrase(ban, nowMs);
   const headerPhase = phase === "replay" ? "live" : phase;
   // Com o painel fechado o palco cresce para ocupar a coluna (abaixo de lg; no computador ele ja ocupa).
   const skeleton = roomSkeleton(design, { cinema: false, panelShown, stageGrows: !panelShown });
@@ -887,6 +930,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       sessionId={sessionId}
       state={stageState}
       title={session.webinar.title}
+      unavailableText={blockedScreen ? (liveScreenPhrase(blockedScreen, { hasReplay: false })?.title ?? null) : null}
     />
   );
 
@@ -916,6 +960,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         error={chat.error}
         look={vertical ? "classic" : "comment"}
         messages={translation.messages}
+        notice={composerNotice}
         nowMs={nowMs}
         onRemoveMine={chat.removeMine}
         onRemoveOpenChange={setRemoveOpen}
@@ -944,7 +989,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         consented={session.me.consented}
         enabled={!readOnly}
         getOffsetMs={getOffsetMs}
+        notice={composerNotice}
         onConsented={() => void clock.refresh()}
+        onRefused={onWriteRefused}
         readOnly={readOnly || phase === "ended"}
         sessionId={sessionId}
         webinarId={webinarId}
@@ -1088,6 +1135,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                     consented={session.me.consented}
                     drawerId={drawerId}
                     drawerOpen={drawerVisible}
+                    notice={composerNotice}
                     nowMs={nowMs}
                     onOpenDrawer={() => openDrawer("drawer")}
                     onReact={reactions.react}
