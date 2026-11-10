@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
+import { licenseCheckInJob } from "./license-check-in-job";
 import { webinarOfferConversionsJob } from "./webinar-offer-conversions-job";
 import { webinarRecordingsJob } from "./webinar-recordings-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
@@ -60,6 +61,11 @@ import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-jo
 // - `webinar-offer-conversions` (fase 4b: liga as vendas do webhook aos cliques da Oferta em ate 7 dias, M7, pela RPC
 //   webinar_offer_conversions, em lote; src/server/jobs/webinar-offer-conversions-job.ts; docs/30 §4.2). Nunca cria
 //   venda nem acesso. Sem trabalho, uma chamada;
+// - `licenca-conferencia` (a licenca desta Instalacao, docs/32 §11.3; src/server/jobs/license-check-in-job.ts). No
+//   modo "off" (a nossa escola hoje, a dev, a Vercel e os testes) nao faz nada nem le o banco. No "enforce": uma
+//   leitura e uma gravacao em license_state por minuto (a ultima hora vista) e a conferencia com o Emissor uma vez
+//   por dia, ou de hora em hora quando falha, com tempo limite de 10 s. Fica no fim, antes da limpeza: nao atrasa os
+//   envios, e a rodada que ficar sem tempo so atrasa a ultima hora vista, o que nunca limita ninguem;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
@@ -81,4 +87,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, communicationMediaJob];

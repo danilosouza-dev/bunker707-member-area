@@ -1802,6 +1802,35 @@ Fase 4 dos webinários (`docs/30` §4.1 a §4.7, decisões D43 a D59): os painé
 
 Cada migração traz no cabeçalho as consultas de conferência (colunas, tabelas, funções e `has_function_privilege('authenticated', …)` falso), repetidas em `docs/21` §9.10.
 
+## Produto licenciado
+
+### license_state (migracao `202611100001`, 10/11/2026)
+
+Produto em `docs/32` §11.3 e §16. O que a Instalacao sabe sobre a propria licenca, numa linha so. Arquivo novo (as `202606150001` ... `202611010001` nao mudam; a guarda `tests/licenca-guardada.guard.test.mjs` confere o texto e o hash das antigas). Uma secao aditiva e idempotente, pelo MCP: sem `drop`, `delete`, politica nem funcao nova; o unico gatilho usa `public.set_updated_at()`, dentro de `do $$ ... if not exists`. Regras de gravacao em `src/server/licensing/store.ts`; adaptador em `store-db.ts`.
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | smallint | chave, sempre 1 (check `license_state_single_row`) |
+| `token` | text | a licenca assinada mais recente aceita (texto `BKL1`, ate 16.384 caracteres); conferida a cada leitura, nunca confiada pelo banco |
+| `ever_activated` | boolean | ja teve licenca valida: sem licenca legivel depois disso, e "licenca ilegivel", nunca "nao ativada" |
+| `unreadable_since` | timestamptz | primeira rodada do tick em que a licenca guardada nao conferiu; apagada quando volta a conferir |
+| `last_seen_at` | timestamptz | a ultima hora vista: so anda pela tarefa do tick, um minuto por rodada; realinhada com a hora do Emissor na conferencia boa; nunca copiada do relogio do servidor |
+| `last_check_in_emissor_at`, `last_check_in_local_at` | timestamptz | a ultima conferencia boa: a hora assinada pelo Emissor e o relogio do servidor naquele momento, as duas ou nenhuma (check `license_state_last_check_in_pair`) |
+| `host_mismatch_since` | timestamptz | primeira rodada em que o endereco configurado (`NEXT_PUBLIC_SITE_URL`) divergiu do da licenca; apagada quando volta a bater |
+| `newest_issued_at` | timestamptz | a emissao da licenca mais nova ja aceita: so sobe; licenca mais antiga que ela nao vale |
+| `installation_id` | text | o identificador da Instalacao no Emissor (1 a 64 caracteres) |
+| `installation_secret` | text | o segredo da Instalacao (1 a 512); so o servidor le; nunca vai para log, tela ou resposta |
+| `check_in_sequence` | text | o numero da ultima conferencia, apresentado na seguinte (1 a 128) |
+| `check_in_attempted_at` | timestamptz | quando a ultima tentativa de conferencia comecou (relogio do servidor) |
+| `check_in_result` | text | `ok`, `em_andamento` (reservada por uma rodada do tick) ou o codigo da falha (`^[a-z_]{1,40}$`) |
+| `check_in_requested_at` | timestamptz | conferencia pedida para ja (licenca guardada que nao confere; depois, o Verificar agora); apagada pela tentativa que a atende |
+| `version` | integer | versao da linha: toda gravacao do app confere a lida e soma 1 (`>= 0`) |
+| `created_at`, `updated_at` | timestamptz | `updated_at` pelo gatilho `set_license_state_updated_at` |
+
+RLS ligado e **sem politica**; `revoke all` de `anon`/`authenticated`; `grant select, insert, update, delete` so ao `service_role`. Nenhum check proibe data invalida (o `infinity` do Postgres): o app a le como data invalida e nunca libera nada com ela. No modo `off` (a nossa escola, a `dev`, a Vercel e os testes) o app nunca le nem grava esta tabela, e a linha nao existe. Sem dado de aluno; o nome do titular vai dentro da licenca assinada. Teste com banco: `tests/integration/licenca-guardada.test.mjs`.
+
+**Deploy**: a migracao sozinha nao muda o app de antes, e o app novo sem ela tambem nao (modo `off`). No produto vendido (modo `enforce`), o instalador aplica todas as migracoes antes de subir.
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

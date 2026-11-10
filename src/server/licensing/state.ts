@@ -2,7 +2,7 @@
 //
 // Junta as tres pecas puras: a conferencia da licenca guardada (artifact.ts), a hora confiavel e a avaliacao
 // (evaluate.ts). Recebe o retrato do que a Instalacao guarda; ler e gravar esse retrato e trabalho do store
-// (tabela license_state, numa peca seguinte). Sem banco e sem "server-only": os testes carregam direto.
+// (store.ts, tabela license_state). Sem banco e sem "server-only": os testes carregam direto.
 
 import { verifyLicenseToken, type LicenseVerificationError } from "./artifact";
 import type { LicensingMode } from "./build-config";
@@ -52,6 +52,31 @@ export type LicenseState =
       verificationError: LicenseVerificationError | "licenca_antiga" | null;
     };
 
+export type LicenseTokenCheck =
+  | { ok: true; license: LicensePayload }
+  | { ok: false; error: LicenseVerificationError | "licenca_antiga" };
+
+/**
+ * Uma licenca so vale se a assinatura confere e se nao e mais antiga que a mais nova ja aceita (anti-volta,
+ * contrato do store). Data invalida guardada como a mais nova nunca libera: nenhuma licenca vale ate o banco ser
+ * corrigido. A mesma regra serve a licenca guardada (computeLicenseState) e a que chega do Emissor (store.ts).
+ */
+export function checkLicenseToken(token: string, roots: readonly TrustedRoot[], newestIssuedAt: Date | null): LicenseTokenCheck {
+  const verification = verifyLicenseToken(token, roots);
+
+  if (!verification.ok) {
+    return { ok: false, error: verification.error };
+  }
+
+  const newestMs = newestIssuedAt instanceof Date ? newestIssuedAt.getTime() : null;
+
+  if (newestMs !== null && (!Number.isFinite(newestMs) || Date.parse(verification.license.issuedAt) < newestMs)) {
+    return { ok: false, error: "licenca_antiga" };
+  }
+
+  return { ok: true, license: verification.license };
+}
+
 export type ComputeLicenseStateInput = {
   mode: LicensingMode;
   roots: readonly TrustedRoot[];
@@ -77,15 +102,12 @@ export function computeLicenseState(input: ComputeLicenseStateInput): LicenseSta
   let verificationError: LicenseVerificationError | "licenca_antiga" | null = null;
 
   if (snapshot.token) {
-    const verification = verifyLicenseToken(snapshot.token, input.roots);
-    const newestMs = snapshot.newestIssuedAt instanceof Date ? snapshot.newestIssuedAt.getTime() : null;
+    const checked = checkLicenseToken(snapshot.token, input.roots, snapshot.newestIssuedAt);
 
-    if (!verification.ok) {
-      verificationError = verification.error;
-    } else if (newestMs !== null && (!Number.isFinite(newestMs) || Date.parse(verification.license.issuedAt) < newestMs)) {
-      verificationError = "licenca_antiga";
+    if (checked.ok) {
+      license = checked.license;
     } else {
-      license = verification.license;
+      verificationError = checked.error;
     }
   }
 
