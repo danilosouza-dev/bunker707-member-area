@@ -58,7 +58,8 @@ import {
   undoSessionBan,
   unbanStudent
 } from "@/server/webinars/live-actions";
-import { LIVE_CONSOLE_COPY, desiredLobby, handRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { LIVE_CONSOLE_COPY, banLabels, desiredLobby, handRows, liveControlsFor, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { NO_BAN } from "@/server/webinars/live-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
 import {
   answerQuestion,
@@ -106,7 +107,7 @@ import { ConsoleTopBar } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
 import { LiveHands } from "./live-hands";
-import { LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
+import { LiveBarredList, LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
 import { useConsoleLeaveGuard } from "./use-console-leave-guard";
@@ -150,7 +151,12 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // o que esta na tela com os numeros, os prontos e os formularios do banner e do QR Code (saveScreenItem, depois
 // showScreenItem no Mostrar agora; uploadScreenImage; showScreenItem, hideScreenItem e archiveScreenItem), com os avisos
 // "Na tela dos alunos em até 5 s.", "Saiu da tela.", "Salvo nos prontos." e "Excluído dos prontos."; o contador da
-// entrada (consoleScreenCount) e, no palco da live, a pilula "Na tela: Banner · QR Code" (screenStageKinds).
+// entrada (consoleScreenCount) e, no palco da live, a pilula "Na tela: Banner · QR Code" (screenStageKinds). A
+// moderacao por pessoa na Live gravada (R5, §6.2): o ⋯ de cada mensagem da turma com os mesmos itens da live sem os do
+// video (recordedPersonMenu: Silenciar 5/15/60 min e ate o fim, Remover da sala e Banir, desligado sem messaging.publish
+// com a frase), os rotulos do autor barrado na mensagem e o bloco "Removidos, silenciados e banidos" do retrato
+// (snapshot.barred) embaixo dos seletores do Chat, com os Desfazer; as acoes sao as mesmas da live (onPersonAction, sem
+// o comando ao iframe: la nao ha sala).
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -214,6 +220,10 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, offsetMs) : []), [snapshot, offsetMs]);
   const live = session?.kind === "live" ? (snapshot?.live ?? null) : null;
   const livePeople = useMemo(() => new Map((live?.people ?? []).map((person) => [person.userId, person])), [live]);
+  // A Live gravada: os barrados do retrato e os itens por pessoa sem sala (silenciar, remover e banir; nada de video).
+  const recorded = session?.kind === "simulated";
+  const barredPeople = useMemo(() => new Map((recorded ? (snapshot?.barred ?? []) : []).map((person) => [person.userId, person])), [recorded, snapshot]);
+  const recordedControls = useMemo(() => ({ ...liveControlsFor({ canPublish: permissions.canPublish, moderator: true, role: "team" }), cameras: false, stage: false }), [permissions.canPublish]);
 
   const markAnchor = useCallback(async () => {
     if (!sessionId) {
@@ -721,6 +731,34 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     );
   }
 
+  /**
+   * A pessoa de uma mensagem da turma na Live gravada: a do retrato quando esta barrada (com o estado, para os Desfazer
+   * do ⋯), senao pelo nome da mensagem e sem banimento. Nada para quem nao e aluno (o servidor tambem recusa a equipe).
+   */
+  function recordedPersonOf(message: ConsoleMessage): LiveConsolePerson | null {
+    if (!message.authorUserId || message.source !== "audience" || message.role !== "student") {
+      return null;
+    }
+    return barredPeople.get(message.authorUserId) ?? { ban: NO_BAN, displayName: message.displayName, joinedAt: null, participantId: null, staff: false, userId: message.authorUserId };
+  }
+
+  // Os itens da pessoa no ⋯ de uma mensagem da turma na Live gravada (sem participante: so as acoes do servidor).
+  function recordedPersonMenu(message: ConsoleMessage) {
+    const person = recordedPersonOf(message);
+
+    if (!person) {
+      return null;
+    }
+
+    return <LivePersonMenuItems canPublish={permissions.canPublish} controls={recordedControls} joined={false} onAction={(action) => onPersonAction(person, null, action)} participantId={null} person={person} />;
+  }
+
+  /** Os rotulos do autor barrado (na live, pela lista da sala; na gravada, pelo retrato). */
+  function personBadgesOf(message: ConsoleMessage): readonly string[] {
+    const person = message.authorUserId ? (live ? livePeople.get(message.authorUserId) : barredPeople.get(message.authorUserId)) : undefined;
+    return person && !person.staff ? banLabels(person.ban) : [];
+  }
+
   const sessionDisabledTitle = room.controls.sessionEnabled ? undefined : LIVE_CONSOLE_COPY.soQuemPublica;
   const topActions =
     session && phase
@@ -1011,6 +1049,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 chat: (
                   <ConsoleChat
                     askedMessageIds={snapshot.askedMessageIds}
+                    barred={
+                      recorded && (snapshot.barred ?? []).length > 0 ? (
+                        <LiveBarredList busyKey={busyKey} canPublish={permissions.canPublish} onAction={onPersonAction} people={snapshot.barred ?? []} />
+                      ) : null
+                    }
                     busyKey={busyKey}
                     canAct={canAct}
                     currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
@@ -1042,7 +1085,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                         }
                       })
                     }
-                    personMenu={live ? chatPersonMenu : null}
+                    personBadges={live || recorded ? personBadgesOf : null}
+                    personMenu={live ? chatPersonMenu : recorded ? recordedPersonMenu : null}
                     pinned={snapshot.pinned ?? null}
                     pinnedMessageId={snapshot.pinnedMessageId}
                     session={session}

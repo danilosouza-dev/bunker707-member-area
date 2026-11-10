@@ -422,6 +422,8 @@ export const WEBINAR_COPY = {
       presenterOnly: "Só o apresentador e os co-apresentadores mudam o microfone da turma.",
       recorderNotReleasable: "O gravador não pode ser desligado agora: espere o envio do vídeo terminar.",
       recordingMissing: "Essa gravação não existe mais.",
+      /** Silenciar, remover e banir por pessoa no Replay (a Na tela, R5: vale na Live ao vivo e na gravada). */
+      replay: "No Replay ninguém é silenciado, removido nem banido.",
       sessionMissing: "Essa sessão não existe mais.",
       staffTarget: "Ninguém da equipe é removido, silenciado nem banido.",
       videoTaken: "Esse vídeo já está ligado a outra gravação."

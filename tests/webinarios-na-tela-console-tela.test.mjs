@@ -22,7 +22,10 @@ import "./support/resolve-extensionless-ts.mjs";
 //   todos os rotulos (os nove pontos como radios, o Grande desligado no meio sem fechar, os avisos fixos, o codigo do QR
 //   Code com o dominio e o aviso de codigo denso, os links prontos); o estado puro do formulario; a Previa no
 //   Computador e no Celular; o contador da entrada no trilho; a entrada no console da gravada (nunca no Replay) e a
-//   pilula "Na tela: Banner · QR Code" no palco da Live ao vivo, sem os cartoes.
+//   pilula "Na tela: Banner · QR Code" no palco da Live ao vivo, sem os cartoes;
+// - R5, a moderacao por pessoa na Live gravada: o ⋯ da mensagem de aluno com os itens da live sem os do video (Banir
+//   desligado com a frase sem messaging.publish), os Desfazer e os rotulos da barrada, o bloco "Removidos, silenciados e
+//   banidos" embaixo dos seletores do Chat, a equipe sem itens e o Replay sem nada.
 //
 // Os .tsx do app sao transpilados aqui pelo TypeScript (so JSX -> JS). next/navigation vira stub; o Dialog e o
 // DropdownMenu viram versoes sem portal; as Server Actions viram funcoes falsas (como tests/webinarios-console-tela).
@@ -511,6 +514,7 @@ const { ConsoleScreenForm, ScreenPreview } = screenForm;
 
 const consoleCopy = naTela.console;
 const formCopy = naTela.formulario;
+const LIVE_CONSOLE_COPY_DESFAZER = WEBINAR_COPY.consoleAoVivo.desfazer;
 const ORIGEM = "https://projeto.supabase.co";
 const IMAGEM = "webinars/screen/0123456789abcdef01234567.webp";
 
@@ -929,4 +933,92 @@ test("o palco do console da Live ao vivo nao desenha os cartoes: so a pilula neu
   assert.doesNotMatch(palco, /data-screen-preview|Garanta sua vaga/, "os cartoes nao sao desenhados no palco do console");
   assert.equal(textOf(block(block(render([exibicaoDe(qrPronto), enqueteFixada]), 'data-console-slot="stage"', "div"), 'data-room-badge="screen"', "span")), "Na tela: QR Code");
   assert.doesNotMatch(render([enqueteFixada]), /data-room-badge="screen"/, "a enquete fixada nao e cartao");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * R5: a moderacao por pessoa no console da Live gravada
+ * ---------------------------------------------------------------------------------------------- */
+
+test("Live gravada: o ⋯ da mensagem de aluno com Silenciar 5/15/60 min, até o fim, Remover da sala e Banir (sem os itens do video); a barrada com os Desfazer e os rotulos; o bloco Removidos, silenciados e banidos embaixo dos seletores; a equipe sem itens; o Replay sem nada", async () => {
+  // 23:15 UTC: 20:15 em Sao Paulo, a hora que a mesa mostra.
+  const ateHora = new Date(NOW + 10 * MIN).toISOString();
+  const barrada = { ban: { banned: false, kicked: true, muted: true, mutedUntil: ateHora }, displayName: "Bia C.", joinedAt: null, participantId: null, staff: false, userId: "u-bia" };
+  const mensagens = [
+    message({ authorUserId: "u-ana", body: "Oi, tudo bem?", displayName: "Ana M.", id: "m-ana" }),
+    message({ authorUserId: "u-bia", body: "Comprei!", displayName: "Bia C.", id: "m-bia" }),
+    message({ authorUserId: "u-host", body: "Bem-vindos", displayName: "Produtor T.", id: "m-equipe", role: "host", source: "team" })
+  ];
+  const snapshotDa = (extra = {}) => ({
+    askedMessageIds: [],
+    barred: [barrada],
+    live: null,
+    messages: mensagens,
+    pinned: null,
+    pinnedMessageId: null,
+    pinnedPollId: null,
+    polls: { launched: [], templates: [] },
+    presentNow: 3,
+    questions: [],
+    scriptFired: {},
+    scriptItems: [],
+    screen: { active: [], items: [], pending: false, stats: {} },
+    serverTime: new Date(NOW).toISOString(),
+    session: session(),
+    ...extra
+  });
+  const webinar = { durationMinutes: 60, hostUserId: "u-host", id: WEBINAR, kind: "simulated", recordingDurationSeconds: 3600, slug: "aula-de-ia", title: "Aula de IA" };
+  const render = (snapshot, permissions = { canPublish: true, canWrite: true }) =>
+    html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions: [snapshot.session], snapshot, webinar }, permissions, serverNow: NOW }));
+  const { WEBINAR_ADMIN_COPY } = await import("../src/server/webinars/editor-model.ts");
+  // Os itens do ⋯ que sao da pessoa (o "Aprovar para as próximas turmas" e da mensagem e vem antes, separado).
+  const itensDo = (markup, id) => {
+    const item = block(markup, `data-room-message="${id}"`, "li");
+    return item.includes('role="menu"')
+      ? Array.from(block(item, 'role="menu"', "div").matchAll(/role="menuitem"[^>]*>([^<]+)</g))
+          .map((match) => match[1])
+          .filter((label) => label !== WEBINAR_ADMIN_COPY.console.chat.promote)
+      : [];
+  };
+  const vivo = WEBINAR_COPY.consoleAoVivo;
+  const silenciar = [vivo.silenciarNoChat[5], vivo.silenciarNoChat[15], vivo.silenciarNoChat[60], vivo.silenciarNoChat.fim];
+
+  const markup = render(snapshotDa());
+  assert.deepEqual(itensDo(markup, "m-ana"), [...silenciar, vivo.removerDaSala, vivo.banir], "os mesmos itens da live, sem Destacar, palco nem camera");
+  assert.doesNotMatch(block(markup, 'data-room-message="m-ana"', "li"), new RegExp(`${vivo.destacar}|${vivo.convidarPalco}|${vivo.fecharCamera}`));
+  const daBarrada = itensDo(markup, "m-bia");
+  assert.equal(daBarrada[0], `${LIVE_CONSOLE_COPY_DESFAZER}: Sem escrever até 20:15`, "o silencio da barrada vira Desfazer");
+  assert.ok(daBarrada.includes(`${LIVE_CONSOLE_COPY_DESFAZER}: ${vivo.removido}`), "o remover tambem");
+  assert.deepEqual(itensDo(markup, "m-equipe").filter((item) => silenciar.includes(item) || item === vivo.banir), [], "a equipe nunca e alvo");
+  assert.match(block(block(markup, 'data-room-message="m-ana"', "li"), "data-stub-menu", "div"), new RegExp(`aria-label="${WEBINAR_COPY.consoleV2.chat.maisAcoes("Ana M.")}"`));
+
+  // Os rotulos da barrada na linha de cima da mensagem dela; a outra sem rotulo.
+  assert.deepEqual(
+    Array.from(block(markup, 'data-room-message="m-bia"', "li").matchAll(/data-console-person-badge="">([^<]+)</g)).map((match) => match[1]),
+    [vivo.removido, "Sem escrever até 20:15"]
+  );
+  assert.doesNotMatch(block(markup, 'data-room-message="m-ana"', "li"), /data-console-person-badge/);
+
+  // O bloco embaixo dos seletores e antes da lista, com os Desfazer que ja existem.
+  const bloco = block(markup, 'data-console-chat-barred=""', "div");
+  assert.ok(markup.indexOf('data-console-chat-header=""') < markup.indexOf('data-console-chat-barred=""'), "embaixo dos seletores");
+  assert.ok(markup.indexOf('data-console-chat-barred=""') < markup.indexOf('data-console-chat=""'), "antes da lista");
+  assert.match(textOf(bloco), new RegExp(`^${vivo.removidosESilenciados} Bia C\\. ${LIVE_CONSOLE_COPY_DESFAZER}: Sem escrever até 20:15 ${LIVE_CONSOLE_COPY_DESFAZER}: ${vivo.removido}$`));
+  assert.match(bloco, /aria-label="Desfazer: Removido da sala \(Bia C\.\)"/);
+
+  // Sem ninguem barrado, sem o bloco; o ⋯ continua.
+  const semBarrados = render(snapshotDa({ barred: [] }));
+  assert.doesNotMatch(semBarrados, /data-console-chat-barred|data-live-barred/);
+  assert.deepEqual(itensDo(semBarrados, "m-bia"), [...silenciar, vivo.removerDaSala, vivo.banir]);
+
+  // Sem messaging.publish: Banir desligado, com a frase.
+  const semPublicar = render(snapshotDa({ barred: [] }), { canPublish: false, canWrite: true });
+  const menuAna = block(block(semPublicar, 'data-room-message="m-ana"', "li"), 'role="menu"', "div");
+  assert.match(menuAna, new RegExp(`aria-disabled="true"[^>]*>${vivo.banir}<`));
+  assert.match(textOf(menuAna), new RegExp(`${vivo.banir} ${vivo.soQuemPublica.replace(/\./g, "\\.")}$`));
+  assert.equal(vivo.soQuemPublica, "Só quem publica webinários pode fazer isso.");
+
+  // No Replay nada muda: nenhum item da pessoa, nenhum bloco, nenhum rotulo.
+  const replay = render(snapshotDa({ session: session({ kind: "replay", status: "live" }) }));
+  assert.ok(!itensDo(replay, "m-ana").some((item) => silenciar.includes(item) || item === vivo.banir || item === vivo.removerDaSala));
+  assert.doesNotMatch(replay, /data-console-chat-barred|data-console-person-badge/);
 });

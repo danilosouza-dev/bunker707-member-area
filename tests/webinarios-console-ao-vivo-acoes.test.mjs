@@ -14,7 +14,9 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 // automatico (o motivo, nada muda) e com o duble (preparing e jibri-up anotado); desligar o gravador (recusa gravando,
 // aceita uploaded); silenciar 5/15/60/fim com until_at; remover; banir e desfazer so com publish; nunca a equipe;
 // Enviar gravacao liga o video e cria o replay da sessao encerrada; Alinhar chat grava anchor_offset_ms e audita o antes
-// e o depois sem mexer nas mensagens; toda acao grava a auditoria so com ids e contagens.
+// e o depois sem mexer nas mensagens; toda acao grava a auditoria so com ids e contagens. Desde a Na tela (R5,
+// 10/11/2026): silenciar, remover, desfazer e banir valem tambem na Live gravada (sem mudar o carimbo da sessao) e sao
+// recusados no Replay; a equipe nunca e alvo; as outras acoes da sala continuam so da Live ao vivo.
 
 process.env.NEXT_PUBLIC_SITE_URL = "https://membros.exemplo.test";
 
@@ -752,7 +754,8 @@ test("Silenciar no chat 5 / 15 / 60 min com until_at e até o fim sem; o motivo 
 
   falha(await live.muteInChat({ minutes: 7, sessionId: S_NO_AR, userId: ALUNA }), 400);
   falha(await live.muteInChat({ minutes: 5, sessionId: S_ENCERRADA, userId: ALUNA }), 409);
-  falha(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: ALUNA }), 409);
+  // Desde a Na tela (R5), silenciar vale tambem na Live gravada (o teste da moderacao na gravada, mais abaixo).
+  assert.equal(ok(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: ALUNA })).sessionId, S_GRAVADA);
 });
 
 test("Remover da sala: kicked até o fim (sem until_at, mesmo se mandarem minutos); nunca a equipe (admin, Apresentador, co-apresentador)", async () => {
@@ -773,6 +776,66 @@ test("Remover da sala: kicked até o fim (sem until_at, mesmo se mandarem minuto
   }
   assert.equal(db.tables.webinar_session_bans.length, 1);
   assert.equal(db.tables.webinar_user_bans.length, 0);
+});
+
+test("a moderacao por pessoa na Live gravada (a Na tela, R5): silenciar, remover, desfazer e banir aceitos na simulated, com a auditoria; no Replay 409 e nada gravado; a equipe nunca e alvo; banir so com messaging.publish", async () => {
+  const S_REPLAY = "bbbbbbbb-2222-4222-8222-888888888888";
+  const base = cenario();
+  base.webinar_sessions.push(sessao({ id: S_REPLAY, kind: "replay", status: "live" }));
+  const db = usar(bancoEmMemoria(base, RPC));
+  const linhas = () => db.tables.webinar_session_bans.filter((row) => row.session_id === S_GRAVADA).map((row) => [row.user_id, row.kind, row.until_at === null ? "fim" : "prazo"]);
+
+  assert.deepEqual(ok(await live.muteInChat({ minutes: 15, sessionId: S_GRAVADA, userId: ALUNA })).kind, "muted");
+  ok(await live.muteInChat({ minutes: null, sessionId: S_GRAVADA, userId: ALUNO }));
+  assert.deepEqual(ok(await live.kickFromSession({ sessionId: S_GRAVADA, userId: ALUNO })), { kind: "kicked", sessionId: S_GRAVADA, untilAt: null, userId: ALUNO });
+  assert.deepEqual(linhas(), [
+    [ALUNA, "muted", "prazo"],
+    [ALUNO, "muted", "fim"],
+    [ALUNO, "kicked", "fim"]
+  ]);
+  assert.deepEqual(audits(db, "webinar.kicked").map((row) => row.metadata.session_id), [S_GRAVADA]);
+  assert.equal(audits(db, "webinar.chat_muted").length, 2);
+  assert.equal(linha(db, S_GRAVADA).updated_at, base.webinar_sessions.find((row) => row.id === S_GRAVADA).updated_at, "silenciar e remover nao mudam o carimbo da sessao");
+
+  assert.equal(ok(await live.undoSessionBan({ kind: "kicked", sessionId: S_GRAVADA, userId: ALUNO })).existed, true);
+  assert.equal(ok(await live.undoSessionBan({ kind: "muted", sessionId: S_GRAVADA, userId: ALUNO })).existed, true);
+  assert.deepEqual(linhas(), [[ALUNA, "muted", "prazo"]]);
+
+  assert.deepEqual(ok(await live.banStudent({ reason: "spam", sessionId: S_GRAVADA, userId: ALUNO })), { sessionId: S_GRAVADA, userId: ALUNO });
+  assert.deepEqual(
+    db.tables.webinar_user_bans.map((row) => [row.user_id, row.session_id]),
+    [[ALUNO, S_GRAVADA]]
+  );
+  assert.deepEqual(linhas().at(-1), [ALUNO, "kicked", "fim"], "banido fica removido desta sessao");
+
+  // A equipe (admin, Apresentador, co-apresentador) nunca e alvo, na gravada tambem.
+  for (const alvo of [HOST, EQUIPE, COAPRESENTADOR]) {
+    assert.equal(falha(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: alvo }), 409).error, LIVE_ACTION_MESSAGES.staffTarget);
+    falha(await live.kickFromSession({ sessionId: S_GRAVADA, userId: alvo }), 409);
+    falha(await live.banStudent({ sessionId: S_GRAVADA, userId: alvo }), 409);
+  }
+
+  // No Replay nada muda: 409 com a frase, nenhuma linha.
+  const antes = [db.tables.webinar_session_bans.length, db.tables.webinar_user_bans.length];
+  for (const chamada of [
+    () => live.muteInChat({ minutes: 5, sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.kickFromSession({ sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.undoSessionBan({ kind: "muted", sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.banStudent({ sessionId: S_REPLAY, userId: ALUNA })
+  ]) {
+    assert.equal(falha(await chamada(), 409).error, LIVE_ACTION_MESSAGES.replay);
+  }
+  assert.deepEqual([db.tables.webinar_session_bans.length, db.tables.webinar_user_bans.length], antes);
+  assert.equal(LIVE_ACTION_MESSAGES.replay, "No Replay ninguém é silenciado, removido nem banido.");
+
+  // Banir pede messaging.publish tambem na gravada; silenciar e remover, messaging.write.
+  estado.negar = ["messaging.publish"];
+  falha(await live.banStudent({ sessionId: S_GRAVADA, userId: ALUNA }), 403);
+  ok(await live.kickFromSession({ sessionId: S_GRAVADA, userId: ALUNA }));
+  estado.negar = false;
+
+  // As outras acoes da sala continuam so da Live ao vivo.
+  falha(await live.setRoomLock({ locked: true, sessionId: S_GRAVADA }), 409);
 });
 
 test("Banir: banido de todos os webinários e removido desta sessão; Desfazer banimento apaga só o banimento; só com messaging.publish", async () => {

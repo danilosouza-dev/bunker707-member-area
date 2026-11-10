@@ -31,7 +31,10 @@ import {
 // aceite, grava revoked); o sinal de presenca (balde do servidor, webinar_joined no primeiro, samples no mesmo
 // balde, webinar_left no leave, o acesso em cache); reacoes 1/s e 20/min e as contagens; perguntas 2/min, a lista
 // com mine/voted e a dispensada so para o autor, o voto que alterna; enquetes (uma resposta, 409 na segunda,
-// encerrada 409, opcao invalida 400, resultado so compartilhado); e a resposta da sessao com os campos da sala.
+// encerrada 409, opcao invalida 400, resultado so compartilhado); e a resposta da sessao com os campos da sala. A
+// moderacao por pessoa na Live gravada (a Na tela, R5): silenciado 409 muted no chat, na pergunta e no fio (reage e
+// responde enquete), removido 409 banned em tudo e a sessao com join kicked e sem o video, o desfazer devolve a sala, e
+// roomJoinFor com o kicked na gravada.
 
 const sessao = (globalThis.__salaRotasSessao ??= { user: null });
 
@@ -86,7 +89,7 @@ const { resetRoomLimits, takeReplyBurst } = await import("../src/server/webinars
 const { CHAT_CONSENT_VERSION } = await import("../src/server/webinars/model.ts");
 const { CHAT_MESSAGES } = await import("../src/server/webinars/chat-schemas.ts");
 const { clearAuthorPhotoCache } = await import("../src/server/webinars/author-photos.ts");
-const { clearSharedPollCounts } = await import("../src/server/webinars/room-queries.ts");
+const { clearSharedPollCounts, roomJoinFor } = await import("../src/server/webinars/room-queries.ts");
 
 let proximoAluno = 100;
 
@@ -1119,6 +1122,89 @@ test("o fio na live: silenciado no chat, removido da sala e banido de todos os w
   assert.equal(naGravada.status, 409);
   assert.equal(naGravada.body.reason, "banned");
   assert.equal((gravada.tables.webinar_question_replies ?? []).length, 0);
+});
+
+test("roomJoinFor na Live gravada: o removido desta sessao fica de fora (kicked) antes da vaga e do relogio; o banido de todos (banned) vence; o silenciado entra; sem banimento, o relogio decide", () => {
+  const T0 = Date.parse("2026-11-05T23:00:00.000Z");
+  const gravada = { kind: "simulated", lateJoinMinutes: null, recordingAnchorAt: null, scheduledAt: new Date(T0).toISOString(), startedAt: null, status: "scheduled" };
+  const contextoDa = (session) => ({ durationMs: 60 * MIN, session });
+  const livre = { banned: false, kicked: false, muted: false, mutedUntil: null };
+  const agora = T0 + 5 * MIN;
+
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: livre }), { ok: true });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, muted: true } }), { ok: true }, "silenciado continua assistindo");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, kicked: true } }), { ok: false, reason: "kicked" });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, kicked: true }, seatMissing: true }), { ok: false, reason: "kicked" }, "removido antes da vaga");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), T0 + 2 * 60 * MIN, { ban: { ...livre, kicked: true } }), { ok: false, reason: "kicked" }, "e antes do relogio");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, banned: true, kicked: true } }), { ok: false, reason: "banned" });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), T0 + 2 * 60 * MIN, { ban: livre }), { ok: false, reason: "ended" });
+  // No Replay o removido nao existe (so o banido de todos).
+  assert.deepEqual(roomJoinFor(contextoDa({ ...gravada, kind: "replay" }), agora, { ban: { ...livre, kicked: true } }), { ok: true });
+});
+
+test("a moderacao por pessoa na Live gravada (a Na tela, R5): silenciado nao manda mensagem, pergunta nem resposta no fio (409 muted, a frase com a hora ou ate o fim), mas reage e responde enquete; removido nao escreve nada (409 banned) e a sessao diz kicked sem o video; desfeito, volta; o removido da live de origem continua livre", async () => {
+  const ban = (userId, kind, extra = {}) => ({ by_user_id: null, created_at: iso(Date.now()), kind, reason: null, session_id: SESSION, until_at: null, user_id: userId, ...extra });
+  const POLL = "cccccccc-bbbb-4000-8000-000000000001";
+  const SIM = "cccccccc-bbbb-4000-8000-000000000002";
+  const comEnquete = (db) => {
+    db.tables.webinar_polls.push({ anonymous: false, closed_at: null, created_at: iso(Date.now()), created_by: null, id: POLL, kind: "single", open_offset_ms: 0, opened_at: iso(Date.now()), position: 0, question: "Gostou?", results_shared_at: null, session_id: SESSION, status: "open", template_poll_id: null, updated_at: iso(Date.now()), webinar_id: WEBINAR });
+    db.tables.webinar_poll_options.push({ created_at: iso(Date.now()), id: SIM, label: "Sim", poll_id: POLL, position: 0 });
+  };
+  const pergunta = async () => json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "Tem certificado?", sessionId: SESSION, ...comAceite }), contexto()));
+  const reagir = async () => json(await reactionsRoute.POST(pedido(`${WEBINAR}/reactions`, "POST", { reaction: "clap", sessionId: SESSION }), contexto()));
+  const votar = async () => json(await pollsRoute.POST(pedido(`${WEBINAR}/polls`, "POST", { optionIds: [SIM], pollId: POLL, sessionId: SESSION }), contexto()));
+  const lerSessao = async () => (await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body.data;
+
+  // Silenciada ate o fim: o chat, a pergunta e o fio recusam; a reacao e a enquete passam; a sala continua.
+  const { db: silencio, userId: silenciada } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  comEnquete(silencio);
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted")];
+  const qid = perguntaRespondida(silencio, silenciada);
+  for (const resposta of [await enviar({ body: "oi", ...comAceite }), await pergunta(), await responderNoFio(qid)]) {
+    assert.equal(resposta.status, 409, JSON.stringify(resposta.body));
+    assert.deepEqual([resposta.body.reason, resposta.body.error], ["muted", "Você está sem escrever no chat até o fim desta live."]);
+  }
+  assert.equal((await reagir()).status, 201, "silenciado reage");
+  assert.equal((await votar()).status, 201, "e responde a enquete");
+  const comSilencio = await lerSessao();
+  assert.deepEqual([comSilencio.me.ban.muted, comSilencio.me.ban.mutedUntil, comSilencio.session.join.ok], [true, null, true]);
+  assert.ok(comSilencio.video, "continua assistindo");
+  assert.equal(silencio.tables.webinar_chat_messages.filter((row) => row.session_id === SESSION).length, 0);
+
+  // Silenciada por 15 min: a frase com a hora; vencido o prazo, escreve de novo.
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted", { until_at: iso(Date.now() + 15 * MIN) })];
+  const comHora = await enviar({ body: "oi", ...comAceite });
+  assert.equal(comHora.status, 409);
+  assert.match(comHora.body.error, /^Você está sem escrever no chat até \d{2}:\d{2}\.$/);
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted", { until_at: iso(Date.now() - 1000) })];
+  assert.equal((await enviar({ body: "voltei", ...comAceite })).status, 201, "o silencio venceu");
+
+  // Removida: nada escreve (nem reage nem vota) e a sessao diz kicked, sem o video da Bunny.
+  const { db: fora, userId: removida } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  comEnquete(fora);
+  fora.tables.webinar_session_bans = [ban(removida, "kicked")];
+  for (const resposta of [await enviar({ body: "oi", ...comAceite }), await pergunta(), await reagir(), await votar()]) {
+    assert.equal(resposta.status, 409, JSON.stringify(resposta.body));
+    assert.deepEqual([resposta.body.reason, resposta.body.error], ["banned", "Você foi removido desta live."]);
+  }
+  const semSala = await lerSessao();
+  assert.deepEqual(semSala.session.join, { ok: false, reason: "kicked" });
+  assert.equal(semSala.me.ban.kicked, true);
+  assert.equal(semSala.video, null, "o video sai na proxima conferencia da sala");
+  assert.equal(fora.tables.webinar_chat_messages.length + fora.tables.webinar_reactions.length + fora.tables.webinar_poll_answers.length, 1, "so a linha mestre da escola");
+
+  // Desfeito (a equipe apagou a linha): a sala e a escrita voltam.
+  fora.tables.webinar_session_bans = [];
+  const devolta = await lerSessao();
+  assert.deepEqual(devolta.session.join, { ok: true });
+  assert.ok(devolta.video);
+  assert.equal((await enviar({ body: "voltei", ...comAceite })).status, 201);
+
+  // O removido da live de origem (outra sessao) continua livre nesta gravada.
+  const { db: outra } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  outra.tables.webinar_session_bans = [ban(sessao.user.id, "kicked", { session_id: LIVE_SOURCE })];
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
+  assert.deepEqual((await lerSessao()).session.join, { ok: true });
 });
 
 test("a foto na sala (docs/30 §8.5, D62): so o arquivo enviado pelo Perfil, pela origem do nosso Supabase; um endereco de fora gravado no perfil vira iniciais no chat, na leitura e no proprio campo", async () => {

@@ -62,6 +62,10 @@ import { useConsolePortal } from "./console-shell";
 // sozinha depois de cada envio (e no Cancelar). Acima da lista, fora da rolagem, o bloco "Fixada agora"
 // (console-pinned.tsx) com o Desafixar, lido do retrato pela chave (`pinned`, mesmo fora das 200 da lista). Os enderecos
 // `https://` das mensagens da equipe viram link na lista e no bloco (consoleMessageBody); a de aluno continua texto.
+// A moderacao por pessoa na Live gravada (R5, §6.2): o ⋯ da mensagem da turma leva os itens da pessoa tambem na gravada
+// (`personMenu`, sem os itens do video), a linha de cima de cada mensagem diz se o autor esta removido, silenciado ou
+// banido (`personBadges`, os rotulos de banLabels) e, embaixo dos seletores, o bloco "Removidos, silenciados e banidos"
+// com os Desfazer (`barred`, so quando ha alguem).
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
 const v2 = WEBINAR_COPY.consoleV2.chat;
@@ -87,6 +91,11 @@ const MENU_TRIGGER = cn(
 type ConsoleChatProps = {
   /** As mensagens que ja viraram pergunta (o `askedMessageIds` do retrato): ficam sem o Virar pergunta. */
   askedMessageIds: readonly string[];
+  /**
+   * Na Live gravada: o bloco "Removidos, silenciados e banidos" (LiveBarredList) embaixo dos seletores; nulo sem
+   * ninguem barrado ou fora da gravada (na live ele fica na aba Pessoas).
+   */
+  barred?: ReactNode;
   busyKey: string | null;
   canAct: boolean;
   /** A foto do proprio perfil de quem esta no console (o avatar do campo da equipe); sem ela, o icone da equipe. */
@@ -110,10 +119,13 @@ type ConsoleChatProps = {
   /** O envio da equipe; `pin` e o "Fixar ao enviar" ligado (publica e fixa num passo). Devolve se gravou. */
   onSend: (body: string, pin: boolean) => Promise<boolean>;
   /**
-   * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; nulo fora da Live ao
-   * vivo. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao esta no retrato).
+   * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; na Live ao vivo e, desde
+   * a Na tela (R5), na gravada; nulo no Replay. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao
+   * esta no retrato).
    */
   personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
+  /** Os rotulos do autor barrado ("Removido da sala", "Sem escrever ate 20:15") na linha de cima da mensagem; vazio sem nada. */
+  personBadges?: ((message: ConsoleMessage) => readonly string[]) | null;
   /** A fixada lida pela chave (snapshot.pinned): o bloco Fixada agora, tambem para uma mensagem fora da lista. */
   pinned?: ConsoleMessage | null;
   pinnedMessageId: string | null;
@@ -127,6 +139,7 @@ type ConsoleChatProps = {
 
 export function ConsoleChat({
   askedMessageIds,
+  barred = null,
   busyKey,
   canAct,
   currentUserAvatarUrl = null,
@@ -140,6 +153,7 @@ export function ConsoleChat({
   onModerate,
   onRetranslate = null,
   onSend,
+  personBadges = null,
   personMenu = null,
   pinned = null,
   pinnedMessageId,
@@ -410,6 +424,12 @@ export function ConsoleChat({
         ) : null}
       </div>
 
+      {barred ? (
+        <div className="shrink-0 pb-3 lg:px-4" data-console-chat-barred="">
+          {barred}
+        </div>
+      ) : null}
+
       {pending.length > 0 ? (
         <ol aria-label={copy.pending} className="relative flex max-h-56 min-w-0 shrink-0 flex-col gap-2 overflow-y-auto pb-3 lg:max-h-[35%] lg:px-4" data-console-chat-queue="">
           {pending.map((message) => {
@@ -475,8 +495,10 @@ export function ConsoleChat({
             const master = message.master && session.kind !== "live";
             // Com a correcao aberta, as acoes (por cima do item) cobririam o Cancelar e o Salvar correção.
             const showActions = canAct && editing?.id !== message.id;
+            // O autor removido, silenciado ou banido (a moderacao por pessoa), so nas mensagens da turma.
+            const badges = personBadges && message.source === "audience" && message.authorUserId ? personBadges(message) : [];
             const headline =
-              pinned || master ? (
+              pinned || master || badges.length > 0 ? (
                 <>
                   {pinned ? (
                     <>
@@ -486,6 +508,11 @@ export function ConsoleChat({
                   ) : null}
                   {pinned && master ? <span aria-hidden="true">·</span> : null}
                   {master ? <span>{copy.master}</span> : null}
+                  {badges.map((label) => (
+                    <span className="rounded-full border border-room-warn-border bg-room-warn-bg px-1.5 font-medium text-room-warn-fg" data-console-person-badge="" key={label}>
+                      {label}
+                    </span>
+                  ))}
                 </>
               ) : null;
 

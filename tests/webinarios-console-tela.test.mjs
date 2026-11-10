@@ -382,7 +382,8 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   const pendente = chatItem(chat, "m-pendente");
   assert.match(pendente, /^<li class="[^"]*\bbg-room-warn-bg\b[^"]*" data-console-pending=""/);
   assert.match(pendente, /<p class="[^"]*\btext-room-warn-fg\b[^"]*">Na moderação · Ana M\. · 20:01<\/p>/, "a hora da gravada: a hora marcada mais o offset");
-  assert.deepEqual(Array.from(pendente.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
+  // E o ⋯ com os itens da pessoa (a moderacao por pessoa na Live gravada, a Na tela, R5).
+  assert.deepEqual(Array.from(pendente.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M.", "Mais ações da mensagem de Ana M."]);
   assert.ok(chat.indexOf("data-console-chat-queue") < chat.indexOf('role="log"'), "o card antes da lista");
   assert.ok(chat.indexOf('data-room-message="m-pendente"') < chat.indexOf('role="log"'), "a pendente fora da lista");
 
@@ -394,7 +395,7 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   );
   assert.deepEqual(Array.from(fila.matchAll(/data-console-pending="" data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-pergunta", "m-nova"]);
   assert.match(fila, /data-console-chat-waiting="">2 aguardando</);
-  assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M."]);
+  assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Mais ações da mensagem de Ana M."]);
   assert.match(fila, /<li[^>]*>Nenhuma mensagem ainda\.<\/li>/, "so pendentes: a lista vazia");
 
   // A lista: a caixa que rola e o role=log com o nome Chat; dentro dela a <ol> continua lista (o role=log na propria <ol>
@@ -493,7 +494,7 @@ test("chat (docs/31 V2-15 e §10): as acoes de cada mensagem (Fixar ou Desafixar
   // Cada botao da linha e do card e um ponto de volta do foco (a posicao entre os do item): o ⋯ e o ultimo.
   const marcados = (block) => Array.from(block.matchAll(/<button(?=[^>]*data-console-action="")[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
   assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
-  assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
+  assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M.", "Mais ações da mensagem de Ana M."]);
 
   // Os botoes: circulos de 32 px (o toque ganha a area de 44, after:-inset-1.5). Com o mouse, as acoes ficam escondidas
   // (sem lugar na linha) e aparecem com o mouse, o foco ou o ⋮ aberto, numa pilula por cima do canto de cima a direita do

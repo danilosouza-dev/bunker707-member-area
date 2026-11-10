@@ -1,7 +1,8 @@
 // Leituras da Sala do aluno (docs/30 §1.3, §1.6, §5.1 e §6.6): o contexto de uma sessao (webinario publicado e dentro
 // do acesso, a sessao do proprio webinario, a gravacao e a duracao do video), o que GET .../session devolve a mais na
 // fase 2 (relogio, fase, video da Bunny com o token do servidor, mensagem fixada, enquetes, presentes agora e o
-// aceite do aluno) e na fase 3 (o bloco `live` e os banimentos do aluno; a entrada recusa o removido e o banido), a
+// aceite do aluno) e na fase 3 (o bloco `live` e os banimentos do aluno; a entrada recusa o removido e o banido; desde
+// a Na tela, R5, os banimentos da sessao valem tambem na Live gravada), a
 // janela do chat e as mensagens novas, as perguntas, as enquetes e as reacoes recentes. Tudo pela service role e so
 // o que o aluno pode ver (nunca o nome da sala, o token nem a situacao do gravador alem de LiveRoomInfo); as regras
 // puras ficam em room-model.ts, room-rules.ts e live-model.ts. A "Na tela" (docs/30 §5.1): o estado (screen-queries.ts)
@@ -280,7 +281,8 @@ async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly Chat
 /**
  * Se o aluno entra na sala agora: o banido de todos os webinarios nunca (`banned`, em qualquer forma: D33); o replay
  * sempre; a live pela situacao (espera ou no ar) e nunca removido desta sessao (`kicked`, os mesmos motivos do
- * join-token); a gravada pelo relogio; com limite de vagas, so com a vaga.
+ * join-token); a gravada pelo relogio e nunca removido desta sessao (`kicked`, a moderacao por pessoa da Na tela, R5:
+ * sem motor de video, o removido perde o video na proxima conferencia da sala); com limite de vagas, so com a vaga.
  */
 export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">, now: number, options: { ban?: LiveBanState; practiceSession?: boolean; seatMissing?: boolean } = {}): RoomJoin {
   const { durationMs, session } = context;
@@ -300,6 +302,9 @@ export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">
     }
     return refusal ? { ok: false, reason: "not_started" } : { ok: true };
   }
+  if (options.ban?.kicked) {
+    return { ok: false, reason: "kicked" };
+  }
   if (options.seatMissing) {
     return { ok: false, reason: "no_seat" };
   }
@@ -308,9 +313,10 @@ export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">
 
 /**
  * O que a Sala recebe a mais em GET .../session. O video (com o token da Bunny) so vai dentro da entrada: antes da
- * abertura, depois do fim, depois da Entrada atrasada ou sem a vaga obrigatoria, nulo. A live (fase 3) nao usa a Bunny:
- * leva o bloco `live` (sem o nome da sala nem o token, que so saem do join-token), os banimentos do aluno em `me.ban`
- * e os presentes agora pelo relogio da presenca (desde o inicio, presenceOffsetMs).
+ * abertura, depois do fim, depois da Entrada atrasada, sem a vaga obrigatoria ou removido desta sessao, nulo. A live
+ * (fase 3) nao usa a Bunny: leva o bloco `live` (sem o nome da sala nem o token, que so saem do join-token). Os
+ * banimentos do aluno vao em `me.ban` (na live e na gravada, os desta sessao tambem) e os presentes agora pelo relogio
+ * da presenca (desde o inicio, presenceOffsetMs).
  */
 export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userId: string, now = Date.now(), options: { seatMissing?: boolean } = {}): Promise<StudentRoomExtras> {
   const { durationMs, session, webinar } = context;
@@ -323,8 +329,9 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
     fetchPinnedMessageRow(db, session.pinnedMessageId),
     listStudentPolls(db, session, userId, now),
     simulated || live ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(presence) ? presence : 0) / 1000)), sessionId: session.id }) : Promise.resolve([]),
-    // Fase 3: remover e silenciar so existem na live; o banido de todos os webinarios vale em qualquer forma (D33).
-    live ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan })),
+    // Remover e silenciar valem na live (fase 3) e na gravada (a Na tela, R5); o banido de todos os webinarios vale em
+    // qualquer forma (D33), o Replay inclusive.
+    live || simulated ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan })),
     // A Na tela: o estado inteiro (o navegador sempre adota o da sessao); vazio no Replay e na sessao encerrada.
     loadScreenState(db, session, userId, now)
   ]);
