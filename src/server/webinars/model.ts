@@ -286,8 +286,8 @@ export const WEBINAR_SITUATIONS = ["draft", "scheduled", "in_progress", "ended",
 export type WebinarSituation = (typeof WEBINAR_SITUATIONS)[number];
 
 /**
- * O webinario tem dados de aluno (docs/30 §2.3, Excluir o arquivado; decisao do produtor de 10/11/2026)? Sim quando
- * alguma tabela bateu o teto da leitura (`truncated`: turma de verdade) ou quando alguem que deixou dado nao e da equipe
+ * O webinario tem dados de aluno (docs/30 §2.3, Excluir o arquivado; decisao do produtor de 10/11/2026)? Sim quando a
+ * conferencia nao decidiu (`truncated`: a equipe nao coube na leitura) ou quando alguem que deixou dado nao e da equipe
  * (`staffIds`: admin_roles, o apresentador e quem apresenta). So sem dado de aluno o arquivado pode ser excluido: o
  * webinario de teste da equipe sai dos paineis; o que teve turma fica, porque o historico alimenta os numeros.
  */

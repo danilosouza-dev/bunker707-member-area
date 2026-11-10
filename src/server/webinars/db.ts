@@ -88,4 +88,6 @@ export function isMissingWebinarSchema(error: unknown) {
 }
 
 export const WEBINAR_MISSING_MESSAGE = "Esse webinário não existe mais.";
+/** O arquivado fica so de leitura (docs/30 §2.3): toda escrita do webinario pede o Desarquivar antes. */
+export const WEBINAR_ARCHIVED_MESSAGE = "Esse webinário está arquivado. Desarquive para mexer nele.";
 export const WEBINAR_CHANGED_MESSAGE = "Esse webinário mudou em outra tela. Recarregue a página e tente de novo.";

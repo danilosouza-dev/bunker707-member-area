@@ -15,6 +15,7 @@ import { readCustomFunctions } from "@/server/auth/admin-access";
 import { getAuthenticatedUser, getUserDisplayName } from "@/server/auth/session";
 import type { AudienceDefinition } from "@/server/communications/audience-model";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
+import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { loadNoticeEditorOptions, type NoticeEditorOptions } from "@/server/communications/queries";
 import { pollFromRow, scriptItemFromRow, transcriptCuesOf } from "./chat-rows";
 import { fetchTranscriptRow, listPollRows, listScriptItemRows } from "./chat-store";
@@ -58,6 +59,24 @@ import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRe
 /* ------------------------------------------------------------------------------------------------
  * A lista (docs/30 §2.1)
  * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O Excluir de um arquivado na lista: so sem dados de aluno. A conferencia que falha numa linha (o banco recusou uma
+ * leitura) tira o Excluir so daquela linha, com o erro no log, em vez de derrubar a pagina do filtro Arquivado (o
+ * Desarquivar fica no menu). O banco sem a migracao segue para o aviso; o editor e o deleteWebinar continuam falhando
+ * fechado (o erro sobe).
+ */
+async function archivedDeletable(db: WebinarsDb, row: WebinarRow): Promise<boolean> {
+  try {
+    return !webinarHasStudentData(await webinarDataAuthors(db, row));
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw error;
+    }
+    console.error("[admin/webinarios] conferencia de dados de aluno", error);
+    return false;
+  }
+}
 
 export type WebinarListItem = {
   coverUrl: string | null;
@@ -282,7 +301,7 @@ export async function listWebinarsForAdmin(input: {
   const items = await Promise.all(
     pageItems.map(async (item) => {
       const row = rowsById.get(item.id);
-      return item.situation === "archived" && row ? { ...item, deletable: !webinarHasStudentData(await webinarDataAuthors(db, row)) } : item;
+      return item.situation === "archived" && row ? { ...item, deletable: await archivedDeletable(db, row) } : item;
     })
   );
 

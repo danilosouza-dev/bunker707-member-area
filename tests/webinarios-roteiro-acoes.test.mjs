@@ -1194,3 +1194,30 @@ test("o chat de uma sessao vira CSV do roteiro: so turma, chat original e equipe
   assert.equal(exportado.rows, 4);
   assert.equal(audits(db, "webinar.chat_exported")[0].metadata.session_id, SESSAO_ENCERRADA);
 });
+
+test("o webinario arquivado fica so de leitura (docs/30 §2.3): o roteiro, a transcricao, as enquetes e o replay respondem 409 com a frase do Desarquivar e nada muda; exportar continua", async () => {
+  const replay = { ...DEFAULTS.webinar_sessions, id: randomUUID(), kind: "replay", recording_id: RECORDING, scheduled_at: new Date(Date.now() - 30 * MIN).toISOString(), status: "live", webinar_id: WEBINAR };
+  const poll = { ...DEFAULTS.webinar_polls, created_at: agora(), id: randomUUID(), question: "Gostou?", updated_at: agora(), webinar_id: WEBINAR };
+  const seed = cenario({ webinar_chat_script_items: [scriptItem({ offset_ms: 7_000, status: "ready" })], webinar_polls: [poll] });
+  seed.webinars[0].status = "archived";
+  seed.webinar_sessions.push(replay);
+  const db = usar(bancoEmMemoria(seed));
+  const antes = structuredClone({ itens: db.tables.webinar_chat_script_items, polls: db.tables.webinar_polls, sessoes: db.tables.webinar_sessions, transcricoes: db.tables.webinar_recording_transcripts });
+  const item = { body: "Mensagem", kind: "message", offsetMs: 10_000, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, status: "draft", triggerKind: "at_offset" };
+
+  for (const [nome, escrever] of [
+    ["saveScriptItems", () => scriptActions.saveScriptItems({ items: [item], webinarId: WEBINAR })],
+    ["importScriptCsv", () => scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n0:10;Duda;Aluno;oi", webinarId: WEBINAR })],
+    ["saveTranscript", () => scriptActions.saveTranscript({ format: "vtt", text: VTT, webinarId: WEBINAR })],
+    ["resolveScriptPhrases", () => scriptActions.resolveScriptPhrases({ webinarId: WEBINAR })],
+    ["savePolls", () => roomActions.savePolls({ polls: [], webinarId: WEBINAR })],
+    ["createReplaySession", () => roomActions.createReplaySession({ webinarId: WEBINAR })],
+    ["cancelReplaySession", () => roomActions.cancelReplaySession({ webinarId: WEBINAR })]
+  ]) {
+    const recusado = await escrever();
+    assert.deepEqual([recusado.ok, recusado.status, recusado.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."], nome);
+  }
+  assert.deepEqual({ itens: db.tables.webinar_chat_script_items, polls: db.tables.webinar_polls, sessoes: db.tables.webinar_sessions, transcricoes: db.tables.webinar_recording_transcripts }, antes, "nada mudou");
+  assert.equal(db.tables.admin_audit_log.length, 0);
+  assert.equal(ok(await scriptActions.exportScriptCsv({ webinarId: WEBINAR })).fileName.endsWith(".csv"), true, "exportar o roteiro continua");
+});

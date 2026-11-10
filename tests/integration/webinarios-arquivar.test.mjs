@@ -112,11 +112,15 @@ test("3. desarquivar: volta como era (encerrado), na lista e na area do aluno", 
 test("4. o arquivado so com a equipe (a vaga do produtor nao conta) pode ser excluido, e sai da lista e do editor", async () => {
   unwrap(await db.from("webinar_registrations").delete().eq("webinar_id", webinarId).eq("user_id", aluna.id), "Tirando a vaga da aluna");
   await vaga(produtor);
+  // Mais de 500 amostras de presenca, todas da equipe (o produtor e a analista estao em admin_roles): a quantidade de
+  // linhas nunca decide; o banco filtra a equipe pelo not.in (webinarDataAuthors).
+  const amostras = [produtor, analista].flatMap((pessoa) => Array.from({ length: 255 }, (_, bucket) => ({ bucket, session_id: sessaoId, state: "playing", user_id: pessoa.id })));
+  unwrap(await db.from("webinar_presence_samples").insert(amostras), "Gravando a presenca da equipe");
   actAs(produtor);
   ok(await actions.archiveWebinar({ id: webinarId }));
 
   const noFiltro = await lista("archived");
-  assert.equal(noFiltro[0].deletable, true, "so a equipe deixou dados");
+  assert.equal(noFiltro[0].deletable, true, "so a equipe deixou dados, mesmo com 510 amostras de presenca");
 
   const salvar = await actions.saveWebinarDraft({ draft: (await getWebinarEditorData(webinarId)).draft, expectedUpdatedAt: (await linha()).updated_at, id: webinarId });
   assert.deepEqual([salvar.ok, salvar.status], [false, 409], "o arquivado nao se salva");

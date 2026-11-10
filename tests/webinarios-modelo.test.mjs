@@ -185,11 +185,11 @@ test("questionBodyOf: o texto da pergunta feita de uma mensagem em ate 500 carac
   assert.equal(model.questionBodyOf("😀".repeat(500)), "😀".repeat(500), "exatamente 500 caracteres: inteiro");
 });
 
-test("webinarHasStudentData (docs/30 §2.3, Excluir o arquivado): sem ninguem, ou so a equipe, nao; um aluno, ou uma tabela no teto da leitura, sim", () => {
+test("webinarHasStudentData (docs/30 §2.3, Excluir o arquivado): sem ninguem, ou so a equipe, nao; um aluno, ou a conferencia que nao decidiu, sim", () => {
   const has = (input) => model.webinarHasStudentData({ staffIds: [], truncated: false, userIds: [], ...input });
   assert.equal(has({}), false, "ninguem deixou dado");
   assert.equal(has({ staffIds: ["u-produtor", "u-co"], userIds: ["u-produtor", "u-co", null] }), false, "so a equipe (e linhas sem pessoa)");
   assert.equal(has({ staffIds: ["u-produtor"], userIds: ["u-produtor", "u-aluna"] }), true, "uma aluna basta");
-  assert.equal(has({ staffIds: ["u-produtor"], truncated: true, userIds: ["u-produtor"] }), true, "alguma tabela bateu o teto: turma de verdade");
+  assert.equal(has({ staffIds: ["u-produtor"], truncated: true, userIds: ["u-produtor"] }), true, "a conferencia nao decidiu (a equipe nao coube na leitura): conta como dados");
   assert.equal(has({ userIds: [""] }), false, "id vazio nao e pessoa");
 });

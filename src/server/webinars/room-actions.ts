@@ -89,7 +89,7 @@ import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -637,6 +637,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
   return runAdminAction("messaging.write", savePollsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const existing = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
     const existingIds = new Set(existing.polls.map((poll) => poll.id));
     const kept = new Set<string>();
@@ -1080,6 +1081,7 @@ export async function createReplaySession(input: { webinarId: string }): Promise
     const db = webinarsDb();
     const now = new Date();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const sessions = await listSessionRows(db, [webinar.id]);
     const existing = sessions.find((session) => session.kind === "replay") ?? null;
 
@@ -1145,6 +1147,7 @@ export async function cancelReplaySession(input: { webinarId: string }): Promise
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const replay = (await listSessionRows(db, [webinar.id])).find((session) => session.kind === "replay" && session.status !== "cancelled");
 
     if (!replay) {

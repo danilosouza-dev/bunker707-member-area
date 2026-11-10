@@ -27,7 +27,7 @@ import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { copyAssistantToWebinar, replyAllDefaultFor } from "./assistant-store";
 import { WEBINAR_CHANGED_MESSAGE, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import { webinarDraftOf } from "./editor-model";
-import { isJitSession, withJitPublishProblems } from "./jit-model";
+import { isJitSession, jitActive, withJitPublishProblems } from "./jit-model";
 import { fetchJitSettings, saveJitSettings } from "./jit-store";
 import { newRoomName } from "./jitsi-token";
 import { ensureSessionRoomName } from "./live-store";
@@ -60,6 +60,7 @@ import {
   replacePresenterRows,
   requireWebinarRow,
   softDeleteWebinarRow,
+  assertWebinarNotArchived,
   webinarDataAuthors,
   updateRecordingRow,
   updateSessionRow,
@@ -78,8 +79,8 @@ const ONLY_PUBLISHED_CANCELS = "Só um webinário publicado é cancelado. Um ras
 const ONLY_DRAFT_DELETES = "Só um rascunho ou um webinário arquivado é excluído. Arquive o webinário encerrado ou cancelado antes.";
 const HAS_STUDENT_DATA = "Este webinário tem dados de alunos (vagas, presença, chat ou cliques). Ele fica arquivado: o histórico alimenta o relatório e os painéis.";
 const ONLY_FINISHED_ARCHIVES = "Só um webinário encerrado ou cancelado é arquivado.";
+const JIT_BLOCKS_ARCHIVE = "Este webinário ainda atende pelo Começa quando você entra. Desligue no card Sessões e espere a sessão em andamento acabar para arquivar.";
 const NOT_ARCHIVED_MESSAGE = "Esse webinário não está arquivado.";
-const ARCHIVED_MESSAGE = "Esse webinário está arquivado. Desarquive para mexer nele.";
 const KIND_LOCKED_MESSAGE = "O tipo não muda depois de publicar.";
 const SESSION_MISSING_MESSAGE = "Essa sessão não existe mais.";
 const SESSION_NOT_SCHEDULED_MESSAGE = "Só uma sessão que ainda não começou muda de hora.";
@@ -371,9 +372,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
     const current = bundle.row;
 
     // O arquivado fica so de leitura (docs/30 §2.3): desarquivar antes de mexer.
-    if (current.status === "archived") {
-      throw new WebinarError(ARCHIVED_MESSAGE, 409);
-    }
+    assertWebinarNotArchived(current);
 
     if (current.cancelled_at) {
       throw new WebinarError(CANCELLED_MESSAGE, 409);
@@ -704,11 +703,23 @@ export async function archiveWebinar(input: { expectedUpdatedAt?: string; id: st
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
-    const sessions = (await listSessionRows(db, [row.id])).map(sessionFromRow);
-    const situation = webinarSituation(webinarFromRow(row), sessions, now.getTime());
+    const webinar = webinarFromRow(row);
+    const sessionRows = await listSessionRows(db, [row.id]);
+    // A mesma conta da lista e do editor (queries.ts): sem as sessoes do "Comeca quando voce entra".
+    const situation = webinarSituation(webinar, sessionRows.filter((sessionRow) => !isJitSession(sessionRow)).map(sessionFromRow), now.getTime());
 
     if (row.status !== "published" || (situation !== "ended" && situation !== "cancelled")) {
       throw new WebinarError(ONLY_FINISHED_ARCHIVES, 409);
+    }
+
+    // O encerrado que ainda atende pelo "Comeca quando voce entra" (ligado, ou com uma sessao dele em aberto, que o tick
+    // deixaria presa: ele so mexe no publicado) nao se arquiva. O cancelado ja teve as sessoes canceladas no Cancelar.
+    if (situation === "ended") {
+      const jitOpen = sessionRows.some((sessionRow) => isJitSession(sessionRow) && (sessionRow.status === "scheduled" || sessionRow.status === "waiting" || sessionRow.status === "live"));
+
+      if (jitOpen || jitActive(webinar.kind, await jitSettingsFor(db, row.id, webinar.kind))) {
+        throw new WebinarError(JIT_BLOCKS_ARCHIVE, 422);
+      }
     }
 
     assertSameVersion(row, data.expectedUpdatedAt);
@@ -740,7 +751,8 @@ export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: 
 
     assertSameVersion(row, data.expectedUpdatedAt);
     const saved = await updateWebinarRow(db, row.id, { status: "published" }, { expectedStatuses: ["archived"], expectedUpdatedAt: row.updated_at });
-    const sessions = (await listSessionRows(db, [row.id])).map(sessionFromRow);
+    // A situacao como a lista e o editor a contam: sem as sessoes do "Comeca quando voce entra".
+    const sessions = (await listSessionRows(db, [row.id])).filter((sessionRow) => !isJitSession(sessionRow)).map(sessionFromRow);
 
     await recordAudit(db, {
       action: "webinar.unarchived",
@@ -768,6 +780,7 @@ export async function rescheduleSession(input: { scheduledAt: string; sessionId:
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(row);
     const session = await fetchSessionRow(db, data.sessionId);
 
     if (!session || session.webinar_id !== row.id) {

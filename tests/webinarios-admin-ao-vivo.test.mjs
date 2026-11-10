@@ -965,3 +965,60 @@ test("frases novas do admin passam pela guarda do Webinario e nada diz 'em breve
   assert.ok(!("recordingSoon" in vm.WEBINAR_ADMIN_COPY.fields));
   assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"], "so o replay como aula segue 'em breve'");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * O arquivado so de leitura (docs/30 §2.3): o servidor e o editor desenhado
+ * ---------------------------------------------------------------------------------------------- */
+
+test("o arquivado so de leitura: mudar a hora e salvar o rascunho respondem 409 com a frase do Desarquivar, sem mexer na sessao", async () => {
+  const db = usar(bancoEmMemoria(cenario({ recorderStatus: "none" })));
+  const data = await queries.getWebinarEditorData(WEBINAR);
+  const antes = db.tables.webinar_sessions[0].scheduled_at;
+  db.tables.webinars[0].status = "archived";
+
+  const hora = await actions.rescheduleSession({ scheduledAt: new Date(Date.now() + 3 * DAY).toISOString(), sessionId: SESSAO, webinarId: WEBINAR });
+  assert.deepEqual([hora.ok, hora.status, hora.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  const salvo = await actions.saveWebinarDraft({ draft: { ...data.draft, scheduledAt: new Date(Date.now() + 4 * DAY).toISOString() }, id: WEBINAR });
+  assert.deepEqual([salvo.ok, salvo.status, salvo.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  assert.equal(db.tables.webinar_sessions[0].scheduled_at, antes);
+  assert.equal(db.tables.admin_audit_log.filter((row) => row.action === "webinar.rescheduled" || row.action === "webinar.saved").length, 0);
+});
+
+test("o editor do arquivado: os cards com o proprio Salvar ficam desligados (o Começa quando você entra, as Enquetes); o encerrado continua com eles; o arquivado cancelado mostra o motivo", () => {
+  const gravada = {
+    ...model.emptyWebinarDraft("simulated"),
+    recordingVideoUrl: "https://iframe.mediadelivery.net/embed/1/abc",
+    sessions: [{ lateJoinMinutes: null, scheduledAt: "2026-10-20T23:00:00.000Z" }],
+    title: "Gravada de teste"
+  };
+  const jit = (markup) => markup.match(/<(?:button|input)\b[^>]*id="webinar-jit-enabled"[^>]*>/)?.[0] ?? "";
+  const botoesDasEnquetes = (markup) => {
+    const inicio = markup.indexOf("data-polls-card");
+    assert.ok(inicio > -1, "o card Enquetes");
+    const fim = markup.indexOf("data-polls-card", inicio + 1);
+    return Array.from(markup.slice(inicio, fim === -1 ? undefined : fim).matchAll(/<button\b[^>]*>/g), (match) => match[0]);
+  };
+
+  const encerrada = renderEditor(editorData({ draft: gravada, liveSession: null, situation: "ended", title: "Gravada de teste" }));
+  assert.ok(jit(encerrada), "o Começa quando você entra no card Sessões");
+  assert.doesNotMatch(jit(encerrada), /\sdisabled/, "o encerrado continua com o proprio Salvar do jit");
+
+  const item = { body: "Boa noite!", createdAt: "2026-10-20T12:00:00.000Z", generatedByAi: false, id: "11111111-2222-4333-8444-555555555555", kind: "message", offsetMs: 10_000, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "2026-10-20T12:00:00.000Z", webinarId: ID };
+  const arquivada = renderEditor(editorData({ draft: gravada, liveSession: null, scriptItems: [item], situation: "archived", status: "archived", title: "Gravada de teste" }));
+  assert.match(jit(arquivada), /\sdisabled/);
+  const enquetes = botoesDasEnquetes(arquivada);
+  assert.ok(enquetes.length > 0 && enquetes.every((botao) => /\sdisabled=""/.test(botao)), "todo botao das Enquetes desligado");
+  // O Roteiro: nada se grava (o Salvar e a linha desligados), mas exportar o roteiro continua (o servidor tambem deixa).
+  const roteiro = arquivada.slice(arquivada.indexOf("data-script-card"));
+  assert.match(roteiro, /<button[^>]*disabled=""[^>]*>[^<]*Salvar roteiro<\/button>/);
+  assert.match(roteiro, /<textarea[^>]*disabled=""/, "o texto da mensagem do roteiro trancado");
+  const exportar = roteiro.match(/<button\b[^>]*>(?:(?!<\/button>)[\s\S])*?Exportar CSV<\/button>/)?.[0] ?? "";
+  assert.ok(exportar, "o Exportar CSV do roteiro");
+  assert.doesNotMatch(exportar.match(/^<button\b[^>]*>/)[0], /\sdisabled=""/, "exportar o roteiro segue no arquivado");
+
+  const cancelada = renderEditor(
+    editorData({ cancelReason: "Apresentador doente", cancelledAt: "2026-10-22T12:00:00.000Z", draft: gravada, liveSession: null, situation: "archived", status: "archived", title: "Gravada de teste" })
+  );
+  assert.match(jit(cancelada), /\sdisabled/);
+  assert.match(textOf(cancelada), /Motivo: Apresentador doente/, "o motivo do cancelado continua no arquivado");
+});

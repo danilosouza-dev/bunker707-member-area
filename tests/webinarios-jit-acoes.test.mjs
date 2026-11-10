@@ -425,3 +425,146 @@ test("banco sem a 202610300005: ler e gravar respondem 409 com a frase da migrac
   const gravado = await actions.saveJitSettings(pedido());
   assert.deepEqual([gravado.status, gravado.error], [409, WEBINAR_COPY.jit.servidor.precisaMigracao("202610300005")]);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Arquivar e Excluir o arquivado (docs/30 §2.3 e D61) com o "Comeca quando voce entra": a conferencia de dados de
+ * aluno em partes, a falha que so tira o Excluir da linha, a equipe que nunca conta pela quantidade de linhas, o
+ * Arquivar que ignora as sessoes jit na situacao e o arquivado so de leitura
+ * ---------------------------------------------------------------------------------------------- */
+
+const ALUNA = "00000000-0000-4000-8000-0000000000a7";
+const SEMANA = { end: new Date(Date.now() + 7 * 24 * HOUR), start: new Date(Date.now() - 7 * 24 * HOUR) };
+
+/** O arquivado (cancelado antes) com `quantas` sessoes jit encerradas; devolve o banco e os ids. */
+function arquivadoComJit(quantas) {
+  const now = Date.now();
+  const db = usar({ webinar: { cancelled_at: pgIso(now - HOUR), status: "archived" } });
+  const ids = Array.from({ length: quantas }, (_, index) => `cdcdcdcd-0000-4000-8000-${String(index).padStart(12, "0")}`);
+  for (const [index, id] of ids.entries()) {
+    db.tables.webinar_sessions.push(sessionRow(id, { ended_at: pgIso(now - 2 * HOUR), jit: true, scheduled_at: pgIso(now - 10 * 24 * HOUR + index * 15 * MIN), status: "ended" }));
+  }
+  return { db, ids };
+}
+
+const itemDaLista = async () => (await queries.listWebinarsForAdmin({ filters: { situation: "archived" }, now: Date.now(), period: SEMANA })).items.find((item) => item.id === WEBINAR);
+const PROBES = ["webinar_registrations", "student_events", "webinar_chat_messages", "webinar_ai_requests", "webinar_attendance", "webinar_presence_samples", "webinar_questions", "webinar_poll_answers", "webinar_reactions", "webinar_offer_clicks"];
+
+test("arquivado com centenas de sessoes jit: a conferencia de dados de aluno le em partes de 100, o historico so nas linhas de webinario e o chat e o Assistente pelas sessoes", async () => {
+  const { db, ids } = arquivadoComJit(320);
+  db.tables.webinar_attendance = [{ seconds: 600, session_id: ids.at(-1), user_id: ALUNA }];
+
+  const item = await itemDaLista();
+  assert.equal(item.deletable, false, "a aluna da ultima sessao conta");
+  // As leituras da conferencia (a lista tambem conta as vagas por webinario, com outra coluna).
+  const leituras = db.calls.queries.filter((query) => PROBES.includes(query.table) && (query.columns === "user_id" || query.columns === "author_user_id"));
+  const maior = Math.max(...leituras.flatMap((query) => query.filters.filter((filter) => filter[0] === "in").map((filter) => filter[2].length)));
+  assert.ok(maior <= 100, `nenhum in(...) passa de 100 ids (${maior})`);
+  const historico = leituras.filter((query) => query.table === "student_events");
+  assert.ok(historico.length > 0);
+  assert.ok(
+    historico.every((query) => query.filters.some((filter) => filter[0] === "eq" && filter[1] === "entity_type" && filter[2] === "webinar")),
+    "o historico pelo indice parcial (entity_type = 'webinar')"
+  );
+  for (const table of ["webinar_chat_messages", "webinar_ai_requests"]) {
+    const lidas = leituras.filter((query) => query.table === table);
+    assert.ok(lidas.length > 0 && lidas.every((query) => query.filters.some((filter) => filter[0] === "in" && filter[1] === "session_id")), `${table} pelas sessoes (o indice que existe)`);
+  }
+  assert.ok(
+    leituras.every((query) => query.filters.some((filter) => filter[0] === "not")),
+    "cada leitura pede so quem e de fora da equipe"
+  );
+
+  // Sem dado de aluno nenhum: todas as partes lidas, e o Excluir aparece.
+  arquivadoComJit(320);
+  assert.equal((await itemDaLista()).deletable, true);
+});
+
+test("a conferencia falhou numa leitura: a lista segue sem o Excluir daquela linha; o editor e o Excluir do servidor falham fechado", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const { db } = arquivadoComJit(3);
+  const original = db.from.bind(db);
+  db.from = (name) => {
+    if (name !== "webinar_attendance") {
+      return original(name);
+    }
+    const falha = { data: null, error: { message: "414 Request-URI Too Large" } };
+    const chain = new Proxy({}, { get: (_target, property) => (property === "then" ? (resolve) => resolve(falha) : () => chain) });
+    return chain;
+  };
+
+  assert.equal((await itemDaLista()).deletable, false, "a lista carrega, sem o Excluir dessa linha");
+  await assert.rejects(queries.getWebinarEditorData(WEBINAR, Date.now()), /414 Request-URI Too Large/, "o editor nao decide sem a conferencia");
+  const excluir = await webinarActions.deleteWebinar({ id: WEBINAR });
+  assert.equal(excluir.ok, false);
+  assert.equal(webinar(db).deleted_at, null, "nada excluido");
+});
+
+test("so a equipe, com mais de 500 amostras de presenca: a quantidade de linhas nao decide; uma aluna atras delas decide", async () => {
+  const { db, ids } = arquivadoComJit(2);
+  db.tables.admin_roles.push({ permissions: {}, role: "owner", user_id: PRODUTORA });
+  db.tables.webinar_presence_samples = Array.from({ length: 600 }, (_, bucket) => ({ bucket, samples: 1, session_id: ids[bucket % 2], user_id: PRODUTORA }));
+
+  assert.equal((await itemDaLista()).deletable, true, "o teste da equipe com a presenca longa sai pelo Excluir");
+  db.tables.webinar_presence_samples.push({ bucket: 700, samples: 1, session_id: ids[1], user_id: ALUNA });
+  assert.equal((await queries.getWebinarEditorData(WEBINAR, Date.now())).deletable, false);
+  const recusado = await webinarActions.deleteWebinar({ id: WEBINAR });
+  assert.deepEqual([recusado.ok, recusado.status], [false, 409]);
+});
+
+test("Arquivar com o Começa quando você entra: a situacao e a da lista (sem as sessoes jit); o encerrado com o jit ligado ou uma sessao jit aberta nao se arquiva; o cancelado sim", async () => {
+  const now = Date.now();
+  const encerrar = (db) =>
+    Object.assign(db.tables.webinar_sessions[0], { ended_at: pgIso(now - 71 * HOUR), scheduled_at: pgIso(now - 72 * HOUR), started_at: pgIso(now - 72 * HOUR), status: "ended" });
+  const situacao = async () => (await queries.listWebinarsForAdmin({ filters: {}, now, period: SEMANA })).items.find((item) => item.id === WEBINAR)?.situation;
+
+  // 1. jit ligado e uma sessao jit no ar: a lista diz Encerrado, e o servidor recusa com a frase do jit (nunca o "mudou em outra tela").
+  const noAr = usar();
+  encerrar(noAr);
+  noAr.tables.webinar_sessions.push(sessionRow(JIT_HOJE, { jit: true, scheduled_at: pgIso(now - 10 * MIN), started_at: pgIso(now - 10 * MIN), status: "live" }));
+  assert.equal(await situacao(), "ended");
+  const recusado = await webinarActions.archiveWebinar({ id: WEBINAR });
+  assert.equal(recusado.ok, false);
+  assert.match(recusado.error, /Começa quando você entra/);
+  assert.notEqual(recusado.status, 409);
+  assert.equal(webinar(noAr).status, "published");
+
+  // 2. jit ligado, nenhuma sessao jit: tambem recusa (arquivar tiraria da area do aluno um webinario que ainda atende).
+  const ligado = usar();
+  encerrar(ligado);
+  assert.equal((await webinarActions.archiveWebinar({ id: WEBINAR })).ok, false);
+  assert.equal(webinar(ligado).status, "published");
+
+  // 3. jit desligado com uma sessao jit ainda no ar: recusa (o tick so mexe no publicado e a deixaria presa).
+  const presa = usar({ jit: { ...JIT_ON, enabled: false } });
+  encerrar(presa);
+  presa.tables.webinar_sessions.push(sessionRow(JIT_HOJE, { jit: true, scheduled_at: pgIso(now - 10 * MIN), started_at: pgIso(now - 10 * MIN), status: "live" }));
+  assert.match((await webinarActions.archiveWebinar({ id: WEBINAR })).error, /Começa quando você entra/);
+  assert.equal(webinar(presa).status, "published");
+
+  // 4. jit desligado e a sessao jit encerrada: arquiva.
+  const pronto = usar({ jit: { ...JIT_ON, enabled: false } });
+  encerrar(pronto);
+  pronto.tables.webinar_sessions.push(sessionRow(JIT_HOJE, { ended_at: pgIso(now - HOUR), jit: true, scheduled_at: pgIso(now - 2 * HOUR), status: "ended" }));
+  ok(await webinarActions.archiveWebinar({ id: WEBINAR }));
+  assert.equal(webinar(pronto).status, "archived");
+
+  // 5. so sessoes jit (nenhuma hora marcada): a lista diz Agendado e o servidor tambem nao arquiva.
+  const soJit = usar();
+  soJit.tables.webinar_sessions = [sessionRow(JIT_HOJE, { ended_at: pgIso(now - HOUR), jit: true, scheduled_at: pgIso(now - 2 * HOUR), status: "ended" })];
+  assert.equal(await situacao(), "scheduled");
+  assert.equal((await webinarActions.archiveWebinar({ id: WEBINAR })).status, 409);
+  assert.equal(webinar(soJit).status, "published");
+
+  // 6. o cancelado com o jit ligado arquiva (o card do jit nao grava no cancelado: nao haveria como desligar).
+  const cancelado = usar({ webinar: { cancelled_at: pgIso(now - HOUR) } });
+  ok(await webinarActions.archiveWebinar({ id: WEBINAR }));
+  assert.equal(webinar(cancelado).status, "archived");
+});
+
+test("o arquivado fica so de leitura: o Começa quando você entra responde 409 com a frase do Desarquivar e nada muda", async () => {
+  const arquivado = usar({ jit: { ...JIT_ON, enabled: false }, webinar: { status: "archived" } });
+  const recusado = await actions.saveJitSettings(pedido());
+  assert.deepEqual([recusado.status, recusado.error], [409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  assert.equal(webinar(arquivado).jit_settings.enabled, false);
+  assert.equal(auditorias(arquivado).length, 0);
+});

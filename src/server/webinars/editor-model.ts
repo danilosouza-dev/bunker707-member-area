@@ -489,7 +489,8 @@ export const WEBINAR_ADMIN_COPY = {
     },
     archive: {
       confirmLabel: "Arquivar",
-      description: "Ele sai da lista e da área do aluno: a página e o replay fecham. O relatório e os números continuam, e dá para desarquivar quando quiser.",
+      description:
+        "Ele sai da lista e da área do aluno: a página e o replay fecham. Arquivar não apaga nada: o relatório e os números continuam, e Desarquivar devolve o webinário como era. O chat original da live segue o prazo de guarda do chat (2 anos): se ele ficar arquivado por mais de 2 anos, esse chat é apagado e não volta ao desarquivar.",
       title: (title: string) => `Arquivar “${title}”?`
     },
     delete: {
