@@ -113,7 +113,8 @@ test("a pagina do webinario: 'No ar há' pelo inicio da live e o degrau do titul
   assert.equal(time.onAirLabel(inicio, t0 + 65 * 60_000), "No ar há 1 h 5 min");
   assert.equal(time.onAirLabel(inicio, t0 + 30_000), "Começou agora", "o primeiro minuto");
   assert.equal(time.onAirLabel(inicio, t0), "Começou agora");
-  assert.equal(time.onAirLabel(inicio, t0 - 60_000), "", "antes do inicio, nada");
+  assert.equal(time.onAirLabel(inicio, t0 - 7_000), "Começou agora", "o relogio da pagina um passo de 15 s atras do inicio: a live ja esta no ar");
+  assert.equal(time.onAirLabel(inicio, t0 - 3 * 60_000), "Começou agora", "o aparelho atrasado 3 min");
   assert.equal(time.onAirLabel(null, t0), "");
   assert.equal(time.onAirLabel("nao e data", t0), "");
 

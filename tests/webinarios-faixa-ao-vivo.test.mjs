@@ -455,8 +455,15 @@ test("pagina do Webinario no padrao da area (docs/31 V2-17): o destaque com os c
   // O destaque usa as medidas do destaque da area (Marca > Estilo), como a pagina do curso; nada de cartao em volta.
   const hero = agendada.match(/<section class="([^"]*)" data-webinar-hero="">/);
   assert.ok(hero, "o destaque");
-  for (const classe of ["mx-[var(--member-hero-inset)]", "mt-[var(--member-hero-top)]", "rounded-[var(--member-hero-radius)]", "overflow-hidden"]) {
+  for (const classe of ["mx-[var(--member-hero-inset)]", "mt-[var(--member-hero-top)]"]) {
     assert.ok(classesDe(`<b class="${hero[1]}">`).includes(classe), `o destaque tem ${classe}`);
+  }
+  // So o fundo e cortado nos cantos (a lista do Adicionar ao calendario abre para fora do destaque).
+  assert.ok(!classesDe(`<b class="${hero[1]}">`).includes("overflow-hidden"), "o destaque nao corta o que abre dele");
+  const fundo = agendada.match(/<div aria-hidden="true" class="([^"]*)" data-webinar-hero-bg="">/);
+  assert.ok(fundo, "o fundo do destaque");
+  for (const classe of ["absolute", "inset-0", "overflow-hidden", "rounded-[var(--member-hero-radius)]"]) {
+    assert.ok(classesDe(`<b class="${fundo[1]}">`).includes(classe), `o fundo tem ${classe}`);
   }
   assert.match(agendada, /opacity-\[var\(--member-hero-fade\)\]/, "o esfumacado de baixo segue o estilo da area");
   assert.doesNotMatch(agendada.slice(agendada.indexOf("data-webinar-hero"), agendada.indexOf("data-webinar-action")), /rounded-\[12px\] border|border-dashed/, "sem cartao dentro do destaque");
@@ -539,6 +546,53 @@ test("pagina do Webinario, as situacoes no destaque: no ar diz 'No ar há' e tro
   const cancelada = render(pageView.WebinarPageView, paginaDoWebinario({ cancelReason: "O apresentador teve um imprevisto.", cancelledAt: iso(T0) }, { scheduledAt: iso(T0 + HOUR) }, [], new Map(), T0));
   assert.match(texto(cancelada), /Essa live foi cancelada\. O apresentador teve um imprevisto\./);
   assert.doesNotMatch(cancelada, /como-funciona|Garantir vaga/);
+
+  // A live que acabou de comecar com o relogio da pagina atras do inicio (o passo de 15 s, o aparelho atrasado): a
+  // linha nunca fica so com o icone.
+  const recemComecada = render(pageView.WebinarPageView, { ...paginaDoWebinario({}, { startedAt: iso(T0 + 7_000), status: "live" }, [], new Map(), T0), liveRoomConfigured: true });
+  assert.match(texto(recemComecada), /Ao vivo\. Começou agora/, "com o relogio da pagina atras do inicio, a linha nunca fica so com o icone");
+
+  // Vagas esgotadas (limite 3, 3 vagas, aluno sem vaga): a frase no destaque e nenhuma linha prometendo o Entrar (A12).
+  const cheia = { capacity: 3, registrationRequired: true };
+  const esgotada = render(pageView.WebinarPageView, { ...paginaDoWebinario(cheia, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [], new Map([[S1, 3]]), T0), liveRoomConfigured: true });
+  assert.match(texto(esgotada), /As vagas acabaram\. O replay fica disponível depois\./);
+  assert.doesNotMatch(esgotada, /como-funciona|o botão Entrar aparece/);
+  // Quem ja tem a vaga na live cheia continua com as tres linhas.
+  assert.match(render(pageView.WebinarPageView, paginaDoWebinario(cheia, { scheduledAt: iso(T0 + 2 * 24 * 60 * MIN) }, [vaga()], new Map([[S1, 3]]), T0)), />Como funciona</);
+});
+
+test("pagina do Webinario: a lista do Adicionar ao calendario (Baixar arquivo, Google Agenda e Outlook) abre para fora do destaque, sem ninguem cortando", () => {
+  const classesDe = (tag) => (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? "").replace(/&amp;/g, "&").split(/\s+/).filter(Boolean);
+  const base = paginaDoWebinario({ coverUrl: "https://exemplo.test/capa.jpg" }, { scheduledAt: iso(T0 + 2 * DAY) }, [vaga()], new Map(), T0);
+  const comVaga = render(pageView.WebinarPageView, {
+    ...base,
+    data: { ...base.data, page: { ...base.data.page, calendars: { [S1]: { downloadUrl: "/api/webinars/w1/calendar?token=t", googleUrl: "https://calendar.google.com/x", outlookUrl: "https://outlook.live.com/x" } } } }
+  });
+  const destaque = comVaga.slice(comVaga.indexOf("<section"), comVaga.indexOf("</section>"));
+  assert.deepEqual(Array.from(destaque.matchAll(/<li><a [^>]*>([^<]+)<\/a><\/li>/g), (match) => match[1]), ["Baixar arquivo", "Google Agenda", "Outlook"]);
+
+  // Os ancestrais abertos da lista, do <section> ate ela: nenhum corta o que passa da borda.
+  const inicio = comVaga.indexOf("<section");
+  const lista = comVaga.indexOf('<ul class="absolute left-0 top-full', inicio);
+  assert.ok(lista > inicio, "a lista do calendario dentro do destaque");
+  const abertos = [];
+  for (const tag of comVaga.slice(inicio, lista).matchAll(/<(\/?)([a-z0-9]+)\b[^>]*?(\/?)>/g)) {
+    const [inteira, fecha, nome, solta] = tag;
+    if (solta || ["img", "br", "input", "source", "meta", "link"].includes(nome)) continue;
+    if (fecha) {
+      abertos.pop();
+    } else {
+      abertos.push(classesDe(inteira));
+    }
+  }
+  assert.ok(abertos.length > 0);
+  for (const classes of abertos) {
+    assert.ok(!classes.some((classe) => /^(?:[a-z]+:)*overflow-(?:hidden|clip|y-|x-|auto|scroll)/.test(classe)), `sem cortar a lista: ${classes.join(" ")}`);
+  }
+  // O fundo continua cortado nos cantos, com a capa desfocada e o esfumacado dentro dele.
+  const fundo = comVaga.slice(comVaga.indexOf("data-webinar-hero-bg"), comVaga.indexOf("<nav "));
+  assert.match(fundo, /blur-3xl/);
+  assert.match(fundo, /opacity-\[var\(--member-hero-fade\)\]/);
 });
 
 /* ------------------------------------------------------------------------------------------------

@@ -39,15 +39,16 @@ export function formatCountdown(targetMs: number, nowMs: number): string {
 
 /**
  * "No ar há 12 min", "No ar há 1 h 5 min" ou "Começou agora" (o primeiro minuto), para a pagina do webinario com a live
- * no ar (docs/31 V2-17); vazio sem a hora do inicio ou com ela no futuro.
+ * no ar (docs/31 V2-17); vazio so sem a hora do inicio. Com o relogio da pagina atras do inicio (o passo de 15 s do
+ * relogio da pagina ou o aparelho atrasado), a live ja esta no ar: "Começou agora".
  */
 export function onAirLabel(startedAtIso: string | null | undefined, nowMs: number): string {
   const startedMs = startedAtIso ? new Date(startedAtIso).getTime() : Number.NaN;
-  if (!Number.isFinite(startedMs) || startedMs > nowMs) {
+  if (!Number.isFinite(startedMs)) {
     return "";
   }
   // O mesmo formato da contagem ("1 h 5 min"), contado para tras.
-  const elapsed = formatCountdown(nowMs + (nowMs - startedMs), nowMs);
+  const elapsed = formatCountdown(nowMs + Math.max(0, nowMs - startedMs), nowMs);
   return elapsed && elapsed !== "menos de 1 min" ? `No ar há ${elapsed}` : "Começou agora";
 }
 

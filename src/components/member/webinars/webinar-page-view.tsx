@@ -13,6 +13,7 @@ import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { heroTitleScale } from "@/lib/webinar-time";
+import { jitCanEnter } from "@/server/webinars/jit-clock";
 import type { StudentPhase } from "@/server/webinars/model";
 import { liveEnterState } from "@/server/webinars/live-banner";
 import { phaseLabel, roomHref, type StudentSessionView, type StudentWebinarView } from "@/server/webinars/student-model";
@@ -41,8 +42,11 @@ import { JitEnter } from "./jit/jit-enter";
 // Com limite de vagas (A12) so quem garantiu entra: sem a vaga, Garantir vaga e depois Entrar. Fase 4e: com o "Comeca
 // quando voce entra" ligado, a pagina mostra "A próxima sessão começa em {n} min" e o Entrar (sem Garantir vaga;
 // jit/jit-enter.tsx) e o selo no lugar da situacao quando nao ha hora marcada. Embaixo do destaque: na Live gravada, as
-// sessoes para escolher (as `jit` nunca aparecem uma a uma), e "Como funciona" ou "Antes de entrar" em tres linhas. Sem
-// acesso a pagina nem existe (notFound na page.tsx).
+// sessoes para escolher (as `jit` nunca aparecem uma a uma), e "Como funciona" ou "Antes de entrar" em tres linhas
+// ("Antes de entrar" com a sala aberta, inclusive a do "Comeca quando voce entra"; nenhuma das duas quando as vagas
+// acabaram em tudo o que da para escolher, porque o aluno sem vaga nunca ve o Entrar). So o fundo do destaque e cortado
+// nos cantos: a lista do Adicionar ao calendario abre para fora dele. Sem acesso a pagina nem existe (notFound na
+// page.tsx).
 
 const PHASE_TONES: Record<StudentPhase, MemberChipTone> = {
   cancelled: "warning",
@@ -284,7 +288,10 @@ function SessionsSection({ accessPreviewMode, calendars, readOnly, serverNow, so
   );
 }
 
-/** "Como funciona" (antes) ou "Antes de entrar" (com a sala aberta): tres linhas numeradas, sem cartao (docs/31 V2-17). */
+/**
+ * "Como funciona" (antes) ou "Antes de entrar" (com a sala aberta, a da sessao em destaque ou a do "Comeca quando voce
+ * entra"): tres linhas numeradas, sem cartao (docs/31 V2-17).
+ */
 function HowItWorks({ live }: { live: boolean }) {
   const copy = WEBINAR_COPY.aluno.pagina;
   const steps = live ? copy.passos.naHora : copy.passos.antes;
@@ -368,6 +375,11 @@ export function WebinarPageView({
   const cover = view.coverUrl?.trim() || null;
   const upcoming = UPCOMING.includes(view.phase);
   const inProgress = view.phase === "waiting" || view.phase === "live";
+  // "Antes de entrar" vale com a sala aberta: a da sessao em destaque ou a do "Comeca quando voce entra" (a situacao fica Agendado, mas o Entrar do jit ja liga).
+  const roomOpen = inProgress || (view.jit ? jitCanEnter(view.jit.state) : false);
+  // Vagas esgotadas em tudo o que ainda da para escolher (e sem o jit, que nunca pede vaga): o aluno sem vaga nunca ve o Entrar (A12); a frase do destaque basta.
+  const noSeatLeft =
+    view.phase === "sold_out" && !view.jit && view.sessions.every((session) => session.phase === "sold_out" || session.phase === "ended" || session.phase === "cancelled");
   const phase = { accessPreviewMode, calendars, liveRoomConfigured, readOnly, serverNow, source, view };
   // As sessoes para escolher: so na Live gravada com vaga (sem vaga, "é só entrar na hora" ja diz tudo no destaque).
   const sessions = view.kind === "simulated" && Boolean(primary) && view.phase !== "cancelled" && view.phase !== "ended" && (view.registrationRequired || !upcoming);
@@ -377,15 +389,18 @@ export function WebinarPageView({
       {/* O destaque com os cantos, o recuo e a luz da pagina do curso (Marca > Estilo). */}
       <div className="relative flow-root">
         <HeroGlow src={cover} />
-        <section className="relative z-[1] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)] overflow-hidden rounded-[var(--member-hero-radius)]" data-webinar-hero="">
-          {/* O fundo: a capa vertical bem desfocada (uma versao pequena, esticada), escurecida para o texto. */}
-          {cover ? (
-            <Image alt="" aria-hidden="true" className="scale-125 object-cover opacity-70 blur-3xl" fill priority sizes="320px" src={cover} unoptimized={!canOptimizeImageSrc(cover)} />
-          ) : (
-            <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(120deg,#262626,#161616)]" />
-          )}
-          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-[#141414]/95 via-[#141414]/75 to-[#141414]/35" />
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent via-[#141414]/80 to-[#141414] opacity-[var(--member-hero-fade)]" />
+        <section className="relative z-[1] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]" data-webinar-hero="">
+          {/* O fundo: a capa vertical bem desfocada (uma versao pequena, esticada), escurecida para o texto. So o fundo e
+              cortado nos cantos: a lista do Adicionar ao calendario abre para fora do destaque, sem ser cortada. */}
+          <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-[var(--member-hero-radius)]" data-webinar-hero-bg="">
+            {cover ? (
+              <Image alt="" aria-hidden="true" className="scale-125 object-cover opacity-70 blur-3xl" fill priority sizes="320px" src={cover} unoptimized={!canOptimizeImageSrc(cover)} />
+            ) : (
+              <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(120deg,#262626,#161616)]" />
+            )}
+            <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-[#141414]/95 via-[#141414]/75 to-[#141414]/35" />
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent via-[#141414]/80 to-[#141414] opacity-[var(--member-hero-fade)]" />
+          </div>
 
           {/* O texto comeca no recuo da pagina (como o da pagina do curso e as fileiras), nao centrado. */}
           <div className="relative z-10 flex w-full max-w-[1440px] flex-col px-5 pb-12 pt-24 sm:px-8 sm:pb-14 lg:px-12 lg:pt-28">
@@ -449,7 +464,7 @@ export function WebinarPageView({
       {/* Embaixo do destaque, no recuo das fileiras da area (--member-row-inset). */}
       <div className="grid w-full max-w-[1440px] gap-12 px-[var(--member-row-inset)] pt-10">
         {sessions ? <SessionsSection accessPreviewMode={accessPreviewMode} calendars={calendars} readOnly={readOnly} serverNow={serverNow} source={source} view={view} /> : null}
-        {view.phase !== "cancelled" && view.phase !== "ended" ? <HowItWorks live={inProgress} /> : null}
+        {view.phase !== "cancelled" && view.phase !== "ended" && !noSeatLeft ? <HowItWorks live={roomOpen} /> : null}
       </div>
     </div>
   );
