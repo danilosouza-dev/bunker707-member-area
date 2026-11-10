@@ -13,7 +13,7 @@ import { writePlatformSettingGuarded } from "./settings-store";
 
 /** [storefront.write] Grava platform_settings.loginPage se ninguem mudou desde expectedUpdatedAt (senao, 409). */
 export async function saveLoginPage(input: SaveLoginPageInput): Promise<ActionResult<{ settings: LoginPageSettings; updatedAt: string }>> {
-  return runAdminAction("storefront.write", saveLoginPageSchema, input, async ({ input: data }) => {
+  return runAdminAction("storefront.write", "dever_legal", saveLoginPageSchema, input, async ({ input: data }) => {
     const { updatedAt } = await writePlatformSettingGuarded("loginPage", data.settings, data.expectedUpdatedAt);
 
     invalidateMemberArea("login", { from: "action" });

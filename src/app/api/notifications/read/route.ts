@@ -5,6 +5,7 @@ import { parseNotificationsAsOf } from "@/server/communications/notification-mod
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Sino do aluno: { seen: true } = abriu o sino (o numero zera, as bolinhas ficam); { ids: [...] } =
 // abriu essas (lidas e abertas: cartao, "Ver mais"); { all: true } = "Marcar todas como lidas" (nunca
@@ -22,6 +23,9 @@ const MAX_IDS = 50;
 type ReadPayload = { all?: unknown; asOf?: unknown; ids?: unknown; seen?: unknown; shown?: unknown };
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

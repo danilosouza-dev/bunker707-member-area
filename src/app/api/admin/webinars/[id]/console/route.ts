@@ -3,6 +3,8 @@ import { requireApiRole } from "@/server/auth/permissions";
 import { isUuid, noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { getConsoleSnapshot } from "@/server/webinars/console-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O retrato do console da sessao (docs/30 §2.4), que a tela busca a cada 5 s: chat com os pendentes, roteiro com
 // o que ja entrou, enquetes com as contagens, perguntas por voto e os presentes agora; na Live ao vivo (fase 3), o
@@ -16,6 +18,9 @@ export const revalidate = 0;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("messaging.write");
 
   if (auth.response) {

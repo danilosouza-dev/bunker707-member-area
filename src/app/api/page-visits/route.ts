@@ -5,6 +5,7 @@ import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { BEACON_PAGE_KEY_PATTERN } from "@/server/member-area/page-visit-model";
 import { trackMemberPageVisit } from "@/server/member-area/page-visits";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Beacon das duas acoes do aluno que nao sao navegacao (docs/23 §5.2): { key: "content:<id>" } ao abrir
 // os detalhes de um produto e { key: "checkout:<id>" } ao clicar em Comprar. Mesmo registro das paginas
@@ -19,6 +20,9 @@ export const revalidate = 0;
 const INVALID_PAGE = "Pagina invalida.";
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

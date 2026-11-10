@@ -16,6 +16,7 @@ import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { licensingMode, trustedRoots } from "@/server/licensing/build-config";
 import { emissorClient } from "@/server/licensing/client";
+import { forgetLicenseStateMemory } from "@/server/licensing/current-state";
 import { LICENSE_STATE_MIGRATION, licenseStateDbOf } from "@/server/licensing/store-db";
 import { runLicenseTick } from "@/server/licensing/tick";
 import type { Job } from "./registry";
@@ -35,6 +36,11 @@ export const licenseCheckInJob: Job = {
         now: () => new Date(),
         signal: ctx.signal
       });
+
+      // A linha mudou nesta rodada (ao menos a ultima hora vista): o proximo pedido le a tabela de novo.
+      if (result.mode === "enforce") {
+        forgetLicenseStateMemory();
+      }
 
       if (result.mode === "enforce" && (result.result !== null || result.contended)) {
         console.info(

@@ -639,20 +639,21 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
 
   const room = stripComments(read("src/server/webinars/room-actions.ts"));
   assert.match(room, /^"use server";/);
-  assert.match(room, /runAdminAction\("messaging\.publish", sessionIdInputSchema, input, async[\s\S]*?openSession\(db, row\.id, now\)/, "abrir pede messaging.publish");
-  assert.match(room, /runAdminAction\("messaging\.publish", sessionIdInputSchema, input, async[\s\S]*?finishSession\(db, row\.id, now\)/, "encerrar pede messaging.publish");
-  assert.match(room, /runAdminAction\("messaging\.publish", saveSimulationSchema/);
-  assert.match(room, /runAdminAction\("messaging\.publish", removeStudentMessagesSchema/);
-  assert.match(room, /runAdminAction\("messaging\.write", moderateMessageSchema/);
-  assert.match(room, /runAdminAction\("messaging\.write", createReplaySessionSchema/);
+  // Pelo esqueleto dos Webinarios (runWebinarAction), com a classe de cada acao (docs/32 §11.3).
+  assert.match(room, /runWebinarAction\("messaging\.publish", "atendimento", sessionIdInputSchema, input, async[\s\S]*?openSession\(db, row\.id, now\)/, "abrir pede messaging.publish");
+  assert.match(room, /runWebinarAction\("messaging\.publish", "atendimento", sessionIdInputSchema, input, async[\s\S]*?finishSession\(db, row\.id, now\)/, "encerrar pede messaging.publish");
+  assert.match(room, /runWebinarAction\("messaging\.publish", "conteudo", saveSimulationSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.publish", "dever_legal", removeStudentMessagesSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.write", "atendimento", moderateMessageSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.write", "conteudo", createReplaySessionSchema/);
   for (const action of ["webinar.session_opened", "webinar.session_ended", "webinar.team_message", "webinar.moderated", "webinar.chat_mode", "webinar.polls_saved", "webinar.poll_launched", "webinar.poll_closed", "webinar.question_answered", "webinar.question_status", "webinar.simulation_saved", "webinar.replay_created", "webinar.replay_cancelled", "webinar.student_messages_removed"]) {
     assert.match(room, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }
 
   const script = stripComments(read("src/server/webinars/script-actions.ts"));
   assert.match(script, /^"use server";/);
-  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 7, "as sete acoes do roteiro pedem messaging.write");
-  assert.doesNotMatch(script, /runAdminAction\("messaging\.publish"/);
+  assert.equal(count(script, /runWebinarAction\("messaging\.write"/g), 7, "as sete acoes do roteiro pedem messaging.write");
+  assert.doesNotMatch(script, /run(?:Admin|Webinar)Action\("messaging\.publish"/);
   for (const action of ["webinar.script_saved", "webinar.script_imported", "webinar.script_exported", "webinar.chat_exported", "webinar.transcript_saved", "webinar.script_resolved", "webinar.script_fired"]) {
     assert.match(script, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }

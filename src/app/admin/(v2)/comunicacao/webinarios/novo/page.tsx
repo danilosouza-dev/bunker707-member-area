@@ -11,6 +11,8 @@ import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_KIND_PARAM, parseWebinarKindParam } from "@/server/webinars/editor-model";
 import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { loadWebinarEditorOptions } from "@/server/webinars/queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // Publicar roda Server Actions desta rota (cria as sessoes).
 export const maxDuration = 60;
@@ -32,6 +34,9 @@ function readNow() {
 // ?tipo=ao-vivo|gravada) e segue para os cards. So quem cria avisos (messaging.write) entra; o resto volta para a
 // lista. O card Gravacao recebe, lido no servidor, se a sala ao vivo existe neste ambiente (so o booleano).
 export default async function AdminNewWebinarPage({ searchParams }: PageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const [{ access }, params] = await Promise.all([requirePageArea("comunicacao"), searchParams]);
 
   if (!can(access, "messaging.write")) {

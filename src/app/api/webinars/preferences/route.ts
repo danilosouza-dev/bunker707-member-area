@@ -5,6 +5,8 @@ import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStu
 import { ok, parseRoomBody, recordAfterReply, roomErrorResponse, tooMany } from "@/server/webinars/room-route";
 import { readViewerPreferences, saveViewerPreferences } from "@/server/webinars/translation";
 import { viewerPrefsBodySchema } from "@/server/webinars/translation-schemas";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O idioma do chat das lives do aluno (docs/30 §1.6, fase 4f; Perfil › Privacidade e a sala). GET devolve
 // { chatLanguage, enabled } (nulo = como foi escrito); PUT { chatLanguage: "pt" | "en" | "es" | null } grava a escolha
@@ -25,6 +27,9 @@ async function user() {
 }
 
 export async function GET() {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await user();
   if ("response" in guarded) {
     return guarded.response;
@@ -37,6 +42,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await user();
   if ("response" in guarded) {
     return guarded.response;

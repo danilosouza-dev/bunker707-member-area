@@ -6,9 +6,15 @@ import { jobRegistry } from "@/server/jobs/registry";
 import { runJobsTick } from "@/server/jobs/run-tick";
 import { authorizeJobsTickRequest } from "@/server/jobs/tick-auth";
 import { MAX_TICK_PAYLOAD_BYTES, parseTickMetadata, shouldReadTickBody } from "@/server/jobs/tick-metadata";
+import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
+import { isFeatureEnabled } from "@/server/licensing/require-feature";
 
 // Chamada a cada minuto por pg_cron + pg_net (`public.enqueue_jobs_tick()`), com
 // `Authorization: Bearer <JOBS_TICK_TOKEN>`. Ver docs/04-arquitetura-tecnica.md, secao Jobs.
+// A licenca (docs/32 §11.3 e §11.8): o tick e dever legal (o que foi agendado antes roda em todo degrau, e a propria
+// conferencia da licenca roda aqui), e as tarefas de um modulo desligado ficam de fora. A situacao e lida uma vez, so
+// depois do token; no modo "off" nada e lido e toda tarefa roda, como antes.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -23,6 +29,9 @@ async function readTickMetadata(request: Request): Promise<Record<string, string
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const authorization = authorizeJobsTickRequest(
     request.headers.get("authorization"),
     process.env.JOBS_TICK_TOKEN
@@ -62,7 +71,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    const license = await getCurrentLicenseState();
     const result = await runJobsTick({
+      isFeatureEnabled: (feature) => isFeatureEnabled(license, feature),
       jobs: jobRegistry,
       metadata,
       supabase: getSupabaseAdminClient()
@@ -73,7 +84,8 @@ export async function POST(request: Request) {
         ok: result.ok,
         ran: result.ran,
         ...(result.failed.length ? { failed: result.failed } : {}),
-        ...(result.skipped.length ? { skipped: result.skipped } : {})
+        ...(result.skipped.length ? { skipped: result.skipped } : {}),
+        ...(result.featureOff.length ? { featureOff: result.featureOff } : {})
       },
       { headers: noStoreHeaders, status: result.ok ? 200 : 500 }
     );

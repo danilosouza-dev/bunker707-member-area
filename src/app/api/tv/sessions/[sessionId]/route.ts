@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth/guards";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { endTvSession, getOwnerTvSession } from "@/server/video/tv-sessions";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ sessionId: string }> };
 
@@ -30,6 +31,9 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
   if (auth.response || !auth.user) return noStore(auth.response!);
 

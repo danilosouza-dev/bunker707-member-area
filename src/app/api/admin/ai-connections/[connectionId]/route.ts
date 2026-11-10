@@ -8,6 +8,7 @@ import {
 } from "@/server/ai/provider-connections";
 import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ connectionId: string }> };
 
@@ -21,6 +22,9 @@ function noStore(response: NextResponse) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
@@ -52,6 +56,9 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);

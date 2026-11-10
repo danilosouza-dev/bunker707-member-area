@@ -26,6 +26,7 @@ import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platf
 import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
 import { popupPageKeyOf } from "@/server/communications/popup-display-model";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { NO_DISABLED_FEATURES, WEBINARS_FEATURE, type FeatureKey } from "@/server/licensing/features";
 
 type AppShellProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -34,6 +35,11 @@ type AppShellProps = {
   branding?: PlatformBrandingConfig;
   canUseAccessPreview?: boolean;
   children: React.ReactNode;
+  /**
+   * Modulos desligados na licenca (getAppShellData; docs/32 §11.8): o item do menu e a faixa "Ao vivo agora" dos
+   * Webinarios somem junto com as rotas deles, para o navegador nao bater num 404 a cada minuto. No modo "off", vazia.
+   */
+  disabledFeatures: readonly FeatureKey[];
   student: {
     avatarUrl?: string | null;
     fullName: string;
@@ -161,7 +167,7 @@ const LiveNowBanner = dynamic(
   { loading: () => null, ssr: false }
 );
 
-export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
+export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAccessPreview = false, children, disabledFeatures = NO_DISABLED_FEATURES, student }: AppShellProps) {
   const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
   // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
   const style = normalizeMemberStyle(branding);
@@ -180,7 +186,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   const popupPage = accessPreviewMode ? null : popupPageKeyOf(pathname);
   const popupHome = popupPage === "home";
   const headerLinks = menuInHeader
-    ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
+    ? (getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures).find((section) => section.id === "estudar")?.items ?? [])
     : [];
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
@@ -432,11 +438,14 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
         </div>
       </header>
 
-      {/* Faixa das lives (docs/30 §1.1): toda pagina do aluno, fora do "ver como"; a propria faixa some na sala. */}
-      {!accessPreviewMode ? <LiveNowBanner onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pathname={pathname} /> : null}
+      {/* Faixa das lives (docs/30 §1.1): toda pagina do aluno, fora do "ver como" e com o modulo ligado; some na sala. */}
+      {!accessPreviewMode && !disabledFeatures.includes(WEBINARS_FEATURE) ? (
+        <LiveNowBanner onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pathname={pathname} />
+      ) : null}
 
       <MemberSidebar
         accessPreviewMode={accessPreviewMode}
+        disabledFeatures={disabledFeatures}
         homeHref={homeHref}
         id={sidebarId}
         logoImage={logoImage}

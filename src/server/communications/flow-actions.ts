@@ -353,7 +353,7 @@ async function goLive(input: { access: AdminAccess; actorId: string; approved: b
  * aprovacao: gravar uma mudanca volta a rascunho e cancela o pedido (como o aviso).
  */
 export async function saveFlow(input: SaveFlowInput): Promise<ActionResult<SavedFlow>> {
-  return runAdminAction("messaging.write", saveFlowSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", saveFlowSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const draft = data.flow;
@@ -454,7 +454,7 @@ export async function saveFlow(input: SaveFlowInput): Promise<ActionResult<Saved
  * O fluxo de um aviso nao se ativa por aqui: ele comeca quando a notificacao sai.
  */
 export async function activateFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.write", flowStateSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", flowStateSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const loaded = await requireFlow(db, data.id);
@@ -492,7 +492,7 @@ export async function activateFlow(input: FlowStateInput): Promise<ActionResult<
 
 /** [messaging.publish_large] Aprova o pedido: ativa como se quem aprova tivesse ativado, recontando quem entra. */
 export async function approveFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.publish_large", flowStateSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.publish_large", "conteudo", flowStateSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const loaded = await requireFlow(db, data.id);
@@ -522,7 +522,7 @@ export async function approveFlow(input: FlowStateInput): Promise<ActionResult<F
 
 /** [messaging.publish_large] Devolve o pedido: o fluxo volta a rascunho. */
 export async function rejectFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.publish_large", flowStateSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish_large", "dever_legal", flowStateSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const loaded = await requireFlow(db, data.id);
     const flow = loaded.flow;
@@ -603,21 +603,21 @@ async function changeLiveState(input: {
 
 /** [messaging.publish] Pausa: ninguem entra e nada sai; as esperas continuam contando. */
 export async function pauseFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.publish", flowStateSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "dever_legal", flowStateSchema, input, ({ access, input: data, user }) =>
     changeLiveState({ access, actorId: user.id, audit: "communication.flow_paused", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active"], id: data.id, to: "paused" })
   );
 }
 
 /** [messaging.publish] Retoma (acima de 500 alunos agora, messaging.publish_large). */
 export async function resumeFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.publish", flowStateSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "conteudo", flowStateSchema, input, ({ access, input: data, user }) =>
     changeLiveState({ access, actorId: user.id, audit: "communication.flow_resumed", expectedUpdatedAt: data.expectedUpdatedAt, from: ["paused"], id: data.id, to: "active" })
   );
 }
 
 /** [messaging.publish] Encerra de vez: pendentes e reservadas canceladas, passagens encerradas. */
 export async function endFlow(input: FlowStateInput): Promise<ActionResult<FlowStateResult>> {
-  return runAdminAction("messaging.publish", flowStateSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "dever_legal", flowStateSchema, input, ({ access, input: data, user }) =>
     changeLiveState({ access, actorId: user.id, audit: "communication.flow_ended", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active", "paused"], id: data.id, to: "ended" })
   );
 }
@@ -685,7 +685,7 @@ function copyOfDraft(draft: FlowDraft, now: number): FlowDraft {
 
 /** [messaging.write] Novo rascunho "{nome} (cópia)" com os mesmos passos e conteudos (cada um com versao nova). */
 export async function duplicateFlow(input: FlowIdInput): Promise<ActionResult<{ id: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", flowIdInputSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", flowIdInputSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const loaded = await requireFlow(db, data.id);
@@ -720,7 +720,7 @@ export async function duplicateFlow(input: FlowIdInput): Promise<ActionResult<{ 
 
 /** [messaging.write] Exclui (some da lista): rascunho, aguardando aprovacao, encerrado ou concluido. */
 export async function deleteFlow(input: FlowIdInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("messaging.write", flowIdInputSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "dever_legal", flowIdInputSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const loaded = await requireFlow(db, data.id);
     const flow = loaded.flow;
@@ -771,7 +771,7 @@ export async function deleteFlow(input: FlowIdInput): Promise<ActionResult<{ id:
  * withdrawNotice da v1). Os testes da equipe ficam.
  */
 export async function withdrawFlowMessage(input: WithdrawFlowMessageInput): Promise<ActionResult<{ removed: number }>> {
-  return runAdminAction("messaging.publish", withdrawFlowMessageSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish", "dever_legal", withdrawFlowMessageSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
 
@@ -795,7 +795,7 @@ export async function withdrawFlowMessage(input: WithdrawFlowMessageInput): Prom
  * numeros e nao muda o fluxo). Repetir traz o teste de volta como novo; fica pelo menos 1 hora no sino.
  */
 export async function sendFlowMessageTest(input: FlowMessageTestInput): Promise<ActionResult<{ sent: true }>> {
-  return runAdminAction("messaging.write", flowMessageTestSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", flowMessageTestSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const rows = await fetchFlowNodes(db, [data.id]);
     const node = rows.find((row) => row.id === data.nodeId && row.kind === "message");

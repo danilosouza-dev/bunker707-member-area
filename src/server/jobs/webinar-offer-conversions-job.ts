@@ -13,6 +13,7 @@ import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { isMissingWebinarSchema, WEBINARS_OFFERS_MIGRATION } from "@/server/webinars/db";
 import { OFFER_LIMITS } from "@/server/webinars/model";
 import { runOfferConversions } from "@/server/webinars/offer-store";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_OFFER_CONVERSIONS_JOB_NAME = "webinar-offer-conversions";
@@ -66,6 +67,7 @@ export async function runOfferConversionsTick(ctx: JobContext): Promise<OfferCon
 }
 
 export const webinarOfferConversionsJob: Job = {
+  feature: WEBINARS_FEATURE,
   name: WEBINAR_OFFER_CONVERSIONS_JOB_NAME,
   async run(ctx) {
     await runOfferConversionsTick(ctx);

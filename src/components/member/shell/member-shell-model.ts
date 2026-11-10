@@ -10,6 +10,7 @@ import {
   type MemberNavigationKey
 } from "../../../lib/member-navigation";
 import { isWebinarRoomPath } from "../../../lib/webinar-paths";
+import { NO_DISABLED_FEATURES, featureVisible, type FeatureKey } from "../../../server/licensing/features";
 
 export type MemberShellLink = {
   /** Item da pagina atual (fundo claro, barra vermelha, `aria-current="page"`). */
@@ -41,14 +42,18 @@ function toShellLink(
   };
 }
 
-/** Grupos da barra lateral ("Estudar", "Conta e ajuda") a partir da fonte unica de rotas. */
+/**
+ * Grupos da barra lateral ("Estudar", "Conta e ajuda") a partir da fonte unica de rotas. `disabledFeatures`: os
+ * modulos desligados na licenca, que o servidor manda (getAppShellData); o item deles some (docs/32 §11.8).
+ */
 export function getMemberSidebarSections(
   pathname: string | null | undefined,
-  accessPreviewMode?: AccessPreviewMode
+  accessPreviewMode?: AccessPreviewMode,
+  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES
 ): MemberSidebarSection[] {
   return MEMBER_NAVIGATION_GROUPS.map((group) => ({
     id: group.id,
-    items: group.items.map((item) => toShellLink(item, pathname, accessPreviewMode)),
+    items: group.items.filter((item) => featureVisible(item.feature, disabledFeatures)).map((item) => toShellLink(item, pathname, accessPreviewMode)),
     label: group.label
   }));
 }

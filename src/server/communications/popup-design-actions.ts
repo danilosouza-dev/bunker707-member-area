@@ -74,7 +74,7 @@ function fontInUseMessage(count: number) {
 
 /** [messaging.write] Endereco assinado para o navegador enviar o video (mp4 ou webm, ate 15 MB) ao bucket. */
 export async function startPopupVideoUpload(input: { mimeType: string; sizeBytes: number }): Promise<ActionResult<PopupVideoUploadTicket>> {
-  return runAdminAction("messaging.write", startVideoSchema, input, async ({ input: data }) => {
+  return runAdminAction("messaging.write", "conteudo", startVideoSchema, input, async ({ input: data }) => {
     const path = newPopupVideoPath(data.mimeType);
     const ticket = await communicationsDb().storage.from(POPUP_VIDEO_BUCKET).createSignedUploadUrl(path);
 
@@ -93,7 +93,7 @@ export async function startPopupVideoUpload(input: { mimeType: string; sizeBytes
  * modelo). O resto fica para a limpeza de 30 dias. E o unico lugar que pede para apagar o recusado.
  */
 export async function finishPopupVideoUpload(input: { path: string }): Promise<ActionResult<PopupVideo>> {
-  return runAdminAction("messaging.write", finishVideoSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", finishVideoSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const { sizeBytes, video } = await inspectPopupVideo(db, data.path, {
       removeRefused: ({ createdAt }) => mayRemoveRefusedVideo(db, data.path, createdAt, new Date())
@@ -113,12 +113,12 @@ export async function finishPopupVideoUpload(input: { path: string }): Promise<A
 
 /** [messaging.write] A biblioteca de fontes (nao excluidas, por nome). */
 export async function listPopupFonts(): Promise<ActionResult<PopupFontOption[]>> {
-  return runAdminAction("messaging.write", noInputSchema, undefined, async () => listPopupFontLibrary(communicationsDb()));
+  return runAdminAction("messaging.write", "leitura", noInputSchema, undefined, async () => listPopupFontLibrary(communicationsDb()));
 }
 
 /** [messaging.write] Novo nome da fonte (1 a 60 caracteres). */
 export async function renamePopupFont(input: { id: string; name: string }): Promise<ActionResult<PopupFontOption>> {
-  return runAdminAction("messaging.write", renameFontSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", renameFontSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const { data: rows, error } = await db
       .from("communication_fonts")
@@ -143,7 +143,7 @@ export async function renamePopupFont(input: { id: string; name: string }): Prom
 
 /** [messaging.write] Exclui a fonte da biblioteca (deleted_at); recusa (409) quando um pop-up ou um modelo nao excluido usa. */
 export async function deletePopupFont(input: { id: string }): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("messaging.write", deleteFontSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "dever_legal", deleteFontSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const { data: found, error: findError } = await db.from("communication_fonts").select("id").eq("id", data.id).is("deleted_at", null).limit(1);
     assertNoDbError(findError, "Comunicacao: fonte a excluir");

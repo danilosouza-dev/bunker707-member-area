@@ -6,6 +6,7 @@ import { MAX_WEBHOOK_PAYLOAD_BYTES, parseResendWebhookEvent } from "@/server/ema
 import { isWebhookSecretConfigured, verifySvixSignature } from "@/server/email/webhook-signature";
 import { readBoundedText } from "@/server/http/bounded-text";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Webhook do Resend (entregue, bounce, reclamacao, falha), assinado no padrao Svix com
 // RESEND_WEBHOOK_SECRET. Ordem: segredo configurado (senao 503) -> assinatura sobre o corpo bruto
@@ -22,6 +23,9 @@ function reply(body: Record<string, unknown>, status: number) {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const { webhookSecret } = readEmailConfig(process.env);
 
   if (!isWebhookSecretConfigured(webhookSecret)) {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { FeatureKey } from "@/server/licensing/features";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
@@ -69,6 +70,10 @@ import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-jo
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
+//
+// As cinco tarefas dos Webinarios (`webinar-*`) declaram `feature: WEBINARS_FEATURE`: sem o modulo na licenca, o
+// agendador as pula (docs/32 §11.8). No modo "off" todo modulo esta ligado e todas rodam, como antes. A lista continua
+// uma constante montada sem ler o banco.
 
 export type JobContext = {
   // Cliente administrativo do Supabase (service role); usar somente no servidor.
@@ -84,6 +89,11 @@ export type JobContext = {
 
 export type Job = {
   name: string;
+  /**
+   * Modulo (feature) da licenca de que a tarefa faz parte (docs/32 §11.8). Sem o modulo ligado, o agendador
+   * (run-tick.ts) nem chama a tarefa: nada roda e nenhuma linha vai para job_runs. Sem o campo, a tarefa e do nucleo.
+   */
+  feature?: FeatureKey;
   run(ctx: JobContext): Promise<void>;
 };
 

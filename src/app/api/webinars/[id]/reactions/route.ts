@@ -2,6 +2,8 @@ import { reactionBodySchema, reactionsQuerySchema } from "@/server/webinars/chat
 import { recentReactionCounts, webinarsDb } from "@/server/webinars/room-queries";
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { sendStudentReaction } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // As reacoes da Sala (docs/30 §5.1 e D16): POST { sessionId, reaction, offsetMs? } grava uma reacao (no maximo 1 por
 // segundo e 20 por minuto por aluno e sessao, contadas no banco: 429 com Retry-After; na live, removido ou banido 409
@@ -15,6 +17,9 @@ export const revalidate = 0;
 const postSchema = reactionBodySchema.extend({ offsetMs: offsetMsFieldSchema });
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -34,6 +39,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

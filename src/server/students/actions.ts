@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { csvFileName, toCsv } from "@/lib/csv";
 import type { ActionResult } from "@/lib/action-result";
+import { actionClassOfBulkStudentAction, actionClassOfNewStudent } from "@/server/actions/action-classes";
 import { runAdminAction } from "@/server/actions/run-action";
 import { can } from "@/server/auth/roles";
 import { getAccessEmailRedirectTo } from "@/server/auth/site-origin";
@@ -100,7 +101,7 @@ async function requireStudent(userId: string) {
 }
 
 export async function createStudent(raw: unknown): Promise<ActionResult<CreatedStudentResult>> {
-  return runAdminAction("students.access", createStudentSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", actionClassOfNewStudent, createStudentSchema, raw, async ({ input, user }) => {
     const result = await provisionStudentAccess({
       ...MANUAL,
       actorId: user.id,
@@ -136,7 +137,7 @@ export async function createStudent(raw: unknown): Promise<ActionResult<CreatedS
 }
 
 export async function grantStudentAccess(raw: unknown): Promise<ActionResult<{ granted: number; missingProductIds: string[] }>> {
-  return runAdminAction("students.access", grantAccessSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "matricula", grantAccessSchema, raw, async ({ input, user }) => {
     const { db } = await requireStudent(input.userId);
     const result = await grantProductAccess(
       {
@@ -164,7 +165,7 @@ export async function grantStudentAccess(raw: unknown): Promise<ActionResult<{ g
 }
 
 export async function updateStudentAccess(raw: unknown): Promise<ActionResult<{ endsAt: string | null; status: string }>> {
-  return runAdminAction("students.access", accessActionSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "atendimento", accessActionSchema, raw, async ({ input, user }) => {
     const row = await applyAccessAction({
       ...MANUAL,
       action: input.action,
@@ -189,7 +190,7 @@ export async function updateStudentAccess(raw: unknown): Promise<ActionResult<{ 
 
 /** Convite de novo ou "redefinir senha": o mesmo e-mail, com link para criar a senha. */
 export async function sendStudentAccessEmail(raw: unknown): Promise<ActionResult<{ email: string }>> {
-  return runAdminAction("students.access", sendAccessEmailSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "dever_legal", sendAccessEmailSchema, raw, async ({ input, user }) => {
     const { account, db, profile } = await requireStudent(input.userId);
 
     if (!account) {
@@ -218,7 +219,7 @@ export async function sendStudentAccessEmail(raw: unknown): Promise<ActionResult
 }
 
 export async function updateStudentProfile(raw: unknown): Promise<ActionResult<{ fullName: string; phone: string | null }>> {
-  return runAdminAction("students.access", updateStudentProfileSchema, raw, async ({ access, input, user }) => {
+  return runAdminAction("students.access", "atendimento", updateStudentProfileSchema, raw, async ({ access, input, user }) => {
     const { account, db, profile } = await requireStudent(input.userId);
 
     // Nome da equipe so o dono muda (ninguem renomeia o dono para se passar por ele).
@@ -255,7 +256,7 @@ export async function updateStudentProfile(raw: unknown): Promise<ActionResult<{
  * (Configurações › Equipe cuida dos papeis) nem para a propria conta.
  */
 export async function deleteStudent(raw: unknown): Promise<ActionResult<{ deleted: true }>> {
-  return runAdminAction("students.delete", deleteStudentSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.delete", "dever_legal", deleteStudentSchema, raw, async ({ input, user }) => {
     const { account, db, profile } = await requireStudent(input.userId);
     const email = normalizeEmail(profile?.email ?? account?.email ?? "");
 
@@ -293,7 +294,7 @@ export async function deleteStudent(raw: unknown): Promise<ActionResult<{ delete
 }
 
 export async function searchStudentOptions(raw: unknown): Promise<ActionResult<StudentOption[]>> {
-  return runAdminAction("students.read_basic", studentOptionsQuerySchema, raw, async ({ input }) =>
+  return runAdminAction("students.read_basic", "leitura", studentOptionsQuerySchema, raw, async ({ input }) =>
     listStudentOptions({ productId: input.productId ?? null, q: input.q })
   );
 }
@@ -304,7 +305,7 @@ export async function searchStudentOptions(raw: unknown): Promise<ActionResult<S
  * ---------------------------------------------------------------------------------------------- */
 
 export async function saveStudentSegment(raw: unknown): Promise<ActionResult<StudentSavedSegment>> {
-  return runAdminAction("students.access", saveSegmentSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "leitura", saveSegmentSchema, raw, async ({ input, user }) => {
     // Uma semana fixa do ciclo de vida nao e um segmento reutilizavel: sai ao salvar.
     const { group: _group, week: _week, ...reusable } = input.params;
     void _group;
@@ -325,7 +326,7 @@ export async function saveStudentSegment(raw: unknown): Promise<ActionResult<Stu
 }
 
 export async function deleteStudentSegment(raw: unknown): Promise<ActionResult<{ deleted: true }>> {
-  return runAdminAction("students.access", deleteSegmentSchema, raw, async ({ input }) => {
+  return runAdminAction("students.access", "leitura", deleteSegmentSchema, raw, async ({ input }) => {
     await deleteSegment(studentsDb(), input.id);
     revalidatePath("/admin/alunos");
 
@@ -334,7 +335,7 @@ export async function deleteStudentSegment(raw: unknown): Promise<ActionResult<{
 }
 
 export async function createCohort(raw: unknown): Promise<ActionResult<StudentCohort>> {
-  return runAdminAction("students.access", createCohortSchema, raw, async ({ input }) => {
+  return runAdminAction("students.access", "conteudo", createCohortSchema, raw, async ({ input }) => {
     const db = studentsDb();
     const existing = (await fetchCohorts(db)).find((cohort) => cohort.name.trim().toLocaleLowerCase("pt-BR") === input.name.toLocaleLowerCase("pt-BR"));
 
@@ -347,7 +348,7 @@ export async function createCohort(raw: unknown): Promise<ActionResult<StudentCo
 }
 
 export async function setStudentCohort(raw: unknown): Promise<ActionResult<{ cohortId: string | null }>> {
-  return runAdminAction("students.access", setStudentCohortSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "atendimento", setStudentCohortSchema, raw, async ({ input, user }) => {
     const { db } = await requireStudent(input.userId);
     await setCohortMembership(db, { actorId: user.id, cohortId: input.cohortId, productId: input.productId, userId: input.userId });
     await recordEvent(db, {
@@ -365,7 +366,7 @@ export async function setStudentCohort(raw: unknown): Promise<ActionResult<{ coh
 
 /** Um lote (ate 25 alunos) de uma acao em massa; o cliente itera com barra de progresso (teto 200). */
 export async function runBulkStudentAction(raw: unknown): Promise<ActionResult<BulkBatchResult>> {
-  return runAdminAction("students.access", bulkActionSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", actionClassOfBulkStudentAction, bulkActionSchema, raw, async ({ input, user }) => {
     const db = studentsDb();
     const result = await runBulkBatch(
       { ...MANUAL, actorId: user.id, batch: input, redirectTo: await getAccessEmailRedirectTo() },
@@ -403,7 +404,7 @@ export async function runBulkStudentAction(raw: unknown): Promise<ActionResult<B
 
 /** Desfazer de uma acao em massa: restaura exatamente o retrato anterior de cada acesso. */
 export async function undoBulkStudentAction(raw: unknown): Promise<ActionResult<{ restored: number }>> {
-  return runAdminAction("students.access", restoreEntitlementsSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "atendimento", restoreEntitlementsSchema, raw, async ({ input, user }) => {
     const db = studentsDb();
     const restored = await restoreEntitlements({ ...MANUAL, actorId: user.id, snapshots: input.snapshots }, db);
 
@@ -423,7 +424,7 @@ export async function undoBulkStudentAction(raw: unknown): Promise<ActionResult<
 
 /** Um lote (ate 25 linhas) da importacao; o cliente envia os lotes em sequencia com progresso. */
 export async function importStudentsBatch(raw: unknown): Promise<ActionResult<ImportBatchResult>> {
-  return runAdminAction("students.access", importBatchSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "conteudo", importBatchSchema, raw, async ({ input, user }) => {
     const db = studentsDb();
     const importedLastHour = await countImportedLastHour(db, user.id);
 
@@ -477,7 +478,7 @@ export async function importStudentsBatch(raw: unknown): Promise<ActionResult<Im
 
 /** CSV da lista (filtro atual ou selecao). O navegador baixa o texto; nada passa pelo endereco. */
 export async function exportStudentsCsv(raw: unknown): Promise<ActionResult<{ csv: string; fileName: string; rows: number }>> {
-  return runAdminAction("students.export", exportQuerySchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.export", "dever_legal", exportQuerySchema, raw, async ({ input, user }) => {
     const params = normalizeStudentListParams(input.params);
     const rows = await listStudentsForExport({ ids: input.ids, params });
     const csv = toCsv(STUDENT_EXPORT_HEADERS, rows.map(studentExportRowToCells));

@@ -6,6 +6,7 @@ import { hideBodySchema } from "@/server/communications/schemas";
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Excluir notificação" do proprio sino e o "Desfazer" (v3a, docs/24 §1.3): { hidden: true | false }. Some
 // so para este aluno: da lista, dos numeros, do "Marcar todas" e do "abriu o sino"; continua "recebeu"
@@ -22,6 +23,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 const INVALID_REQUEST = "Pedido invalido.";
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

@@ -412,7 +412,7 @@ test("publicar com a versao lida atualiza; versao velha vira 409 sem gravar nem 
 test("analista (sem storefront.write) recebe 403 e nada e gravado", async () => {
   const db = createSettingsDb();
   actionStubs.db = db;
-  assert.match(loginActionsSource, /runAdminAction\("storefront\.write", saveLoginPageSchema/);
+  assert.match(loginActionsSource, /runAdminAction\("storefront\.write", "dever_legal", saveLoginPageSchema/);
 
   Object.defineProperty(actionStubs, "role", {
     configurable: true,

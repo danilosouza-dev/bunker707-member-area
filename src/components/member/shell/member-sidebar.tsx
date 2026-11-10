@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { PlatformLogo } from "@/components/platform-logo";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import type { FeatureKey } from "@/server/licensing/features";
 import { cn } from "@/lib/utils";
 import { getMemberSidebarSections } from "./member-shell-model";
 import { memberNavigationIcons } from "./member-navigation-icons";
@@ -18,6 +19,8 @@ import { memberNavigationIcons } from "./member-navigation-icons";
 
 type MemberSidebarProps = {
   accessPreviewMode?: AccessPreviewMode;
+  /** Modulos desligados na licenca (o servidor manda): o item deles some (docs/32 §11.8). */
+  disabledFeatures?: readonly FeatureKey[];
   homeHref: string;
   id: string;
   /** Logo da escola; texto quando vazio. */
@@ -38,6 +41,7 @@ const focusableSelector =
 
 export function MemberSidebar({
   accessPreviewMode,
+  disabledFeatures,
   homeHref,
   id,
   logoImage,
@@ -50,7 +54,7 @@ export function MemberSidebar({
 }: MemberSidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
-  const sections = getMemberSidebarSections(pathname, accessPreviewMode);
+  const sections = getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures);
 
   // Abrir foca o primeiro item; fechar devolve o foco ao botao do menu (se ele estava na gaveta).
   useEffect(() => {

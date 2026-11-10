@@ -3,7 +3,10 @@
 // icone Lucide pela chave `key`.
 //
 // Toda pagina listada aqui exige sessao (requireStudentPageUser ou requirePageUser na pagina e o prefixo
-// em proxy.ts).
+// em proxy.ts). O item de um modulo vendido a parte diz o modulo (`feature`): sem ele na licenca, o item some do
+// menu (docs/32 §11.8; quem esconde e member-shell-model.ts, com a lista que o servidor manda ao AppShell).
+
+import { WEBINARS_FEATURE, type FeatureKey } from "../server/licensing/features";
 
 export const MEMBER_ROUTES = {
   changePassword: "/alterar-senha",
@@ -35,6 +38,8 @@ export type MemberNavigationKey =
 export type MemberNavigationItem = {
   /** Texto curto para leitores de tela e tooltip quando o menu estiver recolhido. */
   description: string;
+  /** Modulo da licenca de que o destino faz parte; sem ele ligado, o item some. Sem o campo, o item e do nucleo. */
+  feature?: FeatureKey;
   href: MemberRouteHref;
   key: MemberNavigationKey;
   label: string;
@@ -56,7 +61,7 @@ export const MEMBER_NAVIGATION_GROUPS: readonly MemberNavigationGroup[] = [
       { description: "Tudo que você comprou ou recebeu", key: "purchases", label: "Minhas compras", href: "/minhas-compras" },
       { description: "Cursos, módulos e aulas salvos", key: "favorites", label: "Favoritos", href: "/favoritos" },
       { description: "Arquivos de apoio das suas aulas", key: "materials", label: "Materiais", href: "/materiais" },
-      { description: "Lives ao vivo e gravadas da escola", key: "webinars", label: "Webinários", href: "/webinarios" }
+      { description: "Lives ao vivo e gravadas da escola", feature: WEBINARS_FEATURE, key: "webinars", label: "Webinários", href: "/webinarios" }
     ],
     label: "Estudar"
   },

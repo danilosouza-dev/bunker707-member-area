@@ -24,7 +24,7 @@ const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
 const store = await import("../../src/server/licensing/store.ts");
 const { licenseStateDbOf } = await import("../../src/server/licensing/store-db.ts");
-const { getCurrentLicenseState } = await import("../../src/server/licensing/current-state.ts");
+const { forgetLicenseStateMemory, getCurrentLicenseState } = await import("../../src/server/licensing/current-state.ts");
 const { LICENSE_CHECK_IN_JOB_NAME, licenseCheckInJob } = await import("../../src/server/jobs/license-check-in-job.ts");
 const { runJobsTick } = await import("../../src/server/jobs/run-tick.ts");
 
@@ -87,6 +87,9 @@ function ativada(desdeAConferencia = HORA) {
 beforeEach(async () => {
   devolverAmbiente();
   await apagarLinha();
+  // A situacao do pedido guarda a linha lida por um minuto na memoria do processo (current-state.ts): cada teste
+  // comeca sem ela.
+  forgetLicenseStateMemory();
 });
 
 after(async () => {
@@ -245,6 +248,8 @@ test("a situação do pedido: no modo off só o modo, sem ler; no enforce lê a 
   assert.equal((await getCurrentLicenseState()).evaluation.degree, "nao_ativada", "sem linha: só a tela de ativação");
 
   await adaptador.write(ativada(), null);
+  // Quem grava de verdade e a tarefa do tick, que esquece a memoria depois de gravar; aqui o teste grava direto.
+  forgetLicenseStateMemory();
   const situacao = await getCurrentLicenseState();
   assert.equal(situacao.mode, "enforce");
   assert.equal(situacao.evaluation.degree, "ok");

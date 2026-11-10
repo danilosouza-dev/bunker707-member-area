@@ -5,6 +5,7 @@ import { isUuid, noStore, recordCommunicationEvents } from "@/server/communicati
 import { audioEventSchema } from "@/server/communications/schemas";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Audio do aviso no sino (docs/23): { event: "started" } no primeiro play (visto, lido, aberto e o comeco
 // do audio; devolve tambem os contadores, porque substitui o POST /read {ids}) e { event: "progress",
@@ -19,6 +20,9 @@ export const revalidate = 0;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

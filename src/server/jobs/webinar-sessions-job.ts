@@ -10,6 +10,7 @@ import "server-only";
 // a sessao que o tick nao abriu a tempo e encerrada aqui com a curva, nao pelo encerramento automatico de la.
 
 import { runSessionsTick, type WebinarSessionsResult } from "@/server/webinars/sessions-tick";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_SESSIONS_JOB_NAME = "webinar-sessions";
@@ -29,6 +30,7 @@ async function recordJobMetrics(ctx: JobContext, result: WebinarSessionsResult, 
 }
 
 export const webinarSessionsJob: Job = {
+  feature: WEBINARS_FEATURE,
   name: WEBINAR_SESSIONS_JOB_NAME,
   async run(ctx) {
     const startedAt = Date.now();

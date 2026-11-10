@@ -33,7 +33,7 @@ export type PopupFreeImageUpload = { asset: { height: number; kind: "image"; pat
 
 /** [messaging.write] Grava a imagem WebP do Livre e devolve caminho e medidas lidas pelo servidor (sem endereco). */
 export async function uploadPopupFreeImage(input: { image: string }): Promise<ActionResult<PopupFreeImageUpload>> {
-  return runAdminAction("messaging.write", uploadImageSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", uploadImageSchema, input, async ({ input: data, user }) => {
     const bytes = decodeWebpDataUrl(data.image);
 
     if (!bytes || bytes.length === 0) {

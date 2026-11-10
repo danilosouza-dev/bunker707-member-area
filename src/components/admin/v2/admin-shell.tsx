@@ -18,7 +18,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { fromAccessSnapshot, type AdminAccessSnapshot } from "@/server/auth/roles";
+import { NO_DISABLED_FEATURES, type FeatureKey } from "@/server/licensing/features";
 import { AccountMenu, type AdminAccount } from "./account-menu";
+import { AdminFeaturesProvider } from "./admin-features";
 import { AdminTopbar } from "./admin-topbar";
 import { ADMIN_PERIOD_PARAM, type AdminFilterProduct } from "./filters";
 import {
@@ -285,6 +287,8 @@ type AdminShellV2Props = {
   children: ReactNode;
   /** Contadores do menu (pilula ao lado do rotulo): Hoje e Comunidade. Zero ou ausente nao aparece. */
   counts?: AdminNavCounts;
+  /** Modulos desligados na licenca (o layout le no servidor; docs/32 §11.8): as telas deles somem do menu e da busca. */
+  disabledFeatures: readonly FeatureKey[];
   /** Barra lateral recolhida ao abrir a pagina (cookie lido no servidor). */
   initialCollapsed?: boolean;
   /** Opcoes do filtro Produto da barra superior. */
@@ -292,11 +296,19 @@ type AdminShellV2Props = {
 };
 
 /** Moldura do Admin Bunker707: barra lateral, barra superior e area principal. */
-export function AdminShellV2({ access: accessSnapshot, account, children, counts = emptyCounts, initialCollapsed = false, products = [] }: AdminShellV2Props) {
+export function AdminShellV2({
+  access: accessSnapshot,
+  account,
+  children,
+  counts = emptyCounts,
+  disabledFeatures = NO_DISABLED_FEATURES,
+  initialCollapsed = false,
+  products = []
+}: AdminShellV2Props) {
   const pathname = usePathname() ?? ADMIN_HOME_HREF;
   const fullScreen = isAdminFullScreenPath(pathname);
   const access = useMemo(() => fromAccessSnapshot(accessSnapshot), [accessSnapshot]);
-  const navItems = useMemo(() => visibleAdminNav(access), [access]);
+  const navItems = useMemo(() => visibleAdminNav(access, disabledFeatures), [access, disabledFeatures]);
   const homeHref = adminHomeHref(access);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -326,6 +338,7 @@ export function AdminShellV2({ access: accessSnapshot, account, children, counts
   );
 
   return (
+    <AdminFeaturesProvider disabledFeatures={disabledFeatures}>
     <AdminTopbarTitleProvider>
       <div className="min-h-dvh bg-[var(--surface-0)] font-sans text-[var(--text-primary)]" data-scope="admin">
         <a
@@ -396,5 +409,6 @@ export function AdminShellV2({ access: accessSnapshot, account, children, counts
         {fullScreen ? null : <AdminToaster />}
       </div>
     </AdminTopbarTitleProvider>
+    </AdminFeaturesProvider>
   );
 }

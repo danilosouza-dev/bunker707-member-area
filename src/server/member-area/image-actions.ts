@@ -20,7 +20,7 @@ import {
 
 /** [storefront.write] Confere medida e tamanho no cabecalho do WebP, envia ao Storage e devolve a URL. */
 export async function uploadMemberAreaImage(input: UploadMemberAreaImageInput): Promise<ActionResult<MemberAreaImageUploaded>> {
-  return runAdminAction("storefront.write", uploadMemberAreaImageSchema, input, async ({ input: data }) => {
+  return runAdminAction("storefront.write", "conteudo", uploadMemberAreaImageSchema, input, async ({ input: data }) => {
     const check = checkProductImage(data.slot, decodeWebpDataUrl(data.image));
 
     if (!check.ok) {

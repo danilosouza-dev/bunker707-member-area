@@ -5,6 +5,8 @@ import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { cleanEnvValue } from "@/lib/env-value";
 import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
+import { licensingMode } from "@/server/licensing/build-config";
+import { isFeatureStudentPage } from "@/server/licensing/features";
 
 const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
 const supabasePublicKey =
@@ -283,6 +285,16 @@ export async function proxy(request: NextRequest) {
   });
 
   const user = await getProxySessionUser(supabase);
+
+  // A pagina de um modulo vendido a parte, na imagem vendida (docs/32 §11.8): quem ainda nao entrou segue para a
+  // propria pagina, que responde 404 sem o modulo na licenca e, com ele, manda para o login (requireStudentPageUser).
+  // Assim o login nunca diz que um modulo desligado existe. O proxy nao le a licenca (ela mora no banco). No modo
+  // "off" (a nossa escola, a dev, a Vercel e os testes), o login de sempre.
+  const featurePageDecides = licensingMode() === "enforce" && isFeatureStudentPage(pathname);
+
+  if (needsUser && !user && featurePageDecides) {
+    return secureResponse(response, contentSecurityPolicy, true);
+  }
 
   if (needsUser && !user) {
     return redirectToLogin(request, contentSecurityPolicy);

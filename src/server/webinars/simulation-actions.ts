@@ -16,7 +16,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
@@ -53,7 +53,7 @@ function isMissingSimulation(error: unknown) {
 
 /** [messaging.write] As regras das sessoes gravadas do webinario (nada da semente); banco sem a 202610300003, o aviso. */
 export async function loadSessionSimulations(input: { webinarId: string }): Promise<ActionResult<SessionSimulationsData>> {
-  return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) => {
+  return runWebinarAction("messaging.write", "leitura", webinarIdSchema, input, async ({ input: data }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     const sessions = (await listSessionRows(db, [webinar.id])).filter((row) => row.kind === "simulated");
@@ -76,7 +76,7 @@ export async function loadSessionSimulations(input: { webinarId: string }): Prom
  * ligados sem nenhum item contam como desligados): a frase confere com o que fica no banco.
  */
 export async function saveSessionSimulation(input: SaveSessionSimulationInput): Promise<ActionResult<SavedSessionSimulation>> {
-  return runAdminAction("messaging.publish", saveSessionSimulationSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", saveSessionSimulationSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const nowMs = now.getTime();

@@ -12,6 +12,8 @@ import { getSessionConsoleData } from "@/server/webinars/console-queries";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_SESSION_PARAM, webinarAdminHref } from "@/server/webinars/editor-model";
 import { webinarTranslationEnabled } from "@/server/webinars/v4-env";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // Abrir, encerrar, soltar o roteiro e as acoes da sala ao vivo rodam Server Actions desta rota.
 export const maxDuration = 60;
@@ -38,6 +40,9 @@ function firstParam(value: string | string[] | undefined) {
 // nonce desta pagina (cabecalho x-nonce do src/proxy.ts; a CSP com 'strict-dynamic' aceita sem origem nova), e o
 // next.config.ts libera camera, microfone e tela para o Jitsi proprio nesta rota.
 export default async function AdminWebinarConsolePage({ params, searchParams }: PageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const [{ access, user }, { id }, query, requestHeaders] = await Promise.all([requirePageArea("comunicacao"), params, searchParams, headers()]);
 
   if (!can(access, "messaging.write")) {

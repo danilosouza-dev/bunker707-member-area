@@ -15,6 +15,7 @@ import "server-only";
 import { bunnyStreamFrom } from "@/server/webinars/bunny-stream";
 import { recorderDispatcherFrom } from "@/server/webinars/recorder-dispatch";
 import { runRecordingsTick, type WebinarRecordingsResult } from "@/server/webinars/recordings-tick";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_RECORDINGS_JOB_NAME = "webinar-recordings";
@@ -43,6 +44,7 @@ async function recordJobMetrics(ctx: JobContext, result: WebinarRecordingsResult
 }
 
 export const webinarRecordingsJob: Job = {
+  feature: WEBINARS_FEATURE,
   name: WEBINAR_RECORDINGS_JOB_NAME,
   async run(ctx) {
     const startedAt = Date.now();

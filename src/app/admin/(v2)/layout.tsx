@@ -13,6 +13,7 @@ import { PRODUCT_ACCENTS } from "@/server/catalog/model";
 import { listProductOptions } from "@/server/catalog/queries";
 import { countOverdueQuestions } from "@/server/community/counts";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
+import { getDisabledFeatures } from "@/server/licensing/guards";
 
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
@@ -32,7 +33,13 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
   const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
   // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
-  const [allCounts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(access), cookies()]);
+  // Os modulos desligados na licenca (docs/32 §11.8): o menu e a busca escondem as telas deles. No modo "off", nenhum.
+  const [allCounts, products, cookieStore, disabledFeatures] = await Promise.all([
+    readNavCounts(),
+    readProductFilterOptions(access),
+    cookies(),
+    getDisabledFeatures()
+  ]);
   const counts = communityScope(access) === null ? allCounts : { ...allCounts, comunidade: undefined };
   const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
 
@@ -41,6 +48,7 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
       access={toAccessSnapshot(access)}
       account={{ email: user.email ?? "", name: fullName, roleLabel: formatAdminRole(role) }}
       counts={counts}
+      disabledFeatures={disabledFeatures}
       initialCollapsed={sidebarCollapsed}
       products={products}
     >

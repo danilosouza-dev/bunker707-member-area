@@ -51,6 +51,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <div className="min-h-screen bg-[#141414] px-5 pb-16 pt-24 sm:px-8 lg:px-12">

@@ -15,6 +15,8 @@ import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { webinarsPageFallbackHref, webinarsStateOf } from "@/server/webinars/editor-model";
 import { getWebinarListNumbers } from "@/server/webinars/panel-queries";
 import { listWebinarsForAdmin } from "@/server/webinars/queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // Cancelar e excluir pela lista rodam Server Actions desta rota (cancelar enfileira os avisos de quem tinha vaga).
 export const maxDuration = 60;
@@ -39,6 +41,9 @@ function readNow() {
 // bloco). Pagina depois da ultima volta para a ultima que tem webinarios (ou para a primeira). Banco sem a migracao
 // das sessoes: o aviso no lugar da lista, nunca a tela quebrada.
 export default async function AdminWebinarsPage({ searchParams }: PageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const [{ access }, params] = await Promise.all([requirePageArea("comunicacao"), searchParams]);
   const now = readNow();
   const period = readAdminPeriod(params, new Date(now));

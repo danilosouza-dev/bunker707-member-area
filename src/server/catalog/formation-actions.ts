@@ -72,7 +72,7 @@ function failOnFormationError(error: { code?: string; message: string } | null, 
 
 /** [catalog.access] Curso existente (formato Curso, sem acessos ativos proprios) passa a fazer parte da formacao. */
 export async function addCourseToFormation(input: FormationCourseInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.access", formationCourseSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", "conteudo", formationCourseSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { course, parentFormationId } = await requireCourse(data.courseId, db);
@@ -98,7 +98,7 @@ export async function addCourseToFormation(input: FormationCourseInput): Promise
 
 /** [catalog.access] Tira da formacao sem apagar: vira curso avulso em Rascunho. */
 export async function removeCourseFromFormation(input: FormationCourseInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.access", formationCourseSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", "dever_legal", formationCourseSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { course, parentFormationId } = await requireCourse(data.courseId, db);
@@ -121,7 +121,7 @@ export async function removeCourseFromFormation(input: FormationCourseInput): Pr
 
 /** [catalog.access] Nova ordem dos cursos dentro da formacao. */
 export async function reorderFormationCourses(input: ReorderFormationCoursesInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.access", reorderFormationCoursesSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", "conteudo", reorderFormationCoursesSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { courses } = await fetchIncludedCourses(formation.id, db);

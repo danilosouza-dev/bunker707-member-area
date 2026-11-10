@@ -35,6 +35,7 @@ export default async function JourneyPage({ searchParams }: JourneyPageProps) {
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <JourneyView accessPreviewMode={accessPreviewMode} view={view} />

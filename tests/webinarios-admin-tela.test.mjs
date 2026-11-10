@@ -377,9 +377,10 @@ test("paginas: permissao, migracao pendente com o numero certo, loading e not-fo
   // Toda escrita passa pela service role e pela permissao certa.
   const actions = stripComments(read("src/server/webinars/actions.ts"));
   assert.match(actions, /^"use server";/);
-  assert.match(actions, /runAdminAction\("messaging\.write", saveWebinarSchema/);
-  assert.match(actions, /runAdminAction\("messaging\.publish", webinarIdSchema, input, async[\s\S]*?status: "published"/, "publicar pede messaging.publish");
-  assert.match(actions, /runAdminAction\("messaging\.publish", cancelWebinarSchema/);
+  // Pelo esqueleto dos Webinarios (runWebinarAction: o modulo na licenca), com a classe de cada acao (docs/32 §11.3).
+  assert.match(actions, /runWebinarAction\("messaging\.write", "conteudo", saveWebinarSchema/);
+  assert.match(actions, /runWebinarAction\("messaging\.publish", "conteudo", webinarIdSchema, input, async[\s\S]*?status: "published"/, "publicar pede messaging.publish");
+  assert.match(actions, /runWebinarAction\("messaging\.publish", "dever_legal", cancelWebinarSchema/);
   assert.match(actions, /queueWebinarCancelledNotices\(db, row\.id, now\)/);
   assert.match(actions, /queueWebinarRescheduledNotices\(db, (live|session)\.id, now\)/);
   assert.match(actions, /persistImageAsset\(data\.image, "webinars\/covers"\)/);

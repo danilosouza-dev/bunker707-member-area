@@ -35,6 +35,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <MaterialsView accessPreviewMode={accessPreviewMode} canUseAccessPreview={shellData.canUseAccessPreview} data={data} />

@@ -77,8 +77,8 @@ export function maxDegree(a: LicenseDegree, b: LicenseDegree): LicenseDegree {
 }
 
 /**
- * Classes de acao do admin (docs/32 §11.3). Cada acao declara uma; a guarda que obriga isso entra
- * junto com a ligacao do Verificador ao runAdminAction.
+ * Classes de acao do admin (docs/32 §11.3). Toda Server Action declara uma no runAdminAction e toda rota que muda
+ * algo, na guarda da rota (src/server/licensing/guards.ts); tests/licenca-classes.guard.test.mjs nao deixa acao sem.
  * - leitura: ver, buscar, exportar;
  * - atendimento: trocar senha, remover acesso, pedidos da LGPD, responder e moderar comentarios,
  *   operar a live ja marcada;

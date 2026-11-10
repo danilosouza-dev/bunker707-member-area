@@ -8,6 +8,7 @@ import type { ActionResult } from "@/lib/action-result";
 import type { LessonVideoConfig } from "@/lib/platform-types";
 import { detectLessonVideo } from "@/lib/video-detect";
 import { normalizeLessonVideoConfig } from "@/lib/video-embed";
+import { actionClassOfLessonsStatus } from "@/server/actions/action-classes";
 import { runAdminAction } from "@/server/actions/run-action";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { CatalogFieldError, CatalogNotFoundError, CatalogRuleError } from "./errors";
@@ -130,7 +131,7 @@ async function lessonPosition(lesson: LessonRow, db: CatalogDb) {
 
 /** [catalog.content] */
 export async function createModule(input: CreateModuleInput): Promise<ActionResult<ModuleNode>> {
-  return runAdminAction("catalog.content", createModuleSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", createModuleSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const product = await requireProductRow(data.productId, db);
 
@@ -184,7 +185,7 @@ export async function createModule(input: CreateModuleInput): Promise<ActionResu
 
 /** [catalog.content] Nome inline e frase de liberacao. */
 export async function updateModule(input: UpdateModuleInput): Promise<ActionResult<ModuleNode>> {
-  return runAdminAction("catalog.content", updateModuleSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", updateModuleSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const patch: Record<string, unknown> = {};
 
@@ -219,7 +220,7 @@ export async function updateModule(input: UpdateModuleInput): Promise<ActionResu
 
 /** [catalog.content] Uma ou varias aulas (Enter ou colar varias linhas); `skipped` = linhas sem titulo nem video reconhecido. */
 export async function createLessons(input: CreateLessonsInput): Promise<ActionResult<{ lessons: LessonNode[]; skipped: number }>> {
-  return runAdminAction("catalog.content", createLessonsSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", createLessonsSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const target = await requireModule(data.moduleId, db);
     const product = await requireProductRow(target.owner_id, db);
@@ -283,7 +284,7 @@ export async function createLessons(input: CreateLessonsInput): Promise<ActionRe
 
 /** [catalog.content] Painel da aula. */
 export async function updateLesson(input: UpdateLessonInput): Promise<ActionResult<LessonNode>> {
-  return runAdminAction("catalog.content", updateLessonSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", updateLessonSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const patch: Record<string, unknown> = {};
 
@@ -352,7 +353,7 @@ export async function updateLesson(input: UpdateLessonInput): Promise<ActionResu
 
 /** [catalog.content] Selecao multipla: Publicar / Despublicar. */
 export async function setLessonsStatus(input: SetLessonsStatusInput): Promise<ActionResult<{ ids: string[]; status: LessonStatus }>> {
-  return runAdminAction("catalog.content", setLessonsStatusSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", actionClassOfLessonsStatus, setLessonsStatusSchema, input, async ({ input: data }) => {
     const { data: updated, error } = await catalogDb()
       .from("lessons")
       .update({ status: data.status })
@@ -369,7 +370,7 @@ export async function setLessonsStatus(input: SetLessonsStatusInput): Promise<Ac
 
 /** [catalog.content] Excluir aula(s) ou modulo(s) com "Desfazer" (status "deleted"). */
 export async function softDeleteStructure(input: SoftDeleteStructureInput): Promise<ActionResult<StructureDeleted>> {
-  return runAdminAction("catalog.content", softDeleteStructureSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("catalog.content", "dever_legal", softDeleteStructureSchema, input, async ({ input: data, user }) => {
     const db = catalogDb();
     const table = data.kind === "module" ? "course_modules" : "lessons";
     const columns = data.kind === "module" ? "id,status" : "id,status,module_id";
@@ -408,7 +409,7 @@ export async function softDeleteStructure(input: SoftDeleteStructureInput): Prom
 
 /** [catalog.content] Desfazer a exclusao com o status devolvido por softDeleteStructure. */
 export async function restoreStructure(input: RestoreStructureInput): Promise<ActionResult<{ ids: string[] }>> {
-  return runAdminAction("catalog.content", restoreStructureSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", restoreStructureSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const table = data.kind === "module" ? "course_modules" : "lessons";
     const restored: string[] = [];
@@ -450,7 +451,7 @@ export async function restoreStructure(input: RestoreStructureInput): Promise<Ac
 
 /** [catalog.content] Ordem completa de modulos e aulas, de uma vez (arrastar, Alt+setas, "Mover para"). */
 export async function reorderContent(input: ReorderContentInput): Promise<ActionResult<ContentReordered>> {
-  return runAdminAction("catalog.content", reorderContentSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "conteudo", reorderContentSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.productId, db);
     assertReorderPayload(data.modules);
@@ -484,7 +485,7 @@ export async function reorderContent(input: ReorderContentInput): Promise<Action
 
 /** [catalog.content] Titulo, miniatura e duracao sugeridos pelo provedor (oEmbed), com o chip do provedor. */
 export async function previewVideo(input: VideoPreviewInput): Promise<ActionResult<VideoPreview>> {
-  return runAdminAction("catalog.content", videoPreviewSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", "leitura", videoPreviewSchema, input, async ({ input: data }) => {
     const detection = detectLessonVideo(data.videoInput, { allowEmbedCode: data.allowEmbedCode });
 
     if (!detection.ok) {

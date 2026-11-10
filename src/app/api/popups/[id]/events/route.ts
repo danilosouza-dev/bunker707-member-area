@@ -8,6 +8,7 @@ import { isUuid, noStore, recordCommunicationEvents } from "@/server/communicati
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Evento do aluno no pop-up: { event: "clicked" | "closed" | "dismissed" | "snoozed", via?, button? } (`via` so no
 // "closed": "x" | "outside" | "esc" | "page", padrao "x"; vai so para o historico). `button` so no "clicked" do Livre
@@ -41,6 +42,9 @@ function isCloseVia(value: unknown): value is PopupCloseVia {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

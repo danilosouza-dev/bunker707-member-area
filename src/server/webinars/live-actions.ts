@@ -13,7 +13,7 @@
 import { revalidatePath } from "next/cache";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { ActionFailure, ActionResult } from "@/lib/action-result";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { invalidateWebinars } from "./cache";
 import { canEndSession, canOpenSession } from "./console-model";
@@ -180,7 +180,7 @@ function dispatchFailure(outcome: DispatchRefused): RecorderDispatchFailure {
  * espera ate Comecar para todos (o navegador do Apresentador liga a sala de espera ao entrar). Ja na espera: nada muda.
  */
 export async function openLiveRoom(input: { sessionId: string }): Promise<ActionResult<LiveRoomOpened>> {
-  return runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     assertPublished(webinar);
@@ -228,7 +228,7 @@ export async function openLiveRoom(input: { sessionId: string }): Promise<Action
  * Apresentador desliga a sala de espera em seguida (salvo Sala de espera ligada ou sala trancada).
  */
 export async function startLiveSession(input: { sessionId: string }): Promise<ActionResult<LiveStarted>> {
-  return runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
@@ -260,7 +260,7 @@ export async function startLiveSession(input: { sessionId: string }): Promise<Ac
  * ainda estava na fila e descartado. O navegador do Apresentador ja parou a gravacao e fecha a sala para todos depois.
  */
 export async function endLiveSession(input: { sessionId: string }): Promise<ActionResult<LiveEnded>> {
-  return runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
@@ -297,7 +297,7 @@ export async function endLiveSession(input: { sessionId: string }): Promise<Acti
 
 /** [messaging.write] Trancar / Destrancar a sala (room_locked; o navegador liga a sala de espera com toggleLobby). */
 export async function setRoomLock(input: { locked: boolean; sessionId: string }): Promise<ActionResult<RoomLock>> {
-  return runAdminAction("messaging.write", roomLockSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", roomLockSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
 
@@ -351,7 +351,7 @@ async function presentsWebinar(db: WebinarsDb, webinar: WebinarRow, userId: stri
  * Os comandos da sala (a moderacao de audio, o vigia de 4 alunos) saem do navegador de quem apresenta depois do sucesso.
  */
 export async function setSelfUnmute(input: { allowed: boolean; sessionId: string }): Promise<ActionResult<SelfUnmuteSaved>> {
-  return runAdminAction("messaging.write", selfUnmuteSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", selfUnmuteSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
 
@@ -390,7 +390,7 @@ export async function setSelfUnmute(input: { allowed: boolean; sessionId: string
  * (`not_configured`) com a frase da reserva e nada muda; o GitHub recusando, `github_error`.
  */
 export async function prepareRecorder(input: { sessionId: string }): Promise<ActionResult<RecorderPrepared> | RecorderDispatchFailure> {
-  const result = await runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }): Promise<Dispatched<RecorderPrepared>> => {
+  const result = await runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }): Promise<Dispatched<RecorderPrepared>> => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     const status = recorderStatusOf(row.recorder_status);
@@ -454,7 +454,7 @@ export async function prepareRecorder(input: { sessionId: string }): Promise<Act
  * pedido de devolucao; o `gone` chega pelo webhook.
  */
 export async function releaseRecorder(input: { force?: boolean; sessionId: string }): Promise<ActionResult<RecorderReleased> | RecorderDispatchFailure> {
-  const result = await runAdminAction("messaging.publish", releaseRecorderSchema, input, async ({ input: data, user }): Promise<Dispatched<RecorderReleased>> => {
+  const result = await runWebinarAction("messaging.publish", "atendimento", releaseRecorderSchema, input, async ({ input: data, user }): Promise<Dispatched<RecorderReleased>> => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     const status = recorderStatusOf(row.recorder_status);
@@ -504,7 +504,7 @@ export async function releaseRecorder(input: { force?: boolean; sessionId: strin
  * `unavailable` ("Gravacao nao preparada para esta live" e a reserva). So com a live na espera ou no ar.
  */
 export async function requestRecording(input: { sessionId: string }): Promise<ActionResult<RecordingRequested>> {
-  return runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
@@ -554,7 +554,7 @@ export async function requestRecording(input: { sessionId: string }): Promise<Ac
  * a sessao ja tinha. A segunda chamada devolve a ancora que ja existe (`already`).
  */
 export async function markRecordingAnchor(input: { sessionId: string }): Promise<ActionResult<AnchorMarked>> {
-  return runAdminAction("messaging.publish", sessionActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionActionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     const outcome = await markRecordingAnchorRpc(db, row.id, new Date().toISOString());
@@ -583,7 +583,7 @@ export async function markRecordingAnchor(input: { sessionId: string }): Promise
  * (o console tambem manda o sinal RECORDING_SIGNAL para o efeito na hora). Ligar so com a live na espera ou no ar.
  */
 export async function setBrowserRecording(input: { on: boolean; sessionId: string }): Promise<ActionResult<BrowserRecordingSaved>> {
-  return runAdminAction("messaging.publish", browserRecordingSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", browserRecordingSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
 
@@ -643,7 +643,7 @@ async function saveSessionBan(input: { kind: BanKind; minutes?: 5 | 15 | 60 | nu
 /** [messaging.write] Silenciar no chat por 5 / 15 / 60 min ou ate o fim (nulo): o aluno assiste, mas nao escreve nem pergunta. */
 export async function muteInChat(input: { minutes?: 5 | 15 | 60 | null; reason?: string; sessionId: string; userId: string }): Promise<ActionResult<SessionBanSaved>> {
   const raw = input && typeof input === "object" ? { ...input, kind: "muted" } : input;
-  return runAdminAction("messaging.write", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "muted" }, user.id));
+  return runWebinarAction("messaging.write", "atendimento", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "muted" }, user.id));
 }
 
 /**
@@ -652,12 +652,12 @@ export async function muteInChat(input: { minutes?: 5 | 15 | 60 | null; reason?:
  */
 export async function kickFromSession(input: { reason?: string; sessionId: string; userId: string }): Promise<ActionResult<SessionBanSaved>> {
   const raw = input && typeof input === "object" ? { ...input, kind: "kicked", minutes: null } : input;
-  return runAdminAction("messaging.write", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "kicked", minutes: null }, user.id));
+  return runWebinarAction("messaging.write", "atendimento", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "kicked", minutes: null }, user.id));
 }
 
 /** [messaging.write] Desfazer o silencio ou o remover desta sessao (apaga a linha). */
 export async function undoSessionBan(input: { kind: BanKind; sessionId: string; userId: string }): Promise<ActionResult<SessionBanUndone>> {
-  return runAdminAction("messaging.write", unbanStudentSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", unbanStudentSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     const existed = await deleteSessionBan(db, { kind: data.kind, sessionId: row.id, userId: data.userId });
@@ -681,7 +681,7 @@ export async function undoSessionBan(input: { kind: BanKind; sessionId: string; 
  * (webinar_user_bans), e fica removido desta sessao (kicked). O navegador manda kickParticipant depois.
  */
 export async function banStudent(input: { reason?: string; sessionId: string; userId: string }): Promise<ActionResult<StudentBanned>> {
-  return runAdminAction("messaging.publish", banUserSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", banUserSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
     await assertStudentTarget(db, webinar, data.userId);
@@ -706,7 +706,7 @@ export async function banStudent(input: { reason?: string; sessionId: string; us
 
 /** [messaging.publish] Desfazer o banimento de todos os webinarios (apaga a linha de webinar_user_bans). */
 export async function unbanStudent(input: { reason?: string; userId: string }): Promise<ActionResult<StudentUnbanned>> {
-  return runAdminAction("messaging.publish", unbanUserSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", unbanUserSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const existed = await deleteUserBan(db, data.userId);
 
@@ -763,7 +763,7 @@ export async function attachRecording(input: {
   embedUrl?: string;
   sessionId: string;
 }): Promise<ActionResult<RecordingAttached>> {
-  return runAdminAction("messaging.write", attachRecordingSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", attachRecordingSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadLiveSession(db, data.sessionId);
@@ -819,7 +819,7 @@ export async function attachRecording(input: {
  * video = offset_ms - anchor_offset_ms). Nenhum offset de mensagem e reescrito; a auditoria leva o antes e o depois.
  */
 export async function alignChat(input: { anchorOffsetMs: number; recordingId: string }): Promise<ActionResult<ChatAligned>> {
-  return runAdminAction("messaging.write", alignChatSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", alignChatSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const recording = await fetchRecordingRowById(db, data.recordingId);
 

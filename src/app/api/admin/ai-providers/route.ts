@@ -7,6 +7,7 @@ import {
   saveAIProviderConfig
 } from "@/server/ai/provider-config";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,6 +31,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
@@ -56,6 +60,9 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
