@@ -70,17 +70,26 @@ const SEM_REGISTRO = "sem-registro-0004";
 const barraDe = (page: Page) => page.locator('[data-console-slot="bar"]');
 const consoleV2 = WEBINAR_COPY.consoleV2;
 
-/** Abre uma aba do painel do console pelo nome (o numero pode vir junto, "Mãos 1"). */
+/**
+ * Abre uma aba do painel do console pelo nome, no trilho a direita (docs/31 §10: o e2e roda no computador, onde as abas
+ * sao o trilho): o item da aba, que no clique abre o painel nela; se ela ja esta na tela, nada (o clique fecharia o
+ * painel). Devolve o conteudo da aba.
+ */
 async function abrirAba(page: Page, nome: string) {
-  const aba = page.getByRole("tab", { name: new RegExp(`^${nome}`) });
-  await aba.click();
-  await expect(aba).toHaveAttribute("aria-selected", "true");
-  return page.locator(`#${(await aba.getAttribute("aria-controls")) ?? ""}`);
+  const chave = (Object.entries(consoleV2.abas) as [string, string][]).find(([, rotulo]) => rotulo === nome)?.[0] ?? nome;
+  const item = page.locator(`[data-console-rail="${chave}"]`);
+  if ((await item.getAttribute("aria-expanded")) !== "true") {
+    await item.click();
+  }
+  await expect(item).toHaveAttribute("aria-expanded", "true");
+  const conteudo = page.locator(`#console-tab-${chave}`);
+  await expect(conteudo).toBeVisible();
+  return conteudo;
 }
 
-/** Escolhe uma entrada no ⋯ do painel do console e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
+/** Escolhe uma entrada no Mais do trilho e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
 async function abrirNoMais(page: Page, entrada: string) {
-  await page.locator("[data-console-more-trigger]").click();
+  await page.locator('[data-console-rail="mais"]').click();
   await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
   const secao = page.locator("section[data-console-more]").and(page.getByRole("group", { exact: true, name: entrada }));
   await expect(secao).toBeVisible();
@@ -624,6 +633,56 @@ test.describe("produtor", () => {
     await expect(page.locator(`[data-live-participant="${ALUNA_DE_ANTES}"]`)).toHaveCount(0);
   });
 
+  test("sair do console com a sala no ar (docs/31 §10): fora da sala a seta sai direto; dentro, a seta pede confirmacao, Continuar no console fica na sala, o Avançar do navegador tambem pergunta (Chromium) e Sair do console sai da sala (hangup) e so entao vai ao editor", async ({ browserName, page }) => {
+    const sair = consoleV2.sair;
+    const noConsole = new RegExp(`/sala\\?sessao=${sessaoId}$`);
+    const noEditor = new RegExp(`${webinarAdminHref(id)}$`);
+    const sala = await abrirConsole(page);
+    await sala.esperarMontada();
+    const voltar = page.locator('[data-console-slot="top"]').getByRole("link", { exact: true, name: WEBINAR_ADMIN_COPY.console.backToEditor });
+
+    // Fora da sala (o iframe montado, sem o videoConferenceJoined): a seta sai direto, sem janela.
+    await voltar.click();
+    await expect(page).toHaveURL(noEditor);
+
+    // O Voltar do navegador traz o console de novo, dentro do mesmo documento (como quem navega pelo app), e ele entra.
+    await page.goBack();
+    await expect(page).toHaveURL(noConsole);
+    await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+    await entrarComoApresentador(sala);
+    const montagens = await sala.montagens();
+
+    // Dentro da sala: a seta nao troca de pagina; a janela pergunta, com o primeiro foco no Continuar.
+    await voltar.click();
+    const janela = page.locator("[data-console-root] [data-console-portal]").getByRole("dialog", { name: sair.titulo });
+    await expect(janela).toBeVisible();
+    await expect(janela.getByRole("button", { exact: true, name: sair.ficar })).toBeFocused();
+    await expect(page).toHaveURL(noConsole);
+    await janela.getByRole("button", { exact: true, name: sair.ficar }).click();
+    await expect(janela).toHaveCount(0);
+    expect((await sala.comandos()).filter((item) => item.comando === "hangup"), "Continuar nao sai da sala").toEqual([]);
+    expect(await sala.montagens(), "o console e a sala continuam os mesmos").toBe(montagens);
+
+    // O Avançar (e o Voltar) do navegador entre paginas do app tambem pergunta onde o navegador deixa cancelar a ida
+    // (Navigation API, que o Chromium tem; sem ela, a ida acontece como antes).
+    if (browserName === "chromium") {
+      await page.evaluate(() => window.history.forward());
+      await expect(janela).toBeVisible();
+      await expect(page).toHaveURL(noConsole);
+      await page.keyboard.press("Escape");
+      await expect(janela).toHaveCount(0);
+      expect(await sala.montagens(), "o Esc fica na sala").toBe(montagens);
+    }
+
+    // Sair do console: o hangup sai antes da troca de pagina (quem assiste ve a saida, e nao o video parado).
+    const antes = (await sala.comandos()).length;
+    await voltar.click();
+    await janela.getByRole("button", { exact: true, name: sair.sair }).click();
+    await sala.esperarComando("hangup", { depoisDe: antes });
+    await sala.disparar("videoConferenceLeft", {});
+    await expect(page).toHaveURL(noEditor);
+  });
+
   test("o tema do console (docs/31 V2-12): escuro por padrao, Tema claro troca a raiz na hora e fica guardado ao recarregar; o iframe monta no tema guardado e trocar com a sala no ar nao remonta; a confirmacao de Encerrar live abre no portal da raiz", async ({ page }) => {
     const tema = WEBINAR_COPY.salaV2.tema;
     const sala = await abrirConsole(page);
@@ -711,11 +770,13 @@ test.describe("produtor", () => {
     await expect(maos).toBeVisible();
     await expect(maos.locator("[data-console-hands-count]")).toHaveText("1");
     await maos.click();
-    const abaMaos = page.getByRole("tab", { name: /^Mãos/ });
-    await expect(abaMaos).toHaveAttribute("aria-selected", "true");
-    await expect(abaMaos).toHaveText(`${consoleV2.abas.maos} 1`);
+    // No computador as abas sao o trilho (docs/31 §10): o item Mãos aberto, com o numero no nome, e o foco nele.
+    const abaMaos = page.locator('[data-console-rail="maos"]');
+    await expect(abaMaos).toHaveAttribute("aria-expanded", "true");
+    await expect(abaMaos).toHaveAccessibleName(consoleV2.trilho.comNumero(consoleV2.abas.maos, consoleV2.trilho.maos(1)));
     await expect(abaMaos).toBeFocused();
-    const painelMaos = page.locator(`#${(await abaMaos.getAttribute("aria-controls")) ?? ""}`);
+    await expect(page.locator("#console-panel-title")).toHaveText(new RegExp(`^${consoleV2.abas.maos}\\s*1$`));
+    const painelMaos = page.locator("#console-tab-maos");
     await expect(painelMaos.locator(`[data-live-hand="${ALUNA_NA_SALA}"]`)).toBeVisible();
 
     // Abaixar todas as mãos: um sinal so, com o destino vazio (cada aluno so abaixa a propria mao levantada). Pelo
@@ -737,10 +798,11 @@ test.describe("produtor", () => {
     await expect(linha.locator("[data-live-mic]")).toHaveAttribute("data-live-mic", "on");
     await expect(linha).toContainText(consoleV2.pessoas.midia.microfoneLigado);
 
-    // Lançar enquete abre o ⋯ › Enquetes (a secao na tela, o foco no ⋯ com o nome dela).
+    // Lançar enquete abre o Mais › Enquetes (a secao na tela, o foco no Mais do trilho com o nome dela).
     await barra.getByRole("button", { exact: true, name: consoleV2.barra.lancarEnquete }).click();
     await expect(page.locator('section[aria-label="Enquetes"]')).toBeVisible();
-    await expect(page.getByRole("button", { exact: true, name: consoleV2.maisEscolhido(consoleV2.entradas.enquetes) })).toBeFocused();
+    await expect(page.locator('[data-console-rail="mais"]')).toHaveAccessibleName(consoleV2.maisEscolhido(consoleV2.entradas.enquetes));
+    await expect(page.locator('[data-console-rail="mais"]')).toBeFocused();
     await expect(pessoas).toBeHidden();
 
     // O Gravar com o gravador por preparar abre o ⋯ › Gravação, onde fica o Preparar.
@@ -753,10 +815,16 @@ test.describe("produtor", () => {
     await expect(gravacao.getByRole("button", { exact: true, name: consoleAoVivo.prepararGravacao })).toBeVisible();
     expect((await sala.comandos()).slice(antes).some((item) => item.comando === "startRecording"), "abrir o painel nao grava").toBe(false);
 
-    // O X fecha o painel (montado) e o foco vai ao balao da barra.
+    // O X fecha o painel (montado) e o foco vai ao item do trilho do que estava na tela (o Mais, com a Gravação); o
+    // balao da barra so existe abaixo de lg (docs/31 §10). O item aberto, tocado de novo, fecha; outro item reabre.
     await page.getByRole("button", { exact: true, name: consoleV2.fecharPainel }).click();
     await expect(page.locator("#console-panel")).toBeHidden();
-    await expect(barra.getByRole("button", { exact: true, name: consoleV2.painel.mostrar })).toBeFocused();
+    await expect(page.locator('[data-console-rail="mais"]')).toBeFocused();
+    await expect(barra.getByRole("button", { exact: true, name: consoleV2.painel.mostrar })).toBeHidden();
+    await page.locator('[data-console-rail="chat"]').click();
+    await expect(page.locator("#console-panel")).toBeVisible();
+    await page.locator('[data-console-rail="chat"]').click();
+    await expect(page.locator("#console-panel")).toBeHidden();
     expect(await sala.montagens(), "abrir e fechar o painel nao remonta a sala").toBe(1);
   });
 

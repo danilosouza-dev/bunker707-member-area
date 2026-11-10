@@ -337,3 +337,32 @@ test("o offset do roteiro corta no encerramento: depois do Encerrar, a fila fica
   const queue = console_.scriptQueue([late], {}, console_.consoleOffsetMs(ended, T0 + 3 * HOUR, 0));
   assert.equal(queue[0].passed, false, "o item depois do fim nao conta como passado");
 });
+
+test("consoleComment (docs/31 §10): o comentario do YouTube do console com o nome (Você na minha), o selo do papel ou da origem, a hora do relogio com o instante e o que o leitor de tela ouve; o Assistente so com o selo; no Replay sem hora", () => {
+  const live = { kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const message = (extra = {}) => ({ createdAt: "2026-11-05T23:42:00.000Z", displayName: "Ana M.", offsetMs: 0, role: "student", source: "audience", ...extra });
+
+  const aluna = console_.consoleComment({ ...live, message: message(), mine: false });
+  assert.deepEqual(aluna, { avatar: "person", name: "Ana M.", role: null, srAuthor: "Ana M., 20:42: ", time: { iso: "2026-11-05T23:42:00.000Z", label: "20:42", title: "20:42" } });
+
+  const minha = console_.consoleComment({ ...live, message: message({ displayName: "Produtor T.", role: "host", source: "team" }), mine: true });
+  assert.equal(minha.name, "Você");
+  assert.equal(minha.role, "Apresentador");
+  assert.equal(minha.srAuthor, "Você, Apresentador, 20:42: ");
+
+  // O Assistente: o nome igual ao selo, so o selo (como na sala) e o avatar dele.
+  const ia = console_.consoleComment({ ...live, message: message({ displayName: "Assistente", role: "ai", source: "ai" }), mine: false });
+  assert.equal(ia.avatar, "assistant");
+  assert.equal(ia.srAuthor, "Assistente, 20:42: ");
+
+  // A origem que so a equipe ve fica no lugar do papel (a persona do roteiro com o papel de quem apresenta diz Roteiro).
+  const gravada = { kind: "simulated", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const roteiro = console_.consoleComment({ ...gravada, message: message({ displayName: "Duda", offsetMs: 60_000, role: "host", source: "scripted" }), mine: false });
+  assert.equal(roteiro.role, WEBINAR_ADMIN_COPY.console.chat.sources.scripted);
+  assert.deepEqual(roteiro.time, { iso: "2026-11-05T23:01:00.000Z", label: "20:01", title: "20:01" }, "a gravada: a hora marcada mais o offset");
+
+  // No Replay, nenhuma hora (o payload nao traz o inicio da live original).
+  const replay = console_.consoleComment({ kind: "replay", message: message(), mine: false, scheduledAt: "2026-11-05T23:00:00.000Z" });
+  assert.equal(replay.time, null);
+  assert.equal(replay.srAuthor, "Ana M.: ");
+});

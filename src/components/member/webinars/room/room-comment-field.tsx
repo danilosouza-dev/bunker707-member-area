@@ -20,10 +20,12 @@ import { RoomPill } from "./room-pill";
 export type RoomCommentFieldProps = {
   /** A pilula Anonima no rodape (so nas Perguntas, quando a equipe deixou ligada). */
   allowAnonymous?: boolean;
+  /** O id do textarea (o console leva o foco a ele depois de uma acao do chat). */
+  id?: string;
   anonymous?: boolean;
   ariaLabel: string;
-  /** De quem e o campo: o nome para as iniciais; sem nome (antes do aceite), a pessoa. */
-  avatar: { name: string | null };
+  /** De quem e o campo: o nome para as iniciais; sem nome (antes do aceite), a pessoa; `team`, o icone da equipe (o console). */
+  avatar: { kind?: "person" | "team"; name: string | null };
   /** Enviando: o envio gira e fica desligado. */
   busy?: boolean;
   disabled?: boolean;
@@ -62,6 +64,7 @@ export function RoomCommentField({
   disabled = false,
   expanded,
   hint = null,
+  id,
   leading = null,
   maxLength,
   mode,
@@ -161,13 +164,14 @@ export function RoomCommentField({
     <form className="shrink-0 border-t border-room-panel-border p-4 max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]" onBlur={handleBlur} onSubmit={submit} ref={stripRef}>
       <div className="mr-4 flex items-start">
         {leading}
-        <RoomCommentAvatar kind={anonymousOn ? "anonymous" : "person"} name={avatar.name ?? undefined} />
+        <RoomCommentAvatar kind={anonymousOn ? "anonymous" : (avatar.kind ?? "person")} name={avatar.name ?? undefined} />
         <div className="ml-3 min-w-0 flex-1">
           <div className={cn("relative border-b", line === "draft" ? "border-room-field-line-draft" : "border-room-field-line")}>
             <textarea
               aria-label={ariaLabel}
               className="block w-full resize-none bg-transparent pb-1 text-base leading-[22px] text-room-fg outline-none placeholder:text-room-fg-subtle disabled:text-room-fg-disabled lg:text-sm lg:leading-5"
               disabled={disabled}
+              id={id}
               maxLength={maxLength}
               onBlur={() => setFocused(false)}
               onChange={(event) => {

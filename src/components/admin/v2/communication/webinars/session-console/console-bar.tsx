@@ -275,7 +275,8 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
           </Fragment>
         );
       case "panel":
-        return <RoomPanelToggle controls={CONSOLE_PANEL_ID} key={item} labels={copy.painel} onToggle={onTogglePanel} open={panelOpen} />;
+        // A partir de lg o trilho abre e fecha o painel (docs/31 §10, como na sala): o balao fica so abaixo de lg.
+        return <RoomPanelToggle className="lg:hidden" controls={CONSOLE_PANEL_ID} key={item} labels={copy.painel} onToggle={onTogglePanel} open={panelOpen} />;
       default:
         return null;
     }

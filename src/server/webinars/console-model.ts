@@ -5,7 +5,8 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
-import { chatRoleLabel, chatTimeLabel } from "../../lib/webinar-room-client";
+import { chatRoleLabel, chatTimeAt, chatTimeLabel, roleBadgeOnly } from "../../lib/webinar-room-client";
+import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDate } from "../../lib/webinar-time";
 import { WEBINAR_ADMIN_COPY } from "./editor-model";
 import {
@@ -279,6 +280,46 @@ export function consoleMessageMeta(input: { kind: WebinarSession["kind"]; messag
   const zeroMs = Date.parse(input.scheduledAt);
   const time = chatTimeLabel({ kind: input.kind, offsetMs: message.offsetMs, sentAt: message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
   return { origin, role, time };
+}
+
+/** O avatar do comentario no console (o RoomCommentAvatar da sala). */
+export type ConsoleCommentAvatar = "assistant" | "person" | "team";
+
+/** O que o comentario do YouTube do console precisa da mensagem (docs/31 §10): o autor, o selo, o avatar e a hora. */
+export type ConsoleComment = {
+  avatar: ConsoleCommentAvatar;
+  /** "Você" na minha; o nome de exibicao nas outras. */
+  name: string;
+  /** O selo tonal: a origem (Roteiro, Chat original, so para a equipe) ou o papel; nulo para o aluno. */
+  role: string | null;
+  /** O que o leitor de tela ouve antes do texto ("Ana M., 20:42: "). */
+  srAuthor: string;
+  /** A hora do comentario (a mesma do consoleMessageMeta, com o instante para o <time>); nula no Replay. */
+  time: { iso: string; label: string; title: string } | null;
+};
+
+/**
+ * O comentario do YouTube no chat do console (docs/31 §10, no lugar do balao do V2-9): a mesma linha do autor da sala
+ * (o nome sem arroba, o selo tonal e a hora), com a origem no lugar do papel e "Você" na minha. Com o nome igual ao
+ * selo (o Assistente), so o selo. A hora continua a do relogio (20:42), nao o tempo relativo da sala: quem modera
+ * compara a mensagem com o momento da live.
+ */
+export function consoleComment(input: {
+  kind: WebinarSession["kind"];
+  message: Pick<ChatMessage, "createdAt" | "displayName" | "offsetMs" | "role" | "source">;
+  mine: boolean;
+  scheduledAt: string;
+}): ConsoleComment {
+  const meta = consoleMessageMeta(input);
+  const role = meta.origin ?? meta.role;
+  const name = input.mine ? WEBINAR_COPY.salaV2.chat.voce : input.message.displayName;
+  const badgeOnly = roleBadgeOnly(name, role);
+  const zeroMs = Date.parse(input.scheduledAt);
+  const at = chatTimeAt({ kind: input.kind, offsetMs: input.message.offsetMs, sentAt: input.message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
+  const time = meta.time && at !== null ? { iso: new Date(at).toISOString(), label: meta.time, title: meta.time } : null;
+  const parts = (badgeOnly ? [role, meta.time] : [name, role, meta.time]).filter((part): part is string => Boolean(part));
+  const avatar: ConsoleCommentAvatar = input.message.role === "ai" ? "assistant" : badgeOnly && input.message.role === "team" ? "team" : "person";
+  return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts), time };
 }
 
 /** De onde saiu uma acao do chat do console: o card da fila ou o balao da lista, a posicao dele e a do botao no item. */

@@ -64,10 +64,10 @@ test("isAdminFullScreenPath: so o console da sessao de um webinario fica em tela
   assert.equal(nav.isAdminFullScreenPath(undefined), false);
 });
 
-test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o painel com a largura por faixa; sem palco, so o painel no meio com 720 px no maximo", () => {
+test("consoleSkeleton (docs/31 V2-13 e §10): com palco, a coluna do palco com o palco e a barra, o painel em cartao do YouTube com a largura da sala e o trilho a direita; sem palco, so o painel no meio com 720 px no maximo e sem trilho", () => {
   const live = layout.consoleSkeleton({ hasStage: true, panelOpen: true });
   const has = (classes, name) => classes.split(" ").includes(name);
-  for (const parte of ["stage", "bar", "stageColumn"]) {
+  for (const parte of ["stage", "bar", "stageColumn", "rail"]) {
     assert.equal(typeof live[parte], "string", `com palco: ${parte}`);
   }
   assert.match(live.stage, /(?:^| )bg-black(?: |$)/, "o palco preto nos dois temas");
@@ -80,21 +80,30 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.ok(!has(live.stage, "lg:min-h-0"), "sem o piso zero, que deixava o palco encolher a nada");
   assert.ok(has(live.stageColumn, "lg:overflow-y-auto"), "a coluna do palco rola por dentro a partir de lg");
   assert.ok(has(live.stageColumn, "relative"), "a coluna e a referencia do que fica por cima do palco e dos rotulos dela");
-  // Cada parte que rola e `relative`: sem isso os rotulos sr-only (absolute) tomam a pagina como referencia, esticam o
-  // documento por baixo da raiz de altura fixa e a pagina inteira rola para fora da tela (na gravada, 1594 px a 1280 x 720).
+  // O painel e a referencia dos rotulos sr-only dele (o corpo de dentro rola, console-panel.tsx).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
-  assert.ok(has(live.panel, "lg:overflow-y-auto"), "o painel rola por dentro");
-  // O painel rola por dentro (o overflow-x tambem fica auto): a folga de 4 px a direita guarda o anel de foco do X.
-  assert.ok(has(live.panel, "lg:pr-1"), "a folga do anel do X a direita");
-  // Os avisos do console abrem em cima, no meio, abaixo do topo (duas linhas abaixo de lg, 56 px a partir de lg).
-  assert.ok(has(live.root, "[--console-toast-top:7.5rem]") && has(live.root, "lg:[--console-toast-top:4.5rem]"), "a altura dos avisos abaixo do topo");
-  for (const largura of ["lg:w-80", "xl:w-[360px]", "2xl:w-[440px]"]) {
-    assert.ok(live.panel.split(" ").includes(largura), `o painel com ${largura}`);
+  // O cartao do YouTube a partir de lg: o fundo do painel, o contorno de 1 px e o raio 12, com a largura da sala.
+  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,514px)]", "lg:flex-none"]) {
+    assert.ok(has(live.panel, classe), `o painel com ${classe}`);
+  }
+  // Dentro do cartao, os cartoes do admin (SectionCard) ficam no fundo do proprio cartao: nunca um cartao escuro dentro dele.
+  assert.ok(has(live.panel, "[--surface-1:var(--room-panel)]") && has(live.panel, "[--surface-3:var(--room-panel)]"), "os cartoes de dentro no fundo do painel");
+  // O trilho: so a partir de lg, 48 px, a 16 px da borda (o recuo do corpo) e 8 px a mais depois do painel.
+  for (const classe of ["hidden", "lg:flex", "w-12", "lg:ml-2"]) {
+    assert.ok(has(live.rail, classe), `o trilho com ${classe}`);
+  }
+  // Os avisos do console abrem em cima, no meio, abaixo do topo (duas linhas abaixo de lg, 64 px a partir de lg).
+  assert.ok(has(live.root, "[--console-toast-top:7.5rem]") && has(live.root, "lg:[--console-toast-top:5rem]"), "a altura dos avisos abaixo do topo");
+  // Os cantos do YouTube no console inteiro: os botoes da sala e do admin em pilula, os cartoes de dentro com 12 px.
+  for (const classe of ["[--member-button-radius:9999px]", "[--member-cover-radius:12px]", "[&_[data-slot=button]]:rounded-full!"]) {
+    assert.ok(has(live.root, classe), `a raiz com ${classe}`);
   }
   assert.doesNotMatch(live.panel, /max-w-\[720px\]/);
   assert.match(live.root, /(?:^| )lg:h-dvh(?: |$)/, "a altura da janela a partir de lg");
   assert.match(live.root, /(?:^| )bg-room-bg(?: |$)/, "o fundo do tema, o mesmo atras do iframe");
-  assert.match(live.top, /(?:^| )lg:h-14(?: |$)/, "o topo de 56 px a partir de lg");
+  // O topo da sala: 64 px a partir de lg, sem fundo e sem borda.
+  assert.ok(has(live.top, "lg:h-16"), "o topo de 64 px a partir de lg");
+  assert.doesNotMatch(live.top, /(?:^| )(?:border-b|bg-room-surface)(?: |$)/, "o topo sem borda e sem fundo");
 
   // Fechado, o painel some (continua montado) e nada mais disputa o display com o `hidden`.
   assert.equal(layout.consoleSkeleton({ hasStage: true, panelOpen: false }).panel, "hidden");
@@ -103,15 +112,29 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.equal(gravada.stage, null);
   assert.equal(gravada.bar, null);
   assert.equal(gravada.stageColumn, null);
+  assert.equal(gravada.rail, null, "sem palco, sem trilho: as abas ficam dentro do painel");
   assert.ok(gravada.panel.split(" ").includes("max-w-[720px]"), "a coluna de ate 720 px");
   assert.ok(gravada.panel.split(" ").includes("mx-auto"), "no meio");
   assert.ok(has(gravada.panel, "relative"), "sem palco o painel tambem e a referencia dos rotulos dele");
-  assert.ok(has(gravada.panel, "lg:overflow-y-auto"), "sem palco o painel rola por dentro");
-  assert.ok(has(gravada.panel, "lg:pr-1"), "sem palco, a folga do anel do ⋯ a direita");
+  assert.ok(has(gravada.panel, "lg:bg-room-panel"), "sem palco, o mesmo cartao");
   assert.ok(has(gravada.root, "lg:overflow-hidden"), "a raiz nao rola a partir de lg: cada parte rola por dentro");
   assert.equal(layout.consoleSkeleton({ hasStage: false, panelOpen: false }).panel, gravada.panel, "sem palco o painel nunca fecha");
   assert.equal(layout.CONSOLE_PANEL_ID, "console-panel");
   assert.equal(layout.CONSOLE_SETTINGS_ID, "console-live-settings");
+});
+
+test("consoleRailStep (docs/31 §10): o item abre o painel nele; o item que ja esta na tela fecha o painel (so com palco); com o painel fechado, abre", async () => {
+  const { consoleRailStep } = await import("../src/server/webinars/console-v2-model.ts");
+  const chat = { tab: "chat" };
+  const perguntas = { tab: "perguntas" };
+  const enquetes = { more: "enquetes" };
+  assert.deepEqual(consoleRailStep({ closable: true, item: perguntas, panelShown: true, view: chat }), { panelOpen: true, view: perguntas }, "outra aba: abre nela");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: true, view: chat }), { panelOpen: false, view: chat }, "a mesma aba: fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: false, view: chat }), { panelOpen: true, view: chat }, "fechado: abre");
+  assert.deepEqual(consoleRailStep({ closable: false, item: chat, panelShown: true, view: chat }), { panelOpen: true, view: chat }, "sem palco o painel nunca fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: enquetes, panelShown: true, view: chat }), { panelOpen: true, view: enquetes }, "a entrada do Mais abre nela");
+  assert.deepEqual(consoleRailStep({ closable: true, item: enquetes, panelShown: true, view: enquetes }), { panelOpen: false, view: enquetes }, "a mesma entrada: fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: true, view: enquetes }), { panelOpen: true, view: chat }, "de uma entrada para uma aba: abre na aba");
 });
 
 test("formatWebinarDayMonthTime: \"30/10 às 20:00\" em Sao Paulo, sem o ano nem o dia da semana", () => {
