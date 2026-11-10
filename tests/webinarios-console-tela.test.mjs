@@ -280,13 +280,21 @@ test("topo (docs/31 V2-13 e §10): a raiz com o tema escuro, a seta de voltar ao
   assert.ok(!linha.includes("overflow-x-auto"), "a partir de lg nao rola");
   // O seletor de sessoes numa pilula tonal do YouTube; o Tema sempre o ultimo.
   // (a pilula e a caixa de fora, com o anel de foco so pelo teclado; o <select> nativo vai dentro, sem contorno proprio).
-  const pilula = markup.match(/<div class="([^"]*)">(?:<span aria-hidden="true" class="[^"]*\bbg-room-speaking\b[^"]*" data-console-on-air=""><\/span>)?<label class="sr-only" for="console-session">Sessão<\/label><select class="([^"]*)" data-own-focus="" id="console-session"/);
+  // Com a sessao no ar, o ponto verde fica por cima do <select> (sem pegar o clique), e o <select> e a pilula inteira.
+  const pilula = markup.match(/<div class="([^"]*)">(?:<span class="([^"]*)"><span aria-hidden="true" class="[^"]*\bbg-room-speaking\b[^"]*" data-console-on-air=""><\/span><\/span>)?<label class="sr-only" for="console-session">Sessão<\/label><select class="([^"]*)" data-own-focus="" id="console-session"/);
   assert.ok(pilula, "a pilula com o rotulo escondido e o select dentro");
   for (const classe of ["rounded-full", "bg-room-control", "h-10", "text-sm", "has-[select:focus-visible]:outline-room-focus", "max-w-72"]) {
     assert.ok(pilula[1].replace(/&amp;/g, "&").split(" ").includes(classe), `a pilula do seletor tem ${classe}`);
   }
   for (const classe of ["appearance-none", "bg-transparent", "outline-none"]) {
-    assert.ok(pilula[2].split(" ").includes(classe), `o select tem ${classe}`);
+    assert.ok(pilula[3].split(" ").includes(classe), `o select tem ${classe}`);
+  }
+  assert.ok(!pilula[1].split(" ").some((classe) => /^pl-/.test(classe)), "com a sessao no ar a pilula nao tem recuo proprio: o select comeca na borda esquerda");
+  for (const classe of ["pointer-events-none", "absolute"]) {
+    assert.ok((pilula[2] ?? "").split(" ").includes(classe), `o ponto verde fica por cima, sem pegar o clique (${classe})`);
+  }
+  for (const classe of ["rounded-full", "pl-7"]) {
+    assert.ok(pilula[3].split(" ").includes(classe), `o select e a pilula inteira, com o recuo que abre o lugar do ponto (${classe})`);
   }
   assert.ok(markup.indexOf('aria-label="Tema claro"') > markup.indexOf("Encerrar sessão"), "o Tema por ultimo");
 
@@ -310,6 +318,13 @@ test("topo (docs/31 V2-13 e §10): a raiz com o tema escuro, a seta de voltar ao
   assert.match(agendada, /Começa em/);
   assert.doesNotMatch(agendada, /Encerrar sessão/);
   assert.doesNotMatch(agendadaMarkup, /data-console-on-air=""/, "sem o ponto com a sessao escolhida fora do ar");
+  // Fora do ar, o mesmo: o select e a pilula inteira, com o recuo da pilula.
+  const foraDoAr = agendadaMarkup.match(/<div class="([^"]*)"><label class="sr-only" for="console-session">Sessão<\/label><select class="([^"]*)"/);
+  assert.ok(foraDoAr, "a pilula fora do ar");
+  assert.ok(!foraDoAr[1].split(" ").some((classe) => /^pl-/.test(classe)));
+  for (const classe of ["rounded-full", "pl-4"]) {
+    assert.ok(foraDoAr[2].split(" ").includes(classe), `o select fora do ar tem ${classe}`);
+  }
 });
 
 /** O item de uma mensagem no chat do console (o card da pendente ou o balao da lista), do <li> ao </li>. */
@@ -352,6 +367,14 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   assert.match(selectOf(desligado, "console-chat-mode"), /<option value="off" selected="">/);
   assert.match(selectOf(desligado, "console-slow-mode"), /^<select[^>]*disabled=""/, "o modo lento desligado com o chat desligado");
   assert.match(chat, /data-console-chat-waiting="">1 aguardando</, "quantas esperam a equipe, no cabecalho");
+  // O corpo do painel corta a partir de lg e o cabecalho do chat e o primeiro filho: o anel de foco das pilulas precisa de 4 px em cima.
+  assert.ok((markup.match(/<div class="([^"]*)" data-console-panel-body="">/)?.[1] ?? "").split(" ").includes("lg:overflow-y-auto"), "o corpo corta a partir de lg");
+  assert.ok((chat.match(/<div class="([^"]*)" data-console-chat-header="">/)?.[1] ?? "").split(" ").includes("lg:pt-1"), "4 px acima das pilulas a partir de lg: o anel de foco inteiro");
+  // O rotulo visivel (Quem escreve, Modo lento): a pilula com o recuo dela, o rotulo na tela e o select ate a borda direita.
+  const visivel = chat.match(/<div class="([^"]*)"><label class="[^"]*" for="console-chat-mode">Quem escreve:<\/label><select class="([^"]*)"/);
+  assert.ok(visivel, "o seletor com o rotulo visivel");
+  assert.ok(visivel[1].split(" ").includes("pl-3"));
+  assert.ok(visivel[2].split(" ").includes("rounded-r-full"));
 
   // A pendente sai da lista e vira o card ambar no topo: "Na moderação · nome · hora", o texto e os tres botoes.
   const pendente = chatItem(chat, "m-pendente");

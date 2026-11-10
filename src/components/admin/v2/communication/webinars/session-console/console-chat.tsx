@@ -359,7 +359,8 @@ export function ConsoleChat({
 
   return (
     <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1" ref={rootRef}>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3 lg:px-4" data-console-chat-header="">
+      {/* O corpo do painel corta a partir de lg e este cabecalho e o primeiro filho: as pilulas pedem 4 px em cima para o anel de foco. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3 lg:px-4 lg:pt-1" data-console-chat-header="">
         <CompactSelect
           disabled={modeBusy}
           id="console-chat-mode"

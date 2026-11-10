@@ -33,7 +33,8 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
   const name = language ? copy.idiomas[language] : null;
 
   return (
-    <div className={cn("flex min-h-11 flex-wrap items-center justify-between gap-x-2 border-b border-room-border px-3 text-xs text-room-fg-subtle", className)} data-testid="room-translation">
+    // Abaixo de lg o cartao da aba corta (max-lg:overflow-hidden) e a faixa e o primeiro filho: 4 px em cima e embaixo para o anel de foco da pilula.
+    <div className={cn("flex min-h-11 flex-wrap items-center justify-between gap-x-2 border-b border-room-border px-3 text-xs text-room-fg-subtle max-lg:py-1", className)} data-testid="room-translation">
       <span className="inline-flex min-w-0 items-center gap-1.5">
         <Languages aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2} />
         <span className="truncate">{active && name ? (state.showOriginal ? copy.chatOriginal : copy.chatTraduzido(name)) : copy.idiomaDaSala}</span>

@@ -448,7 +448,11 @@ test("o foco dos campos do console (docs/31 §10, ajuste do produtor de 10/11/20
   const pilula = ler("src/components/member/webinars/room/room-select-pill.tsx");
   assert.match(pilula, /has-\[select:focus-visible\]:outline-room-focus/);
   assert.match(pilula, /pointer \? null : RING/);
-  assert.match(pilula, /onPointerDown=\{\(\) => setPointer\(true\)\}/);
+  assert.match(pilula, /onMouseDown=\{\(\) => setPointer\(true\)\}/);
+  assert.doesNotMatch(semComentarios(pilula), /onPointerDown/, "o ponteiro que desce sem dar o foco (arrastar no toque, clique na pilula desabilitada) nao pode desligar o anel do teclado");
+  // Com o rotulo escondido, o <select> e a pilula inteira: o `leading` por cima, sem pegar o clique.
+  assert.match(pilula, /\{leading && labelHidden \? <span className=\{cn\("pointer-events-none absolute [^"]+", sizing\.lead\)\}>\{leading\}<\/span> : leading\}/);
+  assert.doesNotMatch(pilula, /labelHidden && !leading/);
   assert.match(pilula, /onKeyDown=\{\(\) => setPointer\(false\)\}/);
   assert.match(pilula, /onBlur=\{\(\) => setPointer\(false\)\}/);
   // Os seletores do console usam a pilula (nenhum <select> com o anel proprio no topo nem no chat).
