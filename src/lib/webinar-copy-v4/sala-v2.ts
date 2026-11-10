@@ -91,6 +91,8 @@ export const SALA_V2_COPY = {
     fioCheio: "Esta conversa chegou ao limite de respostas.",
     responder: "Responder",
     respostaEnviada: "Resposta enviada.",
+    /* O campo de responder fechou porque a pergunta deixou de aceitar resposta (reaberta, dispensada, apagada ou o fio cheio). */
+    respostaFechada: "Esta pergunta não aceita respostas agora.",
     soQuemPerguntou: "Só quem fez a pergunta e a equipe respondem aqui.",
     suaResposta: "Sua resposta",
     filtrar: "Filtrar perguntas",

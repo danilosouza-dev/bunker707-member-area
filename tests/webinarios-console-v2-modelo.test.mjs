@@ -475,7 +475,9 @@ test("consoleTabCounts com o fio (docs/30 §2.4): a respondida em que o aluno es
     { replies: [aluno, equipe], status: "answered" },
     { replies: [equipe, aluno], status: "answered" },
     { replies: [], status: "answered" },
-    { replies: [aluno], status: "dismissed" }
+    { replies: [aluno], status: "dismissed" },
+    // A equipe respondeu pelo campo de cima depois da ultima fala do aluno: nao conta.
+    { answeredAt: "2026-11-05T23:05:00.000Z", replies: [{ createdAt: "2026-11-05T23:02:00.000Z", role: "student" }], status: "answered" }
   ];
   assert.equal(v2.consoleTabCounts({ hands: 0, questions }).perguntas, 3, "a aberta e as duas em que o aluno escreveu por ultimo");
 });

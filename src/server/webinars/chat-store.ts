@@ -5,7 +5,7 @@
 
 import "server-only";
 
-import { isPendingMigrationError } from "../db/pending-migration";
+import { PendingMigrationError, isPendingMigrationError } from "../db/pending-migration";
 import { WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import {
   ATTENDANCE_COLUMNS,
@@ -540,35 +540,43 @@ export async function listQuestionRows(db: WebinarsDb, input: { limit?: number; 
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * As respostas do fio das perguntas de uma sessao, da mais antiga para a mais nova (no maximo 2000: 50 por pergunta
- * num painel de centenas de perguntas ja seria uma live fora da curva). Sem a 202611100001 nao ha fio: lista vazia, e
- * as perguntas seguem como antes.
+ * As respostas do fio das perguntas de uma sessao, da mais antiga para a mais nova, lidas em paginas de 1000 numa
+ * ordem total (created_at, id): o PostgREST corta qualquer resposta em 1000 linhas sem erro (supabase/config.toml,
+ * max_rows) e, na ordem crescente, o corte levaria as respostas mais novas. Sem a 202611100001 nao ha fio: lista
+ * vazia, e as perguntas seguem como antes.
  */
 export async function listQuestionReplyRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionReplyRow[]> {
-  const { data, error } = await db
-    .from("webinar_question_replies")
-    .select(QUESTION_REPLY_COLUMNS)
-    .eq("session_id", input.sessionId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(2000);
   try {
-    assertNoDbError(error, "Webinarios: o fio das perguntas");
+    return await fetchAll<QuestionReplyRow>(
+      (from, to) =>
+        db
+          .from("webinar_question_replies")
+          .select(QUESTION_REPLY_COLUMNS)
+          .eq("session_id", input.sessionId)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      "Webinarios: o fio das perguntas"
+    );
   } catch (failure) {
     if (isPendingMigrationError(failure)) {
       return [];
     }
     throw failure;
   }
-  return (data ?? []) as QuestionReplyRow[];
 }
 
 /** Quantas respostas (nao apagadas) o fio de uma pergunta ja tem. */
 export async function countQuestionReplyRows(db: WebinarsDb, questionId: string): Promise<number> {
   const { count, error } = await db.from("webinar_question_replies").select("id", { count: "exact", head: true }).eq("question_id", questionId).is("deleted_at", null);
   assertNoDbError(error, "Webinarios: tamanho do fio da pergunta");
-  return count ?? 0;
+  // HEAD numa tabela que ainda nao existe: o PostgREST responde 404 sem corpo e o postgrest-js entrega "sem erro e
+  // sem contagem". Com count: "exact" a contagem sempre vem (0 no fio vazio); sem ela, falta a 202611100001.
+  if (typeof count !== "number") {
+    throw new PendingMigrationError("Webinarios: tamanho do fio da pergunta", "webinar_question_replies sem contagem");
+  }
+  return count;
 }
 
 export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id">;

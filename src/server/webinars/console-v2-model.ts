@@ -346,7 +346,7 @@ export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: Sessi
  * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat fica sem numero na aba (o
  * "{n} aguardando" vai no cabecalho dele) e Pessoas tambem.
  */
-export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "replies" | "status">[] }): { maos: number; perguntas: number } {
+export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "answeredAt" | "replies" | "status">[] }): { maos: number; perguntas: number } {
   const hands = Number.isFinite(input.hands) ? Math.max(0, Math.floor(input.hands)) : 0;
   // O numero das Perguntas: as abertas e as respondidas em que o aluno escreveu por ultimo no fio (o que pede a equipe).
   return { maos: hands, perguntas: input.questions.filter((question) => question.status === "open" || questionAwaitsTeam(question)).length };

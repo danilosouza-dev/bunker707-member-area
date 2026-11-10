@@ -138,6 +138,15 @@ test("o fio no quadro (docs/30 §2.4): questionAwaitsTeam so na respondida em qu
   assert.equal(console_.questionAwaitsTeam({ status: "answered" }), false, "sem o fio (uma pergunta de antes)");
   assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "open" }), false, "a aberta ja pede a equipe pelo proprio estado");
   assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "dismissed" }), false);
+  // A resposta de cima depois da ultima fala do aluno (o "Falar com a equipe" respondido pelo campo de cima, ou Reabrir
+  // e responder de novo) tambem e a equipe respondendo.
+  const em = (minute) => new Date(T0 + minute * MIN).toISOString();
+  const alunoAs = (minute) => ({ createdAt: em(minute), role: "student" });
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: em(1), replies: [alunoAs(2)], status: "answered" }), true, "o aluno escreveu depois da resposta");
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: em(5), replies: [alunoAs(2)], status: "answered" }), false, "a equipe respondeu pelo campo de cima depois da ultima fala do aluno");
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: null, replies: [alunoAs(2)], status: "answered" }), true, "sem a hora da resposta, continua esperando");
+  // A hora do app (milissegundos) contra a do banco (microssegundos, +00:00): compara o instante, nunca o texto.
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: "2026-11-05T23:05:00.000Z", replies: [{ createdAt: "2026-11-05T23:04:59.999123+00:00", role: "student" }], status: "answered" }), false);
 
   const question = (id, status, upvotes, minute, replies = []) => ({ createdAt: new Date(T0 + minute * MIN).toISOString(), id, replies, status, upvotes });
   const board = console_.sortQuestionsForBoard([
@@ -145,13 +154,43 @@ test("o fio no quadro (docs/30 §2.4): questionAwaitsTeam so na respondida em qu
     question("esperando", "answered", 1, 5, [aluno]),
     question("aberta", "open", 4, 2),
     question("conversada", "answered", 8, 3, [aluno, equipe]),
+    { ...question("de-cima", "answered", 3, 4, [alunoAs(2)]), answeredAt: em(5) },
     question("dispensada", "dismissed", 7, 0)
   ]);
   assert.deepEqual(
     board.map((entry) => entry.id),
-    ["aberta", "esperando", "respondida", "conversada", "dispensada"],
+    ["aberta", "esperando", "respondida", "conversada", "de-cima", "dispensada"],
     "o que pede a equipe primeiro (por votos), depois as respondidas e as dispensadas"
   );
+});
+
+test("o fio no console: o campo de outra pergunta nao fecha quando o envio da anterior termina, e a resposta enviada nao arma de novo antes do retrato (replyDraftAfterSent e whileSettling)", async () => {
+  assert.equal(console_.replyDraftAfterSent({ draft: "oi", id: "q1" }, "q1"), null);
+  const outra = { draft: "rascunho da q2", id: "q2" };
+  assert.equal(console_.replyDraftAfterSent(outra, "q1"), outra, "o campo da q2, aberto no meio do envio da q1, fica");
+  assert.equal(console_.replyDraftAfterSent(null, "q1"), null);
+
+  let settling = [];
+  const set = (update) => {
+    settling = update(settling);
+  };
+  let calls = 0;
+  let release;
+  const work = () => {
+    calls += 1;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  const primeira = console_.whileSettling({ key: "reply:q1", set, settling, work });
+  assert.deepEqual(settling, ["reply:q1"], "ocupado do clique ate o retrato");
+  assert.equal(await console_.whileSettling({ key: "reply:q1", set, settling, work }), false, "o segundo clique no meio nao manda de novo");
+  assert.equal(calls, 1);
+  release(true);
+  assert.equal(await primeira, true);
+  assert.deepEqual(settling, []);
+  assert.equal(await console_.whileSettling({ key: "delete:r1", set, settling, work: async () => false }), false);
+  assert.deepEqual(settling, [], "a falha tambem solta a chave");
 });
 
 test("acoes de uma mensagem: liberar so a pendente, fixar so a liberada e nao fixada, promover so a da turma com aceite e ainda fora da linha mestre", () => {

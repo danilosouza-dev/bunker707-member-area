@@ -21,6 +21,8 @@ const offer = semComentarios(readFileSync(path.join(root, "src/components/member
 const hook = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/use-live-room.ts"), "utf8"));
 const chatPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-chat.tsx"), "utf8"));
 const roomPanel = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-panel.tsx"), "utf8"));
+const questionsTab = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-questions.tsx"), "utf8"));
+const replyField = semComentarios(readFileSync(path.join(root, "src/components/member/webinars/room/room-reply-field.tsx"), "utf8"));
 
 test("o painel do chat e o palco da live saem das regras puras: o takeover do celular so abaixo de lg, o painel por roomPanelShown e o esqueleto por liveSkeletonState", () => {
   assert.match(room, /const settingsTakeover = settingsShown && !desktop;/, "Configurações toma o lugar do chat so no celular");
@@ -156,4 +158,15 @@ test("as ligacoes da barra da live que o teste de tela nao alcanca: Reagir, Conf
   assert.match(room, /if \(shortcut === "react"\) \{\s*toggleReactions\(\);/, "o atalho R tambem");
   assert.match(room, /\} else if \(step === "close_popovers"\) \{\s*returnFocusFrom\(LIVE_REACTIONS_ID\);\s*setReactionsOpen\(false\);\s*closeSettings\(\);\s*closeViewMenu\(\);/, "o Esc fecha os tres, com o foco de volta ao botao");
   assert.match(room, /useLiveRoom\(\{\s*allowed,\s*canSwitchDevice,\s*container: frameRef,\s*deviceNames: DEVICE_NAMES,\s*frameTitle: WEBINAR_COPY\.aoVivo\.palco,\s*frameWidth: geometry\.frameWidth,\s*lobby: live\.lobby === true,\s*look,\s*nonce,/);
+});
+
+test("o campo de responder do fio ligado as regras puras (docs/30 §1.3): fecha no render quando a pergunta deixa de aceitar resposta (questionReplyGone), o Responder de novo nao apaga (questionReplyOpenStep), o Esc em todo o campo (replyFieldKey) e o foco de volta ao Responder (returnFocusFromReply)", () => {
+  assert.match(questionsTab, /if \(replyOpenId !== null && !replySending && \(!replyWritable \|\| questionReplyGone\(questions, replyOpenId\)\)\) \{\s*closeReply\(\);/);
+  assert.match(questionsTab, /canWrite: replyWritable,/);
+  assert.doesNotMatch(questionsTab, /useEffect\(\(\) => \{[^}]*closeReply\(\)/, "nunca num efeito: o lint recusa");
+  assert.match(questionsTab, /const next = questionReplyOpenStep\(\{ draft: replyDraft, openId: replyOpenId, status: replyStatus \}, questionId\);/);
+  assert.match(replyField, /<form className="flex items-start" data-room-reply-field="" onKeyDown=\{onKeyDown\} onSubmit=\{submit\}>/);
+  assert.doesNotMatch(replyField, /<textarea[^>]*onKeyDown/);
+  assert.match(replyField, /replyFieldKey\(\{ ctrl: event\.ctrlKey, inText: event\.target === areaRef\.current, key: event\.key, meta: event\.metaKey \}\)/);
+  assert.match(questionsTab, /if \(was && !replyOpenId\) \{\s*returnFocusFromReply\(tabRef\.current, document\.activeElement, document\.body, `\[data-room-question="\$\{was\}"\] \[data-room-reply-open\]`\);/);
 });

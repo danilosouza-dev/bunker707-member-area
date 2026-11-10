@@ -242,7 +242,10 @@ const comFio = (extra = {}, reply = responder()) =>
 
 test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na minha, o selo do papel da equipe), o botao conta todas e so quem perguntou tem o Responder", () => {
   const novas = WEBINAR_COPY.salaV2.perguntas;
-  assert.deepEqual([novas.responder, novas.adicioneResposta, novas.suaResposta], ["Responder", "Adicione uma resposta", "Sua resposta"]);
+  assert.deepEqual(
+    [novas.responder, novas.adicioneResposta, novas.suaResposta, novas.respostaFechada],
+    ["Responder", "Adicione uma resposta", "Sua resposta", "Esta pergunta não aceita respostas agora."]
+  );
   const html = comFio();
   const q6 = itemDe(html, "q6");
   // A minha pergunta com a minha foto; o Responder na linha de acoes, depois do numero, fechado.
@@ -460,4 +463,26 @@ test("o Sair da sala pergunta numa janela no centro (alertdialog modal sobre um 
     { foco: true, rotulo: sala.voltar },
     { foco: false, rotulo: sala.sair }
   ]);
+});
+
+test("o botao do fio com o campo de responder aberto: fecha o campo e o fio de uma vez; nunca troca o guardado por baixo (o fio fecharia sozinho depois do envio)", () => {
+  const minha = pergunta("q6", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), canReply: true, mine: true, replies: FIO, status: "answered" });
+  /** O clique no botao do fio, sem navegador: RoomQuestionItem -> o comentario -> o fio (RoomCommentThread). */
+  const clicar = (threadOpen, openId) => {
+    const trocas = [];
+    let cancelados = 0;
+    const item = questionsModule.RoomQuestionItem({ look: "comment", onToggleThread: (id) => trocas.push(id), onVote: noop, question: minha, reply: responder({ onCancel: () => (cancelados += 1), openId }), serverNowMs: AGORA, threadOpen });
+    const fio = item.type(item.props).props.thread;
+    assert.equal(fio.props.expanded, threadOpen || openId === "q6");
+    fio.props.onToggle();
+    return { cancelados, trocas };
+  };
+  // Aberto por padrao (a minha) e respondendo: fecha o campo e guarda "fechado", que e o que a tela mostra.
+  assert.deepEqual(clicar(true, "q6"), { cancelados: 1, trocas: ["q6"] });
+  // Aberto so por causa do campo (o aluno ja tinha ocultado): fechar o campo basta; trocar reabriria o fio.
+  assert.deepEqual(clicar(false, "q6"), { cancelados: 1, trocas: [] });
+  // Sem o campo, ou com o campo em outra pergunta, o clique so troca o guardado, como antes.
+  assert.deepEqual(clicar(true, null), { cancelados: 0, trocas: ["q6"] });
+  assert.deepEqual(clicar(false, null), { cancelados: 0, trocas: ["q6"] });
+  assert.deepEqual(clicar(true, "outra"), { cancelados: 0, trocas: ["q6"] });
 });

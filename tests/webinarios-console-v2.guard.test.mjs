@@ -458,3 +458,14 @@ test("o foco dos campos do console (docs/31 §10, ajuste do produtor de 10/11/20
     assert.doesNotMatch(fonte, /<select\b/, `${arquivo}: sem <select> escrito direto`);
   }
 });
+
+test("o fio no console (docs/30 §2.4): o campo de responder que sai com o foco nele devolve o foco ao Responder da pergunta (returnFocusFromReply), e o envio e a lixeira ficam ocupados ate o retrato novo (whileSettling)", () => {
+  const perguntas = semComentarios(fonte("console-questions.tsx"));
+  assert.match(perguntas, /if \(was && !replyingId\) \{\s*returnFocusFromReply\(paneRef\.current, document\.activeElement, document\.body, `\[data-console-question="\$\{was\}"\] \[data-console-reply-open\]`\);/);
+  assert.match(perguntas, /data-console-questions-pane="" ref=\{paneRef\}/);
+  assert.match(perguntas, /whileSettling\(\{ key: `reply:\$\{question\.id\}`, set: setSettling, settling, work: \(\) => onReply\(question\.id, text\) \}\)/);
+  assert.match(perguntas, /setReplying\(\(current\) => replyDraftAfterSent\(current, question\.id\)\)/);
+  assert.match(perguntas, /busy=\{busy \|\| settling\.includes\(`reply:\$\{question\.id\}`\)\}/);
+  // A lixeira awaita a acao inteira (o retrato incluso): o console devolve a promessa do run, sem o void.
+  assert.match(semComentarios(fonte("session-console.tsx")), /onDeleteReply=\{\(replyId: string\) =>\s*run\(`reply:\$\{replyId\}`/);
+});

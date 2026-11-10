@@ -68,9 +68,10 @@ const repliesRoute = await import("../src/app/api/webinars/[id]/questions/[qid]/
 const pollsRoute = await import("../src/app/api/webinars/[id]/polls/route.ts");
 const sessionRoute = await import("../src/app/api/webinars/[id]/session/route.ts");
 const registerRoute = await import("../src/app/api/webinars/[id]/register/route.ts");
-const { resetRoomLimits } = await import("../src/server/webinars/room-limits.ts");
+const { resetRoomLimits, takeReplyBurst } = await import("../src/server/webinars/room-limits.ts");
 const { CHAT_CONSENT_VERSION } = await import("../src/server/webinars/model.ts");
 const { CHAT_MESSAGES } = await import("../src/server/webinars/chat-schemas.ts");
+const { clearAuthorPhotoCache } = await import("../src/server/webinars/author-photos.ts");
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -222,6 +223,8 @@ function bancoFalso({ rpc = {}, tables = {} } = {}) {
       }
       if (state.range) result = result.slice(state.range[0], state.range[1] + 1);
       if (state.limit !== null) result = result.slice(0, state.limit);
+      // O teto do PostgREST (max_rows = 1000 em supabase/config.toml): a resposta corta em 1000 linhas, sem erro.
+      result = result.slice(0, 1000);
       return finish(result);
     }
 
@@ -640,62 +643,70 @@ test("D64, pagina antiga nas Perguntas e no fio: os tres pedidos respondem 400; 
 });
 
 test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta como sem aceite: a sessao diz consented false, as escritas pedem o aceite (409), a foto nao aparece para outro aluno, e aceitar de novo grava first_name_initial sem apelido", async () => {
-  const FOTO = "https://exemplo.test/ana.jpg";
-  for (const [modo, apelido, nomeAntigo] of [
-    ["nickname", "aninha", "aninha"],
-    ["anonymous", null, "Aninha das Antigas"]
-  ]) {
-    const { db, userId } = montar();
-    db.tables.profiles.find((row) => row.id === userId).avatar_url = FOTO;
-    db.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, consented_at: iso(Date.now() - HOUR), created_at: iso(Date.now() - HOUR), display_mode: modo, nickname: apelido, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: userId });
-    // Uma mensagem de antes, com o nome gravado na epoca (nao e o "Aluno {n}", que nunca leva foto de qualquer jeito).
-    const ANTIGA = randomUUID();
-    db.tables.webinar_chat_messages.push({ approved: true, author_user_id: userId, body: "de antes", created_at: iso(Date.now() - 1000), deleted_at: null, display_name: nomeAntigo, id: ANTIGA, kind: "message", master: false, offset_ms: 96_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: SESSION, source: "audience", webinar_id: WEBINAR });
-    const QUESTION = randomUUID();
-    db.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - 1000), body: "Tem certificado?", created_at: iso(Date.now() - 5000), deleted_at: null, display_name: nomeAntigo, id: QUESTION, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: userId });
+  // So a foto enviada pelo Perfil aparece na sala (avatars/{id}/arquivo, pela origem do nosso Supabase: roomPhotoUrl).
+  const origemAntes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    for (const [modo, apelido, nomeAntigo] of [
+      ["nickname", "aninha", "aninha"],
+      ["anonymous", null, "Aninha das Antigas"]
+    ]) {
+      const { db, userId } = montar();
+      const FOTO = `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${userId}/ana.webp`;
+      db.tables.profiles.find((row) => row.id === userId).avatar_url = FOTO;
+      db.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, consented_at: iso(Date.now() - HOUR), created_at: iso(Date.now() - HOUR), display_mode: modo, nickname: apelido, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: userId });
+      // Uma mensagem de antes, com o nome gravado na epoca (nao e o "Aluno {n}", que nunca leva foto de qualquer jeito).
+      const ANTIGA = randomUUID();
+      db.tables.webinar_chat_messages.push({ approved: true, author_user_id: userId, body: "de antes", created_at: iso(Date.now() - 1000), deleted_at: null, display_name: nomeAntigo, id: ANTIGA, kind: "message", master: false, offset_ms: 96_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: SESSION, source: "audience", webinar_id: WEBINAR });
+      const QUESTION = randomUUID();
+      db.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - 1000), body: "Tem certificado?", created_at: iso(Date.now() - 5000), deleted_at: null, display_name: nomeAntigo, id: QUESTION, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: userId });
 
-    const sessaoAntes = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
-    assert.equal(sessaoAntes.body.data.me.consented, false, `${modo}: a sala mostra a caixa do aceite de novo`);
-    assert.equal(sessaoAntes.body.data.me.displayName, null);
+      const sessaoAntes = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+      assert.equal(sessaoAntes.body.data.me.consented, false, `${modo}: a sala mostra a caixa do aceite de novo`);
+      assert.equal(sessaoAntes.body.data.me.displayName, null);
 
-    const semAceite = await enviar({ body: "oi" });
-    assert.equal(semAceite.status, 409, `${modo}: ${JSON.stringify(semAceite.body)}`);
-    assert.equal(semAceite.body.reason, "consent_required");
-    const perguntaSemAceite = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "E a apostila?", sessionId: SESSION }), contexto()));
-    assert.equal(perguntaSemAceite.status, 409);
-    assert.equal(perguntaSemAceite.body.reason, "consent_required");
-    const respostaSemAceite = await json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${QUESTION}/replies`, "POST", { body: "obrigada", sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: QUESTION }) }));
-    assert.equal(respostaSemAceite.status, 409);
-    assert.equal(respostaSemAceite.body.reason, "consent_required");
-    assert.equal(db.tables.webinar_chat_messages.filter((row) => row.author_user_id === userId).length, 1, "so a mensagem de antes");
-    assert.equal(db.tables.webinar_question_replies.length, 0);
-    assert.equal(db.tables.webinar_chat_consents[0].display_mode, modo, "a linha antiga continua como estava ate o aluno aceitar de novo");
+      const semAceite = await enviar({ body: "oi" });
+      assert.equal(semAceite.status, 409, `${modo}: ${JSON.stringify(semAceite.body)}`);
+      assert.equal(semAceite.body.reason, "consent_required");
+      const perguntaSemAceite = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "E a apostila?", sessionId: SESSION }), contexto()));
+      assert.equal(perguntaSemAceite.status, 409);
+      assert.equal(perguntaSemAceite.body.reason, "consent_required");
+      const respostaSemAceite = await json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${QUESTION}/replies`, "POST", { body: "obrigada", sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: QUESTION }) }));
+      assert.equal(respostaSemAceite.status, 409);
+      assert.equal(respostaSemAceite.body.reason, "consent_required");
+      assert.equal(db.tables.webinar_chat_messages.filter((row) => row.author_user_id === userId).length, 1, "so a mensagem de antes");
+      assert.equal(db.tables.webinar_question_replies.length, 0);
+      assert.equal(db.tables.webinar_chat_consents[0].display_mode, modo, "a linha antiga continua como estava ate o aluno aceitar de novo");
 
-    // Outro aluno le o chat: a foto de quem tem o aceite antigo nao aparece (as iniciais).
-    const autor = sessao.user;
-    sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
-    const ler = async (from, to) => (await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=${from}&to=${to}`), contexto()))).body.data.messages;
-    const antes = (await ler(90_000, 120_000)).find((message) => message.id === ANTIGA);
-    assert.equal(antes.displayName, nomeAntigo, "o que ja foi escrito aparece como foi gravado");
-    assert.equal(antes.avatarUrl, null, `${modo}: sem o aceite em dia, sem foto para os outros alunos`);
+      // Outro aluno le o chat: a foto de quem tem o aceite antigo nao aparece (as iniciais).
+      const autor = sessao.user;
+      sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
+      const ler = async (from, to) => (await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=${from}&to=${to}`), contexto()))).body.data.messages;
+      const antes = (await ler(90_000, 120_000)).find((message) => message.id === ANTIGA);
+      assert.equal(antes.displayName, nomeAntigo, "o que ja foi escrito aparece como foi gravado");
+      assert.equal(antes.avatarUrl, null, `${modo}: sem o aceite em dia, sem foto para os outros alunos`);
 
-    // O aluno aceita de novo (o texto de agora): o aceite passa a first_name_initial, sem apelido, e o nome e o dele.
-    sessao.user = autor;
-    const aceitou = await enviar({ body: "agora com o meu nome", ...comAceite });
-    assert.equal(aceitou.status, 201, JSON.stringify(aceitou.body));
-    assert.equal(aceitou.body.data.message.displayName, "Ana S.");
-    assert.equal(aceitou.body.data.message.avatarUrl, FOTO);
-    assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.consent_version, row.display_mode, row.nickname, row.revoked_at]), [[userId, CHAT_CONSENT_VERSION, "first_name_initial", null, null]]);
-    assert.deepEqual(eventos(db, "webinar_chat_consented").map((row) => row.metadata), [{ consent_version: CHAT_CONSENT_VERSION }]);
-    const sessaoDepois = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
-    assert.equal(sessaoDepois.body.data.me.consented, true);
-    assert.equal(sessaoDepois.body.data.me.displayName, "Ana S.");
+      // O aluno aceita de novo (o texto de agora): o aceite passa a first_name_initial, sem apelido, e o nome e o dele.
+      sessao.user = autor;
+      const aceitou = await enviar({ body: "agora com o meu nome", ...comAceite });
+      assert.equal(aceitou.status, 201, JSON.stringify(aceitou.body));
+      assert.equal(aceitou.body.data.message.displayName, "Ana S.");
+      assert.equal(aceitou.body.data.message.avatarUrl, FOTO);
+      assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.consent_version, row.display_mode, row.nickname, row.revoked_at]), [[userId, CHAT_CONSENT_VERSION, "first_name_initial", null, null]]);
+      assert.deepEqual(eventos(db, "webinar_chat_consented").map((row) => row.metadata), [{ consent_version: CHAT_CONSENT_VERSION }]);
+      const sessaoDepois = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+      assert.equal(sessaoDepois.body.data.me.consented, true);
+      assert.equal(sessaoDepois.body.data.me.displayName, "Ana S.");
 
-    sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
-    // A sessao comecou ha 10 min: a mensagem nova caiu perto dos 600 s do relogio do servidor.
-    const nova = (await ler(aceitou.body.data.message.offsetMs - 10_000, aceitou.body.data.message.offsetMs + 10_000)).find((message) => message.id === aceitou.body.data.message.id);
-    assert.equal(nova.avatarUrl, FOTO, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
-    sessao.user = autor;
+      sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
+      // A sessao comecou ha 10 min: a mensagem nova caiu perto dos 600 s do relogio do servidor.
+      const nova = (await ler(aceitou.body.data.message.offsetMs - 10_000, aceitou.body.data.message.offsetMs + 10_000)).find((message) => message.id === aceitou.body.data.message.id);
+      assert.equal(nova.avatarUrl, FOTO, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
+      sessao.user = autor;
+    }
+  } finally {
+    if (origemAntes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = origemAntes;
   }
 });
 
@@ -1212,4 +1223,251 @@ test("fase 4c: sem WEBINAR_ASSISTANT_ENABLED o chat e as perguntas seguem como a
   const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}`), contexto()));
   assert.deepEqual(lista.body.data.questions.map((question) => [question.body, question.answerSource, question.handoffRequested]), [["Tem certificado?", null, false]]);
   assert.ok(!db.calls.from.includes("webinar_ai_requests"));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * O fio de uma pergunta (docs/30 §1.3 e D63): POST /questions/[qid]/replies
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma pergunta respondida pela equipe na sessao (do aluno do teste, salvo outro dono). */
+function perguntaRespondida(db, userId, extra = {}) {
+  const id = randomUUID();
+  db.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - MIN), answered_by: null, answered_live: false, body: "Tem certificado?", created_at: iso(Date.now() - 2 * MIN), deleted_at: null, deleted_reason: null, display_name: "Ana S.", id, message_id: null, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: userId, ...extra });
+  return id;
+}
+
+async function responderNoFio(qid, body = "Obrigada!", extra = {}) {
+  return json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${qid}/replies`, "POST", { body, sessionId: SESSION, ...comAceite, ...extra }), { params: Promise.resolve({ id: WEBINAR, qid }) }));
+}
+
+/** O banco sem a 202611100001: webinar_question_replies responde como o postgrest-js responde a uma tabela que nao existe. */
+function semATabelaDoFio(db) {
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    if (name !== "webinar_question_replies") {
+      return from(name);
+    }
+    db.calls.from.push(name);
+    let head = false;
+    const chain = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            // HEAD: 404 sem corpo vira "sem erro e sem contagem"; GET e INSERT trazem o PGRST205.
+            const result = head
+              ? { count: null, data: null, error: null, status: 204 }
+              : { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_replies' in the schema cache" } };
+            return (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+          }
+          if (prop === "select") {
+            return (_columns, options) => {
+              if (options?.head) head = true;
+              return chain;
+            };
+          }
+          return () => chain;
+        }
+      }
+    );
+    return chain;
+  };
+}
+
+test("banco sem a 202611100001: responder no fio falha antes do aceite e da rajada (o aceite fica, nada no historico, as 5 vezes da rajada ficam)", async () => {
+  const { db, userId } = montar();
+  semATabelaDoFio(db);
+  const id = perguntaRespondida(db, userId);
+  db.tables.webinar_chat_consents.push({ consent_version: 1, created_at: iso(Date.now() - HOUR), display_mode: "first_name_initial", nickname: null, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: userId });
+
+  const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}`), contexto()));
+  assert.equal(lista.status, 200, JSON.stringify(lista.body));
+  const minha = lista.body.data.questions.find((question) => question.id === id);
+  assert.equal(minha.canReply, true, "o fio le vazio: o Responder continua");
+  assert.deepEqual(minha.replies, []);
+
+  const resposta = await responderNoFio(id);
+  assert.equal(resposta.status, 500);
+  assert.deepEqual(resposta.body, { error: "Não foi possível enviar a resposta." });
+  assert.equal(db.tables.webinar_chat_consents[0].consent_version, 1, "o aceite antigo fica como estava");
+  assert.equal(db.calls.writes.filter((write) => write.table === "webinar_chat_consents").length, 0);
+  assert.equal(eventos(db, "webinar_chat_consented").length, 0);
+  assert.deepEqual(
+    Array.from({ length: 5 }, () => takeReplyBurst(userId, SESSION).ok),
+    [true, true, true, true, true],
+    "a falha nao gastou a rajada"
+  );
+});
+
+test("o fio: a pergunta de outra sessao 404; a 6a resposta em 60 s 429 com Retry-After; palavra bloqueada 422; a 51a resposta 409 (o fio cheio); nada gravado nas recusadas", async () => {
+  const { db, userId } = montar();
+  const id = perguntaRespondida(db, userId);
+  const deOutraSessao = perguntaRespondida(db, userId, { session_id: REPLAY });
+  const fio = () => db.tables.webinar_question_replies ?? [];
+
+  const outra = await responderNoFio(deOutraSessao);
+  assert.equal(outra.status, 404, "a pergunta de outra sessao nao aparece nesta");
+  assert.equal(fio().length, 0);
+
+  for (let i = 0; i < 5; i += 1) {
+    const enviada = await responderNoFio(id, `resposta ${i + 1}`);
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+  }
+  const sexta = await repliesRoute.POST(pedido(`${WEBINAR}/questions/${id}/replies`, "POST", { body: "a sexta", sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: id }) });
+  assert.equal(sexta.status, 429);
+  assert.match(sexta.headers.get("Retry-After") ?? "", /^\d+$/);
+  assert.equal(fio().length, 5);
+  assert.equal(eventos(db, "webinar_question_reply_sent").length, 5);
+
+  // Palavra bloqueada: 422 com a frase da lista, antes de gravar.
+  const { db: bloqueio, userId: aluna } = montar();
+  const alvo = perguntaRespondida(bloqueio, aluna);
+  const bloqueada = await responderNoFio(alvo, "isso é um PALAVRÃO feio");
+  assert.equal(bloqueada.status, 422);
+  assert.equal(bloqueada.body.error, "Sem isso aqui.");
+  assert.equal((bloqueio.tables.webinar_question_replies ?? []).length, 0);
+
+  // O fio com 50 respostas (o teto de QUESTION_REPLY_LIMITS.perQuestion): a 51a e 409, sem gravar.
+  const { db: cheio, userId: dono } = montar();
+  const conversa = perguntaRespondida(cheio, dono);
+  cheio.tables.webinar_question_replies = Array.from({ length: 50 }, (_, index) => ({
+    anonymous: false,
+    body: `r${index}`,
+    created_at: iso(Date.now() - (60 - index) * 1000),
+    deleted_at: null,
+    deleted_by: null,
+    deleted_reason: null,
+    display_name: index % 2 ? "Ana S." : "Equipe",
+    id: randomUUID(),
+    question_id: conversa,
+    role: index % 2 ? "student" : "team",
+    session_id: SESSION,
+    user_id: index % 2 ? dono : null
+  }));
+  const cinquentaEUma = await responderNoFio(conversa, "mais uma");
+  assert.equal(cinquentaEUma.status, 409);
+  assert.equal(cinquentaEUma.body.error, "Esta conversa chegou ao limite de respostas.");
+  assert.equal(cheio.tables.webinar_question_replies.length, 50);
+});
+
+test("o fio na live: silenciado no chat, removido da sala e banido de todos os webinarios respondem 409 com o motivo; nada entra no fio", async () => {
+  /** A sessao do teste vira a live no ar (o banimento da sessao so vale na live). */
+  const aoVivo = (db) => {
+    db.tables.webinars.find((row) => row.id === WEBINAR).kind = "live";
+    Object.assign(db.tables.webinar_sessions.find((row) => row.id === SESSION), { kind: "live", recording_id: null, source_session_id: null, started_at: iso(Date.now() - 5 * MIN), status: "live" });
+    db.tables.webinar_session_bans ??= [];
+    db.tables.webinar_user_bans ??= [];
+  };
+  const ban = (userId, kind) => ({ by_user_id: null, created_at: iso(Date.now()), kind, reason: null, session_id: SESSION, until_at: null, user_id: userId });
+
+  const { db: livre, userId: semBan } = montar();
+  aoVivo(livre);
+  const certa = perguntaRespondida(livre, semBan);
+  const passou = await responderNoFio(certa);
+  assert.equal(passou.status, 201, `sem banimento, a resposta entra na live (${JSON.stringify(passou.body)})`);
+
+  const { db: silencio, userId: silenciada } = montar();
+  aoVivo(silencio);
+  silencio.tables.webinar_session_bans.push(ban(silenciada, "muted"));
+  const muda = await responderNoFio(perguntaRespondida(silencio, silenciada));
+  assert.equal(muda.status, 409);
+  assert.equal(muda.body.reason, "muted");
+  assert.equal((silencio.tables.webinar_question_replies ?? []).length, 0);
+
+  const { db: fora, userId: removida } = montar();
+  aoVivo(fora);
+  fora.tables.webinar_session_bans.push(ban(removida, "kicked"));
+  const removidaDaSala = await responderNoFio(perguntaRespondida(fora, removida));
+  assert.equal(removidaDaSala.status, 409);
+  assert.equal(removidaDaSala.body.reason, "banned");
+  assert.equal(removidaDaSala.body.error, "Você foi removido desta live.");
+  assert.equal((fora.tables.webinar_question_replies ?? []).length, 0);
+
+  const { db: barrado, userId: banida } = montar();
+  aoVivo(barrado);
+  barrado.tables.webinar_user_bans.push({ by_user_id: null, created_at: iso(Date.now()), reason: null, session_id: null, user_id: banida });
+  const banidaDeTodos = await responderNoFio(perguntaRespondida(barrado, banida));
+  assert.equal(banidaDeTodos.status, 409);
+  assert.equal(banidaDeTodos.body.reason, "banned");
+  assert.equal((barrado.tables.webinar_question_replies ?? []).length, 0);
+
+  // Na Live gravada vale so o banido de todos (D33): o mesmo 409 banned.
+  const { db: gravada, userId: banidaNaGravada } = montar();
+  gravada.tables.webinar_user_bans = [{ by_user_id: null, created_at: iso(Date.now()), reason: null, session_id: null, user_id: banidaNaGravada }];
+  const naGravada = await responderNoFio(perguntaRespondida(gravada, banidaNaGravada));
+  assert.equal(naGravada.status, 409);
+  assert.equal(naGravada.body.reason, "banned");
+  assert.equal((gravada.tables.webinar_question_replies ?? []).length, 0);
+});
+
+test("a foto na sala (docs/30 §8.5, D62): so o arquivo enviado pelo Perfil, pela origem do nosso Supabase; um endereco de fora gravado no perfil vira iniciais no chat, na leitura e no proprio campo", async () => {
+  const antes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    const { db, userId } = montar({ scheduledAt: Date.now() - 90_000 });
+    const perfil = db.tables.profiles.find((row) => row.id === userId);
+    perfil.avatar_url = "https://attacker.example/p.png";
+
+    const enviada = await enviar({ body: "oi", ...comAceite });
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+    assert.equal(enviada.body.data.message.avatarUrl, null, "a resposta do envio");
+    const desde = encodeURIComponent(iso(Date.now() - 60_000));
+    const lida = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${desde}`), contexto()));
+    assert.equal(lida.status, 200, JSON.stringify(lida.body));
+    assert.equal(lida.body.data.messages[0].avatarUrl, null, "a leitura do chat");
+    const sessao_ = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+    assert.equal(sessao_.body.data.me.avatarUrl, null, "o proprio campo de escrever");
+
+    // A foto enviada pelo Perfil (avatars/{id}/arquivo no bucket): aparece, pela nossa origem.
+    const propria = `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${userId}/aa11.webp`;
+    perfil.avatar_url = propria;
+    clearAuthorPhotoCache();
+    const deNovo = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${desde}`), contexto()));
+    assert.equal(deNovo.body.data.messages[0].avatarUrl, propria);
+    assert.equal((await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body.data.me.avatarUrl, propria);
+  } finally {
+    if (antes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = antes;
+    clearAuthorPhotoCache();
+  }
+});
+
+test("o fio com mais de 1000 respostas na sessao (o teto de 1000 linhas do PostgREST): a resposta mais nova continua na lista do aluno", async () => {
+  const { db, userId } = montar();
+  const minha = perguntaRespondida(db, userId);
+  const deOutro = "11111111-1111-4111-8111-111111111114";
+  const outras = Array.from({ length: 25 }, () => perguntaRespondida(db, deOutro, { display_name: "Zé" }));
+  const inicio = Date.now() - 2 * HOUR;
+  const resposta = (index, extra) => ({
+    anonymous: false,
+    body: `r${index}`,
+    created_at: iso(inicio + index * 1000),
+    deleted_at: null,
+    deleted_by: null,
+    deleted_reason: null,
+    display_name: "Equipe",
+    id: randomUUID(),
+    question_id: outras[index % outras.length],
+    role: "team",
+    session_id: SESSION,
+    user_id: null,
+    ...extra
+  });
+  db.tables.webinar_question_replies = [
+    ...Array.from({ length: 1000 }, (_, index) => resposta(index)),
+    resposta(1000, { body: "obrigada!", display_name: "Ana S.", question_id: minha, role: "student", user_id: userId })
+  ];
+
+  const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}&ordem=recentes`), contexto()));
+  assert.equal(lista.status, 200, JSON.stringify(lista.body));
+  const questions = lista.body.data.questions;
+  assert.deepEqual(
+    questions.find((question) => question.id === minha).replies.map((reply) => reply.body),
+    ["obrigada!"],
+    "a resposta 1001 nao some no corte"
+  );
+  assert.equal(
+    questions.reduce((total, question) => total + question.replies.length, 0),
+    1001
+  );
 });

@@ -850,8 +850,15 @@ arquivo novo).
 
 **Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migracao o app novo continua de pe. As perguntas
 aparecem como antes (o fio le vazio, `chat-store.listQuestionReplyRows`), a foto do perfil funciona e "Remover minhas
-mensagens" segue; so **responder no fio** (o aluno e a equipe) falha com o aviso de migracao pendente, que aponta
-`WEBINARS_MIGRATION = "202611100001"`. A migracao sozinha nao atrapalha o app de antes: e uma tabela nova que ele nao le.
+mensagens" segue; so **escrever no fio** falha, e falha antes de gravar qualquer coisa. Na equipe, responder ou apagar
+uma resposta no fio volta 409 com a frase "Esta parte precisa da atualização do banco (migração 202611100001)."
+(`room-actions.withReplyTable`, com `WEBINARS_MIGRATION = "202611100001"`). No aluno, o Responder continua aparecendo
+na pergunta respondida (o fio le vazio) e o envio volta o erro comum da rota, "Não foi possível enviar a resposta."
+(500), sem numero de migracao: a contagem do fio sem numero (o PostgREST responde o HEAD de uma tabela que nao existe
+com 404 sem corpo) vira migracao pendente em `chat-store.countQuestionReplyRows`, antes do aceite e da rajada, entao o
+aceite fica como estava, o historico nao ganha linha e a rajada de 5 por 60 s nao gasta
+(`tests/webinarios-sala-rotas.test.mjs` e `tests/webinarios-roteiro-acoes.test.mjs` prendem os dois lados). A migracao
+sozinha nao atrapalha o app de antes: e uma tabela nova que ele nao le.
 
 **Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
 no SQL Editor (e idempotente; nao tem `drop` nem `delete`, entao nao pede confirmacao). Depois, gravar a versao:

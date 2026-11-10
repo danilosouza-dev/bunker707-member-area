@@ -66,7 +66,7 @@ import {
   type ChatMessagePatch
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
-import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isMissingWebinarSchema, WEBINARS_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
@@ -141,6 +141,18 @@ function revalidateWebinar(id: string) {
 
 function revalidateConsole(id: string) {
   revalidatePath(`${LIST_PATH}/${id}/sala`);
+}
+
+/** Uma escrita no fio que esbarra no banco sem a 202611100001 vira 409 com a frase da migracao (nunca um 500 generico). */
+async function withReplyTable<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_MIGRATION), 409);
+    }
+    throw error;
+  }
 }
 
 /** O relatorio da sessao fica 60 s em cache pela tag "webinars" (report-queries.ts): o que muda os numeros invalida. */
@@ -874,7 +886,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
  * aluno saiu), a resposta vai tambem para o sino dele, uma vez por resposta.
  */
 export async function replyToQuestion(input: { body: string; questionId: string }): Promise<ActionResult<RepliedQuestion>> {
-  return runAdminAction("messaging.write", replyQuestionSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", replyQuestionSchema, input, async ({ input: data, user }) => withReplyTable(async () => {
     const db = webinarsDb();
     const now = new Date();
     const row = await fetchQuestionRow(db, data.questionId);
@@ -907,12 +919,12 @@ export async function replyToQuestion(input: { body: string; questionId: string 
     revalidateConsole(webinar.id);
 
     return { notified, reply };
-  });
+  }));
 }
 
 /** [messaging.write] Apaga uma resposta do fio (a do aluno ou a da equipe); o resto do fio fica. */
 export async function deleteQuestionReply(input: { replyId: string }): Promise<ActionResult<{ questionId: string; replyId: string }>> {
-  return runAdminAction("messaging.write", deleteQuestionReplySchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", deleteQuestionReplySchema, input, async ({ input: data, user }) => withReplyTable(async () => {
     const db = webinarsDb();
     const row = await fetchQuestionReplyRow(db, data.replyId);
 
@@ -935,7 +947,7 @@ export async function deleteQuestionReply(input: { replyId: string }): Promise<A
     }
 
     return { questionId: row.question_id, replyId: row.id };
-  });
+  }));
 }
 
 /** [messaging.write] Dispensa, reabre ou marca como respondida uma pergunta. */

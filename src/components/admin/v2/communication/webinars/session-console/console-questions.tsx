@@ -1,16 +1,16 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { roomPillClassName } from "@/components/member/webinars/room/room-pill";
-import { RoomReplyField } from "@/components/member/webinars/room/room-reply-field";
+import { RoomReplyField, returnFocusFromReply } from "@/components/member/webinars/room/room-reply-field";
 import { RoomIconButton } from "@/components/member/webinars/room/room-ui";
 import { chatRoleLabel } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { AttendanceQuestionMark } from "@/server/webinars/assistant-queries";
-import { questionAwaitsTeam, sortQuestionsForBoard } from "@/server/webinars/console-model";
+import { questionAwaitsTeam, replyDraftAfterSent, sortQuestionsForBoard, whileSettling } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionStatus, type WebinarQuestion } from "@/server/webinars/model";
 
@@ -26,7 +26,9 @@ import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionSt
 // equipe escrevem aparece em ordem embaixo dela, cada resposta com a foto ou as iniciais, o nome, o selo do papel da
 // equipe e a lixeira (a equipe apaga qualquer resposta do fio). Na respondida, "Responder" abre o campo da equipe
 // (RoomReplyField). Quando o aluno escreveu por ultimo, a pergunta leva o selo "Nova resposta do aluno", sobe para o
-// topo do quadro e conta no numero da aba, ate a equipe responder.
+// topo do quadro e conta no numero da aba, ate a equipe responder no fio ou pelo campo de cima. O campo de responder e
+// a lixeira de uma resposta ficam ocupados ate o retrato novo chegar (whileSettling), o envio fecha so o campo da
+// pergunta enviada (replyDraftAfterSent), e o campo que sai com o foco nele devolve o foco ao Responder.
 
 const copy = WEBINAR_ADMIN_COPY.console.questions;
 
@@ -39,7 +41,7 @@ type ConsoleQuestionsProps = {
   currentUserAvatarUrl?: string | null;
   onAnswer: (questionId: string, answerText: string, answeredLive: boolean) => Promise<boolean>;
   /** Apaga uma resposta do fio; sem a prop (o teste de tela de antes), o fio fica sem a lixeira. */
-  onDeleteReply?: ((replyId: string) => void) | null;
+  onDeleteReply?: ((replyId: string) => Promise<boolean>) | null;
   /** A resposta da equipe no fio de uma pergunta respondida (devolve se gravou); sem a prop, sem o Responder. */
   onReply?: ((questionId: string, body: string) => Promise<boolean>) | null;
   onStatus: (questionId: string, status: QuestionStatus) => void;
@@ -92,7 +94,20 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
   const [answers, setAnswers] = useState<Record<string, string>>({});
   // O campo de responder do fio: uma pergunta por vez, com o rascunho dela.
   const [replying, setReplying] = useState<{ draft: string; id: string } | null>(null);
+  // As escritas do fio em andamento ate o retrato novo ("reply:{pergunta}", "delete:{resposta}").
+  const [settling, setSettling] = useState<readonly string[]>([]);
   const board = sortQuestionsForBoard(questions);
+  // O campo de responder saiu com o foco nele (Esc, Cancelar, o envio): o foco volta ao Responder da pergunta.
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  const replyingId = replying?.id ?? null;
+  const replyWasOpenRef = useRef(replyingId);
+  useLayoutEffect(() => {
+    const was = replyWasOpenRef.current;
+    replyWasOpenRef.current = replyingId;
+    if (was && !replyingId) {
+      returnFocusFromReply(paneRef.current, document.activeElement, document.body, `[data-console-question="${was}"] [data-console-reply-open]`);
+    }
+  }, [replyingId]);
 
   async function sendReply(question: WebinarQuestion) {
     const text = replying?.id === question.id ? replying.draft.trim() : "";
@@ -101,8 +116,8 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
       return;
     }
 
-    if (await onReply(question.id, text)) {
-      setReplying(null);
+    if (await whileSettling({ key: `reply:${question.id}`, set: setSettling, settling, work: () => onReply(question.id, text) })) {
+      setReplying((current) => replyDraftAfterSent(current, question.id));
     }
   }
 
@@ -119,7 +134,7 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
   }
 
   return (
-    <div className="flex min-w-0 flex-col" data-console-questions-pane="">
+    <div className="flex min-w-0 flex-col" data-console-questions-pane="" ref={paneRef}>
       {board.length === 0 ? <p className="py-6 text-center text-sm leading-5 text-room-fg-subtle">{copy.empty}</p> : null}
       <ol className="flex min-w-0 flex-col max-lg:max-h-[60vh] max-lg:overflow-y-auto" data-console-questions="">
         {board.map((question) => {
@@ -165,7 +180,13 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
                 {replies.length > 0 ? (
                   <ol className="mt-3 flex min-w-0 flex-col gap-3" data-console-thread="">
                     {replies.map((reply) => (
-                      <ThreadReply busy={busy} canAct={canAct} key={reply.id} onDelete={onDeleteReply} reply={reply} />
+                      <ThreadReply
+                        busy={busy || busyKey === `reply:${reply.id}` || settling.includes(`delete:${reply.id}`)}
+                        canAct={canAct}
+                        key={reply.id}
+                        onDelete={onDeleteReply ? (replyId) => void whileSettling({ key: `delete:${replyId}`, set: setSettling, settling, work: () => onDeleteReply(replyId) }) : null}
+                        reply={reply}
+                      />
                     ))}
                   </ol>
                 ) : null}
@@ -174,7 +195,7 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
                     <RoomReplyField
                       ariaLabel={copy.replyLabel}
                       avatar={<RoomCommentAvatar imageSrc={currentUserAvatarUrl} kind="team" />}
-                      busy={busy}
+                      busy={busy || settling.includes(`reply:${question.id}`)}
                       id={`console-reply-${question.id}`}
                       maxLength={QUESTION_REPLY_LIMITS.teamBody}
                       onCancel={() => setReplying(null)}

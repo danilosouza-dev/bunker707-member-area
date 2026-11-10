@@ -335,7 +335,7 @@ test("painel Perguntas do console com o fio (docs/30 §2.4): as respostas em ord
     busyKey: null,
     canAct: true,
     onAnswer: async () => true,
-    onDeleteReply: noop,
+    onDeleteReply: async () => true,
     onReply: async () => true,
     onStatus: noop,
     questions: [
@@ -388,6 +388,33 @@ test("painel Perguntas do console com o fio (docs/30 §2.4): as respostas em ord
   assert.doesNotMatch(leitura, /data-console-reply-open|Apagar a resposta/);
   assert.match(leitura, /data-console-reply="r1"/, "o fio continua na tela");
   assert.doesNotMatch(render(ConsoleQuestions, props({ onDeleteReply: null, onReply: null })), /data-console-reply-open|Apagar a resposta/);
+
+  // "Falar com a equipe" respondido pelo campo de cima depois da ultima fala do aluno: a equipe respondeu, a pergunta
+  // sai da fila (sem o selo, sem subir) e o Responder do fio volta ao tom de texto.
+  const comDeCima = render(
+    ConsoleQuestions,
+    props({
+      marks: { "q-de-cima": { answerSource: "team", assignedName: null, assignedTo: null, handoffRequested: true } },
+      questions: [...props().questions, q("q-de-cima", { answerText: "da equipe", answeredAt: new Date(NOW + 5 * 60_000).toISOString(), replies: [r("r7")], status: "answered" })]
+    })
+  );
+  const deCima = bloco(comDeCima, "q-de-cima");
+  assert.doesNotMatch(deCima, /data-question-awaits-team/);
+  assert.doesNotMatch(textOf(deCima), /Nova resposta do aluno/);
+  assert.match(deCima, /<button class="[^"]*\bbg-transparent\b[^"]*" data-console-reply-open="" type="button">Responder<\/button>/);
+  assert.deepEqual(Array.from(comDeCima.matchAll(/data-console-question="([^"]+)"/g), (match) => match[1]).slice(0, 2), ["q-espera", "q-aberta"], "ela nao sobe para o topo");
+
+  // A lixeira da resposta que esta sendo apagada fica desligada (a chave reply:{id} da acao); as outras nao.
+  const lixeiras = (html) => Array.from(html.matchAll(/<button[^>]*aria-label="Apagar a resposta de ([^"]+)"[^>]*>/g), (match) => [match[1], /\sdisabled=""/.test(match[0])]);
+  assert.deepEqual(
+    lixeiras(bloco(render(ConsoleQuestions, props({ busyKey: "reply:r2" })), "q-espera")),
+    [
+      ["Ana S.", false],
+      ["Danilo S.", true],
+      ["Ana S.", false]
+    ],
+    "a lixeira da resposta que esta sendo apagada fica desligada; as outras nao"
+  );
 });
 
 /* ------------------------------------------------------------------------------------------------

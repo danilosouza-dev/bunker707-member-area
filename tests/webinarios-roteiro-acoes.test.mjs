@@ -1057,6 +1057,44 @@ test("perguntas: responder por escrito vira linha da equipe no chat e marca resp
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /replay\?|7 dias/, "nem a pergunta nem a resposta vao para a auditoria");
 });
 
+test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409 com a frase da migracao, sem gravar nada (nem auditoria, nem sino)", async () => {
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: agora(), answered_by: HOST, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: agora(), user_id: ALUNA };
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta] })));
+  // webinar_question_replies como o postgrest-js responde a uma tabela que nao existe: o HEAD sem erro e sem contagem;
+  // o GET e o INSERT com o PGRST205.
+  const from = db.from;
+  db.from = (table) => {
+    if (table !== "webinar_question_replies") {
+      return from(table);
+    }
+    let head = false;
+    const self = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            const result = head ? { count: null, data: null, error: null, status: 204 } : { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_replies' in the schema cache" } };
+            return (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+          }
+          if (prop === "select") {
+            return (_columns, options = {}) => ((head = head || Boolean(options.head)), self);
+          }
+          return () => self;
+        }
+      }
+    );
+    return self;
+  };
+
+  const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
+  assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100001).");
+  const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100001)."]);
+  assert.equal(db.tables.admin_audit_log.length, 0);
+  assert.equal(db.tables.notifications.length, 0);
+});
+
 test("D31 na Live ao vivo: a mensagem da equipe e a resposta escrita nascem na linha mestre (o replay toca o chat da live); na Live gravada nao", async () => {
   const SESSAO_LIVE = "bbbbbbbb-2222-4222-8222-444444444444";
   const noAr = new Date(Date.now() - 5 * MIN).toISOString();

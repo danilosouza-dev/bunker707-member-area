@@ -952,7 +952,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
                     onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
                     onDeleteReply={(replyId: string) =>
-                      void run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
+                      run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
                     }
                     onReply={(questionId: string, body: string) =>
                       run(`question:${questionId}`, () => replyToQuestion({ body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))

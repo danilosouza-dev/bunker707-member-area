@@ -9,9 +9,8 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { sanitizeProfileAvatarUrl } from "../member-area/student-pages-model";
 import { fetchProfile } from "../students/store";
-import { loadAuthorPhotos } from "./author-photos";
+import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
 import {
   fetchChatWindow,
   fetchConsentRow,
@@ -195,7 +194,7 @@ export async function roomContextOf(db: WebinarsDb, record: StudentWebinarRecord
  * ---------------------------------------------------------------------------------------------- */
 
 export type StudentIdentity = {
-  /** A foto do proprio perfil (so https), para o campo de escrever da sala; nula sem foto. */
+  /** A foto do proprio perfil (so o arquivo enviado pelo Perfil, como os outros a veem), para o campo de escrever da sala; nula sem foto. */
   avatarUrl: string | null;
   consent: ConsentRow | null;
   /** O aceite em dia: sem retirada, na versao de agora e com o modo de agora (consentIsCurrent). */
@@ -215,7 +214,7 @@ export function consentIsCurrent(row: ConsentRow | null): boolean {
 export async function loadStudentIdentity(db: WebinarsDb, userId: string): Promise<StudentIdentity> {
   const [consent, profile] = await Promise.all([fetchConsentRow(db, userId), fetchProfile(db, userId)]);
   return {
-    avatarUrl: sanitizeProfileAvatarUrl(profile?.avatar_url),
+    avatarUrl: roomPhotoUrl(userId, profile?.avatar_url),
     consent,
     consented: consentIsCurrent(consent),
     fullName: profile?.full_name ?? null

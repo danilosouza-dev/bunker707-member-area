@@ -41,7 +41,10 @@ const analista = usuarioDeTeste(contas.analista);
 const pessoas = [aluna.id, outro.id, produtor.id, analista.id];
 const { id: webinarId, sessaoId } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const contexto = { params: Promise.resolve({ id: webinarId }) };
-const FOTO = { aluna: "https://exemplo.test/fotos/aluna.jpg", outro: "https://exemplo.test/fotos/outro.jpg", produtor: "https://exemplo.test/fotos/produtor.jpg" };
+// A sala so mostra o arquivo enviado pelo Perfil (avatars/{id}/arquivo no bucket), com o endereco montado pela origem do
+// nosso Supabase (author-photos.roomPhotoUrl): o arquivo nao precisa existir, so o endereco.
+const fotoNoBucket = (id) => db.storage.from("content-assets").getPublicUrl(`avatars/${id}/foto.webp`).data.publicUrl;
+const FOTO = { aluna: fotoNoBucket(aluna.id), outro: fotoNoBucket(outro.id), produtor: fotoNoBucket(produtor.id) };
 const ACEITE = { consent: true, consentVersion: CHAT_CONSENT_VERSION };
 const FRASE_DA_PAGINA_ANTIGA = "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar.";
 const fotosDeAntes = new Map();
@@ -366,4 +369,18 @@ test("5. 'Remover minhas mensagens' leva tambem o que o aluno escreveu no fio", 
   const linhas = unwrap(await db.from("webinar_question_replies").select("deleted_at, deleted_reason").eq("user_id", aluna.id), "Lendo o fio depois de remover");
   assert.ok(linhas.length >= 2);
   assert.ok(linhas.every((linha) => linha.deleted_at !== null && linha.deleted_reason === "consent_revoked"));
+});
+
+test("6. a foto de fora (um endereco gravado direto no perfil, fora do bucket) vira iniciais: no proprio campo, para o outro aluno e no console", async () => {
+  await foto(aluna.id, "https://exemplo.test/fotos/aluna.jpg");
+  clearAuthorPhotoCache();
+  resetRoomLimits();
+  const enviada = await enviar(aluna, { ...ACEITE, body: "Foto de fora" });
+  assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+  assert.equal(enviada.body.data.message.avatarUrl, null);
+  actAs(aluna);
+  const sessao = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
+  assert.equal(sessao.body.data.me.avatarUrl, null, "o proprio campo de escrever");
+  assert.equal((await chatDe(outro)).find((item) => item.body === "Foto de fora").avatarUrl, null, "o outro aluno");
+  assert.equal((await retrato()).messages.find((item) => item.body === "Foto de fora").avatarUrl, null, "o console");
 });

@@ -1,6 +1,8 @@
 // A foto do perfil de quem escreve na sala (docs/30 §8.5; decisao do produtor de 10/11/2026): para cada autor, a foto
-// (profiles.avatar_url, so https) e se o aceite do chat esta em dia (webinar_chat_consents na versao de agora, sem
-// revogacao e com o modo de agora: um aceite antigo com apelido ou anonimo nao vale, D64). Quem decide se a foto aparece e a regra pura room-model.authorPhotoUrl; aqui so a leitura.
+// (profiles.avatar_url, so o arquivo enviado pelo Perfil, remontado pela origem do nosso Supabase em roomPhotoUrl) e se
+// o aceite do chat esta em dia (webinar_chat_consents na versao de agora, sem revogacao e com o modo de agora: um
+// aceite antigo com apelido ou anonimo nao vale, D64). Quem decide se a foto aparece e a regra pura
+// room-model.authorPhotoUrl; aqui so a leitura.
 //
 // A sala relê o chat a cada 5 s e o console a cada 5 s com a sessao inteira: a leitura fica guardada por pessoa durante
 // 60 s neste processo, entao uma sala cheia nao vira uma consulta a `profiles` por pedido. O que muda no meio (a foto
@@ -10,7 +12,8 @@
 
 import "server-only";
 
-import { sanitizeProfileAvatarUrl } from "../member-area/student-pages-model";
+import { cleanEnvValue } from "../../lib/env-value";
+import { ownAvatarPublicUrl } from "../member-area/student-avatar-model";
 import { assertNoDbError, type WebinarsDb } from "./db";
 import { chatConsentIsCurrent } from "./model";
 import type { AuthorPhoto } from "./room-model";
@@ -22,6 +25,15 @@ const CACHE_MAX = 5_000;
 const CHUNK = 200;
 
 type Entry = AuthorPhoto & { at: number };
+
+/**
+ * A foto do perfil como a sala e o console mostram: so o arquivo que o aluno enviou pelo Perfil
+ * (avatars/{id}/arquivo no bucket content-assets), com o endereco montado pela origem do nosso Supabase. Um endereco
+ * gravado direto no perfil (outro site, a foto do Google) vira null: nenhum navegador da sala busca imagem fora.
+ */
+export function roomPhotoUrl(userId: string, stored: string | null | undefined): string | null {
+  return ownAvatarPublicUrl(stored, userId, cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL));
+}
 
 const cache = new Map<string, Entry>();
 
@@ -73,7 +85,7 @@ export async function loadAuthorPhotos(db: WebinarsDb, userIds: readonly (string
       assertNoDbError(profiles.error, "Webinarios: fotos de quem escreve");
       assertNoDbError(consents.error, "Webinarios: aceite de quem escreve");
       for (const row of (profiles.data ?? []) as ProfileRow[]) {
-        avatars.set(row.id, sanitizeProfileAvatarUrl(row.avatar_url));
+        avatars.set(row.id, roomPhotoUrl(row.id, row.avatar_url));
       }
       for (const row of (consents.data ?? []) as ConsentFlagRow[]) {
         if (chatConsentIsCurrent(row)) {

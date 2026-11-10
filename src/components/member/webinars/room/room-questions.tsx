@@ -1,7 +1,7 @@
 "use client";
 
 import { ListSortDescending, ThumbsUp } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { chatAgoLabel, chatTimeAt, chatTimeLabel } from "@/lib/webinar-room-client";
@@ -20,7 +20,7 @@ import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
 import { RoomPill } from "./room-pill";
-import { RoomReplyField } from "./room-reply-field";
+import { RoomReplyField, returnFocusFromReply } from "./room-reply-field";
 import { useRoomSnackbar } from "./room-snackbar";
 import {
   QUESTIONS_FILTERS,
@@ -30,6 +30,8 @@ import {
   questionsOrderLabel,
   questionsShown,
   questionStatusOf,
+  questionReplyGone,
+  questionReplyOpenStep,
   questionThreadCount,
   questionThreadOpen,
   type QuestionsFilter,
@@ -62,7 +64,10 @@ import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 // linha de acoes abre o campo de resposta no fim do fio (RoomReplyField); o que eu escrevo e o que a equipe responde
 // depois entram no fio em ordem, cada um como um comentario (a foto ou as iniciais, o nome, o selo do papel da equipe e
 // a hora), e o botao do fio conta todas ("3 respostas"). Os outros alunos leem o fio; so quem perguntou e a equipe
-// escrevem nele.
+// escrevem nele. O "Responder" de cima, clicado de novo na pergunta com o campo aberto, nao apaga o que foi escrito
+// (questionReplyOpenStep); o botao do fio com o campo aberto fecha o campo junto; o campo fecha, com a frase embaixo do
+// campo principal, quando a pergunta deixa de aceitar a resposta (questionReplyGone); e, quando o campo sai com o foco
+// nele, o foco volta ao Responder da pergunta (returnFocusFromReply).
 
 const REFRESH_MS = 15_000;
 
@@ -156,7 +161,7 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
   const canReply = Boolean(reply?.canWrite) && question.canReply;
   const replying = canReply && reply?.openId === question.id;
   const count = questionThreadCount(question);
-  // Com o campo aberto, o fio fica aberto (quem responde ve a conversa).
+  // Com o campo aberto, o fio fica aberto (quem responde ve a conversa); o botao do fio fecha o campo junto.
   const expanded = threadOpen || replying;
 
   const items: ReactNode[] = [];
@@ -238,7 +243,17 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
             controlsId={`resposta-${question.id}`}
             expanded={expanded}
             label={expanded ? novas.perguntas.ocultarRespostas : novas.perguntas.respostas(count)}
-            onToggle={() => onToggleThread?.(question.id)}
+            onToggle={() => {
+              if (replying) {
+                // Com o campo aberto o fio nao fecha sozinho: o clique fecha o campo junto. Se o fio so estava aberto por
+                // causa do campo (o aluno ja tinha ocultado), fechar o campo basta; trocar o guardado o reabriria.
+                reply?.onCancel();
+                if (!threadOpen) {
+                  return;
+                }
+              }
+              onToggleThread?.(question.id);
+            }}
           >
             {items.map((item, index) => (index === 0 ? item : <RoomThreadItem key={`item-${index}`}>{item}</RoomThreadItem>))}
             {field ? <RoomThreadItem>{field}</RoomThreadItem> : null}
@@ -506,6 +521,16 @@ export function RoomQuestionsTab({
   const [replyStatus, setReplyStatus] = useState<string | null>(null);
   const [replySending, setReplySending] = useState(false);
   const [consentFor, setConsentFor] = useState<"question" | "reply">("question");
+  // O campo de responder saiu com o foco nele (Esc, Cancelar, o envio): o foco volta ao Responder da pergunta.
+  const tabRef = useRef<HTMLDivElement | null>(null);
+  const replyWasOpenRef = useRef(replyOpenId);
+  useLayoutEffect(() => {
+    const was = replyWasOpenRef.current;
+    replyWasOpenRef.current = replyOpenId;
+    if (was && !replyOpenId) {
+      returnFocusFromReply(tabRef.current, document.activeElement, document.body, `[data-room-question="${was}"] [data-room-reply-open]`);
+    }
+  }, [replyOpenId]);
   // No comentario, "Pergunta enviada." vai ao aviso da sala (o erro e a instrucao do aceite continuam embaixo do campo);
   // a gaveta do vertical segue com a frase. A faixa do campo diz a altura dela, para o aviso ficar acima (abaixo de lg).
   const snackbar = useRoomSnackbar();
@@ -691,6 +716,16 @@ export function RoomQuestionsTab({
 
   // No comentario, a frase que toma o lugar do campo: o silenciado, a sala que nao abriu e a live que acabou.
   const fieldNotice = notice ?? (look === "comment" && ended ? copy.encerrada : null);
+  // O campo de responder aberto numa pergunta que deixou de aceitar a resposta (reaberta, dispensada, apagada, o fio
+  // cheio) ou numa sala que parou de aceitar escrita fecha aqui, no render (nunca num efeito), com a frase quando foi a
+  // pergunta; sem isso ele sumiria calado e voltaria sozinho com o rascunho velho.
+  const replyWritable = !readOnly && !fieldNotice;
+  if (replyOpenId !== null && !replySending && (!replyWritable || questionReplyGone(questions, replyOpenId))) {
+    closeReply();
+    if (replyWritable) {
+      setStatus(WEBINAR_COPY.salaV2.perguntas.respostaFechada);
+    }
+  }
   const visible = questionsShown(questions, filter);
   const waitedQuestion = waiting ? questions.find((question) => question.id === waiting) : null;
   const waitingNow = Boolean(waitedQuestion && waitedQuestion.status === "open");
@@ -704,7 +739,7 @@ export function RoomQuestionsTab({
   }, [loaded, onCount, visibleCount]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="room-questions">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="room-questions" ref={tabRef}>
       {look === "comment" ? (
         <div className="hidden shrink-0 lg:block">
           <RoomChipBar label={WEBINAR_COPY.salaV2.perguntas.filtrar} role="group" selectedKey={filter} variant="panel">
@@ -741,14 +776,15 @@ export function RoomQuestionsTab({
           reply={{
             avatar: { imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null },
             busy: replySending,
-            canWrite: !readOnly && !fieldNotice,
+            canWrite: replyWritable,
             draft: replyDraft,
             onCancel: closeReply,
             onChange: setReplyDraft,
             onOpen: (questionId) => {
-              setReplyOpenId(questionId);
-              setReplyDraft("");
-              setReplyStatus(null);
+              const next = questionReplyOpenStep({ draft: replyDraft, openId: replyOpenId, status: replyStatus }, questionId);
+              setReplyOpenId(next.openId);
+              setReplyDraft(next.draft);
+              setReplyStatus(next.status);
             },
             onSubmit: submitReply,
             openId: replyOpenId,
