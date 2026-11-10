@@ -52,3 +52,19 @@ test("o Verificador confere com verify do node:crypto e não importa nada que as
   assert.match(codigo, /verify as verifySignature/);
   assert.doesNotMatch(codigo, /\bsign\s*\(/);
 });
+
+test("o modo e as raízes da licença nunca vão ao navegador e ficam gravados no build pela chave env do next.config", () => {
+  const achados = arquivos("src")
+    .concat(["next.config.ts"])
+    .filter((arquivo) => /NEXT_PUBLIC_BUNKER_LICENS/.test(readFileSync(arquivo, "utf8")));
+  assert.deepEqual(achados, []);
+
+  const config = readFileSync("next.config.ts", "utf8");
+  assert.match(config, /env:\s*\{[^}]*BUNKER_LICENSING_MODE:[^}]*BUNKER_LICENSING_ROOTS:/s);
+
+  // Lidos por nome literal: só assim o Next troca pelo texto na hora de gerar a imagem.
+  const leitura = readFileSync(join("src", "server", "licensing", "build-config.ts"), "utf8");
+  assert.match(leitura, /process\.env\.BUNKER_LICENSING_MODE/);
+  assert.match(leitura, /process\.env\.BUNKER_LICENSING_ROOTS/);
+  assert.doesNotMatch(leitura, /process\.env\[/);
+});
