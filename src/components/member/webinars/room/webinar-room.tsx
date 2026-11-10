@@ -61,8 +61,13 @@ import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from ".
 import { useRoomOrientation } from "./use-room-orientation";
 import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
-import { RoomPinnedArea, RoomPinnedPills, RoomPinnedStrip, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
-import { useRoomScreen } from "./screen/use-room-screen";
+import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
+import type { ScreenItemHandlers } from "./screen/room-screen-card";
+import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
+import { screenPlacement, screenStripForcedRecorded } from "./screen/room-screen-model";
+import { RoomScreenDock, RoomScreenStrip } from "./screen/room-screen-strip";
+import { RoomWideHidden } from "./screen/room-wide-hidden";
+import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
@@ -125,6 +130,16 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // mensagem." com Ver na fixada nova. No vertical, a linha de 2 linhas da fixada com o link e o Mostrar tudo, e o botao
 // "Enquete fixada: {pergunta}" (verticalPollButton). Nada disso no Replay, com a sessao encerrada nem fora do acesso
 // (pinnedShownIn).
+// A Na tela, o banner e o QR Code (especificacao de 10/11/2026, §3.2 a §3.7; screen/room-screen-layer.tsx e
+// room-screen-strip.tsx): no palco de 640 px ou mais, os cartoes na camada do palco (dentro da caixa, que e o que vai
+// para a Tela cheia), com as pilulas das fixadas primeiro na celula de cima a esquerda e o aviso de venda simulado por
+// ultimo nela; a Oferta no palco empurra o item de baixo a direita para baixo a esquerda. No palco mais estreito, e com
+// qualquer capa no palco (screenStripForcedRecorded: a espera, "Ativar som", a sessao sem video), a faixa abaixo do
+// palco e acima da barra, junto com as linhas das fixadas; na tela cheia com o palco estreito, a linha compacta na
+// borda de cima; no vertical 9:16, no maximo duas linhas compactas na doca, antes da pilula da Oferta. Um item na
+// fileira de baixo (ou "No meio") tira as pilulas do chat do palco largo, e um em "Embaixo, à direita" o selo do
+// Assistente (RoomWideHidden, so CSS). Fechar e por exibicao (sessionStorage); quem tem o foco num item que sai volta
+// para a sala (refocusRoom). As metricas (viu, clicou, fechou) vao por useRoomScreenEvents; nada no "ver como".
 
 function subscribeNothing() {
   return () => undefined;
@@ -570,6 +585,38 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const pinnedShortcuts = pinnedPillsShown({ blocked: unavailable, design, panelShown, settingsTakeover: false });
   const focusPinned = usePinnedFocus(rootRef);
   const snackbarApi = snackbar.api;
+  // A Na tela, o banner e o QR Code: as mesmas regras das fixadas (§3.6); qualquer capa no palco manda tudo para a faixa.
+  const screenItems = pinnedOn ? naTela.items : [];
+  const soundCover = soundCoverShown({ barShown, kind, muted, soundTouched });
+  const stageState = unavailable ? "unavailable" : phase === "replay" ? "replay" : phase;
+  const screenForced = screenStripForcedRecorded({ hasVideo: session.video !== null, soundCover, stageState });
+  const pinnedPillsOn = pinnedShortcuts && (pinnedMessage !== null || pinnedPoll !== null);
+  const placement = screenPlacement({ items: screenForced || vertical ? [] : screenItems, offerShown, pinnedPills: !screenForced && pinnedPillsOn });
+  const screenEvents = useRoomScreenEvents({ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId });
+  const sendScreenEvent = screenEvents.sendEvent;
+  const closeScreenItem = naTela.closeItem;
+  const screenHandlers = useMemo<ScreenItemHandlers>(
+    () => ({
+      onClick: (displayId, form, target) => sendScreenEvent({ displayId, form, name: "clicked", target }),
+      onClose: (displayId, form) => {
+        closeScreenItem(displayId);
+        sendScreenEvent({ displayId, form, name: "closed" });
+      },
+      watch: screenEvents.watch
+    }),
+    [closeScreenItem, screenEvents.watch, sendScreenEvent]
+  );
+  // Um banner ou QR Code com o foco saiu da tela (a equipe tirou, o aluno fechou, a capa o mandou para a faixa): o foco
+  // volta para a sala (o primeiro [data-room-first-focus] na tela), nunca fica no body. O giro ja tem o efeito dele.
+  const screenKey = `${screenItems.map((item) => item.displayId).join(",")}|${screenForced}|${fullscreenOn}`;
+  const screenKeyRef = useRef(screenKey);
+  useLayoutEffect(() => {
+    const was = screenKeyRef.current;
+    screenKeyRef.current = screenKey;
+    if (was !== screenKey) {
+      refocusRoom(rootRef.current, document.activeElement);
+    }
+  }, [screenKey]);
 
   // A fixada nova com o painel fechado: "A equipe fixou uma mensagem." com Ver, uma vez por fixada (a que ja estava quando
   // a sala abriu nao avisa; o vertical nao tem o aviso da sala, a linha da fixada fica acima do chat).
@@ -798,7 +845,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     }
   }
 
-  const stageState = unavailable ? "unavailable" : phase === "replay" ? "replay" : phase;
   const timeLabel = saoPauloTime(session.session.scheduledAt);
   const composerPhase = phase === "replay" ? "replay" : phase;
   const headerPhase = phase === "replay" ? "live" : phase;
@@ -835,7 +881,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       coverUrl={coverUrl}
       embedUrl={session.video?.embedUrl ?? null}
       iframeRef={setIframe}
-      muted={soundCoverShown({ barShown, kind, muted, soundTouched })}
+      muted={soundCover}
       onUnmute={unmute}
       replayHref={replayHref}
       sessionId={sessionId}
@@ -985,27 +1031,39 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             {vertical || unavailable ? null : (
               <RoomStageBadges
                 assistantOn={stageAssistantShown({ assistantEnabled: assistant.state.enabled, bottomBadges, offerShown })}
+                assistantWideHidden={!placement.assistant}
                 present={presentBadge}
                 presenterName={bottomBadges ? presenterName : null}
                 recording={false}
                 topLeft={topLeft}
               />
             )}
-            {/* As fixadas com o painel fechado, abaixo dos selos (so com o palco de 640 px ou mais). */}
-            {pinnedShortcuts ? <RoomPinnedPills message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
-            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8). */}
+            {/* A Na tela no palco de 640 px ou mais (as fixadas com o painel fechado, o banner, o QR Code) e o aviso de venda. */}
+            {vertical || unavailable || kind === "replay" ? null : (
+              <RoomScreenLayer
+                forced={screenForced}
+                fullscreen={fullscreenOn}
+                handlers={screenHandlers}
+                items={screenItems}
+                pinned={pinnedPillsOn ? <RoomPinnedPills message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
+                placement={placement}
+                topLeftExtra={<RoomSimulationSales layout="cell" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
+              />
+            )}
+            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo, so no palco estreito. */}
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
-              <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
+              <RoomWideHidden hidden={!placement.chatPills}>
+                <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
+              </RoomWideHidden>
             ) : null}
             {/* O aviso da sala (os sucessos do chat e das Perguntas), so no desenho normal; o vertical nao muda. */}
             {vertical || unavailable ? null : <RoomSnackbarHost onAction={onSnackAction} panelShown={panelShown} />}
             <div className={skeleton.bubbles} data-room-slot="bubbles">
               <RoomReactionBubbles bubbles={reactions.bubbles} layout={vertical ? "vertical" : "stage"} overflow={reactions.overflow} />
             </div>
+            {/* O aviso de venda simulado no topo do vertical; no desenho normal, na camada da Na tela (a celula de cima a esquerda). */}
             <div className={cn(skeleton.sales, vertical ? "z-30" : null)} data-room-slot="sales">
-              {unavailable ? null : (
-                <RoomSimulationSales layout={vertical ? "vertical" : "stage"} offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />
-              )}
+              {unavailable || !vertical ? null : <RoomSimulationSales layout="vertical" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
             </div>
             <RoomDock
               chat={
@@ -1044,6 +1102,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               }
               design={design}
               hidden={drawerVisible}
+              screen={vertical && pinnedOn ? <RoomScreenDock handlers={screenHandlers} items={screenItems} /> : null}
               offer={
                 <RoomOffer
                   enabled={writable}
@@ -1074,8 +1133,16 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               />
             )}
           </div>
-          {/* O palco mais estreito: as fixadas em linhas logo abaixo dele, acima da barra. */}
-          {pinnedShortcuts ? <RoomPinnedStrip message={pinnedMessage} onMessage={() => showPinned("message")} onPoll={onPinnedPoll} poll={pinnedPoll} /> : null}
+          {/* O palco mais estreito (ou com uma capa): as fixadas, o banner e o QR Code em linhas logo abaixo dele, acima da barra. */}
+          {pinnedOn && !vertical ? (
+            <RoomScreenStrip
+              forced={screenForced}
+              handlers={screenHandlers}
+              items={screenItems}
+              pinned={pinnedShortcuts ? { message: pinnedMessage, onMessage: () => showPinned("message"), onPoll: onPinnedPoll, poll: pinnedPoll } : null}
+            />
+          ) : null}
+          {pinnedOn ? <RoomScreenAnnouncer items={screenItems} /> : null}
           {barShown ? (
             <RecordedControls
               fullscreenEnabled={fullscreenEnabled}

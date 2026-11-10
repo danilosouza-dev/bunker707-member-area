@@ -5,7 +5,8 @@
 // servidor; 5xx e falha de rede ficam com a frase da tela); o sinal de saida vai por sendBeacon (text/plain, como
 // o servidor aceita). Nenhum segredo aqui: o endereco do player ja vem montado pelo servidor. Fase 3 (a sala ao vivo):
 // o token da sala (POST .../join-token, o nome da sala so na resposta, nunca na URL) e os lotes de sinais do iframe
-// (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain).
+// (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain). A Na tela: as metricas do
+// banner e do QR Code (POST .../screen-events; o "viu" pelo fetch keepalive, o clique e o fechar pelo sendBeacon).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
 import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
@@ -211,6 +212,40 @@ export function beaconRoomEvents(webinarId: string, body: string): boolean {
   }
   void fetch(url, { body, credentials: "same-origin", headers: { "Content-Type": "text/plain;charset=UTF-8" }, keepalive: true, method: "POST" }).catch(() => undefined);
   return false;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A Na tela: as metricas (POST .../screen-events)
+ * ---------------------------------------------------------------------------------------------- */
+
+function screenEventsPath(webinarId: string): string {
+  return `/api/webinars/${encodeURIComponent(webinarId)}/screen-events`;
+}
+
+/** Um lote de metricas ({ sessionId, events } ja em JSON): 202 { accepted }; a falha fica com quem chama (descarta). */
+export async function postScreenEvents(webinarId: string, body: string) {
+  const response = await fetch(screenEventsPath(webinarId), {
+    body,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+    method: "POST"
+  });
+  return readData<{ accepted: number }>(response, GENERIC);
+}
+
+/** O clique, o fechar e o que sobrou ao sair: o navegador entrega mesmo com a outra aba abrindo ou a pagina descarregando. */
+export function beaconScreenEvents(webinarId: string, body: string): void {
+  const url = screenEventsPath(webinarId);
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, body)) {
+      return;
+    }
+  } catch {
+    // Sem beacon: vai pelo fetch keepalive.
+  }
+  void fetch(url, { body, credentials: "same-origin", headers: { "Content-Type": "text/plain;charset=UTF-8" }, keepalive: true, method: "POST" }).catch(() => undefined);
 }
 
 export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply, StudentScreenState };

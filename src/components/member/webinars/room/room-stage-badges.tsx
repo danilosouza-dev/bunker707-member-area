@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { RoomElapsed } from "./room-header";
 import type { RoomPresentBadge } from "./room-layout-model";
+import { RoomWideHidden } from "./screen/room-wide-hidden";
 
 // Os selos do palco (docs/31 V2-4), por cima do video, no lugar dos selos do cabecalho: em cima a esquerda, o selo do
 // momento ("Ao vivo · 00:42:10" em vermelho na Live ao vivo; na gravada, a regra D10 do docs/30 §1.6: "Ao vivo" so com
@@ -23,6 +24,8 @@ import type { RoomPresentBadge } from "./room-layout-model";
 // O console de quem apresenta (docs/31 V2-13) usa as mesmas pecas e passa o que so ele tem: o selo do momento fora do ar
 // (`label`, neutro como o "waiting"), o papel do selo de baixo ("Você · Co-apresentador") e o canto de cima a direita
 // (os presentes com o pico, antes da coluna de miniaturas). A sala nao passa nada disso, e o HTML dela fica igual.
+// A Na tela (especificacao de 10/11/2026, §3.2): com um banner ou QR Code em "Embaixo, à direita", o selo do Assistente
+// sai do palco largo (`assistantWideHidden`, so CSS: no palco estreito o item esta na faixa e o selo fica).
 
 /** O selo de cima a esquerda: o momento da sala. */
 export type RoomStageTopLeft =
@@ -41,6 +44,8 @@ export type RoomStageTopLeft =
 export type RoomStageBadgesProps = {
   /** O Assistente de IA ligado na sessao (o estado lido pela sala, useRoomAssistant). */
   assistantOn: boolean;
+  /** Um item da Na tela em "Embaixo, à direita": o selo do Assistente sai do palco de 640 px ou mais. */
+  assistantWideHidden?: boolean;
   /** Quem assiste agora (roomPresentBadge), ao lado do selo do momento; nulo ou ausente (o console), o selo sai. */
   present?: RoomPresentBadge | null;
   /** Quem apresenta (a pagina sabe); nulo, o selo de baixo a esquerda sai. */
@@ -127,7 +132,7 @@ export function RoomStagePill({ children, className, ...props }: { children: Rea
   );
 }
 
-export function RoomStageBadges({ assistantOn, present = null, presenterName, presenterRole, recording, topLeft, topRight }: RoomStageBadgesProps) {
+export function RoomStageBadges({ assistantOn, assistantWideHidden = false, present = null, presenterName, presenterRole, recording, topLeft, topRight }: RoomStageBadgesProps) {
   const gravando = WEBINAR_COPY.aoVivo.gravando;
   const presenter = presenterName?.trim() ?? "";
 
@@ -166,10 +171,12 @@ export function RoomStageBadges({ assistantOn, present = null, presenterName, pr
         </div>
       ) : null}
       {assistantOn ? (
-        <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-4 right-[calc(var(--room-video-right)+16px)] z-20 hidden lg:inline-flex")} data-room-badge="assistant">
-          <Sparkles aria-hidden="true" />
-          {WEBINAR_COPY.sala.selos.assistente}
-        </span>
+        <RoomWideHidden hidden={assistantWideHidden}>
+          <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-4 right-[calc(var(--room-video-right)+16px)] z-20 hidden lg:inline-flex")} data-room-badge="assistant">
+            <Sparkles aria-hidden="true" />
+            {WEBINAR_COPY.sala.selos.assistente}
+          </span>
+        </RoomWideHidden>
       ) : null}
     </>
   );

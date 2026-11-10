@@ -420,3 +420,213 @@ test("a sala adota o estado da sessao sempre e o do chat so com outro carimbo; o
   const itens = [item("d1"), item("d2", false), item("d3")];
   assert.deepEqual(sala.visibleScreenItems(itens, ["d1", "d2"]).map((entry) => entry.displayId), ["d2", "d3"], "o que nao pode fechar continua, mesmo com o id guardado");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * O banner e o QR Code do aluno (fatia S9; §3.2 a §3.7 e §7)
+ * ---------------------------------------------------------------------------------------------- */
+
+const itemDoAluno = (displayId, kind, place, extra = {}) => ({
+  body: null,
+  buttonLabel: null,
+  closable: true,
+  displayId,
+  image: null,
+  kind,
+  linkUrl: "https://bunker707.com.br/turma",
+  place,
+  shownAt: "2026-11-10T23:00:00.000Z",
+  size: "m",
+  title: kind === "qr" ? "Aponte a câmera" : "Turma nova",
+  ...extra
+});
+const celulas = (placement) => placement.cells.map((cell) => [cell.place, cell.entries.map((entry) => (entry.kind === "pinned" ? "fixadas" : `${entry.item.kind}:${entry.item.displayId}`))]);
+
+test("screenPlacement: cada item na posicao escolhida; banner em cima do QR Code na mesma posicao; as pilulas das fixadas primeiro em cima a esquerda; a ordem da grade", () => {
+  const juntos = sala.screenPlacement({ items: [itemDoAluno("q", "qr", "top_left"), itemDoAluno("b", "banner", "top_left")], offerShown: false, pinnedPills: true });
+  assert.deepEqual(celulas(juntos), [["top_left", ["fixadas", "banner:b", "qr:q"]]], "as fixadas, o banner, o QR Code");
+  const separados = sala.screenPlacement({ items: [itemDoAluno("b", "banner", "bottom_right"), itemDoAluno("q", "qr", "top_right")], offerShown: false, pinnedPills: false });
+  assert.deepEqual(celulas(separados), [["top_right", ["qr:q"]], ["bottom_right", ["banner:b"]]], "na ordem da grade, linha a linha");
+  assert.deepEqual(celulas(sala.screenPlacement({ items: [], offerShown: false, pinnedPills: true })), [["top_left", ["fixadas"]]]);
+  assert.deepEqual(sala.screenPlacement({ items: [], offerShown: true, pinnedPills: false }), { assistant: true, cells: [], chatPills: true }, "nada na tela, nada muda");
+});
+
+test("screenPlacement, as colisoes: a Oferta empurra o de baixo a direita para baixo a esquerda (e empilha com o que ja estava la); a fileira de baixo e o meio tiram as pilulas do chat; embaixo a direita tira o selo do Assistente", () => {
+  const comOferta = sala.screenPlacement({ items: [itemDoAluno("q", "qr", "bottom_left"), itemDoAluno("b", "banner", "bottom_right")], offerShown: true, pinnedPills: false });
+  assert.deepEqual(celulas(comOferta), [["bottom_left", ["banner:b", "qr:q"]]], "a Oferta fica com o canto; o banner em cima");
+  assert.equal(comOferta.assistant, true, "com a Oferta o item saiu do canto (o selo ja sai pela Oferta)");
+  assert.equal(sala.screenPlaceOf("bottom_right", true), "bottom_left");
+  assert.equal(sala.screenPlaceOf("bottom_right", false), "bottom_right");
+  assert.equal(sala.screenPlaceOf("top_right", true), "top_right");
+
+  const pilulas = (place) => sala.screenPlacement({ items: [itemDoAluno("b", "banner", place)], offerShown: false, pinnedPills: false });
+  for (const place of ["bottom_left", "bottom_center", "bottom_right", "center"]) {
+    assert.equal(pilulas(place).chatPills, false, `${place}: as pilulas do chat saem do palco largo`);
+  }
+  for (const place of ["top_left", "top_center", "top_right", "middle_left", "middle_right"]) {
+    assert.equal(pilulas(place).chatPills, true, `${place}: as pilulas ficam`);
+  }
+  assert.equal(pilulas("bottom_right").assistant, false, "o selo do Assistente sai");
+  for (const place of ["bottom_left", "bottom_center", "center", "top_right"]) {
+    assert.equal(pilulas(place).assistant, true, `${place}: o selo fica`);
+  }
+});
+
+test("a faixa forcada pela capa: na live, tudo menos a sala aberta com a pessoa dentro; na gravada, a espera, a sessao sem video, o fim e a capa Ativar som", () => {
+  assert.equal(sala.screenStripForcedLive({ entry: "joined", screen: "open" }), false);
+  for (const entry of ["idle", "opening", "joining", "reconnecting", "lost", "open_failed"]) {
+    assert.equal(sala.screenStripForcedLive({ entry, screen: "open" }), true, entry);
+  }
+  for (const screen of ["waiting", "locked", "ended", "soon", "kicked"]) {
+    assert.equal(sala.screenStripForcedLive({ entry: "joined", screen }), true, screen);
+  }
+  assert.equal(sala.screenStripForcedRecorded({ hasVideo: true, soundCover: false, stageState: "live" }), false);
+  assert.equal(sala.screenStripForcedRecorded({ hasVideo: true, soundCover: true, stageState: "live" }), true, "Ativar som");
+  assert.equal(sala.screenStripForcedRecorded({ hasVideo: false, soundCover: false, stageState: "live" }), true, "sem video");
+  assert.equal(sala.screenStripForcedRecorded({ hasVideo: true, soundCover: false, stageState: "waiting" }), true, "a espera");
+});
+
+test("os textos do cartao e da linha: o nome da secao, o titulo (sem ele, a descricao da imagem), a segunda linha (o texto numa linha; no QR Code, o dominio), o Mostrar e o que o banner faz com o link", () => {
+  const imagem = { alt: "Foguete subindo", height: 360, url: `${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM}`, width: 640 };
+  assert.equal(sala.screenSectionName(itemDoAluno("b", "banner", "center")), "Banner da equipe: Turma nova");
+  assert.equal(sala.screenSectionName(itemDoAluno("b", "banner", "center", { image: imagem, title: null })), "Banner da equipe: Foguete subindo");
+  assert.equal(sala.screenSectionName(itemDoAluno("q", "qr", "center")), "QR Code da equipe: Aponte a câmera");
+  assert.equal(sala.screenSectionName(itemDoAluno("q", "qr", "center", { title: null })), "QR Code da equipe");
+  assert.equal(sala.screenRowTitle(itemDoAluno("q", "qr", "center", { title: null })), "QR Code");
+  assert.equal(sala.screenRowDetail(itemDoAluno("b", "banner", "center", { body: "Vagas\n  até   sexta." })), "Vagas até sexta.");
+  assert.equal(sala.screenRowDetail(itemDoAluno("q", "qr", "center", { linkUrl: "https://www.bunker707.com.br/x" })), "bunker707.com.br");
+  assert.equal(sala.screenRowExpandable(itemDoAluno("b", "banner", "center")), false, "so o titulo: nada a mais");
+  assert.equal(sala.screenRowExpandable(itemDoAluno("b", "banner", "center", { body: "Mais." })), true);
+  assert.equal(sala.screenRowExpandable(itemDoAluno("b", "banner", "center", { image: imagem })), true);
+  assert.equal(sala.screenRowExpandable(itemDoAluno("q", "qr", "center")), true);
+  assert.equal(sala.screenBannerAction(itemDoAluno("b", "banner", "center", { buttonLabel: "Quero" })), "button");
+  assert.equal(sala.screenBannerAction(itemDoAluno("b", "banner", "center")), "card");
+  assert.equal(sala.screenBannerAction(itemDoAluno("b", "banner", "center", { linkUrl: null })), "none");
+  assert.equal(sala.screenBannerAction(itemDoAluno("b", "banner", "center", { buttonLabel: "Quero", linkUrl: "javascript:alert(1)" })), "none", "o link e conferido de novo no navegador");
+  assert.equal(sala.screenLinkOf(itemDoAluno("q", "qr", "center", { linkUrl: `https://bunker707.com.br/${"x".repeat(240)}` })), null, "o QR Code com o limite dele");
+  assert.equal(sala.screenImageSrc(imagem.url), imagem.url);
+  for (const url of ["https://cdn.de-fora.com/x.webp", `${ORIGEM}/storage/v1/object/public/content-assets/communications/0123456789abcdef01234567.webp`, `${imagem.url}?x=1`, "javascript:alert(1)", null]) {
+    assert.equal(sala.screenImageSrc(url), null, String(url));
+  }
+});
+
+test("o anuncio educado: so as chegadas (a primeira leitura nao anuncia), com as frases da especificacao; duas de uma vez, uma depois da outra", () => {
+  const b = itemDoAluno("b", "banner", "center");
+  const q = itemDoAluno("q", "qr", "center");
+  assert.deepEqual(sala.screenArrivals(["b"], [b, q]).map((item) => item.displayId), ["q"]);
+  assert.deepEqual(sala.screenArrivals(["b", "q"], [b]), [], "a saida e silenciosa");
+  assert.equal(sala.screenAnnouncement([b]), "A equipe colocou um banner na tela: Turma nova.");
+  assert.equal(sala.screenAnnouncement([q]), "A equipe mostrou um QR Code: Aponte a câmera. O link está no botão Abrir o link.");
+  assert.equal(sala.screenAnnouncement([b, q]), "A equipe colocou um banner na tela: Turma nova. A equipe mostrou um QR Code: Aponte a câmera. O link está no botão Abrir o link.");
+});
+
+/** Um relogio falso para os timers injetados. */
+function relogioFalso() {
+  let agora = 0;
+  let proximo = 1;
+  const timers = new Map();
+  return {
+    avancar(ms) {
+      const alvo = agora + ms;
+      for (;;) {
+        const vencido = [...timers.entries()].filter(([, timer]) => timer.at <= alvo).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!vencido) {
+          break;
+        }
+        timers.delete(vencido[0]);
+        agora = vencido[1].at;
+        vencido[1].callback();
+      }
+      agora = alvo;
+    },
+    clearTimer: (id) => timers.delete(id),
+    pendentes: () => timers.size,
+    setTimer(callback, ms) {
+      const id = proximo++;
+      timers.set(id, { at: agora + ms, callback });
+      return id;
+    }
+  };
+}
+
+test("o envio das metricas: o viu uma vez por exibicao (os vistos), depois de 0 a 5 s ao acaso, pelo fetch; o clique e o fechar na hora, pelo sendBeacon, levando a fila; lotes de ate 6; o pagehide leva o viu que esperava", () => {
+  const relogio = relogioFalso();
+  const posts = [];
+  const beacons = [];
+  const vistos = new Set();
+  let acaso = 0.5;
+  const sender = sala.createScreenEventSender({
+    beacon: (body) => beacons.push(JSON.parse(body)),
+    clearTimer: relogio.clearTimer,
+    post: async (body) => posts.push(JSON.parse(body)),
+    random: () => acaso,
+    seen: { add: (id) => vistos.add(id), has: (id) => vistos.has(id) },
+    sessionId: SESSAO,
+    setTimer: relogio.setTimer
+  });
+  sender.send({ displayId: "b", form: "stage", name: "shown" });
+  sender.send({ displayId: "b", form: "strip", name: "shown" });
+  assert.equal(sender.pending(), 1, "uma vez por exibicao");
+  relogio.avancar(2499);
+  assert.equal(posts.length, 0, "ainda no atraso (0,5 x 5 s)");
+  relogio.avancar(1);
+  assert.deepEqual(posts, [{ events: [{ displayId: "b", form: "stage", name: "shown" }], sessionId: SESSAO }]);
+  sender.send({ displayId: "b", form: "stage", name: "shown" });
+  assert.equal(sender.pending(), 0, "o mesmo viu nao volta (o sessionStorage guarda)");
+
+  sender.send({ displayId: "b", form: "stage", name: "clicked", target: "button" });
+  assert.deepEqual(beacons, [{ events: [{ displayId: "b", form: "stage", name: "clicked", target: "button" }], sessionId: SESSAO }], "o clique na hora, pelo beacon");
+  sender.send({ displayId: "q", form: "strip", name: "closed" });
+  assert.deepEqual(beacons[1].events, [{ displayId: "q", form: "strip", name: "closed" }], "o fechar sem alvo");
+
+  acaso = 1;
+  sender.send({ displayId: "q", form: "strip", name: "shown" });
+  assert.equal(sender.pending(), 1);
+  sender.flushAll();
+  assert.equal(sender.pending(), 0);
+  assert.deepEqual(beacons[2].events, [{ displayId: "q", form: "strip", name: "shown" }], "o pagehide leva o viu que esperava, pelo beacon");
+  assert.equal(relogio.pendentes(), 0, "nenhum timer sobrando");
+  assert.deepEqual(sala.screenEventBodies(SESSAO, []), []);
+  const sete = Array.from({ length: 7 }, (_, index) => ({ displayId: `d${index}`, form: "stage", name: "clicked", target: "card" }));
+  assert.deepEqual(sala.screenEventBodies(SESSAO, sete).map((body) => JSON.parse(body).events.length), [6, 1], "lotes de ate 6");
+  assert.equal(sala.screenShownDelayMs(0), 0);
+  assert.equal(sala.screenShownDelayMs(1), 5000);
+  assert.equal(sala.screenShownDelayMs(Number.NaN), 0);
+  // O corpo passa no schema da rota.
+  for (const body of [...posts, ...beacons]) {
+    assert.equal(schemas.screenEventsBodySchema.safeParse({ ...body, events: body.events.map((event) => ({ ...event, displayId: EXIBICAO })) }).success, true);
+  }
+});
+
+test("o viu: 1 s seguido com 50 % ou mais na tela, a aba visivel e sem a enquete do palco por cima; qualquer interrupcao recomeca; uma vez por exibicao, mesmo no cartao e na linha", () => {
+  const relogio = relogioFalso();
+  const vistos = [];
+  const watcher = sala.createShownWatcher({ clearTimer: relogio.clearTimer, onShown: (displayId, form) => vistos.push([displayId, form]), pollOver: false, setTimer: relogio.setTimer, visible: true });
+  const cartao = {};
+  const linha = {};
+  watcher.update(cartao, { displayId: "b", form: "stage", intersecting: true });
+  relogio.avancar(600);
+  watcher.update(cartao, { displayId: "b", form: "stage", intersecting: false });
+  relogio.avancar(600);
+  watcher.update(cartao, { displayId: "b", form: "stage", intersecting: true });
+  relogio.avancar(999);
+  assert.deepEqual(vistos, [], "saiu da tela: a conta recomecou");
+  watcher.setGlobal({ pollOver: true });
+  relogio.avancar(2000);
+  assert.deepEqual(vistos, [], "a enquete do palco por cima");
+  watcher.setGlobal({ pollOver: false, visible: false });
+  relogio.avancar(2000);
+  assert.deepEqual(vistos, [], "a aba escondida");
+  watcher.setGlobal({ visible: true });
+  relogio.avancar(1000);
+  assert.deepEqual(vistos, [["b", "stage"]]);
+  watcher.update(linha, { displayId: "b", form: "strip", intersecting: true });
+  relogio.avancar(5000);
+  assert.deepEqual(vistos, [["b", "stage"]], "a mesma exibicao na linha nao conta de novo");
+  watcher.update(linha, { displayId: "q", form: "strip", intersecting: true });
+  watcher.remove(linha);
+  relogio.avancar(5000);
+  assert.deepEqual(vistos, [["b", "stage"]], "a linha que saiu da tela nao conta");
+  watcher.update(linha, { displayId: "q", form: "strip", intersecting: true });
+  watcher.dispose();
+  assert.equal(relogio.pendentes(), 0, "o dispose limpa os timers");
+});

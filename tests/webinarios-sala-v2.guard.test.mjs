@@ -30,7 +30,8 @@ test("o painel do chat e o palco da live saem das regras puras: o takeover do ce
   assert.match(room, /const skeletonState = liveSkeletonState\(\{ blocked, cinema: cinemaOn, panelShown, settingsTakeover \}\);\s*const skeleton = roomSkeleton\("normal", skeletonState\);/, "o minimo de 96 px na caixa do palco");
   assert.doesNotMatch(room, /min-h-24/, "o minimo do palco fica so no esqueleto (a caixa), nunca no palco dentro dela");
   // As pilulas do chat (V2-8) pela regra pura: fora do palco pequeno (Configurações no celular) e da frase de removido.
-  assert.match(room, /chatPillsShown\(\{ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover \}\) \? <RoomChatPills kind="live" messages=\{overlayMessages\(translation\.messages\)\} \/>/);
+  // As pilulas do chat pela regra pura; com um item da Na tela embaixo, so no palco estreito (RoomWideHidden, so CSS).
+  assert.match(room, /chatPillsShown\(\{ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills\}>\s*<RoomChatPills kind="live" messages=\{overlayMessages\(translation\.messages\)\} \/>/);
   assert.doesNotMatch(room, /LiveChatOverlay/, "o chat por cima do palco so no celular saiu");
 });
 
@@ -103,8 +104,12 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   assert.match(offer, /const onScreen = offerOnScreen\(\{ closedKey, enabled, hasView: view !== null, shown: state\.shown, windowKey: state\.windowKey \}\);/);
   assert.match(offer, /onShownChange\?\.\(onScreen\);/);
   assert.match(offer, /\{onScreen && view \? \(/, "o card na tela e o aviso a sala sao o mesmo valor");
-  assert.match(recorded, /assistantOn=\{stageAssistantShown\(\{ assistantEnabled: assistant\.state\.enabled, bottomBadges, offerShown \}\)\}/);
-  assert.match(recorded, /chatPillsShown\(\{ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false \}\) \? \(\s*<RoomChatPills kind=\{kind\} messages=\{overlayMessages\(translation\.messages\)\} \/>/, "no Replay acima da barra da Bunny e com o nome Chat da live");
+  assert.match(recorded, /assistantOn=\{stageAssistantShown\(\{ assistantEnabled: assistant\.state\.enabled, bottomBadges, offerShown \}\)\}\s*assistantWideHidden=\{!placement\.assistant\}/);
+  assert.match(
+    recorded,
+    /chatPillsShown\(\{ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills\}>\s*<RoomChatPills kind=\{kind\} messages=\{overlayMessages\(translation\.messages\)\} \/>/,
+    "no Replay acima da barra da Bunny e com o nome Chat da live"
+  );
 });
 
 test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, da enquete depois da hidratacao, da confirmacao de Sair e do chat ao reabrir", () => {
@@ -133,7 +138,8 @@ test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, 
 });
 
 test("a gravada: a capa Ativar som pela regra pura e a tela cheia da caixa do palco que sai com a barra (o giro para o vertical)", () => {
-  assert.match(recorded, /muted=\{soundCoverShown\(\{ barShown, kind, muted, soundTouched \}\)\}/);
+  assert.match(recorded, /const soundCover = soundCoverShown\(\{ barShown, kind, muted, soundTouched \}\);/);
+  assert.match(recorded, /muted=\{soundCover\}/, "a capa Ativar som e a mesma conta que manda a Na tela para a faixa");
   assert.match(recorded, /if \(was && !barShown\) \{\s*leaveStageFullscreen\(document, stageBoxRef\.current\);\s*refocusRoom\(rootRef\.current, document\.activeElement\);/);
 });
 
@@ -169,4 +175,33 @@ test("o campo de responder do fio ligado as regras puras (docs/30 §1.3): fecha 
   assert.doesNotMatch(replyField, /<textarea[^>]*onKeyDown/);
   assert.match(replyField, /replyFieldKey\(\{ ctrl: event\.ctrlKey, inText: event\.target === areaRef\.current, key: event\.key, meta: event\.metaKey \}\)/);
   assert.match(questionsTab, /if \(was && !replyOpenId\) \{\s*returnFocusFromReply\(tabRef\.current, document\.activeElement, document\.body, `\[data-room-question="\$\{was\}"\] \[data-room-reply-open\]`\);/);
+});
+
+test("a Na tela nas duas salas pelas regras puras (especificacao de 10/11/2026, §3.2 a §3.4): o lugar por screenPlacement, a capa que manda para a faixa, a Oferta da gravada, as metricas so fora do ver como, e nenhuma peca do pop-up da Comunicacao", () => {
+  assert.match(room, /const screenForced = screenStripForcedLive\(\{ entry: room\.entry, screen \}\);/);
+  assert.match(room, /const placement = screenPlacement\(\{ items: screenForced \? \[\] : screenItems, offerShown: false, pinnedPills: !screenForced && pinnedPillsOn \}\);/);
+  assert.match(room, /useRoomScreenEvents\(\{ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId \}\)/);
+  assert.match(room, /<RoomScreenLayer\s+engineBar=\{joined && !ourBar\}\s+forced=\{screenForced\}\s+fullscreen=\{fullscreenOn\}/, "a barra do motor na pagina da sala: a margem de baixo de 96 px");
+  assert.match(recorded, /const screenForced = screenStripForcedRecorded\(\{ hasVideo: session\.video !== null, soundCover, stageState \}\);/);
+  assert.match(recorded, /const placement = screenPlacement\(\{ items: screenForced \|\| vertical \? \[\] : screenItems, offerShown, pinnedPills: !screenForced && pinnedPillsOn \}\);/, "a Oferta no palco empurra o item de baixo a direita");
+  assert.match(recorded, /useRoomScreenEvents\(\{ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId \}\)/);
+  assert.match(recorded, /topLeftExtra=\{<RoomSimulationSales layout="cell"/, "o aviso de venda na celula de cima a esquerda da camada");
+  assert.match(recorded, /screen=\{vertical && pinnedOn \? <RoomScreenDock handlers=\{screenHandlers\} items=\{screenItems\} \/> : null\}/, "a doca do vertical");
+  for (const [nome, fonte] of [
+    ["live-room", room],
+    ["webinar-room", recorded]
+  ]) {
+    // O foco que estava num item que saiu volta para a sala.
+    assert.match(fonte, /if \(was !== screenKey\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);/, nome);
+    assert.match(fonte, /closeScreenItem\(displayId\);\s*sendScreenEvent\(\{ displayId, form, name: "closed" \}\);/, `${nome}: fechar e por exibicao e manda o fechou`);
+  }
+  // A sala continua sem nada do pop-up da Comunicacao (docs/25: a sala esta na lista de "onde nunca").
+  const pasta = path.join(root, "src/components/member/webinars/room/screen");
+  for (const arquivo of ["room-screen-model.ts", "room-screen-layer.tsx", "room-screen-card.tsx", "room-screen-strip.tsx", "room-wide-hidden.tsx", "use-room-screen.ts", "room-pinned.tsx"]) {
+    const fonte = readFileSync(path.join(pasta, arquivo), "utf8");
+    assert.doesNotMatch(fonte, /from "[^"]*(?:communications\/popup|popup-free|member-popup|MemberPopup|popup-design)[^"]*"/i, arquivo);
+  }
+  for (const fonte of [room, recorded]) {
+    assert.doesNotMatch(fonte, /from "[^"]*(?:communications\/popup|popup-free|member-popup|popup-design)[^"]*"/i);
+  }
 });

@@ -21,13 +21,13 @@ import { ROOM_FOCUS } from "../room-ui";
 //   clicavel), depois a enquete ("Enquete fixada pela equipe" e o RoomPollCard de sempre: responde ali mesmo;
 //   respondida, recolhe numa linha "Resposta enviada" com Mostrar / Recolher; com o resultado compartilhado, abre com as
 //   barras). Quem a envolve (o painel, a gaveta) limita a 40 % da altura e rola por dentro;
-// - com o painel fechado, as pilulas do palco (RoomPinnedPills, no canto de cima a esquerda, abaixo dos selos, so com o
-//   palco de 640 px ou mais: "Fixada · {texto em 1 linha}" abre o painel no Chat; "Enquete fixada · {pergunta}" traz a
-//   enquete ao meio do palco se falta responder, senao abre o painel) e, no palco mais estreito, as mesmas duas como
-//   linhas de 56 px logo abaixo do palco e acima da barra (RoomPinnedStrip). Sao botoes. A regra dos 640 px e so CSS:
-//   cada um e o proprio recipiente `@container/tela` (a camada das pilulas cobre a caixa do palco; a faixa tem a largura
-//   da coluna, a mesma do palco), sem medir em JavaScript e sem piscar. A faixa inteira da Na tela (banner e QR Code, a
-//   capa que manda tudo para a faixa) e da fatia seguinte, que junta estas linhas a ela;
+// - com o painel fechado, as pilulas do palco (RoomPinnedPills, so com o palco de 640 px ou mais: "Fixada · {texto em
+//   1 linha}" abre o painel no Chat; "Enquete fixada · {pergunta}" traz a enquete ao meio do palco se falta responder,
+//   senao abre o painel) e, no palco mais estreito ou com uma capa no palco, as mesmas duas como linhas de 56 px
+//   (RoomPinnedRows). Sao botoes. Quem os poe no lugar e a Na tela (fatia S9): as pilulas sao as primeiras da celula de
+//   cima a esquerda da camada do palco (screen/room-screen-layer.tsx, o recipiente `@container/tela` que cobre a caixa
+//   do palco, abaixo dos selos), e as linhas, as primeiras da faixa abaixo do palco (screen/room-screen-strip.tsx, com a
+//   largura da coluna); a regra dos 640 px e so CSS, sem medir em JavaScript e sem piscar;
 // - o pedido de foco na area (usePinnedFocus: a pilula e o Ver do aviso abrem o painel e levam o foco ao bloco, que tem
 //   tabIndex -1 e fica fora da trava do Tab) e o corte medido (useClampToggle: o ResizeObserver diz se o corte escondeu
 //   alguma coisa; antes da medida, a dica pura pinnedClampHint; a gaveta e a linha do vertical usam o mesmo).
@@ -218,9 +218,8 @@ const PILL = cn(
 );
 
 /**
- * As pilulas das fixadas no palco com o painel fechado: uma camada que cobre a caixa do palco sem receber o toque (o
- * video por baixo continua clicavel) e e o proprio recipiente `@container/tela`; as pilulas, no canto de cima a
- * esquerda, abaixo dos selos (42 px abaixo de lg, 56 px a partir de lg), so aparecem com 640 px ou mais de palco.
+ * As pilulas das fixadas no palco com o painel fechado: o bloco que a camada da Na tela poe primeiro na celula de cima a
+ * esquerda (abaixo dos selos); so aparece com 640 px ou mais de palco (a camada e o recipiente `@container/tela`).
  */
 export function RoomPinnedPills({ message, onMessage, onPoll, poll }: RoomPinnedShortcutsProps) {
   if (!message && !poll) {
@@ -228,21 +227,19 @@ export function RoomPinnedPills({ message, onMessage, onPoll, poll }: RoomPinned
   }
   const copy = WEBINAR_COPY.naTela.aluno;
   return (
-    <div className="@container/tela pointer-events-none absolute inset-0 z-20" data-room-pinned-pills="">
-      <div className="absolute left-2 top-[42px] hidden max-w-[min(380px,calc(100%-1rem))] flex-col items-start gap-1.5 @min-[640px]/tela:flex lg:left-4 lg:top-14 lg:max-w-[min(380px,calc(100%-2rem))]">
-        {message ? (
-          <button className={PILL} data-room-pinned-pill="message" onClick={onMessage} type="button">
-            <Pin aria-hidden="true" strokeWidth={2} />
-            <span className="min-w-0 truncate">{copy.pilulaFixada(pinnedPillText(message.body))}</span>
-          </button>
-        ) : null}
-        {poll ? (
-          <button className={PILL} data-room-pinned-pill="poll" onClick={onPoll} type="button">
-            <BarChart3 aria-hidden="true" strokeWidth={2} />
-            <span className="min-w-0 truncate">{copy.pilulaEnquete(poll.question)}</span>
-          </button>
-        ) : null}
-      </div>
+    <div className="hidden max-w-[min(380px,100%)] shrink-0 flex-col items-start gap-1.5 @min-[640px]/tela:flex" data-room-pinned-pills="">
+      {message ? (
+        <button className={PILL} data-room-pinned-pill="message" onClick={onMessage} type="button">
+          <Pin aria-hidden="true" strokeWidth={2} />
+          <span className="min-w-0 truncate">{copy.pilulaFixada(pinnedPillText(message.body))}</span>
+        </button>
+      ) : null}
+      {poll ? (
+        <button className={PILL} data-room-pinned-pill="poll" onClick={onPoll} type="button">
+          <BarChart3 aria-hidden="true" strokeWidth={2} />
+          <span className="min-w-0 truncate">{copy.pilulaEnquete(poll.question)}</span>
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -252,42 +249,39 @@ const ROW = cn("flex min-h-14 w-full shrink-0 items-center gap-3 px-3 py-2 text-
 const ROW_ICON = "grid size-10 shrink-0 place-items-center rounded-[10px] bg-room-control text-room-fg [&_svg]:size-4";
 
 /**
- * As linhas das fixadas no palco mais estreito (abaixo de 640 px de palco, o celular), com o painel fechado: logo
- * abaixo do palco e acima da barra, no fluxo da pagina (nada sobre o video), no maximo 120 px (o resto rola por
- * dentro). O recipiente `@container/tela` e a propria faixa, com a largura da coluna do palco; a partir de lg o palco
- * fechado sempre tem 640 px ou mais, e ela nem entra.
+ * As linhas das fixadas na faixa (o palco mais estreito, o celular, ou uma capa no palco), com o painel fechado: as
+ * primeiras da faixa da Na tela (screen/room-screen-strip.tsx), que fica no fluxo da pagina logo abaixo do palco e acima
+ * da barra (nada sobre o video), com no maximo 120 px (o resto rola por dentro).
  */
-export function RoomPinnedStrip({ message, onMessage, onPoll, poll }: RoomPinnedShortcutsProps) {
+export function RoomPinnedRows({ message, onMessage, onPoll, poll }: RoomPinnedShortcutsProps) {
   if (!message && !poll) {
     return null;
   }
   const copy = WEBINAR_COPY.naTela.aluno;
   return (
-    <div className="@container/tela shrink-0 lg:hidden" data-room-pinned-strip="">
-      <div className="flex max-h-[120px] flex-col overflow-y-auto overscroll-contain border-b border-room-border bg-room-surface @min-[640px]/tela:hidden">
-        {message ? (
-          <button className={ROW} data-room-pinned-row="message" onClick={onMessage} type="button">
-            <span aria-hidden="true" className={ROW_ICON}>
-              <Pin strokeWidth={2} />
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{copy.fixadaPelaEquipe}</span>
-              <span className="truncate text-sm leading-5 text-room-fg">{pinnedPillText(message.body)}</span>
-            </span>
-          </button>
-        ) : null}
-        {poll ? (
-          <button className={ROW} data-room-pinned-row="poll" onClick={onPoll} type="button">
-            <span aria-hidden="true" className={ROW_ICON}>
-              <BarChart3 strokeWidth={2} />
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{copy.enqueteFixadaPelaEquipe}</span>
-              <span className="truncate text-sm leading-5 text-room-fg">{poll.question}</span>
-            </span>
-          </button>
-        ) : null}
-      </div>
-    </div>
+    <>
+      {message ? (
+        <button className={ROW} data-room-pinned-row="message" onClick={onMessage} type="button">
+          <span aria-hidden="true" className={ROW_ICON}>
+            <Pin strokeWidth={2} />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{copy.fixadaPelaEquipe}</span>
+            <span className="truncate text-sm leading-5 text-room-fg">{pinnedPillText(message.body)}</span>
+          </span>
+        </button>
+      ) : null}
+      {poll ? (
+        <button className={ROW} data-room-pinned-row="poll" onClick={onPoll} type="button">
+          <span aria-hidden="true" className={ROW_ICON}>
+            <BarChart3 strokeWidth={2} />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{copy.enqueteFixadaPelaEquipe}</span>
+            <span className="truncate text-sm leading-5 text-room-fg">{poll.question}</span>
+          </span>
+        </button>
+      ) : null}
+    </>
   );
 }

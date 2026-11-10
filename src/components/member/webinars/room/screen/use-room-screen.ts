@@ -2,8 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { StudentChatMessage } from "@/server/webinars/model";
-import type { ScreenEventForm, ScreenEventName, ScreenEventTarget, StudentScreenItem, StudentScreenState } from "@/server/webinars/screen-model";
-import { adoptScreen, closedIdsValue, screenClosedKey, storedClosedIds, visibleScreenItems } from "./room-screen-model";
+import type { ScreenEventForm, StudentScreenItem, StudentScreenState } from "@/server/webinars/screen-model";
+import { beaconScreenEvents, postScreenEvents } from "../room-api";
+import {
+  adoptScreen,
+  closedIdsValue,
+  createScreenEventSender,
+  createShownWatcher,
+  screenClosedKey,
+  screenSeenKey,
+  SCREEN_SHOWN_RATIO,
+  storedClosedIds,
+  visibleScreenItems,
+  type ScreenEvent,
+  type ScreenEventSender,
+  type ShownWatcher
+} from "./room-screen-model";
 
 // A "Na tela" na sala do aluno (docs/30 §5.1; especificacao de 10/11/2026, §3 e §5.2): o estado do que a turma ve na
 // frente da sessao, a mensagem fixada, a enquete fixada, o banner e o QR Code. Chega por dois caminhos:
@@ -13,9 +27,13 @@ import { adoptScreen, closedIdsValue, screenClosedKey, storedClosedIds, visibleS
 // O aluno que fecha um banner ou QR Code fecha so aquela exibicao, guardada no sessionStorage da aba (recarregar nao
 // traz de volta; um novo Mostrar e outra exibicao). Lido por useSyncExternalStore (o HTML do servidor e a primeira
 // pintura saem sem nada fechado); sem armazenamento, vale a memoria ate recarregar; toda leitura e escrita em try/catch.
-// O envio das metricas (sendEvent) e um ponto de encaixe: a fatia do aluno o preenche (POST .../screen-events).
+// As metricas do aluno (§7; useRoomScreenEvents): o "viu" de cada cartao e linha pelo IntersectionObserver (50 % ou
+// mais na tela por 1 s seguido, com a aba visivel e sem a enquete do palco por cima), uma vez por exibicao (os vistos
+// no sessionStorage), mandado depois de 0 a 5 s ao acaso por POST .../screen-events; o clique e o fechar na hora, pelo
+// sendBeacon; no pagehide e ao sair da sala, o que esperava vai pelo sendBeacon. As regras ficam em room-screen-model.ts
+// (createShownWatcher, createScreenEventSender); aqui so o navegador. Nada e medido no "ver como" (`enabled` falso).
 
-export type ScreenEvent = { displayId: string; form: ScreenEventForm; name: ScreenEventName; target?: ScreenEventTarget };
+export type { ScreenEvent };
 
 export type RoomScreen = {
   /** Fecha o banner ou o QR Code para este aluno (so os que podem ser fechados). */
@@ -31,8 +49,6 @@ export type RoomScreen = {
   pinnedPollId: string | null;
   /** O resumo das enquetes da sessao: mudou, a sala rele as enquetes (useRoomPolls). Nulo sem estado. */
   pollsKey: string | null;
-  /** As metricas do aluno (viu, clicou, fechou): por enquanto nada sai daqui. */
-  sendEvent: (event: ScreenEvent) => void;
 };
 
 type ClosedStore = { read: () => string | null; subscribe: (listener: () => void) => () => void; write: (value: string) => void };
@@ -106,9 +122,6 @@ export function useRoomScreen(input: { sessionId: string; sessionPinned: Student
   const closedIds = useMemo(() => storedClosedIds(closedRaw), [closedRaw]);
   const closeItem = useCallback((displayId: string) => store.write(closedIdsValue(storedClosedIds(store.read()), displayId)), [store]);
   const items = useMemo(() => visibleScreenItems(state?.items ?? [], closedIds), [closedIds, state]);
-  const sendEvent = useCallback((event: ScreenEvent) => {
-    void event;
-  }, []);
 
   return {
     closeItem,
@@ -117,7 +130,158 @@ export function useRoomScreen(input: { sessionId: string; sessionPinned: Student
     onChatScreen,
     pinned: state ? state.pinned : sessionPinned,
     pinnedPollId: state?.pinnedPollId ?? null,
-    pollsKey: state ? state.pollsKey : null,
-    sendEvent
+    pollsKey: state ? state.pollsKey : null
   };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * As metricas: viu, clicou, fechou
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Registra um cartao ou uma linha para o "viu"; devolve o desligar. */
+export type ScreenWatch = (element: Element, displayId: string, form: ScreenEventForm) => () => void;
+
+export type RoomScreenEvents = {
+  /** Clicou ou fechou (na hora, pelo sendBeacon); o "viu" chega sozinho pelo `watch`. */
+  sendEvent: (event: ScreenEvent) => void;
+  watch: ScreenWatch;
+};
+
+/** Os vistos de uma sessao no sessionStorage (sem armazenamento, so na memoria ate recarregar). */
+function seenStore(sessionId: string): { add: (displayId: string) => void; has: (displayId: string) => boolean } {
+  const key = screenSeenKey(sessionId);
+  let memory: string[] = [];
+  const read = () => {
+    try {
+      return storedClosedIds(window.sessionStorage.getItem(key));
+    } catch {
+      return memory;
+    }
+  };
+  return {
+    add(displayId) {
+      const value = closedIdsValue(read(), displayId);
+      memory = storedClosedIds(value);
+      try {
+        window.sessionStorage.setItem(key, value);
+      } catch {
+        // Sem armazenamento: vale a memoria.
+      }
+    },
+    has: (displayId) => read().includes(displayId) || memory.includes(displayId)
+  };
+}
+
+const setTimer = (callback: () => void, ms: number): unknown => window.setTimeout(callback, ms);
+const clearTimer = (id: unknown) => window.clearTimeout(id as number);
+
+function tabVisible(): boolean {
+  try {
+    return document.visibilityState !== "hidden";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * As metricas da Na tela para a sala: `watch` registra cada cartao e linha (os componentes chamam num efeito; o
+ * registro vale antes e depois de o envio ligar), `sendEvent` manda o clique e o fechar. `enabled` falso (o "ver como",
+ * a sala fora do ar para a pessoa) desliga tudo; `pollOver` e a enquete no meio do palco, que para a conta do "viu".
+ */
+export function useRoomScreenEvents(input: { enabled: boolean; pollOver: boolean; sessionId: string; webinarId: string }): RoomScreenEvents {
+  const { enabled, pollOver, sessionId, webinarId } = input;
+  const runtimeRef = useRef<{ observer: IntersectionObserver | null; sender: ScreenEventSender; watcher: ShownWatcher } | null>(null);
+  const registryRef = useRef(new Map<Element, { displayId: string; form: ScreenEventForm }>());
+  const pollOverRef = useRef(pollOver);
+
+  useEffect(() => {
+    pollOverRef.current = pollOver;
+    runtimeRef.current?.watcher.setGlobal({ pollOver });
+  }, [pollOver]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const registry = registryRef.current;
+    const sender = createScreenEventSender({
+      beacon: (body) => beaconScreenEvents(webinarId, body),
+      clearTimer,
+      post: (body) => postScreenEvents(webinarId, body),
+      random: Math.random,
+      seen: seenStore(sessionId),
+      sessionId,
+      setTimer
+    });
+    const watcher = createShownWatcher({
+      clearTimer,
+      onShown: (displayId, form) => sender.send({ displayId, form, name: "shown" }),
+      pollOver: pollOverRef.current,
+      setTimer,
+      visible: tabVisible()
+    });
+    const observer =
+      typeof IntersectionObserver === "function"
+        ? new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                const info = registry.get(entry.target);
+                if (info) {
+                  watcher.update(entry.target, { ...info, intersecting: entry.isIntersecting && entry.intersectionRatio >= SCREEN_SHOWN_RATIO });
+                }
+              }
+            },
+            { threshold: [0, SCREEN_SHOWN_RATIO, 1] }
+          )
+        : null;
+    const runtime = { observer, sender, watcher };
+    runtimeRef.current = runtime;
+    for (const element of registry.keys()) {
+      observer?.observe(element);
+    }
+    const onVisibility = () => watcher.setGlobal({ visible: tabVisible() });
+    const onPageHide = () => sender.flushAll();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      observer?.disconnect();
+      watcher.dispose();
+      // Sair da sala (ou desligar) leva o que esperava o atraso: o "viu" ja ficou marcado como mandado.
+      sender.flushAll();
+      if (runtimeRef.current === runtime) {
+        runtimeRef.current = null;
+      }
+    };
+  }, [enabled, sessionId, webinarId]);
+
+  const watch = useCallback<ScreenWatch>((element, displayId, form) => {
+    registryRef.current.set(element, { displayId, form });
+    runtimeRef.current?.observer?.observe(element);
+    return () => {
+      registryRef.current.delete(element);
+      runtimeRef.current?.observer?.unobserve(element);
+      runtimeRef.current?.watcher.remove(element);
+    };
+  }, []);
+
+  const sendEvent = useCallback((event: ScreenEvent) => {
+    runtimeRef.current?.sender.send(event);
+  }, []);
+
+  return useMemo(() => ({ sendEvent, watch }), [sendEvent, watch]);
+}
+
+/** O cartao ou a linha que conta o "viu": a ref do elemento, registrada no `watch` enquanto ele esta montado. */
+export function useScreenShownRef<T extends Element>(watch: ScreenWatch | null | undefined, displayId: string, form: ScreenEventForm) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || !watch) {
+      return;
+    }
+    return watch(element, displayId, form);
+  }, [displayId, form, watch]);
+  return ref;
 }
