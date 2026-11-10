@@ -34,7 +34,7 @@ type ConsoleShellProps = {
 
 export function ConsoleShell({ banner, children, classNames, portalRef, theme, top }: ConsoleShellProps) {
   return (
-    <div className={classNames.root} data-console-root="" data-room-theme={theme}>
+    <div className={classNames.root} data-console-root="" data-field-focus="own" data-room-theme={theme}>
       <ConsolePortalContext.Provider value={portalRef}>
         {top}
         {banner ? <div className={classNames.banner}>{banner}</div> : null}

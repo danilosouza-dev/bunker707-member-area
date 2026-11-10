@@ -1109,6 +1109,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                     chatMode={session.session.chatMode}
                     consented={session.me.consented}
                     defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                    avatarUrl={session.me.displayMode === "anonymous" ? null : (session.me.avatarUrl ?? null)}
                     displayName={session.me.displayName}
                     error={chat.error}
                     messages={translation.messages}
@@ -1147,6 +1148,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   assistant={assistant}
                   consented={session.me.consented}
                   defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
+                  avatarUrl={session.me.displayMode === "anonymous" ? null : (session.me.avatarUrl ?? null)}
                   displayName={session.me.displayName}
                   enabled={!readOnly}
                   ended={phase === "ended"}

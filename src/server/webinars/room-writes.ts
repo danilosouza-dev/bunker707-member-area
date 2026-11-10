@@ -18,9 +18,11 @@ import {
   countStudentReactionsSince,
   fetchLastPresenceRow,
   fetchPollRow,
+  countQuestionReplyRows,
   fetchQuestionRow,
   insertChatMessage,
   insertPollAnswerRow,
+  insertQuestionReplyRow,
   insertQuestionRow,
   insertReactionRow,
   listPresentUserIds,
@@ -30,14 +32,15 @@ import {
   toggleQuestionVote,
   upsertConsentRow
 } from "./chat-store";
-import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
-import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput } from "./chat-schemas";
+import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
+import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput, type QuestionReplyPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
 import { CHAT_CONSENT_VERSION, ROOM_RULES, questionBodyOf, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
 import { liveBanState, liveWriteRefusal, presenceOffsetMs, type LiveBanState } from "./live-model";
 import { fetchStudentBans, fetchUserBan } from "./live-store";
-import { presenceBucket, sessionOffsetMs, simulatedPhase, toStudentMessage } from "./room-model";
-import { markLiveOpening, reserveChatSlot, takeChatBurst, takeQuestionBurst, takeReaction } from "./room-limits";
+import { forgetAuthorPhoto } from "./author-photos";
+import { authorPhotoUrl, presenceBucket, sessionOffsetMs, simulatedPhase, toStudentMessage } from "./room-model";
+import { markLiveOpening, reserveChatSlot, takeChatBurst, takeQuestionBurst, takeReaction, takeReplyBurst } from "./room-limits";
 import {
   chatSentMetadata,
   consentMetadata,
@@ -46,14 +49,19 @@ import {
   pollAnswerProblem,
   pollAnsweredMetadata,
   postingRefusal,
+  questionReplyRefusal,
+  questionReplySentMetadata,
   questionSentMetadata,
   reactionSentMetadata,
   toStudentPoll,
   toStudentQuestion,
+  toStudentReply,
   writeOffsetMs,
   type PostingRefusal,
+  type QuestionReplyRefusal,
   type StudentPoll,
-  type StudentQuestion
+  type StudentQuestion,
+  type StudentQuestionReply
 } from "./room-rules";
 import { consentIsCurrent, loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -182,6 +190,8 @@ async function saveConsent(input: { choice: ConsentChoice; db: WebinarsDb; event
     return;
   }
   await upsertConsentRow(input.db, { consent_version: CHAT_CONSENT_VERSION, display_mode: choice.mode, nickname: choice.nickname, user_id: userId }, new Date(input.now).toISOString());
+  // O aceite acabou de mudar: a foto de quem escreve nao espera a memoria de 60 s (author-photos.ts).
+  forgetAuthorPhoto(userId);
   input.events.push(webinarEvent(userId, input.sessionId, "webinar_chat_consented", consentMetadata({ consentVersion: CHAT_CONSENT_VERSION, display: choice.mode })));
 }
 
@@ -286,7 +296,17 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
     questionId = question.id;
   }
 
-  return { events, message: toStudentMessage(chatMessageFromRow(row), userId, session.kind), offsetMs, pending: !approved, questionId };
+  // A minha mensagem ja sai com a minha foto (o aceite esta em dia: acabou de ser conferido ou gravado), fora do anonimo.
+  const message = chatMessageFromRow(row);
+  const avatarUrl = authorPhotoUrl({
+    authorUserId: userId,
+    displayName: message.displayName,
+    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    source: "audience",
+    viewer: "student",
+    webinarId: webinar.id
+  });
+  return { events, message: toStudentMessage(message, userId, session.kind, message.offsetMs, avatarUrl), offsetMs, pending: !approved, questionId };
 }
 
 export type RemoveChatResult = { events: StudentEventInsert[]; removed: number };
@@ -297,6 +317,7 @@ export async function removeStudentChat(input: { db: WebinarsDb; now?: number; u
   const nowIso = new Date(now).toISOString();
   const counts = await softDeleteStudentContent(input.db, { nowIso, reason: "consent_revoked", userId: input.userId });
   await revokeConsentRow(input.db, input.userId, nowIso);
+  forgetAuthorPhoto(input.userId);
   return {
     events: [webinarEvent(input.userId, null, "webinar_chat_consented", consentRevokedMetadata(CHAT_CONSENT_VERSION))],
     removed: counts.answers + counts.messages + counts.questions
@@ -464,12 +485,90 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
   const displayName = studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, mode, userId, webinar.id);
   const offsetMs = writeOffsetMs(session, now, input.offsetMs);
   const row = await insertQuestionRow(db, { anonymous, body: text, display_name: displayName, offset_ms: offsetMs, session_id: session.id, user_id: userId });
-  const question = toStudentQuestion(questionFromRow(row), userId, false);
+  const asked = questionFromRow(row);
+  const ownPhoto = authorPhotoUrl({
+    anonymous: asked.anonymous,
+    authorUserId: userId,
+    displayName: asked.displayName,
+    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    source: "audience",
+    viewer: "student",
+    webinarId: webinar.id
+  });
+  const question = toStudentQuestion(asked, userId, false, ownPhoto);
   if (!question) {
     throw new WebinarError(CHAT_MESSAGES.invalid, 500);
   }
   events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous, offsetMs, questionId: row.id })));
   return { events, offsetMs, question };
+}
+
+/** As frases de quem nao pode responder no fio (403 para quem nao e o dono; 409 para o resto). */
+export const REPLY_REFUSAL_MESSAGES: Record<QuestionReplyRefusal, string> = {
+  full: WEBINAR_COPY.salaV2.perguntas.fioCheio,
+  not_answered: WEBINAR_COPY.salaV2.perguntas.aindaSemResposta,
+  not_owner: WEBINAR_COPY.salaV2.perguntas.soQuemPerguntou
+};
+
+export type QuestionReplyResult = { events: StudentEventInsert[]; reply: StudentQuestionReply };
+
+/**
+ * A resposta do aluno no fio da propria pergunta (docs/30 §1.3; decisao do produtor de 10/11/2026): so quem perguntou,
+ * so depois de respondida e ate o teto do fio (questionReplyRefusal). Escrever e escrever: fora da hora da sessao 409, o
+ * silenciado no chat e o removido nao respondem (como na pergunta), o aceite do chat precisa estar em dia (409
+ * consent_required; a resposta pode trazer o aceite, como a primeira pergunta), 5 por 60 s, palavra bloqueada 422. Na
+ * pergunta Anonima a resposta sai com o mesmo nome anonimo dela, sem foto.
+ */
+export async function replyStudentQuestion(input: { body: Omit<QuestionReplyPostInput, "sessionId">; context: RoomContext; db: WebinarsDb; now?: number; questionId: string; userId: string }): Promise<QuestionReplyResult> {
+  const { body, context, db, userId } = input;
+  const now = input.now ?? Date.now();
+  const { session, webinar } = context;
+  const events: StudentEventInsert[] = [];
+  refuse(context, now, "interaction");
+  await refuseBanned({ context, db, kind: "chat", now, userId });
+
+  const row = await fetchQuestionRow(db, input.questionId);
+  const question = row && row.session_id === session.id && !row.deleted_at ? questionFromRow(row) : null;
+  if (!question || !toStudentQuestion(question, userId, false)) {
+    throw new WebinarError("Pergunta não encontrada.", 404);
+  }
+  const refusal = questionReplyRefusal({ question, replies: await countQuestionReplyRows(db, question.id), staff: false, userId });
+  if (refusal) {
+    throw new WebinarError(REPLY_REFUSAL_MESSAGES[refusal], refusal === "not_owner" ? 403 : 409);
+  }
+
+  const identity = await loadStudentIdentity(db, userId);
+  const choice = consentChoice(identity, { ...body, anonymous: false }, webinar);
+  const burst = takeReplyBurst(userId, session.id, now);
+  if (!burst.ok) {
+    throw new RoomLimitError(ROOM_LIMIT_MESSAGE, burst.retryAfterSeconds);
+  }
+  const text = sanitizeLessonCommentBody(body.body);
+  if (!text) {
+    throw new WebinarError(CHAT_MESSAGES.reply, 400);
+  }
+  const blocked = await blockedTermIn(db, text);
+  if (blocked) {
+    throw new WebinarError(blocked, 422);
+  }
+
+  await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
+  // Na pergunta Anonima, o mesmo nome anonimo dela; senao o nome do aceite (que pode ser "Aluno {n}").
+  const displayName = question.anonymous ? question.displayName : studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, choice.mode, userId, webinar.id);
+  const inserted = questionReplyFromRow(
+    await insertQuestionReplyRow(db, { anonymous: question.anonymous || choice.mode === "anonymous", body: text, display_name: displayName, question_id: question.id, role: "student", session_id: session.id, user_id: userId })
+  );
+  const avatarUrl = authorPhotoUrl({
+    anonymous: inserted.anonymous,
+    authorUserId: userId,
+    displayName: inserted.displayName,
+    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    source: "audience",
+    viewer: "student",
+    webinarId: webinar.id
+  });
+  events.push(webinarEvent(userId, session.id, "webinar_question_reply_sent", questionReplySentMetadata({ length: text.length, questionId: question.id, replyId: inserted.id })));
+  return { events, reply: toStudentReply(inserted, userId, avatarUrl) };
 }
 
 /** Curtir / Tirar a curtida de uma pergunta que o aluno ve na sessao (fora da hora 409; a dispensada de outro aluno 404). */

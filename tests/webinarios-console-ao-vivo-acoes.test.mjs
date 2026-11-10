@@ -956,7 +956,7 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_NO_AR, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-carla" }, user_id: COAPRESENTADOR },
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_ESPERA, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-outra" }, user_id: ALUNO }
         ],
-        webinar_chat_consents: [{ consent_version: 1, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA }],
+        webinar_chat_consents: [{ consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA }],
         webinar_recording_events: [
           { file_name: null, id: randomUUID(), payload: {}, processing_status: "processed", received_at: new Date(nowMs - 2 * 60 * MIN - 6 * MIN).toISOString(), session_id: S_OUTRA, state: "ready" },
           { file_name: `${sala}_2026-11-05-23-03-20.mp4`, id: randomUUID(), payload: { fileName: `${sala}_2026-11-05-23-03-20.mp4`, state: "uploaded" }, processing_status: "processed", received_at: new Date(nowMs - MIN).toISOString(), session_id: S_NO_AR, state: "uploaded" }

@@ -85,11 +85,22 @@ export function chipScrollBy(input: { clientWidth: number; direction: -1 | 1 }):
  * Y10: a pergunta como o comentario do YouTube, com o fio "1 resposta" (spec §8.4)
  * ---------------------------------------------------------------------------------------------- */
 
-type ThreadQuestion = Pick<StudentQuestion, "answerText" | "mine" | "status">;
+type ThreadQuestion = Pick<StudentQuestion, "answerText" | "mine" | "status"> & { replies?: readonly unknown[] };
 
-/** A pergunta tem fio: a resposta escrita da Equipe ou do Assistente (a respondida so ao vivo nao tem texto). */
+/**
+ * Quantas respostas o fio tem: a resposta escrita da Equipe ou do Assistente (uma) mais o que veio depois dela (quem
+ * perguntou e a equipe, docs/30 §1.3). A respondida so ao vivo, sem ninguem ter escrito depois, nao tem fio.
+ */
+export function questionThreadCount(question: ThreadQuestion): number {
+  if (question.status !== "answered") {
+    return 0;
+  }
+  return (question.answerText?.trim() ? 1 : 0) + (question.replies?.length ?? 0);
+}
+
+/** A pergunta tem fio: ao menos uma resposta escrita. */
 export function questionHasThread(question: ThreadQuestion): boolean {
-  return question.status === "answered" && Boolean(question.answerText?.trim());
+  return questionThreadCount(question) > 0;
 }
 
 /** O fio nasce aberto na minha pergunta respondida por escrito e fechado nas outras. */

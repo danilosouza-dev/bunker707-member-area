@@ -20,7 +20,7 @@ const STUBS = {
   "@/server/webinars/assistant-actions": `${fail}
 export const loadAssistantEditor = fail; export const saveAssistant = fail; export const loadAttendanceSnapshot = fail; export const setReplyAll = fail; export const pingAttendant = fail; export const assign = fail; export const editAssistantAnswer = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const answerQuestion = fail; export const sendTeamMessage = fail; export const setQuestionStatus = fail;`
+export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const sendTeamMessage = fail; export const setQuestionStatus = fail;`
 };
 
 registerHooks({
@@ -326,6 +326,68 @@ test("painel Perguntas do console com as marcas: Respondida pelo Assistente, Ped
   assert.match(textOf(bloco("q-bia")), /Com Bia A\./);
   assert.doesNotMatch(textOf(bloco("q-equipe")), /Responder por escrito|Assistente/);
   assert.doesNotMatch(render(ConsoleQuestions, { busyKey: null, canAct: true, onAnswer: async () => true, onStatus: noop, questions: [q("x")] }), /Pediu a equipe/, "sem marcas, como antes");
+});
+
+test("painel Perguntas do console com o fio (docs/30 §2.4): as respostas em ordem com o nome, o selo do papel e a lixeira; 'Nova resposta do aluno' quando ele escreveu por ultimo; o Responder so na respondida e so com a acao; o campo da equipe ao abrir", () => {
+  const q = (id, extra = {}) => ({ anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, body: `pergunta ${id}`, createdAt: new Date(NOW).toISOString(), displayName: "Ana S.", id, messageId: null, offsetMs: 0, sessionId: "s1", status: "open", upvotes: 0, userId: "u1", ...extra });
+  const r = (id, extra = {}) => ({ anonymous: false, avatarUrl: null, body: `resposta ${id}`, createdAt: new Date(NOW).toISOString(), displayName: "Ana S.", id, questionId: "q", role: "student", sessionId: "s1", userId: "u1", ...extra });
+  const props = (extra = {}) => ({
+    busyKey: null,
+    canAct: true,
+    onAnswer: async () => true,
+    onDeleteReply: noop,
+    onReply: async () => true,
+    onStatus: noop,
+    questions: [
+      q("q-espera", { answerText: "da equipe", avatarUrl: "https://exemplo.test/ana.jpg", replies: [r("r1", { avatarUrl: "https://exemplo.test/ana.jpg" }), r("r2", { displayName: "Danilo S.", role: "host", userId: "u-host" }), r("r3")], status: "answered", upvotes: 1 }),
+      q("q-ok", { answerText: "da equipe", replies: [r("r4"), r("r5", { displayName: "Bia A.", role: "team", userId: "u-bia" })], status: "answered" }),
+      q("q-aberta"),
+      q("q-anonima", { anonymous: true, answeredLive: true, displayName: "Aluno 123", replies: [r("r6", { anonymous: true, displayName: "Aluno 123" })], status: "answered" })
+    ],
+    ...extra
+  });
+  const markup = render(ConsoleQuestions, props());
+  const bloco = (html, id) => {
+    const inicio = html.indexOf(`data-console-question="${id}"`);
+    const fim = html.indexOf("data-console-question=", inicio + 10);
+    return html.slice(inicio, fim === -1 ? undefined : fim);
+  };
+
+  // A que espera a equipe: o selo, a marca no item e o topo do quadro junto da aberta (por votos).
+  const espera = bloco(markup, "q-espera");
+  assert.match(markup, /<li[^>]*data-console-question="q-espera" data-question-awaits-team="" data-question-status="answered"/);
+  assert.match(textOf(espera), /Respondida Nova resposta do aluno/);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-question="([^"]+)"/g), (match) => match[1]).slice(0, 2), ["q-espera", "q-aberta"], "o que pede a equipe primeiro");
+  // O fio em ordem, cada resposta com quem escreveu; a equipe com o selo do papel; a foto de quem tem.
+  assert.deepEqual(Array.from(espera.matchAll(/data-console-reply="([^"]+)" data-reply-role="([^"]+)"/g), (match) => `${match[1]}:${match[2]}`), ["r1:student", "r2:host", "r3:student"]);
+  assert.match(espera, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "a foto de quem perguntou e respondeu");
+  assert.match(espera, /Danilo S\.<\/span><span class="[^"]*">Apresentador<\/span>/);
+  assert.equal((espera.match(/aria-label="Apagar a resposta de [^"]+"/g) ?? []).length, 3, "a lixeira em cada resposta do fio");
+  assert.match(espera, /aria-label="Apagar a resposta de Danilo S\."/);
+  // O Responder (tonal quando o aluno espera) antes do Reabrir; o campo so abre no clique.
+  assert.match(espera, /<button class="[^"]*\bbg-room-control\b[^"]*" data-console-reply-open="" type="button">Responder<\/button><button[^>]*>Reabrir<\/button>/);
+  assert.doesNotMatch(markup, /data-room-reply-field/);
+
+  // A conversada (a equipe por ultimo): sem o selo, o Responder de texto.
+  const conversada = bloco(markup, "q-ok");
+  assert.doesNotMatch(textOf(conversada), /Nova resposta do aluno/);
+  assert.doesNotMatch(conversada, /data-question-awaits-team/);
+  assert.match(conversada, /Bia A\.<\/span><span class="[^"]*">Equipe<\/span>/);
+  assert.match(conversada, /<button class="[^"]*\bbg-transparent\b[^"]*" data-console-reply-open="" type="button">Responder<\/button>/);
+  // A aberta continua com o Responder por escrito, sem o Responder do fio.
+  assert.doesNotMatch(bloco(markup, "q-aberta"), /data-console-reply-open/);
+  assert.match(textOf(bloco(markup, "q-aberta")), /Responder por escrito/);
+  // A anonima: a resposta dela sem nome e sem foto.
+  const anonima = bloco(markup, "q-anonima");
+  assert.doesNotMatch(anonima, /Aluno 123|<img/);
+  assert.equal((anonima.match(/lucide-venetian-mask/g) ?? []).length, 2, "a pergunta e a resposta com a mascara");
+  assert.match(anonima, /aria-label="Apagar a resposta de Anônima"/);
+
+  // Sem poder agir, ou sem as acoes do fio (um console de antes), o fio e so de leitura.
+  const leitura = render(ConsoleQuestions, props({ canAct: false }));
+  assert.doesNotMatch(leitura, /data-console-reply-open|Apagar a resposta/);
+  assert.match(leitura, /data-console-reply="r1"/, "o fio continua na tela");
+  assert.doesNotMatch(render(ConsoleQuestions, props({ onDeleteReply: null, onReply: null })), /data-console-reply-open|Apagar a resposta/);
 });
 
 /* ------------------------------------------------------------------------------------------------

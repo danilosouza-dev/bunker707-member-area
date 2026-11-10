@@ -252,9 +252,17 @@ export const WEBINAR_ADMIN_COPY = {
       answerLive: "Respondida ao vivo",
       answerPlaceholder: "Escreva a resposta",
       answerWritten: "Responder por escrito",
+      /* O fio (10/11/2026): a conversa depois da primeira resposta, com o aluno que perguntou. */
+      deleteReply: (name: string) => `Apagar a resposta de ${name}`,
       dismiss: "Dispensar",
       empty: "Nenhuma pergunta ainda.",
+      newReply: "Nova resposta do aluno",
       reopen: "Reabrir",
+      replied: "Resposta enviada.",
+      reply: "Responder",
+      replyDeleted: "Resposta apagada.",
+      replyLabel: "Resposta da equipe",
+      replyPlaceholder: "Escreva uma resposta",
       statuses: { answered: "Respondida", dismissed: "Dispensada", open: "Aberta" },
       title: "Perguntas",
       votes: (count: number) => (count === 1 ? "1 voto" : `${count} votos`)

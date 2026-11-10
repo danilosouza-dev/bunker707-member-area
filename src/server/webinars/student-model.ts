@@ -402,6 +402,8 @@ export type StudentRoomExtras = {
   /** Fase 3: a sala ao vivo (so na sessao `live`; nas outras, nulo). Nunca leva o nome da sala nem o token. */
   live: LiveRoomInfo | null;
   me: {
+    /** A foto do proprio perfil (so https): o avatar do campo de escrever, fora do anonimo; nula sem foto. */
+    avatarUrl: string | null;
     /** Fase 3: removido desta sessao, banido de todas, silenciado no chat ate `mutedUntil` (nulo = ate o fim). */
     ban: LiveBanState;
     consented: boolean;

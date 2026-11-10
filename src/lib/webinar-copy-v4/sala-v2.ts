@@ -84,6 +84,15 @@ export const SALA_V2_COPY = {
    * "Perguntar" (o "Fazer uma pergunta" de WEBINAR_COPY.sala fica so no campo vazio).
    */
   perguntas: {
+    /* O fio da pergunta (10/11/2026): quem perguntou comenta a resposta da equipe, e a equipe responde de novo. */
+    adicioneResposta: "Adicione uma resposta",
+    aceiteParaResponder: "Para responder, aceite as regras do chat uma vez.",
+    aindaSemResposta: "Você pode responder depois que a equipe responder.",
+    fioCheio: "Esta conversa chegou ao limite de respostas.",
+    responder: "Responder",
+    respostaEnviada: "Resposta enviada.",
+    soQuemPerguntou: "Só quem fez a pergunta e a equipe respondem aqui.",
+    suaResposta: "Sua resposta",
     filtrar: "Filtrar perguntas",
     minhas: "Minhas",
     /* O botao do fio aberto, depois das respostas (como o "Ocultar respostas" do YouTube). */

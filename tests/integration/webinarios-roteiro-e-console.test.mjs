@@ -70,7 +70,7 @@ before(async () => {
     "Gravando a sessao marcada de teste"
   );
   unwrap(
-    await db.from("webinar_chat_consents").insert({ consent_version: 1, display_mode: "first_name_initial", user_id: aluna.id }),
+    await db.from("webinar_chat_consents").insert({ consent_version: 2, display_mode: "first_name_initial", user_id: aluna.id }),
     "Gravando o aceite da aluna"
   );
   unwrap(

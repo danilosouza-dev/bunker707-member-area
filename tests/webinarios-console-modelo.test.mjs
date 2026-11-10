@@ -129,6 +129,31 @@ test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentua
   );
 });
 
+test("o fio no quadro (docs/30 §2.4): questionAwaitsTeam so na respondida em que o aluno escreveu por ultimo; ela sobe para junto das abertas", () => {
+  const aluno = { role: "student" };
+  const equipe = { role: "team" };
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "answered" }), true);
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno, equipe], status: "answered" }), false, "a equipe respondeu por ultimo");
+  assert.equal(console_.questionAwaitsTeam({ replies: [], status: "answered" }), false);
+  assert.equal(console_.questionAwaitsTeam({ status: "answered" }), false, "sem o fio (uma pergunta de antes)");
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "open" }), false, "a aberta ja pede a equipe pelo proprio estado");
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "dismissed" }), false);
+
+  const question = (id, status, upvotes, minute, replies = []) => ({ createdAt: new Date(T0 + minute * MIN).toISOString(), id, replies, status, upvotes });
+  const board = console_.sortQuestionsForBoard([
+    question("respondida", "answered", 9, 1),
+    question("esperando", "answered", 1, 5, [aluno]),
+    question("aberta", "open", 4, 2),
+    question("conversada", "answered", 8, 3, [aluno, equipe]),
+    question("dispensada", "dismissed", 7, 0)
+  ]);
+  assert.deepEqual(
+    board.map((entry) => entry.id),
+    ["aberta", "esperando", "respondida", "conversada", "dispensada"],
+    "o que pede a equipe primeiro (por votos), depois as respondidas e as dispensadas"
+  );
+});
+
 test("acoes de uma mensagem: liberar so a pendente, fixar so a liberada e nao fixada, promover so a da turma com aceite e ainda fora da linha mestre", () => {
   const message = (extra) => ({ approved: true, authorUserId: "u1", body: "oi", createdAt: "", displayName: "Ana M.", id: "m1", kind: "message", master: false, offsetMs: 0, pinnedAt: null, promotable: true, replyToId: null, role: "student", scriptItemId: null, sessionId: "s1", source: "audience", webinarId: "w1", ...extra });
   assert.deepEqual(console_.messageActions(message({}), null), { approve: false, delete: true, pin: true, promote: true, question: true, unpin: false });

@@ -632,7 +632,7 @@ test("o aceite (§8.5): o texto palavra por palavra, como o nome aparece, Entend
   assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto e os radios iguais nos dois");
   assert.equal(
     WEBINAR_COPY.sala.consentimento,
-    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
+    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Para não mostrar o nome nem a foto, escolha Participar como anônimo. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
   );
 });
 

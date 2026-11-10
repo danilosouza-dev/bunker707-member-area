@@ -1,14 +1,18 @@
 "use client";
 
+import { Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { roomPillClassName } from "@/components/member/webinars/room/room-pill";
+import { RoomReplyField } from "@/components/member/webinars/room/room-reply-field";
+import { RoomIconButton } from "@/components/member/webinars/room/room-ui";
+import { chatRoleLabel } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { AttendanceQuestionMark } from "@/server/webinars/assistant-queries";
-import { sortQuestionsForBoard } from "@/server/webinars/console-model";
+import { questionAwaitsTeam, sortQuestionsForBoard } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
-import { CHAT_LIMITS, type QuestionStatus, type WebinarQuestion } from "@/server/webinars/model";
+import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionStatus, type WebinarQuestion } from "@/server/webinars/model";
 
 // O painel Perguntas do console (docs/30 §2.4; o estilo do YouTube, docs/31 §10): a fila por votos (as abertas
 // primeiro), cada pergunta como o comentario do YouTube da sala, direto no cartao do painel (sem cartao proprio), com
@@ -18,6 +22,11 @@ import { CHAT_LIMITS, type QuestionStatus, type WebinarQuestion } from "@/server
 // Na aberta (ou na respondida pelo Assistente em que o aluno pediu a equipe), o campo da resposta com a linha embaixo,
 // como o campo da sala, e as pilulas Responder por escrito (vai para o chat como linha da equipe; branca, desligada sem
 // texto), Respondida ao vivo e Dispensar; na que saiu da fila, Reabrir. Nenhuma frase escrita aqui.
+// O fio (docs/30 §2.4; decisao do produtor de 10/11/2026): depois da primeira resposta, o que o aluno que perguntou e a
+// equipe escrevem aparece em ordem embaixo dela, cada resposta com a foto ou as iniciais, o nome, o selo do papel da
+// equipe e a lixeira (a equipe apaga qualquer resposta do fio). Na respondida, "Responder" abre o campo da equipe
+// (RoomReplyField). Quando o aluno escreveu por ultimo, a pergunta leva o selo "Nova resposta do aluno", sobe para o
+// topo do quadro e conta no numero da aba, ate a equipe responder.
 
 const copy = WEBINAR_ADMIN_COPY.console.questions;
 
@@ -26,10 +35,40 @@ type ConsoleQuestionsProps = {
   canAct: boolean;
   /** Fase 4c: as marcas do Atendimento por pergunta (de quem e a resposta, com quem esta, pediu a equipe). */
   marks?: Readonly<Record<string, AttendanceQuestionMark>> | null;
+  /** A foto do proprio perfil de quem esta no console (o avatar do campo de responder do fio). */
+  currentUserAvatarUrl?: string | null;
   onAnswer: (questionId: string, answerText: string, answeredLive: boolean) => Promise<boolean>;
+  /** Apaga uma resposta do fio; sem a prop (o teste de tela de antes), o fio fica sem a lixeira. */
+  onDeleteReply?: ((replyId: string) => void) | null;
+  /** A resposta da equipe no fio de uma pergunta respondida (devolve se gravou); sem a prop, sem o Responder. */
+  onReply?: ((questionId: string, body: string) => Promise<boolean>) | null;
   onStatus: (questionId: string, status: QuestionStatus) => void;
   questions: readonly WebinarQuestion[];
 };
+
+/** Uma resposta do fio no console: quem escreveu (a foto ou as iniciais; a mascara na pergunta anonima), o selo do papel da equipe, o texto e a lixeira. */
+function ThreadReply({ busy, canAct, onDelete, reply }: { busy: boolean; canAct: boolean; onDelete: ((replyId: string) => void) | null; reply: QuestionReply }) {
+  const name = reply.anonymous ? copy.anonymous : reply.displayName;
+  const role = reply.role === "student" ? null : chatRoleLabel(reply.role);
+
+  return (
+    <li className="group/reply flex min-w-0 gap-3" data-console-reply={reply.id} data-reply-role={reply.role}>
+      <RoomCommentAvatar imageSrc={reply.anonymous ? null : reply.avatarUrl} kind={reply.anonymous ? "anonymous" : "person"} name={reply.anonymous ? undefined : reply.displayName} />
+      <div className="min-w-0 flex-1">
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-[18px]">
+          <span className="truncate font-medium text-room-fg">{name}</span>
+          {role ? <Chip>{role}</Chip> : null}
+        </p>
+        <p className="mt-0.5 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg-muted">{reply.body}</p>
+      </div>
+      {canAct && onDelete ? (
+        <RoomIconButton className="shrink-0 [&_svg]:size-4" disabled={busy} label={copy.deleteReply(name)} onClick={() => onDelete(reply.id)} size={32} tone="ghost">
+          <Trash2 aria-hidden="true" />
+        </RoomIconButton>
+      ) : null}
+    </li>
+  );
+}
 
 type ChipTone = "neutral" | "success" | "warning";
 
@@ -46,9 +85,23 @@ function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: Chip
 
 const STATUS_TONE: Record<QuestionStatus, ChipTone> = { answered: "success", dismissed: "neutral", open: "neutral" };
 
-export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onStatus, questions }: ConsoleQuestionsProps) {
+export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null, marks = null, onAnswer, onDeleteReply = null, onReply = null, onStatus, questions }: ConsoleQuestionsProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // O campo de responder do fio: uma pergunta por vez, com o rascunho dela.
+  const [replying, setReplying] = useState<{ draft: string; id: string } | null>(null);
   const board = sortQuestionsForBoard(questions);
+
+  async function sendReply(question: WebinarQuestion) {
+    const text = replying?.id === question.id ? replying.draft.trim() : "";
+
+    if (!text || !onReply) {
+      return;
+    }
+
+    if (await onReply(question.id, text)) {
+      setReplying(null);
+    }
+  }
 
   async function answer(question: WebinarQuestion) {
     const text = (answers[question.id] ?? "").trim();
@@ -73,15 +126,21 @@ export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onSt
           const canAnswer = question.status === "open" || backToTeam;
           const name = question.anonymous ? copy.anonymous : question.displayName;
           const draft = answers[question.id] ?? "";
+          const replies = question.replies ?? [];
+          const awaitsTeam = questionAwaitsTeam(question);
+          // O Responder do fio: so na respondida que nao voltou para a equipe pelo "Falar com a equipe" (essa usa o campo de cima).
+          const canReply = canAct && Boolean(onReply) && question.status === "answered" && !backToTeam && replies.length < QUESTION_REPLY_LIMITS.perQuestion;
+          const replyOpen = canReply && replying?.id === question.id;
 
           return (
             <li
               className={cn("flex min-w-0 gap-3 border-b border-room-border py-4 first:pt-1 last:border-b-0", question.status === "dismissed" && "opacity-70")}
               data-console-question={question.id}
+              data-question-awaits-team={awaitsTeam ? "" : undefined}
               data-question-status={question.status}
               key={question.id}
             >
-              <RoomCommentAvatar kind={question.anonymous ? "anonymous" : "person"} name={question.anonymous ? undefined : question.displayName} />
+              <RoomCommentAvatar imageSrc={question.anonymous ? null : question.avatarUrl} kind={question.anonymous ? "anonymous" : "person"} name={question.anonymous ? undefined : question.displayName} />
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-[18px]">
                   <span className="truncate font-medium text-room-fg">{name}</span>
@@ -90,12 +149,37 @@ export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onSt
                   {mark?.answerSource === "ai" ? <Chip>{WEBINAR_COPY.assistente.console.respondidaPeloAssistente}</Chip> : null}
                   {mark?.handoffRequested ? <Chip tone="warning">{WEBINAR_COPY.assistente.console.pediuEquipe}</Chip> : null}
                   {mark?.assignedName && question.status === "open" ? <Chip tone="success">{WEBINAR_COPY.assistente.console.assumida(mark.assignedName)}</Chip> : null}
+                  {awaitsTeam ? <Chip tone="warning">{copy.newReply}</Chip> : null}
                 </div>
                 <p className="mt-1 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg">{question.body}</p>
                 {question.answerText ? (
                   <div className="mt-3 flex min-w-0 gap-3" data-console-answer="">
                     <RoomCommentAvatar kind="team" />
                     <p className="min-w-0 flex-1 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg-muted">{question.answerText}</p>
+                  </div>
+                ) : null}
+                {replies.length > 0 ? (
+                  <ol className="mt-3 flex min-w-0 flex-col gap-3" data-console-thread="">
+                    {replies.map((reply) => (
+                      <ThreadReply busy={busy} canAct={canAct} key={reply.id} onDelete={onDeleteReply} reply={reply} />
+                    ))}
+                  </ol>
+                ) : null}
+                {replyOpen ? (
+                  <div className="mt-3">
+                    <RoomReplyField
+                      ariaLabel={copy.replyLabel}
+                      avatar={<RoomCommentAvatar imageSrc={currentUserAvatarUrl} kind="team" />}
+                      busy={busy}
+                      id={`console-reply-${question.id}`}
+                      maxLength={QUESTION_REPLY_LIMITS.teamBody}
+                      onCancel={() => setReplying(null)}
+                      onChange={(value) => setReplying({ draft: value, id: question.id })}
+                      onSubmit={() => void sendReply(question)}
+                      placeholder={copy.replyPlaceholder}
+                      submitLabel={copy.reply}
+                      value={replying?.draft ?? ""}
+                    />
                   </div>
                 ) : null}
                 {canAct && canAnswer ? (
@@ -127,8 +211,19 @@ export function ConsoleQuestions({ busyKey, canAct, marks = null, onAnswer, onSt
                   </div>
                 ) : null}
                 {canAct && question.status !== "open" ? (
-                  <div className="mt-2">
-                    <button className={roomPillClassName({ className: "-ml-3", size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "open")} type="button">
+                  <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                    {canReply && !replyOpen ? (
+                      <button
+                        className={roomPillClassName({ className: "-ml-3", size: "s", tone: awaitsTeam ? "tonal" : "text" })}
+                        data-console-reply-open=""
+                        disabled={busy}
+                        onClick={() => setReplying({ draft: "", id: question.id })}
+                        type="button"
+                      >
+                        {copy.reply}
+                      </button>
+                    ) : null}
+                    <button className={roomPillClassName({ className: canReply && !replyOpen ? undefined : "-ml-3", size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "open")} type="button">
                       {copy.reopen}
                     </button>
                   </div>

@@ -24,8 +24,11 @@ export type RoomCommentFieldProps = {
   id?: string;
   anonymous?: boolean;
   ariaLabel: string;
-  /** De quem e o campo: o nome para as iniciais; sem nome (antes do aceite), a pessoa; `team`, o icone da equipe (o console). */
-  avatar: { kind?: "person" | "team"; name: string | null };
+  /**
+   * De quem e o campo: a foto do perfil quando vem (`imageSrc`), senao o nome para as iniciais; sem nome (antes do
+   * aceite), a pessoa; `team`, o icone da equipe (o console). Com a Anonima ligada, sempre a mascara.
+   */
+  avatar: { imageSrc?: string | null; kind?: "person" | "team"; name: string | null };
   /** Enviando: o envio gira e fica desligado. */
   busy?: boolean;
   disabled?: boolean;
@@ -164,7 +167,7 @@ export function RoomCommentField({
     <form className="shrink-0 border-t border-room-panel-border p-4 max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]" onBlur={handleBlur} onSubmit={submit} ref={stripRef}>
       <div className="mr-4 flex items-start">
         {leading}
-        <RoomCommentAvatar kind={anonymousOn ? "anonymous" : (avatar.kind ?? "person")} name={avatar.name ?? undefined} />
+        <RoomCommentAvatar imageSrc={anonymousOn ? null : avatar.imageSrc} kind={anonymousOn ? "anonymous" : (avatar.kind ?? "person")} name={avatar.name ?? undefined} />
         <div className="ml-3 min-w-0 flex-1">
           <div className={cn("relative border-b", line === "draft" ? "border-room-field-line-draft" : "border-room-field-line")}>
             <textarea

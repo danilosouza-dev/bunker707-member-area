@@ -5,7 +5,7 @@
 // direto pelo Node (nada de enum nem namespace, docs/18 §2.5).
 
 import { ROOM_OPENS_MINUTES_BEFORE, sessionOffsetMs, simulatedPhase, type SessionClock } from "./room-model";
-import type { ChatMode, Poll, PollAnswer, Reaction, WebinarQuestion, WebinarSession } from "./model";
+import { QUESTION_REPLY_LIMITS, type ChatMode, type Poll, type PollAnswer, type QuestionReply, type QuestionReplyRole, type Reaction, type WebinarQuestion, type WebinarSession } from "./model";
 
 export type RoomSessionLike = SessionClock & Pick<WebinarSession, "chatMode" | "chatSlowModeSeconds" | "lateJoinMinutes" | "status">;
 
@@ -134,38 +134,98 @@ export function pollAnswerProblem(poll: Pick<Poll, "kind" | "options" | "status"
   return null;
 }
 
-export type StudentQuestion = {
+/** Uma resposta do fio de uma pergunta, como o aluno recebe. */
+export type StudentQuestionReply = {
+  /** A resposta de quem perguntou numa pergunta Anonima: sem nome e sem foto. */
   anonymous: boolean;
-  answerText: string | null;
-  /** Quando a resposta saiu (a hora do fio "1 resposta" na sala, docs/31 V2-A66); null enquanto nao respondida. */
-  answeredAt: string | null;
-  answeredLive: boolean;
+  avatarUrl: string | null;
   body: string;
   createdAt: string;
   displayName: string;
   id: string;
   mine: boolean;
+  role: QuestionReplyRole;
+};
+
+export function toStudentReply(reply: QuestionReply, viewerUserId: string | null, avatarUrl: string | null = null): StudentQuestionReply {
+  return {
+    anonymous: reply.anonymous,
+    avatarUrl: reply.anonymous ? null : avatarUrl,
+    body: reply.body,
+    createdAt: reply.createdAt,
+    displayName: reply.displayName,
+    id: reply.id,
+    mine: Boolean(viewerUserId) && reply.userId === viewerUserId,
+    role: reply.role
+  };
+}
+
+export type QuestionReplyRefusal = "full" | "not_answered" | "not_owner";
+
+/**
+ * Quem escreve no fio de uma pergunta (decisao do produtor de 10/11/2026): a equipe e o aluno que perguntou, e so
+ * depois de a pergunta estar respondida (ao vivo ou por escrito). O fio e a conversa dele com a equipe, a vista de
+ * todos: os outros alunos leem e curtem a pergunta, e perguntam na aba. Antes da resposta nao ha o que comentar (a
+ * primeira resposta escrita da equipe e o "Responder por escrito"); a dispensada volta pelo Reabrir. O fio tem um teto
+ * (QUESTION_REPLY_LIMITS.perQuestion): e uma conversa curta, nao um segundo chat.
+ */
+export function questionReplyRefusal(input: { question: Pick<WebinarQuestion, "status" | "userId">; replies: number; staff: boolean; userId: string }): QuestionReplyRefusal | null {
+  if (!input.staff && input.question.userId !== input.userId) {
+    return "not_owner";
+  }
+  if (input.question.status !== "answered") {
+    return "not_answered";
+  }
+  return input.replies >= QUESTION_REPLY_LIMITS.perQuestion ? "full" : null;
+}
+
+export type StudentQuestion = {
+  anonymous: boolean;
+  /** A foto do perfil de quem perguntou, quando ela pode aparecer (room-model.authorPhotoUrl); nunca na Anonima. */
+  avatarUrl: string | null;
+  answerText: string | null;
+  /** Quando a resposta saiu (a hora do fio "1 resposta" na sala, docs/31 V2-A66); null enquanto nao respondida. */
+  answeredAt: string | null;
+  answeredLive: boolean;
+  body: string;
+  /** O aluno pode responder no fio agora (e dele, esta respondida e o fio nao encheu); a hora da sessao a sala sabe. */
+  canReply: boolean;
+  createdAt: string;
+  displayName: string;
+  id: string;
+  mine: boolean;
+  /** O fio: as respostas depois da primeira resposta da equipe, da mais antiga para a mais nova. */
+  replies: StudentQuestionReply[];
   status: WebinarQuestion["status"];
   upvotes: number;
   voted: boolean;
 };
 
 /** A pergunta para o aluno: a dispensada so o autor ve (docs/30 §1.3). */
-export function toStudentQuestion(question: WebinarQuestion, viewerUserId: string | null, voted: boolean): StudentQuestion | null {
+export function toStudentQuestion(
+  question: WebinarQuestion,
+  viewerUserId: string | null,
+  voted: boolean,
+  avatarUrl: string | null = null,
+  replies: readonly StudentQuestionReply[] = []
+): StudentQuestion | null {
   const mine = Boolean(viewerUserId) && question.userId === viewerUserId;
   if (question.status === "dismissed" && !mine) {
     return null;
   }
   return {
     anonymous: question.anonymous,
+    avatarUrl: question.anonymous ? null : avatarUrl,
     answerText: question.answerText,
     answeredAt: question.answeredAt,
     answeredLive: question.answeredLive,
     body: question.body,
+    canReply: Boolean(viewerUserId) && questionReplyRefusal({ question, replies: replies.length, staff: false, userId: viewerUserId ?? "" }) === null,
     createdAt: question.createdAt,
     displayName: question.displayName,
     id: question.id,
     mine,
+    replies: [...replies],
     status: question.status,
     upvotes: question.upvotes,
     voted
@@ -186,6 +246,10 @@ export function reactionSentMetadata(input: { offsetMs: number; reaction: Reacti
 
 export function questionSentMetadata(input: { anonymous: boolean; offsetMs: number; questionId: string }) {
   return { anonymous: input.anonymous, offset_ms: input.offsetMs, question_id: input.questionId };
+}
+
+export function questionReplySentMetadata(input: { length: number; questionId: string; replyId: string }) {
+  return { length: input.length, question_id: input.questionId, reply_id: input.replyId };
 }
 
 export function pollAnsweredMetadata(input: { offsetMs: number; options: number; pollId: string }) {

@@ -170,7 +170,7 @@ test("os checks do banco batem com as listas, os limites e os ritmos do app (mod
   assert.match(code, new RegExp(`char_length\\(full_text\\) between 1 and ${limits.transcriptBytes}`));
   assert.match(code, new RegExp(`char_length\\(simulation_ack_text\\) <= ${limits.simulationAck}`));
   assert.equal((code.match(new RegExp(`offset_ms between ${limits.offsetMinMs} and ${limits.offsetMaxMs}`, "g")) ?? []).length, 7, "o mesmo intervalo de offset em todas as tabelas");
-  assert.equal(model.CHAT_CONSENT_VERSION, 1);
+  assert.equal(model.CHAT_CONSENT_VERSION, 2);
   assert.match(code, /consent_version smallint not null check \(consent_version between 1 and 100\)/);
 
   // Os ritmos (M1 a M4) no SQL: balde de 30 s, saida depois de 3 baldes, 95 % ate o fim, os pesos dos mais quentes.

@@ -322,7 +322,7 @@ function cenario(extra = {}) {
   const now = Date.now();
   const noAr = new Date(now - 5 * MIN).toISOString();
   return {
-    webinar_chat_consents: [{ consent_version: 1, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }],
+    webinar_chat_consents: [{ consent_version: 2, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }],
     webinar_recordings: [{ anchor_offset_ms: 0, duration_seconds: 3600, embed_url: "https://iframe.mediadelivery.net/embed/1/abc", id: RECORDING, provider: "bunny", session_id: null, source: "bunny", status: "ready", webinar_id: WEBINAR }],
     webinar_sessions: [
       { ...DEFAULTS.webinar_sessions, id: SESSAO_NO_AR, kind: "simulated", recording_id: RECORDING, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR },

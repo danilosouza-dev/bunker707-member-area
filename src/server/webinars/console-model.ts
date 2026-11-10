@@ -178,10 +178,28 @@ export function pollPercent(counts: PollCounts, optionId: string): number {
 
 const QUESTION_ORDER: Record<WebinarQuestion["status"], number> = { answered: 1, dismissed: 2, open: 0 };
 
-/** O quadro: as abertas primeiro (mais votadas, depois as mais antigas), as respondidas, as dispensadas. */
-export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt" | "status" | "upvotes">>(questions: readonly T[]): T[] {
+/**
+ * A pergunta respondida em que o aluno escreveu por ultimo no fio (docs/30 §2.4; decisao do produtor de 10/11/2026): a
+ * conversa esta com a equipe. Conta junto das abertas no numero da aba e sobe para o topo do quadro, com o selo "Nova
+ * resposta do aluno"; some quando a equipe responde no fio (ou apaga a resposta).
+ */
+export function questionAwaitsTeam(question: Pick<WebinarQuestion, "replies" | "status">): boolean {
+  const last = question.replies?.[question.replies.length - 1];
+  return question.status === "answered" && last?.role === "student";
+}
+
+/** A ordem do quadro: a aberta e a que espera a equipe no fio (0), a respondida (1), a dispensada (2). */
+function boardRank(question: Pick<WebinarQuestion, "replies" | "status">): number {
+  return questionAwaitsTeam(question) ? 0 : QUESTION_ORDER[question.status];
+}
+
+/**
+ * O quadro: primeiro o que pede a equipe (as abertas e as respondidas em que o aluno escreveu por ultimo no fio; as
+ * mais votadas, depois as mais antigas), depois as respondidas e as dispensadas.
+ */
+export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt" | "replies" | "status" | "upvotes">>(questions: readonly T[]): T[] {
   return [...questions].sort((a, b) => {
-    const byStatus = QUESTION_ORDER[a.status] - QUESTION_ORDER[b.status];
+    const byStatus = boardRank(a) - boardRank(b);
     if (byStatus !== 0) {
       return byStatus;
     }

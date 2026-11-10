@@ -29,10 +29,15 @@ const AVATAR_ICONS: Record<Exclude<RoomCommentAvatarKind, "person">, LucideIcon>
   unknown: UserRound
 };
 
-/** O avatar de 24 px: as iniciais do nome (MemberAvatar) ou, sem pessoa, o icone de 14 num circulo tonal. */
-export function RoomCommentAvatar({ kind, name }: { kind: RoomCommentAvatarKind; name?: string }) {
-  if (kind === "person" && name?.trim()) {
-    return <MemberAvatar className="size-6 [&>span]:text-[10px]" name={name} size="xs" />;
+/**
+ * O avatar de 24 px: a foto do perfil quando ela vem (`imageSrc`: a da pessoa ou a de quem e da equipe; o servidor so a
+ * manda quando ela pode aparecer, docs/30 §8.5), senao as iniciais do nome (MemberAvatar) ou, sem pessoa, o icone de 14
+ * num circulo tonal. A Anonima e o Assistente nunca levam foto.
+ */
+export function RoomCommentAvatar({ imageSrc = null, kind, name }: { imageSrc?: string | null; kind: RoomCommentAvatarKind; name?: string }) {
+  const photo = kind === "person" || kind === "team" ? imageSrc?.trim() || null : null;
+  if (photo || (kind === "person" && name?.trim())) {
+    return <MemberAvatar className="size-6 [&>span]:text-[10px]" imageSrc={photo} name={name?.trim() || "A"} size="xs" />;
   }
   const Icon = AVATAR_ICONS[kind === "person" ? "unknown" : kind];
   return (
@@ -66,8 +71,11 @@ export type RoomCommentProps = {
   /** A linha de cima, opcional (a fixada: o alfinete e "Fixada pela equipe"). */
   headline?: ReactNode;
   id: string;
-  /** O que o id marca: a mensagem do chat (data-room-message), a pergunta (data-room-question) ou a resposta do fio. */
-  marker?: "answer" | "message" | "question";
+  /**
+   * O que o id marca: a mensagem do chat (data-room-message), a pergunta (data-room-question), a primeira resposta da
+   * equipe no fio (data-room-answer) ou uma resposta seguinte do fio (data-room-reply).
+   */
+  marker?: "answer" | "message" | "question" | "reply";
   meta: { name: string; role: string | null; time: RoomCommentTime | null };
   mine?: boolean;
   /** A minha mensagem esperando a equipe: "Aguardando a equipe" na linha de acoes, alinhado ao texto. */
@@ -87,7 +95,7 @@ const THREAD_CURVE = "absolute w-3 rounded-bl-[16px] border-b border-l border-ro
 /** Aberto, a linha passa pela resposta (em x 12 do comentario) ate o botao "Ocultar respostas", que vem depois dela. */
 const THREAD_LINE_TO_TOGGLE = "absolute -left-6 -top-3 bottom-0 w-px bg-room-thread-line group-hover/comment:bg-room-thread-line-hover";
 
-const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question" } as const;
+const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question", reply: "data-room-reply" } as const;
 
 export function RoomComment({ actions = null, as: Tag = "li", aside = null, avatar, body, className, headline = null, id, marker = "message", meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
   const badgeOnly = roleBadgeOnly(meta.name, meta.role);
@@ -144,6 +152,19 @@ export function RoomComment({ actions = null, as: Tag = "li", aside = null, avat
       </div>
       {thread}
     </Tag>
+  );
+}
+
+/**
+ * Um item do fio depois do primeiro (a segunda resposta em diante e o campo de responder): 16 px abaixo do anterior,
+ * com a propria curva saindo da linha do fio ate o avatar dele, como cada resposta do YouTube.
+ */
+export function RoomThreadItem({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative mt-4">
+      <span aria-hidden="true" className={cn(THREAD_CURVE, "-left-6 -top-4 h-7")} />
+      {children}
+    </div>
   );
 }
 

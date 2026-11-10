@@ -82,7 +82,7 @@ export const setSessionChatMode = fail;
 export const savePolls = fail;
 export const launchPoll = fail;
 export const closePoll = fail;
-export const answerQuestion = fail;
+export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail;
 export const setQuestionStatus = fail;
 export const saveSimulation = fail;
 export const createReplaySession = fail;

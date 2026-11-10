@@ -272,6 +272,19 @@ test("questionHasThread e questionThreadOpenByDefault: so a resposta escrita tem
   assert.equal(questionsModel.questionHasThread(pergunta({ answerText: "Sim.", mine: true })), false, "a aberta de novo nao mostra a resposta antiga");
 });
 
+test("questionThreadCount: a resposta escrita conta uma e cada resposta do fio mais uma; a respondida so ao vivo ganha fio quando alguem escreve; a aberta de novo, zero", () => {
+  const pergunta = (extra) => ({ answerText: null, answeredLive: false, id: "q", mine: false, replies: [], status: "open", ...extra });
+  const fio = [{ id: "r1" }, { id: "r2" }];
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", status: "answered" })), 1);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", replies: fio, status: "answered" })), 3);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answeredLive: true, status: "answered" })), 0, "so ao vivo, sem nada escrito");
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answeredLive: true, replies: fio, status: "answered" })), 2, "o fio comeca com o que foi escrito depois");
+  assert.equal(questionsModel.questionHasThread(pergunta({ answeredLive: true, replies: fio, status: "answered" })), true);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", replies: fio })), 0, "a aberta de novo nao mostra o fio antigo");
+  // Sem a lista (uma pergunta de antes do fio), como antes.
+  assert.equal(questionsModel.questionThreadCount({ answerText: "Sim.", mine: false, status: "answered" }), 1);
+});
+
 test("questionThreadOpen: o clique troca o padrao e continua valendo; a minha respondida depois abre sozinha", () => {
   const minha = { answerText: null, answeredLive: false, id: "q1", mine: true, status: "open" };
   const deOutro = { answerText: "Sim.", answeredLive: false, id: "q2", mine: false, status: "answered" };

@@ -23,15 +23,17 @@ import { teamAnswerNeedsNotice } from "./assistant-model";
 import { studentPresentNow } from "./assistant-queries";
 import { answerQuestionOfApprovedAiReply, fetchAttendanceMarks, setQuestionAnswerSource } from "./assistant-store";
 import { invalidateWebinars } from "./cache";
-import { chatMessageFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
+import { chatMessageFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
 import {
   answerQuestionSchema,
   closePollSchema,
   createReplaySessionSchema,
+  deleteQuestionReplySchema,
   launchPollSchema,
   moderateMessageSchema,
   questionStatusSchema,
   removeStudentMessagesSchema,
+  replyQuestionSchema,
   savePollsSchema,
   saveSimulationSchema,
   sessionChatModeSchema,
@@ -40,18 +42,22 @@ import {
   type ModerationAction
 } from "./chat-schemas";
 import {
+  countQuestionReplyRows,
   deletePollRow,
   fetchChatMessageRow,
   fetchConsentRow,
   fetchPollRow,
+  fetchQuestionReplyRow,
   fetchQuestionRow,
   fetchQuestionRowByMessage,
   insertChatMessage,
   insertPollRow,
+  insertQuestionReplyRow,
   insertQuestionRow,
   listPollRows,
   replacePollOptionRows,
   revokeConsentRow,
+  softDeleteQuestionReplyRow,
   softDeleteQuestionsOfMessage,
   softDeleteStudentContent,
   updateChatMessageRow,
@@ -69,6 +75,7 @@ import {
   type Poll,
   type PollDraft,
   type PresenceSummary,
+  type QuestionReply,
   type SlowModeSeconds,
   questionBodyOf,
   type WebinarQuestion,
@@ -77,7 +84,7 @@ import {
 import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
 import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
-import { questionSentMetadata } from "./room-rules";
+import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
@@ -101,6 +108,9 @@ const POLL_NOT_TEMPLATE_MESSAGE = "Essa enquete já é de uma sessão; abra pelo
 const POLL_NOT_OPEN_MESSAGE = "Essa enquete não está aberta.";
 const QUESTION_MISSING_MESSAGE = "Essa pergunta não existe mais.";
 const ANSWER_MISSING_MESSAGE = "Escreva a resposta ou marque Respondida ao vivo.";
+const REPLY_NEEDS_ANSWER_MESSAGE = "Responda a pergunta antes de continuar a conversa.";
+const REPLY_FULL_MESSAGE = "Esta conversa chegou ao limite de respostas.";
+const REPLY_MISSING_MESSAGE = "Essa resposta não existe mais.";
 const ACK_MISMATCH_MESSAGE = "A confirmação não bate com a frase de hoje. Marque de novo.";
 const ONLY_SIMULATED_SESSION_MESSAGE = "O selo é decidido só nas sessões da Live gravada.";
 const REPLAY_NEEDS_ENDED_MESSAGE = "O replay abre depois da primeira sessão encerrar.";
@@ -113,6 +123,7 @@ export type ModeratedMessage = { message: ChatMessage; pinnedMessageId: string |
 export type SessionChatMode = { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null };
 export type SavedPolls = { created: number; deleted: number; polls: Poll[]; updated: number };
 export type AnsweredQuestion = { message: ChatMessage | null; notified: boolean; question: WebinarQuestion };
+export type RepliedQuestion = { notified: boolean; reply: QuestionReply };
 export type SavedSimulation = { deciderName: string; session: WebinarSession };
 export type ReplayCreated = { created: boolean; session: WebinarSession };
 export type RemovedStudentContent = { answers: number; consentRevoked: boolean; messages: number; questions: number };
@@ -845,6 +856,78 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
     invalidateReport();
 
     return { message, notified, question: questionFromRow(updated) };
+  });
+}
+
+/**
+ * [messaging.write] A equipe continua a conversa no fio de uma pergunta ja respondida (docs/30 §2.4; decisao do produtor
+ * de 10/11/2026): a resposta entra no fio (webinar_question_replies) com o papel de quem escreve (Apresentador,
+ * Co-apresentador ou Equipe) e so aparece na aba Perguntas, nao no chat. A primeira resposta continua sendo o
+ * "Responder por escrito" (answerQuestion): aqui a pergunta precisa estar respondida. Fora da sala (a sessao acabou ou o
+ * aluno saiu), a resposta vai tambem para o sino dele, uma vez por resposta.
+ */
+export async function replyToQuestion(input: { body: string; questionId: string }): Promise<ActionResult<RepliedQuestion>> {
+  return runAdminAction("messaging.write", replyQuestionSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await fetchQuestionRow(db, data.questionId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    const question = questionFromRow(row);
+    const refusal = questionReplyRefusal({ question, replies: await countQuestionReplyRows(db, question.id), staff: true, userId: user.id });
+
+    if (refusal) {
+      throw new WebinarError(refusal === "full" ? REPLY_FULL_MESSAGE : REPLY_NEEDS_ANSWER_MESSAGE, 409);
+    }
+
+    const { session, webinar } = await loadSession(db, question.sessionId);
+    const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
+    const reply = questionReplyFromRow(
+      await insertQuestionReplyRow(db, { anonymous: false, body: data.body, display_name: teamDisplayName(user), question_id: question.id, role, session_id: session.id, user_id: user.id })
+    );
+    const notified = await noticeTeamAnswer(db, { answerText: data.body, handoffRequested: false, now, session, targetId: reply.id, userId: question.userId });
+
+    await recordAudit(db, {
+      action: "webinar.question_replied",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { notified, question_id: question.id, reply_id: reply.id, session_id: session.id }
+    });
+    revalidateConsole(webinar.id);
+
+    return { notified, reply };
+  });
+}
+
+/** [messaging.write] Apaga uma resposta do fio (a do aluno ou a da equipe); o resto do fio fica. */
+export async function deleteQuestionReply(input: { replyId: string }): Promise<ActionResult<{ questionId: string; replyId: string }>> {
+  return runAdminAction("messaging.write", deleteQuestionReplySchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const row = await fetchQuestionReplyRow(db, data.replyId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(REPLY_MISSING_MESSAGE, 404);
+    }
+
+    const sessionRow = await fetchSessionRow(db, row.session_id);
+    await softDeleteQuestionReplyRow(db, { deletedBy: user.id, id: row.id, nowIso: new Date().toISOString(), reason: "team" });
+    await recordAudit(db, {
+      action: "webinar.question_reply_deleted",
+      actorId: user.id,
+      entityId: sessionRow?.webinar_id ?? null,
+      entityType: "webinar",
+      metadata: { by_student: row.role === "student", question_id: row.question_id, reply_id: row.id, session_id: row.session_id }
+    });
+
+    if (sessionRow) {
+      revalidateConsole(sessionRow.webinar_id);
+    }
+
+    return { questionId: row.question_id, replyId: row.id };
   });
 }
 

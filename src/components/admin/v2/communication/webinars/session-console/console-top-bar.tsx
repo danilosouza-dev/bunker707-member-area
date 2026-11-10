@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, CircleStop, DoorOpen, Lock, LockOpen, Play, RefreshCw } from "lucide-react";
+import { ArrowLeft, CircleStop, DoorOpen, Lock, LockOpen, Play, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { RoomThemeButton } from "@/components/member/webinars/room/room-header";
 import { RoomPill, roomPillClassName } from "@/components/member/webinars/room/room-pill";
+import { RoomSelectPill } from "@/components/member/webinars/room/room-select-pill";
 import { RoomTooltip } from "@/components/member/webinars/room/room-tooltip";
 import { ROOM_FOCUS, RoomIconButton } from "@/components/member/webinars/room/room-ui";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -20,7 +21,8 @@ import type { WebinarSession } from "@/server/webinars/model";
 // peso 500 (o "Console da sessão" dela so para quem ve, o h1 ja o diz), que na gravada e no Replay (sem palco) leva
 // o momento e os presentes ("Console da sessão · No ar há 12:30 · 7 presentes · pico 9") e na live so os presentes
 // abaixo de sm (a partir dai eles ficam no palco, em cima a direita); a direita, o seletor de sessoes numa pilula tonal
-// (o <select> nativo, com o ponto verde dentro so com a sessao escolhida no ar), o Atualizar (o circulo sem fundo: o
+// (RoomSelectPill no tamanho M: o seletor nativo por baixo, sem contorno proprio, com o anel de foco na pilula inteira
+// so pelo teclado e o ponto verde dentro so com a sessao escolhida no ar), o Atualizar (o circulo sem fundo: o
 // icone gira enquanto le, o botao nunca fica desligado por isso, e a regiao viva so para o leitor de tela fala o
 // clique, a falta de resposta e a volta, consolePollStep; o sem resposta tambem fica na tela, na faixa abaixo do topo,
 // docs/31 V2-A50), os botoes de situacao da sessao em pilulas M do YouTube (consoleTopActionsFor: Abrir a sala e
@@ -159,31 +161,18 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
       </div>
 
       <div className="flex min-w-0 items-center gap-2 max-lg:-mx-1 max-lg:overflow-x-auto max-lg:px-1 max-lg:py-1 max-lg:[scrollbar-width:none] lg:shrink-0 max-lg:[&::-webkit-scrollbar]:hidden">
-        <div className="relative shrink-0">
-          <label className="sr-only" htmlFor="console-session">
-            {v2.rotuloSessao}
-          </label>
-          {onAir ? <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-4 size-2 -translate-y-1/2 rounded-full bg-room-speaking" data-console-on-air="" /> : null}
-          <select
-            className={cn(
-              "h-10 max-w-72 cursor-pointer appearance-none truncate rounded-full bg-room-control pr-10 text-sm leading-5 font-medium text-room-fg transition-colors hover:bg-room-control-hover disabled:cursor-default disabled:text-room-fg-disabled xl:max-w-80",
-              onAir ? "pl-8" : "pl-4",
-              ROOM_FOCUS
-            )}
-            disabled={props.sessions.length === 0}
-            id="console-session"
-            onChange={(event) => props.onChangeSession(event.target.value)}
-            value={props.sessionId ?? ""}
-          >
-            {props.sessions.length === 0 ? <option value="">—</option> : null}
-            {props.sessions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {consoleSessionOptionLabel(item)}
-              </option>
-            ))}
-          </select>
-          <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-5 -translate-y-1/2 text-room-icon" strokeWidth={1.75} />
-        </div>
+        <RoomSelectPill<string>
+          className="max-w-72 shrink-0 xl:max-w-80"
+          disabled={props.sessions.length === 0}
+          id="console-session"
+          label={v2.rotuloSessao}
+          labelHidden
+          leading={onAir ? <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-room-speaking" data-console-on-air="" /> : null}
+          onChange={props.onChangeSession}
+          options={props.sessions.length === 0 ? [{ label: "—", value: "" }] : props.sessions.map((item) => ({ label: consoleSessionOptionLabel(item), value: item.id }))}
+          size="m"
+          value={props.sessionId ?? ""}
+        />
         <RoomTooltip label={v2.atualizar} side="below">
           <RoomIconButton className="[&_svg]:size-6" disabled={!props.sessionId} label={v2.atualizar} onClick={props.onRefresh} size={40} tone="ghost" withTitle={false}>
             <RefreshCw aria-hidden="true" className={cn(props.reading && "animate-spin motion-reduce:animate-none")} strokeWidth={1.75} />

@@ -6,19 +6,21 @@ import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { chatAgoLabel, chatTimeAt, chatTimeLabel } from "@/lib/webinar-room-client";
 import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
+import { chatRoleLabel } from "@/lib/webinar-room-client";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, QUESTION_REPLY_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint } from "./assistant/assistant-hint";
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
-import { getQuestions, postQuestion, postQuestionVote, type QuestionPostBody, type StudentQuestion } from "./room-api";
+import { getQuestions, postQuestion, postQuestionReply, postQuestionVote, type QuestionPostBody, type QuestionReplyBody, type StudentQuestion, type StudentQuestionReply } from "./room-api";
 import { RoomConsentBox, type ConsentChoice } from "./room-chat";
 import { RoomChip, RoomChipBar } from "./room-chip-bar";
-import { RoomComment, RoomCommentAvatar, RoomCommentThread, type RoomCommentTime } from "./room-comment";
+import { RoomComment, RoomCommentAvatar, RoomCommentThread, RoomThreadItem, type RoomCommentTime } from "./room-comment";
 import { RoomCommentField, RoomCommentFieldNotice } from "./room-comment-field";
 import { composerExpandedStep } from "./room-composer-model";
 import { menuOpenKey } from "./room-layout-model";
 import { RoomMenu } from "./room-menu";
 import { RoomPill } from "./room-pill";
+import { RoomReplyField } from "./room-reply-field";
 import { useRoomSnackbar } from "./room-snackbar";
 import {
   QUESTIONS_FILTERS,
@@ -27,8 +29,8 @@ import {
   questionsFilterLabel,
   questionsOrderLabel,
   questionsShown,
-  questionHasThread,
   questionStatusOf,
+  questionThreadCount,
   questionThreadOpen,
   type QuestionsFilter,
   type QuestionsOrder
@@ -55,6 +57,11 @@ import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 // YouTube (RoomComment: "Anônima" com a mascara, "Você" na minha, o tempo relativo contra o agora do servidor), com o
 // polegar e o numero, a situacao (Respondida ao vivo, Dispensada) na linha de acoes e a resposta escrita da Equipe ou do
 // Assistente no fio "1 resposta", aberto na minha e fechado nas outras, com a hora da resposta (V2-A66). Sem cartao.
+// O fio continua (decisao do produtor de 10/11/2026, docs/30 §1.3): na minha pergunta ja respondida, o "Responder" da
+// linha de acoes abre o campo de resposta no fim do fio (RoomReplyField); o que eu escrevo e o que a equipe responde
+// depois entram no fio em ordem, cada um como um comentario (a foto ou as iniciais, o nome, o selo do papel da equipe e
+// a hora), e o botao do fio conta todas ("3 respostas"). Os outros alunos leem o fio; so quem perguntou e a equipe
+// escrevem nele.
 
 const REFRESH_MS = 15_000;
 
@@ -75,6 +82,23 @@ function questionTime(iso: string | null | undefined, serverNowMs: number | unde
   return at === null || !label ? null : { iso: new Date(at).toISOString(), label, title: chatTimeLabel(input) };
 }
 
+/** O campo de responder do fio, que a aba controla (uma pergunta por vez). */
+export type RoomQuestionReplyControl = {
+  /** O meu avatar no campo (a foto ou as iniciais; a pessoa antes do aceite). */
+  avatar: { imageSrc?: string | null; name: string | null };
+  busy: boolean;
+  /** A sala aceita escrita agora (fora do "ver como", sem a frase no lugar do campo, sessao no ar). */
+  canWrite: boolean;
+  draft: string;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onOpen: (questionId: string) => void;
+  onSubmit: () => void;
+  /** A pergunta com o campo aberto. */
+  openId: string | null;
+  status: string | null;
+};
+
 type RoomQuestionItemProps = {
   /** O "Falar com a equipe" da resposta do Assistente na minha pergunta. */
   footer?: ReactNode;
@@ -83,14 +107,37 @@ type RoomQuestionItemProps = {
   onToggleThread?: (questionId: string) => void;
   onVote: (question: RoomQuestion) => void;
   question: RoomQuestion;
+  /** O campo de responder do fio (so no `comment`); sem ele, o fio e so de leitura. */
+  reply?: RoomQuestionReplyControl | null;
   /** O agora do servidor (o relogio da sala com o skew), para o tempo relativo. */
   serverNowMs?: number;
   /** O fio aberto (questionThreadOpen). */
   threadOpen?: boolean;
 };
 
-/** A pergunta como o comentario do YouTube: o polegar com o numero, a situacao e o fio "1 resposta". */
-function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverNowMs, threadOpen = false }: Omit<RoomQuestionItemProps, "look">) {
+/** Uma resposta do fio (depois da primeira): quem perguntou ("Você" na minha; "Anônima" na pergunta anonima) ou a equipe, com o selo do papel. */
+function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuestionReply; serverNowMs?: number }) {
+  const sala = WEBINAR_COPY.sala;
+  const novas = WEBINAR_COPY.salaV2;
+  const role = reply.role === "student" ? null : chatRoleLabel(reply.role);
+  const name = reply.anonymous ? sala.anonima : reply.mine ? novas.chat.voce : reply.displayName;
+  const time = questionTime(reply.createdAt, serverNowMs);
+  return (
+    <RoomComment
+      as="div"
+      avatar={<RoomCommentAvatar imageSrc={reply.avatarUrl} kind={reply.anonymous ? "anonymous" : "person"} name={reply.displayName} />}
+      body={reply.body}
+      id={reply.id}
+      marker="reply"
+      meta={{ name, role, time }}
+      mine={reply.mine}
+      srAuthor={novas.chat.autor([name, role, time?.label].filter((part): part is string => Boolean(part)))}
+    />
+  );
+}
+
+/** A pergunta como o comentario do YouTube: o polegar com o numero, a situacao, o Responder (na minha) e o fio. */
+function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply = null, serverNowMs, threadOpen = false }: Omit<RoomQuestionItemProps, "look">) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
   const name = question.anonymous ? sala.anonima : question.mine ? novas.chat.voce : question.displayName;
@@ -100,6 +147,49 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverN
   const badge = ai ? sala.selos.assistente : sala.selos.equipe;
   const answerTime = questionTime(question.answeredAt, serverNowMs);
   const autor = (parts: Array<string | undefined>) => novas.chat.autor(parts.filter((part): part is string => Boolean(part)));
+  const canReply = Boolean(reply?.canWrite) && question.canReply;
+  const replying = canReply && reply?.openId === question.id;
+  const count = questionThreadCount(question);
+  // Com o campo aberto, o fio fica aberto (quem responde ve a conversa).
+  const expanded = threadOpen || replying;
+
+  const items: ReactNode[] = [];
+  if (question.status === "answered" && question.answerText?.trim()) {
+    items.push(
+      <RoomComment
+        actions={footer}
+        as="div"
+        avatar={<RoomCommentAvatar kind={ai ? "assistant" : "team"} />}
+        body={question.answerText}
+        id={question.id}
+        key="answer"
+        marker="answer"
+        meta={{ name: badge, role: badge, time: answerTime }}
+        srAuthor={autor([badge, answerTime?.label])}
+      />
+    );
+  }
+  if (question.status === "answered") {
+    for (const item of question.replies ?? []) {
+      items.push(<RoomQuestionReplyComment key={item.id} reply={item} serverNowMs={serverNowMs} />);
+    }
+  }
+  const field =
+    replying && reply ? (
+      <RoomReplyField
+        ariaLabel={novas.perguntas.suaResposta}
+        avatar={<RoomCommentAvatar imageSrc={question.anonymous ? null : reply.avatar.imageSrc} kind={question.anonymous ? "anonymous" : "person"} name={reply.avatar.name ?? undefined} />}
+        busy={reply.busy}
+        maxLength={QUESTION_REPLY_LIMITS.studentBody}
+        onCancel={reply.onCancel}
+        onChange={reply.onChange}
+        onSubmit={reply.onSubmit}
+        placeholder={novas.perguntas.adicioneResposta}
+        status={reply.status}
+        submitLabel={novas.perguntas.responder}
+        value={reply.draft}
+      />
+    ) : null;
 
   return (
     <RoomComment
@@ -123,9 +213,12 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverN
           {status ? (
             <span className={cn("text-xs leading-[18px]", status === "live" ? "text-room-success-fg" : "text-room-fg-subtle")}>{status === "live" ? sala.respondidaAoVivo : sala.dispensada}</span>
           ) : null}
+          {canReply ? (
+            <RoomPill aria-expanded={replying} className="ml-1" data-room-reply-open="" label={novas.perguntas.responder} onClick={() => reply?.onOpen(question.id)} size="s" tone="text" touch44 />
+          ) : null}
         </>
       }
-      avatar={<RoomCommentAvatar kind={question.anonymous ? "anonymous" : "person"} name={question.displayName} />}
+      avatar={<RoomCommentAvatar imageSrc={question.avatarUrl} kind={question.anonymous ? "anonymous" : "person"} name={question.displayName} />}
       body={question.body}
       id={question.id}
       marker="question"
@@ -133,35 +226,30 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, serverN
       mine={question.mine}
       srAuthor={autor([name, time?.label])}
       thread={
-        questionHasThread(question) ? (
+        count > 0 ? (
           <RoomCommentThread
             answerTestId={ai ? "question-answer-assistant" : undefined}
             controlsId={`resposta-${question.id}`}
-            expanded={threadOpen}
-            label={threadOpen ? novas.perguntas.ocultarRespostas : novas.perguntas.respostas(1)}
+            expanded={expanded}
+            label={expanded ? novas.perguntas.ocultarRespostas : novas.perguntas.respostas(count)}
             onToggle={() => onToggleThread?.(question.id)}
           >
-            <RoomComment
-              actions={footer}
-              as="div"
-              avatar={<RoomCommentAvatar kind={ai ? "assistant" : "team"} />}
-              body={question.answerText}
-              id={question.id}
-              marker="answer"
-              meta={{ name: badge, role: badge, time: answerTime }}
-              srAuthor={autor([badge, answerTime?.label])}
-            />
+            {items.map((item, index) => (index === 0 ? item : <RoomThreadItem key={`item-${index}`}>{item}</RoomThreadItem>))}
+            {field ? <RoomThreadItem>{field}</RoomThreadItem> : null}
           </RoomCommentThread>
+        ) : field ? (
+          // Respondida so ao vivo, sem nada escrito ainda: o campo logo abaixo da pergunta, alinhado ao texto dela.
+          <div className="ml-9 mt-3">{field}</div>
         ) : null
       }
     />
   );
 }
 
-export function RoomQuestionItem({ footer = null, look = "classic", onToggleThread, onVote, question, serverNowMs, threadOpen }: RoomQuestionItemProps) {
+export function RoomQuestionItem({ footer = null, look = "classic", onToggleThread, onVote, question, reply = null, serverNowMs, threadOpen }: RoomQuestionItemProps) {
   const copy = WEBINAR_COPY.sala;
   if (look === "comment") {
-    return <RoomQuestionComment footer={footer} onToggleThread={onToggleThread} onVote={onVote} question={question} serverNowMs={serverNowMs} threadOpen={threadOpen} />;
+    return <RoomQuestionComment footer={footer} onToggleThread={onToggleThread} onVote={onVote} question={question} reply={reply} serverNowMs={serverNowMs} threadOpen={threadOpen} />;
   }
 
   return (
@@ -222,12 +310,15 @@ export function RoomQuestionList({
   footerFor,
   onVote,
   questions,
+  reply = null,
   serverNowMs
 }: {
   emptyPhrase: string;
   footerFor: (question: RoomQuestion) => ReactNode;
   onVote: (question: RoomQuestion) => void;
   questions: readonly RoomQuestion[];
+  /** O campo de responder do fio (a aba controla); sem ele, os fios sao so de leitura. */
+  reply?: RoomQuestionReplyControl | null;
   serverNowMs?: number;
 }) {
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
@@ -253,6 +344,7 @@ export function RoomQuestionList({
           onToggleThread={toggleThread}
           onVote={onVote}
           question={question}
+          reply={reply}
           serverNowMs={serverNowMs}
           threadOpen={questionThreadOpen(question, toggled)}
         />
@@ -331,6 +423,7 @@ export function RoomQuestionsOrderButton({ onOrder, order }: { onOrder: (order: 
 export function RoomQuestionsTab({
   allowAnonymous,
   assistant: sharedAssistant,
+  avatarUrl = null,
   consented,
   defaultDisplayMode,
   displayName,
@@ -354,6 +447,8 @@ export function RoomQuestionsTab({
   allowAnonymous: boolean;
   /** Redesign V2, F3: o Assistente que a sala ja le; com ele, a aba nao le de novo. */
   assistant?: RoomAssistant;
+  /** A minha foto do perfil (o avatar do campo no `comment`, depois do aceite e fora do anonimo). */
+  avatarUrl?: string | null;
   consented: boolean;
   defaultDisplayMode: DisplayNameMode;
   /** O meu nome (as iniciais do avatar do campo no `comment`); antes do aceite, a pessoa. */
@@ -403,6 +498,13 @@ export function RoomQuestionsTab({
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  // O fio (docs/30 §1.3): a pergunta com o campo de responder aberto, o rascunho, o envio e o erro; o aceite pedido por
+  // uma resposta (e nao por uma pergunta nova) volta para a resposta.
+  const [replyOpenId, setReplyOpenId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replyStatus, setReplyStatus] = useState<string | null>(null);
+  const [replySending, setReplySending] = useState(false);
+  const [consentFor, setConsentFor] = useState<"question" | "reply">("question");
   // No comentario, "Pergunta enviada." vai ao aviso da sala (o erro e a instrucao do aceite continuam embaixo do campo);
   // a gaveta do vertical segue com a frase. A faixa do campo diz a altura dela, para o aviso ficar acima (abaixo de lg).
   const snackbar = useRoomSnackbar();
@@ -492,11 +594,66 @@ export function RoomQuestionsTab({
       return;
     }
     if (!consented) {
+      setConsentFor("question");
       setConsentOpen(true);
       setStatus(copy.aceiteParaPerguntar);
       return;
     }
     void deliver();
+  }
+
+  function closeReply() {
+    setReplyOpenId(null);
+    setReplyDraft("");
+    setReplyStatus(null);
+    if (consentFor === "reply") {
+      setConsentOpen(false);
+    }
+  }
+
+  /** A minha resposta no fio da minha pergunta (com o aceite, quando ele veio agora). */
+  async function deliverReply(choice?: ConsentChoice) {
+    const questionId = replyOpenId;
+    const text = replyDraft.trim();
+    if (!questionId || !text || readOnly) {
+      return;
+    }
+    setReplySending(true);
+    setReplyStatus(null);
+    const consent: Partial<QuestionReplyBody> = choice
+      ? { consent: true, consentVersion: CHAT_CONSENT_VERSION, displayMode: choice.displayMode, ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {}) }
+      : {};
+    try {
+      const answer = await postQuestionReply(webinarId, questionId, { ...consent, body: text, sessionId });
+      setQuestions((previous) =>
+        previous.map((question) => (question.id === questionId ? { ...question, replies: [...(question.replies ?? []).filter((item) => item.id !== answer.reply.id), answer.reply] } : question))
+      );
+      setReplyOpenId(null);
+      setReplyDraft("");
+      setConsentOpen(false);
+      sent(WEBINAR_COPY.salaV2.perguntas.respostaEnviada);
+      if (choice) {
+        onConsented();
+      }
+    } catch (failure) {
+      setReplyStatus(failure instanceof Error ? failure.message : copy.erroEnviar);
+      onRefused?.(failure);
+    } finally {
+      setReplySending(false);
+    }
+  }
+
+  function submitReply() {
+    if (!replyDraft.trim() || readOnly || replySending) {
+      return;
+    }
+    if (!consented) {
+      setConsentFor("reply");
+      setConsentOpen(true);
+      setReplyStatus(WEBINAR_COPY.salaV2.perguntas.aceiteParaResponder);
+      return;
+    }
+    void deliverReply();
   }
 
   async function vote(question: RoomQuestion) {
@@ -578,7 +735,29 @@ export function RoomQuestionsTab({
         </div>
       </div>
       {look === "comment" ? (
-        <RoomQuestionList emptyPhrase={questionsEmptyPhrase(filter)} footerFor={handoffFor} onVote={(item) => void vote(item)} questions={visible} serverNowMs={serverNowMs} />
+        <RoomQuestionList
+          emptyPhrase={questionsEmptyPhrase(filter)}
+          footerFor={handoffFor}
+          onVote={(item) => void vote(item)}
+          questions={visible}
+          reply={{
+            avatar: { imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null },
+            busy: replySending,
+            canWrite: !readOnly && !fieldNotice,
+            draft: replyDraft,
+            onCancel: closeReply,
+            onChange: setReplyDraft,
+            onOpen: (questionId) => {
+              setReplyOpenId(questionId);
+              setReplyDraft("");
+              setReplyStatus(null);
+            },
+            onSubmit: submitReply,
+            openId: replyOpenId,
+            status: replyStatus
+          }}
+          serverNowMs={serverNowMs}
+        />
       ) : (
         <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2">
           {visible.length === 0 ? <li className="py-6 text-center text-sm text-room-fg-subtle">{copy.semPerguntas}</li> : null}
@@ -589,9 +768,9 @@ export function RoomQuestionsTab({
       )}
       {consentOpen && !consented && !fieldNotice ? (
         <RoomConsentBox
-          busy={sending}
+          busy={sending || replySending}
           defaultDisplayMode={defaultDisplayMode}
-          onAccept={(choice) => void deliver(choice)}
+          onAccept={(choice) => void (consentFor === "reply" ? deliverReply(choice) : deliver(choice))}
           onCancel={() => setConsentOpen(false)}
           variant={look === "comment" ? "card" : "classic"}
         />
@@ -604,7 +783,7 @@ export function RoomQuestionsTab({
             allowAnonymous={allowAnonymous}
             anonymous={anonymous}
             ariaLabel={copy.suaPergunta}
-            avatar={{ name: consented ? (displayName ?? null) : null }}
+            avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null }}
             busy={sending}
             disabled={readOnly}
             expanded={expanded}

@@ -11,6 +11,7 @@ import {
   POLL_KINDS,
   POLL_STATUSES,
   PRESENCE_STATES,
+  QUESTION_REPLY_ROLES,
   QUESTION_STATUSES,
   SCRIPT_STATUSES,
   SCRIPT_TRIGGERS,
@@ -30,6 +31,8 @@ import {
   type PollStatus,
   type PresenceSample,
   type PresenceState,
+  type QuestionReply,
+  type QuestionReplyRole,
   type QuestionStatus,
   type RecordingTranscript,
   type ScriptItem,
@@ -339,6 +342,39 @@ export function questionFromRow(row: QuestionRow): WebinarQuestion {
     sessionId: row.session_id,
     status: oneOf<QuestionStatus>(QUESTION_STATUSES, row.status, "open"),
     upvotes: row.upvotes ?? 0,
+    userId: row.user_id
+  };
+}
+
+/** O fio de uma pergunta (202611100001). */
+export const QUESTION_REPLY_COLUMNS = "id, question_id, session_id, user_id, display_name, role, anonymous, body, deleted_at, deleted_by, deleted_reason, created_at";
+
+export type QuestionReplyRow = {
+  anonymous: boolean;
+  body: string;
+  created_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  deleted_reason: string | null;
+  display_name: string;
+  id: string;
+  question_id: string;
+  role: string;
+  session_id: string;
+  user_id: string;
+};
+
+export function questionReplyFromRow(row: QuestionReplyRow): QuestionReply {
+  return {
+    anonymous: row.anonymous,
+    body: row.body,
+    createdAt: row.created_at,
+    displayName: row.display_name,
+    id: row.id,
+    questionId: row.question_id,
+    // Um papel que este app nao conhece vira aluno, nunca equipe.
+    role: oneOf<QuestionReplyRole>(QUESTION_REPLY_ROLES, row.role, "student"),
+    sessionId: row.session_id,
     userId: row.user_id
   };
 }

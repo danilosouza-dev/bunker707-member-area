@@ -113,7 +113,7 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
     source: "audience",
     webinarId: "w1"
   };
-  assert.deepEqual(room.toStudentMessage(base, "u1", "simulated"), { body: "oi", displayName: "Ana M.", id: "m1", kind: "message", mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: null });
+  assert.deepEqual(room.toStudentMessage(base, "u1", "simulated"), { avatarUrl: null, body: "oi", displayName: "Ana M.", id: "m1", kind: "message", mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: null });
   const scripted = room.toStudentMessage({ ...base, authorUserId: null, role: "team", source: "scripted" }, "u1", "simulated");
   assert.equal(scripted.role, "team");
   assert.equal(scripted.mine, false);
@@ -123,10 +123,41 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
   // A hora em que o servidor gravou (docs/31 V2-9) so na live: na gravada e no Replay a linha mestre diria a data da
   // live de origem.
   assert.equal(room.toStudentMessage(base, "u1", "live").sentAt, "2026-11-05T23:00:10.000Z");
+  // A foto de quem escreveu so entra quando quem monta a manda (authorPhotoUrl decide antes).
+  assert.equal(room.toStudentMessage(base, "u1", "live", base.offsetMs, "https://exemplo.test/ana.jpg").avatarUrl, "https://exemplo.test/ana.jpg");
   assert.equal(room.toStudentMessage(base, "u1", "replay").sentAt, null);
   assert.equal(room.offsetLabel(3_723_000), "1:02:03");
   assert.equal(room.offsetLabel(750_000), "12:30");
   assert.equal(room.offsetLabel(-30_000), "-0:30");
+});
+
+test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe sempre; a do aluno so com o aceite em dia e nunca no anonimo; a equipe ve sem depender do aceite; o roteiro e o Assistente nunca", () => {
+  const foto = "https://exemplo.test/ana.jpg";
+  const emDia = { avatarUrl: foto, consentCurrent: true };
+  const antigo = { avatarUrl: foto, consentCurrent: false };
+  const aluno = { authorUserId: "u1", displayName: "Ana M.", photo: emDia, source: "audience", viewer: "student", webinarId: "w1" };
+  assert.equal(room.authorPhotoUrl(aluno), foto, "o aluno com o aceite da versao de agora");
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo }), null, "quem aceitou o texto de antes (so o nome) fica com as iniciais para os outros alunos");
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, viewer: "team" }), foto, "a equipe, no console, ve a foto do aluno (ela ja ve o perfil)");
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: { avatarUrl: null, consentCurrent: true } }), null, "sem foto no perfil, nada");
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: undefined }), null);
+  // O anonimo: pela pergunta Anonima ou pelo nome gravado "Aluno {n}" de quem participa como anonimo; nem a equipe ve.
+  const anonimo = room.anonymousDisplayName("u1", "w1");
+  assert.match(anonimo, /^Aluno \d{3}$/);
+  assert.equal(room.authorPhotoUrl({ ...aluno, displayName: anonimo }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, displayName: anonimo, viewer: "team" }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, anonymous: true }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, anonymous: true, viewer: "team" }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, displayName: room.anonymousDisplayName("u1", "outro") }), foto, "o numero e por webinario: o de outro nao esconde");
+  // A equipe: sempre, sem aceite (quem apresenta a live).
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, source: "team" }), foto);
+  // A mensagem de aluno levada para as proximas turmas segue a regra do aluno.
+  assert.equal(room.authorPhotoUrl({ ...aluno, source: "original" }), foto);
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, source: "original" }), null);
+  // O roteiro e o Assistente nao tem pessoa.
+  assert.equal(room.authorPhotoUrl({ ...aluno, source: "scripted" }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, source: "ai" }), null);
+  assert.equal(room.authorPhotoUrl({ ...aluno, authorUserId: null }), null);
 });
 
 test("o player da Bunny: le o embed, monta o endereco com autoplay sem som, posicao e token; a frase da decisao (§8.6)", () => {

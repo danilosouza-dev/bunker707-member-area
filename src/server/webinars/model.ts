@@ -577,8 +577,12 @@ export type PersonaRole = (typeof PERSONA_ROLES)[number];
 export const TRANSCRIPT_FORMATS = ["json3", "srt", "vtt", "txt"] as const;
 export type WebinarTranscriptFormat = (typeof TRANSCRIPT_FORMATS)[number];
 
-/** A versao do texto de aceite do chat (D10); muda quando o texto mudar, e o aluno aceita de novo. */
-export const CHAT_CONSENT_VERSION = 1;
+/**
+ * A versao do texto de aceite do chat (D10); muda quando o texto mudar, e o aluno aceita de novo. A versao 2
+ * (10/11/2026, docs/30 §8.5) passou a dizer que a foto de perfil aparece para os outros alunos junto do nome: quem
+ * aceitou a versao 1 continua com as iniciais ate aceitar de novo na proxima mensagem (room-model.authorPhotoUrl).
+ */
+export const CHAT_CONSENT_VERSION = 2;
 
 /** Limites do chat, do roteiro, das enquetes e das perguntas (os checks da 202610290001). */
 export const CHAT_LIMITS = {
@@ -644,6 +648,8 @@ export const ROOM_RULES = {
 export type ChatMessage = {
   approved: boolean;
   authorUserId: string | null;
+  /** A foto do perfil de quem escreveu, so nas leituras do console (author-photos.ts); ausente ou nula, as iniciais. */
+  avatarUrl?: string | null;
   body: string;
   createdAt: string;
   displayName: string;
@@ -662,6 +668,8 @@ export type ChatMessage = {
 
 /** O que o aluno recebe: a origem `scripted` vira o papel da persona (docs/30 §5.1); `ai` continua `ai`. */
 export type StudentChatMessage = {
+  /** A foto do perfil de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl); nula, as iniciais. */
+  avatarUrl: string | null;
   body: string;
   displayName: string;
   id: string;
@@ -738,8 +746,38 @@ export type PollDraft = { anonymous: boolean; id?: string | null; kind: PollKind
 
 export type PollAnswer = { createdAt: string; id: string; offsetMs: number; optionIds: string[]; pollId: string; sessionId: string; userId: string };
 
+/** Quem escreve no fio de uma pergunta (202611100001): o aluno que perguntou e a equipe. */
+export const QUESTION_REPLY_ROLES = ["host", "co_host", "team", "student"] as const;
+export type QuestionReplyRole = (typeof QUESTION_REPLY_ROLES)[number];
+
+/**
+ * Limites do fio das Perguntas (docs/30 §1.3; os checks da 202611100001): o texto do aluno como o da pergunta, o da
+ * equipe como o da resposta, e um teto de respostas por pergunta (o fio e uma conversa curta, nao um segundo chat).
+ */
+export const QUESTION_REPLY_LIMITS = { perQuestion: 50, studentBody: 500, teamBody: 1000 } as const;
+
+/** Uma resposta no fio de uma pergunta (webinar_question_replies), depois da primeira resposta da equipe. */
+export type QuestionReply = {
+  /** A resposta do aluno numa pergunta Anonima: sem nome e sem foto, como a pergunta. */
+  anonymous: boolean;
+  /** A foto do perfil de quem escreveu, so nas leituras do console (author-photos.ts); nunca na Anonima. */
+  avatarUrl?: string | null;
+  body: string;
+  createdAt: string;
+  displayName: string;
+  id: string;
+  questionId: string;
+  role: QuestionReplyRole;
+  sessionId: string;
+  userId: string;
+};
+
 export type WebinarQuestion = {
   anonymous: boolean;
+  /** A foto do perfil de quem perguntou, so nas leituras do console (author-photos.ts); nunca na Anonima. */
+  avatarUrl?: string | null;
+  /** O fio da pergunta (as respostas depois da primeira), em ordem; so nas leituras do console. */
+  replies?: QuestionReply[];
   answerText: string | null;
   answeredAt: string | null;
   answeredBy: string | null;

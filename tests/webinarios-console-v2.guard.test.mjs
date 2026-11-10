@@ -425,3 +425,36 @@ test("as Configurações de quem apresenta: os aparelhos pelo useJitsiDevices do
   const hook = semComentarios(ler("src/components/webinars/use-jitsi-devices.ts"));
   assert.match(hook, /const maisFundos = useCallback\(\(\) => \{\s*executeCommand\("toggleVirtualBackgroundDialog"\);/);
 });
+
+test("o foco dos campos do console (docs/31 §10, ajuste do produtor de 10/11/2026): textarea, select e campo de texto sem o contorno afastado do admin, com a borda no tom do foco; as pilulas de selecao com o anel na pilula inteira, so pelo teclado", () => {
+  const css = ler("src/app/globals.css");
+  // O anel de 2 px do admin continua valendo para o resto (botoes, links, abas).
+  const admin = css.indexOf(':is(a[href], button, input, select, textarea, summary, [role="button"], [role="combobox"], [role="tab"]):focus-visible {');
+  assert.notEqual(admin, -1, "o anel de foco do admin");
+  // A regra do console vem depois dela (a mesma camada: vence pela ordem e pelo atributo a mais).
+  const regra = css.match(/:root:has\(\[data-scope="admin"\]\)\s*\[data-field-focus="own"\]\s*:is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\], \[type="file"\]\)\):focus-visible \{([^}]*)\}/);
+  assert.ok(regra, "a regra do foco dos campos do console");
+  assert.ok(css.indexOf(regra[0]) > admin, "depois do anel do admin");
+  assert.deepEqual(
+    regra[1]
+      .split(";")
+      .map((linha) => linha.trim())
+      .filter(Boolean),
+    ["outline: none", "border-color: var(--room-focus)"]
+  );
+  // A raiz do console pede o foco proprio dos campos.
+  assert.match(ler(`${CONSOLE}/console-shell.tsx`), /data-console-root="" data-field-focus="own"/);
+  // A pilula de selecao: o <select> sem contorno proprio, o anel na pilula e so quando o foco nao veio do ponteiro.
+  const pilula = ler("src/components/member/webinars/room/room-select-pill.tsx");
+  assert.match(pilula, /has-\[select:focus-visible\]:outline-room-focus/);
+  assert.match(pilula, /pointer \? null : RING/);
+  assert.match(pilula, /onPointerDown=\{\(\) => setPointer\(true\)\}/);
+  assert.match(pilula, /onKeyDown=\{\(\) => setPointer\(false\)\}/);
+  assert.match(pilula, /onBlur=\{\(\) => setPointer\(false\)\}/);
+  // Os seletores do console usam a pilula (nenhum <select> com o anel proprio no topo nem no chat).
+  for (const arquivo of ["console-top-bar.tsx", "console-chat.tsx"]) {
+    const fonte = ler(`${CONSOLE}/${arquivo}`);
+    assert.match(fonte, /RoomSelectPill/, arquivo);
+    assert.doesNotMatch(fonte, /<select\b/, `${arquivo}: sem <select> escrito direto`);
+  }
+});

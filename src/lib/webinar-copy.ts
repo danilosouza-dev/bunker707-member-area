@@ -191,7 +191,7 @@ export const WEBINAR_COPY = {
     chatSoEquipe: "Só a equipe escreve agora.",
     comecaEm: (texto: string) => `Começa em ${texto}`,
     consentimento:
-      "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade.",
+      "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Para não mostrar o nome nem a foto, escolha Participar como anônimo. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade.",
     consentimentoBotao: "Entendi e quero participar",
     consentimentoPendente: "Para participar do chat, aceite as regras uma vez.",
     curtir: "Curtir",

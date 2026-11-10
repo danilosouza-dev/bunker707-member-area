@@ -5,6 +5,7 @@ import { useId } from "react";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { CHAT_LANGUAGES, type ChatLanguage } from "@/server/webinars/model";
+import { RoomSelectPill } from "../room/room-select-pill";
 import type { RoomTranslationState } from "../room/use-room-translation";
 
 // A faixa da traducao em cima do chat da sala (docs/30 §1.6, fase 4f): o seletor compacto "Idioma do chat" (Como foi
@@ -13,7 +14,8 @@ import type { RoomTranslationState } from "../room/use-room-translation";
 // traducao") e "Traduzindo…" enquanto alguma mensagem mostrada espera o lote. So aparece com a traducao ligada para
 // o aluno (ambiente e banco; nunca no "ver como"). A interface da sala segue em portugues; as legendas do video ficam
 // de fora. Controles com 44 px de altura no celular (docs/30 §1.7). As cores vem dos tokens do tema da sala (docs/31
-// V2-11): a faixa so aparece dentro do dialogo da sala, que leva o data-room-theme.
+// V2-11): a faixa so aparece dentro do dialogo da sala, que leva o data-room-theme. O seletor e a pilula tonal da sala
+// (RoomSelectPill, ajuste do produtor de 10/11/2026; antes, o <select> quadrado com borda).
 
 const ORIGINAL = "original";
 
@@ -52,29 +54,18 @@ export function RoomTranslationBar({ className, state }: { className?: string; s
             {state.showOriginal ? copy.verTraducao : copy.verOriginal}
           </button>
         ) : null}
-        <label className="sr-only" htmlFor={`${id}-idioma`}>
-          {copy.idiomaDaSala}
-        </label>
-        <select
-          className="min-h-11 rounded-[8px] border border-room-input-border bg-transparent px-2 text-xs font-semibold text-room-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-room-focus disabled:opacity-60"
-          data-room-translation-language=""
+        <RoomSelectPill<string>
+          className="max-lg:h-11"
           disabled={state.choosing}
           id={`${id}-idioma`}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            void state.chooseLanguage?.(value === ORIGINAL ? null : (value as ChatLanguage));
-          }}
+          label={copy.idiomaDaSala}
+          labelHidden
+          onChange={(value) => void state.chooseLanguage?.(value === ORIGINAL ? null : (value as ChatLanguage))}
+          optionClassName="bg-room-surface"
+          options={[{ label: copy.comoFoiEscrito, value: ORIGINAL }, ...CHAT_LANGUAGES.map((option) => ({ label: copy.idiomas[option], lang: option, value: option }))]}
+          selectData={{ "data-room-translation-language": "" }}
           value={language ?? ORIGINAL}
-        >
-          <option className="bg-room-surface" value={ORIGINAL}>
-            {copy.comoFoiEscrito}
-          </option>
-          {CHAT_LANGUAGES.map((option) => (
-            <option className="bg-room-surface" key={option} lang={option} value={option}>
-              {copy.idiomas[option]}
-            </option>
-          ))}
-        </select>
+        />
       </span>
       {state.chooseError ? (
         <p aria-live="polite" className="w-full pb-2 text-xs font-medium text-room-warn-fg">

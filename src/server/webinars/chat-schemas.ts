@@ -11,6 +11,7 @@ import {
   PERSONA_ROLES,
   POLL_KINDS,
   PRESENCE_STATES,
+  QUESTION_REPLY_LIMITS,
   QUESTION_STATUSES,
   REACTIONS,
   SCRIPT_STATUSES,
@@ -38,6 +39,8 @@ export const CHAT_MESSAGES = {
   pollAnswer: "Escolha ao menos uma opção.",
   pollQuestion: "Escreva a pergunta da enquete (até 300 caracteres).",
   question: "Escreva a pergunta.",
+  reply: "Escreva a resposta.",
+  replyTooLong: "A resposta pode ter até 500 caracteres.",
   questionTooLong: "A pergunta pode ter até 500 caracteres.",
   session: "Sessão inválida.",
   simulationAck: "Marque a confirmação para ligar o selo.",
@@ -119,6 +122,14 @@ export const questionBodySchema = z.object({
 export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
+
+/** POST /questions/[qid]/replies: a resposta do aluno no fio da propria pergunta (com o aceite, se ele mudou de versao). */
+export const questionReplyBodySchema = z.object({
+  ...consentFields,
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.studentBody, CHAT_MESSAGES.replyTooLong),
+  sessionId: sessionIdSchema
+});
+export type QuestionReplyPostInput = z.infer<typeof questionReplyBodySchema>;
 
 /** GET /questions?sessao=&ordem=votadas|recentes */
 export const questionsQuerySchema = z.object({ ordem: z.enum(["votadas", "recentes"]).default("votadas"), sessao: sessionIdSchema });
@@ -227,6 +238,14 @@ export const answerQuestionSchema = z.object({
 });
 
 export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z.enum(QUESTION_STATUSES, { error: CHAT_MESSAGES.invalid }) });
+
+/** A resposta da equipe no fio de uma pergunta ja respondida (console). */
+export const replyQuestionSchema = z.object({
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.teamBody, CHAT_MESSAGES.answer),
+  questionId: uuidSchema
+});
+
+export const deleteQuestionReplySchema = z.object({ replyId: uuidSchema });
 
 /** A decisao do selo "Ao vivo" (D10, §8.6): ligar exige a frase marcada; desligar grava a decisao tambem. */
 export const saveSimulationSchema = z

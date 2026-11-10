@@ -8,12 +8,12 @@
 // (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
-import { roomApiPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
+import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
-import type { StudentPoll, StudentQuestion } from "@/server/webinars/room-rules";
+import type { StudentPoll, StudentQuestion, StudentQuestionReply } from "@/server/webinars/room-rules";
 import type { StudentSessionPayload } from "@/server/webinars/student-model";
 import { WebinarsRequestError } from "../webinars-client";
 import { liveApiPath } from "./live-room-model";
@@ -154,6 +154,13 @@ export function postQuestionVote(webinarId: string, questionId: string, sessionI
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
 }
 
+export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { body: string; sessionId: string };
+
+/** A resposta de quem perguntou no fio da propria pergunta. */
+export function postQuestionReply(webinarId: string, questionId: string, body: QuestionReplyBody) {
+  return sendJson<{ reply: StudentQuestionReply }>(questionReplyPath(webinarId, questionId), "POST", body, GENERIC);
+}
+
 export function getPolls(webinarId: string, sessionId: string, signal?: AbortSignal) {
   return getJson<{ polls: StudentPoll[]; serverTime: string }>(roomApiPath(webinarId, "polls", { sessao: sessionId }), GENERIC, signal);
 }
@@ -201,4 +208,4 @@ export function beaconRoomEvents(webinarId: string, body: string): boolean {
   return false;
 }
 
-export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion };
+export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply };

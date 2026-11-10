@@ -73,7 +73,7 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
 };
 
 function withExtension(base) {
@@ -278,7 +278,15 @@ test("topo (docs/31 V2-13 e §10): a raiz com o tema escuro, a seta de voltar ao
   assert.ok(linha.includes("lg:shrink-0"), "a partir de lg a linha fica inteira");
   assert.ok(!linha.includes("overflow-x-auto"), "a partir de lg nao rola");
   // O seletor de sessoes numa pilula tonal do YouTube; o Tema sempre o ultimo.
-  assert.match(markup, /<select class="[^"]*\brounded-full\b[^"]*\bbg-room-control\b[^"]*"[^>]*id="console-session"/);
+  // (a pilula e a caixa de fora, com o anel de foco so pelo teclado; o <select> nativo vai dentro, sem contorno proprio).
+  const pilula = markup.match(/<div class="([^"]*)">(?:<span aria-hidden="true" class="[^"]*\bbg-room-speaking\b[^"]*" data-console-on-air=""><\/span>)?<label class="sr-only" for="console-session">Sessão<\/label><select class="([^"]*)" data-own-focus="" id="console-session"/);
+  assert.ok(pilula, "a pilula com o rotulo escondido e o select dentro");
+  for (const classe of ["rounded-full", "bg-room-control", "h-10", "text-sm", "has-[select:focus-visible]:outline-room-focus", "max-w-72"]) {
+    assert.ok(pilula[1].replace(/&amp;/g, "&").split(" ").includes(classe), `a pilula do seletor tem ${classe}`);
+  }
+  for (const classe of ["appearance-none", "bg-transparent", "outline-none"]) {
+    assert.ok(pilula[2].split(" ").includes(classe), `o select tem ${classe}`);
+  }
   assert.ok(markup.indexOf('aria-label="Tema claro"') > markup.indexOf("Encerrar sessão"), "o Tema por ultimo");
 
   const select = markup.slice(markup.indexOf('id="console-session"'), markup.indexOf("</select>"));

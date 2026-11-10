@@ -219,6 +219,94 @@ test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hor
   assert.doesNotMatch(listaDePerguntas({ serverNowMs: undefined }), /<time/);
 });
 
+// O fio continua (docs/30 §1.3; decisao do produtor de 10/11/2026): quem perguntou comenta a resposta e a equipe
+// responde de novo, em ordem, cada um como um comentario; so quem perguntou tem o Responder.
+const FIO = [
+  { anonymous: false, avatarUrl: "https://exemplo.test/ana.jpg", body: "E fica no app?", createdAt: new Date(AGORA - 2 * 60_000).toISOString(), displayName: "Ana M.", id: "r1", mine: true, role: "student" },
+  { anonymous: false, avatarUrl: null, body: "Fica sim.", createdAt: new Date(AGORA - 60_000).toISOString(), displayName: "Danilo S.", id: "r2", mine: false, role: "host" }
+];
+const responder = (extra = {}) => ({ avatar: { imageSrc: "https://exemplo.test/ana.jpg", name: "Ana M." }, busy: false, canWrite: true, draft: "", onCancel: noop, onChange: noop, onOpen: noop, onSubmit: noop, openId: null, status: null, ...extra });
+const comFio = (extra = {}, reply = responder()) =>
+  render(questionsModule.RoomQuestionList, {
+    emptyPhrase: "vazio",
+    footerFor: () => null,
+    onVote: noop,
+    questions: [
+      pergunta("q6", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), avatarUrl: "https://exemplo.test/ana.jpg", canReply: true, mine: true, replies: FIO, status: "answered", ...extra }),
+      pergunta("q7", { answerSource: "team", answerText: "Sim.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), canReply: false, displayName: "Caio F.", replies: FIO.map((item) => ({ ...item, mine: false })), status: "answered" })
+    ],
+    reply,
+    serverNowMs: AGORA
+  });
+
+test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na minha, o selo do papel da equipe), o botao conta todas e so quem perguntou tem o Responder", () => {
+  const novas = WEBINAR_COPY.salaV2.perguntas;
+  assert.deepEqual([novas.responder, novas.adicioneResposta, novas.suaResposta], ["Responder", "Adicione uma resposta", "Sua resposta"]);
+  const html = comFio();
+  const q6 = itemDe(html, "q6");
+  // A minha pergunta com a minha foto; o Responder na linha de acoes, depois do numero, fechado.
+  assert.match(q6, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "a foto de quem perguntou");
+  const acao = q6.match(/<span class="sr-only">0 curtidas<\/span><button aria-expanded="false" data-room-reply-open="" class="([^"]*)" type="button">Responder<\/button>/);
+  assert.ok(acao, "o Responder depois do numero, com o estado do campo");
+  for (const classe of ["h-8", "rounded-full", "bg-transparent", "text-xs", "ml-1"]) {
+    assert.ok(classesDe(`<b class="${acao[1]}">`).includes(classe), `o Responder tem ${classe}`);
+  }
+  // O fio aberto (a minha): a resposta da Equipe, depois as duas respostas, cada uma com a propria curva.
+  const fio = q6.slice(q6.indexOf('id="resposta-q6"'));
+  const ordem = [...fio.matchAll(/data-room-(answer|reply)="([^"]+)"/g)].map((match) => `${match[1]}:${match[2]}`);
+  assert.deepEqual(ordem, ["answer:q6", "reply:r1", "reply:r2"]);
+  assert.equal((fio.match(/<div class="relative mt-4"><span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-4 h-7"><\/span>/g) ?? []).length, 2, "cada resposta seguinte com a curva dela");
+  assert.match(fio, /<span class="sr-only">Você, há 2 minutos: <\/span>E fica no app\?/, "a minha resposta e Você");
+  assert.match(fio, /<span class="truncate[^"]*">Danilo S\.<\/span><span class="inline-flex h-5 [^"]*">Apresentador<\/span><time[^>]*>há 1 minuto<\/time>/, "a equipe com o nome, o selo do papel e a hora");
+  assert.match(fio, /<span class="sr-only">Danilo S\., Apresentador, há 1 minuto: <\/span>Fica sim\./);
+  assert.match(fio, /data-mine="" data-room-reply="r1"/);
+  assert.doesNotMatch(q6, /data-room-reply-field/, "o campo so abre no Responder");
+
+  // A de outro: fechada, o botao conta as tres; sem o Responder.
+  const q7 = itemDe(html, "q7");
+  assert.match(q7, /<button aria-controls="resposta-q7" aria-expanded="false"[^>]*>3 respostas<svg/);
+  assert.doesNotMatch(q7, /data-room-reply-open/, "so quem perguntou responde");
+  assert.match(q7, /<div class="relative ml-9 mt-3" hidden="" id="resposta-q7">/, "o fio fechado continua no HTML");
+
+  // Sem a sala aceitando escrita (o ver como, a live encerrada) ou sem o controle, o fio e so de leitura.
+  assert.doesNotMatch(comFio({}, responder({ canWrite: false })), /data-room-reply-open/);
+  assert.doesNotMatch(comFio({}, null), /data-room-reply-open/);
+  assert.doesNotMatch(comFio({ canReply: false }), /data-room-reply-open/);
+});
+
+test("o campo de responder do fio: abre no fim do fio da minha pergunta, com o meu avatar, o texto com a linha, o Cancelar e o Responder desligado sem texto; o erro numa regiao viva", () => {
+  const aberto = itemDe(comFio({}, responder({ openId: "q6" })), "q6");
+  assert.match(aberto, /<button aria-expanded="true" data-room-reply-open=""[^>]*>Responder<\/button>/);
+  const campo = aberto.slice(aberto.indexOf("data-room-reply-field"));
+  assert.ok(aberto.indexOf('data-room-reply="r2"') < aberto.indexOf("data-room-reply-field"), "o campo vem depois da ultima resposta");
+  assert.match(aberto, /<div class="relative mt-4"><span aria-hidden="true"[^>]*><\/span><form class="flex items-start" data-room-reply-field="">/, "o campo e mais um item do fio, com a curva dele");
+  assert.match(campo, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "o meu avatar");
+  const area = campo.match(/<textarea aria-label="Sua resposta" class="([^"]*)" maxLength="500" placeholder="Adicione uma resposta" rows="1"[^>]*><\/textarea>/);
+  assert.ok(area, "o texto com o nome, o teto do aluno e a dica");
+  for (const classe of ["bg-transparent", "outline-none", "text-base", "lg:text-sm", "resize-none"]) {
+    assert.ok(classesDe(`<b class="${area[1]}">`).includes(classe), `o texto tem ${classe}`);
+  }
+  assert.match(campo, /<div class="border-b border-room-field-line focus-within:border-room-fg">/, "a linha embaixo, que clareia com o foco");
+  assert.match(campo, /<button class="[^"]*\bbg-transparent\b[^"]*" type="button">Cancelar<\/button><button class="[^"]*\bbg-room-cta-bg\b[^"]*" disabled="" type="submit">Responder<\/button>/, "o Cancelar de texto e o envio desligado sem texto");
+  assert.match(campo, /<p aria-live="polite" class="[^"]*text-room-warn-fg[^"]*"><\/p>/);
+
+  // Com texto, o envio liga; enviando, gira e desliga; o erro aparece embaixo.
+  assert.match(itemDe(comFio({}, responder({ draft: "Obrigada!", openId: "q6" })), "q6"), /<button class="[^"]*" type="submit">Responder<\/button>/);
+  assert.match(itemDe(comFio({}, responder({ busy: true, draft: "Obrigada!", openId: "q6" })), "q6"), /<button aria-busy="true"[^>]*disabled=""[^>]*type="submit">/);
+  assert.match(itemDe(comFio({}, responder({ draft: "x", openId: "q6", status: "Muitas tentativas. Espere um pouco." })), "q6"), /<p aria-live="polite"[^>]*>Muitas tentativas\. Espere um pouco\.<\/p>/);
+
+  // Respondida so ao vivo, sem nada escrito: sem fio, e o campo abre logo abaixo da pergunta, alinhado ao texto.
+  const aoVivo = itemDe(comFio({ answerText: null, answeredLive: true, replies: [] }, responder({ openId: "q6" })), "q6");
+  assert.doesNotMatch(aoVivo, /resposta-q6/, "sem o botao do fio");
+  assert.match(aoVivo, /<div class="ml-9 mt-3"><form class="flex items-start" data-room-reply-field="">/);
+
+  // Na pergunta Anonima, o avatar do campo e das respostas e a mascara, e o nome e Anônima.
+  const anonima = itemDe(comFio({ anonymous: true, avatarUrl: null, replies: [{ ...FIO[0], anonymous: true, avatarUrl: null }] }, responder({ openId: "q6" })), "q6");
+  assert.doesNotMatch(anonima, /<img/, "sem foto em nenhum lugar do fio da anonima (so a resposta da equipe teria)");
+  assert.match(anonima, /<span class="sr-only">Anônima, há 2 minutos: <\/span>E fica no app\?/);
+  assert.equal((anonima.match(/lucide-venetian-mask/g) ?? []).length, 3, "a pergunta, a resposta dela e o campo, com a mascara");
+});
+
 test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de antes", () => {
   const classico = render(questionsModule.RoomQuestionItem, { onVote: noop, question: LISTA[1] });
   assert.match(classico, /^<li class="rounded-\[12px\] border border-room-border bg-room-surface-2 p-3" data-room-question="q2">/);

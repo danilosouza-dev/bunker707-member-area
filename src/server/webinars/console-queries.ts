@@ -12,8 +12,9 @@
 
 import "server-only";
 
-import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
-import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
+import { loadAuthorPhotos, loadOwnPhoto } from "./author-photos";
+import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
+import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionReplyRows, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
 import { askableMessageIds, consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
 import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
 import { assertNoDbError, webinarsDb, type WebinarsDb } from "./db";
@@ -30,12 +31,12 @@ import {
 } from "./live-console-model";
 import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
-import type { WebinarKind, WebinarSession } from "./model";
+import type { QuestionReply, WebinarKind, WebinarSession } from "./model";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
-import { bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
-import { bunnyViewToken, consentIsCurrent } from "./room-queries";
+import { authorPhotoUrl, bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
+import { bunnyViewToken, consentIsCurrent, questionPhotoUrl, replyPhotoUrl } from "./room-queries";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
@@ -69,6 +70,8 @@ export type ConsoleWebinar = {
 };
 
 export type SessionConsoleData = {
+  /** Quem esta no console: a foto do proprio perfil para o campo da equipe (nula sem foto ou sem `viewerUserId`). */
+  viewer?: { avatarUrl: string | null };
   sessions: WebinarSession[];
   /** Nulo quando o webinario ainda nao tem sessao nenhuma. */
   snapshot: ConsoleSnapshot | null;
@@ -433,13 +436,14 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // Os presentes agora pelo relogio da presenca, o mesmo do sinal de 15 s (na live, desde o Iniciar live, nunca pela
   // ancora da gravacao), como a sala do aluno conta.
   const presenceMs = presenceOffsetMs(session, nowMs);
-  const [chatRows, scriptRows, fired, launched, templates, questionRows, presentIds, durationMs] = await Promise.all([
+  const [chatRows, scriptRows, fired, launched, templates, questionRows, replyRows, presentIds, durationMs] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
     input.kind === "simulated" ? listScriptItemRows(db, session.webinarId) : Promise.resolve([]),
     input.kind === "simulated" ? loadFiredScript(db, session.id) : Promise.resolve({}),
     loadLaunchedPolls(db, session.webinarId, session.id),
     listPollRows(db, { sessionId: null, webinarId: session.webinarId }),
     listQuestionRows(db, { order: "votes", sessionId: session.id }),
+    listQuestionReplyRows(db, { sessionId: session.id }),
     Number.isFinite(presenceMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor(presenceMs / 1000)), sessionId: session.id }) : Promise.resolve([]),
     simulatedDurationMs(db, session, input.webinar)
   ]);
@@ -453,8 +457,32 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs),
     askable.length > 0 ? loadAskedMessageIds(db, session.id, askable) : Promise.resolve([])
   ]);
+  // A foto de quem escreveu e de quem perguntou, pela regra da equipe (authorPhotoUrl: nunca no anonimo); a leitura
+  // fica 60 s na memoria do processo, entao o retrato de 5 s nao vira uma consulta a `profiles` por vez.
+  const questions = questionRows.map(questionFromRow);
+  const replies = replyRows.map(questionReplyFromRow);
+  const photos = await loadAuthorPhotos(
+    db,
+    [...authors, ...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)],
+    nowMs
+  );
+  // O fio de cada pergunta (docs/30 §2.4), em ordem, com a foto de quem escreveu.
+  const thread = new Map<string, QuestionReply[]>();
+  for (const reply of replies) {
+    const list = thread.get(reply.questionId) ?? [];
+    list.push({ ...reply, avatarUrl: replyPhotoUrl(reply, session.webinarId, photos, "team") });
+    thread.set(reply.questionId, list);
+  }
   const messages: ConsoleMessage[] = chatMessages.map((message) => ({
     ...message,
+    avatarUrl: authorPhotoUrl({
+      authorUserId: message.authorUserId,
+      displayName: message.displayName,
+      photo: message.authorUserId ? photos.get(message.authorUserId) : null,
+      source: message.source,
+      viewer: "team",
+      webinarId: message.webinarId
+    }),
     promotable: message.authorUserId !== null && consented.has(message.authorUserId)
   }));
 
@@ -466,7 +494,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     polls: { launched, templates: templates.polls.map((poll) => pollFromRow(poll, templates.options)) },
     presence,
     presentNow: presentIds.length,
-    questions: questionRows.map(questionFromRow),
+    questions: questions.map((question) => ({ ...question, avatarUrl: questionPhotoUrl(question, session.webinarId, photos, "team"), replies: thread.get(question.id) ?? [] })),
     scriptFired: fired,
     scriptItems: scriptRows.map(scriptItemFromRow),
     serverTime: input.now.toISOString(),
@@ -490,7 +518,7 @@ async function loadPresenterName(db: WebinarsDb, hostUserId: string | null): Pro
   }
 }
 
-export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date()): Promise<SessionConsoleData | null> {
+export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date(), viewerUserId: string | null = null): Promise<SessionConsoleData | null> {
   const db = webinarsDb();
   const row = await fetchWebinarRow(db, webinarId);
 
@@ -511,6 +539,7 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
 
   return {
     sessions,
+    viewer: { avatarUrl: viewerUserId ? await loadOwnPhoto(db, viewerUserId, now.getTime()) : null },
     snapshot: pickedRow ? await loadConsoleSnapshot(db, { kind, now, session: pickedRow, webinar: row }) : null,
     webinar: {
       allowStudentCamera: row.allow_student_camera !== false,

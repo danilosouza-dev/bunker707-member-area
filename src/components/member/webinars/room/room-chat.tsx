@@ -72,6 +72,8 @@ export type RoomChatPanelProps = {
    * nao le de novo; sem ele (a gaveta antiga, os testes), o painel le sozinho como antes.
    */
   assistant?: RoomAssistant;
+  /** A minha foto do perfil (o avatar do campo, depois do aceite e fora do anonimo); sem ela, as minhas iniciais. */
+  avatarUrl?: string | null;
   busy?: boolean;
   chatMode: ChatMode;
   consented: boolean;
@@ -154,7 +156,7 @@ const BUBBLE_COLUMN = "flex min-w-0 max-w-[270px] flex-col gap-1 lg:max-w-[230px
 
 export type RoomChatBubbleProps = {
   footer?: ReactNode;
-  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role">;
+  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role"> & { avatarUrl?: string | null };
   /**
    * O console: o que entra na linha de baixo depois da hora (Fixada, as acoes da mensagem). Com ele, a linha e um <div>
    * (os botoes e o menu nao cabem num <p>) e o item ganha o `group` e o `relative` (as acoes aparecem com o mouse ou o
@@ -191,7 +193,7 @@ export function RoomChatBubble({ footer = null, message, metaActions = null, pen
 
   return (
     <li className={cn("flex items-end gap-2", mine ? "flex-row-reverse" : undefined, metaActions ? "group relative" : undefined)} data-mine={mine ? "" : undefined} data-room-message={message.id}>
-      <MemberAvatar name={message.displayName} size="xs" />
+      <MemberAvatar imageSrc={message.avatarUrl} name={message.displayName} size="xs" />
       <div className={cn(widthClassName ? cn("flex min-w-0 flex-col gap-1", widthClassName) : BUBBLE_COLUMN, mine ? "items-end" : "items-start")}>
         <p
           className={cn(
@@ -280,7 +282,7 @@ function RoomChatComment({ actions = null, as = "li", headline = null, message, 
     <RoomComment
       actions={actions}
       as={as}
-      avatar={<RoomCommentAvatar kind={author.avatar} name={message.displayName} />}
+      avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={author.avatar} name={message.displayName} />}
       body={<CommentBody body={message.body} />}
       headline={headline}
       id={message.id}
@@ -475,6 +477,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   const {
     aboveComposer = null,
     assistant: sharedAssistant,
+    avatarUrl = null,
     busy = false,
     chatMode,
     consented,
@@ -792,7 +795,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         ) : (
           <RoomCommentField
             ariaLabel={copy.escreva}
-            avatar={{ name: consented ? displayName : null }}
+            avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? displayName : null }}
             busy={sending}
             disabled={state.disabled || readOnly || busy}
             expanded={expanded}

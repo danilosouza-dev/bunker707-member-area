@@ -466,6 +466,20 @@ test("consoleTabCounts: Perguntas conta so as abertas; Mãos, as maos levantadas
   assert.equal(v2.consoleTabCounts({ hands: 2.7, questions }).maos, 2);
 });
 
+test("consoleTabCounts com o fio (docs/30 §2.4): a respondida em que o aluno escreveu por ultimo conta junto das abertas, ate a equipe responder", () => {
+  const aluno = { role: "student" };
+  const equipe = { role: "host" };
+  const questions = [
+    { status: "open" },
+    { replies: [aluno], status: "answered" },
+    { replies: [aluno, equipe], status: "answered" },
+    { replies: [equipe, aluno], status: "answered" },
+    { replies: [], status: "answered" },
+    { replies: [aluno], status: "dismissed" }
+  ];
+  assert.equal(v2.consoleTabCounts({ hands: 0, questions }).perguntas, 3, "a aberta e as duas em que o aluno escreveu por ultimo");
+});
+
 test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nesta sessao; senao, o Chat", () => {
   const tabs = v2.consoleTabsFor({ kind: "live" });
   const entries = v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" });
