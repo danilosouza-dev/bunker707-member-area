@@ -7,12 +7,12 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { chatAgoLabel, chatTimeAt, chatTimeLabel } from "@/lib/webinar-room-client";
 import { ASSISTANT_WAIT_MS } from "@/server/webinars/assistant-model";
 import { chatRoleLabel } from "@/lib/webinar-room-client";
-import { CHAT_CONSENT_VERSION, CHAT_LIMITS, QUESTION_REPLY_LIMITS, type AnswerSource, type DisplayNameMode } from "@/server/webinars/model";
+import { CHAT_CONSENT_VERSION, CHAT_LIMITS, QUESTION_REPLY_LIMITS, type AnswerSource } from "@/server/webinars/model";
 import { AssistantHandoff } from "./assistant/assistant-handoff";
 import { AssistantHint } from "./assistant/assistant-hint";
 import { ownAssistantEnabled, useRoomAssistant, type RoomAssistant } from "./assistant/use-room-assistant";
 import { getQuestions, postQuestion, postQuestionReply, postQuestionVote, type QuestionPostBody, type QuestionReplyBody, type StudentQuestion, type StudentQuestionReply } from "./room-api";
-import { RoomConsentBox, type ConsentChoice } from "./room-chat";
+import { RoomConsentBox } from "./room-chat";
 import { RoomChip, RoomChipBar } from "./room-chip-bar";
 import { RoomComment, RoomCommentAvatar, RoomCommentThread, RoomThreadItem, type RoomCommentTime } from "./room-comment";
 import { RoomCommentField, RoomCommentFieldNotice } from "./room-comment-field";
@@ -38,8 +38,8 @@ import {
 import { RoomTooltip } from "./room-tooltip";
 import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 
-// A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (opcao Anonima so quando a equipe deixou ligada), a
-// lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
+// A aba Perguntas (docs/30 §1.3 e D22): Fazer uma pergunta (sempre com o nome: desde 10/11/2026, D64, nao ha mais a
+// opcao Anonima), a lista com Curtir para subir a pergunta, a situacao (Respondida ao vivo / Respondida por escrito, com o texto /
 // Dispensada, so para o autor), os filtros Todas / Respondidas e a ordem Mais votadas / Mais recentes. Le ao abrir
 // e a cada 15 s enquanto aberta. Sem o aceite do chat (D10), a primeira pergunta abre o mesmo aceite do chat. Na live
 // (fase 3), o silenciado no chat tambem nao pergunta: o campo da lugar a frase (`notice`); a recusa de uma escrita (409
@@ -54,7 +54,8 @@ import { RoomBadge, RoomButton, RoomIconButton } from "./room-ui";
 // da sala (trocar de aba nao os perde), e o numero do cabecalho e o tamanho da lista com o filtro de agora (onCount,
 // so depois da primeira leitura). Abaixo de lg ficam as duas linhas de antes. Sem as props (a gaveta do vertical), o
 // filtro e a ordem sao da aba e o HTML e o de antes. Y10 (spec §8.4): no `comment` cada pergunta e o comentario do
-// YouTube (RoomComment: "Anônima" com a mascara, "Você" na minha, o tempo relativo contra o agora do servidor), com o
+// YouTube (RoomComment: "Você" na minha, o tempo relativo contra o agora do servidor; legado: a pergunta anonima de
+// antes de 10/11/2026 continua "Anônima" com a mascara), com o
 // polegar e o numero, a situacao (Respondida ao vivo, Dispensada) na linha de acoes e a resposta escrita da Equipe ou do
 // Assistente no fio "1 resposta", aberto na minha e fechado nas outras, com a hora da resposta (V2-A66). Sem cartao.
 // O fio continua (decisao do produtor de 10/11/2026, docs/30 §1.3): na minha pergunta ja respondida, o "Responder" da
@@ -115,7 +116,11 @@ type RoomQuestionItemProps = {
   threadOpen?: boolean;
 };
 
-/** Uma resposta do fio (depois da primeira): quem perguntou ("Você" na minha; "Anônima" na pergunta anonima) ou a equipe, com o selo do papel. */
+/**
+ * Uma resposta do fio (depois da primeira): quem perguntou ("Você" na minha) ou a equipe, com o selo do papel. Legado:
+ * linhas de antes de 10/11/2026 (D64). Na pergunta anonima antiga, a resposta de quem perguntou continua como
+ * "Anônima", com a mascara e sem foto.
+ */
 function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuestionReply; serverNowMs?: number }) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
@@ -140,6 +145,7 @@ function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuesti
 function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply = null, serverNowMs, threadOpen = false }: Omit<RoomQuestionItemProps, "look">) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
+  // Legado: linhas de antes de 10/11/2026 (D64). A pergunta anonima antiga continua "Anônima", com a mascara e sem foto.
   const name = question.anonymous ? sala.anonima : question.mine ? novas.chat.voce : question.displayName;
   const time = questionTime(question.createdAt, serverNowMs);
   const status = questionStatusOf(question);
@@ -421,11 +427,9 @@ export function RoomQuestionsOrderButton({ onOrder, order }: { onOrder: (order: 
 }
 
 export function RoomQuestionsTab({
-  allowAnonymous,
   assistant: sharedAssistant,
   avatarUrl = null,
   consented,
-  defaultDisplayMode,
   displayName,
   enabled,
   ended = false,
@@ -444,13 +448,11 @@ export function RoomQuestionsTab({
   sessionId,
   webinarId
 }: {
-  allowAnonymous: boolean;
   /** Redesign V2, F3: o Assistente que a sala ja le; com ele, a aba nao le de novo. */
   assistant?: RoomAssistant;
-  /** A minha foto do perfil (o avatar do campo no `comment`, depois do aceite e fora do anonimo). */
+  /** A minha foto do perfil (o avatar do campo no `comment`, depois do aceite). */
   avatarUrl?: string | null;
   consented: boolean;
-  defaultDisplayMode: DisplayNameMode;
   /** O meu nome (as iniciais do avatar do campo no `comment`); antes do aceite, a pessoa. */
   displayName?: string | null;
   enabled: boolean;
@@ -494,7 +496,6 @@ export function RoomQuestionsTab({
   const [draft, setDraft] = useState("");
   // O campo do YouTube aberto (no comentario): liga no foco, desliga no Cancelar e depois do envio.
   const [expanded, setExpanded] = useState(false);
-  const [anonymous, setAnonymous] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
@@ -550,18 +551,17 @@ export function RoomQuestionsTab({
     };
   }, [enabled, load]);
 
-  async function deliver(choice?: ConsentChoice) {
+  /** A pergunta; `accepting` quando o aluno acabou de aceitar (o aceite vai junto: consent + versao). */
+  async function deliver(accepting = false) {
     const text = draft.trim();
     if (!text || readOnly) {
       return;
     }
     setSending(true);
     setStatus(null);
-    const consent: Partial<QuestionPostBody> = choice
-      ? { consent: true, consentVersion: CHAT_CONSENT_VERSION, displayMode: choice.displayMode, ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {}) }
-      : {};
+    const consent: Partial<QuestionPostBody> = accepting ? { consent: true, consentVersion: CHAT_CONSENT_VERSION } : {};
     try {
-      const answer = await postQuestion(webinarId, { ...consent, anonymous: allowAnonymous && anonymous, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
+      const answer = await postQuestion(webinarId, { ...consent, body: text, offsetMs: Math.round(getOffsetMs()), sessionId });
       setQuestions((previous) => [answer.question, ...previous.filter((question) => question.id !== answer.question.id)]);
       setDraft("");
       setExpanded((previous) => composerExpandedStep(previous, { draft: "", type: "sent" }));
@@ -576,7 +576,7 @@ export function RoomQuestionsTab({
         sent(attendantsOnline === 0 && !assistantOn ? `${copy.perguntaEnviada} ${WEBINAR_COPY.assistente.aluno.equipeRespondeDepois}` : copy.perguntaEnviada);
       }
       setConsentOpen(false);
-      if (choice) {
+      if (accepting) {
         onConsented();
       }
     } catch (failure) {
@@ -612,7 +612,7 @@ export function RoomQuestionsTab({
   }
 
   /** A minha resposta no fio da minha pergunta (com o aceite, quando ele veio agora). */
-  async function deliverReply(choice?: ConsentChoice) {
+  async function deliverReply(accepting = false) {
     const questionId = replyOpenId;
     const text = replyDraft.trim();
     if (!questionId || !text || readOnly) {
@@ -620,9 +620,7 @@ export function RoomQuestionsTab({
     }
     setReplySending(true);
     setReplyStatus(null);
-    const consent: Partial<QuestionReplyBody> = choice
-      ? { consent: true, consentVersion: CHAT_CONSENT_VERSION, displayMode: choice.displayMode, ...(choice.displayMode === "nickname" ? { nickname: choice.nickname } : {}) }
-      : {};
+    const consent: Partial<QuestionReplyBody> = accepting ? { consent: true, consentVersion: CHAT_CONSENT_VERSION } : {};
     try {
       const answer = await postQuestionReply(webinarId, questionId, { ...consent, body: text, sessionId });
       setQuestions((previous) =>
@@ -632,7 +630,7 @@ export function RoomQuestionsTab({
       setReplyDraft("");
       setConsentOpen(false);
       sent(WEBINAR_COPY.salaV2.perguntas.respostaEnviada);
-      if (choice) {
+      if (accepting) {
         onConsented();
       }
     } catch (failure) {
@@ -769,8 +767,7 @@ export function RoomQuestionsTab({
       {consentOpen && !consented && !fieldNotice ? (
         <RoomConsentBox
           busy={sending || replySending}
-          defaultDisplayMode={defaultDisplayMode}
-          onAccept={(choice) => void (consentFor === "reply" ? deliverReply(choice) : deliver(choice))}
+          onAccept={() => void (consentFor === "reply" ? deliverReply(true) : deliver(true))}
           onCancel={() => setConsentOpen(false)}
           variant={look === "comment" ? "card" : "classic"}
         />
@@ -780,8 +777,6 @@ export function RoomQuestionsTab({
           <RoomCommentFieldNotice testId="room-questions-notice">{fieldNotice}</RoomCommentFieldNotice>
         ) : (
           <RoomCommentField
-            allowAnonymous={allowAnonymous}
-            anonymous={anonymous}
             ariaLabel={copy.suaPergunta}
             avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null }}
             busy={sending}
@@ -789,7 +784,6 @@ export function RoomQuestionsTab({
             expanded={expanded}
             maxLength={CHAT_LIMITS.question}
             mode="mod-enter"
-            onAnonymousChange={setAnonymous}
             onCancel={() => {
               setDraft("");
               setConsentOpen(false);
@@ -828,15 +822,7 @@ export function RoomQuestionsTab({
             rows={2}
             value={draft}
           />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            {allowAnonymous ? (
-              <label className="inline-flex min-h-8 items-center gap-2 text-xs text-room-fg-muted">
-                <input checked={anonymous} className="accent-room-active-bg" onChange={(event) => setAnonymous(event.target.checked)} type="checkbox" />
-                {copy.anonima}
-              </label>
-            ) : (
-              <span />
-            )}
+          <div className="mt-2 flex items-center justify-end gap-2">
             <RoomButton disabled={readOnly || sending || !draft.trim()} size="sm" type="submit" variant="primary">
               {copy.fazerPergunta}
             </RoomButton>

@@ -229,6 +229,23 @@ test("4. a mensagem da equipe, o retrato do console e a moderacao: liberar, fixa
 
   const semAceite = await roomActions.moderateMessage({ action: "promote", messageId: porCorpo("Sem aceite").id });
   assert.deepEqual([semAceite.ok, semAceite.status], [false, 409]);
+
+  // Legado (D64): o aluno so tem a linha de aceite de antes de 10/11/2026, como anonimo ou com apelido (o check do
+  // banco ainda aceita os dois). Ela conta como "sem aceite": a mensagem "Aluno 231" nao vai para as proximas turmas.
+  for (const antigo of [
+    { display_mode: "anonymous", nickname: null },
+    { display_mode: "nickname", nickname: "Bruninho" }
+  ]) {
+    unwrap(await db.from("webinar_chat_consents").upsert({ consent_version: 2, user_id: aluno.id, ...antigo }, { onConflict: "user_id" }), "Gravando o aceite antigo do aluno");
+    const comAntigo = await consoleQueries.getConsoleSnapshot(webinarId, SESSAO);
+    assert.equal(comAntigo.messages.find((message) => message.body === "Sem aceite").promotable, false, antigo.display_mode);
+    const recusada = await roomActions.moderateMessage({ action: "promote", messageId: porCorpo("Sem aceite").id });
+    assert.deepEqual([recusada.ok, recusada.status], [false, 409], antigo.display_mode);
+  }
+  const intacta = (await mensagens()).find((row) => row.body === "Sem aceite");
+  assert.deepEqual([intacta.master, intacta.source], [false, "audience"]);
+  unwrap(await db.from("webinar_chat_consents").delete().eq("user_id", aluno.id), "Apagando o aceite antigo do aluno");
+
   const promovida = ok(await roomActions.moderateMessage({ action: "promote", messageId: pendente.id }));
   assert.deepEqual([promovida.message.master, promovida.message.source], [true, "original"]);
 
@@ -280,6 +297,8 @@ test("5. enquetes e perguntas: o modelo, abrir na sessao (sem duplicar), a respo
 
 test("6. Simulação (§8.6): a frase errada recusa no campo; a frase de hoje com o nome liga o selo e fica registrada com quem e quando; o editor mostra a decisao", async () => {
   actAs(produtor);
+  // A auditoria nao e apagada entre as rodadas no banco local: so as linhas desta rodada contam (como no webinarios-relatorio).
+  const antes = new Date(Date.now() - 2000).toISOString();
   const frase = consoleModel.consoleAckSentence({ badgeOn: true, nowMs: Date.now(), responsible: "Produtor de Teste" });
 
   const errada = await roomActions.saveSimulation({ ackText: frase.replace("Produtor de Teste", "Outra Pessoa"), acknowledged: true, sessionId: SESSAO, showLiveBadge: true });
@@ -300,7 +319,7 @@ test("6. Simulação (§8.6): a frase errada recusa no campo; a frase de hoje co
   assert.equal(editor.polls.length, 1);
   assert.equal(editor.runningSessionId, SESSAO);
 
-  const auditoria = unwrap(await db.from("admin_audit_log").select("metadata").eq("action", "webinar.simulation_saved").eq("entity_id", webinarId), "Lendo a auditoria da Simulacao");
+  const auditoria = unwrap(await db.from("admin_audit_log").select("metadata").eq("action", "webinar.simulation_saved").eq("entity_id", webinarId).gte("occurred_at", antes), "Lendo a auditoria da Simulacao");
   assert.equal(auditoria.length, 1);
   assert.deepEqual([auditoria[0].metadata.show_live_badge, auditoria[0].metadata.ack_text, auditoria[0].metadata.decided_by], [true, frase, produtor.id]);
 });

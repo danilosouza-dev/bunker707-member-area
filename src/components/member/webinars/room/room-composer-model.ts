@@ -1,5 +1,5 @@
 // As regras puras do campo "Adicione um comentário" da sala no estilo do YouTube (docs/31; spec §9.2 e §9.3): quando
-// o campo fica aberto (o rodape com a Anonima, o Cancelar e o envio), qual linha ele mostra embaixo e o que cada Enter
+// o campo fica aberto (o rodape com o Cancelar e o envio), qual linha ele mostra embaixo e o que cada Enter
 // faz no chat e nas Perguntas. Sem "use client" e sem imports: os testes de modelo carregam este arquivo direto no Node.
 
 export type ComposerEvent = { draft: string; type: "blur" | "cancel" | "focus" | "sent" };

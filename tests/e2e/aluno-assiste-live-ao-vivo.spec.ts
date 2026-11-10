@@ -692,7 +692,7 @@ test("as Perguntas no estilo do YouTube (Y8): a 1280 o chip Minhas fica fora da 
   await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toHaveAttribute("aria-checked", "false");
 });
 
-test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Enter quebra a linha e o Ctrl+Enter pergunta com a Anônima; o voto marca o polegar; a resposta escrita da equipe chega no fio '1 resposta' aberto na minha; os chips filtram e o ordenar rele", async ({ page }) => {
+test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Enter quebra a linha e o Ctrl+Enter pergunta com o nome do aluno (sem a pílula Anônima, D64); o voto marca o polegar; a resposta escrita da equipe chega no fio '1 resposta' aberto na minha; os chips filtram e o ordenar rele", async ({ page }) => {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2.perguntas;
   await page.setViewportSize({ height: 900, width: 1440 });
@@ -701,7 +701,8 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   await itemDoTrilho(dialogo, sala.abas.perguntas).click();
   await expect(painel.getByRole("heading", { level: 2, name: sala.abas.perguntas })).toBeVisible();
 
-  // Fechado, o campo nao tem o rodape; o foco (o fill) abre: a Anonima, o Cancelar e o Perguntar.
+  // Fechado, o campo nao tem o rodape; o foco (o fill) abre: o Cancelar e o Perguntar. Desde 10/11/2026 (D64) nao ha
+  // mais a pilula Anonima: ninguem pergunta como anonimo.
   const campo = painel.getByRole("textbox", { name: sala.suaPergunta });
   const perguntar = painel.getByRole("button", { exact: true, name: novas.perguntar });
   await expect(perguntar).toHaveCount(0);
@@ -709,10 +710,8 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   await campo.fill(pergunta);
   await expect(perguntar).toBeVisible();
   await expect(painel.getByRole("button", { exact: true, name: WEBINAR_COPY.admin.cancelar })).toBeVisible();
-  const anonima = painel.getByRole("button", { exact: true, name: sala.anonima });
-  await expect(anonima).toHaveAttribute("aria-pressed", "false");
-  await anonima.click();
-  await expect(anonima).toHaveAttribute("aria-pressed", "true");
+  await expect(painel.getByRole("button", { name: /an[oô]nim/i })).toHaveCount(0);
+  await expect(painel.getByRole("checkbox", { name: /an[oô]nim/i })).toHaveCount(0);
 
   // Nas Perguntas o Enter quebra a linha (nada vai ao servidor); o Ctrl ou o ⌘ com o Enter pergunta.
   await campo.press("End");
@@ -724,6 +723,11 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   const aceite = dialogo.getByRole("group", { name: /Ao enviar mensagens neste chat/ });
   const primeiro = await Promise.race([enviou.then(() => "enviou"), aceite.waitFor({ state: "visible" }).then(() => "aceite", () => "nada")]);
   if (primeiro === "aceite") {
+    // O aceite so tem o texto, "Entendi e quero participar" e Cancelar: sem escolha de nome, sem apelido e sem anonimo.
+    await expect(aceite.getByRole("radio")).toHaveCount(0);
+    await expect(aceite.getByRole("textbox")).toHaveCount(0);
+    await expect(aceite.getByRole("button")).toHaveCount(2);
+    await expect(aceite.getByRole("button", { name: /an[oô]nim/i })).toHaveCount(0);
     await aceite.getByRole("button", { exact: true, name: sala.consentimentoBotao }).click();
   }
   const resposta = await enviou;
@@ -731,16 +735,21 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   // A rota da sala responde no envelope { data } (room-route.ts ok()).
   const {
     data: { question }
-  } = (await resposta.json()) as { data: { question: { anonymous: boolean; id: string } } };
-  expect(question.anonymous).toBe(true);
+  } = (await resposta.json()) as { data: { question: { anonymous: boolean; displayName: string; id: string } } };
+  // O corpo do pedido nao leva mais `anonymous`, e a pergunta e gravada com o nome do aluno.
+  expect(resposta.request().postDataJSON()).not.toHaveProperty("anonymous");
+  expect(resposta.request().postDataJSON()).not.toHaveProperty("displayMode");
+  expect(question.anonymous).toBe(false);
+  expect(question.displayName).not.toMatch(/^Aluno \d{3}$/);
   // Depois de perguntar, o campo fecha e fica vazio.
   await expect(campo).toHaveValue("");
   await expect(perguntar).toHaveCount(0);
 
-  // A minha pergunta como comentario: "Anônima" no lugar do nome, e o voto marca o polegar e o numero.
+  // A minha pergunta como comentario: "Você" no lugar do nome (nunca "Anônima"), e o voto marca o polegar e o numero.
   const minha = painel.locator(`[data-room-question="${question.id}"]`);
   await expect(minha).toContainText(pergunta);
-  await expect(minha.getByText(sala.anonima, { exact: true })).toBeVisible();
+  await expect(minha.getByText(WEBINAR_COPY.salaV2.chat.voce, { exact: true }).first()).toBeVisible();
+  await expect(minha.getByText(sala.anonima, { exact: true })).toHaveCount(0);
   const curtir = minha.getByRole("button", { exact: true, name: sala.curtir });
   await expect(curtir).toHaveAttribute("aria-pressed", "false");
   const votou = page.waitForResponse((response) => response.url().includes(`/questions/${question.id}/vote`) && response.request().method() === "POST");

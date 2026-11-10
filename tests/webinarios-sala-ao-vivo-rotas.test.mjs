@@ -334,7 +334,7 @@ function escola({ accessMode = "everyone", anchorAgoMs = 30_000, audience = { ki
     reminders: {},
     replay_days_on_home: 7,
     replay_lesson_target: null,
-    room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+    room_settings: { chatMode: "open" },
     scheduled_at: null,
     show_banner: true,
     show_on_home: true,
@@ -608,12 +608,21 @@ test("join-token do aluno: 409 not_started na agendada; 200 na espera e no ar co
   // O segundo token usa a mesma sala (nunca gera outra).
   assert.equal((await token()).body.data.room, data.room);
 
-  // Com o aceite do chat, o nome do chat (apelido); com o card Sala anonimo e sem aceite, "Aluno {n}".
+  // D64 (10/11/2026): o nome no token e sempre o primeiro nome + inicial. Legado: nem o aceite antigo com apelido ou
+  // anonimo, nem o card Sala antigo ("Sempre anônimo", perguntas anonimas ligadas) mudam o nome no motor da live.
   noAr.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, display_mode: "nickname", nickname: "aninha", revoked_at: null, user_id: userId });
-  assert.equal(claimsDe(await token()).context.user.name, "aninha");
-  const { db: anonimo } = montar();
-  anonimo.tables.webinars[0].room_settings.displayName = "anonymous";
-  assert.match(claimsDe(await token()).context.user.name, /^Aluno \d{3}$/);
+  assert.equal(claimsDe(await token()).context.user.name, "Ana S.", "aceite antigo com apelido");
+  noAr.tables.webinar_chat_consents[0].display_mode = "anonymous";
+  noAr.tables.webinar_chat_consents[0].nickname = null;
+  assert.equal(claimsDe(await token()).context.user.name, "Ana S.", "aceite antigo anonimo");
+  noAr.tables.webinars[0].room_settings = { anonymousQuestions: true, chatMode: "open", displayName: "anonymous" };
+  assert.equal(claimsDe(await token()).context.user.name, "Ana S.", "aceite antigo anonimo e card Sala antigo anonimo");
+  const { db: anonimo, userId: semAceite } = montar();
+  anonimo.tables.webinars[0].room_settings = { anonymousQuestions: true, chatMode: "open", displayName: "anonymous" };
+  const semAceiteClaims = claimsDe(await token());
+  assert.deepEqual(semAceiteClaims.context.user, { id: semAceite, name: "Ana S." }, "card Sala antigo anonimo, sem aceite");
+  anonimo.tables.webinars[0].room_settings.displayName = "nickname";
+  assert.doesNotMatch(claimsDe(await token()).context.user.name, /^Aluno \d{3}$|aninha/);
 });
 
 test("join-token: o exp nunca passa de agora + 15 min, nem numa live longa nem na que passou da duracao prevista", async () => {

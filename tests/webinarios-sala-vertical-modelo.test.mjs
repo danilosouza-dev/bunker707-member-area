@@ -199,7 +199,7 @@ test("o esqueleto: so as classes mudam; o vertical cobre a tela com o video em c
 
 function payload(extra = {}, sessionExtra = {}) {
   return {
-    me: { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null },
+    me: { calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null },
     pinned: null,
     polls: [],
     presentNow: 2,

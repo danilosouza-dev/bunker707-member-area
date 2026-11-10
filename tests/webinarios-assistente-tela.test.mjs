@@ -64,7 +64,6 @@ function chat(props = {}) {
   return render(RoomChatPanel, {
     chatMode: "open",
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
     messages: [
@@ -275,6 +274,7 @@ test("painel Atendimento: Pausar de quem atende, Responder tudo, quem atende com
   const item = (id) => textOf(markup.slice(markup.indexOf(`data-attendance-item="${id}"`), markup.indexOf("</li>", markup.indexOf(`data-attendance-item="${id}"`))));
   assert.match(item("m1"), /Ana S\. Do chat Pediu a equipe Com Bia A\. Respondida pelo Assistente @assistente nao entendi/);
   assert.match(item("m1"), /Assumir Devolver para a fila Passar para/);
+  // Legado: a pergunta gravada como anonima antes de 10/11/2026 (D64) continua "Anônima" na fila.
   assert.match(item("q1"), /Anônima Da aba Perguntas O Assistente está respondendo Tem certificado\?/);
   assert.doesNotMatch(item("q1"), /Devolver/, "sem dono nao devolve");
   assert.match(item("q2"), /Com você/);
@@ -377,7 +377,7 @@ test("painel Perguntas do console com o fio (docs/30 §2.4): as respostas em ord
   // A aberta continua com o Responder por escrito, sem o Responder do fio.
   assert.doesNotMatch(bloco(markup, "q-aberta"), /data-console-reply-open/);
   assert.match(textOf(bloco(markup, "q-aberta")), /Responder por escrito/);
-  // A anonima: a resposta dela sem nome e sem foto.
+  // A anonima (legado: linhas de antes de 10/11/2026, D64): a resposta dela sem nome e sem foto.
   const anonima = bloco(markup, "q-anonima");
   assert.doesNotMatch(anonima, /Aluno 123|<img/);
   assert.equal((anonima.match(/lucide-venetian-mask/g) ?? []).length, 2, "a pergunta e a resposta com a mascara");

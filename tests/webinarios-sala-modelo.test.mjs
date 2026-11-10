@@ -4,12 +4,14 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // A sala da Live gravada, a parte pura (docs/30 §1.6, §5.1, §6.5 e §6.6): o zero do video e o offset, as fases e
 // a entrada, a janela do chat, o relogio do navegador e o alvo do player, os baldes de presenca (M1, M2), o nome
-// exibido (D10) e o endereco do player da Bunny. Da sala ao vivo (fase 3, D16 e D19): os limites na memoria dos lotes
+// exibido (D10; desde 10/11/2026, D64, sempre o primeiro nome com a inicial, sem anonimo e sem apelido), o aceite em dia
+// (versao e modo de agora) e o endereco do player da Bunny. Da sala ao vivo (fase 3, D16 e D19): os limites na memoria dos lotes
 // de sinais do iframe (6 por minuto) e da entrada do join-token (uma a cada 90 s, com a marca da presenca).
 
 const room = await import("../src/server/webinars/room-model.ts");
 const limits = await import("../src/server/webinars/room-limits.ts");
-const { ROOM_RULES } = await import("../src/server/webinars/model.ts");
+const model = await import("../src/server/webinars/model.ts");
+const { ROOM_RULES } = model;
 
 const T0 = Date.parse("2026-11-05T23:00:00.000Z");
 const MIN = 60_000;
@@ -79,7 +81,7 @@ test("presenca: balde de 30 s, 95 % ate o fim, saida depois de 3 baldes sem sina
   assert.ok(!room.isStillPresent(10, 13));
 });
 
-test("nome exibido (D10): primeiro nome e inicial, apelido, Aluno {n} estavel por aluno e webinario", () => {
+test("nome exibido (D10 e D64): sempre o primeiro nome e a inicial do sobrenome, sem apelido e sem Aluno {n}; o numero do anonimo antigo continua estavel para as linhas de antes", () => {
   assert.equal(room.firstNameInitial("Ana Maria da Silva"), "Ana S.");
   assert.equal(room.firstNameInitial("Caio"), "Caio");
   assert.equal(room.firstNameInitial("  "), "Aluno");
@@ -88,10 +90,30 @@ test("nome exibido (D10): primeiro nome e inicial, apelido, Aluno {n} estavel po
   assert.equal(room.anonymousNumber("u1", "w1"), n1);
   assert.ok(n1 >= 100 && n1 <= 999);
   assert.notEqual(room.anonymousNumber("u1", "w2"), room.anonymousNumber("u1", "w1") === room.anonymousNumber("u1", "w2") ? -1 : room.anonymousNumber("u1", "w1"), "outro webinario, outro numero (quase sempre)");
-  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "anonymous", nickname: "aninha" }), "Aluno 123");
-  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "nickname", nickname: "  aninha  " }), "aninha");
-  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "nickname", nickname: "a" }), "Ana M.", "apelido curto demais cai no nome");
-  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "first_name_initial", nickname: null }), "Ana M.");
+  // D64 (10/11/2026): o nome nao depende de escolha nenhuma. Quem ainda chama com o modo e o apelido de antes (um
+  // aceite antigo, o card Sala antigo) recebe o primeiro nome com a inicial do mesmo jeito.
+  assert.equal(room.displayNameFor({ fullName: "Ana Maria" }), "Ana M.");
+  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "anonymous", nickname: "aninha" }), "Ana M.", "nunca Aluno {n}");
+  assert.equal(room.displayNameFor({ anonymousNumber: 123, fullName: "Ana Maria", mode: "nickname", nickname: "  aninha  " }), "Ana M.", "nunca o apelido");
+  assert.equal(room.displayNameFor({ fullName: null }), "Aluno", "o perfil sem nome");
+  assert.equal(room.displayNameFor({ fullName: `${"a".repeat(120)} Silva` }).length, 80, "o teto do nome gravado");
+  assert.deepEqual([...model.DISPLAY_NAME_MODES], ["first_name_initial"], "um modo so");
+  assert.deepEqual([...model.LEGACY_DISPLAY_NAME_MODES], ["nickname", "anonymous"], "os antigos so para ler o que o banco ainda aceita");
+  assert.equal(model.CHAT_LIMITS.nicknameMin, undefined, "o apelido nao tem mais limite no app");
+});
+
+test("o aceite em dia (D64): sem retirada, na versao de agora e com o modo de agora; o aceite antigo com apelido ou anonimo vale como sem aceite", () => {
+  const emDia = { consent_version: model.CHAT_CONSENT_VERSION, display_mode: "first_name_initial", revoked_at: null };
+  assert.equal(model.CHAT_CONSENT_VERSION, 2, "a versao continua 2 (so o texto mudou)");
+  assert.equal(model.chatConsentIsCurrent(emDia), true);
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, display_mode: "anonymous" }), false, "o anonimo de antes");
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, display_mode: "nickname" }), false, "o apelido de antes");
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, display_mode: null }), false);
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, display_mode: "qualquer" }), false);
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, consent_version: 1 }), false, "a versao 1 (so o nome)");
+  assert.equal(model.chatConsentIsCurrent({ ...emDia, revoked_at: "2026-11-10T12:00:00.000Z" }), false, "retirado");
+  assert.equal(model.chatConsentIsCurrent(null), false);
+  assert.equal(model.chatConsentIsCurrent(undefined), false);
 });
 
 test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so para o autor, fixada; a hora gravada so na live", () => {
@@ -131,7 +153,7 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
   assert.equal(room.offsetLabel(-30_000), "-0:30");
 });
 
-test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe sempre; a do aluno so com o aceite em dia e nunca no anonimo; a equipe ve sem depender do aceite; o roteiro e o Assistente nunca", () => {
+test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe sempre; a do aluno so com o aceite em dia e nunca no anonimo (legado: linhas de antes de 10/11/2026); a equipe ve sem depender do aceite; o roteiro e o Assistente nunca", () => {
   const foto = "https://exemplo.test/ana.jpg";
   const emDia = { avatarUrl: foto, consentCurrent: true };
   const antigo = { avatarUrl: foto, consentCurrent: false };
@@ -141,7 +163,8 @@ test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe semp
   assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, viewer: "team" }), foto, "a equipe, no console, ve a foto do aluno (ela ja ve o perfil)");
   assert.equal(room.authorPhotoUrl({ ...aluno, photo: { avatarUrl: null, consentCurrent: true } }), null, "sem foto no perfil, nada");
   assert.equal(room.authorPhotoUrl({ ...aluno, photo: undefined }), null);
-  // O anonimo: pela pergunta Anonima ou pelo nome gravado "Aluno {n}" de quem participa como anonimo; nem a equipe ve.
+  // O anonimo (legado: linhas de antes de 10/11/2026, D64; nada novo e gravado assim): pela pergunta Anonima ou pelo
+  // nome gravado "Aluno {n}" de quem participava como anonimo; nem a equipe ve.
   const anonimo = room.anonymousDisplayName("u1", "w1");
   assert.match(anonimo, /^Aluno \d{3}$/);
   assert.equal(room.authorPhotoUrl({ ...aluno, displayName: anonimo }), null);

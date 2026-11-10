@@ -70,6 +70,7 @@ import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, ty
 import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
+  chatConsentAllowsReplay,
   type ChatMessage,
   type ChatMode,
   type Poll,
@@ -83,7 +84,7 @@ import {
 } from "./model";
 import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
-import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
+import { anonymousDisplayName, firstNameInitial, sessionOffsetMs } from "./room-model";
 import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
@@ -395,15 +396,16 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 /**
  * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
  * equipe): o texto cortado em 500 caracteres (o limite da pergunta, sem partir um emoji: questionBodyOf), o
- * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno. Sem autor, nada (a pergunta pede o
- * aluno). Quem chama confere antes se a mensagem ja tem pergunta.
+ * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno (legado: linhas de antes de 10/11/2026,
+ * D64; a mensagem antiga escrita como anonimo continua com a promessa da epoca, e nenhuma mensagem nova tem esse nome).
+ * Sem autor, nada (a pergunta pede o aluno). Quem chama confere antes se a mensagem ja tem pergunta.
  */
 async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
   const userId = message.author_user_id;
   if (!userId) {
     return null;
   }
-  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const anonymous = message.display_name === anonymousDisplayName(userId, message.webinar_id);
   const question = await insertQuestionRow(db, {
     anonymous,
     body: questionBodyOf(message.body),
@@ -433,7 +435,7 @@ async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): P
       entity_id: message.session_id,
       entity_type: "webinar",
       event_type: "webinar_question_sent",
-      metadata: questionSentMetadata({ anonymous: created.anonymous, offsetMs: message.offset_ms, questionId: created.questionId }),
+      metadata: questionSentMetadata({ offsetMs: message.offset_ms, questionId: created.questionId }),
       user_id: created.userId
     }
   ]);
@@ -458,8 +460,9 @@ async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow):
  * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
  * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
  * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao), promover a linha mestre
- * (master + source `original`, so mensagem da turma cujo autor mantem o aceite) e Virar pergunta (docs/31 V2-15: so
- * mensagem ou pergunta de aluno da turma; a pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite com o modo de agora:
+ * model.chatConsentAllowsReplay) e Virar pergunta (docs/31 V2-15: so mensagem ou pergunta de aluno da turma; a
+ * pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
   return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
@@ -505,7 +508,9 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
         const consent = message.author_user_id ? await fetchConsentRow(db, message.author_user_id) : null;
 
-        if (!consent || consent.revoked_at) {
+        // Sem retirada e com o modo de agora: o aceite antigo de apelido ou anonimo (legado: linhas de antes de
+        // 10/11/2026, D64) conta como "sem aceite", e a mensagem dele nao vira linha mestre ate o aluno aceitar de novo.
+        if (!chatConsentAllowsReplay(consent)) {
           throw new WebinarError(NO_CONSENT_MESSAGE, 409);
         }
 
@@ -631,7 +636,8 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
 
       if (draft.id && existingIds.has(draft.id)) {
         const ownOptionIds = new Set(existing.options.filter((option) => option.poll_id === draft.id).map((option) => option.id));
-        await updatePollRow(db, draft.id, { anonymous: draft.anonymous, kind: draft.kind, position, question: draft.question });
+        // D64: a enquete salva de agora em diante nunca e anonima (um modelo antigo marcado volta a falso aqui).
+        await updatePollRow(db, draft.id, { anonymous: false, kind: draft.kind, position, question: draft.question });
         await replacePollOptionRows(
           db,
           draft.id,
@@ -642,7 +648,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
       } else {
         const inserted = await insertPollRow(
           db,
-          { anonymous: draft.anonymous, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
+          { anonymous: false, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
           labels
         );
         kept.add(inserted.poll.id);
@@ -710,7 +716,8 @@ export async function launchPoll(input: { pollId: string; sessionId: string }): 
     const created = await insertPollRow(
       db,
       {
-        anonymous: template.poll.anonymous,
+        // D64: a copia lancada nunca e anonima, mesmo de um modelo antigo marcado (legado: so as copias de antes continuam).
+        anonymous: false,
         created_by: user.id,
         kind: template.poll.kind,
         open_offset_ms: serverOffsetMs(session, now.getTime()),

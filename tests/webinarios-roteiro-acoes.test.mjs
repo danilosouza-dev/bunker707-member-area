@@ -706,8 +706,57 @@ test("moderacao: liberar grava quem e quando; fixar uma por sessao; apagar some 
   assert.equal(desligado.slowModeSeconds, null, "chat desligado nao tem modo lento");
 });
 
-test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quando a equipe libera (anonima pelo nome Aluno {n}); apagar a mensagem apaga a pergunta", async () => {
+test("promover com o aceite antigo (D64): a linha de aceite com anonimo ou apelido conta como sem aceite e a mensagem nao vira linha mestre; depois do novo aceite, vira; o aceite da versao 1 com o nome continua valendo", async () => {
+  // Legado: linhas de antes de 10/11/2026. O aluno so tem o aceite antigo e a mensagem gravada como "Aluno {n}".
+  const antiga = message({ author_user_id: ALUNO, display_name: "Aluno 437" });
+  const daVersao1 = message({ author_user_id: ALUNA, body: "da turma de antes" });
+  const db = usar(
+    bancoEmMemoria(
+      cenario({
+        webinar_chat_consents: [
+          { consent_version: 2, consented_at: agora(), display_mode: "anonymous", nickname: null, revoked_at: null, user_id: ALUNO },
+          { consent_version: 1, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }
+        ],
+        webinar_chat_messages: [antiga, daVersao1]
+      })
+    )
+  );
+  const linha = (id) => db.tables.webinar_chat_messages.find((row) => row.id === id);
+  const aceite = () => db.tables.webinar_chat_consents.find((row) => row.user_id === ALUNO);
+
+  for (const [modo, apelido] of [
+    ["anonymous", null],
+    ["nickname", "Bruninho"]
+  ]) {
+    Object.assign(aceite(), { display_mode: modo, nickname: apelido });
+    const recusada = await roomActions.moderateMessage({ action: "promote", messageId: antiga.id });
+    assert.deepEqual([recusada.ok, recusada.status], [false, 409], modo);
+    assert.match(recusada.error, /consentimento/i, modo);
+    assert.deepEqual([linha(antiga.id).master, linha(antiga.id).source], [false, "audience"], `${modo}: nada mudou na mensagem`);
+  }
+  assert.equal(audits(db, "webinar.moderated").length, 0, "a recusa nao vai para a auditoria");
+
+  // A versao do texto nao entra nesta regra: quem aceitou a versao 1 com o nome ja autorizou as reexibicoes.
+  const promovidaV1 = ok(await roomActions.moderateMessage({ action: "promote", messageId: daVersao1.id }));
+  assert.deepEqual([promovidaV1.message.master, promovidaV1.message.source], [true, "original"]);
+
+  // O aluno aceitou de novo (a sala grava sempre o modo de agora): a mensagem dele ja pode ir para as proximas turmas.
+  Object.assign(aceite(), { display_mode: "first_name_initial", nickname: null });
+  const promovida = ok(await roomActions.moderateMessage({ action: "promote", messageId: antiga.id }));
+  assert.deepEqual([promovida.message.master, promovida.message.source], [true, "original"]);
+
+  // Retirado, nem com o modo de agora.
+  const outra = message({ author_user_id: ALUNO, body: "outra" });
+  db.tables.webinar_chat_messages.push(outra);
+  aceite().revoked_at = agora();
+  const retirada = await roomActions.moderateMessage({ action: "promote", messageId: outra.id });
+  assert.deepEqual([retirada.ok, retirada.status], [false, 409]);
+});
+
+test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quando a equipe libera (legado: a mensagem antiga gravada como Aluno {n} continua anonima); apagar a mensagem apaga a pergunta", async () => {
   const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
+  // Legado: linhas de antes de 10/11/2026 (D64). Uma pendente escrita como anonimo na epoca ("Aluno {n}") continua com a
+  // promessa de entao quando a equipe libera; nenhuma mensagem nova nasce com esse nome.
   const anonima = message({ approved: false, author_user_id: ALUNO, body: "vai ter certificado?", display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, kind: "question", offset_ms: 42_000 });
   const comNome = message({ approved: false, author_user_id: ALUNA, body: "e a apostila?", kind: "question" });
   const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [anonima, comNome] })));
@@ -718,7 +767,8 @@ test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quan
   assert.ok(aberta, "liberar abre a pergunta");
   assert.deepEqual([aberta.anonymous, aberta.body, aberta.offset_ms, aberta.user_id, aberta.session_id], [true, "vai ter certificado?", 42_000, ALUNO, SESSAO_NO_AR]);
   const [evento] = db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
-  assert.deepEqual(evento.metadata, { anonymous: true, offset_ms: 42_000, question_id: aberta.id });
+  // D64: o historico nao leva mais a chave `anonymous` (a escolha nao existe mais).
+  assert.deepEqual(evento.metadata, { offset_ms: 42_000, question_id: aberta.id });
   assert.equal(evento.user_id, ALUNO);
 
   ok(await roomActions.moderateMessage({ action: "approve", messageId: anonima.id }));
@@ -754,7 +804,7 @@ test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta se
   const eventos = () => db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
 
   // A pendente comum: libera (quem e quando) e vira pergunta com o message_id, o texto cortado em 500 e anonima pelo
-  // "Aluno {n}"; quem perguntou foi a equipe, entao nada no historico do aluno.
+  // "Aluno {n}" (legado: a mensagem de antes de 10/11/2026 gravada com esse nome); quem perguntou foi a equipe, entao nada no historico do aluno.
   const virou = ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
   assert.equal(virou.message.approved, true);
   assert.deepEqual([linha(pendente.id).approved, linha(pendente.id).approved_by], [true, HOST]);
@@ -944,9 +994,19 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
   assert.equal(atualizadas.polls[0].options[0].id, primeira.options[1].id, "a opcao que ficou mantem o id");
   assert.notEqual(atualizadas.polls[0].options[1].id, idDeOutra, "id de opcao de outra enquete nao e aproveitado");
   assert.equal(db.tables.webinar_polls.length, 1);
+  // D64 (10/11/2026): nao ha mais "Respostas anônimas". O editor aberto com a pagina antiga que ainda manda
+  // `anonymous: true` (ao criar e ao atualizar) grava falso, e o modelo devolvido tambem diz falso.
+  assert.deepEqual(salvas.polls.map((poll) => poll.anonymous), [false, false], "criadas: nunca anonimas");
+  assert.equal(atualizadas.polls[0].anonymous, false, "atualizada: nunca anonima");
+  assert.deepEqual(db.tables.webinar_polls.map((row) => row.anonymous), [false]);
 
   const modelo = atualizadas.polls[0];
+  // Legado: um modelo de antes de 10/11/2026 ainda marcado como anonimo no banco. A copia lancada agora guarda quem
+  // respondeu (anonymous falso); so as copias lancadas na epoca continuam anonimas.
+  db.tables.webinar_polls.find((row) => row.id === modelo.id).anonymous = true;
   const aberta = ok(await roomActions.launchPoll({ pollId: modelo.id, sessionId: SESSAO_NO_AR }));
+  assert.equal(aberta.poll.anonymous, false, "a copia lancada nunca e anonima");
+  assert.equal(db.tables.webinar_polls.find((row) => row.id === aberta.poll.id).anonymous, false);
   assert.deepEqual([aberta.poll.sessionId, aberta.poll.templatePollId, aberta.poll.status, aberta.poll.question], [SESSAO_NO_AR, modelo.id, "open", "Vem?"]);
   assert.ok(aberta.poll.openedAt);
   assert.ok(Math.abs(aberta.poll.openOffsetMs - 5 * MIN) < 10_000);

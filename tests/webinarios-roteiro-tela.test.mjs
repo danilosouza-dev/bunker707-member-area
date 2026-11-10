@@ -238,9 +238,10 @@ test("Simulação: o aviso do CDC, uma linha por sessao gravada com o selo, quem
   assert.match(semSessao, /Marque as sessões no card Sessões e salve/);
 });
 
-test("Enquetes: os modelos com pergunta, tipo, respostas anonimas e opcoes; Salvar desligado sem mudanca; o estado vazio", () => {
+test("Enquetes: os modelos com pergunta, tipo e opcoes, sem o interruptor Respostas anônimas (D64); Salvar desligado sem mudanca; o estado vazio", () => {
   const polls = [
     { anonymous: false, closedAt: null, id: "p-1", kind: "single", openOffsetMs: null, openedAt: null, options: [{ id: "o-1", label: "Sim", position: 0 }, { id: "o-2", label: "Não", position: 1 }], position: 0, question: "Vem na próxima?", resultsSharedAt: null, sessionId: null, status: "draft", templatePollId: null, webinarId: WEBINAR },
+    // Legado: um modelo de antes de 10/11/2026 ainda marcado como anonimo; o card nao mostra nem oferece a marca.
     { anonymous: true, closedAt: null, id: "p-2", kind: "multiple", openOffsetMs: null, openedAt: null, options: [{ id: "o-3", label: "A", position: 0 }, { id: "o-4", label: "B", position: 1 }, { id: "o-5", label: "C", position: 2 }], position: 1, question: "Quais temas?", resultsSharedAt: null, sessionId: null, status: "draft", templatePollId: null, webinarId: WEBINAR }
   ];
   const markup = html(createElement(PollsCard, { disabled: false, initial: polls, webinarId: WEBINAR }));
@@ -250,10 +251,12 @@ test("Enquetes: os modelos com pergunta, tipo, respostas anonimas e opcoes; Salv
   assert.match(markup, /value="Vem na próxima\?"/);
   assert.match(markup, /value="Quais temas\?"/);
   assert.equal(count(markup, /placeholder="Opção \d"/g), 5);
-  for (const label of ["Uma opção", "Várias opções", "Pesquisa", "Respostas anônimas", "Adicionar opção", "Adicionar enquete", "Salvar enquetes", "Até 20 enquetes por webinário."]) {
+  for (const label of ["Uma opção", "Várias opções", "Pesquisa", "Adicionar opção", "Adicionar enquete", "Salvar enquetes", "Até 20 enquetes por webinário."]) {
     assert.match(text, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), label);
   }
-  assert.match(markup, /aria-checked="true"/, "a segunda e anonima");
+  // D64 (10/11/2026): toda enquete guarda quem respondeu; o interruptor "Respostas anônimas" saiu do card.
+  assert.doesNotMatch(text, /an[oô]nim/i, "nenhuma frase de anonimo no card");
+  assert.doesNotMatch(markup, /role="switch"|-anonymous"/, "sem o interruptor");
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Salvar enquetes/, "sem mudanca nao salva");
   assert.doesNotMatch(text, /ainda não salvas/);
 

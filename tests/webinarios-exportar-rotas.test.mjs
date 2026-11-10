@@ -214,7 +214,7 @@ test("cada um dos sete relatorios sai com as colunas do Zoom, o nome do arquivo 
   }
 });
 
-test("Q&A pela rota: o Assistente como quem respondeu, a anonima como 'Aluno {n}' sem e-mail, a pergunta da equipe fora", async () => {
+test("Q&A pela rota: o Assistente como quem respondeu, a anonima antiga (legado, antes de 10/11/2026) como 'Aluno {n}' sem e-mail, a pergunta da equipe fora", async () => {
   const db = banco();
   const linhas = lerCsv(await (await pedirSessao(`?sessao=${SESSAO_ID}&relatorio=qa`)).text());
   assert.equal(linhas.length, 3, "cabecalho + duas perguntas de alunos");

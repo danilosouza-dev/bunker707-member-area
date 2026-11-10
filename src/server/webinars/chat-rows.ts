@@ -6,6 +6,7 @@ import {
   CHAT_ROLES,
   CHAT_SOURCES,
   DISPLAY_NAME_MODES,
+  LEGACY_DISPLAY_NAME_MODES,
   MESSAGE_KINDS,
   PERSONA_ROLES,
   POLL_KINDS,
@@ -21,7 +22,6 @@ import {
   type ChatMessage,
   type ChatRole,
   type ChatSource,
-  type DisplayNameMode,
   type MessageKind,
   type PersonaRole,
   type Poll,
@@ -38,6 +38,7 @@ import {
   type ScriptItem,
   type ScriptStatus,
   type ScriptTrigger,
+  type StoredDisplayNameMode,
   type WebinarQuestion,
   type WebinarTranscriptFormat
 } from "./model";
@@ -209,14 +210,17 @@ export function transcriptFromRow(row: TranscriptRow): RecordingTranscript {
   };
 }
 
-export const CONSENT_COLUMNS = "user_id, consent_version, display_mode, nickname, consented_at, revoked_at, created_at, updated_at";
+/** O que o check de `display_mode` aceita no banco: o modo de agora e os antigos (legado). */
+const STORED_DISPLAY_NAME_MODES: readonly StoredDisplayNameMode[] = [...DISPLAY_NAME_MODES, ...LEGACY_DISPLAY_NAME_MODES];
+
+/** `nickname` continua na tabela (legado: linhas de antes de 10/11/2026, D64), mas o app nao le mais o apelido. */
+export const CONSENT_COLUMNS = "user_id, consent_version, display_mode, consented_at, revoked_at, created_at, updated_at";
 
 export type ConsentRow = {
   consent_version: number;
   consented_at: string;
   created_at: string;
   display_mode: string;
-  nickname: string | null;
   revoked_at: string | null;
   updated_at: string;
   user_id: string;
@@ -226,8 +230,9 @@ export function consentFromRow(row: ConsentRow): ChatConsent {
   return {
     consentVersion: row.consent_version,
     consentedAt: row.consented_at,
-    displayMode: oneOf<DisplayNameMode>(DISPLAY_NAME_MODES, row.display_mode, "first_name_initial"),
-    nickname: row.nickname,
+    // Legado: uma linha de antes de 10/11/2026 pode trazer "nickname" ou "anonymous"; um valor que ninguem conhece
+    // cai em "anonymous", que nunca vale como aceite (chatConsentIsCurrent).
+    displayMode: oneOf<StoredDisplayNameMode>(STORED_DISPLAY_NAME_MODES, row.display_mode, "anonymous"),
     revokedAt: row.revoked_at,
     userId: row.user_id
   };

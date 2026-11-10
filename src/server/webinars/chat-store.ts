@@ -36,7 +36,7 @@ import {
   type ScriptItemRow,
   type TranscriptRow
 } from "./chat-rows";
-import { CHAT_LIMITS, ROOM_RULES, type DeleteReason } from "./model";
+import { CHAT_LIMITS, ROOM_RULES, type DeleteReason, type DisplayNameMode } from "./model";
 
 const PAGE = 1000;
 
@@ -67,9 +67,13 @@ export async function fetchConsentRow(db: WebinarsDb, userId: string): Promise<C
   return (data as ConsentRow | null) ?? null;
 }
 
-export type ConsentUpsert = { consent_version: number; display_mode: string; nickname: string | null; user_id: string };
+/** O aceite e sempre gravado com o modo de agora e sem apelido (D64): o tipo nao deixa passar outro valor. */
+export type ConsentUpsert = { consent_version: number; display_mode: DisplayNameMode; nickname: null; user_id: string };
 
-/** Grava (ou renova) o aceite; uma retirada anterior e desfeita (revoked_at volta a nulo). */
+/**
+ * Grava (ou renova) o aceite; uma retirada anterior e desfeita (revoked_at volta a nulo). Um aceite antigo com apelido
+ * ou anonimo (legado: linhas de antes de 10/11/2026) e trocado pelo modo de agora, com o apelido apagado.
+ */
 export async function upsertConsentRow(db: WebinarsDb, input: ConsentUpsert, nowIso: string): Promise<ConsentRow> {
   const { data, error } = await db
     .from("webinar_chat_consents")
@@ -401,7 +405,8 @@ export async function fetchPollRow(db: WebinarsDb, id: string): Promise<{ option
 }
 
 export type PollInsert = {
-  anonymous: boolean;
+  /** Sempre falso desde 10/11/2026 (D64): a enquete nova nunca esconde quem respondeu; a coluna fica para as antigas. */
+  anonymous: false;
   created_by: string | null;
   kind: string;
   open_offset_ms?: number | null;
@@ -427,7 +432,7 @@ export async function insertPollRow(db: WebinarsDb, poll: PollInsert, options: r
   return { options: ((created.data ?? []) as PollOptionRow[]).sort((a, b) => a.position - b.position), poll: row };
 }
 
-export type PollPatch = Partial<Pick<PollRow, "anonymous" | "closed_at" | "kind" | "open_offset_ms" | "opened_at" | "position" | "question" | "results_shared_at" | "status">>;
+export type PollPatch = { anonymous?: false } & Partial<Pick<PollRow, "closed_at" | "kind" | "open_offset_ms" | "opened_at" | "position" | "question" | "results_shared_at" | "status">>;
 
 export async function updatePollRow(db: WebinarsDb, id: string, patch: PollPatch, guard: { expectedStatuses?: readonly string[] } = {}): Promise<PollRow | null> {
   let query = db.from("webinar_polls").update(patch).eq("id", id);
@@ -485,6 +490,7 @@ export async function listStudentPollAnswerRows(db: WebinarsDb, input: { session
  * Perguntas
  * ---------------------------------------------------------------------------------------------- */
 
+/** `anonymous`: falso em toda pergunta do aluno (D64); verdadeiro so quando a equipe libera uma mensagem antiga gravada como "Aluno {n}" (legado). */
 export type QuestionInsert = { anonymous: boolean; body: string; display_name: string; message_id?: string | null; offset_ms: number; session_id: string; user_id: string };
 
 export async function insertQuestionRow(db: WebinarsDb, row: QuestionInsert): Promise<QuestionRow> {

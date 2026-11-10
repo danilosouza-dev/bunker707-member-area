@@ -331,22 +331,23 @@ test("cabecalho no tema claro (V2-3, opcao C): a logo padrao fica preta (brightn
   }
 });
 
-test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat, a pergunta e o apelido do aceite", () => {
+test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no foco de um campo menor): o chat e a pergunta; o aceite nao tem mais campo (sem apelido, D64)", () => {
   const questions = renderToStaticMarkup(
-    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+    createElement(questionsModule.RoomQuestionsTab, { consented: true, enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
-  const apelido = render(chat.RoomConsentBox, { defaultDisplayMode: "nickname", onAccept: noop, onCancel: noop });
+  // O aceite nao tem mais o campo do apelido (D64): nenhum campo de texto que o iPhone pudesse ampliar.
+  const aceite = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop });
+  assert.doesNotMatch(aceite, /<input|<textarea|Apelido|apelido/);
   // O campo do YouTube (Y11) no chat e nas Perguntas da sala: 16/22 abaixo de lg e 14/20 a partir de lg.
-  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, defaultDisplayMode: "first_name_initial", displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
+  const campoDoChat = render(chat.RoomChatPanel, { chatMode: "open", consented: true, displayName: "Ana S.", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", pinned: null, readOnly: false, slowUntilMs: null, timeKind: "live" });
   const perguntasDaSala = renderToStaticMarkup(
-    createElement(questionsModule.RoomQuestionsTab, { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
+    createElement(questionsModule.RoomQuestionsTab, { consented: true, enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" })
   );
   const classes = (tag) => (tag.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
   for (const [nome, tag] of [
     ["o chat", campoDoChat.match(/<textarea aria-label="Escreva uma mensagem"[^>]*>/)?.[0] ?? ""],
     ["a pergunta da sala", perguntasDaSala.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
-    ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""],
-    ["o apelido", apelido.match(/<input aria-label="Apelido"[^>]*>/)?.[0] ?? apelido.match(/<input[^>]*placeholder="[^"]*"[^>]*>/)?.[0] ?? ""]
+    ["a pergunta", questions.match(/<textarea aria-label="Sua pergunta"[^>]*>/)?.[0] ?? ""]
   ]) {
     const lista = classes(tag);
     assert.ok(lista.includes("text-base") && lista.includes("lg:text-sm"), `${nome}: ${lista.join(" ")}`);
@@ -419,7 +420,6 @@ test("o chat da sala e o comentario do YouTube (V2-9 trocado): o avatar de 24, o
   const base = {
     chatMode: "open",
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
     messages: [
@@ -531,7 +531,6 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   const base = {
     chatMode: "open",
     consented: true,
-    defaultDisplayMode: "first_name_initial",
     displayName: "Ana S.",
     error: null,
     messages: [msg("1", { displayName: "Bia C." }), msg("2", { displayName: "Equipe", role: "team" }), msg("5", { mine: true, pending: true })],
@@ -625,34 +624,41 @@ test("chat: a fixada no bloco do topo como comentario, a lista em role=log com o
   assert.match(empty, /aria-live="polite"/, "com uma mensagem por vez, cada uma e lida");
 });
 
-test("o aceite (§8.5): o texto palavra por palavra, como o nome aparece, Entendi e quero participar e Participar como anonimo", () => {
-  const html = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop });
+test("o aceite (§8.5 e D64): o texto palavra por palavra, Entendi e quero participar e Cancelar; sem radio, sem campo de apelido e sem anonimo", () => {
+  const html = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop });
   assert.ok(html.includes(WEBINAR_COPY.sala.consentimento));
   assert.match(html, /Entendi e quero participar/);
-  assert.match(html, /Participar como anônimo/);
-  assert.match(html, /Como você aparece no chat/);
-  assert.match(html, /Primeiro nome e inicial/);
-  assert.match(html, /Apelido/);
   assert.match(html, /role="group"/);
-  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca, tonal e de texto; os radios ficam.
+  // D64 (10/11/2026): ninguem participa como anonimo nem com apelido. Nao ha escolha de como aparecer.
+  assert.doesNotMatch(html, /an[oô]nim/i, "nenhum botao nem frase de anonimo");
+  assert.doesNotMatch(html, /Apelido|apelido|Como você aparece|Primeiro nome e inicial/);
+  assert.doesNotMatch(html, /<input|<fieldset|<legend|type="radio"|type="text"|<textarea/, "sem radio e sem campo de texto");
+  assert.equal((html.match(/<button/g) ?? []).length, 2, "dois botoes: aceitar e cancelar");
+  // Na sala (o cartao, Y11): o raio 12 no tom do controle e as pilulas M branca e de texto.
   const cartao = html.match(/^<div class="([^"]*)" data-testid="room-consent" role="group"/);
   assert.ok(cartao, "o cartao do aceite");
   assert.deepEqual(temTodasAs(cartao[1], ["rounded-[12px]", "bg-room-control", "p-4"]), []);
   const pilula = (nome) => html.match(new RegExp(`<button class="([^"]*)" type="button">${nome}</button>`))?.[1] ?? "";
   assert.deepEqual(temTodasAs(pilula("Entendi e quero participar"), ["h-10", "rounded-full", "bg-room-active-bg", "text-room-active-fg"]), []);
-  assert.deepEqual(temTodasAs(pilula("Participar como anônimo"), ["h-10", "rounded-full", "bg-room-control", "text-room-fg"]), []);
   assert.deepEqual(temTodasAs(pilula("Cancelar"), ["h-10", "rounded-full", "bg-transparent", "text-room-fg"]), []);
-  assert.equal((html.match(/type="radio"/g) ?? []).length, 2, "os dois radios de como o nome aparece");
   // Na gaveta do vertical (classic), a faixa e os botoes de antes.
-  const classico = render(chat.RoomConsentBox, { defaultDisplayMode: "first_name_initial", onAccept: noop, onCancel: noop, variant: "classic" });
+  const classico = render(chat.RoomConsentBox, { onAccept: noop, onCancel: noop, variant: "classic" });
   assert.match(classico, /^<div class="border-t border-room-border bg-room-pinned px-3 py-3" data-testid="room-consent" role="group"/);
   assert.doesNotMatch(classico, /rounded-full|rounded-\[12px\]/, "sem o cartao e sem as pilulas");
-  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 3, "os tres botoes de antes");
-  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto e os radios iguais nos dois");
+  assert.equal((classico.match(/rounded-\[var\(--member-button-radius\)\]/g) ?? []).length, 2, "os dois botoes de antes: aceitar e cancelar");
+  assert.equal((classico.match(/<button/g) ?? []).length, 2);
+  assert.doesNotMatch(classico, /an[oô]nim|Apelido|<input|type="radio"/i);
+  assert.equal(classico.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), html.replace(/<div class="[^"]*" data-testid="room-consent"/, "").replace(/<div class="mt-3 flex flex-wrap gap-2">[\s\S]*$/, ""), "o texto igual nos dois");
   assert.equal(
     WEBINAR_COPY.sala.consentimento,
-    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Para não mostrar o nome nem a foto, escolha Participar como anônimo. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
+    "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome com a inicial do sobrenome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade."
   );
+  // As frases que so serviam a escolha sairam do arquivo de frases; o texto da Privacidade nao fala mais de apelido.
+  for (const chave of ["participarComoAnonimo", "responderComo", "apelidoPlaceholder", "comoAparece"]) {
+    assert.ok(!(chave in WEBINAR_COPY.sala), `WEBINAR_COPY.sala.${chave} saiu`);
+  }
+  assert.doesNotMatch(WEBINAR_COPY.privacidade.texto, /apelido/i);
+  assert.match(WEBINAR_COPY.privacidade.texto, /com o seu primeiro nome e a inicial do sobrenome\.$/);
 });
 
 test("reacoes: seis botoes de 44 px com nome acessivel, as bolhas nunca anunciadas, o contador do excesso", () => {
@@ -718,7 +724,7 @@ test("o Sair do cabecalho em pilula S vermelha (32 px, o toque de 44 abaixo de l
 
 function payload(extra = {}, sessionExtra = {}) {
   return {
-    me: { calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null },
+    me: { calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null },
     pinned: null,
     polls: [],
     presentNow: 2,
@@ -789,7 +795,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
 
   const withPoll = render(room.WebinarRoom, {
     coverUrl: null,
-    payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }),
+    payload: payload({ polls: [{ id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: null, status: "open" }] }),
     readOnly: false,
     webinarHref: "/x"
   });
@@ -804,7 +810,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
   // So uma enquete encerrada com o resultado: sem a aba (o resultado aparece no palco, V2-10).
   const encerrada = render(room.WebinarRoom, {
     coverUrl: null,
-    payload: payload({ polls: [{ anonymous: false, id: "p1", kind: "single", myOptionIds: ["o1"], options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: { counts: { o1: 3 }, total: 3 }, status: "closed" }] }),
+    payload: payload({ polls: [{ id: "p1", kind: "single", myOptionIds: ["o1"], options: [{ id: "o1", label: "Sim" }], question: "Gostou?", results: { counts: { o1: 3 }, total: 3 }, status: "closed" }] }),
     readOnly: false,
     webinarHref: "/x"
   });
@@ -824,7 +830,7 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
 });
 
 /** Uma enquete do aluno (aberta, resposta unica, com duas opcoes). */
-const enquete = (extra = {}) => ({ anonymous: false, id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }, { id: "o2", label: "Ainda não" }], question: "Gostou?", results: null, status: "open", ...extra });
+const enquete = (extra = {}) => ({ id: "p1", kind: "single", myOptionIds: null, options: [{ id: "o1", label: "Sim" }, { id: "o2", label: "Ainda não" }], question: "Gostou?", results: null, status: "open", ...extra });
 const camada = (props) => render(pollLayer.RoomPollLayer, { onAnswer: async () => undefined, onLater: noop, onSeen: noop, readOnly: false, ...props });
 
 test("a enquete no meio do palco (V2-10): o rotulo pelo tipo, a pergunta em h2, opcoes de 48 px, Responder depois e Enviar resposta; um dialogo sem aria-modal que nao pega o foco e se anuncia", () => {

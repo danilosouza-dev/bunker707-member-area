@@ -66,8 +66,24 @@ export type ChatMode = (typeof CHAT_MODES)[number];
 export const SLOW_MODE_SECONDS = [10, 20, 30, 60] as const;
 export type SlowModeSeconds = (typeof SLOW_MODE_SECONDS)[number];
 
-export const DISPLAY_NAME_MODES = ["first_name_initial", "nickname", "anonymous"] as const;
+/**
+ * Como o aluno aparece nos webinarios (D64, decisao do produtor de 10/11/2026): sempre o primeiro nome com a inicial do
+ * sobrenome. Ninguem participa como anonimo nem com apelido, e a equipe sempre sabe quem escreveu.
+ */
+export const DISPLAY_NAME_MODES = ["first_name_initial"] as const;
 export type DisplayNameMode = (typeof DISPLAY_NAME_MODES)[number];
+
+/**
+ * Legado: so o que o check antigo de `webinar_chat_consents.display_mode` (202610290001) ainda aceita. O app nunca mais
+ * grava estes valores; uma linha de aceite com um deles (de antes de 10/11/2026) conta como "sem aceite"
+ * (`chatConsentIsCurrent`), e o aluno aceita de novo com o texto de agora.
+ */
+export const LEGACY_DISPLAY_NAME_MODES = ["nickname", "anonymous"] as const;
+export type LegacyDisplayNameMode = (typeof LEGACY_DISPLAY_NAME_MODES)[number];
+/** O que pode estar gravado em `display_mode`: o modo de agora ou um dos antigos. */
+export type StoredDisplayNameMode = DisplayNameMode | LegacyDisplayNameMode;
+/** Legado: os limites do check antigo de `webinar_chat_consents.nickname` (a coluna continua la; o app grava sempre nulo). */
+export const LEGACY_NICKNAME_LIMITS = { max: 40, min: 2 } as const;
 
 export const PRESENTER_ROLES = ["co_host", "team"] as const;
 export type PresenterRole = (typeof PRESENTER_ROLES)[number];
@@ -116,10 +132,12 @@ export const REMINDER_RULES = {
 
 export type Quality = { screenFps: ScreenFps; stage: StageQuality };
 
+/**
+ * As chaves antigas `anonymousQuestions` e `displayName` (de antes de 10/11/2026, D64) podem continuar dentro do JSON
+ * `room_settings` de um webinario antigo: a leitura ignora (rows.roomSettingsOfRow) e elas somem no proximo salvar.
+ */
 export type RoomSettings = {
-  anonymousQuestions: boolean;
   chatMode: ChatMode;
-  displayName: DisplayNameMode;
   newCommentsVisible: boolean;
   polls: boolean;
   practiceSession: boolean;
@@ -291,9 +309,7 @@ export function defaultQuality(): Quality {
 
 export function defaultRoomSettings(): RoomSettings {
   return {
-    anonymousQuestions: true,
     chatMode: "open",
-    displayName: "first_name_initial",
     newCommentsVisible: true,
     polls: true,
     practiceSession: true,
@@ -581,8 +597,33 @@ export type WebinarTranscriptFormat = (typeof TRANSCRIPT_FORMATS)[number];
  * A versao do texto de aceite do chat (D10); muda quando o texto mudar, e o aluno aceita de novo. A versao 2
  * (10/11/2026, docs/30 §8.5) passou a dizer que a foto de perfil aparece para os outros alunos junto do nome: quem
  * aceitou a versao 1 continua com as iniciais ate aceitar de novo na proxima mensagem (room-model.authorPhotoUrl).
+ * No mesmo dia (D64) o texto deixou de oferecer o anonimo e o apelido; a versao continua 2 porque ela ainda nao tinha
+ * ido para a dev nem para a producao, e um aceite gravado com modo antigo ja pede o aceite de novo (chatConsentIsCurrent).
  */
 export const CHAT_CONSENT_VERSION = 2;
+
+/**
+ * O aceite do chat esta em dia (docs/30 §8.5): sem retirada, na versao de agora e gravado com o modo de agora. Uma
+ * linha com `display_mode` "anonymous" ou "nickname" (legado: linhas de antes de 10/11/2026, D64) vale como "sem
+ * aceite": a sala mostra a caixa de novo, as escritas respondem 409 consent_required e a foto nao aparece para os
+ * outros alunos. A regra e uma so para a sala e para a foto (room-queries, author-photos); o "Aprovar para as proximas
+ * turmas" do console tem a regra propria, logo abaixo (`chatConsentAllowsReplay`).
+ */
+export function chatConsentIsCurrent(row: { consent_version: number; display_mode: string | null; revoked_at: string | null } | null | undefined): boolean {
+  return Boolean(row && !row.revoked_at && row.consent_version === CHAT_CONSENT_VERSION && row.display_mode === DISPLAY_NAME_MODES[0]);
+}
+
+/**
+ * O aceite que deixa a equipe levar a mensagem do aluno para as proximas turmas (o "Aprovar para as proximas turmas":
+ * o `promotable` do retrato do console e o `promote` do moderateMessage): sem retirada e gravado com o modo de agora.
+ * A versao do texto nao entra, como nunca entrou: a reexibicao ("nas reexibicoes dela") ja estava no texto da versao
+ * 1, e quem aceitou a versao 1 continua promovivel. Uma linha com `display_mode` "anonymous" ou "nickname" (legado:
+ * linhas de antes de 10/11/2026, D64) vale como "sem aceite" tambem aqui: a mensagem gravada como "Aluno {n}" ou com
+ * apelido nao vira linha mestre enquanto o aluno nao aceitar de novo.
+ */
+export function chatConsentAllowsReplay(row: { display_mode: string | null; revoked_at: string | null } | null | undefined): boolean {
+  return Boolean(row && !row.revoked_at && row.display_mode === DISPLAY_NAME_MODES[0]);
+}
 
 /** Limites do chat, do roteiro, das enquetes e das perguntas (os checks da 202610290001). */
 export const CHAT_LIMITS = {
@@ -590,8 +631,6 @@ export const CHAT_LIMITS = {
   question: 500,
   answer: 1000,
   displayName: 80,
-  nicknameMin: 2,
-  nicknameMax: 40,
   personaName: 60,
   phraseMin: 2,
   phraseMax: 300,
@@ -726,6 +765,7 @@ export type ScriptItemDraft = {
 export type PollOption = { id: string; label: string; position: number };
 
 export type Poll = {
+  /** Legado: enquetes de antes de 10/11/2026 (D64) marcadas como anonimas continuam sem nome no CSV; as novas sao sempre falso. */
   anonymous: boolean;
   closedAt: string | null;
   id: string;
@@ -742,7 +782,7 @@ export type Poll = {
   webinarId: string;
 };
 
-export type PollDraft = { anonymous: boolean; id?: string | null; kind: PollKind; options: { id?: string | null; label: string }[]; question: string };
+export type PollDraft = { id?: string | null; kind: PollKind; options: { id?: string | null; label: string }[]; question: string };
 
 export type PollAnswer = { createdAt: string; id: string; offsetMs: number; optionIds: string[]; pollId: string; sessionId: string; userId: string };
 
@@ -758,7 +798,7 @@ export const QUESTION_REPLY_LIMITS = { perQuestion: 50, studentBody: 500, teamBo
 
 /** Uma resposta no fio de uma pergunta (webinar_question_replies), depois da primeira resposta da equipe. */
 export type QuestionReply = {
-  /** A resposta do aluno numa pergunta Anonima: sem nome e sem foto, como a pergunta. */
+  /** Legado: linhas de antes de 10/11/2026 (D64). A resposta do aluno numa pergunta Anonima antiga: sem nome e sem foto, como a pergunta. */
   anonymous: boolean;
   /** A foto do perfil de quem escreveu, so nas leituras do console (author-photos.ts); nunca na Anonima. */
   avatarUrl?: string | null;
@@ -773,6 +813,7 @@ export type QuestionReply = {
 };
 
 export type WebinarQuestion = {
+  /** Legado: linhas de antes de 10/11/2026 (D64). Uma pergunta nova e sempre gravada com falso. */
   anonymous: boolean;
   /** A foto do perfil de quem perguntou, so nas leituras do console (author-photos.ts); nunca na Anonima. */
   avatarUrl?: string | null;
@@ -797,8 +838,8 @@ export type WebinarQuestion = {
 export type ChatConsent = {
   consentVersion: number;
   consentedAt: string;
-  displayMode: DisplayNameMode;
-  nickname: string | null;
+  /** O modo gravado: so `first_name_initial` vale; um modo antigo conta como sem aceite (chatConsentIsCurrent). */
+  displayMode: StoredDisplayNameMode;
   revokedAt: string | null;
   userId: string;
 };

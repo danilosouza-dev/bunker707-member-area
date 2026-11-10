@@ -13,7 +13,7 @@
 import "server-only";
 
 import { loadAuthorPhotos, loadOwnPhoto } from "./author-photos";
-import { CONSENT_COLUMNS, chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow, type ConsentRow } from "./chat-rows";
+import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, scriptItemFromRow, CHAT_MESSAGE_COLUMNS, type ChatMessageRow } from "./chat-rows";
 import { listPollAnswerRows, listPollRows, listPresentUserIds, listQuestionReplyRows, listQuestionRows, listScriptItemRows, listSessionChatRows } from "./chat-store";
 import { askableMessageIds, consolePresenceClockMs, consoleSessionOf, countPollAnswers, pickConsoleSession, type ConsoleMessage, type ConsolePollView, type ConsoleSnapshot } from "./console-model";
 import { consolePresenceApplies, consolePresenceOf, type ConsolePresence } from "./console-presence-model";
@@ -31,12 +31,12 @@ import {
 } from "./live-console-model";
 import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
-import type { QuestionReply, WebinarKind, WebinarSession } from "./model";
+import { chatConsentAllowsReplay, type QuestionReply, type WebinarKind, type WebinarSession } from "./model";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
 import { authorPhotoUrl, bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
-import { bunnyViewToken, consentIsCurrent, questionPhotoUrl, replyPhotoUrl } from "./room-queries";
+import { bunnyViewToken, questionPhotoUrl, replyPhotoUrl } from "./room-queries";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
@@ -139,7 +139,11 @@ async function loadAskedMessageIds(db: WebinarsDb, sessionId: string, messageIds
   return Array.from(new Set(rows.map((row) => row.message_id).filter((id): id is string => Boolean(id))));
 }
 
-/** Quem ainda tem o aceite do chat valendo (uma linha sem revoked_at), para o "Aprovar para as proximas turmas". */
+/**
+ * Quem ainda tem o aceite do chat valendo para o "Aprovar para as proximas turmas" (model.chatConsentAllowsReplay): uma
+ * linha sem revoked_at e com o modo de agora. O aceite antigo de apelido ou anonimo (legado: linhas de antes de
+ * 10/11/2026, D64) conta como "sem aceite", como na sala; a versao do texto nao entra.
+ */
 async function loadConsentFlags(db: WebinarsDb, userIds: readonly string[]): Promise<Set<string>> {
   const consented = new Set<string>();
   const wanted = Array.from(new Set(userIds));
@@ -147,12 +151,12 @@ async function loadConsentFlags(db: WebinarsDb, userIds: readonly string[]): Pro
   for (let index = 0; index < wanted.length; index += CONSENT_CHUNK) {
     const { data, error } = await db
       .from("webinar_chat_consents")
-      .select("user_id, revoked_at")
+      .select("user_id, display_mode, revoked_at")
       .in("user_id", wanted.slice(index, index + CONSENT_CHUNK));
     assertNoDbError(error, "Webinarios: aceites do chat");
 
-    for (const row of (data ?? []) as { revoked_at: string | null; user_id: string }[]) {
-      if (!row.revoked_at) {
+    for (const row of (data ?? []) as { display_mode: string | null; revoked_at: string | null; user_id: string }[]) {
+      if (chatConsentAllowsReplay(row)) {
         consented.add(row.user_id);
       }
     }
@@ -216,18 +220,13 @@ async function listRoomJoinRows(db: WebinarsDb, sessionId: string): Promise<Room
   return (data ?? []) as RoomJoinedRow[];
 }
 
-/** Os nomes (so o nome; nada de e-mail), os aceites do chat e quem e da equipe, para a lista da mesa. */
+/** Os nomes (so o nome; nada de e-mail) e quem e da equipe, para a lista da mesa. O aceite do chat nao muda mais o nome (D64). */
 async function loadPeopleFacts(db: WebinarsDb, userIds: readonly string[]) {
-  const [profiles, consents, staff] = await Promise.all([
+  const [profiles, staff] = await Promise.all([
     inChunks(userIds, async (chunk) => {
       const { data, error } = await db.from("profiles").select("id, full_name").in("id", chunk);
       assertNoDbError(error, "Webinarios: nomes da sala ao vivo");
       return (data ?? []) as { full_name: string | null; id: string }[];
-    }),
-    inChunks(userIds, async (chunk) => {
-      const { data, error } = await db.from("webinar_chat_consents").select(CONSENT_COLUMNS).in("user_id", chunk);
-      assertNoDbError(error, "Webinarios: aceites da sala ao vivo");
-      return (data ?? []) as ConsentRow[];
     }),
     inChunks(userIds, async (chunk) => {
       const { data, error } = await db.from("admin_roles").select("user_id").in("user_id", chunk);
@@ -237,7 +236,6 @@ async function loadPeopleFacts(db: WebinarsDb, userIds: readonly string[]) {
   ]);
 
   return {
-    consents: new Map(consents.map((row) => [row.user_id, row])),
     names: new Map(profiles.map((row) => [row.id, row.full_name ?? null])),
     staff: new Set(staff.map((row) => row.user_id))
   };
@@ -262,25 +260,15 @@ async function loadLivePeople(db: WebinarsDb, input: { authors: readonly string[
   }
 
   const presenterIds = new Set(presenters.map((row) => row.user_id));
-  const roomDisplayName = roomSettingsOfRow(webinar.room_settings).displayName;
 
   return sortLivePeople(
     ids.map((userId) => {
       const staff = facts.staff.has(userId) || presenterIds.has(userId) || webinar.host_user_id === userId;
-      const consent = facts.consents.get(userId) ?? null;
       const fullName = facts.names.get(userId) ?? null;
       const join = joins.get(userId) ?? null;
       return {
         ban: liveBanState({ nowMs: input.nowMs, sessionBans: bansByUser.get(userId) ?? [], userBan: banned.get(userId) ?? null }),
-        displayName: staff
-          ? staffDisplayName(fullName)
-          : liveParticipantName({
-              consent: consentIsCurrent(consent) && consent ? { displayMode: consent.display_mode, nickname: consent.nickname } : null,
-              fullName,
-              roomDisplayName,
-              userId,
-              webinarId: webinar.id
-            }),
+        displayName: staff ? staffDisplayName(fullName) : liveParticipantName({ fullName }),
         joinedAt: join?.joinedAt ?? null,
         participantId: join?.participantId ?? null,
         staff,
@@ -457,7 +445,8 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     loadConsolePresence(session, consolePresenceClockMs(session, durationMs, nowMs), nowMs),
     askable.length > 0 ? loadAskedMessageIds(db, session.id, askable) : Promise.resolve([])
   ]);
-  // A foto de quem escreveu e de quem perguntou, pela regra da equipe (authorPhotoUrl: nunca no anonimo); a leitura
+  // A foto de quem escreveu e de quem perguntou, pela regra da equipe (authorPhotoUrl: nunca no anonimo, que desde
+  // 10/11/2026 so existe nas linhas antigas); a leitura
   // fica 60 s na memoria do processo, entao o retrato de 5 s nao vira uma consulta a `profiles` por vez.
   const questions = questionRows.map(questionFromRow);
   const replies = replyRows.map(questionReplyFromRow);

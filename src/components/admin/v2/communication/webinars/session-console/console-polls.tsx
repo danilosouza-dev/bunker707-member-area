@@ -89,7 +89,6 @@ export function ConsolePolls({ busyKey, canAct, launched, onClose, onLaunch, tem
                   <span className="truncate text-sm leading-5 text-[var(--text-primary)]">{poll.question}</span>
                   <span className="text-xs leading-5 text-[var(--text-tertiary)]">
                     {pollsCopy.kinds[poll.kind]} · {poll.options.length} {pollsCopy.options.toLocaleLowerCase("pt-BR")}
-                    {poll.anonymous ? ` · ${pollsCopy.anonymous.toLocaleLowerCase("pt-BR")}` : ""}
                   </span>
                 </span>
                 {openTemplates.has(poll.id) ? (

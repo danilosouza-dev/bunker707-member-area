@@ -62,14 +62,13 @@ const textoDe = (html) => html.replace(/<style>[\s\S]*?<\/style>/g, "").replace(
 function payload({ live = {}, me = {}, session = {}, webinar = {}, ...extra } = {}) {
   return {
     live: { locked: false, meetConfigured: true, recording: false, startedAt: at(T0 - (42 * 60 + 10) * 1000), status: "live", ...live },
-    me: { ban: SEM_BAN, calendarUrl: null, consented: true, displayMode: "first_name_initial", displayName: "Ana S.", nickname: null, registered: false, registeredAt: null, ...me },
+    me: { ban: SEM_BAN, calendarUrl: null, consented: true, displayName: "Ana S.", registered: false, registeredAt: null, ...me },
     pinned: null,
     polls: [],
     presentNow: 7,
     registeredCount: null,
     serverTime: at(T0),
     session: {
-      anonymousQuestions: true,
       chatMode: "open",
       chatSlowModeSeconds: null,
       durationMs: 60 * MIN,

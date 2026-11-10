@@ -17,7 +17,7 @@ const render = (component, props) => renderToStaticMarkup(createElement(componen
 /** As classes de uma abertura de tag, com o & do HTML de volta. */
 const classesDe = (tag) => (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? "").replace(/&amp;/g, "&").split(/\s+/).filter(Boolean);
 
-const PERGUNTAS = { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" };
+const PERGUNTAS = { consented: true, enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" };
 
 test("Y8: as Perguntas da sala (look comment) com o filtro Respondidas: a linha de chips so a partir de lg, um chip ligado, as duas linhas de antes so abaixo de lg e o vazio que diz o filtro", () => {
   const novas = WEBINAR_COPY.salaV2.perguntas;
@@ -132,6 +132,7 @@ const LISTA = [
   pergunta("q1", { answeredLive: true, status: "answered", upvotes: 18, voted: true }),
   pergunta("q2", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), mine: true, status: "answered" }),
   pergunta("q3", { answerSource: "ai", answerText: "Sim, ha certificado.", answeredAt: new Date(AGORA - 60_000).toISOString(), displayName: "Caio F.", status: "answered", upvotes: 2 }),
+  // Legado: uma pergunta gravada como anonima antes de 10/11/2026 (D64) continua aparecendo como "Anônima".
   pergunta("q4", { anonymous: true, displayName: "Aluno 123" }),
   pergunta("q5", { mine: true, status: "dismissed" })
 ];
@@ -172,7 +173,7 @@ test("Y10: a pergunta votada: o polegar Curtir com aria-pressed e o icone cheio,
   assert.doesNotMatch(html, /Não gostei|thumbs-down|ellipsis-vertical|Mais opções/);
 });
 
-test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hora) vem antes do botao 'Ocultar respostas' e a linha desce ate ele; fechado na de outro, '1 resposta' com a resposta no HTML e hidden; a Anonima com a mascara", () => {
+test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hora) vem antes do botao 'Ocultar respostas' e a linha desce ate ele; fechado na de outro, '1 resposta' com a resposta no HTML e hidden; a Anonima antiga (legado) com a mascara", () => {
   const html = listaDePerguntas();
   const q2 = itemDe(html, "q2");
   assert.match(q2, /^<li class="group\/comment relative mb-4" data-mine="" data-room-question="q2">/, "o comentario com o fio pega o ponteiro para a linha");
@@ -209,7 +210,7 @@ test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hor
   // Fechada, so a linha do comentario e a curva ate o botao (sem a continuacao).
   assert.equal((q3.match(/w-px bg-room-thread-line/g) ?? []).length, 1);
 
-  // A Anonima: o nome e o avatar da mascara (nunca o nome guardado); a minha: "Você".
+  // A Anonima (legado: linhas de antes de 10/11/2026): o nome e o avatar da mascara (nunca o nome guardado); a minha: "Você".
   const q4 = itemDe(html, "q4");
   assert.match(q4, /lucide-venetian-mask/);
   assert.match(q4, /<span class="sr-only">Anônima, há 2 minutos: <\/span>/);
@@ -300,7 +301,8 @@ test("o campo de responder do fio: abre no fim do fio da minha pergunta, com o m
   assert.doesNotMatch(aoVivo, /resposta-q6/, "sem o botao do fio");
   assert.match(aoVivo, /<div class="ml-9 mt-3"><form class="flex items-start" data-room-reply-field="">/);
 
-  // Na pergunta Anonima, o avatar do campo e das respostas e a mascara, e o nome e Anônima.
+  // Legado: linhas de antes de 10/11/2026 (D64). Na pergunta Anonima antiga, o avatar do campo e das respostas e a
+  // mascara, e o nome e Anônima (a promessa da epoca continua).
   const anonima = itemDe(comFio({ anonymous: true, avatarUrl: null, replies: [{ ...FIO[0], anonymous: true, avatarUrl: null }] }, responder({ openId: "q6" })), "q6");
   assert.doesNotMatch(anonima, /<img/, "sem foto em nenhum lugar do fio da anonima (so a resposta da equipe teria)");
   assert.match(anonima, /<span class="sr-only">Anônima, há 2 minutos: <\/span>E fica no app\?/);
@@ -317,7 +319,7 @@ test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de ante
 });
 
 // Y11: o campo "Adicione um comentário" do YouTube (RoomCommentField, spec §9) desenhado direto: fechado, aberto com e
-// sem texto, a Anonima das Perguntas e a frase que toma o lugar do campo.
+// sem texto, as Perguntas sem a pilula Anonima (D64) e a frase que toma o lugar do campo.
 const fieldModule = await import("../src/components/member/webinars/room/room-comment-field.tsx");
 const SAFE_AREA = "max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]";
 const CAMPO = {
@@ -379,7 +381,7 @@ test("Y11: o campo aberto com texto: a dica, o Cancelar de texto e o Enviar azul
   }
   // Sem o foco no servidor: aberto com rascunho, a linha de 1 px mais forte.
   assert.match(html, /<div class="relative border-b border-room-field-line-draft"><textarea/);
-  assert.doesNotMatch(html, /VenetianMask|lucide-venetian-mask|>Anônima</, "a Anonima so nas Perguntas");
+  assert.doesNotMatch(html, /VenetianMask|lucide-venetian-mask|>Anônima</, "o campo nao tem Anonima");
 
   // Aberto e vazio: o envio desligado, no tom do desligado.
   const vazio = botaoPeloTexto(campo({ expanded: true }), "Enviar");
@@ -389,21 +391,26 @@ test("Y11: o campo aberto com texto: a dica, o Cancelar de texto e o Enviar azul
   assert.match(botaoPeloTexto(campo({ busy: true, expanded: true, value: "oi" }), "Enviar"), /aria-busy="true"[^>]*disabled=""|disabled=""[^>]*aria-busy="true"/);
 });
 
-test("Y11: nas Perguntas com a Anonima ligada: a pilula S tonal com aria-pressed e a mascara cheia, o avatar da mascara e o envio Perguntar", () => {
-  const html = campo({ allowAnonymous: true, anonymous: true, ariaLabel: "Sua pergunta", expanded: true, maxLength: 500, mode: "mod-enter", placeholder: "Fazer uma pergunta", submitLabel: WEBINAR_COPY.salaV2.perguntas.perguntar, value: "tem replay?" });
-  const anonima = html.match(/<button aria-pressed="true" class="([^"]*)" type="button"><svg([^>]*)>[\s\S]*?<\/svg>Anônima<\/button>/);
-  assert.ok(anonima, "a pilula Anonima ligada");
-  for (const classe of ["h-8", "rounded-full", "bg-room-control", "text-xs"]) {
-    assert.ok(classesDe(`<b class="${anonima[1]}">`).includes(classe), `a Anonima tem ${classe}`);
-  }
-  assert.match(anonima[2], /fill="currentColor"/, "a mascara cheia");
-  assert.match(anonima[2], /lucide-venetian-mask/);
-  assert.match(html, /<div class="mr-4 flex items-start"><span aria-hidden="true" class="[^"]*"><svg[^>]*lucide-venetian-mask/, "o avatar do campo vira a mascara");
+test("Y11 e D64: nas Perguntas o campo nao tem mais a pilula Anonima: o rodape so com o Cancelar e o envio Perguntar, o avatar com as iniciais; as props antigas nao ligam nada", () => {
+  const html = campo({ ariaLabel: "Sua pergunta", expanded: true, maxLength: 500, mode: "mod-enter", placeholder: "Fazer uma pergunta", submitLabel: WEBINAR_COPY.salaV2.perguntas.perguntar, value: "tem replay?" });
+  assert.doesNotMatch(html, /an[oô]nim/i, "nenhum controle de Anonima");
+  assert.doesNotMatch(html, /aria-pressed|lucide-venetian-mask|type="checkbox"/, "sem pilula de ligar e desligar e sem a mascara");
+  assert.match(html, /<div class="mt-2 flex flex-wrap items-center gap-2"><div class="ml-auto flex items-center gap-2">/, "o rodape so com o Cancelar e o envio");
+  assert.equal((html.match(/<button/g) ?? []).length, 2, "dois botoes no rodape");
   assert.match(botaoPeloTexto(html, "Perguntar"), /type="submit"/);
-  // Desligada: a mascara vazia e o avatar com as iniciais.
-  const desligada = campo({ allowAnonymous: true, anonymous: false, expanded: true, mode: "mod-enter" });
-  assert.match(desligada, /<button aria-pressed="false" class="[^"]*" type="button"><svg[^>]*fill="none"[^>]*lucide-venetian-mask/);
-  assert.match(desligada, /<span[^>]*>AS<\/span>/);
+  assert.match(html, /<span[^>]*>AS<\/span>/, "o avatar do campo com as iniciais");
+  // Quem ainda passar as props de antes (allowAnonymous, anonymous) nao desenha nada: elas nao existem mais.
+  const antigas = campo({ allowAnonymous: true, anonymous: true, ariaLabel: "Sua pergunta", expanded: true, mode: "mod-enter", value: "tem replay?" });
+  assert.doesNotMatch(antigas, /an[oô]nim|aria-pressed|lucide-venetian-mask/i);
+  assert.match(antigas, /<span[^>]*>AS<\/span>/, "o avatar continua o da pessoa");
+
+  // A aba Perguntas inteira (o desenho da sala e a gaveta do vertical): nenhum controle de Anonima, mesmo com a prop antiga.
+  for (const look of ["comment", "classic"]) {
+    const aba = renderToStaticMarkup(createElement(questionsModule.RoomQuestionsTab, { ...PERGUNTAS, allowAnonymous: true, look }));
+    assert.match(aba, /<textarea aria-label="Sua pergunta"/, `${look}: o campo da pergunta`);
+    assert.doesNotMatch(aba, /an[oô]nim/i, `${look}: sem a opcao Anonima`);
+    assert.doesNotMatch(aba, /type="checkbox"|lucide-venetian-mask/, `${look}: sem a caixa de marcar e sem a mascara`);
+  }
 });
 
 test("Y11: a frase no lugar do campo: role=status, 14/20 no tom de aviso, com a mesma faixa e a mesma folga do iPhone", () => {

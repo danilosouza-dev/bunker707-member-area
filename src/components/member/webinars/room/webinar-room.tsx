@@ -767,8 +767,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         assistant={assistant}
         chatMode={session.session.chatMode}
         consented={session.me.consented}
-        defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
-        avatarUrl={session.me.displayMode === "anonymous" ? null : (session.me.avatarUrl ?? null)}
+        avatarUrl={session.me.avatarUrl ?? null}
         displayName={session.me.displayName}
         error={chat.error}
         look={vertical ? "classic" : "comment"}
@@ -798,10 +797,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       chatTab
     ) : shownTab === "perguntas" ? (
       <RoomQuestionsTab
-        allowAnonymous={session.session.anonymousQuestions}
         assistant={assistant}
         consented={session.me.consented}
-        defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
         enabled={!readOnly}
         getOffsetMs={getOffsetMs}
         onConsented={() => void clock.refresh()}
@@ -812,7 +809,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         {...(vertical
           ? {}
           : {
-              avatarUrl: session.me.displayMode === "anonymous" ? null : (session.me.avatarUrl ?? null),
+              avatarUrl: session.me.avatarUrl ?? null,
               displayName: session.me.displayName,
               ended: phase === "ended",
               filter: questionsFilter,
@@ -920,7 +917,6 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                     chatMode={session.session.chatMode}
                     chatOpen={chatOpen}
                     consented={session.me.consented}
-                    defaultDisplayMode={session.me.displayMode ?? "first_name_initial"}
                     drawerId={drawerId}
                     drawerOpen={drawerVisible}
                     nowMs={nowMs}

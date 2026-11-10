@@ -28,7 +28,7 @@ import {
   type WebinarNotifyShortcuts,
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
-import { toTime, type AccessMode, type ChatMode, type DisplayNameMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
+import { toTime, type AccessMode, type ChatMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
 import type { WebinarEditorOptions } from "@/server/webinars/queries";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
@@ -621,12 +621,10 @@ const SLOW_MODE_OPTIONS: readonly { label: string; value: SlowModeValue }[] = [
   { label: copy.slowModes[60], value: "60" }
 ];
 
-const DISPLAY_NAME_OPTIONS: readonly { label: string; value: DisplayNameMode }[] = [
-  { label: copy.displayNames.first_name_initial, value: "first_name_initial" },
-  { label: copy.displayNames.nickname, value: "nickname" },
-  { label: copy.displayNames.anonymous, value: "anonymous" }
-];
-
+/**
+ * O card "Sala". Desde 10/11/2026 (D64) nao tem mais "Perguntas anônimas permitidas" nem "Como o aluno aparece": nos
+ * webinarios todo aluno aparece com o primeiro nome e a inicial do sobrenome, e a equipe sempre sabe quem escreveu.
+ */
 export function RoomCard({ disabled, draft, onChange }: CardProps) {
   const room = draft.roomSettings;
   const setRoom = (patch: Partial<WebinarDraft["roomSettings"]>) => onChange({ roomSettings: { ...room, ...patch } });
@@ -678,26 +676,8 @@ export function RoomCard({ disabled, draft, onChange }: CardProps) {
       </div>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <AdminSwitch checked={room.questions} disabled={disabled} id="webinar-room-questions" label={copy.questions} onCheckedChange={(questions) => setRoom({ questions })} />
-        <AdminSwitch
-          checked={room.anonymousQuestions}
-          disabled={disabled || !room.questions}
-          id="webinar-room-anonymousQuestions"
-          label={copy.anonymousQuestions}
-          onCheckedChange={(anonymousQuestions) => setRoom({ anonymousQuestions })}
-        />
         <AdminSwitch checked={room.polls} description={copy.pollsHint} disabled={disabled} id="webinar-room-polls" label={copy.polls} onCheckedChange={(polls) => setRoom({ polls })} />
         <AdminSwitch checked={room.reactions} disabled={disabled} id="webinar-room-reactions" label={copy.reactions} onCheckedChange={(reactions) => setRoom({ reactions })} />
-      </div>
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.displayName}</span>
-        <PillGroup
-          ariaLabel={copy.displayName}
-          disabled={disabled}
-          name="webinar-room-displayName"
-          onChange={(displayName: DisplayNameMode) => setRoom({ displayName })}
-          options={DISPLAY_NAME_OPTIONS}
-          value={room.displayName}
-        />
       </div>
       {draft.kind === "simulated" ? (
         <>

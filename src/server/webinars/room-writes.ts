@@ -1,5 +1,7 @@
 // Escritas do aluno na Sala (docs/30 §1.4, §1.6, §4.7, §5.1, §8.3 e §8.5): a mensagem do chat (com o aceite na
-// primeira, o nome exibido, a rajada, o modo lento, as palavras bloqueadas e a moderacao), "Remover minhas mensagens",
+// primeira, o nome exibido, que e sempre o primeiro nome com a inicial do sobrenome (D64: ninguem participa como
+// anonimo nem com apelido; o pedido antigo que ainda pede isso e recusado com 400 antes de qualquer escrita), a
+// rajada, o modo lento, as palavras bloqueadas e a moderacao), "Remover minhas mensagens",
 // o sinal de presenca, a reacao, a pergunta e o voto, a resposta da enquete. Toda escrita passa pelo servidor com a
 // service role; o offset gravado e o do relogio do servidor na gravada e na live (nunca o do navegador) e a posicao do
 // player no replay. Cada funcao devolve o que a rota responde e os registros do historico (so ids e numeros, nunca o
@@ -33,9 +35,9 @@ import {
   upsertConsentRow
 } from "./chat-store";
 import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
-import { CHAT_MESSAGES, type ChatPostInput, type HeartbeatInput, type QuestionPostInput, type QuestionReplyPostInput } from "./chat-schemas";
+import { CHAT_MESSAGES, refusesLegacyIdentity, type ChatPostInput, type HeartbeatInput, type QuestionPostInput, type QuestionReplyPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
-import { CHAT_CONSENT_VERSION, ROOM_RULES, questionBodyOf, toTime, type DisplayNameMode, type Reaction, type StudentChatMessage, type Webinar } from "./model";
+import { CHAT_CONSENT_VERSION, DISPLAY_NAME_MODES, ROOM_RULES, questionBodyOf, toTime, type Reaction, type StudentChatMessage } from "./model";
 import { liveBanState, liveWriteRefusal, presenceOffsetMs, type LiveBanState } from "./live-model";
 import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { forgetAuthorPhoto } from "./author-photos";
@@ -63,7 +65,7 @@ import {
   type StudentQuestion,
   type StudentQuestionReply
 } from "./room-rules";
-import { consentIsCurrent, loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
+import { loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 
 /**
@@ -161,38 +163,47 @@ async function refuseBanned(input: { context: Pick<RoomContext, "session">; db: 
  * O aceite (D10): a primeira mensagem ou a primeira pergunta traz o aceite; sem ele, nada com o nome do aluno
  * ---------------------------------------------------------------------------------------------- */
 
+/** O aceite e os campos antigos (`anonymous`, `displayMode`, `nickname`), que so entram para a recusa do pedido antigo. */
 type ConsentFields = Pick<ChatPostInput, "anonymous" | "consent" | "consentVersion" | "displayMode" | "nickname">;
-type ConsentChoice = { mode: DisplayNameMode; nickname: string | null; save: boolean };
+type ConsentChoice = { save: boolean };
 
 /**
- * Como o aluno aparece: com o aceite valido, a escolha gravada; sem ele, o corpo precisa trazer o aceite (consent +
- * versao: 409 consent_required) e a escolha de agora, que `saveConsent` grava. Puro (sem banco): a rota confere
- * antes de reservar os limites.
+ * O pedido de uma pagina aberta com o codigo de antes de 10/11/2026 que ainda pede anonimo ou apelido (D64): 400 com
+ * a frase "atualize a pagina", antes de tudo. Nada e gravado (nem mensagem, nem pergunta, nem resposta, nem aceite),
+ * nenhum limite da sala e gasto e nenhum registro vai para o historico. O schema da rota ja recusa; aqui e a mesma
+ * regra para quem chama a escrita direto. Nunca publicar com o nome de verdade o que foi pedido como anonimo.
  */
-function consentChoice(identity: StudentIdentity, body: ConsentFields, webinar: Pick<Webinar, "roomSettings">): ConsentChoice {
-  if (consentIsCurrent(identity.consent)) {
-    return { mode: identity.displayMode ?? webinar.roomSettings.displayName, nickname: identity.nickname, save: false };
+function refuseLegacyIdentity(body: Pick<ConsentFields, "anonymous" | "displayMode" | "nickname">) {
+  if (refusesLegacyIdentity(body)) {
+    throw new WebinarError(CHAT_MESSAGES.identity, 400);
+  }
+}
+
+/**
+ * O aceite: com ele em dia (versao e modo de agora), nada a gravar; sem ele (ou com um aceite antigo de apelido ou
+ * anonimo, que conta como "sem aceite"), o corpo precisa trazer o aceite (consent + versao: 409 consent_required), que
+ * `saveConsent` grava. Puro (sem banco): a rota confere antes de reservar os limites.
+ */
+function consentChoice(identity: StudentIdentity, body: ConsentFields): ConsentChoice {
+  if (identity.consented) {
+    return { save: false };
   }
   if (body.consent !== true || body.consentVersion !== CHAT_CONSENT_VERSION) {
     throw new RoomRefusedError("consent_required");
   }
-  const mode: DisplayNameMode = body.anonymous ? "anonymous" : (body.displayMode ?? webinar.roomSettings.displayName);
-  const nickname = mode === "nickname" ? (body.nickname ?? null) : null;
-  if (mode === "nickname" && !nickname) {
-    throw new WebinarError(CHAT_MESSAGES.nickname, 400);
-  }
-  return { mode, nickname, save: true };
+  return { save: true };
 }
 
+/** Grava o aceite sempre com o modo de agora e sem apelido (um aceite antigo de apelido ou anonimo e trocado aqui). */
 async function saveConsent(input: { choice: ConsentChoice; db: WebinarsDb; events: StudentEventInsert[]; now: number; sessionId: string; userId: string }) {
   const { choice, userId } = input;
   if (!choice.save) {
     return;
   }
-  await upsertConsentRow(input.db, { consent_version: CHAT_CONSENT_VERSION, display_mode: choice.mode, nickname: choice.nickname, user_id: userId }, new Date(input.now).toISOString());
+  await upsertConsentRow(input.db, { consent_version: CHAT_CONSENT_VERSION, display_mode: DISPLAY_NAME_MODES[0], nickname: null, user_id: userId }, new Date(input.now).toISOString());
   // O aceite acabou de mudar: a foto de quem escreve nao espera a memoria de 60 s (author-photos.ts).
   forgetAuthorPhoto(userId);
-  input.events.push(webinarEvent(userId, input.sessionId, "webinar_chat_consented", consentMetadata({ consentVersion: CHAT_CONSENT_VERSION, display: choice.mode })));
+  input.events.push(webinarEvent(userId, input.sessionId, "webinar_chat_consented", consentMetadata({ consentVersion: CHAT_CONSENT_VERSION })));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -215,8 +226,9 @@ export async function blockedTermIn(db: WebinarsDb, body: string): Promise<strin
 }
 
 /**
- * A mensagem do aluno (docs/30 §5.1): fora da hora ou do modo 409; na primeira vez exige o aceite (consent +
- * versao) e grava webinar_chat_consented; o nome exibido sai da escolha do aluno; modo lento e rajada 5/60 s 429,
+ * A mensagem do aluno (docs/30 §5.1): o pedido antigo que pede anonimo ou apelido 400 (D64); fora da hora ou do modo
+ * 409; na primeira vez exige o aceite (consent + versao) e grava webinar_chat_consented; o nome exibido e sempre o
+ * primeiro nome com a inicial do sobrenome; modo lento e rajada 5/60 s 429,
  * conferidos e reservados juntos antes de qualquer await (o modo lento volta se a mensagem nao for gravada);
  * palavra bloqueada 422; chat moderado grava approved = false e devolve pending; `kind: "question"` tambem abre a
  * pergunta na aba Perguntas, ligada por message_id (no chat moderado, so quando a equipe libera: moderateMessage).
@@ -227,13 +239,13 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   const { session, webinar } = context;
   const events: StudentEventInsert[] = [];
 
+  refuseLegacyIdentity(body);
   refuse(context, now, "chat");
   await refuseBanned({ context, db, kind: "chat", now, userId });
 
   const identity = await loadStudentIdentity(db, userId);
-  const choice = consentChoice(identity, body, webinar);
+  const choice = consentChoice(identity, body);
   await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
-  const mode: DisplayNameMode = body.anonymous ? "anonymous" : choice.mode;
 
   const slot = reserveChatSlot(userId, session.id, session.chatSlowModeSeconds, now);
   if (!slot.ok) {
@@ -246,7 +258,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   }
 
   const text = sanitizeLessonCommentBody(body.body);
-  const displayName = studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, mode, userId, webinar.id);
+  const displayName = studentDisplayName(identity);
   const offsetMs = writeOffsetMs(session, now, body.offsetMs);
   const approved = session.chatMode !== "moderated";
   let row: ChatMessageRow;
@@ -284,7 +296,7 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
   let questionId: string | null = null;
   if (body.kind === "question" && approved) {
     const question = await insertQuestionRow(db, {
-      anonymous: mode === "anonymous",
+      anonymous: false,
       body: questionBodyOf(text),
       display_name: displayName,
       message_id: row.id,
@@ -292,11 +304,11 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
       session_id: session.id,
       user_id: userId
     });
-    events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous: mode === "anonymous", offsetMs, questionId: question.id })));
+    events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ offsetMs, questionId: question.id })));
     questionId = question.id;
   }
 
-  // A minha mensagem ja sai com a minha foto (o aceite esta em dia: acabou de ser conferido ou gravado), fora do anonimo.
+  // A minha mensagem ja sai com a minha foto (o aceite esta em dia: acabou de ser conferido ou gravado).
   const message = chatMessageFromRow(row);
   const avatarUrl = authorPhotoUrl({
     authorUserId: userId,
@@ -446,25 +458,23 @@ export type AskQuestionInput = {
 };
 
 /**
- * A pergunta da aba Perguntas (2 por minuto por aluno e sessao). O nome aparece como no chat e so com o aceite
- * (D10): sem ele, a pergunta precisa trazer o aceite (409 consent_required) e grava como a primeira mensagem.
- * Anonima ("Aluno {n}") so quando a equipe deixou ligada no card Sala; pedida com ela desligada, 400.
+ * A pergunta da aba Perguntas (2 por minuto por aluno e sessao). O nome aparece como no chat (o primeiro nome com a
+ * inicial do sobrenome) e so com o aceite (D10): sem ele, a pergunta precisa trazer o aceite (409 consent_required) e
+ * grava como a primeira mensagem. Nao ha mais pergunta anonima (D64): toda pergunta e gravada com `anonymous` falso,
+ * qualquer que seja o card Sala antigo do webinario, e o pedido antigo que ainda pede anonima e recusado com 400.
  */
 export async function askStudentQuestion(input: AskQuestionInput): Promise<QuestionResult> {
   const { body, context, db, userId } = input;
   const now = input.now ?? Date.now();
   const { session, webinar } = context;
   const events: StudentEventInsert[] = [];
+  refuseLegacyIdentity(body);
   refuse(context, now, "interaction");
   // A pergunta e escrever: o silenciado no chat tambem nao pergunta (so reage, curte e responde enquete).
   await refuseBanned({ context, db, kind: "chat", now, userId });
 
-  if (body.anonymous && !webinar.roomSettings.anonymousQuestions) {
-    throw new WebinarError(CHAT_MESSAGES.anonymousOff, 400);
-  }
   const identity = await loadStudentIdentity(db, userId);
-  // O aceite passa pelo mesmo caminho do chat, mas "Anonima" aqui e da pergunta, nao do nome no chat.
-  const choice = consentChoice(identity, { ...body, anonymous: false }, webinar);
+  const choice = consentChoice(identity, body);
 
   const burst = takeQuestionBurst(userId, session.id, now);
   if (!burst.ok) {
@@ -480,11 +490,9 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
   }
 
   await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
-  const mode: DisplayNameMode = body.anonymous ? "anonymous" : choice.mode;
-  const anonymous = mode === "anonymous";
-  const displayName = studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, mode, userId, webinar.id);
+  const displayName = studentDisplayName(identity);
   const offsetMs = writeOffsetMs(session, now, input.offsetMs);
-  const row = await insertQuestionRow(db, { anonymous, body: text, display_name: displayName, offset_ms: offsetMs, session_id: session.id, user_id: userId });
+  const row = await insertQuestionRow(db, { anonymous: false, body: text, display_name: displayName, offset_ms: offsetMs, session_id: session.id, user_id: userId });
   const asked = questionFromRow(row);
   const ownPhoto = authorPhotoUrl({
     anonymous: asked.anonymous,
@@ -499,7 +507,7 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
   if (!question) {
     throw new WebinarError(CHAT_MESSAGES.invalid, 500);
   }
-  events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ anonymous, offsetMs, questionId: row.id })));
+  events.push(webinarEvent(userId, session.id, "webinar_question_sent", questionSentMetadata({ offsetMs, questionId: row.id })));
   return { events, offsetMs, question };
 }
 
@@ -516,14 +524,17 @@ export type QuestionReplyResult = { events: StudentEventInsert[]; reply: Student
  * A resposta do aluno no fio da propria pergunta (docs/30 §1.3; decisao do produtor de 10/11/2026): so quem perguntou,
  * so depois de respondida e ate o teto do fio (questionReplyRefusal). Escrever e escrever: fora da hora da sessao 409, o
  * silenciado no chat e o removido nao respondem (como na pergunta), o aceite do chat precisa estar em dia (409
- * consent_required; a resposta pode trazer o aceite, como a primeira pergunta), 5 por 60 s, palavra bloqueada 422. Na
- * pergunta Anonima a resposta sai com o mesmo nome anonimo dela, sem foto.
+ * consent_required; a resposta pode trazer o aceite, como a primeira pergunta), 5 por 60 s, palavra bloqueada 422. O
+ * pedido antigo que ainda pede anonimo ou apelido e recusado com 400 (D64). Legado: numa pergunta Anonima de antes de
+ * 10/11/2026 a resposta de quem perguntou continua saindo com o mesmo nome anonimo gravado nela, sem foto (a promessa
+ * da epoca); em toda pergunta nova, o primeiro nome com a inicial.
  */
 export async function replyStudentQuestion(input: { body: Omit<QuestionReplyPostInput, "sessionId">; context: RoomContext; db: WebinarsDb; now?: number; questionId: string; userId: string }): Promise<QuestionReplyResult> {
   const { body, context, db, userId } = input;
   const now = input.now ?? Date.now();
   const { session, webinar } = context;
   const events: StudentEventInsert[] = [];
+  refuseLegacyIdentity(body);
   refuse(context, now, "interaction");
   await refuseBanned({ context, db, kind: "chat", now, userId });
 
@@ -538,7 +549,7 @@ export async function replyStudentQuestion(input: { body: Omit<QuestionReplyPost
   }
 
   const identity = await loadStudentIdentity(db, userId);
-  const choice = consentChoice(identity, { ...body, anonymous: false }, webinar);
+  const choice = consentChoice(identity, body);
   const burst = takeReplyBurst(userId, session.id, now);
   if (!burst.ok) {
     throw new RoomLimitError(ROOM_LIMIT_MESSAGE, burst.retryAfterSeconds);
@@ -553,10 +564,11 @@ export async function replyStudentQuestion(input: { body: Omit<QuestionReplyPost
   }
 
   await saveConsent({ choice, db, events, now, sessionId: session.id, userId });
-  // Na pergunta Anonima, o mesmo nome anonimo dela; senao o nome do aceite (que pode ser "Aluno {n}").
-  const displayName = question.anonymous ? question.displayName : studentDisplayName({ fullName: identity.fullName, nickname: choice.nickname }, choice.mode, userId, webinar.id);
+  // Legado: linhas de antes de 10/11/2026. Na pergunta Anonima antiga, o mesmo nome anonimo gravado nela; em toda
+  // pergunta nova (sempre `anonymous` falso), o primeiro nome com a inicial do sobrenome.
+  const displayName = question.anonymous ? question.displayName : studentDisplayName(identity);
   const inserted = questionReplyFromRow(
-    await insertQuestionReplyRow(db, { anonymous: question.anonymous || choice.mode === "anonymous", body: text, display_name: displayName, question_id: question.id, role: "student", session_id: session.id, user_id: userId })
+    await insertQuestionReplyRow(db, { anonymous: question.anonymous, body: text, display_name: displayName, question_id: question.id, role: "student", session_id: session.id, user_id: userId })
   );
   const avatarUrl = authorPhotoUrl({
     anonymous: inserted.anonymous,

@@ -70,7 +70,6 @@ export function isChatMode(value: unknown): value is ChatMode {
  * ---------------------------------------------------------------------------------------------- */
 
 export type StudentPoll = {
-  anonymous: boolean;
   id: string;
   kind: Poll["kind"];
   /** As opcoes que o aluno marcou; nulo quando ainda nao respondeu. */
@@ -107,7 +106,6 @@ export function toStudentPoll(poll: Poll, answers: readonly PollAnswer[], viewer
     results = { counts, total: answers.length };
   }
   return {
-    anonymous: poll.anonymous,
     id: poll.id,
     kind: poll.kind,
     myOptionIds: mine ? [...mine.optionIds] : null,
@@ -136,7 +134,7 @@ export function pollAnswerProblem(poll: Pick<Poll, "kind" | "options" | "status"
 
 /** Uma resposta do fio de uma pergunta, como o aluno recebe. */
 export type StudentQuestionReply = {
-  /** A resposta de quem perguntou numa pergunta Anonima: sem nome e sem foto. */
+  /** Legado: linhas de antes de 10/11/2026 (D64). A resposta de quem perguntou numa pergunta Anonima antiga: sem nome e sem foto. */
   anonymous: boolean;
   avatarUrl: string | null;
   body: string;
@@ -180,6 +178,7 @@ export function questionReplyRefusal(input: { question: Pick<WebinarQuestion, "s
 }
 
 export type StudentQuestion = {
+  /** Legado: linhas de antes de 10/11/2026 (D64); uma pergunta nova chega sempre com falso. */
   anonymous: boolean;
   /** A foto do perfil de quem perguntou, quando ela pode aparecer (room-model.authorPhotoUrl); nunca na Anonima. */
   avatarUrl: string | null;
@@ -244,8 +243,8 @@ export function reactionSentMetadata(input: { offsetMs: number; reaction: Reacti
   return { offset_ms: input.offsetMs, reaction: input.reaction };
 }
 
-export function questionSentMetadata(input: { anonymous: boolean; offsetMs: number; questionId: string }) {
-  return { anonymous: input.anonymous, offset_ms: input.offsetMs, question_id: input.questionId };
+export function questionSentMetadata(input: { offsetMs: number; questionId: string }) {
+  return { offset_ms: input.offsetMs, question_id: input.questionId };
 }
 
 export function questionReplySentMetadata(input: { length: number; questionId: string; replyId: string }) {
@@ -256,8 +255,8 @@ export function pollAnsweredMetadata(input: { offsetMs: number; options: number;
   return { offset_ms: input.offsetMs, options: input.options, poll_id: input.pollId };
 }
 
-export function consentMetadata(input: { consentVersion: number; display: string }) {
-  return { consent_version: input.consentVersion, display: input.display };
+export function consentMetadata(input: { consentVersion: number }) {
+  return { consent_version: input.consentVersion };
 }
 
 export function consentRevokedMetadata(consentVersion: number) {

@@ -215,7 +215,7 @@ export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt
  * ---------------------------------------------------------------------------------------------- */
 
 export type ConsoleMessage = ChatMessage & {
-  /** Mensagem da turma cujo autor ainda tem o aceite valendo: pode virar linha mestre (promote). */
+  /** Mensagem da turma cujo autor ainda tem o aceite valendo (sem retirada e com o modo de agora, model.chatConsentAllowsReplay): pode virar linha mestre (promote). */
   promotable: boolean;
 };
 

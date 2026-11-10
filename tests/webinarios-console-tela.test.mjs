@@ -225,6 +225,7 @@ function snapshot(extra = {}) {
     pinnedMessageId: "m-equipe",
     polls: {
       launched: [poll({ counts: { answers: 3, byOption: { "o-1": 2, "o-2": 1 } }, id: "p-copia", openedAt: new Date(NOW - MIN).toISOString(), sessionId: S_LIVE, status: "open", templatePollId: "p-1" })],
+      // Legado: um modelo de antes de 10/11/2026 ainda marcado como anonimo (D64): a lista nao anuncia mais a marca.
       templates: [poll(), poll({ anonymous: true, id: "p-2", kind: "multiple", question: "Quais temas?" })]
     },
     presentNow: 7,
@@ -548,11 +549,14 @@ test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual
   assert.match(text, /Compartilhar resultado/);
   const templates = markup.slice(markup.indexOf("data-console-polls-templates"));
   assert.equal(count(templates, />Abrir</g), 1, "o modelo ja aberto nesta sessao nao abre de novo");
-  assert.match(textOf(templates), /Quais temas\? Várias opções · 2 opções · respostas anônimas/);
+  // D64: a copia lancada de agora em diante guarda quem respondeu, entao o modelo antigo nao diz mais "respostas anônimas".
+  assert.match(textOf(templates), /Quais temas\? Várias opções · 2 opções/);
+  assert.doesNotMatch(textOf(templates), /an[oô]nim/i);
 
   const questions = markup.slice(markup.indexOf("data-console-questions"));
   const order = Array.from(questions.matchAll(/data-console-question="([^"]+)"/g)).map((match) => match[1]);
   assert.deepEqual(order, ["q-top", "q-1", "q-respondida", "q-dispensada"], "abertas por voto, depois respondidas, dispensadas no fim");
+  // Legado: a pergunta gravada como anonima antes de 10/11/2026 continua "Anônima" no console.
   assert.match(textOf(questions), /Anônima/);
   assert.match(textOf(questions), /5 votos/);
   assert.match(textOf(questions), /Sim, 7 dias\./);

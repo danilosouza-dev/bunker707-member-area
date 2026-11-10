@@ -7,7 +7,6 @@ import { RECORDER_STATUSES, type RecorderStatus } from "./recorder-model";
 import {
   ACCESS_MODE_COLUMN_VALUES,
   CHAT_MODES,
-  DISPLAY_NAME_MODES,
   SESSION_KINDS,
   SESSION_STATUSES,
   SLOW_MODE_SECONDS,
@@ -20,7 +19,6 @@ import {
   emptyReminderTexts,
   type AccessMode,
   type ChatMode,
-  type DisplayNameMode,
   type PresenceSummary,
   type Quality,
   type RegistrationStatus,
@@ -262,13 +260,15 @@ export function qualityOfRow(value: unknown): Quality {
   };
 }
 
+/**
+ * As chaves antigas `anonymousQuestions` e `displayName` (de antes de 10/11/2026, D64) podem continuar no JSON de um
+ * webinario antigo: nao sao lidas aqui (ninguem participa como anonimo nem com apelido) e somem no proximo salvar.
+ */
 export function roomSettingsOfRow(value: unknown): RoomSettings {
   const raw = asObject(value);
   const base = defaultRoomSettings();
   return {
-    anonymousQuestions: asBoolean(raw.anonymousQuestions, base.anonymousQuestions),
     chatMode: oneOf<ChatMode>(CHAT_MODES, raw.chatMode, base.chatMode),
-    displayName: oneOf<DisplayNameMode>(DISPLAY_NAME_MODES, raw.displayName, base.displayName),
     newCommentsVisible: asBoolean(raw.newCommentsVisible, base.newCommentsVisible),
     polls: asBoolean(raw.polls, base.polls),
     practiceSession: asBoolean(raw.practiceSession, base.practiceSession),

@@ -28,13 +28,12 @@ import {
 import { chatMessageFromRow, chatMessageFromWindowRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ConsentRow } from "./chat-rows";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
 import {
-  CHAT_CONSENT_VERSION,
   CHAT_LIMITS,
   REACTIONS,
   ROOM_RULES,
+  chatConsentIsCurrent,
   toTime,
   type ChatMessage,
-  type DisplayNameMode,
   type QuestionReply,
   type Reaction,
   type StudentChatMessage,
@@ -44,7 +43,6 @@ import {
 } from "./model";
 import { loadStudentWebinarById, type StudentWebinarRecord } from "./registrations";
 import {
-  anonymousNumber,
   authorPhotoUrl,
   bunnyEmbedTokenInput,
   bunnyEmbedUrl,
@@ -200,33 +198,36 @@ export type StudentIdentity = {
   /** A foto do proprio perfil (so https), para o campo de escrever da sala; nula sem foto. */
   avatarUrl: string | null;
   consent: ConsentRow | null;
+  /** O aceite em dia: sem retirada, na versao de agora e com o modo de agora (consentIsCurrent). */
   consented: boolean;
-  displayMode: DisplayNameMode | null;
   fullName: string | null;
-  nickname: string | null;
 };
 
+/**
+ * O aceite gravado vale agora (model.chatConsentIsCurrent): sem retirada, na versao de agora e com `display_mode`
+ * "first_name_initial". Uma linha antiga com "anonymous" ou "nickname" (legado: linhas de antes de 10/11/2026, D64)
+ * conta como "sem aceite".
+ */
 export function consentIsCurrent(row: ConsentRow | null): boolean {
-  return Boolean(row && !row.revoked_at && row.consent_version === CHAT_CONSENT_VERSION);
+  return chatConsentIsCurrent(row);
 }
 
 export async function loadStudentIdentity(db: WebinarsDb, userId: string): Promise<StudentIdentity> {
   const [consent, profile] = await Promise.all([fetchConsentRow(db, userId), fetchProfile(db, userId)]);
-  const consented = consentIsCurrent(consent);
-  const mode = consent?.display_mode;
   return {
     avatarUrl: sanitizeProfileAvatarUrl(profile?.avatar_url),
     consent,
-    consented,
-    displayMode: consented && (mode === "anonymous" || mode === "nickname" || mode === "first_name_initial") ? mode : null,
-    fullName: profile?.full_name ?? null,
-    nickname: consent?.nickname ?? null
+    consented: consentIsCurrent(consent),
+    fullName: profile?.full_name ?? null
   };
 }
 
-/** O nome que aparece no chat para este aluno neste webinario (docs/30 §8.5). */
-export function studentDisplayName(identity: Pick<StudentIdentity, "fullName" | "nickname">, mode: DisplayNameMode, userId: string, webinarId: string): string {
-  return displayNameFor({ anonymousNumber: anonymousNumber(userId, webinarId), fullName: identity.fullName, mode, nickname: identity.nickname });
+/**
+ * O nome do aluno nos webinarios (docs/30 §8.5 e D64): sempre o primeiro nome com a inicial do sobrenome, o mesmo em
+ * todo webinario. Nao depende do aceite gravado nem do card Sala.
+ */
+export function studentDisplayName(identity: Pick<StudentIdentity, "fullName">): string {
+  return displayNameFor({ fullName: identity.fullName });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -319,9 +320,7 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       avatarUrl: identity.avatarUrl,
       ban,
       consented: identity.consented,
-      displayMode: identity.displayMode,
-      displayName: identity.consented && identity.displayMode ? studentDisplayName(identity, identity.displayMode, userId, webinar.id) : null,
-      nickname: identity.nickname
+      displayName: identity.consented ? studentDisplayName(identity) : null
     },
     pinned,
     polls,
@@ -334,7 +333,6 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       join,
       offsetMs: Number.isFinite(offset) ? Math.round(offset) : null,
       roomPhase: simulated ? simulatedPhase(session, durationMs, now) : null,
-      anonymousQuestions: webinar.roomSettings.anonymousQuestions,
       showLiveBadge: session.showLiveBadge
     },
     video: join.ok && session.kind !== "live" ? roomVideoFor(context, now) : null
@@ -412,12 +410,12 @@ export async function readRecentChat(db: WebinarsDb, context: RoomContext, userI
  * Perguntas, enquetes e reacoes
  * ---------------------------------------------------------------------------------------------- */
 
-/** A foto de quem perguntou, pela regra do aluno (nunca na Anonima nem no nome "Aluno {n}"). */
+/** A foto de quem perguntou, pela regra do aluno (nunca na Anonima nem no nome "Aluno {n}"; legado: linhas de antes de 10/11/2026). */
 export function questionPhotoUrl(question: Pick<WebinarQuestion, "anonymous" | "displayName" | "userId">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>, viewer: "student" | "team" = "student"): string | null {
   return authorPhotoUrl({ anonymous: question.anonymous, authorUserId: question.userId, displayName: question.displayName, photo: photos.get(question.userId), source: "audience", viewer, webinarId });
 }
 
-/** A foto de quem respondeu no fio: a da equipe sempre; a do aluno pela regra dele (nunca na pergunta Anonima). */
+/** A foto de quem respondeu no fio: a da equipe sempre; a do aluno pela regra dele (nunca na pergunta Anonima; legado: linhas de antes de 10/11/2026). */
 export function replyPhotoUrl(reply: Pick<QuestionReply, "anonymous" | "displayName" | "role" | "userId">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>, viewer: "student" | "team" = "student"): string | null {
   return authorPhotoUrl({
     anonymous: reply.anonymous,

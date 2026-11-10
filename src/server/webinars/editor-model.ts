@@ -183,7 +183,6 @@ export const WEBINAR_ADMIN_COPY = {
   polls: {
     add: "Adicionar enquete",
     addOption: "Adicionar opção",
-    anonymous: "Respostas anônimas",
     empty: "Nenhuma enquete pronta. A equipe abre, encerra e compartilha o resultado no console.",
     kind: "Tipo",
     kinds: { multiple: "Várias opções", single: "Uma opção", survey: "Pesquisa" },
@@ -248,6 +247,7 @@ export const WEBINAR_ADMIN_COPY = {
       title: "Enquetes"
     },
     questions: {
+      /** Legado: perguntas de antes de 10/11/2026 (D64) gravadas como anonimas continuam com este nome e a mascara. */
       anonymous: "Anônima",
       answerLive: "Respondida ao vivo",
       answerPlaceholder: "Escreva a resposta",
@@ -312,7 +312,6 @@ export const WEBINAR_ADMIN_COPY = {
     afterLive: "Depois da live",
     allowStudentCamera: "Câmeras dos alunos",
     allowStudentCameraHint: "Entram desligadas e o aluno liga se quiser. A câmera do aluno sai em 360p e o apresentador fecha quando quiser.",
-    anonymousQuestions: "Perguntas anônimas permitidas",
     autoRecord: "Gravar automaticamente",
     autoRecordHint: `Um servidor de gravação é criado ${RECORDER_RULES.prepareLeadMinutes} min antes da live e apagado no fim, cobrado por hora (uma live de 2 h gravada em 1080p custa cerca de EUR 0,30).`,
     autoRecordOffHint: "Desligado: ninguém cria o servidor sozinho. A equipe prepara a gravação no console, pelo botão Preparar gravação.",
@@ -329,8 +328,6 @@ export const WEBINAR_ADMIN_COPY = {
     cover: "Capa",
     coverHint: "2:3, como a capa de produto. O card da página inicial e a página do webinário usam a mesma imagem.",
     description: "Descrição",
-    displayName: "Como o aluno aparece",
-    displayNames: { anonymous: "Sempre anônimo", first_name_initial: "Primeiro nome + inicial", nickname: "Apelido" },
     duration: "Duração prevista (min)",
     email: "E-mail",
     emailHint: "Cada lembrete sai uma vez por aluno.",

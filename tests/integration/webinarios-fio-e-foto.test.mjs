@@ -7,11 +7,16 @@ import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedL
 // A foto do perfil na sala e o fio das Perguntas (docs/30 §1.3, §2.4 e §8.5; decisoes do produtor de 10/11/2026) contra
 // o banco LOCAL de verdade, com a migracao 202611100001 aplicada:
 // - a foto: a minha mensagem ja sai com a minha foto; o outro aluno ve a foto de quem aceitou o texto de agora (versao
-//   2, que cita a foto) e as iniciais de quem aceitou o de antes; o que foi escrito como anonimo nunca leva foto, nem
-//   para a equipe; a mensagem da equipe leva a foto de quem escreveu; o console ve a foto do aluno sem depender do aceite;
+//   2, que cita a foto) e as iniciais de quem aceitou o de antes; a mensagem da equipe leva a foto de quem escreveu; o
+//   console ve a foto do aluno sem depender do aceite;
+// - sem anonimato e sem apelido (D64, 10/11/2026): o pedido de uma pagina antiga que ainda pede anonimo e recusado
+//   com 400 e nada e gravado; o aceite antigo com modo anonimo ou apelido, mesmo na versao de agora, conta como sem
+//   aceite (sem foto para os outros, 409 nas escritas) ate o aluno aceitar de novo, e ai grava first_name_initial;
+// - legado (linhas de antes de 10/11/2026, postas direto no banco): a mensagem gravada como "Aluno {n}" e a pergunta
+//   gravada como anonima continuam sem foto, nem para a equipe, e a resposta de quem perguntou herda o nome gravado;
 // - o fio: so quem perguntou responde (403 para o outro aluno) e so depois da resposta da equipe (409 antes); a
 //   resposta aparece no fio para todos; o console marca "Nova resposta do aluno" e conta a pergunta ate a equipe
-//   responder no fio; a equipe apaga uma resposta; na pergunta Anonima a resposta continua sem nome e sem foto; quem
+//   responder no fio; a equipe apaga uma resposta; quem
 //   nao escreve no chat (analista) recebe 403; "Remover minhas mensagens" leva tambem o que o aluno escreveu no fio.
 
 const db = createLocalAdminClient();
@@ -37,7 +42,8 @@ const pessoas = [aluna.id, outro.id, produtor.id, analista.id];
 const { id: webinarId, sessaoId } = LIVE_GRAVADA_NO_AR_DE_TESTE;
 const contexto = { params: Promise.resolve({ id: webinarId }) };
 const FOTO = { aluna: "https://exemplo.test/fotos/aluna.jpg", outro: "https://exemplo.test/fotos/outro.jpg", produtor: "https://exemplo.test/fotos/produtor.jpg" };
-const ACEITE = { consent: true, consentVersion: CHAT_CONSENT_VERSION, displayMode: "first_name_initial" };
+const ACEITE = { consent: true, consentVersion: CHAT_CONSENT_VERSION };
+const FRASE_DA_PAGINA_ANTIGA = "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar.";
 const fotosDeAntes = new Map();
 
 const pedido = (path, method = "GET", body) =>
@@ -119,7 +125,7 @@ after(async () => {
   clearAuthorPhotoCache();
 });
 
-test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem aceitou o texto de agora; o anonimo nunca leva foto; a equipe leva a dela", async () => {
+test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem aceitou o texto de agora; a pagina antiga que pede anonimo e recusada; a mensagem anonima de antes (legado) nunca leva foto; a equipe leva a dela", async () => {
   actAs(aluna);
   const antes = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
   assert.equal(antes.body.data.me.avatarUrl, FOTO.aluna, "a minha foto vai para o campo de escrever");
@@ -128,10 +134,27 @@ test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem a
   assert.equal(minha.status, 201, JSON.stringify(minha.body));
   assert.equal(minha.body.data.message.avatarUrl, FOTO.aluna, "a minha mensagem ja sai com a minha foto");
 
-  const anonima = await enviar(aluna, { anonymous: true, body: "Pergunto sem aparecer" });
-  assert.equal(anonima.status, 201, JSON.stringify(anonima.body));
-  assert.equal(anonima.body.data.message.displayName, anonymousDisplayName(aluna.id, webinarId));
-  assert.equal(anonima.body.data.message.avatarUrl, null, "escrita como anonima: sem foto ate para mim");
+  assert.equal(minha.body.data.message.displayName, "Aluna T.", "o primeiro nome com a inicial do sobrenome");
+
+  // D64: a pagina aberta com o codigo de antes ainda pede anonimo ou apelido. 400, e nada e gravado no banco de verdade.
+  for (const antigo of [{ anonymous: true }, { displayMode: "anonymous" }, { displayMode: "nickname", nickname: "aninha" }]) {
+    const recusada = await enviar(aluna, { ...antigo, body: "Pergunto sem aparecer (pagina antiga)" });
+    assert.equal(recusada.status, 400, `${JSON.stringify(antigo)}: ${JSON.stringify(recusada.body)}`);
+    assert.equal(recusada.body.error, FRASE_DA_PAGINA_ANTIGA);
+  }
+  const recusadas = unwrap(await db.from("webinar_chat_messages").select("id").eq("session_id", sessaoId).eq("body", "Pergunto sem aparecer (pagina antiga)"), "Lendo as recusadas");
+  assert.equal(recusadas.length, 0, "a mensagem pedida como anonima nao foi gravada (nem com o nome, nem sem)");
+  const aceiteDaAluna = unwrap(await db.from("webinar_chat_consents").select("display_mode, nickname").eq("user_id", aluna.id).single(), "Lendo o aceite da aluna");
+  assert.deepEqual(aceiteDaAluna, { display_mode: "first_name_initial", nickname: null });
+
+  // Legado: linhas de antes de 10/11/2026. Uma mensagem gravada na epoca com o nome anonimo da aluna ("Aluno {n}"),
+  // posta direto no banco: continua aparecendo como foi gravada e sem foto para todo mundo.
+  unwrap(
+    await db
+      .from("webinar_chat_messages")
+      .insert({ approved: true, author_user_id: aluna.id, body: "Pergunto sem aparecer", display_name: anonymousDisplayName(aluna.id, webinarId), offset_ms: 50_000, role: "student", session_id: sessaoId, source: "audience", webinar_id: webinarId }),
+    "Gravando a mensagem anonima de antes"
+  );
 
   // O outro aluno aceitou o texto de antes (versao 1, que so falava do nome) e escreveu.
   unwrap(await db.from("webinar_chat_consents").insert({ consent_version: 1, display_mode: "first_name_initial", user_id: outro.id }), "Gravando o aceite antigo");
@@ -145,11 +168,13 @@ test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem a
   const paraOutro = await chatDe(outro);
   const porTexto = (lista, texto) => lista.find((item) => item.body === texto);
   assert.equal(porTexto(paraOutro, "Oi, pessoal!").avatarUrl, FOTO.aluna, "o outro aluno ve a foto de quem aceitou a versao de agora");
-  assert.equal(porTexto(paraOutro, "Pergunto sem aparecer").avatarUrl, null, "a anonima sem foto para os outros");
+  assert.equal(porTexto(paraOutro, "Pergunto sem aparecer").avatarUrl, null, "a anonima de antes sem foto para os outros");
+  assert.match(porTexto(paraOutro, "Pergunto sem aparecer").displayName, /^Aluno \d{3}$/, "e com o nome gravado na epoca");
   assert.equal(porTexto(paraOutro, "Bem-vindos!").avatarUrl, FOTO.produtor, "a equipe com a foto dela");
 
   const paraAluna = await chatDe(aluna);
   assert.equal(porTexto(paraAluna, "Cheguei").avatarUrl, null, "quem aceitou o texto de antes fica com as iniciais para os outros alunos");
+  assert.equal(porTexto(paraAluna, "Pergunto sem aparecer").avatarUrl, null, "a anonima de antes sem foto ate para quem escreveu");
 
   // O console: a equipe ve a foto do aluno sem depender do aceite, mas nunca no anonimo.
   const console_ = await retrato();
@@ -159,12 +184,56 @@ test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem a
   assert.equal(porTexto(console_.messages, "Bem-vindos!").avatarUrl, FOTO.produtor);
 });
 
+test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta como sem aceite: sem foto para os outros, consented falso, 409 nas escritas; aceitar de novo grava first_name_initial sem apelido e a foto aparece", async () => {
+  for (const [modo, apelido] of [
+    ["anonymous", null],
+    ["nickname", "Apelido Antigo"]
+  ]) {
+    // A linha de aceite de antes de 10/11/2026, na versao de agora, com o modo antigo (o check do banco ainda aceita).
+    unwrap(
+      await db.from("webinar_chat_consents").upsert({ consent_version: CHAT_CONSENT_VERSION, consented_at: new Date().toISOString(), display_mode: modo, nickname: apelido, revoked_at: null, user_id: outro.id }, { onConflict: "user_id" }),
+      `Gravando o aceite antigo (${modo})`
+    );
+    clearAuthorPhotoCache();
+
+    const porTexto = (lista, texto) => lista.find((item) => item.body === texto);
+    assert.equal(porTexto(await chatDe(aluna), "Cheguei").avatarUrl, null, `${modo}: sem o aceite em dia, a foto nao aparece para os outros alunos`);
+    actAs(outro);
+    const sessao = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
+    assert.deepEqual([sessao.body.data.me.consented, sessao.body.data.me.displayName], [false, null], `${modo}: a sala mostra a caixa do aceite de novo`);
+    assert.ok(!("displayMode" in sessao.body.data.me) && !("nickname" in sessao.body.data.me) && !("anonymousQuestions" in sessao.body.data.session));
+
+    const semAceite = await enviar(outro, { body: `Sem aceitar (${modo})` });
+    assert.equal(semAceite.status, 409, JSON.stringify(semAceite.body));
+    assert.equal(semAceite.body.reason, "consent_required");
+    const perguntaSemAceite = await perguntar(outro, { body: `Pergunta sem aceitar (${modo})` });
+    assert.equal(perguntaSemAceite.status, 409, JSON.stringify(perguntaSemAceite.body));
+    assert.equal(perguntaSemAceite.body.reason, "consent_required");
+    const antes = unwrap(await db.from("webinar_chat_consents").select("display_mode, nickname").eq("user_id", outro.id).single(), "Lendo o aceite antes");
+    assert.deepEqual(antes, { display_mode: modo, nickname: apelido }, "a linha antiga fica como estava ate o aluno aceitar");
+
+    const aceitou = await enviar(outro, { ...ACEITE, body: `Aceitei de novo (${modo})` });
+    assert.equal(aceitou.status, 201, JSON.stringify(aceitou.body));
+    assert.equal(aceitou.body.data.message.avatarUrl, FOTO.outro);
+    assert.doesNotMatch(aceitou.body.data.message.displayName, /^Aluno \d{3}$|Apelido Antigo/, "o nome e o primeiro nome com a inicial, nunca o anonimo nem o apelido");
+    const depois = unwrap(await db.from("webinar_chat_consents").select("consent_version, display_mode, nickname, revoked_at").eq("user_id", outro.id).single(), "Lendo o aceite depois");
+    assert.deepEqual(depois, { consent_version: CHAT_CONSENT_VERSION, display_mode: "first_name_initial", nickname: null, revoked_at: null });
+    const paraAluna = await chatDe(aluna);
+    assert.equal(porTexto(paraAluna, `Aceitei de novo (${modo})`).avatarUrl, FOTO.outro, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
+    assert.equal(porTexto(paraAluna, `Sem aceitar (${modo})`), undefined, "a recusada nao foi gravada");
+    resetRoomLimits();
+  }
+  const semPerguntas = unwrap(await db.from("webinar_questions").select("id").eq("session_id", sessaoId).eq("user_id", outro.id), "Lendo as perguntas do outro aluno");
+  assert.equal(semPerguntas.length, 0, "nenhuma pergunta gravada sem o aceite");
+});
+
 let pergunta = null;
 
 test("2. o fio: antes da resposta ninguem responde (409); o outro aluno nunca (403); depois da resposta, quem perguntou responde e todos veem", async () => {
-  const feita = await perguntar(aluna, { anonymous: false, body: "Vai ter replay?" });
+  const feita = await perguntar(aluna, { body: "Vai ter replay?" });
   assert.equal(feita.status, 201, JSON.stringify(feita.body));
   pergunta = feita.body.data.question;
+  assert.deepEqual([pergunta.anonymous, pergunta.displayName], [false, "Aluna T."], "toda pergunta sai com o nome (D64)");
   assert.equal(pergunta.avatarUrl, FOTO.aluna, "a pergunta com a foto de quem perguntou");
   assert.deepEqual(pergunta.replies, []);
   assert.equal(pergunta.canReply, false, "sem resposta da equipe, nada a comentar");
@@ -246,23 +315,48 @@ test("3. o console: 'Nova resposta do aluno' conta e sobe ate a equipe responder
   assert.deepEqual([apagada.deleted_by, apagada.deleted_reason, apagada.deleted_at !== null], [produtor.id, "team", true]);
 });
 
-test("4. a pergunta Anonima: a resposta de quem perguntou continua sem nome e sem foto, para os alunos e para a equipe", async () => {
-  const feita = await perguntar(aluna, { anonymous: true, body: "Posso perguntar sem aparecer?" });
-  assert.equal(feita.status, 201, JSON.stringify(feita.body));
-  const anonima = feita.body.data.question;
-  assert.deepEqual([anonima.anonymous, anonima.avatarUrl], [true, null]);
+test("4. sem pergunta anonima (D64): a pagina antiga que pede anonima recebe 400 e nada e gravado; legado: a pergunta anonima de antes continua sem foto e a resposta de quem perguntou herda o nome gravado, para os alunos e para a equipe", async () => {
+  // A pagina antiga: a pilula Anonima ligada. Recusada, sem pergunta no banco.
+  for (const antigo of [{ anonymous: true }, { displayMode: "anonymous" }]) {
+    const recusada = await perguntar(aluna, { ...antigo, body: "Posso perguntar sem aparecer? (pagina antiga)" });
+    assert.equal(recusada.status, 400, `${JSON.stringify(antigo)}: ${JSON.stringify(recusada.body)}`);
+    assert.equal(recusada.body.error, FRASE_DA_PAGINA_ANTIGA);
+  }
+  const gravadas = unwrap(await db.from("webinar_questions").select("id").eq("session_id", sessaoId).eq("body", "Posso perguntar sem aparecer? (pagina antiga)"), "Lendo as recusadas");
+  assert.equal(gravadas.length, 0, "nenhuma pergunta gravada, nem com o nome de verdade");
+
+  // Legado: linhas de antes de 10/11/2026. A pergunta gravada como anonima na epoca, posta direto no banco.
+  const nomeAnonimo = anonymousDisplayName(aluna.id, webinarId);
+  const linha = unwrap(
+    await db
+      .from("webinar_questions")
+      .insert({ anonymous: true, body: "Posso perguntar sem aparecer?", display_name: nomeAnonimo, offset_ms: 70_000, session_id: sessaoId, user_id: aluna.id })
+      .select("id")
+      .single(),
+    "Gravando a pergunta anonima de antes"
+  );
+  const [anonima] = (await perguntasDe(aluna)).filter((item) => item.id === linha.id);
+  assert.deepEqual([anonima.anonymous, anonima.avatarUrl, anonima.displayName, anonima.mine], [true, null, nomeAnonimo, true]);
   actAs(produtor);
   ok(await roomActions.answerQuestion({ answeredLive: true, questionId: anonima.id }));
 
+  // A resposta de quem perguntou herda o nome anonimo gravado na pergunta (a promessa da epoca), sem foto.
   const resposta = await responderNoFio(aluna, anonima.id, { body: "Obrigada!" });
   assert.equal(resposta.status, 201, JSON.stringify(resposta.body));
-  assert.deepEqual([resposta.body.data.reply.anonymous, resposta.body.data.reply.avatarUrl, resposta.body.data.reply.displayName], [true, null, anonima.displayName]);
+  assert.deepEqual([resposta.body.data.reply.anonymous, resposta.body.data.reply.avatarUrl, resposta.body.data.reply.displayName], [true, null, nomeAnonimo]);
+  const gravada = unwrap(await db.from("webinar_question_replies").select("anonymous, display_name, user_id").eq("id", resposta.body.data.reply.id).single(), "Lendo a resposta herdada");
+  assert.deepEqual(gravada, { anonymous: true, display_name: nomeAnonimo, user_id: aluna.id });
 
   const [paraOutro] = (await perguntasDe(outro)).filter((item) => item.id === anonima.id);
+  assert.deepEqual([paraOutro.anonymous, paraOutro.avatarUrl], [true, null], "a pergunta anonima de antes sem foto para os outros");
   assert.deepEqual(paraOutro.replies.map((item) => [item.anonymous, item.avatarUrl]), [[true, null]]);
   const noConsole = (await retrato()).questions.find((item) => item.id === anonima.id);
-  assert.equal(noConsole.avatarUrl, null);
+  assert.equal(noConsole.avatarUrl, null, "nem a equipe ve a foto na anonima de antes");
   assert.deepEqual(noConsole.replies.map((item) => [item.anonymous, item.avatarUrl ?? null]), [[true, null]]);
+
+  // Numa pergunta nova (com o nome), a resposta sai com o nome e a foto, como no teste 2.
+  const [nova] = (await perguntasDe(aluna)).filter((item) => item.id === pergunta.id);
+  assert.deepEqual(nova.replies.filter((item) => item.role === "student").map((item) => [item.anonymous, item.displayName]), [[false, "Aluna T."]]);
 });
 
 test("5. 'Remover minhas mensagens' leva tambem o que o aluno escreveu no fio", async () => {

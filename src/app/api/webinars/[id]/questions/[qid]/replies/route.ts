@@ -9,7 +9,8 @@ import { replyStudentQuestion } from "@/server/webinars/room-writes";
 // resposta do aluno no fio da propria pergunta e responde { reply } (201). So quem perguntou (403 para os outros) e so
 // depois de a equipe responder (409); pergunta de outra sessao, apagada ou dispensada de outro aluno: 404; fora da hora
 // da sessao 409; na live, removido, banido ou silenciado no chat 409; sem o aceite do chat em dia 409 consent_required
-// (o corpo pode trazer o aceite, como a primeira pergunta); 5 por 60 s (429); palavra bloqueada 422. Sessao
+// (o corpo pode trazer o aceite, como a primeira pergunta); a pagina antiga que ainda pede anonimo ou apelido 400, sem
+// gravar nada (D64); 5 por 60 s (429); palavra bloqueada 422. Sessao
 // obrigatoria; o teto global de 30 escritas. O historico (`webinar_question_reply_sent`, sem o texto) vai depois da
 // resposta.
 

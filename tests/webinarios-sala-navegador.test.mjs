@@ -172,6 +172,9 @@ test("a enquete do aluno: modelo e rascunho ficam de fora, a encerrada so com re
   const open = rules.toStudentPoll(poll, answers, "u1");
   assert.deepEqual(open.myOptionIds, ["o1"]);
   assert.equal(open.results, null);
+  // D64 (10/11/2026): a enquete do aluno nao leva mais a marca de anonima (a sala nunca usou), nem a de um modelo antigo.
+  assert.deepEqual(Object.keys(open).sort(), ["id", "kind", "myOptionIds", "options", "question", "results", "status"]);
+  assert.ok(!("anonymous" in rules.toStudentPoll({ ...poll, anonymous: true }, answers, "u1")));
   assert.equal(rules.toStudentPoll(poll, answers, "u3").myOptionIds, null);
   const shared = rules.toStudentPoll({ ...poll, resultsSharedAt: "x", status: "closed" }, answers, "u1");
   assert.deepEqual(shared.results, { counts: { o1: 1, o2: 1 }, total: 2 });
@@ -225,6 +228,7 @@ test("o fio da pergunta (docs/30 §1.3): so quem perguntou e a equipe escrevem, 
   const reply = { anonymous: false, body: "E no app?", createdAt: "2026-11-05T23:21:00.000Z", displayName: "Ana M.", id: "r1", questionId: "q1", role: "student", sessionId: "s1", userId: "u1" };
   assert.deepEqual(rules.toStudentReply(reply, "u1", "https://exemplo.test/ana.jpg"), { anonymous: false, avatarUrl: "https://exemplo.test/ana.jpg", body: "E no app?", createdAt: "2026-11-05T23:21:00.000Z", displayName: "Ana M.", id: "r1", mine: true, role: "student" });
   assert.equal(rules.toStudentReply(reply, "u2").mine, false);
+  // Legado: linhas de antes de 10/11/2026 (D64). A resposta gravada numa pergunta Anonima continua sem foto.
   assert.equal(rules.toStudentReply({ ...reply, anonymous: true }, "u2", "https://exemplo.test/ana.jpg").avatarUrl, null, "a resposta numa pergunta Anonima sem foto");
   assert.equal(rules.toStudentReply({ ...reply, role: "host", userId: "u-equipe" }, "u1").role, "host");
 
@@ -236,6 +240,7 @@ test("o fio da pergunta (docs/30 §1.3): so quem perguntou e a equipe escrevem, 
   assert.deepEqual([minha.canReply, minha.avatarUrl, minha.replies.map((item) => item.id)], [true, "https://exemplo.test/ana.jpg", ["r1", "r2"]]);
   assert.equal(rules.toStudentQuestion(respondida, "u2", false, null, fio).canReply, false, "o outro aluno le o fio, sem responder");
   assert.equal(rules.toStudentQuestion(respondida, null, false).canReply, false, "sem aluno (a previa), nunca");
+  // Legado: linhas de antes de 10/11/2026 (D64). A pergunta gravada como Anonima continua sem foto.
   assert.equal(rules.toStudentQuestion({ ...respondida, anonymous: true }, "u2", false, "https://exemplo.test/ana.jpg").avatarUrl, null, "a pergunta Anonima sem foto");
   const cheio = Array.from({ length: QUESTION_REPLY_LIMITS.perQuestion }, (_, index) => rules.toStudentReply({ ...reply, id: `r${index}` }, "u1"));
   assert.equal(rules.toStudentQuestion(respondida, "u1", false, null, cheio).canReply, false, "com o fio cheio, o Responder some");

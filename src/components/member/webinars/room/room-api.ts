@@ -105,14 +105,12 @@ export function getRecentChat(webinarId: string, sessionId: string, cursor: Chat
   return getJson<ChatRecentAnswer>(roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since }), WEBINAR_COPY.sala.erroCarregarChat, signal);
 }
 
+/** O aceite vai junto da primeira escrita (consent + versao). A sala nao manda mais como o aluno aparece (D64): e sempre o primeiro nome com a inicial. */
 export type ChatPostBody = {
-  anonymous?: boolean;
   body: string;
   consent?: boolean;
   consentVersion?: number;
-  displayMode?: "anonymous" | "first_name_initial" | "nickname";
   kind?: "message" | "question";
-  nickname?: string;
   offsetMs?: number;
   replyToId?: string | null;
   sessionId: string;
@@ -144,7 +142,7 @@ export function getQuestions(webinarId: string, sessionId: string, order: "recen
   return getJson<{ questions: StudentQuestion[]; serverTime: string }>(roomApiPath(webinarId, "questions", { ordem: order, sessao: sessionId }), GENERIC, signal);
 }
 
-export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { anonymous: boolean; body: string; offsetMs?: number; sessionId: string };
+export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; offsetMs?: number; sessionId: string };
 
 export function postQuestion(webinarId: string, body: QuestionPostBody) {
   return sendJson<{ question: StudentQuestion }>(roomApiPath(webinarId, "questions"), "POST", body, GENERIC);
@@ -154,7 +152,7 @@ export function postQuestionVote(webinarId: string, questionId: string, sessionI
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
 }
 
-export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { body: string; sessionId: string };
+export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; sessionId: string };
 
 /** A resposta de quem perguntou no fio da propria pergunta. */
 export function postQuestionReply(webinarId: string, questionId: string, body: QuestionReplyBody) {

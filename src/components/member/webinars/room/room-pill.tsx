@@ -79,7 +79,7 @@ export type RoomPillProps = Omit<ComponentProps<"button">, "aria-label" | "title
   /** Desligado COM motivo: aria-disabled (continua focavel) e o motivo lido por aria-describedby. */
   disabledReason?: string;
   icon?: LucideIcon;
-  /** O estado no icone (a mascara cheia da Anonima ligada), como o curtir do YouTube. */
+  /** O estado no icone (o polegar cheio do curtir ligado), como no YouTube. */
   iconFilled?: boolean;
   /** O icone do fim (a seta da Visão do vídeo). Na compacta de menu, a seta e sempre o ChevronDown de 16. */
   trailing?: LucideIcon;

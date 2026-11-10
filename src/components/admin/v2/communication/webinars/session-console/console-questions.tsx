@@ -16,7 +16,7 @@ import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionSt
 
 // O painel Perguntas do console (docs/30 §2.4; o estilo do YouTube, docs/31 §10): a fila por votos (as abertas
 // primeiro), cada pergunta como o comentario do YouTube da sala, direto no cartao do painel (sem cartao proprio), com
-// uma linha fina entre elas: o avatar de 24 (a mascara na Anonima), a linha do autor (o nome, os votos e os selos
+// uma linha fina entre elas: o avatar de 24 (a mascara na Anonima, legado de antes de 10/11/2026), a linha do autor (o nome, os votos e os selos
 // tonais: a situacao, e as marcas do Atendimento da fase 4c, docs/30 §1.6 e D24: "Respondida pelo Assistente", "Pediu a
 // equipe" e com quem esta), o texto e, com a resposta escrita, a resposta como a do fio (o icone da equipe e o texto).
 // Na aberta (ou na respondida pelo Assistente em que o aluno pediu a equipe), o campo da resposta com a linha embaixo,
@@ -46,7 +46,10 @@ type ConsoleQuestionsProps = {
   questions: readonly WebinarQuestion[];
 };
 
-/** Uma resposta do fio no console: quem escreveu (a foto ou as iniciais; a mascara na pergunta anonima), o selo do papel da equipe, o texto e a lixeira. */
+/**
+ * Uma resposta do fio no console: quem escreveu (a foto ou as iniciais), o selo do papel da equipe, o texto e a lixeira.
+ * Legado: linhas de antes de 10/11/2026 (D64). Na pergunta anonima antiga, "Anônima" e a mascara, como a pergunta.
+ */
 function ThreadReply({ busy, canAct, onDelete, reply }: { busy: boolean; canAct: boolean; onDelete: ((replyId: string) => void) | null; reply: QuestionReply }) {
   const name = reply.anonymous ? copy.anonymous : reply.displayName;
   const role = reply.role === "student" ? null : chatRoleLabel(reply.role);
@@ -124,6 +127,7 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
           const mark = marks?.[question.id] ?? null;
           const backToTeam = question.status === "answered" && mark?.answerSource === "ai" && mark.handoffRequested;
           const canAnswer = question.status === "open" || backToTeam;
+          // Legado: linhas de antes de 10/11/2026 (D64). A pergunta anonima antiga continua "Anônima", com a mascara.
           const name = question.anonymous ? copy.anonymous : question.displayName;
           const draft = answers[question.id] ?? "";
           const replies = question.replies ?? [];

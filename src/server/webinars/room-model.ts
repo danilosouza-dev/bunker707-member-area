@@ -3,7 +3,7 @@
 // presenca (M1, M2) e o endereco do player da Bunny. Sem "server-only", imports relativos: tests/webinarios-*.test.mjs
 // carregam direto pelo Node. Nada aqui le o banco nem o relogio de verdade: tudo recebe `nowMs`.
 
-import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type ChatSource, type DisplayNameMode, type SessionKind, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
+import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type ChatSource, type SessionKind, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
 import { ROOM_OPENS_MINUTES_BEFORE } from "./room-opens";
 
 /** A sala abre para o aluno este tanto antes da hora marcada (num modulo folha, para o contador do just-in-time). */
@@ -154,7 +154,11 @@ export function isStillPresent(lastSeenBucket: number, currentBucket: number): b
   return currentBucket - lastSeenBucket < ROOM_RULES.leaveAfterBuckets;
 }
 
-/** Numero estavel por aluno e webinario para "Aluno {n}" (D10): nunca o id, nunca a ordem de chegada. */
+/**
+ * Numero estavel por aluno e webinario para "Aluno {n}" (D10): nunca o id, nunca a ordem de chegada. Legado: linhas de
+ * antes de 10/11/2026 (D64). Ninguem mais escreve como anonimo; a conta fica so para reconhecer e mostrar o que ja foi
+ * gravado assim (a foto que nao aparece, o CSV de perguntas, o "Liberar" da equipe).
+ */
 export function anonymousNumber(userId: string, webinarId: string): number {
   let hash = 2166136261;
   const text = `${userId}:${webinarId}`;
@@ -180,7 +184,10 @@ export function firstNameInitial(fullName: string | null | undefined): string {
   return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 }
 
-/** "Aluno 123": o nome de quem participa como anonimo neste webinario (D10). */
+/**
+ * "Aluno 123": o nome de quem participava como anonimo neste webinario (D10). Legado: linhas de antes de 10/11/2026
+ * (D64); nenhuma escrita nova usa este nome.
+ */
 export function anonymousDisplayName(userId: string, webinarId: string): string {
   return `Aluno ${anonymousNumber(userId, webinarId)}`;
 }
@@ -191,13 +198,15 @@ export type AuthorPhoto = { avatarUrl: string | null; consentCurrent: boolean };
 /**
  * A foto do perfil que acompanha o que a pessoa escreveu na sala (docs/30 §8.5, aceite versao 2, decisao do produtor de
  * 10/11/2026): a da equipe sempre (e quem apresenta a live); a do aluno so com o aceite em dia (o texto da versao 2 diz
- * que a foto aparece para os outros alunos; quem aceitou a versao 1 fica com as iniciais ate aceitar de novo) e nunca
- * no que foi escrito como anonimo (a pergunta Anonima, ou o nome "Aluno {n}" de quem participa como anonimo: a foto
- * diria quem e). A equipe, no console, ve a foto do aluno sem depender do aceite (ela ja ve o perfil no admin), mas
- * nunca no anonimo. O roteiro e o Assistente nao tem pessoa. Sem foto, nulo: a tela desenha as iniciais.
+ * que a foto aparece para os outros alunos; quem aceitou a versao 1, ou aceitou com um modo antigo, fica com as
+ * iniciais ate aceitar de novo) e nunca no que foi escrito como anonimo (a pergunta Anonima, ou o nome "Aluno {n}" de
+ * quem participava como anonimo: a foto diria quem e). A equipe, no console, ve a foto do aluno sem depender do aceite
+ * (ela ja ve o perfil no admin), mas nunca no anonimo. O roteiro e o Assistente nao tem pessoa. Sem foto, nulo: a tela
+ * desenha as iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para
+ * as linhas de antes, que continuam com a promessa da epoca.
  */
 export function authorPhotoUrl(input: {
-  /** A pergunta marcada como Anonima. */
+  /** A pergunta marcada como Anonima (legado: linhas de antes de 10/11/2026). */
   anonymous?: boolean;
   authorUserId: string | null;
   displayName: string;
@@ -220,17 +229,11 @@ export function authorPhotoUrl(input: {
   return input.viewer === "team" || input.photo?.consentCurrent ? url : null;
 }
 
-/** O nome que aparece no chat, pela escolha do aluno no aceite (D10). */
-export function displayNameFor(input: { anonymousNumber: number; fullName: string | null | undefined; mode: DisplayNameMode; nickname: string | null | undefined }): string {
-  if (input.mode === "anonymous") {
-    return `Aluno ${input.anonymousNumber}`;
-  }
-  if (input.mode === "nickname") {
-    const nickname = (input.nickname ?? "").trim();
-    if (nickname.length >= CHAT_LIMITS.nicknameMin) {
-      return nickname.slice(0, CHAT_LIMITS.nicknameMax);
-    }
-  }
+/**
+ * O nome do aluno no chat, nas Perguntas, no motor da live e no console (D64, 10/11/2026): sempre o primeiro nome com
+ * a inicial do sobrenome. Nao ha mais apelido nem "Aluno {n}", qualquer que seja o aceite gravado ou o card Sala.
+ */
+export function displayNameFor(input: { fullName: string | null | undefined }): string {
   return firstNameInitial(input.fullName).slice(0, CHAT_LIMITS.displayName);
 }
 
