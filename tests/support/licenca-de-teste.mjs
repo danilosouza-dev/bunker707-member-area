@@ -34,11 +34,12 @@ export function novaChaveDeEmissao(raiz, opcoes = {}) {
   const par = novoParDeChaves();
   const certificado = {
     v: 1,
+    use: opcoes.use ?? "license",
     kid: opcoes.kid ?? "emissao-teste",
     rid: opcoes.rid ?? raiz.rid,
     publicKey: par.publicKey,
     notBefore: opcoes.notBefore ?? "2026-01-01T00:00:00.000Z",
-    notAfter: opcoes.notAfter ?? "2030-01-01T00:00:00.000Z"
+    notAfter: opcoes.notAfter ?? "2028-12-31T00:00:00.000Z"
   };
   const parteCertificado = segmento(certificado);
   return {
@@ -59,7 +60,7 @@ export function licencaBase(sobrescrever = {}) {
     installation: { id: "inst_0001", host: "alunos.escola.test" },
     issuedAt: "2026-11-10T12:00:00.000Z",
     expiresAt: "2027-02-08T12:00:00.000Z",
-    plan: { kind: "annual", validUntil: "2027-11-10T23:59:59.000Z", steps: [] },
+    plan: { kind: "annual", validUntil: "2027-11-10T23:59:59-03:00", steps: [] },
     features: [{ key: "webinars" }],
     ...sobrescrever
   };
@@ -68,18 +69,24 @@ export function licencaBase(sobrescrever = {}) {
 /** Assina a licença com a chave de emissão e monta o texto BKL1. */
 export function assinarLicenca(chaveDeEmissao, licenca, opcoes = {}) {
   const parteLicenca = segmento(licenca);
-  const assinatura = assinar(CONTEXTO_LICENCA, parteLicenca, opcoes.assinarCom ?? chaveDeEmissao.privateKey);
+  const assinatura = assinar(opcoes.contexto ?? CONTEXTO_LICENCA, parteLicenca, opcoes.assinarCom ?? chaveDeEmissao.privateKey);
   return [PREFIXO, chaveDeEmissao.parteCertificado, chaveDeEmissao.assinaturaCertificado, parteLicenca, assinatura].join(".");
 }
 
-/** Os passos datados que o Emissor manda para a Licença anual vencendo (docs/32 §2.2): 30 dias antes, 15 de carência, 16º e 46º dia. */
+/**
+ * Os passos datados que o Emissor manda para a Licença anual vencendo (docs/32 §2.2): 30 dias antes, 15 de
+ * carência, 16º e 46º dia. A validade vai até o fim do último dia no horário de Brasília (23:59:59-03:00), e
+ * cada passo começa à meia-noite de Brasília: com a validade em 10/11, o Admin limitado começa em 26/11 e a
+ * Escola congelada em 26/12.
+ */
 export function passosDaAnual(validadeIso) {
-  const fim = Date.parse(validadeIso);
+  const virada = Date.parse(validadeIso) + 1000;
   const dia = 24 * 60 * 60 * 1000;
+  const brasilia = (ms) => new Date(ms - 3 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "-03:00");
   return [
-    { degree: "aviso", from: new Date(fim - 30 * dia).toISOString(), reason: "anual_vencendo" },
-    { degree: "aviso", from: new Date(fim).toISOString(), reason: "anual_carencia" },
-    { degree: "admin_limitado", from: new Date(fim + 15 * dia).toISOString(), reason: "anual_vencida" },
-    { degree: "escola_congelada", from: new Date(fim + 45 * dia).toISOString(), reason: "anual_vencida" }
+    { degree: "aviso", from: brasilia(virada - 30 * dia), reason: "anual_vencendo" },
+    { degree: "aviso", from: brasilia(virada), reason: "anual_carencia" },
+    { degree: "admin_limitado", from: brasilia(virada + 15 * dia), reason: "anual_vencida" },
+    { degree: "escola_congelada", from: brasilia(virada + 45 * dia), reason: "anual_vencida" }
   ];
 }

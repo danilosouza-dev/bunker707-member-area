@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 import {
+  CONTEXTO_CERTIFICADO,
   assinarLicenca,
   licencaBase,
   novaChaveDeEmissao,
@@ -10,40 +11,60 @@ import {
 } from "./support/licenca-de-teste.mjs";
 
 // Núcleo do Verificador de licença (docs/32 §2.2, §11.3 e §11.4): a conferência da licença assinada e a
-// situação que ela dá à escola. Um teste por situação do §2.2 que já dá para reproduzir sem banco.
+// situação que ela dá à escola. Um teste por situação do §2.2 que já dá para reproduzir sem banco, e um por
+// achado da revisão independente de 10/11/2026 (datas inválidas, licença ilegível, plano provisório, relógio,
+// limites do que uma chave vazada consegue emitir, endereço).
 
 const { verifyLicenseToken } = await import("../src/server/licensing/artifact.ts");
-const { evaluateLicense, normalizeHost, resolveTrustedNow, sameHost } = await import("../src/server/licensing/evaluate.ts");
+const { daysUntil, evaluateLicense, isFeatureOn, normalizeHost, resolveTrustedNow, sameHost } = await import(
+  "../src/server/licensing/evaluate.ts"
+);
 const { LICENSE_NOTICE, allowsActionClass } = await import("../src/server/licensing/model.ts");
 
-const DIA = 24 * 60 * 60 * 1000;
+const HORA = 60 * 60 * 1000;
+const DIA = 24 * HORA;
+const iso = (ms) => new Date(ms).toISOString();
 const raiz = novaRaiz("raiz-2026");
 const raizDeReserva = novaRaiz("raiz-reserva");
 const RAIZES = [raiz.confiavel, raizDeReserva.confiavel];
 const emissao = novaChaveDeEmissao(raiz);
+const VALIDADE = "2027-11-10T23:59:59-03:00";
 
-function conferida(licenca = licencaBase()) {
-  const resultado = verifyLicenseToken(assinarLicenca(emissao, licenca), RAIZES);
+function conferida(licenca = licencaBase(), chave = emissao) {
+  const resultado = verifyLicenseToken(assinarLicenca(chave, licenca), RAIZES);
   assert.equal(resultado.ok, true, `a licença de teste confere: ${JSON.stringify(resultado)}`);
   return resultado.license;
 }
 
-function avaliar(licenca, opcoes = {}) {
+/** A licença que a conferência diária deixaria guardada: emitida 1 h antes do instante, valendo 90 dias. */
+function emitidaEm(instante, sobrescrever = {}) {
+  const emitida = Date.parse(instante) - HORA;
+  return conferida(licencaBase({ issuedAt: iso(emitida), expiresAt: iso(emitida + 90 * DIA), ...sobrescrever }));
+}
+
+function avaliar(licenca, opcoes) {
   return evaluateLicense({
     license: licenca,
     everActivated: true,
     unreadableSince: null,
-    now: new Date(opcoes.agora ?? "2026-11-11T12:00:00.000Z"),
-    lastGoodCheckInAt: opcoes.ultimaConferencia === undefined ? new Date(opcoes.agora ?? "2026-11-11T12:00:00.000Z") : opcoes.ultimaConferencia,
+    now: opcoes.agora instanceof Date ? opcoes.agora : new Date(opcoes.agora),
     configuredHost: opcoes.endereco ?? "alunos.escola.test",
-    hostMismatchSince: opcoes.enderecoDiferenteDesde ?? null,
-    ...opcoes.entrada
+    hostMismatchSince: opcoes.enderecoDiferenteDesde ?? null
   });
 }
 
-function emDias(baseIso, dias) {
-  return new Date(Date.parse(baseIso) + dias * DIA).toISOString();
+function ilegivel(agora, desde) {
+  return evaluateLicense({
+    license: null,
+    everActivated: true,
+    unreadableSince: desde,
+    now: new Date(agora),
+    configuredHost: "alunos.escola.test",
+    hostMismatchSince: null
+  });
 }
+
+const anual = (sobrescrever = {}) => ({ plan: { kind: "annual", validUntil: VALIDADE, steps: passosDaAnual(VALIDADE) }, ...sobrescrever });
 
 // ---- Conferência da assinatura ---------------------------------------------------------------------------
 
@@ -54,26 +75,23 @@ test("licença emitida pela nossa chave confere e devolve o titular, o endereço
   assert.equal(licenca.installation.host, "alunos.escola.test");
   assert.deepEqual(licenca.features, [{ key: "webinars" }]);
   assert.equal(licenca.delivery, "online");
+  assert.deepEqual(licenca.statusSteps, []);
 });
 
 test("licença com o conteúdo trocado depois de assinada não confere", () => {
-  const texto = assinarLicenca(emissao, licencaBase());
-  const partes = texto.split(".");
-  const adulterada = { ...licencaBase(), features: [{ key: "webinars" }, { key: "modulo-pago" }] };
-  partes[3] = Buffer.from(JSON.stringify(adulterada)).toString("base64url");
+  const partes = assinarLicenca(emissao, licencaBase()).split(".");
+  partes[3] = Buffer.from(JSON.stringify({ ...licencaBase(), features: [{ key: "webinars" }, { key: "modulo-pago" }] })).toString("base64url");
 
   assert.deepEqual(verifyLicenseToken(partes.join("."), RAIZES), { ok: false, error: "assinatura_da_licenca" });
 });
 
 test("licença assinada por uma raiz que o produto não conhece é recusada, mesmo com o nome da nossa", () => {
   const raizPirata = novaRaiz("raiz-pirata");
-  const emissaoPirata = novaChaveDeEmissao(raizPirata);
-  assert.deepEqual(verifyLicenseToken(assinarLicenca(emissaoPirata, licencaBase()), RAIZES), {
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(novaChaveDeEmissao(raizPirata), licencaBase()), RAIZES), {
     ok: false,
     error: "raiz_desconhecida"
   });
 
-  // Quem troca só o identificador da raiz no certificado esbarra na assinatura do certificado.
   const comNossoNome = novaChaveDeEmissao(raizPirata, { rid: "raiz-2026" });
   assert.deepEqual(verifyLicenseToken(assinarLicenca(comNossoNome, licencaBase()), RAIZES), {
     ok: false,
@@ -81,110 +99,180 @@ test("licença assinada por uma raiz que o produto não conhece é recusada, mes
   });
 });
 
-test("a raiz não assina licença direto, e a assinatura do certificado não vale como assinatura de licença", () => {
-  const assinadaPelaRaiz = assinarLicenca(emissao, licencaBase(), { assinarCom: raiz.privateKey });
-  assert.deepEqual(verifyLicenseToken(assinadaPelaRaiz, RAIZES), { ok: false, error: "assinatura_da_licenca" });
+test("separação de domínio: a raiz não assina licença, e a chave de emissão assinando no contexto do certificado não vale", () => {
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(emissao, licencaBase(), { assinarCom: raiz.privateKey }), RAIZES), {
+    ok: false,
+    error: "assinatura_da_licenca"
+  });
+
+  // Mesma chave, mesmo conteúdo, só o contexto trocado: a assinatura não serve.
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(emissao, licencaBase(), { contexto: CONTEXTO_CERTIFICADO }), RAIZES), {
+    ok: false,
+    error: "assinatura_da_licenca"
+  });
 
   const partes = assinarLicenca(emissao, licencaBase()).split(".");
-  const trocada = [partes[0], partes[1], partes[2], partes[1], partes[2]].join(".");
-  assert.equal(verifyLicenseToken(trocada, RAIZES).ok, false);
+  assert.equal(verifyLicenseToken([partes[0], partes[1], partes[2], partes[1], partes[2]].join("."), RAIZES).ok, false);
+});
+
+test("chave certificada para outro uso (a dos pacotes, por exemplo) nunca emite licença", () => {
+  const pacotes = novaChaveDeEmissao(raiz, { use: "packages" });
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(pacotes, licencaBase()), RAIZES), { ok: false, error: "formato" });
 });
 
 test("licença emitida fora do prazo da chave de emissão é recusada; a emitida dentro continua valendo depois", () => {
   const aposentada = novaChaveDeEmissao(raiz, { notBefore: "2026-01-01T00:00:00.000Z", notAfter: "2026-06-30T23:59:59.000Z" });
 
-  assert.deepEqual(verifyLicenseToken(assinarLicenca(aposentada, licencaBase({ issuedAt: "2026-11-10T12:00:00.000Z" })), RAIZES), {
-    ok: false,
-    error: "certificado_fora_do_prazo"
-  });
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(aposentada, licencaBase()), RAIZES), { ok: false, error: "certificado_fora_do_prazo" });
 
-  const antiga = verifyLicenseToken(assinarLicenca(aposentada, licencaBase({ issuedAt: "2026-05-01T12:00:00.000Z" })), RAIZES);
-  assert.equal(antiga.ok, true);
+  const antiga = licencaBase({ issuedAt: "2026-05-01T12:00:00.000Z", expiresAt: "2026-07-30T12:00:00.000Z" });
+  assert.equal(verifyLicenseToken(assinarLicenca(aposentada, antiga), RAIZES).ok, true);
 });
 
-test("a raiz de reserva também confere, e a licença precisa citar a chave que a assinou", () => {
+test("chave de emissão vazada não emite licença longa: arquivo, observação, compra e módulo provisórios têm teto", () => {
+  const aposentada = novaChaveDeEmissao(raiz, { notBefore: "2026-01-01T00:00:00.000Z", notAfter: "2026-06-30T23:59:59.000Z" });
+  const datadaNoPassado = { issuedAt: "2026-06-30T23:00:00.000Z" };
+  const casos = [
+    { expiresAt: "2099-01-01T00:00:00.000Z" },
+    { expiresAt: "2026-09-01T00:00:00.000Z", observeUntil: "2099-01-01T00:00:00.000Z" },
+    { expiresAt: "2026-09-01T00:00:00.000Z", features: [{ key: "webinars", until: "2099-01-01T00:00:00.000Z" }] },
+    {
+      expiresAt: "2026-09-01T00:00:00.000Z",
+      provisional: { kind: "lifetime", steps: [], until: "2099-01-01T00:00:00.000Z" }
+    },
+    { expiresAt: "2026-06-01T00:00:00.000Z" }
+  ];
+
+  for (const caso of casos) {
+    assert.deepEqual(verifyLicenseToken(assinarLicenca(aposentada, licencaBase({ ...datadaNoPassado, ...caso })), RAIZES), {
+      ok: false,
+      error: "fora_dos_limites"
+    }, JSON.stringify(caso));
+  }
+});
+
+test("certificado de chave de emissão com mais de 1.100 dias é recusado", () => {
+  const longa = novaChaveDeEmissao(raiz, { notBefore: "2026-01-01T00:00:00.000Z", notAfter: "2030-01-01T00:00:00.000Z" });
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(longa, licencaBase()), RAIZES), { ok: false, error: "assinatura_do_certificado" });
+});
+
+test("a raiz de reserva também confere, raízes repetidas ou mal formadas não quebram, e a licença precisa citar a chave", () => {
   const daReserva = novaChaveDeEmissao(raizDeReserva, { kid: "emissao-reserva" });
   assert.equal(verifyLicenseToken(assinarLicenca(daReserva, licencaBase({ kid: "emissao-reserva" })), RAIZES).ok, true);
-  assert.deepEqual(verifyLicenseToken(assinarLicenca(daReserva, licencaBase({ kid: "outra" })), RAIZES), {
-    ok: false,
-    error: "chave_diferente"
-  });
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(daReserva, licencaBase({ kid: "outra" })), RAIZES), { ok: false, error: "chave_diferente" });
+
+  const outra = novaRaiz("raiz-2026");
+  const texto = assinarLicenca(emissao, licencaBase());
+  assert.equal(verifyLicenseToken(texto, [null, { rid: 1 }, outra.confiavel, raiz.confiavel]).ok, true, "tenta toda raiz com o mesmo rid");
+  assert.deepEqual(verifyLicenseToken(texto, [null, { rid: "raiz-2026", publicKey: "curta" }]), { ok: false, error: "raiz_desconhecida" });
+  assert.deepEqual(verifyLicenseToken(texto, null), { ok: false, error: "raiz_desconhecida" });
 });
 
-test("texto quebrado, de outro formato ou grande demais é recusado sem lançar erro", () => {
-  const texto = assinarLicenca(emissao, licencaBase());
+test("chave pública de ordem pequena é recusada: nem raiz nem chave de emissão aceitam assinatura sem chave privada", () => {
+  const identidade = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString("base64url");
+  const assinaturaVazia = Buffer.concat([Buffer.from([1]), Buffer.alloc(63)]).toString("base64url");
+  const certificado = Buffer.from(
+    JSON.stringify({ v: 1, use: "license", kid: "emissao-teste", rid: "raiz-2026", publicKey: identidade, notBefore: "2026-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:00.000Z" })
+  ).toString("base64url");
+  const licenca = Buffer.from(JSON.stringify(licencaBase())).toString("base64url");
+  const texto = ["BKL1", certificado, assinaturaVazia, licenca, assinaturaVazia].join(".");
 
-  for (const ruim of ["", "BKL1", texto.replace(/^BKL1/, "BKL2"), texto.split(".").slice(0, 4).join("."), `${texto}.extra`, "x".repeat(20_000), null]) {
-    assert.deepEqual(verifyLicenseToken(ruim, RAIZES), { ok: false, error: "formato" });
+  assert.equal(verifyLicenseToken(texto, [{ rid: "raiz-2026", publicKey: identidade }]).ok, false);
+  assert.deepEqual(verifyLicenseToken(texto, [{ rid: "raiz-2026", publicKey: identidade }]), { ok: false, error: "raiz_desconhecida" });
+});
+
+test("texto quebrado, de outro formato, com espaço, não canônico ou grande demais é recusado sem lançar erro", () => {
+  const texto = assinarLicenca(emissao, licencaBase());
+  const partes = texto.split(".");
+  const alfabeto = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const ultimo = partes[4].at(-1);
+  // Os 4 bits que sobram no último caractere da assinatura: outro caractere, os mesmos 64 bytes.
+  const variante = partes[4].slice(0, -1) + alfabeto[alfabeto.indexOf(ultimo) ^ 1];
+  assert.deepEqual(Buffer.from(variante, "base64url"), Buffer.from(partes[4], "base64url"));
+
+  for (const ruim of [
+    "",
+    "BKL1",
+    texto.replace(/^BKL1/, "BKL2"),
+    partes.slice(0, 4).join("."),
+    `${texto}.extra`,
+    ` ${texto}`,
+    `${texto}\n`,
+    [...partes.slice(0, 4), variante].join("."),
+    `${partes[0]}.${partes[1]}=.${partes.slice(2).join(".")}`,
+    "x".repeat(20_000),
+    null,
+    42
+  ]) {
+    assert.deepEqual(verifyLicenseToken(ruim, RAIZES), { ok: false, error: "formato" }, String(ruim).slice(0, 40));
   }
 
   assert.deepEqual(verifyLicenseToken(assinarLicenca(emissao, licencaBase({ installation: { id: "i", host: "Com Espaço" } })), RAIZES), {
     ok: false,
     error: "conteudo"
   });
+  assert.deepEqual(verifyLicenseToken(assinarLicenca(emissao, licencaBase({ plan: { kind: "annual", steps: [] } })), RAIZES), {
+    ok: false,
+    error: "conteudo"
+  }, "a anual sem validade não vira vitalícia");
 });
 
 test("campo que esta versão não conhece é ignorado, e o módulo que ela não conhece não liga nada", () => {
   const licenca = conferida(licencaBase({ campoDoFuturo: { qualquer: 1 }, features: [{ key: "webinars" }, { key: "modulo-do-futuro" }] }));
-  const situacao = avaliar(licenca);
 
   assert.equal("campoDoFuturo" in licenca, false);
-  assert.deepEqual(situacao.features, ["webinars", "modulo-do-futuro"]);
+  assert.deepEqual(avaliar(licenca, { agora: "2026-11-10T13:00:00.000Z" }).features, ["webinars", "modulo-do-futuro"]);
 });
 
 // ---- Situação da escola ------------------------------------------------------------------------------------
 
-test("instalação nunca ativada só mostra a tela de ativação: nenhuma ação do admin passa", () => {
+test("instalação nunca ativada só mostra a tela de ativação; só o dever legal passa", () => {
   const situacao = evaluateLicense({
     license: null,
     everActivated: false,
     unreadableSince: null,
     now: new Date("2026-11-11T12:00:00.000Z"),
-    lastGoodCheckInAt: null,
     configuredHost: "alunos.escola.test",
     hostMismatchSince: null
   });
 
   assert.equal(situacao.degree, "nao_ativada");
-  for (const classe of ["leitura", "atendimento", "dever_legal", "matricula", "conteudo"]) {
+  for (const classe of ["leitura", "atendimento", "matricula", "conteudo"]) {
     assert.equal(allowsActionClass(situacao.restrictions, classe), false, classe);
   }
+  assert.equal(allowsActionClass(situacao.restrictions, "dever_legal"), true, "pedido da LGPD numa cópia nunca ativada");
   assert.deepEqual(situacao.features, []);
 });
 
 test("licença em dia: tudo liberado, módulos ligados e o titular para o 'Licenciado para'", () => {
-  const situacao = avaliar(conferida());
+  const situacao = avaliar(emitidaEm("2026-11-11T12:00:00.000Z"), { agora: "2026-11-11T12:00:00.000Z" });
 
   assert.equal(situacao.degree, "ok");
   assert.deepEqual(situacao.restrictions, { activationOnly: false, content: false, newAccess: false });
   assert.deepEqual(situacao.features, ["webinars"]);
   assert.equal(situacao.licensedTo, "Escola de Teste Ltda");
   assert.equal(situacao.kind, "annual");
-  assert.equal(situacao.validUntil, "2027-11-10T23:59:59.000Z");
+  assert.equal(situacao.validUntil, VALIDADE);
   assert.equal(situacao.notice, LICENSE_NOTICE);
+  assert.equal(isFeatureOn(situacao, "webinars"), true);
+  assert.equal(isFeatureOn(situacao, "outro"), false);
 });
 
-test("Licença anual: Aviso 30 dias antes, carência de 15 dias, Admin limitado no 16º dia e Escola congelada no 46º", () => {
-  const validade = "2027-11-10T23:59:59.000Z";
-  const licenca = conferida(
-    licencaBase({ expiresAt: "2028-03-01T00:00:00.000Z", plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } })
-  );
-  const em = (iso) => avaliar(licenca, { agora: iso });
+test("Licença anual em Brasília: Aviso 30 dias antes, carência até 25/11, Admin limitado em 26/11 e Escola congelada em 26/12", () => {
+  const em = (instante) => avaliar(emitidaEm(instante, anual()), { agora: instante });
 
-  const antes = em("2027-10-01T12:00:00.000Z");
-  assert.equal(antes.degree, "ok");
+  assert.equal(em("2027-10-01T12:00:00-03:00").degree, "ok");
 
-  const perto = em("2027-10-20T12:00:00.000Z");
+  const perto = em("2027-10-20T12:00:00-03:00");
   assert.equal(perto.degree, "aviso");
   assert.equal(perto.restrictions.content, false);
-  assert.equal(perto.nextStep.degree, "admin_limitado");
-  assert.equal(perto.nextStep.at, emDias(validade, 15));
+  assert.deepEqual(perto.nextStep, { degree: "admin_limitado", at: "2027-11-26T00:00:00-03:00", reason: "anual_vencida" });
 
-  const carencia = em("2027-11-20T12:00:00.000Z");
+  const carencia = em("2027-11-25T23:59:00-03:00");
   assert.equal(carencia.degree, "aviso");
   assert.equal(allowsActionClass(carencia.restrictions, "conteudo"), true);
 
-  const limitado = em("2027-11-26T12:00:00.000Z");
+  const limitado = em("2027-11-26T00:00:00-03:00");
   assert.equal(limitado.degree, "admin_limitado");
   assert.equal(allowsActionClass(limitado.restrictions, "conteudo"), false);
   assert.equal(allowsActionClass(limitado.restrictions, "matricula"), true);
@@ -192,7 +280,9 @@ test("Licença anual: Aviso 30 dias antes, carência de 15 dias, Admin limitado 
   assert.equal(allowsActionClass(limitado.restrictions, "atendimento"), true);
   assert.equal(limitado.nextStep.degree, "escola_congelada");
 
-  const congelada = em("2027-12-26T12:00:00.000Z");
+  assert.equal(em("2027-12-25T23:59:00-03:00").degree, "admin_limitado");
+
+  const congelada = em("2027-12-26T00:00:00-03:00");
   assert.equal(congelada.degree, "escola_congelada");
   assert.equal(allowsActionClass(congelada.restrictions, "matricula"), false);
   assert.equal(allowsActionClass(congelada.restrictions, "dever_legal"), true);
@@ -201,50 +291,61 @@ test("Licença anual: Aviso 30 dias antes, carência de 15 dias, Admin limitado 
   assert.equal(congelada.nextStep, null);
 });
 
-test("Ano adicional na garantia vale como provisório até a data dele; depois volta o confirmado", () => {
-  const validadeAntiga = "2027-11-10T23:59:59.000Z";
-  const validadeNova = "2028-11-10T23:59:59.000Z";
-  const licenca = conferida(
-    licencaBase({
-      expiresAt: "2028-03-01T00:00:00.000Z",
-      plan: { kind: "annual", validUntil: validadeAntiga, steps: passosDaAnual(validadeAntiga) },
-      provisional: { kind: "annual", validUntil: validadeNova, steps: passosDaAnual(validadeNova), until: "2027-11-30T00:00:00.000Z" }
-    })
-  );
+test("rede de segurança: a anual que chega sem os passos não vira vitalícia (Admin limitado 60 dias depois, congelada aos 90)", () => {
+  const sem = (instante) => avaliar(emitidaEm(instante, { plan: { kind: "annual", validUntil: VALIDADE, steps: [] } }), { agora: instante });
+  const fim = Date.parse(VALIDADE);
+
+  assert.equal(sem(iso(fim + 59 * DIA)).degree, "ok");
+  assert.equal(sem(iso(fim + 60 * DIA)).degree, "admin_limitado");
+  assert.equal(sem(iso(fim + 90 * DIA)).degree, "escola_congelada");
+});
+
+test("Ano adicional na garantia vale como provisório até a data dele, a faixa mostra o que volta nesse dia, e depois volta o confirmado", () => {
+  const nova = "2028-11-10T23:59:59-03:00";
+  const licenca = emitidaEm("2027-11-27T12:00:00.000Z", {
+    ...anual(),
+    provisional: { kind: "annual", validUntil: nova, steps: passosDaAnual(nova), until: "2027-11-30T00:00:00.000Z" }
+  });
 
   const naGarantia = avaliar(licenca, { agora: "2027-11-27T12:00:00.000Z" });
   assert.equal(naGarantia.degree, "ok");
   assert.equal(naGarantia.provisional, true);
-  assert.equal(naGarantia.validUntil, validadeNova);
+  assert.equal(naGarantia.validUntil, nova);
+  assert.deepEqual(naGarantia.nextStep, { degree: "admin_limitado", at: "2027-11-30T00:00:00.000Z", reason: "compra_na_garantia" });
 
-  // Cortou o contato e pediu o reembolso: o provisório vence sozinho e a escola segue a escada de antes.
-  const depois = avaliar(licenca, { agora: "2027-11-30T12:00:00.000Z" });
+  // Cortou o contato e pediu o reembolso: na data exata o provisório deixa de valer e volta a escada de antes.
+  const depois = avaliar(licenca, { agora: "2027-11-30T00:00:00.000Z" });
   assert.equal(depois.provisional, false);
   assert.equal(depois.degree, "admin_limitado");
 });
 
-test("vitalícia não tem passo de vencimento: anos depois continua em dia enquanto conversa com o Emissor", () => {
-  // Cinco anos depois, assinada por uma chave de emissão nova (a troca da chave não muda o produto).
-  const emissaoLonga = novaChaveDeEmissao(raiz, { kid: "emissao-2031", notAfter: "2040-01-01T00:00:00.000Z" });
-  const vitalicia = licencaBase({
-    kid: "emissao-2031",
-    issuedAt: "2031-05-01T00:00:00.000Z",
-    expiresAt: "2031-07-30T00:00:00.000Z",
-    plan: { kind: "lifetime", steps: [] }
+test("passo de situação não some atrás de compra provisória: desativada continua congelada", () => {
+  const licenca = emitidaEm("2027-11-15T12:00:00.000Z", {
+    statusSteps: [{ degree: "escola_congelada", from: "2027-11-11T00:00:00.000Z", reason: "desativada" }],
+    provisional: { kind: "lifetime", steps: [], until: "2027-11-25T00:00:00.000Z" }
   });
-  const daChaveNova = verifyLicenseToken(assinarLicenca(emissaoLonga, vitalicia), RAIZES);
-  assert.equal(daChaveNova.ok, true);
+  const situacao = avaliar(licenca, { agora: "2027-11-15T12:00:00.000Z" });
 
-  const situacao = avaliar(daChaveNova.license, { agora: "2031-05-02T00:00:00.000Z" });
+  assert.equal(situacao.provisional, true);
+  assert.equal(situacao.degree, "escola_congelada");
+});
+
+test("vitalícia não tem passo de vencimento: anos depois continua em dia enquanto conversa com o Emissor", () => {
+  const chave2031 = novaChaveDeEmissao(raiz, { kid: "emissao-2031", notBefore: "2030-06-01T00:00:00.000Z", notAfter: "2033-05-01T00:00:00.000Z" });
+  const licenca = conferida(
+    licencaBase({ kid: "emissao-2031", issuedAt: "2031-05-01T00:00:00.000Z", expiresAt: "2031-07-30T00:00:00.000Z", plan: { kind: "lifetime", steps: [] } }),
+    chave2031
+  );
+  const situacao = avaliar(licenca, { agora: "2031-05-02T00:00:00.000Z" });
+
   assert.equal(situacao.degree, "ok");
   assert.equal(situacao.kind, "lifetime");
   assert.equal(situacao.validUntil, null);
 });
 
-test("sem contato: nada até o 7º dia, Aviso no 8º, Admin limitado quando o arquivo vence e Escola congelada 30 dias depois", () => {
+test("sem contato conta da emissão da licença guardada: Aviso no 8º dia, Admin limitado quando o arquivo vence, congelada 30 dias depois", () => {
   const licenca = conferida(licencaBase({ issuedAt: "2026-11-10T12:00:00.000Z", expiresAt: "2026-12-10T12:00:00.000Z" }));
-  const ultima = new Date("2026-11-10T12:00:00.000Z");
-  const em = (dias) => avaliar(licenca, { agora: emDias("2026-11-10T12:00:00.000Z", dias), ultimaConferencia: ultima });
+  const em = (dias) => avaliar(licenca, { agora: iso(Date.parse("2026-11-10T12:00:00.000Z") + dias * DIA) });
 
   assert.equal(em(6.9).degree, "ok");
   assert.equal(em(7).degree, "aviso");
@@ -259,15 +360,24 @@ test("sem contato: nada até o 7º dia, Aviso no 8º, Admin limitado quando o ar
 test("licença por arquivo não recebe o Aviso de sem contato, mas vence do mesmo jeito", () => {
   const licenca = conferida(licencaBase({ delivery: "file", expiresAt: "2027-01-10T12:00:00.000Z" }));
 
-  assert.equal(avaliar(licenca, { agora: "2026-12-20T12:00:00.000Z", ultimaConferencia: null }).degree, "ok");
-  assert.equal(avaliar(licenca, { agora: "2027-01-10T12:00:00.000Z", ultimaConferencia: null }).degree, "admin_limitado");
+  assert.equal(avaliar(licenca, { agora: "2026-12-20T12:00:00.000Z" }).degree, "ok");
+  assert.equal(avaliar(licenca, { agora: "2027-01-10T12:00:00.000Z" }).degree, "admin_limitado");
+});
+
+test("relógio voltado para antes da licença não a deixa nova de novo: a hora nunca fica antes da emissão", () => {
+  const licenca = conferida(
+    licencaBase({ issuedAt: "2026-11-20T12:00:00.000Z", expiresAt: "2027-01-20T12:00:00.000Z", statusSteps: [{ degree: "aviso", from: "2026-11-19T00:00:00.000Z", reason: "suspensa" }] })
+  );
+
+  assert.equal(avaliar(licenca, { agora: "2026-11-01T00:00:00.000Z" }).degree, "aviso");
 });
 
 test("endereço configurado diferente do da licença: Aviso sem acesso novo, Admin limitado em 7 dias e Escola congelada em 30", () => {
-  const licenca = conferida();
-  const desde = new Date("2026-11-11T00:00:00.000Z");
-  const em = (dias) =>
-    avaliar(licenca, { agora: emDias(desde.toISOString(), dias), endereco: "copia.outra-escola.test", enderecoDiferenteDesde: desde, ultimaConferencia: new Date(emDias(desde.toISOString(), dias)) });
+  const desde = Date.parse("2026-11-11T00:00:00.000Z");
+  const em = (dias) => {
+    const agora = iso(desde + dias * DIA);
+    return avaliar(emitidaEm(agora), { agora, endereco: "copia.outra-escola.test", enderecoDiferenteDesde: new Date(desde) });
+  };
 
   const aviso = em(1);
   assert.equal(aviso.degree, "aviso");
@@ -277,76 +387,92 @@ test("endereço configurado diferente do da licença: Aviso sem acesso novo, Adm
   assert.equal(em(30).degree, "escola_congelada");
 });
 
-test("o endereço compara o nome exato: maiúsculas, ponto final e a porta 443 batem; www e outra porta não", () => {
-  assert.equal(normalizeHost(" Alunos.Escola.TEST:443 "), "alunos.escola.test");
-  assert.equal(sameHost("alunos.escola.test", "alunos.escola.test."), true);
-  assert.equal(sameHost("alunos.escola.test", "www.alunos.escola.test"), false);
-  assert.equal(sameHost("alunos.escola.test", "alunos.escola.test:8443"), false);
-  assert.equal(sameHost("alunos.escola.test", "https://alunos.escola.test/"), false);
-  assert.equal(sameHost("alunos.escola.test", null), false);
-});
+test("endereço certo na configuração mas pedidos chegando por outro: a mesma escada, pelo que o store registrou", () => {
+  const desde = Date.parse("2026-11-11T00:00:00.000Z");
+  const em = (dias) => {
+    const agora = iso(desde + dias * DIA);
+    return avaliar(emitidaEm(agora), { agora, enderecoDiferenteDesde: new Date(desde) });
+  };
 
-test("licença ilegível numa escola já ativada nunca vira 'não ativada': Aviso, 7 e 30 dias", () => {
-  const desde = new Date("2026-11-11T00:00:00.000Z");
-  const em = (dias) =>
-    evaluateLicense({
-      license: null,
-      everActivated: true,
-      unreadableSince: desde,
-      now: new Date(emDias(desde.toISOString(), dias)),
-      lastGoodCheckInAt: null,
-      configuredHost: "alunos.escola.test",
-      hostMismatchSince: null
-    });
-
-  assert.equal(em(0).degree, "aviso");
-  assert.equal(em(0).restrictions.activationOnly, false);
+  assert.equal(em(1).degree, "aviso");
+  assert.equal(em(1).restrictions.newAccess, true);
   assert.equal(em(7).degree, "admin_limitado");
   assert.equal(em(30).degree, "escola_congelada");
 });
 
-test("passos datados pelo Emissor: pagamento desfeito escala por dia; desativada congela na hora", () => {
-  const revogada = conferida(
-    licencaBase({
-      plan: {
-        kind: "annual",
-        validUntil: "2027-11-10T23:59:59.000Z",
-        steps: [
-          { degree: "aviso", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" },
-          { degree: "admin_limitado", from: "2026-11-18T00:00:00.000Z", reason: "pagamento_desfeito" },
-          { degree: "escola_congelada", from: "2026-12-11T00:00:00.000Z", reason: "pagamento_desfeito" }
-        ]
-      }
-    })
-  );
+test("endereço diferente sem data registrada: conta como agora, e sem acesso novo desde já", () => {
+  const situacao = avaliar(emitidaEm("2026-11-20T00:00:00.000Z"), { agora: "2026-11-20T00:00:00.000Z", endereco: "copia.test" });
 
-  assert.equal(avaliar(revogada, { agora: "2026-11-12T00:00:00.000Z" }).degree, "aviso");
-  assert.equal(avaliar(revogada, { agora: "2026-11-18T00:00:00.000Z" }).degree, "admin_limitado");
-  assert.equal(avaliar(revogada, { agora: "2026-12-11T00:00:00.000Z" }).degree, "escola_congelada");
+  assert.equal(situacao.degree, "aviso");
+  assert.equal(situacao.restrictions.newAccess, true);
+  assert.equal(situacao.nextStep.degree, "admin_limitado");
+});
 
-  const desativada = conferida(
-    licencaBase({ plan: { kind: "annual", steps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "desativada" }] } })
+test("o endereço compara o nome exato: maiúsculas, ponto final, 443, https e acento em punycode batem; www, outra porta e http não", () => {
+  assert.equal(normalizeHost(" Alunos.Escola.TEST:443 "), "alunos.escola.test");
+  assert.equal(normalizeHost("https://Alunos.Escola.test/"), "alunos.escola.test");
+  assert.equal(normalizeHost("alunos.escolá.com.br"), "alunos.xn--escol-1qa.com.br");
+  assert.equal(normalizeHost("alunos.escola.test, proxy.interno"), "alunos.escola.test", "primeiro da lista do X-Forwarded-Host");
+  assert.equal(sameHost("alunos.escola.test", "alunos.escola.test."), true);
+  assert.equal(sameHost("alunos.escola.test", "www.alunos.escola.test"), false);
+  assert.equal(sameHost("alunos.escola.test", "alunos.escola.test:8443"), false);
+  assert.equal(sameHost("alunos.escola.test", "http://alunos.escola.test"), false);
+  assert.equal(sameHost("alunos.escola.test", "https://usuario@alunos.escola.test"), false);
+  assert.equal(sameHost("alunos.escola.test", "[::1]"), false);
+  assert.equal(sameHost("alunos.escola.test", null), false);
+});
+
+test("licença ilegível numa escola já ativada: nenhum acesso novo desde já, Aviso, 7 e 30 dias, nunca 'não ativada'", () => {
+  const desde = new Date("2026-11-11T00:00:00.000Z");
+  const em = (dias) => ilegivel(iso(desde.getTime() + dias * DIA), desde);
+
+  assert.equal(em(0).degree, "aviso");
+  assert.equal(em(0).restrictions.activationOnly, false);
+  assert.equal(em(0).restrictions.newAccess, true, "nada prova o direito de dar acesso");
+  assert.equal(allowsActionClass(em(0).restrictions, "dever_legal"), true);
+  assert.equal(em(7).degree, "admin_limitado");
+  assert.equal(em(30).degree, "escola_congelada");
+});
+
+test("licença ilegível: data ausente ou no futuro conta como agora; data inválida conta como há muito tempo", () => {
+  const agora = "2026-11-20T00:00:00.000Z";
+
+  assert.equal(ilegivel(agora, null).degree, "aviso");
+  assert.equal(ilegivel(agora, null).restrictions.newAccess, true);
+  assert.equal(ilegivel(agora, new Date("2099-01-01T00:00:00.000Z")).degree, "aviso");
+  assert.equal(ilegivel(agora, new Date("infinity")).degree, "escola_congelada");
+});
+
+test("passos de situação datados pelo Emissor: pagamento desfeito escala por dia; desativada congela na hora", () => {
+  const passos = [
+    { degree: "aviso", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" },
+    { degree: "admin_limitado", from: "2026-11-18T00:00:00.000Z", reason: "pagamento_desfeito" },
+    { degree: "escola_congelada", from: "2026-12-11T00:00:00.000Z", reason: "pagamento_desfeito" }
+  ];
+  const em = (instante) => avaliar(emitidaEm(instante, { statusSteps: passos }), { agora: instante });
+
+  assert.equal(em("2026-11-12T00:00:00.000Z").degree, "aviso");
+  assert.equal(em("2026-11-18T00:00:00.000Z").degree, "admin_limitado");
+  assert.equal(em("2026-12-11T00:00:00.000Z").degree, "escola_congelada");
+
+  const desativada = avaliar(
+    emitidaEm("2026-11-11T00:00:01.000Z", { statusSteps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "desativada" }] }),
+    { agora: "2026-11-11T00:00:01.000Z" }
   );
-  const situacao = avaliar(desativada, { agora: "2026-11-11T00:00:01.000Z" });
-  assert.equal(situacao.degree, "escola_congelada");
-  assert.equal(situacao.reasons.at(-1).reason, "desativada");
+  assert.equal(desativada.degree, "escola_congelada");
+  assert.equal(desativada.reasons.at(-1).reason, "desativada");
 });
 
 test("modo de observação calcula o degrau e avisa, mas não limita nada", () => {
-  const licenca = conferida(
-    licencaBase({
-      observeUntil: "2027-01-10T00:00:00.000Z",
-      plan: { kind: "annual", steps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" }] }
-    })
-  );
-  const observando = avaliar(licenca, { agora: "2026-12-01T00:00:00.000Z", endereco: "outro.escola.test" });
+  const passos = { observeUntil: "2027-01-10T00:00:00.000Z", statusSteps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" }] };
+  const observando = avaliar(emitidaEm("2026-12-01T00:00:00.000Z", passos), { agora: "2026-12-01T00:00:00.000Z", endereco: "outro.escola.test" });
 
   assert.equal(observando.observing, true);
   assert.equal(observando.degree, "escola_congelada");
   assert.equal(observando.enforcedDegree, "aviso");
   assert.deepEqual(observando.restrictions, { activationOnly: false, content: false, newAccess: false });
 
-  const depois = avaliar(licenca, { agora: "2027-01-10T00:00:00.000Z" });
+  const depois = avaliar(emitidaEm("2027-01-10T00:00:00.000Z", passos), { agora: "2027-01-10T00:00:00.000Z" });
   assert.equal(depois.observing, false);
   assert.equal(depois.enforcedDegree, "escola_congelada");
 });
@@ -354,8 +480,30 @@ test("modo de observação calcula o degrau e avisa, mas não limita nada", () =
 test("módulo comprado na garantia liga só até a data dele; módulo fora da licença nunca liga", () => {
   const licenca = conferida(licencaBase({ features: [{ key: "webinars", until: "2026-11-20T00:00:00.000Z" }] }));
 
-  assert.deepEqual(avaliar(licenca, { agora: "2026-11-19T00:00:00.000Z" }).features, ["webinars"]);
+  assert.deepEqual(avaliar(licenca, { agora: "2026-11-15T00:00:00.000Z" }).features, ["webinars"]);
   assert.deepEqual(avaliar(licenca, { agora: "2026-11-20T00:00:00.000Z" }).features, []);
+});
+
+test("data inválida no banco nunca libera: hora inválida fecha a escola; 'desde quando' inválido conta como há muito tempo", () => {
+  const licenca = emitidaEm("2026-11-20T00:00:00.000Z");
+
+  const semHora = avaliar(licenca, { agora: new Date("infinity") });
+  assert.equal(semHora.degree, "escola_congelada");
+  assert.equal(semHora.reasons[0].reason, "relogio_invalido");
+  assert.equal(semHora.restrictions.newAccess, true);
+  assert.equal(semHora.restrictions.content, true);
+
+  const enderecoInvalido = avaliar(licenca, { agora: "2026-11-20T00:00:00.000Z", enderecoDiferenteDesde: new Date("infinity") });
+  assert.equal(enderecoInvalido.degree, "escola_congelada");
+});
+
+test("faixa: dias até o próximo passo, arredondados para cima, nunca negativos", () => {
+  const agora = new Date("2026-11-20T00:00:00.000Z");
+
+  assert.equal(daysUntil("2026-11-21T00:00:00.000Z", agora), 1);
+  assert.equal(daysUntil("2026-11-21T00:00:01.000Z", agora), 2);
+  assert.equal(daysUntil("2026-11-19T00:00:00.000Z", agora), 0);
+  assert.equal(daysUntil("não é data", agora), 0);
 });
 
 // ---- Relógio -----------------------------------------------------------------------------------------------
@@ -363,28 +511,27 @@ test("módulo comprado na garantia liga só até a data dele; módulo fora da li
 test("com conferência recente, vale a hora do Emissor mesmo com o relógio do servidor errado", () => {
   const emissor = new Date("2026-11-10T12:00:00.000Z");
   const local = new Date("2029-01-01T00:00:00.000Z");
-  const relogio = resolveTrustedNow({
-    systemNow: new Date(local.getTime() + 60 * 60 * 1000),
-    lastSeenAt: emissor,
-    lastCheckIn: { emissorTime: emissor, localTime: local }
-  });
+  const relogio = resolveTrustedNow({ systemNow: new Date(local.getTime() + HORA), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: local } });
 
   assert.equal(relogio.source, "emissor");
   assert.equal(relogio.now.toISOString(), "2026-11-10T13:00:00.000Z");
   assert.equal(relogio.clockWrong, true, "a diferença de mais de 48 h vira aviso de relógio errado");
 });
 
-test("relógio parado ou atrasado não segura o prazo: vale a última hora vista", () => {
-  const relogio = resolveTrustedNow({
-    systemNow: new Date("2026-11-01T00:00:00.000Z"),
-    lastSeenAt: new Date("2027-12-01T00:00:00.000Z"),
-    lastCheckIn: null
-  });
+test("relógio adiantado de forma constante e Emissor fora do ar por 3 dias: a hora continua certa, sem pular para o futuro", () => {
+  const emissor = new Date("2027-06-01T00:00:00.000Z");
+  const local = new Date("2029-06-01T00:00:00.000Z");
+  const relogio = resolveTrustedNow({ systemNow: new Date(local.getTime() + 3 * DIA), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: local } });
 
+  assert.equal(relogio.now.toISOString(), "2027-06-04T00:00:00.000Z");
   assert.equal(relogio.source, "relogio");
-  assert.equal(relogio.now.toISOString(), "2027-12-01T00:00:00.000Z");
+});
 
-  // Conferência antiga e relógio voltado para trás: também vale a última hora vista.
+test("relógio parado ou atrasado não segura o prazo: vale a última hora vista", () => {
+  const parado = resolveTrustedNow({ systemNow: new Date("2026-11-01T00:00:00.000Z"), lastSeenAt: new Date("2027-12-01T00:00:00.000Z"), lastCheckIn: null });
+  assert.equal(parado.source, "ultima_hora_vista");
+  assert.equal(parado.now.toISOString(), "2027-12-01T00:00:00.000Z");
+
   const voltou = resolveTrustedNow({
     systemNow: new Date("2026-11-05T00:00:00.000Z"),
     lastSeenAt: new Date("2026-11-12T00:00:00.000Z"),
@@ -393,7 +540,18 @@ test("relógio parado ou atrasado não segura o prazo: vale a última hora vista
   assert.equal(voltou.now.toISOString(), "2026-11-12T00:00:00.000Z");
 });
 
-test("sem conferência nas últimas 48 h, vale o relógio do servidor", () => {
+test("relógio voltado para antes da última conferência não usa tempo negativo: vale o relógio", () => {
+  const relogio = resolveTrustedNow({
+    systemNow: new Date("2026-11-05T00:00:00.000Z"),
+    lastSeenAt: null,
+    lastCheckIn: { emissorTime: new Date("2026-11-10T00:00:00.000Z"), localTime: new Date("2026-11-10T00:00:00.000Z") }
+  });
+
+  assert.equal(relogio.source, "relogio");
+  assert.equal(relogio.now.toISOString(), "2026-11-05T00:00:00.000Z");
+});
+
+test("sem conferência nas últimas 48 h, vale o menor entre o relógio e a hora do Emissor mais o tempo corrido", () => {
   const relogio = resolveTrustedNow({
     systemNow: new Date("2026-11-20T00:00:00.000Z"),
     lastSeenAt: new Date("2026-11-19T23:59:00.000Z"),
@@ -403,4 +561,17 @@ test("sem conferência nas últimas 48 h, vale o relógio do servidor", () => {
   assert.equal(relogio.source, "relogio");
   assert.equal(relogio.now.toISOString(), "2026-11-20T00:00:00.000Z");
   assert.equal(relogio.clockWrong, false);
+});
+
+test("data inválida no relógio guardado é ignorada, nunca vira hora inválida que libera", () => {
+  const invalida = new Date("infinity");
+  const sistema = new Date("2026-11-20T00:00:00.000Z");
+
+  const semUltima = resolveTrustedNow({ systemNow: sistema, lastSeenAt: invalida, lastCheckIn: null });
+  assert.equal(semUltima.now.toISOString(), sistema.toISOString());
+
+  const semConferencia = resolveTrustedNow({ systemNow: sistema, lastSeenAt: null, lastCheckIn: { emissorTime: invalida, localTime: sistema } });
+  assert.equal(semConferencia.source, "relogio");
+  assert.equal(semConferencia.now.toISOString(), sistema.toISOString());
+  assert.equal(semConferencia.clockSkewMs, null);
 });

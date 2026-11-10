@@ -106,6 +106,7 @@ function commandEmission(args: string[]): unknown {
   const emission = generateSigningKey();
   const certificate = signCertificate(root, {
     v: LICENSE_FORMAT_VERSION,
+    use: "license",
     kid,
     rid,
     publicKey: publicKeyText(emission),

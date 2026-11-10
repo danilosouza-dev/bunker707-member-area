@@ -46,6 +46,23 @@ export const LOCAL_ANOMALY_FROZEN_AFTER_MS = 30 * DAY_MS;
 /** Relogio: com conferencia nas ultimas 48 h, vale a hora do Emissor; diferenca maior que isso e erro. */
 export const CLOCK_TRUST_WINDOW_MS = 48 * 60 * 60 * 1000;
 
+/**
+ * Limites do que uma licenca pode prometer, conferidos junto com a assinatura. Seguram o estrago de uma
+ * chave de emissao vazada ou aposentada: mesmo assinando com data antiga, ela nao emite licenca que valha
+ * mais de um ano, nem observacao, compra provisoria ou modulo provisorio longos.
+ */
+export const MAX_FILE_VALIDITY_MS = 366 * DAY_MS;
+export const MAX_OBSERVATION_AHEAD_MS = 90 * DAY_MS;
+export const MAX_PROVISIONAL_AHEAD_MS = 60 * DAY_MS;
+
+/**
+ * Rede de seguranca da Licenca anual: se o Emissor esquecer os passos, a anual nao vira vitalicia. E mais
+ * frouxa que qualquer prazo que o produtor escolha (os prazos de verdade chegam datados na licenca): so pega
+ * defeito do Emissor, nunca decide politica.
+ */
+export const ANNUAL_RESERVE_LIMITED_AFTER_MS = 60 * DAY_MS;
+export const ANNUAL_RESERVE_FROZEN_AFTER_MS = 90 * DAY_MS;
+
 /** Os tres degraus, nesta ordem, e o estado sem nenhum. A ordem do array e a ordem de gravidade. */
 export const LICENSE_DEGREES = ["ok", "aviso", "admin_limitado", "escola_congelada"] as const;
 export type LicenseDegree = (typeof LICENSE_DEGREES)[number];
@@ -91,6 +108,11 @@ export const NO_RESTRICTIONS: LicenseRestrictions = Object.freeze({
 });
 
 export function allowsActionClass(restrictions: LicenseRestrictions, actionClass: ActionClass): boolean {
+  // O que a lei e a seguranca pedem nunca e barrado, nem na copia que nunca foi ativada e guarda dados de alunos.
+  if (actionClass === "dever_legal") {
+    return true;
+  }
+
   if (restrictions.activationOnly) {
     return false;
   }
@@ -124,17 +146,26 @@ const stepSchema = z.object({
   reason: z.string().min(1).max(64)
 });
 
-const planSchema = z.object({
+const planShape = {
   kind: z.enum(["annual", "lifetime"]),
-  /** Ate quando a Licenca anual vale, para mostrar ("Licenca ate 10/11/2027"). */
+  /** Ate quando a Licenca anual vale ("Licenca ate 10/11/2027"). Obrigatorio na anual. */
   validUntil: isoDateTime.optional(),
   /**
-   * Os passos ja datados pelo Emissor: o fim da validade, a carencia, o Admin limitado e a Escola
-   * congelada da anual; e tambem pagamento desfeito, suspensao, desativacao e descumprimento. O
-   * Verificador so compara cada data com a hora; nao soma dias. Mudar um prazo e mudanca no Emissor.
+   * Os passos da validade, ja datados pelo Emissor: o aviso antes do fim, a carencia, o Admin limitado e a
+   * Escola congelada da anual. O Verificador so compara cada data com a hora; nao soma dias. Mudar um prazo
+   * e mudanca no Emissor. Os passos de situacao (pagamento desfeito, suspensao...) ficam em statusSteps.
    */
   steps: z.array(stepSchema).max(16).default([])
-});
+};
+
+function annualNeedsValidity(plan: { kind: "annual" | "lifetime"; validUntil?: string }, context: z.RefinementCtx) {
+  if (plan.kind === "annual" && !plan.validUntil) {
+    context.addIssue({ code: "custom", message: "A Licenca anual precisa de validUntil.", path: ["validUntil"] });
+  }
+}
+
+const planSchema = z.object(planShape).superRefine(annualNeedsValidity);
+const provisionalPlanSchema = z.object({ ...planShape, until: isoDateTime }).superRefine(annualNeedsValidity);
 
 const featureSchema = z.object({
   key: z.string().regex(FEATURE_KEY_PATTERN),
@@ -160,8 +191,16 @@ export const licensePayloadSchema = z.object({
   delivery: z.enum(["online", "file"]).default("online"),
   /** O tipo e os passos confirmados: das compras que ja sairam da garantia. */
   plan: planSchema,
-  /** O tipo e os passos com as compras ainda na garantia. Valem so ate `until`; depois volta o confirmado. */
-  provisional: planSchema.extend({ until: isoDateTime }).optional(),
+  /**
+   * O tipo e os passos com as compras ainda na garantia. Valem so ate `until`; depois volta o confirmado.
+   * So troca a validade: os passos de situacao (statusSteps) valem sempre.
+   */
+  provisional: provisionalPlanSchema.optional(),
+  /**
+   * Passos de situacao, datados pelo Emissor, que valem qualquer que seja o plano: pagamento desfeito,
+   * suspensao, desativacao, descumprimento. Uma compra provisoria nunca os esconde.
+   */
+  statusSteps: z.array(stepSchema).max(16).default([]),
   features: z.array(featureSchema).max(32).default([]),
   /** Chaves internas que nao sao modulos da loja (as paginas de vendedor da nossa propria escola). */
   grants: z.array(z.string().regex(FEATURE_KEY_PATTERN)).max(8).default([]),
@@ -178,11 +217,17 @@ export const licensePayloadSchema = z.object({
 
 export type LicensePayload = z.infer<typeof licensePayloadSchema>;
 export type LicensePlan = z.infer<typeof planSchema>;
+export type ProvisionalLicensePlan = z.infer<typeof provisionalPlanSchema>;
 export type LicenseStep = z.infer<typeof stepSchema>;
 
 /** Certificado da chave de emissao: a raiz, guardada fora de qualquer servidor, assina a chave do Emissor. */
 export const certificatePayloadSchema = z.object({
   v: z.literal(LICENSE_FORMAT_VERSION),
+  /**
+   * Para que serve a chave. So "license" assina licenca: uma chave certificada para outra coisa (a dos
+   * pacotes, por exemplo) nunca emite licenca, mesmo assinada pela mesma raiz.
+   */
+  use: z.literal("license"),
   kid: z.string().min(1).max(64),
   /** Qual raiz assinou. A raiz e a raiz de reserva vao gravadas no produto. */
   rid: z.string().min(1).max(64),
@@ -196,3 +241,28 @@ export type CertificatePayload = z.infer<typeof certificatePayloadSchema>;
 
 /** Uma raiz confiavel: identificador e chave publica Ed25519 em base64url (32 bytes). */
 export type TrustedRoot = { rid: string; publicKey: string };
+
+/**
+ * As codificacoes de pontos de ordem pequena da Ed25519 (sem o bit de sinal do ultimo byte). Uma chave
+ * publica dessas aceita assinatura feita sem chave privada; nenhuma raiz nem chave de emissao pode ser uma
+ * delas. Mesma lista do libsodium (has_small_order).
+ */
+const SMALL_ORDER_ENCODINGS = [
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0100000000000000000000000000000000000000000000000000000000000000",
+  "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+  "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+  "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+];
+
+/** A chave publica (32 bytes) e um ponto de ordem pequena, com ou sem o bit de sinal. */
+export function isSmallOrderPublicKey(bytes: Uint8Array): boolean {
+  if (bytes.length !== 32) {
+    return true;
+  }
+
+  const hex = Array.from(bytes, (byte, index) => (index === 31 ? byte & 0x7f : byte).toString(16).padStart(2, "0")).join("");
+  return SMALL_ORDER_ENCODINGS.includes(hex);
+}

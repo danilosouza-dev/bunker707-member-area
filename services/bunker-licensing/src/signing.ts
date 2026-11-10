@@ -20,6 +20,8 @@ export const LICENSE_SIGNING_CONTEXT = "bunker-licensing/license/v1\n";
 
 export type CertificatePayload = {
   v: 1;
+  /** Para que serve a chave. So "license" assina licenca (o Verificador recusa outro uso). */
+  use: "license";
   kid: string;
   rid: string;
   publicKey: string;

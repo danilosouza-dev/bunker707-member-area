@@ -21,8 +21,14 @@ export type LicenseStoreSnapshot = {
   lastSeenAt: Date | null;
   /** A ultima conferencia boa: a hora assinada pelo Emissor e a hora local naquele momento. */
   lastCheckIn: { emissorTime: Date; localTime: Date } | null;
-  /** Desde quando os pedidos do admin chegam, repetidamente, por outro endereco. */
+  /** Desde quando a Instalacao esta fora do endereco da licenca (configurado ou pedidos repetidos). */
   hostMismatchSince: Date | null;
+  /**
+   * A data de emissao da licenca mais nova ja aceita. Contrato do store: sobe a cada licenca aceita e nunca
+   * desce. Uma licenca mais antiga que ela nao vale: devolver a licenca de ontem, de antes de uma desativacao,
+   * nao desfaz a desativacao (inclusive pela licenca por arquivo).
+   */
+  newestIssuedAt: Date | null;
 };
 
 export const EMPTY_LICENSE_SNAPSHOT: LicenseStoreSnapshot = Object.freeze({
@@ -31,7 +37,8 @@ export const EMPTY_LICENSE_SNAPSHOT: LicenseStoreSnapshot = Object.freeze({
   unreadableSince: null,
   lastSeenAt: null,
   lastCheckIn: null,
-  hostMismatchSince: null
+  hostMismatchSince: null,
+  newestIssuedAt: null
 });
 
 export type LicenseState =
@@ -41,8 +48,8 @@ export type LicenseState =
       evaluation: LicenseEvaluation;
       clock: TrustedClock;
       license: LicensePayload | null;
-      /** Por que a licenca guardada nao conferiu; null quando conferiu ou quando nao ha licenca. */
-      verificationError: LicenseVerificationError | null;
+      /** Por que a licenca guardada nao vale; null quando vale ou quando nao ha licenca. */
+      verificationError: LicenseVerificationError | "licenca_antiga" | null;
     };
 
 export type ComputeLicenseStateInput = {
@@ -67,15 +74,18 @@ export function computeLicenseState(input: ComputeLicenseStateInput): LicenseSta
   });
 
   let license: LicensePayload | null = null;
-  let verificationError: LicenseVerificationError | null = null;
+  let verificationError: LicenseVerificationError | "licenca_antiga" | null = null;
 
   if (snapshot.token) {
     const verification = verifyLicenseToken(snapshot.token, input.roots);
+    const newestMs = snapshot.newestIssuedAt instanceof Date ? snapshot.newestIssuedAt.getTime() : null;
 
-    if (verification.ok) {
-      license = verification.license;
-    } else {
+    if (!verification.ok) {
       verificationError = verification.error;
+    } else if (newestMs !== null && (!Number.isFinite(newestMs) || Date.parse(verification.license.issuedAt) < newestMs)) {
+      verificationError = "licenca_antiga";
+    } else {
+      license = verification.license;
     }
   }
 
@@ -85,8 +95,6 @@ export function computeLicenseState(input: ComputeLicenseStateInput): LicenseSta
     everActivated: snapshot.everActivated || license !== null,
     unreadableSince: license ? null : snapshot.unreadableSince,
     now: clock.now,
-    // A ultima conferencia boa vale na hora do Emissor, que e a hora em que os prazos foram assinados.
-    lastGoodCheckInAt: snapshot.lastCheckIn ? snapshot.lastCheckIn.emissorTime : null,
     configuredHost: input.configuredHost,
     hostMismatchSince: snapshot.hostMismatchSince
   });

@@ -98,7 +98,11 @@ test("licença de outra raiz (um emissor pirata com a chave trocada) não liga n
 
 test("relógio do servidor adiantado com conferência recente: vale a hora do Emissor e a anual não vence antes da hora", () => {
   const validade = "2027-11-10T23:59:59.000Z";
-  const licenca = licencaBase({ expiresAt: "2028-03-01T00:00:00.000Z", plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } });
+  const licenca = licencaBase({
+    issuedAt: "2027-05-31T23:00:00.000Z",
+    expiresAt: "2027-08-29T23:00:00.000Z",
+    plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) }
+  });
   const horaDoEmissor = new Date("2027-06-01T00:00:00.000Z");
   const relogioErrado = new Date("2029-01-01T00:00:00.000Z");
   const situacao = estado(
@@ -109,6 +113,26 @@ test("relógio do servidor adiantado com conferência recente: vale a hora do Em
   assert.equal(situacao.clock.source, "emissor");
   assert.equal(situacao.clock.clockWrong, true);
   assert.equal(situacao.evaluation.degree, "ok");
+});
+
+test("licença antiga devolvida ao banco (de antes de uma desativação) não vale: a mais nova já aceita manda", () => {
+  const antes = licencaBase({ issuedAt: "2026-11-10T12:00:00.000Z" });
+  const desativada = licencaBase({
+    issuedAt: "2026-11-11T11:00:00.000Z",
+    statusSteps: [{ degree: "escola_congelada", from: "2026-11-11T10:00:00.000Z", reason: "desativada" }]
+  });
+  const base = { everActivated: true, lastCheckIn: { emissorTime: AGORA, localTime: AGORA }, lastSeenAt: AGORA };
+
+  const atual = estado({ ...base, token: assinarLicenca(emissao, desativada), newestIssuedAt: new Date(desativada.issuedAt) });
+  assert.equal(atual.evaluation.degree, "escola_congelada");
+
+  const devolvida = estado({ ...base, token: assinarLicenca(emissao, antes), newestIssuedAt: new Date(desativada.issuedAt) });
+  assert.equal(devolvida.verificationError, "licenca_antiga");
+  assert.equal(devolvida.license, null);
+  assert.equal(devolvida.evaluation.restrictions.newAccess, true, "sem licença aceita, nenhum acesso novo");
+
+  const marcaInvalida = estado({ ...base, token: assinarLicenca(emissao, antes), newestIssuedAt: new Date("infinity") });
+  assert.equal(marcaInvalida.verificationError, "licenca_antiga");
 });
 
 test("o modo só exige licença com o texto exato 'enforce', e as raízes ignoram o que não segue o formato", () => {
