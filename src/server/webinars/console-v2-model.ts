@@ -269,8 +269,8 @@ export function consoleRecordButton(input: { canPublish: boolean; card: Pick<Rec
 export const CONSOLE_TABS = ["chat", "perguntas", "maos", "pessoas"] as const;
 export type ConsoleTab = (typeof CONSOLE_TABS)[number];
 
-/** As entradas do ⋯ do painel, na ordem do V2-15. */
-export const CONSOLE_MORE_ENTRIES = ["enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
+/** As entradas do ⋯ do painel, na ordem do V2-15; a Na tela (docs/31 §12) e a primeira. */
+export const CONSOLE_MORE_ENTRIES = ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
 export type ConsoleMoreEntry = (typeof CONSOLE_MORE_ENTRIES)[number];
 
 /** O que o painel mostra: uma aba ou uma entrada do ⋯ (nunca as duas: com uma entrada, nenhuma aba fica escolhida). */
@@ -320,11 +320,12 @@ export function consoleRailFit(input: { available: number | null; count: number 
 }
 
 /**
- * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
- * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
+ * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
+ * da turma); Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento sempre; Presença com a
+ * leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
  */
 export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
-  const entries: ConsoleMoreEntry[] = ["enquetes"];
+  const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
   if (input.webinarKind === "simulated") {
     entries.push("roteiro");
   }

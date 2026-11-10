@@ -39,24 +39,24 @@ async function emptyWithoutMigration<T>(read: () => Promise<T>, empty: T): Promi
  * webinar_screen_items
  * ---------------------------------------------------------------------------------------------- */
 
+function readScreenItemRows(db: WebinarsDb, webinarId: string): Promise<ScreenItemRow[]> {
+  return fetchAll<ScreenItemRow>(
+    (from, to) =>
+      db
+        .from("webinar_screen_items")
+        .select(SCREEN_ITEM_COLUMNS)
+        .eq("webinar_id", webinarId)
+        .is("archived_at", null)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    "Webinarios: Na tela, itens prontos"
+  );
+}
+
 /** Os itens prontos nao arquivados de um webinario, do mais antigo ao mais novo (indice webinar_screen_items_webinar_idx). */
 export async function listScreenItemRows(db: WebinarsDb, webinarId: string): Promise<ScreenItemRow[]> {
-  return emptyWithoutMigration(
-    () =>
-      fetchAll<ScreenItemRow>(
-        (from, to) =>
-          db
-            .from("webinar_screen_items")
-            .select(SCREEN_ITEM_COLUMNS)
-            .eq("webinar_id", webinarId)
-            .is("archived_at", null)
-            .order("created_at", { ascending: true })
-            .order("id", { ascending: true })
-            .range(from, to),
-        "Webinarios: Na tela, itens prontos"
-      ),
-    []
-  );
+  return emptyWithoutMigration(() => readScreenItemRows(db, webinarId), []);
 }
 
 /** Um item pronto pelo id (arquivado tambem: quem chama decide); nulo sem a linha ou sem a migracao. */
@@ -99,13 +99,31 @@ export async function archiveScreenItemRow(db: WebinarsDb, id: string, nowIso: s
  * webinar_screen_displays
  * ---------------------------------------------------------------------------------------------- */
 
+async function readActiveScreenDisplayRows(db: WebinarsDb, sessionId: string): Promise<ScreenDisplayRow[]> {
+  const { data, error } = await db.from("webinar_screen_displays").select(SCREEN_DISPLAY_COLUMNS).eq("session_id", sessionId).is("hidden_at", null);
+  assertNoDbError(error, "Webinarios: Na tela, o que esta na tela");
+  return (data ?? []) as ScreenDisplayRow[];
+}
+
 /** O que esta na tela agora numa sessao: no maximo uma linha por tipo (o indice unico parcial), entao ate 3. */
 export async function listActiveScreenDisplayRows(db: WebinarsDb, sessionId: string): Promise<ScreenDisplayRow[]> {
-  return emptyWithoutMigration(async () => {
-    const { data, error } = await db.from("webinar_screen_displays").select(SCREEN_DISPLAY_COLUMNS).eq("session_id", sessionId).is("hidden_at", null);
-    assertNoDbError(error, "Webinarios: Na tela, o que esta na tela");
-    return (data ?? []) as ScreenDisplayRow[];
-  }, []);
+  return emptyWithoutMigration(() => readActiveScreenDisplayRows(db, sessionId), []);
+}
+
+/**
+ * O que o console le da Na tela a cada retrato: os itens prontos do webinario e o que esta na tela na sessao, numa
+ * leitura de cada. Sem a migracao: vazio com `pending` (o console mostra o aviso da migracao na entrada Na tela).
+ */
+export async function loadConsoleScreenRows(db: WebinarsDb, input: { sessionId: string; webinarId: string }): Promise<{ active: ScreenDisplayRow[]; items: ScreenItemRow[]; pending: boolean }> {
+  try {
+    const [items, active] = await Promise.all([readScreenItemRows(db, input.webinarId), readActiveScreenDisplayRows(db, input.sessionId)]);
+    return { active, items, pending: false };
+  } catch (failure) {
+    if (isPendingMigrationError(failure)) {
+      return { active: [], items: [], pending: true };
+    }
+    throw failure;
+  }
 }
 
 /** Todas as exibicoes de uma sessao, na ordem em que entraram (o relatorio e as metricas). */

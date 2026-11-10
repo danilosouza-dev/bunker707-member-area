@@ -543,7 +543,7 @@ test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual
   // A gravada (docs/31 V2-15): as abas Chat e Perguntas; o ⋯ com Enquetes, Roteiro, Oferta e Atendimento (sem a leitura
   // da presenca, sem a Presença); tudo montado, so o Chat na tela, e sem o X (sem palco o painel nunca fecha).
   assert.deepEqual(Array.from(markup.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas 2"]);
-  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento"]);
   assert.ok(!hiddenPane(pane(markup, "tab", "chat")), "o Chat na tela");
   for (const [kind, name] of [["tab", "perguntas"], ["more", "enquetes"], ["more", "roteiro"], ["more", "oferta"], ["more", "atendimento"]]) {
     assert.ok(hiddenPane(pane(markup, kind, name)), `${name} escondido`);
@@ -703,7 +703,7 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   const presence = consolePresenceOf(view, 4 * MIN + 30_000);
   const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
   // A Presença no ⋯ (docs/31 V2-15), so com a leitura da presenca, montada e escondida.
-  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
   assert.ok(hiddenPane(pane(markup, "more", "presenca")));
   assert.match(pane(markup, "more", "presenca"), /id="console-presence-title"/);
   // O selo do topo da gravada (V2-13): os presentes do retrato de 5 s e o pico da presenca.

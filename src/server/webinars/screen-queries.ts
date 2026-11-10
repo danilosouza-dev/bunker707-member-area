@@ -23,8 +23,8 @@ import type { WebinarsDb } from "./db";
 import type { ChatMessage, WebinarSession } from "./model";
 import { authorPhotoUrl, toStudentMessage } from "./room-model";
 import { SCREEN_KINDS, emptyScreenState, pollsKeyOf, screenShowsIn, studentScreenItem, type StudentScreenItem, type StudentScreenState } from "./screen-model";
-import { screenDisplayFromRow } from "./screen-rows";
-import { listActiveScreenDisplayRows, listSessionPollKeyRows } from "./screen-store";
+import { screenDisplayFromRow, screenStatsFromRows, type ScreenStats } from "./screen-rows";
+import { fetchScreenReportRows, listActiveScreenDisplayRows, listSessionPollKeyRows } from "./screen-store";
 
 /** Quanto o estado de uma sessao vale na memoria do processo (com o mesmo carimbo). */
 export const SCREEN_STATE_TTL_MS = 30_000;
@@ -159,4 +159,45 @@ export async function screenStateForChat(db: WebinarsDb, session: WebinarSession
   }
 
   return loadScreenState(db, session, viewerUserId, nowMs);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Os numeros de cada exibicao para o console (Na tela agora: "312 viram · 41 clicaram · 9 fecharam")
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Quanto os numeros de uma sessao valem na memoria do processo: o retrato de 5 s chama a funcao no maximo a cada 10 s. */
+export const SCREEN_STATS_TTL_MS = 10_000;
+const statsMemory = new Map<string, { at: number; value: Promise<Record<string, ScreenStats>> }>();
+
+/** Esvazia a memoria dos numeros (os testes). */
+export function clearScreenStatsCache() {
+  statsMemory.clear();
+}
+
+/**
+ * Os numeros por exibicao de uma sessao (webinar_screen_report: alunos distintos, a equipe de fora), guardados 10 s por
+ * sessao. Sem a migracao, nenhum; a falha da leitura nao fica guardada.
+ */
+export async function loadScreenStats(db: WebinarsDb, sessionId: string, nowMs: number = Date.now()): Promise<Record<string, ScreenStats>> {
+  const hit = statsMemory.get(sessionId);
+
+  if (hit && nowMs - hit.at < SCREEN_STATS_TTL_MS) {
+    return hit.value;
+  }
+
+  const value = fetchScreenReportRows(db, sessionId).then((rows) => Object.fromEntries(screenStatsFromRows(rows)));
+  statsMemory.delete(sessionId);
+  if (statsMemory.size >= SCREEN_STATE_CACHE_MAX) {
+    const oldest = statsMemory.keys().next().value;
+    if (oldest !== undefined) {
+      statsMemory.delete(oldest);
+    }
+  }
+  statsMemory.set(sessionId, { at: nowMs, value });
+  value.catch(() => {
+    if (statsMemory.get(sessionId)?.value === value) {
+      statsMemory.delete(sessionId);
+    }
+  });
+  return value;
 }

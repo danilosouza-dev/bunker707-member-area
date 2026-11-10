@@ -23,7 +23,9 @@ import {
   type WebinarSession
 } from "./model";
 import type { ConsolePresence } from "./console-presence-model";
-import type { LiveConsoleSnapshot } from "./live-console-model";
+import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-model";
+import type { ScreenDisplay, ScreenItem } from "./screen-model";
+import type { ScreenStats } from "./screen-rows";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -459,6 +461,19 @@ export function ackSentenceMatches(input: { ackText: string | null | undefined; 
 
 export type ConsolePollView = Poll & { counts: PollCounts };
 
+/**
+ * A Na tela no retrato do console (docs/30 §2.4; especificacao de 10/11/2026, §5.6): os banners e QR Codes prontos do
+ * webinario (os nao arquivados), o que esta na tela agora nesta sessao (no maximo um de cada tipo, com a copia
+ * congelada) e os numeros de cada exibicao por id ("312 viram · 41 clicaram · 9 fecharam", ate uns 15 s de atraso).
+ * `pending`: o banco sem a 202611100002 (a entrada mostra o aviso da migracao e nada e gravado).
+ */
+export type ConsoleScreen = {
+  active: ScreenDisplay[];
+  items: ScreenItem[];
+  pending: boolean;
+  stats: Record<string, ScreenStats>;
+};
+
 export type ConsoleSnapshot = {
   /**
    * As mensagens do retrato que ja viraram pergunta (docs/31 V2-15), com a pergunta apagada ou nao e sem o teto da
@@ -466,12 +481,25 @@ export type ConsoleSnapshot = {
    */
   askedMessageIds: string[];
   /**
+   * So na Live gravada (a moderacao por pessoa, docs/30 §2.4): quem esta removido, silenciado ou banido nesta sessao (ou
+   * banido de todas, entre quem escreveu no chat), com o nome, no formato da lista da Live ao vivo (LiveConsolePerson,
+   * so os barrados). Nulo nas outras: na Live ao vivo a lista vem em `live.people`; no Replay nada muda.
+   */
+  barred: LiveConsolePerson[] | null;
+  /**
    * Fase 3: so na sessao `live` (gravador, gravacao, removidos/silenciados/banidos, o mapa aluno -> participante e se a
    * sala existe neste ambiente); nulo nas outras. Nunca o nome da sala nem token: o iframe pede o join-token.
    */
   live: LiveConsoleSnapshot | null;
   messages: ConsoleMessage[];
+  /**
+   * A mensagem fixada lida pela chave (o bloco "Fixada agora"): vale tambem para a mensagem mais velha que as 200 da
+   * lista. Nula sem fixada (ou apagada).
+   */
+  pinned: ConsoleMessage | null;
   pinnedMessageId: string | null;
+  /** A enquete fixada desta sessao (a exibicao `poll` ativa da Na tela); nula sem ela. */
+  pinnedPollId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
   /**
    * O painel Presenca (docs/30 §2.4): pico, mensagens por minuto e a curva dos ultimos 30 minutos, da visao do
@@ -483,6 +511,8 @@ export type ConsoleSnapshot = {
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */
   scriptFired: Record<string, string | null>;
   scriptItems: ScriptItem[];
+  /** A Na tela desta sessao (ConsoleScreen). */
+  screen: ConsoleScreen;
   serverTime: string;
   session: WebinarSession;
 };

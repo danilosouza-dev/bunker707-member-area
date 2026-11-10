@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ChartNoAxesColumn, CircleDot, Ellipsis, FileText, Hand, Headset, MessageCircleQuestionMark, MessageSquareText, ShoppingBag, Users, type LucideIcon } from "lucide-react";
+import { Activity, ChartNoAxesColumn, CircleDot, Ellipsis, FileText, Hand, Headset, MessageCircleQuestionMark, MessageSquareText, PictureInPicture2, ShoppingBag, Users, type LucideIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { RoomCountBadge } from "@/components/member/webinars/room/room-ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -15,7 +15,7 @@ import { useConsolePortal } from "./console-shell";
 // live) e so a partir de lg, uma coluna de 48 px a 16 px da borda direita, depois do painel. Cada item e um botao de
 // 48 x 64: o quadrado de 48 com raio 8 e o icone de 24, e o rotulo 10/16 embaixo (600 no item aberto). Os itens sao as
 // abas (Chat, Perguntas com o numero das abertas no contador vermelho, Mãos com o das maos levantadas, Pessoas) e
-// depois as entradas da sessao (Enquetes, Atendimento, Presença, Gravação; na gravada, Roteiro e Oferta), todos na tela
+// depois as entradas da sessao (Na tela, Enquetes, Atendimento, Presença, Gravação; na gravada, Roteiro e Oferta), todos na tela
 // quando a altura do trilho comporta (ajuste do produtor de 10/11/2026). Numa janela baixa, o trilho mede a propria
 // altura (no navegador, antes de pintar e a cada mudanca) e o ultimo lugar vira o Mais, com o menu dos que nao couberam
 // como opcoes de radio, no portal da raiz (consoleRailFit); com um desses na tela, o Mais fica aberto e o nome dele diz
@@ -35,7 +35,8 @@ const ICONS: Record<ConsoleMoreEntry | ConsoleTab, LucideIcon> = {
   perguntas: MessageCircleQuestionMark,
   pessoas: Users,
   presenca: Activity,
-  roteiro: FileText
+  roteiro: FileText,
+  tela: PictureInPicture2
 };
 
 /** O quadrado de 48 do item (o anel de foco envolve so ele; o botao inteiro e o clique). */

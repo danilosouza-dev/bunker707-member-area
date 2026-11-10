@@ -1124,6 +1124,107 @@ test("fase 4: o painel Presença do retrato para no encerramento, como o topo: a
   assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs))).presence.minute, 44);
 });
 
+test("Na tela no retrato do console: a fixada pela chave (mesmo fora das 200 mais novas), a enquete fixada, os prontos, o que esta na tela com os numeros (a funcao no maximo a cada 10 s); na gravada, os barrados com o nome; no Replay e sem a migracao, nada", async () => {
+  const { clearScreenStatsCache } = await import("../src/server/webinars/screen-queries.ts");
+  clearScreenStatsCache();
+  const nowMs = Date.now();
+  const em = (ms) => new Date(nowMs + ms).toISOString();
+  const S_REPLAY = "bbbbbbbb-2222-4222-8222-777777777777";
+  const ENQUETE = randomUUID();
+  const BANNER = randomUUID();
+  const PRONTO = randomUUID();
+  const ARQUIVADO = randomUUID();
+  const FIXADA = randomUUID();
+  const BANIDO = "abababab-7777-4777-8777-777777777777";
+  const copia = { body: null, buttonLabel: null, closable: true, image: null, linkUrl: "https://bunker707.com.br/turma", name: "Turma", place: "bottom_right", size: "m", title: "Turma nova", v: 1 };
+  const item = (id, extra = {}) => ({ archived_at: null, body: null, button_label: null, closable: true, created_at: em(-60 * MIN), created_by: HOST, id, image_alt: null, image_height: null, image_path: null, image_width: null, kind: "banner", link_url: "https://bunker707.com.br/turma", name: "Turma", place: "bottom_right", size: "m", title: "Turma nova", updated_at: em(-60 * MIN), webinar_id: WEBINAR, ...extra });
+  const exibicao = (id, kind, extra = {}) => ({ created_at: em(-5 * MIN), hidden_at: null, hidden_by: null, hidden_offset_ms: null, hidden_reason: null, id, item_id: kind === "poll" ? null : PRONTO, kind, poll_id: kind === "poll" ? ENQUETE : null, session_id: S_NO_AR, shown_at: em(-5 * MIN), shown_by: HOST, shown_offset_ms: 300_000, snapshot: kind === "poll" ? { name: "Qual curso?", v: 1 } : copia, ...extra });
+  const mensagem = (sessionId, extra = {}) => ({ author_user_id: ALUNA, body: "oi", created_at: em(-MIN), display_name: "Ana M.", id: randomUUID(), offset_ms: 12_000, role: "student", session_id: sessionId, source: "audience", webinar_id: WEBINAR, ...extra });
+  // A fixada e a mais velha; 200 mensagens mais novas depois dela (fora da lista do retrato).
+  const base = cenario({
+    admin_roles: [{ user_id: HOST }, { user_id: EQUIPE }],
+    profiles: [
+      { full_name: "Ana Maria Souza", id: ALUNA },
+      { full_name: "Bruno Lima", id: ALUNO },
+      { full_name: "Equipe Teste", id: EQUIPE },
+      { full_name: "Caio Banido", id: BANIDO }
+    ],
+    webinar_chat_messages: [
+      mensagem(S_NO_AR, { author_user_id: HOST, body: "Material em https://bunker707.com.br/apostila", created_at: em(-90 * MIN), display_name: "Produtor T.", id: FIXADA, pinned_at: em(-30 * MIN), role: "host", source: "team" }),
+      ...Array.from({ length: 200 }, (_, index) => mensagem(S_NO_AR, { created_at: em(-80 * MIN + index * 1000) })),
+      mensagem(S_GRAVADA, { author_user_id: ALUNO, display_name: "Bruno L." }),
+      mensagem(S_GRAVADA, { author_user_id: BANIDO, display_name: "Caio B." }),
+      mensagem(S_GRAVADA, { author_user_id: EQUIPE, display_name: "Equipe T.", role: "team", source: "team" })
+    ],
+    webinar_screen_displays: [exibicao(BANNER, "banner"), exibicao(randomUUID(), "poll"), exibicao(randomUUID(), "qr", { hidden_at: em(-MIN), hidden_reason: "team" })],
+    webinar_screen_items: [item(PRONTO), item(ARQUIVADO, { archived_at: em(-MIN) }), item(randomUUID(), { webinar_id: randomUUID() })],
+    webinar_session_bans: [
+      { created_at: em(-MIN), created_by: HOST, kind: "kicked", session_id: S_GRAVADA, until_at: null, user_id: ALUNA },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: em(10 * MIN), user_id: ALUNO },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: em(-1000), user_id: ALUNO },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: null, user_id: EQUIPE }
+    ],
+    webinar_user_bans: [{ created_at: em(-MIN), created_by: HOST, reason: null, user_id: BANIDO }]
+  });
+  base.webinar_sessions.find((row) => row.id === S_NO_AR).pinned_message_id = FIXADA;
+  base.webinar_sessions.push(sessao({ id: S_REPLAY, kind: "replay", status: "live" }));
+  let chamadas = 0;
+  const db = usar(bancoEmMemoria(base, { ...RPC, webinar_screen_report: () => ((chamadas += 1), { data: [{ clickers: 41, clicks: 55, closed: 9, display_id: BANNER, shown: 312 }], error: null }) }));
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs));
+  assert.equal(retrato.messages.length, 200, "a lista do retrato fica nas 200 mais novas");
+  assert.ok(!retrato.messages.some((message) => message.id === FIXADA), "a fixada esta fora da lista");
+  assert.deepEqual([retrato.pinned.id, retrato.pinned.body, retrato.pinned.role, typeof retrato.pinned.promotable], [FIXADA, "Material em https://bunker707.com.br/apostila", "host", "boolean"], "a fixada lida pela chave, como ConsoleMessage");
+  assert.equal(retrato.pinnedMessageId, FIXADA);
+  assert.equal(retrato.pinnedPollId, ENQUETE);
+  assert.equal(retrato.screen.pending, false);
+  assert.deepEqual(retrato.screen.items.map((entry) => entry.id), [PRONTO], "so os prontos nao arquivados deste webinario");
+  assert.deepEqual(retrato.screen.active.map((display) => [display.kind, display.snapshot?.name]).sort(), [["banner", "Turma"], ["poll", "Qual curso?"]], "o que esta na tela (o QR Code que saiu fica de fora)");
+  assert.deepEqual(retrato.screen.stats, { [BANNER]: { clickers: 41, clicks: 55, closed: 9, shown: 312 } });
+  assert.equal(retrato.barred, null, "a lista da live vem em live.people");
+  assert.equal(chamadas, 1);
+  await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 5_000));
+  assert.equal(chamadas, 1, "o retrato de 5 s depois usa os numeros guardados");
+  await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 11_000));
+  assert.equal(chamadas, 2, "passados 10 s, a funcao roda de novo");
+
+  // A gravada: os removidos, silenciados (o silencio valendo) e banidos entre quem escreveu, com o nome; a equipe nunca.
+  const gravada = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs));
+  assert.deepEqual(
+    gravada.barred.map((person) => [person.userId, person.displayName, person.ban.kicked, person.ban.muted, person.ban.banned, person.staff, person.participantId]),
+    [
+      [ALUNA, "Ana S.", true, false, false, false, null],
+      [ALUNO, "Bruno L.", false, true, false, false, null],
+      [BANIDO, "Caio B.", false, false, true, false, null]
+    ]
+  );
+  assert.equal(gravada.barred[1].ban.mutedUntil, em(10 * MIN), "o silencio que ainda vale");
+  assert.equal(gravada.pinned, null);
+  assert.deepEqual(gravada.screen.stats, {}, "sem nada na tela, a funcao nem roda");
+
+  // O Replay: nada aparece na frente da turma, e o console nem le a Na tela.
+  db.calls.length = 0;
+  const replay = await consoleQueries.getConsoleSnapshot(WEBINAR, S_REPLAY, new Date(nowMs));
+  assert.deepEqual(replay.screen, { active: [], items: [], pending: false, stats: {} });
+  assert.deepEqual([replay.pinnedPollId, replay.barred], [null, null]);
+  assert.ok(!db.calls.some((call) => call.table.startsWith("webinar_screen_")), "nenhuma leitura da Na tela no Replay");
+
+  // Banco sem a 202611100002: a Na tela fica `pending`, sem nada, e o resto do retrato segue.
+  const from = db.from;
+  db.from = (table) => {
+    if (!table.startsWith("webinar_screen_")) {
+      return from(table);
+    }
+    const falha = { data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } };
+    const chain = { eq: () => chain, is: () => chain, order: () => chain, range: () => chain, select: () => chain, then: (resolve, reject) => Promise.resolve(falha).then(resolve, reject) };
+    return chain;
+  };
+  const semMigracao = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 30_000));
+  assert.deepEqual(semMigracao.screen, { active: [], items: [], pending: true, stats: {} });
+  assert.equal(semMigracao.pinnedPollId, null);
+  assert.equal(semMigracao.pinned.id, FIXADA, "a fixada nao depende da migracao");
+});
+
 test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sessoes 'Comeca quando voce entra' so as de hoje em Sao Paulo e as em andamento; a pedida fica", () => {
   // 05/11/2026 23:30 em UTC = 20:30 em Sao Paulo: "hoje" e o dia 05 em Sao Paulo.
   const nowMs = Date.parse("2026-11-05T23:30:00.000Z");

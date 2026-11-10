@@ -955,7 +955,7 @@ test("as Configurações de quem apresenta: Microfone, Alto-falante e Câmera co
  * O painel com abas (docs/31 V2-15) e a aba Pessoas (V2-14)
  * ---------------------------------------------------------------------------------------------- */
 
-test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯ Mais painéis fora da lista das abas, com Enquetes, Atendimento, Presença e Gravação; tudo montado, so o Chat na tela; o X a partir de lg", async () => {
+test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯ Mais painéis fora da lista das abas, com Na tela, Enquetes, Atendimento, Presença e Gravação; tudo montado, so o Chat na tela; o X a partir de lg", async () => {
   const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
   const view = { chat: { hot: [], perMinute: [], students: 0, top: [], total: 0 }, presence: { avgPresent: 2, curve: [{ b: 1, n: 2 }], drops: [], peak: { b: 1, n: 2 }, reachedEnd: 0, unique: 2, watchAvgSeconds: 0, watchMaxSeconds: 0 } };
   const question = (id, status) => ({ anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, body: `Pergunta ${id}`, createdAt: new Date(NOW - MIN).toISOString(), displayName: "Ana M.", id, messageId: null, offsetMs: 60_000, sessionId: S_LIVE, status, upvotes: 0, userId: ANA });
@@ -984,9 +984,9 @@ test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯
   assert.match(trigger, /aria-haspopup="menu"/);
   assert.match(trigger, new RegExp(`aria-label="${escape(consoleV2Copy.mais)}"`));
   assert.ok(panel.indexOf("data-console-more-trigger") > tablistEnd, "o ⋯ depois da lista das abas, fora dela");
-  assert.deepEqual(Array.from(panel.matchAll(/role="menuitemradio"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Enquetes", "Atendimento", "Presença", "Gravação"]);
+  assert.deepEqual(Array.from(panel.matchAll(/role="menuitemradio"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Na tela", "Enquetes", "Atendimento", "Presença", "Gravação"]);
   // Cada entrada e uma <section> com o nome dela (nao um tabpanel), montada e escondida.
-  for (const [entrada, nome] of [["enquetes", "Enquetes"], ["atendimento", "Atendimento"], ["presenca", "Presença"], ["gravacao", "Gravação"]]) {
+  for (const [entrada, nome] of [["tela", "Na tela"], ["enquetes", "Enquetes"], ["atendimento", "Atendimento"], ["presenca", "Presença"], ["gravacao", "Gravação"]]) {
     const bloco = pane(markup, "more", entrada);
     assert.match(bloco, new RegExp(`^<section aria-label="${nome}"[^>]*data-console-more="${entrada}" hidden="" role="group"`), entrada);
     // Um grupo, nao uma regiao: a regiao e o cartao de dentro, e o leitor de tela nao lista "Enquetes" dentro de "Enquetes".
@@ -1006,7 +1006,7 @@ test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯
   // entradas da sessao, todas na tela (o HTML do servidor nao mede a altura: o Mais so aparece no navegador, numa janela baixa).
   const trilho = markup.slice(markup.indexOf('data-console-slot="rail"'));
   assert.ok(markup.indexOf('data-console-slot="rail"') > markup.indexOf('data-console-slot="panel"'), "o trilho depois do painel");
-  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "enquetes", "atendimento", "presenca", "gravacao"]);
+  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "tela", "enquetes", "atendimento", "presenca", "gravacao"], "a Na tela e um item a mais no trilho");
   assert.match(trilho, /<button aria-controls="console-panel" aria-expanded="true"[^>]*data-console-rail="chat"/, "o Chat aberto");
   assert.match(trilho, new RegExp(`aria-label="${escape(consoleV2Copy.trilho.comNumero("Perguntas", consoleV2Copy.trilho.abertas(2)))}"[^>]*data-console-rail="perguntas"`), "Perguntas com o numero no nome");
   // A Equipe tem as mesmas abas e entradas.
