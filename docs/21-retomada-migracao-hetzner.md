@@ -869,9 +869,12 @@ select relrowsecurity from pg_class where oid = 'public.webinar_question_replies
 
 Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up`), onde a integracao
 `tests/integration/webinarios-fio-e-foto.test.mjs` e o ponta a ponta `aluno-responde-no-fio` rodam contra ela. **Na nuvem
-de teste, pendente**: a conta do Supabase ligada a sessao que escreveu a migracao nao tinha acesso ao projeto de teste
-(o MCP respondeu "sem permissao"), entao a aplicacao ficou com o produtor, pelo SQL Editor, antes do merge da PR. Quando
-aplicar, atualizar este paragrafo com a data.
+de teste, aplicada em 10/11/2026 pelo produtor, pelo SQL Editor**, antes do merge da PR: a conta do Supabase ligada a
+sessao que escreveu a migracao nao tinha acesso ao projeto de teste (o MCP respondeu "sem permissao"), entao o produtor
+colou o arquivo no SQL Editor e avisou no chat. A conferencia do cabecalho e o `list_migrations` nao foram rodados por
+aquela sessao (sem acesso): quem tiver acesso confere as tres consultas acima e a linha `202611100001` em
+`supabase_migrations.schema_migrations`. Se o arquivo mudar depois disso, ele nao roda de novo na nuvem de teste: a
+mudanca vira uma migracao nova, e a guarda (o hash) avisa.
 
 **Producao (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
 basta a promocao `dev` -> `main` que levar este codigo passar pelo `deploy-membros`.
