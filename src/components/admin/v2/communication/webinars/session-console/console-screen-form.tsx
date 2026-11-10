@@ -1,8 +1,11 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ImageUp, LoaderCircle, QrCode, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ImageUp, LoaderCircle, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useId, useRef, useState, type CSSProperties } from "react";
+import { useId, useRef, useState } from "react";
+import { RoomScreenLayer } from "@/components/member/webinars/room/screen/room-screen-layer";
+import { screenPlacement } from "@/components/member/webinars/room/screen/room-screen-model";
+import { RoomScreenStrip } from "@/components/member/webinars/room/screen/room-screen-strip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { ActionResult } from "@/lib/action-result";
@@ -14,7 +17,6 @@ import { webinarHref } from "@/server/webinars/model";
 import type { SavedScreenItem, UploadedScreenImage, saveScreenItem } from "@/server/webinars/screen-actions";
 import {
   QR_MARGIN_MODULES,
-  QR_SIDE_PX,
   SCREEN_DEFAULT_PLACE,
   SCREEN_DEFAULT_SIZE,
   SCREEN_LIMITS,
@@ -32,6 +34,7 @@ import {
 } from "@/server/webinars/screen-model";
 import { screenItemInputSchema } from "@/server/webinars/screen-schemas";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../../form";
+import { PreviewFrame } from "../../../member-area/preview-frame";
 import { AdminSwitch, SectionCard } from "../../../settings/kit";
 import { adminMenuItem, adminMenuPopup } from "../../../styles";
 import { useConsolePortal } from "./console-shell";
@@ -48,9 +51,13 @@ import { useConsolePortal } from "./console-shell";
 // a Previa com Computador e Celular e os botoes Mostrar agora (salva e mostra, so com a sessao aceitando a equipe),
 // Salvar para depois e Cancelar. A conferencia do formulario e o mesmo zod do servidor (screenItemInputSchema), mostrada
 // depois da primeira tentativa, junto dos erros que o servidor devolve em cada campo.
-// A Previa (ScreenPreview) e por enquanto um desenho simples na escala: o cartao na posicao e no tamanho escolhidos sobre
-// um palco 16:9 (Computador) e a linha da faixa abaixo do video (Celular); quando o componente do aluno chegar
-// (src/components/member/webinars/room/screen), a Previa passa a desenhar com ele. Nenhuma frase escrita aqui.
+// A Previa (ScreenPreview) e desenhada pelos componentes do aluno (src/components/member/webinars/room/screen; a fatia S9),
+// dentro da moldura de previa da Area de membros (PreviewFrame: a "tela" de largura fixa reduzida para caber na coluna,
+// com o conteudo inert, fora do Tab e do clique, entao nenhum link abre e nenhum X fecha): no Computador, a camada do
+// palco de verdade (RoomScreenLayer, o proprio recipiente @container/tela) sobre um palco 16:9 de 1280 x 720, com o
+// cartao na posicao e no tamanho escolhidos pela mesma screenPlacement da sala; no Celular, a 390 px, o video 16:9 e a
+// faixa logo abaixo (RoomScreenStrip, a linha de 56 px). Sem handlers: nada e medido nem enviado (nem viu, nem clicou,
+// nem fechou). Nenhuma frase escrita aqui.
 
 const copy = WEBINAR_COPY.naTela;
 const form = copy.formulario;
@@ -216,23 +223,7 @@ export function screenItemPreview(item: ScreenItem, origin: string | null | unde
 
 export type ScreenPreviewDevice = "desktop" | "mobile";
 
-/** Onde o cartao fica no palco da Previa (as nove posicoes, com a margem segura). */
-const PLACE_CLASS: Record<ScreenPlace, string> = {
-  bottom_center: "bottom-[8%] left-1/2 -translate-x-1/2",
-  bottom_left: "bottom-[8%] left-[3%]",
-  bottom_right: "bottom-[8%] right-[3%]",
-  center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-  middle_left: "left-[3%] top-1/2 -translate-y-1/2",
-  middle_right: "right-[3%] top-1/2 -translate-y-1/2",
-  top_center: "left-1/2 top-[8%] -translate-x-1/2",
-  top_left: "left-[3%] top-[8%]",
-  top_right: "right-[3%] top-[8%]"
-};
-
-/** A largura do banner na Previa: a mesma fracao do palco (22, 30 e 40 % no palco largo). */
-const BANNER_WIDTH: Record<ScreenSize, number> = { l: 40, m: 30, s: 22 };
-
-/** O quadro do QR Code (preto no branco, nivel M, margem de 4 modulos), nos dois temas. */
+/** O codigo ao lado do Link do formulario do QR Code: o quadro preto no branco, nivel M, margem de 4 modulos, nos dois temas. */
 function QrTile({ className, link, side }: { className?: string; link: string; side: number }) {
   const domain = linkDomain(link) ?? link;
 
@@ -251,75 +242,44 @@ function QrTile({ className, link, side }: { className?: string; link: string; s
   );
 }
 
-function PreviewCard({ item }: { item: ScreenPreviewItem }) {
-  if (item.kind === "qr") {
-    return (
-      <div className="flex flex-col items-center gap-1 rounded-[8px] bg-room-on-video-bg p-1.5 text-room-on-video-fg" data-screen-preview-card="qr">
-        {item.linkUrl ? <QrTile link={item.linkUrl} side={QR_SIDE_PX[item.size]} /> : null}
-        {item.title ? <span className="line-clamp-2 text-center text-[9px] leading-3">{item.title}</span> : null}
-        <span className="text-[9px] leading-3 font-semibold underline">{copy.aluno.abrirOLink}</span>
-      </div>
-    );
-  }
+/** O id da exibicao na Previa: nenhuma exibicao de verdade (sem handlers, nada e medido nem guardado por ele). */
+export const SCREEN_PREVIEW_DISPLAY_ID = "previa";
 
-  return (
-    <div className="relative flex flex-col gap-1 rounded-[8px] bg-room-on-video-bg p-1.5 text-room-on-video-fg" data-screen-preview-card="banner">
-      {item.closable ? <X aria-hidden="true" className="absolute right-1 top-1 size-2.5" data-screen-preview-close="" /> : null}
-      {item.image ? (
-        // eslint-disable-next-line @next/next/no-img-element -- previa da imagem do nosso bucket, pequena e sem otimizacao.
-        <img alt={item.image.alt} className="h-auto max-h-24 w-full rounded-[4px] object-contain" height={item.image.height} src={item.image.url} width={item.image.width} />
-      ) : null}
-      {item.title ? <span className="line-clamp-3 pr-3 text-[10px] leading-3 font-semibold">{item.title}</span> : null}
-      {item.body ? <span className="line-clamp-3 text-[9px] leading-3">{item.body}</span> : null}
-      {item.buttonLabel ? <span className="self-start rounded-full bg-room-accent px-2 py-0.5 text-[9px] leading-3 font-semibold text-white">{item.buttonLabel}</span> : null}
-    </div>
-  );
+/** O item da Previa como a sala o recebe (o componente do aluno pede o id da exibicao e a hora; a Previa nao tem). */
+export function screenPreviewStudentItem(item: ScreenPreviewItem): StudentScreenItem {
+  return { ...item, displayId: SCREEN_PREVIEW_DISPLAY_ID, shownAt: "" };
 }
 
-/** A linha da faixa do celular: miniatura ou o icone do QR, titulo e texto em uma linha, a acao e o X so quando pode fechar. */
-function PreviewStripRow({ item }: { item: ScreenPreviewItem }) {
-  const action = item.kind === "qr" ? (item.linkUrl ? copy.aluno.abrirOLink : null) : item.buttonLabel;
-
-  return (
-    <div className="flex h-14 min-w-0 items-center gap-2 rounded-[8px] bg-room-surface px-2 text-room-fg" data-screen-preview-strip={item.kind}>
-      {item.kind === "qr" ? (
-        <QrCode aria-hidden="true" className="size-6 shrink-0" />
-      ) : item.image ? (
-        // eslint-disable-next-line @next/next/no-img-element -- previa da imagem do nosso bucket, pequena e sem otimizacao.
-        <img alt={item.image.alt} className="size-10 shrink-0 rounded-[4px] object-contain" height={item.image.height} src={item.image.url} width={item.image.width} />
-      ) : null}
-      <span className="flex min-w-0 flex-1 flex-col">
-        {item.title ? <span className="truncate text-[11px] leading-4 font-semibold">{item.title}</span> : null}
-        {item.body ? <span className="truncate text-[10px] leading-4 text-room-fg-muted">{item.body}</span> : null}
-      </span>
-      {action ? <span className="shrink-0 rounded-full bg-room-control px-2 py-1 text-[10px] leading-3 font-semibold">{action}</span> : null}
-      {item.closable ? <X aria-hidden="true" className="size-3.5 shrink-0" data-screen-preview-close="" /> : null}
-    </div>
-  );
-}
+/** O palco do Computador na Previa: 1280 x 720 (16:9; os cartoes do palco largo, 640 px ou mais), reduzido para a coluna. */
+const PREVIEW_STAGE_HEIGHT = 720;
+/** O Celular a 390 px: o video 16:9 (220 px) e a faixa com uma linha de 56 px logo abaixo. */
+const PREVIEW_PHONE_HEIGHT = 280;
 
 /**
- * A Previa do banner ou do QR Code: no Computador, o palco 16:9 com o cartao na posicao e na largura do tamanho; no
- * Celular, o video e a linha da faixa logo abaixo (a posicao e o tamanho nao valem no palco estreito).
+ * A Previa do banner ou do QR Code, desenhada pelo componente do aluno: no Computador, o cartao sobre o palco 16:9 na
+ * posicao e no tamanho escolhidos; no Celular, o video e a linha da faixa logo abaixo (a posicao e o tamanho nao valem
+ * no palco estreito). Sem handlers e dentro da moldura inert: nada abre, nada fecha, nada e enviado.
  */
 export function ScreenPreview({ device, item }: { device: ScreenPreviewDevice; item: ScreenPreviewItem }) {
+  const student = screenPreviewStudentItem(item);
+
   if (device === "mobile") {
     return (
-      <div className="mx-auto flex w-full max-w-[240px] flex-col gap-1.5 rounded-[16px] border border-room-border bg-room-bg p-2" data-screen-preview="mobile">
-        <div aria-hidden="true" className="aspect-video w-full rounded-[6px] bg-black" />
-        <PreviewStripRow item={item} />
-      </div>
+      <PreviewFrame ariaLabel={`${form.previa}: ${form.previaCelular}`} className="[&_figcaption]:hidden" device="mobile" maxWidth={240} screenHeight={PREVIEW_PHONE_HEIGHT}>
+        <div className="flex size-full flex-col bg-room-bg" data-screen-preview="mobile">
+          <div aria-hidden="true" className="aspect-video w-full shrink-0 bg-black" />
+          <RoomScreenStrip forced={false} items={[student]} pinned={null} />
+        </div>
+      </PreviewFrame>
     );
   }
 
-  const width = item.kind === "qr" ? (QR_SIDE_PX[item.size] / 1280) * 100 + 4 : BANNER_WIDTH[item.size];
-
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-[8px] bg-black" data-screen-preview="desktop" data-screen-preview-place={item.place} data-screen-preview-size={item.size}>
-      <div className={cn("absolute", PLACE_CLASS[item.place])} style={{ width: `${width}%` } as CSSProperties}>
-        <PreviewCard item={item} />
+    <PreviewFrame ariaLabel={`${form.previa}: ${form.previaComputador}`} className="[&_figcaption]:hidden" device="desktop" maxWidth={480} screenHeight={PREVIEW_STAGE_HEIGHT}>
+      <div className="relative size-full bg-black" data-screen-preview="desktop" data-screen-preview-place={item.place} data-screen-preview-size={item.size}>
+        <RoomScreenLayer forced={false} fullscreen={false} items={[student]} pinned={null} placement={screenPlacement({ items: [student], offerShown: false, pinnedPills: false })} />
       </div>
-    </div>
+    </PreviewFrame>
   );
 }
 

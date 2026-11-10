@@ -21,7 +21,8 @@ import "./support/resolve-extensionless-ts.mjs";
 //   lugar do atual, Na tela, Mostrar de novo) e o ⋯ com Editar e Excluir; o aviso da migracao; os dois formularios com
 //   todos os rotulos (os nove pontos como radios, o Grande desligado no meio sem fechar, os avisos fixos, o codigo do QR
 //   Code com o dominio e o aviso de codigo denso, os links prontos); o estado puro do formulario; a Previa no
-//   Computador e no Celular; o contador da entrada no trilho; a entrada no console da gravada (nunca no Replay) e a
+//   Computador e no Celular, desenhada pelos componentes do aluno (a camada do palco e a faixa) dentro da moldura inert,
+//   sem handlers; o contador da entrada no trilho; a entrada no console da gravada (nunca no Replay) e a
 //   pilula "Na tela: Banner · QR Code" no palco da Live ao vivo, sem os cartoes;
 // - R5, a moderacao por pessoa na Live gravada: o ⋯ da mensagem de aluno com os itens da live sem os do video (Banir
 //   desligado com a frase sem messaging.publish), os Desfazer e os rotulos da barrada, o bloco "Removidos, silenciados e
@@ -728,6 +729,7 @@ test("formulario do banner: todos os rotulos na ordem, os nove pontos de Onde ap
   const previa = block(formulario, 'data-console-screen-preview-block=""', "section");
   assert.match(textOf(previa), new RegExp(`^${formCopy.previa} ${formCopy.previaComputador} ${formCopy.previaCelular}`));
   assert.match(previa, /data-screen-preview="desktop"/);
+  assert.match(previa, /data-room-screen-layer=""/, "desenhada pela camada do palco do aluno");
   assert.deepEqual(
     Array.from(block(formulario, 'data-console-screen-form-actions=""', "div").matchAll(/<button[^>]*>([^<]+)<\/button>/g)).map((match) => match[1]),
     [formCopy.mostrarAgora, formCopy.salvarParaDepois, formCopy.cancelar]
@@ -819,32 +821,77 @@ test("o estado do formulario: o Grande sai no meio sem fechar, os textos sem esp
   ]);
 });
 
-test("a Previa: no Computador, o cartao na posicao e na largura do tamanho sobre o palco 16:9; no Celular, a linha da faixa abaixo do video com o X so quando pode fechar; nenhum link de verdade", () => {
-  const { screenFormPreview, screenFormStart, screenItemPreview } = screenForm;
+test("a Previa pelo componente do aluno: no Computador, a camada do palco (@container/tela) num palco 16:9 de 1280 x 720 com o cartao na posicao e na largura do tamanho; no Celular, a 390 px, a linha da faixa abaixo do video com o X so quando pode fechar; tudo dentro da moldura inert, sem handlers", () => {
+  const { screenFormPreview, screenFormStart, screenItemPreview, screenPreviewStudentItem, SCREEN_PREVIEW_DISPLAY_ID } = screenForm;
   const desktop = html(createElement(ScreenPreview, { device: "desktop", item: screenItemPreview(banner, ORIGEM) }));
   assert.match(desktop, /data-screen-preview="desktop"/);
   assert.match(desktop, /data-screen-preview-place="bottom_right"/);
-  assert.match(desktop, /bottom-\[8%\] right-\[3%\]/);
-  assert.match(desktop, /style="width:30%"/, "Medio: 30 % do palco");
-  assert.match(textOf(desktop), /Garanta sua vaga Só até o fim da aula\. Quero/);
-  assert.match(desktop, /data-screen-preview-close=""/);
-  assert.doesNotMatch(desktop, /<a\s|href=/, "a Previa nao abre link");
+  // A moldura de previa da Area de membros: o rotulo, a "tela" de 1280 x 720 reduzida e o conteudo inert (nenhum link
+  // abre, nenhum X fecha, nada recebe o Tab); a legenda da moldura fica escondida (Computador / Celular ja dizem).
+  assert.match(desktop, /^<figure aria-label="Prévia: Computador" class="[^"]*\[&amp;_figcaption\]:hidden"/);
+  const tela = desktop.match(/<div class="@container absolute[^"]*" inert="" style="([^"]*)">/);
+  assert.ok(tela, "o conteudo inert");
+  assert.match(tela[1], /height:720px;/);
+  assert.match(tela[1], /width:1280px/);
+  assert.ok(desktop.indexOf(" inert=") < desktop.indexOf('data-screen-preview="desktop"'), "o palco inteiro dentro da moldura inert");
+  // O componente do aluno: a camada e o recipiente @container/tela; a area segura; o cartao na celula de baixo a direita
+  // (screenPlacement), com a largura do Medio (30 % do palco) e o X do aluno.
+  const camada = block(desktop, "data-room-screen-layer", "div");
+  assert.match(camada, /^<div class="@container\/tela pointer-events-none absolute inset-0 z-20" data-room-screen-layer="">/);
+  assert.match(camada, /<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-14" data-room-screen-area="">/, "a margem segura da sala");
+  const celula = block(camada, 'data-room-screen-cell="bottom_right"', "div");
+  const cartao = block(celula, 'data-room-screen-card="banner"', "section");
+  assert.match(cartao, /^<section aria-label="Banner da equipe: Garanta sua vaga" class="[^"]*\bw-\[clamp\(240px,30cqw,380px\)\][^"]*@min-\[640px\]\/tela:flex"/, "Medio: 30 % do palco, so no palco de 640 px ou mais (o da Previa tem 1280)");
+  assert.match(cartao, new RegExp(`data-room-screen-display="${SCREEN_PREVIEW_DISPLAY_ID}"`));
+  assert.match(textOf(cartao), /Garanta sua vaga Só até o fim da aula\. Quero/);
+  assert.match(cartao, /<button aria-label="Fechar o banner"[^>]*data-room-screen-close=""/);
+  assert.deepEqual([...desktop.matchAll(/href="([^"]*)"/g)].map(([, href]) => href), ["https://exemplo.com/vaga"], "so o link https da equipe, como o aluno ve");
+  assert.match(cartao, /<a [^>]*rel="noopener noreferrer nofollow" target="_blank"><span class="truncate">Quero<\/span><\/a>/);
+  assert.doesNotMatch(desktop, /data-room-screen-(?:strip|row|compact)/, "no Computador, so o cartao");
+  // O item como a sala recebe, sem exibicao de verdade.
+  assert.deepEqual(screenPreviewStudentItem(screenItemPreview(banner, ORIGEM)), { ...screenItemPreview(banner, ORIGEM), displayId: SCREEN_PREVIEW_DISPLAY_ID, shownAt: "" });
+
+  // A posicao e o tamanho escolhidos: "No meio" e Pequeno; Grande em cima a esquerda.
+  const meio = html(createElement(ScreenPreview, { device: "desktop", item: screenItemPreview(itemPronto({ place: "center", size: "s" }), ORIGEM) }));
+  assert.match(block(meio, 'data-room-screen-cell="center"', "div"), /data-room-screen-card="banner"/, "No meio: a celula do centro");
+  assert.match(meio, /<section aria-label="Banner da equipe: Garanta sua vaga" class="[^"]*\bw-\[clamp\(200px,22cqw,280px\)\]/, "Pequeno: 22 %");
+  const grande = html(createElement(ScreenPreview, { device: "desktop", item: screenItemPreview(itemPronto({ place: "top_left", size: "l" }), ORIGEM) }));
+  assert.match(block(grande, 'data-room-screen-cell="top_left"', "div"), /class="[^"]*\bw-\[clamp\(280px,40cqw,520px\)\]/, "Grande: 40 %");
 
   const celular = html(createElement(ScreenPreview, { device: "mobile", item: screenItemPreview({ ...banner, closable: false }, ORIGEM) }));
-  const linha = block(celular, 'data-screen-preview-strip="banner"', "div");
-  assert.match(linha, /\bh-14\b/, "a linha de 56 px");
-  assert.doesNotMatch(linha, /data-screen-preview-close/, "sem poder fechar, sem X");
-  assert.doesNotMatch(celular, /data-screen-preview-place/, "no celular a posicao nao vale");
+  assert.match(celular, /^<figure aria-label="Prévia: Celular"/);
+  assert.match(celular.match(/<div class="@container absolute[^"]*" inert="" style="([^"]*)">/)?.[1] ?? "", /width:390px/, "o celular de 390 px");
+  const faixa = block(celular, "data-room-screen-strip", "div");
+  assert.ok(celular.indexOf('aria-hidden="true" class="aspect-video') < celular.indexOf("data-room-screen-strip"), "a faixa abaixo do video");
+  const linha = block(faixa, 'data-room-screen-row="banner"', "section");
+  assert.match(linha, /<div class="flex min-h-14 items-center/, "a linha de 56 px");
+  assert.doesNotMatch(linha, /Fechar o banner|data-room-screen-close/, "sem poder fechar, sem X");
+  assert.match(linha, /<p class="sr-only">Este banner sai quando a equipe tirar\.<\/p>/);
+  assert.doesNotMatch(celular, /data-screen-preview-place|data-room-screen-cell|data-room-screen-card/, "no celular a posicao nao vale");
+  assert.match(block(html(createElement(ScreenPreview, { device: "mobile", item: screenItemPreview(banner, ORIGEM) })), 'data-room-screen-row="banner"', "section"), /aria-label="Fechar o banner"/, "podendo fechar, o X");
 
   const qr = html(createElement(ScreenPreview, { device: "desktop", item: screenItemPreview(qrPronto, ORIGEM) }));
   assert.match(qr, /<svg[^>]*role="img"[^>]*aria-label="QR Code do link exemplo\.com"|aria-label="QR Code do link exemplo\.com"[^>]*role="img"/);
+  assert.match(block(qr, 'data-room-screen-cell="top_right"', "div"), /data-room-screen-card="qr"/);
+  assert.match(qr, /<svg height="176" width="176"[^>]*data-room-screen-qr=""/, "o lado do Medio");
   assert.match(textOf(qr), new RegExp(`Baixe o material ${naTela.aluno.abrirOLink}`));
   const qrCelular = html(createElement(ScreenPreview, { device: "mobile", item: screenItemPreview(qrPronto, ORIGEM) }));
-  assert.match(textOf(qrCelular), new RegExp(naTela.aluno.abrirOLink), "no celular, a acao e Abrir o link");
+  assert.match(textOf(block(qrCelular, 'data-room-screen-row="qr"', "section")), new RegExp(naTela.aluno.abrirOLink), "no celular, a acao e Abrir o link");
 
   // O link que nao e https nunca vira o botao; a imagem so da nossa origem.
   const ruim = screenFormPreview({ ...screenFormStart("banner"), buttonLabel: "Quero", image: { height: 10, path: IMAGEM, width: 10 }, linkUrl: "javascript:alert(1)", title: "Oi" }, "https://outro.site/x");
   assert.deepEqual([ruim.linkUrl, ruim.buttonLabel, ruim.image], [null, null, null]);
+  const ruimHtml = html(createElement(ScreenPreview, { device: "desktop", item: ruim }));
+  assert.doesNotMatch(ruimHtml, /href=|<img/, "sem link e sem imagem de fora");
+  // A imagem da nossa origem chega ao cartao como o aluno a ve (inteira, com width e height).
+  const comImagem = html(createElement(ScreenPreview, { device: "desktop", item: screenItemPreview(itemPronto({ image: { alt: "Turma reunida", height: 360, path: IMAGEM, width: 640 } }), ORIGEM) }));
+  assert.match(comImagem, new RegExp(`<img alt="Turma reunida" class="[^"]*object-contain[^"]*" data-room-screen-image="" decoding="async" height="360" src="${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM.replace(/\./g, "\\.")}" width="640"/>`));
+
+  // Sem handlers: o componente do aluno, nada da sala que mede, guarda ou envia.
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/console-screen-form.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /<RoomScreenLayer forced=\{false\} fullscreen=\{false\} items=\{\[student\]\} pinned=\{null\} placement=\{screenPlacement\(/);
+  assert.match(fonte, /<RoomScreenStrip forced=\{false\} items=\{\[student\]\} pinned=\{null\} \/>/);
+  assert.doesNotMatch(fonte, /handlers=|useRoomScreenEvents|sendBeacon|screen-events/, "nada e enviado da Previa");
 });
 
 test("o contador da entrada Na tela no trilho: o numero e o nome que comeca pelo rotulo; sem nada na tela, so o rotulo", () => {
