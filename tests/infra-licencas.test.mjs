@@ -303,7 +303,7 @@ test("secrets-licencas grava os segredos em segredos/ como 1000:1000 e 0400, so 
   // Sem a chave do Resend: o arquivo que ja esta no servidor fica; sem nenhum, nasce vazio (o compose do Emissor o monta
   // sempre), e o aviso diz que o Painel nao sobe sem ela.
   const semResend = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
-  const { LICENCAS_RESEND_CHAVE: _, ...semChave } = SEGREDOS;
+  const semChave = Object.fromEntries(Object.entries(SEGREDOS).filter(([nome]) => nome !== "LICENCAS_RESEND_CHAVE"));
   const vazia = semResend.runScript("licencas.sh", semChave, ["segredos"]);
   assert.equal(vazia.status, 0, vazia.stdout + vazia.stderr);
   const arquivo = sshCmds(semResend.calls()).find((c) => c.command.includes('segredos/resend-chave'));
