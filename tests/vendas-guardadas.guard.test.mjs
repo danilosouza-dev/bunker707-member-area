@@ -149,7 +149,7 @@ test("quem toca em held_sales: o store e a leitura das telas; as regras ficam pu
 test("a tarefa vendas-guardadas está no registro logo depois da conferência da licença e no comentário dos jobs", () => {
   const registry = read("src/server/jobs/registry.ts");
 
-  assert.match(registry, /, licenseCheckInJob, heldSalesJob, communicationMediaJob\];/);
+  assert.match(registry, /, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\];/);
   assert.match(registry, /- `vendas-guardadas` \(/);
   assert.match(read("src/server/jobs/held-sales-job.ts"), /export const HELD_SALES_JOB_NAME = "vendas-guardadas";/);
 });

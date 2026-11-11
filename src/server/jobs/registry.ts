@@ -7,6 +7,7 @@ import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
 import { heldSalesJob } from "./held-sales-job";
 import { licenseCheckInJob } from "./license-check-in-job";
+import { licenseSalesJob } from "./license-sales-job";
 import { webinarOfferConversionsJob } from "./webinar-offer-conversions-job";
 import { webinarRecordingsJob } from "./webinar-recordings-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
@@ -72,6 +73,11 @@ import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-jo
 //   src/server/jobs/held-sales-job.ts). No modo "off" nao faz nada nem le o banco. No "enforce": uma consulta por
 //   minuto; com venda guardada e a licenca permitindo de novo, libera em ordem, com reivindicacao por venda (duas rodadas
 //   nunca liberam a mesma). Logo depois da conferencia da licenca, para a licenca regularizada nesta rodada ja liberar;
+// - `licencas-vendas` (a venda do Bunker Members que vira Licenca, docs/32 §11.10; src/server/jobs/license-sales-job.ts).
+//   Sem a API interna do Emissor configurada (a copia do comprador, a dev sem o simulador) nao faz nada nem le o banco.
+//   Com ela (a nossa escola): uma consulta por minuto a fila license_requests e ate 10 pedidos por rodada ao Emissor, na
+//   ordem, com reivindicacao por linha e nova tentativa com espera. Fica no fim, antes da limpeza: o Emissor lento so
+//   atrasa a propria fila;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
@@ -102,4 +108,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob];

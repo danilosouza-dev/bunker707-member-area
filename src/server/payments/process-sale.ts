@@ -44,6 +44,7 @@ import "server-only";
 
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { licensingMode } from "@/server/licensing/build-config";
+import { requestLicensesAfterSale } from "@/server/licensing/interno/sale-requests";
 import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import type { LicenseState } from "@/server/licensing/state";
 import { findAccountByEmail, normalizeEmail } from "@/server/students/accounts";
@@ -205,7 +206,37 @@ export type ProcessSaleInput = {
   release?: { productIds: readonly string[] };
 };
 
+/**
+ * A venda inteira: a regra de acesso de sempre (processSaleAccess, que nao muda) e, depois dela, o passo da venda que vira
+ * Licenca do Bunker Members (docs/32 §11.10; src/server/licensing/interno/sale-requests.ts). O passo so existe com a API
+ * interna do Emissor configurada (a nossa escola): sem ela, nao le nem grava nada, e o resultado e exatamente o de antes.
+ * Com ela, so enfileira pedidos ao Emissor (license_requests) e acrescenta uma frase ao detalhe; o erro do banco nesse
+ * passo marca a venda com erro, com o acesso ja liberado, e o Reprocessar refaz os dois.
+ */
 export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
+  const result = await processSaleAccess(db, input);
+  let license: Awaited<ReturnType<typeof requestLicensesAfterSale>>;
+
+  try {
+    license = await requestLicensesAfterSale(db, {
+      access: { heldProductIds: result.held?.productIds ?? [], userId: result.userId },
+      event: input.event,
+      webhookEventId: input.webhookEventId ?? null
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+
+    throw new SaleProcessingError(
+      `${result.outcome === "access_granted" ? "O acesso foi liberado, mas o" : "O"} pedido da Licença do Bunker Members não entrou na fila (${reason}). Use Reprocessar.`,
+      { comboId: result.comboId, productId: result.productId }
+    );
+  }
+
+  return license.note ? { ...result, detail: `${result.detail} ${license.note}` } : result;
+}
+
+/** A regra de acesso de uma venda (a de sempre). */
+async function processSaleAccess(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
   const { event } = input;
 
   if (event.type === "other") {
@@ -614,6 +645,8 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
           return withSaleNotes(
             ignored("Esta compra já está guardada por outro aviso da mesma venda: ela é liberada uma vez só, quando a Licença permitir acesso novo.", {
               ...base,
+              // A parte guardada vai junto: o passo da Licenca do Bunker Members (processSaleEvent) nunca pede o que espera.
+              held: heldPart,
               userId: account?.id ?? null
             }),
             saleNotes

@@ -161,7 +161,7 @@ test("guarda: o motor dos fluxos nao muda o contrato dos jobs (tipo Job e ordem 
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
   // A limpeza diaria dos arquivos sem uso (docs/22 §4.6) entrou por ultimo, e a licenca da Instalacao (docs/32 §11.3) e
   // as vendas guardadas (docs/32 §2.2) logo antes dela; o tipo Job nao mudou.
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, communicationMediaJob\];/);
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\];/);
 });
 
 /* ------------------------------------------------------------------------------------------------

@@ -201,6 +201,6 @@ test("o job licenca-conferencia está no registro do tick, antes da limpeza de a
   const registry = read("src/server/jobs/registry.ts");
 
   // As vendas guardadas (docs/32 §2.2) vem logo depois da conferencia: a licenca regularizada na rodada ja as libera.
-  assert.match(registry, /export const jobRegistry: readonly Job\[\] = \[[^\]]*, licenseCheckInJob, heldSalesJob, communicationMediaJob\];/);
+  assert.match(registry, /export const jobRegistry: readonly Job\[\] = \[[^\]]*, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\];/);
   assert.match(registry, /- `licenca-conferencia` \(/);
 });
