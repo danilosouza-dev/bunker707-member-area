@@ -9,7 +9,9 @@ import "./support/resolve-extensionless-ts.mjs";
 // nome, papel, Solta em, a situacao, Importar/Exportar CSV, a transcricao e Resolver frases, o chat de uma sessao
 // encerrada em CSV), Simulação (o aviso do CDC, uma linha por sessao gravada com o selo e quem decidiu, so para quem
 // publica), Enquetes (os modelos) e Sessões (Entrada atrasada por sessao, o link do console e o Replay livre; o
-// "Comeca quando voce entra" da fase 4e tem o teste dele, tests/webinarios-jit-tela.test.mjs).
+// "Comeca quando voce entra" da fase 4e tem o teste dele, tests/webinarios-jit-tela.test.mjs). Desde 11/11/2026 (docs/30
+// D75 a D78): as pessoas que comentam no card Roteiro e no console (a lista, o Quem comenta pela lista, o Tipo, o
+// Comentar como, o "Enviado." do repetir, a confirmacao do Remover) e o selo "Simulada" so no console.
 //
 // Os .tsx do app sao transpilados aqui pelo TypeScript (so JSX -> JS). next/link, next/image e next/navigation viram
 // stubs; o Dialog vira uma versao sem portal; as Server Actions viram funcoes falsas.
@@ -454,4 +456,154 @@ test("achados 1, 3 e 4 (revisao de 11/11/2026): o minuto da live digitado em min
   assert.match(comFoto.match(/<button[^>]*data-console-script-send=""[^>]*>/)?.[0] ?? "", /disabled=""/, "Enviar agora espera a foto");
   assert.match(comFoto.match(/<button[^>]*data-console-script-save=""[^>]*>/)?.[0] ?? "", /disabled=""/, "Guardar na lista espera a foto");
   assert.match(comFoto, /Enviando a foto…/);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * As pessoas que comentam e a pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78)
+ * ---------------------------------------------------------------------------------------------- */
+
+const ADRIANO = "eeeeeeee-0000-4000-8000-0000000000a1";
+const BIA = "eeeeeeee-0000-4000-8000-0000000000a2";
+const PESSOAS_LISTA = [
+  { avatarPath: FOTO, createdAt: "", id: ADRIANO, name: "Adriano Souza", role: "student", updatedAt: "", webinarId: WEBINAR },
+  { avatarPath: null, createdAt: "", id: BIA, name: "Bia Costa", role: "team", updatedAt: "", webinarId: WEBINAR }
+];
+const COM_LISTA = { available: true, personas: PESSOAS_LISTA };
+
+test("pessoas no editor: a lista 'Pessoas que comentam' (foto ou iniciais, Aparece como, quantos comentarios, Editar, Remover, Nova pessoa) e o 'Quem comenta' de cada linha pela lista, com o Tipo", () => {
+  const items = [
+    scriptItem("a", { offsetMs: 60_000, personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", position: 0 }),
+    scriptItem("b", { kind: "question", offsetMs: 90_000, personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", position: 1 }),
+    scriptItem("c", { offsetMs: 120_000, personaId: null, personaName: "Caio D.", position: 2 })
+  ];
+  const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialPersonas: COM_LISTA, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  const text = textOf(markup);
+  assert.match(markup, /data-persona-list=""/);
+  assert.match(text, /Pessoas que comentam/);
+  assert.match(markup, new RegExp(`data-persona="${ADRIANO}"[\\s\\S]*?src="${FOTO_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "a foto da pessoa");
+  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários do roteiro/);
+  assert.match(text, /Bia Costa Aparece como Equipe · Nenhum comentário do roteiro/);
+  assert.match(markup, /aria-label="Editar Adriano Souza"/);
+  assert.match(markup, /aria-label="Remover Bia Costa"/);
+  assert.match(markup, /data-persona-new=""/);
+  assert.doesNotMatch(markup, /data-persona-comment-as/, "o Comentar como e so do console");
+  // Cada linha: a escolha da pessoa (a ligada, escolhida; a de fora, "(fora da lista)"), "Criar nova pessoa" e o Tipo.
+  assert.equal(count(markup, /data-persona-picker=""/g), 3);
+  assert.equal(count(markup, new RegExp(`<option value="${ADRIANO}" selected="">Adriano Souza · Aluno</option>`, "g")), 2);
+  assert.match(markup, /<option value="" selected="">Caio D\. \(fora da lista\)<\/option>/);
+  assert.equal(count(markup, /<option value="__nova__">Criar nova pessoa<\/option>/g), 3);
+  assert.equal(count(markup, /data-script-kind=""/g), 3);
+  assert.match(markup, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="question"\/>/, "a linha Pergunta");
+  assert.match(text, /Pergunta/);
+  assert.match(markup, /maxLength="500"|maxlength="500"/i, "a Pergunta cabe na pergunta do aluno");
+  assert.doesNotMatch(markup, /data-persona-photo-all|Usar esta foto em todos/);
+  assert.doesNotMatch(text, /personagem/i);
+
+  // "Criar nova pessoa" na linha: o formulario da pessoa embaixo dela, com Adicionar à lista.
+  const criando = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialCreatingFor: "c", initialItems: items, initialPersonas: COM_LISTA, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  assert.match(criando, /data-persona-form="nova"/);
+  assert.match(textOf(criando), /Nova pessoa Nome Foto \(opcional\)[\s\S]*Aparece como Aluno Equipe Adicionar à lista Cancelar/);
+  // No banco sem a lista: a frase da migracao no lugar dela e os campos de antes em cada linha.
+  const semLista = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  assert.match(textOf(semLista), /A lista de pessoas que comentam precisa da atualização do banco \(migração 202611110001\)\./);
+  assert.doesNotMatch(semLista, /data-persona-picker/);
+  assert.equal(count(semLista, /data-persona-photo=""/g), 3);
+});
+
+test("pessoas no console: a lista com 'Comentar como {nome}'; o Novo comentário com a pessoa escolhida (sem o Nome), o Tipo Pergunta e o aviso 'Enviado.' do repetir", async () => {
+  const { ConsoleScript } = await import("../src/components/admin/v2/communication/webinars/session-console/console-script.tsx");
+  const { ConsoleScriptComment } = await import("../src/components/admin/v2/communication/webinars/session-console/console-script-comment.tsx");
+  const items = [scriptItem("a", { personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", position: 0, triggerKind: "manual" }), scriptItem("q", { kind: "question", personaId: ADRIANO, personaName: "Adriano Souza", position: 1, triggerKind: "manual" })];
+  const queue = consoleModel.scriptQueue(items, {}, 60_000);
+  const falha = async () => ({ error: "x", ok: false, status: 500 });
+  const props = { busyKey: null, canAct: true, live: true, onComment: async () => null, onDeletePersona: falha, onFire: () => undefined, onSavePersona: falha, onUpload: falha, origin: "https://projeto.supabase.co", personas: COM_LISTA, queue };
+  const lista = html(createElement(ConsoleScript, props));
+  const text = textOf(lista);
+  assert.match(text, /Pessoas que comentam/);
+  assert.match(text, /Comentar como Adriano Souza/);
+  assert.match(text, /Comentar como Bia Costa/);
+  assert.equal(count(lista, /data-persona-comment-as=""/g), 2);
+  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários do roteiro/);
+  assert.match(lista, /data-script-item="q"[\s\S]*?Pergunta/, "o item Pergunta com o selo");
+
+  // O Novo comentário com a pessoa da lista: a escolha, sem o Nome; o Tipo Pergunta, o texto ate 500.
+  const comPessoa = html(createElement(ConsoleScript, { ...props, initialComment: { body: "", kind: "question", personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", personaRole: "student" } }));
+  assert.match(comPessoa, new RegExp(`<option value="${ADRIANO}" selected="">Adriano Souza · Aluno</option>`));
+  assert.doesNotMatch(comPessoa, /data-console-script-name/, "a pessoa da lista nao pede o Nome");
+  assert.match(comPessoa, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="question"\/>/);
+  assert.match(textOf(comPessoa), /Tipo Comentário Pergunta Pergunta/);
+  assert.match(comPessoa, /<textarea[^>]*data-console-script-body=""[^>]*maxLength="500"|<textarea[^>]*maxLength="500"[^>]*data-console-script-body/i);
+  // "Criar nova pessoa": o Nome, a Foto e o Aparece como.
+  const nova = html(createElement(ConsoleScript, { ...props, initialComment: { body: "", kind: "message", personaAvatarPath: null, personaId: null, personaName: "", personaRole: "student" } }));
+  assert.match(nova, /<option value="__nova__" selected="">Criar nova pessoa<\/option>/);
+  assert.match(nova, /data-console-script-name=""/);
+  assert.match(textOf(nova), /Foto \(opcional\)/);
+  // O repetir: o formulario aberto com "Enviado." (o aviso para o leitor de tela).
+  const enviado = html(
+    createElement(ConsoleScriptComment, { busy: false, canSend: true, initialSent: true, initialState: { body: "", kind: "message", personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", personaRole: "student" }, listAvailable: true, onBack() {}, onSubmit: async () => null, onUpload: falha, personas: PESSOAS_LISTA })
+  );
+  assert.match(enviado, /<p aria-live="polite"[^>]*data-console-script-sent=""[^>]*role="status">Enviado\.<\/p>/);
+  assert.doesNotMatch(textOf(lista + comPessoa + nova + enviado), /personagem/i);
+});
+
+test("pessoas: a confirmacao do Remover diz quantos comentarios do roteiro usam a pessoa; o formulario de editar diz o que muda", async () => {
+  const { PersonaList } = await import("../src/components/admin/v2/communication/webinars/persona-list.tsx");
+  const falha = async () => ({ error: "x", ok: false, status: 500 });
+  const base = { available: true, onDelete: falha, onSave: falha, onUpload: falha, personas: PESSOAS_LISTA, usage: { [ADRIANO]: 3 } };
+  const removendo = textOf(html(createElement(PersonaList, { ...base, initialRemoving: ADRIANO })));
+  assert.match(removendo, /Remover Adriano Souza da lista\?/);
+  assert.match(removendo, /3 comentários do roteiro usam esta pessoa\. Eles continuam com o nome e a foto de agora, fora da lista\. O que a turma já viu não muda\./);
+  assert.match(removendo, /Remover da lista/);
+  assert.match(textOf(html(createElement(PersonaList, { ...base, initialRemoving: BIA }))), /Nenhum comentário do roteiro usa esta pessoa\./);
+  const editando = html(createElement(PersonaList, { ...base, initialForm: ADRIANO }));
+  assert.match(editando, new RegExp(`data-persona-form="${ADRIANO}"`));
+  assert.match(editando, /value="Adriano Souza"/);
+  assert.match(textOf(editando), /Editar pessoa Muda o nome, a foto e o Aparece como em todos os comentários do roteiro desta pessoa\. O que a turma já viu não muda\./);
+  assert.match(textOf(editando), /Salvar pessoa/);
+  assert.match(textOf(html(createElement(PersonaList, { ...base, personas: [] }))), /Nenhuma pessoa na lista ainda\./);
+});
+
+test("o selo 'Simulada' so na pergunta simulada do console, com a frase para o leitor de tela; a sala nunca recebe o selo", async () => {
+  const { ConsoleQuestions } = await import("../src/components/admin/v2/communication/webinars/session-console/console-questions.tsx");
+  const pergunta = (id, extra = {}) => ({ anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, avatarUrl: null, body: `Pergunta ${id}`, createdAt: "2026-11-11T20:00:00.000Z", displayName: "Ana S.", id, messageId: null, offsetMs: 0, replies: [], sessionId: "s", simulated: false, status: "open", upvotes: 0, userId: "u", ...extra });
+  const markup = html(createElement(ConsoleQuestions, { busyKey: null, canAct: true, onAnswer: async () => true, onStatus: () => undefined, questions: [pergunta("real"), pergunta("fake", { avatarUrl: FOTO_URL, displayName: "Adriano Souza", simulated: true, userId: null })] }));
+  assert.equal(count(markup, /data-console-question-simulated=""/g), 1);
+  assert.match(markup, /data-console-question="fake"[\s\S]*?data-console-question-simulated=""/);
+  assert.match(textOf(markup), /Adriano Souza Simulada Pergunta de uma pessoa da lista\. Fica fora do relatório, dos painéis e do CSV\./);
+  // A sala do aluno nao conhece o selo: nenhum componente da sala usa a frase.
+  const { readdirSync } = await import("node:fs");
+  const salaDir = new URL("src/components/member/webinars/room/", root);
+  const fontes = readdirSync(salaDir, { recursive: true }).filter((name) => /\.tsx?$/.test(String(name))).map((name) => readFileSync(new URL(String(name), salaDir), "utf8"));
+  assert.ok(fontes.length > 10);
+  assert.ok(fontes.every((fonte) => !/pessoas\.simulada|Simulada/.test(fonte)), "o selo nunca na sala");
+});
+
+test("vocabulario das pessoas (11/11/2026): nenhuma frase diz 'personagem' nem usa hifen como separador; os nomes que o produtor pediu", async () => {
+  const { PESSOAS_COPY } = await import("../src/lib/webinar-copy-v4/pessoas.ts");
+  const textos = [];
+  const coletar = (valor) => {
+    if (typeof valor === "string") {
+      textos.push(valor);
+    } else if (typeof valor === "function") {
+      for (const args of [["Adriano Souza"], [0], [1], [3]]) {
+        coletar(valor(...args));
+      }
+    } else if (valor && typeof valor === "object") {
+      Object.values(valor).forEach(coletar);
+    }
+  };
+  coletar(PESSOAS_COPY);
+  assert.ok(textos.length > 40);
+  assert.deepEqual(textos.filter((texto) => /personage/i.test(texto)), []);
+  assert.deepEqual(textos.filter((texto) => / - /.test(texto)), []);
+  assert.deepEqual([PESSOAS_COPY.titulo, PESSOAS_COPY.quemComenta, PESSOAS_COPY.novaPessoa, PESSOAS_COPY.tipos.message, PESSOAS_COPY.tipos.question, PESSOAS_COPY.simulada], [
+    "Pessoas que comentam",
+    "Quem comenta",
+    "Nova pessoa",
+    "Comentário",
+    "Pergunta",
+    "Simulada"
+  ]);
+  assert.equal(PESSOAS_COPY.comentarComo("Adriano Souza"), "Comentar como Adriano Souza");
+  assert.equal(PESSOAS_COPY.erros.nomeRepetido, "Já existe uma pessoa com esse nome.");
 });
