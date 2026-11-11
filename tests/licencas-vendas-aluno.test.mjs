@@ -147,7 +147,7 @@ async function informarTitular(pessoa = ANA, dados = {}) {
 test("só o comprador: sem acesso ao produto marcado, a página não existe, o menu não mostra e as ações respondem 404", async () => {
   sessao.usuario = CAIO;
 
-  assert.equal(await student.getMyLicensesPage(CAIO.id), null);
+  assert.equal(await student.getMyLicensesPage(CAIO), null);
   assert.equal(await student.readLicensesMenuVisible(CAIO.id, () => false), false);
 
   const respostas = [
@@ -160,7 +160,7 @@ test("só o comprador: sem acesso ao produto marcado, a página não existe, o m
 
   // O acesso fechado tambem nao conta.
   db.linhas("entitlements").find((linha) => linha.user_id === ANA.id).status = "revoked";
-  assert.equal(await student.getMyLicensesPage(ANA.id), null);
+  assert.equal(await student.getMyLicensesPage(ANA), null);
 });
 
 test("o menu: o item aparece só para o comprador, com as páginas de vendedor ligadas, e nunca na prévia da equipe", async () => {
@@ -184,7 +184,7 @@ test("desligado (sem a configuração): nem a página, nem o menu, nem as açõe
   delete process.env.EMISSOR_INTERNO_URL;
   delete process.env.EMISSOR_INTERNO_CREDENCIAL;
 
-  assert.equal(await student.getMyLicensesPage(ANA.id), null);
+  assert.equal(await student.getMyLicensesPage(ANA), null);
   assert.equal(await student.readLicensesMenuVisible(ANA.id, () => true), false);
   assert.equal((await actions.generateLicenseKey({ licenseId: "lic_sim00000001" })).status, 404);
   assert.deepEqual(db.chamadas, [], "nada lido nem gravado");
@@ -253,7 +253,7 @@ test("o titular: os campos conferidos aqui, o segundo e-mail diferente do da con
 
 test("quando só os termos mudam: o aceite reaproveita o titular que o Emissor tem (o documento nunca vem do navegador)", async () => {
   await informarTitular(ANA);
-  const pagina = await student.getMyLicensesPage(ANA.id);
+  const pagina = await student.getMyLicensesPage(ANA);
   assert.equal(pagina.view.needsHolder, false);
   assert.equal(pagina.view.needsTerms, false);
 
@@ -304,7 +304,7 @@ test("a Chave aparece uma vez, só na resposta da ação: nunca no banco, no HTM
     gerada = await actions.generateLicenseKey({ licenseId: anual.id });
     assert.equal(escritas().length, escritasAntes, "a acao nao grava nada no nosso banco");
 
-    const pagina = await student.getMyLicensesPage(ANA.id);
+    const pagina = await student.getMyLicensesPage(ANA);
     html = renderToStaticMarkup(createElement(LicensesView, { accountEmail: ANA.email, page: pagina }));
   } finally {
     Object.assign(console, originais);
@@ -329,7 +329,7 @@ test("trocar a chave: sem confirmar, a ação devolve o que vai parar de funcion
   const primeira = await actions.generateLicenseKey({ licenseId: anual.id });
   assert.equal(simulador.simulateActivation(anual.id, "alunos.escola-da-ana.test"), true);
 
-  const pagina = await student.getMyLicensesPage(ANA.id);
+  const pagina = await student.getMyLicensesPage(ANA);
   const cartao = pagina.view.licenses.find((licenca) => licenca.id === anual.id);
   assert.deepEqual([cartao.canGenerate, cartao.canReplace, cartao.canRevoke], [false, true, true]);
   assert.match(cartao.replaceWarning, /a escola em alunos\.escola-da-ana\.test sai da Licença e fica congelada na próxima conferência/);
@@ -359,7 +359,7 @@ test("revogar: a chave esperando e a instalação saem da Licença, e a página 
   const revogada = await actions.revokeLicenseKey({ licenseId: anual.id });
   assert.deepEqual(revogada, { data: { canceledKeys: 0, cutAddress: "alunos.escola-da-ana.test" }, ok: true });
 
-  const cartao = (await student.getMyLicensesPage(ANA.id)).view.licenses.find((licenca) => licenca.id === anual.id);
+  const cartao = (await student.getMyLicensesPage(ANA)).view.licenses.find((licenca) => licenca.id === anual.id);
   assert.deepEqual([cartao.canGenerate, cartao.canReplace, cartao.canRevoke, cartao.key.state, cartao.installation], [true, false, false, "nenhuma", null]);
 });
 
@@ -385,7 +385,7 @@ test("os erros do Emissor viram frases simples: fora do ar, limite, titular pend
   const [anual] = licencasDe(ANA);
 
   falso.proximas.push({ caminho: `/interno/v1/clientes/${ANA.id}/licencas`, status: 503, texto: "" });
-  const pagina = await student.getMyLicensesPage(ANA.id);
+  const pagina = await student.getMyLicensesPage(ANA);
   assert.equal(pagina.view, null);
   assert.equal(pagina.emissorError, studentModel.STUDENT_LICENSE_MESSAGES.indisponivel);
   const html = renderToStaticMarkup(createElement(LicensesView, { accountEmail: ANA.email, page: pagina }));
@@ -420,7 +420,7 @@ test("a página: o titular primeiro (antes da primeira chave), cada Licença com
   db.linhas("entitlements").push({ ends_at: null, starts_at: "2026-11-01T00:00:00.000Z", status: "active", target_id: "curso-bm", user_id: DORA.id });
   sessao.usuario = DORA;
 
-  const primeiroAcesso = await student.getMyLicensesPage(DORA.id);
+  const primeiroAcesso = await student.getMyLicensesPage(DORA);
   assert.deepEqual([primeiroAcesso.view.needsHolder, primeiroAcesso.view.needsTerms], [true, true]);
   const antes = renderToStaticMarkup(createElement(LicensesView, { accountEmail: DORA.email, page: primeiroAcesso }));
   assert.match(antes, /Titular da Licença/);
@@ -429,7 +429,7 @@ test("a página: o titular primeiro (antes da primeira chave), cada Licença com
   assert.match(antes, /Diferente de dora@escola\.test/);
 
   await informarTitular(DORA);
-  const pagina = await student.getMyLicensesPage(DORA.id);
+  const pagina = await student.getMyLicensesPage(DORA);
   const html = renderToStaticMarkup(createElement(LicensesView, { accountEmail: DORA.email, page: pagina }));
 
   assert.doesNotMatch(html, /name="documento"/, "o formulario sai depois do titular");
@@ -480,4 +480,29 @@ test("a situação de cada Licença em português simples, pelo calendário de B
   assert.deepEqual([desfeita.canGenerate, desfeita.canReplace, desfeita.renewUrl], [false, false, null]);
   assert.equal(studentModel.licenseCardOf(licenca({ tipo: "vitalicia", validade: null }), "2027-01-10").renewUrl, null, "Renovar so na anual");
   assert.deepEqual(studentModel.licenseCardOf(licenca(), "2027-01-10").modules, ["Webinários"]);
+});
+
+test("na dev com o simulador: a compradora sem Licença ali ganha uma anual simulada, e a página avisa que é teste", async () => {
+  delete process.env.EMISSOR_INTERNO_URL;
+  delete process.env.EMISSOR_INTERNO_CREDENCIAL;
+  process.env.EMISSOR_INTERNO_SIMULADOR = "on";
+  const EVA = { email: "eva@escola.test", id: "4fa05f4e-5abe-4f9c-9d9d-7c7ec0516255" };
+  db.linhas("entitlements").push({ ends_at: null, starts_at: "2026-11-01T00:00:00.000Z", status: "active", target_id: "curso-bm", user_id: EVA.id });
+  sessao.usuario = EVA;
+
+  try {
+    const pagina = await student.getMyLicensesPage(EVA);
+    assert.equal(pagina.simulator, true);
+    assert.equal(pagina.view.licenses.length, 1);
+    assert.equal(pagina.view.licenses[0].title, "Licença anual");
+    assert.equal(falso.pedidos.length, 0, "nada vai ao Emissor (nem ao falso): o simulador e da memoria do processo");
+
+    const html = renderToStaticMarkup(createElement(LicensesView, { accountEmail: EVA.email, page: pagina }));
+    assert.match(html, /Ambiente de teste: estas licenças vêm do simulador/);
+
+    // A segunda visita nao cria outra.
+    assert.equal((await student.getMyLicensesPage(EVA)).view.licenses.length, 1);
+  } finally {
+    delete process.env.EMISSOR_INTERNO_SIMULADOR;
+  }
 });

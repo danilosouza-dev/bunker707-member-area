@@ -121,7 +121,8 @@ export type MyLicensesPage = {
 };
 
 /** O que a pagina mostra para a conta da sessao; null quando a pagina nao existe para ela. */
-export async function getMyLicensesPage(userId: string): Promise<MyLicensesPage | null> {
+export async function getMyLicensesPage(user: { email?: string | null; id: string }): Promise<MyLicensesPage | null> {
+  const userId = user.id;
   const buyer = await licenseBuyerContext(userId);
 
   if (!buyer) {
@@ -129,7 +130,24 @@ export async function getMyLicensesPage(userId: string): Promise<MyLicensesPage 
   }
 
   const courses = buyer.courses.map((course) => ({ href: `/conteudo/${encodeURIComponent(course.id)}`, title: course.title }));
-  const listed = await buyer.client.listLicenses(userId, { requestId: crypto.randomUUID(), timeoutMs: PAGE_TIMEOUT_MS });
+  let listed = await buyer.client.listLicenses(userId, { requestId: crypto.randomUUID(), timeoutMs: PAGE_TIMEOUT_MS });
+
+  // So com o simulador (a dev): cada instancia da Vercel tem a memoria dela, e a venda que a fila mandou pode ter caido em
+  // outra. A compradora sem nenhuma Licenca ali ganha uma anual simulada, para a tela ter o que mostrar. Nunca fora dele.
+  if (buyer.simulator && listed.ok && listed.data.licencas.length === 0 && user.email) {
+    await buyer.client.registerSale(
+      {
+        comprador: { areaUserId: userId, email: user.email, nome: null },
+        compradoEm: new Date().toISOString(),
+        garantiaAte: null,
+        plataforma: "simulador",
+        produto: "simulado",
+        transacao: `simulada-${userId}`
+      },
+      { requestId: crypto.randomUUID() }
+    );
+    listed = await buyer.client.listLicenses(userId, { requestId: crypto.randomUUID(), timeoutMs: PAGE_TIMEOUT_MS });
+  }
 
   if (!listed.ok) {
     return { courses, data: null, emissorError: studentLicenseErrorMessage(listed.error), simulator: buyer.simulator, view: null };

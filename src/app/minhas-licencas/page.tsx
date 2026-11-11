@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 // Chave de ativacao nunca e escrita no HTML (ela chega pela Server Action, a pedido).
 export default async function MyLicensesPage() {
   const user = await requirePageUser("/minhas-licencas");
-  const page = await getMyLicensesPage(user.id);
+  const page = await getMyLicensesPage(user);
 
   if (!page) {
     notFound();

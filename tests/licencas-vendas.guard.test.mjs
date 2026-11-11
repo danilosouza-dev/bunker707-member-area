@@ -204,6 +204,6 @@ test("a página é protegida pelo proxy, a tarefa está no registro e o passo da
   assert.match(venda, /const result = await processSaleAccess\(db, input\);\s*let license[^;]*;\s*try \{\s*license = await requestLicensesAfterSale\(db,/);
 
   const pagina = codeOf(read("src/app/minhas-licencas/page.tsx"));
-  assert.match(pagina, /const page = await getMyLicensesPage\(user\.id\);\s*if \(!page\) \{\s*notFound\(\);/);
+  assert.match(pagina, /const page = await getMyLicensesPage\(user\);\s*if \(!page\) \{\s*notFound\(\);/);
   assert.match(pagina, /canUseAccessPreview=\{false\}/, "a previa da equipe nunca abre Minhas licencas");
 });

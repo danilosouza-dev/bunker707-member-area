@@ -102,7 +102,7 @@ export function LicensesView({ accountEmail, page }: { accountEmail: string; pag
       <div className="grid gap-12 sm:gap-14">
         {page.simulator ? (
           <p className="rounded-[12px] border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
-            Ambiente de teste: estas licenças vêm do simulador, não do serviço de licenças de verdade. As chaves daqui não ativam nada.
+            Ambiente de teste: estas licenças vêm do simulador, não do serviço de licenças de verdade, e as chaves daqui não ativam nada. Quem ainda não tinha nenhuma ganha uma Licença anual de teste, para ver a tela.
           </p>
         ) : null}
 
