@@ -117,7 +117,8 @@ test("3. +300 com a live no ar: a mudanca no banco, a decisao da sessao, a sala 
   // A janela pela rota: antes da mudanca so o real; depois da rampa, +300 para todos.
   const antesDaMudanca = await janela(Math.max(0, mudanca.at_offset_ms - 130_000));
   assert.ok(antesDaMudanca.counter.every((point) => point.extra === 0), "antes da mudanca, +0 (o real)");
-  const depoisDaRampa = await janela(mudanca.at_offset_ms + RAMP);
+  // A janela comeca no ponto de 15 s em que o pedido cai (o de antes do fim da rampa ainda sobe): um passo de folga.
+  const depoisDaRampa = await janela(mudanca.at_offset_ms + RAMP + 15_000);
   assert.equal(depoisDaRampa.enabled, true);
   assert.ok(depoisDaRampa.counter.length > 0 && depoisDaRampa.counter.every((point) => point.extra === 300), JSON.stringify(depoisDaRampa.counter));
   const naRampa = await janela(mudanca.at_offset_ms);

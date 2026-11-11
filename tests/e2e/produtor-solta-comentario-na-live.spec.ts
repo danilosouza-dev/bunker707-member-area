@@ -142,6 +142,9 @@ test.describe("aluna", () => {
     // O selo do palco: o real (a aluna, e quem mais estiver) mais os 300 simulados; nunca so o real.
     const quemAssiste = dialogo.locator("[data-lesson-player-stage]").getByTestId("room-present");
     await expect(quemAssiste).toHaveAttribute("title", /^\d+ assistindo agora$/);
-    await expect.poll(async () => Number((await quemAssiste.getAttribute("title"))?.match(/^(\d+)/)?.[1] ?? 0)).toBeGreaterThanOrEqual(301);
+    // A sessao de teste tem o id fixo: logo depois de outro arquivo que usou a mesma live, o servidor ainda pode ler a
+    // sessao de antes (o contexto da sala guardado ate 10 s na live, room-route.ts) e a janela vem sem a Simulacao; a sala
+    // pede de novo quando a decisao chega pela consulta de 5 s do chat (D79). Ate 30 s cobre os dois.
+    await expect.poll(async () => Number((await quemAssiste.getAttribute("title"))?.match(/^(\d+)/)?.[1] ?? 0), { timeout: 30_000 }).toBeGreaterThanOrEqual(301);
   });
 });
