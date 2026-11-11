@@ -149,7 +149,7 @@ test("o adaptador grava só as colunas do patch, confere a versão lida (a velha
   assert.deepEqual(await adaptador.write(tudo, null), { ...tudo, requestHost: null, version: 1 });
 
   const gravada = await adaptador.write({ checkInResult: "ok", checkInRequestedAt: null }, 1);
-  assert.deepEqual(gravada, { ...tudo, checkInResult: "ok", checkInRequestedAt: null, version: 2 }, "o resto da linha ficou");
+  assert.deepEqual(gravada, { ...tudo, checkInResult: "ok", checkInRequestedAt: null, requestHost: null, version: 2 }, "o resto da linha ficou");
 
   assert.equal(await adaptador.write({ checkInResult: "sem_resposta" }, 1), null, "versão velha: nada gravado");
   assert.deepEqual(await adaptador.read(), gravada);

@@ -31,6 +31,8 @@ const SCRIPT = readFileSync(new URL("../../supabase/dados/202611120001_midia_pel
 // https ou o caminho, e o Supabase local do CI responde em http://127.0.0.1. O script nao olha a origem do banco: so a
 // lista dada e o arquivo em storage.objects.
 const BASE = "https://api.escola-de-teste.exemplo";
+// O transporte do app (o teste contra o PostgREST) converte so a origem configurada: la vale o endereco do Supabase local.
+const BASE_DO_APP = temSupabase ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL).replace(/\/+$/, "") : BASE;
 const OUTRA = "https://outro-projeto.supabase.co";
 const hex = () => randomBytes(12).toString("hex");
 const ID = hex().slice(0, 8);
@@ -323,7 +325,8 @@ test("o transporte do app contra o PostgREST local: grava o caminho e le o ender
   const { unwrap } = await import("../support/local-db.mjs");
   const app = getSupabaseAdminClient();
   const chave = `midia-teste-app-${ID}`;
-  const valor = { foto: nosso(ARQUIVOS.foto), outra: deOutra(ARQUIVOS.foto), texto: `Veja ${nosso(ARQUIVOS.foto)}` };
+  const doApp = `${BASE_DO_APP}${caminho(ARQUIVOS.foto)}`;
+  const valor = { foto: doApp, outra: deOutra(ARQUIVOS.foto), texto: `Veja ${doApp}` };
 
   try {
     const gravado = unwrap(await app.from("platform_settings").upsert({ key: chave, value: valor }, { onConflict: "key" }).select("value").single(), "Gravando pelo app");
