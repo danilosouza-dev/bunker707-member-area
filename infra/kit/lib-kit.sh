@@ -14,6 +14,8 @@ export BUNKER707_ENV_FILE="${BUNKER707_ENV_FILE:-$KIT_ARQUIVO_SEGREDOS}"
 . "$KIT_DIR/../scripts/lib.sh"
 # O projeto do compose vem do kit.conf, por cima do `name:` do arquivo (a ordem do compose: -p, depois esta variavel).
 export COMPOSE_PROJECT_NAME="$KIT_PROJETO_COMPOSE"
+# O compose do kit monta os nomes dos containers e a pasta dos certificados a partir destas duas (docker-compose.kit.yml).
+export KIT_NOME KIT_PASTA_CERTIFICADOS
 umask 077
 
 # Codigos de saida de todos os comandos do kit (docs/20 §9B):

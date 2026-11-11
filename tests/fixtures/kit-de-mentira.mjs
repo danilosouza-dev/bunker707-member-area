@@ -389,7 +389,7 @@ export function servidorDoKit({ segredos = {}, restic = "de mentira" } = {}) {
   dirs.push(dir);
   const compose = join(dir, "compose");
   mkdirSync(compose);
-  writeFileSync(join(compose, "docker-compose.yml"), "name: escola\nservices: {}\n");
+  writeFileSync(join(compose, "docker-compose.kit.yml"), "name: escola\nservices: {}\n");
   const valores = {
     APP_PUBLIC_URL: "https://alunos.escola.test",
     POSTGRES_DB: "postgres",

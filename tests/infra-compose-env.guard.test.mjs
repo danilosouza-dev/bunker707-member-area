@@ -21,8 +21,12 @@ function sourceFiles(dir) {
   });
 }
 
-function appEnvironment() {
-  const compose = readFileSync(join(root, "infra/compose/docker-compose.yml"), "utf8");
+// SUPABASE_INTERNAL_URL e so do kit (docs/32 §11.7): o servidor do app do comprador fala com o Supabase pela rede
+// interna. A nossa producao continua pelo endereco publico (vazio = o comportamento de antes) ate a A29.
+const KIT_ONLY = new Set(["SUPABASE_INTERNAL_URL"]);
+
+function appEnvironment(file = "infra/compose/docker-compose.yml") {
+  const compose = readFileSync(join(root, file), "utf8");
   const start = compose.indexOf("\n  app:\n");
   const end = compose.indexOf("\n  caddy:\n", start);
   assert.ok(start > 0 && end > start, "servicos app e caddy no compose");
@@ -30,20 +34,28 @@ function appEnvironment() {
   return new Set([...block.matchAll(/^ {6}([A-Z][A-Z0-9_]*):/gm)].map((match) => match[1]));
 }
 
-test("o container app recebe toda variavel do .env.example que o app le", () => {
+test("o container app recebe toda variavel do .env.example que o app le (producao e kit)", () => {
   const keys = [...readFileSync(join(root, ".env.example"), "utf8").matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]);
   const source = sourceFiles(join(root, "src"))
     .map((file) => readFileSync(file, "utf8"))
     .join("\n");
+  const readByApp = keys.filter((key) => !NOT_IN_PRODUCTION.has(key) && new RegExp(`\\b${key}\\b`).test(source));
   const environment = appEnvironment();
-  const missing = keys.filter(
-    (key) => !NOT_IN_PRODUCTION.has(key) && new RegExp(`\\b${key}\\b`).test(source) && !environment.has(key),
-  );
+  const missing = readByApp.filter((key) => !KIT_ONLY.has(key) && !environment.has(key));
   assert.deepEqual(missing, [], "variaveis lidas pelo app e fora do environment do servico app");
+  const kitEnvironment = appEnvironment("infra/compose/docker-compose.kit.yml");
+  assert.deepEqual(readByApp.filter((key) => !kitEnvironment.has(key)), [], "variaveis lidas pelo app e fora do app do kit");
+  for (const key of KIT_ONLY) assert.equal(environment.has(key), false, `${key} so no kit por enquanto`);
 });
 
-test("as variaveis dos webinarios chegam ao app e o duble do gravador nunca", () => {
-  const environment = appEnvironment();
+test("as variaveis dos webinarios chegam ao app e o duble do gravador nunca (producao e kit)", () => {
+  for (const file of ["infra/compose/docker-compose.yml", "infra/compose/docker-compose.kit.yml"]) assertWebinarEnvironment(appEnvironment(file));
+  const example = readFileSync(join(root, "infra/compose/.env.example"), "utf8");
+  assert.doesNotMatch(example, /^WEBINAR_RECORDER_DISPATCH=/m);
+  assert.match(example, /^WEBINAR_JWT_SECRET=$/m);
+});
+
+function assertWebinarEnvironment(environment) {
   for (const key of [
     "WEBINAR_MEET_DOMAIN",
     "WEBINAR_JWT_APP_ID",
@@ -58,7 +70,4 @@ test("as variaveis dos webinarios chegam ao app e o duble do gravador nunca", ()
     assert.ok(environment.has(key), key);
   }
   assert.equal(environment.has("WEBINAR_RECORDER_DISPATCH"), false);
-  const example = readFileSync(join(root, "infra/compose/.env.example"), "utf8");
-  assert.doesNotMatch(example, /^WEBINAR_RECORDER_DISPATCH=/m);
-  assert.match(example, /^WEBINAR_JWT_SECRET=$/m);
-});
+}
