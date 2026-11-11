@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from "node:path";
 import test, { after } from "node:test";
 
+import { arquivosDaLista } from "../infra/kit/montar-pacote.mjs";
 import { arquivoDaChave, confirmarKit, faltam, kitDir, limparKitDeMentira, SEGREDOS, servidorDoKit } from "./fixtures/kit-de-mentira.mjs";
 
 // O comando de operacao do kit (infra/kit/membros; docs/32 §3.2 e §4; docs/20 §9B): backup para um destino generico,
@@ -57,11 +58,18 @@ test("os scripts do kit: sintaxe do bash, a guarda do dash, o kit.py compila e o
 });
 
 test("os nomes tecnicos (projeto, containers, volumes, pastas) so existem no kit.conf (A10)", () => {
+  // O que vai ao comprador (a lista do pacote). As ferramentas so nossas, que ficam fora do pacote (montar-pacote,
+  // pacote-escola, conferir-imagem, fixar-imagens), podem citar o nosso dominio (o Emissor, a guarda da imagem).
+  const doPacote = new Set(arquivosDaLista().filter((c) => c.startsWith("infra/kit/")).map((c) => c.slice("infra/kit/".length)));
+  assert.ok(doPacote.has("instalar") && doPacote.has("membros") && doPacote.has("kit.conf"));
   for (const nome of readdirSync(kitDir)) {
-    if (nome === "kit.conf") continue;
+    if (nome === "kit.conf" || !doPacote.has(nome)) continue;
     const fonte = readFileSync(join(kitDir, nome), "utf8");
     // BUNKER707_* sao as variaveis do infra/scripts/lib.sh, nao nomes que o comprador ve.
     assert.doesNotMatch(fonte, /bunker707/, `${nome} escreve o nome; ele vem de kit.conf`);
+  }
+  for (const soNosso of readdirSync(kitDir).filter((nome) => !doPacote.has(nome) && !nome.endsWith(".pyc") && nome !== "__pycache__")) {
+    assert.ok(["fixar-imagens.mjs", "montar-pacote.mjs", "pacote-escola.mjs", "conferir-imagem.mjs"].includes(soNosso), `${soNosso} fica fora do pacote sem estar na lista do que e so nosso`);
   }
   const conf = readFileSync(join(kitDir, "kit.conf"), "utf8");
   for (const variavel of ["KIT_NOME", "KIT_PROJETO_COMPOSE", "KIT_CONTAINERS_DA_ESCOLA", "KIT_VOLUMES_DA_ESCOLA", "KIT_PASTA_ESTADO", "KIT_PASTA_BACKUP", "KIT_UNIDADE_BACKUP", "KIT_BACKUP_TAG", "KIT_ENSAIO_PREFIXO"]) {
