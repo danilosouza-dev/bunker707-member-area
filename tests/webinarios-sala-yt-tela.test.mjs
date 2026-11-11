@@ -366,7 +366,8 @@ test("Y11: o campo fechado: a faixa com a linha em cima e a folga do iPhone, o a
   assert.match(html, /<span aria-hidden="true" class="[^"]*\bh-0\.5\b[^"]*\bbg-room-fg\b[^"]*\bmotion-reduce:transition-none\b[^"]*\bscale-x-0"><\/span>/, "a linha do foco escondida");
   assert.doesNotMatch(html, />Cancelar<|>Enviar<|type="submit"/, "fechado, nada de rodape");
 
-  // Sem nome (antes do aceite), a pessoa no lugar das iniciais.
+  // Sem nome, a pessoa no lugar das iniciais (desde 11/11/2026 a sala manda o meu nome tambem antes do aceite, D82;
+  // fica para o payload de antes).
   assert.match(campo({ avatar: { name: null } }), /lucide-user-round/);
 });
 

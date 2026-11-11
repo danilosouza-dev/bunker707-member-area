@@ -99,7 +99,7 @@ import {
 } from "./model";
 import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
-import { anonymousDisplayName, firstNameInitial, sessionOffsetMs } from "./room-model";
+import { anonymousDisplayName, sessionOffsetMs, teamAuthorName } from "./room-model";
 import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { pollPinnable } from "./screen-model";
@@ -300,7 +300,7 @@ async function teamRoleFor(db: WebinarsDb, input: { nowMs: number; userId: strin
 }
 
 function teamDisplayName(user: { email?: string; user_metadata: Record<string, unknown> }) {
-  return firstNameInitial(getUserDisplayName(user).fullName).slice(0, CHAT_LIMITS.displayName) || "Equipe";
+  return teamAuthorName(getUserDisplayName(user).fullName);
 }
 
 /** Fase 4c: as marcas de atendimento de um alvo; sem a 202610300004 (ou na falha da leitura), nenhuma: a resposta da equipe segue igual. */

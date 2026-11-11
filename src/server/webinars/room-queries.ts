@@ -377,11 +377,13 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
 
   return {
     live: live ? liveRoomInfoOf(session, liveRoomConfigured(process.env), webinar.roomSettings) : null,
+    // So do proprio aluno (D82): a foto do Perfil e o nome dele vao sempre, tambem antes do aceite, para o avatar ao lado
+    // do campo de escrever, que so ele ve; quem a turma ve continua decidido em authorPhotoUrl (D62).
     me: {
       avatarUrl: identity.avatarUrl,
       ban,
       consented: identity.consented,
-      displayName: identity.consented ? studentDisplayName(identity) : null
+      displayName: studentDisplayName(identity)
     },
     pinned,
     polls,

@@ -402,13 +402,19 @@ export type StudentRoomExtras = {
   /** Fase 3: a sala ao vivo (so na sessao `live`; nas outras, nulo). Nunca leva o nome da sala nem o token. */
   live: LiveRoomInfo | null;
   me: {
-    /** A foto do proprio perfil (so o arquivo enviado pelo Perfil, roomPhotoUrl): o avatar do campo de escrever; nula sem foto. */
+    /**
+     * A foto do proprio perfil (so o arquivo enviado pelo Perfil, roomPhotoUrl): o avatar do campo de escrever, tambem
+     * antes do aceite (D82: so o proprio aluno ve); nula sem foto.
+     */
     avatarUrl: string | null;
     /** Fase 3: removido desta sessao, banido de todas, silenciado no chat ate `mutedUntil` (nulo = ate o fim). */
     ban: LiveBanState;
     /** O aceite em dia (versao e modo de agora; um aceite antigo com apelido ou anonimo conta como falso, D64). */
     consented: boolean;
-    /** O primeiro nome com a inicial do sobrenome, depois do aceite; nulo antes. */
+    /**
+     * O primeiro nome com a inicial do sobrenome do proprio aluno (D64), sempre, tambem antes do aceite (D82): as
+     * iniciais do avatar do campo de escrever sem a foto. Nunca o de outro aluno.
+     */
     displayName: string | null;
   };
   /** A mensagem fixada (o mesmo que screen.pinned na live e na gravada); continua para a pagina aberta com o codigo de antes. */

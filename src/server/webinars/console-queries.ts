@@ -84,9 +84,15 @@ export type ConsoleWebinar = {
   waitingRoom: boolean;
 };
 
+/** Quem abre o console: o id (a foto do proprio perfil) e o nome com que a equipe escreve (room-model.teamAuthorName). */
+export type ConsoleViewerInput = { id: string; name: string | null };
+
 export type SessionConsoleData = {
-  /** Quem esta no console: a foto do proprio perfil para o campo da equipe (nula sem foto ou sem `viewerUserId`). */
-  viewer?: { avatarUrl: string | null };
+  /**
+   * Quem esta no console, para o avatar do campo da equipe (D82): a foto do proprio perfil (nula sem foto) e o nome para
+   * as iniciais sem ela (o mesmo das mensagens que a pessoa escreve; nulo sem quem abriu, e o campo mostra a equipe).
+   */
+  viewer?: { avatarUrl: string | null; name: string | null };
   sessions: WebinarSession[];
   /** Nulo quando o webinario ainda nao tem sessao nenhuma. */
   snapshot: ConsoleSnapshot | null;
@@ -657,7 +663,7 @@ async function loadPresenterName(db: WebinarsDb, hostUserId: string | null): Pro
   }
 }
 
-export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date(), viewerUserId: string | null = null): Promise<SessionConsoleData | null> {
+export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date(), viewer: ConsoleViewerInput | null = null): Promise<SessionConsoleData | null> {
   const db = webinarsDb();
   const row = await fetchWebinarRow(db, webinarId);
 
@@ -678,7 +684,7 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
 
   return {
     sessions,
-    viewer: { avatarUrl: viewerUserId ? await loadOwnPhoto(db, viewerUserId, now.getTime()) : null },
+    viewer: { avatarUrl: viewer ? await loadOwnPhoto(db, viewer.id, now.getTime()) : null, name: viewer?.name?.trim() || null },
     snapshot: pickedRow ? await loadConsoleSnapshot(db, { kind, now, session: pickedRow, webinar: row }) : null,
     webinar: {
       allowStudentCamera: row.allow_student_camera !== false,

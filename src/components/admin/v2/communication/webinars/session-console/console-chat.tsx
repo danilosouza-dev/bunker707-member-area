@@ -20,6 +20,7 @@ import {
   consoleChatQueue,
   consoleComment,
   consoleMessageMeta,
+  consoleWriterAvatar,
   messageActions,
   slowModeChoiceOf,
   slowModeFromChoice,
@@ -53,8 +54,9 @@ import { useConsolePortal } from "./console-shell";
 // e de quem e a mensagem ("Fixar: Ana M."). O foco nunca cai no comeco da pagina quando o botao sai da tela
 // (consoleChatFocusAfter): o Liberar e o Recusar levam ao card seguinte (sem card, ao cabecalho), o Virar pergunta ao
 // botao seguinte do item, o Apagar ao comentario seguinte, e a correcao fechada ao ⋮ da mensagem. Embaixo, o campo
-// "Escreva para a turma" do YouTube (RoomCommentField, com o icone da equipe; o Enter envia, o Shift+Enter quebra a
-// linha; durante o envio o campo continua com o foco). A lista enche a aba a partir de lg e cola no fim quando a pessoa
+// "Escreva para a turma" do YouTube (RoomCommentField, com a foto do Perfil de quem esta no console ou as iniciais do
+// nome dele, D82; o icone da equipe so sem o nome; o Enter envia, o Shift+Enter quebra a linha; durante o envio o
+// campo continua com o foco). A lista enche a aba a partir de lg e cola no fim quando a pessoa
 // ja estava no fim, tambem quando a aba volta a tela (`shown`: a lista escondida nao rola com o que chega,
 // chatListOnShow, como na sala). O ⋮ abre no portal da raiz do console. Nenhuma frase escrita aqui.
 // A Na tela (docs/30 §2.4; especificacao de 10/11/2026, R1 e §6.2): com o campo aberto, a pilula "Fixar ao enviar"
@@ -98,9 +100,11 @@ type ConsoleChatProps = {
   barred?: ReactNode;
   busyKey: string | null;
   canAct: boolean;
-  /** A foto do proprio perfil de quem esta no console (o avatar do campo da equipe); sem ela, o icone da equipe. */
+  /** A foto do proprio perfil de quem esta no console (o avatar do campo da equipe); sem ela, as iniciais do nome. */
   currentUserAvatarUrl?: string | null;
   currentUserId: string;
+  /** O nome de quem esta no console (o das mensagens que escreve), para as iniciais sem a foto; sem ele, o icone da equipe. */
+  currentUserName?: string | null;
   hostUserId: string | null;
   messages: readonly ConsoleMessage[];
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
@@ -144,6 +148,7 @@ export function ConsoleChat({
   canAct,
   currentUserAvatarUrl = null,
   currentUserId,
+  currentUserName = null,
   initialComposerOpen = false,
   initialEditing = null,
   messages,
@@ -537,7 +542,7 @@ export function ConsoleChat({
 
       <RoomCommentField
         ariaLabel={copy.composer}
-        avatar={{ imageSrc: currentUserAvatarUrl, kind: "team", name: null }}
+        avatar={consoleWriterAvatar(currentUserAvatarUrl, currentUserName)}
         busy={sending}
         disabled={!canAct}
         expanded={expanded}

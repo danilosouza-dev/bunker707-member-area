@@ -361,6 +361,41 @@ test("os campos do painel tem 16 px abaixo de lg (o Safari do iPhone da zoom no 
   }
 });
 
+test("D82: ao lado do campo do chat e do campo da pergunta, a minha foto do Perfil ou as minhas iniciais, antes e depois do aceite (so eu vejo); sem nome, a pessoa", () => {
+  const FOTO = "https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/u1/ana.webp";
+  const fotoNoAvatar = new RegExp(`<img[^>]*src="${FOTO.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`);
+  /** O avatar da linha do campo (o primeiro filho da linha, antes da coluna do textarea) com o rotulo dado. */
+  const avatarDoCampo = (markup, rotulo) => {
+    const area = markup.indexOf(`<textarea aria-label="${rotulo}"`);
+    assert.ok(area >= 0, `o campo ${rotulo}`);
+    const linha = markup.lastIndexOf('<div class="mr-4 flex items-start">', area);
+    assert.ok(linha >= 0, `a linha do campo ${rotulo}`);
+    return markup.slice(linha, markup.indexOf('<div class="ml-3 min-w-0 flex-1">', linha));
+  };
+  const chatBase = { chatMode: "open", error: null, messages: [], nowMs: T0, onRemoveMine: async () => 0, onSend: async () => ({ pending: false }), phase: "live", readOnly: false, slowUntilMs: null, timeKind: "live" };
+  const perguntasBase = { enabled: false, getOffsetMs: () => 0, look: "comment", onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" };
+  const campos = (me) => [
+    ["o chat", avatarDoCampo(render(chat.RoomChatPanel, { ...chatBase, ...me }), WEBINAR_COPY.sala.escreva)],
+    ["a pergunta", avatarDoCampo(render(questionsModule.RoomQuestionsTab, { ...perguntasBase, ...me }), WEBINAR_COPY.sala.suaPergunta)]
+  ];
+
+  for (const consented of [false, true]) {
+    const quando = consented ? "depois do aceite" : "antes do aceite";
+    for (const [nome, avatar] of campos({ avatarUrl: FOTO, consented, displayName: "Ana S." })) {
+      assert.match(avatar, fotoNoAvatar, `${nome}, ${quando}: a minha foto`);
+      assert.doesNotMatch(avatar, /lucide-user-round/, `${nome}, ${quando}: nunca a pessoa com a foto`);
+    }
+    for (const [nome, avatar] of campos({ avatarUrl: null, consented, displayName: "Ana S." })) {
+      assert.match(avatar, /<span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>AS<\/span><\/span>/, `${nome}, ${quando}: sem foto, as minhas iniciais`);
+      assert.doesNotMatch(avatar, /lucide-user-round|<img/, `${nome}, ${quando}: nem a pessoa, nem foto`);
+    }
+  }
+  // Sem nome (uma pagina com o payload de antes), a pessoa no lugar das iniciais.
+  for (const [nome, avatar] of campos({ avatarUrl: null, consented: false, displayName: null })) {
+    assert.match(avatar, /lucide-user-round/, `${nome}: sem nome, a pessoa`);
+  }
+});
+
 test("palco: espera com a contagem, no ar com o iframe da Bunny coberto e Ativar som, encerrada com Assistir de novo; os atributos do sinal de midia", () => {
   const base = { countdownLabel: "4 min", coverUrl: null, embedUrl: EMBED, iframeRef: noop, muted: true, onUnmute: noop, replayHref: null, sessionId: "s1", state: "waiting", title: "Aula de IA" };
   const waiting = render(stage.RoomStage, base);

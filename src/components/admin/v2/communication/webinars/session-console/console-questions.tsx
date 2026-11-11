@@ -10,7 +10,7 @@ import { chatRoleLabel } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { AttendanceQuestionMark } from "@/server/webinars/assistant-queries";
-import { questionAwaitsTeam, replyDraftAfterSent, sortQuestionsForBoard, whileSettling } from "@/server/webinars/console-model";
+import { consoleWriterAvatar, questionAwaitsTeam, replyDraftAfterSent, sortQuestionsForBoard, whileSettling } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionStatus, type WebinarQuestion } from "@/server/webinars/model";
 
@@ -25,7 +25,8 @@ import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionSt
 // O fio (docs/30 §2.4; decisao do produtor de 10/11/2026): depois da primeira resposta, o que o aluno que perguntou e a
 // equipe escrevem aparece em ordem embaixo dela, cada resposta com a foto ou as iniciais, o nome, o selo do papel da
 // equipe e a lixeira (a equipe apaga qualquer resposta do fio). Na respondida, "Responder" abre o campo da equipe
-// (RoomReplyField). Quando o aluno escreveu por ultimo, a pergunta leva o selo "Nova resposta do aluno", sobe para o
+// (RoomReplyField), com a foto do Perfil de quem esta no console ou as iniciais do nome dele (D82). Quando o aluno
+// escreveu por ultimo, a pergunta leva o selo "Nova resposta do aluno", sobe para o
 // topo do quadro e conta no numero da aba, ate a equipe responder no fio ou pelo campo de cima. O campo de responder e
 // a lixeira de uma resposta ficam ocupados ate o retrato novo chegar (whileSettling), o envio fecha so o campo da
 // pergunta enviada (replyDraftAfterSent), e o campo que sai com o foco nele devolve o foco ao Responder.
@@ -39,6 +40,8 @@ type ConsoleQuestionsProps = {
   marks?: Readonly<Record<string, AttendanceQuestionMark>> | null;
   /** A foto do proprio perfil de quem esta no console (o avatar do campo de responder do fio). */
   currentUserAvatarUrl?: string | null;
+  /** O nome de quem esta no console, para as iniciais do avatar do campo sem a foto; sem ele, o icone da equipe. */
+  currentUserName?: string | null;
   onAnswer: (questionId: string, answerText: string, answeredLive: boolean) => Promise<boolean>;
   /** Apaga uma resposta do fio; sem a prop (o teste de tela de antes), o fio fica sem a lixeira. */
   onDeleteReply?: ((replyId: string) => Promise<boolean>) | null;
@@ -90,7 +93,8 @@ function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: Chip
 
 const STATUS_TONE: Record<QuestionStatus, ChipTone> = { answered: "success", dismissed: "neutral", open: "neutral" };
 
-export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null, marks = null, onAnswer, onDeleteReply = null, onReply = null, onStatus, questions }: ConsoleQuestionsProps) {
+export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null, currentUserName = null, marks = null, onAnswer, onDeleteReply = null, onReply = null, onStatus, questions }: ConsoleQuestionsProps) {
+  const writer = consoleWriterAvatar(currentUserAvatarUrl, currentUserName);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   // O campo de responder do fio: uma pergunta por vez, com o rascunho dela.
   const [replying, setReplying] = useState<{ draft: string; id: string } | null>(null);
@@ -194,7 +198,7 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
                   <div className="mt-3">
                     <RoomReplyField
                       ariaLabel={copy.replyLabel}
-                      avatar={<RoomCommentAvatar imageSrc={currentUserAvatarUrl} kind="team" />}
+                      avatar={<RoomCommentAvatar imageSrc={writer.imageSrc} kind={writer.kind} name={writer.name ?? undefined} />}
                       busy={busy || settling.includes(`reply:${question.id}`)}
                       id={`console-reply-${question.id}`}
                       maxLength={QUESTION_REPLY_LIMITS.teamBody}

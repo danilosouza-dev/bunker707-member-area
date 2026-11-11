@@ -185,6 +185,15 @@ export function firstNameInitial(fullName: string | null | undefined): string {
 }
 
 /**
+ * O nome da equipe no que ela escreve pelo console (a mensagem, a resposta da pergunta e a do fio) e nas iniciais do
+ * avatar do campo dela no console (D82): o primeiro nome com a inicial do sobrenome, no tamanho do nome do chat;
+ * "Equipe" sem nome.
+ */
+export function teamAuthorName(fullName: string | null | undefined): string {
+  return firstNameInitial(fullName).slice(0, CHAT_LIMITS.displayName) || "Equipe";
+}
+
+/**
  * "Aluno 123": o nome de quem participava como anonimo neste webinario (D10). Legado: linhas de antes de 10/11/2026
  * (D64); nenhuma escrita nova usa este nome.
  */

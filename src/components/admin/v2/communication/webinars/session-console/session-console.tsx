@@ -1153,6 +1153,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     canAct={canAct}
                     currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     currentUserId={currentUserId}
+                    currentUserName={data.viewer?.name ?? null}
                     hostUserId={webinar.hostUserId}
                     messages={snapshot.messages}
                     onChatMode={(chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void run("chat-mode", () => setSessionChatMode({ chatMode, sessionId: session.id, slowModeSeconds }))}
@@ -1196,6 +1197,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     busyKey={busyKey}
                     canAct={canAct}
                     currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
+                    currentUserName={data.viewer?.name ?? null}
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
                     onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
                     onDeleteReply={(replyId: string) =>

@@ -541,6 +541,28 @@ test("caixa da equipe durante o envio (docs/31 V2-15 e §10, WCAG 2.4.3): o camp
   assert.match(semAcao, /\sdisabled=""/, "a sessao que nao aceita a equipe desliga o campo");
 });
 
+test("D82: ao lado de Escreva para a turma, a foto do Perfil de quem esta no console ou as iniciais do nome dele (nunca so o icone); o icone da equipe so sem o nome", () => {
+  const props = { askedMessageIds: [], busyKey: null, canAct: true, currentUserId: "u-host", hostUserId: "u-host", messages, onChatMode() {}, onModerate() {}, onSend: async () => true, pinnedMessageId: null, session: session() };
+  /** O avatar da linha do campo: o primeiro filho da linha, antes da coluna do textarea. */
+  const avatarDoCampo = (markup) => {
+    const linha = markup.indexOf('<div class="mr-4 flex items-start">');
+    assert.ok(linha >= 0 && markup.indexOf('id="console-composer"', linha) > linha, "a linha do campo da equipe");
+    return markup.slice(linha, markup.indexOf('<div class="ml-3 min-w-0 flex-1">', linha));
+  };
+  const FOTO = "https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/u-host/danilo.webp";
+
+  const iniciais = avatarDoCampo(html(createElement(ConsoleChat, { ...props, currentUserName: "Danilo S." })));
+  assert.match(iniciais, /<span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>DS<\/span><\/span>/, "sem foto, as iniciais no avatar de 24");
+  assert.doesNotMatch(iniciais, /lucide-users-round|<img/, "nem o icone da equipe, nem foto");
+
+  const foto = avatarDoCampo(html(createElement(ConsoleChat, { ...props, currentUserAvatarUrl: FOTO, currentUserName: "Danilo S." })));
+  assert.match(foto, new RegExp(`<img[^>]*src="${FOTO.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "com foto, a foto");
+  assert.doesNotMatch(foto, />DS</);
+
+  // Sem o nome (quem chama sem o viewer), o icone da equipe, como antes.
+  assert.match(avatarDoCampo(html(createElement(ConsoleChat, props))), /lucide-users-round/);
+});
+
 test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
   const text = textOf(markup);

@@ -1091,6 +1091,12 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
 
     const pagina = await consoleQueries.getSessionConsoleData(WEBINAR, S_NO_AR, now);
     assert.ok(pagina.sessions.every((item) => item.roomName === null), "o seletor de sessoes tambem sem o nome da sala");
+    // Quem abre o console (D82): sem ele, nem foto nem nome (o campo mostra a equipe); com ele, o nome com que a pessoa
+    // escreve, para as iniciais ao lado de "Escreva para a turma".
+    assert.deepEqual(pagina.viewer, { avatarUrl: null, name: null });
+    const comQuemAbre = await consoleQueries.getSessionConsoleData(WEBINAR, S_NO_AR, now, { id: COAPRESENTADOR, name: "Carla D." });
+    assert.equal(comQuemAbre.viewer.name, "Carla D.");
+    assert.equal((await consoleQueries.getSessionConsoleData(WEBINAR, S_NO_AR, now, { id: COAPRESENTADOR, name: "  " })).viewer.name, null, "o nome em branco conta como sem nome");
     assert.deepEqual([pagina.webinar.practiceSession, pagina.webinar.waitingRoom, pagina.webinar.allowStudentCamera], [true, false, true]);
   } finally {
     delete process.env.WEBINAR_MEET_DOMAIN;

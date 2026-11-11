@@ -383,6 +383,19 @@ export function consoleComment(input: {
   return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts), time };
 }
 
+/** O avatar do campo de quem esta no console (o RoomCommentField e o RoomCommentAvatar da sala). */
+export type ConsoleWriterAvatar = { imageSrc: string | null; kind: "person" | "team"; name: string | null };
+
+/**
+ * O avatar ao lado do campo de quem esta no console, o "Escreva para a turma" e o campo da resposta do fio (docs/30
+ * D82): a foto do Perfil; sem ela, as iniciais do nome com que a pessoa escreve; o icone da equipe so sem o nome
+ * (nunca so o icone quando o nome vem).
+ */
+export function consoleWriterAvatar(avatarUrl: string | null | undefined, name: string | null | undefined): ConsoleWriterAvatar {
+  const shown = name?.trim() || null;
+  return { imageSrc: avatarUrl?.trim() || null, kind: shown ? "person" : "team", name: shown };
+}
+
 /** De onde saiu uma acao do chat do console: o card da fila ou o balao da lista, a posicao dele e a do botao no item. */
 export type ConsoleChatFocusFrom = { area: "log" | "queue"; id: string; index: number; position: number };
 

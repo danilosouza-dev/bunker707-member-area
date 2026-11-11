@@ -32,7 +32,7 @@ const consoleV2 = await import("../../src/server/webinars/console-v2-model.ts");
 const { clearAuthorPhotoCache } = await import("../../src/server/webinars/author-photos.ts");
 const { resetRoomLimits } = await import("../../src/server/webinars/room-limits.ts");
 const { CHAT_CONSENT_VERSION } = await import("../../src/server/webinars/model.ts");
-const { anonymousDisplayName } = await import("../../src/server/webinars/room-model.ts");
+const { anonymousDisplayName, firstNameInitial } = await import("../../src/server/webinars/room-model.ts");
 
 const aluna = usuarioDeTeste(contas.aluna);
 const outro = usuarioDeTeste(contas.alunoSemAcesso);
@@ -203,7 +203,13 @@ test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta c
     assert.equal(porTexto(await chatDe(aluna), "Cheguei").avatarUrl, null, `${modo}: sem o aceite em dia, a foto nao aparece para os outros alunos`);
     actAs(outro);
     const sessao = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
-    assert.deepEqual([sessao.body.data.me.consented, sessao.body.data.me.displayName], [false, null], `${modo}: a sala mostra a caixa do aceite de novo`);
+    // Sem aceite, a caixa do aceite de novo; o proprio nome e a propria foto ja vem para o avatar do campo (D82), nunca o
+    // apelido antigo.
+    assert.deepEqual(
+      [sessao.body.data.me.consented, sessao.body.data.me.displayName, sessao.body.data.me.avatarUrl],
+      [false, firstNameInitial(contas.alunoSemAcesso.nome), FOTO.outro],
+      `${modo}: a sala mostra a caixa do aceite de novo`
+    );
     assert.ok(!("displayMode" in sessao.body.data.me) && !("nickname" in sessao.body.data.me) && !("anonymousQuestions" in sessao.body.data.session));
 
     const semAceite = await enviar(outro, { body: `Sem aceitar (${modo})` });
