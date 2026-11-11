@@ -259,6 +259,38 @@ export const SCREEN_NARROW_FLEX = "@min-[640px]/tela:hidden [@media(max-height:5
 
 
 /* ------------------------------------------------------------------------------------------------
+ * O foco: quando a sala confere se ele caiu fora (refocusRoom)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O resumo do que a Na tela poe e tira da sala, para o efeito que devolve o foco a ela (refocusRoom) quando a peca que o
+ * tinha saiu: cada item e a celula onde esta (a Oferta e o QR Code que chega mudam o item de celula, e ele e montado de
+ * novo), a capa, a tela cheia, a mensagem e a enquete fixadas (a pilula, a linha da faixa e o Mostrar tudo da area sao
+ * montados por elas) e as pilulas ou linhas das fixadas na tela. Mudou, a sala confere; com o foco ainda dentro dela,
+ * nada acontece.
+ */
+export function screenFocusKey(input: {
+  forced: boolean;
+  fullscreen: boolean;
+  items: readonly Pick<StudentScreenItem, "displayId">[];
+  pinnedMessageId: string | null;
+  pinnedPollId: string | null;
+  pinnedShortcuts: boolean;
+  placement: Pick<ScreenPlacement, "cells">;
+}): string {
+  const cells = input.placement.cells.map((cell) => `${cell.place}:${cell.entries.map((entry) => (entry.kind === "pinned" ? "pinned" : entry.item.displayId)).join("+")}`);
+  return [
+    input.items.map((item) => item.displayId).join(","),
+    cells.join(","),
+    input.forced,
+    input.fullscreen,
+    input.pinnedMessageId ?? "",
+    input.pinnedPollId ?? "",
+    input.pinnedShortcuts
+  ].join("|");
+}
+
+/* ------------------------------------------------------------------------------------------------
  * A faixa (§3.3 e §3.4): o que a manda para fora do video
  * ---------------------------------------------------------------------------------------------- */
 

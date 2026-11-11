@@ -537,6 +537,30 @@ test("o palco largo e so CSS: os cartoes e as pilulas so com 640 px ou mais de p
   assert.deepEqual(sala.SCREEN_NARROW_FLEX.split(" "), ["@min-[640px]/tela:hidden", "[@media(max-height:500px)]:flex!"]);
 });
 
+test("screenFocusKey (A4): muda quando a peca com o foco pode ter saido ou sido montada de novo; igual com o mesmo estado", () => {
+  const banner = itemDoAluno("b", "banner", "bottom_right");
+  const qr = itemDoAluno("q", "qr", "top_right");
+  const base = { forced: false, fullscreen: false, items: [banner], pinnedMessageId: "m1", pinnedPollId: "p1", pinnedShortcuts: true };
+  const chave = (extra = {}, placementInput = {}) =>
+    sala.screenFocusKey({ ...base, placement: sala.screenPlacement({ items: base.items, offerShown: false, pinnedPills: true, ...placementInput }), ...extra });
+  const antes = chave();
+  assert.equal(chave(), antes, "o mesmo estado, a mesma chave (o desenho de cada segundo nao confere)");
+  assert.notEqual(chave({ pinnedMessageId: null }), antes, "a equipe desafixou (a pilula, a linha e a area saem)");
+  assert.notEqual(chave({ pinnedMessageId: "m2" }), antes, "outra fixada (o Mostrar tudo da area e montado de novo)");
+  assert.notEqual(chave({ pinnedPollId: null }), antes, "a enquete fixada saiu (encerrada sem resultado)");
+  assert.notEqual(chave({ pinnedShortcuts: false }), antes, "as pilulas e as linhas das fixadas sairam");
+  assert.notEqual(chave({}, { offerShown: true }), antes, "a Oferta mudou o cartao de celula (ele e montado de novo)");
+  // Os mesmos itens, outro arranjo: so a celula muda (o banner sozinho embaixo a direita e o banner junto do QR Code).
+  const dois = { ...base, items: [banner, qr] };
+  const semOferta = sala.screenFocusKey({ ...dois, placement: sala.screenPlacement({ items: dois.items, offerShown: false, pinnedPills: true }) });
+  const comOferta = sala.screenFocusKey({ ...dois, placement: sala.screenPlacement({ items: dois.items, offerShown: true, pinnedPills: true }) });
+  assert.notEqual(comOferta, semOferta, "a mesma lista, outra celula");
+  assert.match(semOferta, /top_right:b\+q/, "a celula e quem esta nela, na ordem");
+  assert.notEqual(chave({ forced: true }), antes);
+  assert.notEqual(chave({ fullscreen: true }), antes);
+  assert.notEqual(chave({ items: [] }), antes);
+});
+
 test("a faixa forcada pela capa: na live, tudo menos a sala aberta com a pessoa dentro; na gravada, a espera, a sessao sem video, o fim e a capa Ativar som", () => {
   assert.equal(sala.screenStripForcedLive({ entry: "joined", screen: "open" }), false);
   for (const entry of ["idle", "opening", "joining", "reconnecting", "lost", "open_failed"]) {

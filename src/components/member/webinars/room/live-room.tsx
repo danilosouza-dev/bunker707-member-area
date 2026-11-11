@@ -65,7 +65,7 @@ import {
   pinnedNoticeShown,
   pinnedPillsShown,
   pinnedPollFor,
-  pinnedPollPillStep,
+  pinnedPollTapStep,
   pinnedShownIn,
   pinnedSnack,
   railStep,
@@ -98,14 +98,14 @@ import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
-import { screenPlacement, screenStripForcedLive } from "./screen/room-screen-model";
+import { screenFocusKey, screenPlacement, screenStripForcedLive } from "./screen/room-screen-model";
 import { RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { useStageGeometry } from "./use-stage-geometry";
-import { refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
+import { leaveStageFullscreen, refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
 
 // A sala da Live ao vivo do aluno (docs/30 §1.3, §1.4, §1.5, §1.7, §5.1, §6.3, §8.5 e §9; fase 3), no mesmo endereco
@@ -169,8 +169,9 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // saem da aba Chat e viram a area das fixadas do painel, em todas as abas (o `pinned` do RoomPanel); a enquete fixada
 // nao se repete na aba Enquetes nem vira o card "deixou para depois" (o Responder depois dela manda para a area). Com o
 // painel fechado, as pilulas no palco de 640 px ou mais e as linhas abaixo do palco mais estreito (pinnedPillsShown): a
-// da mensagem abre o painel no Chat, a da enquete a traz ao palco se falta responder (pinnedPollPillStep), e o foco vai
-// para o bloco da area (usePinnedFocus). A fixada nova com o painel fechado mostra o aviso "A equipe fixou uma mensagem."
+// da mensagem abre o painel no Chat, a da enquete a traz ao palco se falta responder e ela e a que o palco mostra
+// (pinnedPollTapStep), e o foco vai para o bloco da area (usePinnedFocus); na Tela cheia de verdade, a tela cheia sai
+// antes (o painel fica fora do palco). A fixada nova com o painel fechado mostra o aviso "A equipe fixou uma mensagem."
 // com Ver (pinnedNoticeShown). Nada disso com a live encerrada nem para quem foi removido ou banido (pinnedShownIn).
 // A Na tela, o banner e o QR Code (especificacao de 10/11/2026, §3.2 a §3.7; screen/room-screen-layer.tsx e
 // room-screen-strip.tsx): no palco de 640 px ou mais, os cartoes na camada do palco (dentro do LiveStage, que e o que vai
@@ -683,17 +684,17 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }),
     [closeScreenItem, screenEvents.watch, sendScreenEvent]
   );
-  // Um banner ou QR Code com o foco saiu da tela (a equipe tirou, o aluno fechou, a capa o mandou para a faixa): o foco
-  // volta para a sala (o primeiro [data-room-first-focus] na tela), nunca fica no body.
-  const screenKey = `${screenItems.map((item) => item.displayId).join(",")}|${screenForced}|${fullscreenOn}`;
-  const screenKeyRef = useRef(screenKey);
-  useLayoutEffect(() => {
-    const was = screenKeyRef.current;
-    screenKeyRef.current = screenKey;
-    if (was !== screenKey) {
-      refocusRoom(rootRef.current, document.activeElement);
-    }
-  }, [screenKey]);
+  // O que a Na tela poe e tira da sala (screenFocusKey): o efeito que devolve o foco a sala fica depois dos do painel e
+  // da enquete, que sabem para onde ele vai.
+  const screenKey = screenFocusKey({
+    forced: screenForced,
+    fullscreen: fullscreenOn,
+    items: screenItems,
+    pinnedMessageId: pinnedMessage?.id ?? null,
+    pinnedPollId: pinnedPoll?.id ?? null,
+    pinnedShortcuts: pinnedPillsOn,
+    placement
+  });
 
   /** O tema da sala: o botao do cabecalho (a partir de sm) e a linha Tema do painel Configurações (abaixo de sm). */
   function toggleTheme() {
@@ -733,16 +734,17 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   }, [restoreSnack, snackbarApi]);
 
   // A fixada nova com o painel fechado: "A equipe fixou uma mensagem." com Ver, uma vez por fixada (a que ja estava quando
-  // a sala abriu nao avisa).
-  const pinnedId = pinnedMessage?.id ?? null;
+  // a sala abriu nao avisa). O id e o do estado da Na tela, mesmo com as fixadas fora da tela (removido): o Desfazer da
+  // equipe devolve a fixada de antes, que nao e nova.
+  const pinnedId = naTela.pinned?.id ?? null;
   const pinnedSeenRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const before = pinnedSeenRef.current;
     pinnedSeenRef.current = pinnedId;
-    if (pinnedNoticeShown({ after: pinnedId, before, panelShown, shown: !blocked })) {
+    if (pinnedNoticeShown({ after: pinnedId, before, panelShown, shown: pinnedOn })) {
       snackbarApi.show(pinnedSnack());
     }
-  }, [blocked, panelShown, pinnedId, snackbarApi]);
+  }, [panelShown, pinnedId, pinnedOn, snackbarApi]);
 
   // A gravacao que comecou com o aluno ja na sala (o motor, o "Gravar no navegador" ou a sessao relida): "Esta live
   // começou a ser gravada." no aviso, no lugar do aviso do motor. Ja ligada na entrada, so o selo Gravando.
@@ -804,6 +806,19 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     }
   }, [stagePollKey]);
 
+  // A peca da Na tela com o foco saiu ou foi montada de novo (a equipe tirou o banner ou o QR Code, desafixou ou fixou
+  // outra mensagem, a enquete fixada saiu, o QR Code que chegou mudou o cartao de celula, o aluno fechou, a capa mandou
+  // tudo para a faixa): o foco volta para a sala (o primeiro [data-room-first-focus] na tela), nunca fica no body. Com
+  // o foco ainda na sala, nada.
+  const screenKeyRef = useRef(screenKey);
+  useLayoutEffect(() => {
+    const was = screenKeyRef.current;
+    screenKeyRef.current = screenKey;
+    if (was !== screenKey) {
+      refocusRoom(rootRef.current, document.activeElement);
+    }
+  }, [screenKey]);
+
   function openPollsTab() {
     if (openPolls.length > 0) {
       setTab("enquetes");
@@ -825,6 +840,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
    * enquete: a area esta em toda aba) e o foco vai ao bloco da area; no celular com Configurações aberto, ele fecha.
    */
   function showPinned(target: PinnedFocusTarget) {
+    // Na Tela cheia de verdade o elemento em tela cheia e o palco, e o painel fica fora dele: a tela cheia sai antes,
+    // senao o painel abriria escondido e o foco iria para tras da tela cheia.
+    leaveStageFullscreen(document, stageRef.current);
     if (target === "message") {
       setTab("chat");
     }
@@ -835,12 +853,15 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     focusPinned(target);
   }
 
-  /** A pilula ou a linha da enquete fixada: falta responder, ela volta ao palco; senao, o painel com a area. */
+  /**
+   * A pilula ou a linha da enquete fixada: falta responder e ela e a que o palco mostra, ela volta ao palco; senao (ja
+   * respondida, encerrada, ou outra enquete sem resposta na frente dela), o painel com a area.
+   */
   function onPinnedPoll() {
     if (!pinnedPoll) {
       return;
     }
-    if (pinnedPollPillStep(pinnedPoll) === "stage") {
+    if (pinnedPollTapStep({ deferred, poll: pinnedPoll, polls, seenResultIds: [...deferred.seen, ...arrivedResults] }) === "stage") {
       answerPollNow(pinnedPoll.id);
     } else {
       showPinned("poll");

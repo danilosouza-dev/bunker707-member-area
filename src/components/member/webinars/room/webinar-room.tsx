@@ -28,7 +28,7 @@ import {
   pinnedNoticeShown,
   pinnedPillsShown,
   pinnedPollFor,
-  pinnedPollPillStep,
+  pinnedPollTapStep,
   pinnedShownIn,
   pinnedSnack,
   railStep,
@@ -64,7 +64,7 @@ import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
-import { screenPlacement, screenStripForcedRecorded } from "./screen/room-screen-model";
+import { screenFocusKey, screenPlacement, screenStripForcedRecorded } from "./screen/room-screen-model";
 import { RoomScreenDock, RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
@@ -638,29 +638,31 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     }),
     [closeScreenItem, screenEvents.watch, sendScreenEvent]
   );
-  // Um banner ou QR Code com o foco saiu da tela (a equipe tirou, o aluno fechou, a capa o mandou para a faixa): o foco
-  // volta para a sala (o primeiro [data-room-first-focus] na tela), nunca fica no body. O giro ja tem o efeito dele.
-  const screenKey = `${screenItems.map((item) => item.displayId).join(",")}|${screenForced}|${fullscreenOn}`;
-  const screenKeyRef = useRef(screenKey);
-  useLayoutEffect(() => {
-    const was = screenKeyRef.current;
-    screenKeyRef.current = screenKey;
-    if (was !== screenKey) {
-      refocusRoom(rootRef.current, document.activeElement);
-    }
-  }, [screenKey]);
+  // O que a Na tela poe e tira da sala (screenFocusKey): o efeito que devolve o foco a sala fica depois dos do painel e
+  // da enquete, que sabem para onde ele vai.
+  const screenKey = screenFocusKey({
+    forced: screenForced,
+    fullscreen: fullscreenOn,
+    items: screenItems,
+    pinnedMessageId: pinnedMessage?.id ?? null,
+    pinnedPollId: pinnedPoll?.id ?? null,
+    pinnedShortcuts: pinnedPillsOn,
+    placement
+  });
 
   // A fixada nova com o painel fechado: "A equipe fixou uma mensagem." com Ver, uma vez por fixada (a que ja estava quando
-  // a sala abriu nao avisa; o vertical nao tem o aviso da sala, a linha da fixada fica acima do chat).
-  const pinnedId = pinnedMessage?.id ?? null;
+  // a sala abriu nao avisa; o vertical nao tem o aviso da sala, a linha da fixada fica acima do chat). O id e o do estado
+  // da Na tela, mesmo com as fixadas fora da tela (removido, o video no fim): o Desfazer da equipe devolve a fixada de
+  // antes, que nao e nova.
+  const pinnedId = naTela.pinned?.id ?? null;
   const pinnedSeenRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const before = pinnedSeenRef.current;
     pinnedSeenRef.current = pinnedId;
-    if (pinnedNoticeShown({ after: pinnedId, before, panelShown, shown: !vertical && !unavailable })) {
+    if (pinnedNoticeShown({ after: pinnedId, before, panelShown, shown: pinnedOn && !vertical })) {
       snackbarApi.show(pinnedSnack());
     }
-  }, [panelShown, pinnedId, snackbarApi, unavailable, vertical]);
+  }, [panelShown, pinnedId, pinnedOn, snackbarApi, vertical]);
 
   const leave = useCallback(() => {
     router.push(webinarHref);
@@ -720,6 +722,19 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
       returnFocusFromPoll(rootRef.current, document.activeElement);
     }
   }, [stagePollKey]);
+
+  // A peca da Na tela com o foco saiu ou foi montada de novo (a equipe tirou o banner ou o QR Code, desafixou ou fixou
+  // outra mensagem, a enquete fixada saiu, a Oferta ou o QR Code que chegou mudou o cartao de celula, o aluno fechou, a
+  // capa mandou tudo para a faixa): o foco volta para a sala (o primeiro [data-room-first-focus] na tela), nunca fica no
+  // body. Com o foco ainda na sala, nada. O giro ja tem o efeito dele.
+  const screenKeyRef = useRef(screenKey);
+  useLayoutEffect(() => {
+    const was = screenKeyRef.current;
+    screenKeyRef.current = screenKey;
+    if (was !== screenKey) {
+      refocusRoom(rootRef.current, document.activeElement);
+    }
+  }, [screenKey]);
 
   useEffect(() => {
     const onChange = () => setFullscreenOn(stageBoxRef.current !== null && document.fullscreenElement === stageBoxRef.current);
@@ -810,9 +825,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
 
   /**
    * A pilula ou a linha da fixada (e o Ver do aviso): o painel abre (no Chat, para a mensagem; na aba de agora, para a
-   * enquete: a area esta em toda aba) e o foco vai ao bloco da area.
+   * enquete: a area esta em toda aba) e o foco vai ao bloco da area. Na Tela cheia de verdade o elemento em tela cheia e
+   * a caixa do palco, e o painel fica fora dela: a tela cheia sai antes, senao o painel abriria escondido e o foco iria
+   * para tras da tela cheia.
    */
   function showPinned(target: PinnedFocusTarget) {
+    leaveStageFullscreen(document, stageBoxRef.current);
     if (target === "message") {
       setTab("chat");
     }
@@ -820,12 +838,15 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     focusPinned(target);
   }
 
-  /** A pilula ou a linha da enquete fixada: falta responder, ela volta ao palco; senao, o painel com a area. */
+  /**
+   * A pilula ou a linha da enquete fixada: falta responder e ela e a que o palco mostra, ela volta ao palco; senao (ja
+   * respondida, encerrada, ou outra enquete sem resposta na frente dela), o painel com a area.
+   */
   function onPinnedPoll() {
     if (!pinnedPoll) {
       return;
     }
-    if (pinnedPollPillStep(pinnedPoll) === "stage") {
+    if (pinnedPollTapStep({ deferred, poll: pinnedPoll, polls, seenResultIds: [...deferred.seen, ...arrivedResults] }) === "stage") {
       answerPollNow(pinnedPoll.id);
     } else {
       showPinned("poll");

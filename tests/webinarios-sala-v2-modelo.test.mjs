@@ -1201,6 +1201,24 @@ test("pinnedPollPillStep (§3.1): a enquete aberta sem resposta volta ao meio do
   assert.equal(layout.pinnedPollPillStep(pergunta("a", { myOptionIds: ["o2"], results: RESULTADO })), "panel", "o resultado compartilhado de quem respondeu");
 });
 
+test("pinnedPollTapStep (A8): o toque na enquete fixada so vai ao palco quando ela e mesmo a que o palco mostra; com outra sem resposta na frente, o painel", () => {
+  const nada = { later: [], seen: [] };
+  const fixada = pergunta("b");
+  const tap = (lista, deferred = nada, seenResultIds = []) => layout.pinnedPollTapStep({ deferred, poll: lista.find((poll) => poll.id === "b"), polls: lista, seenResultIds });
+  assert.equal(tap([fixada]), "stage", "sozinha e sem resposta: o palco");
+  assert.equal(tap([fixada], { later: ["b"], seen: [] }), "stage", "deixada para depois: o Responder agora a traz de volta");
+  // A outra enquete aberta sem resposta vem antes na lista: o palco mostraria a outra e o toque nao faria nada.
+  assert.equal(tap([pergunta("a"), fixada]), "panel", "outra sem resposta na frente: o painel com a area das fixadas");
+  assert.equal(tap([pergunta("a"), fixada], { later: ["a"], seen: [] }), "stage", "a outra ficou para depois: a fixada e a do palco");
+  assert.equal(tap([pergunta("a", { myOptionIds: ["o1"] }), fixada]), "stage", "a outra ja respondida nao conta");
+  // O resultado compartilhado de outra enquete nao passa na frente de uma resposta (stagePollFor).
+  assert.equal(tap([pergunta("c", { myOptionIds: ["o1"], results: RESULTADO }), fixada], { later: ["b"], seen: [] }), "stage");
+  assert.equal(tap([pergunta("b", { myOptionIds: ["o1"] })]), "panel", "respondida: o painel");
+  assert.equal(tap([pergunta("b", { results: RESULTADO, status: "closed" })]), "panel", "encerrada: o painel");
+  // O palco depois do toque, para conferir: e a fixada.
+  assert.equal(polls.stagePollFor({ deferredIds: polls.resumePoll({ later: ["a", "b"], seen: [] }, "b").later, polls: [pergunta("a"), fixada], seenResultIds: [] })?.poll.id, "b");
+});
+
 test("pinnedPillText e pinnedClampHint: a fixada numa linha na pilula; a dica do corte antes da medida pelas quebras e pelo tamanho", () => {
   assert.equal(layout.pinnedPillText("  Material:\n https://bunker707.com.br/apostila\t  hoje "), "Material: https://bunker707.com.br/apostila hoje");
   assert.equal(WEBINAR_COPY.naTela.aluno.pilulaFixada(layout.pinnedPillText("a\nb")), "Fixada · a b");

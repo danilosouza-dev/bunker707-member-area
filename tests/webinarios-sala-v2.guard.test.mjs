@@ -188,12 +188,32 @@ test("a Na tela nas duas salas pelas regras puras (especificacao de 10/11/2026, 
   assert.match(recorded, /useRoomScreenEvents\(\{ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId \}\)/);
   assert.match(recorded, /topLeftExtra=\{<RoomSimulationSales layout="cell"/, "o aviso de venda na celula de cima a esquerda da camada");
   assert.match(recorded, /screen=\{vertical && pinnedOn \? <RoomScreenDock handlers=\{screenHandlers\} items=\{screenItems\} \/> : null\}/, "a doca do vertical");
+  // Na Tela cheia de verdade o painel fica fora do palco: a pilula, a linha e o Ver da fixada saem dela antes (A3).
+  assert.match(recorded, /function showPinned\(target: PinnedFocusTarget\) \{\s*leaveStageFullscreen\(document, stageBoxRef\.current\);\s*if \(target === "message"\)/);
+  assert.match(room, /function showPinned\(target: PinnedFocusTarget\) \{\s*leaveStageFullscreen\(document, stageRef\.current\);\s*if \(target === "message"\)/);
+  assert.match(recorded, /if \(key === PINNED_SNACK_ACTION\) \{\s*showPinned\("message"\);/, "o Ver do aviso");
+  assert.match(room, /if \(key === PINNED_SNACK_ACTION\) \{\s*showPinned\("message"\);/, "o Ver do aviso");
+  assert.match(recorded, /if \(pinnedNoticeShown\(\{ after: pinnedId, before, panelShown, shown: pinnedOn && !vertical \}\)\)/);
+  assert.match(room, /if \(pinnedNoticeShown\(\{ after: pinnedId, before, panelShown, shown: pinnedOn \}\)\)/);
   for (const [nome, fonte] of [
     ["live-room", room],
     ["webinar-room", recorded]
   ]) {
-    // O foco que estava num item que saiu volta para a sala.
+    // O foco que estava num item que saiu volta para a sala: a chave tem os itens e as celulas, as fixadas e as pilulas
+    // ou linhas delas (A4), e o efeito vem depois dos do painel e da enquete, que sabem para onde o foco vai.
     assert.match(fonte, /if \(was !== screenKey\) \{\s*refocusRoom\(rootRef\.current, document\.activeElement\);/, nome);
+    assert.match(
+      fonte,
+      /const screenKey = screenFocusKey\(\{\s*forced: screenForced,\s*fullscreen: fullscreenOn,\s*items: screenItems,\s*pinnedMessageId: pinnedMessage\?\.id \?\? null,\s*pinnedPollId: pinnedPoll\?\.id \?\? null,\s*pinnedShortcuts: pinnedPillsOn,\s*placement\s*\}\);/,
+      nome
+    );
+    const efeitoDaTela = fonte.search(/if \(was !== screenKey\) \{/);
+    assert.ok(fonte.search(/returnFocusFromPanel\(rootRef\.current/) < efeitoDaTela && fonte.search(/returnFocusFromPoll\(rootRef\.current/) < efeitoDaTela, `${nome}: depois do painel e da enquete`);
+    // O toque na enquete fixada pela sala inteira (A8): com outra sem resposta na frente, o painel.
+    assert.match(fonte, /if \(pinnedPollTapStep\(\{ deferred, poll: pinnedPoll, polls, seenResultIds: \[\.\.\.deferred\.seen, \.\.\.arrivedResults\] \}\) === "stage"\) \{\s*answerPollNow\(pinnedPoll\.id\);\s*\} else \{\s*showPinned\("poll"\);/, nome);
+    assert.doesNotMatch(fonte, /pinnedPollPillStep\(pinnedPoll\)/, nome);
+    // A fixada nova pelo estado da Na tela, mesmo bloqueada (A10): o Desfazer de uma remocao nao avisa uma fixada antiga.
+    assert.match(fonte, /const pinnedId = naTela\.pinned\?\.id \?\? null;/, nome);
     assert.match(fonte, /closeScreenItem\(displayId\);\s*sendScreenEvent\(\{ displayId, form, name: "closed" \}\);/, `${nome}: fechar e por exibicao e manda o fechou`);
   }
   // A sala continua sem nada do pop-up da Comunicacao (docs/25: a sala esta na lista de "onde nunca").

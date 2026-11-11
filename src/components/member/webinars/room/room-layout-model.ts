@@ -18,7 +18,9 @@ import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { newMessageCount, type RoomMessage } from "../../../../lib/webinar-room-client";
 import { formatWebinarDayLong, saoPauloTime } from "../../../../lib/webinar-time";
+import type { DeferredPolls } from "../../../../lib/webinar-room-prefs";
 import type { StudentPoll } from "../../../../server/webinars/room-rules";
+import { resumePoll, stagePollFor } from "./room-poll-model";
 import type { RoomSnack } from "./room-snackbar-model";
 import type { RoomDesign, RoomSkeletonState } from "./vertical/vertical-model";
 
@@ -511,6 +513,20 @@ export function pinnedPillsShown(input: { blocked: boolean; design: RoomDesign; 
  */
 export function pinnedPollPillStep(poll: Pick<StudentPoll, "myOptionIds" | "status">): "panel" | "stage" {
   return poll.status === "open" && poll.myOptionIds === null ? "stage" : "panel";
+}
+
+/**
+ * O toque na pilula ou na linha da enquete fixada, com a sala inteira: o palco (`stage`, o Responder agora) so quando,
+ * depois dele, ela e mesmo a enquete que o palco mostra (stagePollFor: a primeira aberta sem resposta que nao ficou para
+ * depois). Com outra enquete sem resposta antes dela na lista, o palco mostraria a outra e o toque nao faria nada: abre
+ * o painel, onde a area das fixadas a mostra (`panel`), como a respondida ou encerrada (pinnedPollPillStep).
+ */
+export function pinnedPollTapStep(input: { deferred: DeferredPolls; poll: StudentPoll; polls: readonly StudentPoll[]; seenResultIds: readonly string[] }): "panel" | "stage" {
+  if (pinnedPollPillStep(input.poll) === "panel") {
+    return "panel";
+  }
+  const next = stagePollFor({ deferredIds: resumePoll(input.deferred, input.poll.id).later, polls: input.polls, seenResultIds: input.seenResultIds });
+  return next?.mode === "answer" && next.poll.id === input.poll.id ? "stage" : "panel";
 }
 
 /** O texto da mensagem fixada numa linha so (a pilula do palco): os espacos e as quebras viram um espaco. */
