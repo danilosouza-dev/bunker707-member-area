@@ -4,7 +4,7 @@ import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs, createFakeDb } from "./support/admin-action-stubs.mjs";
 
-// A leitura da licença que falha no modo "enforce" (a migração 202611100002 pendente, ou o banco com erro; revisão de
+// A leitura da licença que falha no modo "enforce" (a migração 202611100003 pendente, ou o banco com erro; revisão de
 // 11/11/2026): antes, a situação do pedido lançava e derrubava toda página do aluno (getAppShellData) e o admin inteiro
 // (o layout), inclusive a tela Licença. Agora cada pedido segue: os módulos ficam escondidos e negados (fecha), só o
 // dever legal passa, o log leva só o motivo, e a tela Licença diz o que houve.

@@ -665,7 +665,7 @@ test("montar o pacote: so a lista fechada, nada de src, tests, docs, infra/cloud
   for (const caminho of ["src/server/licensing/artifact.ts", "tests/kit-instalar.test.mjs", "docs/32-produto-licenciado.md", "infra/cloud/deploy.sh", "infra/compose/.env", "infra/compose/.env.local", "chave.pem", "infra/kit/__pycache__/kit.cpython-313.pyc", "infra/licencas/compose.yml"]) {
     assert.ok(caminhoProibido(caminho), caminho);
   }
-  for (const caminho of ["infra/kit/instalar", "infra/compose/.env.example", "supabase/migrations/202611100002_license_state.sql"]) assert.ok(!caminhoProibido(caminho), caminho);
+  for (const caminho of ["infra/kit/instalar", "infra/compose/.env.example", "supabase/migrations/202611100003_license_state.sql"]) assert.ok(!caminhoProibido(caminho), caminho);
   const lista = arquivosDaLista();
   for (const necessario of ["infra/kit/instalar", "infra/kit/instalador.py", "infra/kit/no-app.mjs", "infra/kit/licenca.sh", "infra/kit/kit.conf", "infra/compose/docker-compose.kit.yml", "infra/compose/generate-secrets.mjs", "infra/compose/caddy/Caddyfile.kit", "infra/scripts/smoke.sh", "infra/scripts/restore.sh", "infra/scripts/bootstrap.sh", "infra/compose/volumes/api/envoy/envoy.yaml", "infra/compose/volumes/auth-templates/recovery.html"]) {
     assert.ok(lista.includes(necessario), necessario);

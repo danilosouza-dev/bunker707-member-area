@@ -1,6 +1,6 @@
 import "server-only";
 
-// O adaptador do Supabase para a tabela license_state (migracoes 202611100002 e 202611110001; regras em store.ts). Uma linha so
+// O adaptador do Supabase para a tabela license_state (migracoes 202611100003 e 202611110001; regras em store.ts). Uma linha so
 // (id = 1), lida e gravada pelo cliente com a service role: anon e authenticated nao tem nenhum privilegio nela.
 //
 // - Data guardada que nao e data para o JavaScript (o `infinity` do Postgres, ano fora do alcance) volta como

@@ -1,5 +1,5 @@
 -- Produto licenciado, o endereco dos pedidos do dono e dos administradores (docs/32 §2.2 e §11.3, "O endereco"; revisao
--- de 11/11/2026). A 202611100002 (license_state) e as anteriores nao mudam.
+-- de 11/11/2026). A 202611100003 (license_state) e as anteriores nao mudam.
 --
 -- Por que: o Verificador comparava o endereco da licenca so com a variavel NEXT_PUBLIC_SITE_URL, lida ao rodar. A copia
 -- do servidor e do banco noutro dominio mantinha a variavel no endereco da licenca e ficava "em dia", com acesso novo.
@@ -11,7 +11,7 @@
 --   gravacao por pedido;
 -- - no modo "off" (a nossa escola hoje, a dev, a Vercel e os testes) o app nunca le nem grava esta tabela.
 -- As colunas herdam o RLS e os privilegios da tabela (so service_role). Nenhum check proibe data invalida, como na
--- 202611100002: o app a trata como invalida e nunca libera nada com ela.
+-- 202611100003: o app a trata como invalida e nunca libera nada com ela.
 --
 -- Verificacao manual depois de aplicar:
 --   select column_name from information_schema.columns where table_schema = 'public' and table_name = 'license_state'

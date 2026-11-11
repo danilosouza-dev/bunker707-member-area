@@ -81,29 +81,37 @@ export type StudentPoll = {
   status: "closed" | "open";
 };
 
-/** Monta a enquete do aluno: as abertas e as encerradas com resultado compartilhado; os modelos (sem sessao) ficam de fora. */
-export function toStudentPoll(poll: Poll, answers: readonly PollAnswer[], viewerUserId: string | null): StudentPoll | null {
+/** As contagens por opcao de uma enquete (o resultado que a turma ve depois de Compartilhar resultado). */
+export type StudentPollResults = { counts: Record<string, number>; total: number };
+
+/** Conta as respostas por opcao (uma opcao que a enquete nao tem fica de fora); `total` e quantos responderam. */
+export function pollResultCounts(poll: Pick<Poll, "options">, answers: readonly Pick<PollAnswer, "optionIds">[]): StudentPollResults {
+  const counts: Record<string, number> = {};
+  for (const option of poll.options) {
+    counts[option.id] = 0;
+  }
+  for (const answer of answers) {
+    for (const optionId of answer.optionIds) {
+      if (optionId in counts) {
+        counts[optionId] += 1;
+      }
+    }
+  }
+  return { counts, total: answers.length };
+}
+
+/**
+ * A enquete do aluno com a resposta dele e as contagens prontas: as abertas e as encerradas com resultado
+ * compartilhado; os modelos (sem sessao) ficam de fora. As contagens so saem depois do Compartilhar resultado (antes,
+ * nulas mesmo que venham). Quem lista (room-queries.listStudentPolls) le so a resposta do aluno e as contagens guardadas,
+ * nunca as respostas dos outros numa enquete aberta.
+ */
+export function studentPollOf(poll: Poll, mine: Pick<PollAnswer, "optionIds"> | null, results: StudentPollResults | null): StudentPoll | null {
   if (!poll.sessionId || poll.status === "draft") {
     return null;
   }
   if (poll.status === "closed" && !poll.resultsSharedAt) {
     return null;
-  }
-  const mine = viewerUserId ? (answers.find((answer) => answer.userId === viewerUserId) ?? null) : null;
-  let results: StudentPoll["results"] = null;
-  if (poll.resultsSharedAt) {
-    const counts: Record<string, number> = {};
-    for (const option of poll.options) {
-      counts[option.id] = 0;
-    }
-    for (const answer of answers) {
-      for (const optionId of answer.optionIds) {
-        if (optionId in counts) {
-          counts[optionId] += 1;
-        }
-      }
-    }
-    results = { counts, total: answers.length };
   }
   return {
     id: poll.id,
@@ -111,9 +119,15 @@ export function toStudentPoll(poll: Poll, answers: readonly PollAnswer[], viewer
     myOptionIds: mine ? [...mine.optionIds] : null,
     options: poll.options.map((option) => ({ id: option.id, label: option.label })),
     question: poll.question,
-    results,
+    results: poll.resultsSharedAt ? results : null,
     status: poll.status === "closed" ? "closed" : "open"
   };
+}
+
+/** Monta a enquete do aluno a partir das respostas (a do aluno e, com o resultado compartilhado, as contagens). */
+export function toStudentPoll(poll: Poll, answers: readonly PollAnswer[], viewerUserId: string | null): StudentPoll | null {
+  const mine = viewerUserId ? (answers.find((answer) => answer.userId === viewerUserId) ?? null) : null;
+  return studentPollOf(poll, mine, poll.resultsSharedAt ? pollResultCounts(poll, answers) : null);
 }
 
 /** A resposta cabe na enquete: opcoes dela, sem repetir; uma so na enquete de resposta unica. */

@@ -3,7 +3,7 @@ import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
 import { CHAT_CONSENT_VERSION } from "../../src/server/webinars/model";
-import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, NA_TELA_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedNaTelaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
@@ -12,6 +12,7 @@ import {
   ambienteDaSalaAoVivo,
   apagarEnqueteDeTeste,
   eventosDaLiveAoVivo,
+  eventosDeWebinario,
   expect,
   salaFalsaDoJitsi,
   seedLiveAoVivoDeTeste,
@@ -69,6 +70,10 @@ import {
 // quando o motor confirma); com o painel fechado pelo trilho ela volta.
 // O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
 // mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe; o foco que estava nele volta para a sala.
+// A Na tela (docs/31 §12; especificacao de 10/11/2026, §3.2, §3.3 e §9): a camada do palco fica por cima do iframe do
+// motor, entao o banner e o QR Code do palco largo recebem o clique (o ponto do meio do cartao e dele, nao do iframe) e o
+// botao abre o link em outra aba; a 375 px (a Live ao vivo nao tem o desenho vertical) os dois viram a faixa abaixo do
+// palco, sem cruzar a caixa dele, e o banner que nao pode fechar e a mesma linha sem o X.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -1721,5 +1726,70 @@ test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfo
     await expect(botaoMicrofone).not.toHaveAttribute("aria-disabled", "true");
   } finally {
     unwrap(await createLocalAdminClient().from("webinars").update({ room_settings: original }).eq("id", LIVE_AO_VIVO_DE_TESTE.id), "Voltando o room_settings da live de teste");
+  }
+});
+
+test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code recebem o clique e o botao abre outra aba; a 375 px viram a faixa abaixo do palco, sem cruzar a caixa dele, e o banner sem fechar fica sem X; no palco largo e baixo, a faixa tambem", async ({ context, page }) => {
+  const db = createLocalAdminClient();
+  const naTela = WEBINAR_COPY.naTela;
+  const { banner, qr } = NA_TELA_DE_TESTE;
+  await seedNaTelaDeTeste(db, { mostrar: ["banner", "qr"], sessaoId: LIVE_AO_VIVO_DE_TESTE.sessaoId, webinarId: LIVE_AO_VIVO_DE_TESTE.id });
+  await context.route("https://turma.bunker707.test/**", (route) => route.fulfill({ body: "<!doctype html><title>Pagina de teste</title>", contentType: "text/html" }));
+  try {
+    const { dialogo } = await entrarNaSala(page);
+    const cartao = dialogo.locator("[data-room-screen-card='banner']");
+    await expect(cartao).toBeVisible({ timeout: 15_000 });
+    await expect(dialogo.locator("[data-room-screen-card='qr']")).toBeVisible();
+    await expect(cartao.getByRole("button", { name: naTela.aluno.fecharBanner })).toHaveCount(0);
+
+    // O cartao fica por cima do iframe do motor: o ponto do meio dele e do cartao, e o iframe esta embaixo.
+    const motor = dialogo.locator("[data-room-stage] iframe").first();
+    const [caixaDoCartao, caixaDoMotor] = await Promise.all([cartao.boundingBox(), motor.boundingBox()]);
+    expect(caixaDoCartao).not.toBeNull();
+    expect(caixaDoMotor).not.toBeNull();
+    const meio = { x: caixaDoCartao!.x + caixaDoCartao!.width / 2, y: caixaDoCartao!.y + caixaDoCartao!.height / 2 };
+    expect(meio.x > caixaDoMotor!.x && meio.x < caixaDoMotor!.x + caixaDoMotor!.width && meio.y > caixaDoMotor!.y && meio.y < caixaDoMotor!.y + caixaDoMotor!.height, "o cartao esta sobre o iframe").toBe(true);
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-room-screen-card]")?.getAttribute("data-room-screen-card") ?? null, meio)).toBe("banner");
+
+    const botao = cartao.getByRole("link", { exact: true, name: banner.buttonLabel! });
+    const novaAba = context.waitForEvent("page");
+    await botao.click();
+    const aberta = await novaAba;
+    await aberta.waitForURL(banner.linkUrl);
+    await aberta.close();
+    await expect.poll(async () => (await eventosDeWebinario("webinar_screen_clicked")).map((evento) => evento.entity_id), { timeout: 15_000 }).toContain(LIVE_AO_VIVO_DE_TESTE.sessaoId);
+
+    // A 375 px: a faixa abaixo do palco, fora do video; o banner sem fechar sem o X, o QR Code com o X e o Abrir o link.
+    await page.setViewportSize({ height: 740, width: 375 });
+    const faixa = dialogo.locator("[data-room-screen-strip]");
+    const linhaDoBanner = faixa.locator("[data-room-screen-row='banner']");
+    const linhaDoQr = faixa.locator("[data-room-screen-row='qr']");
+    await expect(linhaDoBanner).toBeVisible();
+    await expect(linhaDoQr).toBeVisible();
+    await expect(dialogo.locator("[data-room-screen-card='banner']")).toBeHidden();
+    await expect(linhaDoBanner).toHaveAccessibleName(naTela.aluno.secaoBanner(banner.title));
+    await expect(linhaDoBanner.getByRole("button", { name: naTela.aluno.fecharBanner })).toHaveCount(0);
+    await expect(linhaDoQr.getByRole("button", { name: naTela.aluno.fecharQr })).toBeVisible();
+    await expect(linhaDoQr.getByRole("link", { exact: true, name: naTela.aluno.abrirOLink })).toHaveAttribute("href", qr.linkUrl);
+    const [palco, linha] = await Promise.all([dialogo.locator("[data-room-stage]").boundingBox(), linhaDoBanner.boundingBox()]);
+    expect(palco).not.toBeNull();
+    expect(linha).not.toBeNull();
+    expect(linha!.y, "a linha fica abaixo do palco, sem cruzar a caixa dele").toBeGreaterThanOrEqual(palco!.y + palco!.height - 0.5);
+    expect(linha!.height).toBeGreaterThanOrEqual(56);
+    const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
+    expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
+
+    // A tela baixa (docs/31 §12.4): o palco largo (640 px ou mais) e baixo, como o do celular deitado, usa a faixa; o
+    // QR Code nao cabe sobre o video e os cartoes se cobririam.
+    await page.setViewportSize({ height: 480, width: 1200 });
+    const camada = await dialogo.locator("[data-room-screen-layer]").boundingBox();
+    expect(camada).not.toBeNull();
+    expect(camada!.width, "o palco continua largo").toBeGreaterThanOrEqual(640);
+    await expect(linhaDoBanner).toBeVisible();
+    await expect(linhaDoQr).toBeVisible();
+    await expect(dialogo.locator("[data-room-screen-card='banner']")).toBeHidden();
+    await expect(dialogo.locator("[data-room-screen-card='qr']")).toBeHidden();
+  } finally {
+    unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Tirando a Na tela da live de teste");
   }
 });

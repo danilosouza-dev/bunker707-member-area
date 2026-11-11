@@ -45,7 +45,7 @@ registerHooks({
     }
     if (modulo === "server/licensing/store-db") {
       return stub(`
-        export const LICENSE_STATE_MIGRATION = "202611100002";
+        export const LICENSE_STATE_MIGRATION = "202611100003";
         export function licenseStateDbOf() { return globalThis.__licencaTela.banco; }`);
     }
     if (modulo === "server/auth/permissions") {

@@ -446,12 +446,13 @@ test("consoleTabsFor: a live com Chat, Perguntas, Mãos e Pessoas; a gravada e o
   assert.deepEqual([...v2.CONSOLE_TABS], ["chat", "perguntas", "maos", "pessoas"]);
 });
 
-test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Roteiro so no webinario gravado, Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "presenca", "gravacao"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "gravacao"], "antes de comecar, sem a Presença");
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro");
+test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
+  assert.deepEqual([...v2.CONSOLE_MORE_ENTRIES], ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"], "a Na tela e a primeira entrada");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "gravacao"], "antes de comecar, sem a Presença (a Na tela e o Roteiro ja valem na espera)");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro, sem a Na tela");
   for (const entries of [v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" })]) {
     assert.deepEqual(entries, v2.CONSOLE_MORE_ENTRIES.filter((entry) => entries.includes(entry)), "sempre na ordem do V2-15");
   }
@@ -494,6 +495,11 @@ test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nest
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "roteiro" } }), { more: "roteiro" });
+  // A Na tela vale na live e na gravada; no Replay a escolha volta ao Chat.
+  assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { more: "tela" } }), { more: "tela" });
+  assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "tela" } }), { more: "tela" });
+  const replay = { entries: v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), tabs: v2.consoleTabsFor({ kind: "replay" }) };
+  assert.deepEqual(v2.consolePanelViewOf({ ...replay, view: { more: "tela" } }), { tab: "chat" });
 });
 
 test("consolePollStep (docs/31 V2-13 e V2-A50): a regiao viva do Atualizar so fala o clique, a passagem para sem resposta e a volta; o laco de 5 s fica quieto; o sem resposta fica na tela ate uma leitura responder", () => {
@@ -559,4 +565,18 @@ test("consoleRailFit (docs/31 §10, 10/11/2026): todos os itens quando a altura 
   assert.deepEqual(consoleRailFit({ available: 10, count: 6 }), { overflow: 6, visible: 0 }, "um lugar so: o Mais com tudo");
   assert.deepEqual(consoleRailFit({ available: altura(3), count: 2 }), { overflow: 0, visible: 2 });
   assert.deepEqual(consoleRailFit({ available: altura(3), count: 0 }), { overflow: 0, visible: 0 });
+  // Com a Na tela e o Roteiro (R8), a live tem 10 itens (4 abas, Na tela, Enquetes, Roteiro, Atendimento, Presença, Gravação).
+  const live = v2.consoleTabsFor({ kind: "live" }).length + v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }).length;
+  assert.equal(live, 10);
+  assert.deepEqual(consoleRailFit({ available: altura(10), count: live }), { overflow: 0, visible: 10 }, "cabe exatamente com a Na tela e o Roteiro");
+  assert.deepEqual(consoleRailFit({ available: 640, count: live }), { overflow: 3, visible: 7 }, "1280 x 720: 7 itens e o Mais com 3");
+  assert.deepEqual(consoleRailFit({ available: altura(9), count: live }), { overflow: 2, visible: 8 }, "a altura que cabia os 9 de antes: o Mais leva 2");
+});
+
+test("R7 consolePresenceBadge: com o contador simulado ligado, a parte simulada vem separada no fim, so para a equipe; sem ela (nula, zero), so o real", () => {
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 300 }), "12 presentes · pico 14 · +300 simulados");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 1, simulated: 1250 }), "1 presente · +1.250 simulados", "o milhar do Brasil");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 0 }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: null }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: Number.NaN }), "12 presentes · pico 14");
 });

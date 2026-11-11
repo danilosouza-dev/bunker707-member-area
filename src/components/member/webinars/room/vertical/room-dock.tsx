@@ -10,6 +10,8 @@ import type { RoomDesign } from "./vertical-model";
 // dois desenhos (e escondida com a gaveta aberta): o card da Oferta continua no mesmo lugar da arvore e nao perde o
 // estado ao girar o aparelho (fechado continua fechado, nada e lido de novo). No desenho normal as duas caixas sao
 // `contents` (nao geram caixa): o card fica no canto do palco como sempre. O degrade e parado (nada anima).
+// A Na tela (especificacao de 10/11/2026, §3.4): no vertical, o espaco `screen` com as linhas compactas de 48 px do
+// banner e do QR Code (no maximo duas), antes da pilula da Oferta; somem com a gaveta aberta, como o resto da doca.
 
 export type RoomDockProps = {
   /** O chat por cima (so no vertical). */
@@ -21,9 +23,11 @@ export type RoomDockProps = {
   hidden: boolean;
   /** <RoomOffer layout="stage" | "vertical" />, sempre neste lugar. */
   offer: ReactNode;
+  /** As linhas da Na tela (so no vertical), antes da pilula da Oferta. */
+  screen?: ReactNode;
 };
 
-export function RoomDock({ chat, composer, design, hidden, offer }: RoomDockProps) {
+export function RoomDock({ chat, composer, design, hidden, offer, screen = null }: RoomDockProps) {
   const vertical = design === "vertical";
 
   return (
@@ -43,6 +47,7 @@ export function RoomDock({ chat, composer, design, hidden, offer }: RoomDockProp
       role={vertical ? "group" : undefined}
     >
       {vertical ? chat : null}
+      {vertical ? screen : null}
       {/* So os filhos recebem o toque (a faixa inteira deixa o toque passar para o video). */}
       <div className={vertical ? "pointer-events-none flex min-w-0 justify-end [&>*]:pointer-events-auto" : "contents"} data-room-slot="offer">
         {offer}

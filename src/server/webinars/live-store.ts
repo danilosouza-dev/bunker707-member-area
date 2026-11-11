@@ -157,7 +157,8 @@ export async function fetchStudentBans(db: WebinarsDb, input: { sessionId: strin
 
 /**
  * So o banimento de todos os webinarios (uma leitura pela chave): vale na Live gravada e no Replay tambem (docs/30
- * §1.4 e D33); removido e silenciado sao da sessao `live` e nao contam fora dela.
+ * §1.4 e D33); removido e silenciado sao da sessao (a live e, desde a Na tela, R5, a gravada: fetchStudentBans) e nao
+ * contam no Replay.
  */
 export async function fetchUserBan(db: WebinarsDb, userId: string): Promise<UserBanRow | null> {
   const { data, error } = await db.from("webinar_user_bans").select(USER_BAN_COLUMNS).eq("user_id", userId).maybeSingle();

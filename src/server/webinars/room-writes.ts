@@ -6,9 +6,9 @@
 // service role; o offset gravado e o do relogio do servidor na gravada e na live (nunca o do navegador) e a posicao do
 // player no replay. Cada funcao devolve o que a rota responde e os registros do historico (so ids e numeros, nunca o
 // texto) que a rota grava depois da resposta. Fora da hora ou do modo: RoomRefusedError (409 { reason }); limites: 429.
-// Na live (fase 3) os banimentos tambem recusam: removido ou banido nao escreve nada (409 banned); silenciado no chat
-// nao manda mensagem nem pergunta (409 muted), mas reage, curte e responde enquete. Na Live gravada e no Replay, so o
-// banido de todos os webinarios recusa (409 banned, uma leitura pela chave).
+// Na live (fase 3) e, desde a Na tela (R5, 10/11/2026), tambem na Live gravada, os banimentos recusam: removido ou
+// banido nao escreve nada (409 banned); silenciado no chat nao manda mensagem nem pergunta (409 muted), mas reage, curte
+// e responde enquete. No Replay, so o banido de todos os webinarios recusa (409 banned, uma leitura pela chave).
 
 import "server-only";
 
@@ -139,13 +139,14 @@ export function banRefusalError(ban: LiveBanState, kind: "chat" | "interaction")
 
 /**
  * Os banimentos (docs/30 §1.4 e §8.3), lidos agora a cada escrita (o silencio vence pela hora, a equipe desfaz a
- * qualquer momento). Na sessao `live`, tudo: removido, silenciado e banido. Na Live gravada e no Replay, so o banido de
- * todos os webinarios (uma leitura pela chave; D33: Banir vale para qualquer Webinario), com o mesmo 409 banned.
- * Vem antes dos limites, entao a mensagem recusada nao gasta a vez do modo lento nem a rajada.
+ * qualquer momento). Na Live ao vivo e na Live gravada (a moderacao por pessoa, R5), tudo: removido, silenciado e
+ * banido. No Replay, so o banido de todos os webinarios (uma leitura pela chave; D33: Banir vale para qualquer
+ * Webinario), com o mesmo 409 banned. Vem antes dos limites, entao a mensagem recusada nao gasta a vez do modo lento nem
+ * a rajada.
  */
 async function refuseBanned(input: { context: Pick<RoomContext, "session">; db: WebinarsDb; kind: "chat" | "interaction"; now: number; userId: string }) {
   const { session } = input.context;
-  if (session.kind !== "live") {
+  if (session.kind !== "live" && session.kind !== "simulated") {
     const userBan = await fetchUserBan(input.db, input.userId);
     if (userBan) {
       throw new RoomRefusedError("banned", WEBINAR_COPY.aoVivo.banido);

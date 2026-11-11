@@ -1,10 +1,14 @@
 "use client";
 
-import { BarChart3, MessageSquareMore, Pin } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { BarChart3, ChevronDown, ChevronUp, MessageSquareMore, Pin } from "lucide-react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomMessage } from "@/lib/webinar-room-client";
 import { RoomMessageItem } from "../room-chat";
+import { pinnedClampHint } from "../room-layout-model";
+import { useClampToggle } from "../screen/room-pinned";
+import { RoomTeamText } from "../screen/room-team-text";
 import { verticalChatAnnouncement, verticalChatTail } from "./vertical-model";
 
 // O chat por cima do video na Sala Live vertical (docs/30 §1.6, §1.7 e §9): as ultimas mensagens (as que a sala mostra,
@@ -13,6 +17,11 @@ import { verticalChatAnnouncement, verticalChatTail } from "./vertical-model";
 // "Ver mais mensagens" abre o chat inteiro na gaveta. A lista e role="log"; o leitor de tela ouve pela regiao polite:
 // uma mensagem nova e lida com o prefixo do papel, em rajada so "N mensagens novas"; o que ja estava na tela quando o
 // chat abriu (girar o aparelho, fechar a gaveta) nao e lido de novo. O texto tem sombra sobre o degrade da doca.
+// A Na tela (especificacao de 10/11/2026, §3.4): a fixada continua na linha de 2 linhas acima do chat, agora com o link
+// da equipe clicavel (RoomTeamText) e o toque para Mostrar tudo (no texto, fora do link, ou no botao de 44 px com
+// aria-expanded, que so aparece quando o corte esconde alguma coisa: useClampToggle). Com a enquete fixada, o botao de
+// enquete diz "Enquete fixada: {pergunta}" e continua la depois da resposta (verticalPollButton, room-layout-model.ts);
+// sem ela, a primeira enquete aberta, como antes. A gaveta mostra a area das fixadas no topo (vertical-drawer.tsx).
 
 export type VerticalChatProps = {
   /** A frase de quando o chat nao carregou (no lugar da lista vazia). */
@@ -22,13 +31,58 @@ export type VerticalChatProps = {
   messages: readonly RoomMessage[];
   onMore: () => void;
   onOpenPoll: () => void;
-  /** A pergunta da enquete aberta (o botao abre a gaveta em Enquetes). */
-  openPollQuestion: string | null;
   pinned: RoomMessage | null;
+  /**
+   * O botao de enquete (abre a gaveta em Enquetes; verticalPollButton): a enquete fixada ("Enquete fixada: {pergunta}",
+   * que fica depois da resposta) ou a primeira enquete aberta; nulo, nenhum botao.
+   */
+  pollButton: { label: string; pinned: boolean } | null;
   replay: boolean;
 };
 
-export function VerticalChat({ error, joins, messages, onMore, onOpenPoll, openPollQuestion, pinned, replay }: VerticalChatProps) {
+/**
+ * A fixada na linha de 2 linhas acima do chat: o nome e o texto, com o link da equipe clicavel. Quando o corte esconde
+ * alguma coisa, o toque no texto (fora do link) e o botao de 44 px abrem e fecham o texto inteiro (que rola por dentro
+ * acima de 30 % da tela). O corte fica na margem, nunca no recuo (com recuo a terceira linha apareceria embaixo).
+ */
+function VerticalPinned({ message }: { message: RoomMessage }) {
+  const copy = WEBINAR_COPY.sala;
+  const naTela = WEBINAR_COPY.naTela.aluno;
+  const id = useId();
+  const textRef = useRef<HTMLParagraphElement | null>(null);
+  const clamp = useClampToggle(textRef, { hint: pinnedClampHint(`${message.displayName} ${message.body}`, 2), resetKey: `${message.id}:${message.body}` });
+
+  function onTextClick(event: MouseEvent<HTMLParagraphElement>) {
+    if (clamp.clampable && !(event.target instanceof Element && event.target.closest("a"))) {
+      clamp.toggle();
+    }
+  }
+
+  return (
+    <div className="pointer-events-auto flex min-w-0 items-start gap-1.5 rounded-[12px] bg-black/55 pl-3 pr-0.5 text-[13px] leading-5 text-zinc-100" data-testid="room-pinned">
+      <Pin aria-hidden="true" className="mt-2.5 size-3.5 shrink-0 text-zinc-300" />
+      <p className={cn("my-2 min-w-0 flex-1 break-words", clamp.expanded ? "max-h-[30dvh] overflow-y-auto" : "line-clamp-2")} id={`${id}-t`} onClick={onTextClick} ref={textRef}>
+        <span className="sr-only">{copy.fixada}: </span>
+        <span className="font-bold text-white">{message.displayName}</span> <RoomTeamText message={message} />
+      </p>
+      {clamp.clampable ? (
+        <button
+          aria-controls={`${id}-t`}
+          aria-expanded={clamp.expanded}
+          aria-label={clamp.expanded ? naTela.mostrarMenos : naTela.mostrarTudo}
+          className="grid size-11 shrink-0 place-items-center rounded-full text-zinc-200 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+          data-room-pinned-more=""
+          onClick={clamp.toggle}
+          type="button"
+        >
+          {clamp.expanded ? <ChevronUp aria-hidden="true" className="size-4" /> : <ChevronDown aria-hidden="true" className="size-4" />}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function VerticalChat({ error, joins, messages, onMore, onOpenPoll, pinned, pollButton, replay }: VerticalChatProps) {
   const copy = WEBINAR_COPY.sala;
   const vcopy = WEBINAR_COPY.vertical;
   const { hidden, tail } = verticalChatTail(messages);
@@ -66,15 +120,7 @@ export function VerticalChat({ error, joins, messages, onMore, onOpenPoll, openP
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-1.5 [text-shadow:0_1px_2px_rgba(0,0,0,0.85)]" data-room-vertical-chat="">
-      {pinned ? (
-        <p className="pointer-events-auto flex min-w-0 items-start gap-1.5 rounded-[12px] bg-black/55 px-3 py-1.5 text-[13px] leading-5 text-zinc-100" data-testid="room-pinned">
-          <Pin aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-zinc-300" />
-          <span className="sr-only">{copy.fixada}: </span>
-          <span className="line-clamp-2 min-w-0 break-words">
-            <span className="font-bold text-white">{pinned.displayName}</span> {pinned.body}
-          </span>
-        </p>
-      ) : null}
+      {pinned ? <VerticalPinned key={pinned.id} message={pinned} /> : null}
 
       <ol
         aria-label={replay ? copy.abas.chatDaLive : copy.abas.chat}
@@ -97,17 +143,17 @@ export function VerticalChat({ error, joins, messages, onMore, onOpenPoll, openP
 
       {joins}
 
-      {openPollQuestion || hidden > 0 ? (
+      {pollButton || hidden > 0 ? (
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {openPollQuestion ? (
+          {pollButton ? (
             <button
               className="pointer-events-auto flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-full border border-white/20 bg-black/55 px-3 text-left text-sm font-semibold text-white backdrop-blur-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               onClick={onOpenPoll}
               type="button"
             >
               <BarChart3 aria-hidden="true" className="size-4 shrink-0 text-[var(--accent)]" />
-              <span className="sr-only">{copy.abas.enquetes}: </span>
-              <span className="truncate">{openPollQuestion}</span>
+              {pollButton.pinned ? null : <span className="sr-only">{copy.abas.enquetes}: </span>}
+              <span className="truncate">{pollButton.label}</span>
             </button>
           ) : null}
           {hidden > 0 ? (

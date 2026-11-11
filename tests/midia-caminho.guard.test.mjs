@@ -77,7 +77,7 @@ test("o fetch: so /rest/v1/ muda, a tabela fora da regra e a da Oferta, e o modu
   assert.doesNotMatch(code, /^import\b/m, "puro: sem import (o servidor, os testes e os scripts carregam direto pelo Node)");
   assert.doesNotMatch(code, /server-only/);
   assert.match(code, /export const STORAGE_PUBLIC_ROUTES = \["\/storage\/v1\/object\/public\/", "\/storage\/v1\/render\/image\/public\/"\] as const;/);
-  assert.match(code, /export const STORAGE_PATHS_SKIPPED_TABLES: readonly string\[\] = \["webinar_offer_variants"\];/);
+  assert.match(code, /export const STORAGE_PATHS_SKIPPED_TABLES: readonly string\[\] = \["webinar_offer_variants", "webinar_screen_items"\];/);
   assert.match(code, /const index = pathname\.indexOf\("\/rest\/v1\/"\);/);
   // O fetch global e lido na hora do pedido (o Next e o Sentry poem o deles depois que o modulo carrega).
   assert.match(code, /\(baseFetch \?\? globalThis\.fetch\)\(input, init\)/);
@@ -144,11 +144,13 @@ test("todo check de endereco https das migracoes aceita o caminho guardado ou e 
     "202610200001_communication_v1.sql: audio_url",
     "202610300003_webinars_v4b_ofertas.sql: checkout_url",
     "202610300003_webinars_v4b_ofertas.sql: image_url",
+    // O link de clique do banner e do QR Code da Na tela (Webinarios v7): a tabela fica fora do fetch (a imagem ja e caminho).
+    "202611100002_webinars_v7_na_tela.sql: link_url",
     "202611120001_storage_paths_checks.sql: image_url",
     "202611120001_storage_paths_checks.sql: audio_url",
     "202611120001_storage_paths_checks.sql: file_url"
   ]);
-  assert.deepEqual([...STORAGE_PATHS_SKIPPED_TABLES], ["webinar_offer_variants"]);
+  assert.deepEqual([...STORAGE_PATHS_SKIPPED_TABLES], ["webinar_offer_variants", "webinar_screen_items"]);
   assert.match(sqlCodeOf(read("supabase/migrations/202610300003_webinars_v4b_ofertas.sql")), /create table if not exists public\.webinar_offer_variants \([^;]*checkout_url text not null check[^;]*image_url text check \(image_url is null or \(char_length\(image_url\) <= 2048 and image_url ~ '\^https:\/\/'\)\)/);
 });
 
@@ -220,6 +222,11 @@ const NOT_CONVERTED = {
   "students.avatar_url": "tabela apagada na 202610140001",
   "webinar_offer_variants.checkout_url": "link colado, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
   "webinar_offer_variants.image_url": "link colado, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
+  "webinar_chat_messages.persona_avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v7)",
+  "webinar_chat_script_items.persona_avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v7)",
+  "webinar_screen_items.image_alt": "texto alternativo da imagem, nao endereco (v7)",
+  "webinar_screen_items.image_path": "so o caminho webinars/screen/<hex>.webp, nunca um endereco (v7)",
+  "webinar_screen_items.link_url": "link de clique do banner e do QR Code, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
   "webinar_recordings.embed_url": "video no provedor",
   "youtube_course_imports.playlist_url": "playlist do YouTube"
 };

@@ -488,18 +488,28 @@ test("salvar o roteiro: a situacao e do servidor (pronta com minuto, frase achad
   assert.deepEqual(salvo.summary, { disabled: 1, manual: 1, ready: 2, unresolved: 1 });
   assert.equal(db.tables.webinar_chat_script_items.length, 5, "o id desconhecido nao virou upsert: entrou como novo");
 
-  // Salvar de novo com um item a menos apaga o que saiu e mantem os ids dos que ficaram.
-  const deNovo = ok(await scriptActions.saveScriptItems({ items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })), webinarId: WEBINAR }));
+  // Salvar de novo com um item a menos apaga o que saiu (dos que o editor carregou) e mantem os ids dos que ficaram.
+  const deNovo = ok(
+    await scriptActions.saveScriptItems({
+      items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })),
+      loadedIds: salvo.items.map((item) => item.id),
+      webinarId: WEBINAR
+    })
+  );
   assert.deepEqual(
     deNovo.items.map((item) => item.id),
     salvo.items.slice(0, 2).map((item) => item.id)
   );
   assert.equal(db.tables.webinar_chat_script_items.length, 2);
 
+  // Adendo de 10/11/2026 (R8): a Live ao vivo tambem tem roteiro, mas sem "Quando o apresentador diz" (sem transcricao
+  // durante a transmissao): o item com frase e recusado no campo e nada e gravado.
   const aoVivo = usar(bancoEmMemoria(cenario({ webinars: [{ ...cenario().webinars[0], kind: "live" }] })));
-  const recusa = await scriptActions.saveScriptItems({ items: [], webinarId: WEBINAR });
-  assert.deepEqual([recusa.ok, recusa.status], [false, 409], "roteiro so na Live gravada");
+  const recusa = await scriptActions.saveScriptItems({ items: [{ ...base, phrase: "agora vamos começar", triggerKind: "on_phrase" }], webinarId: WEBINAR });
+  assert.deepEqual([recusa.ok, recusa.status, recusa.fieldErrors?.["items.0.triggerKind"]?.[0]], [false, 400, WEBINAR_COPY.naTela.comentarios.erros.fraseNaLive], "sem frase na live");
   assert.equal(aoVivo.tables.webinar_chat_script_items.length, 0);
+  const daLive = ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: 90_000, triggerKind: "at_offset" }, { ...base, offsetMs: null, triggerKind: "manual" }], webinarId: WEBINAR }));
+  assert.deepEqual(daLive.items.map((item) => [item.triggerKind, item.status]), [["at_offset", "ready"], ["manual", "ready"]], "Num minuto da live e Pelo botao da equipe");
 });
 
 test("a transcricao: grava as cues na gravacao base e resolve as frases (pronta com o atraso / nao achada); sem video, 409; texto vazio, erro no campo", async () => {
@@ -1032,6 +1042,45 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
   assert.equal(audits(db, "webinar.polls_saved").length, 2);
 });
 
+test("Na tela: fixar numa sessao encerrada e recusado (409) e desafixar continua; lancar e encerrar a enquete gravam e so depois mudam o carimbo da sessao", async () => {
+  const antiga = message({ author_user_id: HOST, display_name: "Produtor T.", pinned_at: agora(), role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const outra = message({ author_user_id: HOST, display_name: "Produtor T.", role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const base = cenario({ webinar_chat_messages: [antiga, outra] });
+  base.webinar_sessions.find((row) => row.id === SESSAO_ENCERRADA).pinned_message_id = antiga.id;
+  const db = usar(bancoEmMemoria(base));
+  const sessao = (id) => db.tables.webinar_sessions.find((row) => row.id === id);
+
+  // Fixar e por na frente da turma: so na sessao que ainda aceita a equipe (o console esconde o botao; o pedido direto
+  // numa sessao encerrada nao muda nada).
+  const fixar = await roomActions.moderateMessage({ action: "pin", messageId: outra.id });
+  assert.deepEqual([fixar.ok, fixar.status, fixar.error], [false, 409, "Essa sessão não aceita mais ações da equipe."]);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, antiga.id, "a fixada de antes continua");
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === outra.id).pinned_at ?? null, null);
+  // Desafixar continua sempre permitido (tirar da frente da turma nunca e bloqueado).
+  const desafixada = ok(await roomActions.moderateMessage({ action: "unpin", messageId: antiga.id }));
+  assert.equal(desafixada.pinnedMessageId, null);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, null);
+  assert.deepEqual(audits(db, "webinar.moderated").map((row) => row.metadata.action), ["unpin"]);
+
+  // Lancar: a copia da enquete e gravada e, por ultimo, a linha da sessao (o carimbo que a consulta de 5 s compara).
+  const modelo = ok(await roomActions.savePolls({ polls: [{ kind: "single", options: [{ label: "Sim" }, { label: "Não" }], question: "Vem?" }], webinarId: WEBINAR })).polls[0];
+  db.calls.length = 0;
+  const aberta = ok(await roomActions.launchPoll({ pollId: modelo.id, sessionId: SESSAO_NO_AR }));
+  const escritas = () => db.calls.filter((call) => call.op !== "select" && call.table !== "admin_audit_log").map((call) => `${call.op} ${call.table}`);
+  assert.deepEqual(escritas(), ["insert webinar_polls", "insert webinar_poll_options", "update webinar_sessions"]);
+  const carimbo = db.calls.find((call) => call.op === "update" && call.table === "webinar_sessions");
+  assert.deepEqual(Object.keys(carimbo.payload), ["updated_at"], "so o carimbo muda na sessao");
+  assert.deepEqual(carimbo.filters, [["eq", "id", SESSAO_NO_AR]]);
+
+  // Encerrar (e compartilhar): a enquete primeiro, o carimbo depois.
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR, shareResults: true }));
+  assert.deepEqual(escritas(), ["update webinar_polls", "update webinar_sessions"]);
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR }));
+  assert.deepEqual(escritas(), ["update webinar_sessions"], "encerrar de novo nao muda a enquete, mas o carimbo sim");
+});
+
 test("perguntas: responder por escrito vira linha da equipe no chat e marca respondida; ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 3, user_id: ALUNA };
   const outra = { ...pergunta, body: "E certificado?", id: randomUUID() };
@@ -1088,9 +1137,11 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100001).");
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611100002 da Na tela): aplicar ate ela
+  // inclui a do fio.
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100002).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100001)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100002)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });

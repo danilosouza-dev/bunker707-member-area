@@ -6,7 +6,10 @@
 // as mais antigas primeiro); o webinario e as gravacoes de cada webinario sao lidos uma vez por tick. Uma falha numa
 // sessao vira log e o lote segue; o fim do orcamento do tick (signal) para o lote. Banco sem a 202610300003: registra e
 // devolve zeros (o tick continua verde). A sessao sem a decisao registrada (§8.6, D10) nao mostrou nada na sala
-// (simulationDecisionRecorded): congela zeros. O job e src/server/jobs/webinar-simulation-summaries-job.ts.
+// (simulationDecisionRecorded): congela zeros. O job e src/server/jobs/webinar-simulation-summaries-job.ts. Adendo de
+// 10/11/2026 (R7): as sessoes `live` encerradas entram tambem, com o zero no started_at, a forma da faixa pela duracao
+// prevista do webinario e o fim no Encerrar live (simulationTotals com `live`); a live encerrada direto da espera (sem
+// started_at) congela zeros.
 
 import "server-only";
 
@@ -16,7 +19,7 @@ import { toTime } from "./model";
 import { sessionDurationMs } from "./room-model";
 import { pickRecording } from "./room-queries";
 import { SESSION_SIMULATION_COLUMNS, sessionSimulationFromRow, type RecordingRow, type SessionSimulationRow, type WebinarRow } from "./rows";
-import { simulationDecisionRecorded, simulationEndOffsetMs, simulationTotals } from "./simulation-model";
+import { liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationDecisionRecorded, simulationEndOffsetMs, simulationTotals } from "./simulation-model";
 import { freezeSimulationSummary } from "./simulation-store";
 import { fetchWebinarRow, listRecordingRows } from "./store";
 
@@ -25,7 +28,7 @@ export const SIMULATION_SUMMARIES_BATCH = 50;
 /** Encerradas ha ate 6 h: o tick que ficou fora do ar ainda congela; depois disso a sessao fica sem resumo. */
 export const SIMULATION_SUMMARIES_LOOKBACK_MS = 6 * 60 * 60_000;
 
-const PENDING_COLUMNS = `${SESSION_SIMULATION_COLUMNS}, webinar_id, status, scheduled_at, ended_at, recording_id, simulation_ack_text, simulation_decided_at`;
+const PENDING_COLUMNS = `${SESSION_SIMULATION_COLUMNS}, webinar_id, status, scheduled_at, started_at, ended_at, recording_id, simulation_ack_text, simulation_decided_at`;
 
 /** As regras gravadas como nulo quando desligadas (simulationRulesToRow): uma delas preenchida = havia regra. */
 const HAS_RULE_FILTER = "simulated_count_rule.not.is.null,simulated_joins.not.is.null,simulated_sale_notices.not.is.null";
@@ -36,9 +39,13 @@ type PendingSummaryRow = SessionSimulationRow & {
   scheduled_at: string;
   simulation_ack_text?: string | null;
   simulation_decided_at?: string | null;
+  started_at?: string | null;
   status: string;
   webinar_id: string;
 };
+
+/** As especies com Simulacao: a gravada e a Live ao vivo (R7). */
+const SUMMARY_KINDS = ["simulated", "live"] as const;
 
 export type SimulationSummariesResult = {
   /** Sessoes em que a conta deu erro (log; o lote seguiu). */
@@ -63,12 +70,12 @@ function hasRule(row: PendingSummaryRow) {
   return row.simulated_count_rule != null || row.simulated_joins != null || row.simulated_sale_notices != null;
 }
 
-/** As sessoes gravadas encerradas desde `sinceIso` com regra simulada e sem resumo (as mais antigas primeiro). */
+/** As sessoes gravadas e ao vivo encerradas desde `sinceIso` com regra simulada e sem resumo (as mais antigas primeiro). */
 export async function listSessionsToSummarize(db: WebinarsDb, input: { limit: number; sinceIso: string }): Promise<PendingSummaryRow[]> {
   const { data, error } = await db
     .from("webinar_sessions")
     .select(PENDING_COLUMNS)
-    .eq("kind", "simulated")
+    .in("kind", [...SUMMARY_KINDS])
     .eq("status", "ended")
     .is("simulation_summary", null)
     .gte("ended_at", input.sinceIso)
@@ -121,18 +128,22 @@ export async function runSimulationSummariesTick(input: { db: WebinarsDb; now?: 
       if (signal?.aborted) {
         break;
       }
-      if (row.kind !== "simulated" || row.status !== "ended" || row.simulation_summary != null || !hasRule(row)) {
+      const live = row.kind === "live";
+      if ((row.kind !== "simulated" && !live) || row.status !== "ended" || row.simulation_summary != null || !hasRule(row)) {
         result.skipped += 1;
         continue;
       }
 
       try {
         const context = await contextOf(row.webinar_id);
-        // A forma do contador e a do video inteiro (como a sala recebeu); o Encerrar antecipado so corta o fim.
-        const videoMs = sessionVideoMs(context, row);
-        const endMs = simulationEndOffsetMs({ endedAt: row.ended_at, scheduledAt: row.scheduled_at }, videoMs);
+        // A forma do contador e a do video inteiro (como a sala recebeu); o Encerrar antecipado so corta o fim. Na live,
+        // a forma e a duracao prevista e o fim e o Encerrar live (o numero do fim da forma segura ate la).
+        const videoMs = live ? liveSimulationShapeMs(context.webinar?.duration_minutes ?? 1) : sessionVideoMs(context, row);
+        const endMs = live
+          ? liveSimulationEndOffsetMs({ endedAt: row.ended_at, startedAt: row.started_at ?? null })
+          : simulationEndOffsetMs({ endedAt: row.ended_at, scheduledAt: row.scheduled_at }, videoMs);
         const decided = simulationDecisionRecorded({ simulationAckText: row.simulation_ack_text, simulationDecidedAt: row.simulation_decided_at });
-        const totals = decided ? simulationTotals(sessionSimulationFromRow(row), { endMs, videoMs }) : { counterMax: 0, joinsShown: 0, saleNoticesShown: 0 };
+        const totals = decided ? simulationTotals(sessionSimulationFromRow(row), { endMs, videoMs }, live) : { counterMax: 0, joinsShown: 0, saleNoticesShown: 0 };
         const frozen = await freezeSimulationSummary(db, { sessionId: row.id, totals });
         if (frozen) {
           result.frozen += 1;

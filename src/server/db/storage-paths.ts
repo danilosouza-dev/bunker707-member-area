@@ -29,7 +29,9 @@ export const STORAGE_PUBLIC_ROUTES = ["/storage/v1/object/public/", "/storage/v1
  * Tabelas cujo pedido vai e volta como esta: webinar_offer_variants guarda a imagem e o checkout da Oferta como links
  * colados, com check `^https://` no banco (202610300003); o caminho guardado nao passaria nele.
  */
-export const STORAGE_PATHS_SKIPPED_TABLES: readonly string[] = ["webinar_offer_variants"];
+// webinar_screen_items (Webinarios v7, "Na tela"): a imagem ja e so o caminho no bucket, e link_url e o link de clique
+// do banner e do QR Code, com check https:// (um link para um arquivo nosso viraria caminho e seria recusado).
+export const STORAGE_PATHS_SKIPPED_TABLES: readonly string[] = ["webinar_offer_variants", "webinar_screen_items"];
 
 const ROUTES_PATTERN = "/storage/v1/(?:object|render/image)/public/";
 /** Nome de maquina so com [a-z0-9.-] (ou IPv6 entre colchetes): a base entra no texto JSON e nada pode sair das aspas. */

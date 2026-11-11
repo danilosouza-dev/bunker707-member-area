@@ -5,21 +5,63 @@
 // aulas) e a resolucao das frases ao salvar, e "Soltar agora" no console. Todas passam por runWebinarAction
 // (messaging.write), gravam recordAudit so com ids e contagens (nunca o texto das mensagens) e revalidam a pagina
 // do webinario e o console. Toda leitura e escrita vai pela service role (webinarsDb) com assertNoDbError no store.
+//
+// Adendo de 10/11/2026 (R8 e R9): o roteiro tambem na Live ao vivo (salvar, importar e exportar; "Quando o apresentador
+// diz" recusado nela, que nao tem transcricao durante a transmissao; a transcricao e as frases continuam so da
+// gravada), o "Novo comentário" do console (sendScriptedComment: "Enviar agora", a mensagem `scripted` sem item;
+// saveScriptComment: "Guardar na lista", um item "Pelo botão da equipe" no fim do roteiro) e a foto de quem comenta
+// (uploadPersonaPhoto: o WebP reduzido no navegador a 512 px e 100 KB, conferido de novo, sem animacao, gravado em
+// content-assets/webinars/personas/<24 hex>.webp pelo mesmo persistImageAsset do banner da Na tela; so o caminho volta).
+// O item guarda o caminho da foto e a mensagem solta guarda a copia (o "Soltar agora", o tick da live e o "Enviar
+// agora"); o "Usar esta foto em todos os comentários de {nome}" aplica a foto aos itens com o mesmo nome. Banco sem a
+// 202611100002: o roteiro da gravada segue sem foto e so gravar uma foto volta 409 com a frase da migracao; o da Live ao
+// vivo nao grava nada (salvar, importar, "Guardar na lista": 409 antes de gravar), porque a webinar_open_session de antes
+// soltaria todo o roteiro da live de uma vez no "Começar para todos". O Salvar do editor so apaga os itens que ele
+// carregou (`loadedIds`): o que o console guardou depois fica.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { csvFileName } from "@/lib/csv";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { runWebinarAction } from "./run-webinar-action";
 import { TranscriptError, normalizeManualTranscript } from "@/server/ai/transcripts";
 import { recordAudit } from "@/server/audit/log";
+import { decodeWebpDataUrl, readWebpDimensions, webpIsAnimated } from "@/server/catalog/webp";
+import { persistImageAsset } from "@/server/db/media-assets";
+import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
 import { chatMessageFromRow, scriptItemFromRow, transcriptCuesOf } from "./chat-rows";
-import { CHAT_MESSAGES, fireScriptItemSchema, importScriptCsvSchema, resolveScriptPhrasesSchema, saveScriptItemsSchema, saveTranscriptSchema, sessionIdInputSchema, type SaveScriptItemsInput } from "./chat-schemas";
-import { fetchScriptItemRow, fetchTranscriptRow, insertScriptedMessage, listScriptItemRows, replaceScriptItemRows, updateScriptItemRow, upsertTranscriptRow, type ScriptItemUpsert } from "./chat-store";
+import {
+  CHAT_MESSAGES,
+  fireScriptItemSchema,
+  importScriptCsvSchema,
+  resolveScriptPhrasesSchema,
+  saveScriptItemsSchema,
+  saveTranscriptSchema,
+  scriptCommentSchema,
+  sessionIdInputSchema,
+  uploadPersonaPhotoSchema,
+  type SaveScriptItemsInput,
+  type ScriptCommentInput
+} from "./chat-schemas";
+import {
+  fetchScriptItemRow,
+  fetchTranscriptRow,
+  insertScriptItemRow,
+  insertScriptedComment,
+  insertScriptedMessage,
+  listScriptItemRows,
+  replaceScriptItemRows,
+  updateScriptItemRow,
+  upsertTranscriptRow,
+  type ScriptItemUpsert
+} from "./chat-store";
 import { canTeamActOn } from "./console-model";
 import { listAllSessionChatRows } from "./console-queries";
-import { WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import { CHAT_LIMITS, TRANSCRIPT_FORMATS, type ChatMessage, type ScriptItem, type ScriptItemDraft, type ScriptStatus, type WebinarTranscriptFormat } from "./model";
+import { PERSONA_AVATAR_BUCKET, PERSONA_AVATAR_FOLDER, PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN } from "./persona-model";
+import { applyPersonaAvatarToName, readScriptItemPersonaAvatar, readScriptPersonaAvatars, withPersonaAvatars, type PersonaAvatars } from "./persona-store";
 import { baseRecordingOf, type TranscriptSummary } from "./queries";
 import { sessionOffsetMs } from "./room-model";
 import { sessionFromRow } from "./rows";
@@ -28,7 +70,8 @@ import { assertWebinarNotArchived, fetchSessionRow, listRecordingRows, requireWe
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
-const ONLY_SIMULATED_MESSAGE = "O roteiro de chat é só da Live gravada.";
+/** A transcricao e as frases ("Quando o apresentador diz") sao so da Live gravada; o roteiro existe nos dois tipos (R8). */
+const ONLY_SIMULATED_MESSAGE = "A transcrição e as frases são só da Live gravada.";
 const NO_RECORDING_MESSAGE = "Cole o endereço do vídeo da Bunny no card Dados e salve antes de enviar a transcrição.";
 const RECORDING_MISMATCH_MESSAGE = "Esse vídeo não é deste webinário.";
 const TRANSCRIPT_EMPTY_MESSAGE = "A transcrição está vazia ou não tem trechos válidos.";
@@ -43,6 +86,17 @@ export type ImportedScript = SavedScript & { errors: ScriptCsvError[]; imported:
 export type ResolvedScript = SavedScript & { hasTranscript: boolean; ready: number; unresolved: number };
 export type SavedTranscript = ResolvedScript & { transcript: TranscriptSummary };
 export type ExportedCsv = { csv: string; fileName: string; rows: number };
+export type UploadedPersonaPhoto = { height: number; path: string; width: number };
+/** O comentario solto pelo "Enviar agora" e quantos itens com o mesmo nome ganharam a foto. */
+export type SentScriptedComment = { message: ChatMessage; photoApplied: number };
+/** O item guardado pelo "Guardar na lista" e quantos itens com o mesmo nome ganharam a foto (o novo incluido). */
+export type SavedScriptComment = { item: ScriptItem; photoApplied: number };
+
+const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
+/** O aviso da foto de quem comenta no banco sem a 202611100002. */
+const PERSONA_MIGRATION_MESSAGE = COMENTARIOS.erros.migracao(WEBINARS_SCREEN_MIGRATION);
+/** O aviso do roteiro da Live ao vivo no banco sem a 202611100002. */
+const LIVE_SCRIPT_MIGRATION_MESSAGE = COMENTARIOS.erros.migracaoLive(WEBINARS_SCREEN_MIGRATION);
 
 /* ------------------------------------------------------------------------------------------------
  * Apoio
@@ -75,6 +129,7 @@ function draftOfItem(item: ScriptItem): ScriptItemDraft {
     id: item.id,
     kind: item.kind,
     offsetMs: item.offsetMs,
+    personaAvatarPath: item.personaAvatarPath,
     personaName: item.personaName,
     personaRole: item.personaRole,
     phrase: item.phrase,
@@ -124,6 +179,18 @@ function toUpsert(item: ScriptItemDraft, position: number, transcript: Transcrip
   return keepId && item.id ? { ...base, id: item.id } : { ...base, created_by: createdBy, generated_by_ai: false };
 }
 
+/**
+ * A foto de quem comenta na linha que vai para o banco (R9): so com a coluna no banco (e entao em todas as linhas: um
+ * upsert exige as mesmas chaves); ausente no rascunho, a do item fica como estava.
+ */
+function withAvatarColumn(upsert: ScriptItemUpsert, item: ScriptItemDraft, avatars: PersonaAvatars): ScriptItemUpsert {
+  if (!avatars.available) {
+    return upsert;
+  }
+  const kept = item.id ? (avatars.paths.get(item.id) ?? null) : null;
+  return { ...upsert, persona_avatar_path: item.personaAvatarPath !== undefined ? item.personaAvatarPath : kept };
+}
+
 /** Confere de novo as frases dos itens on_phrase (ao salvar a transcricao ou pelo botao). */
 async function resolveItems(db: WebinarsDb, webinarId: string, transcript: TranscriptContext): Promise<{ items: ScriptItem[]; ready: number; unresolved: number }> {
   const rows = await listScriptItemRows(db, webinarId);
@@ -167,23 +234,83 @@ async function requireSimulatedWebinar(db: WebinarsDb, id: string) {
   return row;
 }
 
+/**
+ * O webinario cujo roteiro se grava: a Live gravada e, desde o adendo de 10/11/2026 (R8), a Live ao vivo. A transcricao
+ * e as frases continuam so da gravada (requireSimulatedWebinar). O arquivado fica so de leitura.
+ */
+async function requireScriptWebinar(db: WebinarsDb, id: string) {
+  const row = await requireWebinarRow(db, id);
+  assertWebinarNotArchived(row);
+
+  if (row.kind !== "simulated" && row.kind !== "live") {
+    throw new WebinarError(ONLY_SIMULATED_MESSAGE, 409);
+  }
+
+  return row;
+}
+
+/**
+ * As fotos do roteiro e a conferencia do banco para a Live ao vivo: sem a 202611100002 (sem a coluna da foto), a
+ * webinar_open_session de antes soltaria no "Começar para todos" todos os itens com minuto de uma vez, entao nenhuma
+ * escrita do roteiro da live passa (409 com a frase da migracao, antes de gravar). A gravada segue como antes.
+ */
+async function scriptAvatarsFor(db: WebinarsDb, row: { id: string; kind: string }): Promise<PersonaAvatars> {
+  const avatars = await readScriptPersonaAvatars(db, row.id);
+  if (row.kind === "live" && !avatars.available) {
+    throw new WebinarError(LIVE_SCRIPT_MIGRATION_MESSAGE, 409);
+  }
+  return avatars;
+}
+
+/** O roteiro gravado com a foto de quem comenta de cada item (banco sem a coluna: sem foto). */
+async function scriptItemsWithAvatars(db: WebinarsDb, webinarId: string, rows?: Awaited<ReturnType<typeof listScriptItemRows>>): Promise<ScriptItem[]> {
+  const [items, avatars] = await Promise.all([rows ? Promise.resolve(rows) : listScriptItemRows(db, webinarId), readScriptPersonaAvatars(db, webinarId)]);
+  return withPersonaAvatars(items.map(scriptItemFromRow), avatars);
+}
+
+/** Uma escrita da foto que esbarra no banco sem a 202611100002 vira 409 com a frase da migracao. */
+async function withPersonaColumn<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (isPendingMigrationError(error) || isMissingWebinarSchema(error)) {
+      throw new WebinarError(PERSONA_MIGRATION_MESSAGE, 409);
+    }
+    throw error;
+  }
+}
+
 /* ------------------------------------------------------------------------------------------------
  * O roteiro
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * [messaging.write] Grava o roteiro inteiro (os itens enviados ficam, os de fora saem): a posicao e a ordem da
- * lista; os itens "Quando o apresentador diz" sao resolvidos agora, com a transcricao da gravacao (D6-b).
+ * [messaging.write] Grava o roteiro inteiro (os itens enviados ficam; dos que o editor carregou, `loadedIds`, os de fora
+ * saem; o que o console guardou depois fica): a posicao e a ordem da lista; os itens "Quando o apresentador diz" sao
+ * resolvidos agora, com a transcricao da gravacao (D6-b).
  */
 export async function saveScriptItems(input: SaveScriptItemsInput): Promise<ActionResult<SavedScript>> {
   return runWebinarAction("messaging.write", "conteudo", saveScriptItemsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    const row = await requireSimulatedWebinar(db, data.webinarId);
-    const { transcript } = await loadTranscriptFor(db, row.id);
+    const row = await requireScriptWebinar(db, data.webinarId);
+    const live = row.kind === "live";
+
+    // Na Live ao vivo (R8) nao ha transcricao durante a transmissao: "Quando o apresentador diz" nao entra.
+    const phraseIndex = live ? data.items.findIndex((item) => item.triggerKind === "on_phrase") : -1;
+    if (phraseIndex !== -1) {
+      throw new WebinarFieldError(`items.${phraseIndex}.triggerKind`, COMENTARIOS.erros.fraseNaLive);
+    }
+
+    const avatars = await scriptAvatarsFor(db, row);
+    if (!avatars.available && data.items.some((item) => item.personaAvatarPath)) {
+      throw new WebinarError(PERSONA_MIGRATION_MESSAGE, 409);
+    }
+    const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
     // Um id de outro webinario nao e deste roteiro: entra como item novo (nunca um upsert la).
     const known = new Set((await listScriptItemRows(db, row.id)).map((item) => item.id));
-    const upserts = data.items.map((item, position) => toUpsert(item, position, transcript, user.id, Boolean(item.id && known.has(item.id))));
-    const items = (await replaceScriptItemRows(db, row.id, upserts)).map(scriptItemFromRow);
+    const upserts = data.items.map((item, position) => withAvatarColumn(toUpsert(item, position, transcript, user.id, Boolean(item.id && known.has(item.id))), item, avatars));
+    // So sai o que o editor carregou e tirou da lista (um item guardado depois pelo console fica).
+    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts, data.loadedIds));
     const summary = scriptSummary(items);
 
     await recordAudit(db, {
@@ -208,15 +335,19 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
 export async function importScriptCsv(input: { csv: string; replace?: boolean; webinarId: string }): Promise<ActionResult<ImportedScript>> {
   return runWebinarAction("messaging.write", "conteudo", importScriptCsvSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    const row = await requireSimulatedWebinar(db, data.webinarId);
-    const parsed = parseScriptCsv(data.csv);
-    const current = (await listScriptItemRows(db, row.id)).map(scriptItemFromRow);
+    // R8: a Live ao vivo tambem importa (as linhas entram "Num minuto da live", com o Tempo em minutos; a foto dos itens
+    // que ficam nao muda). Sem a 202611100002, a live nao grava roteiro (scriptAvatarsFor).
+    const row = await requireScriptWebinar(db, data.webinarId);
+    const live = row.kind === "live";
+    await scriptAvatarsFor(db, row);
+    const parsed = parseScriptCsv(data.csv, { live });
+    const current = await scriptItemsWithAvatars(db, row.id);
 
     if (parsed.items.length === 0) {
       return { errors: parsed.errors, imported: 0, items: current, summary: scriptSummary(current), truncated: parsed.truncated };
     }
 
-    const { transcript } = await loadTranscriptFor(db, row.id);
+    const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
     const kept = data.replace ? [] : current;
 
     if (kept.length + parsed.items.length > CHAT_LIMITS.scriptItemsMax) {
@@ -227,7 +358,9 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
       ...kept.map((item, position) => toUpsert(draftOfItem(item), position, transcript, user.id, true)),
       ...parsed.items.map((item, index) => toUpsert(item, kept.length + index, transcript, user.id, false))
     ];
-    const items = (await replaceScriptItemRows(db, row.id, upserts)).map(scriptItemFromRow);
+    // Sem a coluna da foto no upsert: a dos itens que ficam continua a mesma no banco. Acrescentar nao apaga nada (nem
+    // o que o console guardou entre a leitura e a gravacao); Substituir troca o roteiro inteiro pelo do arquivo.
+    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts, data.replace ? null : []));
     const summary = scriptSummary(items);
 
     await recordAudit(db, {
@@ -244,7 +377,10 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
   });
 }
 
-/** [messaging.write] O roteiro em CSV, no formato que a importacao le de volta (os itens sem minuto ficam de fora). */
+/**
+ * [messaging.write] O roteiro em CSV, no formato que a importacao le de volta (os itens sem minuto ficam de fora; na
+ * Live ao vivo, o Tempo em minuto:segundo da live).
+ */
 export async function exportScriptCsv(input: { webinarId: string }): Promise<ActionResult<ExportedCsv>> {
   return runWebinarAction("messaging.write", "leitura", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
@@ -255,7 +391,7 @@ export async function exportScriptCsv(input: { webinarId: string }): Promise<Act
 
     await recordAudit(db, { action: "webinar.script_exported", actorId: user.id, count: rows, entityId: row.id, entityType: "webinar", metadata: { rows } });
 
-    return { csv: formatScriptCsv(lines), fileName: csvFileName(`roteiro-${row.slug}`, new Date()), rows };
+    return { csv: formatScriptCsv(lines, { live: row.kind === "live" }), fileName: csvFileName(`roteiro-${row.slug}`, new Date()), rows };
   });
 }
 
@@ -419,6 +555,8 @@ export async function fireScriptItem(input: { itemId: string; sessionId: string 
       throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
     }
 
+    // A foto de quem comenta vai com o nome e o texto (R9): a copia do item agora (sem foto, a chave fica de fora).
+    const avatar = await readScriptItemPersonaAvatar(db, item.id);
     const inserted = await insertScriptedMessage(db, {
       approved: true,
       author_user_id: null,
@@ -426,7 +564,8 @@ export async function fireScriptItem(input: { itemId: string; sessionId: string 
       display_name: item.persona_name,
       kind: item.kind,
       master: false,
-      offset_ms: Math.max(CHAT_LIMITS.offsetMinMs, Math.min(CHAT_LIMITS.offsetMaxMs, Math.round(offset))),
+      offset_ms: clampOffset(offset),
+      ...(avatar ? { persona_avatar_path: avatar } : {}),
       role: item.persona_role,
       script_item_id: item.id,
       session_id: session.id,
@@ -450,5 +589,204 @@ export async function fireScriptItem(input: { itemId: string; sessionId: string 
     invalidateWebinars({ from: "action" });
 
     return { message: chatMessageFromRow(inserted) };
+  });
+}
+
+/** O offset dentro dos limites do banco. */
+function clampOffset(offset: number): number {
+  return Math.max(CHAT_LIMITS.offsetMinMs, Math.min(CHAT_LIMITS.offsetMaxMs, Math.round(offset)));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O "Novo comentário" do console e a foto de quem comenta (adendo de 10/11/2026, R8 e R9)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As medidas de um WebP da foto de quem comenta, ou o erro no campo: cabecalho WebP, de 16 a 512 px de lado, sem animacao. */
+function checkPersonaPhotoBytes(bytes: Uint8Array): { height: number; width: number } {
+  const dimensions = readWebpDimensions(bytes);
+
+  if (!dimensions) {
+    throw new WebinarFieldError("image", COMENTARIOS.erros.fotoFormato);
+  }
+
+  const { sideMax: max, sideMin: min } = PERSONA_AVATAR_LIMITS;
+
+  if (dimensions.width < min || dimensions.width > max || dimensions.height < min || dimensions.height > max) {
+    throw new WebinarFieldError("image", COMENTARIOS.erros.fotoLado);
+  }
+
+  if (webpIsAnimated(bytes)) {
+    throw new WebinarFieldError("image", COMENTARIOS.erros.fotoAnimada);
+  }
+
+  return dimensions;
+}
+
+/**
+ * [messaging.write] A foto de quem comenta (R9): recebe o WebP que o navegador ja reduziu (prepareFreeImage com 512 px e
+ * 100.000 bytes), confere de novo o formato, o peso, os lados (16 a 512 px) e recusa a imagem animada, grava pelo
+ * persistImageAsset em content-assets/webinars/personas/<24 hex do sha256>.webp (a mesma rota do banner da Na tela, com
+ * a pasta propria) e devolve so o caminho e as medidas, nunca um endereco. Auditoria `webinar.persona_photo_uploaded`.
+ */
+export async function uploadPersonaPhoto(input: { image: string }): Promise<ActionResult<UploadedPersonaPhoto>> {
+  return runWebinarAction("messaging.write", "conteudo", uploadPersonaPhotoSchema, input, async ({ input: data, user }) => {
+    const bytes = decodeWebpDataUrl(data.image);
+
+    if (!bytes || bytes.length === 0) {
+      throw new WebinarFieldError("image", COMENTARIOS.erros.fotoFormato);
+    }
+
+    if (bytes.length > PERSONA_AVATAR_LIMITS.bytes) {
+      throw new WebinarFieldError("image", COMENTARIOS.erros.fotoPesada);
+    }
+
+    const dimensions = checkPersonaPhotoBytes(bytes);
+    const url = (await persistImageAsset(data.image, PERSONA_AVATAR_FOLDER)).trim();
+    const marker = `/storage/v1/object/public/${PERSONA_AVATAR_BUCKET}/`;
+    const index = url.indexOf(marker);
+    const path = index === -1 ? "" : url.slice(index + marker.length).split(/[?#]/)[0];
+
+    if (!PERSONA_AVATAR_PATH_PATTERN.test(path)) {
+      throw new Error("Webinarios: a foto de quem comenta nao foi enviada ao armazenamento.");
+    }
+
+    await recordAudit(webinarsDb(), {
+      action: "webinar.persona_photo_uploaded",
+      actorId: user.id,
+      entityId: null,
+      entityType: "webinar",
+      metadata: { height: dimensions.height, path, size_bytes: bytes.length, width: dimensions.width }
+    });
+
+    return { height: dimensions.height, path, width: dimensions.width };
+  });
+}
+
+/** A foto nos itens com o mesmo nome, quando pedido (o "Usar esta foto em todos os comentários de {nome}"). */
+async function applyPhotoToName(db: WebinarsDb, input: { apply: boolean; name: string; path: string | null; webinarId: string }): Promise<number> {
+  if (!input.apply || !input.path) {
+    return 0;
+  }
+  return withPersonaColumn(() => applyPersonaAvatarToName(db, { name: input.name, path: input.path, webinarId: input.webinarId }));
+}
+
+/**
+ * [messaging.write] O "Enviar agora" do "Novo comentário" (R8): a mensagem `scripted` da sessao, sem item do roteiro,
+ * com o nome, o papel (Aluno sem selo; Equipe com o selo Equipe) e a foto de quem comenta, no minuto do relogio do
+ * servidor; chega a turma pela consulta de 5 s. Na live e na gravada (no ar ou na espera); o Replay e a sessao
+ * encerrada ou cancelada recusam com 409. Com a foto e `applyToName`, a foto vai tambem para os itens do roteiro com o
+ * mesmo nome. Auditoria `webinar.script_comment_sent` (sem o texto).
+ */
+export async function sendScriptedComment(input: ScriptCommentInput): Promise<ActionResult<SentScriptedComment>> {
+  return runWebinarAction("messaging.write", "atendimento", scriptCommentSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await fetchSessionRow(db, data.sessionId);
+
+    if (!row) {
+      throw new WebinarError(SESSION_MISSING_MESSAGE, 404);
+    }
+
+    const session = sessionFromRow(row);
+
+    if (session.kind === "replay") {
+      throw new WebinarError(COMENTARIOS.erros.replay, 409);
+    }
+
+    if (!canTeamActOn(session)) {
+      throw new WebinarError(COMENTARIOS.erros.sessaoFechada, 409);
+    }
+
+    const offset = sessionOffsetMs(session, now.getTime());
+
+    if (!Number.isFinite(offset)) {
+      throw new WebinarError(COMENTARIOS.erros.sessaoFechada, 409);
+    }
+
+    const inserted = await withPersonaColumn(() =>
+      insertScriptedComment(db, {
+        approved: true,
+        author_user_id: null,
+        body: data.body,
+        display_name: data.personaName,
+        kind: "message",
+        master: false,
+        offset_ms: clampOffset(offset),
+        ...(data.personaAvatarPath ? { persona_avatar_path: data.personaAvatarPath } : {}),
+        role: data.personaRole,
+        session_id: session.id,
+        webinar_id: session.webinarId
+      })
+    );
+    const photoApplied = await applyPhotoToName(db, { apply: data.applyToName, name: data.personaName, path: data.personaAvatarPath, webinarId: session.webinarId });
+
+    await recordAudit(db, {
+      action: "webinar.script_comment_sent",
+      actorId: user.id,
+      entityId: session.webinarId,
+      entityType: "webinar",
+      metadata: { message_id: inserted.id, offset_ms: inserted.offset_ms, photo_applied: photoApplied, role: data.personaRole, session_id: session.id, with_photo: Boolean(data.personaAvatarPath) }
+    });
+    revalidatePath(`${LIST_PATH}/${session.webinarId}/sala`);
+    invalidateWebinars({ from: "action" });
+
+    return { message: chatMessageFromRow(inserted), photoApplied };
+  });
+}
+
+/**
+ * [messaging.write] O "Guardar na lista" do "Novo comentário" (R8): um item "Pelo botão da equipe", pronto, no fim do
+ * roteiro do webinario da sessao (fica para o "Soltar agora" desta e das proximas sessoes), com a foto de quem comenta.
+ * Ate 5.000 itens; o webinario arquivado fica so de leitura. Com a foto e `applyToName`, a foto vai tambem para os
+ * outros itens com o mesmo nome. Auditoria `webinar.script_item_added` (sem o texto).
+ */
+export async function saveScriptComment(input: ScriptCommentInput): Promise<ActionResult<SavedScriptComment>> {
+  return runWebinarAction("messaging.write", "conteudo", scriptCommentSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const session = await fetchSessionRow(db, data.sessionId);
+
+    if (!session) {
+      throw new WebinarError(SESSION_MISSING_MESSAGE, 404);
+    }
+
+    const webinar = await requireScriptWebinar(db, session.webinar_id);
+    await scriptAvatarsFor(db, webinar);
+    const current = await listScriptItemRows(db, webinar.id);
+
+    if (current.length >= CHAT_LIMITS.scriptItemsMax) {
+      throw new WebinarError(COMENTARIOS.erros.limite, 422);
+    }
+
+    const position = current.reduce((max, item) => Math.max(max, item.position), -1) + 1;
+    const saved = await withPersonaColumn(() =>
+      insertScriptItemRow(db, {
+        body: data.body,
+        created_by: user.id,
+        generated_by_ai: false,
+        kind: "message",
+        offset_ms: null,
+        ...(data.personaAvatarPath ? { persona_avatar_path: data.personaAvatarPath } : {}),
+        persona_name: data.personaName,
+        persona_role: data.personaRole,
+        phrase: null,
+        phrase_delay_ms: 0,
+        position,
+        status: "ready",
+        trigger_kind: "manual",
+        webinar_id: webinar.id
+      })
+    );
+    const photoApplied = await applyPhotoToName(db, { apply: data.applyToName, name: data.personaName, path: data.personaAvatarPath, webinarId: webinar.id });
+
+    await recordAudit(db, {
+      action: "webinar.script_item_added",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { item_id: saved.id, photo_applied: photoApplied, role: data.personaRole, session_id: session.id, with_photo: Boolean(data.personaAvatarPath) }
+    });
+    revalidateWebinar(webinar.id);
+
+    return { item: { ...scriptItemFromRow(saved), personaAvatarPath: data.personaAvatarPath }, photoApplied };
   });
 }

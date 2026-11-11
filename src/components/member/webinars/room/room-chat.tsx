@@ -1,7 +1,7 @@
 "use client";
 
-import { EllipsisVertical, MoreHorizontal, Pin, SendHorizontal } from "lucide-react";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { EllipsisVertical, MoreHorizontal, SendHorizontal } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -10,7 +10,6 @@ import {
   chatRoleLabel,
   chatTimeAt,
   chatTimeLabel,
-  commentSegments,
   composerState,
   roleBadgeOnly,
   type ChatTimeKind,
@@ -32,10 +31,11 @@ import { RoomPill } from "./room-pill";
 import { useRoomSnackbar, useRoomSnackbarListInset } from "./room-snackbar";
 import { RoomTooltip } from "./room-tooltip";
 import { RoomBadge, RoomButton, RoomIconButton, type RoomBadgeTone } from "./room-ui";
+import { RoomTeamText } from "./screen/room-team-text";
 import { verticalChatAnnouncement } from "./vertical/vertical-model";
 
 // O painel do chat da Sala (docs/30 §1.3, §1.6, §8.5 e §9): a lista em role="log" (em rajada, o leitor de tela
-// ouve "N mensagens novas" em vez de cada uma), a mensagem fixada no topo, os selos Equipe / Apresentador /
+// ouve "N mensagens novas" em vez de cada uma), os selos Equipe / Apresentador /
 // Assistente, a pendente do proprio aluno ("Aguardando a equipe"), o aceite na primeira mensagem (o texto de §8.5,
 // palavra por palavra, com "Entendi e quero participar" e Cancelar; sem anonimo e sem apelido desde 10/11/2026, D64), o
 // compositor (desligado, so a equipe, modo lento com a contagem) e o menu "..." com Remover minhas mensagens. Na live
@@ -56,13 +56,17 @@ import { verticalChatAnnouncement } from "./vertical/vertical-model";
 // o comentario do YouTube (RoomComment): o avatar de 24, o nome sem "@", o selo tonal do papel, o tempo relativo
 // ("há 2 minutos", contra o agora do servidor: `skewMs`) com a hora exata no title, e o texto 14/20 com o "@assistente"
 // em peso 600; a minha a esquerda como as outras, com "Você"; a pendente e o "Falar com a equipe" na linha de acoes; o
-// Assistente com o selo no lugar do nome. A fixada vira um comentario no bloco do topo, fora do log, com "Fixada pela
-// equipe" acima do nome. A lista comeca em cima e o chat curto fica embaixo pelo margin-top auto do primeiro item
-// (nunca justify-content: flex-end, que deixaria as antigas fora do alcance); quando a lista muda de tamanho, quem
-// estava no fim continua no fim. A partir de lg o ⋯ sai da linha do campo e vira o ⋮ do cabecalho do painel
+// Assistente com o selo no lugar do nome. A lista comeca em cima e o chat curto fica embaixo pelo margin-top auto do
+// primeiro item (nunca justify-content: flex-end, que deixaria as antigas fora do alcance); quando a lista muda de
+// tamanho, quem estava no fim continua no fim. A partir de lg o ⋯ sai da linha do campo e vira o ⋮ do cabecalho do painel
 // (RoomChatMoreButton); abaixo de lg, onde o cabecalho nao aparece, o ⋯ fica na linha do campo, como antes. A
 // confirmacao de remover continua aqui, aberta pela sala (`removeOpen`). A gaveta do vertical passa `look="classic"`, o
 // balao de antes. O console continua com o RoomChatBubble.
+// A Na tela (especificacao de 10/11/2026, §3.1): a fixada saiu daqui (do comentario e do balao da gaveta) e virou a
+// area das fixadas do proprio painel, em todas as abas (screen/room-pinned.tsx, no espaco `pinned` do RoomPanel e no
+// topo da gaveta do vertical). O texto de cada mensagem passa pelo RoomTeamText (screen/room-team-text.tsx): o endereco
+// `https://` de uma mensagem da equipe vira link (o `links` do servidor); a de aluno continua texto. O comentario
+// (RoomChatComment) e o tempo dele (roomCommentTime) ficam exportados para a fixada usar o mesmo desenho.
 
 export type RoomChatPanelProps = {
   /** Fase 4b: o que fica logo acima do campo (a entrada simulada "Ana M. entrou", docs/30 §1.6). */
@@ -86,7 +90,6 @@ export type RoomChatPanelProps = {
   onRemoveMine: () => Promise<number>;
   onSend: (body: Omit<ChatPostBody, "sessionId">) => Promise<{ pending: boolean }>;
   phase: SimulatedPhase | "replay";
-  pinned: RoomMessage | null;
   /** "Ver como" da equipe: mostra, mas nao grava. */
   readOnly: boolean;
   /** Fase 4c: a sessao (com o webinario, liga a dica do Assistente e o "Falar com a equipe"). */
@@ -144,7 +147,9 @@ export function RoomMessageItem({ footer = null, message }: { footer?: ReactNode
           </RoomBadge>
         ) : null}
       </p>
-      <p className="whitespace-pre-line break-words text-sm leading-5 text-room-fg">{message.body}</p>
+      <p className="whitespace-pre-line break-words text-sm leading-5 text-room-fg">
+        <RoomTeamText message={message} />
+      </p>
       {footer}
     </li>
   );
@@ -155,7 +160,8 @@ const BUBBLE_COLUMN = "flex min-w-0 max-w-[270px] flex-col gap-1 lg:max-w-[230px
 
 export type RoomChatBubbleProps = {
   footer?: ReactNode;
-  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role"> & { avatarUrl?: string | null };
+  /** `links`: o servidor ligou os links da equipe (RoomTeamText); sem ele, o texto como veio. */
+  message: Pick<RoomMessage, "body" | "displayName" | "id" | "mine" | "pending" | "role"> & { avatarUrl?: string | null; links?: boolean };
   /**
    * O console: o que entra na linha de baixo depois da hora (Fixada, as acoes da mensagem). Com ele, a linha e um <div>
    * (os botoes e o menu nao cabem num <p>) e o item ganha o `group` e o `relative` (as acoes aparecem com o mouse ou o
@@ -201,7 +207,7 @@ export function RoomChatBubble({ footer = null, message, metaActions = null, pen
           )}
         >
           <span className="sr-only">{WEBINAR_COPY.salaV2.chat.autor(author)}</span>
-          {message.body}
+          <RoomTeamText message={message} />
         </p>
         <Meta className={cn("flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-room-fg-subtle", mine ? "justify-end pr-1" : "pl-1")} data-room-message-meta="">
           <span aria-hidden="true" className="inline-flex flex-wrap items-center gap-1.5">
@@ -233,20 +239,6 @@ export function RoomChatBubble({ footer = null, message, metaActions = null, pen
   );
 }
 
-function RoomPinned({ message }: { message: RoomMessage }) {
-  return (
-    <div className="border-b border-room-border bg-room-pinned px-3 py-2" data-testid="room-pinned">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-room-fg-subtle">
-        <Pin aria-hidden="true" className="size-3" />
-        {WEBINAR_COPY.sala.fixada}
-      </p>
-      <p className="mt-0.5 text-sm text-room-fg">
-        <span className="font-bold text-room-fg-strong">{message.displayName}</span> {message.body}
-      </p>
-    </div>
-  );
-}
-
 /** De quem e a mensagem, para o comentario: o nome ("Você" na minha), o papel, o avatar e o que o leitor de tela ouve. */
 function commentAuthor(message: RoomMessage, time: RoomCommentTime | null) {
   const role = chatRoleLabel(message.role);
@@ -257,33 +249,47 @@ function commentAuthor(message: RoomMessage, time: RoomCommentTime | null) {
   return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts) } as const;
 }
 
-/** O texto do comentario: o "@assistente" em peso 600 (sem azul), o resto como veio. */
-function CommentBody({ body }: { body: string }) {
-  return (
-    <>
-      {commentSegments(body).map((segment, index) =>
-        segment.mention ? (
-          <span className="font-semibold" key={index}>
-            {segment.text}
-          </span>
-        ) : (
-          segment.text
-        )
-      )}
-    </>
-  );
+/** De que sala e o tempo do comentario: o tipo, o agora do aparelho, a diferenca para o servidor e o zero da gravada. */
+export type RoomChatTiming = { kind: ChatTimeKind; nowMs: number; skewMs: number; zeroMs: number | null };
+
+/** O tempo do comentario: "há 2 minutos" contra o agora do servidor, a hora exata no title; no Replay, nenhum. */
+export function roomCommentTime(message: Pick<RoomMessage, "offsetMs" | "sentAt">, timing: RoomChatTiming): RoomCommentTime | null {
+  const input = { kind: timing.kind, offsetMs: message.offsetMs, sentAt: message.sentAt, zeroMs: timing.zeroMs };
+  const at = chatTimeAt(input);
+  const label = chatAgoLabel({ ...input, nowMs: timing.nowMs + timing.skewMs });
+  return at === null || !label ? null : { iso: new Date(at).toISOString(), label, title: chatTimeLabel(input) };
 }
 
-/** Uma mensagem do chat da sala como o comentario do YouTube (RoomComment). */
-function RoomChatComment({ actions = null, as = "li", headline = null, message, time }: { actions?: ReactNode; as?: "div" | "li"; headline?: ReactNode; message: RoomMessage; time: RoomCommentTime | null }) {
+export type RoomChatCommentProps = {
+  actions?: ReactNode;
+  as?: "div" | "li";
+  /** A fixada: o corte do texto, o id e a referencia do paragrafo (RoomComment). */
+  bodyClassName?: string;
+  bodyId?: string;
+  bodyRef?: Ref<HTMLParagraphElement>;
+  headline?: ReactNode;
+  headlineId?: string;
+  message: RoomMessage;
+  time: RoomCommentTime | null;
+};
+
+/**
+ * Uma mensagem do chat da sala como o comentario do YouTube (RoomComment): o texto pelo RoomTeamText, com o
+ * "@assistente" em peso 600 (sem azul) e os links da equipe. A fixada (screen/room-pinned.tsx) usa o mesmo, fora da lista.
+ */
+export function RoomChatComment({ actions = null, as = "li", bodyClassName, bodyId, bodyRef, headline = null, headlineId, message, time }: RoomChatCommentProps) {
   const author = commentAuthor(message, time);
   return (
     <RoomComment
       actions={actions}
       as={as}
       avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={author.avatar} name={message.displayName} />}
-      body={<CommentBody body={message.body} />}
+      body={<RoomTeamText mentions message={message} />}
+      bodyClassName={bodyClassName}
+      bodyId={bodyId}
+      bodyRef={bodyRef}
       headline={headline}
+      headlineId={headlineId}
       id={message.id}
       meta={{ name: author.name, role: author.role, time }}
       mine={message.mine}
@@ -446,7 +452,6 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     onRemoveOpenChange,
     onSend,
     phase,
-    pinned,
     readOnly,
     removeOpen,
     sessionId = null,
@@ -522,8 +527,8 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     chatListOnShow(listRef.current, { shown, stick: stickRef.current });
   }, [shown]);
 
-  // No comentario, a lista muda de tamanho (o campo que abre, a fixada, a faixa da traducao): quem estava no fim volta
-  // ao fim depois do novo tamanho; quem tinha subido para ler fica onde estava.
+  // No comentario, a lista muda de tamanho (o campo que abre, a faixa da traducao; a area das fixadas, acima do chat, no
+  // painel): quem estava no fim volta ao fim depois do novo tamanho; quem tinha subido para ler fica onde estava.
   useEffect(() => {
     const list = listRef.current;
     if (look !== "comment" || !list || typeof ResizeObserver === "undefined") {
@@ -640,13 +645,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
     </div>
   );
 
-  /** O tempo do comentario: "há 2 minutos" contra o agora do servidor, a hora exata no title; no Replay, nenhum. */
-  function commentTime(message: RoomMessage): RoomCommentTime | null {
-    const input = { kind: timeKind, offsetMs: message.offsetMs, sentAt: message.sentAt, zeroMs };
-    const at = chatTimeAt(input);
-    const label = chatAgoLabel({ ...input, nowMs: nowMs + skewMs });
-    return at === null || !label ? null : { iso: new Date(at).toISOString(), label, title: chatTimeLabel(input) };
-  }
+  const timing: RoomChatTiming = { kind: timeKind, nowMs, skewMs, zeroMs };
 
   const removeBox = confirmRemove ? (
     <div className="mx-3 my-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg p-3" role="alertdialog" aria-label={WEBINAR_COPY.privacidade.confirmar}>
@@ -681,22 +680,6 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
   if (look === "comment") {
     return (
       <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
-        {pinned ? (
-          <div className="shrink-0 border-b border-room-panel-border px-4 py-3" data-testid="room-pinned">
-            <RoomChatComment
-              as="div"
-              headline={
-                <>
-                  <Pin aria-hidden="true" className="size-3 shrink-0" strokeWidth={2} />
-                  {WEBINAR_COPY.salaV2.chat.fixadaPelaEquipe}
-                </>
-              }
-              message={pinned}
-              time={commentTime(pinned)}
-            />
-          </div>
-        ) : null}
-
         <ol
           aria-label={copy.abas.chat}
           aria-live={single ? "polite" : "off"}
@@ -720,7 +703,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
                 }
                 key={message.id}
                 message={message}
-                time={commentTime(message)}
+                time={roomCommentTime(message, timing)}
               />
             );
           })}
@@ -775,8 +758,6 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="room-chat">
-      {pinned ? <RoomPinned message={pinned} /> : null}
-
       <ol
         aria-label={copy.abas.chat}
         aria-live={single ? "polite" : "off"}

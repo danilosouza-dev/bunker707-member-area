@@ -713,6 +713,12 @@ export type StudentChatMessage = {
   displayName: string;
   id: string;
   kind: MessageKind;
+  /**
+   * Os enderecos `https://` do texto viram link (src/lib/webinar-links.ts, linkSegments): so na mensagem escrita pela
+   * equipe (papel Apresentador, Co-apresentador ou Equipe, vinda do console ou do roteiro), decidido no servidor
+   * (room-model.messageHasLinks). Mensagem de aluno, personagem de aluno do roteiro e o Assistente: sempre texto.
+   */
+  links: boolean;
   mine: boolean;
   offsetMs: number;
   pending: boolean;
@@ -735,6 +741,12 @@ export type ScriptItem = {
   id: string;
   kind: "message" | "question";
   offsetMs: number | null;
+  /**
+   * A foto de quem comenta (adendo de 10/11/2026, R9): so o caminho webinars/personas/<24 hex>.webp no content-assets
+   * (o endereco e montado pela origem do nosso Supabase, persona-model.personaAvatarUrl); nula sem foto ou no banco sem
+   * a 202611100002 (lida a parte, persona-store.ts).
+   */
+  personaAvatarPath?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;
@@ -754,6 +766,8 @@ export type ScriptItemDraft = {
   id?: string | null;
   kind: "message" | "question";
   offsetMs: number | null;
+  /** A foto de quem comenta (R9); ausente, a do item fica como esta. */
+  personaAvatarPath?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;

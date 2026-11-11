@@ -1,22 +1,27 @@
 // Leituras da Sala do aluno (docs/30 §1.3, §1.6, §5.1 e §6.6): o contexto de uma sessao (webinario publicado e dentro
 // do acesso, a sessao do proprio webinario, a gravacao e a duracao do video), o que GET .../session devolve a mais na
 // fase 2 (relogio, fase, video da Bunny com o token do servidor, mensagem fixada, enquetes, presentes agora e o
-// aceite do aluno) e na fase 3 (o bloco `live` e os banimentos do aluno; a entrada recusa o removido e o banido), a
+// aceite do aluno) e na fase 3 (o bloco `live` e os banimentos do aluno; a entrada recusa o removido e o banido; desde
+// a Na tela, R5, os banimentos da sessao valem tambem na Live gravada), a
 // janela do chat e as mensagens novas, as perguntas, as enquetes e as reacoes recentes. Tudo pela service role e so
 // o que o aluno pode ver (nunca o nome da sala, o token nem a situacao do gravador alem de LiveRoomInfo); as regras
-// puras ficam em room-model.ts, room-rules.ts e live-model.ts.
+// puras ficam em room-model.ts, room-rules.ts e live-model.ts. A "Na tela" (docs/30 §5.1): o estado (screen-queries.ts)
+// vai em GET .../session sempre e na consulta de 5 s do chat so quando o carimbo do navegador ficou velho.
 
 import "server-only";
 
 import { createHash } from "node:crypto";
 import { fetchProfile } from "../students/store";
 import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
+import { personaAvatarUrl } from "./persona-model";
+import { loadScriptedMessageAvatars } from "./persona-store";
 import {
   fetchChatWindow,
   fetchConsentRow,
   fetchPinnedMessageRow,
   listPollAnswerRows,
   listPollRows,
+  listStudentPollAnswerRows,
   listQuestionReplyRows,
   listQuestionRows,
   listReactionRowsSince,
@@ -34,6 +39,7 @@ import {
   toTime,
   type ChatMessage,
   type QuestionReply,
+  type Poll,
   type Reaction,
   type StudentChatMessage,
   type Webinar,
@@ -57,10 +63,24 @@ import {
   type AuthorPhoto,
   type ChatWindow
 } from "./room-model";
-import { countReactions, nextChatCursor, toStudentPoll, toStudentQuestion, toStudentReply, type ChatCursor, type StudentPoll, type StudentQuestion, type StudentQuestionReply } from "./room-rules";
+import {
+  countReactions,
+  nextChatCursor,
+  pollResultCounts,
+  studentPollOf,
+  toStudentQuestion,
+  toStudentReply,
+  type ChatCursor,
+  type StudentPoll,
+  type StudentPollResults,
+  type StudentQuestion,
+  type StudentQuestionReply
+} from "./room-rules";
 import { NO_BAN, liveBanState, liveJoinRefusal, liveRoomConfigured, liveRoomInfoOf, presenceOffsetMs, type LiveBanState } from "./live-model";
 import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { registrationFromRow, type RecordingRow } from "./rows";
+import type { StudentScreenState } from "./screen-model";
+import { loadScreenState, screenStateForChat, screenStorageOrigin } from "./screen-queries";
 import { fetchRegistrationRows, listRecordingRows } from "./store";
 import { openReplaySessionId, registrationFor, seatRequired, type RoomJoin, type StudentRoomExtras, type StudentRoomVideo } from "./student-model";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -233,11 +253,21 @@ export function studentDisplayName(identity: Pick<StudentIdentity, "fullName">):
  * A foto de quem escreveu (docs/30 §8.5, aceite versao 2)
  * ---------------------------------------------------------------------------------------------- */
 
-/** A mensagem do aluno com a foto de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl). */
-export function studentMessageWithPhoto(message: ChatMessage, viewerUserId: string, sessionKind: WebinarSession["kind"], photos: ReadonlyMap<string, AuthorPhoto>): StudentChatMessage {
+/**
+ * A mensagem do aluno com a foto de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl). `personas`: a
+ * foto de quem comenta das mensagens `scripted` (R9), pelo id da mensagem, ja como endereco.
+ */
+export function studentMessageWithPhoto(
+  message: ChatMessage,
+  viewerUserId: string,
+  sessionKind: WebinarSession["kind"],
+  photos: ReadonlyMap<string, AuthorPhoto>,
+  personas: ReadonlyMap<string, string> = new Map()
+): StudentChatMessage {
   const avatarUrl = authorPhotoUrl({
     authorUserId: message.authorUserId,
     displayName: message.displayName,
+    personaAvatarUrl: message.source === "scripted" ? (personas.get(message.id) ?? null) : null,
     photo: message.authorUserId ? photos.get(message.authorUserId) : null,
     source: message.source,
     viewer: "student",
@@ -246,14 +276,38 @@ export function studentMessageWithPhoto(message: ChatMessage, viewerUserId: stri
   return toStudentMessage(message, viewerUserId, sessionKind, message.offsetMs, avatarUrl);
 }
 
+/**
+ * A foto de quem comenta das mensagens `scripted` da pagina (R9), como endereco pela origem do nosso Supabase: uma
+ * leitura pelo id so quando a pagina tem mensagem do roteiro (a foto de cada mensagem fica na memoria do processo,
+ * persona-store.loadScriptedMessageAvatars). A janela do chat (webinar_chat_window) nao devolve a coluna.
+ */
+export async function scriptedAvatarUrls(db: WebinarsDb, messages: readonly Pick<ChatMessage, "id" | "source">[], nowMs: number): Promise<Map<string, string>> {
+  const ids = messages.filter((message) => message.source === "scripted").map((message) => message.id);
+  const urls = new Map<string, string>();
+  if (ids.length === 0) {
+    return urls;
+  }
+  const origin = screenStorageOrigin();
+  for (const [id, path] of await loadScriptedMessageAvatars(db, ids, nowMs)) {
+    const url = personaAvatarUrl(path, origin);
+    if (url) {
+      urls.set(id, url);
+    }
+  }
+  return urls;
+}
+
 /** As mensagens do aluno com as fotos: uma leitura (com a memoria de 60 s) para todos os autores da pagina. */
 async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly ChatMessage[], viewerUserId: string, sessionKind: WebinarSession["kind"], nowMs: number): Promise<StudentChatMessage[]> {
-  const photos = await loadAuthorPhotos(
-    db,
-    messages.map((message) => message.authorUserId),
-    nowMs
-  );
-  return messages.map((message) => studentMessageWithPhoto(message, viewerUserId, sessionKind, photos));
+  const [photos, personas] = await Promise.all([
+    loadAuthorPhotos(
+      db,
+      messages.map((message) => message.authorUserId),
+      nowMs
+    ),
+    scriptedAvatarUrls(db, messages, nowMs)
+  ]);
+  return messages.map((message) => studentMessageWithPhoto(message, viewerUserId, sessionKind, photos, personas));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -263,7 +317,8 @@ async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly Chat
 /**
  * Se o aluno entra na sala agora: o banido de todos os webinarios nunca (`banned`, em qualquer forma: D33); o replay
  * sempre; a live pela situacao (espera ou no ar) e nunca removido desta sessao (`kicked`, os mesmos motivos do
- * join-token); a gravada pelo relogio; com limite de vagas, so com a vaga.
+ * join-token); a gravada pelo relogio e nunca removido desta sessao (`kicked`, a moderacao por pessoa da Na tela, R5:
+ * sem motor de video, o removido perde o video na proxima conferencia da sala); com limite de vagas, so com a vaga.
  */
 export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">, now: number, options: { ban?: LiveBanState; practiceSession?: boolean; seatMissing?: boolean } = {}): RoomJoin {
   const { durationMs, session } = context;
@@ -283,6 +338,9 @@ export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">
     }
     return refusal ? { ok: false, reason: "not_started" } : { ok: true };
   }
+  if (options.ban?.kicked) {
+    return { ok: false, reason: "kicked" };
+  }
   if (options.seatMissing) {
     return { ok: false, reason: "no_seat" };
   }
@@ -291,9 +349,10 @@ export function roomJoinFor(context: Pick<RoomContext, "durationMs" | "session">
 
 /**
  * O que a Sala recebe a mais em GET .../session. O video (com o token da Bunny) so vai dentro da entrada: antes da
- * abertura, depois do fim, depois da Entrada atrasada ou sem a vaga obrigatoria, nulo. A live (fase 3) nao usa a Bunny:
- * leva o bloco `live` (sem o nome da sala nem o token, que so saem do join-token), os banimentos do aluno em `me.ban`
- * e os presentes agora pelo relogio da presenca (desde o inicio, presenceOffsetMs).
+ * abertura, depois do fim, depois da Entrada atrasada, sem a vaga obrigatoria ou removido desta sessao, nulo. A live
+ * (fase 3) nao usa a Bunny: leva o bloco `live` (sem o nome da sala nem o token, que so saem do join-token). Os
+ * banimentos do aluno vao em `me.ban` (na live e na gravada, os desta sessao tambem) e os presentes agora pelo relogio
+ * da presenca (desde o inicio, presenceOffsetMs).
  */
 export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userId: string, now = Date.now(), options: { seatMissing?: boolean } = {}): Promise<StudentRoomExtras> {
   const { durationMs, session, webinar } = context;
@@ -301,13 +360,16 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
   const simulated = session.kind === "simulated";
   const live = session.kind === "live";
   const presence = presenceOffsetMs(session, now);
-  const [identity, pinnedRow, polls, presentIds, bans] = await Promise.all([
+  const [identity, pinnedRow, polls, presentIds, bans, screen] = await Promise.all([
     loadStudentIdentity(db, userId),
     fetchPinnedMessageRow(db, session.pinnedMessageId),
-    listStudentPolls(db, session, userId),
+    listStudentPolls(db, session, userId, now),
     simulated || live ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(presence) ? presence : 0) / 1000)), sessionId: session.id }) : Promise.resolve([]),
-    // Fase 3: remover e silenciar so existem na live; o banido de todos os webinarios vale em qualquer forma (D33).
-    live ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan }))
+    // Remover e silenciar valem na live (fase 3) e na gravada (a Na tela, R5); o banido de todos os webinarios vale em
+    // qualquer forma (D33), o Replay inclusive.
+    live || simulated ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan })),
+    // A Na tela: o estado inteiro (o navegador sempre adota o da sessao); vazio no Replay e na sessao encerrada.
+    loadScreenState(db, session, userId, now)
   ]);
   const ban = liveBanState({ nowMs: now, sessionBans: bans.sessionBans, userBan: bans.userBan });
   const join = roomJoinFor(context, now, { ...options, ban, practiceSession: webinar.roomSettings.practiceSession });
@@ -324,6 +386,7 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
     pinned,
     polls,
     presentNow: presentIds.length,
+    screen,
     replaySessionId: openReplaySessionId(context.sessions),
     session: {
       chatMode: session.chatMode,
@@ -343,7 +406,8 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
  * ---------------------------------------------------------------------------------------------- */
 
 export type ChatWindowReply = { messages: StudentChatMessage[]; mode: "window"; serverTime: string; window: ChatWindow };
-export type ChatRecentReply = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; serverTime: string };
+/** `screen`: o estado da Na tela quando o carimbo que o navegador mandou (`tela`) ficou velho; nulo no resto. */
+export type ChatRecentReply = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; screen: StudentScreenState | null; serverTime: string };
 
 /**
  * Ate onde a janela pode ir: no replay, ate onde o aluno pedir (ele mesmo pula pelo video); na gravada e na live,
@@ -387,20 +451,35 @@ export async function readChatWindow(db: WebinarsDb, context: RoomContext, userI
   };
 }
 
-/** As mensagens novas da sessao depois do cursor (a consulta de 5 s), so ate agora. */
-export async function readRecentChat(db: WebinarsDb, context: RoomContext, userId: string, cursor: ChatCursor | null, now = Date.now()): Promise<ChatRecentReply> {
+/**
+ * As mensagens novas da sessao depois do cursor (a consulta de 5 s), so ate agora. Com `screen.stamp` (o `tela` da
+ * consulta: o carimbo que o navegador tem), leva tambem o estado da Na tela quando o carimbo da sessao mudou
+ * (screen-queries.screenStateForChat: igual, ausente ou no Replay, nulo e nenhuma consulta a mais).
+ */
+export async function readRecentChat(
+  db: WebinarsDb,
+  context: RoomContext,
+  userId: string,
+  cursor: ChatCursor | null,
+  now = Date.now(),
+  screen: { stamp?: string | null } = {}
+): Promise<ChatRecentReply> {
   const nowIso = new Date(now).toISOString();
-  const rows = await listRecentChatRows(db, {
-    afterCreatedAt: cursor?.since ?? null,
-    afterId: cursor?.after ?? null,
-    sessionId: context.session.id,
-    untilIso: nowIso,
-    userId
-  });
+  const [rows, screenState] = await Promise.all([
+    listRecentChatRows(db, {
+      afterCreatedAt: cursor?.since ?? null,
+      afterId: cursor?.after ?? null,
+      sessionId: context.session.id,
+      untilIso: nowIso,
+      userId
+    }),
+    screenStateForChat(db, context.session, userId, screen.stamp, now)
+  ]);
   return {
     messages: await studentMessagesWithPhotos(db, rows.map(chatMessageFromRow), userId, context.session.kind, now),
     mode: "recent",
     next: nextChatCursor(rows, cursor, nowIso),
+    screen: screenState,
     serverTime: nowIso
   };
 }
@@ -455,14 +534,58 @@ export async function listStudentQuestions(db: WebinarsDb, session: Pick<Webinar
     .filter((question): question is StudentQuestion => question !== null);
 }
 
-/** As enquetes da sessao para o aluno: abertas, e encerradas com resultado compartilhado; a resposta dele junto. */
-export async function listStudentPolls(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, userId: string): Promise<StudentPoll[]> {
+/** Quanto as contagens de uma enquete com o resultado compartilhado valem na memoria do processo. */
+export const SHARED_POLL_COUNTS_TTL_MS = 60_000;
+const SHARED_POLL_COUNTS_MAX = 2_000;
+const sharedPollCounts = new Map<string, { at: number; key: string; value: Promise<StudentPollResults> }>();
+
+/** Esvazia a memoria das contagens (os testes). */
+export function clearSharedPollCounts() {
+  sharedPollCounts.clear();
+}
+
+/**
+ * As contagens de uma enquete com o resultado compartilhado: lidas uma vez (todas as respostas) e guardadas 60 s por
+ * enquete, com a chave da situacao e da hora do compartilhar (encerrar ou compartilhar de novo rele). 1.000 alunos
+ * pedindo a lista custam uma leitura das respostas por processo, nao uma por aluno.
+ */
+async function sharedPollResults(db: WebinarsDb, poll: Poll, nowMs: number): Promise<StudentPollResults> {
+  const key = `${poll.status}:${poll.resultsSharedAt ?? ""}`;
+  const hit = sharedPollCounts.get(poll.id);
+  if (hit && hit.key === key && nowMs - hit.at < SHARED_POLL_COUNTS_TTL_MS) {
+    return hit.value;
+  }
+  const value = listPollAnswerRows(db, poll.id).then((rows) => pollResultCounts(poll, rows.map(pollAnswerFromRow)));
+  sharedPollCounts.delete(poll.id);
+  if (sharedPollCounts.size >= SHARED_POLL_COUNTS_MAX) {
+    sharedPollCounts.clear();
+  }
+  sharedPollCounts.set(poll.id, { at: nowMs, key, value });
+  value.catch(() => {
+    if (sharedPollCounts.get(poll.id)?.value === value) {
+      sharedPollCounts.delete(poll.id);
+    }
+  });
+  return value;
+}
+
+/**
+ * As enquetes da sessao para o aluno: abertas, e encerradas com resultado compartilhado; a resposta dele junto. Le so
+ * as respostas do proprio aluno (uma consulta para todas as enquetes) e, nas de resultado compartilhado, as contagens
+ * guardadas (sharedPollResults): nunca as respostas dos outros numa enquete aberta.
+ */
+export async function listStudentPolls(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, userId: string, now = Date.now()): Promise<StudentPoll[]> {
   const { options, polls } = await listPollRows(db, { sessionId: session.id, webinarId: session.webinarId });
-  const visible = polls.filter((row) => row.status === "open" || (row.status === "closed" && row.results_shared_at));
-  const answers = await Promise.all(visible.map((row) => listPollAnswerRows(db, row.id)));
-  return visible
-    .map((row, index) => toStudentPoll(pollFromRow(row, options), answers[index].map(pollAnswerFromRow), userId))
-    .filter((poll): poll is StudentPoll => poll !== null);
+  const visible = polls.filter((row) => row.status === "open" || (row.status === "closed" && row.results_shared_at)).map((row) => pollFromRow(row, options));
+  if (visible.length === 0) {
+    return [];
+  }
+  const [mine, results] = await Promise.all([
+    listStudentPollAnswerRows(db, { sessionId: session.id, userId }),
+    Promise.all(visible.map((poll) => (poll.resultsSharedAt ? sharedPollResults(db, poll, now) : Promise.resolve(null))))
+  ]);
+  const mineByPoll = new Map(mine.map((row) => [row.poll_id, pollAnswerFromRow(row)]));
+  return visible.map((poll, index) => studentPollOf(poll, mineByPoll.get(poll.id) ?? null, results[index])).filter((poll): poll is StudentPoll => poll !== null);
 }
 
 /** As contagens por reacao dos ultimos segundos (no maximo 10 s para tras). */

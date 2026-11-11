@@ -90,8 +90,8 @@ export const CONSOLE_V2_COPY = {
   mais: "Mais painéis",
   /** O ⋯ com uma entrada escolhida (ele mostra o nome dela). */
   maisEscolhido: (nome: string) => `Mais painéis: ${nome}`,
-  /** As entradas do ⋯, na ordem do V2-15. */
-  entradas: { enquetes: "Enquetes", roteiro: "Roteiro", oferta: "Oferta", atendimento: "Atendimento", presenca: "Presença", gravacao: "Gravação" },
+  /** As entradas do ⋯, na ordem do V2-15; a Na tela (docs/31 §12, o mesmo nome de WEBINAR_COPY.naTela.console.entrada) primeiro. */
+  entradas: { tela: "Na tela", enquetes: "Enquetes", roteiro: "Roteiro", oferta: "Oferta", atendimento: "Atendimento", presenca: "Presença", gravacao: "Gravação" },
   /** O X do painel, a partir de lg. */
   fecharPainel: "Fechar o painel",
   /** O trilho a direita do console (docs/31 §10): o nome de cada item comeca pelo rotulo visivel. */

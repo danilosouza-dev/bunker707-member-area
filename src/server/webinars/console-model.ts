@@ -23,7 +23,9 @@ import {
   type WebinarSession
 } from "./model";
 import type { ConsolePresence } from "./console-presence-model";
-import type { LiveConsoleSnapshot } from "./live-console-model";
+import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-model";
+import type { ScreenDisplay, ScreenItem } from "./screen-model";
+import type { ScreenStats } from "./screen-rows";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -114,18 +116,29 @@ export type ScriptQueueItem = ScriptItem & {
   passed: boolean;
 };
 
-/** A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). */
-export function scriptQueue(items: readonly ScriptItem[], firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>, currentOffsetMs: number): ScriptQueueItem[] {
+/**
+ * A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). `lateMs`: a
+ * tolerancia em que o item ainda entra sozinho (na Live ao vivo no ar, LIVE_SCRIPT_LATE_MAX_MS: o tick de minuto solta
+ * ate 5 min atrasado), e so depois dela o item vira "Minuto já passou"; sem ela, assim que o minuto chega.
+ */
+export function scriptQueue(
+  items: readonly ScriptItem[],
+  firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>,
+  currentOffsetMs: number,
+  options: { lateMs?: number } = {}
+): ScriptQueueItem[] {
   const lookup = firedAt instanceof Map ? firedAt : new Map(Object.entries(firedAt));
+  const lateMs = Math.max(0, options.lateMs ?? 0);
   return sortScriptItems(items).map((item) => {
     const dueOffsetMs = scriptOffsetOf(item);
     const fired = lookup.has(item.id);
+    const late = dueOffsetMs != null && Number.isFinite(currentOffsetMs) && (lateMs > 0 ? currentOffsetMs - dueOffsetMs > lateMs : dueOffsetMs <= currentOffsetMs);
     return {
       ...item,
       dueOffsetMs,
       fired,
       firedAt: lookup.get(item.id) ?? null,
-      passed: fired || (dueOffsetMs != null && Number.isFinite(currentOffsetMs) && dueOffsetMs <= currentOffsetMs)
+      passed: fired || late
     };
   });
 }
@@ -459,6 +472,19 @@ export function ackSentenceMatches(input: { ackText: string | null | undefined; 
 
 export type ConsolePollView = Poll & { counts: PollCounts };
 
+/**
+ * A Na tela no retrato do console (docs/30 §2.4; especificacao de 10/11/2026, §5.6): os banners e QR Codes prontos do
+ * webinario (os nao arquivados), o que esta na tela agora nesta sessao (no maximo um de cada tipo, com a copia
+ * congelada) e os numeros de cada exibicao por id ("312 viram · 41 clicaram · 9 fecharam", ate uns 15 s de atraso).
+ * `pending`: o banco sem a 202611100002 (a entrada mostra o aviso da migracao e nada e gravado).
+ */
+export type ConsoleScreen = {
+  active: ScreenDisplay[];
+  items: ScreenItem[];
+  pending: boolean;
+  stats: Record<string, ScreenStats>;
+};
+
 export type ConsoleSnapshot = {
   /**
    * As mensagens do retrato que ja viraram pergunta (docs/31 V2-15), com a pergunta apagada ou nao e sem o teto da
@@ -466,12 +492,25 @@ export type ConsoleSnapshot = {
    */
   askedMessageIds: string[];
   /**
+   * So na Live gravada (a moderacao por pessoa, docs/30 §2.4): quem esta removido, silenciado ou banido nesta sessao (ou
+   * banido de todas, entre quem escreveu no chat), com o nome, no formato da lista da Live ao vivo (LiveConsolePerson,
+   * so os barrados). Nulo nas outras: na Live ao vivo a lista vem em `live.people`; no Replay nada muda.
+   */
+  barred: LiveConsolePerson[] | null;
+  /**
    * Fase 3: so na sessao `live` (gravador, gravacao, removidos/silenciados/banidos, o mapa aluno -> participante e se a
    * sala existe neste ambiente); nulo nas outras. Nunca o nome da sala nem token: o iframe pede o join-token.
    */
   live: LiveConsoleSnapshot | null;
   messages: ConsoleMessage[];
+  /**
+   * A mensagem fixada lida pela chave (o bloco "Fixada agora"): vale tambem para a mensagem mais velha que as 200 da
+   * lista. Nula sem fixada (ou apagada).
+   */
+  pinned: ConsoleMessage | null;
   pinnedMessageId: string | null;
+  /** A enquete fixada desta sessao (a exibicao `poll` ativa da Na tela); nula sem ela. */
+  pinnedPollId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
   /**
    * O painel Presenca (docs/30 §2.4): pico, mensagens por minuto e a curva dos ultimos 30 minutos, da visao do
@@ -480,9 +519,17 @@ export type ConsoleSnapshot = {
   presence?: ConsolePresence | null;
   presentNow: number;
   questions: WebinarQuestion[];
+  /**
+   * A parte simulada do contador agora (adendo de 10/11/2026, R7), so para a equipe ver separada do real ("· +300
+   * simulados"): na gravada e na Live ao vivo com o contador ligado e a decisao registrada; nula sem ele, encerrada ou no
+   * Replay. Nunca entra em `presentNow` nem num numero real.
+   */
+  simulatedNow?: number | null;
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */
   scriptFired: Record<string, string | null>;
   scriptItems: ScriptItem[];
+  /** A Na tela desta sessao (ConsoleScreen). */
+  screen: ConsoleScreen;
   serverTime: string;
   session: WebinarSession;
 };
@@ -499,6 +546,19 @@ export function consoleSessionOf<T extends { roomName: string | null }>(session:
  */
 export function consoleOffsetMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
   return sessionOffsetMs(session, untilEnded(session, deviceNowMs + skewMs));
+}
+
+/**
+ * O relogio do roteiro no console (a fila e o "Minuto já passou"): na gravada, o do video (consoleOffsetMs); na Live ao
+ * vivo (adendo de 10/11/2026, R8), desde o started_at (o "Começar para todos", o zero dos itens "Aos {n} minutos da
+ * live"), nunca pela ancora da gravacao, e NaN antes dele (nada passou ainda). Para no encerramento.
+ */
+export function consoleScriptClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
+  if (session.kind === "live") {
+    const startedMs = toTime(session.startedAt);
+    return Number.isFinite(startedMs) ? untilEnded(session, deviceNowMs + skewMs) - startedMs : Number.NaN;
+  }
+  return consoleOffsetMs(session, deviceNowMs, skewMs);
 }
 
 /**

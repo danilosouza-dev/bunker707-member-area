@@ -102,8 +102,8 @@ test("as migrações até a 202611120001 continuam byte a byte (a 202611130001 s
     hash.update(readFileSync(new URL(name, dir)));
   }
 
-  assert.equal(before.length, 69);
-  assert.equal(hash.digest("hex"), "efa57777a284e9220fd3b01795ef8fce04b2df19871d28269a21739900880719", "uma migracao ja aplicada mudou");
+  assert.equal(before.length, 70);
+  assert.equal(hash.digest("hex"), "9b63947af7e4cda2ffa9710602c6f6fbb053afaf746eb6a3a3ea4db60522713a", "uma migracao ja aplicada mudou");
   assert.ok(files.includes("202611130001_license_sales.sql"));
 });
 

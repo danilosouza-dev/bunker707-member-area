@@ -6,7 +6,7 @@ import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../supp
 import { SENHA_DE_TESTE, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { assinarLicenca, licencaBase, novaChaveDeEmissao, novaRaiz } from "../support/licenca-de-teste.mjs";
 
-// A licença guardada (docs/32 §11.3 e §16; migração 202611100002) contra o banco LOCAL de verdade:
+// A licença guardada (docs/32 §11.3 e §16; migração 202611100003) contra o banco LOCAL de verdade:
 // - RLS sem política com o revoke: anon e a aluna logada recebem 42501 ao ler e ao gravar; só o service_role lê;
 // - uma linha só (check), a segunda criação perde, e cada gravação confere a versão lida (a velha não grava nada);
 // - o adaptador (store-db.ts) grava só as colunas do patch e lê de volta datas, segredo e marcas como gravou;
