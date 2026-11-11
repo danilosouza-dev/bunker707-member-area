@@ -1107,14 +1107,15 @@ export async function designDoPopUpNoBanco(titulo: string): Promise<DesignDoPopU
     : [];
 
   const design = linha.popup_design;
-  const video = design?.media.video;
-  const fundo = design?.card.background;
 
   return {
     design: design && {
       ...design,
-      card: { ...design.card, background: fundo && "url" in fundo ? { ...fundo, url: comoOAppEntrega(fundo.url) } : fundo },
-      media: { ...design.media, video: video ? { ...video, url: comoOAppEntrega(video.url) } : video }
+      card: {
+        ...design.card,
+        background: { ...design.card.background, ...("url" in design.card.background ? { url: comoOAppEntrega(design.card.background.url) } : {}) }
+      },
+      media: { ...design.media, video: design.media.video && { ...design.media.video, url: comoOAppEntrega(design.media.video.url) } }
     },
     fontes: fontes.map((fonte) => ({ family: fonte.family_key, id: fonte.id, name: fonte.name })),
     id: linha.id,
