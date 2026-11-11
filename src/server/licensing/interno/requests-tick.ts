@@ -77,6 +77,12 @@ function asAttempt<T>(result: InternalResult<T>, resolution: (data: T) => string
     : { error: result.error, message: result.message, ok: false, ...(result.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: result.retryAfterSeconds }) };
 }
 
+/** O nome do comprador para o Emissor (obrigatorio, ate 160): o do perfil, ou o comeco do e-mail, como a conta nasce. */
+function buyerNameOf(buyer: { email: string; name: string | null }): string {
+  const name = buyer.name?.replace(/\s+/g, " ").trim().slice(0, 160).trim();
+  return name || buyer.email.split("@")[0] || "Comprador";
+}
+
 /** A data no formato do contrato (o banco devolve "...+00:00"; o Emissor aceita ISO com fuso). */
 function isoOf(value: string | null): string | null {
   if (!value) {
@@ -107,7 +113,7 @@ async function sendRequest(
     const boughtAt = isoOf(row.purchased_at) ?? now.toISOString();
     const warranty = isoOf(row.warranty_ends_at);
     const body = saleRequestSchema.safeParse({
-      comprador: { areaUserId: row.user_id, email: buyer.email, nome: buyer.name },
+      comprador: { areaUserId: row.user_id, email: buyer.email, nome: buyerNameOf(buyer) },
       compradoEm: boughtAt,
       // O fim da garantia nunca antes da compra (o contrato recusa); sem ele, o Emissor conta 7 dias.
       garantiaAte: warranty && Date.parse(warranty) >= Date.parse(boughtAt) ? warranty : null,

@@ -142,7 +142,7 @@ function keyOf(license: CustomerLicense): LicenseCardView["key"] {
   }
 
   if (license.chave.estado === "em_uso" || license.instalacao) {
-    return { state: "em_uso", text: `A chave${final} ativou a instalação abaixo.` };
+    return { state: "em_uso", text: `A chave${license.chave.final ? ` terminada em ${license.chave.final}` : ""} ativou a instalação abaixo.` };
   }
 
   return { state: "nenhuma", text: "Nenhuma chave gerada ainda." };

@@ -120,9 +120,12 @@ export function licenseRetryDelayMs(attempts: number): number {
   return LICENSE_RETRY_DELAYS_MS[index];
 }
 
-/** A recusa provou que o Emissor nao gravou nada? Sem resposta, resposta fora do formato e erro dele deixam a duvida. */
+/**
+ * A recusa provou que o Emissor nao gravou nada? Sem resposta, resposta fora do formato e erro dele deixam a duvida. A
+ * conta que sumiu (sem_conta) nem chegou a sair daqui.
+ */
 export function refusedWithoutRecording(errorCode: string): boolean {
-  return REFUSED_WITHOUT_RECORDING.has(errorCode);
+  return errorCode === "sem_conta" || REFUSED_WITHOUT_RECORDING.has(errorCode);
 }
 
 export type AttemptResult = { ok: true; resolution: string } | { ok: false; error: string; message: string | null; retryAfterSeconds?: number };

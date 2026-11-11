@@ -41,8 +41,9 @@ export const saleRequestSchema = z.object({
   produto: z.string().min(1).max(128),
   comprador: z.object({
     areaUserId: z.string().regex(AREA_USER_ID_PATTERN),
-    email: z.email().max(320),
-    nome: z.string().trim().max(200).nullable()
+    email: z.email().max(254),
+    /** Obrigatorio, de 1 a 160 (sem nome no perfil, a fila manda o comeco do e-mail, como a conta nasce). */
+    nome: z.string().trim().min(1).max(160)
   }),
   compradoEm: iso,
   garantiaAte: isoOrNull,

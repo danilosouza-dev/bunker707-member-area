@@ -137,7 +137,7 @@ export async function getMyLicensesPage(user: { email?: string | null; id: strin
   if (buyer.simulator && listed.ok && listed.data.licencas.length === 0 && user.email) {
     await buyer.client.registerSale(
       {
-        comprador: { areaUserId: userId, email: user.email, nome: null },
+        comprador: { areaUserId: userId, email: user.email, nome: user.email.split("@")[0] || "Compradora" },
         compradoEm: new Date().toISOString(),
         garantiaAte: null,
         plataforma: "simulador",

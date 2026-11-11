@@ -375,7 +375,28 @@ test("o que tentar de novo não resolve fica parado; Tentar agora devolve à fil
   const terceiro = pedidosNaFila(db)[2];
   terceiro.user_id = null;
   await rodada(db);
-  assert.deepEqual([terceiro.status, terceiro.last_error_code], ["parado", "sem_conta"]);
+  assert.deepEqual([terceiro.status, terceiro.last_error_code, terceiro.maybe_delivered], ["parado", "sem_conta", false], "nada saiu daqui");
+});
+
+test("o nome do comprador vai sempre (o Emissor o exige, até 160): o do perfil, cortado, ou o começo do e-mail", async () => {
+  const db = escola();
+  actionStubs.db = db;
+  await postar(aviso({ email: "sem.nome@teste.test", id: "ev-n1", nome: "", transacao: "HP-N1" }));
+  await postar(aviso({ email: "longo@teste.test", id: "ev-n2", nome: `Escola ${"Muito ".repeat(40)}Longa`, transacao: "HP-N2" }));
+  // O perfil sem nome (a conta que ja existia sem nome no cadastro).
+  const semNome = contaDe(db, "sem.nome@teste.test");
+  const perfil = db.linhas("profiles").find((linha) => linha.id === semNome.id);
+  if (perfil) {
+    perfil.full_name = "";
+  }
+
+  await rodada(db);
+
+  const nomes = Object.fromEntries(pedidosAoEmissor("/interno/v1/vendas").map((pedido) => [pedido.corpo.comprador.email, pedido.corpo.comprador.nome]));
+  assert.equal(nomes["sem.nome@teste.test"], "sem.nome");
+  assert.equal(nomes["longo@teste.test"].length <= 160, true);
+  assert.match(nomes["longo@teste.test"], /^Escola Muito/);
+  assert.deepEqual(pedidosNaFila(db).map((linha) => linha.status), ["enviado", "enviado"]);
 });
 
 /* ------------------------------------------------------------------------------------------------
