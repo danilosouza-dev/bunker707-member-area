@@ -1105,6 +1105,7 @@ mostra quantas credenciais o Emissor aceita e quem o Caddy deixa chegar.
 | Conferencia com 401 | o resumo nao entrou no Emissor (o passo 4 no registro); rode de novo |
 | Conferencia com 000 | DNS ou o certificado do endereco novo (a primeira vez leva alguns minutos); rode de novo daqui a pouco |
 | Conferencia com 502 | o Caddy nao chegou na porta da API interna: o registro do Emissor (`exec-licencas`) |
+| Conferencia com `000 exec_falhou` | a conferencia nem rodou dentro do app da escola (o app fora do ar): `status-ssh` e de novo |
 
 **Testes:** `tests/infra-licencas-conectar.test.mjs` (a etapa inteira contra a Hetzner, a Cloudflare e os dois servidores
 de mentira: o resumo so no Emissor, a credencial so na escola, nada no registro nem em linha de comando, 0600, a ordem, a
