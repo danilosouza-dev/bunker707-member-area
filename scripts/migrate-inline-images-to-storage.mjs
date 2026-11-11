@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { createStoragePathsFetch } from "../src/server/db/storage-paths.ts";
 
 const bucket = "content-assets";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -14,8 +15,10 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error("Supabase nao configurado para migrar as imagens.");
 }
 
+// O mesmo transporte do app: o banco guarda o caminho do arquivo no Storage, nunca o endereco inteiro (docs/32 §11.5).
 const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: createStoragePathsFetch(supabaseUrl) }
 });
 
 const bucketResult = await supabase.storage.getBucket(bucket);

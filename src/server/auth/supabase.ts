@@ -3,6 +3,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getSupabaseAuthConfig } from "@/server/auth/config";
+import { createStoragePathsFetch } from "@/server/db/storage-paths";
 
 export async function createSupabaseServerClient() {
   const { anonKey, url } = getSupabaseAuthConfig();
@@ -24,6 +25,8 @@ export async function createSupabaseServerClient() {
           // este setAll que devolve o cookie renovado nas rotas /api, que o proxy nao valida (docs/06).
         }
       }
-    }
+    },
+    // O banco guarda o caminho dos arquivos do Storage; o app le e grava o endereco inteiro (docs/32 §11.5).
+    global: { fetch: createStoragePathsFetch(url) }
   });
 }
