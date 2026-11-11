@@ -1254,9 +1254,17 @@ def mostrar_registros(dominio, detalhe):
     if not registros:
         return
     sys.stderr.write(f"\n    Crie estes registros no painel de DNS do dominio de {dominio} (o mesmo painel do endereco da escola):\n")
+    primeiro, _, resto = dominio.partition(".")
     for r in registros:
         nome = str(r.get("name", ""))
-        completo = nome if nome.endswith(dominio) or not nome else f"{nome}.{dominio}"
+        # O provedor pode dar o nome relativo ao dominio de envio ("send") ou a zona de cima ("send.mail"): o nome
+        # completo e o mesmo nos dois casos.
+        if not nome or nome.endswith(dominio):
+            completo = nome or dominio
+        elif resto and (nome == primeiro or nome.endswith("." + primeiro)):
+            completo = f"{nome}.{resto}"
+        else:
+            completo = f"{nome}.{dominio}"
         prioridade = f"   Prioridade: {r.get('priority')}" if r.get("priority") not in (None, "") else ""
         sys.stderr.write(f"      Tipo: {r.get('type', '?'):<5} Nome: {completo}\n        Valor: {r.get('value', '')}{prioridade}\n")
     sys.stderr.write("    (No campo Nome, alguns paineis pedem so a parte antes do dominio.)\n\n")
