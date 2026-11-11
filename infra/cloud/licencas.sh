@@ -91,7 +91,9 @@ if sem == "sim":
     resumo = "  Sem o Painel (LICENCAS_SEM_PAINEL=sim): o Emissor sobe sem ele e sem e-mail; a API das Instalacoes funciona igual."
 else:
     equipe = re.sub(r"^https://", "", equipe.lower()).rstrip("/")
-    produtor = produtor.lower()
+    produtor, dominio = produtor.lower(), dominio.lower()
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", dominio):
+        problemas.append(f"LICENCAS_PAINEL_DOMAIN nao e um nome (veio {dominio}).")
     faltam = [nome for nome, valor in (("LICENCAS_PAINEL_ACCESS_EQUIPE", equipe), ("LICENCAS_PAINEL_ACCESS_AUD", aud),
                                        ("LICENCAS_EMISSOR_EMAIL_REMETENTE", remetente), ("LICENCAS_EMISSOR_EMAIL_PRODUTOR", produtor)) if not valor]
     if faltam:

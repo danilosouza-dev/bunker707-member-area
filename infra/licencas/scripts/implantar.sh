@@ -14,8 +14,8 @@
 #      um exemplo entre < e > entra vazia, nunca o exemplo) e, a cada rodada, o que o deploy decide: EMISSOR_RAIZES; o
 #      Painel, a conta de envio, as chaves anteriores e os links (--config-b64: PAINEL_ENDERECO, PAINEL_ACCESS_EQUIPE,
 #      PAINEL_ACCESS_AUD, PAINEL_TETO_DIARIO, EMISSOR_EMAIL_PRODUTOR, EMISSOR_EMAIL_REMETENTE, EMISSOR_KIDS_ANTERIORES,
-#      EMISSOR_LINK_RENOVAR e EMISSOR_LINK_LOJA; com os cinco primeiros vazios, menos o teto, o Emissor sobe sem o
-#      Painel); e os proxies confiaveis das duas portas, iguais ao caminho do Caddy (caddy/Caddyfile): so o gateway da
+#      EMISSOR_LINK_RENOVAR e EMISSOR_LINK_LOJA; com o endereco, o Access e os dois e-mails vazios, o Emissor sobe sem
+#      o Painel); e os proxies confiaveis das duas portas, iguais ao caminho do Caddy (caddy/Caddyfile): so o gateway da
 #      rede borda (EMISSOR_GATEWAY_BORDA, por onde o Caddy chega) e o X-Forwarded-For, em que o Caddy escreve um IP so;
 #   3. a imagem do Emissor e puxada e ganha o nome local que o compose dele usa nos servicos com build (hoje
 #      bunker-licensing-emissor:local): nada e construido no servidor;
