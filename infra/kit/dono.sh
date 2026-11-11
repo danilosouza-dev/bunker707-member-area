@@ -29,7 +29,7 @@ app_no_ar || sair 44 "O app nao esta no ar neste servidor (sudo docker compose p
 # link_do_dono EMAIL: o link novo na saida (vazio e codigo 44 se o Auth nao gerou).
 if [ -z "$email" ]; then
     email=$(compose exec -T "$KIT_SERVICO_BANCO" psql -U postgres -X -At -c \
-        "select u.email from auth.users u join public.admin_roles r on r.user_id = u.id where r.role = 'owner' order by u.created_at limit 1" 2>/dev/null | tr -d '[:space:]')
+        "select u.email from auth.users u join public.admin_roles r on r.user_id = u.id where r.role = 'owner' order by u.created_at limit 1" 2>/dev/null </dev/null | tr -d '[:space:]')
     [ -n "$email" ] || sair 44 "Nao achei a conta do dono (papel owner). Diga qual: sudo membros link-do-dono --email dono@exemplo.com"
 fi
 [[ $email =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || sair "$SAI_USO" "E-mail invalido: $email"

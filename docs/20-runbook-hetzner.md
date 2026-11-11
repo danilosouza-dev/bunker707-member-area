@@ -1012,7 +1012,7 @@ bash infra/kit/migrar.sh            # aplica o que falta
 
 ## 9B. Backup e recuperacao do kit (produto licenciado, 11/11/2026)
 
-No servidor de um comprador (`docs/32` §3.2 e §4), o backup, o kit de recuperacao, o ensaio e a restauracao sao subcomandos do comando de operacao `membros` (`infra/kit/membros`, nome provisorio; ele funciona tambem como link, por exemplo em `/usr/local/sbin`, que o instalador vai criar). A nossa producao continua no `infra/scripts/backup.sh` (secao 10).
+No servidor de um comprador (`docs/32` §3.2 e §4), o backup, o kit de recuperacao, o ensaio e a restauracao sao subcomandos do comando de operacao `membros` (`infra/kit/membros`, nome provisorio; ele funciona tambem como link, por exemplo em `/usr/local/sbin`, que o instalador cria: 9D). A nossa producao continua no `infra/scripts/backup.sh` (secao 10).
 
 ```bash
 sudo membros backup --iniciar               # confere o destino e cria o repositorio la (SFTP: cria a chave SSH e mostra)
@@ -1064,7 +1064,7 @@ O kit recusa, sem repetir segredo na mensagem: S3 sem `https`, chave de acesso o
 
 Do backup saem so o dump, os papeis e a chave do Vault. A restauracao segue o `restore.sh` (papeis, privilegios padrao suspensos, `pg_restore --clean`, privilegios devolvidos), conectando pelo `127.0.0.1` de dentro do container; os papeis do backup trazem a senha que o `supabase_admin` tem na escola, e na mesma sessao a senha sorteada do banco temporario volta. A conferencia: contas do Auth, alunos com acesso, conteudos, aulas, acessos, progresso, o historico das migracoes, a linha da `license_state` (e se a licenca ja foi ativada), a chave publica fechada para as tabelas internas e cada objeto do `storage.objects` contra a lista de arquivos do backup. O veredito sai em portugues (DEU CERTO, DEU CERTO com avisos, FALHOU, com o motivo) e vai para a situacao, so com as contagens. Depois, tudo e apagado (o container, os volumes anonimos dele, a pasta e a chave digitada, que fica em `/dev/shm` enquanto o comando roda), tambem na falha e na interrupcao (Ctrl+C, `kill`, SSH caido). Numa queda de luz, as sobras saem no comeco do ensaio seguinte ou no backup diario, que tambem pega a trava. O ensaio nao prova que o app sobe com esse banco (isso e o `atualizar --ensaio`, ainda por fazer) nem le o conteudo dos arquivos do Storage.
 
-**Restaurar num servidor novo** (`restaurar`). Para o servidor de uma recuperacao, instalado no modo de restauracao (sem Chave de ativacao; o instalador ainda nao existe, entao hoje e o compose do kit de pe e o arquivo de segredos com o destino e as chaves de acesso, ou o `--destino` da folha):
+**Restaurar num servidor novo** (`restaurar`). Para o servidor de uma recuperacao, instalado no modo de restauracao (`instalar --restauracao`, 9D: sem Chave de ativacao, so o banco de pe e o arquivo de segredos com o destino e as chaves de acesso; ou o `--destino` da folha):
 
 1. poe a instalacao no modo de restauracao (o backup diario fica parado ate o fim);
 2. abre o backup com a chave de recuperacao e escolhe o mais novo com dados (ou o `--snapshot`);
@@ -1094,7 +1094,7 @@ A licenca vem no backup: no mesmo endereco, o Emissor reconhece a Instalacao na 
 
 ## 9C. O servidor do comprador: o preparo e o compose do kit (produto licenciado, 11/11/2026)
 
-Duas pecas do instalador (`docs/32` §3.2 passos 2 e 5, §11.6 e §11.7) que ja rodam sozinhas: o preparo de um servidor de terceiros (Hetzner, Contabo, Hostinger e parecidos) e o compose reduzido do kit. O instalador, que junta tudo, ainda nao existe.
+Duas pecas do instalador (`docs/32` §3.2 passos 2 e 5, §11.6 e §11.7) que tambem rodam sozinhas: o preparo de um servidor de terceiros (Hetzner, Contabo, Hostinger e parecidos) e o compose reduzido do kit. O instalador, que junta tudo, esta na secao 9D.
 
 ### 9C.1 Preparar o servidor
 
@@ -1159,6 +1159,141 @@ Host escola
 **A conferencia final** (`infra/scripts/smoke.sh`) le os servicos do compose: onde ha Realtime (a nossa producao), exige o healthcheck e o `/realtime/v1/api/tenants` fechado (403), como sempre; onde nao ha (o kit), exige o caminho fechado na borda (404). Se o compose nao responde, cai no ramo do kit, que a producao reprova. Nos dois, baixa os seis modelos de e-mail pelo caminho do Auth: no kit, de dentro do container do Auth; na producao, pelo endereco publico.
 
 **Testes.** `tests/kit-preparar-servidor.test.mjs` roda o `bootstrap.sh` de verdade, nos dois perfis, num servidor de mentira (`tests/fixtures/servidor-de-mentira.mjs`: o servidor inteiro numa pasta, um shim para cada ferramenta que muda o sistema, o `sshd -T` calculado dos arquivos como o OpenSSH, o PATH so com os shims e ferramentas que nao mudam o sistema, e uma pessoa num pseudo-terminal). `tests/kit-compose.test.mjs` confere o compose do kit (servicos, resumos, nomes, portas, rede interna, modelos, certificados e frente) e, quando ha o plugin do compose, o `docker compose config`. `tests/supabase-rede-interna.test.mjs` e `tests/proxy-rede-interna.test.mjs` rodam o supabase-js e o @supabase/ssr de verdade com o fetch interno. `tests/infra-smoke.test.mjs` roda a conferencia final com docker e curl de mentira. Nao rodou: nada disso num servidor de verdade (nem o preparo na Contabo ou na Hostinger, nem o compose com o Docker), a emissao de um certificado, o ZeroSSL como reserva e a medida de memoria do kit (A29).
+
+## 9D. O instalador do kit (produto licenciado, 11/11/2026)
+
+O comando que junta as pecas das secoes 9A a 9C e instala a escola no servidor do comprador (`docs/32` §3.2 e §11.7): `infra/kit/instalar`. No lote fundador quem roda e a nossa equipe; na venda aberta, o comprador ou a IA dele. O mesmo comando, depois do primeiro passo, e `sudo membros instalar`.
+
+### 9D.1 O Pacote da versao (formato 1)
+
+O instalador roda de dentro do pacote aberto na pasta da instalacao (`KIT_PASTA_INSTALACAO`, padrao `/opt/<nome>`, do `kit.conf`): os dados da escola (`infra/compose/volumes/db/data` e `volumes/storage`) e o arquivo de segredos (`infra/compose/.env`) ficam ao lado dele, entao o pacote aberto noutra pasta e recusado (codigo 20, com o comando certo).
+
+```txt
+/opt/<nome>/
+  MANIFESTO.json              formato 1: produto, versao, criado_em, commit, instalacao, imagens, imagens_de_terceiros,
+                              chaves_seguintes e, para cada arquivo, caminho, bytes, sha256 e modo
+  MANIFESTO.json.assinatura   (com a chave) base64 da assinatura Ed25519 dos bytes do MANIFESTO.json
+  imagens/app.tar             a imagem do app, de `docker save` (no lote fundador, uma por Instalacao)
+  imagens/terceiros-N.tar     (opcional) imagens de terceiros, para servidor sem acesso ao Docker Hub
+  infra/kit/                  o instalador, o membros, o kit.conf e as ferramentas (menos montar-pacote e fixar-imagens)
+  infra/compose/              o compose do kit, o .env.example, o gerador de segredos, o Caddyfile.kit (com frente/ e
+                              as faixas da Cloudflare), o Envoy, os modelos de e-mail e os scripts de inicio do banco
+  infra/scripts/              lib.sh, bootstrap.sh, restore.sh e smoke.sh (reaproveitados)
+  supabase/migrations/        as migracoes, aplicadas pelo migrar.sh (9A)
+```
+
+- **Montar** (do nosso lado, nunca no servidor do comprador): `node infra/kit/montar-pacote.mjs --versao 1.0.0 --app app.tar --saida pacote/ [--instalacao alunos.escola.com.br] [--imagem terceiros.tar] [--assinar chave.pem]`. A lista do que vai e fechada (`LISTA_DO_PACOTE`) e recusa `src/`, `tests/`, `docs/`, `infra/cloud/`, o Emissor, `.env` e chave privada. O id de cada imagem (o resumo da configuracao, que o `docker image inspect` mostra) e as tags saem do `manifest.json` de dentro do `docker save`. As imagens de terceiros do compose entram no manifesto como estao no compose, presas pelo resumo.
+- **Entregar no lote fundador** (`docs/32` §11.5): a imagem da Instalacao e gerada no nosso CI, vai ao servidor por `docker save` e `docker load`, pelo SSH, sem login de registry no servidor do comprador: `scp pacote-1.0.0.tgz` e `tar -xzf` em `/opt/<nome>`, ou o pacote sem `imagens/app.tar` e `docker save <imagem> | ssh root@servidor docker load`. Sem o arquivo, a imagem vale se ja esta carregada com o id do manifesto (o id fixa a configuracao, e a configuracao fixa o resumo de cada camada).
+- **Conferir, sempre**: o sha256 e o tamanho de todo arquivo e de toda imagem do manifesto, caminhos so relativos e sem `..`, os arquivos que o instalador precisa presentes e uma imagem do app com id e tag (codigo 32). O pacote gerado para outro endereco (`instalacao`) e recusado antes de mudar o servidor (35). Depois do `docker load`, o id de cada imagem tem de ser o do manifesto (34).
+- **A assinatura**: com a chave publica no `kit.conf` (`KIT_CHAVE_DO_PACOTE`: a chave Ed25519 em DER do SubjectPublicKeyInfo, em base64, numa linha; mais de uma separadas por espaco), o pacote sem assinatura ou com assinatura que nao confere e recusado (33), conferido com `openssl pkeyutl -verify -rawin`. **Sem chave no `kit.conf`, so o sha256 vale e o instalador diz isso**: a cerimonia da chave do pacote e quem assina na rotina de versao ainda estao em aberto (`docs/32` §11.6), e ate la o `kit.conf` sai com a chave vazia. A primeira instalacao com pacote assinado grava a chave em `KIT_PASTA_ESTADO/chaves-do-pacote`, e dali em diante ela vale por cima da do `kit.conf` do pacote que chega (o pacote trocado no caminho nao traz a chave dele junto). A troca de chave vai em `chaves_seguintes`, dentro do manifesto assinado pela chave atual. `node infra/kit/montar-pacote.mjs --chave-publica chave.pem` imprime a chave no formato do `kit.conf`.
+
+### 9D.2 O comando
+
+```bash
+sudo bash /opt/<nome>/infra/kit/instalar                       # guiado: pergunta so o que falta
+sudo bash /opt/<nome>/infra/kit/instalar --respostas respostas.conf [--ativacao-arquivo chave.txt]
+sudo bash /opt/<nome>/infra/kit/instalar --simular [--respostas ...]     # o plano; nada muda
+sudo bash /opt/<nome>/infra/kit/instalar --restauracao --respostas ...   # para receber um backup (membros restaurar)
+bash infra/kit/instalar --conferir [--endereco alunos.meucurso.com.br] [--json]   # antes de comprar: sem Licenca,
+                                                                                   # sem pacote e sem sudo
+```
+
+**As respostas** (`KEY=valor`, lido e nunca executado; chave desconhecida e recusada; o arquivo com segredo tem de ser so do administrador, `chmod 600`): `ENDERECO` (o endereco da escola, subdominio; `https://`, maiusculas e barra saem), `ENDERECO_API` (padrao `api.<ENDERECO>`, enquanto o endereco unico nao for testado, D14), `EMAIL_DONO` (a primeira conta e o e-mail dos certificados), `NOME_DA_ESCOLA` (o remetente), `RESEND_API_KEY`, `EMAIL_REMETENTE` (padrao `escola@mail.<dominio>`; o dominio dele e o dominio de envio no Resend), `EMAIL_RESPONDER_PARA`, `EMAIL_TESTE_PARA`, `CHAVE_ATIVACAO` (ou `CHAVE_ATIVACAO_ARQUIVO` / `--ativacao-arquivo`, 0600), `BACKUP_DESTINO` com `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY` e `BACKUP_AWS_DEFAULT_REGION` (S3) ou `BACKUP_SFTP_PORTA` (SFTP), ou `BACKUP_SO_NESTE_SERVIDOR=ACEITO O BACKUP SO NESTE SERVIDOR` (o aceite escrito), `CHAVE_SSH`, `REINICIO_AUTOMATICO` (sim ou nao) e `IP_DO_SERVIDOR` (quando o servidor nao ve o proprio IPv4 publico). No guiado, o que falta e perguntado (os segredos sem eco); rodar de novo nao pergunta o que ja foi respondido (as respostas ficam no arquivo de segredos desde o passo 5). Sem terminal e com resposta faltando: codigo 1, com a lista. O endereco de uma instalacao ja comecada nao muda por aqui (36; trocar de endereco e outro comando, `docs/32` §2.3).
+
+**Os passos**, cada um anotado em `KIT_ARQUIVO_INSTALACAO` (`/var/lib/<nome>/instalacao.json`, 0644, sem segredo e sem dado de aluno). Rodar de novo pula o que esta feito, continua no que parou e nunca apaga dado: nada roda `down -v`, apaga volume ou pasta de dados, gera segredo por cima do arquivo que existe ou recria repositorio de backup.
+
+| # | Passo | O que faz |
+|---|---|---|
+| 1 | conferir o servidor (sempre) | o mesmo do `--conferir`; o DNS aqui so avisa (o passo 12 bloqueia) |
+| 2 | conferir o pacote (sempre) | 9D.1; poe o `membros` no PATH (`KIT_LINK_DO_COMANDO`) |
+| 3 | preparar o servidor | `preparar-servidor.sh` (9C.1), com `--chave-ssh` e `--reinicio-automatico` das respostas; nunca fecha o login por senha |
+| 4 | carregar as imagens | `docker load` de cada arquivo do manifesto e o id conferido; a que ja esta carregada com o mesmo id fica |
+| 5 | gerar os segredos | so se o arquivo de segredos nao existe: o `generate-secrets.mjs --kit` roda dentro da imagem do app (`docker run --network none`, sem Node no servidor), grava 0600 e nada aparece na tela; tira os valores da nossa producao do `.env.example` (remetente, Storage Box, repositorio) e poe a retencao do kit (7, 4, 6) |
+| 6 | subir os servicos | `db`, `auth`, `rest`, `storage`, `imgproxy`, `api-gw` e `app`, saudaveis em 5 minutos; o Caddy fica para o passo 12, para o certificado so ser pedido depois do DNS |
+| 7 | criar o banco | `migrar.sh` (9A) |
+| 8 | o agendador | o tick no Vault (`jobs_tick_url` e `jobs_tick_token`), criado ou trocado se mudou, com o token pela entrada do `psql`; confere a tarefa no `cron.job` (as migracoes a criam). Era o `infra/cloud/deploy.sh` |
+| 9 | a primeira conta | o dono pela API administrativa do Auth, de dentro do container do app, ja confirmado e sem senha; papel `owner` em `admin_roles`. A conta que ja existia vira a do dono. Era o `infra/cloud/equipe.sh`, sem depender do e-mail |
+| 10 | o e-mail | grava o Resend (SMTP do Auth e API do app, a mesma chave); confere a chave e o dominio de envio pela API do Resend (cria o dominio, mostra os registros de DNS para copiar e espera a verificacao ate `KIT_ESPERA_DOMINIO_EMAIL`); manda o e-mail de teste pelo SMTP, como o Auth manda, na primeira porta que sai (587, 2587, 465; o Auth so faz TLS direto na 465, a conferir no ensaio) e grava a porta; recria o Auth e o app; no terminal, pergunta se chegou. Com a chave que so envia, o dominio nao e conferido e o e-mail de teste decide |
+| 11 | o backup | grava o destino; `membros backup --iniciar` (no SFTP, mostra a chave para autorizar), `--instalar-agendamento`, o primeiro backup e o kit de recuperacao (so com uma pessoa no terminal: sem ela, codigo 49 e o instalador continua depois). Com o aceite escrito do backup so neste servidor, sem o kit de recuperacao |
+| 12 | o endereco | o DNS dos dois nomes (o registro A so com o IPv4 deste servidor, sem AAAA de outro lugar, sem o proxy da Cloudflare), depois sobe o Caddy e espera o certificado dos dois nomes (`curl --resolve` na porta do Caddy deste servidor, com o certificado conferido) ate `KIT_ESPERA_CERTIFICADO`, reiniciando o Caddy uma vez para ele pedir de novo sem esperar |
+| 13 | a conferencia final | `smoke.sh` pelos enderecos publicos e o agendador rodando de verdade (`job_runs` dos ultimos 15 minutos) |
+| 14 | ativar a Licenca | a Chave so e gasta aqui: `membros licenca estado` (pula na imagem sem licenca e na ja ativada) e `membros licenca ativar --da-entrada` (9D.3) |
+
+No fim, o resumo: o endereco, o admin, o link de entrada do dono (de uso unico, so com uma pessoa no terminal; sem ela, o comando para gera-lo), a folha de recuperacao para guardar, o backup, a Licenca, o e-mail e os comandos de acompanhar.
+
+**Segredo nunca na tela nem na linha de comando:** as respostas chegam ao shell pela saida capturada do `instalador.py`, vao ao arquivo de segredos pela entrada do `kit.py segredos-trocar`, a chave do Resend vai ao `curl` por `-K -` (a entrada), a Chave de ativacao e o e-mail vao ao container do app pela entrada, e o token do tick e a chave secreta do Supabase nunca saem do container (`infra/kit/no-app.mjs`).
+
+**Modo de restauracao** (`--restauracao`): para o servidor novo de uma recuperacao. Pede so `ENDERECO`, `EMAIL_DONO` e o destino da folha de recuperacao; gera um arquivo de segredos provisorio (o backup traz o de verdade), sobe so o banco, grava o destino e as chaves de acesso, confere que o destino responde (`membros backup --conferir-destino`: o backup que so a chave de recuperacao abre e o esperado), instala o agendamento e poe a instalacao em espera (`restauracao-pendente`), com o backup diario parado ate `sudo membros restaurar` (9B). Pula as migracoes, o agendador, a conta, o e-mail, a conferencia final e a ativacao (vem do backup; a Licenca, na readocao). O endereco que ainda aponta para o servidor antigo so avisa.
+
+**`--conferir`** (antes de comprar, `docs/32` §1.4 e A26): o sistema (Ubuntu 22.04 ou 24.04, Debian 12 ou 13), x86-64, maquina virtual (container nao), vCPU, memoria e disco contra os minimos do `kit.conf`, as portas 80 e 443 livres (ou com a escola), o IPv4 publico, o DNS dos dois nomes (com `--endereco`), a saida HTTPS para o Emissor e para o provedor de e-mail, a porta de envio de e-mail que sai e o relogio (pela hora do Emissor). Se as portas abrem de fora so da para conferir com um servico de fora: na instalacao, o certificado (passo 12) e a conferencia inicial da ativacao conferem. O Emissor fora do ar com o resto saindo e so um aviso. `--json` para a IA.
+
+### 9D.3 Comando de operacao: licenca, link-do-dono e diagnostico
+
+```bash
+sudo membros licenca estado [--json]                         # modo, ativada, degrau, validade, endereco da licenca
+sudo membros licenca ativar [--chave-arquivo ARQ | --da-entrada] [--json]
+sudo membros link-do-dono [--email E]                        # so no terminal
+sudo membros diagnostico [--json]
+```
+
+- **Ativar pelo terminal (a escolha desta peca).** A Chave nao vai ao Emissor por um cliente a parte: vai ao proprio app, dentro do container (`docker compose exec -T app node -e no-app.mjs`), que chama a rota interna `POST /api/licenca/instalador` (`src/server/licensing/installer.ts`) com as mesmas operacoes da tela Licenca (`operations.ts`: a conferencia inicial, que para tudo com erro de Chave ou de vaga antes de gastar, e a ativacao). A rota so responde a pedido de dentro do servidor (o que traz cabecalho de proxy responde 404, antes do token) e com o token do tick; e dever legal; no modo `off` o `ativar` nao existe; a resposta nunca traz a Chave, o segredo, a sequencia ou a licenca, e a auditoria leva so o codigo (`origem: "terminal"`). A tela Configuracoes > Licenca continua sendo o outro caminho, com a mesma Chave. Codigos: 0 ativada; 7 a Chave pede uma pessoa (ou `--chave-arquivo` 0600); 52 a Chave nao vale ou a Licenca nao esta ativa; 53 a vaga esta em uso; 54 o Emissor nao respondeu; 55 outro motivo.
+- **`link-do-dono`**: um link novo de uso unico (`/auth/confirm?token_hash=...&type=recovery&next=/admin`, o caminho do "esqueci a senha"), que abre a escola na troca de senha. Gerado pela API do Auth de dentro do container, sem e-mail; vale 1 hora. So com uma pessoa no terminal (7): a IA nunca recebe o link (`docs/32` §3.3).
+- **`diagnostico`** (primeira versao): a versao e os passos da instalacao, a mesma conferencia do `--conferir` (com o DNS dos dois enderecos), os servicos do compose (estado e saude), o backup (idade do ultimo bom, kit de recuperacao, ultimo ensaio), a situacao da Licenca pelo app e o disco, com a lista "Atencao". Sem segredo e sem dado de aluno: as linhas de registro dos servicos ficam de fora nesta versao. Sem sudo, mostra o que der.
+
+### 9D.4 Codigos de saida do instalador
+
+Toda falha sai com a frase do que houve, o que fazer e de quem e: do produto (Correcao de defeito, pelo suporte) ou do servidor e das contas do comprador (provedor, DNS, e-mail, armazenamento). `python3 infra/kit/instalador.py codigos --json` da a tabela para a IA. 1, 7 e 10 a 14 sao os mesmos do comando de operacao e do preparo (9B e 9C).
+
+| Codigo | Nome | Quando | De quem |
+|---|---|---|---|
+| 0 | ok | instalado (ou a conferencia passou) | |
+| 1 | uso | opcao errada, resposta faltando ou invalida, arquivo de respostas com segredo legivel por outros | comprador |
+| 7 | precisa_de_terminal | o passo mostra ou pede uma chave e so roda com uma pessoa no terminal | comprador |
+| 10 | sistema | sistema ou processador fora do kit | comprador |
+| 11 | firewall | o firewalld cuida do firewall (do preparo) | comprador |
+| 12 | docker_sem_compose | Docker sem o compose 2 (do preparo) | comprador |
+| 13 | sessao_ssh | fechar a senha pede uma sessao SSH com chave (do preparo) | comprador |
+| 14 | sshd | o sshd nao aceitou fechar a senha (do preparo) | comprador |
+| 20 | pacote_fora_do_lugar | o pacote nao esta aberto na pasta da instalacao | comprador |
+| 21 | virtualizacao | o servidor e um container (OpenVZ, LXC), nao uma maquina virtual | comprador |
+| 22 | processador | menos vCPU que o minimo (2) | comprador |
+| 23 | memoria | menos memoria que o minimo (4 GB) | comprador |
+| 24 | disco | disco menor que 40 GB ou sem a folga livre | comprador |
+| 25 | porta_ocupada | outro programa usa a porta 80 ou a 443 | comprador |
+| 26 | endereco_nao_aponta | sem registro A, mais de um, ou apontando para outro IP | comprador |
+| 27 | registro_aaaa | um registro AAAA aponta para outro servidor | comprador |
+| 28 | proxy_cloudflare | o proxy da Cloudflare esta ligado no endereco | comprador |
+| 29 | sem_internet | o servidor nao sai por HTTPS | comprador |
+| 30 | sem_saida_de_email | nenhuma porta de envio de e-mail sai, ou a API do provedor nao responde | comprador |
+| 31 | sem_ipv4_publico | o servidor nao mostra um IPv4 publico (aviso; IP_DO_SERVIDOR resolve) | comprador |
+| 32 | pacote_corrompido | arquivo do pacote faltando ou diferente do manifesto | produto |
+| 33 | assinatura_do_pacote | com a chave do pacote: sem assinatura ou assinatura que nao confere | produto |
+| 34 | imagem | o docker load falhou ou a imagem tem outro id | produto |
+| 35 | pacote_de_outra_instalacao | o pacote foi gerado para outro endereco | comprador |
+| 36 | instalacao_diferente | a instalacao comecou com outro endereco, noutro modo, ou ja esta pronta noutra versao | comprador |
+| 37 | falta_ferramenta | falta python3, curl, openssl ou o docker | comprador |
+| 38 | relogio | o relogio do servidor esta mais de 5 minutos fora | comprador |
+| 39 | preparo | o preparo do servidor falhou num passo (apt, Docker, restic) | comprador |
+| 40 | segredos | a geracao das senhas falhou | produto |
+| 41 | servicos | um servico nao subiu ou nao ficou saudavel | produto |
+| 42 | migracoes | o migrador parou (o codigo dele, 9A, vai na mensagem) | produto |
+| 43 | agendador | o tick nao foi gravado no Vault, a tarefa nao esta no banco ou nao rodou | produto |
+| 44 | conta_do_dono | a primeira conta da equipe nao foi criada | produto |
+| 45 | chave_do_email | o provedor de e-mail recusou a chave | comprador |
+| 46 | dominio_do_email | o dominio de envio nao foi verificado no prazo (os registros aparecem na tela) | comprador |
+| 47 | email_de_teste | o provedor recusou o e-mail de teste, ou a pessoa disse que nao chegou | comprador |
+| 48 | backup | o destino, o agendamento ou o primeiro backup falhou (o codigo do membros backup vai na mensagem) | comprador |
+| 49 | kit_de_recuperacao | o kit de recuperacao pede a pessoa no terminal, ou nao foi confirmado | comprador |
+| 50 | certificado | o certificado HTTPS nao saiu no prazo (as linhas do Caddy vao na mensagem) | comprador |
+| 51 | conferencia_final | o smoke pelos enderecos publicos falhou | produto |
+| 52 | chave_de_ativacao | a Chave nao vale (mal copiada, vencida, usada, de outro endereco) ou a Licenca nao esta ativa | comprador |
+| 53 | vaga_em_uso | a Licenca esta em uso noutro endereco | comprador |
+| 54 | emissor_fora | o Emissor de licencas nao respondeu | produto |
+| 55 | ativacao | a ativacao nao terminou por outro motivo (a mensagem diz; ou pela tela Licenca) | produto |
+
+### 9D.5 Testes
+
+`tests/kit-instalar.test.mjs` roda o instalador de verdade, de dentro de um pacote montado pelo `montar-pacote.mjs` de verdade, num servidor de mentira (`tests/fixtures/instalador-de-mentira.mjs`: docker, curl, getent, ip, ss, nproc, uname, systemd-detect-virt, df, systemctl e sleep de mentira, com o app, o Auth, o Resend, o Emissor e o Caddy por tras deles; o preparo, o migrador e o smoke de mentira, que tem os testes deles; o `membros licenca` de verdade), com o openssl e o gerador de segredos de verdade e uma pessoa num pseudo-terminal: cada modo, cada problema do `--conferir` com o seu codigo, retomar depois de uma falha em cada passo sem refazer o que ja foi feito, rodar de novo sem mudar nada, os segredos que nunca aparecem na tela nem em linha de comando e o arquivo de segredos 0600, o pacote alterado, faltando, sem assinatura, com assinatura de outra chave e a chave gravada no servidor valendo, a imagem pelo id, o modo de restauracao sem a Chave, as respostas conferidas e o guiado que pergunta so o que falta. `tests/licenca-instalador.test.mjs` testa a rota interna contra o Emissor falso do protocolo e `tests/kit-no-app.test.mjs` roda o `no-app.mjs` de verdade contra um app e um Auth de mentira. Nao rodou: nada disso num servidor de verdade (o Docker, o Resend, o Let's Encrypt, a API administrativa do Auth e a imagem com `enforce`), a porta 2465 e o TLS direto do Auth na 465, e os tempos de instalacao.
 
 ---
 

@@ -126,6 +126,26 @@ fi
 PASSO_ATUAL=""
 PASSO_SITUACAO=""
 PASSO_MOTIVO=""
+# Os nomes dos passos na tela (os mesmos de NOMES_DOS_PASSOS em instalador.py).
+nome_do_passo() {
+    case "$1" in
+        conferencia) printf 'Conferir o servidor' ;;
+        pacote) printf 'Conferir o pacote (sha256 e assinatura)' ;;
+        preparar) printf 'Preparar o servidor (Docker, firewall, troca, atualizacoes)' ;;
+        imagens) printf 'Carregar as imagens do pacote' ;;
+        segredos) printf 'Gerar as senhas e os segredos' ;;
+        servicos) printf 'Subir o banco e os servicos' ;;
+        migracoes) printf 'Criar o banco (migracoes)' ;;
+        agendador) printf 'Ligar o agendador de minuto' ;;
+        conta_do_dono) printf 'Criar a primeira conta da equipe' ;;
+        email) printf 'Configurar e testar o e-mail' ;;
+        backup) printf 'Ligar o backup e o kit de recuperacao' ;;
+        endereco) printf 'Conferir o endereco e o certificado' ;;
+        conferencia_final) printf 'Conferencia final' ;;
+        ativacao) printf 'Ativar a Licenca' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
 
 # parar CODIGO [MOTIVO]: o passo de agora falhou (a mensagem com o codigo ja saiu): anota e para.
 parar() {
@@ -133,7 +153,7 @@ parar() {
     if [ -n "$PASSO_ATUAL" ] && [ "$acao" = instalar ]; then
         inst_py estado-passo "$ARQ" "$PASSO_ATUAL" falhou "$codigo" "$motivo" >/dev/null 2>&1 || true
         printf '\nA instalacao parou em "%s". Depois de corrigir, rode de novo o mesmo comando: ela continua daqui.\n' \
-            "$(inst_py nome-do-passo "$PASSO_ATUAL")" >&2
+            "$(nome_do_passo "$PASSO_ATUAL")" >&2
     fi
     PASSO_ATUAL=""
     exit "$codigo"
@@ -157,7 +177,7 @@ encerrar() {
     if [ "$rc" != 0 ] && [ -n "$PASSO_ATUAL" ] && [ "$acao" = instalar ]; then
         inst_py estado-passo "$ARQ" "$PASSO_ATUAL" falhou "$rc" "parou de um jeito inesperado (linhas acima)" >/dev/null 2>&1 || true
         printf '\nA instalacao parou em "%s" (codigo %s, linhas acima). Rode de novo o mesmo comando: ela continua daqui. Se repetir, fale com o suporte.\n' \
-            "$(inst_py nome-do-passo "$PASSO_ATUAL")" "$rc" >&2
+            "$(nome_do_passo "$PASSO_ATUAL")" "$rc" >&2
     fi
 }
 trap interrompido INT TERM HUP
@@ -169,14 +189,13 @@ passo() {
     local feito
     feito=$(inst_py estado-ler "$ARQ" "passos.$nome.situacao" 2>/dev/null || true)
     if [ -z "$sempre" ] && { [ "$feito" = ok ] || [ "$feito" = pulado ]; }; then
-        printf '  feito: %s\n' "$(inst_py nome-do-passo "$nome")"
+        printf '  feito: %s\n' "$(nome_do_passo "$nome")"
         return 0
     fi
     PASSO_ATUAL=$nome
     PASSO_SITUACAO=ok
     PASSO_MOTIVO=""
-    log "$(inst_py nome-do-passo "$nome")"
-    inst_py estado-passo "$ARQ" "$nome" em_andamento
+    log "$(nome_do_passo "$nome")"
     "$funcao"
     inst_py estado-passo "$ARQ" "$nome" "$PASSO_SITUACAO" "" "$PASSO_MOTIVO"
     PASSO_ATUAL=""
@@ -345,14 +364,16 @@ passo_migracoes() {
     [ "$rc" = 0 ] || falhar 42 "o migrador parou com o codigo $rc (docs/20 §9A)."
 }
 
+# psql no banco da escola. Com -c, a entrada fica fechada: o comando nao le nada do terminal de quem roda.
 psql_banco() { compose exec -T "$KIT_SERVICO_BANCO" psql -U postgres -X "$@"; }
+psql_c() { psql_banco "$@" </dev/null; }
 
 passo_agendador() {
     local sql n
     sql=$(env_value JOBS_TICK_TOKEN | inst_py sql-agendador) || parar $? "token do tick"
     printf '%s\n' "$sql" | psql_banco -q -v ON_ERROR_STOP=1 >/dev/null || falhar 43 "o banco nao gravou o agendador no Vault."
     sql=""
-    n=$(psql_banco -At -c "select count(*) from cron.job where active and command like '%enqueue_jobs_tick%'" 2>/dev/null | tr -d '[:space:]')
+    n=$(psql_c -At -c "select count(*) from cron.job where active and command like '%enqueue_jobs_tick%'" 2>/dev/null | tr -d '[:space:]')
     [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] || falhar 43 "a tarefa de minuto nao esta agendada no banco (as migracoes a criam)."
 }
 
@@ -364,12 +385,12 @@ passo_conta_do_dono() {
     codigo=$(printf '%s' "$saida" | inst_py json-campo codigo)
     if [ -z "$id" ] && [ "$codigo" = existe ]; then
         email_sql=${EMAIL_DONO//\'/\'\'}
-        id=$(psql_banco -At -c "select id from auth.users where lower(email) = lower('$email_sql') order by created_at limit 1" 2>/dev/null | tr -d '[:space:]')
+        id=$(psql_c -At -c "select id from auth.users where lower(email) = lower('$email_sql') order by created_at limit 1" 2>/dev/null | tr -d '[:space:]')
         printf '  A conta %s ja existia: ela passa a ser a do dono.\n' "$EMAIL_DONO"
     fi
     [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
         || falhar 44 "o Auth nao criou a conta de $EMAIL_DONO: $(printf '%s' "$saida" | inst_py json-campo mensagem)"
-    psql_banco -q -v ON_ERROR_STOP=1 -c "insert into public.admin_roles (user_id, role) values ('$id', 'owner') on conflict (user_id) do update set role = excluded.role" >/dev/null \
+    psql_c -q -v ON_ERROR_STOP=1 -c "insert into public.admin_roles (user_id, role) values ('$id', 'owner') on conflict (user_id) do update set role = excluded.role" >/dev/null \
         || falhar 44 "o papel de dono nao foi gravado."
     printf '  Conta do dono: %s (sem senha ainda: o link de entrada aparece no fim).\n' "$EMAIL_DONO"
 }
@@ -493,7 +514,7 @@ passo_conferencia_final() {
     tentativas=$(( KIT_ESPERA_AGENDADOR / 10 ))
     [ "$tentativas" -ge 1 ] || tentativas=1
     for ((t = 0; t < tentativas; t++)); do
-        n=$(psql_banco -At -c "select count(*) from public.job_runs where started_at > now() - interval '15 minutes'" 2>/dev/null | tr -d '[:space:]')
+        n=$(psql_c -At -c "select count(*) from public.job_runs where started_at > now() - interval '15 minutes'" 2>/dev/null | tr -d '[:space:]')
         if [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ]; then
             printf '  O agendador de minuto esta rodando.\n'
             return 0
