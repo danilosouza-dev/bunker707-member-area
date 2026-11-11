@@ -70,7 +70,7 @@ function yamlChildren(source, topKey) {
 }
 
 test("scripts de infra/cloud passam na conferencia de sintaxe do bash", () => {
-  assert.deepEqual(shellScripts, ["carga.sh", "deploy.sh", "envelope.sh", "equipe.sh", "jibri.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
+  assert.deepEqual(shellScripts, ["carga.sh", "deploy.sh", "envelope.sh", "equipe.sh", "jibri.sh", "lib.sh", "licencas.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh", "teste.sh"]);
   for (const file of shellScripts) {
     const result = run("bash", ["-n", join(cloudDir, file)]);
     assert.equal(result.status, 0, `${file}: ${result.stderr}`);
@@ -504,11 +504,15 @@ test("envelope.sh: a senha do AES e texto hex de uma linha (o openssl le so a pr
   assert.doesNotMatch(source, /openssl rand -out/);
 });
 
-test("bootstrap.sh: apt espera a trava do dpkg e o ufw nao limita a porta do SSH (o firewall da Hetzner ja restringe a origem)", () => {
+test("bootstrap.sh: apt espera a trava do dpkg e, na producao, o ufw nao limita a porta do SSH (o firewall da Hetzner ja restringe a origem)", () => {
   const source = readFileSync(new URL("../infra/scripts/bootstrap.sh", import.meta.url), "utf8");
   assert.match(source, /DPkg::Lock::Timeout=600/);
-  assert.match(source, /ufw allow "\$SSH_PORT\/tcp"/);
-  assert.doesNotMatch(source, /ufw limit/);
+  // O perfil kit (servidor de terceiros, sem o firewall da Hetzner) limita; a producao nunca. O teste de comportamento
+  // dos dois perfis esta em tests/kit-preparar-servidor.test.mjs.
+  const producao = source.slice(source.indexOf("producao_firewall() {"), source.indexOf("\n}\n", source.indexOf("producao_firewall() {")));
+  assert.match(producao, /fazer ufw allow "\$SSH_PORT\/tcp" comment "SSH"/);
+  assert.doesNotMatch(producao, /ufw limit/);
+  assert.match(source, /^PERFIL="\$\{PERFIL:-producao\}"$/m, "sem PERFIL, o de sempre (infra\/cloud\/provision.sh nao passa)");
 });
 
 // Achados da revisao de 18/10/2026 (lente de APIs): `hcloud --quiet` descarta a saida de `server ip`; o JSON
@@ -529,8 +533,11 @@ test("snapshot.sh: cria a imagem sem -o json e a encontra pela descricao na list
 });
 
 test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linha antes de gravar o .env", () => {
-  const source = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
-  const start = source.indexOf("python3 -I - '$envf' /tmp/payload.kv\" <<'PY'");
+  // O programa e o env_aplicar_kv de lib.sh, que o secrets-* e o conectar-licencas usam para gravar segredo no .env.
+  const secrets = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
+  assert.match(secrets, /^env_aplicar_kv "\$target" "\$envf" \/tmp\/payload\.kv$/m);
+  const source = libSource;
+  const start = source.indexOf("rsh \"$1\" \"python3 -I - '$2' '$3'\" <<'PY'", source.indexOf("env_aplicar_kv() {"));
   assert.ok(start > 0);
   const block = source.slice(source.indexOf("\n", start) + 1, source.indexOf("\nPY\n", start));
   const dir = mkdtempSync(join(tmpdir(), "bunker707-secrets-"));
@@ -550,6 +557,7 @@ test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linh
     const accepted = spawnSync("python3", ["-I", script, envFile, good], { encoding: "utf8" });
     assert.equal(accepted.status, 0, accepted.stderr);
     assert.equal(readFileSync(envFile, "utf8"), "A=1\nSMTP_PASS=re_abc\nRESEND_API_KEY=re_abc\n");
+    assert.equal(statSync(envFile).mode & 0o777, 0o600, "o .env fica 0600");
     assert.equal(existsSync(good), false, "o arquivo de segredos e apagado depois de aplicado");
   } finally {
     rmSync(dir, { recursive: true, force: true });

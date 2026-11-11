@@ -67,7 +67,7 @@ async function findImportedCourse(playlistUrl: string): Promise<ImportedPlaylist
 
 /** [catalog.create] "Ler playlist". Avisa quando a playlist ja virou um curso (a tela bloqueia importar). */
 export async function previewPlaylist(input: PreviewPlaylistInput): Promise<ActionResult<PlaylistPreview>> {
-  return runAdminAction("catalog.create", previewPlaylistSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.create", "leitura", previewPlaylistSchema, input, async ({ input: data }) => {
     const existingCourse = await findImportedCourse(data.playlistUrl);
 
     try {
@@ -83,7 +83,7 @@ export async function previewPlaylist(input: PreviewPlaylistInput): Promise<Acti
  * contrato legado: "Oculto por enquanto" grava listing = 'hidden' depois da importacao.
  */
 export async function importPlaylist(input: ImportPlaylistActionInput): Promise<ActionResult<PlaylistImported>> {
-  return runAdminAction("catalog.create", importPlaylistSchema, input, async ({ access, input: requested, user }) => {
+  return runAdminAction("catalog.create", "conteudo", importPlaylistSchema, input, async ({ access, input: requested, user }) => {
     // Sem "regras de acesso e venda": o curso importado nasce so para quem tiver acesso.
     const data = can(access, "catalog.access") ? requested : { ...requested, accessModel: "closed" as const, audience: undefined };
 

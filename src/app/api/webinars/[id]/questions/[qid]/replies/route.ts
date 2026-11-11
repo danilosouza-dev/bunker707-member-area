@@ -4,6 +4,8 @@ import { questionReplyBodySchema } from "@/server/webinars/chat-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, recordAfterReply, roomErrorResponse } from "@/server/webinars/room-route";
 import { replyStudentQuestion } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O fio de uma pergunta (docs/30 §1.3 e §5.1; decisao do produtor de 10/11/2026): POST { sessionId, body } grava a
 // resposta do aluno no fio da propria pergunta e responde { reply } (201). So quem perguntou (403 para os outros) e so
@@ -20,6 +22,9 @@ export const revalidate = 0;
 type ReplyRouteContext = { params: Promise<{ id: string; qid: string }> };
 
 export async function POST(request: Request, context: ReplyRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest({ params: context.params.then(({ id }) => ({ id })) }, { write: true });
   if ("response" in guarded) {
     return guarded.response;

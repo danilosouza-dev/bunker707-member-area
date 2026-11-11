@@ -6,6 +6,8 @@ import { badRequest, guardRoomRequest, loadCachedRoomContext, ok, roomErrorRespo
 import { emptySimulationFeed, liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationDecisionRecorded, simulationEndOffsetMs, simulationFeed } from "@/server/webinars/simulation-model";
 import { simulationFeedQuerySchema } from "@/server/webinars/simulation-schemas";
 import { fetchSessionSimulation } from "@/server/webinars/simulation-store";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A Simulacao da sala da Live gravada (docs/30 §1.6, §4.3, §6.6 e §8.6; D6, D10): GET ?sessao=&from=&to= (ms do relogio
 // do video, no maximo 120 s) devolve { data: SimulationFeed }: a parte simulada do contador a cada 15 s, as entradas e
@@ -24,6 +26,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;

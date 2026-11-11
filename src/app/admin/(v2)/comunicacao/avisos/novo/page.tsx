@@ -14,6 +14,8 @@ import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { WEBINARS_HREF, webinarAdminHref } from "@/server/webinars/editor-model";
 import { prepareWebinarNoticeStart } from "@/server/webinars/notice-shortcut";
 import { webinarNoticeRequestOf, webinarRulesNoticeStart } from "@/server/webinars/notice-shortcut-model";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { isFeatureEnabledNow } from "@/server/licensing/guards";
 
 // Publicar agora envia dentro da Server Action desta rota (em lotes).
 export const maxDuration = 60;
@@ -65,7 +67,8 @@ export default async function AdminNewNoticePage({ searchParams }: PageProps) {
 
   const templateId = templateParam(params.modelo);
   const kind = parseNoticeKindParam(params.tipo) ?? "inbox";
-  const webinar = templateId ? null : webinarNoticeRequestOf(params);
+  // Sem o modulo dos Webinarios na licenca (docs/32 §11.8), o ?webinario= e ignorado: o aviso abre em branco.
+  const webinar = templateId || !(await isFeatureEnabledNow(WEBINARS_FEATURE)) ? null : webinarNoticeRequestOf(params);
   const started = webinar?.mode === "webinar" ? await loadWebinarStart(webinar.webinarId, kind, readNow()) : await loadStart(templateId);
   // "Avisar quem não veio": o aviso em branco com as regras da live no "Para quem", sem ler o webinario.
   const rulesStart = webinar?.mode === "rules" ? webinarRulesNoticeStart(kind, webinar.audience) : null;

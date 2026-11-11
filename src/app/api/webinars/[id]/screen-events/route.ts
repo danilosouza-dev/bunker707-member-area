@@ -1,3 +1,5 @@
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { takeScreenEventBatch } from "@/server/webinars/room-limits";
 import { guardRoomRequest, loadCachedRoomContext, ok, parseRoomBody, recordAfterReply, roomErrorResponse, tooMany, type RouteContext } from "@/server/webinars/room-route";
@@ -24,6 +26,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { session: "claims" });
   if ("response" in guarded) {
     return guarded.response;

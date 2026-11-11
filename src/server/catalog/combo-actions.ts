@@ -65,7 +65,7 @@ async function saveComboInSteps(
 }
 
 export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboListItem>> {
-  return runAdminAction("catalog.access", comboSchema, raw, async ({ input, user }) => {
+  return runAdminAction("catalog.access", "conteudo", comboSchema, raw, async ({ input, user }) => {
     const db = getSupabaseAdminClient();
     const productIds = Array.from(new Set(input.productIds));
 
@@ -161,7 +161,7 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
 }
 
 export async function deleteCombo(raw: DeleteComboInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("catalog.access", deleteComboSchema, raw, async ({ input }) => {
+  return runAdminAction("catalog.access", "dever_legal", deleteComboSchema, raw, async ({ input }) => {
     // Os itens saem junto (on delete cascade). Acessos ja liberados continuam (nada retroativo).
     const { data, error } = await getSupabaseAdminClient().from("product_combos").delete().eq("id", input.id).select("id");
     failOnError(error, "Pacote");

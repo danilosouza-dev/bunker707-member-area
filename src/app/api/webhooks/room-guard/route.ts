@@ -4,6 +4,8 @@ import { hasSupabaseConfig } from "@/server/db/supabase/client";
 import { webinarsDb } from "@/server/webinars/db";
 import { RECORDER_SIGNATURE_HEADER, RECORDER_TIMESTAMP_HEADER } from "@/server/webinars/recorder-signature";
 import { handleRoomGuardRequest } from "@/server/webinars/room-guard";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A lista de barrados da sala ao vivo para o Prosody do Jitsi proprio (docs/30 §1.4 e §8.1): quem chama e o
 // mod_bunker_room_guard.lua a cada poucos segundos, sem sessao de usuario, com o GET assinado (HMAC-SHA256 de
@@ -15,6 +17,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function GET(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   if (!hasSupabaseConfig()) {
     console.error("[webinarios] banco nao configurado: lista da sala recusada.");
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import { actAs, actAsSignedIn } from "../support/integration-hooks.mjs";
 import { pngQuadradoDataUrl } from "../support/imagem-de-teste.mjs";
-import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
+import { createLocalAdminClient, guardadoNoBanco, unwrap } from "../support/local-db.mjs";
 import {
   ESCOLA_DE_TESTE,
   SENHA_DE_TESTE,
@@ -12,8 +12,9 @@ import {
 } from "../fixtures/escola-de-teste.mjs";
 
 // Foto do perfil contra o banco e o Storage LOCAIS de verdade (docs/18 §3.1 "Perfil e foto"): a rota
-// PUT/DELETE /api/profile/avatar grava a foto no bucket, o endereco no perfil (com a sessao da aluna e a
-// RLS valendo), carimba os comentarios dela e apaga a foto antiga; a leitura do menu entrega a foto.
+// PUT/DELETE /api/profile/avatar grava a foto no bucket, o caminho dela no perfil (com a sessao da aluna e a
+// RLS valendo; o banco guarda o caminho, nunca o endereco inteiro, docs/32 §11.5), carimba os comentarios dela e
+// apaga a foto antiga; a rota e a leitura do menu entregam o endereco inteiro.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -97,10 +98,11 @@ test("enviar a foto: vai para o bucket na pasta da aluna, o perfil guarda o ende
   assert.ok(primeiraFoto.includes(PASTA_DA_FOTO), `foto na pasta da aluna: ${primeiraFoto}`);
   assert.match(primeiraFoto, /\.png$/, "extensao do formato enviado");
   assert.equal(await arquivoExiste(primeiraFoto), true, "o arquivo esta publico no bucket");
-  assert.equal(await fotoNoPerfil(), primeiraFoto);
+  assert.equal(await fotoNoPerfil(), guardadoNoBanco(primeiraFoto), "o perfil guarda o caminho da foto");
+  assert.match(await fotoNoPerfil(), /^\/storage\/v1\/object\/public\/content-assets\/avatars\//);
 
   const comment = unwrap(await db.from("lesson_comments").select("author_avatar_url").eq("id", comentarioId).single(), "Lendo comentario");
-  assert.equal(comment.author_avatar_url, primeiraFoto, "comentarios antigos passam a apontar para a foto nova");
+  assert.equal(comment.author_avatar_url, guardadoNoBanco(primeiraFoto), "comentarios antigos passam a apontar para a foto nova");
 
   const shell = await getAppShellData(globalThis.__integrationSession.user);
   assert.equal(shell.student.avatarUrl, primeiraFoto, "o menu do topo le a foto do perfil");
@@ -113,7 +115,7 @@ test("trocar a foto: a nova entra e a antiga e apagada do bucket", async () => {
   assert.equal(response.status, 200);
   const segundaFoto = (await response.json()).data.avatarUrl;
   assert.notEqual(segundaFoto, primeiraFoto);
-  assert.equal(await fotoNoPerfil(), segundaFoto);
+  assert.equal(await fotoNoPerfil(), guardadoNoBanco(segundaFoto));
   assert.equal(await arquivoExiste(segundaFoto), true);
   assert.equal(await arquivoExiste(primeiraFoto), false, "a foto antiga nao fica no bucket");
   primeiraFoto = segundaFoto;

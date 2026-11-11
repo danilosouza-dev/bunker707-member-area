@@ -6,6 +6,7 @@ import { pollVoteBodySchema } from "@/server/communications/schemas";
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Voto na enquete da notificacao (v3a, docs/24 §1.6): { optionIds: [...] } (vazio = tirar o voto; uma
 // opcao quando a enquete nao permite varias). Devolve { poll } como o aluno ve agora: o resultado so vem
@@ -21,6 +22,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 const INVALID_VOTE = "Voto invalido.";
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

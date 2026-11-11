@@ -4,6 +4,8 @@ import { hasSupabaseConfig } from "@/server/db/supabase/client";
 import { webinarsDb } from "@/server/webinars/db";
 import { RECORDER_SIGNATURE_HEADER, RECORDER_TIMESTAMP_HEADER } from "@/server/webinars/recorder-signature";
 import { handleRecorderStatusRequest } from "@/server/webinars/recorder-webhook";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A consulta do jibri-down antes de apagar a maquina (docs/30 §5.3 e §6.7): GET assinado como o POST do webhook, com
 // o HMAC-SHA256 de "<X-Bunker-Timestamp>." (corpo vazio) em X-Bunker-Signature e WEBINAR_RECORDER_WEBHOOK_SECRET.
@@ -16,6 +18,9 @@ export const maxDuration = 30;
 type RouteContext = { params: Promise<{ sessionId: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const { sessionId } = await context.params;
 
   if (!hasSupabaseConfig()) {

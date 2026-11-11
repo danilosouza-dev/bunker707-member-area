@@ -12,7 +12,7 @@ import { readPlatformSetting, writePlatformSettingGuarded } from "./settings-sto
 
 /** [storefront.write] Publica o destaque; devolve o rascunho como ficou gravado e a versao nova. */
 export async function saveHomeHero(input: SaveHomeHeroInput): Promise<ActionResult<{ hero: HomeHeroDraft; updatedAt: string }>> {
-  return runAdminAction("storefront.write", saveHomeHeroSchema, input, async ({ input: data }) => {
+  return runAdminAction("storefront.write", "conteudo", saveHomeHeroSchema, input, async ({ input: data }) => {
     // Le o atual so para preservar chaves que o editor nao conhece (ex.: `purpose`). Se alguem gravou
     // depois da versao da tela, a gravacao abaixo falha com 409 e nada muda.
     const current = await readPlatformSetting("hero");

@@ -4,7 +4,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { cleanEnvValue } from "@/lib/env-value";
+import { supabaseServerGlobalOptions } from "@/server/db/supabase/internal-fetch";
 import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
+import { licensingMode } from "@/server/licensing/build-config";
+import { isFeatureStudentPage } from "@/server/licensing/features";
 
 const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
 const supabasePublicKey =
@@ -20,6 +23,7 @@ const protectedPagePrefixes = [
   "/materiais",
   "/minha-jornada",
   "/minhas-compras",
+  "/minhas-licencas",
   "/perfil",
   "/suporte",
   "/webinarios"
@@ -279,10 +283,23 @@ export async function proxy(request: NextRequest) {
           response.cookies.set(name, value, options);
         });
       }
-    }
+    },
+    // No servidor do kit, pela rede interna (SUPABASE_INTERNAL_URL): o JWKS do getClaims e o getUser nao dependem do
+    // DNS nem do certificado do endereco publico. O cookie continua com o nome do endereco publico.
+    global: supabaseServerGlobalOptions(supabaseUrl as string)
   });
 
   const user = await getProxySessionUser(supabase);
+
+  // A pagina de um modulo vendido a parte, na imagem vendida (docs/32 §11.8): quem ainda nao entrou segue para a
+  // propria pagina, que responde 404 sem o modulo na licenca e, com ele, manda para o login (requireStudentPageUser).
+  // Assim o login nunca diz que um modulo desligado existe. O proxy nao le a licenca (ela mora no banco). No modo
+  // "off" (a nossa escola, a dev, a Vercel e os testes), o login de sempre.
+  const featurePageDecides = licensingMode() === "enforce" && isFeatureStudentPage(pathname);
+
+  if (needsUser && !user && featurePageDecides) {
+    return secureResponse(response, contentSecurityPolicy, true);
+  }
 
   if (needsUser && !user) {
     return redirectToLogin(request, contentSecurityPolicy);

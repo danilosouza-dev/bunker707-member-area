@@ -102,7 +102,7 @@ function supportsPresentationSettings(kind: string) {
  * criada (quem cuida de venda ajusta depois). Quem cria so nos proprios cursos ganha o curso novo na lista.
  */
 export async function createProduct(input: CreateProductInput): Promise<ActionResult<CreatedProduct>> {
-  return runAdminAction("catalog.create", createProductSchema, input, async ({ access, input: requested, user }) => {
+  return runAdminAction("catalog.create", "conteudo", createProductSchema, input, async ({ access, input: requested, user }) => {
     const canSetAccess = can(access, "catalog.access");
 
     if (!canSetAccess && requested.parentFormationId) {
@@ -189,7 +189,7 @@ export async function createProduct(input: CreateProductInput): Promise<ActionRe
 
 /** [catalog.write] Nome editavel no cabecalho (autosave com updated_at). */
 export async function renameProduct(input: RenameProductInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.write", renameProductSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", renameProductSchema, input, async ({ input: data }) => {
     const row = await updateRowGuarded<ProductRow>({
       columns: PRODUCT_COLUMNS,
       expectedUpdatedAt: data.expectedUpdatedAt,
@@ -207,7 +207,7 @@ export async function renameProduct(input: RenameProductInput): Promise<ActionRe
 
 /** [catalog.write] Aba Detalhes. */
 export async function updateProductDetails(input: UpdateProductDetailsInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.write", updateProductDetailsSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", updateProductDetailsSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
     const currentFormat = productFormatOf(current);
@@ -301,7 +301,7 @@ export async function updateProductDetails(input: UpdateProductDetailsInput): Pr
 
 /** [catalog.access] Aba Acesso e venda. */
 export async function updateProductAccess(input: UpdateProductAccessInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.access", updateProductAccessSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("catalog.access", "conteudo", updateProductAccessSchema, input, async ({ input: data, user }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
 
@@ -359,7 +359,7 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
 
 /** [catalog.write] Cantos do banner da pagina do produto: como a area ("inherit", nao gravado), arredondados ou retos. */
 export async function setProductHeroCorners(input: SetProductHeroCornersInput): Promise<ActionResult<ProductHeroCornersSaved>> {
-  return runAdminAction("catalog.write", setProductHeroCornersSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", setProductHeroCornersSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.id, db);
     const settings = await fetchProductSettings(data.id, db);
@@ -440,7 +440,7 @@ async function patchHeroSettings(id: string, hero: Record<string, unknown>, db: 
  * a imagem de destaque vira a capa (poster). null remove o video (e as opcoes) e a capa volta a ser a imagem.
  */
 export async function setProductHeroVideo(input: SetProductHeroVideoInput): Promise<ActionResult<ProductHeroVideoSaved>> {
-  return runAdminAction("catalog.write", setProductHeroVideoSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", setProductHeroVideoSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.id, db);
     const currentHero = heroRecordOf(await fetchProductSettings(data.id, db));
@@ -482,7 +482,7 @@ export async function setProductHeroVideo(input: SetProductHeroVideoInput): Prom
 
 /** [catalog.write] Opcoes do video de destaque (tocar sozinho, repetir, botoes, recorte do YouTube). */
 export async function setProductHeroVideoOptions(input: SetProductHeroVideoOptionsInput): Promise<ActionResult<ProductHeroVideoOptionsSaved>> {
-  return runAdminAction("catalog.write", setProductHeroVideoOptionsSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", setProductHeroVideoOptionsSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.id, db);
     const currentHero = heroRecordOf(await fetchProductSettings(data.id, db));
@@ -507,7 +507,7 @@ export async function setProductHeroVideoOptions(input: SetProductHeroVideoOptio
 
 /** [catalog.write] Capa (ate 720×1080) ou hero (1920×720) recortados no cliente em WebP; null remove. */
 export async function setProductImage(input: SetProductImageInput): Promise<ActionResult<ProductImageSaved>> {
-  return runAdminAction("catalog.write", setProductImageSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", setProductImageSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.id, db);
     const url = await persistProductImage(data.slot, data.id, data.image, "image");
@@ -555,7 +555,7 @@ export async function setProductImage(input: SetProductImageInput): Promise<Acti
 
 /** [catalog.publish] Checklist atual, para o dialogo "Publicar" (leitura sob demanda). */
 export async function loadPublishChecklist(input: { id: string }): Promise<ActionResult<PublishChecklist>> {
-  return runAdminAction("catalog.publish", productIdInputSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.publish", "leitura", productIdInputSchema, input, async ({ input: data }) => {
     const checklist = await getPublishChecklist(data.id);
 
     if (!checklist) {
@@ -568,7 +568,7 @@ export async function loadPublishChecklist(input: { id: string }): Promise<Actio
 
 /** [catalog.publish] Reavalia o checklist no servidor; com bloqueio devolve published: false. */
 export async function publishProduct(input: PublishProductInput): Promise<ActionResult<ProductPublished>> {
-  return runAdminAction("catalog.publish", publishProductSchema, input, async ({ access, input: data }) => {
+  return runAdminAction("catalog.publish", "conteudo", publishProductSchema, input, async ({ access, input: data }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
     const checklist = await evaluateChecklistFor(current);
@@ -615,7 +615,7 @@ export async function publishProduct(input: PublishProductInput): Promise<Action
 
 /** [catalog.publish] Voltar para Rascunho ou Arquivar. */
 export async function setProductSituation(input: SetProductSituationInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.publish", setProductSituationSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.publish", "dever_legal", setProductSituationSchema, input, async ({ input: data }) => {
     const row = await updateRowGuarded<ProductRow>({
       columns: PRODUCT_COLUMNS,
       expectedUpdatedAt: data.expectedUpdatedAt,
@@ -633,7 +633,7 @@ export async function setProductSituation(input: SetProductSituationInput): Prom
 
 /** [catalog.delete] Exclui de verdade (revoga acessos ligados); exige digitar o nome. */
 export async function deleteProduct(input: DeleteProductInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("catalog.delete", deleteProductSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.delete", "dever_legal", deleteProductSchema, input, async ({ input: data }) => {
     const row = await requireProductRow(data.id);
     const format = productFormatOf(row);
 

@@ -91,7 +91,12 @@ for role in $roles; do
     if bring_up "$role" "$target" "$ip"; then restored="$restored $role"; else failed="$failed $role"; warn "o $role voltou, mas a subida ou o smoke falhou (veja acima)."; fi
     rsh "$target" "docker ps --format '  {{.Names}}\t{{.Status}}' | head -n 25" || true
     srv_commit=$(rsh "$target" "cat '$REMOTE_DIR/.deployed-commit' 2>/dev/null" || true)
+    # A escola ligada ao Emissor de licencas (conectar-licencas): o Caddy dele so aceita o IPv4 de antes, e o restaurar traz IP
+    # novo. Este servidor nao e tocado aqui (o snapshot e o restaurar nunca mexem no do Emissor); fica o lembrete.
+    conectada=""
+    [ "$role" != membros ] || conectada=$(rsh "$target" "grep -qE '^EMISSOR_INTERNO_URL=.+' '$REMOTE_DIR/infra/compose/.env' && echo sim" 2>/dev/null || true)
     fw_close_all
+    [ "$conectada" != sim ] || echo "  a escola fala com o Emissor de licencas (EMISSOR_INTERNO_URL), que so aceita o IP de antes: rode conectar-licencas da main com CONFIRMAR=conectar (docs/20 §8C.9)."
     if [ -n "$srv_commit" ]; then
         echo "  commit no servidor: ${srv_commit:0:7}"
         if [ -n "$head_commit" ] && [ "$srv_commit" != "$head_commit" ]; then

@@ -109,7 +109,9 @@ run_backup() {
     du -sh "$stage" | sed 's/^/  /'
     log "Enviando ao restic ($RESTIC_REPOSITORY)..."
     restic_bin backup --tag bunker707-mautic --host bunker707-mautic --quiet "$stage" "$COMPOSE_DIR/volumes/config" "$COMPOSE_DIR/volumes/media"
-    restic_bin forget --tag bunker707-mautic --host bunker707-mautic --keep-daily "$keep_daily" --prune --quiet
+    # Agrupado so pelo host: a pasta de cada exportacao tem a hora no nome, e o agrupamento padrao do restic (host e
+    # caminhos) deixava cada snapshot sozinho no grupo dele, e a retencao nunca apagava nenhum.
+    restic_bin forget --tag bunker707-mautic --host bunker707-mautic --group-by host --keep-daily "$keep_daily" --prune --quiet
     local failures=0
     if [ "$do_check" = "1" ]; then restic_bin check --read-data-subset=10% || failures=1; fi
     ls -1dt "$backup_root"/stage/*/ 2>/dev/null | tail -n +3 | xargs -r rm -rf

@@ -2,6 +2,8 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { loadStudentAssistantState } from "@/server/webinars/assistant-queries";
 import { webinarsDb } from "@/server/webinars/db";
 import { guardRoomRequest, loadRoomContextFor, ok, roomErrorResponse, sessionIdOf, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O Assistente na sala do aluno (docs/30 §1.6, §6.6 e D24): GET ?sessao= devolve { enabled, replyAll, attendantsOnline }
 // para a dica "@assistente" (so com o Assistente ligado no ambiente, no webinario e com conexao de IA), o "Responder
@@ -14,6 +16,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;

@@ -9,6 +9,7 @@
 // servidor (requirePageArea em src/server/auth/permissions.ts).
 
 import { canAny, catalogScope, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
+import { NO_DISABLED_FEATURES, WEBINARS_FEATURE, featureVisible, type FeatureKey } from "../../../server/licensing/features";
 
 export type AdminNavId =
   | "hoje"
@@ -26,6 +27,8 @@ export type AdminNavChild = {
    * em /admin/produtos/pacotes; Todos os produtos continua ativo na pagina de um produto).
    */
   exact?: boolean;
+  /** Modulo da licenca de que a tela faz parte (docs/32 §11.8): sem ele ligado, o subitem some. */
+  feature?: FeatureKey;
   href: string;
   label: string;
   /** Permissoes que mostram o subitem (basta uma). Sem a lista, vale para quem ve a area. */
@@ -85,7 +88,7 @@ export const adminNavItems: readonly AdminNavItem[] = [
       { href: "/admin/comunicacao/avisos", label: "Avisos e pop-ups" },
       { href: "/admin/comunicacao/fluxos", label: "Fluxos" },
       { href: "/admin/comunicacao/modelos", label: "Modelos" },
-      { href: "/admin/comunicacao/webinarios", label: "Webinários" },
+      { feature: WEBINARS_FEATURE, href: "/admin/comunicacao/webinarios", label: "Webinários" },
       { href: "/admin/comunicacao/promocoes", label: "Promoções" }
     ],
     href: "/admin/comunicacao",
@@ -125,9 +128,10 @@ export function canSeeAdminArea(access: AdminAccess | null | undefined, id: Admi
 
 /**
  * Menu da pessoa: so as areas e os subitens que as permissoes dela abrem. Quem tem acesso so a alguns
- * cursos (Professor) ve "Meus cursos" no lugar de Produtos, sem subitens.
+ * cursos (Professor) ve "Meus cursos" no lugar de Produtos, sem subitens. `disabledFeatures`: os modulos
+ * desligados na licenca (o layout do admin le no servidor); a tela deles some do menu e da busca.
  */
-export function visibleAdminNav(access: AdminAccess | null | undefined): AdminNavItem[] {
+export function visibleAdminNav(access: AdminAccess | null | undefined, disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES): AdminNavItem[] {
   const scoped = Boolean(access && catalogScope(access) !== null);
 
   return adminNavItems
@@ -137,7 +141,14 @@ export function visibleAdminNav(access: AdminAccess | null | undefined): AdminNa
         return { ...item, children: undefined, label: "Meus cursos" };
       }
 
-      return item.children ? { ...item, children: item.children.filter((child) => !child.requires || canAny(access, child.requires)) } : item;
+      return item.children
+        ? {
+            ...item,
+            children: item.children.filter(
+              (child) => (!child.requires || canAny(access, child.requires)) && featureVisible(child.feature, disabledFeatures)
+            )
+          }
+        : item;
     });
 }
 

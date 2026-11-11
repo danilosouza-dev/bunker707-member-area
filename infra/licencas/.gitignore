@@ -1,0 +1,5 @@
+# Valores de verdade do servidor de licencas: nunca no repositorio (AGENTS.md, docs/13).
+.env
+.env.*
+!.env.example
+segredos/

@@ -6,6 +6,8 @@ import { listStudentQuestions, webinarsDb } from "@/server/webinars/room-queries
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { askStudentQuestion } from "@/server/webinars/room-writes";
 import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A aba Perguntas (docs/30 §1.3, §5.1 e D22): GET ?sessao=&ordem=votadas|recentes lista as abertas e as respondidas (a
 // dispensada so para o autor) com `mine` e `voted`; POST { sessionId, body, offsetMs? } faz a pergunta, sempre com o
@@ -25,6 +27,9 @@ export const revalidate = 0;
 const postSchema = questionBodySchema.extend({ offsetMs: offsetMsFieldSchema });
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -52,6 +57,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

@@ -1,0 +1,5 @@
+# CADDY_FRENTE=cloudflare: o proxy da Cloudflare ligado no endereco da escola, opcao avancada feita depois da instalacao
+# (docs/32 §3.1: so com a zona em "Completo (estrito)" e "Sempre usar HTTPS" desligado). O IP real vem em
+# CF-Connecting-IP, aceito so quando a conexao chega das faixas da Cloudflare (as mesmas da nossa producao).
+import /etc/caddy/cloudflare-trusted-proxies.caddyfile
+client_ip_headers CF-Connecting-IP X-Forwarded-For

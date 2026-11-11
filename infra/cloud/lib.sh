@@ -13,6 +13,9 @@
 #   SKIP_MARKETING=1       Mautic no mesmo servidor do app (colocacao), sem o segundo servidor
 #   MEET_TYPE              tipo do servidor C do Jitsi (cx23); JIBRI_TYPE, o do gravador por hora (cpx42)
 #   JIBRI_SECRETS          segredo do repositorio com as linhas CHAVE=VALOR do gravador (docs/20 §8B.3)
+#   LICENCAS_*             o servidor do Emissor de licencas (bunker707-licencas, docs/32 D39; docs/20 §8C): nomes,
+#                          imagem e minimos abaixo; LICENCAS_TYPE e LICENCAS_LOCATION forcam o tipo e o local; o Painel e
+#                          a conta de envio do Emissor (LICENCAS_PAINEL_*, LICENCAS_EMISSOR_*, LICENCAS_SEM_PAINEL)
 # Nunca imprime segredos; o que precisa ser guardado vai mascarado para o log do Actions (::add-mask::).
 
 set -euo pipefail
@@ -52,6 +55,59 @@ MAUTIC_DOMAIN="${MAUTIC_DOMAIN:-marketing.$ZONE_NAME}"
 MEET_DOMAIN="${MEET_DOMAIN:-meet.$ZONE_NAME}"
 # Webhook do gravador no app (docs/30 §5.3); JIBRI_SECRETS pode trazer outro WEBINAR_RECORDER_WEBHOOK_URL.
 RECORDER_WEBHOOK_URL="${WEBINAR_RECORDER_WEBHOOK_URL:-https://$APP_DOMAIN/api/webhooks/recorder}"
+
+# Emissor de licencas (docs/32 D39 e §11.2; docs/20 §8C): servidor so dele, o tipo e o local mais baratos que servem.
+LICENCAS_NAME="${LICENCAS_NAME:-bunker707-licencas}"
+# O Painel de licencas (so a equipe: proxy da Cloudflare e o login de e-mail e senha do proprio Painel, de qualquer
+# internet, sem lista de IPs e sem o Cloudflare Access; docs/32 D40) e a API publica das Instalacoes (registro A sem
+# proxy da Cloudflare: nenhum desafio de robos e so IPv4, que a conferencia inicial pede).
+# O nome da API vai gravado no produto vendido: trocar depois pede versao nova para todos os compradores.
+LICENCAS_PAINEL_DOMAIN="${LICENCAS_PAINEL_DOMAIN:-licencas.$ZONE_NAME}"
+LICENCAS_API_DOMAIN="${LICENCAS_API_DOMAIN:-licencas-api.$ZONE_NAME}"
+# A API interna do Emissor, so para a nossa escola (docs/api-interna.md do bunker-licensing; docs/20 §8C.9): um endereco
+# proprio, registro A sem proxy da Cloudflare (o Caddy do Emissor so aceita o IPv4 do servidor da escola, e o IP que ele
+# confere tem de ser o da conexao), que o conectar-licencas grava no .env da escola (EMISSOR_INTERNO_URL).
+LICENCAS_INTERNO_DOMAIN="${LICENCAS_INTERNO_DOMAIN:-licencas-interno.$ZONE_NAME}"
+# Imagem do Emissor publicada pelo CI do bunker-licensing no GHCR; a tag <tag>-implantacao traz o compose.yaml e o
+# .env.example do mesmo commit (docs/20 §8C.2).
+LICENCAS_IMAGEM="${LICENCAS_IMAGEM:-ghcr.io/danilosouza-dev/bunker-licensing}"
+LICENCAS_TAG="${LICENCAS_TAG:-main}"
+# No servidor: o compose do Emissor, o .env dele e segredos/ ficam em REMOTE_DIR/emissor, fora do que o sync_repo troca.
+LICENCAS_EMISSOR_DIR="${LICENCAS_EMISSOR_DIR:-$REMOTE_DIR/emissor}"
+# O Painel de licencas e a conta de envio do Emissor (docs/20 §8C.5): o deploy-licencas escreve no .env do compose do
+# Emissor, a cada rodada, cada LICENCAS_<NOME> como <NOME> (variaveis do repositorio no GitHub ou opcoes, todas com
+# padrao): o teto diario, quem recebe os avisos (e e a conta do produtor no Painel) e quem envia (um endereco do dominio
+# de envio ja verificado no Resend), as chaves anteriores da readocao e os links do Renovar e da loja. O endereco do
+# Painel e https://LICENCAS_PAINEL_DOMAIN. LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel e sem e-mail.
+LICENCAS_EMISSOR_EMAIL_PRODUTOR="${LICENCAS_EMISSOR_EMAIL_PRODUTOR:-$PRODUCER_EMAIL}"
+LICENCAS_EMISSOR_EMAIL_REMETENTE="${LICENCAS_EMISSOR_EMAIL_REMETENTE:-Bunker Members <licencas@mail.$ZONE_NAME>}"
+LICENCAS_PAINEL_TETO_DIARIO="${LICENCAS_PAINEL_TETO_DIARIO:-10}"
+# Backup de hora em hora no Storage Box que ja existe, num repositorio restic so dele.
+LICENCAS_RESTIC_REPOSITORY="${LICENCAS_RESTIC_REPOSITORY:-sftp:storagebox:bunker707/restic-licencas}"
+# A pasta das duas raizes, so cifradas, no mesmo Storage Box (cerimonia-licencas, docs/32 D41): fora do servidor do
+# Emissor e de qualquer repositorio restic.
+LICENCAS_RAIZES_PASTA="${LICENCAS_RAIZES_PASTA:-bunker707/licencas-raizes}"
+# As raizes publicas no repositorio (o que a cerimonia imprime, num commit): o EMISSOR_RAIZES do deploy-licencas e o
+# BUNKER_LICENSING_ROOTS do produto vendido (.github/workflows/pacote-escola.yml).
+LICENCAS_RAIZES_ARQUIVO="${LICENCAS_RAIZES_ARQUIVO:-$REPO_ROOT/infra/licencas/raizes.json}"
+# O minimo para Node (Emissor e, depois, o Painel), Postgres 16 e Caddy num servidor so (docs/20 §8C.1).
+LICENCAS_MIN_RAM_GB="${LICENCAS_MIN_RAM_GB:-2}"
+LICENCAS_MIN_DISK_GB="${LICENCAS_MIN_DISK_GB:-20}"
+LICENCAS_MIN_VCPU="${LICENCAS_MIN_VCPU:-1}"
+LICENCAS_ARQUITETURAS="${LICENCAS_ARQUITETURAS:-x86 arm}"
+
+# O ensaio de comprador real (docs/32 item 13; docs/20 §9E): um servidor novo e vazio, so para o ensaio e apagado
+# depois, que simula o servidor de um comprador; a escola fica num endereco da nossa zona, sem o proxy da Cloudflare.
+TESTE_NAME="${TESTE_NAME:-bunker707-teste}"
+TESTE_DOMAIN="${TESTE_DOMAIN:-escola-teste.$ZONE_NAME}"
+TESTE_API_DOMAIN="${TESTE_API_DOMAIN:-api.$TESTE_DOMAIN}"
+# O minimo do kit (infra/kit/kit.conf: 2 vCPU, uns 3,5 GB de memoria visiveis, 40 GB de disco; so x86-64).
+TESTE_MIN_RAM_GB="${TESTE_MIN_RAM_GB:-4}"
+TESTE_MIN_DISK_GB="${TESTE_MIN_DISK_GB:-40}"
+TESTE_MIN_VCPU="${TESTE_MIN_VCPU:-2}"
+TESTE_ARQUITETURAS="${TESTE_ARQUITETURAS:-x86}"
+# A pasta da instalacao no servidor do ensaio (KIT_PASTA_INSTALACAO do kit.conf, com o nome neutro do kit).
+TESTE_PASTA="${TESTE_PASTA:-/opt/membros}"
 
 HCLOUD_VERSION="${HCLOUD_VERSION:-1.70.1}"
 HCLOUD_SHA256="${HCLOUD_SHA256:-85182e0d51f9a26abeefd79b37de8a7fb51215d54c59ee290c3c9141e8aa887e}"
@@ -216,11 +272,53 @@ rules.append({"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0",
 print(json.dumps(rules))
 PY
 }
+# fw_rules_licencas [cidr ...]: o servidor do Emissor (docs/20 §8C.4). A API publica tem registro A sem proxy da
+# Cloudflare (as Instalacoes conferem de qualquer lugar, por IPv4), entao 80 e 443 vem de qualquer lugar: 80 para o
+# Let's Encrypt e o redirecionamento, 443 para a API e para o Painel (pela Cloudflare, com o login do proprio Painel).
+# Sem HTTP/3 (o Caddy dele fala h1 e h2). 22 so dos CIDRs informados, como nos outros servidores.
+fw_rules_licencas() {
+    python3 -I - "$@" <<'PY'
+import json, sys
+ssh = [c for c in sys.argv[1:] if c]
+anywhere = ["0.0.0.0/0", "::/0"]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules += [
+    {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt e redirecionamento)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (API das Instalacoes e o Painel, com o login dele)"},
+    {"direction": "in", "protocol": "icmp", "source_ips": anywhere, "description": "ping do monitor"},
+]
+print(json.dumps(rules))
+PY
+}
+# fw_rules_teste [cidr ...]: o servidor do ensaio de comprador (docs/20 §9E), como o de um comprador na Hetzner: 80 e 443
+# (TCP e, para o HTTP/3 do Caddy do kit, UDP) de qualquer lugar, ping, e a 22 so para o CIDR da etapa (o preparo do kit
+# abre a 22 no ufw do servidor; o firewall da Hetzner a deixa fechada fora das etapas).
+fw_rules_teste() {
+    python3 -I - "$@" <<'PY'
+import json, sys
+ssh = [c for c in sys.argv[1:] if c]
+anywhere = ["0.0.0.0/0", "::/0"]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules += [
+    {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt e redirecionamento)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (a escola do ensaio e a API dela)"},
+    {"direction": "in", "protocol": "udp", "port": "443", "source_ips": anywhere, "description": "HTTP/3"},
+    {"direction": "in", "protocol": "icmp", "source_ips": anywhere, "description": "ping"},
+]
+print(json.dumps(rules))
+PY
+}
 # fw_rules_for SERVER_NAME [cidr ...]: o conjunto de regras de cada papel, pelo nome do servidor.
 fw_rules_for() {
     local name="$1"; shift
     case "$name" in
         "$MEET_NAME") fw_rules_meet "$@" ;;
+        "$LICENCAS_NAME") fw_rules_licencas "$@" ;;
+        "$TESTE_NAME") fw_rules_teste "$@" ;;
         "$JIBRI_NAME_PREFIX"*) fw_rules_jibri "$@" ;;
         *) fw_rules "$@" ;;
     esac
@@ -312,12 +410,27 @@ wait_ssh() {  # wait_ssh user@host [tentativas]
     done
     die "SSH nao respondeu em $target."
 }
+# ensure_project_ssh_key: a chave de deploy (derivada do token) cadastrada no projeto da Hetzner (SSH_KEY_NAME), que todo
+# servidor nosso recebe ao nascer, no root; define pub (a chave publica). Para se o projeto tem outra com o mesmo nome.
+ensure_project_ssh_key() {
+    pub=$(deploy_public_key)
+    if hzj ssh-key describe "$SSH_KEY_NAME" >/dev/null 2>&1; then
+        if [ "$(hzj ssh-key describe "$SSH_KEY_NAME" | jq -r .public_key | awk '{print $2}')" != "$(printf '%s' "$pub" | awk '{print $2}')" ]; then
+            die "A chave '$SSH_KEY_NAME' na Hetzner e diferente da derivada do HCLOUD_TOKEN atual (o token mudou?). Veja docs/20, 'Sessao na nuvem', antes de continuar."
+        fi
+        echo "  ja existe e confere."
+    else
+        hz ssh-key create --name "$SSH_KEY_NAME" --public-key "$pub" --label app=bunker707 >/dev/null
+        echo "  criada."
+    fi
+}
 # Envia o repositorio (o commit atual) para REMOTE_DIR, sem tocar em .env, volumes e dados.
 # As migracoes sao trocadas inteiras: uma renomeada ou removida no repositorio nao pode sobrar no servidor
-# para o migrate.sh aplicar.
-sync_repo() {  # sync_repo user@host
-    local target="$1"
-    git -C "$REPO_ROOT" archive --format=tar HEAD | rsh "$target" "mkdir -p '$REMOTE_DIR' && rm -rf '$REMOTE_DIR/supabase/migrations' && tar -x -C '$REMOTE_DIR'"
+# para o migrate.sh aplicar. Com caminhos, envia so eles (o servidor de licencas recebe so a infra dele, nunca o
+# codigo do produto).
+sync_repo() {  # sync_repo user@host [caminho ...]
+    local target="$1"; shift
+    git -C "$REPO_ROOT" archive --format=tar HEAD -- "$@" | rsh "$target" "mkdir -p '$REMOTE_DIR' && rm -rf '$REMOTE_DIR/supabase/migrations' && tar -x -C '$REMOTE_DIR'"
     rsh "$target" "echo '$(git -C "$REPO_ROOT" rev-parse HEAD)' > '$REMOTE_DIR/.deployed-commit'"
 }
 # set_env user@host ARQUIVO CHAVE VALOR: grava CHAVE=VALOR no .env remoto (troca a linha ou acrescenta).
@@ -346,6 +459,48 @@ os.chmod(tmp, 0o600); os.replace(tmp, path)
 PY
 }
 get_env() { rsh "$1" "grep -E '^$3=' '$2' | head -n1 | cut -d= -f2-"; }
+# env_aplicar_kv user@host ENV KV: as linhas CHAVE=VALOR do arquivo KV (no servidor, 0600, que chegou pelo stdin do SSH ou
+# saiu do envelope) no .env ENV do servidor: troca a linha ou acrescenta, grava 0600 de uma vez (dono: quem roda, o
+# deploy) e apaga o KV em qualquer desfecho. O valor com aspas, barra invertida, $ ou quebra de linha e recusado antes de
+# gravar. E assim que o secrets-* e o conectar-licencas gravam segredo no .env de um servidor.
+env_aplicar_kv() {
+    rsh "$1" "python3 -I - '$2' '$3'" <<'PY'
+import atexit, os, re, sys
+path, kvpath = sys.argv[1], sys.argv[2]
+os.umask(0o077)
+# O texto claro sai do disco em qualquer desfecho (valor recusado, .env ilegivel).
+atexit.register(lambda: os.path.exists(kvpath) and os.remove(kvpath))
+updates = {}
+for line in open(kvpath, encoding="utf-8"):
+    line = line.rstrip("\n")
+    if "=" in line and re.match(r"^[A-Z0-9_]+=", line):
+        k, v = line.split("=", 1); updates[k] = v
+# O compose interpola os valores dentro de JSON (MAUTIC_CONFIG_PARAMETERS) e sem aspas: aspas, barra
+# invertida, $ e quebra de linha quebrariam o stack. Senha SMTP com esses caracteres vai codificada na URL.
+bad = [k for k, v in updates.items() if re.search(r'["\\$\n\r]', v)]
+if bad:
+    sys.exit("ERRO: valor com aspas, barra invertida, $ ou quebra de linha em " + ", ".join(bad) + "; codifique na URL (senha SMTP: urlencode) e gere o envelope de novo.")
+lines = open(path, encoding="utf-8").read().split("\n")
+seen = set()
+for i, line in enumerate(lines):
+    m = re.match(r"^([A-Z0-9_]+)=", line)
+    if m and m.group(1) in updates:
+        lines[i] = f"{m.group(1)}={updates[m.group(1)]}"; seen.add(m.group(1))
+while lines and lines[-1] == "":
+    lines.pop()
+for k, v in updates.items():
+    if k not in seen:
+        lines.append(f"{k}={v}")
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh: fh.write("\n".join(lines).rstrip("\n") + "\n")
+os.chmod(tmp, 0o600); os.replace(tmp, path)
+PY
+}
+# membros_recria user@host: o stack da escola (o servidor A) com o .env novo: o compose recria so o que mudou (o app), o
+# Auth e o app saudaveis antes do smoke (sem a espera, o primeiro /api/health pega o app ainda subindo e da 502).
+membros_recria() {
+    rsh "$1" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash -c '. infra/scripts/lib.sh; for s in auth app; do wait_healthy \$s 180; done' && bash infra/scripts/smoke.sh"
+}
 
 # remote_auth_curl ENV_FILE: comando (para rodar NO servidor) que chama a API administrativa do Auth com a
 # chave secreta do .env. A chave nunca sai do servidor nem entra em argv (ps, /proc): o shell remoto le do
@@ -357,9 +512,14 @@ remote_auth_curl() {
 # Senha de recuperacao dos backups: derivada do HCLOUD_TOKEN e cadastrada como segunda chave do repositorio
 # restic do papel. Sem o .env do servidor (servidor perdido), quem tem o token abre o backup (docs/20 §10.2).
 # A senha vai pelo stdin do SSH para um arquivo temporario 0600 no servidor, apagado em seguida.
-backup_recovery_key() {  # backup_recovery_key user@host membros|marketing
+backup_recovery_key() {  # backup_recovery_key user@host membros|marketing|licencas
     local target="$1" script f="$WORK_DIR/restic-recovery"
-    case "$2" in membros) script=infra/scripts/backup.sh ;; marketing) script=infra/mautic/scripts/backup.sh ;; *) die "papel invalido: $2" ;; esac
+    case "$2" in
+        membros) script=infra/scripts/backup.sh ;;
+        marketing) script=infra/mautic/scripts/backup.sh ;;
+        licencas) script=infra/licencas/scripts/backup.sh ;;
+        *) die "papel invalido: $2" ;;
+    esac
     node "$CLOUD_DIR/deploy-key.mjs" --secret --info bunker707-restic-recovery-v1 --out "$f" 2>/dev/null
     rsh "$target" "umask 077; k=\$(mktemp); cat > \"\$k\"; cd '$REMOTE_DIR' && bash $script --add-key=\"\$k\"; rc=\$?; rm -f \"\$k\"; exit \$rc" < "$f"
     rm -f "$f"
@@ -465,8 +625,200 @@ cf_apply_dns_meet() {
     return 0
 }
 
+# cf_dns_delete NOME TIPO: apaga os registros do tipo para NOME.ZONE_NAME (nenhum = nada a fazer).
+cf_dns_delete() {
+    local zone fqdn ids id; zone=$(cf_zone_id); fqdn="$1.$ZONE_NAME"
+    ids=$(cf_api GET "/zones/$zone/dns_records?type=$2&name=$fqdn" | jq -r '.result[].id')
+    for id in $ids; do cf_api DELETE "/zones/$zone/dns_records/$id" >/dev/null; done
+    [ -z "$ids" ] || printf '  %-10s %-6s apagado(s): %s\n' "$fqdn" "$2" "$(printf '%s\n' "$ids" | grep -c .)"
+}
+
+# ---- Emissor de licencas (bunker707-licencas; docs/32 D39; docs/20 §8C) ------------------------------
+# zona_sub DOMINIO: o nome dentro da zona (api.escola-teste.bunker707.com.br -> api.escola-teste); fora da zona, para.
+zona_sub() {
+    case "$1" in
+        *."$ZONE_NAME") printf '%s' "${1%."$ZONE_NAME"}" ;;
+        *) die "$1 nao esta na zona $ZONE_NAME." ;;
+    esac
+}
+# licencas_sub DOMINIO: o nome dentro da zona (licencas-api.bunker707.com.br -> licencas-api); fora da zona, para.
+licencas_sub() {
+    case "$1" in
+        *."$ZONE_NAME") printf '%s' "${1%."$ZONE_NAME"}" ;;
+        *) die "$1 nao esta na zona $ZONE_NAME (LICENCAS_PAINEL_DOMAIN, LICENCAS_API_DOMAIN e LICENCAS_INTERNO_DOMAIN ficam nela)." ;;
+    esac
+}
+# cf_apply_dns_licencas: so registros A, nunca AAAA (docs/32 §11.2). O Painel com o proxy da Cloudflare (a protecao dela
+# na frente do login do Painel, D40); a API sem proxy: nenhum desafio de robos barra a conferencia feita por servidor, e
+# o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. A API interna tambem sem proxy: o Caddy
+# do Emissor so deixa entrar o IPv4 do servidor da nossa escola, e confere o IP da propria conexao (com o proxy, seria o
+# da Cloudflare). AAAA que exista nos tres nomes e apagado.
+cf_apply_dns_licencas() {
+    local ip4 painel api interno; ip4=$(server_ip4 "$LICENCAS_NAME")
+    painel=$(licencas_sub "$LICENCAS_PAINEL_DOMAIN"); api=$(licencas_sub "$LICENCAS_API_DOMAIN"); interno=$(licencas_sub "$LICENCAS_INTERNO_DOMAIN")
+    cf_dns_upsert "$painel" A "$ip4" true
+    cf_dns_upsert "$api" A "$ip4" false
+    cf_dns_upsert "$interno" A "$ip4" false
+    cf_dns_delete "$painel" AAAA
+    cf_dns_delete "$api" AAAA
+    cf_dns_delete "$interno" AAAA
+}
+# licencas_dns_confere: o DNS dos tres nomes como o cf_apply_dns_licencas deixa, apontando para o servidor de agora.
+# O deploy so sobe o Caddy com isso certo: antes, o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo.
+licencas_dns_confere() {
+    local ip4 zone pair fqdn want got problems=""; ip4=$(server_ip4 "$LICENCAS_NAME"); zone=$(cf_zone_id)
+    for pair in "$LICENCAS_PAINEL_DOMAIN:true" "$LICENCAS_API_DOMAIN:false" "$LICENCAS_INTERNO_DOMAIN:false"; do
+        fqdn="${pair%:*}"; want="A $ip4 proxy=${pair##*:}"
+        got=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '[.result[] | select(.type=="A" or .type=="AAAA") | "\(.type) \(.content) proxy=\(.proxied)"] | join(", ")')
+        [ "$got" = "$want" ] || problems="$problems $fqdn (esperado: $want; achado: ${got:-nada})"
+    done
+    [ -z "$problems" ] || die "DNS do Emissor fora do lugar:$problems. Rode dns-licencas antes do deploy-licencas."
+}
+# licencas_interno_ips: quem o Caddy do Emissor deixa chegar na API interna (LICENCAS_INTERNO_IPS): o IPv4 do servidor da
+# nossa escola (MEMBROS_NAME), lido da API da Hetzner como as outras etapas leem. Sem o servidor (a producao guardada em
+# snapshot), 127.0.0.1/32, ninguem de fora: o IP de antes pode ser de outro cliente da Hetzner, e o restaurar traz IP
+# novo. O conectar-licencas abre de novo para o IP de agora.
+licencas_interno_ips() {
+    if server_exists "$MEMBROS_NAME"; then printf '%s/32' "$(server_ip4 "$MEMBROS_NAME")"; else printf '127.0.0.1/32'; fi
+}
+# Toda etapa que muda o servidor de licencas so roda da main (a do workflow ja barra; esta e a segunda trava, para o
+# script chamado de outro lugar no Actions). Fora do Actions (terminal com os tokens), nao ha branch a conferir.
+licencas_so_da_main() {
+    [ -z "${GITHUB_ACTIONS:-}" ] || [ "${GITHUB_REF:-}" = "refs/heads/main" ] \
+        || die "As etapas que mudam o servidor de licencas so rodam da main (recebido: ${GITHUB_REF:-sem branch}). Fluxo: tarefa -> dev -> main -> servidor."
+}
+
+# licencas_raizes_json: as raizes PUBLICAS (rid e chave publica), numa linha de JSON. Vem de infra/licencas/raizes.json,
+# que a cerimonia-licencas imprime e vai num commit (docs/32 D41); sem o arquivo, do segredo LICENCAS_RAIZES de antes da
+# cerimonia automatica. O arquivo vale por cima do segredo: e com ele que o produto vendido e gerado. Sem nenhum, nada.
+licencas_raizes_json() {
+    python3 -I - "$LICENCAS_RAIZES_ARQUIVO" "${LICENCAS_RAIZES:-}" <<'PY'
+import json, os, re, sys
+arquivo, segredo = sys.argv[1], sys.argv[2]
+def raizes(texto, origem):
+    try:
+        lista = json.loads(texto)
+    except ValueError:
+        sys.exit(f'ERRO: {origem} nao e JSON: [{{"rid":"...","publicKey":"..."}}].')
+    if not (isinstance(lista, list) and 1 <= len(lista) <= 4 and all(
+            isinstance(r, dict) and set(r) == {"rid", "publicKey"} and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(r["rid"]))
+            and re.fullmatch(r"[A-Za-z0-9_-]{43}", str(r["publicKey"])) for r in lista)) or len({r["rid"] for r in lista}) != len(lista):
+        sys.exit(f"ERRO: {origem} precisa ser a lista de 1 a 4 raizes publicas da cerimonia, so com rid e publicKey.")
+    return json.dumps(lista, separators=(",", ":"))
+if os.path.exists(arquivo):
+    valor = raizes(open(arquivo, encoding="utf-8").read(), "infra/licencas/raizes.json")
+    if segredo.strip() and raizes(segredo, "LICENCAS_RAIZES") != valor:
+        print("AVISO: o segredo LICENCAS_RAIZES e diferente de infra/licencas/raizes.json; vale o arquivo (apague o segredo no GitHub).", file=sys.stderr)
+    print(valor)
+elif segredo.strip():
+    print(raizes(segredo, "LICENCAS_RAIZES"))
+PY
+}
+
+# ---- o plano mais barato (plan-licencas e teste-plano) -----------------------------------------------
+# plano_barato ROTULO PREFIXO PARA MIN_RAM MIN_DISK MIN_CPU ARQUITETURAS LOCAIS TIPO LOCAL: le $WORK_DIR/server-types.json
+# (hcloud server-type list), mostra os tipos que servem com o preco por mes em cada local que a API informa e escolhe o
+# mais barato com estoque (empate: LOCATION, depois FALLBACK_LOCATIONS, depois os outros; x86 antes). Grava
+# $WORK_DIR/plan-ROTULO.env com PREFIXO_TYPE, PREFIXO_LOCATION, PREFIXO_PRICE e PREFIXO_FALLBACK_LOCATIONS (o mesmo tipo
+# pelo mesmo preco noutros locais, para quando faltar estoque na hora de criar). Nao cria nada.
+plano_barato() {
+    python3 -I - "$WORK_DIR/server-types.json" "$WORK_DIR/plan-$1.env" "$LOCATION" "$FALLBACK_LOCATIONS" "$4" "$5" "$6" "$7" \
+        "$8" "$9" "${10}" "$1" "$2" "$3" <<'PY'
+import json, os, sys
+types = json.load(open(sys.argv[1]))
+out_env, preferred, fallbacks = sys.argv[2], sys.argv[3], sys.argv[4].split()
+min_ram, min_disk, min_cpu = float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7])
+archs = sys.argv[8].replace(",", " ").split()
+only = sys.argv[9].replace(",", " ").split()
+forced_type, forced_loc = sys.argv[10], sys.argv[11]
+rotulo, prefixo, para = sys.argv[12], sys.argv[13], sys.argv[14]
+# Empate de preco: o local preferido e as reservas de sempre primeiro, depois os outros em ordem alfabetica; x86 antes.
+order = [preferred] + [l for l in fallbacks if l != preferred]
+def rank(loc):
+    return (order.index(loc) if loc in order else len(order), loc)
+
+def monthly(price, key="price_monthly"):
+    m = price.get(key) or {}
+    try:
+        return float(m.get("net") or m.get("gross"))
+    except (TypeError, ValueError):
+        return None
+
+def available(t, loc):
+    # server_types[].locations[] = {name, available, deprecation}; sem o campo, desconhecido (a criacao tenta e a API
+    # recusa o que nao tem estoque).
+    for entry in t.get("locations") or []:
+        if isinstance(entry, dict) and entry.get("name") == loc:
+            if entry.get("deprecation"):
+                return False
+            return entry.get("available") if isinstance(entry.get("available"), bool) else None
+    return None
+
+rows, below = [], set()
+for t in types:
+    if t.get("deprecated"):
+        continue
+    arch = t.get("architecture") or "x86"
+    if arch not in archs or (t.get("memory") or 0) < min_ram or (t.get("disk") or 0) < min_disk or (t.get("cores") or 0) < min_cpu:
+        below.add(t["name"])
+        continue
+    if forced_type and t["name"] != forced_type:
+        continue
+    for p in t.get("prices") or []:
+        loc = p.get("location")
+        if (only and loc not in only) or (forced_loc and loc != forced_loc):
+            continue
+        price = monthly(p)
+        if price is None:
+            continue
+        rows.append({"name": t["name"], "loc": loc, "cores": t.get("cores"), "mem": t.get("memory"), "disk": t.get("disk"),
+                     "cpu": t.get("cpu_type"), "arch": arch, "price": price, "hourly": monthly(p, "price_hourly"), "avail": available(t, loc)})
+
+rows.sort(key=lambda r: (r["price"], rank(r["loc"]), r["arch"] != "x86", r["name"]))
+print(f"Tipos que servem para {para} (minimo {min_ram:g} GB de memoria, {min_disk:g} GB de disco e {min_cpu:g} vCPU; {' ou '.join(archs)}), do mais barato:")
+print(f"{'tipo':8} {'local':6} {'vcpu':>4} {'ram':>5} {'disco':>6} {'cpu':10} {'arq':4} {'EUR/mes':>8} disponivel")
+for r in rows:
+    avail = "?" if r["avail"] is None else ("sim" if r["avail"] else "nao")
+    print(f"{r['name']:8} {r['loc']:6} {r['cores']!s:>4} {r['mem']!s:>5} {r['disk']!s:>6} {str(r['cpu']):10} {r['arch']:4} {r['price']:>8.2f} {avail}")
+if below:
+    print("Fora (abaixo do minimo ou de outra arquitetura): " + ", ".join(sorted(below)))
+cands = [r for r in rows if r["avail"] is not False]
+if not cands:
+    print(f"\nNenhum tipo disponivel serve para {para}" + (f" (forcado: {forced_type})" if forced_type else "") + (f" em {forced_loc}" if forced_loc else "") + ". Nada foi criado.")
+    sys.exit(1)
+best = cands[0]
+fallback = [r["loc"] for r in cands[1:] if r["name"] == best["name"] and abs(r["price"] - best["price"]) < 0.005]
+print(f"\n{rotulo}: {best['name']} em {best['loc']} ({best['cores']} vCPU {best['arch']}, {best['mem']} GB, {best['disk']} GB disco) por EUR {best['price']:.2f}/mes sem IVA, mais o IPv4")
+if fallback:
+    print("Sem estoque na hora de criar, o mesmo tipo pelo mesmo preco em: " + " ".join(fallback))
+if best["hourly"] is not None:
+    print(f"Por hora: EUR {best['hourly']:.4f} sem IVA (a Hetzner cobra por hora, ate o teto do mes, enquanto o servidor existir).")
+with open(out_env, "w") as fh:
+    fh.write(f"{prefixo}_TYPE={best['name']}\n{prefixo}_LOCATION={best['loc']}\n{prefixo}_PRICE={best['price']:.2f}\n{prefixo}_FALLBACK_LOCATIONS=\"{' '.join(fallback)}\"\n")
+gh = os.environ.get("GITHUB_OUTPUT")
+if gh:
+    with open(gh, "a") as fh:
+        fh.write(f"{rotulo}_type={best['name']}\n{rotulo}_location={best['loc']}\n{rotulo}_price={best['price']:.2f}\n")
+PY
+}
+
 # ---- Storage Box ------------------------------------------------------------------------------------
 storage_box_json() { hzj storage-box describe "$STORAGE_BOX_NAME" 2>/dev/null || true; }
+# box_alvo: o usuario e o host do Storage Box (box_user e box_host), ou para.
+box_alvo() {
+    local box; box=$(storage_box_json)
+    box_user=$(printf '%s' "$box" | jq -r '.username // .user // empty'); box_host=$(printf '%s' "$box" | jq -r '.server // .host // empty')
+    [ -n "$box_user" ] && [ -n "$box_host" ] || die "Sem o Storage Box $STORAGE_BOX_NAME (ou sem usuario e host no JSON dele)."
+}
+# box_sftp: os comandos do sftp pela entrada (um por linha), no Storage Box, direto do runner: o box aceita SSH de fora
+# (provision.sh) com a chave de backup derivada do token. Com -b, o primeiro comando que falha para tudo (o `-` na frente
+# de um comando ignora a falha dele).
+box_sftp() {
+    local key="$WORK_DIR/storagebox_key"
+    [ -f "$key" ] || node "$CLOUD_DIR/deploy-key.mjs" --out "$key" --info bunker707-backup-key-v1 >/dev/null
+    sftp -q -b - -P "${STORAGE_BOX_SSH_PORT:-23}" -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 \
+        -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOSTS" -o LogLevel=ERROR "$box_user@$box_host"
+}
 
 # ---- Webinarios: segredos do gravador, webhook assinado e preco por hora --------------------------------
 # JIBRI_SECRETS e um segredo do repositorio com linhas CHAVE=VALOR (docs/20 §8B.3; docs/30 §7.3, I4): o

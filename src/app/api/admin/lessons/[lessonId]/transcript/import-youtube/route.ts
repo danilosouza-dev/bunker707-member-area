@@ -10,6 +10,7 @@ import {
 import { requireApiRole } from "@/server/auth/permissions";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ lessonId: string }> };
 
@@ -18,6 +19,9 @@ export const maxDuration = 60;
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const { lessonId } = await context.params;
   const auth = await requireApiRole("catalog.content", { lessonIds: [lessonId] });
 

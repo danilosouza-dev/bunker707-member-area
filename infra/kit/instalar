@@ -1,0 +1,613 @@
+#!/usr/bin/env bash
+# Instalador do Bunker Members (o kit do produto licenciado; docs/32 §3.2 e §11.7; docs/20 §9D). Um comando, no
+# servidor do comprador, com o Pacote da versao aberto na pasta da instalacao (KIT_PASTA_INSTALACAO, do kit.conf):
+#   sudo bash /opt/<nome>/infra/kit/instalar                      guiado: pergunta so o que falta
+#   sudo bash /opt/<nome>/infra/kit/instalar --respostas ARQ      com o arquivo de respostas (a IA ou a equipe)
+#   sudo bash .../instalar --restauracao [--respostas ARQ]        instala sem Chave de ativacao, para membros restaurar
+#   sudo bash .../instalar --simular [--respostas ARQ]            mostra o plano; nada muda
+#   bash .../instalar --conferir [--endereco E] [--json]          so a conferencia do servidor, sem Licenca (antes de
+#                                                                  comprar); nao precisa do pacote nem de sudo
+#   sudo membros instalar ...                                      o mesmo, depois do primeiro passo
+# Outras opcoes: --ativacao-arquivo ARQ (a Chave de ativacao num arquivo so do administrador), --endereco-api, --ip.
+#
+# Passos, cada um feito uma vez e anotado em KIT_ARQUIVO_INSTALACAO (rodar de novo continua de onde parou, e nunca
+# apaga dado: nada aqui roda `down -v`, apaga volume, gera segredo por cima ou recria repositorio de backup):
+#    1. conferir o servidor (sempre): sistema, vCPU, memoria, disco, portas, IPv4, DNS (aviso), saida HTTPS e de e-mail
+#    2. conferir o pacote (sempre): o sha256 de todo arquivo e imagem do manifesto e, com chave, a assinatura
+#    3. preparar o servidor (preparar-servidor.sh: Docker, firewall, troca, atualizacoes; nunca tranca o dono)
+#    4. carregar as imagens do pacote (docker load, sem login de registry) e conferir o id de cada uma
+#    5. gerar as senhas e os segredos, dentro da imagem do app (sem Node no servidor), num arquivo so do administrador
+#    6. subir o banco e os servicos (sem o Caddy: o certificado so e pedido no passo 12, depois do DNS)
+#    7. criar o banco (migrar.sh)            8. ligar o agendador de minuto (o tick no Vault)
+#    9. a primeira conta da equipe (o dono, sem senha: o link de entrada aparece no fim)
+#   10. o e-mail: o dominio de envio no provedor, a porta que sai e um e-mail de teste
+#   11. o backup: destino, agendamento, primeiro backup e o kit de recuperacao (ou o aceite escrito do backup so aqui)
+#   12. o endereco: o DNS dos dois nomes e o certificado HTTPS
+#   13. a conferencia final (smoke.sh e o agendador rodando)       14. ativar a Licenca (a Chave so e gasta aqui)
+# No modo de restauracao: sem 7, 8, 9, 10, 13 e 14 (tudo vem do backup); o 11 so grava o destino e para o backup diario
+# ate a restauracao; o 12 so avisa se o endereco ainda aponta para o servidor antigo.
+# Segredo nenhum aparece na tela, no registro ou na linha de comando. Codigos de saida: docs/20 §9D
+# (`python3 instalador.py codigos`); 0 ok; 1 uso; 7 pede uma pessoa no terminal; 10 a 14 os do preparo; 20 a 55 os do
+# instalador.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: o script usa arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+
+# A chave do pacote vinda do ambiente vale por cima do servidor e do pacote (o kit.conf a mistura com a do pacote).
+CHAVE_DO_AMBIENTE="${KIT_CHAVE_DO_PACOTE:-}"
+. "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/lib-kit.sh"
+umask 022
+KIT_ARQUIVO_CHAVES="${KIT_ARQUIVO_CHAVES:-$KIT_PASTA_ESTADO/chaves-do-pacote}"
+ARQ=$KIT_ARQUIVO_INSTALACAO
+
+ajuda() { sed -n 2,33p "$KIT_DIR/instalar"; }
+
+acao=instalar
+modo=instalacao
+respostas=""
+ativacao_arquivo=""
+json=0
+conf_endereco=""
+conf_api=""
+conf_ip=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --respostas) [ $# -ge 2 ] || sair "$SAI_USO" "--respostas precisa do arquivo."; respostas=$2; shift ;;
+        --respostas=*) respostas=${1#*=} ;;
+        --ativacao-arquivo) [ $# -ge 2 ] || sair "$SAI_USO" "--ativacao-arquivo precisa do arquivo."; ativacao_arquivo=$2; shift ;;
+        --ativacao-arquivo=*) ativacao_arquivo=${1#*=} ;;
+        --conferir) acao=conferir ;;
+        --simular) acao=simular ;;
+        --restauracao) modo=restauracao ;;
+        --endereco) [ $# -ge 2 ] || sair "$SAI_USO" "--endereco precisa do endereco."; conf_endereco=$2; shift ;;
+        --endereco=*) conf_endereco=${1#*=} ;;
+        --endereco-api) [ $# -ge 2 ] || sair "$SAI_USO" "--endereco-api precisa do endereco."; conf_api=$2; shift ;;
+        --endereco-api=*) conf_api=${1#*=} ;;
+        --ip) [ $# -ge 2 ] || sair "$SAI_USO" "--ip precisa do IPv4."; conf_ip=$2; shift ;;
+        --ip=*) conf_ip=${1#*=} ;;
+        --json) json=1 ;;
+        -h|--help) ajuda; exit 0 ;;
+        *) sair "$SAI_USO" "opcao desconhecida: $1 (veja: bash instalar --help)" ;;
+    esac
+    shift
+done
+[ "$json" = 0 ] || [ "$acao" = conferir ] || sair "$SAI_USO" "--json so vale com --conferir."
+
+precisa() {
+    local b
+    for b in "$@"; do
+        command -v "$b" >/dev/null 2>&1 || { inst_py codigo 37 "falta o $b neste servidor." 2>/dev/null || printf 'ERRO (codigo 37): falta o %s neste servidor.\n' "$b" >&2; exit 37; }
+    done
+}
+
+# ---- conferir (sem Licenca, sem pacote e sem sudo) ------------------------------------------------------------------
+
+caddy_no_ar() { command -v docker >/dev/null 2>&1 && [ -n "$(compose ps -q --status running caddy 2>/dev/null | head -n1)" ]; }
+
+if [ "$acao" = conferir ]; then
+    precisa python3 curl
+    if [ -z "$conf_endereco" ] && [ -r "$ENV_FILE" ]; then
+        conf_endereco=$(env_value APP_PUBLIC_URL)
+        [ -n "$conf_api" ] || conf_api=$(env_value SUPABASE_PUBLIC_URL)
+    fi
+    args=(--dns-bloqueia)
+    if [ -n "$conf_endereco" ]; then
+        conf_endereco=$(inst_py normalizar-host "$conf_endereco")
+        [ -n "$conf_api" ] || conf_api="api.$conf_endereco"
+        conf_api=$(inst_py normalizar-host "$conf_api")
+        args+=(--endereco "$conf_endereco" --endereco-api "$conf_api")
+    fi
+    [ -z "$conf_ip" ] || args+=(--ip "$conf_ip")
+    ! caddy_no_ar || args+=(--portas-nossas)
+    [ "$json" = 0 ] || args+=(--json)
+    [ "$json" = 1 ] || log "Conferindo este servidor para o Bunker Members (nada muda e nenhuma Licenca e usada)"
+    rc=0
+    inst_py conferir "${args[@]}" || rc=$?
+    if [ "$json" = 0 ]; then
+        if [ "$rc" = 0 ]; then log "Este servidor serve para a escola."; else printf '\nEste servidor ainda nao serve (acima).\n' >&2; fi
+    fi
+    exit "$rc"
+fi
+
+# ---- instalar e simular ---------------------------------------------------------------------------------------------
+
+precisa python3 curl
+pacote_aqui=$(readlink -f -- "$KIT_PASTA_PACOTE")
+instalacao_aqui=$(readlink -f -- "$KIT_PASTA_INSTALACAO" 2>/dev/null || printf '%s' "$KIT_PASTA_INSTALACAO")
+if [ "$pacote_aqui" != "$instalacao_aqui" ]; then
+    inst_py codigo 20 "o pacote esta em $pacote_aqui, e a instalacao fica em $KIT_PASTA_INSTALACAO. Abra o pacote la (os dados da escola ficam ao lado dele) e rode: sudo bash $KIT_PASTA_INSTALACAO/infra/kit/instalar"
+    exit 20
+fi
+if [ "$acao" = instalar ]; then
+    mkdir -p "$KIT_PASTA_ESTADO" 2>/dev/null && [ -w "$KIT_PASTA_ESTADO" ] \
+        || sair "$SAI_USO" "O instalador muda o servidor: rode com sudo (sudo bash $KIT_DIR/instalar)."
+    chmod 755 "$KIT_PASTA_ESTADO" 2>/dev/null || true
+fi
+
+PASSO_ATUAL=""
+PASSO_SITUACAO=""
+PASSO_MOTIVO=""
+# Os nomes dos passos na tela (os mesmos de NOMES_DOS_PASSOS em instalador.py).
+nome_do_passo() {
+    case "$1" in
+        conferencia) printf 'Conferir o servidor' ;;
+        pacote) printf 'Conferir o pacote (sha256 e assinatura)' ;;
+        preparar) printf 'Preparar o servidor (Docker, firewall, troca, atualizacoes)' ;;
+        imagens) printf 'Carregar as imagens do pacote' ;;
+        segredos) printf 'Gerar as senhas e os segredos' ;;
+        servicos) printf 'Subir o banco e os servicos' ;;
+        migracoes) printf 'Criar o banco (migracoes)' ;;
+        agendador) printf 'Ligar o agendador de minuto' ;;
+        conta_do_dono) printf 'Criar a primeira conta da equipe' ;;
+        email) printf 'Configurar e testar o e-mail' ;;
+        backup) printf 'Ligar o backup e o kit de recuperacao' ;;
+        endereco) printf 'Conferir o endereco e o certificado' ;;
+        conferencia_final) printf 'Conferencia final' ;;
+        ativacao) printf 'Ativar a Licenca' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+# parar CODIGO [MOTIVO]: o passo de agora falhou (a mensagem com o codigo ja saiu): anota e para.
+parar() {
+    local codigo=$1 motivo=${2:-}
+    if [ -n "$PASSO_ATUAL" ] && [ "$acao" = instalar ]; then
+        inst_py estado-passo "$ARQ" "$PASSO_ATUAL" falhou "$codigo" "$motivo" >/dev/null 2>&1 || true
+        printf '\nA instalacao parou em "%s". Depois de corrigir, rode de novo o mesmo comando: ela continua daqui.\n' \
+            "$(nome_do_passo "$PASSO_ATUAL")" >&2
+    fi
+    PASSO_ATUAL=""
+    exit "$codigo"
+}
+# falhar CODIGO MENSAGEM: a mensagem com o codigo (causa, o que fazer, de quem e), anota e para.
+falhar() {
+    local codigo=$1
+    shift
+    inst_py codigo "$codigo" "$*" || true
+    parar "$codigo" "$*"
+}
+interrompido() {
+    [ -z "$PASSO_ATUAL" ] || inst_py estado-passo "$ARQ" "$PASSO_ATUAL" interrompido >/dev/null 2>&1 || true
+    PASSO_ATUAL=""
+    printf '\nInterrompido. Rode o mesmo comando de novo para continuar de onde parou.\n' >&2
+    exit 130
+}
+# Um comando que falhou sem passar por falhar/parar (set -e): o passo fica anotado como falhou, com o codigo dele.
+encerrar() {
+    local rc=$?
+    if [ "$rc" != 0 ] && [ -n "$PASSO_ATUAL" ] && [ "$acao" = instalar ]; then
+        inst_py estado-passo "$ARQ" "$PASSO_ATUAL" falhou "$rc" "parou de um jeito inesperado (linhas acima)" >/dev/null 2>&1 || true
+        printf '\nA instalacao parou em "%s" (codigo %s, linhas acima). Rode de novo o mesmo comando: ela continua daqui. Se repetir, fale com o suporte.\n' \
+            "$(nome_do_passo "$PASSO_ATUAL")" "$rc" >&2
+    fi
+}
+trap interrompido INT TERM HUP
+trap encerrar EXIT
+
+# passo NOME FUNCAO [sempre]: roda o passo se ainda nao foi feito (ou sempre, para as conferencias).
+passo() {
+    local nome=$1 funcao=$2 sempre=${3:-}
+    local feito
+    feito=$(inst_py estado-ler "$ARQ" "passos.$nome.situacao" 2>/dev/null || true)
+    if [ -z "$sempre" ] && { [ "$feito" = ok ] || [ "$feito" = pulado ]; }; then
+        printf '  feito: %s\n' "$(nome_do_passo "$nome")"
+        return 0
+    fi
+    PASSO_ATUAL=$nome
+    PASSO_SITUACAO=ok
+    PASSO_MOTIVO=""
+    log "$(nome_do_passo "$nome")"
+    "$funcao"
+    inst_py estado-passo "$ARQ" "$nome" "$PASSO_SITUACAO" "" "$PASSO_MOTIVO"
+    PASSO_ATUAL=""
+}
+pular() {
+    local nome=$1 motivo=$2
+    inst_py estado-passo "$ARQ" "$nome" pulado "" "$motivo"
+}
+
+# As chaves que conferem o pacote: as do ambiente; senao as que este servidor ja guardou (a primeira instalacao com
+# pacote assinado grava); senao as do kit.conf do pacote (a primeira vez).
+chaves_confiaveis() {
+    if [ -n "$CHAVE_DO_AMBIENTE" ]; then printf '%s' "$CHAVE_DO_AMBIENTE"
+    elif [ -s "$KIT_ARQUIVO_CHAVES" ]; then tr '\n' ' ' < "$KIT_ARQUIVO_CHAVES"
+    else printf '%s' "$KIT_CHAVE_DO_PACOTE"
+    fi
+}
+
+conferir_pacote() {
+    local args=("$KIT_PASTA_PACOTE" --chaves "$(chaves_confiaveis)") saida rc=0
+    [ "$acao" != instalar ] || args+=(--gravar-chaves "$KIT_ARQUIVO_CHAVES")
+    saida=$(inst_py manifesto-conferir "${args[@]}") || rc=$?
+    [ "$rc" = 0 ] || parar "$rc"
+    eval "$saida"
+    if [ -n "$PACOTE_INSTALACAO" ] && [ -n "${ENDERECO:-}" ] && [ "$PACOTE_INSTALACAO" != "$ENDERECO" ]; then
+        falhar 35 "este pacote foi gerado para $PACOTE_INSTALACAO, e esta escola e $ENDERECO."
+    fi
+    # A imagem do fundador traz gravado tambem o endereco da API (docs/20 §9D.6).
+    if [ -n "$PACOTE_INSTALACAO_API" ] && [ -n "${ENDERECO_API:-}" ] && [ "$PACOTE_INSTALACAO_API" != "$ENDERECO_API" ]; then
+        falhar 35 "este pacote foi gerado com a API em $PACOTE_INSTALACAO_API, e esta escola usa $ENDERECO_API."
+    fi
+}
+
+# As respostas: o arquivo de respostas, o que a instalacao ja tem (o arquivo de segredos) e, no terminal, as perguntas.
+args=(--modo "$modo" --segredos "$ENV_FILE" --estado "$ARQ" --pasta-backup "$KIT_PASTA_BACKUP")
+[ -z "$respostas" ] || args+=(--arquivo "$respostas")
+[ -z "$ativacao_arquivo" ] || args+=(--ativacao-arquivo "$ativacao_arquivo")
+if [ "$acao" = simular ]; then args+=(--permitir-faltas); elif [ -t 0 ]; then args+=(--perguntar); fi
+rc=0
+saida=$(inst_py respostas "${args[@]}") || rc=$?
+[ "$rc" = 0 ] || exit "$rc"
+eval "$saida"
+saida=""
+
+if [ "$acao" = simular ]; then
+    conferir_pacote
+    inst_py plano "estado=$ARQ" "modo=$modo" "endereco=$ENDERECO" "endereco_api=$ENDERECO_API" "versao=$PACOTE_VERSAO" \
+        "pacote=$KIT_PASTA_PACOTE" "assinado=$PACOTE_ASSINADO" "faltando=$RESPOSTAS_FALTANDO"
+    exit 0
+fi
+
+inst_py estado-iniciar "$ARQ" "modo=$modo" "endereco=$ENDERECO" "endereco_api=$ENDERECO_API" || exit $?
+
+# ---- os passos ------------------------------------------------------------------------------------------------------
+
+passo_conferencia() {
+    local args=(--endereco "$ENDERECO" --endereco-api "$ENDERECO_API") rc=0
+    [ -z "$IP_DO_SERVIDOR" ] || args+=(--ip "$IP_DO_SERVIDOR")
+    ! caddy_no_ar || args+=(--portas-nossas)
+    inst_py conferir "${args[@]}" || rc=$?
+    [ "$rc" = 0 ] || parar "$rc" "a conferencia do servidor achou um problema"
+}
+
+passo_pacote() {
+    conferir_pacote
+    inst_py estado-iniciar "$ARQ" "versao=$PACOTE_VERSAO" "manifesto_sha256=$PACOTE_MANIFESTO_SHA256" || parar $? "outro pacote"
+    case "$PACOTE_ASSINADO" in
+        sim) printf '  Pacote do Bunker Members %s: %s arquivos conferidos e a assinatura confere.\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
+        *) printf '  Pacote do Bunker Members %s: %s arquivos conferidos pelo sha256. Sem assinatura conferida: a chave do pacote\n  ainda nao foi gravada neste kit (no lote fundador, a equipe leva o pacote; docs/20 §9D).\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
+    esac
+    # O comando de operacao no PATH do administrador.
+    if [ "$(readlink -f -- "$KIT_LINK_DO_COMANDO" 2>/dev/null)" != "$KIT_DIR/membros" ]; then
+        mkdir -p "$(dirname -- "$KIT_LINK_DO_COMANDO")"
+        ln -sfn "$KIT_DIR/membros" "$KIT_LINK_DO_COMANDO"
+    fi
+    chmod 755 "$KIT_DIR/membros" "$KIT_DIR/instalar" 2>/dev/null || true
+}
+
+passo_preparar() {
+    local args=() rc=0
+    [ -z "$CHAVE_SSH" ] || args+=(--chave-ssh "$CHAVE_SSH")
+    [ "$REINICIO_AUTOMATICO" != sim ] || args+=(--reinicio-automatico)
+    bash "$KIT_SCRIPT_PREPARAR" "${args[@]}" || rc=$?
+    case "$rc" in
+        0) ;;
+        7|10|11|12|13|14) parar "$rc" "o preparo do servidor parou com o codigo $rc" ;;
+        *) falhar 39 "o preparo do servidor parou com o codigo $rc (linhas acima)." ;;
+    esac
+}
+
+passo_imagens() {
+    local arquivo id tags papel tag atual
+    while IFS=$'\x1f' read -r arquivo id tags papel; do
+        tag=${tags%% *}
+        atual=$(docker image inspect -f '{{.Id}}' "$tag" 2>/dev/null || true)
+        if [ "$atual" = "$id" ]; then
+            printf '  %s ja esta carregada.\n' "$tag"
+            continue
+        fi
+        printf '  Carregando %s (%s)...\n' "$tag" "$arquivo"
+        docker load -i "$KIT_PASTA_PACOTE/$arquivo" >/dev/null || falhar 34 "o docker load de $arquivo falhou."
+        atual=$(docker image inspect -f '{{.Id}}' "$tag" 2>/dev/null || true)
+        [ "$atual" = "$id" ] || falhar 34 "a imagem $tag carregou com o id ${atual:-nenhum}, e o manifesto diz $id."
+    done < <(inst_py imagens-do-manifesto "$KIT_PASTA_PACOTE")
+}
+
+passo_segredos() {
+    local erro publicavel=()
+    # A imagem do pacote de um fundador ja traz a chave publicavel gravada (publica; docs/20 §9D.6): o arquivo de segredos
+    # usa a mesma. O segredo JWT, as chaves de servico e as senhas nascem aqui e nunca saem deste servidor.
+    [ -z "$PACOTE_CHAVE_PUBLICAVEL" ] || publicavel=(--publishable-key "$PACOTE_CHAVE_PUBLICAVEL")
+    if [ ! -f "$ENV_FILE" ]; then
+        printf '  Gerando dentro da imagem do app (o servidor nao precisa de Node); nada aparece na tela.\n'
+        erro=$(mktemp)
+        if ! docker run --rm --network none --user 0:0 -v "$KIT_PASTA_COMPOSE:/kit" -w /kit --entrypoint node "$PACOTE_APP_IMAGEM" \
+            generate-secrets.mjs --kit --domain "$ENDERECO" --api-domain "$ENDERECO_API" --email "$EMAIL_DONO" "${publicavel[@]}" >/dev/null 2>"$erro"; then
+            falhar 40 "o gerador de segredos parou: $(tail -n 3 "$erro" | tr '\n' ' ')"
+        fi
+        rm -f "$erro"
+        [ -f "$ENV_FILE" ] || falhar 40 "o gerador nao gravou o arquivo de segredos ($ENV_FILE)."
+        # O que o .env.example traz da nossa producao sai; a retencao do kit (docs/32 §4) entra.
+        printf '%s\n' "DASHBOARD_USERNAME=equipe" "SMTP_ADMIN_EMAIL=" "SMTP_SENDER_NAME=" "SMTP_PASS=" "STORAGE_BOX_USER=" \
+            "STORAGE_BOX_HOST=" "RESTIC_REPOSITORY=" "BACKUP_KEEP_DAILY=7" "BACKUP_KEEP_WEEKLY=4" "BACKUP_KEEP_MONTHLY=6" \
+            | kit_py segredos-trocar "$ENV_FILE"
+    else
+        printf '  O arquivo de segredos ja existe: nada e gerado de novo (as senhas do banco continuam as mesmas).\n'
+        if [ -n "$PACOTE_CHAVE_PUBLICAVEL" ] && [ "$(env_value SUPABASE_PUBLISHABLE_KEY)" != "$PACOTE_CHAVE_PUBLICAVEL" ]; then
+            # Publica: o gateway e o app sobem de novo com ela no passo dos servicos.
+            printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$PACOTE_CHAVE_PUBLICAVEL" | kit_py segredos-trocar "$ENV_FILE"
+            printf '  A chave publicavel passa a ser a que a imagem deste pacote traz (publica; o gateway sobe de novo com ela).\n'
+        fi
+    fi
+    chmod 600 "$ENV_FILE"
+    # As respostas ficam no arquivo de segredos desde ja: rodar de novo nao pergunta o que ja foi respondido.
+    [ "$modo" != instalacao ] || gravar_email_no_env
+    gravar_backup_no_env
+}
+
+# O e-mail pelo provedor (o Resend): o Auth manda por SMTP e o app pela API, com a mesma chave.
+gravar_email_no_env() {
+    {
+        printf 'SMTP_HOST=%s\n' "$KIT_EMAIL_SMTP_HOST"
+        printf 'SMTP_USER=resend\n'
+        printf 'SMTP_PASS=%s\n' "$RESEND_API_KEY"
+        printf 'SMTP_ADMIN_EMAIL=%s\n' "$EMAIL_REMETENTE"
+        printf 'SMTP_SENDER_NAME=%s\n' "$NOME_DA_ESCOLA"
+        printf 'EMAIL_PROVIDER=resend\n'
+        printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
+        printf 'EMAIL_FROM=%s <%s>\n' "$NOME_DA_ESCOLA" "$EMAIL_REMETENTE"
+        printf 'EMAIL_REPLY_TO=%s\n' "$EMAIL_RESPONDER_PARA"
+    } | kit_py segredos-trocar "$ENV_FILE"
+}
+
+# O destino do backup e as chaves de acesso a ele (lidos pelo membros backup, docs/20 §9B).
+gravar_backup_no_env() {
+    {
+        printf 'RESTIC_REPOSITORY=%s\n' "$BACKUP_DESTINO"
+        printf 'KIT_BACKUP_CONFIGURADO=sim\n'
+        printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=%s\n' \
+            "$BACKUP_AWS_ACCESS_KEY_ID" "$BACKUP_AWS_SECRET_ACCESS_KEY" "$BACKUP_AWS_DEFAULT_REGION"
+        [ -z "$BACKUP_SFTP_PORTA" ] || printf 'BACKUP_SFTP_PORTA=%s\n' "$BACKUP_SFTP_PORTA"
+    } | kit_py segredos-trocar "$ENV_FILE"
+}
+
+passo_servicos() {
+    local servicos=(db auth rest storage imgproxy api-gw app) s
+    [ "$modo" = instalacao ] || servicos=(db)
+    printf 'APP_IMAGE=%s\nAPP_VERSION=%s\n' "$PACOTE_APP_IMAGEM" "$PACOTE_VERSAO" | kit_py segredos-trocar "$ENV_FILE"
+    compose up -d "${servicos[@]}" || falhar 41 "o docker compose nao subiu os servicos (linhas acima)."
+    for s in "${servicos[@]}"; do
+        ( wait_healthy "$s" 300 ) || falhar 41 "o servico $s nao ficou saudavel em 5 minutos."
+    done
+}
+
+passo_migracoes() {
+    local rc=0
+    bash "$KIT_SCRIPT_MIGRAR" || rc=$?
+    [ "$rc" = 0 ] || falhar 42 "o migrador parou com o codigo $rc (docs/20 §9A)."
+}
+
+# psql no banco da escola. Com -c, a entrada fica fechada: o comando nao le nada do terminal de quem roda.
+psql_banco() { compose exec -T "$KIT_SERVICO_BANCO" psql -U postgres -X "$@"; }
+psql_c() { psql_banco "$@" </dev/null; }
+
+passo_agendador() {
+    local sql n
+    sql=$(env_value JOBS_TICK_TOKEN | inst_py sql-agendador) || parar $? "token do tick"
+    printf '%s\n' "$sql" | psql_banco -q -v ON_ERROR_STOP=1 >/dev/null || falhar 43 "o banco nao gravou o agendador no Vault."
+    sql=""
+    n=$(psql_c -At -c "select count(*) from cron.job where active and command like '%enqueue_jobs_tick%'" 2>/dev/null | tr -d '[:space:]')
+    [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] || falhar 43 "a tarefa de minuto nao esta agendada no banco (as migracoes a criam)."
+}
+
+passo_conta_do_dono() {
+    local saida id codigo email_sql
+    app_no_ar || falhar 44 "o app nao esta no ar."
+    saida=$(printf '{"email":"%s"}' "$EMAIL_DONO" | no_app dono-criar) || falhar 44 "$(printf '%s' "$saida" | inst_py json-campo mensagem)"
+    id=$(printf '%s' "$saida" | inst_py json-campo id)
+    codigo=$(printf '%s' "$saida" | inst_py json-campo codigo)
+    if [ -z "$id" ] && [ "$codigo" = existe ]; then
+        email_sql=${EMAIL_DONO//\'/\'\'}
+        id=$(psql_c -At -c "select id from auth.users where lower(email) = lower('$email_sql') order by created_at limit 1" 2>/dev/null | tr -d '[:space:]')
+        printf '  A conta %s ja existia: ela passa a ser a do dono.\n' "$EMAIL_DONO"
+    fi
+    [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+        || falhar 44 "o Auth nao criou a conta de $EMAIL_DONO: $(printf '%s' "$saida" | inst_py json-campo mensagem)"
+    psql_c -q -v ON_ERROR_STOP=1 -c "insert into public.admin_roles (user_id, role) values ('$id', 'owner') on conflict (user_id) do update set role = excluded.role" >/dev/null \
+        || falhar 44 "o papel de dono nao foi gravado."
+    printf '  Conta do dono: %s (sem senha ainda: o link de entrada aparece no fim).\n' "$EMAIL_DONO"
+}
+
+passo_email() {
+    local dominio porta resposta args
+    gravar_email_no_env
+    args=(--dominio "$EMAIL_DOMINIO" --espera "$KIT_ESPERA_DOMINIO_EMAIL" --intervalo "${KIT_INTERVALO_DOMINIO_EMAIL:-20}")
+    [ ! -t 2 ] || args+=(--interativo)
+    dominio=$(inst_py email-dominio "$ENV_FILE" "${args[@]}") || parar $? "dominio de envio"
+    [ "$dominio" != verificado ] || printf '  O dominio de envio %s esta verificado no Resend.\n' "$EMAIL_DOMINIO"
+    porta=$(inst_py email-teste "$ENV_FILE" --para "$EMAIL_TESTE_PARA" --remetente "$EMAIL_REMETENTE" --nome "$NOME_DA_ESCOLA" \
+        --endereco "$ENDERECO" --portas "$KIT_EMAIL_SMTP_PORTAS") || parar $? "e-mail de teste"
+    printf 'SMTP_PORT=%s\n' "$porta" | kit_py segredos-trocar "$ENV_FILE"
+    printf '  E-mail de teste enviado para %s pela porta %s, como o Auth envia.\n' "$EMAIL_TESTE_PARA" "$porta"
+    # O Auth e o app leem o e-mail ao subir: recria os dois com o arquivo de segredos novo.
+    compose up -d auth app >/dev/null || falhar 41 "o Auth e o app nao subiram de novo com o e-mail."
+    ( wait_healthy auth 240 && wait_healthy app 240 ) || falhar 41 "o Auth ou o app nao voltou depois de configurar o e-mail."
+    if [ -t 0 ] && [ -t 1 ]; then
+        printf '\n  O e-mail de teste chegou em %s? Pode levar um minuto; confira tambem o spam.\n  Digite s (chegou) ou n (nao chegou): ' "$EMAIL_TESTE_PARA"
+        resposta=""
+        IFS= read -r resposta || true
+        case "$resposta" in
+            s|S|sim|Sim|SIM) ;;
+            *) falhar 47 "o e-mail de teste nao chegou em $EMAIL_TESTE_PARA. Confira no painel do Resend (Emails) se ele saiu e por que nao foi entregue, e os registros do dominio $EMAIL_DOMINIO." ;;
+        esac
+    fi
+    inst_py estado-marcar "$ARQ" "email.porta=$porta" "email.remetente=$EMAIL_REMETENTE" "email.teste_para=$EMAIL_TESTE_PARA"
+}
+
+# membros_rodar SUB...: um subcomando do comando de operacao; devolve o codigo dele.
+membros_rodar() { bash "$KIT_SCRIPT_MEMBROS" "$@"; }
+
+passo_backup() {
+    local rc=0
+    gravar_backup_no_env
+
+    if [ "$modo" = restauracao ]; then
+        membros_rodar backup --conferir-destino || rc=$?
+        case "$rc" in
+            5) printf '  O destino tem um backup que so a chave de recuperacao abre: e o esperado num servidor novo.\n' ;;
+            0) warn "o destino abriu com a senha deste servidor ou ainda nao tem backup: confira a linha Destino da folha." ;;
+            *) falhar 48 "o destino do backup nao respondeu (membros backup --conferir-destino parou com o codigo $rc)." ;;
+        esac
+        membros_rodar backup --instalar-agendamento >/dev/null || falhar 48 "o agendamento do backup nao foi instalado."
+        mkdir -p "$KIT_PASTA_ESTADO"
+        [ -e "$KIT_MARCA_RESTAURACAO" ] || agora_utc > "$KIT_MARCA_RESTAURACAO"
+        situacao_gravar "restauracao.pendente_desde=$(agora_utc)"
+        PASSO_MOTIVO="esperando membros restaurar"
+        return 0
+    fi
+
+    rc=0; membros_rodar backup --iniciar || rc=$?
+    if [ "$rc" != 0 ]; then
+        if [ "$BACKUP_TIPO" = sftp ]; then
+            falhar 48 "o destino SFTP ainda nao aceitou a chave do backup (codigo $rc): autorize a chave mostrada acima no servidor SFTP e rode de novo."
+        fi
+        falhar 48 "membros backup --iniciar parou com o codigo $rc (2 = o destino nao responde ou recusou a chave de acesso; 5 = o destino tem um backup que este servidor nao abre)."
+    fi
+    membros_rodar backup --instalar-agendamento >/dev/null || falhar 48 "o agendamento do backup nao foi instalado."
+    rc=0; membros_rodar backup || rc=$?
+    [ "$rc" = 0 ] || falhar 48 "o primeiro backup falhou (membros backup parou com o codigo $rc)."
+    if [ "$BACKUP_SO_NESTE_SERVIDOR" = sim ]; then
+        inst_py estado-marcar "$ARQ" "backup_so_neste_servidor.aceito_em=$(agora_utc)"
+        warn "o backup fica so neste servidor (aceito por escrito): se o servidor morrer, o backup morre junto."
+        PASSO_MOTIVO="backup so neste servidor, aceito por escrito"
+        return 0
+    fi
+    rc=0; membros_rodar kit-de-recuperacao --conferir >/dev/null 2>&1 || rc=$?
+    [ "$rc" = 0 ] && return 0
+    [ -t 0 ] && [ -t 1 ] || falhar 49 "o kit de recuperacao mostra uma chave que so a pessoa pode ver. No terminal do servidor: sudo membros kit-de-recuperacao; depois rode o instalador de novo."
+    rc=0; membros_rodar kit-de-recuperacao || rc=$?
+    [ "$rc" = 0 ] || falhar 49 "o kit de recuperacao nao foi confirmado (codigo $rc)."
+    rc=0; membros_rodar kit-de-recuperacao --conferir >/dev/null || rc=$?
+    [ "$rc" = 0 ] || falhar 49 "o kit de recuperacao nao confere (codigo $rc)."
+}
+
+# O certificado dos dois nomes, pela porta do Caddy deste servidor (sem depender do DNS daqui).
+certificado_ok() {
+    local host codigo porta
+    porta=$(env_value CADDY_HTTPS_PORT 443)
+    for host in "$ENDERECO" "$ENDERECO_API"; do
+        codigo=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 --resolve "$host:$porta:127.0.0.1" "https://$host:$porta/" 2>/dev/null || true)
+        [ -n "$codigo" ] && [ "$codigo" != 000 ] || return 1
+    done
+}
+
+passo_endereco() {
+    local args=(--endereco "$ENDERECO" --endereco-api "$ENDERECO_API") rc=0 t tentativas motivo
+    [ -z "$IP_DO_SERVIDOR" ] || args+=(--ip "$IP_DO_SERVIDOR")
+    inst_py dns "${args[@]}" || rc=$?
+    if [ "$rc" != 0 ]; then
+        if [ "$modo" = restauracao ]; then
+            warn "o endereco ainda nao aponta para este servidor: depois de restaurar, aponte e o membros restaurar confere."
+            PASSO_SITUACAO=pulado
+            PASSO_MOTIVO="o endereco ainda nao aponta para este servidor"
+            return 0
+        fi
+        parar "$rc" "o endereco ainda nao aponta para este servidor"
+    fi
+    compose up -d caddy >/dev/null || falhar 41 "o Caddy nao subiu."
+    tentativas=$(( KIT_ESPERA_CERTIFICADO / 10 ))
+    [ "$tentativas" -ge 1 ] || tentativas=1
+    for ((t = 0; t < tentativas; t++)); do
+        if certificado_ok; then
+            printf '  HTTPS no ar em %s e em %s.\n' "$ENDERECO" "$ENDERECO_API"
+            return 0
+        fi
+        # O Caddy espera cada vez mais entre as tentativas: reiniciar uma vez, com o DNS ja certo, pede de novo agora.
+        [ "$t" != 9 ] || compose restart caddy >/dev/null 2>&1 || true
+        sleep 10
+    done
+    motivo=$(compose logs --tail 120 caddy 2>/dev/null | grep -iE 'acme|challenge|certificate|obtain' | grep -iE 'error|fail' | tail -n 2 | cut -c1-300 | tr '\n' ' ')
+    falhar 50 "o certificado de $ENDERECO nao saiu em $((KIT_ESPERA_CERTIFICADO / 60)) minutos.${motivo:+ O Caddy disse: $motivo}"
+}
+
+passo_conferencia_final() {
+    local rc=0 n t tentativas
+    bash "$KIT_SCRIPT_FUMACA" || rc=$?
+    [ "$rc" = 0 ] || falhar 51 "a conferencia pelo endereco publico falhou (linhas acima)."
+    tentativas=$(( KIT_ESPERA_AGENDADOR / 10 ))
+    [ "$tentativas" -ge 1 ] || tentativas=1
+    for ((t = 0; t < tentativas; t++)); do
+        n=$(psql_c -At -c "select count(*) from public.job_runs where started_at > now() - interval '15 minutes'" 2>/dev/null | tr -d '[:space:]')
+        if [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ]; then
+            printf '  O agendador de minuto esta rodando.\n'
+            return 0
+        fi
+        sleep 10
+    done
+    falhar 43 "o agendador de minuto nao rodou nos ultimos 15 minutos (o banco chama o app pelo tick)."
+}
+
+passo_ativacao() {
+    local saida rc=0 modo_lic ativada mensagem
+    saida=$(membros_rodar licenca estado --json 2>/dev/null) || rc=$?
+    [ "$rc" = 0 ] || falhar 55 "nao consegui ler a Licenca pelo app: $(printf '%s' "$saida" | inst_py json-campo mensagem)"
+    modo_lic=$(printf '%s' "$saida" | inst_py json-campo modo)
+    ativada=$(printf '%s' "$saida" | inst_py json-campo ativada)
+    if [ "$modo_lic" = off ]; then
+        printf '  Esta imagem nao pede licenca (modo off): nada a ativar.\n'
+        PASSO_SITUACAO=pulado
+        PASSO_MOTIVO="imagem sem licenca (modo off)"
+        return 0
+    fi
+    if [ "$ativada" = true ]; then
+        printf '  A Licenca desta escola ja esta ativada.\n'
+        return 0
+    fi
+    [ -n "$CHAVE_ATIVACAO" ] || falhar 52 "falta a Chave de ativacao (no arquivo de respostas, em --ativacao-arquivo ou digitada no terminal)."
+    rc=0
+    saida=$(printf '%s' "$CHAVE_ATIVACAO" | membros_rodar licenca ativar --da-entrada --json) || rc=$?
+    CHAVE_ATIVACAO=""
+    mensagem=$(printf '%s' "$saida" | inst_py json-campo mensagem)
+    [ "$rc" = 0 ] || falhar "$rc" "${mensagem:-a ativacao nao terminou.} (Ou ative pela tela: Configuracoes > Licenca, com a mesma Chave.)"
+    printf '  %s\n' "${mensagem:-A Licenca foi ativada.}"
+    mensagem=$(printf '%s' "$saida" | inst_py json-campo mensagem_aviso)
+    [ -z "$mensagem" ] || warn "$mensagem"
+}
+
+resumo() {
+    local link="" token licenca="" email_txt="" estado ativada degrau
+    if [ "$modo" = instalacao ]; then
+        if [ -t 0 ] && [ -t 1 ] && app_no_ar; then
+            token=$(printf '{"email":"%s"}' "$EMAIL_DONO" | no_app dono-link 2>/dev/null | inst_py json-campo token_hash || true)
+            [ -z "$token" ] || link="https://$ENDERECO/auth/confirm?token_hash=$token&type=recovery&next=%2Fadmin"
+        fi
+        estado=$(membros_rodar licenca estado --json 2>/dev/null || true)
+        ativada=$(printf '%s' "$estado" | inst_py json-campo ativada)
+        degrau=$(printf '%s' "$estado" | inst_py json-campo degrau)
+        case "$(printf '%s' "$estado" | inst_py json-campo modo)" in
+            off) licenca="esta imagem nao pede licenca (modo off)" ;;
+            enforce) if [ "$ativada" = true ]; then licenca="ativada (situacao: ${degrau:-ok})"; else licenca="ainda nao ativada"; fi ;;
+        esac
+        email_txt="a escola envia como $NOME_DA_ESCOLA <$EMAIL_REMETENTE>. Confira se o e-mail de teste chegou em $EMAIL_TESTE_PARA."
+    fi
+    printf '%s' "$link" | inst_py resumo "modo=$modo" "endereco=$ENDERECO" "endereco_api=$ENDERECO_API" "versao=$PACOTE_VERSAO" \
+        "situacao=$KIT_ARQUIVO_SITUACAO" "backup_local=$BACKUP_SO_NESTE_SERVIDOR" "licenca=$licenca" "email=$email_txt" \
+        "link=$([ -n "$link" ] && printf entrada)"
+    link=""
+}
+
+passo conferencia passo_conferencia sempre
+passo pacote passo_pacote sempre
+passo preparar passo_preparar
+precisa docker
+passo imagens passo_imagens
+passo segredos passo_segredos
+passo servicos passo_servicos
+if [ "$modo" = instalacao ]; then
+    passo migracoes passo_migracoes
+    passo agendador passo_agendador
+    passo conta_do_dono passo_conta_do_dono
+    passo email passo_email
+else
+    for p in migracoes agendador conta_do_dono email; do pular "$p" "modo de restauracao: vem do backup"; done
+fi
+passo backup passo_backup
+passo endereco passo_endereco
+if [ "$modo" = instalacao ]; then
+    passo conferencia_final passo_conferencia_final
+    passo ativacao passo_ativacao
+else
+    pular conferencia_final "modo de restauracao: o membros restaurar confere no fim"
+    pular ativacao "modo de restauracao: a licenca vem no backup"
+fi
+trap - INT TERM HUP
+resumo

@@ -7,6 +7,7 @@ import {
 } from "@/server/ai/provider-connections";
 import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +41,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);

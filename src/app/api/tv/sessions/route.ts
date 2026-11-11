@@ -5,6 +5,7 @@ import { getHeadersOrigin } from "@/server/auth/site-origin";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { createTvSession } from "@/server/video/tv-sessions";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,6 +18,9 @@ function noStore(response: NextResponse) {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
   if (auth.response || !auth.user) return noStore(auth.response!);
 

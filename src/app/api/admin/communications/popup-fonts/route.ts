@@ -12,6 +12,7 @@ import {
   POPUP_FONT_SIZE_MESSAGE
 } from "@/server/communications/popup-media";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Envio de fonte para o design do pop-up (Comunicacao > Avisos e pop-ups > Pop-up > Design > Fontes; docs/26):
 // arquivo WOFF2, WOFF, TTF ou OTF de ate 2 MB em multipart (campo "file", e "name", "weight" e "style"
@@ -86,6 +87,9 @@ function fontStyle(form: FormData): PopupFontStyle {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("messaging.write");
 
   if (auth.response) {

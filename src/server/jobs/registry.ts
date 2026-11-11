@@ -1,9 +1,13 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { FeatureKey } from "@/server/licensing/features";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
+import { heldSalesJob } from "./held-sales-job";
+import { licenseCheckInJob } from "./license-check-in-job";
+import { licenseSalesJob } from "./license-sales-job";
 import { webinarOfferConversionsJob } from "./webinar-offer-conversions-job";
 import { webinarRecordingsJob } from "./webinar-recordings-job";
 import { webinarRemindersJob } from "./webinar-reminders-job";
@@ -60,9 +64,27 @@ import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-jo
 // - `webinar-offer-conversions` (fase 4b: liga as vendas do webhook aos cliques da Oferta em ate 7 dias, M7, pela RPC
 //   webinar_offer_conversions, em lote; src/server/jobs/webinar-offer-conversions-job.ts; docs/30 §4.2). Nunca cria
 //   venda nem acesso. Sem trabalho, uma chamada;
+// - `licenca-conferencia` (a licenca desta Instalacao, docs/32 §11.3; src/server/jobs/license-check-in-job.ts). No
+//   modo "off" (a nossa escola hoje, a dev, a Vercel e os testes) nao faz nada nem le o banco. No "enforce": uma
+//   leitura e uma gravacao em license_state por minuto (a ultima hora vista) e a conferencia com o Emissor uma vez
+//   por dia, ou de hora em hora quando falha, com tempo limite de 10 s. Fica no fim, antes da limpeza: nao atrasa os
+//   envios, e a rodada que ficar sem tempo so atrasa a ultima hora vista, o que nunca limita ninguem;
+// - `vendas-guardadas` (as vendas que chegaram com a licenca barrando o acesso novo, docs/32 §2.2 e §11.3;
+//   src/server/jobs/held-sales-job.ts). No modo "off" nao faz nada nem le o banco. No "enforce": uma consulta por
+//   minuto; com venda guardada e a licenca permitindo de novo, libera em ordem, com reivindicacao por venda (duas rodadas
+//   nunca liberam a mesma). Logo depois da conferencia da licenca, para a licenca regularizada nesta rodada ja liberar;
+// - `licencas-vendas` (a venda do Bunker Members que vira Licenca, docs/32 §11.10; src/server/jobs/license-sales-job.ts).
+//   Sem a API interna do Emissor configurada (a copia do comprador, a dev sem o simulador) nao faz nada nem le o banco.
+//   Com ela (a nossa escola): uma consulta por minuto a fila license_requests e ate 10 pedidos por rodada ao Emissor, na
+//   ordem, com reivindicacao por linha e nova tentativa com espera. Fica no fim, antes da limpeza: o Emissor lento so
+//   atrasa a propria fila;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
+//
+// As cinco tarefas dos Webinarios (`webinar-*`) declaram `feature: WEBINARS_FEATURE`: sem o modulo na licenca, o
+// agendador as pula (docs/32 §11.8). No modo "off" todo modulo esta ligado e todas rodam, como antes. A lista continua
+// uma constante montada sem ler o banco.
 
 export type JobContext = {
   // Cliente administrativo do Supabase (service role); usar somente no servidor.
@@ -78,7 +100,12 @@ export type JobContext = {
 
 export type Job = {
   name: string;
+  /**
+   * Modulo (feature) da licenca de que a tarefa faz parte (docs/32 §11.8). Sem o modulo ligado, o agendador
+   * (run-tick.ts) nem chama a tarefa: nada roda e nenhuma linha vai para job_runs. Sem o campo, a tarefa e do nucleo.
+   */
+  feature?: FeatureKey;
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob];

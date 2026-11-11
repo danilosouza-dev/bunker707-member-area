@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
+import { guardadoNoBanco } from "../support/local-db.mjs";
 import { popupStarterDesign } from "../../src/server/communications/popup-design-model";
 import { emptyNoticeDraft } from "../../src/server/communications/schemas";
 import { templatePayloadOfDraft, type TemplatePayload } from "../../src/server/communications/template-model";
@@ -235,7 +236,8 @@ test("pop-up: salvar pelo ⋯ da lista, excluir o pop-up, editar o modelo e usar
   expect(salvo.kind).toBe("popup");
   expect(salvo.design_mode).toBe("custom");
   expect(salvo.payload.content).toBeNull();
-  expect(salvo.payload.designSupport).toEqual({ ctaLabel: BOTAO, image: { alt: "", url: midia.capa.url } });
+  // O banco guarda o caminho da imagem (docs/32 §11.5); o app le o endereco inteiro.
+  expect(salvo.payload.designSupport).toEqual({ ctaLabel: BOTAO, image: { alt: "", url: guardadoNoBanco(midia.capa.url) } });
   expect((salvo.payload.design as { media: { video: { path: string } } }).media.video.path).toBe(midia.video.path);
 
   await test.step("exclui o pop-up pelo ⋯", async () => {

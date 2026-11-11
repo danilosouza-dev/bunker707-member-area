@@ -86,6 +86,38 @@ export const saveLoginPageSchema = z.object({
 
 export type SaveLoginPageInput = z.input<typeof saveLoginPageSchema>;
 
+/**
+ * O contato da escola na pagina de entrar (a linha "Ainda nao tem acesso? Fale com o suporte"). E o que a licenca deixa
+ * mudar em todo degrau (docs/32 §2.2: editar os dados de contato da escola e dever legal); o resto da pagina e aparencia.
+ */
+export const LOGIN_CONTACT_KEYS = ["supportLabel", "supportLinkLabel", "supportHref"] as const;
+
+export type LoginContactSettings = Pick<LoginPageSettings, (typeof LOGIN_CONTACT_KEYS)[number]>;
+
+/** So o contato: os outros campos que vierem junto sao ignorados (z.object descarta o que nao conhece). */
+export const loginContactSchema = z
+  .object({
+    supportLabel: limitedText(LOGIN_TEXT_LIMITS.supportLabel),
+    supportLinkLabel: limitedText(LOGIN_TEXT_LIMITS.supportLinkLabel),
+    supportHref: supportHrefSchema.nullable()
+  })
+  .superRefine((value, context) => {
+    if (value.supportHref && !value.supportLinkLabel) {
+      context.addIssue({ code: "custom", message: "Escreva o texto do link.", path: ["supportLinkLabel"] });
+    }
+  });
+
+export const saveLoginContactSchema = z.object({
+  expectedUpdatedAt: settingVersionSchema,
+  contact: loginContactSchema
+});
+
+export type SaveLoginContactInput = z.input<typeof saveLoginContactSchema>;
+
+export function loginContactOf(settings: LoginPageSettings): LoginContactSettings {
+  return { supportHref: settings.supportHref, supportLabel: settings.supportLabel, supportLinkLabel: settings.supportLinkLabel };
+}
+
 /** O /login de hoje (antes de existir esta configuracao), com acentos. */
 export const DEFAULT_LOGIN_PAGE_SETTINGS: LoginPageSettings = Object.freeze({
   backgroundImage: Object.freeze({ alt: "", url: null }),
@@ -259,6 +291,12 @@ function sameValue(left: LoginPageSettings[LoginSettingsKey], right: LoginPageSe
 
 export function isLoginSettingsEqual(left: LoginPageSettings, right: LoginPageSettings) {
   return LOGIN_SETTINGS_KEYS.every((key) => sameValue(left[key], right[key]));
+}
+
+/** Entre as duas versoes, so o contato da escola mudou? O editor publica pelo saveLoginContact, que passa em todo degrau. */
+export function isOnlyLoginContactChange(before: LoginPageSettings, after: LoginPageSettings) {
+  const contact: readonly string[] = LOGIN_CONTACT_KEYS;
+  return LOGIN_SETTINGS_KEYS.every((key) => contact.includes(key) || sameValue(before[key], after[key]));
 }
 
 /**

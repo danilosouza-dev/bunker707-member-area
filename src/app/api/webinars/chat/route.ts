@@ -6,6 +6,8 @@ import { chatDeleteBodySchema } from "@/server/webinars/chat-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { parseRoomBody, recordAfterReply, roomErrorResponse } from "@/server/webinars/room-route";
 import { removeStudentChat } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Remover minhas mensagens" fora de uma live (Perfil › Privacidade, docs/30 §8.5): DELETE { all: true } apaga o
 // que o aluno escreveu (mensagens, perguntas e respostas de enquete) em todas as sessoes de todos os webinarios,
@@ -16,6 +18,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function DELETE(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
   if (auth.response || !auth.user) {
     return noStore(auth.response!);

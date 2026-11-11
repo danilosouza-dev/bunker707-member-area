@@ -6,6 +6,7 @@ import { publishHomeSections } from "@/server/db/platform-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { settingVersionSchema } from "@/server/member-area/schemas";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Publicar a vitrine (lista inteira de fileiras). A Vitrine nova e a do admin antigo mandam
 // `expectedUpdatedAt` (a versao da chave homeSections que leram; null = nunca publicada): a gravacao e
@@ -15,6 +16,9 @@ import { settingVersionSchema } from "@/server/member-area/schemas";
 // uma gravacao de outra tela no meio-tempo continua valendo como "mais nova" no proximo Publicar.
 // Sem o campo (chamada antiga) grava sem conferir, como sempre.
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("storefront.write");
 
   if (auth.response) {

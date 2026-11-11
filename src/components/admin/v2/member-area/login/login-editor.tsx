@@ -9,13 +9,15 @@ import { Input } from "@/components/ui/input";
 import { DEFAULT_LOGIN_VISUAL_IMAGE, isSplitLoginTemplate, type LoginPanelTone } from "@/lib/login-config";
 import { cn } from "@/lib/utils";
 import { uploadMemberAreaImage } from "@/server/member-area/image-actions";
-import { saveLoginPage } from "@/server/member-area/login-actions";
+import { saveLoginContact, saveLoginPage } from "@/server/member-area/login-actions";
 import {
   LOGIN_TEXT_LIMITS,
   LOGIN_TONE_OPTIONS,
   applyLoginTemplate,
   defaultLoginPageSettings,
   isLoginSettingsEqual,
+  isOnlyLoginContactChange,
+  loginContactOf,
   loginFieldErrors,
   loginImageKeyFor,
   loginImageSlotFor,
@@ -55,6 +57,16 @@ type ImageKey = "backgroundImage" | "sideImage";
 type TextKey = "formSubtitle" | "formTitle" | "quote" | "quoteDetail" | "supportLabel" | "supportLinkLabel";
 type Failure = { message: string; status: number };
 type Published = { settings: LoginPageSettings; updatedAt: string | null };
+
+/**
+ * Publica a versao nova. Quando so o contato da escola mudou, vai pelo saveLoginContact, que a Licenca deixa em todo
+ * degrau (docs/32 §2.2); a aparencia e conteudo, barrado no Admin limitado.
+ */
+function publishLogin(before: LoginPageSettings, after: LoginPageSettings, expectedUpdatedAt: string | null) {
+  return isOnlyLoginContactChange(before, after)
+    ? saveLoginContact({ contact: loginContactOf(after), expectedUpdatedAt })
+    : saveLoginPage({ expectedUpdatedAt, settings: after });
+}
 
 const PUBLISHED_TOAST = "Login publicado. Quem abrir a página de entrar já vê o novo visual.";
 const UNDO_OUTDATED = "Não foi possível desfazer: já existe uma publicação mais nova do login.";
@@ -291,7 +303,7 @@ export function LoginEditor({ canEdit, data }: LoginEditorProps) {
   async function undoPublish(previous: LoginPageSettings, version: string, justPublished: LoginPageSettings) {
     setSaving(true);
     setFailure(null);
-    const result = await saveLoginPage({ expectedUpdatedAt: version, settings: previous });
+    const result = await publishLogin(justPublished, previous, version);
     setSaving(false);
 
     if (!result.ok) {
@@ -350,7 +362,7 @@ export function LoginEditor({ canEdit, data }: LoginEditorProps) {
     const previous = published;
     setSaving(true);
     setFailure(null);
-    const result = await saveLoginPage({ expectedUpdatedAt: previous.updatedAt, settings: parsed.data });
+    const result = await publishLogin(previous.settings, parsed.data, previous.updatedAt);
     setSaving(false);
 
     if (!result.ok) {

@@ -70,7 +70,9 @@ const PUBLIC_STORAGE_MARKERS = ["/storage/v1/object/public/", "/storage/v1/rende
 
 /**
  * O arquivo de um endereco publico do Storage, de qualquer origem (a nuvem de teste e a Hetzner tem origens
- * diferentes e o banco guarda a de quando foi enviado). Sem query nem fragmento; null = nao e do Storage.
+ * diferentes e o banco guardava a de quando foi enviado), ou do caminho que o banco guarda hoje
+ * ("/storage/v1/object/public/<bucket>/<caminho>", docs/32 §11.5; o app le o endereco inteiro, mas um caminho que
+ * chegue aqui ainda conta como uso). Sem query nem fragmento; null = nao e do Storage.
  */
 export function storageRefOfUrl(value: unknown): MediaRef | null {
   if (typeof value !== "string" || value.length > 4_096) {
@@ -80,7 +82,7 @@ export function storageRefOfUrl(value: unknown): MediaRef | null {
   let pathname: string;
 
   try {
-    pathname = new URL(value.trim()).pathname;
+    pathname = new URL(value.trim(), "http://caminho.invalid").pathname;
   } catch {
     return null;
   }

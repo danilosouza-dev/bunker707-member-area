@@ -7,12 +7,16 @@ import {
 } from "@/server/comments/comment-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type AdminCommentRouteContext = {
   params: Promise<{ commentId: string }>;
 };
 
 export async function PATCH(request: Request, context: AdminCommentRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const { commentId } = await context.params;
   const auth = await requireApiRole("community.moderate", { commentIds: [commentId] });
 

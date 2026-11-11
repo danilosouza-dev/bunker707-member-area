@@ -10,6 +10,8 @@ import { RegistrationRefusedError, registerStudent, unregisterStudent } from "@/
 import { registerBodySchema, unregisterBodySchema } from "@/server/webinars/schemas";
 import { calendarPath } from "@/server/webinars/student-model";
 import { webinarPublicUrl } from "@/server/webinars/student-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Garantir vaga (docs/30 §1.2 e §5.1): POST { sessionId?, source? } grava a vaga do aluno na sessao (na Live
 // ao vivo o corpo pode vir vazio: vale a sessao live) e devolve 201 { registration, calendarUrl, googleUrl,
@@ -86,6 +88,9 @@ async function guard(context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guard(context);
 
   if ("response" in guarded) {
@@ -126,6 +131,9 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guard(context);
 
   if ("response" in guarded) {

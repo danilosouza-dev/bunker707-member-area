@@ -11,6 +11,8 @@ import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { getWebinarEditorData, loadWebinarEditorOptions } from "@/server/webinars/queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // Publicar, cancelar e excluir rodam Server Actions desta rota.
 export const maxDuration = 60;
@@ -33,6 +35,9 @@ function readNow() {
 // Gravacao recebe aqui, lido no servidor, se a sala ao vivo existe neste ambiente (liveRoomConfigured: o hostname e
 // o segredo do token; so o booleano vai para o cliente). Webinario que nao existe (ou excluido): 404.
 export default async function AdminWebinarPage({ params }: PageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const [{ access }, { id }] = await Promise.all([requirePageArea("comunicacao"), params]);
 
   if (!can(access, "messaging.write")) {

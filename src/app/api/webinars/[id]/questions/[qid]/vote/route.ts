@@ -4,6 +4,8 @@ import { questionVoteBodySchema } from "@/server/webinars/chat-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, roomErrorResponse } from "@/server/webinars/room-route";
 import { voteStudentQuestion } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Curtir / Tirar a curtida de uma pergunta (docs/30 §5.1): POST { sessionId } alterna o voto do aluno e responde {
 // upvotes, voted }. Pergunta de outra sessao, apagada ou dispensada de outro aluno: 404; fora da hora da sessao: 409;
@@ -16,6 +18,9 @@ export const revalidate = 0;
 type VoteRouteContext = { params: Promise<{ id: string; qid: string }> };
 
 export async function POST(request: Request, context: VoteRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest({ params: context.params.then(({ id }) => ({ id })) }, { write: true });
   if ("response" in guarded) {
     return guarded.response;

@@ -16,6 +16,7 @@ import { ADMIN_TIME_ZONE } from "../format";
 import type { AdminPeriodPreset, ResolvedAdminPeriod } from "../period";
 import type { AdminAction } from "@/server/auth/roles";
 import type { ProductAccent } from "@/server/catalog/model";
+import { NO_DISABLED_FEATURES, WEBINARS_FEATURE, featureVisible, type FeatureKey } from "../../../../server/licensing/features";
 import { newStudentHref, studentListHref } from "../students/hrefs";
 import type { TodayDemoData } from "./today-demo";
 
@@ -241,6 +242,8 @@ export function sumSeries(values: readonly number[]) {
  * ---------------------------------------------------------------------------------------------- */
 
 export type TodayCreateItem = {
+  /** Modulo da licenca de que o destino faz parte (docs/32 §11.8): sem ele ligado, o item some. */
+  feature?: FeatureKey;
   /** null = ainda nao existe: aparece desativado. */
   href: string | null;
   id: string;
@@ -257,13 +260,19 @@ export const TODAY_CREATE_ITEMS: readonly TodayCreateItem[] = [
   { href: "/admin/produtos/pacotes", id: "pacote", label: "Pacote", permission: "catalog.access" },
   { href: newStudentHref(), id: "aluno", label: "Aluno", permission: "students.access" },
   { href: "/admin/comunicacao/avisos/novo", id: "aviso", label: "Aviso", permission: "messaging.write" },
-  { href: "/admin/comunicacao/webinarios/novo", id: "webinario", label: "Webinário", permission: "messaging.write" },
+  { feature: WEBINARS_FEATURE, href: "/admin/comunicacao/webinarios/novo", id: "webinario", label: "Webinário", permission: "messaging.write" },
   { href: null, id: "promocao", label: "Promoção", meta: "Em breve", permission: "messaging.write" }
 ];
 
-/** Itens do Criar que o papel pode usar; sem nenhum destino ativo, o botao nem aparece. */
-export function getTodayCreateItems(can: (action: AdminAction) => boolean): TodayCreateItem[] {
-  const items = TODAY_CREATE_ITEMS.filter((item) => can(item.permission));
+/**
+ * Itens do Criar que o papel pode usar; sem nenhum destino ativo, o botao nem aparece. Os de um modulo desligado na
+ * licenca (`disabledFeatures`, lidos pela pagina no servidor) nunca aparecem.
+ */
+export function getTodayCreateItems(
+  can: (action: AdminAction) => boolean,
+  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES
+): TodayCreateItem[] {
+  const items = TODAY_CREATE_ITEMS.filter((item) => can(item.permission) && featureVisible(item.feature, disabledFeatures));
 
   return items.some((item) => item.href) ? items : [];
 }

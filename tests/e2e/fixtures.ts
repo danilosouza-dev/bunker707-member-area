@@ -33,7 +33,7 @@ import { storedPopupDesignAssetPaths } from "../../src/server/communications/pop
 import { templateDesignModeOf, type TemplatePayload } from "../../src/server/communications/template-model";
 import { recorderHeaders } from "../../src/server/webinars/recorder-signature";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
-import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
+import { comoOAppEntrega, createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
 // (YouTube, PostHog, Sentry, fontes, CDNs) e cortado antes de sair. O player do YouTube continua
@@ -1092,7 +1092,8 @@ export type DesignDoPopUpNoBanco = {
 
 /**
  * O design Personalizado de um pop-up como ficou no banco depois de salvar/publicar pela tela: o design, a capa e
- * as fontes enviadas (familia bf_) que ele usa. Falha se o pop-up nao existe.
+ * as fontes enviadas (familia bf_) que ele usa. Os enderecos do Storage voltam inteiros, como o app entrega (o banco
+ * guarda o caminho, docs/32 §11.5), para comparar com o que a tela desenha. Falha se o pop-up nao existe.
  */
 export async function designDoPopUpNoBanco(titulo: string): Promise<DesignDoPopUpNoBanco> {
   const db = createLocalAdminClient();
@@ -1105,11 +1106,20 @@ export async function designDoPopUpNoBanco(titulo: string): Promise<DesignDoPopU
     ? (unwrap(await db.from("communication_fonts").select("id,family_key,name").in("id", ids), "Lendo as fontes do design") as { family_key: string; id: string; name: string }[])
     : [];
 
+  const design = linha.popup_design;
+
   return {
-    design: linha.popup_design,
+    design: design && {
+      ...design,
+      card: {
+        ...design.card,
+        background: { ...design.card.background, ...("url" in design.card.background ? { url: comoOAppEntrega(design.card.background.url) } : {}) }
+      },
+      media: { ...design.media, video: design.media.video && { ...design.media.video, url: comoOAppEntrega(design.media.video.url) } }
+    },
     fontes: fontes.map((fonte) => ({ family: fonte.family_key, id: fonte.id, name: fonte.name })),
     id: linha.id,
-    imagem: linha.image_url
+    imagem: comoOAppEntrega(linha.image_url)
   };
 }
 

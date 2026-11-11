@@ -1,8 +1,12 @@
 // Hetzner, Cloudflare, app e servidores de mentira para rodar os scripts de verdade de infra/cloud sem rede (docs/18 §2.5).
-// O hcloud guarda servidores, imagens e firewalls num JSON e recusa criar o tipo sem estoque; o curl responde como a
-// Cloudflare (DNS num JSON), como o checkip e como o webhook do gravador no app; o ssh e o scp anotam o comando e
-// respondem ao backup, ao commit, ao docker, a saude do Jibri e aos .env lidos por get_env. Tudo vai para um log so,
-// na ordem em que aconteceu. Usado por tests/infra-guardar-producao.test.mjs e tests/infra-gravador-falha.test.mjs.
+// O hcloud guarda servidores, imagens, firewalls, chaves SSH, tipos e o Storage Box num JSON e recusa criar o tipo sem
+// estoque; o curl responde como a Cloudflare (DNS num JSON), como o checkip e como o webhook do gravador no app; o ssh e o
+// scp anotam o comando e respondem ao backup, ao commit, ao docker, a saude do Jibri, aos .env lidos por get_env e ao que
+// o teste escolher em SSH_SHIM_REPLIES; o docker do runner (o GHCR e a imagem do Emissor, que roda a cerimonia com o
+// duble do codigo das chaves) e o sftp do Storage Box (uma pasta). Tudo vai para um log so, na ordem em que aconteceu.
+// Usado por tests/infra-guardar-producao.test.mjs, tests/infra-gravador-falha.test.mjs, tests/infra-licencas.test.mjs,
+// tests/infra-licencas-cerimonia.test.mjs, tests/infra-licencas-conectar.test.mjs, tests/infra-deploy-migracoes.test.mjs e
+// tests/infra-teste.test.mjs.
 
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -72,6 +76,13 @@ if (group === "image") {
   if (verb === "delete") { if (!image) fail("image not found"); if (image.protection?.delete) fail("image is protected"); state.images = state.images.filter((i) => i !== image); save(); process.exit(0); }
 }
 if (group === "server-type" && verb === "describe") { const t = state.serverTypes[target]; if (!t) fail("server type not found"); out({ name: target, ...t }); process.exit(0); }
+if (group === "server-type" && verb === "list") { out(Object.entries(state.serverTypes).map(([name, t]) => ({ name, ...t }))); process.exit(0); }
+if (group === "ssh-key") {
+  const key = (state.sshKeys || []).find((k) => k.name === target);
+  if (verb === "describe") { if (!key) fail("ssh key not found"); out(key); process.exit(0); }
+  if (verb === "create") { state.sshKeys = [...(state.sshKeys || []), { name: flag("--name"), public_key: flag("--public-key") }]; save(); process.exit(0); }
+}
+if (group === "storage-box" && verb === "describe" && state.storageBox) { out(state.storageBox); process.exit(0); }
 if (group === "firewall") {
   const fw = state.firewalls.find((f) => f.name === target);
   if (verb === "describe") { if (!fw) fail("firewall not found"); out(fw); process.exit(0); }
@@ -144,9 +155,15 @@ for (let i = 0; i < args.length; i += 1) {
 const command = rest.join(" ");
 let stdin = "";
 if (!control && command !== "true") { try { stdin = fs.readFileSync(0, "utf8"); } catch {} }
-fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: stdin.slice(0, 80) }) + "\n");
+// A entrada inteira so dos comandos que o teste pede (SSH_SHIM_STDIN_COMPLETO, trechos separados por |); o resto, 80 caracteres.
+const completo = (process.env.SSH_SHIM_STDIN_COMPLETO || "").split("|").filter(Boolean).some((t) => command.includes(t));
+fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: completo ? stdin : stdin.slice(0, 80) }) + "\n");
 if (control) process.exit(0);
 const flagOn = (name) => Boolean(process.env[name]);
+// Respostas escolhidas pelo teste: [{ contem, saida, codigo }], a primeira cujo trecho aparece no comando.
+const replies = process.env.SSH_SHIM_REPLIES ? JSON.parse(process.env.SSH_SHIM_REPLIES) : [];
+const reply = replies.find((r) => command.includes(r.contem));
+if (reply) { if (reply.saida) process.stdout.write(reply.saida); process.exit(reply.codigo ?? 0); }
 // get_env (lib.sh): grep -E '^CHAVE=' arquivo | head -n1 | cut -d= -f2-, respondido pelo mapa SSH_SHIM_ENV.
 const key = /grep -E '\^([A-Z0-9_]+)='/.exec(command);
 if (key && command.includes("cut -d= -f2-")) {
@@ -168,6 +185,74 @@ if (command.includes("/jibri/api/v1.0/health")) {
 if (command.includes("-name '*.mp4'")) { if (process.env.SSH_SHIM_PENDING_MP4) console.log(process.env.SSH_SHIM_PENDING_MP4); process.exit(0); }
 if (command.includes("docker ps")) { console.log("  app\tUp 2 minutes (healthy)"); process.exit(0); }
 process.exit(0);
+`;
+
+// O docker do runner: o login no GHCR (o token pela entrada), o pull e o run da imagem do Emissor, que roda a cerimonia
+// (infra/cloud/cerimonia-licencas.mjs) com o duble do codigo das chaves (SHIM_CERIMONIA_MODULOS) e so as variaveis
+// passadas por -e NOME; o resto da imagem, como o docker de verdade, nao ve o ambiente do runner.
+const DOCKER_SHIM = String.raw`
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+const sub = args[0];
+let stdin;
+if (sub === "login") { try { stdin = fs.readFileSync(0, "utf8"); } catch { stdin = ""; } }
+fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "docker", args, stdin }) + "\n");
+if (sub === "login" || sub === "logout") process.exit(0);
+if (sub === "pull") process.exit(process.env.SHIM_DOCKER_PULL_FALHA ? 1 : 0);
+// O build da imagem do app no runner (deploy-membros): so anotado.
+if (sub === "buildx") process.exit(0);
+if (sub === "run") {
+  const mount = args.find((a) => a.endsWith(":/cerimonia/cerimonia.mjs:ro"));
+  if (!mount) { process.stderr.write("docker de mentira: run sem a cerimonia\n"); process.exit(125); }
+  const env = { PATH: process.env.PATH, CERIMONIA_MODULOS: process.env.SHIM_CERIMONIA_MODULOS, CERIMONIA_EXTENSAO: ".mjs" };
+  args.forEach((a, i) => { if (a === "-e" && !args[i + 1].includes("=") && process.env[args[i + 1]] !== undefined) env[args[i + 1]] = process.env[args[i + 1]]; });
+  const r = spawnSync(process.execPath, [mount.slice(0, -":/cerimonia/cerimonia.mjs:ro".length)], { input: fs.readFileSync(0), env, stdio: ["pipe", "inherit", "inherit"] });
+  process.exit(r.status ?? 1);
+}
+process.stderr.write("docker de mentira: inesperado " + args.join(" ") + "\n");
+process.exit(1);
+`;
+
+// O sftp do Storage Box: os comandos chegam pela entrada (-b -) e mexem numa pasta (BOX_DIR); o "-" na frente ignora a
+// falha, como no sftp de verdade.
+const SFTP_SHIM = String.raw`
+import fs from "node:fs";
+import path from "node:path";
+const args = process.argv.slice(2);
+const target = args[args.length - 1];
+const box = process.env.BOX_DIR;
+const lines = fs.readFileSync(0, "utf8").split("\n").filter(Boolean);
+if (process.env.SHIM_SFTP_FALHA) { fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "sftp", target, args, cmd: null }) + "\n"); process.stderr.write("Connection refused\n"); process.exit(255); }
+for (const line of lines) {
+  fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "sftp", target, args: args.slice(0, -1), cmd: line }) + "\n");
+  const ignora = line.startsWith("-");
+  const [cmd, ...rest] = (ignora ? line.slice(1) : line).trim().split(/\s+/);
+  const r = (p) => path.join(box, p);
+  try {
+    if (cmd === "pwd") console.log("Remote working directory: /home");
+    else if (cmd === "ls") { for (const f of fs.readdirSync(r(rest.filter((x) => !x.startsWith("-"))[0])).sort()) console.log(f); }
+    else if (cmd === "mkdir") fs.mkdirSync(r(rest[0]));
+    else if (cmd === "put") fs.copyFileSync(rest[0], r(rest[1]));
+    else if (cmd === "get") fs.copyFileSync(r(rest[0]), rest[1]);
+    else throw new Error("comando inesperado: " + cmd);
+  } catch (e) {
+    if (!ignora) { process.stderr.write(e.message + "\n"); process.exit(1); }
+  }
+}
+`;
+
+// O gh do runner: a lista de artefatos do repositorio (SHIM_GH_ARTEFATOS, o JSON da API) e o zip de um artefato
+// (SHIM_GH_ZIP, um arquivo), como a API do GitHub entrega.
+const GH_SHIM = String.raw`
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "gh", args }) + "\n");
+const caminho = args.filter((a, i) => i > 0 && !a.startsWith("-") && args[i - 1] !== "-H")[0] ?? "";
+if (args[0] === "api" && /\/actions\/artifacts\?/.test(caminho)) { process.stdout.write(process.env.SHIM_GH_ARTEFATOS ?? '{"artifacts":[]}'); process.exit(0); }
+if (args[0] === "api" && /\/actions\/artifacts\/\d+\/zip$/.test(caminho) && process.env.SHIM_GH_ZIP) { process.stdout.write(fs.readFileSync(process.env.SHIM_GH_ZIP)); process.exit(0); }
+process.stderr.write("gh de mentira: inesperado " + args.join(" ") + "\n");
+process.exit(1);
 `;
 
 const SCP_SHIM = String.raw`
@@ -210,12 +295,12 @@ export const hzCalls = (calls, prefix) => calls.filter((c) => c.tool === "hcloud
  * Uma conta de mentira: servidores, imagens, DNS e firewalls iniciais; `runScript(script, env, args)` roda o script de
  * infra/cloud com os binarios de mentira na frente do PATH; `calls()` le o log na ordem; `hz()` e `cf()` o estado.
  */
-export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls } = {}) {
+export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls, tipos, storageBox, sshKeys } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "bunker707-infra-"));
   tempDirs.push(dir);
   const shims = join(dir, "shims");
   mkdirSync(shims);
-  for (const [name, source] of [["hcloud", HCLOUD_SHIM], ["curl", CURL_SHIM], ["ssh", SSH_SHIM], ["scp", SCP_SHIM]]) {
+  for (const [name, source] of [["hcloud", HCLOUD_SHIM], ["curl", CURL_SHIM], ["ssh", SSH_SHIM], ["scp", SCP_SHIM], ["docker", DOCKER_SHIM], ["sftp", SFTP_SHIM], ["gh", GH_SHIM]]) {
     writeFileSync(join(dir, `${name}-shim.mjs`), source);
     writeFileSync(join(shims, name), `#!/bin/sh\nexec "${process.execPath}" "${join(dir, `${name}-shim.mjs`)}" "$@"\n`);
     chmodSync(join(shims, name), 0o755);
@@ -227,13 +312,17 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   const cfState = join(dir, "cloudflare.json");
   const log = join(dir, "chamadas.log");
   const fws = firewalls ?? ["bunker707-membros", "bunker707-marketing", "bunker707-meet"].map((s) => ({ name: `${s}-fw`, applied_to: [], rules: [] }));
-  writeFileSync(hzState, JSON.stringify({ servers, images, firewalls: fws, serverTypes, unavailable, imageStatus, nextImageId: 9000, nextIp: 10 }));
+  writeFileSync(hzState, JSON.stringify({ servers, images, firewalls: fws, serverTypes: tipos ?? serverTypes, unavailable, imageStatus, storageBox, sshKeys, nextImageId: 9000, nextIp: 10 }));
   writeFileSync(cfState, JSON.stringify({ records, settings: {}, nextId: 1 }));
   const work = join(dir, "work");
   mkdirSync(work);
+  // O Storage Box: uma pasta, mexida pelo sftp de mentira.
+  const box = join(dir, "storagebox");
+  mkdirSync(box);
   const env = (extra = {}) => {
     const base = { ...process.env };
-    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO"]) delete base[name];
+    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "GITHUB_REF", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "CONFIRMAR", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO", "SNAPSHOT", "SSH", "TROCAR_SENHA_BANCO", "SEM_BACKUP_ANTES", "ROTACIONAR", "GITHUB_EVENT_PATH", "GITHUB_REPOSITORY", "PACOTE_RUN"]) delete base[name];
+    for (const name of Object.keys(base)) if (name.startsWith("LICENCAS_") || name.startsWith("TESTE_")) delete base[name];
     return {
       ...base,
       PATH: `${shims}:${process.env.PATH}`,
@@ -243,6 +332,11 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
       HZ_STATE: hzState,
       CF_STATE: cfState,
       SHIM_LOG: log,
+      BOX_DIR: box,
+      // As raizes publicas do repositorio: um arquivo desta conta de mentira (so existe se o teste o escrever), nunca o
+      // infra/licencas/raizes.json de verdade, que chega num commit depois da cerimonia.
+      LICENCAS_RAIZES_ARQUIVO: join(dir, "raizes.json"),
+      SHIM_CERIMONIA_MODULOS: fileURLToPath(new URL("./emissor-chaves", import.meta.url)),
       ...extra
     };
   };
@@ -253,5 +347,5 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
   const hz = () => JSON.parse(readFileSync(hzState, "utf8"));
   const cf = () => JSON.parse(readFileSync(cfState, "utf8"));
-  return { runScript, calls, hz, cf, envFor: env };
+  return { runScript, calls, hz, cf, envFor: env, box, work, raizesArquivo: join(dir, "raizes.json") };
 }

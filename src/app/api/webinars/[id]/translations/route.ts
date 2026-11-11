@@ -4,6 +4,8 @@ import { readRoomTranslations, takeTranslationRequest } from "@/server/webinars/
 import { TRANSLATIONS_OFF } from "@/server/webinars/translation-model";
 import { translationsQuerySchema } from "@/server/webinars/translation-schemas";
 import { webinarTranslationEnabled } from "@/server/webinars/v4-env";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A traducao do chat e do roteiro na Sala (docs/30 §1.6, fase 4f). GET ?sessao=&lang=pt|en|es&ids=a,b,c (ate 100
 // ids, as mensagens que a sala esta mostrando) devolve { translations: [{ id, body }], pending: [ids], enabled }: as
@@ -20,6 +22,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;

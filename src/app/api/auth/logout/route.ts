@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 const legacyLocalAuthCookieName = "bunker707_local_session";
 // Cookies de sessao do @supabase/ssr: sb-<ref>-auth-token, fatiados em .0, .1...
@@ -9,6 +10,9 @@ const legacyLocalAuthCookieName = "bunker707_local_session";
 const supabaseAuthCookiePattern = /^sb-.+-auth-token(?:-code-verifier)?(?:\.\d+)?$/;
 
 export async function POST() {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   if (hasSupabaseAuthConfig()) {
     try {
       // signOut no servidor revoga o refresh token e remove os cookies de sessao

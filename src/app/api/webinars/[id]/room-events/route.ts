@@ -4,6 +4,8 @@ import { webinarsDb } from "@/server/webinars/room-queries";
 import { takeRoomEventBatch } from "@/server/webinars/room-limits";
 import { guardRoomRequest, loadCachedRoomContext, ok, parseRoomBody, recordAfterReply, roomErrorResponse, tooMany, type RouteContext } from "@/server/webinars/room-route";
 import { ROOM_LIMIT_MESSAGE } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Os sinais do iframe da sala ao vivo (docs/30 §4.7, §5.1 e §6.3): POST { sessionId, events: [{ name, at, data }] } em
 // lotes de ate 20 (nomes fixos de ROOM_EVENT_NAMES; lote maior ou nome desconhecido: 400). Cada sinal vira uma linha
@@ -19,6 +21,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { session: "claims" });
   if ("response" in guarded) {
     return guarded.response;

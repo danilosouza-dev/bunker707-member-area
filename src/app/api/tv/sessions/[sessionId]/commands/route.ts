@@ -5,6 +5,7 @@ import { requireApiUser } from "@/server/auth/guards";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { sendTvCommand } from "@/server/video/tv-sessions";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ sessionId: string }> };
 
@@ -77,6 +78,9 @@ function parseCommand(payload: unknown): TvCommand | null {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
   if (auth.response || !auth.user) return noStore(auth.response!);
 

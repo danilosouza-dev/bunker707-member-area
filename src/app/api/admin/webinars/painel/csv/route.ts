@@ -9,6 +9,8 @@ import { WEBINARS_MIGRATION, isMissingWebinarSchema, webinarsDb } from "@/server
 import { parsePanelExportRequest } from "@/server/webinars/export-model";
 import { loadPanelExport } from "@/server/webinars/export-queries";
 import { EXPORT_MESSAGES } from "@/server/webinars/export-schemas";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Os CSVs do periodo de um painel (docs/30 §3.1 a §3.3 e §3.7): GET /api/admin/webinars/painel/csv?tipo=ao-vivo|gravadas
 // &inicio=&fim=&relatorio=performance|simulacao, mais os filtros da aba (PANEL_FILTER_PARAMS de export-model.ts). O
@@ -22,6 +24,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("messaging.write");
 
   if (auth.response) {

@@ -13,6 +13,8 @@ import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { WEBINAR_REPORT_SESSION_PARAM } from "@/server/webinars/report-page-model";
 import { getWebinarReportPage } from "@/server/webinars/report-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 export const metadata: Metadata = {
   title: "Relatório · Webinário · Comunicação"
@@ -31,6 +33,9 @@ type PageProps = {
 // nunca (M9). Webinario que nao existe: 404. Banco sem a migracao WEBINARS_MIGRATION: o aviso no lugar dos numeros
 // (as partes da fase 4 sem a migracao delas mostram o aviso so no bloco).
 export default async function AdminWebinarReportPage({ params, searchParams }: PageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
 
   if (!can(access, "messaging.write")) {

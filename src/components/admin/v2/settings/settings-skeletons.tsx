@@ -133,3 +133,15 @@ export function SalesSettingsSkeleton() {
     </AdminPage>
   );
 }
+
+/** Licenca: cabecalho, a situacao e os dados da Licenca (docs/32 §2.4). */
+export function LicenseSettingsSkeleton() {
+  return (
+    <AdminPage className="gap-6">
+      <LoadingStatus label="Carregando a Licença" />
+      <PageHeaderSkeleton />
+      <SectionCardSkeleton className="max-w-[880px]" rows={1} />
+      <SectionCardSkeleton className="max-w-[880px]" rows={3} />
+    </AdminPage>
+  );
+}

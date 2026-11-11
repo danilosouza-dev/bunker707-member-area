@@ -10,6 +10,8 @@ import { liveRoomConfigured } from "@/server/webinars/live-model";
 import { webinarHref } from "@/server/webinars/model";
 import { isWebinarSlug, normalizeSource } from "@/server/webinars/student-model";
 import { getWebinarPageData } from "@/server/webinars/student-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // /webinarios/[slug] (docs/30 §1.2): a pagina do Webinario com o Garantir vaga e o Entrar. Quem nao pode ver (fora
 // do "Quem pode", rascunho, apagado) recebe a pagina de nao encontrado, sem saber se o webinario existe
@@ -32,6 +34,9 @@ type WebinarPageProps = {
 };
 
 export default async function WebinarPage({ params, searchParams }: WebinarPageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const { slug } = await params;
 
   if (!isWebinarSlug(slug)) {
@@ -54,6 +59,7 @@ export default async function WebinarPage({ params, searchParams }: WebinarPageP
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <WebinarPageView

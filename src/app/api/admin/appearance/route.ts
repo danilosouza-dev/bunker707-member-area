@@ -6,6 +6,7 @@ import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { PlatformAppearanceInput } from "@/server/db/platform-store";
 import { isSameMemberStyle, normalizeMemberStyle } from "@/lib/member-style";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 function isValidHeroInput(hero: PlatformAppearanceInput["hero"]) {
   return (
@@ -43,6 +44,9 @@ function isValidStyleInput(style: PlatformAppearanceInput["style"]) {
 }
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("storefront.write");
 
   if (auth.response) {

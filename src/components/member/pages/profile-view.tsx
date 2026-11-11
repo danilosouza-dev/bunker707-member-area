@@ -207,10 +207,25 @@ function ProfileSecurityTab() {
   );
 }
 
-function ProfilePrivacyTab({ accessPreviewMode }: { accessPreviewMode?: AccessPreviewMode }) {
+// Sem o modulo dos Webinarios na licenca (docs/32 §11.8), o bloco do chat das lives some e a aba (que o rodape abre
+// por "Privacidade") mostra so o caminho para pedir os dados ou a exclusao deles a escola.
+function ProfilePrivacyTab({ accessPreviewMode, supportHref, webinars }: { accessPreviewMode?: AccessPreviewMode; supportHref: string; webinars: boolean }) {
   return (
     <div className="grid gap-3" data-testid="profile-privacy">
-      <WebinarChatPrivacy readOnly={Boolean(accessPreviewMode)} />
+      {webinars ? (
+        <WebinarChatPrivacy readOnly={Boolean(accessPreviewMode)} />
+      ) : (
+        <SecurityCard
+          action={
+            <MemberButtonLink href={supportHref} variant="secondary">
+              Falar com o suporte
+            </MemberButtonLink>
+          }
+          description="Para pedir uma cópia dos seus dados ou a exclusão deles, fale com o suporte da escola."
+          icon={Lock}
+          title="Seus dados"
+        />
+      )}
     </div>
   );
 }
@@ -219,12 +234,15 @@ export function ProfileView({
   accessPreviewMode,
   accesses,
   details,
-  tab
+  tab,
+  webinars
 }: {
   accessPreviewMode?: AccessPreviewMode;
   accesses: ProfileAccessView[];
   details: ProfileDetailsView;
   tab: ProfileTab;
+  /** O modulo dos Webinarios esta ligado na licenca (o bloco do chat das lives em Privacidade). */
+  webinars: boolean;
 }) {
   const tabHref = (value: ProfileTab) =>
     withAccessPreviewParam(value === "dados" ? MEMBER_ROUTES.profile : `${MEMBER_ROUTES.profile}?aba=${value}`, accessPreviewMode);
@@ -260,7 +278,7 @@ export function ProfileView({
       {tab === "dados" ? <ProfileDetailsTab details={details} supportHref={supportHref} /> : null}
       {tab === "acessos" ? <ProfileAccessesTab accesses={accesses} supportHref={supportHref} /> : null}
       {tab === "seguranca" ? <ProfileSecurityTab /> : null}
-      {tab === "privacidade" ? <ProfilePrivacyTab accessPreviewMode={accessPreviewMode} /> : null}
+      {tab === "privacidade" ? <ProfilePrivacyTab accessPreviewMode={accessPreviewMode} supportHref={supportHref} webinars={webinars} /> : null}
     </MemberPage>
   );
 }

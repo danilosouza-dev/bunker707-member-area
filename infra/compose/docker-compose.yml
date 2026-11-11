@@ -503,6 +503,11 @@ services:
       WEBINAR_ASSISTANT_ENABLED: ${WEBINAR_ASSISTANT_ENABLED:-}
       WEBINAR_TRANSLATION_ENABLED: ${WEBINAR_TRANSLATION_ENABLED:-}
       YOUTUBE_DATA_API_KEY: ${YOUTUBE_DATA_API_KEY:-}
+      # Bunker Members (docs/32 §11.10): a API interna do Emissor de licencas. So a nossa escola tem; vazias = Minhas
+      # licencas e a fila da venda ao Emissor nao existem. Nunca no compose do kit (o produto vendido). O simulador
+      # (EMISSOR_INTERNO_SIMULADOR) nunca entra aqui: so fora da producao.
+      EMISSOR_INTERNO_URL: ${EMISSOR_INTERNO_URL:-}
+      EMISSOR_INTERNO_CREDENCIAL: ${EMISSOR_INTERNO_CREDENCIAL:-}
 
   # Borda: TLS automatico (Let's Encrypt), app, API do Supabase e Studio em hostnames separados.
   # E o unico servico que escuta fora de 127.0.0.1 (CADDY_BIND=0.0.0.0 em producao; a Hetzner so deixa

@@ -78,7 +78,7 @@ async function callModerationRpc(input: { actorId: string; commentId: string; no
 export async function replyToComment(
   input: ReplyToCommentInput
 ): Promise<ActionResult<{ questionId: string; reply: CommentListItem }>> {
-  return runAdminAction("community.reply", replyToCommentSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.reply", "atendimento", replyToCommentSchema, input, async ({ input: data, user }) => {
     const db = communityDb();
     const validated = validateLessonCommentBody(data.body);
 
@@ -186,7 +186,7 @@ export async function replyToComment(
 
 /** [community.reply] Resolver = atendido sem responder (sai da fila). resolved=false desfaz. */
 export async function resolveComment(input: ResolveCommentInput): Promise<ActionResult<{ commentId: string; resolved: boolean }>> {
-  return runAdminAction("community.reply", resolveCommentSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.reply", "atendimento", resolveCommentSchema, input, async ({ input: data, user }) => {
     const result = await communityDb()
       .from("lesson_comments")
       .update(data.resolved ? { resolved_at: new Date().toISOString(), resolved_by: user.id } : { resolved_at: null, resolved_by: null })
@@ -215,7 +215,7 @@ export async function resolveComment(input: ResolveCommentInput): Promise<Action
 export async function moderateComment(
   input: ModerateCommentInput
 ): Promise<ActionResult<{ commentId: string; status: "approved" | "hidden" | "spam" }>> {
-  return runAdminAction("community.moderate", moderateCommentSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.moderate", "atendimento", moderateCommentSchema, input, async ({ input: data, user }) => {
     await callModerationRpc({ actorId: user.id, commentId: data.commentId, note: data.note, status: data.status });
     refresh();
 
@@ -225,7 +225,7 @@ export async function moderateComment(
 
 /** [community.moderate] Mesma moderacao para varios comentarios (ate 50), um por vez na RPC. */
 export async function moderateComments(input: ModerateCommentsInput): Promise<ActionResult<BulkModerationResult>> {
-  return runAdminAction("community.moderate", moderateCommentsSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.moderate", "atendimento", moderateCommentsSchema, input, async ({ input: data, user }) => {
     const updated: string[] = [];
     const failed: string[] = [];
     const queue = [...data.commentIds];
@@ -262,7 +262,7 @@ export async function moderateComments(input: ModerateCommentsInput): Promise<Ac
 
 /** [community.reply] Cria (sem id) ou edita uma resposta rapida. */
 export async function saveQuickReply(input: QuickReplyInput): Promise<ActionResult<QuickReply>> {
-  return runAdminAction("community.reply", quickReplySchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.reply", "atendimento", quickReplySchema, input, async ({ input: data, user }) => {
     const db = communityDb();
 
     if (data.id) {
@@ -307,7 +307,7 @@ export async function saveQuickReply(input: QuickReplyInput): Promise<ActionResu
 
 /** [community.reply] Exclui uma resposta rapida (a tela oferece "Desfazer" recriando o texto). */
 export async function deleteQuickReply(input: DeleteQuickReplyInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("community.reply", deleteQuickReplySchema, input, async ({ input: data }) => {
+  return runAdminAction("community.reply", "atendimento", deleteQuickReplySchema, input, async ({ input: data }) => {
     const result = await communityDb().from("community_quick_replies").delete().eq("id", data.id).select("id").maybeSingle();
     assertNoDbError(result.error, "Comunidade: excluir resposta rapida");
 

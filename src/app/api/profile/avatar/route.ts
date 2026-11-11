@@ -4,10 +4,14 @@ import { requireApiUser } from "@/server/auth/guards";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { removeStudentAvatar, saveStudentAvatar } from "@/server/member-area/student-avatar";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Foto do perfil do proprio aluno (Perfil > foto). PUT grava a foto recortada; DELETE volta para as iniciais.
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response) {
@@ -36,6 +40,9 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE() {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response) {

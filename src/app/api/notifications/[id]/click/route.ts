@@ -3,6 +3,7 @@ import { requireApiSessionUser } from "@/server/auth/guards";
 import { markClicked } from "@/server/communications/inbox";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O aluno seguiu o link da notificacao ou o botao do aviso: vista, lida e clicada. Sem corpo, para o
 // navegador poder mandar com sendBeacon na hora de sair da pagina. Sessao pelas claims do JWT (v3a, docs/24).
@@ -13,6 +14,9 @@ export const revalidate = 0;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(_request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

@@ -19,7 +19,7 @@ const searchAdminSchema = z.object({
 });
 
 export async function searchAdmin(raw: unknown): Promise<ActionResult<AdminSearchResults>> {
-  return runAdminAction("admin.read", searchAdminSchema, raw, async ({ access, input }) => searchAdminCatalog(input.q, catalogScope(access)), {
+  return runAdminAction("admin.read", "leitura", searchAdminSchema, raw, async ({ access, input }) => searchAdminCatalog(input.q, catalogScope(access)), {
     target: () => "any"
   });
 }

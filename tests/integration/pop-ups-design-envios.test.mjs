@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { after, before, beforeEach, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import { actAs } from "../support/integration-hooks.mjs";
-import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
+import { createLocalAdminClient, guardadoNoBanco, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
 import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Design do pop-up (docs/26), envio de video e de fontes contra o banco e o Storage LOCAIS (pacote U):
@@ -448,10 +448,12 @@ test("pop-up com video: endereco de fora do nosso bucket e recusado; o do nosso 
   const { count } = await db.from("campaigns").select("id", { count: "exact", head: true }).eq("created_by", produtor.id);
   assert.equal(count, 0, "nada gravado");
 
-  // Mesmo caminho do nosso bucket, mas a url que veio do navegador aponta para outro host: grava a nossa.
+  // Mesmo caminho do nosso bucket, mas a url que veio do navegador aponta para outro host: grava a nossa (pelo
+  // caminho: o banco nunca guarda o endereco inteiro, docs/32 §11.5).
   const salvo = ok(await salvar(popupComDesign({ video: { ...video, url: `https://outro.supabase.co/storage/v1/object/public/${model.POPUP_VIDEO_BUCKET}/${video.path}` } })));
   const [linha] = unwrap(await db.from("campaigns").select("popup_design").eq("id", salvo.id), "Lendo o pop-up");
-  assert.equal(linha.popup_design.media.video.url, video.url);
+  assert.equal(linha.popup_design.media.video.url, guardadoNoBanco(video.url));
+  assert.equal(linha.popup_design.media.video.url, model.storagePublicPath(model.POPUP_VIDEO_BUCKET, video.path));
 });
 
 test("pop-up com video: objeto que nao passou pela conferencia do envio e conferido ao salvar (recusado e fica para a limpeza)", async () => {

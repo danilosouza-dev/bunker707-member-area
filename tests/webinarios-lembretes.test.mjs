@@ -530,7 +530,7 @@ test("chaves: o dedupe do sino e a chave do e-mail levam a hora marcada (a sessa
   assert.equal(webinarIdempotencyKey({ kind: "cancelled", sessionId: SESSAO_ID, stamp: "202611052300", userId: ALUNA }), `webinar:cancelled:${SESSAO_ID}:202611052300:${ALUNA}`);
   assert.equal(webinarNoticeExpiresAt({ durationMinutes: 60, floorMs: Date.parse(AGORA), scheduledAt: HORA_MARCADA }), "2026-11-06T02:00:00.000Z");
   assert.equal(webinarNoticeExpiresAt({ durationMinutes: 60, floorMs: Date.parse("2026-11-10T00:00:00.000Z"), scheduledAt: HORA_MARCADA }), "2026-11-10T00:00:00.000Z");
-  assert.deepEqual(EMAIL_KINDS.slice(3), ["webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled", "webinar_recording_failed"]);
+  assert.deepEqual(EMAIL_KINDS.slice(3, 7), ["webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled", "webinar_recording_failed"]);
 });
 
 /* ------------------------------------------------------------------------------------------------

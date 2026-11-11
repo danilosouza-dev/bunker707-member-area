@@ -2,6 +2,8 @@ import { issueJoinToken } from "@/server/webinars/live-room";
 import { joinTokenBodySchema } from "@/server/webinars/live-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { guardRoomRequest, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O token da sala ao vivo (docs/30 §5.1, §5.4 e §8.1): POST { sessionId } devolve { jwt, room, domain, role,
 // expiresAt, refreshAt, settings } (o nome da sala so aqui, nunca na URL; o navegador pede outro em `refreshAt`). So a
@@ -16,6 +18,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

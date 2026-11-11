@@ -2,7 +2,7 @@
 
 // Server Actions do admin dos Webinarios (docs/30 §5.2, fase 1a): salvar o rascunho, publicar, cancelar,
 // duplicar, excluir o rascunho, mudar a hora marcada de uma sessao e enviar a capa. Todas passam por
-// runAdminAction (messaging.write; publicar, cancelar e excluir pedem messaging.publish), gravam recordAudit so
+// runWebinarAction (o runAdminAction com o modulo; messaging.write; publicar, cancelar e excluir pedem messaging.publish), gravam recordAudit so
 // com ids e contagens (nunca nomes, e-mails nem texto digitado) e revalidam a lista e a pagina do webinario.
 // Toda leitura e escrita vai pela service role (webinarsDb) com assertNoDbError no store.
 // Fase 3 (docs/30 §2.3, §6.4 e §6.7): publicar gera o `room_name` da sessao `live` (ou garante numa live antiga);
@@ -18,7 +18,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { isSameVersion } from "@/server/communications/campaign-model";
@@ -340,7 +340,7 @@ async function copyPart<T>(label: string, run: () => Promise<T>, empty: T): Prom
  * vaga (queueWebinarRescheduledNotices).
  */
 export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionResult<SavedWebinar>> {
-  return runAdminAction("messaging.write", saveWebinarSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveWebinarSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const draft = data.draft;
@@ -455,7 +455,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
  * Live gravada. O card na pagina inicial, a faixa e os lembretes passam a valer daqui.
  */
 export async function publishWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<PublishedWebinar>> {
-  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const bundle = await loadBundle(db, data.id);
@@ -554,7 +554,7 @@ export async function publishWebinar(input: { expectedUpdatedAt?: string; id: st
  * tinha vaga recebe "Live cancelada" pelo sino e por e-mail (queueWebinarCancelledNotices, entrega 1c).
  */
 export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: string; reason?: string }): Promise<ActionResult<CancelledWebinar>> {
-  return runAdminAction("messaging.publish", cancelWebinarSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "dever_legal", cancelWebinarSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
@@ -611,7 +611,7 @@ export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: str
  * sessoes que nascem vai sem a decisao, que e de quem liga na copia, D10).
  */
 export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const bundle = await loadBundle(db, data.id);
     const source = draftOfBundle(bundle);
@@ -661,7 +661,7 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
  * arquivado, nunca excluido direto.
  */
 export async function deleteWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "dever_legal", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
@@ -702,7 +702,7 @@ export async function deleteWebinar(input: { expectedUpdatedAt?: string; id: str
  * ainda atende pelo "Comeca quando voce entra" nao se arquiva.
  */
 export async function archiveWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; situation: "archived"; updatedAt: string }>> {
-  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "dever_legal", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
@@ -743,7 +743,7 @@ export async function archiveWebinar(input: { expectedUpdatedAt?: string; id: st
 
 /** [messaging.publish] Desarquiva: o webinario volta a ser publicado (encerrado ou cancelado, como era) e a lista o mostra de novo. */
 export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; situation: WebinarSituation; updatedAt: string }>> {
-  return runAdminAction("messaging.publish", webinarIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", webinarIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.id);
@@ -779,7 +779,7 @@ export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: 
  * acompanha. Quem tinha vaga recebe "A live mudou para…" e os lembretes recomecam (entrega 1c).
  */
 export async function rescheduleSession(input: { scheduledAt: string; sessionId: string; webinarId: string }): Promise<ActionResult<{ scheduledAt: string; sessionId: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", rescheduleSessionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", rescheduleSessionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await requireWebinarRow(db, data.webinarId);
@@ -836,7 +836,7 @@ export async function rescheduleSession(input: { scheduledAt: string; sessionId:
  * webinars/covers e devolve o endereco publico. O servidor le as medidas no cabecalho do WebP antes de enviar.
  */
 export async function uploadWebinarCover(input: { image: string; slot?: "cover" | "notice" }): Promise<ActionResult<{ url: string }>> {
-  return runAdminAction("messaging.write", uploadCoverSchema, input, async ({ input: data }) => {
+  return runWebinarAction("messaging.write", "conteudo", uploadCoverSchema, input, async ({ input: data }) => {
     const check = checkProductImage(data.slot, decodeWebpDataUrl(data.image));
 
     if (!check.ok) {
