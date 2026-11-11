@@ -19,8 +19,11 @@ const TEAM_LIMIT = 500;
 type RoleRow = { permissions: unknown; role: unknown; user_id: string };
 type ProfileRow = { email: string | null; id: string };
 
-/** Os donos e administradores com e-mail. Sem a equipe legivel, lanca (a rodada seguinte tenta de novo). */
-async function listLicenseManagers(db: SupabaseClient): Promise<LicenseNoticeRecipient[]> {
+/**
+ * Os donos e administradores com e-mail. Sem a equipe legivel, lanca (a rodada seguinte tenta de novo). Tambem e quem
+ * recebe o e-mail da venda guardada (src/server/payments/held-sales-notice.ts).
+ */
+export async function listLicenseManagers(db: SupabaseClient): Promise<LicenseNoticeRecipient[]> {
   const roles = await db.from("admin_roles").select("user_id, role, permissions").limit(TEAM_LIMIT);
 
   if (roles.error) {

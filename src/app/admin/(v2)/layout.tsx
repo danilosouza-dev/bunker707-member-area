@@ -21,6 +21,9 @@ import { licenseBannerOf, type LicenseBannerModel } from "@/server/licensing/cop
 import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import { getDisabledFeatures } from "@/server/licensing/guards";
 import { observeAdminRequestHost } from "@/server/licensing/request-host";
+import { isActionClassAllowed } from "@/server/licensing/require-feature";
+import { withHeldSalesBanner } from "@/server/payments/held-sales-model";
+import { countHeldSalesForBanner } from "@/server/payments/held-sales-queries";
 
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
@@ -77,11 +80,24 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
 /**
  * A faixa da Licenca (src/server/licensing/copy.ts, licenseBannerOf): a mesma situacao do pedido que o menu ja leu
  * (readCurrentLicenseState, uma leitura por pedido, que nunca lanca). No modo "off", nenhuma, sem ler nada. Sem
- * leitura, nenhuma faixa (o motivo vai para o log uma vez): a moldura nunca quebra por causa dela.
+ * leitura, nenhuma faixa (o motivo vai para o log uma vez): a moldura nunca quebra por causa dela. No "enforce", a
+ * contagem das vendas guardadas (docs/32 §2.2) entra na faixa; com a Licenca em dia e venda ainda guardada, uma faixa so
+ * delas ate a tarefa do tick terminar de liberar. A contagem que falha vale 0.
  */
 async function readLicenseBanner(): Promise<LicenseBannerModel | null> {
   const state = await readCurrentLicenseState();
-  return state ? licenseBannerOf(state, { configuredHost: getConfiguredSiteOrigin() }) : null;
+
+  if (!state) {
+    return null;
+  }
+
+  const banner = licenseBannerOf(state, { configuredHost: getConfiguredSiteOrigin() });
+
+  if (state.mode !== "enforce") {
+    return banner;
+  }
+
+  return withHeldSalesBanner(banner, await countHeldSalesForBanner(), isActionClassAllowed(state, "matricula"));
 }
 
 /**

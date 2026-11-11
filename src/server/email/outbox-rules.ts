@@ -13,6 +13,8 @@ export type EmailOutboxStatus = (typeof EMAIL_OUTBOX_STATUSES)[number];
  * 24 h e 1 h da live e o aviso de live cancelada, para quem garantiu vaga (docs/30 §2.7); `webinar_recording_failed`: a
  * gravacao da Live ao vivo nao chegou na Bunny, para o apresentador (docs/30 §6.7). `license_degree`: a Licenca desta
  * Instalacao mudou de degrau, para os donos e administradores (docs/32 §2.2; so no produto vendido, modo "enforce").
+ * `held_sales`: a primeira venda guardada de um episodio (a licenca nao permite acesso novo), para os donos e
+ * administradores (docs/32 §2.2; so no modo "enforce").
  */
 export const EMAIL_KINDS = [
   "welcome",
@@ -22,7 +24,8 @@ export const EMAIL_KINDS = [
   "webinar_reminder_1h",
   "webinar_cancelled",
   "webinar_recording_failed",
-  "license_degree"
+  "license_degree",
+  "held_sales"
 ] as const;
 export type EmailKind = (typeof EMAIL_KINDS)[number];
 
@@ -114,12 +117,22 @@ export function welcomeIdempotencyKey(userId: string) {
   return idempotencyKeyOf("welcome", userId);
 }
 
-export function purchaseIdempotencyKey(input: { entitlementIds: string[]; sourceEventId: string | null | undefined; sourceProvider: string; userId: string }) {
+/**
+ * Um e-mail de compra por venda e pessoa. `tag` separa um segundo e-mail da mesma venda: a liberacao de uma venda
+ * guardada (docs/32 §2.2), cuja parte renovada na hora ja levou o e-mail com a chave da compra.
+ */
+export function purchaseIdempotencyKey(input: {
+  entitlementIds: string[];
+  sourceEventId: string | null | undefined;
+  sourceProvider: string;
+  tag?: string | null;
+  userId: string;
+}) {
   if (input.sourceEventId) {
-    return idempotencyKeyOf("purchase", input.sourceProvider, input.sourceEventId, input.userId);
+    return idempotencyKeyOf("purchase", input.sourceProvider, input.sourceEventId, input.userId, input.tag);
   }
 
-  return idempotencyKeyOf("purchase", input.sourceProvider, input.userId, ...[...input.entitlementIds].sort());
+  return idempotencyKeyOf("purchase", input.sourceProvider, input.userId, ...[...input.entitlementIds].sort(), input.tag);
 }
 
 /** Uma vez por pessoa por aviso ("sent-as:campaign:<id>:<pessoa>") ou por fluxo ("sent-as:flow:<id>:<pessoa>"). */

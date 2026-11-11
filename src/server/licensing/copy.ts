@@ -229,6 +229,11 @@ export type LicenseBannerModel = {
   renewUrl: string | null;
   /** A Instalacao nunca ativada: a faixa leva a ativar, nao a conferir. */
   needsActivation: boolean;
+  /**
+   * As vendas guardadas agora (docs/32 §2.2), quando ha alguma: a contagem e a frase. Quem monta e o layout do admin,
+   * com withHeldSalesBanner (src/server/payments/held-sales-model.ts); o e-mail de degrau nao leva.
+   */
+  heldSales?: { count: number; text: string };
 };
 
 /**

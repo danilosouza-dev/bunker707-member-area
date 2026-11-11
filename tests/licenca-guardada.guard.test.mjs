@@ -198,6 +198,7 @@ test("as regras ficam puras e o que toca no banco ou no Emissor é server-only",
 test("o job licenca-conferencia está no registro do tick, antes da limpeza de arquivos, e no comentário dos jobs", () => {
   const registry = read("src/server/jobs/registry.ts");
 
-  assert.match(registry, /export const jobRegistry: readonly Job\[\] = \[[^\]]*, licenseCheckInJob, communicationMediaJob\];/);
+  // As vendas guardadas (docs/32 §2.2) vem logo depois da conferencia: a licenca regularizada na rodada ja as libera.
+  assert.match(registry, /export const jobRegistry: readonly Job\[\] = \[[^\]]*, licenseCheckInJob, heldSalesJob, communicationMediaJob\];/);
   assert.match(registry, /- `licenca-conferencia` \(/);
 });

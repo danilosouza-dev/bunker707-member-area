@@ -6,8 +6,9 @@ import { LICENSE_SCREEN_HREF } from "@/server/licensing/screen-result";
 import { licenseButton } from "./styles";
 
 // A faixa da Licenca na moldura do admin (docs/32 §2.2 e §11.3, "no molde do PendingMigrationNotice"): o que houve, o que
-// vale agora, a data do proximo passo e, para o dono e os administradores, Renovar (o endereco que chega na licenca
-// assinada), Verificar agora (um <form> com a Server Action) e Ver a Licenca. Montada so no servidor: nenhum JavaScript
+// vale agora, a data do proximo passo, as vendas guardadas (quando ha) e, para o dono e os administradores, Renovar (o
+// endereco que chega na licenca assinada), Verificar agora (um <form> com a Server Action), Ver vendas guardadas (a lista
+// na tela Licenca) e Ver a Licenca. Montada so no servidor: nenhum JavaScript
 // novo no navegador. Some no console da sessao de um webinario, a unica tela em tela cheia (sem a barra lateral
 // #admin-sidebar), para nao cobrir a live. No modo "off" o layout nem a monta.
 
@@ -47,6 +48,11 @@ export function LicenseBanner({ banner, canManage, checkNowAction }: LicenseBann
                 {line}
               </p>
             ))}
+            {banner.heldSales ? (
+              <p className="font-medium text-[var(--text-primary)]" data-held-sales={banner.heldSales.count}>
+                {banner.heldSales.text}
+              </p>
+            ) : null}
             {canManage ? null : <p className="text-[var(--text-secondary)]">Avise o dono ou um administrador da escola.</p>}
           </div>
         </div>
@@ -68,6 +74,11 @@ export function LicenseBanner({ banner, canManage, checkNowAction }: LicenseBann
                     Verificar agora
                   </button>
                 </form>
+                {banner.heldSales ? (
+                  <Link className={licenseButton} data-slot="button" href={`${LICENSE_SCREEN_HREF}#vendas-guardadas`}>
+                    Ver vendas guardadas
+                  </Link>
+                ) : null}
                 <Link className={licenseButton} data-slot="button" href={LICENSE_SCREEN_HREF}>
                   Ver a Licença
                 </Link>

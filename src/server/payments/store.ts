@@ -412,6 +412,26 @@ export async function updateWebhookEventResult(db: SalesDb, id: string, patch: W
   failOnError(error, "Registrar o resultado da venda");
 }
 
+/**
+ * Muda o resultado de eventos ja processados (a venda guardada descartada por um reembolso), so nos que ainda estao no
+ * resultado `onlyOutcome`: a situacao de processamento nao muda (processed continua sem Reprocessar).
+ */
+export async function updateWebhookEventsOutcome(
+  db: SalesDb,
+  input: { ids: readonly string[]; onlyOutcome: SaleOutcome; outcome: SaleOutcome; outcomeDetail: string }
+) {
+  if (input.ids.length === 0) {
+    return;
+  }
+
+  const { error } = await db
+    .from("webhook_events")
+    .update({ outcome: input.outcome, outcome_detail: input.outcomeDetail.slice(0, 500), processed_at: new Date().toISOString() })
+    .in("id", [...input.ids])
+    .eq("outcome", input.onlyOutcome);
+  failOnError(error, "Registrar o resultado da venda guardada");
+}
+
 export async function fetchWebhookEvent(db: SalesDb, id: string): Promise<(WebhookEventRow & { payload: unknown }) | null> {
   const { data, error } = await db.from("webhook_events").select(`${WEBHOOK_EVENT_COLUMNS},payload`).eq("id", id).maybeSingle();
   failOnError(error, "Venda recebida");
