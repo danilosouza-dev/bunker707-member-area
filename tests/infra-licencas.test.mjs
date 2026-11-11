@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -65,10 +65,8 @@ const TIPOS = {
 };
 
 // ---- o Painel e a conta de envio do Emissor: as variaveis do repositorio que o workflow entrega ao deploy-licencas ----
-const AUD = "0123456789abcdef".repeat(4);
+// O Painel entra com e-mail e senha (docs/32 D40): nada do Cloudflare Access nem da lista de IPs. Todas tem padrao.
 const PAINEL_ENV = {
-  LICENCAS_PAINEL_ACCESS_EQUIPE: "https://Bunker707.cloudflareaccess.com/",
-  LICENCAS_PAINEL_ACCESS_AUD: AUD,
   LICENCAS_EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
   PRODUCER_EMAIL: "Produtor@Exemplo.com.br"
 };
@@ -179,7 +177,8 @@ test("dns-licencas: so registros A, o Painel com proxy e a API sem; AAAA que exi
   assert.deepEqual(de("membros.bunker707.com.br"), [["AAAA", "2001:db8:a1::1", true]], "os outros nomes nao mudam");
   assert.ok(!conta.calls().some((c) => c.tool === "curl" && c.method === "POST" && JSON.parse(c.data ?? "{}").type === "AAAA"), "nunca cria AAAA");
   assert.deepEqual(conta.cf().settings, { ssl: "strict", always_use_https: "off" });
-  assert.match(result.stdout, /aplicacao do\s+Access/);
+  assert.match(result.stdout, /com o proxy da Cloudflare; o login e o de e-mail e senha do proprio Painel \(D40\)/);
+  assert.doesNotMatch(result.stdout, /Access/, "o Painel nao pede o Cloudflare Access (D40)");
 
   const semServidor = setup({});
   const recusa = semServidor.runScript("licencas.sh", {}, ["dns"]);
@@ -234,7 +233,8 @@ test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e confer
   }
   // As variaveis do repositorio (nao sao segredo): o Painel, a conta de envio, as chaves anteriores, os links e o "sem Painel".
   const variaveis = todas.filter(([, expressao]) => !expressao.includes("secrets."));
-  assert.deepEqual(variaveis.map(([nome]) => nome).sort(), ["LICENCAS_EMISSOR_EMAIL_PRODUTOR", "LICENCAS_EMISSOR_EMAIL_REMETENTE", "LICENCAS_EMISSOR_KIDS_ANTERIORES", "LICENCAS_EMISSOR_LINK_LOJA", "LICENCAS_EMISSOR_LINK_RENOVAR", "LICENCAS_PAINEL_ACCESS_AUD", "LICENCAS_PAINEL_ACCESS_EQUIPE", "LICENCAS_PAINEL_TETO_DIARIO", "LICENCAS_SEM_PAINEL"]);
+  assert.deepEqual(variaveis.map(([nome]) => nome).sort(), ["LICENCAS_EMISSOR_EMAIL_PRODUTOR", "LICENCAS_EMISSOR_EMAIL_REMETENTE", "LICENCAS_EMISSOR_KIDS_ANTERIORES", "LICENCAS_EMISSOR_LINK_LOJA", "LICENCAS_EMISSOR_LINK_RENOVAR", "LICENCAS_PAINEL_TETO_DIARIO", "LICENCAS_SEM_PAINEL"]);
+  assert.doesNotMatch(workflow, /PAINEL_ACCESS|LICENCAS_PAINEL_IPS/, "nada do Cloudflare Access nem da lista de IPs no workflow (D40)");
   for (const [nome, expressao] of variaveis) {
     assert.equal(expressao, `inputs.etapa == 'deploy-licencas' && vars.${nome} || ''`, `${nome}: a variavel do repositorio, so no deploy-licencas`);
   }
@@ -365,7 +365,6 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
     GITHUB_TOKEN: TOKEN,
     GITHUB_ACTOR: "danilosouza-dev",
     LICENCAS_RAIZES: RAIZES,
-    LICENCAS_PAINEL_IPS: "203.0.113.10,2001:db8:1234::/48",
     PUBLICO_TENTATIVAS: "1",
     SSH_SHIM_ENV: JSON.stringify({ EMISSOR_PORTA_NO_HOST: "8080", PAINEL_PORTA_NO_HOST: "8081" })
   }, ["deploy"]);
@@ -385,12 +384,10 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   const imp = calls[implantar].command;
   assert.match(imp, /--imagem='ghcr\.io\/danilosouza-dev\/bunker-licensing:main'/);
   assert.equal(Buffer.from(imp.match(/--raizes-b64='([^']+)'/)[1], "base64").toString(), RAIZES);
-  // O Painel e a conta de envio, como o Emissor confere ao subir: o endereco vem do nome do Painel, a equipe do Access sem
-  // https:// nem barra, o produtor (o PRODUCER_EMAIL, sem a variavel) em minusculas, e o teto padrao.
+  // O Painel e a conta de envio, como o Emissor confere ao subir: o endereco vem do nome do Painel, o produtor (o
+  // PRODUCER_EMAIL, sem a variavel) em minusculas, e o teto padrao. Nada do Access (D40).
   assert.deepEqual(configDe(imp), {
     PAINEL_ENDERECO: `https://${PAINEL}`,
-    PAINEL_ACCESS_EQUIPE: "bunker707.cloudflareaccess.com",
-    PAINEL_ACCESS_AUD: AUD,
     PAINEL_TETO_DIARIO: "10",
     EMISSOR_EMAIL_PRODUTOR: "produtor@exemplo.com.br",
     EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
@@ -400,12 +397,19 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   });
   const geridas = JSON.parse(readFileSync(join(root, "infra/licencas/scripts/implantar.sh"), "utf8").match(/GERIDAS = (\[[^\]]+\])/)[1]);
   assert.deepEqual(Object.keys(configDe(imp)).sort(), geridas, "o JSON do deploy traz exatamente as variaveis que o implantar.sh confere");
-  assert.match(result.stdout, /Painel em https:\/\/licencas\.bunker707\.com\.br \(Access de bunker707\.cloudflareaccess\.com; teto de 10 /);
+  assert.match(result.stdout, /Painel em https:\/\/licencas\.bunker707\.com\.br \(login de e-mail e senha, de qualquer internet, D40; teto de 10 /);
   assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo/i, "o e-mail do produtor nao vai para o log");
-  assert.match(result.stdout, /A primeira conta do Painel, uma vez .*\n\s+cd emissor && docker compose exec -T emissor node bin\/painel\.ts adicionar <e-mail do login do Access> --funcao produtor --motivo "Primeira conta"/);
+  // A conta do produtor no Painel, depois do backup e com a 22 ainda aberta: o e-mail so pelo stdin, com --mostrar-link.
+  const contaDoProdutor = at("bin/painel.ts adicionar");
+  assert.ok(contaDoProdutor > timer, "a conta vem depois do Emissor no ar e do backup");
+  assert.equal(calls[contaDoProdutor].stdin, "Produtor@Exemplo.com.br", "o e-mail do produtor vai pelo stdin do SSH");
+  assert.match(calls[contaDoProdutor].command, /bin\/painel\.ts listar .*grep -qxF/, "so cria quando a conta ainda nao existe");
+  assert.match(calls[contaDoProdutor].command, /bin\/painel\.ts adicionar "\$e" --funcao produtor --motivo 'Primeira conta \(deploy-licencas\)' --mostrar-link/);
+  assert.doesNotMatch(calls[contaDoProdutor].command, /produtor@exemplo/i, "o e-mail nunca na linha de comando");
+  assert.match(result.stdout, /O produtor define a senha pelo link de uso unico que o Emissor manda ao e-mail dele/);
   assert.match(calls[caddy].command, /run --rm --no-deps caddy caddy validate --config \/etc\/caddy\/Caddyfile --adapter caddyfile && .* up -d && .*caddy reload/);
   assert.match(calls[timer].command, /systemctl start bunker707-licencas-backup\.service/);
-  // .env do lado nosso: os nomes, as portas lidas do .env do Emissor, a lista do Painel e o repositorio do backup.
+  // .env do lado nosso: os nomes, as portas lidas do .env do Emissor e o repositorio do backup; lista de IPs, nenhuma.
   const gravados = Object.fromEntries(sshCmds(calls).filter((c) => c.command.startsWith("python3 -I - '/opt/bunker707/infra/licencas/.env'")).map((c) => {
     const [, chave, b64] = c.command.match(/'\/opt\/bunker707\/infra\/licencas\/\.env' '([A-Z_]+)' '([^']*)'/);
     return [chave, Buffer.from(b64, "base64").toString()];
@@ -414,7 +418,7 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.equal(gravados.LICENCAS_PAINEL_DOMAIN, PAINEL);
   assert.equal(gravados.EMISSOR_PORTA_NO_HOST, "8080");
   assert.equal(gravados.PAINEL_PORTA_NO_HOST, "8081");
-  assert.equal(gravados.LICENCAS_PAINEL_IPS, "203.0.113.10/32 2001:db8:1234::/48");
+  assert.equal(gravados.LICENCAS_PAINEL_IPS, undefined, "o Painel nao tem lista de IPs (D40)");
   assert.equal(gravados.RESTIC_REPOSITORY, "sftp:storagebox:bunker707/restic-licencas");
   assert.equal(gravados.STORAGE_BOX_USER, "u100");
   assert.equal(gravados.BACKUP_KEEP_HOURLY, "48");
@@ -426,7 +430,49 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.match(result.stderr, /ainda nao respondeu \{"ok":true\} de fora/, "sem o nome no ar, so o aviso");
 });
 
-test("deploy-licencas para antes do SSH sem o DNS certo, sem as raizes ou com a lista do Painel ampla demais", { skip }, () => {
+test("a conta do produtor no Painel: so quando ainda nao existe, com --mostrar-link, e o e-mail sai do que chega ao log", { skip }, () => {
+  const conta = setup({
+    servers: [servidorLicencas()],
+    firewalls: firewallLicencas(),
+    storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+  });
+  const deploy = conta.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
+  assert.equal(deploy.status, 0, deploy.stdout + deploy.stderr);
+  const comando = sshCmds(conta.calls()).find((c) => c.command.includes("bin/painel.ts adicionar")).command;
+  // O comando de verdade, rodado aqui com um docker de mentira no lugar do compose do Emissor.
+  const dir = mkdtempSync(join(tmpdir(), "bunker707-conta-painel-"));
+  try {
+    const emissor = join(dir, "emissor");
+    const bin = join(dir, "bin");
+    spawnSync("mkdir", ["-p", emissor, bin]);
+    const log = join(dir, "docker.log");
+    writeFileSync(join(bin, "docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\ncase "$*" in\n  *" listar") printf '%s' "$SHIM_LISTAR" ;;\n  *" adicionar "*) printf '%s\\n' "$SHIM_ADICIONAR"; exit "\${SHIM_ADICIONAR_CODIGO:-0}" ;;\nesac\n`);
+    chmodSync(join(bin, "docker"), 0o755);
+    const rodar = (env) => {
+      writeFileSync(log, "");
+      return spawnSync("bash", ["-c", comando.replaceAll("/opt/bunker707/emissor", emissor)], { encoding: "utf8", input: "Produtor@Exemplo.com.br", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env } });
+    };
+    const existe = rodar({ SHIM_LISTAR: "outra@exemplo.com.br\tAtendente\tligada\nproDUTOR@exemplo.com.br\tProdutor\tligada\n" });
+    assert.equal(existe.status, 0, existe.stderr);
+    assert.match(existe.stdout, /A conta do produtor ja existe no Painel: nada a fazer\./);
+    assert.doesNotMatch(readFileSync(log, "utf8"), /adicionar/, "conta que existe nao e criada de novo");
+
+    const nova = rodar({ SHIM_LISTAR: "", SHIM_ADICIONAR: "produtor@exemplo.com.br entrou no Painel como Produtor. O link para definir a senha foi para PRODUTOR@exemplo.com.br." });
+    assert.equal(nova.status, 0, nova.stderr);
+    assert.match(readFileSync(log, "utf8"), /exec -T emissor node bin\/painel\.ts adicionar produtor@exemplo\.com\.br --funcao produtor --motivo Primeira conta \(deploy-licencas\) --mostrar-link/);
+    assert.equal(nova.stdout, "  <e-mail do produtor> entrou no Painel como Produtor. O link para definir a senha foi para <e-mail do produtor>.\n");
+
+    // O envio falhou: o Emissor mostra o link (so nesse caso, --mostrar-link) e o codigo dele volta para o deploy avisar.
+    const falhou = rodar({ SHIM_LISTAR: "", SHIM_ADICIONAR: "O e-mail nao saiu. Link de uso unico: https://licencas.bunker707.com.br/senha/abc", SHIM_ADICIONAR_CODIGO: "3" });
+    assert.equal(falhou.status, 3);
+    assert.match(falhou.stdout, /https:\/\/licencas\.bunker707\.com\.br\/senha\/abc/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deploy-licencas para antes do SSH sem o DNS certo ou sem as raizes", { skip }, () => {
   const base = { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
   const comAAAA = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u", server: "h" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(API, "AAAA", "2001:db8::1", false)] });
   const aaaa = comAAAA.runScript("licencas.sh", base, ["deploy"]);
@@ -438,12 +484,10 @@ test("deploy-licencas para antes do SSH sem o DNS certo, sem as raizes ou com a 
   assert.match(comProxy.runScript("licencas.sh", base, ["deploy"]).stderr, /esperado: A 192\.0\.2\.7 proxy=false; achado: A 192\.0\.2\.7 proxy=true/);
 
   const semRaizes = setup({ servers: [servidorLicencas()] }).runScript("licencas.sh", { GITHUB_TOKEN: "ghs_x" }, ["deploy"]);
-  assert.match(semRaizes.stderr, /Variavel LICENCAS_RAIZES ausente/);
-  const ampla = setup({ servers: [servidorLicencas()] }).runScript("licencas.sh", { ...base, LICENCAS_PAINEL_IPS: "0.0.0.0/0" }, ["deploy"]);
-  assert.match(ampla.stderr, /LICENCAS_PAINEL_IPS tem um IP invalido ou uma rede ampla demais/);
+  assert.match(semRaizes.stderr, /LICENCAS_RAIZES ausente/);
 });
 
-test("deploy-licencas sem a configuracao do Painel, ou com ela fora do formato, para antes de qualquer chamada; so LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel", { skip }, () => {
+test("deploy-licencas com a configuracao do Painel fora do formato para antes de qualquer chamada; sem nenhuma variavel valem os padroes; so LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel", { skip }, () => {
   const base = { GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
   const recusa = (extra, mensagem) => {
     const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
@@ -453,10 +497,6 @@ test("deploy-licencas sem a configuracao do Painel, ou com ela fora do formato, 
     assert.deepEqual(conta.calls(), [], "nada chamado: nem a Hetzner, nem a Cloudflare, nem o servidor");
     return result;
   };
-  recusa({}, /falta a configuracao do Painel de licencas: LICENCAS_PAINEL_ACCESS_EQUIPE, LICENCAS_PAINEL_ACCESS_AUD, LICENCAS_EMISSOR_EMAIL_REMETENTE\. Cadastre como variavel do repositorio no GitHub .* LICENCAS_SEM_PAINEL=sim para subir o Emissor sem o Painel/);
-  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_AUD: "" }, /falta a configuracao do Painel de licencas: LICENCAS_PAINEL_ACCESS_AUD\./);
-  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_AUD: AUD.toUpperCase() }, /LICENCAS_PAINEL_ACCESS_AUD precisa ser a etiqueta AUD do aplicativo do Painel no Access/);
-  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_EQUIPE: PAINEL }, /LICENCAS_PAINEL_ACCESS_EQUIPE precisa ser o dominio da equipe no Cloudflare Zero Trust, <equipe>\.cloudflareaccess\.com \(veio licencas\.bunker707\.com\.br\)/);
   recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_EMAIL_REMETENTE: "Emissor 'Bunker' <emissor@mail.bunker707.com.br>" }, /LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail, ou Nome <e-mail>/);
   recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_EMAIL_REMETENTE: "emissor" }, /LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail/);
   const produtor = recusa({ ...PAINEL_ENV, PRODUCER_EMAIL: "produtor-sem-arroba" }, /LICENCAS_EMISSOR_EMAIL_PRODUTOR \(sem ele, PRODUCER_EMAIL\) nao e um e-mail\./);
@@ -477,10 +517,9 @@ test("deploy-licencas sem a configuracao do Painel, ou com ela fora do formato, 
   const result = conta.runScript("licencas.sh", { ...base, LICENCAS_SEM_PAINEL: "sim", LICENCAS_EMISSOR_KIDS_ANTERIORES: "emissao-2026-11, emissao-2025-10", LICENCAS_EMISSOR_LINK_RENOVAR: link, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const implantar = sshCmds(conta.calls()).find((c) => c.command.includes("bash infra/licencas/scripts/implantar.sh"));
+  assert.ok(!sshCmds(conta.calls()).some((c) => c.command.includes("bin/painel.ts")), "sem o Painel, nenhuma conta");
   assert.deepEqual(configDe(implantar.command), {
     PAINEL_ENDERECO: "",
-    PAINEL_ACCESS_EQUIPE: "",
-    PAINEL_ACCESS_AUD: "",
     PAINEL_TETO_DIARIO: "10",
     EMISSOR_EMAIL_PRODUTOR: "",
     EMISSOR_EMAIL_REMETENTE: "",
@@ -490,7 +529,21 @@ test("deploy-licencas sem a configuracao do Painel, ou com ela fora do formato, 
   });
   assert.match(result.stdout, /Sem o Painel \(LICENCAS_SEM_PAINEL=sim\): o Emissor sobe sem ele e sem e-mail/);
   assert.match(result.stdout, /Emissor no ar: https:\/\/licencas-api\.bunker707\.com\.br \(API das Instalacoes\), sem o Painel/);
-  assert.doesNotMatch(result.stdout, /A primeira conta do Painel/);
+  assert.doesNotMatch(result.stdout, /link de uso unico/);
+
+  // Sem nenhuma variavel do repositorio: os padroes de lib.sh (o remetente no dominio de envio ja verificado e o
+  // produtor do PRODUCER_EMAIL) ligam o Painel; o produtor nao cadastra nada.
+  const padrao = setup({
+    servers: [servidorLicencas()],
+    firewalls: firewallLicencas(),
+    storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+  });
+  const comPadrao = padrao.runScript("licencas.sh", { ...base, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
+  assert.equal(comPadrao.status, 0, comPadrao.stdout + comPadrao.stderr);
+  const padraoImplantar = sshCmds(padrao.calls()).find((c) => c.command.includes("bash infra/licencas/scripts/implantar.sh"));
+  assert.equal(configDe(padraoImplantar.command).EMISSOR_EMAIL_REMETENTE, "Bunker Members <licencas@mail.bunker707.com.br>");
+  assert.equal(configDe(padraoImplantar.command).PAINEL_ENDERECO, `https://${PAINEL}`);
 });
 
 test("restaurar-licencas exige CONFIRMAR=restaurar; o ensaio e o backup rodam os scripts do servidor com o backup escolhido", { skip }, () => {
@@ -536,7 +589,7 @@ test("fw_rules_licencas: 80 e 443 de qualquer lugar, ping, nada de UDP, e a 22 s
   assert.deepEqual(aberto[0], { direction: "in", protocol: "tcp", port: "22", source_ips: ["203.0.113.7/32"], description: "SSH (sessao de deploy / produtor)" });
 });
 
-test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexao; o Painel so com a lista de IPs e o token do Access", () => {
+test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexao; o Painel de qualquer internet, com o IP real da Cloudflare e sem os cabecalhos do Access (D40)", () => {
   const site = (variavel) => {
     const start = caddyfile.indexOf(`{$${variavel}} {`);
     assert.ok(start > 0, variavel);
@@ -556,10 +609,10 @@ test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexa
   assert.doesNotMatch(api, /PAINEL_PORTA_NO_HOST|client_ip/);
 
   const painel = site("LICENCAS_PAINEL_SITE_ADDRESS");
-  assert.match(painel, /@permitido \{\n\t\tclient_ip \{\$LICENCAS_PAINEL_IPS\}\n\t\theader Cf-Access-Jwt-Assertion \*\n\t\}/);
-  assert.match(painel, /handle @permitido \{\n\t\treverse_proxy 127\.0\.0\.1:\{\$PAINEL_PORTA_NO_HOST\} \{\n\t\t\theader_up X-Forwarded-For \{client_ip\}/);
-  assert.match(painel, /handle \{\n\t\trespond 403\n\t\}/);
-  assert.doesNotMatch(painel, /header_up -Cf-Access/, "os cabecalhos do Access chegam ao Painel");
+  assert.match(painel, /\treverse_proxy 127\.0\.0\.1:\{\$PAINEL_PORTA_NO_HOST\} \{\n\t\theader_up X-Forwarded-For \{client_ip\}/, "o IP real que a Cloudflare repassa, so das faixas dela");
+  assert.match(painel, /header_up -Cf-Access-Jwt-Assertion\n\t\theader_up -Cf-Access-Authenticated-User-Email/, "a identidade e so a do login do Painel");
+  assert.doesNotMatch(painel, /client_ip \{|LICENCAS_PAINEL_IPS|respond 403|header Cf-Access/, "sem lista de IPs e sem exigir o Access (D40)");
+  assert.doesNotMatch(caddyfile, /LICENCAS_PAINEL_IPS/);
 
   // O compose: Caddy fixado na mesma versao dos outros servidores, na rede do servidor, com as portas pelos nomes do
   // .env.example do bunker-licensing (EMISSOR_PORTA_NO_HOST) e o do Painel (PAINEL_PORTA_NO_HOST, ainda a confirmar).
@@ -569,7 +622,7 @@ test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexa
   assert.doesNotMatch(caddyCompose, /^\s+ports:/m);
   assert.match(caddyCompose, /EMISSOR_PORTA_NO_HOST: \$\{EMISSOR_PORTA_NO_HOST:-8080\}/);
   assert.match(caddyCompose, /PAINEL_PORTA_NO_HOST: \$\{PAINEL_PORTA_NO_HOST:-8081\}/);
-  assert.match(caddyCompose, /LICENCAS_PAINEL_IPS: \$\{LICENCAS_PAINEL_IPS:-127\.0\.0\.1\/32\}/, "sem lista, ninguem abre o Painel");
+  assert.doesNotMatch(caddyCompose, /LICENCAS_PAINEL_IPS/, "o Painel nao tem lista de IPs (D40)");
 });
 
 test("lib.sh: os nomes do servidor de licencas sao variaveis com padrao, e a API fica fora do proxy da Cloudflare", () => {
@@ -591,7 +644,7 @@ test("infra/licencas/.env.example traz toda variavel que o Caddy e os scripts do
   for (const nome of ["STORAGE_BOX_USER", "STORAGE_BOX_HOST", "STORAGE_BOX_SSH_PORT"]) lidas.add(nome);
   const faltam = [...lidas].filter((nome) => !example.has(nome));
   assert.deepEqual(faltam, [], `faltam no .env.example: ${faltam.join(", ")}`);
-  assert.ok(lidas.has("RESTIC_PASSWORD") && lidas.has("BACKUP_KEEP_HOURLY") && lidas.has("LICENCAS_PAINEL_IPS"));
+  assert.ok(lidas.has("RESTIC_PASSWORD") && lidas.has("BACKUP_KEEP_HOURLY") && lidas.has("LICENCAS_PAINEL_DOMAIN"));
 });
 
 test("status-licencas so le: servidor, preco, DNS com aviso de AAAA e respostas publicas; sem SSH=1 nao abre a 22", { skip }, () => {

@@ -12,11 +12,12 @@
 #      vao para /opt/bunker707/emissor (o compose anterior fica em compose.yaml.anterior);
 #   2. o .env do compose ganha as variaveis novas do .env.example (as que ja existem ficam como estao; a que la so traz
 #      um exemplo entre < e > entra vazia, nunca o exemplo) e, a cada rodada, o que o deploy decide: EMISSOR_RAIZES; o
-#      Painel, a conta de envio, as chaves anteriores e os links (--config-b64: PAINEL_ENDERECO, PAINEL_ACCESS_EQUIPE,
-#      PAINEL_ACCESS_AUD, PAINEL_TETO_DIARIO, EMISSOR_EMAIL_PRODUTOR, EMISSOR_EMAIL_REMETENTE, EMISSOR_KIDS_ANTERIORES,
-#      EMISSOR_LINK_RENOVAR e EMISSOR_LINK_LOJA; com o endereco, o Access e os dois e-mails vazios, o Emissor sobe sem
-#      o Painel); e os proxies confiaveis das duas portas, iguais ao caminho do Caddy (caddy/Caddyfile): so o gateway da
-#      rede borda (EMISSOR_GATEWAY_BORDA, por onde o Caddy chega) e o X-Forwarded-For, em que o Caddy escreve um IP so;
+#      Painel, a conta de envio, as chaves anteriores e os links (--config-b64: PAINEL_ENDERECO, PAINEL_TETO_DIARIO,
+#      EMISSOR_EMAIL_PRODUTOR, EMISSOR_EMAIL_REMETENTE, EMISSOR_KIDS_ANTERIORES, EMISSOR_LINK_RENOVAR e
+#      EMISSOR_LINK_LOJA; com o endereco e os dois e-mails vazios, o Emissor sobe sem o Painel); o Cloudflare Access de
+#      antes sempre vazio (PAINEL_ACCESS_EQUIPE e PAINEL_ACCESS_AUD: o Painel entra com e-mail e senha, docs/32 D40); e
+#      os proxies confiaveis das duas portas, iguais ao caminho do Caddy (caddy/Caddyfile): so o gateway da rede borda
+#      (EMISSOR_GATEWAY_BORDA, por onde o Caddy chega) e o X-Forwarded-For, em que o Caddy escreve um IP so;
 #   3. a imagem do Emissor e puxada e ganha o nome local que o compose dele usa nos servicos com build (hoje
 #      bunker-licensing-emissor:local): nada e construido no servidor;
 #   4. o Postgres sobe, as migracoes rodam (o servico migrar: `npm run migrate` no container) e o resto sobe;
@@ -49,7 +50,7 @@ cd "$LICENCAS_EMISSOR_DIR"
 painel=$(python3 -I - "$raizes_b64" "$config_b64" <<'PY'
 import base64, json, re, sys
 GERIDAS = ["EMISSOR_EMAIL_PRODUTOR", "EMISSOR_EMAIL_REMETENTE", "EMISSOR_KIDS_ANTERIORES", "EMISSOR_LINK_LOJA",
-           "EMISSOR_LINK_RENOVAR", "PAINEL_ACCESS_AUD", "PAINEL_ACCESS_EQUIPE", "PAINEL_ENDERECO", "PAINEL_TETO_DIARIO"]
+           "EMISSOR_LINK_RENOVAR", "PAINEL_ENDERECO", "PAINEL_TETO_DIARIO"]
 def b64_json(text):
     try:
         return json.loads(base64.b64decode(text, validate=True).decode("utf-8"))
@@ -66,9 +67,9 @@ if config is None:
 if not isinstance(config, dict) or sorted(config) != GERIDAS or not all(
         isinstance(v, str) and not re.search(r"[\x00-\x1f\x7f'\"`$\\]", v) for v in config.values()):
     sys.exit("ERRO: --config-b64 fora do formato: " + ", ".join(GERIDAS) + ", cada uma um texto de uma linha, sem aspas, $, crase nem barra invertida.")
-painel = [config[k] for k in ("PAINEL_ENDERECO", "PAINEL_ACCESS_EQUIPE", "PAINEL_ACCESS_AUD", "EMISSOR_EMAIL_PRODUTOR", "EMISSOR_EMAIL_REMETENTE")]
+painel = [config[k] for k in ("PAINEL_ENDERECO", "EMISSOR_EMAIL_PRODUTOR", "EMISSOR_EMAIL_REMETENTE")]
 if any(painel) and not all(painel):
-    sys.exit("ERRO: o Painel precisa de PAINEL_ENDERECO, PAINEL_ACCESS_EQUIPE, PAINEL_ACCESS_AUD, EMISSOR_EMAIL_PRODUTOR e EMISSOR_EMAIL_REMETENTE juntos; sem o Painel, todos vazios.")
+    sys.exit("ERRO: o Painel precisa de PAINEL_ENDERECO, EMISSOR_EMAIL_PRODUTOR e EMISSOR_EMAIL_REMETENTE juntos; sem o Painel, todos vazios.")
 print("sim" if all(painel) else "nao")
 PY
 )
@@ -112,7 +113,8 @@ lines = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) 
 while lines and lines[-1] == "":
     lines.pop()
 present = {m.group(1) for m in map(line_key.match, lines) if m}
-GERIDAS_AQUI = ["EMISSOR_RAIZES", "EMISSOR_PROXIES_CONFIAVEIS", "EMISSOR_CABECALHO_IP", "PAINEL_PROXIES_CONFIAVEIS", "PAINEL_CABECALHO_IP"]
+GERIDAS_AQUI = ["EMISSOR_RAIZES", "EMISSOR_PROXIES_CONFIAVEIS", "EMISSOR_CABECALHO_IP", "PAINEL_PROXIES_CONFIAVEIS", "PAINEL_CABECALHO_IP",
+                "PAINEL_ACCESS_EQUIPE", "PAINEL_ACCESS_AUD"]
 geridas = set(config) | set(GERIDAS_AQUI)
 added, vazias = [], []
 for line in open(example_path, encoding="utf-8").read().split("\n"):
@@ -147,7 +149,10 @@ except ValueError:
 valores = {"EMISSOR_RAIZES": json.dumps([{"rid": r["rid"], "publicKey": r["publicKey"]} for r in raizes], separators=(",", ":"))}
 valores.update(config)
 valores.update({"EMISSOR_PROXIES_CONFIAVEIS": gateway, "EMISSOR_CABECALHO_IP": "x-forwarded-for",
-                "PAINEL_PROXIES_CONFIAVEIS": gateway, "PAINEL_CABECALHO_IP": "x-forwarded-for"})
+                "PAINEL_PROXIES_CONFIAVEIS": gateway, "PAINEL_CABECALHO_IP": "x-forwarded-for",
+                # O Cloudflare Access de antes, sempre vazio: o Painel entra com e-mail e senha (docs/32 D40), e um valor
+                # que ficou no .env de um deploy antigo nao liga o Access de novo num Emissor que ainda o leia.
+                "PAINEL_ACCESS_EQUIPE": "", "PAINEL_ACCESS_AUD": ""})
 linha = lambda key: f"{key}='{valores[key]}'" if valores[key] else f"{key}="
 saida, vistas = [], set()
 for line in lines:
@@ -167,7 +172,7 @@ print("  variaveis novas vindas do .env.example: " + (", ".join(added) if added 
       + (" (entraram vazias, so com o exemplo: " + ", ".join(vazias) + ")" if vazias else ""))
 print("  EMISSOR_RAIZES: " + ", ".join(r["rid"] for r in raizes))
 if config["PAINEL_ENDERECO"]:
-    print(f"  Painel: ligado em {config['PAINEL_ENDERECO']} (Access de {config['PAINEL_ACCESS_EQUIPE']}; teto de {config['PAINEL_TETO_DIARIO']} acoes sem venda por dia), com os avisos ao produtor pelo Resend")
+    print(f"  Painel: ligado em {config['PAINEL_ENDERECO']} (login de e-mail e senha; teto de {config['PAINEL_TETO_DIARIO']} acoes sem venda por dia), com os avisos ao produtor pelo Resend")
 else:
     print("  Painel: desligado (LICENCAS_SEM_PAINEL=sim); nenhum e-mail sai do Emissor")
 print("  chaves anteriores aceitas na readocao: " + (config["EMISSOR_KIDS_ANTERIORES"] or "nenhuma (so a atual)"))

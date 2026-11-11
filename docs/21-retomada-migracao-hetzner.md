@@ -973,7 +973,7 @@ configurar o Painel de licencas e a conta de envio do Emissor, que chegaram ao `
 | `provision-licencas` | servidor com labels `app=bunker707` e `papel=licencas`, firewall proprio (80 e 443 de qualquer lugar, 22 so durante as etapas), bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Sem estoque, so tenta os outros locais do mesmo tipo e preco | `main` | `CONFIRMADO=sim`; `LICENCAS_PRECO_MAX` para se o preco do dia passou do aprovado |
 | `dns-licencas` | `licencas` (Painel) A com proxy; `licencas-api` (API) A sem proxy; apaga AAAA dos dois | `main` | |
 | `secrets-licencas` | confere no runner a chave de emissao, o certificado, as raizes (recusa a raiz) e a chave do Resend (`re_...`) e grava os segredos em `segredos/` (1000:1000, 0400); sem a chave do Resend, mantem a do servidor ou cria o arquivo vazio | `main` | |
-| `deploy-licencas` | confere a configuracao do Painel e o DNS; puxa do GHCR a imagem e o compose do mesmo commit; `.env` com as raizes, o Painel, a conta de envio e os proxies das duas portas; migracoes; `/health`; Caddy; backup de hora em hora | `main` (tambem pela trava dos `deploy-*`) | `LICENCAS_TAG` escolhe a versao; sem o Access ou o remetente para, a nao ser com `LICENCAS_SEM_PAINEL=sim` |
+| `deploy-licencas` | confere a configuracao do Painel e o DNS; puxa do GHCR a imagem e o compose do mesmo commit; `.env` com as raizes, o Painel, a conta de envio e os proxies das duas portas; migracoes; `/health`; Caddy; backup de hora em hora; na primeira vez, a conta do produtor no Painel | `main` (tambem pela trava dos `deploy-*`) | `LICENCAS_TAG` escolhe a versao; `LICENCAS_SEM_PAINEL=sim` sobe sem o Painel |
 | `backup-licencas` | um backup agora, com `restic check` | `main` | |
 | `restaurar-licencas` | troca o banco pelo de um backup (o mais novo com dados, ou `SNAPSHOT`), com um backup antes | `main` | `CONFIRMAR=restaurar` |
 | `ensaio-licencas` | restaura num Postgres descartavel e sem rede, confere e apaga; o banco em uso nao e tocado | `main` | |
@@ -1063,7 +1063,8 @@ E uma vez, pelo produtor: pacote `bunker-licensing` > Package settings > Manage 
    e o mesmo processo do `emissor`, na porta `PAINEL_PORTA_NO_HOST` (8081); a chave do Resend em `segredos/resend-chave`
    (`ARQUIVO_CHAVE_RESEND`), montada sempre. Se um dia os nomes mudarem, mudar `infra/licencas` e as variaveis
    `LICENCAS_*_SERVICE`.
-4. **O Cloudflare Access** do Painel e criado pelo produtor no Zero Trust (o token da infra nao tem permissao).
+4. ~~**O Cloudflare Access** do Painel e criado pelo produtor no Zero Trust.~~ Desde 11/11/2026 o Painel entra com
+   e-mail e senha, sem o Access e sem lista de IPs (`docs/32` D40): o produtor nao configura nada na Cloudflare.
 5. **Storage Box**: os tres servidores usam a mesma chave SFTP; um servidor comprometido apaga os backups dos outros (os
    snapshots diarios do box seguram). Uma subconta do box para o Emissor isola melhor e fica como opcao.
 6. **Achado na producao, fora deste trabalho**: `infra/scripts/backup.sh` e `infra/mautic/scripts/backup.sh` chamam
@@ -1078,13 +1079,14 @@ O `deploy-licencas` foi escrito antes do Painel de licencas e da fila de e-mail 
 Emissor subiria sem o Painel. Agora, a cada rodada:
 
 - **A configuracao do Painel vem das variaveis do repositorio** (nao sao segredo), que o workflow entrega so ao
-  `deploy-licencas`: `LICENCAS_PAINEL_ACCESS_EQUIPE` e `LICENCAS_PAINEL_ACCESS_AUD` (o Access),
-  `LICENCAS_EMISSOR_EMAIL_REMETENTE` (quem envia) e, com padrao, `LICENCAS_EMISSOR_EMAIL_PRODUTOR` (o `PRODUCER_EMAIL`),
+  `deploy-licencas`, todas com padrao: `LICENCAS_EMISSOR_EMAIL_REMETENTE` (quem envia; `Bunker Members
+  <licencas@mail.bunker707.com.br>`), `LICENCAS_EMISSOR_EMAIL_PRODUTOR` (o `PRODUCER_EMAIL`),
   `LICENCAS_PAINEL_TETO_DIARIO` (10), `LICENCAS_EMISSOR_KIDS_ANTERIORES` e os links do Renovar e da loja (vazios). O
-  endereco do Painel sai de `LICENCAS_PAINEL_DOMAIN`. A tabela esta no `docs/20` §8C.5.
-- **O deploy confere tudo no runner, como o Emissor confere ao subir, e para antes de qualquer chamada** se faltar o
-  Access ou o remetente, ou se um valor estiver fora do formato. Subir sem o Painel so com `LICENCAS_SEM_PAINEL=sim`
-  (o Painel e o e-mail ficam vazios; a API das Instalacoes funciona igual).
+  endereco do Painel sai de `LICENCAS_PAINEL_DOMAIN`. A tabela esta no `docs/20` §8C.5. Desde 11/11/2026 (D40) nao ha
+  Cloudflare Access nem lista de IPs: o Painel entra com e-mail e senha.
+- **O deploy confere tudo no runner, como o Emissor confere ao subir, e para antes de qualquer chamada** se um valor
+  estiver fora do formato. Subir sem o Painel so com `LICENCAS_SEM_PAINEL=sim` (o Painel e o e-mail ficam vazios; a
+  API das Instalacoes funciona igual).
 - **No servidor, o `implantar.sh` escreve no `.env` do compose do Emissor** o Painel, a conta de envio, as chaves
   anteriores e os links, e os proxies das duas portas iguais ao caminho do Caddy: `EMISSOR_PROXIES_CONFIAVEIS` e
   `PAINEL_PROXIES_CONFIAVEIS` so com o gateway da rede borda, e o `x-forwarded-for` nas duas. Antes de mexer no que esta
@@ -1092,8 +1094,8 @@ Emissor subiria sem o Painel. Agora, a cada rodada:
   `.env.example` do Emissor que so traz um exemplo entre `<` e `>` entra vazia, nunca com o exemplo.
 - **O `secrets-licencas`** confere a chave do Resend no formato do Emissor (`re_...`) e, sem o segredo, mantem a chave
   do servidor ou cria o arquivo vazio que o compose monta.
-- **A primeira conta do Painel** e um `exec-licencas` (`docs/20` §8C.3, passo 11), e o fim do deploy mostra o comando.
+- **A conta do produtor no Painel** e criada pelo proprio `deploy-licencas`, na primeira vez (`docs/20` §8C.3, passo
+  11): o Emissor manda o link de uso unico para definir a senha ao e-mail dele.
 
-O que o produtor precisa criar, uma vez: o aplicativo do Painel no Cloudflare Access (com o segundo fator), o dominio
-de envio e a chave so de envio no Resend (o segredo `LICENCAS_RESEND_CHAVE`) e as tres variaveis sem padrao. Testado
-so com os dubles de `tests/infra-licencas*.test.mjs`; nada rodou de verdade.
+O que o produtor precisa criar: nada no Cloudflare e nenhuma variavel (D40). A chave do Resend do Emissor e a do
+`docs/20` §8C.5. Testado so com os dubles de `tests/infra-licencas*.test.mjs`; nada rodou de verdade.

@@ -9,9 +9,10 @@
 #                                            chave do Resend e a senha do banco em segredos/ (1000:1000, 0400), dos
 #                                            segredos LICENCAS_* do GitHub, conferidos aqui antes de sair
 #   bash infra/cloud/licencas.sh deploy      deploy-licencas: compose e imagem do GHCR, .env (com o Painel e a conta de
-#                                            envio), migracoes, /health, Caddy e o backup de hora em hora (LICENCAS_TAG
-#                                            escolhe a versao; padrao main). Sem a configuracao do Painel, para antes de
-#                                            tudo, a nao ser com LICENCAS_SEM_PAINEL=sim
+#                                            envio), migracoes, /health, Caddy, o backup de hora em hora e, na primeira
+#                                            vez, a conta do produtor no Painel (LICENCAS_TAG escolhe a versao; padrao
+#                                            main). O Painel entra com e-mail e senha, sem lista de IPs nem Cloudflare
+#                                            Access (D40); LICENCAS_SEM_PAINEL=sim sobe o Emissor sem ele
 #   bash infra/cloud/licencas.sh backup      backup-licencas: um backup agora, com restic check
 #   bash infra/cloud/licencas.sh restaurar   restaurar-licencas: troca o banco pelo de um backup (CONFIRMAR=restaurar;
 #                                            SNAPSHOT=<id>, padrao o mais novo com dados)
@@ -52,18 +53,17 @@ publico_ok() {
     return 1
 }
 # config_emissor ARQUIVO: o Painel, a conta de envio, as chaves anteriores e os links do Emissor (lib.sh, LICENCAS_PAINEL_*
-# e LICENCAS_EMISSOR_*), conferidos como o Emissor confere ao subir, num JSON em base64 para o implantar.sh. Sem o Access
-# ou o remetente, para (antes de qualquer chamada), a nao ser com LICENCAS_SEM_PAINEL=sim. Nao imprime o e-mail do
-# produtor.
+# e LICENCAS_EMISSOR_*), conferidos como o Emissor confere ao subir, num JSON em base64 para o implantar.sh. O Painel
+# entra com e-mail e senha (D40): nada do Cloudflare Access. Sem o produtor ou o remetente (os dois tem padrao em
+# lib.sh), para antes de qualquer chamada, a nao ser com LICENCAS_SEM_PAINEL=sim. Nao imprime o e-mail do produtor.
 config_emissor() {
-    python3 -I - "$1" "${LICENCAS_SEM_PAINEL:-}" "$LICENCAS_PAINEL_DOMAIN" "${LICENCAS_PAINEL_ACCESS_EQUIPE:-}" \
-        "${LICENCAS_PAINEL_ACCESS_AUD:-}" "$LICENCAS_PAINEL_TETO_DIARIO" "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" \
-        "${LICENCAS_EMISSOR_EMAIL_REMETENTE:-}" "${LICENCAS_EMISSOR_KIDS_ANTERIORES:-}" "${LICENCAS_EMISSOR_LINK_RENOVAR:-}" \
-        "${LICENCAS_EMISSOR_LINK_LOJA:-}" <<'PY'
+    python3 -I - "$1" "${LICENCAS_SEM_PAINEL:-}" "$LICENCAS_PAINEL_DOMAIN" "$LICENCAS_PAINEL_TETO_DIARIO" \
+        "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" "${LICENCAS_EMISSOR_EMAIL_REMETENTE:-}" "${LICENCAS_EMISSOR_KIDS_ANTERIORES:-}" \
+        "${LICENCAS_EMISSOR_LINK_RENOVAR:-}" "${LICENCAS_EMISSOR_LINK_LOJA:-}" <<'PY'
 import base64, json, re, sys
 from urllib.parse import urlsplit
 saida = sys.argv[1]
-sem, dominio, equipe, aud, teto, produtor, remetente, kids, renovar, loja = (a.strip() for a in sys.argv[2:12])
+sem, dominio, teto, produtor, remetente, kids, renovar, loja = (a.strip() for a in sys.argv[2:10])
 # O que o .env do Emissor nao aguenta (o implantar.sh grava entre aspas simples) e o e-mail como o Emissor confere.
 PROIBIDO = re.compile(r"[\x00-\x1f\x7f'\"`$\\]")
 EMAIL = re.compile(r'[^@\s<>"(),;:]+@[^@\s<>"(),;:]+\.[^@\s<>"(),;:]+')
@@ -84,32 +84,24 @@ for nome, link in (("LICENCAS_EMISSOR_LINK_RENOVAR", renovar), ("LICENCAS_EMISSO
         ok = False
     if link and (not ok or re.search(r"\s", link) or PROIBIDO.search(link)):
         problemas.append(f"{nome} precisa ser um endereco https://, sem espaco nem aspas ({{licenca}} vira o numero da Licenca; veio {link}).")
-config = {"PAINEL_ENDERECO": "", "PAINEL_ACCESS_EQUIPE": "", "PAINEL_ACCESS_AUD": "", "PAINEL_TETO_DIARIO": teto,
-          "EMISSOR_EMAIL_PRODUTOR": "", "EMISSOR_EMAIL_REMETENTE": "", "EMISSOR_KIDS_ANTERIORES": ",".join(kids),
-          "EMISSOR_LINK_RENOVAR": renovar, "EMISSOR_LINK_LOJA": loja}
+config = {"PAINEL_ENDERECO": "", "PAINEL_TETO_DIARIO": teto, "EMISSOR_EMAIL_PRODUTOR": "", "EMISSOR_EMAIL_REMETENTE": "",
+          "EMISSOR_KIDS_ANTERIORES": ",".join(kids), "EMISSOR_LINK_RENOVAR": renovar, "EMISSOR_LINK_LOJA": loja}
 if sem == "sim":
     resumo = "  Sem o Painel (LICENCAS_SEM_PAINEL=sim): o Emissor sobe sem ele e sem e-mail; a API das Instalacoes funciona igual."
 else:
-    equipe = re.sub(r"^https://", "", equipe.lower()).rstrip("/")
     produtor, dominio = produtor.lower(), dominio.lower()
     if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", dominio):
         problemas.append(f"LICENCAS_PAINEL_DOMAIN nao e um nome (veio {dominio}).")
-    faltam = [nome for nome, valor in (("LICENCAS_PAINEL_ACCESS_EQUIPE", equipe), ("LICENCAS_PAINEL_ACCESS_AUD", aud),
-                                       ("LICENCAS_EMISSOR_EMAIL_REMETENTE", remetente), ("LICENCAS_EMISSOR_EMAIL_PRODUTOR", produtor)) if not valor]
+    faltam = [nome for nome, valor in (("LICENCAS_EMISSOR_EMAIL_REMETENTE", remetente), ("LICENCAS_EMISSOR_EMAIL_PRODUTOR", produtor)) if not valor]
     if faltam:
         sys.exit("ERRO: falta a configuracao do Painel de licencas: " + ", ".join(faltam) + ". Cadastre como variavel do repositorio no GitHub (Settings > Secrets and variables > Actions > Variables; docs/20 §8C.5) e rode de novo, ou rode o deploy-licencas com LICENCAS_SEM_PAINEL=sim para subir o Emissor sem o Painel.")
-    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com", equipe):
-        problemas.append(f"LICENCAS_PAINEL_ACCESS_EQUIPE precisa ser o dominio da equipe no Cloudflare Zero Trust, <equipe>.cloudflareaccess.com (veio {equipe}).")
-    if not re.fullmatch(r"[0-9a-f]{64}", aud):
-        problemas.append("LICENCAS_PAINEL_ACCESS_AUD precisa ser a etiqueta AUD do aplicativo do Painel no Access (Application Audience Tag): 64 caracteres, de 0 a 9 e de a a f.")
     if not email_ok(produtor) or PROIBIDO.search(produtor):
         problemas.append("LICENCAS_EMISSOR_EMAIL_PRODUTOR (sem ele, PRODUCER_EMAIL) nao e um e-mail.")
     nomeado = re.fullmatch(r"([^<>\r\n\"]{1,80}) <([^<>\s]+)>", remetente)
     if not email_ok(nomeado.group(2) if nomeado else remetente) or PROIBIDO.search(remetente):
         problemas.append(f"LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail, ou Nome <e-mail>, de um dominio verificado no Resend, sem aspas nem $ (veio {remetente}).")
-    config.update({"PAINEL_ENDERECO": "https://" + dominio, "PAINEL_ACCESS_EQUIPE": equipe, "PAINEL_ACCESS_AUD": aud,
-                   "EMISSOR_EMAIL_PRODUTOR": produtor, "EMISSOR_EMAIL_REMETENTE": remetente})
-    resumo = f"  Painel em https://{dominio} (Access de {equipe}; teto de {teto} acoes sem venda por dia), com os avisos ao produtor pelo Resend."
+    config.update({"PAINEL_ENDERECO": "https://" + dominio, "EMISSOR_EMAIL_PRODUTOR": produtor, "EMISSOR_EMAIL_REMETENTE": remetente})
+    resumo = f"  Painel em https://{dominio} (login de e-mail e senha, de qualquer internet, D40; teto de {teto} acoes sem venda por dia), com os avisos ao produtor pelo Resend."
 if problemas:
     sys.exit("ERRO: " + " ".join(problemas))
 print(resumo)
@@ -217,8 +209,7 @@ dns() {
     cf_zone_tls
     echo
     echo "  $LICENCAS_API_DOMAIN -> $ip sem proxy da Cloudflare: nenhum desafio de robos e so IPv4 (docs/32 §11.2)."
-    echo "  $LICENCAS_PAINEL_DOMAIN -> $ip com proxy. Uma vez so, o produtor cria no Cloudflare Zero Trust a aplicacao do"
-    echo "  Access para este nome (docs/20 §8C.4): sem ela o Caddy responde 403 a todo mundo."
+    echo "  $LICENCAS_PAINEL_DOMAIN -> $ip com o proxy da Cloudflare; o login e o de e-mail e senha do proprio Painel (D40)."
 }
 
 # ====== secrets-licencas ================================================================================
@@ -285,12 +276,25 @@ segredos() {
     echo "Proximo: deploy-licencas (se ainda nao rodou). A chave raiz nao passou por aqui e nunca passa (docs/32 §10)."
 }
 
+# conta_do_produtor: com a 22 aberta e o Emissor no ar, a conta do produtor no Painel (LICENCAS_EMISSOR_EMAIL_PRODUTOR), so
+# se ainda nao existe: `bin/painel.ts adicionar <e-mail> --funcao produtor` com --mostrar-link. O Emissor manda o link de
+# uso unico para definir a senha ao e-mail; o link so aparece na tela se o envio falhar, e nunca de outro jeito (D40). O
+# e-mail vai pelo stdin do SSH (nunca na linha de comando do runner) e sai do que o comando escreve antes de chegar ao log.
+conta_do_produtor() {
+    printf '%s' "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" | rsh "$target" "e=\$(cat | tr 'A-Z' 'a-z'); cd '$LICENCAS_EMISSOR_DIR' || exit 1
+        tira() { awk -v e=\"\$e\" '{ l = tolower(\$0); while ((i = index(l, e)) > 0) { \$0 = substr(\$0, 1, i - 1) \"<e-mail do produtor>\" substr(\$0, i + length(e)); l = tolower(\$0) } print }'; }
+        if docker compose exec -T emissor node bin/painel.ts listar </dev/null | cut -f1 | tr 'A-Z' 'a-z' | grep -qxF \"\$e\"; then
+            echo '  A conta do produtor ja existe no Painel: nada a fazer.'; exit 0
+        fi
+        out=\$(docker compose exec -T emissor node bin/painel.ts adicionar \"\$e\" --funcao produtor --motivo 'Primeira conta (deploy-licencas)' --mostrar-link </dev/null 2>&1); rc=\$?
+        printf '%s\\n' \"\$out\" | tira | sed 's/^/  /'; exit \$rc"
+}
+
 # ====== deploy-licencas =================================================================================
 deploy() {
     need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN GITHUB_TOKEN LICENCAS_RAIZES
-    local painel_ips raizes_b64 config_b64 sb_user sb_host box porta_api porta_painel caddy rec kv
+    local raizes_b64 config_b64 sb_user sb_host box porta_api porta_painel caddy rec kv
     printf '%s' "$LICENCAS_TAG" | grep -qE '^[A-Za-z0-9_][A-Za-z0-9._-]{0,100}$' || die "LICENCAS_TAG invalida: '$LICENCAS_TAG' (ex.: main ou sha-1a2b3c4)."
-    painel_ips=$(small_cidrs LICENCAS_PAINEL_IPS "${LICENCAS_PAINEL_IPS:-$PRODUCER_IP}")
     raizes_b64=$(printf '%s' "$LICENCAS_RAIZES" | base64 -w0)
     log "Painel de licencas, conta de envio, chaves anteriores e links do Emissor (docs/20 §8C.5)"
     config_emissor "$WORK_DIR/config-emissor.b64"
@@ -325,13 +329,7 @@ deploy() {
     set_env "$target" "$ENVL" EMISSOR_PORTA_NO_HOST "$porta_api"
     set_env "$target" "$ENVL" PAINEL_PORTA_NO_HOST "$porta_painel"
     set_env "$target" "$ENVL" ACME_EMAIL "$PRODUCER_EMAIL"
-    if [ -n "$painel_ips" ]; then
-        set_env "$target" "$ENVL" LICENCAS_PAINEL_IPS "$painel_ips"
-    elif [ -z "$(get_env "$target" "$ENVL" LICENCAS_PAINEL_IPS)" ]; then
-        set_env "$target" "$ENVL" LICENCAS_PAINEL_IPS 127.0.0.1/32
-        warn "Sem LICENCAS_PAINEL_IPS nem PRODUCER_IP nas opcoes: ninguem abre o Painel ate um deploy-licencas com a lista."
-    fi
-    echo "  API -> 127.0.0.1:$porta_api; Painel -> 127.0.0.1:$porta_painel; Painel so para: $(get_env "$target" "$ENVL" LICENCAS_PAINEL_IPS)"
+    echo "  API -> 127.0.0.1:$porta_api; Painel -> 127.0.0.1:$porta_painel (de qualquer internet, pelo proxy da Cloudflare; login do Painel, D40)"
     caddy="docker compose -f infra/licencas/docker-compose.yml"
     # A configuracao e conferida num container de uma vez antes de valer; depois o Caddy sobe (ou e recriado, se o .env
     # mudou) e recarrega o Caddyfile novo, com algumas tentativas enquanto ele acaba de subir.
@@ -353,6 +351,10 @@ deploy() {
     rm -f "$rec"
     backup_recovery_key "$target" licencas
     remote "sudo bash infra/licencas/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-licencas-backup.service && echo \"  ultimo backup: \$(cat /var/backups/bunker707-licencas/ultimo-sucesso 2>/dev/null)\""
+    if [ "${LICENCAS_SEM_PAINEL:-}" != sim ]; then
+        log "A conta do produtor no Painel (uma vez; as outras pelo exec-licencas, docs/20 §8C.3)"
+        conta_do_produtor || warn "A conta do produtor no Painel nao foi criada agora (acima). O Emissor esta no ar; rode o deploy-licencas de novo, ou o exec-licencas do docs/20 §8C.3."
+    fi
     fw_close_all
 
     log "Conferencia de fora (DNS, certificado, Caddy e Emissor)"
@@ -361,9 +363,8 @@ deploy() {
     if [ "${LICENCAS_SEM_PAINEL:-}" = sim ]; then
         echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes), sem o Painel (LICENCAS_SEM_PAINEL=sim)."
     else
-        echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes) e https://$LICENCAS_PAINEL_DOMAIN (Painel, so com o Access e a lista de IPs)."
-        echo "A primeira conta do Painel, uma vez (docs/20 §8C.3): exec-licencas com o comando"
-        echo "  cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail do login do Access> --funcao produtor --motivo \"Primeira conta\""
+        echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes) e https://$LICENCAS_PAINEL_DOMAIN (Painel, com e-mail e senha)."
+        echo "O produtor define a senha pelo link de uso unico que o Emissor manda ao e-mail dele (LICENCAS_EMISSOR_EMAIL_PRODUTOR)."
     fi
     echo "Falta, se ainda nao foi feito: ensaio-licencas (o ensaio de restauracao) e o monitor externo (docs/20 §8C)."
 }
@@ -432,7 +433,7 @@ status() {
     code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H 'Content-Type: application/json' --data '{}' "https://$LICENCAS_API_DOMAIN/v1/preflight" 2>/dev/null) || code=000
     printf '  %-60s %s (esperado 400: pedido sem Chave)\n' "POST https://$LICENCAS_API_DOMAIN/v1/preflight" "${code:-000}"
     code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$LICENCAS_PAINEL_DOMAIN/" 2>/dev/null) || code=000
-    printf '  %-60s %s (esperado 302 para o login do Access, ou 403)\n' "https://$LICENCAS_PAINEL_DOMAIN/" "${code:-000}"
+    printf '  %-60s %s (esperado 200 ou 302: a tela de entrar do Painel)\n' "https://$LICENCAS_PAINEL_DOMAIN/" "${code:-000}"
     if [ -n "${SSH:-}" ] && [ -n "$existe" ]; then
         deploy_key
         licencas_alvo

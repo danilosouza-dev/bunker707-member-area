@@ -58,8 +58,9 @@ RECORDER_WEBHOOK_URL="${WEBINAR_RECORDER_WEBHOOK_URL:-https://$APP_DOMAIN/api/we
 
 # Emissor de licencas (docs/32 D39 e §11.2; docs/20 §8C): servidor so dele, o tipo e o local mais baratos que servem.
 LICENCAS_NAME="${LICENCAS_NAME:-bunker707-licencas}"
-# O Painel de licencas (so a equipe: proxy da Cloudflare com o Access, e lista de IPs no Caddy) e a API publica das
-# Instalacoes (registro A sem proxy da Cloudflare: nenhum desafio de robos e so IPv4, que a conferencia inicial pede).
+# O Painel de licencas (so a equipe: proxy da Cloudflare e o login de e-mail e senha do proprio Painel, de qualquer
+# internet, sem lista de IPs e sem o Cloudflare Access; docs/32 D40) e a API publica das Instalacoes (registro A sem
+# proxy da Cloudflare: nenhum desafio de robos e so IPv4, que a conferencia inicial pede).
 # O nome da API vai gravado no produto vendido: trocar depois pede versao nova para todos os compradores.
 LICENCAS_PAINEL_DOMAIN="${LICENCAS_PAINEL_DOMAIN:-licencas.$ZONE_NAME}"
 LICENCAS_API_DOMAIN="${LICENCAS_API_DOMAIN:-licencas-api.$ZONE_NAME}"
@@ -70,12 +71,12 @@ LICENCAS_TAG="${LICENCAS_TAG:-main}"
 # No servidor: o compose do Emissor, o .env dele e segredos/ ficam em REMOTE_DIR/emissor, fora do que o sync_repo troca.
 LICENCAS_EMISSOR_DIR="${LICENCAS_EMISSOR_DIR:-$REMOTE_DIR/emissor}"
 # O Painel de licencas e a conta de envio do Emissor (docs/20 §8C.5): o deploy-licencas escreve no .env do compose do
-# Emissor, a cada rodada, cada LICENCAS_<NOME> como <NOME> (variaveis do repositorio no GitHub ou opcoes): o Access do
-# Painel (LICENCAS_PAINEL_ACCESS_EQUIPE e LICENCAS_PAINEL_ACCESS_AUD, sem padrao), o teto diario, quem recebe os avisos
-# e quem envia (LICENCAS_EMISSOR_EMAIL_REMETENTE, sem padrao), as chaves anteriores da readocao e os links do Renovar e
-# da loja. O endereco do Painel e https://LICENCAS_PAINEL_DOMAIN. Sem o Access e o remetente o deploy para, a nao ser
-# com LICENCAS_SEM_PAINEL=sim: o Emissor sobe sem o Painel e sem e-mail.
+# Emissor, a cada rodada, cada LICENCAS_<NOME> como <NOME> (variaveis do repositorio no GitHub ou opcoes, todas com
+# padrao): o teto diario, quem recebe os avisos (e e a conta do produtor no Painel) e quem envia (um endereco do dominio
+# de envio ja verificado no Resend), as chaves anteriores da readocao e os links do Renovar e da loja. O endereco do
+# Painel e https://LICENCAS_PAINEL_DOMAIN. LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel e sem e-mail.
 LICENCAS_EMISSOR_EMAIL_PRODUTOR="${LICENCAS_EMISSOR_EMAIL_PRODUTOR:-$PRODUCER_EMAIL}"
+LICENCAS_EMISSOR_EMAIL_REMETENTE="${LICENCAS_EMISSOR_EMAIL_REMETENTE:-Bunker Members <licencas@mail.$ZONE_NAME>}"
 LICENCAS_PAINEL_TETO_DIARIO="${LICENCAS_PAINEL_TETO_DIARIO:-10}"
 # Backup de hora em hora no Storage Box que ja existe, num repositorio restic so dele.
 LICENCAS_RESTIC_REPOSITORY="${LICENCAS_RESTIC_REPOSITORY:-sftp:storagebox:bunker707/restic-licencas}"
@@ -250,8 +251,8 @@ PY
 }
 # fw_rules_licencas [cidr ...]: o servidor do Emissor (docs/20 §8C.4). A API publica tem registro A sem proxy da
 # Cloudflare (as Instalacoes conferem de qualquer lugar, por IPv4), entao 80 e 443 vem de qualquer lugar: 80 para o
-# Let's Encrypt e o redirecionamento, 443 para a API e para o Painel, que so passa da Cloudflare (Access) e da lista de
-# IPs do Caddy. Sem HTTP/3 (o Caddy dele fala h1 e h2). 22 so dos CIDRs informados, como nos outros servidores.
+# Let's Encrypt e o redirecionamento, 443 para a API e para o Painel (pela Cloudflare, com o login do proprio Painel).
+# Sem HTTP/3 (o Caddy dele fala h1 e h2). 22 so dos CIDRs informados, como nos outros servidores.
 fw_rules_licencas() {
     python3 -I - "$@" <<'PY'
 import json, sys
@@ -262,7 +263,7 @@ if ssh:
     rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
 rules += [
     {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt e redirecionamento)"},
-    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (API das Instalacoes; o Painel so pela Cloudflare e pela lista de IPs)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (API das Instalacoes e o Painel, com o login dele)"},
     {"direction": "in", "protocol": "icmp", "source_ips": anywhere, "description": "ping do monitor"},
 ]
 print(json.dumps(rules))
@@ -310,17 +311,6 @@ if [ -n "$PRODUCER_IP" ]; then
     python3 -I -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1], strict=False); sys.exit(0 if n.prefixlen >= (24 if n.version == 4 else 48) else 1)' \
         "$(cidr_or_empty "$PRODUCER_IP")" 2>/dev/null || die "PRODUCER_IP invalido ou amplo demais (no minimo /24 ou /48): $PRODUCER_IP"
 fi
-# small_cidrs NOME VALOR: a lista (virgula ou espaco) de IPs ou redes pequenas (no maximo /24 ou /48), em CIDR e
-# separada por espaco, ou a etapa para. Para listas de acesso que vao a uma configuracao (o Painel de licencas).
-small_cidrs() {
-    local name="$1" item out=""
-    for item in ${2//,/ }; do
-        python3 -I -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1], strict=False); sys.exit(0 if n.prefixlen >= (24 if n.version == 4 else 48) else 1)' \
-            "$(cidr_or_empty "$item")" 2>/dev/null || die "$name tem um IP invalido ou uma rede ampla demais (no minimo /24 ou /48): $item"
-        out="${out:+$out }$(cidr_or_empty "$item")"
-    done
-    printf '%s' "$out"
-}
 runner_ip() { curl -fsS --max-time 15 https://checkip.amazonaws.com | tr -d '[:space:]'; }
 # Abre a porta 22 para esta maquina (e o produtor, se PRODUCER_IP) e fecha de novo ao sair do script.
 # O trap e armado ANTES de abrir, e uma falha ao fechar vira falha da etapa (nunca verde com a 22 aberta).
@@ -551,9 +541,10 @@ licencas_sub() {
         *) die "$1 nao esta na zona $ZONE_NAME (LICENCAS_PAINEL_DOMAIN e LICENCAS_API_DOMAIN ficam nela)." ;;
     esac
 }
-# cf_apply_dns_licencas: so registros A, nunca AAAA (docs/32 §11.2). O Painel com o proxy da Cloudflare (o Access so
-# funciona assim); a API sem proxy: nenhum desafio de robos barra a conferencia feita por servidor, e o nome so
-# resolve para IPv4, o unico em que a conferencia inicial bate de volta. AAAA que exista nos dois nomes e apagado.
+# cf_apply_dns_licencas: so registros A, nunca AAAA (docs/32 §11.2). O Painel com o proxy da Cloudflare (a protecao dela
+# na frente do login do Painel, D40); a API sem proxy: nenhum desafio de robos barra a conferencia feita por servidor, e
+# o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. AAAA que exista nos dois nomes e
+# apagado.
 cf_apply_dns_licencas() {
     local ip4 painel api; ip4=$(server_ip4 "$LICENCAS_NAME")
     painel=$(licencas_sub "$LICENCAS_PAINEL_DOMAIN"); api=$(licencas_sub "$LICENCAS_API_DOMAIN")

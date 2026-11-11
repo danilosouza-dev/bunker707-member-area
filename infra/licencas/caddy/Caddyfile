@@ -4,8 +4,8 @@
 #                                 O nome tem registro A sem proxy da Cloudflare: nenhum desafio de robos, so IPv4, e o
 #                                 IP de quem pediu e o da propria conexao.
 #   LICENCAS_PAINEL_SITE_ADDRESS  o Painel de licencas da equipe -> 127.0.0.1:PAINEL_PORTA_NO_HOST. Proxy da Cloudflare
-#                                 com o Access na frente; aqui, so para LICENCAS_PAINEL_IPS e so com o token do Access
-#                                 no pedido (o Painel confere a assinatura dele a cada pedido).
+#                                 na frente; o login e o de e-mail e senha do proprio Painel, de qualquer internet, sem
+#                                 lista de IPs e sem o Cloudflare Access (decisao do produtor em 11/11/2026, docs/32 D40).
 # O Emissor confia, nas duas portas, so no gateway da rede borda dele, por onde este Caddy chega: a API em
 # EMISSOR_PROXIES_CONFIAVEIS e o Painel em PAINEL_PROXIES_CONFIAVEIS, que o deploy-licencas escreve a cada rodada iguais
 # ao EMISSOR_GATEWAY_BORDA (172.30.70.1), com o cabecalho x-forwarded-for nas duas (scripts/implantar.sh). Ele le o IP de
@@ -55,20 +55,13 @@
 	import sem_server
 	header X-Robots-Tag "noindex, nofollow"
 
-	# As duas travas do lote fundador (docs/32 §11.2): a lista de IPs e o login do Cloudflare Access. O cabecalho
-	# Cf-Access-Jwt-Assertion so existe no pedido que passou pelo Access; o Painel confere a assinatura dele, e o
-	# Caddy repassa esse cabecalho e o Cf-Access-Authenticated-User-Email como vieram.
-	@permitido {
-		client_ip {$LICENCAS_PAINEL_IPS}
-		header Cf-Access-Jwt-Assertion *
-	}
-	handle @permitido {
-		reverse_proxy 127.0.0.1:{$PAINEL_PORTA_NO_HOST} {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-
-	handle {
-		respond 403
+	# Sem lista de IPs e sem o Cloudflare Access (D40): quem segura o Painel e o login dele (senha forte em hash lento,
+	# bloqueio por tentativas por conta e por IP, sessao curta, aviso de aparelho novo e a auditoria). O IP de quem pediu
+	# e o que a Cloudflare repassa, aceito so das faixas dela (o client_ip acima): o bloqueio por IP conta o IP certo.
+	reverse_proxy 127.0.0.1:{$PAINEL_PORTA_NO_HOST} {
+		header_up X-Forwarded-For {client_ip}
+		# Os cabecalhos do Access de antes nunca chegam ao Painel: a identidade e so a do login dele.
+		header_up -Cf-Access-Jwt-Assertion
+		header_up -Cf-Access-Authenticated-User-Email
 	}
 }

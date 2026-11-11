@@ -61,7 +61,7 @@ on:
           - status-licencas
           - exec-licencas
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_PAINEL_IPS=ip1,ip2 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>)"
         type: string
         required: false
         default: ""
@@ -166,10 +166,9 @@ jobs:
           LICENCAS_RESEND_CHAVE: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_RESEND_CHAVE || '' }}
           LICENCAS_BANCO_SENHA: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_BANCO_SENHA || '' }}
           # O Painel de licencas e a conta de envio do Emissor (docs/20 §8C.5): variaveis do repositorio, que nao sao
-          # segredo (Settings > Secrets and variables > Actions > Variables), so no deploy-licencas. As opcoes passam na
-          # frente (run.sh); um valor com espaco, como o remetente com nome, so pela variavel.
-          LICENCAS_PAINEL_ACCESS_EQUIPE: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_PAINEL_ACCESS_EQUIPE || '' }}
-          LICENCAS_PAINEL_ACCESS_AUD: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_PAINEL_ACCESS_AUD || '' }}
+          # segredo (Settings > Secrets and variables > Actions > Variables), so no deploy-licencas, todas opcionais (os
+          # padroes ficam em lib.sh; o Painel entra com e-mail e senha, sem o Cloudflare Access, docs/32 D40). As opcoes
+          # passam na frente (run.sh); um valor com espaco, como o remetente com nome, so pela variavel.
           LICENCAS_PAINEL_TETO_DIARIO: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_PAINEL_TETO_DIARIO || '' }}
           LICENCAS_EMISSOR_EMAIL_PRODUTOR: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_EMAIL_PRODUTOR || '' }}
           LICENCAS_EMISSOR_EMAIL_REMETENTE: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_EMAIL_REMETENTE || '' }}

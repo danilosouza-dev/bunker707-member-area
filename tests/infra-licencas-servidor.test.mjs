@@ -51,12 +51,11 @@ const ENV_EXAMPLE = [
   "EMISSOR_EMAIL_REMETENTE=Emissor Bunker707 <emissor@licencas.bunker707.com.br>",
   ""
 ].join("\n");
-// O que o deploy-licencas manda em --config-b64 (infra/cloud/licencas.sh): o Painel ligado, ou tudo dele vazio.
+// O que o deploy-licencas manda em --config-b64 (infra/cloud/licencas.sh): o Painel ligado, ou tudo dele vazio. O Painel
+// entra com e-mail e senha (docs/32 D40): nada do Cloudflare Access.
 const AUD = "0123456789abcdef".repeat(4);
 const CONFIG_PAINEL = {
   PAINEL_ENDERECO: "https://licencas.bunker707.com.br",
-  PAINEL_ACCESS_EQUIPE: "bunker707.cloudflareaccess.com",
-  PAINEL_ACCESS_AUD: AUD,
   PAINEL_TETO_DIARIO: "10",
   EMISSOR_EMAIL_PRODUTOR: "produtor@exemplo.com.br",
   EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
@@ -64,7 +63,7 @@ const CONFIG_PAINEL = {
   EMISSOR_LINK_RENOVAR: "",
   EMISSOR_LINK_LOJA: ""
 };
-const SEM_PAINEL = { ...CONFIG_PAINEL, PAINEL_ENDERECO: "", PAINEL_ACCESS_EQUIPE: "", PAINEL_ACCESS_AUD: "", EMISSOR_EMAIL_PRODUTOR: "", EMISSOR_EMAIL_REMETENTE: "" };
+const SEM_PAINEL = { ...CONFIG_PAINEL, PAINEL_ENDERECO: "", EMISSOR_EMAIL_PRODUTOR: "", EMISSOR_EMAIL_REMETENTE: "" };
 const b64 = (value) => Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64");
 const IMAGEM = "--imagem=ghcr.io/danilosouza-dev/bunker-licensing:main";
 const RAIZES_ARG = `--raizes-b64=${b64([{ rid: "raiz-teste", publicKey: "A".repeat(43) }])}`;
@@ -387,6 +386,9 @@ test("implantar: compose e .env.example da imagem -implantacao; .env com as vari
   const s = servidor({ implantado: false });
   writeFileSync(join(s.emissor, ".env"), [
     "EMISSOR_PORTA_NO_HOST=8080",
+    // O Cloudflare Access de um deploy antigo (antes da D40): sai vazio, para nunca ligar o Access de novo.
+    "PAINEL_ACCESS_EQUIPE='bunker707.cloudflareaccess.com'",
+    `PAINEL_ACCESS_AUD='${AUD}'`,
     "ARQUIVO_SENHA_POSTGRES=./segredos/outra-senha",
     "EMISSOR_LINK_LOJA=https://membros.exemplo.com.br/loja",
     "EMISSOR_RAIZES='antigo'",
@@ -424,8 +426,8 @@ test("implantar: compose e .env.example da imagem -implantacao; .env com as vari
   assert.deepEqual(linhas("EMISSOR_RAIZES"), [`EMISSOR_RAIZES='[{"rid":"raiz-teste","publicKey":"${"A".repeat(43)}"}]'`]);
   // O Painel, a conta de envio, as chaves anteriores e os links: o que o deploy decidiu, a cada rodada, nunca o exemplo.
   assert.deepEqual(linhas("PAINEL_ENDERECO"), ["PAINEL_ENDERECO='https://licencas.bunker707.com.br'"]);
-  assert.deepEqual(linhas("PAINEL_ACCESS_EQUIPE"), ["PAINEL_ACCESS_EQUIPE='bunker707.cloudflareaccess.com'"]);
-  assert.deepEqual(linhas("PAINEL_ACCESS_AUD"), [`PAINEL_ACCESS_AUD='${AUD}'`]);
+  assert.deepEqual(linhas("PAINEL_ACCESS_EQUIPE"), ["PAINEL_ACCESS_EQUIPE="], "o Access de antes fica vazio (D40)");
+  assert.deepEqual(linhas("PAINEL_ACCESS_AUD"), ["PAINEL_ACCESS_AUD="], "o Access de antes fica vazio (D40)");
   assert.deepEqual(linhas("PAINEL_TETO_DIARIO"), ["PAINEL_TETO_DIARIO='10'"], "a linha repetida sai e vale o valor do deploy");
   assert.deepEqual(linhas("EMISSOR_EMAIL_PRODUTOR"), ["EMISSOR_EMAIL_PRODUTOR='produtor@exemplo.com.br'"]);
   assert.deepEqual(linhas("EMISSOR_EMAIL_REMETENTE"), ["EMISSOR_EMAIL_REMETENTE='Emissor Bunker707 <emissor@mail.bunker707.com.br>'"]);
@@ -439,7 +441,8 @@ test("implantar: compose e .env.example da imagem -implantacao; .env com as vari
   assert.deepEqual(linhas("PAINEL_CABECALHO_IP"), ["PAINEL_CABECALHO_IP='x-forwarded-for'"]);
   assert.equal(statSync(join(s.emissor, ".env")).mode & 0o777, 0o600);
   assert.match(readFileSync(join(s.emissor, ".imagem"), "utf8"), /^ghcr\.io\/danilosouza-dev\/bunker-licensing@sha256:a{64}\n$/);
-  assert.match(result.stdout, /Painel: ligado em https:\/\/licencas\.bunker707\.com\.br \(Access de bunker707\.cloudflareaccess\.com; teto de 10/);
+  assert.match(result.stdout, /Painel: ligado em https:\/\/licencas\.bunker707\.com\.br \(login de e-mail e senha; teto de 10/);
+  assert.doesNotMatch(result.stdout, /Access de|cloudflareaccess/, "nada do Access na saida");
   assert.match(result.stdout, /chaves anteriores aceitas na readocao: emissao-2026-11/);
   assert.match(result.stdout, /proxies confiaveis da API e do Painel: 172\.30\.70\.1/);
   assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo|re_chave/, "nem o e-mail do produtor nem a chave do Resend vao para o log");
@@ -486,7 +489,9 @@ test("implantar recusa raizes e configuracao fora do formato, o Painel pela meta
   recusa(ruins, [IMAGEM, RAIZES_ARG, "--config-b64=nao-e-base64!"], /--config-b64 nao e o JSON em base64/);
   recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, OUTRA: "x" })], /--config-b64 fora do formato/);
   recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, EMISSOR_EMAIL_REMETENTE: "Emissor' ; rm -rf / '" })], /--config-b64 fora do formato/);
-  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, PAINEL_ACCESS_AUD: "" })], /o Painel precisa de PAINEL_ENDERECO, PAINEL_ACCESS_EQUIPE, PAINEL_ACCESS_AUD, EMISSOR_EMAIL_PRODUTOR e EMISSOR_EMAIL_REMETENTE juntos/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, EMISSOR_EMAIL_REMETENTE: "" })], /o Painel precisa de PAINEL_ENDERECO, EMISSOR_EMAIL_PRODUTOR e EMISSOR_EMAIL_REMETENTE juntos/);
+  // O JSON de um deploy de antes da D40, com o Access: fora do formato (o deploy de agora nunca manda o Access).
+  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, PAINEL_ACCESS_EQUIPE: "bunker707.cloudflareaccess.com", PAINEL_ACCESS_AUD: AUD })], /--config-b64 fora do formato/);
   assert.equal(docker(ruins.calls(), "pull"), -1, "nada foi puxado");
   assert.equal(readFileSync(join(ruins.emissor, "compose.yaml"), "utf8"), "name: bunker-licensing\n", "o compose no ar fica");
 

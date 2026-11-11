@@ -21,8 +21,6 @@ services:
     environment:
       LICENCAS_API_SITE_ADDRESS: ${LICENCAS_API_DOMAIN:?LICENCAS_API_DOMAIN vazio no infra/licencas/.env}
       LICENCAS_PAINEL_SITE_ADDRESS: ${LICENCAS_PAINEL_DOMAIN:?LICENCAS_PAINEL_DOMAIN vazio no infra/licencas/.env}
-      # Sem lista, ninguem abre o Painel (127.0.0.1 so casa com o proprio servidor).
-      LICENCAS_PAINEL_IPS: ${LICENCAS_PAINEL_IPS:-127.0.0.1/32}
       EMISSOR_PORTA_NO_HOST: ${EMISSOR_PORTA_NO_HOST:-8080}
       PAINEL_PORTA_NO_HOST: ${PAINEL_PORTA_NO_HOST:-8081}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL vazio no infra/licencas/.env}

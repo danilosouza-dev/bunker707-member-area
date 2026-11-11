@@ -136,7 +136,7 @@ infra/
     licencas-chave.mjs          confere no runner a chave de emissao, o certificado e as raizes antes do secrets-licencas
   licencas/                     (10/11/2026) o lado nosso do servidor bunker707-licencas (secao 8C)
     docker-compose.yml          so o Caddy, na rede do servidor; o Emissor sobe pelo compose do bunker-licensing
-    caddy/Caddyfile             a API (sem proxy da Cloudflare) e o Painel (Access + lista de IPs), cada um numa porta
+    caddy/Caddyfile             a API (sem proxy da Cloudflare) e o Painel (login do proprio Painel, D40), cada um numa porta
     .env.example                as variaveis do lado nosso no servidor (nomes, portas, backup)
     scripts/                    _env.sh, implantar.sh, backup.sh (de hora em hora), restore.sh (e --ensaio), smoke.sh
   mautic/                       (18/10/2026) stack do Mautic (secao 8A)
@@ -804,10 +804,10 @@ imagem nao conhece; sem isso, o caminho e restaurar o backup de antes (8C.6).
 | 5 | produtor | O ok no chat, com o preco |
 | 6 | IA | `provision-licencas` da `main`, com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<preco aprovado>`: cria o servidor, o firewall `bunker707-licencas-fw`, o bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Se o preco do dia passou do aprovado, para sem criar nada |
 | 7 | IA | `dns-licencas` da `main`: registros A (8C.4) |
-| 8 | produtor | Cloudflare Zero Trust > Access > Applications > Self-hosted: aplicacao para `licencas.bunker707.com.br`, politica com os e-mails da equipe e login com segundo fator (o token da Cloudflare da infra nao tem permissao para criar; os passos estao no `docs/painel.md` do `bunker-licensing`, "O que o produtor configura"). Sem ela o Painel responde 403 a todo mundo. Depois, na aba Variables do passo 2: `LICENCAS_PAINEL_ACCESS_EQUIPE` (o dominio da equipe, `<equipe>.cloudflareaccess.com`) e `LICENCAS_PAINEL_ACCESS_AUD` (a Application Audience (AUD) Tag do aplicativo) |
+| 8 | ninguem | (era o Cloudflare Access e a lista de IPs; desde 11/11/2026 o Painel entra com e-mail e senha, de qualquer internet: decisao do produtor, `docs/32` D40. Nada a configurar na Cloudflare) |
 | 9 | IA | `secrets-licencas` da `main` (8C.5) |
-| 10 | IA | `deploy-licencas` da `main`, com `PRODUCER_IP=<ip>` ou `LICENCAS_PAINEL_IPS=<ip1>,<ip2>` (quem abre o Painel; sem isso, ninguem). Ele confere o DNS e a configuracao do Painel (sem o Access ou o remetente, para antes de tudo, a nao ser com `LICENCAS_SEM_PAINEL=sim`; 8C.5), puxa a imagem, escreve o `.env` do compose (com o Painel e a conta de envio), aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy e liga o backup de hora em hora |
-| 11 | IA | `exec-licencas` da `main`: a primeira conta do Painel, a do produtor, com o e-mail do login do Access. No campo `payload`: `cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail do produtor> --funcao produtor --motivo "Primeira conta"`. O e-mail "entrou no Painel" que chega ao produtor mostra que o envio funciona. As outras contas: o mesmo, com `--funcao atendente --nome "<nome>"`; `listar`, `funcao`, `desligar` e `religar` estao no `docs/painel.md` do `bunker-licensing`. Toda conta precisa estar tambem na politica do Access |
+| 10 | IA | `deploy-licencas` da `main`. Ele confere o DNS e a configuracao do Painel (todas as variaveis tem padrao; uma fora do formato para antes de tudo; 8C.5), puxa a imagem, escreve o `.env` do compose (com o Painel e a conta de envio), aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy, liga o backup de hora em hora e, na primeira vez, cria a conta do produtor no Painel (passo 11) |
+| 11 | automatico | Dentro do `deploy-licencas`: a conta do produtor (`LICENCAS_EMISSOR_EMAIL_PRODUTOR`, padrao `PRODUCER_EMAIL`), so se ainda nao existe: `bin/painel.ts adicionar <e-mail> --funcao produtor --mostrar-link`. O Emissor manda ao e-mail do produtor o link de uso unico para definir a senha; o link so aparece no registro da etapa se o envio falhar, e nunca de outro jeito. O e-mail vai ao servidor pelo stdin e e trocado por `<e-mail do produtor>` no que chega ao log. As outras contas: `exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail> --funcao atendente --nome "<nome>" --motivo "..."`; `listar`, `funcao`, `desligar` e `religar` estao no `docs/painel.md` do `bunker-licensing` |
 | 12 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
 | 13 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
 
@@ -818,15 +818,17 @@ Toda etapa e idempotente: rodar de novo completa o que faltou. Um `deploy-licenc
 | Nome (variavel em `infra/cloud/lib.sh`) | Registro | Proxy | Para que |
 |---|---|---|---|
 | `licencas-api.bunker707.com.br` (`LICENCAS_API_DOMAIN`) | so A | **sem** proxy | a API publica das Instalacoes. Sem o proxy, nenhum desafio de robos da Cloudflare barra a conferencia feita por servidor (o Bot Fight Mode do plano gratis vale para a zona inteira e nao tem excecao por regra), e o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. O nome vai gravado no produto vendido: trocar depois pede versao nova para todos |
-| `licencas.bunker707.com.br` (`LICENCAS_PAINEL_DOMAIN`) | so A | **com** proxy | o Painel de licencas da equipe, atras do Cloudflare Access |
+| `licencas.bunker707.com.br` (`LICENCAS_PAINEL_DOMAIN`) | so A | **com** proxy | o Painel de licencas da equipe, com o login de e-mail e senha do proprio Painel (D40) |
 
 `dns-licencas` apaga qualquer AAAA dos dois nomes e nunca cria um. O `deploy-licencas` para se o DNS nao estiver
 assim (sem isso o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo). Consequencia de a API ficar
 fora do proxy: o IP do servidor fica publico, a API nao tem o WAF nem a protecao contra ataque da Cloudflare (a defesa e
 o limite de pedidos do proprio Emissor, o firewall e o Caddy), e por isso 80 e 443 ficam abertas para qualquer lugar.
-Por isso o Painel tem duas travas no Caddy: a lista de IPs (`client_ip`, com o IP real lido do `CF-Connecting-IP` so
-quando a conexao vem das faixas da Cloudflare) e o cabecalho `Cf-Access-Jwt-Assertion` presente; quem chega direto no
-IP sem passar pelo Access recebe 403, e o Painel ainda confere a assinatura do token a cada pedido.
+O Painel nao tem mais lista de IPs nem o Cloudflare Access (decisao do produtor em 11/11/2026, `docs/32` D40): entra com
+o e-mail e a senha do proprio Painel, de qualquer internet. O que segura e o login dele (senha forte em hash lento,
+bloqueio por tentativas por conta e por IP, sessao curta, aviso ao produtor de aparelho novo e a auditoria). O Caddy
+continua lendo o IP real do `CF-Connecting-IP` so quando a conexao vem das faixas da Cloudflare (`client_ip`), para o
+bloqueio por IP contar o IP certo, e tira do pedido os cabecalhos `Cf-Access-*`: a identidade e so a do login do Painel.
 
 O Caddy roda na rede do servidor e manda cada nome para uma porta local do compose do Emissor, pelos nomes do
 `.env.example` do `bunker-licensing`: a API para `EMISSOR_PORTA_NO_HOST` (8080) e o Painel para `PAINEL_PORTA_NO_HOST`
@@ -877,24 +879,25 @@ valor como o Emissor confere ao subir e escreve no `.env` do compose do Emissor 
 
 | Variavel do repositorio | No `.env` do Emissor | Sem ela | O que e |
 |---|---|---|---|
-| `LICENCAS_PAINEL_ACCESS_EQUIPE` | `PAINEL_ACCESS_EQUIPE` | o deploy para | o dominio da equipe no Cloudflare Zero Trust (o "team domain"), `<equipe>.cloudflareaccess.com` |
-| `LICENCAS_PAINEL_ACCESS_AUD` | `PAINEL_ACCESS_AUD` | o deploy para | a Application Audience (AUD) Tag do aplicativo do Painel no Access: 64 caracteres, de 0 a 9 e de a a f |
-| `LICENCAS_EMISSOR_EMAIL_REMETENTE` | `EMISSOR_EMAIL_REMETENTE` | o deploy para | quem envia, um endereco do dominio da chave do Resend: `Emissor Bunker707 <emissor@mail.bunker707.com.br>` |
-| `LICENCAS_EMISSOR_EMAIL_PRODUTOR` | `EMISSOR_EMAIL_PRODUTOR` | `PRODUCER_EMAIL` | quem recebe o aviso de toda acao que da valor sem venda e a lista de toda segunda-feira |
+| `LICENCAS_EMISSOR_EMAIL_REMETENTE` | `EMISSOR_EMAIL_REMETENTE` | `Bunker Members <licencas@mail.bunker707.com.br>` | quem envia, um endereco do dominio de envio ja verificado no Resend |
+| `LICENCAS_EMISSOR_EMAIL_PRODUTOR` | `EMISSOR_EMAIL_PRODUTOR` | `PRODUCER_EMAIL` | quem recebe o aviso de toda acao que da valor sem venda e a lista de toda segunda-feira; e tambem a conta do produtor no Painel, que o deploy cria na primeira vez |
 | `LICENCAS_PAINEL_TETO_DIARIO` | `PAINEL_TETO_DIARIO` | 10 | quantas acoes que dao valor sem venda o Painel aceita por dia, somando a equipe toda (de 1 a 1000) |
 | `LICENCAS_EMISSOR_KIDS_ANTERIORES` | `EMISSOR_KIDS_ANTERIORES` | nenhuma | os `kid` das chaves de emissao anteriores que a readocao ainda aceita, separados por virgula (acima) |
 | `LICENCAS_EMISSOR_LINK_RENOVAR` e `LICENCAS_EMISSOR_LINK_LOJA` | `EMISSOR_LINK_RENOVAR` e `EMISSOR_LINK_LOJA` | sem os botoes | os enderecos `https` do Renovar e da loja que vao dentro da licenca (`{licenca}` vira o numero); so quando as paginas existirem na nossa area |
 | `LICENCAS_SEM_PAINEL` | | | `sim`: o Emissor sobe sem o Painel e sem e-mail; a API das Instalacoes funciona igual |
 
 - O endereco do Painel (`PAINEL_ENDERECO`) e `https://` mais `LICENCAS_PAINEL_DOMAIN`, o nome que o Caddy serve.
-- Sem o Access ou o remetente, o `deploy-licencas` para antes de qualquer chamada e diz o que falta; com um valor fora
-  do formato, idem. Com o Painel, o servidor ainda precisa da chave do Resend em `segredos/resend-chave` (o deploy para
-  sem ela, antes de mexer no que esta no ar). `LICENCAS_SEM_PAINEL=sim` e a unica forma de subir sem o Painel.
+- Nenhuma variavel e obrigatoria: os padroes servem (o Painel entra com e-mail e senha, sem o Cloudflare Access, D40).
+  Com um valor fora do formato, o `deploy-licencas` para antes de qualquer chamada e diz qual. Com o Painel, o servidor
+  ainda precisa da chave do Resend em `segredos/resend-chave` (o deploy para sem ela, antes de mexer no que esta no ar).
+  `LICENCAS_SEM_PAINEL=sim` e a unica forma de subir sem o Painel. O `PAINEL_ACCESS_EQUIPE` e o `PAINEL_ACCESS_AUD` de
+  um deploy antigo ficam vazios no `.env` do Emissor a cada rodada.
 - As opcoes do workflow passam na frente das variaveis (por exemplo, `LICENCAS_SEM_PAINEL=sim` numa rodada so). O
   remetente com nome tem espaco: so pela variavel; nas opcoes, so o e-mail.
 - Mudar um destes valores direto no `.env` do servidor nao dura: o proximo `deploy-licencas` escreve de novo. Para
   aumentar o teto diario, por exemplo, mude `LICENCAS_PAINEL_TETO_DIARIO` e rode `deploy-licencas`.
-- As contas do Painel nao passam por aqui: sao do banco do Emissor, por `exec-licencas` (8C.3, passo 11).
+- As contas do Painel nao passam por aqui: sao do banco do Emissor. A do produtor, o `deploy-licencas` cria na primeira
+  vez (8C.3, passo 11); as outras, por `exec-licencas`.
 
 ### 8C.6 Backup, restauracao e ensaio
 
@@ -934,8 +937,8 @@ valor como o Emissor confere ao subir e escreve no `.env` do compose do Emissor 
 | `deploy-licencas` para em "Falta a chave do Resend" | o segredo `LICENCAS_RESEND_CHAVE`, `secrets-licencas` e deploy de novo; ou `LICENCAS_SEM_PAINEL=sim` |
 | `/health` com `"ok":false` | `exec-licencas` com `COMANDO='cd /opt/bunker707/emissor && docker compose logs --tail 100 emissor'`: configuracao, chave, certificado vencido ou banco. O certificado vencido pede a troca da chave de emissao (8C.5) |
 | Instalacoes recebendo erro de rede, com o servidor no ar | `status-licencas` (as respostas publicas); o Caddy (`docker logs bunker707-licencas-caddy`); o certificado do Let's Encrypt; um AAAA que voltou no nome da API |
-| O Painel responde 403 para a equipe | o IP mudou: `deploy-licencas` com `PRODUCER_IP` ou `LICENCAS_PAINEL_IPS` novos; ou o Access nao esta na frente do nome |
-| O Painel mostra "Acesso negado" | o e-mail nao esta nas contas do Painel ou a conta foi desligada (`exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts listar`), ou a equipe ou a AUD do Access nas variaveis nao sao as do aplicativo (8C.5). O motivo exato: `exec-licencas` com `cd emissor && docker compose logs --tail 200 emissor`, nas linhas `painel`, campo `recusa` |
+| O produtor nao recebeu o link para definir a senha | o registro do `deploy-licencas` (a linha da conta do produtor; com o envio falhando, o link de uso unico aparece ali, so nesse caso); a chave do Resend e o remetente (8C.5). A conta ja existe: o `docs/painel.md` do `bunker-licensing` diz como gerar um link novo |
+| O Painel recusa o login | conta desligada ou bloqueada por tentativas (`exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts listar`). O motivo exato: `exec-licencas` com `cd emissor && docker compose logs --tail 200 emissor`, nas linhas `painel`, campo `recusa` |
 | O Painel mostra o aviso vermelho de e-mail | a chave do Resend (8C.5) ou o dominio do remetente nao verificado no Resend; o motivo fica no registro do Emissor, nas linhas "e-mail" |
 | Servidor perdido | 8C.6, "Servidor perdido" |
 | A chave de emissao vazou | trocar a chave (8C.5), olhar a auditoria no Painel e levar ao produtor: o certificado da chave vazada continua valendo no produto ate vencer, e o que fazer com as licencas assinadas por ela e decisao do desenho (`docs/32` §10) |
