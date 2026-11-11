@@ -546,9 +546,11 @@ def ler_lista(caminho):
             if not linha.startswith("{"):
                 continue
             dado = json.loads(linha)
-            if dado.get("struct_type") == "snapshot" or (snapshot is None and "paths" in dado and "tree" in dado):
+            # O restic 0.16 marca cada linha com struct_type; do 0.17 em diante, tambem com message_type.
+            tipo = dado.get("message_type") or dado.get("struct_type")
+            if tipo == "snapshot" or (snapshot is None and "paths" in dado and "tree" in dado):
                 snapshot = dado
-            elif dado.get("path"):
+            elif dado.get("path") and tipo in (None, "node"):
                 nos.append(dado)
     return snapshot or {}, nos
 
