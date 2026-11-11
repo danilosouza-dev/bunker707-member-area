@@ -90,7 +90,9 @@ test.describe("produtor", () => {
     await expect(formulario.getByText(COMENTARIOS.fotoConsentimento, { exact: true })).toBeVisible();
     // Desde 11/11/2026 (D75) a caixa "Usar esta foto em todos" saiu: a pessoa nova entra na lista ao enviar.
     await expect(formulario.locator("[data-persona-photo-all]")).toHaveCount(0);
-    await formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student }).check();
+    // O radio da pilula e sr-only (coberto pelo rotulo): o clique vai no rotulo, como a pessoa faz.
+    await formulario.locator("label:has(input[value='student'])").click();
+    await expect(formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student })).toBeChecked();
     await formulario.getByLabel(PESSOAS.comentario, { exact: true }).fill(TEXTO);
     await formulario.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(COMENTARIOS.avisos.enviado)).toBeVisible();

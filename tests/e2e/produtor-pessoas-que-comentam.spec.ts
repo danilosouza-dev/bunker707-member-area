@@ -74,7 +74,8 @@ test.describe("produtor", () => {
     await formulario.getByLabel(COMENTARIOS.nome, { exact: true }).fill(NOME);
     await formulario.getByLabel(COMENTARIOS.enviarFoto, { exact: true }).setInputFiles({ buffer: pngQuadrado(640), mimeType: "image/png", name: "rosto-gerado.png" });
     await expect(formulario.locator("[data-persona-photo-preview]")).toHaveAttribute("src", /\/storage\/v1\/object\/public\/content-assets\/webinars\/personas\/[a-f0-9]{24}\.webp$/);
-    await formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student }).check();
+    await formulario.locator("label:has(input[value='student'])").click();
+    await expect(formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student })).toBeChecked();
     await formulario.getByRole("button", { exact: true, name: PESSOAS.adicionarPessoa }).click();
     const pessoa = lista.locator("[data-persona]").filter({ hasText: NOME });
     await expect(pessoa).toBeVisible();
@@ -92,13 +93,16 @@ test.describe("produtor", () => {
     await expect(texto).toHaveValue("");
     await expect(texto).toBeFocused();
 
-    await novo.getByRole("radio", { exact: true, name: PESSOAS.tipos.question }).check();
+    // O radio da pilula e so para o leitor de tela (sr-only, coberto pelo rotulo): o clique vai no rotulo, como a pessoa faz.
+    await novo.locator("label:has(input[value='question'])").click();
+    await expect(novo.getByRole("radio", { exact: true, name: PESSOAS.tipos.question })).toBeChecked();
     await novo.getByLabel(PESSOAS.pergunta, { exact: true }).fill(PERGUNTA);
     await novo.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(PESSOAS.avisos.perguntaEnviada)).toBeVisible();
     await expect(texto).toHaveValue("");
 
-    await novo.getByRole("radio", { exact: true, name: PESSOAS.tipos.message }).check();
+    await novo.locator("label:has(input[value='message'])").click();
+    await expect(novo.getByRole("radio", { exact: true, name: PESSOAS.tipos.message })).toBeChecked();
     await novo.getByLabel(PESSOAS.comentario, { exact: true }).fill(SEGUNDO);
     await novo.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(novo.locator("[data-console-script-sent]")).toHaveText(PESSOAS.avisos.enviado);

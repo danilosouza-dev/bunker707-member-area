@@ -33,9 +33,17 @@ test.afterAll(async () => {
   await limparWebinarios(createLocalAdminClient());
 });
 
-/** O painel guardado fechado neste navegador antes da primeira pagina (o mesmo valor do X do painel). */
+/**
+ * O painel guardado fechado neste navegador antes da primeira pagina (o mesmo valor do X do painel). So na janela de
+ * cima: o script de inicio roda tambem em cada quadro novo, e o quadro da mesma origem (o da sala falsa do Jitsi nasce
+ * about:blank) gravaria "0" de novo depois do clique, e o evento storage fecharia o painel aberto pelo teste.
+ */
 async function guardarPainelFechado(page: Page, chave: string) {
-  await page.addInitScript((nome) => window.localStorage.setItem(nome, "0"), chave);
+  await page.addInitScript((nome) => {
+    if (window.top === window) {
+      window.localStorage.setItem(nome, "0");
+    }
+  }, chave);
 }
 
 /** O campo inteiro na tela: a linha da frase (20 px ou mais), nunca o 0px de antes, e a frase no lugar. */
