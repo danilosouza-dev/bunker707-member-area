@@ -463,16 +463,23 @@ test("passos de situação datados pelo Emissor: pagamento desfeito escala por d
   assert.equal(desativada.reasons.at(-1).reason, "desativada");
 });
 
-test("modo de observação calcula o degrau e avisa, mas não limita nada", () => {
-  const passos = { observeUntil: "2027-01-10T00:00:00.000Z", statusSteps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" }] };
-  const observando = avaliar(emitidaEm("2026-12-01T00:00:00.000Z", passos), { agora: "2026-12-01T00:00:00.000Z", endereco: "outro.escola.test" });
+test("modo de observação calcula o degrau da validade e da Instalação e avisa, sem limitar; a ordem do Emissor vale", () => {
+  const validade = "2026-10-01T23:59:59-03:00";
+  const vencida = { observeUntil: "2027-01-10T00:00:00.000Z", plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } };
+  const observando = avaliar(emitidaEm("2026-12-01T00:00:00.000Z", vencida), { agora: "2026-12-01T00:00:00.000Z", endereco: "outro.escola.test" });
 
   assert.equal(observando.observing, true);
   assert.equal(observando.degree, "escola_congelada");
   assert.equal(observando.enforcedDegree, "aviso");
   assert.deepEqual(observando.restrictions, { activationOnly: false, content: false, newAccess: false });
 
-  const depois = avaliar(emitidaEm("2027-01-10T00:00:00.000Z", passos), { agora: "2027-01-10T00:00:00.000Z" });
+  const ordem = { ...vencida, statusSteps: [{ degree: "escola_congelada", from: "2026-11-11T00:00:00.000Z", reason: "pagamento_desfeito" }] };
+  const comOrdem = avaliar(emitidaEm("2026-12-01T00:00:00.000Z", ordem), { agora: "2026-12-01T00:00:00.000Z" });
+  assert.equal(comOrdem.observing, true);
+  assert.equal(comOrdem.enforcedDegree, "escola_congelada");
+  assert.deepEqual(comOrdem.restrictions, { activationOnly: false, content: true, newAccess: true });
+
+  const depois = avaliar(emitidaEm("2027-01-10T00:00:00.000Z", vencida), { agora: "2027-01-10T00:00:00.000Z" });
   assert.equal(depois.observing, false);
   assert.equal(depois.enforcedDegree, "escola_congelada");
 });

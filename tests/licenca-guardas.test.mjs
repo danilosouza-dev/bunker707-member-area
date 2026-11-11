@@ -112,8 +112,13 @@ const SITUACOES = {
   escola_congelada: situacao({ statusSteps: [passo("escola_congelada", "pagamento_desfeito")] }),
   // Endereço diferente: o Aviso, e o acesso novo já para (docs/32 §2.2).
   endereco_diferente: situacao({}, "outra.escola.test"),
-  // Lote fundador em observação: registra, sem limitar nada.
-  observacao: situacao({ observeUntil: "2027-01-01T00:00:00.000Z", statusSteps: [passo("escola_congelada", "pagamento_desfeito")] }),
+  // Lote fundador em observação: o que vem da validade (aqui, a anual vencida há meses) é registrado sem limitar nada.
+  observacao: situacao({
+    observeUntil: "2027-01-01T00:00:00.000Z",
+    plan: { kind: "annual", validUntil: "2026-06-30T23:59:59-03:00", steps: [{ degree: "escola_congelada", from: "2026-08-15T03:00:00.000Z", reason: "anual_vencida" }] }
+  }),
+  // A ordem do Emissor (aqui, o pagamento desfeito) vale mesmo na observação.
+  observacao_com_ordem: situacao({ observeUntil: "2027-01-01T00:00:00.000Z", statusSteps: [passo("escola_congelada", "pagamento_desfeito")] }),
   nao_ativada: computeLicenseState({ configuredHost: ENDERECO, mode: "enforce", roots: [raiz.confiavel], snapshot: EMPTY_LICENSE_SNAPSHOT, systemNow: AGORA })
 };
 
@@ -135,6 +140,10 @@ test("as situações de teste estão no degrau que dizem", () => {
   assert.equal(SITUACOES.escola_congelada.evaluation.enforcedDegree, "escola_congelada");
   assert.equal(SITUACOES.endereco_diferente.evaluation.enforcedDegree, "aviso");
   assert.equal(SITUACOES.observacao.evaluation.observing, true);
+  assert.equal(SITUACOES.observacao.evaluation.degree, "escola_congelada");
+  assert.equal(SITUACOES.observacao.evaluation.enforcedDegree, "aviso");
+  assert.equal(SITUACOES.observacao_com_ordem.evaluation.observing, true);
+  assert.equal(SITUACOES.observacao_com_ordem.evaluation.enforcedDegree, "escola_congelada");
   assert.equal(SITUACOES.nao_ativada.evaluation.degree, "nao_ativada");
   assert.deepEqual(disabledFeaturesOf(SITUACOES.em_dia), []);
   assert.deepEqual(disabledFeaturesOf(SITUACOES.sem_o_modulo), [WEBINARS_FEATURE]);
@@ -146,7 +155,8 @@ test("cada degrau barra as classes do §2.2: o Admin limitado para o conteúdo, 
 
   assert.deepEqual(passa("em_dia"), tudo);
   assert.deepEqual(passa("aviso"), tudo, "o Aviso só avisa");
-  assert.deepEqual(passa("observacao"), tudo, "a observação do lote fundador não limita nada");
+  assert.deepEqual(passa("observacao"), tudo, "a observação do lote fundador não limita o que vem da validade");
+  assert.deepEqual(passa("observacao_com_ordem"), { ...tudo, conteudo: false, matricula: false }, "a ordem do Emissor vale mesmo na observação");
   // Admin limitado: o que é novo para; o que já estava combinado com o aluno continua, e a matrícula também.
   assert.deepEqual(passa("admin_limitado"), { ...tudo, conteudo: false });
   // Escola congelada: admin limitado e nenhum acesso novo, para ninguém.

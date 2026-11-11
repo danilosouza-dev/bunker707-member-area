@@ -275,15 +275,26 @@ export function licenseBannerOf(state: LicenseState, options: { configuredHost: 
 
   if (evaluation.observing && evaluation.enforcedDegree !== degree) {
     const until = formatLicenseDate(state.license?.observeUntil ?? null);
-    lines.push(
-      `Modo de observação${until ? ` até ${until}` : ""}: a situação é calculada e avisada, mas nada foi limitado. Fora dele, a escola estaria em ${LICENSE_DEGREE_LABELS[degree]}.`
-    );
+    const enforced = evaluation.enforcedDegree;
+    // As ordens do Emissor (pagamento desfeito, suspensao, desativacao) valem mesmo na observacao: a faixa diz o que vale.
+    const ordersApply = enforced === "admin_limitado" || enforced === "escola_congelada";
+
+    if (ordersApply) {
+      lines.push(LICENSE_DEGREE_MEANINGS[enforced]);
+      lines.push(
+        `Modo de observação${until ? ` até ${until}` : ""}: as ordens do Emissor de licenças valem, e por elas a escola está em ${LICENSE_DEGREE_LABELS[enforced]}. O resto é calculado e avisado, sem limitar. Fora dele, a escola estaria em ${LICENSE_DEGREE_LABELS[degree]}.`
+      );
+    } else {
+      lines.push(
+        `Modo de observação${until ? ` até ${until}` : ""}: a situação é calculada e avisada, mas nada foi limitado. Fora dele, a escola estaria em ${LICENSE_DEGREE_LABELS[degree]}.`
+      );
+    }
 
     if (next) {
       lines.push(next);
     }
 
-    return { degree, tone: "warning", title: "Modo de observação da Licença", lines, renewUrl, needsActivation: false };
+    return { degree, tone: ordersApply ? "error" : "warning", title: "Modo de observação da Licença", lines, renewUrl, needsActivation: false };
   }
 
   lines.push(degree === "aviso" && evaluation.restrictions.newAccess ? LICENSE_NEW_ACCESS_STOPPED : LICENSE_DEGREE_MEANINGS[degree]);

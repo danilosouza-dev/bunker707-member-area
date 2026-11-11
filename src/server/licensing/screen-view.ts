@@ -107,7 +107,9 @@ export function licenseScreenView(input: LicenseScreenInput): LicenseScreenView 
     reasons: visibleReasons(evaluation.reasons).map((item) => licenseReasonSentence(item, context)),
     nextStep: nextStepSentence(evaluation.nextStep),
     observation: evaluation.observing
-      ? `Modo de observação${observeUntil ? ` até ${observeUntil}` : ""}: a situação é calculada e avisada, mas nada é limitado.`
+      ? evaluation.restrictions.content || evaluation.restrictions.newAccess
+        ? `Modo de observação${observeUntil ? ` até ${observeUntil}` : ""}: as ordens do Emissor de licenças valem; o que vem da validade e desta Instalação é calculado e avisado, sem limitar.`
+        : `Modo de observação${observeUntil ? ` até ${observeUntil}` : ""}: a situação é calculada e avisada, mas nada é limitado.`
       : null,
     clockWrong: state.clock.clockWrong,
     holder: evaluation.licensedTo,

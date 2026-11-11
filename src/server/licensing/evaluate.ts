@@ -11,7 +11,10 @@
 //   Escola congelada 30 dias depois), endereco diferente e licenca ilegivel (Aviso, 7 e 30 dias). Nos dois
 //   ultimos, nenhum acesso novo ja no Aviso: nada prova o direito de dar acesso;
 // - os modulos nao dependem do degrau: quem ja e aluno nao perde o que tem;
-// - modo de observacao: calcula e avisa, mas nao limita nada.
+// - modo de observacao: calcula e avisa, sem limitar, o que vem da validade (os passos do plano e o arquivo vencido) e
+//   o que a Instalacao conta sozinha (sem contato, endereco diferente). As ordens do Emissor (os passos de situacao:
+//   pagamento desfeito, suspensao, desativacao, descumprimento) valem mesmo na observacao: sao decisoes, nao alarme
+//   (revisao do Emissor, 11/11/2026).
 //
 // Toda data de entrada pode ter vindo do banco, que o comprador controla. Data invalida nunca libera nada:
 // "desde quando" invalido conta como ha muito tempo; hora atual invalida fecha a escola.
@@ -26,7 +29,6 @@ import {
   LOCAL_ANOMALY_FROZEN_AFTER_MS,
   LOCAL_ANOMALY_LIMITED_AFTER_MS,
   NO_CONTACT_NOTICE_AFTER_MS,
-  NO_RESTRICTIONS,
   TRUSTED_CLOCK_MAX_LAG_MS,
   degreeRank,
   maxDegree,
@@ -204,7 +206,10 @@ export type LicenseNextStep = { degree: StepDegree; at: string; reason: string }
 export type LicenseEvaluation = {
   /** O degrau calculado. "nao_ativada" so para a Instalacao que nunca teve licenca. */
   degree: LicenseDegree | "nao_ativada";
-  /** O degrau que vale de fato: no modo de observacao, nunca passa do Aviso. */
+  /**
+   * O degrau que vale de fato. No modo de observacao, o que vem da validade e da Instalacao nao passa do Aviso; as
+   * ordens do Emissor (passos de situacao) valem inteiras.
+   */
   enforcedDegree: LicenseDegree | "nao_ativada";
   observing: boolean;
   restrictions: LicenseRestrictions;
@@ -411,10 +416,20 @@ export function evaluateLicense(input: LicenseEvaluationInput): LicenseEvaluatio
   const reasons: LicenseReason[] = [];
   const nextCandidates: Array<LicenseNextStep | null> = [];
 
-  // 1. Os passos datados pelo Emissor: os da validade do plano que vale agora e os de situacao, sempre.
-  for (const step of [...validitySteps(plan), ...license.statusSteps]) {
+  // 1. Os passos datados pelo Emissor: os da validade do plano que vale agora e os de situacao, sempre. Os de situacao
+  // sao ordens do Emissor: o modo de observacao nao os suaviza (statusDegree).
+  let statusDegree: LicenseDegree = "ok";
+
+  for (const [step, isOrder] of [
+    ...validitySteps(plan).map((item) => [item, false] as const),
+    ...license.statusSteps.map((item) => [item, true] as const)
+  ]) {
     if (Date.parse(step.from) <= nowMs) {
       reasons.push({ degree: step.degree, reason: step.reason, since: step.from });
+
+      if (isOrder) {
+        statusDegree = maxDegree(statusDegree, step.degree);
+      }
     } else {
       nextCandidates.push({ degree: step.degree, at: step.from, reason: step.reason });
     }
@@ -468,15 +483,18 @@ export function evaluateLicense(input: LicenseEvaluationInput): LicenseEvaluatio
 
   const degree = highestDegree(reasons);
   const observing = license.observeUntil !== undefined && nowMs < Date.parse(license.observeUntil);
-  const enforcedDegree: LicenseDegree = observing && degreeRank(degree) > degreeRank("aviso") ? "aviso" : degree;
+  // Na observacao, o que vem da validade e da Instalacao nao passa do Aviso nem barra o acesso novo do endereco
+  // diferente; a ordem do Emissor vale inteira.
+  const softened: LicenseDegree = degreeRank(degree) > degreeRank("aviso") ? "aviso" : degree;
+  const enforcedDegree: LicenseDegree = observing ? maxDegree(statusDegree, softened) : degree;
 
   return {
     ...base,
     degree,
     enforcedDegree,
     observing,
-    // Fora do endereco da licenca, nenhum acesso novo ja no Aviso (docs/32 §2.2).
-    restrictions: observing ? { ...NO_RESTRICTIONS } : restrictionsFor(enforcedDegree, hostMismatch),
+    // Fora do endereco da licenca, nenhum acesso novo ja no Aviso (docs/32 §2.2), menos na observacao.
+    restrictions: observing ? restrictionsFor(enforcedDegree, false) : restrictionsFor(enforcedDegree, hostMismatch),
     reasons,
     nextStep: earliestNextStep(nextCandidates, degree),
     kind: plan.kind,

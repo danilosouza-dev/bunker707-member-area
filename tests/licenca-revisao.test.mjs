@@ -9,6 +9,9 @@ import { assinarLicenca, licencaBase, novaChaveDeEmissao, novaRaiz, passosDaAnua
 
 const store = await import("../src/server/licensing/store.ts");
 const { computeLicenseState } = await import("../src/server/licensing/state.ts");
+const { verifyLicenseToken } = await import("../src/server/licensing/artifact.ts");
+const { evaluateLicense } = await import("../src/server/licensing/evaluate.ts");
+const { allowsActionClass } = await import("../src/server/licensing/model.ts");
 const { runLicenseCheckInNow, runLicenseTick } = await import("../src/server/licensing/tick.ts");
 const { notifyLicenseDegree } = await import("../src/server/licensing/degree-notice.ts");
 
@@ -235,4 +238,59 @@ test("e-mail de degrau com 'desde quando' no futuro: um por pessoa, não um por 
   const estado = situacao({ ...linha, hostMismatchSince: new Date("2099-01-01T00:00:00.000Z") }, agoraMs, OUTRO);
   const reenvio = await notifyLicenseDegree({ state: estado, configuredHost: OUTRO, memory: { lastMarker: null }, now: () => agoraMs, listRecipients: async () => equipe, enqueue: async (email) => fila.push(email) });
   assert.ok(reenvio.queued === 0 || fila.slice(2).every((email) => chaves.has(email.idempotencyKey)), "a mesma chave no mesmo dia");
+});
+
+// ---- Revisão do Emissor: o modo de observação dos fundadores tirava também as ordens do Emissor --------------
+
+test("modo de observação: as ordens do Emissor (revogação, suspensão, desativação) valem; só a validade e o que a Instalação conta ficam suaves (revisão do Emissor)", () => {
+  const AGORA = Date.parse("2026-12-01T12:00:00.000Z");
+  const observando = { observeUntil: "2027-01-10T00:00:00.000Z" };
+  const passo = (degree, reason, desdeMs = AGORA - DIA) => ({ degree, from: iso(desdeMs), reason });
+  const avaliar = (licenca, endereco = "alunos.escola.test") => {
+    const token = assinar(licencaBase({ issuedAt: iso(AGORA - HORA), expiresAt: iso(AGORA + 60 * DIA), ...observando, ...licenca }));
+    const conferida = verifyLicenseToken(token, RAIZES);
+    assert.equal(conferida.ok, true);
+    return evaluateLicense({ license: conferida.license, everActivated: true, unreadableSince: null, now: new Date(AGORA), configuredHost: endereco, hostMismatchSince: null });
+  };
+  const pode = (avaliacao, classe) => allowsActionClass(avaliacao.restrictions, classe);
+
+  // A desativação (ordem assinada, Escola congelada na hora) vale mesmo na observação. Antes: nada era limitado.
+  const desativada = avaliar({ statusSteps: [passo("escola_congelada", "desativada")] });
+  assert.equal(desativada.observing, true);
+  assert.equal(desativada.enforcedDegree, "escola_congelada");
+  assert.equal(pode(desativada, "conteudo"), false);
+  assert.equal(pode(desativada, "matricula"), false);
+  assert.equal(pode(desativada, "dever_legal"), true);
+
+  // A revogação no 7º dia (Admin limitado) e a suspensão também.
+  const revogada = avaliar({ statusSteps: [passo("aviso", "revogada", AGORA - 8 * DIA), passo("admin_limitado", "revogada", AGORA - DIA)] });
+  assert.equal(revogada.enforcedDegree, "admin_limitado");
+  assert.equal(pode(revogada, "conteudo"), false);
+  assert.equal(pode(revogada, "matricula"), true);
+  assert.equal(avaliar({ statusSteps: [passo("admin_limitado", "suspensa")] }).enforcedDegree, "admin_limitado");
+
+  // A validade vencida (a anual depois da carência) e o arquivo vencido ficam suaves: calculados e avisados, sem limitar.
+  const validade = "2026-10-01T23:59:59-03:00";
+  const vencida = avaliar({ plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } });
+  assert.equal(vencida.degree, "escola_congelada");
+  assert.equal(vencida.enforcedDegree, "aviso");
+  assert.deepEqual(vencida.restrictions, { activationOnly: false, content: false, newAccess: false });
+  const arquivoVencido = avaliar({ issuedAt: iso(AGORA - 50 * DIA), expiresAt: iso(AGORA - 40 * DIA) });
+  assert.equal(arquivoVencido.degree, "escola_congelada");
+  assert.deepEqual(arquivoVencido.restrictions, { activationOnly: false, content: false, newAccess: false });
+
+  // O endereço diferente, que a Instalação conta sozinha, também: nem o acesso novo para.
+  const outroEndereco = avaliar({}, "outro.escola.test");
+  assert.equal(outroEndereco.degree, "aviso");
+  assert.equal(outroEndereco.restrictions.newAccess, false);
+
+  // Ordem do Emissor junto com o que fica suave: vale a ordem, e o resto não sobe acima do Aviso.
+  const misto = avaliar({ plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) }, statusSteps: [passo("admin_limitado", "suspensa")] });
+  assert.equal(misto.degree, "escola_congelada");
+  assert.equal(misto.enforcedDegree, "admin_limitado");
+  assert.deepEqual(misto.restrictions, { activationOnly: false, content: true, newAccess: false });
+
+  // Fora da observação, tudo como antes.
+  observando.observeUntil = iso(AGORA - MINUTO);
+  assert.equal(avaliar({ plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } }).enforcedDegree, "escola_congelada");
 });

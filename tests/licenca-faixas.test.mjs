@@ -168,17 +168,32 @@ test("licença guardada ilegível: Aviso, nenhum acesso novo, e a data desde qua
   assert.equal(modelo.renewUrl, null, "sem licença legível, sem o endereço do Renovar");
 });
 
-test("modo de observação do lote fundador: avisa o degrau calculado e diz que nada foi limitado", () => {
-  const estado = situacao({
-    observeUntil: "2027-01-01T00:00:00-03:00",
-    statusSteps: [{ degree: "escola_congelada", from: "2026-11-01T00:00:00-03:00", reason: "revogada" }]
-  });
+test("modo de observação do lote fundador: avisa o degrau calculado da validade e diz que nada foi limitado", () => {
+  const estado = situacao({ observeUntil: "2028-01-15T00:00:00-03:00" }, { agora: "2027-12-28T12:00:00.000Z" });
   const modelo = faixa(estado);
 
+  assert.equal(estado.evaluation.degree, "escola_congelada", "a anual vencida há mais de 45 dias");
   assert.equal(estado.evaluation.enforcedDegree, "aviso");
   assert.equal(modelo.title, "Modo de observação da Licença");
   assert.equal(modelo.tone, "warning");
-  assert.ok(modelo.lines.some((linha) => linha.startsWith("Modo de observação até 01/01/2027") && linha.includes("nada foi limitado") && linha.endsWith("estaria em Escola congelada.")));
+  assert.ok(modelo.lines.some((linha) => linha.startsWith("Modo de observação até 15/01/2028") && linha.includes("nada foi limitado") && linha.endsWith("estaria em Escola congelada.")));
+});
+
+test("modo de observação com uma ordem do Emissor: a faixa diz o que vale pela ordem, e nunca que nada foi limitado", () => {
+  const ordem = { observeUntil: "2028-01-15T00:00:00-03:00", statusSteps: [{ degree: "admin_limitado", from: "2027-12-20T00:00:00-03:00", reason: "suspensa" }] };
+  const estado = situacao(ordem, { agora: "2027-12-28T12:00:00.000Z" });
+  const modelo = faixa(estado);
+
+  assert.equal(estado.evaluation.degree, "escola_congelada");
+  assert.equal(estado.evaluation.enforcedDegree, "admin_limitado");
+  assert.equal(modelo.tone, "error");
+  assert.ok(modelo.lines.includes(copy.LICENSE_DEGREE_MEANINGS.admin_limitado));
+  assert.ok(modelo.lines.some((linha) => linha.startsWith("Modo de observação até 15/01/2028: as ordens do Emissor de licenças valem") && linha.endsWith("estaria em Escola congelada.")));
+  assert.ok(modelo.lines.every((linha) => !linha.includes("nada foi limitado")));
+
+  // Só a ordem, sem nada da validade: a faixa de sempre do degrau que vale.
+  const soOrdem = faixa(situacao({ observeUntil: "2027-01-01T00:00:00-03:00", statusSteps: [{ degree: "escola_congelada", from: "2026-11-01T00:00:00-03:00", reason: "desativada" }] }));
+  assert.equal(soOrdem.title, "Licença: Escola congelada");
 });
 
 test("relógio do servidor errado: faixa própria; até 48 h adiantado, nunca um degrau, e a faixa diz o preço de passar disso", () => {

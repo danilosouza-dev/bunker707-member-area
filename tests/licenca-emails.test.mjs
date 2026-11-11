@@ -176,16 +176,24 @@ test("o processo que reinicia tenta de novo com as mesmas chaves (a fila ignora 
 });
 
 test("modo de observação: o e-mail diz o degrau calculado e que nada foi limitado; nunca ativada: nenhum e-mail", async () => {
-  const observando = situacao("2026-11-11T12:00:00.000Z", {
-    observeUntil: "2027-01-01T00:00:00-03:00",
-    statusSteps: [{ degree: "admin_limitado", from: "2026-11-01T00:00:00-03:00", reason: "revogada" }]
-  });
+  // A anual vencida há poucos dias, no 16º dia (Admin limitado pela validade): na observação, calculado e avisado.
+  const observando = situacao(LIMITADO, { observeUntil: "2028-01-15T00:00:00-03:00" });
   const { deps, fila } = dependencias(observando);
   await notifyLicenseDegree(deps);
 
   assert.equal(fila[0].subject, "Modo de observação da Licença");
   assert.match(fila[0].text, /nada foi limitado/);
   assert.match(fila[0].text, /estaria em Admin limitado/);
+
+  // A ordem do Emissor (a revogação no 7º dia) vale mesmo na observação: o e-mail nunca diz que nada foi limitado.
+  const revogada = situacao("2026-11-11T12:00:00.000Z", {
+    observeUntil: "2027-01-01T00:00:00-03:00",
+    statusSteps: [{ degree: "admin_limitado", from: "2026-11-01T00:00:00-03:00", reason: "revogada" }]
+  });
+  const ordem = dependencias(revogada);
+  await notifyLicenseDegree(ordem.deps);
+  assert.equal(ordem.fila[0].subject, "Licença: Admin limitado");
+  assert.doesNotMatch(ordem.fila[0].text, /nada foi limitado/);
 
   const nunca = computeLicenseState({ mode: "enforce", roots: RAIZES, snapshot: EMPTY_LICENSE_SNAPSHOT, systemNow: new Date(AVISO), configuredHost: ENDERECO });
   const semEmail = dependencias(nunca);
