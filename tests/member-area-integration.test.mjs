@@ -95,6 +95,7 @@ test("Server Actions da rodada passam por runAdminAction com uma permissao de pr
   ];
   const expected = {
     saveHomeHero: "storefront.write",
+    saveLoginContact: "storefront.write",
     saveLoginPage: "storefront.write",
     setHomeModuleRow: "storefront.write",
     setModuleCover: "catalog.content",

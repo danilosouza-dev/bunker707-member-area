@@ -30,3 +30,28 @@ export function actionClassOfBulkStudentAction(input: { action: string }): Actio
 
   return input.action === "resend_access_email" ? "dever_legal" : "atendimento";
 }
+
+/** O nome da conexao como o servidor grava (provider-connections.ts, validateLabel): espacos juntados e aparados. */
+function connectionLabelOf(value: unknown): string | null {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : null;
+}
+
+/**
+ * A mudanca numa conexao de IA ja conectada (PATCH /api/admin/ai-connections/[id]). Trocar a chave (com o nome e a
+ * prioridade como estao, que o editor manda junto) e pausar sao dever legal: trocar o segredo de uma integracao ja
+ * conectada, ou desliga-la (docs/32 §2.2). Retomar a pausada, renomear e mudar a prioridade sao configuracao (conteudo).
+ * Antes o PATCH inteiro era dever legal, e no Admin limitado ele tambem retomava a conexao pausada (revisao de 11/11/2026).
+ */
+export function actionClassOfAIConnectionChange(
+  change: { apiKey?: unknown; label?: unknown; paused?: unknown; priority?: unknown },
+  current: { label: string; priority: number }
+): ActionClass {
+  if (change.paused !== undefined && change.paused !== true) {
+    return "conteudo";
+  }
+
+  const sameLabel = change.label === undefined || connectionLabelOf(change.label) === current.label;
+  const samePriority = change.priority === undefined || (typeof change.priority === "number" ? change.priority : Number(change.priority)) === current.priority;
+
+  return sameLabel && samePriority ? "dever_legal" : "conteudo";
+}

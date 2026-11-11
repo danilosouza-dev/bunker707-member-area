@@ -304,8 +304,10 @@ export async function searchStudentOptions(raw: unknown): Promise<ActionResult<S
  * Entrega 2: segmentos, turmas, acoes em massa, importacao e exportacao
  * ---------------------------------------------------------------------------------------------- */
 
+// Salvar um segmento acrescenta (conteudo e configuracao, barrado no Admin limitado); apagar so tira (dever legal, como
+// apagar o resto). Antes os dois eram "leitura" e gravavam (revisao de 11/11/2026, docs/32 §11.3).
 export async function saveStudentSegment(raw: unknown): Promise<ActionResult<StudentSavedSegment>> {
-  return runAdminAction("students.access", "leitura", saveSegmentSchema, raw, async ({ input, user }) => {
+  return runAdminAction("students.access", "conteudo", saveSegmentSchema, raw, async ({ input, user }) => {
     // Uma semana fixa do ciclo de vida nao e um segmento reutilizavel: sai ao salvar.
     const { group: _group, week: _week, ...reusable } = input.params;
     void _group;
@@ -326,7 +328,7 @@ export async function saveStudentSegment(raw: unknown): Promise<ActionResult<Stu
 }
 
 export async function deleteStudentSegment(raw: unknown): Promise<ActionResult<{ deleted: true }>> {
-  return runAdminAction("students.access", "leitura", deleteSegmentSchema, raw, async ({ input }) => {
+  return runAdminAction("students.access", "dever_legal", deleteSegmentSchema, raw, async ({ input }) => {
     await deleteSegment(studentsDb(), input.id);
     revalidatePath("/admin/alunos");
 

@@ -6,6 +6,7 @@ import {
   updateAIProviderConnection,
   getAIProviderConnectionRow
 } from "@/server/ai/provider-connections";
+import { actionClassOfAIConnectionChange } from "@/server/actions/action-classes";
 import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
@@ -33,6 +34,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     const { connectionId } = await context.params;
     const payload = await request.json() as Record<string, unknown>;
     const row = await getAIProviderConnectionRow(connectionId);
+    // So trocar a chave e pausar sao dever legal (a guarda acima); retomar, renomear e mudar a prioridade sao conteudo.
+    const changeClass = actionClassOfAIConnectionChange(payload, row);
+
+    if (changeClass !== "dever_legal") {
+      const changeRefusal = await licenseRouteRefusal({ actionClass: changeClass });
+      if (changeRefusal) return noStore(changeRefusal);
+    }
+
     const connection = row.auth_mode === "api_key" && payload.apiKey !== undefined
       ? await saveAIProviderAPIConnection({
           actorId: auth.user.id,

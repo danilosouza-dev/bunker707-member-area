@@ -412,7 +412,9 @@ test("publicar com a versao lida atualiza; versao velha vira 409 sem gravar nem 
 test("analista (sem storefront.write) recebe 403 e nada e gravado", async () => {
   const db = createSettingsDb();
   actionStubs.db = db;
-  assert.match(loginActionsSource, /runAdminAction\("storefront\.write", "dever_legal", saveLoginPageSchema/);
+  // A aparência é conteúdo; só o contato da escola é dever legal (docs/32 §2.2; tests/licenca-classes.test.mjs).
+  assert.match(loginActionsSource, /runAdminAction\("storefront\.write", "conteudo", saveLoginPageSchema/);
+  assert.match(loginActionsSource, /runAdminAction\("storefront\.write", "dever_legal", saveLoginContactSchema/);
 
   Object.defineProperty(actionStubs, "role", {
     configurable: true,
@@ -537,7 +539,12 @@ test("LoginExperience responde ao container, aceita a altura da previa e nao toc
 });
 
 test("a tela do editor publica pela Server Action e sobe imagens antes de gravar", () => {
-  assert.match(loginEditorSource, /saveLoginPage\(\{ expectedUpdatedAt: previous\.updatedAt, settings: parsed\.data \}\)/);
+  assert.match(loginEditorSource, /await publishLogin\(previous\.settings, parsed\.data, previous\.updatedAt\)/);
+  // Só o contato mudou: pelo saveLoginContact, que a Licença deixa em todo degrau; o resto, pelo saveLoginPage.
+  assert.match(
+    loginEditorSource,
+    /return isOnlyLoginContactChange\(before, after\)\s*\? saveLoginContact\(\{ contact: loginContactOf\(after\), expectedUpdatedAt \}\)\s*: saveLoginPage\(\{ expectedUpdatedAt, settings: after \}\);/
+  );
   assert.match(loginEditorSource, /uploadMemberAreaImage\(\{ image: value, slot:/);
   assert.match(loginEditorSource, /saveLabel="Publicar login"/);
   assert.doesNotMatch(loginEditorSource, /window\.confirm/);

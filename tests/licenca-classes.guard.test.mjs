@@ -180,6 +180,10 @@ test("a classificação onde o §2.2 é explícito: o que a lei e a segurança p
     ["src/server/payments/actions.ts", "disconnectSalesProvider", "dever_legal"],
     ["src/server/team/actions.ts", "removeTeamMember", "dever_legal"],
     ["src/server/webinars/room-actions.ts", "removeStudentMessages", "dever_legal"],
+    // Editar os dados de contato da escola (só o contato da página de entrar; a aparência é conteúdo, abaixo).
+    ["src/server/member-area/login-actions.ts", "saveLoginContact", "dever_legal"],
+    // Apagar um segmento salvo só tira.
+    ["src/server/students/actions.ts", "deleteStudentSegment", "dever_legal"],
     // A tela Licença (docs/32 §2.4): o caminho para sair de qualquer degrau, inclusive da Instalação nunca ativada.
     ["src/server/licensing/actions.ts", "activateLicense", "dever_legal"],
     ["src/server/licensing/actions.ts", "checkLicenseNow", "dever_legal"],
@@ -204,7 +208,10 @@ test("a classificação onde o §2.2 é explícito: o que a lei e a segurança p
     ["src/server/communications/actions.ts", "publishNotice", "conteudo"],
     ["src/server/communications/flow-actions.ts", "activateFlow", "conteudo"],
     ["src/server/webinars/actions.ts", "publishWebinar", "conteudo"],
-    ["src/server/member-area/home-hero-actions.ts", "saveHomeHero", "conteudo"]
+    ["src/server/member-area/home-hero-actions.ts", "saveHomeHero", "conteudo"],
+    ["src/server/member-area/login-actions.ts", "saveLoginPage", "conteudo"],
+    // Salvar um segmento grava: nunca "leitura" (revisão de 11/11/2026).
+    ["src/server/students/actions.ts", "saveStudentSegment", "conteudo"]
   ];
 
   for (const [file, name, expected] of casos) {
@@ -226,4 +233,18 @@ test("a classificação onde o §2.2 é explícito: o que a lei e a segurança p
   for (const [route, method, expected] of rotas) {
     assert.equal(routeClassOf(route, method), expected, `${route} ${method}`);
   }
+});
+
+test("o PATCH de uma conexão de IA: a primeira linha é dever legal (trocar a chave, pausar), e o resto da mudança confere a classe dela antes de gravar", () => {
+  const rota = "src/app/api/admin/ai-connections/[connectionId]/route.ts";
+  assert.equal(routeClassOf(rota, "PATCH"), "dever_legal");
+
+  const { bodies } = mutatingHandlers(read(rota));
+  const corpo = codeOf(bodies.find((item) => item.method === "PATCH").body);
+  const resolvida = corpo.indexOf("actionClassOfAIConnectionChange(payload, row)");
+  const segunda = corpo.indexOf("await licenseRouteRefusal({ actionClass: changeClass })");
+
+  assert.ok(resolvida > 0 && resolvida < segunda, "a classe sai da mudança e da conexão como está");
+  assert.ok(segunda < corpo.indexOf("saveAIProviderAPIConnection(") && segunda < corpo.indexOf("updateAIProviderConnection("), "a segunda guarda vem antes de gravar");
+  assert.match(corpo, /if \(changeClass !== "dever_legal"\) \{\s*const changeRefusal = await licenseRouteRefusal\(\{ actionClass: changeClass \}\);\s*if \(changeRefusal\) return noStore\(changeRefusal\);/);
 });
