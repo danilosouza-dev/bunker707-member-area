@@ -29,14 +29,46 @@ const COMPOSE_JSON = JSON.stringify({
   }
 });
 const ENV_EXAMPLE = [
-  "# Variaveis do compose.yaml do Emissor (copia de teste do .env.example do bunker-licensing).",
+  "# Variaveis do compose.yaml do Emissor (copia de teste do .env.example do bunker-licensing, com o Painel).",
   "ARQUIVO_SENHA_POSTGRES=./segredos/postgres-senha",
+  "ARQUIVO_CHAVE_RESEND=./segredos/resend-chave",
   "EMISSOR_RAIZES='[{\"rid\":\"<rid da raiz>\",\"publicKey\":\"<chave publica da raiz>\"}]'",
+  "EMISSOR_KIDS_ANTERIORES=",
+  "# EMISSOR_LINK_RENOVAR=https://<area de membros>/minhas-licencas/{licenca}/renovar",
   "EMISSOR_PORTA_NO_HOST=8080",
   "EMISSOR_PROXIES_CONFIAVEIS=172.30.70.1",
+  "EMISSOR_CABECALHO_IP=x-forwarded-for",
+  "EMISSOR_REDE_BORDA=172.30.70.0/24",
+  "EMISSOR_GATEWAY_BORDA=172.30.70.1",
   "PAINEL_PORTA_NO_HOST=8081",
+  "PAINEL_ENDERECO=https://licencas.bunker707.com.br",
+  "PAINEL_ACCESS_EQUIPE=<equipe>.cloudflareaccess.com",
+  "PAINEL_ACCESS_AUD=<a etiqueta AUD do aplicativo, 64 caracteres de 0 a 9 e a a f>",
+  "PAINEL_PROXIES_CONFIAVEIS=172.30.70.1",
+  "PAINEL_CABECALHO_IP=x-forwarded-for",
+  "PAINEL_TETO_DIARIO=10",
+  "EMISSOR_EMAIL_PRODUTOR=<e-mail do produtor>",
+  "EMISSOR_EMAIL_REMETENTE=Emissor Bunker707 <emissor@licencas.bunker707.com.br>",
   ""
 ].join("\n");
+// O que o deploy-licencas manda em --config-b64 (infra/cloud/licencas.sh): o Painel ligado, ou tudo dele vazio.
+const AUD = "0123456789abcdef".repeat(4);
+const CONFIG_PAINEL = {
+  PAINEL_ENDERECO: "https://licencas.bunker707.com.br",
+  PAINEL_ACCESS_EQUIPE: "bunker707.cloudflareaccess.com",
+  PAINEL_ACCESS_AUD: AUD,
+  PAINEL_TETO_DIARIO: "10",
+  EMISSOR_EMAIL_PRODUTOR: "produtor@exemplo.com.br",
+  EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
+  EMISSOR_KIDS_ANTERIORES: "",
+  EMISSOR_LINK_RENOVAR: "",
+  EMISSOR_LINK_LOJA: ""
+};
+const SEM_PAINEL = { ...CONFIG_PAINEL, PAINEL_ENDERECO: "", PAINEL_ACCESS_EQUIPE: "", PAINEL_ACCESS_AUD: "", EMISSOR_EMAIL_PRODUTOR: "", EMISSOR_EMAIL_REMETENTE: "" };
+const b64 = (value) => Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64");
+const IMAGEM = "--imagem=ghcr.io/danilosouza-dev/bunker-licensing:main";
+const RAIZES_ARG = `--raizes-b64=${b64([{ rid: "raiz-teste", publicKey: "A".repeat(43) }])}`;
+const configArg = (config = CONFIG_PAINEL) => `--config-b64=${b64(config)}`;
 
 const DOCKER_SHIM = String.raw`
 import fs from "node:fs";
@@ -123,8 +155,11 @@ ${extra}
 process.exit(0);
 `;
 
-/** Um servidor de licencas de mentira: /opt/bunker707 numa pasta temporaria, com o Emissor ja implantado ou nao. */
-function servidor({ implantado = true, segredos = true, envLicencas = {} } = {}) {
+/**
+ * Um servidor de licencas de mentira: /opt/bunker707 numa pasta temporaria, com o Emissor ja implantado ou nao. `resend`
+ * e o conteudo de segredos/resend-chave (null: o arquivo nao existe).
+ */
+function servidor({ implantado = true, segredos = true, resend = "re_chave_de_teste_do_emissor", envLicencas = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "bunker707-licencas-servidor-"));
   dirs.push(dir);
   const emissor = join(dir, "emissor");
@@ -137,6 +172,7 @@ function servidor({ implantado = true, segredos = true, envLicencas = {} } = {})
   if (segredos) {
     mkdirSync(join(emissor, "segredos"));
     for (const f of ["postgres-senha", "emissao.pem", "emissao-senha", "emissao-certificado.json"]) writeFileSync(join(emissor, "segredos", f), "x");
+    if (resend !== null) writeFileSync(join(emissor, "segredos", "resend-chave"), resend);
   }
   const envFile = join(dir, "licencas.env");
   const valores = { RESTIC_REPOSITORY: "sftp:storagebox:bunker707/restic-licencas", RESTIC_PASSWORD: "senha-restic-de-teste", STORAGE_BOX_USER: "u100", STORAGE_BOX_HOST: "u100.your-storagebox.de", BACKUP_KEEP_HOURLY: "48", BACKUP_KEEP_DAILY: "30", BACKUP_PRUNE_HOUR: "03", ...envLicencas };
@@ -347,12 +383,21 @@ test("restore --ensaio: Postgres descartavel sem rede, nada no banco em uso, con
   assert.match(nenhum.stderr, /nenhum backup do Emissor neste repositorio/);
 });
 
-test("implantar: compose e .env.example da imagem -implantacao, .env com as variaveis novas e as raizes, imagem do GHCR com o nome local, migracoes e /health", { skip }, () => {
+test("implantar: compose e .env.example da imagem -implantacao; .env com as variaveis novas, as raizes, o Painel, a conta de envio e os proxies das duas portas; imagem do GHCR com o nome local, migracoes e /health", { skip }, () => {
   const s = servidor({ implantado: false });
-  writeFileSync(join(s.emissor, ".env"), "EMISSOR_PORTA_NO_HOST=8080\nEMISSOR_LINK_LOJA=https://membros.exemplo.com.br/loja\nEMISSOR_RAIZES='antigo'\n");
-  const raizes = JSON.stringify([{ rid: "raiz-teste", publicKey: "A".repeat(43) }]);
+  writeFileSync(join(s.emissor, ".env"), [
+    "EMISSOR_PORTA_NO_HOST=8080",
+    "ARQUIVO_SENHA_POSTGRES=./segredos/outra-senha",
+    "EMISSOR_LINK_LOJA=https://membros.exemplo.com.br/loja",
+    "EMISSOR_RAIZES='antigo'",
+    "PAINEL_PROXIES_CONFIAVEIS=173.245.48.0/20,172.30.70.1",
+    "PAINEL_TETO_DIARIO=50",
+    "PAINEL_TETO_DIARIO=60",
+    ""
+  ].join("\n"));
   const imagem = "ghcr.io/danilosouza-dev/bunker-licensing:main";
-  const result = s.run("implantar.sh", [`--imagem=${imagem}`, `--raizes-b64=${Buffer.from(raizes).toString("base64")}`]);
+  const config = { ...CONFIG_PAINEL, EMISSOR_KIDS_ANTERIORES: "emissao-2026-11", EMISSOR_LINK_RENOVAR: "https://membros.bunker707.com.br/minhas-licencas/{licenca}/renovar" };
+  const result = s.run("implantar.sh", [`--imagem=${imagem}`, RAIZES_ARG, configArg(config)]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const calls = s.calls();
   const at = (...p) => docker(calls, ...p);
@@ -372,41 +417,104 @@ test("implantar: compose e .env.example da imagem -implantacao, .env com as vari
   assert.ok(!calls.some((c) => c.tool === "docker" && (c.args[0] === "build" || c.args[0] === "buildx" || c.args.includes("--build"))), "nada e construido no servidor");
   assert.match(readFileSync(join(s.emissor, "compose.yaml"), "utf8"), /compose de teste vindo da imagem -implantacao/);
   const env = readFileSync(join(s.emissor, ".env"), "utf8");
-  assert.match(env, /^EMISSOR_LINK_LOJA=https:\/\/membros\.exemplo\.com\.br\/loja$/m, "o que ja estava fica");
-  assert.match(env, /^PAINEL_PORTA_NO_HOST=8081$/m, "a variavel nova do .env.example entra");
-  assert.equal(env.match(/^EMISSOR_RAIZES=.*$/gm).length, 1);
-  assert.match(env, /^EMISSOR_RAIZES='\[\{"rid":"raiz-teste","publicKey":"A{43}"\}\]'$/m);
+  const linhas = (nome) => env.match(new RegExp(`^${nome}=.*$`, "gm")) ?? [];
+  assert.deepEqual(linhas("ARQUIVO_SENHA_POSTGRES"), ["ARQUIVO_SENHA_POSTGRES=./segredos/outra-senha"], "o que ja estava, e o deploy nao decide, fica");
+  assert.deepEqual(linhas("ARQUIVO_CHAVE_RESEND"), ["ARQUIVO_CHAVE_RESEND=./segredos/resend-chave"], "a variavel nova do .env.example entra");
+  assert.deepEqual(linhas("PAINEL_PORTA_NO_HOST"), ["PAINEL_PORTA_NO_HOST=8081"]);
+  assert.deepEqual(linhas("EMISSOR_RAIZES"), [`EMISSOR_RAIZES='[{"rid":"raiz-teste","publicKey":"${"A".repeat(43)}"}]'`]);
+  // O Painel, a conta de envio, as chaves anteriores e os links: o que o deploy decidiu, a cada rodada, nunca o exemplo.
+  assert.deepEqual(linhas("PAINEL_ENDERECO"), ["PAINEL_ENDERECO='https://licencas.bunker707.com.br'"]);
+  assert.deepEqual(linhas("PAINEL_ACCESS_EQUIPE"), ["PAINEL_ACCESS_EQUIPE='bunker707.cloudflareaccess.com'"]);
+  assert.deepEqual(linhas("PAINEL_ACCESS_AUD"), [`PAINEL_ACCESS_AUD='${AUD}'`]);
+  assert.deepEqual(linhas("PAINEL_TETO_DIARIO"), ["PAINEL_TETO_DIARIO='10'"], "a linha repetida sai e vale o valor do deploy");
+  assert.deepEqual(linhas("EMISSOR_EMAIL_PRODUTOR"), ["EMISSOR_EMAIL_PRODUTOR='produtor@exemplo.com.br'"]);
+  assert.deepEqual(linhas("EMISSOR_EMAIL_REMETENTE"), ["EMISSOR_EMAIL_REMETENTE='Emissor Bunker707 <emissor@mail.bunker707.com.br>'"]);
+  assert.deepEqual(linhas("EMISSOR_KIDS_ANTERIORES"), ["EMISSOR_KIDS_ANTERIORES='emissao-2026-11'"]);
+  assert.deepEqual(linhas("EMISSOR_LINK_RENOVAR"), ["EMISSOR_LINK_RENOVAR='https://membros.bunker707.com.br/minhas-licencas/{licenca}/renovar'"]);
+  assert.deepEqual(linhas("EMISSOR_LINK_LOJA"), ["EMISSOR_LINK_LOJA="], "o link que o deploy nao manda fica vazio");
+  // As duas portas: so o Caddy, pelo gateway da rede borda, e o X-Forwarded-For com o IP que ele escreve.
+  assert.deepEqual(linhas("EMISSOR_PROXIES_CONFIAVEIS"), ["EMISSOR_PROXIES_CONFIAVEIS='172.30.70.1'"]);
+  assert.deepEqual(linhas("PAINEL_PROXIES_CONFIAVEIS"), ["PAINEL_PROXIES_CONFIAVEIS='172.30.70.1'"], "as faixas da Cloudflare saem da lista do Painel");
+  assert.deepEqual(linhas("EMISSOR_CABECALHO_IP"), ["EMISSOR_CABECALHO_IP='x-forwarded-for'"]);
+  assert.deepEqual(linhas("PAINEL_CABECALHO_IP"), ["PAINEL_CABECALHO_IP='x-forwarded-for'"]);
   assert.equal(statSync(join(s.emissor, ".env")).mode & 0o777, 0o600);
   assert.match(readFileSync(join(s.emissor, ".imagem"), "utf8"), /^ghcr\.io\/danilosouza-dev\/bunker-licensing@sha256:a{64}\n$/);
+  assert.match(result.stdout, /Painel: ligado em https:\/\/licencas\.bunker707\.com\.br \(Access de bunker707\.cloudflareaccess\.com; teto de 10/);
+  assert.match(result.stdout, /chaves anteriores aceitas na readocao: emissao-2026-11/);
+  assert.match(result.stdout, /proxies confiaveis da API e do Painel: 172\.30\.70\.1/);
+  assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo|re_chave/, "nem o e-mail do produtor nem a chave do Resend vao para o log");
   assert.match(result.stdout, /\/health ok na porta local 8080/);
   assert.ok(s.calls().some((c) => c.tool === "curl" && c.args.includes("http://127.0.0.1:8080/health")));
 });
 
-test("implantar recusa raizes fora do formato, segredos que faltam e um Emissor sem saude, sem trocar o que esta no ar", { skip }, () => {
-  const imagem = "--imagem=ghcr.io/danilosouza-dev/bunker-licensing:main";
-  const raizes = `--raizes-b64=${Buffer.from(JSON.stringify([{ rid: "raiz-teste", publicKey: "A".repeat(43) }])).toString("base64")}`;
-  const ruins = servidor({ implantado: false });
-  const recusa = ruins.run("implantar.sh", [imagem, `--raizes-b64=${Buffer.from('[{"rid":"x","publicKey":"curta"}]').toString("base64")}`]);
-  assert.equal(recusa.status, 1);
-  assert.match(recusa.stderr, /LICENCAS_RAIZES precisa ser a lista JSON de 1 a 4 raizes/);
-  assert.equal(docker(ruins.calls(), "compose", "up"), -1);
+test("implantar sem o Painel (LICENCAS_SEM_PAINEL=sim no deploy): a chave do Resend vazia serve, o Painel e o e-mail ficam vazios, o exemplo nunca entra e os proxies seguem o gateway da rede borda", { skip }, () => {
+  const s = servidor({ implantado: false, resend: "" });
+  writeFileSync(join(s.emissor, ".env"), "EMISSOR_GATEWAY_BORDA=172.30.71.1\nEMISSOR_REDE_BORDA=172.30.71.0/24\n");
+  const exemplo = ENV_EXAMPLE + "# Uma variavel que um .env.example futuro traga so com o exemplo.\nEMISSOR_NOVA=<um exemplo>\n";
+  const result = s.run("implantar.sh", [IMAGEM, RAIZES_ARG, configArg(SEM_PAINEL)], { SHIM_ENV_EXAMPLE: exemplo });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const env = readFileSync(join(s.emissor, ".env"), "utf8");
+  for (const nome of ["PAINEL_ENDERECO", "PAINEL_ACCESS_EQUIPE", "PAINEL_ACCESS_AUD", "EMISSOR_EMAIL_PRODUTOR", "EMISSOR_EMAIL_REMETENTE", "EMISSOR_NOVA"]) {
+    assert.deepEqual(env.match(new RegExp(`^${nome}=.*$`, "gm")), [`${nome}=`], `${nome} vazia`);
+  }
+  assert.doesNotMatch(env, /<[^>\n]*>/, "nenhum exemplo do .env.example no .env");
+  assert.match(env, /^EMISSOR_PROXIES_CONFIAVEIS='172\.30\.71\.1'$/m);
+  assert.match(env, /^PAINEL_PROXIES_CONFIAVEIS='172\.30\.71\.1'$/m);
+  assert.match(result.stdout, /Painel: desligado \(LICENCAS_SEM_PAINEL=sim\)/);
+  assert.match(result.stdout, /entraram vazias, so com o exemplo: EMISSOR_NOVA\)/);
+});
 
+test("implantar recusa raizes e configuracao fora do formato, o Painel pela metade, segredos que faltam (com o Painel, a chave do Resend) e um Emissor sem saude, sem trocar o que esta no ar", { skip }, () => {
+  const nadaMudou = (s, envAntes) => {
+    assert.equal(docker(s.calls(), "compose", "up"), -1, "nada sobe");
+    if (envAntes !== undefined) assert.equal(readFileSync(join(s.emissor, ".env"), "utf8"), envAntes, "o .env fica como estava");
+  };
+  const antes = (s) => readFileSync(join(s.emissor, ".env"), "utf8");
+  const recusa = (s, args, mensagem, extra) => {
+    const envAntes = antes(s);
+    const r = s.run("implantar.sh", args, extra);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, mensagem);
+    nadaMudou(s, envAntes);
+    return r;
+  };
+
+  // Formato: conferido antes de qualquer pull, sem tocar no compose nem no .env.
+  const ruins = servidor();
+  recusa(ruins, [IMAGEM, `--raizes-b64=${b64('[{"rid":"x","publicKey":"curta"}]')}`, configArg()], /LICENCAS_RAIZES precisa ser a lista JSON de 1 a 4 raizes/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG], /--config-b64 vazio/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG, "--config-b64=nao-e-base64!"], /--config-b64 nao e o JSON em base64/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, OUTRA: "x" })], /--config-b64 fora do formato/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, EMISSOR_EMAIL_REMETENTE: "Emissor' ; rm -rf / '" })], /--config-b64 fora do formato/);
+  recusa(ruins, [IMAGEM, RAIZES_ARG, configArg({ ...CONFIG_PAINEL, PAINEL_ACCESS_AUD: "" })], /o Painel precisa de PAINEL_ENDERECO, PAINEL_ACCESS_EQUIPE, PAINEL_ACCESS_AUD, EMISSOR_EMAIL_PRODUTOR e EMISSOR_EMAIL_REMETENTE juntos/);
+  assert.equal(docker(ruins.calls(), "pull"), -1, "nada foi puxado");
+  assert.equal(readFileSync(join(ruins.emissor, "compose.yaml"), "utf8"), "name: bunker-licensing\n", "o compose no ar fica");
+
+  // Segredos: os quatro do Emissor sempre; a chave do Resend com conteudo so com o Painel, e o arquivo sempre.
   const semSegredos = servidor({ implantado: false, segredos: false });
-  const falta = semSegredos.run("implantar.sh", [imagem, raizes]);
-  assert.equal(falta.status, 1);
-  assert.match(falta.stderr, /Falta segredos\/postgres-senha no servidor: rode a etapa secrets-licencas/);
-  assert.equal(docker(semSegredos.calls(), "compose", "up"), -1);
+  writeFileSync(join(semSegredos.emissor, ".env"), "");
+  recusa(semSegredos, [IMAGEM, RAIZES_ARG, configArg()], /Falta segredos\/postgres-senha no servidor: rode a etapa secrets-licencas/);
+  const semResend = servidor({ resend: "" });
+  const falta = recusa(semResend, [IMAGEM, RAIZES_ARG, configArg()], /Falta a chave do Resend em segredos\/resend-chave: com o Painel, .*LICENCAS_RESEND_CHAVE .* LICENCAS_SEM_PAINEL=sim/);
+  assert.equal(docker(semResend.calls(), "pull"), -1);
+  assert.doesNotMatch(falta.stdout + falta.stderr, /produtor@exemplo/);
+  recusa(servidor({ resend: null }), [IMAGEM, RAIZES_ARG, configArg(SEM_PAINEL)], /Falta segredos\/resend-chave no servidor \(o compose do Emissor monta o arquivo mesmo sem o Painel; vazio serve\)/);
+
+  // O gateway da rede borda que nao e IP: o .env nao muda e nada sobe.
+  const gatewayRuim = servidor();
+  writeFileSync(join(gatewayRuim.emissor, ".env"), "EMISSOR_GATEWAY_BORDA=gateway-da-borda\n");
+  recusa(gatewayRuim, [IMAGEM, RAIZES_ARG, configArg()], /EMISSOR_GATEWAY_BORDA no \.env do Emissor nao e um IP \(veio gateway-da-borda\)/);
 
   const doente = servidor({ implantado: false });
-  const semSaude = doente.run("implantar.sh", [imagem, raizes], { SHIM_SAUDE: '{"ok":false}', SAUDE_TENTATIVAS: "2" });
+  const semSaude = doente.run("implantar.sh", [IMAGEM, RAIZES_ARG, configArg()], { SHIM_SAUDE: '{"ok":false}', SAUDE_TENTATIVAS: "2" });
   assert.equal(semSaude.status, 1);
   assert.match(semSaude.stderr, /O Emissor nao respondeu \{"ok":true\}/);
 
   const semImagem = servidor({ implantado: false });
-  const ghcr = semImagem.run("implantar.sh", [imagem, raizes], { SHIM_PULL_FALHA: "-implantacao" });
+  const ghcr = semImagem.run("implantar.sh", [IMAGEM, RAIZES_ARG, configArg()], { SHIM_PULL_FALHA: "-implantacao" });
   assert.equal(ghcr.status, 1);
   assert.match(ghcr.stderr, /Nao consegui puxar .*-implantacao\. Confira: o CI do bunker-licensing publica .*Manage Actions access/);
-  assert.match(servidor().run("implantar.sh", ["--imagem=ghcr.io/x/y@sha256:abc", raizes]).stderr, /--imagem precisa ser <repositorio>:<tag>/);
+  assert.match(servidor().run("implantar.sh", ["--imagem=ghcr.io/x/y@sha256:abc", RAIZES_ARG, configArg()]).stderr, /--imagem precisa ser <repositorio>:<tag>/);
 });
 
 test("smoke: banco e Emissor saudaveis e /health ok passam; backup velho vira aviso; Emissor sem saude falha", { skip }, () => {
