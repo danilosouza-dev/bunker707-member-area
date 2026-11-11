@@ -4,10 +4,10 @@
 # deste diretorio).
 #
 # O Caddy roda na rede do servidor (network_mode: host) para chegar nas portas que o compose do Emissor publica so em
-# 127.0.0.1 (EMISSOR_PORTA_NO_HOST e PAINEL_PORTA_NO_HOST, lidas do .env do Emissor pelo deploy-licencas). Por esse
-# caminho o Emissor ve a conexao vindo do gateway da rede `borda` dele (172.30.70.1), o unico proxy confiavel das duas
-# portas (EMISSOR_PROXIES_CONFIAVEIS e PAINEL_PROXIES_CONFIAVEIS, que o deploy escreve), e le o IP de quem pediu no
-# X-Forwarded-For que este Caddy escreve (caddy/Caddyfile).
+# 127.0.0.1 (EMISSOR_PORTA_NO_HOST, PAINEL_PORTA_NO_HOST e INTERNO_PORTA_NO_HOST, lidas do .env do Emissor pelo
+# deploy-licencas). Por esse caminho o Emissor ve a conexao vindo do gateway da rede `borda` dele (172.30.70.1), o unico
+# proxy confiavel das tres portas (EMISSOR_PROXIES_CONFIAVEIS, PAINEL_PROXIES_CONFIAVEIS e INTERNO_PROXIES_CONFIAVEIS, que
+# o deploy escreve), e le o IP de quem pediu no X-Forwarded-For que este Caddy escreve (caddy/Caddyfile).
 #
 # As variaveis vem de infra/licencas/.env no servidor, escrito pelo deploy-licencas (.env.example lista todas).
 name: bunker707-licencas-borda
@@ -21,8 +21,13 @@ services:
     environment:
       LICENCAS_API_SITE_ADDRESS: ${LICENCAS_API_DOMAIN:?LICENCAS_API_DOMAIN vazio no infra/licencas/.env}
       LICENCAS_PAINEL_SITE_ADDRESS: ${LICENCAS_PAINEL_DOMAIN:?LICENCAS_PAINEL_DOMAIN vazio no infra/licencas/.env}
+      LICENCAS_INTERNO_SITE_ADDRESS: ${LICENCAS_INTERNO_DOMAIN:?LICENCAS_INTERNO_DOMAIN vazio no infra/licencas/.env (rode deploy-licencas)}
       EMISSOR_PORTA_NO_HOST: ${EMISSOR_PORTA_NO_HOST:-8080}
       PAINEL_PORTA_NO_HOST: ${PAINEL_PORTA_NO_HOST:-8081}
+      INTERNO_PORTA_NO_HOST: ${INTERNO_PORTA_NO_HOST:-8082}
+      # Quem chega na API interna: o IPv4 do servidor da nossa escola (deploy-licencas e conectar-licencas); sem ele,
+      # ninguem de fora.
+      LICENCAS_INTERNO_IPS: ${LICENCAS_INTERNO_IPS:-127.0.0.1/32}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL vazio no infra/licencas/.env}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro

@@ -15,9 +15,12 @@
 #      Painel, a conta de envio, as chaves anteriores e os links (--config-b64: PAINEL_ENDERECO, PAINEL_TETO_DIARIO,
 #      EMISSOR_EMAIL_PRODUTOR, EMISSOR_EMAIL_REMETENTE, EMISSOR_KIDS_ANTERIORES, EMISSOR_LINK_RENOVAR e
 #      EMISSOR_LINK_LOJA; com o endereco e os dois e-mails vazios, o Emissor sobe sem o Painel); o Cloudflare Access de
-#      antes sempre vazio (PAINEL_ACCESS_EQUIPE e PAINEL_ACCESS_AUD: o Painel entra com e-mail e senha, docs/32 D40); e
-#      os proxies confiaveis das duas portas, iguais ao caminho do Caddy (caddy/Caddyfile): so o gateway da rede borda
-#      (EMISSOR_GATEWAY_BORDA, por onde o Caddy chega) e o X-Forwarded-For, em que o Caddy escreve um IP so;
+#      antes sempre vazio (PAINEL_ACCESS_EQUIPE e PAINEL_ACCESS_AUD: o Painel entra com e-mail e senha, docs/32 D40); os
+#      proxies confiaveis das tres portas (a API, o Painel e a API interna), iguais ao caminho do Caddy (caddy/Caddyfile):
+#      so o gateway da rede borda (EMISSOR_GATEWAY_BORDA, por onde o Caddy chega) e o X-Forwarded-For, em que o Caddy
+#      escreve um IP so; e a porta da API interna no servidor (INTERNO_PORTA_NO_HOST, a que ja estava ou 8082). O resumo
+#      da credencial da API interna (INTERNO_CREDENCIAL_HASH, do conectar-licencas) fica como esta: o deploy nunca o
+#      troca nem o apaga, e com ele o Emissor precisa da conta de envio (sem o Painel, o deploy para antes de tudo);
 #   3. a imagem do Emissor e puxada e ganha o nome local que o compose dele usa nos servicos com build (hoje
 #      bunker-licensing-emissor:local): nada e construido no servidor;
 #   4. o Postgres sobe, as migracoes rodam (o servico migrar: `npm run migrate` no container) e o resto sobe;
@@ -74,6 +77,12 @@ print("sim" if all(painel) else "nao")
 PY
 )
 
+# A API interna, quando o conectar-licencas ja a ligou (INTERNO_CREDENCIAL_HASH no .env), pede a conta de envio do Emissor
+# (o aviso da troca de Chave e da venda parada ao produtor): sem o Painel e sem e-mail, o Emissor nao subiria.
+if [ "$painel" = nao ] && [ -n "$(ENV_FILE="$LICENCAS_EMISSOR_DIR/.env" env_value INTERNO_CREDENCIAL_HASH "")" ]; then
+    die "A API interna da nossa escola esta ligada neste Emissor (INTERNO_CREDENCIAL_HASH, do conectar-licencas) e precisa da conta de envio: sem o Painel (LICENCAS_SEM_PAINEL=sim) o Emissor nao subiria. Rode o deploy-licencas sem LICENCAS_SEM_PAINEL=sim."
+fi
+
 # Os segredos antes de tudo: sem eles nada muda (nem o compose, nem o .env, nem a imagem).
 for f in postgres-senha emissao.pem emissao-senha emissao-certificado.json; do
     [ -s "segredos/$f" ] || die "Falta segredos/$f no servidor: rode a etapa secrets-licencas antes do deploy-licencas."
@@ -114,7 +123,7 @@ while lines and lines[-1] == "":
     lines.pop()
 present = {m.group(1) for m in map(line_key.match, lines) if m}
 GERIDAS_AQUI = ["EMISSOR_RAIZES", "EMISSOR_PROXIES_CONFIAVEIS", "EMISSOR_CABECALHO_IP", "PAINEL_PROXIES_CONFIAVEIS", "PAINEL_CABECALHO_IP",
-                "PAINEL_ACCESS_EQUIPE", "PAINEL_ACCESS_AUD"]
+                "PAINEL_ACCESS_EQUIPE", "PAINEL_ACCESS_AUD", "INTERNO_PROXIES_CONFIAVEIS", "INTERNO_CABECALHO_IP", "INTERNO_PORTA_NO_HOST"]
 geridas = set(config) | set(GERIDAS_AQUI)
 added, vazias = [], []
 for line in open(example_path, encoding="utf-8").read().split("\n"):
@@ -138,22 +147,32 @@ def atual(key):
             return re.sub(r"\s+#.*$", "", text)
     return ""
 
-# As duas portas recebem do Caddy (caddy/Caddyfile), que chega pelo gateway da rede borda do compose do Emissor e escreve
-# um IP so no X-Forwarded-For: na API, o da conexao; no Painel, o que a Cloudflare repassa, aceito so das faixas dela.
-# Por isso nenhuma das duas listas leva as faixas da Cloudflare.
+# As tres portas recebem do Caddy (caddy/Caddyfile), que chega pelo gateway da rede borda do compose do Emissor e escreve
+# um IP so no X-Forwarded-For: na API e na API interna, o da conexao; no Painel, o que a Cloudflare repassa, aceito so das
+# faixas dela. Por isso nenhuma das listas leva as faixas da Cloudflare.
 gateway = atual("EMISSOR_GATEWAY_BORDA") or "172.30.70.1"
 try:
     ipaddress.ip_address(gateway)
 except ValueError:
     sys.exit(f"ERRO: EMISSOR_GATEWAY_BORDA no .env do Emissor nao e um IP (veio {gateway}): e o gateway da rede borda, por onde o Caddy chega ao Emissor.")
+# A porta da API interna no servidor (o compose do Emissor publica 127.0.0.1:INTERNO_PORTA_NO_HOST): a que ja estava, ou
+# a padrao; nunca a mesma da API publica nem a do Painel (o Caddy levaria a API interna para outra porta).
+porta_interno = atual("INTERNO_PORTA_NO_HOST") or "8082"
+outras = {atual("EMISSOR_PORTA_NO_HOST") or "8080", atual("PAINEL_PORTA_NO_HOST") or "8081"}
+if not re.fullmatch(r"[1-9][0-9]{0,4}", porta_interno) or int(porta_interno) > 65535 or porta_interno in outras:
+    sys.exit(f"ERRO: INTERNO_PORTA_NO_HOST no .env do Emissor precisa ser uma porta de 1 a 65535, diferente das da API e do Painel ({', '.join(sorted(outras))}) (veio {porta_interno}).")
 valores = {"EMISSOR_RAIZES": json.dumps([{"rid": r["rid"], "publicKey": r["publicKey"]} for r in raizes], separators=(",", ":"))}
 valores.update(config)
 valores.update({"EMISSOR_PROXIES_CONFIAVEIS": gateway, "EMISSOR_CABECALHO_IP": "x-forwarded-for",
                 "PAINEL_PROXIES_CONFIAVEIS": gateway, "PAINEL_CABECALHO_IP": "x-forwarded-for",
+                # A API interna da nossa escola: o mesmo caminho (o Caddy pelo gateway, um IP so no X-Forwarded-For).
+                "INTERNO_PROXIES_CONFIAVEIS": gateway, "INTERNO_CABECALHO_IP": "x-forwarded-for",
+                "INTERNO_PORTA_NO_HOST": porta_interno,
                 # O Cloudflare Access de antes, sempre vazio: o Painel entra com e-mail e senha (docs/32 D40), e um valor
                 # que ficou no .env de um deploy antigo nao liga o Access de novo num Emissor que ainda o leia.
                 "PAINEL_ACCESS_EQUIPE": "", "PAINEL_ACCESS_AUD": ""})
-linha = lambda key: f"{key}='{valores[key]}'" if valores[key] else f"{key}="
+# A porta vai sem aspas, como as outras portas do .env (o deploy-licencas a le de volta para o Caddy).
+linha = lambda key: f"{key}={valores[key]}" if key == "INTERNO_PORTA_NO_HOST" else (f"{key}='{valores[key]}'" if valores[key] else f"{key}=")
 saida, vistas = [], set()
 for line in lines:
     m = line_key.match(line)
@@ -178,7 +197,11 @@ else:
 print("  chaves anteriores aceitas na readocao: " + (config["EMISSOR_KIDS_ANTERIORES"] or "nenhuma (so a atual)"))
 links = [nome for nome, key in (("Renovar", "EMISSOR_LINK_RENOVAR"), ("loja", "EMISSOR_LINK_LOJA")) if config[key]]
 print("  enderecos na licenca: " + (" e ".join(links) if links else "nenhum (sem Renovar nem loja)"))
-print(f"  proxies confiaveis da API e do Painel: {gateway}, o gateway da rede borda (o Caddy), com o X-Forwarded-For")
+print(f"  proxies confiaveis da API, do Painel e da API interna: {gateway}, o gateway da rede borda (o Caddy), com o X-Forwarded-For")
+resumos = [h for h in atual("INTERNO_CREDENCIAL_HASH").split(",") if h.strip()]
+print(f"  API interna da nossa escola: porta local {porta_interno}; "
+      + (f"ligada, com {len(resumos)} credencial(is) aceita(s) (o resumo fica como estava; o conectar-licencas troca)" if resumos
+         else "desligada ate o conectar-licencas (INTERNO_CREDENCIAL_HASH vazio)"))
 PY
 
 log "3/5 Imagem do Emissor ($imagem)"

@@ -25,6 +25,7 @@ const LICENCAS = "bunker707-licencas";
 const IP = "192.0.2.7";
 const PAINEL = "licencas.bunker707.com.br";
 const API = "licencas-api.bunker707.com.br";
+const INTERNO = "licencas-interno.bunker707.com.br";
 
 // ---- a cerimonia das chaves, de mentira (a de verdade e o bin/chaves.ts do bunker-licensing) ----------------------
 const CERT_CONTEXT = "bunker-licensing/certificate/v1\n";
@@ -157,7 +158,7 @@ test("provision-licencas para antes de criar quando o preco passou do aprovado, 
   assert.deepEqual(sem.hz().servers.map((s) => [s.server_type.name, s.location.name]), [["cax11", "hel1"]]);
 });
 
-test("dns-licencas: so registros A, o Painel com proxy e a API sem; AAAA que existir sai, e o resto da zona fica", { skip }, () => {
+test("dns-licencas: so registros A, o Painel com proxy e a API e a API interna sem; AAAA que existir sai, e o resto da zona fica", { skip }, () => {
   const conta = setup({
     servers: [servidorLicencas()],
     firewalls: firewallLicencas(),
@@ -165,6 +166,7 @@ test("dns-licencas: so registros A, o Painel com proxy e a API sem; AAAA que exi
       record(PAINEL, "AAAA", "2001:db8::1", true),
       record(API, "AAAA", "2001:db8::1", false),
       record(API, "A", "203.0.113.99", true),
+      record(INTERNO, "AAAA", "2001:db8::1", false),
       record("membros.bunker707.com.br", "AAAA", "2001:db8:a1::1", true)
     ]
   });
@@ -174,11 +176,13 @@ test("dns-licencas: so registros A, o Painel com proxy e a API sem; AAAA que exi
   const de = (name) => records.filter((r) => r.name === name).map((r) => [r.type, r.content, r.proxied]);
   assert.deepEqual(de(PAINEL), [["A", IP, true]]);
   assert.deepEqual(de(API), [["A", IP, false]], "a API sem proxy: nenhum desafio de robos, so IPv4");
+  assert.deepEqual(de(INTERNO), [["A", IP, false]], "a API interna sem proxy: o Caddy do Emissor confere o IP da propria conexao");
   assert.deepEqual(de("membros.bunker707.com.br"), [["AAAA", "2001:db8:a1::1", true]], "os outros nomes nao mudam");
   assert.ok(!conta.calls().some((c) => c.tool === "curl" && c.method === "POST" && JSON.parse(c.data ?? "{}").type === "AAAA"), "nunca cria AAAA");
   assert.deepEqual(conta.cf().settings, { ssl: "strict", always_use_https: "off" });
   assert.match(result.stdout, /com o proxy da Cloudflare; o login e o de e-mail e senha do proprio Painel \(D40\)/);
   assert.doesNotMatch(result.stdout, /Access/, "o Painel nao pede o Cloudflare Access (D40)");
+  assert.match(result.stdout, /licencas-interno\.bunker707\.com\.br -> 192\.0\.2\.7 sem proxy: a API interna, que o Caddy do Emissor so abre para o IPv4 do servidor da nossa escola/);
 
   const semServidor = setup({});
   const recusa = semServidor.runScript("licencas.sh", {}, ["dns"]);
@@ -458,7 +462,7 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
     servers: [servidorLicencas()],
     firewalls: firewallLicencas(),
     storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
-    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)]
   });
   const TOKEN = "ghs_token_efemero_do_job_0001";
   const result = conta.runScript("licencas.sh", {
@@ -517,6 +521,13 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.equal(gravados.LICENCAS_PAINEL_DOMAIN, PAINEL);
   assert.equal(gravados.EMISSOR_PORTA_NO_HOST, "8080");
   assert.equal(gravados.PAINEL_PORTA_NO_HOST, "8081");
+  // A API interna: o endereco, a porta local do compose do Emissor e quem chega. Sem o servidor da escola (a producao
+  // guardada em snapshot), ninguem de fora.
+  assert.equal(gravados.LICENCAS_INTERNO_DOMAIN, INTERNO);
+  assert.equal(gravados.INTERNO_PORTA_NO_HOST, "8082", "o padrao do compose do Emissor quando o .env dele nao diz");
+  assert.equal(gravados.LICENCAS_INTERNO_IPS, "127.0.0.1/32");
+  assert.match(result.stdout, /API interna -> 127\.0\.0\.1:8082, fechada para todos: o servidor da escola \(bunker707-membros\) nao existe agora/);
+  assert.ok(at("python3 -I - '/opt/bunker707/infra/licencas/.env' 'LICENCAS_INTERNO_IPS'") < caddy, "a lista do Caddy e escrita antes de ele subir");
   assert.equal(gravados.LICENCAS_PAINEL_IPS, undefined, "o Painel nao tem lista de IPs (D40)");
   assert.equal(gravados.RESTIC_REPOSITORY, "sftp:storagebox:bunker707/restic-licencas");
   assert.equal(gravados.STORAGE_BOX_USER, "u100");
@@ -529,9 +540,37 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.match(result.stderr, /ainda nao respondeu \{"ok":true\} de fora/, "sem o nome no ar, so o aviso");
 });
 
+test("deploy-licencas com a escola no ar: o Caddy do endereco interno abre so para o IPv4 dela, lido da API da Hetzner, e a porta e a do .env do Emissor", { skip }, () => {
+  const conta = setup({
+    servers: [servidorLicencas(), serverFixture("bunker707-membros", "membros", 1)],
+    firewalls: firewallLicencas(),
+    storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)]
+  });
+  const result = conta.runScript("licencas.sh", {
+    ...PAINEL_ENV,
+    GITHUB_TOKEN: "ghs_x",
+    LICENCAS_RAIZES: RAIZES,
+    PUBLICO_TENTATIVAS: "1",
+    SSH_SHIM_ENV: JSON.stringify({ INTERNO_PORTA_NO_HOST: "'8092'" })
+  }, ["deploy"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const gravados = Object.fromEntries(sshCmds(conta.calls()).filter((c) => c.command.startsWith("python3 -I - '/opt/bunker707/infra/licencas/.env'")).map((c) => {
+    const [, chave, b64] = c.command.match(/'\/opt\/bunker707\/infra\/licencas\/\.env' '([A-Z_]+)' '([^']*)'/);
+    return [chave, Buffer.from(b64, "base64").toString()];
+  }));
+  assert.equal(gravados.LICENCAS_INTERNO_IPS, "192.0.2.1/32", "o IPv4 do bunker707-membros, /32; nunca o IPv6");
+  assert.equal(gravados.INTERNO_PORTA_NO_HOST, "8092", "a porta do .env do Emissor, sem as aspas");
+  assert.match(result.stdout, /API interna -> 127\.0\.0\.1:8092, so do servidor da escola \(bunker707-membros, 192\.0\.2\.1\/32\) e so \/interno\/v1\/\*/);
+  // O deploy so le o servidor da escola: nada muda nele, e a 22 dele nunca abre.
+  assert.ok(!conta.calls().some((c) => c.tool === "ssh" && String(c.target).includes("192.0.2.1")), "nenhum SSH no servidor da escola");
+  assert.ok(!conta.calls().some((c) => c.tool === "hcloud" && c.args.join(" ").includes("bunker707-membros-fw")));
+  assert.match(result.stdout, /conectar-licencas com CONFIRMAR=conectar: a API interna em https:\/\/licencas-interno\.bunker707\.com\.br/);
+});
+
 test("a conta do produtor no Painel (conta-do-produtor.sh): so quando nao existe; o link so por e-mail, conferido na fila; so com LICENCAS_MOSTRAR_LINK=sim e o e-mail falhando ele aparece", { skip }, () => {
   // As opcoes do deploy viram as do script.
-  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)] });
+  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)] });
   const deploy = conta.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1", LICENCAS_NOVO_LINK: "sim", LICENCAS_MOSTRAR_LINK: "sim" }, ["deploy"]);
   assert.equal(deploy.status, 0, deploy.stdout + deploy.stderr);
   assert.ok(sshCmds(conta.calls()).some((c) => c.command.endsWith("conta-do-produtor.sh --novo-link --mostrar-link-se-falhar")));
@@ -596,7 +635,7 @@ test("a conta do produtor no Painel (conta-do-produtor.sh): so quando nao existe
 
 test("deploy-licencas para antes do SSH sem o DNS certo ou sem as raizes", { skip }, () => {
   const base = { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
-  const comAAAA = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u", server: "h" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(API, "AAAA", "2001:db8::1", false)] });
+  const comAAAA = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u", server: "h" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false), record(API, "AAAA", "2001:db8::1", false)] });
   const aaaa = comAAAA.runScript("licencas.sh", base, ["deploy"]);
   assert.equal(aaaa.status, 1);
   assert.match(aaaa.stderr, /DNS do Emissor fora do lugar: licencas-api\.bunker707\.com\.br .*Rode dns-licencas antes do deploy-licencas/);
@@ -604,6 +643,15 @@ test("deploy-licencas para antes do SSH sem o DNS certo ou sem as raizes", { ski
 
   const comProxy = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), records: [record(PAINEL, "A", IP, true), record(API, "A", IP, true)] });
   assert.match(comProxy.runScript("licencas.sh", base, ["deploy"]).stderr, /esperado: A 192\.0\.2\.7 proxy=false; achado: A 192\.0\.2\.7 proxy=true/);
+
+  // O endereco da API interna: sem o registro (o dns-licencas de antes desta mudanca) ou atras do proxy, o deploy para.
+  const semInterno = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)] });
+  const falta = semInterno.runScript("licencas.sh", base, ["deploy"]);
+  assert.equal(falta.status, 1);
+  assert.match(falta.stderr, /DNS do Emissor fora do lugar: licencas-interno\.bunker707\.com\.br \(esperado: A 192\.0\.2\.7 proxy=false; achado: nada\)\. Rode dns-licencas/);
+  assert.equal(sshCmds(semInterno.calls()).length, 0);
+  const internoComProxy = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, true)] });
+  assert.match(internoComProxy.runScript("licencas.sh", base, ["deploy"]).stderr, /licencas-interno\.bunker707\.com\.br \(esperado: A 192\.0\.2\.7 proxy=false; achado: A 192\.0\.2\.7 proxy=true\)/);
 
   const semRaizes = setup({ servers: [servidorLicencas()] }).runScript("licencas.sh", { GITHUB_TOKEN: "ghs_x" }, ["deploy"]);
   assert.match(semRaizes.stderr, /Sem as raizes publicas: rode a cerimonia-licencas e grave em infra\/licencas\/raizes\.json/);
@@ -633,7 +681,7 @@ test("deploy-licencas com a configuracao do Painel fora do formato para antes de
     servers: [servidorLicencas()],
     firewalls: firewallLicencas(),
     storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
-    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)]
   });
   const link = "https://membros.bunker707.com.br/minhas-licencas/{licenca}/renovar";
   const result = conta.runScript("licencas.sh", { ...base, LICENCAS_SEM_PAINEL: "sim", LICENCAS_EMISSOR_KIDS_ANTERIORES: "emissao-2026-11, emissao-2025-10", LICENCAS_EMISSOR_LINK_RENOVAR: link, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
@@ -659,7 +707,7 @@ test("deploy-licencas com a configuracao do Painel fora do formato para antes de
     servers: [servidorLicencas()],
     firewalls: firewallLicencas(),
     storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
-    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)]
   });
   const comPadrao = padrao.runScript("licencas.sh", { ...base, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
   assert.equal(comPadrao.status, 0, comPadrao.stdout + comPadrao.stderr);
@@ -736,6 +784,15 @@ test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexa
   assert.doesNotMatch(painel, /client_ip \{|LICENCAS_PAINEL_IPS|respond 403|header Cf-Access/, "sem lista de IPs e sem exigir o Access (D40)");
   assert.doesNotMatch(caddyfile, /LICENCAS_PAINEL_IPS/);
 
+  // A API interna da nossa escola: so do IP da conexao do servidor da escola (remote_ip, nunca client_ip, que leria um
+  // cabecalho), so /interno/v1/*, um IP so no X-Forwarded-For; o resto, 403 sem chegar ao Emissor.
+  const interno = site("LICENCAS_INTERNO_SITE_ADDRESS");
+  assert.match(interno, /@escola \{\n\t\tremote_ip \{\$LICENCAS_INTERNO_IPS\}\n\t\tpath \/interno\/v1\/\*\n\t\}/);
+  assert.match(interno, /handle @escola \{[\s\S]*max_size 32KB[\s\S]*reverse_proxy 127\.0\.0\.1:\{\$INTERNO_PORTA_NO_HOST\} \{\n\t\t\t# .*\n\t\t\theader_up X-Forwarded-For \{remote_host\}/);
+  assert.match(interno, /\thandle \{\n\t\trespond 403\n\t\}$/, "outro IP ou outro caminho: 403");
+  assert.doesNotMatch(interno, /client_ip|PAINEL_PORTA_NO_HOST|EMISSOR_PORTA_NO_HOST/);
+  assert.equal((caddyfile.match(/INTERNO_PORTA_NO_HOST/g) ?? []).length, 2, "a porta interna so no site dela (e no comentario do topo)");
+
   // O compose: Caddy fixado na mesma versao dos outros servidores, na rede do servidor, com as portas pelos nomes do
   // .env.example do bunker-licensing (EMISSOR_PORTA_NO_HOST) e o do Painel (PAINEL_PORTA_NO_HOST, ainda a confirmar).
   assert.match(caddyCompose, /^    image: caddy:2\.11\.7-alpine$/m);
@@ -745,6 +802,9 @@ test("Caddy do servidor de licencas: a API so com /v1 e /health e o IP da conexa
   assert.match(caddyCompose, /EMISSOR_PORTA_NO_HOST: \$\{EMISSOR_PORTA_NO_HOST:-8080\}/);
   assert.match(caddyCompose, /PAINEL_PORTA_NO_HOST: \$\{PAINEL_PORTA_NO_HOST:-8081\}/);
   assert.doesNotMatch(caddyCompose, /LICENCAS_PAINEL_IPS/, "o Painel nao tem lista de IPs (D40)");
+  assert.match(caddyCompose, /LICENCAS_INTERNO_SITE_ADDRESS: \$\{LICENCAS_INTERNO_DOMAIN:\?/);
+  assert.match(caddyCompose, /INTERNO_PORTA_NO_HOST: \$\{INTERNO_PORTA_NO_HOST:-8082\}/);
+  assert.match(caddyCompose, /LICENCAS_INTERNO_IPS: \$\{LICENCAS_INTERNO_IPS:-127\.0\.0\.1\/32\}/, "sem a lista, ninguem de fora");
 });
 
 test("lib.sh: os nomes do servidor de licencas sao variaveis com padrao, e a API fica fora do proxy da Cloudflare", () => {
@@ -770,13 +830,16 @@ test("infra/licencas/.env.example traz toda variavel que o Caddy e os scripts do
 });
 
 test("status-licencas so le: servidor, preco, DNS com aviso de AAAA e respostas publicas; sem SSH=1 nao abre a 22", { skip }, () => {
-  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(API, "AAAA", "2001:db8::1", false)] });
+  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(API, "AAAA", "2001:db8::1", false), record(INTERNO, "A", IP, false)] });
   const result = conta.runScript("licencas.sh", { GITHUB_ACTIONS: "true", GITHUB_REF: "refs/heads/dev" }, ["status"]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /bunker707-licencas: cx23 em fsn1, 192\.0\.2\.7, running/);
   assert.match(result.stdout, /preco: EUR 6\.4900\/mes sem IVA, mais o IPv4/);
   assert.match(result.stderr, /licencas-api\.bunker707\.com\.br tem AAAA: a conferencia inicial so funciona por IPv4/);
   assert.match(result.stdout, /https:\/\/licencas-api\.bunker707\.com\.br\/health\s+000 \(esperado 200\)/);
+  assert.match(result.stdout, /^ {2}licencas-interno\.bunker707\.com\.br A 192\.0\.2\.7 proxy=false$/m);
+  // De fora (o runner), a API interna fecha na borda: o status so pergunta, sem credencial nenhuma.
+  assert.match(result.stdout, /https:\/\/licencas-interno\.bunker707\.com\.br\/interno\/v1\/planos\s+000 \(esperado 403: so o servidor da escola entra\)/);
   const calls = conta.calls();
   assert.ok(!calls.some((c) => c.tool === "ssh"), "sem SSH=1, nenhum SSH");
   assert.ok(!calls.some((c) => c.tool === "hcloud" && /create|delete|replace-rules|apply/.test(c.args.join(" "))), "nada muda na Hetzner");

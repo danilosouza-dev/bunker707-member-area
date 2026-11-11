@@ -45,6 +45,28 @@ licencas_alvo() {  # define ip e target do servidor de licencas, ou para
     ip=$(server_ip4 "$LICENCAS_NAME"); target="$DEPLOY_USER@$ip"
 }
 remote() { rsh "$target" "cd '$REMOTE_DIR' && $*"; }
+# borda: o Caddy do servidor com o infra/licencas/.env de agora. A configuracao e conferida num container de uma vez antes
+# de valer; depois o Caddy sobe (ou e recriado, se o .env mudou) e recarrega o Caddyfile novo, com algumas tentativas
+# enquanto ele acaba de subir.
+borda() {
+    local caddy="docker compose -f infra/licencas/docker-compose.yml"
+    remote "$caddy pull --quiet && $caddy run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && $caddy up -d && for i in 1 2 3 4 5 6 7 8 9 10; do $caddy exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && break; [ \$i != 10 ] || exit 1; sleep 2; done"
+}
+# borda_interno IPS: a API interna no infra/licencas/.env, para o Caddy: o endereco dela, a porta local que o compose do
+# Emissor publica (INTERNO_PORTA_NO_HOST do .env dele, padrao 8082) e quem chega nela (IPS: o IPv4 de agora do servidor
+# da nossa escola, ou 127.0.0.1/32 sem a escola no ar; licencas_interno_ips, lido antes de abrir a 22).
+borda_interno() {
+    local porta
+    porta=$(get_env "$target" "$LICENCAS_EMISSOR_DIR/.env" INTERNO_PORTA_NO_HOST | tr -d "'\""); porta="${porta:-8082}"
+    set_env "$target" "$ENVL" LICENCAS_INTERNO_DOMAIN "$LICENCAS_INTERNO_DOMAIN"
+    set_env "$target" "$ENVL" INTERNO_PORTA_NO_HOST "$porta"
+    set_env "$target" "$ENVL" LICENCAS_INTERNO_IPS "$1"
+    if [ "$1" = "127.0.0.1/32" ]; then
+        echo "  API interna -> 127.0.0.1:$porta, fechada para todos: o servidor da escola ($MEMBROS_NAME) nao existe agora (guardado?); o conectar-licencas abre para o IP dele"
+    else
+        echo "  API interna -> 127.0.0.1:$porta, so do servidor da escola ($MEMBROS_NAME, $1) e so /interno/v1/*; a credencial e o Emissor que confere"
+    fi
+}
 # publico_ok: https://<API>/health responde {"ok":true} de fora (DNS, certificado e Caddy), por ate ~2 min.
 publico_ok() {
     local i code
@@ -141,6 +163,7 @@ dns() {
     echo
     echo "  $LICENCAS_API_DOMAIN -> $ip sem proxy da Cloudflare: nenhum desafio de robos e so IPv4 (docs/32 §11.2)."
     echo "  $LICENCAS_PAINEL_DOMAIN -> $ip com o proxy da Cloudflare; o login e o de e-mail e senha do proprio Painel (D40)."
+    echo "  $LICENCAS_INTERNO_DOMAIN -> $ip sem proxy: a API interna, que o Caddy do Emissor so abre para o IPv4 do servidor da nossa escola (docs/20 §8C.9)."
 }
 
 # ====== secrets-licencas ================================================================================
@@ -460,7 +483,7 @@ conta_do_produtor() {
 # ====== deploy-licencas =================================================================================
 deploy() {
     need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN GITHUB_TOKEN
-    local raizes raizes_b64 config_b64 sb_user sb_host box porta_api porta_painel caddy rec kv
+    local raizes raizes_b64 config_b64 sb_user sb_host box porta_api porta_painel rec kv escola_ips
     printf '%s' "$LICENCAS_TAG" | grep -qE '^[A-Za-z0-9_][A-Za-z0-9._-]{0,100}$' || die "LICENCAS_TAG invalida: '$LICENCAS_TAG' (ex.: main ou sha-1a2b3c4)."
     # As raizes publicas: infra/licencas/raizes.json, que a cerimonia-licencas imprime (o segredo LICENCAS_RAIZES de antes
     # ainda vale sem o arquivo).
@@ -472,9 +495,11 @@ deploy() {
     config_b64=$(cat "$WORK_DIR/config-emissor.b64")
     install_hcloud; deploy_key
     licencas_alvo
-    log "DNS dos dois nomes (etapa dns-licencas)"
+    log "DNS dos tres nomes (etapa dns-licencas)"
     licencas_dns_confere
-    echo "  $LICENCAS_API_DOMAIN (sem proxy) e $LICENCAS_PAINEL_DOMAIN (com proxy) -> $ip, so registro A."
+    echo "  $LICENCAS_API_DOMAIN e $LICENCAS_INTERNO_DOMAIN (sem proxy) e $LICENCAS_PAINEL_DOMAIN (com proxy) -> $ip, so registro A."
+    # Quem chega na API interna: o IPv4 de agora do servidor da escola, pela API da Hetzner (sem ele, ninguem).
+    escola_ips=$(licencas_interno_ips)
     box=$(storage_box_json)
     sb_user=$(printf '%s' "$box" | jq -r '.username // .user // empty'); sb_host=$(printf '%s' "$box" | jq -r '.server // .host // empty')
     [ -n "$sb_user" ] && [ -n "$sb_host" ] || die "Sem o Storage Box $STORAGE_BOX_NAME (ou sem usuario e host no JSON dele): o Emissor nao sobe sem backup (docs/20 §8C.6)."
@@ -492,7 +517,7 @@ deploy() {
     fi
     remote "docker logout ghcr.io >/dev/null 2>&1 || true"
 
-    log "Borda (Caddy): $LICENCAS_API_DOMAIN e $LICENCAS_PAINEL_DOMAIN"
+    log "Borda (Caddy): $LICENCAS_API_DOMAIN, $LICENCAS_PAINEL_DOMAIN e $LICENCAS_INTERNO_DOMAIN"
     porta_api=$(get_env "$target" "$LICENCAS_EMISSOR_DIR/.env" EMISSOR_PORTA_NO_HOST); porta_api="${porta_api:-8080}"
     porta_painel=$(get_env "$target" "$LICENCAS_EMISSOR_DIR/.env" PAINEL_PORTA_NO_HOST); porta_painel="${porta_painel:-8081}"
     set_env "$target" "$ENVL" LICENCAS_API_DOMAIN "$LICENCAS_API_DOMAIN"
@@ -501,10 +526,8 @@ deploy() {
     set_env "$target" "$ENVL" PAINEL_PORTA_NO_HOST "$porta_painel"
     set_env "$target" "$ENVL" ACME_EMAIL "$PRODUCER_EMAIL"
     echo "  API -> 127.0.0.1:$porta_api; Painel -> 127.0.0.1:$porta_painel (de qualquer internet, pelo proxy da Cloudflare; login do Painel, D40)"
-    caddy="docker compose -f infra/licencas/docker-compose.yml"
-    # A configuracao e conferida num container de uma vez antes de valer; depois o Caddy sobe (ou e recriado, se o .env
-    # mudou) e recarrega o Caddyfile novo, com algumas tentativas enquanto ele acaba de subir.
-    remote "$caddy pull --quiet && $caddy run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && $caddy up -d && for i in 1 2 3 4 5 6 7 8 9 10; do $caddy exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && break; [ \$i != 10 ] || exit 1; sleep 2; done"
+    borda_interno "$escola_ips"
+    borda
 
     log "Backup de hora em hora ($LICENCAS_RESTIC_REPOSITORY, no Storage Box $STORAGE_BOX_NAME)"
     set_env "$target" "$ENVL" STORAGE_BOX_USER "$sb_user"
@@ -537,7 +560,8 @@ deploy() {
         echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes) e https://$LICENCAS_PAINEL_DOMAIN (Painel, com e-mail e senha)."
         echo "O produtor define a senha pelo link de uso unico que o Emissor manda ao e-mail dele (LICENCAS_EMISSOR_EMAIL_PRODUTOR)."
     fi
-    echo "Falta, se ainda nao foi feito: ensaio-licencas (o ensaio de restauracao) e o monitor externo (docs/20 §8C)."
+    echo "Falta, se ainda nao foi feito: ensaio-licencas (o ensaio de restauracao) e o monitor externo (docs/20 §8C); e, com a escola"
+    echo "no ar (restaurar e deploy-membros), conectar-licencas com CONFIRMAR=conectar: a API interna em https://$LICENCAS_INTERNO_DOMAIN (docs/20 §8C.9)."
 }
 
 # ====== backup-licencas, restaurar-licencas, ensaio-licencas ===========================================
@@ -589,10 +613,10 @@ status() {
         echo "  nao existe (plan-licencas, e provision-licencas com CONFIRMADO=sim depois do ok do produtor)."
     fi
     if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
-        log "DNS (o Painel com proxy, a API sem; so registro A)"
+        log "DNS (o Painel com proxy, a API e a API interna sem; so registro A)"
         local zone fqdn registros
         zone=$(cf_zone_id)
-        for fqdn in "$LICENCAS_PAINEL_DOMAIN" "$LICENCAS_API_DOMAIN"; do
+        for fqdn in "$LICENCAS_PAINEL_DOMAIN" "$LICENCAS_API_DOMAIN" "$LICENCAS_INTERNO_DOMAIN"; do
             registros=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '.result[] | "  \(.name) \(.type) \(.content) proxy=\(.proxied)"')
             printf '%s\n' "${registros:-  $fqdn (nenhum registro)}"
             case "$registros" in *" AAAA "*) warn "$fqdn tem AAAA: a conferencia inicial so funciona por IPv4 (rode dns-licencas)." ;; esac
@@ -605,6 +629,9 @@ status() {
     printf '  %-60s %s (esperado 400: pedido sem Chave)\n' "POST https://$LICENCAS_API_DOMAIN/v1/preflight" "${code:-000}"
     code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$LICENCAS_PAINEL_DOMAIN/" 2>/dev/null) || code=000
     printf '  %-60s %s (esperado 200 ou 302: a tela de entrar do Painel)\n' "https://$LICENCAS_PAINEL_DOMAIN/" "${code:-000}"
+    # Daqui (o runner) a API interna fecha na borda: so o servidor da escola entra. Nada chega ao Emissor.
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$LICENCAS_INTERNO_DOMAIN/interno/v1/planos" 2>/dev/null) || code=000
+    printf '  %-60s %s (esperado 403: so o servidor da escola entra)\n' "https://$LICENCAS_INTERNO_DOMAIN/interno/v1/planos" "${code:-000}"
     if [ -n "${SSH:-}" ] && [ -n "$existe" ]; then
         deploy_key
         licencas_alvo

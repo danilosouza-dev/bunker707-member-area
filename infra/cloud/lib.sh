@@ -64,6 +64,10 @@ LICENCAS_NAME="${LICENCAS_NAME:-bunker707-licencas}"
 # O nome da API vai gravado no produto vendido: trocar depois pede versao nova para todos os compradores.
 LICENCAS_PAINEL_DOMAIN="${LICENCAS_PAINEL_DOMAIN:-licencas.$ZONE_NAME}"
 LICENCAS_API_DOMAIN="${LICENCAS_API_DOMAIN:-licencas-api.$ZONE_NAME}"
+# A API interna do Emissor, so para a nossa escola (docs/api-interna.md do bunker-licensing; docs/20 §8C.9): um endereco
+# proprio, registro A sem proxy da Cloudflare (o Caddy do Emissor so aceita o IPv4 do servidor da escola, e o IP que ele
+# confere tem de ser o da conexao), que o conectar-licencas grava no .env da escola (EMISSOR_INTERNO_URL).
+LICENCAS_INTERNO_DOMAIN="${LICENCAS_INTERNO_DOMAIN:-licencas-interno.$ZONE_NAME}"
 # Imagem do Emissor publicada pelo CI do bunker-licensing no GHCR; a tag <tag>-implantacao traz o compose.yaml e o
 # .env.example do mesmo commit (docs/20 §8C.2).
 LICENCAS_IMAGEM="${LICENCAS_IMAGEM:-ghcr.io/danilosouza-dev/bunker-licensing}"
@@ -455,6 +459,48 @@ os.chmod(tmp, 0o600); os.replace(tmp, path)
 PY
 }
 get_env() { rsh "$1" "grep -E '^$3=' '$2' | head -n1 | cut -d= -f2-"; }
+# env_aplicar_kv user@host ENV KV: as linhas CHAVE=VALOR do arquivo KV (no servidor, 0600, que chegou pelo stdin do SSH ou
+# saiu do envelope) no .env ENV do servidor: troca a linha ou acrescenta, grava 0600 de uma vez (dono: quem roda, o
+# deploy) e apaga o KV em qualquer desfecho. O valor com aspas, barra invertida, $ ou quebra de linha e recusado antes de
+# gravar. E assim que o secrets-* e o conectar-licencas gravam segredo no .env de um servidor.
+env_aplicar_kv() {
+    rsh "$1" "python3 -I - '$2' '$3'" <<'PY'
+import atexit, os, re, sys
+path, kvpath = sys.argv[1], sys.argv[2]
+os.umask(0o077)
+# O texto claro sai do disco em qualquer desfecho (valor recusado, .env ilegivel).
+atexit.register(lambda: os.path.exists(kvpath) and os.remove(kvpath))
+updates = {}
+for line in open(kvpath, encoding="utf-8"):
+    line = line.rstrip("\n")
+    if "=" in line and re.match(r"^[A-Z0-9_]+=", line):
+        k, v = line.split("=", 1); updates[k] = v
+# O compose interpola os valores dentro de JSON (MAUTIC_CONFIG_PARAMETERS) e sem aspas: aspas, barra
+# invertida, $ e quebra de linha quebrariam o stack. Senha SMTP com esses caracteres vai codificada na URL.
+bad = [k for k, v in updates.items() if re.search(r'["\\$\n\r]', v)]
+if bad:
+    sys.exit("ERRO: valor com aspas, barra invertida, $ ou quebra de linha em " + ", ".join(bad) + "; codifique na URL (senha SMTP: urlencode) e gere o envelope de novo.")
+lines = open(path, encoding="utf-8").read().split("\n")
+seen = set()
+for i, line in enumerate(lines):
+    m = re.match(r"^([A-Z0-9_]+)=", line)
+    if m and m.group(1) in updates:
+        lines[i] = f"{m.group(1)}={updates[m.group(1)]}"; seen.add(m.group(1))
+while lines and lines[-1] == "":
+    lines.pop()
+for k, v in updates.items():
+    if k not in seen:
+        lines.append(f"{k}={v}")
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh: fh.write("\n".join(lines).rstrip("\n") + "\n")
+os.chmod(tmp, 0o600); os.replace(tmp, path)
+PY
+}
+# membros_recria user@host: o stack da escola (o servidor A) com o .env novo: o compose recria so o que mudou (o app), o
+# Auth e o app saudaveis antes do smoke (sem a espera, o primeiro /api/health pega o app ainda subindo e da 502).
+membros_recria() {
+    rsh "$1" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash -c '. infra/scripts/lib.sh; for s in auth app; do wait_healthy \$s 180; done' && bash infra/scripts/smoke.sh"
+}
 
 # remote_auth_curl ENV_FILE: comando (para rodar NO servidor) que chama a API administrativa do Auth com a
 # chave secreta do .env. A chave nunca sai do servidor nem entra em argv (ps, /proc): o shell remoto le do
@@ -599,31 +645,41 @@ zona_sub() {
 licencas_sub() {
     case "$1" in
         *."$ZONE_NAME") printf '%s' "${1%."$ZONE_NAME"}" ;;
-        *) die "$1 nao esta na zona $ZONE_NAME (LICENCAS_PAINEL_DOMAIN e LICENCAS_API_DOMAIN ficam nela)." ;;
+        *) die "$1 nao esta na zona $ZONE_NAME (LICENCAS_PAINEL_DOMAIN, LICENCAS_API_DOMAIN e LICENCAS_INTERNO_DOMAIN ficam nela)." ;;
     esac
 }
 # cf_apply_dns_licencas: so registros A, nunca AAAA (docs/32 §11.2). O Painel com o proxy da Cloudflare (a protecao dela
 # na frente do login do Painel, D40); a API sem proxy: nenhum desafio de robos barra a conferencia feita por servidor, e
-# o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. AAAA que exista nos dois nomes e
-# apagado.
+# o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. A API interna tambem sem proxy: o Caddy
+# do Emissor so deixa entrar o IPv4 do servidor da nossa escola, e confere o IP da propria conexao (com o proxy, seria o
+# da Cloudflare). AAAA que exista nos tres nomes e apagado.
 cf_apply_dns_licencas() {
-    local ip4 painel api; ip4=$(server_ip4 "$LICENCAS_NAME")
-    painel=$(licencas_sub "$LICENCAS_PAINEL_DOMAIN"); api=$(licencas_sub "$LICENCAS_API_DOMAIN")
+    local ip4 painel api interno; ip4=$(server_ip4 "$LICENCAS_NAME")
+    painel=$(licencas_sub "$LICENCAS_PAINEL_DOMAIN"); api=$(licencas_sub "$LICENCAS_API_DOMAIN"); interno=$(licencas_sub "$LICENCAS_INTERNO_DOMAIN")
     cf_dns_upsert "$painel" A "$ip4" true
     cf_dns_upsert "$api" A "$ip4" false
+    cf_dns_upsert "$interno" A "$ip4" false
     cf_dns_delete "$painel" AAAA
     cf_dns_delete "$api" AAAA
+    cf_dns_delete "$interno" AAAA
 }
-# licencas_dns_confere: o DNS dos dois nomes como o cf_apply_dns_licencas deixa, apontando para o servidor de agora.
+# licencas_dns_confere: o DNS dos tres nomes como o cf_apply_dns_licencas deixa, apontando para o servidor de agora.
 # O deploy so sobe o Caddy com isso certo: antes, o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo.
 licencas_dns_confere() {
     local ip4 zone pair fqdn want got problems=""; ip4=$(server_ip4 "$LICENCAS_NAME"); zone=$(cf_zone_id)
-    for pair in "$LICENCAS_PAINEL_DOMAIN:true" "$LICENCAS_API_DOMAIN:false"; do
+    for pair in "$LICENCAS_PAINEL_DOMAIN:true" "$LICENCAS_API_DOMAIN:false" "$LICENCAS_INTERNO_DOMAIN:false"; do
         fqdn="${pair%:*}"; want="A $ip4 proxy=${pair##*:}"
         got=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '[.result[] | select(.type=="A" or .type=="AAAA") | "\(.type) \(.content) proxy=\(.proxied)"] | join(", ")')
         [ "$got" = "$want" ] || problems="$problems $fqdn (esperado: $want; achado: ${got:-nada})"
     done
     [ -z "$problems" ] || die "DNS do Emissor fora do lugar:$problems. Rode dns-licencas antes do deploy-licencas."
+}
+# licencas_interno_ips: quem o Caddy do Emissor deixa chegar na API interna (LICENCAS_INTERNO_IPS): o IPv4 do servidor da
+# nossa escola (MEMBROS_NAME), lido da API da Hetzner como as outras etapas leem. Sem o servidor (a producao guardada em
+# snapshot), 127.0.0.1/32, ninguem de fora: o IP de antes pode ser de outro cliente da Hetzner, e o restaurar traz IP
+# novo. O conectar-licencas abre de novo para o IP de agora.
+licencas_interno_ips() {
+    if server_exists "$MEMBROS_NAME"; then printf '%s/32' "$(server_ip4 "$MEMBROS_NAME")"; else printf '127.0.0.1/32'; fi
 }
 # Toda etapa que muda o servidor de licencas so roda da main (a do workflow ja barra; esta e a segunda trava, para o
 # script chamado de outro lugar no Actions). Fora do Actions (terminal com os tokens), nao ha branch a conferir.

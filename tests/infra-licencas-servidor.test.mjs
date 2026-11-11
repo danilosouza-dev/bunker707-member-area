@@ -47,6 +47,10 @@ const ENV_EXAMPLE = [
   "PAINEL_PROXIES_CONFIAVEIS=172.30.70.1",
   "PAINEL_CABECALHO_IP=x-forwarded-for",
   "PAINEL_TETO_DIARIO=10",
+  "INTERNO_PORTA_NO_HOST=8082",
+  "INTERNO_CREDENCIAL_HASH=",
+  "INTERNO_PROXIES_CONFIAVEIS=172.30.70.1",
+  "INTERNO_CABECALHO_IP=x-forwarded-for",
   "EMISSOR_EMAIL_PRODUTOR=<e-mail do produtor>",
   "EMISSOR_EMAIL_REMETENTE=Emissor Bunker707 <emissor@licencas.bunker707.com.br>",
   ""
@@ -395,6 +399,9 @@ test("implantar: compose e .env.example da imagem -implantacao; .env com as vari
     "PAINEL_PROXIES_CONFIAVEIS=173.245.48.0/20,172.30.70.1",
     "PAINEL_TETO_DIARIO=50",
     "PAINEL_TETO_DIARIO=60",
+    // O resumo da credencial da API interna, do conectar-licencas: o deploy nunca o troca nem o apaga.
+    `INTERNO_CREDENCIAL_HASH='${"a".repeat(64)},${"b".repeat(64)}'`,
+    "INTERNO_PROXIES_CONFIAVEIS=173.245.48.0/20",
     ""
   ].join("\n"));
   const imagem = "ghcr.io/danilosouza-dev/bunker-licensing:main";
@@ -444,7 +451,13 @@ test("implantar: compose e .env.example da imagem -implantacao; .env com as vari
   assert.match(result.stdout, /Painel: ligado em https:\/\/licencas\.bunker707\.com\.br \(login de e-mail e senha; teto de 10/);
   assert.doesNotMatch(result.stdout, /Access de|cloudflareaccess/, "nada do Access na saida");
   assert.match(result.stdout, /chaves anteriores aceitas na readocao: emissao-2026-11/);
-  assert.match(result.stdout, /proxies confiaveis da API e do Painel: 172\.30\.70\.1/);
+  assert.match(result.stdout, /proxies confiaveis da API, do Painel e da API interna: 172\.30\.70\.1/);
+  // A API interna: o mesmo caminho do Caddy, a porta no servidor e o resumo da credencial como estava.
+  assert.deepEqual(linhas("INTERNO_PROXIES_CONFIAVEIS"), ["INTERNO_PROXIES_CONFIAVEIS='172.30.70.1'"], "as faixas da Cloudflare saem da lista da API interna");
+  assert.deepEqual(linhas("INTERNO_CABECALHO_IP"), ["INTERNO_CABECALHO_IP='x-forwarded-for'"]);
+  assert.deepEqual(linhas("INTERNO_PORTA_NO_HOST"), ["INTERNO_PORTA_NO_HOST=8082"]);
+  assert.deepEqual(linhas("INTERNO_CREDENCIAL_HASH"), [`INTERNO_CREDENCIAL_HASH='${"a".repeat(64)},${"b".repeat(64)}'`], "o resumo da credencial fica");
+  assert.match(result.stdout, /API interna da nossa escola: porta local 8082; ligada, com 2 credencial\(is\) aceita\(s\)/);
   assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo|re_chave/, "nem o e-mail do produtor nem a chave do Resend vao para o log");
   assert.match(result.stdout, /\/health ok na porta local 8080/);
   assert.ok(s.calls().some((c) => c.tool === "curl" && c.args.includes("http://127.0.0.1:8080/health")));
@@ -463,6 +476,9 @@ test("implantar sem o Painel (LICENCAS_SEM_PAINEL=sim no deploy): a chave do Res
   assert.doesNotMatch(env, /<[^>\n]*>/, "nenhum exemplo do .env.example no .env");
   assert.match(env, /^EMISSOR_PROXIES_CONFIAVEIS='172\.30\.71\.1'$/m);
   assert.match(env, /^PAINEL_PROXIES_CONFIAVEIS='172\.30\.71\.1'$/m);
+  assert.match(env, /^INTERNO_PROXIES_CONFIAVEIS='172\.30\.71\.1'$/m);
+  assert.match(env, /^INTERNO_CREDENCIAL_HASH=$/m, "sem o conectar-licencas, a API interna fica desligada");
+  assert.match(result.stdout, /API interna da nossa escola: porta local 8082; desligada ate o conectar-licencas/);
   assert.match(result.stdout, /Painel: desligado \(LICENCAS_SEM_PAINEL=sim\)/);
   assert.match(result.stdout, /entraram vazias, so com o exemplo: EMISSOR_NOVA\)/);
 });
@@ -504,6 +520,17 @@ test("implantar recusa raizes e configuracao fora do formato, o Painel pela meta
   assert.equal(docker(semResend.calls(), "pull"), -1);
   assert.doesNotMatch(falta.stdout + falta.stderr, /produtor@exemplo/);
   recusa(servidor({ resend: null }), [IMAGEM, RAIZES_ARG, configArg(SEM_PAINEL)], /Falta segredos\/resend-chave no servidor \(o compose do Emissor monta o arquivo mesmo sem o Painel; vazio serve\)/);
+
+  // A API interna ligada (o resumo do conectar-licencas) pede a conta de envio: sem o Painel, o Emissor nao subiria.
+  const internoSemEmail = servidor({ resend: "" });
+  writeFileSync(join(internoSemEmail.emissor, ".env"), `EMISSOR_PORTA_NO_HOST=8080\nINTERNO_CREDENCIAL_HASH='${"c".repeat(64)}'\n`);
+  recusa(internoSemEmail, [IMAGEM, RAIZES_ARG, configArg(SEM_PAINEL)], /A API interna da nossa escola esta ligada neste Emissor \(INTERNO_CREDENCIAL_HASH, do conectar-licencas\) e precisa da conta de envio: .*sem LICENCAS_SEM_PAINEL=sim/);
+  assert.equal(docker(internoSemEmail.calls(), "pull"), -1, "nada foi puxado");
+
+  // A porta da API interna igual a de outra porta do Emissor: o Caddy levaria a API interna para o lugar errado.
+  const portaRepetida = servidor({ implantado: false });
+  writeFileSync(join(portaRepetida.emissor, ".env"), "PAINEL_PORTA_NO_HOST=8081\nINTERNO_PORTA_NO_HOST=8081\n");
+  recusa(portaRepetida, [IMAGEM, RAIZES_ARG, configArg()], /INTERNO_PORTA_NO_HOST no \.env do Emissor precisa ser uma porta de 1 a 65535, diferente das da API e do Painel \(8080, 8081\) \(veio 8081\)/);
 
   // O gateway da rede borda que nao e IP: o .env nao muda e nada sobe.
   const gatewayRuim = servidor();

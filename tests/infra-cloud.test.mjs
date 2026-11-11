@@ -533,8 +533,11 @@ test("snapshot.sh: cria a imagem sem -o json e a encontra pela descricao na list
 });
 
 test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linha antes de gravar o .env", () => {
-  const source = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
-  const start = source.indexOf("python3 -I - '$envf' /tmp/payload.kv\" <<'PY'");
+  // O programa e o env_aplicar_kv de lib.sh, que o secrets-* e o conectar-licencas usam para gravar segredo no .env.
+  const secrets = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
+  assert.match(secrets, /^env_aplicar_kv "\$target" "\$envf" \/tmp\/payload\.kv$/m);
+  const source = libSource;
+  const start = source.indexOf("rsh \"$1\" \"python3 -I - '$2' '$3'\" <<'PY'", source.indexOf("env_aplicar_kv() {"));
   assert.ok(start > 0);
   const block = source.slice(source.indexOf("\n", start) + 1, source.indexOf("\nPY\n", start));
   const dir = mkdtempSync(join(tmpdir(), "bunker707-secrets-"));
@@ -554,6 +557,7 @@ test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linh
     const accepted = spawnSync("python3", ["-I", script, envFile, good], { encoding: "utf8" });
     assert.equal(accepted.status, 0, accepted.stderr);
     assert.equal(readFileSync(envFile, "utf8"), "A=1\nSMTP_PASS=re_abc\nRESEND_API_KEY=re_abc\n");
+    assert.equal(statSync(envFile).mode & 0o777, 0o600, "o .env fica 0600");
     assert.equal(existsSync(good), false, "o arquivo de segredos e apagado depois de aplicado");
   } finally {
     rmSync(dir, { recursive: true, force: true });
