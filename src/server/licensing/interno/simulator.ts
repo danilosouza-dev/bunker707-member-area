@@ -1,33 +1,35 @@
 // O simulador da API interna do Emissor, em memoria (docs/32 §11.2, "Ambientes": a `dev` e os testes falam com um
-// simulador). Segue o mesmo contrato do cliente HTTP (contract.ts): a venda idempotente, o desfazer, a lista do comprador,
-// o titular com o aceite dos termos, a Chave de ativacao uma vez so (com a confirmacao da troca) e o revogar.
+// simulador). Segue o contrato v1 (contract.ts; docs/api-interna.md do bunker-licensing): a venda idempotente, o desfazer
+// que chega antes da venda e a impede, a lista do comprador com as Licencas completas, o titular com o aceite dos termos,
+// a Chave de ativacao uma vez so (com a troca confirmada que corta a Chave esperando e a Instalacao no ar) e o revogar.
+// Nao simula o Ano adicional com atraso, a carencia, a garantia nem os limites de pedidos: so o que as telas e a fila usam.
 //
 // Onde roda: nos testes, e no `next dev` ou na previa da Vercel com EMISSOR_INTERNO_SIMULADOR=on e sem a configuracao de
 // verdade (config.ts). Nunca na producao nem na copia do comprador. O estado fica na memoria do processo: na Vercel cada
 // instancia tem o seu, entao serve para olhar as telas, nao para um ensaio de verdade.
 //
-// Modulo puro: nada de banco nem rede. A Chave sorteada so existe na resposta (o simulador guarda o resumo dela, como o
-// Emissor).
+// Modulo puro: nada de banco nem rede. A Chave sorteada so existe na resposta (o simulador guarda o resumo, como o Emissor).
 
 import { createHash, randomBytes } from "node:crypto";
-import {
-  customerLicensesSchema,
-  type CustomerLicense,
-  type HolderRequest,
-  type InternalEmissorClient,
-  type InternalFailure,
-  type SaleRequest,
-  type UndoRequest
+import type {
+  CustomerLicense,
+  HolderRequest,
+  InternalEmissorClient,
+  InternalFailure,
+  InternalFailureDetails,
+  LicenseSummary,
+  SaleRequest,
+  UndoRequest
 } from "./contract";
-import { documentKindOf } from "./holder";
+import { documentKindOf, normalizeDocument } from "./holder";
 
-/** O que cada codigo de produto e no simulador (no Emissor de verdade, a tabela product_map). */
-export type SimulatedProductKind = "anual" | "vitalicia" | "ano_adicional" | { modulo: string; nome: string };
+/** O que cada codigo de produto e no simulador (no Emissor de verdade, o mapa de produtos da tela Planos). */
+export type SimulatedProductKind = "licenca_anual" | "licenca_vitalicia" | "ano_adicional" | { modulo: string; nome: string };
 
 export type InternalEmissorSimulatorOptions = {
   /** O mapa dos codigos de produto. */
   products?: Record<string, SimulatedProductKind>;
-  /** O que vale para um codigo fora do mapa: null = produto_desconhecido (os testes); "anual" na `dev`. */
+  /** O que vale para um codigo fora do mapa: null = produto_desconhecido (os testes); a Licenca anual na `dev`. */
   defaultKind?: SimulatedProductKind | null;
   /** O relogio (os testes passam o deles). */
   now?: () => Date;
@@ -40,12 +42,17 @@ type SimLicense = {
   owner: string;
   saleKey: string;
   kind: "anual" | "vitalicia";
-  validUntil: Date | null;
-  status: "em_dia" | "revogada";
-  installation: { host: string; lastContact: Date | null } | null;
-  key: { state: "nenhuma" | "nao_usada" | "em_uso" | "revogada"; issuedAt: Date | null; digest: string | null };
+  /** O inicio do prazo da anual (a primeira ativacao), ou null enquanto nao comecou. */
+  startedAt: Date | null;
+  boughtAt: Date;
+  status: "ativa" | "suspensa" | "revogada";
+  installation: { host: string; lastContact: Date | null; activatedAt: Date } | null;
+  /** A Chave esperando uso (so o resumo e o final). */
+  pendingKey: { digest: string; issuedAt: Date; final: string; validUntil: Date } | null;
+  /** A Chave que ativou a Instalacao no ar. */
+  usedKey: { issuedAt: Date; final: string } | null;
   modules: { chave: string; nome: string }[];
-  changes: Date[];
+  cuts: Date[];
 };
 
 type SimCustomer = {
@@ -64,15 +71,17 @@ export type SimulatorInspection = {
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const BRASILIA_OFFSET_MS = 3 * 60 * 60 * 1000;
 
-function failure(error: string, status: number, message: string | null = null): InternalFailure {
-  return { error, message, ok: false, status };
+function failure(error: string, status: number, message: string | null = null, details?: InternalFailureDetails): InternalFailure {
+  return details ? { details, error, message, ok: false, status } : { error, message, ok: false, status };
 }
 
+/** A Chave no formato do Emissor: BKA- e seis grupos de cinco simbolos do base32 de Crockford. */
 function newKey(): string {
-  const bytes = randomBytes(35);
+  const bytes = randomBytes(30);
   const characters = Array.from(bytes, (byte) => CROCKFORD[byte % 32]);
-  const groups = Array.from({ length: 7 }, (_, index) => characters.slice(index * 5, index * 5 + 5).join(""));
+  const groups = Array.from({ length: 6 }, (_, index) => characters.slice(index * 5, index * 5 + 5).join(""));
   return `BKA-${groups.join("-")}`;
 }
 
@@ -82,8 +91,13 @@ function addMonths(date: Date, months: number): Date {
   return result;
 }
 
+/** A data de calendario (AAAA-MM-DD) no horario de Brasilia. */
+function brasiliaDay(date: Date): string {
+  return new Date(date.getTime() - BRASILIA_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 export type InternalEmissorSimulator = InternalEmissorClient & {
-  /** Para os testes e a `dev`: a Chave nao usada vira uma Instalacao num endereco (como se o instalador tivesse ativado). */
+  /** Para os testes e a `dev`: a Chave esperando vira uma Instalacao no endereco (como se o instalador ativasse). */
   simulateActivation(licenseId: string, host: string): boolean;
   /** Para os testes: o estado por dentro. */
   inspect(): SimulatorInspection;
@@ -104,22 +118,49 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
   const nextLicenseId = () => `lic_sim${String((sequence += 1)).padStart(8, "0")}`;
   const licensesOf = (owner: string) => [...licenses.values()].filter((license) => license.owner === owner);
 
-  function viewOf(license: SimLicense): CustomerLicense {
-    const kind = license.kind;
-    const expired = kind === "anual" && license.validUntil !== null && license.validUntil.getTime() < now().getTime();
+  function startOf(license: SimLicense): Date {
+    return license.startedAt ?? new Date(license.boughtAt.getTime() + 30 * DAY_MS);
+  }
+
+  function summaryOf(license: SimLicense): LicenseSummary {
+    const annual = license.kind === "anual";
 
     return {
-      chave: { estado: license.key.state, geradaEm: license.key.issuedAt?.toISOString() ?? null },
       id: license.id,
+      prazoComecaEm: annual && !license.startedAt ? brasiliaDay(startOf(license)) : null,
+      situacao: license.status,
+      tipo: license.kind,
+      validade: annual ? brasiliaDay(new Date(addMonths(startOf(license), 12).getTime() - DAY_MS)) : null
+    };
+  }
+
+  function fullOf(license: SimLicense): CustomerLicense {
+    const pending = license.pendingKey && license.pendingKey.validUntil.getTime() > now().getTime() ? license.pendingKey : null;
+    const estado = pending ? "aguardando_uso" : license.installation ? "em_uso" : "nenhuma";
+    const key = pending ?? (license.installation ? license.usedKey : null);
+
+    return {
+      ...summaryOf(license),
+      chave: {
+        estado,
+        final: key?.final ?? null,
+        geradaEm: key?.issuedAt.toISOString() ?? null,
+        reservadaPara: null,
+        validaAte: pending ? pending.validUntil.toISOString() : null
+      },
       instalacao: license.installation
-        ? { endereco: license.installation.host, ultimoContato: license.installation.lastContact?.toISOString() ?? null, versao: null }
+        ? {
+            ativadaEm: license.installation.activatedAt.toISOString(),
+            endereco: license.installation.host,
+            pacote: null,
+            ultimoContato: license.installation.lastContact?.toISOString() ?? null,
+            versao: null
+          }
         : null,
-      links: { renovar: kind === "anual" && license.status !== "revogada" ? `${renewBase}?licenca=${license.id}` : null },
+      links: { loja: null, renovar: license.kind === "anual" && license.status !== "revogada" ? `${renewBase}/${license.id}` : null },
       modulos: license.modules.map((module) => ({ chave: module.chave, nome: module.nome })),
-      situacao: license.status === "revogada" ? "revogada" : expired ? "vencida" : "em_dia",
-      tipo: kind,
-      trocasEm12Meses: license.changes.filter((date) => now().getTime() - date.getTime() < 365 * DAY_MS).length,
-      validade: kind === "anual" ? (license.validUntil?.toISOString() ?? null) : null
+      origem: "venda",
+      trocasEm12Meses: license.cuts.filter((date) => now().getTime() - date.getTime() < 365 * DAY_MS).length
     };
   }
 
@@ -128,58 +169,74 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
     return license && license.owner === areaUserId ? license : null;
   }
 
-  function applySale(body: SaleRequest): { licenseIds: string[] } | InternalFailure {
+  /** Corta a Chave esperando e a Instalacao no ar (a troca confirmada e o revogar). */
+  function cut(license: SimLicense): { chavesCanceladas: number; instalacaoDesligada: { endereco: string } | null } {
+    const canceled = license.pendingKey ? 1 : 0;
+    const installation = license.installation ? { endereco: license.installation.host } : null;
+
+    if (canceled || installation) {
+      license.cuts.push(now());
+    }
+
+    license.pendingKey = null;
+    license.installation = null;
+    license.usedKey = null;
+
+    return { chavesCanceladas: canceled, instalacaoDesligada: installation };
+  }
+
+  function applySale(body: SaleRequest): string[] | InternalFailure {
     const kind = products[body.produto] ?? defaultKind;
 
     if (!kind) {
-      return failure("produto_desconhecido", 422, `O produto ${body.produto} não está no mapa do Emissor.`);
+      return failure("produto_desconhecido", 422, `O produto ${body.produto} não está no mapa de produtos.`);
     }
 
     const owner = body.comprador.areaUserId;
     const saleKey = `${body.plataforma}:${body.transacao}:${body.produto}`;
-    const customer = customers.get(owner) ?? { email: body.comprador.email, holder: null, name: body.comprador.nome, terms: null };
-    customers.set(owner, { ...customer, email: body.comprador.email, name: body.comprador.nome ?? customer.name });
-    const boughtAt = body.compradoEm ? new Date(body.compradoEm) : now();
+    const boughtAt = new Date(Math.min(Date.parse(body.compradoEm), now().getTime()));
 
-    if (kind === "anual" || kind === "vitalicia") {
-      const quantity = body.quantidade ?? 1;
-      const ids: string[] = [];
-
-      for (let index = 0; index < quantity; index += 1) {
+    if (kind === "licenca_anual" || kind === "licenca_vitalicia") {
+      return Array.from({ length: body.quantidade ?? 1 }, () => {
         const id = nextLicenseId();
         licenses.set(id, {
-          changes: [],
+          boughtAt,
+          cuts: [],
           id,
           installation: null,
-          key: { digest: null, issuedAt: null, state: "nenhuma" },
-          kind,
+          kind: kind === "licenca_anual" ? "anual" : "vitalicia",
           modules: [],
           owner,
+          pendingKey: null,
           saleKey,
-          status: "em_dia",
-          validUntil: kind === "anual" ? addMonths(boughtAt, 12) : null
+          startedAt: null,
+          status: "ativa",
+          usedKey: null
         });
-        ids.push(id);
-      }
-
-      return { licenseIds: ids };
+        return id;
+      });
     }
 
-    const target = licensesOf(owner)
-      .filter((license) => license.status !== "revogada" && (kind !== "ano_adicional" || license.kind === "anual"))
-      .sort((a, b) => (a.validUntil?.getTime() ?? Infinity) - (b.validUntil?.getTime() ?? Infinity))[0];
+    if ((body.quantidade ?? 1) > 1) {
+      return failure("quantidade_invalida", 422, "Mais de uma unidade de um produto que não é Licença.");
+    }
+
+    const candidates = licensesOf(owner).filter((license) => license.status === "ativa" && (kind !== "ano_adicional" || license.kind === "anual"));
+    const target = body.licenca ? candidates.find((license) => license.id === body.licenca) : candidates.length === 1 ? candidates[0] : undefined;
 
     if (!target) {
-      return failure("licenca_indisponivel", 409, "Nenhuma Licença do comprador para aplicar a compra.");
+      return candidates.length > 1 && !body.licenca
+        ? failure("licenca_ambigua", 422, "O cliente tem mais de uma Licença que serve.")
+        : failure("sem_licenca_para_aplicar", 422, "Nenhuma Licença do cliente serve para esta compra.", { motivo: "nenhuma_licenca" });
     }
 
     if (kind === "ano_adicional") {
-      target.validUntil = addMonths(target.validUntil ?? boughtAt, 12);
+      target.startedAt = addMonths(startOf(target), 12);
     } else if (!target.modules.some((module) => module.chave === kind.modulo)) {
       target.modules.push({ chave: kind.modulo, nome: kind.nome });
     }
 
-    return { licenseIds: [target.id] };
+    return [target.id];
   }
 
   const simulator: InternalEmissorSimulator = {
@@ -188,18 +245,30 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
       const saleKey = `${body.plataforma}:${body.transacao}:${body.produto}`;
       const existing = sales.get(saleKey);
 
+      if (existing?.undone) {
+        return { data: { aplicada: false, desfeita: true, licencas: [] }, ok: true };
+      }
+
       if (existing) {
-        return { data: { licencas: existing.licenseIds }, ok: true };
+        return { data: { aplicada: true, licencas: existing.licenseIds.map((id) => summaryOf(licenses.get(id) as SimLicense)), repetida: true }, ok: true };
       }
 
       const applied = applySale(body);
 
-      if ("ok" in applied) {
+      if (!Array.isArray(applied)) {
         return applied;
       }
 
-      sales.set(saleKey, { licenseIds: applied.licenseIds, undone: null });
-      return { data: { licencas: applied.licenseIds }, ok: true };
+      const customer = customers.get(body.comprador.areaUserId);
+      customers.set(body.comprador.areaUserId, {
+        email: body.comprador.email,
+        holder: customer?.holder ?? null,
+        name: body.comprador.nome ?? customer?.name ?? null,
+        terms: customer?.terms ?? null
+      });
+      sales.set(saleKey, { licenseIds: applied, undone: null });
+
+      return { data: { aplicada: true, licencas: applied.map((id) => summaryOf(licenses.get(id) as SimLicense)) }, ok: true };
     },
 
     async undoSale(body: UndoRequest, call) {
@@ -208,10 +277,14 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
       const sale = sales.get(saleKey);
 
       if (!sale) {
-        return { data: {}, ok: true };
+        // O desfazer que chega antes da venda: a marca impede a venda depois.
+        sales.set(saleKey, { licenseIds: [], undone: body.motivo });
+        return { data: { desfeita: true, licencas: [], vendaConhecida: false }, ok: true };
       }
 
-      if (!sale.undone) {
+      const repeated = sale.undone !== null;
+
+      if (!repeated) {
         sale.undone = body.motivo;
 
         for (const id of sale.licenseIds) {
@@ -219,24 +292,42 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
 
           if (license && license.saleKey === saleKey) {
             license.status = "revogada";
-            license.key = { ...license.key, digest: null, state: license.key.state === "nenhuma" ? "nenhuma" : "revogada" };
+            license.pendingKey = null;
           }
         }
       }
 
-      return { data: { licencas: sale.licenseIds, situacao: "revogada" }, ok: true };
+      return {
+        data: {
+          desfeita: true,
+          licencas: sale.licenseIds.map((id) => summaryOf(licenses.get(id) as SimLicense)),
+          vendaConhecida: true,
+          ...(repeated ? { repetida: true } : {})
+        },
+        ok: true
+      };
     },
 
     async listLicenses(areaUserId, call) {
       note("GET", `/clientes/${areaUserId}/licencas`, call.requestId);
       const customer = customers.get(areaUserId);
-      const data = customerLicensesSchema.parse({
-        licencas: licensesOf(areaUserId).map(viewOf),
-        termosAceitos: customer?.terms ? { em: customer.terms.em.toISOString(), versao: customer.terms.versao } : null,
-        titular: customer?.holder ? { documento: maskDocument(customer.holder.documento), email2: customer.holder.email2, nome: customer.holder.nome } : null
-      });
 
-      return { data, ok: true };
+      return {
+        data: {
+          licencas: licensesOf(areaUserId).map(fullOf),
+          termosAceitos: customer?.terms ? { em: customer.terms.em.toISOString(), versao: customer.terms.versao } : null,
+          titular: customer?.holder
+            ? {
+                documento: customer.holder.documento,
+                email: customer.email,
+                email2: customer.holder.email2,
+                nome: customer.holder.nome,
+                tipoDocumento: customer.holder.documento.length === 11 ? "cpf" : "cnpj"
+              }
+            : null
+        },
+        ok: true
+      };
     },
 
     async saveHolder(areaUserId, body: HolderRequest, call) {
@@ -244,21 +335,37 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
       const customer = customers.get(areaUserId);
 
       if (!customer) {
-        return failure("nao_encontrado", 404, "Cliente sem compra.");
+        return failure("cliente_desconhecido", 404, "Nenhuma venda deste cliente chegou ao Emissor.");
+      }
+
+      if (!body.nome.trim() || body.nome.trim().length > 160) {
+        return failure("pedido_invalido", 400, "Nome fora do formato.", { campos: ["nome"] });
       }
 
       if (!documentKindOf(body.documento)) {
-        return failure("documento_invalido", 422, "Documento inválido.");
+        return failure("pedido_invalido", 400, "Documento inválido.", { campos: ["documento"] });
       }
 
       if (body.email2.trim().toLowerCase() === customer.email.trim().toLowerCase()) {
-        return failure("email2_invalido", 422, "O segundo e-mail precisa ser diferente.");
+        return failure("pedido_invalido", 400, "O segundo e-mail precisa ser diferente.", { campos: ["email2"] });
       }
 
-      customer.holder = { documento: body.documento, email2: body.email2, nome: body.nome };
+      customer.holder = { documento: normalizeDocument(body.documento), email2: body.email2, nome: body.nome.trim() };
       customer.terms = { em: now(), versao: body.aceiteTermos.versao };
 
-      return { data: {}, ok: true };
+      return {
+        data: {
+          termosAceitos: { em: customer.terms.em.toISOString(), versao: customer.terms.versao },
+          titular: {
+            documento: customer.holder.documento,
+            email: customer.email,
+            email2: customer.holder.email2,
+            nome: customer.holder.nome,
+            tipoDocumento: customer.holder.documento.length === 11 ? "cpf" : "cnpj"
+          }
+        },
+        ok: true
+      };
     },
 
     async issueKey(licenseId, body, call) {
@@ -266,38 +373,48 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
       const license = ownLicense(licenseId, body.areaUserId);
 
       if (!license) {
-        return failure("nao_encontrado", 404, "Licença não encontrada.");
+        return failure("licenca_nao_encontrada", 404, "Licença não encontrada.");
+      }
+
+      if (license.status !== "ativa") {
+        return failure("licenca_indisponivel", 403, "Licença suspensa ou revogada.");
       }
 
       const customer = customers.get(body.areaUserId);
+      const missing = [...(customer?.holder ? [] : ["titular"]), ...(customer?.terms ? [] : ["termos"])];
 
-      if (!customer?.holder) {
-        return failure("titular_necessario", 409, "Informe o titular antes da primeira chave.");
+      if (missing.length > 0) {
+        return failure("titular_pendente", 409, "Falta o titular ou o aceite dos termos.", { falta: missing });
       }
 
-      if (!customer.terms) {
-        return failure("termos_necessarios", 409, "Aceite os termos antes da chave.");
+      const pending = license.pendingKey && license.pendingKey.validUntil.getTime() > now().getTime() ? license.pendingKey : null;
+
+      if ((pending || license.installation) && body.confirmarTroca !== true) {
+        return failure("troca_nao_confirmada", 409, "A troca precisa ser confirmada.", {
+          chaveAguardandoUso: pending ? { final: pending.final, geradaEm: pending.issuedAt.toISOString() } : null,
+          instalacao: license.installation
+            ? { endereco: license.installation.host, ultimoContato: license.installation.lastContact?.toISOString() ?? null }
+            : null
+        });
       }
 
-      if (license.status === "revogada") {
-        return failure("licenca_indisponivel", 409, "Licença revogada.");
-      }
-
-      const inUse = license.installation !== null || license.key.state === "nao_usada";
-
-      if (inUse && body.confirmarTroca !== true) {
-        return failure("confirmacao_necessaria", 409, "A chave de agora para de funcionar; confirme a troca.");
-      }
-
-      if (inUse) {
-        license.changes.push(now());
-        license.installation = null;
-      }
-
+      const cutNow = cut(license);
       const key = newKey();
-      license.key = { digest: createHash("sha256").update(key).digest("hex"), issuedAt: now(), state: "nao_usada" };
+      const final = key.slice(-4);
+      const validUntil = new Date(now().getTime() + DAY_MS);
+      license.pendingKey = { digest: createHash("sha256").update(key).digest("hex"), final, issuedAt: now(), validUntil };
 
-      return { data: { chave: key, validaAte: new Date(now().getTime() + DAY_MS).toISOString() }, ok: true };
+      return {
+        data: {
+          chave: key,
+          chavesCanceladas: cutNow.chavesCanceladas,
+          final,
+          instalacaoDesligada: cutNow.instalacaoDesligada,
+          trocasEm12Meses: fullOf(license).trocasEm12Meses,
+          validaAte: validUntil.toISOString()
+        },
+        ok: true
+      };
     },
 
     async revokeKey(licenseId, body, call) {
@@ -305,29 +422,25 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
       const license = ownLicense(licenseId, body.areaUserId);
 
       if (!license) {
-        return failure("nao_encontrado", 404, "Licença não encontrada.");
+        return failure("licenca_nao_encontrada", 404, "Licença não encontrada.");
       }
 
-      if (license.key.state === "nenhuma" || license.key.state === "revogada") {
-        return { data: {}, ok: true };
-      }
+      const cutNow = cut(license);
 
-      license.key = { ...license.key, digest: null, state: "revogada" };
-      license.installation = null;
-      license.changes.push(now());
-
-      return { data: {}, ok: true };
+      return { data: { ...cutNow, trocasEm12Meses: fullOf(license).trocasEm12Meses }, ok: true };
     },
 
     simulateActivation(licenseId, host) {
       const license = licenses.get(licenseId);
 
-      if (!license || license.key.state !== "nao_usada") {
+      if (!license || !license.pendingKey || license.pendingKey.validUntil.getTime() <= now().getTime()) {
         return false;
       }
 
-      license.key = { ...license.key, digest: null, state: "em_uso" };
-      license.installation = { host, lastContact: now() };
+      license.usedKey = { final: license.pendingKey.final, issuedAt: license.pendingKey.issuedAt };
+      license.pendingKey = null;
+      license.installation = { activatedAt: now(), host, lastContact: now() };
+      license.startedAt ??= now();
       return true;
     },
 
@@ -341,9 +454,4 @@ export function createInternalEmissorSimulator(options: InternalEmissorSimulator
   };
 
   return simulator;
-}
-
-/** O documento como o Emissor devolve na lista: so os ultimos digitos a mostra. */
-function maskDocument(digits: string): string {
-  return digits.length === 14 ? `**.***.***/****-${digits.slice(12)}` : `***.***.***-${digits.slice(9)}`;
 }

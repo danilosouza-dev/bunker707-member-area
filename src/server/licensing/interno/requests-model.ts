@@ -12,7 +12,12 @@ export const LICENSE_SALES_MIGRATION = "202611130001";
 export const LICENSE_REQUEST_KINDS = ["venda", "desfazer"] as const;
 export type LicenseRequestKind = (typeof LICENSE_REQUEST_KINDS)[number];
 
-export const LICENSE_REQUEST_STATUSES = ["pendente", "enviando", "enviado", "dispensado"] as const;
+/**
+ * pendente: na fila (com a hora da proxima tentativa); enviando: reivindicada por uma rodada; enviado: o Emissor aceitou;
+ * dispensado: nao precisa mais ir (a venda desfeita antes de chegar ao Emissor, ou a equipe dispensou); parado: o Emissor
+ * recusou de um jeito que tentar de novo nao resolve (precisa da equipe; "Tentar agora" devolve a fila).
+ */
+export const LICENSE_REQUEST_STATUSES = ["pendente", "enviando", "enviado", "dispensado", "parado"] as const;
 export type LicenseRequestStatus = (typeof LICENSE_REQUEST_STATUSES)[number];
 
 /** As colunas da 202611130001 (a lista que o adaptador le; a guarda confere contra o arquivo da migracao). */
@@ -69,8 +74,44 @@ export const LICENSE_RETRY_DELAYS_MS: readonly number[] = [60_000, 5 * 60_000, 1
 /** Linha em "enviando" ha mais tempo que isso ficou orfa (a rodada morreu no meio): outra rodada a retoma. */
 export const STALE_LICENSE_CLAIM_MS = 5 * 60_000;
 
-/** Pedidos por rodada do tick: cada um pode levar ate o tempo limite do cliente. */
+/** Pedidos por rodada do tick: cada um pode levar ate o tempo limite do cliente, dentro do orcamento do tick. */
 export const MAX_LICENSE_REQUESTS_PER_RUN = 10;
+
+/**
+ * As recusas que tentar de novo nao resolve (docs/api-interna.md, "Erros": "guardar e avisar a equipe", "parar e avisar a
+ * equipe", "pedir a escolha"): o pedido fica parado, com a frase na lista, ate a equipe resolver no Painel de licencas e
+ * usar "Tentar agora" ou "Dispensar". sem_conta e nosso: a conta do comprador sumiu.
+ */
+export const NEEDS_TEAM_ERRORS = new Set<string>([
+  "pedido_invalido",
+  "pedido_grande_demais",
+  "tipo_de_conteudo",
+  "quantidade_invalida",
+  "venda_de_outro_cliente",
+  "validade_acima_do_limite",
+  "licenca_ambigua",
+  "sem_conta"
+]);
+
+/**
+ * As falhas do Emissor inteiro (fora do ar, lento, limite de pedidos, credencial ou endereco errados): a rodada para ali,
+ * para nao gastar o tempo do tick com tempos esgotados nem somar credencial errada (o Emissor bloqueia o IP depois de 20).
+ */
+export const STOPS_ROUND_ERRORS = new Set<string>([
+  "sem_resposta",
+  "indisponivel",
+  "erro_interno",
+  "limite_de_pedidos",
+  "credencial_invalida",
+  "nao_encontrado",
+  "metodo_nao_permitido",
+  "resposta_invalida",
+  "nao_configurado",
+  "erro_inesperado"
+]);
+
+/** Com a credencial recusada, a proxima tentativa espera pelo menos isso (a janela do bloqueio do Emissor e de 10 min). */
+const CREDENTIAL_RETRY_MS = 30 * 60_000;
 
 export function licenseRetryDelayMs(attempts: number): number {
   const index = Math.min(Math.max(attempts, 1), LICENSE_RETRY_DELAYS_MS.length) - 1;
@@ -84,23 +125,24 @@ export function refusedWithoutRecording(errorCode: string): boolean {
 
 export type AttemptResult = { ok: true; resolution: string } | { ok: false; error: string; message: string | null; retryAfterSeconds?: number };
 
+type AttemptFailurePatch = {
+  attempts: number;
+  claimed_at: null;
+  last_error_code: string;
+  last_error: string;
+  maybe_delivered: boolean;
+};
+
 export type AttemptPatch =
   | { status: "enviado"; attempts: number; sent_at: string; claimed_at: null; resolution: string; last_error_code: null; last_error: null; maybe_delivered: boolean }
-  | {
-      status: "pendente";
-      attempts: number;
-      claimed_at: null;
-      next_attempt_at: string;
-      last_error_code: string;
-      last_error: string;
-      maybe_delivered: boolean;
-    };
+  | (AttemptFailurePatch & { status: "pendente"; next_attempt_at: string })
+  | (AttemptFailurePatch & { status: "parado" });
 
 /**
- * O que gravar depois de uma tentativa. Sucesso: enviado. Falha: volta para a fila com a espera da tentativa (ou a que o
- * Emissor pediu, no limite de pedidos), o codigo e a frase do erro. Nunca desiste: o produto desconhecido fica tentando
- * ate o produtor cadastrar o codigo no Emissor (a lista mostra o erro). `maybe_delivered` so liga: depois de uma resposta
- * em duvida, o desfazer nunca dispensa esta venda.
+ * O que gravar depois de uma tentativa. Sucesso: enviado. Recusa que precisa da equipe: parado. Outra falha: volta para a
+ * fila com a espera da tentativa (ou a que o Emissor pediu, no limite de pedidos; meia hora, com a credencial recusada), o
+ * codigo e a frase do erro: o produto que o Emissor nao conhece fica tentando ate o produtor cadastrar o codigo la.
+ * `maybe_delivered` so liga: depois de uma resposta em duvida, o desfazer nunca dispensa esta venda sem avisar o Emissor.
  */
 export function planAfterLicenseAttempt(row: Pick<LicenseRequestRow, "attempts" | "maybe_delivered">, result: AttemptResult, now: Date): AttemptPatch {
   const attempts = row.attempts + 1;
@@ -118,47 +160,55 @@ export function planAfterLicenseAttempt(row: Pick<LicenseRequestRow, "attempts" 
     };
   }
 
-  const waitMs = result.error === "limite_de_pedidos" && result.retryAfterSeconds ? Math.max(result.retryAfterSeconds * 1000, 60_000) : licenseRetryDelayMs(attempts);
-
-  return {
+  const failure: AttemptFailurePatch = {
     attempts,
     claimed_at: null,
     last_error: licenseRequestErrorText(result.error, result.message).slice(0, 500),
     last_error_code: result.error,
-    maybe_delivered: row.maybe_delivered || !refusedWithoutRecording(result.error),
-    next_attempt_at: new Date(now.getTime() + Math.min(waitMs, 6 * 60 * 60_000)).toISOString(),
-    status: "pendente"
+    maybe_delivered: row.maybe_delivered || !refusedWithoutRecording(result.error)
   };
+
+  if (NEEDS_TEAM_ERRORS.has(result.error)) {
+    return { ...failure, status: "parado" };
+  }
+
+  const askedWait = result.retryAfterSeconds ? result.retryAfterSeconds * 1000 : 0;
+  const waitMs =
+    result.error === "credencial_invalida"
+      ? CREDENTIAL_RETRY_MS
+      : result.error === "limite_de_pedidos"
+        ? Math.max(askedWait, 60_000)
+        : Math.max(licenseRetryDelayMs(attempts), askedWait);
+
+  return { ...failure, next_attempt_at: new Date(now.getTime() + Math.min(waitMs, 6 * 60 * 60_000)).toISOString(), status: "pendente" };
 }
 
 /**
  * O desfazer que chega para uma venda da fila:
  * - sem venda (nunca pedida aqui), ou a venda ja dispensada: nada a desfazer;
- * - a venda ainda na fila e que nunca pode ter chegado ao Emissor (nenhuma tentativa, ou so recusas que provam que ele
- *   nao gravou): as duas saem como dispensadas, e nada vai ao Emissor;
- * - senao (a venda enviada, sendo enviada, ou com uma resposta em duvida): o desfazer entra na fila e sai depois dela.
+ * - a venda que nunca pode ter chegado ao Emissor (na fila ou parada, sem nenhuma resposta em duvida): as duas saem como
+ *   dispensadas, e nada vai ao Emissor;
+ * - senao (a venda enviada, sendo enviada, ou com uma resposta em duvida): o desfazer entra na fila. Ele nao espera a
+ *   venda: o Emissor guarda a marca do desfazer que chega antes e nunca aplica a venda depois (docs/api-interna.md §2), e
+ *   a venda que ficou na fila sai dispensada quando o desfazer e aceito.
  */
 export function undoPlanFor(sale: Pick<LicenseRequestRow, "status" | "maybe_delivered"> | null): "sem_venda" | "dispensar" | "enfileirar" {
   if (!sale || sale.status === "dispensado") {
     return "sem_venda";
   }
 
-  if (sale.status === "pendente" && !sale.maybe_delivered) {
+  if ((sale.status === "pendente" || sale.status === "parado") && !sale.maybe_delivered) {
     return "dispensar";
   }
 
   return "enfileirar";
 }
 
-/** O desfazer espera enquanto a venda dele nao saiu (a ordem: o Emissor nunca recebe o desfazer antes da venda). */
-export function undoMustWait(sale: Pick<LicenseRequestRow, "status"> | null): boolean {
-  return sale !== null && (sale.status === "pendente" || sale.status === "enviando");
-}
-
 export const LICENSE_REQUEST_STATUS_LABELS: Record<LicenseRequestStatus, string> = {
   dispensado: "Dispensado",
   enviado: "Enviado",
   enviando: "Enviando",
+  parado: "Parado",
   pendente: "Na fila"
 };
 
@@ -172,7 +222,20 @@ export const UNDO_REASON_LABELS: Record<UndoReason, string> = {
 export function licenseRequestErrorText(code: string, emissorMessage: string | null = null): string {
   switch (code) {
     case "produto_desconhecido":
-      return "O Emissor não conhece este código de produto. Cadastre o código no Painel de licenças; o pedido é reenviado sozinho.";
+      return "O Emissor não conhece este código de produto. Cadastre o código no Painel de licenças (Planos); o pedido é reenviado sozinho.";
+    case "sem_licenca_para_aplicar":
+      return "O comprador não tem uma Licença em que esta compra sirva (Ano adicional, troca ou módulo). O pedido é reenviado sozinho; o Painel de licenças avisou o produtor.";
+    case "licenca_ambigua":
+      return "O comprador tem mais de uma Licença em que esta compra serve. Aplique pelo Painel de licenças (Aplicar compra) e use Dispensar aqui.";
+    case "quantidade_invalida":
+      return "A venda trouxe mais de uma unidade de um produto que não é Licença. Resolva pelo Painel de licenças e use Dispensar aqui.";
+    case "validade_acima_do_limite":
+      return "O Ano adicional passaria a validade de 36 meses à frente. Devolva o valor ao comprador e use Dispensar aqui.";
+    case "venda_de_outro_cliente":
+      return "Esta venda já foi aplicada numa Licença de outro cliente no Emissor. Confira no Painel de licenças.";
+    case "licenca_nao_encontrada":
+    case "cliente_desconhecido":
+      return "O Emissor não achou a Licença ou o cliente deste pedido.";
     case "sem_resposta":
       return "O Emissor não respondeu. O pedido é reenviado sozinho.";
     case "indisponivel":
@@ -190,6 +253,9 @@ export function licenseRequestErrorText(code: string, emissorMessage: string | n
       return "A conta do comprador não existe mais nesta escola. O pedido fica parado até a equipe resolver.";
     case "nao_configurado":
       return "A API interna do Emissor não está configurada neste servidor.";
+    case "nao_encontrado":
+    case "metodo_nao_permitido":
+      return "O endereço da API interna do Emissor não respondeu como esperado. Confira EMISSOR_INTERNO_URL no servidor.";
     default:
       return emissorMessage ? `O Emissor recusou (${code}): ${emissorMessage}` : `O Emissor recusou (${code}).`;
   }
@@ -197,3 +263,5 @@ export function licenseRequestErrorText(code: string, emissorMessage: string | n
 
 export const DISMISSED_SALE_RESOLUTION = "Desfeita antes de chegar ao Emissor: nada foi enviado.";
 export const DISMISSED_UNDO_RESOLUTION = "A venda não chegou ao Emissor: nada a desfazer.";
+export const UNDONE_SALE_RESOLUTION = "Desfeita: o Emissor recebeu o desfazer desta venda.";
+export const TEAM_DISMISSED_RESOLUTION = "Dispensado pela equipe.";

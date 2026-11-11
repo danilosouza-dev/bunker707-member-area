@@ -3,8 +3,8 @@
 //
 // Regras:
 // - nunca lanca: toda falha volta como { ok: false, error } com o codigo do Emissor ou um do cliente;
-// - tempo limite por pedido (padrao de 8 s; a tarefa do tick soma o `signal` dela), sem seguir redirecionamento, sem
-//   cache e com teto no corpo da resposta;
+// - tempo limite por pedido (15 s, o do contrato; a pagina pede menos para a lista, e a tarefa do tick soma o `signal`
+//   do orcamento dela), sem seguir redirecionamento, sem cache e com teto no corpo da resposta;
 // - `Authorization: Bearer <credencial>` e `X-Pedido` em todo pedido; a credencial, a Chave de ativacao e os dados do
 //   comprador nunca vao para log nem para o erro devolvido (este arquivo nao escreve log);
 // - toda resposta passa pelo schema do contrato: fora do formato vira `resposta_invalida`.
@@ -13,25 +13,27 @@
 
 import type { z } from "zod";
 import {
+  AREA_USER_ID_PATTERN,
   customerLicensesSchema,
   errorBodySchema,
   issuedKeySchema,
   LICENSE_ID_PATTERN,
-  AREA_USER_ID_PATTERN,
+  REQUEST_ID_PATTERN,
+  revokeReceiptSchema,
   saleReceiptSchema,
   savedHolderSchema,
+  undoReceiptSchema,
   type CallOptions,
   type InternalEmissorClient,
   type InternalFailure,
+  type InternalFailureDetails,
   type InternalResult
 } from "./contract";
 
-/** O tempo limite de cada pedido (a pagina espera isso no maximo; a tarefa do tick soma o `signal` dela). */
-export const INTERNAL_REQUEST_TIMEOUT_MS = 8_000;
+/** O tempo limite de cada pedido, do lado da area (docs/api-interna.md: 15 s). */
+export const INTERNAL_REQUEST_TIMEOUT_MS = 15_000;
 /** Teto do corpo da resposta: a lista de Licencas de um comprador e pequena. */
 export const INTERNAL_MAX_RESPONSE_BYTES = 256 * 1024;
-
-const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
 
 export type HttpInternalEmissorOptions = {
   /** O endereco ja conferido (parseInternalBaseUrl), terminado em /interno/v1. */
@@ -43,8 +45,20 @@ export type HttpInternalEmissorOptions = {
 
 type Exchange = { status: number; body: unknown; retryAfter: number | null } | { failure: InternalFailure };
 
-function fail(error: string, status: number | null = null, message: string | null = null, retryAfterSeconds?: number): InternalFailure {
-  return retryAfterSeconds === undefined ? { error, message, ok: false, status } : { error, message, ok: false, retryAfterSeconds, status };
+function fail(
+  error: string,
+  status: number | null = null,
+  message: string | null = null,
+  extra: { details?: InternalFailureDetails; retryAfterSeconds?: number } = {}
+): InternalFailure {
+  return {
+    error,
+    message,
+    ok: false,
+    status,
+    ...(extra.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: extra.retryAfterSeconds }),
+    ...(extra.details && Object.keys(extra.details).length > 0 ? { details: extra.details } : {})
+  };
 }
 
 async function readCapped(response: Response): Promise<string | null> {
@@ -88,21 +102,30 @@ function retryAfterOf(response: Response): number | null {
   return header && /^\d{1,5}$/.test(header) ? Math.min(Number(header), 86_400) : null;
 }
 
-/** A recusa do Emissor: o codigo do corpo `{ erro, mensagem }`; sem ele, pelo status. */
+/** A recusa do Emissor: o codigo do corpo `{ erro, mensagem }` e o que veio a mais; sem o corpo, pelo status. */
 function refusalOf(status: number, body: unknown, retryAfter: number | null): InternalFailure {
   const parsed = errorBodySchema.safeParse(body);
-  const wait = parsed.success ? (parsed.data.esperarSegundos ?? retryAfter ?? undefined) : (retryAfter ?? undefined);
 
   if (parsed.success) {
-    return fail(parsed.data.erro, status, parsed.data.mensagem?.trim().slice(0, 300) || null, wait);
+    const data = parsed.data;
+    const details: InternalFailureDetails = {
+      ...(data.campos ? { campos: data.campos } : {}),
+      ...(data.falta ? { falta: data.falta } : {}),
+      ...(data.instalacao !== undefined ? { instalacao: data.instalacao } : {}),
+      ...(data.chaveAguardandoUso !== undefined ? { chaveAguardandoUso: data.chaveAguardandoUso } : {}),
+      ...(data.motivo ? { motivo: data.motivo } : {})
+    };
+    const wait = data.tenteDeNovoEm ?? retryAfter ?? undefined;
+
+    return fail(data.erro, status, data.mensagem?.trim().slice(0, 300) || null, { details, retryAfterSeconds: wait });
   }
 
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return fail("credencial_invalida", status);
   }
 
   if (status === 429) {
-    return fail("limite_de_pedidos", status, null, wait);
+    return fail("limite_de_pedidos", status, null, { retryAfterSeconds: retryAfter ?? undefined });
   }
 
   if (status === 404) {
@@ -124,7 +147,7 @@ export function createHttpInternalEmissor(options: HttpInternalEmissorOptions): 
       return { failure: fail("erro_inesperado") };
     }
 
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const timeout = AbortSignal.timeout(call.timeoutMs ?? timeoutMs);
     const signal = call.signal ? AbortSignal.any([call.signal, timeout]) : timeout;
     const headers: Record<string, string> = { accept: "application/json", authorization, "x-pedido": call.requestId };
 
@@ -193,7 +216,7 @@ export function createHttpInternalEmissor(options: HttpInternalEmissorOptions): 
       return guarded(async () => answered(await call("POST", "/vendas", body, callOptions), saleReceiptSchema));
     },
     undoSale(body, callOptions) {
-      return guarded(async () => answered(await call("POST", "/vendas/desfazer", body, callOptions), saleReceiptSchema));
+      return guarded(async () => answered(await call("POST", "/vendas/desfazer", body, callOptions), undoReceiptSchema));
     },
     listLicenses(areaUserId, callOptions) {
       return guarded(async () =>
@@ -219,7 +242,7 @@ export function createHttpInternalEmissor(options: HttpInternalEmissorOptions): 
     revokeKey(licenseId, body, callOptions) {
       return guarded(async () =>
         validLicense(licenseId) && validUser(body.areaUserId)
-          ? answered(await call("POST", `/licencas/${encodeURIComponent(licenseId)}/revogar`, body, callOptions), saleReceiptSchema)
+          ? answered(await call("POST", `/licencas/${encodeURIComponent(licenseId)}/revogar`, body, callOptions), revokeReceiptSchema)
           : fail("pedido_invalido")
       );
     }

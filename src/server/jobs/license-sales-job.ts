@@ -5,7 +5,8 @@ import "server-only";
 //
 // - Sem a API interna do Emissor configurada (a copia do comprador, a `dev` sem o simulador): nao faz nada; nem le o banco.
 // - Com ela (a nossa escola): uma consulta por minuto a fila; com pedidos na vez, ate 10 por rodada, cada um com o tempo
-//   limite do cliente e o orcamento do tick. O Emissor fora do ar so atrasa: a linha volta para a fila com a espera.
+//   limite do cliente e o orcamento do tick. O Emissor fora do ar so atrasa: a linha volta para a fila com a espera, e a
+//   rodada para na primeira falha do Emissor inteiro.
 // Fica no fim, antes da limpeza de arquivos: nao atrasa os e-mails, os avisos nem as lives. Banco sem a migracao
 // 202611130001: registra uma vez e termina sem erro. Os logs levam so contagens e codigos.
 
@@ -30,10 +31,11 @@ export const licenseSalesJob: Job = {
     try {
       const result = await runLicenseRequestsRound({ client: seller.client, db: ctx.supabase, signal: ctx.signal });
 
-      if (result.sent + result.failed + result.dismissed > 0) {
+      if (result.sent + result.failed + result.stopped > 0) {
         console.info(
-          `[licencas-vendas] tick ${ctx.tickRunId}: enviados ${result.sent}, com erro ${result.failed}, dispensados ${result.dismissed}, esperando a venda ${result.waiting}` +
-            `${result.contended > 0 ? `, com outra rodada ${result.contended}` : ""}${result.errors.length > 0 ? ` (${[...new Set(result.errors)].join(", ")})` : ""}.`
+          `[licencas-vendas] tick ${ctx.tickRunId}: enviados ${result.sent}, para tentar de novo ${result.failed}, parados ${result.stopped}` +
+            `${result.contended > 0 ? `, com outra rodada ${result.contended}` : ""}${result.interrupted ? ", rodada interrompida" : ""}` +
+            `${result.errors.length > 0 ? ` (${[...new Set(result.errors)].join(", ")})` : ""}.`
         );
       }
     } catch (error) {

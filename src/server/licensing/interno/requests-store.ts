@@ -14,6 +14,8 @@ import {
   DISMISSED_SALE_RESOLUTION,
   LICENSE_REQUEST_COLUMNS,
   STALE_LICENSE_CLAIM_MS,
+  TEAM_DISMISSED_RESOLUTION,
+  UNDONE_SALE_RESOLUTION,
   type AttemptPatch,
   type LicenseRequestRow
 } from "./requests-model";
@@ -172,7 +174,7 @@ export async function fetchSaleRequestsOf(
 }
 
 /**
- * Dispensa a venda que nunca pode ter chegado ao Emissor (ainda na fila, sem resposta em duvida). Update condicional:
+ * Dispensa a venda que nunca pode ter chegado ao Emissor (na fila ou parada, sem resposta em duvida). Update condicional:
  * se a rodada do tick a reivindicou no meio tempo, nada muda e o desfazer entra na fila (devolve false).
  */
 export async function dismissUnsentSale(db: LicenseSalesDb, id: string): Promise<boolean> {
@@ -180,10 +182,26 @@ export async function dismissUnsentSale(db: LicenseSalesDb, id: string): Promise
     .from("license_requests")
     .update({ claimed_at: null, resolution: DISMISSED_SALE_RESOLUTION, status: "dispensado" })
     .eq("id", id)
-    .eq("status", "pendente")
+    .in("status", ["pendente", "parado"])
     .eq("maybe_delivered", false)
     .select("id");
   failOnError(error, "Dispensar a venda na fila de Licenças");
+
+  return ((data ?? []) as { id: string }[]).length > 0;
+}
+
+/** Depois do desfazer aceito pelo Emissor, a venda dele que ainda estava na fila (ou parada) nao precisa mais ir. */
+export async function dismissSaleUndoneByEmissor(db: LicenseSalesDb, undo: Pick<LicenseRequestRow, "external_product_id" | "provider" | "transaction_id">): Promise<boolean> {
+  const { data, error } = await db
+    .from("license_requests")
+    .update({ claimed_at: null, resolution: UNDONE_SALE_RESOLUTION, status: "dispensado" })
+    .eq("kind", "venda")
+    .eq("provider", undo.provider)
+    .eq("transaction_id", undo.transaction_id)
+    .eq("external_product_id", undo.external_product_id)
+    .in("status", ["pendente", "parado"])
+    .select("id");
+  failOnError(error, "Dispensar a venda desfeita na fila de Licenças");
 
   return ((data ?? []) as { id: string }[]).length > 0;
 }
@@ -230,17 +248,6 @@ export async function finishLicenseRequest(db: LicenseSalesDb, input: { claimedA
   failOnError(error, "Resultado do pedido de Licença");
 
   return ((data ?? []) as { id: string }[]).length > 0;
-}
-
-/** Devolve a reivindicacao sem contar tentativa (o desfazer que ainda espera a venda). */
-export async function releaseLicenseRequest(db: LicenseSalesDb, input: { claimedAt: string; id: string; nextAttemptAt: string }): Promise<void> {
-  const { error } = await db
-    .from("license_requests")
-    .update({ claimed_at: null, next_attempt_at: input.nextAttemptAt, status: "pendente" })
-    .eq("id", input.id)
-    .eq("status", "enviando")
-    .eq("claimed_at", input.claimedAt);
-  failOnError(error, "Devolver o pedido de Licença à fila");
 }
 
 /** Dispensa o desfazer reivindicado cuja venda nunca chegou ao Emissor. */
@@ -290,13 +297,13 @@ export async function fetchBuyerOf(db: LicenseSalesDb, userId: string): Promise<
 
 // ---- A lista da equipe -------------------------------------------------------------------------------------
 
-/** O que ainda nao saiu (todas) e as ultimas que sairam ou foram dispensadas. */
+/** O que ainda nao saiu (na fila, enviando ou parado) e as ultimas que sairam ou foram dispensadas. */
 export async function listLicenseRequestsForTeam(db: LicenseSalesDb, input: { recent: number }): Promise<{ open: LicenseRequestRow[]; recent: LicenseRequestRow[] }> {
   const [open, recent] = await Promise.all([
     db
       .from("license_requests")
       .select(LICENSE_REQUEST_COLUMNS)
-      .in("status", ["pendente", "enviando"])
+      .in("status", ["pendente", "enviando", "parado"])
       .order("created_at", { ascending: true })
       .limit(200),
     db
@@ -312,15 +319,28 @@ export async function listLicenseRequestsForTeam(db: LicenseSalesDb, input: { re
   return { open: (open.data ?? []) as unknown as LicenseRequestRow[], recent: (recent.data ?? []) as unknown as LicenseRequestRow[] };
 }
 
-/** "Tentar agora": a linha na fila volta a ficar na vez. */
+/** "Tentar agora": o pedido na fila ou parado volta a ficar na vez da proxima rodada. */
 export async function retryLicenseRequestNow(db: LicenseSalesDb, input: { id: string; now: Date }): Promise<boolean> {
   const { data, error } = await db
     .from("license_requests")
-    .update({ next_attempt_at: input.now.toISOString() })
+    .update({ next_attempt_at: input.now.toISOString(), status: "pendente" })
     .eq("id", input.id)
-    .eq("status", "pendente")
+    .in("status", ["pendente", "parado"])
     .select("id");
   failOnError(error, "Tentar de novo o pedido de Licença");
+
+  return ((data ?? []) as { id: string }[]).length > 0;
+}
+
+/** "Dispensar": a equipe resolveu de outro jeito (o Painel de licenças, a devolucao do valor); o pedido sai da fila. */
+export async function dismissLicenseRequestByTeam(db: LicenseSalesDb, input: { id: string }): Promise<boolean> {
+  const { data, error } = await db
+    .from("license_requests")
+    .update({ claimed_at: null, resolution: TEAM_DISMISSED_RESOLUTION, status: "dispensado" })
+    .eq("id", input.id)
+    .in("status", ["pendente", "parado"])
+    .select("id");
+  failOnError(error, "Dispensar o pedido de Licença");
 
   return ((data ?? []) as { id: string }[]).length > 0;
 }

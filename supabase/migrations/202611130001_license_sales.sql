@@ -5,7 +5,7 @@
 -- nascendo pela regra de sempre (src/server/payments/process-sale.ts). Agora, alem do acesso, a venda paga de um produto
 -- marcado como Bunker Members vira um pedido ao Emissor (POST /interno/v1/vendas), e o reembolso, o chargeback e o
 -- cancelamento viram o desfazer (POST /interno/v1/vendas/desfazer). Com o Emissor fora do ar, nada se perde: o pedido
--- fica numa fila daqui, reenviado pela tarefa do tick `licencas-vendas`, na ordem em que chegou.
+-- fica numa fila daqui, reenviado pela tarefa do tick `licencas-vendas`, com espera crescente entre as tentativas.
 -- - license_products: os produtos do catalogo marcados como Bunker Members (Produtos > Acesso e venda, so o dono). So o
 --   id do produto: o que cada codigo da plataforma e (Licenca anual, vitalicia, Ano adicional, modulo) fica no Emissor
 --   (docs/32 §11.10), nunca aqui;
@@ -87,7 +87,8 @@ create table if not exists public.license_requests (
     (kind = 'venda' and reason is null)
     or (kind = 'desfazer' and reason is not null and reason in ('reembolso', 'chargeback', 'cancelamento'))
   ),
-  constraint license_requests_status_known check (status in ('pendente', 'enviando', 'enviado', 'dispensado')),
+  -- Parado: o Emissor recusou de um jeito que tentar de novo nao resolve (a equipe resolve e usa Tentar agora ou Dispensar).
+  constraint license_requests_status_known check (status in ('pendente', 'enviando', 'enviado', 'dispensado', 'parado')),
   -- Enviado tem a data; enviando tem a reivindicacao da rodada.
   constraint license_requests_sent_pair check ((status = 'enviado') = (sent_at is not null)),
   constraint license_requests_claim_pair check (status <> 'enviando' or claimed_at is not null),
@@ -124,10 +125,10 @@ end;
 $$;
 
 comment on table public.license_requests is
-  'Pedidos ao Emissor da venda e do desfazer do Bunker Members (docs/32 §11.10): enviados pela tarefa licencas-vendas do tick, em ordem, com novas tentativas. Sem dado pessoal; escrita somente pelo servidor.';
+  'Pedidos ao Emissor da venda e do desfazer do Bunker Members (docs/32 §11.10): enviados pela tarefa licencas-vendas do tick, com novas tentativas. Sem dado pessoal; escrita somente pelo servidor.';
 comment on column public.license_requests.request_key is 'venda:<plataforma>:<transacao>:<produto> ou desfazer:<motivo>:<plataforma>:<transacao>:<produto>.';
 comment on column public.license_requests.user_id is 'A conta do comprador na nossa area (areaUserId no Emissor); o e-mail e o nome sao lidos na hora de enviar.';
-comment on column public.license_requests.maybe_delivered is 'Alguma tentativa pode ter chegado ao Emissor (sem resposta, erro do lado dele): o desfazer espera a venda, nunca a dispensa.';
+comment on column public.license_requests.maybe_delivered is 'Alguma tentativa pode ter chegado ao Emissor (sem resposta, erro do lado dele): o desfazer nunca dispensa esta venda sem avisar o Emissor.';
 comment on column public.license_requests.resolution is 'O que aconteceu, em portugues, para a lista de Configuracoes > Vendas.';
 
 alter table public.license_requests enable row level security;

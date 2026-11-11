@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-// Banco em memoria com a superficie do supabase-js que a venda, a venda guardada e a exportacao usam (docs/18 §2.5:
+// Banco em memoria com a superficie do supabase-js que a venda, a venda guardada, a fila de Licencas do Bunker Members e
+// a exportacao usam (docs/18 §2.5:
 // testes de comportamento sem o Supabase local). Nada aqui e importado por src/.
 //
 // - from(tabela): select (com { count: "exact", head }), insert, upsert ({ onConflict, ignoreDuplicates }), update e
@@ -16,6 +17,25 @@ const PADROES = {
   email_outbox: () => ({ attempts: 0, metadata: {}, status: "queued" }),
   entitlements: () => ({ ends_at: null, product_id: null, source_event_id: null }),
   held_sales: () => ({ attempts: 0, claimed_at: null, held_at: new Date().toISOString(), last_error: null, resolution: null, resolved_at: null, status: "held" }),
+  license_requests: () => ({
+    attempts: 0,
+    claimed_at: null,
+    last_error: null,
+    last_error_code: null,
+    maybe_delivered: false,
+    next_attempt_at: new Date().toISOString(),
+    occurred_at: null,
+    purchased_at: null,
+    reason: null,
+    resolution: null,
+    sent_at: null,
+    status: "pendente",
+    subscription_code: null,
+    updated_at: new Date().toISOString(),
+    user_id: null,
+    warranty_ends_at: null,
+    webhook_event_id: null
+  }),
   sale_grants: () => ({ closed_at: null, closed_by: null, previous_ends_at: null, subscription_code: null, webhook_event_id: null }),
   webhook_events: () => ({
     anonymized_at: null,
@@ -40,6 +60,8 @@ const UNICOS = {
   entitlements: [["user_id", "source_event_id"]],
   held_sales: [["webhook_event_id"]],
   integration_settings: [["provider"]],
+  license_products: [["product_id"]],
+  license_requests: [["request_key"]],
   profiles: [["id"]],
   sale_grants: [["provider", "transaction_id", "entitlement_id"]],
   sales_product_links: [["provider", "external_product_id"]],

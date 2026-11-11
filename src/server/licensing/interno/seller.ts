@@ -27,7 +27,7 @@ type SimulatorHolder = { __bunkerInternalEmissorSimulator?: InternalEmissorSimul
  */
 function processSimulator(): InternalEmissorSimulator {
   const holder = globalThis as SimulatorHolder;
-  holder.__bunkerInternalEmissorSimulator ??= createInternalEmissorSimulator({ defaultKind: "anual" });
+  holder.__bunkerInternalEmissorSimulator ??= createInternalEmissorSimulator({ defaultKind: "licenca_anual" });
   return holder.__bunkerInternalEmissorSimulator;
 }
 

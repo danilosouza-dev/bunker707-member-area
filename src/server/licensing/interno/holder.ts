@@ -11,15 +11,20 @@ export function onlyDigits(value: string): string {
   return value.replace(/\D+/g, "");
 }
 
-function allSameDigit(digits: string) {
-  return /^(\d)\1+$/.test(digits);
+/** O documento sem pontuacao (pontos, barra, hifen e espacos) e em maiusculas: o CNPJ alfanumerico tem letras. */
+export function normalizeDocument(value: string): string {
+  return value.replace(/[\s./-]+/g, "").toUpperCase();
+}
+
+function allSameCharacter(text: string) {
+  return /^(.)\1+$/.test(text);
 }
 
 /** CPF com os dois digitos verificadores certos (11 digitos, nunca todos iguais). */
 export function isValidCpf(value: string): boolean {
-  const digits = onlyDigits(value);
+  const digits = normalizeDocument(value);
 
-  if (digits.length !== 11 || allSameDigit(digits)) {
+  if (!/^\d{11}$/.test(digits) || allSameCharacter(digits)) {
     return false;
   }
 
@@ -37,36 +42,41 @@ export function isValidCpf(value: string): boolean {
   return check(9) === Number(digits[9]) && check(10) === Number(digits[10]);
 }
 
-/** CNPJ com os dois digitos verificadores certos (14 digitos, nunca todos iguais). */
+/**
+ * CNPJ com os dois digitos verificadores certos: o numerico (14 digitos) e o alfanumerico, que a Receita usa desde
+ * julho de 2026 (12 caracteres de 0 a 9 e de A a Z, e os dois verificadores numericos). O valor de cada caractere e o
+ * codigo dele menos 48 (os digitos continuam valendo eles mesmos), com os mesmos pesos de sempre. Nunca todos iguais.
+ */
 export function isValidCnpj(value: string): boolean {
-  const digits = onlyDigits(value);
+  const text = normalizeDocument(value);
 
-  if (digits.length !== 14 || allSameDigit(digits)) {
+  if (!/^[0-9A-Z]{12}\d{2}$/.test(text) || allSameCharacter(text)) {
     return false;
   }
 
+  const valueOf = (index: number) => text.charCodeAt(index) - 48;
   const check = (length: number) => {
     const weights = length === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    const sum = weights.reduce((total, weight, index) => total + Number(digits[index]) * weight, 0);
+    const sum = weights.reduce((total, weight, index) => total + valueOf(index) * weight, 0);
     const rest = sum % 11;
     return rest < 2 ? 0 : 11 - rest;
   };
 
-  return check(12) === Number(digits[12]) && check(13) === Number(digits[13]);
+  return check(12) === Number(text[12]) && check(13) === Number(text[13]);
 }
 
 export type DocumentKind = "cpf" | "cnpj";
 
-/** O tipo do documento pelos digitos (11 = CPF, 14 = CNPJ), so quando os verificadores conferem. */
+/** O tipo do documento (11 digitos = CPF, 14 caracteres = CNPJ), so quando os verificadores conferem. */
 export function documentKindOf(value: string): DocumentKind | null {
-  const digits = onlyDigits(value);
+  const text = normalizeDocument(value);
 
-  if (digits.length === 11) {
-    return isValidCpf(digits) ? "cpf" : null;
+  if (text.length === 11) {
+    return isValidCpf(text) ? "cpf" : null;
   }
 
-  if (digits.length === 14) {
-    return isValidCnpj(digits) ? "cnpj" : null;
+  if (text.length === 14) {
+    return isValidCnpj(text) ? "cnpj" : null;
   }
 
   return null;
@@ -76,7 +86,7 @@ export const HOLDER_MESSAGES = Object.freeze({
   documento: "Confira o CPF ou o CNPJ: os números não batem.",
   email2: "Informe um e-mail válido.",
   email2Igual: "Use um e-mail diferente do e-mail da sua conta: avisamos os dois.",
-  nome: "Informe o nome ou a razão social (de 3 a 200 letras).",
+  nome: "Informe o nome ou a razão social (de 3 a 160 letras).",
   termos: "Para gerar a chave, leia e aceite os termos de uso da Licença."
 });
 
@@ -92,7 +102,7 @@ export const holderFormSchema = z.object({
     .string()
     .trim()
     .transform((value) => value.replace(/\s+/g, " "))
-    .pipe(z.string().min(3, HOLDER_MESSAGES.nome).max(200, HOLDER_MESSAGES.nome)),
+    .pipe(z.string().min(3, HOLDER_MESSAGES.nome).max(160, HOLDER_MESSAGES.nome)),
   termos: z.literal(true, { error: HOLDER_MESSAGES.termos })
 });
 
@@ -123,20 +133,16 @@ export function validateHolderForm(
     return { fieldErrors: { email2: [HOLDER_MESSAGES.email2Igual] }, ok: false };
   }
 
-  return { data: { ...parsed.data, documento: onlyDigits(parsed.data.documento) }, ok: true };
+  return { data: { ...parsed.data, documento: normalizeDocument(parsed.data.documento) }, ok: true };
 }
 
-/** O documento para mostrar: 123.456.789-09 ou 12.345.678/0001-95; o que veio mascarado do Emissor fica como veio. */
-export function formatDocument(value: string): string {
-  const digits = onlyDigits(value);
+/**
+ * O documento para a tela, mascarado: so o tipo e os ultimos digitos (o comprador ve que e o dele; o numero inteiro nao
+ * fica escrito na pagina). "CPF terminado em 09", "CNPJ terminado em 95".
+ */
+export function maskedDocument(value: string): string {
+  const text = normalizeDocument(value);
+  const kind = text.length === 11 ? "CPF" : text.length === 14 ? "CNPJ" : "Documento";
 
-  if (digits.length === 11 && digits === value) {
-    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
-  }
-
-  if (digits.length === 14 && digits === value) {
-    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
-  }
-
-  return value;
+  return text.length >= 4 ? `${kind} terminado em ${text.slice(-2)}` : kind;
 }
