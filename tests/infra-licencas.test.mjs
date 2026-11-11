@@ -196,7 +196,7 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
   const run = (etapa, ref) => spawnSync("bash", ["-e", "-c", step[2]], { encoding: "utf8", env: { ...process.env, ETAPA: etapa, GITHUB_REF: ref } });
   const runSource = readFileSync(join(cloudDir, "run.sh"), "utf8");
   const etapas = [...runSource.matchAll(/^\s+([a-z-]+-licencas)\)/gm)].map((m) => m[1]);
-  assert.deepEqual(etapas.sort(), ["backup-licencas", "deploy-licencas", "dns-licencas", "ensaio-licencas", "exec-licencas", "plan-licencas", "provision-licencas", "restaurar-licencas", "secrets-licencas", "status-licencas"]);
+  assert.deepEqual(etapas.sort(), ["backup-licencas", "cerimonia-licencas", "deploy-licencas", "dns-licencas", "ensaio-licencas", "exec-licencas", "plan-licencas", "provision-licencas", "restaurar-licencas", "secrets-licencas", "status-licencas"]);
   for (const etapa of etapas) {
     assert.equal(run(etapa, "refs/heads/main").status, 0, `${etapa} na main`);
     const dev = run(etapa, "refs/heads/dev");
@@ -213,7 +213,7 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
 
   // A segunda trava, no proprio script, para quem chamar de outro lugar no Actions.
   const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
-  for (const [script, args] of [["licencas.sh", ["dns"]], ["licencas.sh", ["deploy"]], ["licencas.sh", ["segredos"]], ["licencas.sh", ["restaurar"]], ["provision.sh", ["licencas"]], ["run.sh", ["exec-licencas"]]]) {
+  for (const [script, args] of [["licencas.sh", ["dns"]], ["licencas.sh", ["deploy"]], ["licencas.sh", ["segredos"]], ["licencas.sh", ["cerimonia"]], ["licencas.sh", ["restaurar"]], ["provision.sh", ["licencas"]], ["run.sh", ["exec-licencas"]]]) {
     const recusa = conta.runScript(script, { GITHUB_ACTIONS: "true", GITHUB_REF: "refs/heads/dev", CONFIRMADO: "sim", CONFIRMAR: "restaurar", COMANDO: "true" }, args);
     assert.equal(recusa.status, 1, `${script} ${args}`);
     assert.match(recusa.stderr, /As etapas que mudam o servidor de licencas so rodam da main \(recebido: refs\/heads\/dev\)/, `${script} ${args}`);
@@ -223,7 +223,7 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
   assert.equal(plano.status, 0, "plan-licencas so le");
 });
 
-test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e confere que existem antes; a configuracao do Painel vem das variaveis do repositorio, so no deploy", () => {
+test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e nenhum e obrigatorio depois da cerimonia; a configuracao do Painel vem das variaveis do repositorio, so no deploy", () => {
   const step = workflow.slice(workflow.indexOf("      - name: ${{ inputs.etapa }}"), workflow.indexOf("      - name: Fechar o SSH (sempre)"));
   const todas = [...step.matchAll(/^ {10}(LICENCAS_[A-Z_]+): \$\{\{ (.+) \}\}$/gm)].map((m) => [m[1], m[2]]);
   const linhas = todas.filter(([, expressao]) => expressao.includes("secrets."));
@@ -245,7 +245,23 @@ test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e confer
   assert.doesNotMatch(workflow, /RAIZ_PRIVADA|LICENCAS_RAIZ_CHAVE|secrets\.LICENCAS_RAIZ[^E]/, "nenhum segredo de chave raiz no workflow");
   const presentes = workflow.slice(workflow.indexOf("- name: Segredos presentes?"), workflow.indexOf("      - name: ${{ inputs.etapa }}"));
   assert.match(presentes, /TEM_LICENCAS_RAIZES: \$\{\{ secrets\.LICENCAS_RAIZES != '' \}\}/, "a conferencia so ve se existe, nunca o valor");
-  assert.match(presentes, /secrets-licencas\|deploy-licencas\) \[ "\$TEM_LICENCAS_RAIZES" = true \]/);
+  // O deploy precisa das raizes publicas: o infra/licencas/raizes.json da cerimonia, ou o segredo de antes.
+  const conferencia = presentes.match(/case "\$ETAPA" in deploy-licencas\) (.+) ;; esac/)[1];
+  const roda = (comArquivo, tem) => {
+    const dir = mkdtempSync(join(tmpdir(), "bunker707-presentes-"));
+    try {
+      if (comArquivo) { spawnSync("mkdir", ["-p", join(dir, "infra/licencas")]); writeFileSync(join(dir, "infra/licencas/raizes.json"), RAIZES); }
+      return spawnSync("bash", ["-c", conferencia], { cwd: dir, encoding: "utf8", env: { PATH: process.env.PATH, TEM_LICENCAS_RAIZES: tem } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  assert.equal(roda(true, "false").status, 0, "com o raizes.json, sem segredo nenhum");
+  assert.equal(roda(false, "true").status, 0, "sem o arquivo, o segredo de antes");
+  const falta = roda(false, "false");
+  assert.equal(falta.status, 1);
+  assert.match(falta.stdout, /::error::Faltam as raizes publicas: rode cerimonia-licencas/);
+  assert.doesNotMatch(presentes, /TEM_LICENCAS_EMISSAO|secrets-licencas\)/, "o secrets-licencas nao exige mais os segredos da chave de emissao");
 });
 
 test("licencas-chave.mjs: aceita a chave de emissao certa e recusa a raiz, a chave sem cifra, o certificado de outra chave, de outra raiz ou vencido", () => {
@@ -308,7 +324,7 @@ test("secrets-licencas grava os segredos em segredos/ como 1000:1000 e 0400, so 
   assert.equal(vazia.status, 0, vazia.stdout + vazia.stderr);
   const arquivo = sshCmds(semResend.calls()).find((c) => c.command.includes('segredos/resend-chave'));
   assert.match(arquivo.command, /test -s "\/opt\/bunker707\/emissor\/segredos\/resend-chave" && echo .*mantida.* \|\| \{ umask 077; : > "\/opt\/bunker707\/emissor\/segredos\/resend-chave" && chown 1000:1000 .* && chmod 400 /);
-  assert.match(vazia.stderr, /LICENCAS_RESEND_CHAVE vazio: sem a chave do Resend o Painel nao sobe .*LICENCAS_SEM_PAINEL=sim/);
+  assert.match(vazia.stderr, /Sem a chave do Resend \(nem o envelope no payload, nem LICENCAS_RESEND_CHAVE\): sem ela o Painel nao sobe .*LICENCAS_SEM_PAINEL=sim/);
   // A chave fora do formato que o Emissor confere ao subir: recusada no runner, antes de qualquer chamada.
   const malFeita = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
   const ruim = malFeita.runScript("licencas.sh", { ...SEGREDOS, LICENCAS_RESEND_CHAVE: "chave.sem.prefixo.0001" }, ["segredos"]);
@@ -322,6 +338,91 @@ test("secrets-licencas grava os segredos em segredos/ como 1000:1000 e 0400, so 
   assert.equal(recusa.status, 1);
   assert.match(recusa.stderr, /e uma das RAIZES/);
   assert.deepEqual(raizComoEmissao.calls(), [], "nada saiu do runner");
+});
+
+test("secrets-licencas depois da cerimonia: sem os segredos da chave de emissao, mantem a do servidor; sem ela no servidor, manda rodar a cerimonia; os tres andam juntos", { skip }, () => {
+  const semEmissao = { LICENCAS_RESEND_CHAVE: SEGREDOS.LICENCAS_RESEND_CHAVE };
+  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+  const result = conta.runScript("licencas.sh", semEmissao, ["segredos"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = sshCmds(conta.calls());
+  assert.ok(calls.some((c) => c.command.includes('for f in emissao.pem emissao-senha emissao-certificado.json; do test -s')), "confere a chave da cerimonia no servidor");
+  for (const arquivo of ["emissao.pem", "emissao-senha", "emissao-certificado.json"]) {
+    assert.ok(!calls.some((c) => c.command.includes(`mv -f "$t" "/opt/bunker707/emissor/segredos/${arquivo}"`)), `${arquivo} nao e trocado`);
+  }
+  assert.match(result.stdout, /os da cerimonia-licencas, ja no servidor \(mantidos\)/);
+  assert.ok(calls.some((c) => c.command.includes('mv -f "$t" "/opt/bunker707/emissor/segredos/resend-chave"')), "a chave do Resend do segredo vai");
+
+  const semChave = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+  const recusa = semChave.runScript("licencas.sh", { ...semEmissao, SSH_SHIM_REPLIES: JSON.stringify([{ contem: "do test -s", codigo: 1 }]) }, ["segredos"]);
+  assert.equal(recusa.status, 1);
+  assert.match(recusa.stderr, /Falta a chave de emissao no servidor .*rode a etapa cerimonia-licencas da main, com CONFIRMAR=cerimonia/);
+  assert.ok(!semChave.hz().firewalls[0].rules.some((r) => r.port === "22"), "a 22 fecha mesmo com a recusa");
+
+  const metade = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+  const parcial = metade.runScript("licencas.sh", { LICENCAS_EMISSAO_CHAVE: SEGREDOS.LICENCAS_EMISSAO_CHAVE }, ["segredos"]);
+  assert.equal(parcial.status, 1);
+  assert.match(parcial.stderr, /andam juntos\. Com a cerimonia-licencas .* nenhum dos tres e preciso/);
+  assert.deepEqual(metade.calls(), []);
+});
+
+test("secrets-licencas com o envelope no payload: a chave do Resend so e aberta no servidor e vai direto para segredos/resend-chave", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "bunker707-envelope-licencas-"));
+  try {
+    // A transfer.key do servidor e o envelope que a IA monta com a chave criada pelo conector do Resend.
+    spawnSync("openssl", ["genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", join(dir, "transfer.key")]);
+    spawnSync("openssl", ["pkey", "-in", join(dir, "transfer.key"), "-pubout", "-out", join(dir, "transfer.pub")]);
+    writeFileSync(join(dir, "kv"), "RESEND_API_KEY=re_chave_do_envelope_0001\n");
+    const envelope = spawnSync("bash", [join(cloudDir, "envelope.sh"), "encrypt", join(dir, "transfer.pub"), join(dir, "kv")], { encoding: "utf8" }).stdout.trim();
+    assert.match(envelope, /^[A-Za-z0-9+/]+=*\.[A-Za-z0-9+/]+=*$/);
+
+    const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+    const result = conta.runScript("licencas.sh", { PAYLOAD: envelope, LICENCAS_RESEND_CHAVE: "re_segredo_que_perde_para_o_envelope" }, ["segredos"]);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const calls = sshCmds(conta.calls());
+    const payload = calls.find((c) => c.command.includes("cat > /tmp/payload-licencas.b64"));
+    assert.equal(payload.stdin, envelope.slice(0, 80), "o envelope (cifrado) vai pelo stdin");
+    const abre = calls.find((c) => c.command.includes("envelope-licencas.sh decrypt /etc/bunker707/transfer.key"));
+    assert.ok(abre, "o servidor abre o envelope com a transfer.key dele");
+    assert.ok(!calls.some((c) => c.command.includes('segredos/resend-chave"\'') && c.command.includes("mv -f")), "nada da chave sai do runner");
+    const tudo = calls.map((c) => `${c.command}\n${c.stdin}`).join("\n") + result.stdout + result.stderr;
+    assert.ok(!tudo.includes("re_chave_do_envelope") && !tudo.includes("re_segredo_que_perde"), "a chave nunca em texto no runner, no log ou no SSH");
+
+    // O programa que roda no servidor, de verdade: o envelope aberto com a transfer.key, a chave conferida e gravada.
+    const programa = join(dir, "programa.py");
+    const remoto = abre.command;
+    const ssh = conta.calls().find((c) => c.tool === "ssh" && c.command === remoto);
+    assert.ok(ssh);
+    const pasta = join(dir, "segredos");
+    spawnSync("mkdir", ["-p", pasta]);
+    const fonte = readFileSync(join(cloudDir, "licencas.sh"), "utf8");
+    writeFileSync(programa, fonte.slice(fonte.indexOf("import os, re, sys, tempfile"), fonte.indexOf("PY\n}\nsegredos() {")));
+    const abrir = (kv) => {
+      writeFileSync(join(dir, "kv2"), kv);
+      const env = spawnSync("bash", [join(cloudDir, "envelope.sh"), "encrypt", join(dir, "transfer.pub"), join(dir, "kv2")], { encoding: "utf8" }).stdout.trim();
+      writeFileSync(join(dir, "payload.b64"), env);
+      return spawnSync("bash", ["-c", `set -o pipefail; bash "${join(cloudDir, "envelope.sh")}" decrypt "${join(dir, "transfer.key")}" "${join(dir, "payload.b64")}" | python3 -c "import os; os.chown = lambda *a: None; exec(open('${programa}').read())" "${pasta}"`], { encoding: "utf8" });
+    };
+    const ok = abrir("EMAIL_PROVIDER=resend\nRESEND_API_KEY=re_chave_do_envelope_0001\n");
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(readFileSync(join(pasta, "resend-chave"), "utf8"), "re_chave_do_envelope_0001");
+    assert.match(ok.stdout, /segredos\/resend-chave \(do envelope; so este servidor o abre\)/);
+    assert.doesNotMatch(ok.stdout + ok.stderr, /re_chave/);
+    const ruim = abrir("RESEND_API_KEY=chave sem prefixo\n");
+    assert.equal(ruim.status, 1);
+    assert.match(ruim.stderr, /fora do formato/);
+    const semLinha = abrir("OUTRA=1\n");
+    assert.equal(semLinha.status, 1);
+    assert.match(semLinha.stderr, /nao traz a linha RESEND_API_KEY/);
+
+    const malFeito = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+    const recusa = malFeito.runScript("licencas.sh", { PAYLOAD: "isto nao e um envelope" }, ["segredos"]);
+    assert.equal(recusa.status, 1);
+    assert.match(recusa.stderr, /PAYLOAD nao e um envelope de infra\/cloud\/envelope\.sh/);
+    assert.deepEqual(malFeito.calls(), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("secrets-licencas: a senha do banco que ja existe com outro valor so muda com TROCAR_SENHA_BANCO=sim, que troca dentro do banco antes do arquivo", { skip }, () => {
@@ -484,7 +585,7 @@ test("deploy-licencas para antes do SSH sem o DNS certo ou sem as raizes", { ski
   assert.match(comProxy.runScript("licencas.sh", base, ["deploy"]).stderr, /esperado: A 192\.0\.2\.7 proxy=false; achado: A 192\.0\.2\.7 proxy=true/);
 
   const semRaizes = setup({ servers: [servidorLicencas()] }).runScript("licencas.sh", { GITHUB_TOKEN: "ghs_x" }, ["deploy"]);
-  assert.match(semRaizes.stderr, /LICENCAS_RAIZES ausente/);
+  assert.match(semRaizes.stderr, /Sem as raizes publicas: rode a cerimonia-licencas e grave em infra\/licencas\/raizes\.json/);
 });
 
 test("deploy-licencas com a configuracao do Painel fora do formato para antes de qualquer chamada; sem nenhuma variavel valem os padroes; so LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel", { skip }, () => {

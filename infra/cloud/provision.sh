@@ -132,6 +132,8 @@ if [ "$role" = "licencas" ]; then
     fw_open_ssh "$LICENCAS_NAME"
     bootstrap_server "$LICENCAS_NAME" SEM_SUPABASE_CLI=1
     install_backup_key "$(server_ip4 "$LICENCAS_NAME")" "$backup_key"
+    # A transfer.pub do Emissor (publica): a IA cifra para ela o envelope com a chave do Resend (secrets-licencas).
+    print_transfer_pub "$LICENCAS_NAME"
     fw_close_all
     rm -f "$backup_key" "$backup_key.pub"
     [ -n "$(storage_box_json)" ] || warn "O Storage Box $STORAGE_BOX_NAME nao existe: o deploy-licencas para sem ele (o Emissor nao sobe sem backup)."

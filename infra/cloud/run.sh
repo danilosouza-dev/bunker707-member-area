@@ -11,9 +11,10 @@
 #   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
 #   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup),
 #   carga (teste de carga: VUS alunos navegando pelo dominio publico; dados de teste apagados no fim),
-#   plan-licencas, provision-licencas, dns-licencas, secrets-licencas, deploy-licencas, backup-licencas,
+#   plan-licencas, provision-licencas, dns-licencas, cerimonia-licencas, secrets-licencas, deploy-licencas, backup-licencas,
 #   restaurar-licencas, ensaio-licencas, status-licencas, exec-licencas (servidor do Emissor de licencas, docs/20 §8C;
-#   o que muda alguma coisa so da main; criar com CONFIRMADO=sim, restaurar com CONFIRMAR=restaurar)
+#   o que muda alguma coisa so da main; criar com CONFIRMADO=sim, a cerimonia com CONFIRMAR=cerimonia, restaurar com
+#   CONFIRMAR=restaurar)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -66,6 +67,7 @@ case "$etapa" in
     plan-licencas) bash "$here/licencas.sh" plan ;;
     provision-licencas) bash "$here/provision.sh" licencas ;;
     dns-licencas) bash "$here/licencas.sh" dns ;;
+    cerimonia-licencas) bash "$here/licencas.sh" cerimonia ;;
     secrets-licencas) bash "$here/licencas.sh" segredos ;;
     deploy-licencas) bash "$here/licencas.sh" deploy ;;
     backup-licencas) bash "$here/licencas.sh" backup ;;

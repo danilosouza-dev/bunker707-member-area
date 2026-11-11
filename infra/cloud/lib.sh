@@ -80,6 +80,12 @@ LICENCAS_EMISSOR_EMAIL_REMETENTE="${LICENCAS_EMISSOR_EMAIL_REMETENTE:-Bunker Mem
 LICENCAS_PAINEL_TETO_DIARIO="${LICENCAS_PAINEL_TETO_DIARIO:-10}"
 # Backup de hora em hora no Storage Box que ja existe, num repositorio restic so dele.
 LICENCAS_RESTIC_REPOSITORY="${LICENCAS_RESTIC_REPOSITORY:-sftp:storagebox:bunker707/restic-licencas}"
+# A pasta das duas raizes, so cifradas, no mesmo Storage Box (cerimonia-licencas, docs/32 D41): fora do servidor do
+# Emissor e de qualquer repositorio restic.
+LICENCAS_RAIZES_PASTA="${LICENCAS_RAIZES_PASTA:-bunker707/licencas-raizes}"
+# As raizes publicas no repositorio (o que a cerimonia imprime, num commit): o EMISSOR_RAIZES do deploy-licencas e o
+# BUNKER_LICENSING_ROOTS do produto vendido (.github/workflows/pacote-escola.yml).
+LICENCAS_RAIZES_ARQUIVO="${LICENCAS_RAIZES_ARQUIVO:-$REPO_ROOT/infra/licencas/raizes.json}"
 # O minimo para Node (Emissor e, depois, o Painel), Postgres 16 e Caddy num servidor so (docs/20 §8C.1).
 LICENCAS_MIN_RAM_GB="${LICENCAS_MIN_RAM_GB:-2}"
 LICENCAS_MIN_DISK_GB="${LICENCAS_MIN_DISK_GB:-20}"
@@ -571,8 +577,50 @@ licencas_so_da_main() {
         || die "As etapas que mudam o servidor de licencas so rodam da main (recebido: ${GITHUB_REF:-sem branch}). Fluxo: tarefa -> dev -> main -> servidor."
 }
 
+# licencas_raizes_json: as raizes PUBLICAS (rid e chave publica), numa linha de JSON. Vem de infra/licencas/raizes.json,
+# que a cerimonia-licencas imprime e vai num commit (docs/32 D41); sem o arquivo, do segredo LICENCAS_RAIZES de antes da
+# cerimonia automatica. O arquivo vale por cima do segredo: e com ele que o produto vendido e gerado. Sem nenhum, nada.
+licencas_raizes_json() {
+    python3 -I - "$LICENCAS_RAIZES_ARQUIVO" "${LICENCAS_RAIZES:-}" <<'PY'
+import json, os, re, sys
+arquivo, segredo = sys.argv[1], sys.argv[2]
+def raizes(texto, origem):
+    try:
+        lista = json.loads(texto)
+    except ValueError:
+        sys.exit(f'ERRO: {origem} nao e JSON: [{{"rid":"...","publicKey":"..."}}].')
+    if not (isinstance(lista, list) and 1 <= len(lista) <= 4 and all(
+            isinstance(r, dict) and set(r) == {"rid", "publicKey"} and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(r["rid"]))
+            and re.fullmatch(r"[A-Za-z0-9_-]{43}", str(r["publicKey"])) for r in lista)) or len({r["rid"] for r in lista}) != len(lista):
+        sys.exit(f"ERRO: {origem} precisa ser a lista de 1 a 4 raizes publicas da cerimonia, so com rid e publicKey.")
+    return json.dumps(lista, separators=(",", ":"))
+if os.path.exists(arquivo):
+    valor = raizes(open(arquivo, encoding="utf-8").read(), "infra/licencas/raizes.json")
+    if segredo.strip() and raizes(segredo, "LICENCAS_RAIZES") != valor:
+        print("AVISO: o segredo LICENCAS_RAIZES e diferente de infra/licencas/raizes.json; vale o arquivo (apague o segredo no GitHub).", file=sys.stderr)
+    print(valor)
+elif segredo.strip():
+    print(raizes(segredo, "LICENCAS_RAIZES"))
+PY
+}
+
 # ---- Storage Box ------------------------------------------------------------------------------------
 storage_box_json() { hzj storage-box describe "$STORAGE_BOX_NAME" 2>/dev/null || true; }
+# box_alvo: o usuario e o host do Storage Box (box_user e box_host), ou para.
+box_alvo() {
+    local box; box=$(storage_box_json)
+    box_user=$(printf '%s' "$box" | jq -r '.username // .user // empty'); box_host=$(printf '%s' "$box" | jq -r '.server // .host // empty')
+    [ -n "$box_user" ] && [ -n "$box_host" ] || die "Sem o Storage Box $STORAGE_BOX_NAME (ou sem usuario e host no JSON dele)."
+}
+# box_sftp: os comandos do sftp pela entrada (um por linha), no Storage Box, direto do runner: o box aceita SSH de fora
+# (provision.sh) com a chave de backup derivada do token. Com -b, o primeiro comando que falha para tudo (o `-` na frente
+# de um comando ignora a falha dele).
+box_sftp() {
+    local key="$WORK_DIR/storagebox_key"
+    [ -f "$key" ] || node "$CLOUD_DIR/deploy-key.mjs" --out "$key" --info bunker707-backup-key-v1 >/dev/null
+    sftp -q -b - -P "${STORAGE_BOX_SSH_PORT:-23}" -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 \
+        -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOSTS" -o LogLevel=ERROR "$box_user@$box_host"
+}
 
 # ---- Webinarios: segredos do gravador, webhook assinado e preco por hora --------------------------------
 # JIBRI_SECRETS e um segredo do repositorio com linhas CHAVE=VALOR (docs/20 §8B.3; docs/30 §7.3, I4): o

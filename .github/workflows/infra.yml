@@ -53,6 +53,7 @@ on:
           - plan-licencas
           - provision-licencas
           - dns-licencas
+          - cerimonia-licencas
           - secrets-licencas
           - deploy-licencas
           - backup-licencas
@@ -61,7 +62,7 @@ on:
           - status-licencas
           - exec-licencas
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>; cerimonia: CONFIRMAR=cerimonia ROTACIONAR=emissao)"
         type: string
         required: false
         default: ""
@@ -126,7 +127,8 @@ jobs:
           case "$ETAPA:$GITHUB_REF" in *:refs/heads/main|deploy-meet:refs/heads/dev) ;; *) echo "::error::$ETAPA so roda na main$([ "$ETAPA" = deploy-meet ] && printf ' ou na dev') (recebido: $GITHUB_REF). Fluxo: tarefa -> dev (teste na Vercel) -> main -> servidor."; exit 1 ;; esac
 
       # Servidor do Emissor de licencas (docs/32 D39; docs/20 §8C): toda etapa que muda alguma coisa nele (criar, DNS,
-      # segredos, deploy, backup, restaurar, ensaio, exec) so roda da main. plan-licencas e status-licencas so leem.
+      # a cerimonia das chaves, segredos, deploy, backup, restaurar, ensaio, exec) so roda da main. plan-licencas e
+      # status-licencas so leem.
       - name: Licencas so da main
         if: endsWith(inputs.etapa, '-licencas')
         run: |
@@ -138,14 +140,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
           TEM_LICENCAS_RAIZES: ${{ secrets.LICENCAS_RAIZES != '' }}
-          TEM_LICENCAS_EMISSAO: ${{ secrets.LICENCAS_EMISSAO_CHAVE != '' && secrets.LICENCAS_EMISSAO_SENHA != '' && secrets.LICENCAS_EMISSAO_CERTIFICADO != '' }}
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
           case "$ETAPA" in provision|provision-meet|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
           case "$ETAPA" in dns-licencas|deploy-licencas) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS do Emissor e conferido no deploy)."; exit 1; } ;; esac
           case "$ETAPA" in jibri-up|jibri-down) [ -n "$JIBRI_SECRETS" ] || { echo "::error::Segredo JIBRI_SECRETS ausente (linhas CHAVE=VALOR do gravador, docs/20 secao 8B.3)."; exit 1; } ;; esac
-          case "$ETAPA" in secrets-licencas|deploy-licencas) [ "$TEM_LICENCAS_RAIZES" = true ] || { echo "::error::Segredo LICENCAS_RAIZES ausente (as raizes publicas da cerimonia das chaves, docs/20 secao 8C.5)."; exit 1; } ;; esac
-          case "$ETAPA" in secrets-licencas) [ "$TEM_LICENCAS_EMISSAO" = true ] || { echo "::error::Faltam os segredos LICENCAS_EMISSAO_CHAVE, LICENCAS_EMISSAO_SENHA e LICENCAS_EMISSAO_CERTIFICADO (cerimonia das chaves, docs/20 secao 8C.5)."; exit 1; } ;; esac
+          # As raizes publicas: infra/licencas/raizes.json, que a cerimonia-licencas imprime (docs/32 D41); o segredo
+          # LICENCAS_RAIZES de antes ainda vale sem o arquivo. A chave de emissao nasce no servidor pela cerimonia.
+          case "$ETAPA" in deploy-licencas) [ -s infra/licencas/raizes.json ] || [ "$TEM_LICENCAS_RAIZES" = true ] || { echo "::error::Faltam as raizes publicas: rode cerimonia-licencas e grave em infra/licencas/raizes.json, num commit, o que ela imprime (docs/20 secao 8C.8)."; exit 1; } ;; esac
 
       - name: ${{ inputs.etapa }}
         # Abaixo dos 60 minutos do job, para o passo final sempre ter tempo de rodar.
@@ -157,8 +159,10 @@ jobs:
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
           PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
           COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
-          # Servidor de licencas (docs/20 §8C.5): cada segredo so entra na etapa que o usa. A chave raiz nunca e segredo
-          # daqui: fica fora de qualquer servidor (docs/32 §10), e o secrets-licencas recusa uma raiz no lugar da emissao.
+          # Servidor de licencas (docs/20 §8C.5): cada segredo so entra na etapa que o usa, e nenhum e obrigatorio. A chave
+          # raiz nunca e segredo daqui: a cerimonia-licencas a guarda so cifrada no Storage Box (docs/32 D41), e o
+          # secrets-licencas recusa uma raiz no lugar da emissao. Os LICENCAS_EMISSAO_* sao da cerimonia feita fora, de
+          # antes; a chave do Resend chega de preferencia no envelope do payload (docs/20 §8C.5).
           LICENCAS_RAIZES: ${{ (inputs.etapa == 'secrets-licencas' || inputs.etapa == 'deploy-licencas') && secrets.LICENCAS_RAIZES || '' }}
           LICENCAS_EMISSAO_CHAVE: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_EMISSAO_CHAVE || '' }}
           LICENCAS_EMISSAO_SENHA: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_EMISSAO_SENHA || '' }}
