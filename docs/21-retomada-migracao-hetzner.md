@@ -986,7 +986,8 @@ aponta a `202611110001` (`WEBINARS_MIGRATION` e `WEBINARS_PERSONAS_MIGRATION`). 
 antes: a tabela é nova, as colunas novas têm padrão ou ficam nulas, o check aceita tudo que o app de antes grava (toda
 pergunta dele tem aluno e fica `audience`), e só o app novo cria item Pergunta e pergunta simulada. O único `drop` é o
 `drop not null` de `webinar_questions.user_id` (afrouxa; nenhum dado sai). O preenchimento muda a cópia dos itens do
-roteiro ligados a uma pessoa (o nome, o papel e a foto da mais recente com o mesmo nome); as mensagens já enviadas não
+roteiro ligados a uma pessoa (o nome e o papel da mais recente com o mesmo nome e a foto mais recente que existe; a
+correção da revisão v8 de 11/11/2026 mudou o arquivo antes de ele ir para a nuvem); as mensagens já enviadas não
 mudam.
 
 **Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
