@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Instalador do kit do produto licenciado (docs/32 §3.2 e §11.7; docs/20 §9D). Um comando, no servidor do comprador,
-# com o Pacote da versao aberto na pasta da instalacao (KIT_PASTA_INSTALACAO, do kit.conf):
+# Instalador do Bunker Members (o kit do produto licenciado; docs/32 §3.2 e §11.7; docs/20 §9D). Um comando, no
+# servidor do comprador, com o Pacote da versao aberto na pasta da instalacao (KIT_PASTA_INSTALACAO, do kit.conf):
 #   sudo bash /opt/<nome>/infra/kit/instalar                      guiado: pergunta so o que falta
 #   sudo bash /opt/<nome>/infra/kit/instalar --respostas ARQ      com o arquivo de respostas (a IA ou a equipe)
 #   sudo bash .../instalar --restauracao [--respostas ARQ]        instala sem Chave de ativacao, para membros restaurar
@@ -99,7 +99,7 @@ if [ "$acao" = conferir ]; then
     [ -z "$conf_ip" ] || args+=(--ip "$conf_ip")
     ! caddy_no_ar || args+=(--portas-nossas)
     [ "$json" = 0 ] || args+=(--json)
-    [ "$json" = 1 ] || log "Conferindo este servidor (nada muda e nenhuma Licenca e usada)"
+    [ "$json" = 1 ] || log "Conferindo este servidor para o Bunker Members (nada muda e nenhuma Licenca e usada)"
     rc=0
     inst_py conferir "${args[@]}" || rc=$?
     if [ "$json" = 0 ]; then
@@ -259,8 +259,8 @@ passo_pacote() {
     conferir_pacote
     inst_py estado-iniciar "$ARQ" "versao=$PACOTE_VERSAO" "manifesto_sha256=$PACOTE_MANIFESTO_SHA256" || parar $? "outro pacote"
     case "$PACOTE_ASSINADO" in
-        sim) printf '  Pacote %s: %s arquivos conferidos e a assinatura confere.\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
-        *) printf '  Pacote %s: %s arquivos conferidos pelo sha256. Sem assinatura conferida: a chave do pacote ainda nao foi\n  gravada neste kit (a cerimonia das chaves vem depois; docs/20 §9D).\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
+        sim) printf '  Pacote do Bunker Members %s: %s arquivos conferidos e a assinatura confere.\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
+        *) printf '  Pacote do Bunker Members %s: %s arquivos conferidos pelo sha256. Sem assinatura conferida: a chave do pacote\n  ainda nao foi gravada neste kit (no lote fundador, a equipe leva o pacote; docs/20 §9D).\n' "$PACOTE_VERSAO" "$PACOTE_ARQUIVOS" ;;
     esac
     # O comando de operacao no PATH do administrador.
     if [ "$(readlink -f -- "$KIT_LINK_DO_COMANDO" 2>/dev/null)" != "$KIT_DIR/membros" ]; then

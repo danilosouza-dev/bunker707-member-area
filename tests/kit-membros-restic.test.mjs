@@ -54,9 +54,9 @@ test("retencao do kit com o restic de verdade: os backups velhos saem, e os vazi
   mkdirSync(etapa, { recursive: true });
   writeFileSync(join(etapa, "postgres.dump"), "PGDMP");
   for (let atras = 10; atras >= 1; atras--) {
-    const r = restic(repo, ["backup", "-q", "--time", `${dia(atras)} 03:30:00`, "--host", "bunker707", "--tag", "bunker707", "--tag", "com-dados", etapa, s.storage]);
+    const r = restic(repo, ["backup", "-q", "--time", `${dia(atras)} 03:30:00`, "--host", "membros", "--tag", "membros", "--tag", "com-dados", etapa, s.storage]);
     assert.equal(r.status, 0, r.stderr);
-    if (atras <= 5) assert.equal(restic(repo, ["backup", "-q", "--time", `${dia(atras)} 04:00:00`, "--host", "bunker707", "--tag", "bunker707", "--tag", "vazio", etapa]).status, 0);
+    if (atras <= 5) assert.equal(restic(repo, ["backup", "-q", "--time", `${dia(atras)} 04:00:00`, "--host", "membros", "--tag", "membros", "--tag", "vazio", etapa]).status, 0);
   }
   rmSync(etapa, { recursive: true });
   assert.equal(snapshots(repo).length, 15);

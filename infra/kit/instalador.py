@@ -1387,7 +1387,7 @@ def plano(argv):
     passos = estado.get("passos") or {}
     modo = opcoes.get("modo", "instalacao")
     pulados = {"restauracao": {"conta_do_dono", "email", "agendador", "migracoes", "conferencia_final", "ativacao"}}.get(modo, set())
-    print(f"\nPlano ({'modo de restauracao: instala sem Chave de ativacao, pronto para membros restaurar' if modo == 'restauracao' else 'instalacao'}):")
+    print(f"\nPlano do Bunker Members ({'modo de restauracao: instala sem Chave de ativacao, pronto para membros restaurar' if modo == 'restauracao' else 'instalacao'}):")
     print(f"  Escola: https://{opcoes.get('endereco') or '(falta o endereco)'}   API: https://{opcoes.get('endereco_api') or '?'}")
     print(f"  Pacote: versao {opcoes.get('versao') or '?'} ({opcoes.get('pacote') or '?'}), assinatura: {opcoes.get('assinado') or '?'}")
     if opcoes.get("faltando"):
@@ -1415,7 +1415,7 @@ def resumo(argv):
         print(f"    Depois aponte {opcoes.get('endereco')} (e {opcoes.get('endereco_api')}) para este servidor, se ainda nao apontou.")
         print("    O backup diario fica parado ate a restauracao terminar.")
         return
-    print(f"\n==> A escola esta instalada (versao {opcoes.get('versao') or '?'}).")
+    print(f"\n==> A escola esta instalada (Bunker Members, versao {opcoes.get('versao') or '?'}).")
     print(f"    Endereco da escola:  https://{opcoes.get('endereco')}")
     print(f"    Admin:               https://{opcoes.get('endereco')}/admin")
     link = sys.stdin.read().strip() if opcoes.get("link") == "entrada" else ""

@@ -67,7 +67,7 @@ test("os nomes tecnicos (projeto, containers, volumes, pastas) so existem no kit
   for (const variavel of ["KIT_NOME", "KIT_PROJETO_COMPOSE", "KIT_CONTAINERS_DA_ESCOLA", "KIT_VOLUMES_DA_ESCOLA", "KIT_PASTA_ESTADO", "KIT_PASTA_BACKUP", "KIT_UNIDADE_BACKUP", "KIT_BACKUP_TAG", "KIT_ENSAIO_PREFIXO"]) {
     assert.match(conf, new RegExp(`^${variavel}="\\$\\{${variavel}:-`, "m"), variavel);
   }
-  assert.match(conf, /^KIT_NOME="\$\{KIT_NOME:-bunker707\}"$/m, "o padrao continua o nome de hoje");
+  assert.match(conf, /^KIT_NOME="\$\{KIT_NOME:-membros\}"$/m, "o padrao e o nome neutro (docs/32 item 17)");
 });
 
 test("destino: S3 (B2, R2, Wasabi), SFTP e pasta; recusa o que nao serve, pede a chave de acesso e nunca repete segredo", { skip }, () => {
@@ -158,10 +158,10 @@ test("backup: exporta de dentro do container do banco, envia com as marcas, rete
   ]);
   const etapa = join(s.backups, "atual");
   const [envio] = restic(chamadas, "backup");
-  assert.deepEqual(envio.args, ["backup", "--host", "bunker707", "--tag", "bunker707", "--tag", "com-dados", etapa, s.storage]);
+  assert.deepEqual(envio.args, ["backup", "--host", "membros", "--tag", "membros", "--tag", "com-dados", etapa, s.storage]);
   assert.equal(envio.senhaNoAmbiente, true, "o backup diario usa a senha do servidor");
   const [esquece] = restic(chamadas, "forget");
-  assert.deepEqual(esquece.args, ["forget", "--host", "bunker707", "--tag", "bunker707", "--group-by", "host,tags", "--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "6", "--prune"]);
+  assert.deepEqual(esquece.args, ["forget", "--host", "membros", "--tag", "membros", "--group-by", "host,tags", "--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "6", "--prune"]);
   // O que foi para o backup: o dump, os papeis, a chave do Vault, o arquivo de segredos e os arquivos do Storage.
   const [snap] = s.resticEstado().repos[s.valores.RESTIC_REPOSITORY].snapshots;
   const caminhos = Object.keys(snap.arquivos).sort();
@@ -183,7 +183,7 @@ test("backup: exporta de dentro do container do banco, envia com as marcas, rete
   // Instalacao vazia (sem conta): marcada `vazio`; retencao do arquivo de segredos; retencao invalida ou toda zero.
   s.limparLog();
   assert.equal(s.rodar(["backup"], { SHIM_CONTAS: "0" }).status, 0);
-  assert.deepEqual(restic(s.chamadas(), "backup")[0].args.slice(3, 7), ["--tag", "bunker707", "--tag", "vazio"]);
+  assert.deepEqual(restic(s.chamadas(), "backup")[0].args.slice(3, 7), ["--tag", "membros", "--tag", "vazio"]);
   s.escreverSegredos({ ...s.valores, BACKUP_KEEP_DAILY: "14", BACKUP_KEEP_WEEKLY: "8", BACKUP_KEEP_MONTHLY: "12" });
   s.limparLog();
   assert.equal(s.rodar(["backup"]).status, 0);
@@ -280,13 +280,13 @@ test("backup --instalar-agendamento: servico e timer com os nomes do kit.conf, n
   const s = servidorDoKit();
   const r = s.rodar(["backup", "--instalar-agendamento"]);
   assert.equal(r.status, 0, r.saida);
-  const servico = readFileSync(join(s.systemd, "bunker707-backup.service"), "utf8");
-  const timer = readFileSync(join(s.systemd, "bunker707-backup.timer"), "utf8");
+  const servico = readFileSync(join(s.systemd, "membros-backup.service"), "utf8");
+  const timer = readFileSync(join(s.systemd, "membros-backup.timer"), "utf8");
   assert.match(servico, new RegExp(`ExecStart=/usr/bin/env bash ${kitDir.replace(/\/$/, "")}/membros backup --agendado`));
   assert.match(servico, /Nice=10/);
   assert.match(timer, /OnCalendar=\*-\*-\* 03:30:00 America\/Sao_Paulo/);
   assert.match(timer, /Persistent=true/);
-  assert.deepEqual(s.chamadas().filter((c) => c.tool === "systemctl").map((c) => c.args.join(" ")), ["daemon-reload", "enable --now bunker707-backup.timer"]);
+  assert.deepEqual(s.chamadas().filter((c) => c.tool === "systemctl").map((c) => c.args.join(" ")), ["daemon-reload", "enable --now membros-backup.timer"]);
   const outro = servidorDoKit();
   assert.equal(outro.rodar(["backup", "--instalar-agendamento"], { KIT_NOME: "escola", KIT_HORA_DO_BACKUP: "02:15" }).status, 0);
   assert.match(readFileSync(join(outro.systemd, "escola-backup.timer"), "utf8"), /02:15:00 America\/Sao_Paulo/);
@@ -422,9 +422,9 @@ test("ensaio: abre com a chave de recuperacao num banco sem rede, sem porta e co
   const d = docker(chamadas);
   const criar = d.find((c) => c.args[0] === "create").args;
   const opcao = (nome) => criar[criar.indexOf(nome) + 1];
-  assert.match(opcao("--name"), /^bunker707-ensaio-\d{14}-\d+$/);
-  const id = opcao("--name").replace("bunker707-ensaio-", "");
-  assert.equal(opcao("--label"), `bunker707.ensaio=${id}`);
+  assert.match(opcao("--name"), /^membros-ensaio-\d{14}-\d+$/);
+  const id = opcao("--name").replace("membros-ensaio-", "");
+  assert.equal(opcao("--label"), `membros.ensaio=${id}`);
   assert.equal(opcao("--network"), "none");
   assert.equal(opcao("--memory"), "512m");
   assert.equal(opcao("--memory-swap"), "512m");
@@ -444,7 +444,7 @@ test("ensaio: abre com a chave de recuperacao num banco sem rede, sem porta e co
   assert.ok(imagem > 0, "a imagem do banco da escola, ja no servidor");
   assert.deepEqual(criar.slice(imagem + 1).filter((a) => a.startsWith("cron.") || a.startsWith("shared_buffers")), ["shared_buffers=64MB", "cron.launch_active_jobs=off"]);
   const textoCriar = criar.join(" ");
-  for (const daEscola of ["bunker707-db", "bunker707_db-config", "volumes/db/data", s.storage, "docker.sock"]) assert.ok(!textoCriar.includes(daEscola), daEscola);
+  for (const daEscola of ["membros-db", "membros_db-config", "volumes/db/data", s.storage, "docker.sock"]) assert.ok(!textoCriar.includes(daEscola), daEscola);
 
   // Nada da escola e tocado: o compose so e lido; todo exec, cp, start e rm e no container do ensaio.
   assert.deepEqual(d.filter((c) => c.args[0] === "compose").map((c) => c.args.at(-2) === "config" || c.args.includes("config")), [true]);
@@ -481,9 +481,9 @@ test("ensaio: abre com a chave de recuperacao num banco sem rede, sem porta e co
 test("ensaio: o container que nao ficou isolado e apagado sem ligar", { skip }, () => {
   const { s, arquivo } = servidorProntoParaEnsaio();
   s.limparLog();
-  const r = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_INSPECT_REDE: "bunker707_default" });
+  const r = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_INSPECT_REDE: "membros_default" });
   assert.equal(r.status, 3, r.saida);
-  assert.match(r.stderr, /rede 'bunker707_default' \(o ensaio roda sem rede\)/);
+  assert.match(r.stderr, /rede 'membros_default' \(o ensaio roda sem rede\)/);
   assert.match(r.stderr, /nao ficou isolado da escola/);
   const d = docker(s.chamadas());
   assert.equal(d.filter((c) => c.args[0] === "start").length, 0);
@@ -491,9 +491,9 @@ test("ensaio: o container que nao ficou isolado e apagado sem ligar", { skip }, 
   assert.equal(s.situacao().ensaio.resultado, "falhou");
   // Um volume com nome (o da configuracao do banco da escola) no lugar do volume que a imagem declara: recusado.
   s.limparLog();
-  const nomeado = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_VOLUME_DA_IMAGEM: "/etc/postgresql-custom", SHIM_VOLUME_NOMEADO: "bunker707_db-config" });
+  const nomeado = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_VOLUME_DA_IMAGEM: "/etc/postgresql-custom", SHIM_VOLUME_NOMEADO: "membros_db-config" });
   assert.equal(nomeado.status, 3, nomeado.saida);
-  assert.match(nomeado.stderr, /montagem fora da pasta do ensaio: volume bunker707_db-config em \/etc\/postgresql-custom/);
+  assert.match(nomeado.stderr, /montagem fora da pasta do ensaio: volume membros_db-config em \/etc\/postgresql-custom/);
   assert.equal(docker(s.chamadas()).filter((c) => c.args[0] === "start").length, 0);
   // O volume anonimo que a propria imagem declara (VOLUME no Dockerfile) nasce so para este container e sai com o rm -v.
   s.limparLog();
@@ -561,11 +561,11 @@ test("ensaio: sobras de um ensaio anterior saem antes; sem disco, para com 8 ant
   mkdirSync(join(s.backups, "ensaio", "20261101000000-1"), { recursive: true });
   writeFileSync(join(s.backups, "ensaio", "20261101000000-1", "postgres.dump"), "sobra");
   s.limparLog();
-  assert.equal(s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_SOBRAS: "bunker707-ensaio-20261101000000-1" }).status, 0);
+  assert.equal(s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_SOBRAS: "membros-ensaio-20261101000000-1" }).status, 0);
   const d = docker(s.chamadas());
-  const sobra = d.findIndex((c) => c.args[0] === "rm" && c.args.includes("bunker707-ensaio-20261101000000-1"));
+  const sobra = d.findIndex((c) => c.args[0] === "rm" && c.args.includes("membros-ensaio-20261101000000-1"));
   assert.ok(sobra >= 0 && sobra < d.findIndex((c) => c.args[0] === "create"), "a sobra sai antes");
-  assert.deepEqual(d.find((c) => c.args[0] === "ps").args, ["ps", "-aq", "--filter", "label=bunker707.ensaio"]);
+  assert.deepEqual(d.find((c) => c.args[0] === "ps").args, ["ps", "-aq", "--filter", "label=membros.ensaio"]);
   assert.equal(existsSync(join(s.backups, "ensaio")), false);
   s.limparLog();
   const disco = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_DF_LIVRE_KB: "500000" });
@@ -597,13 +597,13 @@ test("backup diario apaga as sobras de um ensaio que parou sem limpar (queda de 
   mkdirSync(join(sobra, "banco"), { recursive: true });
   writeFileSync(join(sobra, "banco", "PG_VERSION"), "17");
   s.limparLog();
-  const r = s.rodar(["backup", "--agendado"], { SHIM_SOBRAS: "bunker707-ensaio-20261101000000-77" });
+  const r = s.rodar(["backup", "--agendado"], { SHIM_SOBRAS: "membros-ensaio-20261101000000-77" });
   assert.equal(r.status, 0, r.saida);
   assert.match(r.stdout, /Apagando o que sobrou de um ensaio de restauracao que parou no meio/);
   assert.equal(existsSync(join(s.backups, "ensaio")), false);
   const d = docker(s.chamadas());
-  assert.deepEqual(d.find((c) => c.args[0] === "ps").args, ["ps", "-aq", "--filter", "label=bunker707.ensaio"]);
-  assert.deepEqual(d.find((c) => c.args[0] === "rm").args, ["rm", "-f", "-v", "bunker707-ensaio-20261101000000-77"]);
+  assert.deepEqual(d.find((c) => c.args[0] === "ps").args, ["ps", "-aq", "--filter", "label=membros.ensaio"]);
+  assert.deepEqual(d.find((c) => c.args[0] === "rm").args, ["rm", "-f", "-v", "membros-ensaio-20261101000000-77"]);
   // So o que tem o rotulo do ensaio: nada da escola sai; e sem sobra, nada e dito.
   assert.equal(d.filter((c) => c.args[0] === "rm").length, 1);
   s.limparLog();
@@ -683,7 +683,7 @@ test("restaurar: pede terminal, confirma o endereco, roda o restore.sh com a cha
   assert.equal(chamada.chave, chave, "a chave de recuperacao, por arquivo");
   assert.ok(chamada.arquivo.startsWith(s.temporaria));
   assert.equal(chamada.senha_no_ambiente, "", "nunca no ambiente");
-  assert.equal(chamada.tag, "bunker707");
+  assert.equal(chamada.tag, "membros");
   assert.equal(chamada.pasta, s.backups);
   // Depois: o acesso que abriu o backup volta ao arquivo de segredos, as migracoes rodam, o baixado sai e o backup volta.
   const segredos = s.lerSegredos();

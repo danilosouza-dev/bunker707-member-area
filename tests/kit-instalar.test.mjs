@@ -170,7 +170,7 @@ test("--simular: mostra o plano com o que falta responder e nao muda nada (nem o
   const s = servidorDoInstalador();
   const r = s.rodar(["--simular", "--respostas", s.respostas({ ENDERECO })]);
   assert.equal(r.status, 0, r.saida);
-  assert.match(r.stdout, /Plano \(instalacao\):/);
+  assert.match(r.stdout, /Plano do Bunker Members \(instalacao\):/);
   assert.match(r.stdout, /Escola: https:\/\/alunos\.escola\.test {3}API: https:\/\/api\.alunos\.escola\.test/);
   assert.match(r.stdout, /Pacote: versao 1\.0\.0 .*assinatura: nao/);
   assert.match(r.stdout, /Falta responder: EMAIL_DONO NOME_DA_ESCOLA RESEND_API_KEY BACKUP_DESTINO \(ou BACKUP_SO_NESTE_SERVIDOR\) CHAVE_ATIVACAO/);
@@ -249,7 +249,7 @@ test("instalacao completa com o arquivo de respostas, no terminal: S3, kit de re
   semSegredoNaLinhaDeComando(s);
   for (const c of chamadas.filter((c) => c.tool === "curl" && c.comChaveNoConfig)) assert.ok(c.args.includes("-K"), "a chave do Resend vai pelo -K - (a entrada)");
   // O resumo: o endereco, o link de entrada do dono (uso unico, so no terminal) e a folha de recuperacao.
-  assert.match(r.saida, /A escola esta instalada \(versao 1\.0\.0\)/);
+  assert.match(r.saida, /A escola esta instalada \(Bunker Members, versao 1\.0\.0\)/);
   assert.match(r.saida, /https:\/\/alunos\.escola\.test\/auth\/confirm\?token_hash=f00dfeed[0-9a-f]+&type=recovery&next=%2Fadmin/);
   assert.match(r.saida, /Licenca: ativada/);
   assert.match(r.saida, /sudo membros diagnostico/);

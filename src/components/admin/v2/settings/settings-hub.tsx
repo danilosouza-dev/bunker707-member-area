@@ -66,7 +66,7 @@ export function buildSettingsHubEntries(
   const licenseEntries: SettingsHubEntry[] = license
     ? [
         {
-          description: "A Licença desta área de membros: situação, validade, módulos, Verificar agora e ativação.",
+          description: "A Licença do Bunker Members: situação, validade, módulos, Verificar agora e ativação.",
           href: "/admin/configuracoes/licenca",
           icon: KeyRound,
           id: "licenca",

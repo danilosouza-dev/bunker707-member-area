@@ -56,7 +56,7 @@ export default async function LicenseSettingsPage({ searchParams }: PageProps) {
   const header = (
     <PageHeader
       breadcrumb={BREADCRUMB}
-      description="A Licença desta área de membros: a situação, o que ela liga e a conferência com o Emissor de licenças."
+      description="A Licença do Bunker Members nesta área de membros: a situação, o que ela liga e a conferência com o Emissor de licenças."
       title="Licença"
     />
   );
