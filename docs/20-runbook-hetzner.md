@@ -86,14 +86,17 @@ src/app/api/health/route.ts     GET /api/health -> {ok, version}; HEALTHCHECK e 
 infra/
   compose/
     docker-compose.yml          o stack inteiro
+    docker-compose.kit.yml      (11/11/2026) o compose do kit, no servidor do comprador: sem Realtime, Supavisor, Edge
+                                Runtime, Studio e meta; imagens pelo resumo; nomes do kit.conf (secao 9C)
     .env.example                todas as variaveis, comentadas; nunca com valor real
     generate-secrets.sh/.mjs    gera o .env (modo --local ou --domain ...)
     caddy/Caddyfile             sites do Caddy
     caddy/cloudflare-trusted-proxies.caddyfile  faixas da Cloudflare (IP real do visitante)
+    caddy/Caddyfile.kit, caddy/frente/  o Caddy do kit: certificado direto, modelos na rede interna, Cloudflare opcional
     volumes/                    arquivos copiados do Supabase oficial (Envoy, SQL de init, pooler, functions)
     UPSTREAM.md                 de que commit do supabase/supabase os arquivos vieram
   scripts/
-    bootstrap.sh                prepara o Ubuntu 24.04 (root, uma vez)
+    bootstrap.sh                prepara o servidor (root): perfil producao (Ubuntu 24.04 na Hetzner) e kit (secao 9C)
     hetzner-firewall.sh         firewall da Hetzner pela CLI hcloud (roda na sua maquina)
     cloudflare-ips.sh           faixas da Cloudflare (texto, --caddy, --json)
     migrate.sh                  supabase db push --db-url no banco do stack
@@ -112,6 +115,8 @@ infra/
     backup.sh, recuperacao.sh   backup diario e kit de recuperacao
     ensaio.sh, restaurar.sh     ensaio de restauracao isolado e restauracao num servidor novo
     status.sh                   a situacao, sem sudo e sem rede
+    preparar-servidor.sh        o preparo do servidor do comprador: o bootstrap.sh no perfil kit (secao 9C)
+    fixar-imagens.mjs           resolve os resumos das imagens do compose do kit a partir das tags da producao
   systemd/                      timer do backup (03:30 UTC)
   terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado; referencia)
   cloud/                        (18/10/2026) operacao pela API da Hetzner e da Cloudflare, a partir do runner
@@ -380,6 +385,8 @@ ssh root@<ip> 'SSH_PUBLIC_KEY="ssh-ed25519 AAAA... produtor@bunker707" bash /roo
 O script e idempotente (pode rodar de novo). Ele cria o usuario `deploy` (sudo sem senha, grupo docker), fecha o SSH para senha, liga ufw (so 22, 80 e 443; sem rate limit na 22 desde 18/10/2026, porque o firewall da Hetzner ja restringe a origem e o deploy abre dezenas de comandos SSH em sequencia) com as regras `DOCKER-USER` para o Docker respeitar o ufw, fail2ban no sshd, atualizacoes automaticas (reinicio as 05:30 UTC se um kernel pedir), Docker CE com rotacao de logs, swap de 2 GB, a CLI do Supabase 2.121.0 e a pasta `/opt/bunker707`.
 
 **Antes de fechar a sessao de root**, confirme em outro terminal que `ssh deploy@<ip>` entra. Depois disso, trabalhe sempre como `deploy`.
+
+Desde 11/11/2026 o mesmo script tem dois perfis: sem `PERFIL` (como o `provision` chama) e o de sempre, descrito acima; `PERFIL=kit` e o servidor de um comprador, sempre pelo `infra/kit/preparar-servidor.sh` (secao 9C). Nos dois, `--simular` mostra o que faria sem mudar nada, rodar de novo nao reinicia servico nem regrava arquivo que ja esta certo, a chave do repositorio do Docker e conferida pela impressao digital e o `daemon.json` ganha a rotacao de log sem perder o que ja tinha.
 
 ---
 
@@ -1084,6 +1091,74 @@ A licenca vem no backup: no mesmo endereco, o Emissor reconhece a Instalacao na 
 | 9 | a instalacao espera a restauracao de um backup (backup parado) |
 
 **Testes.** `tests/kit-membros.test.mjs` roda os scripts de verdade com docker, restic, systemctl e df de mentira (`tests/fixtures/kit-de-mentira.mjs`; o docker de mentira so deixa entrar no banco do ensaio com a senha que o `supabase_admin` tem naquele momento) e, quando o passo mostra ou pede uma chave, com uma pessoa num pseudo-terminal. `tests/kit-membros-restic.test.mjs` usa o restic de verdade num repositorio em pasta (o CI instala o restic no job Verify). Nao rodou: o ensaio com o Docker e a imagem do banco de verdade (este ambiente nao tem o servico do Docker), um destino S3 ou SFTP de verdade, o timer do systemd e a medida de memoria num servidor de 4 GB com a escola no ar.
+
+## 9C. O servidor do comprador: o preparo e o compose do kit (produto licenciado, 11/11/2026)
+
+Duas pecas do instalador (`docs/32` §3.2 passos 2 e 5, §11.6 e §11.7) que ja rodam sozinhas: o preparo de um servidor de terceiros (Hetzner, Contabo, Hostinger e parecidos) e o compose reduzido do kit. O instalador, que junta tudo, ainda nao existe.
+
+### 9C.1 Preparar o servidor
+
+```bash
+sudo bash infra/kit/preparar-servidor.sh --simular        # mostra o que faria; nada muda
+sudo bash infra/kit/preparar-servidor.sh [--chave-ssh "ssh-ed25519 AAAA... voce"] [--reinicio-automatico] \
+     [--ssh-sem-limite] [--manter-firewall]
+sudo bash infra/kit/preparar-servidor.sh --fechar-login-por-senha   # numa sessao SSH que entrou com a chave
+sudo membros preparar-servidor ...                         # o mesmo, depois de instalado
+```
+
+E o `infra/scripts/bootstrap.sh` da producao no perfil `kit`, com os nomes e as pastas do `kit.conf` (A10): o que muda e configuracao, nao um script a parte. Idempotente; `--simular` nao chama nenhum comando que muda o servidor.
+
+| | producao (nossos servidores) | kit (servidor do comprador) |
+|---|---|---|
+| Sistema | Ubuntu 24.04 (outro so avisa) | Ubuntu 22.04 ou 24.04, Debian 12 ou 13, x86-64; outro para com o codigo 10 antes de mudar qualquer coisa |
+| Acesso | usuario `deploy` com a chave, SSH so com chave e `AllowUsers` | o acesso de hoje continua igual: o preparo nao mexe no sshd. `--chave-ssh` acrescenta uma chave publica a conta de quem entrou (a do `sudo`, a do registro do sshd ou o root); o login por senha so fecha com `--fechar-login-por-senha` |
+| Firewall | zera o ufw; a 22 sem limite (o firewall da Hetzner restringe a origem) | mantem as regras e a politica de quem ja tinha o ufw ligado; abre so as portas do SSH (as do `sshd -T`, do `ssh.socket` e da sessao de agora, com `ufw limit`), a 80/tcp e a 443 (TCP e UDP); com o ufw desligado, avisa o que deixa de responder de fora antes de ligar. O firewalld nao e tocado: para com o codigo 11, ou `--manter-firewall` deixa o firewall com o dono |
+| fail2ban | `jail.d/sshd.local` | `jail.d/<nome>-sshd.local`, com o IP de quem esta preparando no `ignoreip` (senha errada nao tranca o dono do lado de fora); a regra que o dono ja tinha para o sshd fica |
+| Reinicio automatico | ligado (05:30 UTC) | desligado; `--reinicio-automatico` liga |
+| Docker | repositorio do Ubuntu | repositorio da distribuicao (`linux/ubuntu` ou `linux/debian` e o codinome); o Docker que ja existe fica, e sem o compose 2 para com o codigo 12 |
+| restic | o do apt (0.16 no 24.04) | 0.16 ou mais novo: no Ubuntu 22.04 (0.12) e no Debian 12 (0.14) o do apt nao serve e nao tem `self-update`; baixa o 0.18.1 oficial, conferido pelo sha256 do `SHA256SUMS` do release, em `/usr/local/bin` |
+| CLI do Supabase e git | sim | nao (o kit usa o `migrar.sh`) |
+| Pastas | `/opt/bunker707`, `/var/backups/bunker707` | as do `kit.conf`: estado, backup, certificados e a pasta da instalacao |
+
+**Fechar o login por senha sem trancar o dono.** Muitos provedores criam o servidor com senha. O preparo nunca fecha a senha sozinho; `--fechar-login-por-senha` so fecha quando prova que outra forma de entrar funciona:
+
+1. acha a sessao SSH de quem roda (`SSH_CONNECTION`, ou, debaixo do `sudo`, que limpa o ambiente, o primeiro processo acima que a tenha) e procura no registro do sshd como ela entrou (`Accepted publickey for <conta> from <ip> port <porta>`, no journal ou no `auth.log`). Pelo console do provedor, entrou por senha ou nao achou no registro: codigo 13 e nada muda;
+2. pede uma pessoa no terminal (a IA rodando o comando recebe o codigo 7) e a palavra `FECHAR` digitada;
+3. grava `/etc/ssh/sshd_config.d/01-<nome>-sem-senha.conf` (`PasswordAuthentication no` e `KbdInteractiveAuthentication no`). O `01-` e de proposito: o sshd usa o primeiro valor que le, e o `50-cloud-init.conf` de muitos provedores liga a senha;
+4. confere com `sshd -t` e com o valor efetivo (`sshd -T -C user=...,addr=...`). Se o sshd recusa, ou se outro arquivo ou um bloco `Match` continua ligando a senha, apaga o arquivo e para com o codigo 14, dizendo qual arquivo manda;
+5. recarrega o sshd (`reload`, nunca `restart`): as sessoes abertas continuam. A mensagem final pede para entrar de novo com a chave num terceiro terminal antes de fechar o atual.
+
+**O limite do SSH.** O `ufw limit` recusa a sexta conexao nova em 30 s do mesmo IP (a mesma conta do comentario da producao no `bootstrap.sh`). A senha errada e com o fail2ban (5 em 10 minutos, 1 hora). Quem automatiza (a IA do kit, `docs/32` §3.3) abre uma conexao so e reaproveita, no `~/.ssh/config` do computador dela:
+
+```txt
+Host escola
+  HostName <ip do servidor>
+  User <conta>
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h:%p
+  ControlPersist 10m
+```
+
+`--ssh-sem-limite` troca o `limit` por `allow`. Se o dono ja tinha `ufw allow 22`, essa regra vem antes e o limite nao vale; o preparo avisa e nao apaga a regra dele.
+
+**Codigos de saida:** 0 ok; 1 uso ou confirmacao diferente; 3 um passo falhou (download, sha256, chave do Docker que nao e a esperada, `daemon.json` que nao e JSON); 7 o passo pede uma pessoa no terminal; 10 sistema ou processador fora do kit; 11 o firewalld cuida do firewall; 12 Docker sem o compose 2; 13 fechar a senha pede uma sessao SSH que entrou com chave; 14 o sshd nao aceitou fechar a senha (voltou como estava).
+
+### 9C.2 O compose do kit
+
+`infra/compose/docker-compose.kit.yml`, ao lado do da producao, com as mesmas pastas de dados, o mesmo `.env` e os mesmos arquivos do banco, do Envoy e dos modelos de e-mail (o `restore.sh`, o backup e o migrador leem dali). O `kit.conf` aponta para ele (`KIT_ARQUIVO_COMPOSE`).
+
+- **Servicos:** `db`, `auth`, `rest`, `storage`, `imgproxy`, `api-gw` (Envoy), `app` e `caddy`. Fora: Realtime, Supavisor e Edge Runtime (o app nao usa, D30), Studio e meta (D14), e os scripts de inicio do banco que so eles usavam (`_realtime`, `_supabase`, `_analytics`). O Envoy usa a configuracao da producao: as rotas do Realtime, das Functions e do painel ficam sem destino, e o Caddy nem encaminha esses caminhos (404).
+- **Imagens presas pelo resumo** (`tag@sha256:...`, o resumo do indice de plataformas, conferido pelo sha256 do indice baixado). As tags sao as da producao, que recebe toda versao primeiro: trocou uma na producao, rode `node infra/kit/fixar-imagens.mjs` (o `--conferir` so compara) e a guarda `tests/kit-compose.test.mjs` fica verde de novo. O app e a imagem do Pacote da versao (`APP_IMAGE`, obrigatorio, carregada com `docker load`): o comprador nunca constroi.
+- **Nomes:** `name:` e os `container_name:` vem de `KIT_NOME`, que os comandos do kit exportam (`lib-kit.sh`, junto com `KIT_PASTA_CERTIFICADOS`). Sem eles o compose para com a mensagem, em vez de criar um segundo projeto sobre as mesmas pastas do banco. Para mexer a mao, rode pelo `membros` ou exporte as duas.
+- **Portas:** so o Caddy publica (80 e 443, TCP e UDP). O banco e o gateway ficam so na rede interna; o migrador, o backup e a restauracao entram por `docker compose exec`.
+- **Rede interna:** o app tem `SUPABASE_INTERNAL_URL=http://api-gw:8000`, e o proxy, a sessao e o cliente administrativo do app levam o Auth, o PostgREST e o Storage ao gateway por ali (`src/server/db/supabase/internal-fetch.ts`). O cliente continua com o endereco publico, entao o nome do cookie da sessao, as URLs publicas do Storage e os links nao mudam; DNS ou certificado errados nao derrubam mais o banco do app. So o otimizador do `next/image` ainda busca as capas pelo endereco publico, pelo `extra_hosts` (o proprio servidor, sem DNS). Sem a variavel (Vercel, dev, nossa producao), nada muda.
+- **Modelos de e-mail do Auth:** servidos pelo Caddy na porta 8088, que nao e publicada; o Auth baixa de `http://caddy:8088/auth-templates/...`. Os assuntos padrao do kit nao tem a nossa marca (`AUTH_SUBJECT_*` troca); o texto dos modelos ainda tem (marca branca, `docs/32` §6).
+- **Certificados:** o Caddy tira o certificado direto (HTTP-01 na 80 ou TLS-ALPN-01 na 443). Com o e-mail da conta (`ACME_EMAIL`, obrigatorio), os emissores padrao do Caddy 2.11 sao o Let's Encrypt e, se ele falhar, o ZeroSSL (conferido no codigo da tag `v2.11.7`, `DefaultIssuers`): o kit nao fixa autoridade. A conta e os certificados ficam em `KIT_PASTA_CERTIFICADOS` (padrao `/var/lib/<nome>/caddy`), fora do pacote e dos volumes do Docker: uma reinstalacao reaproveita o certificado em vez de pedir outro (o Let's Encrypt limita 5 certificados iguais por semana).
+- **Cloudflare opcional:** `CADDY_FRENTE=direta` (padrao) nao confia em cabecalho de IP nenhum; `CADDY_FRENTE=cloudflare` importa as faixas da Cloudflare da producao e le o `CF-Connecting-IP`. E a opcao avancada do `docs/32` §3.1, depois da instalacao. Outro valor nao acha o arquivo e o Caddy nao sobe.
+
+**A conferencia final** (`infra/scripts/smoke.sh`) le os servicos do compose: onde ha Realtime (a nossa producao), exige o healthcheck e o `/realtime/v1/api/tenants` fechado (403), como sempre; onde nao ha (o kit), exige o caminho fechado na borda (404). Se o compose nao responde, cai no ramo do kit, que a producao reprova. Nos dois, baixa os seis modelos de e-mail pelo caminho do Auth: no kit, de dentro do container do Auth; na producao, pelo endereco publico.
+
+**Testes.** `tests/kit-preparar-servidor.test.mjs` roda o `bootstrap.sh` de verdade, nos dois perfis, num servidor de mentira (`tests/fixtures/servidor-de-mentira.mjs`: o servidor inteiro numa pasta, um shim para cada ferramenta que muda o sistema, o `sshd -T` calculado dos arquivos como o OpenSSH, o PATH so com os shims e ferramentas que nao mudam o sistema, e uma pessoa num pseudo-terminal). `tests/kit-compose.test.mjs` confere o compose do kit (servicos, resumos, nomes, portas, rede interna, modelos, certificados e frente) e, quando ha o plugin do compose, o `docker compose config`. `tests/supabase-rede-interna.test.mjs` e `tests/proxy-rede-interna.test.mjs` rodam o supabase-js e o @supabase/ssr de verdade com o fetch interno. `tests/infra-smoke.test.mjs` roda a conferencia final com docker e curl de mentira. Nao rodou: nada disso num servidor de verdade (nem o preparo na Contabo ou na Hostinger, nem o compose com o Docker), a emissao de um certificado, o ZeroSSL como reserva e a medida de memoria do kit (A29).
 
 ---
 
