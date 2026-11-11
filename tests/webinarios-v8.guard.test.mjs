@@ -201,7 +201,9 @@ test("a secao 9 so valida os cinco checks novos; nenhuma coluna nova nas listas 
     "alter table public.webinar_questions validate constraint webinar_questions_persona_v8;",
     "alter table public.webinar_questions validate constraint webinar_questions_persona_fk_v8;"
   ]);
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611110001";/);
+  // O aviso geral aponta a mais nova dos webinarios (desde 11/11/2026 a 202611110002 dos participantes simulados, que vem
+  // depois desta pela ordem dos arquivos): aplicar ate ela inclui esta.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611110001");
   assert.match(dbSource, /export const WEBINARS_PERSONAS_MIGRATION = "202611110001";/);
   assert.equal(persona.PERSONAS_MIGRATION_ID, "202611110001", "o aviso da tela (persona-model) e o do servidor (db.ts) apontam a mesma");
   for (const [list, novas] of [
