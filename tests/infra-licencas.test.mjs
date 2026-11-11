@@ -500,13 +500,11 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.deepEqual(Object.keys(configDe(imp)).sort(), geridas, "o JSON do deploy traz exatamente as variaveis que o implantar.sh confere");
   assert.match(result.stdout, /Painel em https:\/\/licencas\.bunker707\.com\.br \(login de e-mail e senha, de qualquer internet, D40; teto de 10 /);
   assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo/i, "o e-mail do produtor nao vai para o log");
-  // A conta do produtor no Painel, depois do backup e com a 22 ainda aberta: o e-mail so pelo stdin, com --mostrar-link.
-  const contaDoProdutor = at("bin/painel.ts adicionar");
+  // A conta do produtor no Painel, depois do backup e com a 22 ainda aberta: o e-mail so pelo stdin, sem mostrar o link.
+  const contaDoProdutor = at("bash infra/licencas/scripts/conta-do-produtor.sh");
   assert.ok(contaDoProdutor > timer, "a conta vem depois do Emissor no ar e do backup");
   assert.equal(calls[contaDoProdutor].stdin, "Produtor@Exemplo.com.br", "o e-mail do produtor vai pelo stdin do SSH");
-  assert.match(calls[contaDoProdutor].command, /bin\/painel\.ts listar .*grep -qxF/, "so cria quando a conta ainda nao existe");
-  assert.match(calls[contaDoProdutor].command, /bin\/painel\.ts adicionar "\$e" --funcao produtor --motivo 'Primeira conta \(deploy-licencas\)' --mostrar-link/);
-  assert.doesNotMatch(calls[contaDoProdutor].command, /produtor@exemplo/i, "o e-mail nunca na linha de comando");
+  assert.equal(calls[contaDoProdutor].command, "cd '/opt/bunker707' && bash infra/licencas/scripts/conta-do-produtor.sh", "sem as opcoes, o link nunca aparece");
   assert.match(result.stdout, /O produtor define a senha pelo link de uso unico que o Emissor manda ao e-mail dele/);
   assert.match(calls[caddy].command, /run --rm --no-deps caddy caddy validate --config \/etc\/caddy\/Caddyfile --adapter caddyfile && .* up -d && .*caddy reload/);
   assert.match(calls[timer].command, /systemctl start bunker707-licencas-backup\.service/);
@@ -531,43 +529,66 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   assert.match(result.stderr, /ainda nao respondeu \{"ok":true\} de fora/, "sem o nome no ar, so o aviso");
 });
 
-test("a conta do produtor no Painel: so quando ainda nao existe, com --mostrar-link, e o e-mail sai do que chega ao log", { skip }, () => {
-  const conta = setup({
-    servers: [servidorLicencas()],
-    firewalls: firewallLicencas(),
-    storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
-    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
-  });
-  const deploy = conta.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
+test("a conta do produtor no Painel (conta-do-produtor.sh): so quando nao existe; o link so por e-mail, conferido na fila; so com LICENCAS_MOSTRAR_LINK=sim e o e-mail falhando ele aparece", { skip }, () => {
+  // As opcoes do deploy viram as do script.
+  const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)] });
+  const deploy = conta.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1", LICENCAS_NOVO_LINK: "sim", LICENCAS_MOSTRAR_LINK: "sim" }, ["deploy"]);
   assert.equal(deploy.status, 0, deploy.stdout + deploy.stderr);
-  const comando = sshCmds(conta.calls()).find((c) => c.command.includes("bin/painel.ts adicionar")).command;
-  // O comando de verdade, rodado aqui com um docker de mentira no lugar do compose do Emissor.
+  assert.ok(sshCmds(conta.calls()).some((c) => c.command.endsWith("conta-do-produtor.sh --novo-link --mostrar-link-se-falhar")));
+
+  // O script de verdade, com um docker de mentira no lugar do compose do Emissor (o bin/painel.ts e a fila de e-mail).
   const dir = mkdtempSync(join(tmpdir(), "bunker707-conta-painel-"));
   try {
-    const emissor = join(dir, "emissor");
     const bin = join(dir, "bin");
-    spawnSync("mkdir", ["-p", emissor, bin]);
+    spawnSync("mkdir", ["-p", bin, join(dir, "emissor")]);
     const log = join(dir, "docker.log");
-    writeFileSync(join(bin, "docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\ncase "$*" in\n  *" listar") printf '%s' "$SHIM_LISTAR" ;;\n  *" adicionar "*) printf '%s\\n' "$SHIM_ADICIONAR"; exit "\${SHIM_ADICIONAR_CODIGO:-0}" ;;\nesac\n`);
+    writeFileSync(join(bin, "docker"), [
+      "#!/bin/sh",
+      `printf '%s\\n' "$*" >> "${log}"`,
+      'case "$*" in',
+      '  *" listar") printf "%s" "$SHIM_LISTAR" ;;',
+      '  *" psql "*) cat > /dev/null; printf "%s\\n" "$SHIM_FILA" ;;',
+      '  *" adicionar "*|*" redefinir-senha "*) printf "%s\\n" "$SHIM_PAINEL"; case "$*" in *--mostrar-link*) printf "%s\\n" "Link: https://licencas.bunker707.com.br/senha/TOKEN-DE-USO-UNICO" ;; esac; exit "${SHIM_PAINEL_CODIGO:-0}" ;;',
+      "esac",
+      ""
+    ].join("\n"));
     chmodSync(join(bin, "docker"), 0o755);
-    const rodar = (env) => {
+    const script = join(root, "infra/licencas/scripts/conta-do-produtor.sh");
+    const rodar = (env, args = []) => {
       writeFileSync(log, "");
-      return spawnSync("bash", ["-c", comando.replaceAll("/opt/bunker707/emissor", emissor)], { encoding: "utf8", input: "Produtor@Exemplo.com.br", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env } });
+      return spawnSync("bash", [script, ...args], { encoding: "utf8", input: "Produtor@Exemplo.com.br", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LICENCAS_EMISSOR_DIR: join(dir, "emissor"), ESPERA_EMAIL_INTERVALO: "0", ESPERA_EMAIL_TENTATIVAS: "3", ...env } });
     };
-    const existe = rodar({ SHIM_LISTAR: "outra@exemplo.com.br\tAtendente\tligada\nproDUTOR@exemplo.com.br\tProdutor\tligada\n" });
+    const chamadas = () => readFileSync(log, "utf8");
+
+    const existe = rodar({ SHIM_LISTAR: "outra@exemplo.com.br\tAtendente\tativa\nproDUTOR@exemplo.com.br\tProdutor\tativa\n" });
     assert.equal(existe.status, 0, existe.stderr);
-    assert.match(existe.stdout, /A conta do produtor ja existe no Painel: nada a fazer\./);
-    assert.doesNotMatch(readFileSync(log, "utf8"), /adicionar/, "conta que existe nao e criada de novo");
+    assert.match(existe.stdout, /A conta do produtor ja existe no Painel: nada a fazer/);
+    assert.doesNotMatch(chamadas(), /adicionar|redefinir-senha/, "conta que existe nao e criada de novo");
 
-    const nova = rodar({ SHIM_LISTAR: "", SHIM_ADICIONAR: "produtor@exemplo.com.br entrou no Painel como Produtor. O link para definir a senha foi para PRODUTOR@exemplo.com.br." });
+    const nova = rodar({ SHIM_LISTAR: "", SHIM_PAINEL: "produtor@exemplo.com.br entrou no Painel como Produtor.", SHIM_FILA: "sent" });
     assert.equal(nova.status, 0, nova.stderr);
-    assert.match(readFileSync(log, "utf8"), /exec -T emissor node bin\/painel\.ts adicionar produtor@exemplo\.com\.br --funcao produtor --motivo Primeira conta \(deploy-licencas\) --mostrar-link/);
-    assert.equal(nova.stdout, "  <e-mail do produtor> entrou no Painel como Produtor. O link para definir a senha foi para <e-mail do produtor>.\n");
+    assert.match(chamadas(), /exec -T emissor node bin\/painel\.ts adicionar produtor@exemplo\.com\.br --funcao produtor --motivo Primeira conta \(deploy-licencas\)\n/);
+    assert.doesNotMatch(chamadas(), /--mostrar-link/, "o link nunca e pedido quando o e-mail sai");
+    assert.match(chamadas(), /exec -T postgres psql -U emissor -d emissor -X -At -v ON_ERROR_STOP=1 -v e=produtor@exemplo\.com\.br/, "confere a fila do e-mail do link");
+    assert.equal(nova.stdout, "  <e-mail do produtor> entrou no Painel como Produtor.\n  O link para definir a senha saiu por e-mail para o produtor (vale 60 minutos, uma vez so).\n");
 
-    // O envio falhou: o Emissor mostra o link (so nesse caso, --mostrar-link) e o codigo dele volta para o deploy avisar.
-    const falhou = rodar({ SHIM_LISTAR: "", SHIM_ADICIONAR: "O e-mail nao saiu. Link de uso unico: https://licencas.bunker707.com.br/senha/abc", SHIM_ADICIONAR_CODIGO: "3" });
+    // O e-mail nao sai: sem a opcao, nenhum link na tela e o codigo 3 (o deploy so avisa).
+    const falhou = rodar({ SHIM_LISTAR: "", SHIM_FILA: "failed" });
     assert.equal(falhou.status, 3);
-    assert.match(falhou.stdout, /https:\/\/licencas\.bunker707\.com\.br\/senha\/abc/);
+    assert.match(falhou.stderr, /o e-mail com o link de senha nao saiu \(situacao na fila: failed\)/);
+    assert.doesNotMatch(falhou.stdout + falhou.stderr, /TOKEN-DE-USO-UNICO|https:\/\/licencas/);
+    // Com --mostrar-link-se-falhar (LICENCAS_MOSTRAR_LINK=sim): um link novo, so neste caso.
+    const mostra = rodar({ SHIM_LISTAR: "", SHIM_FILA: "pending" }, ["--mostrar-link-se-falhar"]);
+    assert.equal(mostra.status, 0, mostra.stderr);
+    assert.match(chamadas(), /redefinir-senha produtor@exemplo\.com\.br --motivo O e-mail do link nao saiu \(deploy-licencas\) --mostrar-link/);
+    assert.match(mostra.stdout, /Link: https:\/\/licencas\.bunker707\.com\.br\/senha\/TOKEN-DE-USO-UNICO/);
+    const comEmail = rodar({ SHIM_LISTAR: "", SHIM_FILA: "sent" }, ["--mostrar-link-se-falhar"]);
+    assert.doesNotMatch(comEmail.stdout, /TOKEN-DE-USO-UNICO/, "com o e-mail saindo, nem com a opcao o link aparece");
+    // --novo-link: a conta que existe recebe outro link, pelo e-mail.
+    const outro = rodar({ SHIM_LISTAR: "produtor@exemplo.com.br\tProdutor\tativa\n", SHIM_FILA: "sent" }, ["--novo-link"]);
+    assert.equal(outro.status, 0, outro.stderr);
+    assert.match(chamadas(), /redefinir-senha produtor@exemplo\.com\.br --motivo Link novo pedido pelo deploy-licencas\n/);
+    for (const r of [nova, falhou, mostra, outro]) assert.doesNotMatch(r.stdout + r.stderr, /produtor@exemplo/i, "o e-mail do produtor nunca na saida");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

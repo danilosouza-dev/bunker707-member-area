@@ -445,18 +445,16 @@ for (const r of JSON.parse(readFileSync(`${pasta}/raizes.json`, "utf8"))) {
     limpar_cerimonia
 }
 
-# conta_do_produtor: com a 22 aberta e o Emissor no ar, a conta do produtor no Painel (LICENCAS_EMISSOR_EMAIL_PRODUTOR), so
-# se ainda nao existe: `bin/painel.ts adicionar <e-mail> --funcao produtor` com --mostrar-link. O Emissor manda o link de
-# uso unico para definir a senha ao e-mail; o link so aparece na tela se o envio falhar, e nunca de outro jeito (D40). O
-# e-mail vai pelo stdin do SSH (nunca na linha de comando do runner) e sai do que o comando escreve antes de chegar ao log.
+# conta_do_produtor: com a 22 aberta, o Emissor no ar e a infra do commit no servidor, a conta do produtor no Painel
+# (LICENCAS_EMISSOR_EMAIL_PRODUTOR), so se ainda nao existe (infra/licencas/scripts/conta-do-produtor.sh): o Emissor manda o
+# link de uso unico para definir a senha ao e-mail dele, e o script confere na fila que o e-mail saiu. O link nunca aparece
+# no registro; so com LICENCAS_MOSTRAR_LINK=sim e so se o e-mail nao sair, um link novo aparece, uma vez (D40).
+# LICENCAS_NOVO_LINK=sim manda outro link a conta que ja existe. O e-mail vai pelo stdin do SSH, nunca na linha de comando.
 conta_do_produtor() {
-    printf '%s' "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" | rsh "$target" "e=\$(cat | tr 'A-Z' 'a-z'); cd '$LICENCAS_EMISSOR_DIR' || exit 1
-        tira() { awk -v e=\"\$e\" '{ l = tolower(\$0); while ((i = index(l, e)) > 0) { \$0 = substr(\$0, 1, i - 1) \"<e-mail do produtor>\" substr(\$0, i + length(e)); l = tolower(\$0) } print }'; }
-        if docker compose exec -T emissor node bin/painel.ts listar </dev/null | cut -f1 | tr 'A-Z' 'a-z' | grep -qxF \"\$e\"; then
-            echo '  A conta do produtor ja existe no Painel: nada a fazer.'; exit 0
-        fi
-        out=\$(docker compose exec -T emissor node bin/painel.ts adicionar \"\$e\" --funcao produtor --motivo 'Primeira conta (deploy-licencas)' --mostrar-link </dev/null 2>&1); rc=\$?
-        printf '%s\\n' \"\$out\" | tira | sed 's/^/  /'; exit \$rc"
+    local args=""
+    [ "${LICENCAS_NOVO_LINK:-}" != sim ] || args="$args --novo-link"
+    [ "${LICENCAS_MOSTRAR_LINK:-}" != sim ] || args="$args --mostrar-link-se-falhar"
+    printf '%s' "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" | rsh "$target" "cd '$REMOTE_DIR' && bash infra/licencas/scripts/conta-do-produtor.sh$args"
 }
 
 # ====== deploy-licencas =================================================================================
