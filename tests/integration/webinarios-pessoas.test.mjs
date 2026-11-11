@@ -30,7 +30,8 @@ import {
 //   aba com o nome e a foto da pessoa, vota, e nao responde no fio (403); a equipe responde; o relatorio, o painel e o
 //   CSV Q&A nao contam a pergunta; os checks do banco recusam a simulada com aluno e a da turma sem aluno;
 // - o item Pergunta da Live gravada: webinar_open_session abre a pergunta ligada a mensagem, com a hora dela, e a aba
-//   so mostra a que ja chegou a hora.
+//   so mostra a que ja chegou a hora; o Atendimento da equipe tambem (revisao v8, achado 2: nem na fila, nem
+//   distribuida, nem na conta de abertas).
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -47,6 +48,8 @@ const personaActions = await import("../../src/server/webinars/persona-actions.t
 const scriptActions = await import("../../src/server/webinars/script-actions.ts");
 const roomActions = await import("../../src/server/webinars/room-actions.ts");
 const webinarActions = await import("../../src/server/webinars/actions.ts");
+const assistantActions = await import("../../src/server/webinars/assistant-actions.ts");
+const assistantQueries = await import("../../src/server/webinars/assistant-queries.ts");
 const questionsRoute = await import("../../src/app/api/webinars/[id]/questions/route.ts");
 const voteRoute = await import("../../src/app/api/webinars/[id]/questions/[qid]/vote/route.ts");
 const repliesRoute = await import("../../src/app/api/webinars/[id]/questions/[qid]/replies/route.ts");
@@ -248,6 +251,19 @@ test("6. o item Pergunta da Live gravada: a abertura da sessao abre a pergunta l
   assert.ok(mensagens.some((row) => row.script_item_id === agora.id) && mensagens.some((row) => row.script_item_id === depois.id));
   const naAba = await pedirPerguntas(aluna, GRAVADA.id, GRAVADA.sessaoId);
   assert.deepEqual(naAba.map((entry) => entry.body), ["Tem certificado?"], "a dos 30 minutos ainda nao chegou a hora");
+
+  // O Atendimento da equipe (revisao v8, achado 2): pelo filtro de verdade do PostgREST, a dos 30 minutos tambem fica
+  // fora da fila, nao e distribuida e nao entra na conta de abertas do modo hibrido.
+  actAs(produtor);
+  unwrap(await db.from("webinar_attendants").upsert({ last_seen_at: new Date().toISOString(), session_id: GRAVADA.sessaoId, status: "online", user_id: contas.produtor.id }, { onConflict: "session_id,user_id" }), "O produtor atendendo");
+  const retrato = ok(await assistantActions.loadAttendanceSnapshot({ sessionId: GRAVADA.sessaoId }));
+  assert.deepEqual(retrato.queue.filter((item) => item.target === "question").map((item) => item.body), ["Tem certificado?"]);
+  const futura = unwrap(await db.from("webinar_questions").select("assigned_to").eq("session_id", GRAVADA.sessaoId).eq("body", "E bonus?").single(), "A dos 30 minutos");
+  assert.equal(futura.assigned_to, null, "o distribute nao atribui o que a sala ainda nao perguntou");
+  unwrap(await db.from("webinar_questions").update({ assigned_to: contas.produtor.id }).eq("session_id", GRAVADA.sessaoId).eq("body", "E bonus?"), "Dando a do futuro a mao");
+  const abertas = await assistantQueries.listAssignedOpenQuestions(db, GRAVADA.sessaoId);
+  assert.equal(abertas.length, 1, "so a que ja apareceu conta");
+  unwrap(await db.from("webinar_attendants").delete().eq("session_id", GRAVADA.sessaoId), "Saindo do atendimento");
   actAs(null);
 });
 

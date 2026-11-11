@@ -601,10 +601,27 @@ export async function softDeleteQuestionsOfMessage(db: WebinarsDb, input: { mess
   return (data ?? []).length;
 }
 
-export async function listQuestionRows(db: WebinarsDb, input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[] }): Promise<QuestionRow[]> {
+/**
+ * A pergunta que ja apareceu na sala no banco (room-rules.questionVisibleAt, D77): a da turma sempre; a simulada (sem
+ * aluno) so a partir da hora dela. Na Live gravada a webinar_open_session cria toda Pergunta do roteiro na abertura com
+ * o created_at no minuto do item (no futuro): sem este filtro, as listas da equipe a mostram e distribuem antes da sala
+ * (correcao da revisao v8, achado 2). O valor vai entre aspas, como os vizinhos com instantes num `or`.
+ */
+export function visibleQuestionFilter(nowIso: string): string {
+  return `user_id.not.is.null,created_at.lte."${nowIso}"`;
+}
+
+export async function listQuestionRows(
+  db: WebinarsDb,
+  input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[]; visibleAt?: string }
+): Promise<QuestionRow[]> {
   let query = db.from("webinar_questions").select(QUESTION_COLUMNS).eq("session_id", input.sessionId).is("deleted_at", null);
   if (input.statuses?.length) {
     query = query.in("status", [...input.statuses]);
+  }
+  // Com `visibleAt`, so as que ja apareceram (a simulada do futuro nunca ocupa o lugar das de agora no teto da lista).
+  if (input.visibleAt) {
+    query = query.or(visibleQuestionFilter(input.visibleAt));
   }
   query = input.order === "votes" ? query.order("upvotes", { ascending: false }).order("created_at", { ascending: true }) : query.order("created_at", { ascending: false });
   const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));

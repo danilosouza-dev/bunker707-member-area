@@ -26,10 +26,11 @@ import {
 import { hasActiveAiConnection } from "./assistant-provider";
 import { assignAttendance, fetchAssistantSettings, fetchAttendanceMarks, fetchSessionReplyAll, listAttendants, listKnowledge, listSessionAiRequests } from "./assistant-store";
 import { chatMessageFromRow, questionFromRow, transcriptCuesOf } from "./chat-rows";
-import { fetchTranscriptRow, listQuestionRows, listSessionChatRows } from "./chat-store";
+import { fetchTranscriptRow, listQuestionRows, listSessionChatRows, visibleQuestionFilter } from "./chat-store";
 import { WEBINARS_ASSISTANT_MIGRATION, WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import { presenceOffsetMs } from "./live-model";
 import { firstNameInitial, presenceBucket } from "./room-model";
+import { questionVisibleAt } from "./room-rules";
 import { AI_REQUEST_COLUMNS, aiRequestFromRow, sessionFromRow, type AiRequestRow } from "./rows";
 import { ROOM_RULES, type AnswerSource, type AssistantRequest, type AttendanceMarks, type AttendantStatus, type SessionKind, type Webinar, type WebinarSession } from "./model";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows } from "./store";
@@ -280,11 +281,14 @@ export async function loadAttendanceSnapshot(
     throw error;
   }
 
+  // A pergunta simulada do futuro (D77; na gravada, criada na abertura com o minuto do item) fica de fora ate a hora
+  // dela, no banco e de novo aqui: o painel nao mostra, o distribute nao atribui e a conta de abertas nao soma o que a
+  // sala ainda nao perguntou (correcao da revisao v8, achado 2).
   const [questionRows, chatRows] = await Promise.all([
-    listQuestionRows(db, { limit: 200, order: "recent", sessionId: session.id, statuses: ["open", "answered"] }),
+    listQuestionRows(db, { limit: 200, order: "recent", sessionId: session.id, statuses: ["open", "answered"], visibleAt: now.toISOString() }),
     listSessionChatRows(db, { limit: 300, sessionId: session.id })
   ]);
-  const questions = questionRows.map(questionFromRow);
+  const questions = questionRows.map(questionFromRow).filter((question) => questionVisibleAt(question, nowMs));
   const messages = chatRows.map(chatMessageFromRow);
   const candidates = messages.filter((message) => message.source === "audience" && mightCallAssistant({ body: message.body, messageKind: message.kind === "question" ? "question" : "message", origin: "chat" }));
   const [questionMarks, messageMarks] = await Promise.all([
@@ -378,14 +382,18 @@ export async function loadAttendanceSnapshot(
   };
 }
 
-/** As perguntas abertas que ja estao com cada atendente nesta sessao (o modo hibrido escolhe o de menos). */
-export async function listAssignedOpenQuestions(db: WebinarsDb, sessionId: string): Promise<{ assignedTo: string | null; createdAt: string; id: string }[]> {
+/**
+ * As perguntas abertas que ja estao com cada atendente nesta sessao (o modo hibrido escolhe o de menos). So as que ja
+ * apareceram na sala (visibleQuestionFilter; correcao da revisao v8, achado 2): a simulada do futuro nunca pesa na conta.
+ */
+export async function listAssignedOpenQuestions(db: WebinarsDb, sessionId: string, nowIso: string = new Date().toISOString()): Promise<{ assignedTo: string | null; createdAt: string; id: string }[]> {
   const { data, error } = await db
     .from("webinar_questions")
     .select("id, assigned_to, created_at")
     .eq("session_id", sessionId)
     .eq("status", "open")
     .is("deleted_at", null)
+    .or(visibleQuestionFilter(nowIso))
     .limit(500);
   assertNoDbError(error, "Webinarios: perguntas abertas por atendente");
   return ((data ?? []) as { assigned_to: string | null; created_at: string; id: string }[]).map((row) => ({ assignedTo: row.assigned_to, createdAt: row.created_at, id: row.id }));

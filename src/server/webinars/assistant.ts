@@ -130,7 +130,7 @@ async function handToAttendant(db: WebinarsDb, trigger: AssistantTrigger, nowMs:
   if (!attendants.some((attendant) => attendantIsOnline(attendant, nowMs))) {
     return false;
   }
-  const open = (await listAssignedOpenQuestions(db, trigger.sessionId)).filter((item) => item.assignedTo && item.id !== trigger.targetId);
+  const open = (await listAssignedOpenQuestions(db, trigger.sessionId, iso(nowMs))).filter((item) => item.assignedTo && item.id !== trigger.targetId);
   const items = [...open.map((item) => ({ ...item, target: "question" as AssistantTarget })), { assignedTo: null, createdAt: iso(nowMs), id: trigger.targetId, target: trigger.target }];
   const assignment = distributeQueue({ attendants, items, nowMs }).find((item) => item.id === trigger.targetId && item.target === trigger.target);
   return assignment ? assignAttendance(db, { id: assignment.id, nowIso: iso(nowMs), onlyIfUnassigned: true, target: assignment.target, userId: assignment.userId }) : false;
