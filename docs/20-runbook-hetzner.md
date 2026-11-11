@@ -1005,7 +1005,7 @@ bash infra/kit/migrar.sh            # aplica o que falta
 
 ## 9B. Backup e recuperacao do kit (produto licenciado, 11/11/2026)
 
-No servidor de um comprador (`docs/32` §3.2 e §4), o backup, o kit de recuperacao, o ensaio e a restauracao sao subcomandos do comando de operacao `membros` (`infra/kit/membros`, nome provisorio; o instalador o liga em `/usr/local/sbin`). A nossa producao continua no `infra/scripts/backup.sh` (secao 10).
+No servidor de um comprador (`docs/32` §3.2 e §4), o backup, o kit de recuperacao, o ensaio e a restauracao sao subcomandos do comando de operacao `membros` (`infra/kit/membros`, nome provisorio; ele funciona tambem como link, por exemplo em `/usr/local/sbin`, que o instalador vai criar). A nossa producao continua no `infra/scripts/backup.sh` (secao 10).
 
 ```bash
 sudo membros backup --iniciar               # confere o destino e cria o repositorio la (SFTP: cria a chave SSH e mostra)
