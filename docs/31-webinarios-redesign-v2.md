@@ -415,6 +415,50 @@ O resumo das enquetes da sessão (`pollsKey`: id, situação e resultado compart
 
 ## 13. Ajustes do teste do produtor de 11/11/2026
 
+O produtor testou na `dev` a Na tela, o roteiro e a Simulação na Live ao vivo e pediu ajustes em quatro frentes. A
+regra de cada uma está no `docs/30`; aqui, o que é desenho da sala e do console.
+
+### 13.1 As pessoas que comentam e a pergunta simulada
+
+"Quando eu crio um comentário fake, eu coloco uma foto, eu deveria poder fazer uma pergunta fake também. [...] Eu
+poderia simplesmente criar as pessoas primeiro, depois, quando eu fosse criar o comentário fake, eu selecionar a pessoa
+que eu quero que comente." A regra inteira (a lista por webinário, a pessoa como unidade, o preenchimento, a pergunta
+simulada fora de toda métrica e o repetir) está no `docs/30` D75 a D78, §2.2, §2.4, §2.7 e §4.2. Vale sobre §5.2 onde
+houver conflito (o **Quem comenta** com o Nome digitado e o "Usar esta foto em todos os comentários de {nome}").
+
+- **A lista "Pessoas que comentam"** (`persona-list.tsx`, a mesma peça no editor e no console): cada pessoa numa linha
+  com a foto ou as iniciais (o avatar de 24 px da sala, `RoomCommentAvatar`), o nome, "Aparece como Aluno · 2
+  comentários do roteiro", e os botões **Editar** e **Remover** (com o nome no rótulo para o leitor de tela). **Nova
+  pessoa** abre o formulário no fim da lista; **Editar** abre o formulário no lugar da linha, com a frase do que muda
+  ("Muda o nome, a foto e o Aparece como em todos os comentários do roteiro desta pessoa. O que a turma já viu não
+  muda."). O formulário: **Nome**, **Foto (opcional)** (o mesmo campo de antes, sem a caixa "Usar esta foto em todos"),
+  **Aparece como** (Aluno / Equipe) e **Adicionar à lista** ou **Salvar pessoa** com **Cancelar**; o nome repetido volta
+  no campo Nome ("Já existe uma pessoa com esse nome."). **Remover** pede confirmação com quantos comentários do roteiro
+  usam a pessoa e diz que eles ficam com o nome e a foto de agora. No banco sem a lista, só a frase da migração.
+- **No editor** (card Roteiro): a lista no topo do card, antes das linhas. Em cada linha, o **Quem comenta** vira o
+  seletor nativo com as pessoas ("Adriano Souza · Aluno"), a foto ou as iniciais da escolhida ao lado, **Criar nova
+  pessoa** (o formulário da pessoa abre embaixo da linha; a nova entra na lista e na linha) e, na linha ligada a
+  ninguém, o nome que ela guarda com "(fora da lista)". Logo abaixo, o **Tipo** (Comentário / Pergunta), e o texto vira
+  **Pergunta** com o limite de 500.
+- **No console** (entrada Roteiro, na Live ao vivo e na gravada): embaixo da fila, um segundo cartão **Pessoas que
+  comentam** com a mesma lista, e em cada pessoa **Comentar como {nome}**, que abre o **Novo comentário** com ela
+  escolhida. O **Novo comentário**: o **Quem comenta** pelo mesmo seletor (com **Criar nova pessoa**, que mostra o Nome,
+  a Foto e o Aparece como de antes; a nova entra na lista ao enviar ou guardar), o **Tipo** e o texto. O **Novo
+  comentário** do topo abre com a última pessoa usada enquanto a página estiver aberta.
+- **O repetir**: depois do **Enviar agora**, o formulário fica aberto com a mesma pessoa e o mesmo Tipo, o texto limpo,
+  o aviso "Enviado." (`role="status"`) e o foco no texto; **Guardar na lista**, **Voltar** e **Cancelar** voltam para a
+  fila. A fila marca o item Pergunta com o selo **Pergunta**.
+- **A pergunta simulada na sala**: igual à pergunta de um aluno na aba Perguntas (o nome e a foto ou as iniciais da
+  pessoa, os votos), sem nenhum selo; nunca no chat. **No console**, na aba Perguntas, o selo tonal **Simulada** (o tom
+  de aviso) ao lado do nome, com a frase inteira no `title` e para o leitor de tela ("Pergunta de uma pessoa da lista.
+  Fica fora do relatório, dos painéis e do CSV."); a equipe responde como nas outras.
+- Na tela, nunca a palavra "personagem" (a guarda das frases confere `WEBINAR_COPY.pessoas`).
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A79 | O seletor de pessoa com a foto dentro de cada opção (uma lista própria, não a nativa)? | não: o seletor nativo (teclado, leitor de tela e a lista do celular do navegador) com a foto ou as iniciais da escolhida ao lado |
+| V2-A80 | A pergunta simulada também aparece no chat da sala? | não: só na aba Perguntas, como a pergunta que o aluno faz pela aba; a mensagem do item Pergunta é só o registro de que ele entrou (`docs/30` D77) |
+
 ### 13.3 O campo de escrever estreito e a foto ou as iniciais de quem escreve
 
 O produtor, em 11/11/2026: "Está difícil de comentar com a caixa de escrever o comentário tão estreita.", "em algum momento no início ela ficou sem aquele placeholder escrito" e "Do lado da caixa de comentário [...] por que não aparece a foto dele? E se ele não tiver foto cadastrada, por que não aparece pelo menos as iniciais dele? tanto em comentários como e perguntas." A regra está no `docs/30` §1.3, §2.4, §5.1, §8.5, D81 e D82. Aqui, o que é desenho.

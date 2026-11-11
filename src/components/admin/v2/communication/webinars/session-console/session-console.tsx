@@ -164,9 +164,12 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // (snapshot.barred) embaixo dos seletores do Chat, com os Desfazer; as acoes sao as mesmas da live (onPersonAction, sem
 // o comando ao iframe: la nao ha sala). Adendo de 10/11/2026: a parte simulada do contador separada no selo dos
 // presentes (R7) e o Roteiro tambem na sessao da Live ao vivo (R8, a fila pelo relogio desde o Começar para todos), com
-// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto). A "Nova
-// enquete" das Enquetes (D83, 11/11/2026): createConsolePoll guarda nas prontas e, no "Abrir agora" e no "Abrir e
-// fixar", abre (e fixa) na sessao, com os avisos "Enquete guardada nas prontas.", "Enquete aberta para a turma." e
+// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto). As pessoas que
+// comentam (11/11/2026, docs/30 D75 a D78): o Roteiro recebe a lista do retrato e grava pela persona-actions (savePersona,
+// deletePersona, com os avisos), o Novo comentário manda a pessoa e o Tipo (a Pergunta vai para a aba Perguntas, com o
+// aviso proprio) e o console lembra a ultima pessoa usada enquanto a pagina estiver aberta (`lastPersonaId`).
+// A "Nova enquete" das Enquetes (D83, 11/11/2026): createConsolePoll guarda nas prontas e, no "Abrir agora" e no "Abrir
+// e fixar", abre (e fixa) na sessao, com os avisos "Enquete guardada nas prontas.", "Enquete aberta para a turma." e
 // "Enquete fixada."; abrir que falha depois de guardar vai para o banner do console (a enquete ja esta nas prontas).
 
 const copy = WEBINAR_ADMIN_COPY.console;
