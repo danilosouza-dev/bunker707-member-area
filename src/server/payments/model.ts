@@ -164,7 +164,8 @@ export function saleEventLabel(rawType: string | null | undefined, normalizedTyp
 export const WEBHOOK_PROCESSING_STATUSES = ["received", "processed", "failed", "ignored"] as const;
 export type WebhookProcessingStatus = (typeof WEBHOOK_PROCESSING_STATUSES)[number];
 
-export const SALE_OUTCOMES = ["access_granted", "access_revoked", "access_suspended", "access_restored", "ignored", "failed"] as const;
+/** `held`: a venda guardada (produto licenciado, docs/32 §2.2): a licenca nao permitia acesso novo (migracao 202611110002). */
+export const SALE_OUTCOMES = ["access_granted", "access_revoked", "access_suspended", "access_restored", "held", "ignored", "failed"] as const;
 export type SaleOutcome = (typeof SALE_OUTCOMES)[number];
 
 export function normalizeSaleOutcome(value: unknown): SaleOutcome | null {
@@ -182,6 +183,8 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
       return { label: "Acesso suspenso", tone: "warning" };
     case "access_restored":
       return { label: "Prazo devolvido", tone: "neutral" };
+    case "held":
+      return { label: "Venda guardada", tone: "warning" };
     case "ignored":
       return { label: "Ignorado", tone: "muted" };
     case "failed":

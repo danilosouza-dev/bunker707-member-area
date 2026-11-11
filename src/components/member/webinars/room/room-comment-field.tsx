@@ -1,6 +1,5 @@
 "use client";
 
-import { VenetianMask } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -10,20 +9,23 @@ import { RoomPill } from "./room-pill";
 
 // O campo "Adicione um comentário" do YouTube no chat e nas Perguntas da sala (docs/31, a sala no estilo do YouTube;
 // spec §9): so da sala (a gaveta do vertical continua com o campo de antes). Fechado: a faixa com a linha de 1 px em
-// cima, o avatar de 24 (as minhas iniciais; a mascara com a Anonima ligada; a pessoa antes do aceite) e o textarea sem
+// cima, o avatar de 24 (a minha foto ou as minhas iniciais; a pessoa antes do aceite) e o textarea sem
 // caixa, de uma linha que cresce ate 100 px, com a linha de 1 px embaixo. Com o foco, a linha de 2 px no tom do texto
 // cresce do centro; aberto com rascunho e sem o foco, a linha de 1 px mais forte. Aberto (o foco, ou o texto que ficou),
-// embaixo: a dica, e o rodape com a Anonima (so nas Perguntas), o Cancelar e o envio azul (desligado com o campo vazio).
+// embaixo: a dica, e o rodape com o Cancelar e o envio azul (desligado com o campo vazio). Desde 10/11/2026 (D64) o
+// rodape nao tem mais a pilula Anonima: ninguem pergunta como anonimo.
 // O aberto e guardado por quem usa o campo (composerExpandedStep), nunca so o :focus-within. Abaixo de lg, a folga do
 // iPhone e o texto de 16 px (o Safari da zoom no foco de um campo menor). So tokens --room-*; nenhuma frase aqui.
 
 export type RoomCommentFieldProps = {
-  /** A pilula Anonima no rodape (so nas Perguntas, quando a equipe deixou ligada). */
-  allowAnonymous?: boolean;
-  anonymous?: boolean;
+  /** O id do textarea (o console leva o foco a ele depois de uma acao do chat). */
+  id?: string;
   ariaLabel: string;
-  /** De quem e o campo: o nome para as iniciais; sem nome (antes do aceite), a pessoa. */
-  avatar: { name: string | null };
+  /**
+   * De quem e o campo: a foto do perfil quando vem (`imageSrc`), senao o nome para as iniciais; sem nome (antes do
+   * aceite), a pessoa; `team`, o icone da equipe (o console).
+   */
+  avatar: { imageSrc?: string | null; kind?: "person" | "team"; name: string | null };
   /** Enviando: o envio gira e fica desligado. */
   busy?: boolean;
   disabled?: boolean;
@@ -35,7 +37,6 @@ export type RoomCommentFieldProps = {
   maxLength: number;
   /** "enter": o Enter envia (o chat); "mod-enter": o Ctrl ou o ⌘ com o Enter envia (as Perguntas). */
   mode: "enter" | "mod-enter";
-  onAnonymousChange?: (on: boolean) => void;
   /** O Cancelar: quem usa o campo limpa o rascunho (o campo fecha e tira o foco). */
   onCancel: () => void;
   onChange: (value: string) => void;
@@ -54,18 +55,16 @@ export type RoomCommentFieldProps = {
 const MAX_HEIGHT = 100;
 
 export function RoomCommentField({
-  allowAnonymous = false,
-  anonymous = false,
   ariaLabel,
   avatar,
   busy = false,
   disabled = false,
   expanded,
   hint = null,
+  id,
   leading = null,
   maxLength,
   mode,
-  onAnonymousChange,
   onCancel,
   onChange,
   onExpandedChange,
@@ -76,12 +75,10 @@ export function RoomCommentField({
   submitLabel,
   value
 }: RoomCommentFieldProps) {
-  const sala = WEBINAR_COPY.sala;
   const [focused, setFocused] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const stripRef = useRef<HTMLFormElement | null>(null);
   const line = composerLine({ draft: value, expanded, focused });
-  const anonymousOn = allowAnonymous && anonymous;
 
   // O campo cresce com o texto ate o teto e depois rola.
   useLayoutEffect(() => {
@@ -161,13 +158,14 @@ export function RoomCommentField({
     <form className="shrink-0 border-t border-room-panel-border p-4 max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]" onBlur={handleBlur} onSubmit={submit} ref={stripRef}>
       <div className="mr-4 flex items-start">
         {leading}
-        <RoomCommentAvatar kind={anonymousOn ? "anonymous" : "person"} name={avatar.name ?? undefined} />
+        <RoomCommentAvatar imageSrc={avatar.imageSrc} kind={avatar.kind ?? "person"} name={avatar.name ?? undefined} />
         <div className="ml-3 min-w-0 flex-1">
           <div className={cn("relative border-b", line === "draft" ? "border-room-field-line-draft" : "border-room-field-line")}>
             <textarea
               aria-label={ariaLabel}
               className="block w-full resize-none bg-transparent pb-1 text-base leading-[22px] text-room-fg outline-none placeholder:text-room-fg-subtle disabled:text-room-fg-disabled lg:text-sm lg:leading-5"
               disabled={disabled}
+              id={id}
               maxLength={maxLength}
               onBlur={() => setFocused(false)}
               onChange={(event) => {
@@ -200,9 +198,6 @@ export function RoomCommentField({
               {hint ? <div className="mt-1.5 text-xs leading-[18px] text-room-fg-subtle">{hint}</div> : null}
               {/* O clique no rodape nao tira o foco do campo (no Safari o botao nem pega o foco): o rodape fica ate o click. */}
               <div className="mt-2 flex flex-wrap items-center gap-2" onMouseDown={(event) => event.preventDefault()}>
-                {allowAnonymous ? (
-                  <RoomPill aria-pressed={anonymousOn} icon={VenetianMask} iconFilled={anonymousOn} label={sala.anonima} onClick={() => onAnonymousChange?.(!anonymousOn)} size="s" tone="tonal" />
-                ) : null}
                 <div className="ml-auto flex items-center gap-2">
                   <RoomPill label={WEBINAR_COPY.admin.cancelar} onClick={cancel} tone="text" />
                   <RoomPill busy={busy} disabled={disabled || busy || !value.trim()} label={submitLabel} tone="cta" type="submit" />

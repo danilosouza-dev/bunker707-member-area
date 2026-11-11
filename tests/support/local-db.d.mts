@@ -5,3 +5,5 @@ export class SupabaseLocalError extends Error {}
 export function readLocalSupabaseConfig(env?: NodeJS.ProcessEnv): { anonKey: string; serviceKey: string; url: string };
 export function createLocalAdminClient(): SupabaseClient;
 export function unwrap<T>(result: { data: T; error: { message: string } | null }, context: string): T;
+export function guardadoNoBanco(url: string): string;
+export function comoOAppEntrega<T>(valor: T): T;

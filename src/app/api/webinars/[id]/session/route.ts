@@ -3,6 +3,8 @@ import { requireApiUser } from "@/server/auth/guards";
 import { isUuid, noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { getStudentSessionPayload } from "@/server/webinars/student-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A sessao do Webinario para o aluno (docs/30 §5.1, o subconjunto da fase 1): GET ?sessao= devolve { serverTime,
 // session: { id, kind, status, scheduledAt, startedAt, endedAt, lateJoinMinutes, phase }, webinar: { id, slug, title,
@@ -18,6 +20,9 @@ export const revalidate = 0;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {

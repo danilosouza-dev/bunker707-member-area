@@ -85,7 +85,7 @@ if [ -n "${SSH:-}" ]; then
         ip=$(server_ip4 "$name"); target="$DEPLOY_USER@$ip"
         log "$name por SSH"
         fw_open_ssh "$name"; wait_ssh "$target" 10
-        rsh "$target" "cd '$REMOTE_DIR' 2>/dev/null && cat .deployed-commit 2>/dev/null; docker ps --format '  {{.Names}}\t{{.Status}}'; free -h | sed 's/^/  /'; df -h / | sed 's/^/  /'; for f in /var/backups/bunker707/ultimo-sucesso /var/backups/bunker707-mautic/ultimo-sucesso; do [ -f \$f ] && echo \"  ultimo backup (\$f): \$(cat \$f)\"; done; echo '  transfer.pub (base64):'; sudo base64 -w0 /etc/bunker707/transfer.pub 2>/dev/null; echo"
+        rsh "$target" "cd '$REMOTE_DIR' 2>/dev/null && cat .deployed-commit 2>/dev/null; docker ps --format '  {{.Names}}\t{{.Status}}'; free -h | sed 's/^/  /'; df -h / | sed 's/^/  /'; for f in /var/backups/bunker707/ultimo-sucesso /var/backups/bunker707-mautic/ultimo-sucesso /var/backups/bunker707-licencas/ultimo-sucesso; do [ -f \$f ] && echo \"  ultimo backup (\$f): \$(cat \$f)\"; done; echo '  transfer.pub (base64):'; sudo base64 -w0 /etc/bunker707/transfer.pub 2>/dev/null; echo"
         fw_close_all
     done
 fi

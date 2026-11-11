@@ -5,14 +5,20 @@ import { readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/ro
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { postStudentChat, removeStudentChat } from "@/server/webinars/room-writes";
 import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
 // deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
-// mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor. POST { sessionId, body, kind,
-// anonymous, consent, consentVersion, displayMode, nickname, replyToId, offsetMs? } grava a mensagem com o offset do
-// relogio do servidor (no replay, a posicao do player que veio no corpo): 201 { message, pending }; a primeira exige o
-// aceite (409 consent_required); fora da hora ou do modo 409 { reason }; rajada e modo lento 429 com Retry-After;
-// palavra bloqueada 422; na live, removido ou banido 409 banned e silenciado 409 muted (fase 3). DELETE { all: true } e
+// mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor; com &tela=<carimbo>, leva tambem
+// `screen`, o estado da Na tela, so quando o carimbo da sessao mudou (nulo quando e igual, sem `tela` e no Replay; o
+// estado vem da memoria do processo, screen-queries.ts). POST { sessionId, body, kind,
+// consent, consentVersion, replyToId, offsetMs? } grava a mensagem com o offset do relogio do servidor (no replay, a
+// posicao do player que veio no corpo) e o nome do aluno, sempre o primeiro nome com a inicial do sobrenome (D64):
+// 201 { message, pending }; a primeira exige o aceite (409 consent_required); a pagina aberta com o codigo de antes de
+// 10/11/2026 que ainda manda `anonymous: true`, `displayMode` "anonymous" ou "nickname", ou um `nickname`, recebe 400
+// com a frase "atualize a pagina" e nada e gravado (`anonymous: false` e `displayMode` "first_name_initial" passam);
+// fora da hora ou do modo 409 { reason }; rajada e modo lento 429 com Retry-After; palavra bloqueada 422; na live, removido ou banido 409 banned e silenciado 409 muted (fase 3). DELETE { all: true } e
 // "Remover minhas mensagens": apaga o que o aluno escreveu em todas as sessoes e retira o aceite, 200 { removed }.
 // Sessao obrigatoria (401); ate 30 escritas por minuto por aluno; corpo de ate 4 KB; fora do acesso ou sessao de outro
 // webinario: 404 sem dizer se existe. Fase 4c (docs/30 §6.6 e D24): a mensagem que chama o Assistente ("@assistente",
@@ -26,6 +32,9 @@ export const revalidate = 0;
 const postSchema = chatPostBodySchema.extend({ offsetMs: offsetMsFieldSchema });
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -46,7 +55,7 @@ export async function GET(request: Request, context: RouteContext) {
     const room = await loadRoomContextFor(guarded.userId, guarded.webinarId, query.sessao.toLowerCase());
     const data = windowMode
       ? await readChatWindow(webinarsDb(), room, guarded.userId, { fromMs: query.from as number, toMs: query.to as number })
-      : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string });
+      : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string }, Date.now(), { stamp: query.tela });
     return ok(data);
   } catch (error) {
     return roomErrorResponse(error, "Não foi possível ler o chat.");
@@ -54,6 +63,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;
@@ -90,6 +102,9 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

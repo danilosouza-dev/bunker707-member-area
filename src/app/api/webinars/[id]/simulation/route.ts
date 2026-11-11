@@ -3,9 +3,11 @@ import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { isMissingWebinarSchema, webinarsDb } from "@/server/webinars/db";
 import type { SessionSimulation } from "@/server/webinars/model";
 import { badRequest, guardRoomRequest, loadCachedRoomContext, ok, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
-import { emptySimulationFeed, simulationDecisionRecorded, simulationEndOffsetMs, simulationFeed } from "@/server/webinars/simulation-model";
+import { emptySimulationFeed, liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationDecisionRecorded, simulationEndOffsetMs, simulationFeed } from "@/server/webinars/simulation-model";
 import { simulationFeedQuerySchema } from "@/server/webinars/simulation-schemas";
 import { fetchSessionSimulation } from "@/server/webinars/simulation-store";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A Simulacao da sala da Live gravada (docs/30 §1.6, §4.3, §6.6 e §8.6; D6, D10): GET ?sessao=&from=&to= (ms do relogio
 // do video, no maximo 120 s) devolve { data: SimulationFeed }: a parte simulada do contador a cada 15 s, as entradas e
@@ -16,12 +18,17 @@ import { fetchSessionSimulation } from "@/server/webinars/simulation-store";
 // tambem, mesmo com regra gravada. Nada vai para student_events (§6.6). Sessao obrigatoria (401), id do
 // webinario (400), consulta invalida ou janela maior que 120 s (400), fora do acesso ou sessao de outro webinario (404),
 // sem a vaga obrigatoria (403). Leitura: o acesso conferido fica guardado (loadCachedRoomContext), fora do teto de
-// escritas do aluno.
+// escritas do aluno. Adendo de 10/11/2026 (R7): a Live ao vivo tambem, com `from`/`to` no relogio da Simulacao da live
+// (desde o started_at, o "Começar para todos"; negativo na espera, simulation-model.simulationClockMs), a forma da faixa
+// pela duracao prevista do webinario e o fim no Encerrar live (liveSimulationEndOffsetMs).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -36,7 +43,8 @@ export async function GET(request: Request, context: RouteContext) {
   try {
     const room = await loadCachedRoomContext(guarded.userId, guarded.webinarId, sessao.toLowerCase());
     const { session } = room;
-    if (session.kind !== "simulated" || session.status === "cancelled" || !simulationDecisionRecorded(session)) {
+    const live = session.kind === "live";
+    if ((session.kind !== "simulated" && !live) || session.status === "cancelled" || !simulationDecisionRecorded(session)) {
       return ok(emptySimulationFeed(from, to));
     }
 
@@ -48,6 +56,11 @@ export async function GET(request: Request, context: RouteContext) {
         return ok(emptySimulationFeed(from, to));
       }
       throw error;
+    }
+
+    if (live) {
+      const shapeMs = liveSimulationShapeMs(room.webinar.durationMinutes);
+      return ok(simulationFeed({ durationMs: shapeMs, endMs: liveSimulationEndOffsetMs(session), fromMs: from, kind: session.kind, simulation, status: session.status, toMs: to }));
     }
 
     return ok(

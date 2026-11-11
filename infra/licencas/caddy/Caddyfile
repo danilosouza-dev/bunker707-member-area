@@ -1,0 +1,99 @@
+# Borda do servidor do Emissor de licencas (infra/licencas/docker-compose.yml; docs/32 §11.2; docs/20 §8C.4). Tres
+# sites, um por nome, cada um para uma porta local do compose do Emissor:
+#   LICENCAS_API_SITE_ADDRESS     a API publica das Instalacoes -> 127.0.0.1:EMISSOR_PORTA_NO_HOST, so /v1/* e /health.
+#                                 O nome tem registro A sem proxy da Cloudflare: nenhum desafio de robos, so IPv4, e o
+#                                 IP de quem pediu e o da propria conexao.
+#   LICENCAS_PAINEL_SITE_ADDRESS  o Painel de licencas da equipe -> 127.0.0.1:PAINEL_PORTA_NO_HOST. Proxy da Cloudflare
+#                                 na frente; o login e o de e-mail e senha do proprio Painel, de qualquer internet, sem
+#                                 lista de IPs e sem o Cloudflare Access (decisao do produtor em 11/11/2026, docs/32 D40).
+#   LICENCAS_INTERNO_SITE_ADDRESS a API interna da nossa escola (docs/api-interna.md do bunker-licensing; docs/20 §8C.9)
+#                                 -> 127.0.0.1:INTERNO_PORTA_NO_HOST, so /interno/v1/* e so do IPv4 do servidor da
+#                                 escola (LICENCAS_INTERNO_IPS, que o deploy-licencas e o conectar-licencas escrevem; sem
+#                                 a escola no ar, 127.0.0.1/32: ninguem). A credencial quem confere e o proprio Emissor.
+#                                 Registro A sem proxy da Cloudflare: o IP conferido e o da conexao.
+# O Emissor confia, nas tres portas, so no gateway da rede borda dele, por onde este Caddy chega: a API em
+# EMISSOR_PROXIES_CONFIAVEIS, o Painel em PAINEL_PROXIES_CONFIAVEIS e a API interna em INTERNO_PROXIES_CONFIAVEIS, que o
+# deploy-licencas escreve a cada rodada iguais ao EMISSOR_GATEWAY_BORDA (172.30.70.1), com o cabecalho x-forwarded-for
+# nas tres (scripts/implantar.sh). Ele le o IP de quem pediu no X-Forwarded-For, da direita para a esquerda: por isso
+# cada site escreve ali um IP so, o certo, o que veio de fora no cabecalho nunca passa e as faixas da Cloudflare nao
+# entram em nenhuma das listas. Dominio puro no endereco = HTTPS automatico (Let's Encrypt).
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		# Painel atras da Cloudflare: o IP real vem em CF-Connecting-IP, aceito so das faixas dela. Nenhum outro
+		# cabecalho escolhe o IP (um X-Forwarded-For vindo do navegador nunca vale).
+		import /etc/caddy/cloudflare-trusted-proxies.caddyfile
+		client_ip_headers CF-Connecting-IP
+		# Quem chama a API e servidor (fetch do Node): sem HTTP/3, que o firewall tambem nao abre.
+		protocols h1 h2
+	}
+}
+
+(sem_server) {
+	header -Server
+}
+
+{$LICENCAS_API_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	@api path /v1/* /health
+	handle @api {
+		# O Emissor recusa acima de 32 KB; aqui o corte e antes de chegar nele.
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy 127.0.0.1:{$EMISSOR_PORTA_NO_HOST} {
+			# O IP da conexao, nunca o de um cabecalho: e para ele que a conferencia inicial bate nas portas 80 e 443.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# O Painel e qualquer outro caminho nao existem neste nome.
+	handle {
+		respond 404
+	}
+}
+
+{$LICENCAS_PAINEL_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	# Sem lista de IPs e sem o Cloudflare Access (D40): quem segura o Painel e o login dele (senha forte em hash lento,
+	# bloqueio por tentativas por conta e por IP, sessao curta, aviso de aparelho novo e a auditoria). O IP de quem pediu
+	# e o que a Cloudflare repassa, aceito so das faixas dela (o client_ip acima): o bloqueio por IP conta o IP certo.
+	reverse_proxy 127.0.0.1:{$PAINEL_PORTA_NO_HOST} {
+		header_up X-Forwarded-For {client_ip}
+		# Os cabecalhos do Access de antes nunca chegam ao Painel: a identidade e so a do login dele.
+		header_up -Cf-Access-Jwt-Assertion
+		header_up -Cf-Access-Authenticated-User-Email
+	}
+}
+
+{$LICENCAS_INTERNO_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	# So o servidor da nossa escola (o IP da propria conexao, remote_ip: nenhum cabecalho escolhe, nem o da Cloudflare) e
+	# so as rotas da API interna. A credencial (Authorization: Bearer) quem confere e o Emissor, que guarda so o resumo.
+	@escola {
+		remote_ip {$LICENCAS_INTERNO_IPS}
+		path /interno/v1/*
+	}
+	handle @escola {
+		# O Emissor recusa acima de 16 KB; aqui o corte e antes de chegar nele.
+		request_body {
+			max_size 32KB
+		}
+		reverse_proxy 127.0.0.1:{$INTERNO_PORTA_NO_HOST} {
+			# O IP da conexao, nunca o de um cabecalho: vai para a auditoria e para o limite de pedidos do Emissor.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# Qualquer outro IP, ou outro caminho: nada (nem chega ao Emissor, nem conta como credencial errada).
+	handle {
+		respond 403
+	}
+}

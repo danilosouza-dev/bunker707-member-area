@@ -1019,7 +1019,7 @@ export async function seedLiveGravadaDeTeste(db, { comecouHa = 90_000, duracaoSe
         kind: "simulated",
         published_at: origemIso,
         registration_required: false,
-        room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+        room_settings: { chatMode: "open" },
         scheduled_at: scheduledAt,
         show_banner: false,
         show_on_home: true,
@@ -1161,9 +1161,7 @@ export async function seedLiveAoVivoDeTeste(db, { comecouHa = 60_000, equipeMode
         quality: { screenFps: 30, stage: 720 },
         registration_required: false,
         room_settings: {
-          anonymousQuestions: true,
           chatMode: "open",
-          displayName: "first_name_initial",
           newCommentsVisible: true,
           polls: true,
           practiceSession: true,
@@ -1527,7 +1525,7 @@ export async function seedJitDeTeste(db, { aCada = 15, entradaAtrasada = 0 } = {
         kind: "simulated",
         published_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
         registration_required: false,
-        room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+        room_settings: { chatMode: "open" },
         scheduled_at: null,
         show_banner: false,
         show_on_home: false,
@@ -1549,4 +1547,95 @@ export async function seedJitDeTeste(db, { aCada = 15, entradaAtrasada = 0 } = {
   );
 
   return { everyMinutes: aCada, lateJoinMinutes: entradaAtrasada };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A "Na tela" (docs/30 §2.4 e §4.2; docs/31 §12; migracao 202611100002): um banner e um QR Code prontos e, quando
+ * pedido, na tela de uma sessao. Ids na faixa bbbbbbbb-...-0009xx; os itens saem com o webinario (cascata) e as
+ * exibicoes com a sessao (limparWebinarios apaga tudo pelo slug "teste-").
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O banner que o aluno nao pode fechar (Embaixo, a esquerda, Medio, com o botao) e o QR Code que pode (Em cima, a
+ * direita), os dois com links .test que o ponta a ponta serve com uma pagina falsa (o navegador nunca sai da maquina).
+ */
+export const NA_TELA_DE_TESTE = {
+  banner: {
+    body: "As vagas da turma de dezembro abrem hoje.",
+    buttonLabel: "Quero minha vaga",
+    closable: false,
+    id: "bbbbbbbb-0000-4000-8000-000000000901",
+    kind: "banner",
+    linkUrl: "https://turma.bunker707.test/dezembro",
+    name: "Turma de dezembro",
+    place: "bottom_left",
+    size: "m",
+    title: "Turma de dezembro"
+  },
+  qr: {
+    body: null,
+    buttonLabel: null,
+    closable: true,
+    id: "bbbbbbbb-0000-4000-8000-000000000902",
+    kind: "qr",
+    linkUrl: "https://material.bunker707.test/apostila",
+    name: "Apostila da aula",
+    place: "top_right",
+    size: "m",
+    title: "Baixe a apostila"
+  }
+};
+
+/** A copia congelada de um item (snapshot v1, a mesma de screen-model.snapshotOfItem). */
+function copiaDoItemDaTela(item) {
+  return { body: item.body, buttonLabel: item.buttonLabel, closable: item.closable, image: null, linkUrl: item.linkUrl, name: item.name, place: item.place, size: item.size, title: item.title, v: 1 };
+}
+
+/**
+ * Grava o banner e o QR Code prontos de NA_TELA_DE_TESTE no webinario dado (o da Live gravada no ar por padrao) e
+ * poe na tela da sessao os tipos de `mostrar` ("banner", "qr"), com a copia congelada e o carimbo da sessao mudado
+ * por ultimo (como as acoes: a sala ve em ate cerca de 5 s). Sempre do zero: as exibicoes da sessao saem antes.
+ * Idempotente. Devolve os ids das exibicoes por tipo.
+ */
+export async function seedNaTelaDeTeste(db, { mostrar = [], sessaoId = LIVE_GRAVADA_NO_AR_DE_TESTE.sessaoId, webinarId = LIVE_GRAVADA_NO_AR_DE_TESTE.id } = {}) {
+  const contas = await contasDeTeste(db);
+  unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", sessaoId), "Apagando as exibicoes de teste (a migracao 202611100002 esta aplicada?)");
+  unwrap(
+    await db.from("webinar_screen_items").upsert(
+      Object.values(NA_TELA_DE_TESTE).map((item) => ({
+        archived_at: null,
+        body: item.body,
+        button_label: item.buttonLabel,
+        closable: item.closable,
+        created_by: contas.produtor.id,
+        id: item.id,
+        kind: item.kind,
+        link_url: item.linkUrl,
+        name: item.name,
+        place: item.place,
+        size: item.size,
+        title: item.title,
+        webinar_id: webinarId
+      })),
+      { onConflict: "id" }
+    ),
+    "Gravando o banner e o QR Code prontos de teste"
+  );
+
+  const exibicoes = {};
+  for (const tipo of mostrar) {
+    const item = NA_TELA_DE_TESTE[tipo];
+    const linha = unwrap(
+      await db
+        .from("webinar_screen_displays")
+        .insert({ item_id: item.id, kind: item.kind, session_id: sessaoId, shown_by: contas.produtor.id, snapshot: copiaDoItemDaTela(item) })
+        .select("id")
+        .single(),
+      `Mostrando o ${tipo} de teste`
+    );
+    exibicoes[tipo] = linha.id;
+  }
+  unwrap(await db.from("webinar_sessions").update({ updated_at: new Date().toISOString() }).eq("id", sessaoId), "Mudando o carimbo da sessao de teste");
+
+  return exibicoes;
 }

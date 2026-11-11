@@ -35,6 +35,7 @@ export default async function ContinueWatchingPage({ searchParams }: ContinueWat
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <ContinueWatchingView accessPreviewMode={accessPreviewMode} view={view} />

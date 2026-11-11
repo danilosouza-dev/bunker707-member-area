@@ -6,12 +6,16 @@ import {
 } from "@/server/comments/comment-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type CommentReactionRouteContext = {
   params: Promise<{ commentId: string }>;
 };
 
 export async function PUT(request: Request, context: CommentReactionRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {

@@ -1,6 +1,9 @@
 // Frases da Simulacao completa (docs/30 §1.6, §2.2, §3.5, §4.3, §6.6, §8.6 e D10): o card Simulacao (contador,
 // entradas e saidas, avisos de venda, a decisao registrada), as recusas das Server Actions e o que o aluno ve na sala.
-// Entram em WEBINAR_COPY.simulacao. Modulo puro, sem imports. Dono: a frente 4b da Simulacao.
+// Entram em WEBINAR_COPY.simulacao. Modulo puro, sem imports. Dono: a frente 4b da Simulacao. O adendo de 10/11/2026
+// (R7, a Simulacao na Live ao vivo) acrescenta as frases da live: o aviso do CDC, o minuto do aviso de venda contado da
+// live, a sessao que ja comecou, as recusas (o Replay, o selo na live, a migracao 202611100002) e os presentes simulados
+// do console.
 
 export const SIMULACAO_COPY = {
   card: {
@@ -61,7 +64,15 @@ export const SIMULACAO_COPY = {
     congelado: (contador: number, entradas: number, avisos: number) =>
       `Nesta sessão: contador com até +${contador}, ${entradas} ${entradas === 1 ? "entrada" : "entradas"} e ${avisos} ${avisos === 1 ? "aviso" : "avisos"} de venda.`,
     soLiveGravada: "A Simulação existe só na sessão gravada.",
-    relatorio: "Números simulados aparecem no relatório só no bloco Simulação."
+    relatorio: "Números simulados aparecem no relatório só no bloco Simulação.",
+    /* A Live ao vivo (R7). */
+    avisoCdcLive:
+      "Pela lei (CDC, art. 37), nunca divulgue fora da área de membros os números simulados como se fossem reais. Dentro dela, os números e os avisos simulados são sua decisão e ficam registrados com seu nome e a data.",
+    numerosPadraoLive: "Números de plateia: reais, a não ser que você ligue o contador ou as entradas da live.",
+    sessaoLive: (quando: string) => `Live de ${quando}`,
+    avisoMinutoLive: "Minuto da live",
+    avisoMinutoLiveDica: "Contado do Começar para todos: minuto ou minuto:segundo, como 12 ou 12:30.",
+    liveComecou: "A live já começou: o que a turma vê não muda até o fim."
   },
   /** As recusas das Server Actions do card (simulation-actions.ts). */
   servidor: {
@@ -70,7 +81,16 @@ export const SIMULACAO_COPY = {
     fraseNaoBate: "A confirmação não bate com a frase de hoje. Marque de novo.",
     naoExiste: "Essa sessão não existe mais.",
     usarCardNovo: "Esta sessão tem números ou avisos simulados: decida pelo card Simulação, com a frase completa.",
-    precisaMigracao: (migracao: string) => `A Simulação completa precisa da atualização do banco (migração ${migracao}).`
+    precisaMigracao: (migracao: string) => `A Simulação completa precisa da atualização do banco (migração ${migracao}).`,
+    /* A Live ao vivo (R7). */
+    semReplay: "O Replay nunca tem Simulação.",
+    liveSemSelo: "A live já é ao vivo: o selo \"Ao vivo\" da sessão gravada não existe nela.",
+    liveComecou: "Essa live já começou: a Simulação não muda no meio, e o relatório guarda o que a turma viu.",
+    precisaMigracaoLive: (migracao: string) => `A Simulação na live ao vivo precisa da atualização do banco (migração ${migracao}).`
+  },
+  /** O console da equipe (R7): a parte simulada separada do real, ao lado de "12 presentes · pico 14". */
+  console: {
+    simulados: (n: number) => `+${n.toLocaleString("pt-BR")} simulados`
   },
   aluno: {
     entrou: (nome: string) => `${nome} entrou`,

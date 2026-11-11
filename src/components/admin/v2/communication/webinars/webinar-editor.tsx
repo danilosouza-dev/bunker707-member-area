@@ -122,7 +122,7 @@ const DEVICE_OPTIONS: readonly { label: string; value: PreviewDevice }[] = [
 ];
 
 const COUNT_DEBOUNCE_MS = 500;
-const READ_ONLY_SITUATIONS: readonly WebinarSituation[] = ["in_progress", "ended", "cancelled"];
+const READ_ONLY_SITUATIONS: readonly WebinarSituation[] = ["in_progress", "ended", "cancelled", "archived"];
 
 function scrollBehavior(): ScrollBehavior {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
@@ -214,6 +214,10 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const situation = savedVersion?.situation ?? null;
   const kindLocked = isWebinarKindLocked(status);
   const readOnly = situation !== null && READ_ONLY_SITUATIONS.includes(situation);
+  // O arquivado fica so de leitura em tudo, inclusive nos cards com o proprio Salvar (o servidor recusa, docs/30 §2.3);
+  // o cancelado pela hora em que foi cancelado (a situacao do arquivado e Arquivado, nunca Cancelado).
+  const archived = status === "archived";
+  const cancelled = situation === "cancelled" || Boolean(initial?.cancelledAt);
   const payload = useMemo(() => canonicalWebinarDraft(draft), [draft]);
   const publishers = useMemo(() => (options.peopleLoaded ? new Set(options.people.filter((person) => person.canPublish).map((person) => person.id)) : null), [options.people, options.peopleLoaded]);
   const pickerItems = useMemo(() => toPickerItems(options.products), [options.products]);
@@ -479,6 +483,8 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const webinarActions = useWebinarActions({ onDeleted: () => router.push(WEBINARS_HREF), permissions });
   const actionTarget: WebinarActionTarget | null = savedVersion
     ? {
+        // O arquivado sem dados de aluno pode ser excluido (lido no servidor); o arquivado aqui e so o que a pagina carregou.
+        deletable: savedVersion.situation === "archived" && initial?.deletable === true,
         id: savedVersion.id,
         // O tipo gravado (o do rascunho na tela so vale depois de salvar).
         kind: saved.kind,
@@ -583,7 +589,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
   const cardProps = { disabled, draft, errorFor, now, onBlur: touch, onChange: change };
 
   function renderCard(card: WebinarEditorCard): ReactNode {
-    const meta = webinarCardTitle(card);
+    const meta = webinarCardTitle(card, draft.kind);
     const titleId = `webinar-card-${card}`;
 
     switch (card) {
@@ -759,7 +765,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
                 canPublish: permissions.canPublish,
                 currentUserName: options.currentUserName,
                 deciderNames: initial?.deciderNames ?? {},
-                disabled: locked || situation === "cancelled",
+                disabled: locked || archived || cancelled,
                 hasVideo: Boolean(saved.recordingVideoUrl),
                 initial: jitSaved,
                 now,
@@ -781,7 +787,15 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
             {savedVersion ? (
-              <SimulationCard canPublish={permissions.canPublish} currentUserName={options.currentUserName} deciderNames={initial?.deciderNames ?? {}} disabled={locked} now={now} sessions={savedSessions} />
+              <SimulationCard
+                canPublish={permissions.canPublish}
+                currentUserName={options.currentUserName}
+                deciderNames={initial?.deciderNames ?? {}}
+                disabled={locked || archived}
+                now={now}
+                sessions={savedSessions}
+                webinarKind={draft.kind}
+              />
             ) : (
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
             )}
@@ -796,8 +810,10 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
                 hasRecording={Boolean(initial?.recordingId) || Boolean(saved.recordingVideoUrl)}
                 initialItems={initial?.scriptItems ?? []}
                 initialTranscript={initial?.transcript ?? null}
+                readOnly={archived}
                 sessions={savedSessions}
                 webinarId={savedVersion.id}
+                webinarKind={draft.kind}
               />
             ) : (
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
@@ -807,14 +823,14 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
       case "enquetes":
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
-            {savedVersion ? <PollsCard disabled={locked} initial={initial?.polls ?? []} webinarId={savedVersion.id} /> : <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>}
+            {savedVersion ? <PollsCard disabled={locked || archived} initial={initial?.polls ?? []} webinarId={savedVersion.id} /> : <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>}
           </SectionCard>
         );
       case "oferta":
         return (
           <SectionCard description={meta.description} key={card} title={meta.title} titleId={titleId}>
             {savedVersion ? (
-              <OfferCard canWrite={permissions.canWrite} disabled={locked} kind={draft.kind} webinarId={savedVersion.id} />
+              <OfferCard canWrite={permissions.canWrite} disabled={locked || archived} kind={draft.kind} webinarId={savedVersion.id} />
             ) : (
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>
             )}
@@ -826,7 +842,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
             {savedVersion ? (
               <AssistantCard
                 canWrite={permissions.canWrite}
-                disabled={locked}
+                disabled={locked || archived}
                 // assistant_settings muda o updated_at do webinario: o proximo Salvar leva a versao nova.
                 onSaved={(updatedAt) => setSavedVersion((current) => (current ? { ...current, updatedAt } : current))}
                 webinarId={savedVersion.id}
@@ -895,7 +911,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
                 {reviewSentence}
               </p>
               {savedVersion?.status === "published" && !readOnly ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.publishedHint}</p> : null}
-              {situation === "cancelled" && initial?.cancelReason ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Motivo: {initial.cancelReason}</p> : null}
+              {cancelled && initial?.cancelReason ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Motivo: {initial.cancelReason}</p> : null}
               {reviewButtons}
               {!readOnly ? <p className="text-xs leading-5 text-[var(--text-tertiary)]">{WEBINAR_ADMIN_COPY.review.shortcutHint}</p> : null}
             </div>

@@ -6,6 +6,7 @@ import { requireLessonsAccess } from "@/server/access/lesson-access";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonReaction, LessonWatchStatus } from "@/lib/platform-types";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Progresso da aula. Comunicacao v3b-2 (docs/29 §4.3 e §6.1): 200 { data } como sempre; 200 { courseCompleted: true,
 // data } so no pedido que vira o curso de incompleto para completo para um aluno (todas as aulas publicadas dos
@@ -13,6 +14,9 @@ import type { LessonReaction, LessonWatchStatus } from "@/lib/platform-types";
 // nunca a leitura do acesso: duas gravacoes que fecham o mesmo curso dao uma virada so. A equipe nunca recebe.
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response) {

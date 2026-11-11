@@ -37,6 +37,8 @@ export type SimulationRulesFieldsProps = {
   form: SimulationForm;
   /** Prefixo unico dos ids (useId de quem usa + a sessao). */
   idBase: string;
+  /** A sessao da Live ao vivo (R7): o minuto do aviso contado da live, nao do video. */
+  live?: boolean;
   onChange: (next: SimulationForm) => void;
 };
 
@@ -73,7 +75,9 @@ function NumberField(props: { disabled: boolean; error?: string; hint?: ReactNod
   );
 }
 
-export function SimulationRulesFields({ disabled, errors, form, idBase, onChange }: SimulationRulesFieldsProps) {
+export function SimulationRulesFields({ disabled, errors, form, idBase, live = false, onChange }: SimulationRulesFieldsProps) {
+  const minuteLabel = live ? COPY.avisoMinutoLive : COPY.avisoMinuto;
+  const minuteHint = live ? COPY.avisoMinutoLiveDica : COPY.avisoMinutoDica;
   const patch = (next: Partial<SimulationForm>) => onChange({ ...form, ...next });
   const salesFull = form.sales.length >= SIMULATION_LIMITS.saleNoticesMax;
 
@@ -186,9 +190,9 @@ export function SimulationRulesFields({ disabled, errors, form, idBase, onChange
                         value={item.text}
                       />
                     </AdminField>
-                    <AdminField error={minuteError} hint={COPY.avisoMinutoDica} id={minuteId} label={COPY.avisoMinuto}>
+                    <AdminField error={minuteError} hint={minuteHint} id={minuteId} label={minuteLabel}>
                       <input
-                        aria-describedby={fieldDescribedBy(minuteId, { error: minuteError, hint: COPY.avisoMinutoDica })}
+                        aria-describedby={fieldDescribedBy(minuteId, { error: minuteError, hint: minuteHint })}
                         aria-invalid={minuteError ? true : undefined}
                         className={adminInputClass}
                         disabled={disabled}

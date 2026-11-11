@@ -3,7 +3,7 @@ import { THEME_HASH_KEY } from "../../src/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
 import { verifyJitsiToken } from "../../src/server/webinars/jitsi-token";
 import { CHAT_CONSENT_VERSION } from "../../src/server/webinars/model";
-import { ESCOLA_DE_TESTE, limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, NA_TELA_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedNaTelaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
   LIVE_AO_VIVO_DE_TESTE,
@@ -12,6 +12,7 @@ import {
   ambienteDaSalaAoVivo,
   apagarEnqueteDeTeste,
   eventosDaLiveAoVivo,
+  eventosDeWebinario,
   expect,
   salaFalsaDoJitsi,
   seedLiveAoVivoDeTeste,
@@ -27,8 +28,8 @@ import {
 // aceite), a mao levantada vai por toggleRaiseHand, o microfone liberado pelo apresentador abre o aviso com Falar /
 // Agora não e so o Falar manda toggleAudio. O chat e as reacoes sao os nossos; nenhum texto da pagina cita o Jitsi; a
 // 375 px a sala cabe sem rolagem lateral e os botoes da barra tem 44 px. A IA Diretor fica na pagina da live e some na
-// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "{n} assistindo
-// agora · com {apresentador}" e o Sair (docs/31 V2-18), e o "Ao vivo" e o Gravando ficam dentro do palco (V2-4) (sem
+// sala (o botao flutuante cobria o Enviar do chat); a 375 px o cabecalho da sala tem o titulo, "com {apresentador}"
+// e o Sair (docs/31 V2-18), e o "Ao vivo", quem assiste agora (docs/31 §11.5) e o Gravando ficam dentro do palco (V2-4) (sem
 // Minimizar nem pilula, docs/31 V2-2; o Sair pede a confirmacao e volta para a pagina da live, onde a IA Diretor
 // reaparece); a 667 px (celular deitado) o cabecalho continua o do celular, sem marca, os selos ficam no palco e Configurações aberto deixa
 // o palco com 96 px, acima do painel. O botao Configurações abre o painel de som e aparelhos: antes da liberacao nada
@@ -69,6 +70,10 @@ import {
 // quando o motor confirma); com o painel fechado pelo trilho ela volta.
 // O microfone recolhido (docs/31 V2-19): a equipe que recolhe o microfone (rejectParticipant de audio) o tira da barra
 // mesmo ja desligado pela aluna, quando nenhum mudo chega, com o aviso da equipe; o foco que estava nele volta para a sala.
+// A Na tela (docs/31 §12; especificacao de 10/11/2026, §3.2, §3.3 e §9): a camada do palco fica por cima do iframe do
+// motor, entao o banner e o QR Code do palco largo recebem o clique (o ponto do meio do cartao e dele, nao do iframe) e o
+// botao abre o link em outra aba; a 375 px (a Live ao vivo nao tem o desenho vertical) os dois viram a faixa abaixo do
+// palco, sem cruzar a caixa dele, e o banner que nao pode fechar e a mesma linha sem o X.
 
 const { roomName, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 /** Quem apresenta a live de teste (o produtor): o cabecalho e o selo do palco dizem o nome dele. */
@@ -137,11 +142,23 @@ test("Entrar na sala: o construtor recebe a sala, o token e a barra vazia; camer
   // confirmacao).
   await expect(dialogo.getByRole("img", { name: "Bunker707" })).toBeVisible();
   await expect(dialogo.getByRole("link", { name: "Bunker707" })).toHaveCount(0);
-  // O topo no estilo do YouTube a 1280 px: 64 px, a linha de baixo do titulo comecando pelo numero de agora e o tema
-  // redondo sem contorno.
+  // O topo no estilo do YouTube a 1280 px: 64 px, a linha de baixo do titulo so com a data, a duracao e quem apresenta
+  // (o numero de quem assiste saiu dela, docs/31 §11.5) e o tema redondo sem contorno.
   const topo = dialogo.locator("header").first();
   await expect.poll(async () => (await topo.boundingBox())?.height ?? 0).toBe(64);
-  await expect(topo.locator('[data-room-line="meta"]')).toHaveText(/^\d+ assistindo agora · /);
+  await expect(topo.locator('[data-room-line="meta"]')).toHaveText(new RegExp(`· com ${APRESENTADOR}$`));
+  await expect(topo.locator('[data-room-line="meta"]')).not.toHaveText(/assistindo/);
+  await expect(topo.getByTestId("room-present")).toHaveCount(0);
+  // Quem assiste agora: o selo com o icone de pessoas e o numero, no palco, logo a direita do "Ao vivo".
+  const palcoDoTopo = dialogo.locator("[data-lesson-player-stage]");
+  const quemAssiste = palcoDoTopo.getByTestId("room-present");
+  await expect(quemAssiste).toBeVisible();
+  await expect(quemAssiste).toHaveAttribute("title", /^\d+ assistindo agora$/);
+  await expect(quemAssiste.locator("svg")).toBeVisible();
+  const caixaDoAoVivo = await palcoDoTopo.getByTestId("room-on-air").boundingBox();
+  const caixaDeQuemAssiste = await quemAssiste.boundingBox();
+  expect(caixaDeQuemAssiste?.x ?? 0, "a direita do Ao vivo").toBeGreaterThanOrEqual((caixaDoAoVivo?.x ?? 0) + (caixaDoAoVivo?.width ?? Number.POSITIVE_INFINITY));
+  expect(Math.abs((caixaDeQuemAssiste?.y ?? 0) - (caixaDoAoVivo?.y ?? Number.POSITIVE_INFINITY)), "na mesma linha").toBeLessThanOrEqual(1);
   const botaoDoTema = topo.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro });
   await expect(botaoDoTema).toBeVisible();
   expect(await botaoDoTema.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("0px");
@@ -680,7 +697,7 @@ test("as Perguntas no estilo do YouTube (Y8): a 1280 o chip Minhas fica fora da 
   await expect(menu.getByRole("menuitemradio", { exact: true, name: ordem.maisVotadas })).toHaveAttribute("aria-checked", "false");
 });
 
-test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Enter quebra a linha e o Ctrl+Enter pergunta com a Anônima; o voto marca o polegar; a resposta escrita da equipe chega no fio '1 resposta' aberto na minha; os chips filtram e o ordenar rele", async ({ page }) => {
+test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Enter quebra a linha e o Ctrl+Enter pergunta com o nome do aluno (sem a pílula Anônima, D64); o voto marca o polegar; a resposta escrita da equipe chega no fio '1 resposta' aberto na minha; os chips filtram e o ordenar rele", async ({ page }) => {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2.perguntas;
   await page.setViewportSize({ height: 900, width: 1440 });
@@ -689,7 +706,8 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   await itemDoTrilho(dialogo, sala.abas.perguntas).click();
   await expect(painel.getByRole("heading", { level: 2, name: sala.abas.perguntas })).toBeVisible();
 
-  // Fechado, o campo nao tem o rodape; o foco (o fill) abre: a Anonima, o Cancelar e o Perguntar.
+  // Fechado, o campo nao tem o rodape; o foco (o fill) abre: o Cancelar e o Perguntar. Desde 10/11/2026 (D64) nao ha
+  // mais a pilula Anonima: ninguem pergunta como anonimo.
   const campo = painel.getByRole("textbox", { name: sala.suaPergunta });
   const perguntar = painel.getByRole("button", { exact: true, name: novas.perguntar });
   await expect(perguntar).toHaveCount(0);
@@ -697,10 +715,8 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   await campo.fill(pergunta);
   await expect(perguntar).toBeVisible();
   await expect(painel.getByRole("button", { exact: true, name: WEBINAR_COPY.admin.cancelar })).toBeVisible();
-  const anonima = painel.getByRole("button", { exact: true, name: sala.anonima });
-  await expect(anonima).toHaveAttribute("aria-pressed", "false");
-  await anonima.click();
-  await expect(anonima).toHaveAttribute("aria-pressed", "true");
+  await expect(painel.getByRole("button", { name: /an[oô]nim/i })).toHaveCount(0);
+  await expect(painel.getByRole("checkbox", { name: /an[oô]nim/i })).toHaveCount(0);
 
   // Nas Perguntas o Enter quebra a linha (nada vai ao servidor); o Ctrl ou o ⌘ com o Enter pergunta.
   await campo.press("End");
@@ -712,6 +728,11 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   const aceite = dialogo.getByRole("group", { name: /Ao enviar mensagens neste chat/ });
   const primeiro = await Promise.race([enviou.then(() => "enviou"), aceite.waitFor({ state: "visible" }).then(() => "aceite", () => "nada")]);
   if (primeiro === "aceite") {
+    // O aceite so tem o texto, "Entendi e quero participar" e Cancelar: sem escolha de nome, sem apelido e sem anonimo.
+    await expect(aceite.getByRole("radio")).toHaveCount(0);
+    await expect(aceite.getByRole("textbox")).toHaveCount(0);
+    await expect(aceite.getByRole("button")).toHaveCount(2);
+    await expect(aceite.getByRole("button", { name: /an[oô]nim/i })).toHaveCount(0);
     await aceite.getByRole("button", { exact: true, name: sala.consentimentoBotao }).click();
   }
   const resposta = await enviou;
@@ -719,16 +740,21 @@ test("as Perguntas no estilo do YouTube (Y10 e Y11): o campo abre no foco, o Ent
   // A rota da sala responde no envelope { data } (room-route.ts ok()).
   const {
     data: { question }
-  } = (await resposta.json()) as { data: { question: { anonymous: boolean; id: string } } };
-  expect(question.anonymous).toBe(true);
+  } = (await resposta.json()) as { data: { question: { anonymous: boolean; displayName: string; id: string } } };
+  // O corpo do pedido nao leva mais `anonymous`, e a pergunta e gravada com o nome do aluno.
+  expect(resposta.request().postDataJSON()).not.toHaveProperty("anonymous");
+  expect(resposta.request().postDataJSON()).not.toHaveProperty("displayMode");
+  expect(question.anonymous).toBe(false);
+  expect(question.displayName).not.toMatch(/^Aluno \d{3}$/);
   // Depois de perguntar, o campo fecha e fica vazio.
   await expect(campo).toHaveValue("");
   await expect(perguntar).toHaveCount(0);
 
-  // A minha pergunta como comentario: "Anônima" no lugar do nome, e o voto marca o polegar e o numero.
+  // A minha pergunta como comentario: "Você" no lugar do nome (nunca "Anônima"), e o voto marca o polegar e o numero.
   const minha = painel.locator(`[data-room-question="${question.id}"]`);
   await expect(minha).toContainText(pergunta);
-  await expect(minha.getByText(sala.anonima, { exact: true })).toBeVisible();
+  await expect(minha.getByText(WEBINAR_COPY.salaV2.chat.voce, { exact: true }).first()).toBeVisible();
+  await expect(minha.getByText(sala.anonima, { exact: true })).toHaveCount(0);
   const curtir = minha.getByRole("button", { exact: true, name: sala.curtir });
   await expect(curtir).toHaveAttribute("aria-pressed", "false");
   const votou = page.waitForResponse((response) => response.url().includes(`/questions/${question.id}/vote`) && response.request().method() === "POST");
@@ -1454,9 +1480,9 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(painel).toHaveCount(0);
   await page.setViewportSize({ height: 740, width: 375 });
 
-  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "{n}
-  // assistindo agora · com {apresentador}" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o
-  // leitor de tela) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
+  // O cabecalho do celular (docs/31 V2-18) com a gravacao ligada (o duble avisa, como o gravador): o titulo, "com
+  // {apresentador}" e o Sair, sem marca e sem selo; o "Ao vivo" (so o tempo, a frase para o leitor de tela), quem
+  // assiste agora (docs/31 §11.5) e o Gravando ficam dentro do palco, em cima a esquerda, e quem apresenta embaixo (V2-4).
   await sala.disparar("recordingStatusChanged", { mode: "file", on: true });
   // O aviso da gravacao que comecou, em pe: preso ao pe da tela, acima do campo da folha aberta, nunca sobre o video; a
   // ultima mensagem do chat fica acima dele (a lista ganha o respiro da altura do aviso).
@@ -1487,7 +1513,21 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   const tituloDoCabecalho = cabecalho.getByRole("heading", { level: 1, name: titulo });
   await expect(tituloDoCabecalho).toBeVisible();
   const linha = cabecalho.getByTestId("room-mobile-line");
-  await expect(linha).toHaveText(new RegExp(`^\\d+ assistindo agora · com ${APRESENTADOR}$`));
+  await expect(linha).toHaveText(`com ${APRESENTADOR}`);
+  // Quem assiste agora fica no palco, entre o Ao vivo e o Gravando, e os tres cabem na largura do palco a 375 px.
+  const assistindo = palcoDaSala.getByTestId("room-present");
+  await expect(assistindo).toBeVisible();
+  await expect(assistindo).toHaveAttribute("title", /^\d+ assistindo agora$/);
+  await expect(cabecalho.getByTestId("room-present")).toHaveCount(0);
+  const caixaDoPalco = await palcoDaSala.boundingBox();
+  const selosDeCima = [await noAr.boundingBox(), await assistindo.boundingBox(), await gravando.boundingBox()];
+  for (const [indice, caixa] of selosDeCima.entries()) {
+    expect(caixa, `o selo ${indice} na tela`).not.toBeNull();
+    expect((caixa?.x ?? 0) + (caixa?.width ?? 0), `o selo ${indice} dentro do palco`).toBeLessThanOrEqual((caixaDoPalco?.x ?? 0) + (caixaDoPalco?.width ?? 0));
+    if (indice > 0) {
+      expect(caixa?.x ?? 0, `o selo ${indice} depois do anterior`).toBeGreaterThanOrEqual((selosDeCima[indice - 1]?.x ?? 0) + (selosDeCima[indice - 1]?.width ?? Number.POSITIVE_INFINITY));
+    }
+  }
   // Sem Minimizar (docs/31 V2-2): o cabecalho termina no Sair.
   await expect(dialogo.getByRole("button", { exact: true, name: "Minimizar" })).toHaveCount(0);
   const sair = cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.sair });
@@ -1525,9 +1565,9 @@ test("a 375 px: a sala cabe sem rolagem lateral, o palco ocupa a largura e a nos
   await expect(page.getByRole("button", { exact: true, name: IA_DIRETOR })).toBeVisible();
 });
 
-test("a 667 px (celular deitado): o cabecalho do celular (titulo e '{n} assistindo agora · com {apresentador}', sem marca) e os selos Ao vivo e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
+test("a 667 px (celular deitado): o cabecalho do celular (titulo e 'com {apresentador}', sem marca) e os selos Ao vivo, quem assiste e Gravando no palco; Configurações aberto deixa o palco com 96 px, fora de baixo do painel", async ({ page }) => {
   // Abaixo de lg (1024 px, onde a sala vira computador) o cabecalho e o do celular (docs/31 V2-18): a logo e a linha de
-  // baixo do titulo com o numero e a data so entram em lg; o numero fica no comeco da linha do celular.
+  // baixo do titulo com a data so entram em lg; o numero de quem assiste fica no palco (docs/31 §11.5).
   await page.setViewportSize({ height: 740, width: 667 });
   const { dialogo, sala } = await entrarNaSala(page);
   // O iPhone SE deitado: 667 x 375 (a altura nao muda o cabecalho; a entrada usa a de cima para o Entrar na sala caber).
@@ -1542,9 +1582,11 @@ test("a 667 px (celular deitado): o cabecalho do celular (titulo e '{n} assistin
   await expect(palco.getByText(/^Ao vivo · \d{2}:\d{2}:\d{2}$/).filter({ visible: true })).toBeVisible();
   await expect(cabecalho.getByTestId("live-recording")).toHaveCount(0);
   await expect(cabecalho.locator("[data-room-brand]")).toBeHidden();
-  await expect(cabecalho.getByTestId("room-present")).toBeHidden();
+  await expect(cabecalho.getByTestId("room-present")).toHaveCount(0);
+  await expect(palco.getByTestId("room-present")).toBeVisible();
+  await expect(palco.getByTestId("room-present")).toHaveAttribute("title", /^\d+ assistindo agora$/);
   const linha = cabecalho.getByTestId("room-mobile-line");
-  await expect(linha).toHaveText(new RegExp(`^\\d+ assistindo agora · com ${APRESENTADOR}$`));
+  await expect(linha).toHaveText(`com ${APRESENTADOR}`);
   // A partir de sm o botao de tema volta ao cabecalho, depois do Sair: o tema e sempre o ultimo.
   await expect(cabecalho.getByRole("button", { exact: true, name: WEBINAR_COPY.salaV2.tema.claro })).toBeVisible();
 
@@ -1684,5 +1726,70 @@ test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfo
     await expect(botaoMicrofone).not.toHaveAttribute("aria-disabled", "true");
   } finally {
     unwrap(await createLocalAdminClient().from("webinars").update({ room_settings: original }).eq("id", LIVE_AO_VIVO_DE_TESTE.id), "Voltando o room_settings da live de teste");
+  }
+});
+
+test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code recebem o clique e o botao abre outra aba; a 375 px viram a faixa abaixo do palco, sem cruzar a caixa dele, e o banner sem fechar fica sem X; no palco largo e baixo, a faixa tambem", async ({ context, page }) => {
+  const db = createLocalAdminClient();
+  const naTela = WEBINAR_COPY.naTela;
+  const { banner, qr } = NA_TELA_DE_TESTE;
+  await seedNaTelaDeTeste(db, { mostrar: ["banner", "qr"], sessaoId: LIVE_AO_VIVO_DE_TESTE.sessaoId, webinarId: LIVE_AO_VIVO_DE_TESTE.id });
+  await context.route("https://turma.bunker707.test/**", (route) => route.fulfill({ body: "<!doctype html><title>Pagina de teste</title>", contentType: "text/html" }));
+  try {
+    const { dialogo } = await entrarNaSala(page);
+    const cartao = dialogo.locator("[data-room-screen-card='banner']");
+    await expect(cartao).toBeVisible({ timeout: 15_000 });
+    await expect(dialogo.locator("[data-room-screen-card='qr']")).toBeVisible();
+    await expect(cartao.getByRole("button", { name: naTela.aluno.fecharBanner })).toHaveCount(0);
+
+    // O cartao fica por cima do iframe do motor: o ponto do meio dele e do cartao, e o iframe esta embaixo.
+    const motor = dialogo.locator("[data-room-stage] iframe").first();
+    const [caixaDoCartao, caixaDoMotor] = await Promise.all([cartao.boundingBox(), motor.boundingBox()]);
+    expect(caixaDoCartao).not.toBeNull();
+    expect(caixaDoMotor).not.toBeNull();
+    const meio = { x: caixaDoCartao!.x + caixaDoCartao!.width / 2, y: caixaDoCartao!.y + caixaDoCartao!.height / 2 };
+    expect(meio.x > caixaDoMotor!.x && meio.x < caixaDoMotor!.x + caixaDoMotor!.width && meio.y > caixaDoMotor!.y && meio.y < caixaDoMotor!.y + caixaDoMotor!.height, "o cartao esta sobre o iframe").toBe(true);
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-room-screen-card]")?.getAttribute("data-room-screen-card") ?? null, meio)).toBe("banner");
+
+    const botao = cartao.getByRole("link", { exact: true, name: banner.buttonLabel! });
+    const novaAba = context.waitForEvent("page");
+    await botao.click();
+    const aberta = await novaAba;
+    await aberta.waitForURL(banner.linkUrl);
+    await aberta.close();
+    await expect.poll(async () => (await eventosDeWebinario("webinar_screen_clicked")).map((evento) => evento.entity_id), { timeout: 15_000 }).toContain(LIVE_AO_VIVO_DE_TESTE.sessaoId);
+
+    // A 375 px: a faixa abaixo do palco, fora do video; o banner sem fechar sem o X, o QR Code com o X e o Abrir o link.
+    await page.setViewportSize({ height: 740, width: 375 });
+    const faixa = dialogo.locator("[data-room-screen-strip]");
+    const linhaDoBanner = faixa.locator("[data-room-screen-row='banner']");
+    const linhaDoQr = faixa.locator("[data-room-screen-row='qr']");
+    await expect(linhaDoBanner).toBeVisible();
+    await expect(linhaDoQr).toBeVisible();
+    await expect(dialogo.locator("[data-room-screen-card='banner']")).toBeHidden();
+    await expect(linhaDoBanner).toHaveAccessibleName(naTela.aluno.secaoBanner(banner.title));
+    await expect(linhaDoBanner.getByRole("button", { name: naTela.aluno.fecharBanner })).toHaveCount(0);
+    await expect(linhaDoQr.getByRole("button", { name: naTela.aluno.fecharQr })).toBeVisible();
+    await expect(linhaDoQr.getByRole("link", { exact: true, name: naTela.aluno.abrirOLink })).toHaveAttribute("href", qr.linkUrl);
+    const [palco, linha] = await Promise.all([dialogo.locator("[data-room-stage]").boundingBox(), linhaDoBanner.boundingBox()]);
+    expect(palco).not.toBeNull();
+    expect(linha).not.toBeNull();
+    expect(linha!.y, "a linha fica abaixo do palco, sem cruzar a caixa dele").toBeGreaterThanOrEqual(palco!.y + palco!.height - 0.5);
+    expect(linha!.height).toBeGreaterThanOrEqual(56);
+    const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
+    expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
+
+    // A tela baixa (docs/31 §12.4): o palco largo (640 px ou mais) e baixo, como o do celular deitado, usa a faixa; o
+    // QR Code nao cabe sobre o video e os cartoes se cobririam.
+    await page.setViewportSize({ height: 480, width: 1200 });
+    const camada = await dialogo.locator("[data-room-screen-layer]").boundingBox();
+    expect(camada).not.toBeNull();
+    expect(camada!.width, "o palco continua largo").toBeGreaterThanOrEqual(640);
+    await expect(linhaDoBanner).toBeVisible();
+    await expect(linhaDoQr).toBeVisible();
+    await expect(dialogo.locator("[data-room-screen-card='banner']")).toBeHidden();
+    await expect(dialogo.locator("[data-room-screen-card='qr']")).toBeHidden();
+  } finally {
+    unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Tirando a Na tela da live de teste");
   }
 });

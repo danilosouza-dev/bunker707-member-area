@@ -106,6 +106,26 @@ test("Agendado: data e hora em Sao Paulo, duracao, apresentador e a contagem reg
   assert.equal(view.endedAtMs, null);
 });
 
+test("a pagina do webinario: 'No ar há' pelo inicio da live e o degrau do titulo pelo tamanho do texto", () => {
+  const inicio = "2026-11-05T23:00:00.000Z";
+  const t0 = Date.parse(inicio);
+  assert.equal(time.onAirLabel(inicio, t0 + 12 * 60_000), "No ar há 12 min");
+  assert.equal(time.onAirLabel(inicio, t0 + 65 * 60_000), "No ar há 1 h 5 min");
+  assert.equal(time.onAirLabel(inicio, t0 + 30_000), "Começou agora", "o primeiro minuto");
+  assert.equal(time.onAirLabel(inicio, t0), "Começou agora");
+  assert.equal(time.onAirLabel(inicio, t0 - 7_000), "Começou agora", "o relogio da pagina um passo de 15 s atras do inicio: a live ja esta no ar");
+  assert.equal(time.onAirLabel(inicio, t0 - 3 * 60_000), "Começou agora", "o aparelho atrasado 3 min");
+  assert.equal(time.onAirLabel(null, t0), "");
+  assert.equal(time.onAirLabel("nao e data", t0), "");
+
+  assert.equal(time.heroTitleScale("Live de Teste: Boas-vindas"), "lg");
+  assert.equal(time.heroTitleScale("a".repeat(40)), "lg");
+  assert.equal(time.heroTitleScale("a".repeat(41)), "md");
+  assert.equal(time.heroTitleScale("a".repeat(80)), "md");
+  assert.equal(time.heroTitleScale("a".repeat(81)), "sm");
+  assert.equal(time.heroTitleScale("  curto  "), "lg", "sem contar os espacos das pontas");
+});
+
 test("Vaga garantida: a vaga da sessao (ou a geral, sem sessao) vira o selo e o token do calendario", () => {
   const view = build(webinar(), [session()], [registration()]);
   assert.equal(view.phase, "registered");

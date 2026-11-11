@@ -88,6 +88,25 @@ supabase_cli() {
 # Caminho do repositorio como o compose ve (para mensagens).
 project_name() { compose config --format json 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["name"])' 2>/dev/null || echo bunker707; }
 
+# Alias `storagebox` no ~/.ssh/config para o restic falar SFTP com o Storage Box: usuario e host lidos do .env
+# (STORAGE_BOX_USER, STORAGE_BOX_HOST, STORAGE_BOX_SSH_PORT), chave em ~/.ssh/id_ed25519_storagebox (o provision
+# instala a derivada do token, que o box ja conhece; sem ela, gera uma e diz como cadastrar). Idempotente.
+storagebox_ssh_alias() {
+    local user host port key_file config
+    user=$(env_value STORAGE_BOX_USER); host=$(env_value STORAGE_BOX_HOST); port=$(env_value STORAGE_BOX_SSH_PORT 23)
+    [ -n "$user" ] && [ -n "$host" ] || { warn "STORAGE_BOX_USER/STORAGE_BOX_HOST vazios: pulando o alias SSH (repositorio local?)."; return 0; }
+    key_file="$HOME/.ssh/id_ed25519_storagebox"; config="$HOME/.ssh/config"
+    mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+    if [ ! -f "$key_file" ]; then
+        ssh-keygen -q -t ed25519 -N "" -C "bunker707-backup" -f "$key_file"
+        log "Chave SSH criada em $key_file: cadastre no Storage Box com ssh -p $port $user@$host install-ssh-key < $key_file.pub"
+    fi
+    if ! grep -qE '^Host storagebox$' "$config" 2>/dev/null; then
+        printf '\nHost storagebox\n  HostName %s\n  User %s\n  Port %s\n  IdentityFile %s\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$host" "$user" "$port" "$key_file" >> "$config"
+        chmod 600 "$config"; log "Alias 'storagebox' gravado em $config."
+    fi
+}
+
 # Cadastra no repositorio restic (RESTIC_REPOSITORY, aberto com RESTIC_PASSWORD) uma segunda senha, lida do
 # arquivo: a de recuperacao derivada do HCLOUD_TOKEN (infra/cloud/deploy-key.mjs --secret), que abre o backup
 # mesmo sem o .env do servidor. Idempotente: se a senha ja abre o repositorio, nao faz nada.

@@ -3,19 +3,38 @@ import { randomUUID } from "node:crypto";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
+import {
+  HOUR,
+  LIVE_SOURCE,
+  MIN,
+  OTHER_SESSION,
+  RECORDING,
+  REPLAY,
+  SESSION,
+  WEBINAR,
+  bancoFalso,
+  escola,
+  iso,
+  janelaDoChat
+} from "./support/webinarios-sala-banco.mjs";
 
 // As rotas da Sala (docs/30 §4.7, §5.1, §8.3 e §8.5; docs/18 §2.2), sem banco: um banco falso em memoria (tabelas
 // como listas, filtros do PostgREST, chaves unicas das tabelas da 202610290001 e a RPC webinar_chat_window com a
 // linha mestre deslocada pela ancora) e a sessao do aluno pelo teste. Aqui: 401 sem sessao, 400 sem id, 404 fora do
 // acesso e sessao de outro webinario; a janela do chat (linha mestre + a pendente do proprio aluno) e a consulta de
 // mensagens novas com o cursor; o aceite obrigatorio uma vez (409 consent_required, depois webinar_chat_consented
-// e o nome exibido pela escolha); offset do relogio do servidor na gravada e do corpo no replay; 409 chat_off /
+// e o nome exibido, sempre o primeiro nome com a inicial do sobrenome); sem anonimato e sem apelido (D64, 10/11/2026):
+// o pedido de uma pagina antiga que ainda pede anonimo ou apelido e recusado com 400 e nada e gravado, o aceite antigo
+// com apelido ou anonimo conta como sem aceite, e o card Sala antigo do webinario nao muda nada; offset do relogio do servidor na gravada e do corpo no replay; 409 chat_off /
 // team_only / not_started / ended; rajada 5/60 s e modo lento 429 com Retry-After; palavra bloqueada 422; moderado
 // grava approved = false e devolve pending; a pergunta pelo chat; Remover minhas mensagens (apaga tudo, retira o
 // aceite, grava revoked); o sinal de presenca (balde do servidor, webinar_joined no primeiro, samples no mesmo
 // balde, webinar_left no leave, o acesso em cache); reacoes 1/s e 20/min e as contagens; perguntas 2/min, a lista
 // com mine/voted e a dispensada so para o autor, o voto que alterna; enquetes (uma resposta, 409 na segunda,
-// encerrada 409, opcao invalida 400, resultado so compartilhado); e a resposta da sessao com os campos da sala.
+// encerrada 409, opcao invalida 400, resultado so compartilhado); e a resposta da sessao com os campos da sala. A
+// moderacao por pessoa na Live gravada (a Na tela, R5): silenciado 409 muted no chat, na pergunta e no fio (reage e
+// responde enquete), removido 409 banned em tudo e a sessao com join kicked e sem o video, o desfazer devolve a sala, e
+// roomJoinFor com o kicked na gravada.
 
 const sessao = (globalThis.__salaRotasSessao ??= { user: null });
 
@@ -62,22 +81,16 @@ const heartbeatRoute = await import("../src/app/api/webinars/[id]/heartbeat/rout
 const reactionsRoute = await import("../src/app/api/webinars/[id]/reactions/route.ts");
 const questionsRoute = await import("../src/app/api/webinars/[id]/questions/route.ts");
 const voteRoute = await import("../src/app/api/webinars/[id]/questions/[qid]/vote/route.ts");
+const repliesRoute = await import("../src/app/api/webinars/[id]/questions/[qid]/replies/route.ts");
 const pollsRoute = await import("../src/app/api/webinars/[id]/polls/route.ts");
 const sessionRoute = await import("../src/app/api/webinars/[id]/session/route.ts");
 const registerRoute = await import("../src/app/api/webinars/[id]/register/route.ts");
-const { resetRoomLimits } = await import("../src/server/webinars/room-limits.ts");
+const { resetRoomLimits, takeReplyBurst } = await import("../src/server/webinars/room-limits.ts");
 const { CHAT_CONSENT_VERSION } = await import("../src/server/webinars/model.ts");
+const { CHAT_MESSAGES } = await import("../src/server/webinars/chat-schemas.ts");
+const { clearAuthorPhotoCache } = await import("../src/server/webinars/author-photos.ts");
+const { clearSharedPollCounts, roomJoinFor } = await import("../src/server/webinars/room-queries.ts");
 
-const MIN = 60_000;
-const HOUR = 60 * MIN;
-const WEBINAR = "cccccccc-0000-4000-8000-000000000001";
-const SESSION = "cccccccc-0000-4000-8000-000000000002";
-const LIVE_SOURCE = "cccccccc-0000-4000-8000-000000000003";
-const REPLAY = "cccccccc-0000-4000-8000-000000000004";
-const OTHER_WEBINAR = "cccccccc-0000-4000-8000-000000000005";
-const OTHER_SESSION = "cccccccc-0000-4000-8000-000000000006";
-const RECORDING = "cccccccc-0000-4000-8000-000000000007";
-const iso = (time) => new Date(time).toISOString();
 let proximoAluno = 100;
 
 /** Um aluno novo por teste: o teto global de escritas e por aluno e vive no modulo. */
@@ -86,303 +99,6 @@ function novoAluno() {
   const id = `55555555-5555-4555-8555-${String(proximoAluno).padStart(12, "0")}`;
   sessao.user = { id };
   return id;
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Banco falso
- * ---------------------------------------------------------------------------------------------- */
-
-const UNIQUE = {
-  webinar_chat_consents: [["user_id"]],
-  webinar_poll_answers: [["poll_id", "user_id"]],
-  webinar_presence_samples: [["session_id", "user_id", "bucket"]],
-  webinar_question_votes: [["question_id", "user_id"]]
-};
-const NO_ID = new Set(["webinar_attendance", "webinar_chat_consents", "webinar_presence_samples", "webinar_question_votes"]);
-const DEFAULTS = {
-  student_events: { entity_id: null, entity_type: null, metadata: {} },
-  webinar_chat_consents: { nickname: null, revoked_at: null },
-  webinar_chat_messages: { approved: true, approved_at: null, approved_by: null, deleted_at: null, deleted_by: null, deleted_reason: null, kind: "message", master: false, pinned_at: null, reply_to_id: null, script_item_id: null },
-  webinar_poll_answers: { deleted_at: null },
-  webinar_presence_samples: { samples: 1 },
-  webinar_questions: { anonymous: false, answer_text: null, answered_at: null, answered_by: null, answered_live: false, deleted_at: null, deleted_reason: null, message_id: null, status: "open", upvotes: 0 }
-};
-
-function literal(text) {
-  if (text === "null") return null;
-  if (text === "true") return true;
-  if (text === "false") return false;
-  return text.replace(/^"(.*)"$/, "$1");
-}
-
-function compare(a, b) {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
-}
-
-function matches(row, [op, column, value]) {
-  const current = row[column];
-  switch (op) {
-    case "eq":
-      return current === value;
-    case "in":
-      return value.includes(current);
-    case "is":
-      return value === null ? current === null || current === undefined : current === value;
-    case "gte":
-      return compare(current, value) >= 0;
-    case "gt":
-      return compare(current, value) > 0;
-    case "lte":
-      return compare(current, value) <= 0;
-    case "lt":
-      return compare(current, value) < 0;
-    case "or":
-      return column.split(",").some((part) => {
-        const [col, operator, ...rest] = part.split(".");
-        return matches(row, [operator, col, literal(rest.join("."))]);
-      });
-    default:
-      return true;
-  }
-}
-
-/** O relogio do banco falso (created_at das linhas novas): o teste adianta para testar a janela de 60 s das reacoes. */
-const relogio = { agora: () => Date.now() };
-
-function bancoFalso({ rpc = {}, tables = {} } = {}) {
-  const calls = { from: [], rpc: [], writes: [] };
-  const table = (name) => (tables[name] ??= []);
-
-  function violates(name, row, ignore) {
-    return (UNIQUE[name] ?? []).some((keys) => table(name).some((existing) => existing !== ignore && keys.every((key) => existing[key] === row[key])));
-  }
-
-  function query(name) {
-    const state = { count: null, filters: [], head: false, limit: null, op: null, order: [], payload: null, range: null, single: null, upsertKeys: null };
-
-    function stamp(row) {
-      const now = iso(relogio.agora());
-      const base = { ...(DEFAULTS[name] ?? {}) };
-      if (!NO_ID.has(name)) base.id = randomUUID();
-      return { ...base, created_at: now, updated_at: now, ...row };
-    }
-
-    function finish(rows) {
-      if (state.head) return { count: rows.length, data: null, error: null };
-      if (state.single === "single") return rows[0] ? { data: rows[0], error: null } : { data: null, error: { code: "PGRST116", message: "no rows" } };
-      if (state.single === "maybe") return { data: rows[0] ?? null, error: null };
-      return { count: state.count ? rows.length : null, data: rows, error: null };
-    }
-
-    function run() {
-      const rows = table(name);
-      const filtered = () => rows.filter((row) => state.filters.every((filter) => matches(row, filter)));
-
-      if (state.op === "insert" || state.op === "upsert") {
-        const payloads = Array.isArray(state.payload) ? state.payload : [state.payload];
-        const touched = [];
-        for (const payload of payloads) {
-          const existing = state.op === "upsert" ? rows.find((row) => state.upsertKeys.every((key) => row[key] === payload[key])) : null;
-          if (existing) {
-            Object.assign(existing, payload, { updated_at: iso(relogio.agora()) });
-            touched.push(existing);
-            continue;
-          }
-          const row = stamp(payload);
-          if (violates(name, row)) {
-            return { data: null, error: { code: "23505", message: `duplicate key (${name})` } };
-          }
-          rows.push(row);
-          touched.push(row);
-        }
-        calls.writes.push({ op: state.op, payload: state.payload, table: name });
-        return finish(touched);
-      }
-      if (state.op === "update") {
-        const touched = filtered();
-        touched.forEach((row) => Object.assign(row, state.payload, { updated_at: iso(relogio.agora()) }));
-        calls.writes.push({ filters: state.filters, op: "update", payload: state.payload, table: name });
-        return finish(touched);
-      }
-      if (state.op === "delete") {
-        const removed = filtered();
-        tables[name] = rows.filter((row) => !removed.includes(row));
-        calls.writes.push({ filters: state.filters, op: "delete", table: name });
-        return finish(removed);
-      }
-      let result = filtered();
-      for (const [column, ascending] of [...state.order].reverse()) {
-        result = [...result].sort((a, b) => (ascending ? compare(a[column], b[column]) : compare(b[column], a[column])));
-      }
-      if (state.range) result = result.slice(state.range[0], state.range[1] + 1);
-      if (state.limit !== null) result = result.slice(0, state.limit);
-      return finish(result);
-    }
-
-    const filter = (op) => (column, value) => {
-      state.filters.push([op, column, value]);
-      return chain;
-    };
-    const chain = {
-      delete: () => ((state.op = "delete"), chain),
-      eq: filter("eq"),
-      gt: filter("gt"),
-      gte: filter("gte"),
-      in: filter("in"),
-      insert: (payload) => ((state.op = "insert"), (state.payload = payload), chain),
-      is: filter("is"),
-      limit: (value) => ((state.limit = value), chain),
-      lt: filter("lt"),
-      lte: filter("lte"),
-      maybeSingle: () => ((state.single = "maybe"), chain),
-      or: (expression) => ((state.filters.push(["or", expression, null]), chain)),
-      order: (column, options) => (state.order.push([column, options?.ascending !== false]), chain),
-      range: (from, to) => ((state.range = [from, to]), chain),
-      select: (_columns, options) => {
-        state.op ??= "select";
-        if (options?.count) state.count = options.count;
-        if (options?.head) state.head = true;
-        return chain;
-      },
-      single: () => ((state.single = "single"), chain),
-      then: (resolve, reject) => Promise.resolve().then(run).then(resolve, reject),
-      update: (payload) => ((state.op = "update"), (state.payload = payload), chain),
-      upsert: (payload, options) => ((state.op = "upsert"), (state.payload = payload), (state.upsertKeys = (options?.onConflict ?? "id").split(",")), chain)
-    };
-    return chain;
-  }
-
-  return {
-    calls,
-    from(name) {
-      calls.from.push(name);
-      return query(name);
-    },
-    rpc(name, args) {
-      calls.rpc.push({ args, name });
-      return { then: (resolve, reject) => Promise.resolve().then(() => ({ data: rpc[name] ? rpc[name](args, tables) : null, error: null })).then(resolve, reject) };
-    },
-    tables
-  };
-}
-
-/** A RPC webinar_chat_window do banco falso: as linhas da sessao (aprovadas, ou minhas) + a linha mestre das outras sessoes do webinario, a da live deslocada pela ancora. */
-function janelaDoChat(args, tables) {
-  const session = tables.webinar_sessions.find((row) => row.id === args.p_session_id);
-  const anchor = tables.webinar_recordings?.find((row) => row.id === session?.recording_id)?.anchor_offset_ms ?? 0;
-  const own = tables.webinar_chat_messages.filter(
-    (row) => row.session_id === args.p_session_id && !row.deleted_at && row.offset_ms >= args.p_from_ms && row.offset_ms <= args.p_to_ms && (row.approved || (args.p_user_id && row.author_user_id === args.p_user_id))
-  );
-  const master = tables.webinar_chat_messages
-    .filter((row) => row.master && row.approved && !row.deleted_at && row.session_id !== args.p_session_id && row.webinar_id === session?.webinar_id)
-    .map((row) => {
-      const source = tables.webinar_sessions.find((item) => item.id === row.session_id);
-      return { ...row, offset_ms: source?.kind === "live" ? row.offset_ms - anchor : row.offset_ms };
-    })
-    .filter((row) => row.offset_ms >= args.p_from_ms && row.offset_ms <= args.p_to_ms);
-  return [...own, ...master].sort((a, b) => a.offset_ms - b.offset_ms || compare(a.created_at, b.created_at));
-}
-
-/* ------------------------------------------------------------------------------------------------
- * A escola de mentira: uma Live gravada publicada para todos, com a gravacao da Bunny e a live de origem
- * ---------------------------------------------------------------------------------------------- */
-
-function escola({ chatMode = "open", kind = "simulated", scheduledAt = Date.now() - 10 * MIN, slowMode = null, status = "scheduled", accessMode = "everyone" } = {}) {
-  const now = Date.now();
-  const webinar = (id, extra = {}) => ({
-    access_mode: accessMode,
-    allow_student_camera: true,
-    audience: { kind: "everyone" },
-    auto_record: true,
-    cancel_reason: null,
-    cancelled_at: null,
-    capacity: null,
-    chat_retention_days: 730,
-    cover_url: null,
-    created_at: iso(now - HOUR),
-    created_by: null,
-    deleted_at: null,
-    description: "",
-    duration_minutes: 60,
-    host_user_id: null,
-    id,
-    kind,
-    product_id: accessMode === "product" ? "curso-x" : null,
-    published_at: iso(now - HOUR),
-    quality: {},
-    recording_retention_days: 730,
-    registration_required: false,
-    reminder_texts: {},
-    reminders: {},
-    replay_days_on_home: 7,
-    replay_lesson_target: null,
-    room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
-    scheduled_at: null,
-    show_banner: true,
-    show_on_home: true,
-    show_registered_count: false,
-    slug: "live-de-mentira",
-    status: "published",
-    title: "Live de mentira",
-    updated_at: iso(now - HOUR),
-    ...extra
-  });
-  const session = (id, extra = {}) => ({
-    chat_mode: chatMode,
-    chat_slow_mode_seconds: slowMode,
-    created_at: iso(now - HOUR),
-    ended_at: null,
-    id,
-    kind: "simulated",
-    late_join_minutes: null,
-    pinned_message_id: null,
-    presence_curve: null,
-    recording_anchor_at: null,
-    recording_id: RECORDING,
-    scheduled_at: iso(scheduledAt),
-    script_fired_at: null,
-    show_live_badge: true,
-    simulation_ack_text: null,
-    simulation_decided_at: null,
-    simulation_decided_by: null,
-    source_session_id: LIVE_SOURCE,
-    started_at: null,
-    status,
-    updated_at: iso(now - HOUR),
-    webinar_id: WEBINAR,
-    ...extra
-  });
-  return {
-    admin_roles: [],
-    entitlements: [],
-    lesson_comment_blocked_words: [{ active: true, message: "Sem isso aqui.", word: "palavrão" }],
-    profiles: [],
-    student_events: [],
-    webinar_chat_consents: [],
-    webinar_chat_messages: [
-      // A linha mestre da live real: offset 100 s na live, 95 s no video (ancora de 5 s).
-      { approved: true, author_user_id: "11111111-1111-4111-8111-111111111111", body: "oi da live", created_at: iso(now - 30 * 24 * HOUR), deleted_at: null, display_name: "Bia C.", id: "cccccccc-aaaa-4000-8000-000000000001", kind: "message", master: true, offset_ms: 100_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: LIVE_SOURCE, source: "original", webinar_id: WEBINAR }
-    ],
-    webinar_poll_answers: [],
-    webinar_poll_options: [],
-    webinar_polls: [],
-    webinar_presence_samples: [],
-    webinar_question_votes: [],
-    webinar_questions: [],
-    webinar_reactions: [],
-    webinar_recordings: [
-      { anchor_offset_ms: 5000, bunny_library_id: "12345", bunny_video_id: "0b1c2d3e-aaaa-4bbb-8ccc-123456789abc", created_at: iso(now - HOUR), duration_seconds: 3600, embed_url: "https://iframe.mediadelivery.net/embed/12345/0b1c2d3e-aaaa-4bbb-8ccc-123456789abc", error_message: null, file_name: null, id: RECORDING, provider: "bunny", purge_due_at: null, session_id: LIVE_SOURCE, sha256: null, size_bytes: null, source: "upload", status: "ready", updated_at: iso(now - HOUR), webinar_id: WEBINAR }
-    ],
-    webinar_registrations: [],
-    webinar_sessions: [
-      session(SESSION),
-      session(LIVE_SOURCE, { kind: "live", recording_anchor_at: iso(now - 30 * 24 * HOUR), scheduled_at: iso(now - 30 * 24 * HOUR), status: "ended" }),
-      session(REPLAY, { kind: "replay", scheduled_at: iso(now - 29 * 24 * HOUR), status: "ended" }),
-      session(OTHER_SESSION, { webinar_id: OTHER_WEBINAR })
-    ],
-    webinars: [webinar(WEBINAR), webinar(OTHER_WEBINAR, { slug: "outra-live", title: "Outra live" })]
-  };
 }
 
 function montar(options) {
@@ -488,7 +204,7 @@ test("janela do chat na gravada: nunca passa da janela a frente do relogio do se
   assert.deepEqual(replay.body.data.window, { fromMs: 880_000, toMs: 920_000 });
 });
 
-test("POST chat: a primeira exige o aceite (409 consent_required); com ele grava o aceite, o nome exibido pela escolha e os registros; o offset e o do servidor", async () => {
+test("POST chat: a primeira exige o aceite (409 consent_required); com ele grava o aceite, o nome exibido (primeiro nome e inicial) e os registros; o offset e o do servidor", async () => {
   const { db, userId } = montar({ scheduledAt: Date.now() - 90_000 });
   const semAceite = await enviar({ body: "oi" });
   assert.equal(semAceite.status, 409);
@@ -509,11 +225,12 @@ test("POST chat: a primeira exige o aceite (409 consent_required); com ele grava
   assert.equal(linha.source, "audience");
   assert.equal(linha.master, false);
   assert.equal(linha.role, "student");
-  assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.consent_version, row.display_mode, row.revoked_at]), [[userId, CHAT_CONSENT_VERSION, "first_name_initial", null]]);
+  assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.consent_version, row.display_mode, row.nickname, row.revoked_at]), [[userId, CHAT_CONSENT_VERSION, "first_name_initial", null, null]]);
   assert.deepEqual(
     db.tables.student_events.map((row) => [row.event_type, row.entity_type, row.entity_id, row.metadata]),
     [
-      ["webinar_chat_consented", "webinar", SESSION, { consent_version: CHAT_CONSENT_VERSION, display: "first_name_initial" }],
+      // D64: o historico nao guarda mais a escolha de como aparecer (nao ha escolha).
+      ["webinar_chat_consented", "webinar", SESSION, { consent_version: CHAT_CONSENT_VERSION }],
       ["webinar_chat_sent", "webinar", SESSION, { kind: "message", length: 9, message_id: linha.id, offset_ms: linha.offset_ms }]
     ]
   );
@@ -524,28 +241,202 @@ test("POST chat: a primeira exige o aceite (409 consent_required); com ele grava
   assert.equal(eventos(db, "webinar_chat_consented").length, 1, "o aceite nao se repete");
 });
 
-test("POST chat: Participar como anonimo vira Aluno {n} estavel; apelido; a pergunta pelo chat abre a linha em webinar_questions", async () => {
+test("POST chat: a pergunta pelo chat abre a linha em webinar_questions com o nome do aluno e anonymous falso; os campos antigos inofensivos de uma pagina antiga passam e sao ignorados", async () => {
   const { db, userId } = montar();
-  const anonima = await enviar({ anonymous: true, body: "quem sou eu?", ...comAceite });
-  assert.equal(anonima.status, 201, JSON.stringify(anonima.body));
-  assert.match(anonima.body.data.message.displayName, /^Aluno \d{3}$/);
-  assert.equal(db.tables.webinar_chat_consents[0].display_mode, "anonymous");
-  assert.equal(eventos(db, "webinar_chat_consented")[0].metadata.display, "anonymous");
-  const outra = await enviar({ body: "e agora?" });
-  assert.equal(outra.body.data.message.displayName, anonima.body.data.message.displayName, "o numero e estavel");
-
-  const { db: db2 } = montar();
-  const apelido = await enviar({ body: "oi", displayMode: "nickname", nickname: "aninha", ...comAceite });
-  assert.equal(apelido.body.data.message.displayName, "aninha");
+  // A pagina antiga de quem tinha escolhido "Primeiro nome e inicial" manda displayMode e anonymous: false: nada muda.
+  const primeira = await enviar({ anonymous: false, body: "oi", displayMode: "first_name_initial", ...comAceite });
+  assert.equal(primeira.status, 201, JSON.stringify(primeira.body));
+  assert.equal(primeira.body.data.message.displayName, "Ana S.");
+  assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.display_mode, row.nickname]), [["first_name_initial", null]]);
   const pergunta = await enviar({ body: "e quando sai o modulo 2?", kind: "question" });
   assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
   assert.equal(pergunta.body.data.message.kind, "question");
-  const linhaDaPergunta = db2.tables.webinar_questions[0];
+  assert.equal(pergunta.body.data.message.displayName, "Ana S.");
+  const linhaDaPergunta = db.tables.webinar_questions[0];
   assert.equal(linhaDaPergunta.message_id, pergunta.body.data.message.id);
-  assert.equal(linhaDaPergunta.display_name, "aninha");
-  assert.deepEqual(eventos(db2, "webinar_question_sent")[0].metadata, { anonymous: false, offset_ms: linhaDaPergunta.offset_ms, question_id: linhaDaPergunta.id });
-  assert.equal(db2.tables.webinar_chat_consents[0].user_id, sessao.user.id);
-  assert.notEqual(userId, sessao.user.id);
+  assert.equal(linhaDaPergunta.display_name, "Ana S.");
+  assert.equal(linhaDaPergunta.anonymous, false);
+  assert.equal(linhaDaPergunta.user_id, userId);
+  // D64: o historico da pergunta nao leva mais a chave `anonymous`.
+  assert.deepEqual(eventos(db, "webinar_question_sent")[0].metadata, { offset_ms: linhaDaPergunta.offset_ms, question_id: linhaDaPergunta.id });
+  assert.ok(!db.tables.webinar_chat_messages.some((row) => /^Aluno \d{3}$/.test(row.display_name)), "nenhuma mensagem nova com Aluno {n}");
+});
+
+/** Os tres pedidos que uma pagina aberta com o codigo de antes de 10/11/2026 ainda pode mandar (D64). */
+const PEDIDOS_ANTIGOS = [
+  ["anonymous: true", { anonymous: true }],
+  ["displayMode anonymous", { displayMode: "anonymous" }],
+  ["displayMode nickname com o apelido", { displayMode: "nickname", nickname: "aninha" }]
+];
+
+/** Nada gravado pelo aluno: nem mensagem, nem pergunta, nem resposta, nem aceite, nem historico. */
+function nadaGravado(db, userId, onde) {
+  assert.equal(db.tables.webinar_chat_messages.filter((row) => row.author_user_id === userId).length, 0, `${onde}: nenhuma mensagem`);
+  assert.equal(db.tables.webinar_questions.filter((row) => row.user_id === userId && row.status === "open").length, 0, `${onde}: nenhuma pergunta`);
+  assert.equal(db.tables.webinar_question_replies.filter((row) => row.user_id === userId).length, 0, `${onde}: nenhuma resposta`);
+  assert.equal(db.tables.webinar_chat_consents.filter((row) => row.user_id === userId).length, 0, `${onde}: nenhum aceite`);
+  assert.equal(db.tables.student_events.filter((row) => row.user_id === userId).length, 0, `${onde}: nenhum registro no historico`);
+}
+
+test("D64, pagina antiga no chat: anonymous true, displayMode anonymous e apelido respondem 400 com a frase de atualizar a pagina; nada e gravado e a recusa nao gasta a rajada nem o modo lento", async () => {
+  // Modo lento de 30 s: se a recusa segurasse a vez, a mensagem valida logo depois seria 429.
+  const { db, userId } = montar({ slowMode: 30 });
+  // Seis recusas (a rajada e de 5 por 60 s): se contassem, a valida seria 429.
+  for (const rodada of [1, 2]) {
+    for (const [nome, campos] of PEDIDOS_ANTIGOS) {
+      const recusada = await enviar({ body: "quem sou eu?", ...campos, ...comAceite });
+      assert.equal(recusada.status, 400, `${nome} (${rodada}): ${JSON.stringify(recusada.body)}`);
+      assert.equal(recusada.body.error, CHAT_MESSAGES.identity);
+      assert.match(recusada.body.error, /anônima ou com apelido não está mais disponível\. Atualize a página/);
+      nadaGravado(db, userId, nome);
+    }
+  }
+  // A pergunta pelo chat da pagina antiga tambem: nem a mensagem nem a linha em webinar_questions.
+  const pergunta = await enviar({ anonymous: true, body: "e o modulo 2?", kind: "question", ...comAceite });
+  assert.equal(pergunta.status, 400);
+  nadaGravado(db, userId, "pergunta pelo chat");
+
+  const valida = await enviar({ body: "agora com o meu nome", ...comAceite });
+  assert.equal(valida.status, 201, `a recusa nao gastou a rajada nem o modo lento: ${JSON.stringify(valida.body)}`);
+  assert.equal(valida.body.data.message.displayName, "Ana S.");
+  assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.display_mode, row.nickname]), [[userId, "first_name_initial", null]]);
+
+  // Com o aceite ja em dia, a pagina antiga que insiste no anonimo continua recusada (nunca publica com o nome sem avisar).
+  const { db: comAceiteEmDia, userId: outro } = montar();
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
+  const insistiu = await enviar({ anonymous: true, body: "isto era para ser anonimo" });
+  assert.equal(insistiu.status, 400);
+  assert.equal(insistiu.body.error, CHAT_MESSAGES.identity);
+  assert.deepEqual(comAceiteEmDia.tables.webinar_chat_messages.filter((row) => row.author_user_id === outro).map((row) => row.body), ["oi"], "a mensagem pedida como anonima nao foi publicada");
+});
+
+test("D64, pagina antiga nas Perguntas e no fio: os tres pedidos respondem 400; nenhuma pergunta, resposta, aceite ou registro; as duas perguntas e a resposta validas de depois passam", async () => {
+  const { db, userId } = montar();
+  const perguntar = (body) => questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { sessionId: SESSION, ...body }), contexto());
+  for (const [nome, campos] of PEDIDOS_ANTIGOS) {
+    const recusada = await json(await perguntar({ body: "Vai ter certificado?", ...campos, ...comAceite }));
+    assert.equal(recusada.status, 400, `${nome}: ${JSON.stringify(recusada.body)}`);
+    assert.equal(recusada.body.error, CHAT_MESSAGES.identity);
+    nadaGravado(db, userId, `pergunta, ${nome}`);
+  }
+  // O teto e de 2 perguntas por minuto: as tres recusas nao contaram.
+  const primeira = await json(await perguntar({ body: "Vai ter certificado?", ...comAceite }));
+  assert.equal(primeira.status, 201, JSON.stringify(primeira.body));
+  assert.equal((await perguntar({ anonymous: false, body: "E a apostila?" })).status, 201, "a segunda do minuto ainda cabe");
+  assert.deepEqual(db.tables.webinar_questions.map((row) => [row.anonymous, row.display_name]), [[false, "Ana S."], [false, "Ana S."]]);
+
+  // O fio: a pergunta do aluno ja respondida pela equipe; a pagina antiga responde pedindo anonimo ou apelido.
+  const { db: fio, userId: dono } = montar();
+  const QUESTION = randomUUID();
+  fio.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - 1000), body: "Tem certificado?", created_at: iso(Date.now() - 5000), deleted_at: null, display_name: "Ana S.", id: QUESTION, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: dono });
+  const responder = async (body) => json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${QUESTION}/replies`, "POST", { sessionId: SESSION, ...body }), { params: Promise.resolve({ id: WEBINAR, qid: QUESTION }) }));
+  // Seis recusas (o fio aceita 5 respostas por 60 s): se contassem, a valida seria 429.
+  for (const rodada of [1, 2]) {
+    for (const [nome, campos] of PEDIDOS_ANTIGOS) {
+      const recusada = await responder({ body: "obrigada", ...campos, ...comAceite });
+      assert.equal(recusada.status, 400, `${nome} (${rodada}): ${JSON.stringify(recusada.body)}`);
+      assert.equal(recusada.body.error, CHAT_MESSAGES.identity);
+      assert.equal(fio.tables.webinar_question_replies.length, 0, `${nome}: nenhuma resposta`);
+      assert.equal(fio.tables.webinar_chat_consents.length, 0, `${nome}: nenhum aceite`);
+      assert.equal(fio.tables.student_events.length, 0, `${nome}: nenhum registro`);
+    }
+  }
+  const valida = await responder({ body: "obrigada", ...comAceite });
+  assert.equal(valida.status, 201, JSON.stringify(valida.body));
+  assert.equal(valida.body.data.reply.displayName, "Ana S.");
+  assert.equal(valida.body.data.reply.anonymous, false);
+  assert.deepEqual(fio.tables.webinar_question_replies.map((row) => [row.anonymous, row.display_name, row.user_id]), [[false, "Ana S.", dono]]);
+  assert.deepEqual(fio.tables.webinar_chat_consents.map((row) => [row.display_mode, row.nickname]), [["first_name_initial", null]]);
+});
+
+test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta como sem aceite: a sessao diz consented false, as escritas pedem o aceite (409), a foto nao aparece para outro aluno, e aceitar de novo grava first_name_initial sem apelido", async () => {
+  // So a foto enviada pelo Perfil aparece na sala (avatars/{id}/arquivo, pela origem do nosso Supabase: roomPhotoUrl).
+  const origemAntes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    for (const [modo, apelido, nomeAntigo] of [
+      ["nickname", "aninha", "aninha"],
+      ["anonymous", null, "Aninha das Antigas"]
+    ]) {
+      const { db, userId } = montar();
+      const FOTO = `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${userId}/ana.webp`;
+      db.tables.profiles.find((row) => row.id === userId).avatar_url = FOTO;
+      db.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, consented_at: iso(Date.now() - HOUR), created_at: iso(Date.now() - HOUR), display_mode: modo, nickname: apelido, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: userId });
+      // Uma mensagem de antes, com o nome gravado na epoca (nao e o "Aluno {n}", que nunca leva foto de qualquer jeito).
+      const ANTIGA = randomUUID();
+      db.tables.webinar_chat_messages.push({ approved: true, author_user_id: userId, body: "de antes", created_at: iso(Date.now() - 1000), deleted_at: null, display_name: nomeAntigo, id: ANTIGA, kind: "message", master: false, offset_ms: 96_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: SESSION, source: "audience", webinar_id: WEBINAR });
+      const QUESTION = randomUUID();
+      db.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - 1000), body: "Tem certificado?", created_at: iso(Date.now() - 5000), deleted_at: null, display_name: nomeAntigo, id: QUESTION, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: userId });
+
+      const sessaoAntes = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+      assert.equal(sessaoAntes.body.data.me.consented, false, `${modo}: a sala mostra a caixa do aceite de novo`);
+      assert.equal(sessaoAntes.body.data.me.displayName, null);
+
+      const semAceite = await enviar({ body: "oi" });
+      assert.equal(semAceite.status, 409, `${modo}: ${JSON.stringify(semAceite.body)}`);
+      assert.equal(semAceite.body.reason, "consent_required");
+      const perguntaSemAceite = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "E a apostila?", sessionId: SESSION }), contexto()));
+      assert.equal(perguntaSemAceite.status, 409);
+      assert.equal(perguntaSemAceite.body.reason, "consent_required");
+      const respostaSemAceite = await json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${QUESTION}/replies`, "POST", { body: "obrigada", sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: QUESTION }) }));
+      assert.equal(respostaSemAceite.status, 409);
+      assert.equal(respostaSemAceite.body.reason, "consent_required");
+      assert.equal(db.tables.webinar_chat_messages.filter((row) => row.author_user_id === userId).length, 1, "so a mensagem de antes");
+      assert.equal(db.tables.webinar_question_replies.length, 0);
+      assert.equal(db.tables.webinar_chat_consents[0].display_mode, modo, "a linha antiga continua como estava ate o aluno aceitar de novo");
+
+      // Outro aluno le o chat: a foto de quem tem o aceite antigo nao aparece (as iniciais).
+      const autor = sessao.user;
+      sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
+      const ler = async (from, to) => (await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=${from}&to=${to}`), contexto()))).body.data.messages;
+      const antes = (await ler(90_000, 120_000)).find((message) => message.id === ANTIGA);
+      assert.equal(antes.displayName, nomeAntigo, "o que ja foi escrito aparece como foi gravado");
+      assert.equal(antes.avatarUrl, null, `${modo}: sem o aceite em dia, sem foto para os outros alunos`);
+
+      // O aluno aceita de novo (o texto de agora): o aceite passa a first_name_initial, sem apelido, e o nome e o dele.
+      sessao.user = autor;
+      const aceitou = await enviar({ body: "agora com o meu nome", ...comAceite });
+      assert.equal(aceitou.status, 201, JSON.stringify(aceitou.body));
+      assert.equal(aceitou.body.data.message.displayName, "Ana S.");
+      assert.equal(aceitou.body.data.message.avatarUrl, FOTO);
+      assert.deepEqual(db.tables.webinar_chat_consents.map((row) => [row.user_id, row.consent_version, row.display_mode, row.nickname, row.revoked_at]), [[userId, CHAT_CONSENT_VERSION, "first_name_initial", null, null]]);
+      assert.deepEqual(eventos(db, "webinar_chat_consented").map((row) => row.metadata), [{ consent_version: CHAT_CONSENT_VERSION }]);
+      const sessaoDepois = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+      assert.equal(sessaoDepois.body.data.me.consented, true);
+      assert.equal(sessaoDepois.body.data.me.displayName, "Ana S.");
+
+      sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
+      // A sessao comecou ha 10 min: a mensagem nova caiu perto dos 600 s do relogio do servidor.
+      const nova = (await ler(aceitou.body.data.message.offsetMs - 10_000, aceitou.body.data.message.offsetMs + 10_000)).find((message) => message.id === aceitou.body.data.message.id);
+      assert.equal(nova.avatarUrl, FOTO, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
+      sessao.user = autor;
+    }
+  } finally {
+    if (origemAntes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = origemAntes;
+  }
+});
+
+test("D64, o card Sala antigo (room_settings com anonymousQuestions true e displayName anonymous) nao muda nada: a pergunta e a mensagem saem com Ana S., anonymous falso, e a sessao nao leva a chave", async () => {
+  const { db, userId } = montar();
+  db.tables.webinars.find((row) => row.id === WEBINAR).room_settings = { anonymousQuestions: true, chatMode: "open", displayName: "anonymous", questions: true };
+  const pergunta = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "Vai ter certificado?", sessionId: SESSION, ...comAceite }), contexto()));
+  assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
+  assert.equal(pergunta.body.data.question.displayName, "Ana S.");
+  assert.equal(pergunta.body.data.question.anonymous, false);
+  assert.deepEqual(db.tables.webinar_questions.map((row) => [row.anonymous, row.display_name, row.user_id]), [[false, "Ana S.", userId]]);
+  assert.equal(db.tables.webinar_chat_consents[0].display_mode, "first_name_initial", "o aceite nao segue o card antigo");
+  const mensagem = await enviar({ body: "oi" });
+  assert.equal(mensagem.status, 201);
+  assert.equal(mensagem.body.data.message.displayName, "Ana S.");
+  const { data } = (await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body;
+  assert.ok(!("anonymousQuestions" in data.session), "a sala nao recebe mais a opcao Anonima");
+  assert.equal(data.me.displayName, "Ana S.");
+  // O card "Sempre anonimo" tambem nao segura a pagina antiga: o pedido de anonima continua recusado.
+  const antiga = await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { anonymous: true, body: "posso sem nome?", sessionId: SESSION }), contexto()));
+  assert.equal(antiga.status, 400);
+  assert.equal(antiga.body.error, CHAT_MESSAGES.identity);
+  assert.equal(db.tables.webinar_questions.length, 1);
 });
 
 test("POST chat: a pergunta pelo chat aberto com um emoji na casa 500 corta por caractere (questionBodyOf), nunca no meio do emoji; a mensagem do chat fica inteira", async () => {
@@ -749,20 +640,23 @@ test("reacoes: 201 com o registro; a segunda no mesmo segundo e 429 (Retry-After
   assert.equal(outra.tables.webinar_reactions.length, 1);
 });
 
-test("perguntas: 201 (anonima vira Aluno {n}), a 3a no minuto e 429; a lista com mine e voted, a dispensada so para o autor, a ordem; o voto alterna e reconta", async () => {
+test("perguntas: 201 com o nome do aluno e anonymous falso, a 3a no minuto e 429; a lista com mine e voted, a dispensada so para o autor, a ordem; o voto alterna e reconta", async () => {
   const { db, userId } = montar();
   const perguntar = (body) => questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { sessionId: SESSION, ...body }), contexto());
   // Sem o aceite do chat, nada com o nome do aluno (D10): 409 consent_required, nada gravado, a rajada nao conta.
-  const semAceite = await json(await perguntar({ anonymous: true, body: "Vai ter certificado?" }));
+  const semAceite = await json(await perguntar({ body: "Vai ter certificado?" }));
   assert.equal(semAceite.status, 409);
   assert.equal(semAceite.body.reason, "consent_required");
   assert.equal(db.tables.webinar_questions.length, 0);
-  const primeira = await json(await perguntar({ anonymous: true, body: "Vai ter certificado?", ...comAceite }));
+  const primeira = await json(await perguntar({ body: "Vai ter certificado?", ...comAceite }));
   assert.equal(primeira.status, 201, JSON.stringify(primeira.body));
-  assert.match(primeira.body.data.question.displayName, /^Aluno \d{3}$/);
+  assert.equal(primeira.body.data.question.displayName, "Ana S.", "a pergunta sai com o primeiro nome e a inicial (D64)");
+  assert.equal(primeira.body.data.question.anonymous, false);
   assert.equal(primeira.body.data.question.mine, true);
-  assert.deepEqual(eventos(db, "webinar_question_sent")[0].metadata, { anonymous: true, offset_ms: db.tables.webinar_questions[0].offset_ms, question_id: db.tables.webinar_questions[0].id });
-  assert.equal(db.tables.webinar_chat_consents[0].display_mode, "first_name_initial", "a Anonima e da pergunta, nao do nome no chat");
+  assert.equal(db.tables.webinar_questions[0].anonymous, false);
+  assert.equal(db.tables.webinar_questions[0].display_name, "Ana S.");
+  assert.deepEqual(eventos(db, "webinar_question_sent")[0].metadata, { offset_ms: db.tables.webinar_questions[0].offset_ms, question_id: db.tables.webinar_questions[0].id });
+  assert.deepEqual([db.tables.webinar_chat_consents[0].display_mode, db.tables.webinar_chat_consents[0].nickname], ["first_name_initial", null]);
   assert.equal(eventos(db, "webinar_chat_consented").length, 1, "o aceite veio com a pergunta");
   const segunda = await json(await perguntar({ anonymous: false, body: "E a apostila?" }));
   assert.equal(segunda.status, 201);
@@ -804,13 +698,13 @@ test("perguntas: 201 (anonima vira Aluno {n}), a 3a no minuto e 429; a lista com
   assert.equal(db.tables.webinar_question_votes.length, 0);
   assert.equal(db.tables.webinar_questions.filter((row) => row.user_id === userId).length, 2);
 
-  // Anonima com a opcao desligada no card Sala: 400 (nunca grava com o nome sem avisar).
+  // A pergunta anonima nao existe mais (D64): o pedido da pagina antiga e 400 e nunca grava com o nome sem avisar.
   const { db: semAnonimas } = montar();
-  semAnonimas.tables.webinars.find((row) => row.id === WEBINAR).room_settings.anonymousQuestions = false;
   const desligada = await json(await perguntar({ anonymous: true, body: "posso sem nome?", ...comAceite }));
   assert.equal(desligada.status, 400);
-  assert.match(desligada.body.error, /anônimas estão desligadas/);
+  assert.equal(desligada.body.error, CHAT_MESSAGES.identity);
   assert.equal(semAnonimas.tables.webinar_questions.length, 0);
+  assert.equal(semAnonimas.tables.webinar_chat_consents.length, 0);
 
   // Curtir fora da hora da sessao (a gravada acabou): 409 ended.
   const { db: encerrada } = montar({ scheduledAt: Date.now() - 2 * HOUR });
@@ -838,6 +732,11 @@ test("enquetes: a aberta com myOptionIds nulo; 201 na resposta; a segunda e 409;
   );
   db.tables.webinar_poll_answers.push({ created_at: iso(Date.now()), deleted_at: null, id: randomUUID(), offset_ms: 0, option_ids: ["dddddddd-0000-4000-8000-00000000000c"], poll_id: FECHADA, session_id: SESSION, user_id: "11111111-1111-4111-8111-111111111111" });
 
+  // Outra pessoa ja respondeu a aberta: a lista do aluno nunca le essa resposta (so as dele e as contagens das compartilhadas).
+  db.tables.webinar_poll_answers.push({ created_at: iso(Date.now()), deleted_at: null, id: randomUUID(), offset_ms: 0, option_ids: [SIM], poll_id: ABERTA, session_id: SESSION, user_id: "11111111-1111-4111-8111-111111111112" });
+  clearSharedPollCounts();
+  db.calls.reads.length = 0;
+
   const lista = await json(await pollsRoute.GET(pedido(`${WEBINAR}/polls?sessao=${SESSION}`), contexto()));
   assert.equal(lista.status, 200, JSON.stringify(lista.body));
   assert.deepEqual(
@@ -848,6 +747,18 @@ test("enquetes: a aberta com myOptionIds nulo; 201 na resposta; a segunda e 409;
     ],
     "o modelo fica de fora; a encerrada vem com o resultado compartilhado"
   );
+  // As respostas lidas (especificacao "Na tela", §5.2): as do proprio aluno numa consulta so (pela sessao) e, so na
+  // compartilhada, as contagens; nada da aberta.
+  const respostasLidas = () => db.calls.reads.filter((read) => read.table === "webinar_poll_answers").map((read) => read.filters.filter(([op]) => op === "eq").map(([, column, value]) => `${column}=${value}`).join("&"));
+  assert.deepEqual(respostasLidas(), [`session_id=${SESSION}&user_id=${sessao.user.id}`, `poll_id=${FECHADA}`]);
+  // O segundo aluno: as contagens da compartilhada vem da memoria (60 s), so a resposta dele e lida.
+  db.calls.reads.length = 0;
+  const outroAluno = novoAluno();
+  db.tables.profiles.push({ avatar_url: null, created_at: iso(Date.now()), email: "bia@bunker707.test", full_name: "Bia Costa", id: outroAluno, last_sign_in_at: null, phone: null });
+  const listaDoOutro = await json(await pollsRoute.GET(pedido(`${WEBINAR}/polls?sessao=${SESSION}`), contexto()));
+  assert.equal(listaDoOutro.status, 200);
+  assert.deepEqual(listaDoOutro.body.data.polls.map((item) => item.results), [null, { counts: { "dddddddd-0000-4000-8000-00000000000c": 1 }, total: 1 }]);
+  assert.deepEqual(respostasLidas(), [`session_id=${SESSION}&user_id=${outroAluno}`]);
 
   const responder = async (body) => json(await pollsRoute.POST(pedido(`${WEBINAR}/polls`, "POST", { sessionId: SESSION, ...body }), contexto()));
   const invalida = await responder({ optionIds: [randomUUID()], pollId: ABERTA });
@@ -857,6 +768,7 @@ test("enquetes: a aberta com myOptionIds nulo; 201 na resposta; a segunda e 409;
   const ok = await responder({ optionIds: [SIM], pollId: ABERTA });
   assert.equal(ok.status, 201, JSON.stringify(ok.body));
   assert.deepEqual(ok.body.data.poll.myOptionIds, [SIM]);
+  assert.ok(!("anonymous" in ok.body.data.poll) && lista.body.data.polls.every((item) => !("anonymous" in item)), "a enquete do aluno nao leva mais a marca de anonima (D64)");
   assert.equal(ok.body.data.poll.results, null, "sem resultado ate a equipe compartilhar");
   assert.deepEqual(eventos(db, "webinar_poll_answered")[0].metadata, { offset_ms: db.tables.webinar_poll_answers.at(-1).offset_ms, options: 1, poll_id: ABERTA });
   const repetida = await responder({ optionIds: [NAO], pollId: ABERTA });
@@ -894,7 +806,7 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.equal(data.webinar.replaySessionId, REPLAY);
   assert.equal(data.presentNow, 1);
   const semBanimento = { banned: false, kicked: false, muted: false, mutedUntil: null };
-  assert.deepEqual(data.me, { ban: semBanimento, calendarUrl: null, consented: false, displayMode: null, displayName: null, nickname: null, registered: false, registeredAt: null });
+  assert.deepEqual(data.me, { avatarUrl: null, ban: semBanimento, calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null });
   assert.equal(data.live, null, "a gravada nao tem o bloco da sala ao vivo (fase 3)");
   assert.equal(data.pinned.body, "link da apostila");
   assert.equal(data.pinned.pinned, true);
@@ -919,13 +831,13 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.equal(livre.searchParams.get("controls"), null);
   assert.equal(livre.searchParams.get("autoplay"), "false");
 
-  // Com o aceite gravado, `me` traz como o aluno aparece.
-  assert.equal((await enviar({ body: "oi", displayMode: "nickname", nickname: "aninha", ...comAceite })).status, 201);
+  // Com o aceite gravado, `me` traz o nome do aluno (sempre o primeiro nome com a inicial; sem modo e sem apelido, D64).
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
   const depois = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
-  assert.deepEqual(depois.body.data.me, { ban: semBanimento, calendarUrl: null, consented: true, displayMode: "nickname", displayName: "aninha", nickname: "aninha", registered: false, registeredAt: null });
+  assert.deepEqual(depois.body.data.me, { avatarUrl: null, ban: semBanimento, calendarUrl: null, consented: true, displayName: "Ana S.", registered: false, registeredAt: null });
   assert.equal(db.tables.webinar_chat_consents[0].user_id, userId);
 
-  assert.equal(data.session.anonymousQuestions, true, "a opcao Anonima das perguntas vem do card Sala");
+  assert.ok(!("anonymousQuestions" in data.session), "a sala nao recebe mais a opcao Anonima das perguntas");
 
   // Antes de 15 min da hora, a sala nao abre (join) e o video (com o token da Bunny) nao sai; a sessao responde.
   montar({ scheduledAt: Date.now() + HOUR });
@@ -1035,4 +947,334 @@ test("fase 4c: sem WEBINAR_ASSISTANT_ENABLED o chat e as perguntas seguem como a
   const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}`), contexto()));
   assert.deepEqual(lista.body.data.questions.map((question) => [question.body, question.answerSource, question.handoffRequested]), [["Tem certificado?", null, false]]);
   assert.ok(!db.calls.from.includes("webinar_ai_requests"));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * O fio de uma pergunta (docs/30 §1.3 e D63): POST /questions/[qid]/replies
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma pergunta respondida pela equipe na sessao (do aluno do teste, salvo outro dono). */
+function perguntaRespondida(db, userId, extra = {}) {
+  const id = randomUUID();
+  db.tables.webinar_questions.push({ anonymous: false, answer_text: "Sim!", answered_at: iso(Date.now() - MIN), answered_by: null, answered_live: false, body: "Tem certificado?", created_at: iso(Date.now() - 2 * MIN), deleted_at: null, deleted_reason: null, display_name: "Ana S.", id, message_id: null, offset_ms: 0, session_id: SESSION, status: "answered", upvotes: 0, user_id: userId, ...extra });
+  return id;
+}
+
+async function responderNoFio(qid, body = "Obrigada!", extra = {}) {
+  return json(await repliesRoute.POST(pedido(`${WEBINAR}/questions/${qid}/replies`, "POST", { body, sessionId: SESSION, ...comAceite, ...extra }), { params: Promise.resolve({ id: WEBINAR, qid }) }));
+}
+
+/** O banco sem a 202611100001: webinar_question_replies responde como o postgrest-js responde a uma tabela que nao existe. */
+function semATabelaDoFio(db) {
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    if (name !== "webinar_question_replies") {
+      return from(name);
+    }
+    db.calls.from.push(name);
+    let head = false;
+    const chain = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            // HEAD: 404 sem corpo vira "sem erro e sem contagem"; GET e INSERT trazem o PGRST205.
+            const result = head
+              ? { count: null, data: null, error: null, status: 204 }
+              : { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_replies' in the schema cache" } };
+            return (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+          }
+          if (prop === "select") {
+            return (_columns, options) => {
+              if (options?.head) head = true;
+              return chain;
+            };
+          }
+          return () => chain;
+        }
+      }
+    );
+    return chain;
+  };
+}
+
+test("banco sem a 202611100001: responder no fio falha antes do aceite e da rajada (o aceite fica, nada no historico, as 5 vezes da rajada ficam)", async () => {
+  const { db, userId } = montar();
+  semATabelaDoFio(db);
+  const id = perguntaRespondida(db, userId);
+  db.tables.webinar_chat_consents.push({ consent_version: 1, created_at: iso(Date.now() - HOUR), display_mode: "first_name_initial", nickname: null, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: userId });
+
+  const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}`), contexto()));
+  assert.equal(lista.status, 200, JSON.stringify(lista.body));
+  const minha = lista.body.data.questions.find((question) => question.id === id);
+  assert.equal(minha.canReply, true, "o fio le vazio: o Responder continua");
+  assert.deepEqual(minha.replies, []);
+
+  const resposta = await responderNoFio(id);
+  assert.equal(resposta.status, 500);
+  assert.deepEqual(resposta.body, { error: "Não foi possível enviar a resposta." });
+  assert.equal(db.tables.webinar_chat_consents[0].consent_version, 1, "o aceite antigo fica como estava");
+  assert.equal(db.calls.writes.filter((write) => write.table === "webinar_chat_consents").length, 0);
+  assert.equal(eventos(db, "webinar_chat_consented").length, 0);
+  assert.deepEqual(
+    Array.from({ length: 5 }, () => takeReplyBurst(userId, SESSION).ok),
+    [true, true, true, true, true],
+    "a falha nao gastou a rajada"
+  );
+});
+
+test("o fio: a pergunta de outra sessao 404; a 6a resposta em 60 s 429 com Retry-After; palavra bloqueada 422; a 51a resposta 409 (o fio cheio); nada gravado nas recusadas", async () => {
+  const { db, userId } = montar();
+  const id = perguntaRespondida(db, userId);
+  const deOutraSessao = perguntaRespondida(db, userId, { session_id: REPLAY });
+  const fio = () => db.tables.webinar_question_replies ?? [];
+
+  const outra = await responderNoFio(deOutraSessao);
+  assert.equal(outra.status, 404, "a pergunta de outra sessao nao aparece nesta");
+  assert.equal(fio().length, 0);
+
+  for (let i = 0; i < 5; i += 1) {
+    const enviada = await responderNoFio(id, `resposta ${i + 1}`);
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+  }
+  const sexta = await repliesRoute.POST(pedido(`${WEBINAR}/questions/${id}/replies`, "POST", { body: "a sexta", sessionId: SESSION }), { params: Promise.resolve({ id: WEBINAR, qid: id }) });
+  assert.equal(sexta.status, 429);
+  assert.match(sexta.headers.get("Retry-After") ?? "", /^\d+$/);
+  assert.equal(fio().length, 5);
+  assert.equal(eventos(db, "webinar_question_reply_sent").length, 5);
+
+  // Palavra bloqueada: 422 com a frase da lista, antes de gravar.
+  const { db: bloqueio, userId: aluna } = montar();
+  const alvo = perguntaRespondida(bloqueio, aluna);
+  const bloqueada = await responderNoFio(alvo, "isso é um PALAVRÃO feio");
+  assert.equal(bloqueada.status, 422);
+  assert.equal(bloqueada.body.error, "Sem isso aqui.");
+  assert.equal((bloqueio.tables.webinar_question_replies ?? []).length, 0);
+
+  // O fio com 50 respostas (o teto de QUESTION_REPLY_LIMITS.perQuestion): a 51a e 409, sem gravar.
+  const { db: cheio, userId: dono } = montar();
+  const conversa = perguntaRespondida(cheio, dono);
+  cheio.tables.webinar_question_replies = Array.from({ length: 50 }, (_, index) => ({
+    anonymous: false,
+    body: `r${index}`,
+    created_at: iso(Date.now() - (60 - index) * 1000),
+    deleted_at: null,
+    deleted_by: null,
+    deleted_reason: null,
+    display_name: index % 2 ? "Ana S." : "Equipe",
+    id: randomUUID(),
+    question_id: conversa,
+    role: index % 2 ? "student" : "team",
+    session_id: SESSION,
+    user_id: index % 2 ? dono : null
+  }));
+  const cinquentaEUma = await responderNoFio(conversa, "mais uma");
+  assert.equal(cinquentaEUma.status, 409);
+  assert.equal(cinquentaEUma.body.error, "Esta conversa chegou ao limite de respostas.");
+  assert.equal(cheio.tables.webinar_question_replies.length, 50);
+});
+
+test("o fio na live: silenciado no chat, removido da sala e banido de todos os webinarios respondem 409 com o motivo; nada entra no fio", async () => {
+  /** A sessao do teste vira a live no ar (o banimento da sessao so vale na live). */
+  const aoVivo = (db) => {
+    db.tables.webinars.find((row) => row.id === WEBINAR).kind = "live";
+    Object.assign(db.tables.webinar_sessions.find((row) => row.id === SESSION), { kind: "live", recording_id: null, source_session_id: null, started_at: iso(Date.now() - 5 * MIN), status: "live" });
+    db.tables.webinar_session_bans ??= [];
+    db.tables.webinar_user_bans ??= [];
+  };
+  const ban = (userId, kind) => ({ by_user_id: null, created_at: iso(Date.now()), kind, reason: null, session_id: SESSION, until_at: null, user_id: userId });
+
+  const { db: livre, userId: semBan } = montar();
+  aoVivo(livre);
+  const certa = perguntaRespondida(livre, semBan);
+  const passou = await responderNoFio(certa);
+  assert.equal(passou.status, 201, `sem banimento, a resposta entra na live (${JSON.stringify(passou.body)})`);
+
+  const { db: silencio, userId: silenciada } = montar();
+  aoVivo(silencio);
+  silencio.tables.webinar_session_bans.push(ban(silenciada, "muted"));
+  const muda = await responderNoFio(perguntaRespondida(silencio, silenciada));
+  assert.equal(muda.status, 409);
+  assert.equal(muda.body.reason, "muted");
+  assert.equal((silencio.tables.webinar_question_replies ?? []).length, 0);
+
+  const { db: fora, userId: removida } = montar();
+  aoVivo(fora);
+  fora.tables.webinar_session_bans.push(ban(removida, "kicked"));
+  const removidaDaSala = await responderNoFio(perguntaRespondida(fora, removida));
+  assert.equal(removidaDaSala.status, 409);
+  assert.equal(removidaDaSala.body.reason, "banned");
+  assert.equal(removidaDaSala.body.error, "Você foi removido desta live.");
+  assert.equal((fora.tables.webinar_question_replies ?? []).length, 0);
+
+  const { db: barrado, userId: banida } = montar();
+  aoVivo(barrado);
+  barrado.tables.webinar_user_bans.push({ by_user_id: null, created_at: iso(Date.now()), reason: null, session_id: null, user_id: banida });
+  const banidaDeTodos = await responderNoFio(perguntaRespondida(barrado, banida));
+  assert.equal(banidaDeTodos.status, 409);
+  assert.equal(banidaDeTodos.body.reason, "banned");
+  assert.equal((barrado.tables.webinar_question_replies ?? []).length, 0);
+
+  // Na Live gravada vale so o banido de todos (D33): o mesmo 409 banned.
+  const { db: gravada, userId: banidaNaGravada } = montar();
+  gravada.tables.webinar_user_bans = [{ by_user_id: null, created_at: iso(Date.now()), reason: null, session_id: null, user_id: banidaNaGravada }];
+  const naGravada = await responderNoFio(perguntaRespondida(gravada, banidaNaGravada));
+  assert.equal(naGravada.status, 409);
+  assert.equal(naGravada.body.reason, "banned");
+  assert.equal((gravada.tables.webinar_question_replies ?? []).length, 0);
+});
+
+test("roomJoinFor na Live gravada: o removido desta sessao fica de fora (kicked) antes da vaga e do relogio; o banido de todos (banned) vence; o silenciado entra; sem banimento, o relogio decide", () => {
+  const T0 = Date.parse("2026-11-05T23:00:00.000Z");
+  const gravada = { kind: "simulated", lateJoinMinutes: null, recordingAnchorAt: null, scheduledAt: new Date(T0).toISOString(), startedAt: null, status: "scheduled" };
+  const contextoDa = (session) => ({ durationMs: 60 * MIN, session });
+  const livre = { banned: false, kicked: false, muted: false, mutedUntil: null };
+  const agora = T0 + 5 * MIN;
+
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: livre }), { ok: true });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, muted: true } }), { ok: true }, "silenciado continua assistindo");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, kicked: true } }), { ok: false, reason: "kicked" });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, kicked: true }, seatMissing: true }), { ok: false, reason: "kicked" }, "removido antes da vaga");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), T0 + 2 * 60 * MIN, { ban: { ...livre, kicked: true } }), { ok: false, reason: "kicked" }, "e antes do relogio");
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), agora, { ban: { ...livre, banned: true, kicked: true } }), { ok: false, reason: "banned" });
+  assert.deepEqual(roomJoinFor(contextoDa(gravada), T0 + 2 * 60 * MIN, { ban: livre }), { ok: false, reason: "ended" });
+  // No Replay o removido nao existe (so o banido de todos).
+  assert.deepEqual(roomJoinFor(contextoDa({ ...gravada, kind: "replay" }), agora, { ban: { ...livre, kicked: true } }), { ok: true });
+});
+
+test("a moderacao por pessoa na Live gravada (a Na tela, R5): silenciado nao manda mensagem, pergunta nem resposta no fio (409 muted, a frase com a hora ou ate o fim), mas reage e responde enquete; removido nao escreve nada (409 banned) e a sessao diz kicked sem o video; desfeito, volta; o removido da live de origem continua livre", async () => {
+  const ban = (userId, kind, extra = {}) => ({ by_user_id: null, created_at: iso(Date.now()), kind, reason: null, session_id: SESSION, until_at: null, user_id: userId, ...extra });
+  const POLL = "cccccccc-bbbb-4000-8000-000000000001";
+  const SIM = "cccccccc-bbbb-4000-8000-000000000002";
+  const comEnquete = (db) => {
+    db.tables.webinar_polls.push({ anonymous: false, closed_at: null, created_at: iso(Date.now()), created_by: null, id: POLL, kind: "single", open_offset_ms: 0, opened_at: iso(Date.now()), position: 0, question: "Gostou?", results_shared_at: null, session_id: SESSION, status: "open", template_poll_id: null, updated_at: iso(Date.now()), webinar_id: WEBINAR });
+    db.tables.webinar_poll_options.push({ created_at: iso(Date.now()), id: SIM, label: "Sim", poll_id: POLL, position: 0 });
+  };
+  const pergunta = async () => json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "Tem certificado?", sessionId: SESSION, ...comAceite }), contexto()));
+  const reagir = async () => json(await reactionsRoute.POST(pedido(`${WEBINAR}/reactions`, "POST", { reaction: "clap", sessionId: SESSION }), contexto()));
+  const votar = async () => json(await pollsRoute.POST(pedido(`${WEBINAR}/polls`, "POST", { optionIds: [SIM], pollId: POLL, sessionId: SESSION }), contexto()));
+  const lerSessao = async () => (await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body.data;
+
+  // Silenciada ate o fim: o chat, a pergunta e o fio recusam; a reacao e a enquete passam; a sala continua.
+  const { db: silencio, userId: silenciada } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  comEnquete(silencio);
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted")];
+  const qid = perguntaRespondida(silencio, silenciada);
+  for (const resposta of [await enviar({ body: "oi", ...comAceite }), await pergunta(), await responderNoFio(qid)]) {
+    assert.equal(resposta.status, 409, JSON.stringify(resposta.body));
+    assert.deepEqual([resposta.body.reason, resposta.body.error], ["muted", "Você está sem escrever no chat até o fim desta live."]);
+  }
+  assert.equal((await reagir()).status, 201, "silenciado reage");
+  assert.equal((await votar()).status, 201, "e responde a enquete");
+  const comSilencio = await lerSessao();
+  assert.deepEqual([comSilencio.me.ban.muted, comSilencio.me.ban.mutedUntil, comSilencio.session.join.ok], [true, null, true]);
+  assert.ok(comSilencio.video, "continua assistindo");
+  assert.equal(silencio.tables.webinar_chat_messages.filter((row) => row.session_id === SESSION).length, 0);
+
+  // Silenciada por 15 min: a frase com a hora; vencido o prazo, escreve de novo.
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted", { until_at: iso(Date.now() + 15 * MIN) })];
+  const comHora = await enviar({ body: "oi", ...comAceite });
+  assert.equal(comHora.status, 409);
+  assert.match(comHora.body.error, /^Você está sem escrever no chat até \d{2}:\d{2}\.$/);
+  silencio.tables.webinar_session_bans = [ban(silenciada, "muted", { until_at: iso(Date.now() - 1000) })];
+  assert.equal((await enviar({ body: "voltei", ...comAceite })).status, 201, "o silencio venceu");
+
+  // Removida: nada escreve (nem reage nem vota) e a sessao diz kicked, sem o video da Bunny.
+  const { db: fora, userId: removida } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  comEnquete(fora);
+  fora.tables.webinar_session_bans = [ban(removida, "kicked")];
+  for (const resposta of [await enviar({ body: "oi", ...comAceite }), await pergunta(), await reagir(), await votar()]) {
+    assert.equal(resposta.status, 409, JSON.stringify(resposta.body));
+    assert.deepEqual([resposta.body.reason, resposta.body.error], ["banned", "Você foi removido desta live."]);
+  }
+  const semSala = await lerSessao();
+  assert.deepEqual(semSala.session.join, { ok: false, reason: "kicked" });
+  assert.equal(semSala.me.ban.kicked, true);
+  assert.equal(semSala.video, null, "o video sai na proxima conferencia da sala");
+  assert.equal(fora.tables.webinar_chat_messages.length + fora.tables.webinar_reactions.length + fora.tables.webinar_poll_answers.length, 1, "so a linha mestre da escola");
+
+  // Desfeito (a equipe apagou a linha): a sala e a escrita voltam.
+  fora.tables.webinar_session_bans = [];
+  const devolta = await lerSessao();
+  assert.deepEqual(devolta.session.join, { ok: true });
+  assert.ok(devolta.video);
+  assert.equal((await enviar({ body: "voltei", ...comAceite })).status, 201);
+
+  // O removido da live de origem (outra sessao) continua livre nesta gravada.
+  const { db: outra } = montar({ scheduledAt: Date.now() - 2 * MIN });
+  outra.tables.webinar_session_bans = [ban(sessao.user.id, "kicked", { session_id: LIVE_SOURCE })];
+  assert.equal((await enviar({ body: "oi", ...comAceite })).status, 201);
+  assert.deepEqual((await lerSessao()).session.join, { ok: true });
+});
+
+test("a foto na sala (docs/30 §8.5, D62): so o arquivo enviado pelo Perfil, pela origem do nosso Supabase; um endereco de fora gravado no perfil vira iniciais no chat, na leitura e no proprio campo", async () => {
+  const antes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    const { db, userId } = montar({ scheduledAt: Date.now() - 90_000 });
+    const perfil = db.tables.profiles.find((row) => row.id === userId);
+    perfil.avatar_url = "https://attacker.example/p.png";
+
+    const enviada = await enviar({ body: "oi", ...comAceite });
+    assert.equal(enviada.status, 201, JSON.stringify(enviada.body));
+    assert.equal(enviada.body.data.message.avatarUrl, null, "a resposta do envio");
+    const desde = encodeURIComponent(iso(Date.now() - 60_000));
+    const lida = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${desde}`), contexto()));
+    assert.equal(lida.status, 200, JSON.stringify(lida.body));
+    assert.equal(lida.body.data.messages[0].avatarUrl, null, "a leitura do chat");
+    const sessao_ = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+    assert.equal(sessao_.body.data.me.avatarUrl, null, "o proprio campo de escrever");
+
+    // A foto enviada pelo Perfil (avatars/{id}/arquivo no bucket): aparece, pela nossa origem.
+    const propria = `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${userId}/aa11.webp`;
+    perfil.avatar_url = propria;
+    clearAuthorPhotoCache();
+    const deNovo = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&since=${desde}`), contexto()));
+    assert.equal(deNovo.body.data.messages[0].avatarUrl, propria);
+    assert.equal((await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body.data.me.avatarUrl, propria);
+  } finally {
+    if (antes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = antes;
+    clearAuthorPhotoCache();
+  }
+});
+
+test("o fio com mais de 1000 respostas na sessao (o teto de 1000 linhas do PostgREST): a resposta mais nova continua na lista do aluno", async () => {
+  const { db, userId } = montar();
+  const minha = perguntaRespondida(db, userId);
+  const deOutro = "11111111-1111-4111-8111-111111111114";
+  const outras = Array.from({ length: 25 }, () => perguntaRespondida(db, deOutro, { display_name: "Zé" }));
+  const inicio = Date.now() - 2 * HOUR;
+  const resposta = (index, extra) => ({
+    anonymous: false,
+    body: `r${index}`,
+    created_at: iso(inicio + index * 1000),
+    deleted_at: null,
+    deleted_by: null,
+    deleted_reason: null,
+    display_name: "Equipe",
+    id: randomUUID(),
+    question_id: outras[index % outras.length],
+    role: "team",
+    session_id: SESSION,
+    user_id: null,
+    ...extra
+  });
+  db.tables.webinar_question_replies = [
+    ...Array.from({ length: 1000 }, (_, index) => resposta(index)),
+    resposta(1000, { body: "obrigada!", display_name: "Ana S.", question_id: minha, role: "student", user_id: userId })
+  ];
+
+  const lista = await json(await questionsRoute.GET(pedido(`${WEBINAR}/questions?sessao=${SESSION}&ordem=recentes`), contexto()));
+  assert.equal(lista.status, 200, JSON.stringify(lista.body));
+  const questions = lista.body.data.questions;
+  assert.deepEqual(
+    questions.find((question) => question.id === minha).replies.map((reply) => reply.body),
+    ["obrigada!"],
+    "a resposta 1001 nao some no corte"
+  );
+  assert.equal(
+    questions.reduce((total, question) => total + question.replies.length, 0),
+    1001
+  );
 });

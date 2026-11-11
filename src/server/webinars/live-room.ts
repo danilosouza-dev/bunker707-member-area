@@ -5,8 +5,8 @@
 // webinars.host_user_id com messaging.publish, co-apresentador e Equipe da sala por webinar_presenters, Equipe por
 // messaging.write; nunca vindo do navegador). O aluno so entra na espera ou no ar e nunca removido (409 kicked) nem
 // banido (409 banned); a equipe tambem na Sessao de pratica (agendada). Sem WEBINAR_MEET_DOMAIN ou WEBINAR_JWT_SECRET:
-// 503 meet_unconfigured e a sala mostra "em breve". O nome no token e o do chat (com o aceite) ou primeiro nome +
-// inicial ("Aluno {n}" quando o card Sala manda anonimo), nunca o e-mail; sem avatar (dado pessoal a menos). O token
+// 503 meet_unconfigured e a sala mostra "em breve". O nome no token e sempre o primeiro nome + inicial do sobrenome
+// (D64: nunca um apelido nem "Aluno {n}"), nunca o e-mail; sem avatar (dado pessoal a menos). O token
 // nunca e guardado nem escrito em log; webinar_joined (so do aluno) sai uma vez por abertura (renovar o token nao
 // grava). Os sinais do iframe viram student_events so com codigos (roomEventRecord), no relogio do chat da live
 // (sessionOffsetMs).
@@ -80,20 +80,17 @@ export async function roomGrantFor(db: WebinarsDb, input: { nowMs: number; userI
 }
 
 /**
- * O nome que vai no token (e aparece na fileira e em Participantes): a equipe com primeiro nome + inicial; o aluno com o
- * aceite do chat, o nome do chat (o apelido ou "Aluno {n}" quando escolheu); sem o aceite, primeiro nome + inicial, ou
- * "Aluno {n}" quando o card Sala manda sempre anonimo. Nunca o e-mail.
+ * O nome que vai no token (e aparece na fileira e em Participantes): a equipe e o aluno com o primeiro nome + inicial
+ * do sobrenome ("Equipe" para a equipe sem nome). Desde 10/11/2026 (D64) nunca um apelido nem "Aluno {n}", qualquer
+ * que seja o aceite gravado (uma linha antiga com apelido ou anonimo) ou o card Sala antigo do webinario. Nunca o
+ * e-mail.
  */
-export function liveTokenName(input: { grant: Pick<RoomGrant, "role">; identity: Pick<StudentIdentity, "consented" | "displayMode" | "fullName" | "nickname">; userId: string; webinar: Pick<Webinar, "id" | "roomSettings"> }): string {
-  const { identity, userId, webinar } = input;
+export function liveTokenName(input: { grant: Pick<RoomGrant, "role">; identity: Pick<StudentIdentity, "fullName"> }): string {
+  const { identity } = input;
   if (input.grant.role !== "student") {
     return identity.fullName?.trim() ? firstNameInitial(identity.fullName) : "Equipe";
   }
-  if (identity.consented) {
-    return studentDisplayName(identity, identity.displayMode ?? webinar.roomSettings.displayName, userId, webinar.id);
-  }
-  const mode = webinar.roomSettings.displayName === "anonymous" ? "anonymous" : "first_name_initial";
-  return studentDisplayName({ fullName: identity.fullName, nickname: null }, mode, userId, webinar.id);
+  return studentDisplayName(identity);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -224,7 +221,7 @@ export async function issueJoinToken(input: IssueJoinTokenInput): Promise<IssueJ
     nowMs,
     room,
     secret: env.secret,
-    user: { id: userId, name: liveTokenName({ grant, identity, userId, webinar }) }
+    user: { id: userId, name: liveTokenName({ grant, identity }) }
   };
   const expiresAtMs = Number(jitsiTokenClaims(tokenInput).exp) * 1000;
   const jwt = signJitsiToken(tokenInput);

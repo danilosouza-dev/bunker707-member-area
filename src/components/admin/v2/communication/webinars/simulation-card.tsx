@@ -19,7 +19,9 @@ import { SimulationSessionRow, type SimulationRowMode, type SimulationSaveOutcom
 // servidor confere) e a caixa de confirmacao. Cada sessao salva
 // tudo de uma vez (saveSessionSimulation, messaging.publish). As regras sao lidas ao abrir (loadSessionSimulations;
 // Tentar de novo quando falha); banco sem a 202610300003, o aviso da migracao no lugar dos numeros e o selo como na
-// fase 2. Os numeros simulados aparecem no relatorio so no bloco Simulacao (D6, M6).
+// fase 2. Os numeros simulados aparecem no relatorio so no bloco Simulacao (D6, M6). Na Live ao vivo (adendo de
+// 10/11/2026, R7; `webinarKind` "live"): a sessao da live (nunca o Replay), com o aviso do CDC da live e a frase da live;
+// sem a 202610300003 nao ha o que decidir na live (ela nunca teve o selo), so o aviso da migracao.
 
 const COPY = WEBINAR_COPY.simulacao.card;
 const ADMIN = WEBINAR_ADMIN_COPY.simulation;
@@ -36,12 +38,15 @@ type SimulationCardProps = {
   /** Hora da tela (a data de hoje da frase). */
   now: number;
   sessions: readonly WebinarSession[];
+  /** O tipo do webinario: na Live ao vivo, a sessao da live (R7); sem ele, a Live gravada. */
+  webinarKind?: "live" | "simulated";
 };
 
-export function SimulationCard({ canPublish, currentUserName, deciderNames, disabled, initialSimulations, now, sessions }: SimulationCardProps) {
+export function SimulationCard({ canPublish, currentUserName, deciderNames, disabled, initialSimulations, now, sessions, webinarKind = "simulated" }: SimulationCardProps) {
   const idBase = useId();
+  const liveWebinar = webinarKind === "live";
   // As sessoes do "Comeca quando voce entra" (jit) seguem o modelo do card Sessoes (4e): nao entram aqui uma a uma.
-  const simulated = sessions.filter((session) => session.kind === "simulated" && session.status !== "cancelled" && !session.jit);
+  const simulated = sessions.filter((session) => session.kind === (liveWebinar ? "live" : "simulated") && session.status !== "cancelled" && !session.jit);
   const webinarId = simulated[0]?.webinarId ?? null;
   const [load, setLoad] = useState<LoadState>(() => (initialSimulations ? { data: initialSimulations, kind: "ready" } : { kind: "loading" }));
   const [attempt, setAttempt] = useState(0);
@@ -75,6 +80,8 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
   }, [attempt, initialSimulations, webinarId]);
 
   const mode: SimulationRowMode = load.kind === "ready" ? (load.data.pendingMigration ? "v2" : "v4") : "loading";
+  // A live sem a 202610300003 nao tem o que decidir (so o selo da fase 2, que a live nao tem): so o aviso da migracao.
+  const rows = liveWebinar && mode === "v2" ? [] : simulated;
   const loaded = load.kind === "ready" && !load.data.pendingMigration ? new Map(load.data.simulations.map((simulation) => [simulation.sessionId, simulation])) : new Map<string, SessionSimulationView>();
   const locked = disabled || !canPublish || busy !== null || mode === "loading";
 
@@ -96,11 +103,11 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-simulation-card="">
-      <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2 text-[13px] leading-5 text-[var(--text-secondary)]">{COPY.avisoCdc}</p>
+      <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2 text-[13px] leading-5 text-[var(--text-secondary)]">{liveWebinar ? COPY.avisoCdcLive : COPY.avisoCdc}</p>
       <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
-        {COPY.numerosPadrao} {COPY.relatorio}
+        {liveWebinar ? COPY.numerosPadraoLive : COPY.numerosPadrao} {COPY.relatorio}
       </p>
-      {!canPublish ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{ADMIN.needsPublish}</p> : null}
+      {!canPublish ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{liveWebinar ? ADMIN.needsPublishLive : ADMIN.needsPublish}</p> : null}
       {simulated.length > 0 && load.kind === "loading" ? (
         <p className="text-[13px] leading-5 text-[var(--text-secondary)]" role="status">
           {COPY.carregando}
@@ -138,9 +145,9 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
           {failure.message}
         </ErrorBanner>
       ) : null}
-      {simulated.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{ADMIN.noSessions}</p> : null}
+      {simulated.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{liveWebinar ? ADMIN.noLiveSession : ADMIN.noSessions}</p> : null}
       <ul className="flex min-w-0 flex-col gap-4">
-        {simulated.map((original) => {
+        {rows.map((original) => {
           const session = savedSessions[original.id] ?? original;
           const decider = session.simulationDecidedBy ? (names[session.simulationDecidedBy] ?? COPY.equipe) : null;
           const version = versions[session.id] ?? 0;

@@ -125,7 +125,8 @@ test("a pagina do Novo aviso usa o parse e o start dos dois botoes (o ?modelo= v
   const { readFile } = await import("node:fs/promises");
   const pagina = await readFile(new URL("../src/app/admin/(v2)/comunicacao/avisos/novo/page.tsx", import.meta.url), "utf8");
 
-  assert.match(pagina, /const webinar = templateId \? null : webinarNoticeRequestOf\(params\);/);
+  // Sem o modulo dos Webinarios na licenca, o ?webinario= e ignorado (docs/32 §11.8).
+  assert.match(pagina, /const webinar = templateId \|\| !\(await isFeatureEnabledNow\(WEBINARS_FEATURE\)\) \? null : webinarNoticeRequestOf\(params\);/);
   assert.match(pagina, /webinar\?\.mode === "webinar" \? await loadWebinarStart\(webinar\.webinarId, kind, readNow\(\)\)/);
   assert.match(pagina, /webinar\?\.mode === "rules" \? webinarRulesNoticeStart\(kind, webinar\.audience\) : null/);
   assert.doesNotMatch(pagina, /follow-up-links|WEBINAR_FOLLOW_UP_PARAMS/, "nada do link antigo da fase 4");

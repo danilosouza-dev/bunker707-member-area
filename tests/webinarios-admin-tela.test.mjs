@@ -61,6 +61,8 @@ export const publishWebinar = fail;
 export const cancelWebinar = fail;
 export const duplicateWebinar = fail;
 export const deleteWebinar = fail;
+export const archiveWebinar = fail;
+export const unarchiveWebinar = fail;
 export const rescheduleSession = fail;
 export const uploadWebinarCover = fail;`,
   "@/server/webinars/script-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
@@ -80,7 +82,7 @@ export const setSessionChatMode = fail;
 export const savePolls = fail;
 export const launchPoll = fail;
 export const closePoll = fail;
-export const answerQuestion = fail;
+export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail;
 export const setQuestionStatus = fail;
 export const saveSimulation = fail;
 export const createReplaySession = fail;
@@ -324,7 +326,16 @@ test("tabela: capa, tipo e sessoes, situacao, vagas, presentes '—'; o menu por
   assert.doesNotMatch(markup, /em breve/, "a sala ao vivo chegou: nada de 'em breve' na lista");
   assert.match(markup, /data-row-shortcut="open_room" href="\/admin\/comunicacao\/webinarios\/0b7f3c1e-2a4d-4e5f-8a9b-0c1d2e3f4a5b\/sala"/, "a Live ao vivo agendada leva a sala pela linha");
   assert.deepEqual(labels(menus[1]), ["Abrir", "Duplicar", "Excluir"]);
-  assert.deepEqual(labels(menus[2]), ["Abrir", "Duplicar"]);
+  // O cancelado se arquiva (docs/30 §2.3, 10/11/2026).
+  assert.deepEqual(labels(menus[2]), ["Abrir", "Duplicar", "Arquivar"]);
+
+  // O arquivado: Desarquivar sempre; Excluir so sem dados de aluno (deletable, lido no servidor).
+  const arquivado = (deletable) => {
+    const linha = html(createElement(WebinarsTable, { items: [item({ deletable, situation: "archived", situationLabel: "Arquivado", situationTone: "muted", status: "archived", title: "Teste" })], permissions: both }));
+    return labels(linha.split('role="menu"')[1]);
+  };
+  assert.deepEqual(arquivado(true), ["Abrir", "Ver relatório", "Duplicar", "Desarquivar", "Excluir"]);
+  assert.deepEqual(arquivado(false), ["Abrir", "Ver relatório", "Duplicar", "Desarquivar"], "com dados de aluno, sem Excluir");
 
   const writeOnly = html(createElement(WebinarsTable, { items: [rows[1]], permissions: { canPublish: false, canWrite: true } }));
   assert.deepEqual(labels(writeOnly.split('role="menu"')[1]), ["Abrir", "Duplicar"], "sem messaging.publish nao exclui");
@@ -377,9 +388,10 @@ test("paginas: permissao, migracao pendente com o numero certo, loading e not-fo
   // Toda escrita passa pela service role e pela permissao certa.
   const actions = stripComments(read("src/server/webinars/actions.ts"));
   assert.match(actions, /^"use server";/);
-  assert.match(actions, /runAdminAction\("messaging\.write", saveWebinarSchema/);
-  assert.match(actions, /runAdminAction\("messaging\.publish", webinarIdSchema, input, async[\s\S]*?status: "published"/, "publicar pede messaging.publish");
-  assert.match(actions, /runAdminAction\("messaging\.publish", cancelWebinarSchema/);
+  // Pelo esqueleto dos Webinarios (runWebinarAction: o modulo na licenca), com a classe de cada acao (docs/32 §11.3).
+  assert.match(actions, /runWebinarAction\("messaging\.write", "conteudo", saveWebinarSchema/);
+  assert.match(actions, /runWebinarAction\("messaging\.publish", "conteudo", webinarIdSchema, input, async[\s\S]*?status: "published"/, "publicar pede messaging.publish");
+  assert.match(actions, /runWebinarAction\("messaging\.publish", "dever_legal", cancelWebinarSchema/);
   assert.match(actions, /queueWebinarCancelledNotices\(db, row\.id, now\)/);
   assert.match(actions, /queueWebinarRescheduledNotices\(db, (live|session)\.id, now\)/);
   assert.match(actions, /persistImageAsset\(data\.image, "webinars\/covers"\)/);

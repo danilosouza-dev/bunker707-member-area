@@ -74,6 +74,35 @@ export function formatOffsetText(offsetMs: number): string {
   return negative ? `-${text}` : text;
 }
 
+/**
+ * O tempo da coluna Tempo no CSV do roteiro da Live ao vivo (adendo de 10/11/2026, R8), lido como o campo "Minuto da
+ * live" e o card Simulação: contado do Começar para todos, o numero sozinho e minuto ("12" = 12 min) e "12:30" e minuto e
+ * segundo. Tambem le "1:02:03" (hora; o CSV do chat de uma sessao) e "12m" ou "90s"; o numero com fracao e o negativo
+ * nao entram (nulo).
+ */
+export function parseLiveOffsetText(input: string | null | undefined): number | null {
+  const text = (input ?? "").trim();
+  const minuteMark = /^(\d{1,4})(?::([0-5]\d))?$/.exec(text);
+  let ms: number | null;
+  if (minuteMark) {
+    ms = (Number(minuteMark[1]) * 60 + Number(minuteMark[2] ?? 0)) * 1000;
+  } else if (/^\d+[.,]\d+$/.test(text)) {
+    return null;
+  } else {
+    ms = parseOffsetText(text);
+  }
+  return ms !== null && ms >= 0 && ms <= CHAT_LIMITS.offsetMaxMs ? ms : null;
+}
+
+/**
+ * O minuto da live no CSV do roteiro: sempre minuto:segundo ("12:00", "12:30", "62:03"), que a importacao da live e a da
+ * gravada leem igual (a ida e a volta nao mudam o minuto).
+ */
+export function formatLiveOffsetText(offsetMs: number): string {
+  const total = Math.max(0, Math.round(offsetMs / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 /** O minuto do video em que o item entra (nulo no manual e na frase ainda nao resolvida). */
 export function scriptOffsetOf(item: Pick<ScriptItemDraft, "offsetMs" | "triggerKind"> & { resolvedOffsetMs?: number | null }): number | null {
   if (item.triggerKind === "at_offset") {
@@ -116,9 +145,10 @@ function headerIndex(headers: readonly string[], wanted: string): number {
  * Le o CSV do roteiro (o nosso, o da live real exportado ou o de outra ferramenta): cabecalho obrigatorio com as
  * quatro colunas em qualquer ordem, separador "," ou ";" pelo cabecalho, ate 5 000 linhas e 1 MB. Linha ruim vira
  * erro com o numero dela e nao entra; as boas entram como `at_offset` prontos. O chamador decide se substitui ou
- * acrescenta ao roteiro.
+ * acrescenta ao roteiro. `live`: o roteiro da Live ao vivo, com o Tempo lido em minutos (parseLiveOffsetText).
  */
-export function parseScriptCsv(text: string): ScriptCsvResult {
+export function parseScriptCsv(text: string, options: { live?: boolean } = {}): ScriptCsvResult {
+  const parseTime = options.live ? parseLiveOffsetText : parseOffsetText;
   const errors: ScriptCsvError[] = [];
   if (new TextEncoder().encode(text).length > CHAT_LIMITS.scriptCsvBytes) {
     return { errors: [{ line: 0, message: `O arquivo passa de ${Math.round(CHAT_LIMITS.scriptCsvBytes / 1024)} KB.` }], items: [], truncated: false };
@@ -138,7 +168,7 @@ export function parseScriptCsv(text: string): ScriptCsvResult {
   const items: ScriptItemDraft[] = [];
   parsed.rows.forEach((row, index) => {
     const line = index + 2;
-    const offsetMs = parseOffsetText(row[columns.time] ?? "");
+    const offsetMs = parseTime(row[columns.time] ?? "");
     const personaName = (row[columns.name] ?? "").trim().slice(0, CHAT_LIMITS.personaName);
     const roleWord = stripAccents((row[columns.role] ?? "").trim().toLowerCase());
     const personaRole = PERSONA_WORDS[roleWord] ?? (roleWord === "" ? "student" : null);
@@ -170,11 +200,15 @@ export function parseScriptCsv(text: string): ScriptCsvResult {
   return { errors, items, truncated: parsed.truncated };
 }
 
-/** O CSV do roteiro (e o do chat de uma live real) no formato que a importacao le de volta. */
-export function formatScriptCsv(items: readonly { body: string; offsetMs: number | null; personaName: string; personaRole: "student" | "team" }[]): string {
+/**
+ * O CSV do roteiro (e o do chat de uma live real) no formato que a importacao le de volta. `live`: o roteiro da Live ao
+ * vivo, com o Tempo em minuto:segundo (formatLiveOffsetText).
+ */
+export function formatScriptCsv(items: readonly { body: string; offsetMs: number | null; personaName: string; personaRole: "student" | "team" }[], options: { live?: boolean } = {}): string {
+  const formatTime = options.live ? formatLiveOffsetText : formatOffsetText;
   const rows = items
     .filter((item) => item.offsetMs != null)
-    .map((item) => [formatOffsetText(item.offsetMs ?? 0), item.personaName, item.personaRole === "team" ? "Equipe" : "Aluno", item.body]);
+    .map((item) => [formatTime(item.offsetMs ?? 0), item.personaName, item.personaRole === "team" ? "Equipe" : "Aluno", item.body]);
   return toCsv(SCRIPT_CSV_HEADERS, rows, ";");
 }
 

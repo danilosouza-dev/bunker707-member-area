@@ -171,7 +171,7 @@ test("Server Action valida o texto e usa o papel de leitura; a leitura so traz n
   const server = await readSource("src/server/admin/search.ts");
 
   assert.match(action, /^"use server";/);
-  assert.match(action, /runAdminAction\("admin\.read", searchAdminSchema, raw,/);
+  assert.match(action, /runAdminAction\("admin\.read", "leitura", searchAdminSchema, raw,/);
   assert.match(action, /min\(ADMIN_SEARCH_MIN_LENGTH/);
 
   assert.match(server, /^import "server-only";/);

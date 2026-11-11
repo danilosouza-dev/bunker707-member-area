@@ -50,13 +50,30 @@ on:
           - fechar-ssh
           - chave-backup
           - carga
+          - plan-licencas
+          - provision-licencas
+          - dns-licencas
+          - cerimonia-licencas
+          - secrets-licencas
+          - deploy-licencas
+          - conectar-licencas
+          - backup-licencas
+          - restaurar-licencas
+          - ensaio-licencas
+          - status-licencas
+          - exec-licencas
+          - teste-plano
+          - teste-criar
+          - teste-dns
+          - teste-instalar
+          - teste-apagar
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>; cerimonia: CONFIRMAR=cerimonia ROTACIONAR=emissao; conectar-licencas: CONFIRMAR=conectar REVOGAR_ANTERIORES=sim; ensaio: CONFIRMADO=sim TESTE_PRECO_MAX=4.50 PACOTE_VERSAO=1.0.0 CONFIRMAR=apagar)"
         type: string
         required: false
         default: ""
       payload:
-        description: "secrets-*: envelope cifrado (base64). exec-*: comando a rodar no servidor, como deploy, em /opt/bunker707."
+        description: "secrets-*: envelope cifrado (base64). exec-*: comando a rodar no servidor, como deploy, em /opt/bunker707. teste-instalar: a Chave de ativacao (mascarada; nunca vai ao log)."
         type: string
         required: false
         default: ""
@@ -80,6 +97,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # teste-instalar baixa o pacote da escola, o artefato do workflow pacote-escola.yml.
+      actions: read
     # Uma etapa por vez: duas rodando juntas disputariam o firewall e o .env. No job (e nao no workflow) para
     # um push deste arquivo nao cancelar um disparo que esta na fila.
     concurrency:
@@ -92,6 +111,15 @@ jobs:
       OPCOES: ${{ inputs.opcoes }}
 
     steps:
+      # teste-instalar: a Chave de ativacao chega no payload. Mascarada antes de qualquer outro passo, lida do arquivo do
+      # evento (nunca por uma variavel do workflow, que o GitHub mostra no cabecalho do passo); o teste.sh a le do mesmo
+      # arquivo e a leva ao servidor pela entrada do SSH.
+      - name: Mascarar a Chave de ativacao
+        if: inputs.etapa == 'teste-instalar'
+        run: |
+          v=$(jq -r '.inputs.payload // ""' "$GITHUB_EVENT_PATH" | tr -d '[:space:]')
+          [ -z "$v" ] || echo "::add-mask::$v"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,15 +143,36 @@ jobs:
         run: |
           case "$ETAPA:$GITHUB_REF" in *:refs/heads/main|deploy-meet:refs/heads/dev) ;; *) echo "::error::$ETAPA so roda na main$([ "$ETAPA" = deploy-meet ] && printf ' ou na dev') (recebido: $GITHUB_REF). Fluxo: tarefa -> dev (teste na Vercel) -> main -> servidor."; exit 1 ;; esac
 
+      # Servidor do Emissor de licencas (docs/32 D39; docs/20 §8C): toda etapa que muda alguma coisa nele (criar, DNS,
+      # a cerimonia das chaves, segredos, deploy, a credencial da API interna da escola, backup, restaurar, ensaio, exec)
+      # so roda da main. plan-licencas e status-licencas so leem.
+      - name: Licencas so da main
+        if: endsWith(inputs.etapa, '-licencas')
+        run: |
+          case "$ETAPA:$GITHUB_REF" in plan-licencas:*|status-licencas:*|*:refs/heads/main) ;; *) echo "::error::$ETAPA muda o servidor de licencas e so roda na main (recebido: $GITHUB_REF). So plan-licencas e status-licencas rodam de outra branch."; exit 1 ;; esac
+
+      # O ensaio de comprador real (docs/32 item 13; docs/20 §9E): o servidor bunker707-teste e cobrado e a instalacao
+      # leva o pacote da escola; toda etapa dele so roda da main.
+      - name: Ensaio so da main
+        if: startsWith(inputs.etapa, 'teste-')
+        run: |
+          case "$GITHUB_REF" in refs/heads/main) ;; *) echo "::error::$ETAPA e do ensaio de comprador e so roda na main (recebido: $GITHUB_REF)."; exit 1 ;; esac
+
       - name: Segredos presentes?
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
+          TEM_LICENCAS_RAIZES: ${{ secrets.LICENCAS_RAIZES != '' }}
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
           case "$ETAPA" in provision|provision-meet|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
+          case "$ETAPA" in dns-licencas|deploy-licencas|conectar-licencas) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS do Emissor e conferido no deploy e no conectar)."; exit 1; } ;; esac
+          case "$ETAPA" in teste-dns|teste-apagar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS da escola do ensaio)."; exit 1; } ;; esac
           case "$ETAPA" in jibri-up|jibri-down) [ -n "$JIBRI_SECRETS" ] || { echo "::error::Segredo JIBRI_SECRETS ausente (linhas CHAVE=VALOR do gravador, docs/20 secao 8B.3)."; exit 1; } ;; esac
+          # As raizes publicas: infra/licencas/raizes.json, que a cerimonia-licencas imprime (docs/32 D41); o segredo
+          # LICENCAS_RAIZES de antes ainda vale sem o arquivo. A chave de emissao nasce no servidor pela cerimonia.
+          case "$ETAPA" in deploy-licencas) [ -s infra/licencas/raizes.json ] || [ "$TEM_LICENCAS_RAIZES" = true ] || { echo "::error::Faltam as raizes publicas: rode cerimonia-licencas e grave em infra/licencas/raizes.json, num commit, o que ela imprime (docs/20 secao 8C.8)."; exit 1; } ;; esac
 
       - name: ${{ inputs.etapa }}
         # Abaixo dos 60 minutos do job, para o passo final sempre ter tempo de rodar.
@@ -135,6 +184,27 @@ jobs:
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
           PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
           COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
+          # Servidor de licencas (docs/20 §8C.5): cada segredo so entra na etapa que o usa, e nenhum e obrigatorio. A chave
+          # raiz nunca e segredo daqui: a cerimonia-licencas a guarda so cifrada no Storage Box (docs/32 D41), e o
+          # secrets-licencas recusa uma raiz no lugar da emissao. Os LICENCAS_EMISSAO_* sao da cerimonia feita fora, de
+          # antes; a chave do Resend chega de preferencia no envelope do payload (docs/20 §8C.5).
+          LICENCAS_RAIZES: ${{ (inputs.etapa == 'secrets-licencas' || inputs.etapa == 'deploy-licencas') && secrets.LICENCAS_RAIZES || '' }}
+          LICENCAS_EMISSAO_CHAVE: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_EMISSAO_CHAVE || '' }}
+          LICENCAS_EMISSAO_SENHA: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_EMISSAO_SENHA || '' }}
+          LICENCAS_EMISSAO_CERTIFICADO: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_EMISSAO_CERTIFICADO || '' }}
+          LICENCAS_RESEND_CHAVE: ${{ (inputs.etapa == 'secrets-licencas' || inputs.etapa == 'teste-instalar') && secrets.LICENCAS_RESEND_CHAVE || '' }}
+          LICENCAS_BANCO_SENHA: ${{ inputs.etapa == 'secrets-licencas' && secrets.LICENCAS_BANCO_SENHA || '' }}
+          # O Painel de licencas e a conta de envio do Emissor (docs/20 §8C.5): variaveis do repositorio, que nao sao
+          # segredo (Settings > Secrets and variables > Actions > Variables), so no deploy-licencas, todas opcionais (os
+          # padroes ficam em lib.sh; o Painel entra com e-mail e senha, sem o Cloudflare Access, docs/32 D40). As opcoes
+          # passam na frente (run.sh); um valor com espaco, como o remetente com nome, so pela variavel.
+          LICENCAS_PAINEL_TETO_DIARIO: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_PAINEL_TETO_DIARIO || '' }}
+          LICENCAS_EMISSOR_EMAIL_PRODUTOR: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_EMAIL_PRODUTOR || '' }}
+          LICENCAS_EMISSOR_EMAIL_REMETENTE: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_EMAIL_REMETENTE || '' }}
+          LICENCAS_EMISSOR_KIDS_ANTERIORES: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_KIDS_ANTERIORES || '' }}
+          LICENCAS_EMISSOR_LINK_RENOVAR: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_LINK_RENOVAR || '' }}
+          LICENCAS_EMISSOR_LINK_LOJA: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_EMISSOR_LINK_LOJA || '' }}
+          LICENCAS_SEM_PAINEL: ${{ inputs.etapa == 'deploy-licencas' && vars.LICENCAS_SEM_PAINEL || '' }}
         run: bash infra/cloud/run.sh "$ETAPA"
 
       # Cancelamento ou timeout matam o script sem rodar o trap que fecha a porta 22 (o runner so sinaliza o

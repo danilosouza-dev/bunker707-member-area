@@ -1821,6 +1821,22 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
 }
 
 /*
+ * Console no estilo do YouTube (docs/31 §10, ajuste do produtor de 10/11/2026): nos campos de digitar e nos seletores
+ * do console, o contorno branco de 2 px afastado da peca parecia o foco padrao do navegador. Ali o foco aparece na
+ * propria peca: a borda do campo passa ao tom do foco (os campos com caixa e o campo de resposta com a linha embaixo);
+ * os campos do YouTube sem borda cuidam da propria linha (RoomCommentField, RoomReplyField) e as pilulas de selecao
+ * mostram o anel na pilula inteira, so pelo teclado (RoomSelectPill). Botoes, links, abas, caixas de marcar e de
+ * arquivo continuam com o anel de 2 px. A raiz do console pede isso com data-field-focus="own" (o seletor nao repete o
+ * atributo da ponte de tokens, que tem um bloco so).
+ */
+:root:has([data-scope="admin"])
+  [data-field-focus="own"]
+  :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"])):focus-visible {
+  outline: none;
+  border-color: var(--room-focus);
+}
+
+/*
  * Livre (docs/27 §4): as cores do Botao e dos Links do pop-up Livre ao passar o mouse e no foco pelo teclado (L6c).
  * O cartao poe em data-free-hover a lista do que muda (color, border, fill) e os valores nas variaveis --free-hover-*
  * do estilo em linha (so cores e degrades montados de valores validados). Fora de @layer e com !important so nestas

@@ -526,6 +526,7 @@ export function distributeQueue(input: { attendants: readonly Attendant[]; items
 }
 
 export type QueueQuestion = {
+  /** Legado: perguntas de antes de 10/11/2026 (D64) gravadas como anonimas; as novas sao sempre falso. */
   anonymous: boolean;
   body: string;
   createdAt: string;
@@ -550,6 +551,7 @@ export type QueueMessage = {
 export type AttendanceQueueItem = {
   /** A situacao do pedido ao Assistente neste alvo (nulo: ninguem pediu). */
   aiStatus: AssistantRequestStatus | null;
+  /** Legado: so a pergunta anonima de antes de 10/11/2026 (D64); a fila mostra o nome de anonima nela. */
   anonymous: boolean;
   answerSource: AnswerSource | null;
   assignedTo: string | null;

@@ -7,6 +7,8 @@ import { nextSession } from "@/server/webinars/model";
 import { sessionFromRow, webinarFromRow } from "@/server/webinars/rows";
 import { fetchRegistrationRowByToken, fetchWebinarRow, listSessionRows } from "@/server/webinars/store";
 import { webinarPublicUrl } from "@/server/webinars/student-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O arquivo .ics da vaga (docs/30 §1.2 e §5.1): GET ?token= com o calendar_token da vaga. Nao pede sessao: o
 // token (32 caracteres aleatorios, um por vaga) basta, para o aluno abrir o link no app de calendario do
@@ -22,6 +24,9 @@ const TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
 const NOT_FOUND = "Calendário não encontrado.";
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const { id } = await context.params;
   const token = new URL(request.url).searchParams.get("token") ?? "";
 

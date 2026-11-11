@@ -118,3 +118,25 @@ export function avatarObjectPathFromUrl(url: string | null | undefined, userId: 
     ? objectPath
     : null;
 }
+
+/**
+ * A foto que os outros veem (a sala e o console dos webinarios): so o arquivo que o aluno enviou pelo Perfil, na pasta
+ * dele do bucket, com o endereco montado pela origem do nosso Supabase (a maquina gravada no perfil nunca chega ao
+ * navegador de outra pessoa). Endereco de fora (outro site, a foto do Google, a pasta de outro aluno, um escape
+ * quebrado) ou sem a origem: null, e a tela mostra as iniciais.
+ */
+export function ownAvatarPublicUrl(stored: string | null | undefined, userId: string, supabaseUrl: string | null | undefined): string | null {
+  try {
+    const objectPath = avatarObjectPathFromUrl(stored?.trim(), userId);
+
+    if (!objectPath || !supabaseUrl) {
+      return null;
+    }
+
+    const url = new URL(`${PUBLIC_OBJECT_PATH}${objectPath.split("/").map(encodeURIComponent).join("/")}`, supabaseUrl);
+
+    return isHttpsOrLoopbackUrl(url) ? url.href : null;
+  } catch {
+    return null;
+  }
+}

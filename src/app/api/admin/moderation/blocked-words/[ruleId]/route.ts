@@ -7,6 +7,7 @@ import {
 } from "@/server/comments/comment-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type BlockedWordRouteContext = {
   params: Promise<{ ruleId: string }>;
@@ -21,6 +22,9 @@ function errorResponse(error: unknown, fallbackMessage: string) {
 }
 
 export async function PATCH(request: Request, context: BlockedWordRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {
@@ -53,6 +57,9 @@ export async function PATCH(request: Request, context: BlockedWordRouteContext) 
 }
 
 export async function DELETE(_request: Request, context: BlockedWordRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {

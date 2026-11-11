@@ -20,12 +20,13 @@ import { tooltipStep, type TooltipEvent, type TooltipState } from "./room-layout
 // motivo comprido (`wide`) corta na terceira linha num texto de dentro, para o recuo da caixa nao mostrar o topo da
 // quarta. So tokens --room-*.
 
-export type RoomTooltipAlign = "center" | "end";
+export type RoomTooltipAlign = "center" | "end" | "start";
 
 export type RoomTooltipProps = {
   /**
    * Centrada no botao (o padrao) ou presa a borda direita dele (`end`), para o botao na ponta direita da janela: a
-   * dica centrada passaria da borda quando e mais larga que o dobro da distancia do centro do botao ate ela.
+   * dica centrada passaria da borda quando e mais larga que o dobro da distancia do centro do botao ate ela. `start`, presa
+   * a borda esquerda, e a do botao na ponta esquerda (a seta de voltar do console).
    */
   align?: RoomTooltipAlign;
   /** O botao (ou o envoltorio dele) que chama a dica. */
@@ -176,7 +177,7 @@ export function RoomTooltipBubble({
       aria-hidden="true"
       className={cn(
         "absolute z-50 w-max rounded-[4px] bg-room-tooltip-bg p-2 text-left text-xs font-normal leading-[18px] text-room-tooltip-fg transition-opacity duration-75 motion-reduce:transition-none",
-        align === "end" ? "right-0" : "left-1/2 -translate-x-1/2",
+        align === "end" ? "right-0" : align === "start" ? "left-0" : "left-1/2 -translate-x-1/2",
         side === "above" ? "bottom-full mb-2" : "top-full mt-2",
         wide ? "max-w-[280px] whitespace-normal" : "whitespace-nowrap",
         hiding ? "opacity-0" : "opacity-100"

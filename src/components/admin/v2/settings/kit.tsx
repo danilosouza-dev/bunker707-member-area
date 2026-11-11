@@ -181,6 +181,8 @@ type ConfirmDialogProps = {
   /** true pinta o botao de confirmar como acao destrutiva. */
   destructive?: boolean;
   onConfirm: () => void;
+  /** Para onde o foco vai ao fechar (o Popup da Base UI); sem ele, o padrao (o botao que abriu). */
+  finalFocus?: (closeType: string) => HTMLElement | boolean | null | void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   title: ReactNode;
@@ -194,6 +196,7 @@ export function ConfirmDialog({
   container,
   description,
   destructive = false,
+  finalFocus,
   onConfirm,
   onOpenChange,
   open,
@@ -204,6 +207,7 @@ export function ConfirmDialog({
       <DialogContent
         className="max-w-md rounded-xl border border-[var(--border-strong)] bg-[var(--surface-3)] text-[var(--text-primary)]"
         container={container}
+        finalFocus={finalFocus}
         showCloseButton={false}
       >
         <DialogHeader className="gap-1 px-5 pt-5 pb-2">
@@ -249,10 +253,12 @@ type SectionCardProps = {
   /** Texto curto ao lado do titulo, ex.: "últimos 30 dias". */
   meta?: ReactNode;
   title: ReactNode;
+  /** O titulo recebe o foco por codigo (tabIndex -1): o formulario que abriu no lugar da lista, a volta do foco. */
+  titleFocusable?: boolean;
   titleId?: string;
 };
 
-export function SectionCard({ actions, bodyClassName, children, className, description, meta, title, titleId }: SectionCardProps) {
+export function SectionCard({ actions, bodyClassName, children, className, description, meta, title, titleFocusable = false, titleId }: SectionCardProps) {
   const autoId = useId();
   const headingId = titleId ?? autoId;
 
@@ -260,7 +266,11 @@ export function SectionCard({ actions, bodyClassName, children, className, descr
     <section aria-labelledby={headingId} className={cn(adminCard, "flex min-w-0 flex-col", className)}>
       <header className="flex flex-wrap items-start justify-between gap-3 px-4 pt-4">
         <div className="min-w-0">
-          <h2 className="flex flex-wrap items-baseline gap-x-2 text-base leading-6 font-semibold text-[var(--text-primary)]" id={headingId}>
+          <h2
+            className={cn("flex flex-wrap items-baseline gap-x-2 text-base leading-6 font-semibold text-[var(--text-primary)]", titleFocusable && "outline-none")}
+            id={headingId}
+            tabIndex={titleFocusable ? -1 : undefined}
+          >
             {title}
             {meta ? <span className="text-xs leading-5 font-medium text-[var(--text-tertiary)]">{meta}</span> : null}
           </h2>

@@ -5,6 +5,8 @@ import { webinarsDb } from "@/server/webinars/db";
 import { jitEnterBodySchema } from "@/server/webinars/jit-schemas";
 import { JitRefusedError, enterJitSession } from "@/server/webinars/jit-queries";
 import { guardRoomRequest, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Comeca quando voce entra" (docs/30 §1.2, §1.6, A14 e D25): POST {} pede a sessao do horario de agora para quem
 // acabou de chegar e responde { data: { roomHref, scheduledAt, sessionId } }; a pagina leva o aluno para a sala, que
@@ -19,6 +21,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

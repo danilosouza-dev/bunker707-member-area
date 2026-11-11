@@ -3,7 +3,7 @@
 // presenca (M1, M2) e o endereco do player da Bunny. Sem "server-only", imports relativos: tests/webinarios-*.test.mjs
 // carregam direto pelo Node. Nada aqui le o banco nem o relogio de verdade: tudo recebe `nowMs`.
 
-import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type DisplayNameMode, type SessionKind, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
+import { CHAT_LIMITS, ROOM_RULES, toTime, type ChatMessage, type ChatSource, type SessionKind, type SimulatedPhase, type StudentChatMessage, type WebinarSession } from "./model";
 import { ROOM_OPENS_MINUTES_BEFORE } from "./room-opens";
 
 /** A sala abre para o aluno este tanto antes da hora marcada (num modulo folha, para o contador do just-in-time). */
@@ -154,7 +154,11 @@ export function isStillPresent(lastSeenBucket: number, currentBucket: number): b
   return currentBucket - lastSeenBucket < ROOM_RULES.leaveAfterBuckets;
 }
 
-/** Numero estavel por aluno e webinario para "Aluno {n}" (D10): nunca o id, nunca a ordem de chegada. */
+/**
+ * Numero estavel por aluno e webinario para "Aluno {n}" (D10): nunca o id, nunca a ordem de chegada. Legado: linhas de
+ * antes de 10/11/2026 (D64). Ninguem mais escreve como anonimo; a conta fica so para reconhecer e mostrar o que ja foi
+ * gravado assim (a foto que nao aparece, o CSV de perguntas, o "Liberar" da equipe).
+ */
 export function anonymousNumber(userId: string, webinarId: string): number {
   let hash = 2166136261;
   const text = `${userId}:${webinarId}`;
@@ -180,32 +184,100 @@ export function firstNameInitial(fullName: string | null | undefined): string {
   return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 }
 
-/** O nome que aparece no chat, pela escolha do aluno no aceite (D10). */
-export function displayNameFor(input: { anonymousNumber: number; fullName: string | null | undefined; mode: DisplayNameMode; nickname: string | null | undefined }): string {
-  if (input.mode === "anonymous") {
-    return `Aluno ${input.anonymousNumber}`;
+/**
+ * "Aluno 123": o nome de quem participava como anonimo neste webinario (D10). Legado: linhas de antes de 10/11/2026
+ * (D64); nenhuma escrita nova usa este nome.
+ */
+export function anonymousDisplayName(userId: string, webinarId: string): string {
+  return `Aluno ${anonymousNumber(userId, webinarId)}`;
+}
+
+/** O que se sabe de quem escreveu, para a foto: a foto do perfil e se o aceite do chat esta em dia (author-photos.ts). */
+export type AuthorPhoto = { avatarUrl: string | null; consentCurrent: boolean };
+
+/**
+ * A foto do perfil que acompanha o que a pessoa escreveu na sala (docs/30 §8.5, aceite versao 2, decisao do produtor de
+ * 10/11/2026): a da equipe sempre (e quem apresenta a live); a do aluno so com o aceite em dia (o texto da versao 2 diz
+ * que a foto aparece para os outros alunos; quem aceitou a versao 1, ou aceitou com um modo antigo, fica com as
+ * iniciais ate aceitar de novo) e nunca no que foi escrito como anonimo (a pergunta Anonima, ou o nome "Aluno {n}" de
+ * quem participava como anonimo: a foto diria quem e). A equipe, no console, ve a foto do aluno sem depender do aceite
+ * (ela ja ve o perfil no admin), mas nunca no anonimo. O Assistente nao tem pessoa. Sem foto, nulo: a tela desenha as
+ * iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para as linhas de
+ * antes, que continuam com a promessa da epoca. O roteiro (adendo de 10/11/2026, R9, que muda o D62 so nisto): a
+ * mensagem `scripted` mostra a foto de quem comenta quando a equipe pos uma (`personaAvatarUrl`, montada pela origem do
+ * nosso Supabase); sem ela, as iniciais, para a turma e para a equipe.
+ */
+export function authorPhotoUrl(input: {
+  /** A pergunta marcada como Anonima (legado: linhas de antes de 10/11/2026). */
+  anonymous?: boolean;
+  authorUserId: string | null;
+  displayName: string;
+  /** A foto de quem comenta da mensagem `scripted` (R9; persona-model.personaAvatarUrl). */
+  personaAvatarUrl?: string | null;
+  photo: AuthorPhoto | null | undefined;
+  source: ChatSource;
+  viewer: "student" | "team";
+  webinarId: string;
+}): string | null {
+  if (input.source === "scripted") {
+    return input.personaAvatarUrl ?? null;
   }
-  if (input.mode === "nickname") {
-    const nickname = (input.nickname ?? "").trim();
-    if (nickname.length >= CHAT_LIMITS.nicknameMin) {
-      return nickname.slice(0, CHAT_LIMITS.nicknameMax);
-    }
+  const url = input.photo?.avatarUrl ?? null;
+  if (!url || !input.authorUserId || input.anonymous) {
+    return null;
   }
+  if (input.source === "team") {
+    return url;
+  }
+  // `original` e a mensagem de aluno que a equipe levou para as proximas turmas: a mesma regra do aluno.
+  if ((input.source !== "audience" && input.source !== "original") || input.displayName === anonymousDisplayName(input.authorUserId, input.webinarId)) {
+    return null;
+  }
+  return input.viewer === "team" || input.photo?.consentCurrent ? url : null;
+}
+
+/**
+ * O nome do aluno no chat, nas Perguntas, no motor da live e no console (D64, 10/11/2026): sempre o primeiro nome com
+ * a inicial do sobrenome. Nao ha mais apelido nem "Aluno {n}", qualquer que seja o aceite gravado ou o card Sala.
+ */
+export function displayNameFor(input: { fullName: string | null | undefined }): string {
   return firstNameInitial(input.fullName).slice(0, CHAT_LIMITS.displayName);
+}
+
+/** Os papeis da equipe e as origens da equipe: so a mensagem que junta os dois tem link (especificacao "Na tela", §8.1). */
+const LINK_ROLES: readonly ChatMessage["role"][] = ["host", "co_host", "team"];
+const LINK_SOURCES: readonly ChatSource[] = ["team", "scripted"];
+
+/**
+ * Se os enderecos `https://` da mensagem viram link para o aluno: papel Apresentador, Co-apresentador ou Equipe E
+ * origem equipe (o console) ou roteiro (a fala de um personagem da equipe). O aluno, o personagem de aluno do roteiro e
+ * o Assistente nunca: ninguem espalha link de golpe pelo chat.
+ */
+export function messageHasLinks(message: Pick<ChatMessage, "role" | "source">): boolean {
+  return LINK_ROLES.includes(message.role) && LINK_SOURCES.includes(message.source);
 }
 
 /**
  * O que o aluno recebe de uma mensagem (docs/30 §5.1): `scripted` vai com o papel da persona (ja gravado em
  * `role`), a origem fica so no banco; `ai` continua `ai` (selo Assistente); as pendentes so do proprio autor. A hora
  * em que foi gravada (`sentAt`) so na sessao `live` (docs/31 V2-9): na gravada e no Replay, a linha mestre diria a
- * data da live de origem.
+ * data da live de origem. `links` pela regra de messageHasLinks.
  */
-export function toStudentMessage(message: ChatMessage, viewerUserId: string | null, sessionKind: SessionKind, offsetMs: number = message.offsetMs): StudentChatMessage {
+export function toStudentMessage(
+  message: ChatMessage,
+  viewerUserId: string | null,
+  sessionKind: SessionKind,
+  offsetMs: number = message.offsetMs,
+  /** A foto de quem escreveu (authorPhotoUrl), quando ela pode aparecer; sem ela, as iniciais. */
+  avatarUrl: string | null = null
+): StudentChatMessage {
   return {
+    avatarUrl,
     body: message.body,
     displayName: message.displayName,
     id: message.id,
     kind: message.kind,
+    links: messageHasLinks(message),
     mine: Boolean(viewerUserId) && message.authorUserId === viewerUserId,
     offsetMs,
     pending: !message.approved,

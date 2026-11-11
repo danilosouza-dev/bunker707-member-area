@@ -33,6 +33,21 @@ export const CONSOLE_V2_COPY = {
   /** O esqueleto da tela enquanto o console carrega, so para o leitor de tela. */
   carregando: "Carregando o console da sessão",
 
+  /**
+   * Sair da pagina do console com quem esta nele dentro da sala (a sala mora na pagina: sair dela tira a pessoa da sala
+   * para todos ate ela voltar). A janela no centro, como o Sair da sala do aluno, com a nova aba como saida sem cair.
+   */
+  sair: {
+    titulo: "Sair do console?",
+    texto: "Você está dentro da sala ao vivo. Se sair desta página, você sai da sala, e quem assiste deixa de ver e ouvir você até você voltar ao console.",
+    dica: "Para ver outra página sem sair do ar, abra em uma nova aba.",
+    ficar: "Continuar no console",
+    novaAba: "Abrir em nova aba",
+    sair: "Sair do console",
+    /** O Sair confirmado: o console sai da sala antes de trocar de pagina (no maximo alguns segundos). */
+    saindo: "Saindo da sala…"
+  },
+
   /* O palco (V2-4 e V2-13): os selos sobre o video. */
   palco: {
     /**
@@ -75,10 +90,19 @@ export const CONSOLE_V2_COPY = {
   mais: "Mais painéis",
   /** O ⋯ com uma entrada escolhida (ele mostra o nome dela). */
   maisEscolhido: (nome: string) => `Mais painéis: ${nome}`,
-  /** As entradas do ⋯, na ordem do V2-15. */
-  entradas: { enquetes: "Enquetes", roteiro: "Roteiro", oferta: "Oferta", atendimento: "Atendimento", presenca: "Presença", gravacao: "Gravação" },
+  /** As entradas do ⋯, na ordem do V2-15; a Na tela (docs/31 §12, o mesmo nome de WEBINAR_COPY.naTela.console.entrada) primeiro. */
+  entradas: { tela: "Na tela", enquetes: "Enquetes", roteiro: "Roteiro", oferta: "Oferta", atendimento: "Atendimento", presenca: "Presença", gravacao: "Gravação" },
   /** O X do painel, a partir de lg. */
   fecharPainel: "Fechar o painel",
+  /** O trilho a direita do console (docs/31 §10): o nome de cada item comeca pelo rotulo visivel. */
+  trilho: {
+    /** O rotulo do ultimo item, que abre o menu das outras entradas. */
+    mais: "Mais",
+    /** "Perguntas, 3 abertas". */
+    comNumero: (rotulo: string, numero: string) => `${rotulo}, ${numero}`,
+    abertas: (n: number) => (n === 1 ? "1 aberta" : `${n} abertas`),
+    maos: (n: number) => (n === 1 ? "1 levantada" : `${n} levantadas`)
+  },
 
   /** A aba Pessoas (V2-14 e V2-15) e o Remover do ⋮ da miniatura do video (V2-A29), quando ele nao passa pelo nosso. */
   pessoas: {

@@ -34,7 +34,7 @@ class SalesRuleError extends Error {
 
 /** [settings.sales] Guarda (ou troca) o token que a plataforma manda em cada venda. */
 export async function saveSalesSecret(raw: unknown): Promise<ActionResult<{ secretUpdatedAt: string; webhookUrl: string }>> {
-  return runAdminAction("settings.sales", saveSalesSecretSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.sales", "dever_legal", saveSalesSecretSchema, raw, async ({ input, user }) => {
     const adapter = getPaymentAdapter(input.provider);
 
     if (!adapter) {
@@ -61,7 +61,7 @@ export async function saveSalesSecret(raw: unknown): Promise<ActionResult<{ secr
 
 /** [settings.sales] Desconecta a plataforma: apaga o token; vendas novas passam a responder 503. */
 export async function disconnectSalesProvider(raw: unknown): Promise<ActionResult<{ provider: string }>> {
-  return runAdminAction("settings.sales", salesProviderInputSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.sales", "dever_legal", salesProviderInputSchema, raw, async ({ input, user }) => {
     const db = salesDb();
 
     await clearIntegration(db, input.provider);
@@ -74,7 +74,7 @@ export async function disconnectSalesProvider(raw: unknown): Promise<ActionResul
 
 /** [settings.sales] Roda de novo a regra de acesso de uma venda que falhou ou foi ignorada. */
 export async function reprocessSalesEvent(raw: unknown): Promise<ActionResult<ReprocessOutcome>> {
-  return runAdminAction("settings.sales", reprocessSalesEventSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.sales", "dever_legal", reprocessSalesEventSchema, raw, async ({ input, user }) => {
     const db = salesDb();
     const outcome = await reprocessWebhookEvent(db, { id: input.id, siteOrigin: await getRequestOrigin() });
 

@@ -64,10 +64,10 @@ test("isAdminFullScreenPath: so o console da sessao de um webinario fica em tela
   assert.equal(nav.isAdminFullScreenPath(undefined), false);
 });
 
-test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o painel com a largura por faixa; sem palco, so o painel no meio com 720 px no maximo", () => {
+test("consoleSkeleton (docs/31 V2-13 e §10): com palco, a coluna do palco com o palco e a barra, o painel em cartao do YouTube com a largura da sala e o trilho a direita; sem palco, so o painel no meio com 720 px no maximo e sem trilho", () => {
   const live = layout.consoleSkeleton({ hasStage: true, panelOpen: true });
   const has = (classes, name) => classes.split(" ").includes(name);
-  for (const parte of ["stage", "bar", "stageColumn"]) {
+  for (const parte of ["stage", "bar", "stageColumn", "rail"]) {
     assert.equal(typeof live[parte], "string", `com palco: ${parte}`);
   }
   assert.match(live.stage, /(?:^| )bg-black(?: |$)/, "o palco preto nos dois temas");
@@ -80,21 +80,30 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.ok(!has(live.stage, "lg:min-h-0"), "sem o piso zero, que deixava o palco encolher a nada");
   assert.ok(has(live.stageColumn, "lg:overflow-y-auto"), "a coluna do palco rola por dentro a partir de lg");
   assert.ok(has(live.stageColumn, "relative"), "a coluna e a referencia do que fica por cima do palco e dos rotulos dela");
-  // Cada parte que rola e `relative`: sem isso os rotulos sr-only (absolute) tomam a pagina como referencia, esticam o
-  // documento por baixo da raiz de altura fixa e a pagina inteira rola para fora da tela (na gravada, 1594 px a 1280 x 720).
+  // O painel e a referencia dos rotulos sr-only dele (o corpo de dentro rola, console-panel.tsx).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
-  assert.ok(has(live.panel, "lg:overflow-y-auto"), "o painel rola por dentro");
-  // O painel rola por dentro (o overflow-x tambem fica auto): a folga de 4 px a direita guarda o anel de foco do X.
-  assert.ok(has(live.panel, "lg:pr-1"), "a folga do anel do X a direita");
-  // Os avisos do console abrem em cima, no meio, abaixo do topo (duas linhas abaixo de lg, 56 px a partir de lg).
-  assert.ok(has(live.root, "[--console-toast-top:7.5rem]") && has(live.root, "lg:[--console-toast-top:4.5rem]"), "a altura dos avisos abaixo do topo");
-  for (const largura of ["lg:w-80", "xl:w-[360px]", "2xl:w-[440px]"]) {
-    assert.ok(live.panel.split(" ").includes(largura), `o painel com ${largura}`);
+  // O cartao do YouTube a partir de lg: o fundo do painel, o contorno de 1 px e o raio 12, com a largura da sala.
+  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,514px)]", "lg:flex-none"]) {
+    assert.ok(has(live.panel, classe), `o painel com ${classe}`);
+  }
+  // Dentro do cartao, os cartoes do admin (SectionCard) ficam no fundo do proprio cartao: nunca um cartao escuro dentro dele.
+  assert.ok(has(live.panel, "[--surface-1:var(--room-panel)]") && has(live.panel, "[--surface-3:var(--room-panel)]"), "os cartoes de dentro no fundo do painel");
+  // O trilho: so a partir de lg, 48 px, a 16 px da borda (o recuo do corpo) e 8 px a mais depois do painel.
+  for (const classe of ["hidden", "lg:flex", "w-12", "lg:ml-2"]) {
+    assert.ok(has(live.rail, classe), `o trilho com ${classe}`);
+  }
+  // Os avisos do console abrem em cima, no meio, abaixo do topo (duas linhas abaixo de lg, 64 px a partir de lg).
+  assert.ok(has(live.root, "[--console-toast-top:7.5rem]") && has(live.root, "lg:[--console-toast-top:5rem]"), "a altura dos avisos abaixo do topo");
+  // Os cantos do YouTube no console inteiro: os botoes da sala e do admin em pilula, os cartoes de dentro com 12 px.
+  for (const classe of ["[--member-button-radius:9999px]", "[--member-cover-radius:12px]", "[&_[data-slot=button]]:rounded-full!"]) {
+    assert.ok(has(live.root, classe), `a raiz com ${classe}`);
   }
   assert.doesNotMatch(live.panel, /max-w-\[720px\]/);
   assert.match(live.root, /(?:^| )lg:h-dvh(?: |$)/, "a altura da janela a partir de lg");
   assert.match(live.root, /(?:^| )bg-room-bg(?: |$)/, "o fundo do tema, o mesmo atras do iframe");
-  assert.match(live.top, /(?:^| )lg:h-14(?: |$)/, "o topo de 56 px a partir de lg");
+  // O topo da sala: 64 px a partir de lg, sem fundo e sem borda.
+  assert.ok(has(live.top, "lg:h-16"), "o topo de 64 px a partir de lg");
+  assert.doesNotMatch(live.top, /(?:^| )(?:border-b|bg-room-surface)(?: |$)/, "o topo sem borda e sem fundo");
 
   // Fechado, o painel some (continua montado) e nada mais disputa o display com o `hidden`.
   assert.equal(layout.consoleSkeleton({ hasStage: true, panelOpen: false }).panel, "hidden");
@@ -103,15 +112,29 @@ test("consoleSkeleton: com palco, a coluna do palco com o palco e a barra e o pa
   assert.equal(gravada.stage, null);
   assert.equal(gravada.bar, null);
   assert.equal(gravada.stageColumn, null);
+  assert.equal(gravada.rail, null, "sem palco, sem trilho: as abas ficam dentro do painel");
   assert.ok(gravada.panel.split(" ").includes("max-w-[720px]"), "a coluna de ate 720 px");
   assert.ok(gravada.panel.split(" ").includes("mx-auto"), "no meio");
   assert.ok(has(gravada.panel, "relative"), "sem palco o painel tambem e a referencia dos rotulos dele");
-  assert.ok(has(gravada.panel, "lg:overflow-y-auto"), "sem palco o painel rola por dentro");
-  assert.ok(has(gravada.panel, "lg:pr-1"), "sem palco, a folga do anel do ⋯ a direita");
+  assert.ok(has(gravada.panel, "lg:bg-room-panel"), "sem palco, o mesmo cartao");
   assert.ok(has(gravada.root, "lg:overflow-hidden"), "a raiz nao rola a partir de lg: cada parte rola por dentro");
   assert.equal(layout.consoleSkeleton({ hasStage: false, panelOpen: false }).panel, gravada.panel, "sem palco o painel nunca fecha");
   assert.equal(layout.CONSOLE_PANEL_ID, "console-panel");
   assert.equal(layout.CONSOLE_SETTINGS_ID, "console-live-settings");
+});
+
+test("consoleRailStep (docs/31 §10): o item abre o painel nele; o item que ja esta na tela fecha o painel (so com palco); com o painel fechado, abre", async () => {
+  const { consoleRailStep } = await import("../src/server/webinars/console-v2-model.ts");
+  const chat = { tab: "chat" };
+  const perguntas = { tab: "perguntas" };
+  const enquetes = { more: "enquetes" };
+  assert.deepEqual(consoleRailStep({ closable: true, item: perguntas, panelShown: true, view: chat }), { panelOpen: true, view: perguntas }, "outra aba: abre nela");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: true, view: chat }), { panelOpen: false, view: chat }, "a mesma aba: fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: false, view: chat }), { panelOpen: true, view: chat }, "fechado: abre");
+  assert.deepEqual(consoleRailStep({ closable: false, item: chat, panelShown: true, view: chat }), { panelOpen: true, view: chat }, "sem palco o painel nunca fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: enquetes, panelShown: true, view: chat }), { panelOpen: true, view: enquetes }, "a entrada do Mais abre nela");
+  assert.deepEqual(consoleRailStep({ closable: true, item: enquetes, panelShown: true, view: enquetes }), { panelOpen: false, view: enquetes }, "a mesma entrada: fecha");
+  assert.deepEqual(consoleRailStep({ closable: true, item: chat, panelShown: true, view: enquetes }), { panelOpen: true, view: chat }, "de uma entrada para uma aba: abre na aba");
 });
 
 test("formatWebinarDayMonthTime: \"30/10 às 20:00\" em Sao Paulo, sem o ano nem o dia da semana", () => {
@@ -423,12 +446,13 @@ test("consoleTabsFor: a live com Chat, Perguntas, Mãos e Pessoas; a gravada e o
   assert.deepEqual([...v2.CONSOLE_TABS], ["chat", "perguntas", "maos", "pessoas"]);
 });
 
-test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Roteiro so no webinario gravado, Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "presenca", "gravacao"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["enquetes", "atendimento", "gravacao"], "antes de comecar, sem a Presença");
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro");
+test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
+  assert.deepEqual([...v2.CONSOLE_MORE_ENTRIES], ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"], "a Na tela e a primeira entrada");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "gravacao"], "antes de comecar, sem a Presença (a Na tela e o Roteiro ja valem na espera)");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro, sem a Na tela");
   for (const entries of [v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" })]) {
     assert.deepEqual(entries, v2.CONSOLE_MORE_ENTRIES.filter((entry) => entries.includes(entry)), "sempre na ordem do V2-15");
   }
@@ -443,6 +467,22 @@ test("consoleTabCounts: Perguntas conta so as abertas; Mãos, as maos levantadas
   assert.equal(v2.consoleTabCounts({ hands: 2.7, questions }).maos, 2);
 });
 
+test("consoleTabCounts com o fio (docs/30 §2.4): a respondida em que o aluno escreveu por ultimo conta junto das abertas, ate a equipe responder", () => {
+  const aluno = { role: "student" };
+  const equipe = { role: "host" };
+  const questions = [
+    { status: "open" },
+    { replies: [aluno], status: "answered" },
+    { replies: [aluno, equipe], status: "answered" },
+    { replies: [equipe, aluno], status: "answered" },
+    { replies: [], status: "answered" },
+    { replies: [aluno], status: "dismissed" },
+    // A equipe respondeu pelo campo de cima depois da ultima fala do aluno: nao conta.
+    { answeredAt: "2026-11-05T23:05:00.000Z", replies: [{ createdAt: "2026-11-05T23:02:00.000Z", role: "student" }], status: "answered" }
+  ];
+  assert.equal(v2.consoleTabCounts({ hands: 0, questions }).perguntas, 3, "a aberta e as duas em que o aluno escreveu por ultimo");
+});
+
 test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nesta sessao; senao, o Chat", () => {
   const tabs = v2.consoleTabsFor({ kind: "live" });
   const entries = v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" });
@@ -455,6 +495,11 @@ test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nest
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "roteiro" } }), { more: "roteiro" });
+  // A Na tela vale na live e na gravada; no Replay a escolha volta ao Chat.
+  assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { more: "tela" } }), { more: "tela" });
+  assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "tela" } }), { more: "tela" });
+  const replay = { entries: v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), tabs: v2.consoleTabsFor({ kind: "replay" }) };
+  assert.deepEqual(v2.consolePanelViewOf({ ...replay, view: { more: "tela" } }), { tab: "chat" });
 });
 
 test("consolePollStep (docs/31 V2-13 e V2-A50): a regiao viva do Atualizar so fala o clique, a passagem para sem resposta e a volta; o laco de 5 s fica quieto; o sem resposta fica na tela ate uma leitura responder", () => {
@@ -505,4 +550,33 @@ test("consoleRowFocusAfter (WCAG 2.4.3; Mãos e a Sala de espera): o foco vai a 
   assert.equal(v2.consoleRowFocusAfter({ id: "c", ids, move: "end" }), "c", "Pular a ultima: ela fica no lugar");
   assert.equal(v2.consoleRowFocusAfter({ id: "x", ids, move: "remove" }), "a", "fora da lista: a primeira");
   assert.equal(v2.consoleRowFocusAfter({ id: "x", ids: [], move: "remove" }), null);
+});
+
+test("consoleRailFit (docs/31 §10, 10/11/2026): todos os itens quando a altura comporta; senao o ultimo lugar e do Mais; sem medida, todos; sempre ao menos um lugar", async () => {
+  const { CONSOLE_RAIL_GAP_PX, CONSOLE_RAIL_ITEM_PX, consoleRailFit } = await import("../src/server/webinars/console-v2-model.ts");
+  const altura = (lugares) => lugares * CONSOLE_RAIL_ITEM_PX + (lugares - 1) * CONSOLE_RAIL_GAP_PX;
+  assert.deepEqual(consoleRailFit({ available: null, count: 8 }), { overflow: 0, visible: 8 }, "o HTML do servidor: todos");
+  assert.deepEqual(consoleRailFit({ available: 0, count: 8 }), { overflow: 0, visible: 8 }, "escondido (abaixo de lg): sem medida");
+  // A live no computador: 8 itens (4 abas, Enquetes, Atendimento, Presença, Gravação) em 624 px.
+  assert.deepEqual(consoleRailFit({ available: altura(8), count: 8 }), { overflow: 0, visible: 8 }, "cabe exatamente");
+  assert.deepEqual(consoleRailFit({ available: 640, count: 8 }), { overflow: 0, visible: 8 }, "1280 x 720: o trilho tem 640 px");
+  assert.deepEqual(consoleRailFit({ available: altura(8) - 1, count: 8 }), { overflow: 2, visible: 6 }, "1 px a menos: 6 itens e o Mais com 2");
+  assert.deepEqual(consoleRailFit({ available: altura(4), count: 6 }), { overflow: 3, visible: 3 });
+  assert.deepEqual(consoleRailFit({ available: 10, count: 6 }), { overflow: 6, visible: 0 }, "um lugar so: o Mais com tudo");
+  assert.deepEqual(consoleRailFit({ available: altura(3), count: 2 }), { overflow: 0, visible: 2 });
+  assert.deepEqual(consoleRailFit({ available: altura(3), count: 0 }), { overflow: 0, visible: 0 });
+  // Com a Na tela e o Roteiro (R8), a live tem 10 itens (4 abas, Na tela, Enquetes, Roteiro, Atendimento, Presença, Gravação).
+  const live = v2.consoleTabsFor({ kind: "live" }).length + v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }).length;
+  assert.equal(live, 10);
+  assert.deepEqual(consoleRailFit({ available: altura(10), count: live }), { overflow: 0, visible: 10 }, "cabe exatamente com a Na tela e o Roteiro");
+  assert.deepEqual(consoleRailFit({ available: 640, count: live }), { overflow: 3, visible: 7 }, "1280 x 720: 7 itens e o Mais com 3");
+  assert.deepEqual(consoleRailFit({ available: altura(9), count: live }), { overflow: 2, visible: 8 }, "a altura que cabia os 9 de antes: o Mais leva 2");
+});
+
+test("R7 consolePresenceBadge: com o contador simulado ligado, a parte simulada vem separada no fim, so para a equipe; sem ela (nula, zero), so o real", () => {
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 300 }), "12 presentes · pico 14 · +300 simulados");
+  assert.equal(v2.consolePresenceBadge({ peak: null, presentNow: 1, simulated: 1250 }), "1 presente · +1.250 simulados", "o milhar do Brasil");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: 0 }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: null }), "12 presentes · pico 14");
+  assert.equal(v2.consolePresenceBadge({ peak: 14, presentNow: 12, simulated: Number.NaN }), "12 presentes · pico 14");
 });

@@ -5,10 +5,14 @@
 // juntos; as reacoes tambem contam no banco (countStudentReactionsSince), o limite entre instancias. Por cima de
 // tudo vale o teto global takeStudentWrite. Na live (fase 3): os lotes de sinais do iframe (POST .../room-events,
 // 6 por minuto) e o webinar_joined do join-token (no maximo um a cada 90 s, a mesma tolerancia da presenca: pedir
-// o token de novo nao e uma entrada nova; a abertura vista primeiro pela presenca fica marcada para o token). Modulo puro (sem "server-only"), com o relogio por parametro:
-// tests/webinarios-sala-navegador, tests/webinarios-sala-rotas e tests/webinarios-sala-ao-vivo-rotas.
+// o token de novo nao e uma entrada nova; a abertura vista primeiro pela presenca fica marcada para o token). A Na tela
+// (especificacao de 10/11/2026, §5.5 e §8.4): os lotes de POST .../screen-events (viu, clicou e fechou o banner ou o QR
+// Code), 12 por minuto por aluno e sessao, fora do teto global. Modulo puro (sem "server-only"), com o relogio por parametro:
+// tests/webinarios-sala-navegador, tests/webinarios-sala-rotas, tests/webinarios-sala-ao-vivo-rotas e
+// tests/webinarios-na-tela-rotas.
 
 import { ROOM_RULES } from "./model";
+import { SCREEN_LIMITS } from "./screen-model";
 
 /** Chaves guardadas ao mesmo tempo; acima disto as mais antigas saem. */
 const MAX_TRACKED = 20_000;
@@ -81,6 +85,8 @@ function windowedLimit(max: number, windowMs: number) {
 
 const chatBurst = windowedLimit(ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs);
 const questionBurst = windowedLimit(ROOM_RULES.questionsPerMinute, 60_000);
+// O fio das perguntas: a mesma rajada do chat (5 por 60 s), numa janela so dele.
+const replyBurst = windowedLimit(ROOM_RULES.chatBurst.max, ROOM_RULES.chatBurst.windowMs);
 const reactionSecond = windowedLimit(ROOM_RULES.reactions.perSecond, 1000);
 const reactionMinute = windowedLimit(ROOM_RULES.reactions.perMinute, 60_000);
 const lastSentAt = new Map<string, number>();
@@ -91,6 +97,9 @@ export const ROOM_EVENT_BATCHES_PER_MINUTE = 6;
 export const LIVE_JOIN_WINDOW_MS = ROOM_RULES.leaveAfterBuckets * ROOM_RULES.bucketSeconds * 1000;
 
 const roomEventBatches = windowedLimit(ROOM_EVENT_BATCHES_PER_MINUTE, 60_000);
+/** Lotes de POST .../screen-events por aluno e sessao num minuto (a Na tela; SCREEN_LIMITS.eventBatchesPerMinute). */
+export const SCREEN_EVENT_BATCHES_PER_MINUTE = SCREEN_LIMITS.eventBatchesPerMinute;
+const screenEventBatches = windowedLimit(SCREEN_EVENT_BATCHES_PER_MINUTE, 60_000);
 const liveJoins = windowedLimit(1, LIVE_JOIN_WINDOW_MS);
 const liveOpenings = new Map<string, number>();
 
@@ -112,6 +121,11 @@ export function takeQuestionBurst(userId: string, sessionId: string, now = Date.
   return questionBurst.take(roomKey(userId, sessionId), now);
 }
 
+/** Respostas no fio das perguntas: 5 por 60 s por aluno e sessao (a rajada do chat, numa janela propria). */
+export function takeReplyBurst(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return replyBurst.take(roomKey(userId, sessionId), now);
+}
+
 /** Reacoes: 1 por segundo e 20 por minuto por aluno e sessao; as duas janelas conferidas antes de contar. */
 export function takeReaction(userId: string, sessionId: string, now = Date.now()): WindowedTake {
   const key = roomKey(userId, sessionId);
@@ -127,6 +141,11 @@ export function takeReaction(userId: string, sessionId: string, now = Date.now()
 /** Sinais do iframe: no maximo 6 lotes por minuto por aluno e sessao (429 com Retry-After). */
 export function takeRoomEventBatch(userId: string, sessionId: string, now = Date.now()): WindowedTake {
   return roomEventBatches.take(roomKey(userId, sessionId), now);
+}
+
+/** As metricas da Na tela: no maximo 12 lotes por minuto por aluno e sessao (429 com Retry-After). */
+export function takeScreenEventBatch(userId: string, sessionId: string, now = Date.now()): WindowedTake {
+  return screenEventBatches.take(roomKey(userId, sessionId), now);
 }
 
 /**
@@ -209,9 +228,11 @@ export function reserveChatSlot(userId: string, sessionId: string, slowModeSecon
 export function resetRoomLimits() {
   chatBurst.clear();
   questionBurst.clear();
+  replyBurst.clear();
   reactionSecond.clear();
   reactionMinute.clear();
   roomEventBatches.clear();
+  screenEventBatches.clear();
   liveJoins.clear();
   liveOpenings.clear();
   lastSentAt.clear();

@@ -17,13 +17,16 @@ import { webinarHref } from "@/server/webinars/model";
 import { isWebinarSlug } from "@/server/webinars/student-model";
 import { getRoomPageData } from "@/server/webinars/student-queries";
 import { Radio } from "lucide-react";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // /webinarios/[slug]/sala?sessao= (docs/30 §1.3 e §1.6): a Sala da Live gravada, do Replay ou da Live ao vivo (fase 3),
 // um dialogo de tela cheia. Nada fica desenhado por baixo dele: sem Minimizar (docs/31 V2-2), a pagina da live por
 // baixo so duplicava o h1 e o trabalho do servidor; Sair volta para ela. O rodape fica para os estados de erro e de
 // recusa. Fora do acesso ou sessao de outro webinario: nao encontrado, sem dizer se existe (docs/30 §8.2). Gravada fora da janela de entrada
-// (antes de 15 min, depois do fim ou da Entrada atrasada), sessao cancelada ou sem a vaga numa live com limite de
-// vagas (A12): a frase e o caminho de volta. A Live ao vivo abre em qualquer situacao (a tela diz Aguardando o
+// (antes de 15 min, depois do fim ou da Entrada atrasada), sessao cancelada, sem a vaga numa live com limite de
+// vagas (A12) ou removido desta sessao da gravada (a moderacao por pessoa da Na tela, R5: "Você foi removido desta
+// live.", a mesma frase da sala): a frase e o caminho de volta. A Live ao vivo abre em qualquer situacao (a tela diz Aguardando o
 // apresentador, sala trancada, em breve, encerrada, removido ou banido) e recebe o nonce da pagina: o external_api.js
 // do nosso servidor de video entra com ele, sem origem nova na CSP (docs/30 §8.4). Nenhum pop-up aqui (docs/25 §1,
 // "onde nunca": a rota nao tem chave de pagina e o palco anuncia o sinal de midia).
@@ -44,6 +47,9 @@ type RoomPageProps = {
 };
 
 export default async function WebinarRoomPage({ params, searchParams }: RoomPageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const { slug } = await params;
   const resolvedSearchParams = await searchParams;
   const sessao = Array.isArray(resolvedSearchParams?.sessao) ? resolvedSearchParams?.sessao[0] : resolvedSearchParams?.sessao;
@@ -67,7 +73,7 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
   const nonce = data.state === "ready" && data.payload.session.kind === "live" ? ((await headers()).get("x-nonce") ?? null) : null;
 
   return (
-    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} student={shellData.student}>
+    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} disabledFeatures={shellData.disabledFeatures} student={shellData.student}>
       {data.state === "error" ? (
         <MemberPage width="default">
           <MemberEmptyState
@@ -94,15 +100,17 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
             description={
               data.reason === "banned"
                 ? WEBINAR_COPY.aoVivo.banido
-                : data.reason === "not_started"
-                  ? copy.naoComecou
-                  : data.reason === "late"
-                    ? copy.entradaAtrasada
-                    : data.reason === "no_seat"
-                      ? copy.vagaObrigatoria
-                      : data.reason === "cancelled"
-                        ? WEBINAR_COPY.aluno.cancelada
-                        : copy.encerrada
+                : data.reason === "kicked"
+                  ? WEBINAR_COPY.aoVivo.removido
+                  : data.reason === "not_started"
+                    ? copy.naoComecou
+                    : data.reason === "late"
+                      ? copy.entradaAtrasada
+                      : data.reason === "no_seat"
+                        ? copy.vagaObrigatoria
+                        : data.reason === "cancelled"
+                          ? WEBINAR_COPY.aluno.cancelada
+                          : copy.encerrada
             }
             icon={Radio}
             title={data.page.view.title}

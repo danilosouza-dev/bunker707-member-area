@@ -280,7 +280,7 @@ export async function getStudentSessionPayload(userId: string, webinarId: string
  * A Sala (docs/30 §1.3 e §1.6): /webinarios/[slug]/sala?sessao=
  * ---------------------------------------------------------------------------------------------- */
 
-export type RoomRefusalReason = "banned" | "cancelled" | "ended" | "late" | "no_seat" | "not_started";
+export type RoomRefusalReason = "banned" | "cancelled" | "ended" | "kicked" | "late" | "no_seat" | "not_started";
 
 export type RoomPageData =
   | {
@@ -320,7 +320,8 @@ export async function liveRoomStaff(db: WebinarsDb, userId: string, webinarId: s
  * relogio: a sala abre em qualquer situacao (a tela mostra Aguardando o apresentador antes de a equipe abrir, a sala
  * trancada, encerrada com o replay, removido ou banido) e so recusa a sessao cancelada; a vaga obrigatoria (A12) vale
  * para os dois, menos para a equipe na live (o join-token tambem deixa a equipe passar). Na gravada e no replay, o
- * banido de todos os webinarios fica fora (D33).
+ * banido de todos os webinarios fica fora (D33); na gravada, tambem o removido desta sessao (a moderacao por pessoa da
+ * Na tela, R5: a pagina mostra "Você foi removido desta live.", a mesma frase da sala).
  */
 export function roomPageDecision(
   payload: Pick<StudentRoomPayload, "session">,
@@ -337,8 +338,9 @@ export function roomPageDecision(
     }
     return { ok: true };
   }
-  // O banido de todos os webinarios nao entra na Live gravada nem no Replay (D33; a live mostra a frase na propria sala).
-  if (!join.ok && (join.reason === "banned" || join.reason === "no_seat")) {
+  // O banido de todos os webinarios nao entra na Live gravada nem no Replay (D33; a live mostra a frase na propria sala),
+  // e o removido desta sessao nao entra de novo na gravada (R5; roomJoinFor so o marca la).
+  if (!join.ok && (join.reason === "banned" || join.reason === "kicked" || join.reason === "no_seat")) {
     return { ok: false, reason: join.reason };
   }
   if (session.kind !== "replay") {

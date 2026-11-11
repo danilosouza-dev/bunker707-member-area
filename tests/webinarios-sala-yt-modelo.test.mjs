@@ -272,6 +272,19 @@ test("questionHasThread e questionThreadOpenByDefault: so a resposta escrita tem
   assert.equal(questionsModel.questionHasThread(pergunta({ answerText: "Sim.", mine: true })), false, "a aberta de novo nao mostra a resposta antiga");
 });
 
+test("questionThreadCount: a resposta escrita conta uma e cada resposta do fio mais uma; a respondida so ao vivo ganha fio quando alguem escreve; a aberta de novo, zero", () => {
+  const pergunta = (extra) => ({ answerText: null, answeredLive: false, id: "q", mine: false, replies: [], status: "open", ...extra });
+  const fio = [{ id: "r1" }, { id: "r2" }];
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", status: "answered" })), 1);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", replies: fio, status: "answered" })), 3);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answeredLive: true, status: "answered" })), 0, "so ao vivo, sem nada escrito");
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answeredLive: true, replies: fio, status: "answered" })), 2, "o fio comeca com o que foi escrito depois");
+  assert.equal(questionsModel.questionHasThread(pergunta({ answeredLive: true, replies: fio, status: "answered" })), true);
+  assert.equal(questionsModel.questionThreadCount(pergunta({ answerText: "Sim.", replies: fio })), 0, "a aberta de novo nao mostra o fio antigo");
+  // Sem a lista (uma pergunta de antes do fio), como antes.
+  assert.equal(questionsModel.questionThreadCount({ answerText: "Sim.", mine: false, status: "answered" }), 1);
+});
+
 test("questionThreadOpen: o clique troca o padrao e continua valendo; a minha respondida depois abre sozinha", () => {
   const minha = { answerText: null, answeredLive: false, id: "q1", mine: true, status: "open" };
   const deOutro = { answerText: "Sim.", answeredLive: false, id: "q2", mine: false, status: "answered" };
@@ -286,6 +299,26 @@ test("questionThreadOpen: o clique troca o padrao e continua valendo; a minha re
   assert.equal(questionsModel.questionThreadOpen(deOutro, nenhum), false);
   assert.equal(questionsModel.questionThreadOpen(deOutro, clicadas), true);
   assert.equal(questionsModel.questionThreadOpen({ ...deOutro, answerText: null, answeredLive: true }, clicadas), false, "sem texto nunca abre, nem clicada");
+});
+
+test("questionReplyOpenStep: o Responder abre o campo com o rascunho vazio; clicado de novo na mesma pergunta, o rascunho fica; noutra pergunta, o campo muda e comeca vazio", () => {
+  const fechado = { draft: "", openId: null, status: null };
+  assert.deepEqual(questionsModel.questionReplyOpenStep(fechado, "q1"), { draft: "", openId: "q1", status: null });
+  const escrevendo = { draft: "Obrigada! E o certificado?", openId: "q1", status: "Muitas tentativas. Espere um pouco." };
+  assert.deepEqual(questionsModel.questionReplyOpenStep(escrevendo, "q1"), escrevendo, "o mesmo Responder nao apaga o que foi escrito");
+  assert.deepEqual(questionsModel.questionReplyOpenStep(escrevendo, "q2"), { draft: "", openId: "q2", status: null }, "noutra pergunta, o campo muda e comeca vazio");
+});
+
+test("questionReplyGone: o campo de responder fecha quando a pergunta dele saiu da lista ou deixou de aceitar a resposta; sem campo aberto, nunca", () => {
+  const lista = [
+    { canReply: true, id: "q1" },
+    { canReply: false, id: "q2" }
+  ];
+  assert.equal(questionsModel.questionReplyGone(lista, null), false, "sem campo aberto");
+  assert.equal(questionsModel.questionReplyGone(lista, "q1"), false, "a respondida que aceita resposta");
+  assert.equal(questionsModel.questionReplyGone(lista, "q2"), true, "a equipe reabriu, dispensou ou o fio encheu");
+  assert.equal(questionsModel.questionReplyGone(lista, "q9"), true, "apagada: saiu da lista");
+  assert.equal(questionsModel.questionReplyGone([], "q1"), true);
 });
 
 test("questionStatusOf: Respondida ao vivo, Dispensada (so o autor a recebe) e nada nas outras", () => {
@@ -344,4 +377,35 @@ test("composerKey: com o envio em andamento ou o campo desligado, a tecla de env
   assert.equal(tecla("enter", { blocked: true, shift: true }), "newline", "o Shift+Enter continua quebrando a linha");
   assert.equal(tecla("enter", { blocked: true, composing: true }), null, "o IME continua sem enviar");
   assert.equal(tecla("mod-enter", { blocked: false, ctrl: true }), "submit", "livre, envia");
+});
+
+test("replyFieldKey: o Esc cancela com o foco no texto, no Cancelar ou no Responder; o Ctrl ou o ⌘ com o Enter envia so do texto", () => {
+  const tecla = (extra = {}) => composerModel.replyFieldKey({ ctrl: false, inText: true, key: "Escape", meta: false, ...extra });
+  assert.equal(tecla(), "cancel");
+  assert.equal(tecla({ inText: false }), "cancel", "no Cancelar e no Responder o Esc tambem cancela (nao chega a sala)");
+  assert.equal(tecla({ ctrl: true, key: "Enter" }), "submit");
+  assert.equal(tecla({ key: "Enter", meta: true }), "submit");
+  assert.equal(tecla({ key: "Enter" }), null);
+  assert.equal(tecla({ ctrl: true, inText: false, key: "Enter" }), null);
+});
+
+const replyField = await import("../src/components/member/webinars/room/room-reply-field.tsx");
+
+test("returnFocusFromReply: o campo de responder saiu com o foco nele (caiu no body): o foco volta ao Responder da pergunta; um foco noutro controle fica", () => {
+  const focados = [];
+  const no = (nome) => ({ focus: () => focados.push(nome), nome });
+  const responder = no("Responder da q6");
+  const body = { nome: "body" };
+  const pedidos = [];
+  const aba = (achado = responder) => ({ querySelector: (selector) => (pedidos.push(selector), achado) });
+  const seletor = '[data-room-question="q6"] [data-room-reply-open]';
+  assert.equal(replyField.returnFocusFromReply(aba(), body, body, seletor), true);
+  assert.deepEqual(focados, ["Responder da q6"]);
+  assert.deepEqual(pedidos, [seletor]);
+  assert.equal(replyField.returnFocusFromReply(aba(), null, body, seletor), true);
+  const antes = focados.length;
+  assert.equal(replyField.returnFocusFromReply(aba(), no("Curtir"), body, seletor), false, "o aluno ja foi a outro controle");
+  assert.equal(replyField.returnFocusFromReply(aba(null), body, body, seletor), false);
+  assert.equal(replyField.returnFocusFromReply(null, body, body, seletor), false);
+  assert.equal(focados.length, antes);
 });

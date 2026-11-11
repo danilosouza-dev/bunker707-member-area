@@ -6,11 +6,13 @@ import {
   CHAT_ROLES,
   CHAT_SOURCES,
   DISPLAY_NAME_MODES,
+  LEGACY_DISPLAY_NAME_MODES,
   MESSAGE_KINDS,
   PERSONA_ROLES,
   POLL_KINDS,
   POLL_STATUSES,
   PRESENCE_STATES,
+  QUESTION_REPLY_ROLES,
   QUESTION_STATUSES,
   SCRIPT_STATUSES,
   SCRIPT_TRIGGERS,
@@ -20,7 +22,6 @@ import {
   type ChatMessage,
   type ChatRole,
   type ChatSource,
-  type DisplayNameMode,
   type MessageKind,
   type PersonaRole,
   type Poll,
@@ -30,11 +31,14 @@ import {
   type PollStatus,
   type PresenceSample,
   type PresenceState,
+  type QuestionReply,
+  type QuestionReplyRole,
   type QuestionStatus,
   type RecordingTranscript,
   type ScriptItem,
   type ScriptStatus,
   type ScriptTrigger,
+  type StoredDisplayNameMode,
   type WebinarQuestion,
   type WebinarTranscriptFormat
 } from "./model";
@@ -206,14 +210,17 @@ export function transcriptFromRow(row: TranscriptRow): RecordingTranscript {
   };
 }
 
-export const CONSENT_COLUMNS = "user_id, consent_version, display_mode, nickname, consented_at, revoked_at, created_at, updated_at";
+/** O que o check de `display_mode` aceita no banco: o modo de agora e os antigos (legado). */
+const STORED_DISPLAY_NAME_MODES: readonly StoredDisplayNameMode[] = [...DISPLAY_NAME_MODES, ...LEGACY_DISPLAY_NAME_MODES];
+
+/** `nickname` continua na tabela (legado: linhas de antes de 10/11/2026, D64), mas o app nao le mais o apelido. */
+export const CONSENT_COLUMNS = "user_id, consent_version, display_mode, consented_at, revoked_at, created_at, updated_at";
 
 export type ConsentRow = {
   consent_version: number;
   consented_at: string;
   created_at: string;
   display_mode: string;
-  nickname: string | null;
   revoked_at: string | null;
   updated_at: string;
   user_id: string;
@@ -223,8 +230,9 @@ export function consentFromRow(row: ConsentRow): ChatConsent {
   return {
     consentVersion: row.consent_version,
     consentedAt: row.consented_at,
-    displayMode: oneOf<DisplayNameMode>(DISPLAY_NAME_MODES, row.display_mode, "first_name_initial"),
-    nickname: row.nickname,
+    // Legado: uma linha de antes de 10/11/2026 pode trazer "nickname" ou "anonymous"; um valor que ninguem conhece
+    // cai em "anonymous", que nunca vale como aceite (chatConsentIsCurrent).
+    displayMode: oneOf<StoredDisplayNameMode>(STORED_DISPLAY_NAME_MODES, row.display_mode, "anonymous"),
     revokedAt: row.revoked_at,
     userId: row.user_id
   };
@@ -339,6 +347,39 @@ export function questionFromRow(row: QuestionRow): WebinarQuestion {
     sessionId: row.session_id,
     status: oneOf<QuestionStatus>(QUESTION_STATUSES, row.status, "open"),
     upvotes: row.upvotes ?? 0,
+    userId: row.user_id
+  };
+}
+
+/** O fio de uma pergunta (202611100001). */
+export const QUESTION_REPLY_COLUMNS = "id, question_id, session_id, user_id, display_name, role, anonymous, body, deleted_at, deleted_by, deleted_reason, created_at";
+
+export type QuestionReplyRow = {
+  anonymous: boolean;
+  body: string;
+  created_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  deleted_reason: string | null;
+  display_name: string;
+  id: string;
+  question_id: string;
+  role: string;
+  session_id: string;
+  user_id: string;
+};
+
+export function questionReplyFromRow(row: QuestionReplyRow): QuestionReply {
+  return {
+    anonymous: row.anonymous,
+    body: row.body,
+    createdAt: row.created_at,
+    displayName: row.display_name,
+    id: row.id,
+    questionId: row.question_id,
+    // Um papel que este app nao conhece vira aluno, nunca equipe.
+    role: oneOf<QuestionReplyRole>(QUESTION_REPLY_ROLES, row.role, "student"),
+    sessionId: row.session_id,
     userId: row.user_id
   };
 }

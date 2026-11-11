@@ -230,7 +230,7 @@ function draftsOfSaved(items: readonly SavedFollowUp[]): FollowUpDraft[] {
 
 /** [messaging.write] Cria (sem id) ou atualiza (com id + expectedUpdatedAt). Editor do aviso (dialogo), card Design, editor Livre e modo modelo. */
 export async function saveTemplate(input: SaveTemplateInput): Promise<ActionResult<SavedTemplate>> {
-  return runAdminAction("messaging.write", saveTemplateSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", saveTemplateSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const requestKind: TemplateKind = data.body.source === "design" ? "design" : data.body.draft.kind;
@@ -291,7 +291,7 @@ export async function saveTemplate(input: SaveTemplateInput): Promise<ActionResu
 
 /** [messaging.write] Menu ⋯ da lista e do relatorio: a versao gravada do aviso (sempre cria). */
 export async function saveTemplateFromNotice(input: { include: TemplateInclude; name: string; noticeId: string }): Promise<ActionResult<SavedTemplate>> {
-  return runAdminAction("messaging.write", saveTemplateFromNoticeSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", saveTemplateFromNoticeSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
 
     // 1. Limite (a mesma regra das outras criacoes).
@@ -357,7 +357,7 @@ export async function saveTemplateFromNotice(input: { include: TemplateInclude; 
 
 /** [messaging.write] Novo nome (1 a 80 caracteres); nunca mexe no payload. */
 export async function renameTemplate(input: { expectedUpdatedAt: string; id: string; name: string }): Promise<ActionResult<{ id: string; name: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", renameTemplateSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", renameTemplateSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const row = await updateTemplate(db, data.id, { name: data.name, updated_by: user.id }, { expectedUpdatedAt: data.expectedUpdatedAt });
 
@@ -369,7 +369,7 @@ export async function renameTemplate(input: { expectedUpdatedAt: string; id: str
 
 /** [messaging.write] Copia com " (cópia)" no nome e o mesmo payload cru (partes que nao abrem ficam como estao). */
 export async function duplicateTemplate(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; name: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", templateIdInputSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", templateIdInputSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
 
     await assertRoom(db);
@@ -405,7 +405,7 @@ export async function duplicateTemplate(input: { expectedUpdatedAt?: string; id:
 
 /** [messaging.write] Exclusao logica (deleted_at); nada no Storage (a limpeza cuida dos arquivos, D17). */
 export async function deleteTemplate(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("messaging.write", templateIdInputSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "dever_legal", templateIdInputSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const row = await softDeleteTemplate(db, data.id, { actorId: user.id, expectedUpdatedAt: data.expectedUpdatedAt, now: new Date() });
 
@@ -427,7 +427,7 @@ export async function deleteTemplate(input: { expectedUpdatedAt?: string; id: st
  * vazia: "Meus modelos" nao aparece e o card fica como antes. Qualquer outro erro lanca.
  */
 export async function loadDesignTemplates(input: { mode: TemplateDesignMode }): Promise<ActionResult<{ fonts: PopupFontFace[]; items: DesignTemplateOption[]; total: number }>> {
-  return runAdminAction("messaging.write", loadDesignTemplatesSchema, input, async ({ input: data }) => {
+  return runAdminAction("messaging.write", "leitura", loadDesignTemplatesSchema, input, async ({ input: data }) => {
     const db = communicationsDb();
     const [list, counted] = await Promise.all([
       db

@@ -90,6 +90,7 @@ export const EXPORTAR_COPY = {
     respondida: "Respondida",
     dispensada: "Dispensada",
     tipos: { live: "Ao vivo", replay: "Replay", simulated: "Gravada" },
+    /** Legado: so as perguntas gravadas como anonimas antes de 10/11/2026 (D64). */
     alunoAnonimo: (n: number) => `Aluno ${n}`,
     equipe: "Equipe",
     assistente: "Assistente",

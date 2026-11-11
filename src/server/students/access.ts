@@ -7,6 +7,8 @@ import "server-only";
 
 import type { User } from "@supabase/supabase-js";
 import { enqueuePurchaseEmail, enqueueWelcomeEmail, originOfUrl } from "@/server/email/transactional";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
+import { LicenseRestrictionError, isActionClassAllowed } from "@/server/licensing/require-feature";
 import {
   EmailRateLimitError,
   createAccountWithPassword,
@@ -104,6 +106,16 @@ export type GrantProductAccessInput = AccessContext & {
   /** Acoes em massa e importacao: quem ja tem acesso aberto nao muda ("ja tinha acesso"). */
   skipIfOpen?: boolean;
   userId: string;
+} & SaleReleaseOptions;
+
+/**
+ * So a liberacao de uma venda guardada (docs/32 §2.2; src/server/payments/held-sales-release.ts): o acesso leva sempre o
+ * sufixo do produto na origem (a parte da mesma compra renovada antes pode ter ficado sem sufixo, e o par aluno + origem
+ * e unico) e o e-mail de compra ganha uma chave propria (o da parte renovada ja saiu com a chave da compra).
+ */
+export type SaleReleaseOptions = {
+  purchaseEmailKeyTag?: string | null;
+  sourceEventPerProduct?: boolean;
 };
 
 export type GrantProductAccessResult = {
@@ -141,6 +153,8 @@ export async function grantResolvedProducts(
   const events: StudentEventInsert[] = [];
   /** Acessos que acabaram de abrir (novos ou de volta); quem so ganhou prazo nao recebe e-mail de compra. */
   const opened: { content: ContentKindRow; row: EntitlementRow }[] = [];
+  /** A matricula passa no degrau de agora? Perguntado uma vez, so quando aparece um acesso novo. */
+  let newAccessAllowed: boolean | null = null;
 
   for (const productId of uniqueIds) {
     const content = contentById.get(productId);
@@ -160,10 +174,27 @@ export async function grantResolvedProducts(
       continue;
     }
 
+    // A ultima trava do acesso novo (docs/32 §11.3, "Onde o congelamento barra"): sem a matricula liberada pela licenca,
+    // so passa a renovacao, a retomada e a extensao de um acesso que ja existia. A venda que chega fica guardada antes
+    // (src/server/payments/process-sale.ts) e a matricula pelo admin para pela classe; isto so pega o que escapar delas.
+    // No modo "off" nada e lido e tudo passa.
+    if (!existing) {
+      newAccessAllowed ??= isActionClassAllowed(await readCurrentLicenseState(), "matricula");
+
+      if (!newAccessAllowed) {
+        throw new LicenseRestrictionError("action_class", "matricula");
+      }
+    }
+
     let row: EntitlementRow;
     // Um evento de venda pode liberar varios produtos (pacote): o id do evento e unico por (aluno,
-    // source_event_id), entao cada produto a mais leva o proprio id no sufixo.
-    const sourceEventId = input.sourceEventId ? (uniqueIds.length > 1 ? `${input.sourceEventId}:${productId}` : input.sourceEventId) : `admin:${productId}`;
+    // source_event_id), entao cada produto a mais leva o proprio id no sufixo (e todo produto, na liberacao de uma venda
+    // guardada).
+    const sourceEventId = input.sourceEventId
+      ? uniqueIds.length > 1 || input.sourceEventPerProduct
+        ? `${input.sourceEventId}:${productId}`
+        : input.sourceEventId
+      : `admin:${productId}`;
 
     if (existing) {
       row = await updateEntitlement(db, existing.id, {
@@ -232,6 +263,7 @@ async function notifyPurchase(db: StudentsDb, input: GrantProductAccessInput, op
     email,
     entitlementIds: opened.map((item) => item.row.id),
     fullName: profile?.full_name ?? null,
+    keyTag: input.purchaseEmailKeyTag ?? null,
     products: opened.map((item) => ({ id: item.content.id, title: item.content.title })),
     siteOrigin: input.siteOrigin,
     sourceEventId: input.sourceEventId,
@@ -265,7 +297,7 @@ export type ProvisionStudentAccessInput = AccessContext & {
   rejectStaff?: boolean;
   /** Senha escolhida pela equipe; vazia = gerada aqui. So vale com delivery = temporary_password. */
   temporaryPassword?: string | null;
-};
+} & SaleReleaseOptions;
 
 async function ensureAccount(
   db: StudentsDb,
@@ -378,9 +410,11 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
       actorId: input.actorId,
       endsAt: accessEndDateToIso(input.endsAt),
       productIds: input.productIds,
+      purchaseEmailKeyTag: input.purchaseEmailKeyTag,
       siteOrigin,
       source: input.source,
       sourceEventId: input.sourceEventId,
+      sourceEventPerProduct: input.sourceEventPerProduct,
       sourceProvider: input.sourceProvider,
       userId: user.id
     },

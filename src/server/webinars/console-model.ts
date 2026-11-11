@@ -5,7 +5,8 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
-import { chatRoleLabel, chatTimeLabel } from "../../lib/webinar-room-client";
+import { chatRoleLabel, chatTimeAt, chatTimeLabel, roleBadgeOnly } from "../../lib/webinar-room-client";
+import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDate } from "../../lib/webinar-time";
 import { WEBINAR_ADMIN_COPY } from "./editor-model";
 import {
@@ -22,7 +23,9 @@ import {
   type WebinarSession
 } from "./model";
 import type { ConsolePresence } from "./console-presence-model";
-import type { LiveConsoleSnapshot } from "./live-console-model";
+import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-model";
+import type { ScreenDisplay, ScreenItem } from "./screen-model";
+import type { ScreenStats } from "./screen-rows";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -113,18 +116,29 @@ export type ScriptQueueItem = ScriptItem & {
   passed: boolean;
 };
 
-/** A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). */
-export function scriptQueue(items: readonly ScriptItem[], firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>, currentOffsetMs: number): ScriptQueueItem[] {
+/**
+ * A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). `lateMs`: a
+ * tolerancia em que o item ainda entra sozinho (na Live ao vivo no ar, LIVE_SCRIPT_LATE_MAX_MS: o tick de minuto solta
+ * ate 5 min atrasado), e so depois dela o item vira "Minuto já passou"; sem ela, assim que o minuto chega.
+ */
+export function scriptQueue(
+  items: readonly ScriptItem[],
+  firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>,
+  currentOffsetMs: number,
+  options: { lateMs?: number } = {}
+): ScriptQueueItem[] {
   const lookup = firedAt instanceof Map ? firedAt : new Map(Object.entries(firedAt));
+  const lateMs = Math.max(0, options.lateMs ?? 0);
   return sortScriptItems(items).map((item) => {
     const dueOffsetMs = scriptOffsetOf(item);
     const fired = lookup.has(item.id);
+    const late = dueOffsetMs != null && Number.isFinite(currentOffsetMs) && (lateMs > 0 ? currentOffsetMs - dueOffsetMs > lateMs : dueOffsetMs <= currentOffsetMs);
     return {
       ...item,
       dueOffsetMs,
       fired,
       firedAt: lookup.get(item.id) ?? null,
-      passed: fired || (dueOffsetMs != null && Number.isFinite(currentOffsetMs) && dueOffsetMs <= currentOffsetMs)
+      passed: fired || late
     };
   });
 }
@@ -177,10 +191,58 @@ export function pollPercent(counts: PollCounts, optionId: string): number {
 
 const QUESTION_ORDER: Record<WebinarQuestion["status"], number> = { answered: 1, dismissed: 2, open: 0 };
 
-/** O quadro: as abertas primeiro (mais votadas, depois as mais antigas), as respondidas, as dispensadas. */
-export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt" | "status" | "upvotes">>(questions: readonly T[]): T[] {
+/**
+ * A pergunta respondida em que o aluno escreveu por ultimo no fio (docs/30 §2.4; decisao do produtor de 10/11/2026): a
+ * conversa esta com a equipe. Conta junto das abertas no numero da aba e sobe para o topo do quadro, com o selo "Nova
+ * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta).
+ */
+export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): boolean {
+  const last = question.replies?.[question.replies.length - 1];
+  if (question.status !== "answered" || last?.role !== "student") {
+    return false;
+  }
+  // A resposta de cima gravada depois da ultima fala do aluno (o campo de cima no "Falar com a equipe", ou Reabrir e
+  // responder de novo) tambem e a equipe respondendo. Sem hora para comparar, continua esperando.
+  return !(toTime(question.answeredAt) >= toTime(last.createdAt));
+}
+
+/** O campo de responder do fio no console: a pergunta com o campo aberto e o rascunho. */
+export type ThreadReplyDraft = { draft: string; id: string };
+
+/** Depois do envio de uma resposta no fio, so o campo daquela pergunta fecha (o de outra pergunta, aberto no meio, fica). */
+export function replyDraftAfterSent(current: ThreadReplyDraft | null, questionId: string): ThreadReplyDraft | null {
+  return current?.id === questionId ? null : current;
+}
+
+/**
+ * Uma escrita do fio no console (a resposta ou a lixeira) que fica ocupada ate o retrato novo chegar, e nao so ate a
+ * acao voltar: entre as duas coisas o campo com o texto enviado e a lixeira da resposta apagada continuariam ligados, e
+ * o segundo clique mandaria a mesma resposta de novo (ou um 404). A chave repetida no meio do envio nao faz nada.
+ */
+export async function whileSettling(input: { key: string; set: (update: (current: readonly string[]) => readonly string[]) => void; settling: readonly string[]; work: () => Promise<boolean> }): Promise<boolean> {
+  if (input.settling.includes(input.key)) {
+    return false;
+  }
+  input.set((current) => [...current, input.key]);
+  try {
+    return await input.work();
+  } finally {
+    input.set((current) => current.filter((entry) => entry !== input.key));
+  }
+}
+
+/** A ordem do quadro: a aberta e a que espera a equipe no fio (0), a respondida (1), a dispensada (2). */
+function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): number {
+  return questionAwaitsTeam(question) ? 0 : QUESTION_ORDER[question.status];
+}
+
+/**
+ * O quadro: primeiro o que pede a equipe (as abertas e as respondidas em que o aluno escreveu por ultimo no fio; as
+ * mais votadas, depois as mais antigas), depois as respondidas e as dispensadas.
+ */
+export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes">>(questions: readonly T[]): T[] {
   return [...questions].sort((a, b) => {
-    const byStatus = QUESTION_ORDER[a.status] - QUESTION_ORDER[b.status];
+    const byStatus = boardRank(a) - boardRank(b);
     if (byStatus !== 0) {
       return byStatus;
     }
@@ -196,7 +258,7 @@ export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "createdAt
  * ---------------------------------------------------------------------------------------------- */
 
 export type ConsoleMessage = ChatMessage & {
-  /** Mensagem da turma cujo autor ainda tem o aceite valendo: pode virar linha mestre (promote). */
+  /** Mensagem da turma cujo autor ainda tem o aceite valendo (sem retirada e com o modo de agora, model.chatConsentAllowsReplay): pode virar linha mestre (promote). */
   promotable: boolean;
 };
 
@@ -279,6 +341,46 @@ export function consoleMessageMeta(input: { kind: WebinarSession["kind"]; messag
   const zeroMs = Date.parse(input.scheduledAt);
   const time = chatTimeLabel({ kind: input.kind, offsetMs: message.offsetMs, sentAt: message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
   return { origin, role, time };
+}
+
+/** O avatar do comentario no console (o RoomCommentAvatar da sala). */
+export type ConsoleCommentAvatar = "assistant" | "person" | "team";
+
+/** O que o comentario do YouTube do console precisa da mensagem (docs/31 §10): o autor, o selo, o avatar e a hora. */
+export type ConsoleComment = {
+  avatar: ConsoleCommentAvatar;
+  /** "Você" na minha; o nome de exibicao nas outras. */
+  name: string;
+  /** O selo tonal: a origem (Roteiro, Chat original, so para a equipe) ou o papel; nulo para o aluno. */
+  role: string | null;
+  /** O que o leitor de tela ouve antes do texto ("Ana M., 20:42: "). */
+  srAuthor: string;
+  /** A hora do comentario (a mesma do consoleMessageMeta, com o instante para o <time>); nula no Replay. */
+  time: { iso: string; label: string; title: string } | null;
+};
+
+/**
+ * O comentario do YouTube no chat do console (docs/31 §10, no lugar do balao do V2-9): a mesma linha do autor da sala
+ * (o nome sem arroba, o selo tonal e a hora), com a origem no lugar do papel e "Você" na minha. Com o nome igual ao
+ * selo (o Assistente), so o selo. A hora continua a do relogio (20:42), nao o tempo relativo da sala: quem modera
+ * compara a mensagem com o momento da live.
+ */
+export function consoleComment(input: {
+  kind: WebinarSession["kind"];
+  message: Pick<ChatMessage, "createdAt" | "displayName" | "offsetMs" | "role" | "source">;
+  mine: boolean;
+  scheduledAt: string;
+}): ConsoleComment {
+  const meta = consoleMessageMeta(input);
+  const role = meta.origin ?? meta.role;
+  const name = input.mine ? WEBINAR_COPY.salaV2.chat.voce : input.message.displayName;
+  const badgeOnly = roleBadgeOnly(name, role);
+  const zeroMs = Date.parse(input.scheduledAt);
+  const at = chatTimeAt({ kind: input.kind, offsetMs: input.message.offsetMs, sentAt: input.message.createdAt, zeroMs: Number.isFinite(zeroMs) ? zeroMs : null });
+  const time = meta.time && at !== null ? { iso: new Date(at).toISOString(), label: meta.time, title: meta.time } : null;
+  const parts = (badgeOnly ? [role, meta.time] : [name, role, meta.time]).filter((part): part is string => Boolean(part));
+  const avatar: ConsoleCommentAvatar = input.message.role === "ai" ? "assistant" : badgeOnly && input.message.role === "team" ? "team" : "person";
+  return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts), time };
 }
 
 /** De onde saiu uma acao do chat do console: o card da fila ou o balao da lista, a posicao dele e a do botao no item. */
@@ -370,6 +472,19 @@ export function ackSentenceMatches(input: { ackText: string | null | undefined; 
 
 export type ConsolePollView = Poll & { counts: PollCounts };
 
+/**
+ * A Na tela no retrato do console (docs/30 §2.4; especificacao de 10/11/2026, §5.6): os banners e QR Codes prontos do
+ * webinario (os nao arquivados), o que esta na tela agora nesta sessao (no maximo um de cada tipo, com a copia
+ * congelada) e os numeros de cada exibicao por id ("312 viram · 41 clicaram · 9 fecharam", ate uns 15 s de atraso).
+ * `pending`: o banco sem a 202611100002 (a entrada mostra o aviso da migracao e nada e gravado).
+ */
+export type ConsoleScreen = {
+  active: ScreenDisplay[];
+  items: ScreenItem[];
+  pending: boolean;
+  stats: Record<string, ScreenStats>;
+};
+
 export type ConsoleSnapshot = {
   /**
    * As mensagens do retrato que ja viraram pergunta (docs/31 V2-15), com a pergunta apagada ou nao e sem o teto da
@@ -377,12 +492,25 @@ export type ConsoleSnapshot = {
    */
   askedMessageIds: string[];
   /**
+   * So na Live gravada (a moderacao por pessoa, docs/30 §2.4): quem esta removido, silenciado ou banido nesta sessao (ou
+   * banido de todas, entre quem escreveu no chat), com o nome, no formato da lista da Live ao vivo (LiveConsolePerson,
+   * so os barrados). Nulo nas outras: na Live ao vivo a lista vem em `live.people`; no Replay nada muda.
+   */
+  barred: LiveConsolePerson[] | null;
+  /**
    * Fase 3: so na sessao `live` (gravador, gravacao, removidos/silenciados/banidos, o mapa aluno -> participante e se a
    * sala existe neste ambiente); nulo nas outras. Nunca o nome da sala nem token: o iframe pede o join-token.
    */
   live: LiveConsoleSnapshot | null;
   messages: ConsoleMessage[];
+  /**
+   * A mensagem fixada lida pela chave (o bloco "Fixada agora"): vale tambem para a mensagem mais velha que as 200 da
+   * lista. Nula sem fixada (ou apagada).
+   */
+  pinned: ConsoleMessage | null;
   pinnedMessageId: string | null;
+  /** A enquete fixada desta sessao (a exibicao `poll` ativa da Na tela); nula sem ela. */
+  pinnedPollId: string | null;
   polls: { launched: ConsolePollView[]; templates: Poll[] };
   /**
    * O painel Presenca (docs/30 §2.4): pico, mensagens por minuto e a curva dos ultimos 30 minutos, da visao do
@@ -391,9 +519,17 @@ export type ConsoleSnapshot = {
   presence?: ConsolePresence | null;
   presentNow: number;
   questions: WebinarQuestion[];
+  /**
+   * A parte simulada do contador agora (adendo de 10/11/2026, R7), so para a equipe ver separada do real ("· +300
+   * simulados"): na gravada e na Live ao vivo com o contador ligado e a decisao registrada; nula sem ele, encerrada ou no
+   * Replay. Nunca entra em `presentNow` nem num numero real.
+   */
+  simulatedNow?: number | null;
   /** O minuto em que o item entrou nesta sessao (created_at da linha scripted), por id do item. */
   scriptFired: Record<string, string | null>;
   scriptItems: ScriptItem[];
+  /** A Na tela desta sessao (ConsoleScreen). */
+  screen: ConsoleScreen;
   serverTime: string;
   session: WebinarSession;
 };
@@ -410,6 +546,19 @@ export function consoleSessionOf<T extends { roomName: string | null }>(session:
  */
 export function consoleOffsetMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
   return sessionOffsetMs(session, untilEnded(session, deviceNowMs + skewMs));
+}
+
+/**
+ * O relogio do roteiro no console (a fila e o "Minuto já passou"): na gravada, o do video (consoleOffsetMs); na Live ao
+ * vivo (adendo de 10/11/2026, R8), desde o started_at (o "Começar para todos", o zero dos itens "Aos {n} minutos da
+ * live"), nunca pela ancora da gravacao, e NaN antes dele (nada passou ainda). Para no encerramento.
+ */
+export function consoleScriptClockMs(session: Pick<WebinarSession, "endedAt" | "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">, deviceNowMs: number, skewMs: number): number {
+  if (session.kind === "live") {
+    const startedMs = toTime(session.startedAt);
+    return Number.isFinite(startedMs) ? untilEnded(session, deviceNowMs + skewMs) - startedMs : Number.NaN;
+  }
+  return consoleOffsetMs(session, deviceNowMs, skewMs);
 }
 
 /**

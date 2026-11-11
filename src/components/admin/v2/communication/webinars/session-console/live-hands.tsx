@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { consoleRowFocusAfter } from "@/server/webinars/console-v2-model";
 import { LIVE_CONSOLE_COPY, handRows, lowerHandMessage, roomRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
-import { CONSOLE_PANE_CARD, CONSOLE_TAB_ID_PREFIX } from "./console-layout-model";
+import { CONSOLE_PANE_CARD } from "./console-layout-model";
+import { visibleConsoleTabControl } from "./console-rail";
 import type { LiveRoomHandle } from "./live-room-panel";
 
 // A aba Mãos do console (docs/30 §1.4 e §2.4; docs/31 V2-15): a fila na ordem em que as maos subiram (raiseHandUpdated
@@ -48,7 +49,7 @@ export function LiveHands({ handle, people }: LiveHandsProps) {
     const next = input.id ? consoleRowFocusAfter({ id: input.id, ids: input.ids, move: input.move }) : null;
     const nextRow = next ? button.ownerDocument.querySelector(`[${input.rows}="${CSS.escape(next)}"]`) : null;
     const buttons = nextRow ? Array.from(nextRow.querySelectorAll<HTMLButtonElement>("button")).filter((item) => !item.disabled) : [];
-    const target = buttons[Math.min(Math.max(0, position), buttons.length - 1)] ?? button.ownerDocument.getElementById(`${CONSOLE_TAB_ID_PREFIX}-tabbtn-maos`);
+    const target = buttons[Math.min(Math.max(0, position), buttons.length - 1)] ?? visibleConsoleTabControl(button.ownerDocument, "maos");
     target?.focus();
   }
 

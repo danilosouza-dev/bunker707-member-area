@@ -1,6 +1,7 @@
 // As regras puras do campo "Adicione um comentário" da sala no estilo do YouTube (docs/31; spec §9.2 e §9.3): quando
-// o campo fica aberto (o rodape com a Anonima, o Cancelar e o envio), qual linha ele mostra embaixo e o que cada Enter
-// faz no chat e nas Perguntas. Sem "use client" e sem imports: os testes de modelo carregam este arquivo direto no Node.
+// o campo fica aberto (o rodape com o Cancelar e o envio), qual linha ele mostra embaixo e o que cada Enter
+// faz no chat e nas Perguntas; e as teclas do campo de responder do fio (replyFieldKey). Sem "use client" e sem
+// imports: os testes de modelo carregam este arquivo direto no Node.
 
 export type ComposerEvent = { draft: string; type: "blur" | "cancel" | "focus" | "sent" };
 
@@ -52,4 +53,16 @@ export function composerKey(input: {
   }
   const action = input.mode === "enter" ? (input.shift ? "newline" : "submit") : input.ctrl || input.meta ? "submit" : "newline";
   return action === "submit" && input.blocked ? "hold" : action;
+}
+
+/**
+ * As teclas do campo de responder do fio (RoomReplyField, docs/30 §1.3): o Esc cancela com o foco em qualquer parte do
+ * campo (o texto, o Cancelar ou o Responder), e nunca chega a sala, que perguntaria se quer sair; o Ctrl ou o ⌘ com o
+ * Enter envia, so com o foco no texto (nos botoes, o Enter e o clique deles).
+ */
+export function replyFieldKey(input: { ctrl: boolean; inText: boolean; key: string; meta: boolean }): "cancel" | "submit" | null {
+  if (input.key === "Escape") {
+    return "cancel";
+  }
+  return input.inText && input.key === "Enter" && (input.ctrl || input.meta) ? "submit" : null;
 }

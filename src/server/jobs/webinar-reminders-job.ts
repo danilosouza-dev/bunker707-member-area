@@ -10,6 +10,7 @@ import "server-only";
 // contam como trabalho (without_access).
 
 import { processWebinarReminders, WEBINAR_REMINDER_ACCESS_MEMO, type WebinarRemindersResult } from "@/server/webinars/reminders";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_REMINDERS_JOB_NAME = "webinar-reminders";
@@ -37,6 +38,7 @@ async function recordJobMetrics(ctx: JobContext, result: WebinarRemindersResult,
 }
 
 export const webinarRemindersJob: Job = {
+  feature: WEBINARS_FEATURE,
   name: WEBINAR_REMINDERS_JOB_NAME,
   async run(ctx) {
     const startedAt = Date.now();

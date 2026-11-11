@@ -33,6 +33,7 @@ export default async function PurchasesPage({ searchParams }: PurchasesPageProps
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <PurchasesExperience view={view} />

@@ -1,9 +1,14 @@
 "use client";
 
-import { ChevronDown, MoreHorizontal, SendHorizontal } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { RoomChatBubble, chatListOnShow } from "@/components/member/webinars/room/room-chat";
-import { ROOM_FOCUS, RoomButton, RoomIconButton } from "@/components/member/webinars/room/room-ui";
+import { MessageCircleQuestionMark, MoreVertical, Pin, PinOff, Trash2 } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { chatListOnShow } from "@/components/member/webinars/room/room-chat";
+import { RoomComment, RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
+import { RoomCommentField } from "@/components/member/webinars/room/room-comment-field";
+import { composerExpandedStep } from "@/components/member/webinars/room/room-composer-model";
+import { RoomPill, roomPillClassName } from "@/components/member/webinars/room/room-pill";
+import { RoomSelectPill } from "@/components/member/webinars/room/room-select-pill";
+import { ROOM_FOCUS, RoomIconButton } from "@/components/member/webinars/room/room-ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -13,6 +18,7 @@ import {
   SLOW_MODE_CHOICES,
   consoleChatFocusAfter,
   consoleChatQueue,
+  consoleComment,
   consoleMessageMeta,
   messageActions,
   slowModeChoiceOf,
@@ -26,75 +32,102 @@ import {
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type ChatMode, type SlowModeSeconds, type WebinarSession } from "@/server/webinars/model";
 import { adminMenuItem, adminMenuPopup, adminMenuSeparator } from "../../../styles";
+import { ConsolePinned, consoleMessageBody } from "./console-pinned";
 import { useConsolePortal } from "./console-shell";
 
-// A aba Chat do console (docs/30 §2.4 e §8.3; docs/31 V2-15 e V2-9), no cartao do painel e pelos tokens do tema do
-// console. Em cima, "Quem escreve" e "Modo lento" em dois seletores compactos (os mesmos valores e a mesma acao de
-// antes; o modo lento desligado com o chat desligado) e, a direita, "{n} aguardando". As pendentes do chat moderado
-// saem da lista e viram cards ambar no topo, a mais velha primeiro: "Na moderação · nome · hora", o texto, Liberar,
-// Recusar (o apagar da pendente) e Virar pergunta (so a mensagem comum de um aluno; a pergunta pelo chat ja vira
-// pergunta no Liberar). A lista (um role=log que rola, com o nome "Chat" e aria-live desligado: quem modera le a lista, e
-// cada mensagem nova chegaria lida com os botoes dela; dentro dele, a <ol> continua lista) usa o balao da sala
-// (RoomChatBubble) com "nome · papel ou origem · hora"
-// embaixo (a origem que so a equipe ve, Roteiro ou Chat original, no lugar do papel), "Fixada" e, fora da live, "Nas
-// próximas turmas" (na live toda mensagem nasce na linha mestre, D31); a minha a direita, com "Você". As acoes de cada
-// mensagem ficam na linha de baixo e aparecem com o mouse ou o foco dentro dela (por cima da linha), sempre na tela de
-// toque: Fixar ou Desafixar, Virar pergunta, Apagar e o ⋯ com Aprovar para as próximas turmas (so com o aceite do
-// autor; sem ele, a frase do porque), Corrigir resposta (Assistente, o texto novo embaixo do balao; com ele aberto, as
-// acoes da linha saem, para nao cobrir o Salvar correção), Refazer tradução e, na live, os itens da pessoa (Silenciar,
-// Remover, Banir; LivePersonMenuItems). Cada botao da linha tem 24 px de altura (WCAG 2.5.8). O foco nunca cai no
-// comeco da pagina quando o botao sai da tela (consoleChatFocusAfter): o Liberar e o Recusar levam ao card seguinte (sem
-// card, ao cabecalho), o Virar pergunta ao botao seguinte da linha, o Apagar ao balao seguinte, e a correcao fechada ao
-// ⋯ da mensagem. Embaixo, a caixa da equipe com o Enviar redondo (Enter envia, Shift+Enter quebra a linha; durante o
-// envio o campo so fica somente leitura, para o foco continuar nele). A lista enche a aba a partir de lg e cola no fim
-// quando a pessoa ja estava no fim, tambem quando a aba volta a tela (`shown`: a lista escondida nao rola com o que
-// chega, chatListOnShow, como na sala). O ⋯ abre no portal da raiz do console.
-// Nenhuma frase escrita aqui.
+// A aba Chat do console (docs/30 §2.4 e §8.3; docs/31 V2-15; o estilo do YouTube, docs/31 §10), direto no cartao do
+// painel, pelos tokens do tema do console. Em cima, "Quem escreve" e "Modo lento" em duas pilulas tonais com o seletor
+// nativo (os mesmos valores e a mesma acao de antes; o modo lento desligado com o chat desligado) e, a direita, "{n}
+// aguardando". As pendentes do chat moderado saem da lista e viram cards ambar no topo, a mais velha primeiro: "Na
+// moderação · nome · hora", o texto, Liberar (a pilula branca), Recusar (o apagar da pendente) e Virar pergunta (so a
+// mensagem comum de um aluno; a pergunta pelo chat ja vira pergunta no Liberar) e o ⋮. A lista (um role=log que rola,
+// com o nome "Chat" e aria-live desligado: quem modera le a lista, e cada mensagem nova chegaria lida com os botoes
+// dela; dentro dele, a <ol> continua lista) usa o comentario do YouTube da sala (RoomComment, consoleComment): o avatar
+// de 24, o nome ("Você" na minha), o selo do papel ou da origem que so a equipe ve (Roteiro, Chat original) e a hora; em
+// cima, "Fixada" e, fora da live, "Nas próximas turmas" (na live toda mensagem nasce na linha mestre, D31). As acoes de
+// cada mensagem sao circulos de 32 sem fundo (Fixar ou Desafixar, Virar pergunta, Apagar e o ⋮ com Aprovar para as
+// próximas turmas, so com o aceite do autor; sem ele, a frase do porque; Corrigir resposta, no Assistente, o texto novo
+// embaixo do comentario; com ele aberto, as acoes saem, para nao cobrir o Salvar correção; Refazer tradução e, na live,
+// os itens da pessoa, LivePersonMenuItems): com o mouse, numa pilula por cima do canto de cima a direita do item, que
+// aparece com o mouse ou o foco dentro dele; no toque, sempre na tela, no fim da linha. O nome de cada circulo diz a acao
+// e de quem e a mensagem ("Fixar: Ana M."). O foco nunca cai no comeco da pagina quando o botao sai da tela
+// (consoleChatFocusAfter): o Liberar e o Recusar levam ao card seguinte (sem card, ao cabecalho), o Virar pergunta ao
+// botao seguinte do item, o Apagar ao comentario seguinte, e a correcao fechada ao ⋮ da mensagem. Embaixo, o campo
+// "Escreva para a turma" do YouTube (RoomCommentField, com o icone da equipe; o Enter envia, o Shift+Enter quebra a
+// linha; durante o envio o campo continua com o foco). A lista enche a aba a partir de lg e cola no fim quando a pessoa
+// ja estava no fim, tambem quando a aba volta a tela (`shown`: a lista escondida nao rola com o que chega,
+// chatListOnShow, como na sala). O ⋮ abre no portal da raiz do console. Nenhuma frase escrita aqui.
+// A Na tela (docs/30 §2.4; especificacao de 10/11/2026, R1 e §6.2): com o campo aberto, a pilula "Fixar ao enviar"
+// (aria-pressed, desligada por padrao) embaixo do texto: ligada, o Enviar publica e fixa num passo, e ela desliga
+// sozinha depois de cada envio (e no Cancelar). Acima da lista, fora da rolagem, o bloco "Fixada agora"
+// (console-pinned.tsx) com o Desafixar, lido do retrato pela chave (`pinned`, mesmo fora das 200 da lista). Os enderecos
+// `https://` das mensagens da equipe viram link na lista e no bloco (consoleMessageBody); a de aluno continua texto.
+// A moderacao por pessoa na Live gravada (R5, §6.2): o ⋯ da mensagem da turma leva os itens da pessoa tambem na gravada
+// (`personMenu`, sem os itens do video), a linha de cima de cada mensagem diz se o autor esta removido, silenciado ou
+// banido (`personBadges`, os rotulos de banLabels) e, embaixo dos seletores, o bloco "Removidos, silenciados e banidos"
+// com os Desfazer (`barred`, so quando ha alguem).
 
 const copy = WEBINAR_ADMIN_COPY.console.chat;
 const v2 = WEBINAR_COPY.consoleV2.chat;
 const assistantCopy = WEBINAR_COPY.assistente.console;
+const naTelaChat = WEBINAR_COPY.naTela.chat;
 
-/** Um botao da linha de baixo do balao: o texto de 11 px num alvo de 24 px de altura. */
-const LINE_ACTION = cn("inline-flex min-h-6 items-center rounded-md px-1 text-[11px] font-semibold disabled:pointer-events-none disabled:opacity-45", ROOM_FOCUS);
 /**
- * As acoes da mensagem. Com o mouse (pointer-fine), elas ficam escondidas e aparecem com o mouse ou o foco dentro do
- * item e com o ⋯ aberto, por cima da linha de baixo, no canto do item (a direita; na minha, a esquerda): escondidas, nao
- * ocupam lugar nenhum, e o foco do teclado chega nelas do mesmo jeito. Na tela de toque, sempre a mostra, na linha.
+ * As acoes da mensagem. Com o mouse (pointer-fine), uma pilula no fundo dos menus por cima do canto de cima a direita do
+ * item, escondida ate o mouse ou o foco entrar nele (ou o ⋮ abrir): escondida, nao ocupa lugar, e o foco do teclado
+ * chega nela do mesmo jeito. No toque, sempre na tela, no fim da linha do comentario.
  */
-const LINE_ACTIONS = cn(
-  "inline-flex flex-wrap items-center gap-0.5 transition-opacity motion-reduce:transition-none",
-  "pointer-fine:absolute pointer-fine:bottom-0 pointer-fine:z-10 pointer-fine:rounded-md pointer-fine:bg-room-surface pointer-fine:px-1",
+const TOOLBAR = cn(
+  "ml-1 flex shrink-0 items-center gap-0.5 self-start transition-opacity motion-reduce:transition-none",
+  "pointer-fine:absolute pointer-fine:-top-2 pointer-fine:right-0 pointer-fine:z-10 pointer-fine:ml-0 pointer-fine:rounded-full pointer-fine:bg-room-menu pointer-fine:p-0.5 pointer-fine:shadow-[var(--room-menu-shadow)]",
   "pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100 pointer-fine:has-[[data-popup-open]]:opacity-100"
 );
-/** O balao do console: o mesmo da sala ate xl; a partir de xl (o painel de 360 e 440 px), ate 320 px. */
-const BUBBLE_WIDTH = "max-w-[270px] lg:max-w-[230px] xl:max-w-[320px]";
-/** O campo da caixa e o da correcao: 16 px abaixo de lg (o Safari do iPhone da zoom num campo menor). */
-const FIELD = "min-w-0 rounded-[12px] border border-room-input-border bg-room-input-bg px-3 text-base leading-5 text-room-fg placeholder:text-room-fg-subtle disabled:opacity-50 lg:text-[13px]";
+/** O circulo de 32 sem fundo do ⋮ (o gatilho do menu nao e um RoomIconButton). */
+const MENU_TRIGGER = cn(
+  "relative grid size-8 shrink-0 place-items-center rounded-full text-room-icon transition-colors after:absolute after:-inset-1.5 hover:bg-room-control-hover disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none [&_svg]:size-4",
+  ROOM_FOCUS
+);
 
 type ConsoleChatProps = {
   /** As mensagens que ja viraram pergunta (o `askedMessageIds` do retrato): ficam sem o Virar pergunta. */
   askedMessageIds: readonly string[];
+  /**
+   * Na Live gravada: o bloco "Removidos, silenciados e banidos" (LiveBarredList) embaixo dos seletores; nulo sem
+   * ninguem barrado ou fora da gravada (na live ele fica na aba Pessoas).
+   */
+  barred?: ReactNode;
   busyKey: string | null;
   canAct: boolean;
+  /** A foto do proprio perfil de quem esta no console (o avatar do campo da equipe); sem ela, o icone da equipe. */
+  currentUserAvatarUrl?: string | null;
   currentUserId: string;
   hostUserId: string | null;
   messages: readonly ConsoleMessage[];
   onChatMode: (chatMode: ChatMode, slowModeSeconds: SlowModeSeconds | null) => void;
   /** A correcao aberta na montagem (o teste de tela; o console sempre comeca sem nenhuma). */
   initialEditing?: { body: string; id: string } | null;
+  /** O campo da equipe aberto na montagem (o teste de tela; o console sempre comeca com ele fechado). */
+  initialComposerOpen?: boolean;
+  /** A hora do servidor agora (o relogio do console): o "há 2 min" do bloco Fixada agora. */
+  nowMs?: number;
   /** Fase 4c: "Corrigir resposta" numa resposta do Assistente (devolve se gravou). */
   onEditAssistant?: ((messageId: string, body: string) => Promise<boolean>) | null;
   /** Devolve, quando pode, a promessa da acao (resolvida com o retrato novo): o foco segue depois dela. */
   onModerate: (action: ModerationAction, messageId: string) => Promise<boolean> | void;
   /** Fase 4f: "Refazer tradução" (apaga a traducao guardada do texto); nulo com a traducao desligada no ambiente. */
   onRetranslate?: ((messageId: string) => void) | null;
-  onSend: (body: string) => Promise<boolean>;
+  /** O envio da equipe; `pin` e o "Fixar ao enviar" ligado (publica e fixa num passo). Devolve se gravou. */
+  onSend: (body: string, pin: boolean) => Promise<boolean>;
   /**
-   * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; nulo fora da Live ao
-   * vivo. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao esta no retrato).
+   * Fase 3: os itens da pessoa (Silenciar no chat, Remover, Banir) no ⋯ de uma mensagem da turma; na Live ao vivo e, desde
+   * a Na tela (R5), na gravada; nulo no Replay. Devolve nulo quando nao ha item para aquela pessoa (a equipe, quem nao
+   * esta no retrato).
    */
   personMenu?: ((message: ConsoleMessage) => ReactNode) | null;
+  /** Os rotulos do autor barrado ("Removido da sala", "Sem escrever ate 20:15") na linha de cima da mensagem; vazio sem nada. */
+  personBadges?: ((message: ConsoleMessage) => readonly string[]) | null;
+  /** A fixada lida pela chave (snapshot.pinned): o bloco Fixada agora, tambem para uma mensagem fora da lista. */
+  pinned?: ConsoleMessage | null;
   pinnedMessageId: string | null;
   session: WebinarSession;
   /**
@@ -106,22 +139,32 @@ type ConsoleChatProps = {
 
 export function ConsoleChat({
   askedMessageIds,
+  barred = null,
   busyKey,
   canAct,
+  currentUserAvatarUrl = null,
   currentUserId,
+  initialComposerOpen = false,
   initialEditing = null,
   messages,
+  nowMs = Number.NaN,
   onChatMode,
   onEditAssistant = null,
   onModerate,
   onRetranslate = null,
   onSend,
+  personBadges = null,
   personMenu = null,
+  pinned = null,
   pinnedMessageId,
   session,
   shown = true
 }: ConsoleChatProps) {
   const [body, setBody] = useState("");
+  // O campo da equipe aberto (o rodape com o Cancelar e o Enviar), guardado pela regra da sala (composerExpandedStep).
+  const [expanded, setExpanded] = useState(initialComposerOpen);
+  // O "Fixar ao enviar": desligado por padrao e de novo depois de cada envio (e no Cancelar).
+  const [pinOnSend, setPinOnSend] = useState(false);
   const [editing, setEditing] = useState<{ body: string; id: string } | null>(initialEditing);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -213,10 +256,18 @@ export function ConsoleChat({
       return;
     }
 
-    if (await onSend(text)) {
+    if (await onSend(text, pinOnSend)) {
       setBody("");
+      setPinOnSend(false);
+      setExpanded((current) => composerExpandedStep(current, { draft: "", type: "sent" }));
       stickToEnd.current = true;
     }
+  }
+
+  /** O Desafixar do bloco Fixada agora: o bloco sai da tela, e o foco vai a caixa da equipe (nunca ao comeco da pagina). */
+  async function unpinFromBlock(message: ConsoleMessage) {
+    await onModerate("unpin", message.id);
+    requestFocus(() => ({ area: "composer" }));
   }
 
   async function saveEdit(message: ConsoleMessage) {
@@ -231,13 +282,6 @@ export function ConsoleChat({
     } else {
       // O campo ficou desligado durante a gravacao: o foco volta para ele.
       requestFocus(() => ({ area: "edit", id: message.id }));
-    }
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      void submit();
     }
   }
 
@@ -259,7 +303,7 @@ export function ConsoleChat({
         </label>
         <textarea
           autoFocus
-          className={cn(FIELD, "min-h-16 w-full py-2")}
+          className="min-h-16 w-full rounded-[12px] border border-room-input-border bg-room-input-bg px-3 py-2 text-base leading-5 text-room-fg placeholder:text-room-fg-subtle disabled:opacity-50 lg:text-sm"
           disabled={busy}
           id={`console-edit-${message.id}`}
           maxLength={CHAT_LIMITS.body}
@@ -268,12 +312,8 @@ export function ConsoleChat({
           value={editing.body}
         />
         <div className="flex flex-wrap justify-end gap-1.5">
-          <RoomButton disabled={busy} onClick={() => closeEditor(message)} size="xs" variant="ghost">
-            {assistantCopy.cancelar}
-          </RoomButton>
-          <RoomButton disabled={busy || !editing.body.trim()} onClick={() => void saveEdit(message)} size="xs" variant="secondary">
-            {assistantCopy.salvarCorrecao}
-          </RoomButton>
+          <RoomPill disabled={busy} label={assistantCopy.cancelar} onClick={() => closeEditor(message)} size="s" tone="text" />
+          <RoomPill disabled={busy || !editing.body.trim()} label={assistantCopy.salvarCorrecao} onClick={() => void saveEdit(message)} size="s" tone="tonal" />
         </div>
       </div>
     );
@@ -328,9 +368,39 @@ export function ConsoleChat({
     );
   }
 
+  /** As acoes de uma mensagem da lista (circulos de 32 com o nome da acao e de quem e a mensagem) e o ⋮. */
+  function toolbarOf(message: ConsoleMessage, actions: MessageActions): ReactNode {
+    const busy = busyKey === `moderate:${message.id}`;
+    const name = message.displayName;
+    return (
+      <span className={TOOLBAR} data-console-message-actions="">
+        {actions.pin ? (
+          <RoomIconButton data-console-action="" disabled={busy} label={`${copy.pin}: ${name}`} onClick={(event) => void act("pin", message, event)} size={32} tone="ghost">
+            <Pin aria-hidden="true" />
+          </RoomIconButton>
+        ) : null}
+        {actions.unpin ? (
+          <RoomIconButton data-console-action="" disabled={busy} label={`${copy.unpin}: ${name}`} onClick={(event) => void act("unpin", message, event)} size={32} tone="ghost">
+            <PinOff aria-hidden="true" />
+          </RoomIconButton>
+        ) : null}
+        {actions.question ? (
+          <RoomIconButton data-console-action="" disabled={busy} label={`${v2.virarPergunta}: ${name}`} onClick={(event) => void act("question", message, event)} size={32} tone="ghost">
+            <MessageCircleQuestionMark aria-hidden="true" />
+          </RoomIconButton>
+        ) : null}
+        <RoomIconButton data-console-action="" disabled={busy} label={`${copy.delete}: ${name}`} onClick={(event) => void act("delete", message, event)} size={32} tone="ghost">
+          <Trash2 aria-hidden="true" />
+        </RoomIconButton>
+        {menuOf(message, actions, "")}
+      </span>
+    );
+  }
+
   return (
-    <div className="flex min-w-0 flex-col overflow-hidden rounded-[var(--member-cover-radius)] border border-room-border bg-room-surface lg:min-h-0 lg:flex-1" ref={rootRef}>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-room-border px-3 py-2.5" data-console-chat-header="">
+    <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1" ref={rootRef}>
+      {/* O corpo do painel corta a partir de lg e este cabecalho e o primeiro filho: as pilulas pedem 4 px em cima para o anel de foco. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3 lg:px-4 lg:pt-1" data-console-chat-header="">
         <CompactSelect
           disabled={modeBusy}
           id="console-chat-mode"
@@ -348,38 +418,44 @@ export function ConsoleChat({
           value={slowModeChoiceOf(session.chatSlowModeSeconds)}
         />
         {pending.length > 0 ? (
-          <span className="ml-auto text-[11px] leading-4 whitespace-nowrap text-room-fg-muted tabular-nums" data-console-chat-waiting="">
+          <span className="ml-auto text-xs leading-[18px] font-medium whitespace-nowrap text-room-warn-fg tabular-nums" data-console-chat-waiting="">
             {v2.aguardando(pending.length)}
           </span>
         ) : null}
       </div>
 
+      {barred ? (
+        <div className="shrink-0 pb-3 lg:px-4" data-console-chat-barred="">
+          {barred}
+        </div>
+      ) : null}
+
       {pending.length > 0 ? (
-        <ol aria-label={copy.pending} className="relative flex max-h-56 min-w-0 shrink-0 flex-col gap-2 overflow-y-auto px-3 pt-2.5 lg:max-h-[35%]" data-console-chat-queue="">
+        <ol aria-label={copy.pending} className="relative flex max-h-56 min-w-0 shrink-0 flex-col gap-2 overflow-y-auto pb-3 lg:max-h-[35%] lg:px-4" data-console-chat-queue="">
           {pending.map((message) => {
             const actions = actionsOf(message);
             const busy = busyKey === `moderate:${message.id}`;
             const time = metaOf(message).time;
 
             return (
-              <li className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-room-warn-border bg-room-warn-bg px-3 py-2.5" data-console-pending="" data-room-message={message.id} key={message.id}>
-                <p className="text-[11px] leading-4 font-bold text-room-warn-fg">{[copy.pending, message.displayName, time].filter(Boolean).join(" · ")}</p>
-                <p className="text-[13px] leading-[18px] break-words whitespace-pre-line text-room-fg">{message.body}</p>
+              <li className="flex min-w-0 flex-col gap-1.5 rounded-[12px] border border-room-warn-border bg-room-warn-bg px-3 py-2.5" data-console-pending="" data-room-message={message.id} key={message.id}>
+                <p className="text-xs leading-[18px] font-medium text-room-warn-fg">{[copy.pending, message.displayName, time].filter(Boolean).join(" · ")}</p>
+                <p className="text-sm leading-5 break-words whitespace-pre-line text-room-fg">{message.body}</p>
                 {editorOf(message)}
                 {canAct ? (
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <RoomButton aria-label={`${copy.approve}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("approve", message, event)} size="xs" variant="primary">
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                    <button aria-label={`${copy.approve}: ${message.displayName}`} className={roomPillClassName({ size: "s", tone: "white" })} data-console-action="" disabled={busy} onClick={(event) => void act("approve", message, event)} type="button">
                       {copy.approve}
-                    </RoomButton>
-                    <RoomButton aria-label={`${v2.recusar}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("delete", message, event)} size="xs" variant="secondary">
+                    </button>
+                    <button aria-label={`${v2.recusar}: ${message.displayName}`} className={roomPillClassName({ size: "s", tone: "tonal" })} data-console-action="" disabled={busy} onClick={(event) => void act("delete", message, event)} type="button">
                       {v2.recusar}
-                    </RoomButton>
+                    </button>
                     {actions.question ? (
-                      <RoomButton aria-label={`${v2.virarPergunta}: ${message.displayName}`} data-console-action="" disabled={busy} onClick={(event) => void act("question", message, event)} size="xs" variant="secondary">
+                      <button aria-label={`${v2.virarPergunta}: ${message.displayName}`} className={roomPillClassName({ size: "s", tone: "tonal" })} data-console-action="" disabled={busy} onClick={(event) => void act("question", message, event)} type="button">
                         {v2.virarPergunta}
-                      </RoomButton>
+                      </button>
                     ) : null}
-                    {menuOf(message, actions, "size-7 justify-center rounded-full border border-room-border-strong px-0 text-room-fg-strong hover:bg-room-control")}
+                    {menuOf(message, actions, "bg-room-control")}
                   </div>
                 ) : null}
               </li>
@@ -388,138 +464,124 @@ export function ConsoleChat({
         </ol>
       ) : null}
 
+      {pinned ? (
+        <ConsolePinned
+          author={consoleComment({ kind: session.kind, message: pinned, mine: pinned.authorUserId === currentUserId, scheduledAt: session.scheduledAt }).name}
+          busy={busyKey === `moderate:${pinned.id}`}
+          canAct={canAct}
+          message={pinned}
+          nowMs={nowMs}
+          onUnpin={() => void unpinFromBlock(pinned)}
+        />
+      ) : null}
+
       <div
         aria-label={copy.title}
         aria-live="off"
-        className="relative flex min-h-48 min-w-0 flex-col overflow-y-auto px-3 pt-3 pb-2 max-lg:max-h-[60vh] lg:min-h-0 lg:flex-1"
+        className="relative flex min-h-48 min-w-0 flex-col overflow-y-auto border-t border-room-border pt-4 max-lg:max-h-[60vh] lg:min-h-0 lg:flex-1 lg:px-4"
         data-console-chat=""
         onScroll={trackScroll}
         ref={listRef}
         role="log"
       >
-        <ol className="flex min-w-0 flex-col gap-3.5">
-          {log.length === 0 ? <li className="px-2 py-6 text-center text-[13px] leading-5 text-room-fg-subtle">{copy.empty}</li> : null}
+        <ol className="flex min-h-full min-w-0 flex-col">
+          {log.length === 0 ? <li className="my-auto px-2 py-6 text-center text-sm leading-5 text-room-fg-subtle">{copy.empty}</li> : null}
           {log.map((message) => {
             const actions = actionsOf(message);
-            const busy = busyKey === `moderate:${message.id}`;
-            const meta = metaOf(message);
             const pinned = pinnedMessageId === message.id;
             const mine = message.authorUserId === currentUserId;
+            const comment = consoleComment({ kind: session.kind, message, mine, scheduledAt: session.scheduledAt });
             // Na live toda mensagem nasce na linha mestre (D31): o selo diria o mesmo em todas.
             const master = message.master && session.kind !== "live";
-            // Com a correcao aberta, as acoes (presas ao fim do item, por cima) cobririam o Cancelar e o Salvar correção.
+            // Com a correcao aberta, as acoes (por cima do item) cobririam o Cancelar e o Salvar correção.
             const showActions = canAct && editing?.id !== message.id;
+            // O autor removido, silenciado ou banido (a moderacao por pessoa), so nas mensagens da turma.
+            const badges = personBadges && message.source === "audience" && message.authorUserId ? personBadges(message) : [];
+            const headline =
+              pinned || master || badges.length > 0 ? (
+                <>
+                  {pinned ? (
+                    <>
+                      <Pin aria-hidden="true" className="size-3.5" />
+                      <span>{copy.pinned}</span>
+                    </>
+                  ) : null}
+                  {pinned && master ? <span aria-hidden="true">·</span> : null}
+                  {master ? <span>{copy.master}</span> : null}
+                  {badges.map((label) => (
+                    <span className="rounded-full border border-room-warn-border bg-room-warn-bg px-1.5 font-medium text-room-warn-fg" data-console-person-badge="" key={label}>
+                      {label}
+                    </span>
+                  ))}
+                </>
+              ) : null;
 
             return (
-              <RoomChatBubble
-                footer={editorOf(message)}
+              <RoomComment
+                actions={editorOf(message)}
+                aside={showActions ? toolbarOf(message, actions) : null}
+                avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={comment.avatar} name={message.displayName} />}
+                body={consoleMessageBody(message)}
+                className="group relative"
+                headline={headline}
+                id={message.id}
                 key={message.id}
-                message={{ body: message.body, displayName: message.displayName, id: message.id, mine, pending: false, role: message.role }}
-                metaActions={
-                  <>
-                    {pinned ? (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="font-semibold text-room-fg-muted">{copy.pinned}</span>
-                      </>
-                    ) : null}
-                    {master ? (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="font-semibold text-room-fg-muted">{copy.master}</span>
-                      </>
-                    ) : null}
-                    {showActions ? (
-                      <span className={cn(LINE_ACTIONS, mine ? "pointer-fine:left-0" : "pointer-fine:right-0")} data-console-message-actions="">
-                        <span aria-hidden="true" className="pr-1 pointer-fine:hidden">
-                          ·
-                        </span>
-                        {actions.pin ? (
-                          <button aria-label={`${copy.pin}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("pin", message, event)} type="button">
-                            {copy.pin}
-                          </button>
-                        ) : null}
-                        {actions.unpin ? (
-                          <button aria-label={`${copy.unpin}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("unpin", message, event)} type="button">
-                            {copy.unpin}
-                          </button>
-                        ) : null}
-                        {actions.question ? (
-                          <button aria-label={`${v2.virarPergunta}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("question", message, event)} type="button">
-                            {v2.virarPergunta}
-                          </button>
-                        ) : null}
-                        <button aria-label={`${copy.delete}: ${message.displayName}`} className={cn(LINE_ACTION, "text-room-fg-muted hover:text-room-fg-strong hover:underline")} data-console-action="" disabled={busy} onClick={(event) => void act("delete", message, event)} type="button">
-                          {copy.delete}
-                        </button>
-                        {menuOf(message, actions, "min-w-6 justify-center text-room-fg-muted hover:text-room-fg-strong")}
-                      </span>
-                    ) : null}
-                  </>
-                }
-                roleLabel={meta.origin ?? meta.role}
-                time={meta.time}
-                widthClassName={BUBBLE_WIDTH}
+                meta={{ name: comment.name, role: comment.role, time: comment.time }}
+                mine={mine}
+                srAuthor={comment.srAuthor}
               />
             );
           })}
         </ol>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 border-t border-room-border bg-room-composer p-2">
-        <label className="sr-only" htmlFor="console-composer">
-          {copy.composer}
-        </label>
-        {/* A linha de 20 px cabe nos 44 px com a borda e o respiro (1 + 10 + 20 + 10 + 1), como o campo da sala. */}
-        {/* Durante o envio o campo so fica somente leitura: desligado, o foco cairia no comeco da pagina a cada Enter. */}
-        <textarea
-          className={cn(FIELD, "min-h-11 flex-1 resize-none py-2.5")}
-          disabled={!canAct}
-          id="console-composer"
-          maxLength={CHAT_LIMITS.body}
-          onChange={(event) => setBody(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={copy.composer}
-          readOnly={sending}
-          rows={1}
-          value={body}
-        />
-        <RoomIconButton disabled={!canAct || sending || !body.trim()} label={copy.send} onClick={() => void submit()} size={44} tone="primary">
-          <SendHorizontal aria-hidden="true" />
-        </RoomIconButton>
-      </div>
+      <RoomCommentField
+        ariaLabel={copy.composer}
+        avatar={{ imageSrc: currentUserAvatarUrl, kind: "team", name: null }}
+        busy={sending}
+        disabled={!canAct}
+        expanded={expanded}
+        hint={
+          canAct ? (
+            // O clique na pilula nao tira o foco do campo (como o rodape do campo): o campo continua aberto.
+            <div className="flex" data-console-pin-on-send="" onMouseDown={(event) => event.preventDefault()}>
+              <RoomPill
+                aria-pressed={pinOnSend}
+                disabled={sending}
+                icon={Pin}
+                iconFilled={pinOnSend}
+                label={naTelaChat.fixarAoEnviar}
+                onClick={() => setPinOnSend((on) => !on)}
+                size="s"
+                tone={pinOnSend ? "white" : "tonal"}
+              />
+            </div>
+          ) : null
+        }
+        id="console-composer"
+        maxLength={CHAT_LIMITS.body}
+        mode="enter"
+        onCancel={() => {
+          setBody("");
+          setPinOnSend(false);
+        }}
+        onChange={setBody}
+        onExpandedChange={setExpanded}
+        onSubmit={() => void submit()}
+        placeholder={copy.composer}
+        submitLabel={copy.send}
+        value={body}
+      />
     </div>
   );
 }
 
-/** Um seletor compacto do cabecalho do chat: o rotulo visivel, o valor e a seta, em 30 px. */
+/**
+ * Um seletor compacto do cabecalho do chat: a pilula tonal de 32 px com o rotulo visivel, o valor e a seta (a mesma
+ * peca do "Idioma do chat" da sala, com o anel de foco na pilula inteira).
+ */
 function CompactSelect<T extends string>({ disabled, id, label, onChange, options, value }: { disabled: boolean; id: string; label: string; onChange: (value: T) => void; options: readonly { label: string; value: T }[]; value: T }) {
-  return (
-    <div className="relative inline-flex h-[30px] max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-room-border-strong bg-room-control pl-2.5 text-xs">
-      <label className="shrink-0 text-room-fg-muted" htmlFor={id}>
-        {label}
-      </label>
-      <select
-        className={cn("h-full min-w-0 cursor-pointer appearance-none truncate rounded-r-lg bg-transparent pr-7 font-medium text-room-fg-strong disabled:cursor-default disabled:opacity-45", ROOM_FOCUS)}
-        disabled={disabled}
-        id={id}
-        onChange={(event) => {
-          const next = options.find((option) => option.value === event.target.value);
-          if (next) {
-            onChange(next.value);
-          }
-        }}
-        value={value}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2.5 size-3 -translate-y-1/2 text-room-fg-muted" />
-    </div>
-  );
+  return <RoomSelectPill disabled={disabled} id={id} label={label} onChange={onChange} options={options} value={value} />;
 }
 
 /** O ⋯ de uma mensagem, no portal da raiz do console (no tema dela). */
@@ -528,10 +590,10 @@ function MessageMenu({ busy, children, name, triggerClassName }: { busy: boolean
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger aria-label={v2.maisAcoes(name)} className={cn(LINE_ACTION, triggerClassName)} data-console-action="" disabled={busy}>
-        <MoreHorizontal aria-hidden="true" className="size-4" />
+      <DropdownMenuTrigger aria-label={v2.maisAcoes(name)} className={cn(MENU_TRIGGER, triggerClassName)} data-console-action="" disabled={busy} title={v2.maisAcoes(name)}>
+        <MoreVertical aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className={cn(adminMenuPopup, "w-64 bg-room-surface text-room-fg")} container={portal}>
+      <DropdownMenuContent align="end" className={cn(adminMenuPopup, "w-64 bg-room-menu text-room-fg")} container={portal}>
         {children}
       </DropdownMenuContent>
     </DropdownMenu>

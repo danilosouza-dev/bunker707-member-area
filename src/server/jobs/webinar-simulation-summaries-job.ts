@@ -12,6 +12,7 @@ import "server-only";
 // run-tick.ts fica). So numeros: nada da regra nem dos nomes.
 
 import { runSimulationSummariesTick, type SimulationSummariesResult } from "@/server/webinars/simulation-tick";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import type { Job, JobContext } from "./registry";
 
 export const WEBINAR_SIMULATION_SUMMARIES_JOB_NAME = "webinar-simulation-summaries";
@@ -46,6 +47,7 @@ export async function runSimulationSummariesJob(ctx: JobContext): Promise<Simula
 }
 
 export const webinarSimulationSummariesJob: Job = {
+  feature: WEBINARS_FEATURE,
   name: WEBINAR_SIMULATION_SUMMARIES_JOB_NAME,
   async run(ctx) {
     await runSimulationSummariesJob(ctx);

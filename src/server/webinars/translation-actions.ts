@@ -10,7 +10,7 @@
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { fetchChatMessageRow } from "./chat-store";
@@ -26,7 +26,7 @@ export type ClearedTranslations = { removed: number };
 
 /** [messaging.write] "Refazer tradução": apaga as traducoes guardadas do texto da mensagem (todos os idiomas). */
 export async function clearMessageTranslations(input: { messageId: string }): Promise<ActionResult<ClearedTranslations>> {
-  return runAdminAction("messaging.write", clearMessageTranslationsSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", clearMessageTranslationsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const message = await fetchChatMessageRow(db, data.messageId);
     if (!message) {

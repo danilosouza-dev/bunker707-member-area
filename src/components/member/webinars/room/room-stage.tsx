@@ -9,8 +9,9 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 // O palco da Sala (docs/30 §1.6, §6.6 e §9): o iframe da Bunny (sem barra na sessao gravada; com barra no replay),
 // o botao "Ativar som" por cima ate o primeiro toque (o navegador bloqueia som automatico), a espera antes do
 // zero com a capa e a contagem, a tela "Essa live acabou." com Assistir de novo quando ha replay e, sem player, "Esta
-// live não está disponível para você." para quem saiu do "Quem pode" no meio da sessao (D41). O palco leva
-// os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
+// live não está disponível para você." para quem saiu do "Quem pode" no meio da sessao (D41) ou, no mesmo lugar, a
+// frase de quem foi removido desta sessao ou banido (a moderacao por pessoa da Na tela, R5: `unavailableText`). O
+// palco leva os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
 // enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao girar o aparelho (o som continua).
 // Abaixo de lg deitado o palco deixa o 16:9 e ocupa a caixa, como no computador (roomSkeleton, docs/31 V2-18).
 
@@ -28,6 +29,8 @@ export type RoomStageProps = {
   sessionId: string;
   state: RoomStageState;
   title: string;
+  /** A frase no lugar do player com `unavailable`: removido ou banido (R5); sem ela, a de fora do "Quem pode". */
+  unavailableText?: string | null;
 };
 
 function Cover({ children, coverUrl }: { children?: ReactNode; coverUrl: string | null }) {
@@ -42,7 +45,7 @@ function Cover({ children, coverUrl }: { children?: ReactNode; coverUrl: string 
   );
 }
 
-export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted, onUnmute, replayHref, sessionId, state, title }: RoomStageProps) {
+export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted, onUnmute, replayHref, sessionId, state, title, unavailableText = null }: RoomStageProps) {
   const copy = WEBINAR_COPY.sala;
   const showPlayer = embedUrl !== null && (state === "live" || state === "replay");
 
@@ -107,7 +110,7 @@ export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted
       {state === "unavailable" ? (
         <Cover coverUrl={null}>
           <p className="text-lg font-black text-white sm:text-2xl" data-testid="room-unavailable" role="alert">
-            {WEBINAR_COPY.aluno.naoDisponivel}
+            {unavailableText ?? WEBINAR_COPY.aluno.naoDisponivel}
           </p>
         </Cover>
       ) : null}

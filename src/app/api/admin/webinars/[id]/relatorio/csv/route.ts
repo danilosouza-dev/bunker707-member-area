@@ -9,6 +9,8 @@ import { WEBINARS_MIGRATION, isMissingWebinarSchema, webinarsDb } from "@/server
 import { parseSessionExportRequest } from "@/server/webinars/export-model";
 import { loadSessionExport } from "@/server/webinars/export-queries";
 import { EXPORT_MESSAGES } from "@/server/webinars/export-schemas";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Os CSVs do relatorio de uma sessao com os nomes do Zoom (docs/30 §3.1 e §3.7): GET
 // /api/admin/webinars/[id]/relatorio/csv?sessao=&relatorio=registration|attendee|performance|qa|poll|survey|simulacao
@@ -23,6 +25,9 @@ export const revalidate = 0;
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("messaging.write");
 
   if (auth.response) {

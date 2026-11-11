@@ -10,10 +10,18 @@
 // a uma pergunta grava answer_source 'team' (a do Assistente e 'ai'), e a resposta que chega depois (o aluno pediu a
 // equipe, a sessao acabou ou ele saiu da sala) vira aviso no sino (notify.queueWebinarAnswerNotice), na pergunta e na
 // resposta da equipe a uma mensagem do chat; banco sem a 202610300004: a resposta segue e so a marca fica de fora.
+// A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §5.3): o "Fixar ao enviar" (sendTeamMessage com `pin`) usa a
+// mesma rotina de fixar do moderateMessage (pinMessage: a fixada de antes perde o pinned_at e a linha da sessao ganha o
+// pinned_message_id por ultimo, o carimbo que a consulta de 5 s da sala compara); fixar so na sessao que ainda aceita a
+// equipe, desafixar sempre. A enquete fixada (R2) e a exibicao `poll` de webinar_screen_displays: pinPoll (uma copia
+// desta sessao, aberta ou encerrada com o resultado compartilhado; a fixada de antes sai como `replaced`), unpinPoll
+// (`team`), o "Abrir e fixar" (launchPoll com `pin`) e o Encerrar sem compartilhar, que desafixa (`poll_closed`; com o
+// resultado compartilhado ela continua fixada, agora com as barras). Toda troca muda o carimbo da sessao por ultimo.
+// No Replay e na sessao encerrada ou cancelada, 409; banco sem a 202611100002, 409 com o aviso da migracao.
 
 import { revalidatePath } from "next/cache";
-import type { ActionResult } from "@/lib/action-result";
-import { runAdminAction } from "@/server/actions/run-action";
+import { GENERIC_ACTION_ERROR, type ActionResult } from "@/lib/action-result";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
@@ -23,15 +31,17 @@ import { teamAnswerNeedsNotice } from "./assistant-model";
 import { studentPresentNow } from "./assistant-queries";
 import { answerQuestionOfApprovedAiReply, fetchAttendanceMarks, setQuestionAnswerSource } from "./assistant-store";
 import { invalidateWebinars } from "./cache";
-import { chatMessageFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
+import { chatMessageFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
 import {
   answerQuestionSchema,
   closePollSchema,
   createReplaySessionSchema,
+  deleteQuestionReplySchema,
   launchPollSchema,
   moderateMessageSchema,
   questionStatusSchema,
   removeStudentMessagesSchema,
+  replyQuestionSchema,
   savePollsSchema,
   saveSimulationSchema,
   sessionChatModeSchema,
@@ -40,18 +50,22 @@ import {
   type ModerationAction
 } from "./chat-schemas";
 import {
+  countQuestionReplyRows,
   deletePollRow,
   fetchChatMessageRow,
   fetchConsentRow,
   fetchPollRow,
+  fetchQuestionReplyRow,
   fetchQuestionRow,
   fetchQuestionRowByMessage,
   insertChatMessage,
   insertPollRow,
+  insertQuestionReplyRow,
   insertQuestionRow,
   listPollRows,
   replacePollOptionRows,
   revokeConsentRow,
+  softDeleteQuestionReplyRow,
   softDeleteQuestionsOfMessage,
   softDeleteStudentContent,
   updateChatMessageRow,
@@ -60,15 +74,17 @@ import {
   type ChatMessagePatch
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
-import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isMissingWebinarSchema, WEBINARS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
+  chatConsentAllowsReplay,
   type ChatMessage,
   type ChatMode,
   type Poll,
   type PollDraft,
   type PresenceSummary,
+  type QuestionReply,
   type SlowModeSeconds,
   questionBodyOf,
   type WebinarQuestion,
@@ -76,12 +92,16 @@ import {
 } from "./model";
 import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
-import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
-import { questionSentMetadata } from "./room-rules";
+import { anonymousDisplayName, firstNameInitial, sessionOffsetMs } from "./room-model";
+import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
+import { pollPinnable } from "./screen-model";
+import type { ScreenDisplayHide } from "./screen-rows";
+import { pinPollSchema, pollPinSnapshotSchema, unpinPollSchema } from "./screen-schemas";
+import { hideActiveScreenDisplayRows, readActiveScreenDisplayRows, showScreenDisplayRow } from "./screen-store";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, touchSessionRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -101,6 +121,9 @@ const POLL_NOT_TEMPLATE_MESSAGE = "Essa enquete já é de uma sessão; abra pelo
 const POLL_NOT_OPEN_MESSAGE = "Essa enquete não está aberta.";
 const QUESTION_MISSING_MESSAGE = "Essa pergunta não existe mais.";
 const ANSWER_MISSING_MESSAGE = "Escreva a resposta ou marque Respondida ao vivo.";
+const REPLY_NEEDS_ANSWER_MESSAGE = "Responda a pergunta antes de continuar a conversa.";
+const REPLY_FULL_MESSAGE = "Esta conversa chegou ao limite de respostas.";
+const REPLY_MISSING_MESSAGE = "Essa resposta não existe mais.";
 const ACK_MISMATCH_MESSAGE = "A confirmação não bate com a frase de hoje. Marque de novo.";
 const ONLY_SIMULATED_SESSION_MESSAGE = "O selo é decidido só nas sessões da Live gravada.";
 const REPLAY_NEEDS_ENDED_MESSAGE = "O replay abre depois da primeira sessão encerrar.";
@@ -113,9 +136,14 @@ export type ModeratedMessage = { message: ChatMessage; pinnedMessageId: string |
 export type SessionChatMode = { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null };
 export type SavedPolls = { created: number; deleted: number; polls: Poll[]; updated: number };
 export type AnsweredQuestion = { message: ChatMessage | null; notified: boolean; question: WebinarQuestion };
+export type RepliedQuestion = { notified: boolean; reply: QuestionReply };
 export type SavedSimulation = { deciderName: string; session: WebinarSession };
 export type ReplayCreated = { created: boolean; session: WebinarSession };
 export type RemovedStudentContent = { answers: number; consentRevoked: boolean; messages: number; questions: number };
+/** A enquete fixada (`changed` falso: ela ja era a fixada, nada mudou). */
+export type PinnedPoll = { changed: boolean; displayId: string; pollId: string; sessionId: string };
+/** A enquete desafixada (`unpinned` falso: nao havia enquete fixada). */
+export type UnpinnedPoll = { pollId: string | null; sessionId: string; unpinned: boolean };
 
 /* ------------------------------------------------------------------------------------------------
  * Apoio
@@ -129,6 +157,83 @@ function revalidateWebinar(id: string) {
 
 function revalidateConsole(id: string) {
   revalidatePath(`${LIST_PATH}/${id}/sala`);
+}
+
+/** Uma escrita no fio que esbarra no banco sem a 202611100001 vira 409 com a frase da migracao (nunca um 500 generico). */
+async function withReplyTable<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_MIGRATION), 409);
+    }
+    throw error;
+  }
+}
+
+/** O aviso da Na tela no banco sem a 202611100002 (as escritas da enquete fixada). */
+const SCREEN_MIGRATION_MESSAGE = WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_SCREEN_MIGRATION);
+
+/** Uma leitura ou escrita da Na tela que esbarra no banco sem a 202611100002 vira 409 com a frase da migracao. */
+async function withScreenTables<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(SCREEN_MIGRATION_MESSAGE, 409);
+    }
+    throw error;
+  }
+}
+
+/**
+ * A sessao aceita uma mudanca na Na tela (fixar e desafixar a enquete): nunca no Replay (la nada aparece na frente da
+ * turma) nem na sessao encerrada ou cancelada (a turma ja nao ve nada). 409 com a frase de cada caso.
+ */
+function assertScreenSession(session: WebinarSession) {
+  if (session.kind === "replay") {
+    throw new WebinarError(WEBINAR_COPY.naTela.erros.replay, 409);
+  }
+
+  if (!canTeamActOn(session)) {
+    throw new WebinarError(WEBINAR_COPY.naTela.erros.sessaoFechada, 409);
+  }
+}
+
+/** Quem tira da tela, quando e em que minuto da sessao (o offset do relogio do servidor), com o motivo. */
+function screenHide(session: WebinarSession, userId: string, now: Date, reason: ScreenDisplayHide["hidden_reason"]): ScreenDisplayHide {
+  return { hidden_at: now.toISOString(), hidden_by: userId, hidden_offset_ms: serverOffsetMs(session, now.getTime()), hidden_reason: reason };
+}
+
+/**
+ * Fixa a enquete na sessao (a exibicao `poll` da Na tela, com a copia { v: 1, name: pergunta } conferida pelo zod): a
+ * fixada de antes sai como `replaced`, e o conflito do indice unico tenta uma vez mais (showScreenDisplayRow). Quem
+ * chama confere a sessao e a enquete e muda o carimbo da sessao depois.
+ */
+async function pinPollDisplay(db: WebinarsDb, input: { now: Date; poll: { id: string; question: string }; session: WebinarSession; userId: string }): Promise<{ displayId: string; replaced: number }> {
+  const snapshot = pollPinSnapshotSchema.parse({ name: input.poll.question, v: 1 });
+  const shown = await withScreenTables(() =>
+    showScreenDisplayRow(
+      db,
+      {
+        item_id: null,
+        kind: "poll",
+        poll_id: input.poll.id,
+        session_id: input.session.id,
+        shown_at: input.now.toISOString(),
+        shown_by: input.userId,
+        shown_offset_ms: serverOffsetMs(input.session, input.now.getTime()),
+        snapshot
+      },
+      screenHide(input.session, input.userId, input.now, "replaced")
+    )
+  );
+
+  if (!shown) {
+    throw new WebinarError(GENERIC_ACTION_ERROR, 409);
+  }
+
+  return { displayId: shown.row.id, replaced: shown.replaced.length };
 }
 
 /** O relatorio da sessao fica 60 s em cache pela tag "webinars" (report-queries.ts): o que muda os numeros invalida. */
@@ -246,7 +351,7 @@ async function markTeamAnswer(db: WebinarsDb, questionId: string) {
  * publicado.
  */
 export async function openSessionNow(input: { sessionId: string }): Promise<ActionResult<SessionOpened>> {
-  return runAdminAction("messaging.publish", sessionIdInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionIdInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadSession(db, data.sessionId);
@@ -280,7 +385,7 @@ export async function openSessionNow(input: { sessionId: string }): Promise<Acti
  * replay nasce quando a gravacao esta pronta (session-lifecycle.finishSession). So na espera ou no ar.
  */
 export async function endSessionNow(input: { sessionId: string }): Promise<ActionResult<SessionEnded>> {
-  return runAdminAction("messaging.publish", sessionIdInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionIdInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, session, webinar } = await loadSession(db, data.sessionId);
@@ -311,15 +416,43 @@ export async function endSessionNow(input: { sessionId: string }): Promise<Actio
  * ---------------------------------------------------------------------------------------------- */
 
 /**
+ * Fixa uma mensagem ja liberada na sessao (uma fixada por sessao; quem chama confere a sessao e a mensagem): a mensagem
+ * ganha o pinned_at, a fixada de antes perde o dela e a linha da sessao ganha o pinned_message_id POR ULTIMO. Essa
+ * escrita muda o carimbo da sessao (o gatilho poe o updated_at), e a sala so troca o estado da Na tela depois de tudo
+ * gravado (docs/30 §5.1). Devolve a linha fixada (nula quando a mensagem sumiu no meio).
+ */
+async function pinMessage(db: WebinarsDb, sessionRow: Pick<SessionRow, "id" | "pinned_message_id">, message: Pick<ChatMessageRow, "id">, nowIso: string): Promise<ChatMessageRow | null> {
+  const pinned = await updateChatMessageRow(db, message.id, { pinned_at: nowIso });
+
+  if (!pinned) {
+    return null;
+  }
+
+  if (sessionRow.pinned_message_id && sessionRow.pinned_message_id !== message.id) {
+    await updateChatMessageRow(db, sessionRow.pinned_message_id, { pinned_at: null });
+  }
+
+  await updateSessionRow(db, sessionRow.id, { pinned_message_id: message.id });
+  return pinned;
+}
+
+/**
  * [messaging.write] A mensagem da equipe no chat da sessao: role `host` para o Apresentador, `co_host` para o
  * co-apresentador, `team` para o resto (teamRoleFor), source `team`, aprovada, no offset do relogio do servidor (nunca o
- * do navegador).
+ * do navegador). Com `pin` (o "Fixar ao enviar" do console), depois de gravada ela vira a fixada da sessao pela mesma
+ * rotina do Fixar (pinMessage), e a auditoria leva `pinned: true`.
  */
-export async function sendTeamMessage(input: { body: string; kind?: "answer" | "message" | "system"; replyToId?: string | null; sessionId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
-  return runAdminAction("messaging.write", teamChatSchema, input, async ({ input: data, user }) => {
+export async function sendTeamMessage(input: {
+  body: string;
+  kind?: "answer" | "message" | "system";
+  pin?: boolean;
+  replyToId?: string | null;
+  sessionId: string;
+}): Promise<ActionResult<{ message: ChatMessage }>> {
+  return runWebinarAction("messaging.write", "atendimento", teamChatSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
-    const { session, webinar } = await loadSession(db, data.sessionId);
+    const { row: sessionRow, session, webinar } = await loadSession(db, data.sessionId);
 
     if (session.kind === "replay") {
       throw new WebinarError(REPLAY_NO_CHAT_MESSAGE, 409);
@@ -351,6 +484,8 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       source: "team",
       webinar_id: webinar.id
     });
+    // O "Fixar ao enviar": a mensagem acabou de nascer aprovada, nesta sessao que aceita a equipe (conferido acima).
+    const sent = data.pin ? ((await pinMessage(db, sessionRow, inserted, now.toISOString())) ?? inserted) : inserted;
 
     // Fase 4c: a resposta da equipe a uma mensagem do aluno (a fila do Atendimento) tambem vai para o sino quando ele
     // pediu a equipe ou ja saiu da sala.
@@ -374,25 +509,30 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: { kind: data.kind, message_id: inserted.id, notified, reply: Boolean(data.replyToId), role, session_id: session.id }
+      metadata: { kind: data.kind, message_id: inserted.id, notified, pinned: data.pin, reply: Boolean(data.replyToId), role, session_id: session.id }
     });
 
-    return { message: chatMessageFromRow(inserted) };
+    if (data.pin) {
+      revalidateConsole(webinar.id);
+    }
+
+    return { message: chatMessageFromRow(sent) };
   });
 }
 
 /**
  * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
  * equipe): o texto cortado em 500 caracteres (o limite da pergunta, sem partir um emoji: questionBodyOf), o
- * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno. Sem autor, nada (a pergunta pede o
- * aluno). Quem chama confere antes se a mensagem ja tem pergunta.
+ * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno (legado: linhas de antes de 10/11/2026,
+ * D64; a mensagem antiga escrita como anonimo continua com a promessa da epoca, e nenhuma mensagem nova tem esse nome).
+ * Sem autor, nada (a pergunta pede o aluno). Quem chama confere antes se a mensagem ja tem pergunta.
  */
 async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
   const userId = message.author_user_id;
   if (!userId) {
     return null;
   }
-  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const anonymous = message.display_name === anonymousDisplayName(userId, message.webinar_id);
   const question = await insertQuestionRow(db, {
     anonymous,
     body: questionBodyOf(message.body),
@@ -422,7 +562,7 @@ async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): P
       entity_id: message.session_id,
       entity_type: "webinar",
       event_type: "webinar_question_sent",
-      metadata: questionSentMetadata({ anonymous: created.anonymous, offsetMs: message.offset_ms, questionId: created.questionId }),
+      metadata: questionSentMetadata({ offsetMs: message.offset_ms, questionId: created.questionId }),
       user_id: created.userId
     }
   ]);
@@ -447,11 +587,12 @@ async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow):
  * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
  * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
  * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao), promover a linha mestre
- * (master + source `original`, so mensagem da turma cujo autor mantem o aceite) e Virar pergunta (docs/31 V2-15: so
- * mensagem ou pergunta de aluno da turma; a pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite com o modo de agora:
+ * model.chatConsentAllowsReplay) e Virar pergunta (docs/31 V2-15: so mensagem ou pergunta de aluno da turma; a
+ * pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
-  return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", moderateMessageSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const message = await fetchChatMessageRow(db, data.messageId);
@@ -479,10 +620,17 @@ export async function moderateMessage(input: { action: ModerationAction; message
         patch = { deleted_at: nowIso, deleted_by: user.id, deleted_reason: "team" };
         break;
       case "pin":
+        // Fixar e por na frente da turma (a Na tela, docs/30 §2.4): so na sessao que ainda aceita a equipe (o console
+        // esconde o botao; um console parado ou o pedido direto numa sessao encerrada, cancelada ou no Replay nao muda
+        // nada). Desafixar continua sempre permitido.
+        if (!canTeamActOn(sessionFromRow(sessionRow))) {
+          throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
+        }
         if (!message.approved) {
           throw new WebinarError(PIN_NEEDS_APPROVAL_MESSAGE, 409);
         }
-        patch = { pinned_at: nowIso };
+        // A troca da linha e da sessao e a rotina do Fixar (pinMessage, abaixo), a mesma do "Fixar ao enviar".
+        patch = null;
         break;
       case "unpin":
         patch = { pinned_at: null };
@@ -494,7 +642,9 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
         const consent = message.author_user_id ? await fetchConsentRow(db, message.author_user_id) : null;
 
-        if (!consent || consent.revoked_at) {
+        // Sem retirada e com o modo de agora: o aceite antigo de apelido ou anonimo (legado: linhas de antes de
+        // 10/11/2026, D64) conta como "sem aceite", e a mensagem dele nao vira linha mestre ate o aluno aceitar de novo.
+        if (!chatConsentAllowsReplay(consent)) {
           throw new WebinarError(NO_CONSENT_MESSAGE, 409);
         }
 
@@ -519,7 +669,7 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
     // O estado de antes da troca (a linha lida pode ser a mesma referencia que a escrita devolve).
     const wasApproved = message.approved;
-    const updated = patch ? await updateChatMessageRow(db, message.id, patch) : message;
+    const updated = data.action === "pin" ? await pinMessage(db, sessionRow, message, nowIso) : patch ? await updateChatMessageRow(db, message.id, patch) : message;
 
     if (!updated) {
       throw new WebinarError(MESSAGE_MISSING_MESSAGE, 404);
@@ -538,11 +688,6 @@ export async function moderateMessage(input: { action: ModerationAction; message
     }
 
     if (data.action === "pin") {
-      if (pinnedMessageId && pinnedMessageId !== message.id) {
-        await updateChatMessageRow(db, pinnedMessageId, { pinned_at: null });
-      }
-
-      await updateSessionRow(db, sessionRow.id, { pinned_message_id: message.id });
       pinnedMessageId = message.id;
     } else if ((data.action === "unpin" || data.action === "delete") && pinnedMessageId === message.id) {
       await updateSessionRow(db, sessionRow.id, { pinned_message_id: null });
@@ -569,7 +714,7 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
 /** [messaging.write] Quem pode escrever e o modo lento da sessao (o modo lento nao vale para a equipe, §8.3). */
 export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null }): Promise<ActionResult<SessionChatMode>> {
-  return runAdminAction("messaging.write", sessionChatModeSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", sessionChatModeSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadSession(db, data.sessionId);
 
@@ -606,9 +751,10 @@ export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId:
  * os que tem id, apaga os que sairam. As copias ja lancadas nas sessoes nao mudam.
  */
 export async function savePolls(input: { polls: PollDraft[]; webinarId: string }): Promise<ActionResult<SavedPolls>> {
-  return runAdminAction("messaging.write", savePollsSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", savePollsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const existing = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
     const existingIds = new Set(existing.polls.map((poll) => poll.id));
     const kept = new Set<string>();
@@ -620,7 +766,8 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
 
       if (draft.id && existingIds.has(draft.id)) {
         const ownOptionIds = new Set(existing.options.filter((option) => option.poll_id === draft.id).map((option) => option.id));
-        await updatePollRow(db, draft.id, { anonymous: draft.anonymous, kind: draft.kind, position, question: draft.question });
+        // D64: a enquete salva de agora em diante nunca e anonima (um modelo antigo marcado volta a falso aqui).
+        await updatePollRow(db, draft.id, { anonymous: false, kind: draft.kind, position, question: draft.question });
         await replacePollOptionRows(
           db,
           draft.id,
@@ -631,7 +778,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
       } else {
         const inserted = await insertPollRow(
           db,
-          { anonymous: draft.anonymous, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
+          { anonymous: false, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
           labels
         );
         kept.add(inserted.poll.id);
@@ -667,10 +814,13 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
 
 /**
  * [messaging.write] Abre uma enquete na sessao: a copia do modelo (session_id, template_poll_id) nasce aberta, com
- * a hora e o minuto do video. Uma copia aberta do mesmo modelo na mesma sessao nao duplica: volta a que existe.
+ * a hora e o minuto do video. Uma copia aberta do mesmo modelo na mesma sessao nao duplica: volta a que existe. Com
+ * `pin` (o "Abrir e fixar" do console, R2), a copia vira a enquete fixada da sessao (a de antes sai como `replaced`);
+ * banco sem a 202611100002: 409 com o aviso da migracao antes de qualquer escrita. O carimbo da sessao muda por ultimo,
+ * mesmo quando o fixar falha depois de a enquete nascer (a turma ve a enquete aberta de qualquer jeito).
  */
-export async function launchPoll(input: { pollId: string; sessionId: string }): Promise<ActionResult<{ poll: Poll }>> {
-  return runAdminAction("messaging.write", launchPollSchema, input, async ({ input: data, user }) => {
+export async function launchPoll(input: { pin?: boolean; pollId: string; sessionId: string }): Promise<ActionResult<{ pinned: boolean; poll: Poll }>> {
+  return runWebinarAction("messaging.write", "atendimento", launchPollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);
@@ -689,17 +839,36 @@ export async function launchPoll(input: { pollId: string; sessionId: string }): 
       throw new WebinarError(POLL_NOT_TEMPLATE_MESSAGE, 409);
     }
 
+    // O "Abrir e fixar" le o que esta na tela antes de gravar: sem a migracao, nada nasce (409 com o aviso).
+    const pinnedNow = data.pin ? (await withScreenTables(() => readActiveScreenDisplayRows(db, session.id))).find((row) => row.kind === "poll")?.poll_id ?? null : null;
     const launched = await listPollRows(db, { sessionId: session.id, webinarId: webinar.id });
     const open = launched.polls.find((poll) => poll.template_poll_id === template.poll.id && poll.status === "open");
 
     if (open) {
-      return { poll: pollFromRow(open, launched.options) };
+      if (!data.pin || pinnedNow === open.id) {
+        return { pinned: pinnedNow === open.id, poll: pollFromRow(open, launched.options) };
+      }
+
+      // A copia aberta ja existe: o "Abrir e fixar" so fixa (o Fixar da enquete em "Nesta sessão").
+      const shown = await pinPollDisplay(db, { now, poll: { id: open.id, question: open.question }, session, userId: user.id });
+      await touchSessionRow(db, session.id);
+      await recordAudit(db, {
+        action: "webinar.poll_pinned",
+        actorId: user.id,
+        entityId: webinar.id,
+        entityType: "webinar",
+        metadata: { display_id: shown.displayId, poll_id: open.id, replaced: shown.replaced, session_id: session.id }
+      });
+      revalidateConsole(webinar.id);
+      invalidateReport();
+      return { pinned: true, poll: pollFromRow(open, launched.options) };
     }
 
     const created = await insertPollRow(
       db,
       {
-        anonymous: template.poll.anonymous,
+        // D64: a copia lancada nunca e anonima, mesmo de um modelo antigo marcado (legado: so as copias de antes continuam).
+        anonymous: false,
         created_by: user.id,
         kind: template.poll.kind,
         open_offset_ms: serverOffsetMs(session, now.getTime()),
@@ -714,25 +883,74 @@ export async function launchPoll(input: { pollId: string; sessionId: string }): 
       template.options.map((option) => option.label)
     );
 
+    // O "Abrir e fixar": a copia nova vira a fixada. A falha (o conflito do indice unico duas vezes) nao desfaz a enquete
+    // aberta: o carimbo e a auditoria seguem e so depois o 409 sobe.
+    let shown: { displayId: string; replaced: number } | null = null;
+    let pinFailure: unknown = null;
+
+    if (data.pin) {
+      try {
+        shown = await pinPollDisplay(db, { now, poll: { id: created.poll.id, question: created.poll.question }, session, userId: user.id });
+      } catch (failure) {
+        pinFailure = failure;
+      }
+    }
+
+    // O carimbo por ultimo (a enquete ja gravada): a sala rele as enquetes em 5 a 10 s (o pollsKey da Na tela mudou).
+    await touchSessionRow(db, session.id);
     await recordAudit(db, {
       action: "webinar.poll_launched",
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: { poll_id: created.poll.id, session_id: session.id, template_poll_id: template.poll.id }
+      metadata: {
+        poll_id: created.poll.id,
+        session_id: session.id,
+        template_poll_id: template.poll.id,
+        ...(data.pin ? { display_id: shown?.displayId ?? null, pinned: shown !== null, replaced: shown?.replaced ?? 0 } : {})
+      }
     });
     revalidateConsole(webinar.id);
     invalidateReport();
 
-    return { poll: pollFromRow(created.poll, created.options) };
+    if (pinFailure) {
+      throw pinFailure;
+    }
+
+    return { pinned: shown !== null, poll: pollFromRow(created.poll, created.options) };
   });
 }
 
-/** [messaging.write] Encerra a enquete aberta (e, se pedido, compartilha o resultado com a turma). */
-export async function closePoll(input: { pollId: string; sessionId: string; shareResults?: boolean }): Promise<ActionResult<{ poll: Poll }>> {
-  return runAdminAction("messaging.write", closePollSchema, input, async ({ input: data, user }) => {
+/**
+ * A enquete encerrada sem o resultado compartilhado some para a turma (room-rules.studentPollOf): se ela estava fixada,
+ * sai da tela tambem (`poll_closed`). Devolve quantas exibicoes sairam; banco sem a 202611100002, nenhuma (nada podia
+ * estar fixado).
+ */
+async function unpinClosedPoll(db: WebinarsDb, input: { now: Date; pollId: string; sessionId: string; userId: string }): Promise<number> {
+  try {
+    const sessionRow = await fetchSessionRow(db, input.sessionId);
+    const hide: ScreenDisplayHide = sessionRow
+      ? screenHide(sessionFromRow(sessionRow), input.userId, input.now, "poll_closed")
+      : { hidden_at: input.now.toISOString(), hidden_by: input.userId, hidden_offset_ms: null, hidden_reason: "poll_closed" };
+    return (await hideActiveScreenDisplayRows(db, { kind: "poll", pollId: input.pollId, sessionId: input.sessionId }, hide)).length;
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      return 0;
+    }
+    throw error;
+  }
+}
+
+/**
+ * [messaging.write] Encerra a enquete aberta (e, se pedido, compartilha o resultado com a turma). Encerrada sem
+ * compartilhar, a enquete fixada sai da tela (`poll_closed`); com o resultado compartilhado ela continua fixada, agora
+ * com as barras. O carimbo da sessao muda por ultimo.
+ */
+export async function closePoll(input: { pollId: string; sessionId: string; shareResults?: boolean }): Promise<ActionResult<{ poll: Poll; unpinned: boolean }>> {
+  return runWebinarAction("messaging.write", "atendimento", closePollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
     const found = await fetchPollRow(db, data.pollId);
 
     if (!found || found.poll.session_id !== data.sessionId) {
@@ -752,17 +970,107 @@ export async function closePoll(input: { pollId: string; sessionId: string; shar
       throw new WebinarError(POLL_NOT_OPEN_MESSAGE, 409);
     }
 
+    // Encerrada sem o resultado compartilhado, a turma ja nao ve a enquete: a fixada sai da tela antes do carimbo.
+    const unpinned = row.session_id && row.status === "closed" && !row.results_shared_at ? await unpinClosedPoll(db, { now, pollId: row.id, sessionId: row.session_id, userId: user.id }) : 0;
+
+    // O carimbo por ultimo (encerrar ou compartilhar ja gravado): a sala rele as enquetes em 5 a 10 s.
+    if (row.session_id) {
+      await touchSessionRow(db, row.session_id);
+    }
     await recordAudit(db, {
       action: "webinar.poll_closed",
       actorId: user.id,
       entityId: row.webinar_id,
       entityType: "webinar",
-      metadata: { poll_id: row.id, session_id: row.session_id, shared: Boolean(row.results_shared_at) }
+      metadata: { poll_id: row.id, session_id: row.session_id, shared: Boolean(row.results_shared_at), unpinned: unpinned > 0 }
     });
     revalidateConsole(row.webinar_id);
     invalidateReport();
 
-    return { poll: pollFromRow(row, found.options) };
+    return { poll: pollFromRow(row, found.options), unpinned: unpinned > 0 };
+  });
+}
+
+/**
+ * [messaging.write] Fixa uma enquete da sessao (R2): uma copia desta sessao, aberta ou encerrada com o resultado
+ * compartilhado (screen-model.pollPinnable). A fixada de antes sai como `replaced`; a mesma enquete ja fixada nao muda
+ * nada. Replay, sessao encerrada ou cancelada: 409. Banco sem a 202611100002: 409 com o aviso da migracao. O carimbo da
+ * sessao muda por ultimo; auditoria `webinar.poll_pinned`.
+ */
+export async function pinPoll(input: { pollId: string; sessionId: string }): Promise<ActionResult<PinnedPoll>> {
+  return runWebinarAction("messaging.write", "atendimento", pinPollSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const { session, webinar } = await loadSession(db, data.sessionId);
+
+    assertScreenSession(session);
+
+    const found = await fetchPollRow(db, data.pollId);
+
+    if (!found || found.poll.session_id !== session.id) {
+      throw new WebinarError(POLL_MISSING_MESSAGE, 404);
+    }
+
+    const poll = pollFromRow(found.poll, found.options);
+
+    if (!pollPinnable(poll)) {
+      throw new WebinarError(WEBINAR_COPY.naTela.erros.enqueteNaoFixa, 409);
+    }
+
+    const current = (await withScreenTables(() => readActiveScreenDisplayRows(db, session.id))).find((row) => row.kind === "poll");
+
+    if (current?.poll_id === poll.id) {
+      return { changed: false, displayId: current.id, pollId: poll.id, sessionId: session.id };
+    }
+
+    const shown = await pinPollDisplay(db, { now, poll, session, userId: user.id });
+
+    await touchSessionRow(db, session.id);
+    await recordAudit(db, {
+      action: "webinar.poll_pinned",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { display_id: shown.displayId, poll_id: poll.id, replaced: shown.replaced, session_id: session.id }
+    });
+    revalidateConsole(webinar.id);
+    invalidateReport();
+
+    return { changed: true, displayId: shown.displayId, pollId: poll.id, sessionId: session.id };
+  });
+}
+
+/**
+ * [messaging.write] Desafixa a enquete fixada da sessao (motivo `team`): ela continua aberta na aba Enquetes da turma,
+ * so sai da area das fixadas. Sem enquete fixada, nada muda. Replay, sessao encerrada ou cancelada: 409. O carimbo da
+ * sessao muda por ultimo; auditoria `webinar.poll_unpinned`.
+ */
+export async function unpinPoll(input: { sessionId: string }): Promise<ActionResult<UnpinnedPoll>> {
+  return runWebinarAction("messaging.write", "atendimento", unpinPollSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const { session, webinar } = await loadSession(db, data.sessionId);
+
+    assertScreenSession(session);
+
+    const hidden = await withScreenTables(() => hideActiveScreenDisplayRows(db, { kind: "poll", sessionId: session.id }, screenHide(session, user.id, now, "team")));
+
+    if (hidden.length === 0) {
+      return { pollId: null, sessionId: session.id, unpinned: false };
+    }
+
+    await touchSessionRow(db, session.id);
+    await recordAudit(db, {
+      action: "webinar.poll_unpinned",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { display_id: hidden[0].id, poll_id: hidden[0].poll_id, session_id: session.id }
+    });
+    revalidateConsole(webinar.id);
+    invalidateReport();
+
+    return { pollId: hidden[0].poll_id, sessionId: session.id, unpinned: true };
   });
 }
 
@@ -775,7 +1083,7 @@ export async function closePoll(input: { pollId: string; sessionId: string; shar
  * `answer`, respondendo a mensagem de origem quando houver) e/ou "Respondida ao vivo".
  */
 export async function answerQuestion(input: { answerText?: string; answeredLive?: boolean; questionId: string }): Promise<ActionResult<AnsweredQuestion>> {
-  return runAdminAction("messaging.write", answerQuestionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", answerQuestionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const question = await fetchQuestionRow(db, data.questionId);
@@ -848,9 +1156,81 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
   });
 }
 
+/**
+ * [messaging.write] A equipe continua a conversa no fio de uma pergunta ja respondida (docs/30 §2.4; decisao do produtor
+ * de 10/11/2026): a resposta entra no fio (webinar_question_replies) com o papel de quem escreve (Apresentador,
+ * Co-apresentador ou Equipe) e so aparece na aba Perguntas, nao no chat. A primeira resposta continua sendo o
+ * "Responder por escrito" (answerQuestion): aqui a pergunta precisa estar respondida. Fora da sala (a sessao acabou ou o
+ * aluno saiu), a resposta vai tambem para o sino dele, uma vez por resposta.
+ */
+export async function replyToQuestion(input: { body: string; questionId: string }): Promise<ActionResult<RepliedQuestion>> {
+  return runWebinarAction("messaging.write", "atendimento", replyQuestionSchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await fetchQuestionRow(db, data.questionId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    const question = questionFromRow(row);
+    const refusal = questionReplyRefusal({ question, replies: await countQuestionReplyRows(db, question.id), staff: true, userId: user.id });
+
+    if (refusal) {
+      throw new WebinarError(refusal === "full" ? REPLY_FULL_MESSAGE : REPLY_NEEDS_ANSWER_MESSAGE, 409);
+    }
+
+    const { session, webinar } = await loadSession(db, question.sessionId);
+    const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
+    const reply = questionReplyFromRow(
+      await insertQuestionReplyRow(db, { anonymous: false, body: data.body, display_name: teamDisplayName(user), question_id: question.id, role, session_id: session.id, user_id: user.id })
+    );
+    const notified = await noticeTeamAnswer(db, { answerText: data.body, handoffRequested: false, now, session, targetId: reply.id, userId: question.userId });
+
+    await recordAudit(db, {
+      action: "webinar.question_replied",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { notified, question_id: question.id, reply_id: reply.id, session_id: session.id }
+    });
+    revalidateConsole(webinar.id);
+
+    return { notified, reply };
+  }));
+}
+
+/** [messaging.write] Apaga uma resposta do fio (a do aluno ou a da equipe); o resto do fio fica. */
+export async function deleteQuestionReply(input: { replyId: string }): Promise<ActionResult<{ questionId: string; replyId: string }>> {
+  return runWebinarAction("messaging.write", "atendimento", deleteQuestionReplySchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+    const db = webinarsDb();
+    const row = await fetchQuestionReplyRow(db, data.replyId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(REPLY_MISSING_MESSAGE, 404);
+    }
+
+    const sessionRow = await fetchSessionRow(db, row.session_id);
+    await softDeleteQuestionReplyRow(db, { deletedBy: user.id, id: row.id, nowIso: new Date().toISOString(), reason: "team" });
+    await recordAudit(db, {
+      action: "webinar.question_reply_deleted",
+      actorId: user.id,
+      entityId: sessionRow?.webinar_id ?? null,
+      entityType: "webinar",
+      metadata: { by_student: row.role === "student", question_id: row.question_id, reply_id: row.id, session_id: row.session_id }
+    });
+
+    if (sessionRow) {
+      revalidateConsole(sessionRow.webinar_id);
+    }
+
+    return { questionId: row.question_id, replyId: row.id };
+  }));
+}
+
 /** [messaging.write] Dispensa, reabre ou marca como respondida uma pergunta. */
 export async function setQuestionStatus(input: { questionId: string; status: WebinarQuestion["status"] }): Promise<ActionResult<{ question: WebinarQuestion }>> {
-  return runAdminAction("messaging.write", questionStatusSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", questionStatusSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const question = await fetchQuestionRow(db, data.questionId);
@@ -900,7 +1280,7 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
  * tela aberta antes da meia-noite). Desligar grava a decisao tambem. A auditoria leva os valores (D10).
  */
 export async function saveSimulation(input: { ackText?: string; acknowledged?: boolean; sessionId: string; showLiveBadge: boolean }): Promise<ActionResult<SavedSimulation>> {
-  return runAdminAction("messaging.publish", saveSimulationSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", saveSimulationSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadSession(db, data.sessionId);
@@ -974,10 +1354,11 @@ async function hasSimulatedRules(db: WebinarsDb, sessionId: string) {
  * fechada antes reabre.
  */
 export async function createReplaySession(input: { webinarId: string }): Promise<ActionResult<ReplayCreated>> {
-  return runAdminAction("messaging.write", createReplaySessionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", createReplaySessionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const sessions = await listSessionRows(db, [webinar.id]);
     const existing = sessions.find((session) => session.kind === "replay") ?? null;
 
@@ -1039,10 +1420,11 @@ export async function createReplaySession(input: { webinarId: string }): Promise
 
 /** [messaging.write] Fecha o Replay livre (a sessao `replay` vira cancelada; "Liberar o replay" reabre a mesma). */
 export async function cancelReplaySession(input: { webinarId: string }): Promise<ActionResult<{ sessionId: string }>> {
-  return runAdminAction("messaging.write", createReplaySessionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "dever_legal", createReplaySessionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const replay = (await listSessionRows(db, [webinar.id])).find((session) => session.kind === "replay" && session.status !== "cancelled");
 
     if (!replay) {
@@ -1067,7 +1449,7 @@ export async function cancelReplaySession(input: { webinarId: string }): Promise
  * motivo do pedido fica na auditoria (§5.2).
  */
 export async function removeStudentMessages(input: { reason: string; userId: string }): Promise<ActionResult<RemovedStudentContent>> {
-  return runAdminAction("messaging.publish", removeStudentMessagesSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "dever_legal", removeStudentMessagesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const consent = await fetchConsentRow(db, data.userId);

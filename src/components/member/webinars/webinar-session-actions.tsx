@@ -19,6 +19,9 @@ export type SessionCalendarLinks = { downloadUrl: string; googleUrl: string; out
 
 type Status = { text: string; tone: "error" | "ok" };
 
+/** O Garantir vaga: a largura do proprio texto com um minimo de 220 px; no celular, a linha inteira (nunca esticado no computador). */
+const SEAT_BUTTON = "w-full sm:w-auto sm:min-w-[220px]";
+
 const menuItemClassName =
   "flex h-10 items-center gap-2 rounded-[8px] px-3 text-sm font-semibold text-zinc-200 outline-none transition hover:bg-white/[0.07] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white";
 
@@ -130,8 +133,8 @@ export function WebinarSessionActions({
 
   if (readOnly) {
     return (
-      <div className="grid gap-2">
-        <MemberButton aria-disabled="true" disabled size="lg" variant="primary">
+      <div className="grid justify-items-start gap-2">
+        <MemberButton aria-disabled="true" className={SEAT_BUTTON} disabled size="lg" variant="primary">
           {copy.garantirVaga}
         </MemberButton>
         <p className="text-xs text-zinc-500">{copy.previaSemGravar}</p>
@@ -167,14 +170,14 @@ export function WebinarSessionActions({
     controls = <p className="text-sm leading-6 text-zinc-300">{copy.cancelada}</p>;
   } else {
     controls = (
-      <MemberButton disabled={busy} onClick={register} size="lg" variant="primary">
+      <MemberButton className={SEAT_BUTTON} disabled={busy} onClick={register} size="lg" variant="primary">
         {copy.garantirVaga}
       </MemberButton>
     );
   }
 
   return (
-    <div className="grid gap-2">
+    <div className="grid justify-items-start gap-2">
       {controls}
       <p aria-live="polite" className={`min-h-5 text-sm font-medium ${status?.tone === "error" ? "text-red-300" : "text-emerald-300"}`}>
         {status?.text ?? ""}

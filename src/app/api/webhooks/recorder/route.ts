@@ -5,6 +5,8 @@ import { readBoundedText } from "@/server/http/bounded-text";
 import { webinarsDb } from "@/server/webinars/db";
 import { RECORDER_SIGNATURE_HEADER, RECORDER_TIMESTAMP_HEADER } from "@/server/webinars/recorder-signature";
 import { RECORDER_WEBHOOK_ERRORS, RECORDER_WEBHOOK_MAX_BYTES, handleRecorderWebhook } from "@/server/webinars/recorder-webhook";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Webhook do gravador por hora (docs/30 §5.3 e §8.2, D17): quem chama sao as etapas jibri-up / jibri-down do workflow
 // (ready, unavailable, gone) e o finalize.sh da maquina do Jibri (uploaded, upload_failed), sem sessao de usuario. O
@@ -22,6 +24,9 @@ function json(body: Record<string, unknown>, status: number) {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   let rawBody: string;
 
   try {

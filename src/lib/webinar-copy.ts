@@ -6,11 +6,13 @@
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
 // .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
 // entra do mesmo jeito em WEBINAR_COPY.salaV2, e o console V2 de quem apresenta (docs/31 V2-13 a V2-15) em .consoleV2.
+// A "Na tela" (docs/31 §12: fixadas, banner e QR Code) entra em WEBINAR_COPY.naTela.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { CONSOLE_V2_COPY } from "./webinar-copy-v4/console-v2";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
+import { NA_TELA_COPY } from "./webinar-copy-v4/na-tela";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
 import { SALA_V2_COPY } from "./webinar-copy-v4/sala-v2";
@@ -74,6 +76,29 @@ export const WEBINAR_COPY = {
     menuDescricao: "Lives ao vivo e gravadas da escola",
     naoDisponivel: "Esta live não está disponível para você.",
     outlook: "Outlook",
+    /**
+     * A pagina do webinario no padrao da area (docs/31 V2-17, 10/11/2026): o caminho do topo, os nomes dos fatos para o
+     * leitor de tela e as tres linhas de "Como funciona" (antes) e "Antes de entrar" (com a sala aberta). So o que vale
+     * para a Live ao vivo e para a gravada, com qualquer configuracao da sala.
+     */
+    pagina: {
+      antesDeEntrar: "Antes de entrar",
+      caminho: "Você está em",
+      comoFunciona: "Como funciona",
+      inicio: "Início",
+      passos: {
+        antes: [
+          "Na hora, o botão Entrar aparece nesta página e a sala abre em tela cheia.",
+          "Chat, perguntas e enquetes ficam ao lado do vídeo.",
+          "Você entra só assistindo, com câmera e microfone desligados."
+        ],
+        naHora: [
+          "Ligue o som do aparelho antes de entrar.",
+          "Chat, perguntas e enquetes ficam ao lado do vídeo.",
+          "Para voltar a esta página, use o Sair dentro da sala."
+        ]
+      }
+    },
     previaSemGravar: "No modo de visualização, nada é gravado.",
     proximaLive: "Próxima live",
     proximas: "Próximas",
@@ -155,8 +180,10 @@ export const WEBINAR_COPY = {
     abas: { gravadas: "Lives gravadas", lista: "Webinários", aoVivo: "Lives ao vivo" },
     abrirConsole: "Abrir o console",
     abrirSala: "Abrir a sala",
+    arquivar: "Arquivar",
     cancelar: "Cancelar",
     comecarParaTodos: "Começar para todos",
+    desarquivar: "Desarquivar",
     duplicar: "Duplicar",
     encerrarLive: "Encerrar live",
     excluir: "Excluir",
@@ -166,6 +193,7 @@ export const WEBINAR_COPY = {
     semDados: "Sem dados no período",
     semLivesAoVivo: "Sem lives ao vivo ainda",
     situacoes: {
+      archived: "Arquivado",
       cancelled: "Cancelado",
       draft: "Rascunho",
       ended: "Encerrado",
@@ -179,6 +207,7 @@ export const WEBINAR_COPY = {
   sala: {
     abas: { chat: "Chat", chatDaLive: "Chat da live", enquetes: "Enquetes", participantes: "Participantes", perguntas: "Perguntas" },
     aguardandoEquipe: "Aguardando a equipe",
+    /** Legado: so o nome das perguntas e respostas gravadas como anonimas antes de 10/11/2026 (D64); ninguem mais pergunta assim. */
     anonima: "Anônima",
     aoVivo: "Ao vivo",
     assistindo: (n: number) => (n === 1 ? "1 assistindo" : `${n} assistindo`),
@@ -187,8 +216,9 @@ export const WEBINAR_COPY = {
     chatDesligado: "O chat está desligado nesta sessão.",
     chatSoEquipe: "Só a equipe escreve agora.",
     comecaEm: (texto: string) => `Começa em ${texto}`,
+    /** O texto exato do aceite, versao 2 (docs/30 §8.5 e D64): sem anonimo e sem apelido. */
     consentimento:
-      "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade.",
+      "Ao enviar mensagens neste chat, você autoriza que o seu primeiro nome com a inicial do sobrenome, a sua foto de perfil e o texto da mensagem apareçam para os outros alunos durante esta sessão e nas reexibições dela. Você pode remover as suas mensagens a qualquer momento em Perfil › Privacidade.",
     consentimentoBotao: "Entendi e quero participar",
     consentimentoPendente: "Para participar do chat, aceite as regras uma vez.",
     curtir: "Curtir",
@@ -206,7 +236,6 @@ export const WEBINAR_COPY = {
     modoLento: (segundos: number) => `Você pode enviar de novo em ${segundos} s`,
     naoComecou: "Essa sessão ainda não abriu. Volte na hora marcada.",
     ordem: { maisRecentes: "Mais recentes", maisVotadas: "Mais votadas" },
-    participarComoAnonimo: "Participar como anônimo",
     perguntaEnviada: "Pergunta enviada.",
     reagir: "Reagir",
     reconectando: "Reconectando…",
@@ -214,7 +243,6 @@ export const WEBINAR_COPY = {
     removidaPelaEquipe: "mensagem removida pela equipe",
     respondidaAoVivo: "Respondida ao vivo",
     respondidaPorEscrito: "Respondida por escrito",
-    responderComo: { anonimo: "Aluno (anônimo)", apelido: "Apelido", nome: "Primeiro nome e inicial" },
     sair: "Sair",
     sairConfirmar: "Sair da sala?",
     sairConfirmarTexto: "O vídeo para e você volta para a página do webinário.",
@@ -226,8 +254,6 @@ export const WEBINAR_COPY = {
     tempoNoAr: (texto: string) => `Ao vivo · ${texto}`,
     voltar: "Voltar",
     /* Fase 2a, a sala no navegador (chaves a mais so deste grupo). */
-    apelidoPlaceholder: "Seu apelido",
-    comoAparece: "Como você aparece no chat",
     curtidas: (n: number) => (n === 1 ? "1 curtida" : `${n} curtidas`),
     erroCarregarChat: "O chat não carregou. Tente de novo.",
     erroEnviar: "Não foi possível enviar. Tente de novo.",
@@ -396,6 +422,8 @@ export const WEBINAR_COPY = {
       presenterOnly: "Só o apresentador e os co-apresentadores mudam o microfone da turma.",
       recorderNotReleasable: "O gravador não pode ser desligado agora: espere o envio do vídeo terminar.",
       recordingMissing: "Essa gravação não existe mais.",
+      /** Silenciar, remover e banir por pessoa no Replay (a Na tela, R5: vale na Live ao vivo e na gravada). */
+      replay: "No Replay ninguém é silenciado, removido nem banido.",
       sessionMissing: "Essa sessão não existe mais.",
       staffTarget: "Ninguém da equipe é removido, silenciado nem banido.",
       videoTaken: "Esse vídeo já está ligado a outra gravação."
@@ -506,7 +534,7 @@ export const WEBINAR_COPY = {
     confirmarTexto: "Suas mensagens, perguntas e respostas de enquete somem de todas as sessões e dos replays. Isso não tem volta.",
     feito: (n: number) => (n === 1 ? "1 mensagem removida." : `${n} mensagens removidas.`),
     nadaParaRemover: "Você ainda não escreveu em nenhuma live.",
-    texto: "O que você escreve no chat das lives aparece para os outros alunos durante a sessão e nos replays, com o seu primeiro nome (ou o apelido que você escolheu).",
+    texto: "O que você escreve no chat das lives aparece para os outros alunos durante a sessão e nos replays, com o seu primeiro nome e a inicial do sobrenome.",
     titulo: "Chat das lives"
   },
   /** A aba Relatório do webinário (docs/30 §3.4): rótulos dos números e dos blocos. */
@@ -593,6 +621,8 @@ export const WEBINAR_COPY = {
       vagasGarantidas: "Garantir vaga"
     },
     seloAoVivo: 'Selo "Ao vivo"',
+    /** A primeira linha do bloco Simulacao na Live ao vivo (R7): sem o selo da gravada, so quem decidiu. */
+    simulacaoDaLive: "Simulação da live",
     ligado: "ligado",
     desligado: "desligado",
     decididoPor: (nome: string, data: string) => `decidido por ${nome} em ${data}`,
@@ -613,6 +643,7 @@ export const WEBINAR_COPY = {
     alunoSemNome: "Aluno",
     replayVistos: "Vistos",
     replayAssistido: "Assistido, em média",
+    /** Legado: enquetes de antes de 10/11/2026 (D64) marcadas como anonimas; as novas guardam sempre quem respondeu. */
     anonima: "Anônima: só as barras.",
     semRespostas: "Ninguém respondeu ainda.",
     semMensagens: "Nenhuma mensagem de aluno nesta sessão.",
@@ -637,7 +668,9 @@ export const WEBINAR_COPY = {
   /* A sala do aluno V2 (docs/31 §1): src/lib/webinar-copy-v4/sala-v2.ts. */
   salaV2: SALA_V2_COPY,
   /* O console V2 de quem apresenta (docs/31 V2-13 a V2-15): src/lib/webinar-copy-v4/console-v2.ts. */
-  consoleV2: CONSOLE_V2_COPY
+  consoleV2: CONSOLE_V2_COPY,
+  /* A "Na tela" (docs/31 §12): src/lib/webinar-copy-v4/na-tela.ts. */
+  naTela: NA_TELA_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

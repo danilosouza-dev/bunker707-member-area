@@ -391,7 +391,7 @@ export function escolaDaTraducao({ mensagens = null } = {}) {
     reminders: {},
     replay_days_on_home: 7,
     replay_lesson_target: null,
-    room_settings: { anonymousQuestions: true, chatMode: "open", displayName: "first_name_initial" },
+    room_settings: { chatMode: "open" },
     scheduled_at: null,
     show_banner: true,
     show_on_home: true,

@@ -19,7 +19,9 @@ import type { LiveEntry } from "./use-live-room";
 // palco da aula (data-lesson-player-stage etc.): com o sinal de midia da sala (announceLiveRoomMedia) nenhum pop-up
 // abre com a sala no ar. Nenhum texto daqui cita o motor de video (D2). Redesign V2, F4 (docs/31 V2-6 e V2-18): o
 // palco fica na caixa do esqueleto da sala (roomSkeleton), com cantos de 16 px no computador; no celular a sala poe a
-// Tela cheia (ou o Modo cinema) como filho, no canto de baixo a direita.
+// Tela cheia (ou o Modo cinema) como filho, no canto de baixo a direita. A Na tela (especificacao de 10/11/2026, §3.2): a
+// camada do banner, do QR Code e das pilulas das fixadas (screen/room-screen-layer.tsx) entra como filho, depois dos
+// selos, para ir junto na Tela cheia (este elemento e o que vai para a tela cheia) e ler a largura do palco.
 
 export type LiveStageProps = {
   children?: ReactNode;

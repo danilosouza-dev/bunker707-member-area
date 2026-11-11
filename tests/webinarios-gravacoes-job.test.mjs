@@ -694,12 +694,12 @@ test("retencao: so o video do nosso gravador (source jibri) e apagado na Bunny; 
  * Migracao pendente, frases, o job e o cliente da Bunny
  * ---------------------------------------------------------------------------------------------- */
 
-test("banco sem a migracao mais nova (WEBINARS_MIGRATION: a 202611010001 pela ordem dos arquivos, que inclui a 202610300005 do jit): zeros, pendingMigration e o log da migracao", async () => {
+test("banco sem a migracao mais nova (WEBINARS_MIGRATION: a 202611100002 pela ordem dos arquivos, que inclui a 202610300005 do jit): zeros, pendingMigration e o log da migracao", async () => {
   const comAdaptador = escola();
   comAdaptador.falhar("webinar_sessions", "select", { code: "42703", message: "column webinar_sessions.recorder_status does not exist" });
   const result = await rodar(comAdaptador, HORA_MARCADA - 10 * MIN, { bunny: bunnyFalsa(), dispatcher: fakeRecorderDispatcher([]) });
   assert.deepEqual(semLogs(result), resultado({ pendingMigration: true }));
-  assert.ok(result.logs.some((linha) => linha.startsWith("info:") && linha.includes("migracao 202611010001 pendente")));
+  assert.ok(result.logs.some((linha) => linha.startsWith("info:") && linha.includes("migracao 202611100002 pendente")));
 
   const soAviso = escola();
   soAviso.falhar("webinar_sessions", "select", { code: "42703", message: "column webinar_sessions.recorder_alerted_at does not exist" });
@@ -735,7 +735,7 @@ test("o job: nome, registro depois dos lembretes e as contagens em job_runs quan
   assert.equal(webinarRecordingsJob.name, WEBINAR_RECORDINGS_JOB_NAME);
   assert.match(webinarRecordingsJob.name, /^[a-z0-9][a-z0-9-]{0,119}$/);
   const registry = readFileSync(new URL("../src/server/jobs/registry.ts", import.meta.url), "utf8");
-  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, communicationMediaJob\]/);
+  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\]/);
   assert.match(registry, /- `webinar-recordings` \(/, "a linha no comentario dos jobs registrados");
 
   const env = { ...process.env };

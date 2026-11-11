@@ -6,6 +6,7 @@ import { reactionBodySchema } from "@/server/communications/schemas";
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Reacao do aluno numa notificacao (v3a, docs/24 §1.4): { reaction: "like" | "love" | ... | null } (null =
 // tirar). Uma por aluno, so a propria; a mesma reacao nao muda nada. Conta como interacao (vista, lida e
@@ -20,6 +21,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 const INVALID_REACTION = "Reacao invalida.";
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

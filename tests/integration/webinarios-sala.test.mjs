@@ -120,17 +120,19 @@ test("2. a primeira mensagem exige o aceite; com ele grava o aceite, o nome exib
   assert.equal(primeira.body.data.pending, false);
   assert.ok(primeira.body.data.message.offsetMs >= 85_000, `nunca o 7 do navegador (${primeira.body.data.message.offsetMs})`);
 
-  const aceite = unwrap(await db.from("webinar_chat_consents").select("consent_version,display_mode,revoked_at").eq("user_id", aluna.id).maybeSingle(), "Lendo o aceite");
-  assert.deepEqual(aceite, { consent_version: CHAT_CONSENT_VERSION, display_mode: "first_name_initial", revoked_at: null });
+  // D64 (10/11/2026): o aceite e sempre gravado com o modo de agora e sem apelido.
+  const aceite = unwrap(await db.from("webinar_chat_consents").select("consent_version,display_mode,nickname,revoked_at").eq("user_id", aluna.id).maybeSingle(), "Lendo o aceite");
+  assert.deepEqual(aceite, { consent_version: CHAT_CONSENT_VERSION, display_mode: "first_name_initial", nickname: null, revoked_at: null });
 
   const historico = await eventos(aluna.id);
   assert.deepEqual(historico.map((linha) => [linha.event_type, linha.entity_id]), [["webinar_chat_consented", sessaoId], ["webinar_chat_sent", sessaoId]]);
-  assert.deepEqual(historico[0].metadata, { consent_version: CHAT_CONSENT_VERSION, display: "first_name_initial" });
+  assert.deepEqual(historico[0].metadata, { consent_version: CHAT_CONSENT_VERSION }, "o historico nao guarda mais a escolha de como aparecer");
   assert.equal(historico[1].metadata.message_id, primeira.body.data.message.id);
   assert.ok(!JSON.stringify(historico).includes("oi, turma"), "nunca o texto no historico");
 
   const depois = await sessao(aluna);
-  assert.deepEqual([depois.body.data.me.consented, depois.body.data.me.displayMode, depois.body.data.me.displayName], [true, "first_name_initial", esperado]);
+  assert.deepEqual([depois.body.data.me.consented, depois.body.data.me.displayName], [true, esperado]);
+  assert.ok(!("displayMode" in depois.body.data.me) && !("nickname" in depois.body.data.me), "a sala nao recebe mais o modo nem o apelido");
 });
 
 test("3. a janela do chat (RPC): a linha mestre deslocada pela ancora (105 s na live = 100 s no video) e a linha do aluno; a moderada so para o autor; a consulta de novas e o cursor", async () => {
@@ -312,7 +314,7 @@ test("8. fase 4c: o Assistente (provedor falso) responde ao @assistente com role
     assert.equal(vista.role, "ai", "o aluno ve o selo Assistente, nunca Equipe");
 
     actAs(aluna);
-    const pergunta = await json(await questionsRoute.POST(pedido("questions", "POST", { anonymous: false, body: "Tem certificado?", sessionId: sessaoId }), contexto));
+    const pergunta = await json(await questionsRoute.POST(pedido("questions", "POST", { body: "Tem certificado?", sessionId: sessaoId }), contexto));
     assert.equal(pergunta.status, 201, JSON.stringify(pergunta.body));
     const linha = unwrap(await db.from("webinar_questions").select("status,answer_text,answered_by,answer_source").eq("id", pergunta.body.data.question.id).single(), "Lendo a pergunta respondida");
     assert.deepEqual(linha, { answer_source: "ai", answer_text: "Custa R$ 997 a vista.", answered_by: null, status: "answered" });

@@ -184,6 +184,31 @@ test("foto do perfil: so apaga arquivo antigo da propria pasta do aluno", () => 
   assert.equal(model.avatarObjectPathFromUrl("nao e link", user), null);
 });
 
+test("foto que os outros veem (sala e console dos webinarios): so o arquivo enviado pelo Perfil, na origem do nosso Supabase", () => {
+  const origem = "https://abc.supabase.co";
+  const base = `${origem}/storage/v1/object/public/content-assets`;
+  const user = "11111111-2222-3333-4444-555555555555";
+
+  assert.equal(model.ownAvatarPublicUrl(`${base}/avatars/${user}/aa11.webp`, user, origem), `${base}/avatars/${user}/aa11.webp`);
+  assert.equal(model.ownAvatarPublicUrl("https://attacker.example/p.png", user, origem), null, "endereco de fora");
+  assert.equal(
+    model.ownAvatarPublicUrl(`https://attacker.example/storage/v1/object/public/content-assets/avatars/${user}/aa11.webp`, user, origem),
+    `${base}/avatars/${user}/aa11.webp`,
+    "a maquina gravada nao vale: o endereco sai pela nossa origem"
+  );
+  assert.equal(model.ownAvatarPublicUrl(`${base}/avatars/outro-aluno/aa11.webp`, user, origem), null, "pasta de outro aluno");
+  assert.equal(model.ownAvatarPublicUrl("https://lh3.googleusercontent.com/a/foto", user, origem), null, "foto do Google");
+  assert.equal(model.ownAvatarPublicUrl(`${base}/avatars/${user}/%E0%A4%A.webp`, user, origem), null, "escape quebrado, sem lancar");
+  assert.equal(model.ownAvatarPublicUrl(null, user, origem), null);
+  assert.equal(model.ownAvatarPublicUrl(`${base}/avatars/${user}/aa11.webp`, user, null), null, "sem a origem do Supabase");
+  const local = "http://127.0.0.1:55321";
+  assert.equal(
+    model.ownAvatarPublicUrl(`${local}/storage/v1/object/public/content-assets/avatars/${user}/aa11.webp`, user, local),
+    `${local}/storage/v1/object/public/content-assets/avatars/${user}/aa11.webp`,
+    "o Supabase local dos testes"
+  );
+});
+
 test("rota da foto: so para quem esta logado, grava e remove a foto do proprio aluno", () => {
   const route = readFileSync(new URL("../src/app/api/profile/avatar/route.ts", import.meta.url), "utf8");
   const store = readFileSync(new URL("../src/server/member-area/student-avatar.ts", import.meta.url), "utf8");

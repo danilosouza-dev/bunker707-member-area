@@ -164,3 +164,29 @@ body {
 .filmstrip__videos .videocontainer.dominant-speaker .active-speaker-indicator {
   box-shadow: inset 0 0 0 2px var(--bunker-speaking) !important;
 }
+
+/*
+ * O botao do menu da miniatura (LocalVideoMenuTriggerButton.tsx e RemoteVideoMenuTriggerButton.tsx: o Button
+ * "primary" da tag, azul, quadrado de raio 4, filho direto do Popover #local-video-menu-trigger ou
+ * #remote-video-menu-trigger, que so aparece com o ponteiro na miniatura): vira o circulo escuro translucido dos
+ * controles sobre o video, com os tres pontos brancos, nos dois temas (ajuste do produtor de 10/11/2026: o azul do
+ * motor destoava da sala). So cor e canto: o tamanho continua o da tag (18 px do icone + 3 px de cada lado), para a
+ * linha dos indicadores do topo da miniatura nao mudar de altura. O filho direto (>) deixa os botoes de dentro do
+ * menu aberto como estao.
+ */
+#local-video-menu-trigger > button,
+#remote-video-menu-trigger > button {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  border-radius: 9999px !important;
+  color: #fff !important;
+}
+
+#local-video-menu-trigger > button:hover,
+#remote-video-menu-trigger > button:hover {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+#local-video-menu-trigger > button svg,
+#remote-video-menu-trigger > button svg {
+  fill: #fff !important;
+}

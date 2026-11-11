@@ -16,12 +16,16 @@ function usage(message) {
   console.error(`Uso:
   sh infra/compose/generate-secrets.sh --local [--force]
   sh infra/compose/generate-secrets.sh --domain <app> --api-domain <api> --studio-domain <studio> \\
-      --email <acme> [--studio-ips "<cidr> <cidr>"] [--force]`);
+      --email <acme> [--studio-ips "<cidr> <cidr>"] [--force]
+  node generate-secrets.mjs --kit --domain <escola> --api-domain <api> --email <dono> [--publishable-key <chave>]
+      (instalador do kit; --publishable-key: a chave publicavel que a imagem do pacote da escola ja traz gravada)`);
   process.exit(message ? 2 : 0);
 }
 
 const args = process.argv.slice(2);
-const options = { force: false, local: false, studioIps: "" };
+// --kit: o servidor de um comprador (infra/kit/instalar, docs/20 §9D). Sem Studio (o compose do kit nao tem), e o
+// instalador grava o resto (e-mail, backup, imagem) por cima, entao a saida nao da as dicas da nossa producao.
+const options = { force: false, kit: false, local: false, studioIps: "" };
 
 for (let index = 0; index < args.length; index += 1) {
   const arg = args[index];
@@ -33,12 +37,14 @@ for (let index = 0; index < args.length; index += 1) {
 
   switch (arg) {
     case "--local": options.local = true; break;
+    case "--kit": options.kit = true; break;
     case "--force": options.force = true; break;
     case "--domain": options.domain = next(); break;
     case "--api-domain": options.apiDomain = next(); break;
     case "--studio-domain": options.studioDomain = next(); break;
     case "--email": options.email = next(); break;
     case "--studio-ips": options.studioIps = next(); break;
+    case "--publishable-key": options.publishableKey = next(); break;
     case "--help": case "-h": usage(); break;
     default: usage(`opcao desconhecida: ${arg}`);
   }
@@ -46,8 +52,14 @@ for (let index = 0; index < args.length; index += 1) {
 
 const hostPattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 
+if (options.kit && options.local) usage("--kit e --local nao andam juntos.");
+if (options.kit && options.studioDomain) usage("o kit nao tem Studio: --studio-domain nao vale com --kit.");
+if (options.publishableKey !== undefined && !options.kit) usage("--publishable-key so vale com --kit (a imagem do pacote da escola traz a chave).");
+
 if (!options.local) {
-  for (const [name, value] of [["--domain", options.domain], ["--api-domain", options.apiDomain], ["--studio-domain", options.studioDomain]]) {
+  const required = [["--domain", options.domain], ["--api-domain", options.apiDomain]];
+  if (!options.kit) required.push(["--studio-domain", options.studioDomain]);
+  for (const [name, value] of required) {
     if (!value) usage(`em producao ${name} e obrigatorio (ou use --local).`);
     if (!hostPattern.test(value)) usage(`${name} deve ser um hostname, sem https:// nem barra: ${value}`);
   }
@@ -107,12 +119,20 @@ function opaqueKey(prefix) {
   return `${intermediate}_${checksum}`;
 }
 
+// A chave publicavel que a imagem do pacote da escola ja traz gravada (docs/20 §9D.6): publica, no mesmo formato, com o
+// resumo conferido (um erro de copia nunca vira uma chave que o navegador e o gateway nao combinam).
+if (options.publishableKey !== undefined) {
+  const match = /^(sb_publishable_[A-Za-z0-9_-]{22})_([A-Za-z0-9_-]{8})$/.exec(options.publishableKey);
+  const checksum = match && createHash("sha256").update(`${PROJECT_REF}|${match[1]}`).digest("base64url").slice(0, 8);
+  if (!match || checksum !== match[2]) usage("--publishable-key nao e uma chave publicavel valida (sb_publishable_..., com o resumo certo).");
+}
+
 const secrets = {
   POSTGRES_PASSWORD: hex(24),
   JWT_SECRET: jwtSecret,
   ANON_KEY: signHs256({ role: "anon", iss: "supabase", iat: issuedAt, exp: expiresAt }),
   SERVICE_ROLE_KEY: signHs256({ role: "service_role", iss: "supabase", iat: issuedAt, exp: expiresAt }),
-  SUPABASE_PUBLISHABLE_KEY: opaqueKey("sb_publishable_"),
+  SUPABASE_PUBLISHABLE_KEY: options.publishableKey ?? opaqueKey("sb_publishable_"),
   SUPABASE_SECRET_KEY: opaqueKey("sb_secret_"),
   JWT_KEYS: JSON.stringify(jwtKeys),
   JWT_JWKS: JSON.stringify(jwtJwks),
@@ -166,9 +186,9 @@ const addresses = options.local
       ADDITIONAL_REDIRECT_URLS: `https://${options.domain}/auth/callback`,
       APP_SITE_ADDRESS: options.domain,
       SUPABASE_SITE_ADDRESS: options.apiDomain,
-      STUDIO_SITE_ADDRESS: options.studioDomain,
+      STUDIO_SITE_ADDRESS: options.kit ? "" : options.studioDomain,
       // Sem IP informado ninguem abre o Studio (403): melhor fechado do que aberto por engano.
-      STUDIO_ALLOWED_IPS: options.studioIps || "127.0.0.1/32",
+      STUDIO_ALLOWED_IPS: options.kit ? "127.0.0.1/32" : options.studioIps || "127.0.0.1/32",
       ACME_EMAIL: options.email
     };
 
@@ -200,10 +220,12 @@ for (const value of Object.values(values)) {
 writeFileSync(envPath, lines.join("\n"), { mode: 0o600 });
 chmodSync(envPath, 0o600);
 
-console.log(`Gravado ${envPath} (chmod 600), modo ${options.local ? "ensaio local" : "producao"}.`);
+console.log(`Gravado ${envPath} (chmod 600), modo ${options.local ? "ensaio local" : options.kit ? "kit" : "producao"}.`);
 console.log(`Gerados: ${Object.keys(secrets).length} segredos e ${Object.keys(addresses).length} enderecos.`);
 
-if (options.local) {
+if (options.kit) {
+  // O instalador do kit grava o resto (o e-mail, o backup, a imagem) e confere; nada a fazer a mao.
+} else if (options.local) {
   console.log(`App: ${addresses.APP_PUBLIC_URL}  Supabase: ${addresses.SUPABASE_PUBLIC_URL}  Studio: http://127.0.0.1:8000/ (usuario bunker707, senha DASHBOARD_PASSWORD do .env)`);
 } else {
   console.log("Ainda precisa preencher no .env, a mao: SMTP_PASS (chave de envio do Resend), STORAGE_BOX_USER e STORAGE_BOX_HOST,");

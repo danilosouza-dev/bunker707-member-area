@@ -114,6 +114,23 @@ test("a fila do roteiro: na ordem do minuto, com o que entrou marcado, o que ja 
   assert.equal(console_.scriptQueue(items, {}, Number.NaN).every((entry) => !entry.passed), true);
 });
 
+test("achado 13 (revisao de 11/11/2026): na Live ao vivo no ar, 'Minuto já passou' so depois da tolerancia do tick (5 min); antes disso o item ainda entra sozinho", async () => {
+  const { LIVE_SCRIPT_LATE_MAX_MS } = await import("../src/server/webinars/persona-model.ts");
+  const item = (id, offsetMs) => ({ body: "x", createdAt: "", generatedByAi: false, id, kind: "message", offsetMs, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "", webinarId: "w1" });
+  // A live esta aos 12 min: o item dos 12 min acabou de vencer, o dos 7 min esta na borda dos 5 min, o dos 6:59 passou.
+  const items = [item("agora", 12 * MIN), item("borda", 7 * MIN), item("passou", 7 * MIN - 1000), item("depois", 13 * MIN)];
+  const live = console_.scriptQueue(items, {}, 12 * MIN, { lateMs: LIVE_SCRIPT_LATE_MAX_MS });
+  assert.deepEqual(Object.fromEntries(live.map((entry) => [entry.id, entry.passed])), { agora: false, borda: false, depois: false, passou: true }, "o tick ainda solta ate 5 min atrasado");
+  assert.deepEqual(Object.fromEntries(console_.scriptQueue(items, { agora: null }, 12 * MIN, { lateMs: LIVE_SCRIPT_LATE_MAX_MS }).map((entry) => [entry.id, entry.passed])).agora, true, "o que entrou continua marcado");
+  // Sem a tolerancia (a gravada, a live encerrada): assim que o minuto chega, como antes.
+  assert.deepEqual(Object.fromEntries(console_.scriptQueue(items, {}, 12 * MIN).map((entry) => [entry.id, entry.passed])), { agora: true, borda: true, depois: false, passou: true });
+  // O console da live no ar passa a tolerancia; a gravada e a encerrada, nao.
+  const { readFileSync } = await import("node:fs");
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /const scriptLateMs = session\?\.kind === "live" && session\.status === "live" \? LIVE_SCRIPT_LATE_MAX_MS : 0;/);
+  assert.match(fonte, /scriptQueue\(snapshot\.scriptItems, snapshot\.scriptFired, scriptClockMs, \{ lateMs: scriptLateMs \}\)/);
+});
+
 test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentual; perguntas: abertas por voto, depois respondidas, dispensadas no fim", () => {
   const poll = { options: [{ id: "o1", label: "Sim", position: 0 }, { id: "o2", label: "Não", position: 1 }] };
   const counts = console_.countPollAnswers(poll, [{ optionIds: ["o1"] }, { optionIds: ["o1", "o2"] }, { optionIds: ["o2", "fora"] }]);
@@ -127,6 +144,70 @@ test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentua
     board.map((entry) => entry.id),
     ["e", "c", "b", "a", "d"]
   );
+});
+
+test("o fio no quadro (docs/30 §2.4): questionAwaitsTeam so na respondida em que o aluno escreveu por ultimo; ela sobe para junto das abertas", () => {
+  const aluno = { role: "student" };
+  const equipe = { role: "team" };
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "answered" }), true);
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno, equipe], status: "answered" }), false, "a equipe respondeu por ultimo");
+  assert.equal(console_.questionAwaitsTeam({ replies: [], status: "answered" }), false);
+  assert.equal(console_.questionAwaitsTeam({ status: "answered" }), false, "sem o fio (uma pergunta de antes)");
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "open" }), false, "a aberta ja pede a equipe pelo proprio estado");
+  assert.equal(console_.questionAwaitsTeam({ replies: [aluno], status: "dismissed" }), false);
+  // A resposta de cima depois da ultima fala do aluno (o "Falar com a equipe" respondido pelo campo de cima, ou Reabrir
+  // e responder de novo) tambem e a equipe respondendo.
+  const em = (minute) => new Date(T0 + minute * MIN).toISOString();
+  const alunoAs = (minute) => ({ createdAt: em(minute), role: "student" });
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: em(1), replies: [alunoAs(2)], status: "answered" }), true, "o aluno escreveu depois da resposta");
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: em(5), replies: [alunoAs(2)], status: "answered" }), false, "a equipe respondeu pelo campo de cima depois da ultima fala do aluno");
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: null, replies: [alunoAs(2)], status: "answered" }), true, "sem a hora da resposta, continua esperando");
+  // A hora do app (milissegundos) contra a do banco (microssegundos, +00:00): compara o instante, nunca o texto.
+  assert.equal(console_.questionAwaitsTeam({ answeredAt: "2026-11-05T23:05:00.000Z", replies: [{ createdAt: "2026-11-05T23:04:59.999123+00:00", role: "student" }], status: "answered" }), false);
+
+  const question = (id, status, upvotes, minute, replies = []) => ({ createdAt: new Date(T0 + minute * MIN).toISOString(), id, replies, status, upvotes });
+  const board = console_.sortQuestionsForBoard([
+    question("respondida", "answered", 9, 1),
+    question("esperando", "answered", 1, 5, [aluno]),
+    question("aberta", "open", 4, 2),
+    question("conversada", "answered", 8, 3, [aluno, equipe]),
+    { ...question("de-cima", "answered", 3, 4, [alunoAs(2)]), answeredAt: em(5) },
+    question("dispensada", "dismissed", 7, 0)
+  ]);
+  assert.deepEqual(
+    board.map((entry) => entry.id),
+    ["aberta", "esperando", "respondida", "conversada", "de-cima", "dispensada"],
+    "o que pede a equipe primeiro (por votos), depois as respondidas e as dispensadas"
+  );
+});
+
+test("o fio no console: o campo de outra pergunta nao fecha quando o envio da anterior termina, e a resposta enviada nao arma de novo antes do retrato (replyDraftAfterSent e whileSettling)", async () => {
+  assert.equal(console_.replyDraftAfterSent({ draft: "oi", id: "q1" }, "q1"), null);
+  const outra = { draft: "rascunho da q2", id: "q2" };
+  assert.equal(console_.replyDraftAfterSent(outra, "q1"), outra, "o campo da q2, aberto no meio do envio da q1, fica");
+  assert.equal(console_.replyDraftAfterSent(null, "q1"), null);
+
+  let settling = [];
+  const set = (update) => {
+    settling = update(settling);
+  };
+  let calls = 0;
+  let release;
+  const work = () => {
+    calls += 1;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  const primeira = console_.whileSettling({ key: "reply:q1", set, settling, work });
+  assert.deepEqual(settling, ["reply:q1"], "ocupado do clique ate o retrato");
+  assert.equal(await console_.whileSettling({ key: "reply:q1", set, settling, work }), false, "o segundo clique no meio nao manda de novo");
+  assert.equal(calls, 1);
+  release(true);
+  assert.equal(await primeira, true);
+  assert.deepEqual(settling, []);
+  assert.equal(await console_.whileSettling({ key: "delete:r1", set, settling, work: async () => false }), false);
+  assert.deepEqual(settling, [], "a falha tambem solta a chave");
 });
 
 test("acoes de uma mensagem: liberar so a pendente, fixar so a liberada e nao fixada, promover so a da turma com aceite e ainda fora da linha mestre", () => {
@@ -336,4 +417,33 @@ test("o offset do roteiro corta no encerramento: depois do Encerrar, a fila fica
   const late = { body: "x", createdAt: "", generatedByAi: false, id: "late", kind: "message", offsetMs: 25 * MIN, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "", webinarId: "w1" };
   const queue = console_.scriptQueue([late], {}, console_.consoleOffsetMs(ended, T0 + 3 * HOUR, 0));
   assert.equal(queue[0].passed, false, "o item depois do fim nao conta como passado");
+});
+
+test("consoleComment (docs/31 §10): o comentario do YouTube do console com o nome (Você na minha), o selo do papel ou da origem, a hora do relogio com o instante e o que o leitor de tela ouve; o Assistente so com o selo; no Replay sem hora", () => {
+  const live = { kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const message = (extra = {}) => ({ createdAt: "2026-11-05T23:42:00.000Z", displayName: "Ana M.", offsetMs: 0, role: "student", source: "audience", ...extra });
+
+  const aluna = console_.consoleComment({ ...live, message: message(), mine: false });
+  assert.deepEqual(aluna, { avatar: "person", name: "Ana M.", role: null, srAuthor: "Ana M., 20:42: ", time: { iso: "2026-11-05T23:42:00.000Z", label: "20:42", title: "20:42" } });
+
+  const minha = console_.consoleComment({ ...live, message: message({ displayName: "Produtor T.", role: "host", source: "team" }), mine: true });
+  assert.equal(minha.name, "Você");
+  assert.equal(minha.role, "Apresentador");
+  assert.equal(minha.srAuthor, "Você, Apresentador, 20:42: ");
+
+  // O Assistente: o nome igual ao selo, so o selo (como na sala) e o avatar dele.
+  const ia = console_.consoleComment({ ...live, message: message({ displayName: "Assistente", role: "ai", source: "ai" }), mine: false });
+  assert.equal(ia.avatar, "assistant");
+  assert.equal(ia.srAuthor, "Assistente, 20:42: ");
+
+  // A origem que so a equipe ve fica no lugar do papel (a persona do roteiro com o papel de quem apresenta diz Roteiro).
+  const gravada = { kind: "simulated", scheduledAt: "2026-11-05T23:00:00.000Z" };
+  const roteiro = console_.consoleComment({ ...gravada, message: message({ displayName: "Duda", offsetMs: 60_000, role: "host", source: "scripted" }), mine: false });
+  assert.equal(roteiro.role, WEBINAR_ADMIN_COPY.console.chat.sources.scripted);
+  assert.deepEqual(roteiro.time, { iso: "2026-11-05T23:01:00.000Z", label: "20:01", title: "20:01" }, "a gravada: a hora marcada mais o offset");
+
+  // No Replay, nenhuma hora (o payload nao traz o inicio da live original).
+  const replay = console_.consoleComment({ kind: "replay", message: message(), mine: false, scheduledAt: "2026-11-05T23:00:00.000Z" });
+  assert.equal(replay.time, null);
+  assert.equal(replay.srAuthor, "Ana M.: ");
 });

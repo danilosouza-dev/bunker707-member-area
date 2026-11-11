@@ -5,32 +5,49 @@ import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type PersonaRole, type ScriptItem, type ScriptItemDraft, type ScriptStatus, type ScriptTrigger, type WebinarSession, type WebinarTranscriptFormat } from "@/server/webinars/model";
 import type { TranscriptSummary } from "@/server/webinars/queries";
-import { exportScriptCsv, exportSessionChatCsv, importScriptCsv, resolveScriptPhrases, saveScriptItems, saveTranscript } from "@/server/webinars/script-actions";
+import { LIVE_SCRIPT_TRIGGER_LABELS, withPersonaAvatarForName } from "@/server/webinars/persona-model";
+import { exportScriptCsv, exportSessionChatCsv, importScriptCsv, resolveScriptPhrases, saveScriptItems, saveTranscript, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { SCRIPT_TRIGGER_LABELS, formatOffsetText, parseOffsetText, parseScriptCsv, scriptSummary, sortScriptItems, type ScriptCsvResult } from "@/server/webinars/script-model";
 import { ErrorBanner } from "../../error-banner";
 import { PillGroup, adminInputClass, adminTextareaClass } from "../../form";
 import { ConfirmDialog } from "../../settings/kit";
 import { StatusChip } from "../../status-chip";
 import { adminToast } from "../../toast";
+import { PersonaPhotoField } from "./persona-photo-field";
+import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model";
 
 // Card "Roteiro de chat" do editor (docs/30 §2.2, §6.6 D6-b e D6-c; fase 2b): os itens em linhas editaveis (minuto,
 // nome, papel, mensagem, Solta em, frase e atraso, situacao), Importar CSV (lido no navegador para a previa com os
 // erros por linha, enviado ao servidor para gravar), Exportar CSV, o chat de uma sessao encerrada como CSV, a
 // transcricao do video (colada ou enviada) e Resolver frases. O card guarda o proprio estado: o que vem das Server
-// Actions e a verdade (os itens gravados, com a situacao decidida no servidor).
+// Actions e a verdade (os itens gravados, com a situacao decidida no servidor). Adendo de 10/11/2026 (R8 e R9): o card
+// tambem no webinario ao vivo (`webinarKind` "live"): os gatilhos "Num minuto da live" (contado do Começar para todos)
+// e "Pelo botão da equipe", a frase que diz por que "Quando o apresentador diz" nao existe na live e sem a transcricao;
+// e, nos dois tipos, a Foto (opcional) de quem comenta em cada linha (persona-photo-field.tsx), com o "Usar esta foto em
+// todos os comentários de {nome}" ligado por padrao (a foto vai para as linhas com o mesmo nome; o Salvar grava).
+// Na live, o "Minuto da live" e lido como no card Simulação: o numero sozinho e minuto ("12" = 12 min) e "12:30" e
+// minuto e segundo (minuteMarkToMs / minuteMarkOf); o CSV da live tambem (parseScriptCsv com `live`). O Salvar fica
+// desligado enquanto uma foto sobe; manda os ids que o card carregou (`loadedIds`: o servidor so apaga desses, nunca um
+// item que o console guardou depois) e so a foto que mudou (a que ficou igual nao vai, e a do banco fica: o "Usar esta
+// foto em todos" do console nao e desfeito por um Salvar com a pagina velha).
 
 const copy = WEBINAR_ADMIN_COPY.script;
+const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
 
 type Row = {
+  /** A caixa "Usar esta foto em todos os comentários de {nome}" desta linha (ligada por padrao). */
+  applyToAll: boolean;
   body: string;
   id: string | null;
   key: string;
   kind: "message" | "question";
   offsetMs: number | null;
   offsetText: string;
+  personaAvatarPath: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string;
@@ -45,17 +62,29 @@ type Failure = { message: string; status: number };
 type ScriptCardProps = {
   disabled: boolean;
   hasRecording: boolean;
+  /** O webinario arquivado (docs/30 §2.3): nada se grava; exportar o roteiro e o chat continua. */
+  readOnly?: boolean;
   initialItems: readonly ScriptItem[];
   initialTranscript: TranscriptSummary | null;
   /** As sessoes gravadas (as encerradas oferecem o CSV do chat real). */
   sessions: readonly WebinarSession[];
   webinarId: string;
+  /** O tipo do webinario: na Live ao vivo, os gatilhos da live e sem a transcricao (R8). */
+  webinarKind?: "live" | "simulated";
+  /** As linhas (pelo id do item) com a foto subindo ao desenhar (o teste de tela). */
+  initialUploading?: readonly string[];
 };
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
   { label: SCRIPT_TRIGGER_LABELS.at_offset, value: "at_offset" },
   { label: SCRIPT_TRIGGER_LABELS.on_phrase, value: "on_phrase" },
   { label: SCRIPT_TRIGGER_LABELS.manual, value: "manual" }
+];
+
+/** Na Live ao vivo (R8): "Num minuto da live" e "Pelo botão da equipe" (sem transcricao durante a transmissao). */
+const LIVE_TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
+  { label: LIVE_SCRIPT_TRIGGER_LABELS.at_offset, value: "at_offset" },
+  { label: LIVE_SCRIPT_TRIGGER_LABELS.manual, value: "manual" }
 ];
 
 const STATUS_TONE: Record<ScriptStatus, "muted" | "neutral" | "success" | "warning"> = { disabled: "muted", draft: "neutral", ready: "success", unresolved: "warning" };
@@ -67,14 +96,30 @@ function rowKey() {
   return `row-${rowCounter}`;
 }
 
-function rowOf(item: ScriptItem): Row {
+/** O tempo do campo: na live, o minuto da live ("12" ou "12:30"); na gravada, o minuto do video ("02:03"). */
+function offsetTextOf(offsetMs: number, live: boolean): string {
+  return live ? minuteMarkOf(offsetMs) : formatOffsetText(offsetMs);
+}
+
+/** O que foi digitado no campo do tempo, em ms (nulo: nao entendeu); na live, o numero sozinho e minuto. */
+export function scriptOffsetInput(text: string, live: boolean): number | null {
+  if (!live) {
+    return parseOffsetText(text);
+  }
+  const ms = minuteMarkToMs(text);
+  return ms !== null && ms <= CHAT_LIMITS.offsetMaxMs ? ms : null;
+}
+
+function rowOf(item: ScriptItem, live: boolean): Row {
   return {
+    applyToAll: true,
     body: item.body,
     id: item.id,
     key: item.id,
     kind: item.kind,
     offsetMs: item.offsetMs,
-    offsetText: item.offsetMs == null ? "" : formatOffsetText(item.offsetMs),
+    offsetText: item.offsetMs == null ? "" : offsetTextOf(item.offsetMs, live),
+    personaAvatarPath: item.personaAvatarPath ?? null,
     personaName: item.personaName,
     personaRole: item.personaRole,
     phrase: item.phrase ?? "",
@@ -85,8 +130,24 @@ function rowOf(item: ScriptItem): Row {
   };
 }
 
-function emptyRow(): Row {
-  return { body: "", id: null, key: rowKey(), kind: "message", offsetMs: 0, offsetText: "00:00", personaName: "", personaRole: "student", phrase: "", phraseDelaySeconds: 0, resolvedOffsetMs: null, status: "draft", triggerKind: "at_offset" };
+function emptyRow(live: boolean): Row {
+  return {
+    applyToAll: true,
+    body: "",
+    id: null,
+    key: rowKey(),
+    kind: "message",
+    offsetMs: 0,
+    offsetText: offsetTextOf(0, live),
+    personaAvatarPath: null,
+    personaName: "",
+    personaRole: "student",
+    phrase: "",
+    phraseDelaySeconds: 0,
+    resolvedOffsetMs: null,
+    status: "draft",
+    triggerKind: "at_offset"
+  };
 }
 
 /** O que a Server Action recebe (a situacao final e do servidor; "disabled" e a unica escolha da tela). */
@@ -96,6 +157,7 @@ function draftOf(row: Row): ScriptItemDraft {
     id: row.id,
     kind: row.kind,
     offsetMs: row.triggerKind === "at_offset" ? row.offsetMs : null,
+    personaAvatarPath: row.personaAvatarPath,
     personaName: row.personaName.trim(),
     personaRole: row.personaRole,
     phrase: row.triggerKind === "on_phrase" ? row.phrase.trim() || null : null,
@@ -103,6 +165,30 @@ function draftOf(row: Row): ScriptItemDraft {
     status: row.status === "disabled" ? "disabled" : "draft",
     triggerKind: row.triggerKind
   };
+}
+
+/**
+ * O que o Salvar manda (achado 3 da revisao de 11/11/2026): os rascunhos com a foto so quando ela mudou em relacao ao
+ * item carregado (a que ficou igual vai ausente e o servidor mantem a do banco, que o console pode ter trocado pelo "Usar
+ * esta foto em todos") e os ids carregados, os unicos que o servidor pode apagar.
+ */
+export function scriptSaveInput(drafts: readonly ScriptItemDraft[], loaded: readonly Pick<ScriptItem, "id" | "personaAvatarPath">[], webinarId: string): { items: ScriptItemDraft[]; loadedIds: string[]; webinarId: string } {
+  const loadedPhotos = new Map(loaded.map((item) => [item.id, item.personaAvatarPath ?? null]));
+  const items = drafts.map((draft) => {
+    const unchanged = draft.id && loadedPhotos.has(draft.id) && loadedPhotos.get(draft.id) === (draft.personaAvatarPath ?? null);
+    if (!unchanged) {
+      return draft;
+    }
+    const rest = { ...draft };
+    delete rest.personaAvatarPath;
+    return rest;
+  });
+  return { items, loadedIds: loaded.map((item) => item.id), webinarId };
+}
+
+/** O Salvar vale: com mudanca, o card livre e nenhuma foto subindo (o envio no meio sairia sem a foto). */
+export function scriptCanSave(input: { dirty: boolean; locked: boolean; uploading: number }): boolean {
+  return input.dirty && !input.locked && input.uploading === 0;
 }
 
 /** Problemas que a tela aponta antes de enviar (o schema do servidor confere de novo). */
@@ -145,9 +231,13 @@ function downloadCsv(csv: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, sessions, webinarId }: ScriptCardProps) {
+export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, initialUploading = [], readOnly = false, sessions, webinarId, webinarKind = "simulated" }: ScriptCardProps) {
   const idBase = useId();
-  const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map(rowOf));
+  const live = webinarKind === "live";
+  const triggerOptions = live ? LIVE_TRIGGER_OPTIONS : TRIGGER_OPTIONS;
+  const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map((item) => rowOf(item, live)));
+  // As linhas com a foto subindo: o Salvar espera (o caminho da foto ainda nao chegou).
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(() => new Set(initialUploading));
   const [saved, setSaved] = useState<readonly ScriptItem[]>(initialItems);
   const [transcript, setTranscript] = useState<TranscriptSummary | null>(initialTranscript);
   const [transcriptText, setTranscriptText] = useState("");
@@ -161,13 +251,27 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
   const transcriptInput = useRef<HTMLInputElement>(null);
 
   const summary = useMemo(() => scriptSummary(saved), [saved]);
-  const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map(rowOf).map(draftOf)), [rows, saved]);
+  const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map((item) => draftOf(rowOf(item, live)))), [live, rows, saved]);
   const ended = sessions.filter((session) => session.kind !== "replay" && session.status === "ended");
-  const locked = disabled || busy !== null;
+  // As exportacoes so leem: seguem no arquivado (`readOnly`), que tranca o resto do card.
+  const reading = disabled || busy !== null;
+  const locked = reading || readOnly;
 
   function applySaved(items: ScriptItem[]) {
     setSaved(items);
-    setRows(sortScriptItems(items).map(rowOf));
+    setRows(sortScriptItems(items).map((item) => rowOf(item, live)));
+  }
+
+  function setRowUploading(key: string, on: boolean) {
+    setUploading((current) => {
+      const next = new Set(current);
+      if (on) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
   }
 
   function fail(result: { error: string; fieldErrors?: Record<string, string[] | undefined>; status: number }) {
@@ -185,16 +289,40 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
+  /** A foto da linha (R9): com a caixa ligada e o nome, vai tambem para as linhas com o mesmo nome; Remover, so esta. */
+  function setPhoto(key: string, path: string | null) {
+    setRows((current) => {
+      const row = current.find((item) => item.key === key);
+      if (!row) {
+        return current;
+      }
+      const own = current.map((item) => (item.key === key ? { ...item, personaAvatarPath: path } : item));
+      return path && row.applyToAll && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, path) : own;
+    });
+  }
+
+  /** A caixa "Usar esta foto em todos os comentários de {nome}": ligada com a foto, a foto vai para as outras linhas agora. */
+  function setApplyToAll(key: string, checked: boolean) {
+    setRows((current) => {
+      const row = current.find((item) => item.key === key);
+      const own = current.map((item) => (item.key === key ? { ...item, applyToAll: checked } : item));
+      return checked && row?.personaAvatarPath && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, row.personaAvatarPath) : own;
+    });
+  }
+
   async function save() {
     const problem = rows.map((row, index) => ({ index, problem: rowProblem(row) })).find((entry) => entry.problem);
     if (problem) {
       setFailure({ message: `Mensagem ${problem.index + 1}: ${problem.problem}`, status: 400 });
       return;
     }
+    if (uploading.size > 0) {
+      return;
+    }
     setBusy("save");
     setFailure(null);
     setFieldErrors({});
-    const result = await saveScriptItems({ items: rows.map(draftOf), webinarId });
+    const result = await saveScriptItems(scriptSaveInput(rows.map(draftOf), saved, webinarId));
     setBusy(null);
     if (!result.ok) {
       fail(result);
@@ -211,7 +339,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       return;
     }
     const csv = await file.text();
-    setImporting({ csv, fileName: file.name, preview: parseScriptCsv(csv), replace: false });
+    setImporting({ csv, fileName: file.name, preview: parseScriptCsv(csv, { live }), replace: false });
   }
 
   async function confirmImport() {
@@ -325,11 +453,13 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
           {copy.importCsv}
         </Button>
         <input accept=".csv,text/csv" className="sr-only" data-script-csv-input="" onChange={(event) => void readCsv(event)} ref={csvInput} tabIndex={-1} type="file" />
-        <Button className="px-3" disabled={locked || saved.length === 0} onClick={() => void exportScript()} type="button" variant="secondary">
+        <Button className="px-3" disabled={reading || saved.length === 0} onClick={() => void exportScript()} type="button" variant="secondary">
           <Download aria-hidden="true" className="size-4" />
           {copy.exportCsv}
         </Button>
-        <span className="text-xs leading-5 text-[var(--text-secondary)]">{copy.csvHint}</span>
+        <span className="text-xs leading-5 text-[var(--text-secondary)]" data-script-csv-hint="">
+          {live ? COMENTARIOS.csvDicaLive : copy.csvHint}
+        </span>
       </div>
 
       <p aria-live="polite" className="text-[13px] leading-5 text-[var(--text-secondary)]" data-script-summary="">
@@ -338,6 +468,11 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       </p>
 
       {rows.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</p> : null}
+      {live ? (
+        <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-script-live-hint="">
+          {COMENTARIOS.semFraseNaLive}
+        </p>
+      ) : null}
 
       <ol className="flex min-w-0 flex-col gap-3">
         {rows.map((row, index) => {
@@ -386,6 +521,19 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                 </div>
               </div>
 
+              <PersonaPhotoField
+                applyToAll={row.applyToAll}
+                disabled={locked}
+                idBase={`${base}-persona`}
+                name={row.personaName}
+                onApplyToAllChange={(checked) => setApplyToAll(row.key, checked)}
+                onChange={(path) => setPhoto(row.key, path)}
+                onUpload={(image) => uploadPersonaPhoto({ image })}
+                onUploadingChange={(on) => setRowUploading(row.key, on)}
+                path={row.personaAvatarPath}
+                uploading={uploading.has(row.key)}
+              />
+
               <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
                 {copy.columns.body}
                 <textarea className={cn(adminTextareaClass, "min-h-16")} disabled={locked} maxLength={CHAT_LIMITS.body} onChange={(event) => updateRow(row.key, { body: event.target.value })} rows={2} value={row.body} />
@@ -393,23 +541,24 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
 
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.trigger}</span>
-                <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={TRIGGER_OPTIONS} value={row.triggerKind} />
+                <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={triggerOptions} value={row.triggerKind} />
               </div>
 
               {row.triggerKind === "at_offset" ? (
                 <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                  {copy.columns.time}
+                  {live ? COMENTARIOS.minutoDaLive : copy.columns.time}
                   <input
                     aria-invalid={row.offsetMs == null ? true : undefined}
                     className={cn(adminInputClass, "w-36")}
                     disabled={locked}
                     inputMode="numeric"
-                    onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : formatOffsetText(row.offsetMs) })}
-                    onChange={(event) => updateRow(row.key, { offsetMs: parseOffsetText(event.target.value), offsetText: event.target.value })}
-                    placeholder={copy.timePlaceholder}
+                    onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : offsetTextOf(row.offsetMs, live) })}
+                    onChange={(event) => updateRow(row.key, { offsetMs: scriptOffsetInput(event.target.value, live), offsetText: event.target.value })}
+                    placeholder={live ? "12:30" : copy.timePlaceholder}
                     type="text"
                     value={row.offsetText}
                   />
+                  {live ? <span className="text-xs leading-5 font-normal text-[var(--text-secondary)]">{COMENTARIOS.minutoDaLiveDica}</span> : null}
                 </label>
               ) : null}
 
@@ -441,57 +590,60 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       </ol>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button className="px-3" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={() => setRows((current) => [...current, emptyRow()])} type="button" variant="secondary">
+        <Button className="px-3" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={() => setRows((current) => [...current, emptyRow(live)])} type="button" variant="secondary">
           <Plus aria-hidden="true" className="size-4" />
           {copy.add}
         </Button>
-        <Button className="px-4" disabled={locked || !dirty} onClick={() => void save()} type="button">
+        <Button className="px-4" data-script-save="" disabled={!scriptCanSave({ dirty, locked, uploading: uploading.size })} onClick={() => void save()} type="button">
           {working(copy.save, "save")}
         </Button>
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] pt-4">
-        <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{copy.transcriptTitle}</span>
-        <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-transcript-summary="">
-          {transcript ? copy.transcriptSummary(transcript.cues, transcript.format, formatSaoPauloDateTime(transcript.updatedAt)) : copy.transcriptNone}
-        </p>
-        {!hasRecording ? <p className="text-[13px] leading-5 text-[var(--warning)]">{copy.noRecording}</p> : null}
-        <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-          {copy.transcriptPaste}
-          <textarea
-            aria-invalid={fieldErrors.text ? true : undefined}
-            className={cn(adminTextareaClass, "min-h-24 font-mono text-xs")}
-            disabled={locked || !hasRecording}
-            onChange={(event) => {
-              setTranscriptText(event.target.value);
-              setTranscriptFormat(formatOf("", event.target.value));
-            }}
-            placeholder="WEBVTT…"
-            rows={4}
-            value={transcriptText}
-          />
-        </label>
-        <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.transcriptHint}</p>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button className="px-3" disabled={locked || !hasRecording} onClick={() => transcriptInput.current?.click()} type="button" variant="secondary">
-            <Upload aria-hidden="true" className="size-4" />
-            {copy.transcriptFile}
-          </Button>
-          <input accept=".vtt,.srt,.txt,text/vtt,text/plain" className="sr-only" data-transcript-input="" onChange={(event) => void readTranscriptFile(event)} ref={transcriptInput} tabIndex={-1} type="file" />
-          <Button className="px-3" disabled={locked || !hasRecording || !transcriptText.trim()} onClick={() => void submitTranscript()} type="button">
-            {working(copy.transcriptSave, "transcript")}
-          </Button>
-          <Button className="px-3" disabled={locked || !transcript} onClick={() => void resolve()} type="button" variant="secondary">
-            {working(copy.resolve, "resolve")}
-          </Button>
+      {/* A transcricao e as frases so na gravada: na live ao vivo nao ha transcricao durante a transmissao (R8). */}
+      {live ? null : (
+        <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] pt-4">
+          <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{copy.transcriptTitle}</span>
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-transcript-summary="">
+            {transcript ? copy.transcriptSummary(transcript.cues, transcript.format, formatSaoPauloDateTime(transcript.updatedAt)) : copy.transcriptNone}
+          </p>
+          {!hasRecording ? <p className="text-[13px] leading-5 text-[var(--warning)]">{copy.noRecording}</p> : null}
+          <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+            {copy.transcriptPaste}
+            <textarea
+              aria-invalid={fieldErrors.text ? true : undefined}
+              className={cn(adminTextareaClass, "min-h-24 font-mono text-xs")}
+              disabled={locked || !hasRecording}
+              onChange={(event) => {
+                setTranscriptText(event.target.value);
+                setTranscriptFormat(formatOf("", event.target.value));
+              }}
+              placeholder="WEBVTT…"
+              rows={4}
+              value={transcriptText}
+            />
+          </label>
+          <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.transcriptHint}</p>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button className="px-3" disabled={locked || !hasRecording} onClick={() => transcriptInput.current?.click()} type="button" variant="secondary">
+              <Upload aria-hidden="true" className="size-4" />
+              {copy.transcriptFile}
+            </Button>
+            <input accept=".vtt,.srt,.txt,text/vtt,text/plain" className="sr-only" data-transcript-input="" onChange={(event) => void readTranscriptFile(event)} ref={transcriptInput} tabIndex={-1} type="file" />
+            <Button className="px-3" disabled={locked || !hasRecording || !transcriptText.trim()} onClick={() => void submitTranscript()} type="button">
+              {working(copy.transcriptSave, "transcript")}
+            </Button>
+            <Button className="px-3" disabled={locked || !transcript} onClick={() => void resolve()} type="button" variant="secondary">
+              {working(copy.resolve, "resolve")}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {ended.length > 0 ? (
         <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4">
           <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]" htmlFor={`${idBase}-chat-session`}>
             {copy.exportChat}
-            <select className={cn(adminInputClass, "max-w-sm")} disabled={locked} id={`${idBase}-chat-session`} onChange={(event) => setChatSession(event.target.value)} value={chatSession}>
+            <select className={cn(adminInputClass, "max-w-sm")} disabled={reading} id={`${idBase}-chat-session`} onChange={(event) => setChatSession(event.target.value)} value={chatSession}>
               <option value="">—</option>
               {ended.map((session) => (
                 <option key={session.id} value={session.id}>
@@ -502,7 +654,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
           </label>
           <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.exportChatHint}</p>
           <div>
-            <Button className="px-3" disabled={locked || !chatSession} onClick={() => void exportChat()} type="button" variant="secondary">
+            <Button className="px-3" disabled={reading || !chatSession} onClick={() => void exportChat()} type="button" variant="secondary">
               <Download aria-hidden="true" className="size-4" />
               {copy.exportCsv}
             </Button>

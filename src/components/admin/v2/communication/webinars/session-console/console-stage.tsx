@@ -1,7 +1,7 @@
 "use client";
 
-import { DoorOpen, LogIn, RefreshCw, Users } from "lucide-react";
-import { useEffect, type CSSProperties, type RefObject } from "react";
+import { DoorOpen, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 import { columnWanted, stageColumnShown } from "@/components/member/webinars/room/live-room-model";
 import { stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
 import { RoomStageBadges, RoomStagePill } from "@/components/member/webinars/room/room-stage-badges";
@@ -29,7 +29,9 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
 // gravador) e o co-apresentador e a Equipe tiram ou poem a coluna pela largura, como o aluno (columnWanted).
-// Nenhum texto cita o motor da sala.
+// Nenhum texto cita o motor da sala. A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §6.1): os cartoes do banner
+// e do QR Code nao sao desenhados neste palco (o menu das miniaturas do motor precisa continuar livre); com algum deles
+// na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 /**
@@ -49,6 +51,8 @@ type ConsoleStageProps = {
   presentLabel: string | null;
   /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
   presenterName: string | null;
+  /** "Na tela: Banner · QR Code" (a Na tela, com o banner ou o QR Code na frente da turma); nulo, a pilula nao aparece. */
+  screenLabel?: string | null;
   session: WebinarSession;
   /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */
   stageRef: RefObject<HTMLDivElement | null>;
@@ -56,8 +60,13 @@ type ConsoleStageProps = {
   topLeft: ConsoleStageTopLeft | null;
 };
 
-/** A frase por cima do palco quando a sala nao esta no iframe (abrindo, agendada, encerrada, sem a sala no ambiente). */
-function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]): string | null {
+/**
+ * A frase por cima do palco quando a sala nao esta no iframe (abrindo, agendada, encerrada, sem a sala no ambiente). A
+ * falha so diz "Não conseguimos voltar." depois de o console ter entrado nesta pagina (a queda e as tentativas de
+ * voltar); a que acontece antes de entrar (o servidor de video fora do ar, o script que nao carrega) diz que nao foi
+ * possivel abrir a sala, como a falha do token.
+ */
+function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], everJoined: boolean): string | null {
   if (!handle.meetConfigured) {
     return copy.salaEmBreve;
   }
@@ -74,7 +83,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]):
     case "joined":
       return null;
     case "failed":
-      return WEBINAR_COPY.aoVivo.naoConseguimosVoltar;
+      return everJoined ? WEBINAR_COPY.aoVivo.naoConseguimosVoltar : WEBINAR_COPY.aoVivo.erroAbrir;
     case "left":
       return null;
     default:
@@ -82,7 +91,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"]):
   }
 }
 
-export function ConsoleStage({ busy, className, handle, live, presentLabel, presenterName, session, stageRef, topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, live, presentLabel, presenterName, screenLabel = null, session, stageRef, topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
@@ -99,7 +108,12 @@ export function ConsoleStage({ busy, className, handle, live, presentLabel, pres
     }
   }, [byWidth, filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
 
-  const message = frameMessage(handle, session.status);
+  // O console ja entrou na sala nesta pagina (a falha depois disso e uma queda; antes, a sala que nao abriu).
+  const [everJoined, setEverJoined] = useState(joined);
+  if (joined && !everJoined) {
+    setEverJoined(true);
+  }
+  const message = frameMessage(handle, session.status, everJoined);
   const recording = room.recording.on || live.recorder.status === "recording";
   const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
   const showRetry = handle.frameStatus === "failed" || (handle.tokenError === "failed" && handle.frameStatus === "idle");
@@ -116,11 +130,21 @@ export function ConsoleStage({ busy, className, handle, live, presentLabel, pres
         recording={recording}
         topLeft={topLeft}
         topRight={
-          presentLabel ? (
-            <RoomStagePill className="tabular-nums" data-room-badge="present">
-              <Users aria-hidden="true" />
-              {presentLabel}
-            </RoomStagePill>
+          presentLabel || screenLabel ? (
+            <>
+              {presentLabel ? (
+                <RoomStagePill className="tabular-nums" data-room-badge="present">
+                  <Users aria-hidden="true" />
+                  {presentLabel}
+                </RoomStagePill>
+              ) : null}
+              {screenLabel ? (
+                <RoomStagePill data-room-badge="screen">
+                  <PictureInPicture2 aria-hidden="true" />
+                  {screenLabel}
+                </RoomStagePill>
+              ) : null}
+            </>
           ) : null
         }
       />

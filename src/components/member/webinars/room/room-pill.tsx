@@ -61,8 +61,11 @@ const PILL_DISABLED = {
   text: "disabled:bg-transparent disabled:text-room-fg-disabled disabled:shadow-none disabled:hover:bg-transparent aria-disabled:bg-transparent aria-disabled:text-room-fg-disabled aria-disabled:shadow-none aria-disabled:hover:bg-transparent"
 };
 
-/** A area de toque de 44 px abaixo de lg (a pilula S e o circulo S de 32), sem mudar o desenho. */
-const TOUCH_44 = "relative after:absolute after:-inset-1.5 lg:after:hidden";
+/**
+ * A area de toque de 44 px abaixo de lg (a pilula S e o circulo S de 32), sem mudar o desenho; exportada para quem desenha
+ * a pilula S num link (roomPillClassName: o botao e o Abrir o link da Na tela).
+ */
+export const ROOM_TOUCH_44 = "relative after:absolute after:-inset-1.5 lg:after:hidden";
 
 /** As classes de uma pilula (a forma, o tamanho e o estilo), para quem desenha uma pilula num elemento que nao e o RoomPill. */
 export function roomPillClassName({ className, shape = "pill", size = "m", tone = "tonal" }: { className?: string; shape?: RoomPillShape; size?: RoomPillSize; tone?: RoomPillTone } = {}): string {
@@ -79,7 +82,7 @@ export type RoomPillProps = Omit<ComponentProps<"button">, "aria-label" | "title
   /** Desligado COM motivo: aria-disabled (continua focavel) e o motivo lido por aria-describedby. */
   disabledReason?: string;
   icon?: LucideIcon;
-  /** O estado no icone (a mascara cheia da Anonima ligada), como o curtir do YouTube. */
+  /** O estado no icone (o polegar cheio do curtir ligado), como no YouTube. */
   iconFilled?: boolean;
   /** O icone do fim (a seta da Visão do vídeo). Na compacta de menu, a seta e sempre o ChevronDown de 16. */
   trailing?: LucideIcon;
@@ -150,7 +153,7 @@ export function RoomPill({
         aria-describedby={describedBy}
         aria-disabled={blocked ? true : props["aria-disabled"]}
         aria-label={withLabel ? undefined : label}
-        className={roomPillClassName({ className: cn(touch44 ? TOUCH_44 : undefined, className), shape, size, tone })}
+        className={roomPillClassName({ className: cn(touch44 ? ROOM_TOUCH_44 : undefined, className), shape, size, tone })}
         disabled={blocked ? undefined : disabled}
         onClick={handleClick}
         type={type}

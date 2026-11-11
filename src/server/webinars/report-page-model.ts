@@ -3,10 +3,12 @@
 // geometria da curva "Presentes minuto a minuto" (e a tabela por minuto que a substitui) com o trecho da transcricao
 // de cada ponto de queda, as barras (mensagens por minuto, reacoes, origem da vaga), as enquetes por opcao, a
 // pontuacao dos alunos (a mesma conta M3 de webinar_report, com os pesos de ROOM_RULES), os blocos da fase 4 (Oferta,
-// Respostas do Assistente e a Simulacao completa) e o CSV "Attendee" nos nomes do Zoom. Sem "server-only", imports
+// Respostas do Assistente e a Simulacao completa), o bloco "Na tela" (especificacao de 10/11/2026, §7: uma linha por
+// exibicao de banner, QR Code ou enquete fixada) e o CSV "Attendee" nos nomes do Zoom. Sem "server-only", imports
 // relativos: tests/webinarios-relatorio-*.test.mjs carregam direto pelo Node. Os numeros simulados nunca entram aqui
 // alem do bloco Simulacao (D6, D10): a RPC ja separa as linhas `sim_*` e report-model.ts so as poe em `script` e
-// `simulation`, que so simulationLines le.
+// `simulation`, que so simulationLines le. Adendo de 10/11/2026 (R7): o bloco Simulacao tambem na Live ao vivo, so
+// quando ela teve algo simulado (simulationBlockVisible), sem o selo "Ao vivo" da gravada e com os gatilhos da live.
 
 import type { CsvCell } from "../../lib/csv";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -29,8 +31,11 @@ import {
   type SimulatedCountMode,
   type WebinarSession
 } from "./model";
+import { LIVE_SCRIPT_TRIGGER_LABELS, scriptTriggersFor } from "./persona-model";
 import { bucketLabel, percentOf, revenueLabel, watchTimeLabel, type ReportBucket, type WebinarReportView } from "./report-model";
 import { bucketCount } from "./room-model";
+import { screenDisplayLabel, type ScreenDisplay, type ScreenDisplayKind } from "./screen-model";
+import type { ScreenStats } from "./screen-rows";
 
 const COPY = WEBINAR_COPY.relatorio;
 const EXPORTAR = WEBINAR_COPY.exportar;
@@ -325,6 +330,7 @@ export function questionStatusBars(questions: WebinarReportView["questions"]): R
  * ---------------------------------------------------------------------------------------------- */
 
 export type PollResultOption = { id: string; label: string; percent: number | null; students: number; total: number };
+/** `anonymous`: legado, enquetes de antes de 10/11/2026 (D64) marcadas como anonimas (a nota "Anônima: só as barras."). */
 export type PollResult = { anonymous: boolean; id: string; options: PollResultOption[]; question: string; total: number };
 
 /** As respostas por opcao de cada enquete lancada na sessao (os rotulos vem das linhas de webinar_polls). */
@@ -579,7 +585,8 @@ export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly Tran
 
 /* ------------------------------------------------------------------------------------------------
  * O bloco Simulacao completo (docs/30 §3.5): o selo e quem decidiu, o contador com o real ao lado, as entradas, os
- * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6).
+ * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6). Na Live ao
+ * vivo (R7): sem o selo (a primeira linha diz so quem decidiu) e o roteiro pelos gatilhos da live.
  * ---------------------------------------------------------------------------------------------- */
 
 /** As regras da fase 4 (202610300003) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
@@ -597,12 +604,37 @@ export type SimulationSummary = {
   pending: boolean;
   /** Os participantes de verdade (presentes unicos), ao lado do contador para a equipe comparar. */
   realParticipants: number;
+  /**
+   * A sessao e a Live ao vivo (R7): a primeira linha sem o selo "Ao vivo" da gravada (que nunca existe na live) e o
+   * roteiro por Solta em so com os gatilhos da live ("Num minuto da live" e "Pelo botão da equipe").
+   */
+  live: boolean;
   rules: SimulationRulesSummary | null;
   script: { byTrigger: Record<ScriptTrigger, number>; fired: number; missed: number; ready: number };
   showLiveBadge: boolean;
   /** O que simulation_summary congelou no fim (as linhas sim_* da RPC); nulo antes do fim ou sem regra. */
   totals: WebinarReportView["simulation"];
 };
+
+/**
+ * O bloco Simulacao aparece na sessao: sempre na gravada (o selo e a decisao dela); na Live ao vivo (R7), so quando ela
+ * teve algo simulado: a decisao registrada no card, uma regra ligada, o resumo congelado no fim ou o roteiro (itens
+ * prontos ou comentarios que entraram). A live sem nada disso fica sem o bloco, como antes; o Replay, nunca.
+ */
+export function simulationBlockVisible(kind: SessionKind, summary: SimulationSummary): boolean {
+  if (kind === "simulated") {
+    return true;
+  }
+  if (kind !== "live") {
+    return false;
+  }
+  const { rules, script, totals } = summary;
+  const ruleOn = Boolean(rules && (rules.countMode !== "off" || rules.joins.enabled || rules.saleNotices.enabled));
+  const frozen = totals.counterMax !== null || totals.joinsShown !== null || totals.saleNoticesShown !== null;
+  const scripted = script.ready > 0 || script.fired > 0 || Object.values(script.byTrigger).some((count) => count > 0);
+
+  return summary.decidedAt !== null || ruleOn || frozen || scripted;
+}
 
 export function emptyScriptByTrigger(): Record<ScriptTrigger, number> {
   return { at_offset: 0, manual: 0, on_phrase: 0 };
@@ -614,7 +646,8 @@ export function simulationLines(summary: SimulationSummary): string[] {
   const decision = summary.decidedAt
     ? COPY.decididoPor(summary.decidedByName || COPY.alunoSemNome, formatSaoPauloDateTime(summary.decidedAt))
     : COPY.semDecisao;
-  const lines = [`${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`];
+  // A live nunca tem o selo da gravada: a primeira linha diz so quem decidiu a Simulacao dela.
+  const lines = [summary.live ? `${COPY.simulacaoDaLive}: ${decision}` : `${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`];
   const { rules, totals } = summary;
 
   if (rules) {
@@ -630,7 +663,72 @@ export function simulationLines(summary: SimulationSummary): string[] {
 
   lines.push(COPY.roteiroProntos(summary.script.ready));
   lines.push(`${COPY.roteiroEntraram(summary.script.fired)} · ${COPY.roteiroFaltaram(summary.script.missed)}`);
-  lines.push(`${SIM.porSoltaEm}: ${SCRIPT_TRIGGERS.map((trigger) => `${EXPORTAR.valores.soltaEm[trigger]} ${summary.script.byTrigger[trigger] ?? 0}`).join(" · ")}`);
+  // Na live, so os gatilhos dela (sem "Quando o apresentador diz", que nao existe na transmissao).
+  const triggers = summary.live ? scriptTriggersFor("live") : SCRIPT_TRIGGERS;
+  const label = (trigger: ScriptTrigger) => (summary.live && trigger !== "on_phrase" ? LIVE_SCRIPT_TRIGGER_LABELS[trigger] : EXPORTAR.valores.soltaEm[trigger]);
+  lines.push(`${SIM.porSoltaEm}: ${triggers.map((trigger) => `${label(trigger)} ${summary.script.byTrigger[trigger] ?? 0}`).join(" · ")}`);
 
   return lines;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O bloco "Na tela" (especificacao de 10/11/2026, §7): uma linha por exibicao da sessao
+ * ---------------------------------------------------------------------------------------------- */
+
+const NA_TELA = WEBINAR_COPY.naTela.relatorio;
+
+/** Uma linha do bloco: o item, quando entrou, quanto ficou e os numeros (nulos na enquete fixada: as respostas estao no bloco Enquetes). */
+export type ScreenReportRow = {
+  clickers: number | null;
+  clicks: number | null;
+  closed: number | null;
+  /** "12:30" (o minuto da sessao) ou "antes do início" (na espera). */
+  enteredAt: string;
+  id: string;
+  kind: ScreenDisplayKind;
+  label: string;
+  /** Clicaram ÷ viram, em %; nulo sem quem viu (a tela mostra "—") e na enquete fixada. */
+  rate: number | null;
+  shown: number | null;
+  /** "45 min", "1 h 12 min", "30 s". */
+  stayed: string;
+};
+
+/** O minuto da sessao em que a exibicao entrou: "mm:ss" (ou "h:mm:ss"); negativo, "antes do início". */
+export function screenEnteredLabel(offsetMs: number | null): string {
+  if (offsetMs === null || !Number.isFinite(offsetMs)) {
+    return "—";
+  }
+  if (offsetMs < 0) {
+    return NA_TELA.antesDoInicio;
+  }
+  const total = Math.floor(offsetMs / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * As linhas do bloco "Na tela", na ordem em que entraram. `zeroMs` e o zero do relogio da sessao (sessionVideoZero), usado
+ * quando a exibicao nao guardou o offset; `endMs` e o fim da sessao (ou agora, com ela no ar): quem nao saiu ficou ate
+ * ele. O item e "Banner · {nome}", "QR Code · {nome}" ou "Enquete fixada · {pergunta}" (a copia que nao passou no zod
+ * vira "—"). Viram, Clicaram e Fecharam sao alunos distintos; Cliques, o total; a enquete fixada fica sem numeros.
+ */
+export function screenReportRows(input: { displays: readonly ScreenDisplay[]; endMs: number; stats: Readonly<Record<string, ScreenStats>>; zeroMs: number }): ScreenReportRow[] {
+  return [...input.displays]
+    .sort((a, b) => toTime(a.shownAt) - toTime(b.shownAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((display) => {
+      const shownMs = toTime(display.shownAt);
+      const offsetMs = display.shownOffsetMs ?? (Number.isFinite(input.zeroMs) && Number.isFinite(shownMs) ? shownMs - input.zeroMs : null);
+      const untilMs = display.hiddenAt ? toTime(display.hiddenAt) : input.endMs;
+      const stayedSeconds = Number.isFinite(untilMs) && Number.isFinite(shownMs) ? Math.max(0, (untilMs - shownMs) / 1000) : 0;
+      const base = { enteredAt: screenEnteredLabel(offsetMs), id: display.id, kind: display.kind, label: screenDisplayLabel(display.kind, display.snapshot?.name ?? "—"), stayed: watchTimeLabel(stayedSeconds) };
+      if (display.kind === "poll") {
+        return { ...base, clickers: null, clicks: null, closed: null, rate: null, shown: null };
+      }
+      const stats = input.stats[display.id] ?? { clickers: 0, clicks: 0, closed: 0, shown: 0 };
+      return { ...base, clickers: stats.clickers, clicks: stats.clicks, closed: stats.closed, rate: percentOf(stats.clickers, stats.shown), shown: stats.shown };
+    });
 }

@@ -428,6 +428,21 @@ export const FREE_DESIGN_LIMITS = {
   z: { max: 10, min: -10 }
 } as const;
 
+/**
+ * Os limites da imagem que o navegador prepara antes de enviar (prepareFreeImage e as contas puras do painel): o peso
+ * maximo do WebP e o lado minimo e maximo. O Livre usa os do design (FREE_IMAGE_LIMITS); o banner da Na tela dos
+ * webinarios passa os dele (1.280 px e 200.000 bytes, docs/30 §2.4), com as frases dele.
+ */
+export type FreeImageLimits = {
+  bytes: number;
+  /** As frases do "nao coube" e do "lado fora da faixa" (sem elas, as do Livre). */
+  messages?: { sides: string; tooLarge: string };
+  side: { max: number; min: number };
+};
+
+/** Os limites da imagem do Livre (os de FREE_DESIGN_LIMITS). */
+export const FREE_IMAGE_LIMITS: FreeImageLimits = { bytes: FREE_DESIGN_LIMITS.imageBytes, side: FREE_DESIGN_LIMITS.imageSide };
+
 /** Atalhos de largura do pop-up (P, M, G, GG). */
 export const FREE_ARTBOARD_WIDTH_PRESETS = { G: 520, GG: 640, M: 440, P: 360 } as const;
 

@@ -36,6 +36,7 @@ const form = await import("../src/components/admin/v2/communication/webinars/sim
 const roomSimulation = await import("../src/components/member/webinars/room/room-simulation.tsx");
 const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 const header = await import("../src/components/member/webinars/room/room-header.tsx");
+const stageBadges = await import("../src/components/member/webinars/room/room-stage-badges.tsx");
 const roomLayout = await import("../src/components/member/webinars/room/room-layout-model.ts");
 const model = await import("../src/server/webinars/simulation-model.ts");
 const { SIMULATION_LIMITS } = await import("../src/server/webinars/model.ts");
@@ -273,24 +274,27 @@ const roomData = {
   saleNotices: [{ atMs: 30_000, text: "Carlos acabou de garantir a vaga na Formação" }]
 };
 
-test("sala: o cabecalho mostra o real mais a parte simulada daquele instante; sem regra ligada, so o real", () => {
+test("sala: o selo de quem assiste no palco mostra o real mais a parte simulada daquele instante; sem regra ligada, so o real", () => {
   const state = roomSimulationStateOf(roomData);
   assert.equal(state.displayCount(3, 5_000), 43);
   assert.equal(state.displayCount(3, 16_000), 58);
+  // O numero somado vai para o selo do palco, ao lado do selo do momento (docs/31 §11.5); o cabecalho nao o leva mais.
+  const present = roomLayout.roomPresentBadge(state.displayCount(3, 16_000));
+  assert.deepEqual(present, { count: "58", label: "58 assistindo agora" });
+  const palco = html(createElement(stageBadges.RoomStageBadges, { assistantOn: false, present, presenterName: null, recording: false, topLeft: { kind: "session", timeLabel: "20:00" } }));
+  assert.match(palco, /Sessão das 20:00<\/span><span class="[^"]*" data-testid="room-present" title="58 assistindo agora">[\s\S]*?<span aria-hidden="true">58<\/span><span class="sr-only">58 assistindo agora<\/span>/);
   const markup = html(
     createElement(header.RoomHeader, {
-      metaLine: roomLayout.roomMetaLine({ durationMinutes: 60, kind: "simulated", presentNow: state.displayCount(3, 16_000), presenterName: null, scheduledAt: "2026-11-05T23:00:00.000Z" }),
-      mobileLine: roomLayout.roomMobileLine({ presenterName: null, presentNow: state.displayCount(3, 16_000) }).join(" · "),
+      metaLine: roomLayout.roomDateLine({ durationMinutes: 60, kind: "simulated", presenterName: null, scheduledAt: "2026-11-05T23:00:00.000Z" }).join(" · "),
+      mobileLine: roomLayout.roomMobileLine(null),
       onLeave: () => undefined,
       onToggleTheme: () => undefined,
-      presentNow: state.displayCount(3, 16_000),
       theme: "dark",
       title: "Aula de IA"
     })
   );
-  assert.match(markup, /data-testid="room-present">58 assistindo agora</, "no computador, no comeco da linha");
-  assert.match(markup, /data-room-line="meta"><span data-testid="room-present">58 assistindo agora<\/span> · Quinta, 5 de novembro · 20:00 · 60 min</);
-  assert.match(markup, /data-testid="room-mobile-line">58 assistindo agora</, "e na linha do celular");
+  assert.match(markup, /data-room-line="meta">Quinta, 5 de novembro · 20:00 · 60 min</);
+  assert.doesNotMatch(markup, /assistindo|room-present|room-mobile-line/, "o cabecalho sem o numero; sem apresentador, sem a linha do celular");
 
   const nada = roomSimulationStateOf(model.EMPTY_SIMULATION_ROOM);
   assert.equal(nada.displayCount(3, 16_000), 3);
@@ -324,4 +328,93 @@ test("sala: 'Ana M. entrou' no chat por 8 s (so visual, sem anunciar), 'saiu' ta
   assert.doesNotMatch(html(createElement(roomSimulation.RoomSimulationSales, props(31_000, { reducedMotion: true }))), /animate-in/);
   const antes = html(createElement(roomSimulation.RoomSimulationSales, props(10_000)));
   assert.match(antes, /aria-live="polite"[^>]*><\/p>/, "nada anunciado antes do primeiro aviso");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Live ao vivo (adendo de 10/11/2026, R7)
+ * ---------------------------------------------------------------------------------------------- */
+
+const liveSession = (extra = {}) => session({ id: "dddddddd-4444-4444-8444-444444444444", kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", status: "waiting", ...extra });
+
+test("R7 card na Live ao vivo: o aviso do CDC da live, 'Live de ...' sem o selo \"Ao vivo\", o minuto do aviso contado da live; so a sessao da live (nunca o Replay)", () => {
+  const markup = card({
+    initialSimulations: { pendingMigration: false, simulations: [{ ...simulations.simulations[0], sessionId: liveSession().id }] },
+    sessions: [liveSession(), session({ id: "replay", kind: "replay" })],
+    webinarKind: "live"
+  });
+  const text = textOf(markup);
+  assert.match(text, /Pela lei \(CDC, art\. 37\), nunca divulgue fora da área de membros os números simulados como se fossem reais\./);
+  assert.doesNotMatch(text, /nunca anuncie uma sessão gravada como ao vivo/);
+  assert.match(text, /Números de plateia: reais, a não ser que você ligue o contador ou as entradas da live\./);
+  assert.equal(count(markup, /data-simulation-session=/g), 1, "so a sessao da live");
+  assert.match(text, /Live de 05\/11\/2026 às 20:00/);
+  assert.equal(count(markup, /role="switch"/g), 0, "a live nunca tem o selo Ao vivo da gravada");
+  assert.match(text, /Minuto da live/);
+  assert.match(text, /Contado do Começar para todos/);
+  assert.doesNotMatch(text, /Minuto do vídeo/);
+
+  const semPublicar = textOf(card({ canPublish: false, sessions: [liveSession()], webinarKind: "live" }));
+  assert.match(semPublicar, /Só quem publica na Comunicação decide a Simulação\./);
+  const semSessao = textOf(card({ sessions: [], webinarKind: "live" }));
+  assert.match(semSessao, /A sessão da live aparece aqui depois de publicar o webinário\./);
+  const semMigracao = card({ initialSimulations: { migration: "202610300003", pendingMigration: true }, sessions: [liveSession()], webinarKind: "live" });
+  assert.match(textOf(semMigracao), /migração 202610300003/);
+  assert.equal(count(semMigracao, /data-simulation-session=/g), 0, "sem a Simulacao completa, a live nao tem o que decidir");
+});
+
+test("R7 card na Live ao vivo: a mudanca mostra a frase da live (sem o selo) com a caixa; a live ja comecada fica so para ler", () => {
+  const saved = simulations.simulations[0];
+  const initialForm = { ...form.simulationFormOf(saved, false), base: "300", countMode: "fixed" };
+  const row = (extra) =>
+    html(
+      createElement(SimulationSessionRow, {
+        busy: false,
+        deciderName: null,
+        idBase: "l",
+        initialForm,
+        locked: false,
+        mode: "v4",
+        now: NOW,
+        onFailure: () => undefined,
+        onSaved: () => undefined,
+        onSaving: () => undefined,
+        responsible: "Produtora de Teste",
+        saved,
+        session: liveSession(),
+        ...extra
+      })
+    );
+  const text = textOf(row({}));
+  const frase = model.simulationAckFor({ live: true, nowMs: NOW, responsible: "Produtora de Teste", rules: form.simulationRulesOfForm(initialForm).rules });
+  assert.equal(frase, "Decisão do produtor em 05/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda são simulados. Responsável: Produtora de Teste.");
+  assert.ok(text.includes(frase), "a frase exata que o servidor confere");
+  assert.equal(form.simulationFormSentence(initialForm, { live: true, nowMs: NOW, responsible: "Produtora de Teste" }), frase);
+  assert.match(text, /Confirmo a decisão acima para esta sessão\./);
+
+  const noAr = row({ session: liveSession({ startedAt: "2026-11-05T23:01:00.000Z", status: "live" }) });
+  assert.match(textOf(noAr), /A live já começou: o que a turma vê não muda até o fim\./);
+  assert.doesNotMatch(noAr, /data-simulation-sentence/);
+  assert.match(noAr, /<input[^>]*disabled=""[^>]*id="l-base"/);
+});
+
+test("R7 sala ao vivo: o selo de quem assiste soma a parte simulada no relogio desde o started_at (nunca pela ancora); na espera, o numero do zero", async () => {
+  const { readFileSync } = await import("node:fs");
+  const state = roomSimulationStateOf(roomData);
+  const startedAt = "2026-11-05T23:10:00.000Z";
+  const agora = Date.parse(startedAt) + 16_000;
+  const offset = model.simulationClockMs({ kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", startedAt }, agora);
+  assert.equal(offset, 16_000);
+  assert.deepEqual(roomLayout.roomPresentBadge(state.displayCount(3, offset)), { count: "58", label: "58 assistindo agora" });
+  const espera = model.simulationClockMs({ kind: "live", scheduledAt: "2026-11-05T23:00:00.000Z", startedAt: null }, agora);
+  assert.equal(state.displayCount(3, espera), 3 + model.counterExtraFromPoints(roomData.counter, -1000));
+  // A sala ao vivo liga a Simulacao pelo relogio da live e leva as entradas ao chat e o aviso de venda ao palco.
+  const source = readFileSync(new URL("../src/components/member/webinars/room/live-room.tsx", import.meta.url), "utf8");
+  assert.match(source, /useRoomSimulation\(\{ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs/);
+  assert.match(source, /getSimulationOffsetMs = \(\) => simulationClockMs\(\{ kind: "live", scheduledAt, startedAt \}/);
+  assert.match(source, /aboveComposer=\{<RoomSimulationJoins layout="stage" look="comment" offsetMs=\{simulationOffsetMs\}/);
+  // O aviso de venda fica na celula de cima a esquerda da camada da Na tela, o ultimo dela, como na gravada (docs/31 §12):
+  // abaixo das pilulas das fixadas, sem nunca cobri-las; a camada aparece com a Simulacao ligada mesmo sem banner.
+  assert.match(source, /topLeftExtra=\{blocked \? null : <RoomSimulationSales layout="cell" offsetMs=\{simulationOffsetMs\}/);
+  assert.match(source, /\|\| \(!blocked && simulation\.enabled\) \? \(\s*<RoomScreenLayer/);
+  assert.doesNotMatch(source, /<RoomSimulationSales layout="stage"/, "nunca solta por cima das fixadas");
 });

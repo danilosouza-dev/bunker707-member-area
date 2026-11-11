@@ -14,7 +14,9 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 // automatico (o motivo, nada muda) e com o duble (preparing e jibri-up anotado); desligar o gravador (recusa gravando,
 // aceita uploaded); silenciar 5/15/60/fim com until_at; remover; banir e desfazer so com publish; nunca a equipe;
 // Enviar gravacao liga o video e cria o replay da sessao encerrada; Alinhar chat grava anchor_offset_ms e audita o antes
-// e o depois sem mexer nas mensagens; toda acao grava a auditoria so com ids e contagens.
+// e o depois sem mexer nas mensagens; toda acao grava a auditoria so com ids e contagens. Desde a Na tela (R5,
+// 10/11/2026): silenciar, remover, desfazer e banir valem tambem na Live gravada (sem mudar o carimbo da sessao) e sao
+// recusados no Replay; a equipe nunca e alvo; as outras acoes da sala continuam so da Live ao vivo.
 
 process.env.NEXT_PUBLIC_SITE_URL = "https://membros.exemplo.test";
 
@@ -752,7 +754,8 @@ test("Silenciar no chat 5 / 15 / 60 min com until_at e até o fim sem; o motivo 
 
   falha(await live.muteInChat({ minutes: 7, sessionId: S_NO_AR, userId: ALUNA }), 400);
   falha(await live.muteInChat({ minutes: 5, sessionId: S_ENCERRADA, userId: ALUNA }), 409);
-  falha(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: ALUNA }), 409);
+  // Desde a Na tela (R5), silenciar vale tambem na Live gravada (o teste da moderacao na gravada, mais abaixo).
+  assert.equal(ok(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: ALUNA })).sessionId, S_GRAVADA);
 });
 
 test("Remover da sala: kicked até o fim (sem until_at, mesmo se mandarem minutos); nunca a equipe (admin, Apresentador, co-apresentador)", async () => {
@@ -773,6 +776,66 @@ test("Remover da sala: kicked até o fim (sem until_at, mesmo se mandarem minuto
   }
   assert.equal(db.tables.webinar_session_bans.length, 1);
   assert.equal(db.tables.webinar_user_bans.length, 0);
+});
+
+test("a moderacao por pessoa na Live gravada (a Na tela, R5): silenciar, remover, desfazer e banir aceitos na simulated, com a auditoria; no Replay 409 e nada gravado; a equipe nunca e alvo; banir so com messaging.publish", async () => {
+  const S_REPLAY = "bbbbbbbb-2222-4222-8222-888888888888";
+  const base = cenario();
+  base.webinar_sessions.push(sessao({ id: S_REPLAY, kind: "replay", status: "live" }));
+  const db = usar(bancoEmMemoria(base, RPC));
+  const linhas = () => db.tables.webinar_session_bans.filter((row) => row.session_id === S_GRAVADA).map((row) => [row.user_id, row.kind, row.until_at === null ? "fim" : "prazo"]);
+
+  assert.deepEqual(ok(await live.muteInChat({ minutes: 15, sessionId: S_GRAVADA, userId: ALUNA })).kind, "muted");
+  ok(await live.muteInChat({ minutes: null, sessionId: S_GRAVADA, userId: ALUNO }));
+  assert.deepEqual(ok(await live.kickFromSession({ sessionId: S_GRAVADA, userId: ALUNO })), { kind: "kicked", sessionId: S_GRAVADA, untilAt: null, userId: ALUNO });
+  assert.deepEqual(linhas(), [
+    [ALUNA, "muted", "prazo"],
+    [ALUNO, "muted", "fim"],
+    [ALUNO, "kicked", "fim"]
+  ]);
+  assert.deepEqual(audits(db, "webinar.kicked").map((row) => row.metadata.session_id), [S_GRAVADA]);
+  assert.equal(audits(db, "webinar.chat_muted").length, 2);
+  assert.equal(linha(db, S_GRAVADA).updated_at, base.webinar_sessions.find((row) => row.id === S_GRAVADA).updated_at, "silenciar e remover nao mudam o carimbo da sessao");
+
+  assert.equal(ok(await live.undoSessionBan({ kind: "kicked", sessionId: S_GRAVADA, userId: ALUNO })).existed, true);
+  assert.equal(ok(await live.undoSessionBan({ kind: "muted", sessionId: S_GRAVADA, userId: ALUNO })).existed, true);
+  assert.deepEqual(linhas(), [[ALUNA, "muted", "prazo"]]);
+
+  assert.deepEqual(ok(await live.banStudent({ reason: "spam", sessionId: S_GRAVADA, userId: ALUNO })), { sessionId: S_GRAVADA, userId: ALUNO });
+  assert.deepEqual(
+    db.tables.webinar_user_bans.map((row) => [row.user_id, row.session_id]),
+    [[ALUNO, S_GRAVADA]]
+  );
+  assert.deepEqual(linhas().at(-1), [ALUNO, "kicked", "fim"], "banido fica removido desta sessao");
+
+  // A equipe (admin, Apresentador, co-apresentador) nunca e alvo, na gravada tambem.
+  for (const alvo of [HOST, EQUIPE, COAPRESENTADOR]) {
+    assert.equal(falha(await live.muteInChat({ minutes: 5, sessionId: S_GRAVADA, userId: alvo }), 409).error, LIVE_ACTION_MESSAGES.staffTarget);
+    falha(await live.kickFromSession({ sessionId: S_GRAVADA, userId: alvo }), 409);
+    falha(await live.banStudent({ sessionId: S_GRAVADA, userId: alvo }), 409);
+  }
+
+  // No Replay nada muda: 409 com a frase, nenhuma linha.
+  const antes = [db.tables.webinar_session_bans.length, db.tables.webinar_user_bans.length];
+  for (const chamada of [
+    () => live.muteInChat({ minutes: 5, sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.kickFromSession({ sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.undoSessionBan({ kind: "muted", sessionId: S_REPLAY, userId: ALUNA }),
+    () => live.banStudent({ sessionId: S_REPLAY, userId: ALUNA })
+  ]) {
+    assert.equal(falha(await chamada(), 409).error, LIVE_ACTION_MESSAGES.replay);
+  }
+  assert.deepEqual([db.tables.webinar_session_bans.length, db.tables.webinar_user_bans.length], antes);
+  assert.equal(LIVE_ACTION_MESSAGES.replay, "No Replay ninguém é silenciado, removido nem banido.");
+
+  // Banir pede messaging.publish tambem na gravada; silenciar e remover, messaging.write.
+  estado.negar = ["messaging.publish"];
+  falha(await live.banStudent({ sessionId: S_GRAVADA, userId: ALUNA }), 403);
+  ok(await live.kickFromSession({ sessionId: S_GRAVADA, userId: ALUNA }));
+  estado.negar = false;
+
+  // As outras acoes da sala continuam so da Live ao vivo.
+  falha(await live.setRoomLock({ locked: true, sessionId: S_GRAVADA }), 409);
 });
 
 test("Banir: banido de todos os webinários e removido desta sessão; Desfazer banimento apaga só o banimento; só com messaging.publish", async () => {
@@ -938,7 +1001,7 @@ test("toda ação que muda algo grava a auditoria só com ids e contagens (nada 
  * Os dados do console (console-queries.ts: o bloco `live` do retrato de 5 s)
  * ---------------------------------------------------------------------------------------------- */
 
-test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a gravação com a prévia, removidos/silenciados/banidos, o mapa aluno -> participante com o nome da sala e nada do nome da sala nem token", async () => {
+test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a gravação com a prévia, removidos/silenciados/banidos, o mapa aluno -> participante com o primeiro nome + inicial de cada um (D64) e nada do nome da sala nem token", async () => {
   const now = new Date();
   const nowMs = now.getTime();
   const sala = `w-${WEBINAR}-bcdefghijkmnpqrs`;
@@ -956,7 +1019,11 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_NO_AR, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-carla" }, user_id: COAPRESENTADOR },
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_ESPERA, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-outra" }, user_id: ALUNO }
         ],
-        webinar_chat_consents: [{ consent_version: 1, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA }],
+        // Legado: um aceite de antes de 10/11/2026 com apelido (e o Bruno com o anonimo). Desde o D64 ele nao muda o nome.
+        webinar_chat_consents: [
+          { consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA },
+          { consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "anonymous", nickname: null, revoked_at: null, updated_at: agora(), user_id: ALUNO }
+        ],
         webinar_recording_events: [
           { file_name: null, id: randomUUID(), payload: {}, processing_status: "processed", received_at: new Date(nowMs - 2 * 60 * MIN - 6 * MIN).toISOString(), session_id: S_OUTRA, state: "ready" },
           { file_name: `${sala}_2026-11-05-23-03-20.mp4`, id: randomUUID(), payload: { fileName: `${sala}_2026-11-05-23-03-20.mp4`, state: "uploaded" }, processing_status: "processed", received_at: new Date(nowMs - MIN).toISOString(), session_id: S_NO_AR, state: "uploaded" }
@@ -971,6 +1038,8 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
       RPC
     )
   );
+  // Legado: o card Sala antigo do webinario ("Sempre anônimo", perguntas anonimas ligadas) continua no JSON e nao e lido.
+  db.tables.webinars[0].room_settings = { ...db.tables.webinars[0].room_settings, anonymousQuestions: true, displayName: "anonymous" };
   Object.assign(linha(db, S_NO_AR), { recorder_requested_at: new Date(nowMs - 2 * MIN).toISOString(), recorder_status: "preparing", recording_anchor_at: "2026-11-05T23:03:15.000Z", room_locked: true });
   linha(db, S_OUTRA).recorder_requested_at = new Date(nowMs - 2 * 60 * MIN - 12 * MIN).toISOString();
   process.env.WEBINAR_MEET_DOMAIN = "meet.exemplo.test";
@@ -1001,8 +1070,10 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
 
     const pessoas = Object.fromEntries(bloco.people.map((item) => [item.userId, item]));
     assert.deepEqual(Object.keys(pessoas).sort(), [ALUNA, ALUNO, COAPRESENTADOR].sort(), "quem entrou, quem foi barrado e quem escreveu");
-    assert.deepEqual([pessoas[ALUNA].displayName, pessoas[ALUNA].participantId, pessoas[ALUNA].ban.muted, pessoas[ALUNA].staff], ["Aninha", "p-ana", true, false], "o participante mais novo e o nome do chat");
-    assert.deepEqual([pessoas[ALUNO].displayName, pessoas[ALUNO].participantId, pessoas[ALUNO].ban.kicked, pessoas[ALUNO].ban.banned], ["Bruno L.", null, true, true], "a entrada em outra sessao nao conta");
+    // D64: a aba Pessoas mostra o primeiro nome + inicial, nunca o apelido nem "Aluno {n}", com o aceite antigo e o card antigo.
+    assert.deepEqual([pessoas[ALUNA].displayName, pessoas[ALUNA].participantId, pessoas[ALUNA].ban.muted, pessoas[ALUNA].staff], ["Ana S.", "p-ana", true, false], "o participante mais novo e o primeiro nome + inicial (nunca o apelido)");
+    assert.deepEqual([pessoas[ALUNO].displayName, pessoas[ALUNO].participantId, pessoas[ALUNO].ban.kicked, pessoas[ALUNO].ban.banned], ["Bruno L.", null, true, true], "a entrada em outra sessao nao conta; o aceite anonimo antigo nao vira Aluno {n}");
+    assert.ok(!JSON.stringify(bloco.people).match(/Aninha|Aluno \d{3}/), "nenhum apelido nem numero de anonimo na lista da mesa");
     assert.deepEqual([pessoas[COAPRESENTADOR].staff, pessoas[COAPRESENTADOR].displayName], [true, "Carla D."]);
     assert.deepEqual(
       bloco.people.map((item) => item.userId),
@@ -1025,6 +1096,49 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
     delete process.env.WEBINAR_MEET_DOMAIN;
     delete process.env.WEBINAR_JWT_SECRET;
   }
+});
+
+test("o retrato do console e o Aprovar para as próximas turmas (D64): o aceite antigo de anônimo ou de apelido conta como sem aceite e a mensagem não é promovível; com o nome é, também na versão 1; retirado, não", async () => {
+  const RETIRADO = randomUUID();
+  const SEM_LINHA = randomUUID();
+  const aceite = (userId, extra) => ({ consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, updated_at: agora(), user_id: userId, ...extra });
+  const mensagem = (userId, body, displayName) => ({ author_user_id: userId, body, created_at: agora(), display_name: displayName, id: randomUUID(), offset_ms: 12_000, role: "student", session_id: S_GRAVADA, source: "audience", webinar_id: WEBINAR });
+  usar(
+    bancoEmMemoria(
+      cenario({
+        // Legado: linhas de antes de 10/11/2026 (a Ana com o apelido, o Bruno como anonimo).
+        webinar_chat_consents: [
+          aceite(ALUNA, { display_mode: "nickname", nickname: "Aninha" }),
+          aceite(ALUNO, { display_mode: "anonymous" }),
+          aceite(COAPRESENTADOR, { consent_version: 1 }),
+          aceite(HOST),
+          aceite(RETIRADO, { revoked_at: agora() })
+        ],
+        webinar_chat_messages: [
+          mensagem(ALUNA, "com apelido", "Aninha"),
+          mensagem(ALUNO, "como anonimo", "Aluno 437"),
+          mensagem(COAPRESENTADOR, "aceite da versao 1", "Carla D."),
+          mensagem(HOST, "aceite em dia", "Produtor T."),
+          mensagem(RETIRADO, "aceite retirado", "Rui P."),
+          mensagem(SEM_LINHA, "sem aceite", "Lia M.")
+        ]
+      }),
+      RPC
+    )
+  );
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date());
+  assert.deepEqual(
+    Object.fromEntries(retrato.messages.map((item) => [item.body, item.promotable])),
+    {
+      "aceite da versao 1": true,
+      "aceite em dia": true,
+      "aceite retirado": false,
+      "com apelido": false,
+      "como anonimo": false,
+      "sem aceite": false
+    }
+  );
 });
 
 test("os presentes agora do console contam pelo relogio da presenca: na live com a gravacao comecada 6 min depois do Iniciar live, os sinais dos alunos (desde o Iniciar) contam", async () => {
@@ -1073,6 +1187,107 @@ test("fase 4: o painel Presença do retrato para no encerramento, como o topo: a
   assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs))).presence.minute, 44);
 });
 
+test("Na tela no retrato do console: a fixada pela chave (mesmo fora das 200 mais novas), a enquete fixada, os prontos, o que esta na tela com os numeros (a funcao no maximo a cada 10 s); na gravada, os barrados com o nome; no Replay e sem a migracao, nada", async () => {
+  const { clearScreenStatsCache } = await import("../src/server/webinars/screen-queries.ts");
+  clearScreenStatsCache();
+  const nowMs = Date.now();
+  const em = (ms) => new Date(nowMs + ms).toISOString();
+  const S_REPLAY = "bbbbbbbb-2222-4222-8222-777777777777";
+  const ENQUETE = randomUUID();
+  const BANNER = randomUUID();
+  const PRONTO = randomUUID();
+  const ARQUIVADO = randomUUID();
+  const FIXADA = randomUUID();
+  const BANIDO = "abababab-7777-4777-8777-777777777777";
+  const copia = { body: null, buttonLabel: null, closable: true, image: null, linkUrl: "https://bunker707.com.br/turma", name: "Turma", place: "bottom_right", size: "m", title: "Turma nova", v: 1 };
+  const item = (id, extra = {}) => ({ archived_at: null, body: null, button_label: null, closable: true, created_at: em(-60 * MIN), created_by: HOST, id, image_alt: null, image_height: null, image_path: null, image_width: null, kind: "banner", link_url: "https://bunker707.com.br/turma", name: "Turma", place: "bottom_right", size: "m", title: "Turma nova", updated_at: em(-60 * MIN), webinar_id: WEBINAR, ...extra });
+  const exibicao = (id, kind, extra = {}) => ({ created_at: em(-5 * MIN), hidden_at: null, hidden_by: null, hidden_offset_ms: null, hidden_reason: null, id, item_id: kind === "poll" ? null : PRONTO, kind, poll_id: kind === "poll" ? ENQUETE : null, session_id: S_NO_AR, shown_at: em(-5 * MIN), shown_by: HOST, shown_offset_ms: 300_000, snapshot: kind === "poll" ? { name: "Qual curso?", v: 1 } : copia, ...extra });
+  const mensagem = (sessionId, extra = {}) => ({ author_user_id: ALUNA, body: "oi", created_at: em(-MIN), display_name: "Ana M.", id: randomUUID(), offset_ms: 12_000, role: "student", session_id: sessionId, source: "audience", webinar_id: WEBINAR, ...extra });
+  // A fixada e a mais velha; 200 mensagens mais novas depois dela (fora da lista do retrato).
+  const base = cenario({
+    admin_roles: [{ user_id: HOST }, { user_id: EQUIPE }],
+    profiles: [
+      { full_name: "Ana Maria Souza", id: ALUNA },
+      { full_name: "Bruno Lima", id: ALUNO },
+      { full_name: "Equipe Teste", id: EQUIPE },
+      { full_name: "Caio Banido", id: BANIDO }
+    ],
+    webinar_chat_messages: [
+      mensagem(S_NO_AR, { author_user_id: HOST, body: "Material em https://bunker707.com.br/apostila", created_at: em(-90 * MIN), display_name: "Produtor T.", id: FIXADA, pinned_at: em(-30 * MIN), role: "host", source: "team" }),
+      ...Array.from({ length: 200 }, (_, index) => mensagem(S_NO_AR, { created_at: em(-80 * MIN + index * 1000) })),
+      mensagem(S_GRAVADA, { author_user_id: ALUNO, display_name: "Bruno L." }),
+      mensagem(S_GRAVADA, { author_user_id: BANIDO, display_name: "Caio B." }),
+      mensagem(S_GRAVADA, { author_user_id: EQUIPE, display_name: "Equipe T.", role: "team", source: "team" })
+    ],
+    webinar_screen_displays: [exibicao(BANNER, "banner"), exibicao(randomUUID(), "poll"), exibicao(randomUUID(), "qr", { hidden_at: em(-MIN), hidden_reason: "team" })],
+    webinar_screen_items: [item(PRONTO), item(ARQUIVADO, { archived_at: em(-MIN) }), item(randomUUID(), { webinar_id: randomUUID() })],
+    webinar_session_bans: [
+      { created_at: em(-MIN), created_by: HOST, kind: "kicked", session_id: S_GRAVADA, until_at: null, user_id: ALUNA },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: em(10 * MIN), user_id: ALUNO },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: em(-1000), user_id: ALUNO },
+      { created_at: em(-MIN), created_by: HOST, kind: "muted", session_id: S_GRAVADA, until_at: null, user_id: EQUIPE }
+    ],
+    webinar_user_bans: [{ created_at: em(-MIN), created_by: HOST, reason: null, user_id: BANIDO }]
+  });
+  base.webinar_sessions.find((row) => row.id === S_NO_AR).pinned_message_id = FIXADA;
+  base.webinar_sessions.push(sessao({ id: S_REPLAY, kind: "replay", status: "live" }));
+  let chamadas = 0;
+  const db = usar(bancoEmMemoria(base, { ...RPC, webinar_screen_report: () => ((chamadas += 1), { data: [{ clickers: 41, clicks: 55, closed: 9, display_id: BANNER, shown: 312 }], error: null }) }));
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs));
+  assert.equal(retrato.messages.length, 200, "a lista do retrato fica nas 200 mais novas");
+  assert.ok(!retrato.messages.some((message) => message.id === FIXADA), "a fixada esta fora da lista");
+  assert.deepEqual([retrato.pinned.id, retrato.pinned.body, retrato.pinned.role, typeof retrato.pinned.promotable], [FIXADA, "Material em https://bunker707.com.br/apostila", "host", "boolean"], "a fixada lida pela chave, como ConsoleMessage");
+  assert.equal(retrato.pinnedMessageId, FIXADA);
+  assert.equal(retrato.pinnedPollId, ENQUETE);
+  assert.equal(retrato.screen.pending, false);
+  assert.deepEqual(retrato.screen.items.map((entry) => entry.id), [PRONTO], "so os prontos nao arquivados deste webinario");
+  assert.deepEqual(retrato.screen.active.map((display) => [display.kind, display.snapshot?.name]).sort(), [["banner", "Turma"], ["poll", "Qual curso?"]], "o que esta na tela (o QR Code que saiu fica de fora)");
+  assert.deepEqual(retrato.screen.stats, { [BANNER]: { clickers: 41, clicks: 55, closed: 9, shown: 312 } });
+  assert.equal(retrato.barred, null, "a lista da live vem em live.people");
+  assert.equal(chamadas, 1);
+  await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 5_000));
+  assert.equal(chamadas, 1, "o retrato de 5 s depois usa os numeros guardados");
+  await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 11_000));
+  assert.equal(chamadas, 2, "passados 10 s, a funcao roda de novo");
+
+  // A gravada: os removidos, silenciados (o silencio valendo) e banidos entre quem escreveu, com o nome; a equipe nunca.
+  const gravada = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date(nowMs));
+  assert.deepEqual(
+    gravada.barred.map((person) => [person.userId, person.displayName, person.ban.kicked, person.ban.muted, person.ban.banned, person.staff, person.participantId]),
+    [
+      [ALUNA, "Ana S.", true, false, false, false, null],
+      [ALUNO, "Bruno L.", false, true, false, false, null],
+      [BANIDO, "Caio B.", false, false, true, false, null]
+    ]
+  );
+  assert.equal(gravada.barred[1].ban.mutedUntil, em(10 * MIN), "o silencio que ainda vale");
+  assert.equal(gravada.pinned, null);
+  assert.deepEqual(gravada.screen.stats, {}, "sem nada na tela, a funcao nem roda");
+
+  // O Replay: nada aparece na frente da turma, e o console nem le a Na tela.
+  db.calls.length = 0;
+  const replay = await consoleQueries.getConsoleSnapshot(WEBINAR, S_REPLAY, new Date(nowMs));
+  assert.deepEqual(replay.screen, { active: [], items: [], pending: false, stats: {} });
+  assert.deepEqual([replay.pinnedPollId, replay.barred], [null, null]);
+  assert.ok(!db.calls.some((call) => call.table.startsWith("webinar_screen_")), "nenhuma leitura da Na tela no Replay");
+
+  // Banco sem a 202611100002: a Na tela fica `pending`, sem nada, e o resto do retrato segue.
+  const from = db.from;
+  db.from = (table) => {
+    if (!table.startsWith("webinar_screen_")) {
+      return from(table);
+    }
+    const falha = { data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` } };
+    const chain = { eq: () => chain, is: () => chain, order: () => chain, range: () => chain, select: () => chain, then: (resolve, reject) => Promise.resolve(falha).then(resolve, reject) };
+    return chain;
+  };
+  const semMigracao = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, new Date(nowMs + 30_000));
+  assert.deepEqual(semMigracao.screen, { active: [], items: [], pending: true, stats: {} });
+  assert.equal(semMigracao.pinnedPollId, null);
+  assert.equal(semMigracao.pinned.id, FIXADA, "a fixada nao depende da migracao");
+});
+
 test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sessoes 'Comeca quando voce entra' so as de hoje em Sao Paulo e as em andamento; a pedida fica", () => {
   // 05/11/2026 23:30 em UTC = 20:30 em Sao Paulo: "hoje" e o dia 05 em Sao Paulo.
   const nowMs = Date.parse("2026-11-05T23:30:00.000Z");
@@ -1092,4 +1307,34 @@ test("fase 4 (4e com o Atendimento da 4c): o seletor do console mostra das sesso
     "22:45 em Sao Paulo ainda e hoje; 23:15 do dia 04 em Sao Paulo nao"
   );
   assert.ok(consoleQueries.consoleSessionsFor(sessions, nowMs, "jit-pedida").some((item) => item.id === "jit-pedida"), "a pedida por ?sessao= continua no seletor");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A Simulacao na Live ao vivo no console (adendo de 10/11/2026, R7)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("R7: o retrato da live no ar leva a parte simulada do contador separada do real (so com a decisao registrada); os presentes continuam o real", async () => {
+  const decisao = {
+    simulated_count_rule: { base: 300, jitter: 0, mode: "fixed", peak: 300 },
+    simulated_joins: null,
+    simulated_sale_notices: null,
+    simulation_ack_text: "Decisão do produtor em 10/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem. Responsável: Produtor de Teste.",
+    simulation_decided_at: new Date(Date.now() - 60 * MIN).toISOString(),
+    simulation_decided_by: HOST,
+    simulation_seed: 99,
+    simulation_summary: null
+  };
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  Object.assign(linha(db, S_NO_AR), decisao);
+  const now = new Date();
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now);
+  assert.equal(retrato.simulatedNow, 300, "+300 simulados, so para a equipe");
+  assert.equal(retrato.presentNow, 0, "o real fica o real");
+
+  Object.assign(linha(db, S_NO_AR), { simulation_ack_text: null });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).simulatedNow, null, "sem a decisao, nada simulado");
+  Object.assign(linha(db, S_NO_AR), decisao, { simulated_count_rule: null, simulated_joins: { enabled: true, every_seconds: 30, max: 10, names: "generic" } });
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).simulatedNow, null, "so as entradas: nada a separar no contador");
+  Object.assign(linha(db, S_ENCERRADA), decisao);
+  assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_ENCERRADA, now)).simulatedNow, null, "a live encerrada");
 });

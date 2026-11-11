@@ -7,10 +7,10 @@ import { z } from "zod";
 import {
   CHAT_LIMITS,
   CHAT_MODES,
-  DISPLAY_NAME_MODES,
   PERSONA_ROLES,
   POLL_KINDS,
   PRESENCE_STATES,
+  QUESTION_REPLY_LIMITS,
   QUESTION_STATUSES,
   REACTIONS,
   SCRIPT_STATUSES,
@@ -20,16 +20,18 @@ import {
   type PollDraft,
   type ScriptItemDraft
 } from "./model";
+import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
+import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN } from "./persona-model";
 
 export const CHAT_MESSAGES = {
-  anonymousOff: "Perguntas anônimas estão desligadas nesta live.",
   answer: "A resposta pode ter até 1.000 caracteres.",
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
   consent: "Para participar do chat, aceite as regras uma vez.",
   csvTooLong: "O arquivo passa de 1 MB.",
+  /** D64: o navegador com a pagina antiga ainda pede anonimo ou apelido; o servidor recusa e nada e gravado. */
+  identity: "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar.",
   invalid: "Pedido inválido.",
-  nickname: "O apelido tem de 2 a 40 caracteres.",
   offset: "Minuto do vídeo inválido.",
   options: "A enquete precisa de 2 a 20 opções.",
   option: "Cada opção tem até 120 caracteres.",
@@ -38,6 +40,8 @@ export const CHAT_MESSAGES = {
   pollAnswer: "Escolha ao menos uma opção.",
   pollQuestion: "Escreva a pergunta da enquete (até 300 caracteres).",
   question: "Escreva a pergunta.",
+  reply: "Escreva a resposta.",
+  replyTooLong: "A resposta pode ter até 500 caracteres.",
   questionTooLong: "A pergunta pode ter até 500 caracteres.",
   session: "Sessão inválida.",
   simulationAck: "Marque a confirmação para ligar o selo.",
@@ -61,27 +65,55 @@ const replayOffsetSchema = offsetSchema.optional();
 /**
  * GET /chat?sessao=&from=&to= (a janela por offset, em ms: a linha mestre + as linhas da sessao) ou
  * ?sessao=&since=<ISO>&after=<id> (so as mensagens novas da sessao desde o instante; o id desempata o mesmo instante).
+ * Na consulta de mensagens novas, `tela` e o carimbo da Na tela que o navegador tem (o updated_at da sessao): a
+ * resposta leva o estado so quando ele mudou (docs/30 §5.1).
  */
 export const chatWindowQuerySchema = z.object({
   after: uuidSchema.optional(),
   from: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional(),
   sessao: sessionIdSchema,
   since: z.iso.datetime({ offset: true }).optional(),
+  tela: z.string().max(40).optional(),
   to: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional()
 });
 
-/** O aceite do chat (D10), que vem junto da primeira mensagem ou da primeira pergunta: consent + versao + como o nome aparece. */
+/**
+ * O que o navegador com a pagina de antes de 10/11/2026 ainda pode mandar (D64): `anonymous`, `displayMode` e
+ * `nickname`. Ninguem mais participa como anonimo nem com apelido, entao o pedido que pede isso e RECUSADO (400 com
+ * CHAT_MESSAGES.identity, "atualize a pagina") antes de qualquer escrita: publicar o nome de quem pediu anonimato sem
+ * avisar seria pior do que recusar. `anonymous: false` e `displayMode: "first_name_initial"` passam e sao ignorados (o
+ * nome e sempre o primeiro nome com a inicial). `refusesLegacyIdentity` e a mesma regra para quem chama as escritas
+ * sem passar pelo schema (room-writes.ts confere de novo antes de gravar). O alcance (docs/30 §8.5 e A34): so da para
+ * recusar o que chega no pedido. A pilula Anonima da pagina antiga dependia do `anonymousQuestions` da sessao, que
+ * saiu: depois da primeira releitura da sessao ela some dessa pagina e a pergunta chega sem `anonymous`, como uma nova.
+ */
+export function refusesLegacyIdentity(body: { anonymous?: unknown; displayMode?: unknown; nickname?: unknown }): boolean {
+  return (
+    (body.anonymous !== undefined && body.anonymous !== false) ||
+    (body.displayMode !== undefined && body.displayMode !== "first_name_initial") ||
+    (body.nickname !== undefined && body.nickname !== null)
+  );
+}
+
+const legacyIdentityFields = {
+  anonymous: z.literal(false, { error: CHAT_MESSAGES.identity }).optional(),
+  displayMode: z.literal("first_name_initial", { error: CHAT_MESSAGES.identity }).optional(),
+  nickname: z.null({ error: CHAT_MESSAGES.identity }).optional()
+};
+
+/**
+ * O aceite do chat (D10), que vem junto da primeira mensagem, da primeira pergunta ou da primeira resposta no fio:
+ * consent + versao. Os campos antigos entram so para a recusa acima.
+ */
 const consentFields = {
+  ...legacyIdentityFields,
   consent: z.boolean().optional(),
-  consentVersion: z.number().int().min(1).max(100).optional(),
-  displayMode: z.enum(DISPLAY_NAME_MODES).optional(),
-  nickname: z.string().trim().min(CHAT_LIMITS.nicknameMin, CHAT_MESSAGES.nickname).max(CHAT_LIMITS.nicknameMax, CHAT_MESSAGES.nickname).optional()
+  consentVersion: z.number().int().min(1).max(100).optional()
 };
 
 /** POST /chat: a primeira mensagem traz o aceite. */
 export const chatPostBodySchema = z.object({
   ...consentFields,
-  anonymous: z.boolean().optional(),
   body: bodySchema,
   kind: z.enum(["message", "question"]).default("message"),
   offsetMs: replayOffsetSchema,
@@ -111,7 +143,6 @@ export const reactionsQuerySchema = z.object({ sessao: sessionIdSchema, since: z
 /** POST /questions: sem o aceite gravado, a pergunta traz o aceite como a primeira mensagem do chat. */
 export const questionBodySchema = z.object({
   ...consentFields,
-  anonymous: z.boolean().default(false),
   body: z.string({ error: CHAT_MESSAGES.question }).trim().min(1, CHAT_MESSAGES.question).max(CHAT_LIMITS.question, CHAT_MESSAGES.questionTooLong),
   offsetMs: replayOffsetSchema,
   sessionId: sessionIdSchema
@@ -119,6 +150,14 @@ export const questionBodySchema = z.object({
 export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
+
+/** POST /questions/[qid]/replies: a resposta do aluno no fio da propria pergunta (com o aceite, se ele mudou de versao). */
+export const questionReplyBodySchema = z.object({
+  ...consentFields,
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.studentBody, CHAT_MESSAGES.replyTooLong),
+  sessionId: sessionIdSchema
+});
+export type QuestionReplyPostInput = z.infer<typeof questionReplyBodySchema>;
 
 /** GET /questions?sessao=&ordem=votadas|recentes */
 export const questionsQuerySchema = z.object({ ordem: z.enum(["votadas", "recentes"]).default("votadas"), sessao: sessionIdSchema });
@@ -136,6 +175,11 @@ export const sessionQuerySchema = z.object({ sessao: sessionIdSchema.optional() 
  * Server Actions da equipe (src/server/webinars/script-actions.ts e room-actions.ts)
  * ---------------------------------------------------------------------------------------------- */
 
+const COMENTARIOS = NA_TELA_COPY.comentarios;
+
+/** A foto de quem comenta (R9): so o caminho webinars/personas/<24 hex>.webp do nosso bucket, nunca um endereco. */
+const personaAvatarPathSchema = z.string({ error: COMENTARIOS.erros.fotoSumiu }).regex(PERSONA_AVATAR_PATH_PATTERN, COMENTARIOS.erros.fotoSumiu);
+
 export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
   .object({
     body: bodySchema,
@@ -146,6 +190,8 @@ export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
     personaRole: z.enum(PERSONA_ROLES).default("student"),
     phrase: z.string().trim().min(CHAT_LIMITS.phraseMin, CHAT_MESSAGES.phrase).max(CHAT_LIMITS.phraseMax, CHAT_MESSAGES.phrase).nullable(),
     phraseDelayMs: z.number().int().min(CHAT_LIMITS.phraseDelayMinMs).max(CHAT_LIMITS.phraseDelayMaxMs).default(0),
+    // R9: a foto de quem comenta, so o caminho da nossa pasta; ausente, a do item fica como esta.
+    personaAvatarPath: personaAvatarPathSchema.nullable().optional(),
     status: z.enum(SCRIPT_STATUSES).default("draft"),
     triggerKind: z.enum(SCRIPT_TRIGGERS, { error: CHAT_MESSAGES.invalid })
   })
@@ -160,6 +206,12 @@ export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
 
 export const saveScriptItemsSchema = z.object({
   items: z.array(scriptItemDraftSchema).max(CHAT_LIMITS.scriptItemsMax, CHAT_MESSAGES.tooManyItems),
+  /**
+   * Os ids que o editor carregou (o roteiro que ele tinha na tela): so esses podem sair quando faltam na lista nova. Um
+   * item que o console guardou depois ("Guardar na lista") nunca e apagado por um Salvar com a pagina velha. Ausente:
+   * nada sai.
+   */
+  loadedIds: z.array(uuidSchema).max(CHAT_LIMITS.scriptItemsMax, CHAT_MESSAGES.tooManyItems).default([]),
   webinarId: uuidSchema
 });
 export type SaveScriptItemsInput = z.infer<typeof saveScriptItemsSchema>;
@@ -184,8 +236,42 @@ export const resolveScriptPhrasesSchema = z.object({ webinarId: uuidSchema });
 /** "Soltar agora": um item do roteiro (manual ou nao) entra na sessao no minuto atual. */
 export const fireScriptItemSchema = z.object({ itemId: uuidSchema, sessionId: sessionIdSchema });
 
-/** A mensagem da equipe no chat da sessao (role team, source team). */
-export const teamChatSchema = z.object({ body: bodySchema, kind: z.enum(["message", "answer", "system"]).default("message"), replyToId: uuidSchema.nullable().optional(), sessionId: sessionIdSchema });
+/**
+ * O "Novo comentário" do console (adendo de 10/11/2026, R8 e R9): quem comenta (Nome, Foto (opcional), Aparece como) e
+ * o Comentário, para "Enviar agora" (sendScriptedComment) ou "Guardar na lista" (saveScriptComment). `applyToName`: o
+ * "Usar esta foto em todos os comentários de {nome}", ligado por padrao (so vale com a foto).
+ */
+export const scriptCommentSchema = z.object({
+  applyToName: z.boolean().default(true),
+  body: z.string({ error: COMENTARIOS.erros.comentario }).trim().min(1, COMENTARIOS.erros.comentario).max(CHAT_LIMITS.body, COMENTARIOS.erros.comentario),
+  personaAvatarPath: personaAvatarPathSchema.nullable().default(null),
+  personaName: z.string({ error: COMENTARIOS.erros.nome }).trim().min(1, COMENTARIOS.erros.nome).max(CHAT_LIMITS.personaName, COMENTARIOS.erros.nome),
+  personaRole: z.enum(PERSONA_ROLES).default("student"),
+  sessionId: sessionIdSchema
+});
+export type ScriptCommentInput = z.input<typeof scriptCommentSchema>;
+
+/**
+ * A foto de quem comenta como o navegador manda (data URL WebP ja reduzido a 512 px e ate 100 KB): o teto do texto e o
+ * do base64 de 100 KB com folga para o cabecalho; o servidor confere de novo os bytes, as medidas e a animacao.
+ */
+export const PERSONA_AVATAR_DATA_URL_MAX = Math.ceil(PERSONA_AVATAR_LIMITS.bytes / 3) * 4 + 64;
+
+export const uploadPersonaPhotoSchema = z.object({
+  image: z.string({ error: COMENTARIOS.erros.fotoFormato }).min(1, COMENTARIOS.erros.fotoFormato).max(PERSONA_AVATAR_DATA_URL_MAX, COMENTARIOS.erros.fotoPesada)
+});
+
+/**
+ * A mensagem da equipe no chat da sessao (role team, source team). `pin`: o "Fixar ao enviar" do console (a Na tela,
+ * docs/30 §2.4): publica e fixa num passo, trocando a fixada de antes.
+ */
+export const teamChatSchema = z.object({
+  body: bodySchema,
+  kind: z.enum(["message", "answer", "system"]).default("message"),
+  pin: z.boolean().default(false),
+  replyToId: uuidSchema.nullable().optional(),
+  sessionId: sessionIdSchema
+});
 
 /** "question" (docs/31 V2-15): Virar pergunta, so mensagem da turma com autor (a pendente tambem e liberada). */
 export const MODERATION_ACTIONS = ["approve", "delete", "pin", "unpin", "promote", "question"] as const;
@@ -203,8 +289,8 @@ export const sessionChatModeSchema = z.object({
   slowModeSeconds: z.union([z.literal(SLOW_MODE_SECONDS[0]), z.literal(SLOW_MODE_SECONDS[1]), z.literal(SLOW_MODE_SECONDS[2]), z.literal(SLOW_MODE_SECONDS[3])]).nullable()
 });
 
+/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
 export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
-  anonymous: z.boolean().default(false),
   id: uuidSchema.nullable().optional(),
   kind: z.enum(POLL_KINDS).default("single"),
   options: z
@@ -217,7 +303,8 @@ export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
 /** Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. */
 export const savePollsSchema = z.object({ polls: z.array(pollDraftSchema).max(20, CHAT_MESSAGES.tooManyPolls), webinarId: uuidSchema });
 
-export const launchPollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema });
+/** Abrir uma enquete pronta na sessao; `pin`: o "Abrir e fixar" do console (a Na tela, R2). */
+export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });
 export const closePollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema, shareResults: z.boolean().default(false) });
 
 export const answerQuestionSchema = z.object({
@@ -227,6 +314,14 @@ export const answerQuestionSchema = z.object({
 });
 
 export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z.enum(QUESTION_STATUSES, { error: CHAT_MESSAGES.invalid }) });
+
+/** A resposta da equipe no fio de uma pergunta ja respondida (console). */
+export const replyQuestionSchema = z.object({
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.teamBody, CHAT_MESSAGES.answer),
+  questionId: uuidSchema
+});
+
+export const deleteQuestionReplySchema = z.object({ replyId: uuidSchema });
 
 /** A decisao do selo "Ao vivo" (D10, §8.6): ligar exige a frase marcada; desligar grava a decisao tambem. */
 export const saveSimulationSchema = z

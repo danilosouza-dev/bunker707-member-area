@@ -322,7 +322,7 @@ function cenario(extra = {}) {
   const now = Date.now();
   const noAr = new Date(now - 5 * MIN).toISOString();
   return {
-    webinar_chat_consents: [{ consent_version: 1, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }],
+    webinar_chat_consents: [{ consent_version: 2, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }],
     webinar_recordings: [{ anchor_offset_ms: 0, duration_seconds: 3600, embed_url: "https://iframe.mediadelivery.net/embed/1/abc", id: RECORDING, provider: "bunny", session_id: null, source: "bunny", status: "ready", webinar_id: WEBINAR }],
     webinar_sessions: [
       { ...DEFAULTS.webinar_sessions, id: SESSAO_NO_AR, kind: "simulated", recording_id: RECORDING, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR },
@@ -488,18 +488,28 @@ test("salvar o roteiro: a situacao e do servidor (pronta com minuto, frase achad
   assert.deepEqual(salvo.summary, { disabled: 1, manual: 1, ready: 2, unresolved: 1 });
   assert.equal(db.tables.webinar_chat_script_items.length, 5, "o id desconhecido nao virou upsert: entrou como novo");
 
-  // Salvar de novo com um item a menos apaga o que saiu e mantem os ids dos que ficaram.
-  const deNovo = ok(await scriptActions.saveScriptItems({ items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })), webinarId: WEBINAR }));
+  // Salvar de novo com um item a menos apaga o que saiu (dos que o editor carregou) e mantem os ids dos que ficaram.
+  const deNovo = ok(
+    await scriptActions.saveScriptItems({
+      items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })),
+      loadedIds: salvo.items.map((item) => item.id),
+      webinarId: WEBINAR
+    })
+  );
   assert.deepEqual(
     deNovo.items.map((item) => item.id),
     salvo.items.slice(0, 2).map((item) => item.id)
   );
   assert.equal(db.tables.webinar_chat_script_items.length, 2);
 
+  // Adendo de 10/11/2026 (R8): a Live ao vivo tambem tem roteiro, mas sem "Quando o apresentador diz" (sem transcricao
+  // durante a transmissao): o item com frase e recusado no campo e nada e gravado.
   const aoVivo = usar(bancoEmMemoria(cenario({ webinars: [{ ...cenario().webinars[0], kind: "live" }] })));
-  const recusa = await scriptActions.saveScriptItems({ items: [], webinarId: WEBINAR });
-  assert.deepEqual([recusa.ok, recusa.status], [false, 409], "roteiro so na Live gravada");
+  const recusa = await scriptActions.saveScriptItems({ items: [{ ...base, phrase: "agora vamos começar", triggerKind: "on_phrase" }], webinarId: WEBINAR });
+  assert.deepEqual([recusa.ok, recusa.status, recusa.fieldErrors?.["items.0.triggerKind"]?.[0]], [false, 400, WEBINAR_COPY.naTela.comentarios.erros.fraseNaLive], "sem frase na live");
   assert.equal(aoVivo.tables.webinar_chat_script_items.length, 0);
+  const daLive = ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: 90_000, triggerKind: "at_offset" }, { ...base, offsetMs: null, triggerKind: "manual" }], webinarId: WEBINAR }));
+  assert.deepEqual(daLive.items.map((item) => [item.triggerKind, item.status]), [["at_offset", "ready"], ["manual", "ready"]], "Num minuto da live e Pelo botao da equipe");
 });
 
 test("a transcricao: grava as cues na gravacao base e resolve as frases (pronta com o atraso / nao achada); sem video, 409; texto vazio, erro no campo", async () => {
@@ -706,8 +716,57 @@ test("moderacao: liberar grava quem e quando; fixar uma por sessao; apagar some 
   assert.equal(desligado.slowModeSeconds, null, "chat desligado nao tem modo lento");
 });
 
-test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quando a equipe libera (anonima pelo nome Aluno {n}); apagar a mensagem apaga a pergunta", async () => {
+test("promover com o aceite antigo (D64): a linha de aceite com anonimo ou apelido conta como sem aceite e a mensagem nao vira linha mestre; depois do novo aceite, vira; o aceite da versao 1 com o nome continua valendo", async () => {
+  // Legado: linhas de antes de 10/11/2026. O aluno so tem o aceite antigo e a mensagem gravada como "Aluno {n}".
+  const antiga = message({ author_user_id: ALUNO, display_name: "Aluno 437" });
+  const daVersao1 = message({ author_user_id: ALUNA, body: "da turma de antes" });
+  const db = usar(
+    bancoEmMemoria(
+      cenario({
+        webinar_chat_consents: [
+          { consent_version: 2, consented_at: agora(), display_mode: "anonymous", nickname: null, revoked_at: null, user_id: ALUNO },
+          { consent_version: 1, consented_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: ALUNA }
+        ],
+        webinar_chat_messages: [antiga, daVersao1]
+      })
+    )
+  );
+  const linha = (id) => db.tables.webinar_chat_messages.find((row) => row.id === id);
+  const aceite = () => db.tables.webinar_chat_consents.find((row) => row.user_id === ALUNO);
+
+  for (const [modo, apelido] of [
+    ["anonymous", null],
+    ["nickname", "Bruninho"]
+  ]) {
+    Object.assign(aceite(), { display_mode: modo, nickname: apelido });
+    const recusada = await roomActions.moderateMessage({ action: "promote", messageId: antiga.id });
+    assert.deepEqual([recusada.ok, recusada.status], [false, 409], modo);
+    assert.match(recusada.error, /consentimento/i, modo);
+    assert.deepEqual([linha(antiga.id).master, linha(antiga.id).source], [false, "audience"], `${modo}: nada mudou na mensagem`);
+  }
+  assert.equal(audits(db, "webinar.moderated").length, 0, "a recusa nao vai para a auditoria");
+
+  // A versao do texto nao entra nesta regra: quem aceitou a versao 1 com o nome ja autorizou as reexibicoes.
+  const promovidaV1 = ok(await roomActions.moderateMessage({ action: "promote", messageId: daVersao1.id }));
+  assert.deepEqual([promovidaV1.message.master, promovidaV1.message.source], [true, "original"]);
+
+  // O aluno aceitou de novo (a sala grava sempre o modo de agora): a mensagem dele ja pode ir para as proximas turmas.
+  Object.assign(aceite(), { display_mode: "first_name_initial", nickname: null });
+  const promovida = ok(await roomActions.moderateMessage({ action: "promote", messageId: antiga.id }));
+  assert.deepEqual([promovida.message.master, promovida.message.source], [true, "original"]);
+
+  // Retirado, nem com o modo de agora.
+  const outra = message({ author_user_id: ALUNO, body: "outra" });
+  db.tables.webinar_chat_messages.push(outra);
+  aceite().revoked_at = agora();
+  const retirada = await roomActions.moderateMessage({ action: "promote", messageId: outra.id });
+  assert.deepEqual([retirada.ok, retirada.status], [false, 409]);
+});
+
+test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quando a equipe libera (legado: a mensagem antiga gravada como Aluno {n} continua anonima); apagar a mensagem apaga a pergunta", async () => {
   const { anonymousNumber } = await import("../src/server/webinars/room-model.ts");
+  // Legado: linhas de antes de 10/11/2026 (D64). Uma pendente escrita como anonimo na epoca ("Aluno {n}") continua com a
+  // promessa de entao quando a equipe libera; nenhuma mensagem nova nasce com esse nome.
   const anonima = message({ approved: false, author_user_id: ALUNO, body: "vai ter certificado?", display_name: `Aluno ${anonymousNumber(ALUNO, WEBINAR)}`, kind: "question", offset_ms: 42_000 });
   const comNome = message({ approved: false, author_user_id: ALUNA, body: "e a apostila?", kind: "question" });
   const db = usar(bancoEmMemoria(cenario({ webinar_chat_messages: [anonima, comNome] })));
@@ -718,7 +777,8 @@ test("moderacao da pergunta pelo chat: a pendente so entra na aba Perguntas quan
   assert.ok(aberta, "liberar abre a pergunta");
   assert.deepEqual([aberta.anonymous, aberta.body, aberta.offset_ms, aberta.user_id, aberta.session_id], [true, "vai ter certificado?", 42_000, ALUNO, SESSAO_NO_AR]);
   const [evento] = db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
-  assert.deepEqual(evento.metadata, { anonymous: true, offset_ms: 42_000, question_id: aberta.id });
+  // D64: o historico nao leva mais a chave `anonymous` (a escolha nao existe mais).
+  assert.deepEqual(evento.metadata, { offset_ms: 42_000, question_id: aberta.id });
   assert.equal(evento.user_id, ALUNO);
 
   ok(await roomActions.moderateMessage({ action: "approve", messageId: anonima.id }));
@@ -754,7 +814,7 @@ test("Virar pergunta (docs/31 V2-15): a mensagem comum da turma vira pergunta se
   const eventos = () => db.tables.student_events.filter((row) => row.event_type === "webinar_question_sent");
 
   // A pendente comum: libera (quem e quando) e vira pergunta com o message_id, o texto cortado em 500 e anonima pelo
-  // "Aluno {n}"; quem perguntou foi a equipe, entao nada no historico do aluno.
+  // "Aluno {n}" (legado: a mensagem de antes de 10/11/2026 gravada com esse nome); quem perguntou foi a equipe, entao nada no historico do aluno.
   const virou = ok(await roomActions.moderateMessage({ action: "question", messageId: pendente.id }));
   assert.equal(virou.message.approved, true);
   assert.deepEqual([linha(pendente.id).approved, linha(pendente.id).approved_by], [true, HOST]);
@@ -944,9 +1004,19 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
   assert.equal(atualizadas.polls[0].options[0].id, primeira.options[1].id, "a opcao que ficou mantem o id");
   assert.notEqual(atualizadas.polls[0].options[1].id, idDeOutra, "id de opcao de outra enquete nao e aproveitado");
   assert.equal(db.tables.webinar_polls.length, 1);
+  // D64 (10/11/2026): nao ha mais "Respostas anônimas". O editor aberto com a pagina antiga que ainda manda
+  // `anonymous: true` (ao criar e ao atualizar) grava falso, e o modelo devolvido tambem diz falso.
+  assert.deepEqual(salvas.polls.map((poll) => poll.anonymous), [false, false], "criadas: nunca anonimas");
+  assert.equal(atualizadas.polls[0].anonymous, false, "atualizada: nunca anonima");
+  assert.deepEqual(db.tables.webinar_polls.map((row) => row.anonymous), [false]);
 
   const modelo = atualizadas.polls[0];
+  // Legado: um modelo de antes de 10/11/2026 ainda marcado como anonimo no banco. A copia lancada agora guarda quem
+  // respondeu (anonymous falso); so as copias lancadas na epoca continuam anonimas.
+  db.tables.webinar_polls.find((row) => row.id === modelo.id).anonymous = true;
   const aberta = ok(await roomActions.launchPoll({ pollId: modelo.id, sessionId: SESSAO_NO_AR }));
+  assert.equal(aberta.poll.anonymous, false, "a copia lancada nunca e anonima");
+  assert.equal(db.tables.webinar_polls.find((row) => row.id === aberta.poll.id).anonymous, false);
   assert.deepEqual([aberta.poll.sessionId, aberta.poll.templatePollId, aberta.poll.status, aberta.poll.question], [SESSAO_NO_AR, modelo.id, "open", "Vem?"]);
   assert.ok(aberta.poll.openedAt);
   assert.ok(Math.abs(aberta.poll.openOffsetMs - 5 * MIN) < 10_000);
@@ -972,6 +1042,45 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
   assert.equal(audits(db, "webinar.polls_saved").length, 2);
 });
 
+test("Na tela: fixar numa sessao encerrada e recusado (409) e desafixar continua; lancar e encerrar a enquete gravam e so depois mudam o carimbo da sessao", async () => {
+  const antiga = message({ author_user_id: HOST, display_name: "Produtor T.", pinned_at: agora(), role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const outra = message({ author_user_id: HOST, display_name: "Produtor T.", role: "team", session_id: SESSAO_ENCERRADA, source: "team" });
+  const base = cenario({ webinar_chat_messages: [antiga, outra] });
+  base.webinar_sessions.find((row) => row.id === SESSAO_ENCERRADA).pinned_message_id = antiga.id;
+  const db = usar(bancoEmMemoria(base));
+  const sessao = (id) => db.tables.webinar_sessions.find((row) => row.id === id);
+
+  // Fixar e por na frente da turma: so na sessao que ainda aceita a equipe (o console esconde o botao; o pedido direto
+  // numa sessao encerrada nao muda nada).
+  const fixar = await roomActions.moderateMessage({ action: "pin", messageId: outra.id });
+  assert.deepEqual([fixar.ok, fixar.status, fixar.error], [false, 409, "Essa sessão não aceita mais ações da equipe."]);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, antiga.id, "a fixada de antes continua");
+  assert.equal(db.tables.webinar_chat_messages.find((row) => row.id === outra.id).pinned_at ?? null, null);
+  // Desafixar continua sempre permitido (tirar da frente da turma nunca e bloqueado).
+  const desafixada = ok(await roomActions.moderateMessage({ action: "unpin", messageId: antiga.id }));
+  assert.equal(desafixada.pinnedMessageId, null);
+  assert.equal(sessao(SESSAO_ENCERRADA).pinned_message_id, null);
+  assert.deepEqual(audits(db, "webinar.moderated").map((row) => row.metadata.action), ["unpin"]);
+
+  // Lancar: a copia da enquete e gravada e, por ultimo, a linha da sessao (o carimbo que a consulta de 5 s compara).
+  const modelo = ok(await roomActions.savePolls({ polls: [{ kind: "single", options: [{ label: "Sim" }, { label: "Não" }], question: "Vem?" }], webinarId: WEBINAR })).polls[0];
+  db.calls.length = 0;
+  const aberta = ok(await roomActions.launchPoll({ pollId: modelo.id, sessionId: SESSAO_NO_AR }));
+  const escritas = () => db.calls.filter((call) => call.op !== "select" && call.table !== "admin_audit_log").map((call) => `${call.op} ${call.table}`);
+  assert.deepEqual(escritas(), ["insert webinar_polls", "insert webinar_poll_options", "update webinar_sessions"]);
+  const carimbo = db.calls.find((call) => call.op === "update" && call.table === "webinar_sessions");
+  assert.deepEqual(Object.keys(carimbo.payload), ["updated_at"], "so o carimbo muda na sessao");
+  assert.deepEqual(carimbo.filters, [["eq", "id", SESSAO_NO_AR]]);
+
+  // Encerrar (e compartilhar): a enquete primeiro, o carimbo depois.
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR, shareResults: true }));
+  assert.deepEqual(escritas(), ["update webinar_polls", "update webinar_sessions"]);
+  db.calls.length = 0;
+  ok(await roomActions.closePoll({ pollId: aberta.poll.id, sessionId: SESSAO_NO_AR }));
+  assert.deepEqual(escritas(), ["update webinar_sessions"], "encerrar de novo nao muda a enquete, mas o carimbo sim");
+});
+
 test("perguntas: responder por escrito vira linha da equipe no chat e marca respondida; ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 3, user_id: ALUNA };
   const outra = { ...pergunta, body: "E certificado?", id: randomUUID() };
@@ -995,6 +1104,46 @@ test("perguntas: responder por escrito vira linha da equipe no chat e marca resp
   const reaberta = ok(await roomActions.setQuestionStatus({ questionId: outra.id, status: "open" }));
   assert.equal(reaberta.question.status, "open");
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /replay\?|7 dias/, "nem a pergunta nem a resposta vao para a auditoria");
+});
+
+test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409 com a frase da migracao, sem gravar nada (nem auditoria, nem sino)", async () => {
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: agora(), answered_by: HOST, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: agora(), user_id: ALUNA };
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta] })));
+  // webinar_question_replies como o postgrest-js responde a uma tabela que nao existe: o HEAD sem erro e sem contagem;
+  // o GET e o INSERT com o PGRST205.
+  const from = db.from;
+  db.from = (table) => {
+    if (table !== "webinar_question_replies") {
+      return from(table);
+    }
+    let head = false;
+    const self = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            const result = head ? { count: null, data: null, error: null, status: 204 } : { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_replies' in the schema cache" } };
+            return (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+          }
+          if (prop === "select") {
+            return (_columns, options = {}) => ((head = head || Boolean(options.head)), self);
+          }
+          return () => self;
+        }
+      }
+    );
+    return self;
+  };
+
+  const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
+  assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611100002 da Na tela): aplicar ate ela
+  // inclui a do fio.
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100002).");
+  const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100002)."]);
+  assert.equal(db.tables.admin_audit_log.length, 0);
+  assert.equal(db.tables.notifications.length, 0);
 });
 
 test("D31 na Live ao vivo: a mensagem da equipe e a resposta escrita nascem na linha mestre (o replay toca o chat da live); na Live gravada nao", async () => {
@@ -1095,4 +1244,31 @@ test("o chat de uma sessao vira CSV do roteiro: so turma, chat original e equipe
   assert.deepEqual(linhas, ["Tempo;Nome;Papel;Mensagem", "00:10;Ana M.;Aluno;Primeira", "00:15;Produtor T.;Equipe;Da equipe", "00:17;Rui P.;Equipe;Do co-apresentador", "00:20;Ana M.;Aluno;Segunda"]);
   assert.equal(exportado.rows, 4);
   assert.equal(audits(db, "webinar.chat_exported")[0].metadata.session_id, SESSAO_ENCERRADA);
+});
+
+test("o webinario arquivado fica so de leitura (docs/30 §2.3): o roteiro, a transcricao, as enquetes e o replay respondem 409 com a frase do Desarquivar e nada muda; exportar continua", async () => {
+  const replay = { ...DEFAULTS.webinar_sessions, id: randomUUID(), kind: "replay", recording_id: RECORDING, scheduled_at: new Date(Date.now() - 30 * MIN).toISOString(), status: "live", webinar_id: WEBINAR };
+  const poll = { ...DEFAULTS.webinar_polls, created_at: agora(), id: randomUUID(), question: "Gostou?", updated_at: agora(), webinar_id: WEBINAR };
+  const seed = cenario({ webinar_chat_script_items: [scriptItem({ offset_ms: 7_000, status: "ready" })], webinar_polls: [poll] });
+  seed.webinars[0].status = "archived";
+  seed.webinar_sessions.push(replay);
+  const db = usar(bancoEmMemoria(seed));
+  const antes = structuredClone({ itens: db.tables.webinar_chat_script_items, polls: db.tables.webinar_polls, sessoes: db.tables.webinar_sessions, transcricoes: db.tables.webinar_recording_transcripts });
+  const item = { body: "Mensagem", kind: "message", offsetMs: 10_000, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, status: "draft", triggerKind: "at_offset" };
+
+  for (const [nome, escrever] of [
+    ["saveScriptItems", () => scriptActions.saveScriptItems({ items: [item], webinarId: WEBINAR })],
+    ["importScriptCsv", () => scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n0:10;Duda;Aluno;oi", webinarId: WEBINAR })],
+    ["saveTranscript", () => scriptActions.saveTranscript({ format: "vtt", text: VTT, webinarId: WEBINAR })],
+    ["resolveScriptPhrases", () => scriptActions.resolveScriptPhrases({ webinarId: WEBINAR })],
+    ["savePolls", () => roomActions.savePolls({ polls: [], webinarId: WEBINAR })],
+    ["createReplaySession", () => roomActions.createReplaySession({ webinarId: WEBINAR })],
+    ["cancelReplaySession", () => roomActions.cancelReplaySession({ webinarId: WEBINAR })]
+  ]) {
+    const recusado = await escrever();
+    assert.deepEqual([recusado.ok, recusado.status, recusado.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."], nome);
+  }
+  assert.deepEqual({ itens: db.tables.webinar_chat_script_items, polls: db.tables.webinar_polls, sessoes: db.tables.webinar_sessions, transcricoes: db.tables.webinar_recording_transcripts }, antes, "nada mudou");
+  assert.equal(db.tables.admin_audit_log.length, 0);
+  assert.equal(ok(await scriptActions.exportScriptCsv({ webinarId: WEBINAR })).fileName.endsWith(".csv"), true, "exportar o roteiro continua");
 });

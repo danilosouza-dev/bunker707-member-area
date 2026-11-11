@@ -36,6 +36,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <FavoritesExperience view={view} />

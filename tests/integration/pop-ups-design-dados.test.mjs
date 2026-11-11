@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, before, beforeEach, test } from "node:test";
 import { actAs } from "../support/integration-hooks.mjs";
-import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
+import { comoOAppEntrega, createLocalAdminClient, guardadoNoBanco, unwrap } from "../support/local-db.mjs";
 import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Design do pop-up (docs/26), o caminho dos dados contra o banco LOCAL (pacote P0): salvar o Personalizado grava
@@ -139,8 +139,10 @@ test("salvar o Personalizado grava o design canonico, com o endereco do video do
 
   assert.equal(gravado.links.color, "#a1a1aa", "forma canonica");
   assert.deepEqual(gravado.fonts, [fonte.id], "fontes recalculadas dos blocos");
-  assert.equal(gravado.media.video.url, urlDoVideo, "o endereco do navegador nunca e gravado");
-  assert.ok(model.isOwnStorageUrl(gravado.media.video.url, { bucket: model.POPUP_VIDEO_BUCKET, objectPath: VIDEO_PATH, origin: new URL(urlDoVideo).origin }));
+  // O banco guarda o caminho (docs/32 §11.5): o endereco do navegador nunca e gravado, e o app le o nosso.
+  assert.equal(gravado.media.video.url, model.storagePublicPath(model.POPUP_VIDEO_BUCKET, VIDEO_PATH), "o endereco do navegador nunca e gravado");
+  assert.equal(comoOAppEntrega(gravado.media.video.url), urlDoVideo);
+  assert.ok(model.isOwnStorageUrl(comoOAppEntrega(gravado.media.video.url), { bucket: model.POPUP_VIDEO_BUCKET, objectPath: VIDEO_PATH, origin: new URL(urlDoVideo).origin }));
 
   const [auditoria] = unwrap(
     await db.from("admin_audit_log").select("metadata").eq("entity_id", salvo.id).eq("action", "communication.saved").order("occurred_at", { ascending: false }).limit(1),
@@ -284,7 +286,7 @@ test("imagem no fundo do cartao: a do uploadNoticeImage salva com o nosso endere
     // O navegador manda o caminho certo com outra origem: o servidor grava o nosso endereco.
     const salvo = ok(await salvar(popup({ design: comImagemNoFundo(enviada.url.replace(new URL(enviada.url).origin, "https://outro.supabase.co")) })));
     const gravado = (await linha(salvo.id)).popup_design;
-    assert.deepEqual(gravado.card.background, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: nossa });
+    assert.deepEqual(gravado.card.background, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: guardadoNoBanco(nossa) });
 
     // Salvar de novo com a mesma imagem (o caminho ja gravado) nao confere o Storage outra vez e continua valendo.
     ok(await salvar(popup({ design: comImagemNoFundo(nossa), title: "Mesmo fundo" }), salvo.id));
@@ -300,7 +302,7 @@ test("imagem no fundo do cartao: a do uploadNoticeImage salva com o nosso endere
     assert.equal(semArquivo.ok, false);
     assert.equal(semArquivo.status, 400);
     assert.deepEqual(semArquivo.fieldErrors, { "design.card.background.url": ["Envie a imagem do fundo de novo."] });
-    assert.deepEqual((await linha(salvo.id)).popup_design.card.background.url, nossa, "a linha continua com a imagem boa");
+    assert.deepEqual((await linha(salvo.id)).popup_design.card.background.url, guardadoNoBanco(nossa), "a linha continua com a imagem boa");
 
     // A aluna recebe o mesmo fundo (endereco recalculado na leitura tambem).
     const atual = unwrap(await db.from("campaigns").select("updated_at").eq("id", salvo.id).single(), "Lendo o aviso");

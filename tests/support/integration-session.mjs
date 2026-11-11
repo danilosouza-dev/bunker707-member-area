@@ -17,8 +17,13 @@ export function actAs(user) {
 export async function actAsSignedIn(conta, senha) {
   const { createClient } = await import("@supabase/supabase-js");
   const { readLocalSupabaseConfig } = await import("./local-db.mjs");
+  // O mesmo transporte do createSupabaseServerClient do app: o banco guarda o caminho dos arquivos do Storage.
+  const { createStoragePathsFetch } = await import("../../src/server/db/storage-paths.ts");
   const { anonKey, url } = readLocalSupabaseConfig();
-  const supabase = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const supabase = createClient(url, anonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { fetch: createStoragePathsFetch(url) }
+  });
   const { data, error } = await supabase.auth.signInWithPassword({ email: conta.email, password: senha });
 
   if (error || !data.user) {

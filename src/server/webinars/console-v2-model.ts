@@ -12,7 +12,7 @@ import type { RoomStageTopLeft } from "../../components/member/webinars/room/roo
 import type { ConsoleScreenShareMode } from "../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarDayMonthTime } from "../../lib/webinar-time";
-import { canEndSession, canOpenSession, consoleClockLabel, consoleClockMs, consolePhaseOf, type ConsolePhase } from "./console-model";
+import { canEndSession, canOpenSession, consoleClockLabel, consoleClockMs, consolePhaseOf, questionAwaitsTeam, type ConsolePhase } from "./console-model";
 import { liveSessionButtons, type ConsoleRoomRole, type LiveControls, type LiveRoomState, type RecorderCard } from "./live-console-model";
 import type { SessionKind, SessionStatus, WebinarKind, WebinarQuestion, WebinarSession } from "./model";
 
@@ -32,14 +32,15 @@ export function consoleSessionOptionLabel(session: { kind: SessionKind; schedule
  * O selo dos presentes (V2-13; no topo da gravada e do Replay, e no palco da live): "12 presentes ·
  * pico 14". Os presentes vem do retrato de 5 s e o pico do relatorio em cache de 60 s (console-presence-model.ts), entao
  * o pico mostrado e o maior dos dois: sem isso o selo poderia dizer "12 presentes · pico 10". Sem pico (o Replay, antes
- * de comecar ou sem a leitura), so "12 presentes".
+ * de comecar ou sem a leitura), so "12 presentes". Com o contador simulado ligado (adendo de 10/11/2026, R7), a parte
+ * simulada vem separada no fim, "· +300 simulados", para a equipe nunca confundir com o real (o aluno ve a soma); sem
+ * ela (desligado, zero, sessao encerrada), nada a mais.
  */
-export function consolePresenceBadge(input: { peak: number | null; presentNow: number }): string {
+export function consolePresenceBadge(input: { peak: number | null; presentNow: number; simulated?: number | null }): string {
   const present = Number.isFinite(input.presentNow) ? Math.max(0, Math.round(input.presentNow)) : 0;
-  if (input.peak === null || !Number.isFinite(input.peak)) {
-    return copy.presentes(present);
-  }
-  return copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
+  const simulated = typeof input.simulated === "number" && Number.isFinite(input.simulated) ? Math.round(input.simulated) : 0;
+  const real = input.peak === null || !Number.isFinite(input.peak) ? copy.presentes(present) : copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
+  return simulated > 0 ? `${real} · ${WEBINAR_COPY.simulacao.console.simulados(simulated)}` : real;
 }
 
 /** Os botoes de situacao do topo do console, na ordem em que aparecem. */
@@ -269,8 +270,8 @@ export function consoleRecordButton(input: { canPublish: boolean; card: Pick<Rec
 export const CONSOLE_TABS = ["chat", "perguntas", "maos", "pessoas"] as const;
 export type ConsoleTab = (typeof CONSOLE_TABS)[number];
 
-/** As entradas do ⋯ do painel, na ordem do V2-15. */
-export const CONSOLE_MORE_ENTRIES = ["enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
+/** As entradas do ⋯ do painel, na ordem do V2-15; a Na tela (docs/31 §12) e a primeira. */
+export const CONSOLE_MORE_ENTRIES = ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
 export type ConsoleMoreEntry = (typeof CONSOLE_MORE_ENTRIES)[number];
 
 /** O que o painel mostra: uma aba ou uma entrada do ⋯ (nunca as duas: com uma entrada, nenhuma aba fica escolhida). */
@@ -285,12 +286,50 @@ export function consoleTabsFor(input: { kind: SessionKind }): ConsoleTab[] {
 }
 
 /**
- * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
- * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
+ * O toque num item do trilho do console (docs/31 §10, o railStep da sala com as entradas do Mais): com o painel fora da
+ * tela, ou noutra aba ou entrada, abre o painel nela; no item que ja esta na tela, fecha o painel (so com palco; sem
+ * palco o painel e o corpo inteiro e nunca fecha). O estado do painel fica com o console.
+ */
+export function consoleRailStep(input: { closable: boolean; item: ConsolePanelView; panelShown: boolean; view: ConsolePanelView }): { panelOpen: boolean; view: ConsolePanelView } {
+  const same = "tab" in input.item ? "tab" in input.view && input.view.tab === input.item.tab : "more" in input.view && input.view.more === input.item.more;
+  if (!input.panelShown || !same) {
+    return { panelOpen: true, view: input.item };
+  }
+  return { panelOpen: !input.closable, view: input.view };
+}
+
+/** A altura de um item do trilho do console (o quadrado de 48 e o rotulo de 16) e o vao entre dois (docs/31 §10). */
+export const CONSOLE_RAIL_ITEM_PX = 64;
+export const CONSOLE_RAIL_GAP_PX = 16;
+
+/**
+ * Quantos itens do trilho ficam na tela (docs/31 §10, ajuste de 10/11/2026): todos, quando a altura do trilho comporta
+ * (as abas e as entradas da sessao, na ordem); senao, o ultimo lugar e do Mais, que leva os que nao couberam. Sem a
+ * medida (o HTML do servidor, o trilho escondido abaixo de lg), todos. Sempre ao menos um lugar.
+ */
+export function consoleRailFit(input: { available: number | null; count: number }): { overflow: number; visible: number } {
+  const count = Math.max(0, Math.floor(input.count));
+  if (input.available === null || !Number.isFinite(input.available) || input.available <= 0) {
+    return { overflow: 0, visible: count };
+  }
+  const slots = Math.max(1, Math.floor((input.available + CONSOLE_RAIL_GAP_PX) / (CONSOLE_RAIL_ITEM_PX + CONSOLE_RAIL_GAP_PX)));
+  if (count <= slots) {
+    return { overflow: 0, visible: count };
+  }
+  const visible = slots - 1;
+  return { overflow: count - visible, visible };
+}
+
+/**
+ * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
+ * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença com a
+ * leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
  */
 export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
-  const entries: ConsoleMoreEntry[] = ["enquetes"];
-  if (input.webinarKind === "simulated") {
+  const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
+  // O Roteiro: no webinario gravado (o Replay dele tambem) e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao
+  // vivo (nunca no Replay da live: la ninguem solta comentario).
+  if (input.webinarKind === "simulated" || input.kind === "live") {
     entries.push("roteiro");
   }
   if (input.kind !== "live") {
@@ -311,9 +350,10 @@ export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: Sessi
  * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat fica sem numero na aba (o
  * "{n} aguardando" vai no cabecalho dele) e Pessoas tambem.
  */
-export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "status">[] }): { maos: number; perguntas: number } {
+export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "answeredAt" | "replies" | "status">[] }): { maos: number; perguntas: number } {
   const hands = Number.isFinite(input.hands) ? Math.max(0, Math.floor(input.hands)) : 0;
-  return { maos: hands, perguntas: input.questions.filter((question) => question.status === "open").length };
+  // O numero das Perguntas: as abertas e as respondidas em que o aluno escreveu por ultimo no fio (o que pede a equipe).
+  return { maos: hands, perguntas: input.questions.filter((question) => question.status === "open" || questionAwaitsTeam(question)).length };
 }
 
 /**

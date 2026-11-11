@@ -26,9 +26,21 @@ export type WebinarsDb = SupabaseClient;
  * a linha do chat do co-apresentador falha (23514 no check antigo, que chega a ele como o erro comum da acao, sem o
  * aviso de migracao pendente): a mensagem nao entra e, na resposta escrita, a pergunta ja ficou respondida antes do
  * insert, sem a linha no chat, sem o aviso no sino e sem a auditoria; o resto le e grava como antes. Cada parte da fase 4 tem a propria constante abaixo, para o
- * aviso de migracao pendente apontar a certa onde so aquela parte falta.
+ * aviso de migracao pendente apontar a certa onde so aquela parte falta. O fio das Perguntas (docs/30 §1.3,
+ * 10/11/2026) vem depois: a 202611100001 cria webinar_question_replies e e a mais nova, entao o aviso a aponta (aplicar
+ * ate ela inclui todas as de antes; docs/21 §9.12). Sem ela, as perguntas seguem como antes (so a primeira resposta): o
+ * fio le vazio (chat-store.listQuestionReplyRows) e so escrever nele falha, antes de gravar qualquer coisa (a contagem
+ * do fio sem numero vira PendingMigrationError em chat-store.countQuestionReplyRows): a equipe recebe 409 com a frase da
+ * migracao (room-actions.withReplyTable, ao responder e ao apagar); o aluno, o erro comum da rota, sem numero de migracao.
+ * A "Na tela" (docs/30 §2.4 e §4.2; docs/31 §12; 10/11/2026) vem depois: a 202611100002 cria webinar_screen_items,
+ * webinar_screen_displays e webinar_screen_report e traz, junto, o banco do adendo do mesmo dia (a Simulacao na Live ao
+ * vivo, o check webinar_sessions_simulation_live_v7; a foto do personagem do roteiro, persona_avatar_path no item e na
+ * mensagem scripted; webinar_open_session com a foto e sem soltar o roteiro da live ao abrir). E a mais nova, entao o
+ * aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21 §9.13). Nenhuma coluna dela entra nas listas que o
+ * app sempre le (SESSION_COLUMNS, CHAT_MESSAGE_COLUMNS, SCRIPT_ITEM_COLUMNS): sem ela, o app segue como antes, menos as
+ * escritas novas (a Na tela, a foto de quem comenta e o roteiro da Live ao vivo, que voltam 409 com o aviso dela).
  */
-export const WEBINARS_MIGRATION = "202611010001";
+export const WEBINARS_MIGRATION = "202611100002";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -44,6 +56,14 @@ export const WEBINARS_JIT_MIGRATION = "202610300005";
 
 /** 4f: a traducao do chat e do roteiro (webinar_viewer_prefs, webinar_text_translations). */
 export const WEBINARS_TRANSLATION_MIGRATION = "202610300006";
+
+/**
+ * Na tela (docs/30 §2.4 e §4.2): webinar_screen_items, webinar_screen_displays e webinar_screen_report. Nenhuma leitura
+ * de sempre depende dela (nenhuma coluna nova em webinar_sessions; o sinal de mudanca e o updated_at que a sessao ja
+ * tem): sem a migracao as leituras da Na tela devolvem vazio (screen-store.ts), a sala e o console seguem como antes, e
+ * so as escritas novas (salvar, mostrar, tirar, fixar a enquete) caem no aviso de migracao pendente, apontando esta.
+ */
+export const WEBINARS_SCREEN_MIGRATION = "202611100002";
 
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();
@@ -83,4 +103,6 @@ export function isMissingWebinarSchema(error: unknown) {
 }
 
 export const WEBINAR_MISSING_MESSAGE = "Esse webinário não existe mais.";
+/** O arquivado fica so de leitura (docs/30 §2.3): toda escrita do webinario pede o Desarquivar antes. */
+export const WEBINAR_ARCHIVED_MESSAGE = "Esse webinário está arquivado. Desarquive para mexer nele.";
 export const WEBINAR_CHANGED_MESSAGE = "Esse webinário mudou em outra tela. Recarregue a página e tente de novo.";

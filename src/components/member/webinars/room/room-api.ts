@@ -5,15 +5,17 @@
 // servidor; 5xx e falha de rede ficam com a frase da tela); o sinal de saida vai por sendBeacon (text/plain, como
 // o servidor aceita). Nenhum segredo aqui: o endereco do player ja vem montado pelo servidor. Fase 3 (a sala ao vivo):
 // o token da sala (POST .../join-token, o nome da sala so na resposta, nunca na URL) e os lotes de sinais do iframe
-// (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain).
+// (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain). A Na tela: as metricas do
+// banner e do QR Code (POST .../screen-events; o "viu" pelo fetch keepalive, o clique e o fechar pelo sendBeacon).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
-import { roomApiPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
+import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
-import type { StudentPoll, StudentQuestion } from "@/server/webinars/room-rules";
+import type { StudentPoll, StudentQuestion, StudentQuestionReply } from "@/server/webinars/room-rules";
+import type { StudentScreenState } from "@/server/webinars/screen-model";
 import type { StudentSessionPayload } from "@/server/webinars/student-model";
 import { WebinarsRequestError } from "../webinars-client";
 import { liveApiPath } from "./live-room-model";
@@ -95,24 +97,28 @@ export function beaconLeave(webinarId: string, body: { offsetSeconds: number; se
  * ---------------------------------------------------------------------------------------------- */
 
 export type ChatWindowAnswer = { messages: StudentChatMessage[]; mode: "window"; serverTime: string; window: ChatWindow };
-export type ChatRecentAnswer = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; serverTime: string };
+/** `screen`: o estado da Na tela quando o carimbo mandado em `tela` ficou velho; nulo (ou ausente, servidor de antes) no resto. */
+export type ChatRecentAnswer = { messages: StudentChatMessage[]; mode: "recent"; next: ChatCursor; screen?: StudentScreenState | null; serverTime: string };
 
 export function getChatWindow(webinarId: string, sessionId: string, window: ChatWindow, signal?: AbortSignal) {
   return getJson<ChatWindowAnswer>(roomApiPath(webinarId, "chat", { from: window.fromMs, sessao: sessionId, to: window.toMs }), WEBINAR_COPY.sala.erroCarregarChat, signal);
 }
 
-export function getRecentChat(webinarId: string, sessionId: string, cursor: ChatCursor, signal?: AbortSignal) {
-  return getJson<ChatRecentAnswer>(roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since }), WEBINAR_COPY.sala.erroCarregarChat, signal);
+/** As mensagens novas depois do cursor (a consulta de 5 s); com `screenStamp`, o carimbo da Na tela que a sala tem (`tela`). */
+export function getRecentChat(webinarId: string, sessionId: string, cursor: ChatCursor, screenStamp?: string | null, signal?: AbortSignal) {
+  return getJson<ChatRecentAnswer>(
+    roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since, tela: screenStamp }),
+    WEBINAR_COPY.sala.erroCarregarChat,
+    signal
+  );
 }
 
+/** O aceite vai junto da primeira escrita (consent + versao). A sala nao manda mais como o aluno aparece (D64): e sempre o primeiro nome com a inicial. */
 export type ChatPostBody = {
-  anonymous?: boolean;
   body: string;
   consent?: boolean;
   consentVersion?: number;
-  displayMode?: "anonymous" | "first_name_initial" | "nickname";
   kind?: "message" | "question";
-  nickname?: string;
   offsetMs?: number;
   replyToId?: string | null;
   sessionId: string;
@@ -144,7 +150,7 @@ export function getQuestions(webinarId: string, sessionId: string, order: "recen
   return getJson<{ questions: StudentQuestion[]; serverTime: string }>(roomApiPath(webinarId, "questions", { ordem: order, sessao: sessionId }), GENERIC, signal);
 }
 
-export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { anonymous: boolean; body: string; offsetMs?: number; sessionId: string };
+export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; offsetMs?: number; sessionId: string };
 
 export function postQuestion(webinarId: string, body: QuestionPostBody) {
   return sendJson<{ question: StudentQuestion }>(roomApiPath(webinarId, "questions"), "POST", body, GENERIC);
@@ -152,6 +158,13 @@ export function postQuestion(webinarId: string, body: QuestionPostBody) {
 
 export function postQuestionVote(webinarId: string, questionId: string, sessionId: string) {
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
+}
+
+export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; sessionId: string };
+
+/** A resposta de quem perguntou no fio da propria pergunta. */
+export function postQuestionReply(webinarId: string, questionId: string, body: QuestionReplyBody) {
+  return sendJson<{ reply: StudentQuestionReply }>(questionReplyPath(webinarId, questionId), "POST", body, GENERIC);
 }
 
 export function getPolls(webinarId: string, sessionId: string, signal?: AbortSignal) {
@@ -201,4 +214,38 @@ export function beaconRoomEvents(webinarId: string, body: string): boolean {
   return false;
 }
 
-export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion };
+/* ------------------------------------------------------------------------------------------------
+ * A Na tela: as metricas (POST .../screen-events)
+ * ---------------------------------------------------------------------------------------------- */
+
+function screenEventsPath(webinarId: string): string {
+  return `/api/webinars/${encodeURIComponent(webinarId)}/screen-events`;
+}
+
+/** Um lote de metricas ({ sessionId, events } ja em JSON): 202 { accepted }; a falha fica com quem chama (descarta). */
+export async function postScreenEvents(webinarId: string, body: string) {
+  const response = await fetch(screenEventsPath(webinarId), {
+    body,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+    method: "POST"
+  });
+  return readData<{ accepted: number }>(response, GENERIC);
+}
+
+/** O clique, o fechar e o que sobrou ao sair: o navegador entrega mesmo com a outra aba abrindo ou a pagina descarregando. */
+export function beaconScreenEvents(webinarId: string, body: string): void {
+  const url = screenEventsPath(webinarId);
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && navigator.sendBeacon(url, body)) {
+      return;
+    }
+  } catch {
+    // Sem beacon: vai pelo fetch keepalive.
+  }
+  void fetch(url, { body, credentials: "same-origin", headers: { "Content-Type": "text/plain;charset=UTF-8" }, keepalive: true, method: "POST" }).catch(() => undefined);
+}
+
+export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply, StudentScreenState };

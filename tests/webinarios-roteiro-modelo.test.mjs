@@ -62,6 +62,47 @@ test("o CSV: cabecalho em qualquer ordem, ; ou ,, Papel por extenso, linha ruim 
   assert.deepEqual(again.items.map((item) => item.body), result.items.map((item) => item.body));
 });
 
+test("o CSV do roteiro da Live ao vivo (revisao de 11/11/2026, achado 1): o numero sozinho e minuto, como o campo Minuto da live e o card Simulação; a ida e a volta nao mudam o minuto", () => {
+  assert.equal(script.parseLiveOffsetText("12"), 12 * 60_000, "12 = 12 minutos (na gravada seriam 12 segundos)");
+  assert.equal(script.parseOffsetText("12"), 12_000, "a gravada continua em segundos");
+  assert.equal(script.parseLiveOffsetText("12:30"), 12 * 60_000 + 30_000);
+  assert.equal(script.parseLiveOffsetText(" 0:12 "), 12_000, "minuto:segundo, com espacos nas pontas");
+  assert.equal(script.parseLiveOffsetText("1:02:03"), 3_723_000, "a hora (o CSV do chat de uma sessao)");
+  assert.equal(script.parseLiveOffsetText("12m"), 12 * 60_000);
+  assert.equal(script.parseLiveOffsetText("90s"), 90_000);
+  for (const torto of ["12.5", "12,5", "-0:30", "-5", "12:75", "abc", "", "3000"]) {
+    assert.equal(script.parseLiveOffsetText(torto), null, torto);
+  }
+  assert.equal(script.parseLiveOffsetText("2880"), 48 * 60 * 60_000, "ate 48 h, o limite do banco");
+  assert.equal(script.formatLiveOffsetText(12 * 60_000), "12:00");
+  assert.equal(script.formatLiveOffsetText(12 * 60_000 + 30_000), "12:30");
+  assert.equal(script.formatLiveOffsetText(3_723_000), "62:03", "minuto:segundo, nunca hora");
+  assert.equal(script.formatLiveOffsetText(12_000), "0:12");
+
+  const csv = ["Tempo;Nome;Papel;Mensagem", "12;Bia C.;Aluno;Cheguei", "12:30;Caio D.;Equipe;Bem-vindos", "1:02:03;Duda;Aluno;Depois de uma hora", "12.5;Lia;Aluno;torto"].join("\n");
+  const live = script.parseScriptCsv(csv, { live: true });
+  assert.deepEqual(
+    live.items.map((item) => [item.offsetMs, item.personaName]),
+    [
+      [12 * 60_000, "Bia C."],
+      [12 * 60_000 + 30_000, "Caio D."],
+      [3_723_000, "Duda"]
+    ]
+  );
+  assert.deepEqual(live.errors, [{ line: 5, message: 'Tempo inválido: "12.5".' }]);
+  assert.deepEqual(script.parseScriptCsv(csv).items.map((item) => item.offsetMs).slice(0, 2), [12_000, 750_000], "o mesmo arquivo na gravada: o numero em segundos");
+
+  // A ida e a volta: o CSV exportado da live volta com os mesmos minutos, na live e na gravada.
+  const itens = [12 * 60_000, 12 * 60_000 + 30_000, 3_723_000, 12_000].map((offsetMs, index) => ({ body: `m${index}`, offsetMs, personaName: "Bia C.", personaRole: "student" }));
+  const exportado = script.formatScriptCsv(itens, { live: true });
+  assert.match(exportado, /^\uFEFF?Tempo;Nome;Papel;Mensagem\r?\n12:00;Bia C\.;Aluno;m0/);
+  assert.match(exportado, /62:03;Bia C\.;Aluno;m2/);
+  assert.deepEqual(script.parseScriptCsv(exportado, { live: true }).items.map((item) => item.offsetMs), itens.map((item) => item.offsetMs));
+  assert.deepEqual(script.parseScriptCsv(exportado).items.map((item) => item.offsetMs), itens.map((item) => item.offsetMs), "a gravada le o mesmo arquivo igual");
+  assert.match(script.formatScriptCsv(itens), /12:00;Bia C\.;Aluno;m0/, "a gravada continua com mm:ss");
+  assert.match(script.formatScriptCsv(itens), /1:02:03;Bia C\.;Aluno;m2/);
+});
+
 test("ordem e minuto de cada item: at_offset pelo minuto, on_phrase pelo resolvido, manual no fim", () => {
   const items = [
     { id: "a", offsetMs: 90_000, position: 0, resolvedOffsetMs: null, triggerKind: "at_offset" },

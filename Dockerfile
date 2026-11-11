@@ -9,6 +9,18 @@
 # As variaveis NEXT_PUBLIC_* entram no JavaScript do navegador na hora do build, por isso sao ARG e nao
 # variaveis de runtime. Sao valores publicos (endereco e chave publicavel): nenhum segredo entra na
 # imagem, que e publicada no ghcr.io pelo workflow .github/workflows/build-image.yml.
+#
+# A imagem vendida (docs/32 §11.3) e gerada com a licenca exigida, gravada no codigo do servidor pelo next.config.ts:
+#   --build-arg BUNKER_LICENSING_MODE=enforce \
+#   --build-arg BUNKER_LICENSING_ROOTS='[{"rid":"...","publicKey":"..."}]' \
+#   --build-arg BUNKER_LICENSING_EMISSOR_URL=https://...
+# Sem elas, a imagem sai "off" (a nossa escola). Modo digitado errado, ou "enforce" sem raizes validas ou sem o Emissor
+# em https, para o build. As tres ficam so no estagio do build: a imagem que roda nao as recebe, e trocar a variavel no
+# conteiner depois nao muda nada.
+#
+# O pacote de uma escola do lote fundador (.github/workflows/pacote-escola.yml; docs/20 §9D.6) grava tambem o endereco
+# dela no codigo: --build-arg NEXT_PUBLIC_SITE_URL=https://alunos.escola.com.br. Sem ele, a variavel sai do ambiente
+# antes do build (o Next nunca grava o endereco vazio) e a producao continua lendo o endereco ao rodar.
 
 ARG NODE_IMAGE=node:24.11.1-alpine3.22
 
@@ -29,6 +41,10 @@ ARG NEXT_PUBLIC_POSTHOG_KEY
 ARG NEXT_PUBLIC_POSTHOG_HOST
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG APP_VERSION=dev
+ARG BUNKER_LICENSING_MODE
+ARG BUNKER_LICENSING_ROOTS
+ARG BUNKER_LICENSING_EMISSOR_URL
+ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_OUTPUT=standalone \
     NODE_ENV=production \
@@ -38,10 +54,13 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY} \
     NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST} \
     NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
-    APP_VERSION=${APP_VERSION}
+    APP_VERSION=${APP_VERSION} \
+    BUNKER_LICENSING_MODE="${BUNKER_LICENSING_MODE}" \
+    BUNKER_LICENSING_ROOTS="${BUNKER_LICENSING_ROOTS}" \
+    BUNKER_LICENSING_EMISSOR_URL="${BUNKER_LICENSING_EMISSOR_URL}"
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN if [ -z "${NEXT_PUBLIC_SITE_URL:-}" ]; then unset NEXT_PUBLIC_SITE_URL; fi; npm run build
 
 # ---- runtime: so o servidor standalone, estaticos e public, rodando como usuario sem privilegio ----
 FROM ${NODE_IMAGE} AS runner

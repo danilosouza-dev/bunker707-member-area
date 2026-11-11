@@ -7,9 +7,10 @@ import "./support/transpile-tsx.mjs";
 // viewOnJoin, filmstripStep e stagePollFor), no lugar das conferencias de texto do codigo-fonte que elas substituem.
 // F1 (V2-2): sem Minimizar, a nossa barra da sala ao vivo so depende de a sala estar no ar: a live encerrada, removido,
 // banido ou fora do acesso a tiram; na espera, trancada, sem o ambiente ou aberta, ela fica.
-// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (no estilo do YouTube, roomMetaLine, com o numero primeiro), a
-// do celular (tambem com o numero primeiro) e a margem que a coluna de miniaturas do iframe
-// tira da direita do video (room-layout-model.ts), e o selo do momento no palco da live (no ar ou na espera).
+// F3 (V2-3, V2-4 e V2-18): a linha da data do cabecalho (roomDateLine), a do celular (so quem apresenta), o selo de
+// quem assiste agora no palco (roomPresentBadge, docs/31 §11.5: o numero saiu da linha do titulo), a margem que a coluna
+// de miniaturas do iframe tira da direita do video (room-layout-model.ts) e o selo do momento no palco da live (no ar
+// ou na espera).
 // F5 (V2-7 e V2-8): as abas do painel nas tres salas, o contador de mensagens novas do balao (tambem com o zero da live
 // mudando), o primeiro foco, quando as 2 ultimas mensagens ficam em pilulas sobre o palco e o card da Oferta no canto.
 // F6 (V2-9): a hora e o papel da linha de baixo do balao do chat (webinar-room-client.ts).
@@ -19,6 +20,10 @@ import "./support/transpile-tsx.mjs";
 // (1013 px), o toggleFilmStrip so quando muda o que o motor mostra, os sinais tileViewChanged e filmstripDisplayChanged
 // (na barra, nunca no servidor) e a margem que a coluna tira dos selos so quando ela esta na tela.
 // F9 (V2-19): o Microfone que a equipe recolhe ou silencia sai da barra; o foco que estava nele volta para a sala.
+// Na tela, as fixadas do aluno (especificacao de 10/11/2026, §3.1, §3.4 e §3.6): quando a mensagem e a enquete fixadas
+// aparecem, a enquete fixada fora da aba Enquetes e do card "deixou para depois", as pilulas e as linhas da faixa so com
+// o painel fechado, o que a pilula da enquete faz, o texto de uma linha, a dica do corte, o aviso so na fixada nova e o
+// botao de enquete do vertical.
 
 const model = await import("../src/components/member/webinars/room/live-room-model.ts");
 
@@ -158,30 +163,30 @@ test("roomDateLine (V2-3): a data, a hora, a duracao e quem apresenta; no Replay
   assert.equal(linha({ durationMinutes: 0, kind: "replay", presenterName: null }), "", "nada a dizer: a linha fica vazia");
 });
 
-test("roomMetaLine (V2-3, no estilo do YouTube): o numero primeiro ('3 assistindo agora') e depois os trechos da data; sem contador (Replay, encerrada), a linha comeca na data; no Replay, sem data", () => {
-  const base = { durationMinutes: 60, kind: "live", presentNow: 3, presenterName: "Danilo Souza", scheduledAt: "2026-11-05T23:00:00.000Z" };
-  const meta = (extra = {}) => layout.roomMetaLine({ ...base, ...extra });
-  assert.deepEqual(meta(), { present: "3 assistindo agora", rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] });
-  assert.deepEqual(meta().rest, layout.roomDateLine(base), "o resto e a linha da data de sempre");
-  assert.deepEqual(meta({ presentNow: null }), { present: null, rest: ["Quinta, 5 de novembro", "20:00", "60 min", "com Danilo Souza"] }, "encerrada: sem o numero, comeca na data");
-  assert.deepEqual(meta({ kind: "replay", presentNow: null }), { present: null, rest: ["60 min", "com Danilo Souza"] }, "no Replay: sem o numero, sem data e sem hora");
-  assert.deepEqual(meta({ kind: "simulated", presentNow: 58 }).present, "58 assistindo agora", "a gravada com o numero somado da Simulacao");
-  assert.equal(meta({ presentNow: 1 }).present, "1 assistindo agora");
-  assert.equal(meta({ presentNow: 0 }).present, "0 assistindo agora", "zero tambem e numero");
-  assert.equal(meta({ presentNow: -4 }).present, "0 assistindo agora", "nunca negativo");
-  assert.equal(meta({ presentNow: 2.6 }).present, "3 assistindo agora", "inteiro");
-  assert.equal(meta({ presentNow: Number.NaN }).present, null, "sem numero de verdade, sem o trecho");
-  assert.equal(meta({ presentNow: 1234 }).present, "1.234 assistindo agora", "o milhar como no Brasil");
+test("roomPresentBadge (docs/31 §11.5): o selo de quem assiste agora no palco, com o numero ('1.234') e a frase inteira ('1.234 assistindo agora'); sem contador (Replay, encerrada), nulo", () => {
+  assert.deepEqual(layout.roomPresentBadge(3), { count: "3", label: "3 assistindo agora" });
+  assert.deepEqual(layout.roomPresentBadge(1), { count: "1", label: "1 assistindo agora" });
+  assert.deepEqual(layout.roomPresentBadge(0), { count: "0", label: "0 assistindo agora" }, "zero tambem e numero");
+  assert.deepEqual(layout.roomPresentBadge(-4), { count: "0", label: "0 assistindo agora" }, "nunca negativo");
+  assert.deepEqual(layout.roomPresentBadge(2.6), { count: "3", label: "3 assistindo agora" }, "inteiro");
+  assert.deepEqual(layout.roomPresentBadge(1234), { count: "1.234", label: "1.234 assistindo agora" }, "o milhar como no Brasil");
+  assert.equal(layout.roomPresentBadge(null), null, "o Replay e a encerrada nao tem contador: o selo sai");
+  assert.equal(layout.roomPresentBadge(Number.NaN), null, "sem numero de verdade, sem o selo");
+  assert.equal(layout.roomPresentBadge(Number.POSITIVE_INFINITY), null);
 });
 
-test("roomMobileLine (V2-18, no estilo do YouTube): '{n} assistindo agora · com {apresentador}', o numero primeiro; sem contador (replay, encerrada) ou sem apresentador, o trecho sai", () => {
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 3 }).join(" · "), "3 assistindo agora · com Danilo Souza");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1 }).join(" · "), "1 assistindo agora · com Danilo Souza");
-  assert.equal(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: 1234 }).join(" · "), "1.234 assistindo agora · com Danilo Souza");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "Danilo Souza", presentNow: null }), ["com Danilo Souza"], "o replay e a encerrada nao tem contador: so o apresentador");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: 3 }), ["3 assistindo agora"], "sem apresentador, so o numero");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: "   ", presentNow: 0 }), ["0 assistindo agora"], "nome em branco tambem; zero tambem e numero");
-  assert.deepEqual(layout.roomMobileLine({ presenterName: null, presentNow: null }), []);
+test("roomMobileLine (V2-18): so 'com {apresentador}' (o numero de quem assiste fica no palco, docs/31 §11.5); sem apresentador, a linha sai", () => {
+  assert.equal(layout.roomMobileLine("Danilo Souza"), "com Danilo Souza");
+  assert.equal(layout.roomMobileLine("  Danilo Souza  "), "com Danilo Souza", "sem os espacos das pontas");
+  assert.equal(layout.roomMobileLine(null), "");
+  assert.equal(layout.roomMobileLine("   "), "", "nome em branco tambem");
+});
+
+test("a linha de baixo do titulo nao leva mais o numero de quem assiste (docs/31 §11.5): roomDateLine nao recebe o contador e o modelo nao exporta mais roomMetaLine", () => {
+  assert.equal(layout.roomMetaLine, undefined, "a linha com o numero saiu");
+  const linha = layout.roomDateLine({ durationMinutes: 60, kind: "live", presenterName: "Danilo Souza", presentNow: 128, scheduledAt: "2026-11-05T23:00:00.000Z" }).join(" · ");
+  assert.equal(linha, "Quinta, 5 de novembro · 20:00 · 60 min · com Danilo Souza");
+  assert.doesNotMatch(linha, /assistindo|128/);
 });
 
 test("assistindoAgora: '1 assistindo agora' e, com mais de um, o numero com o milhar do pt-BR", () => {
@@ -1145,4 +1150,107 @@ test("microfone sozinho (docs/31 caminho A): o Microfone aparece sem o Liberar; 
   assert.equal(model.micClick({ ...base, audioModeration: true, audioOn: true, consented: true }), "toggle", "ligado, o aluno sempre se cala");
   assert.equal(model.micClick({ ...base, micAllowed: true, consented: false, selfUnmute: false }), "toggle", "o Liberar de sempre (o Falar ja aceito)");
   assert.equal(model.liveNoticePhrase("mic_full"), WEBINAR_COPY.aoVivo.microfoneLotado);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Na tela: as fixadas do aluno (especificacao de 10/11/2026, §3.1, §3.4 e §3.6)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("pinnedShownIn (§3.6): as fixadas na Live ao vivo e na gravada, na espera e no ar; nunca no Replay, com a sessao encerrada nem para quem foi removido, banido ou saiu do acesso", () => {
+  for (const kind of ["live", "simulated"]) {
+    for (const phase of ["waiting", "live"]) {
+      assert.equal(layout.pinnedShownIn({ blocked: false, kind, phase }), true, `${kind} ${phase}`);
+      assert.equal(layout.pinnedShownIn({ blocked: true, kind, phase }), false, `${kind} ${phase}: removido ou banido`);
+    }
+    assert.equal(layout.pinnedShownIn({ blocked: false, kind, phase: "ended" }), false, `${kind}: encerrada`);
+  }
+  assert.equal(layout.pinnedShownIn({ blocked: false, kind: "replay", phase: "replay" }), false, "o Replay nao tem equipe");
+});
+
+test("pinnedPollFor e unpinnedPolls (§3.1): a enquete fixada sai da lista do aluno; a aba Enquetes e o card 'deixou para depois' ficam com as outras", () => {
+  const fixada = pergunta("f");
+  const outra = pergunta("o");
+  const lista = [outra, fixada];
+  assert.equal(layout.pinnedPollFor({ pinnedPollId: "f", polls: lista }), fixada);
+  assert.equal(layout.pinnedPollFor({ pinnedPollId: null, polls: lista }), null, "sem enquete fixada");
+  assert.equal(layout.pinnedPollFor({ pinnedPollId: "x", polls: lista }), null, "a que saiu da lista do aluno (encerrada sem compartilhar) nao aparece fixada");
+  assert.deepEqual(layout.unpinnedPolls(lista, "f"), [outra], "a aba Enquetes nao repete o cartao fixado");
+  assert.deepEqual(layout.unpinnedPolls(lista, null), lista);
+  assert.notEqual(layout.unpinnedPolls(lista, null), lista, "uma lista nova, nunca a da sala");
+  // O Responder depois da enquete fixada manda para a area das fixadas: o card do chat nunca e o dela.
+  const depois = { later: ["f"], seen: [] };
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: layout.unpinnedPolls(lista, "f") }), null);
+  assert.equal(polls.deferredPollCard({ deferredIds: depois.later, polls: lista })?.id, "f", "sem a regra, ela viraria o card");
+  // A enquete no meio do palco continua abrindo uma vez ao ser lancada, fixada ou nao.
+  assert.equal(polls.stagePollFor({ deferredIds: [], polls: [fixada], seenResultIds: [] })?.poll.id, "f");
+});
+
+test("pinnedPillsShown (§3.1): as pilulas do palco e as linhas da faixa so no desenho normal, com o painel fechado e a sala de pe para a pessoa", () => {
+  const base = { blocked: false, design: "normal", panelShown: false, settingsTakeover: false };
+  assert.equal(layout.pinnedPillsShown(base), true);
+  assert.equal(layout.pinnedPillsShown({ ...base, panelShown: true }), false, "aberto, a area das fixadas ja esta no painel");
+  assert.equal(layout.pinnedPillsShown({ ...base, design: "vertical" }), false, "o vertical tem a linha dele acima do chat");
+  assert.equal(layout.pinnedPillsShown({ ...base, blocked: true }), false, "removido ou banido");
+  assert.equal(layout.pinnedPillsShown({ ...base, settingsTakeover: true }), false, "Configurações no lugar do chat no celular");
+});
+
+test("pinnedPollPillStep (§3.1): a enquete aberta sem resposta volta ao meio do palco; respondida ou encerrada com resultado, o painel", () => {
+  assert.equal(layout.pinnedPollPillStep(pergunta("a")), "stage");
+  assert.equal(layout.pinnedPollPillStep(pergunta("a", { myOptionIds: ["o1"] })), "panel", "respondida");
+  assert.equal(layout.pinnedPollPillStep(pergunta("a", { results: RESULTADO, status: "closed" })), "panel", "encerrada com o resultado");
+  assert.equal(layout.pinnedPollPillStep(pergunta("a", { myOptionIds: ["o2"], results: RESULTADO })), "panel", "o resultado compartilhado de quem respondeu");
+});
+
+test("pinnedPollTapStep (A8): o toque na enquete fixada so vai ao palco quando ela e mesmo a que o palco mostra; com outra sem resposta na frente, o painel", () => {
+  const nada = { later: [], seen: [] };
+  const fixada = pergunta("b");
+  const tap = (lista, deferred = nada, seenResultIds = []) => layout.pinnedPollTapStep({ deferred, poll: lista.find((poll) => poll.id === "b"), polls: lista, seenResultIds });
+  assert.equal(tap([fixada]), "stage", "sozinha e sem resposta: o palco");
+  assert.equal(tap([fixada], { later: ["b"], seen: [] }), "stage", "deixada para depois: o Responder agora a traz de volta");
+  // A outra enquete aberta sem resposta vem antes na lista: o palco mostraria a outra e o toque nao faria nada.
+  assert.equal(tap([pergunta("a"), fixada]), "panel", "outra sem resposta na frente: o painel com a area das fixadas");
+  assert.equal(tap([pergunta("a"), fixada], { later: ["a"], seen: [] }), "stage", "a outra ficou para depois: a fixada e a do palco");
+  assert.equal(tap([pergunta("a", { myOptionIds: ["o1"] }), fixada]), "stage", "a outra ja respondida nao conta");
+  // O resultado compartilhado de outra enquete nao passa na frente de uma resposta (stagePollFor).
+  assert.equal(tap([pergunta("c", { myOptionIds: ["o1"], results: RESULTADO }), fixada], { later: ["b"], seen: [] }), "stage");
+  assert.equal(tap([pergunta("b", { myOptionIds: ["o1"] })]), "panel", "respondida: o painel");
+  assert.equal(tap([pergunta("b", { results: RESULTADO, status: "closed" })]), "panel", "encerrada: o painel");
+  // O palco depois do toque, para conferir: e a fixada.
+  assert.equal(polls.stagePollFor({ deferredIds: polls.resumePoll({ later: ["a", "b"], seen: [] }, "b").later, polls: [pergunta("a"), fixada], seenResultIds: [] })?.poll.id, "b");
+});
+
+test("pinnedPillText e pinnedClampHint: a fixada numa linha na pilula; a dica do corte antes da medida pelas quebras e pelo tamanho", () => {
+  assert.equal(layout.pinnedPillText("  Material:\n https://bunker707.com.br/apostila\t  hoje "), "Material: https://bunker707.com.br/apostila hoje");
+  assert.equal(WEBINAR_COPY.naTela.aluno.pilulaFixada(layout.pinnedPillText("a\nb")), "Fixada · a b");
+  assert.equal(layout.pinnedClampHint("Boa noite, turma!", 3), false, "curta: sem o Mostrar tudo");
+  assert.equal(layout.pinnedClampHint("um\ndois\ntres", 3), false, "tres linhas cabem em tres");
+  assert.equal(layout.pinnedClampHint("um\ndois\ntres\nquatro", 3), true, "mais quebras que linhas");
+  assert.equal(layout.pinnedClampHint("x".repeat(3 * 38), 3), false);
+  assert.equal(layout.pinnedClampHint("x".repeat(3 * 38 + 1), 3), true, "mais letras do que cabem");
+  assert.equal(layout.pinnedClampHint("x".repeat(80), 2), true, "a linha do vertical corta em 2");
+  assert.equal(layout.pinnedClampHint("um\ndois\ntres", 2), true);
+});
+
+test("pinnedNoticeShown e pinnedSnack (§3.1): o aviso 'A equipe fixou uma mensagem.' com Ver so na fixada nova com o painel fechado, uma vez", () => {
+  const aviso = (extra) => layout.pinnedNoticeShown({ after: "m2", before: "m1", panelShown: false, shown: true, ...extra });
+  assert.equal(aviso({}), true, "trocou de fixada com o painel fechado");
+  assert.equal(aviso({ before: null }), true, "fixou com nada antes");
+  assert.equal(aviso({ before: undefined }), false, "a fixada que ja estava quando a sala abriu nao avisa");
+  assert.equal(aviso({ before: "m2" }), false, "a mesma fixada (a leitura seguinte, o painel que abre e fecha) nao avisa de novo");
+  assert.equal(aviso({ after: null }), false, "desafixar e silencioso");
+  assert.equal(aviso({ panelShown: true }), false, "aberto, o painel ja mostra a area das fixadas");
+  assert.equal(aviso({ shown: false }), false, "o vertical, removido ou banido");
+  const snack = layout.pinnedSnack();
+  assert.deepEqual(snack, { action: { key: layout.PINNED_SNACK_ACTION, label: "Ver" }, key: "pinned", text: "A equipe fixou uma mensagem." });
+  assert.equal(snack.text, WEBINAR_COPY.naTela.aluno.avisoFixou);
+});
+
+test("verticalPollButton (§3.4): com a enquete fixada, 'Enquete fixada: {pergunta}', que fica depois da resposta; sem ela, a primeira aberta como antes", () => {
+  const fixada = pergunta("f", { question: "Qual o seu nivel?" });
+  assert.deepEqual(layout.verticalPollButton({ openPolls: [pergunta("o")], pinnedPoll: fixada }), { label: "Enquete fixada: Qual o seu nivel?", pinned: true });
+  const respondida = { ...fixada, myOptionIds: ["o1"] };
+  assert.deepEqual(layout.verticalPollButton({ openPolls: [], pinnedPoll: respondida }), { label: "Enquete fixada: Qual o seu nivel?", pinned: true }, "continua la depois da resposta");
+  assert.deepEqual(layout.verticalPollButton({ openPolls: [], pinnedPoll: { ...fixada, results: RESULTADO, status: "closed" } })?.pinned, true, "e com o resultado compartilhado");
+  assert.deepEqual(layout.verticalPollButton({ openPolls: [pergunta("o"), pergunta("p")], pinnedPoll: null }), { label: "Pergunta o?", pinned: false });
+  assert.equal(layout.verticalPollButton({ openPolls: [], pinnedPoll: null }), null);
 });

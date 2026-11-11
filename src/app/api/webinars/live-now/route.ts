@@ -13,6 +13,8 @@ import { sessionDurationMs } from "@/server/webinars/room-model";
 import { pickRecording } from "@/server/webinars/room-queries";
 import { registrationFromRow, sessionFromRow, webinarFromRow, WEBINAR_COLUMNS, type RecordingRow, type WebinarRow } from "@/server/webinars/rows";
 import { fetchRegistrationRows, listRecordingRows, listSessionRowsBetween } from "@/server/webinars/store";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A faixa "Ao vivo agora" e "Comeca em 1 h: Entrar" do topo de todas as paginas da area (docs/30 §1.1, §1.5 e §2.7):
 // GET devolve { data: { serverTime, live: [{ title, href, startedAt }], soon: { title, href, scheduledAt } | null } }.
@@ -108,6 +110,9 @@ async function readLiveNow(db: WebinarsDb, userId: string, nowMs: number): Promi
 }
 
 export async function GET() {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {

@@ -4,7 +4,7 @@
 
 import "server-only";
 
-import { WEBINAR_CHANGED_MESSAGE, WEBINAR_MISSING_MESSAGE, WebinarError, assertNoDbError, type WebinarsDb } from "./db";
+import { WEBINAR_ARCHIVED_MESSAGE, WEBINAR_CHANGED_MESSAGE, WEBINAR_MISSING_MESSAGE, WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import {
   PRESENTER_COLUMNS,
   RECORDING_COLUMNS,
@@ -52,6 +52,17 @@ export async function requireWebinarRow(db: WebinarsDb, id: string): Promise<Web
     throw new WebinarError(WEBINAR_MISSING_MESSAGE, 404);
   }
   return row;
+}
+
+/**
+ * O arquivado fica so de leitura (docs/30 §2.3): as escritas do webinario (o rascunho, as sessoes, o "Comeca quando
+ * voce entra", a Simulacao, o roteiro, as enquetes, a Oferta, o Assistente e o replay) chamam isto logo depois de ler a
+ * linha. Fica fora de requireWebinarRow e de loadSession: as leituras, as exportacoes e as respostas do console seguem.
+ */
+export function assertWebinarNotArchived(row: Pick<WebinarRow, "status">): void {
+  if (row.status === "archived") {
+    throw new WebinarError(WEBINAR_ARCHIVED_MESSAGE, 409);
+  }
 }
 
 export type WebinarListFilter = {
@@ -196,6 +207,17 @@ export async function updateSessionRow(db: WebinarsDb, id: string, patch: Sessio
   assertNoDbError(error, "Webinarios: gravar sessao");
   const rows = (data ?? []) as SessionRow[];
   return rows[0] ?? null;
+}
+
+/**
+ * Muda o carimbo da sessao (webinar_sessions.updated_at, que o gatilho set_webinar_sessions_updated_at poe na hora do
+ * banco) sem mexer em mais nada: o sinal de que o que a turma ve mudou (a Na tela, docs/30 §5.1; a consulta de 5 s do
+ * chat compara o carimbo). Quem mexe no que a turma ve grava o dado ANTES e chama isto DEPOIS: assim nenhuma leitura
+ * guarda um estado velho com um carimbo novo.
+ */
+export async function touchSessionRow(db: WebinarsDb, id: string): Promise<void> {
+  const { error } = await db.from("webinar_sessions").update({ updated_at: new Date().toISOString() }).eq("id", id);
+  assertNoDbError(error, "Webinarios: atualizar o carimbo da sessao");
 }
 
 export async function deleteSessionRows(db: WebinarsDb, ids: readonly string[]): Promise<void> {
@@ -441,4 +463,76 @@ export async function fetchWebinarReport(db: WebinarsDb, sessionId: string): Pro
     students: toNumber(row.students),
     total: toNumber(row.total)
   }));
+}
+
+/** Ids de sessao por leitura `.in(...)` da conferencia: o "Comeca quando voce entra" cria dezenas de sessoes por dia e o endereco do PostgREST tem limite. */
+export const STUDENT_DATA_SESSION_CHUNK = 100;
+/** Ate quantas pessoas da equipe cabem no `not.in` do endereco junto das sessoes; acima disso a conferencia nao decide (`truncated`). */
+export const STUDENT_DATA_STAFF_MAX = 50;
+
+const SESSION_DATA_TABLES = ["webinar_attendance", "webinar_presence_samples", "webinar_questions", "webinar_poll_answers", "webinar_reactions", "webinar_offer_clicks", "webinar_ai_requests"] as const;
+
+type ProbeResult = { data: Record<string, unknown>[] | null; error: { message: string; code?: string | null; hint?: string | null } | null };
+type ProbeQuery<Q> = { limit(count: number): PromiseLike<ProbeResult>; not(column: string, operator: string, value: unknown): Q };
+
+/**
+ * Quem deixou dados no webinario (docs/30 §2.3, Excluir o arquivado). A equipe vem primeiro (o admin_roles, o
+ * apresentador e quem apresenta) e cada leitura pede ao banco uma linha so de alguem fora dela (`not.in` + limit 1): a
+ * quantidade de linhas da equipe nunca decide (a presenca grava uma linha a cada 30 s por pessoa). As tabelas: as
+ * inscricoes e o historico do aluno (student_events com entity_type 'webinar', pelo indice parcial
+ * student_events_webinar_idx) pelo webinario; e, pelas sessoes, em partes de STUDENT_DATA_SESSION_CHUNK, o chat da turma,
+ * o historico, a presenca, as amostras, as perguntas, as respostas de enquete, as reacoes, os cliques na oferta e os
+ * pedidos ao Assistente. Para na primeira pessoa achada. Uma equipe maior que STUDENT_DATA_STAFF_MAX nao cabe no endereco:
+ * `truncated` (a conferencia nao decidiu), que conta como "tem dados". Quem decide e webinarHasStudentData (model.ts).
+ */
+export async function webinarDataAuthors(db: WebinarsDb, webinar: Pick<WebinarRow, "host_user_id" | "id">): Promise<{ staffIds: string[]; truncated: boolean; userIds: (string | null)[] }> {
+  const [sessions, presenters, roles] = await Promise.all([
+    listSessionRows(db, [webinar.id]),
+    listPresenterRows(db, [webinar.id]),
+    db.from("admin_roles").select("user_id").limit(STUDENT_DATA_STAFF_MAX + 1)
+  ]);
+  assertNoDbError(roles.error, "Webinarios: equipe na conferencia de dados de aluno");
+  const staff = new Set<string>(webinar.host_user_id ? [webinar.host_user_id] : []);
+  for (const presenter of presenters) {
+    staff.add(presenter.user_id);
+  }
+  for (const row of (roles.data ?? []) as { user_id: string }[]) {
+    staff.add(row.user_id);
+  }
+  const staffIds = [...staff];
+  if (staffIds.length > STUDENT_DATA_STAFF_MAX) {
+    return { staffIds, truncated: true, userIds: [] };
+  }
+
+  /** Uma linha de alguem fora da equipe (o banco filtra: a quantidade de linhas da equipe nunca decide). */
+  async function outsider<Q extends ProbeQuery<Q>>(context: string, column: string, query: Q): Promise<string | null> {
+    const { data, error } = await (staffIds.length > 0 ? query.not(column, "in", `(${staffIds.join(",")})`) : query.not(column, "is", null)).limit(1);
+    assertNoDbError(error, `Webinarios: dados de aluno (${context})`);
+    const value = (data ?? [])[0]?.[column];
+    return typeof value === "string" ? value : null;
+  }
+  const firstOf = async (probes: Promise<string | null>[]) => (await Promise.all(probes)).find((userId) => userId !== null) ?? null;
+  const result = (userId: string | null) => ({ staffIds, truncated: false, userIds: userId ? [userId] : [] });
+
+  const byWebinar = await firstOf([
+    outsider("inscricoes", "user_id", db.from("webinar_registrations").select("user_id").eq("webinar_id", webinar.id)),
+    outsider("historico", "user_id", db.from("student_events").select("user_id").eq("entity_type", "webinar").eq("entity_id", webinar.id))
+  ]);
+  if (byWebinar) {
+    return result(byWebinar);
+  }
+
+  const sessionIds = sessions.map((session) => session.id);
+  for (let index = 0; index < sessionIds.length; index += STUDENT_DATA_SESSION_CHUNK) {
+    const part = sessionIds.slice(index, index + STUDENT_DATA_SESSION_CHUNK);
+    const found = await firstOf([
+      outsider("chat", "author_user_id", db.from("webinar_chat_messages").select("author_user_id").in("session_id", part).eq("source", "audience")),
+      outsider("historico", "user_id", db.from("student_events").select("user_id").eq("entity_type", "webinar").in("entity_id", part)),
+      ...SESSION_DATA_TABLES.map((table) => outsider(table, "user_id", db.from(table).select("user_id").in("session_id", part)))
+    ]);
+    if (found) {
+      return result(found);
+    }
+  }
+  return result(null);
 }

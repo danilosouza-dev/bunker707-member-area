@@ -319,6 +319,27 @@ test("card Sala: o microfone sozinho liga na Live ao vivo (o teto na dica) e fic
   assert.match(textOf(desligado), /Desligado nesta versão\./);
 });
 
+test("card Sala (D64, 10/11/2026): sem 'Perguntas anônimas permitidas' e sem 'Como o aluno aparece' (nem Apelido, nem Sempre anônimo), na Live ao vivo e na gravada, mesmo com o rascunho antigo", () => {
+  const card = (draft) => html(createElement(RoomCard, { disabled: false, draft, errorFor: () => undefined, now: Date.now(), onBlur() {}, onChange() {} }));
+  for (const kind of ["live", "simulated"]) {
+    // O rascunho de um webinario antigo ainda pode trazer as duas chaves no card Sala: a tela nao desenha nada para elas.
+    for (const roomSettings of [model.defaultRoomSettings(), { ...model.defaultRoomSettings(), anonymousQuestions: true, displayName: "anonymous" }]) {
+      const markup = card({ ...model.emptyWebinarDraft(kind), roomSettings });
+      const text = textOf(markup);
+      assert.doesNotMatch(text, /an[oô]nim/i, `${kind}: nada de anonimo no card`);
+      assert.doesNotMatch(text, /Como o aluno aparece|Apelido|Primeiro nome \+ inicial/, `${kind}: sem a escolha de como o aluno aparece`);
+      assert.doesNotMatch(markup, /webinar-room-anonymousQuestions|webinar-room-displayName/, `${kind}: sem o interruptor e sem o grupo`);
+      // O resto do card continua: Perguntas, Enquetes e Reacoes.
+      for (const id of ["webinar-room-questions", "webinar-room-polls", "webinar-room-reactions"]) {
+        assert.match(markup, new RegExp(`id="${id}"`), `${kind}: ${id}`);
+      }
+    }
+  }
+  const fields = vm.WEBINAR_ADMIN_COPY.fields;
+  assert.ok(!("anonymousQuestions" in fields) && !("displayName" in fields) && !("displayNames" in fields), "as frases do editor sairam");
+  assert.ok(!("anonymous" in vm.WEBINAR_ADMIN_COPY.polls), "a frase Respostas anônimas saiu");
+});
+
 test("card Gravacao na tela: a situacao do gravador, os links para o console, a frase de quem nao publica e o aviso sem a sala", () => {
   const draft = { ...model.emptyWebinarDraft("live"), autoRecord: true };
   const props = { disabled: false, draft, errorFor: () => undefined, now: Date.now(), onBlur() {}, onChange() {} };
@@ -624,6 +645,26 @@ test("publicar a Live ao vivo gera o nome da sala (so na sessao live); duplicar 
   assert.deepEqual([audit.metadata.jit_copied, audit.metadata.offer_copied, audit.metadata.assistant_items], [false, false, 0]);
 });
 
+test("salvar o rascunho (D64): o card Sala que ainda traz anonymousQuestions e displayName e salvo sem as duas chaves; o webinario antigo com elas no JSON perde as duas no proximo salvar", async () => {
+  const db = usar(bancoEmMemoria({ admin_roles: [{ permissions: null, role: "owner", user_id: HOST }] }));
+  const CHAVES = Object.keys(model.defaultRoomSettings()).sort();
+  // O editor aberto com a pagina de antes de 10/11/2026 manda o card Sala com as duas chaves.
+  const antigo = { ...liveDraft(), roomSettings: { ...model.defaultRoomSettings(), anonymousQuestions: true, chatMode: "moderated", displayName: "anonymous" } };
+  const saved = ok(await actions.saveWebinarDraft({ draft: antigo }));
+  const linha = () => db.tables.webinars.find((row) => row.id === saved.id);
+  assert.deepEqual(Object.keys(linha().room_settings).sort(), CHAVES, "gravado sem anonymousQuestions e sem displayName");
+  assert.equal(linha().room_settings.chatMode, "moderated", "o resto do card foi gravado");
+
+  // O webinario de antes: o JSON no banco ainda tem as duas chaves. O editor le sem elas e o proximo salvar as tira.
+  linha().room_settings = { ...linha().room_settings, anonymousQuestions: true, displayName: "nickname" };
+  const data = await queries.getWebinarEditorData(saved.id);
+  assert.deepEqual(Object.keys(data.draft.roomSettings).sort(), CHAVES, "o rascunho lido nao leva as chaves antigas");
+  ok(await actions.saveWebinarDraft({ draft: { ...data.draft, title: "Live de teste, de novo" }, expectedUpdatedAt: data.updatedAt, id: saved.id }));
+  assert.deepEqual(Object.keys(linha().room_settings).sort(), CHAVES, "as chaves antigas sumiram no proximo salvar");
+  assert.equal(linha().room_settings.chatMode, "moderated");
+  assert.equal(linha().title, "Live de teste, de novo");
+});
+
 test("cancelar uma Live ao vivo com a maquina do gravador ligada: a sessao vira cancelada, o nome da sala e o gravador ficam, e nada chama o GitHub", async () => {
   for (const recorderStatus of ["preparing", "ready"]) {
     const db = usar(bancoEmMemoria(cenario({ recorderStatus })));
@@ -923,4 +964,61 @@ test("frases novas do admin passam pela guarda do Webinario e nada diz 'em breve
   assert.ok(!("roomNameSoon" in vm.WEBINAR_ADMIN_COPY.fields), "a frase '(fase 3)' saiu");
   assert.ok(!("recordingSoon" in vm.WEBINAR_ADMIN_COPY.fields));
   assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"], "so o replay como aula segue 'em breve'");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * O arquivado so de leitura (docs/30 §2.3): o servidor e o editor desenhado
+ * ---------------------------------------------------------------------------------------------- */
+
+test("o arquivado so de leitura: mudar a hora e salvar o rascunho respondem 409 com a frase do Desarquivar, sem mexer na sessao", async () => {
+  const db = usar(bancoEmMemoria(cenario({ recorderStatus: "none" })));
+  const data = await queries.getWebinarEditorData(WEBINAR);
+  const antes = db.tables.webinar_sessions[0].scheduled_at;
+  db.tables.webinars[0].status = "archived";
+
+  const hora = await actions.rescheduleSession({ scheduledAt: new Date(Date.now() + 3 * DAY).toISOString(), sessionId: SESSAO, webinarId: WEBINAR });
+  assert.deepEqual([hora.ok, hora.status, hora.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  const salvo = await actions.saveWebinarDraft({ draft: { ...data.draft, scheduledAt: new Date(Date.now() + 4 * DAY).toISOString() }, id: WEBINAR });
+  assert.deepEqual([salvo.ok, salvo.status, salvo.error], [false, 409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  assert.equal(db.tables.webinar_sessions[0].scheduled_at, antes);
+  assert.equal(db.tables.admin_audit_log.filter((row) => row.action === "webinar.rescheduled" || row.action === "webinar.saved").length, 0);
+});
+
+test("o editor do arquivado: os cards com o proprio Salvar ficam desligados (o Começa quando você entra, as Enquetes); o encerrado continua com eles; o arquivado cancelado mostra o motivo", () => {
+  const gravada = {
+    ...model.emptyWebinarDraft("simulated"),
+    recordingVideoUrl: "https://iframe.mediadelivery.net/embed/1/abc",
+    sessions: [{ lateJoinMinutes: null, scheduledAt: "2026-10-20T23:00:00.000Z" }],
+    title: "Gravada de teste"
+  };
+  const jit = (markup) => markup.match(/<(?:button|input)\b[^>]*id="webinar-jit-enabled"[^>]*>/)?.[0] ?? "";
+  const botoesDasEnquetes = (markup) => {
+    const inicio = markup.indexOf("data-polls-card");
+    assert.ok(inicio > -1, "o card Enquetes");
+    const fim = markup.indexOf("data-polls-card", inicio + 1);
+    return Array.from(markup.slice(inicio, fim === -1 ? undefined : fim).matchAll(/<button\b[^>]*>/g), (match) => match[0]);
+  };
+
+  const encerrada = renderEditor(editorData({ draft: gravada, liveSession: null, situation: "ended", title: "Gravada de teste" }));
+  assert.ok(jit(encerrada), "o Começa quando você entra no card Sessões");
+  assert.doesNotMatch(jit(encerrada), /\sdisabled/, "o encerrado continua com o proprio Salvar do jit");
+
+  const item = { body: "Boa noite!", createdAt: "2026-10-20T12:00:00.000Z", generatedByAi: false, id: "11111111-2222-4333-8444-555555555555", kind: "message", offsetMs: 10_000, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "2026-10-20T12:00:00.000Z", webinarId: ID };
+  const arquivada = renderEditor(editorData({ draft: gravada, liveSession: null, scriptItems: [item], situation: "archived", status: "archived", title: "Gravada de teste" }));
+  assert.match(jit(arquivada), /\sdisabled/);
+  const enquetes = botoesDasEnquetes(arquivada);
+  assert.ok(enquetes.length > 0 && enquetes.every((botao) => /\sdisabled=""/.test(botao)), "todo botao das Enquetes desligado");
+  // O Roteiro: nada se grava (o Salvar e a linha desligados), mas exportar o roteiro continua (o servidor tambem deixa).
+  const roteiro = arquivada.slice(arquivada.indexOf("data-script-card"));
+  assert.match(roteiro, /<button[^>]*disabled=""[^>]*>[^<]*Salvar roteiro<\/button>/);
+  assert.match(roteiro, /<textarea[^>]*disabled=""/, "o texto da mensagem do roteiro trancado");
+  const exportar = roteiro.match(/<button\b[^>]*>(?:(?!<\/button>)[\s\S])*?Exportar CSV<\/button>/)?.[0] ?? "";
+  assert.ok(exportar, "o Exportar CSV do roteiro");
+  assert.doesNotMatch(exportar.match(/^<button\b[^>]*>/)[0], /\sdisabled=""/, "exportar o roteiro segue no arquivado");
+
+  const cancelada = renderEditor(
+    editorData({ cancelReason: "Apresentador doente", cancelledAt: "2026-10-22T12:00:00.000Z", draft: gravada, liveSession: null, situation: "archived", status: "archived", title: "Gravada de teste" })
+  );
+  assert.match(jit(cancelada), /\sdisabled/);
+  assert.match(textOf(cancelada), /Motivo: Apresentador doente/, "o motivo do cancelado continua no arquivado");
 });

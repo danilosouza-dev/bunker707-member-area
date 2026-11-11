@@ -8,6 +8,7 @@ import {
   updateTvReceiverState,
   type TvPlaybackState
 } from "@/server/video/tv-sessions";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ sessionId: string }> };
 
@@ -42,6 +43,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   try {
     const payload = await readBoundedJson<{
       appliedCommandRevision?: unknown;

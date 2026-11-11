@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { featureVisible, type FeatureKey } from "@/server/licensing/features";
+import { useAdminDisabledFeatures } from "./admin-features";
 import { normalizeAdminPath } from "./nav";
 import { adminTransition } from "./styles";
 
@@ -15,6 +17,8 @@ import { adminTransition } from "./styles";
 export type SectionTabItem = {
   /** Numero ao lado do rotulo (ex.: perguntas sem resposta). null/0 nao mostra. */
   count?: number | null;
+  /** Modulo da licenca de que a aba faz parte (docs/32 §11.8): sem ele ligado, a aba some. */
+  feature?: FeatureKey;
   href: string;
   label: string;
   /**
@@ -38,7 +42,9 @@ function isActive(pathname: string, item: SectionTabItem) {
   return pathname === href || (item.exact === false && pathname.startsWith(`${href}/`));
 }
 
-export function SectionTabs({ ariaLabel, className, items, preserveParams = [] }: SectionTabsProps) {
+export function SectionTabs({ ariaLabel, className, items: allItems, preserveParams = [] }: SectionTabsProps) {
+  const disabledFeatures = useAdminDisabledFeatures();
+  const items = allItems.filter((item) => featureVisible(item.feature, disabledFeatures));
   const pathname = normalizeAdminPath(usePathname());
   const searchParams = useSearchParams();
   const listRef = useRef<HTMLUListElement>(null);

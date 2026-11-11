@@ -19,6 +19,7 @@ import { WebinarActionIcon, WebinarRowMenu, useWebinarActions, type WebinarActio
 
 export function toWebinarActionTarget(item: WebinarListItem): WebinarActionTarget {
   return {
+    deletable: item.deletable,
     id: item.id,
     kind: item.kind,
     registeredCount: item.registeredCount,

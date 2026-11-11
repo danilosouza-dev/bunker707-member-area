@@ -221,6 +221,8 @@ test("a faixa: Chat traduzido para English com Ver original; com a original, Ver
   assert.ok(translated.includes(copy.chatTraduzido("English")));
   assert.match(translated, /<button[^>]*aria-pressed="false"[^>]*>Ver original<\/button>/);
   assert.match(translated, /min-h-11/, "44 px no celular");
+  // Abaixo de lg o cartao da aba corta (max-lg:overflow-hidden) e a faixa e o primeiro filho: a pilula de 44 px precisa de 4 px para o anel de foco.
+  assert.ok((translated.match(/<div class="([^"]*)" data-testid="room-translation">/)?.[1] ?? "").split(" ").includes("max-lg:py-1"), "o respiro do anel de foco abaixo de lg");
 
   const original = render(bar.RoomTranslationBar, { state: { ...base, showOriginal: true } });
   assert.ok(original.includes(copy.chatOriginal));

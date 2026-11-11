@@ -14,8 +14,8 @@ import {
   canTeamActOn,
   consoleClockLabel,
   consoleClockMs,
-  consoleOffsetMs,
   consolePhaseOf,
+  consoleScriptClockMs,
   scriptQueue,
   type ConsoleMessage,
   type ConsoleSnapshot
@@ -25,6 +25,7 @@ import {
   CONSOLE_POLL_START,
   consoleMoreEntriesFor,
   consolePanelViewOf,
+  consoleRailStep,
   consolePollStep,
   consolePresenceBadge,
   consoleStageTopLeft,
@@ -57,11 +58,29 @@ import {
   undoSessionBan,
   unbanStudent
 } from "@/server/webinars/live-actions";
-import { LIVE_CONSOLE_COPY, desiredLobby, handRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { LIVE_CONSOLE_COPY, banLabels, desiredLobby, handRows, liveControlsFor, type LiveConsolePerson } from "@/server/webinars/live-console-model";
+import { NO_BAN } from "@/server/webinars/live-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
-import { answerQuestion, closePoll, endSessionNow, launchPoll, moderateMessage, openSessionNow, sendTeamMessage, setQuestionStatus, setSessionChatMode } from "@/server/webinars/room-actions";
+import { LIVE_SCRIPT_LATE_MAX_MS } from "@/server/webinars/persona-model";
+import {
+  answerQuestion,
+  closePoll,
+  deleteQuestionReply,
+  endSessionNow,
+  launchPoll,
+  moderateMessage,
+  openSessionNow,
+  pinPoll,
+  replyToQuestion,
+  sendTeamMessage,
+  setQuestionStatus,
+  setSessionChatMode,
+  unpinPoll
+} from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
-import { fireScriptItem } from "@/server/webinars/script-actions";
+import { archiveScreenItem, hideScreenItem, saveScreenItem, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
+import { screenStageKinds } from "@/server/webinars/screen-model";
+import { fireScriptItem, saveScriptComment, sendScriptedComment, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
 import { adminTextareaClass } from "../../../form";
@@ -70,23 +89,30 @@ import { adminToast } from "../../../toast";
 import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleBar } from "./console-bar";
 import { ConsoleChat } from "./console-chat";
-import { CONSOLE_TAB_ID_PREFIX, consoleSkeleton } from "./console-layout-model";
+import { ConsoleLeaveDialog } from "./console-leave-dialog";
+import { CONSOLE_LEAVE_WAIT_MS, consoleLeaveGuarded, type ConsoleLeaveTarget } from "./console-leave-model";
+import { consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
 import { ConsolePanel } from "./console-panel";
+import { ConsoleRail, visibleConsoleTabControl } from "./console-rail";
 import { ConsolePeopleTab } from "./console-people-tab";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
+import { ConsoleScreen, consoleScreenCount } from "./console-screen";
+import type { ScreenItemSaveInput } from "./console-screen-form";
 import { ConsoleScript } from "./console-script";
+import type { ScriptCommentFormInput } from "./console-script-comment";
 import { ConsoleShell } from "./console-shell";
 import { ConsoleStage } from "./console-stage";
 import { ConsoleTopBar } from "./console-top-bar";
 import { LiveAlignChat } from "./live-align-chat";
 import { LiveAttachRecording, type AttachInput } from "./live-attach-recording";
 import { LiveHands } from "./live-hands";
-import { LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
+import { LiveBarredList, LivePersonMenuItems, livePersonMenuGroups, type PersonAction } from "./live-participants";
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
+import { useConsoleLeaveGuard } from "./use-console-leave-guard";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
@@ -119,10 +145,27 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // Pessoas na live (Chat e Perguntas na gravada e no Replay), com o numero das perguntas abertas e das maos, e o ⋯ com
 // Enquetes, Roteiro, Oferta, Atendimento, Presença e Gravação conforme a sessao; tudo montado, o que nao esta na tela
 // com `hidden`. A aba e a entrada escolhidas ficam so na memoria da pagina; Mãos, Lançar enquete e o Gravar por
-// preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida.
+// preparar abrem o painel nelas (openPanel) e o foco vai a aba (ou ao ⋯) escolhida. A Na tela (docs/30 §2.4;
+// especificacao de 10/11/2026, R1 e R2): o Chat recebe a fixada lida pela chave (o bloco Fixada agora), o relogio para
+// o "há 2 min" e o "Fixar ao enviar" (sendTeamMessage com `pin`, aviso "Mensagem fixada."); as Enquetes recebem a
+// enquete fixada do retrato (pinnedPollId), o Fixar e o Desafixar (pinPoll, unpinPoll) e o "Abrir e fixar" (launchPoll
+// com `pin`), com os avisos "Enquete fixada." e "Enquete desafixada.". A entrada Na tela (R3 e R4, console-screen.tsx):
+// o que esta na tela com os numeros, os prontos e os formularios do banner e do QR Code (saveScreenItem, depois
+// showScreenItem no Mostrar agora; uploadScreenImage; showScreenItem, hideScreenItem e archiveScreenItem), com os avisos
+// "Na tela dos alunos em até 5 s.", "Saiu da tela.", "Salvo nos prontos." e "Excluído dos prontos."; o contador da
+// entrada (consoleScreenCount) e, no palco da live, a pilula "Na tela: Banner · QR Code" (screenStageKinds). A
+// moderacao por pessoa na Live gravada (R5, §6.2): o ⋯ de cada mensagem da turma com os mesmos itens da live sem os do
+// video (recordedPersonMenu: Silenciar 5/15/60 min e ate o fim, Remover da sala e Banir, desligado sem messaging.publish
+// com a frase), os rotulos do autor barrado na mensagem e o bloco "Removidos, silenciados e banidos" do retrato
+// (snapshot.barred) embaixo dos seletores do Chat, com os Desfazer; as acoes sao as mesmas da live (onPersonAction, sem
+// o comando ao iframe: la nao ha sala). Adendo de 10/11/2026: a parte simulada do contador separada no selo dos
+// presentes (R7) e o Roteiro tambem na sessao da Live ao vivo (R8, a fila pelo relogio desde o Começar para todos), com
+// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto).
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
+const naTelaCopy = WEBINAR_COPY.naTela.console;
+const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
 
 type Failure = { message: string; status: number };
 
@@ -174,14 +217,21 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const webinar = data.webinar;
   const durationMs = sessionDurationMs(webinar.recordingDurationSeconds, webinar.durationMinutes);
   const nowMs = tick + skew;
-  const offsetMs = session ? consoleOffsetMs(session, tick, skew) : Number.NaN;
-  // O topo conta o tempo da sessao (desde o Iniciar live na ao vivo) e para no encerramento; o roteiro segue offsetMs.
+  // O topo conta o tempo da sessao (desde o Iniciar live na ao vivo) e para no encerramento; o roteiro segue o relogio
+  // dele (consoleScriptClockMs: o do video na gravada, consoleOffsetMs; desde o Começar para todos na Live ao vivo, R8).
   const clockMs = session ? consoleClockMs(session, durationMs, nowMs) : Number.NaN;
   const phase = session ? consolePhaseOf(session, durationMs, nowMs) : null;
   const canAct = session ? canTeamActOn(session) : false;
-  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, offsetMs) : []), [snapshot, offsetMs]);
+  const scriptClockMs = session ? consoleScriptClockMs(session, tick, skew) : Number.NaN;
+  // Na Live ao vivo no ar, o tick ainda solta o item ate 5 min atrasado: so depois disso, "Minuto já passou".
+  const scriptLateMs = session?.kind === "live" && session.status === "live" ? LIVE_SCRIPT_LATE_MAX_MS : 0;
+  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, scriptClockMs, { lateMs: scriptLateMs }) : []), [snapshot, scriptClockMs, scriptLateMs]);
   const live = session?.kind === "live" ? (snapshot?.live ?? null) : null;
   const livePeople = useMemo(() => new Map((live?.people ?? []).map((person) => [person.userId, person])), [live]);
+  // A Live gravada: os barrados do retrato e os itens por pessoa sem sala (silenciar, remover e banir; nada de video).
+  const recorded = session?.kind === "simulated";
+  const barredPeople = useMemo(() => new Map((recorded ? (snapshot?.barred ?? []) : []).map((person) => [person.userId, person])), [recorded, snapshot]);
+  const recordedControls = useMemo(() => ({ ...liveControlsFor({ canPublish: permissions.canPublish, moderator: true, role: "team" }), cameras: false, stage: false }), [permissions.canPublish]);
 
   const markAnchor = useCallback(async () => {
     if (!sessionId) {
@@ -231,6 +281,70 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     session,
     webinar
   });
+
+  // Sair da pagina com o console dentro da sala (docs/31 §10): a sala mora nesta pagina, e trocar de pagina na mesma aba
+  // tirava quem apresenta da sala para todos (o video parado para quem assiste) ate ele voltar. A guarda segura o link,
+  // o Voltar do navegador e o seletor de sessoes e pergunta; o Sair confirmado sai da sala antes de trocar de pagina.
+  const [leaveTarget, setLeaveTarget] = useState<ConsoleLeaveTarget | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const guarded = consoleLeaveGuarded({ joined: room.joined });
+  const leaveGuard = useConsoleLeaveGuard({ active: guarded, onAsk: setLeaveTarget });
+  const frameStatusRef = useRef(room.frameStatus);
+
+  useEffect(() => {
+    frameStatusRef.current = room.frameStatus;
+  });
+
+  // Fora da sala (encerrou, caiu), a pergunta que estava aberta nao vale mais: a saida segue sem ela (a troca e lida
+  // no desenho, sem efeito).
+  const [wasGuarded, setWasGuarded] = useState(guarded);
+  if (wasGuarded !== guarded) {
+    setWasGuarded(guarded);
+    if (!guarded && !leaving) {
+      setLeaveTarget(null);
+    }
+  }
+
+  /** O Sair confirmado: solta a guarda, sai da sala (quem assiste ve a saida na hora) e so entao troca de pagina. */
+  async function leaveConsole() {
+    const target = leaveTarget;
+    if (!target || leaving) {
+      return;
+    }
+    setLeaving(true);
+    leaveGuard.allow();
+    if (room.command("hangup")) {
+      const started = Date.now();
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (frameStatusRef.current !== "joined" || Date.now() - started >= CONSOLE_LEAVE_WAIT_MS) {
+            resolve();
+          } else {
+            window.setTimeout(check, 100);
+          }
+        };
+        check();
+      });
+    }
+    if (target.kind === "back") {
+      window.history.back();
+      return;
+    }
+    const next = new URL(target.href, window.location.href);
+    if (next.origin === window.location.origin) {
+      router.push(`${next.pathname}${next.search}${next.hash}`);
+    } else {
+      window.location.assign(next.href);
+    }
+  }
+
+  /** Abrir em nova aba: o mesmo endereco noutra aba; o console e a sala ficam onde estao. */
+  function leaveInNewTab() {
+    if (leaveTarget?.href) {
+      window.open(leaveTarget.href, "_blank", "noopener");
+    }
+    setLeaveTarget(null);
+  }
 
   // O relogio da tela anda a cada segundo; o skew foi medido na carga (hora do servidor menos a do aparelho).
   useEffect(() => {
@@ -365,7 +479,13 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   }
 
   function changeSession(nextId: string) {
-    router.push(webinarConsoleHref(webinar.id, nextId));
+    const href = webinarConsoleHref(webinar.id, nextId);
+    // Trocar de sessao remonta o console (a chave da pagina): dentro da sala, pergunta antes, como qualquer saida.
+    if (guarded) {
+      setLeaveTarget({ href, kind: "session" });
+      return;
+    }
+    router.push(href);
   }
 
   /* Live ao vivo: situacao da sessao */
@@ -542,6 +662,87 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
   }
 
+  /* Na tela: o banner e o QR Code */
+
+  /**
+   * O "Novo comentário" do Roteiro (R8 e R9): "Enviar agora" solta o comentario no chat da sessao (sendScriptedComment) e
+   * "Guardar na lista" vira um item "Pelo botão da equipe" (saveScriptComment). Devolve o resultado para o formulario
+   * mostrar os erros por campo (nulo: outra acao em andamento); no sucesso, o aviso e o retrato de novo.
+   */
+  async function submitComment(input: ScriptCommentFormInput, mode: "save" | "send") {
+    if (!sessionId || busyKey) {
+      return null;
+    }
+    setBusyKey("script:comment");
+    setFailure(null);
+    const payload = { ...input, sessionId };
+    const result = mode === "send" ? await sendScriptedComment(payload) : await saveScriptComment(payload);
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(mode === "send" ? comentariosCopy.avisos.enviado : comentariosCopy.avisos.guardado);
+      if (result.data.photoApplied > 0 && input.personaAvatarPath) {
+        adminToast.info(comentariosCopy.avisos.fotoEmTodos(input.personaName, result.data.photoApplied));
+      }
+      await refresh();
+    }
+    return result;
+  }
+
+  /**
+   * O Excluir confirmado de um banner ou QR Code pronto: o resultado volta para a confirmacao, que mostra a falha dentro
+   * dela (o banner do console fica por baixo do dialogo); no sucesso, o aviso e o retrato de novo.
+   */
+  async function archiveScreen(itemId: string) {
+    if (busyKey) {
+      return null;
+    }
+    setBusyKey(`screen:${itemId}`);
+    setFailure(null);
+    const result = await archiveScreenItem({ id: itemId });
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(naTelaCopy.avisos.excluido);
+      await refresh();
+    }
+    return result;
+  }
+
+  /**
+   * O Salvar do formulario do banner e do QR Code: salva e, no Mostrar agora, mostra na sessao. Devolve o resultado do
+   * salvar para o formulario pôr os erros nos campos (nulo com outra acao em andamento); a falha do Mostrar depois de
+   * salvo vai para o banner do console (o item ja esta nos prontos).
+   */
+  async function saveScreen(input: ScreenItemSaveInput, show: boolean) {
+    if (!sessionId || busyKey) {
+      return null;
+    }
+
+    setBusyKey("screen:save");
+    setFailure(null);
+    const saved = await saveScreenItem(input);
+
+    if (!saved.ok) {
+      setBusyKey(null);
+      return saved;
+    }
+
+    if (show) {
+      const shown = await showScreenItem({ itemId: saved.data.item.id, sessionId });
+
+      if (shown.ok) {
+        adminToast.success(naTelaCopy.avisos.naTela);
+      } else {
+        setFailure({ message: shown.error, status: shown.status });
+      }
+    } else {
+      adminToast.success(naTelaCopy.avisos.salvo);
+    }
+
+    setBusyKey(null);
+    await refresh();
+    return saved;
+  }
+
   async function confirmBan() {
     if (!sessionId || !banTarget) {
       return;
@@ -581,6 +782,34 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     );
   }
 
+  /**
+   * A pessoa de uma mensagem da turma na Live gravada: a do retrato quando esta barrada (com o estado, para os Desfazer
+   * do ⋯), senao pelo nome da mensagem e sem banimento. Nada para quem nao e aluno (o servidor tambem recusa a equipe).
+   */
+  function recordedPersonOf(message: ConsoleMessage): LiveConsolePerson | null {
+    if (!message.authorUserId || message.source !== "audience" || message.role !== "student") {
+      return null;
+    }
+    return barredPeople.get(message.authorUserId) ?? { ban: NO_BAN, displayName: message.displayName, joinedAt: null, participantId: null, staff: false, userId: message.authorUserId };
+  }
+
+  // Os itens da pessoa no ⋯ de uma mensagem da turma na Live gravada (sem participante: so as acoes do servidor).
+  function recordedPersonMenu(message: ConsoleMessage) {
+    const person = recordedPersonOf(message);
+
+    if (!person) {
+      return null;
+    }
+
+    return <LivePersonMenuItems canPublish={permissions.canPublish} controls={recordedControls} joined={false} onAction={(action) => onPersonAction(person, null, action)} participantId={null} person={person} />;
+  }
+
+  /** Os rotulos do autor barrado (na live, pela lista da sala; na gravada, pelo retrato). */
+  function personBadgesOf(message: ConsoleMessage): readonly string[] {
+    const person = message.authorUserId ? (live ? livePeople.get(message.authorUserId) : barredPeople.get(message.authorUserId)) : undefined;
+    return person && !person.staff ? banLabels(person.ban) : [];
+  }
+
   const sessionDisabledTitle = room.controls.sessionEnabled ? undefined : LIVE_CONSOLE_COPY.soQuemPublica;
   const topActions =
     session && phase
@@ -592,8 +821,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
   const entries = session ? consoleMoreEntriesFor({ hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
-  const counts = consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] });
-  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0 }) : null;
+  const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
+  const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
+  const stageKinds = screenStageKinds(screen.active);
+  // R7: a parte simulada do contador vem separada no fim ("· +300 simulados"), so para a equipe.
+  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0, simulated: snapshot?.simulatedNow ?? null }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
   const presenterName = live ? (webinar.presenterName ?? null) : null;
@@ -622,22 +854,36 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
 
   /**
    * Abre o painel na aba ou na entrada do ⋯ (Mãos, Lançar enquete e o Gravar por preparar, na barra) e leva o foco a ela,
-   * depois de o painel aparecer.
+   * depois de o painel aparecer: o item do trilho a partir de lg (com palco), a aba ou o ⋯ do painel abaixo de lg.
    */
   function openPanel(view: ConsolePanelView) {
     setPanelOpen(true);
     setPanelView(view);
     window.requestAnimationFrame(() => {
-      const target = "tab" in view ? document.getElementById(`${CONSOLE_TAB_ID_PREFIX}-tabbtn-${view.tab}`) : document.querySelector<HTMLElement>("[data-console-more-trigger]");
-      target?.focus();
+      visibleConsoleTabControl(document, "tab" in view ? view.tab : view.more)?.focus();
     });
   }
 
-  /** O X do painel: o foco vai ao balao da barra antes de o painel sumir (senao ele cairia no body). */
+  /**
+   * O X do painel (so a partir de lg): o foco vai ao item do trilho do que estava na tela antes de o painel sumir (senao
+   * ele cairia no body); sem o trilho na tela, ao balao da barra.
+   */
   function closePanel() {
-    document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]')?.focus();
+    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : shownView.more) ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
+    target?.focus();
     setPanelOpen(false);
   }
+
+  /**
+   * O toque num item do trilho (uma aba ou uma entrada, no trilho ou no Mais): abre o painel nele ou, no que ja esta na
+   * tela, fecha o painel (consoleRailStep).
+   */
+  function onRail(item: ConsolePanelView) {
+    const next = consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
+    setPanelView(next.view);
+    setPanelOpen(next.panelOpen);
+  }
+
 
   const readOnly = Boolean(session) && !canAct;
   const onlyPublishers = live !== null && room.controls.session && !room.controls.sessionEnabled;
@@ -679,6 +925,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       disabledTitle={sessionDisabledTitle}
       editorHref={webinarAdminHref(webinar.id)}
       onAction={onTopAction}
+      onBlocked={(reason) => adminToast.info(reason)}
       onChangeSession={changeSession}
       onLock={lockRoom}
       onRefresh={() => void refresh("click")}
@@ -716,6 +963,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   live={live}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
+                  screenLabel={stageKinds.length > 0 ? naTelaCopy.pilulaPalco(stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind])) : null}
                   session={session}
                   stageRef={stageRef}
                   topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
@@ -741,6 +989,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
             <ConsolePanel
               className={skeleton.panel}
               closable={live !== null}
+              rail={skeleton.rail !== null}
               counts={counts}
               entries={entries}
               more={{
@@ -755,7 +1004,22 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     canAct={canAct}
                     launched={snapshot.polls.launched}
                     onClose={(pollId: string, shareResults: boolean) => void run(`poll:${pollId}`, () => closePoll({ pollId, sessionId: session.id, shareResults }))}
-                    onLaunch={(pollId: string) => void run(`poll:${pollId}`, () => launchPoll({ pollId, sessionId: session.id }))}
+                    onLaunch={(pollId: string, pin: boolean) =>
+                      void run(`poll:${pollId}`, () => launchPoll({ pin, pollId, sessionId: session.id }), (launched) => {
+                        if (pin && launched.pinned) {
+                          adminToast.success(naTelaCopy.avisos.enqueteFixada);
+                        }
+                      })
+                    }
+                    onPin={(pollId: string) => void run(`poll:${pollId}`, () => pinPoll({ pollId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.enqueteFixada))}
+                    onUnpin={(pollId: string) =>
+                      void run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
+                        if (result.unpinned) {
+                          adminToast.success(naTelaCopy.avisos.enqueteDesafixada);
+                        }
+                      })
+                    }
+                    pinnedPollId={snapshot.pinnedPollId ?? null}
                     templates={snapshot.polls.templates}
                   />
                 ),
@@ -797,9 +1061,46 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 oferta: session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null,
                 // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache.
                 presenca: snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null,
+                tela:
+                  session.kind !== "replay" ? (
+                    <ConsoleScreen
+                      busyKey={busyKey}
+                      canAct={canAct}
+                      nowMs={nowMs}
+                      onArchive={archiveScreen}
+                      onHide={(displayId: string) => run(`screen:${displayId}`, () => hideScreenItem({ displayId }), () => adminToast.success(naTelaCopy.avisos.saiu))}
+                      onSave={saveScreen}
+                      onShow={(itemId: string) =>
+                        void run(`screen:${itemId}`, () => showScreenItem({ itemId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.naTela))
+                      }
+                      onUnpinMessage={(messageId: string) => run(`moderate:${messageId}`, () => moderateMessage({ action: "unpin", messageId }))}
+                      onUnpinPoll={(pollId: string) =>
+                        run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
+                          if (result.unpinned) {
+                            adminToast.success(naTelaCopy.avisos.enqueteDesafixada);
+                          }
+                        })
+                      }
+                      onUpload={(image: string) => uploadScreenImage({ image })}
+                      pinned={snapshot.pinned ?? null}
+                      polls={snapshot.polls.launched}
+                      screen={screen}
+                      webinarId={webinar.id}
+                      webinarSlug={webinar.slug}
+                    />
+                  ) : null,
+                // O Roteiro na gravada e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo, com o "Novo comentário".
                 roteiro:
-                  webinar.kind === "simulated" ? (
-                    <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />
+                  webinar.kind === "simulated" || session.kind === "live" ? (
+                    <ConsoleScript
+                      busyKey={busyKey}
+                      canAct={canAct}
+                      live={session.kind === "live"}
+                      onComment={submitComment}
+                      onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))}
+                      onUpload={(image: string) => uploadPersonaPhoto({ image })}
+                      queue={queue}
+                    />
                   ) : null
               }}
               onClose={closePanel}
@@ -809,8 +1110,14 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 chat: (
                   <ConsoleChat
                     askedMessageIds={snapshot.askedMessageIds}
+                    barred={
+                      recorded && (snapshot.barred ?? []).length > 0 ? (
+                        <LiveBarredList busyKey={busyKey} canPublish={permissions.canPublish} onAction={onPersonAction} people={snapshot.barred ?? []} />
+                      ) : null
+                    }
                     busyKey={busyKey}
                     canAct={canAct}
+                    currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     currentUserId={currentUserId}
                     hostUserId={webinar.hostUserId}
                     messages={snapshot.messages}
@@ -829,9 +1136,19 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                             )
                         : null
                     }
-                    // Sem aviso: a mensagem enviada aparece na lista, como na sala do aluno.
-                    onSend={(body: string) => run("send", () => sendTeamMessage({ body, sessionId: session.id }))}
-                    personMenu={live ? chatPersonMenu : null}
+                    nowMs={nowMs}
+                    // Sem aviso: a mensagem enviada aparece na lista, como na sala do aluno. Com o "Fixar ao enviar", o
+                    // aviso "Mensagem fixada." (a Na tela).
+                    onSend={(body: string, pin: boolean) =>
+                      run("send", () => sendTeamMessage({ body, pin, sessionId: session.id }), () => {
+                        if (pin) {
+                          adminToast.success(naTelaCopy.avisos.mensagemFixada);
+                        }
+                      })
+                    }
+                    personBadges={live || recorded ? personBadgesOf : null}
+                    personMenu={live ? chatPersonMenu : recorded ? recordedPersonMenu : null}
+                    pinned={snapshot.pinned ?? null}
                     pinnedMessageId={snapshot.pinnedMessageId}
                     session={session}
                     // A lista escondida (outra aba, uma entrada do ⋯, o painel fechado) nao rola com o que chega: ao
@@ -844,8 +1161,15 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   <ConsoleQuestions
                     busyKey={busyKey}
                     canAct={canAct}
+                    currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
                     onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
+                    onDeleteReply={(replyId: string) =>
+                      run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
+                    }
+                    onReply={(questionId: string, body: string) =>
+                      run(`question:${questionId}`, () => replyToQuestion({ body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
+                    }
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}
                   />
@@ -855,9 +1179,12 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
               tabs={tabs}
               view={shownView}
             />
+            {skeleton.rail ? <ConsoleRail className={skeleton.rail} counts={counts} entries={entries} onItem={onRail} panelShown={panelShown} tabs={tabs} view={shownView} /> : null}
           </div>
         )}
       </ConsoleShell>
+
+      <ConsoleLeaveDialog container={portalRef} leaving={leaving} onLeave={() => void leaveConsole()} onNewTab={leaveInNewTab} onStay={() => setLeaveTarget(null)} open={leaveTarget !== null} />
 
       <ConfirmDialog
         busy={busyKey === "open" || busyKey === "end"}

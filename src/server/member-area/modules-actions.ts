@@ -34,7 +34,7 @@ const FORMATION_OPENS_AS = "Uma formação abre nos cursos dela.";
 export async function setProductOpensAs(
   input: SetProductOpensAsInput
 ): Promise<ActionResult<{ mode: CoursePresentationModeValue; productId: string }>> {
-  return runAdminAction("catalog.write", setProductOpensAsSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.write", "conteudo", setProductOpensAsSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const product = await requireProductRow(data.productId, db);
 
@@ -79,7 +79,7 @@ async function writeHomeModuleRow(desired: { enabled: boolean; productId: string
  * vitrine usa como padrao enquanto nunca foi publicada.
  */
 export async function setHomeModuleRow(input: SetHomeModuleRowInput): Promise<ActionResult<HomeModuleRowState>> {
-  return runAdminAction("storefront.write", setHomeModuleRowSchema, input, async ({ input: data }) => {
+  return runAdminAction("storefront.write", "conteudo", setHomeModuleRowSchema, input, async ({ input: data }) => {
     let state: HomeModuleRowState;
 
     try {
