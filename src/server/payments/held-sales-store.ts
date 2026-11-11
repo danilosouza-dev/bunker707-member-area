@@ -159,14 +159,6 @@ export async function listPendingHeldSales(db: SalesDb, limit: number): Promise<
   return (data ?? []) as HeldSaleRow[];
 }
 
-/** Quantas vendas estao guardadas agora (a faixa e o titulo da lista). */
-export async function countPendingHeldSales(db: SalesDb): Promise<number> {
-  const { count, error } = await db.from("held_sales").select("id", { count: "exact", head: true }).eq("status", "held");
-  failOnError(error, "Vendas guardadas");
-
-  return count ?? 0;
-}
-
 /**
  * Reivindica uma venda guardada para liberar (update condicional): so a guardada, e so sem reivindicacao ou com uma
  * abandonada (mais velha que `staleAfterMs`). Devolve a marca da reivindicacao, que a gravacao do resultado confere, ou
@@ -297,16 +289,4 @@ export async function discardHeldSalesOf(
   }
 
   return discarded;
-}
-
-/** Busca as linhas das vendas guardadas pelos ids dos eventos (a lista Vendas recebidas). */
-export async function fetchHeldSalesByEvents(db: SalesDb, webhookEventIds: readonly string[]): Promise<HeldSaleRow[]> {
-  if (webhookEventIds.length === 0) {
-    return [];
-  }
-
-  const { data, error } = await db.from("held_sales").select(HELD_SALE_COLUMNS).in("webhook_event_id", [...webhookEventIds]);
-  failOnError(error, "Vendas guardadas");
-
-  return (data ?? []) as HeldSaleRow[];
 }
