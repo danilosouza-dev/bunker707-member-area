@@ -8,8 +8,10 @@
 #   bash infra/cloud/licencas.sh segredos    secrets-licencas: a chave de emissao cifrada, a senha dela, o certificado, a
 #                                            chave do Resend e a senha do banco em segredos/ (1000:1000, 0400), dos
 #                                            segredos LICENCAS_* do GitHub, conferidos aqui antes de sair
-#   bash infra/cloud/licencas.sh deploy      deploy-licencas: compose e imagem do GHCR, .env, migracoes, /health, Caddy e
-#                                            o backup de hora em hora (LICENCAS_TAG escolhe a versao; padrao main)
+#   bash infra/cloud/licencas.sh deploy      deploy-licencas: compose e imagem do GHCR, .env (com o Painel e a conta de
+#                                            envio), migracoes, /health, Caddy e o backup de hora em hora (LICENCAS_TAG
+#                                            escolhe a versao; padrao main). Sem a configuracao do Painel, para antes de
+#                                            tudo, a nao ser com LICENCAS_SEM_PAINEL=sim
 #   bash infra/cloud/licencas.sh backup      backup-licencas: um backup agora, com restic check
 #   bash infra/cloud/licencas.sh restaurar   restaurar-licencas: troca o banco pelo de um backup (CONFIRMAR=restaurar;
 #                                            SNAPSHOT=<id>, padrao o mais novo com dados)
@@ -48,6 +50,72 @@ publico_ok() {
         sleep 10
     done
     return 1
+}
+# config_emissor ARQUIVO: o Painel, a conta de envio, as chaves anteriores e os links do Emissor (lib.sh, LICENCAS_PAINEL_*
+# e LICENCAS_EMISSOR_*), conferidos como o Emissor confere ao subir, num JSON em base64 para o implantar.sh. Sem o Access
+# ou o remetente, para (antes de qualquer chamada), a nao ser com LICENCAS_SEM_PAINEL=sim. Nao imprime o e-mail do
+# produtor.
+config_emissor() {
+    python3 -I - "$1" "${LICENCAS_SEM_PAINEL:-}" "$LICENCAS_PAINEL_DOMAIN" "${LICENCAS_PAINEL_ACCESS_EQUIPE:-}" \
+        "${LICENCAS_PAINEL_ACCESS_AUD:-}" "$LICENCAS_PAINEL_TETO_DIARIO" "$LICENCAS_EMISSOR_EMAIL_PRODUTOR" \
+        "${LICENCAS_EMISSOR_EMAIL_REMETENTE:-}" "${LICENCAS_EMISSOR_KIDS_ANTERIORES:-}" "${LICENCAS_EMISSOR_LINK_RENOVAR:-}" \
+        "${LICENCAS_EMISSOR_LINK_LOJA:-}" <<'PY'
+import base64, json, re, sys
+from urllib.parse import urlsplit
+saida = sys.argv[1]
+sem, dominio, equipe, aud, teto, produtor, remetente, kids, renovar, loja = (a.strip() for a in sys.argv[2:12])
+# O que o .env do Emissor nao aguenta (o implantar.sh grava entre aspas simples) e o e-mail como o Emissor confere.
+PROIBIDO = re.compile(r"[\x00-\x1f\x7f'\"`$\\]")
+EMAIL = re.compile(r'[^@\s<>"(),;:]+@[^@\s<>"(),;:]+\.[^@\s<>"(),;:]+')
+email_ok = lambda texto: len(texto) <= 254 and bool(EMAIL.fullmatch(texto))
+problemas = []
+if sem not in ("", "sim"):
+    sys.exit(f"ERRO: LICENCAS_SEM_PAINEL so aceita sim (veio {sem}).")
+if not re.fullmatch(r"\d{1,4}", teto) or not 1 <= int(teto) <= 1000:
+    problemas.append(f"LICENCAS_PAINEL_TETO_DIARIO precisa ser um numero de 1 a 1000 (veio {teto}).")
+kids = [k.strip() for k in kids.split(",") if k.strip()]
+if len(kids) > 8 or not all(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", k) for k in kids):
+    problemas.append("LICENCAS_EMISSOR_KIDS_ANTERIORES precisa ser uma lista de ate 8 kid (letras minusculas, numeros e hifen), separados por virgula, como emissao-2026-11.")
+for nome, link in (("LICENCAS_EMISSOR_LINK_RENOVAR", renovar), ("LICENCAS_EMISSOR_LINK_LOJA", loja)):
+    try:
+        partes = urlsplit(link.replace("{licenca}", "lic_exemplo"))
+        ok = partes.scheme == "https" and bool(partes.hostname)
+    except ValueError:
+        ok = False
+    if link and (not ok or re.search(r"\s", link) or PROIBIDO.search(link)):
+        problemas.append(f"{nome} precisa ser um endereco https://, sem espaco nem aspas ({{licenca}} vira o numero da Licenca; veio {link}).")
+config = {"PAINEL_ENDERECO": "", "PAINEL_ACCESS_EQUIPE": "", "PAINEL_ACCESS_AUD": "", "PAINEL_TETO_DIARIO": teto,
+          "EMISSOR_EMAIL_PRODUTOR": "", "EMISSOR_EMAIL_REMETENTE": "", "EMISSOR_KIDS_ANTERIORES": ",".join(kids),
+          "EMISSOR_LINK_RENOVAR": renovar, "EMISSOR_LINK_LOJA": loja}
+if sem == "sim":
+    resumo = "  Sem o Painel (LICENCAS_SEM_PAINEL=sim): o Emissor sobe sem ele e sem e-mail; a API das Instalacoes funciona igual."
+else:
+    equipe = re.sub(r"^https://", "", equipe.lower()).rstrip("/")
+    produtor = produtor.lower()
+    faltam = [nome for nome, valor in (("LICENCAS_PAINEL_ACCESS_EQUIPE", equipe), ("LICENCAS_PAINEL_ACCESS_AUD", aud),
+                                       ("LICENCAS_EMISSOR_EMAIL_REMETENTE", remetente), ("LICENCAS_EMISSOR_EMAIL_PRODUTOR", produtor)) if not valor]
+    if faltam:
+        sys.exit("ERRO: falta a configuracao do Painel de licencas: " + ", ".join(faltam) + ". Cadastre como variavel do repositorio no GitHub (Settings > Secrets and variables > Actions > Variables; docs/20 §8C.5) e rode de novo, ou rode o deploy-licencas com LICENCAS_SEM_PAINEL=sim para subir o Emissor sem o Painel.")
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com", equipe):
+        problemas.append(f"LICENCAS_PAINEL_ACCESS_EQUIPE precisa ser o dominio da equipe no Cloudflare Zero Trust, <equipe>.cloudflareaccess.com (veio {equipe}).")
+    if not re.fullmatch(r"[0-9a-f]{64}", aud):
+        problemas.append("LICENCAS_PAINEL_ACCESS_AUD precisa ser a etiqueta AUD do aplicativo do Painel no Access (Application Audience Tag): 64 caracteres, de 0 a 9 e de a a f.")
+    if not email_ok(produtor) or PROIBIDO.search(produtor):
+        problemas.append("LICENCAS_EMISSOR_EMAIL_PRODUTOR (sem ele, PRODUCER_EMAIL) nao e um e-mail.")
+    nomeado = re.fullmatch(r"([^<>\r\n\"]{1,80}) <([^<>\s]+)>", remetente)
+    if not email_ok(nomeado.group(2) if nomeado else remetente) or PROIBIDO.search(remetente):
+        problemas.append(f"LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail, ou Nome <e-mail>, de um dominio verificado no Resend, sem aspas nem $ (veio {remetente}).")
+    config.update({"PAINEL_ENDERECO": "https://" + dominio, "PAINEL_ACCESS_EQUIPE": equipe, "PAINEL_ACCESS_AUD": aud,
+                   "EMISSOR_EMAIL_PRODUTOR": produtor, "EMISSOR_EMAIL_REMETENTE": remetente})
+    resumo = f"  Painel em https://{dominio} (Access de {equipe}; teto de {teto} acoes sem venda por dia), com os avisos ao produtor pelo Resend."
+if problemas:
+    sys.exit("ERRO: " + " ".join(problemas))
+print(resumo)
+print("  Chaves anteriores aceitas na readocao: " + (",".join(kids) or "nenhuma (so a atual)") + "; Renovar e loja na licenca: "
+      + (" e ".join(n for n, l in (("Renovar", renovar), ("loja", loja)) if l) or "nenhum") + ".")
+with open(saida, "w", encoding="utf-8") as fh:
+    fh.write(base64.b64encode(json.dumps(config, separators=(",", ":")).encode("utf-8")).decode("ascii"))
+PY
 }
 
 # ====== plan-licencas ===================================================================================
@@ -159,7 +227,8 @@ segredos() {
             || die "LICENCAS_BANCO_SENHA precisa ter de 16 a 128 letras, numeros ou . _ ~ + / = - (sem aspas nem espaco)."
     fi
     if [ -n "${LICENCAS_RESEND_CHAVE:-}" ]; then
-        printf '%s' "$LICENCAS_RESEND_CHAVE" | grep -qE '^[A-Za-z0-9_.-]{8,200}$' || die "LICENCAS_RESEND_CHAVE fora do formato de uma chave do Resend (re_...)."
+        # O formato que o Emissor confere ao subir com o Painel (src/config.ts do bunker-licensing).
+        printf '%s' "$LICENCAS_RESEND_CHAVE" | grep -qE '^re_[A-Za-z0-9_-]{8,200}$' || die "LICENCAS_RESEND_CHAVE fora do formato de uma chave do Resend (uma linha, re_...)."
     fi
     log "Conferindo a chave de emissao, o certificado e as raizes, antes de qualquer coisa sair do runner"
     node "$CLOUD_DIR/licencas-chave.mjs"
@@ -178,7 +247,9 @@ segredos() {
     if [ -n "${LICENCAS_RESEND_CHAVE:-}" ]; then
         grava resend-chave LICENCAS_RESEND_CHAVE
     else
-        warn "LICENCAS_RESEND_CHAVE vazio: sem a conta de envio do Emissor, os avisos ao produtor nao saem (docs/32 §11.2)."
+        # O compose do Emissor monta o arquivo sempre: sem o segredo, fica o que ja esta no servidor ou um arquivo vazio.
+        rsh "$target" "sudo sh -c 'test -s \"$SEG/resend-chave\" && echo \"  segredos/resend-chave (ja existia; mantida)\" || { umask 077; : > \"$SEG/resend-chave\" && chown 1000:1000 \"$SEG/resend-chave\" && chmod 400 \"$SEG/resend-chave\" && echo \"  segredos/resend-chave (vazia)\"; }'"
+        warn "LICENCAS_RESEND_CHAVE vazio: sem a chave do Resend o Painel nao sobe e os avisos ao produtor nao saem (docs/32 §11.2). O deploy-licencas so passa sem ela com LICENCAS_SEM_PAINEL=sim, ou com uma chave que ja estava no servidor."
     fi
     # A senha do banco: o Postgres so le o arquivo na primeira subida. Trocar o arquivo de um banco que ja existe, sem
     # trocar a senha dentro dele, deixaria o Emissor sem banco.
@@ -215,10 +286,13 @@ segredos() {
 # ====== deploy-licencas =================================================================================
 deploy() {
     need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN GITHUB_TOKEN LICENCAS_RAIZES
-    local painel_ips raizes_b64 sb_user sb_host box porta_api porta_painel caddy rec kv
+    local painel_ips raizes_b64 config_b64 sb_user sb_host box porta_api porta_painel caddy rec kv
     printf '%s' "$LICENCAS_TAG" | grep -qE '^[A-Za-z0-9_][A-Za-z0-9._-]{0,100}$' || die "LICENCAS_TAG invalida: '$LICENCAS_TAG' (ex.: main ou sha-1a2b3c4)."
     painel_ips=$(small_cidrs LICENCAS_PAINEL_IPS "${LICENCAS_PAINEL_IPS:-$PRODUCER_IP}")
     raizes_b64=$(printf '%s' "$LICENCAS_RAIZES" | base64 -w0)
+    log "Painel de licencas, conta de envio, chaves anteriores e links do Emissor (docs/20 §8C.5)"
+    config_emissor "$WORK_DIR/config-emissor.b64"
+    config_b64=$(cat "$WORK_DIR/config-emissor.b64")
     install_hcloud; deploy_key
     licencas_alvo
     log "DNS dos dois nomes (etapa dns-licencas)"
@@ -235,7 +309,7 @@ deploy() {
 
     log "Emissor $LICENCAS_IMAGEM:$LICENCAS_TAG (GHCR; o servidor entra com o token do job, que vence com ele)"
     printf '%s' "$GITHUB_TOKEN" | rsh "$target" "docker login ghcr.io -u '${GITHUB_ACTOR:-danilosouza-dev}' --password-stdin >/dev/null"
-    if ! remote "bash infra/licencas/scripts/implantar.sh --imagem='$LICENCAS_IMAGEM:$LICENCAS_TAG' --raizes-b64='$raizes_b64'"; then
+    if ! remote "bash infra/licencas/scripts/implantar.sh --imagem='$LICENCAS_IMAGEM:$LICENCAS_TAG' --raizes-b64='$raizes_b64' --config-b64='$config_b64'"; then
         remote "docker logout ghcr.io >/dev/null 2>&1 || true"
         die "A implantacao do Emissor falhou (veja acima). O que ja estava no ar continua."
     fi
@@ -282,7 +356,13 @@ deploy() {
     log "Conferencia de fora (DNS, certificado, Caddy e Emissor)"
     publico_ok || warn "https://$LICENCAS_API_DOMAIN/health ainda nao respondeu {\"ok\":true} de fora. O Emissor responde no servidor; o certificado pode levar alguns minutos depois do primeiro deploy: rode status-licencas daqui a pouco."
     echo
-    echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes) e https://$LICENCAS_PAINEL_DOMAIN (Painel, so com o Access e a lista de IPs)."
+    if [ "${LICENCAS_SEM_PAINEL:-}" = sim ]; then
+        echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes), sem o Painel (LICENCAS_SEM_PAINEL=sim)."
+    else
+        echo "Emissor no ar: https://$LICENCAS_API_DOMAIN (API das Instalacoes) e https://$LICENCAS_PAINEL_DOMAIN (Painel, so com o Access e a lista de IPs)."
+        echo "A primeira conta do Painel, uma vez (docs/20 §8C.3): exec-licencas com o comando"
+        echo "  cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail do login do Access> --funcao produtor --motivo \"Primeira conta\""
+    fi
     echo "Falta, se ainda nao foi feito: ensaio-licencas (o ensaio de restauracao) e o monitor externo (docs/20 §8C)."
 }
 

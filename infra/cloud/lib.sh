@@ -14,7 +14,8 @@
 #   MEET_TYPE              tipo do servidor C do Jitsi (cx23); JIBRI_TYPE, o do gravador por hora (cpx42)
 #   JIBRI_SECRETS          segredo do repositorio com as linhas CHAVE=VALOR do gravador (docs/20 §8B.3)
 #   LICENCAS_*             o servidor do Emissor de licencas (bunker707-licencas, docs/32 D39; docs/20 §8C): nomes,
-#                          imagem e minimos abaixo; LICENCAS_TYPE e LICENCAS_LOCATION forcam o tipo e o local
+#                          imagem e minimos abaixo; LICENCAS_TYPE e LICENCAS_LOCATION forcam o tipo e o local; o Painel e
+#                          a conta de envio do Emissor (LICENCAS_PAINEL_*, LICENCAS_EMISSOR_*, LICENCAS_SEM_PAINEL)
 # Nunca imprime segredos; o que precisa ser guardado vai mascarado para o log do Actions (::add-mask::).
 
 set -euo pipefail
@@ -68,6 +69,14 @@ LICENCAS_IMAGEM="${LICENCAS_IMAGEM:-ghcr.io/danilosouza-dev/bunker-licensing}"
 LICENCAS_TAG="${LICENCAS_TAG:-main}"
 # No servidor: o compose do Emissor, o .env dele e segredos/ ficam em REMOTE_DIR/emissor, fora do que o sync_repo troca.
 LICENCAS_EMISSOR_DIR="${LICENCAS_EMISSOR_DIR:-$REMOTE_DIR/emissor}"
+# O Painel de licencas e a conta de envio do Emissor (docs/20 §8C.5): o deploy-licencas escreve no .env do compose do
+# Emissor, a cada rodada, cada LICENCAS_<NOME> como <NOME> (variaveis do repositorio no GitHub ou opcoes): o Access do
+# Painel (LICENCAS_PAINEL_ACCESS_EQUIPE e LICENCAS_PAINEL_ACCESS_AUD, sem padrao), o teto diario, quem recebe os avisos
+# e quem envia (LICENCAS_EMISSOR_EMAIL_REMETENTE, sem padrao), as chaves anteriores da readocao e os links do Renovar e
+# da loja. O endereco do Painel e https://LICENCAS_PAINEL_DOMAIN. Sem o Access e o remetente o deploy para, a nao ser
+# com LICENCAS_SEM_PAINEL=sim: o Emissor sobe sem o Painel e sem e-mail.
+LICENCAS_EMISSOR_EMAIL_PRODUTOR="${LICENCAS_EMISSOR_EMAIL_PRODUTOR:-$PRODUCER_EMAIL}"
+LICENCAS_PAINEL_TETO_DIARIO="${LICENCAS_PAINEL_TETO_DIARIO:-10}"
 # Backup de hora em hora no Storage Box que ja existe, num repositorio restic so dele.
 LICENCAS_RESTIC_REPOSITORY="${LICENCAS_RESTIC_REPOSITORY:-sftp:storagebox:bunker707/restic-licencas}"
 # O minimo para Node (Emissor e, depois, o Painel), Postgres 16 e Caddy num servidor so (docs/20 §8C.1).

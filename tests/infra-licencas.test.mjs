@@ -64,6 +64,16 @@ const TIPOS = {
   cx22: { cores: 2, memory: 4, disk: 40, cpu_type: "shared", architecture: "x86", deprecated: true, prices: [preco("fsn1", 2.49)], locations: [{ name: "fsn1", available: true }] }
 };
 
+// ---- o Painel e a conta de envio do Emissor: as variaveis do repositorio que o workflow entrega ao deploy-licencas ----
+const AUD = "0123456789abcdef".repeat(4);
+const PAINEL_ENV = {
+  LICENCAS_PAINEL_ACCESS_EQUIPE: "https://Bunker707.cloudflareaccess.com/",
+  LICENCAS_PAINEL_ACCESS_AUD: AUD,
+  LICENCAS_EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
+  PRODUCER_EMAIL: "Produtor@Exemplo.com.br"
+};
+const configDe = (command) => JSON.parse(Buffer.from(command.match(/--config-b64='([^']+)'/)[1], "base64").toString());
+
 const servidorLicencas = () => serverFixture(LICENCAS, "licencas", 7);
 const firewallLicencas = () => [{ name: `${LICENCAS}-fw`, applied_to: [], rules: [] }];
 const sshCmds = (calls) => calls.filter((c) => c.tool === "ssh" && !c.control);
@@ -214,13 +224,23 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
   assert.equal(plano.status, 0, "plan-licencas so le");
 });
 
-test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e confere que existem antes", () => {
+test("o workflow so entrega cada segredo LICENCAS_* na etapa que o usa, e confere que existem antes; a configuracao do Painel vem das variaveis do repositorio, so no deploy", () => {
   const step = workflow.slice(workflow.indexOf("      - name: ${{ inputs.etapa }}"), workflow.indexOf("      - name: Fechar o SSH (sempre)"));
-  const linhas = [...step.matchAll(/^ {10}(LICENCAS_[A-Z_]+): \$\{\{ (.+) \}\}$/gm)].map((m) => [m[1], m[2]]);
+  const todas = [...step.matchAll(/^ {10}(LICENCAS_[A-Z_]+): \$\{\{ (.+) \}\}$/gm)].map((m) => [m[1], m[2]]);
+  const linhas = todas.filter(([, expressao]) => expressao.includes("secrets."));
   assert.deepEqual(linhas.map(([nome]) => nome).sort(), ["LICENCAS_BANCO_SENHA", "LICENCAS_EMISSAO_CERTIFICADO", "LICENCAS_EMISSAO_CHAVE", "LICENCAS_EMISSAO_SENHA", "LICENCAS_RAIZES", "LICENCAS_RESEND_CHAVE"]);
   for (const [nome, expressao] of linhas) {
     assert.match(expressao, new RegExp(`^\\(?inputs\\.etapa == '(secrets|deploy)-licencas'.*&& secrets\\.${nome} \\|\\| ''$`), `${nome} so na etapa certa`);
   }
+  // As variaveis do repositorio (nao sao segredo): o Painel, a conta de envio, as chaves anteriores, os links e o "sem Painel".
+  const variaveis = todas.filter(([, expressao]) => !expressao.includes("secrets."));
+  assert.deepEqual(variaveis.map(([nome]) => nome).sort(), ["LICENCAS_EMISSOR_EMAIL_PRODUTOR", "LICENCAS_EMISSOR_EMAIL_REMETENTE", "LICENCAS_EMISSOR_KIDS_ANTERIORES", "LICENCAS_EMISSOR_LINK_LOJA", "LICENCAS_EMISSOR_LINK_RENOVAR", "LICENCAS_PAINEL_ACCESS_AUD", "LICENCAS_PAINEL_ACCESS_EQUIPE", "LICENCAS_PAINEL_TETO_DIARIO", "LICENCAS_SEM_PAINEL"]);
+  for (const [nome, expressao] of variaveis) {
+    assert.equal(expressao, `inputs.etapa == 'deploy-licencas' && vars.${nome} || ''`, `${nome}: a variavel do repositorio, so no deploy-licencas`);
+  }
+  // Cada variavel que o workflow entrega e uma que o deploy le (infra/cloud/licencas.sh).
+  const licencasSh = readFileSync(join(cloudDir, "licencas.sh"), "utf8");
+  for (const [nome] of variaveis) assert.ok(licencasSh.includes(nome), `${nome} lida pelo deploy-licencas`);
   assert.match(step, /LICENCAS_EMISSAO_CHAVE: \$\{\{ inputs\.etapa == 'secrets-licencas' && /, "a chave de emissao so no secrets-licencas");
   assert.doesNotMatch(workflow, /RAIZ_PRIVADA|LICENCAS_RAIZ_CHAVE|secrets\.LICENCAS_RAIZ[^E]/, "nenhum segredo de chave raiz no workflow");
   const presentes = workflow.slice(workflow.indexOf("- name: Segredos presentes?"), workflow.indexOf("      - name: ${{ inputs.etapa }}"));
@@ -280,6 +300,22 @@ test("secrets-licencas grava os segredos em segredos/ como 1000:1000 e 0400, so 
   assert.ok(calls.some((c) => c.command.includes("openssl rand -hex 24") && c.command.includes("chown 1000:1000") && c.command.includes("chmod 400")));
   assert.ok(!conta.hz().firewalls[0].rules.some((r) => r.port === "22"), "a 22 termina fechada");
 
+  // Sem a chave do Resend: o arquivo que ja esta no servidor fica; sem nenhum, nasce vazio (o compose do Emissor o monta
+  // sempre), e o aviso diz que o Painel nao sobe sem ela.
+  const semResend = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+  const { LICENCAS_RESEND_CHAVE: _, ...semChave } = SEGREDOS;
+  const vazia = semResend.runScript("licencas.sh", semChave, ["segredos"]);
+  assert.equal(vazia.status, 0, vazia.stdout + vazia.stderr);
+  const arquivo = sshCmds(semResend.calls()).find((c) => c.command.includes('segredos/resend-chave'));
+  assert.match(arquivo.command, /test -s "\/opt\/bunker707\/emissor\/segredos\/resend-chave" && echo .*mantida.* \|\| \{ umask 077; : > "\/opt\/bunker707\/emissor\/segredos\/resend-chave" && chown 1000:1000 .* && chmod 400 /);
+  assert.match(vazia.stderr, /LICENCAS_RESEND_CHAVE vazio: sem a chave do Resend o Painel nao sobe .*LICENCAS_SEM_PAINEL=sim/);
+  // A chave fora do formato que o Emissor confere ao subir: recusada no runner, antes de qualquer chamada.
+  const malFeita = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+  const ruim = malFeita.runScript("licencas.sh", { ...SEGREDOS, LICENCAS_RESEND_CHAVE: "chave.sem.prefixo.0001" }, ["segredos"]);
+  assert.equal(ruim.status, 1);
+  assert.match(ruim.stderr, /LICENCAS_RESEND_CHAVE fora do formato de uma chave do Resend \(uma linha, re_\.\.\.\)/);
+  assert.deepEqual(malFeita.calls(), []);
+
   // A raiz no lugar da chave de emissao: recusada no runner, antes de qualquer SSH ou chamada a Hetzner.
   const raizComoEmissao = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
   const recusa = raizComoEmissao.runScript("licencas.sh", { ...SEGREDOS, LICENCAS_EMISSAO_CHAVE: cifrada(raiz), LICENCAS_EMISSAO_CERTIFICADO: certificado(raiz, "raiz-teste", raiz) }, ["segredos"]);
@@ -325,6 +361,7 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   });
   const TOKEN = "ghs_token_efemero_do_job_0001";
   const result = conta.runScript("licencas.sh", {
+    ...PAINEL_ENV,
     GITHUB_TOKEN: TOKEN,
     GITHUB_ACTOR: "danilosouza-dev",
     LICENCAS_RAIZES: RAIZES,
@@ -348,6 +385,24 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
   const imp = calls[implantar].command;
   assert.match(imp, /--imagem='ghcr\.io\/danilosouza-dev\/bunker-licensing:main'/);
   assert.equal(Buffer.from(imp.match(/--raizes-b64='([^']+)'/)[1], "base64").toString(), RAIZES);
+  // O Painel e a conta de envio, como o Emissor confere ao subir: o endereco vem do nome do Painel, a equipe do Access sem
+  // https:// nem barra, o produtor (o PRODUCER_EMAIL, sem a variavel) em minusculas, e o teto padrao.
+  assert.deepEqual(configDe(imp), {
+    PAINEL_ENDERECO: `https://${PAINEL}`,
+    PAINEL_ACCESS_EQUIPE: "bunker707.cloudflareaccess.com",
+    PAINEL_ACCESS_AUD: AUD,
+    PAINEL_TETO_DIARIO: "10",
+    EMISSOR_EMAIL_PRODUTOR: "produtor@exemplo.com.br",
+    EMISSOR_EMAIL_REMETENTE: "Emissor Bunker707 <emissor@mail.bunker707.com.br>",
+    EMISSOR_KIDS_ANTERIORES: "",
+    EMISSOR_LINK_RENOVAR: "",
+    EMISSOR_LINK_LOJA: ""
+  });
+  const geridas = JSON.parse(readFileSync(join(root, "infra/licencas/scripts/implantar.sh"), "utf8").match(/GERIDAS = (\[[^\]]+\])/)[1]);
+  assert.deepEqual(Object.keys(configDe(imp)).sort(), geridas, "o JSON do deploy traz exatamente as variaveis que o implantar.sh confere");
+  assert.match(result.stdout, /Painel em https:\/\/licencas\.bunker707\.com\.br \(Access de bunker707\.cloudflareaccess\.com; teto de 10 /);
+  assert.doesNotMatch(result.stdout + result.stderr, /produtor@exemplo/i, "o e-mail do produtor nao vai para o log");
+  assert.match(result.stdout, /A primeira conta do Painel, uma vez .*\n\s+cd emissor && docker compose exec -T emissor node bin\/painel\.ts adicionar <e-mail do login do Access> --funcao produtor --motivo "Primeira conta"/);
   assert.match(calls[caddy].command, /run --rm --no-deps caddy caddy validate --config \/etc\/caddy\/Caddyfile --adapter caddyfile && .* up -d && .*caddy reload/);
   assert.match(calls[timer].command, /systemctl start bunker707-licencas-backup\.service/);
   // .env do lado nosso: os nomes, as portas lidas do .env do Emissor, a lista do Painel e o repositorio do backup.
@@ -372,7 +427,7 @@ test("deploy-licencas: DNS conferido, so a infra dele vai ao servidor, token so 
 });
 
 test("deploy-licencas para antes do SSH sem o DNS certo, sem as raizes ou com a lista do Painel ampla demais", { skip }, () => {
-  const base = { GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
+  const base = { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
   const comAAAA = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u", server: "h" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(API, "AAAA", "2001:db8::1", false)] });
   const aaaa = comAAAA.runScript("licencas.sh", base, ["deploy"]);
   assert.equal(aaaa.status, 1);
@@ -386,6 +441,56 @@ test("deploy-licencas para antes do SSH sem o DNS certo, sem as raizes ou com a 
   assert.match(semRaizes.stderr, /Variavel LICENCAS_RAIZES ausente/);
   const ampla = setup({ servers: [servidorLicencas()] }).runScript("licencas.sh", { ...base, LICENCAS_PAINEL_IPS: "0.0.0.0/0" }, ["deploy"]);
   assert.match(ampla.stderr, /LICENCAS_PAINEL_IPS tem um IP invalido ou uma rede ampla demais/);
+});
+
+test("deploy-licencas sem a configuracao do Painel, ou com ela fora do formato, para antes de qualquer chamada; so LICENCAS_SEM_PAINEL=sim sobe o Emissor sem o Painel", { skip }, () => {
+  const base = { GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES };
+  const recusa = (extra, mensagem) => {
+    const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
+    const result = conta.runScript("licencas.sh", { ...base, ...extra }, ["deploy"]);
+    assert.equal(result.status, 1, `${JSON.stringify(extra)}: ${result.stdout}`);
+    assert.match(result.stderr, mensagem);
+    assert.deepEqual(conta.calls(), [], "nada chamado: nem a Hetzner, nem a Cloudflare, nem o servidor");
+    return result;
+  };
+  recusa({}, /falta a configuracao do Painel de licencas: LICENCAS_PAINEL_ACCESS_EQUIPE, LICENCAS_PAINEL_ACCESS_AUD, LICENCAS_EMISSOR_EMAIL_REMETENTE\. Cadastre como variavel do repositorio no GitHub .* LICENCAS_SEM_PAINEL=sim para subir o Emissor sem o Painel/);
+  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_AUD: "" }, /falta a configuracao do Painel de licencas: LICENCAS_PAINEL_ACCESS_AUD\./);
+  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_AUD: AUD.toUpperCase() }, /LICENCAS_PAINEL_ACCESS_AUD precisa ser a etiqueta AUD do aplicativo do Painel no Access/);
+  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_ACCESS_EQUIPE: PAINEL }, /LICENCAS_PAINEL_ACCESS_EQUIPE precisa ser o dominio da equipe no Cloudflare Zero Trust, <equipe>\.cloudflareaccess\.com \(veio licencas\.bunker707\.com\.br\)/);
+  recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_EMAIL_REMETENTE: "Emissor 'Bunker' <emissor@mail.bunker707.com.br>" }, /LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail, ou Nome <e-mail>/);
+  recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_EMAIL_REMETENTE: "emissor" }, /LICENCAS_EMISSOR_EMAIL_REMETENTE precisa ser um e-mail/);
+  const produtor = recusa({ ...PAINEL_ENV, PRODUCER_EMAIL: "produtor-sem-arroba" }, /LICENCAS_EMISSOR_EMAIL_PRODUTOR \(sem ele, PRODUCER_EMAIL\) nao e um e-mail\./);
+  assert.doesNotMatch(produtor.stderr, /produtor-sem-arroba/, "o e-mail do produtor nao vai para o log");
+  recusa({ ...PAINEL_ENV, LICENCAS_PAINEL_TETO_DIARIO: "0" }, /LICENCAS_PAINEL_TETO_DIARIO precisa ser um numero de 1 a 1000 \(veio 0\)/);
+  recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_KIDS_ANTERIORES: "Emissao_2026" }, /LICENCAS_EMISSOR_KIDS_ANTERIORES precisa ser uma lista de ate 8 kid/);
+  recusa({ ...PAINEL_ENV, LICENCAS_EMISSOR_LINK_LOJA: "http://membros.bunker707.com.br/modulos" }, /LICENCAS_EMISSOR_LINK_LOJA precisa ser um endereco https:\/\//);
+  recusa({ ...PAINEL_ENV, LICENCAS_SEM_PAINEL: "talvez" }, /LICENCAS_SEM_PAINEL so aceita sim \(veio talvez\)/);
+
+  // Sem o Painel: o JSON vai com o Painel e o e-mail vazios; o teto, as chaves anteriores e os links seguem.
+  const conta = setup({
+    servers: [servidorLicencas()],
+    firewalls: firewallLicencas(),
+    storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" },
+    records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false)]
+  });
+  const link = "https://membros.bunker707.com.br/minhas-licencas/{licenca}/renovar";
+  const result = conta.runScript("licencas.sh", { ...base, LICENCAS_SEM_PAINEL: "sim", LICENCAS_EMISSOR_KIDS_ANTERIORES: "emissao-2026-11, emissao-2025-10", LICENCAS_EMISSOR_LINK_RENOVAR: link, PUBLICO_TENTATIVAS: "1" }, ["deploy"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const implantar = sshCmds(conta.calls()).find((c) => c.command.includes("bash infra/licencas/scripts/implantar.sh"));
+  assert.deepEqual(configDe(implantar.command), {
+    PAINEL_ENDERECO: "",
+    PAINEL_ACCESS_EQUIPE: "",
+    PAINEL_ACCESS_AUD: "",
+    PAINEL_TETO_DIARIO: "10",
+    EMISSOR_EMAIL_PRODUTOR: "",
+    EMISSOR_EMAIL_REMETENTE: "",
+    EMISSOR_KIDS_ANTERIORES: "emissao-2026-11,emissao-2025-10",
+    EMISSOR_LINK_RENOVAR: link,
+    EMISSOR_LINK_LOJA: ""
+  });
+  assert.match(result.stdout, /Sem o Painel \(LICENCAS_SEM_PAINEL=sim\): o Emissor sobe sem ele e sem e-mail/);
+  assert.match(result.stdout, /Emissor no ar: https:\/\/licencas-api\.bunker707\.com\.br \(API das Instalacoes\), sem o Painel/);
+  assert.doesNotMatch(result.stdout, /A primeira conta do Painel/);
 });
 
 test("restaurar-licencas exige CONFIRMAR=restaurar; o ensaio e o backup rodam os scripts do servidor com o backup escolhido", { skip }, () => {
