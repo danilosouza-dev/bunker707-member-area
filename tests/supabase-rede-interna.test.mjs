@@ -136,12 +136,42 @@ test("sessao do @supabase/ssr: o cookie continua sb-<rotulo publico>-auth-token 
 
 test("os tres clientes do servidor passam o fetch interno; o do navegador nunca", () => {
   const ler = (caminho) => readFileSync(new URL(`../${caminho}`, import.meta.url), "utf8");
-  assert.match(ler("src/server/db/supabase/client.ts"), /global: supabaseServerGlobalOptions\(supabaseUrl\)/);
-  assert.match(ler("src/server/auth/supabase.ts"), /global: supabaseServerGlobalOptions\(url\)/);
+  assert.match(ler("src/server/db/supabase/client.ts"), /global: \{ fetch: createStoragePathsFetch\(supabaseUrl, supabaseServerGlobalOptions\(supabaseUrl\)\.fetch\) \}/);
+  assert.match(ler("src/server/auth/supabase.ts"), /global: \{ fetch: createStoragePathsFetch\(url, supabaseServerGlobalOptions\(url\)\.fetch\) \}/);
   assert.match(ler("src/proxy.ts"), /global: supabaseServerGlobalOptions\(supabaseUrl as string\)/);
   const navegador = ler("src/lib/supabase/browser.ts");
   assert.doesNotMatch(navegador, /SUPABASE_INTERNAL_URL|internal-fetch/);
   // Nenhum arquivo do navegador le a variavel (ela nao tem NEXT_PUBLIC_ e nem deve ter).
   assert.doesNotMatch(ler(".env.example"), /^NEXT_PUBLIC_SUPABASE_INTERNAL_URL=/m);
   assert.match(ler(".env.example"), /^SUPABASE_INTERNAL_URL=$/m);
+});
+
+// A mídia pelo caminho (docs/32 §11.5) e a rede interna (§11.7) dividem o mesmo transporte nos clientes do servidor:
+// o fetch que guarda o caminho chama o fetch interno. A gravação sai para o gateway interno já com o caminho, e a
+// leitura volta com o endereço público montado, nunca com o interno.
+test("mídia pelo caminho por cima da rede interna: grava o caminho no gateway interno e devolve o endereço público", async () => {
+  const { createStoragePathsFetch } = await import("../src/server/db/storage-paths.ts");
+  const publico = "https://api.escola.test";
+  const interno = "http://api-gw:8000";
+  const objeto = `${publico}/storage/v1/object/public/capas/curso.png`;
+  const pedidos = [];
+  const base = async (entrada, opcoes) => {
+    pedidos.push({ url: typeof entrada === "string" ? entrada : entrada.url, corpo: opcoes?.body });
+    return new Response(JSON.stringify([{ id: 1, cover_url: "/storage/v1/object/public/capas/curso.png" }]), {
+      headers: { "content-type": "application/json" },
+      status: 200
+    });
+  };
+  const transporte = createStoragePathsFetch(publico, createSupabaseInternalFetch(publico, interno, base));
+
+  const resposta = await transporte(`${publico}/rest/v1/courses?select=*`, {
+    body: JSON.stringify({ cover_url: objeto }),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+
+  assert.equal(pedidos.length, 1);
+  assert.ok(pedidos[0].url.startsWith(`${interno}/rest/v1/courses`), "o pedido vai ao gateway interno");
+  assert.equal(JSON.parse(pedidos[0].corpo).cover_url, "/storage/v1/object/public/capas/curso.png", "o banco recebe o caminho");
+  assert.deepEqual(await resposta.json(), [{ id: 1, cover_url: objeto }], "a leitura volta com o endereço público");
 });

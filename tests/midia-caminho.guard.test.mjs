@@ -35,11 +35,11 @@ test("todo cliente do Supabase em src/ e conhecido; os dois que leem e gravam da
 
   const admin = codeOf(read("src/server/db/supabase/client.ts"));
   assert.match(admin, /import \{ createStoragePathsFetch \} from "@\/server\/db\/storage-paths";/);
-  assert.match(admin, /return createClient\(supabaseUrl, supabaseSecretKey, \{[\s\S]*global: \{ fetch: createStoragePathsFetch\(supabaseUrl\) \}\s*\}\);/);
+  assert.match(admin, /return createClient\(supabaseUrl, supabaseSecretKey, \{[\s\S]*global: \{ fetch: createStoragePathsFetch\(supabaseUrl, supabaseServerGlobalOptions\(supabaseUrl\)\.fetch\) \}\s*\}\);/);
 
   const session = codeOf(read("src/server/auth/supabase.ts"));
   assert.match(session, /import \{ createStoragePathsFetch \} from "@\/server\/db\/storage-paths";/);
-  assert.match(session, /return createServerClient\(url, anonKey, \{[\s\S]*global: \{ fetch: createStoragePathsFetch\(url\) \}\s*\}\);/);
+  assert.match(session, /return createServerClient\(url, anonKey, \{[\s\S]*global: \{ fetch: createStoragePathsFetch\(url, supabaseServerGlobalOptions\(url\)\.fetch\) \}\s*\}\);/);
   assert.match(session, /const \{ anonKey, url \} = getSupabaseAuthConfig\(\);/, "o endereco do cliente e o do fetch sao o mesmo");
 });
 
