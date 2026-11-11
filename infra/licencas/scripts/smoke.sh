@@ -17,11 +17,11 @@ echo "  banco: $(pg_resumo 2>/dev/null || echo '?') (Licencas, Instalacoes, even
 if [ "$(docker inspect --format '{{.State.Running}}' bunker707-licencas-caddy 2>/dev/null)" = "true" ]; then
     echo "  Caddy: no ar."
 else
-    warn "o Caddy (bunker707-licencas-caddy) nao esta rodando: os dois nomes nao respondem."
+    warn "o Caddy (bunker707-licencas-caddy) nao esta rodando: os tres nomes do Emissor nao respondem."
 fi
 # A API interna da nossa escola (conectar-licencas, docs/20 §8C.9): quantas credenciais o Emissor aceita e quem o Caddy deixa
 # chegar. So informa: o Emissor sem ela continua atendendo as Instalacoes.
-aceitas=$(ENV_FILE="$LICENCAS_EMISSOR_DIR/.env" env_value INTERNO_CREDENCIAL_HASH "" | tr ',' '\n' | grep -c '[0-9a-f]' || true)
+aceitas=$(ENV_FILE="$LICENCAS_EMISSOR_DIR/.env" env_value INTERNO_CREDENCIAL_HASH "" | tr ',' '\n' | tr -d ' ' | grep -ciE '^[0-9a-f]{64}$' || true)
 if [ "${aceitas:-0}" -gt 0 ]; then
     echo "  API interna da escola: ligada, com $aceitas credencial(is) aceita(s); o Caddy deixa entrar $(env_value LICENCAS_INTERNO_IPS 127.0.0.1/32)."
 else

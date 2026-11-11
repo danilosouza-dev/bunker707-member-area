@@ -37,7 +37,7 @@ grep -q 'INTERNO_CREDENCIAL_HASH' compose.yaml && grep -q 'INTERNO_PORTA_NO_HOST
 [ -n "$(emissor_env EMISSOR_EMAIL_PRODUTOR)" ] && [ -n "$(emissor_env EMISSOR_EMAIL_REMETENTE)" ] && [ -s segredos/resend-chave ] \
     || die "A API interna precisa da conta de envio do Emissor (EMISSOR_EMAIL_PRODUTOR, EMISSOR_EMAIL_REMETENTE e a chave do Resend em segredos/resend-chave): rode secrets-licencas e o deploy-licencas sem LICENCAS_SEM_PAINEL=sim."
 if [ "$modo" = conferir ]; then
-    aceitas=$(emissor_env INTERNO_CREDENCIAL_HASH | tr ',' '\n' | grep -c '[0-9a-f]' || true)
+    aceitas=$(emissor_env INTERNO_CREDENCIAL_HASH | tr ',' '\n' | tr -d ' ' | grep -ciE '^[0-9a-f]{64}$' || true)
     echo "  Emissor com a API interna e a conta de envio; hoje aceita ${aceitas:-0} credencial(is) da escola."
     exit 0
 fi
