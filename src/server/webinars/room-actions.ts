@@ -968,12 +968,22 @@ export async function launchPoll(input: { pin?: boolean; pollId: string; session
   });
 }
 
+/** A ordem em que as prontas entraram: a hora de criacao e, no empate, o id (todos contam igual). */
+function byCreation(a: { created_at: string; id: string }, b: { created_at: string; id: string }): number {
+  const at = Date.parse(a.created_at);
+  const bt = Date.parse(b.created_at);
+  if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) {
+    return at - bt;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 /**
  * [messaging.write, a permissao do savePolls] A "Nova enquete" do console (D83; pedido do produtor de 11/11/2026, na
  * Live ao vivo e na gravada): cria UMA enquete pronta no fim das prontas do webinario da sessao (nunca troca a lista
  * inteira, entao o que outra pessoa da equipe criou ao mesmo tempo fica), dentro do teto CHAT_LIMITS.pollTemplatesMax
- * (409 antes de gravar; depois de gravar, conta de novo: na corrida que passou do teto, quem passou desfaz a propria e
- * recebe o mesmo 409). Com `launch` "open" ou "pin", abre (e fixa) na sessao pelo caminho do Abrir (openTemplatePoll),
+ * (409 antes de gravar; depois de gravar, conta de novo pela ordem das prontas (created_at, id): na corrida que passou
+ * do teto, so a que ficou de fora dele desfaz a propria e recebe o mesmo 409; a revisao v8, achado 7). Com `launch` "open" ou "pin", abre (e fixa) na sessao pelo caminho do Abrir (openTemplatePoll),
  * so com a sessao aceitando a equipe e, no fixar, com a 202611100002 (os dois conferidos antes de gravar: nada nasce).
  * Webinario arquivado, 409. Se abrir falha depois de a enquete entrar nas prontas, ela fica la e o resultado volta com
  * `launchError` (a frase para o aviso do console) em vez de falhar: o formulario fecha sem criar outra numa segunda
@@ -1015,10 +1025,13 @@ export async function createConsolePoll(input: {
       data.options.map((option) => option.label)
     );
 
-    // Duas pessoas da equipe criando ao mesmo tempo perto do teto: quem passou dele desfaz a propria.
+    // Duas pessoas da equipe criando ao mesmo tempo perto do teto: pela ordem em que as prontas entraram (created_at e
+    // o id), a que ficou dentro do teto fica e so a que passou dele desfaz a propria. As duas contam a mesma ordem, entao
+    // nunca as duas desfazem (a revisao v8, achado 7: antes, as duas viam 21 e as duas saiam).
     const after = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
+    const place = [...after.polls].sort(byCreation).findIndex((poll) => poll.id === template.poll.id);
 
-    if (after.polls.length > CHAT_LIMITS.pollTemplatesMax) {
+    if (place >= CHAT_LIMITS.pollTemplatesMax) {
       await deletePollRow(db, template.poll.id);
       throw new WebinarError(CHAT_MESSAGES.tooManyPolls, 409);
     }

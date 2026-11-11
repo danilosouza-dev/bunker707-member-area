@@ -15,7 +15,8 @@ import { DEFAULTS, MIN, OTHER_WEBINAR, REPLAY, SESSION, UNIQUE, WEBINAR, bancoFa
 //   o carimbo da sessao por ultimo, `webinar.poll_launched`), so com a sessao aceitando a equipe; fora disso, so
 //   "Guardar nas prontas"; o fixar que falha depois de guardar volta como `launchError`, com a enquete nas prontas;
 // - o teto de 20 prontas por webinario (CHAT_LIMITS.pollTemplatesMax): 409 antes de gravar e, na corrida que passa
-//   dele, quem passou desfaz a propria; as recusas (campos pelo mesmo zod do editor, sessao que nao existe, webinario
+//   dele, so a que ficou de fora do teto pela ordem das prontas (created_at, id) desfaz a propria (a revisao v8, achado
+//   7: nunca as duas); as recusas (campos pelo mesmo zod do editor, sessao que nao existe, webinario
 //   arquivado, banco sem a 202611100002 no fixar, sem permissao) nunca gravam nada;
 // - o savePolls do editor so apaga dos modelos que o card carregou (`loadedIds`): a enquete criada no console com a
 //   pagina do editor aberta fica, o teto conta com ela, e o pedido sem os ids (a pagina de antes) nao apaga nada.
@@ -364,7 +365,8 @@ test("a corrida no teto: duas pessoas criando com 19 prontas; quem passou dos 20
     tables.webinar_polls.push(enquete(randomUUID(), { position: index }));
   }
   const DA_OUTRA = "dddddddd-0000-4000-8000-0000000000bb";
-  const db = comOutraPessoaNoMeio(usar(tables), enquete(DA_OUTRA, { created_at: iso(Date.now()), position: 19, question: "Da outra pessoa?" }));
+  // A da outra pessoa entra antes da nossa (1 s antes, como o banco carimba): a 20a pela ordem e a dela.
+  const db = comOutraPessoaNoMeio(usar(tables), enquete(DA_OUTRA, { created_at: iso(Date.now() - 1000), position: 19, question: "Da outra pessoa?" }));
   const recusada = await roomActions.createConsolePoll(nova({ launch: "open" }));
   assert.deepEqual([recusada.ok, recusada.status, recusada.error], [false, 409, CHAT_MESSAGES.tooManyPolls]);
   assert.equal(prontas(db).length, 20, "nunca passa do teto");
@@ -372,6 +374,40 @@ test("a corrida no teto: duas pessoas criando com 19 prontas; quem passou dos 20
   assert.ok(!prontas(db).some((row) => row.question === "Qual tema na próxima?"), "a nossa foi desfeita");
   assert.deepEqual(escritas(db), ["insert webinar_polls", "insert webinar_poll_options", "delete webinar_polls"], "nada aberto");
   assert.equal(audits(db, "webinar.poll_created").length, 0);
+});
+
+test("revisao v8, achado 7: as duas criacoes ao mesmo tempo no teto (nenhuma viu a outra antes de gravar): a que entrou primeiro fica e abre; so a de depois desfaz", async () => {
+  const tables = cenario();
+  for (let index = 2; index < 19; index += 1) {
+    tables.webinar_polls.push(enquete(randomUUID(), { position: index }));
+  }
+  const DEPOIS = "dddddddd-0000-4000-8000-0000000000cc";
+  const db = usar(tables);
+  // A outra pessoa grava a dela logo depois da nossa (as opcoes da nossa ja entrando), 1 s mais tarde: 21 prontas.
+  const from = db.from;
+  let feito = false;
+  db.from = (name) => {
+    const chain = from(name);
+    if (name === "webinar_poll_options" && !feito) {
+      const insert = chain.insert;
+      chain.insert = (payload) => {
+        feito = true;
+        const linha = enquete(DEPOIS, { created_at: iso(Date.now() + 1000), position: 19, question: "Da outra pessoa?" });
+        db.tables.webinar_polls.push(linha);
+        db.tables.webinar_poll_options.push(...opcoes(linha.id));
+        return insert(payload);
+      };
+    }
+    return chain;
+  };
+  const nossa = ok(await roomActions.createConsolePoll(nova({ launch: "open" })));
+  assert.ok(nossa.launched, "a nossa (a 20a pela ordem) fica e abre");
+  assert.ok(prontas(db).some((row) => row.id === nossa.poll.id));
+  assert.equal(audits(db, "webinar.poll_created").length, 1);
+  // A da outra pessoa e a 21a pela mesma ordem: a acao dela, ao contar de novo, desfaz so a dela.
+  const ordem = prontas(db).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || (a.id < b.id ? -1 : 1));
+  assert.equal(ordem.findIndex((row) => row.id === DEPOIS), 20);
+  assert.ok(ordem.findIndex((row) => row.id === nossa.poll.id) < 20);
 });
 
 test("fora da sessao: Abrir agora e Abrir e fixar na sessao encerrada, cancelada e no Replay recebem 409 antes de gravar; Guardar nas prontas nelas funciona; sessao que nao existe 404", async () => {

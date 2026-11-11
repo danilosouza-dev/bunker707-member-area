@@ -19,7 +19,8 @@ import {
 // - "Abrir agora" abre na sessao (a copia aberta da nova) e a aluna responde pela rota das enquetes da sala, com a
 //   contagem no retrato; "Abrir e fixar" abre e fixa (a fixada de antes sai como `replaced`) e a consulta de 5 s do chat
 //   da aluna traz a fixada;
-// - o teto de 20 prontas: a 21a recebe 409 e nada e gravado;
+// - o teto de 20 prontas: a 21a recebe 409 e nada e gravado; duas criacoes ao mesmo tempo com 19 prontas deixam uma so
+//   (a revisao v8, achado 7: nunca as duas recusadas);
 // - recusas: o analista (sem messaging.write) recebe 403 em tudo; "Abrir agora" e "Abrir e fixar" na sessao encerrada
 //   recebem 409 sem gravar, e "Guardar nas prontas" nela funciona; sessao que nao existe, 404;
 // - o Salvar do card do editor com a pagina aberta antes (loadedIds sem a nova) nao apaga a enquete criada no console.
@@ -236,4 +237,24 @@ test("7. o Salvar do card do editor aberto antes (loadedIds sem a nova) nao apag
   assert.deepEqual([salvo.created, salvo.updated, salvo.deleted], [0, 1, 0]);
   assert.ok((await prontas()).some((row) => row.id === doConsole.id), "a do console fica");
   assert.ok(salvo.polls.some((poll) => poll.id === doConsole.id), "e volta para o card");
+});
+
+test("8. revisao v8, achado 7: duas criacoes ao mesmo tempo com 19 prontas: uma fica e a outra recebe 409; nunca as duas recusadas, nunca acima do teto", async () => {
+  await limparWebinarios(db);
+  await seedLiveAoVivoDeTeste(db, { comecouHa: 3 * 60_000, status: "live" });
+  const faltam = 19 - (await prontas()).length;
+  for (let index = 0; index < faltam; index += 1) {
+    await prontaDaOutraPessoa(`Antes ${index + 1}?`, index);
+  }
+  assert.equal((await prontas()).length, 19);
+  actAs(produtor);
+  const [uma, outra] = await Promise.all([roomActions.createConsolePoll(nova({ question: "Da primeira pessoa?" })), roomActions.createConsolePoll(nova({ question: "Da segunda pessoa?" }))]);
+  const resultados = [uma, outra];
+  assert.equal(resultados.filter((result) => result.ok).length, 1, JSON.stringify(resultados));
+  const recusada = resultados.find((result) => !result.ok);
+  assert.deepEqual([recusada.status, recusada.error], [409, CHAT_MESSAGES.tooManyPolls]);
+  const depois = await prontas();
+  assert.equal(depois.length, 20, "a que ficou dentro do teto fica");
+  assert.equal(depois.filter((row) => row.question === "Da primeira pessoa?" || row.question === "Da segunda pessoa?").length, 1);
+  actAs(null);
 });
