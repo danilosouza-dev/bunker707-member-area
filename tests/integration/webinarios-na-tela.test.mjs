@@ -853,7 +853,7 @@ test("15. R7 pelo app: o produtor decide a Simulacao da live na espera com a fra
  * R8 e R9 pelo app: o roteiro na Live ao vivo e a foto de quem comenta
  * ---------------------------------------------------------------------------------------------- */
 
-test("10. R8 e R9 pelo app: o tick solta o item vencido da live com a foto, uma vez; o Enviar agora com a foto; a aluna recebe os dois pela consulta de 5 s com a foto no avatar", async () => {
+test("16. R8 e R9 pelo app: o tick solta o item vencido da live com a foto, uma vez; o Enviar agora com a foto; a aluna recebe os dois pela consulta de 5 s com a foto no avatar", async () => {
   const tick = await import("../../src/server/webinars/live-script-tick.ts");
   const scriptActions = await import("../../src/server/webinars/script-actions.ts");
   const { clearScriptedAvatarCache } = await import("../../src/server/webinars/persona-store.ts");
