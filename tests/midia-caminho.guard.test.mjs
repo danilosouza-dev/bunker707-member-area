@@ -82,3 +82,72 @@ test("o fetch: so /rest/v1/ muda, a tabela fora da regra e a da Oferta, e o modu
   // O fetch global e lido na hora do pedido (o Next e o Sentry poem o deles depois que o modulo carrega).
   assert.match(code, /\(baseFetch \?\? globalThis\.fetch\)\(input, init\)/);
 });
+
+const sqlCodeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, "");
+const CHECKS_MIGRATION = "supabase/migrations/202611120001_storage_paths_checks.sql";
+const STORED_FORM = "'^/storage/v1/(object|render/image)/public/[^[:space:]]+$'";
+
+test("a 202611120001: duas secoes MCP, idempotente; so troca os checks de endereco (nenhum dado muda aqui)", () => {
+  const migration = read(CHECKS_MIGRATION);
+  const code = sqlCodeOf(migration);
+
+  assert.deepEqual(migration.match(/^ \* \d\. .+$/gm), [
+    " * 1. Os checks de endereco aceitam o caminho do Storage, sem ler as linhas. MCP.",
+    " * 2. A conferencia das linhas que ja existem (de novo, nada muda). MCP."
+  ]);
+  assert.match(migration, /^-- Idempotente: pode ser executada mais de uma vez sem efeito colateral\.$/m);
+  assert.doesNotMatch(migration, /popup_design/, "a guarda do Livre proibe migracao nova que cite a coluna do design");
+  assert.doesNotMatch(code, /\bpublic\.webinars?\b|\bpublic\.webinar_\w+/, "nao mexe nas tabelas dos webinarios (o aviso de migracao pendente deles aponta a mais nova que mexe)");
+  for (const proibido of [/\bupdate\s+public\./i, /\binsert\s+into\b/i, /\bdelete\s+from\b/i, /\btruncate\b/i, /\bcreate\s+(?:table|policy|index|trigger)\b/i, /\balter\s+policy\b/i, /\bgrant\b|\brevoke\b/i, /security\s+definer/i, /\bconcurrently\b/i]) {
+    assert.doesNotMatch(code, proibido);
+  }
+
+  // O unico drop: o check antigo achado pela definicao, dentro do bloco que so roda sem o check novo.
+  assert.deepEqual(
+    [...code.matchAll(/\bdrop\b[^;]*/gi)].map((match) => match[0]),
+    [
+      "drop constraint %I', v_old.conname)",
+      "drop constraint %I', v_old.conname)",
+      "drop constraint %I', v_old.conname)"
+    ]
+  );
+  for (const [table, column, name, pattern] of [
+    ["campaigns", "image_url", "campaigns_image_url_v2", "^https?://"],
+    ["campaigns", "audio_url", "campaigns_audio_url_v2", "^https?://"],
+    ["lesson_materials", "file_url", "lesson_materials_file_url_v2", "^https://"]
+  ]) {
+    const block = code.slice(code.indexOf(`where conname = '${name}'`), code.indexOf(`) not valid;`, code.indexOf(`add constraint ${name}`)));
+    assert.match(block, new RegExp(`and pg_get_constraintdef\\(oid\\) like '%\\(${column} ~ ''${pattern.replace(/[?^/]/g, "\\$&")}%'`), name);
+    assert.match(block, new RegExp(`execute format\\('alter table public\\.${table} drop constraint %I', v_old\\.conname\\);`), name);
+    assert.ok(block.includes(`${column} ~ ${STORED_FORM}`), `${name} aceita o caminho guardado`);
+    assert.match(code, new RegExp(`alter table public\\.${table} validate constraint ${name};`), name);
+  }
+});
+
+test("todo check de endereco https das migracoes aceita o caminho guardado ou e de uma tabela que o fetch deixa como esta", async () => {
+  const { STORAGE_PATHS_SKIPPED_TABLES } = await import("../src/server/db/storage-paths.ts");
+  const dir = new URL("supabase/migrations/", root);
+  const found = [];
+
+  for (const name of readdirSync(dir).filter((file) => file.endsWith(".sql")).sort()) {
+    const code = sqlCodeOf(readFileSync(new URL(name, dir), "utf8"));
+    for (const match of code.matchAll(/\b(\w+)\s+~\*?\s+'\^https/g)) {
+      found.push(`${name}: ${match[1]}`);
+    }
+  }
+
+  // Coluna nova com check de endereco https: o fetch gravaria o caminho e o banco recusaria (23514). Ou o check novo
+  // aceita tambem o caminho guardado (como na 202611120001), ou a tabela entra em STORAGE_PATHS_SKIPPED_TABLES.
+  assert.deepEqual(found, [
+    "202610130001_lesson_materials.sql: file_url",
+    "202610200001_communication_v1.sql: image_url",
+    "202610200001_communication_v1.sql: audio_url",
+    "202610300003_webinars_v4b_ofertas.sql: checkout_url",
+    "202610300003_webinars_v4b_ofertas.sql: image_url",
+    "202611120001_storage_paths_checks.sql: image_url",
+    "202611120001_storage_paths_checks.sql: audio_url",
+    "202611120001_storage_paths_checks.sql: file_url"
+  ]);
+  assert.deepEqual([...STORAGE_PATHS_SKIPPED_TABLES], ["webinar_offer_variants"]);
+  assert.match(sqlCodeOf(read("supabase/migrations/202610300003_webinars_v4b_ofertas.sql")), /create table if not exists public\.webinar_offer_variants \([^;]*checkout_url text not null check[^;]*image_url text check \(image_url is null or \(char_length\(image_url\) <= 2048 and image_url ~ '\^https:\/\/'\)\)/);
+});
