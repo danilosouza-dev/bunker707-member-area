@@ -60,7 +60,19 @@ import {
 } from "@/server/webinars/live-actions";
 import { LIVE_CONSOLE_COPY, desiredLobby, handRows, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
-import { answerQuestion, closePoll, endSessionNow, launchPoll, moderateMessage, openSessionNow, sendTeamMessage, setQuestionStatus, setSessionChatMode } from "@/server/webinars/room-actions";
+import {
+  answerQuestion,
+  closePoll,
+  deleteQuestionReply,
+  endSessionNow,
+  launchPoll,
+  moderateMessage,
+  openSessionNow,
+  replyToQuestion,
+  sendTeamMessage,
+  setQuestionStatus,
+  setSessionChatMode
+} from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
 import { fireScriptItem } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
@@ -703,7 +715,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     setPanelOpen(true);
     setPanelView(view);
     window.requestAnimationFrame(() => {
-      visibleConsoleTabControl(document, "tab" in view ? view.tab : "mais")?.focus();
+      visibleConsoleTabControl(document, "tab" in view ? view.tab : view.more)?.focus();
     });
   }
 
@@ -712,17 +724,21 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
    * ele cairia no body); sem o trilho na tela, ao balao da barra.
    */
   function closePanel() {
-    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : "mais") ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
+    const target = visibleConsoleTabControl(document, "tab" in shownView ? shownView.tab : shownView.more) ?? document.querySelector<HTMLButtonElement>('[data-console-bar] [data-room-bar-item="panel"]');
     target?.focus();
     setPanelOpen(false);
   }
 
-  /** O toque num item do trilho: a aba abre ou fecha o painel (consoleRailStep); a entrada escolhida no Mais so abre. */
+  /**
+   * O toque num item do trilho (uma aba ou uma entrada, no trilho ou no Mais): abre o painel nele ou, no que ja esta na
+   * tela, fecha o painel (consoleRailStep).
+   */
   function onRail(item: ConsolePanelView) {
-    const next = "more" in item ? { panelOpen: true, view: item } : consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
+    const next = consoleRailStep({ closable: live !== null, item, panelShown, view: shownView });
     setPanelView(next.view);
     setPanelOpen(next.panelOpen);
   }
+
 
   const readOnly = Boolean(session) && !canAct;
   const onlyPublishers = live !== null && room.controls.session && !room.controls.sessionEnabled;
@@ -898,6 +914,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     askedMessageIds={snapshot.askedMessageIds}
                     busyKey={busyKey}
                     canAct={canAct}
+                    currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     currentUserId={currentUserId}
                     hostUserId={webinar.hostUserId}
                     messages={snapshot.messages}
@@ -931,8 +948,15 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   <ConsoleQuestions
                     busyKey={busyKey}
                     canAct={canAct}
+                    currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
                     onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
+                    onDeleteReply={(replyId: string) =>
+                      run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
+                    }
+                    onReply={(questionId: string, body: string) =>
+                      run(`question:${questionId}`, () => replyToQuestion({ body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
+                    }
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}
                   />

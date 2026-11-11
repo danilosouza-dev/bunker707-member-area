@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-// Guarda da licença guardada (docs/32 §11.3 e §16; docs/18 §1.2): o que se lê no código e na migração 202611100001.
+// Guarda da licença guardada (docs/32 §11.3 e §16; docs/18 §1.2): o que se lê no código e na migração 202611100002.
 // - a migração passa pelo MCP numa seção só, idempotente, sem drop, delete, função nova, política, Storage nem
 //   security definer; a tabela é de uma linha, só do service_role (RLS ligada, revoke de anon e authenticated, grant
 //   ao service_role), com os checks nomeados e o gatilho com a função que já existe dentro de "if not exists";
@@ -23,7 +23,7 @@ const sqlCodeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/
 /** Sem comentários: o que sobra é o código. */
 const codeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
 
-const MIGRATION = "supabase/migrations/202611100001_license_state.sql";
+const MIGRATION = "supabase/migrations/202611100002_license_state.sql";
 /** O endereço dos pedidos do dono e dos administradores (revisão de 11/11/2026): só acrescenta duas colunas. */
 const REQUEST_HOST_MIGRATION = "supabase/migrations/202611110001_license_state_request_host.sql";
 const LICENSING = "src/server/licensing/";
@@ -34,7 +34,7 @@ function sourceFiles(directory) {
     .map((entry) => `${entry.parentPath.replace(new URL(root).pathname, "").replace(/\/?$/, "/")}${entry.name}`);
 }
 
-test("a 202611100001: uma seção MCP, idempotente, sem drop, delete, função nova, política, Storage nem security definer", () => {
+test("a 202611100002: uma seção MCP, idempotente, sem drop, delete, função nova, política, Storage nem security definer", () => {
   const migration = read(MIGRATION);
   const code = sqlCodeOf(migration);
 
@@ -53,7 +53,7 @@ test("a 202611100001: uma seção MCP, idempotente, sem drop, delete, função n
   assert.equal((code.match(/\bcreate table\b/gi) ?? []).length, (code.match(/\bcreate table if not exists\b/gi) ?? []).length);
 });
 
-test("a 202611100001: uma linha só, checks nomeados, gatilho dentro de if not exists, RLS sem política e só o service_role", () => {
+test("a 202611100002: uma linha só, checks nomeados, gatilho dentro de if not exists, RLS sem política e só o service_role", () => {
   const code = sqlCodeOf(read(MIGRATION));
 
   assert.match(code, /create table if not exists public\.license_state \(\s*id smallint primary key default 1,/);
@@ -79,7 +79,7 @@ test("a 202611100001: uma linha só, checks nomeados, gatilho dentro de if not e
   assert.doesNotMatch(code, /\bgrant\b[^;]*\b(?:anon|authenticated)\b/i, "nenhum privilégio para anon nem authenticated");
 });
 
-test("as migrações até a 202611010001 continuam byte a byte (a 202611100001 só acrescenta)", () => {
+test("as migrações até a 202611010001 continuam byte a byte (a 202611100002 só acrescenta)", () => {
   const dir = new URL("supabase/migrations/", root);
   const files = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -94,7 +94,7 @@ test("as migrações até a 202611010001 continuam byte a byte (a 202611100001 s
 
   assert.equal(before.length, 64);
   assert.equal(hash.digest("hex"), "5ce8b330f39f1180c45c06e7a744f2bbbf4e788637f6a74d33318fcc5e0ca8c8", "uma migração já aplicada mudou");
-  assert.ok(files.includes("202611100001_license_state.sql"));
+  assert.ok(files.includes("202611100002_license_state.sql"));
 });
 
 test("a 202611110001: uma seção MCP, idempotente, só duas colunas novas e dois checks nomeados dentro de if not exists", () => {

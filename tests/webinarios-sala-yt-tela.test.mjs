@@ -17,7 +17,7 @@ const render = (component, props) => renderToStaticMarkup(createElement(componen
 /** As classes de uma abertura de tag, com o & do HTML de volta. */
 const classesDe = (tag) => (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? "").replace(/&amp;/g, "&").split(/\s+/).filter(Boolean);
 
-const PERGUNTAS = { allowAnonymous: true, consented: true, defaultDisplayMode: "first_name_initial", enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" };
+const PERGUNTAS = { consented: true, enabled: false, getOffsetMs: () => 0, onConsented: noop, readOnly: false, sessionId: "s1", webinarId: "w1" };
 
 test("Y8: as Perguntas da sala (look comment) com o filtro Respondidas: a linha de chips so a partir de lg, um chip ligado, as duas linhas de antes so abaixo de lg e o vazio que diz o filtro", () => {
   const novas = WEBINAR_COPY.salaV2.perguntas;
@@ -132,6 +132,7 @@ const LISTA = [
   pergunta("q1", { answeredLive: true, status: "answered", upvotes: 18, voted: true }),
   pergunta("q2", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), mine: true, status: "answered" }),
   pergunta("q3", { answerSource: "ai", answerText: "Sim, ha certificado.", answeredAt: new Date(AGORA - 60_000).toISOString(), displayName: "Caio F.", status: "answered", upvotes: 2 }),
+  // Legado: uma pergunta gravada como anonima antes de 10/11/2026 (D64) continua aparecendo como "Anônima".
   pergunta("q4", { anonymous: true, displayName: "Aluno 123" }),
   pergunta("q5", { mine: true, status: "dismissed" })
 ];
@@ -172,7 +173,7 @@ test("Y10: a pergunta votada: o polegar Curtir com aria-pressed e o icone cheio,
   assert.doesNotMatch(html, /Não gostei|thumbs-down|ellipsis-vertical|Mais opções/);
 });
 
-test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hora) vem antes do botao 'Ocultar respostas' e a linha desce ate ele; fechado na de outro, '1 resposta' com a resposta no HTML e hidden; a Anonima com a mascara", () => {
+test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hora) vem antes do botao 'Ocultar respostas' e a linha desce ate ele; fechado na de outro, '1 resposta' com a resposta no HTML e hidden; a Anonima antiga (legado) com a mascara", () => {
   const html = listaDePerguntas();
   const q2 = itemDe(html, "q2");
   assert.match(q2, /^<li class="group\/comment relative mb-4" data-mine="" data-room-question="q2">/, "o comentario com o fio pega o ponteiro para a linha");
@@ -209,7 +210,7 @@ test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hor
   // Fechada, so a linha do comentario e a curva ate o botao (sem a continuacao).
   assert.equal((q3.match(/w-px bg-room-thread-line/g) ?? []).length, 1);
 
-  // A Anonima: o nome e o avatar da mascara (nunca o nome guardado); a minha: "Você".
+  // A Anonima (legado: linhas de antes de 10/11/2026): o nome e o avatar da mascara (nunca o nome guardado); a minha: "Você".
   const q4 = itemDe(html, "q4");
   assert.match(q4, /lucide-venetian-mask/);
   assert.match(q4, /<span class="sr-only">Anônima, há 2 minutos: <\/span>/);
@@ -217,6 +218,98 @@ test("Y10: o fio como no YouTube: aberto na minha, a resposta (selo Equipe e hor
   assert.match(q2, /<span class="sr-only">Você, há 2 minutos: <\/span>pergunta q2/);
   // Sem o agora do servidor, sem tempo (nunca um tempo errado).
   assert.doesNotMatch(listaDePerguntas({ serverNowMs: undefined }), /<time/);
+});
+
+// O fio continua (docs/30 §1.3; decisao do produtor de 10/11/2026): quem perguntou comenta a resposta e a equipe
+// responde de novo, em ordem, cada um como um comentario; so quem perguntou tem o Responder.
+const FIO = [
+  { anonymous: false, avatarUrl: "https://exemplo.test/ana.jpg", body: "E fica no app?", createdAt: new Date(AGORA - 2 * 60_000).toISOString(), displayName: "Ana M.", id: "r1", mine: true, role: "student" },
+  { anonymous: false, avatarUrl: null, body: "Fica sim.", createdAt: new Date(AGORA - 60_000).toISOString(), displayName: "Danilo S.", id: "r2", mine: false, role: "host" }
+];
+const responder = (extra = {}) => ({ avatar: { imageSrc: "https://exemplo.test/ana.jpg", name: "Ana M." }, busy: false, canWrite: true, draft: "", onCancel: noop, onChange: noop, onOpen: noop, onSubmit: noop, openId: null, status: null, ...extra });
+const comFio = (extra = {}, reply = responder()) =>
+  render(questionsModule.RoomQuestionList, {
+    emptyPhrase: "vazio",
+    footerFor: () => null,
+    onVote: noop,
+    questions: [
+      pergunta("q6", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), avatarUrl: "https://exemplo.test/ana.jpg", canReply: true, mine: true, replies: FIO, status: "answered", ...extra }),
+      pergunta("q7", { answerSource: "team", answerText: "Sim.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), canReply: false, displayName: "Caio F.", replies: FIO.map((item) => ({ ...item, mine: false })), status: "answered" })
+    ],
+    reply,
+    serverNowMs: AGORA
+  });
+
+test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na minha, o selo do papel da equipe), o botao conta todas e so quem perguntou tem o Responder", () => {
+  const novas = WEBINAR_COPY.salaV2.perguntas;
+  assert.deepEqual(
+    [novas.responder, novas.adicioneResposta, novas.suaResposta, novas.respostaFechada],
+    ["Responder", "Adicione uma resposta", "Sua resposta", "Esta pergunta não aceita respostas agora."]
+  );
+  const html = comFio();
+  const q6 = itemDe(html, "q6");
+  // A minha pergunta com a minha foto; o Responder na linha de acoes, depois do numero, fechado.
+  assert.match(q6, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "a foto de quem perguntou");
+  const acao = q6.match(/<span class="sr-only">0 curtidas<\/span><button aria-expanded="false" data-room-reply-open="" class="([^"]*)" type="button">Responder<\/button>/);
+  assert.ok(acao, "o Responder depois do numero, com o estado do campo");
+  for (const classe of ["h-8", "rounded-full", "bg-transparent", "text-xs", "ml-1"]) {
+    assert.ok(classesDe(`<b class="${acao[1]}">`).includes(classe), `o Responder tem ${classe}`);
+  }
+  // O fio aberto (a minha): a resposta da Equipe, depois as duas respostas, cada uma com a propria curva.
+  const fio = q6.slice(q6.indexOf('id="resposta-q6"'));
+  const ordem = [...fio.matchAll(/data-room-(answer|reply)="([^"]+)"/g)].map((match) => `${match[1]}:${match[2]}`);
+  assert.deepEqual(ordem, ["answer:q6", "reply:r1", "reply:r2"]);
+  assert.equal((fio.match(/<div class="relative mt-4"><span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-4 h-7"><\/span>/g) ?? []).length, 2, "cada resposta seguinte com a curva dela");
+  assert.match(fio, /<span class="sr-only">Você, há 2 minutos: <\/span>E fica no app\?/, "a minha resposta e Você");
+  assert.match(fio, /<span class="truncate[^"]*">Danilo S\.<\/span><span class="inline-flex h-5 [^"]*">Apresentador<\/span><time[^>]*>há 1 minuto<\/time>/, "a equipe com o nome, o selo do papel e a hora");
+  assert.match(fio, /<span class="sr-only">Danilo S\., Apresentador, há 1 minuto: <\/span>Fica sim\./);
+  assert.match(fio, /data-mine="" data-room-reply="r1"/);
+  assert.doesNotMatch(q6, /data-room-reply-field/, "o campo so abre no Responder");
+
+  // A de outro: fechada, o botao conta as tres; sem o Responder.
+  const q7 = itemDe(html, "q7");
+  assert.match(q7, /<button aria-controls="resposta-q7" aria-expanded="false"[^>]*>3 respostas<svg/);
+  assert.doesNotMatch(q7, /data-room-reply-open/, "so quem perguntou responde");
+  assert.match(q7, /<div class="relative ml-9 mt-3" hidden="" id="resposta-q7">/, "o fio fechado continua no HTML");
+
+  // Sem a sala aceitando escrita (o ver como, a live encerrada) ou sem o controle, o fio e so de leitura.
+  assert.doesNotMatch(comFio({}, responder({ canWrite: false })), /data-room-reply-open/);
+  assert.doesNotMatch(comFio({}, null), /data-room-reply-open/);
+  assert.doesNotMatch(comFio({ canReply: false }), /data-room-reply-open/);
+});
+
+test("o campo de responder do fio: abre no fim do fio da minha pergunta, com o meu avatar, o texto com a linha, o Cancelar e o Responder desligado sem texto; o erro numa regiao viva", () => {
+  const aberto = itemDe(comFio({}, responder({ openId: "q6" })), "q6");
+  assert.match(aberto, /<button aria-expanded="true" data-room-reply-open=""[^>]*>Responder<\/button>/);
+  const campo = aberto.slice(aberto.indexOf("data-room-reply-field"));
+  assert.ok(aberto.indexOf('data-room-reply="r2"') < aberto.indexOf("data-room-reply-field"), "o campo vem depois da ultima resposta");
+  assert.match(aberto, /<div class="relative mt-4"><span aria-hidden="true"[^>]*><\/span><form class="flex items-start" data-room-reply-field="">/, "o campo e mais um item do fio, com a curva dele");
+  assert.match(campo, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "o meu avatar");
+  const area = campo.match(/<textarea aria-label="Sua resposta" class="([^"]*)" maxLength="500" placeholder="Adicione uma resposta" rows="1"[^>]*><\/textarea>/);
+  assert.ok(area, "o texto com o nome, o teto do aluno e a dica");
+  for (const classe of ["bg-transparent", "outline-none", "text-base", "lg:text-sm", "resize-none"]) {
+    assert.ok(classesDe(`<b class="${area[1]}">`).includes(classe), `o texto tem ${classe}`);
+  }
+  assert.match(campo, /<div class="border-b border-room-field-line focus-within:border-room-fg">/, "a linha embaixo, que clareia com o foco");
+  assert.match(campo, /<button class="[^"]*\bbg-transparent\b[^"]*" type="button">Cancelar<\/button><button class="[^"]*\bbg-room-cta-bg\b[^"]*" disabled="" type="submit">Responder<\/button>/, "o Cancelar de texto e o envio desligado sem texto");
+  assert.match(campo, /<p aria-live="polite" class="[^"]*text-room-warn-fg[^"]*"><\/p>/);
+
+  // Com texto, o envio liga; enviando, gira e desliga; o erro aparece embaixo.
+  assert.match(itemDe(comFio({}, responder({ draft: "Obrigada!", openId: "q6" })), "q6"), /<button class="[^"]*" type="submit">Responder<\/button>/);
+  assert.match(itemDe(comFio({}, responder({ busy: true, draft: "Obrigada!", openId: "q6" })), "q6"), /<button aria-busy="true"[^>]*disabled=""[^>]*type="submit">/);
+  assert.match(itemDe(comFio({}, responder({ draft: "x", openId: "q6", status: "Muitas tentativas. Espere um pouco." })), "q6"), /<p aria-live="polite"[^>]*>Muitas tentativas\. Espere um pouco\.<\/p>/);
+
+  // Respondida so ao vivo, sem nada escrito: sem fio, e o campo abre logo abaixo da pergunta, alinhado ao texto.
+  const aoVivo = itemDe(comFio({ answerText: null, answeredLive: true, replies: [] }, responder({ openId: "q6" })), "q6");
+  assert.doesNotMatch(aoVivo, /resposta-q6/, "sem o botao do fio");
+  assert.match(aoVivo, /<div class="ml-9 mt-3"><form class="flex items-start" data-room-reply-field="">/);
+
+  // Legado: linhas de antes de 10/11/2026 (D64). Na pergunta Anonima antiga, o avatar do campo e das respostas e a
+  // mascara, e o nome e Anônima (a promessa da epoca continua).
+  const anonima = itemDe(comFio({ anonymous: true, avatarUrl: null, replies: [{ ...FIO[0], anonymous: true, avatarUrl: null }] }, responder({ openId: "q6" })), "q6");
+  assert.doesNotMatch(anonima, /<img/, "sem foto em nenhum lugar do fio da anonima (so a resposta da equipe teria)");
+  assert.match(anonima, /<span class="sr-only">Anônima, há 2 minutos: <\/span>E fica no app\?/);
+  assert.equal((anonima.match(/lucide-venetian-mask/g) ?? []).length, 3, "a pergunta, a resposta dela e o campo, com a mascara");
 });
 
 test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de antes", () => {
@@ -229,7 +322,7 @@ test("Y10: no look classic (a gaveta do vertical), a pergunta e o cartao de ante
 });
 
 // Y11: o campo "Adicione um comentário" do YouTube (RoomCommentField, spec §9) desenhado direto: fechado, aberto com e
-// sem texto, a Anonima das Perguntas e a frase que toma o lugar do campo.
+// sem texto, as Perguntas sem a pilula Anonima (D64) e a frase que toma o lugar do campo.
 const fieldModule = await import("../src/components/member/webinars/room/room-comment-field.tsx");
 const SAFE_AREA = "max-lg:pb-[max(16px,calc(env(safe-area-inset-bottom)+8px))]";
 const CAMPO = {
@@ -291,7 +384,7 @@ test("Y11: o campo aberto com texto: a dica, o Cancelar de texto e o Enviar azul
   }
   // Sem o foco no servidor: aberto com rascunho, a linha de 1 px mais forte.
   assert.match(html, /<div class="relative border-b border-room-field-line-draft"><textarea/);
-  assert.doesNotMatch(html, /VenetianMask|lucide-venetian-mask|>Anônima</, "a Anonima so nas Perguntas");
+  assert.doesNotMatch(html, /VenetianMask|lucide-venetian-mask|>Anônima</, "o campo nao tem Anonima");
 
   // Aberto e vazio: o envio desligado, no tom do desligado.
   const vazio = botaoPeloTexto(campo({ expanded: true }), "Enviar");
@@ -301,21 +394,26 @@ test("Y11: o campo aberto com texto: a dica, o Cancelar de texto e o Enviar azul
   assert.match(botaoPeloTexto(campo({ busy: true, expanded: true, value: "oi" }), "Enviar"), /aria-busy="true"[^>]*disabled=""|disabled=""[^>]*aria-busy="true"/);
 });
 
-test("Y11: nas Perguntas com a Anonima ligada: a pilula S tonal com aria-pressed e a mascara cheia, o avatar da mascara e o envio Perguntar", () => {
-  const html = campo({ allowAnonymous: true, anonymous: true, ariaLabel: "Sua pergunta", expanded: true, maxLength: 500, mode: "mod-enter", placeholder: "Fazer uma pergunta", submitLabel: WEBINAR_COPY.salaV2.perguntas.perguntar, value: "tem replay?" });
-  const anonima = html.match(/<button aria-pressed="true" class="([^"]*)" type="button"><svg([^>]*)>[\s\S]*?<\/svg>Anônima<\/button>/);
-  assert.ok(anonima, "a pilula Anonima ligada");
-  for (const classe of ["h-8", "rounded-full", "bg-room-control", "text-xs"]) {
-    assert.ok(classesDe(`<b class="${anonima[1]}">`).includes(classe), `a Anonima tem ${classe}`);
-  }
-  assert.match(anonima[2], /fill="currentColor"/, "a mascara cheia");
-  assert.match(anonima[2], /lucide-venetian-mask/);
-  assert.match(html, /<div class="mr-4 flex items-start"><span aria-hidden="true" class="[^"]*"><svg[^>]*lucide-venetian-mask/, "o avatar do campo vira a mascara");
+test("Y11 e D64: nas Perguntas o campo nao tem mais a pilula Anonima: o rodape so com o Cancelar e o envio Perguntar, o avatar com as iniciais; as props antigas nao ligam nada", () => {
+  const html = campo({ ariaLabel: "Sua pergunta", expanded: true, maxLength: 500, mode: "mod-enter", placeholder: "Fazer uma pergunta", submitLabel: WEBINAR_COPY.salaV2.perguntas.perguntar, value: "tem replay?" });
+  assert.doesNotMatch(html, /an[oô]nim/i, "nenhum controle de Anonima");
+  assert.doesNotMatch(html, /aria-pressed|lucide-venetian-mask|type="checkbox"/, "sem pilula de ligar e desligar e sem a mascara");
+  assert.match(html, /<div class="mt-2 flex flex-wrap items-center gap-2"><div class="ml-auto flex items-center gap-2">/, "o rodape so com o Cancelar e o envio");
+  assert.equal((html.match(/<button/g) ?? []).length, 2, "dois botoes no rodape");
   assert.match(botaoPeloTexto(html, "Perguntar"), /type="submit"/);
-  // Desligada: a mascara vazia e o avatar com as iniciais.
-  const desligada = campo({ allowAnonymous: true, anonymous: false, expanded: true, mode: "mod-enter" });
-  assert.match(desligada, /<button aria-pressed="false" class="[^"]*" type="button"><svg[^>]*fill="none"[^>]*lucide-venetian-mask/);
-  assert.match(desligada, /<span[^>]*>AS<\/span>/);
+  assert.match(html, /<span[^>]*>AS<\/span>/, "o avatar do campo com as iniciais");
+  // Quem ainda passar as props de antes (allowAnonymous, anonymous) nao desenha nada: elas nao existem mais.
+  const antigas = campo({ allowAnonymous: true, anonymous: true, ariaLabel: "Sua pergunta", expanded: true, mode: "mod-enter", value: "tem replay?" });
+  assert.doesNotMatch(antigas, /an[oô]nim|aria-pressed|lucide-venetian-mask/i);
+  assert.match(antigas, /<span[^>]*>AS<\/span>/, "o avatar continua o da pessoa");
+
+  // A aba Perguntas inteira (o desenho da sala e a gaveta do vertical): nenhum controle de Anonima, mesmo com a prop antiga.
+  for (const look of ["comment", "classic"]) {
+    const aba = renderToStaticMarkup(createElement(questionsModule.RoomQuestionsTab, { ...PERGUNTAS, allowAnonymous: true, look }));
+    assert.match(aba, /<textarea aria-label="Sua pergunta"/, `${look}: o campo da pergunta`);
+    assert.doesNotMatch(aba, /an[oô]nim/i, `${look}: sem a opcao Anonima`);
+    assert.doesNotMatch(aba, /type="checkbox"|lucide-venetian-mask/, `${look}: sem a caixa de marcar e sem a mascara`);
+  }
 });
 
 test("Y11: a frase no lugar do campo: role=status, 14/20 no tom de aviso, com a mesma faixa e a mesma folga do iPhone", () => {
@@ -365,4 +463,26 @@ test("o Sair da sala pergunta numa janela no centro (alertdialog modal sobre um 
     { foco: true, rotulo: sala.voltar },
     { foco: false, rotulo: sala.sair }
   ]);
+});
+
+test("o botao do fio com o campo de responder aberto: fecha o campo e o fio de uma vez; nunca troca o guardado por baixo (o fio fecharia sozinho depois do envio)", () => {
+  const minha = pergunta("q6", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), canReply: true, mine: true, replies: FIO, status: "answered" });
+  /** O clique no botao do fio, sem navegador: RoomQuestionItem -> o comentario -> o fio (RoomCommentThread). */
+  const clicar = (threadOpen, openId) => {
+    const trocas = [];
+    let cancelados = 0;
+    const item = questionsModule.RoomQuestionItem({ look: "comment", onToggleThread: (id) => trocas.push(id), onVote: noop, question: minha, reply: responder({ onCancel: () => (cancelados += 1), openId }), serverNowMs: AGORA, threadOpen });
+    const fio = item.type(item.props).props.thread;
+    assert.equal(fio.props.expanded, threadOpen || openId === "q6");
+    fio.props.onToggle();
+    return { cancelados, trocas };
+  };
+  // Aberto por padrao (a minha) e respondendo: fecha o campo e guarda "fechado", que e o que a tela mostra.
+  assert.deepEqual(clicar(true, "q6"), { cancelados: 1, trocas: ["q6"] });
+  // Aberto so por causa do campo (o aluno ja tinha ocultado): fechar o campo basta; trocar reabriria o fio.
+  assert.deepEqual(clicar(false, "q6"), { cancelados: 1, trocas: [] });
+  // Sem o campo, ou com o campo em outra pergunta, o clique so troca o guardado, como antes.
+  assert.deepEqual(clicar(true, null), { cancelados: 0, trocas: ["q6"] });
+  assert.deepEqual(clicar(false, null), { cancelados: 0, trocas: ["q6"] });
+  assert.deepEqual(clicar(true, "outra"), { cancelados: 0, trocas: ["q6"] });
 });

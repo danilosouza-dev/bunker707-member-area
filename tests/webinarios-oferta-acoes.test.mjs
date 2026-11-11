@@ -372,3 +372,21 @@ test("sem oferta: o console diz que nao ha; uma variante ligada a mais nao muda 
   ok(await actions.saveOffer({ draft: draft({ showAtOffsetMs: 5 * MIN }), webinarId: WEBINAR }));
   assert.deepEqual(db.tables.webinar_offer_displays[0].snapshot, snapshot, "a foto do que a sessao mostrou fica");
 });
+
+test("o webinario arquivado fica so de leitura (docs/30 §2.3): salvar e arquivar a Oferta respondem 409 com a frase do Desarquivar e nada muda", async () => {
+  const arquivar = (db) => {
+    db.tables.webinars.find((row) => row.id === WEBINAR).status = "archived";
+    return db;
+  };
+  const semOferta = arquivar(usar({ oferta: false }));
+  const salvar = await actions.saveOffer({ draft: draft(), webinarId: WEBINAR });
+  assert.deepEqual([salvar.status, salvar.error], [409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  assert.equal(semOferta.tables.webinar_offers.length, 0);
+  assert.equal(audits(semOferta, "webinar.offer_saved").length, 0);
+
+  const comOferta = arquivar(usar());
+  const arquivada = await actions.archiveOffer({ offerId: OFFER, webinarId: WEBINAR });
+  assert.equal(arquivada.status, 409);
+  assert.equal(comOferta.tables.webinar_offers.find((row) => row.id === OFFER).status, "active");
+  assert.equal(audits(comOferta, "webinar.offer_archived").length, 0);
+});

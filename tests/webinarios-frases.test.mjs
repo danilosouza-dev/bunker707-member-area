@@ -106,7 +106,9 @@ test("as frases do admin de §2.7 e dos lembretes estao em WEBINAR_COPY, como a 
   assert.equal(admin.comecarParaTodos, "Começar para todos");
   assert.equal(admin.semDados, "Sem dados no período");
   assert.equal(admin.semLivesAoVivo, "Sem lives ao vivo ainda");
-  assert.deepEqual(admin.situacoes, { cancelled: "Cancelado", draft: "Rascunho", ended: "Encerrado", in_progress: "Em andamento", scheduled: "Agendado" });
+  assert.deepEqual(admin.situacoes, { archived: "Arquivado", cancelled: "Cancelado", draft: "Rascunho", ended: "Encerrado", in_progress: "Em andamento", scheduled: "Agendado" });
+  assert.equal(admin.arquivar, "Arquivar");
+  assert.equal(admin.desarquivar, "Desarquivar");
   assert.deepEqual(admin.tipos, { live: "Live ao vivo", simulated: "Live gravada" });
 
   assert.equal(WEBINAR_COPY.aluno.vagaGarantidaToast, "Vaga garantida. Avisamos você 1 dia e 1 hora antes.");

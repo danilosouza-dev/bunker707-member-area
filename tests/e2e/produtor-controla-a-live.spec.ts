@@ -87,10 +87,21 @@ async function abrirAba(page: Page, nome: string) {
   return conteudo;
 }
 
-/** Escolhe uma entrada no Mais do trilho e devolve a secao dela, ja na tela (um grupo com o nome da entrada). */
+/**
+ * Abre uma entrada (Enquetes, Gravação...) e devolve a secao dela, ja na tela (um grupo com o nome da entrada): pelo item
+ * dela no trilho, que no computador lista tudo o que cabe na altura (docs/31 §10); se ela nao coube, pelo Mais.
+ */
 async function abrirNoMais(page: Page, entrada: string) {
-  await page.locator('[data-console-rail="mais"]').click();
-  await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
+  const chave = (Object.entries(consoleV2.entradas) as [string, string][]).find(([, rotulo]) => rotulo === entrada)?.[0] ?? entrada;
+  const item = page.locator(`[data-console-rail="${chave}"]`);
+  if (await item.isVisible()) {
+    if ((await item.getAttribute("aria-expanded")) !== "true") {
+      await item.click();
+    }
+  } else {
+    await page.locator('[data-console-rail="mais"]').click();
+    await page.getByRole("menuitemradio", { exact: true, name: entrada }).click();
+  }
   const secao = page.locator("section[data-console-more]").and(page.getByRole("group", { exact: true, name: entrada }));
   await expect(secao).toBeVisible();
   return secao;
@@ -798,11 +809,13 @@ test.describe("produtor", () => {
     await expect(linha.locator("[data-live-mic]")).toHaveAttribute("data-live-mic", "on");
     await expect(linha).toContainText(consoleV2.pessoas.midia.microfoneLigado);
 
-    // Lançar enquete abre o Mais › Enquetes (a secao na tela, o foco no Mais do trilho com o nome dela).
+    // Lançar enquete abre a entrada Enquetes (a secao na tela, o foco no item Enquetes do trilho, aberto). A 1280 x 720
+    // o trilho comporta as abas e as entradas da live: nenhum Mais (docs/31 §10).
     await barra.getByRole("button", { exact: true, name: consoleV2.barra.lancarEnquete }).click();
     await expect(page.locator('section[aria-label="Enquetes"]')).toBeVisible();
-    await expect(page.locator('[data-console-rail="mais"]')).toHaveAccessibleName(consoleV2.maisEscolhido(consoleV2.entradas.enquetes));
-    await expect(page.locator('[data-console-rail="mais"]')).toBeFocused();
+    await expect(page.locator('[data-console-rail="enquetes"]')).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator('[data-console-rail="enquetes"]')).toBeFocused();
+    await expect(page.locator('[data-console-rail="mais"]')).toHaveCount(0);
     await expect(pessoas).toBeHidden();
 
     // O Gravar com o gravador por preparar abre o ⋯ › Gravação, onde fica o Preparar.
@@ -815,11 +828,11 @@ test.describe("produtor", () => {
     await expect(gravacao.getByRole("button", { exact: true, name: consoleAoVivo.prepararGravacao })).toBeVisible();
     expect((await sala.comandos()).slice(antes).some((item) => item.comando === "startRecording"), "abrir o painel nao grava").toBe(false);
 
-    // O X fecha o painel (montado) e o foco vai ao item do trilho do que estava na tela (o Mais, com a Gravação); o
-    // balao da barra so existe abaixo de lg (docs/31 §10). O item aberto, tocado de novo, fecha; outro item reabre.
+    // O X fecha o painel (montado) e o foco vai ao item do trilho do que estava na tela (a Gravação); o balao da barra
+    // so existe abaixo de lg (docs/31 §10). O item aberto, tocado de novo, fecha; outro item reabre.
     await page.getByRole("button", { exact: true, name: consoleV2.fecharPainel }).click();
     await expect(page.locator("#console-panel")).toBeHidden();
-    await expect(page.locator('[data-console-rail="mais"]')).toBeFocused();
+    await expect(page.locator('[data-console-rail="gravacao"]')).toBeFocused();
     await expect(barra.getByRole("button", { exact: true, name: consoleV2.painel.mostrar })).toBeHidden();
     await page.locator('[data-console-rail="chat"]').click();
     await expect(page.locator("#console-panel")).toBeVisible();

@@ -248,7 +248,7 @@ export function webinarRow(id = WEBINAR, extra = {}) {
     reminders: { email: true, h1: true, h24: true },
     replay_days_on_home: 7,
     replay_lesson_target: null,
-    room_settings: { anonymousQuestions: true, chatMode: "moderated", displayName: "first_name_initial", slowModeSeconds: 20 },
+    room_settings: { chatMode: "moderated", slowModeSeconds: 20 },
     scheduled_at: null,
     show_banner: true,
     show_on_home: true,

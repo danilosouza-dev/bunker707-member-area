@@ -13,9 +13,9 @@ import { LOWER_HAND_SIGNAL, RECORDING_SIGNAL } from "../../lib/jitsi-room-config
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloTime } from "../../lib/webinar-time";
 import { desiredLobby, MUTE_MINUTES_OPTIONS, type LiveBanState, type MuteMinutes } from "./live-model";
-import { MIC_LIMIT, type DisplayNameMode, type SessionStatus } from "./model";
+import { MIC_LIMIT, type SessionStatus } from "./model";
 import { RECORDER_LABELS, canReleaseRecorder, canRequestRecorder, recorderMachineAlive, recorderPrepareStale, recordButtonAction, type RecorderStatus } from "./recorder-model";
-import { anonymousNumber, displayNameFor, firstNameInitial } from "./room-model";
+import { displayNameFor, firstNameInitial } from "./room-model";
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 
@@ -59,7 +59,7 @@ export const LIVE_ACTION_MESSAGES = copy.recusas;
 /** Um aluno (ou alguem da equipe que escreveu) que a mesa pode silenciar, remover ou banir. */
 export type LiveConsolePerson = {
   ban: LiveBanState;
-  /** O nome da sala e do chat (primeiro nome + inicial, apelido ou "Aluno {n}"), nunca o e-mail. */
+  /** O nome da sala e do chat (primeiro nome + inicial do sobrenome, D64), nunca o e-mail. */
   displayName: string;
   /** Quando entrou na sala pela ultima vez (o ultimo webinar_room_joined). */
   joinedAt: string | null;
@@ -151,26 +151,13 @@ export function latestRoomJoins(rows: readonly RoomJoinedRow[]): Map<string, { j
 }
 
 /**
- * O nome que a sala mostra para o aluno (o mesmo do token, live-room.liveTokenName): com o aceite do chat, o modo que
- * ele escolheu; sem o aceite, primeiro nome + inicial, ou "Aluno {n}" quando o card Sala manda sempre anonimo.
+ * O nome que a sala mostra para o aluno na aba Pessoas, na fila das maos e na lista dos barrados (o mesmo do token,
+ * live-room.liveTokenName): sempre o primeiro nome + inicial do sobrenome (D64, 10/11/2026). O aceite gravado (mesmo
+ * uma linha antiga com apelido ou anonimo) e o card Sala antigo do webinario nao mudam o nome: a equipe sempre sabe
+ * quem e.
  */
-export function liveParticipantName(input: {
-  consent: { displayMode: string | null; nickname: string | null } | null;
-  fullName: string | null;
-  roomDisplayName: DisplayNameMode;
-  userId: string;
-  webinarId: string;
-}): string {
-  const number = anonymousNumber(input.userId, input.webinarId);
-  const chosen = input.consent?.displayMode;
-  if (input.consent && (chosen === "anonymous" || chosen === "nickname" || chosen === "first_name_initial")) {
-    return displayNameFor({ anonymousNumber: number, fullName: input.fullName, mode: chosen, nickname: input.consent.nickname });
-  }
-  if (input.consent) {
-    return displayNameFor({ anonymousNumber: number, fullName: input.fullName, mode: input.roomDisplayName, nickname: input.consent.nickname });
-  }
-  const mode = input.roomDisplayName === "anonymous" ? "anonymous" : "first_name_initial";
-  return displayNameFor({ anonymousNumber: number, fullName: input.fullName, mode, nickname: null });
+export function liveParticipantName(input: { fullName: string | null }): string {
+  return displayNameFor({ fullName: input.fullName });
 }
 
 /** O nome da equipe na lista (primeiro nome + inicial; "Equipe" sem nome). */

@@ -11,7 +11,7 @@ import "server-only";
 //   e-mail da mudanca de degrau para os donos e administradores (src/server/licensing/degree-email.ts), uma vez por
 //   mudanca, pela fila de e-mail.
 // Falha do Emissor nunca vira erro do agendador: fica em license_state, e a licenca guardada continua valendo. Falha do
-// e-mail de degrau tambem nao: a rodada seguinte tenta de novo. Banco sem a migracao 202611100001 (so no modo
+// e-mail de degrau tambem nao: a rodada seguinte tenta de novo. Banco sem a migracao 202611100002 (so no modo
 // "enforce"): registra e termina sem erro. Os logs levam so motivos e codigos, nunca a licenca, o segredo ou a sequencia.
 
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";

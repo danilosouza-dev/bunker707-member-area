@@ -23,15 +23,17 @@ import { teamAnswerNeedsNotice } from "./assistant-model";
 import { studentPresentNow } from "./assistant-queries";
 import { answerQuestionOfApprovedAiReply, fetchAttendanceMarks, setQuestionAnswerSource } from "./assistant-store";
 import { invalidateWebinars } from "./cache";
-import { chatMessageFromRow, pollFromRow, questionFromRow, type ChatMessageRow } from "./chat-rows";
+import { chatMessageFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
 import {
   answerQuestionSchema,
   closePollSchema,
   createReplaySessionSchema,
+  deleteQuestionReplySchema,
   launchPollSchema,
   moderateMessageSchema,
   questionStatusSchema,
   removeStudentMessagesSchema,
+  replyQuestionSchema,
   savePollsSchema,
   saveSimulationSchema,
   sessionChatModeSchema,
@@ -40,18 +42,22 @@ import {
   type ModerationAction
 } from "./chat-schemas";
 import {
+  countQuestionReplyRows,
   deletePollRow,
   fetchChatMessageRow,
   fetchConsentRow,
   fetchPollRow,
+  fetchQuestionReplyRow,
   fetchQuestionRow,
   fetchQuestionRowByMessage,
   insertChatMessage,
   insertPollRow,
+  insertQuestionReplyRow,
   insertQuestionRow,
   listPollRows,
   replacePollOptionRows,
   revokeConsentRow,
+  softDeleteQuestionReplyRow,
   softDeleteQuestionsOfMessage,
   softDeleteStudentContent,
   updateChatMessageRow,
@@ -60,15 +66,17 @@ import {
   type ChatMessagePatch
 } from "./chat-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
-import { isMissingWebinarSchema, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isMissingWebinarSchema, WEBINARS_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
+  chatConsentAllowsReplay,
   type ChatMessage,
   type ChatMode,
   type Poll,
   type PollDraft,
   type PresenceSummary,
+  type QuestionReply,
   type SlowModeSeconds,
   questionBodyOf,
   type WebinarQuestion,
@@ -76,12 +84,12 @@ import {
 } from "./model";
 import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
-import { anonymousNumber, displayNameFor, firstNameInitial, sessionOffsetMs } from "./room-model";
-import { questionSentMetadata } from "./room-rules";
+import { anonymousDisplayName, firstNameInitial, sessionOffsetMs } from "./room-model";
+import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, updateSessionRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -101,6 +109,9 @@ const POLL_NOT_TEMPLATE_MESSAGE = "Essa enquete já é de uma sessão; abra pelo
 const POLL_NOT_OPEN_MESSAGE = "Essa enquete não está aberta.";
 const QUESTION_MISSING_MESSAGE = "Essa pergunta não existe mais.";
 const ANSWER_MISSING_MESSAGE = "Escreva a resposta ou marque Respondida ao vivo.";
+const REPLY_NEEDS_ANSWER_MESSAGE = "Responda a pergunta antes de continuar a conversa.";
+const REPLY_FULL_MESSAGE = "Esta conversa chegou ao limite de respostas.";
+const REPLY_MISSING_MESSAGE = "Essa resposta não existe mais.";
 const ACK_MISMATCH_MESSAGE = "A confirmação não bate com a frase de hoje. Marque de novo.";
 const ONLY_SIMULATED_SESSION_MESSAGE = "O selo é decidido só nas sessões da Live gravada.";
 const REPLAY_NEEDS_ENDED_MESSAGE = "O replay abre depois da primeira sessão encerrar.";
@@ -113,6 +124,7 @@ export type ModeratedMessage = { message: ChatMessage; pinnedMessageId: string |
 export type SessionChatMode = { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null };
 export type SavedPolls = { created: number; deleted: number; polls: Poll[]; updated: number };
 export type AnsweredQuestion = { message: ChatMessage | null; notified: boolean; question: WebinarQuestion };
+export type RepliedQuestion = { notified: boolean; reply: QuestionReply };
 export type SavedSimulation = { deciderName: string; session: WebinarSession };
 export type ReplayCreated = { created: boolean; session: WebinarSession };
 export type RemovedStudentContent = { answers: number; consentRevoked: boolean; messages: number; questions: number };
@@ -129,6 +141,18 @@ function revalidateWebinar(id: string) {
 
 function revalidateConsole(id: string) {
   revalidatePath(`${LIST_PATH}/${id}/sala`);
+}
+
+/** Uma escrita no fio que esbarra no banco sem a 202611100001 vira 409 com a frase da migracao (nunca um 500 generico). */
+async function withReplyTable<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_MIGRATION), 409);
+    }
+    throw error;
+  }
 }
 
 /** O relatorio da sessao fica 60 s em cache pela tag "webinars" (report-queries.ts): o que muda os numeros invalida. */
@@ -384,15 +408,16 @@ export async function sendTeamMessage(input: { body: string; kind?: "answer" | "
 /**
  * A pergunta da aba Perguntas feita de uma mensagem do aluno (a pergunta pelo chat moderado ou o Virar pergunta da
  * equipe): o texto cortado em 500 caracteres (o limite da pergunta, sem partir um emoji: questionBodyOf), o
- * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno. Sem autor, nada (a pergunta pede o
- * aluno). Quem chama confere antes se a mensagem ja tem pergunta.
+ * `message_id` e anonima quando o nome gravado e o "Aluno {n}" do proprio aluno (legado: linhas de antes de 10/11/2026,
+ * D64; a mensagem antiga escrita como anonimo continua com a promessa da epoca, e nenhuma mensagem nova tem esse nome).
+ * Sem autor, nada (a pergunta pede o aluno). Quem chama confere antes se a mensagem ja tem pergunta.
  */
 async function insertQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): Promise<{ anonymous: boolean; questionId: string; userId: string } | null> {
   const userId = message.author_user_id;
   if (!userId) {
     return null;
   }
-  const anonymous = message.display_name === displayNameFor({ anonymousNumber: anonymousNumber(userId, message.webinar_id), fullName: null, mode: "anonymous", nickname: null });
+  const anonymous = message.display_name === anonymousDisplayName(userId, message.webinar_id);
   const question = await insertQuestionRow(db, {
     anonymous,
     body: questionBodyOf(message.body),
@@ -422,7 +447,7 @@ async function openQuestionOfMessage(db: WebinarsDb, message: ChatMessageRow): P
       entity_id: message.session_id,
       entity_type: "webinar",
       event_type: "webinar_question_sent",
-      metadata: questionSentMetadata({ anonymous: created.anonymous, offsetMs: message.offset_ms, questionId: created.questionId }),
+      metadata: questionSentMetadata({ offsetMs: message.offset_ms, questionId: created.questionId }),
       user_id: created.userId
     }
   ]);
@@ -447,8 +472,9 @@ async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow):
  * [messaging.write] Moderacao de uma mensagem: liberar (approved + quem e quando; a pergunta pelo chat entra na
  * aba Perguntas so agora), apagar (deleted_at, motivo `team`; some para todos na hora, com a pergunta ligada a ela),
  * fixar e desafixar (pinned_at + webinar_sessions.pinned_message_id, uma por sessao), promover a linha mestre
- * (master + source `original`, so mensagem da turma cujo autor mantem o aceite) e Virar pergunta (docs/31 V2-15: so
- * mensagem ou pergunta de aluno da turma; a pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
+ * (master + source `original`, so mensagem da turma cujo autor mantem o aceite com o modo de agora:
+ * model.chatConsentAllowsReplay) e Virar pergunta (docs/31 V2-15: so mensagem ou pergunta de aluno da turma; a
+ * pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
   return runWebinarAction("messaging.write", "atendimento", moderateMessageSchema, input, async ({ input: data, user }) => {
@@ -494,7 +520,9 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
         const consent = message.author_user_id ? await fetchConsentRow(db, message.author_user_id) : null;
 
-        if (!consent || consent.revoked_at) {
+        // Sem retirada e com o modo de agora: o aceite antigo de apelido ou anonimo (legado: linhas de antes de
+        // 10/11/2026, D64) conta como "sem aceite", e a mensagem dele nao vira linha mestre ate o aluno aceitar de novo.
+        if (!chatConsentAllowsReplay(consent)) {
           throw new WebinarError(NO_CONSENT_MESSAGE, 409);
         }
 
@@ -609,6 +637,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
   return runWebinarAction("messaging.write", "conteudo", savePollsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const existing = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
     const existingIds = new Set(existing.polls.map((poll) => poll.id));
     const kept = new Set<string>();
@@ -620,7 +649,8 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
 
       if (draft.id && existingIds.has(draft.id)) {
         const ownOptionIds = new Set(existing.options.filter((option) => option.poll_id === draft.id).map((option) => option.id));
-        await updatePollRow(db, draft.id, { anonymous: draft.anonymous, kind: draft.kind, position, question: draft.question });
+        // D64: a enquete salva de agora em diante nunca e anonima (um modelo antigo marcado volta a falso aqui).
+        await updatePollRow(db, draft.id, { anonymous: false, kind: draft.kind, position, question: draft.question });
         await replacePollOptionRows(
           db,
           draft.id,
@@ -631,7 +661,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
       } else {
         const inserted = await insertPollRow(
           db,
-          { anonymous: draft.anonymous, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
+          { anonymous: false, created_by: user.id, kind: draft.kind, position, question: draft.question, session_id: null, status: "draft", webinar_id: webinar.id },
           labels
         );
         kept.add(inserted.poll.id);
@@ -699,7 +729,8 @@ export async function launchPoll(input: { pollId: string; sessionId: string }): 
     const created = await insertPollRow(
       db,
       {
-        anonymous: template.poll.anonymous,
+        // D64: a copia lancada nunca e anonima, mesmo de um modelo antigo marcado (legado: so as copias de antes continuam).
+        anonymous: false,
         created_by: user.id,
         kind: template.poll.kind,
         open_offset_ms: serverOffsetMs(session, now.getTime()),
@@ -848,6 +879,78 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
   });
 }
 
+/**
+ * [messaging.write] A equipe continua a conversa no fio de uma pergunta ja respondida (docs/30 §2.4; decisao do produtor
+ * de 10/11/2026): a resposta entra no fio (webinar_question_replies) com o papel de quem escreve (Apresentador,
+ * Co-apresentador ou Equipe) e so aparece na aba Perguntas, nao no chat. A primeira resposta continua sendo o
+ * "Responder por escrito" (answerQuestion): aqui a pergunta precisa estar respondida. Fora da sala (a sessao acabou ou o
+ * aluno saiu), a resposta vai tambem para o sino dele, uma vez por resposta.
+ */
+export async function replyToQuestion(input: { body: string; questionId: string }): Promise<ActionResult<RepliedQuestion>> {
+  return runWebinarAction("messaging.write", "atendimento", replyQuestionSchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+    const db = webinarsDb();
+    const now = new Date();
+    const row = await fetchQuestionRow(db, data.questionId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    const question = questionFromRow(row);
+    const refusal = questionReplyRefusal({ question, replies: await countQuestionReplyRows(db, question.id), staff: true, userId: user.id });
+
+    if (refusal) {
+      throw new WebinarError(refusal === "full" ? REPLY_FULL_MESSAGE : REPLY_NEEDS_ANSWER_MESSAGE, 409);
+    }
+
+    const { session, webinar } = await loadSession(db, question.sessionId);
+    const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
+    const reply = questionReplyFromRow(
+      await insertQuestionReplyRow(db, { anonymous: false, body: data.body, display_name: teamDisplayName(user), question_id: question.id, role, session_id: session.id, user_id: user.id })
+    );
+    const notified = await noticeTeamAnswer(db, { answerText: data.body, handoffRequested: false, now, session, targetId: reply.id, userId: question.userId });
+
+    await recordAudit(db, {
+      action: "webinar.question_replied",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { notified, question_id: question.id, reply_id: reply.id, session_id: session.id }
+    });
+    revalidateConsole(webinar.id);
+
+    return { notified, reply };
+  }));
+}
+
+/** [messaging.write] Apaga uma resposta do fio (a do aluno ou a da equipe); o resto do fio fica. */
+export async function deleteQuestionReply(input: { replyId: string }): Promise<ActionResult<{ questionId: string; replyId: string }>> {
+  return runWebinarAction("messaging.write", "atendimento", deleteQuestionReplySchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+    const db = webinarsDb();
+    const row = await fetchQuestionReplyRow(db, data.replyId);
+
+    if (!row || row.deleted_at) {
+      throw new WebinarError(REPLY_MISSING_MESSAGE, 404);
+    }
+
+    const sessionRow = await fetchSessionRow(db, row.session_id);
+    await softDeleteQuestionReplyRow(db, { deletedBy: user.id, id: row.id, nowIso: new Date().toISOString(), reason: "team" });
+    await recordAudit(db, {
+      action: "webinar.question_reply_deleted",
+      actorId: user.id,
+      entityId: sessionRow?.webinar_id ?? null,
+      entityType: "webinar",
+      metadata: { by_student: row.role === "student", question_id: row.question_id, reply_id: row.id, session_id: row.session_id }
+    });
+
+    if (sessionRow) {
+      revalidateConsole(sessionRow.webinar_id);
+    }
+
+    return { questionId: row.question_id, replyId: row.id };
+  }));
+}
+
 /** [messaging.write] Dispensa, reabre ou marca como respondida uma pergunta. */
 export async function setQuestionStatus(input: { questionId: string; status: WebinarQuestion["status"] }): Promise<ActionResult<{ question: WebinarQuestion }>> {
   return runWebinarAction("messaging.write", "atendimento", questionStatusSchema, input, async ({ input: data, user }) => {
@@ -978,6 +1081,7 @@ export async function createReplaySession(input: { webinarId: string }): Promise
     const db = webinarsDb();
     const now = new Date();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const sessions = await listSessionRows(db, [webinar.id]);
     const existing = sessions.find((session) => session.kind === "replay") ?? null;
 
@@ -1043,6 +1147,7 @@ export async function cancelReplaySession(input: { webinarId: string }): Promise
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const replay = (await listSessionRows(db, [webinar.id])).find((session) => session.kind === "replay" && session.status !== "cancelled");
 
     if (!replay) {

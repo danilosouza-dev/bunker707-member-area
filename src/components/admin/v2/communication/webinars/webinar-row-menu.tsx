@@ -1,12 +1,12 @@
 "use client";
 
-import { CalendarX, ChartColumn, CircleStop, Copy, DoorOpen, ExternalLink, MonitorPlay, Pencil, Send, Trash2, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, CalendarX, ChartColumn, CircleStop, Copy, DoorOpen, ExternalLink, MonitorPlay, Pencil, Send, Trash2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { startTransition, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
-import { cancelWebinar, deleteWebinar, duplicateWebinar } from "@/server/webinars/actions";
+import { archiveWebinar, cancelWebinar, deleteWebinar, duplicateWebinar, unarchiveWebinar } from "@/server/webinars/actions";
 import {
   WEBINAR_ACTION_TOASTS,
   WEBINAR_ADMIN_COPY,
@@ -35,9 +35,13 @@ import { adminToast } from "../../toast";
 // navegam (fase 2b); na fase 3 Abrir a sala tambem leva ao console, e na Live ao vivo o Encerrar live idem (a acao
 // mora la: o navegador do apresentador para a gravacao e desliga a sala). Sem messaging.publish, Abrir a sala e o
 // Encerrar live da Live ao vivo aparecem desligados com "· só quem publica" (§2.6); o que chega em outra fase
-// (Publicar replay) aparece desligado com "em breve" (docs/30 §2.8).
+// (Publicar replay) aparece desligado com "em breve" (docs/30 §2.8). Arquivar (o encerrado e o cancelado, com
+// confirmacao), Desarquivar (sem confirmacao: so desfaz) e o Excluir do arquivado, so sem dados de aluno (`deletable`),
+// seguem a decisao do produtor de 10/11/2026 (docs/30 §2.3).
 
 export type WebinarActionTarget = {
+  /** O arquivado sem dados de aluno pode ser excluido (o servidor confere de novo); sem o campo, nao. */
+  deletable?: boolean;
   id: string;
   /** O tipo decide o Encerrar live: link para o console na Live ao vivo, confirmacao na Live gravada. */
   kind: WebinarKind;
@@ -55,6 +59,7 @@ const NO_RUNNING_SESSION_MESSAGE = "Nenhuma sessão no ar para encerrar.";
 type Failure = { message: string; status: number };
 
 const ACTION_ICONS: Partial<Record<WebinarAction, LucideIcon>> = {
+  archive: Archive,
   cancel: CalendarX,
   delete: Trash2,
   duplicate: Copy,
@@ -64,6 +69,7 @@ const ACTION_ICONS: Partial<Record<WebinarAction, LucideIcon>> = {
   open_room: DoorOpen,
   publish: Send,
   publish_replay: ExternalLink,
+  unarchive: ArchiveRestore,
   view_report: ChartColumn
 };
 
@@ -146,6 +152,18 @@ export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsO
             refreshInBackground();
           }
 
+          return;
+        }
+        case "archive":
+        case "unarchive": {
+          const result = action === "archive" ? await archiveWebinar(input) : await unarchiveWebinar(input);
+
+          if (!result.ok) {
+            return fail(result);
+          }
+
+          adminToast.success(WEBINAR_ACTION_TOASTS[action] ?? "");
+          refreshInBackground();
           return;
         }
         case "end": {
@@ -275,7 +293,7 @@ type WebinarRowMenuProps = {
 
 /** Menu "…" de um webinario. Sem nenhuma acao disponivel, nao aparece. */
 export function WebinarRowMenu({ exclude, onRequest, permissions, webinar }: WebinarRowMenuProps) {
-  const entries = webinarMenuEntries(webinar.situation, permissions, exclude, webinar.kind);
+  const entries = webinarMenuEntries(webinar.situation, permissions, exclude, webinar.kind, { deletable: webinar.deletable });
 
   return (
     <RowMenu

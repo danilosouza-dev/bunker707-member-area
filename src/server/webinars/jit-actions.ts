@@ -6,7 +6,7 @@
 // Simulacao que cada sessao copia ao nascer. Regras:
 // - messaging.write; com algo simulado ligado (o selo, o contador, as entradas ou os avisos de venda), messaging.publish
 //   tambem (403 sem ela), como o card Simulacao;
-// - so a Live gravada nao cancelada (409); ligar pede o video base (erro no campo `settings.enabled`);
+// - so a Live gravada nao cancelada nem arquivada (409); ligar pede o video base (erro no campo `settings.enabled`);
 // - a decisao da Simulacao (D10): com algo simulado ligado, a caixa marcada e a frase de §8.6 de hoje (ou de ontem,
 //   para a tela aberta antes da meia-noite) com o nome de quem decide, conferidas no servidor; quem decidiu e quando
 //   sao do servidor. As mesmas regras ja decididas, com a frase gravada de volta, guardam a decisao como estava (mudar so
@@ -35,7 +35,7 @@ import { defaultJitSettings, type JitSettings, type JitSimulationTemplate } from
 import { webinarFromRow } from "./rows";
 import { clampSimulationAck, normalizeSimulationAck, normalizeSimulationRules, simulationAckFlags, simulationAckMatches, type SimulationRules } from "./simulation-model";
 import { simulationNeedsAck } from "./simulation-schemas";
-import { listRecordingRows, requireWebinarRow } from "./store";
+import { assertWebinarNotArchived, listRecordingRows, requireWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 const COPY = WEBINAR_COPY.jit;
@@ -89,7 +89,9 @@ export async function saveJitSettings(input: SaveJitSettingsInput): Promise<Acti
     const db = webinarsDb();
     const now = new Date();
     const nowMs = now.getTime();
-    const webinar = webinarFromRow(await requireWebinarRow(db, data.webinarId));
+    const row = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(row);
+    const webinar = webinarFromRow(row);
 
     if (webinar.kind !== "simulated") {
       throw new WebinarError(COPY.servidor.soLiveGravada, 409);

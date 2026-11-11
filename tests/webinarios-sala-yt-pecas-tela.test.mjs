@@ -22,7 +22,7 @@ const tooltipModule = await import("../src/components/member/webinars/room/room-
 const snackModule = await import("../src/components/member/webinars/room/room-snackbar.tsx");
 const viewMenuModule = await import("../src/components/member/webinars/room/room-view-menu.tsx");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
-const { LogOut, Mic, PanelRight, SmilePlus, VenetianMask, Volume2, Maximize2, X } = await import("lucide-react");
+const { LogOut, Mic, PanelRight, SmilePlus, ThumbsUp, Volume2, Maximize2, X } = await import("lucide-react");
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const noop = () => undefined;
@@ -110,7 +110,7 @@ test("o circulo e a compacta de menu: o nome no aria-label, sem rotulo visivel; 
   assert.doesNotMatch(compacta, /-mr-1\.5|-ml-1\.5/);
 });
 
-test("os estados da pilula: aria-pressed so quando passado, o ocupado com aria-busy e o circulo girando, o disabled com o atributo, a mascara cheia e o toque de 44", () => {
+test("os estados da pilula: aria-pressed so quando passado, o ocupado com aria-busy e o circulo girando, o disabled com o atributo, o icone cheio do ligado e o toque de 44", () => {
   assert.doesNotMatch(render(pill.RoomPill, { icon: Mic, label: "Microfone" }), /aria-pressed/);
   assert.match(render(pill.RoomPill, { "aria-pressed": false, icon: Mic, label: "Microfone" }), /aria-pressed="false"/);
   assert.match(render(pill.RoomPill, { "aria-pressed": true, icon: Mic, label: "Microfone", tone: "white" }), /aria-pressed="true"/);
@@ -125,9 +125,9 @@ test("os estados da pilula: aria-pressed so quando passado, o ocupado com aria-b
   assert.match(abertura(desligado), /\sdisabled=""/);
   assert.doesNotMatch(desligado, /\saria-disabled=|sr-only/);
 
-  // Ligada, a Anonima mostra o estado no icone: a mascara cheia.
-  assert.match(render(pill.RoomPill, { "aria-pressed": true, icon: VenetianMask, iconFilled: true, label: "Anônima", size: "s" }), /<svg[^>]*fill="currentColor"/);
-  assert.match(render(pill.RoomPill, { icon: VenetianMask, label: "Anônima", size: "s" }), /<svg[^>]*fill="none"/);
+  // Ligada, a pilula mostra o estado no icone: o polegar cheio do Curtir (a pilula Anonima saiu em 10/11/2026, D64).
+  assert.match(render(pill.RoomPill, { "aria-pressed": true, icon: ThumbsUp, iconFilled: true, label: "Curtir", size: "s" }), /<svg[^>]*fill="currentColor"/);
+  assert.match(render(pill.RoomPill, { icon: ThumbsUp, label: "Curtir", size: "s" }), /<svg[^>]*fill="none"/);
 
   const toque = classesDe(abertura(render(pill.RoomPill, { label: "Sair", size: "s", tone: "red", touch44: true })));
   assert.deepEqual(temTodas(toque, ["relative", "after:absolute", "after:-inset-1.5", "lg:after:hidden"]), []);

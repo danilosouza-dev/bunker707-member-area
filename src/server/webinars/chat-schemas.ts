@@ -7,10 +7,10 @@ import { z } from "zod";
 import {
   CHAT_LIMITS,
   CHAT_MODES,
-  DISPLAY_NAME_MODES,
   PERSONA_ROLES,
   POLL_KINDS,
   PRESENCE_STATES,
+  QUESTION_REPLY_LIMITS,
   QUESTION_STATUSES,
   REACTIONS,
   SCRIPT_STATUSES,
@@ -22,14 +22,14 @@ import {
 } from "./model";
 
 export const CHAT_MESSAGES = {
-  anonymousOff: "Perguntas anônimas estão desligadas nesta live.",
   answer: "A resposta pode ter até 1.000 caracteres.",
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
   consent: "Para participar do chat, aceite as regras uma vez.",
   csvTooLong: "O arquivo passa de 1 MB.",
+  /** D64: o navegador com a pagina antiga ainda pede anonimo ou apelido; o servidor recusa e nada e gravado. */
+  identity: "A participação anônima ou com apelido não está mais disponível. Atualize a página para continuar.",
   invalid: "Pedido inválido.",
-  nickname: "O apelido tem de 2 a 40 caracteres.",
   offset: "Minuto do vídeo inválido.",
   options: "A enquete precisa de 2 a 20 opções.",
   option: "Cada opção tem até 120 caracteres.",
@@ -38,6 +38,8 @@ export const CHAT_MESSAGES = {
   pollAnswer: "Escolha ao menos uma opção.",
   pollQuestion: "Escreva a pergunta da enquete (até 300 caracteres).",
   question: "Escreva a pergunta.",
+  reply: "Escreva a resposta.",
+  replyTooLong: "A resposta pode ter até 500 caracteres.",
   questionTooLong: "A pergunta pode ter até 500 caracteres.",
   session: "Sessão inválida.",
   simulationAck: "Marque a confirmação para ligar o selo.",
@@ -70,18 +72,43 @@ export const chatWindowQuerySchema = z.object({
   to: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional()
 });
 
-/** O aceite do chat (D10), que vem junto da primeira mensagem ou da primeira pergunta: consent + versao + como o nome aparece. */
+/**
+ * O que o navegador com a pagina de antes de 10/11/2026 ainda pode mandar (D64): `anonymous`, `displayMode` e
+ * `nickname`. Ninguem mais participa como anonimo nem com apelido, entao o pedido que pede isso e RECUSADO (400 com
+ * CHAT_MESSAGES.identity, "atualize a pagina") antes de qualquer escrita: publicar o nome de quem pediu anonimato sem
+ * avisar seria pior do que recusar. `anonymous: false` e `displayMode: "first_name_initial"` passam e sao ignorados (o
+ * nome e sempre o primeiro nome com a inicial). `refusesLegacyIdentity` e a mesma regra para quem chama as escritas
+ * sem passar pelo schema (room-writes.ts confere de novo antes de gravar). O alcance (docs/30 §8.5 e A34): so da para
+ * recusar o que chega no pedido. A pilula Anonima da pagina antiga dependia do `anonymousQuestions` da sessao, que
+ * saiu: depois da primeira releitura da sessao ela some dessa pagina e a pergunta chega sem `anonymous`, como uma nova.
+ */
+export function refusesLegacyIdentity(body: { anonymous?: unknown; displayMode?: unknown; nickname?: unknown }): boolean {
+  return (
+    (body.anonymous !== undefined && body.anonymous !== false) ||
+    (body.displayMode !== undefined && body.displayMode !== "first_name_initial") ||
+    (body.nickname !== undefined && body.nickname !== null)
+  );
+}
+
+const legacyIdentityFields = {
+  anonymous: z.literal(false, { error: CHAT_MESSAGES.identity }).optional(),
+  displayMode: z.literal("first_name_initial", { error: CHAT_MESSAGES.identity }).optional(),
+  nickname: z.null({ error: CHAT_MESSAGES.identity }).optional()
+};
+
+/**
+ * O aceite do chat (D10), que vem junto da primeira mensagem, da primeira pergunta ou da primeira resposta no fio:
+ * consent + versao. Os campos antigos entram so para a recusa acima.
+ */
 const consentFields = {
+  ...legacyIdentityFields,
   consent: z.boolean().optional(),
-  consentVersion: z.number().int().min(1).max(100).optional(),
-  displayMode: z.enum(DISPLAY_NAME_MODES).optional(),
-  nickname: z.string().trim().min(CHAT_LIMITS.nicknameMin, CHAT_MESSAGES.nickname).max(CHAT_LIMITS.nicknameMax, CHAT_MESSAGES.nickname).optional()
+  consentVersion: z.number().int().min(1).max(100).optional()
 };
 
 /** POST /chat: a primeira mensagem traz o aceite. */
 export const chatPostBodySchema = z.object({
   ...consentFields,
-  anonymous: z.boolean().optional(),
   body: bodySchema,
   kind: z.enum(["message", "question"]).default("message"),
   offsetMs: replayOffsetSchema,
@@ -111,7 +138,6 @@ export const reactionsQuerySchema = z.object({ sessao: sessionIdSchema, since: z
 /** POST /questions: sem o aceite gravado, a pergunta traz o aceite como a primeira mensagem do chat. */
 export const questionBodySchema = z.object({
   ...consentFields,
-  anonymous: z.boolean().default(false),
   body: z.string({ error: CHAT_MESSAGES.question }).trim().min(1, CHAT_MESSAGES.question).max(CHAT_LIMITS.question, CHAT_MESSAGES.questionTooLong),
   offsetMs: replayOffsetSchema,
   sessionId: sessionIdSchema
@@ -119,6 +145,14 @@ export const questionBodySchema = z.object({
 export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
+
+/** POST /questions/[qid]/replies: a resposta do aluno no fio da propria pergunta (com o aceite, se ele mudou de versao). */
+export const questionReplyBodySchema = z.object({
+  ...consentFields,
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.studentBody, CHAT_MESSAGES.replyTooLong),
+  sessionId: sessionIdSchema
+});
+export type QuestionReplyPostInput = z.infer<typeof questionReplyBodySchema>;
 
 /** GET /questions?sessao=&ordem=votadas|recentes */
 export const questionsQuerySchema = z.object({ ordem: z.enum(["votadas", "recentes"]).default("votadas"), sessao: sessionIdSchema });
@@ -203,8 +237,8 @@ export const sessionChatModeSchema = z.object({
   slowModeSeconds: z.union([z.literal(SLOW_MODE_SECONDS[0]), z.literal(SLOW_MODE_SECONDS[1]), z.literal(SLOW_MODE_SECONDS[2]), z.literal(SLOW_MODE_SECONDS[3])]).nullable()
 });
 
+/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
 export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
-  anonymous: z.boolean().default(false),
   id: uuidSchema.nullable().optional(),
   kind: z.enum(POLL_KINDS).default("single"),
   options: z
@@ -227,6 +261,14 @@ export const answerQuestionSchema = z.object({
 });
 
 export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z.enum(QUESTION_STATUSES, { error: CHAT_MESSAGES.invalid }) });
+
+/** A resposta da equipe no fio de uma pergunta ja respondida (console). */
+export const replyQuestionSchema = z.object({
+  body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.teamBody, CHAT_MESSAGES.answer),
+  questionId: uuidSchema
+});
+
+export const deleteQuestionReplySchema = z.object({ replyId: uuidSchema });
 
 /** A decisao do selo "Ao vivo" (D10, §8.6): ligar exige a frase marcada; desligar grava a decisao tambem. */
 export const saveSimulationSchema = z

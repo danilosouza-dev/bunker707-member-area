@@ -486,3 +486,14 @@ test("chat moderado: a resposta do Assistente espera a equipe; ao liberar, a per
   assert.equal(resposta.approved, true);
   assert.deepEqual([pergunta.status, pergunta.answer_text, pergunta.answer_source, pergunta.answered_by], ["answered", "Tem certificado sim, ao fim da formação.", "ai", null]);
 });
+
+test("saveAssistant no webinario arquivado (docs/30 §2.3): 409 com a frase do Desarquivar, sem gravar nem auditar; ler continua", async () => {
+  const { db } = montar({ kind: "live" });
+  quemPode(db, { status: "archived" });
+  const antes = structuredClone(db.tables.webinar_assistant_knowledge);
+  const recusado = await acoes.saveAssistant({ items: [], settings: { enabled: true, replyAllDefault: true }, webinarId: WEBINAR });
+  assert.deepEqual([recusado.status, recusado.error], [409, "Esse webinário está arquivado. Desarquive para mexer nele."]);
+  assert.deepEqual(db.tables.webinar_assistant_knowledge, antes);
+  assert.equal(auditoria(db, "webinar.assistant_saved").length, 0);
+  assert.equal((await acoes.loadAssistantEditor({ webinarId: WEBINAR })).ok, true, "o editor ainda le o Assistente");
+});

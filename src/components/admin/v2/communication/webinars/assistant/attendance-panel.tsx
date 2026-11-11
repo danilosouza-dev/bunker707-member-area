@@ -73,6 +73,7 @@ function QueueItem({
   const busy = busyKey === `attendance:${item.target}:${item.id}`;
   const online = snapshot.attendants.filter((attendant) => attendant.online && attendant.userId !== item.assignedTo);
   const assignedName = item.assignedTo ? (item.assignedTo === currentUserId ? COPY.comVoce : COPY.assumida(snapshot.names[item.assignedTo] ?? WEBINAR_COPY.sala.selos.equipe)) : null;
+  // Legado: linhas de antes de 10/11/2026 (D64). A pergunta anonima antiga continua com o nome de anonima na fila.
   const author = item.anonymous ? WEBINAR_ADMIN_COPY.console.questions.anonymous : item.displayName;
   const answerId = `attendance-answer-${item.target}-${item.id}`;
   const passId = `attendance-pass-${item.target}-${item.id}`;

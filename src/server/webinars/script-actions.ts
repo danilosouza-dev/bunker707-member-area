@@ -24,7 +24,7 @@ import { baseRecordingOf, type TranscriptSummary } from "./queries";
 import { sessionOffsetMs } from "./room-model";
 import { sessionFromRow } from "./rows";
 import { formatScriptCsv, parseScriptCsv, resolvedScriptItem, scriptOffsetOf, scriptSummary, type PhraseCue, type ScriptCsvError } from "./script-model";
-import { fetchSessionRow, listRecordingRows, requireWebinarRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, listRecordingRows, requireWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -157,6 +157,8 @@ async function resolveItems(db: WebinarsDb, webinarId: string, transcript: Trans
 
 async function requireSimulatedWebinar(db: WebinarsDb, id: string) {
   const row = await requireWebinarRow(db, id);
+  // So as escritas do roteiro e da transcricao passam por aqui: o arquivado fica so de leitura (as exportacoes seguem).
+  assertWebinarNotArchived(row);
 
   if (row.kind !== "simulated") {
     throw new WebinarError(ONLY_SIMULATED_MESSAGE, 409);

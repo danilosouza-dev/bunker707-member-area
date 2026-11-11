@@ -425,3 +425,51 @@ test("as Configurações de quem apresenta: os aparelhos pelo useJitsiDevices do
   const hook = semComentarios(ler("src/components/webinars/use-jitsi-devices.ts"));
   assert.match(hook, /const maisFundos = useCallback\(\(\) => \{\s*executeCommand\("toggleVirtualBackgroundDialog"\);/);
 });
+
+test("o foco dos campos do console (docs/31 §10, ajuste do produtor de 10/11/2026): textarea, select e campo de texto sem o contorno afastado do admin, com a borda no tom do foco; as pilulas de selecao com o anel na pilula inteira, so pelo teclado", () => {
+  const css = ler("src/app/globals.css");
+  // O anel de 2 px do admin continua valendo para o resto (botoes, links, abas).
+  const admin = css.indexOf(':is(a[href], button, input, select, textarea, summary, [role="button"], [role="combobox"], [role="tab"]):focus-visible {');
+  assert.notEqual(admin, -1, "o anel de foco do admin");
+  // A regra do console vem depois dela (a mesma camada: vence pela ordem e pelo atributo a mais).
+  const regra = css.match(/:root:has\(\[data-scope="admin"\]\)\s*\[data-field-focus="own"\]\s*:is\(textarea, select, input:not\(\[type="checkbox"\], \[type="radio"\], \[type="range"\], \[type="file"\]\)\):focus-visible \{([^}]*)\}/);
+  assert.ok(regra, "a regra do foco dos campos do console");
+  assert.ok(css.indexOf(regra[0]) > admin, "depois do anel do admin");
+  assert.deepEqual(
+    regra[1]
+      .split(";")
+      .map((linha) => linha.trim())
+      .filter(Boolean),
+    ["outline: none", "border-color: var(--room-focus)"]
+  );
+  // A raiz do console pede o foco proprio dos campos.
+  assert.match(ler(`${CONSOLE}/console-shell.tsx`), /data-console-root="" data-field-focus="own"/);
+  // A pilula de selecao: o <select> sem contorno proprio, o anel na pilula e so quando o foco nao veio do ponteiro.
+  const pilula = ler("src/components/member/webinars/room/room-select-pill.tsx");
+  assert.match(pilula, /has-\[select:focus-visible\]:outline-room-focus/);
+  assert.match(pilula, /pointer \? null : RING/);
+  assert.match(pilula, /onMouseDown=\{\(\) => setPointer\(true\)\}/);
+  assert.doesNotMatch(semComentarios(pilula), /onPointerDown/, "o ponteiro que desce sem dar o foco (arrastar no toque, clique na pilula desabilitada) nao pode desligar o anel do teclado");
+  // Com o rotulo escondido, o <select> e a pilula inteira: o `leading` por cima, sem pegar o clique.
+  assert.match(pilula, /\{leading && labelHidden \? <span className=\{cn\("pointer-events-none absolute [^"]+", sizing\.lead\)\}>\{leading\}<\/span> : leading\}/);
+  assert.doesNotMatch(pilula, /labelHidden && !leading/);
+  assert.match(pilula, /onKeyDown=\{\(\) => setPointer\(false\)\}/);
+  assert.match(pilula, /onBlur=\{\(\) => setPointer\(false\)\}/);
+  // Os seletores do console usam a pilula (nenhum <select> com o anel proprio no topo nem no chat).
+  for (const arquivo of ["console-top-bar.tsx", "console-chat.tsx"]) {
+    const fonte = ler(`${CONSOLE}/${arquivo}`);
+    assert.match(fonte, /RoomSelectPill/, arquivo);
+    assert.doesNotMatch(fonte, /<select\b/, `${arquivo}: sem <select> escrito direto`);
+  }
+});
+
+test("o fio no console (docs/30 §2.4): o campo de responder que sai com o foco nele devolve o foco ao Responder da pergunta (returnFocusFromReply), e o envio e a lixeira ficam ocupados ate o retrato novo (whileSettling)", () => {
+  const perguntas = semComentarios(fonte("console-questions.tsx"));
+  assert.match(perguntas, /if \(was && !replyingId\) \{\s*returnFocusFromReply\(paneRef\.current, document\.activeElement, document\.body, `\[data-console-question="\$\{was\}"\] \[data-console-reply-open\]`\);/);
+  assert.match(perguntas, /data-console-questions-pane="" ref=\{paneRef\}/);
+  assert.match(perguntas, /whileSettling\(\{ key: `reply:\$\{question\.id\}`, set: setSettling, settling, work: \(\) => onReply\(question\.id, text\) \}\)/);
+  assert.match(perguntas, /setReplying\(\(current\) => replyDraftAfterSent\(current, question\.id\)\)/);
+  assert.match(perguntas, /busy=\{busy \|\| settling\.includes\(`reply:\$\{question\.id\}`\)\}/);
+  // A lixeira awaita a acao inteira (o retrato incluso): o console devolve a promessa do run, sem o void.
+  assert.match(semComentarios(fonte("session-console.tsx")), /onDeleteReply=\{\(replyId: string\) =>\s*run\(`reply:\$\{replyId\}`/);
+});

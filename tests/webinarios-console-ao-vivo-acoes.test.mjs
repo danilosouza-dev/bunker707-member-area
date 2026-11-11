@@ -938,7 +938,7 @@ test("toda ação que muda algo grava a auditoria só com ids e contagens (nada 
  * Os dados do console (console-queries.ts: o bloco `live` do retrato de 5 s)
  * ---------------------------------------------------------------------------------------------- */
 
-test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a gravação com a prévia, removidos/silenciados/banidos, o mapa aluno -> participante com o nome da sala e nada do nome da sala nem token", async () => {
+test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a gravação com a prévia, removidos/silenciados/banidos, o mapa aluno -> participante com o primeiro nome + inicial de cada um (D64) e nada do nome da sala nem token", async () => {
   const now = new Date();
   const nowMs = now.getTime();
   const sala = `w-${WEBINAR}-bcdefghijkmnpqrs`;
@@ -956,7 +956,11 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_NO_AR, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-carla" }, user_id: COAPRESENTADOR },
           { created_at: new Date(nowMs - 3 * MIN).toISOString(), entity_id: S_ESPERA, entity_type: "webinar", event_type: "webinar_room_joined", id: randomUUID(), metadata: { participant_id: "p-outra" }, user_id: ALUNO }
         ],
-        webinar_chat_consents: [{ consent_version: 1, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA }],
+        // Legado: um aceite de antes de 10/11/2026 com apelido (e o Bruno com o anonimo). Desde o D64 ele nao muda o nome.
+        webinar_chat_consents: [
+          { consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "nickname", nickname: "Aninha", revoked_at: null, updated_at: agora(), user_id: ALUNA },
+          { consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "anonymous", nickname: null, revoked_at: null, updated_at: agora(), user_id: ALUNO }
+        ],
         webinar_recording_events: [
           { file_name: null, id: randomUUID(), payload: {}, processing_status: "processed", received_at: new Date(nowMs - 2 * 60 * MIN - 6 * MIN).toISOString(), session_id: S_OUTRA, state: "ready" },
           { file_name: `${sala}_2026-11-05-23-03-20.mp4`, id: randomUUID(), payload: { fileName: `${sala}_2026-11-05-23-03-20.mp4`, state: "uploaded" }, processing_status: "processed", received_at: new Date(nowMs - MIN).toISOString(), session_id: S_NO_AR, state: "uploaded" }
@@ -971,6 +975,8 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
       RPC
     )
   );
+  // Legado: o card Sala antigo do webinario ("Sempre anônimo", perguntas anonimas ligadas) continua no JSON e nao e lido.
+  db.tables.webinars[0].room_settings = { ...db.tables.webinars[0].room_settings, anonymousQuestions: true, displayName: "anonymous" };
   Object.assign(linha(db, S_NO_AR), { recorder_requested_at: new Date(nowMs - 2 * MIN).toISOString(), recorder_status: "preparing", recording_anchor_at: "2026-11-05T23:03:15.000Z", room_locked: true });
   linha(db, S_OUTRA).recorder_requested_at = new Date(nowMs - 2 * 60 * MIN - 12 * MIN).toISOString();
   process.env.WEBINAR_MEET_DOMAIN = "meet.exemplo.test";
@@ -1001,8 +1007,10 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
 
     const pessoas = Object.fromEntries(bloco.people.map((item) => [item.userId, item]));
     assert.deepEqual(Object.keys(pessoas).sort(), [ALUNA, ALUNO, COAPRESENTADOR].sort(), "quem entrou, quem foi barrado e quem escreveu");
-    assert.deepEqual([pessoas[ALUNA].displayName, pessoas[ALUNA].participantId, pessoas[ALUNA].ban.muted, pessoas[ALUNA].staff], ["Aninha", "p-ana", true, false], "o participante mais novo e o nome do chat");
-    assert.deepEqual([pessoas[ALUNO].displayName, pessoas[ALUNO].participantId, pessoas[ALUNO].ban.kicked, pessoas[ALUNO].ban.banned], ["Bruno L.", null, true, true], "a entrada em outra sessao nao conta");
+    // D64: a aba Pessoas mostra o primeiro nome + inicial, nunca o apelido nem "Aluno {n}", com o aceite antigo e o card antigo.
+    assert.deepEqual([pessoas[ALUNA].displayName, pessoas[ALUNA].participantId, pessoas[ALUNA].ban.muted, pessoas[ALUNA].staff], ["Ana S.", "p-ana", true, false], "o participante mais novo e o primeiro nome + inicial (nunca o apelido)");
+    assert.deepEqual([pessoas[ALUNO].displayName, pessoas[ALUNO].participantId, pessoas[ALUNO].ban.kicked, pessoas[ALUNO].ban.banned], ["Bruno L.", null, true, true], "a entrada em outra sessao nao conta; o aceite anonimo antigo nao vira Aluno {n}");
+    assert.ok(!JSON.stringify(bloco.people).match(/Aninha|Aluno \d{3}/), "nenhum apelido nem numero de anonimo na lista da mesa");
     assert.deepEqual([pessoas[COAPRESENTADOR].staff, pessoas[COAPRESENTADOR].displayName], [true, "Carla D."]);
     assert.deepEqual(
       bloco.people.map((item) => item.userId),
@@ -1025,6 +1033,49 @@ test("o retrato da live: gravador com a estimativa e a diferença do arquivo, a 
     delete process.env.WEBINAR_MEET_DOMAIN;
     delete process.env.WEBINAR_JWT_SECRET;
   }
+});
+
+test("o retrato do console e o Aprovar para as próximas turmas (D64): o aceite antigo de anônimo ou de apelido conta como sem aceite e a mensagem não é promovível; com o nome é, também na versão 1; retirado, não", async () => {
+  const RETIRADO = randomUUID();
+  const SEM_LINHA = randomUUID();
+  const aceite = (userId, extra) => ({ consent_version: 2, consented_at: agora(), created_at: agora(), display_mode: "first_name_initial", nickname: null, revoked_at: null, updated_at: agora(), user_id: userId, ...extra });
+  const mensagem = (userId, body, displayName) => ({ author_user_id: userId, body, created_at: agora(), display_name: displayName, id: randomUUID(), offset_ms: 12_000, role: "student", session_id: S_GRAVADA, source: "audience", webinar_id: WEBINAR });
+  usar(
+    bancoEmMemoria(
+      cenario({
+        // Legado: linhas de antes de 10/11/2026 (a Ana com o apelido, o Bruno como anonimo).
+        webinar_chat_consents: [
+          aceite(ALUNA, { display_mode: "nickname", nickname: "Aninha" }),
+          aceite(ALUNO, { display_mode: "anonymous" }),
+          aceite(COAPRESENTADOR, { consent_version: 1 }),
+          aceite(HOST),
+          aceite(RETIRADO, { revoked_at: agora() })
+        ],
+        webinar_chat_messages: [
+          mensagem(ALUNA, "com apelido", "Aninha"),
+          mensagem(ALUNO, "como anonimo", "Aluno 437"),
+          mensagem(COAPRESENTADOR, "aceite da versao 1", "Carla D."),
+          mensagem(HOST, "aceite em dia", "Produtor T."),
+          mensagem(RETIRADO, "aceite retirado", "Rui P."),
+          mensagem(SEM_LINHA, "sem aceite", "Lia M.")
+        ]
+      }),
+      RPC
+    )
+  );
+
+  const retrato = await consoleQueries.getConsoleSnapshot(WEBINAR, S_GRAVADA, new Date());
+  assert.deepEqual(
+    Object.fromEntries(retrato.messages.map((item) => [item.body, item.promotable])),
+    {
+      "aceite da versao 1": true,
+      "aceite em dia": true,
+      "aceite retirado": false,
+      "com apelido": false,
+      "como anonimo": false,
+      "sem aceite": false
+    }
+  );
 });
 
 test("os presentes agora do console contam pelo relogio da presenca: na live com a gravacao comecada 6 min depois do Iniciar live, os sinais dos alunos (desde o Iniciar) contam", async () => {

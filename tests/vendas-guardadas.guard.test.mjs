@@ -103,8 +103,8 @@ test("as migrações até a 202611110001 continuam byte a byte (a 202611110002 s
     hash.update(readFileSync(new URL(name, dir)));
   }
 
-  assert.equal(before.length, 66);
-  assert.equal(hash.digest("hex"), "bfe1d3915d7b402a4f9c6d68d0626a2edebcf411a7f66c51aa0817d4dd90bcba", "uma migracao ja aplicada mudou");
+  assert.equal(before.length, 67);
+  assert.equal(hash.digest("hex"), "58a4030f2f6b8c7ea2fc0ad1201d5da2bd090111ac73061156aac8bc972fdfef", "uma migracao ja aplicada mudou");
   assert.ok(files.includes("202611110002_held_sales.sql"));
 });
 

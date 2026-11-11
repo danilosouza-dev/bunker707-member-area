@@ -151,7 +151,11 @@ test("os checks do banco batem com as listas, os limites e os ritmos do app (mod
   assert.match(code, new RegExp(`trigger_kind text not null check \\(trigger_kind in \\(${sqlList(model.SCRIPT_TRIGGERS)}\\)\\)`));
   assert.match(code, new RegExp(`status text not null default 'draft' check \\(status in \\(${sqlList(model.SCRIPT_STATUSES)}\\)\\)`));
   assert.match(code, new RegExp(`persona_role text not null default 'student' check \\(persona_role in \\(${sqlList(model.PERSONA_ROLES)}\\)\\)`));
-  assert.match(code, new RegExp(`display_mode text not null default 'first_name_initial' check \\(display_mode in \\(${sqlList(model.DISPLAY_NAME_MODES)}\\)\\)`));
+  // D64 (10/11/2026): o app so grava "first_name_initial"; o check da 0029 (imutavel, ja aplicada) continua aceitando os
+  // modos antigos, que o app guarda em LEGACY_DISPLAY_NAME_MODES so para ler as linhas de antes. O check e a uniao.
+  assert.deepEqual([...model.DISPLAY_NAME_MODES], ["first_name_initial"], "o unico modo que o app grava");
+  assert.deepEqual([...model.LEGACY_DISPLAY_NAME_MODES], ["nickname", "anonymous"], "so o que o check antigo ainda aceita");
+  assert.match(code, new RegExp(`display_mode text not null default 'first_name_initial' check \\(display_mode in \\(${sqlList([...model.DISPLAY_NAME_MODES, ...model.LEGACY_DISPLAY_NAME_MODES])}\\)\\)`));
   assert.match(code, new RegExp(`source_format text not null check \\(source_format in \\(${sqlList(model.TRANSCRIPT_FORMATS)}\\)\\)`));
   assert.equal((code.match(new RegExp(`deleted_reason in \\(${sqlList(model.DELETE_REASONS)}\\)`, "g")) ?? []).length, 2, "mensagens e perguntas");
 
@@ -160,7 +164,9 @@ test("os checks do banco batem com as listas, os limites e os ritmos do app (mod
   assert.match(code, new RegExp(`body text not null check \\(char_length\\(body\\) between 1 and ${limits.question}\\)`));
   assert.match(code, new RegExp(`char_length\\(answer_text\\) <= ${limits.answer}`));
   assert.match(code, new RegExp(`display_name text not null check \\(char_length\\(display_name\\) between 1 and ${limits.displayName}\\)`));
-  assert.match(code, new RegExp(`char_length\\(nickname\\) between ${limits.nicknameMin} and ${limits.nicknameMax}`));
+  // O apelido saiu do app (D64): a coluna e o check antigo continuam la, e o app grava sempre nulo.
+  assert.match(code, new RegExp(`nickname text check \\(nickname is null or char_length\\(nickname\\) between ${model.LEGACY_NICKNAME_LIMITS.min} and ${model.LEGACY_NICKNAME_LIMITS.max}\\)`));
+  assert.ok(!("nicknameMin" in limits) && !("nicknameMax" in limits), "o apelido nao tem mais limite no app");
   assert.match(code, new RegExp(`persona_name text not null check \\(char_length\\(persona_name\\) between 1 and ${limits.personaName}\\)`));
   assert.match(code, new RegExp(`char_length\\(phrase\\) between ${limits.phraseMin} and ${limits.phraseMax}`));
   assert.match(code, new RegExp(`phrase_delay_ms between ${limits.phraseDelayMinMs} and ${limits.phraseDelayMaxMs}`));
@@ -170,7 +176,7 @@ test("os checks do banco batem com as listas, os limites e os ritmos do app (mod
   assert.match(code, new RegExp(`char_length\\(full_text\\) between 1 and ${limits.transcriptBytes}`));
   assert.match(code, new RegExp(`char_length\\(simulation_ack_text\\) <= ${limits.simulationAck}`));
   assert.equal((code.match(new RegExp(`offset_ms between ${limits.offsetMinMs} and ${limits.offsetMaxMs}`, "g")) ?? []).length, 7, "o mesmo intervalo de offset em todas as tabelas");
-  assert.equal(model.CHAT_CONSENT_VERSION, 1);
+  assert.equal(model.CHAT_CONSENT_VERSION, 2);
   assert.match(code, /consent_version smallint not null check \(consent_version between 1 and 100\)/);
 
   // Os ritmos (M1 a M4) no SQL: balde de 30 s, saida depois de 3 baldes, 95 % ate o fim, os pesos dos mais quentes.

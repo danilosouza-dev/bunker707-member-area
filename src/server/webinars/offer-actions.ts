@@ -24,7 +24,7 @@ import { loadConsoleOffer, requireOfferConsoleSession, type ConsoleOfferView } f
 import { OFFER_MESSAGES, offerDisplayActionSchema, saveOfferSchema, type OfferDraftInput } from "./offer-schemas";
 import { archiveOfferRow, ensureOfferDisplayRow, fetchOfferById, fetchOfferDisplayRow, fetchOfferForWebinar, saveOfferRows, updateOfferDisplayRow } from "./offer-store";
 import { offerDisplayFromRow, type OfferDisplayRow } from "./rows";
-import { requireWebinarRow } from "./store";
+import { assertWebinarNotArchived, requireWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 const COPY = WEBINAR_COPY.oferta;
@@ -91,6 +91,7 @@ export async function saveOffer(input: { draft: OfferDraftInput; webinarId: stri
   return runWebinarAction("messaging.write", "conteudo", saveOfferSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
+    assertWebinarNotArchived(webinar);
     const draft: OfferDraft = data.draft;
     const saved = await withOfferTables(() => saveOfferRows(db, { draft, userId: user.id, webinarId: webinar.id }));
 
@@ -125,6 +126,7 @@ export async function archiveOffer(input: { offerId: string; webinarId: string }
     if (!offer || offer.webinarId !== data.webinarId) {
       throw new WebinarError(COPY.console.ofertaInvalida, 404);
     }
+    assertWebinarNotArchived(await requireWebinarRow(db, offer.webinarId));
     await archiveOfferRow(db, offer.id);
 
     await recordAudit(db, {

@@ -1,12 +1,13 @@
 "use client";
 
-import { ChevronDown, MessageCircleQuestionMark, MoreVertical, Pin, PinOff, Trash2 } from "lucide-react";
+import { MessageCircleQuestionMark, MoreVertical, Pin, PinOff, Trash2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { chatListOnShow } from "@/components/member/webinars/room/room-chat";
 import { RoomComment, RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { RoomCommentField } from "@/components/member/webinars/room/room-comment-field";
 import { composerExpandedStep } from "@/components/member/webinars/room/room-composer-model";
 import { RoomPill, roomPillClassName } from "@/components/member/webinars/room/room-pill";
+import { RoomSelectPill } from "@/components/member/webinars/room/room-select-pill";
 import { ROOM_FOCUS, RoomIconButton } from "@/components/member/webinars/room/room-ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -81,6 +82,8 @@ type ConsoleChatProps = {
   askedMessageIds: readonly string[];
   busyKey: string | null;
   canAct: boolean;
+  /** A foto do proprio perfil de quem esta no console (o avatar do campo da equipe); sem ela, o icone da equipe. */
+  currentUserAvatarUrl?: string | null;
   currentUserId: string;
   hostUserId: string | null;
   messages: readonly ConsoleMessage[];
@@ -112,6 +115,7 @@ export function ConsoleChat({
   askedMessageIds,
   busyKey,
   canAct,
+  currentUserAvatarUrl = null,
   currentUserId,
   initialEditing = null,
   messages,
@@ -355,7 +359,8 @@ export function ConsoleChat({
 
   return (
     <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1" ref={rootRef}>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3 lg:px-4" data-console-chat-header="">
+      {/* O corpo do painel corta a partir de lg e este cabecalho e o primeiro filho: as pilulas pedem 4 px em cima para o anel de foco. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3 lg:px-4 lg:pt-1" data-console-chat-header="">
         <CompactSelect
           disabled={modeBusy}
           id="console-chat-mode"
@@ -451,7 +456,7 @@ export function ConsoleChat({
               <RoomComment
                 actions={editorOf(message)}
                 aside={showActions ? toolbarOf(message, actions) : null}
-                avatar={<RoomCommentAvatar kind={comment.avatar} name={message.displayName} />}
+                avatar={<RoomCommentAvatar imageSrc={message.avatarUrl} kind={comment.avatar} name={message.displayName} />}
                 body={message.body}
                 className="group relative"
                 headline={headline}
@@ -468,7 +473,7 @@ export function ConsoleChat({
 
       <RoomCommentField
         ariaLabel={copy.composer}
-        avatar={{ kind: "team", name: null }}
+        avatar={{ imageSrc: currentUserAvatarUrl, kind: "team", name: null }}
         busy={sending}
         disabled={!canAct}
         expanded={expanded}
@@ -487,34 +492,12 @@ export function ConsoleChat({
   );
 }
 
-/** Um seletor compacto do cabecalho do chat: a pilula tonal de 32 px com o rotulo visivel, o valor e a seta. */
+/**
+ * Um seletor compacto do cabecalho do chat: a pilula tonal de 32 px com o rotulo visivel, o valor e a seta (a mesma
+ * peca do "Idioma do chat" da sala, com o anel de foco na pilula inteira).
+ */
 function CompactSelect<T extends string>({ disabled, id, label, onChange, options, value }: { disabled: boolean; id: string; label: string; onChange: (value: T) => void; options: readonly { label: string; value: T }[]; value: T }) {
-  return (
-    <div className="relative inline-flex h-8 max-w-full min-w-0 items-center gap-1 rounded-full bg-room-control pl-3 text-xs leading-[18px] transition-colors hover:bg-room-control-hover">
-      <label className="shrink-0 text-room-fg-subtle" htmlFor={id}>
-        {label}
-      </label>
-      <select
-        className={cn("h-full min-w-0 cursor-pointer appearance-none truncate rounded-r-full bg-transparent pr-8 font-medium text-room-fg disabled:cursor-default disabled:text-room-fg-disabled", ROOM_FOCUS)}
-        disabled={disabled}
-        id={id}
-        onChange={(event) => {
-          const next = options.find((option) => option.value === event.target.value);
-          if (next) {
-            onChange(next.value);
-          }
-        }}
-        value={value}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown aria-hidden="true" className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-room-icon" />
-    </div>
-  );
+  return <RoomSelectPill disabled={disabled} id={id} label={label} onChange={onChange} options={options} value={value} />;
 }
 
 /** O ⋯ de uma mensagem, no portal da raiz do console (no tema dela). */

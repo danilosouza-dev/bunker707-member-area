@@ -27,7 +27,6 @@ import {
   WEBINAR_LIMITS,
   webinarHref,
   type ChatMode,
-  type DisplayNameMode,
   type JitSettings,
   type SessionKind,
   type SessionStatus,
@@ -402,20 +401,20 @@ export type StudentRoomExtras = {
   /** Fase 3: a sala ao vivo (so na sessao `live`; nas outras, nulo). Nunca leva o nome da sala nem o token. */
   live: LiveRoomInfo | null;
   me: {
+    /** A foto do proprio perfil (so o arquivo enviado pelo Perfil, roomPhotoUrl): o avatar do campo de escrever; nula sem foto. */
+    avatarUrl: string | null;
     /** Fase 3: removido desta sessao, banido de todas, silenciado no chat ate `mutedUntil` (nulo = ate o fim). */
     ban: LiveBanState;
+    /** O aceite em dia (versao e modo de agora; um aceite antigo com apelido ou anonimo conta como falso, D64). */
     consented: boolean;
-    displayMode: DisplayNameMode | null;
+    /** O primeiro nome com a inicial do sobrenome, depois do aceite; nulo antes. */
     displayName: string | null;
-    nickname: string | null;
   };
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
   presentNow: number;
   replaySessionId: string | null;
   session: {
-    /** A equipe deixou a opcao Anonima ligada nas perguntas (card Sala). */
-    anonymousQuestions: boolean;
     chatMode: ChatMode;
     chatSlowModeSeconds: number | null;
     /** A duracao do video em ms (a gravacao quando se sabe; senao a duracao prevista). */

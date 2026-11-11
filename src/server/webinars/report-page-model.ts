@@ -325,6 +325,7 @@ export function questionStatusBars(questions: WebinarReportView["questions"]): R
  * ---------------------------------------------------------------------------------------------- */
 
 export type PollResultOption = { id: string; label: string; percent: number | null; students: number; total: number };
+/** `anonymous`: legado, enquetes de antes de 10/11/2026 (D64) marcadas como anonimas (a nota "Anônima: só as barras."). */
 export type PollResult = { anonymous: boolean; id: string; options: PollResultOption[]; question: string; total: number };
 
 /** As respostas por opcao de cada enquete lancada na sessao (os rotulos vem das linhas de webinar_polls). */

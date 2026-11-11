@@ -62,14 +62,13 @@ const textoDe = (html) => html.replace(/<style>[\s\S]*?<\/style>/g, "").replace(
 function payload({ live = {}, me = {}, session = {}, webinar = {}, ...extra } = {}) {
   return {
     live: { locked: false, meetConfigured: true, recording: false, startedAt: at(T0 - (42 * 60 + 10) * 1000), status: "live", ...live },
-    me: { ban: SEM_BAN, calendarUrl: null, consented: true, displayMode: "first_name_initial", displayName: "Ana S.", nickname: null, registered: false, registeredAt: null, ...me },
+    me: { ban: SEM_BAN, calendarUrl: null, consented: true, displayName: "Ana S.", registered: false, registeredAt: null, ...me },
     pinned: null,
     polls: [],
     presentNow: 7,
     registeredCount: null,
     serverTime: at(T0),
     session: {
-      anonymousQuestions: true,
       chatMode: "open",
       chatSlowModeSeconds: null,
       durationMs: 60 * MIN,
@@ -567,7 +566,7 @@ test("o Esc com o foco dentro do painel devolve o foco ao botao da barra antes d
   assert.match(room, /function closeSettings\(focusButton = false\) \{[\s\S]*?returnFocusFrom\(LIVE_SETTINGS_ID\);[\s\S]*?setSettingsOpen\(false\);/);
 });
 
-test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (V2-4); o cabecalho com a linha que comeca por {n} assistindo agora (V2-3); Entrar na sala, as quatro abas e o painel a direita", () => {
+test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', o selo de quem assiste agora ao lado (docs/31 §11.5), Gravando e quem apresenta (V2-4); o cabecalho com a linha da data, sem o numero (V2-3); Entrar na sala, as quatro abas e o painel a direita", () => {
   const html = sala({ payload: payload({ live: { recording: true } }) });
   assert.match(html, /data-room-kind="live"/);
   assert.match(html, /data-room-phase="live"/);
@@ -610,16 +609,22 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', Gravando e quem apresenta (
   assert.match(palco, /data-testid="live-recording" title="Gravando">[\s\S]*?Gravando<\/span>/, "o Gravando no palco");
   assert.match(palco, /data-room-badge="presenter"[\s\S]*?>Danilo S\. · Apresentador</, "quem apresenta, embaixo a esquerda");
   assert.ok(palco.indexOf('data-testid="room-on-air"') < palco.indexOf('data-testid="live-recording"'), "o Gravando ao lado do Ao vivo");
+  // Quem assiste agora (docs/31 §11.5): o icone de pessoas e o numero, entre o Ao vivo e o Gravando; a frase inteira no
+  // title e para o leitor de tela. O numero saiu da linha de baixo do titulo.
+  assert.match(palco, /<span class="[^"]*" data-testid="room-present" title="7 assistindo agora"><svg[^>]*lucide-users[^>]*>[\s\S]*?<\/svg><span aria-hidden="true">7<\/span><span class="sr-only">7 assistindo agora<\/span><\/span>/);
+  assert.ok(palco.indexOf('data-testid="room-on-air"') < palco.indexOf('data-testid="room-present"') && palco.indexOf('data-testid="room-present"') < palco.indexOf('data-testid="live-recording"'), "o Ao vivo, quem assiste e o Gravando, nessa ordem");
+  assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, no palco");
   // Antes de entrar nao ha iframe, nem a coluna de miniaturas dele (docs/31 V2-A5): os selos e as pilulas vao ate a borda.
   assert.match(html, /data-room-stage="idle" role="region" style="--room-video-right:0px"/);
   assert.doesNotMatch(html, /data-room-badge="assistant"/, "o Assistente desligado (o servidor ainda nao leu o estado)");
   assert.doesNotMatch(sala(), /Gravando/, "sem gravador, sem o selo");
 
-  // O cabecalho (V2-3, no estilo do YouTube): o titulo e a linha que comeca pelo numero, com a data, a duracao e quem
-  // apresenta; no celular, o numero primeiro e quem apresenta.
+  // O cabecalho (V2-3, no estilo do YouTube): o titulo e a linha com a data, a duracao e quem apresenta; no celular, so
+  // quem apresenta. Sem o numero de quem assiste (docs/31 §11.5).
   assert.match(cabecalho, /<h1 [^>]*>Aula de IA<\/h1>/);
-  assert.match(cabecalho, /data-room-line="meta"><span data-testid="room-present">7 assistindo agora<\/span> · Quinta, 5 de novembro · 19:15 · 60 min · com Danilo S\.<\/p>/);
-  assert.match(cabecalho, /data-testid="room-mobile-line">7 assistindo agora · com Danilo S\.<\/p>/);
+  assert.match(cabecalho, /data-room-line="meta">Quinta, 5 de novembro · 19:15 · 60 min · com Danilo S\.<\/p>/);
+  assert.match(cabecalho, /data-testid="room-mobile-line">com Danilo S\.<\/p>/);
+  assert.doesNotMatch(cabecalho, /assistindo|room-present/, "o numero de quem assiste nao fica no cabecalho");
   assert.match(cabecalho, /class="hidden shrink-0 items-center lg:flex" data-room-brand="logo"/, "a logo so a partir de lg (o ponto em que a sala vira computador)");
   assert.doesNotMatch(cabecalho, /data-room-brand="icon"/, "abaixo de lg, sem marca: o titulo tem a largura");
 
@@ -663,12 +668,18 @@ test("antes de abrir: o aluno ve Aguardando o apresentador com a contagem (o cha
   const palcoDe = (html) => html.slice(html.indexOf("data-lesson-player-stage"), html.indexOf('data-testid="live-controls"'));
   const cabecalhoDe = (html) => html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
   assert.match(espera, /data-room-screen="open"/);
-  assert.match(palcoDe(espera), /data-room-badges="top"><span class="[^"]*bg-black\/60[^"]*" data-room-badge="waiting">Aguardando o apresentador<\/span><\/div>/);
+  // Ao lado dele, quem ja esta na sala (docs/31 §11.5), e mais nada na fileira de cima.
+  assert.match(
+    palcoDe(espera),
+    /data-room-badges="top"><span class="[^"]*bg-black\/60[^"]*" data-room-badge="waiting">Aguardando o apresentador<\/span><span class="[^"]*" data-testid="room-present" title="7 assistindo agora">[\s\S]*?<span class="sr-only">7 assistindo agora<\/span><\/span><\/div>/
+  );
   assert.doesNotMatch(cabecalhoDe(espera), /Aguardando o apresentador/, "nada no cabecalho");
   assert.doesNotMatch(palcoDe(espera), /room-on-air|data-room-badge="presenter"/, "sem o Ao vivo e sem quem apresenta antes de comecar");
   // Na capa da espera (a sessao que ainda nao abriu, a Sessao de pratica) a frase ja esta na capa: o selo nao repete.
   assert.equal((aluno.match(/Aguardando o apresentador/g) ?? []).length, 1, "so a capa");
   assert.doesNotMatch(aluno, /data-room-badge="waiting"/);
+  // Sobre a capa, a fileira de cima fica so com quem ja esta esperando.
+  assert.match(palcoDe(aluno), /data-room-badges="top"><span class="[^"]*" data-testid="room-present" title="7 assistindo agora">[\s\S]*?<\/span><\/span><\/div>/);
   const pratica = sala({ payload: payload({ live: { practice: true, startedAt: null, status: "waiting" }, session: { startedAt: null, status: "waiting" } }) });
   assert.match(pratica, /data-room-screen="waiting"/);
   assert.doesNotMatch(pratica, /data-room-badge="waiting"/);

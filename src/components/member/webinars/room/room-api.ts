@@ -8,12 +8,12 @@
 // (POST .../room-events; no pagehide pelo sendBeacon com o mesmo corpo JSON em text/plain).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
-import { roomApiPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
+import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
 import type { ChatWindow } from "@/server/webinars/room-model";
-import type { StudentPoll, StudentQuestion } from "@/server/webinars/room-rules";
+import type { StudentPoll, StudentQuestion, StudentQuestionReply } from "@/server/webinars/room-rules";
 import type { StudentSessionPayload } from "@/server/webinars/student-model";
 import { WebinarsRequestError } from "../webinars-client";
 import { liveApiPath } from "./live-room-model";
@@ -105,14 +105,12 @@ export function getRecentChat(webinarId: string, sessionId: string, cursor: Chat
   return getJson<ChatRecentAnswer>(roomApiPath(webinarId, "chat", { after: cursor.after, sessao: sessionId, since: cursor.since }), WEBINAR_COPY.sala.erroCarregarChat, signal);
 }
 
+/** O aceite vai junto da primeira escrita (consent + versao). A sala nao manda mais como o aluno aparece (D64): e sempre o primeiro nome com a inicial. */
 export type ChatPostBody = {
-  anonymous?: boolean;
   body: string;
   consent?: boolean;
   consentVersion?: number;
-  displayMode?: "anonymous" | "first_name_initial" | "nickname";
   kind?: "message" | "question";
-  nickname?: string;
   offsetMs?: number;
   replyToId?: string | null;
   sessionId: string;
@@ -144,7 +142,7 @@ export function getQuestions(webinarId: string, sessionId: string, order: "recen
   return getJson<{ questions: StudentQuestion[]; serverTime: string }>(roomApiPath(webinarId, "questions", { ordem: order, sessao: sessionId }), GENERIC, signal);
 }
 
-export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion" | "displayMode" | "nickname"> & { anonymous: boolean; body: string; offsetMs?: number; sessionId: string };
+export type QuestionPostBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; offsetMs?: number; sessionId: string };
 
 export function postQuestion(webinarId: string, body: QuestionPostBody) {
   return sendJson<{ question: StudentQuestion }>(roomApiPath(webinarId, "questions"), "POST", body, GENERIC);
@@ -152,6 +150,13 @@ export function postQuestion(webinarId: string, body: QuestionPostBody) {
 
 export function postQuestionVote(webinarId: string, questionId: string, sessionId: string) {
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
+}
+
+export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; sessionId: string };
+
+/** A resposta de quem perguntou no fio da propria pergunta. */
+export function postQuestionReply(webinarId: string, questionId: string, body: QuestionReplyBody) {
+  return sendJson<{ reply: StudentQuestionReply }>(questionReplyPath(webinarId, questionId), "POST", body, GENERIC);
 }
 
 export function getPolls(webinarId: string, sessionId: string, signal?: AbortSignal) {
@@ -201,4 +206,4 @@ export function beaconRoomEvents(webinarId: string, body: string): boolean {
   return false;
 }
 
-export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion };
+export type { ChatMode, JoinTokenReply, Reaction, RoomEventItem, StudentChatMessage, StudentPoll, StudentQuestion, StudentQuestionReply };
