@@ -2,6 +2,7 @@
 # Restaura um backup (backup.sh) num servidor limpo e roda o teste de fumaca:
 #   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
 #   sh infra/scripts/restore.sh --snapshot latest [--yes]
+# (RESTIC_PASSWORD_FILE no lugar de RESTIC_PASSWORD e BUNKER707_BACKUP_TAG para outra marca: o kit usa os dois.)
 # Pre-requisitos: bootstrap.sh feito, repositorio clonado, alias SSH `storagebox` (backup.sh --init) e
 # NENHUM dado em infra/compose/volumes/db/data (o script recusa sobrescrever sem --yes).
 # Ordem: restic restore -> .env -> sobe so o Postgres -> devolve a chave do Vault e reinicia -> papeis ->
@@ -18,7 +19,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --snapshot) snapshot="$2"; shift ;;
         --yes) assume_yes=1 ;;
-        -h|--help) sed -n 2,10p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,11p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $1" ;;
     esac
     shift
@@ -28,8 +29,14 @@ if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
     RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
     RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
 fi
-[ -n "${RESTIC_REPOSITORY:-}" ] && [ -n "${RESTIC_PASSWORD:-}" ] || die "Exporte RESTIC_REPOSITORY e RESTIC_PASSWORD (ou tenha um .env com eles)."
-export RESTIC_REPOSITORY RESTIC_PASSWORD
+# A senha pode vir de um arquivo (RESTIC_PASSWORD_FILE): e assim que o kit passa a chave de recuperacao digitada
+# (infra/kit/restaurar.sh), sem ela entrar no ambiente.
+[ -n "${RESTIC_REPOSITORY:-}" ] && { [ -n "${RESTIC_PASSWORD:-}" ] || [ -n "${RESTIC_PASSWORD_FILE:-}" ]; } \
+    || die "Exporte RESTIC_REPOSITORY e RESTIC_PASSWORD (ou RESTIC_PASSWORD_FILE), ou tenha um .env com eles."
+export RESTIC_REPOSITORY
+[ -z "${RESTIC_PASSWORD:-}" ] || export RESTIC_PASSWORD
+# A marca dos backups: a da nossa producao, ou a do kit (BUNKER707_BACKUP_TAG, de infra/kit/kit.conf).
+backup_tag="${BUNKER707_BACKUP_TAG:-bunker707}"
 
 if [ "$(id -u)" = "0" ]; then
     restore_root="${BUNKER707_BACKUP_DIR:-/var/backups/bunker707}/restore"
@@ -58,7 +65,7 @@ confirm() {
 }
 
 log "Baixando o snapshot '$snapshot' para $target..."
-restic_bin restore "$snapshot" --target "$target" --tag bunker707
+restic_bin restore "$snapshot" --target "$target" --tag "$backup_tag"
 stage=$(dirname "$(find "$target" -type f -name postgres.dump | head -n1)")
 [ -n "$stage" ] && [ -f "$stage/postgres.dump" ] || die "Nao achei postgres.dump no snapshot."
 restored_storage=$(find "$target" -type d -path '*/volumes/storage' | head -n1)

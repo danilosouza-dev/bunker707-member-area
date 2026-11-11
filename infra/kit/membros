@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Comando de operacao do kit (docs/32 §3.2 e §11.7), primeiro esqueleto: o backup e a recuperacao. Nome provisorio.
+#   membros status [--json]                       a situacao do backup, do kit de recuperacao e do ensaio
+#   membros backup [--iniciar | --conferir | --conferir-destino | --instalar-agendamento]
+#   membros restaurar --ensaio [--snapshot ID] [--chave-arquivo ARQ]   ensaio isolado: nao toca na escola
+#   membros restaurar [--snapshot ID] [--chave-arquivo ARQ] [--destino REPO]   restauracao de verdade (servidor novo)
+#   membros kit-de-recuperacao [--nova | --conferir]
+#   membros migrar [--listar]                     as migracoes do pacote (infra/kit/migrar.sh)
+# Cada subcomando tem --help. Os nomes tecnicos (projeto do compose, containers, volumes, pastas) vem de kit.conf.
+# Codigos de saida (docs/20 §9B): 0 ok; 1 uso ou configuracao; 2 destino do backup inacessivel; 3 falhou; 4 outra
+# operacao do backup rodando; 5 a chave nao abre o backup; 6 kit de recuperacao nao confirmado; 7 precisa de uma pessoa
+# no terminal; 8 falta disco para o ensaio; 9 instalacao esperando restauracao (backup parado).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+set -euo pipefail
+
+# O comando pode ser um link (por exemplo /usr/local/sbin/membros): os scripts ficam ao lado do arquivo de verdade.
+KIT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
+
+ajuda() { sed -n 2,13p "$KIT_DIR/membros"; }
+
+[ $# -gt 0 ] || { ajuda; exit 1; }
+sub=$1
+shift
+case "$sub" in
+    status) exec bash "$KIT_DIR/status.sh" "$@" ;;
+    backup) exec bash "$KIT_DIR/backup.sh" "$@" ;;
+    restaurar)
+        for arg in "$@"; do
+            [ "$arg" != "--ensaio" ] || exec bash "$KIT_DIR/ensaio.sh" "$@"
+        done
+        exec bash "$KIT_DIR/restaurar.sh" "$@"
+        ;;
+    kit-de-recuperacao) exec bash "$KIT_DIR/recuperacao.sh" "$@" ;;
+    migrar) exec bash "$KIT_DIR/migrar.sh" "$@" ;;
+    ajuda|-h|--help) ajuda; exit 0 ;;
+    *)
+        printf 'ERRO: subcomando desconhecido: %s. Os que existem: status, backup, restaurar, restaurar --ensaio, kit-de-recuperacao, migrar.\n' "$sub" >&2
+        exit 1
+        ;;
+esac

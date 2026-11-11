@@ -15,7 +15,8 @@
 #   env                 o infra/compose/.env (todos os segredos do stack)
 #   volumes/storage     arquivos do Storage (capas, materiais, fotos)
 # Tudo roda com as ferramentas de dentro do container do Postgres (mesma versao, sem imagem extra) e sai
-# pelo restic (criptografado antes de deixar o servidor). Retencao: BACKUP_KEEP_DAILY snapshots diarios.
+# pelo restic (criptografado antes de deixar o servidor). Retencao: BACKUP_KEEP_DAILY snapshots diarios, agrupados so
+# pelo host (--group-by host), porque o caminho da exportacao muda a cada backup.
 # Por que nao `supabase db dump`: ele exclui os esquemas que o Auth e o Storage administram (pensado para
 # migrar entre projetos da nuvem); num servidor proprio queremos o banco inteiro. docs/20, "Backup".
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
@@ -141,7 +142,9 @@ run_backup() {
     log "Enviando ao restic ($RESTIC_REPOSITORY)..."
     restic_bin backup --tag bunker707 --host bunker707 --quiet "$stage" "$storage_dir"
     log "Aplicando retencao (ultimos $keep_daily dias)..."
-    restic_bin forget --tag bunker707 --host bunker707 --keep-daily "$keep_daily" --prune --quiet
+    # Agrupado so pelo host: a pasta de cada exportacao tem a hora no nome (stage/<data>), e o agrupamento padrao do
+    # restic (host e caminhos) deixava cada snapshot sozinho no grupo dele, e a retencao nunca apagava nenhum.
+    restic_bin forget --tag bunker707 --host bunker707 --group-by host --keep-daily "$keep_daily" --prune --quiet
     if [ "$do_check" = "1" ]; then
         log "Conferindo a integridade do repositorio..."
         restic_bin check --read-data-subset=10% || failures=1
