@@ -60,7 +60,7 @@ export function DropdownMenuItem({ children, disabled, render }) {
   "@/server/webinars/actions": `${fail}
 export const saveWebinarDraft = fail; export const publishWebinar = fail; export const cancelWebinar = fail; export const duplicateWebinar = fail; export const deleteWebinar = fail; export const archiveWebinar = fail; export const unarchiveWebinar = fail; export const rescheduleSession = fail; export const uploadWebinarCover = fail;`,
   "@/server/webinars/script-actions": `${fail}
-export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
+export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
   // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas (o painel
@@ -72,8 +72,10 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   // Fase 4f: "Refazer tradução" no chat do console.
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
+  "@/server/webinars/screen-actions": `${fail}
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
 };
 
 function withExtension(base) {
@@ -380,7 +382,8 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   const pendente = chatItem(chat, "m-pendente");
   assert.match(pendente, /^<li class="[^"]*\bbg-room-warn-bg\b[^"]*" data-console-pending=""/);
   assert.match(pendente, /<p class="[^"]*\btext-room-warn-fg\b[^"]*">Na moderação · Ana M\. · 20:01<\/p>/, "a hora da gravada: a hora marcada mais o offset");
-  assert.deepEqual(Array.from(pendente.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
+  // E o ⋯ com os itens da pessoa (a moderacao por pessoa na Live gravada, a Na tela, R5).
+  assert.deepEqual(Array.from(pendente.matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M.", "Mais ações da mensagem de Ana M."]);
   assert.ok(chat.indexOf("data-console-chat-queue") < chat.indexOf('role="log"'), "o card antes da lista");
   assert.ok(chat.indexOf('data-room-message="m-pendente"') < chat.indexOf('role="log"'), "a pendente fora da lista");
 
@@ -392,7 +395,7 @@ test("chat (docs/31 V2-15): Quem escreve e Modo lento em dois seletores compacto
   );
   assert.deepEqual(Array.from(fila.matchAll(/data-console-pending="" data-room-message="([^"]+)"/g)).map((match) => match[1]), ["m-pergunta", "m-nova"]);
   assert.match(fila, /data-console-chat-waiting="">2 aguardando</);
-  assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M."]);
+  assert.deepEqual(Array.from(chatItem(fila, "m-pergunta").matchAll(/<button[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]), ["Liberar: Ana M.", "Recusar: Ana M.", "Mais ações da mensagem de Ana M."]);
   assert.match(fila, /<li[^>]*>Nenhuma mensagem ainda\.<\/li>/, "so pendentes: a lista vazia");
 
   // A lista: a caixa que rola e o role=log com o nome Chat; dentro dela a <ol> continua lista (o role=log na propria <ol>
@@ -491,7 +494,7 @@ test("chat (docs/31 V2-15 e §10): as acoes de cada mensagem (Fixar ou Desafixar
   // Cada botao da linha e do card e um ponto de volta do foco (a posicao entre os do item): o ⋯ e o ultimo.
   const marcados = (block) => Array.from(block.matchAll(/<button(?=[^>]*data-console-action="")[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
   assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
-  assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M."]);
+  assert.deepEqual(marcados(chatItem(chat, "m-pendente")), ["Liberar: Ana M.", "Recusar: Ana M.", "Virar pergunta: Ana M.", "Mais ações da mensagem de Ana M."]);
 
   // Os botoes: circulos de 32 px (o toque ganha a area de 44, after:-inset-1.5). Com o mouse, as acoes ficam escondidas
   // (sem lugar na linha) e aparecem com o mouse, o foco ou o ⋮ aberto, numa pilula por cima do canto de cima a direita do
@@ -543,7 +546,7 @@ test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual
   // A gravada (docs/31 V2-15): as abas Chat e Perguntas; o ⋯ com Enquetes, Roteiro, Oferta e Atendimento (sem a leitura
   // da presenca, sem a Presença); tudo montado, so o Chat na tela, e sem o X (sem palco o painel nunca fecha).
   assert.deepEqual(Array.from(markup.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas 2"]);
-  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento"]);
   assert.ok(!hiddenPane(pane(markup, "tab", "chat")), "o Chat na tela");
   for (const [kind, name] of [["tab", "perguntas"], ["more", "enquetes"], ["more", "roteiro"], ["more", "oferta"], ["more", "atendimento"]]) {
     assert.ok(hiddenPane(pane(markup, kind, name)), `${name} escondido`);
@@ -686,9 +689,22 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
 
   const script = stripComments(read("src/server/webinars/script-actions.ts"));
   assert.match(script, /^"use server";/);
-  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 7, "as sete acoes do roteiro pedem messaging.write");
+  // Adendo de 10/11/2026 (R8 e R9): o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta pedem o
+  // mesmo messaging.write do Soltar agora (o apresentador, o co-apresentador e a equipe).
+  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 10, "as dez acoes do roteiro pedem messaging.write");
   assert.doesNotMatch(script, /runAdminAction\("messaging\.publish"/);
-  for (const action of ["webinar.script_saved", "webinar.script_imported", "webinar.script_exported", "webinar.chat_exported", "webinar.transcript_saved", "webinar.script_resolved", "webinar.script_fired"]) {
+  for (const action of [
+    "webinar.script_saved",
+    "webinar.script_imported",
+    "webinar.script_exported",
+    "webinar.chat_exported",
+    "webinar.transcript_saved",
+    "webinar.script_resolved",
+    "webinar.script_fired",
+    "webinar.persona_photo_uploaded",
+    "webinar.script_comment_sent",
+    "webinar.script_item_added"
+  ]) {
     assert.match(script, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }
   assert.doesNotMatch(`${room}${script}`, /full_name|email:/, "nada de nome ou e-mail na auditoria");
@@ -703,7 +719,7 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   const presence = consolePresenceOf(view, 4 * MIN + 30_000);
   const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
   // A Presença no ⋯ (docs/31 V2-15), so com a leitura da presenca, montada e escondida.
-  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
   assert.ok(hiddenPane(pane(markup, "more", "presenca")));
   assert.match(pane(markup, "more", "presenca"), /id="console-presence-title"/);
   // O selo do topo da gravada (V2-13): os presentes do retrato de 5 s e o pico da presenca.

@@ -53,6 +53,7 @@ import {
   type WebinarStatus,
   type WebinarTranscriptFormat
 } from "./model";
+import { readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
 import { sessionFromRow, webinarFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows, listWebinarRows, webinarDataAuthors } from "./store";
 
@@ -400,8 +401,11 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
   const simulated = webinar.kind === "simulated";
   const jitData = simulated ? await loadJitEditorData(db, row.id, now) : null;
   const jit = jitData?.settings ?? defaultJitSettings();
-  const [scriptRows, transcriptRow, pollRows, deciderNames] = await Promise.all([
-    simulated ? listScriptItemRows(db, row.id) : Promise.resolve([]),
+  // O roteiro nos dois tipos (adendo de 10/11/2026, R8), com a foto de quem comenta de cada item (R9; banco sem a
+  // 202611100002: sem foto); a transcricao so na gravada.
+  const [scriptRows, avatars, transcriptRow, pollRows, deciderNames] = await Promise.all([
+    listScriptItemRows(db, row.id),
+    readScriptPersonaAvatars(db, row.id),
     simulated && recording ? fetchTranscriptRow(db, recording.id) : Promise.resolve(null),
     listPollRows(db, { sessionId: null, webinarId: row.id }),
     loadCreatorNames(db, [...sessions.map((session) => session.simulationDecidedBy), jit.simulation?.decidedBy ?? null])
@@ -424,7 +428,7 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     registeredCount: registered.get(row.id) ?? 0,
     replaySession: sessions.find((session) => session.kind === "replay" && session.status !== "cancelled") ?? null,
     runningSessionId: runningSessionOf(sessions)?.id ?? null,
-    scriptItems: scriptRows.map(scriptItemFromRow),
+    scriptItems: withPersonaAvatars(scriptRows.map(scriptItemFromRow), avatars),
     sessions,
     situation: webinarSituation(webinar, sessions, now),
     slug: webinar.slug,

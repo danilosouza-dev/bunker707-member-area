@@ -13,7 +13,7 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 // banido 409 banned, webinar_joined uma vez por abertura); os sinais do iframe (202 com os event_type combinados e so
 // codigos, lote de 21 e nome desconhecido 400, removido 409, 6 lotes por minuto); os banimentos nas escritas da sala
 // (silenciado: chat e pergunta 409 muted ate o prazo, reacao, curtida e enquete passam; removido e banido: tudo 409
-// banned; fora da live so o banido de todos, 409 banned na gravada e no replay); a presenca da live (balde desde started_at, nunca a ancora, sem
+// banned; na gravada, os banimentos da propria gravada (a Na tela, R5) e no replay so o banido de todos, 409 banned); a presenca da live (balde desde started_at, nunca a ancora, sem
 // webinar_joined, a sessao relida, `kicked` na saida de quem foi removido); e GET .../session da live (bloco `live`
 // sem o nome da sala, `me.ban`, a entrada recusada, os presentes pelo relogio da presenca).
 
@@ -964,7 +964,7 @@ test("silenciado no chat: mensagem e pergunta 409 muted com a hora ate quando va
   assert.equal((await json(await questionsRoute.POST(pedido(`${WEBINAR}/questions`, "POST", { body: "e agora?", sessionId: LIVE }), contexto()))).status, 201);
 });
 
-test("removido e banido: mensagem, pergunta, reacao, curtida e enquete 409 banned; fora da live nenhuma leitura de banimento", async () => {
+test("removido e banido: mensagem, pergunta, reacao, curtida e enquete 409 banned; na gravada so os banimentos da propria sessao; no Replay so o banido de todos", async () => {
   const { db, userId } = montar();
   const POLL = "ffffffff-0000-4000-8000-000000000003";
   const SIM = "ffffffff-0000-4000-8000-00000000000b";
@@ -1000,13 +1000,21 @@ test("removido e banido: mensagem, pergunta, reacao, curtida e enquete 409 banne
   assert.equal(db.tables.webinar_questions.length, 1, "so a pergunta de outro aluno");
   assert.equal(db.tables.student_events.length, 0);
 
-  // Na Live gravada (outra sessao do mesmo webinario) removido e silenciado da live nao sao lidos: so o banido de todos.
+  // Na Live gravada (outra sessao do mesmo webinario) o removido e o silenciado da live nao valem; desde a Na tela (R5,
+  // a moderacao por pessoa na gravada) a gravada le os banimentos da propria sessao, uma leitura de cada tabela.
   const { db: gravada } = montar();
   gravada.tables.webinar_sessions.find((row) => row.id === GRAVADA).scheduled_at = iso(Date.now() - MIN);
   const naGravada = await json(await reactionsRoute.POST(pedido(`${WEBINAR}/reactions`, "POST", { reaction: "clap", sessionId: GRAVADA }), contexto()));
   assert.equal(naGravada.status, 201, JSON.stringify(naGravada.body));
-  assert.ok(!gravada.calls.from.includes("webinar_session_bans"), "fora da live, removido e silenciado nao sao lidos");
+  assert.equal(gravada.calls.from.filter((name) => name === "webinar_session_bans").length, 1, "os banimentos da propria gravada, uma leitura");
   assert.equal(gravada.calls.from.filter((name) => name === "webinar_user_bans").length, 1, "uma leitura pela chave do banido de todos");
+
+  // No Replay ninguem e silenciado nem removido: so o banido de todos e lido.
+  const { db: replay } = montar();
+  const noReplay = await json(await reactionsRoute.POST(pedido(`${WEBINAR}/reactions`, "POST", { reaction: "clap", sessionId: REPLAY }), contexto()));
+  assert.equal(noReplay.status, 201, JSON.stringify(noReplay.body));
+  assert.ok(!replay.calls.from.includes("webinar_session_bans"), "no Replay, removido e silenciado nao sao lidos");
+  assert.equal(replay.calls.from.filter((name) => name === "webinar_user_bans").length, 1, "uma leitura pela chave do banido de todos");
 });
 
 test("banido de todos os webinarios: na Live gravada e no Replay o chat e a reacao respondem 409 banned e a sessao recusa a entrada; removido ou silenciado na live continua livre na gravada", async () => {

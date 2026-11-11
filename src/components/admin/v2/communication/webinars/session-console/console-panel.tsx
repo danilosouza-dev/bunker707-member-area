@@ -16,7 +16,8 @@ import { useConsolePortal } from "./console-shell";
 // O painel do console de quem apresenta (docs/31 V2-15; o estilo do YouTube, docs/31 §10), no cartao do RoomPanel da
 // sala: a partir de lg, o fundo --room-panel, o contorno de 1 px e o raio 12 (as classes do esqueleto). Com palco (a
 // live), as abas sao o trilho a direita (console-rail.tsx) a partir de lg, e o painel tem em cima o cabecalho do YouTube
-// de 56 px: o h2 com o nome da aba ou da entrada do Mais e o numero (as perguntas abertas, as maos levantadas) e o X
+// de 56 px: o h2 com o nome da aba ou da entrada do Mais e o numero (as perguntas abertas, as maos levantadas, o que
+// esta na tela na entrada Na tela) e o X
 // "Fechar o painel" sem fundo, com a dica no lugar do title. Abaixo de lg, e sem palco em toda largura (a gravada e o
 // Replay, onde o painel e o corpo inteiro e nunca fecha), a linha das abas da sala (RoomTabList, em pilula, que rola de
 // lado quando nao cabe) com Chat, Perguntas, Mãos e Pessoas na live (Chat e Perguntas na gravada e no Replay), os
@@ -37,8 +38,8 @@ export type ConsolePanelProps = {
   className: string;
   /** Com palco (a live), o X a partir de lg; sem palco, o painel nunca fecha. */
   closable: boolean;
-  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas. */
-  counts: { maos: number; perguntas: number };
+  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; e o que esta na tela (a Na tela). */
+  counts: { maos: number; perguntas: number; tela?: number };
   /** As entradas do ⋯ desta sessao (consoleMoreEntriesFor), na ordem. */
   entries: readonly ConsoleMoreEntry[];
   /** O conteudo de cada entrada do ⋯. */
@@ -65,7 +66,7 @@ export function consolePanelTitle(view: ConsolePanelView): string {
 export function ConsolePanel({ className, closable, counts, entries, more, onClose, onView, open, panes, rail, tabs, view }: ConsolePanelProps) {
   const tab = "tab" in view ? view.tab : null;
   const chosen = "more" in view ? view.more : null;
-  const count = tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : null;
+  const count = tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : chosen === "tela" ? (counts.tela ?? 0) : null;
 
   return (
     <aside aria-labelledby="console-panel-title" className={className} data-console-slot="panel" hidden={!open} id={CONSOLE_PANEL_ID}>

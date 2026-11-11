@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ChartNoAxesColumn, CircleDot, Ellipsis, FileText, Hand, Headset, MessageCircleQuestionMark, MessageSquareText, ShoppingBag, Users, type LucideIcon } from "lucide-react";
+import { Activity, ChartNoAxesColumn, CircleDot, Ellipsis, FileText, Hand, Headset, MessageCircleQuestionMark, MessageSquareText, PictureInPicture2, ShoppingBag, Users, type LucideIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { RoomCountBadge } from "@/components/member/webinars/room/room-ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -15,13 +15,14 @@ import { useConsolePortal } from "./console-shell";
 // live) e so a partir de lg, uma coluna de 48 px a 16 px da borda direita, depois do painel. Cada item e um botao de
 // 48 x 64: o quadrado de 48 com raio 8 e o icone de 24, e o rotulo 10/16 embaixo (600 no item aberto). Os itens sao as
 // abas (Chat, Perguntas com o numero das abertas no contador vermelho, Mãos com o das maos levantadas, Pessoas) e
-// depois as entradas da sessao (Enquetes, Atendimento, Presença, Gravação; na gravada, Roteiro e Oferta), todos na tela
+// depois as entradas da sessao (Na tela, Enquetes, Atendimento, Presença, Gravação; na gravada, Roteiro e Oferta), todos na tela
 // quando a altura do trilho comporta (ajuste do produtor de 10/11/2026). Numa janela baixa, o trilho mede a propria
 // altura (no navegador, antes de pintar e a cada mudanca) e o ultimo lugar vira o Mais, com o menu dos que nao couberam
 // como opcoes de radio, no portal da raiz (consoleRailFit); com um desses na tela, o Mais fica aberto e o nome dele diz
 // qual. O item abre o painel nele e, aberto, fecha o painel (consoleRailStep, no console); o estado vai em
 // aria-expanded com o aria-controls do painel. O nome de cada item comeca pelo rotulo visivel (WCAG 2.5.3): "Perguntas,
-// 3 abertas". Sem dica nem title: o rotulo esta sempre na tela. Cores so pelos tokens --room-*.
+// 3 abertas"; a Na tela leva no contador quantas coisas estao na frente da turma ("Na tela, 2 coisas na tela"). Sem
+// dica nem title: o rotulo esta sempre na tela. Cores so pelos tokens --room-*.
 
 const copy = WEBINAR_COPY.consoleV2;
 
@@ -35,7 +36,8 @@ const ICONS: Record<ConsoleMoreEntry | ConsoleTab, LucideIcon> = {
   perguntas: MessageCircleQuestionMark,
   pessoas: Users,
   presenca: Activity,
-  roteiro: FileText
+  roteiro: FileText,
+  tela: PictureInPicture2
 };
 
 /** O quadrado de 48 do item (o anel de foco envolve so ele; o botao inteiro e o clique). */
@@ -46,6 +48,11 @@ const LABEL = "-mx-3 block max-w-[72px] truncate text-center text-[10px] leading
 
 /** Um item do trilho: a aba ou a entrada, pela chave (que da o id e o data-console-rail). */
 type RailItem = { count: number; key: ConsoleMoreEntry | ConsoleTab; label: string; view: ConsolePanelView };
+
+/** O numero do item para o leitor de tela: as maos levantadas, o que esta na tela (a Na tela) ou as perguntas abertas. */
+function railCountLabel(key: ConsoleMoreEntry | ConsoleTab, count: number): string {
+  return key === "maos" ? copy.trilho.maos(count) : key === "tela" ? WEBINAR_COPY.naTela.console.contador(count) : copy.trilho.abertas(count);
+}
 
 /** A chave do que o painel mostra (a aba ou a entrada). */
 function viewKey(view: ConsolePanelView): ConsoleMoreEntry | ConsoleTab {
@@ -70,8 +77,8 @@ export function visibleConsoleTabControl(doc: Document, key: ConsoleMoreEntry | 
 
 export type ConsoleRailProps = {
   className: string;
-  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas. */
-  counts: { maos: number; perguntas: number };
+  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; e o que esta na tela (a Na tela). */
+  counts: { maos: number; perguntas: number; tela?: number };
   /** As entradas desta sessao (consoleMoreEntriesFor), na ordem, depois das abas. */
   entries: readonly ConsoleMoreEntry[];
   /** A altura do trilho antes da medida (o teste de tela); sem ela, todos os itens ate o navegador medir. */
@@ -110,7 +117,7 @@ export function ConsoleRail({ className, counts, entries, initialAvailable = nul
 
   const items: RailItem[] = [
     ...tabs.map((tab) => ({ count: tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : 0, key: tab, label: copy.abas[tab], view: { tab } })),
-    ...entries.map((more) => ({ count: 0, key: more, label: copy.entradas[more], view: { more } }))
+    ...entries.map((more) => ({ count: more === "tela" ? (counts.tela ?? 0) : 0, key: more, label: copy.entradas[more], view: { more } }))
   ];
   const fit = consoleRailFit({ available, count: items.length });
   const shown = items.slice(0, fit.visible);
@@ -127,7 +134,7 @@ export function ConsoleRail({ className, counts, entries, initialAvailable = nul
           <button
             aria-controls={CONSOLE_PANEL_ID}
             aria-expanded={open}
-            aria-label={item.count > 0 ? copy.trilho.comNumero(item.label, item.key === "maos" ? copy.trilho.maos(item.count) : copy.trilho.abertas(item.count)) : undefined}
+            aria-label={item.count > 0 ? copy.trilho.comNumero(item.label, railCountLabel(item.key, item.count)) : undefined}
             className={ITEM}
             data-console-rail={item.key}
             id={`console-railbtn-${item.key}`}

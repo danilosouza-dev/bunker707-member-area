@@ -8,7 +8,9 @@ import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
 
 // O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
 // deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
-// mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor. POST { sessionId, body, kind,
+// mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor; com &tela=<carimbo>, leva tambem
+// `screen`, o estado da Na tela, so quando o carimbo da sessao mudou (nulo quando e igual, sem `tela` e no Replay; o
+// estado vem da memoria do processo, screen-queries.ts). POST { sessionId, body, kind,
 // consent, consentVersion, replyToId, offsetMs? } grava a mensagem com o offset do relogio do servidor (no replay, a
 // posicao do player que veio no corpo) e o nome do aluno, sempre o primeiro nome com a inicial do sobrenome (D64):
 // 201 { message, pending }; a primeira exige o aceite (409 consent_required); a pagina aberta com o codigo de antes de
@@ -48,7 +50,7 @@ export async function GET(request: Request, context: RouteContext) {
     const room = await loadRoomContextFor(guarded.userId, guarded.webinarId, query.sessao.toLowerCase());
     const data = windowMode
       ? await readChatWindow(webinarsDb(), room, guarded.userId, { fromMs: query.from as number, toMs: query.to as number })
-      : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string });
+      : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string }, Date.now(), { stamp: query.tela });
     return ok(data);
   } catch (error) {
     return roomErrorResponse(error, "Não foi possível ler o chat.");

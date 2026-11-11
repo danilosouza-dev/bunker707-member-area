@@ -12,12 +12,15 @@ import type { RoomSimulationState } from "./use-room-simulation";
 // venda chegam por uma regiao aria-live="polite" no maximo um por minuto. Com prefers-reduced-motion, nada desliza.
 // Sem nada ligado na sessao, nada aparece. webinar-room.tsx monta os dois; o estado vem de use-room-simulation.ts.
 // Redesign V2, F3 (docs/31 V2-4): no palco, o aviso de venda fica abaixo da linha dos selos de cima (o canto de cima a
-// esquerda e do "Ao vivo" e do "Gravando").
+// esquerda e do "Ao vivo" e do "Gravando"). A Na tela (especificacao de 10/11/2026, §3.2): no desenho normal ele entra
+// na celula de cima a esquerda da camada do palco (`layout` cell, no fluxo), depois das pilulas das fixadas e do item
+// daquela posicao, para nada que fica na tela mudar de lugar quando ele passa.
 
 const COPY = WEBINAR_COPY.simulacao.aluno;
 
 export type RoomSimulationViewProps = {
-  layout: "stage" | "vertical";
+  /** "cell": no fluxo da celula de cima a esquerda da camada da Na tela (o desenho normal). */
+  layout: "cell" | "stage" | "vertical";
   offsetMs: number;
   reducedMotion: boolean;
   state: RoomSimulationState;
@@ -73,8 +76,9 @@ export function RoomSimulationSales({ layout, offsetMs, reducedMotion, state }: 
         <div
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute z-10 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-[12px] border border-white/15 bg-black/75 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm",
-            layout === "vertical" ? "inset-x-0 top-14 mx-auto w-fit" : "left-4 top-14",
+            "pointer-events-none z-10 flex items-center gap-2 rounded-[12px] border border-white/15 bg-black/75 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm",
+            layout === "cell" ? "relative w-fit max-w-[min(22rem,100%)] shrink-0" : "absolute max-w-[min(22rem,calc(100%-1.5rem))]",
+            layout === "vertical" ? "inset-x-0 top-14 mx-auto w-fit" : layout === "stage" ? "left-4 top-14" : null,
             !reducedMotion && "animate-in fade-in-0 slide-in-from-top-2 duration-300"
           )}
           data-room-simulation-sale=""

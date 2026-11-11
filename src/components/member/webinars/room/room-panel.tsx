@@ -28,6 +28,10 @@ import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
 // aba Enquetes com enquete aberta.
 // A linha das abas e o RoomTabList, que o painel com abas do console de quem apresenta (docs/31 V2-15) tambem usa, com
 // outras abas, os numeros no nome ("Perguntas 3") e os ids pelo `idPrefix`; o HTML da linha e o de antes.
+// A Na tela (especificacao de 10/11/2026, §3.1): o espaco `pinned`, entre a linha das abas (e o cabecalho, a partir de
+// lg) e o conteudo, leva a area das fixadas (screen/room-pinned.tsx) em todas as abas: no maximo 40 % da altura do
+// painel, rolando por dentro. Abaixo de lg, um cartao como o da aba; a partir de lg, so a linha de 1 px embaixo. Sem
+// fixada, nada (o HTML de antes).
 
 export type RoomPanelProps = {
   /** O conteudo da aba escolhida. */
@@ -47,6 +51,8 @@ export type RoomPanelProps = {
   onTab: (tab: RoomPanelTab) => void;
   /** O painel na tela (fechado, o aside fica hidden e montado). */
   open: boolean;
+  /** A area das fixadas (Na tela), acima do conteudo de toda aba; nula sem fixada. */
+  pinned?: ReactNode;
   /** Ha enquete aberta: o ponto na aba Enquetes. */
   pollOpen: boolean;
   tab: RoomPanelTab;
@@ -163,6 +169,7 @@ export function RoomPanel({
   onClose,
   onTab,
   open,
+  pinned = null,
   pollOpen,
   tab,
   tabAction,
@@ -213,6 +220,15 @@ export function RoomPanel({
           </RoomTooltip>
         ) : null}
       </div>
+
+      {pinned ? (
+        <div
+          className="mx-2 max-h-[40%] shrink-0 overflow-y-auto overscroll-contain rounded-[var(--member-cover-radius)] border border-room-border bg-room-surface lg:mx-0 lg:rounded-none lg:border-0 lg:border-b lg:border-room-panel-border lg:bg-transparent"
+          data-room-slot="pinned"
+        >
+          {pinned}
+        </div>
+      ) : null}
 
       <div
         aria-labelledby={`room-tabbtn-${tab}`}

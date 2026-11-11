@@ -851,8 +851,9 @@ arquivo novo).
 **Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migracao o app novo continua de pe. As perguntas
 aparecem como antes (o fio le vazio, `chat-store.listQuestionReplyRows`), a foto do perfil funciona e "Remover minhas
 mensagens" segue; so **escrever no fio** falha, e falha antes de gravar qualquer coisa. Na equipe, responder ou apagar
-uma resposta no fio volta 409 com a frase "Esta parte precisa da atualização do banco (migração 202611100001)."
-(`room-actions.withReplyTable`, com `WEBINARS_MIGRATION = "202611100001"`). No aluno, o Responder continua aparecendo
+uma resposta no fio volta 409 com a frase "Esta parte precisa da atualização do banco (migração {a mais nova})."
+(`room-actions.withReplyTable`, pelo `WEBINARS_MIGRATION`, que aponta sempre a migração mais nova: era `"202611100001"`
+quando esta parte entrou e, desde a §9.13, é `"202611100002"`, que inclui esta). No aluno, o Responder continua aparecendo
 na pergunta respondida (o fio le vazio) e o envio volta o erro comum da rota, "Não foi possível enviar a resposta."
 (500), sem numero de migracao: a contagem do fio sem numero (o PostgREST responde o HEAD de uma tabela que nao existe
 com 404 sem corpo) vira migracao pendente em `chat-store.countQuestionReplyRows`, antes do aceite e da rajada, entao o
@@ -885,6 +886,87 @@ mudanca vira uma migracao nova, e a guarda (o hash) avisa.
 
 **Producao (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
 basta a promocao `dev` -> `main` que levar este codigo passar pelo `deploy-membros`.
+
+### 9.13 Na tela e o banco do adendo: migração `202611100002` antes do merge (10/11/2026)
+
+A "Na tela" (a mensagem e a enquete fixadas, o banner e o QR Code na frente da turma; `docs/30` §2.4 e §4.2,
+`docs/31` §12) tem uma migração só, que vem **depois** da `202611100001` (§9.12) e não muda as de antes (a guarda
+`tests/webinarios-v7.guard.test.mjs` prende o hash acumulado das 65 anteriores e o do arquivo novo). Na mesma migração
+entra o banco do adendo do mesmo dia: a Simulação e o roteiro na Live ao vivo (R7 e R8) e a foto de quem comenta nos
+comentários do roteiro (R9; `docs/30` D74). O app de R7 a R9 foi construído em 11/11/2026 em cima desta mesma migração:
+nenhuma migração nova. O que o adendo usa daqui: o check `webinar_sessions_simulation_live_v7` (a sessão `live` grava as
+regras simuladas, a decisão com a frase da live e o resumo congelado no **Encerrar live**; o selo "Ao vivo", nunca), as
+duas colunas `persona_avatar_path` (o item do roteiro e a cópia na mensagem `scripted`) e a `webinar_open_session` que
+não solta o roteiro da live ao abrir (o tick de minuto solta os itens dela desde o `started_at`).
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611100002_webinars_v7_na_tela.sql` | cria `webinar_screen_items` (os banners e QR Codes prontos de um webinário) e `webinar_screen_displays` (cada exibição numa sessão, com a cópia congelada; o índice único parcial deixa uma de cada tipo na tela por sessão), as duas só do `service_role`, e a função `webinar_screen_report` (os números por exibição, sem a equipe). Troca o check `webinar_sessions_simulation_not_live_v4` pelo `webinar_sessions_simulation_live_v7` (a sessão `live` aceita as regras simuladas e o resumo, nunca o selo "Ao vivo" da gravada); acrescenta `persona_avatar_path` em `webinar_chat_script_items` e em `webinar_chat_messages` (só o caminho `webinars/personas/<24 hex>.webp`; na mensagem, só na `scripted`); recria `webinar_open_session` com o corpo inteiro de antes, a foto do personagem na mensagem e a live fora do roteiro ao abrir | 7: as duas tabelas; a função; o check novo (`not valid`, com o drop do antigo no mesmo bloco); as colunas da foto e os checks delas (`not valid`); `webinar_open_session`; o `validate` dos três checks | `webinars_v7_na_tela` |
+
+**Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migração o app novo continua de pé. Nenhuma
+coluna dela entra nas listas que o app sempre lê (`SESSION_COLUMNS`, `CHAT_MESSAGE_COLUMNS`, `SCRIPT_ITEM_COLUMNS`); as
+leituras da Na tela devolvem vazio e só as escritas novas caem no aviso de migração pendente, que aponta a
+`202611100002` (`WEBINARS_MIGRATION` e `WEBINARS_SCREEN_MIGRATION`). **O roteiro da Live ao vivo não grava nada sem
+ela** (revisão de 11/11/2026): a `webinar_open_session` de antes (`202610290001`) não tem o filtro da live e, no
+**Começar para todos**, soltaria todos os itens com minuto de uma vez (com `created_at` na hora marcada mais o minuto,
+fora da consulta de 5 s, e o tick e o **Soltar agora** pulando depois). Por isso salvar o roteiro, importar o CSV e o
+**Guardar na lista** do console num webinário `live` voltam 409 com a frase "O roteiro da live ao vivo precisa da
+atualização do banco (migração 202611100002)." antes de gravar qualquer coisa (`script-actions.scriptAvatarsFor`, quando
+a coluna `persona_avatar_path` não existe). O **Enviar agora** sem foto segue (não cria item do roteiro); com foto, e a
+foto em qualquer item, voltam o aviso da foto. A Live gravada segue como antes: o roteiro salva sem foto e só gravar uma
+foto pede a migração. A migração sozinha não atrapalha o app de antes: as tabelas são novas; o check novo aceita tudo
+que o app de antes grava; as colunas novas ficam nulas; e no app de antes a live não tinha roteiro, então a troca de
+`webinar_open_session` não muda nada para ele.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (é idempotente). O único `drop` é o do check antigo, dentro do bloco que só roda sem o check novo; se o
+SQL Editor pedir confirmação por causa dele, confirmar. Pelo MCP seção por seção (`execute_sql`, uma por chamada, na
+ordem), as seções 4, 5 e 7 começam com `set lock_timeout = '5s';`. Depois, gravar a versão:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611100002', 'webinars_v7_na_tela') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferência depois de aplicar (a do cabeçalho da migração):
+
+```sql
+select table_name from information_schema.tables where table_schema = 'public'
+  and table_name in ('webinar_screen_items', 'webinar_screen_displays'); -- 2 linhas
+select has_table_privilege('authenticated', 'public.webinar_screen_items', 'select'),
+       has_table_privilege('authenticated', 'public.webinar_screen_displays', 'select'); -- false, false
+select relrowsecurity from pg_class where oid in ('public.webinar_screen_items'::regclass,
+  'public.webinar_screen_displays'::regclass); -- true, true
+select indexname from pg_indexes where schemaname = 'public' and indexname like 'webinar_screen_%'; -- 3 + 2 pkey
+select * from public.webinar_screen_report(gen_random_uuid()); -- 0 linhas
+select conname, convalidated from pg_constraint where conname in ('webinar_sessions_simulation_not_live_v4',
+  'webinar_sessions_simulation_live_v7', 'webinar_chat_script_items_persona_avatar_v7',
+  'webinar_chat_messages_persona_avatar_v7') order by 1; -- 3 linhas (sem a _v4), convalidated = true
+select table_name from information_schema.columns where table_schema = 'public'
+  and column_name = 'persona_avatar_path' order by 1; -- webinar_chat_messages, webinar_chat_script_items
+-- E a troca da webinar_open_session (R8 e R9; fora do cabeçalho da migração, que a guarda prende pelo hash):
+select position('kind <> ''live''' in pg_get_functiondef('public.webinar_open_session(uuid, timestamptz)'::regprocedure)) > 0,
+       position('persona_avatar_path' in pg_get_functiondef('public.webinar_open_session(uuid, timestamptz)'::regprocedure)) > 0;
+  -- true, true (a live fora do roteiro ao abrir; a foto de quem comenta vai na mensagem)
+```
+
+Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up --local`), com as consultas
+acima conferidas, e a integração `tests/integration/webinarios-na-tela.test.mjs` roda contra ela. Em 11/11/2026 a
+integração cresceu para os caminhos do app (14 testes: as ações de salvar, mostrar, tirar e excluir, a imagem no bucket,
+Fixar ao enviar, a enquete fixada, a rota `screen-events` com a `webinar_screen_report`, a moderação na Live gravada) e o
+ponta a ponta da Na tela rodou contra o mesmo banco local (`docs/30` §10.2). Ainda em 11/11/2026, com o app de R7 a R9,
+a integração chegou a 17 testes (o 15, a Simulação da live decidida na espera com a frase da live e a janela pela rota;
+o 16, o tick que solta o item vencido da live com a foto e o **Enviar agora**; o 17, o **Encerrar live**, o tick do
+resumo e o relatório da live com o bloco Simulação à parte), todos os `tests/integration/webinarios*.test.mjs` passaram
+um arquivo por vez contra o banco local, e o ponta a ponta novo `produtor-solta-comentario-na-live` rodou no Chromium com
+os de webinário de antes. Os testes 5 a 7 já conferem, no banco local, o check novo, os checks da foto e a troca da
+`webinar_open_session`. **Na nuvem de teste, pendente**: **antes
+do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as oito
+consultas de conferência e confere a linha `202611100002` em `supabase_migrations.schema_migrations`. Quem escreveu
+esta parte não tocou na nuvem de teste: a aplicação fica com o produtor, como na §9.12. Quando aplicar, atualizar este parágrafo com a data e quem aplicou. Se o arquivo mudar depois disso, ele não roda de
+novo na nuvem de teste: a mudança vira uma migração nova, e a guarda (o hash) avisa.
+
+**Produção (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
+basta a promoção `dev` -> `main` que levar este código passar pelo `deploy-membros`. Antes de qualquer deploy na
+produção vale a regra R1 do `docs/29` (a migração no banco antes do app novo no ar), embora este desenho deixe o app de
+antes funcionando sem ela.
 
 ## 10. Producao guardada em snapshot (03/11/2026)
 

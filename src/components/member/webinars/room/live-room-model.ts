@@ -9,6 +9,8 @@
 // os sinais de mudo da troca de aparelho do painel Configurações (nem a equipe silenciando, nem linha no servidor) e os
 // atalhos R / M / E. Sem "use client" e com imports relativos: tests/webinarios-sala-ao-vivo-navegador.test.mjs carrega
 // direto pelo Node. Nada aqui le o relogio de verdade nem a rede: a hora e o resto chegam por parametro.
+// A Na tela (R5, 10/11/2026): a sala da Live gravada usa as mesmas regras de banimento (a recusa local ate a proxima
+// leitura, o silencio com a hora, a frase de removido e de banido) pelos tres ajudantes do fim da secao de banimentos.
 
 import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
 import { FILMSTRIP_COLUMN_MIN_FRAME, LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
@@ -518,6 +520,61 @@ export function writeRefusalOf(error: unknown): "banned" | "ended" | "kicked" | 
     return "kicked";
   }
   return reason === "muted" || reason === "ended" ? reason : null;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A Live gravada (a moderacao por pessoa da Na tela, R5): as mesmas regras, sem o motor de video
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O que uma escrita recusada da sala da Live gravada contou (409 banned / kicked / muted; writeRefusalOf) ate a proxima
+ * leitura da sessao: a mesma ponte da sala ao vivo (localBanStillValid). `refusedAtMs` e a hora do aparelho na recusa.
+ */
+export type RefusedBan = { banned: boolean; kicked: boolean; muted: boolean; refusedAtMs: number | null };
+
+export const NO_REFUSED_BAN: RefusedBan = { banned: false, kicked: false, muted: false, refusedAtMs: null };
+
+/**
+ * A recusa nova (a hora do aparelho em `nowMs`): soma com a de antes enquanto ela ainda vale e recomeca a ponte quando
+ * uma leitura da sessao ja a cobriu (a de antes podia ser um silencio que a equipe desfez).
+ */
+export function refusedBanAfter(
+  previous: RefusedBan,
+  refusal: "banned" | "kicked" | "muted",
+  input: { nowMs: number; serverTimeIso: string | null | undefined; skewMs: number }
+): RefusedBan {
+  const base = localBanStillValid({ refusedAtMs: previous.refusedAtMs, serverTimeIso: input.serverTimeIso, skewMs: input.skewMs }) ? previous : NO_REFUSED_BAN;
+  return {
+    banned: base.banned || refusal === "banned",
+    kicked: base.kicked || refusal === "kicked",
+    muted: base.muted || refusal === "muted",
+    refusedAtMs: input.nowMs
+  };
+}
+
+/**
+ * O banimento que vale agora na sala da Live gravada: o da leitura da sessao (`me.ban`, que desde a Na tela traz os
+ * desta sessao tambem) mais a recusa local so enquanto ela vale. A leitura mais nova manda: o Desfazer da equipe e o
+ * silencio que venceu devolvem o campo e a sala sem recarregar a pagina.
+ */
+export function recordedBanNow(input: { fromSession: LiveBanState | null | undefined; refused: RefusedBan; serverTimeIso: string | null | undefined; skewMs: number }): LiveBanState {
+  const valid = localBanStillValid({ refusedAtMs: input.refused.refusedAtMs, serverTimeIso: input.serverTimeIso, skewMs: input.skewMs });
+  return mergeBan(input.fromSession, valid ? input.refused : NO_REFUSED_BAN);
+}
+
+/**
+ * A sala da Live gravada (e do Replay) inteira da lugar a frase, na ordem de liveRoomScreen: fora do "Quem pode" (o 404
+ * vem antes do 409; D41), banido de todos os webinarios (D33) e removido desta sessao. Nulo: a sala fica. A frase de
+ * cada uma e a da sala ao vivo (liveScreenPhrase).
+ */
+export function recordedBlockedScreen(input: { accessLost: boolean; ban: Pick<LiveBanState, "banned" | "kicked"> }): Extract<LiveScreen, "banned" | "kicked" | "unavailable"> | null {
+  if (input.accessLost) {
+    return "unavailable";
+  }
+  if (input.ban.banned) {
+    return "banned";
+  }
+  return input.ban.kicked ? "kicked" : null;
 }
 
 /* ------------------------------------------------------------------------------------------------

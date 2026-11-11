@@ -28,7 +28,9 @@ import { SimulationRulesFields } from "./simulation-rules-fields";
 // gravado com a caixa de confirmacao (so quando algo mudou), quem decidiu e quando, a frase gravada e o que a sessao
 // mostrou (congelado no fim). Salva tudo de uma vez por saveSessionSimulation (o servidor confere a frase e grava quem
 // e quando). Banco sem a 202610300003 ("v2"): so o selo, como na fase 2 (saveSimulation, a frase sem os numeros).
-// Enquanto o card le as regras ("loading"), nada muda. A sessao encerrada fica so para ler.
+// Enquanto o card le as regras ("loading"), nada muda. A sessao encerrada fica so para ler. A sessao da Live ao vivo
+// (adendo de 10/11/2026, R7): "Live de {quando}", sem o selo "Ao vivo" (a live ja e ao vivo; o servidor recusa), o minuto
+// do aviso contado da live, a frase da live e o "ja comecou" pelo started_at (na espera ainda muda); so no modo "v4".
 
 const COPY = WEBINAR_COPY.simulacao.card;
 const ADMIN = WEBINAR_ADMIN_COPY.simulation;
@@ -71,11 +73,12 @@ export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, l
   const [acknowledged, setAcknowledged] = useState(false);
   const ended = session.status === "ended";
   const v4 = mode === "v4";
+  const live = session.kind === "live";
   // A Simulacao completa nao muda depois que a sessao comecou (o servidor recusa com 409; §4.3 e §8.6).
   const started = v4 && !ended && simulationSessionStarted(session, now);
   const parsed = v4 ? simulationRulesOfForm(form) : null;
   const changed = v4 ? simulationFormChanged(form, savedSimulationRules(saved, session.showLiveBadge)) : form.showLiveBadge !== session.showLiveBadge;
-  const sentence = v4 ? simulationFormSentence(form, { nowMs: now, responsible }) : consoleAckSentence({ badgeOn: form.showLiveBadge, nowMs: now, responsible });
+  const sentence = v4 ? simulationFormSentence(form, { live, nowMs: now, responsible }) : consoleAckSentence({ badgeOn: form.showLiveBadge, nowMs: now, responsible });
   const fieldsLocked = locked || ended || started || mode === "loading";
   const checkboxId = `${idBase}-ack`;
   const summary = v4 ? simulationSummaryLine(saved?.summary ?? null) : null;
@@ -124,19 +127,21 @@ export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, l
 
   return (
     <li className="flex min-w-0 flex-col gap-3 border-b border-[var(--border-subtle)] pb-4 last:border-b-0 last:pb-0" data-simulation-session={session.id}>
-      <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{ADMIN.sessionLabel(formatSaoPauloDateTime(session.scheduledAt))}</span>
-      <AdminSwitch
-        checked={form.showLiveBadge}
-        description={ADMIN.badgeHint}
-        disabled={fieldsLocked}
-        id={`${idBase}-badge`}
-        label={ADMIN.badge}
-        onCheckedChange={(checked) => edit({ ...form, showLiveBadge: checked })}
-        pending={busy}
-      />
-      {v4 ? <SimulationRulesFields disabled={fieldsLocked} errors={parsed?.errors ?? {}} form={form} idBase={idBase} onChange={edit} /> : null}
+      <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{live ? COPY.sessaoLive(formatSaoPauloDateTime(session.scheduledAt)) : ADMIN.sessionLabel(formatSaoPauloDateTime(session.scheduledAt))}</span>
+      {live ? null : (
+        <AdminSwitch
+          checked={form.showLiveBadge}
+          description={ADMIN.badgeHint}
+          disabled={fieldsLocked}
+          id={`${idBase}-badge`}
+          label={ADMIN.badge}
+          onCheckedChange={(checked) => edit({ ...form, showLiveBadge: checked })}
+          pending={busy}
+        />
+      )}
+      {v4 ? <SimulationRulesFields disabled={fieldsLocked} errors={parsed?.errors ?? {}} form={form} idBase={idBase} live={live} onChange={edit} /> : null}
       {v4 && ended ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.sessaoEncerrada}</p> : null}
-      {started ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.sessaoComecou}</p> : null}
+      {started ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{live ? COPY.liveComecou : COPY.sessaoComecou}</p> : null}
       {changed && !ended && !started ? (
         <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] p-3" data-simulation-confirm="">
           {sentence ? (

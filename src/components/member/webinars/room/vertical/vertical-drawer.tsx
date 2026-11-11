@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils";
 // da sala (Chat inteiro, Perguntas e, com enquete, Enquetes), cada uma com o mesmo componente do desenho normal. Ao
 // abrir, o foco vai para a aba escolhida; Esc (ou "Voltar para o video", ou tocar fora) fecha e o foco volta para o
 // botao que abriu (a sala cuida disso). Sem animacao com prefers-reduced-motion. O rodape lembra que, com o celular
-// deitado, a sala fica completa.
+// deitado, a sala fica completa. A Na tela (especificacao de 10/11/2026, §3.4): o espaco `pinned`, entre as abas e o
+// conteudo, leva a mesma area das fixadas do painel (screen/room-pinned.tsx) em todas as abas, com no maximo 40 % da
+// altura da gaveta e rolando por dentro.
 
 export type VerticalDrawerTab = "chat" | "enquetes" | "perguntas";
 
@@ -19,6 +21,8 @@ export type VerticalDrawerProps = {
   id: string;
   onClose: () => void;
   onTab: (tab: VerticalDrawerTab) => void;
+  /** A area das fixadas (Na tela), no topo de toda aba; nula sem fixada. */
+  pinned?: ReactNode;
   /** Ha enquete aberta (o ponto ao lado da aba). */
   pollOpen: boolean;
   reducedMotion: boolean;
@@ -27,7 +31,7 @@ export type VerticalDrawerProps = {
   tabs: readonly VerticalDrawerTab[];
 };
 
-export function VerticalDrawer({ children, id, onClose, onTab, pollOpen, reducedMotion, replay, tab, tabs }: VerticalDrawerProps) {
+export function VerticalDrawer({ children, id, onClose, onTab, pinned = null, pollOpen, reducedMotion, replay, tab, tabs }: VerticalDrawerProps) {
   const copy = WEBINAR_COPY.sala;
   const vcopy = WEBINAR_COPY.vertical;
   const rootRef = useRef<HTMLElement | null>(null);
@@ -96,6 +100,11 @@ export function VerticalDrawer({ children, id, onClose, onTab, pollOpen, reduced
             <ChevronDown aria-hidden="true" className="size-5" />
           </button>
         </div>
+        {pinned ? (
+          <div className="max-h-[40%] shrink-0 overflow-y-auto overscroll-contain border-b border-white/10" data-room-slot="pinned">
+            {pinned}
+          </div>
+        ) : null}
         <div aria-labelledby={`room-vtabbtn-${tab}`} className="flex min-h-0 flex-1 flex-col" id={`room-vtab-${tab}`} role="tabpanel">
           {children}
         </div>

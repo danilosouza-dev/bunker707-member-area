@@ -22,7 +22,9 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // equipe nunca recebe os itens de remover, silenciar ou banir. Embaixo, quem foi removido, silenciado ou banido nesta
 // sessao, com Desfazer. Os itens do ⋯ (LivePersonMenuItems) tambem entram no ⋯ de cada mensagem da turma no chat
 // (docs/31 V2-15), junto dos itens da mensagem; o menu abre no portal da raiz do console, no tema dela (a ponte dos
-// tokens do admin e as classes da sala no conteudo).
+// tokens do admin e as classes da sala no conteudo). Na Live gravada (a Na tela, R5; especificacao de 10/11/2026, §6.2)
+// nao ha sala de video: o ⋯ da mensagem leva os mesmos itens sem os do video (participantId nulo) e o bloco dos
+// removidos, silenciados e banidos (LiveBarredList, a mesma lista daqui) vai para o Chat, embaixo dos seletores.
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 const pessoas = WEBINAR_COPY.consoleV2.pessoas;
@@ -176,6 +178,69 @@ function RowMedia({ audio, video }: { audio: boolean; video: boolean }) {
   );
 }
 
+/**
+ * Quem foi removido, silenciado ou banido nesta sessao, com os Desfazer de cada um (o Desfazer banimento so com
+ * messaging.publish): embaixo da sala na aba Pessoas da live e embaixo dos seletores no Chat da gravada. `people` ja vem
+ * so com os barrados (barredPeople); vazio, nada.
+ */
+export function LiveBarredList({ busyKey, canPublish, onAction, people }: Pick<LiveParticipantsProps, "busyKey" | "canPublish" | "onAction" | "people">) {
+  if (people.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-live-barred="">
+      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{LIVE_CONSOLE_COPY.removidosESilenciados}</span>
+      <ul className="flex min-w-0 flex-col gap-2">
+        {people.map((person) => (
+          <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-live-barred-user={person.userId} key={person.userId}>
+            <span className="truncate text-sm leading-5 text-[var(--text-primary)]">{person.displayName}</span>
+            <span className="flex min-w-0 flex-wrap items-center gap-1">
+              {person.ban.muted ? (
+                <Button
+                  aria-label={`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(person.ban)} (${person.displayName})`}
+                  className="h-8! px-2 text-[13px]"
+                  disabled={busyKey !== null}
+                  onClick={() => onAction(person, person.participantId, { kind: "muted", type: "undo" })}
+                  type="button"
+                  variant="secondary"
+                >
+                  {`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(person.ban)}`}
+                </Button>
+              ) : null}
+              {person.ban.kicked ? (
+                <Button
+                  aria-label={`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido} (${person.displayName})`}
+                  className="h-8! px-2 text-[13px]"
+                  disabled={busyKey !== null}
+                  onClick={() => onAction(person, person.participantId, { kind: "kicked", type: "undo" })}
+                  type="button"
+                  variant="secondary"
+                >
+                  {`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido}`}
+                </Button>
+              ) : null}
+              {person.ban.banned ? (
+                <Button
+                  aria-label={`${copy.desfazerBanimento} (${person.displayName})`}
+                  className="h-8! px-2 text-[13px]"
+                  disabled={busyKey !== null || !canPublish}
+                  onClick={() => onAction(person, person.participantId, { type: "unban" })}
+                  title={canPublish ? undefined : LIVE_CONSOLE_COPY.soQuemPublica}
+                  type="button"
+                  variant="secondary"
+                >
+                  {copy.desfazerBanimento}
+                </Button>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function LiveParticipants({ busyKey, canPublish, handle, onAction, people }: LiveParticipantsProps) {
   const rows = roomRows(handle.room, people);
   const barred = barredPeople(people);
@@ -224,57 +289,7 @@ export function LiveParticipants({ busyKey, canPublish, handle, onAction, people
         </ul>
       ) : null}
 
-      {barred.length > 0 ? (
-        <div className="flex min-w-0 flex-col gap-2" data-live-barred="">
-          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{LIVE_CONSOLE_COPY.removidosESilenciados}</span>
-          <ul className="flex min-w-0 flex-col gap-2">
-            {barred.map((person) => (
-              <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-live-barred-user={person.userId} key={person.userId}>
-                <span className="truncate text-sm leading-5 text-[var(--text-primary)]">{person.displayName}</span>
-                <span className="flex min-w-0 flex-wrap items-center gap-1">
-                  {person.ban.muted ? (
-                    <Button
-                      aria-label={`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(person.ban)} (${person.displayName})`}
-                      className="h-8! px-2 text-[13px]"
-                      disabled={busyKey !== null}
-                      onClick={() => onAction(person, person.participantId, { kind: "muted", type: "undo" })}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {`${LIVE_CONSOLE_COPY.desfazer}: ${muteLabel(person.ban)}`}
-                    </Button>
-                  ) : null}
-                  {person.ban.kicked ? (
-                    <Button
-                      aria-label={`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido} (${person.displayName})`}
-                      className="h-8! px-2 text-[13px]"
-                      disabled={busyKey !== null}
-                      onClick={() => onAction(person, person.participantId, { kind: "kicked", type: "undo" })}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {`${LIVE_CONSOLE_COPY.desfazer}: ${copy.removido}`}
-                    </Button>
-                  ) : null}
-                  {person.ban.banned ? (
-                    <Button
-                      aria-label={`${copy.desfazerBanimento} (${person.displayName})`}
-                      className="h-8! px-2 text-[13px]"
-                      disabled={busyKey !== null || !canPublish}
-                      onClick={() => onAction(person, person.participantId, { type: "unban" })}
-                      title={canPublish ? undefined : LIVE_CONSOLE_COPY.soQuemPublica}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {copy.desfazerBanimento}
-                    </Button>
-                  ) : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <LiveBarredList busyKey={busyKey} canPublish={canPublish} onAction={onAction} people={barred} />
     </section>
   );
 }

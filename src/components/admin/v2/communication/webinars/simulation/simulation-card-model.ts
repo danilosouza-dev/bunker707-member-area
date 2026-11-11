@@ -2,8 +2,9 @@
 // campos de texto (numeros, minutos dos avisos) e voltam como as regras que saveSessionSimulation confere, com os erros
 // em portugues junto de cada campo; se a sessao mudou em relacao ao que esta gravado (o selo ou as regras, ja
 // normalizadas do mesmo jeito que o servidor grava); e a frase de §8.6 do que vai ser gravado (simulationAckFor, a
-// mesma conta do servidor). O "Comeca quando voce entra" (4e) pode usar o mesmo formulario no modelo da sessao. Sem
-// React e com imports relativos: tests/webinarios-simulacao-tela.test.mjs carrega direto pelo Node.
+// mesma conta do servidor). O "Comeca quando voce entra" (4e) pode usar o mesmo formulario no modelo da sessao. Na
+// Live ao vivo (adendo de 10/11/2026, R7) a frase e a da live (`live`, sem o selo). Sem React e com imports relativos:
+// tests/webinarios-simulacao-tela.test.mjs carrega direto pelo Node.
 
 import { WEBINAR_COPY } from "../../../../../../lib/webinar-copy";
 import {
@@ -176,10 +177,10 @@ export function simulationFormChanged(form: SimulationForm, saved: SimulationRul
   return !rules || rulesKey(rules) !== rulesKey(saved);
 }
 
-/** A frase de §8.6 do que vai ser gravado (nula enquanto ha erro nos campos). */
-export function simulationFormSentence(form: SimulationForm, input: { nowMs: number; responsible: string }): string | null {
+/** A frase de §8.6 do que vai ser gravado (nula enquanto ha erro nos campos); `live`, a da Live ao vivo. */
+export function simulationFormSentence(form: SimulationForm, input: { live?: boolean; nowMs: number; responsible: string }): string | null {
   const { rules } = simulationRulesOfForm(form);
-  return rules ? simulationAckFor({ nowMs: input.nowMs, responsible: input.responsible, rules }) : null;
+  return rules ? simulationAckFor({ live: input.live, nowMs: input.nowMs, responsible: input.responsible, rules }) : null;
 }
 
 /** A dica do contador com os numeros digitados. */

@@ -6,11 +6,13 @@
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
 // .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
 // entra do mesmo jeito em WEBINAR_COPY.salaV2, e o console V2 de quem apresenta (docs/31 V2-13 a V2-15) em .consoleV2.
+// A "Na tela" (docs/31 §12: fixadas, banner e QR Code) entra em WEBINAR_COPY.naTela.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { CONSOLE_V2_COPY } from "./webinar-copy-v4/console-v2";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
+import { NA_TELA_COPY } from "./webinar-copy-v4/na-tela";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
 import { SALA_V2_COPY } from "./webinar-copy-v4/sala-v2";
@@ -420,6 +422,8 @@ export const WEBINAR_COPY = {
       presenterOnly: "Só o apresentador e os co-apresentadores mudam o microfone da turma.",
       recorderNotReleasable: "O gravador não pode ser desligado agora: espere o envio do vídeo terminar.",
       recordingMissing: "Essa gravação não existe mais.",
+      /** Silenciar, remover e banir por pessoa no Replay (a Na tela, R5: vale na Live ao vivo e na gravada). */
+      replay: "No Replay ninguém é silenciado, removido nem banido.",
       sessionMissing: "Essa sessão não existe mais.",
       staffTarget: "Ninguém da equipe é removido, silenciado nem banido.",
       videoTaken: "Esse vídeo já está ligado a outra gravação."
@@ -617,6 +621,8 @@ export const WEBINAR_COPY = {
       vagasGarantidas: "Garantir vaga"
     },
     seloAoVivo: 'Selo "Ao vivo"',
+    /** A primeira linha do bloco Simulacao na Live ao vivo (R7): sem o selo da gravada, so quem decidiu. */
+    simulacaoDaLive: "Simulação da live",
     ligado: "ligado",
     desligado: "desligado",
     decididoPor: (nome: string, data: string) => `decidido por ${nome} em ${data}`,
@@ -662,7 +668,9 @@ export const WEBINAR_COPY = {
   /* A sala do aluno V2 (docs/31 §1): src/lib/webinar-copy-v4/sala-v2.ts. */
   salaV2: SALA_V2_COPY,
   /* O console V2 de quem apresenta (docs/31 V2-13 a V2-15): src/lib/webinar-copy-v4/console-v2.ts. */
-  consoleV2: CONSOLE_V2_COPY
+  consoleV2: CONSOLE_V2_COPY,
+  /* A "Na tela" (docs/31 §12): src/lib/webinar-copy-v4/na-tela.ts. */
+  naTela: NA_TELA_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

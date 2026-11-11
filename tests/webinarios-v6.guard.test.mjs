@@ -9,7 +9,8 @@ import { assertOnlyAdds, assertSections, assertServiceRoleOnly, cumulativeHash, 
 // - uma secao MCP, idempotente; so acrescenta (nada de drop, delete, truncate nem politica); a tabela e so do
 //   service_role (o aluno nunca le nem grava direto);
 // - os limites e a lista de papeis do SQL sao os do app (model.QUESTION_REPLY_LIMITS e QUESTION_REPLY_ROLES);
-// - o aviso de migracao pendente aponta esta (WEBINARS_MIGRATION), a mais nova dos webinarios.
+// - o aviso de migracao pendente aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 10/11/2026 a da Na tela,
+//   202611100002, que vem depois desta: aplicar ate ela inclui esta).
 
 const MIGRATION = "supabase/migrations/202611100001_webinars_v6_respostas.sql";
 const model = await import("../src/server/webinars/model.ts");
@@ -48,7 +49,7 @@ test("a 202611100001: uma secao MCP, idempotente, so acrescenta; a tabela do fio
   assert.match(code, /deleted_by uuid references auth\.users\(id\) on delete set null,/);
 });
 
-test("os limites e os papeis do SQL sao os do app; o aviso de migracao pendente aponta a 202611100001", () => {
+test("os limites e os papeis do SQL sao os do app; o aviso de migracao pendente aponta uma migracao que inclui a 202611100001", () => {
   const code = sqlCodeOf(read(MIGRATION));
   assert.deepEqual([...model.QUESTION_REPLY_ROLES], ["host", "co_host", "team", "student"]);
   assert.match(code, new RegExp(`role text not null check \\(role in \\(${sqlList(model.QUESTION_REPLY_ROLES)}\\)\\),`));
@@ -58,7 +59,9 @@ test("os limites e os papeis do SQL sao os do app; o aviso de migracao pendente 
   assert.equal(model.QUESTION_REPLY_LIMITS.teamBody, model.CHAT_LIMITS.answer, "a equipe escreve no fio o que escreve na resposta");
   assert.match(code, new RegExp(`display_name text not null check \\(char_length\\(display_name\\) between 1 and ${model.CHAT_LIMITS.displayName}\\),`));
   assert.match(code, /deleted_reason text check \(deleted_reason is null or deleted_reason in \('student', 'team', 'consent_revoked'\)\),/);
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611100001";/);
+  // O aviso aponta a migracao mais nova dos webinarios (hoje a da Na tela, tests/webinarios-v7.guard.test.mjs): aplicar
+  // ate ela inclui esta.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611100001");
   // Sem constante propria: o fio le vazio sem a migracao, e escrever nele cai no aviso geral.
   assert.doesNotMatch(dbSource, /WEBINARS_REPLIES_MIGRATION/);
 });

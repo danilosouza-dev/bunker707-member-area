@@ -14,6 +14,10 @@ import { cn } from "@/lib/utils";
 // - os tokens do aluno (vermelho da marca em --accent, fundo #141414) voltam a valer dentro da moldura,
 //   porque o admin troca --accent por cinza;
 // - o conteudo fica `inert`: nada recebe foco nem clique e leitores de tela leem so o rotulo da moldura.
+//
+// Tambem a Previa da Na tela no console do webinario (session-console/console-screen-form.tsx): o cartao e a faixa da
+// sala do aluno (src/components/member/webinars/room/screen), que medem pelo recipiente @container/tela deles e usam os
+// tokens --room-* do console; la a legenda da moldura fica escondida (os botoes Computador / Celular ja dizem).
 
 export const PREVIEW_DEVICES = {
   desktop: { height: 800, label: "Computador", width: 1280 },

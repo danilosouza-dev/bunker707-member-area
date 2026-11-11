@@ -114,6 +114,23 @@ test("a fila do roteiro: na ordem do minuto, com o que entrou marcado, o que ja 
   assert.equal(console_.scriptQueue(items, {}, Number.NaN).every((entry) => !entry.passed), true);
 });
 
+test("achado 13 (revisao de 11/11/2026): na Live ao vivo no ar, 'Minuto já passou' so depois da tolerancia do tick (5 min); antes disso o item ainda entra sozinho", async () => {
+  const { LIVE_SCRIPT_LATE_MAX_MS } = await import("../src/server/webinars/persona-model.ts");
+  const item = (id, offsetMs) => ({ body: "x", createdAt: "", generatedByAi: false, id, kind: "message", offsetMs, personaName: "Duda", personaRole: "student", phrase: null, phraseDelayMs: 0, position: 0, resolvedOffsetMs: null, resolvedTranscriptId: null, status: "ready", triggerKind: "at_offset", updatedAt: "", webinarId: "w1" });
+  // A live esta aos 12 min: o item dos 12 min acabou de vencer, o dos 7 min esta na borda dos 5 min, o dos 6:59 passou.
+  const items = [item("agora", 12 * MIN), item("borda", 7 * MIN), item("passou", 7 * MIN - 1000), item("depois", 13 * MIN)];
+  const live = console_.scriptQueue(items, {}, 12 * MIN, { lateMs: LIVE_SCRIPT_LATE_MAX_MS });
+  assert.deepEqual(Object.fromEntries(live.map((entry) => [entry.id, entry.passed])), { agora: false, borda: false, depois: false, passou: true }, "o tick ainda solta ate 5 min atrasado");
+  assert.deepEqual(Object.fromEntries(console_.scriptQueue(items, { agora: null }, 12 * MIN, { lateMs: LIVE_SCRIPT_LATE_MAX_MS }).map((entry) => [entry.id, entry.passed])).agora, true, "o que entrou continua marcado");
+  // Sem a tolerancia (a gravada, a live encerrada): assim que o minuto chega, como antes.
+  assert.deepEqual(Object.fromEntries(console_.scriptQueue(items, {}, 12 * MIN).map((entry) => [entry.id, entry.passed])), { agora: true, borda: true, depois: false, passou: true });
+  // O console da live no ar passa a tolerancia; a gravada e a encerrada, nao.
+  const { readFileSync } = await import("node:fs");
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /const scriptLateMs = session\?\.kind === "live" && session\.status === "live" \? LIVE_SCRIPT_LATE_MAX_MS : 0;/);
+  assert.match(fonte, /scriptQueue\(snapshot\.scriptItems, snapshot\.scriptFired, scriptClockMs, \{ lateMs: scriptLateMs \}\)/);
+});
+
 test("enquetes: respostas e por opcao (a multipla conta cada marcada), percentual; perguntas: abertas por voto, depois respondidas, dispensadas no fim", () => {
   const poll = { options: [{ id: "o1", label: "Sim", position: 0 }, { id: "o2", label: "Não", position: 1 }] };
   const counts = console_.countPollAnswers(poll, [{ optionIds: ["o1"] }, { optionIds: ["o1", "o2"] }, { optionIds: ["o2", "fora"] }]);

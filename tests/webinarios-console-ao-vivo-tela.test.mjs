@@ -62,7 +62,7 @@ export function DropdownMenuItem({ children, disabled }) { return createElement(
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
   "@/server/webinars/script-actions": `${fail}
-export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
+export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas.
   "@/server/webinars/offer-actions": `${fail}
 export const loadOfferEditor = fail; export const saveOffer = fail; export const archiveOffer = fail; export const loadOfferConsole = fail; export const showOfferNow = fail; export const hideOffer = fail;`,
@@ -71,8 +71,10 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   // Fase 4f: "Refazer tradução" no chat do console.
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
+  "@/server/webinars/screen-actions": `${fail}
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
 };
 
 function withExtension(base) {
@@ -955,7 +957,7 @@ test("as Configurações de quem apresenta: Microfone, Alto-falante e Câmera co
  * O painel com abas (docs/31 V2-15) e a aba Pessoas (V2-14)
  * ---------------------------------------------------------------------------------------------- */
 
-test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯ Mais painéis fora da lista das abas, com Enquetes, Atendimento, Presença e Gravação; tudo montado, so o Chat na tela; o X a partir de lg", async () => {
+test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯ Mais painéis fora da lista das abas, com Na tela, Enquetes, Roteiro (R8), Atendimento, Presença e Gravação; tudo montado, so o Chat na tela; o X a partir de lg", async () => {
   const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
   const view = { chat: { hot: [], perMinute: [], students: 0, top: [], total: 0 }, presence: { avgPresent: 2, curve: [{ b: 1, n: 2 }], drops: [], peak: { b: 1, n: 2 }, reachedEnd: 0, unique: 2, watchAvgSeconds: 0, watchMaxSeconds: 0 } };
   const question = (id, status) => ({ anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, body: `Pergunta ${id}`, createdAt: new Date(NOW - MIN).toISOString(), displayName: "Ana M.", id, messageId: null, offsetMs: 60_000, sessionId: S_LIVE, status, upvotes: 0, userId: ANA });
@@ -984,15 +986,15 @@ test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯
   assert.match(trigger, /aria-haspopup="menu"/);
   assert.match(trigger, new RegExp(`aria-label="${escape(consoleV2Copy.mais)}"`));
   assert.ok(panel.indexOf("data-console-more-trigger") > tablistEnd, "o ⋯ depois da lista das abas, fora dela");
-  assert.deepEqual(Array.from(panel.matchAll(/role="menuitemradio"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Enquetes", "Atendimento", "Presença", "Gravação"]);
+  assert.deepEqual(Array.from(panel.matchAll(/role="menuitemradio"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Na tela", "Enquetes", "Roteiro", "Atendimento", "Presença", "Gravação"]);
   // Cada entrada e uma <section> com o nome dela (nao um tabpanel), montada e escondida.
-  for (const [entrada, nome] of [["enquetes", "Enquetes"], ["atendimento", "Atendimento"], ["presenca", "Presença"], ["gravacao", "Gravação"]]) {
+  for (const [entrada, nome] of [["tela", "Na tela"], ["enquetes", "Enquetes"], ["roteiro", "Roteiro"], ["atendimento", "Atendimento"], ["presenca", "Presença"], ["gravacao", "Gravação"]]) {
     const bloco = pane(markup, "more", entrada);
     assert.match(bloco, new RegExp(`^<section aria-label="${nome}"[^>]*data-console-more="${entrada}" hidden="" role="group"`), entrada);
     // Um grupo, nao uma regiao: a regiao e o cartao de dentro, e o leitor de tela nao lista "Enquetes" dentro de "Enquetes".
     assert.doesNotMatch(bloco, /^<section(?![^>]*role=)/, `${entrada}: a entrada nao e uma regiao`);
   }
-  assert.doesNotMatch(panel, /data-console-more="(?:roteiro|oferta)"/, "Roteiro e Oferta nao existem na live");
+  assert.doesNotMatch(panel, /data-console-more="oferta"/, "a Oferta nao existe na live");
   // Com palco (o trilho), a linha das abas so abaixo de lg; a partir de lg o cabecalho do YouTube: o nome do que esta na
   // tela (o h2 que da o nome ao painel) e o X sem fundo, com a dica no lugar do title (docs/31 §10).
   assert.match(panel, /<div class="[^"]*\blg:hidden\b[^"]*" data-console-tabs="">/, "as abas so abaixo de lg");
@@ -1006,7 +1008,7 @@ test("painel com abas (V2-15): na live, Chat, Perguntas, Mãos e Pessoas e o ⋯
   // entradas da sessao, todas na tela (o HTML do servidor nao mede a altura: o Mais so aparece no navegador, numa janela baixa).
   const trilho = markup.slice(markup.indexOf('data-console-slot="rail"'));
   assert.ok(markup.indexOf('data-console-slot="rail"') > markup.indexOf('data-console-slot="panel"'), "o trilho depois do painel");
-  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "enquetes", "atendimento", "presenca", "gravacao"]);
+  assert.deepEqual(Array.from(trilho.matchAll(/data-console-rail="([a-z]+)"/g)).map((match) => match[1]), ["chat", "perguntas", "maos", "pessoas", "tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"], "a Na tela e o Roteiro (R8) sao itens a mais no trilho");
   assert.match(trilho, /<button aria-controls="console-panel" aria-expanded="true"[^>]*data-console-rail="chat"/, "o Chat aberto");
   assert.match(trilho, new RegExp(`aria-label="${escape(consoleV2Copy.trilho.comNumero("Perguntas", consoleV2Copy.trilho.abertas(2)))}"[^>]*data-console-rail="perguntas"`), "Perguntas com o numero no nome");
   // A Equipe tem as mesmas abas e entradas.

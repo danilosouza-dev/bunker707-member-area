@@ -5,7 +5,10 @@
 // desligar, o "Gravar" na fila), a ancora (hora do servidor, uma vez), silenciar no chat, remover da sala, banir e
 // desfazer, Enviar gravacao / Ligar um video da Bunny e "Alinhar chat". Os comandos da sala (silenciar todos, liberar,
 // remover do iframe, trancar, gravar) saem do navegador de quem esta no console (executeCommand); aqui fica o que o
-// banco guarda. Sempre a sessao `live` do webinario (outra: 409). Permissoes de §2.6: abrir, comecar, encerrar, o
+// banco guarda. Sempre a sessao `live` do webinario (outra: 409), menos silenciar, remover, desfazer e banir, que valem
+// tambem na Live gravada (a Na tela, R5; especificacao de 10/11/2026, §5.4: loadModeratedSession; no Replay, 409): la
+// nao ha sala de video, entao o removido para de escrever na hora e perde o video na proxima conferencia da sala (ate
+// 60 s). Permissoes de §2.6: abrir, comecar, encerrar, o
 // gravador, a ancora e banir pedem messaging.publish; trancar, silenciar, remover, desfazer, enviar a gravacao,
 // alinhar e o microfone sozinho (so quem apresenta), messaging.write. Ninguem da equipe e removido, silenciado nem banido (409). Toda acao grava recordAudit so
 // com ids e contagens (o motivo digitado pela equipe vira um booleano) e revalida o console. O relogio e o do servidor.
@@ -100,6 +103,24 @@ function revalidateWebinar(webinarId: string) {
 }
 
 type LiveSession = { row: SessionRow; webinar: WebinarRow };
+
+/**
+ * A sessao onde a equipe silencia, remove e bane por pessoa (docs/30 §2.4 e §8.3; a Na tela, R5): a Live ao vivo e a
+ * Live gravada. No Replay ninguem escreve, entao nada muda: 409.
+ */
+async function loadModeratedSession(db: WebinarsDb, sessionId: string): Promise<LiveSession> {
+  const row = await fetchSessionRow(db, sessionId);
+
+  if (!row) {
+    throw new WebinarError(LIVE_ACTION_MESSAGES.sessionMissing, 404);
+  }
+
+  if (row.kind !== "live" && row.kind !== "simulated") {
+    throw new WebinarError(LIVE_ACTION_MESSAGES.replay, 409);
+  }
+
+  return { row, webinar: await requireWebinarRow(db, row.webinar_id) };
+}
 
 /** A sessao `live` e o webinario dela; outra sessao: 409 (a gravada e o replay nao tem sala). */
 async function loadLiveSession(db: WebinarsDb, sessionId: string): Promise<LiveSession> {
@@ -616,7 +637,7 @@ export async function setBrowserRecording(input: { on: boolean; sessionId: strin
 
 async function saveSessionBan(input: { kind: BanKind; minutes?: 5 | 15 | 60 | null; reason?: string; sessionId: string; userId: string }, actorId: string): Promise<SessionBanSaved> {
   const db = webinarsDb();
-  const { row, webinar } = await loadLiveSession(db, input.sessionId);
+  const { row, webinar } = await loadModeratedSession(db, input.sessionId);
 
   if (isClosed(row)) {
     throw new WebinarError(LIVE_ACTION_MESSAGES.closed, 409);
@@ -640,7 +661,10 @@ async function saveSessionBan(input: { kind: BanKind; minutes?: 5 | 15 | 60 | nu
   return { kind: input.kind, sessionId: row.id, untilAt, userId: input.userId };
 }
 
-/** [messaging.write] Silenciar no chat por 5 / 15 / 60 min ou ate o fim (nulo): o aluno assiste, mas nao escreve nem pergunta. */
+/**
+ * [messaging.write] Silenciar no chat por 5 / 15 / 60 min ou ate o fim (nulo): o aluno assiste, mas nao escreve nem
+ * pergunta. Na Live ao vivo e na gravada.
+ */
 export async function muteInChat(input: { minutes?: 5 | 15 | 60 | null; reason?: string; sessionId: string; userId: string }): Promise<ActionResult<SessionBanSaved>> {
   const raw = input && typeof input === "object" ? { ...input, kind: "muted" } : input;
   return runAdminAction("messaging.write", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "muted" }, user.id));
@@ -648,18 +672,19 @@ export async function muteInChat(input: { minutes?: 5 | 15 | 60 | null; reason?:
 
 /**
  * [messaging.write] Remover da sala (Remove): o aluno nao recebe outro token nem escreve nesta sessao (kicked, ate o
- * fim). O navegador de quem modera manda kickParticipant ao iframe depois desta acao.
+ * fim). Na Live ao vivo, o navegador de quem modera manda kickParticipant ao iframe depois desta acao; na gravada, a
+ * escrita para na hora e o video sai na proxima conferencia da sala (ate 60 s).
  */
 export async function kickFromSession(input: { reason?: string; sessionId: string; userId: string }): Promise<ActionResult<SessionBanSaved>> {
   const raw = input && typeof input === "object" ? { ...input, kind: "kicked", minutes: null } : input;
   return runAdminAction("messaging.write", banStudentSchema, raw, async ({ input: data, user }) => saveSessionBan({ ...data, kind: "kicked", minutes: null }, user.id));
 }
 
-/** [messaging.write] Desfazer o silencio ou o remover desta sessao (apaga a linha). */
+/** [messaging.write] Desfazer o silencio ou o remover desta sessao (apaga a linha). Na Live ao vivo e na gravada. */
 export async function undoSessionBan(input: { kind: BanKind; sessionId: string; userId: string }): Promise<ActionResult<SessionBanUndone>> {
   return runAdminAction("messaging.write", unbanStudentSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    const { row, webinar } = await loadLiveSession(db, data.sessionId);
+    const { row, webinar } = await loadModeratedSession(db, data.sessionId);
     const existed = await deleteSessionBan(db, { kind: data.kind, sessionId: row.id, userId: data.userId });
 
     await recordAudit(db, {
@@ -678,12 +703,13 @@ export async function undoSessionBan(input: { kind: BanKind; sessionId: string; 
 
 /**
  * [messaging.publish] Banir: o aluno sai da sala e nao entra em nenhum webinario ate a equipe desfazer
- * (webinar_user_bans), e fica removido desta sessao (kicked). O navegador manda kickParticipant depois.
+ * (webinar_user_bans), e fica removido desta sessao (kicked). Na Live ao vivo o navegador manda kickParticipant depois;
+ * na gravada vale pela proxima escrita ou conferencia da sala.
  */
 export async function banStudent(input: { reason?: string; sessionId: string; userId: string }): Promise<ActionResult<StudentBanned>> {
   return runAdminAction("messaging.publish", banUserSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    const { row, webinar } = await loadLiveSession(db, data.sessionId);
+    const { row, webinar } = await loadModeratedSession(db, data.sessionId);
     await assertStudentTarget(db, webinar, data.userId);
 
     const reason = data.reason?.trim() || null;

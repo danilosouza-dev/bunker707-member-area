@@ -11,6 +11,11 @@
 // meio e a encerrada fica registrada como estava. A auditoria leva os
 // valores (D10: numeros e booleanos; dos avisos de venda, so a contagem). A semente nunca sai daqui. Banco sem a
 // 202610300003: a leitura devolve { pendingMigration } (o card volta ao selo da fase 2) e a escrita, 409 com a frase.
+// Adendo de 10/11/2026 (R7): a sessao `live` tambem tem a Simulacao (o contador, as entradas e os avisos de venda; nunca
+// o selo "Ao vivo", que e da gravada: ligado na live, erro no campo), com a frase da live (simulationAckSentenceLive) e o
+// zero no started_at: na espera ainda muda; no ar ou encerrada, nao. O Replay recusa com 409. Banco sem a 202611100002
+// (o check antigo webinar_sessions_simulation_not_live_v4 ainda la): a gravacao da live volta 409 com a frase da
+// migracao; a gravada segue como antes.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -21,12 +26,12 @@ import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
-import { WEBINARS_OFFERS_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb } from "./db";
+import { WEBINARS_OFFERS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb } from "./db";
 import type { SessionSimulation, WebinarSession } from "./model";
 import { sessionFromRow } from "./rows";
 import { clampSimulationAck, normalizeSimulationRules, simulationAckFlags, simulationAckFor, simulationAckMatches, simulationSessionStarted } from "./simulation-model";
 import { SIMULATION_MESSAGES, saveSessionSimulationSchema, simulationNeedsAck } from "./simulation-schemas";
-import { listSessionSimulations, saveSessionSimulationRows } from "./simulation-store";
+import { LiveSimulationPendingError, listSessionSimulations, saveSessionSimulationRows } from "./simulation-store";
 import { fetchSessionRow, listSessionRows, requireWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
@@ -51,12 +56,17 @@ function isMissingSimulation(error: unknown) {
   return isPendingMigrationError(error) || isMissingWebinarSchema(error);
 }
 
-/** [messaging.write] As regras das sessoes gravadas do webinario (nada da semente); banco sem a 202610300003, o aviso. */
+/**
+ * [messaging.write] As regras das sessoes gravadas do webinario e, na Live ao vivo, da sessao da live (R7; nada da
+ * semente, nunca o Replay); banco sem a 202610300003, o aviso.
+ */
 export async function loadSessionSimulations(input: { webinarId: string }): Promise<ActionResult<SessionSimulationsData>> {
   return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
-    const sessions = (await listSessionRows(db, [webinar.id])).filter((row) => row.kind === "simulated");
+    // A especie da sessao segue o tipo do webinario: a gravada no gravado, a da live no ao vivo (nunca o Replay).
+    const sessionKind = webinar.kind === "live" ? "live" : "simulated";
+    const sessions = (await listSessionRows(db, [webinar.id])).filter((row) => row.kind === sessionKind);
     try {
       const simulations = await listSessionSimulations(db, sessions.map((row) => row.id));
       return { pendingMigration: false as const, simulations: simulations.map(viewOf) };
@@ -70,10 +80,11 @@ export async function loadSessionSimulations(input: { webinarId: string }): Prom
 }
 
 /**
- * [messaging.publish] Grava a Simulacao de uma sessao gravada: o selo, as regras e a decisao (D10). Com algo simulado
- * ligado, a frase marcada precisa ser a que o servidor monta hoje com o nome de quem decide (senao, erro no campo
- * `acknowledged`); tudo desligado grava a frase de tudo desligado. As regras gravadas sao as normalizadas (avisos
- * ligados sem nenhum item contam como desligados): a frase confere com o que fica no banco.
+ * [messaging.publish] Grava a Simulacao de uma sessao gravada (ou da Live ao vivo, R7): o selo, as regras e a decisao
+ * (D10). Com algo simulado ligado, a frase marcada precisa ser a que o servidor monta hoje com o nome de quem decide (a
+ * da live na live; senao, erro no campo `acknowledged`); tudo desligado grava a frase de tudo desligado. As regras
+ * gravadas sao as normalizadas (avisos ligados sem nenhum item contam como desligados): a frase confere com o que fica
+ * no banco. Na live o selo nunca liga (erro no campo `showLiveBadge`).
  */
 export async function saveSessionSimulation(input: SaveSessionSimulationInput): Promise<ActionResult<SavedSessionSimulation>> {
   return runAdminAction("messaging.publish", saveSessionSimulationSchema, input, async ({ input: data, user }) => {
@@ -85,7 +96,11 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     if (!row) {
       throw new WebinarError(COPY.servidor.naoExiste, 404);
     }
-    if (row.kind !== "simulated" || row.status === "cancelled") {
+    const live = row.kind === "live";
+    if (row.kind === "replay") {
+      throw new WebinarError(COPY.servidor.semReplay, 409);
+    }
+    if ((row.kind !== "simulated" && !live) || row.status === "cancelled") {
       throw new WebinarError(COPY.card.soLiveGravada, 409);
     }
     if (row.status === "ended") {
@@ -93,9 +108,13 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     }
     // Com a sessao no ar (ou com a hora marcada ja passada: o zero da gravada e scheduled_at e o status pode atrasar
     // ate o tick), a regra nao muda: o resumo do fim recalcula com a regra gravada de 0 ao fim, e trocar no meio faria
-    // o relatorio contar o que ninguem viu (ou nada do que viram) e apagaria a decisao que valia (§4.3, §8.6, D10).
-    if (simulationSessionStarted({ scheduledAt: row.scheduled_at, status: row.status as WebinarSession["status"] }, nowMs)) {
-      throw new WebinarError(COPY.servidor.comecou, 409);
+    // o relatorio contar o que ninguem viu (ou nada do que viram) e apagaria a decisao que valia (§4.3, §8.6, D10). Na
+    // live, o zero e o started_at (o "Começar para todos"): na espera ainda muda.
+    if (simulationSessionStarted({ kind: row.kind as WebinarSession["kind"], scheduledAt: row.scheduled_at, startedAt: row.started_at, status: row.status as WebinarSession["status"] }, nowMs)) {
+      throw new WebinarError(live ? COPY.servidor.liveComecou : COPY.servidor.comecou, 409);
+    }
+    if (live && data.showLiveBadge) {
+      throw new WebinarFieldError("showLiveBadge", COPY.servidor.liveSemSelo);
     }
 
     const webinar = await requireWebinarRow(db, row.webinar_id);
@@ -103,13 +122,13 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     const responsible = getUserDisplayName(user).fullName;
     const given = data.ackText?.trim() ?? "";
     const needsAck = simulationNeedsAck(rules);
-    const matches = simulationAckMatches({ ackText: given, nowMs, responsible, rules });
+    const matches = simulationAckMatches({ ackText: given, live, nowMs, responsible, rules });
 
     if (needsAck && (!data.acknowledged || !matches)) {
       throw new WebinarFieldError("acknowledged", COPY.servidor.fraseNaoBate);
     }
 
-    const ackText = clampSimulationAck(matches ? given : simulationAckFor({ nowMs, responsible, rules }));
+    const ackText = clampSimulationAck(matches ? given : simulationAckFor({ live, nowMs, responsible, rules }));
     let saved: SessionSimulation;
     try {
       saved = await saveSessionSimulationRows(db, {
@@ -125,6 +144,9 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     } catch (error) {
       if (isMissingSimulation(error)) {
         throw new WebinarError(COPY.servidor.precisaMigracao(WEBINARS_OFFERS_MIGRATION), 409);
+      }
+      if (error instanceof LiveSimulationPendingError) {
+        throw new WebinarError(COPY.servidor.precisaMigracaoLive(WEBINARS_SCREEN_MIGRATION), 409);
       }
       throw error;
     }
@@ -155,6 +177,7 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
         sale_notices: rules.saleNotices.items.length,
         sale_notices_enabled: flags.saleNoticesSimulated,
         session_id: row.id,
+        session_kind: row.kind,
         show_live_badge: rules.showLiveBadge
       }
     });

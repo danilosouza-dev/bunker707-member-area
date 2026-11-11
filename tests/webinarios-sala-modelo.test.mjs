@@ -135,10 +135,19 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
     source: "audience",
     webinarId: "w1"
   };
-  assert.deepEqual(room.toStudentMessage(base, "u1", "simulated"), { avatarUrl: null, body: "oi", displayName: "Ana M.", id: "m1", kind: "message", mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: null });
+  assert.deepEqual(room.toStudentMessage(base, "u1", "simulated"), { avatarUrl: null, body: "oi", displayName: "Ana M.", id: "m1", kind: "message", links: false, mine: true, offsetMs: 10_000, pending: false, pinned: false, replyToId: null, role: "student", sentAt: null });
   const scripted = room.toStudentMessage({ ...base, authorUserId: null, role: "team", source: "scripted" }, "u1", "simulated");
   assert.equal(scripted.role, "team");
   assert.equal(scripted.mine, false);
+  // Link so na mensagem da equipe (especificacao "Na tela", §8.1): papel da equipe E origem console ou roteiro.
+  assert.equal(scripted.links, true, "a fala de um personagem da equipe");
+  for (const role of ["host", "co_host", "team"]) {
+    assert.equal(room.toStudentMessage({ ...base, role, source: "team" }, "u1", "live").links, true, role);
+  }
+  assert.equal(room.toStudentMessage({ ...base, role: "student", source: "scripted" }, "u1", "simulated").links, false, "o personagem de aluno do roteiro");
+  assert.equal(room.toStudentMessage({ ...base, role: "ai", source: "ai" }, "u1", "live").links, false, "o Assistente");
+  assert.equal(room.toStudentMessage({ ...base, role: "team", source: "audience" }, "u1", "live").links, false, "papel de equipe numa linha da turma");
+  assert.equal(room.toStudentMessage({ ...base, role: "team", source: "original" }, "u1", "simulated").links, false, "a linha mestre repetida");
   assert.equal(room.toStudentMessage({ ...base, approved: false }, "u1", "simulated").pending, true);
   assert.equal(room.toStudentMessage({ ...base, pinnedAt: "2026-11-05T23:01:00.000Z" }, null, "simulated").pinned, true);
   assert.equal(room.toStudentMessage(base, null, "simulated", 8_000).offsetMs, 8_000, "a linha mestre vem deslocada");

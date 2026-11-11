@@ -22,8 +22,9 @@ import { Radio } from "lucide-react";
 // um dialogo de tela cheia. Nada fica desenhado por baixo dele: sem Minimizar (docs/31 V2-2), a pagina da live por
 // baixo so duplicava o h1 e o trabalho do servidor; Sair volta para ela. O rodape fica para os estados de erro e de
 // recusa. Fora do acesso ou sessao de outro webinario: nao encontrado, sem dizer se existe (docs/30 §8.2). Gravada fora da janela de entrada
-// (antes de 15 min, depois do fim ou da Entrada atrasada), sessao cancelada ou sem a vaga numa live com limite de
-// vagas (A12): a frase e o caminho de volta. A Live ao vivo abre em qualquer situacao (a tela diz Aguardando o
+// (antes de 15 min, depois do fim ou da Entrada atrasada), sessao cancelada, sem a vaga numa live com limite de
+// vagas (A12) ou removido desta sessao da gravada (a moderacao por pessoa da Na tela, R5: "Você foi removido desta
+// live.", a mesma frase da sala): a frase e o caminho de volta. A Live ao vivo abre em qualquer situacao (a tela diz Aguardando o
 // apresentador, sala trancada, em breve, encerrada, removido ou banido) e recebe o nonce da pagina: o external_api.js
 // do nosso servidor de video entra com ele, sem origem nova na CSP (docs/30 §8.4). Nenhum pop-up aqui (docs/25 §1,
 // "onde nunca": a rota nao tem chave de pagina e o palco anuncia o sinal de midia).
@@ -94,15 +95,17 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
             description={
               data.reason === "banned"
                 ? WEBINAR_COPY.aoVivo.banido
-                : data.reason === "not_started"
-                  ? copy.naoComecou
-                  : data.reason === "late"
-                    ? copy.entradaAtrasada
-                    : data.reason === "no_seat"
-                      ? copy.vagaObrigatoria
-                      : data.reason === "cancelled"
-                        ? WEBINAR_COPY.aluno.cancelada
-                        : copy.encerrada
+                : data.reason === "kicked"
+                  ? WEBINAR_COPY.aoVivo.removido
+                  : data.reason === "not_started"
+                    ? copy.naoComecou
+                    : data.reason === "late"
+                      ? copy.entradaAtrasada
+                      : data.reason === "no_seat"
+                        ? copy.vagaObrigatoria
+                        : data.reason === "cancelled"
+                          ? WEBINAR_COPY.aluno.cancelada
+                          : copy.encerrada
             }
             icon={Radio}
             title={data.page.view.title}

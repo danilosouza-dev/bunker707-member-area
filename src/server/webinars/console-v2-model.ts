@@ -32,14 +32,15 @@ export function consoleSessionOptionLabel(session: { kind: SessionKind; schedule
  * O selo dos presentes (V2-13; no topo da gravada e do Replay, e no palco da live): "12 presentes ·
  * pico 14". Os presentes vem do retrato de 5 s e o pico do relatorio em cache de 60 s (console-presence-model.ts), entao
  * o pico mostrado e o maior dos dois: sem isso o selo poderia dizer "12 presentes · pico 10". Sem pico (o Replay, antes
- * de comecar ou sem a leitura), so "12 presentes".
+ * de comecar ou sem a leitura), so "12 presentes". Com o contador simulado ligado (adendo de 10/11/2026, R7), a parte
+ * simulada vem separada no fim, "· +300 simulados", para a equipe nunca confundir com o real (o aluno ve a soma); sem
+ * ela (desligado, zero, sessao encerrada), nada a mais.
  */
-export function consolePresenceBadge(input: { peak: number | null; presentNow: number }): string {
+export function consolePresenceBadge(input: { peak: number | null; presentNow: number; simulated?: number | null }): string {
   const present = Number.isFinite(input.presentNow) ? Math.max(0, Math.round(input.presentNow)) : 0;
-  if (input.peak === null || !Number.isFinite(input.peak)) {
-    return copy.presentes(present);
-  }
-  return copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
+  const simulated = typeof input.simulated === "number" && Number.isFinite(input.simulated) ? Math.round(input.simulated) : 0;
+  const real = input.peak === null || !Number.isFinite(input.peak) ? copy.presentes(present) : copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
+  return simulated > 0 ? `${real} · ${WEBINAR_COPY.simulacao.console.simulados(simulated)}` : real;
 }
 
 /** Os botoes de situacao do topo do console, na ordem em que aparecem. */
@@ -269,8 +270,8 @@ export function consoleRecordButton(input: { canPublish: boolean; card: Pick<Rec
 export const CONSOLE_TABS = ["chat", "perguntas", "maos", "pessoas"] as const;
 export type ConsoleTab = (typeof CONSOLE_TABS)[number];
 
-/** As entradas do ⋯ do painel, na ordem do V2-15. */
-export const CONSOLE_MORE_ENTRIES = ["enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
+/** As entradas do ⋯ do painel, na ordem do V2-15; a Na tela (docs/31 §12) e a primeira. */
+export const CONSOLE_MORE_ENTRIES = ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"] as const;
 export type ConsoleMoreEntry = (typeof CONSOLE_MORE_ENTRIES)[number];
 
 /** O que o painel mostra: uma aba ou uma entrada do ⋯ (nunca as duas: com uma entrada, nenhuma aba fica escolhida). */
@@ -320,12 +321,15 @@ export function consoleRailFit(input: { available: number | null; count: number 
 }
 
 /**
- * As entradas do ⋯ (V2-15), na ordem: Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento
- * sempre; Presença com a leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
+ * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
+ * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença com a
+ * leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
  */
 export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
-  const entries: ConsoleMoreEntry[] = ["enquetes"];
-  if (input.webinarKind === "simulated") {
+  const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
+  // O Roteiro: no webinario gravado (o Replay dele tambem) e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao
+  // vivo (nunca no Replay da live: la ninguem solta comentario).
+  if (input.webinarKind === "simulated" || input.kind === "live") {
     entries.push("roteiro");
   }
   if (input.kind !== "live") {

@@ -177,3 +177,61 @@ test("a receita escrita (M8): uma por moeda; sem venda com valor, nulo (a tela e
   assert.equal(report.revenueLabel([]), null);
   assert.equal(report.revenueLabel([{ cents: 0, currency: "BRL", sales: 0 }]), null);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * O bloco "Na tela" (especificacao de 10/11/2026, §7): uma linha por exibicao
+ * ---------------------------------------------------------------------------------------------- */
+
+test("o bloco Na tela: o item, quando entrou (antes do início na espera), quanto ficou (sem sair, ate o fim), os numeros e Clicaram ÷ viram; a enquete fixada sem numeros", async () => {
+  const pageModel = await import("../src/server/webinars/report-page-model.ts");
+  const ZERO = Date.parse("2026-11-10T23:00:00.000Z");
+  const FIM = ZERO + 60 * 60_000;
+  const quando = (ms) => new Date(ms).toISOString();
+  const exibicao = (id, kind, extra = {}) => ({
+    createdAt: quando(ZERO),
+    hiddenAt: null,
+    hiddenBy: null,
+    hiddenOffsetMs: null,
+    hiddenReason: null,
+    id,
+    itemId: kind === "poll" ? null : "item",
+    kind,
+    pollId: kind === "poll" ? "enquete" : null,
+    sessionId: "sessao",
+    shownAt: quando(ZERO),
+    shownBy: null,
+    shownOffsetMs: null,
+    snapshot: { name: kind === "poll" ? "Qual curso?" : "Turma de novembro", v: 1 },
+    ...extra
+  });
+  const linhas = pageModel.screenReportRows({
+    displays: [
+      // Fora de ordem: o bloco segue a ordem em que entraram.
+      exibicao("qr", "qr", { hiddenAt: quando(ZERO + 15 * 60_000 + 30_000), shownAt: quando(ZERO + 12 * 60_000 + 30_000), shownOffsetMs: 750_000, snapshot: { name: "Inscrição", v: 1 } }),
+      exibicao("espera", "banner", { hiddenAt: quando(ZERO + 30_000), shownAt: quando(ZERO - 2 * 60_000), shownOffsetMs: -120_000 }),
+      exibicao("ficou", "banner", { shownAt: quando(ZERO + 15 * 60_000) }),
+      exibicao("enquete", "poll", { hiddenAt: quando(ZERO + 75 * 60_000), shownAt: quando(ZERO + 5 * 60_000), shownOffsetMs: 300_000 }),
+      exibicao("invalida", "banner", { shownAt: quando(ZERO + 70 * 60_000), shownOffsetMs: 4_210_000, snapshot: null })
+    ],
+    endMs: FIM,
+    stats: { espera: { clickers: 41, clicks: 57, closed: 9, shown: 312 }, ficou: { clickers: 0, clicks: 0, closed: 0, shown: 0 }, qr: { clickers: 3, clicks: 3, closed: 1, shown: 8 } },
+    zeroMs: ZERO
+  });
+  assert.deepEqual(
+    linhas.map((linha) => [linha.label, linha.enteredAt, linha.stayed, linha.shown, linha.clickers, linha.clicks, linha.closed, linha.rate]),
+    [
+      ["Banner · Turma de novembro", "antes do início", "3 min", 312, 41, 57, 9, 13],
+      ["Enquete fixada · Qual curso?", "05:00", "1 h 10 min", null, null, null, null, null],
+      ["QR Code · Inscrição", "12:30", "3 min", 8, 3, 3, 1, 38],
+      ["Banner · Turma de novembro", "15:00", "45 min", 0, 0, 0, 0, null],
+      ["Banner · —", "1:10:10", "0 s", 0, 0, 0, 0, null]
+    ],
+    "sem o offset gravado, pelo zero da sessao; sem sair, ate o fim; sem quem viu, a taxa fica nula ('—'); a copia invalida vira '—'"
+  );
+  assert.deepEqual(linhas.map((linha) => linha.kind), ["banner", "poll", "qr", "banner", "banner"]);
+  assert.equal(pageModel.screenEnteredLabel(null), "—");
+  assert.equal(pageModel.screenEnteredLabel(-1), "antes do início");
+  assert.equal(pageModel.screenEnteredLabel(0), "00:00");
+  assert.equal(pageModel.screenEnteredLabel(3_725_000), "1:02:05");
+  assert.deepEqual(pageModel.screenReportRows({ displays: [], endMs: FIM, stats: {}, zeroMs: ZERO }), []);
+});

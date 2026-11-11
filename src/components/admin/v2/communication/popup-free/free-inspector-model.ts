@@ -13,6 +13,7 @@
 import {
   FREE_ARTBOARD_WIDTH_PRESETS,
   FREE_DESIGN_LIMITS,
+  FREE_IMAGE_LIMITS,
   FREE_MARK_DEFAULTS,
   findFreeNode,
   freeDefaultFlowWidth,
@@ -34,6 +35,7 @@ import {
   type FreeClose,
   type FreeIconName,
   type FreeImageAsset,
+  type FreeImageLimits,
   type FreeColorStop,
   type FreeCountdownCell,
   type FreeCountdownUnits,
@@ -2081,6 +2083,9 @@ export function freeWeightAfterFontChange(font: PopupFontRef, current: PopupFont
  * Imagem: reduzir ate 1.600 px e as qualidades ate caber em 420.000 bytes
  * ---------------------------------------------------------------------------------------------- */
 
+// As contas recebem os limites (FreeImageLimits) com os do Livre como padrao: o banner da Na tela dos webinarios usa as
+// mesmas contas com 1.280 px e 200.000 bytes (console-screen-form.tsx).
+
 /** Qualidades do WebP, nesta ordem, ate caber. */
 export const FREE_IMAGE_QUALITIES = [0.86, 0.75, 0.6] as const;
 /** Formatos aceitos no "Enviar imagem" (o editor converte em WebP). */
@@ -2088,18 +2093,18 @@ export const FREE_IMAGE_INPUT_TYPES = ["image/jpeg", "image/png", "image/webp"] 
 /** Arquivo de origem: ate 20 MB (o envio final e sempre ate 420.000 bytes). */
 export const FREE_IMAGE_SOURCE_MAX_BYTES = 20 * 1024 * 1024;
 
-/** Medidas finais: o lado maior vai ate 1.600 px (nunca aumenta); lado final abaixo de 16 px = null. */
-export function freeImageTargetSize(source: { height: number; width: number }): { height: number; width: number } | null {
+/** Medidas finais: o lado maior vai ate 1.600 px (ou o lado de `limits`; nunca aumenta); lado final abaixo de 16 px = null. */
+export function freeImageTargetSize(source: { height: number; width: number }, limits: FreeImageLimits = FREE_IMAGE_LIMITS): { height: number; width: number } | null {
   const { height, width } = source;
 
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return null;
   }
 
-  const scale = Math.min(1, L.imageSide.max / Math.max(width, height));
+  const scale = Math.min(1, limits.side.max / Math.max(width, height));
   const target = { height: Math.round(height * scale), width: Math.round(width * scale) };
 
-  return target.width < L.imageSide.min || target.height < L.imageSide.min ? null : target;
+  return target.width < limits.side.min || target.height < limits.side.min ? null : target;
 }
 
 /** Bytes de um data URL em base64 (sem o prefixo). */
@@ -2111,8 +2116,11 @@ export function freeDataUrlBytes(dataUrl: string): number {
   return Math.max(0, Math.floor((body.length * 3) / 4) - padding);
 }
 
-/** A primeira qualidade que coube (WebP de verdade e ate 420.000 bytes); null = nenhuma coube. */
-export function pickFreeImageEncoding(attempts: readonly { dataUrl: string; quality: number }[]): { bytes: number; dataUrl: string; quality: number } | null {
+/** A primeira qualidade que coube (WebP de verdade e ate 420.000 bytes, ou o peso de `limits`); null = nenhuma coube. */
+export function pickFreeImageEncoding(
+  attempts: readonly { dataUrl: string; quality: number }[],
+  limits: FreeImageLimits = FREE_IMAGE_LIMITS
+): { bytes: number; dataUrl: string; quality: number } | null {
   for (const attempt of attempts) {
     if (!attempt.dataUrl.startsWith("data:image/webp;base64,")) {
       continue;
@@ -2120,7 +2128,7 @@ export function pickFreeImageEncoding(attempts: readonly { dataUrl: string; qual
 
     const bytes = freeDataUrlBytes(attempt.dataUrl);
 
-    if (bytes > 0 && bytes <= L.imageBytes) {
+    if (bytes > 0 && bytes <= limits.bytes) {
       return { bytes, dataUrl: attempt.dataUrl, quality: attempt.quality };
     }
   }

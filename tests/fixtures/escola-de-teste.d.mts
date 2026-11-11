@@ -145,3 +145,22 @@ export const SIMULACAO_DE_TESTE: { resumo: { counter_max: number; joins_shown: n
 export function seedSimulacaoDeTeste(db: unknown, opcoes?: { sessaoId?: string }): Promise<{ ackText: string; resumo: { counter_max: number; joins_shown: number; sale_notices_shown: number } }>;
 export const JIT_DE_TESTE: { gravacaoId: string; id: string; slug: string; titulo: string; videoUrl: string };
 export function seedJitDeTeste(db: unknown, opcoes?: { aCada?: 15 | 30 | 60; entradaAtrasada?: number | null }): Promise<{ everyMinutes: number; lateJoinMinutes: number | null }>;
+
+/* A "Na tela" (docs/30 §2.4 e §4.2; migracao 202611100002): o banner e o QR Code prontos de teste. */
+export type ItemDaTelaDeTeste = {
+  body: string | null;
+  buttonLabel: string | null;
+  closable: boolean;
+  id: string;
+  kind: "banner" | "qr";
+  linkUrl: string;
+  name: string;
+  place: string;
+  size: "l" | "m" | "s";
+  title: string;
+};
+export const NA_TELA_DE_TESTE: { banner: ItemDaTelaDeTeste; qr: ItemDaTelaDeTeste };
+export function seedNaTelaDeTeste(
+  db: unknown,
+  opcoes?: { mostrar?: ("banner" | "qr")[]; sessaoId?: string; webinarId?: string }
+): Promise<{ banner?: string; qr?: string }>;

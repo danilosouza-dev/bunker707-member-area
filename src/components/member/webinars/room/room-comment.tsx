@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronUp, Sparkles, UserRound, UsersRound, VenetianMask, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -19,6 +19,9 @@ import { ROOM_FOCUS } from "./room-ui";
 // O fio (a pergunta com a resposta escrita, spec §8.4; A §4.6 e §4.7): a linha de 1 px no centro do avatar, de 28 px
 // abaixo do topo ate o fim do comentario, a curva de 12 x 30 ate o botao "1 resposta" e, aberto, a linha que segue ate
 // a curva de 12 x 24 do avatar da resposta; com o ponteiro no comentario, a linha clareia. Tudo decorativo (aria-hidden).
+// A fixada na area das fixadas do painel (especificacao "Na tela", §3.1; screen/room-pinned.tsx): o texto cortado em 3
+// linhas pede as classes, o id e a referencia do paragrafo do texto (o "Mostrar tudo" mede o corte e aponta para ele
+// pelo aria-controls) e o id da linha de cima (o nome da secao da fixada). Sem essas props, o HTML e o de antes.
 
 export type RoomCommentAvatarKind = "anonymous" | "assistant" | "person" | "team" | "unknown";
 
@@ -64,12 +67,20 @@ export type RoomCommentProps = {
   aside?: ReactNode;
   /** O avatar (RoomCommentAvatar). */
   avatar: ReactNode;
+  /** Classes a mais no paragrafo do texto (a fixada: o corte em 3 linhas). */
+  bodyClassName?: string;
+  /** O id do paragrafo do texto (o aria-controls do "Mostrar tudo" da fixada). */
+  bodyId?: string;
+  /** A referencia do paragrafo do texto (a fixada mede se o corte escondeu alguma coisa). */
+  bodyRef?: Ref<HTMLParagraphElement>;
   /** "li" na lista; "div" fora dela (a fixada, no bloco do topo; a resposta no fio). */
   as?: "div" | "li";
   /** O texto do comentario (os trechos com o "@assistente"). */
   body: ReactNode;
   /** A linha de cima, opcional (a fixada: o alfinete e "Fixada pela equipe"). */
   headline?: ReactNode;
+  /** O id da linha de cima (o nome da secao da fixada, pelo aria-labelledby). */
+  headlineId?: string;
   id: string;
   /**
    * O que o id marca: a mensagem do chat (data-room-message), a pergunta (data-room-question), a primeira resposta da
@@ -97,7 +108,26 @@ const THREAD_LINE_TO_TOGGLE = "absolute -left-6 -top-3 bottom-0 w-px bg-room-thr
 
 const MARKERS = { answer: "data-room-answer", message: "data-room-message", question: "data-room-question", reply: "data-room-reply" } as const;
 
-export function RoomComment({ actions = null, as: Tag = "li", aside = null, avatar, body, className, headline = null, id, marker = "message", meta, mine = false, pending = false, srAuthor, thread = null }: RoomCommentProps) {
+export function RoomComment({
+  actions = null,
+  as: Tag = "li",
+  aside = null,
+  avatar,
+  body,
+  bodyClassName,
+  bodyId,
+  bodyRef,
+  className,
+  headline = null,
+  headlineId,
+  id,
+  marker = "message",
+  meta,
+  mine = false,
+  pending = false,
+  srAuthor,
+  thread = null
+}: RoomCommentProps) {
   const badgeOnly = roleBadgeOnly(meta.name, meta.role);
   const hasActions = pending || Boolean(actions);
   const marks = { "data-mine": mine ? "" : undefined, [MARKERS[marker]]: id };
@@ -106,7 +136,11 @@ export function RoomComment({ actions = null, as: Tag = "li", aside = null, avat
     <>
       {avatar}
       <div className="ml-3 min-w-0 flex-1">
-        {headline ? <p className="flex items-center gap-1.5 text-xs leading-[18px] text-room-fg-subtle">{headline}</p> : null}
+        {headline ? (
+          <p className="flex items-center gap-1.5 text-xs leading-[18px] text-room-fg-subtle" id={headlineId}>
+            {headline}
+          </p>
+        ) : null}
         <p aria-hidden="true" className="mb-0.5 flex h-5 min-w-0 items-center gap-1" data-room-message-meta="">
           {badgeOnly && meta.role ? (
             <RoomRoleBadge>{meta.role}</RoomRoleBadge>
@@ -122,7 +156,7 @@ export function RoomComment({ actions = null, as: Tag = "li", aside = null, avat
             </time>
           ) : null}
         </p>
-        <p className="whitespace-pre-wrap text-sm leading-5 text-room-fg [overflow-wrap:anywhere]">
+        <p className={cn("whitespace-pre-wrap text-sm leading-5 text-room-fg [overflow-wrap:anywhere]", bodyClassName)} id={bodyId} ref={bodyRef}>
           <span className="sr-only">{srAuthor}</span>
           {body}
         </p>

@@ -180,7 +180,11 @@ test("as superficies fora do video nao voltam aos hex fixos de antes (#0b0b0b, #
     "room-tooltip.tsx",
     "room-snackbar.tsx",
     "room-rail.tsx",
-    ...readdirSync(path.join(root, ROOM, "assistant")).map((nome) => `assistant/${nome}`)
+    "room-stage-badges.tsx",
+    "room-simulation.tsx",
+    ...readdirSync(path.join(root, ROOM, "assistant")).map((nome) => `assistant/${nome}`),
+    // A Na tela (especificacao de 10/11/2026): a area das fixadas, a camada do palco, o cartao, a faixa e a doca.
+    ...readdirSync(path.join(root, ROOM, "screen")).map((nome) => `screen/${nome}`)
   ].map((nome) => `${ROOM}/${nome}`);
   arquivos.push("src/components/member/webinars/translation/room-translation-bar.tsx", `${ROOM}/vertical/vertical-model.ts`);
   const HEX = ["0b0b0b", "111", "0f0f0f", "161616", "1b1b1b", "121212"];
@@ -496,5 +500,19 @@ test("o vermelho cheio (o RoomButton accent e a RoomPill red) e so o Sair: o do 
   assert.deepEqual([...new Set(usos.map((uso) => uso.caminho))].sort(), [`${ROOM}/room-bar.tsx`, `${ROOM}/room-header.tsx`], "o Sair do cabecalho e o da barra");
   for (const uso of usos) {
     assert.match(uso.rotulo, /\{copy\.sair\}/, `${uso.caminho}: ${uso.rotulo}`);
+  }
+});
+
+test("a Na tela so com os tokens da sala (especificacao de 10/11/2026, §3.2): nenhuma cor escrita nos componentes, menos o quadro branco e os modulos pretos do QR Code (iguais nos dois temas, para o celular ler)", () => {
+  const pasta = "src/components/member/webinars/room/screen";
+  const arquivos = readdirSync(path.join(root, pasta)).filter((nome) => nome.endsWith(".tsx"));
+  assert.ok(arquivos.includes("room-screen-card.tsx") && arquivos.includes("room-screen-strip.tsx") && arquivos.includes("room-screen-layer.tsx"), arquivos.join(", "));
+  for (const nome of arquivos) {
+    const codigo = semComentarios(ler(`${pasta}/${nome}`));
+    const cores = [...codigo.matchAll(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi)].map(([cor]) => cor);
+    const permitidas = nome === "room-screen-card.tsx" ? ["#ffffff", "#000000"] : [];
+    const sombras = cores.filter((cor) => cor.startsWith("rgba(0,0,0,"));
+    assert.deepEqual(cores.filter((cor) => !permitidas.includes(cor) && !sombras.includes(cor)), [], `${nome}: so --room-* (e a sombra preta)`);
+    assert.doesNotMatch(codigo, /\b(?:bg|text|border)-(?:zinc|neutral|gray|slate|stone)-\d/, `${nome}: sem a paleta fixa`);
   }
 });

@@ -102,6 +102,8 @@ export type ChatMessageInsert = {
   kind?: string;
   master?: boolean;
   offset_ms: number;
+  /** A foto de quem comenta (R9), so na `scripted` e so com a 202611100002: sem foto, a chave fica de fora. */
+  persona_avatar_path?: string | null;
   reply_to_id?: string | null;
   role: string;
   script_item_id?: string | null;
@@ -124,6 +126,25 @@ export async function insertScriptedMessage(db: WebinarsDb, row: ChatMessageInse
   }
   assertNoDbError(error, "Webinarios: soltar item do roteiro");
   return (data as ChatMessageRow | null) ?? null;
+}
+
+/**
+ * Um comentario do "Novo comentário" do console solto na hora, sem item do roteiro (R8): a mensagem `scripted` da
+ * sessao com o nome, o papel e a foto de quem comenta.
+ */
+export async function insertScriptedComment(db: WebinarsDb, row: Omit<ChatMessageInsert, "script_item_id" | "source">): Promise<ChatMessageRow> {
+  const { data, error } = await db.from("webinar_chat_messages").insert({ ...row, script_item_id: null, source: "scripted" }).select(CHAT_MESSAGE_COLUMNS).single();
+  assertNoDbError(error, "Webinarios: soltar comentario");
+  return data as ChatMessageRow;
+}
+
+/** Os itens do roteiro que ja entraram numa sessao (o tick da live nunca solta o mesmo duas vezes). */
+export async function listFiredScriptItemIds(db: WebinarsDb, sessionId: string): Promise<Set<string>> {
+  const rows = await fetchAll<{ script_item_id: string }>(
+    (from, to) => db.from("webinar_chat_messages").select("script_item_id").eq("session_id", sessionId).not("script_item_id", "is", null).range(from, to),
+    "Webinarios: roteiro que ja entrou na sessao"
+  );
+  return new Set(rows.map((row) => row.script_item_id).filter((id): id is string => Boolean(id)));
 }
 
 export async function fetchChatMessageRow(db: WebinarsDb, id: string): Promise<ChatMessageRow | null> {
@@ -276,16 +297,20 @@ export type ScriptItemUpsert = {
   position: number;
   resolved_offset_ms?: number | null;
   resolved_transcript_id?: string | null;
+  /** A foto de quem comenta (R9): so com a 202611100002; sem a coluna no banco, a chave fica de fora. */
+  persona_avatar_path?: string | null;
   status: string;
   trigger_kind: string;
   webinar_id: string;
 };
 
 /**
- * O roteiro inteiro de uma vez: grava (upsert pelo id) as linhas enviadas e apaga as do webinario que ficaram de fora.
- * Os ids que nao vieram sao criados pelo banco. Devolve o roteiro como ficou.
+ * O roteiro inteiro de uma vez: grava (upsert pelo id) as linhas enviadas e apaga as que ficaram de fora. Os ids que nao
+ * vieram sao criados pelo banco. `removable`: so esses ids podem sair (o Salvar do editor manda os que ele carregou; um
+ * item que o console guardou depois fica); nulo, sai todo item do webinario fora da lista (o "Substituir" do CSV).
+ * Devolve o roteiro como ficou.
  */
-export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, items: readonly ScriptItemUpsert[]): Promise<ScriptItemRow[]> {
+export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, items: readonly ScriptItemUpsert[], removable: readonly string[] | null = null): Promise<ScriptItemRow[]> {
   const withId = items.filter((item): item is ScriptItemUpsert & { id: string } => Boolean(item.id));
   const withoutId = items.filter((item) => !item.id);
   const kept: string[] = withId.map((item) => item.id);
@@ -299,13 +324,33 @@ export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, i
     assertNoDbError(error, "Webinarios: gravar itens novos do roteiro");
     kept.push(...((data ?? []) as { id: string }[]).map((row) => row.id));
   }
-  let removal = db.from("webinar_chat_script_items").delete().eq("webinar_id", webinarId);
-  if (kept.length > 0) {
-    removal = removal.not("id", "in", `(${kept.join(",")})`);
+  if (removable === null) {
+    let removal = db.from("webinar_chat_script_items").delete().eq("webinar_id", webinarId);
+    if (kept.length > 0) {
+      removal = removal.not("id", "in", `(${kept.join(",")})`);
+    }
+    const { error } = await removal;
+    assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
+  } else {
+    const keptIds = new Set(kept);
+    const gone = Array.from(new Set(removable)).filter((id) => !keptIds.has(id));
+    for (let start = 0; start < gone.length; start += 200) {
+      const { error } = await db
+        .from("webinar_chat_script_items")
+        .delete()
+        .eq("webinar_id", webinarId)
+        .in("id", gone.slice(start, start + 200));
+      assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
+    }
   }
-  const { error } = await removal;
-  assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
   return listScriptItemRows(db, webinarId);
+}
+
+/** Um item novo no fim do roteiro (o "Guardar na lista" do console, R8): devolve a linha gravada. */
+export async function insertScriptItemRow(db: WebinarsDb, item: ScriptItemUpsert): Promise<ScriptItemRow> {
+  const { data, error } = await db.from("webinar_chat_script_items").insert(item).select(SCRIPT_ITEM_COLUMNS).single();
+  assertNoDbError(error, "Webinarios: guardar item no roteiro");
+  return data as ScriptItemRow;
 }
 
 export type ScriptItemPatch = Partial<Pick<ScriptItemRow, "resolved_offset_ms" | "resolved_transcript_id" | "status">>;
