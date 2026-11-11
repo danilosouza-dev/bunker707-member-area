@@ -200,6 +200,8 @@ if (sub === "login") { try { stdin = fs.readFileSync(0, "utf8"); } catch { stdin
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "docker", args, stdin }) + "\n");
 if (sub === "login" || sub === "logout") process.exit(0);
 if (sub === "pull") process.exit(process.env.SHIM_DOCKER_PULL_FALHA ? 1 : 0);
+// O build da imagem do app no runner (deploy-membros): so anotado.
+if (sub === "buildx") process.exit(0);
 if (sub === "run") {
   const mount = args.find((a) => a.endsWith(":/cerimonia/cerimonia.mjs:ro"));
   if (!mount) { process.stderr.write("docker de mentira: run sem a cerimonia\n"); process.exit(125); }
