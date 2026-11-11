@@ -119,7 +119,12 @@ test("o produtor cria um banner sem fechar e mostra; a aluna ve no palco largo s
     await formulario.getByLabel(naTela.formulario.texto, { exact: true }).fill(BANNER.texto);
     await formulario.getByLabel(naTela.formulario.textoDoBotao, { exact: true }).fill(BANNER.botao);
     await formulario.getByLabel(naTela.formulario.link, { exact: true }).fill(BANNER.link);
-    await formulario.getByRole("radio", { exact: true, name: naTela.lugares.bottom_left }).check({ force: true });
+    // O ponto da grade e o rotulo do radio (o radio fica escondido para quem ve): clica-se no ponto, como a pessoa faz.
+    // Forcar o clique no radio escondido nao o marca no WebKit.
+    const embaixoEsquerda = formulario.getByRole("radio", { exact: true, name: naTela.lugares.bottom_left });
+    await formulario.locator("[data-console-screen-place] label:has(input[value='bottom_left'])").click();
+    await expect(embaixoEsquerda).toBeChecked();
+    await expect(formulario.locator("[data-console-screen-place-name]")).toHaveText(naTela.lugares.bottom_left);
     const fechar = formulario.getByRole("switch", { name: naTela.formulario.podeFechar });
     await expect(fechar).toHaveAttribute("aria-checked", "true");
     await fechar.click();
