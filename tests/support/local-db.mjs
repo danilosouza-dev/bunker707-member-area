@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { storageBaseOf, toPublicStorageUrl, toStoredStorageUrl } from "../../src/server/db/storage-paths.ts";
 
 // Cliente do Supabase LOCAL para os testes de integracao e de ponta a ponta (docs/18 §2.5).
 //
@@ -61,4 +62,17 @@ export function unwrap(result, context) {
   }
 
   return result.data;
+}
+
+/**
+ * O que o banco guarda para um endereco do Storage local: o caminho (docs/32 §11.5). Este cliente le e grava o banco
+ * cru (sem o transporte do app), entao o que o app gravou aparece assim.
+ */
+export function guardadoNoBanco(url) {
+  return toStoredStorageUrl(url, storageBaseOf(readLocalSupabaseConfig().url));
+}
+
+/** O endereco inteiro que o app entrega para um valor guardado no banco (o caminho ganha o Supabase local na frente). */
+export function comoOAppEntrega(valor) {
+  return typeof valor === "string" ? toPublicStorageUrl(valor, storageBaseOf(readLocalSupabaseConfig().url)) : valor;
 }

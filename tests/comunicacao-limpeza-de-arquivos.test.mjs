@@ -83,6 +83,10 @@ test("Padrão: nenhum arquivo no design; a imagem e o áudio do aviso contam, de
   assert.deepEqual(chaves([refs.storageRefOfUrl(`${NUVEM}/storage/v1/render/image/public/content-assets/${AVISO_IMG}?width=320`)]), [`content-assets/${AVISO_IMG}`]);
   assert.equal(refs.storageRefOfUrl("nao e endereco"), null);
   assert.equal(refs.storageRefOfUrl(`${NUVEM}/storage/v1/object/public/content-assets/`), null);
+  // O caminho que o banco guarda (docs/32 §11.5) tambem conta como uso: um arquivo citado assim nunca e apagado.
+  assert.deepEqual(chaves([refs.storageRefOfUrl(`/storage/v1/object/public/content-assets/${AVISO_IMG}`)]), [`content-assets/${AVISO_IMG}`]);
+  assert.deepEqual(chaves(refs.campaignMediaRefs({ audio_url: `/storage/v1/object/public/communication-audio/${AUDIO}`, image_url: null, popup_design: null })), [`communication-audio/${AUDIO}`]);
+  assert.equal(refs.storageRefOfUrl(AVISO_IMG), null, "o caminho dentro do bucket sozinho nao diz o bucket");
 });
 
 test("Personalizado: o vídeo (mesmo com a mídia em imagem) e a imagem do fundo do cartão; a origem não importa", () => {

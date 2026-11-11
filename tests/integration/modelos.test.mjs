@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { after, before, beforeEach, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import { actAs } from "../support/integration-hooks.mjs";
-import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
+import { createLocalAdminClient, guardadoNoBanco, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
 import { apagarContaDeTeste, ESCOLA_DE_TESTE, limparComunicacao, SENHA_DE_TESTE, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Modelos da Comunicacao (docs/28 §7.2) contra o banco e o Storage LOCAIS de verdade: permissoes (analista 403, sem
@@ -271,7 +271,7 @@ test("4. salvar o design: Personalizado com mídia imagem guarda o apoio com a i
   const personalizado = ok(await salvarModelo(doDesign({ design: comImagem, support: { ctaLabel: "Quero", image: IMAGEM } })));
   const linhaP = await linhaDoModelo(personalizado.id);
   assert.deepEqual([linhaP.kind, linhaP.design_mode, personalizado.designMode], ["design", "custom", "custom"]);
-  assert.deepEqual(linhaP.payload.designSupport, { ctaLabel: "Quero", image: IMAGEM });
+  assert.deepEqual(linhaP.payload.designSupport, { ctaLabel: "Quero", image: { ...IMAGEM, url: guardadoNoBanco(IMAGEM.url) } }, "o banco guarda o caminho da imagem");
 
   const livre = ok(await salvarModelo(doDesign({ freeDesign: freeStarters.freeStarterDesign("blank"), support: { ctaLabel: "Entrar", image: IMAGEM } }, { origin: "free_editor" })));
   const linhaL = await linhaDoModelo(livre.id);
