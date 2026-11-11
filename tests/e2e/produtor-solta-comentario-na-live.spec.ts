@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { WEBINAR_COPY } from "../../src/lib/webinar-copy";
+import { WEBINAR_ADMIN_COPY } from "../../src/server/webinars/editor-model";
 import { limparWebinarios, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
@@ -91,7 +92,19 @@ test.describe("produtor", () => {
     await formulario.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(TEXTO);
     await formulario.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(COMENTARIOS.avisos.enviado)).toBeVisible();
-    await expect(page.locator("[data-console-script]")).toBeVisible();
+    // De volta ao Roteiro (o formulario fecha): o "Enviar agora" nao vira item, entao a live segue sem roteiro, com a
+    // frase e o Novo comentário de novo (sem item, nenhuma lista vazia).
+    await expect(formulario).toHaveCount(0);
+    await expect(roteiro.getByText(WEBINAR_ADMIN_COPY.console.script.emptyLive, { exact: true })).toBeVisible();
+    await expect(roteiro.getByRole("button", { exact: true, name: COMENTARIOS.novoComentario })).toBeVisible();
+
+    // No Chat do console, o comentario com o nome e a foto de quem comenta, pela origem do nosso Supabase.
+    await page.locator('[data-console-rail="chat"]').click();
+    const noChat = page.locator("#console-panel [data-room-message]").filter({ hasText: TEXTO });
+    await expect(noChat).toBeVisible();
+    await expect(noChat).toContainText(NOME);
+    // O avatar passa pelo next/image (o endereco do nosso bucket pode vir codificado no ?url=).
+    await expect(noChat.locator("img")).toHaveAttribute("src", /storage(%2F|\/)v1(%2F|\/)object(%2F|\/)public(%2F|\/)content-assets(%2F|\/)webinars(%2F|\/)personas(%2F|\/)[a-f0-9]{24}\.webp/);
 
     const db = createLocalAdminClient();
     const linha = unwrap(await db.from("webinar_chat_messages").select("display_name, role, source, script_item_id, persona_avatar_path").eq("session_id", sessaoId).eq("body", TEXTO).single(), "Lendo o comentario");

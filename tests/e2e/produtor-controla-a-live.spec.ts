@@ -767,9 +767,10 @@ test.describe("produtor", () => {
         .eq("id", sessaoId),
       "Voltando o gravador para por preparar"
     );
-    // Desde a Na tela (docs/31 §12.5, 10/11/2026) a live tem uma entrada a mais no trilho (nove itens): a 1280 x 720 o
-    // ultimo lugar ja e do Mais; a 1280 x 800 cabem todos, que e o que este caso confere (docs/31 §10).
-    await page.setViewportSize({ height: 800, width: 1280 });
+    // Desde a Na tela (docs/31 §12.5, 10/11/2026) a live tem uma entrada a mais no trilho (nove itens), e desde o Roteiro
+    // na live (adendo de 10/11/2026, R8; docs/31 §5.2) mais uma (dez itens): a 1280 x 800 o ultimo lugar ja e do Mais; a
+    // 1280 x 900 cabem todos, que e o que este caso confere (docs/31 §10).
+    await page.setViewportSize({ height: 900, width: 1280 });
     const sala = await abrirConsole(page);
     await entrarComoApresentador(sala);
     const barra = barraDe(page);
@@ -812,8 +813,8 @@ test.describe("produtor", () => {
     await expect(linha.locator("[data-live-mic]")).toHaveAttribute("data-live-mic", "on");
     await expect(linha).toContainText(consoleV2.pessoas.midia.microfoneLigado);
 
-    // Lançar enquete abre a entrada Enquetes (a secao na tela, o foco no item Enquetes do trilho, aberto). A 1280 x 800
-    // o trilho comporta as abas e as entradas da live, com a Na tela: nenhum Mais (docs/31 §10).
+    // Lançar enquete abre a entrada Enquetes (a secao na tela, o foco no item Enquetes do trilho, aberto). A 1280 x 900
+    // o trilho comporta as abas e as entradas da live, com a Na tela e o Roteiro: nenhum Mais (docs/31 §10).
     await barra.getByRole("button", { exact: true, name: consoleV2.barra.lancarEnquete }).click();
     await expect(page.locator('section[aria-label="Enquetes"]')).toBeVisible();
     await expect(page.locator('[data-console-rail="enquetes"]')).toHaveAttribute("aria-expanded", "true");

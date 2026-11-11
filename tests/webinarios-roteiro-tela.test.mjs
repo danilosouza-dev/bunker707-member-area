@@ -354,7 +354,11 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
   assert.match(lista, /data-console-script-new=""/);
   assert.match(text, /Novo comentário/);
   assert.equal(count(lista, /Soltar agora/g), 2, "o que ja entrou nao solta de novo");
-  assert.match(html(createElement(ConsoleScript, { ...props, queue: [] })), /Sem roteiro nesta live\. Crie no editor do webinário ou use o Novo comentário\./);
+  const vazia = html(createElement(ConsoleScript, { ...props, queue: [] }));
+  assert.match(vazia, /Sem roteiro nesta live\. Crie no editor do webinário ou use o Novo comentário\./);
+  assert.doesNotMatch(vazia, /<ol/, "sem item, so a frase: nenhuma lista vazia para o leitor de tela");
+  assert.match(vazia, /data-console-script-new=""/, "o Novo comentário continua com o roteiro vazio");
+  assert.match(lista, /<ol[^>]*data-console-script=""/, "com item, a lista");
   assert.doesNotMatch(html(createElement(ConsoleScript, { ...props, onComment: undefined })), /data-console-script-new/, "sem a acao, sem o botao");
 
   const form = html(createElement(ConsoleScript, { ...props, initialComment: { applyToName: true, body: "Que aula!", personaAvatarPath: FOTO, personaName: "Bia C.", personaRole: "team" } }));
