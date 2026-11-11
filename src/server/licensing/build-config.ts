@@ -106,3 +106,79 @@ export function parseEmissorBaseUrl(raw: string | undefined): string | null {
 export function emissorBaseUrl(): string | null {
   return parseEmissorBaseUrl(process.env.BUNKER_LICENSING_EMISSOR_URL);
 }
+
+// ---- O build (next.config.ts) ------------------------------------------------------------------------
+
+export type LicensingBuildEnv = {
+  BUNKER_LICENSING_MODE: LicensingMode;
+  BUNKER_LICENSING_ROOTS: string;
+  BUNKER_LICENSING_EMISSOR_URL: string;
+};
+
+const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * 43 caracteres base64url sao 32 bytes canonicos so quando o ultimo nao carrega bits a mais (os 2 bits de baixo zerados).
+ * Sem Buffer: este arquivo tambem entra no codigo do instrumentation.ts, que o Next pode gerar para o runtime de borda.
+ */
+function canonicalKeyText(publicKey: string): boolean {
+  return BASE64URL_ALPHABET.indexOf(publicKey.charAt(42)) % 4 === 0;
+}
+
+/** As raizes do build, sem perdoar nada: de 1 a 4, todas no formato, sem rid repetido e com 32 bytes canonicos. */
+function strictBuildRoots(raw: string): boolean {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 4) {
+    return false;
+  }
+
+  const roots = parseTrustedRoots(raw);
+
+  return roots.length === parsed.length && roots.every((root) => canonicalKeyText(root.publicKey));
+}
+
+/**
+ * O que o next.config.ts grava pela chave `env` (docs/32 §11.3). Sem a variavel do modo, ou com ela vazia (o Dockerfile
+ * declara as tres vazias quando o build nao as recebe), sai "off" e o resto como veio: a nossa escola, a `dev`, a Vercel e
+ * os testes buildam exatamente como antes. O build falha, em vez de sair "off" em silencio (revisao de 11/11/2026):
+ * - com o modo em qualquer outro texto que nao "", "off" ou "enforce" (um erro de digitacao gerava a imagem sem licenca);
+ * - com "enforce" sem raizes validas (de 1 a 4, nenhuma descartada) ou sem o endereco do Emissor em https (a imagem nunca
+ *   ativaria; o http://127.0.0.1 dos testes nao vale no build).
+ */
+export function licensingBuildEnv(env: Readonly<Record<string, string | undefined>>): LicensingBuildEnv {
+  const mode = env.BUNKER_LICENSING_MODE ?? "";
+  const roots = env.BUNKER_LICENSING_ROOTS ?? "";
+  const emissorUrl = env.BUNKER_LICENSING_EMISSOR_URL ?? "";
+
+  if (mode !== "" && mode !== "off" && mode !== "enforce") {
+    throw new Error(
+      `Licenca: BUNKER_LICENSING_MODE tem de ser vazio, "off" ou "enforce" (veio ${JSON.stringify(mode.slice(0, 40))}). ` +
+        "O build parou para a imagem nao sair sem a exigencia da licenca por engano (docs/32 §11.3)."
+    );
+  }
+
+  if (mode !== "enforce") {
+    return { BUNKER_LICENSING_MODE: "off", BUNKER_LICENSING_ROOTS: roots, BUNKER_LICENSING_EMISSOR_URL: emissorUrl };
+  }
+
+  if (!strictBuildRoots(roots)) {
+    throw new Error(
+      'Licenca: com BUNKER_LICENSING_MODE=enforce, BUNKER_LICENSING_ROOTS tem de trazer de 1 a 4 raizes validas, sem repetir o rid: [{"rid":"raiz-2026","publicKey":"<32 bytes em base64url>"}].'
+    );
+  }
+
+  const emissor = parseEmissorBaseUrl(emissorUrl);
+
+  if (!emissor || !emissor.startsWith("https://")) {
+    throw new Error("Licenca: com BUNKER_LICENSING_MODE=enforce, BUNKER_LICENSING_EMISSOR_URL tem de ser o endereco https da API do Emissor.");
+  }
+
+  return { BUNKER_LICENSING_MODE: "enforce", BUNKER_LICENSING_ROOTS: roots, BUNKER_LICENSING_EMISSOR_URL: emissorUrl };
+}
