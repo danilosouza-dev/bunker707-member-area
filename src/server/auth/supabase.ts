@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getSupabaseAuthConfig } from "@/server/auth/config";
 import { createStoragePathsFetch } from "@/server/db/storage-paths";
+import { supabaseServerGlobalOptions } from "@/server/db/supabase/internal-fetch";
 
 export async function createSupabaseServerClient() {
   const { anonKey, url } = getSupabaseAuthConfig();
@@ -26,7 +27,9 @@ export async function createSupabaseServerClient() {
         }
       }
     },
-    // O banco guarda o caminho dos arquivos do Storage; o app le e grava o endereco inteiro (docs/32 §11.5).
-    global: { fetch: createStoragePathsFetch(url) }
+    // O banco guarda o caminho dos arquivos do Storage e o app le e grava o endereco inteiro (docs/32 §11.5); no
+    // servidor do kit, o transporte vai pela rede interna (SUPABASE_INTERNAL_URL, §11.7), e o cookie continua com o
+    // nome do endereco publico.
+    global: { fetch: createStoragePathsFetch(url, supabaseServerGlobalOptions(url).fetch) }
   });
 }

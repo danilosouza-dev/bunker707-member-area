@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { cleanEnvValue } from "@/lib/env-value";
+import { supabaseServerGlobalOptions } from "@/server/db/supabase/internal-fetch";
 import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
 import { licensingMode } from "@/server/licensing/build-config";
 import { isFeatureStudentPage } from "@/server/licensing/features";
@@ -281,7 +282,10 @@ export async function proxy(request: NextRequest) {
           response.cookies.set(name, value, options);
         });
       }
-    }
+    },
+    // No servidor do kit, pela rede interna (SUPABASE_INTERNAL_URL): o JWKS do getClaims e o getUser nao dependem do
+    // DNS nem do certificado do endereco publico. O cookie continua com o nome do endereco publico.
+    global: supabaseServerGlobalOptions(supabaseUrl as string)
   });
 
   const user = await getProxySessionUser(supabase);
