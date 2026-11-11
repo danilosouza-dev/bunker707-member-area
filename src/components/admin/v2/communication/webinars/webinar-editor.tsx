@@ -813,6 +813,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
                 readOnly={archived}
                 sessions={savedSessions}
                 webinarId={savedVersion.id}
+                webinarKind={draft.kind}
               />
             ) : (
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{WEBINAR_ADMIN_COPY.review.saveFirst}</p>

@@ -60,7 +60,7 @@ export function DropdownMenuItem({ children, disabled, render }) {
   "@/server/webinars/actions": `${fail}
 export const saveWebinarDraft = fail; export const publishWebinar = fail; export const cancelWebinar = fail; export const duplicateWebinar = fail; export const deleteWebinar = fail; export const archiveWebinar = fail; export const unarchiveWebinar = fail; export const rescheduleSession = fail; export const uploadWebinarCover = fail;`,
   "@/server/webinars/script-actions": `${fail}
-export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail;`,
+export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
   // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas (o painel
@@ -689,9 +689,22 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
 
   const script = stripComments(read("src/server/webinars/script-actions.ts"));
   assert.match(script, /^"use server";/);
-  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 7, "as sete acoes do roteiro pedem messaging.write");
+  // Adendo de 10/11/2026 (R8 e R9): o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta pedem o
+  // mesmo messaging.write do Soltar agora (o apresentador, o co-apresentador e a equipe).
+  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 10, "as dez acoes do roteiro pedem messaging.write");
   assert.doesNotMatch(script, /runAdminAction\("messaging\.publish"/);
-  for (const action of ["webinar.script_saved", "webinar.script_imported", "webinar.script_exported", "webinar.chat_exported", "webinar.transcript_saved", "webinar.script_resolved", "webinar.script_fired"]) {
+  for (const action of [
+    "webinar.script_saved",
+    "webinar.script_imported",
+    "webinar.script_exported",
+    "webinar.chat_exported",
+    "webinar.transcript_saved",
+    "webinar.script_resolved",
+    "webinar.script_fired",
+    "webinar.persona_photo_uploaded",
+    "webinar.script_comment_sent",
+    "webinar.script_item_added"
+  ]) {
     assert.match(script, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }
   assert.doesNotMatch(`${room}${script}`, /full_name|email:/, "nada de nome ou e-mail na auditoria");

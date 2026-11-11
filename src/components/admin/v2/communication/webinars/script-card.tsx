@@ -5,32 +5,43 @@ import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
+import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type PersonaRole, type ScriptItem, type ScriptItemDraft, type ScriptStatus, type ScriptTrigger, type WebinarSession, type WebinarTranscriptFormat } from "@/server/webinars/model";
 import type { TranscriptSummary } from "@/server/webinars/queries";
-import { exportScriptCsv, exportSessionChatCsv, importScriptCsv, resolveScriptPhrases, saveScriptItems, saveTranscript } from "@/server/webinars/script-actions";
+import { LIVE_SCRIPT_TRIGGER_LABELS, withPersonaAvatarForName } from "@/server/webinars/persona-model";
+import { exportScriptCsv, exportSessionChatCsv, importScriptCsv, resolveScriptPhrases, saveScriptItems, saveTranscript, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { SCRIPT_TRIGGER_LABELS, formatOffsetText, parseOffsetText, parseScriptCsv, scriptSummary, sortScriptItems, type ScriptCsvResult } from "@/server/webinars/script-model";
 import { ErrorBanner } from "../../error-banner";
 import { PillGroup, adminInputClass, adminTextareaClass } from "../../form";
 import { ConfirmDialog } from "../../settings/kit";
 import { StatusChip } from "../../status-chip";
 import { adminToast } from "../../toast";
+import { PersonaPhotoField } from "./persona-photo-field";
 
 // Card "Roteiro de chat" do editor (docs/30 §2.2, §6.6 D6-b e D6-c; fase 2b): os itens em linhas editaveis (minuto,
 // nome, papel, mensagem, Solta em, frase e atraso, situacao), Importar CSV (lido no navegador para a previa com os
 // erros por linha, enviado ao servidor para gravar), Exportar CSV, o chat de uma sessao encerrada como CSV, a
 // transcricao do video (colada ou enviada) e Resolver frases. O card guarda o proprio estado: o que vem das Server
-// Actions e a verdade (os itens gravados, com a situacao decidida no servidor).
+// Actions e a verdade (os itens gravados, com a situacao decidida no servidor). Adendo de 10/11/2026 (R8 e R9): o card
+// tambem no webinario ao vivo (`webinarKind` "live"): os gatilhos "Num minuto da live" (contado do Começar para todos)
+// e "Pelo botão da equipe", a frase que diz por que "Quando o apresentador diz" nao existe na live e sem a transcricao;
+// e, nos dois tipos, a Foto (opcional) de quem comenta em cada linha (persona-photo-field.tsx), com o "Usar esta foto em
+// todos os comentários de {nome}" ligado por padrao (a foto vai para as linhas com o mesmo nome; o Salvar grava).
 
 const copy = WEBINAR_ADMIN_COPY.script;
+const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
 
 type Row = {
+  /** A caixa "Usar esta foto em todos os comentários de {nome}" desta linha (ligada por padrao). */
+  applyToAll: boolean;
   body: string;
   id: string | null;
   key: string;
   kind: "message" | "question";
   offsetMs: number | null;
   offsetText: string;
+  personaAvatarPath: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string;
@@ -52,12 +63,20 @@ type ScriptCardProps = {
   /** As sessoes gravadas (as encerradas oferecem o CSV do chat real). */
   sessions: readonly WebinarSession[];
   webinarId: string;
+  /** O tipo do webinario: na Live ao vivo, os gatilhos da live e sem a transcricao (R8). */
+  webinarKind?: "live" | "simulated";
 };
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
   { label: SCRIPT_TRIGGER_LABELS.at_offset, value: "at_offset" },
   { label: SCRIPT_TRIGGER_LABELS.on_phrase, value: "on_phrase" },
   { label: SCRIPT_TRIGGER_LABELS.manual, value: "manual" }
+];
+
+/** Na Live ao vivo (R8): "Num minuto da live" e "Pelo botão da equipe" (sem transcricao durante a transmissao). */
+const LIVE_TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
+  { label: LIVE_SCRIPT_TRIGGER_LABELS.at_offset, value: "at_offset" },
+  { label: LIVE_SCRIPT_TRIGGER_LABELS.manual, value: "manual" }
 ];
 
 const STATUS_TONE: Record<ScriptStatus, "muted" | "neutral" | "success" | "warning"> = { disabled: "muted", draft: "neutral", ready: "success", unresolved: "warning" };
@@ -71,12 +90,14 @@ function rowKey() {
 
 function rowOf(item: ScriptItem): Row {
   return {
+    applyToAll: true,
     body: item.body,
     id: item.id,
     key: item.id,
     kind: item.kind,
     offsetMs: item.offsetMs,
     offsetText: item.offsetMs == null ? "" : formatOffsetText(item.offsetMs),
+    personaAvatarPath: item.personaAvatarPath ?? null,
     personaName: item.personaName,
     personaRole: item.personaRole,
     phrase: item.phrase ?? "",
@@ -88,7 +109,23 @@ function rowOf(item: ScriptItem): Row {
 }
 
 function emptyRow(): Row {
-  return { body: "", id: null, key: rowKey(), kind: "message", offsetMs: 0, offsetText: "00:00", personaName: "", personaRole: "student", phrase: "", phraseDelaySeconds: 0, resolvedOffsetMs: null, status: "draft", triggerKind: "at_offset" };
+  return {
+    applyToAll: true,
+    body: "",
+    id: null,
+    key: rowKey(),
+    kind: "message",
+    offsetMs: 0,
+    offsetText: "00:00",
+    personaAvatarPath: null,
+    personaName: "",
+    personaRole: "student",
+    phrase: "",
+    phraseDelaySeconds: 0,
+    resolvedOffsetMs: null,
+    status: "draft",
+    triggerKind: "at_offset"
+  };
 }
 
 /** O que a Server Action recebe (a situacao final e do servidor; "disabled" e a unica escolha da tela). */
@@ -98,6 +135,7 @@ function draftOf(row: Row): ScriptItemDraft {
     id: row.id,
     kind: row.kind,
     offsetMs: row.triggerKind === "at_offset" ? row.offsetMs : null,
+    personaAvatarPath: row.personaAvatarPath,
     personaName: row.personaName.trim(),
     personaRole: row.personaRole,
     phrase: row.triggerKind === "on_phrase" ? row.phrase.trim() || null : null,
@@ -147,8 +185,10 @@ function downloadCsv(csv: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, readOnly = false, sessions, webinarId }: ScriptCardProps) {
+export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, readOnly = false, sessions, webinarId, webinarKind = "simulated" }: ScriptCardProps) {
   const idBase = useId();
+  const live = webinarKind === "live";
+  const triggerOptions = live ? LIVE_TRIGGER_OPTIONS : TRIGGER_OPTIONS;
   const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map(rowOf));
   const [saved, setSaved] = useState<readonly ScriptItem[]>(initialItems);
   const [transcript, setTranscript] = useState<TranscriptSummary | null>(initialTranscript);
@@ -187,6 +227,27 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
 
   function updateRow(key: string, patch: Partial<Row>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  }
+
+  /** A foto da linha (R9): com a caixa ligada e o nome, vai tambem para as linhas com o mesmo nome; Remover, so esta. */
+  function setPhoto(key: string, path: string | null) {
+    setRows((current) => {
+      const row = current.find((item) => item.key === key);
+      if (!row) {
+        return current;
+      }
+      const own = current.map((item) => (item.key === key ? { ...item, personaAvatarPath: path } : item));
+      return path && row.applyToAll && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, path) : own;
+    });
+  }
+
+  /** A caixa "Usar esta foto em todos os comentários de {nome}": ligada com a foto, a foto vai para as outras linhas agora. */
+  function setApplyToAll(key: string, checked: boolean) {
+    setRows((current) => {
+      const row = current.find((item) => item.key === key);
+      const own = current.map((item) => (item.key === key ? { ...item, applyToAll: checked } : item));
+      return checked && row?.personaAvatarPath && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, row.personaAvatarPath) : own;
+    });
   }
 
   async function save() {
@@ -342,6 +403,11 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       </p>
 
       {rows.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</p> : null}
+      {live ? (
+        <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-script-live-hint="">
+          {COMENTARIOS.semFraseNaLive}
+        </p>
+      ) : null}
 
       <ol className="flex min-w-0 flex-col gap-3">
         {rows.map((row, index) => {
@@ -390,6 +456,17 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                 </div>
               </div>
 
+              <PersonaPhotoField
+                applyToAll={row.applyToAll}
+                disabled={locked}
+                idBase={`${base}-persona`}
+                name={row.personaName}
+                onApplyToAllChange={(checked) => setApplyToAll(row.key, checked)}
+                onChange={(path) => setPhoto(row.key, path)}
+                onUpload={(image) => uploadPersonaPhoto({ image })}
+                path={row.personaAvatarPath}
+              />
+
               <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
                 {copy.columns.body}
                 <textarea className={cn(adminTextareaClass, "min-h-16")} disabled={locked} maxLength={CHAT_LIMITS.body} onChange={(event) => updateRow(row.key, { body: event.target.value })} rows={2} value={row.body} />
@@ -397,12 +474,12 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
 
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.trigger}</span>
-                <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={TRIGGER_OPTIONS} value={row.triggerKind} />
+                <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={triggerOptions} value={row.triggerKind} />
               </div>
 
               {row.triggerKind === "at_offset" ? (
                 <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                  {copy.columns.time}
+                  {live ? COMENTARIOS.minutoDaLive : copy.columns.time}
                   <input
                     aria-invalid={row.offsetMs == null ? true : undefined}
                     className={cn(adminInputClass, "w-36")}
@@ -414,6 +491,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                     type="text"
                     value={row.offsetText}
                   />
+                  {live ? <span className="text-xs leading-5 font-normal text-[var(--text-secondary)]">{COMENTARIOS.minutoDaLiveDica}</span> : null}
                 </label>
               ) : null}
 
@@ -454,42 +532,45 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
         </Button>
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] pt-4">
-        <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{copy.transcriptTitle}</span>
-        <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-transcript-summary="">
-          {transcript ? copy.transcriptSummary(transcript.cues, transcript.format, formatSaoPauloDateTime(transcript.updatedAt)) : copy.transcriptNone}
-        </p>
-        {!hasRecording ? <p className="text-[13px] leading-5 text-[var(--warning)]">{copy.noRecording}</p> : null}
-        <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-          {copy.transcriptPaste}
-          <textarea
-            aria-invalid={fieldErrors.text ? true : undefined}
-            className={cn(adminTextareaClass, "min-h-24 font-mono text-xs")}
-            disabled={locked || !hasRecording}
-            onChange={(event) => {
-              setTranscriptText(event.target.value);
-              setTranscriptFormat(formatOf("", event.target.value));
-            }}
-            placeholder="WEBVTT…"
-            rows={4}
-            value={transcriptText}
-          />
-        </label>
-        <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.transcriptHint}</p>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button className="px-3" disabled={locked || !hasRecording} onClick={() => transcriptInput.current?.click()} type="button" variant="secondary">
-            <Upload aria-hidden="true" className="size-4" />
-            {copy.transcriptFile}
-          </Button>
-          <input accept=".vtt,.srt,.txt,text/vtt,text/plain" className="sr-only" data-transcript-input="" onChange={(event) => void readTranscriptFile(event)} ref={transcriptInput} tabIndex={-1} type="file" />
-          <Button className="px-3" disabled={locked || !hasRecording || !transcriptText.trim()} onClick={() => void submitTranscript()} type="button">
-            {working(copy.transcriptSave, "transcript")}
-          </Button>
-          <Button className="px-3" disabled={locked || !transcript} onClick={() => void resolve()} type="button" variant="secondary">
-            {working(copy.resolve, "resolve")}
-          </Button>
+      {/* A transcricao e as frases so na gravada: na live ao vivo nao ha transcricao durante a transmissao (R8). */}
+      {live ? null : (
+        <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] pt-4">
+          <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{copy.transcriptTitle}</span>
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-transcript-summary="">
+            {transcript ? copy.transcriptSummary(transcript.cues, transcript.format, formatSaoPauloDateTime(transcript.updatedAt)) : copy.transcriptNone}
+          </p>
+          {!hasRecording ? <p className="text-[13px] leading-5 text-[var(--warning)]">{copy.noRecording}</p> : null}
+          <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+            {copy.transcriptPaste}
+            <textarea
+              aria-invalid={fieldErrors.text ? true : undefined}
+              className={cn(adminTextareaClass, "min-h-24 font-mono text-xs")}
+              disabled={locked || !hasRecording}
+              onChange={(event) => {
+                setTranscriptText(event.target.value);
+                setTranscriptFormat(formatOf("", event.target.value));
+              }}
+              placeholder="WEBVTT…"
+              rows={4}
+              value={transcriptText}
+            />
+          </label>
+          <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.transcriptHint}</p>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button className="px-3" disabled={locked || !hasRecording} onClick={() => transcriptInput.current?.click()} type="button" variant="secondary">
+              <Upload aria-hidden="true" className="size-4" />
+              {copy.transcriptFile}
+            </Button>
+            <input accept=".vtt,.srt,.txt,text/vtt,text/plain" className="sr-only" data-transcript-input="" onChange={(event) => void readTranscriptFile(event)} ref={transcriptInput} tabIndex={-1} type="file" />
+            <Button className="px-3" disabled={locked || !hasRecording || !transcriptText.trim()} onClick={() => void submitTranscript()} type="button">
+              {working(copy.transcriptSave, "transcript")}
+            </Button>
+            <Button className="px-3" disabled={locked || !transcript} onClick={() => void resolve()} type="button" variant="secondary">
+              {working(copy.resolve, "resolve")}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {ended.length > 0 ? (
         <div className="flex min-w-0 flex-col gap-2 border-t border-[var(--border-subtle)] pt-4">

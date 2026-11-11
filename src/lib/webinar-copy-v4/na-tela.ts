@@ -5,6 +5,11 @@
 // (tests/webinarios-frases.test.mjs). Modulo puro, sem imports. Dono: a entrega "Na tela"; todas as frases da
 // especificacao estao aqui desde a primeira fatia, entao as fatias seguintes so leem este arquivo.
 //
+// O adendo do mesmo dia (R8 e R9) acrescenta `comentarios`: o roteiro de comentarios prontos na Live ao vivo (os
+// gatilhos da live e o porque de "Quando o apresentador diz" faltar nela), o "Novo comentário" do console com "Quem
+// comenta" (Nome, Foto (opcional), Aparece como, Comentário), a foto de quem comenta com a linha do consentimento, os
+// avisos e os erros. Nunca a palavra "personagem" na tela (o teste confere): o nome interno `persona` fica no codigo.
+//
 // Ja existiam e continuam onde estao: "Fixar" e "Desafixar" de cada linha do chat (WEBINAR_ADMIN_COPY.console), os itens
 // de silenciar, remover e banir e o bloco "Removidos, silenciados e banidos" (WEBINAR_COPY.consoleAoVivo), e as frases
 // do aluno silenciado e removido (WEBINAR_COPY.aoVivo).
@@ -220,6 +225,60 @@ export const NA_TELA_COPY = {
     semFechar: "Este banner sai quando a equipe tirar.",
     /** O nome do desenho do QR Code (role="img"). */
     qrNome: (dominio: string) => `QR Code do link ${dominio}`
+  },
+
+  /* O roteiro de comentarios prontos na Live ao vivo e a foto de quem comenta (adendo de 10/11/2026, R8 e R9). */
+  comentarios: {
+    /** Os gatilhos do roteiro na Live ao vivo (o zero e o Começar para todos). */
+    gatilhosLive: { at_offset: "Num minuto da live", manual: "Pelo botão da equipe" },
+    /** O campo do tempo na live e a dica. */
+    minutoDaLive: "Minuto da live",
+    minutoDaLiveDica: "Contado do Começar para todos. Minuto:segundo, como 12:30.",
+    /** "Quando o apresentador diz" fica de fora na live: o editor diz por quê. */
+    semFraseNaLive: "Na live ao vivo não há transcrição durante a transmissão, então “Quando o apresentador diz” não existe aqui. O comentário entra num minuto da live ou pelo botão da equipe.",
+    /** Quando o item entra, na fila do console da live. */
+    aosMinutos: (minutos: number, segundos = 0) =>
+      segundos > 0 ? `Aos ${minutos}:${String(segundos).padStart(2, "0")} da live` : minutos === 0 ? "No começo da live" : minutos === 1 ? "Com 1 minuto de live" : `Aos ${minutos} minutos da live`,
+    /** O formulario rapido do console (R8) e os campos de quem comenta (R9). */
+    novoComentario: "Novo comentário",
+    quemComenta: "Quem comenta",
+    nome: "Nome",
+    foto: "Foto (opcional)",
+    fotoDeQuemComenta: "Foto de quem comenta",
+    fotoDe: (nome: string) => `Foto de ${nome}`,
+    enviarFoto: "Enviar foto",
+    trocarFoto: "Trocar",
+    removerFoto: "Remover",
+    enviandoFoto: "Enviando a foto…",
+    fotoDica: "JPG, PNG ou WebP. Fica com até 512 px.",
+    fotoConsentimento: "Use imagem gerada ou com autorização. Nunca a foto de uma pessoa real sem o consentimento dela.",
+    usarEmTodos: (nome: string) => `Usar esta foto em todos os comentários de ${nome}`,
+    apareceComo: "Aparece como",
+    papeis: { student: "Aluno", team: "Equipe" },
+    comentario: "Comentário",
+    enviarAgora: "Enviar agora",
+    guardarNaLista: "Guardar na lista",
+    cancelar: "Cancelar",
+    voltar: "Voltar",
+    avisos: {
+      enviado: "Comentário no chat em até 5 s.",
+      guardado: "Guardado no roteiro, pelo botão da equipe.",
+      fotoEmTodos: (nome: string, total: number) => (total === 1 ? `A foto foi para 1 comentário de ${nome}.` : `A foto foi para ${total} comentários de ${nome}.`)
+    },
+    erros: {
+      nome: "Dê um nome a quem comenta (até 60 caracteres).",
+      comentario: "Escreva o comentário (até 1.000 caracteres).",
+      fotoFormato: "Envie uma imagem JPG, PNG ou WebP.",
+      fotoPesada: "A foto passou de 100 KB. Envie uma menor.",
+      fotoLado: "A foto precisa ter de 16 a 512 px de lado.",
+      fotoAnimada: "Imagem animada não é aceita. Use uma imagem parada.",
+      fotoSumiu: "A foto não foi encontrada. Envie de novo.",
+      fraseNaLive: "Na live ao vivo, o comentário entra num minuto da live ou pelo botão da equipe.",
+      replay: "No Replay nenhum comentário entra no chat.",
+      sessaoFechada: "Essa sessão já acabou. Nenhum comentário entra no chat.",
+      limite: "O roteiro aceita até 5.000 comentários.",
+      migracao: (migracao: string) => `A foto de quem comenta precisa da atualização do banco (migração ${migracao}).`
+    }
   },
 
   /* O bloco "Na tela" do relatorio da sessao (§7). */

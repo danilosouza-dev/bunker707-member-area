@@ -26,6 +26,8 @@ import "server-only";
 import { cleanEnvValue } from "../../lib/env-value";
 import type { StudentEventInsert } from "../students/store";
 import { loadAuthorPhotos } from "./author-photos";
+import { personaAvatarUrl } from "./persona-model";
+import { loadScriptedMessageAvatars } from "./persona-store";
 import { chatMessageFromRow } from "./chat-rows";
 import { CHAT_MESSAGES } from "./chat-schemas";
 import { fetchPinnedMessageRow } from "./chat-store";
@@ -106,11 +108,16 @@ async function buildSharedScreen(db: WebinarsDb, session: WebinarSession, nowMs:
   let pinned: SharedScreen["pinned"] = null;
 
   if (message) {
-    const photos = await loadAuthorPhotos(db, [message.authorUserId], nowMs);
+    // A fixada do roteiro mostra a foto de quem comenta (R9), como no chat.
+    const [photos, personas] = await Promise.all([
+      loadAuthorPhotos(db, [message.authorUserId], nowMs),
+      message.source === "scripted" ? loadScriptedMessageAvatars(db, [message.id], nowMs) : Promise.resolve(new Map<string, string>())
+    ]);
     pinned = {
       avatarUrl: authorPhotoUrl({
         authorUserId: message.authorUserId,
         displayName: message.displayName,
+        personaAvatarUrl: personaAvatarUrl(personas.get(message.id), screenStorageOrigin()),
         photo: message.authorUserId ? photos.get(message.authorUserId) : null,
         source: message.source,
         viewer: "student",

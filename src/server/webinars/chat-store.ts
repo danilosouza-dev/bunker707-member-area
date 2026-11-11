@@ -102,6 +102,8 @@ export type ChatMessageInsert = {
   kind?: string;
   master?: boolean;
   offset_ms: number;
+  /** A foto de quem comenta (R9), so na `scripted` e so com a 202611100002: sem foto, a chave fica de fora. */
+  persona_avatar_path?: string | null;
   reply_to_id?: string | null;
   role: string;
   script_item_id?: string | null;
@@ -124,6 +126,25 @@ export async function insertScriptedMessage(db: WebinarsDb, row: ChatMessageInse
   }
   assertNoDbError(error, "Webinarios: soltar item do roteiro");
   return (data as ChatMessageRow | null) ?? null;
+}
+
+/**
+ * Um comentario do "Novo comentário" do console solto na hora, sem item do roteiro (R8): a mensagem `scripted` da
+ * sessao com o nome, o papel e a foto de quem comenta.
+ */
+export async function insertScriptedComment(db: WebinarsDb, row: Omit<ChatMessageInsert, "script_item_id" | "source">): Promise<ChatMessageRow> {
+  const { data, error } = await db.from("webinar_chat_messages").insert({ ...row, script_item_id: null, source: "scripted" }).select(CHAT_MESSAGE_COLUMNS).single();
+  assertNoDbError(error, "Webinarios: soltar comentario");
+  return data as ChatMessageRow;
+}
+
+/** Os itens do roteiro que ja entraram numa sessao (o tick da live nunca solta o mesmo duas vezes). */
+export async function listFiredScriptItemIds(db: WebinarsDb, sessionId: string): Promise<Set<string>> {
+  const rows = await fetchAll<{ script_item_id: string }>(
+    (from, to) => db.from("webinar_chat_messages").select("script_item_id").eq("session_id", sessionId).not("script_item_id", "is", null).range(from, to),
+    "Webinarios: roteiro que ja entrou na sessao"
+  );
+  return new Set(rows.map((row) => row.script_item_id).filter((id): id is string => Boolean(id)));
 }
 
 export async function fetchChatMessageRow(db: WebinarsDb, id: string): Promise<ChatMessageRow | null> {
@@ -276,6 +297,8 @@ export type ScriptItemUpsert = {
   position: number;
   resolved_offset_ms?: number | null;
   resolved_transcript_id?: string | null;
+  /** A foto de quem comenta (R9): so com a 202611100002; sem a coluna no banco, a chave fica de fora. */
+  persona_avatar_path?: string | null;
   status: string;
   trigger_kind: string;
   webinar_id: string;
@@ -306,6 +329,13 @@ export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, i
   const { error } = await removal;
   assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
   return listScriptItemRows(db, webinarId);
+}
+
+/** Um item novo no fim do roteiro (o "Guardar na lista" do console, R8): devolve a linha gravada. */
+export async function insertScriptItemRow(db: WebinarsDb, item: ScriptItemUpsert): Promise<ScriptItemRow> {
+  const { data, error } = await db.from("webinar_chat_script_items").insert(item).select(SCRIPT_ITEM_COLUMNS).single();
+  assertNoDbError(error, "Webinarios: guardar item no roteiro");
+  return data as ScriptItemRow;
 }
 
 export type ScriptItemPatch = Partial<Pick<ScriptItemRow, "resolved_offset_ms" | "resolved_transcript_id" | "status">>;

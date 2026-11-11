@@ -51,7 +51,9 @@ import {
 //   removida e recusada na entrada (a sessao com join kicked e sem video; a pagina da sala recusa), o Desfazer
 //   devolve tudo; a equipe nunca e alvo; no Replay, 409; o retrato do console lista os barrados.
 // - R7 pelo app: o produtor decide a Simulacao da live na espera (saveSessionSimulation com a frase da live; o selo
-//   recusado), a aluna recebe a janela pela rota depois do Comecar para todos e o console ve "+300" separado.
+//   recusado), a aluna recebe a janela pela rota depois do Comecar para todos e o console ve "+300" separado;
+// - R8 e R9 pelo app: o tick solta o item vencido da live com a foto (uma vez; o Soltar agora depois esbarra na chave
+//   unica), o Enviar agora grava o comentario com a foto e a aluna recebe os dois pela consulta de 5 s com a foto.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -61,6 +63,7 @@ const AO_VIVO = LIVE_AO_VIVO_DE_TESTE;
 const ENCERRADA = LIVE_GRAVADA_DE_TESTE;
 const IMAGEM = "webinars/screen/0123456789abcdef01234567.webp";
 const FOTO = "webinars/personas/89abcdef0123456789abcdef.webp";
+const OUTRA_FOTO = "webinars/personas/0123456789abcdef89abcdef.webp";
 const pessoas = [contas.aluna.id, contas.alunoSemAcesso.id, contas.produtor.id];
 const chatRoute = await import("../../src/app/api/webinars/[id]/chat/route.ts");
 const sessionRoute = await import("../../src/app/api/webinars/[id]/session/route.ts");
@@ -843,5 +846,59 @@ test("15. R7 pelo app: o produtor decide a Simulacao da live na espera com a fra
     return simulationActions.saveSessionSimulation({ sessionId: AO_VIVO.sessaoId });
   })();
   assert.equal(mudarNoAr.status, 409, "no ar, a regra nao muda");
+  actAs(null);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * R8 e R9 pelo app: o roteiro na Live ao vivo e a foto de quem comenta
+ * ---------------------------------------------------------------------------------------------- */
+
+test("10. R8 e R9 pelo app: o tick solta o item vencido da live com a foto, uma vez; o Enviar agora com a foto; a aluna recebe os dois pela consulta de 5 s com a foto no avatar", async () => {
+  const tick = await import("../../src/server/webinars/live-script-tick.ts");
+  const scriptActions = await import("../../src/server/webinars/script-actions.ts");
+  const { clearScriptedAvatarCache } = await import("../../src/server/webinars/persona-store.ts");
+  const { resetRoomAccessCache } = await import("../../src/server/webinars/room-route.ts");
+  resetRoomLimits();
+  resetRoomAccessCache();
+  clearScriptedAvatarCache();
+  unwrap(await db.from("webinar_chat_script_items").delete().eq("webinar_id", AO_VIVO.id), "Zerando o roteiro da live");
+  unwrap(await db.from("webinar_chat_messages").delete().eq("session_id", AO_VIVO.sessaoId).eq("source", "scripted"), "Zerando o roteiro solto da live");
+  unwrap(await db.from("webinar_sessions").update({ ended_at: null, recording_anchor_at: null, started_at: new Date(Date.now() - 3 * 60_000).toISOString(), status: "live" }).eq("id", AO_VIVO.sessaoId), "A live no ar ha 3 min");
+  const [vencido, depois] = unwrap(
+    await db
+      .from("webinar_chat_script_items")
+      .insert([
+        { body: "Cheguei agora!", offset_ms: 60_000, persona_avatar_path: FOTO, persona_name: "Bia C.", persona_role: "student", position: 0, status: "ready", trigger_kind: "at_offset", webinar_id: AO_VIVO.id },
+        { body: "Mais tarde", offset_ms: 30 * 60_000, persona_name: "Caio D.", persona_role: "team", position: 1, status: "ready", trigger_kind: "at_offset", webinar_id: AO_VIVO.id }
+      ])
+      .select("id, position"),
+    "Gravando o roteiro da live"
+  ).sort((a, b) => a.position - b.position);
+
+  const primeira = await tick.runLiveScriptTick({ db, now: new Date() });
+  assert.equal(primeira.released, 1, JSON.stringify(primeira));
+  const segunda = await tick.runLiveScriptTick({ db, now: new Date() });
+  assert.equal(segunda.released, 0, "o tick seguinte nao repete");
+  const soltas = unwrap(await db.from("webinar_chat_messages").select("script_item_id, persona_avatar_path, display_name, source, master").eq("session_id", AO_VIVO.sessaoId).eq("source", "scripted"), "Lendo o roteiro solto da live");
+  assert.deepEqual(
+    soltas.map((row) => [row.script_item_id, row.display_name, row.persona_avatar_path, row.master]),
+    [[vencido.id, "Bia C.", FOTO, false]]
+  );
+  assert.ok(!soltas.some((row) => row.script_item_id === depois.id), "o item dos 30 min espera");
+
+  actAs(usuarioDeTeste(contas.produtor));
+  const repetido = await scriptActions.fireScriptItem({ itemId: vencido.id, sessionId: AO_VIVO.sessaoId });
+  assert.equal(repetido.status, 409, "a chave unica: o Soltar agora depois do tick nao repete");
+  const enviado = await scriptActions.sendScriptedComment({ applyToName: true, body: "Que aula boa!", personaAvatarPath: OUTRA_FOTO, personaName: "Duda E.", personaRole: "student", sessionId: AO_VIVO.sessaoId });
+  assert.equal(enviado.ok, true, JSON.stringify(enviado));
+
+  actAs(usuarioDeTeste(contas.aluna));
+  const query = new URLSearchParams({ sessao: AO_VIVO.sessaoId, since: new Date(Date.now() - 10 * 60_000).toISOString() });
+  const resposta = await chatRoute.GET(new Request(`http://localhost/api/webinars/${AO_VIVO.id}/chat?${query}`), { params: Promise.resolve({ id: AO_VIVO.id }) });
+  const body = await resposta.json();
+  assert.equal(resposta.status, 200, JSON.stringify(body));
+  const porNome = Object.fromEntries(body.data.messages.map((message) => [message.displayName, message.avatarUrl]));
+  assert.equal(porNome["Bia C."], `${supabaseUrl}/storage/v1/object/public/content-assets/${FOTO}`, "a foto de quem comenta pela origem do nosso Supabase");
+  assert.equal(porNome["Duda E."], `${supabaseUrl}/storage/v1/object/public/content-assets/${OUTRA_FOTO}`);
   actAs(null);
 });

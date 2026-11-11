@@ -14,8 +14,8 @@ import {
   canTeamActOn,
   consoleClockLabel,
   consoleClockMs,
-  consoleOffsetMs,
   consolePhaseOf,
+  consoleScriptClockMs,
   scriptQueue,
   type ConsoleMessage,
   type ConsoleSnapshot
@@ -79,7 +79,7 @@ import {
 import { sessionDurationMs } from "@/server/webinars/room-model";
 import { archiveScreenItem, hideScreenItem, saveScreenItem, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
 import { screenStageKinds } from "@/server/webinars/screen-model";
-import { fireScriptItem } from "@/server/webinars/script-actions";
+import { fireScriptItem, saveScriptComment, sendScriptedComment, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
 import { adminTextareaClass } from "../../../form";
@@ -101,6 +101,7 @@ import { ConsoleQuestions } from "./console-questions";
 import { ConsoleScreen, consoleScreenCount } from "./console-screen";
 import type { ScreenItemSaveInput } from "./console-screen-form";
 import { ConsoleScript } from "./console-script";
+import type { ScriptCommentFormInput } from "./console-script-comment";
 import { ConsoleShell } from "./console-shell";
 import { ConsoleStage } from "./console-stage";
 import { ConsoleTopBar } from "./console-top-bar";
@@ -156,11 +157,14 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // video (recordedPersonMenu: Silenciar 5/15/60 min e ate o fim, Remover da sala e Banir, desligado sem messaging.publish
 // com a frase), os rotulos do autor barrado na mensagem e o bloco "Removidos, silenciados e banidos" do retrato
 // (snapshot.barred) embaixo dos seletores do Chat, com os Desfazer; as acoes sao as mesmas da live (onPersonAction, sem
-// o comando ao iframe: la nao ha sala).
+// o comando ao iframe: la nao ha sala). Adendo de 10/11/2026: a parte simulada do contador separada no selo dos
+// presentes (R7) e o Roteiro tambem na sessao da Live ao vivo (R8, a fila pelo relogio desde o Começar para todos), com
+// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto).
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const naTelaCopy = WEBINAR_COPY.naTela.console;
+const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
 
 type Failure = { message: string; status: number };
 
@@ -212,12 +216,13 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const webinar = data.webinar;
   const durationMs = sessionDurationMs(webinar.recordingDurationSeconds, webinar.durationMinutes);
   const nowMs = tick + skew;
-  const offsetMs = session ? consoleOffsetMs(session, tick, skew) : Number.NaN;
-  // O topo conta o tempo da sessao (desde o Iniciar live na ao vivo) e para no encerramento; o roteiro segue offsetMs.
+  // O topo conta o tempo da sessao (desde o Iniciar live na ao vivo) e para no encerramento; o roteiro segue o relogio
+  // dele (consoleScriptClockMs: o do video na gravada, consoleOffsetMs; desde o Começar para todos na Live ao vivo, R8).
   const clockMs = session ? consoleClockMs(session, durationMs, nowMs) : Number.NaN;
   const phase = session ? consolePhaseOf(session, durationMs, nowMs) : null;
   const canAct = session ? canTeamActOn(session) : false;
-  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, offsetMs) : []), [snapshot, offsetMs]);
+  const scriptClockMs = session ? consoleScriptClockMs(session, tick, skew) : Number.NaN;
+  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, scriptClockMs) : []), [snapshot, scriptClockMs]);
   const live = session?.kind === "live" ? (snapshot?.live ?? null) : null;
   const livePeople = useMemo(() => new Map((live?.people ?? []).map((person) => [person.userId, person])), [live]);
   // A Live gravada: os barrados do retrato e os itens por pessoa sem sala (silenciar, remover e banir; nada de video).
@@ -661,6 +666,30 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
    * salvar para o formulario pôr os erros nos campos (nulo com outra acao em andamento); a falha do Mostrar depois de
    * salvo vai para o banner do console (o item ja esta nos prontos).
    */
+  /**
+   * O "Novo comentário" do Roteiro (R8 e R9): "Enviar agora" solta o comentario no chat da sessao (sendScriptedComment) e
+   * "Guardar na lista" vira um item "Pelo botão da equipe" (saveScriptComment). Devolve o resultado para o formulario
+   * mostrar os erros por campo (nulo: outra acao em andamento); no sucesso, o aviso e o retrato de novo.
+   */
+  async function submitComment(input: ScriptCommentFormInput, mode: "save" | "send") {
+    if (!sessionId || busyKey) {
+      return null;
+    }
+    setBusyKey("script:comment");
+    setFailure(null);
+    const payload = { ...input, sessionId };
+    const result = mode === "send" ? await sendScriptedComment(payload) : await saveScriptComment(payload);
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(mode === "send" ? comentariosCopy.avisos.enviado : comentariosCopy.avisos.guardado);
+      if (result.data.photoApplied > 0 && input.personaAvatarPath) {
+        adminToast.info(comentariosCopy.avisos.fotoEmTodos(input.personaName, result.data.photoApplied));
+      }
+      await refresh();
+    }
+    return result;
+  }
+
   async function saveScreen(input: ScreenItemSaveInput, show: boolean) {
     if (!sessionId || busyKey) {
       return null;
@@ -1038,9 +1067,18 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       webinarSlug={webinar.slug}
                     />
                   ) : null,
+                // O Roteiro na gravada e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo, com o "Novo comentário".
                 roteiro:
-                  webinar.kind === "simulated" ? (
-                    <ConsoleScript busyKey={busyKey} canAct={canAct} onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))} queue={queue} />
+                  webinar.kind === "simulated" || session.kind === "live" ? (
+                    <ConsoleScript
+                      busyKey={busyKey}
+                      canAct={canAct}
+                      live={session.kind === "live"}
+                      onComment={submitComment}
+                      onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))}
+                      onUpload={(image: string) => uploadPersonaPhoto({ image })}
+                      queue={queue}
+                    />
                   ) : null
               }}
               onClose={closePanel}

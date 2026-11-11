@@ -280,6 +280,8 @@ export const WEBINAR_ADMIN_COPY = {
     script: {
       due: (text: string) => `Entra em ${text}`,
       empty: "Sem roteiro nesta Live gravada.",
+      /** A sessao da Live ao vivo (R8). */
+      emptyLive: "Sem roteiro nesta live. Crie no editor do webinário ou use o Novo comentário.",
       fire: "Soltar agora",
       fired: "Entrou",
       manual: "Pelo botão",
@@ -1106,13 +1108,13 @@ export type WebinarEditorCard = (typeof WEBINAR_EDITOR_CARDS)[number];
 export const WEBINAR_SAVED_ONLY_CARDS: readonly WebinarEditorCard[] = ["simulacao", "roteiro", "enquetes", "oferta", "assistente"];
 
 /**
- * So na Live gravada: o card Sessoes (as horas marcadas) e o Roteiro. A Simulacao existe nos dois tipos desde o adendo
- * de 10/11/2026 (R7: o contador, as entradas e os avisos de venda tambem na Live ao vivo, com o zero no "Começar para
- * todos").
+ * So na Live gravada: o card Sessoes (as horas marcadas). A Simulacao e o Roteiro existem nos dois tipos desde o adendo
+ * de 10/11/2026 (R7 e R8: o contador, as entradas, os avisos de venda e os comentarios prontos tambem na Live ao vivo,
+ * com o zero no "Começar para todos").
  */
-const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes", "roteiro"];
+const SIMULATED_ONLY_CARDS: readonly WebinarEditorCard[] = ["sessoes"];
 
-/** Os cards na ordem, por tipo: Sessoes e Roteiro so na Live gravada, Gravacao so na Live ao vivo; Simulacao nos dois. */
+/** Os cards na ordem, por tipo: Sessoes so na Live gravada, Gravacao so na Live ao vivo; Simulacao e Roteiro nos dois. */
 export function webinarEditorCards(kind: WebinarKind): WebinarEditorCard[] {
   return WEBINAR_EDITOR_CARDS.filter((card) => (SIMULATED_ONLY_CARDS.includes(card) ? kind === "simulated" : card === "gravacao" ? kind === "live" : true));
 }

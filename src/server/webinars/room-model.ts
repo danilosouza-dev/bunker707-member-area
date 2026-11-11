@@ -201,20 +201,27 @@ export type AuthorPhoto = { avatarUrl: string | null; consentCurrent: boolean };
  * que a foto aparece para os outros alunos; quem aceitou a versao 1, ou aceitou com um modo antigo, fica com as
  * iniciais ate aceitar de novo) e nunca no que foi escrito como anonimo (a pergunta Anonima, ou o nome "Aluno {n}" de
  * quem participava como anonimo: a foto diria quem e). A equipe, no console, ve a foto do aluno sem depender do aceite
- * (ela ja ve o perfil no admin), mas nunca no anonimo. O roteiro e o Assistente nao tem pessoa. Sem foto, nulo: a tela
- * desenha as iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para
- * as linhas de antes, que continuam com a promessa da epoca.
+ * (ela ja ve o perfil no admin), mas nunca no anonimo. O Assistente nao tem pessoa. Sem foto, nulo: a tela desenha as
+ * iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para as linhas de
+ * antes, que continuam com a promessa da epoca. O roteiro (adendo de 10/11/2026, R9, que muda o D62 so nisto): a
+ * mensagem `scripted` mostra a foto de quem comenta quando a equipe pos uma (`personaAvatarUrl`, montada pela origem do
+ * nosso Supabase); sem ela, as iniciais, para a turma e para a equipe.
  */
 export function authorPhotoUrl(input: {
   /** A pergunta marcada como Anonima (legado: linhas de antes de 10/11/2026). */
   anonymous?: boolean;
   authorUserId: string | null;
   displayName: string;
+  /** A foto de quem comenta da mensagem `scripted` (R9; persona-model.personaAvatarUrl). */
+  personaAvatarUrl?: string | null;
   photo: AuthorPhoto | null | undefined;
   source: ChatSource;
   viewer: "student" | "team";
   webinarId: string;
 }): string | null {
+  if (input.source === "scripted") {
+    return input.personaAvatarUrl ?? null;
+  }
   const url = input.photo?.avatarUrl ?? null;
   if (!url || !input.authorUserId || input.anonymous) {
     return null;

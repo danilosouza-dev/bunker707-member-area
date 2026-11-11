@@ -13,7 +13,9 @@
 // lista), a enquete fixada, os banners e QR Codes prontos, o que esta na tela e os numeros de cada exibicao (a funcao
 // webinar_screen_report, guardada 10 s por sessao) e, na Live gravada, os removidos, silenciados e banidos com o nome.
 // Adendo de 10/11/2026 (R7): na gravada e na Live ao vivo com a decisao registrada, a parte simulada do contador agora
-// (`simulatedNow`, uma leitura das regras pela chave so nessas sessoes), so para a equipe ver separada do real.
+// (`simulatedNow`, uma leitura das regras pela chave so nessas sessoes), so para a equipe ver separada do real. R8 e R9:
+// o roteiro (com o que ja entrou) tambem na sessao da Live ao vivo, com a foto de quem comenta de cada item, e a foto de
+// quem comenta nas mensagens do roteiro (lida a parte pelo id: a coluna nao entra em CHAT_MESSAGE_COLUMNS).
 
 import "server-only";
 
@@ -38,12 +40,13 @@ import {
 } from "./live-console-model";
 import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
-import { chatConsentAllowsReplay, type QuestionReply, type WebinarKind, type WebinarSession } from "./model";
+import { chatConsentAllowsReplay, type QuestionReply, type ScriptItem, type WebinarKind, type WebinarSession } from "./model";
+import { readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
 import { authorPhotoUrl, bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
-import { bunnyViewToken, questionPhotoUrl, replyPhotoUrl } from "./room-queries";
+import { bunnyViewToken, questionPhotoUrl, replyPhotoUrl, scriptedAvatarUrls } from "./room-queries";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
 import { screenDisplayFromRow, screenItemFromRow } from "./screen-rows";
@@ -175,6 +178,12 @@ async function loadConsentFlags(db: WebinarsDb, userIds: readonly string[]): Pro
   }
 
   return consented;
+}
+
+/** O roteiro do webinario com a foto de quem comenta de cada item (R9; banco sem a coluna: sem foto). */
+async function loadConsoleScriptItems(db: WebinarsDb, webinarId: string): Promise<ScriptItem[]> {
+  const [rows, avatars] = await Promise.all([listScriptItemRows(db, webinarId), readScriptPersonaAvatars(db, webinarId)]);
+  return withPersonaAvatars(rows.map(scriptItemFromRow), avatars);
 }
 
 /** Os itens do roteiro que ja entraram nesta sessao (pela abertura ou pelo botao), com a hora em que entraram. */
@@ -541,10 +550,12 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // Os presentes agora pelo relogio da presenca, o mesmo do sinal de 15 s (na live, desde o Iniciar live, nunca pela
   // ancora da gravacao), como a sala do aluno conta.
   const presenceMs = presenceOffsetMs(session, nowMs);
-  const [chatRows, scriptRows, fired, launched, templates, questionRows, replyRows, presentIds, durationMs, screen] = await Promise.all([
+  // O roteiro: no webinario gravado e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo.
+  const withScript = input.kind === "simulated" || session.kind === "live";
+  const [chatRows, scriptItems, fired, launched, templates, questionRows, replyRows, presentIds, durationMs, screen] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
-    input.kind === "simulated" ? listScriptItemRows(db, session.webinarId) : Promise.resolve([]),
-    input.kind === "simulated" ? loadFiredScript(db, session.id) : Promise.resolve({}),
+    withScript ? loadConsoleScriptItems(db, session.webinarId) : Promise.resolve([]),
+    withScript ? loadFiredScript(db, session.id) : Promise.resolve({}),
     loadLaunchedPolls(db, session.webinarId, session.id),
     listPollRows(db, { sessionId: null, webinarId: session.webinarId }),
     listQuestionRows(db, { order: "votes", sessionId: session.id }),
@@ -578,11 +589,15 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // fica 60 s na memoria do processo, entao o retrato de 5 s nao vira uma consulta a `profiles` por vez.
   const questions = questionRows.map(questionFromRow);
   const replies = replyRows.map(questionReplyFromRow);
-  const photos = await loadAuthorPhotos(
-    db,
-    [...authors, ...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)],
-    nowMs
-  );
+  const [photos, personas] = await Promise.all([
+    loadAuthorPhotos(
+      db,
+      [...authors, ...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)],
+      nowMs
+    ),
+    // A foto de quem comenta das mensagens do roteiro (R9), pela memoria do processo.
+    scriptedAvatarUrls(db, pinnedMessage ? [...chatMessages, pinnedMessage] : chatMessages, nowMs)
+  ]);
   // O fio de cada pergunta (docs/30 §2.4), em ordem, com a foto de quem escreveu.
   const thread = new Map<string, QuestionReply[]>();
   for (const reply of replies) {
@@ -595,6 +610,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     avatarUrl: authorPhotoUrl({
       authorUserId: message.authorUserId,
       displayName: message.displayName,
+      personaAvatarUrl: personas.get(message.id) ?? null,
       photo: message.authorUserId ? photos.get(message.authorUserId) : null,
       source: message.source,
       viewer: "team",
@@ -617,7 +633,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     presentNow: presentIds.length,
     questions: questions.map((question) => ({ ...question, avatarUrl: questionPhotoUrl(question, session.webinarId, photos, "team"), replies: thread.get(question.id) ?? [] })),
     scriptFired: fired,
-    scriptItems: scriptRows.map(scriptItemFromRow),
+    scriptItems,
     screen,
     serverTime: input.now.toISOString(),
     simulatedNow,

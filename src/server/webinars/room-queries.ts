@@ -13,6 +13,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { fetchProfile } from "../students/store";
 import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
+import { personaAvatarUrl } from "./persona-model";
+import { loadScriptedMessageAvatars } from "./persona-store";
 import {
   fetchChatWindow,
   fetchConsentRow,
@@ -78,7 +80,7 @@ import { NO_BAN, liveBanState, liveJoinRefusal, liveRoomConfigured, liveRoomInfo
 import { fetchStudentBans, fetchUserBan } from "./live-store";
 import { registrationFromRow, type RecordingRow } from "./rows";
 import type { StudentScreenState } from "./screen-model";
-import { loadScreenState, screenStateForChat } from "./screen-queries";
+import { loadScreenState, screenStateForChat, screenStorageOrigin } from "./screen-queries";
 import { fetchRegistrationRows, listRecordingRows } from "./store";
 import { openReplaySessionId, registrationFor, seatRequired, type RoomJoin, type StudentRoomExtras, type StudentRoomVideo } from "./student-model";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -251,11 +253,21 @@ export function studentDisplayName(identity: Pick<StudentIdentity, "fullName">):
  * A foto de quem escreveu (docs/30 §8.5, aceite versao 2)
  * ---------------------------------------------------------------------------------------------- */
 
-/** A mensagem do aluno com a foto de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl). */
-export function studentMessageWithPhoto(message: ChatMessage, viewerUserId: string, sessionKind: WebinarSession["kind"], photos: ReadonlyMap<string, AuthorPhoto>): StudentChatMessage {
+/**
+ * A mensagem do aluno com a foto de quem escreveu, quando ela pode aparecer (room-model.authorPhotoUrl). `personas`: a
+ * foto de quem comenta das mensagens `scripted` (R9), pelo id da mensagem, ja como endereco.
+ */
+export function studentMessageWithPhoto(
+  message: ChatMessage,
+  viewerUserId: string,
+  sessionKind: WebinarSession["kind"],
+  photos: ReadonlyMap<string, AuthorPhoto>,
+  personas: ReadonlyMap<string, string> = new Map()
+): StudentChatMessage {
   const avatarUrl = authorPhotoUrl({
     authorUserId: message.authorUserId,
     displayName: message.displayName,
+    personaAvatarUrl: message.source === "scripted" ? (personas.get(message.id) ?? null) : null,
     photo: message.authorUserId ? photos.get(message.authorUserId) : null,
     source: message.source,
     viewer: "student",
@@ -264,14 +276,38 @@ export function studentMessageWithPhoto(message: ChatMessage, viewerUserId: stri
   return toStudentMessage(message, viewerUserId, sessionKind, message.offsetMs, avatarUrl);
 }
 
+/**
+ * A foto de quem comenta das mensagens `scripted` da pagina (R9), como endereco pela origem do nosso Supabase: uma
+ * leitura pelo id so quando a pagina tem mensagem do roteiro (a foto de cada mensagem fica na memoria do processo,
+ * persona-store.loadScriptedMessageAvatars). A janela do chat (webinar_chat_window) nao devolve a coluna.
+ */
+export async function scriptedAvatarUrls(db: WebinarsDb, messages: readonly Pick<ChatMessage, "id" | "source">[], nowMs: number): Promise<Map<string, string>> {
+  const ids = messages.filter((message) => message.source === "scripted").map((message) => message.id);
+  const urls = new Map<string, string>();
+  if (ids.length === 0) {
+    return urls;
+  }
+  const origin = screenStorageOrigin();
+  for (const [id, path] of await loadScriptedMessageAvatars(db, ids, nowMs)) {
+    const url = personaAvatarUrl(path, origin);
+    if (url) {
+      urls.set(id, url);
+    }
+  }
+  return urls;
+}
+
 /** As mensagens do aluno com as fotos: uma leitura (com a memoria de 60 s) para todos os autores da pagina. */
 async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly ChatMessage[], viewerUserId: string, sessionKind: WebinarSession["kind"], nowMs: number): Promise<StudentChatMessage[]> {
-  const photos = await loadAuthorPhotos(
-    db,
-    messages.map((message) => message.authorUserId),
-    nowMs
-  );
-  return messages.map((message) => studentMessageWithPhoto(message, viewerUserId, sessionKind, photos));
+  const [photos, personas] = await Promise.all([
+    loadAuthorPhotos(
+      db,
+      messages.map((message) => message.authorUserId),
+      nowMs
+    ),
+    scriptedAvatarUrls(db, messages, nowMs)
+  ]);
+  return messages.map((message) => studentMessageWithPhoto(message, viewerUserId, sessionKind, photos, personas));
 }
 
 /* ------------------------------------------------------------------------------------------------

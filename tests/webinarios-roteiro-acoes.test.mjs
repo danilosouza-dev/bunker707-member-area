@@ -496,10 +496,14 @@ test("salvar o roteiro: a situacao e do servidor (pronta com minuto, frase achad
   );
   assert.equal(db.tables.webinar_chat_script_items.length, 2);
 
+  // Adendo de 10/11/2026 (R8): a Live ao vivo tambem tem roteiro, mas sem "Quando o apresentador diz" (sem transcricao
+  // durante a transmissao): o item com frase e recusado no campo e nada e gravado.
   const aoVivo = usar(bancoEmMemoria(cenario({ webinars: [{ ...cenario().webinars[0], kind: "live" }] })));
-  const recusa = await scriptActions.saveScriptItems({ items: [], webinarId: WEBINAR });
-  assert.deepEqual([recusa.ok, recusa.status], [false, 409], "roteiro so na Live gravada");
+  const recusa = await scriptActions.saveScriptItems({ items: [{ ...base, phrase: "agora vamos começar", triggerKind: "on_phrase" }], webinarId: WEBINAR });
+  assert.deepEqual([recusa.ok, recusa.status, recusa.fieldErrors?.["items.0.triggerKind"]?.[0]], [false, 400, WEBINAR_COPY.naTela.comentarios.erros.fraseNaLive], "sem frase na live");
   assert.equal(aoVivo.tables.webinar_chat_script_items.length, 0);
+  const daLive = ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: 90_000, triggerKind: "at_offset" }, { ...base, offsetMs: null, triggerKind: "manual" }], webinarId: WEBINAR }));
+  assert.deepEqual(daLive.items.map((item) => [item.triggerKind, item.status]), [["at_offset", "ready"], ["manual", "ready"]], "Num minuto da live e Pelo botao da equipe");
 });
 
 test("a transcricao: grava as cues na gravacao base e resolve as frases (pronta com o atraso / nao achada); sem video, 409; texto vazio, erro no campo", async () => {

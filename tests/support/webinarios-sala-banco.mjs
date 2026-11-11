@@ -50,9 +50,16 @@ export function compare(a, b) {
   return String(a).localeCompare(String(b));
 }
 
-export function matches(row, [op, column, value]) {
+export function matches(row, [op, column, value, extra]) {
   const current = row[column];
   switch (op) {
+    // .not(coluna, "is", null), .not(coluna, "eq", valor) e .not("id", "in", "(a,b)"): o roteiro que ja entrou, as lives
+    // no ar e os itens que saem do roteiro ao salvar (R8).
+    case "not":
+      if (value === "is") return extra === null ? current !== null && current !== undefined : current !== extra;
+      if (value === "eq") return current !== extra;
+      if (value === "in") return !String(extra).replace(/^\(|\)$/g, "").split(",").map(literal).includes(current);
+      return true;
     case "eq":
       return current === value;
     case "in":
@@ -170,6 +177,7 @@ export function bancoFalso({ rpc = {}, tables = {} } = {}) {
       lt: filter("lt"),
       lte: filter("lte"),
       maybeSingle: () => ((state.single = "maybe"), chain),
+      not: (column, operator, value) => (state.filters.push(["not", column, operator, value]), chain),
       or: (expression) => ((state.filters.push(["or", expression, null]), chain)),
       order: (column, options) => (state.order.push([column, options?.ascending !== false]), chain),
       range: (from, to) => ((state.range = [from, to]), chain),

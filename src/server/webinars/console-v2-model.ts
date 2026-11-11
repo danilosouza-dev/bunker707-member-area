@@ -322,12 +322,14 @@ export function consoleRailFit(input: { available: number | null; count: number 
 
 /**
  * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
- * da turma); Enquetes sempre; Roteiro no webinario gravado; Oferta fora da live; Atendimento sempre; Presença com a
+ * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença com a
  * leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
  */
 export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
   const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
-  if (input.webinarKind === "simulated") {
+  // O Roteiro: no webinario gravado (o Replay dele tambem) e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao
+  // vivo (nunca no Replay da live: la ninguem solta comentario).
+  if (input.webinarKind === "simulated" || input.kind === "live") {
     entries.push("roteiro");
   }
   if (input.kind !== "live") {
