@@ -66,7 +66,10 @@ export const NA_TELA_COPY = {
   /* O console: a entrada "Na tela" (trilho e ⋯), a aba Chat e a entrada Enquetes. */
   console: {
     entrada: "Na tela",
-    /** O contador da entrada, so para o leitor de tela: quantas coisas estao na frente da turma. */
+    /**
+     * O nome do contador da entrada para o leitor de tela (o aria-label do item do trilho): quantas coisas estao na frente
+     * da turma. O numero aparece tambem no circulo vermelho do trilho (RoomCountBadge), como o das Perguntas.
+     */
     contador: (n: number) => (n === 0 ? "Nada na tela" : n === 1 ? "1 coisa na tela" : `${n} coisas na tela`),
     agora: "Na tela agora",
     agoraVazio: "Nada na tela dos alunos.",

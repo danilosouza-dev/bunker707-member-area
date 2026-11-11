@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, Send } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -11,6 +11,7 @@ import type { UploadedPersonaPhoto } from "@/server/webinars/script-actions";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../../form";
 import { SectionCard } from "../../../settings/kit";
 import { PersonaPhotoField } from "../persona-photo-field";
+import { returnConsoleFocus } from "./console-focus";
 
 // O "Novo comentário" da entrada Roteiro do console (adendo de 10/11/2026, R8 e R9; na Live ao vivo e na gravada), no
 // lugar da lista, com o Voltar: Quem comenta (Nome, Foto (opcional) com a linha do consentimento e o "Usar esta foto em
@@ -81,6 +82,11 @@ export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIP
   const errorOf = (field: string) => serverErrors[field] ?? localErrors[field] ?? null;
   const titleId = `${prefix}-titulo`;
 
+  // Ao abrir no lugar da lista, o foco vai para o titulo do formulario (o botao que abriu saiu da tela).
+  useEffect(() => {
+    returnConsoleFocus({ heading: titleId, opener: null });
+  }, [titleId]);
+
   function change(patch: Partial<ScriptCommentFormState>) {
     setState((current) => ({ ...current, ...patch }));
     setServerErrors((current) => {
@@ -133,6 +139,7 @@ export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIP
         </Button>
       }
       title={COPY.novoComentario}
+      titleFocusable
       titleId={titleId}
     >
       <form className="flex min-w-0 flex-col gap-4" data-console-script-comment="" noValidate onSubmit={(event) => event.preventDefault()}>

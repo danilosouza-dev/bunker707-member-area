@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ChevronDown, ImageUp, LoaderCircle, QrCode } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { RoomScreenLayer } from "@/components/member/webinars/room/screen/room-screen-layer";
 import { screenPlacement } from "@/components/member/webinars/room/screen/room-screen-model";
 import { RoomScreenStrip } from "@/components/member/webinars/room/screen/room-screen-strip";
@@ -37,6 +37,7 @@ import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescri
 import { PreviewFrame } from "../../../member-area/preview-frame";
 import { AdminSwitch, SectionCard } from "../../../settings/kit";
 import { adminMenuItem, adminMenuPopup } from "../../../styles";
+import { returnConsoleFocus } from "./console-focus";
 import { useConsolePortal } from "./console-shell";
 
 // Os formularios "Novo banner" e "Novo QR Code" da entrada Na tela do console (docs/30 §2.4; especificacao de
@@ -355,6 +356,11 @@ export function ConsoleScreenForm({ busy, canShow, initialDevice = "desktop", it
   const title = item ? (qr ? copy.console.editarQr : copy.console.editarBanner) : qr ? copy.console.novoQr : copy.console.novoBanner;
   const titleId = `${prefix}-titulo`;
 
+  // Ao abrir no lugar da lista, o foco vai para o titulo do formulario (o botao que abriu saiu da tela).
+  useEffect(() => {
+    returnConsoleFocus({ heading: titleId, opener: null });
+  }, [titleId]);
+
   function change(patch: Partial<ScreenFormState>) {
     setState((current) => screenFormWith(current, patch));
     // O erro do servidor de um campo sai quando o campo muda.
@@ -442,6 +448,7 @@ export function ConsoleScreenForm({ busy, canShow, initialDevice = "desktop", it
         </Button>
       }
       title={title}
+      titleFocusable
       titleId={titleId}
     >
       <form className="flex min-w-0 flex-col gap-4" data-console-screen-form={kind} noValidate onSubmit={(event) => event.preventDefault()}>

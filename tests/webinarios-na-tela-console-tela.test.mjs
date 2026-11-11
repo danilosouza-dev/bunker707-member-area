@@ -644,13 +644,14 @@ test("Prontos: cada item com o nome, o selo do tipo, o resumo, a Previa e o bota
   const menu = `${consoleCopy.editar} ${consoleCopy.excluir}`;
   assert.equal(textOf(linha(soOutro, banner.id)), `Banner da vaga Banner Embaixo, à direita · Médio · o aluno pode fechar ${consoleCopy.previa} ${consoleCopy.mostrarNoLugar} ${menu}`);
   assert.match(linha(soOutro, outroBanner.id), /data-screen-state="on"/);
-  assert.equal(textOf(linha(soOutro, outroBanner.id)), `Aviso do intervalo Banner ${consoleCopy.seloNaTela} Em cima, à esquerda · Médio · o aluno pode fechar ${consoleCopy.previa} ${consoleCopy.tirarDaTela} ${menu}`);
+  // Na tela, o Excluir fica desligado com o motivo (achado 5 da revisao de 11/11/2026).
+  assert.equal(textOf(linha(soOutro, outroBanner.id)), `Aviso do intervalo Banner ${consoleCopy.seloNaTela} Em cima, à esquerda · Médio · o aluno pode fechar ${consoleCopy.previa} ${consoleCopy.tirarDaTela} ${menu} ${naTela.erros.tireDaTela}`);
   assert.match(linha(soOutro, qrPronto.id), /data-screen-state="show"/);
   assert.equal(textOf(linha(soOutro, qrPronto.id)), `Material QR Code Em cima, à direita · Médio · o aluno pode fechar ${consoleCopy.previa} ${consoleCopy.mostrar} ${menu}`);
 
   const comEditado = html(createElement(ConsoleScreen, { ...props, screen: { ...props.screen, active: [editadoMostrado] } }));
   assert.match(linha(comEditado, editado.id), /data-screen-state="again"/);
-  assert.match(textOf(linha(comEditado, editado.id)), new RegExp(`${consoleCopy.mostrarDeNovo} ${consoleCopy.editar} ${consoleCopy.excluir}$`));
+  assert.match(textOf(linha(comEditado, editado.id)), new RegExp(`${consoleCopy.mostrarDeNovo} ${consoleCopy.editar} ${consoleCopy.excluir} ${naTela.erros.tireDaTela}$`), "editado, mas ainda na tela: o Excluir espera");
 
   // A Previa fechada (aria-expanded), o ⋯ com o nome do item, Editar e Excluir.
   const previa = linha(soOutro, banner.id).match(/<button[^>]*data-console-screen-preview="i-banner"[^>]*>/)?.[0] ?? "";
@@ -659,7 +660,7 @@ test("Prontos: cada item com o nome, o selo do tipo, o resumo, a Previa e o bota
   assert.match(linha(soOutro, banner.id), /<div hidden="" id="console-screen-preview-i-banner"><\/div>/);
   assert.match(linha(soOutro, banner.id), new RegExp(`aria-label="${consoleCopy.maisAcoes("Banner da vaga")}"`));
   assert.deepEqual(
-    Array.from(block(linha(soOutro, banner.id), 'role="menu"', "div").matchAll(/role="menuitem"[^>]*>([^<]+)</g)).map((match) => match[1]),
+    Array.from(block(linha(soOutro, banner.id), 'role="menu"', "div").matchAll(/role="menuitem"[^>]*>([\s\S]*?)<\/div>/g)).map((match) => textOf(match[1])),
     [consoleCopy.editar, consoleCopy.excluir]
   );
 
@@ -676,6 +677,70 @@ test("Prontos: cada item com o nome, o selo do tipo, o resumo, a Previa e o bota
   assert.match(soLeitura, /data-console-screen-preview="i-banner"/, "a Previa continua");
   const ocupado = html(createElement(ConsoleScreen, { ...props, busyKey: "screen:i-banner" }));
   assert.match(linha(ocupado, banner.id).match(/<button[^>]*data-console-screen-show=[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
+});
+
+test("achado 5 (revisao de 11/11/2026): o Excluir do item na tela fica desligado com o motivo; a falha da confirmacao aparece dentro dela", () => {
+  const props = screenProps({ screen: { active: [exibicaoDe(outroBanner)], items: [banner, outroBanner], pending: false, stats: {} } });
+  const markup = html(createElement(ConsoleScreen, props));
+  const linha = (id) => block(markup, `data-console-screen-item="${id}"`, "li");
+  const excluirDe = (id) => Array.from(block(linha(id), 'role="menu"', "div").matchAll(/<div([^>]*)role="menuitem"[^>]*>([\s\S]*?)<\/div>/g)).map((match) => [match[1].includes('aria-disabled="true"'), textOf(match[2])]);
+  assert.deepEqual(excluirDe(outroBanner.id), [[false, consoleCopy.editar], [true, `${consoleCopy.excluir} ${naTela.erros.tireDaTela}`]], "na tela: desligado, com o motivo");
+  assert.deepEqual(excluirDe(banner.id), [[false, consoleCopy.editar], [false, consoleCopy.excluir]], "fora da tela: liga");
+  assert.match(linha(outroBanner.id), /data-console-screen-delete-reason=""/);
+
+  // A confirmacao aberta com a falha do servidor (o item na tela de outra sessao): o aviso dentro dela, nunca so no banner do console.
+  const comFalha = html(createElement(ConsoleScreen, { ...props, initialArchive: { error: naTela.erros.tireDaTela, itemId: banner.id } }));
+  const dialogo = block(comFalha, 'role="dialog"', "div");
+  assert.match(textOf(dialogo), new RegExp(consoleCopy.excluirConfirmar(banner.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(dialogo, new RegExp(`<p[^>]*data-console-screen-archive-error=""[^>]*role="alert"[^>]*>${naTela.erros.tireDaTela}</p>`));
+  const semFalha = block(html(createElement(ConsoleScreen, { ...props, initialArchive: { error: null, itemId: banner.id } })), 'role="dialog"', "div");
+  assert.doesNotMatch(semFalha, /data-console-screen-archive-error/);
+});
+
+test("achado 6 (revisao de 11/11/2026): o foco do teclado: o titulo do formulario e os das secoes recebem o foco (tabIndex -1); ao fechar, o botao que abriu, ou o titulo quando ele saiu com o item", async () => {
+  const { consoleFocusIsLoose, consoleFocusTarget } = await import("../src/components/admin/v2/communication/webinars/session-console/console-focus.ts");
+  // Os titulos focaveis: Na tela agora e Prontos; os formularios do banner, do QR Code e do Novo comentário; o Roteiro.
+  const lista = html(createElement(ConsoleScreen, screenProps({ screen: { active: [exibicaoDe(banner)], items: [banner], pending: false, stats: {} } })));
+  assert.match(lista, /<h2[^>]*id="console-screen-now-title"[^>]*tabindex="-1"|<h2[^>]*tabindex="-1"[^>]*id="console-screen-now-title"/);
+  assert.match(lista, /<h2(?=[^>]*id="console-screen-ready-title")(?=[^>]*tabindex="-1")/);
+  for (const kind of ["banner", "qr"]) {
+    const form = html(createElement(ConsoleScreenForm, formProps({ kind })));
+    assert.match(form, /<h2(?=[^>]*id="console-screen-[a-z]+-[^"]*-titulo")(?=[^>]*tabindex="-1")/, kind);
+  }
+  const { ConsoleScript } = await import("../src/components/admin/v2/communication/webinars/session-console/console-script.tsx");
+  const roteiro = { busyKey: null, canAct: true, live: true, onComment: async () => null, onFire() {}, onUpload: async () => ({ error: "x", ok: false, status: 500 }), origin: ORIGEM, queue: [] };
+  assert.match(html(createElement(ConsoleScript, roteiro)), /<h2(?=[^>]*id="console-script-title")(?=[^>]*tabindex="-1")/);
+  const comentario = html(createElement(ConsoleScript, { ...roteiro, initialComment: { applyToName: true, body: "", personaAvatarPath: null, personaName: "", personaRole: "student" } }));
+  assert.match(comentario, /<h2(?=[^>]*id="console-script-comment-[^"]*-titulo")(?=[^>]*tabindex="-1")/);
+  // Os outros SectionCard do admin continuam sem tabIndex no titulo.
+  assert.doesNotMatch(html(createElement(ConsolePolls, pollsProps())).match(/<h2[^>]*>/)?.[0] ?? "", /tabindex/);
+
+  // Para onde o foco volta: o botao que abriu, se ainda esta na pagina e ligado; senao o titulo da secao.
+  const el = (name, extra = {}) => ({ disabled: false, focus() {}, isConnected: true, name, ...extra });
+  const titulo = el("titulo");
+  const raiz = (achados) => ({ getElementById: (id) => (id === "console-screen-ready-title" ? titulo : null), querySelector: (selector) => achados[selector] ?? null });
+  const novo = el("novo");
+  const ask = { heading: "console-screen-ready-title", opener: '[data-console-screen-new="banner"]' };
+  assert.equal(consoleFocusTarget(raiz({ [ask.opener]: novo }), ask), novo, "Voltar: o Novo banner");
+  assert.equal(consoleFocusTarget(raiz({}), ask), titulo, "o botao saiu com o item (Excluir): o titulo dos Prontos");
+  assert.equal(consoleFocusTarget(raiz({ [ask.opener]: el("novo", { disabled: true }) }), ask), titulo, "desligado nao recebe o foco");
+  assert.equal(consoleFocusTarget(raiz({}), { heading: "console-screen-ready-title", opener: null }), titulo, "Tirar da tela e Desafixar: o titulo da secao");
+  assert.equal(consoleFocusTarget(null, ask), null);
+  // O foco so e movido quando esta solto (no body ou num elemento que saiu da pagina).
+  const body = {};
+  assert.equal(consoleFocusIsLoose(null, body), true);
+  assert.equal(consoleFocusIsLoose(body, body), true);
+  assert.equal(consoleFocusIsLoose({ isConnected: false }, body), true, "o botao que sumiu com o item");
+  assert.equal(consoleFocusIsLoose({ isConnected: true }, body), false, "quem levou o foco para outro lugar fica onde esta");
+
+  // As acoes que tiram o botao da tela devolvem a promessa (o foco segue depois do retrato novo) e a confirmacao do
+  // Excluir manda o foco para o ⋯ do item ou para o titulo dos Prontos.
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/console-screen.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /finalFocus=\{\(\) => consoleFocusTarget<HTMLElement>\(document, \{ heading: READY_TITLE, opener: archiveOpener\.current \? `\[data-console-screen-menu="\$\{archiveOpener\.current\}"\]` : null \}\)\}/);
+  assert.match(fonte, /archiveOpener\.current = item\.id;/, "o ⋯ de onde a confirmacao abriu fica guardado (ela fecha ja sem o item no estado)");
+  assert.equal(count(fonte, /afterAction\(on(?:Hide|UnpinMessage|UnpinPoll)\(/g), 4, "Tirar da tela (na lista e nos Prontos) e os dois Desafixar");
+  const consoleFonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(consoleFonte, /onHide=\{\(displayId: string\) => void run|onUnpinMessage=\{\(messageId: string\) => void run|onUnpinPoll=\{\(pollId: string\) =>\s+void run/, "as acoes devolvem a promessa");
 });
 
 test("Prontos sem a 202611100002: o aviso da migracao no lugar da lista e nada para criar", () => {

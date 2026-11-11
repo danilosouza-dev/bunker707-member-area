@@ -17,7 +17,11 @@
 // ficam 30 s na memoria do processo (ate 500 sessoes); um id que a memoria nao conhece rele as exibicoes no maximo uma
 // vez a cada 5 s por sessao e, continuando desconhecido, e descartado em silencio (o lote de outra sessao, um id
 // inventado). A linha de student_events leva entity_type 'webinar', entity_id = a sessao e o metadata { display_id,
-// item_id, kind, form, target, offset_ms }, com o offset do relogio do servidor (o mesmo do chat).
+// item_id, kind, form, target, offset_ms }, com o offset do relogio do servidor (o mesmo do chat). Um aluno em laco nao
+// infla os numeros (revisao de 11/11/2026, S2): uma memoria limitada do processo por (aluno, exibicao) descarta o "viu"
+// e o "fechou" repetidos e deixa no maximo um clique a cada 3 s e 20 por exibicao; o "fechou" de um item que nao fecha
+// (pela copia mostrada) e qualquer evento de uma exibicao que saiu da tela ha mais de 60 s ficam de fora (a saida vem
+// da mesma leitura das exibicoes, que fica ate 30 s na memoria).
 // O relatorio da sessao (§7): todas as exibicoes da sessao e os numeros de webinar_screen_report (alunos distintos, a
 // equipe de fora), as duas leituras vazias sem a migracao; quem monta as linhas do bloco e report-page-model.ts.
 
@@ -47,7 +51,7 @@ import {
   type StudentScreenState
 } from "./screen-model";
 import { screenDisplayFromRow, screenStatsFromRows, type ScreenStats } from "./screen-rows";
-import type { ScreenEventsBody } from "./screen-schemas";
+import { parseScreenSnapshot, type ScreenEventsBody } from "./screen-schemas";
 import { fetchScreenReportRows, listActiveScreenDisplayRows, listSessionPollKeyRows, listSessionScreenDisplayRows } from "./screen-store";
 
 /** Quanto o estado de uma sessao vale na memoria do processo (com o mesmo carimbo). */
@@ -240,16 +244,68 @@ export const SCREEN_DISPLAY_IDS_TTL_MS = 30_000;
 /** Um id desconhecido rele as exibicoes da sessao no maximo uma vez neste intervalo. */
 export const SCREEN_DISPLAY_IDS_RETRY_MS = 5_000;
 
-/** O que a rota precisa de cada exibicao: o item e o tipo (so banner e QR Code medem). */
-export type ScreenDisplayKey = { itemId: string | null; kind: ScreenKind };
+/**
+ * O que a rota precisa de cada exibicao: o item e o tipo (so banner e QR Code medem), se a copia mostrada deixa o aluno
+ * fechar e quando saiu da tela (nulo: na tela).
+ */
+export type ScreenDisplayKey = { closable: boolean; hiddenAtMs: number | null; itemId: string | null; kind: ScreenKind };
+
+/** Os cliques de um aluno numa exibicao que contam: um a cada 3 s, ate 20. */
+export const SCREEN_CLICK_GAP_MS = 3_000;
+export const SCREEN_CLICKS_MAX = 20;
+/** Quanto depois de sair da tela um evento da exibicao ainda conta (o fechar ou o clique que chegou atrasado). */
+export const SCREEN_EVENT_AFTER_HIDE_MS = 60_000;
+/** Quantos pares (aluno, exibicao) a memoria dos eventos guarda; passou disso, o mais antigo sai. */
+export const SCREEN_EVENT_MEMORY_MAX = 50_000;
+
+type ScreenEventSeen = { clicks: number; closed: boolean; lastClickAt: number; shown: boolean };
+
+const eventsSeen = new Map<string, ScreenEventSeen>();
+
+/**
+ * O evento conta? "viu" e "fechou" uma vez por (aluno, exibicao) neste processo; o clique, um a cada 3 s e ate 20. A
+ * memoria guarda o par como o mais novo (o mais antigo sai quando passa do teto).
+ */
+function screenEventCounts(userId: string, displayId: string, name: ScreenEventsBody["events"][number]["name"], nowMs: number): boolean {
+  const memo = `${userId}:${displayId}`;
+  const seen = eventsSeen.get(memo) ?? { clicks: 0, closed: false, lastClickAt: Number.NEGATIVE_INFINITY, shown: false };
+  if (name === "shown") {
+    if (seen.shown) {
+      return false;
+    }
+    seen.shown = true;
+  } else if (name === "closed") {
+    if (seen.closed) {
+      return false;
+    }
+    seen.closed = true;
+  } else {
+    if (seen.clicks >= SCREEN_CLICKS_MAX || nowMs - seen.lastClickAt < SCREEN_CLICK_GAP_MS) {
+      return false;
+    }
+    seen.clicks += 1;
+    seen.lastClickAt = nowMs;
+  }
+  eventsSeen.delete(memo);
+  while (eventsSeen.size >= SCREEN_EVENT_MEMORY_MAX) {
+    const oldest = eventsSeen.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    eventsSeen.delete(oldest);
+  }
+  eventsSeen.set(memo, seen);
+  return true;
+}
 
 type DisplayIdsEntry = { at: number; value: Promise<Map<string, ScreenDisplayKey>> };
 
 const displayIdsMemory = new Map<string, DisplayIdsEntry>();
 
-/** Esvazia a memoria dos ids das exibicoes (os testes). */
+/** Esvazia a memoria dos ids das exibicoes e a dos eventos ja contados (os testes). */
 export function clearScreenDisplayIdsCache() {
   displayIdsMemory.clear();
+  eventsSeen.clear();
 }
 
 async function readDisplayKeys(db: WebinarsDb, sessionId: string): Promise<Map<string, ScreenDisplayKey>> {
@@ -258,7 +314,13 @@ async function readDisplayKeys(db: WebinarsDb, sessionId: string): Promise<Map<s
   for (const row of rows) {
     const kind = (SCREEN_KINDS as readonly string[]).includes(row.kind) ? (row.kind as ScreenKind) : null;
     if (kind) {
-      keys.set(row.id.toLowerCase(), { itemId: row.item_id, kind });
+      const hiddenAtMs = row.hidden_at ? Date.parse(row.hidden_at) : Number.NaN;
+      keys.set(row.id.toLowerCase(), {
+        closable: parseScreenSnapshot(kind, row.snapshot)?.closable === true,
+        hiddenAtMs: Number.isFinite(hiddenAtMs) ? hiddenAtMs : null,
+        itemId: row.item_id,
+        kind
+      });
     }
   }
   return keys;
@@ -303,7 +365,8 @@ export async function sessionScreenDisplayKeys(db: WebinarsDb, sessionId: string
 
 /**
  * As linhas de student_events de um lote de metricas da Na tela: so na Live ao vivo e na gravada (o Replay e 404: la
- * nada aparece na tela); cada evento so de uma exibicao de banner ou QR Code desta sessao (o resto sai em silencio). O
+ * nada aparece na tela); cada evento so de uma exibicao de banner ou QR Code desta sessao, nunca de uma que saiu ha
+ * mais de 60 s, o "fechou" so de um item que fecha, e sem os repetidos (screenEventCounts); o resto sai em silencio. O
  * offset e o do relogio do servidor (o do chat da sessao), nulo quando a sessao nao tem relogio.
  */
 export async function screenEventRows(input: {
@@ -325,7 +388,10 @@ export async function screenEventRows(input: {
   return events.flatMap((event, index) => {
     const displayId = wanted[index];
     const key = keys.get(displayId);
-    if (!key) {
+    if (!key || (key.hiddenAtMs !== null && nowMs - key.hiddenAtMs > SCREEN_EVENT_AFTER_HIDE_MS) || (event.name === "closed" && !key.closable)) {
+      return [];
+    }
+    if (!screenEventCounts(userId, displayId, event.name, nowMs)) {
       return [];
     }
     return [

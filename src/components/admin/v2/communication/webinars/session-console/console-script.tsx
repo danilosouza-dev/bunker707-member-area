@@ -1,7 +1,7 @@
 "use client";
 
 import { MessageSquarePlus, Zap } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
@@ -14,6 +14,7 @@ import { offsetLabel } from "@/server/webinars/room-model";
 import type { UploadedPersonaPhoto } from "@/server/webinars/script-actions";
 import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
+import { returnConsoleFocus } from "./console-focus";
 import { ConsoleScriptComment, type ScriptCommentFormInput, type ScriptCommentFormState } from "./console-script-comment";
 
 // O painel Roteiro do console (docs/30 §2.4 e §6.6 D6-c): a fila na ordem do minuto, o que ja entrou marcado, os
@@ -21,6 +22,8 @@ import { ConsoleScriptComment, type ScriptCommentFormInput, type ScriptCommentFo
 // R9): tambem na sessao da Live ao vivo (`live`: o minuto de cada item contado do Começar para todos, "Aos 12 minutos da
 // live"), a foto de quem comenta em cada item e o "Novo comentário" (console-script-comment.tsx) no lugar da lista,
 // com "Enviar agora" e "Guardar na lista", na live e na gravada; quem pode e quem tem messaging.write, como o Soltar.
+// Ao fechar o formulario (Voltar, Cancelar, depois de enviar ou guardar), o foco volta ao "Novo comentário" (ou ao
+// titulo do Roteiro; console-focus.ts). Na live, "Minuto já passou" so depois da tolerancia do tick (scriptQueue).
 
 const copy = WEBINAR_ADMIN_COPY.console.script;
 const scriptCopy = WEBINAR_ADMIN_COPY.script;
@@ -45,8 +48,17 @@ type ConsoleScriptProps = {
 
 export function ConsoleScript({ busyKey, canAct, initialComment = null, live = false, onComment, onFire, onUpload, origin, queue }: ConsoleScriptProps) {
   const [comment, setComment] = useState<ScriptCommentFormState | null>(initialComment);
+  const returnFocus = useRef(false);
   const summary = scriptQueueSummary(queue);
   const photoOrigin = origin === undefined ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? null) : origin;
+
+  useEffect(() => {
+    if (comment || !returnFocus.current) {
+      return;
+    }
+    returnFocus.current = false;
+    returnConsoleFocus({ heading: "console-script-title", opener: "[data-console-script-new]" });
+  }, [comment]);
 
   if (comment && onComment && onUpload) {
     return (
@@ -54,7 +66,10 @@ export function ConsoleScript({ busyKey, canAct, initialComment = null, live = f
         busy={busyKey !== null}
         canSend={canAct}
         initialState={comment}
-        onBack={() => setComment(null)}
+        onBack={() => {
+          returnFocus.current = true;
+          setComment(null);
+        }}
         onSubmit={onComment}
         onUpload={onUpload}
       />
@@ -75,6 +90,7 @@ export function ConsoleScript({ busyKey, canAct, initialComment = null, live = f
       }
       description={copy.summary(summary.fired, summary.pending, summary.manual)}
       title={copy.title}
+      titleFocusable
       titleId="console-script-title"
     >
       {/* Sem item, so a frase: nenhuma lista vazia para o leitor de tela. */}

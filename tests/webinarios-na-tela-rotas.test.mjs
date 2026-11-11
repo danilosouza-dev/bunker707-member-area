@@ -317,12 +317,15 @@ function montarMetricas(opcoes) {
 
 test("screen-events: 202 com as linhas de student_events (display_id, item_id, kind, form, target e o offset do servidor); a enquete fixada fica de fora", async () => {
   const { db, userId } = montarMetricas();
+  // O QR Code que acabou de sair (20 s): o fechar que chegou depois ainda conta.
+  const SAIU_AGORA = "eeeeeeee-0000-4000-8000-000000000007";
+  db.tables.webinar_screen_displays.push(exibicao(SAIU_AGORA, "qr", { hidden_at: iso(Date.now() - 20_000), hidden_reason: "team", snapshot: copiaDoQr }));
   const resposta = await metricas([
     { displayId: BANNER, form: "stage", name: "shown" },
     { displayId: BANNER, form: "stage", name: "clicked", target: "button" },
     { displayId: QR.toUpperCase(), form: "strip", name: "clicked", target: "qr_link" },
     { displayId: QR, form: "vertical", name: "closed" },
-    { displayId: SAIU, form: "stage", name: "closed" },
+    { displayId: SAIU_AGORA, form: "stage", name: "closed" },
     { displayId: FIXADA_ENQUETE, form: "stage", name: "shown" }
   ]);
   assert.equal(resposta.status, 202, JSON.stringify(resposta.body));
@@ -335,9 +338,9 @@ test("screen-events: 202 com as linhas de student_events (display_id, item_id, k
       ["webinar_screen_clicked", BANNER, "stage", "button"],
       ["webinar_screen_clicked", QR, "strip", "qr_link"],
       ["webinar_screen_closed", QR, "vertical", null],
-      ["webinar_screen_closed", SAIU, "stage", null]
+      ["webinar_screen_closed", SAIU_AGORA, "stage", null]
     ],
-    "o id em minusculas; a exibicao que ja saiu ainda conta (o fechar que chegou depois); a enquete fixada nao mede"
+    "o id em minusculas; a exibicao que acabou de sair ainda conta (o fechar que chegou depois); a enquete fixada nao mede"
   );
   for (const linha of linhas) {
     assert.equal(linha.entity_type, "webinar");
@@ -347,7 +350,57 @@ test("screen-events: 202 com as linhas de student_events (display_id, item_id, k
     assert.equal(linha.metadata.item_id, ITEM_DO_BANNER);
     assert.ok(Math.abs(linha.metadata.offset_ms - 10 * MIN) < 5000, `o offset do relogio do servidor (10 min de sessao): ${linha.metadata.offset_ms}`);
   }
-  assert.deepEqual(linhas.map((row) => row.metadata.kind), ["banner", "banner", "qr", "qr", "banner"]);
+  assert.deepEqual(linhas.map((row) => row.metadata.kind), ["banner", "banner", "qr", "qr", "qr"]);
+});
+
+test("screen-events S2 (revisao de 11/11/2026): o aluno em laco nao infla os numeros: o viu e o fechou uma vez por exibicao, o clique um a cada 3 s e ate 20; o fechou de item que nao fecha e a exibicao que saiu ha mais de 60 s ficam de fora", async (t) => {
+  const { db, userId } = montarMetricas();
+  const inicio = Date.now();
+  let agora = inicio;
+  t.mock.method(Date, "now", () => agora);
+  const linhas = (tipo, displayId) => db.tables.student_events.filter((row) => row.user_id === userId && row.event_type === tipo && row.metadata.display_id === displayId).length;
+
+  // Um lote com tudo repetido: um viu, um clique (o segundo no mesmo instante fica de fora), um fechou.
+  const lote = await metricas([
+    { displayId: QR, form: "stage", name: "shown" },
+    { displayId: QR, form: "stage", name: "shown" },
+    { displayId: QR, form: "stage", name: "clicked", target: "qr_link" },
+    { displayId: QR, form: "stage", name: "clicked", target: "qr_link" },
+    { displayId: QR, form: "stage", name: "closed" },
+    { displayId: QR, form: "stage", name: "closed" }
+  ]);
+  assert.deepEqual(lote.body.data, { accepted: 3 });
+  // Os lotes seguintes: o viu e o fechou nunca de novo; o clique so depois de 3 s.
+  agora = inicio + 1000;
+  assert.deepEqual((await metricas([{ displayId: QR, form: "stage", name: "shown" }, { displayId: QR, form: "stage", name: "closed" }, { displayId: QR, form: "stage", name: "clicked", target: "card" }])).body.data, { accepted: 0 });
+  agora = inicio + 3000;
+  assert.deepEqual((await metricas([{ displayId: QR, form: "stage", name: "clicked", target: "card" }])).body.data, { accepted: 1 }, "3 s depois, o clique conta");
+  assert.deepEqual([linhas("webinar_screen_shown", QR), linhas("webinar_screen_clicked", QR), linhas("webinar_screen_closed", QR)], [1, 2, 1]);
+
+  // Ate 20 cliques por exibicao, mesmo espacados (12 lotes por minuto: a hora anda 6 s por lote).
+  const aceitos = [];
+  for (let clique = 3; clique <= 22; clique += 1) {
+    agora += 6000;
+    const resposta = await metricas([{ displayId: QR, form: "stage", name: "clicked", target: "card" }]);
+    assert.equal(resposta.status, 202, `clique ${clique}`);
+    aceitos.push(resposta.body.data.accepted);
+  }
+  assert.deepEqual(aceitos, [...Array(18).fill(1), 0, 0], "o 21o e o 22o ficam de fora");
+  assert.equal(linhas("webinar_screen_clicked", QR), 20);
+
+  // O banner da copia mostrada nao fecha (closable false): o fechou dele nao conta; o viu e o clique sim.
+  agora += 6000;
+  assert.deepEqual((await metricas([{ displayId: BANNER, form: "stage", name: "closed" }, { displayId: BANNER, form: "stage", name: "shown" }])).body.data, { accepted: 1 });
+  assert.equal(linhas("webinar_screen_closed", BANNER), 0);
+
+  // A exibicao que saiu ha 2 min (SAIU): nada conta, nem o viu.
+  agora += 6000;
+  assert.deepEqual((await metricas([{ displayId: SAIU, form: "stage", name: "shown" }, { displayId: SAIU, form: "stage", name: "clicked", target: "card" }])).body.data, { accepted: 0 });
+
+  // Outro aluno tem a propria conta.
+  novoAluno();
+  agora += 6000;
+  assert.deepEqual((await metricas([{ displayId: QR, form: "stage", name: "shown" }])).body.data, { accepted: 1 });
 });
 
 test("screen-events: a exibicao de outra sessao e o id inventado saem em silencio; o desconhecido rele as exibicoes no maximo uma vez a cada 5 s", async () => {
@@ -383,11 +436,15 @@ test("screen-events: a exibicao nova (mostrada depois da ultima leitura) entra d
   assert.equal(db.calls.from.filter((table) => table === "webinar_screen_displays").length, 2);
 });
 
-test("screen-events: 12 lotes por minuto por aluno e sessao (o 13o e 429 com Retry-After); 400 no lote de 7 e no nome desconhecido; 401 sem sessao; 404 no Replay", async () => {
+test("screen-events: 12 lotes por minuto por aluno e sessao (o 13o e 429 com Retry-After); 400 no lote de 7 e no nome desconhecido; 401 sem sessao; 404 no Replay", async (t) => {
   const { db } = montarMetricas();
   const evento = { displayId: BANNER, form: "stage", name: "clicked", target: "card" };
+  // Um clique a cada 3 s (o que a memoria dos eventos deixa contar): 12 lotes em 33 s, dentro do mesmo minuto.
+  let agora = Date.now();
+  t.mock.method(Date, "now", () => agora);
   for (let lote = 1; lote <= 12; lote += 1) {
     assert.equal((await metricas([evento])).status, 202, `lote ${lote}`);
+    agora += 3000;
   }
   const decimoTerceiro = await metricas([evento]);
   assert.equal(decimoTerceiro.status, 429);

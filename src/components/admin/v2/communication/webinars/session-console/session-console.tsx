@@ -61,6 +61,7 @@ import {
 import { LIVE_CONSOLE_COPY, banLabels, desiredLobby, handRows, liveControlsFor, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import { NO_BAN } from "@/server/webinars/live-model";
 import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
+import { LIVE_SCRIPT_LATE_MAX_MS } from "@/server/webinars/persona-model";
 import {
   answerQuestion,
   closePoll,
@@ -222,7 +223,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const phase = session ? consolePhaseOf(session, durationMs, nowMs) : null;
   const canAct = session ? canTeamActOn(session) : false;
   const scriptClockMs = session ? consoleScriptClockMs(session, tick, skew) : Number.NaN;
-  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, scriptClockMs) : []), [snapshot, scriptClockMs]);
+  // Na Live ao vivo no ar, o tick ainda solta o item ate 5 min atrasado: so depois disso, "Minuto já passou".
+  const scriptLateMs = session?.kind === "live" && session.status === "live" ? LIVE_SCRIPT_LATE_MAX_MS : 0;
+  const queue = useMemo(() => (snapshot ? scriptQueue(snapshot.scriptItems, snapshot.scriptFired, scriptClockMs, { lateMs: scriptLateMs }) : []), [snapshot, scriptClockMs, scriptLateMs]);
   const live = session?.kind === "live" ? (snapshot?.live ?? null) : null;
   const livePeople = useMemo(() => new Map((live?.people ?? []).map((person) => [person.userId, person])), [live]);
   // A Live gravada: os barrados do retrato e os itens por pessoa sem sala (silenciar, remover e banir; nada de video).
@@ -662,11 +665,6 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   /* Na tela: o banner e o QR Code */
 
   /**
-   * O Salvar do formulario do banner e do QR Code: salva e, no Mostrar agora, mostra na sessao. Devolve o resultado do
-   * salvar para o formulario pôr os erros nos campos (nulo com outra acao em andamento); a falha do Mostrar depois de
-   * salvo vai para o banner do console (o item ja esta nos prontos).
-   */
-  /**
    * O "Novo comentário" do Roteiro (R8 e R9): "Enviar agora" solta o comentario no chat da sessao (sendScriptedComment) e
    * "Guardar na lista" vira um item "Pelo botão da equipe" (saveScriptComment). Devolve o resultado para o formulario
    * mostrar os erros por campo (nulo: outra acao em andamento); no sucesso, o aviso e o retrato de novo.
@@ -690,6 +688,30 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     return result;
   }
 
+  /**
+   * O Excluir confirmado de um banner ou QR Code pronto: o resultado volta para a confirmacao, que mostra a falha dentro
+   * dela (o banner do console fica por baixo do dialogo); no sucesso, o aviso e o retrato de novo.
+   */
+  async function archiveScreen(itemId: string) {
+    if (busyKey) {
+      return null;
+    }
+    setBusyKey(`screen:${itemId}`);
+    setFailure(null);
+    const result = await archiveScreenItem({ id: itemId });
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(naTelaCopy.avisos.excluido);
+      await refresh();
+    }
+    return result;
+  }
+
+  /**
+   * O Salvar do formulario do banner e do QR Code: salva e, no Mostrar agora, mostra na sessao. Devolve o resultado do
+   * salvar para o formulario pôr os erros nos campos (nulo com outra acao em andamento); a falha do Mostrar depois de
+   * salvo vai para o banner do console (o item ja esta nos prontos).
+   */
   async function saveScreen(input: ScreenItemSaveInput, show: boolean) {
     if (!sessionId || busyKey) {
       return null;
@@ -1045,15 +1067,15 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       busyKey={busyKey}
                       canAct={canAct}
                       nowMs={nowMs}
-                      onArchive={(itemId: string) => run(`screen:${itemId}`, () => archiveScreenItem({ id: itemId }), () => adminToast.success(naTelaCopy.avisos.excluido))}
-                      onHide={(displayId: string) => void run(`screen:${displayId}`, () => hideScreenItem({ displayId }), () => adminToast.success(naTelaCopy.avisos.saiu))}
+                      onArchive={archiveScreen}
+                      onHide={(displayId: string) => run(`screen:${displayId}`, () => hideScreenItem({ displayId }), () => adminToast.success(naTelaCopy.avisos.saiu))}
                       onSave={saveScreen}
                       onShow={(itemId: string) =>
                         void run(`screen:${itemId}`, () => showScreenItem({ itemId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.naTela))
                       }
-                      onUnpinMessage={(messageId: string) => void run(`moderate:${messageId}`, () => moderateMessage({ action: "unpin", messageId }))}
+                      onUnpinMessage={(messageId: string) => run(`moderate:${messageId}`, () => moderateMessage({ action: "unpin", messageId }))}
                       onUnpinPoll={(pollId: string) =>
-                        void run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
+                        run(`poll:${pollId}`, () => unpinPoll({ sessionId: session.id }), (result) => {
                           if (result.unpinned) {
                             adminToast.success(naTelaCopy.avisos.enqueteDesafixada);
                           }

@@ -116,18 +116,29 @@ export type ScriptQueueItem = ScriptItem & {
   passed: boolean;
 };
 
-/** A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). */
-export function scriptQueue(items: readonly ScriptItem[], firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>, currentOffsetMs: number): ScriptQueueItem[] {
+/**
+ * A fila do roteiro para uma sessao: na ordem do minuto, com o que ja entrou marcado (firedAt por item). `lateMs`: a
+ * tolerancia em que o item ainda entra sozinho (na Live ao vivo no ar, LIVE_SCRIPT_LATE_MAX_MS: o tick de minuto solta
+ * ate 5 min atrasado), e so depois dela o item vira "Minuto já passou"; sem ela, assim que o minuto chega.
+ */
+export function scriptQueue(
+  items: readonly ScriptItem[],
+  firedAt: ReadonlyMap<string, string | null> | Record<string, string | null>,
+  currentOffsetMs: number,
+  options: { lateMs?: number } = {}
+): ScriptQueueItem[] {
   const lookup = firedAt instanceof Map ? firedAt : new Map(Object.entries(firedAt));
+  const lateMs = Math.max(0, options.lateMs ?? 0);
   return sortScriptItems(items).map((item) => {
     const dueOffsetMs = scriptOffsetOf(item);
     const fired = lookup.has(item.id);
+    const late = dueOffsetMs != null && Number.isFinite(currentOffsetMs) && (lateMs > 0 ? currentOffsetMs - dueOffsetMs > lateMs : dueOffsetMs <= currentOffsetMs);
     return {
       ...item,
       dueOffsetMs,
       fired,
       firedAt: lookup.get(item.id) ?? null,
-      passed: fired || (dueOffsetMs != null && Number.isFinite(currentOffsetMs) && dueOffsetMs <= currentOffsetMs)
+      passed: fired || late
     };
   });
 }

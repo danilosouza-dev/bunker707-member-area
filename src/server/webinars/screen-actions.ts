@@ -496,7 +496,9 @@ export async function hideScreenItem(input: { displayId: string }): Promise<Acti
 
     assertScreenSession(session);
 
-    const hidden = display.hidden_at ? null : await withScreenTables(() => hideScreenDisplayRow(db, display.id, screenHide(session, user.id, now, "team")));
+    // Nunca antes do shown_at da exibicao (o check _window_v7): o relogio de outra instancia pode estar adiantado.
+    const hiddenAt = new Date(Math.max(now.getTime(), Date.parse(display.shown_at) || 0));
+    const hidden = display.hidden_at ? null : await withScreenTables(() => hideScreenDisplayRow(db, display.id, screenHide(session, user.id, hiddenAt, "team")));
 
     if (!hidden) {
       return { displayId: display.id, hidden: false, sessionId: session.id };

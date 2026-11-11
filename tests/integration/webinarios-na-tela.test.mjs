@@ -705,6 +705,7 @@ test("13. POST .../screen-events grava viu, clicou e fechou em student_events; w
   assert.deepEqual(daAluna.body.data, { accepted: 3 }, "a exibicao de outra sessao e o id inventado saem em silencio");
   const doAluno = await metricas(aluno, [evento("shown", { form: "strip" }), evento("clicked", { form: "strip", target: "button" }), evento("clicked", { form: "strip", target: "card" })]);
   assert.equal(doAluno.status, 202, JSON.stringify(doAluno.body));
+  assert.deepEqual(doAluno.body.data, { accepted: 2 }, "o segundo clique no mesmo instante fica de fora (um a cada 3 s por aluno e exibicao, revisao de 11/11/2026)");
   // A equipe que abre a sala fica gravada, mas nunca conta.
   assert.equal((await metricas(produtor, [evento("shown"), evento("clicked", { target: "button" })])).status, 202);
 
@@ -723,12 +724,12 @@ test("13. POST .../screen-events grava viu, clicou e fechou em student_events; w
   const relatorio = unwrap(await db.rpc("webinar_screen_report", { p_session_id: GRAVADA.sessaoId }), "Lendo o relatorio da Na tela");
   assert.deepEqual(
     relatorio.map((row) => [row.display_id, Number(row.shown), Number(row.clickers), Number(row.clicks), Number(row.closed)]),
-    [[displayId, 2, 2, 3, 1]],
-    "viram 2 (sem o produtor), clicaram 2, 3 cliques, fechou 1"
+    [[displayId, 2, 2, 2, 1]],
+    "viram 2 (sem o produtor), clicaram 2, 2 cliques (o repetido do aluno no mesmo instante nao entra), fechou 1"
   );
   clearScreenStatsCache();
   const retrato = await retratoDoConsole();
-  assert.deepEqual(retrato.screen.stats[displayId], { clickers: 2, clicks: 3, closed: 1, shown: 2 }, "os numeros de Na tela agora");
+  assert.deepEqual(retrato.screen.stats[displayId], { clickers: 2, clicks: 2, closed: 1, shown: 2 }, "os numeros de Na tela agora");
   assert.deepEqual(retrato.screen.active.map((display) => display.id), [displayId]);
   assert.equal(retrato.screen.pending, false);
 

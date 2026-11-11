@@ -1018,6 +1018,26 @@ test("Tirar da tela: sai com o motivo team, o minuto e o carimbo por ultimo; a q
   assert.deepEqual([encerrada.ok, encerrada.status, encerrada.error], [false, 409, ERROS.sessaoFechada]);
 });
 
+test("S3 (revisao de 11/11/2026): Tirar da tela nunca grava hidden_at antes do shown_at (o relogio de outra instancia adiantado; o check _window_v7 daria 500)", async () => {
+  const db = usar(cenarioDaTela());
+  const mostrado = ok(await screenActions.showScreenItem({ itemId: QR, sessionId: SESSION }));
+  // Outra instancia, com o relogio 2 min adiantado, gravou a exibicao "no futuro".
+  const futuro = iso(Date.now() + 2 * MIN);
+  exibicao(db, mostrado.displayId).shown_at = futuro;
+  const tirado = ok(await screenActions.hideScreenItem({ displayId: mostrado.displayId }));
+  assert.equal(tirado.hidden, true);
+  const saiu = exibicao(db, mostrado.displayId);
+  assert.ok(Date.parse(saiu.hidden_at) >= Date.parse(saiu.shown_at), `hidden_at ${saiu.hidden_at} antes do shown_at ${saiu.shown_at}`);
+  assert.equal(saiu.hidden_at, futuro, "sai no instante em que entrou");
+
+  // O caso comum (o shown_at no passado): sai agora.
+  const db2 = usar(cenarioDaTela());
+  const outro = ok(await screenActions.showScreenItem({ itemId: QR, sessionId: SESSION }));
+  const antes = Date.now();
+  ok(await screenActions.hideScreenItem({ displayId: outro.displayId }));
+  assert.ok(Math.abs(Date.parse(exibicao(db2, outro.displayId).hidden_at) - antes) < 5_000);
+});
+
 test("Enviar imagem: grava em content-assets/webinars/screen/<24 hex>.webp e devolve so o caminho e as medidas do servidor; a mesma imagem cai no mesmo caminho; a auditoria", async () => {
   const db = usar(cenarioDaTela());
   const storage = comStorage(db);

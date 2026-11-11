@@ -14,7 +14,9 @@ import { screenEventsBodySchema } from "@/server/webinars/screen-schemas";
 // proprio de 12 lotes por minuto por aluno e sessao (429 com Retry-After). So a Live ao vivo e a gravada (o Replay: 404).
 // Cada displayId precisa ser uma exibicao de banner ou QR Code daquela sessao (screen-queries.screenEventRows: os ids
 // ficam 30 s na memoria; o desconhecido rele no maximo uma vez a cada 5 s e, continuando desconhecido, sai em
-// silencio). Responde 202 { accepted } e grava em student_events depois da resposta (entity_type 'webinar', entity_id
+// silencio), nunca uma que saiu da tela ha mais de 60 s; o "fechou" so de item que fecha; o "viu" e o "fechou" uma vez
+// por aluno e exibicao e o clique no maximo um a cada 3 s e 20 por exibicao (a memoria do processo, contra o aluno em
+// laco). Responde 202 { accepted } e grava em student_events depois da resposta (entity_type 'webinar', entity_id
 // = a sessao; event_type webinar_screen_shown / _clicked / _closed; metadata { display_id, item_id, kind, form, target,
 // offset_ms }, o offset pelo relogio do servidor). O clique e um link comum: nao ha rota de redirecionamento.
 
