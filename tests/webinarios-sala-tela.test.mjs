@@ -46,7 +46,7 @@ const vertical = await import("../src/components/member/webinars/room/vertical/v
 const recorded = await import("../src/components/member/webinars/room/recorded-controls.tsx");
 const notices = await import("../src/components/member/webinars/room/live-notices.tsx");
 const layout = await import("../src/components/member/webinars/room/room-layout-model.ts");
-const { roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
+const { createSimulationChecker, roomSimulationStateOf } = await import("../src/components/member/webinars/room/use-room-simulation.ts");
 const pollLayer = await import("../src/components/member/webinars/room/room-poll-layer.tsx");
 const pollsTab = await import("../src/components/member/webinars/room/room-polls.tsx");
 const questionsModule = await import("../src/components/member/webinars/room/room-questions.tsx");
@@ -1224,4 +1224,78 @@ test("R5, a entrada: a pagina da Sala recusa o removido desta sessao da gravada 
   const pagina = readFileSync(new URL("../src/app/webinarios/[slug]/sala/page.tsx", import.meta.url), "utf8");
   assert.match(pagina, /data\.reason === "kicked"\s*\?\s*WEBINAR_COPY\.aoVivo\.removido/);
   assert.match(pagina, /data\.reason === "banned"\s*\?\s*WEBINAR_COPY\.aoVivo\.banido/);
+});
+
+test("a Simulacao confere de novo quando a live comeca (A9): quem chegou cedo e recebeu 'nada ligado' nao espera os 5 min depois do Começar para todos; sem a virada, a espera de 5 min e a de 30 s depois da falha continuam", async () => {
+  const relogio = { agora: 0, offset: -60_000 };
+  const pedidos = [];
+  const respostas = [];
+  const checker = createSimulationChecker({
+    fetchFeed: async (janela) => {
+      pedidos.push(janela);
+      const resposta = respostas.shift() ?? { enabled: true };
+      if (resposta.erro) {
+        throw new Error("falhou");
+      }
+      return { counter: [], enabled: resposta.enabled, from: janela.fromMs, joins: [], saleNotices: [], to: janela.toMs };
+    },
+    getOffsetMs: () => relogio.offset,
+    now: () => relogio.agora,
+    onFeed: () => undefined
+  });
+  const conferir = async (agora, offset) => {
+    relogio.agora = agora;
+    relogio.offset = offset;
+    await checker.check();
+  };
+
+  // Na espera (offset negativo, no maximo -1 s na live), a equipe ainda nao ligou nada.
+  respostas.push({ enabled: false });
+  await conferir(0, -60_000);
+  assert.equal(pedidos.length, 1);
+  await conferir(5_000, -1_000);
+  await conferir(60_000, -1_000);
+  assert.equal(pedidos.length, 1, "nada ligado: de novo so em 5 min");
+  // A equipe liga as regras na espera (D74) e aperta Começar para todos: o offset vira 0 e a sala confere na hora.
+  await conferir(65_000, 0);
+  assert.equal(pedidos.length, 2, "a virada do offset acaba a espera");
+  assert.deepEqual(pedidos[1], { fromMs: -15_000, toMs: 105_000 }, "a janela do offset de agora (a que veio vazia nao conta)");
+  await conferir(70_000, 5_000);
+  assert.equal(pedidos.length, 2, "a janela nova vale: nada a pedir");
+
+  // Sem a virada, as esperas de sempre: 5 min depois do 'nada ligado' (mesmo parado em -1 s) e 30 s depois da falha.
+  const outro = { agora: 0, offset: -1_000 };
+  const pedidosDoOutro = [];
+  const respostasDoOutro = [{ enabled: false }, { erro: true }];
+  const espera = createSimulationChecker({
+    fetchFeed: async (janela) => {
+      pedidosDoOutro.push(janela);
+      const resposta = respostasDoOutro.shift() ?? { enabled: true };
+      if (resposta.erro) {
+        throw new Error("falhou");
+      }
+      return { counter: [], enabled: resposta.enabled, from: janela.fromMs, joins: [], saleNotices: [], to: janela.toMs };
+    },
+    getOffsetMs: () => outro.offset,
+    now: () => outro.agora,
+    onFeed: () => undefined
+  });
+  await espera.check();
+  outro.agora = 4 * 60_000;
+  await espera.check();
+  assert.equal(pedidosDoOutro.length, 1, "ainda na espera de 5 min");
+  outro.agora = 5 * 60_000;
+  await espera.check();
+  assert.equal(pedidosDoOutro.length, 2, "depois de 5 min, de novo, mesmo com o offset parado em -1 s");
+  outro.agora = 5 * 60_000 + 20_000;
+  await espera.check();
+  assert.equal(pedidosDoOutro.length, 2, "a falha espera 30 s");
+  outro.agora = 5 * 60_000 + 30_000;
+  await espera.check();
+  assert.equal(pedidosDoOutro.length, 3);
+  // Parada (a sala saiu), nada mais e pedido.
+  espera.stop();
+  outro.offset = 10 * 60_000;
+  await espera.check();
+  assert.equal(pedidosDoOutro.length, 3);
 });
