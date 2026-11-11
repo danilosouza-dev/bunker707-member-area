@@ -28,7 +28,7 @@
 --   dela chega, como o chat (docs/30 D77);
 -- - webinar_report e webinar_panel (os corpos inteiros da 202610300007, mesmas assinaturas): as perguntas contam so as
 --   da turma (source = 'audience'); a simulada fica fora de todo numero (as perguntas por situacao, as mais votadas, os
---   alunos mais quentes e os pedidos da equipe). webinar_attendees (202610300002) nao muda: conta as perguntas pelo
+--   alunos mais quentes e os pedidos da equipe). webinar_attendees (202610290001) nao muda: conta as perguntas pelo
 --   user_id do aluno, e a simulada nao tem aluno. As listas que o app sempre le (QUESTION_COLUMNS, SCRIPT_ITEM_COLUMNS)
 --   nao ganham coluna nova: o app de antes continua de pe com esta migracao, e o app novo le as colunas novas a parte;
 -- - os checks novos das tabelas que ja existem entram `not valid` (secoes 3 e 4, sem ler as linhas) e sao validados na
