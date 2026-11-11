@@ -1,6 +1,7 @@
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { EXPORT_DATA_PAGE_HREF } from "@/server/export/school-data-model";
 import type { LicenseBannerModel } from "@/server/licensing/copy";
 import { LICENSE_SCREEN_HREF } from "@/server/licensing/screen-result";
 import { licenseButton } from "./styles";
@@ -8,7 +9,8 @@ import { licenseButton } from "./styles";
 // A faixa da Licenca na moldura do admin (docs/32 §2.2 e §11.3, "no molde do PendingMigrationNotice"): o que houve, o que
 // vale agora, a data do proximo passo, as vendas guardadas (quando ha) e, para o dono e os administradores, Renovar (o
 // endereco que chega na licenca assinada), Verificar agora (um <form> com a Server Action), Ver vendas guardadas (a lista
-// na tela Licenca) e Ver a Licenca. Montada so no servidor: nenhum JavaScript
+// na tela Licenca), Ver a Licenca e Exportar dados (docs/32 §2.2: o Aviso ja oferece a exportacao). Montada so no
+// servidor: nenhum JavaScript
 // novo no navegador. Some no console da sessao de um webinario, a unica tela em tela cheia (sem a barra lateral
 // #admin-sidebar), para nao cobrir a live. No modo "off" o layout nem a monta.
 
@@ -81,6 +83,9 @@ export function LicenseBanner({ banner, canManage, checkNowAction }: LicenseBann
                 ) : null}
                 <Link className={licenseButton} data-slot="button" href={LICENSE_SCREEN_HREF}>
                   Ver a Licença
+                </Link>
+                <Link className={licenseButton} data-slot="button" href={EXPORT_DATA_PAGE_HREF}>
+                  Exportar dados
                 </Link>
               </>
             )}

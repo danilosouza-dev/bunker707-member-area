@@ -132,11 +132,19 @@ function quoteCsvCell(text: string, separator: string) {
   return /["\r\n]/.test(text) || text.includes(separator) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+/** O BOM UTF-8 que o Excel em portugues precisa para ler os acentos. */
+export const CSV_BOM = "\uFEFF";
+
+/** Uma linha do arquivo, sem a quebra: as celulas seguras e com aspas quando precisam (a exportacao em fluxo). */
+export function toCsvLine(row: readonly CsvCell[], separator: "," | ";" = ";") {
+  return row.map((value) => quoteCsvCell(sanitizeCsvCell(value), separator)).join(separator);
+}
+
 /** Monta o arquivo: BOM + cabecalho + linhas, separador ";" por padrao, quebra CRLF. */
 export function toCsv(headers: readonly string[], rows: readonly (readonly CsvCell[])[], separator: "," | ";" = ";") {
-  const lines = [headers, ...rows].map((row) => row.map((value) => quoteCsvCell(sanitizeCsvCell(value), separator)).join(separator));
+  const lines = [headers, ...rows].map((row) => toCsvLine(row, separator));
 
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return `${CSV_BOM}${lines.join("\r\n")}\r\n`;
 }
 
 /** Nome de arquivo seguro para Content-Disposition e para download no navegador. */

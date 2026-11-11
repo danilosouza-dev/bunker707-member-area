@@ -81,7 +81,7 @@ export default async function AdminSettingsPage() {
   return (
     <AdminPage className="gap-6">
       <PageHeader description="Equipe, vídeo, Tutor IA, vendas, canais de envio e dados da escola." title="Configurações" />
-      <SettingsHub access={{ canAi, canSales, canTeam, teamCount }} aiStatus={aiStatus} license={license} salesStatus={salesStatus} />
+      <SettingsHub access={{ canAi, canExportData: isLicenseManager(access), canSales, canTeam, teamCount }} aiStatus={aiStatus} license={license} salesStatus={salesStatus} />
     </AdminPage>
   );
 }

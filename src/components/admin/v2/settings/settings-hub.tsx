@@ -1,6 +1,7 @@
 import {
   ChevronRight,
   Clapperboard,
+  Download,
   KeyRound,
   Send,
   SlidersHorizontal,
@@ -19,7 +20,8 @@ import { adminCard, adminTransition } from "../styles";
 // grupo, com o estado honesto de cada um. Equipe, Tutor IA e Vendas ja tem tela; o resto diz "Em breve"
 // e nao e clicavel (nenhuma linha leva a uma tela vazia). Cada pessoa ve so as linhas que pode usar:
 // Equipe e Vendas so o dono; Tutor IA quem tem settings.ai. A linha Licenca (docs/32 §2.4) so existe no produto
-// vendido (modo "enforce") e so para o dono e os administradores: a pagina passa `license` so nesse caso.
+// vendido (modo "enforce") e so para o dono e os administradores: a pagina passa `license` so nesse caso. A linha
+// Exportar dados (docs/32 §4) e do dono e dos administradores, nos dois modos e em todo degrau da Licenca.
 
 export type SettingsHubStatus = { label: string; tone: StatusChipTone };
 
@@ -35,6 +37,8 @@ type SettingsHubEntry = {
 /** O que a pessoa pode abrir no hub (vem das permissoes dela, no servidor). */
 export type SettingsHubAccess = {
   canAi: boolean;
+  /** Dono ou administrador (src/server/licensing/admin-access.ts): Exportar dados. */
+  canExportData?: boolean;
   canSales: boolean;
   canTeam: boolean;
   /** Pessoas na equipe (so para quem ve a Equipe); null = sem leitura. */
@@ -105,6 +109,14 @@ export function buildSettingsHubEntries(
       title: "Vendas"
     },
     {
+      description: "Baixar um ZIP com os alunos, os acessos, o progresso, os cursos e as vendas, em planilhas, com um LEIA-ME que explica cada arquivo.",
+      href: "/admin/configuracoes/dados",
+      icon: Download,
+      id: "dados",
+      status: null,
+      title: "Exportar dados"
+    },
+    {
       description: "Remetente de e-mail, WhatsApp oficial e notificações push.",
       icon: Send,
       id: "canais",
@@ -121,7 +133,7 @@ export function buildSettingsHubEntries(
   ];
 
   // Linhas so de quem pode usar (as "Em breve" valem para todos que veem Configuracoes).
-  const visibility: Record<string, boolean> = { equipe: access.canTeam, ia: access.canAi, vendas: access.canSales };
+  const visibility: Record<string, boolean> = { dados: access.canExportData === true, equipe: access.canTeam, ia: access.canAi, vendas: access.canSales };
 
   return entries.filter((entry) => visibility[entry.id] ?? true);
 }
