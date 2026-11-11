@@ -68,7 +68,14 @@ import {
   type HeldSaleUndoKind
 } from "./held-sales-model";
 import { notifyHeldSalesEpisodeSafely } from "./held-sales-notice";
-import { HELD_SALES_MIGRATION, discardHeldSalesOf, isHeldSalesSchemaMissing, recordHeldSale, resolveHeldSaleOfEvent } from "./held-sales-store";
+import {
+  HELD_SALES_MIGRATION,
+  discardHeldSalesOf,
+  findPendingHeldSaleOfTransaction,
+  isHeldSalesSchemaMissing,
+  recordHeldSale,
+  resolveHeldSaleOfEvent
+} from "./held-sales-store";
 import { SALES_PROVIDER_LABELS, decideEntitlementAfterSale, type EntitlementAfterSaleDecision, type SaleGrantLike, type SaleOutcome } from "./model";
 import {
   assertSaleGrantsAvailable,
@@ -278,26 +285,38 @@ function withHeldSalesDiscarded(result: SaleProcessingResult, count: number): Sa
 }
 
 /**
- * Guarda a parte nova da compra. Banco sem a migracao 202611110002: a venda nao pode ficar guardada nem liberar acesso
- * novo; falha com a frase para o dono (a plataforma reenvia, e o Reprocessar depois da migracao guarda).
+ * Guarda a parte nova da compra. A mesma compra ja guardada por outro aviso (a confirmacao do fim da garantia, um reenvio
+ * com outro id), com os mesmos produtos, nao guarda de novo: `sameSale`. Banco sem a migracao 202611110002: a venda nao
+ * pode ficar guardada nem liberar acesso novo; falha com a frase para o dono (a plataforma reenvia, e o Reprocessar
+ * depois da migracao guarda).
  */
 async function holdSale(
   db: SalesDb,
   input: { base: TargetRef; event: NormalizedSaleEvent; productIds: string[]; reason: HeldSaleReason; subscriptionCode: string | null; webhookEventId: string | null }
-): Promise<{ created: boolean; id: string }> {
+): Promise<{ created: boolean; id: string; sameSale: boolean }> {
   if (!input.webhookEventId) {
     throw new SaleProcessingError("A compra precisa ficar guardada (a Licença não permite acesso novo agora), mas chegou sem o evento gravado.", input.base);
   }
 
+  const transactionId = saleSourceEventId(input.event);
+
   try {
-    return await recordHeldSale(db, {
+    const sameSale = await findPendingHeldSaleOfTransaction(db, { provider: input.event.provider, transactionId, webhookEventId: input.webhookEventId });
+
+    if (sameSale && input.productIds.every((productId) => sameSale.product_ids.includes(productId))) {
+      return { created: false, id: sameSale.id, sameSale: true };
+    }
+
+    const recorded = await recordHeldSale(db, {
       productIds: input.productIds,
       provider: input.event.provider,
       reason: input.reason,
       subscriptionCode: input.subscriptionCode,
-      transactionId: saleSourceEventId(input.event),
+      transactionId,
       webhookEventId: input.webhookEventId
     });
+
+    return { ...recorded, sameSale: false };
   } catch (error) {
     if (isHeldSalesSchemaMissing(error)) {
       throw new SaleProcessingError(
@@ -590,6 +609,16 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
         }
 
         heldPart = { id: recorded.id, productIds: split.held, reason: decision.reason };
+
+        if (split.now.length === 0 && recorded.sameSale) {
+          return withSaleNotes(
+            ignored("Esta compra já está guardada por outro aviso da mesma venda: ela é liberada uma vez só, quando a Licença permitir acesso novo.", {
+              ...base,
+              userId: account?.id ?? null
+            }),
+            saleNotes
+          );
+        }
 
         if (split.now.length === 0) {
           const what = target.kind === "combo" ? `pacote ${target.name} (${plural(split.held.length, "produto", "produtos")})` : plural(split.held.length, "produto", "produtos");

@@ -735,7 +735,7 @@ test("o job: nome, registro depois dos lembretes e as contagens em job_runs quan
   assert.equal(webinarRecordingsJob.name, WEBINAR_RECORDINGS_JOB_NAME);
   assert.match(webinarRecordingsJob.name, /^[a-z0-9][a-z0-9-]{0,119}$/);
   const registry = readFileSync(new URL("../src/server/jobs/registry.ts", import.meta.url), "utf8");
-  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, communicationMediaJob\]/);
+  assert.match(registry, /\[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, communicationMediaJob\]/);
   assert.match(registry, /- `webinar-recordings` \(/, "a linha no comentario dos jobs registrados");
 
   const env = { ...process.env };

@@ -214,19 +214,36 @@ const dayFormatter = new Intl.DateTimeFormat("en-CA", { day: "2-digit", month: "
  * marcador dos e-mails de degrau (degree-notice.ts). A copia nunca ativada e um episodio so; a licenca que nao pode
  * ser lida, um por dia. O dono e os administradores recebem um e-mail quando a primeira venda e guardada no episodio.
  */
-export function heldSalesEpisodeOf(state: LicenseState | null, now: Date): string {
+export function heldSalesEpisodeOf(state: LicenseState | null, now: Date): { marker: string; since: Date | null } {
   const change = licenseDegreeChangeOf(state);
 
   if (change) {
-    return change.marker;
+    return { marker: change.marker, since: new Date(change.since) };
   }
 
   if (state === null) {
-    const nowMs = now.getTime();
-    return `leitura_falhou:${Number.isFinite(nowMs) ? dayFormatter.format(now) : "sem-data"}`;
+    if (!Number.isFinite(now.getTime())) {
+      return { marker: "leitura_falhou:sem-data", since: null };
+    }
+
+    const day = dayFormatter.format(now);
+    // Brasilia sem horario de verao desde 2019: o dia comeca as 03:00 UTC.
+    return { marker: `leitura_falhou:${day}`, since: new Date(`${day}T00:00:00-03:00`) };
   }
 
-  return "nao_ativada";
+  return { marker: "nao_ativada", since: null };
+}
+
+/** A venda guardada (a mais nova) chegou neste episodio? Sem o comeco do episodio (a copia nunca ativada), sim. */
+export function heldInEpisode(heldAt: string | null, episode: { since: Date | null }): boolean {
+  if (!heldAt) {
+    return false;
+  }
+
+  const heldMs = Date.parse(heldAt);
+  const sinceMs = episode.since ? episode.since.getTime() : Number.NaN;
+
+  return !Number.isFinite(sinceMs) || (Number.isFinite(heldMs) && heldMs >= sinceMs);
 }
 
 /* ------------------------------------------------------------------------------------------------

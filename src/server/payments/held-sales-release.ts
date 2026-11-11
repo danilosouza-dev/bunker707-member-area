@@ -26,7 +26,9 @@ import {
   HELD_SALES_ROUND_BUDGET_MS,
   HELD_SALE_CLAIM_STALE_MS,
   HELD_SALE_MAX_ATTEMPTS,
+  heldInEpisode,
   heldSaleGaveUpDetail,
+  heldSalesEpisodeOf,
   heldSaleNotReleasedDetail,
   heldSaleReleasedDetail,
   newAccessDecisionOf
@@ -39,6 +41,7 @@ import {
   finishHeldSale,
   isHeldSalesSchemaMissing,
   listPendingHeldSales,
+  newestPendingHeldAt,
   type HeldSaleRow
 } from "./held-sales-store";
 import { processSaleEvent, type SaleProcessingResult } from "./process-sale";
@@ -237,8 +240,14 @@ export async function runHeldSalesRound(deps: HeldSalesRoundDeps): Promise<HeldS
 
   if (!decision.allowed) {
     // Ainda barrada: nada e liberado. O e-mail do episodio (uma vez por pessoa, pela chave da fila) e a segunda chance
-    // do que a venda tentou na hora.
-    await notifyHeldSalesEpisodeSafely(deps.db, { configuredHost: deps.configuredHost(), now: now(), reason: decision.reason, state: license });
+    // do que a venda tentou na hora, so quando ha venda guardada neste episodio: as de um episodio anterior, ainda
+    // guardadas, nao abrem e-mail num episodio novo.
+    const at = now();
+
+    if (heldInEpisode(await newestPendingHeldAt(deps.db), heldSalesEpisodeOf(license, at))) {
+      await notifyHeldSalesEpisodeSafely(deps.db, { configuredHost: deps.configuredHost(), now: at, reason: decision.reason, state: license });
+    }
+
     return { ...result, blocked: true };
   }
 

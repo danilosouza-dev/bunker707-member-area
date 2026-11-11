@@ -115,6 +115,36 @@ export async function recordHeldSale(db: SalesDb, input: HeldSaleInsert): Promis
   return { created: ((reheld.data ?? []) as { id: string }[]).length > 0, id: current.id };
 }
 
+/**
+ * A venda guardada da mesma compra que ainda espera, de outro aviso (a confirmacao do fim da garantia, ou a plataforma
+ * que repete a compra com outro id): a compra e liberada uma vez so, e a lista nao mostra duas vendas para ela.
+ */
+export async function findPendingHeldSaleOfTransaction(
+  db: SalesDb,
+  input: { provider: SalesProvider; transactionId: string; webhookEventId: string }
+): Promise<HeldSaleRow | null> {
+  const { data, error } = await db
+    .from("held_sales")
+    .select(HELD_SALE_COLUMNS)
+    .eq("provider", input.provider)
+    .eq("transaction_id", input.transactionId)
+    .eq("status", "held")
+    .neq("webhook_event_id", input.webhookEventId)
+    .order("held_at", { ascending: true })
+    .limit(1);
+  failOnError(error, "Venda guardada da mesma compra");
+
+  return ((data ?? []) as HeldSaleRow[])[0] ?? null;
+}
+
+/** Quando a venda guardada mais nova chegou (o e-mail do episodio so sai pela tarefa se ela e deste episodio). */
+export async function newestPendingHeldAt(db: SalesDb): Promise<string | null> {
+  const { data, error } = await db.from("held_sales").select("held_at").eq("status", "held").order("held_at", { ascending: false }).limit(1);
+  failOnError(error, "Vendas guardadas");
+
+  return ((data ?? []) as { held_at: string }[])[0]?.held_at ?? null;
+}
+
 /** As vendas guardadas, na ordem em que chegaram (a da liberacao). */
 export async function listPendingHeldSales(db: SalesDb, limit: number): Promise<HeldSaleRow[]> {
   const { data, error } = await db

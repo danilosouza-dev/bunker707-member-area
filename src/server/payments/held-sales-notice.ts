@@ -37,7 +37,7 @@ export async function notifyHeldSalesEpisode(
   input: { configuredHost: string | null; now: Date; reason: string; state: LicenseState | null },
   notices: { lastEpisode: string | null } = memory
 ): Promise<HeldSalesNoticeResult> {
-  const episode = heldSalesEpisodeOf(input.state, input.now);
+  const episode = heldSalesEpisodeOf(input.state, input.now).marker;
 
   if (notices.lastEpisode === episode) {
     return { episode, queued: 0, skipped: "ja_avisado" };

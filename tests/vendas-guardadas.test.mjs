@@ -287,6 +287,44 @@ test("o reenvio do mesmo evento não guarda duas vezes, e o episódio manda um e
   assert.ok(emails(db, "held_sales").every((linha) => linha.idempotency_key.startsWith("held-sales:escola_congelada:")));
 });
 
+test("outro aviso da mesma compra (a confirmação do fim da garantia) não guarda de novo, e a compra é liberada uma vez", async () => {
+  const db = escola();
+  actionStubs.db = db;
+
+  await postar(compra({ id: "ev-aprovada", transacao: "HP-G" }));
+  const confirmacao = await postar(compra({ evento: "PURCHASE_COMPLETE", id: "ev-fim-da-garantia", transacao: "HP-G" }));
+
+  assert.equal(confirmacao.status, 200);
+  assert.equal(confirmacao.corpo.outcome, "ignored");
+  assert.match(evento(db, "ev-fim-da-garantia").outcome_detail, /já está guardada por outro aviso da mesma venda/);
+  assert.equal(guardadas(db).length, 1, "a lista mostra uma venda so");
+
+  licencaDoPedido.situacao = SITUACOES.em_dia;
+  assert.equal((await rodada(db)).granted, 1);
+  assert.equal(db.linhas("entitlements").length, 1);
+  assert.equal(emails(db, "welcome").length, 1);
+});
+
+test("o e-mail do episódio pela tarefa do tick: só para venda guardada neste episódio, nunca para a de um episódio anterior", async () => {
+  const db = escola();
+  actionStubs.db = db;
+
+  await postar(compra({ id: "ev-antiga", transacao: "HP-ANTIGA" }));
+  // A venda ficou guardada num episodio anterior (antes de o degrau de agora comecar) e a fila do e-mail ficou vazia.
+  guardadas(db)[0].held_at = "2026-11-01T12:00:00.000Z";
+  db.linhas("email_outbox").length = 0;
+  forgetHeldSalesNoticeMemory();
+
+  const barrada = await rodada(db);
+  assert.equal(barrada.blocked, true);
+  assert.equal(emails(db, "held_sales").length, 0, "o episodio novo nao tem venda guardada: nenhum e-mail");
+
+  // A venda deste episodio cujo e-mail nao saiu na hora (a fila falhou): a tarefa manda.
+  guardadas(db)[0].held_at = "2026-11-10T13:00:00.000Z";
+  await rodada(db);
+  assert.equal(emails(db, "held_sales").length, 2);
+});
+
 test("quem já tinha o produto renova na hora, inclusive o acesso fechado; na compra com os dois, só o novo fica guardado", async () => {
   const db = escola();
   actionStubs.db = db;
@@ -661,9 +699,17 @@ test("a decisão e o motivo vêm da classe matrícula, a mesma pergunta do admin
   assert.equal(model.heldSaleReasonLabel("codigo_de_uma_versao_nova"), model.HELD_SALE_REASON_LABELS.acesso_novo_barrado);
 
   // O episodio: o degrau e o dia em que comecou; a copia nunca ativada, um so; a leitura que falha, um por dia.
-  assert.match(model.heldSalesEpisodeOf(SITUACOES.escola_congelada, AGORA), /^escola_congelada:2026-11-10$/);
-  assert.equal(model.heldSalesEpisodeOf(SITUACOES.nao_ativada, AGORA), "nao_ativada");
-  assert.equal(model.heldSalesEpisodeOf(null, AGORA), "leitura_falhou:2026-11-11");
+  const congelada = model.heldSalesEpisodeOf(SITUACOES.escola_congelada, AGORA);
+  assert.equal(congelada.marker, "escola_congelada:2026-11-10");
+  assert.equal(congelada.since.toISOString(), ONTEM);
+  assert.deepEqual(model.heldSalesEpisodeOf(SITUACOES.nao_ativada, AGORA), { marker: "nao_ativada", since: null });
+  const semLeitura = model.heldSalesEpisodeOf(null, AGORA);
+  assert.equal(semLeitura.marker, "leitura_falhou:2026-11-11");
+  assert.equal(semLeitura.since.toISOString(), "2026-11-11T03:00:00.000Z", "a meia-noite de Brasilia");
+  assert.equal(model.heldInEpisode("2026-11-10T13:00:00.000Z", congelada), true);
+  assert.equal(model.heldInEpisode("2026-11-09T13:00:00.000Z", congelada), false, "guardada num episodio anterior");
+  assert.equal(model.heldInEpisode("2020-01-01T00:00:00.000Z", { since: null }), true);
+  assert.equal(model.heldInEpisode(null, congelada), false);
 });
 
 /* ------------------------------------------------------------------------------------------------
