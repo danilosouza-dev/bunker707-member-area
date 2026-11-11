@@ -401,6 +401,11 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
   assert.doesNotMatch(form, /data-persona-photo-all|Usar esta foto em todos/);
   assert.match(form, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="team"\/>/, "Aparece como Equipe");
   assert.match(form, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="message"\/>/, "Tipo Comentário");
+  // O campo do texto tem nome proprio, nunca o do botao do Tipo (o leitor de tela e o getByLabel acham um campo so).
+  assert.match(form, /<label[^>]*for="[^"]*-comentario"[^>]*>Texto do comentário/);
+  const pergunta = html(createElement(ConsoleScript, { ...props, initialComment: { body: "", kind: "question", personaAvatarPath: null, personaId: null, personaName: "Bia C.", personaRole: "student" } }));
+  assert.match(pergunta, /<label[^>]*for="[^"]*-comentario"[^>]*>Texto da pergunta/);
+  assert.doesNotMatch(form, /<label[^>]*for="[^"]*-comentario"[^>]*>(Comentário|Pergunta)</);
   assert.doesNotMatch(formText, /personagem/i);
   const semSessao = html(createElement(ConsoleScript, { ...props, canAct: false, initialComment: { body: "", kind: "message", personaAvatarPath: null, personaId: null, personaName: "", personaRole: "student" } }));
   assert.doesNotMatch(semSessao, /data-console-script-send/, "sessao encerrada: so Guardar na lista");
@@ -531,7 +536,7 @@ test("pessoas no console: a lista com 'Comentar como {nome}'; o Novo comentário
   assert.match(comPessoa, new RegExp(`<option value="${ADRIANO}" selected="">Adriano Souza · Aluno</option>`));
   assert.doesNotMatch(comPessoa, /data-console-script-name/, "a pessoa da lista nao pede o Nome");
   assert.match(comPessoa, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="question"\/>/);
-  assert.match(textOf(comPessoa), /Tipo Comentário Pergunta Pergunta/);
+  assert.match(textOf(comPessoa), /Tipo Comentário Pergunta Texto da pergunta/);
   assert.match(comPessoa, /<textarea[^>]*data-console-script-body=""[^>]*maxLength="500"|<textarea[^>]*maxLength="500"[^>]*data-console-script-body/i);
   // "Criar nova pessoa": o Nome, a Foto e o Aparece como.
   const nova = html(createElement(ConsoleScript, { ...props, initialComment: { body: "", kind: "message", personaAvatarPath: null, personaId: null, personaName: "", personaRole: "student" } }));

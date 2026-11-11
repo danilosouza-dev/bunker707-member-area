@@ -84,7 +84,7 @@ test.describe("produtor", () => {
     await pessoa.getByRole("button", { exact: true, name: PESSOAS.comentarComo(NOME) }).click();
     const novo = page.locator("[data-console-script-comment]");
     await expect(novo.locator("[data-console-script-name]")).toHaveCount(0);
-    await novo.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(PRIMEIRO);
+    await novo.getByLabel(PESSOAS.comentario, { exact: true }).fill(PRIMEIRO);
     await novo.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(novo.locator("[data-console-script-sent]")).toHaveText(PESSOAS.avisos.enviado);
     // O repetir: a mesma pessoa, o texto limpo e o foco nele.
@@ -99,7 +99,7 @@ test.describe("produtor", () => {
     await expect(texto).toHaveValue("");
 
     await novo.getByRole("radio", { exact: true, name: PESSOAS.tipos.message }).check();
-    await novo.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(SEGUNDO);
+    await novo.getByLabel(PESSOAS.comentario, { exact: true }).fill(SEGUNDO);
     await novo.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(novo.locator("[data-console-script-sent]")).toHaveText(PESSOAS.avisos.enviado);
     await page.locator("[data-console-script-back]").click();

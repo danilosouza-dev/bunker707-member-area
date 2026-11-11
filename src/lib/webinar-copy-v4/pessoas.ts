@@ -49,8 +49,12 @@ export const PESSOAS_COPY = {
   /** O Tipo do comentario. */
   tipo: "Tipo",
   tipos: { message: "Comentário", question: "Pergunta" },
-  /** O campo do texto quando o Tipo e Pergunta. */
-  pergunta: "Pergunta",
+  /**
+   * O campo do texto pelo Tipo: nunca o mesmo nome do botao do Tipo ("Comentário", "Pergunta"), para o leitor de tela e
+   * o getByLabel acharem um campo so.
+   */
+  comentario: "Texto do comentário",
+  pergunta: "Texto da pergunta",
   /** O selo da pergunta simulada, so no console (a turma nunca ve). */
   simulada: "Simulada",
   simuladaDica: "Pergunta de uma pessoa da lista. Fica fora do relatório, dos painéis e do CSV.",

@@ -63,7 +63,8 @@ test("a aluna entra na sala pelo link com o painel guardado fechado: ao abrir o 
   await esperarCampoInteiro(campo, WEBINAR_COPY.sala.escreva);
   // As iniciais da aluna (Aluna de Teste: "Aluna T.") ao lado do campo, sem aceite nenhum.
   await expect(sala.getByTestId("room-consent")).toHaveCount(0);
-  await expect(sala.locator("form").filter({ has: campo }).getByText("AT", { exact: true })).toBeVisible();
+  // O filtro `has` e consultado a partir do form: o campo pela pagina (um localizador que parte da sala nunca casa ali).
+  await expect(sala.locator("form").filter({ has: page.getByRole("textbox", { name: WEBINAR_COPY.sala.escreva }) }).getByText("AT", { exact: true })).toBeVisible();
 });
 
 test.describe("produtor", () => {

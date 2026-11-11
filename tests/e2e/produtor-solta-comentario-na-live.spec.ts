@@ -17,6 +17,7 @@ import { LIVE_AO_VIVO_DE_TESTE, expect, salaFalsaDoJitsi, seedLiveAoVivoDeTeste,
 const { id, roomName, sessaoId, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 const CONSOLE = `/admin/comunicacao/webinarios/${id}/sala?sessao=${sessaoId}`;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
+const PESSOAS = WEBINAR_COPY.pessoas;
 const NOME = "Bia Comentarista";
 const TEXTO = "Que aula boa, pessoal! Tô amando o exemplo.";
 
@@ -90,7 +91,7 @@ test.describe("produtor", () => {
     // Desde 11/11/2026 (D75) a caixa "Usar esta foto em todos" saiu: a pessoa nova entra na lista ao enviar.
     await expect(formulario.locator("[data-persona-photo-all]")).toHaveCount(0);
     await formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student }).check();
-    await formulario.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(TEXTO);
+    await formulario.getByLabel(PESSOAS.comentario, { exact: true }).fill(TEXTO);
     await formulario.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(COMENTARIOS.avisos.enviado)).toBeVisible();
     // Desde 11/11/2026 (D78) o formulario fica aberto para o proximo, com a mesma pessoa e o texto limpo; o Voltar volta

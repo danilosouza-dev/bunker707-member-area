@@ -284,7 +284,7 @@ export function ConsoleScriptComment({
             value={state.kind}
           />
         </div>
-        <AdminField error={bodyError} id={bodyId} label={question ? PESSOAS.pergunta : COPY.comentario}>
+        <AdminField error={bodyError} id={bodyId} label={question ? PESSOAS.pergunta : PESSOAS.comentario}>
           <textarea
             aria-describedby={fieldDescribedBy(bodyId, { error: bodyError })}
             aria-invalid={bodyError ? true : undefined}
