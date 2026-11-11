@@ -697,17 +697,31 @@ def manifesto_conferir(argv):
     if not isinstance(arquivos, list) or not arquivos or not isinstance(imagens, list) or not imagens:
         falhar("o manifesto nao lista os arquivos e as imagens do pacote.", 32)
     vistos = set()
+    conferidos = {}
     for item in arquivos + ([] if sem_imagens else [{"caminho": im.get("arquivo"), **im} for im in imagens if isinstance(im, dict)]):
         rel = item.get("caminho") if isinstance(item, dict) else None
         alvo = caminho_seguro(pacote, rel)
-        if alvo is None or rel in vistos:
+        if alvo is None or (rel in vistos and "id" not in item):
             falhar(f"o manifesto tem um caminho recusado ({rel!r}).", 32)
         vistos.add(rel)
+        if rel in conferidos:
+            continue
+        if "id" in item and not os.path.exists(alvo):
+            # A imagem que a equipe mandou direto (docker save | ssh ... docker load) e nao veio em arquivo: vale se ja esta
+            # carregada com o mesmo id, que e o resumo da configuracao dela (e a configuracao fixa o resumo de cada camada).
+            tags = [t for t in item.get("tags") or [] if isinstance(t, str)]
+            rc, saida, _ = rodar(["docker", "image", "inspect", "-f", "{{.Id}}", tags[0]]) if tags else (1, "", "")
+            if rc == 0 and saida.strip() == item.get("id"):
+                conferidos[rel] = True
+                continue
+            problemas.append(f"falta {rel} (e a imagem {tags[0] if tags else '?'} nao esta carregada neste servidor)")
+            continue
         if not os.path.isfile(alvo) or os.path.islink(alvo):
             problemas.append(f"falta {rel}")
             continue
         if os.path.getsize(alvo) != item.get("bytes") or sha256_do_arquivo(alvo) != item.get("sha256"):
             problemas.append(f"{rel} nao confere")
+        conferidos[rel] = True
     if problemas:
         mostrar = "; ".join(problemas[:5]) + (f" e mais {len(problemas) - 5}" if len(problemas) > 5 else "")
         falhar(f"o pacote nao confere com o manifesto: {mostrar}.", 32)
