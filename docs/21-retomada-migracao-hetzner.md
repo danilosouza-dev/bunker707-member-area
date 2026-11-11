@@ -1053,10 +1053,11 @@ configurar o Painel de licencas e a conta de envio do Emissor, que chegaram ao `
 |---|---|---|---|
 | `plan-licencas` | lista os tipos que servem (2 GB, 20 GB, 1 vCPU; x86 ou ARM) com o preco por mes em cada local que a API informa (fsn1, nbg1, hel1 e os de fora da Europa) e escolhe o mais barato com estoque; empate fica com fsn1, nbg1, hel1. Nao cria nada | qualquer | |
 | `provision-licencas` | servidor com labels `app=bunker707` e `papel=licencas`, firewall proprio (80 e 443 de qualquer lugar, 22 so durante as etapas), bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Sem estoque, so tenta os outros locais do mesmo tipo e preco | `main` | `CONFIRMADO=sim`; `LICENCAS_PRECO_MAX` para se o preco do dia passou do aprovado |
-| `dns-licencas` | `licencas` (Painel) A com proxy; `licencas-api` (API) A sem proxy; apaga AAAA dos dois | `main` | |
+| `dns-licencas` | `licencas` (Painel) A com proxy; `licencas-api` (API) e `licencas-interno` (API interna da escola) A sem proxy; apaga AAAA dos tres | `main` | |
 | `cerimonia-licencas` | as duas raizes e a chave de emissao com o codigo de chaves do proprio Emissor, na imagem do GHCR e sem rede: as raizes so cifradas (senha derivada do `HCLOUD_TOKEN`) direto no Storage Box, a emissao em `segredos/`; o registro mostra so as raizes publicas, que vao para `infra/licencas/raizes.json` num commit (`docs/20` §8C.8) | `main` | `CONFIRMAR=cerimonia`; recusa se as chaves ja existem; `ROTACIONAR=emissao` troca so a de emissao |
 | `secrets-licencas` | a chave do Resend do envelope no `payload` (so o servidor abre; vai direto para `segredos/`), ou do segredo `LICENCAS_RESEND_CHAVE`, e a senha do banco; a chave de emissao e a da cerimonia (os segredos `LICENCAS_EMISSAO_*` de antes ainda valem, os tres juntos, conferidos no runner) | `main` | |
 | `deploy-licencas` | confere a configuracao do Painel e o DNS; puxa do GHCR a imagem e o compose do mesmo commit; `.env` com as raizes, o Painel, a conta de envio e os proxies das duas portas; migracoes; `/health`; Caddy; backup de hora em hora; na primeira vez, a conta do produtor no Painel | `main` (tambem pela trava dos `deploy-*`) | `LICENCAS_TAG` escolhe a versao; `LICENCAS_SEM_PAINEL=sim` sobe sem o Painel |
+| `conectar-licencas` | a nossa escola ligada a API interna do Emissor: a credencial nova sorteada no runner, so o resumo no Emissor (a nova e as anteriores, ate 4), a credencial so no `.env` do app da escola, o Caddy de `licencas-interno` so para o IPv4 da escola e a conferencia de dentro do app (`docs/20` §8C.9); rodar de novo troca a credencial | `main` | `CONFIRMAR=conectar`; `REVOGAR_ANTERIORES=sim` deixa so a nova |
 | `backup-licencas` | um backup agora, com `restic check` | `main` | |
 | `restaurar-licencas` | troca o banco pelo de um backup (o mais novo com dados, ou `SNAPSHOT`), com um backup antes | `main` | `CONFIRMAR=restaurar` |
 | `ensaio-licencas` | restaura num Postgres descartavel e sem rede, confere e apaga; o banco em uso nao e tocado | `main` | |
@@ -1210,3 +1211,26 @@ Construido e testado so com os dubles (`tests/infra-licencas*.test.mjs`, `tests/
 Depende do `bunker-licensing`: o Emissor com a entrada de e-mail e senha publicado no GHCR (a PR de la na `main`). Com a
 imagem de antes, o `deploy-licencas` de agora deixa o Emissor sem o Access, e ele nao sobe com o Painel.
 
+### 11.7 A nossa escola ligada ao Emissor, sem colar segredo (11/11/2026)
+
+**Decisao do produtor (11/11/2026):** o teste de cliente novo roda inteiro nos nossos servidores, sem a Vercel: a nossa
+escola de producao e ligada para o teste (`restaurar`), o Emissor e o Painel rodam no `bunker707-licencas` e a escola do
+comprador no `bunker707-teste`. O que faltava era ligar a escola a API interna do Emissor sem ninguem colar a credencial.
+Construido (testado so com os dubles; nada rodou de verdade):
+
+- **O endereco da API interna**, `licencas-interno.bunker707.com.br` (`LICENCAS_INTERNO_DOMAIN`): registro A sem proxy
+  pelo `dns-licencas`; no Caddy do Emissor, so `/interno/v1/*`, so do IPv4 do servidor da escola (lido da API da Hetzner;
+  sem a escola no ar, ninguem) e o resto 403 sem chegar ao Emissor. O `deploy-licencas` escreve os `INTERNO_*` do `.env`
+  do Emissor iguais ao caminho do Caddy e nunca mexe no resumo da credencial (`docs/20` §8C.4).
+- **A etapa `conectar-licencas`** (`docs/20` §8C.9), so da `main`, com `CONFIRMAR=conectar`: a credencial nasce no runner,
+  so o resumo vai ao Emissor, so a credencial vai ao `.env` do app da escola (como o `secrets-membros` grava), e a
+  conferencia de dentro do app pede `GET /interno/v1/planos`. Rodar de novo troca a credencial; depois de cada
+  `restaurar` da escola, rodar de novo (o IP muda; o `restaurar` lembra).
+- **As migracoes na producao:** o `deploy-membros` ja aplica as pendentes (o `deploy.sh` do servidor roda o `migrate.sh`,
+  `supabase db push`, antes de recriar o app); as seis desta leva (`202611100001` a `202611130001`) vem depois da ultima que
+  a producao aplicou (`202611010001`) e nenhuma roda fora de transacao. `tests/infra-deploy-migracoes.test.mjs` prende isso.
+- **O passo a passo do teste**, com quem faz o que e o custo de cada passo: `docs/20` §9F.
+
+Em aberto: a virada das vendas para a producao (o webhook da Hotmart e da Ticto apontando para
+`https://membros.bunker707.com.br/api/webhooks/...`, secao 8, item 4) nunca foi feita; para o teste, o produtor cadastra o
+webhook so do produto do Bunker Members (`docs/20` §9F, passo 18) e o desliga se a escola voltar ao snapshot.

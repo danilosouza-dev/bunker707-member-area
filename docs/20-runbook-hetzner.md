@@ -271,7 +271,7 @@ Valores padrao de `infra/cloud/lib.sh`: zona `bunker707.com.br`; local `fsn1` co
 | `carga` | `carga.sh`: teste de carga pelo dominio publico (Cloudflare). Cria um aluno (`carga@bunker707.test`, senha derivada do token, nunca impressa) e um curso de teste (`carga-*`, 2 modulos, 6 aulas), roda o k6 (imagem fixada por digest) no runner com `VUS` alunos (padrao 100; 1 min subindo, `DURACAO` no pico, padrao 3m) abrindo home, curso, aula e minhas compras com pausa de `PAUSA_MIN` a `PAUSA_MAX` s (1 a 4), mede CPU e memoria do servidor a cada 15 s e imprime mediana, p95 e maximo por pagina. Limites: p95 abaixo de 2 s por pagina, menos de 1% de erro e nenhuma pagina caindo no login. Aluno e curso sao apagados no fim, mesmo com erro (trap). | `HCLOUD_TOKEN` |
 | `chave-backup` | para cada servidor existente, deriva do `HCLOUD_TOKEN` a senha de recuperacao dos backups (`deploy-key.mjs --secret`, nunca impressa) e a cadastra como segunda chave do repositorio restic do papel (`backup.sh --add-key`); idempotente. O `deploy-*` faz o mesmo depois do `--init`. Sem o `.env` do servidor, o token abre o backup (secao 10.2). | `HCLOUD_TOKEN` |
 | `fechar-ssh` | passo final de todo disparo (`if: always()`): manda TERM aos scripts orfaos de um passo cancelado (o trap deles fecha a porta) e reescreve sem a 22 as regras dos servidores anotados em `fw-abertos`. Pode ser disparada a mao; sem nada anotado, nao faz nada. | `HCLOUD_TOKEN` |
-| `plan-licencas`, `provision-licencas`, `dns-licencas`, `secrets-licencas`, `deploy-licencas`, `backup-licencas`, `restaurar-licencas`, `ensaio-licencas`, `status-licencas`, `exec-licencas` | o servidor do Emissor de licencas, `bunker707-licencas` (secao 8C). Todas, menos `plan-licencas` e `status-licencas`, so rodam da `main`; criar pede `CONFIRMADO=sim` depois do ok do produtor e restaurar pede `CONFIRMAR=restaurar`. O snapshot e o restaurar da producao nunca tocam neste servidor | `HCLOUD_TOKEN`; DNS e deploy tambem `CLOUDFLARE_API_TOKEN`; os segredos `LICENCAS_*` (secao 8C.5) |
+| `plan-licencas`, `provision-licencas`, `dns-licencas`, `cerimonia-licencas`, `secrets-licencas`, `deploy-licencas`, `conectar-licencas`, `backup-licencas`, `restaurar-licencas`, `ensaio-licencas`, `status-licencas`, `exec-licencas` | o servidor do Emissor de licencas, `bunker707-licencas` (secao 8C). Todas, menos `plan-licencas` e `status-licencas`, so rodam da `main`; criar pede `CONFIRMADO=sim` depois do ok do produtor, restaurar pede `CONFIRMAR=restaurar` e ligar a nossa escola a API interna do Emissor pede `CONFIRMAR=conectar` (8C.9). O snapshot e o restaurar da producao nunca tocam neste servidor | `HCLOUD_TOKEN`; DNS, deploy e conectar tambem `CLOUDFLARE_API_TOKEN`; os segredos `LICENCAS_*` (secao 8C.5) |
 | `restaurar` | `restaurar.sh`: para cada papel sem servidor, cria um novo a partir do snapshot mais recente daquele papel (tipo do `plan`, que so considera discos do tamanho do servidor de origem ou maiores, porque um snapshot nao cabe em disco menor; ou `MEMBROS_TYPE`/`MARKETING_TYPE`), aplica o firewall, confere os containers por SSH e refaz o DNS. Tudo volta como estava, so com IP novo; nao precisa de deploy. | `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN` |
 
 Ordem na migracao: `plan` -> `provision` -> `deploy-membros` -> `deploy-marketing` -> `secrets-membros` -> `secrets-marketing` -> `equipe` -> `status`. Todas sao idempotentes: rodar de novo completa o que faltou ou atualiza (um `deploy-membros` repetido e um deploy de nova versao). O `generate-secrets.sh` so roda quando o `.env` ainda nao existe: para mudar `STUDIO_ALLOWED_IPS` ou `MAUTIC_ADMIN_IPS` depois, editar o `.env` por `exec-*` e recriar o Caddy (`docker compose ... up -d caddy`).
@@ -822,6 +822,7 @@ primeiro ensaio de comprador, com o Emissor junto, esta na secao 9F.
 | 10 | produtor | Abre o e-mail "definir a senha" do Painel, escolhe a senha e entra em `https://licencas.bunker707.com.br` (o segundo fator por aplicativo fica em Minha conta, recomendado) |
 | 11 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
 | 12 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
+| 13 | IA | Com a nossa escola no ar (`restaurar` e `deploy-membros` da `main`): `conectar-licencas` com `CONFIRMAR=conectar` (8C.9), que liga a escola a API interna do Emissor. Rodar de novo depois de cada `restaurar` da escola (o IP dela muda) |
 
 Os segredos `LICENCAS_RAIZES`, `LICENCAS_EMISSAO_CHAVE`, `LICENCAS_EMISSAO_SENHA`, `LICENCAS_EMISSAO_CERTIFICADO` e
 `LICENCAS_RESEND_CHAVE` ainda valem se existirem (a cerimonia feita fora, como antes), mas nenhum e preciso: o produtor
@@ -835,8 +836,9 @@ Toda etapa e idempotente: rodar de novo completa o que faltou. Um `deploy-licenc
 |---|---|---|---|
 | `licencas-api.bunker707.com.br` (`LICENCAS_API_DOMAIN`) | so A | **sem** proxy | a API publica das Instalacoes. Sem o proxy, nenhum desafio de robos da Cloudflare barra a conferencia feita por servidor (o Bot Fight Mode do plano gratis vale para a zona inteira e nao tem excecao por regra), e o nome so resolve para IPv4, o unico em que a conferencia inicial bate de volta. O nome vai gravado no produto vendido: trocar depois pede versao nova para todos |
 | `licencas.bunker707.com.br` (`LICENCAS_PAINEL_DOMAIN`) | so A | **com** proxy | o Painel de licencas da equipe, com o login de e-mail e senha do proprio Painel (D40) |
+| `licencas-interno.bunker707.com.br` (`LICENCAS_INTERNO_DOMAIN`) | so A | **sem** proxy | a API interna da nossa escola (`docs/api-interna.md` do `bunker-licensing`): o Caddy do Emissor so deixa entrar o IPv4 do servidor da escola, conferido na propria conexao (com o proxy, o IP seria o da Cloudflare), e so `/interno/v1/*`; a credencial quem confere e o Emissor (8C.9) |
 
-`dns-licencas` apaga qualquer AAAA dos dois nomes e nunca cria um. O `deploy-licencas` para se o DNS nao estiver
+`dns-licencas` apaga qualquer AAAA dos tres nomes e nunca cria um. O `deploy-licencas` para se o DNS nao estiver
 assim (sem isso o Let's Encrypt falharia e o Caddy esperaria horas para tentar de novo). Consequencia de a API ficar
 fora do proxy: o IP do servidor fica publico, a API nao tem o WAF nem a protecao contra ataque da Cloudflare (a defesa e
 o limite de pedidos do proprio Emissor, o firewall e o Caddy), e por isso 80 e 443 ficam abertas para qualquer lugar.
@@ -850,13 +852,17 @@ O Caddy roda na rede do servidor e manda cada nome para uma porta local do compo
 `.env.example` do `bunker-licensing`: a API para `EMISSOR_PORTA_NO_HOST` (8080) e o Painel para `PAINEL_PORTA_NO_HOST`
 (8081), os nomes e as portas do compose do Emissor com o Painel (conferido em 11/11/2026; o deploy le os dois do `.env`
 do compose a cada rodada). Na API o Caddy so passa `/v1/*` e `/health` e corta o corpo acima de 64 KB. O Painel nunca
-responde na porta da API.
+responde na porta da API. Desde 11/11/2026 ha o terceiro site, o da API interna: `/interno/v1/*` para
+`INTERNO_PORTA_NO_HOST` (8082), so do IPv4 da escola (`LICENCAS_INTERNO_IPS` no `infra/licencas/.env`; sem a escola no
+ar, `127.0.0.1/32`, ninguem), corpo ate 32 KB, e qualquer outro IP ou caminho recebe 403 sem chegar ao Emissor (8C.9).
 
-O IP de quem pediu: o Emissor confia em proxies por porta e, nas duas, so no gateway da rede `borda` dele, por onde o
-Caddy chega: `EMISSOR_PROXIES_CONFIAVEIS` na API e `PAINEL_PROXIES_CONFIAVEIS` no Painel, as duas iguais ao
-`EMISSOR_GATEWAY_BORDA` (172.30.70.1), com `EMISSOR_CABECALHO_IP` e `PAINEL_CABECALHO_IP` em `x-forwarded-for`. O
-`deploy-licencas` escreve as quatro no `.env` do compose a cada rodada (`infra/licencas/scripts/implantar.sh`): mudar no
-servidor nao dura. O Emissor le o `X-Forwarded-For` da direita para a esquerda, e o Caddy escreve ali um IP so: na API,
+O IP de quem pediu: o Emissor confia em proxies por porta e, nas tres, so no gateway da rede `borda` dele, por onde o
+Caddy chega: `EMISSOR_PROXIES_CONFIAVEIS` na API, `PAINEL_PROXIES_CONFIAVEIS` no Painel e `INTERNO_PROXIES_CONFIAVEIS`
+na API interna, as tres iguais ao `EMISSOR_GATEWAY_BORDA` (172.30.70.1), com `EMISSOR_CABECALHO_IP`,
+`PAINEL_CABECALHO_IP` e `INTERNO_CABECALHO_IP` em `x-forwarded-for`. O `deploy-licencas` escreve as seis no `.env` do
+compose a cada rodada, com a porta da API interna (`INTERNO_PORTA_NO_HOST`, a que ja estava ou 8082;
+`infra/licencas/scripts/implantar.sh`): mudar no servidor nao dura. O resumo da credencial da API interna
+(`INTERNO_CREDENCIAL_HASH`) e do `conectar-licencas`: o deploy nunca o troca nem o apaga. O Emissor le o `X-Forwarded-For` da direita para a esquerda, e o Caddy escreve ali um IP so: na API,
 o IP da propria conexao (`{remote_host}`; o que vier no cabecalho e ignorado), e no Painel o IP real que a Cloudflare
 repassa (`{client_ip}`, aceito so das faixas dela). Por isso as faixas da Cloudflare nao entram em nenhuma das duas
 listas; na da API, nunca (um Worker da Cloudflare escolheria o IP que o limite de pedidos conta e onde a conferencia
@@ -1038,6 +1044,75 @@ cifradas no box (e abrindo so com a senha derivada), a troca da chave de emissao
 o box fora do ar e a imagem que nao vem. Rodou tambem, fora do CI, o `cerimonia-licencas.mjs` contra o codigo de verdade
 do `bunker-licensing` (`src/keys.ts` e `src/signing.ts`, commit 1131d72): o `loadSignerFromFiles` do Emissor carregou a
 chave e o certificado, com as raizes. Nao rodou: a imagem do GHCR, o Storage Box e o servidor de verdade.
+
+### 8C.9 A API interna da nossa escola: a etapa `conectar-licencas` (11/11/2026)
+
+A venda do Bunker Members pela nossa escola e **Minhas licencas** (`docs/32` §2.4 e §11.10) falam com o Emissor pela API
+interna dele (`docs/api-interna.md` do `bunker-licensing`). A escola precisa de duas configuracoes no `.env` do app,
+`EMISSOR_INTERNO_URL` e `EMISSOR_INTERNO_CREDENCIAL`, e o Emissor guarda so o resumo da credencial
+(`INTERNO_CREDENCIAL_HASH`). A etapa `conectar-licencas` faz as duas pontas de uma vez, sem ninguem colar segredo em
+lugar nenhum. So da `main`, com `CONFIRMAR=conectar` nas opcoes, e com a escola no ar (`restaurar` e `deploy-membros` da
+`main` antes; com a escola guardada em snapshot, a etapa para e diz isso):
+
+1. confere o DNS dos tres nomes (8C.4), como o `deploy-licencas`;
+2. **antes de mudar qualquer coisa**, confere os dois servidores: o Emissor no ar tem a API interna (o `compose.yaml` dele
+   le `INTERNO_CREDENCIAL_HASH` e publica a porta dela) e a conta de envio (sem ela o Emissor nao sobe com a API interna
+   ligada); e o compose da escola no ar leva `EMISSOR_INTERNO_URL` e `EMISSOR_INTERNO_CREDENCIAL` ao app (senao: rode
+   `deploy-membros` da `main`);
+3. sorteia **no runner** uma credencial nova no formato do Emissor (`bki_` e 256 bits, `infra/cloud/credencial-interna.mjs`,
+   o mesmo de `bin/painel.ts credencial-interna`) e o resumo dela, em arquivos 0600 apagados com `shred` no fim. A
+   credencial nunca aparece no registro (e mascarada no Actions); do resumo, so os 8 primeiros caracteres;
+4. no servidor do Emissor, **so o resumo**, pela entrada do SSH (`infra/licencas/scripts/credencial-interna.sh`):
+   `INTERNO_CREDENCIAL_HASH` no `.env` do compose dele, com a nova primeiro e as anteriores atras, ate 4 (o limite do
+   Emissor; a mais velha sai), para a escola nunca ficar sem acesso no meio da troca. O Emissor e recriado e conferido
+   (`/health`); se nao voltar saudavel, o `.env` de antes volta e a etapa para sem tocar na escola. Depois, o Caddy do
+   endereco interno passa a aceitar so o IPv4 de agora do servidor da escola (`LICENCAS_INTERNO_IPS`); o Caddy e
+   recriado, o que corta a API publica e o Painel por alguns segundos;
+5. no servidor da escola, a credencial e o endereco (`https://licencas-interno.bunker707.com.br`) no `.env` do app, pela
+   entrada do SSH e pelo mesmo programa do `secrets-membros` (`env_aplicar_kv` em `infra/cloud/lib.sh`: 0600, dono
+   `deploy`, o arquivo temporario apagado em qualquer desfecho), e o app recriado, com o smoke;
+6. de dentro do app da escola (o mesmo ambiente, a mesma saida de rede), `GET /interno/v1/planos` com a credencial nova
+   tem de responder 200 (`infra/cloud/conferir-interno.mjs`; o registro mostra so o codigo e quantos planos o mapa tem).
+   Ate 12 tentativas, 10 s entre elas, enquanto o certificado do endereco novo sai; o 401 nao repete (cada credencial
+   errada conta para o bloqueio do IP da escola no Emissor: 20 em 10 minutos). Cada tentativa leva um `X-Pedido`
+   (`conectar-licencas-<data>-<n>`), que aparece na auditoria do Emissor.
+
+**Rodar de novo e trocar a credencial** (a rotacao). As anteriores continuam aceitas, ate 4, para nada parar no meio. Com
+`REVOGAR_ANTERIORES=sim`, depois do 200 o Emissor fica so com a nova e a escola confere de novo: use quando uma credencial
+vazou, ou para fechar uma troca.
+
+**Depois de cada `restaurar` da escola**, rode o `conectar-licencas` de novo: o snapshot volta com IP novo, e o Caddy do
+Emissor so aceita o de antes (o `restaurar` lembra, quando a escola tem `EMISSOR_INTERNO_URL`). O `deploy-licencas` le o
+IPv4 da escola na API da Hetzner a cada rodada; com a escola guardada, fecha o endereco interno para todos
+(`127.0.0.1/32`): o IP de antes pode ser de outro cliente da Hetzner.
+
+| Onde fica | O que |
+|---|---|
+| Servidor do Emissor, `/opt/bunker707/emissor/.env` | `INTERNO_CREDENCIAL_HASH` (os resumos, ate 4), `INTERNO_PROXIES_CONFIAVEIS`, `INTERNO_CABECALHO_IP` e `INTERNO_PORTA_NO_HOST` |
+| Servidor do Emissor, `/opt/bunker707/infra/licencas/.env` | `LICENCAS_INTERNO_DOMAIN`, `INTERNO_PORTA_NO_HOST` e `LICENCAS_INTERNO_IPS` (o Caddy) |
+| Servidor da escola, `/opt/bunker707/infra/compose/.env` (0600, `deploy`) | `EMISSOR_INTERNO_URL` e `EMISSOR_INTERNO_CREDENCIAL` (a credencial, so aqui) |
+| Em nenhum outro lugar | a credencial nunca vai ao servidor do Emissor, ao registro, a segredo do GitHub, ao chat nem a linha de comando |
+
+O `status-licencas` confere de fora que o endereco interno responde 403 ao runner (so a escola entra) e, com `SSH=1`,
+mostra quantas credenciais o Emissor aceita e quem o Caddy deixa chegar.
+
+| Sintoma | O que fazer |
+|---|---|
+| Para em "esta guardada em snapshot" | `restaurar` com `PAPEIS=membros`, `deploy-membros` da `main` e de novo |
+| Para em "O Emissor no ar nao tem a API interna" | o `bunker-licensing` com a API interna na `main` de la e `deploy-licencas` |
+| Para em "precisa da conta de envio" | a chave do Resend (`secrets-licencas`) e o `deploy-licencas` sem `LICENCAS_SEM_PAINEL=sim` |
+| Conferencia com 403 | o pedido nao saiu do IPv4 da escola: `status-licencas` com `SSH=1` (quem o Caddy deixa chegar) e de novo |
+| Conferencia com 401 | o resumo nao entrou no Emissor (o passo 4 no registro); rode de novo |
+| Conferencia com 000 | DNS ou o certificado do endereco novo (a primeira vez leva alguns minutos); rode de novo daqui a pouco |
+| Conferencia com 502 | o Caddy nao chegou na porta da API interna: o registro do Emissor (`exec-licencas`) |
+
+**Testes:** `tests/infra-licencas-conectar.test.mjs` (a etapa inteira contra a Hetzner, a Cloudflare e os dois servidores
+de mentira: o resumo so no Emissor, a credencial so na escola, nada no registro nem em linha de comando, 0600, a ordem, a
+trava da `main` e do `CONFIRMAR`, a rotacao, o `REVOGAR_ANTERIORES`, as recusas antes de mudar qualquer coisa e cada
+falha da conferencia; o vetor do resumo saiu do codigo do Emissor), `tests/infra-licencas-servidor.test.mjs` (o
+`credencial-interna.sh`: ate 4, a volta do `.env` sem saude; o `implantar.sh` com as variaveis `INTERNO_*`) e
+`tests/infra-licencas.test.mjs` (o DNS e o Caddy do terceiro nome). **Nao rodou:** nada de verdade (Hetzner, Cloudflare,
+o Emissor e a escola no ar, o certificado do endereco novo).
 
 ## 9. Deploy de nova versao do app
 
@@ -1454,34 +1529,63 @@ Sem terminal, o instalador nao mostra o link do dono: o dono entra pela tela de 
 e-mail dele. Testes: `tests/infra-teste.test.mjs` (a Hetzner, a Cloudflare, o GitHub e os servidores de mentira). Nao
 rodou: nada de verdade.
 
-## 9F. Primeiro ensaio de comprador: o passo a passo
+## 9F. O teste de cliente novo nos nossos servidores: a lista, na ordem (11/11/2026)
 
-Uma lista so, na ordem. "IA" e a sessao do Claude, pelo workflow Infra (Hetzner) e pelos conectores; "produtor" e o que
-so ele faz, com os cliques. Os precos sao sem IVA e a conferir no dia (o plano de cada etapa mostra o do dia).
+**Decisao do produtor (11/11/2026):** o teste inteiro de cliente novo roda nos nossos servidores, sem a Vercel. A nossa
+escola de producao (`bunker707-membros`, guardada em snapshot desde 03/11) e ligada para o teste e vende o Bunker Members
+como um curso; o Emissor e o Painel de licencas rodam no `bunker707-licencas`; a escola do comprador roda no
+`bunker707-teste`, criado para o ensaio e apagado no fim. Ninguem cola segredo em lugar nenhum: as chaves nascem nas
+etapas, e a unica coisa que passa pela mao do produtor e a Chave de ativacao, uma vez.
+
+"IA" e a sessao do Claude, pelo workflow **Infra (Hetzner)** (sempre da `main`) e pelos conectores; "produtor" e o que so
+ele faz, com os cliques. Uma etapa por vez; se uma parar, a mensagem diz o que fazer, e rodar de novo completa o que
+faltou. Precos sem IVA e a conferir no dia (o plano de cada etapa mostra o do dia).
 
 | # | Quem | O que | Custo |
 |---|---|---|---|
-| 1 | produtor | No `bunker-licensing`: GitHub > repositorio `bunker-licensing` > **Pull requests** > a PR do Painel com e-mail e senha > **Merge pull request** > **Confirm merge**. O CI de la publica a imagem do Emissor | nada |
-| 2 | produtor | Uma vez: GitHub > seu perfil > **Packages** > `bunker-licensing` > **Package settings** > **Manage Actions access** > **Add repository** > `bunker707-member-area` > papel **Read**. Sem isso o runner nao puxa a imagem (a cerimonia e o deploy param com essa dica) | nada |
-| 3 | produtor | Este trabalho na `main` deste repositorio, pelo fluxo de sempre (a PR para a `dev` e depois a `dev` para a `main`, `CONTRIBUTING.md`): **Merge pull request** > **Confirm merge** em cada uma | nada |
-| 4 | IA | `plan-licencas`; o preco no chat | nada |
-| 5 | produtor | O ok no chat, com o preco do servidor do Emissor | |
-| 6 | IA | `provision-licencas` com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<o aprovado>`; `dns-licencas` | o mais barato do dia (referencia: um CX23 a EUR 6,49/mes, ou um ARM mais barato) mais o IPv4 (uns EUR 0,50/mes), ligado o tempo todo |
-| 7 | IA | `cerimonia-licencas` com `CONFIRMAR=cerimonia` (8C.8); grava as raizes publicas do registro em `infra/licencas/raizes.json` e leva o commit a `main` (o produtor faz o **Merge** da PR, como no passo 3) | nada (o Storage Box ja existe) |
-| 8 | IA | A chave do Resend so de envio pelo conector do Resend, o envelope para a `transfer.pub` do Emissor e `secrets-licencas` com o envelope no `payload` (8C.5) | nada (plano gratis do Resend) |
-| 9 | IA | `deploy-licencas`: o Emissor e o Painel no ar e a conta do produtor criada | nada |
-| 10 | produtor | No e-mail "definir a senha" do Painel: o link > a senha (duas vezes) > **Definir**; depois, em `https://licencas.bunker707.com.br`, entrar. Recomendado: **Minha conta** > ligar o segundo fator | nada |
-| 11 | IA | `ensaio-licencas` (o ensaio de restauracao do Emissor) | nada |
-| 12 | IA | `teste-plano`; o preco por hora no chat | nada |
-| 13 | produtor | O ok no chat, com o preco por hora do servidor do ensaio | |
-| 14 | IA | `teste-criar` com `CONFIRMADO=sim TESTE_PRECO_MAX=<o aprovado>`; `teste-dns` | por hora, enquanto existir: referencia CX23, uns EUR 0,009/hora mais o IPv4 (uns EUR 0,25 por dia; uns EUR 1,60 por semana) |
-| 15 | IA | O workflow **Pacote da escola (lote fundador)**, da `main`, com `endereco` = `escola-teste.bunker707.com.br` e `versao` = `1.0.0-ensaio.1` | minutos do GitHub Actions (uns 20) e o artefato (umas centenas de MB por 7 dias, na cota do plano do GitHub; a conferir) |
-| 16 | produtor | No Painel: **Licencas** > **Emitir uma Licenca** (o titular de ensaio, origem fundador ou cortesia, o motivo "Ensaio de comprador") > **Emitir**; na ficha dela, **Gerar chave de ativacao** > copiar a Chave (aparece uma vez so) | nada |
-| 17 | produtor | GitHub > `bunker707-member-area` > **Actions** > **Infra (Hetzner)** > **Run workflow** > Branch **main**, etapa **teste-instalar**, `payload` = a Chave colada > **Run workflow**. A Chave e mascarada no registro e nunca passa pelo chat. (A outra saida: a IA roda o `teste-instalar` sem a Chave, e o produtor ativa na escola, em Configuracoes > Licenca, com a mesma Chave) | o servidor do passo 14, por hora |
-| 18 | produtor | Em `https://escola-teste.bunker707.com.br`: **Entrar** > **Esqueci a senha** > o e-mail dele > o link do e-mail > a senha. Testar a escola como comprador (o admin, um aluno, a tela Licenca) | |
-| 19 | IA | Com o ok do produtor no chat: `teste-apagar` com `CONFIRMAR=apagar` | a cobranca do ensaio para aqui |
+| | | **Parte 1. O codigo na `main`** | |
+| 1 | IA | CI verde nas PRs: `bunker-licensing#1` (o Emissor com o Painel de e-mail e senha e a API interna), `bunker707-member-area#168` (Minhas licencas, a venda que vira Licenca e as seis migracoes) e a deste trabalho (o `conectar-licencas`), que vai para a `dev` depois da #168. A `dev` da Vercel publica sozinha: as migracoes novas entram na nuvem de teste antes do merge da #168 (a `202611120001` muda checks que o app novo usa ao gravar; `docs/21` §9) | nada |
+| 2 | produtor | No `bunker-licensing`: **Pull requests** > #1 > **Merge pull request** > **Confirm merge**. O CI de la publica a imagem do Emissor no GHCR | nada |
+| 3 | produtor | No `bunker707-member-area`: a #168 para a `dev`, depois a PR deste trabalho para a `dev`, e por ultimo a PR que promove a `dev` para a `main` (`CONTRIBUTING.md`): em cada uma, **Merge pull request** > **Confirm merge** | nada |
+| 4 | produtor | Uma vez so: GitHub > seu perfil > **Packages** > `bunker-licensing` > **Package settings** > **Manage Actions access** > **Add repository** > `bunker707-member-area` > papel **Read**. Sem isso o runner nao puxa a imagem do Emissor (a cerimonia e o deploy param com essa dica) | nada |
+| | | **Parte 2. O Emissor e o Painel (`bunker707-licencas`, ligado o tempo todo)** | |
+| 5 | IA | `plan-licencas`: o tipo e o local mais baratos que servem e o preco por mes, no chat | nada |
+| 6 | produtor | O ok no chat, com o preco | |
+| 7 | IA | `provision-licencas` com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<o aprovado>` (8C.3) | o mais barato do dia (referencia: um CX23 a EUR 6,49/mes, ou um ARM mais barato) mais o IPv4 (uns EUR 0,50/mes), por mes, a partir daqui |
+| 8 | IA | `dns-licencas`: os tres nomes so com registro A (o Painel com o proxy da Cloudflare; a API e a API interna sem) | nada |
+| 9 | IA | `cerimonia-licencas` com `CONFIRMAR=cerimonia` (8C.8). As raizes publicas do registro vao para `infra/licencas/raizes.json` num commit, numa PR para a `dev` e a promocao para a `main` | nada (o Storage Box ja existe) |
+| 10 | produtor | O **Merge** das duas PRs do passo 9, como no passo 3 | nada |
+| 11 | IA | A chave do Resend so de envio, criada pelo conector do Resend, num envelope para a `transfer.pub` do Emissor, e `secrets-licencas` com o envelope no `payload` (8C.5). Sem ela o Painel e a API interna nao sobem | nada (plano gratis do Resend, 100 e-mails por dia) |
+| 12 | IA | `deploy-licencas`: o Emissor, o Painel, o backup de hora em hora e a conta do produtor no Painel. Com a escola guardada, a API interna fica fechada para todos ate o passo 16 | nada |
+| 13 | produtor | No e-mail "definir a senha" do Painel: o link > a senha (duas vezes) > **Definir**; depois, em `https://licencas.bunker707.com.br`, **Entrar**. Recomendado: **Minha conta** > ligar o segundo fator | nada |
+| | | **Parte 3. A nossa escola ligada (`bunker707-membros`) e conectada ao Emissor** | |
+| 14 | IA | `restaurar` com `PAPEIS=membros` (4A.7): a escola volta do snapshot, so ela (o Mautic e o Jitsi ficam guardados) | cerca de EUR 0,01 por hora (CX23) mais o IPv4, enquanto estiver ligada |
+| 15 | IA | `deploy-membros`: o codigo da `main`, com as seis migracoes novas aplicadas antes do app (9; o `deploy.sh` do servidor roda o `migrate.sh`) | minutos do GitHub Actions |
+| 16 | IA | `conectar-licencas` com `CONFIRMAR=conectar` (8C.9): a credencial nova so na escola, o resumo so no Emissor, o endereco interno aberto so para o IP da escola, e a conferencia de dentro do app (`200`) | nada |
+| 17 | produtor | No Painel de licencas: **Planos** > o produto da plataforma (Hotmart ou Ticto, e o codigo do produto la) com a forma que ele vende (para o teste, a **Licenca anual** de 12 meses), a venda. No admin da escola (`https://membros.bunker707.com.br/admin`): **Produtos** > o produto do Bunker Members (a aula de instalacao) > **Acesso e venda**: o mesmo codigo da plataforma e a marca **Bunker Members** | nada |
+| 18 | produtor | A venda chegando a producao: em **Configuracoes** > **Vendas**, no cartao da Hotmart (ou da Ticto), copiar o endereco mostrado (`https://membros.bunker707.com.br/api/webhooks/hotmart`, ou `.../ticto`), cadastrar na plataforma (Hotmart: Ferramentas > Webhook, versao 2.0.0; Ticto: Tictools > Webhooks, versao 2.0, JSON), com os eventos que o cartao lista, de preferencia so para este produto, e colar o token no cartao > **Salvar** (`docs/06`, Vendas). **Hoje nada aponta para a producao:** a virada das vendas (`docs/21` §8, item 4) nunca foi feita, a producao nunca recebeu venda e o token e de cada ambiente (so o resumo, no banco dele); webhook que ja exista aponta para a Vercel (a `dev`) | nada |
+| | | **Parte 4. A compra e Minhas licencas** | |
+| 19 | produtor | Uma compra de verdade do produto, com um e-mail seu que ainda nao tem conta na escola (por exemplo, um apelido `+teste` do Gmail). O envio de teste da plataforma so prova o endereco e o token: ele manda um produto e um comprador de exemplo, que nao viram Licenca | o preco do produto, que volta no reembolso do passo 28 (a taxa da plataforma, a conferir) |
+| 20 | produtor | No e-mail do comprador: o acesso da escola > a senha > **Entrar**. Em **Configuracoes** > **Vendas** do admin, a venda aparece com o acesso liberado; a fila do Emissor envia a venda em ate um minuto (venda de produto que nao esta em Planos fica tentando, e o Painel avisa por e-mail) | nada |
+| 21 | produtor | Como o comprador: menu > **Minhas licencas** > a Licenca nova > o titular (o nome e um CPF ou CNPJ de verdade: os digitos sao conferidos, e o nome vai na licenca assinada) e o aceite dos termos > **Gerar chave**. A Chave aparece uma vez so: copiar. No Painel, o cliente aparece com a Licenca e a Chave gerada | nada |
+| | | **Parte 5. A escola do comprador (`bunker707-teste`)** | |
+| 22 | IA | `teste-plano`: o preco por hora no chat | nada |
+| 23 | produtor | O ok no chat, com o preco | |
+| 24 | IA | `teste-criar` com `CONFIRMADO=sim TESTE_PRECO_MAX=<o aprovado>`; `teste-dns` (9E) | por hora, enquanto existir: referencia CX23, cerca de EUR 0,01 por hora mais o IPv4 (uns EUR 0,25 por dia) |
+| 25 | IA | O workflow **Pacote da escola (lote fundador)**, da `main`, com `endereco` = `escola-teste.bunker707.com.br` e `versao` = `1.0.0-ensaio.1` (9D.6) | minutos do GitHub Actions (uns 20) e o artefato (umas centenas de MB por 7 dias) |
+| 26 | produtor | GitHub > `bunker707-member-area` > **Actions** > **Infra (Hetzner)** > **Run workflow** > Branch **main**, etapa **teste-instalar**, `payload` = a Chave do passo 21 > **Run workflow**. A Chave e mascarada no registro e nunca passa pelo chat. (A outra saida: a IA roda o `teste-instalar` sem a Chave, e o produtor ativa na escola do teste, em **Configuracoes** > **Licenca**, com a mesma Chave.) Depois, em `https://escola-teste.bunker707.com.br`: **Entrar** > **Esqueci a senha** > o e-mail dele > a senha | o servidor do passo 24, por hora |
+| | | **Parte 6. As conferencias** | |
+| 27 | produtor | Na escola do teste, **Configuracoes** > **Licenca**: ativa. Em Minhas licencas (nossa escola), **Revogar**; na escola do teste, **Verificar agora**: a escola congela (vaga liberada). Em Minhas licencas, **Gerar chave** de novo e ativar a Chave nova na escola do teste: ela volta. O Painel mostra cada Chave gerada e revogada e a troca | nada |
+| 28 | produtor | O reembolso da compra na plataforma (o produtor reembolsa a venda no painel dela; se nao der, o comprador pede la). A nossa escola recebe o aviso (em **Vendas**, reembolso), o Emissor revoga a Licenca, e na escola do teste o **Verificar agora** mostra o Aviso (Admin limitado em 7 dias e Escola congelada em 30) | nada (o valor volta ao comprador) |
+| | | **Parte 7. Desligar** | |
+| 29 | IA | Com o ok do produtor no chat: `teste-apagar` com `CONFIRMAR=apagar` | a cobranca do ensaio para aqui |
+| 30 | IA | A nossa escola de volta ao snapshot (`snapshot` com `CONFIRMAR=apagar PAPEIS=membros`), ou ligada, se o produtor quiser. Guardada, o webhook do passo 18 precisa ser desligado na plataforma: a venda chegaria num servidor que nao existe, e a Hotmart desliga a configuracao de quem responde com erro. Depois de cada `restaurar`, o `conectar-licencas` de novo (o IP muda; 8C.9) | guardada, os snapshots da escola (ficam os 2 mais novos, uns 13 GB a EUR 0,0143 por GB), cerca de EUR 0,19 por mes; ligada, cerca de EUR 7 por mes |
 
-O que fica cobrando depois: so o servidor do Emissor (passo 6). Nada do ensaio fica no ar.
+O que fica cobrando depois: o servidor do Emissor (passo 7), o Storage Box de sempre e o snapshot da escola (ou a escola
+ligada). Nada do ensaio fica no ar.
+
+O passo de dados `supabase/dados/202611120001_midia_pelo_caminho.sql` (os enderecos antigos de midia pelo caminho) nao e
+preciso para o teste: o app novo le as duas formas.
 
 ---
 
