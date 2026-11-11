@@ -10,9 +10,17 @@
 // - a chave de emissao, que mora no Emissor e pode ser trocada sem versao nova do produto, assina a licenca;
 // - o texto assinado e o contexto (model.ts) mais a parte em base64url, exatamente como veio.
 //
-// Ed25519 pelo node:crypto. Erros voltam tipados, sem lancar: quem chama decide o que mostrar.
+// Ed25519 conferido duas vezes, e as duas tem de aceitar (docs/32 §7.1, medida 7): pelo node:crypto e por uma
+// implementacao em JavaScript puro embutida no produto (@noble/ed25519, com o SHA-512 tambem em JavaScript puro, de
+// @noble/hashes). O comprador e dono do compose e pode mandar o Node carregar um arquivo antes do produto (NODE_OPTIONS
+// ou a linha de comando) que troca o crypto.verify por um que sempre aceita; a revisao de 11/11/2026 fez isso e uma
+// licenca forjada passou. Com a segunda conferencia, trocar so o node:crypto nao basta, e o produto vendido nem sobe com
+// essas opcoes (node-start.ts). E um obstaculo, nao uma trava: quem altera a imagem passa pelos dois. Erros voltam
+// tipados, sem lancar: quem chama decide o que mostrar.
 
 import { createPublicKey, verify as verifySignature, type KeyObject } from "node:crypto";
+import { hashes as ed25519Hashes, verify as verifyEd25519 } from "@noble/ed25519";
+import { sha512 } from "@noble/hashes/sha2.js";
 import {
   CERTIFICATE_SIGNING_CONTEXT,
   DAY_MS,
@@ -82,8 +90,11 @@ function decodeSignature(segment: string): Buffer | null {
   return bytes && bytes.length === 64 ? bytes : null;
 }
 
+/** A chave publica Ed25519 nos dois formatos: o do node:crypto e os 32 bytes, para a conferencia em JavaScript puro. */
+type Ed25519PublicKey = { object: KeyObject; bytes: Uint8Array };
+
 /** A chave publica Ed25519 a partir dos 32 bytes em base64url; recusa ponto de ordem pequena. */
-function ed25519PublicKey(base64urlKey: unknown): KeyObject | null {
+function ed25519PublicKey(base64urlKey: unknown): Ed25519PublicKey | null {
   if (typeof base64urlKey !== "string" || !PUBLIC_KEY_PATTERN.test(base64urlKey)) {
     return null;
   }
@@ -95,27 +106,48 @@ function ed25519PublicKey(base64urlKey: unknown): KeyObject | null {
   }
 
   try {
-    return createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: base64urlKey }, format: "jwk" });
+    return { object: createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: base64urlKey }, format: "jwk" }), bytes: new Uint8Array(bytes) };
   } catch {
     return null;
   }
 }
 
-function signatureMatches(context: string, segment: string, signature: Buffer, key: KeyObject): boolean {
+/** A conferencia do node:crypto (OpenSSL). Rapida; um arquivo carregado antes do produto consegue troca-la. */
+function nodeCryptoAccepts(message: Buffer, signature: Buffer, key: Ed25519PublicKey): boolean {
   try {
-    return verifySignature(null, Buffer.from(`${context}${segment}`, "utf8"), key, signature);
+    return verifySignature(null, message, key.object, signature) === true;
   } catch {
     return false;
   }
 }
 
+/**
+ * A conferencia em JavaScript puro, embutida no produto: RFC 8032 estrita (zip215: false), que recusa encodificacao nao
+ * canonica e chave de ordem pequena, com o SHA-512 tambem em JavaScript puro (o do node:crypto ou o do crypto.subtle
+ * poderia ser trocado como o verify). O SHA-512 e posto de novo antes de cada conferencia.
+ */
+function pureJavaScriptAccepts(message: Buffer, signature: Buffer, key: Ed25519PublicKey): boolean {
+  try {
+    ed25519Hashes.sha512 = sha512;
+    return verifyEd25519(new Uint8Array(signature), new Uint8Array(message), key.bytes, { zip215: false }) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** A assinatura so confere se as duas conferencias aceitam. A do node:crypto vem primeiro: recusa o que e lixo sem custo. */
+function signatureMatches(context: string, segment: string, signature: Buffer, key: Ed25519PublicKey): boolean {
+  const message = Buffer.from(`${context}${segment}`, "utf8");
+  return nodeCryptoAccepts(message, signature, key) && pureJavaScriptAccepts(message, signature, key);
+}
+
 /** As raizes com o rid pedido, ja em formato de chave; entrada mal formada na lista e ignorada, nunca lanca. */
-function rootKeysFor(roots: readonly TrustedRoot[], rid: string): KeyObject[] {
+function rootKeysFor(roots: readonly TrustedRoot[], rid: string): Ed25519PublicKey[] {
   if (!Array.isArray(roots)) {
     return [];
   }
 
-  const keys: KeyObject[] = [];
+  const keys: Ed25519PublicKey[] = [];
 
   for (const root of roots) {
     if (root && typeof root === "object" && root.rid === rid && ROOT_ID_PATTERN.test(rid)) {
@@ -158,16 +190,60 @@ function withinBounds(license: LicensePayload, certificate: CertificatePayload):
 }
 
 /**
+ * A memoria das conferencias deste processo: a conferencia em JavaScript puro custa alguns milissegundos por
+ * assinatura, e a situacao da licenca e montada a cada pedido com a mesma licenca guardada. A conferencia nao depende do
+ * relogio, so do texto e das raizes, entao o resultado de um par vale enquanto o processo vive. Poucas entradas: a
+ * licenca guardada muda uma vez por dia. Cada leitura devolve uma copia.
+ */
+const VERIFICATION_MEMORY_SIZE = 8;
+const verificationMemory = new Map<string, LicenseVerification>();
+
+function verificationMemoryKey(token: string, roots: readonly TrustedRoot[]): string | null {
+  if (!Array.isArray(roots)) {
+    return null;
+  }
+
+  const rootsText = JSON.stringify(roots.map((root) => (root && typeof root === "object" ? [String(root.rid), String(root.publicKey)] : null)));
+  return `${rootsText}\n${token}`;
+}
+
+/**
  * Confere o texto da licenca contra as raizes confiaveis. So devolve `ok: true` quando a raiz e conhecida,
- * as duas assinaturas batem, a chave serve para licenca, a licenca foi emitida dentro do prazo do certificado,
- * o conteudo segue o formato e fica dentro dos limites. Nao olha o relogio para decidir se a licenca vale: isso
- * e da avaliacao (evaluate.ts), que precisa ler uma licenca vencida para mostrar o degrau certo.
+ * as duas assinaturas batem (cada uma pelo node:crypto e pela conferencia em JavaScript puro), a chave serve para
+ * licenca, a licenca foi emitida dentro do prazo do certificado, o conteudo segue o formato e fica dentro dos limites.
+ * Nao olha o relogio para decidir se a licenca vale: isso e da avaliacao (evaluate.ts), que precisa ler uma licenca
+ * vencida para mostrar o degrau certo.
  */
 export function verifyLicenseToken(token: unknown, roots: readonly TrustedRoot[]): LicenseVerification {
   if (typeof token !== "string" || token.length === 0 || token.length > MAX_LICENSE_TOKEN_LENGTH) {
     return { ok: false, error: "formato" };
   }
 
+  const key = verificationMemoryKey(token, roots);
+  const remembered = key === null ? undefined : verificationMemory.get(key);
+
+  if (remembered) {
+    return structuredClone(remembered);
+  }
+
+  const verification = verifyUncached(token, roots);
+
+  if (key !== null) {
+    verificationMemory.set(key, structuredClone(verification));
+
+    if (verificationMemory.size > VERIFICATION_MEMORY_SIZE) {
+      const oldest = verificationMemory.keys().next().value;
+
+      if (oldest !== undefined) {
+        verificationMemory.delete(oldest);
+      }
+    }
+  }
+
+  return verification;
+}
+
+function verifyUncached(token: string, roots: readonly TrustedRoot[]): LicenseVerification {
   const parts = token.split(".");
 
   if (parts.length !== 5 || parts[0] !== LICENSE_TOKEN_PREFIX) {

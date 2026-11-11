@@ -82,11 +82,22 @@ test("a guarda pega as formas de assinar que a revisão listou", () => {
   );
 });
 
-test("o Verificador confere com verify do node:crypto e não importa nada que assine", () => {
+test("o Verificador confere com o verify do node:crypto e com a Ed25519 em JavaScript puro embutida, e não importa nada que assine", () => {
   const codigo = readFileSync(join("src", "server", "licensing", "artifact.ts"), "utf8");
 
   assert.match(codigo, /verify as verifySignature/);
+  // A segunda conferência (docs/32 §7.1, medida 7): um arquivo carregado antes do produto troca só o node:crypto.
+  assert.match(codigo, /import \{ hashes as ed25519Hashes, verify as verifyEd25519 \} from "@noble\/ed25519";/);
+  assert.match(codigo, /import \{ sha512 \} from "@noble\/hashes\/sha2\.js";/);
+  assert.match(codigo, /ed25519Hashes\.sha512 = sha512;/, "o SHA-512 em JavaScript puro, posto antes de cada conferência");
+  assert.match(codigo, /\{ zip215: false \}/, "RFC 8032 estrita: sem encodificação não canônica nem chave de ordem pequena");
+  assert.match(codigo, /return nodeCryptoAccepts\(message, signature, key\) && pureJavaScriptAccepts\(message, signature, key\);/, "as duas têm de aceitar");
   assert.doesNotMatch(codigo, /\bsign\s*\(/);
+
+  // As duas bibliotecas na versão exata: trocar de versão é uma decisão, não um npm update.
+  const pacote = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(pacote.dependencies["@noble/ed25519"], "3.2.0");
+  assert.equal(pacote.dependencies["@noble/hashes"], "2.4.0");
 });
 
 test("o modo, as raízes e o endereço do Emissor nunca vão ao navegador e ficam gravados no build pela chave env do next.config", () => {

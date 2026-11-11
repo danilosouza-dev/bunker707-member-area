@@ -18,6 +18,7 @@ import { cache } from "react";
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { licensingMode, trustedRoots } from "./build-config";
+import { refuseUnsafeNodeStart } from "./node-start";
 import type { LicenseState } from "./state";
 import { hasInstallationCredentials, loadLicenseState, type LicenseStateDb, type LicenseStateRecord } from "./store";
 import { licenseStateDbOf } from "./store-db";
@@ -50,16 +51,23 @@ const rememberingDb: LicenseStateDb = {
   }
 };
 
-export const getCurrentLicenseState = cache(
-  (): Promise<LicenseState> =>
-    loadLicenseState({
-      mode: licensingMode(),
-      db: () => rememberingDb,
-      roots: trustedRoots,
-      configuredHost: getConfiguredSiteOrigin,
-      systemNow: () => new Date()
-    })
-);
+export const getCurrentLicenseState = cache((): Promise<LicenseState> => {
+  const mode = licensingMode();
+
+  // A conferencia da subida (instrumentation.ts) tambem aqui, no servidor de verdade: o NEXT_PHASE de build no compose
+  // pula o register() do Next. Uma leitura do /proc por processo; depois, so a memoria (node-start.ts).
+  if (mode === "enforce" && process.env.NEXT_RUNTIME === "nodejs") {
+    refuseUnsafeNodeStart({ mode });
+  }
+
+  return loadLicenseState({
+    mode,
+    db: () => rememberingDb,
+    roots: trustedRoots,
+    configuredHost: getConfiguredSiteOrigin,
+    systemNow: () => new Date()
+  });
+});
 
 /**
  * O que a tela Licenca mostra alem da situacao: o identificador da Instalacao, a ultima conferencia boa e a ultima
