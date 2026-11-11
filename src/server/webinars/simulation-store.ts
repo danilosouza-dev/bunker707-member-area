@@ -16,7 +16,17 @@ import "server-only";
 import { isPendingMigrationError } from "../db/pending-migration";
 import { WebinarError, assertNoDbError, isMissingWebinarSchema, type WebinarsDb } from "./db";
 import type { SessionSimulation, SimulatedCountRule, SimulatedJoins, SimulatedSaleNotices, SimulationChangeRecord, SimulationChangeSource, SimulationTotals } from "./model";
-import { SESSION_SIMULATION_COLUMNS, sessionSimulationFromRow, simulationRulesToRow, simulationTotalsToRow, type SessionSimulationRow } from "./rows";
+import {
+  SESSION_SIMULATION_COLUMNS,
+  SESSION_SIMULATION_FEED_COLUMNS,
+  sessionSimulationFeedStateFromRow,
+  sessionSimulationFromRow,
+  simulationRulesToRow,
+  simulationTotalsToRow,
+  type SessionSimulationFeedRow,
+  type SessionSimulationFeedState,
+  type SessionSimulationRow
+} from "./rows";
 import { SIMULATION_CHANGE_COLUMNS, countChangesOf, simulationChangeFromRow, simulationChangeToRow, type SimulationChangeRow } from "./simulation-change-rows";
 
 const NOT_SIMULATED_MESSAGE = "Só a sessão da Live gravada e a da Live ao vivo têm Simulação.";
@@ -49,6 +59,23 @@ export async function fetchSessionSimulation(db: WebinarsDb, sessionId: string):
   }
   const changes = await readSimulationChanges(db, [row.id]);
   return withCountChanges(sessionSimulationFromRow(row), changes);
+}
+
+/**
+ * A Simulacao e a linha fresca da sessao para a janela da sala (GET .../simulation; correcao da revisao v8, achado 1):
+ * numa leitura, as regras e a decisao, a situacao, a hora marcada, o inicio e o fim de agora, para a rota nunca decidir
+ * "sem decisao" pela sessao do cache do acesso (ate 10 min na gravada) enquanto a consulta de 5 s do chat ja levou o
+ * carimbo novo a sala. Sem a linha, nulo; banco sem as colunas, o erro de sempre (quem chama devolve a janela vazia).
+ */
+export async function fetchSessionSimulationFeed(db: WebinarsDb, sessionId: string): Promise<{ simulation: SessionSimulation; state: SessionSimulationFeedState } | null> {
+  const { data, error } = await db.from("webinar_sessions").select(SESSION_SIMULATION_FEED_COLUMNS).eq("id", sessionId).maybeSingle();
+  assertNoDbError(error, "Webinarios: ler simulacao da sessao para a sala");
+  const row = (data as SessionSimulationFeedRow | null) ?? null;
+  if (!row) {
+    return null;
+  }
+  const changes = await readSimulationChanges(db, [row.id]);
+  return { simulation: withCountChanges(sessionSimulationFromRow(row), changes), state: sessionSimulationFeedStateFromRow(row) };
 }
 
 export async function listSessionSimulations(db: WebinarsDb, sessionIds: readonly string[]): Promise<SessionSimulation[]> {
