@@ -6,7 +6,11 @@ import { SettingsHub, type SettingsHubStatus } from "@/components/admin/v2/setti
 import { listAIProviderConfigs } from "@/server/ai/provider-config";
 import { listAIProviderConnections } from "@/server/ai/provider-connections";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, type AdminAccess } from "@/server/auth/roles";
+import { isLicenseManager } from "@/server/licensing/admin-access";
+import { licensingMode } from "@/server/licensing/build-config";
+import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { licenseHubStatusOf } from "@/server/licensing/screen-view";
 import { summarizeSalesSetup } from "@/server/payments/model";
 import { getSalesProviderStatuses } from "@/server/payments/queries";
 import { listTeamMembers } from "@/server/team/queries";
@@ -49,21 +53,39 @@ async function loadSalesStatus(): Promise<SettingsHubStatus | null> {
   }
 }
 
+/**
+ * A linha da Licenca (docs/32 §2.4): so no produto vendido (modo "enforce") e so para o dono e os administradores. No
+ * modo "off" nada aqui le a licenca. Sem leitura, a linha fica sem estado (nunca um palpite).
+ */
+async function loadLicenseRow(access: AdminAccess): Promise<{ status: SettingsHubStatus | null } | null> {
+  if (licensingMode() !== "enforce" || !isLicenseManager(access)) {
+    return null;
+  }
+
+  try {
+    return { status: licenseHubStatusOf(await getCurrentLicenseState()) };
+  } catch (error) {
+    console.error("[admin/configuracoes] situacao da Licenca", error);
+    return { status: null };
+  }
+}
+
 export default async function AdminSettingsPage() {
   const { access } = await requirePageArea("configuracoes");
   const canAi = can(access, "settings.ai");
   const canSales = can(access, "settings.sales");
   const canTeam = can(access, "settings.team");
-  const [aiStatus, teamCount, salesStatus] = await Promise.all([
+  const [aiStatus, teamCount, salesStatus, license] = await Promise.all([
     canAi ? loadAiStatus() : Promise.resolve(null),
     canTeam ? loadTeamCount() : Promise.resolve(null),
-    canSales ? loadSalesStatus() : Promise.resolve(null)
+    canSales ? loadSalesStatus() : Promise.resolve(null),
+    loadLicenseRow(access)
   ]);
 
   return (
     <AdminPage className="gap-6">
       <PageHeader description="Equipe, vídeo, Tutor IA, vendas, canais de envio e dados da escola." title="Configurações" />
-      <SettingsHub access={{ canAi, canSales, canTeam, teamCount }} aiStatus={aiStatus} salesStatus={salesStatus} />
+      <SettingsHub access={{ canAi, canSales, canTeam, teamCount }} aiStatus={aiStatus} license={license} salesStatus={salesStatus} />
     </AdminPage>
   );
 }

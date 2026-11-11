@@ -89,18 +89,40 @@ test("o Verificador confere com verify do node:crypto e não importa nada que as
   assert.doesNotMatch(codigo, /\bsign\s*\(/);
 });
 
-test("o modo e as raízes da licença nunca vão ao navegador e ficam gravados no build pela chave env do next.config", () => {
+test("o modo, as raízes e o endereço do Emissor nunca vão ao navegador e ficam gravados no build pela chave env do next.config", () => {
   const achados = arquivos("src")
     .concat(["next.config.ts"])
     .filter((arquivo) => /NEXT_PUBLIC_BUNKER_LICENS/.test(readFileSync(arquivo, "utf8")));
   assert.deepEqual(achados, []);
 
   const config = readFileSync("next.config.ts", "utf8");
-  assert.match(config, /env:\s*\{[^}]*BUNKER_LICENSING_MODE:[^}]*BUNKER_LICENSING_ROOTS:/s);
+  assert.match(config, /env:\s*\{[^}]*BUNKER_LICENSING_MODE:[^}]*BUNKER_LICENSING_ROOTS:[^}]*BUNKER_LICENSING_EMISSOR_URL:/s);
 
   // Lidos por nome literal: só assim o Next troca pelo texto na hora de gerar a imagem.
   const leitura = readFileSync(join("src", "server", "licensing", "build-config.ts"), "utf8");
   assert.match(leitura, /process\.env\.BUNKER_LICENSING_MODE/);
   assert.match(leitura, /process\.env\.BUNKER_LICENSING_ROOTS/);
+  assert.match(leitura, /process\.env\.BUNKER_LICENSING_EMISSOR_URL/);
   assert.doesNotMatch(leitura, /process\.env\[/);
+
+  // As variáveis da licença só são lidas ali: nenhum outro arquivo de src/ lê process.env.BUNKER_LICENSING_*.
+  const leitores = arquivos("src").filter((arquivo) => /process\.env\s*(?:\.|\[\s*["'`])BUNKER_LICENSING/.test(readFileSync(arquivo, "utf8")));
+  assert.deepEqual(leitores, [join("src", "server", "licensing", "build-config.ts")]);
+});
+
+test("o endereço do Emissor gravado no build: só https, ou http://127.0.0.1 nos testes; o cliente não segue redirecionamento", async () => {
+  await import("./support/resolve-extensionless-ts.mjs");
+  const { parseEmissorBaseUrl } = await import("../src/server/licensing/build-config.ts");
+
+  assert.equal(parseEmissorBaseUrl("https://licencas-api.bunker707.com.br/"), "https://licencas-api.bunker707.com.br");
+  assert.equal(parseEmissorBaseUrl("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
+
+  for (const recusado of ["http://licencas-api.bunker707.com.br", "http://localhost:8080", "http://127.0.0.1.nip.io", "https://a:b@emissor.test", "https://emissor.test/?x=1"]) {
+    assert.equal(parseEmissorBaseUrl(recusado), null, recusado);
+  }
+
+  const cliente = readFileSync(join("src", "server", "licensing", "client.ts"), "utf8");
+  assert.match(cliente, /redirect: "error"/);
+  assert.match(cliente, /cache: "no-store"/);
+  assert.doesNotMatch(cliente, /console\./, "o cliente do Emissor não escreve log");
 });

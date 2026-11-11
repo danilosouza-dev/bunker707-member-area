@@ -11,15 +11,15 @@ import "server-only";
 // Uma leitura por pedido (cache do React). As rotas consultadas sem parar (a presenca da sala a cada 15 s, o sino, o
 // progresso) perguntam a cada pedido, e o cache do React nao vale nas rotas: por isso a linha lida fica na memoria do
 // processo por LICENSE_ROW_MEMORY_MS. A situacao e montada de novo a cada pedido, com o relogio de agora; so a linha
-// fica guardada. A tarefa do tick esquece a memoria depois de gravar (forgetLicenseStateMemory), e o Verificar agora
-// da peca seguinte faz o mesmo.
+// fica guardada. A tarefa do tick esquece a memoria depois de gravar (forgetLicenseStateMemory), e as acoes da tela
+// Licenca (ativar, Verificar agora, desativar, licenca por arquivo) fazem o mesmo.
 
 import { cache } from "react";
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { licensingMode, trustedRoots } from "./build-config";
 import type { LicenseState } from "./state";
-import { loadLicenseState, type LicenseStateDb, type LicenseStateRecord } from "./store";
+import { hasInstallationCredentials, loadLicenseState, type LicenseStateDb, type LicenseStateRecord } from "./store";
 import { licenseStateDbOf } from "./store-db";
 
 /** Quanto a linha lida vale na memoria do processo. A situacao fica no maximo isso atras da tabela. */
@@ -60,3 +60,35 @@ export const getCurrentLicenseState = cache(
       systemNow: () => new Date()
     })
 );
+
+/**
+ * O que a tela Licenca mostra alem da situacao: o identificador da Instalacao, a ultima conferencia boa e a ultima
+ * tentativa de conversa com o Emissor. Nunca o segredo nem a sequencia. A mesma linha da memoria do processo (as acoes
+ * da tela a esquecem depois de gravar).
+ */
+export type LicenseOverview = {
+  state: LicenseState;
+  installationId: string | null;
+  /** A Instalacao tem identificador e segredo (so o fato, nunca o segredo): da para conferir e desativar. */
+  hasInstallationCredentials: boolean;
+  lastCheckIn: { emissorTime: Date; localTime: Date } | null;
+  lastAttempt: { at: Date | null; result: string | null };
+};
+
+export const getLicenseOverview = cache(async (): Promise<LicenseOverview> => {
+  const state = await getCurrentLicenseState();
+
+  if (state.mode === "off") {
+    return { state, installationId: null, hasInstallationCredentials: false, lastCheckIn: null, lastAttempt: { at: null, result: null } };
+  }
+
+  const record = await rememberingDb.read();
+
+  return {
+    state,
+    installationId: record?.installationId ?? null,
+    hasInstallationCredentials: hasInstallationCredentials(record),
+    lastCheckIn: record?.lastCheckIn ?? null,
+    lastAttempt: { at: record?.checkInAttemptedAt ?? null, result: record?.checkInResult ?? null }
+  };
+});

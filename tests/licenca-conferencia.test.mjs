@@ -279,9 +279,10 @@ test("erro do banco no adaptador: tabela que falta vira migração pendente; out
 
 // ---- O cliente de hoje ---------------------------------------------------------------------------------
 
-test("o cliente de hoje responde 'nao_configurado' para ativar e conferir, sem lançar e sem abrir conexão", async () => {
+test("sem o endereço do Emissor no build, o cliente é o 'nao_configurado': responde isso a tudo, sem lançar e sem abrir conexão", async () => {
   assert.equal(emissorClient(), notConfiguredEmissorClient);
-  assert.deepEqual(await notConfiguredEmissorClient.activate({ activationKey: "x", host: "alunos.escola.test", nonce: "n" }), {
+  assert.deepEqual(await notConfiguredEmissorClient.preflight({ activationKey: "x", host: "alunos.escola.test" }), { ok: false, error: "nao_configurado" });
+  assert.deepEqual(await notConfiguredEmissorClient.activate({ activationKey: "x", host: "alunos.escola.test", instanceId: "i", nonce: "n" }), {
     ok: false,
     error: "nao_configurado"
   });
@@ -289,6 +290,10 @@ test("o cliente de hoje responde 'nao_configurado' para ativar e conferir, sem l
     await notConfiguredEmissorClient.checkIn({ host: null, installationId: "i", installationSecret: SEGREDO, nonce: "n", sequence: null }),
     { ok: false, error: "nao_configurado" }
   );
+  assert.deepEqual(await notConfiguredEmissorClient.deactivate({ installationId: "i", installationSecret: SEGREDO, nonce: "n" }), {
+    ok: false,
+    error: "nao_configurado"
+  });
 
   for (const codigo of EMISSOR_ERROR_CODES) {
     assert.match(codigo, store.CHECK_IN_RESULT_PATTERN, `${codigo} cabe na coluna check_in_result`);
@@ -306,8 +311,9 @@ test("conferência vencida com o cliente de hoje: a tentativa fica gravada com o
     }
   };
 
-  const primeira = await rodar(banco, contado);
+  const { state: situacaoDaRodada, ...primeira } = await rodar(banco, contado);
   assert.deepEqual(primeira, { mode: "enforce", contended: false, checkIn: { due: true, reason: "diaria" }, result: "nao_configurado" });
+  assert.equal(situacaoDaRodada.evaluation.degree, "ok", "a rodada devolve a situação (a dos e-mails de degrau)");
   assert.equal(chamadas, 1);
   assert.equal(banco.linha.checkInResult, "nao_configurado");
   assert.equal(banco.linha.checkInAttemptedAt.toISOString(), AGORA.toISOString());
@@ -324,11 +330,11 @@ test("conferência vencida com o cliente de hoje: a tentativa fica gravada com o
 
 // ---- Com um Emissor de teste ---------------------------------------------------------------------------
 
-test("conferência boa: o pedido leva o identificador, o segredo, a sequência, um nonce novo e o endereço; a licença nova e a sequência são gravadas", async () => {
+test("conferência boa: o pedido leva o identificador, o segredo, a sequência, um nonce novo, o endereço, a licença guardada e as versões; a licença nova e a sequência são gravadas", async () => {
   const banco = bancoDaLicenca(VAZIO, vencida());
   const emissor = emissorDeTeste(() => ({ ok: true, token: novaDoEmissor(), sequence: "seq-2" }));
 
-  const resultado = await rodar(banco, emissor.client, { now: () => depois(1_000) });
+  const resultado = await rodar(banco, emissor.client, { now: () => depois(1_000), versions: () => ({ product: "1.4.0" }) });
   assert.equal(resultado.result, "ok");
 
   const [pedido] = emissor.pedidos;
@@ -336,7 +342,11 @@ test("conferência boa: o pedido leva o identificador, o segredo, a sequência, 
   assert.equal(pedido.installationSecret, SEGREDO);
   assert.equal(pedido.sequence, "seq-1");
   assert.equal(pedido.host, "alunos.escola.test");
-  assert.match(pedido.nonce, /^[A-Za-z0-9_-]{24}$/);
+  assert.match(pedido.nonce, /^[A-Za-z0-9_-]{43}$/, "32 bytes sorteados, como o protocolo pede");
+  assert.equal(pedido.storedLicense, vencida().token, "a licença guardada vai junto, para a readoção");
+  assert.equal(pedido.licenseId, "lic_0001", "o número da Licença da licença guardada");
+  assert.equal(pedido.newestIssuedAt.toISOString(), "2026-11-10T12:00:00.000Z", "o cliente confere que a resposta não é mais antiga");
+  assert.deepEqual(pedido.versions, { product: "1.4.0" });
   assert.ok(pedido.signal instanceof AbortSignal, "o tempo limite vai junto");
 
   const linha = banco.linha;
@@ -416,9 +426,10 @@ test("licença devolvida que o store recusa grava o motivo e não troca a licen�
 
 test("Instalação ainda sem identificador e segredo: a rodada só anda a hora vista e não chama o Emissor", async () => {
   const banco = bancoDaLicenca(VAZIO, vencida({ installationId: null, installationSecret: null, checkInSequence: null }));
-  const resultado = await rodar(banco, null, { client: proibido("cliente do Emissor sem Instalação") });
+  const { state, ...resultado } = await rodar(banco, null, { client: proibido("cliente do Emissor sem Instalação") });
 
   assert.deepEqual(resultado, { mode: "enforce", contended: false, checkIn: { due: false, reason: "sem_instalacao" }, result: null });
+  assert.equal(state.mode, "enforce");
   assert.equal(banco.linha.lastSeenAt.toISOString(), "2026-11-11T12:01:00.000Z");
 });
 

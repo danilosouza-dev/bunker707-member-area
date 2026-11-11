@@ -9,8 +9,10 @@ import test from "node:test";
 //   ao service_role), com os checks nomeados e o gatilho com a função que já existe dentro de "if not exists";
 // - as migrações até a 202611010001 continuam byte a byte;
 // - o adaptador lê e grava só colunas que a tabela tem;
-// - quem grava: a tarefa do tick é a única que roda a rodada (a última hora vista só anda por ela), e o segredo da
-//   Instalação só aparece nos arquivos do Verificador que falam com o banco e com o Emissor;
+// - quem grava: a tarefa do tick é a única que roda a rodada (a última hora vista só anda por ela); além dela e da
+//   situação do pedido, só as Server Actions da tela Licença (ativar, Verificar agora, desativar, licença por arquivo)
+//   criam o adaptador do banco; e o segredo da Instalação só aparece nos arquivos do Verificador que falam com o banco e
+//   com o Emissor;
 // - os arquivos de regras ficam puros (os testes os carregam pelo Node) e os que tocam no banco ou no Emissor são
 //   "server-only";
 // - o job está no registro do tick, antes da limpeza de arquivos (que fica por último).
@@ -108,21 +110,29 @@ test("o adaptador lê e grava só colunas que a tabela tem, e a tabela não tem 
   }
 });
 
-test("quem grava: só o job do tick roda a rodada, e só ele e a situação do pedido criam o adaptador do banco", () => {
+test("quem grava: só o job do tick roda a rodada; ele, a situação do pedido e as ações da tela Licença criam o adaptador do banco", () => {
   const sources = sourceFiles("src/");
   const importers = (pattern) => sources.filter((file) => pattern.test(codeOf(read(file)))).sort();
 
   assert.deepEqual(importers(/\brunLicenseTick\b/), ["src/server/jobs/license-check-in-job.ts", `${LICENSING}tick.ts`]);
   assert.deepEqual(importers(/\bplanLicenseTick\b/), [`${LICENSING}store.ts`, `${LICENSING}tick.ts`]);
-  assert.deepEqual(importers(/\blicenseStateDbOf\b/), ["src/server/jobs/license-check-in-job.ts", `${LICENSING}current-state.ts`, `${LICENSING}store-db.ts`]);
+  assert.deepEqual(importers(/\blicenseStateDbOf\b/), [
+    "src/server/jobs/license-check-in-job.ts",
+    `${LICENSING}actions.ts`,
+    `${LICENSING}current-state.ts`,
+    `${LICENSING}store-db.ts`
+  ]);
   assert.deepEqual(importers(/\blicense_state\b/), [`${LICENSING}store-db.ts`], "a tabela só é tocada pelo adaptador");
+  // A conferência fora da rodada (Verificar agora) e as conversas da tela passam pela mesma reserva do store.
+  assert.deepEqual(importers(/\brunLicenseCheckInNow\b/), [`${LICENSING}actions.ts`, `${LICENSING}tick.ts`]);
+  assert.deepEqual(importers(/\bplanConversationStart\b/), [`${LICENSING}operations.ts`, `${LICENSING}store.ts`, `${LICENSING}tick.ts`]);
 });
 
 test("o segredo da Instalação só aparece no Verificador que fala com o banco e com o Emissor", () => {
   const sources = sourceFiles("src/");
   const citing = sources.filter((file) => /installation_?secret/i.test(codeOf(read(file)))).sort();
 
-  assert.deepEqual(citing, [`${LICENSING}client.ts`, `${LICENSING}store-db.ts`, `${LICENSING}store.ts`, `${LICENSING}tick.ts`]);
+  assert.deepEqual(citing, [`${LICENSING}client.ts`, `${LICENSING}operations.ts`, `${LICENSING}store-db.ts`, `${LICENSING}store.ts`, `${LICENSING}tick.ts`]);
 
   const job = codeOf(read("src/server/jobs/license-check-in-job.ts"));
   const logs = [...job.matchAll(/console\.(?:info|warn|error)\(([\s\S]*?)\);/g)].map((match) => match[1]).join("\n");
@@ -130,7 +140,7 @@ test("o segredo da Instalação só aparece no Verificador que fala com o banco 
 });
 
 test("as regras ficam puras e o que toca no banco ou no Emissor é server-only", () => {
-  for (const name of ["store.ts", "tick.ts", "state.ts"]) {
+  for (const name of ["store.ts", "tick.ts", "state.ts", "operations.ts", "copy.ts", "screen-view.ts", "screen-result.ts", "degree-notice.ts", "admin-access.ts", "request-ids.ts"]) {
     const source = read(`${LICENSING}${name}`);
     assert.doesNotMatch(source, /^import "server-only";/m, `${name} carrega pelo Node`);
     assert.doesNotMatch(source, /from "@\//, `${name} sem o alias "@/"`);
@@ -140,9 +150,19 @@ test("as regras ficam puras e o que toca no banco ou no Emissor é server-only",
   assert.match(read(`${LICENSING}tick.ts`), /^import type \{[^}]+\} from "\.\/client";$/m);
   assert.doesNotMatch(read(`${LICENSING}store.ts`), /from "\.\/client"/);
 
-  for (const path of [`${LICENSING}client.ts`, `${LICENSING}store-db.ts`, `${LICENSING}current-state.ts`, "src/server/jobs/license-check-in-job.ts"]) {
+  for (const path of [
+    `${LICENSING}client.ts`,
+    `${LICENSING}store-db.ts`,
+    `${LICENSING}current-state.ts`,
+    `${LICENSING}degree-email.ts`,
+    "src/server/jobs/license-check-in-job.ts"
+  ]) {
     assert.match(read(path), /^import "server-only";/m, path);
   }
+
+  // As ações da tela Licença são Server Actions (só rodam no servidor) e as operações delas só levam os tipos do cliente.
+  assert.match(read(`${LICENSING}actions.ts`), /^"use server";/);
+  assert.match(read(`${LICENSING}operations.ts`), /^import type \{[^}]+\} from "\.\/client";$/m);
 });
 
 test("o job licenca-conferencia está no registro do tick, antes da limpeza de arquivos, e no comentário dos jobs", () => {

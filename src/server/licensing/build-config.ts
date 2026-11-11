@@ -1,7 +1,8 @@
-// O modo da licenca e as raizes confiaveis vem do build (docs/32 §11.3 e D9).
+// O modo da licenca, as raizes confiaveis e o endereco do Emissor vem do build (docs/32 §11.3 e D9).
 //
-// next.config.ts passa BUNKER_LICENSING_MODE e BUNKER_LICENSING_ROOTS pela chave `env`, e o Next troca cada
-// `process.env.BUNKER_LICENSING_*` abaixo pelo texto na hora de gerar a imagem, no codigo do servidor tambem.
+// next.config.ts passa BUNKER_LICENSING_MODE, BUNKER_LICENSING_ROOTS e BUNKER_LICENSING_EMISSOR_URL pela chave `env`,
+// e o Next troca cada `process.env.BUNKER_LICENSING_*` abaixo pelo texto na hora de gerar a imagem, no codigo do
+// servidor tambem.
 // Por isso a variavel do conteiner nao muda nada depois: o comprador e dono do compose, e nenhuma variavel
 // pode afrouxar a licenca. Nos testes, o Node le a variavel na hora.
 //
@@ -65,4 +66,43 @@ export function parseTrustedRoots(raw: string | undefined): TrustedRoot[] {
 
 export function trustedRoots(): TrustedRoot[] {
   return parseTrustedRoots(process.env.BUNKER_LICENSING_ROOTS);
+}
+
+/** O unico endereco sem https aceito: o Emissor de teste ou de ensaio na propria maquina. */
+const LOCAL_TEST_HOST = "127.0.0.1";
+
+/**
+ * Le o endereco da API publica do Emissor (docs/protocolo.md do bunker-licensing, por exemplo
+ * `https://licencas-api.bunker707.com.br`). So https, sem usuario, senha, busca nem ancora; a unica excecao e
+ * `http://127.0.0.1` (com porta ou sem), para os testes e o ensaio local. Endereco fora disso vale como ausente: o
+ * cliente fica "nao configurado" e nunca fala com um endereco errado. Devolve a origem mais o caminho, sem a barra final.
+ */
+export function parseEmissorBaseUrl(raw: string | undefined): string | null {
+  const text = raw?.trim();
+
+  if (!text || text.length > 300) {
+    return null;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+
+  const secure = url.protocol === "https:";
+  const localTest = url.protocol === "http:" && url.hostname === LOCAL_TEST_HOST;
+
+  if ((!secure && !localTest) || url.username || url.password || url.search || url.hash || text.includes("?") || text.includes("#")) {
+    return null;
+  }
+
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/** O endereco do Emissor gravado no build; null sem a variavel (a nossa escola hoje, a `dev`, a Vercel e os testes). */
+export function emissorBaseUrl(): string | null {
+  return parseEmissorBaseUrl(process.env.BUNKER_LICENSING_EMISSOR_URL);
 }

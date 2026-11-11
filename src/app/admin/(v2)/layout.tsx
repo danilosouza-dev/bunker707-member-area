@@ -4,15 +4,21 @@ import type { ReactNode } from "react";
 import { AdminShellV2 } from "@/components/admin/v2/admin-shell";
 import type { AdminFilterProduct } from "@/components/admin/v2/filters";
 import { formatAdminRole } from "@/components/admin/v2/format";
+import { LicenseBanner } from "@/components/admin/v2/license/license-banner";
 import { ADMIN_SIDEBAR_COOKIE, type AdminNavCounts } from "@/components/admin/v2/nav";
 import { readTodayAlertSummary } from "@/server/admin/today";
 import { requirePageAdmin } from "@/server/auth/guards";
 import { catalogScope, communityScope, toAccessSnapshot, type AdminAccess } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
+import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { PRODUCT_ACCENTS } from "@/server/catalog/model";
 import { listProductOptions } from "@/server/catalog/queries";
 import { countOverdueQuestions } from "@/server/community/counts";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
+import { checkLicenseNow } from "@/server/licensing/actions";
+import { isLicenseManager } from "@/server/licensing/admin-access";
+import { licenseBannerOf, type LicenseBannerModel } from "@/server/licensing/copy";
+import { getCurrentLicenseState } from "@/server/licensing/current-state";
 import { getDisabledFeatures } from "@/server/licensing/guards";
 
 export const metadata: Metadata = {
@@ -28,17 +34,19 @@ export const metadata: Metadata = {
 // persiste entre navegacoes, entao e uma leitura por carregamento completo; qualquer falha deixa a
 // moldura sem contador ou sem opcoes, nunca quebrada. O layout nao protege as paginas: layout e pagina
 // renderizam em paralelo, entao cada page.tsx chama requirePageAdmin() de novo. Usuario e papel sao
-// memoizados por requisicao (React.cache em src/server/auth/session.ts).
+// memoizados por requisicao (React.cache em src/server/auth/session.ts). A faixa da Licenca (docs/32 §2.2) vem antes
+// das telas, so no produto vendido (modo "enforce"; no "off" nada aqui le a licenca) e so quando ha o que dizer.
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
   const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
   // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
   // Os modulos desligados na licenca (docs/32 §11.8): o menu e a busca escondem as telas deles. No modo "off", nenhum.
-  const [allCounts, products, cookieStore, disabledFeatures] = await Promise.all([
+  const [allCounts, products, cookieStore, disabledFeatures, licenseBanner] = await Promise.all([
     readNavCounts(),
     readProductFilterOptions(access),
     cookies(),
-    getDisabledFeatures()
+    getDisabledFeatures(),
+    readLicenseBanner()
   ]);
   const counts = communityScope(access) === null ? allCounts : { ...allCounts, comunidade: undefined };
   const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
@@ -52,9 +60,27 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
       initialCollapsed={sidebarCollapsed}
       products={products}
     >
+      {licenseBanner ? <LicenseBanner banner={licenseBanner} canManage={isLicenseManager(access)} checkNowAction={checkLicenseNow} /> : null}
       {children}
     </AdminShellV2>
   );
+}
+
+/**
+ * A faixa da Licenca (src/server/licensing/copy.ts, licenseBannerOf): a mesma situacao do pedido que o menu ja leu
+ * (getCurrentLicenseState, uma leitura por pedido). No modo "off", nenhuma, sem ler nada. Sem leitura, nenhuma faixa:
+ * a moldura nunca quebra por causa dela.
+ */
+async function readLicenseBanner(): Promise<LicenseBannerModel | null> {
+  try {
+    return licenseBannerOf(await getCurrentLicenseState(), { configuredHost: getConfiguredSiteOrigin() });
+  } catch (error) {
+    if (!isPendingMigrationError(error)) {
+      console.error("[admin] Faixa da Licença:", error instanceof Error ? error.message : error);
+    }
+
+    return null;
+  }
 }
 
 /**

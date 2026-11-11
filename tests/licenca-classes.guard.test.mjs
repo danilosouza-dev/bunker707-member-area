@@ -180,6 +180,11 @@ test("a classificação onde o §2.2 é explícito: o que a lei e a segurança p
     ["src/server/payments/actions.ts", "disconnectSalesProvider", "dever_legal"],
     ["src/server/team/actions.ts", "removeTeamMember", "dever_legal"],
     ["src/server/webinars/room-actions.ts", "removeStudentMessages", "dever_legal"],
+    // A tela Licença (docs/32 §2.4): o caminho para sair de qualquer degrau, inclusive da Instalação nunca ativada.
+    ["src/server/licensing/actions.ts", "activateLicense", "dever_legal"],
+    ["src/server/licensing/actions.ts", "checkLicenseNow", "dever_legal"],
+    ["src/server/licensing/actions.ts", "deactivateLicense", "dever_legal"],
+    ["src/server/licensing/actions.ts", "uploadLicenseFile", "dever_legal"],
     // Atendimento: remover acesso, responder e moderar comentários, operar a live já marcada.
     ["src/server/students/actions.ts", "updateStudentAccess", "atendimento"],
     ["src/server/community/actions.ts", "replyToComment", "atendimento"],

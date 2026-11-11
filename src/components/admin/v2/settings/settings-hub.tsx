@@ -1,6 +1,7 @@
 import {
   ChevronRight,
   Clapperboard,
+  KeyRound,
   Send,
   SlidersHorizontal,
   Sparkles,
@@ -17,7 +18,8 @@ import { adminCard, adminTransition } from "../styles";
 // Hub de Configuracoes (docs/17 §1.10; prototipo aprovado, tela 14): uma lista, uma linha por
 // grupo, com o estado honesto de cada um. Equipe, Tutor IA e Vendas ja tem tela; o resto diz "Em breve"
 // e nao e clicavel (nenhuma linha leva a uma tela vazia). Cada pessoa ve so as linhas que pode usar:
-// Equipe e Vendas so o dono; Tutor IA quem tem settings.ai.
+// Equipe e Vendas so o dono; Tutor IA quem tem settings.ai. A linha Licenca (docs/32 §2.4) so existe no produto
+// vendido (modo "enforce") e so para o dono e os administradores: a pagina passa `license` so nesse caso.
 
 export type SettingsHubStatus = { label: string; tone: StatusChipTone };
 
@@ -54,9 +56,23 @@ function teamStatus(count: number | null): SettingsHubStatus | null {
 export function buildSettingsHubEntries(
   aiStatus: SettingsHubStatus | null,
   access: SettingsHubAccess = FULL_ACCESS,
-  salesStatus: SettingsHubStatus | null = null
+  salesStatus: SettingsHubStatus | null = null,
+  license: { status: SettingsHubStatus | null } | null = null
 ): SettingsHubEntry[] {
+  const licenseEntries: SettingsHubEntry[] = license
+    ? [
+        {
+          description: "A Licença desta área de membros: situação, validade, módulos, Verificar agora e ativação.",
+          href: "/admin/configuracoes/licenca",
+          icon: KeyRound,
+          id: "licenca",
+          status: license.status,
+          title: "Licença"
+        }
+      ]
+    : [];
   const entries: SettingsHubEntry[] = [
+    ...licenseEntries,
     {
       description: "Quem entra no admin e o que cada pessoa pode fazer: dono, administrador, editor, professor, suporte, analista ou personalizado.",
       href: "/admin/configuracoes/equipe",
@@ -145,13 +161,16 @@ function EntryBody({ entry }: { entry: SettingsHubEntry }) {
 export function SettingsHub({
   access,
   aiStatus,
+  license = null,
   salesStatus = null
 }: {
   access?: SettingsHubAccess;
   aiStatus: SettingsHubStatus | null;
+  /** So no produto vendido e para o dono e os administradores: a linha da tela Licenca. */
+  license?: { status: SettingsHubStatus | null } | null;
   salesStatus?: SettingsHubStatus | null;
 }) {
-  const entries = buildSettingsHubEntries(aiStatus, access, salesStatus);
+  const entries = buildSettingsHubEntries(aiStatus, access, salesStatus, license);
   const rowClass = "flex min-h-16 w-full items-center gap-4 px-4 py-3 text-left";
 
   return (

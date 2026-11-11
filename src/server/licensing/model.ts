@@ -212,7 +212,14 @@ export const licensePayloadSchema = z.object({
       renew: z.url({ protocol: /^https$/ }).optional(),
       store: z.url({ protocol: /^https$/ }).optional()
     })
-    .optional()
+    .optional(),
+  /**
+   * O numero sorteado que a Instalacao mandou no pedido (ativacao, conferencia, desativacao), devolvido assinado.
+   * A resposta so vale como conferencia boa se este campo for igual ao que a Instalacao mandou (client.ts). A licenca
+   * por arquivo nao traz o campo: vale como licenca, nunca como conferencia. Opcional e aditivo: o vetor fixo do
+   * BKL1 (tests/fixtures/licenca-vetor.json) nao muda.
+   */
+  nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/).optional()
 });
 
 export type LicensePayload = z.infer<typeof licensePayloadSchema>;

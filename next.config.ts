@@ -106,13 +106,15 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: localDevOrigins,
-  // Licenca do produto vendido (docs/32 §11.3, D9): o modo e as raizes ficam gravados no codigo gerado, servidor
-  // inclusive, para nenhuma variavel do conteiner afrouxar a licenca depois. So "enforce" exige licenca; sem a
-  // variavel no build (a nossa escola hoje, a `dev`, a Vercel e os testes) fica "off" e nada muda.
-  // Lidos em src/server/licensing/build-config.ts. Nunca NEXT_PUBLIC_: nada disto vai ao navegador.
+  // Licenca do produto vendido (docs/32 §11.3, D9): o modo, as raizes e o endereco do Emissor ficam gravados no codigo
+  // gerado, servidor inclusive, para nenhuma variavel do conteiner afrouxar a licenca nem trocar o Emissor depois. So
+  // "enforce" exige licenca; sem a variavel no build (a nossa escola hoje, a `dev`, a Vercel e os testes) fica "off" e
+  // nada muda. O endereco do Emissor so vale com https (ou http://127.0.0.1, nos testes); fora disso o cliente fica "nao
+  // configurado". Lidos em src/server/licensing/build-config.ts. Nunca NEXT_PUBLIC_: nada disto vai ao navegador.
   env: {
     BUNKER_LICENSING_MODE: process.env.BUNKER_LICENSING_MODE === "enforce" ? "enforce" : "off",
-    BUNKER_LICENSING_ROOTS: process.env.BUNKER_LICENSING_ROOTS ?? ""
+    BUNKER_LICENSING_ROOTS: process.env.BUNKER_LICENSING_ROOTS ?? "",
+    BUNKER_LICENSING_EMISSOR_URL: process.env.BUNKER_LICENSING_EMISSOR_URL ?? ""
   },
   // NEXT_OUTPUT=standalone so no build da imagem Docker (Dockerfile): gera .next/standalone com o servidor
   // e as dependencias minimas. Fora dele (Vercel, `npm run build`, testes de ponta a ponta) nada muda.

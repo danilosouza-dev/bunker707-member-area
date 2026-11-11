@@ -11,9 +11,19 @@ export type EmailOutboxStatus = (typeof EMAIL_OUTBOX_STATUSES)[number];
 /**
  * `sent_as`: a pessoa da equipe escolhida em "Quem envia" fica sabendo (docs/23, §1.6). `webinar_*`: os lembretes de
  * 24 h e 1 h da live e o aviso de live cancelada, para quem garantiu vaga (docs/30 §2.7); `webinar_recording_failed`: a
- * gravacao da Live ao vivo nao chegou na Bunny, para o apresentador (docs/30 §6.7).
+ * gravacao da Live ao vivo nao chegou na Bunny, para o apresentador (docs/30 §6.7). `license_degree`: a Licenca desta
+ * Instalacao mudou de degrau, para os donos e administradores (docs/32 §2.2; so no produto vendido, modo "enforce").
  */
-export const EMAIL_KINDS = ["welcome", "purchase", "sent_as", "webinar_reminder_24h", "webinar_reminder_1h", "webinar_cancelled", "webinar_recording_failed"] as const;
+export const EMAIL_KINDS = [
+  "welcome",
+  "purchase",
+  "sent_as",
+  "webinar_reminder_24h",
+  "webinar_reminder_1h",
+  "webinar_cancelled",
+  "webinar_recording_failed",
+  "license_degree"
+] as const;
 export type EmailKind = (typeof EMAIL_KINDS)[number];
 
 /** Depois desta quantidade de falhas passageiras a linha vira `failed` (dead-letter). */
