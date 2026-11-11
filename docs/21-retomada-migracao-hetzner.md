@@ -931,13 +931,19 @@ select table_name from information_schema.columns where table_schema = 'public'
 ```
 
 Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up --local`), com as consultas
-acima conferidas, e a integração `tests/integration/webinarios-na-tela.test.mjs` roda contra ela. **Na nuvem de teste,
-pendente**: o produtor aplica depois da revisão desta parte, antes do merge da PR. Quando aplicar, atualizar este
-parágrafo com a data. Se o arquivo mudar depois disso, ele não roda de novo na nuvem de teste: a mudança vira uma
-migração nova, e a guarda (o hash) avisa.
+acima conferidas, e a integração `tests/integration/webinarios-na-tela.test.mjs` roda contra ela. Em 11/11/2026 a
+integração cresceu para os caminhos do app (14 testes: as ações de salvar, mostrar, tirar e excluir, a imagem no bucket,
+Fixar ao enviar, a enquete fixada, a rota `screen-events` com a `webinar_screen_report`, a moderação na Live gravada) e o
+ponta a ponta da Na tela rodou contra o mesmo banco local (`docs/30` §10.2). **Na nuvem de teste, pendente**: **antes
+do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as sete
+consultas de conferência e confere a linha `202611100002` em `supabase_migrations.schema_migrations`. Quem escreveu
+esta parte não tocou na nuvem de teste: a aplicação fica com o produtor, como na §9.12. Quando aplicar, atualizar este parágrafo com a data e quem aplicou. Se o arquivo mudar depois disso, ele não roda de
+novo na nuvem de teste: a mudança vira uma migração nova, e a guarda (o hash) avisa.
 
 **Produção (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
-basta a promoção `dev` -> `main` que levar este código passar pelo `deploy-membros`.
+basta a promoção `dev` -> `main` que levar este código passar pelo `deploy-membros`. Antes de qualquer deploy na
+produção vale a regra R1 do `docs/29` (a migração no banco antes do app novo no ar), embora este desenho deixe o app de
+antes funcionando sem ela.
 
 ## 10. Producao guardada em snapshot (03/11/2026)
 

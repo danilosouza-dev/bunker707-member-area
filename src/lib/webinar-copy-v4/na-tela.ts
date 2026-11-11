@@ -7,7 +7,7 @@
 //
 // Ja existiam e continuam onde estao: "Fixar" e "Desafixar" de cada linha do chat (WEBINAR_ADMIN_COPY.console), os itens
 // de silenciar, remover e banir e o bloco "Removidos, silenciados e banidos" (WEBINAR_COPY.consoleAoVivo), e as frases
-// do aluno silenciado e removido (WEBINAR_COPY.salaAoVivo).
+// do aluno silenciado e removido (WEBINAR_COPY.aoVivo).
 
 /** "agora", "há 2 min", "há 1 h", "há 1 h 5 min": quanto tempo a coisa esta na tela (Na tela agora, Fixada agora). */
 const haTempo = (minutos: number) => {
