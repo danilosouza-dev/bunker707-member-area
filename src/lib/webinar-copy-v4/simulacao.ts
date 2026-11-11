@@ -72,7 +72,9 @@ export const SIMULACAO_COPY = {
     sessaoLive: (quando: string) => `Live de ${quando}`,
     avisoMinutoLive: "Minuto da live",
     avisoMinutoLiveDica: "Contado do Começar para todos: minuto ou minuto:segundo, como 12 ou 12:30.",
-    liveComecou: "A live já começou: os participantes simulados mudam aqui ou no console; as entradas e os avisos de venda ficam como estão até o fim."
+    liveComecou: "A live já começou: os participantes simulados mudam aqui ou no console; as entradas e os avisos de venda ficam como estão até o fim.",
+    /* A revisão v8 (achado 6): o botão do aviso de que a simulação mudou em outro lugar. */
+    recarregar: "Recarregar"
   },
   /** As recusas das Server Actions do card (simulation-actions.ts). */
   servidor: {
@@ -92,7 +94,9 @@ export const SIMULACAO_COPY = {
     plateiaFraseNaoBate: "A confirmação não bate com a frase do número novo. Marque de novo.",
     plateiaIgual: "Esse já é o número somado agora.",
     plateiaLimite: (limite: number) => `Esta sessão chegou ao limite de ${limite} mudanças dos participantes simulados.`,
-    precisaMigracaoPlateia: (migracao: string) => `Mudar os participantes simulados precisa da atualização do banco (migração ${migracao}).`
+    precisaMigracaoPlateia: (migracao: string) => `Mudar os participantes simulados precisa da atualização do banco (migração ${migracao}).`,
+    /* A revisão v8 (achado 6): o card aberto antes de uma mudança feita no console ou noutra aba. */
+    mudouEmOutroLugar: "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora."
   },
   /** O console da equipe (R7): a parte simulada separada do real, ao lado de "12 presentes · pico 14". */
   console: {

@@ -3,8 +3,9 @@
 // em portugues junto de cada campo; se a sessao mudou em relacao ao que esta gravado (o selo ou as regras, ja
 // normalizadas do mesmo jeito que o servidor grava); e a frase de §8.6 do que vai ser gravado (simulationAckFor, a
 // mesma conta do servidor). O "Comeca quando voce entra" (4e) pode usar o mesmo formulario no modelo da sessao. Na
-// Live ao vivo (adendo de 10/11/2026, R7) a frase e a da live (`live`, sem o selo). Sem React e com imports relativos:
-// tests/webinarios-simulacao-tela.test.mjs carrega direto pelo Node.
+// Live ao vivo (adendo de 10/11/2026, R7) a frase e a da live (`live`, sem o selo). A revisao v8 (achado 6): a hora da
+// decisao que o card carregou vai no salvar, e a recusa "mudou em outro lugar" leva o Recarregar. Sem React e com
+// imports relativos: tests/webinarios-simulacao-tela.test.mjs carrega direto pelo Node.
 
 import { WEBINAR_COPY } from "../../../../../../lib/webinar-copy";
 import {
@@ -213,4 +214,22 @@ export function updateSaleNotice(form: SimulationForm, key: string, patch: Parti
 /** O que a sessao mostrou, congelado no fim (simulation_summary), na frase do card. */
 export function simulationSummaryLine(summary: SessionSimulation["summary"]): string | null {
   return summary ? COPY.congelado(summary.counterMax, summary.joinsShown, summary.saleNoticesShown) : null;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * A Simulacao mudou em outro lugar (a revisao v8 de 11/11/2026, achado 6)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * A hora da decisao que o card carregou, que vai no salvar (`expectedDecidedAt`): a lida junto com as regras
+ * (loadSessionSimulations ou a volta do ultimo salvar); sem ela (os dubles antigos), a da sessao da pagina; nula, a sessao
+ * sem decisao.
+ */
+export function simulationExpectedDecidedAt(saved: { decidedAt?: string | null } | null, session: { simulationDecidedAt: string | null }): string | null {
+  return saved && saved.decidedAt !== undefined ? saved.decidedAt : (session.simulationDecidedAt ?? null);
+}
+
+/** A recusa do salvar porque a Simulacao mudou em outro lugar (o console ou outra aba): o aviso leva o Recarregar. */
+export function simulationChangedElsewhere(failure: { message: string; status: number } | null): boolean {
+  return failure?.status === 409 && failure.message === WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar;
 }

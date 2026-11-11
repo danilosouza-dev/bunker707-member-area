@@ -15,6 +15,8 @@ import { LIVE_AO_VIVO_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveAoV
 // - sem a frase confirmada, recusa (400); sem messaging.publish, recusa (403); nada gravado;
 // - depois do Encerrar live, recusa (409); o tick do resumo junta os trechos de cada regra (o maior numero que a turma
 //   viu, igual a conta do modelo com as linhas do banco) e o relatorio da live lista as mudancas.
+// - (revisao v8, achado 6) o card do editor aberto antes de uma mudanca feita no console, na espera, recebe 409 com a
+//   frase e nao grava por cima; lido de novo, grava (a escrita condicional pela hora da decisao no PostgREST de verdade).
 // Nao roda na rodada que escreveu (outras frentes usavam o mesmo banco local); quem junta roda.
 
 const db = createLocalAdminClient();
@@ -163,5 +165,39 @@ test("4. depois do Encerrar live, recusa; o resumo do fim junta os trechos de ca
   assert.ok(lines.includes(`02:00 · +300 · ${contas.produtor.nome}, pelo console`), lines.join("\n"));
   assert.ok(lines.includes(`06:00 · +0 · ${contas.produtor.nome}, pelo editor`), lines.join("\n"));
   assert.ok((page.selected.report.presence.peak?.n ?? 0) < 300, "o numero real sem a parte simulada");
+  actAs(null);
+});
+
+test("5. revisao v8, achado 6: o card do editor aberto antes da mudanca feita no console (na espera) nao grava por cima: 409 com a frase; lido de novo, grava sobre a decisao de agora", async () => {
+  await limparWebinarios(db);
+  await seedLiveAoVivoDeTeste(db, { status: "scheduled" });
+  actAs(produtor);
+  const ler = async () => {
+    const lido = await simulationActions.loadSessionSimulations({ webinarId: AO_VIVO.id });
+    assert.equal(lido.ok, true, JSON.stringify(lido));
+    return lido.data.simulations.find((item) => item.sessionId === AO_VIVO.sessaoId);
+  };
+  const carregado = await ler();
+  assert.equal(carregado.decidedAt, null);
+
+  // No console, antes do Começar para todos: +200 (a regra da sessao passa a ser a nova).
+  const doConsole = await simulationActions.saveSimulatedAudience({ ackText: frase(200), acknowledged: true, extra: 200, sessionId: AO_VIVO.sessaoId });
+  assert.equal(doConsole.ok, true, JSON.stringify(doConsole));
+
+  // O card aberto antes salva o numero dele: recusado, o +200 fica.
+  const regras = { countRule: { base: 40, jitter: 0, mode: "fixed", peak: 40 }, joins: { enabled: false, everySeconds: 60, max: 30, names: "generic" }, saleNotices: { enabled: false, items: [] }, showLiveBadge: false };
+  const fraseDoCard = () => simulationModel.simulationAckFor({ live: true, nowMs: Date.now(), responsible: contas.produtor.nome, rules: simulationModel.normalizeSimulationRules(regras) });
+  const recusado = await simulationActions.saveSessionSimulation({ ...regras, ackText: fraseDoCard(), acknowledged: true, expectedDecidedAt: carregado.decidedAt, sessionId: AO_VIVO.sessaoId });
+  assert.deepEqual([recusado.status, recusado.error], [409, WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar]);
+  const sessao = unwrap(await db.from("webinar_sessions").select("simulated_count_rule").eq("id", AO_VIVO.sessaoId).single(), "Lendo a sessao");
+  assert.equal(sessao.simulated_count_rule.base, 200, "o +200 do console fica");
+
+  // Lido de novo (o Recarregar): a hora como o banco devolve vai de volta, e a escrita condicional do PostgREST passa.
+  const recarregado = await ler();
+  assert.ok(recarregado.decidedAt);
+  const salvo = await simulationActions.saveSessionSimulation({ ...regras, ackText: fraseDoCard(), acknowledged: true, expectedDecidedAt: recarregado.decidedAt, sessionId: AO_VIVO.sessaoId });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+  const depois = unwrap(await db.from("webinar_sessions").select("simulated_count_rule").eq("id", AO_VIVO.sessaoId).single(), "Lendo a sessao");
+  assert.equal(depois.simulated_count_rule.base, 40);
   actAs(null);
 });

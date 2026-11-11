@@ -334,3 +334,65 @@ test("R7: banco sem a 202611100002 (o check antigo da live): 409 com a frase da 
   assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null);
   assert.equal(auditorias(db).length, 0);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * A revisao v8 (11/11/2026, achado 6): o card aberto antes de uma mudanca feita no console
+ * ---------------------------------------------------------------------------------------------- */
+
+test("revisao v8, achado 6: o card que carregou antes da mudanca feita no console nunca grava o numero antigo por cima (409 com a frase); com a decisao de agora, grava", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
+  // O editor abre o card: a sessao agendada, sem decisao.
+  const carregado = ok(await actions.loadSessionSimulations({ webinarId: WEBINAR })).simulations.find((item) => item.sessionId === SESSION);
+  assert.equal(carregado.decidedAt, null, "o card leva a hora da decisao lida com as regras");
+
+  // No console, antes do comeco, a equipe soma +200 (a regra da sessao passa a ser a nova).
+  const semNada = { badgeOn: false, joinsSimulated: false, saleNoticesSimulated: false };
+  const doConsole = model.simulationAudienceAckFor({ extra: 200, flags: semNada, nowMs: Date.now(), responsible: "Produtora de Teste" });
+  ok(await actions.saveSimulatedAudience({ ackText: doConsole, acknowledged: true, extra: 200, sessionId: SESSION }));
+  const decididaNoConsole = linha(db).simulation_decided_at;
+  assert.deepEqual(linha(db).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 });
+
+  // O card aberto antes salva o que ele tinha (o numero de antes): recusado, e nada muda.
+  const antigo = { countRule: { base: 40, jitter: 0, mode: "fixed", peak: 40 }, joins: entradas, saleNotices: avisos, showLiveBadge: false };
+  const recusado = await actions.saveSessionSimulation({ ...antigo, ackText: fraseDeHoje(antigo), acknowledged: true, expectedDecidedAt: carregado.decidedAt, sessionId: SESSION });
+  assert.deepEqual([recusado.ok, recusado.status, recusado.error], [false, 409, "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora."]);
+  assert.equal(WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar, recusado.error);
+  assert.deepEqual(linha(db).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 }, "o +200 do console fica");
+  assert.equal(linha(db).simulation_decided_at, decididaNoConsole);
+  assert.equal(auditorias(db).length, 0);
+
+  // Depois do Recarregar: o card le de novo (com a decisao do console) e grava.
+  const recarregado = ok(await actions.loadSessionSimulations({ webinarId: WEBINAR })).simulations.find((item) => item.sessionId === SESSION);
+  assert.ok(recarregado.decidedAt && Date.parse(recarregado.decidedAt) === Date.parse(decididaNoConsole));
+  assert.deepEqual(recarregado.countRule, { base: 200, jitter: 0, mode: "fixed", peak: 200 }, "o numero de agora");
+  const salvo = ok(await actions.saveSessionSimulation({ ...antigo, ackText: fraseDeHoje(antigo), acknowledged: true, expectedDecidedAt: recarregado.decidedAt, sessionId: SESSION }));
+  assert.deepEqual(linha(db).simulated_count_rule, { base: 40, jitter: 0, mode: "fixed", peak: 40 });
+  assert.ok(salvo.simulation.decidedAt && Date.parse(salvo.simulation.decidedAt) === Date.parse(linha(db).simulation_decided_at), "a volta do salvar leva a decisao nova");
+
+  // A pagina de antes (sem expectedDecidedAt) segue gravando como sempre.
+  ok(await actions.saveSessionSimulation({ sessionId: SESSION }));
+  assert.equal(linha(db).simulated_count_rule, null);
+});
+
+test("revisao v8, achado 6: a mudanca gravada entre a leitura e a escrita do salvar tambem e recusada (a escrita so passa sobre a decisao lida)", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
+  // O console grava logo depois que o salvar leu a sessao, antes da escrita dele.
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    const chain = from(name);
+    if (name === "webinar_sessions") {
+      const update = chain.update;
+      chain.update = (payload) => {
+        if ("simulated_joins" in payload) {
+          Object.assign(linha(db), { simulated_count_rule: { base: 300, jitter: 0, mode: "fixed", peak: 300 }, simulation_decided_at: new Date().toISOString() });
+        }
+        return update(payload);
+      };
+    }
+    return chain;
+  };
+  const recusado = await actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, expectedDecidedAt: null, sessionId: SESSION });
+  assert.deepEqual([recusado.status, recusado.error], [409, WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar]);
+  assert.deepEqual(linha(db).simulated_count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 }, "o que o console gravou fica");
+  assert.equal(auditorias(db).length, 0);
+});

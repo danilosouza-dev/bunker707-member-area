@@ -25,6 +25,10 @@
 // da Simulacao, e a sala chega no numero em 90 s) e depois a decisao na sessao (quem, quando e a frase), que muda o
 // carimbo que a sala ja le na consulta de 5 s. Banco sem a 202611110002: 409 com a frase dela, antes de gravar.
 // loadSessionSimulations leva tambem a vista do controle de cada sessao (o numero de agora e as mudancas com o nome).
+// Correcao da revisao v8 (11/11/2026, achado 6): a vista leva a hora da decisao lida com as regras (`decidedAt`), o card
+// a manda de volta (`expectedDecidedAt`) e o saveSessionSimulation recusa com 409 ("A simulação desta sessão mudou em
+// outro lugar...") quando a sessao ja tem outra decisao, conferida na leitura e de novo na escrita (condicional): o card
+// aberto antes de uma mudanca feita no console nunca grava o numero antigo por cima.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -33,6 +37,7 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
+import { isSameVersion } from "@/server/communications/campaign-model";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
 import { WEBINARS_AUDIENCE_MIGRATION, WEBINARS_OFFERS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb } from "./db";
@@ -58,6 +63,7 @@ import {
 import { SIMULATION_MESSAGES, saveSessionSimulationSchema, saveSimulatedAudienceSchema, simulationNeedsAck } from "./simulation-schemas";
 import {
   LiveSimulationPendingError,
+  SimulationChangedError,
   fetchSessionSimulation,
   insertSimulationChange,
   listSessionSimulations,
@@ -78,7 +84,14 @@ const webinarIdSchema = z.object({ webinarId: z.uuid({ error: SIMULATION_MESSAGE
  * As regras de uma sessao como o card recebe (sem a semente: so o servidor calcula com ela; sem as mudancas cruas), com
  * a vista do controle dos participantes simulados (D79: o numero de agora e as mudancas com o nome).
  */
-export type SessionSimulationView = Omit<SessionSimulation, "countChanges" | "seed"> & { audience?: SimulationAudienceView };
+export type SessionSimulationView = Omit<SessionSimulation, "countChanges" | "seed"> & {
+  audience?: SimulationAudienceView;
+  /**
+   * A hora da decisao gravada junto com estas regras (nula: sem decisao). O card manda de volta ao salvar, e o servidor
+   * recusa com 409 quando a sessao ja tem outra (a revisao v8, achado 6). Ausente nos dubles antigos.
+   */
+  decidedAt?: string | null;
+};
 
 export type SessionSimulationsData = { migration: string; pendingMigration: true } | { pendingMigration: false; simulations: SessionSimulationView[] };
 
@@ -90,8 +103,16 @@ export type SaveSimulatedAudienceInput = z.input<typeof saveSimulatedAudienceSch
 
 export type SavedSimulatedAudience = { audience: SimulationAudienceView; deciderName: string; session: WebinarSession };
 
-function viewOf(simulation: SessionSimulation, audience?: SimulationAudienceView): SessionSimulationView {
-  return { audience, countRule: simulation.countRule, joins: simulation.joins, saleNotices: simulation.saleNotices, sessionId: simulation.sessionId, summary: simulation.summary };
+function viewOf(simulation: SessionSimulation, decidedAt: string | null, audience?: SimulationAudienceView): SessionSimulationView {
+  return { audience, countRule: simulation.countRule, decidedAt, joins: simulation.joins, saleNotices: simulation.saleNotices, sessionId: simulation.sessionId, summary: simulation.summary };
+}
+
+/** A mesma decisao: as duas sem decisao, ou a mesma hora (o PostgREST escreve "+00:00", o toISOString "Z"). */
+function sameDecision(current: string | null, expected: string | null): boolean {
+  if (current === null || expected === null) {
+    return current === expected;
+  }
+  return isSameVersion(current, expected);
 }
 
 /** A vista do controle de uma sessao agora (o relogio da Simulacao dela). */
@@ -152,7 +173,11 @@ export async function loadSessionSimulations(input: { webinarId: string }): Prom
         pendingMigration: false as const,
         simulations: simulations.map((simulation) => {
           const row = rows.get(simulation.sessionId);
-          return viewOf(simulation, row ? audienceViewOf({ names, nowMs, pendingMigration: changes.pending, records: changes.records, row, simulation }) : undefined);
+          return viewOf(
+            simulation,
+            row?.simulation_decided_at ?? null,
+            row ? audienceViewOf({ names, nowMs, pendingMigration: changes.pending, records: changes.records, row, simulation }) : undefined
+          );
         })
       };
     } catch (error) {
@@ -201,6 +226,11 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     if (live && data.showLiveBadge) {
       throw new WebinarFieldError("showLiveBadge", COPY.servidor.liveSemSelo);
     }
+    // O card aberto antes de uma mudanca feita no console (ou noutra aba) nunca grava por cima dela (achado 6).
+    const decidedNow = row.simulation_decided_at ?? null;
+    if (data.expectedDecidedAt !== undefined && !sameDecision(decidedNow, data.expectedDecidedAt)) {
+      throw new WebinarError(COPY.servidor.mudouEmOutroLugar, 409);
+    }
 
     const webinar = await requireWebinarRow(db, row.webinar_id);
     const rules = normalizeSimulationRules({ countRule: data.countRule, joins: data.joins, saleNotices: data.saleNotices, showLiveBadge: data.showLiveBadge });
@@ -221,12 +251,17 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
         countRule: rules.countRule,
         decidedAt: now.toISOString(),
         decidedBy: user.id,
+        // A decisao lida agora (o valor do banco, byte a byte): a escrita so passa se ninguem gravou no meio.
+        expectedDecidedAt: data.expectedDecidedAt !== undefined ? decidedNow : undefined,
         joins: rules.joins,
         saleNotices: rules.saleNotices,
         sessionId: row.id,
         showLiveBadge: rules.showLiveBadge
       });
     } catch (error) {
+      if (error instanceof SimulationChangedError) {
+        throw new WebinarError(COPY.servidor.mudouEmOutroLugar, 409);
+      }
       if (isMissingSimulation(error)) {
         throw new WebinarError(COPY.servidor.precisaMigracao(WEBINARS_OFFERS_MIGRATION), 409);
       }
@@ -269,7 +304,7 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     revalidatePath(`${LIST_PATH}/${webinar.id}`);
     invalidateWebinars({ from: "action" });
 
-    return { deciderName: responsible, session: sessionFromRow(updated), simulation: viewOf(saved) };
+    return { deciderName: responsible, session: sessionFromRow(updated), simulation: viewOf(saved, updated.simulation_decided_at ?? null) };
   });
 }
 

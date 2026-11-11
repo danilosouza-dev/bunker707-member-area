@@ -9,7 +9,8 @@ import "./support/transpile-tsx.mjs";
 // sem a 202610300003 (o aviso da migracao e o selo da fase 2) e o card lendo as regras; o formulario puro (erros em
 // portugues, minutos dos avisos, mudanca, limite de 50); e a sala: o contador somado ao real no cabecalho, a entrada
 // "Ana M. entrou" no chat por 8 s, o aviso de venda num toast de 4 s (no topo na sala vertical), o leitor de tela no
-// maximo um aviso por minuto, prefers-reduced-motion sem deslizar e, sem regra ligada, tudo como hoje.
+// maximo um aviso por minuto, prefers-reduced-motion sem deslizar e, sem regra ligada, tudo como hoje. Revisao v8
+// (achado 6): o salvar leva a hora da decisao que o card carregou, e a recusa "mudou em outro lugar" mostra o Recarregar.
 
 const fail = `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });`;
 const STUBS = {
@@ -30,7 +31,7 @@ registerHooks({
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { SimulationCard } = await import("../src/components/admin/v2/communication/webinars/simulation-card.tsx");
+const { SimulationCard, SimulationFailureBanner } = await import("../src/components/admin/v2/communication/webinars/simulation-card.tsx");
 const { SimulationSessionRow } = await import("../src/components/admin/v2/communication/webinars/simulation/simulation-session-row.tsx");
 const form = await import("../src/components/admin/v2/communication/webinars/simulation/simulation-card-model.ts");
 const roomSimulation = await import("../src/components/member/webinars/room/room-simulation.tsx");
@@ -438,4 +439,31 @@ test("R7 sala ao vivo: o selo de quem assiste soma a parte simulada no relogio d
   assert.match(source, /topLeftExtra=\{blocked \? null : <RoomSimulationSales layout="cell" offsetMs=\{simulationOffsetMs\}/);
   assert.match(source, /\|\| \(!blocked && simulation\.enabled\) \? \(\s*<RoomScreenLayer/);
   assert.doesNotMatch(source, /<RoomSimulationSales layout="stage"/, "nunca solta por cima das fixadas");
+});
+
+test("revisao v8, achado 6: o salvar leva a hora da decisao que o card carregou; a recusa \"mudou em outro lugar\" mostra a frase com o Recarregar (as outras falhas, o Fechar)", async () => {
+  // A hora que vai no salvar: a lida junto com as regras; sem ela (os dubles antigos), a da sessao; nula sem decisao.
+  assert.equal(form.simulationExpectedDecidedAt({ decidedAt: "2026-11-05T20:00:00.000Z" }, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), "2026-11-05T20:00:00.000Z");
+  assert.equal(form.simulationExpectedDecidedAt({ decidedAt: null }, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), null, "as regras lidas sem decisao valem mais que a pagina");
+  assert.equal(form.simulationExpectedDecidedAt({}, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), "2026-11-01T10:00:00.000Z");
+  assert.equal(form.simulationExpectedDecidedAt(null, { simulationDecidedAt: null }), null);
+
+  const frase = WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar;
+  assert.equal(frase, "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora.");
+  assert.equal(form.simulationChangedElsewhere({ message: frase, status: 409 }), true);
+  assert.equal(form.simulationChangedElsewhere({ message: WEBINAR_COPY.simulacao.servidor.comecou, status: 409 }), false, "o 409 da sessao que comecou nao recarrega");
+  assert.equal(form.simulationChangedElsewhere(null), false);
+
+  const mudou = html(createElement(SimulationFailureBanner, { failure: { message: frase, status: 409 }, onClose: () => undefined, onReload: () => undefined }));
+  assert.match(textOf(mudou), /A simulação desta sessão mudou em outro lugar\. Recarregue para ver o número de agora\./);
+  assert.match(mudou, /<button[^>]*data-simulation-reload=""[^>]*>Recarregar<\/button>/);
+  assert.doesNotMatch(textOf(mudou), /Fechar/);
+  const outra = html(createElement(SimulationFailureBanner, { failure: { message: "Falhou.", status: 500 }, onClose: () => undefined, onReload: () => undefined }));
+  assert.match(textOf(outra), /Falhou\. Fechar/);
+  assert.doesNotMatch(outra, /data-simulation-reload/);
+
+  // A linha manda a hora no salvar (o fonte: o pedido leva expectedDecidedAt pelo ajudante do modelo).
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/webinars/simulation/simulation-session-row.tsx", import.meta.url), "utf8");
+  assert.match(source, /expectedDecidedAt: simulationExpectedDecidedAt\(saved, session\)/);
 });

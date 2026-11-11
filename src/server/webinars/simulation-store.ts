@@ -9,7 +9,10 @@
 // momento (D79 e D80; 202611110002): cada mudanca e uma linha de webinar_simulation_changes (so acrescenta; a regra, o
 // offset em que vale, a frase confirmada, quem e de onde), e a leitura da Simulacao traz as que valem no ar em
 // `countChanges`. Banco sem a tabela: a leitura das mudancas devolve vazio (a Simulacao segue como antes) e so a escrita
-// vira PendingMigrationError (409 com a frase da 202611110002 em quem chama).
+// vira PendingMigrationError (409 com a frase da 202611110002 em quem chama). Correcoes da revisao v8 (11/11/2026): a
+// janela da sala le a decisao, a situacao e o fim da linha de agora junto com as regras (fetchSessionSimulationFeed;
+// achado 1), e o card do editor so grava por cima da decisao que carregou (expectedDecidedAt, SimulationChangedError;
+// achado 6).
 
 import "server-only";
 
@@ -187,11 +190,24 @@ export type SessionSimulationSave = {
   countRule: SimulatedCountRule;
   decidedAt: string;
   decidedBy: string;
+  /**
+   * A decisao que estava gravada quando quem salva leu a sessao (nula: sem decisao). Com ela, a escrita so passa se a
+   * sessao ainda tem essa decisao; senao, SimulationChangedError (a revisao v8, achado 6). Ausente, grava sempre.
+   */
+  expectedDecidedAt?: string | null;
   joins: SimulatedJoins;
   saleNotices: SimulatedSaleNotices;
   sessionId: string;
   showLiveBadge: boolean;
 };
+
+/** A Simulacao da sessao mudou entre a leitura e a escrita (o console ou outra aba gravou antes). */
+export class SimulationChangedError extends Error {
+  constructor() {
+    super("Webinarios: a simulacao da sessao mudou em outro lugar");
+    this.name = "SimulationChangedError";
+  }
+}
 
 /**
  * Grava a Simulacao da sessao gravada (ou da Live ao vivo, R7) de uma vez: o selo, as regras da fase 4 e a decisao
@@ -200,7 +216,7 @@ export type SessionSimulationSave = {
  * simulation-schemas.ts) e o selo da live. Banco sem a 202611100002: a live vira LiveSimulationPendingError.
  */
 export async function saveSessionSimulationRows(db: WebinarsDb, input: SessionSimulationSave): Promise<SessionSimulation> {
-  const { data, error } = await db
+  let query = db
     .from("webinar_sessions")
     .update({
       ...simulationRulesToRow(input),
@@ -210,14 +226,21 @@ export async function saveSessionSimulationRows(db: WebinarsDb, input: SessionSi
       simulation_decided_by: input.decidedBy
     })
     .eq("id", input.sessionId)
-    .in("kind", [...SIMULATION_KINDS])
-    .select(SESSION_SIMULATION_COLUMNS);
+    .in("kind", [...SIMULATION_KINDS]);
+  // So por cima da decisao que quem salva leu (a escrita condicional fecha a corrida entre a leitura e a gravacao).
+  if (input.expectedDecidedAt !== undefined) {
+    query = input.expectedDecidedAt === null ? query.is("simulation_decided_at", null) : query.eq("simulation_decided_at", input.expectedDecidedAt);
+  }
+  const { data, error } = await query.select(SESSION_SIMULATION_COLUMNS);
   if (isOldLiveSimulationCheck(error)) {
     throw new LiveSimulationPendingError();
   }
   assertNoDbError(error, "Webinarios: gravar simulacao");
   const row = ((data ?? []) as SessionSimulationRow[])[0];
   if (!row) {
+    if (input.expectedDecidedAt !== undefined) {
+      throw new SimulationChangedError();
+    }
     throw new WebinarError(NOT_SIMULATED_MESSAGE, 409);
   }
   return sessionSimulationFromRow(row);

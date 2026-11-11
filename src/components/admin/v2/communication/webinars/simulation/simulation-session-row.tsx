@@ -20,6 +20,7 @@ import {
   simulationFormChanged,
   simulationFormOf,
   simulationFormSentence,
+  simulationExpectedDecidedAt,
   simulationRulesOfForm,
   simulationSummaryLine,
   type SimulationForm
@@ -38,7 +39,8 @@ import { SimulationRulesFields } from "./simulation-rules-fields";
 // Com a sessao ja comecada (e de pe), o bloco do contador da lugar ao controle "Participantes simulados" (o mesmo do
 // console; saveSimulatedAudience com a origem "editor"), e so as entradas e os avisos de venda ficam travados. Cada
 // sessao tem o atalho "Mudar no console" (o console daquela sessao), e a live sem decisao diz que nada simulado aparece
-// nela (a live nao tem o selo da gravada).
+// nela (a live nao tem o selo da gravada). A revisao v8 (achado 6): o salvar manda a hora da decisao que o formulario
+// carregou, e o servidor recusa ("A simulação desta sessão mudou em outro lugar...") quando o console gravou outra.
 
 const COPY = WEBINAR_COPY.simulacao.card;
 const ADMIN = WEBINAR_ADMIN_COPY.simulation;
@@ -143,6 +145,8 @@ export function SimulationSessionRow({
         ackText: sentence,
         acknowledged: true,
         countRule: rules.countRule,
+        // A decisao que este formulario carregou: o servidor recusa se o console (ou outra aba) gravou outra depois.
+        expectedDecidedAt: simulationExpectedDecidedAt(saved, session),
         joins: rules.joins,
         saleNotices: rules.saleNotices,
         sessionId: session.id,

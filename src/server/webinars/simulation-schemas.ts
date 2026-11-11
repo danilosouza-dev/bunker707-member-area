@@ -65,6 +65,12 @@ export const saveSessionSimulationSchema = simulationRulesSchema
   .extend({
     ackText: z.string().trim().max(CHAT_LIMITS.simulationAck).optional(),
     acknowledged: z.boolean().default(false),
+    /**
+     * A hora da decisao que o card carregou (nula: a sessao sem decisao). Diferente da gravada agora, a Simulacao mudou
+     * em outro lugar (o console ou outra aba) e o salvar volta 409 (a revisao v8, achado 6). Ausente (a pagina de
+     * antes), sem a conferencia.
+     */
+    expectedDecidedAt: z.iso.datetime({ offset: true }).nullable().optional(),
     sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid })
   })
   .superRefine((input, context) => {
