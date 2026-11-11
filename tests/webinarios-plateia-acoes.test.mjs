@@ -11,7 +11,8 @@ import { ENDED_SESSION, LIVE_SESSION, MIN, REPLAY, SESSION, WEBINAR, bancoDaSimu
 // contador fica com "Real + 0"; a janela da Simulacao devolve o numero novo depois da rampa; antes do comeco a linha fica
 // sem offset e a regra da sessao muda; o Tirar grava a frase do +0 sem caixa; o mesmo numero, a encerrada, o Replay,
 // quem nao publica e o banco sem a tabela recusam sem gravar; o teto de 200 mudancas; a leitura do card com a vista do
-// controle; e o resumo do fim (o tick) que junta os trechos.
+// controle; o resumo do fim (o tick) que junta os trechos; e as mudancas lidas todas, em paginas, alem do teto de 1.000
+// linhas do PostgREST (a revisao v8, achado 8).
 
 const estado = (globalThis.__plateiaAcoes ??= { revalidados: [], semPublicar: false });
 const PRODUTORA = "00000000-0000-4000-8000-0000000000f1";
@@ -285,4 +286,45 @@ test("o resumo do fim (o tick) junta os trechos de cada regra: o maior numero qu
   ).counterMax;
   assert.equal(resumo.counter_max, esperado);
   assert.ok(resumo.counter_max > 300 && resumo.counter_max < 1000, `o trecho curto conta so o que a turma viu (${resumo.counter_max})`);
+});
+
+/** O teto do PostgREST (max_rows = 1000 em supabase/config.toml) nas leituras das mudancas: a resposta corta, sem erro. */
+function comTetoDoPostgrest(db) {
+  const from = db.from.bind(db);
+  db.from = (name) => {
+    const chain = from(name);
+    if (name === "webinar_simulation_changes") {
+      const then = chain.then;
+      chain.then = (resolve, reject) => then((result) => resolve(Array.isArray(result.data) ? { ...result, data: result.data.slice(0, 1000) } : result), reject);
+    }
+    return chain;
+  };
+  return db;
+}
+
+test("revisao v8, achado 8: as mudancas de varias sessoes passam das 1.000 linhas do PostgREST e vem todas, na ordem; a sessao das mais novas nao perde as dela (o tick e o card leem assim)", async () => {
+  const tabelas = escolaAoVivo();
+  // Seis sessoes com o teto de 200 mudancas cada: 1.200 linhas; as 200 mais novas sao da ultima sessao.
+  const sessoes = Array.from({ length: 6 }, (_, index) => `eeeeeeee-3333-4000-8000-${String(index).padStart(12, "0")}`);
+  const inicio = Date.now() - 6 * 3_600_000;
+  tabelas.webinar_simulation_changes = sessoes.flatMap((sessionId, sessao) =>
+    Array.from({ length: SIMULATION_LIMITS.countChangesMax }, (_, index) => ({
+      ack_text: "x",
+      at_offset_ms: index * 1000,
+      changed_by: PRODUTORA,
+      count_rule: { base: sessao * 1000 + index, jitter: 0, mode: "fixed", peak: sessao * 1000 + index },
+      created_at: new Date(inicio + (sessao * SIMULATION_LIMITS.countChangesMax + index) * 1000).toISOString(),
+      id: `m-${sessao}-${String(index).padStart(3, "0")}`,
+      session_id: sessionId,
+      source: "console"
+    }))
+  );
+  const db = comTetoDoPostgrest(bancoDaSimulacao({ tables: tabelas }));
+  const todas = await store.listSimulationChanges(db, sessoes);
+  assert.equal(todas.length, 6 * SIMULATION_LIMITS.countChangesMax, "todas, alem das 1.000 primeiras");
+  assert.ok(todas.every((record, index) => index === 0 || Date.parse(todas[index - 1].changedAt) <= Date.parse(record.changedAt)), "da mais antiga para a mais nova");
+  assert.equal(new Set(todas.map((record) => record.id)).size, todas.length, "nenhuma repetida entre as paginas");
+  const daUltima = store.withCountChanges({ sessionId: sessoes[5] }, todas).countChanges;
+  assert.equal(daUltima.length, SIMULATION_LIMITS.countChangesMax);
+  assert.deepEqual(daUltima.at(-1).rule, { base: 5199, jitter: 0, mode: "fixed", peak: 5199 }, "a mudanca que vale agora na ultima sessao");
 });

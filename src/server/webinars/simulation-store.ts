@@ -11,8 +11,8 @@
 // `countChanges`. Banco sem a tabela: a leitura das mudancas devolve vazio (a Simulacao segue como antes) e so a escrita
 // vira PendingMigrationError (409 com a frase da 202611110002 em quem chama). Correcoes da revisao v8 (11/11/2026): a
 // janela da sala le a decisao, a situacao e o fim da linha de agora junto com as regras (fetchSessionSimulationFeed;
-// achado 1), e o card do editor so grava por cima da decisao que carregou (expectedDecidedAt, SimulationChangedError;
-// achado 6).
+// achado 1), o card do editor so grava por cima da decisao que carregou (expectedDecidedAt, SimulationChangedError;
+// achado 6) e as mudancas sao lidas em paginas, todas (listSimulationChanges; achado 8).
 
 import "server-only";
 
@@ -31,6 +31,7 @@ import {
   type SessionSimulationRow
 } from "./rows";
 import { SIMULATION_CHANGE_COLUMNS, countChangesOf, simulationChangeFromRow, simulationChangeToRow, type SimulationChangeRow } from "./simulation-change-rows";
+import { fetchAll } from "./store";
 
 const NOT_SIMULATED_MESSAGE = "Só a sessão da Live gravada e a da Live ao vivo têm Simulação.";
 
@@ -101,15 +102,29 @@ export function withCountChanges(simulation: SessionSimulation, records: readonl
   return { ...simulation, countChanges: countChangesOf(records.filter((record) => record.sessionId === simulation.sessionId)) };
 }
 
-/** As mudancas das sessoes, na ordem em que foram gravadas (a mais antiga primeiro). Sem a tabela, PendingMigrationError. */
+/**
+ * As mudancas das sessoes, na ordem em que foram gravadas (a mais antiga primeiro), todas: em paginas de 1.000 numa
+ * ordem total (created_at e id), porque o PostgREST corta a resposta em 1.000 linhas sem erro e o tick (ate 50 sessoes)
+ * e o card (todas as sessoes do webinario) perderiam as mais novas, as que valem agora (a revisao v8, achado 8). Sem a
+ * tabela, PendingMigrationError.
+ */
 export async function listSimulationChanges(db: WebinarsDb, sessionIds: readonly string[]): Promise<SimulationChangeRecord[]> {
   const ids = [...new Set(sessionIds)];
   if (ids.length === 0) {
     return [];
   }
-  const { data, error } = await db.from("webinar_simulation_changes").select(SIMULATION_CHANGE_COLUMNS).in("session_id", ids).order("created_at", { ascending: true });
-  assertNoDbError(error, "Webinarios: ler mudancas dos participantes simulados");
-  return ((data ?? []) as SimulationChangeRow[]).map(simulationChangeFromRow);
+  const rows = await fetchAll<SimulationChangeRow>(
+    (from, to) =>
+      db
+        .from("webinar_simulation_changes")
+        .select(SIMULATION_CHANGE_COLUMNS)
+        .in("session_id", ids)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    "Webinarios: ler mudancas dos participantes simulados"
+  );
+  return rows.map(simulationChangeFromRow);
 }
 
 /** As mudancas para a conta e para a tela: sem a tabela (banco sem a 202611110002), nenhuma, e a Simulacao segue. */
