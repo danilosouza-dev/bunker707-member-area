@@ -8,9 +8,10 @@ import type { RoomMessage } from "@/lib/webinar-room-client";
 import type { StudentPoll } from "../room-api";
 import { RoomChatComment, roomCommentTime, type RoomChatTiming } from "../room-chat";
 import { pinnedClampHint, pinnedPillText } from "../room-layout-model";
-import { RoomPill } from "../room-pill";
+import { ROOM_TOUCH_44, RoomPill } from "../room-pill";
 import { RoomPollCard, type PollAnswerHandler } from "../room-polls";
 import { ROOM_FOCUS } from "../room-ui";
+import { SCREEN_WIDE_ONLY } from "./room-screen-model";
 
 // As fixadas na sala do aluno (Na tela, R1 e R2; especificacao de 10/11/2026, §3.1 e §3.6), na Live ao vivo e na
 // gravada, na espera e no ar (nunca no Replay, com a sessao encerrada nem para quem foi removido; pinnedShownIn):
@@ -211,15 +212,20 @@ export type RoomPinnedShortcutsProps = {
   poll: StudentPoll | null;
 };
 
-/** A pilula sobre o video: as cores sobre o video da sala (o selo de quem apresenta), 32 px, o texto numa linha. */
+/**
+ * A pilula sobre o video: as cores sobre o video da sala (o selo de quem apresenta), 32 px, o texto numa linha, com a
+ * area de toque de 44 px abaixo de lg (ROOM_TOUCH_44; as duas ficam a 12 px, para as areas nao se cobrirem).
+ */
 const PILL = cn(
   "pointer-events-auto inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-room-on-video-bg px-3 text-xs font-semibold text-room-on-video-fg shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:opacity-90 [&_svg]:size-3.5 [&_svg]:shrink-0",
+  ROOM_TOUCH_44,
   ROOM_FOCUS
 );
 
 /**
  * As pilulas das fixadas no palco com o painel fechado: o bloco que a camada da Na tela poe primeiro na celula de cima a
- * esquerda (abaixo dos selos); so aparece com 640 px ou mais de palco (a camada e o recipiente `@container/tela`).
+ * esquerda (abaixo dos selos); so aparece com 640 px ou mais de palco (a camada e o recipiente `@container/tela`) e a
+ * tela com mais de 500 px de altura (SCREEN_WIDE_ONLY: no celular deitado, as linhas da faixa).
  */
 export function RoomPinnedPills({ message, onMessage, onPoll, poll }: RoomPinnedShortcutsProps) {
   if (!message && !poll) {
@@ -227,7 +233,7 @@ export function RoomPinnedPills({ message, onMessage, onPoll, poll }: RoomPinned
   }
   const copy = WEBINAR_COPY.naTela.aluno;
   return (
-    <div className="hidden max-w-[min(380px,100%)] shrink-0 flex-col items-start gap-1.5 @min-[640px]/tela:flex" data-room-pinned-pills="">
+    <div className={cn("max-w-[min(380px,100%)] shrink-0 flex-col items-start gap-3", SCREEN_WIDE_ONLY)} data-room-pinned-pills="">
       {message ? (
         <button className={PILL} data-room-pinned-pill="message" onClick={onMessage} type="button">
           <Pin aria-hidden="true" strokeWidth={2} />

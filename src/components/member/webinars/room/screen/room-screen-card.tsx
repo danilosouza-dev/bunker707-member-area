@@ -7,7 +7,7 @@ import { linkDomain } from "@/lib/webinar-links";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { QR_MARGIN_MODULES, qrModules, qrSidePx, type ScreenEventForm, type ScreenEventTarget, type ScreenSize, type StudentScreenItem } from "@/server/webinars/screen-model";
-import { roomPillClassName } from "../room-pill";
+import { ROOM_TOUCH_44, roomPillClassName } from "../room-pill";
 import { ROOM_FOCUS, RoomIconButton } from "../room-ui";
 import { SCREEN_BANNER_WIDTH, screenBannerAction, screenImageSrc, screenLinkOf, screenSectionName } from "./room-screen-model";
 import { useScreenShownRef, type ScreenWatch } from "./use-room-screen";
@@ -20,10 +20,11 @@ import { useScreenShownRef, type ScreenWatch } from "./use-room-screen";
 // "QR Code do link {domínio}") e o X (alvo de 44 px, fora do link; "Fechar o banner" / "Fechar o QR Code"). Sem poder
 // fechar, nada de X: o leitor de tela ouve "Este banner sai quando a equipe tirar.".
 // O cartao: a superficie sobre o video da sala (--room-on-video-*, raio 16), a largura do banner pelo tamanho (clamp em
-// cqw da camada, nunca mais de 40 % do palco), a imagem inteira (object-contain, com width e height) e o texto em ate 3
-// linhas; o botao e uma pilula (roomPillClassName num <a>); sem texto do botao, o banner inteiro e o link; sem link, e
-// so um aviso. O QR Code tem o lado do tamanho (128 / 176 / 232, nunca menos de 3 px por modulo: qrSidePx) e, abaixo, a
-// legenda e sempre o link de texto "Abrir o link". Altura no maximo a area livre: o resto rola por dentro. Entrada com
+// cqw da camada, nunca mais de 40 % do palco nem mais que a celula), a imagem inteira (object-contain, com width e
+// height) e o texto em ate 3 linhas; o botao e uma pilula (roomPillClassName num <a>, com a area de toque de 44 px
+// abaixo de lg); sem texto do botao, o banner inteiro e o link; sem link, e so um aviso. O QR Code tem o lado do tamanho
+// (128 / 176 / 232, nunca menos de 3 px por modulo: qrSidePx) e, abaixo, a legenda e sempre o link de texto "Abrir o
+// link" (tambem com a area de 44 px). Altura no maximo a area livre: o resto rola por dentro. Entrada com
 // fade de 200 ms (sem animacao com prefers-reduced-motion); nada pisca nem conta tempo. Uma <section> nao modal com nome
 // ("Banner da equipe: {título}"), nunca dialogo: sem veu, sem prender nem tirar o foco. So tokens --room-*; nenhuma frase
 // escrita aqui (WEBINAR_COPY.naTela.aluno).
@@ -44,8 +45,14 @@ export function RoomScreenLink({ children, className, href, onClick }: { childre
   );
 }
 
-/** O "Abrir o link" de texto (o QR Code nunca e o unico caminho ate o link). */
-export const SCREEN_TEXT_LINK = cn("rounded-[4px] text-[13px] font-semibold leading-5 text-room-link underline underline-offset-2 hover:no-underline", ROOM_FOCUS);
+/**
+ * O "Abrir o link" de texto (o QR Code nunca e o unico caminho ate o link): a linha de 20 px com a area de toque de 44 px
+ * abaixo de lg (12 px acima e abaixo, 6 px dos lados), sem mudar o desenho do cartao.
+ */
+export const SCREEN_TEXT_LINK = cn(
+  "relative rounded-[4px] text-[13px] font-semibold leading-5 text-room-link underline underline-offset-2 after:absolute after:-inset-x-1.5 after:-inset-y-3 hover:no-underline lg:after:hidden",
+  ROOM_FOCUS
+);
 
 /** O desenho do QR Code: o quadro branco com os modulos pretos (nos dois temas), nivel M e a margem de 4 modulos; o svg ja e role="img". */
 export function RoomScreenQr({ link, side }: { link: string; side: number }) {
@@ -126,7 +133,7 @@ function BannerContent({ form, handlers, item }: { form: ScreenEventForm; handle
       )}
       {action === "button" && href && item.buttonLabel ? (
         <div className={cn("px-3 pb-3", text ? "pt-2" : "pt-3")}>
-          <RoomScreenLink className={roomPillClassName({ className: "max-w-full", size: "s", tone: "white" })} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "button")}>
+          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "max-w-full"), size: "s", tone: "white" })} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "button")}>
             <span className="truncate">{item.buttonLabel}</span>
           </RoomScreenLink>
         </div>
@@ -174,7 +181,7 @@ export function RoomScreenCard({ className, handlers, item }: { className?: stri
     <section
       aria-label={screenSectionName(item)}
       className={cn(
-        "pointer-events-auto relative min-h-0 max-w-[40cqw] shrink flex-col overflow-y-auto overscroll-contain rounded-[16px] bg-room-on-video-bg text-room-on-video-fg shadow-[0_8px_24px_rgba(0,0,0,0.35)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+        "pointer-events-auto relative min-h-0 max-w-[min(40cqw,100%)] shrink flex-col overflow-y-auto overscroll-contain rounded-[16px] bg-room-on-video-bg text-room-on-video-fg shadow-[0_8px_24px_rgba(0,0,0,0.35)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
         qr ? "w-fit" : SCREEN_BANNER_WIDTH[item.size],
         className
       )}

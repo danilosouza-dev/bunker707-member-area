@@ -5,11 +5,13 @@
 // navegador: quem le e escreve o sessionStorage e use-room-screen.ts.
 // O banner e o QR Code do aluno (§3.2 a §3.7 e §7; fatia S9):
 // - onde cada um fica no palco de 640 px ou mais (screenPlacement: a grade 3x3, o empilhar do banner em cima do QR
-//   Code, a Oferta dona do canto de baixo a direita, as pilulas das fixadas primeiro na celula de cima a esquerda, e
-//   quando as pilulas do chat e o selo do Assistente saem do palco largo), as larguras por tamanho (clamp em cqw, nunca
-//   mais de 40 % do palco) e as celulas;
+//   Code, o juntar ou dividir a area quando os dois estao em posicoes diferentes (screenPairSplit, screenCellLimits),
+//   a Oferta dona da coluna da direita, as pilulas das fixadas primeiro na celula de cima a esquerda, e quando as
+//   pilulas do chat e o selo do Assistente saem do palco largo), as larguras por tamanho (clamp em cqw, nunca mais de
+//   40 % do palco) e as celulas;
 // - o que manda tudo para a faixa abaixo do palco: qualquer capa no palco (screenStripForcedLive e
-//   screenStripForcedRecorded); a regra dos 640 px e so CSS (o recipiente @container/tela);
+//   screenStripForcedRecorded); a regra dos 640 px e a da tela baixa sao so CSS (o recipiente @container/tela e
+//   SCREEN_WIDE_ONLY / SCREEN_NARROW_FLEX);
 // - os textos: o nome da secao, o titulo e a segunda linha da faixa, o anuncio educado de cada chegada (a saida e
 //   silenciosa) e quando a linha da faixa tem o Mostrar / Recolher;
 // - o envio das metricas (o viu depois de 1 s com 50 % ou mais na tela, a aba visivel e sem a enquete do palco por
@@ -94,38 +96,82 @@ export function visibleScreenItems(items: readonly StudentScreenItem[], closedId
 /** Uma entrada de uma celula da grade, de cima para baixo: as pilulas das fixadas ou um item. */
 export type ScreenCellEntry = { kind: "pinned" } | { item: StudentScreenItem; kind: "item" };
 
-export type ScreenCell = { entries: ScreenCellEntry[]; place: ScreenPlace };
+/**
+ * A metade da area segura que a celula pode usar quando banner e QR Code ficam em celulas separadas: `width` (um a
+ * esquerda e o outro a direita), `height` (um em cima e o outro embaixo); nulo, a area inteira.
+ */
+export type ScreenCellSplit = "height" | "width";
+
+export type ScreenCell = { entries: ScreenCellEntry[]; place: ScreenPlace; split: ScreenCellSplit | null };
 
 export type ScreenPlacement = {
   /** O selo do Assistente pode ficar no palco largo (nenhum item em "Embaixo, à direita"). */
   assistant: boolean;
   /** As celulas usadas, na ordem da grade (linha a linha). */
   cells: ScreenCell[];
-  /** As pilulas do chat podem ficar no palco largo (nenhum item na fileira de baixo nem "No meio"). */
+  /** As pilulas do chat podem ficar no palco largo (nenhum item na fileira de baixo nem na do meio). */
   chatPills: boolean;
 };
 
-const BOTTOM_ROW: ReadonlySet<ScreenPlace> = new Set(["bottom_left", "bottom_center", "bottom_right"]);
 const KIND_ORDER: Record<StudentScreenItem["kind"], number> = { banner: 0, qr: 1 };
 
-/** A posicao de um item no palco: com a Oferta no palco (Live gravada), o canto de baixo a direita e dela e o item vai para baixo a esquerda. */
+/** A fileira (0 em cima, 2 embaixo) e a coluna (0 a esquerda, 2 a direita) de uma posicao da grade. */
+function gridOf(place: ScreenPlace): { col: number; row: number } {
+  const index = SCREEN_PLACES.indexOf(place);
+  return { col: index % 3, row: Math.floor(index / 3) };
+}
+
+/** A coluna da direita: com a Oferta no palco ela e da Oferta, e o item vai para a mesma fileira, a esquerda. */
+const OFFER_MOVES: Partial<Record<ScreenPlace, ScreenPlace>> = { bottom_right: "bottom_left", middle_right: "middle_left", top_right: "top_left" };
+
+/**
+ * A posicao de um item no palco: com a Oferta no palco (Live gravada), o card dela cobre a coluna da direita inteira
+ * (ate 430 px de altura com a imagem), e o item da direita vai para a esquerda, na mesma fileira.
+ */
 export function screenPlaceOf(place: ScreenPlace, offerShown: boolean): ScreenPlace {
-  return offerShown && place === "bottom_right" ? "bottom_left" : place;
+  return offerShown ? (OFFER_MOVES[place] ?? place) : place;
 }
 
 /**
- * Onde cada coisa fica no palco de 640 px ou mais (a tabela de colisoes da §3.2): cada item na posicao escolhida (a
- * Oferta empurra o de baixo a direita para baixo a esquerda); banner e QR Code na mesma posicao empilham, o banner em
- * cima; as pilulas das fixadas sao as primeiras da celula de cima a esquerda, e o item dessa posicao fica abaixo delas;
- * um item na fileira de baixo ou "No meio" tira as pilulas do chat do palco largo; um item em "Embaixo, à direita" tira
- * o selo do Assistente. A enquete do palco fica por cima de tudo (a camada dela e outra). Com a faixa forcada (a capa),
- * a sala passa a lista vazia: nada sobre o video.
+ * Como banner e QR Code em duas posicoes diferentes dividem a area segura (cada celula pode ter ate a area inteira, e
+ * duas celulas sem regra se cobrem): na mesma fileira, na mesma coluna ou em diagonal com uma delas encostada no meio,
+ * juntam numa celula so (`join`); em lados opostos sem dividir fileira nem coluna, cada uma fica com metade da largura
+ * (`width`: uma a esquerda e a outra a direita) ou, senao, da altura (`height`: uma em cima e a outra embaixo).
+ */
+export function screenPairSplit(a: ScreenPlace, b: ScreenPlace): ScreenCellSplit | "join" {
+  const first = gridOf(a);
+  const second = gridOf(b);
+  if (first.row === second.row || first.col === second.col) {
+    return "join";
+  }
+  if (Math.abs(first.col - second.col) === 2) {
+    return "width";
+  }
+  return Math.abs(first.row - second.row) === 2 ? "height" : "join";
+}
+
+/**
+ * Onde cada coisa fica no palco de 640 px ou mais (a tabela de colisoes da §3.2): cada item na posicao escolhida (com a
+ * Oferta, a coluna da direita vai para a esquerda); banner e QR Code na mesma posicao empilham, o banner em cima; em
+ * posicoes diferentes, pela screenPairSplit: juntam na primeira das duas na ordem da grade (de cima para baixo, da
+ * esquerda para a direita), o banner em cima, ou ficam separados com metade da area cada; as pilulas das fixadas sao as
+ * primeiras da celula de cima a esquerda, e o item dessa posicao fica abaixo delas; um item na fileira de baixo ou na
+ * do meio tira as pilulas do chat do palco largo; um item em "Embaixo, à direita" tira o selo do Assistente (as duas
+ * regras pela posicao escolhida, antes de juntar: a pilha cresce na direcao dela). A enquete do palco fica por cima de
+ * tudo (a camada dela e outra). Com a faixa forcada (a capa), a sala passa a lista vazia: nada sobre o video.
  */
 export function screenPlacement(input: { items: readonly StudentScreenItem[]; offerShown: boolean; pinnedPills: boolean }): ScreenPlacement {
+  const chosen = input.items.map((item) => ({ item, place: screenPlaceOf(item.place, input.offerShown) }));
+  const places = [...new Set(chosen.map((entry) => entry.place))];
+  // Duas posicoes (o banner e o QR Code, um de cada no maximo): juntam ou dividem a area.
+  const pair = places.length === 2 ? screenPairSplit(places[0], places[1]) : null;
+  const joinedAt = pair === "join" ? SCREEN_PLACES.find((place) => places.includes(place)) : undefined;
+  const split = pair === "join" ? null : pair;
+
   const byPlace = new Map<ScreenPlace, StudentScreenItem[]>();
-  for (const item of input.items) {
-    const place = screenPlaceOf(item.place, input.offerShown);
-    byPlace.set(place, [...(byPlace.get(place) ?? []), item]);
+  for (const { item, place } of chosen) {
+    const at = joinedAt ?? place;
+    byPlace.set(at, [...(byPlace.get(at) ?? []), item]);
   }
   const cells: ScreenCell[] = [];
   for (const place of SCREEN_PLACES) {
@@ -135,21 +181,21 @@ export function screenPlacement(input: { items: readonly StudentScreenItem[]; of
       entries.unshift({ kind: "pinned" });
     }
     if (entries.length > 0) {
-      cells.push({ entries, place });
+      cells.push({ entries, place, split: items.length > 0 ? split : null });
     }
   }
-  const places = [...byPlace.keys()];
   return {
     assistant: !places.includes("bottom_right"),
     cells,
-    chatPills: !places.some((place) => BOTTOM_ROW.has(place) || place === "center")
+    chatPills: !places.some((place) => gridOf(place).row > 0)
   };
 }
 
 /**
  * Onde cada celula fica na area segura (a caixa dentro do palco sem os 56 px dos selos de cima e de baixo, os 12 px da
  * esquerda e os 12 px mais a coluna de miniaturas da direita): a coluna pela borda (ou centrada), a linha pela borda (ou
- * centrada); a de baixo empilha de baixo para cima.
+ * centrada); a de baixo empilha de baixo para cima e sobe a altura do aviso da sala no palco mais 8 px
+ * (--room-snackbar-offset, como as pilulas do chat).
  */
 export const SCREEN_CELL_CLASSES: Readonly<Record<ScreenPlace, string>> = {
   top_left: "left-0 top-0 items-start",
@@ -158,10 +204,33 @@ export const SCREEN_CELL_CLASSES: Readonly<Record<ScreenPlace, string>> = {
   middle_left: "left-0 top-1/2 -translate-y-1/2 items-start",
   center: "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center",
   middle_right: "right-0 top-1/2 -translate-y-1/2 items-end",
-  bottom_left: "bottom-0 left-0 items-start justify-end",
-  bottom_center: "bottom-0 left-1/2 -translate-x-1/2 items-center justify-end",
-  bottom_right: "bottom-0 right-0 items-end justify-end"
+  bottom_left: "bottom-[var(--room-snackbar-offset,0px)] left-0 items-start justify-end",
+  bottom_center: "bottom-[var(--room-snackbar-offset,0px)] left-1/2 -translate-x-1/2 items-center justify-end",
+  bottom_right: "bottom-[var(--room-snackbar-offset,0px)] right-0 items-end justify-end"
 };
+
+/**
+ * O tamanho maximo da celula: a area segura inteira ou, separada do outro item, a metade dela naquele eixo (menos 4 px:
+ * 8 px entre as duas); a de baixo desconta o que ela subiu pelo aviso da sala.
+ */
+export function screenCellLimits(cell: Pick<ScreenCell, "place" | "split">): string {
+  const bottom = gridOf(cell.place).row === 2;
+  const height =
+    cell.split === "height"
+      ? bottom
+        ? "max-h-[calc(50%-4px-var(--room-snackbar-offset,0px))]"
+        : "max-h-[calc(50%-4px)]"
+      : bottom
+        ? "max-h-[calc(100%-var(--room-snackbar-offset,0px))]"
+        : "max-h-full";
+  return `${height} ${cell.split === "width" ? "max-w-[calc(50%-4px)]" : "max-w-full"}`;
+}
+
+/**
+ * Na pilha (o banner e o QR Code na mesma celula), quem encolhe primeiro e o banner, que rola por dentro e guarda 56 px
+ * (o X e o comeco dele): o QR Code fica inteiro enquanto couber, com a legenda, o Abrir o link e o X na tela.
+ */
+export const SCREEN_STACK_BANNER = "min-h-14 shrink-[999]";
 
 /** A largura do banner por tamanho, pela largura do palco (cqw da camada @container/tela); nunca passa de 40 % dele. */
 export const SCREEN_BANNER_WIDTH: Readonly<Record<ScreenSize, string>> = {
@@ -169,6 +238,25 @@ export const SCREEN_BANNER_WIDTH: Readonly<Record<ScreenSize, string>> = {
   m: "w-[clamp(240px,30cqw,380px)]",
   l: "w-[clamp(280px,40cqw,520px)]"
 };
+
+/* ------------------------------------------------------------------------------------------------
+ * O palco largo e o estreito: a regra so de CSS
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O que so aparece no palco largo (os cartoes e as pilulas das fixadas): 640 px ou mais de palco (a camada e o
+ * recipiente @container/tela) e a tela com mais de 500 px de altura. O celular deitado (844 x 390) tem o palco largo e
+ * baixo (uns 254 px, a area segura com uns 142 px): nele o QR Code e cortado e os cartoes se cobrem, entao ele usa a
+ * faixa como o palco estreito. A tela baixa vence sempre (!important): a ordem das regras no CSS nao importa.
+ */
+export const SCREEN_WIDE_ONLY = "hidden [@media(max-height:500px)]:hidden! @min-[640px]/tela:flex";
+
+/**
+ * O que some do palco largo (a faixa, as linhas compactas da tela cheia), mostrado de novo na tela baixa (flex). As
+ * pilulas do chat e o selo do Assistente (room-wide-hidden.tsx, modulo folha) escrevem a mesma regra com display contents.
+ */
+export const SCREEN_NARROW_FLEX = "@min-[640px]/tela:hidden [@media(max-height:500px)]:flex!";
+
 
 /* ------------------------------------------------------------------------------------------------
  * A faixa (§3.3 e §3.4): o que a manda para fora do video

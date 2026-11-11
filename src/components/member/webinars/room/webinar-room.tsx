@@ -133,11 +133,11 @@ import { VerticalTopBar } from "./vertical/vertical-top-bar";
 // A Na tela, o banner e o QR Code (especificacao de 10/11/2026, §3.2 a §3.7; screen/room-screen-layer.tsx e
 // room-screen-strip.tsx): no palco de 640 px ou mais, os cartoes na camada do palco (dentro da caixa, que e o que vai
 // para a Tela cheia), com as pilulas das fixadas primeiro na celula de cima a esquerda e o aviso de venda simulado por
-// ultimo nela; a Oferta no palco empurra o item de baixo a direita para baixo a esquerda. No palco mais estreito, e com
-// qualquer capa no palco (screenStripForcedRecorded: a espera, "Ativar som", a sessao sem video), a faixa abaixo do
-// palco e acima da barra, junto com as linhas das fixadas; na tela cheia com o palco estreito, a linha compacta na
-// borda de cima; no vertical 9:16, no maximo duas linhas compactas na doca, antes da pilula da Oferta. Um item na
-// fileira de baixo (ou "No meio") tira as pilulas do chat do palco largo, e um em "Embaixo, à direita" o selo do
+// ultimo nela; a Oferta no palco leva a coluna da direita para a esquerda. No palco mais estreito, no baixo (a tela de
+// ate 500 px de altura) e com qualquer capa no palco (screenStripForcedRecorded: a espera, "Ativar som", a sessao sem
+// video), a faixa abaixo do palco e acima da barra, junto com as linhas das fixadas; na tela cheia com o palco estreito
+// ou baixo, a linha compacta na borda de cima; no vertical 9:16, no maximo duas linhas compactas na doca, antes da
+// pilula da Oferta. Um item na fileira de baixo ou na do meio tira as pilulas do chat do palco largo, e um em "Embaixo, à direita" o selo do
 // Assistente (RoomWideHidden, so CSS). Fechar e por exibicao (sessionStorage); quem tem o foco num item que sai volta
 // para a sala (refocusRoom). As metricas (viu, clicou, fechou) vao por useRoomScreenEvents; nada no "ver como".
 // A Na tela, a moderacao por pessoa na Live gravada (especificacao de 10/11/2026, R5 e §3.8), com as regras e as frases

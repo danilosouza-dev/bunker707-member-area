@@ -330,7 +330,7 @@ test("as pilulas do palco sao botoes, so com 640 px ou mais de palco (a camada d
   const celula = elementWith(html, 'data-room-screen-cell="top_left"');
   assert.ok(celula.indexOf("data-room-pinned-pills") > 0, "as pilulas na celula de cima a esquerda");
   const bloco = elementWith(celula, "data-room-pinned-pills");
-  for (const classe of ["hidden", "@min-[640px]/tela:flex", "flex-col"]) {
+  for (const classe of ["hidden", "@min-[640px]/tela:flex", "flex-col", "[@media(max-height:500px)]:hidden!", "gap-3"]) {
     assert.ok(classesDe(bloco.slice(0, bloco.indexOf(">") + 1)).includes(classe), `${classe} no bloco das pilulas`);
   }
   const botoes = [...html.matchAll(/<button class="([^"]*)" data-room-pinned-pill="(message|poll)" type="button">([\s\S]*?)<\/button>/g)];
@@ -344,6 +344,10 @@ test("as pilulas do palco sao botoes, so com 640 px ou mais de palco (a camada d
   );
   for (const [, classes] of botoes) {
     assert.ok(classes.includes("pointer-events-auto") && classes.includes("focus-visible:outline-room-focus"), "so o botao recebe o toque, com o anel de foco");
+    // A pilula de 32 px com a area de toque de 44 px abaixo de lg (A7); a 12 px uma da outra, as areas nao se cobrem.
+    for (const classe of ["h-8", "relative", "after:absolute", "after:-inset-1.5", "lg:after:hidden"]) {
+      assert.ok(classes.split(" ").includes(classe), `${classe} na pilula`);
+    }
   }
   assert.doesNotMatch(html, /<a\b/, "a pilula nao e link: ela abre o painel");
   assert.equal(render(pinnedModule.RoomPinnedPills, { message: null, onMessage: noop, onPoll: noop, poll: null }), "");
@@ -352,12 +356,16 @@ test("as pilulas do palco sao botoes, so com 640 px ou mais de palco (a camada d
 test("as linhas da faixa (palco mais estreito ou com capa): botoes de 56 px abaixo do palco, no maximo 120 px rolando por dentro, so abaixo de 640 px de palco; com a capa, em qualquer largura (data-tela=faixa)", () => {
   const props = { forced: false, items: [], pinned: { message: FIXADA, onMessage: noop, onPoll: noop, poll: enquete() } };
   const html = render(stripModule.RoomScreenStrip, props);
-  assert.deepEqual(classesDe(html.slice(0, html.indexOf(">") + 1)).sort(), ["@container/tela", "shrink-0"]);
+  // A partir de lg o invólucro sobe os 12 px do gap da coluna e o conteudo desce 12 px (A6): escondida no palco largo, a
+  // faixa tem altura zero e nao ocupa o gap, e o palco nao pula quando algo entra, sai ou e fixado.
+  assert.deepEqual(classesDe(html.slice(0, html.indexOf(">") + 1)).sort(), ["@container/tela", "lg:-mt-3", "shrink-0"]);
   assert.doesNotMatch(html.slice(0, html.indexOf(">") + 1), /data-tela/);
   const faixa = html.match(/^<div[^>]*><div class="([^"]*)">/)?.[1].split(" ") ?? [];
-  for (const classe of ["@min-[640px]/tela:hidden", "max-h-[120px]", "overflow-y-auto", "flex-col"]) {
+  for (const classe of ["@min-[640px]/tela:hidden", "max-h-[120px]", "overflow-y-auto", "flex-col", "lg:mt-3"]) {
     assert.ok(faixa.includes(classe), `${classe} na faixa`);
   }
+  // A tela baixa (o celular deitado, A5): o palco largo e baixo demais para os cartoes, a faixa volta (por cima dos 640 px).
+  assert.ok(faixa.includes("[@media(max-height:500px)]:flex!"), "a faixa na tela baixa");
   const linhas = [...html.matchAll(/<button class="([^"]*)" data-room-pinned-row="(message|poll)" type="button">([\s\S]*?)<\/button>/g)];
   assert.deepEqual(
     linhas.map(([, , qual, conteudo]) => [qual, conteudo.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()]),
@@ -371,7 +379,7 @@ test("as linhas da faixa (palco mais estreito ou com capa): botoes de 56 px abai
   }
   // Com uma capa no palco, a faixa vale tambem no palco largo.
   const comCapa = render(stripModule.RoomScreenStrip, { ...props, forced: true });
-  assert.match(comCapa, /^<div class="@container\/tela shrink-0" data-room-screen-strip="" data-tela="faixa"><div class="([^"]*)">/);
+  assert.match(comCapa, /^<div class="@container\/tela shrink-0 lg:-mt-3" data-room-screen-strip="" data-tela="faixa"><div class="([^"]*)">/);
   assert.ok(!comCapa.match(/^<div[^>]*><div class="([^"]*)">/)[1].includes("@min-[640px]/tela:hidden"), "sem esconder no palco largo");
   assert.equal(render(stripModule.RoomScreenStrip, { forced: false, items: [], pinned: null }), "", "sem nada, sem faixa");
 });
@@ -392,7 +400,7 @@ test("a gravada com o painel fechado (o HTML do servidor abre com a capa Ativar 
       const coluna = elementWith(html, 'data-room-slot="stage-column"');
       const [palco, faixa, barra] = ['data-room-slot="stage-box"', "data-room-screen-strip", 'data-testid="recorded-controls"'].map((trecho) => coluna.indexOf(trecho));
       assert.ok(palco >= 0 && palco < faixa && faixa < barra, `${rotulo}: a faixa logo abaixo do palco e acima da barra`);
-      assert.match(elementWith(coluna, "data-room-screen-strip"), /^<div class="@container\/tela shrink-0" data-room-screen-strip="" data-tela="faixa">[\s\S]*data-room-pinned-row="message"[\s\S]*data-room-pinned-row="poll"/);
+      assert.match(elementWith(coluna, "data-room-screen-strip"), /^<div class="@container\/tela shrink-0 lg:-mt-3" data-room-screen-strip="" data-tela="faixa">[\s\S]*data-room-pinned-row="message"[\s\S]*data-room-pinned-row="poll"/);
     }
     const painel = elementWith(sala(comFixadas), 'data-testid="room-panel"');
     assert.match(painel, /^<aside[^>]*hidden=""/, "o painel fechado e montado");
@@ -519,7 +527,7 @@ test("o cartao do banner: a secao nao modal com o nome, a largura pelo tamanho (
   const html = render(cardModule.RoomScreenCard, { item: banner() });
   const secao = abertura(html);
   assert.match(secao, /^<section aria-label="Banner da equipe: Turma nova"/);
-  for (const classe of ["w-[clamp(240px,30cqw,380px)]", "max-w-[40cqw]", "bg-room-on-video-bg", "text-room-on-video-fg", "rounded-[16px]", "overflow-y-auto", "pointer-events-auto", "motion-safe:animate-in", "motion-safe:fade-in-0", "motion-safe:duration-200"]) {
+  for (const classe of ["w-[clamp(240px,30cqw,380px)]", "max-w-[min(40cqw,100%)]", "bg-room-on-video-bg", "text-room-on-video-fg", "rounded-[16px]", "overflow-y-auto", "pointer-events-auto", "motion-safe:animate-in", "motion-safe:fade-in-0", "motion-safe:duration-200"]) {
     assert.ok(classesDe(secao).includes(classe), `${classe} no cartao`);
   }
   assert.doesNotMatch(html, /aria-modal|role="dialog"|tabindex="-1"/, "nunca dialogo: sem prender nem tirar o foco");
@@ -530,6 +538,9 @@ test("o cartao do banner: a secao nao modal com o nome, a largura pelo tamanho (
   assert.match(links[0].attrs, /\brel="noopener noreferrer nofollow"/);
   assert.match(links[0].attrs, /\btarget="_blank"/);
   assert.ok(classesDe(`<a${links[0].attrs}>`).includes("rounded-full"), "a pilula da sala");
+  for (const classe of ["h-8", "relative", "after:absolute", "after:-inset-1.5", "lg:after:hidden"]) {
+    assert.ok(classesDe(`<a${links[0].attrs}>`).includes(classe), `${classe}: o botao de 32 px com a area de toque de 44 px abaixo de lg (A7)`);
+  }
   assert.match(html, /<button aria-label="Fechar o banner"[^>]*data-room-screen-close=""[^>]*>/, "o X, um botao");
   assert.ok(html.indexOf("Fechar o banner") > html.lastIndexOf("</a>"), "o X fora do link");
   assert.doesNotMatch(html, /Este banner sai quando a equipe tirar/);
@@ -585,6 +596,10 @@ test("o QR Code: um svg role=img com o nome 'QR Code do link {domínio}', modulo
   assert.match(html, /<path fill="#000000"[^>]*>/, "os modulos pretos");
   const links = linksDe(html);
   assert.deepEqual(links.map((link) => [link.href, link.texto]), [[INSCRICAO, "Abrir o link"]], "o link de texto com o mesmo endereco");
+  // A linha de 20 px com a area de toque de 44 px abaixo de lg (12 px acima e abaixo; A7).
+  for (const classe of ["leading-5", "relative", "after:absolute", "after:-inset-y-3", "after:-inset-x-1.5", "lg:after:hidden"]) {
+    assert.ok(classesDe(`<a${links[0].attrs}>`).includes(classe), `${classe} no Abrir o link`);
+  }
   assert.match(links[0].attrs, /\brel="noopener noreferrer nofollow"/);
   assert.ok(html.indexOf(">Aponte a câmera<") > html.indexOf("</svg>") && html.indexOf(">Abrir o link<") > html.indexOf(">Aponte a câmera<"), "abaixo do codigo, a legenda e o link");
   assert.ok(html.indexOf("Fechar o QR Code") > html.indexOf("</svg>"), "o X depois do quadro, nunca sobre ele");
@@ -624,6 +639,41 @@ test("as nove posicoes: cada item na celula da posicao escolhida (as classes da 
   assert.doesNotMatch(capa, /data-room-screen-card/);
 });
 
+test("banner e QR Code nas posicoes padrao (A1): uma celula so em cima a direita, o banner em cima e encolhendo primeiro; em cantos opostos, metade da largura cada; a fileira de baixo sobe com o aviso da sala; os cartoes saem na tela baixa (A5)", () => {
+  const camada = (items, extra = {}) => {
+    const placement = screenModel.screenPlacement({ items, offerShown: extra.offerShown ?? false, pinnedPills: false });
+    return render(layerModule.RoomScreenLayer, { forced: false, fullscreen: false, items, pinned: null, placement, ...extra });
+  };
+  // O padrao: o QR Code em cima a direita e o banner embaixo a direita (a 1280 x 720 o banner cobria o QR Code).
+  const padrao = camada([banner(), qr()]);
+  assert.equal([...padrao.matchAll(/data-room-screen-cell="(\w+)"/g)].map(([, place]) => place).join(), "top_right", "uma celula so");
+  const pilha = elementWith(padrao, 'data-room-screen-cell="top_right"');
+  assert.ok(["max-h-full", "max-w-full", "gap-2"].every((classe) => classesDe(abertura(pilha)).includes(classe)), "a pilha usa a area inteira");
+  assert.ok(pilha.indexOf('data-room-screen-card="banner"') < pilha.indexOf('data-room-screen-card="qr"'), "o banner em cima");
+  const cartaoBanner = classesDe(abertura(elementWith(pilha, 'data-room-screen-card="banner"')));
+  const cartaoQr = classesDe(abertura(elementWith(pilha, 'data-room-screen-card="qr"')));
+  assert.ok(cartaoBanner.includes("shrink-[999]") && cartaoBanner.includes("min-h-14") && !cartaoBanner.includes("shrink"), "o banner encolhe primeiro e guarda 56 px");
+  assert.ok(cartaoQr.includes("shrink") && cartaoQr.includes("min-h-0") && !cartaoQr.includes("shrink-[999]"), "o QR Code fica inteiro enquanto couber");
+  // Sozinho, o banner encolhe como antes.
+  assert.ok(classesDe(abertura(elementWith(camada([banner()]), 'data-room-screen-card="banner"'))).includes("shrink"));
+  // A tela baixa vence sempre; a ultima classe continua a dos 640 px.
+  for (const classes of [cartaoBanner, cartaoQr]) {
+    assert.deepEqual(classes.slice(-3), ["hidden", "[@media(max-height:500px)]:hidden!", "@min-[640px]/tela:flex"]);
+  }
+  // Em cantos opostos: duas celulas com metade da largura, e o cartao nunca mais largo que a celula.
+  const opostos = camada([banner({ place: "top_left" }), qr({ place: "bottom_right" })]);
+  for (const place of ["top_left", "bottom_right"]) {
+    assert.ok(classesDe(abertura(elementWith(opostos, `data-room-screen-cell="${place}"`))).includes("max-w-[calc(50%-4px)]"), `${place}: metade da largura`);
+  }
+  assert.ok(classesDe(abertura(elementWith(opostos, 'data-room-screen-card="banner"'))).includes("max-w-[min(40cqw,100%)]"));
+  // Um em cima e o outro embaixo (sem dividir coluna): metade da altura, a de baixo descontando o aviso da sala.
+  const altura = camada([banner({ place: "top_center" }), qr({ place: "bottom_left" })]);
+  assert.ok(classesDe(abertura(elementWith(altura, 'data-room-screen-cell="top_center"'))).includes("max-h-[calc(50%-4px)]"));
+  const baixo = classesDe(abertura(elementWith(altura, 'data-room-screen-cell="bottom_left"')));
+  assert.ok(baixo.includes("max-h-[calc(50%-4px-var(--room-snackbar-offset,0px))]") && baixo.includes("bottom-[var(--room-snackbar-offset,0px)]"), "a fileira de baixo sobe com o aviso da sala");
+  assert.ok(!baixo.includes("bottom-0"));
+});
+
 test("a area segura com a barra do motor (96 px embaixo) e a coluna de miniaturas a direita; na tela cheia de verdade, a linha compacta de 48 px na borda de cima, so no palco estreito (com a capa, em qualquer largura)", () => {
   const items = [banner(), qr()];
   const placement = screenModel.screenPlacement({ items, offerShown: false, pinnedPills: false });
@@ -636,6 +686,7 @@ test("a area segura com a barra do motor (96 px embaixo) e a coluna de miniatura
   const linhas = elementWith(cheia, "data-room-screen-compact=");
   const classes = classesDe(abertura(linhas));
   assert.ok(classes.includes("@min-[640px]/tela:hidden") && classes.includes("top-[42px]"), "na borda de cima, abaixo dos selos, so no palco estreito");
+  assert.ok(classes.includes("[@media(max-height:500px)]:flex!"), "e no palco baixo (o celular deitado em tela cheia: os cartoes saem, A5)");
   const compactas = [...linhas.matchAll(/<section aria-label="([^"]*)" class="([^"]*)" data-room-screen-compact-row="(\w+)"/g)];
   assert.deepEqual(compactas.map(([, nome, , kind]) => [kind, nome]), [["banner", "Banner da equipe: Turma nova"], ["qr", "QR Code da equipe: Aponte a câmera"]]);
   for (const [, , classe] of compactas) {
@@ -667,6 +718,13 @@ test("a faixa: linhas de 56 px sem classes de posicao, com a miniatura, o titulo
   const linhaQr = elementWith(html, 'data-room-screen-row="qr"');
   assert.match(linhaQr, /<span class="truncate text-sm font-semibold leading-5 text-room-fg">Aponte a câmera<\/span><span class="truncate text-xs leading-\[18px\] text-room-fg-subtle">bunker707\.com\.br<\/span>/, "a legenda e o dominio");
   assert.deepEqual(linksDe(linhaQr).map((link) => [link.href, link.texto]), [[INSCRICAO, "Abrir o link"]], "no celular, a acao do QR Code e Abrir o link");
+  // A acao principal da linha (no celular, o "Abrir o link"): a pilula de 32 px com a area de toque de 44 px (A7).
+  for (const link of [...linksDe(linhaBanner), ...linksDe(linhaQr)]) {
+    const classes = classesDe(`<a${link.attrs}>`);
+    for (const classe of ["h-8", "relative", "after:absolute", "after:-inset-1.5", "lg:after:hidden"]) {
+      assert.ok(classes.includes(classe), `${link.texto}: ${classe}`);
+    }
+  }
   assert.match(linhaQr, /<button aria-label="Fechar o QR Code"/);
   assert.match(linhaQr.match(/<svg [^>]*data-room-screen-qr=""[^>]*>/)[0], /width="160"/, "o QR Code aberto a 160 px");
   assert.doesNotMatch(html, /aria-modal|role="dialog"/);
@@ -677,9 +735,13 @@ test("a faixa: linhas de 56 px sem classes de posicao, com a miniatura, o titulo
 test("as pilulas do chat e o selo do Assistente saem so do palco largo (RoomWideHidden: o recipiente @container/tela e o conteudo escondido a partir de 640 px); sem item embaixo, o HTML de antes", () => {
   const filho = createElement("p", { "data-x": "" }, "pilula");
   assert.equal(render(wideModule.RoomWideHidden, { hidden: false }, filho), '<p data-x="">pilula</p>');
-  assert.equal(render(wideModule.RoomWideHidden, { hidden: true }, filho), '<div class="@container/tela pointer-events-none absolute inset-0 z-20" data-room-wide-hidden=""><div class="contents @min-[640px]/tela:hidden"><p data-x="">pilula</p></div></div>');
+  // Na tela baixa (o celular deitado, A5) o item esta na faixa: as pilulas e o selo continuam (por cima dos 640 px).
+  assert.equal(
+    render(wideModule.RoomWideHidden, { hidden: true }, filho),
+    '<div class="@container/tela pointer-events-none absolute inset-0 z-20" data-room-wide-hidden=""><div class="contents @min-[640px]/tela:hidden [@media(max-height:500px)]:contents!"><p data-x="">pilula</p></div></div>'
+  );
   const selos = (assistantWideHidden) => render(badgesModule.RoomStageBadges, { assistantOn: true, assistantWideHidden, presenterName: null, recording: false, topLeft: null });
-  assert.match(selos(true), /^<div class="@container\/tela [^"]*" data-room-wide-hidden=""><div class="contents @min-\[640px\]\/tela:hidden"><span class="[^"]*" data-room-badge="assistant">/);
+  assert.match(selos(true), /^<div class="@container\/tela [^"]*" data-room-wide-hidden=""><div class="contents @min-\[640px\]\/tela:hidden \[@media\(max-height:500px\)\]:contents!"><span class="[^"]*" data-room-badge="assistant">/);
   assert.match(selos(false), /^<span class="[^"]*" data-room-badge="assistant">/, "sem item embaixo a direita, o selo como antes");
 });
 

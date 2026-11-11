@@ -175,11 +175,11 @@ import { roomSkeleton } from "./vertical/vertical-model";
 // A Na tela, o banner e o QR Code (especificacao de 10/11/2026, §3.2 a §3.7; screen/room-screen-layer.tsx e
 // room-screen-strip.tsx): no palco de 640 px ou mais, os cartoes na camada do palco (dentro do LiveStage, que e o que vai
 // para a Tela cheia), na posicao e no tamanho escolhidos, com as pilulas das fixadas primeiro na celula de cima a
-// esquerda; no palco mais estreito, e com qualquer capa no palco (screenStripForcedLive: antes de Entrar na sala,
-// Abrindo a sala…, Reconectando…, a espera), a faixa abaixo do palco e acima da barra, junto com as linhas das fixadas;
-// na tela cheia de verdade com o palco estreito, a linha compacta na borda de cima. Um item na fileira de baixo (ou "No
-// meio") tira as pilulas do chat do palco largo, e um em "Embaixo, à direita" o selo do Assistente (RoomWideHidden, so
-// CSS). Fechar e por exibicao (sessionStorage); quem tem o foco num item que sai volta para a sala (refocusRoom). As
+// esquerda; no palco mais estreito, no baixo (a tela de ate 500 px de altura) e com qualquer capa no palco
+// (screenStripForcedLive: antes de Entrar na sala, Abrindo a sala…, Reconectando…, a espera), a faixa abaixo do palco e
+// acima da barra, junto com as linhas das fixadas; na tela cheia de verdade com o palco estreito ou baixo, a linha
+// compacta na borda de cima. Um item na fileira de baixo ou na do meio tira as pilulas do chat do palco largo, e um em
+// "Embaixo, à direita" o selo do Assistente (RoomWideHidden, so CSS). Fechar e por exibicao (sessionStorage); quem tem o foco num item que sai volta para a sala (refocusRoom). As
 // metricas (viu, clicou, fechou) vao por useRoomScreenEvents; nada no "ver como". Com quem apresenta usando a barra do
 // motor nesta pagina, a margem de baixo da camada e 96 px.
 

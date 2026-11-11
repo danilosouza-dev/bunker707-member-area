@@ -4,22 +4,25 @@ import { Fragment, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { SCREEN_PLACES, type StudentScreenItem } from "@/server/webinars/screen-model";
 import { RoomScreenCard, type ScreenItemHandlers } from "./room-screen-card";
-import { SCREEN_CELL_CLASSES, screenAnnouncement, screenArrivals, type ScreenPlacement } from "./room-screen-model";
+import { SCREEN_CELL_CLASSES, SCREEN_NARROW_FLEX, SCREEN_STACK_BANNER, SCREEN_WIDE_ONLY, screenAnnouncement, screenArrivals, screenCellLimits, type ScreenPlacement } from "./room-screen-model";
 import { RoomScreenCompactRow } from "./room-screen-strip";
 
 // A camada da Na tela no palco (especificacao de 10/11/2026, §3.2, §3.3 e §3.7): dentro da caixa do palco (aparece
 // tambem na Tela cheia e no Modo cinema, que levam a caixa inteira), no plano dos selos (z-20) e abaixo da enquete do
 // palco (z-30), sem receber o toque (pointer-events-none: o video por baixo continua clicavel; so os cartoes e as
 // pilulas recebem). E o proprio recipiente `@container/tela`: o que vai sobre o video so aparece com 640 px ou mais de
-// palco (as variantes @min-[640px]/tela), sem medir em JavaScript; abaixo disso a faixa (room-screen-strip.tsx) mostra
-// o mesmo fora do video. Com uma capa no palco, a sala manda tudo para a faixa (data-tela="faixa" e a lista vazia aqui).
+// palco e a tela com mais de 500 px de altura (SCREEN_WIDE_ONLY), sem medir em JavaScript; no palco estreito e no baixo
+// (o celular deitado) a faixa (room-screen-strip.tsx) mostra o mesmo fora do video. Com uma capa no palco, a sala manda
+// tudo para a faixa (data-tela="faixa" e a lista vazia aqui).
 // A area segura: 56 px em cima (os selos) e embaixo (os selos de baixo; 96 px quando quem apresenta usa a barra do motor
 // na pagina da sala), 12 px a esquerda (16 px a partir de lg) e 12 px mais a coluna de miniaturas a direita
 // (--room-video-right). Nela, a grade 3x3 com as nove posicoes (screenPlacement: o banner em cima do QR Code na mesma
-// posicao, 8 px; a Oferta dona do canto de baixo a direita; as pilulas das fixadas primeiro na celula de cima a esquerda;
-// o aviso de venda simulado da gravada por ultimo nessa celula, para nada que fica mudar de lugar quando ele passa). Na
-// tela cheia de verdade com o palco estreito (a faixa de fora nao aparece la), a linha compacta de 48 px na borda de
-// cima, abaixo dos selos. Ficam no DOM depois dos selos do palco e antes da barra: o Tab passa pelo link e pelo X e segue.
+// celula, 8 px, e o banner encolhe primeiro; em celulas separadas, cada uma com metade da area naquele eixo; com a
+// Oferta, a coluna da direita vai para a esquerda; as pilulas das fixadas primeiro na celula de cima a esquerda; o aviso
+// de venda simulado da gravada por ultimo nessa celula, para nada que fica mudar de lugar quando ele passa). A fileira de
+// baixo sobe com o aviso da sala no palco (--room-snackbar-offset). Na tela cheia de verdade com o palco estreito ou
+// baixo (a faixa de fora nao aparece la), a linha compacta de 48 px na borda de cima, abaixo dos selos. Ficam no DOM
+// depois dos selos do palco e antes da barra: o Tab passa pelo link e pelo X e segue.
 // RoomScreenAnnouncer: o anuncio educado de cada chegada (a saida e silenciosa). O que sai so do palco largo quando um
 // item ocupa o lugar dele (as pilulas do chat, o selo do Assistente) e room-wide-hidden.tsx.
 
@@ -53,13 +56,15 @@ export function RoomScreenLayer({ engineBar = false, forced, fullscreen, handler
           if (!cell && !extra) {
             return null;
           }
+          // Na pilha com o QR Code, o banner encolhe primeiro (o QR Code fica inteiro enquanto couber).
+          const stacked = cell?.entries.some((entry) => entry.kind === "item" && entry.item.kind === "qr") ?? false;
           return (
-            <div className={cn("absolute flex max-h-full max-w-full flex-col gap-2", SCREEN_CELL_CLASSES[place])} data-room-screen-cell={place} key={place}>
+            <div className={cn("absolute flex flex-col gap-2", SCREEN_CELL_CLASSES[place], screenCellLimits({ place, split: cell?.split ?? null }))} data-room-screen-cell={place} key={place}>
               {cell?.entries.map((entry) =>
                 entry.kind === "pinned" ? (
                   <Fragment key="pinned">{pinned}</Fragment>
                 ) : (
-                  <RoomScreenCard className="hidden @min-[640px]/tela:flex" handlers={handlers} item={entry.item} key={entry.item.displayId} />
+                  <RoomScreenCard className={cn(stacked && entry.item.kind === "banner" ? SCREEN_STACK_BANNER : null, SCREEN_WIDE_ONLY)} handlers={handlers} item={entry.item} key={entry.item.displayId} />
                 )
               )}
               {extra}
@@ -68,7 +73,7 @@ export function RoomScreenLayer({ engineBar = false, forced, fullscreen, handler
         })}
       </div>
       {compact ? (
-        <div className={cn("absolute inset-x-3 top-[42px] flex-col gap-1.5", forced ? "flex" : "flex @min-[640px]/tela:hidden")} data-room-screen-compact="">
+        <div className={cn("absolute inset-x-3 top-[42px] flex-col gap-1.5", forced ? "flex" : cn("flex", SCREEN_NARROW_FLEX))} data-room-screen-compact="">
           {items.map((item) => (
             <RoomScreenCompactRow form="strip" handlers={handlers} item={item} key={item.displayId} />
           ))}

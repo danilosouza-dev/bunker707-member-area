@@ -5,25 +5,28 @@ import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { QR_MIN_MODULE_PX, qrModules, type ScreenEventForm, type ScreenEventTarget, type StudentScreenItem } from "@/server/webinars/screen-model";
-import { RoomPill, roomPillClassName } from "../room-pill";
+import { ROOM_TOUCH_44, RoomPill, roomPillClassName } from "../room-pill";
 import { RoomPinnedRows, type RoomPinnedShortcutsProps } from "./room-pinned";
 import { RoomScreenClose, RoomScreenImage, RoomScreenLink, RoomScreenQr, RoomScreenStays, type ScreenItemHandlers } from "./room-screen-card";
-import { screenBannerAction, screenImageSrc, screenLinkOf, screenRowDetail, screenRowExpandable, screenRowTitle, screenSectionName } from "./room-screen-model";
+import { SCREEN_NARROW_FLEX, screenBannerAction, screenImageSrc, screenLinkOf, screenRowDetail, screenRowExpandable, screenRowTitle, screenSectionName } from "./room-screen-model";
 import { useScreenShownRef } from "./use-room-screen";
 
 // A faixa da Na tela (especificacao de 10/11/2026, §3.1, §3.3, §3.4 e §3.7): fora do video, no fluxo da pagina, logo
-// abaixo do palco e acima da barra, quando o palco tem menos de 640 px (o celular de 375 px) ou quando ha uma capa no
-// palco (antes de "Entrar na sala", "Abrindo a sala…", "Reconectando…", a espera, "Ativar som"): a capa forca a faixa
-// pelo data-tela="faixa". A regra dos 640 px e so CSS: o proprio invólucro e o recipiente @container/tela (a largura da
-// coluna, a mesma do palco), sem medir em JavaScript e sem piscar. Primeiro as linhas das fixadas (com o painel fechado;
-// RoomPinnedRows), depois o banner e o QR Code, cada um uma linha de 56 px: [miniatura de 40 px ou o icone do QR Code]
-// [titulo; texto, uma linha cada] [o botao, ou "Abrir o link"] [Mostrar / Recolher quando ha imagem, mais texto ou o QR
+// abaixo do palco e acima da barra, quando o palco tem menos de 640 px (o celular de 375 px), quando a tela tem 500 px
+// de altura ou menos (o celular deitado: o palco largo e baixo demais para os cartoes) ou quando ha uma capa no palco
+// (antes de "Entrar na sala", "Abrindo a sala…", "Reconectando…", a espera, "Ativar som"): a capa forca a faixa pelo
+// data-tela="faixa". A regra e so CSS (SCREEN_NARROW_FLEX): o proprio invólucro e o recipiente @container/tela (a
+// largura da coluna, a mesma do palco), sem medir em JavaScript e sem piscar; a partir de lg ele sobe os 12 px do gap da
+// coluna e o conteudo desce 12 px, entao escondido ele nao ocupa espaco. Primeiro as linhas das fixadas (com o painel
+// fechado; RoomPinnedRows), depois o banner e o QR Code, cada um uma linha de 56 px: [miniatura de 40 px ou o icone do
+// QR Code] [titulo; texto, uma linha cada] [o botao, ou "Abrir o link", com a area de toque de 44 px] [Mostrar /
+// Recolher quando ha imagem, mais texto ou o QR
 // Code] [o X so se pode fechar]. Mostrar abre o conteudo inteiro no fluxo (a imagem ate 40 % da altura da tela; o QR
 // Code a 160 px, para ler com outro aparelho), empurrando o painel para baixo; Recolher e sempre permitido e nao e
 // fechar. No maximo 120 px de faixa (com uma linha aberta, ate 45 % da tela), o resto rola por dentro. O banner que nao
 // pode fechar e a mesma linha, sem o X: nunca cobre o video, os controles, o chat, a barra nem o Sair.
 // A linha compacta de 48 px (RoomScreenCompactRow): dentro do palco, na borda de cima, na tela cheia de verdade com o
-// palco estreito (a faixa de fora nao aparece em tela cheia), e na doca da sala vertical 9:16 (RoomScreenDock, no maximo
+// palco estreito ou baixo (a faixa de fora nao aparece em tela cheia), e na doca da sala vertical 9:16 (RoomScreenDock, no maximo
 // duas, antes da pilula da Oferta; somem com a gaveta aberta, como o resto da doca). No celular a acao principal do QR
 // Code e "Abrir o link" (ninguem aponta a camera para a propria tela). So tokens --room-* (o vertical, sempre escuro,
 // fica sobre o video); nenhuma frase escrita aqui.
@@ -83,7 +86,7 @@ export function RoomScreenRow({ expanded, handlers, item, onToggle }: { expanded
           {detail ? <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{detail}</span> : null}
         </span>
         {action ? (
-          <RoomScreenLink className={roomPillClassName({ className: "max-w-[45%]", size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, "strip", action.target)}>
+          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "max-w-[45%]"), size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, "strip", action.target)}>
             <span className="truncate">{action.label}</span>
           </RoomScreenLink>
         ) : null}
@@ -143,12 +146,14 @@ export function RoomScreenStrip({ forced, handlers, items, pinned }: RoomScreenS
   }
   const open = expanded.filter((displayId) => items.some((item) => item.displayId === displayId));
   return (
-    <div className="@container/tela shrink-0" data-room-screen-strip="" data-tela={forced ? "faixa" : undefined}>
+    // A partir de lg a coluna do palco tem o gap-3: o invólucro sobe 12 px e o conteudo desce 12 px, entao a faixa
+    // escondida no palco largo (altura zero) nao ocupa o espaco do gap e o palco nao pula quando algo entra ou sai.
+    <div className="@container/tela shrink-0 lg:-mt-3" data-room-screen-strip="" data-tela={forced ? "faixa" : undefined}>
       <div
         className={cn(
-          "flex flex-col overflow-y-auto overscroll-contain border-b border-room-border bg-room-surface",
+          "flex flex-col overflow-y-auto overscroll-contain border-b border-room-border bg-room-surface lg:mt-3",
           open.length > 0 ? "max-h-[45dvh]" : "max-h-[120px]",
-          forced ? null : "@min-[640px]/tela:hidden"
+          forced ? null : SCREEN_NARROW_FLEX
         )}
       >
         {withPinned ? <RoomPinnedRows {...pinned} /> : null}

@@ -1729,7 +1729,7 @@ test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfo
   }
 });
 
-test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code recebem o clique e o botao abre outra aba; a 375 px viram a faixa abaixo do palco, sem cruzar a caixa dele, e o banner sem fechar fica sem X", async ({ context, page }) => {
+test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code recebem o clique e o botao abre outra aba; a 375 px viram a faixa abaixo do palco, sem cruzar a caixa dele, e o banner sem fechar fica sem X; no palco largo e baixo, a faixa tambem", async ({ context, page }) => {
   const db = createLocalAdminClient();
   const naTela = WEBINAR_COPY.naTela;
   const { banner, qr } = NA_TELA_DE_TESTE;
@@ -1778,6 +1778,17 @@ test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code
     expect(linha!.height).toBeGreaterThanOrEqual(56);
     const larguras = await page.evaluate(() => ({ pagina: document.documentElement.scrollWidth, tela: window.innerWidth }));
     expect(larguras.pagina).toBeLessThanOrEqual(larguras.tela);
+
+    // A tela baixa (docs/31 §12.4): o palco largo (640 px ou mais) e baixo, como o do celular deitado, usa a faixa; o
+    // QR Code nao cabe sobre o video e os cartoes se cobririam.
+    await page.setViewportSize({ height: 480, width: 1200 });
+    const camada = await dialogo.locator("[data-room-screen-layer]").boundingBox();
+    expect(camada).not.toBeNull();
+    expect(camada!.width, "o palco continua largo").toBeGreaterThanOrEqual(640);
+    await expect(linhaDoBanner).toBeVisible();
+    await expect(linhaDoQr).toBeVisible();
+    await expect(dialogo.locator("[data-room-screen-card='banner']")).toBeHidden();
+    await expect(dialogo.locator("[data-room-screen-card='qr']")).toBeHidden();
   } finally {
     unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Tirando a Na tela da live de teste");
   }

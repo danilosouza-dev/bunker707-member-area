@@ -444,31 +444,97 @@ const celulas = (placement) => placement.cells.map((cell) => [cell.place, cell.e
 test("screenPlacement: cada item na posicao escolhida; banner em cima do QR Code na mesma posicao; as pilulas das fixadas primeiro em cima a esquerda; a ordem da grade", () => {
   const juntos = sala.screenPlacement({ items: [itemDoAluno("q", "qr", "top_left"), itemDoAluno("b", "banner", "top_left")], offerShown: false, pinnedPills: true });
   assert.deepEqual(celulas(juntos), [["top_left", ["fixadas", "banner:b", "qr:q"]]], "as fixadas, o banner, o QR Code");
-  const separados = sala.screenPlacement({ items: [itemDoAluno("b", "banner", "bottom_right"), itemDoAluno("q", "qr", "top_right")], offerShown: false, pinnedPills: false });
-  assert.deepEqual(celulas(separados), [["top_right", ["qr:q"]], ["bottom_right", ["banner:b"]]], "na ordem da grade, linha a linha");
+  // Em cantos opostos (um a esquerda e o outro a direita), cada um na sua celula, com metade da largura.
+  const separados = sala.screenPlacement({ items: [itemDoAluno("b", "banner", "bottom_right"), itemDoAluno("q", "qr", "top_left")], offerShown: false, pinnedPills: false });
+  assert.deepEqual(celulas(separados), [["top_left", ["qr:q"]], ["bottom_right", ["banner:b"]]], "na ordem da grade, linha a linha");
+  assert.deepEqual(separados.cells.map((cell) => cell.split), ["width", "width"]);
   assert.deepEqual(celulas(sala.screenPlacement({ items: [], offerShown: false, pinnedPills: true })), [["top_left", ["fixadas"]]]);
+  assert.deepEqual(sala.screenPlacement({ items: [], offerShown: false, pinnedPills: true }).cells[0].split, null, "so as fixadas: a area inteira");
   assert.deepEqual(sala.screenPlacement({ items: [], offerShown: true, pinnedPills: false }), { assistant: true, cells: [], chatPills: true }, "nada na tela, nada muda");
+  assert.deepEqual(sala.screenPlacement({ items: [itemDoAluno("b", "banner", "center")], offerShown: false, pinnedPills: false }).cells.map((cell) => cell.split), [null], "um item so: a area inteira");
 });
 
-test("screenPlacement, as colisoes: a Oferta empurra o de baixo a direita para baixo a esquerda (e empilha com o que ja estava la); a fileira de baixo e o meio tiram as pilulas do chat; embaixo a direita tira o selo do Assistente", () => {
+test("screenPlacement, banner e QR Code em posicoes diferentes (A1): na mesma coluna, na mesma fileira ou vizinhos pelo meio juntam na primeira das duas (o banner em cima); em lados opostos, metade da area cada", () => {
+  const par = (bannerPlace, qrPlace, extra = {}) =>
+    sala.screenPlacement({ items: [itemDoAluno("b", "banner", bannerPlace), itemDoAluno("q", "qr", qrPlace)], offerShown: false, pinnedPills: false, ...extra });
+  // O padrao (o QR Code em cima a direita, o banner embaixo a direita): a 1280 x 720 o banner cobria o QR Code.
+  const padrao = par("bottom_right", "top_right");
+  assert.deepEqual(celulas(padrao), [["top_right", ["banner:b", "qr:q"]]], "a mesma coluna: juntam em cima a direita, o banner em cima");
+  assert.deepEqual(padrao.cells.map((cell) => cell.split), [null], "a pilha usa a area inteira");
+  assert.equal(padrao.chatPills, false, "a pilha pode crescer ate embaixo: a posicao escolhida (embaixo) ainda tira as pilulas do chat");
+  assert.equal(padrao.assistant, false, "e o selo do Assistente");
+  assert.deepEqual(celulas(par("top_left", "top_center")), [["top_left", ["banner:b", "qr:q"]]], "a mesma fileira (o Grande em cima a esquerda cobria o X)");
+  assert.deepEqual(celulas(par("middle_left", "top_left", { pinnedPills: true })), [["top_left", ["fixadas", "banner:b", "qr:q"]]], "em cima e no meio a esquerda: com as fixadas, todos numa coluna so");
+  assert.deepEqual(celulas(par("center", "top_left")), [["top_left", ["banner:b", "qr:q"]]], "vizinhos pelo meio: a metade nao separaria");
+  assert.deepEqual(celulas(par("middle_right", "bottom_center")), [["middle_right", ["banner:b", "qr:q"]]]);
+  // Em lados opostos: um a esquerda e o outro a direita (a largura) ou um em cima e o outro embaixo (a altura).
+  assert.deepEqual(par("top_left", "middle_right").cells.map((cell) => [cell.place, cell.split]), [["top_left", "width"], ["middle_right", "width"]]);
+  assert.deepEqual(par("bottom_center", "top_left").cells.map((cell) => [cell.place, cell.split]), [["top_left", "height"], ["bottom_center", "height"]]);
+  // Todos os pares: so juntam ou dividem; nenhum par de celulas fica sem regra.
+  const lados = { center: [1, 1], top_left: [0, 0], top_center: [0, 1], top_right: [0, 2], middle_left: [1, 0], middle_right: [1, 2], bottom_left: [2, 0], bottom_center: [2, 1], bottom_right: [2, 2] };
+  for (const a of model.SCREEN_PLACES) {
+    for (const b of model.SCREEN_PLACES) {
+      if (a === b) {
+        continue;
+      }
+      const [ra, ca] = lados[a];
+      const [rb, cb] = lados[b];
+      const esperado = ra === rb || ca === cb ? "join" : Math.abs(ca - cb) === 2 ? "width" : Math.abs(ra - rb) === 2 ? "height" : "join";
+      assert.equal(sala.screenPairSplit(a, b), esperado, `${a} e ${b}`);
+      assert.equal(sala.screenPairSplit(b, a), esperado, `${b} e ${a}`);
+      const placement = par(a, b);
+      assert.equal(placement.cells.length, esperado === "join" ? 1 : 2, `${a} e ${b}`);
+    }
+  }
+});
+
+test("screenCellLimits: a area inteira, a metade quando separada, e a fileira de baixo descontando o aviso da sala (--room-snackbar-offset)", () => {
+  assert.equal(sala.screenCellLimits({ place: "top_right", split: null }), "max-h-full max-w-full");
+  assert.equal(sala.screenCellLimits({ place: "top_left", split: "width" }), "max-h-full max-w-[calc(50%-4px)]");
+  assert.equal(sala.screenCellLimits({ place: "top_center", split: "height" }), "max-h-[calc(50%-4px)] max-w-full");
+  assert.equal(sala.screenCellLimits({ place: "bottom_left", split: "height" }), "max-h-[calc(50%-4px-var(--room-snackbar-offset,0px))] max-w-full");
+  assert.equal(sala.screenCellLimits({ place: "bottom_right", split: null }), "max-h-[calc(100%-var(--room-snackbar-offset,0px))] max-w-full");
+  for (const place of ["bottom_left", "bottom_center", "bottom_right"]) {
+    assert.ok(sala.SCREEN_CELL_CLASSES[place].split(" ").includes("bottom-[var(--room-snackbar-offset,0px)]"), `${place}: sobe com o aviso da sala, como as pilulas do chat`);
+  }
+  assert.equal(sala.SCREEN_STACK_BANNER, "min-h-14 shrink-[999]", "na pilha, o banner encolhe primeiro e guarda 56 px");
+});
+
+test("screenPlacement, as colisoes: a Oferta leva a coluna da direita para a esquerda (e empilha com o que ja estava la); a fileira de baixo e a do meio tiram as pilulas do chat; embaixo a direita tira o selo do Assistente", () => {
   const comOferta = sala.screenPlacement({ items: [itemDoAluno("q", "qr", "bottom_left"), itemDoAluno("b", "banner", "bottom_right")], offerShown: true, pinnedPills: false });
   assert.deepEqual(celulas(comOferta), [["bottom_left", ["banner:b", "qr:q"]]], "a Oferta fica com o canto; o banner em cima");
   assert.equal(comOferta.assistant, true, "com a Oferta o item saiu do canto (o selo ja sai pela Oferta)");
-  assert.equal(sala.screenPlaceOf("bottom_right", true), "bottom_left");
-  assert.equal(sala.screenPlaceOf("bottom_right", false), "bottom_right");
-  assert.equal(sala.screenPlaceOf("top_right", true), "top_right");
+  // O card da Oferta cobre a coluna da direita inteira: o QR Code padrao (em cima a direita) ficava 70 % coberto.
+  assert.deepEqual(
+    model.SCREEN_PLACES.map((place) => sala.screenPlaceOf(place, true)),
+    ["top_left", "top_center", "top_left", "middle_left", "center", "middle_left", "bottom_left", "bottom_center", "bottom_left"]
+  );
+  for (const place of model.SCREEN_PLACES) {
+    assert.equal(sala.screenPlaceOf(place, false), place, `${place}: sem a Oferta, a posicao escolhida`);
+  }
+  assert.deepEqual(celulas(sala.screenPlacement({ items: [itemDoAluno("q", "qr", "top_right")], offerShown: true, pinnedPills: true })), [["top_left", ["fixadas", "qr:q"]]], "abaixo das fixadas");
+  assert.deepEqual(
+    celulas(sala.screenPlacement({ items: [itemDoAluno("q", "qr", "top_right"), itemDoAluno("b", "banner", "bottom_right")], offerShown: true, pinnedPills: false })),
+    [["top_left", ["banner:b", "qr:q"]]],
+    "o padrao com a Oferta: a coluna da esquerda, juntos"
+  );
 
   const pilulas = (place) => sala.screenPlacement({ items: [itemDoAluno("b", "banner", place)], offerShown: false, pinnedPills: false });
-  for (const place of ["bottom_left", "bottom_center", "bottom_right", "center"]) {
+  for (const place of ["bottom_left", "bottom_center", "bottom_right", "center", "middle_left", "middle_right"]) {
     assert.equal(pilulas(place).chatPills, false, `${place}: as pilulas do chat saem do palco largo`);
   }
-  for (const place of ["top_left", "top_center", "top_right", "middle_left", "middle_right"]) {
+  for (const place of ["top_left", "top_center", "top_right"]) {
     assert.equal(pilulas(place).chatPills, true, `${place}: as pilulas ficam`);
   }
   assert.equal(pilulas("bottom_right").assistant, false, "o selo do Assistente sai");
   for (const place of ["bottom_left", "bottom_center", "center", "top_right"]) {
     assert.equal(pilulas(place).assistant, true, `${place}: o selo fica`);
   }
+});
+
+test("o palco largo e so CSS: os cartoes e as pilulas so com 640 px ou mais de palco e a tela com mais de 500 px de altura; a faixa e a linha compacta voltam na tela baixa (o celular deitado), sempre por cima da regra dos 640 px", () => {
+  assert.deepEqual(sala.SCREEN_WIDE_ONLY.split(" "), ["hidden", "[@media(max-height:500px)]:hidden!", "@min-[640px]/tela:flex"]);
+  assert.deepEqual(sala.SCREEN_NARROW_FLEX.split(" "), ["@min-[640px]/tela:hidden", "[@media(max-height:500px)]:flex!"]);
 });
 
 test("a faixa forcada pela capa: na live, tudo menos a sala aberta com a pessoa dentro; na gravada, a espera, a sessao sem video, o fim e a capa Ativar som", () => {

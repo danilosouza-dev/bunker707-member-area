@@ -304,9 +304,9 @@ export function firstFocusTarget(input: { panelShown: boolean }): "panel-toggle"
  * As ultimas mensagens em pilulas sobre o palco (V2-8): so no desenho normal (o vertical tem o chat dele por cima do
  * video), com o painel fechado e o palco de pe. Saem na frase de removido ou banido (`blocked`), com Configurações
  * no lugar do chat no celular (`settingsTakeover`: o palco fica com 96 px) e com o card da Oferta no palco, que e a
- * unica coisa clicavel da venda e tem a prioridade do canto. Um banner ou QR Code da Na tela na fileira de baixo (ou
- * "No meio") as tira so do palco de 640 px ou mais (screen/room-screen-model.screenPlacement e RoomWideHidden, so CSS):
- * no palco estreito o item esta na faixa abaixo do video e elas continuam.
+ * unica coisa clicavel da venda e tem a prioridade do canto. Um banner ou QR Code da Na tela na fileira de baixo ou na
+ * do meio as tira so do palco de 640 px ou mais (screen/room-screen-model.screenPlacement e RoomWideHidden, so CSS): no
+ * palco estreito e no baixo o item esta na faixa abaixo do video e elas continuam.
  */
 export function chatPillsShown(input: { blocked: boolean; design: RoomDesign; offerShown: boolean; panelShown: boolean; settingsTakeover: boolean }): boolean {
   return input.design === "normal" && !input.panelShown && !input.blocked && !input.settingsTakeover && !input.offerShown;

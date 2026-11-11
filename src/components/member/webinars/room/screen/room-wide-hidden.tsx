@@ -8,7 +8,8 @@ import type { ReactNode } from "react";
  * O que sai do palco largo quando um item ocupa o lugar dele (as pilulas do chat com um item na fileira de baixo ou "No
  * meio"; o selo do Assistente com um item embaixo a direita) e continua no palco estreito, onde o item esta na faixa:
  * um recipiente `@container/tela` que cobre a caixa do palco (a mesma caixa: quem esta dentro se posiciona igual) e o
- * conteudo escondido a partir de 640 px. Sem `hidden`, o conteudo como sempre (o HTML de antes).
+ * conteudo escondido a partir de 640 px, menos na tela baixa (500 px de altura ou menos, o celular deitado), onde o item
+ * tambem esta na faixa. Sem `hidden`, o conteudo como sempre (o HTML de antes).
  */
 export function RoomWideHidden({ children, hidden }: { children: ReactNode; hidden: boolean }) {
   if (!hidden) {
@@ -16,7 +17,8 @@ export function RoomWideHidden({ children, hidden }: { children: ReactNode; hidd
   }
   return (
     <div className="@container/tela pointer-events-none absolute inset-0 z-20" data-room-wide-hidden="">
-      <div className="contents @min-[640px]/tela:hidden">{children}</div>
+      {/* A tela baixa vence sempre (!important), como os cartoes (room-screen-model.SCREEN_WIDE_ONLY). */}
+      <div className="contents @min-[640px]/tela:hidden [@media(max-height:500px)]:contents!">{children}</div>
     </div>
   );
 }
