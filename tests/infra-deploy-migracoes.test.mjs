@@ -18,27 +18,25 @@ after(limparInfraDeMentira);
 
 const skip = faltamBinarios.length ? `faltam ${faltamBinarios.join(", ")}` : false;
 const root = fileURLToPath(new URL("..", import.meta.url));
-const NOVAS = [
-  "202611100001_webinars_v6_respostas.sql",
-  "202611100002_license_state.sql",
-  "202611110001_license_state_request_host.sql",
-  "202611110002_held_sales.sql",
-  "202611120001_storage_paths_checks.sql",
-  "202611130001_license_sales.sql"
-];
 const ULTIMA_NA_PRODUCAO = "202611010001";
+// As desta leva, pelo nome: a versao pode mudar ate o merge (quando a dev entrou no branch do produto licenciado, a
+// license_state passou de 202611100002 para 202611100003 e a 202611100002 virou a webinars_v7_na_tela).
+const NOMES = ["webinars_v6_respostas", "license_state", "license_state_request_host", "held_sales", "storage_paths_checks", "license_sales"];
+const TODAS = readdirSync(join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+const NOVAS = NOMES.map((nome) => TODAS.find((f) => f.replace(/^\d+_/, "").replace(/\.sql$/, "") === nome) ?? `(falta ${nome})`);
 const dirs = [];
 after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-test("as seis migracoes novas estao no repositorio, nenhuma fora da transacao, e todas depois da ultima que a producao aplicou", () => {
-  const todas = readdirSync(join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
-  for (const nova of NOVAS) assert.ok(todas.includes(nova), nova);
-  // A CLI (`db push`) so aplica sem --include-all o que vem depois da ultima do banco: nenhuma pendente pode ser mais velha.
-  // As que vierem depois destas ficam atras delas e nao mudam a conta; uma no meio delas apareceria aqui.
-  const pendentes = todas.filter((f) => f.slice(0, 12) > ULTIMA_NA_PRODUCAO);
-  assert.deepEqual(pendentes.slice(0, NOVAS.length), NOVAS, "as pendentes na producao comecam pelas seis, na ordem");
-  for (const nova of NOVAS) {
-    assert.doesNotMatch(readFileSync(join(root, "supabase/migrations", nova), "utf8"), /^-- pg-delta: transaction=false/m, `${nova} roda numa transacao`);
+test("as migracoes novas estao no repositorio, todas depois da ultima que a producao aplicou, cada versao uma vez so e nenhuma fora da transacao", () => {
+  for (const nova of NOVAS) assert.ok(TODAS.includes(nova), nova);
+  // A CLI (`db push`) aplica sem --include-all o que vem depois da ultima do banco, na ordem das versoes.
+  const pendentes = TODAS.filter((f) => f.slice(0, 12) > ULTIMA_NA_PRODUCAO);
+  for (const nova of NOVAS) assert.ok(pendentes.includes(nova), `${nova} vem depois da ${ULTIMA_NA_PRODUCAO}`);
+  // Duas migracoes com a mesma versao: a CLI e o historico (schema_migrations, chave pela versao) so guardam uma.
+  const versoes = TODAS.map((f) => f.split("_")[0]);
+  assert.deepEqual(versoes.filter((v, i) => versoes.indexOf(v) !== i), [], "cada versao uma vez so");
+  for (const pendente of pendentes) {
+    assert.doesNotMatch(readFileSync(join(root, "supabase/migrations", pendente), "utf8"), /^-- pg-delta: transaction=false/m, `${pendente} roda numa transacao`);
   }
 });
 
