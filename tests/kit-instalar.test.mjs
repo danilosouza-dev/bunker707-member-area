@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 
 import { chavePublicaDoKit, montarPacote } from "../infra/kit/montar-pacote.mjs";
+import { chavePublicavelDaEscola } from "../infra/kit/pacote-escola.mjs";
 import {
   API,
   AWS_SEGREDO,
@@ -418,6 +419,29 @@ test("o pacote: arquivo alterado ou faltando (32), sem assinatura ou assinado po
   r = fora.rodar(["--simular"], { KIT_PASTA_INSTALACAO: join(fora.dir, "opt", "outra") });
   assert.equal(r.status, 20, r.saida);
   assert.match(r.stderr, /Abra o pacote la/);
+});
+
+test("o pacote de um fundador: a chave publicavel da imagem vai para o arquivo de segredos, e o pacote de outra API e recusado (35)", { skip }, () => {
+  // A chave publicavel que o workflow pacote-escola gravou na imagem (publica, derivada do endereco).
+  const chave = chavePublicavelDaEscola(ENDERECO);
+  const { s } = instalado({ instalacao: ENDERECO, instalacaoApi: API, chavePublicavel: chave });
+  const env = s.lerSegredos();
+  assert.equal(env.SUPABASE_PUBLISHABLE_KEY, chave, "o gateway aceita o que o navegador da imagem manda");
+  const gerador = s.chamadas().find(docker("run"));
+  assert.deepEqual(gerador.args.slice(gerador.args.indexOf("--publishable-key"), gerador.args.indexOf("--publishable-key") + 2), ["--publishable-key", chave]);
+  // O segredo JWT e as chaves de servico nasceram aqui, no servidor: nenhum deles esta no pacote.
+  const pacote = readFileSync(join(s.dir, "opt", "escola", "MANIFESTO.json"), "utf8");
+  for (const nome of ["JWT_SECRET", "SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "POSTGRES_PASSWORD"]) {
+    assert.match(env[nome], /.{16,}/, nome);
+    assert.ok(!pacote.includes(env[nome]), `${nome} nunca no pacote`);
+  }
+  assert.equal(JSON.parse(pacote).chave_publicavel, chave);
+
+  const outraApi = servidorDoInstalador({ instalacao: ENDERECO, instalacaoApi: "api2.escola.test", chavePublicavel: chave });
+  const r = outraApi.rodar(["--respostas", outraApi.respostas(respostasCompletas(BACKUP_LOCAL))]);
+  assert.equal(r.status, 35, r.saida);
+  assert.match(r.stderr, /gerado com a API em api2\.escola\.test, e esta escola usa api\.alunos\.escola\.test/);
+  assert.equal(contar(outraApi.chamadas(), (c) => c.tool === "preparar"), 0, "nada muda no servidor");
 });
 
 test("a imagem que chegou direto (docker save | ssh docker load) vale pelo id, sem o arquivo no pacote", { skip }, () => {

@@ -332,7 +332,7 @@ ${corpo}
 `;
 
 /** Um servidor com o pacote aberto na pasta da instalacao e tudo de mentira em volta. */
-export function servidorDoInstalador({ assinar = false, instalacao = null, sistema = "ubuntu-24.04", memoriaKb = 4015048 } = {}) {
+export function servidorDoInstalador({ assinar = false, instalacao = null, instalacaoApi = null, chavePublicavel = null, sistema = "ubuntu-24.04", memoriaKb = 4015048 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-instalar-"));
   dirs.push(dir);
   const { tar, id } = imagemDeMentira(dir);
@@ -344,7 +344,7 @@ export function servidorDoInstalador({ assinar = false, instalacao = null, siste
     chavePrivada = par.privateKey;
     chavePublica = chavePublicaDoKit(par.publicKey);
   }
-  montarPacote({ saida: pacote, versao: "1.0.0", app: tar, instalacao, chavePrivada, criadoEm: new Date("2026-11-11T12:00:00Z"), commit: "teste" });
+  montarPacote({ saida: pacote, versao: "1.0.0", app: tar, instalacao, instalacaoApi, chavePublicavel, chavePrivada, criadoEm: new Date("2026-11-11T12:00:00Z"), commit: "teste" });
   const estado = join(dir, "var", "lib", "escola");
   const backups = join(dir, "var", "backups", "escola");
   mkdirSync(backups, { recursive: true });

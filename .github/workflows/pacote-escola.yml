@@ -1,0 +1,149 @@
+name: Pacote da escola (lote fundador)
+
+# O Pacote da versao de uma escola do lote fundador (docs/32 §11.5 e §11.6; docs/20 §9D.6): a imagem do produto gerada
+# para o endereco dela, com a licenca exigida (BUNKER_LICENSING_MODE=enforce), as raizes publicas da cerimonia
+# (infra/licencas/raizes.json) e o Emissor de verdade gravados no codigo, sem as nossas chaves do PostHog e do Sentry; o
+# pacote montado pelo infra/kit/montar-pacote.mjs; e um artefato privado deste repositorio, que a etapa teste-instalar
+# (ou a equipe, no fundador) leva ao servidor. Nada aqui e segredo: o endereco, a API e a chave publicavel sao publicos
+# (infra/kit/pacote-escola.mjs explica a chave), e o segredo JWT, as chaves de servico e as senhas da escola nascem no
+# servidor dela, no instalador, e nunca passam por aqui. Disparo a mao (ou pela IA, pela API do GitHub), so da main.
+
+on:
+  # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece para disparo
+  # manual antes de ter rodado uma vez); o pacote so e montado por workflow_dispatch.
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/pacote-escola.yml
+  workflow_dispatch:
+    inputs:
+      endereco:
+        description: "Endereco da escola (subdominio, sem https://), ex.: escola-teste.bunker707.com.br"
+        type: string
+        required: true
+      endereco_api:
+        description: "Endereco da API (vazio: api.<endereco>)"
+        type: string
+        required: false
+        default: ""
+      versao:
+        description: "Versao do pacote, ex.: 1.0.0-ensaio.1"
+        type: string
+        required: true
+
+# Nada no nivel do workflow: o job `registrar` (push) nao recebe permissao nenhuma.
+permissions: {}
+
+jobs:
+  registrar:
+    name: Registrar o workflow
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow registrado para disparo manual (workflow_dispatch)."
+
+  pacote:
+    name: Pacote de ${{ inputs.endereco }} ${{ inputs.versao }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    # As entradas so por variavel de ambiente: nunca interpoladas no script.
+    env:
+      ENDERECO: ${{ inputs.endereco }}
+      ENDERECO_API: ${{ inputs.endereco_api }}
+      VERSAO: ${{ inputs.versao }}
+
+    steps:
+      # A imagem que vai ao comprador sai so do que chegou a main (o mesmo fluxo da producao, CONTRIBUTING.md).
+      - name: Pacote so da main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::O pacote da escola so sai da main (recebido: $GITHUB_REF)."; exit 1; }
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.11.0
+
+      # O endereco, a API, a chave publicavel (derivada do endereco), as raizes publicas e o nome do artefato.
+      - name: Valores publicos da escola
+        id: valores
+        run: node infra/kit/pacote-escola.mjs --endereco "$ENDERECO" --endereco-api "$ENDERECO_API" --versao "$VERSAO" --saida "$GITHUB_OUTPUT"
+
+      # Sem NEXT_PUBLIC_POSTHOG_* nem NEXT_PUBLIC_SENTRY_DSN: a imagem do comprador nao leva as nossas chaves (D19).
+      - name: Imagem da escola (licenca exigida)
+        env:
+          SITE_URL: ${{ steps.valores.outputs.site_url }}
+          SUPABASE_URL: ${{ steps.valores.outputs.supabase_url }}
+          CHAVE_PUBLICAVEL: ${{ steps.valores.outputs.chave_publicavel }}
+          RAIZES: ${{ steps.valores.outputs.raizes }}
+          EMISSOR_URL: ${{ steps.valores.outputs.emissor_url }}
+          TAG: ${{ steps.valores.outputs.tag }}
+        run: |
+          docker build --pull -t "$TAG" \
+            --build-arg APP_VERSION="$VERSAO" \
+            --build-arg NEXT_PUBLIC_SITE_URL="$SITE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="$CHAVE_PUBLICAVEL" \
+            --build-arg BUNKER_LICENSING_MODE=enforce \
+            --build-arg BUNKER_LICENSING_ROOTS="$RAIZES" \
+            --build-arg BUNKER_LICENSING_EMISSOR_URL="$EMISSOR_URL" \
+            .
+
+      # As guardas: a licenca e os valores da escola gravados, nenhuma chave nossa de analise ou de erros (as variaveis
+      # que a producao usa, vindas do repositorio so para a comparacao), sem src/ e sem mapa com o codigo; e o aviso do
+      # que ainda cita bunker707.com.br.
+      - name: Guardas da imagem
+        env:
+          TAG: ${{ steps.valores.outputs.tag }}
+          SITE_URL: ${{ steps.valores.outputs.site_url }}
+          SUPABASE_URL: ${{ steps.valores.outputs.supabase_url }}
+          CHAVE_PUBLICAVEL: ${{ steps.valores.outputs.chave_publicavel }}
+          RAIZES: ${{ steps.valores.outputs.raizes }}
+          EMISSOR_URL: ${{ steps.valores.outputs.emissor_url }}
+          NOSSO_POSTHOG: ${{ vars.NEXT_PUBLIC_POSTHOG_KEY }}
+          NOSSO_SENTRY: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+        run: |
+          set -euo pipefail
+          d=$(mktemp -d)
+          cid=$(docker create "$TAG")
+          docker cp "$cid:/app" "$d/app"
+          docker rm -f "$cid" >/dev/null
+          node infra/kit/conferir-imagem.mjs --pasta "$d/app" --raizes "$RAIZES" --emissor "$EMISSOR_URL" \
+            --site "$SITE_URL" --api "$SUPABASE_URL" --chave "$CHAVE_PUBLICAVEL" \
+            --proibido "$NOSSO_POSTHOG" --proibido "$NOSSO_SENTRY"
+          rm -rf "$d"
+
+      - name: Pacote da versao
+        env:
+          TAG: ${{ steps.valores.outputs.tag }}
+          ESCOLA: ${{ steps.valores.outputs.endereco }}
+          API: ${{ steps.valores.outputs.endereco_api }}
+          CHAVE_PUBLICAVEL: ${{ steps.valores.outputs.chave_publicavel }}
+          ARTEFATO: ${{ steps.valores.outputs.artefato }}
+        run: |
+          set -euo pipefail
+          docker save -o "$RUNNER_TEMP/app.tar" "$TAG"
+          node infra/kit/montar-pacote.mjs --versao "$VERSAO" --app "$RUNNER_TEMP/app.tar" --saida "$RUNNER_TEMP/pacote" \
+            --instalacao "$ESCOLA" --instalacao-api "$API" --chave-publicavel "$CHAVE_PUBLICAVEL"
+          mkdir -p "$RUNNER_TEMP/saida"
+          tar -czf "$RUNNER_TEMP/saida/$ARTEFATO.tgz" -C "$RUNNER_TEMP/pacote" .
+          sha256sum "$RUNNER_TEMP/saida/$ARTEFATO.tgz" | sed "s#$RUNNER_TEMP/saida/##" | tee "$RUNNER_TEMP/saida/$ARTEFATO.tgz.sha256"
+          rm -f "$RUNNER_TEMP/app.tar"
+
+      # Privado (como o repositorio) e por pouco tempo: o pacote leva a imagem da escola. A etapa teste-instalar o acha
+      # pelo nome (pacote-<endereco>-<versao>).
+      - name: Guardar o pacote (artefato privado)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.valores.outputs.artefato }}
+          path: ${{ runner.temp }}/saida/
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error

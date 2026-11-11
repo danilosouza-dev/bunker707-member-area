@@ -110,5 +110,9 @@ test("o estágio do build do Dockerfile recebe as três variáveis da licença (
     assert.doesNotMatch(runner, new RegExp(nome), `${nome} não vai para a imagem que roda`);
   }
 
-  assert.ok(build.indexOf("ARG BUNKER_LICENSING_MODE") < build.indexOf("RUN npm run build"), "antes do build");
+  assert.ok(build.indexOf("ARG BUNKER_LICENSING_MODE") < build.indexOf("npm run build"), "antes do build");
+  // O endereco da escola so no pacote do fundador: vazio, sai do ambiente antes do build (o Next nunca grava o vazio).
+  assert.match(build, /^ARG NEXT_PUBLIC_SITE_URL$/m);
+  assert.doesNotMatch(build, /NEXT_PUBLIC_SITE_URL=\$\{NEXT_PUBLIC_SITE_URL\}/, "nunca um ENV com o endereco vazio");
+  assert.match(build, /^RUN if \[ -z "\$\{NEXT_PUBLIC_SITE_URL:-\}" \]; then unset NEXT_PUBLIC_SITE_URL; fi; npm run build$/m);
 });

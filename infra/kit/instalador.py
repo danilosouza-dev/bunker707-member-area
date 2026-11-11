@@ -749,6 +749,12 @@ def manifesto_conferir(argv):
     if not re.fullmatch(r"\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?", versao):
         falhar("o manifesto nao tem uma versao valida.", 32)
     instalacao = manifesto.get("instalacao") or ""
+    instalacao_api = manifesto.get("instalacao_api") or ""
+    # A chave publicavel que a imagem da escola traz gravada (o pacote de um fundador, docs/20 §9D.6): publica; o passo dos
+    # segredos a grava no arquivo de segredos, para o gateway aceitar o que o navegador manda.
+    chave_publicavel = manifesto.get("chave_publicavel") or ""
+    if chave_publicavel and not re.fullmatch(r"sb_publishable_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{8}", str(chave_publicavel)):
+        falhar("o manifesto traz uma chave publicavel fora do formato.", 32)
     if gravar and chaves:
         # A chave que conferiu este pacote passa a ser a deste servidor (rodar de novo e atualizar conferem com ela).
         novas = [c for c in (manifesto.get("chaves_seguintes") or []) if isinstance(c, str) and chave_publica_em_pem(c)]
@@ -760,6 +766,8 @@ def manifesto_conferir(argv):
     print("\n".join([
         sh("PACOTE_VERSAO", versao),
         sh("PACOTE_INSTALACAO", normalizar_host(instalacao) if instalacao else ""),
+        sh("PACOTE_INSTALACAO_API", normalizar_host(instalacao_api) if instalacao_api else ""),
+        sh("PACOTE_CHAVE_PUBLICAVEL", str(chave_publicavel)),
         sh("PACOTE_APP_IMAGEM", str(app["tags"][0])),
         sh("PACOTE_APP_ID", str(app["id"])),
         sh("PACOTE_MANIFESTO_SHA256", hashlib.sha256(bruto).hexdigest()),

@@ -223,6 +223,10 @@ conferir_pacote() {
     if [ -n "$PACOTE_INSTALACAO" ] && [ -n "${ENDERECO:-}" ] && [ "$PACOTE_INSTALACAO" != "$ENDERECO" ]; then
         falhar 35 "este pacote foi gerado para $PACOTE_INSTALACAO, e esta escola e $ENDERECO."
     fi
+    # A imagem do fundador traz gravado tambem o endereco da API (docs/20 §9D.6).
+    if [ -n "$PACOTE_INSTALACAO_API" ] && [ -n "${ENDERECO_API:-}" ] && [ "$PACOTE_INSTALACAO_API" != "$ENDERECO_API" ]; then
+        falhar 35 "este pacote foi gerado com a API em $PACOTE_INSTALACAO_API, e esta escola usa $ENDERECO_API."
+    fi
 }
 
 # As respostas: o arquivo de respostas, o que a instalacao ja tem (o arquivo de segredos) e, no terminal, as perguntas.
@@ -299,12 +303,15 @@ passo_imagens() {
 }
 
 passo_segredos() {
-    local erro
+    local erro publicavel=()
+    # A imagem do pacote de um fundador ja traz a chave publicavel gravada (publica; docs/20 §9D.6): o arquivo de segredos
+    # usa a mesma. O segredo JWT, as chaves de servico e as senhas nascem aqui e nunca saem deste servidor.
+    [ -z "$PACOTE_CHAVE_PUBLICAVEL" ] || publicavel=(--publishable-key "$PACOTE_CHAVE_PUBLICAVEL")
     if [ ! -f "$ENV_FILE" ]; then
         printf '  Gerando dentro da imagem do app (o servidor nao precisa de Node); nada aparece na tela.\n'
         erro=$(mktemp)
         if ! docker run --rm --network none --user 0:0 -v "$KIT_PASTA_COMPOSE:/kit" -w /kit --entrypoint node "$PACOTE_APP_IMAGEM" \
-            generate-secrets.mjs --kit --domain "$ENDERECO" --api-domain "$ENDERECO_API" --email "$EMAIL_DONO" >/dev/null 2>"$erro"; then
+            generate-secrets.mjs --kit --domain "$ENDERECO" --api-domain "$ENDERECO_API" --email "$EMAIL_DONO" "${publicavel[@]}" >/dev/null 2>"$erro"; then
             falhar 40 "o gerador de segredos parou: $(tail -n 3 "$erro" | tr '\n' ' ')"
         fi
         rm -f "$erro"
@@ -315,6 +322,11 @@ passo_segredos() {
             | kit_py segredos-trocar "$ENV_FILE"
     else
         printf '  O arquivo de segredos ja existe: nada e gerado de novo (as senhas do banco continuam as mesmas).\n'
+        if [ -n "$PACOTE_CHAVE_PUBLICAVEL" ] && [ "$(env_value SUPABASE_PUBLISHABLE_KEY)" != "$PACOTE_CHAVE_PUBLICAVEL" ]; then
+            # Publica: o gateway e o app sobem de novo com ela no passo dos servicos.
+            printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$PACOTE_CHAVE_PUBLICAVEL" | kit_py segredos-trocar "$ENV_FILE"
+            printf '  A chave publicavel passa a ser a que a imagem deste pacote traz (publica; o gateway sobe de novo com ela).\n'
+        fi
     fi
     chmod 600 "$ENV_FILE"
     # As respostas ficam no arquivo de segredos desde ja: rodar de novo nao pergunta o que ja foi respondido.

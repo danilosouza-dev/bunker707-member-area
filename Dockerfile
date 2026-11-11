@@ -17,6 +17,10 @@
 # Sem elas, a imagem sai "off" (a nossa escola). Modo digitado errado, ou "enforce" sem raizes validas ou sem o Emissor
 # em https, para o build. As tres ficam so no estagio do build: a imagem que roda nao as recebe, e trocar a variavel no
 # conteiner depois nao muda nada.
+#
+# O pacote de uma escola do lote fundador (.github/workflows/pacote-escola.yml; docs/20 §9D.6) grava tambem o endereco
+# dela no codigo: --build-arg NEXT_PUBLIC_SITE_URL=https://alunos.escola.com.br. Sem ele, a variavel sai do ambiente
+# antes do build (o Next nunca grava o endereco vazio) e a producao continua lendo o endereco ao rodar.
 
 ARG NODE_IMAGE=node:24.11.1-alpine3.22
 
@@ -40,6 +44,7 @@ ARG APP_VERSION=dev
 ARG BUNKER_LICENSING_MODE
 ARG BUNKER_LICENSING_ROOTS
 ARG BUNKER_LICENSING_EMISSOR_URL
+ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_OUTPUT=standalone \
     NODE_ENV=production \
@@ -55,7 +60,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     BUNKER_LICENSING_EMISSOR_URL="${BUNKER_LICENSING_EMISSOR_URL}"
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN if [ -z "${NEXT_PUBLIC_SITE_URL:-}" ]; then unset NEXT_PUBLIC_SITE_URL; fi; npm run build
 
 # ---- runtime: so o servidor standalone, estaticos e public, rodando como usuario sem privilegio ----
 FROM ${NODE_IMAGE} AS runner

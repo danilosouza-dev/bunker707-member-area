@@ -2,7 +2,8 @@
 // servidor do comprador (nao vai no pacote).
 //
 //   node infra/kit/montar-pacote.mjs --versao 1.0.0 --app app.tar --saida pacote/ \
-//       [--imagem terceiros.tar ...] [--instalacao alunos.escola.com.br] [--assinar chave-do-pacote.pem]
+//       [--imagem terceiros.tar ...] [--instalacao alunos.escola.com.br [--instalacao-api api.alunos.escola.com.br]
+//        --chave-publicavel sb_publishable_...] [--assinar chave-do-pacote.pem]
 //
 // - Copia do repositorio so o que o servidor usa (uma lista fechada, abaixo): o kit (infra/kit), o compose do kit com o
 //   Caddy, o Envoy, os modelos de e-mail e os scripts de inicio do banco (infra/compose), os scripts reaproveitados
@@ -11,7 +12,9 @@
 // - As imagens vem prontas de `docker save` (a do app e, se quiser, as de terceiros): copiadas para imagens/, com o
 //   sha256 do arquivo, o id da imagem (o resumo da configuracao, que o `docker image inspect` mostra depois do
 //   `docker load`) e as tags, lidos do manifest.json de dentro do arquivo. No lote fundador, a imagem e por Instalacao
-//   (--instalacao): o instalador recusa o pacote noutro endereco.
+//   (--instalacao e --instalacao-api, os dois enderecos gravados nela): o instalador recusa o pacote noutro endereco, e
+//   grava no arquivo de segredos a chave publicavel que a imagem traz (--chave-publicavel, publica; o workflow
+//   pacote-escola a deriva do endereco, infra/kit/pacote-escola.mjs).
 // - Escreve MANIFESTO.json: formato 1, produto, versao, data, commit, instalacao, imagens, imagens de terceiros do compose
 //   (presas pelo resumo) e o sha256, o tamanho e o modo de cada arquivo.
 // - --assinar: assina o MANIFESTO.json com uma chave Ed25519 (PEM, cifrada com a senha em PACOTE_SENHA_DA_CHAVE) e grava
@@ -32,7 +35,7 @@ export const PRODUTO = "area-de-membros";
 
 /** O que vai no pacote: pastas inteiras (so arquivos, sem subpastas, salvo dito) e arquivos soltos. */
 export const LISTA_DO_PACOTE = [
-  { pasta: "infra/kit", fora: ["fixar-imagens.mjs", "montar-pacote.mjs"] },
+  { pasta: "infra/kit", fora: ["fixar-imagens.mjs", "montar-pacote.mjs", "pacote-escola.mjs", "conferir-imagem.mjs"] },
   { arquivo: "infra/compose/docker-compose.kit.yml" },
   { arquivo: "infra/compose/.env.example" },
   { arquivo: "infra/compose/generate-secrets.mjs" },
@@ -122,10 +125,12 @@ export function chavePublicaDoKit(chavePrivadaOuPublica) {
   return publica.export({ type: "spki", format: "der" }).toString("base64");
 }
 
-export function montarPacote({ raiz = RAIZ_DO_REPOSITORIO, saida, versao, app, imagens = [], instalacao = null, chavePrivada = null, criadoEm = new Date(), commit = null, chavesSeguintes = [] }) {
+export function montarPacote({ raiz = RAIZ_DO_REPOSITORIO, saida, versao, app, imagens = [], instalacao = null, instalacaoApi = null, chavePublicavel = null, chavePrivada = null, criadoEm = new Date(), commit = null, chavesSeguintes = [] }) {
   if (!/^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$/.test(versao ?? "")) sair("--versao precisa ser como 1.0.0.");
   if (!app) sair("--app precisa do arquivo da imagem do app (docker save).");
   if (instalacao && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(instalacao)) sair("--instalacao e o endereco da escola, como alunos.escola.com.br.");
+  if (instalacaoApi && (!instalacao || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(instalacaoApi))) sair("--instalacao-api e o endereco da API da escola, como api.alunos.escola.com.br, junto com --instalacao.");
+  if (chavePublicavel && (!instalacao || !/^sb_publishable_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{8}$/.test(chavePublicavel))) sair("--chave-publicavel e a chave publicavel gravada na imagem da escola (sb_publishable_...), junto com --instalacao.");
   if (existsSync(saida) && readdirSync(saida).length > 0) sair(`a pasta ${saida} nao esta vazia.`);
   mkdirSync(saida, { recursive: true });
 
@@ -162,6 +167,8 @@ export function montarPacote({ raiz = RAIZ_DO_REPOSITORIO, saida, versao, app, i
     criado_em: criadoEm.toISOString().replace(/\.\d{3}Z$/, "Z"),
     commit,
     instalacao,
+    instalacao_api: instalacaoApi,
+    chave_publicavel: chavePublicavel,
     imagens: listaDeImagens,
     imagens_de_terceiros: imagensDeTerceiros(raiz),
     chaves_seguintes: chavesSeguintes,
@@ -189,11 +196,13 @@ function principal(argv) {
     else if (a === "--imagem") opcoes.imagens.push(valor());
     else if (a === "--saida") opcoes.saida = valor();
     else if (a === "--instalacao") opcoes.instalacao = valor();
+    else if (a === "--instalacao-api") opcoes.instalacaoApi = valor();
+    else if (a === "--chave-publicavel") opcoes.chavePublicavel = valor();
     else if (a === "--assinar") opcoes.assinar = valor();
     else if (a === "--chave-publica") opcoes.chavePublica = valor();
     else if (a === "--commit") opcoes.commit = valor();
     else if (a === "-h" || a === "--help") {
-      process.stdout.write(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 24).join("\n") + "\n");
+      process.stdout.write(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(0, 28).join("\n") + "\n");
       process.exit(0);
     } else sair(`opcao desconhecida: ${a}`);
   }

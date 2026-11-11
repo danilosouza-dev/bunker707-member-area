@@ -17,7 +17,8 @@ function usage(message) {
   sh infra/compose/generate-secrets.sh --local [--force]
   sh infra/compose/generate-secrets.sh --domain <app> --api-domain <api> --studio-domain <studio> \\
       --email <acme> [--studio-ips "<cidr> <cidr>"] [--force]
-  node generate-secrets.mjs --kit --domain <escola> --api-domain <api> --email <dono>   (instalador do kit)`);
+  node generate-secrets.mjs --kit --domain <escola> --api-domain <api> --email <dono> [--publishable-key <chave>]
+      (instalador do kit; --publishable-key: a chave publicavel que a imagem do pacote da escola ja traz gravada)`);
   process.exit(message ? 2 : 0);
 }
 
@@ -43,6 +44,7 @@ for (let index = 0; index < args.length; index += 1) {
     case "--studio-domain": options.studioDomain = next(); break;
     case "--email": options.email = next(); break;
     case "--studio-ips": options.studioIps = next(); break;
+    case "--publishable-key": options.publishableKey = next(); break;
     case "--help": case "-h": usage(); break;
     default: usage(`opcao desconhecida: ${arg}`);
   }
@@ -52,6 +54,7 @@ const hostPattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9
 
 if (options.kit && options.local) usage("--kit e --local nao andam juntos.");
 if (options.kit && options.studioDomain) usage("o kit nao tem Studio: --studio-domain nao vale com --kit.");
+if (options.publishableKey !== undefined && !options.kit) usage("--publishable-key so vale com --kit (a imagem do pacote da escola traz a chave).");
 
 if (!options.local) {
   const required = [["--domain", options.domain], ["--api-domain", options.apiDomain]];
@@ -116,12 +119,20 @@ function opaqueKey(prefix) {
   return `${intermediate}_${checksum}`;
 }
 
+// A chave publicavel que a imagem do pacote da escola ja traz gravada (docs/20 §9D.6): publica, no mesmo formato, com o
+// resumo conferido (um erro de copia nunca vira uma chave que o navegador e o gateway nao combinam).
+if (options.publishableKey !== undefined) {
+  const match = /^(sb_publishable_[A-Za-z0-9_-]{22})_([A-Za-z0-9_-]{8})$/.exec(options.publishableKey);
+  const checksum = match && createHash("sha256").update(`${PROJECT_REF}|${match[1]}`).digest("base64url").slice(0, 8);
+  if (!match || checksum !== match[2]) usage("--publishable-key nao e uma chave publicavel valida (sb_publishable_..., com o resumo certo).");
+}
+
 const secrets = {
   POSTGRES_PASSWORD: hex(24),
   JWT_SECRET: jwtSecret,
   ANON_KEY: signHs256({ role: "anon", iss: "supabase", iat: issuedAt, exp: expiresAt }),
   SERVICE_ROLE_KEY: signHs256({ role: "service_role", iss: "supabase", iat: issuedAt, exp: expiresAt }),
-  SUPABASE_PUBLISHABLE_KEY: opaqueKey("sb_publishable_"),
+  SUPABASE_PUBLISHABLE_KEY: options.publishableKey ?? opaqueKey("sb_publishable_"),
   SUPABASE_SECRET_KEY: opaqueKey("sb_secret_"),
   JWT_KEYS: JSON.stringify(jwtKeys),
   JWT_JWKS: JSON.stringify(jwtJwks),
