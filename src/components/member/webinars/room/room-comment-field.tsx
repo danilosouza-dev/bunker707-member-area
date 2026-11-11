@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useAutoGrowTextarea } from "@/components/use-auto-grow-textarea";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { RoomCommentAvatar } from "./room-comment";
@@ -9,8 +10,10 @@ import { RoomPill } from "./room-pill";
 
 // O campo "Adicione um comentário" do YouTube no chat e nas Perguntas da sala (docs/31, a sala no estilo do YouTube;
 // spec §9): so da sala (a gaveta do vertical continua com o campo de antes). Fechado: a faixa com a linha de 1 px em
-// cima, o avatar de 24 (a minha foto ou as minhas iniciais; a pessoa antes do aceite) e o textarea sem
-// caixa, de uma linha que cresce ate 100 px, com a linha de 1 px embaixo. Com o foco, a linha de 2 px no tom do texto
+// cima, o avatar de 24 (a minha foto ou as minhas iniciais, tambem antes do aceite, D82; no console, as de quem esta
+// nele) e o textarea sem caixa, de uma linha que cresce ate 100 px, com a linha de 1 px embaixo. Desde 11/11/2026 (D81)
+// a altura e medida pelo useAutoGrowTextarea: montado no painel escondido (o painel guardado fechado), o campo fica com
+// a linha inteira e a frase, e mede de novo quando aparece. Com o foco, a linha de 2 px no tom do texto
 // cresce do centro; aberto com rascunho e sem o foco, a linha de 1 px mais forte. Aberto (o foco, ou o texto que ficou),
 // embaixo: a dica, e o rodape com o Cancelar e o envio azul (desligado com o campo vazio). Desde 10/11/2026 (D64) o
 // rodape nao tem mais a pilula Anonima: ninguem pergunta como anonimo.
@@ -22,8 +25,8 @@ export type RoomCommentFieldProps = {
   id?: string;
   ariaLabel: string;
   /**
-   * De quem e o campo: a foto do perfil quando vem (`imageSrc`), senao o nome para as iniciais; sem nome (antes do
-   * aceite), a pessoa; `team`, o icone da equipe (o console).
+   * De quem e o campo: a foto do perfil quando vem (`imageSrc`), senao o nome para as iniciais (D82: na sala, tambem
+   * antes do aceite; no console, o nome de quem esta nele); sem nome, a pessoa, ou com `team` o icone da equipe.
    */
   avatar: { imageSrc?: string | null; kind?: "person" | "team"; name: string | null };
   /** Enviando: o envio gira e fica desligado. */
@@ -80,15 +83,9 @@ export function RoomCommentField({
   const stripRef = useRef<HTMLFormElement | null>(null);
   const line = composerLine({ draft: value, expanded, focused });
 
-  // O campo cresce com o texto ate o teto e depois rola.
-  useLayoutEffect(() => {
-    const area = areaRef.current;
-    if (!area) {
-      return;
-    }
-    area.style.height = "auto";
-    area.style.height = `${Math.min(area.scrollHeight, MAX_HEIGHT)}px`;
-  }, [value]);
+  // O campo cresce com o texto ate o teto e depois rola; mede de novo quando aparece (o painel guardado fechado que abre,
+  // D81), nunca fica com 0px.
+  useAutoGrowTextarea(areaRef, value, MAX_HEIGHT);
 
   useEffect(() => {
     const strip = stripRef.current;
