@@ -206,6 +206,12 @@ export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
 
 export const saveScriptItemsSchema = z.object({
   items: z.array(scriptItemDraftSchema).max(CHAT_LIMITS.scriptItemsMax, CHAT_MESSAGES.tooManyItems),
+  /**
+   * Os ids que o editor carregou (o roteiro que ele tinha na tela): so esses podem sair quando faltam na lista nova. Um
+   * item que o console guardou depois ("Guardar na lista") nunca e apagado por um Salvar com a pagina velha. Ausente:
+   * nada sai.
+   */
+  loadedIds: z.array(uuidSchema).max(CHAT_LIMITS.scriptItemsMax, CHAT_MESSAGES.tooManyItems).default([]),
   webinarId: uuidSchema
 });
 export type SaveScriptItemsInput = z.infer<typeof saveScriptItemsSchema>;

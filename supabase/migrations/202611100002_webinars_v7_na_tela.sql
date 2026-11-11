@@ -27,7 +27,9 @@
 -- - webinar_open_session (mesma assinatura, o corpo completo da 202610290001): a mensagem `scripted` leva a foto do
 --   item, e a sessao `live` nao solta o roteiro ao abrir (R8: os itens da live entram pelo tick, contados do
 --   started_at, nunca antes do "Comecar para todos"). Ate o adendo a live nao tinha roteiro (o editor e as acoes so o
---   aceitam na gravada), entao o app de antes nao percebe a troca;
+--   aceitam na gravada), entao o app de antes nao percebe a troca. Ao contrario, o app novo num banco sem esta migracao
+--   recusa (409, antes de gravar) toda escrita do roteiro da Live ao vivo: a funcao de antes soltaria no "Comecar para
+--   todos" todo o roteiro com minuto da live de uma vez (docs/21 §9.13); a gravada segue como antes;
 -- - as colunas novas nao entram nas listas que o app sempre le (SESSION_COLUMNS, CHAT_MESSAGE_COLUMNS,
 --   SCRIPT_ITEM_COLUMNS): o app publicado antes da migracao continua funcionando; tabelas novas so do service_role (o
 --   aluno nunca le nem grava direto); nada de create policy, alter policy, delete nem truncate;

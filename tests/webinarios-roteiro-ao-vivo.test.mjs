@@ -510,7 +510,7 @@ test("R8 Soltar agora na live: o item entra na sessao com a foto de quem comenta
 });
 
 test("R8 e R9 salvar o roteiro da live: a foto de cada item (ausente fica a de antes, nula tira); o banco sem a coluna salva sem foto e recusa gravar uma foto (409)", async () => {
-  usar();
+  const db = usar();
   const base = { body: "Mensagem", kind: "message", personaRole: "student", phrase: null, phraseDelayMs: 0, status: "draft" };
   const salvo = ok(
     await scriptActions.saveScriptItems({
@@ -520,6 +520,8 @@ test("R8 e R9 salvar o roteiro da live: a foto de cada item (ausente fica a de a
         { ...base, id: ITENS.aos11, offsetMs: 11 * MIN, personaAvatarPath: null, personaName: "Bia C.", triggerKind: "at_offset" },
         { ...base, offsetMs: null, personaAvatarPath: FOTO, personaName: "Nova", triggerKind: "manual" }
       ],
+      // O editor carregou os 7: os que nao vieram saem.
+      loadedIds: db.tables.webinar_chat_script_items.map((row) => row.id),
       webinarId: WEBINAR
     })
   );
@@ -534,8 +536,10 @@ test("R8 e R9 salvar o roteiro da live: a foto de cada item (ausente fica a de a
     "a foto de antes fica quando o rascunho nao a traz; nula tira"
   );
 
+  // Sem a 202611100002, a Live gravada segue: o roteiro salva sem foto e so gravar uma foto pede a migracao.
   const semColuna = semAColunaDaFoto(usar());
-  const semFoto = ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: MIN, personaName: "Bia C.", triggerKind: "at_offset" }], webinarId: WEBINAR }));
+  semColuna.tables.webinars.find((row) => row.id === WEBINAR).kind = "simulated";
+  const semFoto = ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: MIN, personaName: "Bia C.", triggerKind: "at_offset" }], loadedIds: semColuna.tables.webinar_chat_script_items.map((row) => row.id), webinarId: WEBINAR }));
   assert.equal(semFoto.items.length, 1);
   assert.equal(semFoto.items[0].personaAvatarPath, null);
   const comFoto = await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: MIN, personaAvatarPath: FOTO, personaName: "Bia C.", triggerKind: "at_offset" }], webinarId: WEBINAR });
@@ -544,6 +548,108 @@ test("R8 e R9 salvar o roteiro da live: a foto de cada item (ausente fica a de a
   assert.deepEqual([enviar.status, enviar.error], [409, COPY.erros.migracao("202611100002")], "so gravar uma foto pede a migracao");
   ok(await scriptActions.sendScriptedComment({ body: "Oi", personaName: "Bia C.", sessionId: SESSION }));
   assert.ok(semColuna.tables.webinar_chat_messages.some((row) => row.body === "Oi"), "sem foto, o Enviar agora segue");
+});
+
+test("S1 e achado 2 (revisao de 11/11/2026): sem a 202611100002, nenhuma escrita do roteiro da Live ao vivo passa (409 da migracao, antes de gravar); a gravada segue como antes", async () => {
+  // A webinar_open_session de antes da 202611100002 solta TODO o roteiro com minuto no "Começar para todos" (sem o
+  // filtro da live): sem a migracao, o roteiro da live nao pode ganhar itens.
+  const db = semAColunaDaFoto(usar());
+  const antes = JSON.stringify(db.tables.webinar_chat_script_items);
+  const escritasAntes = db.calls.writes.filter((write) => write.table === "webinar_chat_script_items").length;
+  const migracao = COPY.erros.migracaoLive("202611100002");
+  assert.equal(migracao, "O roteiro da live ao vivo precisa da atualização do banco (migração 202611100002).");
+  const base = { body: "Mensagem", kind: "message", personaName: "Bia C.", personaRole: "student", phrase: null, phraseDelayMs: 0, status: "draft" };
+
+  const salvar = await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: MIN, triggerKind: "at_offset" }], loadedIds: [], webinarId: WEBINAR });
+  assert.deepEqual([salvar.ok, salvar.status, salvar.error], [false, 409, migracao], "salvar, mesmo sem foto");
+  const importar = await scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n12;Duda;Aluno;oi", webinarId: WEBINAR });
+  assert.deepEqual([importar.ok, importar.status, importar.error], [false, 409, migracao], "importar");
+  const substituir = await scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n12;Duda;Aluno;oi", replace: true, webinarId: WEBINAR });
+  assert.deepEqual([substituir.status, substituir.error], [409, migracao], "substituir");
+  const guardar = await scriptActions.saveScriptComment({ body: "Pergunta boa", personaName: "Caio D.", sessionId: SESSION });
+  assert.deepEqual([guardar.ok, guardar.status, guardar.error], [false, 409, migracao], "o Guardar na lista do console");
+  assert.equal(JSON.stringify(db.tables.webinar_chat_script_items), antes, "nada gravado no roteiro");
+  assert.equal(db.calls.writes.filter((write) => write.table === "webinar_chat_script_items").length, escritasAntes, "nenhuma escrita na tabela do roteiro");
+  // O Enviar agora nao cria item do roteiro: sem foto, segue (a mensagem scripted sem item ja existia antes).
+  ok(await scriptActions.sendScriptedComment({ body: "Oi", personaName: "Bia C.", sessionId: SESSION }));
+
+  // A gravada, no mesmo banco sem a migracao: salva, importa e guarda como antes.
+  db.tables.webinars.find((row) => row.id === WEBINAR).kind = "simulated";
+  ok(await scriptActions.saveScriptItems({ items: [{ ...base, offsetMs: MIN, triggerKind: "at_offset" }], loadedIds: [], webinarId: WEBINAR }));
+  ok(await scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n0:12;Duda;Aluno;oi", webinarId: WEBINAR }));
+  ok(await scriptActions.saveScriptComment({ body: "Pergunta boa", personaName: "Caio D.", sessionId: SESSION }));
+});
+
+test("achado 3 (revisao de 11/11/2026): o Salvar do editor com a pagina velha so apaga os ids que carregou; o comentario que o console guardou depois fica, e a foto que o console pos em todos nao volta", async () => {
+  const db = usar();
+  // O editor abriu e carregou os 7 itens (Caio D. sem foto).
+  const carregados = db.tables.webinar_chat_script_items.map((row) => row.id);
+  // Depois, no console: "Guardar na lista" com foto e "Usar esta foto em todos os comentários de Caio D.".
+  const guardado = ok(await scriptActions.saveScriptComment({ applyToName: true, body: "Pergunta boa", personaAvatarPath: OUTRA_FOTO, personaName: "Caio D.", personaRole: "team", sessionId: SESSION }));
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, OUTRA_FOTO);
+
+  // O editor (a pagina velha) tira o item desligado e salva o resto como carregou: a foto que nao mudou vai ausente.
+  const base = { kind: "message", phrase: null, phraseDelayMs: 0, status: "draft" };
+  const ficam = db.tables.webinar_chat_script_items.filter((row) => carregados.includes(row.id) && row.id !== ITENS.desligado);
+  const salvo = ok(
+    await scriptActions.saveScriptItems({
+      items: ficam.map((row) => ({ ...base, body: row.body, id: row.id, offsetMs: row.offset_ms, personaName: row.persona_name, personaRole: row.persona_role, triggerKind: row.trigger_kind })),
+      loadedIds: carregados,
+      webinarId: WEBINAR
+    })
+  );
+  const ids = salvo.items.map((item) => item.id);
+  assert.ok(ids.includes(guardado.item.id), "o comentario guardado pelo console depois fica");
+  assert.ok(!ids.includes(ITENS.desligado), "o que o editor carregou e tirou sai");
+  assert.equal(ids.length, 7);
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, OUTRA_FOTO, "a foto que o console pos em todos nao volta");
+  assert.equal(salvo.items.find((item) => item.id === guardado.item.id).personaAvatarPath, OUTRA_FOTO);
+
+  // Sem os ids carregados (o pedido de antes), nada sai.
+  const semIds = ok(await scriptActions.saveScriptItems({ items: [], webinarId: WEBINAR }));
+  assert.equal(semIds.items.length, 7, "sem loadedIds, o Salvar nao apaga nada");
+});
+
+test("achado 1 (revisao de 11/11/2026): o CSV do roteiro da live le e escreve o Tempo em minutos da live; a gravada segue em segundos", async () => {
+  const db = usar();
+  const importado = ok(await scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n12;Duda;Aluno;Cheguei\n12:30;Lia;Equipe;Bem-vindos", webinarId: WEBINAR }));
+  assert.equal(importado.imported, 2);
+  assert.deepEqual(importado.items.slice(-2).map((item) => [item.personaName, item.offsetMs]), [["Duda", 12 * MIN], ["Lia", 12 * MIN + 30_000]], "12 = 12 minutos da live");
+  const exportado = ok(await scriptActions.exportScriptCsv({ webinarId: WEBINAR }));
+  assert.match(exportado.csv, /\r?\n12:00;Duda;Aluno;Cheguei/);
+  assert.match(exportado.csv, /\r?\n12:30;Lia;Equipe;Bem-vindos/);
+  assert.match(exportado.csv, /\r?\n5:30;Bia C\.;Aluno;/, "o item aos 5:30 da live");
+  // A volta: o arquivo exportado importado de novo da os mesmos minutos.
+  const deNovo = ok(await scriptActions.importScriptCsv({ csv: exportado.csv, replace: true, webinarId: WEBINAR }));
+  assert.deepEqual(deNovo.items.map((item) => item.offsetMs).sort((a, b) => a - b), importado.items.filter((item) => item.offsetMs != null && item.status !== "disabled").map((item) => item.offsetMs).sort((a, b) => a - b));
+
+  db.tables.webinars.find((row) => row.id === WEBINAR).kind = "simulated";
+  const gravada = ok(await scriptActions.importScriptCsv({ csv: "Tempo;Nome;Papel;Mensagem\n12;Duda;Aluno;oi", webinarId: WEBINAR }));
+  assert.equal(gravada.items.at(-1).offsetMs, 12_000, "na gravada, 12 = 12 segundos do video");
+});
+
+test("S4 e achado 7 (revisao de 11/11/2026): o 'Usar esta foto em todos' chega a todos os itens com o nome, alem dos 1.000 primeiros (o teto do PostgREST)", async () => {
+  const tables = cenario();
+  tables.webinar_chat_script_items = Array.from({ length: 1005 }, (_, index) =>
+    item(`dddddddd-0000-4000-8000-${String(100000 + index).padStart(12, "0")}`, { offset_ms: null, persona_name: "Bia C.", position: index, trigger_kind: "manual" })
+  );
+  const db = usar(tables);
+  const enviado = ok(await scriptActions.sendScriptedComment({ applyToName: true, body: "Oi", personaAvatarPath: FOTO, personaName: "Bia C.", sessionId: SESSION }));
+  assert.equal(enviado.photoApplied, 1005);
+  assert.ok(db.tables.webinar_chat_script_items.every((row) => row.persona_avatar_path === FOTO), "todos, nenhum fica sem a foto");
+});
+
+test("achado 12 (revisao de 11/11/2026): na Live ao vivo, o Enviar agora e o Soltar agora valem na espera e no ar; so os itens 'Num minuto da live' esperam o Começar para todos", async () => {
+  const db = usar(cenario({ sessao: { started_at: null, status: "waiting" } }));
+  assert.equal((await tick.runLiveScriptTick({ db, now: new Date() })).released, 0, "na espera, o tick nao solta nada");
+  const enviado = ok(await scriptActions.sendScriptedComment({ body: "Boa noite, já vamos começar", personaName: "Caio D.", personaRole: "team", sessionId: SESSION }));
+  assert.equal(enviado.message.source, "scripted");
+  const solto = ok(await scriptActions.fireScriptItem({ itemId: ITENS.botao, sessionId: SESSION }));
+  assert.equal(solto.message.scriptItemId, ITENS.botao);
+  const minuto = ok(await scriptActions.fireScriptItem({ itemId: ITENS.aos11, sessionId: SESSION }));
+  assert.equal(minuto.message.scriptItemId, ITENS.aos11, "o Soltar agora e manual: vale tambem para um item com minuto");
+  assert.equal(soltas(db).length, 4);
+  assert.equal((await tick.runLiveScriptTick({ db, now: new Date() })).released, 0, "e o tick continua sem soltar nada antes do started_at");
 });
 
 /** Cabecalho WebP VP8X (32 bytes, ou `total`) com o canvas e as flags; `anim`: o chunk ANIM. */

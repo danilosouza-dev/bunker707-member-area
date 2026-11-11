@@ -14,7 +14,10 @@
 // content-assets/webinars/personas/<24 hex>.webp pelo mesmo persistImageAsset do banner da Na tela; so o caminho volta).
 // O item guarda o caminho da foto e a mensagem solta guarda a copia (o "Soltar agora", o tick da live e o "Enviar
 // agora"); o "Usar esta foto em todos os comentários de {nome}" aplica a foto aos itens com o mesmo nome. Banco sem a
-// 202611100002: o roteiro segue sem foto e so gravar uma foto volta 409 com a frase da migracao.
+// 202611100002: o roteiro da gravada segue sem foto e so gravar uma foto volta 409 com a frase da migracao; o da Live ao
+// vivo nao grava nada (salvar, importar, "Guardar na lista": 409 antes de gravar), porque a webinar_open_session de antes
+// soltaria todo o roteiro da live de uma vez no "Começar para todos". O Salvar do editor so apaga os itens que ele
+// carregou (`loadedIds`): o que o console guardou depois fica.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
@@ -92,6 +95,8 @@ export type SavedScriptComment = { item: ScriptItem; photoApplied: number };
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
 /** O aviso da foto de quem comenta no banco sem a 202611100002. */
 const PERSONA_MIGRATION_MESSAGE = COMENTARIOS.erros.migracao(WEBINARS_SCREEN_MIGRATION);
+/** O aviso do roteiro da Live ao vivo no banco sem a 202611100002. */
+const LIVE_SCRIPT_MIGRATION_MESSAGE = COMENTARIOS.erros.migracaoLive(WEBINARS_SCREEN_MIGRATION);
 
 /* ------------------------------------------------------------------------------------------------
  * Apoio
@@ -244,6 +249,19 @@ async function requireScriptWebinar(db: WebinarsDb, id: string) {
   return row;
 }
 
+/**
+ * As fotos do roteiro e a conferencia do banco para a Live ao vivo: sem a 202611100002 (sem a coluna da foto), a
+ * webinar_open_session de antes soltaria no "Começar para todos" todos os itens com minuto de uma vez, entao nenhuma
+ * escrita do roteiro da live passa (409 com a frase da migracao, antes de gravar). A gravada segue como antes.
+ */
+async function scriptAvatarsFor(db: WebinarsDb, row: { id: string; kind: string }): Promise<PersonaAvatars> {
+  const avatars = await readScriptPersonaAvatars(db, row.id);
+  if (row.kind === "live" && !avatars.available) {
+    throw new WebinarError(LIVE_SCRIPT_MIGRATION_MESSAGE, 409);
+  }
+  return avatars;
+}
+
 /** O roteiro gravado com a foto de quem comenta de cada item (banco sem a coluna: sem foto). */
 async function scriptItemsWithAvatars(db: WebinarsDb, webinarId: string, rows?: Awaited<ReturnType<typeof listScriptItemRows>>): Promise<ScriptItem[]> {
   const [items, avatars] = await Promise.all([rows ? Promise.resolve(rows) : listScriptItemRows(db, webinarId), readScriptPersonaAvatars(db, webinarId)]);
@@ -267,8 +285,9 @@ async function withPersonaColumn<T>(work: () => Promise<T>): Promise<T> {
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * [messaging.write] Grava o roteiro inteiro (os itens enviados ficam, os de fora saem): a posicao e a ordem da
- * lista; os itens "Quando o apresentador diz" sao resolvidos agora, com a transcricao da gravacao (D6-b).
+ * [messaging.write] Grava o roteiro inteiro (os itens enviados ficam; dos que o editor carregou, `loadedIds`, os de fora
+ * saem; o que o console guardou depois fica): a posicao e a ordem da lista; os itens "Quando o apresentador diz" sao
+ * resolvidos agora, com a transcricao da gravacao (D6-b).
  */
 export async function saveScriptItems(input: SaveScriptItemsInput): Promise<ActionResult<SavedScript>> {
   return runAdminAction("messaging.write", saveScriptItemsSchema, input, async ({ input: data, user }) => {
@@ -282,15 +301,16 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
       throw new WebinarFieldError(`items.${phraseIndex}.triggerKind`, COMENTARIOS.erros.fraseNaLive);
     }
 
-    const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
-    // Um id de outro webinario nao e deste roteiro: entra como item novo (nunca um upsert la).
-    const known = new Set((await listScriptItemRows(db, row.id)).map((item) => item.id));
-    const avatars = await readScriptPersonaAvatars(db, row.id);
+    const avatars = await scriptAvatarsFor(db, row);
     if (!avatars.available && data.items.some((item) => item.personaAvatarPath)) {
       throw new WebinarError(PERSONA_MIGRATION_MESSAGE, 409);
     }
+    const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
+    // Um id de outro webinario nao e deste roteiro: entra como item novo (nunca um upsert la).
+    const known = new Set((await listScriptItemRows(db, row.id)).map((item) => item.id));
     const upserts = data.items.map((item, position) => withAvatarColumn(toUpsert(item, position, transcript, user.id, Boolean(item.id && known.has(item.id))), item, avatars));
-    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts));
+    // So sai o que o editor carregou e tirou da lista (um item guardado depois pelo console fica).
+    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts, data.loadedIds));
     const summary = scriptSummary(items);
 
     await recordAudit(db, {
@@ -315,16 +335,19 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
 export async function importScriptCsv(input: { csv: string; replace?: boolean; webinarId: string }): Promise<ActionResult<ImportedScript>> {
   return runAdminAction("messaging.write", importScriptCsvSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
-    // R8: a Live ao vivo tambem importa (as linhas entram "Num minuto da live"; a foto dos itens que ficam nao muda).
+    // R8: a Live ao vivo tambem importa (as linhas entram "Num minuto da live", com o Tempo em minutos; a foto dos itens
+    // que ficam nao muda). Sem a 202611100002, a live nao grava roteiro (scriptAvatarsFor).
     const row = await requireScriptWebinar(db, data.webinarId);
-    const parsed = parseScriptCsv(data.csv);
+    const live = row.kind === "live";
+    await scriptAvatarsFor(db, row);
+    const parsed = parseScriptCsv(data.csv, { live });
     const current = await scriptItemsWithAvatars(db, row.id);
 
     if (parsed.items.length === 0) {
       return { errors: parsed.errors, imported: 0, items: current, summary: scriptSummary(current), truncated: parsed.truncated };
     }
 
-    const { transcript } = row.kind === "live" ? { transcript: null } : await loadTranscriptFor(db, row.id);
+    const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
     const kept = data.replace ? [] : current;
 
     if (kept.length + parsed.items.length > CHAT_LIMITS.scriptItemsMax) {
@@ -335,8 +358,9 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
       ...kept.map((item, position) => toUpsert(draftOfItem(item), position, transcript, user.id, true)),
       ...parsed.items.map((item, index) => toUpsert(item, kept.length + index, transcript, user.id, false))
     ];
-    // Sem a coluna da foto no upsert: a dos itens que ficam continua a mesma no banco.
-    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts));
+    // Sem a coluna da foto no upsert: a dos itens que ficam continua a mesma no banco. Acrescentar nao apaga nada (nem
+    // o que o console guardou entre a leitura e a gravacao); Substituir troca o roteiro inteiro pelo do arquivo.
+    const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts, data.replace ? null : []));
     const summary = scriptSummary(items);
 
     await recordAudit(db, {
@@ -353,7 +377,10 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
   });
 }
 
-/** [messaging.write] O roteiro em CSV, no formato que a importacao le de volta (os itens sem minuto ficam de fora). */
+/**
+ * [messaging.write] O roteiro em CSV, no formato que a importacao le de volta (os itens sem minuto ficam de fora; na
+ * Live ao vivo, o Tempo em minuto:segundo da live).
+ */
 export async function exportScriptCsv(input: { webinarId: string }): Promise<ActionResult<ExportedCsv>> {
   return runAdminAction("messaging.write", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
@@ -364,7 +391,7 @@ export async function exportScriptCsv(input: { webinarId: string }): Promise<Act
 
     await recordAudit(db, { action: "webinar.script_exported", actorId: user.id, count: rows, entityId: row.id, entityType: "webinar", metadata: { rows } });
 
-    return { csv: formatScriptCsv(lines), fileName: csvFileName(`roteiro-${row.slug}`, new Date()), rows };
+    return { csv: formatScriptCsv(lines, { live: row.kind === "live" }), fileName: csvFileName(`roteiro-${row.slug}`, new Date()), rows };
   });
 }
 
@@ -723,6 +750,7 @@ export async function saveScriptComment(input: ScriptCommentInput): Promise<Acti
     }
 
     const webinar = await requireScriptWebinar(db, session.webinar_id);
+    await scriptAvatarsFor(db, webinar);
     const current = await listScriptItemRows(db, webinar.id);
 
     if (current.length >= CHAT_LIMITS.scriptItemsMax) {

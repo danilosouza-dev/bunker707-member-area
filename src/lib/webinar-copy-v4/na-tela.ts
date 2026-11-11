@@ -233,7 +233,9 @@ export const NA_TELA_COPY = {
     gatilhosLive: { at_offset: "Num minuto da live", manual: "Pelo botão da equipe" },
     /** O campo do tempo na live e a dica. */
     minutoDaLive: "Minuto da live",
-    minutoDaLiveDica: "Contado do Começar para todos. Minuto:segundo, como 12:30.",
+    minutoDaLiveDica: "Contado do Começar para todos: minuto ou minuto:segundo, como 12 ou 12:30.",
+    /** A dica do CSV do roteiro na live: o Tempo e o minuto da live, como no campo. */
+    csvDicaLive: "Quatro colunas: Tempo;Nome;Papel;Mensagem. Tempo é o minuto da live, como 12 ou 12:30; Papel Aluno ou Equipe.",
     /** "Quando o apresentador diz" fica de fora na live: o editor diz por quê. */
     semFraseNaLive: "Na live ao vivo não há transcrição durante a transmissão, então “Quando o apresentador diz” não existe aqui. O comentário entra num minuto da live ou pelo botão da equipe.",
     /** Quando o item entra, na fila do console da live. */
@@ -277,7 +279,9 @@ export const NA_TELA_COPY = {
       replay: "No Replay nenhum comentário entra no chat.",
       sessaoFechada: "Essa sessão já acabou. Nenhum comentário entra no chat.",
       limite: "O roteiro aceita até 5.000 comentários.",
-      migracao: (migracao: string) => `A foto de quem comenta precisa da atualização do banco (migração ${migracao}).`
+      migracao: (migracao: string) => `A foto de quem comenta precisa da atualização do banco (migração ${migracao}).`,
+      /** O roteiro da Live ao vivo no banco sem a 202611100002 (o abrir a sessao de antes soltaria tudo de uma vez). */
+      migracaoLive: (migracao: string) => `O roteiro da live ao vivo precisa da atualização do banco (migração ${migracao}).`
     }
   },
 

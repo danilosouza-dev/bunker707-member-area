@@ -61,7 +61,7 @@ test("as 65 migracoes ate a 202611100001 continuam byte a byte (todas aplicadas)
   assert.equal(files[files.indexOf("202611100001_webinars_v6_respostas.sql") + 1], "202611100002_webinars_v7_na_tela.sql", "logo depois da do fio das Perguntas");
   assert.equal(
     fileHash(MIGRATION),
-    "bdd42dbeb02e7630c09be49713842fe2a115600e0ccad947f0169a518130f9ef",
+    "f2abd33b279708a6248dbd7794973426c2de9736a55c7105e561f63b6c0e9418",
     "a 202611100002 mudou: depois de aplicada na nuvem de teste (docs/21 §9.13), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });

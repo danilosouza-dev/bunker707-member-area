@@ -18,6 +18,7 @@ import { ConfirmDialog } from "../../settings/kit";
 import { StatusChip } from "../../status-chip";
 import { adminToast } from "../../toast";
 import { PersonaPhotoField } from "./persona-photo-field";
+import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model";
 
 // Card "Roteiro de chat" do editor (docs/30 §2.2, §6.6 D6-b e D6-c; fase 2b): os itens em linhas editaveis (minuto,
 // nome, papel, mensagem, Solta em, frase e atraso, situacao), Importar CSV (lido no navegador para a previa com os
@@ -28,6 +29,11 @@ import { PersonaPhotoField } from "./persona-photo-field";
 // e "Pelo botão da equipe", a frase que diz por que "Quando o apresentador diz" nao existe na live e sem a transcricao;
 // e, nos dois tipos, a Foto (opcional) de quem comenta em cada linha (persona-photo-field.tsx), com o "Usar esta foto em
 // todos os comentários de {nome}" ligado por padrao (a foto vai para as linhas com o mesmo nome; o Salvar grava).
+// Na live, o "Minuto da live" e lido como no card Simulação: o numero sozinho e minuto ("12" = 12 min) e "12:30" e
+// minuto e segundo (minuteMarkToMs / minuteMarkOf); o CSV da live tambem (parseScriptCsv com `live`). O Salvar fica
+// desligado enquanto uma foto sobe; manda os ids que o card carregou (`loadedIds`: o servidor so apaga desses, nunca um
+// item que o console guardou depois) e so a foto que mudou (a que ficou igual nao vai, e a do banco fica: o "Usar esta
+// foto em todos" do console nao e desfeito por um Salvar com a pagina velha).
 
 const copy = WEBINAR_ADMIN_COPY.script;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
@@ -65,6 +71,8 @@ type ScriptCardProps = {
   webinarId: string;
   /** O tipo do webinario: na Live ao vivo, os gatilhos da live e sem a transcricao (R8). */
   webinarKind?: "live" | "simulated";
+  /** As linhas (pelo id do item) com a foto subindo ao desenhar (o teste de tela). */
+  initialUploading?: readonly string[];
 };
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
@@ -88,7 +96,21 @@ function rowKey() {
   return `row-${rowCounter}`;
 }
 
-function rowOf(item: ScriptItem): Row {
+/** O tempo do campo: na live, o minuto da live ("12" ou "12:30"); na gravada, o minuto do video ("02:03"). */
+function offsetTextOf(offsetMs: number, live: boolean): string {
+  return live ? minuteMarkOf(offsetMs) : formatOffsetText(offsetMs);
+}
+
+/** O que foi digitado no campo do tempo, em ms (nulo: nao entendeu); na live, o numero sozinho e minuto. */
+export function scriptOffsetInput(text: string, live: boolean): number | null {
+  if (!live) {
+    return parseOffsetText(text);
+  }
+  const ms = minuteMarkToMs(text);
+  return ms !== null && ms <= CHAT_LIMITS.offsetMaxMs ? ms : null;
+}
+
+function rowOf(item: ScriptItem, live: boolean): Row {
   return {
     applyToAll: true,
     body: item.body,
@@ -96,7 +118,7 @@ function rowOf(item: ScriptItem): Row {
     key: item.id,
     kind: item.kind,
     offsetMs: item.offsetMs,
-    offsetText: item.offsetMs == null ? "" : formatOffsetText(item.offsetMs),
+    offsetText: item.offsetMs == null ? "" : offsetTextOf(item.offsetMs, live),
     personaAvatarPath: item.personaAvatarPath ?? null,
     personaName: item.personaName,
     personaRole: item.personaRole,
@@ -108,7 +130,7 @@ function rowOf(item: ScriptItem): Row {
   };
 }
 
-function emptyRow(): Row {
+function emptyRow(live: boolean): Row {
   return {
     applyToAll: true,
     body: "",
@@ -116,7 +138,7 @@ function emptyRow(): Row {
     key: rowKey(),
     kind: "message",
     offsetMs: 0,
-    offsetText: "00:00",
+    offsetText: offsetTextOf(0, live),
     personaAvatarPath: null,
     personaName: "",
     personaRole: "student",
@@ -143,6 +165,30 @@ function draftOf(row: Row): ScriptItemDraft {
     status: row.status === "disabled" ? "disabled" : "draft",
     triggerKind: row.triggerKind
   };
+}
+
+/**
+ * O que o Salvar manda (achado 3 da revisao de 11/11/2026): os rascunhos com a foto so quando ela mudou em relacao ao
+ * item carregado (a que ficou igual vai ausente e o servidor mantem a do banco, que o console pode ter trocado pelo "Usar
+ * esta foto em todos") e os ids carregados, os unicos que o servidor pode apagar.
+ */
+export function scriptSaveInput(drafts: readonly ScriptItemDraft[], loaded: readonly Pick<ScriptItem, "id" | "personaAvatarPath">[], webinarId: string): { items: ScriptItemDraft[]; loadedIds: string[]; webinarId: string } {
+  const loadedPhotos = new Map(loaded.map((item) => [item.id, item.personaAvatarPath ?? null]));
+  const items = drafts.map((draft) => {
+    const unchanged = draft.id && loadedPhotos.has(draft.id) && loadedPhotos.get(draft.id) === (draft.personaAvatarPath ?? null);
+    if (!unchanged) {
+      return draft;
+    }
+    const rest = { ...draft };
+    delete rest.personaAvatarPath;
+    return rest;
+  });
+  return { items, loadedIds: loaded.map((item) => item.id), webinarId };
+}
+
+/** O Salvar vale: com mudanca, o card livre e nenhuma foto subindo (o envio no meio sairia sem a foto). */
+export function scriptCanSave(input: { dirty: boolean; locked: boolean; uploading: number }): boolean {
+  return input.dirty && !input.locked && input.uploading === 0;
 }
 
 /** Problemas que a tela aponta antes de enviar (o schema do servidor confere de novo). */
@@ -185,11 +231,13 @@ function downloadCsv(csv: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, readOnly = false, sessions, webinarId, webinarKind = "simulated" }: ScriptCardProps) {
+export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, initialUploading = [], readOnly = false, sessions, webinarId, webinarKind = "simulated" }: ScriptCardProps) {
   const idBase = useId();
   const live = webinarKind === "live";
   const triggerOptions = live ? LIVE_TRIGGER_OPTIONS : TRIGGER_OPTIONS;
-  const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map(rowOf));
+  const [rows, setRows] = useState<Row[]>(() => sortScriptItems(initialItems).map((item) => rowOf(item, live)));
+  // As linhas com a foto subindo: o Salvar espera (o caminho da foto ainda nao chegou).
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(() => new Set(initialUploading));
   const [saved, setSaved] = useState<readonly ScriptItem[]>(initialItems);
   const [transcript, setTranscript] = useState<TranscriptSummary | null>(initialTranscript);
   const [transcriptText, setTranscriptText] = useState("");
@@ -203,7 +251,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
   const transcriptInput = useRef<HTMLInputElement>(null);
 
   const summary = useMemo(() => scriptSummary(saved), [saved]);
-  const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map(rowOf).map(draftOf)), [rows, saved]);
+  const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map((item) => draftOf(rowOf(item, live)))), [live, rows, saved]);
   const ended = sessions.filter((session) => session.kind !== "replay" && session.status === "ended");
   // As exportacoes so leem: seguem no arquivado (`readOnly`), que tranca o resto do card.
   const reading = disabled || busy !== null;
@@ -211,7 +259,19 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
 
   function applySaved(items: ScriptItem[]) {
     setSaved(items);
-    setRows(sortScriptItems(items).map(rowOf));
+    setRows(sortScriptItems(items).map((item) => rowOf(item, live)));
+  }
+
+  function setRowUploading(key: string, on: boolean) {
+    setUploading((current) => {
+      const next = new Set(current);
+      if (on) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
   }
 
   function fail(result: { error: string; fieldErrors?: Record<string, string[] | undefined>; status: number }) {
@@ -256,10 +316,13 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       setFailure({ message: `Mensagem ${problem.index + 1}: ${problem.problem}`, status: 400 });
       return;
     }
+    if (uploading.size > 0) {
+      return;
+    }
     setBusy("save");
     setFailure(null);
     setFieldErrors({});
-    const result = await saveScriptItems({ items: rows.map(draftOf), webinarId });
+    const result = await saveScriptItems(scriptSaveInput(rows.map(draftOf), saved, webinarId));
     setBusy(null);
     if (!result.ok) {
       fail(result);
@@ -276,7 +339,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       return;
     }
     const csv = await file.text();
-    setImporting({ csv, fileName: file.name, preview: parseScriptCsv(csv), replace: false });
+    setImporting({ csv, fileName: file.name, preview: parseScriptCsv(csv, { live }), replace: false });
   }
 
   async function confirmImport() {
@@ -394,7 +457,9 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
           <Download aria-hidden="true" className="size-4" />
           {copy.exportCsv}
         </Button>
-        <span className="text-xs leading-5 text-[var(--text-secondary)]">{copy.csvHint}</span>
+        <span className="text-xs leading-5 text-[var(--text-secondary)]" data-script-csv-hint="">
+          {live ? COMENTARIOS.csvDicaLive : copy.csvHint}
+        </span>
       </div>
 
       <p aria-live="polite" className="text-[13px] leading-5 text-[var(--text-secondary)]" data-script-summary="">
@@ -464,7 +529,9 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                 onApplyToAllChange={(checked) => setApplyToAll(row.key, checked)}
                 onChange={(path) => setPhoto(row.key, path)}
                 onUpload={(image) => uploadPersonaPhoto({ image })}
+                onUploadingChange={(on) => setRowUploading(row.key, on)}
                 path={row.personaAvatarPath}
+                uploading={uploading.has(row.key)}
               />
 
               <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
@@ -485,9 +552,9 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                     className={cn(adminInputClass, "w-36")}
                     disabled={locked}
                     inputMode="numeric"
-                    onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : formatOffsetText(row.offsetMs) })}
-                    onChange={(event) => updateRow(row.key, { offsetMs: parseOffsetText(event.target.value), offsetText: event.target.value })}
-                    placeholder={copy.timePlaceholder}
+                    onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : offsetTextOf(row.offsetMs, live) })}
+                    onChange={(event) => updateRow(row.key, { offsetMs: scriptOffsetInput(event.target.value, live), offsetText: event.target.value })}
+                    placeholder={live ? "12:30" : copy.timePlaceholder}
                     type="text"
                     value={row.offsetText}
                   />
@@ -523,11 +590,11 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
       </ol>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button className="px-3" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={() => setRows((current) => [...current, emptyRow()])} type="button" variant="secondary">
+        <Button className="px-3" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={() => setRows((current) => [...current, emptyRow(live)])} type="button" variant="secondary">
           <Plus aria-hidden="true" className="size-4" />
           {copy.add}
         </Button>
-        <Button className="px-4" disabled={locked || !dirty} onClick={() => void save()} type="button">
+        <Button className="px-4" data-script-save="" disabled={!scriptCanSave({ dirty, locked, uploading: uploading.size })} onClick={() => void save()} type="button">
           {working(copy.save, "save")}
         </Button>
       </div>

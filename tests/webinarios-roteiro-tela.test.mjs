@@ -315,7 +315,10 @@ test("R8 e R9 Roteiro na Live ao vivo: 'Num minuto da live' e 'Pelo botão da eq
   assert.match(markup, /data-script-live-hint=""/);
   assert.match(text, /Na live ao vivo não há transcrição durante a transmissão, então “Quando o apresentador diz” não existe aqui\./);
   assert.match(text, /Minuto da live/);
-  assert.match(text, /Contado do Começar para todos\./);
+  assert.match(text, /Contado do Começar para todos: minuto ou minuto:segundo, como 12 ou 12:30\./);
+  // Achado 1 (revisao de 11/11/2026): o minuto da live como no card Simulação: o item dos 12 min mostra "12".
+  assert.match(markup, /<input[^>]*placeholder="12:30"[^>]*value="12"\/>/);
+  assert.match(markup.match(/<span[^>]*data-script-csv-hint=""[^>]*>([^<]*)<\/span>/)?.[1] ?? "", /Tempo é o minuto da live, como 12 ou 12:30/);
   assert.doesNotMatch(text, /Transcrição do vídeo|Resolver frases|Salvar transcrição/, "sem transcricao na live");
   assert.doesNotMatch(markup, /data-transcript-input/);
   // A foto de quem comenta em cada linha: a previa, Trocar e Remover, a dica, a linha do consentimento e a caixa.
@@ -333,6 +336,8 @@ test("R8 e R9 Roteiro na Live ao vivo: 'Num minuto da live' e 'Pelo botão da eq
 
   // A gravada continua com as tres opcoes e a transcricao; a foto tambem.
   const gravada = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  assert.match(gravada, /<input[^>]*placeholder="mm:ss"[^>]*value="12:00"\/>/, "a gravada continua no minuto do video");
+  assert.match(textOf(gravada), /Tempo como 1:02:03, 02:03 ou 63 \(segundos\)/);
   assert.match(textOf(gravada), /Num minuto do vídeo.*Quando o apresentador diz.*Pelo botão da equipe/);
   assert.match(textOf(gravada), /Transcrição do vídeo/);
   assert.doesNotMatch(gravada, /data-script-live-hint/);
@@ -382,4 +387,52 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
 
   assert.deepEqual(scriptCommentErrors({ applyToName: true, body: " ", personaAvatarPath: null, personaName: "", personaRole: "student" }), { body: "Escreva o comentário (até 1.000 caracteres).", personaName: "Dê um nome a quem comenta (até 60 caracteres)." });
   assert.deepEqual(scriptCommentInput({ applyToName: false, body: "  Oi  ", personaAvatarPath: FOTO, personaName: " Bia C. ", personaRole: "team" }), { applyToName: false, body: "Oi", personaAvatarPath: FOTO, personaName: "Bia C.", personaRole: "team" });
+});
+
+test("achados 1, 3 e 4 (revisao de 11/11/2026): o minuto da live digitado em minutos (como no card Simulação); o Salvar manda os ids carregados e so a foto que mudou; nada sai enquanto a foto sobe", async () => {
+  const card = await import("../src/components/admin/v2/communication/webinars/script-card.tsx");
+  const { ConsoleScriptComment } = await import("../src/components/admin/v2/communication/webinars/session-console/console-script-comment.tsx");
+  const { liveScriptDueLabel } = await import("../src/server/webinars/persona-model.ts");
+
+  // Achado 1: na live, "12" e 12 minutos e "12:30" e minuto e segundo; o console diz "Aos 12 minutos da live".
+  assert.equal(card.scriptOffsetInput("12", true), 12 * 60_000);
+  assert.equal(card.scriptOffsetInput("12:30", true), 12 * 60_000 + 30_000);
+  assert.equal(liveScriptDueLabel(card.scriptOffsetInput("12", true)), "Aos 12 minutos da live");
+  assert.equal(card.scriptOffsetInput("12.5", true), null);
+  assert.equal(card.scriptOffsetInput("3000", true), null, "passa das 48 h do banco");
+  assert.equal(card.scriptOffsetInput("12", false), 12_000, "na gravada, segundos do video");
+  assert.equal(card.scriptOffsetInput("1:02:03", false), 3_723_000);
+
+  // Achado 3: o Salvar manda os ids que o card carregou (o servidor so apaga desses) e a foto so quando mudou.
+  const carregados = [
+    { id: "a", personaAvatarPath: FOTO },
+    { id: "b", personaAvatarPath: null },
+    { id: "c", personaAvatarPath: FOTO }
+  ];
+  const draft = (id, personaAvatarPath) => ({ body: "x", id, kind: "message", offsetMs: 0, personaAvatarPath, personaName: "Bia C.", personaRole: "student", phrase: null, phraseDelayMs: 0, status: "draft", triggerKind: "at_offset" });
+  const OUTRA = "webinars/personas/89abcdef0123456789abcdef.webp";
+  const enviado = card.scriptSaveInput([draft("a", FOTO), draft("b", OUTRA), draft("c", null), draft(null, FOTO)], carregados, WEBINAR);
+  assert.deepEqual(enviado.loadedIds, ["a", "b", "c"]);
+  assert.equal(enviado.webinarId, WEBINAR);
+  assert.ok(!("personaAvatarPath" in enviado.items[0]), "a foto que nao mudou nao vai (o banco fica com a dele)");
+  assert.equal(enviado.items[1].personaAvatarPath, OUTRA, "trocada");
+  assert.equal(enviado.items[2].personaAvatarPath, null, "removida");
+  assert.equal(enviado.items[3].personaAvatarPath, FOTO, "a linha nova leva a foto");
+
+  // Achado 4: com a foto subindo, o Salvar do card e o Enviar agora e o Guardar na lista do console esperam.
+  assert.equal(card.scriptCanSave({ dirty: true, locked: false, uploading: 0 }), true);
+  assert.equal(card.scriptCanSave({ dirty: true, locked: false, uploading: 1 }), false);
+  assert.equal(card.scriptCanSave({ dirty: false, locked: false, uploading: 0 }), false);
+  const items = [scriptItem("a", { offsetMs: 60_000, personaName: "Bia C.", position: 0 })];
+  const subindo = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, initialUploading: ["a"], sessions: [session()], webinarId: WEBINAR }));
+  assert.match(subindo, /<button(?=[^>]*data-persona-photo-send="")(?=[^>]*\sdisabled="")[^>]*>[\s\S]*?Enviando a foto…/, "a linha com a foto subindo");
+  assert.match(subindo.match(/<button[^>]*data-script-save=""[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
+  const estado = { applyToName: true, body: "Que aula!", personaAvatarPath: null, personaName: "Bia C.", personaRole: "student" };
+  const props = { busy: false, canSend: true, initialState: estado, onBack() {}, onSubmit: async () => null, onUpload: async () => ({ error: "x", ok: false, status: 500 }) };
+  const livre = html(createElement(ConsoleScriptComment, props));
+  assert.doesNotMatch(livre.match(/<button[^>]*data-console-script-send=""[^>]*>/)?.[0] ?? "", /disabled=""/, "sem foto subindo, o Enviar agora vale");
+  const comFoto = html(createElement(ConsoleScriptComment, { ...props, initialUploading: true }));
+  assert.match(comFoto.match(/<button[^>]*data-console-script-send=""[^>]*>/)?.[0] ?? "", /disabled=""/, "Enviar agora espera a foto");
+  assert.match(comFoto.match(/<button[^>]*data-console-script-save=""[^>]*>/)?.[0] ?? "", /disabled=""/, "Guardar na lista espera a foto");
+  assert.match(comFoto, /Enviando a foto…/);
 });

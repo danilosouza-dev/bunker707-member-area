@@ -488,8 +488,14 @@ test("salvar o roteiro: a situacao e do servidor (pronta com minuto, frase achad
   assert.deepEqual(salvo.summary, { disabled: 1, manual: 1, ready: 2, unresolved: 1 });
   assert.equal(db.tables.webinar_chat_script_items.length, 5, "o id desconhecido nao virou upsert: entrou como novo");
 
-  // Salvar de novo com um item a menos apaga o que saiu e mantem os ids dos que ficaram.
-  const deNovo = ok(await scriptActions.saveScriptItems({ items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })), webinarId: WEBINAR }));
+  // Salvar de novo com um item a menos apaga o que saiu (dos que o editor carregou) e mantem os ids dos que ficaram.
+  const deNovo = ok(
+    await scriptActions.saveScriptItems({
+      items: salvo.items.slice(0, 2).map((item) => ({ ...base, id: item.id, offsetMs: item.offsetMs, phrase: item.phrase, phraseDelayMs: item.phraseDelayMs, triggerKind: item.triggerKind })),
+      loadedIds: salvo.items.map((item) => item.id),
+      webinarId: WEBINAR
+    })
+  );
   assert.deepEqual(
     deNovo.items.map((item) => item.id),
     salvo.items.slice(0, 2).map((item) => item.id)

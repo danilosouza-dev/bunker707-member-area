@@ -37,7 +37,8 @@ export type WebinarsDb = SupabaseClient;
  * vivo, o check webinar_sessions_simulation_live_v7; a foto do personagem do roteiro, persona_avatar_path no item e na
  * mensagem scripted; webinar_open_session com a foto e sem soltar o roteiro da live ao abrir). E a mais nova, entao o
  * aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21 §9.13). Nenhuma coluna dela entra nas listas que o
- * app sempre le (SESSION_COLUMNS, CHAT_MESSAGE_COLUMNS, SCRIPT_ITEM_COLUMNS): sem ela, o app segue como antes.
+ * app sempre le (SESSION_COLUMNS, CHAT_MESSAGE_COLUMNS, SCRIPT_ITEM_COLUMNS): sem ela, o app segue como antes, menos as
+ * escritas novas (a Na tela, a foto de quem comenta e o roteiro da Live ao vivo, que voltam 409 com o aviso dela).
  */
 export const WEBINARS_MIGRATION = "202611100002";
 

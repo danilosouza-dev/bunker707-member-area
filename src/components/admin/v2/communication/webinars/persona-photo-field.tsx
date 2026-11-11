@@ -14,7 +14,9 @@ import type { UploadedPersonaPhoto } from "@/server/webinars/script-actions";
 // Trocar / Remover (o navegador reduz a 512 px e ate 100.000 bytes em WebP pelo prepareFreeImage do Livre, carregado so
 // quando a equipe escolhe a imagem, e envia pelo uploadPersonaPhoto, que devolve so o caminho), a dica do formato, a
 // linha do consentimento ("Use imagem gerada ou com autorização...") e, com a foto e o nome, a caixa "Usar esta foto em
-// todos os comentários de {nome}" (ligada por padrao; quem usa decide o que ela faz). Nenhuma frase escrita aqui.
+// todos os comentários de {nome}" (ligada por padrao; quem usa decide o que ela faz). Nenhuma frase escrita aqui. O
+// "enviando" fica com quem usa (`uploading` e `onUploadingChange`): o Salvar do editor e o "Enviar agora" e o "Guardar
+// na lista" do console esperam a foto chegar (um envio no meio sairia sem a foto e deixaria o arquivo sem dono).
 
 const COPY = WEBINAR_COPY.naTela.comentarios;
 
@@ -39,12 +41,14 @@ export type PersonaPhotoFieldProps = {
   onUpload: (image: string) => Promise<ActionResult<UploadedPersonaPhoto>>;
   /** A origem do nosso Supabase (o endereco da previa); sem ela, a do ambiente. */
   origin?: string | null;
+  /** A foto subindo (o estado e de quem usa: o envio do formulario espera). */
+  onUploadingChange: (uploading: boolean) => void;
   /** O caminho da foto de agora (nulo, sem foto). */
   path: string | null;
+  uploading: boolean;
 };
 
-export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyToAllChange, onChange, onUpload, origin, path }: PersonaPhotoFieldProps) {
-  const [uploading, setUploading] = useState(false);
+export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyToAllChange, onChange, onUpload, onUploadingChange, origin, path, uploading }: PersonaPhotoFieldProps) {
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const url = personaAvatarUrl(path, origin === undefined ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? null) : origin);
@@ -55,7 +59,7 @@ export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyT
     if (!file) {
       return;
     }
-    setUploading(true);
+    onUploadingChange(true);
     setError(null);
     try {
       // O preparo do Livre so carrega quando a equipe escolhe uma imagem.
@@ -69,7 +73,7 @@ export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyT
     } catch (failure) {
       setError(failure instanceof Error && failure.message ? failure.message : COPY.erros.fotoFormato);
     } finally {
-      setUploading(false);
+      onUploadingChange(false);
     }
   }
 

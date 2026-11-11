@@ -18,7 +18,8 @@ import { PersonaPhotoField } from "../persona-photo-field";
 // "Enviar agora" (a mensagem do roteiro entra no chat da sessao na hora, sendScriptedComment; so com a sessao aceitando
 // a equipe), "Guardar na lista" (vira um item "Pelo botão da equipe" no fim do roteiro, saveScriptComment) e Cancelar.
 // A conferencia do nome e do comentario e a mesma do servidor (scriptCommentSchema), mostrada depois da primeira
-// tentativa, junto dos erros que o servidor devolve em cada campo. Nenhuma frase escrita aqui.
+// tentativa, junto dos erros que o servidor devolve em cada campo. Enquanto a foto sobe, o "Enviar agora" e o "Guardar na
+// lista" esperam (o comentario sairia sem a foto). Nenhuma frase escrita aqui.
 
 const COPY = WEBINAR_COPY.naTela.comentarios;
 
@@ -61,15 +62,18 @@ export type ConsoleScriptCommentProps = {
   canSend: boolean;
   /** O formulario ao abrir (o teste de tela). */
   initialState?: ScriptCommentFormState;
+  /** A foto subindo ao abrir (o teste de tela). */
+  initialUploading?: boolean;
   onBack: () => void;
   /** "Enviar agora" ou "Guardar na lista"; devolve o resultado (nulo: outra acao em andamento). */
   onSubmit: (input: ScriptCommentFormInput, mode: "save" | "send") => Promise<ActionResult<unknown> | null>;
   onUpload: (image: string) => Promise<ActionResult<UploadedPersonaPhoto>>;
 };
 
-export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIPT_COMMENT, onBack, onSubmit, onUpload }: ConsoleScriptCommentProps) {
+export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIPT_COMMENT, initialUploading = false, onBack, onSubmit, onUpload }: ConsoleScriptCommentProps) {
   const prefix = `console-script-comment-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [state, setState] = useState<ScriptCommentFormState>(initialState);
+  const [uploading, setUploading] = useState(initialUploading);
   const [tried, setTried] = useState(false);
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -89,6 +93,9 @@ export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIP
   }
 
   async function submit(mode: "save" | "send") {
+    if (uploading) {
+      return;
+    }
     setTried(true);
     setFormError(null);
     if (Object.keys(scriptCommentErrors(state)).length > 0) {
@@ -151,7 +158,9 @@ export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIP
             onApplyToAllChange={(applyToName) => change({ applyToName })}
             onChange={(personaAvatarPath) => change({ personaAvatarPath })}
             onUpload={onUpload}
+            onUploadingChange={setUploading}
             path={state.personaAvatarPath}
+            uploading={uploading}
           />
           {errorOf("personaAvatarPath") ? (
             <p className="text-[13px] leading-5 text-[var(--error)]" role="alert">
@@ -192,12 +201,12 @@ export function ConsoleScriptComment({ busy, canSend, initialState = EMPTY_SCRIP
         ) : null}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {canSend ? (
-            <Button className="px-3" data-console-script-send="" disabled={busy} onClick={() => void submit("send")} type="button">
+            <Button className="px-3" data-console-script-send="" disabled={busy || uploading} onClick={() => void submit("send")} type="button">
               <Send aria-hidden="true" className="size-4" />
               {COPY.enviarAgora}
             </Button>
           ) : null}
-          <Button className="px-3" data-console-script-save="" disabled={busy} onClick={() => void submit("save")} type="button" variant="secondary">
+          <Button className="px-3" data-console-script-save="" disabled={busy || uploading} onClick={() => void submit("save")} type="button" variant="secondary">
             {COPY.guardarNaLista}
           </Button>
           <Button className="px-3 text-[var(--text-secondary)]" onClick={onBack} type="button" variant="ghost">

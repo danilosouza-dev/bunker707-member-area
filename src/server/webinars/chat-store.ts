@@ -305,10 +305,12 @@ export type ScriptItemUpsert = {
 };
 
 /**
- * O roteiro inteiro de uma vez: grava (upsert pelo id) as linhas enviadas e apaga as do webinario que ficaram de fora.
- * Os ids que nao vieram sao criados pelo banco. Devolve o roteiro como ficou.
+ * O roteiro inteiro de uma vez: grava (upsert pelo id) as linhas enviadas e apaga as que ficaram de fora. Os ids que nao
+ * vieram sao criados pelo banco. `removable`: so esses ids podem sair (o Salvar do editor manda os que ele carregou; um
+ * item que o console guardou depois fica); nulo, sai todo item do webinario fora da lista (o "Substituir" do CSV).
+ * Devolve o roteiro como ficou.
  */
-export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, items: readonly ScriptItemUpsert[]): Promise<ScriptItemRow[]> {
+export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, items: readonly ScriptItemUpsert[], removable: readonly string[] | null = null): Promise<ScriptItemRow[]> {
   const withId = items.filter((item): item is ScriptItemUpsert & { id: string } => Boolean(item.id));
   const withoutId = items.filter((item) => !item.id);
   const kept: string[] = withId.map((item) => item.id);
@@ -322,12 +324,25 @@ export async function replaceScriptItemRows(db: WebinarsDb, webinarId: string, i
     assertNoDbError(error, "Webinarios: gravar itens novos do roteiro");
     kept.push(...((data ?? []) as { id: string }[]).map((row) => row.id));
   }
-  let removal = db.from("webinar_chat_script_items").delete().eq("webinar_id", webinarId);
-  if (kept.length > 0) {
-    removal = removal.not("id", "in", `(${kept.join(",")})`);
+  if (removable === null) {
+    let removal = db.from("webinar_chat_script_items").delete().eq("webinar_id", webinarId);
+    if (kept.length > 0) {
+      removal = removal.not("id", "in", `(${kept.join(",")})`);
+    }
+    const { error } = await removal;
+    assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
+  } else {
+    const keptIds = new Set(kept);
+    const gone = Array.from(new Set(removable)).filter((id) => !keptIds.has(id));
+    for (let start = 0; start < gone.length; start += 200) {
+      const { error } = await db
+        .from("webinar_chat_script_items")
+        .delete()
+        .eq("webinar_id", webinarId)
+        .in("id", gone.slice(start, start + 200));
+      assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
+    }
   }
-  const { error } = await removal;
-  assertNoDbError(error, "Webinarios: apagar itens tirados do roteiro");
   return listScriptItemRows(db, webinarId);
 }
 

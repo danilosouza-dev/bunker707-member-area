@@ -46,7 +46,7 @@ export async function readScriptPersonaAvatars(db: WebinarsDb, webinarId: string
   try {
     const paths = new Map<string, string | null>();
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await db.from("webinar_chat_script_items").select("id, persona_avatar_path").eq("webinar_id", webinarId).range(from, from + 999);
+      const { data, error } = await db.from("webinar_chat_script_items").select("id, persona_avatar_path").eq("webinar_id", webinarId).order("id", { ascending: true }).range(from, from + 999);
       assertNoDbError(error, "Webinarios: fotos de quem comenta");
       const rows = (data ?? []) as { id: string; persona_avatar_path: string | null }[];
       for (const row of rows) {
@@ -151,13 +151,21 @@ export async function loadScriptedMessageAvatars(db: WebinarsDb, messageIds: rea
 }
 
 /**
- * A foto em todos os itens do webinario com o mesmo nome (samePersonaName; nulo tira a foto). Devolve quantos itens
- * mudaram. Banco sem a coluna: PendingMigrationError (quem chama responde 409 com a frase da migracao).
+ * A foto em todos os itens do webinario com o mesmo nome (samePersonaName; nulo tira a foto). Le o roteiro inteiro em
+ * paginas de 1.000 (o teto do PostgREST; o roteiro vai ate 5.000 itens). Devolve quantos itens mudaram. Banco sem a
+ * coluna: PendingMigrationError (quem chama responde 409 com a frase da migracao).
  */
 export async function applyPersonaAvatarToName(db: WebinarsDb, input: { name: string; path: string | null; webinarId: string }): Promise<number> {
-  const { data, error } = await db.from("webinar_chat_script_items").select("id, persona_name").eq("webinar_id", input.webinarId);
-  assertNoDbError(error, "Webinarios: itens com o mesmo nome");
-  const ids = ((data ?? []) as { id: string; persona_name: string }[]).filter((row) => samePersonaName(row.persona_name, input.name)).map((row) => row.id);
+  const ids: string[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("webinar_chat_script_items").select("id, persona_name").eq("webinar_id", input.webinarId).order("id", { ascending: true }).range(from, from + 999);
+    assertNoDbError(error, "Webinarios: itens com o mesmo nome");
+    const rows = (data ?? []) as { id: string; persona_name: string }[];
+    ids.push(...rows.filter((row) => samePersonaName(row.persona_name, input.name)).map((row) => row.id));
+    if (rows.length < 1000) {
+      break;
+    }
+  }
   let changed = 0;
   for (const chunk of chunkIds(ids, CHUNK)) {
     const update = await db.from("webinar_chat_script_items").update({ persona_avatar_path: input.path }).in("id", chunk).select("id");
