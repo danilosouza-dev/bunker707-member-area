@@ -184,9 +184,20 @@ export async function insertScreenDisplayRow(db: WebinarsDb, row: ScreenDisplayI
   return { conflict: false, row: data as ScreenDisplayRow };
 }
 
-/** Tira da tela as exibicoes ativas de um tipo numa sessao (o trocar e o desafixar). Devolve as que sairam. */
+/**
+ * Tira da tela as exibicoes ativas de um tipo numa sessao (o trocar e o desafixar). Devolve as que sairam. So as
+ * mostradas ate o instante do `hide`: uma exibicao que entrou depois dele (outro clique ao mesmo tempo, com o relogio
+ * um pouco a frente) nunca sai com um hidden_at antes do proprio shown_at (o check _window_v7 recusaria a escrita
+ * inteira); ela fica, e quem mostra tenta de novo com o relogio de agora (showScreenDisplayRow).
+ */
 export async function hideActiveScreenDisplayRows(db: WebinarsDb, input: { kind: ScreenDisplayKind; pollId?: string; sessionId: string }, hide: ScreenDisplayHide): Promise<ScreenDisplayRow[]> {
-  let query = db.from("webinar_screen_displays").update(hide).eq("session_id", input.sessionId).eq("kind", input.kind).is("hidden_at", null);
+  let query = db
+    .from("webinar_screen_displays")
+    .update(hide)
+    .eq("session_id", input.sessionId)
+    .eq("kind", input.kind)
+    .is("hidden_at", null)
+    .lte("shown_at", hide.hidden_at);
   if (input.pollId) {
     query = query.eq("poll_id", input.pollId);
   }
@@ -198,20 +209,28 @@ export async function hideActiveScreenDisplayRows(db: WebinarsDb, input: { kind:
 /**
  * Poe uma exibicao na tela no lugar da do mesmo tipo (o Mostrar e o Fixar da enquete): tira a ativa daquele tipo com o
  * `hide` (motivo `replaced`) e grava a nova. Dois cliques juntos (ou duas pessoas da equipe) podem gravar a do outro
- * entre o tirar e o gravar: o indice unico parcial recusa (23505) e a rotina tenta UMA vez mais (tira de novo e grava).
+ * entre o tirar e o gravar (ou depois do instante do `hide`, que entao nao a tira): o indice unico parcial recusa
+ * (23505) e a rotina tenta UMA vez mais, com o relogio de agora (nunca antes do de antes) no tirar e no gravar: a do
+ * outro sai num instante que nao vem antes do shown_at dela (o check _window_v7) e a nova entra nesse mesmo instante.
  * Devolve a nova e as que sairam; nulo quando a segunda tentativa tambem esbarrou (quem chama responde 409). Quem chama
  * muda o carimbo da sessao depois (touchSessionRow).
  */
 export async function showScreenDisplayRow(db: WebinarsDb, insert: ScreenDisplayInsert, hide: ScreenDisplayHide): Promise<{ replaced: ScreenDisplayRow[]; row: ScreenDisplayRow } | null> {
   const replaced: ScreenDisplayRow[] = [];
+  let attemptInsert = insert;
+  let attemptHide = hide;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    replaced.push(...(await hideActiveScreenDisplayRows(db, { kind: insert.kind, sessionId: insert.session_id }, hide)));
-    const result = await insertScreenDisplayRow(db, insert);
+    replaced.push(...(await hideActiveScreenDisplayRows(db, { kind: insert.kind, sessionId: insert.session_id }, attemptHide)));
+    const result = await insertScreenDisplayRow(db, attemptInsert);
 
     if (!result.conflict) {
       return { replaced, row: result.row };
     }
+
+    const at = new Date(Math.max(Date.now(), Date.parse(attemptHide.hidden_at))).toISOString();
+    attemptHide = { ...attemptHide, hidden_at: at };
+    attemptInsert = { ...attemptInsert, shown_at: at };
   }
 
   return null;

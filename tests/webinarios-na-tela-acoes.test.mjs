@@ -943,6 +943,45 @@ test("dois cliques no Mostrar: o conflito do indice unico (outro banner entrou e
   assert.equal(audits(db2, "webinar.screen_shown").length, 0);
 });
 
+test("dois cliques no Mostrar com o outro mostrado depois do nosso instante: nunca um hidden_at antes do shown_at (o check _window_v7); a segunda tentativa usa o relogio de agora no tirar e no gravar", async () => {
+  // O outro banner entrou depois do instante que a nossa acao leu (o integrado pegou isso: o tirar com o relogio
+  // de antes esbarrava no check e a acao inteira caia em 500).
+  const rival = (shownAt) => () => ({
+    created_at: shownAt,
+    hidden_at: null,
+    hidden_by: null,
+    hidden_offset_ms: null,
+    hidden_reason: null,
+    id: randomUUID(),
+    item_id: BANNER_2,
+    kind: "banner",
+    poll_id: null,
+    session_id: SESSION,
+    shown_at: shownAt,
+    shown_by: "00000000-0000-4000-8000-0000000000e9",
+    shown_offset_ms: 0,
+    snapshot: { body: null, buttonLabel: null, closable: true, image: null, linkUrl: null, name: "Aviso", place: "top_left", size: "m", title: "Intervalo de 5 min", v: 1 }
+  });
+  const inicio = Date.now();
+  const db = comConcorrente(usar(cenarioDaTela()), 1, () => rival(iso(Date.now()))());
+  const mostrado = ok(await screenActions.showScreenItem({ itemId: BANNER, sessionId: SESSION }));
+  const outro = db.tables.webinar_screen_displays.find((row) => row.item_id === BANNER_2);
+  const nosso = db.tables.webinar_screen_displays.find((row) => row.id === mostrado.displayId);
+  assert.equal(outro.hidden_reason, "replaced");
+  assert.ok(Date.parse(outro.hidden_at) >= Date.parse(outro.shown_at), "o outro sai depois de ter entrado");
+  assert.equal(nosso.shown_at, outro.hidden_at, "o nosso entra no instante em que o outro saiu");
+  assert.ok(Date.parse(nosso.shown_at) >= inicio);
+
+  // Um servidor com o relogio adiantado (o outro entrou "no futuro"): ele nunca sai com um hidden_at antes do shown_at
+  // dela; o nosso esbarra duas vezes e a acao responde 409, sem 500 e sem carimbo.
+  const db2 = comConcorrente(usar(cenarioDaTela()), 1, rival(iso(Date.now() + 60 * MIN)));
+  const antes = db2.calls.writes.length;
+  const recusado = await screenActions.showScreenItem({ itemId: BANNER, sessionId: SESSION });
+  assert.deepEqual([recusado.ok, recusado.status], [false, 409]);
+  assert.equal(db2.tables.webinar_screen_displays.find((row) => row.item_id === BANNER_2).hidden_at, null, "o do relogio adiantado fica");
+  assert.ok(!escritas(db2, antes).includes("update webinar_sessions"), "sem carimbo");
+});
+
 test("Tirar da tela: sai com o motivo team, o minuto e o carimbo por ultimo; a que ja saiu nao grava nada; a enquete fixada so pelo Desafixar; na sessao encerrada 409", async () => {
   const db = usar(cenarioDaTela());
   const mostrado = ok(await screenActions.showScreenItem({ itemId: QR, sessionId: SESSION }));
