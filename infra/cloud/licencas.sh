@@ -122,82 +122,8 @@ plan() {
     need HCLOUD_TOKEN
     install_hcloud
     hzj server-type list > "$WORK_DIR/server-types.json"
-    python3 -I - "$WORK_DIR/server-types.json" "$WORK_DIR/plan-licencas.env" "$LOCATION" "$FALLBACK_LOCATIONS" \
-        "$LICENCAS_MIN_RAM_GB" "$LICENCAS_MIN_DISK_GB" "$LICENCAS_MIN_VCPU" "$LICENCAS_ARQUITETURAS" \
-        "${LICENCAS_LOCAIS:-}" "${LICENCAS_TYPE:-}" "${LICENCAS_LOCATION:-}" <<'PY'
-import json, os, sys
-types = json.load(open(sys.argv[1]))
-out_env, preferred, fallbacks = sys.argv[2], sys.argv[3], sys.argv[4].split()
-min_ram, min_disk, min_cpu = float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7])
-archs = sys.argv[8].replace(",", " ").split()
-only = sys.argv[9].replace(",", " ").split()
-forced_type, forced_loc = sys.argv[10], sys.argv[11]
-# Empate de preco: o local preferido e as reservas de sempre primeiro, depois os outros em ordem alfabetica; x86 antes.
-order = [preferred] + [l for l in fallbacks if l != preferred]
-def rank(loc):
-    return (order.index(loc) if loc in order else len(order), loc)
-
-def monthly(price):
-    m = price.get("price_monthly") or {}
-    try:
-        return float(m.get("net") or m.get("gross"))
-    except (TypeError, ValueError):
-        return None
-
-def available(t, loc):
-    # server_types[].locations[] = {name, available, deprecation}; sem o campo, desconhecido (a criacao tenta e a API
-    # recusa o que nao tem estoque).
-    for entry in t.get("locations") or []:
-        if isinstance(entry, dict) and entry.get("name") == loc:
-            if entry.get("deprecation"):
-                return False
-            return entry.get("available") if isinstance(entry.get("available"), bool) else None
-    return None
-
-rows, below = [], set()
-for t in types:
-    if t.get("deprecated"):
-        continue
-    arch = t.get("architecture") or "x86"
-    if arch not in archs or (t.get("memory") or 0) < min_ram or (t.get("disk") or 0) < min_disk or (t.get("cores") or 0) < min_cpu:
-        below.add(t["name"])
-        continue
-    if forced_type and t["name"] != forced_type:
-        continue
-    for p in t.get("prices") or []:
-        loc = p.get("location")
-        if (only and loc not in only) or (forced_loc and loc != forced_loc):
-            continue
-        price = monthly(p)
-        if price is None:
-            continue
-        rows.append({"name": t["name"], "loc": loc, "cores": t.get("cores"), "mem": t.get("memory"), "disk": t.get("disk"),
-                     "cpu": t.get("cpu_type"), "arch": arch, "price": price, "avail": available(t, loc)})
-
-rows.sort(key=lambda r: (r["price"], rank(r["loc"]), r["arch"] != "x86", r["name"]))
-print(f"Tipos que servem para o Emissor (minimo {min_ram:g} GB de memoria, {min_disk:g} GB de disco e {min_cpu:g} vCPU; {' ou '.join(archs)}), do mais barato:")
-print(f"{'tipo':8} {'local':6} {'vcpu':>4} {'ram':>5} {'disco':>6} {'cpu':10} {'arq':4} {'EUR/mes':>8} disponivel")
-for r in rows:
-    avail = "?" if r["avail"] is None else ("sim" if r["avail"] else "nao")
-    print(f"{r['name']:8} {r['loc']:6} {r['cores']!s:>4} {r['mem']!s:>5} {r['disk']!s:>6} {str(r['cpu']):10} {r['arch']:4} {r['price']:>8.2f} {avail}")
-if below:
-    print("Fora (abaixo do minimo ou de outra arquitetura): " + ", ".join(sorted(below)))
-cands = [r for r in rows if r["avail"] is not False]
-if not cands:
-    print("\nNenhum tipo disponivel serve para o Emissor" + (f" (forcado: {forced_type})" if forced_type else "") + (f" em {forced_loc}" if forced_loc else "") + ". Nada foi criado.")
-    sys.exit(1)
-best = cands[0]
-fallback = [r["loc"] for r in cands[1:] if r["name"] == best["name"] and abs(r["price"] - best["price"]) < 0.005]
-print(f"\nlicencas: {best['name']} em {best['loc']} ({best['cores']} vCPU {best['arch']}, {best['mem']} GB, {best['disk']} GB disco) por EUR {best['price']:.2f}/mes sem IVA, mais o IPv4")
-if fallback:
-    print("Sem estoque na hora de criar, o mesmo tipo pelo mesmo preco em: " + " ".join(fallback))
-with open(out_env, "w") as fh:
-    fh.write(f"LICENCAS_TYPE={best['name']}\nLICENCAS_LOCATION={best['loc']}\nLICENCAS_PRICE={best['price']:.2f}\nLICENCAS_FALLBACK_LOCATIONS=\"{' '.join(fallback)}\"\n")
-gh = os.environ.get("GITHUB_OUTPUT")
-if gh:
-    with open(gh, "a") as fh:
-        fh.write(f"licencas_type={best['name']}\nlicencas_location={best['loc']}\nlicencas_price={best['price']:.2f}\n")
-PY
+    plano_barato licencas LICENCAS "o Emissor" "$LICENCAS_MIN_RAM_GB" "$LICENCAS_MIN_DISK_GB" "$LICENCAS_MIN_VCPU" \
+        "$LICENCAS_ARQUITETURAS" "${LICENCAS_LOCAIS:-}" "${LICENCAS_TYPE:-}" "${LICENCAS_LOCATION:-}"
     echo "IPv4: um, obrigatorio (a API e a conferencia inicial so falam IPv4): cerca de EUR 0,50/mes; o valor do dia esta no console da Hetzner."
     echo "Backup: no Storage Box que ja existe ($STORAGE_BOX_NAME), num repositorio proprio; o preco do box nao muda."
     echo "Nada foi criado. A criacao e a etapa provision-licencas, com CONFIRMADO=sim depois do ok do produtor no chat."

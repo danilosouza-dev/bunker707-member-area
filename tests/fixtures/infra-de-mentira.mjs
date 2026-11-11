@@ -237,6 +237,19 @@ for (const line of lines) {
 }
 `;
 
+// O gh do runner: a lista de artefatos do repositorio (SHIM_GH_ARTEFATOS, o JSON da API) e o zip de um artefato
+// (SHIM_GH_ZIP, um arquivo), como a API do GitHub entrega.
+const GH_SHIM = String.raw`
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "gh", args }) + "\n");
+const caminho = args.filter((a, i) => i > 0 && !a.startsWith("-") && args[i - 1] !== "-H")[0] ?? "";
+if (args[0] === "api" && /\/actions\/artifacts\?/.test(caminho)) { process.stdout.write(process.env.SHIM_GH_ARTEFATOS ?? '{"artifacts":[]}'); process.exit(0); }
+if (args[0] === "api" && /\/actions\/artifacts\/\d+\/zip$/.test(caminho) && process.env.SHIM_GH_ZIP) { process.stdout.write(fs.readFileSync(process.env.SHIM_GH_ZIP)); process.exit(0); }
+process.stderr.write("gh de mentira: inesperado " + args.join(" ") + "\n");
+process.exit(1);
+`;
+
 const SCP_SHIM = String.raw`
 import fs from "node:fs";
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "scp", args: process.argv.slice(2).filter((a) => !a.startsWith("-") && !a.includes("=")).slice(-2) }) + "\n");
@@ -282,7 +295,7 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   tempDirs.push(dir);
   const shims = join(dir, "shims");
   mkdirSync(shims);
-  for (const [name, source] of [["hcloud", HCLOUD_SHIM], ["curl", CURL_SHIM], ["ssh", SSH_SHIM], ["scp", SCP_SHIM], ["docker", DOCKER_SHIM], ["sftp", SFTP_SHIM]]) {
+  for (const [name, source] of [["hcloud", HCLOUD_SHIM], ["curl", CURL_SHIM], ["ssh", SSH_SHIM], ["scp", SCP_SHIM], ["docker", DOCKER_SHIM], ["sftp", SFTP_SHIM], ["gh", GH_SHIM]]) {
     writeFileSync(join(dir, `${name}-shim.mjs`), source);
     writeFileSync(join(shims, name), `#!/bin/sh\nexec "${process.execPath}" "${join(dir, `${name}-shim.mjs`)}" "$@"\n`);
     chmodSync(join(shims, name), 0o755);

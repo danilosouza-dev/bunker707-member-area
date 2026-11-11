@@ -15,6 +15,8 @@
 #   restaurar-licencas, ensaio-licencas, status-licencas, exec-licencas (servidor do Emissor de licencas, docs/20 §8C;
 #   o que muda alguma coisa so da main; criar com CONFIRMADO=sim, a cerimonia com CONFIRMAR=cerimonia, restaurar com
 #   CONFIRMAR=restaurar)
+#   teste-plano, teste-criar, teste-dns, teste-instalar, teste-apagar (o ensaio de comprador real no servidor bunker707-teste,
+#   docs/20 §9E; tudo so da main; criar com CONFIRMADO=sim, apagar com CONFIRMAR=apagar; a Chave de ativacao no payload)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -75,6 +77,11 @@ case "$etapa" in
     ensaio-licencas) bash "$here/licencas.sh" ensaio ;;
     status-licencas) bash "$here/licencas.sh" status ;;
     exec-licencas) exec_remote licencas ;;
+    teste-plano) bash "$here/teste.sh" plano ;;
+    teste-criar) bash "$here/teste.sh" criar ;;
+    teste-dns) bash "$here/teste.sh" dns ;;
+    teste-instalar) bash "$here/teste.sh" instalar ;;
+    teste-apagar) bash "$here/teste.sh" apagar ;;
     chave-backup)
         . "$here/lib.sh"; need HCLOUD_TOKEN; install_hcloud; deploy_key
         for role in membros marketing; do
@@ -93,5 +100,5 @@ case "$etapa" in
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,16p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,19p "$0"; exit 2 ;;
 esac

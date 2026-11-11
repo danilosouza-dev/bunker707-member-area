@@ -35,19 +35,7 @@ fi
 install_hcloud
 deploy_key
 
-# ---- 1. chave SSH do projeto ------------------------------------------------------------------------
-ensure_project_ssh_key() {
-    pub=$(deploy_public_key)
-    if hzj ssh-key describe "$SSH_KEY_NAME" >/dev/null 2>&1; then
-        if [ "$(hzj ssh-key describe "$SSH_KEY_NAME" | jq -r .public_key | awk '{print $2}')" != "$(printf '%s' "$pub" | awk '{print $2}')" ]; then
-            die "A chave '$SSH_KEY_NAME' na Hetzner e diferente da derivada do HCLOUD_TOKEN atual (o token mudou?). Veja docs/20, 'Sessao na nuvem', antes de continuar."
-        fi
-        echo "  ja existe e confere."
-    else
-        hz ssh-key create --name "$SSH_KEY_NAME" --public-key "$pub" --label app=bunker707 >/dev/null
-        echo "  criada."
-    fi
-}
+# ---- 1. chave SSH do projeto: ensure_project_ssh_key (lib.sh) -----------------------------------------
 
 # ---- servidores (usado pelos dois caminhos) ----------------------------------------------------------
 create_server() {  # create_server NOME TIPO LOCAL PAPEL

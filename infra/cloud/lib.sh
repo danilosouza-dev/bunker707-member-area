@@ -92,6 +92,19 @@ LICENCAS_MIN_DISK_GB="${LICENCAS_MIN_DISK_GB:-20}"
 LICENCAS_MIN_VCPU="${LICENCAS_MIN_VCPU:-1}"
 LICENCAS_ARQUITETURAS="${LICENCAS_ARQUITETURAS:-x86 arm}"
 
+# O ensaio de comprador real (docs/32 item 13; docs/20 §9E): um servidor novo e vazio, so para o ensaio e apagado
+# depois, que simula o servidor de um comprador; a escola fica num endereco da nossa zona, sem o proxy da Cloudflare.
+TESTE_NAME="${TESTE_NAME:-bunker707-teste}"
+TESTE_DOMAIN="${TESTE_DOMAIN:-escola-teste.$ZONE_NAME}"
+TESTE_API_DOMAIN="${TESTE_API_DOMAIN:-api.$TESTE_DOMAIN}"
+# O minimo do kit (infra/kit/kit.conf: 2 vCPU, uns 3,5 GB de memoria visiveis, 40 GB de disco; so x86-64).
+TESTE_MIN_RAM_GB="${TESTE_MIN_RAM_GB:-4}"
+TESTE_MIN_DISK_GB="${TESTE_MIN_DISK_GB:-40}"
+TESTE_MIN_VCPU="${TESTE_MIN_VCPU:-2}"
+TESTE_ARQUITETURAS="${TESTE_ARQUITETURAS:-x86}"
+# A pasta da instalacao no servidor do ensaio (KIT_PASTA_INSTALACAO do kit.conf, com o nome neutro do kit).
+TESTE_PASTA="${TESTE_PASTA:-/opt/membros}"
+
 HCLOUD_VERSION="${HCLOUD_VERSION:-1.70.1}"
 HCLOUD_SHA256="${HCLOUD_SHA256:-85182e0d51f9a26abeefd79b37de8a7fb51215d54c59ee290c3c9141e8aa887e}"
 
@@ -275,12 +288,33 @@ rules += [
 print(json.dumps(rules))
 PY
 }
+# fw_rules_teste [cidr ...]: o servidor do ensaio de comprador (docs/20 §9E), como o de um comprador na Hetzner: 80 e 443
+# (TCP e, para o HTTP/3 do Caddy do kit, UDP) de qualquer lugar, ping, e a 22 so para o CIDR da etapa (o preparo do kit
+# abre a 22 no ufw do servidor; o firewall da Hetzner a deixa fechada fora das etapas).
+fw_rules_teste() {
+    python3 -I - "$@" <<'PY'
+import json, sys
+ssh = [c for c in sys.argv[1:] if c]
+anywhere = ["0.0.0.0/0", "::/0"]
+rules = []
+if ssh:
+    rules.append({"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ssh, "description": "SSH (sessao de deploy / produtor)"})
+rules += [
+    {"direction": "in", "protocol": "tcp", "port": "80", "source_ips": anywhere, "description": "HTTP (Let's Encrypt e redirecionamento)"},
+    {"direction": "in", "protocol": "tcp", "port": "443", "source_ips": anywhere, "description": "HTTPS (a escola do ensaio e a API dela)"},
+    {"direction": "in", "protocol": "udp", "port": "443", "source_ips": anywhere, "description": "HTTP/3"},
+    {"direction": "in", "protocol": "icmp", "source_ips": anywhere, "description": "ping"},
+]
+print(json.dumps(rules))
+PY
+}
 # fw_rules_for SERVER_NAME [cidr ...]: o conjunto de regras de cada papel, pelo nome do servidor.
 fw_rules_for() {
     local name="$1"; shift
     case "$name" in
         "$MEET_NAME") fw_rules_meet "$@" ;;
         "$LICENCAS_NAME") fw_rules_licencas "$@" ;;
+        "$TESTE_NAME") fw_rules_teste "$@" ;;
         "$JIBRI_NAME_PREFIX"*) fw_rules_jibri "$@" ;;
         *) fw_rules "$@" ;;
     esac
@@ -371,6 +405,20 @@ wait_ssh() {  # wait_ssh user@host [tentativas]
         sleep 8
     done
     die "SSH nao respondeu em $target."
+}
+# ensure_project_ssh_key: a chave de deploy (derivada do token) cadastrada no projeto da Hetzner (SSH_KEY_NAME), que todo
+# servidor nosso recebe ao nascer, no root; define pub (a chave publica). Para se o projeto tem outra com o mesmo nome.
+ensure_project_ssh_key() {
+    pub=$(deploy_public_key)
+    if hzj ssh-key describe "$SSH_KEY_NAME" >/dev/null 2>&1; then
+        if [ "$(hzj ssh-key describe "$SSH_KEY_NAME" | jq -r .public_key | awk '{print $2}')" != "$(printf '%s' "$pub" | awk '{print $2}')" ]; then
+            die "A chave '$SSH_KEY_NAME' na Hetzner e diferente da derivada do HCLOUD_TOKEN atual (o token mudou?). Veja docs/20, 'Sessao na nuvem', antes de continuar."
+        fi
+        echo "  ja existe e confere."
+    else
+        hz ssh-key create --name "$SSH_KEY_NAME" --public-key "$pub" --label app=bunker707 >/dev/null
+        echo "  criada."
+    fi
 }
 # Envia o repositorio (o commit atual) para REMOTE_DIR, sem tocar em .env, volumes e dados.
 # As migracoes sao trocadas inteiras: uma renomeada ou removida no repositorio nao pode sobrar no servidor
@@ -540,6 +588,13 @@ cf_dns_delete() {
 }
 
 # ---- Emissor de licencas (bunker707-licencas; docs/32 D39; docs/20 §8C) ------------------------------
+# zona_sub DOMINIO: o nome dentro da zona (api.escola-teste.bunker707.com.br -> api.escola-teste); fora da zona, para.
+zona_sub() {
+    case "$1" in
+        *."$ZONE_NAME") printf '%s' "${1%."$ZONE_NAME"}" ;;
+        *) die "$1 nao esta na zona $ZONE_NAME." ;;
+    esac
+}
 # licencas_sub DOMINIO: o nome dentro da zona (licencas-api.bunker707.com.br -> licencas-api); fora da zona, para.
 licencas_sub() {
     case "$1" in
@@ -601,6 +656,93 @@ if os.path.exists(arquivo):
     print(valor)
 elif segredo.strip():
     print(raizes(segredo, "LICENCAS_RAIZES"))
+PY
+}
+
+# ---- o plano mais barato (plan-licencas e teste-plano) -----------------------------------------------
+# plano_barato ROTULO PREFIXO PARA MIN_RAM MIN_DISK MIN_CPU ARQUITETURAS LOCAIS TIPO LOCAL: le $WORK_DIR/server-types.json
+# (hcloud server-type list), mostra os tipos que servem com o preco por mes em cada local que a API informa e escolhe o
+# mais barato com estoque (empate: LOCATION, depois FALLBACK_LOCATIONS, depois os outros; x86 antes). Grava
+# $WORK_DIR/plan-ROTULO.env com PREFIXO_TYPE, PREFIXO_LOCATION, PREFIXO_PRICE e PREFIXO_FALLBACK_LOCATIONS (o mesmo tipo
+# pelo mesmo preco noutros locais, para quando faltar estoque na hora de criar). Nao cria nada.
+plano_barato() {
+    python3 -I - "$WORK_DIR/server-types.json" "$WORK_DIR/plan-$1.env" "$LOCATION" "$FALLBACK_LOCATIONS" "$4" "$5" "$6" "$7" \
+        "$8" "$9" "${10}" "$1" "$2" "$3" <<'PY'
+import json, os, sys
+types = json.load(open(sys.argv[1]))
+out_env, preferred, fallbacks = sys.argv[2], sys.argv[3], sys.argv[4].split()
+min_ram, min_disk, min_cpu = float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7])
+archs = sys.argv[8].replace(",", " ").split()
+only = sys.argv[9].replace(",", " ").split()
+forced_type, forced_loc = sys.argv[10], sys.argv[11]
+rotulo, prefixo, para = sys.argv[12], sys.argv[13], sys.argv[14]
+# Empate de preco: o local preferido e as reservas de sempre primeiro, depois os outros em ordem alfabetica; x86 antes.
+order = [preferred] + [l for l in fallbacks if l != preferred]
+def rank(loc):
+    return (order.index(loc) if loc in order else len(order), loc)
+
+def monthly(price, key="price_monthly"):
+    m = price.get(key) or {}
+    try:
+        return float(m.get("net") or m.get("gross"))
+    except (TypeError, ValueError):
+        return None
+
+def available(t, loc):
+    # server_types[].locations[] = {name, available, deprecation}; sem o campo, desconhecido (a criacao tenta e a API
+    # recusa o que nao tem estoque).
+    for entry in t.get("locations") or []:
+        if isinstance(entry, dict) and entry.get("name") == loc:
+            if entry.get("deprecation"):
+                return False
+            return entry.get("available") if isinstance(entry.get("available"), bool) else None
+    return None
+
+rows, below = [], set()
+for t in types:
+    if t.get("deprecated"):
+        continue
+    arch = t.get("architecture") or "x86"
+    if arch not in archs or (t.get("memory") or 0) < min_ram or (t.get("disk") or 0) < min_disk or (t.get("cores") or 0) < min_cpu:
+        below.add(t["name"])
+        continue
+    if forced_type and t["name"] != forced_type:
+        continue
+    for p in t.get("prices") or []:
+        loc = p.get("location")
+        if (only and loc not in only) or (forced_loc and loc != forced_loc):
+            continue
+        price = monthly(p)
+        if price is None:
+            continue
+        rows.append({"name": t["name"], "loc": loc, "cores": t.get("cores"), "mem": t.get("memory"), "disk": t.get("disk"),
+                     "cpu": t.get("cpu_type"), "arch": arch, "price": price, "hourly": monthly(p, "price_hourly"), "avail": available(t, loc)})
+
+rows.sort(key=lambda r: (r["price"], rank(r["loc"]), r["arch"] != "x86", r["name"]))
+print(f"Tipos que servem para {para} (minimo {min_ram:g} GB de memoria, {min_disk:g} GB de disco e {min_cpu:g} vCPU; {' ou '.join(archs)}), do mais barato:")
+print(f"{'tipo':8} {'local':6} {'vcpu':>4} {'ram':>5} {'disco':>6} {'cpu':10} {'arq':4} {'EUR/mes':>8} disponivel")
+for r in rows:
+    avail = "?" if r["avail"] is None else ("sim" if r["avail"] else "nao")
+    print(f"{r['name']:8} {r['loc']:6} {r['cores']!s:>4} {r['mem']!s:>5} {r['disk']!s:>6} {str(r['cpu']):10} {r['arch']:4} {r['price']:>8.2f} {avail}")
+if below:
+    print("Fora (abaixo do minimo ou de outra arquitetura): " + ", ".join(sorted(below)))
+cands = [r for r in rows if r["avail"] is not False]
+if not cands:
+    print(f"\nNenhum tipo disponivel serve para {para}" + (f" (forcado: {forced_type})" if forced_type else "") + (f" em {forced_loc}" if forced_loc else "") + ". Nada foi criado.")
+    sys.exit(1)
+best = cands[0]
+fallback = [r["loc"] for r in cands[1:] if r["name"] == best["name"] and abs(r["price"] - best["price"]) < 0.005]
+print(f"\n{rotulo}: {best['name']} em {best['loc']} ({best['cores']} vCPU {best['arch']}, {best['mem']} GB, {best['disk']} GB disco) por EUR {best['price']:.2f}/mes sem IVA, mais o IPv4")
+if fallback:
+    print("Sem estoque na hora de criar, o mesmo tipo pelo mesmo preco em: " + " ".join(fallback))
+if best["hourly"] is not None:
+    print(f"Por hora: EUR {best['hourly']:.4f} sem IVA (a Hetzner cobra por hora, ate o teto do mes, enquanto o servidor existir).")
+with open(out_env, "w") as fh:
+    fh.write(f"{prefixo}_TYPE={best['name']}\n{prefixo}_LOCATION={best['loc']}\n{prefixo}_PRICE={best['price']:.2f}\n{prefixo}_FALLBACK_LOCATIONS=\"{' '.join(fallback)}\"\n")
+gh = os.environ.get("GITHUB_OUTPUT")
+if gh:
+    with open(gh, "a") as fh:
+        fh.write(f"{rotulo}_type={best['name']}\n{rotulo}_location={best['loc']}\n{rotulo}_price={best['price']:.2f}\n")
 PY
 }
 
