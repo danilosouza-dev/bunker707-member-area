@@ -35,6 +35,7 @@ import { MemberAreaConflictError } from "@/server/member-area/errors";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
 import { getDisabledFeatures } from "@/server/licensing/guards";
+import { readLicensesMenuVisible } from "@/server/licensing/interno/student";
 import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
 import { recordStudentActivity } from "@/server/progress/student-activity";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
@@ -2276,6 +2277,9 @@ export async function getAppShellData(user?: SessionUser) {
     // derruba a pagina do aluno (getDisabledFeatures).
     getDisabledFeatures()
   ]);
+  // O item Minhas licencas (docs/32 §2.4): so com as paginas de vendedor ligadas (a nossa escola) e acesso aberto a um
+  // produto marcado como Bunker Members, olhando os acessos ja lidos acima. Sem a API interna, nada e lido.
+  const licenses = await readLicensesMenuVisible(user?.id, (productIds) => hasOpenAccessToAny(database, user, productIds));
 
   return {
     branding: database.branding,
@@ -2289,9 +2293,17 @@ export async function getAppShellData(user?: SessionUser) {
     student: {
       ...getStudentForUser(database, user, profile?.fullName),
       avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl),
-      id: user?.id ?? null
+      id: user?.id ?? null,
+      licenses
     }
   };
+}
+
+/** Acesso aberto a algum destes produtos, pelos acessos que a moldura ja leu (o item Minhas licencas do menu). */
+function hasOpenAccessToAny(database: PlatformDatabase, user: SessionUser | undefined, productIds: readonly string[]) {
+  const { userId } = getUserIdentity(user);
+
+  return Boolean(userId) && database.accessEntitlements.some((entitlement) => entitlement.userId === userId && productIds.includes(entitlement.targetId) && isActiveEntitlement(entitlement));
 }
 
 export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, user?: SessionUser | string) {

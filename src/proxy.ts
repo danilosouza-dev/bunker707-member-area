@@ -23,6 +23,7 @@ const protectedPagePrefixes = [
   "/materiais",
   "/minha-jornada",
   "/minhas-compras",
+  "/minhas-licencas",
   "/perfil",
   "/suporte",
   "/webinarios"

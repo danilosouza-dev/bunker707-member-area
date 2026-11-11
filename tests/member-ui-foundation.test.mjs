@@ -44,7 +44,7 @@ test("tempos e contagens em portugues", () => {
   assert.equal(format.clampMemberPercent(Number.NaN), 0);
 });
 
-test("barra lateral: nove destinos reais, agrupados, sem item sem pagina", () => {
+test("barra lateral: dez destinos reais, agrupados, sem item sem pagina", () => {
   const items = navigation.MEMBER_NAVIGATION_ITEMS;
 
   assert.deepEqual(items.map((item) => item.href), [
@@ -52,6 +52,8 @@ test("barra lateral: nove destinos reais, agrupados, sem item sem pagina", () =>
     "/minha-jornada",
     "/continue-assistindo",
     "/minhas-compras",
+    // Minhas licencas (docs/32 §2.4): ao lado de Minhas compras, so para quem comprou o Bunker Members (item de vendedor).
+    "/minhas-licencas",
     "/favoritos",
     "/materiais",
     // Webinarios (docs/30 §1.1): no grupo Estudar, depois de Materiais.
@@ -61,6 +63,7 @@ test("barra lateral: nove destinos reais, agrupados, sem item sem pagina", () =>
   ]);
   assert.ok(items.every((item) => item.href && item.label && item.description));
   assert.equal(items.find((item) => item.key === "webinars")?.label, "Webinários");
+  assert.deepEqual(items.filter((item) => item.seller).map((item) => item.key), ["licenses"]);
   assert.deepEqual(navigation.MEMBER_NAVIGATION_GROUPS.map((group) => group.label), ["Estudar", "Conta e ajuda"]);
   assert.deepEqual([...navigation.MEMBER_NEW_PAGE_PREFIXES], ["/minha-jornada", "/continue-assistindo", "/materiais", "/suporte", "/perfil", "/webinarios"]);
 });

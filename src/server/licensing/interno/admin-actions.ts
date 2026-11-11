@@ -15,6 +15,7 @@ import { recordAudit } from "@/server/audit/log";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { dismissLicenseRequestByTeam, productExists, retryLicenseRequestNow, setLicenseProduct } from "./requests-store";
 import { getSellerFeatures } from "./seller";
+import { forgetLicenseProductsMemory } from "./student";
 
 const SALES_PATH = "/admin/configuracoes/vendas";
 
@@ -50,6 +51,7 @@ export async function setProductLicenseSale(raw: unknown): Promise<ActionResult<
     }
 
     await setLicenseProduct(db, { enabled: input.enabled, productId: input.productId, userId: user.id });
+    forgetLicenseProductsMemory();
     await recordAudit(db, {
       action: input.enabled ? "licencas.produto_marcado" : "licencas.produto_desmarcado",
       actorId: user.id,

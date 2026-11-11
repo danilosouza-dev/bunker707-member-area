@@ -23,6 +23,8 @@ type MemberSidebarProps = {
   disabledFeatures?: readonly FeatureKey[];
   homeHref: string;
   id: string;
+  /** O item Minhas licencas (docs/32 §2.4): so quando o servidor diz que a pessoa comprou o Bunker Members. */
+  licenses?: boolean;
   /** Logo da escola; texto quando vazio. */
   logoImage?: string | null;
   onClose: () => void;
@@ -44,6 +46,7 @@ export function MemberSidebar({
   disabledFeatures,
   homeHref,
   id,
+  licenses,
   logoImage,
   onClose,
   onNavigate,
@@ -54,7 +57,7 @@ export function MemberSidebar({
 }: MemberSidebarProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
-  const sections = getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures);
+  const sections = getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures, { licenses });
 
   // Abrir foca o primeiro item; fechar devolve o foco ao botao do menu (se ele estava na gaveta).
   useEffect(() => {

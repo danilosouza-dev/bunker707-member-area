@@ -7,8 +7,8 @@ import "./support/resolve-extensionless-ts.mjs";
 
 // Guarda das cinco classes de ação (docs/32 §11.3): nenhuma ação nova sem classe. Conferido no disco:
 // - toda Server Action mora num arquivo "use server" (nenhum "use server" dentro de função) e passa por runAdminAction
-//   (ou runWebinarAction) com a classe logo depois da permissão: uma das cinco, ou um resolvedor de
-//   src/server/actions/action-classes.ts que tira a classe da entrada;
+//   (ou runWebinarAction, ou runStudentAction nas do aluno) com a classe logo depois da permissão (ou do nome da ação do
+//   aluno): uma das cinco, ou um resolvedor de src/server/actions/action-classes.ts que tira a classe da entrada;
 // - runAdminAction exige a classe e confere a licença antes de validar a entrada e antes do handler;
 // - toda rota que muda algo (POST, PUT, PATCH, DELETE) tem como primeira linha a guarda da licença com a classe;
 // - a classificação conferida nos casos em que o §2.2 é explícito.
@@ -32,7 +32,7 @@ const { ACTION_CLASSES } = await import("../src/server/licensing/model.ts");
 const resolvers = await import("../src/server/actions/action-classes.ts");
 const CLASS = `"(?:${ACTION_CLASSES.join("|")})"`;
 const RESOLVER = "actionClassOf[A-Z]\\w*";
-const RUNNER_CALL = new RegExp(`\\brun(?:Admin|Webinar)Action\\(\\s*"([a-z_.]+)",\\s*(${CLASS}|${RESOLVER}),`, "g");
+const RUNNER_CALL = new RegExp(`\\brun(?:Admin|Webinar|Student)Action\\(\\s*"([a-z_.]+)",\\s*(${CLASS}|${RESOLVER}),`, "g");
 
 const sources = filesIn("src", /\.tsx?$/);
 const useServer = sources.filter((file) => /^["']use server["'];/m.test(read(file)));
@@ -64,9 +64,9 @@ test("toda Server Action declara uma das cinco classes (ou um resolvedor pela en
     for (const { body, name } of exportedFunctions(source)) {
       const code = codeOf(body);
       const calls = [...code.matchAll(RUNNER_CALL)];
-      const runners = code.match(/\brun(?:Admin|Webinar)Action\(/g) ?? [];
+      const runners = code.match(/\brun(?:Admin|Webinar|Student)Action\(/g) ?? [];
 
-      assert.equal(runners.length, 1, `${file} ${name}: uma chamada a runAdminAction (ou runWebinarAction)`);
+      assert.equal(runners.length, 1, `${file} ${name}: uma chamada a runAdminAction (ou runWebinarAction, ou runStudentAction)`);
       assert.equal(calls.length, 1, `${file} ${name}: a classe (uma das cinco ou actionClassOf...) vem logo depois da permissão`);
 
       const actionClass = calls[0][2].replaceAll('"', "");

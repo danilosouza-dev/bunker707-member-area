@@ -45,15 +45,22 @@ function toShellLink(
 /**
  * Grupos da barra lateral ("Estudar", "Conta e ajuda") a partir da fonte unica de rotas. `disabledFeatures`: os
  * modulos desligados na licenca, que o servidor manda (getAppShellData); o item deles some (docs/32 §11.8).
+ * `options.licenses`: a pessoa comprou o Bunker Members e as paginas de vendedor estao ligadas (getAppShellData, docs/32
+ * §2.4); sem isso, e sempre na previa da equipe, o item Minhas licencas nao aparece.
  */
 export function getMemberSidebarSections(
   pathname: string | null | undefined,
   accessPreviewMode?: AccessPreviewMode,
-  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES
+  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES,
+  options: { licenses?: boolean } = {}
 ): MemberSidebarSection[] {
+  const sellerVisible = Boolean(options.licenses) && !accessPreviewMode;
+
   return MEMBER_NAVIGATION_GROUPS.map((group) => ({
     id: group.id,
-    items: group.items.filter((item) => featureVisible(item.feature, disabledFeatures)).map((item) => toShellLink(item, pathname, accessPreviewMode)),
+    items: group.items
+      .filter((item) => featureVisible(item.feature, disabledFeatures) && (!item.seller || sellerVisible))
+      .map((item) => toShellLink(item, pathname, accessPreviewMode)),
     label: group.label
   }));
 }

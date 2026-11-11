@@ -197,7 +197,7 @@ test("os componentes do núcleo só desenham as peças dos Webinários com o mó
   const shell = codeOf(read("src/components/app-shell.tsx"));
   assert.match(shell, /!accessPreviewMode && !disabledFeatures\.includes\(WEBINARS_FEATURE\) \? \(\s*<LiveNowBanner/);
   assert.match(shell, /disabledFeatures: readonly FeatureKey\[\];/, "a lista é obrigatória no tipo do AppShell");
-  assert.match(shell, /getMemberSidebarSections\(pathname, accessPreviewMode, disabledFeatures\)/);
+  assert.match(shell, /getMemberSidebarSections\(pathname, accessPreviewMode, disabledFeatures(?:, \{ licenses: student\.licenses \})?\)/);
   assert.match(shell, /<MemberSidebar\s+accessPreviewMode=\{accessPreviewMode\}\s+disabledFeatures=\{disabledFeatures\}/);
 
   const profile = codeOf(read("src/components/member/pages/profile-view.tsx"));

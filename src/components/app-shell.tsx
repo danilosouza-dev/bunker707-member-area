@@ -45,6 +45,8 @@ type AppShellProps = {
     fullName: string;
     /** Id do aluno da sessao: dono da memoria do sino (o login troca de pagina sem recarregar). */
     id?: string | null;
+    /** Comprou o Bunker Members e as paginas de vendedor estao ligadas (getAppShellData): o item Minhas licencas aparece. */
+    licenses?: boolean;
     name: string;
   };
 };
@@ -186,7 +188,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   const popupPage = accessPreviewMode ? null : popupPageKeyOf(pathname);
   const popupHome = popupPage === "home";
   const headerLinks = menuInHeader
-    ? (getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures).find((section) => section.id === "estudar")?.items ?? [])
+    ? (getMemberSidebarSections(pathname, accessPreviewMode, disabledFeatures, { licenses: student.licenses }).find((section) => section.id === "estudar")?.items ?? [])
     : [];
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
@@ -447,6 +449,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
         accessPreviewMode={accessPreviewMode}
         disabledFeatures={disabledFeatures}
         homeHref={homeHref}
+        licenses={student.licenses}
         id={sidebarId}
         logoImage={logoImage}
         onClose={closeSidebarMenu}
