@@ -10,6 +10,7 @@ import { assinarLicenca, licencaBase, novaChaveDeEmissao, novaRaiz, passosDaAnua
 const store = await import("../src/server/licensing/store.ts");
 const { computeLicenseState } = await import("../src/server/licensing/state.ts");
 const { runLicenseCheckInNow, runLicenseTick } = await import("../src/server/licensing/tick.ts");
+const { notifyLicenseDegree } = await import("../src/server/licensing/degree-notice.ts");
 
 const MINUTO = 60_000;
 const HORA = 60 * MINUTO;
@@ -162,4 +163,76 @@ test("UPDATE semanal na linha com o Emissor bloqueado não segura os prazos: a h
   // Sem o UPDATE, a mesma escada no relógio do servidor: o piso só tira o que o UPDATE ganhava além de 48 h.
   const controle = simularUpdatePeriodico(0, [8, 31, 61]).situacoes;
   assert.deepEqual([8, 31, 61].map((dia) => controle.get(dia).evaluation.degree), ["aviso", "admin_limitado", "escola_congelada"]);
+});
+
+// ---- future-since.mjs: "desde quando" no futuro parava a escada e mandava um e-mail por minuto --------------
+
+test("endereço diferente com 'desde quando' no futuro: a rodada do tick o traz para agora, e a escada anda (revisão: future-since)", () => {
+  const T0 = Date.parse("2026-11-10T12:00:00.000Z");
+  const OUTRO = "https://outro.dominio.test";
+  let linha = { ...instalacaoEmDia(T0, { expiresAt: iso(T0 + 90 * DIA) }), hostMismatchSince: new Date("2099-01-01T00:00:00.000Z") };
+
+  // Uma rodada por hora, por 40 dias (a cópia noutro domínio, com o endereço configurado honesto).
+  for (let hora = 1; hora <= 40 * 24; hora += 1) {
+    const agora = new Date(T0 + hora * HORA);
+    const plano = store.planLicenseTick(linha, { roots: RAIZES, configuredHost: OUTRO, systemNow: agora });
+    linha = { ...linha, ...plano.patch };
+
+    if (hora === 1) {
+      assert.equal(iso(plano.patch.hostMismatchSince.getTime()), iso(agora.getTime()), "a primeira rodada traz o 'desde quando' para a hora que gravaria");
+    }
+  }
+
+  // Antes da correção: Aviso para sempre, com o conteúdo livre. Agora, a mesma escada do endereço diferente gravado de verdade.
+  assert.equal(situacao(linha, T0 + 40 * DIA, OUTRO).evaluation.degree, "escola_congelada");
+
+  // A licença ilegível com a marca no futuro também volta para agora.
+  const ilegivel = { ...linha, token: "BKL1.estragada", hostMismatchSince: null, unreadableSince: new Date("2099-01-01T00:00:00.000Z") };
+  const agora = new Date(T0 + 41 * DIA);
+  assert.equal(iso(store.planLicenseTick(ilegivel, { roots: RAIZES, configuredHost: ENDERECO, systemNow: agora }).patch.unreadableSince.getTime()), iso(agora.getTime()));
+});
+
+test("e-mail de degrau com 'desde quando' no futuro: um por pessoa, não um por minuto, mesmo com o banco mexido a cada minuto (revisão: future-since)", async () => {
+  const T0 = Date.parse("2026-11-10T12:00:00.000Z");
+  const OUTRO = "https://outro.dominio.test";
+  const equipe = [
+    { userId: "u1", email: "dono@escola.test" },
+    { userId: "u2", email: "admin@escola.test" }
+  ];
+  const fila = [];
+  const memory = { lastMarker: null };
+  const enviar = (estado, agoraMs) =>
+    notifyLicenseDegree({
+      state: estado,
+      configuredHost: OUTRO,
+      memory,
+      now: () => agoraMs,
+      listRecipients: async () => equipe,
+      enqueue: async (email) => {
+        fila.push(email);
+      }
+    });
+
+  // Cinco rodadas de minuto, com a marca no futuro gravada de novo antes de cada uma (o pior caso: alguém no banco).
+  let linha = instalacaoEmDia(T0 + DIA);
+  for (let minuto = 0; minuto < 5; minuto += 1) {
+    const agoraMs = T0 + DIA + minuto * MINUTO;
+    linha = { ...linha, hostMismatchSince: new Date("2099-01-01T00:00:00.000Z"), lastSeenAt: new Date(agoraMs) };
+    const plano = store.planLicenseTick(linha, { roots: RAIZES, configuredHost: OUTRO, systemNow: new Date(agoraMs) });
+    await enviar(plano.state, agoraMs);
+    linha = { ...linha, ...plano.patch };
+  }
+
+  // Antes da correção: 10 e-mails em 5 minutos (o marcador mudava a cada minuto). Agora, um por pessoa.
+  assert.equal(fila.length, 2);
+  assert.equal(new Set(fila.map((email) => email.idempotencyKey)).size, 2);
+
+  // A segunda trava: mesmo com a memória do marcador esquecida (o processo que reinicia), a chave da fila é a mesma no dia,
+  // e a fila ignora a repetida.
+  const chaves = new Set(fila.map((email) => email.idempotencyKey));
+  memory.lastMarker = null;
+  const agoraMs = T0 + DIA + 10 * MINUTO;
+  const estado = situacao({ ...linha, hostMismatchSince: new Date("2099-01-01T00:00:00.000Z") }, agoraMs, OUTRO);
+  const reenvio = await notifyLicenseDegree({ state: estado, configuredHost: OUTRO, memory: { lastMarker: null }, now: () => agoraMs, listRecipients: async () => equipe, enqueue: async (email) => fila.push(email) });
+  assert.ok(reenvio.queued === 0 || fila.slice(2).every((email) => chaves.has(email.idempotencyKey)), "a mesma chave no mesmo dia");
 });

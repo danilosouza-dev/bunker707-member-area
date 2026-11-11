@@ -11,7 +11,7 @@ import { isLicenseManagerRow } from "./admin-access";
 import { notifyLicenseDegree, type LicenseNoticeMemory, type LicenseNoticeRecipient, type LicenseNoticeResult } from "./degree-notice";
 import type { LicenseState } from "./state";
 
-const memory: LicenseNoticeMemory = { lastMarker: null };
+const memory: LicenseNoticeMemory = { lastMarker: null, sentAt: {} };
 
 /** Equipe pequena; o teto so protege de uma tabela inesperadamente grande (o mesmo da tela Equipe). */
 const TEAM_LIMIT = 500;
@@ -42,15 +42,23 @@ async function listLicenseManagers(db: SupabaseClient): Promise<LicenseNoticeRec
   return ((profiles.data ?? []) as ProfileRow[]).flatMap((row) => (row.email?.trim() ? [{ email: row.email.trim(), userId: row.id }] : []));
 }
 
-/** O e-mail da mudanca de degrau, se o degrau mudou desde o ultimo aviso deste processo. */
-export function notifyLicenseDegreeChange(db: SupabaseClient, state: LicenseState | null, configuredHost: string | null): Promise<LicenseNoticeResult> {
+/**
+ * O e-mail da mudanca de degrau, se o degrau mudou desde o ultimo aviso deste processo. A memoria e a do processo; quem
+ * testa passa a sua, para um teste nao herdar o intervalo minimo do anterior.
+ */
+export function notifyLicenseDegreeChange(
+  db: SupabaseClient,
+  state: LicenseState | null,
+  configuredHost: string | null,
+  notices: LicenseNoticeMemory = memory
+): Promise<LicenseNoticeResult> {
   return notifyLicenseDegree({
     configuredHost,
     enqueue: async (email) => {
       await enqueueEmail(db, email);
     },
     listRecipients: () => listLicenseManagers(db),
-    memory,
+    memory: notices,
     state
   });
 }

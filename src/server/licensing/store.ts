@@ -6,7 +6,9 @@
 // Contrato do store (docs/32 §16, revisao independente do nucleo):
 // - unreadableSince e hostMismatchSince sao gravados na primeira vez que a tarefa do tick percebe a licenca ilegivel
 //   ou o endereco diferente, com a hora confiavel, e apagados quando o caso se resolve. Data invalida guardada fica
-//   como esta: a avaliacao a conta como ha muito tempo;
+//   como esta: a avaliacao a conta como ha muito tempo. Data no futuro (o banco mexido, ou a hora que voltou depois de
+//   um salto do relogio do Emissor) volta para a hora que a rodada gravaria: no futuro, ela contava como agora para
+//   sempre e parava a escada no Aviso (revisao de 11/11/2026);
 // - lastSeenAt so avanca, e so pela tarefa do tick (planLicenseTick): um minuto por rodada, a partir do maior
 //   instante que a Instalacao sabe que ja passou (ela mesma, a emissao da licenca, a ultima conferencia). Nunca e
 //   copiada do relogio do servidor. Uma conferencia boa a realinha com a hora assinada pelo Emissor, para a frente
@@ -109,6 +111,12 @@ function validMs(value: Date | null | undefined): number | null {
 
   const ms = value.getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+/** A marca de "desde quando" esta depois da hora que a rodada gravaria (data valida no futuro)? */
+function sinceAfter(value: Date | null, stampMs: number | null): boolean {
+  const ms = validMs(value);
+  return ms !== null && stampMs !== null && ms > stampMs;
 }
 
 function latestValidMs(values: Array<Date | null | undefined>): number | null {
@@ -342,7 +350,8 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
   }
 
   // 3. Licenca ilegivel (a guardada nao confere, ou a linha perdeu a licenca de uma Instalacao ja ativada): grava a
-  // primeira vez que percebe e pede a conferencia na hora; apaga quando a licenca guardada volta a conferir.
+  // primeira vez que percebe e pede a conferencia na hora; apaga quando a licenca guardada volta a conferir. A marca no
+  // futuro volta para a hora que a rodada gravaria.
   const unreadable = license === null && (snapshot.token !== null || snapshot.everActivated);
 
   if (unreadable) {
@@ -352,12 +361,15 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
       if (current.checkInRequestedAt === null && systemMs !== null) {
         patch.checkInRequestedAt = new Date(systemMs);
       }
+    } else if (sinceAfter(snapshot.unreadableSince, stampMs)) {
+      patch.unreadableSince = new Date(stampMs as number);
     }
   } else if (license && snapshot.unreadableSince !== null) {
     patch.unreadableSince = null;
   }
 
-  // 4. Endereco: o configurado tem de ser o da licenca. Grava a primeira vez que diverge; apaga quando volta a bater.
+  // 4. Endereco: o configurado tem de ser o da licenca. Grava a primeira vez que diverge (a marca no futuro volta para a
+  // hora que a rodada gravaria); apaga quando volta a bater.
   // (Os pedidos do admin chegando por outro endereco entram numa peca seguinte, somados aqui.)
   if (license) {
     const mismatch = !sameHost(license.installation.host, input.configuredHost);
@@ -365,6 +377,8 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
     if (mismatch) {
       if (snapshot.hostMismatchSince === null && stampMs !== null) {
         patch.hostMismatchSince = new Date(stampMs);
+      } else if (sinceAfter(snapshot.hostMismatchSince, stampMs)) {
+        patch.hostMismatchSince = new Date(stampMs as number);
       }
     } else if (snapshot.hostMismatchSince !== null) {
       patch.hostMismatchSince = null;

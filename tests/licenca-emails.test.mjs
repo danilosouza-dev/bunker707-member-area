@@ -82,27 +82,27 @@ test("a mudança de degrau: o degrau e desde quando (o motivo mais antigo dele);
     null
   );
 
-  assert.deepEqual(licenseDegreeChangeOf(situacao(AVISO)), { degree: "aviso", since: "2027-10-12T03:00:00.000Z", marker: "aviso:2027-10-12T03:00:00.000Z" });
+  assert.deepEqual(licenseDegreeChangeOf(situacao(AVISO)), { degree: "aviso", since: "2027-10-12T03:00:00.000Z", marker: "aviso:2027-10-12" });
   assert.deepEqual(licenseDegreeChangeOf(situacao(LIMITADO)), {
     degree: "admin_limitado",
     since: "2027-11-26T03:00:00.000Z",
-    marker: "admin_limitado:2027-11-26T03:00:00.000Z"
+    marker: "admin_limitado:2027-11-26"
   });
-  assert.equal(licenseDegreeChangeOf(situacao("2027-10-25T12:00:00.000Z")).marker, "aviso:2027-10-12T03:00:00.000Z", "o mesmo degrau dias depois: a mesma mudança");
+  assert.equal(licenseDegreeChangeOf(situacao("2027-10-25T12:00:00.000Z")).marker, "aviso:2027-10-12", "o mesmo degrau dias depois: a mesma mudança");
 });
 
 test("o e-mail da mudança: um por dono e administrador (e-mail repetido vai uma vez), com a faixa, o Renovar e o link da tela Licença", async () => {
   const { deps, fila } = dependencias(situacao(AVISO));
   const resultado = await notifyLicenseDegree(deps);
 
-  assert.deepEqual(resultado, { marker: "aviso:2027-10-12T03:00:00.000Z", queued: 2, skipped: null });
+  assert.deepEqual(resultado, { marker: "aviso:2027-10-12", queued: 2, skipped: null });
   assert.deepEqual(fila.map((email) => [email.userId, email.to]), [["dono", "dona@escola.test"], ["admin", "admin@escola.test"]]);
 
   const [email] = fila;
   assert.equal(email.kind, LICENSE_DEGREE_EMAIL_KIND);
   assert.ok(EMAIL_KINDS.includes(email.kind), "um tipo que a fila conhece");
   assert.equal(email.subject, "Aviso sobre a Licença");
-  assert.equal(email.idempotencyKey, "license-degree:aviso:2027-10-12T03:00:00.000Z:dono");
+  assert.equal(email.idempotencyKey, "license-degree:aviso:2027-10-12:dono");
   assert.deepEqual(email.metadata, { degree: "aviso", since: "2027-10-12T03:00:00.000Z" });
   assert.match(email.text, /A sua Licença termina em 10\/11\/2027\./);
   assert.match(email.text, /A partir de 26\/11\/2027: Admin limitado/);
@@ -128,11 +128,34 @@ test("deduplicado por mudança de degrau: o mesmo degrau não lê a equipe nem t
   const limitado = dependencias(situacao(LIMITADO), memoria);
   assert.equal((await notifyLicenseDegree(limitado.deps)).queued, 2);
   assert.equal(limitado.fila[0].subject, "Licença: Admin limitado");
-  assert.equal(limitado.fila[0].idempotencyKey, "license-degree:admin_limitado:2027-11-26T03:00:00.000Z:dono");
+  assert.equal(limitado.fila[0].idempotencyKey, "license-degree:admin_limitado:2027-11-26:dono");
 
   const renovada = dependencias(situacao("2027-12-02T12:00:00.000Z", { plan: { kind: "annual", validUntil: "2028-11-10T23:59:59-03:00", steps: passosDaAnual("2028-11-10T23:59:59-03:00") } }), memoria);
   assert.deepEqual(await notifyLicenseDegree(renovada.deps), { marker: null, queued: 0, skipped: "sem_degrau" });
   assert.equal(memoria.lastMarker, null);
+});
+
+test("a segunda camada: o mesmo degrau não manda dois e-mails em menos de 24 h no mesmo processo, mesmo com o marcador mudando", async () => {
+  const memoria = { lastMarker: null };
+  const agora = Date.parse("2027-10-20T12:00:00.000Z");
+  const primeiro = dependencias(situacao(AVISO), memoria, { now: () => agora });
+  assert.equal((await notifyLicenseDegree(primeiro.deps)).queued, 2);
+
+  // O mesmo degrau com outro marcador (outro dia de início) 23 horas depois: espera; a memória do marcador não anda.
+  memoria.lastMarker = "aviso:2027-10-01";
+  const cedo = dependencias(situacao(AVISO), memoria, { now: () => agora + 23 * 60 * 60 * 1000 });
+  assert.deepEqual(await notifyLicenseDegree(cedo.deps), { marker: "aviso:2027-10-12", queued: 0, skipped: "intervalo" });
+  assert.deepEqual(cedo.fila, []);
+  assert.equal(cedo.leituras.equipe, 0, "nem lê a equipe");
+  assert.equal(memoria.lastMarker, "aviso:2027-10-01");
+
+  // Passadas 24 horas, sai (e a fila ainda ignora a chave repetida do mesmo dia).
+  const depois = dependencias(situacao(AVISO), memoria, { now: () => agora + 24 * 60 * 60 * 1000 });
+  assert.equal((await notifyLicenseDegree(depois.deps)).queued, 2);
+
+  // Outro degrau não espera o intervalo do primeiro.
+  const limitado = dependencias(situacao(LIMITADO), memoria, { now: () => agora + 24 * 60 * 60 * 1000 + 1 });
+  assert.equal((await notifyLicenseDegree(limitado.deps)).queued, 2);
 });
 
 test("o processo que reinicia tenta de novo com as mesmas chaves (a fila ignora a repetida); a fila que falha não anda a memória", async () => {
@@ -253,7 +276,9 @@ const PERFIS = [
 
 test("no banco: só os donos e administradores (inclusive a função Administrador combinada) recebem, pela fila com a chave da mudança", async () => {
   const banco = supabaseFalso({ equipe: EQUIPE_NO_BANCO, perfis: PERFIS });
-  const resultado = await notifyLicenseDegreeChange(banco, situacao(LIMITADO), ENDERECO);
+  // A memória deste teste (a do processo fica para a tarefa do tick, no teste seguinte).
+  const memoria = { lastMarker: null };
+  const resultado = await notifyLicenseDegreeChange(banco, situacao(LIMITADO), ENDERECO, memoria);
 
   assert.equal(resultado.queued, 3);
   assert.deepEqual(
@@ -268,7 +293,7 @@ test("no banco: só os donos e administradores (inclusive a função Administrad
 
   // O mesmo processo, a mesma mudança: nem lê a equipe.
   const lidasAntes = banco.lidas.length;
-  assert.equal((await notifyLicenseDegreeChange(banco, situacao(LIMITADO), ENDERECO)).skipped, "ja_avisado");
+  assert.equal((await notifyLicenseDegreeChange(banco, situacao(LIMITADO), ENDERECO, memoria)).skipped, "ja_avisado");
   assert.equal(banco.lidas.length, lidasAntes);
 });
 

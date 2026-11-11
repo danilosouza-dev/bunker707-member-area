@@ -2,29 +2,45 @@
 // equipe com papel de dono ou de administrador, pela fila de e-mail que ja existe (email_outbox), so no modo "enforce".
 // Puro, sem "server-only" e sem "@/": quem le o banco e enfileira e degree-email.ts; os testes carregam direto.
 //
-// Um e-mail por mudanca de degrau. A mudanca e o par "degrau e o instante em que ele comecou" (o motivo mais antigo do
-// degrau calculado): enquanto a escola fica no mesmo degrau pelo mesmo motivo, o par nao muda; um degrau novo, ou o
-// mesmo degrau de volta noutro dia, muda. Duas travas contra o e-mail repetido: a memoria do processo (o ultimo par
-// avisado, para nao tocar na fila a cada minuto) e a chave de idempotencia da fila, unica por par e pessoa (o processo
-// que reinicia tenta de novo e a fila ignora). Licenca em dia e Instalacao nunca ativada: nenhum e-mail. No modo de
-// observacao, o degrau calculado, com o aviso de que nada foi limitado (o texto da faixa).
+// Um e-mail por mudanca de degrau. A mudanca e o par "degrau e o dia em que ele comecou" (o dia, no horario de Brasilia,
+// do motivo mais antigo do degrau calculado): enquanto a escola fica no mesmo degrau, o par nao muda; um degrau novo, ou
+// o mesmo degrau de volta noutro dia, muda. O marcador e o dia, e nao o instante, para ser estavel: um "desde quando" que
+// anda com o relogio (a marca no futuro, que a avaliacao conta como agora, ou o banco mexido a cada minuto) mandava um
+// e-mail por minuto para cada dono e administrador (revisao de 11/11/2026); com o dia, no maximo um por degrau por dia.
+// Tres travas contra o e-mail repetido: a memoria do processo (o ultimo marcador avisado, para nao tocar na fila a cada
+// minuto), o intervalo minimo por degrau na mesma memoria (24 h entre dois e-mails do mesmo degrau, a segunda camada) e a
+// chave de idempotencia da fila, unica por marcador e pessoa (o processo que reinicia tenta de novo e a fila ignora).
+// Licenca em dia e Instalacao nunca ativada: nenhum e-mail. No modo de observacao, o degrau calculado, com o aviso de que
+// nada foi limitado (o texto da faixa).
 
 import { idempotencyKeyOf } from "../email/outbox-rules";
 import { renderLicenseDegreeEmail } from "../email/templates/license-degree";
-import { licenseBannerOf } from "./copy";
+import { LICENSE_TIME_ZONE, licenseBannerOf } from "./copy";
 import type { LicenseDegree } from "./model";
 import type { LicenseState } from "./state";
 
 /** O tipo do e-mail na fila (outbox-rules.EMAIL_KINDS). */
 export const LICENSE_DEGREE_EMAIL_KIND = "license_degree";
 
+/** Intervalo minimo entre dois e-mails do mesmo degrau, no mesmo processo (a segunda camada contra a enxurrada). */
+export const LICENSE_DEGREE_EMAIL_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+type NoticeDegree = Exclude<LicenseDegree, "ok">;
+
 export type LicenseDegreeChange = {
-  degree: Exclude<LicenseDegree, "ok">;
+  degree: NoticeDegree;
   /** Desde quando a escola esta neste degrau (o motivo mais antigo dele), em ISO. */
   since: string;
-  /** "aviso:2027-10-12T03:00:00.000Z": o que identifica a mudanca na memoria e na chave da fila. */
+  /** "aviso:2027-10-12": o degrau e o dia (Brasilia) em que comecou; identifica a mudanca na memoria e na chave da fila. */
   marker: string;
 };
+
+const dayFormatter = new Intl.DateTimeFormat("en-CA", { day: "2-digit", month: "2-digit", timeZone: LICENSE_TIME_ZONE, year: "numeric" });
+
+/** "2027-10-12": o dia de um instante no horario de Brasilia. */
+function licenseDayOf(ms: number): string {
+  return dayFormatter.format(new Date(ms));
+}
 
 /** A mudanca de degrau que vale agora; null com a Licenca em dia, nunca ativada ou no modo "off". */
 export function licenseDegreeChangeOf(state: LicenseState | null): LicenseDegreeChange | null {
@@ -42,9 +58,9 @@ export function licenseDegreeChangeOf(state: LicenseState | null): LicenseDegree
     .filter((item) => item.degree === degree)
     .map((item) => Date.parse(item.since))
     .filter((ms) => Number.isFinite(ms));
-  const since = new Date(starts.length > 0 ? Math.min(...starts) : 0).toISOString();
+  const sinceMs = starts.length > 0 ? Math.min(...starts) : 0;
 
-  return { degree, since, marker: `${degree}:${since}` };
+  return { degree, since: new Date(sinceMs).toISOString(), marker: `${degree}:${licenseDayOf(sinceMs)}` };
 }
 
 export type LicenseNoticeRecipient = { userId: string; email: string };
@@ -60,7 +76,11 @@ export type LicenseNoticeEmail = {
   metadata: Record<string, unknown>;
 };
 
-export type LicenseNoticeMemory = { lastMarker: string | null };
+export type LicenseNoticeMemory = {
+  lastMarker: string | null;
+  /** Quando saiu o ultimo e-mail de cada degrau (relogio do processo), para o intervalo minimo. */
+  sentAt?: Partial<Record<NoticeDegree, number>>;
+};
 
 export type LicenseNoticeDeps = {
   state: LicenseState | null;
@@ -69,9 +89,11 @@ export type LicenseNoticeDeps = {
   memory: LicenseNoticeMemory;
   listRecipients: () => Promise<LicenseNoticeRecipient[]>;
   enqueue: (email: LicenseNoticeEmail) => Promise<void>;
+  /** O relogio do processo, em ms (padrao: Date.now). */
+  now?: () => number;
 };
 
-export type LicenseNoticeResult = { marker: string | null; queued: number; skipped: "sem_degrau" | "ja_avisado" | null };
+export type LicenseNoticeResult = { marker: string | null; queued: number; skipped: "sem_degrau" | "ja_avisado" | "intervalo" | null };
 
 /** A tela Licenca desta escola, pelo endereco configurado (so http e https). */
 export function licenseScreenUrlOf(configuredHost: string | null): string | null {
@@ -101,6 +123,16 @@ export async function notifyLicenseDegree(deps: LicenseNoticeDeps): Promise<Lice
 
   if (deps.memory.lastMarker === change.marker) {
     return { marker: change.marker, queued: 0, skipped: "ja_avisado" };
+  }
+
+  // A segunda camada: o mesmo degrau nao manda dois e-mails em menos de 24 h neste processo, mesmo com o marcador mudando
+  // (relogio voltado para tras tambem conta como dentro do intervalo). A memoria do marcador nao anda: o e-mail sai
+  // quando o intervalo passa, se o degrau continuar.
+  const nowMs = (deps.now ?? Date.now)();
+  const lastSentMs = deps.memory.sentAt?.[change.degree];
+
+  if (lastSentMs !== undefined && Math.abs(nowMs - lastSentMs) < LICENSE_DEGREE_EMAIL_MIN_INTERVAL_MS) {
+    return { marker: change.marker, queued: 0, skipped: "intervalo" };
   }
 
   const banner = licenseBannerOf(deps.state, { configuredHost: deps.configuredHost });
@@ -137,5 +169,6 @@ export async function notifyLicenseDegree(deps: LicenseNoticeDeps): Promise<Lice
   }
 
   deps.memory.lastMarker = change.marker;
+  deps.memory.sentAt = { ...deps.memory.sentAt, [change.degree]: nowMs };
   return { marker: change.marker, queued, skipped: null };
 }
