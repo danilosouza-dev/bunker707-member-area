@@ -127,6 +127,12 @@ test("destino: S3 (B2, R2, Wasabi), SFTP e pasta; recusa o que nao serve, pede a
     assert.equal(c.aws, "com-chave");
     assert.doesNotMatch(JSON.stringify(c.args), /segredo-da-chave|senha-/);
   }
+  // O restic velho (o 0.14 do apt do Debian 12, sem --retry-lock): para com a frase do que fazer, sem chamar o destino.
+  s.limparLog();
+  const velho = s.rodar(["backup"], { SHIM_RESTIC_VERSAO: "restic 0.14.0 compiled with go1.19.8 on linux/amd64" });
+  assert.equal(velho.status, 1, velho.saida);
+  assert.match(velho.stderr, /O restic deste servidor e o 0\.14\.0, e o backup do kit pede o 0\.16 ou mais novo: rode sudo restic self-update/);
+  assert.equal(s.chamadas().filter((c) => c.tool === "restic").length, 0);
 });
 
 test("backup: exporta de dentro do container do banco, envia com as marcas, retencao por host e marcas, e grava a situacao", { skip }, () => {

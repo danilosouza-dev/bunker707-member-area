@@ -82,6 +82,18 @@ destino_carregar() {
             [ -d "$(dirname -- "$RESTIC_REPOSITORY")" ] || sair "$SAI_DESTINO" "A pasta do backup ($RESTIC_REPOSITORY) nao existe neste servidor: monte o disco ou crie a pasta."
             ;;
     esac
+    restic_conferir_versao
+}
+
+# O kit pede o restic 0.16 ou mais novo (--retry-lock). O apt do Debian 12 traz o 0.14, e o bootstrap atualiza com
+# `restic self-update`; se a atualizacao nao rodou, a mensagem diz o que fazer em vez de um erro do restic.
+restic_conferir_versao() {
+    local versao
+    versao=$(restic version 2>/dev/null | awk '{ print $2; exit }' || true)
+    [[ $versao =~ ^([0-9]+)\.([0-9]+) ]] || sair "$SAI_USO" "Nao achei o restic neste servidor: instale com sudo apt-get install restic e rode sudo restic self-update."
+    if [ "${BASH_REMATCH[1]}" -eq 0 ] && [ "${BASH_REMATCH[2]}" -lt 16 ]; then
+        sair "$SAI_USO" "O restic deste servidor e o $versao, e o backup do kit pede o 0.16 ou mais novo: rode sudo restic self-update e tente de novo."
+    fi
 }
 
 # A senha deste servidor para o backup (RESTIC_PASSWORD do arquivo de segredos).

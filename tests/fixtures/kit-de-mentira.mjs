@@ -214,6 +214,8 @@ for (let i = 0; i < bruto.length; i++) {
   if (a === "-r" || a === "--repo") { repoUrl = bruto[++i]; continue; }
   args.push(a);
 }
+// restic version nao abre repositorio (e nao vai para o log): a versao que o kit confere.
+if (args[0] === "version") { console.log(env.SHIM_RESTIC_VERSAO ?? "restic 0.17.3 compiled with go1.23.4 on linux/amd64"); process.exit(0); }
 const senha = arquivoSenha ? fs.readFileSync(arquivoSenha, "utf8").replace(/\r?\n$/, "") : (env.RESTIC_PASSWORD ?? null);
 const repo = estado.repos[repoUrl];
 const chave = repo && senha !== null ? repo.chaves.find((c) => c.senha === senha) : null;
