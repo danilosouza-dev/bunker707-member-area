@@ -138,9 +138,12 @@ test("o app fala com o Supabase pela rede interna; o endereco publico fica para 
   assert.equal(app.NEXT_PUBLIC_SUPABASE_URL, "${SUPABASE_PUBLIC_URL}");
   assert.equal(app.NEXT_PUBLIC_SITE_URL, "${APP_PUBLIC_URL}");
   // O mesmo pacote de variaveis da producao, mais o endereco interno (o resto da guarda esta em
-  // tests/infra-compose-env.guard.test.mjs, que confere os dois composes).
+  // tests/infra-compose-env.guard.test.mjs, que confere os dois composes). A API interna do Emissor de licencas (docs/32
+  // §11.10) e so da nossa producao: nunca vai ao kit.
+  const soDaNossaEscola = ["EMISSOR_INTERNO_CREDENCIAL", "EMISSOR_INTERNO_URL"];
   const producao = ambiente(servicos(producaoFonte).app);
-  assert.deepEqual(Object.keys(app).filter((k) => k !== "SUPABASE_INTERNAL_URL").sort(), Object.keys(producao).sort());
+  assert.deepEqual(Object.keys(app).filter((k) => k !== "SUPABASE_INTERNAL_URL").sort(), Object.keys(producao).filter((k) => !soDaNossaEscola.includes(k)).sort());
+  for (const chave of soDaNossaEscola) assert.equal(app[chave], undefined, `${chave} nunca no kit`);
   assert.match(kit.app, /^ {4}extra_hosts:\n {6}- "\$\{SUPABASE_PUBLIC_HOST:\?falta SUPABASE_PUBLIC_HOST, o host do endereco publico do Supabase\}:host-gateway"$/m, "so o otimizador do next/image usa o nome publico");
   assert.match(kit.app, /^ {4}depends_on:\n {6}api-gw:\n {8}condition: service_healthy$/m);
 });
