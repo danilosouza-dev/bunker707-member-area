@@ -298,7 +298,15 @@ test("conectar-licencas: a conferencia que falha para com o que fazer; o 401 nao
   assert.match(semConfig.r.stderr, /O app da escola nao recebeu EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL/);
   const semRede = com("000 ENOTFOUND\n");
   assert.match(semRede.r.stderr, /Sem resposta de https:\/\/licencas-interno\.bunker707\.com\.br de dentro do app da escola \(ENOTFOUND\)/);
-  for (const { r, c } of [recusada, ipErrado, semApi, semConfig, semRede]) {
+  // O docker compose exec que falha (o app fora do ar): nem chegou a perguntar.
+  const execFalhou = (() => {
+    const c = conta();
+    const r = rodar(c, { SSH_SHIM_REPLIES: JSON.stringify([{ contem: CHECK, codigo: 1 }]), CONFERIR_TENTATIVAS: "2" });
+    return { r, c };
+  })();
+  assert.match(execFalhou.r.stdout, /de dentro do app da escola: 000 exec_falhou/);
+  assert.match(execFalhou.r.stderr, /A conferencia nao rodou dentro do app da escola \(docker compose exec\): o app esta no ar\?/);
+  for (const { r, c } of [recusada, ipErrado, semApi, semConfig, semRede, execFalhou]) {
     assert.equal(r.status, 1);
     for (const fw of c.hz().firewalls) assert.ok(!fw.rules.some((x) => x.port === "22"), "a 22 fecha");
     const cred = credencialDe(naEscola(c).find((x) => x.command.includes(KV)).stdin);

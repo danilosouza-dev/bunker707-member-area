@@ -602,7 +602,7 @@ conferir_da_escola() {
     local i n="${CONFERIR_TENTATIVAS:-12}" pedido resposta=""
     for ((i = 1; i <= n; i++)); do
         pedido="conectar-licencas-$(date -u +%Y%m%dT%H%M%SZ)-$i"
-        resposta=$(rsh "$escola" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml exec -T app node - '$pedido'" < "$CLOUD_DIR/conferir-interno.mjs" | tail -n1 | tr -cd 'A-Za-z0-9_.= -') || resposta="000 ssh"
+        resposta=$(rsh "$escola" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml exec -T app node - '$pedido'" < "$CLOUD_DIR/conferir-interno.mjs" | tail -n1 | tr -cd 'A-Za-z0-9_.= -') || resposta="000 exec_falhou"
         resposta="${resposta:-000 sem_resposta}"
         echo "  GET https://$LICENCAS_INTERNO_DOMAIN/interno/v1/planos de dentro do app da escola: $resposta"
         case "${resposta%% *}" in 200|401|429) break ;; esac
@@ -619,7 +619,10 @@ conectar_diagnostico() {
         429) die "O Emissor respondeu limite de pedidos (429): espere 10 minutos e rode de novo." ;;
         502|503|504) die "O Caddy do Emissor nao chegou na API interna (${1%% *}): o Emissor no ar tem a API interna? Veja o registro dele (exec-licencas com COMANDO='cd emissor && docker compose logs --tail 100 emissor')." ;;
         000)
-            case "$1" in *sem_configuracao*) die "O app da escola nao recebeu EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL: o compose dela no ar leva as duas? Rode deploy-membros da main e de novo o conectar-licencas." ;; esac
+            case "$1" in
+                *sem_configuracao*) die "O app da escola nao recebeu EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL: o compose dela no ar leva as duas? Rode deploy-membros da main e de novo o conectar-licencas." ;;
+                *exec_falhou*) die "A conferencia nao rodou dentro do app da escola (docker compose exec): o app esta no ar? Veja com status-ssh e rode de novo." ;;
+            esac
             die "Sem resposta de https://$LICENCAS_INTERNO_DOMAIN de dentro do app da escola (${1#* }): DNS, o certificado do Let's Encrypt (o endereco novo pode levar alguns minutos na primeira vez) ou a rede. Rode de novo daqui a pouco." ;;
         *) die "Resposta inesperada da API interna de dentro do app da escola: $1." ;;
     esac
