@@ -1227,8 +1227,9 @@ Construido (testado so com os dubles; nada rodou de verdade):
   conferencia de dentro do app pede `GET /interno/v1/planos`. Rodar de novo troca a credencial; depois de cada
   `restaurar` da escola, rodar de novo (o IP muda; o `restaurar` lembra).
 - **As migracoes na producao:** o `deploy-membros` ja aplica as pendentes (o `deploy.sh` do servidor roda o `migrate.sh`,
-  `supabase db push`, antes de recriar o app); as seis desta leva (`202611100001` a `202611130001`) vem depois da ultima que
-  a producao aplicou (`202611010001`) e nenhuma roda fora de transacao. `tests/infra-deploy-migracoes.test.mjs` prende isso.
+  `supabase db push`, antes de recriar o app); as desta leva (de `202611100001` a `202611130001`: seis no branch da #168 em 8c4b886, sete
+  depois que a dev #169 entrou nele, com a `202611100002_webinars_v7_na_tela` e a `license_state` em `202611100003`) vem
+  depois da ultima que a producao aplicou (`202611010001`) e nenhuma roda fora de transacao. `tests/infra-deploy-migracoes.test.mjs` prende isso.
 - **O passo a passo do teste**, com quem faz o que e o custo de cada passo: `docs/20` §9F.
 
 Em aberto: a virada das vendas para a producao (o webhook da Hotmart e da Ticto apontando para

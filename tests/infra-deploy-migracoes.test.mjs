@@ -11,8 +11,9 @@ import { cloudDir, criarInfraDeMentira as setup, faltamBinarios, limparInfraDeMe
 // O deploy-membros aplica as migracoes novas na producao (docs/20 §9; docs/21 §9.11 e §9.12; o achado de 11/11/2026 para
 // o primeiro ensaio de comprador, docs/20 §9F): o runner manda as migracoes do commit inteiras (sync_repo apaga a pasta do
 // servidor antes) e, com o banco no ar, o servidor roda o infra/scripts/deploy.sh --image, que aplica as pendentes
-// (migrate.sh: `supabase db push`, a CLI 2.121.0 do servidor) antes de recriar o app. As seis desta leva vem depois da
-// ultima que a producao aplicou (202611010001, no deploy de b2966ea em 03/11/2026), entao a CLI as aplica na ordem.
+// (migrate.sh: `supabase db push`, a CLI 2.121.0 do servidor) antes de recriar o app. As desta leva (de 202611100001 a
+// 202611130001) vem depois da ultima que a producao aplicou (202611010001, no deploy de b2966ea em 03/11/2026), entao a
+// CLI as aplica na ordem.
 
 after(limparInfraDeMentira);
 
