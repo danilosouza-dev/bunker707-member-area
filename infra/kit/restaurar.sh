@@ -131,6 +131,7 @@ if [ -f "$KIT_SCRIPT_MIGRAR" ]; then
 fi
 
 rm -f -- "$KIT_MARCA_RESTAURACAO"
+trap 'printf "\nInterrompido no teste de fumaca: a escola ja foi restaurada; confira pelo endereco publico depois de apontar.\n" >&2; exit 130' INT
 situacao_gravar restauracao.pendente_desde=x: "restauracao.ultima=$(agora_utc)" "restauracao.backup_hora=$snap_hora" "restauracao.snapshot=$snap_curto"
 log "Restaurado: a escola $escola esta como estava no backup de $quando."
 
