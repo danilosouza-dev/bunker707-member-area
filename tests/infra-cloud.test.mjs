@@ -504,11 +504,15 @@ test("envelope.sh: a senha do AES e texto hex de uma linha (o openssl le so a pr
   assert.doesNotMatch(source, /openssl rand -out/);
 });
 
-test("bootstrap.sh: apt espera a trava do dpkg e o ufw nao limita a porta do SSH (o firewall da Hetzner ja restringe a origem)", () => {
+test("bootstrap.sh: apt espera a trava do dpkg e, na producao, o ufw nao limita a porta do SSH (o firewall da Hetzner ja restringe a origem)", () => {
   const source = readFileSync(new URL("../infra/scripts/bootstrap.sh", import.meta.url), "utf8");
   assert.match(source, /DPkg::Lock::Timeout=600/);
-  assert.match(source, /ufw allow "\$SSH_PORT\/tcp"/);
-  assert.doesNotMatch(source, /ufw limit/);
+  // O perfil kit (servidor de terceiros, sem o firewall da Hetzner) limita; a producao nunca. O teste de comportamento
+  // dos dois perfis esta em tests/kit-preparar-servidor.test.mjs.
+  const producao = source.slice(source.indexOf("producao_firewall() {"), source.indexOf("\n}\n", source.indexOf("producao_firewall() {")));
+  assert.match(producao, /fazer ufw allow "\$SSH_PORT\/tcp" comment "SSH"/);
+  assert.doesNotMatch(producao, /ufw limit/);
+  assert.match(source, /^PERFIL="\$\{PERFIL:-producao\}"$/m, "sem PERFIL, o de sempre (infra\/cloud\/provision.sh nao passa)");
 });
 
 // Achados da revisao de 18/10/2026 (lente de APIs): `hcloud --quiet` descarta a saida de `server ip`; o JSON

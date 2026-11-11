@@ -6,6 +6,7 @@
 #   membros restaurar [--snapshot ID] [--chave-arquivo ARQ] [--destino REPO]   restauracao de verdade (servidor novo)
 #   membros kit-de-recuperacao [--nova | --conferir]
 #   membros migrar [--listar]                     as migracoes do pacote (infra/kit/migrar.sh)
+#   membros preparar-servidor [--simular | --fechar-login-por-senha | ...]   o preparo do servidor (preparar-servidor.sh)
 # Cada subcomando tem --help. Os nomes tecnicos (projeto do compose, containers, volumes, pastas) vem de kit.conf.
 # Codigos de saida (docs/20 §9B): 0 ok; 1 uso ou configuracao; 2 destino do backup inacessivel; 3 falhou; 4 outra
 # operacao do backup rodando; 5 a chave nao abre o backup; 6 kit de recuperacao nao confirmado; 7 precisa de uma pessoa
@@ -17,7 +18,7 @@ set -euo pipefail
 # O comando pode ser um link (por exemplo /usr/local/sbin/membros): os scripts ficam ao lado do arquivo de verdade.
 KIT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
 
-ajuda() { sed -n 2,12p "$KIT_DIR/membros"; }
+ajuda() { sed -n 2,13p "$KIT_DIR/membros"; }
 
 [ $# -gt 0 ] || { ajuda; exit 1; }
 sub=$1
@@ -33,9 +34,10 @@ case "$sub" in
         ;;
     kit-de-recuperacao) exec bash "$KIT_DIR/recuperacao.sh" "$@" ;;
     migrar) exec bash "$KIT_DIR/migrar.sh" "$@" ;;
+    preparar-servidor) exec bash "$KIT_DIR/preparar-servidor.sh" "$@" ;;
     ajuda|-h|--help) ajuda; exit 0 ;;
     *)
-        printf 'ERRO: subcomando desconhecido: %s. Os que existem: status, backup, restaurar, restaurar --ensaio, kit-de-recuperacao, migrar.\n' "$sub" >&2
+        printf 'ERRO: subcomando desconhecido: %s. Os que existem: status, backup, restaurar, restaurar --ensaio, kit-de-recuperacao, migrar, preparar-servidor.\n' "$sub" >&2
         exit 1
         ;;
 esac
