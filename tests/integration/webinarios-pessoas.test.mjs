@@ -24,7 +24,8 @@ import {
 // - criar, editar (as copias dos itens mudam), o nome repetido recusado (no app e no indice unico), remover (os itens
 //   ficam com a copia e sem a pessoa, pelo on delete set null do banco);
 // - o preenchimento da migracao (a secao 5, numa transacao desfeita no fim): uma pessoa por nome dos itens e das
-//   mensagens do Enviar agora, a foto e o papel do mais recente, os itens ligados com a copia da pessoa;
+//   mensagens do Enviar agora, o nome e o papel do mais recente e a foto mais recente que existe (revisao v8, achado
+//   5), os itens ligados com a copia da pessoa;
 // - duplicar o webinario copia a lista;
 // - a pergunta simulada na Live ao vivo: o "Enviar agora" de Tipo Pergunta grava sem aluno; a aluna ve a pergunta na
 //   aba com o nome e a foto da pessoa, vota, e nao responde no fio (403); a equipe responde; o relatorio, o painel e o
@@ -147,30 +148,37 @@ test("2. criar, editar (as copias dos itens mudam), o nome repetido recusado e r
   actAs(null);
 });
 
-test("3. o preenchimento da migracao (numa transacao desfeita): uma pessoa por nome dos itens e do Enviar agora, o papel e a foto do mais recente, os itens ligados com a copia", () => {
+test("3. o preenchimento da migracao (numa transacao desfeita): uma pessoa por nome dos itens e do Enviar agora, o nome e o papel do mais recente, a foto mais recente que existe, os itens ligados com a copia", () => {
   const webinar = AO_VIVO.id;
+  // A Bia (revisao v8, achado 5): a linha mais nova nao tem foto; a foto da mais velha fica na pessoa e vai para os
+  // dois itens (antes, a pessoa pegava a foto nula da mais recente e a copia apagava a foto do item mais velho).
   const saida = sql(`
     begin;
     delete from public.webinar_personas;
     insert into public.webinar_chat_script_items (webinar_id, trigger_kind, persona_name, persona_role, body, kind, status, position, persona_avatar_path, updated_at) values
       ('${webinar}', 'manual', 'adriano  souza', 'student', 'Velho', 'message', 'ready', 10, null, now() - interval '2 hours'),
-      ('${webinar}', 'manual', 'Adriano Souza', 'team', 'Novo', 'message', 'ready', 11, '${FOTO}', now() - interval '1 hour');
+      ('${webinar}', 'manual', 'Adriano Souza', 'team', 'Novo', 'message', 'ready', 11, '${FOTO}', now() - interval '1 hour'),
+      ('${webinar}', 'manual', 'Bia Velha', 'student', 'Com foto', 'message', 'ready', 12, '${OUTRA_FOTO}', now() - interval '3 hours'),
+      ('${webinar}', 'manual', 'bia   velha', 'team', 'Sem foto', 'message', 'ready', 13, null, now() - interval '30 minutes');
     insert into public.webinar_chat_messages (webinar_id, session_id, offset_ms, display_name, role, source, body, kind, master, approved)
       values ('${webinar}', '${AO_VIVO.sessaoId}', 1000, 'Carla  M.', 'student', 'scripted', 'Enviado agora', 'message', false, true);
     ${secaoDoPreenchimento()}
     select coalesce(json_agg(json_build_object('nome', name, 'papel', role, 'foto', avatar_path) order by name_key), '[]'::json) from public.webinar_personas where webinar_id = '${webinar}';
     select coalesce(json_agg(json_build_object('nome', persona_name, 'papel', persona_role, 'foto', persona_avatar_path, 'ligado', persona_id is not null) order by position), '[]'::json)
-      from public.webinar_chat_script_items where webinar_id = '${webinar}' and position in (10, 11);
+      from public.webinar_chat_script_items where webinar_id = '${webinar}' and position in (10, 11, 12, 13);
     rollback;
   `);
   const [pessoas, itens] = saida.trim().split("\n").filter((linha) => linha.startsWith("[")).map((linha) => JSON.parse(linha));
   assert.deepEqual(pessoas, [
     { foto: FOTO, nome: "Adriano Souza", papel: "team" },
+    { foto: OUTRA_FOTO, nome: "bia velha", papel: "team" },
     { foto: null, nome: "Carla M.", papel: "student" }
   ]);
   assert.deepEqual(itens, [
     { foto: FOTO, ligado: true, nome: "Adriano Souza", papel: "team" },
-    { foto: FOTO, ligado: true, nome: "Adriano Souza", papel: "team" }
+    { foto: FOTO, ligado: true, nome: "Adriano Souza", papel: "team" },
+    { foto: OUTRA_FOTO, ligado: true, nome: "bia velha", papel: "team" },
+    { foto: OUTRA_FOTO, ligado: true, nome: "bia velha", papel: "team" }
   ]);
 });
 

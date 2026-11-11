@@ -19,7 +19,8 @@
 --   user_id passa a aceitar nulo, e so na scripted: nenhum aluno e dono dela (o check pede user_id na audience e nulo
 --   na scripted). Um indice unico parcial segura uma pergunta simulada por mensagem do roteiro;
 -- - o preenchimento (secao 5): uma pessoa por nome distinto (pelo name_key) dos itens do roteiro de cada webinario e das
---   mensagens scripted sem item (o "Enviar agora" do console), com o papel e a foto do mais recente; e cada item ligado
+--   mensagens scripted sem item (o "Enviar agora" do console), com o nome e o papel do mais recente e a foto mais recente
+--   que existe (a linha mais nova sem foto nunca apaga a foto do nome; revisao v8 de 11/11/2026); e cada item ligado
 --   a pessoa do nome dele, com a copia dela (as mensagens ja enviadas nao mudam). So roda com a lista ainda vazia (a primeira vez): rodar de novo nunca traz de volta uma pessoa
 --   que a equipe tirou da lista;
 -- - webinar_open_session (o corpo inteiro da 202611100002, mesma assinatura): na Live gravada, o item Pergunta solto na
@@ -180,10 +181,9 @@ do $$
 begin
   -- So a primeira vez (a lista vazia): rodar de novo nunca traz de volta uma pessoa que a equipe tirou da lista.
   if not exists (select 1 from public.webinar_personas) then
-    insert into public.webinar_personas (webinar_id, name, role, avatar_path, created_at)
-    select distinct on (src.webinar_id, public.webinar_persona_name_key(src.name))
-      src.webinar_id, src.name, src.role, src.avatar_path, src.at
-    from (
+    -- O nome e o papel do mais recente; a foto, a mais recente que existe (uma linha mais nova sem foto nunca apaga a
+    -- foto que o nome ja tinha: a copia da pessoa vai para todos os itens dela logo abaixo).
+    with src as (
       select i.webinar_id,
         left(regexp_replace(btrim(i.persona_name), '\s+', ' ', 'g'), 60) as name,
         case when i.persona_role = 'team' then 'team' else 'student' end as role,
@@ -198,12 +198,24 @@ begin
         m.created_at
       from public.webinar_chat_messages m
       where m.source = 'scripted' and m.script_item_id is null
-    ) src
+    ),
+    photo as (
+      select distinct on (src.webinar_id, public.webinar_persona_name_key(src.name))
+        src.webinar_id, public.webinar_persona_name_key(src.name) as photo_key, src.avatar_path
+      from src
+      where src.avatar_path is not null
+      order by src.webinar_id, public.webinar_persona_name_key(src.name), src.at desc
+    )
+    insert into public.webinar_personas (webinar_id, name, role, avatar_path, created_at)
+    select distinct on (src.webinar_id, public.webinar_persona_name_key(src.name))
+      src.webinar_id, src.name, src.role, photo.avatar_path, src.at
+    from src
+    left join photo on photo.webinar_id = src.webinar_id and photo.photo_key = public.webinar_persona_name_key(src.name)
     where public.webinar_persona_name_key(src.name) <> ''
     order by src.webinar_id, public.webinar_persona_name_key(src.name), src.at desc
     on conflict (webinar_id, name_key) do nothing;
 
-    -- A pessoa e a fonte: o item ligado fica com a copia dela (o nome, o papel e a foto do mais recente).
+    -- A pessoa e a fonte: o item ligado fica com a copia dela (o nome e o papel do mais recente, a foto mais recente).
     update public.webinar_chat_script_items i
     set persona_id = p.id, persona_name = p.name, persona_role = p.role, persona_avatar_path = p.avatar_path
     from public.webinar_personas p

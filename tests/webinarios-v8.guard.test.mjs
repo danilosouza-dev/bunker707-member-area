@@ -27,7 +27,9 @@ import {
 //   (NFC, espacos repetidos viram um, sem espacos nas pontas, sem caixa), conferido pelo texto da funcao e por uma copia
 //   em JavaScript da expressao num punhado de nomes com acento e caixa (o par contra o banco de verdade fica na
 //   integracao, tests/integration/webinarios-pessoas.test.mjs);
-// - o preenchimento roda uma vez (a lista vazia), uma pessoa por nome dos itens e das mensagens scripted sem item;
+// - o preenchimento roda uma vez (a lista vazia), uma pessoa por nome dos itens e das mensagens scripted sem item, com
+//   o nome e o papel do mais recente e a foto mais recente nao nula (a revisao v8, achado 5: o arquivo mudou antes de
+//   ir para a nuvem de teste, e o hash junto);
 // - webinar_open_session mantem o corpo inteiro da 202611100002 e so ganha a pergunta do item Pergunta na gravada;
 // - webinar_report e webinar_panel mantem o corpo inteiro da 202610300007 e so ganham o filtro da turma
 //   (source = 'audience') nas perguntas;
@@ -62,7 +64,7 @@ test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611110001 v
   assert.equal(files[files.indexOf("202611100002_webinars_v7_na_tela.sql") + 1], "202611110001_webinars_v8_pessoas.sql", "logo depois da Na tela");
   assert.equal(
     fileHash(MIGRATION),
-    "0c8477f1aad42127eba79bf534deb825f682cfe71854dfeac11f3fcf4053c982",
+    "8ec4b5bf89463d5ef428d834e1d77baaa8c92c13cff50aeafee9929c1d14ed4c",
     "a 202611110001 mudou: depois de aplicada na nuvem de teste (docs/21 §9.14), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });
@@ -137,7 +139,15 @@ test("o preenchimento roda so com a lista vazia, uma pessoa por nome dos itens e
   assert.match(fill, /select distinct on \(src\.webinar_id, public\.webinar_persona_name_key\(src\.name\)\)/);
   assert.match(fill, /from public\.webinar_chat_script_items i/);
   assert.match(fill, /where m\.source = 'scripted' and m\.script_item_id is null/, "as mensagens do Enviar agora");
-  assert.match(fill, /order by src\.webinar_id, public\.webinar_persona_name_key\(src\.name\), src\.at desc/, "o papel e a foto do mais recente");
+  assert.match(fill, /order by src\.webinar_id, public\.webinar_persona_name_key\(src\.name\), src\.at desc\s+on conflict/, "o nome e o papel do mais recente");
+  // A revisao v8 (achado 5): a foto e a mais recente que existe por nome; a linha mais nova sem foto nunca a apaga.
+  assert.match(
+    fill,
+    /photo as \(\s*select distinct on \(src\.webinar_id, public\.webinar_persona_name_key\(src\.name\)\)\s+src\.webinar_id, public\.webinar_persona_name_key\(src\.name\) as photo_key, src\.avatar_path\s+from src\s+where src\.avatar_path is not null\s+order by src\.webinar_id, public\.webinar_persona_name_key\(src\.name\), src\.at desc\s*\)/,
+    "a foto mais recente nao nula"
+  );
+  assert.match(fill, /src\.webinar_id, src\.name, src\.role, photo\.avatar_path, src\.at\s+from src\s+left join photo on photo\.webinar_id = src\.webinar_id and photo\.photo_key = public\.webinar_persona_name_key\(src\.name\)/);
+  assert.doesNotMatch(fill, /src\.role, src\.avatar_path, src\.at/, "nunca a foto da linha mais recente, mesmo nula");
   assert.match(fill, /on conflict \(webinar_id, name_key\) do nothing;/);
   assert.match(fill, /set persona_id = p\.id, persona_name = p\.name, persona_role = p\.role, persona_avatar_path = p\.avatar_path/);
   assert.match(fill, /and p\.name_key = public\.webinar_persona_name_key\(i\.persona_name\);/);
