@@ -851,8 +851,9 @@ arquivo novo).
 **Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migracao o app novo continua de pe. As perguntas
 aparecem como antes (o fio le vazio, `chat-store.listQuestionReplyRows`), a foto do perfil funciona e "Remover minhas
 mensagens" segue; so **escrever no fio** falha, e falha antes de gravar qualquer coisa. Na equipe, responder ou apagar
-uma resposta no fio volta 409 com a frase "Esta parte precisa da atualização do banco (migração 202611100001)."
-(`room-actions.withReplyTable`, com `WEBINARS_MIGRATION = "202611100001"`). No aluno, o Responder continua aparecendo
+uma resposta no fio volta 409 com a frase "Esta parte precisa da atualização do banco (migração {a mais nova})."
+(`room-actions.withReplyTable`, pelo `WEBINARS_MIGRATION`, que aponta sempre a migração mais nova: era `"202611100001"`
+quando esta parte entrou e, desde a §9.13, é `"202611100002"`, que inclui esta). No aluno, o Responder continua aparecendo
 na pergunta respondida (o fio le vazio) e o envio volta o erro comum da rota, "Não foi possível enviar a resposta."
 (500), sem numero de migracao: a contagem do fio sem numero (o PostgREST responde o HEAD de uma tabela que nao existe
 com 404 sem corpo) vira migracao pendente em `chat-store.countQuestionReplyRows`, antes do aceite e da rajada, entao o
@@ -905,9 +906,17 @@ não solta o roteiro da live ao abrir (o tick de minuto solta os itens dela desd
 **Antes do merge na `dev`** (a Vercel publica a `dev` sozinha): sem a migração o app novo continua de pé. Nenhuma
 coluna dela entra nas listas que o app sempre lê (`SESSION_COLUMNS`, `CHAT_MESSAGE_COLUMNS`, `SCRIPT_ITEM_COLUMNS`); as
 leituras da Na tela devolvem vazio e só as escritas novas caem no aviso de migração pendente, que aponta a
-`202611100002` (`WEBINARS_MIGRATION` e `WEBINARS_SCREEN_MIGRATION`). A migração sozinha não atrapalha o app de antes: as
-tabelas são novas; o check novo aceita tudo que o app de antes grava; as colunas novas ficam nulas; e a live ainda não
-tinha roteiro, então a troca de `webinar_open_session` não muda nada para ele.
+`202611100002` (`WEBINARS_MIGRATION` e `WEBINARS_SCREEN_MIGRATION`). **O roteiro da Live ao vivo não grava nada sem
+ela** (revisão de 11/11/2026): a `webinar_open_session` de antes (`202610290001`) não tem o filtro da live e, no
+**Começar para todos**, soltaria todos os itens com minuto de uma vez (com `created_at` na hora marcada mais o minuto,
+fora da consulta de 5 s, e o tick e o **Soltar agora** pulando depois). Por isso salvar o roteiro, importar o CSV e o
+**Guardar na lista** do console num webinário `live` voltam 409 com a frase "O roteiro da live ao vivo precisa da
+atualização do banco (migração 202611100002)." antes de gravar qualquer coisa (`script-actions.scriptAvatarsFor`, quando
+a coluna `persona_avatar_path` não existe). O **Enviar agora** sem foto segue (não cria item do roteiro); com foto, e a
+foto em qualquer item, voltam o aviso da foto. A Live gravada segue como antes: o roteiro salva sem foto e só gravar uma
+foto pede a migração. A migração sozinha não atrapalha o app de antes: as tabelas são novas; o check novo aceita tudo
+que o app de antes grava; as colunas novas ficam nulas; e no app de antes a live não tinha roteiro, então a troca de
+`webinar_open_session` não muda nada para ele.
 
 **Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
 no SQL Editor (é idempotente). O único `drop` é o do check antigo, dentro do bloco que só roda sem o check novo; se o
