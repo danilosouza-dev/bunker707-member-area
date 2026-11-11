@@ -11,6 +11,8 @@ import "server-only";
 // (ligado no webinario ou com resposta) e a Simulacao completa (a decisao do selo, as regras da 202610300003, o
 // resumo congelado e o roteiro por Solta em) e o bloco "Na tela" (as exibicoes da sessao com os numeros de
 // webinar_screen_report, no mesmo cache de 60 s por minuto; sem a 202611100002, nenhuma linha e o bloco nao aparece).
+// Adendo de 10/11/2026 (R7): a Simulacao da Live ao vivo tambem (as regras, a decisao, o resumo congelado no Encerrar
+// live e o roteiro da sessao da live por Solta em), no mesmo bloco a parte; o CSV Simulacao continua so da gravada.
 // Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
 // (M9); webinarReportCsv continua servindo o Attendee de sempre. Tudo pela service role; PendingMigrationError sobe
 // para a pagina mostrar o aviso da migracao (WEBINARS_MIGRATION); as partes da fase 4 lidas guardadas mostram o aviso
@@ -212,9 +214,14 @@ function simulationScriptByTrigger(fires: ReadonlyMap<string, number>, triggers:
   return counts;
 }
 
-/** As regras da Simulacao da sessao (202610300003) no formato do bloco; nulo sem regra lida. */
+/** As sessoes com o bloco Simulacao: a gravada e, desde o adendo de 10/11/2026 (R7), a Live ao vivo (nunca o Replay). */
+function withSimulation(session: WebinarSession) {
+  return session.kind === "simulated" || session.kind === "live";
+}
+
+/** As regras da Simulacao da sessao (202610300003) no formato do bloco; nulo sem regra lida (e no Replay). */
 async function loadSimulationRules(db: WebinarsDb, session: WebinarSession): Promise<Guarded<SimulationRulesSummary | null>> {
-  if (session.kind !== "simulated") {
+  if (!withSimulation(session)) {
     return { pending: false, value: null };
   }
   return guarded(async () => {
@@ -276,7 +283,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     listRecordingRows(db, [webinarId]),
     guarded(() => fetchAssistantSettings(db, webinarId)),
     loadSimulationRules(db, session),
-    simulated ? listSimulationScriptFires(db, [session.id]) : Promise.resolve(new Map<string, Map<string, number>>()),
+    withSimulation(session) ? listSimulationScriptFires(db, [session.id]) : Promise.resolve(new Map<string, Map<string, number>>()),
     withOffer ? unlessMissing(() => listSessionOfferClicks(db, session.id), []) : Promise.resolve([]),
     session.kind === "replay" ? Promise.resolve<ScreenReportData>({ displays: [], stats: {} }) : (options.screen ?? screenReportOf)(session.id, now)
   ]);
@@ -324,6 +331,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
       ackText: session.simulationAckText,
       decidedAt: session.simulationDecidedAt,
       decidedByName: session.simulationDecidedBy ? (people[session.simulationDecidedBy]?.name ?? null) : null,
+      live: session.kind === "live",
       pending: rules.pending,
       realParticipants: report.presence.unique,
       rules: rules.pending ? null : rules.value,

@@ -53,7 +53,9 @@ import {
 // - R7 pelo app: o produtor decide a Simulacao da live na espera (saveSessionSimulation com a frase da live; o selo
 //   recusado), a aluna recebe a janela pela rota depois do Comecar para todos e o console ve "+300" separado;
 // - R8 e R9 pelo app: o tick solta o item vencido da live com a foto (uma vez; o Soltar agora depois esbarra na chave
-//   unica), o Enviar agora grava o comentario com a foto e a aluna recebe os dois pela consulta de 5 s com a foto.
+//   unica), o Enviar agora grava o comentario com a foto e a aluna recebe os dois pela consulta de 5 s com a foto;
+// - R7 no relatorio: o Encerrar live e o tick do resumo congelam a Simulacao da live, e a pagina do relatorio da live
+//   traz o bloco Simulacao a parte (regras, resumo, roteiro por Solta em) sem nada simulado nos numeros reais.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -900,5 +902,47 @@ test("16. R8 e R9 pelo app: o tick solta o item vencido da live com a foto, uma 
   const porNome = Object.fromEntries(body.data.messages.map((message) => [message.displayName, message.avatarUrl]));
   assert.equal(porNome["Bia C."], `${supabaseUrl}/storage/v1/object/public/content-assets/${FOTO}`, "a foto de quem comenta pela origem do nosso Supabase");
   assert.equal(porNome["Duda E."], `${supabaseUrl}/storage/v1/object/public/content-assets/${OUTRA_FOTO}`);
+  actAs(null);
+});
+
+test("17. R7 no relatorio: o Encerrar live e o tick do resumo congelam a Simulacao da live; o relatorio da live traz o bloco Simulacao a parte e os numeros reais sem nada simulado", async () => {
+  // Continua do 15 (a regra +300 fixos decidida na espera) e do 16 (o item vencido solto pelo tick e o Enviar agora).
+  const { runSimulationSummariesTick } = await import("../../src/server/webinars/simulation-tick.ts");
+  const { getWebinarReportPage } = await import("../../src/server/webinars/report-queries.ts");
+  const { simulationBlockVisible, simulationLines } = await import("../../src/server/webinars/report-page-model.ts");
+  const antes = unwrap(await db.from("webinar_sessions").select("kind, status, simulated_count_rule, simulation_summary").eq("id", AO_VIVO.sessaoId).single(), "Lendo a live no ar");
+  assert.deepEqual([antes.kind, antes.status, antes.simulated_count_rule?.base, antes.simulation_summary], ["live", "live", 300, null]);
+
+  ok(await liveActions.endLiveSession({ sessionId: AO_VIVO.sessaoId }));
+  const tick = await runSimulationSummariesTick({ db, now: new Date() });
+  assert.equal(tick.frozen, 1, JSON.stringify(tick));
+  const depois = unwrap(await db.from("webinar_sessions").select("status, simulation_summary").eq("id", AO_VIVO.sessaoId).single(), "Lendo a live encerrada");
+  assert.equal(depois.status, "ended");
+  assert.equal(depois.simulation_summary.counter_max, 300, "o contador +300 fixos congelado no Encerrar live");
+  assert.equal((await runSimulationSummariesTick({ db, now: new Date() })).frozen, 0, "uma vez so");
+
+  actAs(produtor);
+  const page = await getWebinarReportPage(AO_VIVO.id, { sessionId: AO_VIVO.sessaoId });
+  const selected = page?.selected;
+  assert.ok(selected, "a pagina do relatorio da live abre com a sessao");
+  assert.equal(selected.session.id, AO_VIVO.sessaoId);
+  const { simulation, report } = selected;
+  assert.equal(simulation.live, true);
+  assert.equal(simulation.showLiveBadge, false);
+  assert.equal(simulation.decidedByName, contas.produtor.nome);
+  assert.match(simulation.ackText, /^Decisão do produtor em \d{2}\/\d{2}\/\d{4}: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem\. Responsável: /);
+  assert.equal(simulation.rules?.countMode, "fixed");
+  assert.deepEqual(simulation.totals, { counterMax: 300, joinsShown: 0, saleNoticesShown: 0 }, "o resumo congelado, pelas linhas sim_* da RPC");
+  assert.deepEqual(simulation.script.byTrigger, { at_offset: 1, manual: 0, on_phrase: 0 }, "o item solto pelo tick; o Enviar agora nao tem item");
+  assert.deepEqual([simulation.script.ready, simulation.script.fired, simulation.script.missed], [2, 1, 1], "o item dos 30 min nao disparou");
+  assert.equal(simulationBlockVisible(selected.session.kind, simulation), true);
+  assert.ok(simulationLines(simulation).includes("Comentários do roteiro por Solta em: Num minuto da live 1 · Pelo botão da equipe 0"));
+  assert.ok(!selected.exportReports.includes("simulacao"), "o CSV Simulacao continua so da gravada");
+
+  // Os numeros reais (so alunos, so o chat da turma) nunca levam o simulado: nem os +300 nem os comentarios prontos.
+  assert.equal(report.chat.total, 0, "as mensagens scripted nunca contam no chat");
+  assert.equal(report.presence.unique, 0, "ninguem de verdade na sala");
+  assert.equal(simulation.realParticipants, report.presence.unique, "o real ao lado do contador, sem somar");
+  assert.ok((report.presence.peak?.n ?? 0) < 300, "o pico real sem a parte simulada");
   actAs(null);
 });

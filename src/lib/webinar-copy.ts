@@ -621,6 +621,8 @@ export const WEBINAR_COPY = {
       vagasGarantidas: "Garantir vaga"
     },
     seloAoVivo: 'Selo "Ao vivo"',
+    /** A primeira linha do bloco Simulacao na Live ao vivo (R7): sem o selo da gravada, so quem decidiu. */
+    simulacaoDaLive: "Simulação da live",
     ligado: "ligado",
     desligado: "desligado",
     decididoPor: (nome: string, data: string) => `decidido por ${nome} em ${data}`,

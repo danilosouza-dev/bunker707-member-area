@@ -11,7 +11,8 @@ import { ReportBlock, ReportEmpty, ReportFacts, ReportSubheading } from "./repor
 // Assistente (respostas, tempo medio, corrigidas, apagadas e quem pediu a equipe; fora da Simulacao e das mensagens de
 // aluno e equipe, D24) e a Simulacao completa (o selo com quem decidiu, o contador com os participantes de verdade ao
 // lado, as entradas, os avisos de venda e o roteiro por Solta em; fundo diferente e a frase de que nada dali entra nos
-// outros numeros, D6 e D10). Banco sem a parte: o aviso da migracao so no bloco. O bloco "Na tela" (especificacao de
+// outros numeros, D6 e D10; na Live ao vivo, R7, a mesma coisa sem o selo e com os gatilhos da live). Banco sem a
+// parte: o aviso da migracao so no bloco. O bloco "Na tela" (especificacao de
 // 10/11/2026, §7): uma linha por exibicao de banner, QR Code ou enquete fixada (Item, Entrou aos, Ficou, Viram,
 // Clicaram, Cliques, Fecharam e Clicaram ÷ viram; a enquete fixada so com a entrada e quanto ficou, "—" nos numeros) e a
 // nota do que "Viram" quer dizer embaixo; a pagina so o desenha quando a sessao teve exibicao. Sem hooks: desenha no

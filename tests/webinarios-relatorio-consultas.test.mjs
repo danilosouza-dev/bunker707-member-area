@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
-import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, bancoDosWebinarios, gravacaoRow, resumoDePresenca, rpcs, scriptedDb, sessaoRow, silenciando, vagaRow, webinarRow } from "./support/webinarios-banco-falso.mjs";
+import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, bancoDosWebinarios, gravacaoRow, perfil, perfis, resumoDePresenca, rpcs, scriptedDb, sessaoRow, silenciando, vagaRow, webinarRow } from "./support/webinarios-banco-falso.mjs";
 
 // As leituras da aba Relatorio (docs/30 §3.4, §3.7 e §4.6; entrega 2c), sem banco e sem Next: "next/cache" vira um
 // duble que imita o Data Cache (uma entrada por chave e argumentos, devolvida para sempre), e o cliente do banco vira
@@ -11,8 +11,8 @@ import { ALUNA, ALUNO, EQUIPE, GRAVACAO_ID, SESSAO_ID, WEBINAR_ID, bancoDosWebin
 // padrao, a sessao pedida, a lista por aluno com nome, e-mail, hora da vaga, aparelho e pontuacao, as enquetes com
 // os rotulos, as perguntas citadas, a Simulacao), o CSV "Attendee" (colunas do Zoom, BOM, ponto e virgula, nome do
 // arquivo, sessao de outro webinario) e a migracao pendente. Da fase 4: o Assistente ligado, o trecho da transcricao das
-// quedas, as regras da Simulacao e o roteiro por Solta em (e o aviso so no bloco sem a migracao da parte), as sessoes
-// "Comeca quando voce entra" e os CSVs sem cache (M9). Contra o banco local: tests/integration/webinarios-relatorio.test.mjs.
+// quedas, as regras da Simulacao e o roteiro por Solta em (e o aviso so no bloco sem a migracao da parte; na Live ao
+// vivo tambem, R7, sem o CSV Simulacao), as sessoes "Comeca quando voce entra" e os CSVs sem cache (M9). Contra o banco local: tests/integration/webinarios-relatorio.test.mjs.
 
 // `keyParts` e `options` sao os do primeiro unstable_cache do modulo (o relatorio); `all` guarda todos, na ordem (o
 // segundo e o bloco "Na tela", com a mesma regra de 60 s e a tag).
@@ -266,6 +266,7 @@ test("a sessao escolhida: lista por aluno com nome, e-mail, hora da vaga, aparel
     ackText: "Decisão do produtor em 05/11/2026: o selo fica ligado.",
     decidedAt: "2026-11-05T12:00:00.000Z",
     decidedByName: "Carla Produtora",
+    live: false,
     pending: false,
     realParticipants: 3,
     // A sessao do duble nao tem as colunas da fase 4: as regras saem no padrao (tudo desligado).
@@ -457,7 +458,7 @@ test("fase 4 na pagina: o Assistente ligado no webinario, o trecho da transcrica
   assert.ok(consultas(db, "webinar_chat_messages").every((query) => query.filters.some(([metodo, coluna, valor]) => metodo === "eq" && coluna === "source" && valor === "scripted")), "o roteiro que entrou e lido so para o bloco Simulacao");
 });
 
-test("fase 4 na pagina: banco sem a 202610300003 ou a 202610300004 deixa o aviso so no bloco; a Live ao vivo nao le a Simulacao nem oferece o CSV dela", async () => {
+test("fase 4 na pagina: banco sem a 202610300003 ou a 202610300004 deixa o aviso so no bloco; a Live ao vivo le a Simulacao dela (R7) mas nao oferece o CSV dela; o Replay nao le", async () => {
   const db = bancoV4({ semMigracao: ["ofertas", "assistente"] });
   const selected = (await semCacheV4(db))?.selected;
   assert.ok(selected, "a pagina abre");
@@ -465,12 +466,47 @@ test("fase 4 na pagina: banco sem a 202610300003 ou a 202610300004 deixa o aviso
   assert.equal(selected.simulation.pending, true);
   assert.equal(selected.simulation.rules, null);
 
-  const live = bancoV4({ sessoes: [sessaoRow({ kind: "live", started_at: "2026-11-05T23:00:00.000Z", status: "live" })] });
+  // R7: a live encerrada com +300 fixos, as entradas e o resumo congelado no Encerrar live; o roteiro da sessao da live.
+  const live = bancoV4({
+    perfis: [...perfis, perfil(EQUIPE, "carla@exemplo.test", "Carla Produtora")],
+    sessoes: [
+      sessaoRow({
+        ended_at: "2026-11-05T23:31:00.000Z",
+        kind: "live",
+        presence_curve: resumoDePresenca(),
+        simulated_count_rule: { base: 300, jitter: 0, mode: "fixed", peak: 300 },
+        simulated_joins: { enabled: true, every_seconds: 45, max: 20, names: "generic" },
+        simulated_sale_notices: null,
+        simulation_ack_text: "Decisão do produtor em 05/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem. Responsável: Carla Produtora.",
+        simulation_decided_at: "2026-11-05T12:00:00.000Z",
+        simulation_decided_by: EQUIPE,
+        simulation_summary: { counter_max: 300, joins_shown: 18, sale_notices_shown: 0 },
+        started_at: "2026-11-05T23:00:00.000Z",
+        status: "ended"
+      })
+    ]
+  });
   const aoVivo = (await semCacheV4(live))?.selected;
   assert.ok(aoVivo);
-  assert.ok(!aoVivo.exportReports.includes("simulacao"));
-  assert.equal(aoVivo.simulation.rules, null);
-  assert.equal(consultas(live, "webinar_chat_messages").length, 0, "nada do roteiro numa live ao vivo");
+  assert.ok(!aoVivo.exportReports.includes("simulacao"), "o CSV Simulacao continua so da gravada");
+  assert.equal(aoVivo.simulation.live, true);
+  assert.equal(aoVivo.simulation.showLiveBadge, false);
+  assert.deepEqual(aoVivo.simulation.rules, { countMode: "fixed", joins: { enabled: true, everySeconds: 45, max: 20 }, saleNotices: { enabled: false, items: 0 } });
+  assert.deepEqual(aoVivo.simulation.totals, { counterMax: 240, joinsShown: 18, saleNoticesShown: null }, "o que a RPC trouxe do resumo congelado (a do duble)");
+  assert.deepEqual(aoVivo.simulation.script.byTrigger, { at_offset: 1, manual: 1, on_phrase: 0 }, "os comentarios da live por Solta em");
+  assert.equal(aoVivo.simulation.decidedByName, "Carla Produtora");
+  assert.match(aoVivo.simulation.ackText, /nesta live ao vivo/);
+  assert.equal(aoVivo.simulation.realParticipants, aoVivo.report.presence.unique, "o real ao lado, sem somar");
+  assert.ok(consultas(live, "webinar_chat_messages").length > 0, "o roteiro que entrou na live e lido para o bloco");
+  assert.ok(consultas(live, "webinar_chat_messages").every((query) => query.filters.some(([metodo, coluna, valor]) => metodo === "eq" && coluna === "source" && valor === "scripted")), "so as mensagens scripted");
+
+  // O Replay nunca tem Simulacao: nem as regras nem o roteiro.
+  const replay = bancoV4({ sessoes: [sessaoRow({ kind: "replay", started_at: "2026-11-05T23:00:00.000Z", status: "live" })] });
+  const doReplay = (await semCacheV4(replay))?.selected;
+  assert.ok(doReplay);
+  assert.equal(doReplay.simulation.rules, null);
+  assert.equal(doReplay.simulation.live, false);
+  assert.equal(consultas(replay, "webinar_chat_messages").length, 0, "nada do roteiro no Replay");
 });
 
 test("as sessoes 'Comeca quando voce entra': so as dos ultimos 7 dias, da mais nova para a mais velha; a padrao e a mais recente", async () => {

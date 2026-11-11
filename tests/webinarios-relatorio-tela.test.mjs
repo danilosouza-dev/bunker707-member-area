@@ -120,6 +120,7 @@ function simulacao(extra = {}) {
     ackText: encerrada.simulationAckText,
     decidedAt: encerrada.simulationDecidedAt,
     decidedByName: "Carla Produtora",
+    live: false,
     pending: false,
     realParticipants: 3,
     rules: null,
@@ -254,9 +255,21 @@ test("a lista por aluno: nome, vaga, entrou/saiu, tempo, ate o fim, contagens e 
   }
 });
 
-test("sessao em andamento: o selo e a nota de que a curva le as amostras; sem replay o numero do replay fica '—'; a Live ao vivo nao tem o bloco Simulacao", () => {
+/** A Simulacao de uma Live ao vivo sem nada simulado: sem decisao, regras desligadas, sem resumo e sem roteiro. */
+const liveSemSimulacao = () =>
+  simulacao({
+    ackText: null,
+    decidedAt: null,
+    decidedByName: null,
+    live: true,
+    rules: { countMode: "off", joins: { enabled: false, everySeconds: 60, max: 30 }, saleNotices: { enabled: false, items: 0 } },
+    script: { byTrigger: model.emptyScriptByTrigger(), fired: 0, missed: 0, ready: 0 },
+    showLiveBadge: false
+  });
+
+test("sessao em andamento: o selo e a nota de que a curva le as amostras; sem replay o numero do replay fica '—'; a Live ao vivo sem nada simulado nao tem o bloco Simulacao", () => {
   const aoVivo = sessionFromRow(sessaoRow({ kind: "live", started_at: "2026-11-05T23:00:00.000Z", status: "live" }));
-  const page = pagina({ hasReplay: false, selected: { ...pagina().selected, session: aoVivo }, sessions: model.reportSessionOptions(WEBINAR_ID, [aoVivo], SESSAO_ID), webinar: { ...pagina().webinar, kind: "live" } });
+  const page = pagina({ hasReplay: false, selected: { ...pagina().selected, session: aoVivo, simulation: liveSemSimulacao() }, sessions: model.reportSessionOptions(WEBINAR_ID, [aoVivo], SESSAO_ID), webinar: { ...pagina().webinar, kind: "live" } });
   const markup = html(createElement(WebinarReportView, { page }));
   const text = textOf(markup);
 
@@ -657,4 +670,98 @@ test("o bloco Na tela (especificacao de 10/11/2026, §7): so com exibicao, uma l
   // Depois das Respostas do Assistente e da Oferta, antes da Simulacao e da lista por aluno.
   const ordem = ["webinario-relatorio-na-tela", "webinario-relatorio-simulacao"].map((id) => markup.indexOf(`aria-labelledby="${id}"`));
   assert.ok(ordem[0] > 0 && ordem[0] < ordem[1], ordem.join(" "));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * R7 (adendo de 10/11/2026): o bloco Simulacao na Live ao vivo, a parte dos numeros reais
+ * ---------------------------------------------------------------------------------------------- */
+
+const { simulationAckSentenceLive } = await import("../src/server/webinars/simulation-ack.ts");
+
+const FRASE_DA_LIVE = simulationAckSentenceLive({ countSimulated: true, date: "05/11/2026", joinsSimulated: true, responsible: "Carla Produtora", saleNoticesSimulated: false });
+
+/** A Live ao vivo encerrada com +300 fixos e entradas simuladas, decidida na espera, e o roteiro da live. */
+function liveSimulada() {
+  const aoVivo = sessionFromRow(
+    sessaoRow({
+      ended_at: "2026-11-05T23:31:00.000Z",
+      kind: "live",
+      presence_curve: resumoDePresenca(),
+      simulation_ack_text: FRASE_DA_LIVE,
+      simulation_decided_at: "2026-11-05T12:00:00.000Z",
+      simulation_decided_by: EQUIPE,
+      started_at: "2026-11-05T23:00:00.000Z",
+      status: "ended"
+    })
+  );
+  const simulation = simulacao({
+    ackText: FRASE_DA_LIVE,
+    live: true,
+    realParticipants: 3,
+    rules: { countMode: "fixed", joins: { enabled: true, everySeconds: 45, max: 20 }, saleNotices: { enabled: false, items: 0 } },
+    script: { byTrigger: { at_offset: 2, manual: 1, on_phrase: 0 }, fired: 3, missed: 1, ready: 3 },
+    showLiveBadge: false,
+    totals: { counterMax: 300, joinsShown: 12, saleNoticesShown: null }
+  });
+  return pagina({
+    hasReplay: false,
+    selected: { ...pagina().selected, exportReports: ["registration", "attendee", "performance", "qa", "poll", "survey"], session: aoVivo, simulation },
+    sessions: model.reportSessionOptions(WEBINAR_ID, [aoVivo], SESSAO_ID),
+    webinar: { ...pagina().webinar, kind: "live" }
+  });
+}
+
+test("R7: a Live ao vivo com algo simulado mostra o bloco Simulacao a parte (sem o selo, a frase da live, os gatilhos da live); os numeros reais nao mudam", () => {
+  const markup = html(createElement(WebinarReportView, { page: liveSimulada() }));
+  const inicio = markup.indexOf('aria-labelledby="webinario-relatorio-simulacao"');
+  assert.ok(inicio > 0, "o bloco aparece na live");
+  const bloco = markup.slice(markup.lastIndexOf("<section", inicio), markup.indexOf("</section>", inicio) + "</section>".length);
+  assert.match(bloco, /bg-\[var\(--surface-2\)\]/, "o fundo diferente, como na gravada");
+  const texto = textOf(bloco);
+  assert.match(texto, /^Simulação Estes números são da simulação e não entram em nenhum outro número\./);
+  assert.match(texto, /Simulação da live: decidido por Carla Produtora em 05\/11\/2026 às 09:00/);
+  assert.doesNotMatch(texto, /Selo "Ao vivo"/, "a live nunca tem o selo da gravada");
+  assert.match(texto, /Contador simulado: real \+ número fixo · maior número mostrado: 300 · participantes de verdade: 3/);
+  assert.match(texto, /Entradas simuladas: 12 apareceram Avisos de venda simulados: desligado/);
+  assert.match(texto, /3 itens prontos no roteiro 3 comentários do roteiro entraram · 1 não disparou/);
+  assert.match(texto, /Comentários do roteiro por Solta em: Num minuto da live 2 · Pelo botão da equipe 1/);
+  assert.doesNotMatch(texto, /Quando o apresentador diz|Num minuto do vídeo/, "so os gatilhos da live");
+  assert.ok(texto.includes(FRASE_DA_LIVE), "a frase da live gravada com a decisao");
+  assert.match(FRASE_DA_LIVE, /^Decisão do produtor em 05\/11\/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda não aparecem\. Responsável: Carla Produtora\.$/);
+
+  // Os numeros reais, fora do bloco, continuam os da RPC (so alunos): nada dos +300 nem das entradas.
+  const fora = markup.slice(0, markup.lastIndexOf("<section", inicio));
+  assert.match(fora, /aria-label="Compareceram, 3, pelo menos 30 s na sala"/);
+  assert.match(fora, /aria-label="Pico de presentes, 3, no melhor momento \(00:00\)"/);
+  assert.doesNotMatch(textOf(fora), /300|simulad/, "nenhum numero simulado fora do bloco");
+  assert.match(textOf(markup), /Live ao vivo · 05\/11\/2026 às 20:00/);
+  // Antes da lista por aluno, como na gravada.
+  const ordem = ["webinario-relatorio-simulacao", "webinario-relatorio-alunos"].map((id) => markup.indexOf(id));
+  assert.ok(ordem[0] > 0 && ordem[0] < ordem[1], ordem.join(" "));
+});
+
+test("R7 modelo: o bloco Simulacao aparece sempre na gravada, na live so com algo simulado (decisao, regra, resumo ou roteiro) e nunca no Replay", () => {
+  const vazia = liveSemSimulacao();
+  assert.equal(model.simulationBlockVisible("simulated", { ...vazia, live: false }), true, "a gravada sempre");
+  assert.equal(model.simulationBlockVisible("live", vazia), false, "a live sem nada simulado");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, rules: null, pending: true }), false, "a live sem a 202610300003 e sem roteiro");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, decidedAt: "2026-11-05T12:00:00.000Z" }), true, "a decisao registrada (mesmo so com o real)");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, rules: { ...vazia.rules, countMode: "curve" } }), true, "o contador");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, rules: { ...vazia.rules, joins: { enabled: true, everySeconds: 60, max: 30 } } }), true, "as entradas");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, rules: { ...vazia.rules, saleNotices: { enabled: true, items: 1 } } }), true, "os avisos de venda");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, totals: { counterMax: 300, joinsShown: null, saleNoticesShown: null } }), true, "o resumo congelado no Encerrar live");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, script: { ...vazia.script, ready: 2 } }), true, "itens prontos no roteiro");
+  assert.equal(model.simulationBlockVisible("live", { ...vazia, script: { byTrigger: { at_offset: 0, manual: 1, on_phrase: 0 }, fired: 1, missed: 0, ready: 0 } }), true, "o Soltar agora de um item pelo botao");
+  assert.equal(model.simulationBlockVisible("replay", { ...liveSimulada().selected.simulation, live: false }), false, "o Replay nunca");
+
+  assert.deepEqual(model.simulationLines(liveSimulada().selected.simulation), [
+    "Simulação da live: decidido por Carla Produtora em 05/11/2026 às 09:00",
+    "Contador simulado: real + número fixo · maior número mostrado: 300 · participantes de verdade: 3",
+    "Entradas simuladas: 12 apareceram",
+    "Avisos de venda simulados: desligado",
+    "3 itens prontos no roteiro",
+    "3 comentários do roteiro entraram · 1 não disparou",
+    "Comentários do roteiro por Solta em: Num minuto da live 2 · Pelo botão da equipe 1"
+  ]);
+  assert.equal(model.simulationLines({ ...vazia, script: { ...vazia.script, ready: 1 } })[0], "Simulação da live: sem decisão registrada");
 });

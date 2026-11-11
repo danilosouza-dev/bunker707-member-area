@@ -7,7 +7,8 @@
 // exibicao de banner, QR Code ou enquete fixada) e o CSV "Attendee" nos nomes do Zoom. Sem "server-only", imports
 // relativos: tests/webinarios-relatorio-*.test.mjs carregam direto pelo Node. Os numeros simulados nunca entram aqui
 // alem do bloco Simulacao (D6, D10): a RPC ja separa as linhas `sim_*` e report-model.ts so as poe em `script` e
-// `simulation`, que so simulationLines le.
+// `simulation`, que so simulationLines le. Adendo de 10/11/2026 (R7): o bloco Simulacao tambem na Live ao vivo, so
+// quando ela teve algo simulado (simulationBlockVisible), sem o selo "Ao vivo" da gravada e com os gatilhos da live.
 
 import type { CsvCell } from "../../lib/csv";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
@@ -30,6 +31,7 @@ import {
   type SimulatedCountMode,
   type WebinarSession
 } from "./model";
+import { LIVE_SCRIPT_TRIGGER_LABELS, scriptTriggersFor } from "./persona-model";
 import { bucketLabel, percentOf, revenueLabel, watchTimeLabel, type ReportBucket, type WebinarReportView } from "./report-model";
 import { bucketCount } from "./room-model";
 import { screenDisplayLabel, type ScreenDisplay, type ScreenDisplayKind } from "./screen-model";
@@ -583,7 +585,8 @@ export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly Tran
 
 /* ------------------------------------------------------------------------------------------------
  * O bloco Simulacao completo (docs/30 §3.5): o selo e quem decidiu, o contador com o real ao lado, as entradas, os
- * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6).
+ * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6). Na Live ao
+ * vivo (R7): sem o selo (a primeira linha diz so quem decidiu) e o roteiro pelos gatilhos da live.
  * ---------------------------------------------------------------------------------------------- */
 
 /** As regras da fase 4 (202610300003) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
@@ -601,12 +604,37 @@ export type SimulationSummary = {
   pending: boolean;
   /** Os participantes de verdade (presentes unicos), ao lado do contador para a equipe comparar. */
   realParticipants: number;
+  /**
+   * A sessao e a Live ao vivo (R7): a primeira linha sem o selo "Ao vivo" da gravada (que nunca existe na live) e o
+   * roteiro por Solta em so com os gatilhos da live ("Num minuto da live" e "Pelo botão da equipe").
+   */
+  live: boolean;
   rules: SimulationRulesSummary | null;
   script: { byTrigger: Record<ScriptTrigger, number>; fired: number; missed: number; ready: number };
   showLiveBadge: boolean;
   /** O que simulation_summary congelou no fim (as linhas sim_* da RPC); nulo antes do fim ou sem regra. */
   totals: WebinarReportView["simulation"];
 };
+
+/**
+ * O bloco Simulacao aparece na sessao: sempre na gravada (o selo e a decisao dela); na Live ao vivo (R7), so quando ela
+ * teve algo simulado: a decisao registrada no card, uma regra ligada, o resumo congelado no fim ou o roteiro (itens
+ * prontos ou comentarios que entraram). A live sem nada disso fica sem o bloco, como antes; o Replay, nunca.
+ */
+export function simulationBlockVisible(kind: SessionKind, summary: SimulationSummary): boolean {
+  if (kind === "simulated") {
+    return true;
+  }
+  if (kind !== "live") {
+    return false;
+  }
+  const { rules, script, totals } = summary;
+  const ruleOn = Boolean(rules && (rules.countMode !== "off" || rules.joins.enabled || rules.saleNotices.enabled));
+  const frozen = totals.counterMax !== null || totals.joinsShown !== null || totals.saleNoticesShown !== null;
+  const scripted = script.ready > 0 || script.fired > 0 || Object.values(script.byTrigger).some((count) => count > 0);
+
+  return summary.decidedAt !== null || ruleOn || frozen || scripted;
+}
 
 export function emptyScriptByTrigger(): Record<ScriptTrigger, number> {
   return { at_offset: 0, manual: 0, on_phrase: 0 };
@@ -618,7 +646,8 @@ export function simulationLines(summary: SimulationSummary): string[] {
   const decision = summary.decidedAt
     ? COPY.decididoPor(summary.decidedByName || COPY.alunoSemNome, formatSaoPauloDateTime(summary.decidedAt))
     : COPY.semDecisao;
-  const lines = [`${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`];
+  // A live nunca tem o selo da gravada: a primeira linha diz so quem decidiu a Simulacao dela.
+  const lines = [summary.live ? `${COPY.simulacaoDaLive}: ${decision}` : `${COPY.seloAoVivo}: ${summary.showLiveBadge ? COPY.ligado : COPY.desligado} · ${decision}`];
   const { rules, totals } = summary;
 
   if (rules) {
@@ -634,7 +663,10 @@ export function simulationLines(summary: SimulationSummary): string[] {
 
   lines.push(COPY.roteiroProntos(summary.script.ready));
   lines.push(`${COPY.roteiroEntraram(summary.script.fired)} · ${COPY.roteiroFaltaram(summary.script.missed)}`);
-  lines.push(`${SIM.porSoltaEm}: ${SCRIPT_TRIGGERS.map((trigger) => `${EXPORTAR.valores.soltaEm[trigger]} ${summary.script.byTrigger[trigger] ?? 0}`).join(" · ")}`);
+  // Na live, so os gatilhos dela (sem "Quando o apresentador diz", que nao existe na transmissao).
+  const triggers = summary.live ? scriptTriggersFor("live") : SCRIPT_TRIGGERS;
+  const label = (trigger: ScriptTrigger) => (summary.live && trigger !== "on_phrase" ? LIVE_SCRIPT_TRIGGER_LABELS[trigger] : EXPORTAR.valores.soltaEm[trigger]);
+  lines.push(`${SIM.porSoltaEm}: ${triggers.map((trigger) => `${label(trigger)} ${summary.script.byTrigger[trigger] ?? 0}`).join(" · ")}`);
 
   return lines;
 }
