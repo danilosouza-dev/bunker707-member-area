@@ -8,7 +8,7 @@ import type { ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
-import type { ModerationAction } from "@/server/webinars/chat-schemas";
+import type { ConsolePollLaunch, ModerationAction } from "@/server/webinars/chat-schemas";
 import {
   CONSOLE_POLL_MS,
   canTeamActOn,
@@ -65,6 +65,7 @@ import { LIVE_SCRIPT_LATE_MAX_MS } from "@/server/webinars/persona-model";
 import {
   answerQuestion,
   closePoll,
+  createConsolePoll,
   deleteQuestionReply,
   endSessionNow,
   launchPoll,
@@ -96,6 +97,7 @@ import { ConsoleOffer } from "./console-offer";
 import { ConsolePanel } from "./console-panel";
 import { ConsoleRail, visibleConsoleTabControl } from "./console-rail";
 import { ConsolePeopleTab } from "./console-people-tab";
+import type { ConsolePollFormInput } from "./console-poll-form";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
 import { ConsoleQuestions } from "./console-questions";
@@ -160,12 +162,16 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // (snapshot.barred) embaixo dos seletores do Chat, com os Desfazer; as acoes sao as mesmas da live (onPersonAction, sem
 // o comando ao iframe: la nao ha sala). Adendo de 10/11/2026: a parte simulada do contador separada no selo dos
 // presentes (R7) e o Roteiro tambem na sessao da Live ao vivo (R8, a fila pelo relogio desde o Começar para todos), com
-// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto).
+// o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta (R9; uploadPersonaPhoto). A "Nova
+// enquete" das Enquetes (D83, 11/11/2026): createConsolePoll guarda nas prontas e, no "Abrir agora" e no "Abrir e
+// fixar", abre (e fixa) na sessao, com os avisos "Enquete guardada nas prontas.", "Enquete aberta para a turma." e
+// "Enquete fixada."; abrir que falha depois de guardar vai para o banner do console (a enquete ja esta nas prontas).
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const naTelaCopy = WEBINAR_COPY.naTela.console;
 const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
+const novaEnqueteCopy = WEBINAR_ADMIN_COPY.console.polls.create;
 
 type Failure = { message: string; status: number };
 
@@ -689,6 +695,33 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   }
 
   /**
+   * A "Nova enquete" das Enquetes (D83): guarda nas prontas e, no "Abrir agora" e no "Abrir e fixar", abre (e fixa) na
+   * sessao (createConsolePoll). Devolve o resultado para o formulario pôr os erros nos campos (nulo com outra acao em
+   * andamento); abrir que falha depois de guardar (`launchError`) vai para o banner do console, porque a enquete ja esta
+   * nas prontas e o formulario fecha. No sucesso, o aviso e o retrato de novo (a lista das prontas com a nova).
+   */
+  async function submitPoll(input: ConsolePollFormInput, launch: ConsolePollLaunch) {
+    if (!sessionId || busyKey) {
+      return null;
+    }
+    setBusyKey("poll:create");
+    setFailure(null);
+    const result = await createConsolePoll({ ...input, launch, sessionId });
+    setBusyKey(null);
+    if (result.ok) {
+      if (result.data.launchError) {
+        setFailure(result.data.launchError);
+      } else if (launch === "save") {
+        adminToast.success(novaEnqueteCopy.avisos.guardada);
+      } else {
+        adminToast.success(launch === "pin" && result.data.pinned ? naTelaCopy.avisos.enqueteFixada : novaEnqueteCopy.avisos.aberta);
+      }
+      await refresh();
+    }
+    return result;
+  }
+
+  /**
    * O Excluir confirmado de um banner ou QR Code pronto: o resultado volta para a confirmacao, que mostra a falha dentro
    * dela (o banner do console fica por baixo do dialogo); no sucesso, o aviso e o retrato de novo.
    */
@@ -1004,6 +1037,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     canAct={canAct}
                     launched={snapshot.polls.launched}
                     onClose={(pollId: string, shareResults: boolean) => void run(`poll:${pollId}`, () => closePoll({ pollId, sessionId: session.id, shareResults }))}
+                    onCreate={submitPoll}
                     onLaunch={(pollId: string, pin: boolean) =>
                       void run(`poll:${pollId}`, () => launchPoll({ pin, pollId, sessionId: session.id }), (launched) => {
                         if (pin && launched.pinned) {

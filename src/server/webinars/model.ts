@@ -644,6 +644,8 @@ export const CHAT_LIMITS = {
   pollOption: 120,
   pollOptionsMax: 20,
   pollOptionsMin: 2,
+  /** O teto de enquetes prontas por webinario (o editor e o console, D83). */
+  pollTemplatesMax: 20,
   transcriptBytes: 2_000_000,
   simulationAck: 600,
   chatPageMax: 200

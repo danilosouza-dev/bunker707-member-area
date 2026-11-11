@@ -264,6 +264,21 @@ test("Enquetes: os modelos com pergunta, tipo e opcoes, sem o interruptor Respos
   assert.match(empty, /Nenhuma enquete pronta\./);
 });
 
+test("D83 Enquetes do editor: o Salvar manda os ids que o card carregou (o servidor so apaga desses, entao a enquete criada no console com a pagina aberta fica); o teto do card e o do servidor", async () => {
+  const { pollsSaveInput } = await import("../src/components/admin/v2/communication/webinars/polls-card.tsx");
+  const { CHAT_LIMITS } = await import("../src/server/webinars/model.ts");
+  const linhas = [{ id: "p-1", key: "p-1", kind: "single", options: [{ id: "o-1", key: "o-1", label: " Sim " }, { id: null, key: "k-2", label: "Não" }], question: " Vem? " }];
+  assert.deepEqual(pollsSaveInput(linhas, [{ id: "p-1" }, { id: "p-2" }], WEBINAR), {
+    loadedIds: ["p-1", "p-2"],
+    polls: [{ id: "p-1", kind: "single", options: [{ id: "o-1", label: "Sim" }, { id: null, label: "Não" }], question: "Vem?" }],
+    webinarId: WEBINAR
+  });
+  assert.equal(CHAT_LIMITS.pollTemplatesMax, 20);
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/polls-card.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /savePolls\(pollsSaveInput\(rows, saved, webinarId\)\)/, "o Salvar manda os ids do que esta salvo no card");
+  assert.match(fonte, /const MAX_POLLS = CHAT_LIMITS\.pollTemplatesMax;/);
+});
+
 test("Sessões: Entrada atrasada por sessao (Até o fim / Até um minuto com os minutos), a situacao e o link do console das gravadas, o Replay livre", () => {
   const draft = { ...model.emptyWebinarDraft("simulated"), sessions: [{ lateJoinMinutes: null, scheduledAt: "2026-11-06T23:00:00.000Z" }, { lateJoinMinutes: 15, scheduledAt: "2026-11-07T23:00:00.000Z" }] };
   const props = { disabled: false, draft, errorFor: () => undefined, now: NOW, onBlur: () => undefined, onChange: () => undefined };

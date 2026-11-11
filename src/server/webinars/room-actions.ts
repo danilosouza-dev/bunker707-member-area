@@ -18,9 +18,12 @@
 // (`team`), o "Abrir e fixar" (launchPoll com `pin`) e o Encerrar sem compartilhar, que desafixa (`poll_closed`; com o
 // resultado compartilhado ela continua fixada, agora com as barras). Toda troca muda o carimbo da sessao por ultimo.
 // No Replay e na sessao encerrada ou cancelada, 409; banco sem a 202611100002, 409 com o aviso da migracao.
+// A "Nova enquete" do console (11/11/2026, D83): createConsolePoll cria UMA enquete pronta no fim das prontas (nunca
+// pelo savePolls, que troca a lista inteira), dentro do teto, e abre ou abre e fixa pelo mesmo caminho do Abrir
+// (openTemplatePoll); o savePolls do editor so apaga dos modelos que o card carregou, entao ela fica.
 
 import { revalidatePath } from "next/cache";
-import { GENERIC_ACTION_ERROR, type ActionResult } from "@/lib/action-result";
+import { GENERIC_ACTION_ERROR, toActionError, type ActionErrorStatus, type ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
@@ -31,10 +34,12 @@ import { teamAnswerNeedsNotice } from "./assistant-model";
 import { studentPresentNow } from "./assistant-queries";
 import { answerQuestionOfApprovedAiReply, fetchAttendanceMarks, setQuestionAnswerSource } from "./assistant-store";
 import { invalidateWebinars } from "./cache";
-import { chatMessageFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
+import { chatMessageFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow, type PollOptionRow, type PollRow } from "./chat-rows";
 import {
   answerQuestionSchema,
+  CHAT_MESSAGES,
   closePollSchema,
+  createConsolePollSchema,
   createReplaySessionSchema,
   deleteQuestionReplySchema,
   launchPollSchema,
@@ -47,6 +52,7 @@ import {
   sessionChatModeSchema,
   sessionIdInputSchema,
   teamChatSchema,
+  type ConsolePollLaunch,
   type ModerationAction
 } from "./chat-schemas";
 import {
@@ -83,6 +89,7 @@ import {
   type ChatMode,
   type Poll,
   type PollDraft,
+  type PollKind,
   type PresenceSummary,
   type QuestionReply,
   type SlowModeSeconds,
@@ -144,6 +151,15 @@ export type RemovedStudentContent = { answers: number; consentRevoked: boolean; 
 export type PinnedPoll = { changed: boolean; displayId: string; pollId: string; sessionId: string };
 /** A enquete desafixada (`unpinned` falso: nao havia enquete fixada). */
 export type UnpinnedPoll = { pollId: string | null; sessionId: string; unpinned: boolean };
+/**
+ * A "Nova enquete" do console (D83): `poll` e a pronta criada; `launched` a copia aberta nesta sessao (nula no "Guardar
+ * nas prontas" ou quando abrir falhou depois de guardar, com a frase e o status em `launchError`); `pinned` se ficou
+ * fixada.
+ */
+export type CreatedConsolePoll = { launchError: { message: string; status: ActionErrorStatus } | null; launched: Poll | null; pinned: boolean; poll: Poll };
+
+/** O maior `position` que o check da 202610290001 aceita numa enquete. */
+const POLL_POSITION_MAX = 10_000;
 
 /* ------------------------------------------------------------------------------------------------
  * Apoio
@@ -748,15 +764,27 @@ export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId:
 
 /**
  * [messaging.write] Os modelos de enquete do webinario (session_id nulo), a lista inteira: cria os novos, atualiza
- * os que tem id, apaga os que sairam. As copias ja lancadas nas sessoes nao mudam.
+ * os que tem id, apaga os que sairam. As copias ja lancadas nas sessoes nao mudam. Desde 11/11/2026 (D83) so apaga dos
+ * modelos que o card carregou (`loadedIds`): a enquete que o console criou depois (createConsolePoll) fica, e o pedido
+ * sem os ids (a pagina de antes) nao apaga nada. O teto (CHAT_LIMITS.pollTemplatesMax) conta o que o card manda mais o
+ * que fica sem ele ter carregado: passou, 409 antes de gravar.
  */
-export async function savePolls(input: { polls: PollDraft[]; webinarId: string }): Promise<ActionResult<SavedPolls>> {
+export async function savePolls(input: { loadedIds?: string[]; polls: PollDraft[]; webinarId: string }): Promise<ActionResult<SavedPolls>> {
   return runAdminAction("messaging.write", savePollsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     assertWebinarNotArchived(webinar);
     const existing = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
     const existingIds = new Set(existing.polls.map((poll) => poll.id));
+    const loaded = new Set(data.loadedIds);
+    const sentIds = new Set(data.polls.map((draft) => draft.id).filter((id): id is string => Boolean(id && existingIds.has(id))));
+    // O que fica sem o card ter carregado (a enquete criada no console depois que a pagina abriu) conta no teto.
+    const untouched = existing.polls.filter((poll) => !sentIds.has(poll.id) && !loaded.has(poll.id));
+
+    if (data.polls.length + untouched.length > CHAT_LIMITS.pollTemplatesMax) {
+      throw new WebinarError(CHAT_MESSAGES.tooManyPolls, 409);
+    }
+
     const kept = new Set<string>();
     let created = 0;
     let updated = 0;
@@ -789,7 +817,7 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
     let deleted = 0;
 
     for (const poll of existing.polls) {
-      if (!kept.has(poll.id)) {
+      if (!kept.has(poll.id) && loaded.has(poll.id)) {
         await deletePollRow(db, poll.id);
         deleted += 1;
       }
@@ -813,11 +841,103 @@ export async function savePolls(input: { polls: PollDraft[]; webinarId: string }
 }
 
 /**
- * [messaging.write] Abre uma enquete na sessao: a copia do modelo (session_id, template_poll_id) nasce aberta, com
- * a hora e o minuto do video. Uma copia aberta do mesmo modelo na mesma sessao nao duplica: volta a que existe. Com
- * `pin` (o "Abrir e fixar" do console, R2), a copia vira a enquete fixada da sessao (a de antes sai como `replaced`);
- * banco sem a 202611100002: 409 com o aviso da migracao antes de qualquer escrita. O carimbo da sessao muda por ultimo,
- * mesmo quando o fixar falha depois de a enquete nascer (a turma ve a enquete aberta de qualquer jeito).
+ * Abre a enquete pronta na sessao, o caminho unico do Abrir, do "Abrir e fixar" e da "Nova enquete" do console (D83):
+ * a copia do modelo (session_id, template_poll_id) nasce aberta, com a hora e o minuto do video. Uma copia aberta do
+ * mesmo modelo na mesma sessao nao duplica: volta a que existe. Com `pin` (o "Abrir e fixar" do console, R2), a copia
+ * vira a enquete fixada da sessao (a de antes sai como `replaced`); banco sem a 202611100002: 409 com o aviso da
+ * migracao antes de qualquer escrita. O carimbo da sessao muda por ultimo, mesmo quando o fixar falha depois de a
+ * enquete nascer (a turma ve a enquete aberta de qualquer jeito). Quem chama confere a sessao (canTeamActOn) e o modelo
+ * (do webinario da sessao, sem sessao).
+ */
+async function openTemplatePoll(
+  db: WebinarsDb,
+  input: { now: Date; pin: boolean; session: WebinarSession; template: { options: PollOptionRow[]; poll: PollRow }; userId: string; webinarId: string }
+): Promise<{ pinned: boolean; poll: Poll }> {
+  const { now, session, template, userId, webinarId } = input;
+  // O "Abrir e fixar" le o que esta na tela antes de gravar: sem a migracao, nada nasce (409 com o aviso).
+  const pinnedNow = input.pin ? (await withScreenTables(() => readActiveScreenDisplayRows(db, session.id))).find((row) => row.kind === "poll")?.poll_id ?? null : null;
+  const launched = await listPollRows(db, { sessionId: session.id, webinarId });
+  const open = launched.polls.find((poll) => poll.template_poll_id === template.poll.id && poll.status === "open");
+
+  if (open) {
+    if (!input.pin || pinnedNow === open.id) {
+      return { pinned: pinnedNow === open.id, poll: pollFromRow(open, launched.options) };
+    }
+
+    // A copia aberta ja existe: o "Abrir e fixar" so fixa (o Fixar da enquete em "Nesta sessão").
+    const shown = await pinPollDisplay(db, { now, poll: { id: open.id, question: open.question }, session, userId });
+    await touchSessionRow(db, session.id);
+    await recordAudit(db, {
+      action: "webinar.poll_pinned",
+      actorId: userId,
+      entityId: webinarId,
+      entityType: "webinar",
+      metadata: { display_id: shown.displayId, poll_id: open.id, replaced: shown.replaced, session_id: session.id }
+    });
+    revalidateConsole(webinarId);
+    invalidateReport();
+    return { pinned: true, poll: pollFromRow(open, launched.options) };
+  }
+
+  const created = await insertPollRow(
+    db,
+    {
+      // D64: a copia lancada nunca e anonima, mesmo de um modelo antigo marcado (legado: so as copias de antes continuam).
+      anonymous: false,
+      created_by: userId,
+      kind: template.poll.kind,
+      open_offset_ms: serverOffsetMs(session, now.getTime()),
+      opened_at: now.toISOString(),
+      position: template.poll.position,
+      question: template.poll.question,
+      session_id: session.id,
+      status: "open",
+      template_poll_id: template.poll.id,
+      webinar_id: webinarId
+    },
+    template.options.map((option) => option.label)
+  );
+
+  // O "Abrir e fixar": a copia nova vira a fixada. A falha (o conflito do indice unico duas vezes) nao desfaz a enquete
+  // aberta: o carimbo e a auditoria seguem e so depois o 409 sobe.
+  let shown: { displayId: string; replaced: number } | null = null;
+  let pinFailure: unknown = null;
+
+  if (input.pin) {
+    try {
+      shown = await pinPollDisplay(db, { now, poll: { id: created.poll.id, question: created.poll.question }, session, userId });
+    } catch (failure) {
+      pinFailure = failure;
+    }
+  }
+
+  // O carimbo por ultimo (a enquete ja gravada): a sala rele as enquetes em 5 a 10 s (o pollsKey da Na tela mudou).
+  await touchSessionRow(db, session.id);
+  await recordAudit(db, {
+    action: "webinar.poll_launched",
+    actorId: userId,
+    entityId: webinarId,
+    entityType: "webinar",
+    metadata: {
+      poll_id: created.poll.id,
+      session_id: session.id,
+      template_poll_id: template.poll.id,
+      ...(input.pin ? { display_id: shown?.displayId ?? null, pinned: shown !== null, replaced: shown?.replaced ?? 0 } : {})
+    }
+  });
+  revalidateConsole(webinarId);
+  invalidateReport();
+
+  if (pinFailure) {
+    throw pinFailure;
+  }
+
+  return { pinned: shown !== null, poll: pollFromRow(created.poll, created.options) };
+}
+
+/**
+ * [messaging.write] Abre uma enquete pronta na sessao pelo caminho unico (openTemplatePoll): so na sessao que aceita a
+ * equipe e so um modelo do webinario da sessao (nunca uma copia). Com `pin`, o "Abrir e fixar" das prontas (R2).
  */
 export async function launchPoll(input: { pin?: boolean; pollId: string; sessionId: string }): Promise<ActionResult<{ pinned: boolean; poll: Poll }>> {
   return runAdminAction("messaging.write", launchPollSchema, input, async ({ input: data, user }) => {
@@ -839,85 +959,90 @@ export async function launchPoll(input: { pin?: boolean; pollId: string; session
       throw new WebinarError(POLL_NOT_TEMPLATE_MESSAGE, 409);
     }
 
-    // O "Abrir e fixar" le o que esta na tela antes de gravar: sem a migracao, nada nasce (409 com o aviso).
-    const pinnedNow = data.pin ? (await withScreenTables(() => readActiveScreenDisplayRows(db, session.id))).find((row) => row.kind === "poll")?.poll_id ?? null : null;
-    const launched = await listPollRows(db, { sessionId: session.id, webinarId: webinar.id });
-    const open = launched.polls.find((poll) => poll.template_poll_id === template.poll.id && poll.status === "open");
+    return openTemplatePoll(db, { now, pin: data.pin, session, template, userId: user.id, webinarId: webinar.id });
+  });
+}
 
-    if (open) {
-      if (!data.pin || pinnedNow === open.id) {
-        return { pinned: pinnedNow === open.id, poll: pollFromRow(open, launched.options) };
-      }
+/**
+ * [messaging.write, a permissao do savePolls] A "Nova enquete" do console (D83; pedido do produtor de 11/11/2026, na
+ * Live ao vivo e na gravada): cria UMA enquete pronta no fim das prontas do webinario da sessao (nunca troca a lista
+ * inteira, entao o que outra pessoa da equipe criou ao mesmo tempo fica), dentro do teto CHAT_LIMITS.pollTemplatesMax
+ * (409 antes de gravar; depois de gravar, conta de novo: na corrida que passou do teto, quem passou desfaz a propria e
+ * recebe o mesmo 409). Com `launch` "open" ou "pin", abre (e fixa) na sessao pelo caminho do Abrir (openTemplatePoll),
+ * so com a sessao aceitando a equipe e, no fixar, com a 202611100002 (os dois conferidos antes de gravar: nada nasce).
+ * Webinario arquivado, 409. Se abrir falha depois de a enquete entrar nas prontas, ela fica la e o resultado volta com
+ * `launchError` (a frase para o aviso do console) em vez de falhar: o formulario fecha sem criar outra numa segunda
+ * tentativa. Auditoria `webinar.poll_created` so com ids e contagens (nunca a pergunta).
+ */
+export async function createConsolePoll(input: {
+  kind: PollKind;
+  launch?: ConsolePollLaunch;
+  options: { label: string }[];
+  question: string;
+  sessionId: string;
+}): Promise<ActionResult<CreatedConsolePoll>> {
+  return runAdminAction("messaging.write", createConsolePollSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const { session, webinar } = await loadSession(db, data.sessionId);
+    assertWebinarNotArchived(webinar);
 
-      // A copia aberta ja existe: o "Abrir e fixar" so fixa (o Fixar da enquete em "Nesta sessão").
-      const shown = await pinPollDisplay(db, { now, poll: { id: open.id, question: open.question }, session, userId: user.id });
-      await touchSessionRow(db, session.id);
-      await recordAudit(db, {
-        action: "webinar.poll_pinned",
-        actorId: user.id,
-        entityId: webinar.id,
-        entityType: "webinar",
-        metadata: { display_id: shown.displayId, poll_id: open.id, replaced: shown.replaced, session_id: session.id }
-      });
-      revalidateConsole(webinar.id);
-      invalidateReport();
-      return { pinned: true, poll: pollFromRow(open, launched.options) };
+    if (data.launch !== "save" && !canTeamActOn(session)) {
+      throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
     }
 
-    const created = await insertPollRow(
+    if (data.launch === "pin") {
+      // Sem a 202611100002, o "Abrir e fixar" recusa antes de a enquete nascer (como o das prontas).
+      await withScreenTables(() => readActiveScreenDisplayRows(db, session.id));
+    }
+
+    const before = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
+
+    if (before.polls.length >= CHAT_LIMITS.pollTemplatesMax) {
+      throw new WebinarError(CHAT_MESSAGES.tooManyPolls, 409);
+    }
+
+    const position = Math.min(POLL_POSITION_MAX, before.polls.reduce((max, poll) => Math.max(max, poll.position + 1), 0));
+    const template = await insertPollRow(
       db,
-      {
-        // D64: a copia lancada nunca e anonima, mesmo de um modelo antigo marcado (legado: so as copias de antes continuam).
-        anonymous: false,
-        created_by: user.id,
-        kind: template.poll.kind,
-        open_offset_ms: serverOffsetMs(session, now.getTime()),
-        opened_at: now.toISOString(),
-        position: template.poll.position,
-        question: template.poll.question,
-        session_id: session.id,
-        status: "open",
-        template_poll_id: template.poll.id,
-        webinar_id: webinar.id
-      },
-      template.options.map((option) => option.label)
+      // D64: nunca anonima.
+      { anonymous: false, created_by: user.id, kind: data.kind, position, question: data.question, session_id: null, status: "draft", webinar_id: webinar.id },
+      data.options.map((option) => option.label)
     );
 
-    // O "Abrir e fixar": a copia nova vira a fixada. A falha (o conflito do indice unico duas vezes) nao desfaz a enquete
-    // aberta: o carimbo e a auditoria seguem e so depois o 409 sobe.
-    let shown: { displayId: string; replaced: number } | null = null;
-    let pinFailure: unknown = null;
+    // Duas pessoas da equipe criando ao mesmo tempo perto do teto: quem passou dele desfaz a propria.
+    const after = await listPollRows(db, { sessionId: null, webinarId: webinar.id });
 
-    if (data.pin) {
-      try {
-        shown = await pinPollDisplay(db, { now, poll: { id: created.poll.id, question: created.poll.question }, session, userId: user.id });
-      } catch (failure) {
-        pinFailure = failure;
-      }
+    if (after.polls.length > CHAT_LIMITS.pollTemplatesMax) {
+      await deletePollRow(db, template.poll.id);
+      throw new WebinarError(CHAT_MESSAGES.tooManyPolls, 409);
     }
 
-    // O carimbo por ultimo (a enquete ja gravada): a sala rele as enquetes em 5 a 10 s (o pollsKey da Na tela mudou).
-    await touchSessionRow(db, session.id);
     await recordAudit(db, {
-      action: "webinar.poll_launched",
+      action: "webinar.poll_created",
       actorId: user.id,
       entityId: webinar.id,
       entityType: "webinar",
-      metadata: {
-        poll_id: created.poll.id,
-        session_id: session.id,
-        template_poll_id: template.poll.id,
-        ...(data.pin ? { display_id: shown?.displayId ?? null, pinned: shown !== null, replaced: shown?.replaced ?? 0 } : {})
-      }
+      metadata: { kind: data.kind, launch: data.launch, options: template.options.length, poll_id: template.poll.id, session_id: session.id }
     });
-    revalidateConsole(webinar.id);
-    invalidateReport();
+    revalidateWebinar(webinar.id);
 
-    if (pinFailure) {
-      throw pinFailure;
+    let opened: { pinned: boolean; poll: Poll } | null = null;
+    let launchError: CreatedConsolePoll["launchError"] = null;
+
+    if (data.launch !== "save") {
+      try {
+        opened = await openTemplatePoll(db, { now, pin: data.launch === "pin", session, template, userId: user.id, webinarId: webinar.id });
+      } catch (failure) {
+        const refused = toActionError(failure);
+        if (refused.status === 500) {
+          console.error(`[webinarios] enquete do console guardada, mas nao aberta: ${failure instanceof Error ? failure.message : String(failure)}`);
+        }
+        launchError = { message: refused.error, status: refused.status };
+      }
     }
 
-    return { pinned: shown !== null, poll: pollFromRow(created.poll, created.options) };
+    return { launchError, launched: opened?.poll ?? null, pinned: opened?.pinned ?? false, poll: pollFromRow(template.poll, template.options) };
   });
 }
 

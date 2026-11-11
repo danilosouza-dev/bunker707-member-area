@@ -992,8 +992,10 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
 
   const [primeira, segunda] = salvas.polls;
   const idDeOutra = segunda.options[0].id;
+  // D83 (11/11/2026): o card manda os ids que carregou (`loadedIds`) e o servidor so apaga desses.
   const atualizadas = ok(
     await roomActions.savePolls({
+      loadedIds: [primeira.id, segunda.id],
       polls: [{ anonymous: true, id: primeira.id, kind: "single", options: [{ id: primeira.options[1].id, label: "Não" }, { id: idDeOutra, label: "Talvez" }, { label: "Sim!" }], question: "Vem?" }],
       webinarId: WEBINAR
     })

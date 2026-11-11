@@ -245,7 +245,21 @@ export const WEBINAR_ADMIN_COPY = {
       answers: (count: number) => (count === 1 ? "1 resposta" : `${count} respostas`),
       close: "Encerrar",
       closed: "Encerrada",
-      empty: "Nenhuma enquete pronta. Crie no editor do webinário.",
+      /**
+       * A "Nova enquete" do console (D83, 11/11/2026): o formulario no lugar da lista, com os campos do card Enquetes
+       * do editor (WEBINAR_ADMIN_COPY.polls) e o "Abrir e fixar" da Na tela.
+       */
+      create: {
+        abrirAgora: "Abrir agora",
+        avisos: { aberta: "Enquete aberta para a turma.", guardada: "Enquete guardada nas prontas." },
+        cancelar: "Cancelar",
+        dica: "Toda enquete criada aqui fica nas prontas deste webinário, para abrir de novo em outra sessão.",
+        guardar: "Guardar nas prontas",
+        novaEnquete: "Nova enquete",
+        soGuardar: "Esta sessão não abre enquetes agora. A nova fica nas prontas.",
+        voltar: "Voltar"
+      },
+      empty: "Nenhuma enquete pronta. Crie uma em Nova enquete ou no editor do webinário.",
       launch: "Abrir",
       launched: "Nesta sessão",
       open: "Aberta",

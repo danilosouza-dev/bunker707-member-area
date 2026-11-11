@@ -34,7 +34,7 @@ export const CHAT_MESSAGES = {
   invalid: "Pedido inválido.",
   offset: "Minuto do vídeo inválido.",
   options: "A enquete precisa de 2 a 20 opções.",
-  option: "Cada opção tem até 120 caracteres.",
+  option: "Escreva cada opção (até 120 caracteres).",
   personaName: "Dê um nome a quem fala (até 60 caracteres).",
   phrase: "A frase tem de 2 a 300 caracteres.",
   pollAnswer: "Escolha ao menos uma opção.",
@@ -46,7 +46,7 @@ export const CHAT_MESSAGES = {
   session: "Sessão inválida.",
   simulationAck: "Marque a confirmação para ligar o selo.",
   tooManyItems: "O roteiro aceita até 5.000 mensagens.",
-  tooManyPolls: "Até 20 enquetes por webinário.",
+  tooManyPolls: `Até ${CHAT_LIMITS.pollTemplatesMax} enquetes por webinário.`,
   transcriptTooLong: "A transcrição passa de 2 MB.",
   window: "Janela inválida."
 } as const;
@@ -289,19 +289,42 @@ export const sessionChatModeSchema = z.object({
   slowModeSeconds: z.union([z.literal(SLOW_MODE_SECONDS[0]), z.literal(SLOW_MODE_SECONDS[1]), z.literal(SLOW_MODE_SECONDS[2]), z.literal(SLOW_MODE_SECONDS[3])]).nullable()
 });
 
-/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
-export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
-  id: uuidSchema.nullable().optional(),
+/**
+ * Os campos de uma enquete, os mesmos no card Enquetes do editor e na "Nova enquete" do console (D83): o tipo, a
+ * pergunta e de 2 a 20 opcoes de ate 120 caracteres (o id da opcao so vale no editor, que atualiza o modelo).
+ */
+const pollDraftFields = {
   kind: z.enum(POLL_KINDS).default("single"),
   options: z
     .array(z.object({ id: uuidSchema.nullable().optional(), label: z.string().trim().min(1, CHAT_MESSAGES.option).max(CHAT_LIMITS.pollOption, CHAT_MESSAGES.option) }))
     .min(CHAT_LIMITS.pollOptionsMin, CHAT_MESSAGES.options)
     .max(CHAT_LIMITS.pollOptionsMax, CHAT_MESSAGES.options),
   question: z.string({ error: CHAT_MESSAGES.pollQuestion }).trim().min(1, CHAT_MESSAGES.pollQuestion).max(CHAT_LIMITS.pollQuestion, CHAT_MESSAGES.pollQuestion)
+};
+
+/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
+export const pollDraftSchema: z.ZodType<PollDraft> = z.object({ id: uuidSchema.nullable().optional(), ...pollDraftFields });
+
+/**
+ * Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. `loadedIds` (D83): os
+ * modelos que o card carregou; o servidor so apaga desses, entao a enquete que o console criou depois fica. A folga de
+ * 100 nunca recusa o salvar de um banco que passou do teto.
+ */
+export const savePollsSchema = z.object({
+  loadedIds: z.array(uuidSchema).max(100, CHAT_MESSAGES.invalid).default([]),
+  polls: z.array(pollDraftSchema).max(CHAT_LIMITS.pollTemplatesMax, CHAT_MESSAGES.tooManyPolls),
+  webinarId: uuidSchema
 });
 
-/** Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. */
-export const savePollsSchema = z.object({ polls: z.array(pollDraftSchema).max(20, CHAT_MESSAGES.tooManyPolls), webinarId: uuidSchema });
+/** O que a "Nova enquete" do console faz depois de guardar nas prontas (D83): nada, Abrir agora ou Abrir e fixar. */
+export const CONSOLE_POLL_LAUNCHES = ["save", "open", "pin"] as const;
+export type ConsolePollLaunch = (typeof CONSOLE_POLL_LAUNCHES)[number];
+
+/**
+ * A enquete criada no console (D83): os mesmos campos do editor (pollDraftFields, os erros pelo mesmo caminho do campo),
+ * a sessao do console e o que fazer depois de guardar nas prontas do webinario.
+ */
+export const createConsolePollSchema = z.object({ ...pollDraftFields, launch: z.enum(CONSOLE_POLL_LAUNCHES, { error: CHAT_MESSAGES.invalid }).default("save"), sessionId: sessionIdSchema });
 
 /** Abrir uma enquete pronta na sessao; `pin`: o "Abrir e fixar" do console (a Na tela, R2). */
 export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });
