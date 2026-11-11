@@ -71,6 +71,7 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
   return (
     <SessionConsole
       currentUserId={user.id}
+      currentUserName={getUserDisplayName(user).fullName}
       data={loaded.data}
       key={loaded.data.snapshot?.session.id ?? "sem-sessao"}
       nonce={requestHeaders.get("x-nonce")}

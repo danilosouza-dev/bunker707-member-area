@@ -119,13 +119,19 @@ export const WEBINAR_ADMIN_COPY = {
     roteiro: { description: "Mensagens do roteiro nunca entram nas métricas reais.", title: "Roteiro de chat" },
     sala: { description: "Controles padrão ao começar; a sessão copia ao abrir.", title: "Sala" },
     sessoes: { description: "Cada sessão tem a própria Simulação e o próprio relatório.", title: "Sessões" },
-    simulacao: { description: "Por sessão: o selo que o aluno vê na sala, com a decisão registrada.", title: "Simulação" },
+    simulacao: {
+      description: "Participantes simulados somados ao número de quem assiste que o aluno vê, entradas e avisos de venda, por sessão, com a decisão registrada.",
+      title: "Simulação"
+    },
     vagaLembretes: { description: "O e-mail sai pela fila com os outros e-mails da área (Resend).", title: "Vaga e lembretes" }
   },
   /** A Simulacao e o Roteiro na Live ao vivo (adendo de 10/11/2026, R7 e R8). */
   cardsLive: {
     roteiro: { description: "Comentários prontos que entram aos minutos da live ou pelo botão da equipe. Nunca entram nas métricas reais.", title: "Roteiro de chat" },
-    simulacao: { description: "O contador, as entradas e os avisos de venda simulados da live, com a decisão registrada.", title: "Simulação" }
+    simulacao: {
+      description: "Participantes simulados somados ao número de quem assiste que o aluno vê, que mudam a qualquer momento no console, e as entradas e os avisos de venda da live, com a decisão registrada.",
+      title: "Simulação"
+    }
   },
   /** Roteiro de chat (docs/30 §2.2, §6.6 D6). */
   script: {
@@ -184,6 +190,8 @@ export const WEBINAR_ADMIN_COPY = {
     noSessions: "Marque as sessões no card Sessões e salve para decidir o selo de cada uma.",
     sessionLabel: (when: string) => `Sessão de ${when}`,
     undecided: "Sem decisão registrada: o selo fica desligado.",
+    /** A Live ao vivo (D79): ela nunca teve o selo da gravada, entao a frase fala do que aparece. */
+    undecidedLive: "Sem decisão registrada: nada simulado aparece na live.",
     unsaved: "Marque a confirmação para gravar a decisão."
   },
   /** Enquetes prontas (docs/30 §2.2 e §2.4). */

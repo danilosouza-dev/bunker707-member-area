@@ -1189,9 +1189,41 @@ export type SimulatedSaleNotices = { enabled: boolean; items: SimulatedSaleNotic
 /** O que o fim da sessao congela em `simulation_summary` (so o bloco Simulacao le). */
 export type SimulationTotals = { counterMax: number; joinsShown: number; saleNoticesShown: number };
 
+/**
+ * Uma mudanca dos participantes simulados no ar (docs/30 D79; webinar_simulation_changes, migracao 202611110002): a
+ * regra do contador que vale a partir de `atMs` no relogio da Simulacao (simulationClockMs), com a subida ou a descida
+ * em linha reta (SIMULATION_LIMITS.countRampSeconds) a partir do numero que a turma via. Na ordem do relogio.
+ */
+export type SimulationCountChange = { atMs: number; rule: SimulatedCountRule };
+
+/** De onde veio a mudanca dos participantes simulados: o console da sessao ou o card Simulacao do editor. */
+export const SIMULATION_CHANGE_SOURCES = ["console", "editor"] as const;
+export type SimulationChangeSource = (typeof SIMULATION_CHANGE_SOURCES)[number];
+
+/**
+ * Uma linha de webinar_simulation_changes (D79 e D80): a auditoria de cada mudanca dos participantes simulados, com a
+ * frase confirmada, quem, quando e de onde. `atMs` nulo e a mudanca de antes do comeco (ela trocou a regra da sessao,
+ * simulated_count_rule, e fica so no registro); com numero, vale no ar a partir dali (SimulationCountChange).
+ */
+export type SimulationChangeRecord = {
+  ackText: string;
+  atMs: number | null;
+  changedAt: string;
+  changedBy: string | null;
+  id: string;
+  rule: SimulatedCountRule;
+  sessionId: string;
+  source: SimulationChangeSource;
+};
+
 /** As colunas de Simulacao da fase 4 numa sessao (lidas so pelo codigo da Simulacao, nunca por uma metrica real). */
 export type SessionSimulation = {
   countRule: SimulatedCountRule;
+  /**
+   * As mudancas do contador depois do comeco (D79), na ordem do relogio; ausente ou vazia, so `countRule` (a regra de
+   * antes do comeco, que nunca muda no ar). As mudancas de antes do comeco ja trocaram `countRule` e nao entram aqui.
+   */
+  countChanges?: SimulationCountChange[];
   joins: SimulatedJoins;
   saleNotices: SimulatedSaleNotices;
   /** A semente do contador e das entradas (so no servidor; nunca vai para o aluno). */
@@ -1212,7 +1244,11 @@ export const SIMULATION_LIMITS = {
   /** A janela que GET /api/webinars/[id]/simulation devolve de cada vez (como o chat, docs/30 §6.6). */
   feedWindowSeconds: 120,
   /** O passo do contador na janela: um ponto a cada 15 s (o mesmo ritmo do sinal de presenca). */
-  counterStepSeconds: 15
+  counterStepSeconds: 15,
+  /** Os participantes simulados mudados no ar (D79): sobem ou descem em linha reta em 90 s, nunca de uma vez. */
+  countRampSeconds: 90,
+  /** No maximo 200 mudancas por sessao (a conta de cada ponto percorre as mudancas). */
+  countChangesMax: 200
 } as const;
 
 export function defaultSimulatedCountRule(): SimulatedCountRule {

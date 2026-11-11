@@ -78,6 +78,14 @@ export const WEBINARS_SCREEN_MIGRATION = "202611100002";
  */
 export const WEBINARS_PERSONAS_MIGRATION = "202611110001";
 
+/**
+ * Os participantes simulados mudados a qualquer momento (docs/30 D79 e D80; 11/11/2026): webinar_simulation_changes, as
+ * mudancas no ar com a frase de cada uma. Nenhuma leitura de sempre depende dela: sem a tabela, a Simulacao segue como
+ * antes (as leituras das mudancas devolvem vazio, simulation-store.ts) e so mudar o numero (o console e o card) volta
+ * 409 com o aviso desta.
+ */
+export const WEBINARS_AUDIENCE_MIGRATION = "202611110002";
+
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();
 }

@@ -52,7 +52,7 @@ export const savePersona = fail; export const deletePersona = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/simulation-actions": `${fail}
-export const loadSessionSimulations = fail; export const saveSessionSimulation = fail;`,
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`,
   "@/server/webinars/jit-actions": `${fail}
 export const saveJitSettings = fail; export const loadJitSettings = fail;`,
   "@/server/webinars/room-actions": `${fail}

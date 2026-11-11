@@ -84,6 +84,9 @@ import { screenStageKinds } from "@/server/webinars/screen-model";
 import { deletePersona, savePersona } from "@/server/webinars/persona-actions";
 import type { PersonaDraft, WebinarPersona } from "@/server/webinars/persona-model";
 import { fireScriptItem, saveScriptComment, sendScriptedComment, uploadPersonaPhoto } from "@/server/webinars/script-actions";
+import { saveSimulatedAudience } from "@/server/webinars/simulation-actions";
+import { simulationClockMs, simulationSessionStarted } from "@/server/webinars/simulation-model";
+import { SimulationAudienceControl } from "../simulation/simulation-audience-control";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
 import { adminTextareaClass } from "../../../form";
@@ -171,8 +174,17 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 // A "Nova enquete" das Enquetes (D83, 11/11/2026): createConsolePoll guarda nas prontas e, no "Abrir agora" e no "Abrir
 // e fixar", abre (e fixa) na sessao, com os avisos "Enquete guardada nas prontas.", "Enquete aberta para a turma." e
 // "Enquete fixada."; abrir que falha depois de guardar vai para o banner do console (a enquete ja esta nas prontas).
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, teste do produtor de 11/11/2026): o controle
+// "Participantes simulados" (simulation-audience-control.tsx) no alto da entrada Presença, que passa a existir tambem
+// antes do comeco quando o retrato traz o controle (snapshot.audience), na gravada e na Live ao vivo; o selo dos
+// presentes ("1 presente · +300 simulados", no palco da live e no topo) vira o botao que abre a Presença e leva o foco
+// ao titulo do controle. O Aplicar e o Tirar vao por saveSimulatedAudience (messaging.publish; o banner na falha, o
+// aviso "A sala recebe em segundos." e o retrato de novo no sucesso), e o controle leva ao card Simulacao do editor.
 
 const copy = WEBINAR_ADMIN_COPY.console;
+const plateiaCopy = WEBINAR_COPY.simulacao.plateia;
+/** O titulo do controle dos participantes simulados (o selo dos presentes leva o foco a ele). */
+const AUDIENCE_TITLE_ID = "console-audience-title";
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const naTelaCopy = WEBINAR_COPY.naTela.console;
 const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
@@ -183,6 +195,8 @@ type Failure = { message: string; status: number };
 
 type SessionConsoleProps = {
   currentUserId: string;
+  /** O nome de quem esta no console, como o servidor poe na frase dos participantes simulados (getUserDisplayName). */
+  currentUserName?: string | null;
   data: SessionConsoleData;
   /** A leitura do retrato na montagem (o teste de tela; o console sempre comeca respondendo). */
   initialPoll?: ConsolePoll;
@@ -197,7 +211,7 @@ type SessionConsoleProps = {
 
 type BanTarget = { name: string; participantId: string | null; userId: string };
 
-export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
+export function SessionConsole({ currentUserId, currentUserName = null, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ConsoleSnapshot | null>(data.snapshot);
   const [skew] = useState(() => serverNow - Date.now());
@@ -828,6 +842,35 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     return saved;
   }
 
+  /**
+   * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (a frase marcada so quando
+   * soma algo); o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
+   */
+  function applyAudience(input: { ackText: string | null; extra: number }): Promise<boolean> {
+    if (!sessionId) {
+      return Promise.resolve(false);
+    }
+    return run(
+      "audience",
+      () => saveSimulatedAudience({ ackText: input.ackText ?? undefined, acknowledged: input.ackText !== null, extra: input.extra, sessionId, source: "console" }),
+      () => adminToast.success(plateiaCopy.aplicado(input.extra))
+    );
+  }
+
+  /** O selo dos presentes (no palco da live e no topo): abre a Presença e leva o foco ao titulo dos participantes simulados. */
+  function openAudience() {
+    setPanelOpen(true);
+    setPanelView({ more: "presenca" });
+    window.requestAnimationFrame(() => {
+      const title = document.getElementById(AUDIENCE_TITLE_ID);
+      if (title && title.getClientRects().length > 0) {
+        title.focus();
+        return;
+      }
+      visibleConsoleTabControl(document, "presenca")?.focus();
+    });
+  }
+
   async function confirmBan() {
     if (!sessionId || !banTarget) {
       return;
@@ -904,7 +947,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const panelShown = live === null || panelOpen;
   const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen });
   const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
-  const entries = session ? consoleMoreEntriesFor({ hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
+  const audience = snapshot?.audience ?? null;
+  const entries = session ? consoleMoreEntriesFor({ audience: audience !== null, hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
+  // O momento do controle dos participantes simulados (D79): antes do comeco o numero vale na hora; no ar, a rampa.
+  const audiencePhase = session ? (session.status === "ended" ? "ended" : simulationSessionStarted(session, nowMs) ? "on_air" : "before") : "before";
+  const audienceOffsetMs = session ? simulationClockMs(session, nowMs) : Number.NaN;
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
   const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
   const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
@@ -1016,6 +1063,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       onRefresh={() => void refresh("click")}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       poll={poll}
+      onPresent={audience ? openAudience : undefined}
       presentLabel={presentLabel}
       presentNarrowOnly={live !== null}
       reading={reading}
@@ -1046,6 +1094,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   className={skeleton.stage ?? ""}
                   handle={room}
                   live={live}
+                  onPresent={audience ? openAudience : undefined}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
                   screenLabel={stageKinds.length > 0 ? naTelaCopy.pilulaPalco(stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind])) : null}
@@ -1145,8 +1194,31 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 ) : null,
                 // Fase 4b (docs/30 §2.4): a Oferta na sessao gravada e no Replay, com a propria leitura.
                 oferta: session.kind !== "live" ? <ConsoleOffer canAct={canAct} sessionId={session.id} webinarId={webinar.id} /> : null,
-                // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache.
-                presenca: snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null,
+                // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache;
+                // no alto, desde 11/11/2026 (D79), os participantes simulados (tambem antes do comeco, so com eles).
+                presenca:
+                  snapshot.presence || audience ? (
+                    <div className="flex min-w-0 flex-col gap-4">
+                      {audience ? (
+                        <SimulationAudienceControl
+                          audience={audience}
+                          busy={busyKey !== null}
+                          canPublish={permissions.canPublish}
+                          idBase="console-audience"
+                          key={session.id}
+                          link={{ href: `${webinarAdminHref(webinar.id)}#webinar-card-simulacao`, label: plateiaCopy.verNoEditor }}
+                          live={session.kind === "live"}
+                          nowMs={nowMs}
+                          offsetMs={audienceOffsetMs}
+                          onApply={applyAudience}
+                          phase={audiencePhase}
+                          responsible={currentUserName ?? ""}
+                          titleId={AUDIENCE_TITLE_ID}
+                        />
+                      ) : null}
+                      {snapshot.presence ? <ConsolePresencePanel presence={snapshot.presence} presentNow={snapshot.presentNow} /> : null}
+                    </div>
+                  ) : null,
                 tela:
                   session.kind !== "replay" ? (
                     <ConsoleScreen

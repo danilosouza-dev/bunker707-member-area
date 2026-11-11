@@ -650,7 +650,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const scheduledAt = session.session.scheduledAt;
   // A sala guarda a funcao num ref a cada desenho (use-room-simulation.ts): sem useCallback.
   const getSimulationOffsetMs = () => simulationClockMs({ kind: "live", scheduledAt, startedAt }, Date.now() + (skewRef.current ?? 0));
-  const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, webinarId });
+  const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
@@ -1359,7 +1359,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   webinarId={webinarId}
                 />
               ) : null}
-              {tab === "participantes" ? <LiveParticipantsTab presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
+              {tab === "participantes" ? <LiveParticipantsTab note={readOnly ? WEBINAR_COPY.simulacao.plateia.previa : null} presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
               {/* A enquete fixada fica na area das fixadas, acima: aqui so as outras (e nada, quando ela e a unica). */}
               {tab === "enquetes" && !(pinnedPoll && pollsTab.length === 0) ? (
                 <RoomPollsTab onAnswer={roomPolls.answer} polls={pollsTab} readOnly={readOnly || !writable} />

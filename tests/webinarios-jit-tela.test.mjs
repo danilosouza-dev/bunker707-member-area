@@ -89,7 +89,8 @@ test("o card do editor: ligar, a cada 15/30/60 min, a janela de Brasilia, a Entr
   assert.match(text, new RegExp(WEBINAR_COPY.jit.card.turma.slice(0, 40)));
   assert.match(text, /Simulação das sessões que nascem aqui/);
   assert.match(text, /CDC, art\. 37/);
-  assert.match(text, /Contador de plateia/);
+  // D79 (11/11/2026): o bloco do contador fala de participantes.
+  assert.match(text, /Participantes simulados/);
   assert.match(text, /Decisão de Produtora de Teste em 28\/10\/2026/);
   assert.match(text, /Sessões que nasceram hoje/);
   assert.match(text, /Começou às 10:00/);

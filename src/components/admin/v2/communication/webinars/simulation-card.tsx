@@ -3,9 +3,10 @@
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
+import { WEBINAR_ADMIN_COPY, webinarConsoleHref } from "@/server/webinars/editor-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { loadSessionSimulations, type SessionSimulationView, type SessionSimulationsData } from "@/server/webinars/simulation-actions";
+import type { SimulationAudienceView } from "@/server/webinars/simulation-audience-model";
 import { ErrorBanner } from "../../error-banner";
 import { PendingMigrationNotice } from "../../pending-migration-notice";
 import { adminToast } from "../../toast";
@@ -22,6 +23,10 @@ import { SimulationSessionRow, type SimulationRowMode, type SimulationSaveOutcom
 // fase 2. Os numeros simulados aparecem no relatorio so no bloco Simulacao (D6, M6). Na Live ao vivo (adendo de
 // 10/11/2026, R7; `webinarKind` "live"): a sessao da live (nunca o Replay), com o aviso do CDC da live e a frase da live;
 // sem a 202610300003 nao ha o que decidir na live (ela nunca teve o selo), so o aviso da migracao.
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, teste do produtor de 11/11/2026): no alto do
+// card, a frase de que o numero muda tambem no ar (aqui ou no console) e de que as entradas e os avisos de venda travam
+// quando a sessao comeca; cada sessao com o atalho "Mudar no console" e, ja comecada, o controle dos participantes
+// simulados (a vista vem de loadSessionSimulations; a mudanca troca a vista e o aviso diz que a sala recebe em segundos).
 
 const COPY = WEBINAR_COPY.simulacao.card;
 const ADMIN = WEBINAR_ADMIN_COPY.simulation;
@@ -52,6 +57,7 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
   const [attempt, setAttempt] = useState(0);
   const [savedSessions, setSavedSessions] = useState<Record<string, WebinarSession>>({});
   const [savedSimulations, setSavedSimulations] = useState<Record<string, SessionSimulationView>>({});
+  const [savedAudiences, setSavedAudiences] = useState<Record<string, SimulationAudienceView>>({});
   const [versions, setVersions] = useState<Record<string, number>>({});
   const [names, setNames] = useState<Record<string, string>>(deciderNames);
   const [busy, setBusy] = useState<string | null>(null);
@@ -92,17 +98,24 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
       const simulation = outcome.simulation;
       setSavedSimulations((current) => ({ ...current, [id]: simulation }));
     }
+    if (outcome.audience) {
+      const audience = outcome.audience;
+      setSavedAudiences((current) => ({ ...current, [id]: audience }));
+    }
     if (outcome.session.simulationDecidedBy) {
       const deciderId = outcome.session.simulationDecidedBy;
       setNames((current) => ({ ...current, [deciderId]: outcome.deciderName }));
     }
     setVersions((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
     setFailure(null);
-    adminToast.success(mode === "v4" ? COPY.salva : WEBINAR_ADMIN_COPY.toasts.simulationSaved);
+    adminToast.success(outcome.notice ?? (mode === "v4" ? COPY.salva : WEBINAR_ADMIN_COPY.toasts.simulationSaved));
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-simulation-card="">
+      <p className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-2 text-[13px] leading-5 font-medium text-[var(--text-primary)]" data-simulation-locked-note="">
+        {WEBINAR_COPY.simulacao.plateia.travados}
+      </p>
       <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2 text-[13px] leading-5 text-[var(--text-secondary)]">{liveWebinar ? COPY.avisoCdcLive : COPY.avisoCdc}</p>
       <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
         {liveWebinar ? COPY.numerosPadraoLive : COPY.numerosPadrao} {COPY.relatorio}
@@ -153,7 +166,10 @@ export function SimulationCard({ canPublish, currentUserName, deciderNames, disa
           const version = versions[session.id] ?? 0;
           return (
             <SimulationSessionRow
+              audience={savedAudiences[session.id] ?? loaded.get(session.id)?.audience ?? null}
               busy={busy === session.id}
+              canPublish={canPublish}
+              consoleHref={webinarConsoleHref(session.webinarId, session.id)}
               deciderName={decider}
               idBase={`${idBase}-${session.id}`}
               key={`${session.id}:${mode}:${version}`}

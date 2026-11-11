@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
@@ -9,9 +10,11 @@ import { consoleAckSentence } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { saveSimulation } from "@/server/webinars/room-actions";
-import { saveSessionSimulation, type SessionSimulationView } from "@/server/webinars/simulation-actions";
-import { simulationSessionStarted } from "@/server/webinars/simulation-model";
+import { saveSessionSimulation, saveSimulatedAudience, type SessionSimulationView } from "@/server/webinars/simulation-actions";
+import type { SimulationAudienceView } from "@/server/webinars/simulation-audience-model";
+import { simulationClockMs, simulationSessionStarted } from "@/server/webinars/simulation-model";
 import { AdminSwitch } from "../../../settings/kit";
+import { SimulationAudienceControl } from "./simulation-audience-control";
 import {
   savedSimulationRules,
   simulationFormChanged,
@@ -31,17 +34,37 @@ import { SimulationRulesFields } from "./simulation-rules-fields";
 // Enquanto o card le as regras ("loading"), nada muda. A sessao encerrada fica so para ler. A sessao da Live ao vivo
 // (adendo de 10/11/2026, R7): "Live de {quando}", sem o selo "Ao vivo" (a live ja e ao vivo; o servidor recusa), o minuto
 // do aviso contado da live, a frase da live e o "ja comecou" pelo started_at (na espera ainda muda); so no modo "v4".
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026): o card deixa de travar o numero.
+// Com a sessao ja comecada (e de pe), o bloco do contador da lugar ao controle "Participantes simulados" (o mesmo do
+// console; saveSimulatedAudience com a origem "editor"), e so as entradas e os avisos de venda ficam travados. Cada
+// sessao tem o atalho "Mudar no console" (o console daquela sessao), e a live sem decisao diz que nada simulado aparece
+// nela (a live nao tem o selo da gravada).
 
 const COPY = WEBINAR_COPY.simulacao.card;
 const ADMIN = WEBINAR_ADMIN_COPY.simulation;
+const PLATEIA = WEBINAR_COPY.simulacao.plateia;
 
 export type SimulationRowMode = "loading" | "v2" | "v4";
 
-export type SimulationSaveOutcome = { deciderName: string; session: WebinarSession; simulation: SessionSimulationView | null };
+export type SimulationSaveOutcome = {
+  /** A vista nova do controle dos participantes simulados (D79), quando a mudanca foi dele. */
+  audience?: SimulationAudienceView;
+  deciderName: string;
+  /** O aviso do sucesso (sem ele, o do card). */
+  notice?: string;
+  session: WebinarSession;
+  simulation: SessionSimulationView | null;
+};
 
 export type SimulationSessionRowProps = {
+  /** A vista do controle dos participantes simulados desta sessao (D79); sem ela, o controle nao aparece. */
+  audience?: SimulationAudienceView | null;
   /** Esta sessao esta gravando. */
   busy: boolean;
+  /** messaging.publish: o controle dos participantes simulados com os botoes. */
+  canPublish?: boolean;
+  /** O console desta sessao ("Mudar no console"); nulo, sem o atalho. */
+  consoleHref?: string | null;
   /** O nome de quem decidiu por ultimo (nulo sem decisao). */
   deciderName: string | null;
   idBase: string;
@@ -68,7 +91,24 @@ function firstFieldError(fieldErrors: Record<string, string[]> | undefined): str
   return fieldErrors.acknowledged?.[0] ?? Object.values(fieldErrors).find((messages) => messages.length > 0)?.[0] ?? null;
 }
 
-export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, locked, mode, now, onFailure, onSaved, onSaving, responsible, saved, session }: SimulationSessionRowProps) {
+export function SimulationSessionRow({
+  audience = null,
+  busy,
+  canPublish = true,
+  consoleHref = null,
+  deciderName,
+  idBase,
+  initialForm,
+  locked,
+  mode,
+  now,
+  onFailure,
+  onSaved,
+  onSaving,
+  responsible,
+  saved,
+  session
+}: SimulationSessionRowProps) {
   const [form, setForm] = useState<SimulationForm>(() => initialForm ?? simulationFormOf(saved, session.showLiveBadge));
   const [acknowledged, setAcknowledged] = useState(false);
   const ended = session.status === "ended";
@@ -125,9 +165,46 @@ export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, l
     onSaved({ deciderName: result.data.deciderName, session: result.data.session, simulation: null });
   }
 
+  /** O Aplicar e o Tirar do controle (D79), pelo card: a origem "editor"; a falha vai ao banner do card. */
+  async function applyAudience(input: { ackText: string | null; extra: number }): Promise<boolean> {
+    onSaving(true);
+    const result = await saveSimulatedAudience({ ackText: input.ackText ?? undefined, acknowledged: input.ackText !== null, extra: input.extra, sessionId: session.id, source: "editor" });
+    onSaving(false);
+    if (!result.ok) {
+      onFailure({ message: firstFieldError(result.fieldErrors) ?? result.error, status: result.status });
+      return false;
+    }
+    onSaved({ audience: result.data.audience, deciderName: result.data.deciderName, notice: PLATEIA.aplicado(input.extra), session: result.data.session, simulation: null });
+    return true;
+  }
+
+  // Ja comecada e de pe: o contador da lugar ao controle dos participantes simulados (o resto fica travado).
+  const audienceShown = started && audience !== null;
+
   return (
     <li className="flex min-w-0 flex-col gap-3 border-b border-[var(--border-subtle)] pb-4 last:border-b-0 last:pb-0" data-simulation-session={session.id}>
-      <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{live ? COPY.sessaoLive(formatSaoPauloDateTime(session.scheduledAt)) : ADMIN.sessionLabel(formatSaoPauloDateTime(session.scheduledAt))}</span>
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{live ? COPY.sessaoLive(formatSaoPauloDateTime(session.scheduledAt)) : ADMIN.sessionLabel(formatSaoPauloDateTime(session.scheduledAt))}</span>
+        {consoleHref && v4 && !ended ? (
+          <Link className="text-[13px] leading-5 font-medium text-[var(--text-primary)] underline underline-offset-2" data-simulation-console-link="" href={consoleHref}>
+            {PLATEIA.abrirConsole}
+          </Link>
+        ) : null}
+      </div>
+      {audienceShown && audience ? (
+        <SimulationAudienceControl
+          audience={audience}
+          busy={busy || locked}
+          canPublish={canPublish}
+          idBase={`${idBase}-plateia`}
+          live={live}
+          nowMs={now}
+          offsetMs={simulationClockMs(session, now)}
+          onApply={applyAudience}
+          phase="on_air"
+          responsible={responsible}
+        />
+      ) : null}
       {live ? null : (
         <AdminSwitch
           checked={form.showLiveBadge}
@@ -139,7 +216,7 @@ export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, l
           pending={busy}
         />
       )}
-      {v4 ? <SimulationRulesFields disabled={fieldsLocked} errors={parsed?.errors ?? {}} form={form} idBase={idBase} live={live} onChange={edit} /> : null}
+      {v4 ? <SimulationRulesFields disabled={fieldsLocked} errors={parsed?.errors ?? {}} form={form} hideCount={audienceShown} idBase={idBase} live={live} onChange={edit} /> : null}
       {v4 && ended ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.sessaoEncerrada}</p> : null}
       {started ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{live ? COPY.liveComecou : COPY.sessaoComecou}</p> : null}
       {changed && !ended && !started ? (
@@ -180,7 +257,7 @@ export function SimulationSessionRow({ busy, deciderName, idBase, initialForm, l
         </div>
       ) : null}
       <p className={cn("text-xs leading-5", session.simulationDecidedAt ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]")} data-simulation-decision="">
-        {session.simulationDecidedAt && deciderName ? ADMIN.decidedBy(deciderName, formatSaoPauloDateTime(session.simulationDecidedAt)) : ADMIN.undecided}
+        {session.simulationDecidedAt && deciderName ? ADMIN.decidedBy(deciderName, formatSaoPauloDateTime(session.simulationDecidedAt)) : live ? ADMIN.undecidedLive : ADMIN.undecided}
       </p>
       {session.simulationAckText ? <p className="text-xs leading-5 text-[var(--text-tertiary)]">{session.simulationAckText}</p> : null}
       {summary ? (

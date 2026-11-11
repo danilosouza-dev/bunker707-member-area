@@ -27,6 +27,7 @@ import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-mode
 import type { PersonaList } from "./persona-model";
 import type { ScreenDisplay, ScreenItem } from "./screen-model";
 import type { ScreenStats } from "./screen-rows";
+import type { SimulationAudienceView } from "./simulation-audience-model";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -505,6 +506,12 @@ export type ConsoleSnapshot = {
    * lista `questions`: so as que `askableMessageIds` confere. A que esta aqui fica sem o Virar pergunta.
    */
   askedMessageIds: string[];
+  /**
+   * Os participantes simulados (docs/30 D79, 11/11/2026): o controle no alto da entrada Presença (o numero de agora, a
+   * rampa, as mudancas com o nome e o que a frase diz alem do numero), na gravada e na Live ao vivo de pe ou encerrada.
+   * Nulo no Replay, na cancelada, sem as colunas da Simulacao ou com a leitura que falhou.
+   */
+  audience?: SimulationAudienceView | null;
   /**
    * So na Live gravada (a moderacao por pessoa, docs/30 §2.4): quem esta removido, silenciado ou banido nesta sessao (ou
    * banido de todas, entre quem escreveu no chat), com o nome, no formato da lista da Live ao vivo (LiveConsolePerson,

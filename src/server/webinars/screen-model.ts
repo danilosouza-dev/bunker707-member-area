@@ -448,15 +448,36 @@ export type StudentScreenItem = {
 /**
  * O que a turma ve na frente da sessao, pego na consulta de 5 s do chat. `stamp` e o updated_at da linha da sessao (o
  * sinal de mudanca); `pollsKey` resume (id, situacao, resultado compartilhado) das enquetes da sessao, para a sala
- * reler GET .../polls so quando ele muda.
+ * reler GET .../polls so quando ele muda. `simulationKey` (docs/30 D79, 11/11/2026) resume a decisao da Simulacao (a
+ * hora gravada em simulation_decided_at, que toda mudanca dos participantes simulados e todo Salvar do card regravam),
+ * para a sala pedir a janela da Simulacao de novo so quando ela muda: o numero novo chega em segundos, nao na janela
+ * seguinte (ate 90 s) nem na espera de 5 min sem nada ligado. Opaco e curto; nunca as regras nem a semente.
  */
 export type StudentScreenState = {
   items: StudentScreenItem[];
   pinned: StudentChatMessage | null;
   pinnedPollId: string | null;
   pollsKey: string;
+  /** Ausente no servidor de antes (a sala trata como sem mudanca). */
+  simulationKey?: string;
   stamp: string;
 };
+
+/**
+ * O resumo da decisao da Simulacao (D79): um FNV-1a de 32 bits em hexadecimal da hora da decisao; vazio sem decisao.
+ * Muda a cada mudanca dos participantes simulados e a cada Salvar do card; nada mais o mexe.
+ */
+export function simulationKeyOf(decidedAt: string | null | undefined): string {
+  if (!decidedAt) {
+    return "";
+  }
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < decidedAt.length; index += 1) {
+    hash ^= decidedAt.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
 
 /**
  * Se a sessao mostra alguma coisa na frente da turma: a Live ao vivo e a gravada, na espera e no ar. No Replay (sem

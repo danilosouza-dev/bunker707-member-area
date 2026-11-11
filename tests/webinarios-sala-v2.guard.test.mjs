@@ -81,11 +81,20 @@ test("o painel das duas salas: as abas pela regra das tres salas, o primeiro foc
 });
 
 test("a gravada: Participantes com quem apresenta e o numero do selo do palco (docs/31 §11.5); as pilulas e o selo do Assistente saem com o card da Oferta (V2-4, V2-7 e V2-8)", () => {
-  assert.match(recorded, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/, "o mesmo numero do selo do palco, pela mesma condicao");
+  // D79 (11/11/2026): no "ver como", a aba diz que a simulacao nao aparece na previa (o numero ali e so o real).
+  assert.match(
+    recorded,
+    /<LiveParticipantsTab note=\{readOnly && kind === "simulated" \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/,
+    "o mesmo numero do selo do palco, pela mesma condicao"
+  );
   // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
   assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
   assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
-  assert.match(room, /<LiveParticipantsTab presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/, "a live: o numero do selo do palco, que some com a live encerrada");
+  assert.match(
+    room,
+    /<LiveParticipantsTab note=\{readOnly \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{stage\} students=\{presentShown\} \/>/,
+    "a live: o numero do selo do palco, que some com a live encerrada (no ver como, a frase da previa sem a simulacao, D79)"
+  );
   // Com a Simulacao na live (adendo de 10/11/2026, R7): o real mais a parte simulada, como na gravada.
   assert.match(room, /const presentShown = phase === "ended" \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
   assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);

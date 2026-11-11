@@ -153,8 +153,10 @@ export function LiveMicDialog({ onCancel, onConfirm, title }: { onCancel: () => 
  * estilo do YouTube (spec §7.4): "No palco" em 14/20 peso 500 sem caixa alta, cada nome numa linha de 40 px com o
  * avatar de 24 e o nome em 14/20, o selo "Apresentador" so no primeiro quando a sala sabe quem apresenta
  * (`presenterKnown`), e "{n} alunos na sala" numa linha de 40 px com o icone de 20. So os nomes do palco viram lista.
+ * No "ver como" da equipe (docs/30 D79), `note` diz embaixo do numero que a simulacao nao aparece na previa (o numero
+ * ali e so o real), para o produtor nao achar que os participantes simulados quebraram.
  */
-export function LiveParticipantsTab({ presenterKnown, stage, students }: { presenterKnown: boolean; stage: readonly string[]; students: number | null }) {
+export function LiveParticipantsTab({ note = null, presenterKnown, stage, students }: { note?: string | null; presenterKnown: boolean; stage: readonly string[]; students: number | null }) {
   const copy = WEBINAR_COPY.aoVivo;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-1" data-testid="live-participants">
@@ -178,6 +180,11 @@ export function LiveParticipantsTab({ presenterKnown, stage, students }: { prese
           {copy.alunosNaSala(Math.max(0, students))}
         </p>
       )}
+      {note ? (
+        <p className="text-xs leading-5 text-room-fg-subtle" data-testid="room-simulation-preview-note">
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 }

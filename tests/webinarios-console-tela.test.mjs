@@ -62,6 +62,8 @@ export const saveWebinarDraft = fail; export const publishWebinar = fail; export
   // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
   "@/server/webinars/persona-actions": `${fail}
 export const savePersona = fail; export const deletePersona = fail;`,
+  "@/server/webinars/simulation-actions": `${fail}
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/live-actions": `${fail}

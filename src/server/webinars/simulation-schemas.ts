@@ -7,6 +7,7 @@ import { CHAT_LIMITS, SIMULATED_COUNT_MODES, SIMULATION_LIMITS } from "./model";
 
 export const SIMULATION_MESSAGES = {
   ack: "Marque a caixa com a decisão para ligar o selo ou os números simulados.",
+  ackAudience: "Marque a confirmação com a frase do número novo para somar participantes.",
   count: `Use números de 0 a ${SIMULATION_LIMITS.countMax}.`,
   invalid: "Pedido inválido.",
   peak: "O máximo precisa ser maior ou igual ao mínimo.",
@@ -69,6 +70,24 @@ export const saveSessionSimulationSchema = simulationRulesSchema
   .superRefine((input, context) => {
     if (simulationNeedsAck(input) && (!input.acknowledged || !input.ackText)) {
       context.addIssue({ code: "custom", message: SIMULATION_MESSAGES.ack, path: ["acknowledged"] });
+    }
+  });
+
+/**
+ * saveSimulatedAudience [messaging.publish] (docs/30 D79): os participantes simulados da sessao a partir de agora (o +N;
+ * 0 e o Tirar), com a frase da mudanca marcada sempre que soma algo, e de onde veio (o console ou o card do editor).
+ */
+export const saveSimulatedAudienceSchema = z
+  .object({
+    ackText: z.string().trim().max(CHAT_LIMITS.simulationAck).optional(),
+    acknowledged: z.boolean().default(false),
+    extra: count,
+    sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid }),
+    source: z.enum(["console", "editor"]).default("console")
+  })
+  .superRefine((input, context) => {
+    if (input.extra > 0 && (!input.acknowledged || !input.ackText)) {
+      context.addIssue({ code: "custom", message: SIMULATION_MESSAGES.ackAudience, path: ["acknowledged"] });
     }
   });
 

@@ -43,7 +43,7 @@ import {
 } from "./live-console-model";
 import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
-import { chatConsentAllowsReplay, type QuestionReply, type ScriptItem, type WebinarKind, type WebinarSession } from "./model";
+import { chatConsentAllowsReplay, type QuestionReply, type ScriptItem, type SimulationChangeRecord, type WebinarKind, type WebinarSession } from "./model";
 import { NO_PERSONA_LIST } from "./persona-model";
 import { listPersonas, readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
 import { baseRecordingOf } from "./queries";
@@ -57,8 +57,17 @@ import { reportViewOf } from "./report-queries";
 import { screenDisplayFromRow, screenItemFromRow } from "./screen-rows";
 import { loadScreenStats } from "./screen-queries";
 import { loadConsoleScreenRows } from "./screen-store";
-import { liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationClockMs, simulationCounterNow, simulationDecisionRecorded, simulationEndOffsetMs } from "./simulation-model";
-import { fetchSessionSimulation } from "./simulation-store";
+import { simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
+import {
+  liveSimulationEndOffsetMs,
+  liveSimulationShapeMs,
+  simulationAudienceFlagsOf,
+  simulationClockMs,
+  simulationCounterNow,
+  simulationDecisionRecorded,
+  simulationEndOffsetMs
+} from "./simulation-model";
+import { fetchSessionSimulation, listSimulationChanges, loadSimulationChangeNames } from "./simulation-store";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
 import { saoPauloDayKey } from "../../lib/webinar-time";
 
@@ -500,20 +509,41 @@ async function loadConsolePresence(session: WebinarSession, offsetMs: number, no
 /**
  * A parte simulada do contador agora (R7), so para a equipe: na gravada (o relogio e a duracao do video) e na Live ao
  * vivo (o relogio desde o started_at e a forma pela duracao prevista), com a decisao registrada (simulationDecisionRecorded,
- * como a sala) e a sessao de pe. Uma leitura das regras pela chave so nesse caso; banco sem a 202610300003 ou a leitura
- * que falha: nulo (o selo fica so com o real).
+ * como a sala) e a sessao de pe. Desde 11/11/2026 (D79), com as mudancas dos participantes simulados no ar (a rampa
+ * inclusa) e a vista do controle "Participantes simulados" (o numero de agora, a rampa e as mudancas com o nome), na
+ * gravada e na Live ao vivo de pe ou encerrada (nunca no Replay nem na cancelada), mesmo sem decisao. Uma leitura das
+ * regras pela chave e uma das mudancas so nesse caso; banco sem a 202610300003 ou a leitura que falha: nulo nos dois (o
+ * selo fica so com o real e o controle nao aparece); sem a 202611110002, o controle sem os botoes.
  */
-async function loadConsoleSimulated(db: WebinarsDb, input: { durationMs: number; nowMs: number; session: WebinarSession; webinar: WebinarRow | undefined }): Promise<number | null> {
+async function loadConsoleSimulated(
+  db: WebinarsDb,
+  input: { durationMs: number; nowMs: number; session: WebinarSession; webinar: WebinarRow | undefined }
+): Promise<{ audience: SimulationAudienceView | null; simulatedNow: number | null }> {
   const { session } = input;
   const live = session.kind === "live";
-  if ((session.kind !== "simulated" && !live) || session.status === "ended" || session.status === "cancelled" || !simulationDecisionRecorded(session)) {
-    return null;
+  if ((session.kind !== "simulated" && !live) || session.status === "cancelled") {
+    return { audience: null, simulatedNow: null };
   }
   try {
     const simulation = await fetchSessionSimulation(db, session.id);
+    if (!simulation) {
+      return { audience: null, simulatedNow: null };
+    }
     const offsetMs = simulationClockMs(session, input.nowMs);
+    const changes = await loadAudienceChanges(db, session.id);
+    const audience = simulationAudienceViewOf({
+      flags: simulationAudienceFlagsOf({ joins: simulation.joins, saleNotices: simulation.saleNotices, showLiveBadge: session.showLiveBadge }),
+      names: await loadSimulationChangeNames(db, changes.records),
+      offsetMs,
+      pendingMigration: changes.pending,
+      records: changes.records,
+      simulation
+    });
+    if (session.status === "ended" || !simulationDecisionRecorded(session)) {
+      return { audience, simulatedNow: null };
+    }
     if (live) {
-      return simulationCounterNow({
+      const simulatedNow = simulationCounterNow({
         durationMs: liveSimulationShapeMs(input.webinar?.duration_minutes ?? 1),
         endMs: liveSimulationEndOffsetMs(session),
         kind: "live",
@@ -521,16 +551,32 @@ async function loadConsoleSimulated(db: WebinarsDb, input: { durationMs: number;
         simulation,
         status: session.status
       });
+      return { audience, simulatedNow };
     }
     if (!Number.isFinite(input.durationMs) || input.durationMs <= 0) {
-      return null;
+      return { audience, simulatedNow: null };
     }
-    return simulationCounterNow({ durationMs: input.durationMs, endMs: simulationEndOffsetMs(session, input.durationMs), kind: "simulated", offsetMs, simulation, status: session.status });
+    return {
+      audience,
+      simulatedNow: simulationCounterNow({ durationMs: input.durationMs, endMs: simulationEndOffsetMs(session, input.durationMs), kind: "simulated", offsetMs, simulation, status: session.status })
+    };
   } catch (error) {
     if (!isPendingMigrationError(error) && !isMissingWebinarSchema(error)) {
       console.error(`[admin/webinarios] parte simulada do console da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return null;
+    return { audience: null, simulatedNow: null };
+  }
+}
+
+/** As mudancas da sessao para o controle; sem a tabela (banco sem a 202611110002), nenhuma e `pending`. */
+async function loadAudienceChanges(db: WebinarsDb, sessionId: string): Promise<{ pending: boolean; records: SimulationChangeRecord[] }> {
+  try {
+    return { pending: false, records: await listSimulationChanges(db, [sessionId]) };
+  } catch (error) {
+    if (isPendingMigrationError(error) || isMissingWebinarSchema(error)) {
+      return { pending: true, records: [] };
+    }
+    throw error;
   }
 }
 
@@ -585,7 +631,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // A fixada pela chave: da lista quando esta entre as 200 mais novas; senao, uma leitura.
   const pinnedInList = session.pinnedMessageId ? (chatRows.find((row) => row.id === session.pinnedMessageId) ?? null) : null;
   const chatAuthors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
-  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred, simulatedNow] = await Promise.all([
+  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred, simulated] = await Promise.all([
     chatAuthors.length > 0 ? loadConsentFlags(db, chatAuthors) : Promise.resolve(new Set<string>()),
     pinnedInList ? Promise.resolve(pinnedInList) : fetchPinnedMessageRow(db, session.pinnedMessageId),
     session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
@@ -640,6 +686,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
 
   return {
     askedMessageIds,
+    audience: simulated.audience,
     barred,
     live,
     messages,
@@ -655,7 +702,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     scriptItems,
     screen,
     serverTime: input.now.toISOString(),
-    simulatedNow,
+    simulatedNow: simulated.simulatedNow,
     session: consoleSessionOf(session)
   };
 }
