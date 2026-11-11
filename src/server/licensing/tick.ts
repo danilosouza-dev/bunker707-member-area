@@ -149,25 +149,26 @@ async function checkInWithEmissor(
   deps: Omit<LicenseTickDeps, "mode" | "db">
 ): Promise<CheckInConversation> {
   const roots = deps.roots();
+  // O nonce deste pedido: a licenca devolvida tem de traze-lo, e o store confere de novo antes de gravar (resposta fresca).
+  const nonce = (deps.nonce ?? newRequestNonce)();
   const answer = await askEmissor(
     deps.client(),
     {
       installationId: record.installationId ?? "",
       installationSecret: record.installationSecret ?? "",
       sequence: record.checkInSequence,
-      nonce: (deps.nonce ?? newRequestNonce)(),
+      nonce,
       host: normalizeHost(deps.configuredHost()),
       storedLicense: record.token,
       licenseId: storedLicenseId(record, roots),
-      versions: deps.versions?.(),
-      newestIssuedAt: record.newestIssuedAt
+      versions: deps.versions?.()
     },
     deps.signal
   );
   const receivedAt = deps.now();
   const recorded = await mutateLicenseState(db, (current) =>
     answer.ok
-      ? planCheckInSuccess(current, { attemptStartedAt, receivedAt, roots, sequence: answer.sequence, token: answer.token })
+      ? planCheckInSuccess(current, { attemptStartedAt, nonce, receivedAt, roots, sequence: answer.sequence, token: answer.token })
       : planCheckInFailure(current, { attemptStartedAt, result: answer.error })
   );
 

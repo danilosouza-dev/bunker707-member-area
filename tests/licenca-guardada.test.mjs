@@ -59,14 +59,18 @@ function rodada(linha, opcoes = {}) {
 
 const aplicar = (linha, patch) => ({ ...linha, ...patch, version: linha.version + 1 });
 
-/** A licença que o Emissor devolveria agora, para esta Instalação. */
+/** O nonce que a Instalação sorteou para este pedido: volta dentro da licença assinada. */
+const NONCE = "nonce-deste-pedido-0000000000000000000000";
+
+/** A licença que o Emissor devolveria agora, para esta Instalação, em resposta a este pedido. */
 const devolvidaAgora = (extra = {}) =>
-  licencaBase({ issuedAt: "2026-11-11T12:00:00.000Z", expiresAt: "2027-02-09T12:00:00.000Z", ...extra });
+  licencaBase({ issuedAt: "2026-11-11T12:00:00.000Z", expiresAt: "2027-02-09T12:00:00.000Z", nonce: NONCE, ...extra });
 
 function aceitar(linha, token, extra = {}) {
   return store.planCheckInSuccess(linha, {
     token,
     sequence: "seq-2",
+    nonce: NONCE,
     roots: RAIZES,
     receivedAt: depois(2_000),
     attemptStartedAt: AGORA,
@@ -278,17 +282,27 @@ test("licença do Emissor que não confere, de outra raiz ou adulterada, é recu
   }
 });
 
-test("licença do Emissor mais antiga que a mais nova já aceita é recusada e a marca não desce; a da mesma emissão vale", () => {
+test("licença do Emissor com o nonce deste pedido é fresca: vale mesmo mais antiga que a mais nova já aceita, e a marca a acompanha", () => {
   const linha = emDia(devolvidaAgora());
-  const antiga = aceitar(linha, assinar(licencaBase({ issuedAt: "2026-11-11T11:59:59.000Z" })));
+  const antiga = aceitar(linha, assinar(devolvidaAgora({ issuedAt: "2026-11-11T11:59:59.000Z" })));
 
-  assert.deepEqual(antiga.outcome, { accepted: false, result: "licenca_antiga" });
-  assert.equal("newestIssuedAt" in antiga.patch, false);
-  assert.equal("token" in antiga.patch, false);
+  assert.equal(antiga.outcome.accepted, true, "o relógio do nosso Emissor que pulou para a frente e voltou não prende a escola");
+  assert.equal(iso(antiga.patch.newestIssuedAt), "2026-11-11T11:59:59.000Z");
+  assert.equal(iso(antiga.patch.lastSeenAt), "2026-11-11T11:59:59.000Z");
 
   const mesma = aceitar(linha, assinar(devolvidaAgora({ features: [] })));
   assert.equal(mesma.outcome.accepted, true);
   assert.equal(iso(mesma.patch.newestIssuedAt), "2026-11-11T12:00:00.000Z");
+});
+
+test("licença do Emissor sem o nonce deste pedido (a resposta de outro pedido, ou a por arquivo) é recusada: nada muda", () => {
+  for (const token of [assinar(devolvidaAgora({ nonce: "nonce-de-outro-pedido-00000000000000000000" })), assinar(devolvidaAgora({ nonce: undefined }))]) {
+    const plano = aceitar(emDia(), token);
+    assert.deepEqual(plano.outcome, { accepted: false, result: "nonce_diferente" });
+    assert.deepEqual(plano.patch, { checkInResult: "nonce_diferente" });
+  }
+
+  assert.deepEqual(aceitar(emDia(), assinar(devolvidaAgora()), { nonce: "" }).outcome, { accepted: false, result: "nonce_diferente" }, "sem nonce no pedido, nada é fresco");
 });
 
 test("licença do Emissor para outra Instalação é recusada", () => {
@@ -297,9 +311,13 @@ test("licença do Emissor para outra Instalação é recusada", () => {
   assert.equal("token" in plano.patch, false);
 });
 
-test("marca da mais nova com data inválida: nenhuma licença do Emissor é aceita até o banco ser corrigido", () => {
-  const plano = aceitar(emDia(licencaBase(), { newestIssuedAt: new Date("infinity") }), assinar(devolvidaAgora()));
-  assert.deepEqual(plano.outcome, { accepted: false, result: "licenca_antiga" });
+test("marca da mais nova com data inválida: a licença guardada não vale, e só a resposta fresca do Emissor conserta a marca", () => {
+  const linha = emDia(licencaBase(), { newestIssuedAt: new Date("infinity") });
+  assert.equal(rodada(linha).state.verificationError, "licenca_antiga", "a guardada nunca vale com a marca inválida");
+
+  const plano = aceitar(linha, assinar(devolvidaAgora()));
+  assert.equal(plano.outcome.accepted, true);
+  assert.equal(iso(plano.patch.newestIssuedAt), "2026-11-11T12:00:00.000Z");
 });
 
 test("falha da conferência: grava o motivo e atende o pedido feito antes da tentativa; o feito durante fica para a seguinte", () => {

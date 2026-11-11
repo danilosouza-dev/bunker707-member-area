@@ -11,9 +11,11 @@ import "server-only";
 //   agendador, e a licenca guardada continua valendo (docs/32 §11.3);
 // - tempo limite curto por pedido (15 s, o do protocolo), somado ao `signal` de quem chama (a tarefa do tick poe 10 s);
 // - o `nonce` e sorteado por quem chama, a cada pedido, e volta DENTRO da licenca assinada da resposta. So devolve
-//   `ok: true` quando a licenca devolvida confere com as raizes gravadas no produto, traz o mesmo nonce, e desta
-//   Instalacao (e deste endereco, na ativacao) e nao e mais antiga que a mais nova ja aceita (`newestIssuedAt`): uma
-//   resposta velha repetida, ou guardada por alguem no meio do caminho, nao volta o relogio da Instalacao (docs/32 §16);
+//   `ok: true` quando a licenca devolvida confere com as raizes gravadas no produto, traz o mesmo nonce e e desta
+//   Instalacao (e deste endereco, na ativacao): uma resposta velha repetida, ou guardada por alguem no meio do caminho,
+//   traz o nonce de outro pedido e nao volta o relogio da Instalacao (docs/32 §16). Com o nonce deste pedido a resposta e
+//   fresca e vale mesmo mais antiga que a mais nova ja aceita: e assim que a escola volta sozinha depois de um salto do
+//   relogio do nosso Emissor para a frente (revisao de 11/11/2026);
 // - o segredo da Instalacao, a sequencia, a Chave de ativacao e a licenca so vao no pedido ao Emissor: este arquivo nao
 //   escreve log, e nenhum erro devolvido os carrega;
 // - so https (ou http://127.0.0.1, nos testes), sem seguir redirecionamento, sem cache, corpo da resposta com teto;
@@ -56,7 +58,8 @@ export const EMISSOR_PROTOCOL_ERROR_CODES = [
  * - resposta_invalida: respondeu fora do formato;
  * - licenca_invalida: a licenca devolvida nao confere com as raizes, ou e de outra Instalacao ou de outro endereco;
  * - nonce_diferente: a licenca devolvida nao traz o numero deste pedido (a resposta velha repetida);
- * - licenca_antiga: a licenca devolvida e mais antiga que a mais nova ja aceita;
+ * - licenca_antiga: nao sai mais do cliente (a resposta com o nonce do pedido e fresca); fica na lista porque o store a
+ *   usa para a licenca por arquivo mais antiga, e a tela tem a frase dela;
  * - erro_inesperado: defeito deste lado.
  */
 export const EMISSOR_CLIENT_ERROR_CODES = [
@@ -129,8 +132,6 @@ export type EmissorActivateRequest = Signal & {
   /** Sorteado na hora; volta dentro da licenca assinada. */
   nonce: string;
   versions?: EmissorVersions;
-  /** A data da licenca mais nova ja aceita (anti-volta). */
-  newestIssuedAt?: Date | null;
 };
 
 export type EmissorActivateResult =
@@ -161,7 +162,6 @@ export type EmissorCheckInRequest = Signal & {
   /** O numero da Licenca da licenca guardada; se vier, o Emissor confere que e o desta Instalacao. */
   licenseId?: string | null;
   versions?: EmissorVersions;
-  newestIssuedAt?: Date | null;
 };
 
 export type EmissorCheckInResult =
@@ -179,7 +179,6 @@ export type EmissorDeactivateRequest = Signal & {
   installationId: string;
   installationSecret: string;
   nonce: string;
-  newestIssuedAt?: Date | null;
 };
 
 /** A ordem assinada (Escola congelada, motivo desativada), gravada como qualquer licenca nova. */
@@ -352,15 +351,14 @@ function refusalOf(status: number, body: unknown, retryAfter: number | null): Em
 type LicenseExpectation = {
   roots: readonly TrustedRoot[];
   nonce: string;
-  newestIssuedAt?: Date | null;
   installationId?: string;
   host?: string;
 };
 
 /**
- * A licenca devolvida so vale como resposta a ESTE pedido: confere com as raizes, traz o nonce do pedido, e da
- * Instalacao (e do endereco) esperados e nao e mais antiga que a mais nova ja aceita. Data invalida guardada como a mais
- * nova nunca libera (como em state.ts).
+ * A licenca devolvida so vale como resposta a ESTE pedido: confere com as raizes, traz o nonce do pedido e e da
+ * Instalacao (e do endereco) esperados. Com o nonce, a resposta e fresca: a emissao mais antiga que a mais nova ja
+ * aceita nao a recusa (o relogio do nosso Emissor que pulou para a frente e voltou); o store confere o nonce de novo.
  */
 function expectedLicense(token: string, expected: LicenseExpectation): { ok: true; license: LicensePayload } | EmissorFailure {
   const verification = verifyLicenseToken(token, expected.roots);
@@ -373,14 +371,6 @@ function expectedLicense(token: string, expected: LicenseExpectation): { ok: tru
 
   if (license.nonce !== expected.nonce) {
     return fail("nonce_diferente");
-  }
-
-  if (expected.newestIssuedAt instanceof Date) {
-    const newestMs = expected.newestIssuedAt.getTime();
-
-    if (!Number.isFinite(newestMs) || Date.parse(license.issuedAt) < newestMs) {
-      return fail("licenca_antiga");
-    }
   }
 
   if (expected.installationId !== undefined && license.installation.id !== expected.installationId) {
@@ -537,7 +527,6 @@ export function createHttpEmissorClient(options: HttpEmissorClientOptions): Emis
         const checked = expectedLicense(reply.data.license, {
           roots,
           nonce: request.nonce,
-          newestIssuedAt: request.newestIssuedAt,
           installationId: reply.data.installationId,
           host
         });
@@ -591,7 +580,6 @@ export function createHttpEmissorClient(options: HttpEmissorClientOptions): Emis
         const checked = expectedLicense(reply.data.license, {
           roots,
           nonce: request.nonce,
-          newestIssuedAt: request.newestIssuedAt,
           installationId: request.installationId
         });
 
@@ -619,7 +607,6 @@ export function createHttpEmissorClient(options: HttpEmissorClientOptions): Emis
         const checked = expectedLicense(reply.data.license, {
           roots,
           nonce: request.nonce,
-          newestIssuedAt: request.newestIssuedAt,
           installationId: request.installationId
         });
 

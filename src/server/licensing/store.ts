@@ -11,9 +11,12 @@
 //   instante que a Instalacao sabe que ja passou (ela mesma, a emissao da licenca, a ultima conferencia). Nunca e
 //   copiada do relogio do servidor. Uma conferencia boa a realinha com a hora assinada pelo Emissor, para a frente
 //   ou para tras: rodadas repetidas no mesmo minuto a adiantam, e a hora do Emissor e a que vale;
-// - newestIssuedAt so sobe;
-// - uma licenca nova so e aceita se confere com as raizes, se nao e mais antiga que newestIssuedAt e se e desta
-//   Instalacao;
+// - newestIssuedAt so sobe, com uma excecao: a resposta fresca do Emissor (a que traz o nonce deste pedido) a leva
+//   junto, para tras tambem. Sem isso, um salto do relogio do nosso Emissor para a frente prendia a escola: toda
+//   conferencia certa depois dele era recusada como mais antiga (revisao de 11/11/2026);
+// - a licenca da conversa com o Emissor so e aceita se confere com as raizes, traz o nonce deste pedido e e desta
+//   Instalacao. A licenca guardada e a licenca por arquivo, que nao tem nonce, seguem a anti-volta: nao valem se forem
+//   mais antigas que newestIssuedAt;
 // - quando a licenca guardada nao confere, a tarefa pede uma conferencia na hora.
 // A leitura de cada pedido (loadLicenseState) nunca grava e, no modo "off", nem chega a criar o banco.
 //
@@ -24,6 +27,7 @@
 // desativar) usa a mesma reserva (planConversationStart): nenhuma conversa com o Emissor corre junto com outra, e o
 // resultado de uma tentativa que outra substituiu (a reserva venceu e outra comecou) nao grava nada.
 
+import { verifyLicenseToken } from "./artifact";
 import type { LicensingMode } from "./build-config";
 import { sameHost } from "./evaluate";
 import { DAY_MS, type LicensePayload, type TrustedRoot } from "./model";
@@ -383,6 +387,7 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
 /**
  * Por que o store recusou a licenca que chegou:
  * - licenca_invalida, licenca_antiga, outra_instalacao: as regras do contrato do store;
+ * - nonce_diferente: a licenca da conversa com o Emissor nao traz o nonce deste pedido (a resposta de outro pedido);
  * - tentativa_substituida: outra conversa com o Emissor comecou depois desta (a reserva venceu e outra rodada, a
  *   ativacao ou o Verificar agora reservou de novo): o resultado velho nao passa por cima do novo;
  * - nao_e_arquivo, endereco_diferente: a licenca por arquivo enviada pela tela Licenca (planLicenseFile).
@@ -390,6 +395,7 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
 export type LicenseRefusal =
   | "licenca_invalida"
   | "licenca_antiga"
+  | "nonce_diferente"
   | "outra_instalacao"
   | "tentativa_substituida"
   | "nao_e_arquivo"
@@ -454,24 +460,50 @@ export function planCheckInFailure(record: LicenseStateRecord | null, input: Che
 export type CheckInSuccessInput = {
   token: string;
   sequence: string;
+  /** O nonce que esta Instalacao sorteou para o pedido: a licenca devolvida tem de traze-lo (resposta fresca). */
+  nonce: string;
   roots: readonly TrustedRoot[];
   /** O relogio do servidor quando a resposta chegou: vira a hora local da ultima conferencia. */
   receivedAt: Date;
   attemptStartedAt: Date;
 };
 
+type FreshLicense = { ok: true; license: LicensePayload } | { ok: false; error: "licenca_invalida" | "nonce_diferente" };
+
+/**
+ * A licenca de uma conversa com o Emissor (conferencia, ativacao, desativacao): confere com as raizes e traz o nonce que
+ * esta Instalacao sorteou para este pedido. Com o nonce, a resposta e fresca, assinada agora para esta conversa: vale
+ * mesmo que a emissao seja mais antiga que a mais nova ja aceita. O caso e o relogio do nosso Emissor que pulou para a
+ * frente e voltou: sem isso, toda conferencia certa depois do salto era recusada, e a escola ficava presa sem volta pela
+ * internet (revisao de 11/11/2026). A resposta repetida de outro pedido nao traz este nonce e continua recusada; a
+ * anti-volta segue valendo para a licenca guardada e para a licenca por arquivo (checkLicenseToken, state.ts).
+ */
+function freshConversationLicense(token: string, roots: readonly TrustedRoot[], nonce: string): FreshLicense {
+  const verification = verifyLicenseToken(token, roots);
+
+  if (!verification.ok) {
+    return { ok: false, error: "licenca_invalida" };
+  }
+
+  if (typeof nonce !== "string" || nonce.length === 0 || verification.license.nonce !== nonce) {
+    return { ok: false, error: "nonce_diferente" };
+  }
+
+  return { ok: true, license: verification.license };
+}
+
 /**
  * O patch de uma conversa boa com o Emissor (conferencia, ativacao, desativacao): troca a licenca, guarda a hora
- * assinada (a emissao da licenca nova) como a ultima conferencia, realinha a ultima hora vista com ela, apaga a marca de
- * licenca ilegivel, devolve a reserva ("ok") e atende o pedido de conferencia feito antes da tentativa.
+ * assinada (a emissao da licenca nova) como a ultima conferencia, realinha com ela a ultima hora vista e a data da mais
+ * nova aceita (as duas, para a frente ou para tras: a resposta e fresca), apaga a marca de licenca ilegivel, devolve a
+ * reserva ("ok") e atende o pedido de conferencia feito antes da tentativa.
  */
 function goodConversationPatch(record: LicenseStateRecord, license: LicensePayload, input: { token: string; receivedAt: Date; attemptStartedAt: Date }): LicenseStatePatch {
   const issuedMs = Date.parse(license.issuedAt);
-  const newestMs = validMs(record.newestIssuedAt);
   const patch: LicenseStatePatch = {
     token: input.token,
     everActivated: true,
-    newestIssuedAt: new Date(newestMs === null ? issuedMs : Math.max(newestMs, issuedMs)),
+    newestIssuedAt: new Date(issuedMs),
     lastCheckIn: { emissorTime: new Date(issuedMs), localTime: new Date(validMs(input.receivedAt) ?? issuedMs) },
     lastSeenAt: new Date(issuedMs),
     unreadableSince: null,
@@ -486,10 +518,11 @@ function goodConversationPatch(record: LicenseStateRecord, license: LicensePaylo
 }
 
 /**
- * O Emissor devolveu uma licenca nova. So vale se confere com as raizes, se nao e mais antiga que a mais nova ja
- * aceita e se e desta Instalacao; recusada, grava o motivo como uma falha e nada mais muda. Aceita, troca a licenca e
- * a sequencia, guarda a hora assinada (a emissao da licenca nova) como a ultima conferencia, realinha a ultima hora
- * vista com ela e apaga a marca de licenca ilegivel. A tentativa que ja foi substituida por outra nao grava nada.
+ * O Emissor devolveu uma licenca nova. So vale se confere com as raizes, se traz o nonce deste pedido (a resposta
+ * fresca, freshConversationLicense) e se e desta Instalacao; recusada, grava o motivo como uma falha e nada mais muda.
+ * Aceita, troca a licenca e a sequencia, guarda a hora assinada (a emissao da licenca nova) como a ultima conferencia,
+ * realinha com ela a ultima hora vista e a data da mais nova aceita e apaga a marca de licenca ilegivel. A tentativa que
+ * ja foi substituida por outra nao grava nada.
  */
 export function planCheckInSuccess(record: LicenseStateRecord | null, input: CheckInSuccessInput): LicensePlan<CheckInOutcome> {
   const refuse = (result: LicenseRefusal) => planCheckInFailure(record, { result, attemptStartedAt: input.attemptStartedAt });
@@ -502,10 +535,10 @@ export function planCheckInSuccess(record: LicenseStateRecord | null, input: Che
     return SUPERSEDED;
   }
 
-  const checked = checkLicenseToken(input.token, input.roots, record.newestIssuedAt);
+  const checked = freshConversationLicense(input.token, input.roots, input.nonce);
 
   if (!checked.ok) {
-    return refuse(checked.error === "licenca_antiga" ? "licenca_antiga" : "licenca_invalida");
+    return refuse(checked.error);
   }
 
   const license = checked.license;
@@ -592,16 +625,19 @@ export type ActivationSuccessInput = {
   installationId: string;
   installationSecret: string;
   sequence: string;
+  /** O nonce que esta Instalacao sorteou para a ativacao. */
+  nonce: string;
   roots: readonly TrustedRoot[];
   receivedAt: Date;
   attemptStartedAt: Date;
 };
 
 /**
- * A ativacao deu certo (o cliente ja conferiu o nonce): grava, numa gravacao so, a licenca, o identificador, o segredo
- * e a sequencia (docs/protocolo.md: o segredo sai so nesta resposta). Ativar troca a identidade da Instalacao (a
- * Chave nova num endereco largado cria outra), entao a licenca tem de ser do identificador que veio junto, nao do
- * guardado. Continua valendo o anti-volta: nao pode ser mais antiga que a mais nova ja aceita.
+ * A ativacao deu certo: grava, numa gravacao so, a licenca, o identificador, o segredo e a sequencia (docs/protocolo.md:
+ * o segredo sai so nesta resposta). Ativar troca a identidade da Instalacao (a Chave nova num endereco largado cria
+ * outra), entao a licenca tem de ser do identificador que veio junto, nao do guardado. A licenca tem de trazer o nonce
+ * desta ativacao (o cliente ja conferiu; o store confere de novo): fresca, ela vale mesmo mais antiga que a mais nova
+ * ja aceita, e a data da mais nova acompanha (freshConversationLicense).
  */
 export function planActivationSuccess(record: LicenseStateRecord | null, input: ActivationSuccessInput): LicensePlan<CheckInOutcome> {
   const current = record ?? EMPTY_LICENSE_RECORD;
@@ -610,10 +646,10 @@ export function planActivationSuccess(record: LicenseStateRecord | null, input: 
     return SUPERSEDED;
   }
 
-  const checked = checkLicenseToken(input.token, input.roots, current.newestIssuedAt);
+  const checked = freshConversationLicense(input.token, input.roots, input.nonce);
 
   if (!checked.ok) {
-    return { patch: {}, outcome: { accepted: false, result: checked.error === "licenca_antiga" ? "licenca_antiga" : "licenca_invalida" } };
+    return { patch: {}, outcome: { accepted: false, result: checked.error } };
   }
 
   if (checked.license.installation.id !== input.installationId) {
@@ -633,6 +669,8 @@ export function planActivationSuccess(record: LicenseStateRecord | null, input: 
 
 export type DeactivationSuccessInput = {
   token: string;
+  /** O nonce que esta Instalacao sorteou para o desativar. */
+  nonce: string;
   roots: readonly TrustedRoot[];
   receivedAt: Date;
   attemptStartedAt: Date;
@@ -652,10 +690,10 @@ export function planDeactivationSuccess(record: LicenseStateRecord | null, input
     return SUPERSEDED;
   }
 
-  const checked = checkLicenseToken(input.token, input.roots, record.newestIssuedAt);
+  const checked = freshConversationLicense(input.token, input.roots, input.nonce);
 
   if (!checked.ok) {
-    return { patch: {}, outcome: { accepted: false, result: checked.error === "licenca_antiga" ? "licenca_antiga" : "licenca_invalida" } };
+    return { patch: {}, outcome: { accepted: false, result: checked.error } };
   }
 
   if (record.installationId === null || checked.license.installation.id !== record.installationId) {

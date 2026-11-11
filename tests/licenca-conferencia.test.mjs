@@ -332,7 +332,7 @@ test("conferência vencida com o cliente de hoje: a tentativa fica gravada com o
 
 test("conferência boa: o pedido leva o identificador, o segredo, a sequência, um nonce novo, o endereço, a licença guardada e as versões; a licença nova e a sequência são gravadas", async () => {
   const banco = bancoDaLicenca(VAZIO, vencida());
-  const emissor = emissorDeTeste(() => ({ ok: true, token: novaDoEmissor(), sequence: "seq-2" }));
+  const emissor = emissorDeTeste((pedido) => ({ ok: true, token: novaDoEmissor({ nonce: pedido.nonce }), sequence: "seq-2" }));
 
   const resultado = await rodar(banco, emissor.client, { now: () => depois(1_000), versions: () => ({ product: "1.4.0" }) });
   assert.equal(resultado.result, "ok");
@@ -345,12 +345,12 @@ test("conferência boa: o pedido leva o identificador, o segredo, a sequência, 
   assert.match(pedido.nonce, /^[A-Za-z0-9_-]{43}$/, "32 bytes sorteados, como o protocolo pede");
   assert.equal(pedido.storedLicense, vencida().token, "a licença guardada vai junto, para a readoção");
   assert.equal(pedido.licenseId, "lic_0001", "o número da Licença da licença guardada");
-  assert.equal(pedido.newestIssuedAt.toISOString(), "2026-11-10T12:00:00.000Z", "o cliente confere que a resposta não é mais antiga");
+  assert.equal("newestIssuedAt" in pedido, false, "com o nonce deste pedido a resposta é fresca: a anti-volta é da licença guardada");
   assert.deepEqual(pedido.versions, { product: "1.4.0" });
   assert.ok(pedido.signal instanceof AbortSignal, "o tempo limite vai junto");
 
   const linha = banco.linha;
-  assert.equal(linha.token, novaDoEmissor());
+  assert.equal(linha.token, novaDoEmissor({ nonce: pedido.nonce }));
   assert.equal(linha.checkInSequence, "seq-2");
   assert.equal(linha.checkInResult, "ok");
   assert.equal(linha.lastSeenAt.toISOString(), "2026-11-11T12:00:00.000Z", "realinhada com a hora assinada");
@@ -415,13 +415,20 @@ test("cliente que lança vira 'erro_inesperado' e resposta fora do formato vira 
 });
 
 test("licença devolvida que o store recusa grava o motivo e não troca a licença nem a sequência", async () => {
-  const banco = bancoDaLicenca(VAZIO, vencida());
-  const outra = novaDoEmissor({ installation: { id: "inst_9999", host: "alunos.escola.test" } });
-  const resultado = await rodar(banco, emissorDeTeste(() => ({ ok: true, token: outra, sequence: "seq-9" })).client);
+  const casos = [
+    [(pedido) => novaDoEmissor({ installation: { id: "inst_9999", host: "alunos.escola.test" }, nonce: pedido.nonce }), "outra_instalacao"],
+    // O cliente de verdade já recusa a licença sem o nonce do pedido; o store confere de novo.
+    [() => novaDoEmissor(), "nonce_diferente"]
+  ];
 
-  assert.equal(resultado.result, "outra_instalacao");
-  assert.equal(banco.linha.token, vencida().token);
-  assert.equal(banco.linha.checkInSequence, "seq-1");
+  for (const [licenca, esperado] of casos) {
+    const banco = bancoDaLicenca(VAZIO, vencida());
+    const resultado = await rodar(banco, emissorDeTeste((pedido) => ({ ok: true, token: licenca(pedido), sequence: "seq-9" })).client);
+
+    assert.equal(resultado.result, esperado);
+    assert.equal(banco.linha.token, vencida().token);
+    assert.equal(banco.linha.checkInSequence, "seq-1");
+  }
 });
 
 test("Instalação ainda sem identificador e segredo: a rodada só anda a hora vista e não chama o Emissor", async () => {
@@ -435,7 +442,9 @@ test("Instalação ainda sem identificador e segredo: a rodada só anda a hora v
 
 test("duas rodadas no mesmo minuto: só uma fala com o Emissor", async () => {
   const banco = bancoDaLicenca(VAZIO, vencida());
-  const emissor = emissorDeTeste(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true, token: novaDoEmissor(), sequence: "seq-2" }), 20)));
+  const emissor = emissorDeTeste(
+    (pedido) => new Promise((resolve) => setTimeout(() => resolve({ ok: true, token: novaDoEmissor({ nonce: pedido.nonce }), sequence: "seq-2" }), 20))
+  );
 
   const [a, b] = await Promise.all([rodar(banco, emissor.client), rodar(banco, emissor.client)]);
 

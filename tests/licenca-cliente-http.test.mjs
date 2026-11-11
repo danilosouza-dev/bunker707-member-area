@@ -38,7 +38,6 @@ after(async () => {
 
 const nonce = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
 const instanceId = () => Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
-const conteudo = (token) => JSON.parse(Buffer.from(token.split(".")[3], "base64url").toString("utf8"));
 const ultimoPedido = () => emissor.pedidos.at(-1);
 
 /** Uma Instalação ativada no Emissor falso: o que a Instalação guardaria. */
@@ -188,8 +187,7 @@ test("conferência com o nonce certo: licença nova, sequência nova; o pedido l
     host: HOST,
     storedLicense: instalacao.token,
     licenseId: instalacao.licenseId,
-    versions: { product: "1.4.0" },
-    newestIssuedAt: new Date(instalacao.license.issuedAt)
+    versions: { product: "1.4.0" }
   };
   const resposta = await cliente.checkIn(pedido);
 
@@ -255,20 +253,29 @@ test("a resposta velha repetida (a de ontem, inteira, licença legítima e sequ�
 
   // Alguém no meio do caminho (ou no banco) devolve a mesma resposta boa, byte a byte.
   emissor.proximas.push({ status: 200, corpo: { license: ontem.token, sequence: ontem.sequence } });
-  const repetida = await cliente.checkIn({ ...credenciais, sequence: ontem.sequence, nonce: nonce(), newestIssuedAt: new Date(ontem.license.issuedAt) });
+  const repetida = await cliente.checkIn({ ...credenciais, sequence: ontem.sequence, nonce: nonce() });
   assert.deepEqual(repetida, { ok: false, error: "nonce_diferente" });
 
-  // E com o mesmo nonce (o pedido repetido por inteiro), a licença mais antiga que a mais nova já aceita não volta o relógio.
+  // A licença da ativação, repetida, também traz o nonce de outro pedido.
   emissor.proximas.push({ status: 200, corpo: { license: instalacao.token, sequence: ontem.sequence } });
-  const antiga = await cliente.checkIn({ ...credenciais, sequence: ontem.sequence, nonce: instalacao.nonceDaAtivacao, newestIssuedAt: new Date(ontem.license.issuedAt) });
-  assert.deepEqual(antiga, { ok: false, error: "licenca_antiga" });
+  assert.deepEqual(await cliente.checkIn({ ...credenciais, sequence: ontem.sequence, nonce: nonce() }), { ok: false, error: "nonce_diferente" });
+});
 
-  // A marca guardada com data inválida (o banco mexido) nunca deixa passar.
-  emissor.proximas.push({ status: 200, corpo: { license: ontem.token, sequence: ontem.sequence } });
-  assert.deepEqual(
-    await cliente.checkIn({ ...credenciais, sequence: ontem.sequence, nonce: conteudo(ontem.token).nonce, newestIssuedAt: new Date("infinity") }),
-    { ok: false, error: "licenca_antiga" }
-  );
+test("a resposta com o nonce deste pedido é fresca: vale mesmo mais antiga que a mais nova já aceita (o relógio do Emissor que pulou e voltou)", async () => {
+  const instalacao = await ativada();
+  const credenciais = { installationId: instalacao.installationId, installationSecret: instalacao.installationSecret, host: HOST };
+
+  emissor.estado.agora += 80 * 24 * 60 * 60 * 1000;
+  const noSalto = await cliente.checkIn({ ...credenciais, sequence: instalacao.sequence, nonce: nonce() });
+  assert.equal(noSalto.ok, true);
+
+  emissor.estado.agora -= 80 * 24 * 60 * 60 * 1000;
+  const pedido = { ...credenciais, sequence: noSalto.sequence, nonce: nonce(), newestIssuedAt: new Date(noSalto.license.issuedAt) };
+  const corrigida = await cliente.checkIn(pedido);
+
+  assert.equal(corrigida.ok, true, JSON.stringify(corrigida));
+  assert.equal(corrigida.license.nonce, pedido.nonce);
+  assert.ok(Date.parse(corrigida.license.issuedAt) < Date.parse(noSalto.license.issuedAt), "mais antiga que a mais nova já aceita, e mesmo assim boa");
 });
 
 test("licença de outra Instalação, de outra chave de emissão ou adulterada: licenca_invalida", async () => {

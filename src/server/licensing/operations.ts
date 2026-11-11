@@ -7,8 +7,8 @@
 //   correm juntas, e duas ativacoes ao mesmo tempo nao deixam a Instalacao com o segredo que o Emissor ja trocou;
 // - a ativacao e o desativar que falham devolvem a reserva como estava: uma Chave errada nao mexe na agenda da
 //   conferencia diaria;
-// - o cliente ja conferiu a licenca devolvida (raizes, nonce do pedido, Instalacao, endereco e a mais nova aceita), e o
-//   store confere de novo antes de gravar;
+// - o cliente ja conferiu a licenca devolvida (raizes, nonce do pedido, Instalacao e endereco), e o store confere de novo
+//   antes de gravar: com o nonce deste pedido a resposta e fresca e vale mesmo mais antiga que a mais nova ja aceita;
 // - nada daqui escreve log, e nenhum resultado carrega a Chave, o segredo, a sequencia ou a licenca.
 
 import type { EmissorClient, EmissorFailure, EmissorVersions } from "./client";
@@ -137,14 +137,8 @@ export async function activateWithKey(deps: LicenseOperationDeps, activationKey:
     return failureOf(preflight);
   }
 
-  const activation = await client.activate({
-    activationKey,
-    host,
-    instanceId,
-    nonce: (deps.nonce ?? newRequestNonce)(),
-    versions: deps.versions?.(),
-    newestIssuedAt: reservation.record.newestIssuedAt
-  });
+  const nonce = (deps.nonce ?? newRequestNonce)();
+  const activation = await client.activate({ activationKey, host, instanceId, nonce, versions: deps.versions?.() });
 
   if (!activation.ok) {
     await release(db, reservation);
@@ -164,6 +158,7 @@ export async function activateWithKey(deps: LicenseOperationDeps, activationKey:
         installationId: activation.installationId,
         installationSecret: activation.installationSecret,
         sequence: activation.sequence,
+        nonce,
         roots,
         receivedAt,
         attemptStartedAt: reservation.start.attemptStartedAt
@@ -196,13 +191,9 @@ export async function deactivateInstallation(deps: LicenseOperationDeps): Promis
     return { ok: false, error: reservation };
   }
 
-  const { installationId, installationSecret, newestIssuedAt } = reservation.record;
-  const answer = await deps.client().deactivate({
-    installationId: installationId ?? "",
-    installationSecret: installationSecret ?? "",
-    nonce: (deps.nonce ?? newRequestNonce)(),
-    newestIssuedAt
-  });
+  const { installationId, installationSecret } = reservation.record;
+  const nonce = (deps.nonce ?? newRequestNonce)();
+  const answer = await deps.client().deactivate({ installationId: installationId ?? "", installationSecret: installationSecret ?? "", nonce });
 
   if (!answer.ok) {
     await release(db, reservation);
@@ -211,7 +202,7 @@ export async function deactivateInstallation(deps: LicenseOperationDeps): Promis
 
   const roots = deps.roots();
   const recorded = await mutateLicenseState(db, (record) =>
-    planDeactivationSuccess(record, { token: answer.token, roots, receivedAt: deps.now(), attemptStartedAt: reservation.start.attemptStartedAt })
+    planDeactivationSuccess(record, { token: answer.token, nonce, roots, receivedAt: deps.now(), attemptStartedAt: reservation.start.attemptStartedAt })
   );
 
   if (!recorded) {
