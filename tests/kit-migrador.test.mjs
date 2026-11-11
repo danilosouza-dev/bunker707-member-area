@@ -192,7 +192,8 @@ test("--listar so le: sem trava, sem historico e sem nenhum arquivo; mostra o qu
   assert.match(r.stderr, /AVISO: outra execucao do migrador esta aplicando agora/);
   // Depois das ferramentas (que so criam funcoes e tabelas temporarias), nada que grave ou pegue a trava.
   const roteiro = amb.roteiro().split(ferramentas)[1];
-  assert.ok(roteiro.indexOf("set session characteristics as transaction read only;") < roteiro.indexOf("select * from pg_temp.bk_planejar();"));
+  const soLeitura = roteiro.indexOf("set session characteristics as transaction read only;");
+  assert.ok(soLeitura > 0 && soLeitura < roteiro.indexOf("select * from pg_temp.bk_planejar();"), "so leitura antes do plano");
   for (const proibido of ["bk_travar()", "\\i ", "INSERT INTO supabase_migrations", "CREATE SCHEMA", "BEGIN;", "RESET ALL"]) {
     assert.equal(roteiro.includes(proibido), false, `--listar sem ${proibido}`);
   }

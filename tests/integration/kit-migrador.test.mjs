@@ -54,6 +54,15 @@ function sql(banco, comando) {
   return r.stdout.trim();
 }
 
+/** Um roteiro inteiro pelo stdin do psql (as ferramentas do migrador mais consultas), no mesmo caminho do sql(). */
+function roteiro(banco, texto) {
+  const r = psqlLocal
+    ? spawnSync("bash", ["-c", `${psqlLocal} -X -q -v ON_ERROR_STOP=1 -At -d "$1"`, "_", banco], { input: texto, encoding: "utf8" })
+    : spawnSync("docker", ["exec", "-i", CONTAINER, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At", "-U", "postgres", "-d", banco], { input: texto, encoding: "utf8" });
+  assert.equal(r.status, 0, `psql em ${banco}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
 let numero = 0;
 function bancoNovo() {
   const banco = `kit_migrador_${process.pid}_${++numero}`;
@@ -286,6 +295,46 @@ test("recusa antes de aplicar: comando fora de transacao sem a diretiva, BEGIN e
   assert.match(repetida.saida, /duas migracoes com a mesma versao no pacote: 202604010002_a\.sql, 202604010002_b\.sql/);
   assert.equal(sql(banco, "select to_regnamespace('supabase_migrations') is null"), "t", "nem o historico foi criado");
   assert.equal(existe(banco, "public.bom"), false);
+});
+
+// Os cortes esquisitos do divisor da CLI 2.121.0 (o que o splitAndTrim dela devolve para cada texto): o BOM tirado antes de
+// cortar (sem ele, o BEGIN ATOMIC do comeco nao seria palavra), o "/*/" que abre e fecha, o $ depois de letra ou digito,
+// a barra que so escapa no E'', a continuacao do E'' na linha de baixo, os parenteses aninhados que fecham juntos, o
+// comentario que sobra no fim, os espacos do Unicode, o $tag$ com acento, as aspas dobradas e as tabulacoes vertical e de
+// pagina.
+const ESQUISITOS = [
+  ["\ufeffBEGIN ATOMIC\n  select 2;\nEND; select 3", ["BEGIN ATOMIC\n  select 2;\nEND", "select 3"]],
+  ["/*/ select 1; /* a /* b */ c */ select 2;", ["/*/ select 1", "/* a /* b */ c */ select 2"]],
+  ["select $$a;b$$; select $tag$x$$;y$tag$; select 1$$; select a$b;", ["select $$a;b$$", "select $tag$x$$;y$tag$", "select 1$$", "select a$b"]],
+  ["select E'a\\';b'; select 'a\\';b'", ["select E'a\\';b'", "select 'a\\'", "b'"]],
+  ["select E'a'\n  'b;c'; select E'a' -- x\n 'b;c'", ["select E'a'\n  'b;c'", "select E'a' -- x\n 'b;c'"]],
+  ["create function f() returns int language sql begin atomic select 1; select case when true then 1 end; end; select 2", ["create function f() returns int language sql begin atomic select 1; select case when true then 1 end; end", "select 2"]],
+  ["select (1; 2); select 3", ["select (1; 2)", "select 3"]],
+  ["select ((1); 2); select 3", ["select ((1)", "2)", "select 3"]],
+  ["select 1;;; ;\n-- fim", ["select 1", "-- fim"]],
+  ["\u00a0select 1\u00a0;\u3000select 2\u2028", ["select 1", "select 2"]],
+  ["select 'ação'; select $ç$x;y$ç$", ["select 'ação'", "select $ç$x;y$ç$"]],
+  ["select \"a;b\"; select \"\"\";\"\"\"", ["select \"a;b\"", "select \"\"\";\"\"\""]],
+  ["vacuum x;\vselect 1\v;\fselect 2", ["vacuum x", "select 1", "select 2"]]
+];
+
+test("o divisor das ferramentas corta como o da CLI 2.121.0 nos casos esquisitos", { skip }, () => {
+  const banco = bancoNovo();
+  const consulta = `select json_agg(c order by i) from (select i, (pg_temp.bk_dividir(decode(t, 'base64'))).comandos as c from unnest(array[${ESQUISITOS.map(([texto]) => `'${Buffer.from(texto, "utf8").toString("base64")}'`).join(", ")}]) with ordinality as u(t, i)) x;`;
+  const obtido = JSON.parse(roteiro(banco, `${readFileSync(join(root, "infra/kit/migrador.sql"), "utf8")}\n${consulta}\n`));
+  ESQUISITOS.forEach(([texto, esperado], i) => assert.deepEqual(obtido[i], esperado, JSON.stringify(texto)));
+});
+
+test("arquivo com BOM: o BOM sai antes de ler a diretiva e de cortar, como na CLI", { skip }, () => {
+  const banco = bancoNovo();
+  const conteudo = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("-- pg-delta: transaction=false\ncreate table if not exists public.com_bom (id int);\ncreate index concurrently if not exists com_bom_id on public.com_bom (id);\n")]);
+  const r = migrador(banco, pacote({ "202606010001_com_bom.sql": conteudo }));
+  assert.equal(r.status, 0, r.saida);
+  assert.match(r.saida, /Aplicando 202606010001_com_bom\.sql \(sem transacao, comando por comando\)/);
+  assert.deepEqual(JSON.parse(sql(banco, "select to_json(statements) from supabase_migrations.schema_migrations")), [
+    "-- pg-delta: transaction=false\ncreate table if not exists public.com_bom (id int)",
+    "create index concurrently if not exists com_bom_id on public.com_bom (id)"
+  ]);
 });
 
 test("com outra execucao segurando a trava, o migrador para com 4 e o --listar so avisa", { skip }, async () => {
