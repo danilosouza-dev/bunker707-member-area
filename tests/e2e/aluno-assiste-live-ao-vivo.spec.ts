@@ -1677,7 +1677,7 @@ test("entrar na sala pela faixa Ao vivo agora do Inicio, sem recarregar a pagina
   }
 });
 
-test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfone esta na barra sem o Liberar; o primeiro clique abre o aviso com o titulo da politica e so o Falar manda toggleAudio; lotado (moderationStatusChanged de audio ligado), o Microfone fica focavel com o motivo e o clique so avisa", async ({ page }) => {
+test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfone esta na barra sem o Liberar; o primeiro clique abre o aviso com o titulo da politica e so o Falar manda toggleAudio; com a moderacao de audio ligada (moderationStatusChanged), o Microfone fica focavel com o motivo e o clique so avisa", async ({ page }) => {
   const db = createLocalAdminClient();
   const lido = unwrap(await db.from("webinars").select("room_settings").eq("id", LIVE_AO_VIVO_DE_TESTE.id).single(), "Lendo o room_settings da live de teste") as { room_settings: Record<string, unknown> | null };
   const original = lido.room_settings ?? {};
@@ -1709,7 +1709,8 @@ test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfo
     await expect(botaoMicrofone).toHaveAttribute("aria-pressed", "false");
     await expect(aviso).toHaveCount(0);
 
-    // Lotado: o vigia do console ligou a moderacao de audio. O Microfone fica, focavel, com o motivo; o clique so avisa.
+    // A moderacao de audio ligada (ainda nao desligada pelo console; sem teto de alunos desde 11/11/2026, D84): o
+    // Microfone fica, focavel, com o motivo; o clique so avisa.
     await sala.disparar("moderationStatusChanged", { enabled: true, mediaType: "audio" });
     await expect(botaoMicrofone).toHaveAttribute("aria-disabled", "true");
     await expect(botaoMicrofone).not.toHaveAttribute("disabled", /.*/);
@@ -1721,7 +1722,7 @@ test("o microfone sozinho (docs/31 caminho A): com a politica no banco o Microfo
     await expect(dialogo.getByTestId("live-notice")).toHaveText(aoVivo.microfoneLotado);
     expect((await sala.comandos()).slice(antesDoLotado).some((item) => item.comando === "toggleAudio")).toBe(false);
 
-    // A moderacao desligada de novo (a conta caiu abaixo do teto): o Microfone volta a abrir direto.
+    // A moderacao desligada (o console de quem apresenta desliga com a politica ligada): o Microfone volta a abrir direto.
     await sala.disparar("moderationStatusChanged", { enabled: false, mediaType: "audio" });
     await expect(botaoMicrofone).not.toHaveAttribute("aria-disabled", "true");
   } finally {

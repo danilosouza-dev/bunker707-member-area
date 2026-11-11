@@ -143,14 +143,14 @@ export type RoomSettings = {
   practiceSession: boolean;
   questions: boolean;
   reactions: boolean;
-  /** Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar, com teto no console de quem apresenta. */
+  /**
+   * Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar. Sem teto desde 11/11/2026 (D84; o
+   * teto de 4 do V2-A60 saiu): ligado, todo aluno pode falar, e a equipe silencia uma pessoa ou todos.
+   */
   selfUnmute: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
-
-/** O teto do microfone sozinho (docs/31 V2-A60): quantos alunos falam ao mesmo tempo; as frases do editor e do console saem daqui. */
-export const MIC_LIMIT = 4;
 
 export type ReminderSettings = { email: boolean; h1: boolean; h24: boolean };
 

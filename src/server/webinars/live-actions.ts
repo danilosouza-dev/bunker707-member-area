@@ -369,7 +369,8 @@ async function presentsWebinar(db: WebinarsDb, webinar: WebinarRow, userId: stri
  * [messaging.write] O microfone sozinho ao vivo (docs/31, caminho A, sem migracao): so o Apresentador ou um
  * co-apresentador (conferido aqui; a Equipe recebe 403), com a sessao aberta. Grava so a chave `selfUnmute` no
  * room_settings do webinario, com a guarda do `updated_at` lido (o editor aberto noutra aba recebe o conflito, 409).
- * Os comandos da sala (a moderacao de audio, o vigia de 4 alunos) saem do navegador de quem apresenta depois do sucesso.
+ * Os comandos da sala (desligado, fechar o microfone da turma; ligado, a moderacao de audio desligada, sem teto desde
+ * 11/11/2026, D84) saem do navegador de quem apresenta depois do sucesso.
  */
 export async function setSelfUnmute(input: { allowed: boolean; sessionId: string }): Promise<ActionResult<SelfUnmuteSaved>> {
   return runAdminAction("messaging.write", selfUnmuteSchema, input, async ({ input: data, user }) => {

@@ -911,13 +911,14 @@ test.describe("produtor", () => {
     await expect(pessoas.locator(`[data-live-participant="${APRESENTADOR}"]`)).toHaveCount(0);
   });
 
-  test("microfone sozinho (docs/31 caminho A): com a politica no banco, o preparo nao manda a moderacao de audio; 5 alunos com o microfone aberto fazem o vigia ligar a moderacao e silenciar o quinto; o botao da aba Pessoas grava e, ao desligar, fecha o microfone da turma; Tentar de novo com a politica ligada nao fecha o microfone", async ({ page }) => {
+  test("microfone sozinho sem teto (docs/31 caminho A; D84): com a politica no banco, o preparo nao manda a moderacao de audio; 6 alunos com o microfone aberto falam juntos, sem moderacao ligada e sem ninguem silenciado; o botao da aba Pessoas grava e, ao desligar, fecha o microfone da turma; ligar de novo desliga a moderacao uma vez; Tentar de novo com a politica ligada nao fecha o microfone", async ({ page }) => {
     const db = createLocalAdminClient();
     const lido = unwrap(await db.from("webinars").select("room_settings").eq("id", id).single(), "Lendo o room_settings da live de teste") as { room_settings: Record<string, unknown> | null };
     const original = lido.room_settings ?? {};
     const politicaNoBanco = async () =>
       (unwrap(await createLocalAdminClient().from("webinars").select("room_settings").eq("id", id).single(), "Lendo o microfone sozinho") as { room_settings: { selfUnmute?: unknown } }).room_settings.selfUnmute;
     const audioLigado = (args: unknown[]) => JSON.stringify(args) === JSON.stringify([true, "audio"]);
+    const audioDesligado = (args: unknown[]) => JSON.stringify(args) === JSON.stringify([false, "audio"]);
     unwrap(await db.from("webinars").update({ room_settings: { ...original, selfUnmute: true } }).eq("id", id), "Ligando o microfone sozinho");
 
     try {
@@ -926,8 +927,8 @@ test.describe("produtor", () => {
       expect((await sala.esperarComando("setFollowMe")).args).toEqual([true]);
       expect((await sala.comandos()).filter((item) => item.comando === "toggleModeration" && audioLigado(item.args))).toEqual([]);
 
-      // Cinco alunos abrem o microfone, nessa ordem: com o quarto a sala lota, e o quinto e silenciado.
-      const alunos = ["mic-aluno-0011", "mic-aluno-0012", "mic-aluno-0013", "mic-aluno-0014", "mic-aluno-0015"];
+      // Seis alunos abrem o microfone, nessa ordem (antes, o quinto seria silenciado): todos falam juntos.
+      const alunos = ["mic-aluno-0011", "mic-aluno-0012", "mic-aluno-0013", "mic-aluno-0014", "mic-aluno-0015", "mic-aluno-0016"];
       for (const aluno of alunos) {
         await sala.disparar("participantJoined", { displayName: aluno, id: aluno });
         await sala.disparar("participantRoleChanged", { id: aluno, role: "participant" });
@@ -936,14 +937,17 @@ test.describe("produtor", () => {
       for (const aluno of alunos) {
         await sala.disparar("participantMuted", { id: aluno, isMuted: false, mediaType: "audio" });
       }
-      await expect
-        .poll(async () => (await sala.comandos()).slice(antes).some((item) => item.comando === "toggleModeration" && audioLigado(item.args)), { timeout: 15_000 })
-        .toBe(true);
-      expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([alunos[4], "audio"]);
-      expect((await sala.comandos()).filter((item) => item.comando === "muteEveryone" || item.comando === "rejectParticipant")).toEqual([]);
+      // A aba Pessoas mostra os seis com o microfone no ar: o console ja viu tudo, e nada saiu para fechar ninguem.
+      const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
+      for (const aluno of alunos) {
+        await expect(pessoas.locator(`[data-live-participant="${aluno}"] [data-live-mic]`)).toHaveAttribute("data-live-mic", "on");
+      }
+      const depoisDosSeis = (await sala.comandos()).slice(antes);
+      expect(depoisDosSeis.filter((item) => item.comando === "toggleModeration" && audioLigado(item.args))).toEqual([]);
+      expect(depoisDosSeis.filter((item) => item.comando === "muteRemoteParticipant" || item.comando === "muteEveryone" || item.comando === "rejectParticipant")).toEqual([]);
+      await expect(pessoas.getByText(consoleAoVivo.microfoneSozinhoTexto, { exact: true })).toBeVisible();
 
       // O botao da aba Pessoas mostra a politica gravada; desligar grava no banco e fecha o microfone da turma.
-      const pessoas = await abrirAba(page, consoleV2.abas.pessoas);
       const botao = pessoas.getByRole("button", { exact: true, name: consoleAoVivo.microfoneSozinho });
       await expect(botao).toHaveAttribute("aria-pressed", "true");
       antes = (await sala.comandos()).length;
@@ -955,10 +959,17 @@ test.describe("produtor", () => {
         .toBe(true);
       expect((await sala.esperarComando("muteRemoteParticipant", { depoisDe: antes })).args).toEqual([alunos[0], "audio"]);
 
-      // Liga de novo e o iframe cai: o preparo do iframe novo nao fecha o microfone da turma.
+      // Liga de novo: a moderacao que o fechar ligou e desligada, uma vez so, e ninguem e silenciado.
+      antes = (await sala.comandos()).length;
       await botao.click();
       await expect.poll(politicaNoBanco).toBe(true);
       await expect(botao).toHaveAttribute("aria-pressed", "true");
+      expect((await sala.esperarComando("toggleModeration", { depoisDe: antes })).args).toEqual([false, "audio"]);
+      const religou = (await sala.comandos()).slice(antes);
+      expect(religou.filter((item) => item.comando === "toggleModeration" && audioDesligado(item.args))).toHaveLength(1);
+      expect(religou.filter((item) => item.comando === "muteRemoteParticipant")).toEqual([]);
+
+      // O iframe cai: o preparo do iframe novo nao fecha o microfone da turma.
       await sala.disparar("errorOccurred", { error: { isFatal: true, name: "conference.connectionError.otherError" } });
       await page.getByRole("button", { exact: true, name: WEBINAR_COPY.sala.tentarDeNovo }).click();
       await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);

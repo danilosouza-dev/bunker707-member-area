@@ -107,8 +107,9 @@ export const LIVE_ROOM_RULES = {
   nameMax: 60,
   /**
    * A moderacao de audio mudou: a sala rele a sessao (o microfone sozinho pode ter mudado junto no console) depois de
-   * uma espera sorteada ate isto, para a turma inteira nao pedir no mesmo segundo (o vigia do teto troca a moderacao a
-   * cada 2 s no pior caso). As trocas dentro da espera viram uma releitura so.
+   * uma espera sorteada ate isto, para a turma inteira nao pedir no mesmo segundo (a moderacao muda quando a equipe
+   * liga ou desliga a politica; sem teto de alunos falando desde 11/11/2026, D84). As trocas dentro da espera viram uma
+   * releitura so.
    */
   audioModerationSpreadMs: 10_000
 } as const;
@@ -596,8 +597,9 @@ export function cameraClick(input: { allowStudentCamera: boolean; consented: boo
 }
 
 /**
- * O microfone sozinho lotado (docs/31 caminho A): com a politica ligada, sem a liberacao do apresentador e com o
- * microfone desligado, a moderacao de audio ligada (o vigia do console ligou no teto) ou ainda nao lida (o seguro: sem
+ * O microfone sozinho ainda fechado (docs/31 caminho A; o nome "lotado" ficou do teto de 4 alunos, que saiu em
+ * 11/11/2026, D84): com a politica ligada, sem a liberacao do apresentador e com o microfone desligado, a moderacao de
+ * audio ligada (o console de quem apresenta ainda nao a desligou) ou ainda nao lida (o seguro: sem
  * saber, nao abre). Com o microfone ligado nunca bloqueia: o aluno sempre pode se calar (docs/31 V2-A16).
  */
 export function micBlocked(input: { audioModeration: boolean | null; audioOn: boolean; micAllowed: boolean; selfUnmute: boolean }): boolean {

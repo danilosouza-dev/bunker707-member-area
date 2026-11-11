@@ -1104,7 +1104,7 @@ test("ConsoleRail (docs/31 §10): as abas e as entradas da sessao no trilho, com
 });
 
 
-test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase do teto; a Equipe nao o ve", () => {
+test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase de que todos podem falar (sem teto, D84); a Equipe nao o ve", () => {
   const people = liveBlock().people;
   const tab = (handle) => html(createElement(ConsolePeopleTab, { busyKey: null, canPublish: true, handle, onAction: noop, onSelfUnmute: noop, people }));
   const botao = (markup) => markup.match(/<button[^>]*>(?:(?!<\/button>).)*Permitir que o aluno abra o microfone sozinho(?:(?!<\/button>).)*<\/button>/s)?.[0] ?? "";
@@ -1117,9 +1117,12 @@ test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-p
   const host = tab(handleFor("host", { selfUnmute: true }));
   const hint = host.match(/<button[^>]*aria-describedby="([^"]+)"[^>]*aria-pressed="true"/)?.[1];
   assert.ok(hint, "o botao aponta para a frase");
-  assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase do teto embaixo do botao");
-  assert.match(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, new RegExp(`^Até ${liveModel.MIC_LIMIT} alunos`), "o teto sai do MIC_LIMIT");
-  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(6), "Até 6 alunos falam ao mesmo tempo; quando lota, os outros esperam.", "outro teto, outra frase");
+  assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase embaixo do botao");
+  // D84 (11/11/2026): sem teto. A frase nao tem numero nem "quando lota, os outros esperam", e diz que a equipe silencia.
+  assert.equal(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, "Todos os alunos podem abrir o microfone ao mesmo tempo. A equipe silencia uma pessoa ou todos quando precisar.");
+  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto, LIVE_CONSOLE_COPY.microfoneSozinhoTexto, "a mesma frase do editor e do console");
+  assert.doesNotMatch(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, /\d|lota|esperam/);
+  assert.equal(liveModel.MIC_LIMIT, undefined, "o teto saiu");
   assert.equal(botao(tab(handleFor("team", { selfUnmute: true }))), "", "a Equipe nao muda o microfone da turma");
 });
 

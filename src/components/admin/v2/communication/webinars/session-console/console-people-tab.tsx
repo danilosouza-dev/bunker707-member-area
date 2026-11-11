@@ -14,7 +14,7 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // todos (Silenciar todos, o muteEveryone de audio; Fechar todas as câmeras, o de video; e o "Câmeras livres", a
 // moderacao de video desligada, com o estado em aria-pressed pelo que o motor diz: o moderationStatusChanged de video e
 // o isModerationOn na entrada, nunca o clique), o microfone sozinho (docs/31 caminho A: o botao com aria-pressed pelo
-// que foi gravado, so para quem apresenta, com o teto de 4 alunos na frase de baixo), a Sala
+// que foi gravado, so para quem apresenta, com a frase de baixo; sem teto de alunos falando desde 11/11/2026, D84), a Sala
 // de espera com Admitir por pessoa e Admitir todos (answerKnockingParticipant), quem esta na sala (LiveParticipants:
 // "Na sala · 3", o microfone, a camera, o Compartilhando e o ⋯ de cada um, e os removidos, silenciados e banidos com
 // Desfazer) e o rodape "3 na sala · 2 com a mão levantada". Cada botao so aparece para o papel que pode
@@ -28,7 +28,7 @@ const copy = WEBINAR_COPY.consoleAoVivo;
 const pessoas = WEBINAR_COPY.consoleV2.pessoas;
 /** O titulo da Sala de espera (recebe o foco quando o ultimo Admitir sai). */
 const LOBBY_TITLE_ID = "console-live-lobby-title";
-/** A frase do microfone sozinho (o teto), ligada ao botao. */
+/** A frase do microfone sozinho (todos podem falar; a equipe silencia), ligada ao botao. */
 const MIC_SELF_HINT_ID = "console-live-mic-self-hint";
 /** O "Câmeras livres" ligado: o estilo do botao ativo da sala, com contraste nos dois temas (WCAG 1.4.11). */
 const PRESSED = "border-room-active-bg bg-room-active-bg text-room-active-fg hover:bg-room-active-bg/85";

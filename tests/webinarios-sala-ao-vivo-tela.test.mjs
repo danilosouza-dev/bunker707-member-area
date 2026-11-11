@@ -222,7 +222,8 @@ test("microfone sozinho (docs/31 caminho A): o Microfone na barra sem o Liberar;
   assert.ok(motivo, "o sr-only existe");
   assert.match(motivo[0], /class="sr-only"/);
   assert.equal(motivo[1], WEBINAR_COPY.aoVivo.microfoneLotado);
-  assert.equal(WEBINAR_COPY.aoVivo.microfoneLotado, "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.");
+  // D84 (11/11/2026): sem teto de alunos falando, o microfone fechado nao e mais "sala cheia".
+  assert.equal(WEBINAR_COPY.aoVivo.microfoneLotado, "O microfone da turma ainda não foi aberto. Tente daqui a pouco.");
   assert.ok(!barra({ selfUnmute: false }).includes('data-room-bar-item="mic"'), "sem a politica, so depois do Liberar");
 });
 

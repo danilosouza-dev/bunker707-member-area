@@ -351,8 +351,12 @@ export const WEBINAR_COPY = {
     microfoneSilenciado: "A equipe silenciou o seu microfone.",
     /** O microfone sozinho (docs/31 caminho A): o titulo do aviso de gravacao no primeiro abrir. */
     microfoneSozinhoTitulo: "Esta live deixa você abrir o microfone.",
-    /** O microfone sozinho lotado: a mesma frase no motivo do botao, na dica e no aviso. */
-    microfoneLotado: "Muitos alunos com o microfone aberto agora. Tente daqui a pouco.",
+    /**
+     * O microfone sozinho ainda fechado no motor (a moderacao de audio ligada ou ainda nao lida; o console de quem
+     * apresenta a desliga quando a politica liga): a mesma frase no motivo do botao, na dica e no aviso. Desde 11/11/2026
+     * (D84) nao ha mais teto de alunos falando, entao a frase nao fala em sala cheia.
+     */
+    microfoneLotado: "O microfone da turma ainda não foi aberto. Tente daqui a pouco.",
     maoLevantada: "Mão levantada",
     modoCinema: "Modo cinema",
     naoConseguimosVoltar: "Não conseguimos voltar.",
@@ -399,8 +403,8 @@ export const WEBINAR_COPY = {
     mensagemDoChat: "Mensagem do chat",
     microfoneLiberado: "Microfone liberado",
     microfoneSozinho: "Permitir que o aluno abra o microfone sozinho",
-    /** O teto vem do MIC_LIMIT (src/server/webinars/model.ts), nunca escrito aqui. */
-    microfoneSozinhoTexto: (limite: number) => `Até ${limite} alunos falam ao mesmo tempo; quando lota, os outros esperam.`,
+    /** Sem teto desde 11/11/2026 (D84): todo aluno pode falar, e a equipe silencia quem precisar. */
+    microfoneSozinhoTexto: "Todos os alunos podem abrir o microfone ao mesmo tempo. A equipe silencia uma pessoa ou todos quando precisar.",
     noVideo: (texto: string) => `No vídeo: ${texto}`,
     removidosESilenciados: "Removidos, silenciados e banidos",
     semGravacao: "Nenhum vídeo ligado a esta sessão ainda.",

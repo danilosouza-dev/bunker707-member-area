@@ -453,7 +453,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // do DOM e o foco cai no body; a sala o manda de volta para dentro dela, como quando a barra inteira some. Com o
   // microfone ainda ligado ele fica (o recolhimento sem o mudo: o aluno sempre tem como se calar), como em liveBarItems.
   const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn || live.selfUnmute === true);
-  // Lotado (o vigia do console ligou a moderacao de audio, ou ela ainda nao foi lida): o Microfone fica, desligado com o motivo.
+  // Ainda fechado (a moderacao de audio ligada, ou ainda nao lida; sem teto desde 11/11/2026, D84): o Microfone fica,
+  // desligado com o motivo.
   const micInput = {
     audioModeration: room.signals.audioModeration,
     audioOn: room.signals.audioOn,
@@ -1045,7 +1046,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function confirmMic() {
     setMicAsk(false);
     setMicConsented(true);
-    // A sala pode ter lotado com o aviso aberto: o aviso de lotado, sem abrir.
+    // A moderacao de audio pode ter ligado (ou ainda nao foi lida) com o aviso aberto: o aviso do microfone fechado, sem abrir.
     if (micFull) {
       room.showNotice("mic_full");
       return;

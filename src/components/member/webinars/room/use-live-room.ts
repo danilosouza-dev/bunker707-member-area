@@ -637,8 +637,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
           .catch(() => undefined);
       }
       if (name === "moderationStatusChanged" && field(payload, "mediaType") === "audio") {
-        // Espalhada e juntada: a turma inteira recebe o sinal no mesmo instante, e o vigia do teto troca a moderacao
-        // a cada 2 s no pior caso.
+        // Espalhada e juntada: a turma inteira recebe o sinal no mesmo instante (a equipe liga ou desliga a politica do
+        // microfone sozinho).
         const delayMs = audioModerationRefreshInMs(audioModerationPendingRef.current, Math.random());
         if (delayMs !== null) {
           audioModerationPendingRef.current = true;
