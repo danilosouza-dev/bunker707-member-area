@@ -22,6 +22,7 @@ Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na s
 | Servidor | `infra/scripts/bootstrap.sh` | usuario deploy, SSH so com chave, ufw + Docker, fail2ban, atualizacoes automaticas, Docker CE, swap, CLI do Supabase |
 | Firewall da Hetzner | `infra/scripts/hetzner-firewall.sh` | 22 so do produtor, 80/443 so da Cloudflare (caminho manual de 17/10; em 18/10/2026 o firewall passou a ser feito por `infra/cloud/lib.sh`, secao 4A.4) |
 | Migracoes | `infra/scripts/migrate.sh` | `supabase db push --db-url` no Postgres do stack |
+| Migrador do kit (11/11/2026) | `infra/kit/migrar.sh`, `infra/kit/migrador.sql` | migracoes sem a CLI no servidor do comprador, com o mesmo historico dela (secao 9A) |
 | Deploy | `infra/scripts/deploy.sh` | troca a imagem, migra, recria o app, smoke, volta atras |
 | Backup / restore | `infra/scripts/backup.sh`, `restore.sh`, `infra/systemd/` | restic -> Storage Box (SFTP), retencao 30 dias, restauracao em servidor limpo com smoke |
 | Atualizacao do stack | `infra/scripts/update.sh` | compara e reescreve as imagens com o compose oficial do Supabase |
@@ -101,6 +102,9 @@ infra/
     restore.sh                  restauracao em servidor limpo + smoke
     update.sh                   compara/reescreve as imagens com o compose oficial
     lib.sh                      funcoes comuns (le o .env chave a chave, espera healthcheck...)
+  kit/                          (11/11/2026) o kit do produto licenciado (docs/32 §11.6 e §11.7; secao 9A)
+    migrar.sh                   migracoes sem a CLI: psql no container do banco, trava, um arquivo por transacao
+    migrador.sql                ferramentas de SQL da sessao (pg_temp): divisor de comandos da CLI, plano e conferencia
   systemd/                      timer do backup (03:30 UTC)
   terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado; referencia)
   cloud/                        (18/10/2026) operacao pela API da Hetzner e da Cloudflare, a partir do runner
@@ -918,6 +922,38 @@ Aba aberta antes do deploy (o cartao antigo ja baixado no navegador do aluno, cr
 A regra, no molde do R1 (`docs/29`): com uma imagem anterior no ar (o meio de um deploy, ou uma previa antiga da Vercel ligada ao Supabase de teste), ninguem salva no editor Livre o que a entrega trouxe (no L6b, contorno e marca-texto; no L6c, as cores ao passar o mouse).
 
 Sem GitHub no caminho (emergencia): `deploy.sh --build` constroi no proprio servidor (precisa de ~2 GB livres e uns 3 minutos).
+
+---
+
+## 9A. O migrador do kit (produto licenciado, 11/11/2026)
+
+O servidor de um comprador (`docs/32` §11.6) aplica as migracoes sem a CLI do Supabase, com `infra/kit/migrar.sh`. A nossa producao continua no `migrate.sh` (a CLI) por enquanto; os dois gravam o mesmo historico, entao um banco aplicado por um segue com o outro.
+
+```bash
+bash infra/kit/migrar.sh --listar   # confere o historico contra o pacote e lista o que falta; nada muda no banco
+bash infra/kit/migrar.sh            # aplica o que falta
+```
+
+**Como roda.** Uma sessao so do `psql` dentro do container do banco (servico `db` do compose; `MIGRAR_CONTAINER=<nome>` aponta outro container), como `postgres` pelo socket local, sem senha na linha de comando e com `ON_ERROR_STOP`. A sessao pega uma trava de sessao do Postgres (`pg_advisory_lock(70707, 1)`, que some sozinha se o `psql` cair), le `supabase_migrations.schema_migrations`, confere o pacote e aplica cada arquivo pendente numa transacao propria, com a linha do historico gravada na mesma transacao e `RESET ALL` antes de cada arquivo. As ferramentas de SQL (`infra/kit/migrador.sql`) sao criadas em `pg_temp`: somem quando o `psql` sai e nunca entram no esquema da escola. `--pasta` e `--banco` trocam a pasta das migracoes e o banco.
+
+**O historico e o da CLI 2.121.0** (a versao pinada em `infra/scripts/lib.sh` e no CI), conferido no codigo dela (tag `v2.121.0`, `apps/cli/src/command-internal/`): a tabela criada como no `createMigrationTable` (`version text` chave, `statements text[]`, `name text`), `version` e `name` tirados do nome do arquivo e, em `statements`, os comandos do arquivo cortados como o `splitAndTrim` dela corta (inclusive o comentario depois do ultimo `;`, que vira mais um comando). Trocar a versao da CLI pede conferir de novo o divisor e a tabela; a guarda `tests/kit-migrador.guard.test.mjs` lembra.
+
+**O que ele recusa antes de aplicar qualquer coisa:**
+
+| Codigo | Quando | O que fazer |
+|---|---|---|
+| 0 | o banco esta em dia (aplicou o que faltava, ou nada faltava) | nada |
+| 1 | opcao errada, pasta sem migracao, arquivo que nao le | conferir o comando e o pacote |
+| 2 | sem conexao com o banco (container parado, copia para o container falhou) | subir o `db` e rodar de novo |
+| 3 | uma migracao falhou: foi desfeita inteira, as anteriores ficaram | ler o erro do Postgres (arquivo e linha) e rodar de novo depois de corrigir; o migrador continua dela |
+| 4 | outra execucao do migrador esta aplicando agora | esperar e rodar de novo |
+| 5 | o historico do banco nao bate com o pacote: versao no banco sem arquivo, ou arquivo pendente mais velho que a ultima aplicada | conferir se o pacote e o desta instalacao (pacote mais velho que o banco nunca e aplicado) |
+| 6 | uma migracao ja aplicada mudou no pacote (os comandos do historico nao batem com os do arquivo; linha em branco entre comandos nao conta, e o mesmo texto cortado por outra versao da CLI so avisa) | pacote corrompido ou alterado: baixar de novo ou suporte |
+| 7 | arquivo recusado: nome fora de `<versao>_<nome>.sql`, UTF-8 invalido, versao repetida, comando que nao roda em transacao sem a diretiva, `BEGIN`/`COMMIT` soltos, `DISCARD`, barra invertida fora de texto (o `psql` leria como comando dele) | corrigir a migracao no repositorio |
+
+**Migracao que nao roda dentro de transacao** (`CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, `REINDEX ... CONCURRENTLY`, `VACUUM`, `ALTER SYSTEM`, `CLUSTER`, `CREATE`/`DROP DATABASE` e `TABLESPACE`, `DETACH PARTITION ... CONCURRENTLY`): vai num arquivo so dela, com a primeira linha exatamente `-- pg-delta: transaction=false`. Com ela, o migrador e a CLI rodam o arquivo comando por comando, sem transacao, e gravam o historico no fim. Sem ela, o migrador recusa (codigo 7); a CLI 2.121.0 nao recusa: corta a transacao em pedacos sem avisar, e e isso que a recusa evita. Arquivo assim tem que poder rodar de novo do comeco (`if not exists`; um indice `CONCURRENTLY` que falhou fica invalido e precisa de `drop index concurrently if exists` antes), porque uma falha no meio deixa os comandos anteriores no banco e a linha fora do historico. `ALTER TYPE ... ADD VALUE` roda na transacao (Postgres 12 em diante), mas o valor novo so pode ser usado depois do `COMMIT`: o uso vai no arquivo seguinte (o migrador avisa). A guarda `tests/kit-migrador.guard.test.mjs` confere as migracoes do repositorio.
+
+**Testes.** `tests/kit-migrador.test.mjs` (o roteiro e as saidas, com `psql` e `docker` de mentira), `tests/integration/kit-migrador.test.mjs` (num Postgres de verdade; fora do CI, `MIGRAR_TESTE_PSQL="psql -h <socket> -p <porta> -U postgres"` aponta um Postgres de rascunho) e, so no CI, o passo **Migrador do kit igual à CLI** (`tests/support/kit-migrador-contra-cli.sh`): zera o banco local sem migracoes, aplica todas com o migrador, zera de novo, aplica com a CLI e compara o esquema (`pg_dump --schema-only`), o historico byte a byte e os dados que as migracoes gravam.
 
 ---
 

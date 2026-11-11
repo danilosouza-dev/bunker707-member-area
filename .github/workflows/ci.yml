@@ -57,6 +57,14 @@ jobs:
       - name: Supabase local
         run: node tests/support/db.mjs start --ci
 
+      # O migrador do kit do produto licenciado (docs/32 §11.6): zera o banco local sem migracoes, aplica todas com ele,
+      # zera de novo, aplica com a CLI e compara esquema, historico e dados; no fim recria a escola de teste. Os retratos
+      # ficam em test-results/, que sobe como artefato se algo falhar.
+      - name: Migrador do kit igual à CLI
+        env:
+          KIT_MIGRADOR_RETRATOS: test-results/kit-migrador
+        run: bash tests/support/kit-migrador-contra-cli.sh
+
       - name: Testes de integração
         run: npm run test:integration
 

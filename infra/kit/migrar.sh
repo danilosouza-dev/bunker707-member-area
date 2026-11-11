@@ -38,6 +38,8 @@ sair() {
     printf 'ERRO: %s\n' "$*" >&2
     exit "$codigo"
 }
+# quantas 3 migracao migracoes -> "3 migracoes"; com 1, o singular.
+quantas() { if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi; }
 
 listar=0
 pasta="$REPO_ROOT/supabase/migrations"
@@ -200,7 +202,7 @@ SQL
 } > "$roteiro"
 
 # 5. Roda e acompanha: o psql conta o que faz em linhas BKMIGRAR (resumo, avisos, problemas, pendentes, cada arquivo).
-log "Migracoes de $pasta (${#arquivos[@]} arquivos) para $alvo."
+log "Migracoes de $pasta ($(quantas "${#arquivos[@]}" arquivo arquivos)) para $alvo."
 inicio=$(date +%s)
 n_pacote=0; n_historico=0; n_pendentes=0; aplicadas=0; fim=0; atual=""; atual_modo=""
 declare -A modo_de=()
@@ -211,7 +213,7 @@ env "${ambiente_psql[@]}" "${psql_cmd[@]}" -X -q -v ON_ERROR_STOP=1 < "$roteiro"
         case "$tipo" in
             R)
                 n_pacote=$a; n_historico=$b; n_pendentes=$c
-                log "Pacote: $n_pacote migracoes. No historico do banco: $n_historico. Faltam: $n_pendentes."
+                log "Pacote: $(quantas "$n_pacote" migracao migracoes). No historico do banco: $n_historico. Faltam: $n_pendentes."
                 ;;
             A) warn "$b" ;;
             X) printf 'ERRO: %s\n' "$c" >&2 ;;
@@ -250,9 +252,9 @@ if [ "$rc" -eq 0 ] && [ "$fim" = 1 ]; then
     if [ "$listar" = 1 ]; then
         if [ "$n_pendentes" -eq 0 ]; then log "O banco esta em dia com o pacote: nada a aplicar."; else log "Nada foi aplicado (--listar)."; fi
     elif [ "$aplicadas" -eq 0 ]; then
-        log "Nada a aplicar: o banco ja esta em dia com o pacote ($n_pacote migracoes)."
+        log "Nada a aplicar: o banco ja esta em dia com o pacote ($(quantas "$n_pacote" migracao migracoes))."
     else
-        log "Pronto: $aplicadas migracoes aplicadas em ${segundos}s; o banco esta em dia com o pacote."
+        log "Pronto: $(quantas "$aplicadas" "migracao aplicada" "migracoes aplicadas") em ${segundos}s; o banco esta em dia com o pacote."
     fi
     exit 0
 fi
@@ -280,8 +282,8 @@ fi
 erros_do_psql
 if [ -n "$atual" ]; then
     if [ "$atual_modo" = "sem_transacao" ]; then
-        sair 3 "A migracao $atual falhou. Ela roda sem transacao: os comandos dela que vieram antes do erro ficaram no banco, e ela nao entrou no historico (na proxima vez roda de novo do comeco). $aplicadas antes dela ficaram aplicadas."
+        sair 3 "A migracao $atual falhou. Ela roda sem transacao: os comandos dela que vieram antes do erro ficaram no banco, e ela nao entrou no historico (na proxima vez roda de novo do comeco). Aplicadas antes dela nesta execucao: $aplicadas."
     fi
-    sair 3 "A migracao $atual falhou e foi desfeita inteira: nada dela ficou no banco. $aplicadas antes dela ficaram aplicadas; rode de novo depois de corrigir (o migrador continua dela)."
+    sair 3 "A migracao $atual falhou e foi desfeita inteira: nada dela ficou no banco. Aplicadas antes dela nesta execucao: $aplicadas. Depois de corrigir, rode de novo: o migrador continua dela."
 fi
-sair 3 "O migrador parou antes do fim (psql saiu com $rc); $aplicadas migracoes aplicadas."
+sair 3 "O migrador parou antes do fim (o psql saiu com $rc). Aplicadas nesta execucao: $aplicadas."
