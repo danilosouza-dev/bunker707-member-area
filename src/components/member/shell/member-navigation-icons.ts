@@ -4,11 +4,11 @@ import {
   CircleUser,
   FolderOpen,
   House,
-  KeyRound,
   LibraryBig,
   LifeBuoy,
   Radio,
   Route,
+  ShieldCheck,
   type LucideIcon
 } from "lucide-react";
 import type { MemberNavigationKey } from "@/lib/member-navigation";
@@ -20,7 +20,9 @@ export const memberNavigationIcons: Record<MemberNavigationKey, LucideIcon> = {
   favorites: Bookmark,
   home: House,
   journey: Route,
-  licenses: KeyRound,
+  // Minhas licencas (docs/32 §2.4): o escudo que a moldura ja carrega (a Area do produtor), para o item so de quem
+  // comprou o Bunker Members nao somar um icone ao JavaScript de toda pagina do aluno.
+  licenses: ShieldCheck,
   materials: FolderOpen,
   profile: CircleUser,
   purchases: LibraryBig,
