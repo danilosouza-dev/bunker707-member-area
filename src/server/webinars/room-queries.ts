@@ -569,7 +569,8 @@ export function studentRepliesByQuestion(replies: readonly QuestionReply[], user
 
 export async function listStudentQuestions(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, userId: string, order: "recent" | "votes", now = Date.now()): Promise<StudentQuestion[]> {
   const [rows, replyRows] = await Promise.all([
-    listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"] }),
+    // O filtro no banco tambem: a simulada do futuro nunca ocupa um dos 200 lugares das perguntas de agora.
+    listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"], visibleAt: new Date(now).toISOString() }),
     listQuestionReplyRows(db, { sessionId: session.id })
   ]);
   // A pergunta simulada so aparece quando a hora dela chega (D77: a da Live gravada nasce com o minuto do item).
