@@ -972,7 +972,8 @@ configurar o Painel de licencas e a conta de envio do Emissor, que chegaram ao `
 | `plan-licencas` | lista os tipos que servem (2 GB, 20 GB, 1 vCPU; x86 ou ARM) com o preco por mes em cada local que a API informa (fsn1, nbg1, hel1 e os de fora da Europa) e escolhe o mais barato com estoque; empate fica com fsn1, nbg1, hel1. Nao cria nada | qualquer | |
 | `provision-licencas` | servidor com labels `app=bunker707` e `papel=licencas`, firewall proprio (80 e 443 de qualquer lugar, 22 so durante as etapas), bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Sem estoque, so tenta os outros locais do mesmo tipo e preco | `main` | `CONFIRMADO=sim`; `LICENCAS_PRECO_MAX` para se o preco do dia passou do aprovado |
 | `dns-licencas` | `licencas` (Painel) A com proxy; `licencas-api` (API) A sem proxy; apaga AAAA dos dois | `main` | |
-| `secrets-licencas` | confere no runner a chave de emissao, o certificado, as raizes (recusa a raiz) e a chave do Resend (`re_...`) e grava os segredos em `segredos/` (1000:1000, 0400); sem a chave do Resend, mantem a do servidor ou cria o arquivo vazio | `main` | |
+| `cerimonia-licencas` | as duas raizes e a chave de emissao com o codigo de chaves do proprio Emissor, na imagem do GHCR e sem rede: as raizes so cifradas (senha derivada do `HCLOUD_TOKEN`) direto no Storage Box, a emissao em `segredos/`; o registro mostra so as raizes publicas, que vao para `infra/licencas/raizes.json` num commit (`docs/20` §8C.8) | `main` | `CONFIRMAR=cerimonia`; recusa se as chaves ja existem; `ROTACIONAR=emissao` troca so a de emissao |
+| `secrets-licencas` | a chave do Resend do envelope no `payload` (so o servidor abre; vai direto para `segredos/`), ou do segredo `LICENCAS_RESEND_CHAVE`, e a senha do banco; a chave de emissao e a da cerimonia (os segredos `LICENCAS_EMISSAO_*` de antes ainda valem, os tres juntos, conferidos no runner) | `main` | |
 | `deploy-licencas` | confere a configuracao do Painel e o DNS; puxa do GHCR a imagem e o compose do mesmo commit; `.env` com as raizes, o Painel, a conta de envio e os proxies das duas portas; migracoes; `/health`; Caddy; backup de hora em hora; na primeira vez, a conta do produtor no Painel | `main` (tambem pela trava dos `deploy-*`) | `LICENCAS_TAG` escolhe a versao; `LICENCAS_SEM_PAINEL=sim` sobe sem o Painel |
 | `backup-licencas` | um backup agora, com `restic check` | `main` | |
 | `restaurar-licencas` | troca o banco pelo de um backup (o mais novo com dados, ou `SNAPSHOT`), com um backup antes | `main` | `CONFIRMAR=restaurar` |
@@ -981,6 +982,11 @@ configurar o Painel de licencas e a conta de envio do Emissor, que chegaram ao `
 | `exec-licencas` | um comando no servidor, como `deploy` (por exemplo, as contas do Painel: `docs/20` §8C.3, passo 11) | `main` | |
 
 A trava da `main` esta no workflow (passo "Licencas so da main") e de novo nos scripts (`licencas_so_da_main`).
+
+O ensaio de comprador real (`docs/32` item 13) tem as etapas dele, todas so da `main`: `teste-plano`, `teste-criar`,
+`teste-dns`, `teste-instalar` e `teste-apagar` (`docs/20` §9E), com o pacote da escola gerado pelo workflow
+`pacote-escola.yml` (`docs/20` §9D.6). O passo a passo do primeiro ensaio, com o Emissor junto, o que o produtor clica e
+o custo de cada passo, esta no `docs/20` §9F.
 
 ### 11.2 Custo (precisa do ok do produtor antes do `provision-licencas`)
 
@@ -1099,3 +1105,26 @@ Emissor subiria sem o Painel. Agora, a cada rodada:
 
 O que o produtor precisa criar: nada no Cloudflare e nenhuma variavel (D40). A chave do Resend do Emissor e a do
 `docs/20` §8C.5. Testado so com os dubles de `tests/infra-licencas*.test.mjs`; nada rodou de verdade.
+
+### 11.6 Pronto para o primeiro ensaio de comprador (11/11/2026)
+
+Construido e testado so com os dubles (`tests/infra-licencas*.test.mjs`, `tests/infra-teste.test.mjs`,
+`tests/kit-pacote-escola.test.mjs`, `tests/kit-instalar.test.mjs`); nada rodou de verdade:
+
+- **O Painel com e-mail e senha** (`docs/32` D40): o Caddy do `licencas.bunker707.com.br` continua atras do proxy da
+  Cloudflare, com o IP real so das faixas dela, e sem a lista de IPs e sem o Access (os cabecalhos `Cf-Access-*` saem do
+  pedido). O `deploy-licencas` nao pede mais variavel nenhuma (o remetente tem padrao no dominio de envio ja verificado) e
+  cria, na primeira vez, a conta do produtor: o link de senha vai por e-mail, conferido na fila do Emissor; so com
+  `LICENCAS_MOSTRAR_LINK=sim` e o e-mail falhando ele aparece no registro.
+- **A chave do Resend:** nao ha segredo do Resend da producao no repositorio (a da producao viaja em envelope). O
+  `secrets-licencas` passa a aceitar o mesmo envelope: a IA cria a chave so de envio pelo conector e a cifra para a
+  `transfer.pub` do Emissor, que o `provision-licencas` agora imprime. O produtor nao cadastra segredo.
+- **A cerimonia das chaves** (`docs/32` D41): `cerimonia-licencas` (acima e `docs/20` §8C.8).
+- **O pacote da escola de um fundador:** `pacote-escola.yml` (`docs/20` §9D.6), num passo so: a chave publicavel e
+  escolhida no CI (publica), e os segredos da escola nascem so no servidor dela.
+- **O ensaio:** as etapas `teste-*` (`docs/20` §9E) e o passo a passo (`docs/20` §9F).
+- **Os nomes:** o kit nasce com `KIT_NOME=membros`; a nossa producao continua `bunker707` ate a migracao planejada.
+
+Depende do `bunker-licensing`: o Emissor com a entrada de e-mail e senha publicado no GHCR (a PR de la na `main`). Com a
+imagem de antes, o `deploy-licencas` de agora deixa o Emissor sem o Access, e ele nao sobe com o Painel.
+

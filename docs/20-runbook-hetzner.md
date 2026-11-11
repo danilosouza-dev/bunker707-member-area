@@ -83,6 +83,7 @@ Dockerfile                      imagem do app (3 estagios: deps, build, runner)
 src/app/api/health/route.ts     GET /api/health -> {ok, version}; HEALTHCHECK e monitor
 .github/workflows/build-image.yml  build (PR) e publicacao (main) no ghcr.io (conferencia do build; a imagem de producao sai do deploy-membros)
 .github/workflows/infra.yml     Infra (Hetzner): disparo manual de uma etapa de infra/cloud/run.sh com os tokens (18/10/2026)
+.github/workflows/pacote-escola.yml  o pacote da escola de um fundador, como artefato privado (11/11/2026; secao 9D.6)
 infra/
   compose/
     docker-compose.yml          o stack inteiro
@@ -109,14 +110,18 @@ infra/
   kit/                          (11/11/2026) o kit do produto licenciado (docs/32 §11.6 e §11.7; secao 9A)
     migrar.sh                   migracoes sem a CLI: psql no container do banco, trava, um arquivo por transacao
     migrador.sql                ferramentas de SQL da sessao (pg_temp): divisor de comandos da CLI, plano e conferencia
-    membros                     comando de operacao (nome provisorio): status, backup, restaurar, kit-de-recuperacao (secao 9B)
-    kit.conf                    os nomes tecnicos do kit num arquivo so (projeto, containers, volumes, pastas; A10)
+    membros                     o comando de operacao do Bunker Members: status, backup, restaurar, kit-de-recuperacao (9B)
+    kit.conf                    os nomes tecnicos do kit num arquivo so (padrao neutro, membros; A10)
     lib-kit.sh, kit.py          funcoes comuns: destino, trava, situacao sem segredo, folha, veredito do ensaio
     backup.sh, recuperacao.sh   backup diario e kit de recuperacao
     ensaio.sh, restaurar.sh     ensaio de restauracao isolado e restauracao num servidor novo
     status.sh                   a situacao, sem sudo e sem rede
     preparar-servidor.sh        o preparo do servidor do comprador: o bootstrap.sh no perfil kit (secao 9C)
     fixar-imagens.mjs           resolve os resumos das imagens do compose do kit a partir das tags da producao
+    instalar, instalador.py     o instalador de um comando (secao 9D)
+    montar-pacote.mjs           o Pacote da versao (do nosso lado; nao vai no pacote)
+    pacote-escola.mjs           os valores publicos do pacote de um fundador (do nosso lado; secao 9D.6)
+    conferir-imagem.mjs         as guardas da imagem do pacote de um fundador (do nosso lado; secao 9D.6)
   systemd/                      timer do backup (03:30 UTC)
   terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado; referencia)
   cloud/                        (18/10/2026) operacao pela API da Hetzner e da Cloudflare, a partir do runner
@@ -131,14 +136,18 @@ infra/
     status.sh                   servidores, Storage Box, DNS, respostas publicas; com SSH=1, o interior de cada servidor
     deploy-key.mjs              chave SSH Ed25519 derivada do HCLOUD_TOKEN (HKDF), formato OpenSSH
     cloud-init.yaml             primeiro boot: so o usuario deploy com a chave; o resto e o bootstrap.sh
-    licencas.sh                 (10/11/2026) servidor do Emissor de licencas: plan, dns, segredos, deploy, backup,
-                                restaurar, ensaio e status (secao 8C); a criacao e o provision.sh licencas
+    licencas.sh                 (10/11/2026) servidor do Emissor de licencas: plan, dns, cerimonia, segredos, deploy,
+                                backup, restaurar, ensaio e status (secao 8C); a criacao e o provision.sh licencas
     licencas-chave.mjs          confere no runner a chave de emissao, o certificado e as raizes antes do secrets-licencas
+    cerimonia-licencas.mjs      a cerimonia das chaves, dentro da imagem do Emissor, sem rede (secao 8C.8)
+    teste.sh                    (11/11/2026) o ensaio de comprador real no servidor bunker707-teste (secao 9E)
   licencas/                     (10/11/2026) o lado nosso do servidor bunker707-licencas (secao 8C)
     docker-compose.yml          so o Caddy, na rede do servidor; o Emissor sobe pelo compose do bunker-licensing
     caddy/Caddyfile             a API (sem proxy da Cloudflare) e o Painel (login do proprio Painel, D40), cada um numa porta
     .env.example                as variaveis do lado nosso no servidor (nomes, portas, backup)
-    scripts/                    _env.sh, implantar.sh, backup.sh (de hora em hora), restore.sh (e --ensaio), smoke.sh
+    scripts/                    _env.sh, implantar.sh, backup.sh (de hora em hora), restore.sh (e --ensaio), smoke.sh,
+                                conta-do-produtor.sh (a conta do produtor no Painel, no deploy)
+    raizes.json                 as raizes publicas que a cerimonia-licencas imprime (num commit; secao 8C.8)
   mautic/                       (18/10/2026) stack do Mautic (secao 8A)
     docker-compose.yml          MySQL 8.4.11, Mautic 7.2.1 (web, cron, worker) e Caddy (perfil borda)
     compose.colocado.yml        plano B: entra na rede do compose principal, sem Caddy proprio
@@ -795,21 +804,28 @@ imagem nao conhece; sem isso, o caminho e restaurar o backup de antes (8C.6).
 
 ### 8C.3 Ordem para subir (da primeira vez)
 
+Desde 11/11/2026 (`docs/32` D40 e D41) nada disto passa pelo computador do produtor: as chaves nascem numa etapa do
+workflow, o Painel entra com e-mail e senha e a chave do Resend chega cifrada para o servidor. O passo a passo do
+primeiro ensaio de comprador, com o Emissor junto, esta na secao 9F.
+
 | Passo | Quem | O que |
 |---|---|---|
-| 1 | produtor | **Cerimonia das chaves**, no computador dele, de preferencia sem internet (README do `bunker-licensing`): as duas raizes e a chave de emissao. Os arquivos das raizes e as senhas delas ficam fora de qualquer servidor, em dois lugares, e uma copia com o depositario da continuidade (`docs/32` A23). **A chave raiz nunca vai para o GitHub nem para servidor nenhum** |
-| 2 | produtor | Os segredos do GitHub (8C.5), neste repositorio: Settings > Secrets and variables > Actions. Nunca no chat. Entre eles a chave do Resend so do Emissor (`LICENCAS_RESEND_CHAVE`) e, na aba Variables, quem envia (`LICENCAS_EMISSOR_EMAIL_REMETENTE`, um endereco do dominio da chave) |
-| 3 | produtor | No `bunker-licensing`: o trabalho com o job de publicacao chega a `main` de la (a primeira imagem sai dali) e o acesso do pacote a este repositorio (8C.2) |
-| 4 | IA | `plan-licencas` (de qualquer branch): mostra os tipos, os precos por local e a escolha. Reportar o custo ao produtor |
-| 5 | produtor | O ok no chat, com o preco |
-| 6 | IA | `provision-licencas` da `main`, com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<preco aprovado>`: cria o servidor, o firewall `bunker707-licencas-fw`, o bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Se o preco do dia passou do aprovado, para sem criar nada |
-| 7 | IA | `dns-licencas` da `main`: registros A (8C.4) |
-| 8 | ninguem | (era o Cloudflare Access e a lista de IPs; desde 11/11/2026 o Painel entra com e-mail e senha, de qualquer internet: decisao do produtor, `docs/32` D40. Nada a configurar na Cloudflare) |
-| 9 | IA | `secrets-licencas` da `main` (8C.5) |
-| 10 | IA | `deploy-licencas` da `main`. Ele confere o DNS e a configuracao do Painel (todas as variaveis tem padrao; uma fora do formato para antes de tudo; 8C.5), puxa a imagem, escreve o `.env` do compose (com o Painel e a conta de envio), aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy, liga o backup de hora em hora e, na primeira vez, cria a conta do produtor no Painel (passo 11) |
-| 11 | automatico | Dentro do `deploy-licencas` (`infra/licencas/scripts/conta-do-produtor.sh`): a conta do produtor (`LICENCAS_EMISSOR_EMAIL_PRODUTOR`, padrao `PRODUCER_EMAIL`), so se ainda nao existe: `bin/painel.ts adicionar <e-mail> --funcao produtor`. O Emissor manda ao e-mail do produtor o link de uso unico para definir a senha (vale 60 minutos), e o script confere na fila do Emissor que o e-mail saiu. O link nunca aparece no registro quando o e-mail sai. Se o e-mail nao sai, a etapa avisa e nao mostra nada; so com `LICENCAS_MOSTRAR_LINK=sim` nas opcoes, e so nesse caso, um link novo aparece no registro, uma vez (`redefinir-senha --mostrar-link`). `LICENCAS_NOVO_LINK=sim` manda outro link, pelo e-mail, a conta que ja existe. O e-mail vai ao servidor pelo stdin e e trocado por `<e-mail do produtor>` no que chega ao log. As outras contas: `exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail> --funcao atendente --nome "<nome>" --motivo "..."`; `listar`, `redefinir-senha`, `desbloquear`, `funcao`, `desligar` e `religar` estao no `docs/painel.md` do `bunker-licensing` |
-| 12 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
-| 13 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
+| 1 | produtor | No `bunker-licensing`: o trabalho chega a `main` de la (o job de publicacao gera a primeira imagem) e, uma vez, o acesso do pacote a este repositorio (8C.2: pacote `bunker-licensing` > Package settings > Manage Actions access > Add repository > `bunker707-member-area`, Read) |
+| 2 | IA | `plan-licencas` (de qualquer branch): mostra os tipos, os precos por local e a escolha. Reportar o custo ao produtor |
+| 3 | produtor | O ok no chat, com o preco |
+| 4 | IA | `provision-licencas` da `main`, com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<preco aprovado>`: cria o servidor, o firewall `bunker707-licencas-fw`, o bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase), a chave do Storage Box e imprime a `transfer.pub` (publica) do servidor. Se o preco do dia passou do aprovado, para sem criar nada |
+| 5 | IA | `dns-licencas` da `main`: registros A (8C.4) |
+| 6 | IA | `cerimonia-licencas` da `main`, com `CONFIRMAR=cerimonia` (8C.8): as duas raizes so cifradas no Storage Box, a chave de emissao direto em `segredos/` do servidor; o registro mostra so as raizes publicas, que a IA grava em `infra/licencas/raizes.json` num commit que chega a `main` antes do passo 8 |
+| 7 | IA | A chave do Resend so de envio do Emissor, criada pelo conector do Resend (restrita a `mail.bunker707.com.br`), num envelope para a `transfer.pub` do passo 4 (`infra/cloud/envelope.sh encrypt`, a linha `RESEND_API_KEY=re_...`), e `secrets-licencas` da `main` com o envelope no `payload` (8C.5). O valor nunca passa pelo chat nem vira segredo do GitHub |
+| 8 | IA | `deploy-licencas` da `main`. Ele confere o DNS e a configuracao do Painel (todas as variaveis tem padrao; uma fora do formato para antes de tudo; 8C.5), puxa a imagem, escreve o `.env` do compose (com as raizes de `infra/licencas/raizes.json`, o Painel e a conta de envio), aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy, liga o backup de hora em hora e, na primeira vez, cria a conta do produtor no Painel (passo 9) |
+| 9 | automatico | Dentro do `deploy-licencas` (`infra/licencas/scripts/conta-do-produtor.sh`): a conta do produtor (`LICENCAS_EMISSOR_EMAIL_PRODUTOR`, padrao `PRODUCER_EMAIL`), so se ainda nao existe: `bin/painel.ts adicionar <e-mail> --funcao produtor`. O Emissor manda ao e-mail do produtor o link de uso unico para definir a senha (vale 60 minutos), e o script confere na fila do Emissor que o e-mail saiu. O link nunca aparece no registro quando o e-mail sai. Se o e-mail nao sai, a etapa avisa e nao mostra nada; so com `LICENCAS_MOSTRAR_LINK=sim` nas opcoes, e so nesse caso, um link novo aparece no registro, uma vez (`redefinir-senha --mostrar-link`). `LICENCAS_NOVO_LINK=sim` manda outro link, pelo e-mail, a conta que ja existe. O e-mail vai ao servidor pelo stdin e e trocado por `<e-mail do produtor>` no que chega ao log. As outras contas: `exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail> --funcao atendente --nome "<nome>" --motivo "..."`; `listar`, `redefinir-senha`, `desbloquear`, `funcao`, `desligar` e `religar` estao no `docs/painel.md` do `bunker-licensing` |
+| 10 | produtor | Abre o e-mail "definir a senha" do Painel, escolhe a senha e entra em `https://licencas.bunker707.com.br` (o segundo fator por aplicativo fica em Minha conta, recomendado) |
+| 11 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
+| 12 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
+
+Os segredos `LICENCAS_RAIZES`, `LICENCAS_EMISSAO_CHAVE`, `LICENCAS_EMISSAO_SENHA`, `LICENCAS_EMISSAO_CERTIFICADO` e
+`LICENCAS_RESEND_CHAVE` ainda valem se existirem (a cerimonia feita fora, como antes), mas nenhum e preciso: o produtor
+nao cadastra segredo nem variavel para o Emissor.
 
 Toda etapa e idempotente: rodar de novo completa o que faltou. Um `deploy-licencas` repetido e uma atualizacao.
 
@@ -849,7 +865,19 @@ da zona (docs/21 §11.4).
 
 ### 8C.5 Segredos (etapa `secrets-licencas`) e a configuracao do Painel
 
-Segredos do repositorio no GitHub, cada um entregue so a etapa que o usa:
+**Desde a cerimonia automatica (8C.8), nenhum segredo do GitHub e preciso para o Emissor.** A chave de emissao, a senha
+dela e o certificado nascem direto em `segredos/` do servidor; as raizes publicas ficam em `infra/licencas/raizes.json`
+(que vale por cima do segredo `LICENCAS_RAIZES`, com um aviso para apaga-lo se forem diferentes); a senha do banco nasce
+no servidor; e a chave do Resend chega no **envelope** do `secrets-licencas`, como a da producao chega no
+`secrets-membros` (secao 4A.6): a IA cria uma chave so de envio pelo conector do Resend, restrita a
+`mail.bunker707.com.br`, monta o envelope com a linha `RESEND_API_KEY=re_...` para a `transfer.pub` do servidor do
+Emissor (impressa pelo `provision-licencas` e pelo `status-licencas` com `SSH=1`) e roda o `secrets-licencas` com o
+envelope no `payload`. Nao existe segredo do Resend da producao no repositorio para reaproveitar: a chave da producao
+tambem so viaja em envelope, para o `.env` do servidor dela. So o servidor abre o envelope; a chave vai direto do
+envelope para `segredos/resend-chave` (1000:1000, 0400), sem passar pelo disco, pelo runner nem pelo log. A ordem: o
+envelope; senao o segredo `LICENCAS_RESEND_CHAVE`; senao a que ja esta no servidor.
+
+Os segredos de antes ainda valem, cada um entregue so a etapa que o usa (a chave de emissao, os tres juntos):
 
 | Segredo | O que e | Vai para |
 |---|---|---|
@@ -868,8 +896,10 @@ do SSH (nunca em linha de comando) e vira um arquivo `1000:1000` (o usuario `nod
 arquivo novo. A senha do banco so le na primeira subida do Postgres: trocar a de um banco que ja existe exige
 `TROCAR_SENHA_BANCO=sim`, que muda a senha dentro do banco antes do arquivo. A raiz nunca e segredo daqui.
 
-Trocar a chave de emissao (a cada ~400 dias, ou se vazar): nova `bin/chaves.ts emissao` com outro `--kid`, trocar os
-tres segredos `LICENCAS_EMISSAO_*` no GitHub e rodar `secrets-licencas`. As licencas ja emitidas continuam valendo. Na
+Trocar a chave de emissao (a cada ~400 dias, ou se vazar): `cerimonia-licencas` com `CONFIRMAR=cerimonia
+ROTACIONAR=emissao` (8C.8), que assina a chave nova com a raiz guardada no Storage Box. (Com a cerimonia feita fora,
+como antes: nova `bin/chaves.ts emissao` com outro `--kid`, trocar os tres segredos `LICENCAS_EMISSAO_*` no GitHub e
+rodar `secrets-licencas`.) As licencas ja emitidas continuam valendo. Na
 troca no prazo, ponha o `kid` anterior em `LICENCAS_EMISSOR_KIDS_ANTERIORES` por 30 dias e rode `deploy-licencas`
 (a readocao depois de restaurar o banco ainda aceita as licencas dele); depois, tire. A chave que vazou nunca entra ali.
 
@@ -938,10 +968,76 @@ valor como o Emissor confere ao subir e escreve no `.env` do compose do Emissor 
 | `/health` com `"ok":false` | `exec-licencas` com `COMANDO='cd /opt/bunker707/emissor && docker compose logs --tail 100 emissor'`: configuracao, chave, certificado vencido ou banco. O certificado vencido pede a troca da chave de emissao (8C.5) |
 | Instalacoes recebendo erro de rede, com o servidor no ar | `status-licencas` (as respostas publicas); o Caddy (`docker logs bunker707-licencas-caddy`); o certificado do Let's Encrypt; um AAAA que voltou no nome da API |
 | O produtor nao recebeu o link para definir a senha | o registro do `deploy-licencas` (a linha da conta do produtor; com o envio falhando, o link de uso unico aparece ali, so nesse caso); a chave do Resend e o remetente (8C.5). A conta ja existe: o `docs/painel.md` do `bunker-licensing` diz como gerar um link novo |
+| `cerimonia-licencas` para em "As chaves ja existem" | e o esperado numa segunda rodada: a cerimonia nunca roda por cima. Trocar a chave de emissao: `ROTACIONAR=emissao`. Se a primeira rodada parou no meio (as raizes no box, a emissao fora do servidor), o mesmo `ROTACIONAR=emissao` completa |
+| `cerimonia-licencas` diz que a raiz "nao abre com a senha derivada do HCLOUD_TOKEN" | o token mudou depois da cerimonia (8C.8, "Trocar o HCLOUD_TOKEN") |
 | O Painel recusa o login | conta desligada ou bloqueada por tentativas (`exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts listar`). O motivo exato: `exec-licencas` com `cd emissor && docker compose logs --tail 200 emissor`, nas linhas `painel`, campo `recusa` |
 | O Painel mostra o aviso vermelho de e-mail | a chave do Resend (8C.5) ou o dominio do remetente nao verificado no Resend; o motivo fica no registro do Emissor, nas linhas "e-mail" |
 | Servidor perdido | 8C.6, "Servidor perdido" |
 | A chave de emissao vazou | trocar a chave (8C.5), olhar a auditoria no Painel e levar ao produtor: o certificado da chave vazada continua valendo no produto ate vencer, e o que fazer com as licencas assinadas por ela e decisao do desenho (`docs/32` §10) |
+
+### 8C.8 A cerimonia das chaves (etapa `cerimonia-licencas`)
+
+Decidido em 11/11/2026 (`docs/32` D41): as chaves que assinam as licencas nascem numa etapa do workflow, sem passo no
+computador do produtor. `cerimonia-licencas`, so da `main`, com `CONFIRMAR=cerimonia` nas opcoes:
+
+1. **Recusa rodar por cima:** se `infra/licencas/raizes.json` ja traz raizes, se o Storage Box ja guarda raizes cifradas
+   em `bunker707/licencas-raizes` ou se o servidor do Emissor ja tem `segredos/emissao.pem`, para e diz qual, sem criar
+   nada. So `ROTACIONAR=emissao` roda de novo (abaixo).
+2. **As senhas:** a da chave de emissao, sorteada no runner (64 hexadecimais); a das duas raizes, derivada do
+   `HCLOUD_TOKEN` como a chave de recuperacao do backup (`infra/cloud/deploy-key.mjs --secret --info
+   bunker707-licencas-raizes-v1`). Nenhuma vai para o log, para segredo do GitHub ou para artefato.
+3. **As chaves, com o codigo do proprio Emissor:** a imagem do Emissor do GHCR (`LICENCAS_IMAGEM:LICENCAS_TAG`) nao leva
+   o `bin/chaves.ts` (o Dockerfile do `bunker-licensing` o deixa de fora de proposito), mas leva o `src/keys.ts` e o
+   `src/signing.ts` que ele usa. `infra/cloud/cerimonia-licencas.mjs` faz o que o `bin/chaves.ts raiz` e o `emissao` fazem,
+   com aquele codigo, num container sem rede, so leitura, sem privilegio e como o usuario `node`; as senhas entram por
+   `-e NOME` (nunca o valor na linha de comando), e a saida e um JSON com as chaves privadas so cifradas, gravado num
+   arquivo 0600 do runner. Saem a raiz `raiz-AAAA-MM`, a raiz de reserva `raiz-reserva-AAAA-MM` e a chave de emissao
+   `emissao-AAAA-MM`, com o certificado de 400 dias (`LICENCAS_DIAS`) assinado pela raiz.
+4. **A conferencia, fora da imagem:** com o Node do runner, as raizes abrem com a senha derivada e batem com as publicas;
+   a emissao passa pela mesma conferencia do `secrets-licencas` (`licencas-chave.mjs`: cifrada, abre com a senha, nao e
+   uma raiz, o certificado e dela, serve para licenca, esta no prazo e foi assinado por uma das raizes).
+5. **As raizes, so cifradas, no Storage Box:** direto do runner para `bunker707/licencas-raizes/` (o box aceita SFTP de
+   fora, porta 23, com a chave de backup derivada do token), com o `raizes.json` publico e um `LEIA-ME.txt`, e lidas de
+   volta para conferir byte a byte. Nunca passam pelo disco do servidor do Emissor. A pasta e criada sem sobrescrever:
+   se ja existisse, o SFTP pararia.
+6. **A emissao no servidor do Emissor:** a chave cifrada, a senha e o certificado em `segredos/` (1000:1000, 0400), pela
+   entrada do SSH, como o `secrets-licencas` faz; os servicos no ar sao recriados para ler os arquivos novos.
+7. **O registro mostra so as raizes publicas**, que vao para `infra/licencas/raizes.json` num commit. Dali saem o
+   `EMISSOR_RAIZES` do `deploy-licencas` e o `BUNKER_LICENSING_ROOTS` do produto vendido (secao 9D.6).
+
+No fim, a pasta das chaves no runner e apagada (com `shred`), e o runner sai do GHCR.
+
+| Onde fica | O que |
+|---|---|
+| Storage Box `bunker707-backups`, pasta `bunker707/licencas-raizes/` | as duas raizes, so cifradas (PKCS#8 AES-256, senha derivada do `HCLOUD_TOKEN`), o `raizes.json` publico e o `LEIA-ME.txt`. Os snapshots diarios do box guardam copias |
+| Servidor `bunker707-licencas`, `segredos/` | a chave de emissao cifrada, a senha dela e o certificado |
+| Repositorio, `infra/licencas/raizes.json` | as raizes publicas |
+| Em nenhum outro lugar | nem no log, nem em artefato, nem em segredo do GitHub, nem no chat |
+
+**Trocar a chave de emissao** (a cada ~400 dias, ou se vazar): `cerimonia-licencas` com `CONFIRMAR=cerimonia
+ROTACIONAR=emissao`. Baixa a raiz principal cifrada do box, assina uma chave de emissao nova (`emissao-AAAA-MM-DD`, ou
+`LICENCAS_KID`) e a instala no servidor; as raizes nao mudam. O registro diz o `kid` anterior: por 30 dias, rode o
+`deploy-licencas` com `LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid anterior>` (a readocao ainda aceita as licencas dela); a
+chave que vazou nunca entra ali. Trocar as raizes e uma versao nova do produto para todos os compradores e fica fora desta
+etapa (`docs/32` §10).
+
+**Trocar o HCLOUD_TOKEN:** a senha das raizes e derivada dele. Antes de apagar o token antigo, as raizes precisam ser
+cifradas de novo com a senha do token novo (baixar do box, abrir com a senha derivada do antigo, cifrar com a do novo e
+subir de volta). Ainda nao ha etapa para isso (`docs/32` §16, em aberto): sem ela, quem troca o token perde a raiz, e a
+saida e a raiz de reserva so se ela tambem foi recifrada. A chave de deploy e a de recuperacao do backup tem o mesmo
+cuidado (secao 10.2).
+
+**O que segura e o que nao segura** (`docs/32` D41): a raiz deixa de estar fora de qualquer servidor. Quem tiver o
+`HCLOUD_TOKEN` e o acesso ao Storage Box alcanca as raizes cifradas e a senha delas. Da para voltar a cerimonia no
+computador do produtor antes da venda aberta, trocando as raizes numa versao.
+
+**Testes:** `tests/infra-licencas-cerimonia.test.mjs` roda a etapa de verdade contra a Hetzner, o servidor, o docker do
+runner e o Storage Box de mentira (com um duble do codigo das chaves do Emissor, `tests/fixtures/emissor-chaves`): nada
+privado no registro nem em linha de comando, as permissoes (1000:1000, 0400), a recusa da segunda rodada, as raizes so
+cifradas no box (e abrindo so com a senha derivada), a troca da chave de emissao com as raizes intactas, o token trocado,
+o box fora do ar e a imagem que nao vem. Rodou tambem, fora do CI, o `cerimonia-licencas.mjs` contra o codigo de verdade
+do `bunker-licensing` (`src/keys.ts` e `src/signing.ts`, commit 1131d72): o `loadSignerFromFiles` do Emissor carregou a
+chave e o certificado, com as raizes. Nao rodou: a imagem do GHCR, o Storage Box e o servidor de verdade.
 
 ## 9. Deploy de nova versao do app
 
@@ -1029,7 +1125,7 @@ sudo membros restaurar [--snapshot ID] [--chave-arquivo ARQ] [--destino REPO]   
 membros status [--json]                     # sem sudo, sem rede e sem abrir o backup
 ```
 
-**Os nomes num arquivo so (A10).** O projeto do compose, os containers e volumes da escola, as pastas (`/var/lib/<nome>` para a situacao, `/var/backups/<nome>` para a exportacao e o ensaio), a trava, o servico do systemd, o host e a marca dos backups, o prefixo e o rotulo do ensaio, o teto de memoria dele e os scripts reaproveitados estao em `infra/kit/kit.conf`, com os nomes de hoje como padrao (`KIT_NOME=bunker707`). Nenhum outro arquivo do kit escreve o nome (a guarda esta em `tests/kit-membros.test.mjs`). Trocar o nome e trocar `KIT_NOME` ali e, junto, o `name:` e os `container_name:` do compose que for no pacote.
+**Os nomes num arquivo so (A10).** O projeto do compose, os containers e volumes da escola, as pastas (`/var/lib/<nome>` para a situacao, `/var/backups/<nome>` para a exportacao e o ensaio), a trava, o servico do systemd, o host e a marca dos backups, o prefixo e o rotulo do ensaio, o teto de memoria dele e os scripts reaproveitados estao em `infra/kit/kit.conf`, com o nome neutro como padrao (`KIT_NOME=membros`, decisao do produtor em 11/11/2026, `docs/32` item 17: os containers `membros-db`, `membros-app` e os outros, as pastas `/opt/membros`, `/var/lib/membros` e `/var/backups/membros`, o servico `membros-backup`); a nossa producao continua com os nomes dela (`bunker707`) ate a migracao planejada. Nenhum outro arquivo do kit escreve o nome (a guarda esta em `tests/kit-membros.test.mjs`). Trocar o nome e trocar `KIT_NOME` ali e, junto, o `name:` e os `container_name:` do compose que for no pacote.
 
 **O destino**, no arquivo de segredos da instalacao (`infra/compose/.env`, so o administrador le):
 
@@ -1173,8 +1269,9 @@ O instalador roda de dentro do pacote aberto na pasta da instalacao (`KIT_PASTA_
 
 ```txt
 /opt/<nome>/
-  MANIFESTO.json              formato 1: produto, versao, criado_em, commit, instalacao, imagens, imagens_de_terceiros,
-                              chaves_seguintes e, para cada arquivo, caminho, bytes, sha256 e modo
+  MANIFESTO.json              formato 1: produto, versao, criado_em, commit, instalacao, instalacao_api e
+                              chave_publicavel (os tres so no pacote de um fundador, 9D.6), imagens,
+                              imagens_de_terceiros, chaves_seguintes e, para cada arquivo, caminho, bytes, sha256 e modo
   MANIFESTO.json.assinatura   (com a chave) base64 da assinatura Ed25519 dos bytes do MANIFESTO.json
   imagens/app.tar             a imagem do app, de `docker save` (no lote fundador, uma por Instalacao)
   imagens/terceiros-N.tar     (opcional) imagens de terceiros, para servidor sem acesso ao Docker Hub
@@ -1297,6 +1394,94 @@ Toda falha sai com a frase do que houve, o que fazer e de quem e: do produto (Co
 ### 9D.5 Testes
 
 `tests/kit-instalar.test.mjs` roda o instalador de verdade, de dentro de um pacote montado pelo `montar-pacote.mjs` de verdade, num servidor de mentira (`tests/fixtures/instalador-de-mentira.mjs`: docker, curl, getent, ip, ss, nproc, uname, systemd-detect-virt, df, systemctl e sleep de mentira, com o app, o Auth, o Resend, o Emissor e o Caddy por tras deles; o preparo, o migrador e o smoke de mentira, que tem os testes deles; o `membros licenca` de verdade), com o openssl e o gerador de segredos de verdade e uma pessoa num pseudo-terminal: cada modo, cada problema do `--conferir` com o seu codigo, retomar depois de uma falha em cada passo sem refazer o que ja foi feito, rodar de novo sem mudar nada, os segredos que nunca aparecem na tela nem em linha de comando e o arquivo de segredos 0600, o pacote alterado, faltando, sem assinatura, com assinatura de outra chave e a chave gravada no servidor valendo, a imagem pelo id, o modo de restauracao sem a Chave, as respostas conferidas e o guiado que pergunta so o que falta. `tests/licenca-instalador.test.mjs` testa a rota interna contra o Emissor falso do protocolo e `tests/kit-no-app.test.mjs` roda o `no-app.mjs` de verdade contra um app e um Auth de mentira. Nao rodou: nada disso num servidor de verdade (o Docker, o Resend, o Let's Encrypt, a API administrativa do Auth e a imagem com `enforce`), a porta 2465 e o TLS direto do Auth na 465, e os tempos de instalacao.
+
+### 9D.6 O pacote da escola do lote fundador (workflow `pacote-escola.yml`, 11/11/2026)
+
+No lote fundador a imagem e por Instalacao (`docs/32` §11.5): o Next grava no codigo, na hora do build, o endereco da
+escola (`NEXT_PUBLIC_SITE_URL`), o da API (`NEXT_PUBLIC_SUPABASE_URL`, `https://api.<endereco>`) e a chave publicavel do
+Supabase (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). O workflow **Pacote da escola (lote fundador)**, so da `main`, por
+`workflow_dispatch` com o `endereco`, a `versao` e, se for outro, o `endereco_api`:
+
+1. `infra/kit/pacote-escola.mjs`: confere as entradas e monta os valores publicos: os dois enderecos, a chave publicavel,
+   as raizes de `infra/licencas/raizes.json` (sem o arquivo, para e manda rodar a cerimonia, 8C.8), o Emissor
+   (`https://licencas-api.bunker707.com.br`), a tag da imagem (`membros/app:<versao>`) e o nome do artefato
+   (`pacote-<endereco>-<versao>`);
+2. `docker build` com `BUNKER_LICENSING_MODE=enforce`, as raizes, o Emissor, os tres valores da escola e a versao, e
+   **sem** `NEXT_PUBLIC_POSTHOG_*` nem `NEXT_PUBLIC_SENTRY_DSN` (a imagem do comprador nao leva as nossas chaves, D19). O
+   `Dockerfile` so grava o endereco da escola quando o build o recebe: sem ele, a producao continua lendo ao rodar;
+3. **as guardas** (`infra/kit/conferir-imagem.mjs`, sobre o `/app` tirado da imagem): para se sobrou leitura de
+   `process.env.BUNKER_LICENSING_*` no servidor, se falta uma raiz, o Emissor ou o endereco da escola no servidor, ou a
+   API e a chave publicavel no navegador; se aparece uma chave nossa de analise de uso ou de erros (as variaveis
+   `NEXT_PUBLIC_POSTHOG_KEY` e `NEXT_PUBLIC_SENTRY_DSN` do repositorio, so para a comparacao, uma chave `phc_...` ou um
+   DSN do Sentry); se a imagem leva `src/` ou mapa de fonte com o codigo original. E avisa, sem parar, o que ainda cita
+   `bunker707.com.br` fora o Emissor e a propria escola (a marca branca, `docs/32` §6: por exemplo o dominio padrao do
+   Jitsi na permissao da sala, `next.config.ts`, e os textos e os modelos de e-mail com a nossa marca);
+4. `docker save` e `montar-pacote.mjs` com `--instalacao`, `--instalacao-api` e `--chave-publicavel` (o manifesto leva os
+   tres) e o `.tgz` com o sha256 ao lado;
+5. o artefato **privado** do repositorio, por 7 dias (`retention-days: 7`), que a etapa `teste-instalar` (9E) ou a equipe
+   leva ao servidor.
+
+**Por que um passo so, e nao dois.** A ordem pedida era primeiro o servidor (`instalar --preparar`: gerar os segredos e
+mostrar so os valores publicos) e depois o pacote. Lendo o gateway do kit (`volumes/api/envoy/lds.template.yaml`), a chave
+publicavel nao sai do segredo JWT da escola: e um texto opaco que o Envoy so compara com o `SUPABASE_PUBLISHABLE_KEY` do
+`.env` antes de trocar pela chave anon, assinada no servidor. Entao ela pode ser escolhida no CI: `pacote-escola.mjs` a
+deriva do endereco (a mesma em toda versao da escola; publica, como em qualquer pagina da escola), o manifesto a leva, e
+o instalador a passa ao gerador (`generate-secrets.mjs --publishable-key`) ou a grava no arquivo de segredos que ja
+existe. O segredo JWT, as chaves de servico e todas as senhas continuam nascendo so no servidor da escola e nunca passam
+pelo CI, pelo log ou pelo artefato. O outro caminho simples (o segredo JWT gerado no CI e levado cifrado) foi descartado:
+poria a chave de servico de cada fundador sob a nossa chave da Hetzner.
+
+O instalador recusa (codigo 35) o pacote gerado para outro endereco ou outra API. Testes: `tests/kit-pacote-escola.test.mjs`
+(os valores, a chave com o resumo certo, o gerador, o manifesto, as guardas e o workflow) e o caso do fundador em
+`tests/kit-instalar.test.mjs`. Nao rodou: o build de verdade com `enforce` e as guardas sobre uma imagem de verdade.
+
+## 9E. O ensaio de comprador real: o servidor `bunker707-teste` (11/11/2026)
+
+Decisao do produtor (`docs/32` item 13): o produto e ensaiado como cliente novo num servidor novo e vazio da Hetzner,
+separado da nossa producao, e o servidor e apagado no fim. A escola do ensaio fica na nossa zona,
+`escola-teste.bunker707.com.br` e `api.escola-teste.bunker707.com.br` (`TESTE_DOMAIN` e `TESTE_API_DOMAIN` em
+`infra/cloud/lib.sh`), sem o proxy da Cloudflare. Etapas do workflow Infra (`infra/cloud/teste.sh`), **todas so da main**:
+
+| Etapa | O que faz | Trava |
+|---|---|---|
+| `teste-plano` | o tipo e o local mais baratos que servem ao kit (x86, 2 vCPU, 4 GB, 40 GB; o mesmo plano do `plan-licencas`, em `lib.sh`), com o preco por mes e por hora. Nao cria nada | |
+| `teste-criar` | o servidor `bunker707-teste`: Ubuntu 24.04 vazio, sem cloud-init nosso, com a chave de deploy no root (como o comprador entra com a dele), a marca `papel=teste` e o firewall `bunker707-teste-fw` (80 e 443 de qualquer lugar, a 22 so durante as etapas). Sem estoque, so outro local do mesmo tipo e preco | `CONFIRMADO=sim`; `TESTE_PRECO_MAX` para se o preco do dia passou do aprovado |
+| `teste-dns` | os dois nomes so com registro A para o servidor, sem proxy; AAAA sai | |
+| `teste-instalar` | baixa o pacote mais novo da escola entre os artefatos (o workflow 9D.6; `PACOTE_VERSAO` escolhe), confere o sha256, abre em `/opt/membros` e roda o instalador como root com um arquivo de respostas (0600): a escola, o dono e os e-mails (o `PRODUCER_EMAIL`, ou `TESTE_EMAIL_DONO`), o remetente `escola-teste@mail.bunker707.com.br` (o dominio de envio ja verificado), o backup so no servidor (o aceite escrito: o servidor e apagado no fim). A chave do Resend: o segredo `LICENCAS_RESEND_CHAVE`, se existir, ou a do Emissor, de um servidor para o outro pela entrada do SSH. A Chave de ativacao vem no `payload` do disparo: o primeiro passo do workflow a mascara, lida do arquivo do evento, e ela vai ao servidor so pela entrada do SSH. O e-mail do dono sai do que vai ao log. As respostas e a Chave saem do servidor no fim. Sem a Chave, o instalador para no ultimo passo (52), com a escola no ar | |
+| `teste-apagar` | apaga o servidor (so com a marca `papel=teste`), o firewall e os dois registros | `CONFIRMAR=apagar` |
+
+Sem terminal, o instalador nao mostra o link do dono: o dono entra pela tela de entrar, em **Esqueci a senha**, com o
+e-mail dele. Testes: `tests/infra-teste.test.mjs` (a Hetzner, a Cloudflare, o GitHub e os servidores de mentira). Nao
+rodou: nada de verdade.
+
+## 9F. Primeiro ensaio de comprador: o passo a passo
+
+Uma lista so, na ordem. "IA" e a sessao do Claude, pelo workflow Infra (Hetzner) e pelos conectores; "produtor" e o que
+so ele faz, com os cliques. Os precos sao sem IVA e a conferir no dia (o plano de cada etapa mostra o do dia).
+
+| # | Quem | O que | Custo |
+|---|---|---|---|
+| 1 | produtor | No `bunker-licensing`: GitHub > repositorio `bunker-licensing` > **Pull requests** > a PR do Painel com e-mail e senha > **Merge pull request** > **Confirm merge**. O CI de la publica a imagem do Emissor | nada |
+| 2 | produtor | Uma vez: GitHub > seu perfil > **Packages** > `bunker-licensing` > **Package settings** > **Manage Actions access** > **Add repository** > `bunker707-member-area` > papel **Read**. Sem isso o runner nao puxa a imagem (a cerimonia e o deploy param com essa dica) | nada |
+| 3 | produtor | Este trabalho na `main` deste repositorio, pelo fluxo de sempre (a PR para a `dev` e depois a `dev` para a `main`, `CONTRIBUTING.md`): **Merge pull request** > **Confirm merge** em cada uma | nada |
+| 4 | IA | `plan-licencas`; o preco no chat | nada |
+| 5 | produtor | O ok no chat, com o preco do servidor do Emissor | |
+| 6 | IA | `provision-licencas` com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<o aprovado>`; `dns-licencas` | o mais barato do dia (referencia: um CX23 a EUR 6,49/mes, ou um ARM mais barato) mais o IPv4 (uns EUR 0,50/mes), ligado o tempo todo |
+| 7 | IA | `cerimonia-licencas` com `CONFIRMAR=cerimonia` (8C.8); grava as raizes publicas do registro em `infra/licencas/raizes.json` e leva o commit a `main` (o produtor faz o **Merge** da PR, como no passo 3) | nada (o Storage Box ja existe) |
+| 8 | IA | A chave do Resend so de envio pelo conector do Resend, o envelope para a `transfer.pub` do Emissor e `secrets-licencas` com o envelope no `payload` (8C.5) | nada (plano gratis do Resend) |
+| 9 | IA | `deploy-licencas`: o Emissor e o Painel no ar e a conta do produtor criada | nada |
+| 10 | produtor | No e-mail "definir a senha" do Painel: o link > a senha (duas vezes) > **Definir**; depois, em `https://licencas.bunker707.com.br`, entrar. Recomendado: **Minha conta** > ligar o segundo fator | nada |
+| 11 | IA | `ensaio-licencas` (o ensaio de restauracao do Emissor) | nada |
+| 12 | IA | `teste-plano`; o preco por hora no chat | nada |
+| 13 | produtor | O ok no chat, com o preco por hora do servidor do ensaio | |
+| 14 | IA | `teste-criar` com `CONFIRMADO=sim TESTE_PRECO_MAX=<o aprovado>`; `teste-dns` | por hora, enquanto existir: referencia CX23, uns EUR 0,009/hora mais o IPv4 (uns EUR 0,25 por dia; uns EUR 1,60 por semana) |
+| 15 | IA | O workflow **Pacote da escola (lote fundador)**, da `main`, com `endereco` = `escola-teste.bunker707.com.br` e `versao` = `1.0.0-ensaio.1` | minutos do GitHub Actions (uns 20) e o artefato (umas centenas de MB por 7 dias, na cota do plano do GitHub; a conferir) |
+| 16 | produtor | No Painel: **Licencas** > **Emitir uma Licenca** (o titular de ensaio, origem fundador ou cortesia, o motivo "Ensaio de comprador") > **Emitir**; na ficha dela, **Gerar chave de ativacao** > copiar a Chave (aparece uma vez so) | nada |
+| 17 | produtor | GitHub > `bunker707-member-area` > **Actions** > **Infra (Hetzner)** > **Run workflow** > Branch **main**, etapa **teste-instalar**, `payload` = a Chave colada > **Run workflow**. A Chave e mascarada no registro e nunca passa pelo chat. (A outra saida: a IA roda o `teste-instalar` sem a Chave, e o produtor ativa na escola, em Configuracoes > Licenca, com a mesma Chave) | o servidor do passo 14, por hora |
+| 18 | produtor | Em `https://escola-teste.bunker707.com.br`: **Entrar** > **Esqueci a senha** > o e-mail dele > o link do e-mail > a senha. Testar a escola como comprador (o admin, um aluno, a tela Licenca) | |
+| 19 | IA | Com o ok do produtor no chat: `teste-apagar` com `CONFIRMAR=apagar` | a cobranca do ensaio para aqui |
+
+O que fica cobrando depois: so o servidor do Emissor (passo 6). Nada do ensaio fica no ar.
 
 ---
 
