@@ -39,7 +39,7 @@
     "@base-ui/react": "^1.9.0",
     "@noble/ed25519": "3.2.0",
     "@noble/hashes": "2.4.0",
-    "@sentry/nextjs": "^11.9.0",
+    "@sentry/nextjs": "^11.11.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
     "@vercel/speed-insights": "^2.0.0",
