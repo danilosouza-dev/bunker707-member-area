@@ -42,6 +42,14 @@ sair() {
 }
 
 kit_py() { python3 -I "$KIT_DIR/kit.py" "$@"; }
+# As ferramentas do instalador (infra/kit/instalador.py): respostas, pacote, conferencia, codigos de saida.
+inst_py() { python3 -I "$KIT_DIR/instalador.py" "$@"; }
+
+# no_app ACAO: roda infra/kit/no-app.mjs DENTRO do container do app (JSON na entrada e na saida). E por ali que o kit
+# fala com o app e com o Auth sem segredo nenhum na linha de comando deste servidor: o token do tick e a chave secreta
+# do Supabase ja estao no ambiente do container; a Chave de ativacao e o e-mail vao pela entrada.
+no_app() { compose exec -T app node --input-type=module -e "$(cat "$KIT_DIR/no-app.mjs")" "$1"; }
+app_no_ar() { [ -n "$(compose ps -q --status running app 2>/dev/null | head -n1)" ]; }
 
 agora_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 

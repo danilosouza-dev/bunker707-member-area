@@ -16,12 +16,15 @@ function usage(message) {
   console.error(`Uso:
   sh infra/compose/generate-secrets.sh --local [--force]
   sh infra/compose/generate-secrets.sh --domain <app> --api-domain <api> --studio-domain <studio> \\
-      --email <acme> [--studio-ips "<cidr> <cidr>"] [--force]`);
+      --email <acme> [--studio-ips "<cidr> <cidr>"] [--force]
+  node generate-secrets.mjs --kit --domain <escola> --api-domain <api> --email <dono>   (instalador do kit)`);
   process.exit(message ? 2 : 0);
 }
 
 const args = process.argv.slice(2);
-const options = { force: false, local: false, studioIps: "" };
+// --kit: o servidor de um comprador (infra/kit/instalar, docs/20 §9D). Sem Studio (o compose do kit nao tem), e o
+// instalador grava o resto (e-mail, backup, imagem) por cima, entao a saida nao da as dicas da nossa producao.
+const options = { force: false, kit: false, local: false, studioIps: "" };
 
 for (let index = 0; index < args.length; index += 1) {
   const arg = args[index];
@@ -33,6 +36,7 @@ for (let index = 0; index < args.length; index += 1) {
 
   switch (arg) {
     case "--local": options.local = true; break;
+    case "--kit": options.kit = true; break;
     case "--force": options.force = true; break;
     case "--domain": options.domain = next(); break;
     case "--api-domain": options.apiDomain = next(); break;
@@ -46,8 +50,13 @@ for (let index = 0; index < args.length; index += 1) {
 
 const hostPattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 
+if (options.kit && options.local) usage("--kit e --local nao andam juntos.");
+if (options.kit && options.studioDomain) usage("o kit nao tem Studio: --studio-domain nao vale com --kit.");
+
 if (!options.local) {
-  for (const [name, value] of [["--domain", options.domain], ["--api-domain", options.apiDomain], ["--studio-domain", options.studioDomain]]) {
+  const required = [["--domain", options.domain], ["--api-domain", options.apiDomain]];
+  if (!options.kit) required.push(["--studio-domain", options.studioDomain]);
+  for (const [name, value] of required) {
     if (!value) usage(`em producao ${name} e obrigatorio (ou use --local).`);
     if (!hostPattern.test(value)) usage(`${name} deve ser um hostname, sem https:// nem barra: ${value}`);
   }
@@ -166,9 +175,9 @@ const addresses = options.local
       ADDITIONAL_REDIRECT_URLS: `https://${options.domain}/auth/callback`,
       APP_SITE_ADDRESS: options.domain,
       SUPABASE_SITE_ADDRESS: options.apiDomain,
-      STUDIO_SITE_ADDRESS: options.studioDomain,
+      STUDIO_SITE_ADDRESS: options.kit ? "" : options.studioDomain,
       // Sem IP informado ninguem abre o Studio (403): melhor fechado do que aberto por engano.
-      STUDIO_ALLOWED_IPS: options.studioIps || "127.0.0.1/32",
+      STUDIO_ALLOWED_IPS: options.kit ? "127.0.0.1/32" : options.studioIps || "127.0.0.1/32",
       ACME_EMAIL: options.email
     };
 
@@ -200,10 +209,12 @@ for (const value of Object.values(values)) {
 writeFileSync(envPath, lines.join("\n"), { mode: 0o600 });
 chmodSync(envPath, 0o600);
 
-console.log(`Gravado ${envPath} (chmod 600), modo ${options.local ? "ensaio local" : "producao"}.`);
+console.log(`Gravado ${envPath} (chmod 600), modo ${options.local ? "ensaio local" : options.kit ? "kit" : "producao"}.`);
 console.log(`Gerados: ${Object.keys(secrets).length} segredos e ${Object.keys(addresses).length} enderecos.`);
 
-if (options.local) {
+if (options.kit) {
+  // O instalador do kit grava o resto (o e-mail, o backup, a imagem) e confere; nada a fazer a mao.
+} else if (options.local) {
   console.log(`App: ${addresses.APP_PUBLIC_URL}  Supabase: ${addresses.SUPABASE_PUBLIC_URL}  Studio: http://127.0.0.1:8000/ (usuario bunker707, senha DASHBOARD_PASSWORD do .env)`);
 } else {
   console.log("Ainda precisa preencher no .env, a mao: SMTP_PASS (chave de envio do Resend), STORAGE_BOX_USER e STORAGE_BOX_HOST,");

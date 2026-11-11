@@ -10,9 +10,9 @@ import test from "node:test";
 // - as migrações até a 202611010001 continuam byte a byte;
 // - o adaptador lê e grava só colunas que a tabela tem;
 // - quem grava: a tarefa do tick é a única que roda a rodada (a última hora vista só anda por ela); além dela e da
-//   situação do pedido, só as Server Actions da tela Licença (ativar, Verificar agora, desativar, licença por arquivo)
-//   criam o adaptador do banco; e o segredo da Instalação só aparece nos arquivos do Verificador que falam com o banco e
-//   com o Emissor;
+//   situação do pedido, só as Server Actions da tela Licença (ativar, Verificar agora, desativar, licença por arquivo) e
+//   a rota interna do terminal (a ativação pelo instalador do kit, docs/20 §9D) criam o adaptador do banco; e o segredo da
+//   Instalação só aparece nos arquivos do Verificador que falam com o banco e com o Emissor;
 // - os arquivos de regras ficam puros (os testes os carregam pelo Node) e os que tocam no banco ou no Emissor são
 //   "server-only";
 // - o job está no registro do tick, antes da limpeza de arquivos (que fica por último).
@@ -142,6 +142,8 @@ test("quem grava: só o job do tick roda a rodada; ele, a situação do pedido e
   assert.deepEqual(importers(/\brunLicenseTick\b/), ["src/server/jobs/license-check-in-job.ts", `${LICENSING}tick.ts`]);
   assert.deepEqual(importers(/\bplanLicenseTick\b/), [`${LICENSING}store.ts`, `${LICENSING}tick.ts`]);
   assert.deepEqual(importers(/\blicenseStateDbOf\b/), [
+    // A ativação pelo terminal (membros licenca e o instalador do kit): as mesmas operações da tela Licença.
+    "src/app/api/licenca/instalador/route.ts",
     "src/server/jobs/license-check-in-job.ts",
     `${LICENSING}actions.ts`,
     `${LICENSING}current-state.ts`,
@@ -169,7 +171,7 @@ test("o segredo da Instalação só aparece no Verificador que fala com o banco 
 });
 
 test("as regras ficam puras e o que toca no banco ou no Emissor é server-only", () => {
-  for (const name of ["store.ts", "tick.ts", "state.ts", "operations.ts", "copy.ts", "screen-view.ts", "screen-result.ts", "degree-notice.ts", "admin-access.ts", "request-ids.ts", "node-start.ts"]) {
+  for (const name of ["store.ts", "tick.ts", "state.ts", "operations.ts", "copy.ts", "screen-view.ts", "screen-result.ts", "degree-notice.ts", "admin-access.ts", "request-ids.ts", "node-start.ts", "installer.ts"]) {
     const source = read(`${LICENSING}${name}`);
     assert.doesNotMatch(source, /^import "server-only";/m, `${name} carrega pelo Node`);
     assert.doesNotMatch(source, /from "@\//, `${name} sem o alias "@/"`);

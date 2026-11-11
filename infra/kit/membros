@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Comando de operacao do kit (docs/32 §3.2 e §11.7), primeiro esqueleto: o backup e a recuperacao. Nome provisorio.
+# Comando de operacao do kit (docs/32 §3.2 e §11.7): o backup, a recuperacao, a instalacao e a Licenca. Nome provisorio.
 #   membros status [--json]                       a situacao do backup, do kit de recuperacao e do ensaio
+#   membros diagnostico [--json]                  a conferencia do servidor, os servicos, o backup, a Licenca e o disco
+#   membros instalar [...]                        o instalador (infra/kit/instalar): continua de onde parou
+#   membros licenca estado | ativar [...]         a Licenca desta Instalacao, pelo terminal (ou pela tela Licenca)
+#   membros link-do-dono [--email E]              um link de entrada novo para o dono, de uso unico (so no terminal)
 #   membros backup [--iniciar | --conferir | --conferir-destino | --instalar-agendamento]
 #   membros restaurar --ensaio [--snapshot ID] [--chave-arquivo ARQ]   ensaio isolado: nao toca na escola
 #   membros restaurar [--snapshot ID] [--chave-arquivo ARQ] [--destino REPO]   restauracao de verdade (servidor novo)
@@ -8,7 +12,7 @@
 #   membros migrar [--listar]                     as migracoes do pacote (infra/kit/migrar.sh)
 #   membros preparar-servidor [--simular | --fechar-login-por-senha | ...]   o preparo do servidor (preparar-servidor.sh)
 # Cada subcomando tem --help. Os nomes tecnicos (projeto do compose, containers, volumes, pastas) vem de kit.conf.
-# Codigos de saida (docs/20 §9B): 0 ok; 1 uso ou configuracao; 2 destino do backup inacessivel; 3 falhou; 4 outra
+# Codigos de saida (docs/20 §9B e §9D): 0 ok; 1 uso ou configuracao; 2 destino do backup inacessivel; 3 falhou; 4 outra
 # operacao do backup rodando; 5 a chave nao abre o backup; 6 kit de recuperacao nao confirmado; 7 precisa de uma pessoa
 # no terminal; 8 falta disco ou memoria para o ensaio; 9 instalacao esperando restauracao (backup parado).
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash.
@@ -18,7 +22,7 @@ set -euo pipefail
 # O comando pode ser um link (por exemplo /usr/local/sbin/membros): os scripts ficam ao lado do arquivo de verdade.
 KIT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
 
-ajuda() { sed -n 2,13p "$KIT_DIR/membros"; }
+ajuda() { sed -n 2,17p "$KIT_DIR/membros"; }
 
 [ $# -gt 0 ] || { ajuda; exit 1; }
 sub=$1
@@ -35,9 +39,13 @@ case "$sub" in
     kit-de-recuperacao) exec bash "$KIT_DIR/recuperacao.sh" "$@" ;;
     migrar) exec bash "$KIT_DIR/migrar.sh" "$@" ;;
     preparar-servidor) exec bash "$KIT_DIR/preparar-servidor.sh" "$@" ;;
+    diagnostico) exec bash "$KIT_DIR/diagnostico.sh" "$@" ;;
+    instalar) exec bash "$KIT_DIR/instalar" "$@" ;;
+    licenca) exec bash "$KIT_DIR/licenca.sh" "$@" ;;
+    link-do-dono) exec bash "$KIT_DIR/dono.sh" "$@" ;;
     ajuda|-h|--help) ajuda; exit 0 ;;
     *)
-        printf 'ERRO: subcomando desconhecido: %s. Os que existem: status, backup, restaurar, restaurar --ensaio, kit-de-recuperacao, migrar, preparar-servidor.\n' "$sub" >&2
+        printf 'ERRO: subcomando desconhecido: %s. Os que existem: status, diagnostico, backup, restaurar, restaurar --ensaio, kit-de-recuperacao, migrar, preparar-servidor, instalar, licenca, link-do-dono.\n' "$sub" >&2
         exit 1
         ;;
 esac
