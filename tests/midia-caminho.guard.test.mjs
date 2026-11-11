@@ -151,3 +151,132 @@ test("todo check de endereco https das migracoes aceita o caminho guardado ou e 
   assert.deepEqual([...STORAGE_PATHS_SKIPPED_TABLES], ["webinar_offer_variants"]);
   assert.match(sqlCodeOf(read("supabase/migrations/202610300003_webinars_v4b_ofertas.sql")), /create table if not exists public\.webinar_offer_variants \([^;]*checkout_url text not null check[^;]*image_url text check \(image_url is null or \(char_length\(image_url\) <= 2048 and image_url ~ '\^https:\/\/'\)\)/);
 });
+
+const DATA_SCRIPT = "supabase/dados/202611120001_midia_pelo_caminho.sql";
+
+/** O SQL sem comentarios, textos entre aspas, identificadores entre aspas e corpos $tag$...$tag$ (o que o psql le). */
+function sqlOutsideTexts(sql) {
+  let out = "";
+  let i = 0;
+  while (i < sql.length) {
+    const rest = sql.slice(i);
+    if (rest.startsWith("--")) {
+      const end = rest.search(/\n/);
+      i += end < 0 ? rest.length : end;
+    } else if (rest.startsWith("/*")) {
+      i += rest.indexOf("*/") + 2;
+      out += " ";
+    } else if (rest[0] === "'") {
+      let j = 1;
+      while (j < rest.length && !(rest[j] === "'" && rest[j + 1] !== "'")) j += rest[j] === "'" ? 2 : 1;
+      i += j + 1;
+      out += "''";
+    } else if (rest[0] === '"') {
+      i += rest.indexOf('"', 1) + 1;
+      out += '""';
+    } else if (/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.test(rest) && !/[A-Za-z0-9_$]/.test(sql[i - 1] ?? "")) {
+      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest)[0];
+      const end = rest.indexOf(tag, tag.length);
+      i += end < 0 ? rest.length : end + tag.length;
+      out += "$$";
+    } else {
+      out += sql[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** As colunas text/jsonb das migracoes (create table e add column), como "tabela.coluna". */
+function migrationColumns() {
+  const dir = new URL("supabase/migrations/", root);
+  const columns = new Map();
+  for (const name of readdirSync(dir).filter((file) => file.endsWith(".sql")).sort()) {
+    const code = sqlCodeOf(readFileSync(new URL(name, dir), "utf8"));
+    for (const table of code.matchAll(/create table if not exists public\.(\w+) \(([\s\S]*?)\n\);/g)) {
+      for (const column of table[2].matchAll(/^\s+(\w+)\s+(text|jsonb)\b/gm)) columns.set(`${table[1]}.${column[1]}`, column[2]);
+    }
+    for (const column of code.matchAll(/alter table (?:if exists )?public\.(\w+)\s+add column if not exists (\w+) (text|jsonb)\b/g)) {
+      columns.set(`${column[1]}.${column[2]}`, column[3]);
+    }
+  }
+  return columns;
+}
+
+/** As colunas que a conversao percorre (bk_midia_alvos), como "tabela.coluna" -> tipo. */
+function dataScriptTargets() {
+  const body = read(DATA_SCRIPT).match(/create or replace function pg_temp\.bk_midia_alvos\(\)[\s\S]*?as \$\$\s*values\s*([\s\S]*?)\$\$;/)[1];
+  return new Map([...body.matchAll(/\('(\w+)', '(\w+)', '(text|jsonb)'\)/g)].map((match) => [`${match[1]}.${match[2]}`, match[3]]));
+}
+
+/**
+ * Colunas com nome de arquivo ou endereco que a conversao deixa como estao, com o motivo. Coluna nova com nome assim
+ * entra na lista da conversao (bk_midia_alvos) ou aqui.
+ */
+const NOT_CONVERTED = {
+  "campaigns.image_alt": "texto alternativo da imagem, nao endereco",
+  "content_items.purchase_url": "link de compra na plataforma de venda",
+  "integration_settings.webhook_url": "endereco de webhook",
+  "students.avatar_url": "tabela apagada na 202610140001",
+  "webinar_offer_variants.checkout_url": "link colado, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
+  "webinar_offer_variants.image_url": "link colado, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
+  "webinar_recordings.embed_url": "video no provedor",
+  "youtube_course_imports.playlist_url": "playlist do YouTube"
+};
+
+test("a conversao dos dados (supabase/dados) nunca e aplicada sozinha e so cria ferramentas em pg_temp", () => {
+  const script = read(DATA_SCRIPT);
+  const outside = sqlOutsideTexts(script);
+  const code = sqlCodeOf(script).toLowerCase();
+
+  assert.match(script, /^-- Midia do Storage pelo caminho: a conversao dos enderecos que ja estao no banco \(docs\/32 §11\.5\)\. NAO e migracao:/);
+  assert.match(script, /^-- Idempotente: pode ser executada mais de uma vez sem efeito colateral\.$/m);
+  assert.deepEqual(readdirSync(new URL("supabase/migrations/", root)).filter((name) => name.includes("midia")), [], "fora da pasta que a CLI, o migrate.sh e o migrador aplicam");
+  assert.match(read(".dockerignore"), /^supabase$/m, "fora da imagem");
+
+  // O psql le o arquivo inteiro: nada de transacao solta (cada comando e uma), DISCARD (apagaria pg_temp) nem barra
+  // invertida fora de texto (comando do psql).
+  assert.doesNotMatch(outside, /\\/);
+  for (const command of outside.split(";").map((part) => part.trim().toLowerCase())) {
+    assert.doesNotMatch(command, /^(?:begin|commit|rollback|abort|start\s+transaction|discard)\b/, command.slice(0, 60));
+  }
+
+  // So objetos temporarios: as funcoes em pg_temp e a tabela temporaria do resultado.
+  const functions = code.match(/\bcreate\s+(?:or\s+replace\s+)?function\s+[\w.]+/g) ?? [];
+  assert.ok(functions.length >= 10);
+  for (const name of functions) assert.match(name, /function pg_temp\.bk_midia_\w+$/, name);
+  assert.deepEqual(code.match(/\bcreate\s+(?:\w+\s+)*table\s+(?:if not exists\s+)?[\w.]+/g), ["create temp table if not exists bk_midia_mudadas"]);
+  assert.doesNotMatch(code, /\b(?:create\s+(?:schema|role|extension|trigger|view|index|type|policy|sequence)|drop|grant|revoke|vacuum|copy|delete\s+from)\b/);
+  assert.doesNotMatch(code, /security\s+definer/);
+  // O que escreve nas tabelas da escola: o update montado na rodada de cada coluna, com os gatilhos de data
+  // desligados so durante ele (e religados), e nada mais.
+  assert.deepEqual(code.match(/\b(?:insert\s+into|update|truncate)\s+[\w.%$]+/g), ["update public.%1$i", "truncate bk_midia_mudadas", "insert into bk_midia_mudadas"]);
+  assert.deepEqual(code.match(/alter table public\.%i (?:disable|enable) trigger %i/g), ["alter table public.%i disable trigger %i", "alter table public.%i enable trigger %i"]);
+  assert.match(code, /t\.tgfoid = any \(array_remove\(array\[to_regproc\('public\.set_updated_at'\), to_regproc\('public\.touch_campaign_version'\)\]::oid\[\], null\)\)/, "so os gatilhos de data");
+  assert.match(code, /coalesce\(nullif\(btrim\(current_setting\('bunker\.midia_modo', true\)\), ''\), 'previa'\)/, "sem modo, so le");
+});
+
+test("a conversao percorre toda coluna com endereco de arquivo das migracoes, e o cabecalho conta as mesmas", () => {
+  const columns = migrationColumns();
+  const targets = dataScriptTargets();
+
+  for (const [column, type] of targets) {
+    assert.equal(columns.get(column), type, `${column}: existe nas migracoes com o tipo ${type}`);
+  }
+  assert.deepEqual([...targets.keys()], [...targets.keys()].sort(), "em ordem");
+  assert.deepEqual(
+    [...targets].filter(([, type]) => type === "jsonb").map(([column]) => column),
+    ["campaigns.popup_design", "communication_templates.payload", "content_items.instructor", "content_page_settings.settings", "lessons.video_config", "platform_settings.value", "youtube_course_imports.last_manifest"],
+    "os JSON que guardam enderecos (o design, os modelos, o instrutor, a pagina do produto, o video da aula, a marca e o destaque, o manifesto do YouTube)"
+  );
+
+  const named = [...columns.keys()].filter((column) => /(?:image|avatar|cover|logo|icon|thumbnail|poster|_url|media)/.test(column.split(".")[1])).sort();
+  const covered = [...targets.keys(), ...Object.keys(NOT_CONVERTED)];
+  assert.deepEqual(named.filter((column) => !covered.includes(column)), [], "coluna nova com nome de arquivo ou endereco: entra em bk_midia_alvos ou em NOT_CONVERTED, com o motivo");
+  for (const column of Object.keys(NOT_CONVERTED)) assert.ok(named.includes(column), `${column} ainda existe`);
+
+  // A previa rapida do cabecalho (so leitura, sem as ferramentas) conta as mesmas colunas.
+  const header = read(DATA_SCRIPT).split("/* ----")[0];
+  const counted = [...header.matchAll(/select '(\w+\.\w+)'/g)].map((match) => match[1]);
+  assert.deepEqual(counted, [...targets.keys()]);
+});
