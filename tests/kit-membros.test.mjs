@@ -451,6 +451,16 @@ test("ensaio: abre com a chave de recuperacao num banco sem rede, sem porta e co
   assert.match(sql, /revoke all on tables from postgres, anon, authenticated, service_role/);
   assert.match(sql, /grant all on tables to postgres, anon, authenticated, service_role/);
   assert.ok(d.some((c) => c.args[0] === "exec" && c.args.includes("pg_restore") && c.args.includes("--clean")));
+  // Os papeis do backup trazem a senha que o supabase_admin tem na escola (o docker de mentira so deixa entrar com a
+  // senha que o papel tem agora): na mesma sessao, a senha sorteada do banco temporario volta, pela entrada do psql.
+  const papeis = d.find((c) => c.args[0] === "exec" && c.args[1] === "-i" && c.stdin.includes("CREATE ROLE anon"));
+  assert.ok(papeis, "os papeis do backup foram aplicados");
+  assert.match(papeis.stdin, /PASSWORD 'SCRAM-SHA-256\$[\s\S]*\nALTER ROLE supabase_admin WITH PASSWORD '[0-9a-f]{48}';\n$/);
+  assert.ok(!papeis.args.join(" ").match(/[0-9a-f]{48}/), "a senha nunca na linha de comando");
+  // Toda conexao ao banco do ensaio e pelo 127.0.0.1 de dentro do container, como no restore.sh.
+  for (const c of d.filter((c) => c.args[0] === "exec" && (c.args.includes("psql") || (c.args.includes("pg_restore") && !c.args.includes("--list"))))) {
+    assert.equal(c.args[c.args.indexOf("-h") + 1], "127.0.0.1", c.args.join(" "));
+  }
 
   // Tudo apagado: o container, a pasta do ensaio e a chave digitada; e a situacao sem as contas pessoais.
   assert.deepEqual(d.filter((c) => c.args[0] === "rm").map((c) => c.args.at(-1)), [opcao("--name"), opcao("--name")]);
@@ -473,6 +483,18 @@ test("ensaio: o container que nao ficou isolado e apagado sem ligar", { skip }, 
   assert.equal(d.filter((c) => c.args[0] === "start").length, 0);
   assert.ok(d.some((c) => c.args[0] === "rm"));
   assert.equal(s.situacao().ensaio.resultado, "falhou");
+  // Um volume com nome (o da configuracao do banco da escola) no lugar do volume que a imagem declara: recusado.
+  s.limparLog();
+  const nomeado = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_VOLUME_DA_IMAGEM: "/etc/postgresql-custom", SHIM_VOLUME_NOMEADO: "bunker707_db-config" });
+  assert.equal(nomeado.status, 3, nomeado.saida);
+  assert.match(nomeado.stderr, /montagem fora da pasta do ensaio: volume bunker707_db-config em \/etc\/postgresql-custom/);
+  assert.equal(docker(s.chamadas()).filter((c) => c.args[0] === "start").length, 0);
+  // O volume anonimo que a propria imagem declara (VOLUME no Dockerfile) nasce so para este container e sai com o rm -v.
+  s.limparLog();
+  const anonimo = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { SHIM_VOLUME_DA_IMAGEM: "/etc/postgresql-custom" });
+  assert.equal(anonimo.status, 0, anonimo.saida);
+  assert.match(anonimo.stdout, /DEU CERTO/);
+  assert.ok(docker(s.chamadas()).filter((c) => c.args[0] === "rm").every((c) => c.args.includes("-v")), "o rm apaga os volumes anonimos");
 });
 
 test("ensaio: falha, banco que nao sobe, dump ilegivel e interrupcao tambem apagam tudo", { skip }, () => {
@@ -544,6 +566,45 @@ test("ensaio: sobras de um ensaio anterior saem antes; sem disco, para com 8 ant
   assert.equal(disco.status, 8, disco.saida);
   assert.match(disco.stderr, /O ensaio precisa de cerca de \d+ MB livres no disco e ha 488 MB/);
   assert.equal(docker(s.chamadas()).filter((c) => c.args[0] === "create").length, 0);
+  // Memoria: o teto do banco do ensaio (512m) mais a folga da escola (256m) precisam estar livres no servidor.
+  writeFileSync(s.meminfo, "MemTotal:        4015048 kB\nMemAvailable:     600000 kB\n");
+  s.limparLog();
+  const memoria = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo]);
+  assert.equal(memoria.status, 8, memoria.saida);
+  assert.match(memoria.stderr, /O ensaio precisa de cerca de 768 MB de memoria livre e ha 585 MB: a escola nao pode ficar sem memoria/);
+  assert.equal(docker(s.chamadas()).filter((c) => c.args[0] === "create").length, 0);
+  assert.equal(s.situacao().ensaio.motivo, "falta memoria livre");
+  // Com um teto menor (num servidor apertado), cabe; um teto que nao e tamanho para antes de tudo, com 1.
+  const menor = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { KIT_ENSAIO_MEMORIA: "256m" });
+  assert.equal(menor.status, 0, menor.saida);
+  assert.match(docker(s.chamadas()).filter((c) => c.args[0] === "create").at(-1).args.join(" "), /--memory 256m --memory-swap 256m/);
+  s.limparLog();
+  const errado = s.rodar(["restaurar", "--ensaio", "--chave-arquivo", arquivo], { KIT_ENSAIO_MEMORIA: "meio-giga" });
+  assert.equal(errado.status, 1, errado.saida);
+  assert.match(errado.stderr, /KIT_ENSAIO_MEMORIA precisa ser um tamanho como 512m/);
+  assert.equal(s.chamadas().length, 0, "nada roda");
+});
+
+test("backup diario apaga as sobras de um ensaio que parou sem limpar (queda de luz): o container e a pasta", { skip }, () => {
+  const s = servidorComBackup();
+  const sobra = join(s.backups, "ensaio", "20261101000000-77");
+  mkdirSync(join(sobra, "banco"), { recursive: true });
+  writeFileSync(join(sobra, "banco", "PG_VERSION"), "17");
+  s.limparLog();
+  const r = s.rodar(["backup", "--agendado"], { SHIM_SOBRAS: "bunker707-ensaio-20261101000000-77" });
+  assert.equal(r.status, 0, r.saida);
+  assert.match(r.stdout, /Apagando o que sobrou de um ensaio de restauracao que parou no meio/);
+  assert.equal(existsSync(join(s.backups, "ensaio")), false);
+  const d = docker(s.chamadas());
+  assert.deepEqual(d.find((c) => c.args[0] === "ps").args, ["ps", "-aq", "--filter", "label=bunker707.ensaio"]);
+  assert.deepEqual(d.find((c) => c.args[0] === "rm").args, ["rm", "-f", "-v", "bunker707-ensaio-20261101000000-77"]);
+  // So o que tem o rotulo do ensaio: nada da escola sai; e sem sobra, nada e dito.
+  assert.equal(d.filter((c) => c.args[0] === "rm").length, 1);
+  s.limparLog();
+  const limpo = s.rodar(["backup"]);
+  assert.equal(limpo.status, 0);
+  assert.doesNotMatch(limpo.stdout, /Apagando o que sobrou/);
+  assert.equal(docker(s.chamadas()).filter((c) => c.args[0] === "rm").length, 0);
 });
 
 test("ensaio: licenca e Storage conferidos; escolhe o backup mais novo com dados", { skip }, () => {

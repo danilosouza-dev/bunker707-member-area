@@ -63,7 +63,8 @@ if (args[0] === "compose") {
     const cmd = resto.slice(at + 1);
     if (cmd[0] === "psql") { log({ sql: cmd[cmd.indexOf("-c") + 1] }); console.log(env.SHIM_CONTAS ?? "40"); sair(); }
     log();
-    if (cmd[0] === "pg_dumpall") { process.stdout.write("-- papeis da escola\nCREATE ROLE anon;\n"); sair(); }
+    // Como o pg_dumpall de verdade, com a senha (o hash) que o supabase_admin tem na escola.
+    if (cmd[0] === "pg_dumpall") { process.stdout.write("-- papeis da escola\nCREATE ROLE anon;\nALTER ROLE supabase_admin WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS PASSWORD 'SCRAM-SHA-256$4096:c2FsZGFlc2NvbGE=$Y2hhdmVkYWVzY29sYQ==:c2Vydmlkb3JkYWVzY29sYQ==';\n"); sair(); }
     if (cmd[0] === "pg_dump") { if (env.SHIM_PG_DUMP_FALHA) { process.stderr.write("pg_dump: error: connection failed\n"); sair(1); } process.stdout.write("PGDMP-dump-falso-da-escola"); sair(); }
     if (cmd[0] === "cat") { process.stdout.write("chave-raiz-do-vault-0123456789abcdef"); sair(); }
     sair();
@@ -106,6 +107,8 @@ if (args[0] === "create") {
   }
   c.imagem = args[i];
   c.comando = args.slice(i + 1);
+  // O initdb da imagem da ao supabase_admin a senha de POSTGRES_PASSWORD (do --env-file).
+  c.senhaAdmin = c.envFile && fs.existsSync(c.envFile) ? (/^POSTGRES_PASSWORD=(.*)$/m.exec(fs.readFileSync(c.envFile, "utf8")) ?? [])[1] ?? null : null;
   estado.containers[c.nome] = c;
   salvar();
   console.log("cid-" + c.nome);
@@ -121,9 +124,17 @@ if (args[0] === "inspect") {
   if (fmt === "{{.State.OOMKilled}}") { console.log(env.SHIM_OOM ?? "false"); sair(); }
   const binds = c.volumes.map((v) => v);
   const mounts = c.volumes.map((v) => { const [origem, destino, modo] = v.split(":"); return { Type: "bind", Source: origem, Destination: destino, RW: modo !== "ro" }; });
+  // A imagem declara VOLUME (os destinos com -v ficam de fora): SHIM_VOLUME_DA_IMAGEM vira um volume anonimo, e
+  // SHIM_VOLUME_NOMEADO poe ali um volume com nome (o da escola, por engano).
+  const declarados = { "/var/lib/postgresql/data": {} };
+  if (env.SHIM_VOLUME_DA_IMAGEM) {
+    declarados[env.SHIM_VOLUME_DA_IMAGEM] = {};
+    const nomeVolume = env.SHIM_VOLUME_NOMEADO || "f".repeat(16) + "0123456789abcdef".repeat(3);
+    mounts.push({ Type: "volume", Name: nomeVolume, Source: "/var/lib/docker/volumes/" + nomeVolume + "/_data", Destination: env.SHIM_VOLUME_DA_IMAGEM, Driver: "local", RW: true });
+  }
   const portas = {};
   for (const p of c.portas) portas[p] = [{ HostPort: p }];
-  console.log(JSON.stringify([{ Name: "/" + nome, HostConfig: { NetworkMode: env.SHIM_INSPECT_REDE ?? c.rede, PortBindings: portas, Privileged: c.extra.includes("--privileged"), Binds: binds, PidMode: "", IpcMode: "private" }, Mounts: mounts }]));
+  console.log(JSON.stringify([{ Name: "/" + nome, Config: { Volumes: declarados }, HostConfig: { NetworkMode: env.SHIM_INSPECT_REDE ?? c.rede, PortBindings: portas, Privileged: c.extra.includes("--privileged"), Binds: binds, PidMode: "", IpcMode: "private" }, Mounts: mounts }]));
   sair();
 }
 if (args[0] === "cp") { log(); sair(); }
@@ -134,9 +145,24 @@ if (args[0] === "exec") {
   const nome = interativo ? args[2] : args[1];
   const cmd = interativo ? args.slice(3) : args.slice(2);
   if (interativo) leStdin();
-  log({ stdin: stdin.slice(0, 300) });
+  log({ stdin: stdin.slice(0, 4000) });
   if (cmd[0] === "pg_isready") sair(env.SHIM_PRONTO === "nunca" || env.SHIM_PRONTO === "morreu" ? 2 : 0);
   if (cmd[0] === "pg_restore" && cmd.includes("--list")) sair(env.SHIM_DUMP_ILEGIVEL ? 1 : 0);
+  // Quem conecta como supabase_admin precisa da senha que o papel tem agora (o pior caso do pg_hba da imagem: senha
+  // pelo socket e pelo 127.0.0.1). A senha vem do ambiente do container (PGPASSWORD do --env-file).
+  const cont = estado.containers[nome];
+  if ((cmd[0] === "psql" || cmd[0] === "pg_restore") && cont && cont.senhaAdmin != null) {
+    const pgpassword = cont.envFile && fs.existsSync(cont.envFile) ? (/^PGPASSWORD=(.*)$/m.exec(fs.readFileSync(cont.envFile, "utf8")) ?? [])[1] : undefined;
+    if (pgpassword !== cont.senhaAdmin) {
+      process.stderr.write('psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  password authentication failed for user "supabase_admin"\n');
+      sair(2);
+    }
+  }
+  if (cmd[0] === "psql" && cont) {
+    // ALTER ROLE supabase_admin ... PASSWORD: a ultima da sessao vale para as conexoes seguintes.
+    const trocas = [...stdin.matchAll(/ALTER ROLE supabase_admin WITH[^;]*PASSWORD '([^']*)'/gi)];
+    if (trocas.length) { cont.senhaAdmin = trocas.at(-1)[1]; salvar(); }
+  }
   if (cmd[0] === "pg_restore") {
     if (env.SHIM_INTERROMPER === "pg_restore") { process.kill(process.ppid, "SIGTERM"); sair(0); }
     for (let n = 0; n < Number(env.SHIM_ERROS_RESTORE ?? 0); n++) process.stderr.write("pg_restore: error: could not execute query: ERROR:  already exists\n");
@@ -380,6 +406,9 @@ export function servidorDoKit({ segredos = {}, restic = "de mentira" } = {}) {
   const systemd = join(dir, "systemd");
   mkdirSync(systemd);
   const trava = join(dir, "trava.lock");
+  // A memoria do servidor de mentira: 2 GB livres (um servidor de 4 GB com a escola no ar); o teste troca por outra.
+  const meminfo = join(dir, "meminfo");
+  writeFileSync(meminfo, "MemTotal:        4015048 kB\nMemFree:          301234 kB\nMemAvailable:    2097152 kB\n");
   const shims = join(dir, "shims");
   mkdirSync(shims);
   const ferramentas = [["docker", DOCKER], ["systemctl", ANOTA("systemctl")], ["df", DF]];
@@ -404,13 +433,14 @@ export function servidorDoKit({ segredos = {}, restic = "de mentira" } = {}) {
       KIT_PASTA_TEMPORARIA: temporaria,
       KIT_PASTA_SYSTEMD: systemd,
       KIT_ARQUIVO_TRAVA: trava,
+      KIT_ARQUIVO_MEMINFO: meminfo,
       SHIM_LOG: log,
       SHIM_DOCKER_ESTADO: join(dir, "docker.json"),
       SHIM_RESTIC_ESTADO: join(dir, "restic.json"),
       ...extra
     };
     for (const nome of Object.keys(env)) {
-      if ((nome.startsWith("KIT_") || nome.startsWith("BUNKER707_") || nome.startsWith("RESTIC_") || nome.startsWith("AWS_") || nome === "DOCKER_HOST" || nome === "COMPOSE_PROJECT_NAME") && !(nome in extra) && !["KIT_PASTA_COMPOSE", "KIT_PASTA_ESTADO", "KIT_PASTA_BACKUP", "KIT_PASTA_TEMPORARIA", "KIT_PASTA_SYSTEMD", "KIT_ARQUIVO_TRAVA"].includes(nome)) {
+      if ((nome.startsWith("KIT_") || nome.startsWith("BUNKER707_") || nome.startsWith("RESTIC_") || nome.startsWith("AWS_") || nome === "DOCKER_HOST" || nome === "COMPOSE_PROJECT_NAME") && !(nome in extra) && !["KIT_PASTA_COMPOSE", "KIT_PASTA_ESTADO", "KIT_PASTA_BACKUP", "KIT_PASTA_TEMPORARIA", "KIT_PASTA_SYSTEMD", "KIT_ARQUIVO_TRAVA", "KIT_ARQUIVO_MEMINFO"].includes(nome)) {
         delete env[nome];
       }
     }
@@ -430,7 +460,7 @@ export function servidorDoKit({ segredos = {}, restic = "de mentira" } = {}) {
   const resticEstado = () => JSON.parse(readFileSync(join(dir, "restic.json"), "utf8"));
   const gravarResticEstado = (e) => writeFileSync(join(dir, "restic.json"), JSON.stringify(e));
   const lerSegredos = () => Object.fromEntries(readFileSync(envFile, "utf8").split("\n").filter(Boolean).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
-  return { dir, compose, envFile, storage, estado, backups, temporaria, systemd, trava, valores, escreverSegredos, rodar, pessoa, chamadas, limparLog, situacao, resticEstado, gravarResticEstado, lerSegredos };
+  return { dir, compose, envFile, storage, estado, backups, temporaria, systemd, trava, meminfo, valores, escreverSegredos, rodar, pessoa, chamadas, limparLog, situacao, resticEstado, gravarResticEstado, lerSegredos };
 }
 
 /** O kit de recuperacao confirmado por uma pessoa: devolve a chave que a folha mostrou. */

@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
         --chave-arquivo=*) chave_arquivo=${1#*=} ;;
         --destino) [ $# -ge 2 ] || sair "$SAI_USO" "--destino precisa do endereco do backup."; destino=$2; shift ;;
         --destino=*) destino=${1#*=} ;;
-        -h|--help) sed -n 2,23p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,19p "$0"; exit 0 ;;
         *) sair "$SAI_USO" "opcao desconhecida: $1 (veja: membros restaurar --help)" ;;
     esac
     shift

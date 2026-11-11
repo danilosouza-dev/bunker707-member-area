@@ -604,13 +604,33 @@ def isolamento(pasta, nome):
     if host.get("CapAdd"):
         problemas.append("capacidades a mais")
     raiz = os.path.realpath(pasta) + "/"
+
+    def na_pasta(origem):
+        return origem.startswith("/") and (os.path.realpath(origem) + "/").startswith(raiz)
+
+    # A imagem pode declarar pastas como VOLUME (o banco do Supabase guarda a configuracao numa delas): o docker cria para
+    # este container um volume anonimo, com o conteudo da imagem, que nenhum outro container usa e que o `docker rm -v`
+    # apaga. So esse volume passa: anonimo (nome de 64 letras hexadecimais, nunca um volume com nome, como os da escola),
+    # num destino que a imagem declara e que nenhum -v pediu.
+    declarados = set((dados.get("Config") or {}).get("Volumes") or {})
+    pedidos = {b.split(":")[1] for b in host.get("Binds") or [] if b.count(":") >= 1}
     for montagem in dados.get("Mounts") or []:
         origem = montagem.get("Source") or ""
-        if montagem.get("Type") != "bind" or not (os.path.realpath(origem) + "/").startswith(raiz):
-            problemas.append(f"montagem fora da pasta do ensaio: {montagem.get('Type')} {origem or montagem.get('Name')}")
+        destino = montagem.get("Destination") or ""
+        if montagem.get("Type") == "bind" and na_pasta(origem):
+            continue
+        if (
+            montagem.get("Type") == "volume"
+            and re.fullmatch(r"[0-9a-f]{64}", montagem.get("Name") or "")
+            and (montagem.get("Driver") or "local") == "local"
+            and destino in declarados
+            and destino not in pedidos
+        ):
+            continue
+        problemas.append(f"montagem fora da pasta do ensaio: {montagem.get('Type')} {montagem.get('Name') or origem} em {destino}")
     for bind in host.get("Binds") or []:
         origem = bind.split(":", 1)[0]
-        if not (os.path.realpath(origem) + "/").startswith(raiz):
+        if not na_pasta(origem):
             problemas.append(f"montagem fora da pasta do ensaio: {origem}")
     if problemas:
         sys.stderr.write("".join(f"  - {p}\n" for p in problemas))

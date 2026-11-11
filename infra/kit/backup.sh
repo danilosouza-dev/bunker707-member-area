@@ -19,7 +19,8 @@
 # Retencao (BACKUP_KEEP_DAILY 7, BACKUP_KEEP_WEEKLY 4, BACKUP_KEEP_MONTHLY 6 no arquivo de segredos): `restic forget`
 # agrupado por host e marcas (--group-by host,tags), nunca pelo caminho, e com --prune. O agrupamento padrao do
 # restic (host e caminhos) deixa sozinho no grupo todo backup cuja pasta muda de nome, e a retencao nunca apaga nada.
-# Uma operacao do backup por vez (trava em KIT_ARQUIVO_TRAVA). Codigos de saida: os de lib-kit.sh.
+# Uma operacao do backup por vez (trava em KIT_ARQUIVO_TRAVA). Com a trava, apaga as sobras de um ensaio de restauracao
+# que parou no meio. Codigos de saida: os de lib-kit.sh.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: o script usa arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
@@ -36,7 +37,7 @@ for arg in "$@"; do
         --conferir-destino) modo=destino ;;
         --instalar-agendamento) modo=agendamento ;;
         --agendado) agendado=1 ;;
-        -h|--help) sed -n 2,25p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,23p "$0"; exit 0 ;;
         *) sair "$SAI_USO" "opcao desconhecida: $arg (veja: membros backup --help)" ;;
     esac
 done
@@ -176,6 +177,9 @@ manter_mensais=$(env_value BACKUP_KEEP_MONTHLY 6)
 [ $((manter_diarios + manter_semanais + manter_mensais)) -gt 0 ] || sair "$SAI_USO" "A retencao nao pode ser zero em tudo: o restic apagaria todo backup."
 
 if [ "$agendado" = 1 ]; then trava_backup "${KIT_TRAVA_ESPERA:-3600}"; else trava_backup 0; fi
+# Um ensaio de restauracao que parou sem limpar (queda de luz) deixa o banco restaurado em texto claro no disco: sai
+# aqui, com a trava na mao, em vez de esperar o ensaio seguinte.
+ensaio_limpar_sobras
 etapa="$KIT_PASTA_BACKUP/atual"
 inicio=$(date +%s)
 tentativa=$(agora_utc)

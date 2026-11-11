@@ -12,8 +12,11 @@
 # ensaio (KIT_PASTA_BACKUP/ensaio/<id>): o banco temporario e o dump, so leitura. O docker inspect do container e
 # conferido antes de ele ligar; nada da escola e tocado (o compose so e lido, para saber a imagem do banco).
 # Do backup saem so o dump, os papeis e a chave do Vault (nem o arquivo de segredos, nem os arquivos do Storage, que
-# sao conferidos pela lista). Sobras de um ensaio que parou no meio (queda de luz) sao apagadas no comeco do seguinte.
-# Disco: pede cerca de 5 vezes o tamanho do dump mais 1 GB livres, e para antes (codigo 8) se nao houver.
+# sao conferidos pela lista). Os papeis do backup trazem a senha que o supabase_admin tem na escola: na mesma sessao a
+# senha do banco temporario volta, e o ensaio fala com ele pelo 127.0.0.1 de dentro do container, como o restore.sh.
+# Sobras de um ensaio que parou no meio (queda de luz) sao apagadas no comeco do seguinte e no backup diario.
+# Disco: pede cerca de 5 vezes o tamanho do dump mais 1 GB livres. Memoria: o teto do banco do ensaio mais a folga da
+# escola (KIT_ENSAIO_FOLGA_MEMORIA) livres. Sem um dos dois, para antes de criar o banco (codigo 8).
 # Codigos de saida: os de lib-kit.sh; 0 e "deu certo" (com ou sem avisos), 3 e "falhou" (o motivo vem no veredito).
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: o script usa arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -30,12 +33,14 @@ while [ $# -gt 0 ]; do
         --chave-arquivo) [ $# -ge 2 ] || sair "$SAI_USO" "--chave-arquivo precisa de um arquivo."; chave_arquivo=$2; shift ;;
         --chave-arquivo=*) chave_arquivo=${1#*=} ;;
         --ensaio) ;;
-        -h|--help) sed -n 2,19p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,20p "$0"; exit 0 ;;
         *) sair "$SAI_USO" "opcao desconhecida: $1 (veja: membros restaurar --ensaio --help)" ;;
     esac
     shift
 done
 
+teto_kb=$(memoria_em_kb "$KIT_ENSAIO_MEMORIA") || sair "$SAI_USO" "KIT_ENSAIO_MEMORIA precisa ser um tamanho como 512m ou 1g (veio $KIT_ENSAIO_MEMORIA)."
+folga_kb=$(memoria_em_kb "$KIT_ENSAIO_FOLGA_MEMORIA") || sair "$SAI_USO" "KIT_ENSAIO_FOLGA_MEMORIA precisa ser um tamanho como 256m (veio $KIT_ENSAIO_FOLGA_MEMORIA)."
 exigir_segredos
 destino_carregar
 command -v docker >/dev/null 2>&1 || sair "$SAI_USO" "O ensaio precisa do Docker, e ele nao esta neste servidor."
@@ -75,13 +80,7 @@ trap 'resultado=interrompido; motivo="interrompido no meio"; exit 143' TERM HUP
 
 # Sobras de um ensaio anterior que parou no meio: so o que tem o rotulo do ensaio e a pasta dele (a trava garante que
 # nenhum outro ensaio esta rodando agora).
-sobras=$(docker ps -aq --filter "label=$KIT_ENSAIO_ROTULO" 2>/dev/null || true)
-if [ -n "$sobras" ]; then
-    log "Apagando o que sobrou de um ensaio anterior..."
-    # shellcheck disable=SC2086
-    docker rm -f -v $sobras >/dev/null 2>&1 || true
-fi
-rm -rf -- "$pasta_ensaios"
+ensaio_limpar_sobras
 mkdir -p "$pasta"
 chmod 700 "$pasta_ensaios" "$pasta"
 
@@ -115,6 +114,14 @@ livre_kb=$(df -Pk "$pasta" | awk 'NR == 2 { print $4 }')
 precisa_kb=$(( PLANO_DUMP_BYTES * 5 / 1024 + 1048576 ))
 if [ "${livre_kb:-0}" -lt "$precisa_kb" ]; then
     sair "$SAI_DISCO" "O ensaio precisa de cerca de $((precisa_kb / 1024)) MB livres no disco e ha $((livre_kb / 1024)) MB: a escola nao pode ficar sem disco. Libere espaco e rode de novo."
+fi
+# Memoria: o banco do ensaio nunca passa do teto (o docker o derruba antes), e a escola fica com a folga. Num servidor de
+# 4 GB com a escola no ar, sobra isso; quando nao sobra, o ensaio espera um horario de menos movimento.
+motivo="falta memoria livre"
+# KIT_ARQUIVO_MEMINFO so existe para os testes; no servidor e o /proc/meminfo.
+memoria_livre_kb=$(awk '/^MemAvailable:/ { print $2; exit }' "${KIT_ARQUIVO_MEMINFO:-/proc/meminfo}" 2>/dev/null || true)
+if [[ $memoria_livre_kb =~ ^[0-9]+$ ]] && [ "$memoria_livre_kb" -lt $((teto_kb + folga_kb)) ]; then
+    sair "$SAI_DISCO" "O ensaio precisa de cerca de $(((teto_kb + folga_kb) / 1024)) MB de memoria livre e ha $((memoria_livre_kb / 1024)) MB: a escola nao pode ficar sem memoria. Rode de novo num horario de menos movimento (de madrugada, por exemplo)."
 fi
 
 log "Baixando do backup so o dump do banco, os papeis e a chave do Vault..."
@@ -171,7 +178,8 @@ if [ -z "$pronto" ]; then
     sair "$SAI_FALHOU" "O banco temporario do ensaio nao subiu em ${KIT_ENSAIO_ESPERA}s ($motivo)."
 fi
 
-psql_ensaio() { docker exec -i "$nome" psql -U supabase_admin -d postgres -X -q -v ON_ERROR_STOP=1 "$@"; }
+# Pelo 127.0.0.1 de dentro do container (a rede dele e so essa), como o restore.sh; a senha vem do ambiente do container.
+psql_ensaio() { docker exec -i "$nome" psql -U supabase_admin -h 127.0.0.1 -d postgres -X -q -v ON_ERROR_STOP=1 "$@"; }
 
 motivo="o dump do backup nao e legivel"
 docker exec "$nome" pg_restore --list /ensaio/postgres.dump >/dev/null 2>&1 \
@@ -179,7 +187,11 @@ docker exec "$nome" pg_restore --list /ensaio/postgres.dump >/dev/null 2>&1 \
 log "Restaurando o banco no ensaio (como o restore.sh: papeis, pg_restore --clean, permissoes)..."
 motivo="a restauracao do banco falhou"
 if [ -n "$PLANO_ROLES" ]; then
-    docker exec -i "$nome" psql -U supabase_admin -d postgres -X -q -v ON_ERROR_STOP=0 < "$entrada/roles.sql" >/dev/null 2>"$pasta/roles.log" || true
+    # O pg_dumpall grava a senha de cada papel, e a do supabase_admin e a da escola: aplicada sozinha, ela trancaria o
+    # ensaio fora do proprio banco. Na mesma sessao, a senha sorteada deste banco temporario volta (pela entrada do psql,
+    # nunca pela linha de comando).
+    { cat "$entrada/roles.sql"; printf "\nALTER ROLE supabase_admin WITH PASSWORD '%s';\n" "$senha"; } \
+        | docker exec -i "$nome" psql -U supabase_admin -h 127.0.0.1 -d postgres -X -q -v ON_ERROR_STOP=0 >/dev/null 2>"$pasta/roles.log" || true
 fi
 # Os privilegios padrao da imagem dariam a anon e authenticated acesso a tudo que o pg_restore recria (o pg_dump so grava
 # GRANTs): suspensos durante a restauracao, como no restore.sh, e conferidos no fim.
@@ -188,7 +200,7 @@ alter default privileges for role supabase_admin in schema public revoke all on 
 alter default privileges for role supabase_admin in schema public revoke all on sequences from postgres, anon, authenticated, service_role;
 alter default privileges for role supabase_admin in schema public revoke all on functions from postgres, anon, authenticated, service_role;
 SQL
-docker exec "$nome" pg_restore -U supabase_admin -d postgres --clean --if-exists --no-password /ensaio/postgres.dump 2>"$pasta/pg_restore.log" || true
+docker exec "$nome" pg_restore -U supabase_admin -h 127.0.0.1 -d postgres --clean --if-exists --no-password /ensaio/postgres.dump 2>"$pasta/pg_restore.log" || true
 erros_restore=$(grep -c 'ERROR' "$pasta/pg_restore.log" || true)
 if [ -n "${KIT_ENSAIO_GUARDAR_REGISTRO:-}" ]; then cp "$pasta/pg_restore.log" "$KIT_PASTA_ESTADO/ensaio-pg_restore.log"; fi
 psql_ensaio <<'SQL'

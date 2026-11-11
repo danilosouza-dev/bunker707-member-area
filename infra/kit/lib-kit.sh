@@ -24,7 +24,7 @@ SAI_OCUPADO=4      # outra operacao do backup esta rodando neste servidor
 SAI_CHAVE=5        # a senha ou a chave de recuperacao nao abre o backup
 SAI_PENDENTE=6     # o kit de recuperacao nao foi confirmado
 SAI_TERMINAL=7     # o passo mostra ou pede uma chave e so roda com uma pessoa no terminal
-SAI_DISCO=8        # falta espaco em disco para o ensaio
+SAI_DISCO=8        # falta espaco em disco ou memoria livre para o ensaio
 SAI_RESTAURANDO=9  # a instalacao espera a restauracao de um backup: o backup diario fica parado
 
 KIT_ARQUIVO_SITUACAO="$KIT_PASTA_ESTADO/situacao.json"
@@ -164,6 +164,35 @@ ler_chave_de_recuperacao() {
     chmod 600 "$destino"
     [ -s "$destino" ] || sair "$SAI_USO" "A chave de recuperacao veio vazia."
     KIT_ARQUIVO_CHAVE_EM_USO=$destino
+}
+
+# memoria_em_kb 512m|1g|300000k: um tamanho no formato do `docker --memory`, em KB (falha se nao e um tamanho).
+memoria_em_kb() {
+    [[ $1 =~ ^([0-9]{1,7})([kKmMgG]?)$ ]] || return 1
+    local n=$((10#${BASH_REMATCH[1]}))
+    case "${BASH_REMATCH[2]}" in
+        k|K) echo "$n" ;;
+        m|M) echo $((n * 1024)) ;;
+        g|G) echo $((n * 1048576)) ;;
+        *) echo $((n / 1024)) ;;
+    esac
+}
+
+# Sobras de um ensaio que parou sem limpar (queda de luz, kill -9, servidor reiniciado no meio): o container com o
+# rotulo do ensaio (e os volumes anonimos dele) e a pasta do ensaio, que guarda o banco restaurado em texto claro.
+# So com a trava do backup na mao, que garante que nenhum ensaio esta rodando agora. O ensaio chama no comeco, e o
+# backup diario tambem, para a sobra nao ficar no disco ate o ensaio seguinte.
+ensaio_limpar_sobras() {
+    local sobras=""
+    if command -v docker >/dev/null 2>&1; then
+        sobras=$(docker ps -aq --filter "label=$KIT_ENSAIO_ROTULO" 2>/dev/null || true)
+    fi
+    if [ -n "$sobras" ] || [ -e "$KIT_PASTA_BACKUP/ensaio" ]; then
+        log "Apagando o que sobrou de um ensaio de restauracao que parou no meio..."
+        # shellcheck disable=SC2086
+        [ -z "$sobras" ] || docker rm -f -v $sobras >/dev/null 2>&1 || true
+        rm -rf -- "$KIT_PASTA_BACKUP/ensaio"
+    fi
 }
 
 # Conta as contas do Auth no banco da escola (0 = instalacao vazia, recem-criada ou esperando restauracao).

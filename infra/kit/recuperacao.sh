@@ -27,7 +27,7 @@ for arg in "$@"; do
     case "$arg" in
         --nova) modo=nova ;;
         --conferir) modo=conferir ;;
-        -h|--help) sed -n 2,21p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,18p "$0"; exit 0 ;;
         *) sair "$SAI_USO" "opcao desconhecida: $arg (veja: membros kit-de-recuperacao --help)" ;;
     esac
 done
