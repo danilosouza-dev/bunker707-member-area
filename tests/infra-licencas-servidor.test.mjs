@@ -559,7 +559,16 @@ test("smoke: banco e Emissor saudaveis e /health ok passam; backup velho vira av
   assert.match(ok.stdout, /banco: 3 2 10 0001_emissor_inicial/);
   assert.match(ok.stdout, /Caddy: no ar\./);
   assert.match(ok.stdout, /ultimo backup: /);
+  assert.match(ok.stdout, /API interna da escola: desligada \(sem INTERNO_CREDENCIAL_HASH; o conectar-licencas liga\)\./);
   assert.doesNotMatch(ok.stderr, /AVISO/);
+
+  // Depois do conectar-licencas: quantas credenciais o Emissor aceita e quem o Caddy deixa chegar (o resumo nunca aparece).
+  const conectado = servidor({ envLicencas: { LICENCAS_INTERNO_IPS: "192.0.2.1/32" } });
+  writeFileSync(join(conectado.emissor, ".env"), `EMISSOR_PORTA_NO_HOST=8080\nINTERNO_CREDENCIAL_HASH='${"d".repeat(64)},${"e".repeat(64)}'\n`);
+  const ligado = conectado.run("smoke.sh");
+  assert.equal(ligado.status, 0, ligado.stderr);
+  assert.match(ligado.stdout, /API interna da escola: ligada, com 2 credencial\(is\) aceita\(s\); o Caddy deixa entrar 192\.0\.2\.1\/32\./);
+  assert.doesNotMatch(ligado.stdout, /dddddddd/);
 
   writeFileSync(join(s.backups, "ultimo-sucesso"), "2026-01-01T00:00:00Z\n");
   assert.match(s.run("smoke.sh").stderr, /AVISO: o ultimo backup \(2026-01-01T00:00:00Z\) tem mais de 2 horas/);

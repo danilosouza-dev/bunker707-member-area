@@ -332,3 +332,19 @@ test("conectar-licencas no Actions: a credencial so aparece no ::add-mask:: (o r
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("restaurar da escola ligada ao Emissor lembra o conectar-licencas (o IP muda); a escola que nao fala com o Emissor nao ganha o lembrete", { skip }, () => {
+  const lembrete = /a escola fala com o Emissor de licencas \(EMISSOR_INTERNO_URL\), que so aceita o IP de antes: rode conectar-licencas da main com CONFIRMAR=conectar/;
+  const voltar = (replies) => {
+    const c = setup({ images: [oldImage(801, "membros", "2026-11-03T19:26:00Z")] });
+    const r = c.runScript("restaurar.sh", { PAPEIS: "membros", ...(replies ? { SSH_SHIM_REPLIES: JSON.stringify(replies) } : {}) });
+    return { c, r };
+  };
+  const ligada = voltar([{ contem: "grep -qE '^EMISSOR_INTERNO_URL=.+'", saida: "sim\n" }]);
+  assert.equal(ligada.r.status, 0, ligada.r.stdout + ligada.r.stderr);
+  assert.match(ligada.r.stdout, lembrete);
+  assert.ok(!ligada.c.calls().some((x) => x.tool === "hcloud" && x.args.join(" ").includes("bunker707-licencas")), "o servidor do Emissor nao e tocado");
+  const sem = voltar();
+  assert.equal(sem.r.status, 0, sem.r.stderr);
+  assert.doesNotMatch(sem.r.stdout, lembrete);
+});

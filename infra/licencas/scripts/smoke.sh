@@ -19,6 +19,14 @@ if [ "$(docker inspect --format '{{.State.Running}}' bunker707-licencas-caddy 2>
 else
     warn "o Caddy (bunker707-licencas-caddy) nao esta rodando: os dois nomes nao respondem."
 fi
+# A API interna da nossa escola (conectar-licencas, docs/20 §8C.9): quantas credenciais o Emissor aceita e quem o Caddy deixa
+# chegar. So informa: o Emissor sem ela continua atendendo as Instalacoes.
+aceitas=$(ENV_FILE="$LICENCAS_EMISSOR_DIR/.env" env_value INTERNO_CREDENCIAL_HASH "" | tr ',' '\n' | grep -c '[0-9a-f]' || true)
+if [ "${aceitas:-0}" -gt 0 ]; then
+    echo "  API interna da escola: ligada, com $aceitas credencial(is) aceita(s); o Caddy deixa entrar $(env_value LICENCAS_INTERNO_IPS 127.0.0.1/32)."
+else
+    echo "  API interna da escola: desligada (sem INTERNO_CREDENCIAL_HASH; o conectar-licencas liga)."
+fi
 if systemctl is-active --quiet bunker707-licencas-backup.timer 2>/dev/null; then
     echo "  timer do backup: ligado (de hora em hora)."
 else
