@@ -90,6 +90,8 @@ export type ReasonContext = {
   /** O endereco da licenca e o configurado da Instalacao. */
   licenseHost: string | null;
   configuredHost: string | null;
+  /** O endereco por onde o dono e os administradores abriram o admin, quando nao e o da licenca. */
+  requestHost?: string | null;
 };
 
 /** A frase de um motivo (os do Emissor e os que a Instalacao conta sozinha). Motivo novo do Emissor: a frase geral. */
@@ -128,8 +130,13 @@ export function licenseReasonSentence(reason: Pick<LicenseReason, "reason" | "si
     }
     case "endereco_diferente": {
       const configured = normalizeHost(context.configuredHost);
-      return configured && context.licenseHost && configured !== context.licenseHost
-        ? `Esta escola está no endereço ${configured}, e a Licença é do endereço ${context.licenseHost}.`
+
+      if (configured && context.licenseHost && configured !== context.licenseHost) {
+        return `Esta escola está no endereço ${configured}, e a Licença é do endereço ${context.licenseHost}.`;
+      }
+
+      return context.requestHost && context.licenseHost
+        ? `O admin desta escola foi aberto pelo endereço ${context.requestHost}, e a Licença é do endereço ${context.licenseHost}.`
         : "Esta escola está num endereço diferente do endereço da Licença.";
     }
     case "licenca_ilegivel":
@@ -198,7 +205,8 @@ export function reasonContextOf(state: Extract<LicenseState, { mode: "enforce" }
     lastContactAt: license && license.delivery === "online" ? license.issuedAt : null,
     fileExpiresAt: license ? license.expiresAt : null,
     licenseHost: license ? license.installation.host : null,
-    configuredHost
+    configuredHost,
+    requestHost: state.requestHost
   };
 }
 

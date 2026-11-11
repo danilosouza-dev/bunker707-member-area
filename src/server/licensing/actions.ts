@@ -27,6 +27,7 @@ import { licensingMode, trustedRoots } from "./build-config";
 import { emissorClient, installationVersions } from "./client";
 import { forgetLicenseStateMemory } from "./current-state";
 import { MAX_LICENSE_FILE_BYTES, activateWithKey, deactivateInstallation, loadLicenseFile, type LicenseOperationDeps } from "./operations";
+import { currentRequestHost } from "./request-host";
 import { licenseActionHref, type LicenseActionOutcome } from "./screen-result";
 import { licenseStateDbOf } from "./store-db";
 import { runLicenseCheckInNow } from "./tick";
@@ -156,7 +157,9 @@ export async function uploadLicenseFile(formData: FormData): Promise<void> {
     async ({ access, input, user }) => {
       assertLicenseScreen(access);
       const text = await licenseFileText(input.arquivo, input.texto);
-      const outcome = text.ok ? await loadLicenseFile(operationDeps(), text.text) : { ok: false as const, error: text.code };
+      // O arquivo tem de ser do endereco por onde o admin foi aberto: a copia nunca ativada noutro dominio nao o adota.
+      const requestHost = await currentRequestHost();
+      const outcome = text.ok ? await loadLicenseFile({ ...operationDeps(), requestHost: () => requestHost }, text.text) : { ok: false as const, error: text.code };
       const back: LicenseActionOutcome = outcome.ok ? { code: "arquivo_carregado" } : { code: outcome.error };
 
       await afterLicenseAction(user.id, "license.file_loaded", back);

@@ -294,3 +294,76 @@ test("modo de observação: as ordens do Emissor (revogação, suspensão, desat
   observando.observeUntil = iso(AGORA - MINUTO);
   assert.equal(avaliar({ plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) } }).enforcedDegree, "escola_congelada");
 });
+
+// ---- O endereço era só a variável NEXT_PUBLIC_SITE_URL ------------------------------------------------------
+
+test("cópia noutro domínio com o NEXT_PUBLIC_SITE_URL no endereço da licença: os pedidos do dono pelo outro endereço levam à escada (revisão: endereço)", () => {
+  const T0 = Date.parse("2026-11-10T12:00:00.000Z");
+  const LICENCIADO = "https://alunos.escola.test";
+  let linha = instalacaoEmDia(T0, { expiresAt: iso(T0 + 90 * DIA) });
+  const observar = (pedido, agoraMs) =>
+    store.planRequestHostObservation(linha, { requestHost: pedido, roots: RAIZES, configuredHost: LICENCIADO, systemNow: new Date(agoraMs) });
+
+  // Antes da correção, a cópia ficava "em dia", com acesso novo, para sempre: o endereço configurado bate.
+  assert.equal(situacao(linha, T0 + HORA, LICENCIADO).evaluation.degree, "ok");
+
+  // O dono abre o admin da cópia pelo endereço dela: a primeira vez fica gravada, com a hora confiável.
+  const primeira = observar("pirata.example.com", T0 + HORA);
+  assert.deepEqual(primeira.outcome, "registrado");
+  assert.deepEqual(primeira.patch, { requestHost: { host: "pirata.example.com", since: new Date(T0 + HORA) } });
+  linha = { ...linha, ...primeira.patch };
+
+  // Os pedidos seguintes pelo mesmo endereço não gravam nada (nenhuma gravação por pedido).
+  assert.deepEqual(observar("PIRATA.example.com.", T0 + 2 * HORA), { patch: {}, outcome: "ja_registrado" });
+
+  // A escada do endereço diferente: Aviso sem acesso novo, Admin limitado em 7 dias, Escola congelada em 30.
+  const aviso = situacao(linha, T0 + 2 * HORA, LICENCIADO);
+  assert.equal(aviso.evaluation.degree, "aviso");
+  assert.equal(aviso.evaluation.restrictions.newAccess, true);
+  assert.ok(aviso.evaluation.reasons.some((item) => item.reason === "endereco_diferente" && item.since === iso(T0 + HORA)));
+  assert.equal(situacao(linha, T0 + HORA + 8 * DIA, LICENCIADO).evaluation.degree, "admin_limitado");
+  assert.equal(situacao(linha, T0 + HORA + 31 * DIA, LICENCIADO).evaluation.degree, "escola_congelada");
+
+  // O tick não apaga a marca dos pedidos só porque o endereço configurado bate.
+  const rodada = store.planLicenseTick(linha, { roots: RAIZES, configuredHost: LICENCIADO, systemNow: new Date(T0 + 3 * HORA) });
+  assert.equal("requestHost" in rodada.patch, false);
+
+  // Sai como o §2.2 diz: a escola volta ao endereço da licença (o pedido do dono pelo endereço dela apaga a marca)...
+  const voltou = observar("alunos.escola.test", T0 + 4 * HORA);
+  assert.deepEqual(voltou, { patch: { requestHost: null }, outcome: "voltou" });
+  assert.equal(situacao({ ...linha, ...voltou.patch }, T0 + 4 * HORA, LICENCIADO).evaluation.degree, "ok");
+
+  // ...ou a licença passa a ser do endereço em que a escola está (troca de endereço): o tick apaga a marca.
+  const trocada = assinar(licencaBase({ issuedAt: iso(T0 + 5 * HORA), expiresAt: iso(T0 + 90 * DIA), installation: { id: "inst_0001", host: "pirata.example.com" } }));
+  const depoisDaTroca = store.planLicenseTick(
+    { ...linha, token: trocada, newestIssuedAt: new Date(T0 + 5 * HORA) },
+    { roots: RAIZES, configuredHost: "https://pirata.example.com", systemNow: new Date(T0 + 5 * HORA) }
+  );
+  assert.equal(depoisDaTroca.patch.requestHost, null);
+
+  // Pedido interno, por IP ou sem nome público, não conta; sem licença legível, não há com o que comparar.
+  for (const interno of ["localhost:3000", "127.0.0.1:3000", "app:3000", "10.0.0.5", null, ""]) {
+    assert.deepEqual(observar(interno, T0 + 6 * HORA).patch, {}, String(interno));
+  }
+  assert.deepEqual(
+    store.planRequestHostObservation({ ...linha, token: null }, { requestHost: "pirata.example.com", roots: RAIZES, configuredHost: LICENCIADO, systemNow: new Date(T0) }).patch,
+    {}
+  );
+});
+
+test("cópia nunca ativada não adota a licença por arquivo de um endereço em que ela não está (revisão: endereço)", () => {
+  const LICENCIADO = "https://alunos.escola.test";
+  const arquivo = assinar(licencaBase({ delivery: "file", issuedAt: "2026-11-10T12:00:00.000Z", expiresAt: "2027-02-08T12:00:00.000Z" }));
+  const carregar = (pedido, configurado = LICENCIADO) =>
+    store.planLicenseFile(null, { token: arquivo, roots: RAIZES, configuredHost: configurado, requestHost: pedido });
+
+  // A cópia mantém o endereço configurado no da licença, mas é aberta por outro: antes da correção, adotava o arquivo.
+  assert.deepEqual(carregar("pirata.example.com").outcome, { accepted: false, result: "endereco_diferente" });
+  assert.deepEqual(carregar(null).outcome, { accepted: false, result: "endereco_diferente" }, "sem o endereço do pedido, fecha");
+  assert.deepEqual(carregar("alunos.escola.test", "https://pirata.example.com").outcome, { accepted: false, result: "endereco_diferente" });
+
+  // A Instalação de verdade, no endereço da licença, adota.
+  const aceita = carregar("alunos.escola.test");
+  assert.equal(aceita.outcome.accepted, true);
+  assert.equal(aceita.patch.installationId, "inst_0001");
+});

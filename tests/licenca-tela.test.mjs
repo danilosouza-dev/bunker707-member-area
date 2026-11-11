@@ -40,6 +40,9 @@ registerHooks({
         export async function readCurrentLicenseState() { return globalThis.__licencaTela.situacao; }
         export function forgetLicenseStateMemory() { globalThis.__licencaTela.esquecida += 1; }`);
     }
+    if (modulo === "server/licensing/request-host") {
+      return stub(`export async function currentRequestHost() { return globalThis.__licencaTela.host ?? "alunos.escola.test"; }`);
+    }
     if (modulo === "server/licensing/store-db") {
       return stub(`
         export const LICENSE_STATE_MIGRATION = "202611100001";
@@ -124,6 +127,8 @@ function dependencias(banco, extra = {}) {
     client: () => cliente,
     roots: () => RAIZES,
     configuredHost: () => ENDERECO,
+    // O admin aberto pelo endereço da licença (o pedido que envia a licença por arquivo).
+    requestHost: () => HOST,
     now: () => new Date((relogio += 1_000)),
     ...extra
   };
@@ -412,6 +417,10 @@ test("licença por arquivo na Instalação nunca ativada: vale como licença (o 
   const banco = bancoDaLicenca(VAZIO);
   const arquivo = porArquivo({ id: "inst_doarquivo01", host: HOST });
 
+  // A cópia aberta por outro endereço, com o endereço configurado no da licença, não adota o arquivo.
+  assert.deepEqual(await loadLicenseFile(dependencias(banco, { requestHost: () => "pirata.example.com" }), arquivo), { ok: false, error: "endereco_diferente" });
+  assert.equal(banco.linha, null);
+
   assert.equal((await loadLicenseFile(dependencias(banco), arquivo)).ok, true);
   assert.equal(banco.linha.installationId, "inst_doarquivo01");
   assert.equal(banco.linha.everActivated, true);
@@ -529,8 +538,20 @@ test("Verificar agora pela ação em Escola congelada: passa (dever legal) e con
 });
 
 test("licença por arquivo pela ação: o arquivo escolhido ou o texto colado; vazio e grande demais voltam com a frase", async () => {
-  const banco = prepararAcao({ situacao: situacaoCom(null) });
   const arquivo = porArquivo({ id: "inst_doarquivo02", host: HOST });
+
+  // O admin aberto por outro endereço (a cópia nunca ativada noutro domínio): a ação manda o endereço do pedido, e o
+  // arquivo não é adotado.
+  tela.host = "pirata.example.com";
+  const copia = prepararAcao({ situacao: situacaoCom(null) });
+  try {
+    assert.equal(await rodar(actions.uploadLicenseFile, formulario({ texto: arquivo })), "/admin/configuracoes/licenca?resultado=endereco_diferente");
+    assert.equal(copia.linha, null);
+  } finally {
+    delete tela.host;
+  }
+
+  const banco = prepararAcao({ situacao: situacaoCom(null) });
 
   assert.equal(
     await rodar(actions.uploadLicenseFile, formulario({ arquivo: new File([`${arquivo}\n`], "licenca.txt", { type: "text/plain" }) })),

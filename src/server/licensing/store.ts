@@ -9,6 +9,10 @@
 //   como esta: a avaliacao a conta como ha muito tempo. Data no futuro (o banco mexido, ou a hora que voltou depois de
 //   um salto do relogio do Emissor) volta para a hora que a rodada gravaria: no futuro, ela contava como agora para
 //   sempre e parava a escada no Aviso (revisao de 11/11/2026);
+// - requestHost e o endereco por onde chegaram pedidos do dono e dos administradores, quando nao e o da licenca, com a
+//   primeira vez (planRequestHostObservation, chamado pelo layout do admin). So grava quando muda: a primeira vez, outro
+//   endereco, ou a volta ao endereco da licenca, que a apaga. A rodada do tick tambem a apaga quando a licenca passa a ser
+//   do endereco em que a escola esta (a troca de endereco), e traz para agora o "desde quando" no futuro;
 // - lastSeenAt so avanca, e so pela tarefa do tick (planLicenseTick): um minuto por rodada, a partir do maior
 //   instante que a Instalacao sabe que ja passou (ela mesma, a emissao da licenca, a ultima conferencia). Nunca e
 //   copiada do relogio do servidor. Uma conferencia boa a realinha com a hora assinada pelo Emissor, para a frente
@@ -31,8 +35,8 @@
 
 import { verifyLicenseToken } from "./artifact";
 import type { LicensingMode } from "./build-config";
-import { sameHost } from "./evaluate";
-import { DAY_MS, type LicensePayload, type TrustedRoot } from "./model";
+import { normalizeHost, sameHost } from "./evaluate";
+import { DAY_MS, hostSchema, type LicensePayload, type TrustedRoot } from "./model";
 import {
   EMPTY_LICENSE_SNAPSHOT,
   checkLicenseToken,
@@ -144,6 +148,7 @@ export function snapshotOf(record: LicenseStateRecord | null): LicenseStoreSnaps
     lastSeenAt: record.lastSeenAt,
     lastCheckIn: record.lastCheckIn,
     hostMismatchSince: record.hostMismatchSince,
+    requestHost: record.requestHost,
     newestIssuedAt: record.newestIssuedAt
   };
 }
@@ -385,7 +390,17 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
     }
   }
 
-  // 5. A conferencia, decidida sobre a linha como ela fica, e reservada na mesma gravacao.
+  // 5. O endereco dos pedidos do dono e dos administradores: apagado quando a licenca passa a ser dele (a troca de endereco
+  // do §2.3 chegou), e com o "desde quando" no futuro trazido para a hora que a rodada gravaria.
+  if (license && current.requestHost) {
+    if (sameHost(license.installation.host, current.requestHost.host)) {
+      patch.requestHost = null;
+    } else if (sinceAfter(current.requestHost.since, stampMs)) {
+      patch.requestHost = { host: current.requestHost.host, since: new Date(stampMs as number) };
+    }
+  }
+
+  // 6. A conferencia, decidida sobre a linha como ela fica, e reservada na mesma gravacao.
   const checkIn = checkInDecision({ ...current, ...patch }, input.systemNow);
 
   if (checkIn.due && systemMs !== null) {
@@ -394,6 +409,89 @@ export function planLicenseTick(record: LicenseStateRecord | null, input: Licens
   }
 
   return { patch, state, checkIn };
+}
+
+// ---- O endereco dos pedidos do dono e dos administradores ---------------------------------------------
+
+/**
+ * O endereco de um pedido como ele conta para a licenca: o nome publico (o mesmo formato do endereco da licenca), com a
+ * porta quando nao e a 443. Pedido interno, por IP, de localhost ou sem ponto no nome nao conta: null.
+ */
+export function publicRequestHost(value: string | null | undefined): string | null {
+  const host = normalizeHost(value);
+
+  if (host === null) {
+    return null;
+  }
+
+  const name = host.replace(/:\d+$/, "");
+  return hostSchema.safeParse(name).success ? host : null;
+}
+
+/**
+ * O que a observacao de um pedido do dono ou de um administrador fez: sem licenca legivel (nada a comparar); pedido fora
+ * do nome publico (nao conta); no endereco da licenca (nada a gravar) ou de volta a ele (apaga a marca); a primeira vez
+ * por outro endereco (grava); de novo pelo mesmo (nada a gravar) ou por um terceiro (troca o endereco, mantem desde
+ * quando).
+ */
+export type RequestHostOutcome = "sem_licenca" | "fora_do_proxy" | "no_endereco" | "voltou" | "registrado" | "ja_registrado" | "outro_endereco";
+
+export type RequestHostObservationInput = {
+  /** O nome do pedido (X-Forwarded-Host ou Host). */
+  requestHost: string | null;
+  roots: readonly TrustedRoot[];
+  configuredHost: string | null;
+  systemNow: Date;
+};
+
+/**
+ * Um pedido do dono ou de um administrador chegou por este endereco (docs/32 §2.2 e §11.3, "O endereco"). A copia do
+ * servidor noutro dominio mantem a variavel NEXT_PUBLIC_SITE_URL no endereco da licenca, mas quem a usa a abre pelo
+ * endereco dela: so o endereco configurado nao bastava (revisao de 11/11/2026). Grava a primeira vez, com a hora
+ * confiavel, e so grava quando algo muda: nenhuma gravacao por pedido. Sai como o §2.2 manda: um pedido deles pelo
+ * endereco da licenca apaga a marca (a escola voltou ao endereco dela), e a troca de endereco tambem (planLicenseTick).
+ */
+export function planRequestHostObservation(record: LicenseStateRecord | null, input: RequestHostObservationInput): LicensePlan<RequestHostOutcome> {
+  const current = record ?? EMPTY_LICENSE_RECORD;
+  const state = computeLicenseState({
+    mode: "enforce",
+    roots: input.roots,
+    snapshot: snapshotOf(current),
+    systemNow: input.systemNow,
+    configuredHost: input.configuredHost
+  });
+
+  if (state.mode !== "enforce" || !state.license) {
+    return { patch: {}, outcome: "sem_licenca" };
+  }
+
+  const host = publicRequestHost(input.requestHost);
+
+  if (host === null) {
+    return { patch: {}, outcome: "fora_do_proxy" };
+  }
+
+  if (host === state.license.installation.host) {
+    return current.requestHost === null ? { patch: {}, outcome: "no_endereco" } : { patch: { requestHost: null }, outcome: "voltou" };
+  }
+
+  const stampMs = validMs(state.clock.now) ?? validMs(input.systemNow);
+
+  if (stampMs === null) {
+    return { patch: {}, outcome: "ja_registrado" };
+  }
+
+  if (current.requestHost === null) {
+    return { patch: { requestHost: { host, since: new Date(stampMs) } }, outcome: "registrado" };
+  }
+
+  const since = sinceAfter(current.requestHost.since, stampMs) ? new Date(stampMs) : current.requestHost.since;
+
+  if (current.requestHost.host !== host) {
+    return { patch: { requestHost: { host, since } }, outcome: "outro_endereco" };
+  }
+
+  return since === current.requestHost.since ? { patch: {}, outcome: "ja_registrado" } : { patch: { requestHost: { host, since } }, outcome: "registrado" };
 }
 
 // ---- O resultado da conferencia -----------------------------------------------------------------------
@@ -722,13 +820,17 @@ export type LicenseFileInput = {
   roots: readonly TrustedRoot[];
   /** O endereco configurado da Instalacao: o arquivo tem de ser dele. */
   configuredHost: string | null;
+  /** O endereco do pedido que enviou o arquivo (o admin aberto pelo nome publico): o arquivo tem de ser dele tambem. */
+  requestHost: string | null;
 };
 
 /**
  * A licenca por arquivo (docs/32 §2.3 e docs/protocolo.md, "A licenca por arquivo"), enviada pela tela Licenca: vale
  * como licenca, nunca como conferencia. So aceita a que confere com as raizes, foi baixada como arquivo
  * (`delivery: "file"`, sem nonce), e deste endereco e desta Instalacao (quando ja ha uma) e nao e mais antiga que a mais
- * nova ja aceita. Nao mexe na ultima conferencia nem na ultima hora vista (quem anda a hora e o tick, a partir da
+ * nova ja aceita. "Deste endereco" e o configurado e o do pedido que enviou o arquivo: a copia nunca ativada noutro
+ * dominio, com a variavel no endereco da licenca, nao adota o arquivo de uma escola em que ela nao esta (revisao de
+ * 11/11/2026). Nao mexe na ultima conferencia nem na ultima hora vista (quem anda a hora e o tick, a partir da
  * emissao assinada do arquivo) nem na reserva da conversa com o Emissor.
  */
 export function planLicenseFile(record: LicenseStateRecord | null, input: LicenseFileInput): LicensePlan<CheckInOutcome> {
@@ -746,7 +848,7 @@ export function planLicenseFile(record: LicenseStateRecord | null, input: Licens
     return refuse("nao_e_arquivo");
   }
 
-  if (!sameHost(license.installation.host, input.configuredHost)) {
+  if (!sameHost(license.installation.host, input.configuredHost) || !sameHost(license.installation.host, input.requestHost)) {
     return refuse("endereco_diferente");
   }
 

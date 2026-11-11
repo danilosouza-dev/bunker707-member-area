@@ -222,10 +222,13 @@ export const MAX_LICENSE_FILE_BYTES = 32 * 1024;
 
 /**
  * Carregar a licenca por arquivo (docs/32 §2.3): para o servidor que nao consegue falar com o Emissor. Conferida aqui,
- * com as raizes gravadas no produto, e gravada como licenca, nunca como conferencia (planLicenseFile). Nao fala com o
- * Emissor.
+ * com as raizes gravadas no produto, e gravada como licenca, nunca como conferencia (planLicenseFile). O arquivo tem de
+ * ser do endereco configurado e do endereco por onde o admin foi aberto (requestHost). Nao fala com o Emissor.
  */
-export async function loadLicenseFile(deps: Pick<LicenseOperationDeps, "db" | "roots" | "configuredHost">, text: string): Promise<LicenseFileOutcome> {
+export async function loadLicenseFile(
+  deps: Pick<LicenseOperationDeps, "db" | "roots" | "configuredHost"> & { requestHost: () => string | null },
+  text: string
+): Promise<LicenseFileOutcome> {
   const token = text.trim();
 
   if (token.length === 0) {
@@ -238,7 +241,8 @@ export async function loadLicenseFile(deps: Pick<LicenseOperationDeps, "db" | "r
 
   const roots = deps.roots();
   const configuredHost = deps.configuredHost();
-  const recorded = await mutateLicenseState(deps.db(), (record) => planLicenseFile(record, { token, roots, configuredHost }));
+  const requestHost = deps.requestHost();
+  const recorded = await mutateLicenseState(deps.db(), (record) => planLicenseFile(record, { token, roots, configuredHost, requestHost }));
 
   if (!recorded) {
     return { ok: false, error: "disputada" };

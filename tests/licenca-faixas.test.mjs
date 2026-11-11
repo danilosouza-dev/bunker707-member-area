@@ -152,6 +152,16 @@ test("endereço diferente do da licença: os dois endereços, e o acesso novo pa
   assert.ok(modelo.lines.includes(copy.LICENSE_PAUSE_OFFERS));
 });
 
+test("endereço configurado certo, mas o admin aberto por outro: a faixa diz o endereço do pedido e o da licença", () => {
+  const estado = situacao({}, { snapshot: { requestHost: { host: "pirata.example.com", since: new Date("2026-11-11T11:00:00.000Z") } } });
+  const modelo = faixa(estado);
+
+  assert.equal(estado.requestHost, "pirata.example.com");
+  assert.equal(modelo.degree, "aviso");
+  assert.equal(modelo.lines[0], "O admin desta escola foi aberto pelo endereço pirata.example.com, e a Licença é do endereço alunos.escola.test.");
+  assert.equal(modelo.lines[1], copy.LICENSE_NEW_ACCESS_STOPPED);
+});
+
 test("licença guardada ilegível: Aviso, nenhum acesso novo, e a data desde quando", () => {
   const ilegivel = computeLicenseState({
     mode: "enforce",

@@ -24,6 +24,8 @@ const sqlCodeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/
 const codeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
 
 const MIGRATION = "supabase/migrations/202611100001_license_state.sql";
+/** O endereço dos pedidos do dono e dos administradores (revisão de 11/11/2026): só acrescenta duas colunas. */
+const REQUEST_HOST_MIGRATION = "supabase/migrations/202611110001_license_state_request_host.sql";
 const LICENSING = "src/server/licensing/";
 
 function sourceFiles(directory) {
@@ -95,10 +97,33 @@ test("as migrações até a 202611010001 continuam byte a byte (a 202611100001 s
   assert.ok(files.includes("202611100001_license_state.sql"));
 });
 
+test("a 202611110001: uma seção MCP, idempotente, só duas colunas novas e dois checks nomeados dentro de if not exists", () => {
+  const migration = read(REQUEST_HOST_MIGRATION);
+  const code = sqlCodeOf(migration);
+
+  assert.equal((migration.match(/^ \* \d\. .+ MCP\.$/gm) ?? []).length, 1, "uma seção, marcada MCP");
+  assert.match(migration, /^-- Idempotente: pode ser executada mais de uma vez sem efeito colateral\.$/m);
+  assert.doesNotMatch(migration, /popup_design/);
+  assert.doesNotMatch(code, /\bpublic\.webinars?\b|\bpublic\.webinar_\w+/);
+  for (const proibido of [/\bdrop\b/i, /\bdelete\s+from\b/i, /\bcreate\s+(?:or\s+replace\s+)?function\b/i, /\bcreate\s+policy\b|\balter\s+policy\b/i, /storage\.objects/i, /\btruncate\b/i, /security\s+definer/i, /\bgrant\b/i, /\bcreate table\b/i]) {
+    assert.doesNotMatch(code, proibido);
+  }
+
+  assert.deepEqual(
+    [...code.matchAll(/alter table public\.license_state add column if not exists ([a-z_]+) (text|timestamptz);/g)].map((match) => `${match[1]} ${match[2]}`),
+    ["request_host text", "request_host_since timestamptz"]
+  );
+  assert.match(code, /add constraint license_state_request_host_size check \(request_host is null or char_length\(request_host\) between 1 and 260\);/);
+  assert.match(code, /add constraint license_state_request_host_pair check \(\(request_host is null\) = \(request_host_since is null\)\);/);
+  assert.equal((code.match(/\bcheck \(/g) ?? []).length, 2);
+  assert.equal((code.match(/if not exists \(\s*select 1 from pg_constraint\s*where conname = 'license_state_request_host_(?:size|pair)' and conrelid = 'public\.license_state'::regclass\s*\) then/g) ?? []).length, 2);
+});
+
 test("o adaptador lê e grava só colunas que a tabela tem, e a tabela não tem coluna que o adaptador esqueça", () => {
   const code = sqlCodeOf(read(MIGRATION));
   const body = code.slice(code.indexOf("create table if not exists public.license_state ("), code.indexOf("constraint license_state_single_row"));
-  const tableColumns = [...body.matchAll(/^\s+([a-z_]+) (?:smallint|text|boolean|timestamptz|integer)\b/gm)].map((match) => match[1]).sort();
+  const added = [...sqlCodeOf(read(REQUEST_HOST_MIGRATION)).matchAll(/alter table public\.license_state add column if not exists ([a-z_]+) /g)].map((match) => match[1]);
+  const tableColumns = [...body.matchAll(/^\s+([a-z_]+) (?:smallint|text|boolean|timestamptz|integer)\b/gm)].map((match) => match[1]).concat(added).sort();
   const adapter = read(`${LICENSING}store-db.ts`);
   const adapterColumns = adapter.match(/const COLUMNS =\s*"([^"]+)";/)[1].split(",").map((column) => column.trim()).sort();
 
@@ -120,8 +145,12 @@ test("quem grava: só o job do tick roda a rodada; ele, a situação do pedido e
     "src/server/jobs/license-check-in-job.ts",
     `${LICENSING}actions.ts`,
     `${LICENSING}current-state.ts`,
+    // O endereço dos pedidos do dono e dos administradores (planRequestHostObservation), só quando muda.
+    `${LICENSING}request-host.ts`,
     `${LICENSING}store-db.ts`
   ]);
+  assert.deepEqual(importers(/\bplanRequestHostObservation\b/), [`${LICENSING}request-host.ts`, `${LICENSING}store.ts`]);
+  assert.deepEqual(importers(/\bobserveAdminRequestHost\b/), ["src/app/admin/(v2)/layout.tsx", `${LICENSING}request-host.ts`]);
   assert.deepEqual(importers(/\blicense_state\b/), [`${LICENSING}store-db.ts`], "a tabela só é tocada pelo adaptador");
   // A conferência fora da rodada (Verificar agora) e as conversas da tela passam pela mesma reserva do store.
   assert.deepEqual(importers(/\brunLicenseCheckInNow\b/), [`${LICENSING}actions.ts`, `${LICENSING}tick.ts`]);
@@ -140,7 +169,7 @@ test("o segredo da Instalação só aparece no Verificador que fala com o banco 
 });
 
 test("as regras ficam puras e o que toca no banco ou no Emissor é server-only", () => {
-  for (const name of ["store.ts", "tick.ts", "state.ts", "operations.ts", "copy.ts", "screen-view.ts", "screen-result.ts", "degree-notice.ts", "admin-access.ts", "request-ids.ts"]) {
+  for (const name of ["store.ts", "tick.ts", "state.ts", "operations.ts", "copy.ts", "screen-view.ts", "screen-result.ts", "degree-notice.ts", "admin-access.ts", "request-ids.ts", "node-start.ts"]) {
     const source = read(`${LICENSING}${name}`);
     assert.doesNotMatch(source, /^import "server-only";/m, `${name} carrega pelo Node`);
     assert.doesNotMatch(source, /from "@\//, `${name} sem o alias "@/"`);
@@ -155,6 +184,7 @@ test("as regras ficam puras e o que toca no banco ou no Emissor é server-only",
     `${LICENSING}store-db.ts`,
     `${LICENSING}current-state.ts`,
     `${LICENSING}degree-email.ts`,
+    `${LICENSING}request-host.ts`,
     "src/server/jobs/license-check-in-job.ts"
   ]) {
     assert.match(read(path), /^import "server-only";/m, path);

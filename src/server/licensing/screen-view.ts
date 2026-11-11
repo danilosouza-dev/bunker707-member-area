@@ -118,7 +118,7 @@ export function licenseScreenView(input: LicenseScreenInput): LicenseScreenView 
     provisional: evaluation.provisional,
     licenseHost: license?.installation.host ?? null,
     configuredHost,
-    hostMismatch: Boolean(license && configuredHost !== license.installation.host),
+    hostMismatch: Boolean(license && (configuredHost !== license.installation.host || state.requestHost !== null)),
     delivery: license?.delivery ?? null,
     lastContact: license && license.delivery === "online" ? formatLicenseDateTime(license.issuedAt) : null,
     validWithoutContactUntil: license ? formatLicenseDate(license.expiresAt) : null,

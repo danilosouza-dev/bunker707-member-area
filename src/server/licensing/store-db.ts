@@ -1,6 +1,6 @@
 import "server-only";
 
-// O adaptador do Supabase para a tabela license_state (migracao 202611100001; regras em store.ts). Uma linha so
+// O adaptador do Supabase para a tabela license_state (migracoes 202611100001 e 202611110001; regras em store.ts). Uma linha so
 // (id = 1), lida e gravada pelo cliente com a service role: anon e authenticated nao tem nenhum privilegio nela.
 //
 // - Data guardada que nao e data para o JavaScript (o `infinity` do Postgres, ano fora do alcance) volta como
@@ -16,11 +16,12 @@ import { toDbError } from "../db/pending-migration";
 import type { LicenseStateDb, LicenseStatePatch, LicenseStateRecord } from "./store";
 
 export const LICENSE_STATE_TABLE = "license_state";
-export const LICENSE_STATE_MIGRATION = "202611100001";
+/** A migracao mais nova que o adaptador precisa (o endereco dos pedidos do dono e dos administradores). */
+export const LICENSE_STATE_MIGRATION = "202611110001";
 const ROW_ID = 1;
 
 const COLUMNS =
-  "token, ever_activated, unreadable_since, last_seen_at, last_check_in_emissor_at, last_check_in_local_at, host_mismatch_since, newest_issued_at, installation_id, installation_secret, check_in_sequence, check_in_attempted_at, check_in_result, check_in_requested_at, version";
+  "token, ever_activated, unreadable_since, last_seen_at, last_check_in_emissor_at, last_check_in_local_at, host_mismatch_since, request_host, request_host_since, newest_issued_at, installation_id, installation_secret, check_in_sequence, check_in_attempted_at, check_in_result, check_in_requested_at, version";
 
 type LicenseStateRow = {
   token: string | null;
@@ -30,6 +31,8 @@ type LicenseStateRow = {
   last_check_in_emissor_at: string | null;
   last_check_in_local_at: string | null;
   host_mismatch_since: string | null;
+  request_host: string | null;
+  request_host_since: string | null;
   newest_issued_at: string | null;
   installation_id: string | null;
   installation_secret: string | null;
@@ -72,6 +75,7 @@ export function licenseRecordOfRow(row: LicenseStateRow): LicenseStateRecord {
     lastSeenAt: dateOf(row.last_seen_at),
     lastCheckIn: emissorTime && localTime ? { emissorTime, localTime } : null,
     hostMismatchSince: dateOf(row.host_mismatch_since),
+    requestHost: row.request_host && row.request_host_since !== null ? { host: row.request_host, since: dateOf(row.request_host_since) as Date } : null,
     newestIssuedAt: dateOf(row.newest_issued_at),
     installationId: row.installation_id,
     installationSecret: row.installation_secret,
@@ -96,6 +100,11 @@ export function licenseColumnsOfPatch(patch: LicenseStatePatch): Record<string, 
     columns.last_check_in_local_at = isoOf(patch.lastCheckIn?.localTime, "last_check_in_local_at");
   }
   if ("hostMismatchSince" in patch) columns.host_mismatch_since = isoOf(patch.hostMismatchSince, "host_mismatch_since");
+  if ("requestHost" in patch) {
+    // O endereco e o "desde quando" andam juntos (o check license_state_request_host_pair).
+    columns.request_host = patch.requestHost?.host ?? null;
+    columns.request_host_since = isoOf(patch.requestHost?.since, "request_host_since");
+  }
   if ("newestIssuedAt" in patch) columns.newest_issued_at = isoOf(patch.newestIssuedAt, "newest_issued_at");
   if ("installationId" in patch) columns.installation_id = patch.installationId ?? null;
   if ("installationSecret" in patch) columns.installation_secret = patch.installationSecret ?? null;

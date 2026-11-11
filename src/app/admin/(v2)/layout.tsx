@@ -20,6 +20,7 @@ import { isLicenseManager } from "@/server/licensing/admin-access";
 import { licenseBannerOf, type LicenseBannerModel } from "@/server/licensing/copy";
 import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import { getDisabledFeatures } from "@/server/licensing/guards";
+import { observeAdminRequestHost } from "@/server/licensing/request-host";
 
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
@@ -39,6 +40,13 @@ export const metadata: Metadata = {
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
   const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
+
+  // A Licenca confere o endereco por onde o dono e os administradores abrem o admin (docs/32 §2.2): so no modo
+  // "enforce", sem gravar nada quando nada mudou, e nunca derruba a moldura.
+  if (isLicenseManager(access)) {
+    await observeAdminRequestHost();
+  }
+
   // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
   // Os modulos desligados na licenca (docs/32 §11.8): o menu e a busca escondem as telas deles. No modo "off", nenhum.
   const [allCounts, products, cookieStore, disabledFeatures, licenseBanner] = await Promise.all([

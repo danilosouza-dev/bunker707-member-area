@@ -6,7 +6,7 @@
 
 import { verifyLicenseToken, type LicenseVerificationError } from "./artifact";
 import type { LicensingMode } from "./build-config";
-import { evaluateLicense, resolveTrustedNow, type LicenseEvaluation, type TrustedClock } from "./evaluate";
+import { evaluateLicense, resolveTrustedNow, sameHost, type LicenseEvaluation, type TrustedClock } from "./evaluate";
 import type { LicensePayload, TrustedRoot } from "./model";
 
 /** O que a Instalacao guarda sobre a propria licenca (uma linha da tabela license_state). */
@@ -21,8 +21,14 @@ export type LicenseStoreSnapshot = {
   lastSeenAt: Date | null;
   /** A ultima conferencia boa: a hora assinada pelo Emissor e a hora local naquele momento. */
   lastCheckIn: { emissorTime: Date; localTime: Date } | null;
-  /** Desde quando a Instalacao esta fora do endereco da licenca (configurado ou pedidos repetidos). */
+  /** Desde quando o endereco configurado esta fora do endereco da licenca (o tick grava e apaga). */
   hostMismatchSince: Date | null;
+  /**
+   * O endereco por onde chegaram pedidos do dono e dos administradores, diferente do da licenca, e desde quando (a
+   * primeira vez, com a hora confiavel). Gravado por planRequestHostObservation (store.ts), so quando muda; apagado
+   * quando um pedido deles chega pelo endereco da licenca ou quando a licenca passa a ser deste endereco.
+   */
+  requestHost: { host: string; since: Date } | null;
   /**
    * A data de emissao da licenca mais nova ja aceita. Contrato do store: sobe a cada licenca aceita e nunca
    * desce. Uma licenca mais antiga que ela nao vale: devolver a licenca de ontem, de antes de uma desativacao,
@@ -38,6 +44,7 @@ export const EMPTY_LICENSE_SNAPSHOT: LicenseStoreSnapshot = Object.freeze({
   lastSeenAt: null,
   lastCheckIn: null,
   hostMismatchSince: null,
+  requestHost: null,
   newestIssuedAt: null
 });
 
@@ -50,6 +57,8 @@ export type LicenseState =
       license: LicensePayload | null;
       /** Por que a licenca guardada nao vale; null quando vale ou quando nao ha licenca. */
       verificationError: LicenseVerificationError | "licenca_antiga" | null;
+      /** O endereco por onde chegaram pedidos do dono e dos administradores, quando diferente do da licenca (as frases). */
+      requestHost: string | null;
     };
 
 export type LicenseTokenCheck =
@@ -118,8 +127,10 @@ export function computeLicenseState(input: ComputeLicenseStateInput): LicenseSta
     unreadableSince: license ? null : snapshot.unreadableSince,
     now: clock.now,
     configuredHost: input.configuredHost,
-    hostMismatchSince: snapshot.hostMismatchSince
+    hostMismatchSince: snapshot.hostMismatchSince,
+    requestHost: snapshot.requestHost
   });
+  const requestHost = license && snapshot.requestHost && !sameHost(license.installation.host, snapshot.requestHost.host) ? snapshot.requestHost.host : null;
 
-  return { mode: "enforce", evaluation, clock, license, verificationError };
+  return { mode: "enforce", evaluation, clock, license, verificationError, requestHost };
 }

@@ -243,11 +243,16 @@ export type LicenseEvaluationInput = {
   /** O endereco configurado da Instalacao, o mesmo que monta os links dos e-mails. */
   configuredHost: string | null;
   /**
-   * Desde quando a Instalacao esta fora do endereco da licenca: o configurado diferente, ou os pedidos do admin
-   * chegando repetidamente por outro endereco. O store grava na primeira vez; null ou no futuro contam como
-   * agora, invalido conta como ha muito tempo.
+   * Desde quando o endereco configurado esta fora do endereco da licenca. O store grava na primeira vez; null ou no
+   * futuro contam como agora, invalido conta como ha muito tempo.
    */
   hostMismatchSince: Date | null;
+  /**
+   * O endereco por onde chegaram pedidos do dono e dos administradores e desde quando (a primeira vez). Conta como
+   * endereco diferente quando nao e o da licenca: a copia noutro dominio mantem a variavel no endereco da licenca, mas
+   * e aberta pelo dela (revisao de 11/11/2026). "Desde quando" no futuro conta como agora; invalido, como ha muito tempo.
+   */
+  requestHost?: { host: string; since: Date } | null;
 };
 
 /** O menor instante que uma Date aceita: "ha muito tempo" sem quebrar toISOString. */
@@ -471,12 +476,18 @@ export function evaluateLicense(input: LicenseEvaluationInput): LicenseEvaluatio
     nextCandidates.push({ degree: "escola_congelada", at: isoOf(expiresMs + EXPIRED_FILE_FROZEN_AFTER_MS), reason: "arquivo_vencido" });
   }
 
-  // 3. Endereco: o configurado tem de ser o da licenca, e os pedidos do admin tambem.
-  const configuredMismatch = !sameHost(license.installation.host, input.configuredHost);
-  const hostMismatch = configuredMismatch || input.hostMismatchSince !== null;
+  // 3. Endereco: o configurado tem de ser o da licenca, e os pedidos do dono e dos administradores tambem. A escada conta
+  // da primeira divergencia que a Instalacao viu, por qualquer dos dois caminhos.
+  const configuredMismatch = !sameHost(license.installation.host, input.configuredHost) || input.hostMismatchSince !== null;
+  const requestHost = input.requestHost ?? null;
+  const requestMismatch = requestHost !== null && !sameHost(license.installation.host, requestHost.host);
+  const hostMismatch = configuredMismatch || requestMismatch;
 
   if (hostMismatch) {
-    const fromMs = sinceMs(input.hostMismatchSince, nowMs);
+    const fromMs = Math.min(
+      configuredMismatch ? sinceMs(input.hostMismatchSince, nowMs) : nowMs,
+      requestMismatch && requestHost ? sinceMs(requestHost.since, nowMs) : nowMs
+    );
     reasons.push(...localAnomalyReasons("endereco_diferente", fromMs, nowMs));
     nextCandidates.push(localAnomalyNextStep("endereco_diferente", fromMs, nowMs));
   }
