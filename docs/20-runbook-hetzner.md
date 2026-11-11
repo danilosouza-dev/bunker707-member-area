@@ -23,6 +23,7 @@ Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na s
 | Firewall da Hetzner | `infra/scripts/hetzner-firewall.sh` | 22 so do produtor, 80/443 so da Cloudflare (caminho manual de 17/10; em 18/10/2026 o firewall passou a ser feito por `infra/cloud/lib.sh`, secao 4A.4) |
 | Migracoes | `infra/scripts/migrate.sh` | `supabase db push --db-url` no Postgres do stack |
 | Migrador do kit (11/11/2026) | `infra/kit/migrar.sh`, `infra/kit/migrador.sql` | migracoes sem a CLI no servidor do comprador, com o mesmo historico dela (secao 9A) |
+| Backup e recuperacao do kit (11/11/2026) | `infra/kit/membros` e os scripts dele, `infra/kit/kit.conf` | backup para o destino do comprador (S3, SFTP ou pasta), kit de recuperacao, ensaio de restauracao isolado, restauracao num servidor novo e a situacao sem segredo (secao 9B) |
 | Deploy | `infra/scripts/deploy.sh` | troca a imagem, migra, recria o app, smoke, volta atras |
 | Backup / restore | `infra/scripts/backup.sh`, `restore.sh`, `infra/systemd/` | restic -> Storage Box (SFTP), retencao 30 dias, restauracao em servidor limpo com smoke |
 | Atualizacao do stack | `infra/scripts/update.sh` | compara e reescreve as imagens com o compose oficial do Supabase |
@@ -105,6 +106,12 @@ infra/
   kit/                          (11/11/2026) o kit do produto licenciado (docs/32 §11.6 e §11.7; secao 9A)
     migrar.sh                   migracoes sem a CLI: psql no container do banco, trava, um arquivo por transacao
     migrador.sql                ferramentas de SQL da sessao (pg_temp): divisor de comandos da CLI, plano e conferencia
+    membros                     comando de operacao (nome provisorio): status, backup, restaurar, kit-de-recuperacao (secao 9B)
+    kit.conf                    os nomes tecnicos do kit num arquivo so (projeto, containers, volumes, pastas; A10)
+    lib-kit.sh, kit.py          funcoes comuns: destino, trava, situacao sem segredo, folha, veredito do ensaio
+    backup.sh, recuperacao.sh   backup diario e kit de recuperacao
+    ensaio.sh, restaurar.sh     ensaio de restauracao isolado e restauracao num servidor novo
+    status.sh                   a situacao, sem sudo e sem rede
   systemd/                      timer do backup (03:30 UTC)
   terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado; referencia)
   cloud/                        (18/10/2026) operacao pela API da Hetzner e da Cloudflare, a partir do runner
@@ -996,6 +1003,88 @@ bash infra/kit/migrar.sh            # aplica o que falta
 
 **Testes.** `tests/kit-migrador.test.mjs` (o roteiro e as saidas, com `psql` e `docker` de mentira), `tests/integration/kit-migrador.test.mjs` (num Postgres de verdade; fora do CI, `MIGRAR_TESTE_PSQL="psql -h <socket> -p <porta> -U postgres"` aponta um Postgres de rascunho) e, so no CI, o passo **Migrador do kit igual à CLI** (`tests/support/kit-migrador-contra-cli.sh`): zera o banco local sem migracoes, aplica todas com o migrador, zera de novo, aplica com a CLI e compara o esquema (`pg_dump --schema-only`), o historico byte a byte e os dados que as migracoes gravam.
 
+## 9B. Backup e recuperacao do kit (produto licenciado, 11/11/2026)
+
+No servidor de um comprador (`docs/32` §3.2 e §4), o backup, o kit de recuperacao, o ensaio e a restauracao sao subcomandos do comando de operacao `membros` (`infra/kit/membros`, nome provisorio; o instalador o liga em `/usr/local/sbin`). A nossa producao continua no `infra/scripts/backup.sh` (secao 10).
+
+```bash
+sudo membros backup --iniciar               # confere o destino e cria o repositorio la (SFTP: cria a chave SSH e mostra)
+sudo membros backup                         # backup agora: banco, arquivos do Storage e segredos, retencao, situacao
+sudo membros backup --conferir              # backup + restic check de 10% dos dados
+sudo membros backup --conferir-destino      # so diz que destino e esse e se abre; nada muda
+sudo membros backup --instalar-agendamento  # servico e timer do systemd: todo dia 03:30 de Brasilia, ate 30 min de folga
+sudo membros kit-de-recuperacao [--nova | --conferir]   # no terminal: a folha e a confirmacao digitada
+sudo membros restaurar --ensaio [--snapshot ID] [--chave-arquivo ARQ]   # ensaio isolado: nao toca na escola
+sudo membros restaurar [--snapshot ID] [--chave-arquivo ARQ] [--destino REPO]   # servidor novo, modo de restauracao
+membros status [--json]                     # sem sudo, sem rede e sem abrir o backup
+```
+
+**Os nomes num arquivo so (A10).** O projeto do compose, os containers e volumes da escola, as pastas (`/var/lib/<nome>` para a situacao, `/var/backups/<nome>` para a exportacao e o ensaio), a trava, o servico do systemd, o host e a marca dos backups, o prefixo e o rotulo do ensaio, o teto de memoria dele e os scripts reaproveitados estao em `infra/kit/kit.conf`, com os nomes de hoje como padrao (`KIT_NOME=bunker707`). Nenhum outro arquivo do kit escreve o nome (a guarda esta em `tests/kit-membros.test.mjs`). Trocar o nome e trocar `KIT_NOME` ali e, junto, o `name:` e os `container_name:` do compose que for no pacote.
+
+**O destino**, no arquivo de segredos da instalacao (`infra/compose/.env`, so o administrador le):
+
+| Destino | `RESTIC_REPOSITORY` | Acesso |
+|---|---|---|
+| S3 (Backblaze B2, Wasabi, Cloudflare R2, AWS) | `s3:https://<servidor>/<bucket>[/pasta]`, por exemplo `s3:https://s3.us-east-005.backblazeb2.com/escola-backup/membros` | `AWS_ACCESS_KEY_ID` e `AWS_SECRET_ACCESS_KEY` (a chave criada no painel do armazenamento, com acesso ao bucket); no R2, `AWS_DEFAULT_REGION=auto` |
+| SFTP | `sftp:usuario@servidor:/pasta` | a chave SSH que o `--iniciar` cria em `/var/lib/<nome>/backup/sftp_ed25519` e mostra para a pessoa autorizar; `BACKUP_SFTP_PORTA` se nao for a 22 |
+| Pasta deste servidor | `/mnt/backup/escola` | nenhum; o backup morre junto com o servidor, e o `status` e a folha dizem isso |
+
+O kit recusa, sem repetir segredo na mensagem: S3 sem `https`, chave de acesso ou senha dentro do endereco, os tipos `b2:`, `rest:`, `azure:`, `gs:`, `swift:` e `rclone:` (no B2, usa-se o endereco S3 do bucket) e pastas como `/`, `/root` ou `/var`. A senha que cifra o backup e a `RESTIC_PASSWORD` do servidor; a chave de recuperacao e a segunda (abaixo). O kit pede o restic 0.16 ou mais novo (`--retry-lock`); o apt do Debian 12 traz o 0.14, e o bootstrap atualiza com `restic self-update`.
+
+**O que vai em cada backup:** `roles.sql` e `postgres.dump` (`pg_dumpall --roles-only` e `pg_dump -Fc`, de dentro do container do banco, como `supabase_admin`), `pgsodium_root.key` (a chave do Vault), `env` (o arquivo de segredos) e a pasta do Storage. A exportacao fica em `/var/backups/<nome>/atual` so durante o envio e sai do disco no fim, com ou sem erro. Todo backup leva o host fixo do `kit.conf` (nao o nome da maquina: o servidor novo de uma recuperacao continua a mesma linha do tempo) e duas marcas: a do kit e `com-dados`, ou `vazio` quando o banco nao tem nenhuma conta (instalacao recem-criada). O ensaio e a restauracao escolhem o mais novo `com-dados`.
+
+**Retencao:** `BACKUP_KEEP_DAILY` 7, `BACKUP_KEEP_WEEKLY` 4 e `BACKUP_KEEP_MONTHLY` 6 no arquivo de segredos (zero nos tres e recusado), aplicados por `restic forget --host <host> --tag <marca> --group-by host,tags ... --prune` depois de cada backup. O agrupamento por host e marcas, e nunca pelo caminho, e o que faz a retencao apagar: o padrao do restic (host e caminhos) deixa sozinho no grupo todo backup cuja pasta muda de nome, e entao nada sai, que era o caso da nossa producao ate 11/11/2026 (secao 10.1). Com as marcas no grupo, os backups `vazio` de um servidor recem-instalado nunca empurram os `com-dados` para fora. `tests/kit-membros-restic.test.mjs` prova as duas coisas com o restic de verdade.
+
+**Trava, agendamento e situacao.** Uma operacao do backup por vez neste servidor (backup, kit de recuperacao, ensaio, restauracao), com `flock` em `/run/lock/<nome>-backup.lock`: quem chega com a trava ocupada para com o codigo 4; o backup agendado espera ate uma hora. O agendado confere 10% dos dados do repositorio (`restic check --read-data-subset=10%`) uma vez por semana. Enquanto a instalacao espera uma restauracao (`/var/lib/<nome>/restauracao-pendente`), o backup fica parado (codigo 9), para os backups de um servidor vazio nunca passarem na frente do bom. A situacao fica em `/var/lib/<nome>/situacao.json` (0644, lida sem sudo por `membros status` e pelo diagnostico): ultimo backup bom, tamanho, destino (tipo e servidor, nunca o endereco inteiro), retencao, ultima conferencia, kit de recuperacao, ultimo ensaio e restauracao. O `kit.py` recusa gravar um valor que contenha um segredo do arquivo de segredos ou a chave de recuperacao em uso.
+
+**Kit de recuperacao** (`docs/32` §4). Sem ele, a senha do backup so existe dentro do servidor, e o backup nao abre se o servidor morrer.
+
+- Uma segunda chave do repositorio (`restic key add`), sorteada pelo kit: 32 letras e numeros do alfabeto de Crockford (sem I, L, O e U), em 8 grupos de 4. Na digitacao, minusculas, hifens e espacos nao contam, e O vira 0, I e L viram 1.
+- A folha, texto simples de uma pagina: a escola, onde esta o backup (tipo, endereco e o identificador da chave de acesso, nunca o segredo dela), a chave de recuperacao, o que fazer se o servidor morrer, o ensaio por trimestre e o que fazer se perder a folha.
+- A pessoa confirma digitando dois grupos sorteados da chave (tres tentativas). Ate la, a folha fica pendente em `/var/lib/<nome>/recuperacao/folha-pendente.txt` (0600, pasta 0700) e volta na vez seguinte; `--conferir` devolve 6, e o instalador so termina com 0.
+- **A chave nao fica no servidor.** Depois da confirmacao, a folha pendente e apagada com `shred` e o servidor guarda so o identificador da chave no repositorio. Se ficasse, ela vazaria junto com qualquer coisa que vaze do servidor (um suporte, a IA lendo arquivos, uma copia do disco), e a pessoa perderia a unica senha que nao depende dele. O servidor nao precisa dela: o backup diario usa a `RESTIC_PASSWORD`.
+- So roda com uma pessoa no terminal: sem terminal (a IA rodando o comando), para com o codigo 7 sem criar nada. `--nova` gera outra folha; a chave antiga so sai do repositorio quando a nova e confirmada.
+
+**Ensaio de restauracao** (`restaurar --ensaio`). Abre o backup mais novo com dados (ou o `--snapshot`) com a chave de recuperacao, digitada sem eco ou num arquivo so do administrador (`--chave-arquivo`, 0600), e diz se a escola esta la dentro, sem tocar nela:
+
+| Isolamento | Como |
+|---|---|
+| Container proprio | da mesma imagem do banco da escola (ja esta no servidor: nada e baixado), com nome e rotulo do ensaio (`<nome>-ensaio-<id>`, `<nome>.ensaio=<id>`); so o banco sobe, sem app, Auth, Storage ou qualquer coisa que envie |
+| Sem rede | `--network none`: nem a internet, nem o Emissor, nem o e-mail, nem os containers da escola; o pg_cron sobe sem disparar tarefa (`cron.launch_active_jobs=off`) |
+| Sem porta, sem privilegio | nada publicado, nada de `--privileged`, `--pid`/`--ipc` do servidor, capacidade a mais ou volume de outro container |
+| So as pastas do ensaio | o banco temporario e o dump (so leitura) em `/var/backups/<nome>/ensaio/<id>`; a unica outra montagem aceita e o volume anonimo que a propria imagem declare, que nasce para o container e sai com ele. O `docker inspect` e conferido antes de ligar; o container que nao passa e apagado sem ligar |
+| Memoria e disco | teto de 512 MB sem troca (`KIT_ENSAIO_MEMORIA`), 1 CPU e 512 processos, com o Postgres afinado para caber; so comeca se a memoria livre cobre o teto mais 256 MB de folga para a escola (`KIT_ENSAIO_FOLGA_MEMORIA`) e se o disco tem 5 vezes o dump mais 1 GB livres; senao, codigo 8 antes de criar o banco |
+
+Do backup saem so o dump, os papeis e a chave do Vault. A restauracao segue o `restore.sh` (papeis, privilegios padrao suspensos, `pg_restore --clean`, privilegios devolvidos), conectando pelo `127.0.0.1` de dentro do container; os papeis do backup trazem a senha que o `supabase_admin` tem na escola, e na mesma sessao a senha sorteada do banco temporario volta. A conferencia: contas do Auth, alunos com acesso, conteudos, aulas, acessos, progresso, o historico das migracoes, a linha da `license_state` (e se a licenca ja foi ativada), a chave publica fechada para as tabelas internas e cada objeto do `storage.objects` contra a lista de arquivos do backup. O veredito sai em portugues (DEU CERTO, DEU CERTO com avisos, FALHOU, com o motivo) e vai para a situacao, so com as contagens. Depois, tudo e apagado (o container, os volumes anonimos dele, a pasta e a chave digitada, que fica em `/dev/shm` enquanto o comando roda), tambem na falha e na interrupcao (Ctrl+C, `kill`, SSH caido). Numa queda de luz, as sobras saem no comeco do ensaio seguinte ou no backup diario, que tambem pega a trava. O ensaio nao prova que o app sobe com esse banco (isso e o `atualizar --ensaio`, ainda por fazer) nem le o conteudo dos arquivos do Storage.
+
+**Restaurar num servidor novo** (`restaurar`). Para o servidor de uma recuperacao, instalado no modo de restauracao (sem Chave de ativacao; o instalador ainda nao existe, entao hoje e o compose do kit de pe e o arquivo de segredos com o destino e as chaves de acesso, ou o `--destino` da folha):
+
+1. poe a instalacao no modo de restauracao (o backup diario fica parado ate o fim);
+2. abre o backup com a chave de recuperacao e escolhe o mais novo com dados (ou o `--snapshot`);
+3. mostra de quando e de qual escola e o backup, avisa que o servidor antigo nao pode estar no ar junto (os alunos receberiam os e-mails em dobro) e pede a confirmacao digitada: o endereco da escola, ou `APAGAR <endereco>` quando esta instalacao ja tem contas;
+4. roda o `infra/scripts/restore.sh --sem-fumaca` (banco inteiro, chave do Vault, arquivo de segredos, Storage e tudo de pe);
+5. devolve ao arquivo de segredos o destino e as chaves de acesso que abriram o backup, confere que a `RESTIC_PASSWORD` restaurada ainda abre o repositorio (se nao, cadastra uma nova pela chave de recuperacao), aplica as migracoes do pacote que o backup nao tinha (`migrar.sh`) e apaga o que foi baixado;
+6. sai do modo de restauracao e roda o `smoke.sh` pelo endereco publico. Ele so passa quando o endereco ja aponta para este servidor: se falha, nada e desfeito, e a mensagem diz para apontar o registro A e conferir de novo com `sudo bash <pacote>/infra/scripts/smoke.sh`.
+
+A licenca vem no backup: no mesmo endereco, o Emissor reconhece a Instalacao na conferencia seguinte (readocao, `docs/32` §11.2). A folha continua valendo.
+
+**Codigos de saida** (todos os subcomandos):
+
+| Codigo | Quando |
+|---|---|
+| 0 | deu certo (o ensaio com ou sem avisos) |
+| 1 | opcao errada, configuracao faltando ou invalida, restic velho, confirmacao diferente |
+| 2 | o destino nao responde ou recusa a chave de acesso |
+| 3 | o backup, o ensaio ou a restauracao falhou (o motivo vem na mensagem e na situacao) |
+| 4 | outra operacao do backup esta rodando neste servidor |
+| 5 | a senha do servidor ou a chave de recuperacao nao abre o backup |
+| 6 | o kit de recuperacao nao foi confirmado |
+| 7 | o passo mostra ou pede uma chave e so roda com uma pessoa no terminal |
+| 8 | falta disco ou memoria livre para o ensaio |
+| 9 | a instalacao espera a restauracao de um backup (backup parado) |
+
+**Testes.** `tests/kit-membros.test.mjs` roda os scripts de verdade com docker, restic, systemctl e df de mentira (`tests/fixtures/kit-de-mentira.mjs`; o docker de mentira so deixa entrar no banco do ensaio com a senha que o `supabase_admin` tem naquele momento) e, quando o passo mostra ou pede uma chave, com uma pessoa num pseudo-terminal. `tests/kit-membros-restic.test.mjs` usa o restic de verdade num repositorio em pasta (o CI instala o restic no job Verify). Nao rodou: o ensaio com o Docker e a imagem do banco de verdade (este ambiente nao tem o servico do Docker), um destino S3 ou SFTP de verdade, o timer do systemd e a medida de memoria num servidor de 4 GB com a escola no ar.
+
 ---
 
 ## 10. Backup e restauracao
@@ -1013,7 +1102,7 @@ Em 18/10/2026: o Storage Box (`bunker707-backups`, bx11) e criado pela etapa `pr
 
 Disco dos avisos (Comunicacao v1, `docs/22` §4.5): cada audio vai ate 10 MB e cada imagem ate 420 KB; um aviso por semana com audio da cerca de 0,5 GB por ano no Storage, e o mesmo no repositorio restic (o restic deduplica entre snapshots, entao os 30 diarios nao multiplicam isso). O bucket nasce pela migracao `202610200001` (sem passo manual nem variavel nova; o limite global `FILE_SIZE_LIMIT` de 50 MiB fica acima dos 10 MB). Audio ou imagem trocados no editor ficam no Storage sem referencia; se o disco apertar (monitor da secao 12), olhar primeiro os arquivos do bucket `communication-audio` em `infra/compose/volumes/storage`.
 
-Retencao: um snapshot por dia pelos ultimos 30 dias (`BACKUP_KEEP_DAILY`). Os dois ultimos exports ficam tambem em `/var/backups/bunker707/stage` para restauracao rapida. `backup.sh --check` (semanal, a mao ou num segundo timer) le 10% dos dados do repositorio para conferir integridade. `BACKUP_HEARTBEAT_URL` no `.env` recebe um GET a cada backup bom (monitor de "push" do Uptime Kuma ou Better Stack: se nao chegar, alerta).
+Retencao: um snapshot por dia pelos ultimos 30 dias (`BACKUP_KEEP_DAILY`). Ate a correcao de 11/11/2026 isso nao valia, aqui e no Mautic (secao 8A.5): o `restic forget` agrupava pelo padrao do restic (host e caminhos), e como a pasta de cada exportacao tem a hora no nome (`stage/<data>`), cada snapshot ficava sozinho no grupo e nenhum era apagado. Com a correcao, os dois agrupam so pelo host (`--group-by host`); `tests/kit-membros-restic.test.mjs` confere com o restic de verdade. Na primeira noite com a correcao no servidor, o `forget --prune` aplica a retencao a tudo de uma vez: fica um snapshot por dia, nos ultimos 30 dias com backup. Os dois ultimos exports ficam tambem em `/var/backups/bunker707/stage` para restauracao rapida. `backup.sh --check` (semanal, a mao ou num segundo timer) le 10% dos dados do repositorio para conferir integridade. `BACKUP_HEARTBEAT_URL` no `.env` recebe um GET a cada backup bom (monitor de "push" do Uptime Kuma ou Better Stack: se nao chegar, alerta).
 
 Por que nao `supabase db dump`: o dump da CLI exclui de proposito os esquemas que o Auth e o Storage administram (ele existe para migrar entre projetos da nuvem, onde esses esquemas ja existem). Num servidor proprio queremos o banco inteiro, inclusive `auth`, `storage`, `vault`, `cron` e `supabase_migrations`, para restaurar num Postgres identico sem reconstruir nada. Para migrar DA nuvem PARA a Hetzner, a CLI e a ferramenta certa (secao 14).
 
