@@ -733,16 +733,18 @@ mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
 O desenho esta no `docs/32` (§10, §11.2 e D39; o codigo, no repositorio privado `bunker-licensing`); aqui fica so a
 operacao. **Decisao do produtor (D39):** o Emissor e o Painel de licencas rodam num servidor so deles desde o comeco, o
 tipo e o local mais baratos da Hetzner, mesmo que mais lento, porque so a equipe abre o Painel e as Instalacoes conferem
-uma vez por dia. **Estado em 10/11/2026: as etapas existem e foram testadas so com a Hetzner e a Cloudflare de mentira
-(`tests/infra-licencas*.test.mjs`); nada foi criado.** Nada e criado nem cobrado sem o ok do produtor no chat.
+uma vez por dia. **Estado em 11/11/2026: as etapas existem e foram testadas so com a Hetzner e a Cloudflare de mentira
+(`tests/infra-licencas*.test.mjs`); nada foi criado.** Em 11/11/2026 o `deploy-licencas` passou a configurar o Painel e
+a conta de envio do Emissor (8C.5), que chegaram ao `bunker-licensing` depois das etapas. Nada e criado nem cobrado sem
+o ok do produtor no chat.
 
 ### 8C.1 O que roda e quanto custa
 
 | Peca | Onde | Observacao |
 |---|---|---|
-| Servidor | `bunker707-licencas`, o mais barato que o `plan-licencas` acha no dia, x86 ou ARM, em qualquer local que a API informa | minimo: 2 GB de memoria, 20 GB de disco, 1 vCPU (`LICENCAS_MIN_*`). O Emissor (Node) e, depois, o Painel usam uns 100 a 200 MB; o Postgres 16 com o banco pequeno, 50 a 150 MB; o Caddy, uns 30 MB; Docker e Ubuntu, uns 400 MB. Os 2 GB deixam folga para o `pg_dump`, o restic, o `apt` e a troca de imagem (o bootstrap ainda poe 2 GB de swap). Disco nao pesa: todo tipo da Hetzner tem 40 GB ou mais |
+| Servidor | `bunker707-licencas`, o mais barato que o `plan-licencas` acha no dia, x86 ou ARM, em qualquer local que a API informa | minimo: 2 GB de memoria, 20 GB de disco, 1 vCPU (`LICENCAS_MIN_*`). O Emissor (Node, com o Painel no mesmo processo) usa uns 100 a 200 MB; o Postgres 16 com o banco pequeno, 50 a 150 MB; o Caddy, uns 30 MB; Docker e Ubuntu, uns 400 MB. Os 2 GB deixam folga para o `pg_dump`, o restic, o `apt` e a troca de imagem (o bootstrap ainda poe 2 GB de swap). Disco nao pesa: todo tipo da Hetzner tem 40 GB ou mais |
 | IPv4 | um, obrigatorio | a API e a conferencia inicial so falam IPv4 (`docs/32` §11.2) |
-| Emissor e Postgres 16 | `/opt/bunker707/emissor` (compose.yaml do `bunker-licensing`, `.env` e `segredos/`) | a imagem vem do GHCR (8C.2); nada e construido no servidor |
+| Emissor (com o Painel) e Postgres 16 | `/opt/bunker707/emissor` (compose.yaml do `bunker-licensing`, `.env` e `segredos/`) | a imagem vem do GHCR (8C.2); nada e construido no servidor. O Painel e o mesmo processo do Emissor, noutra porta (8C.4), e a fila de e-mail envia pelo Resend (8C.5) |
 | Caddy 2.11.7 | `infra/licencas/docker-compose.yml`, na rede do servidor | as duas portas locais do compose do Emissor (8C.4) |
 | Backup | o Storage Box que ja existe (`bunker707-backups`), repositorio `bunker707/restic-licencas` | de hora em hora (8C.6) |
 
@@ -765,7 +767,9 @@ CI do proprio `bunker-licensing`, e o `deploy-licencas` deste repositorio a puxa
 
 Duas coisas fora deste repositorio, antes do primeiro `deploy-licencas` (a IA nao mexe no `bunker-licensing` daqui):
 
-1. o job de publicacao no CI do `bunker-licensing` (o YAML esta em docs/21 §11.3);
+1. o job de publicacao no CI do `bunker-licensing` (o job `publicar`, escrito la em 10/11/2026 com o YAML do
+   docs/21 §11.3): publica a cada push na `main` de la, depois dos testes e do compose de ponta a ponta, entao a
+   primeira imagem sai quando aquele trabalho chegar a `main`;
 2. **o produtor da leitura do pacote a este repositorio, uma vez**: GitHub > pacote `bunker-licensing` > Package
    settings > Manage Actions access > Add repository > `bunker707-member-area`, papel Read. Sem isso o servidor nao
    puxa a imagem ("Nao consegui puxar ... Manage Actions access").
@@ -780,17 +784,18 @@ imagem nao conhece; sem isso, o caminho e restaurar o backup de antes (8C.6).
 | Passo | Quem | O que |
 |---|---|---|
 | 1 | produtor | **Cerimonia das chaves**, no computador dele, de preferencia sem internet (README do `bunker-licensing`): as duas raizes e a chave de emissao. Os arquivos das raizes e as senhas delas ficam fora de qualquer servidor, em dois lugares, e uma copia com o depositario da continuidade (`docs/32` A23). **A chave raiz nunca vai para o GitHub nem para servidor nenhum** |
-| 2 | produtor | Os segredos do GitHub (8C.5), neste repositorio: Settings > Secrets and variables > Actions. Nunca no chat |
-| 3 | produtor | No `bunker-licensing`: o job de publicacao (docs/21 §11.3) e o acesso do pacote a este repositorio (8C.2) |
+| 2 | produtor | Os segredos do GitHub (8C.5), neste repositorio: Settings > Secrets and variables > Actions. Nunca no chat. Entre eles a chave do Resend so do Emissor (`LICENCAS_RESEND_CHAVE`) e, na aba Variables, quem envia (`LICENCAS_EMISSOR_EMAIL_REMETENTE`, um endereco do dominio da chave) |
+| 3 | produtor | No `bunker-licensing`: o trabalho com o job de publicacao chega a `main` de la (a primeira imagem sai dali) e o acesso do pacote a este repositorio (8C.2) |
 | 4 | IA | `plan-licencas` (de qualquer branch): mostra os tipos, os precos por local e a escolha. Reportar o custo ao produtor |
 | 5 | produtor | O ok no chat, com o preco |
 | 6 | IA | `provision-licencas` da `main`, com `CONFIRMADO=sim LICENCAS_PRECO_MAX=<preco aprovado>`: cria o servidor, o firewall `bunker707-licencas-fw`, o bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Se o preco do dia passou do aprovado, para sem criar nada |
 | 7 | IA | `dns-licencas` da `main`: registros A (8C.4) |
-| 8 | produtor | Cloudflare Zero Trust > Access > Applications > Self-hosted: aplicacao para `licencas.bunker707.com.br`, politica com os e-mails da equipe (o token da Cloudflare da infra nao tem permissao para criar). Sem ela o Painel responde 403 a todo mundo |
+| 8 | produtor | Cloudflare Zero Trust > Access > Applications > Self-hosted: aplicacao para `licencas.bunker707.com.br`, politica com os e-mails da equipe e login com segundo fator (o token da Cloudflare da infra nao tem permissao para criar; os passos estao no `docs/painel.md` do `bunker-licensing`, "O que o produtor configura"). Sem ela o Painel responde 403 a todo mundo. Depois, na aba Variables do passo 2: `LICENCAS_PAINEL_ACCESS_EQUIPE` (o dominio da equipe, `<equipe>.cloudflareaccess.com`) e `LICENCAS_PAINEL_ACCESS_AUD` (a Application Audience (AUD) Tag do aplicativo) |
 | 9 | IA | `secrets-licencas` da `main` (8C.5) |
-| 10 | IA | `deploy-licencas` da `main`, com `PRODUCER_IP=<ip>` ou `LICENCAS_PAINEL_IPS=<ip1>,<ip2>` (quem abre o Painel; sem isso, ninguem). Ele confere o DNS, puxa a imagem, escreve o `.env` do compose, aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy e liga o backup de hora em hora |
-| 11 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
-| 12 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
+| 10 | IA | `deploy-licencas` da `main`, com `PRODUCER_IP=<ip>` ou `LICENCAS_PAINEL_IPS=<ip1>,<ip2>` (quem abre o Painel; sem isso, ninguem). Ele confere o DNS e a configuracao do Painel (sem o Access ou o remetente, para antes de tudo, a nao ser com `LICENCAS_SEM_PAINEL=sim`; 8C.5), puxa a imagem, escreve o `.env` do compose (com o Painel e a conta de envio), aplica as migracoes (`npm run migrate` no container, o servico `migrar`), confere o `/health`, sobe o Caddy e liga o backup de hora em hora |
+| 11 | IA | `exec-licencas` da `main`: a primeira conta do Painel, a do produtor, com o e-mail do login do Access. No campo `payload`: `cd emissor && docker compose exec -T emissor node bin/painel.ts adicionar <e-mail do produtor> --funcao produtor --motivo "Primeira conta"`. O e-mail "entrou no Painel" que chega ao produtor mostra que o envio funciona. As outras contas: o mesmo, com `--funcao atendente --nome "<nome>"`; `listar`, `funcao`, `desligar` e `religar` estao no `docs/painel.md` do `bunker-licensing`. Toda conta precisa estar tambem na politica do Access |
+| 12 | IA | `ensaio-licencas` da `main`: o ensaio de restauracao (8C.6). E `status-licencas` com `SSH=1` |
+| 13 | IA ou produtor | Monitor externo (secao 12): `https://licencas-api.bunker707.com.br/health` com `"ok":true`, e o heartbeat do backup (`BACKUP_HEARTBEAT_URL` no `infra/licencas/.env`, periodo de 2 h) |
 
 Toda etapa e idempotente: rodar de novo completa o que faltou. Um `deploy-licencas` repetido e uma atualizacao.
 
@@ -811,17 +816,22 @@ IP sem passar pelo Access recebe 403, e o Painel ainda confere a assinatura do t
 
 O Caddy roda na rede do servidor e manda cada nome para uma porta local do compose do Emissor, pelos nomes do
 `.env.example` do `bunker-licensing`: a API para `EMISSOR_PORTA_NO_HOST` (8080) e o Painel para `PAINEL_PORTA_NO_HOST`
-(8081). **Suposicao a confirmar quando o Painel chegar ao `bunker-licensing`**: o nome `PAINEL_PORTA_NO_HOST` e a
-porta 8081 (o deploy le os dois do `.env` do compose a cada rodada; se o nome for outro, mudar aqui e no
-`infra/licencas/docker-compose.yml`). Na API o Caddy so passa `/v1/*` e `/health` e corta o corpo acima de 64 KB.
+(8081), os nomes e as portas do compose do Emissor com o Painel (conferido em 11/11/2026; o deploy le os dois do `.env`
+do compose a cada rodada). Na API o Caddy so passa `/v1/*` e `/health` e corta o corpo acima de 64 KB. O Painel nunca
+responde na porta da API.
 
-O IP de quem pediu: o Emissor confia so no gateway da rede `borda` dele (`EMISSOR_PROXIES_CONFIAVEIS=172.30.70.1`, por
-onde o Caddy chega) e le o `X-Forwarded-For` da direita para a esquerda. O Caddy escreve ali um IP so: na API, o IP da
-propria conexao (`{remote_host}`; o que vier no cabecalho e ignorado), e no Painel o IP real da Cloudflare
-(`{client_ip}`). Por isso as faixas da Cloudflare nao precisam entrar em `EMISSOR_PROXIES_CONFIAVEIS`. Se um dia a API
-passar para tras do proxy, trocar `{remote_host}` por `{client_ip}` e desligar o IPv6 da zona (docs/21 §11.4).
+O IP de quem pediu: o Emissor confia em proxies por porta e, nas duas, so no gateway da rede `borda` dele, por onde o
+Caddy chega: `EMISSOR_PROXIES_CONFIAVEIS` na API e `PAINEL_PROXIES_CONFIAVEIS` no Painel, as duas iguais ao
+`EMISSOR_GATEWAY_BORDA` (172.30.70.1), com `EMISSOR_CABECALHO_IP` e `PAINEL_CABECALHO_IP` em `x-forwarded-for`. O
+`deploy-licencas` escreve as quatro no `.env` do compose a cada rodada (`infra/licencas/scripts/implantar.sh`): mudar no
+servidor nao dura. O Emissor le o `X-Forwarded-For` da direita para a esquerda, e o Caddy escreve ali um IP so: na API,
+o IP da propria conexao (`{remote_host}`; o que vier no cabecalho e ignorado), e no Painel o IP real que a Cloudflare
+repassa (`{client_ip}`, aceito so das faixas dela). Por isso as faixas da Cloudflare nao entram em nenhuma das duas
+listas; na da API, nunca (um Worker da Cloudflare escolheria o IP que o limite de pedidos conta e onde a conferencia
+inicial bate). Se um dia a API passar para tras do proxy, trocar `{remote_host}` por `{client_ip}` e desligar o IPv6
+da zona (docs/21 §11.4).
 
-### 8C.5 Segredos (etapa `secrets-licencas`)
+### 8C.5 Segredos (etapa `secrets-licencas`) e a configuracao do Painel
 
 Segredos do repositorio no GitHub, cada um entregue so a etapa que o usa:
 
@@ -831,7 +841,7 @@ Segredos do repositorio no GitHub, cada um entregue so a etapa que o usa:
 | `LICENCAS_EMISSAO_CHAVE` | o conteudo do arquivo `emissao-*.pem` (cifrado com senha) | `segredos/emissao.pem` |
 | `LICENCAS_EMISSAO_SENHA` | a senha da chave de emissao (16 ou mais caracteres) | `segredos/emissao-senha` |
 | `LICENCAS_EMISSAO_CERTIFICADO` | a saida JSON de `bin/chaves.ts emissao` | `segredos/emissao-certificado.json` |
-| `LICENCAS_RESEND_CHAVE` | uma chave do Resend so de envio, restrita a `mail.bunker707.com.br`, so do Emissor | `segredos/resend-chave` (o nome que o compose do Emissor deve usar quando a fila de e-mail chegar) |
+| `LICENCAS_RESEND_CHAVE` | uma chave do Resend so de envio, restrita a `mail.bunker707.com.br`, so do Emissor (uma linha, `re_...`, o formato que o Emissor confere) | `segredos/resend-chave`, que o compose do Emissor monta sempre (`ARQUIVO_CHAVE_RESEND`). Com o Painel, obrigatoria: o `deploy-licencas` para sem ela. Sem o segredo, o `secrets-licencas` mantem a chave que ja esta no servidor, ou cria o arquivo vazio (serve so para o Emissor sem o Painel) |
 | `LICENCAS_BANCO_SENHA` (opcional) | a senha do banco | `segredos/postgres-senha`; sem ela, a senha nasce no servidor e nunca sai dele |
 
 Antes de qualquer coisa sair do runner, `infra/cloud/licencas-chave.mjs` confere: a chave esta cifrada e abre com a
@@ -843,7 +853,34 @@ arquivo novo. A senha do banco so le na primeira subida do Postgres: trocar a de
 `TROCAR_SENHA_BANCO=sim`, que muda a senha dentro do banco antes do arquivo. A raiz nunca e segredo daqui.
 
 Trocar a chave de emissao (a cada ~400 dias, ou se vazar): nova `bin/chaves.ts emissao` com outro `--kid`, trocar os
-tres segredos `LICENCAS_EMISSAO_*` no GitHub e rodar `secrets-licencas`. As licencas ja emitidas continuam valendo.
+tres segredos `LICENCAS_EMISSAO_*` no GitHub e rodar `secrets-licencas`. As licencas ja emitidas continuam valendo. Na
+troca no prazo, ponha o `kid` anterior em `LICENCAS_EMISSOR_KIDS_ANTERIORES` por 30 dias e rode `deploy-licencas`
+(a readocao depois de restaurar o banco ainda aceita as licencas dele); depois, tire. A chave que vazou nunca entra ali.
+
+**O Painel e a conta de envio do Emissor.** Nao sao segredo: ficam nas variaveis do repositorio (Settings > Secrets and
+variables > Actions > Variables), que o workflow entrega so ao `deploy-licencas`. A cada rodada o deploy confere cada
+valor como o Emissor confere ao subir e escreve no `.env` do compose do Emissor com o nome sem o `LICENCAS_`:
+
+| Variavel do repositorio | No `.env` do Emissor | Sem ela | O que e |
+|---|---|---|---|
+| `LICENCAS_PAINEL_ACCESS_EQUIPE` | `PAINEL_ACCESS_EQUIPE` | o deploy para | o dominio da equipe no Cloudflare Zero Trust (o "team domain"), `<equipe>.cloudflareaccess.com` |
+| `LICENCAS_PAINEL_ACCESS_AUD` | `PAINEL_ACCESS_AUD` | o deploy para | a Application Audience (AUD) Tag do aplicativo do Painel no Access: 64 caracteres, de 0 a 9 e de a a f |
+| `LICENCAS_EMISSOR_EMAIL_REMETENTE` | `EMISSOR_EMAIL_REMETENTE` | o deploy para | quem envia, um endereco do dominio da chave do Resend: `Emissor Bunker707 <emissor@mail.bunker707.com.br>` |
+| `LICENCAS_EMISSOR_EMAIL_PRODUTOR` | `EMISSOR_EMAIL_PRODUTOR` | `PRODUCER_EMAIL` | quem recebe o aviso de toda acao que da valor sem venda e a lista de toda segunda-feira |
+| `LICENCAS_PAINEL_TETO_DIARIO` | `PAINEL_TETO_DIARIO` | 10 | quantas acoes que dao valor sem venda o Painel aceita por dia, somando a equipe toda (de 1 a 1000) |
+| `LICENCAS_EMISSOR_KIDS_ANTERIORES` | `EMISSOR_KIDS_ANTERIORES` | nenhuma | os `kid` das chaves de emissao anteriores que a readocao ainda aceita, separados por virgula (acima) |
+| `LICENCAS_EMISSOR_LINK_RENOVAR` e `LICENCAS_EMISSOR_LINK_LOJA` | `EMISSOR_LINK_RENOVAR` e `EMISSOR_LINK_LOJA` | sem os botoes | os enderecos `https` do Renovar e da loja que vao dentro da licenca (`{licenca}` vira o numero); so quando as paginas existirem na nossa area |
+| `LICENCAS_SEM_PAINEL` | | | `sim`: o Emissor sobe sem o Painel e sem e-mail; a API das Instalacoes funciona igual |
+
+- O endereco do Painel (`PAINEL_ENDERECO`) e `https://` mais `LICENCAS_PAINEL_DOMAIN`, o nome que o Caddy serve.
+- Sem o Access ou o remetente, o `deploy-licencas` para antes de qualquer chamada e diz o que falta; com um valor fora
+  do formato, idem. Com o Painel, o servidor ainda precisa da chave do Resend em `segredos/resend-chave` (o deploy para
+  sem ela, antes de mexer no que esta no ar). `LICENCAS_SEM_PAINEL=sim` e a unica forma de subir sem o Painel.
+- As opcoes do workflow passam na frente das variaveis (por exemplo, `LICENCAS_SEM_PAINEL=sim` numa rodada so). O
+  remetente com nome tem espaco: so pela variavel; nas opcoes, so o e-mail.
+- Mudar um destes valores direto no `.env` do servidor nao dura: o proximo `deploy-licencas` escreve de novo. Para
+  aumentar o teto diario, por exemplo, mude `LICENCAS_PAINEL_TETO_DIARIO` e rode `deploy-licencas`.
+- As contas do Painel nao passam por aqui: sao do banco do Emissor, por `exec-licencas` (8C.3, passo 11).
 
 ### 8C.6 Backup, restauracao e ensaio
 
@@ -879,9 +916,13 @@ tres segredos `LICENCAS_EMISSAO_*` no GitHub e rodar `secrets-licencas`. As lice
 |---|---|
 | `deploy-licencas` para em "Nao consegui puxar ... -implantacao" | o CI do `bunker-licensing` publicou a imagem e os arquivos de implantacao? O pacote da leitura a este repositorio (8C.2)? A tag existe? |
 | `deploy-licencas` para em "DNS do Emissor fora do lugar" | `dns-licencas` e deploy de novo |
+| `deploy-licencas` para em "falta a configuracao do Painel" ou num valor fora do formato | as variaveis do repositorio (8C.5) e deploy de novo; para subir sem o Painel, `LICENCAS_SEM_PAINEL=sim` |
+| `deploy-licencas` para em "Falta a chave do Resend" | o segredo `LICENCAS_RESEND_CHAVE`, `secrets-licencas` e deploy de novo; ou `LICENCAS_SEM_PAINEL=sim` |
 | `/health` com `"ok":false` | `exec-licencas` com `COMANDO='cd /opt/bunker707/emissor && docker compose logs --tail 100 emissor'`: configuracao, chave, certificado vencido ou banco. O certificado vencido pede a troca da chave de emissao (8C.5) |
 | Instalacoes recebendo erro de rede, com o servidor no ar | `status-licencas` (as respostas publicas); o Caddy (`docker logs bunker707-licencas-caddy`); o certificado do Let's Encrypt; um AAAA que voltou no nome da API |
 | O Painel responde 403 para a equipe | o IP mudou: `deploy-licencas` com `PRODUCER_IP` ou `LICENCAS_PAINEL_IPS` novos; ou o Access nao esta na frente do nome |
+| O Painel mostra "Acesso negado" | o e-mail nao esta nas contas do Painel ou a conta foi desligada (`exec-licencas` com `cd emissor && docker compose exec -T emissor node bin/painel.ts listar`), ou a equipe ou a AUD do Access nas variaveis nao sao as do aplicativo (8C.5). O motivo exato: `exec-licencas` com `cd emissor && docker compose logs --tail 200 emissor`, nas linhas `painel`, campo `recusa` |
+| O Painel mostra o aviso vermelho de e-mail | a chave do Resend (8C.5) ou o dominio do remetente nao verificado no Resend; o motivo fica no registro do Emissor, nas linhas "e-mail" |
 | Servidor perdido | 8C.6, "Servidor perdido" |
 | A chave de emissao vazou | trocar a chave (8C.5), olhar a auditoria no Painel e levar ao produtor: o certificado da chave vazada continua valendo no produto ate vencer, e o que fazer com as licencas assinadas por ela e decisao do desenho (`docs/32` §10) |
 

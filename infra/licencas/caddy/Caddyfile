@@ -6,9 +6,12 @@
 #   LICENCAS_PAINEL_SITE_ADDRESS  o Painel de licencas da equipe -> 127.0.0.1:PAINEL_PORTA_NO_HOST. Proxy da Cloudflare
 #                                 com o Access na frente; aqui, so para LICENCAS_PAINEL_IPS e so com o token do Access
 #                                 no pedido (o Painel confere a assinatura dele a cada pedido).
-# O Emissor confia so no gateway da rede dele (EMISSOR_PROXIES_CONFIAVEIS=172.30.70.1, por onde este Caddy chega) e le
-# o IP de quem pediu no X-Forwarded-For, da direita para a esquerda: por isso cada site escreve ali um IP so, o certo,
-# e o que veio de fora no cabecalho nunca passa. Dominio puro no endereco = HTTPS automatico (Let's Encrypt).
+# O Emissor confia, nas duas portas, so no gateway da rede borda dele, por onde este Caddy chega: a API em
+# EMISSOR_PROXIES_CONFIAVEIS e o Painel em PAINEL_PROXIES_CONFIAVEIS, que o deploy-licencas escreve a cada rodada iguais
+# ao EMISSOR_GATEWAY_BORDA (172.30.70.1), com o cabecalho x-forwarded-for nas duas (scripts/implantar.sh). Ele le o IP de
+# quem pediu no X-Forwarded-For, da direita para a esquerda: por isso cada site escreve ali um IP so, o certo, o que veio
+# de fora no cabecalho nunca passa e as faixas da Cloudflare nao entram em nenhuma das duas listas. Dominio puro no
+# endereco = HTTPS automatico (Let's Encrypt).
 
 {
 	email {$ACME_EMAIL}
