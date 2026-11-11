@@ -4,7 +4,7 @@ import "./support/resolve-extensionless-ts.mjs";
 import { assertOnlyAdds, assertSections, assertServiceRoleOnly, cumulativeHash, fileHash, migrationFiles, read, sqlCodeOf, sqlList, statementsOf } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da migracao dos participantes simulados mudados a qualquer momento (docs/30 D79 e D80, §4.1 e §4.3; docs/21
-// §9.14; docs/18 §1.2): a 202611110002_webinars_v8_plateia.sql.
+// §9.15; docs/18 §1.2): a 202611110002_webinars_v8_plateia.sql.
 // - as 66 migracoes ate a 202611100002 continuam byte a byte (hash acumulado); a 202611110002 vem depois dela (a
 //   202611110001 de outra frente da mesma rodada pode ficar no meio) e e o texto exato (hash);
 // - duas secoes MCP, idempotente, so acrescenta (nenhum drop); a tabela nova so do service_role;
@@ -32,7 +32,7 @@ test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611110002 v
   assert.equal(
     fileHash(MIGRATION),
     "3bc28131d3548c3d2bae9c591e6bfcd4daa642edbd587b3f5a7dcb02bcc1eb2e",
-    "a 202611110002 mudou: depois de aplicada na nuvem de teste (docs/21 §9.14), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
+    "a 202611110002 mudou: depois de aplicada na nuvem de teste (docs/21 §9.15), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });
 

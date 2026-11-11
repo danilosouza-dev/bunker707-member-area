@@ -1016,6 +1016,41 @@ esta parte não tocou na nuvem. Quando aplicar, atualizar este parágrafo com a 
 **Produção (Hetzner)**: nada manual; o `deploy-membros` roda o `migrate.sh` antes de recriar o app. Vale a regra R1 do
 `docs/29` (a migração no banco antes do app novo no ar).
 
+### 9.15 Participantes simulados no ar: migração `202611110002` antes do merge (11/11/2026)
+
+Os participantes simulados mudados a qualquer momento, também no ar, pelo console e pelo card (`docs/30` D79 e D80,
+§4.1 e §4.3; `docs/31` §13.2) têm uma migração só, que vem **depois** da `202611100002` (§9.13) e da `202611110001` (§9.14) e não muda as de antes (a guarda `tests/webinarios-v8-plateia.guard.test.mjs`
+prende o hash acumulado das 66 anteriores e o do arquivo novo).
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611110002_webinars_v8_plateia.sql` | cria `webinar_simulation_changes` (cada mudança dos participantes simulados de uma sessão: o offset em que vale, a regra, a frase confirmada, quem e de onde; só acrescenta), com o índice `(session_id, created_at)`, RLS e só o `service_role`; nenhuma coluna nova em `webinar_sessions` | 2: a tabela; o índice e as permissões | `webinars_v8_plateia` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. Nada que o app sempre lê vem dela; as leituras
+das mudanças devolvem vazio (a Simulação segue como antes) e só mudar o número, no console ou no card, volta 409 com
+"Mudar os participantes simulados precisa da atualização do banco (migração 202611110002)." antes de gravar qualquer
+coisa. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e `WEBINARS_AUDIENCE_MIGRATION`).
+A migração sozinha não atrapalha o app de antes: a tabela é nova e ele nunca a lê.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (é idempotente, sem `drop`). Depois, gravar a versão:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611110002', 'webinars_v8_plateia') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração):
+
+```sql
+select has_table_privilege('authenticated', 'public.webinar_simulation_changes', 'select'), (select relrowsecurity from pg_class where oid = 'public.webinar_simulation_changes'::regclass), (select count(*) from pg_indexes where schemaname = 'public' and tablename = 'webinar_simulation_changes'); -- false, true, 2
+```
+
+Estado em 11/11/2026: escrita, sem aplicar em lugar nenhum (a rodada que a escreveu não tocou no banco local, que outras
+frentes usavam). A integração `tests/integration/webinarios-plateia.test.mjs` e o ponta a ponta
+`tests/e2e/produtor-muda-plateia-no-ar.spec.ts` rodam contra ela no Supabase local. **Na nuvem de teste, pendente**:
+antes do merge na `dev`, o produtor aplica a `202611110002` (o arquivo inteiro), roda a conferência acima e confere a
+linha em `supabase_migrations.schema_migrations`. Quando aplicar, atualizar este parágrafo com a data e quem aplicou.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a
