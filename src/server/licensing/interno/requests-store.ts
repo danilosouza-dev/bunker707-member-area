@@ -302,13 +302,13 @@ export async function listLicenseRequestsForTeam(db: LicenseSalesDb, input: { re
   const [open, recent] = await Promise.all([
     db
       .from("license_requests")
-      .select(LICENSE_REQUEST_COLUMNS)
+      .select(`${LICENSE_REQUEST_COLUMNS},created_at`)
       .in("status", ["pendente", "enviando", "parado"])
       .order("created_at", { ascending: true })
       .limit(200),
     db
       .from("license_requests")
-      .select(LICENSE_REQUEST_COLUMNS)
+      .select(`${LICENSE_REQUEST_COLUMNS},created_at`)
       .in("status", ["enviado", "dispensado"])
       .order("updated_at", { ascending: false })
       .limit(input.recent)
@@ -343,4 +343,12 @@ export async function dismissLicenseRequestByTeam(db: LicenseSalesDb, input: { i
   failOnError(error, "Dispensar o pedido de Licença");
 
   return ((data ?? []) as { id: string }[]).length > 0;
+}
+
+/** O produto existe no catalogo (a marca so vale para um produto de verdade). */
+export async function productExists(db: LicenseSalesDb, productId: string): Promise<boolean> {
+  const { data, error } = await db.from("content_items").select("id").eq("id", productId).maybeSingle();
+  failOnError(error, "Produto");
+
+  return Boolean(data);
 }

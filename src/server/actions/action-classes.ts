@@ -55,3 +55,11 @@ export function actionClassOfAIConnectionChange(
 
   return sameLabel && samePriority ? "dever_legal" : "conteudo";
 }
+
+/**
+ * A marca Bunker Members num produto (Produtos > Acesso e venda; docs/32 §11.10): marcar acrescenta (a venda do produto
+ * passa a virar Licenca), e conteudo; desmarcar so tira, e dever legal.
+ */
+export function actionClassOfLicenseProductChange(input: { enabled: boolean }): ActionClass {
+  return input.enabled ? "conteudo" : "dever_legal";
+}

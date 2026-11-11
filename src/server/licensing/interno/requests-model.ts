@@ -26,6 +26,8 @@ export const LICENSE_REQUEST_COLUMNS =
 
 export type LicenseRequestRow = {
   attempts: number;
+  /** So na lista da equipe (lida a mais): quando o pedido entrou na fila. */
+  created_at?: string;
   claimed_at: string | null;
   external_product_id: string;
   id: string;

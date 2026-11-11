@@ -473,7 +473,8 @@ test("o acesso não muda: a mesma venda dá o mesmo resultado com a API interna 
   actionStubs.db = semApi;
   const sem = await postar(aviso({ id: "ev-igual", transacao: "HP-IGUAL" }));
 
-  const acessos = (db) => db.linhas("entitlements").map(({ id, user_id, created_at, starts_at, updated_at, ...resto }) => resto);
+  const VARIAM = new Set(["id", "user_id", "created_at", "starts_at", "updated_at"]);
+  const acessos = (db) => db.linhas("entitlements").map((linha) => Object.fromEntries(Object.entries(linha).filter(([coluna]) => !VARIAM.has(coluna))));
   const emails = (db) => db.linhas("email_outbox").map((linha) => [linha.kind, linha.to_email]);
 
   assert.deepEqual([com.status, com.corpo.outcome], [sem.status, sem.corpo.outcome]);
