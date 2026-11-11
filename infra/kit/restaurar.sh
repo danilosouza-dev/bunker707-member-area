@@ -7,14 +7,17 @@
 #   1. poe a instalacao no modo de restauracao: o backup diario fica parado ate o fim, para os backups de um servidor
 #      vazio nunca passarem na frente do backup bom;
 #   2. abre o backup com a chave de recuperacao e escolhe o mais novo com dados (ou o --snapshot);
-#   3. mostra de quando e de qual escola e o backup e pede a confirmacao digitada: o endereco da escola, ou
-#      "APAGAR <endereco>" quando esta instalacao ja tem contas (elas serao apagadas);
-#   4. roda o infra/scripts/restore.sh (o mesmo da nossa producao): banco inteiro, chave do Vault, arquivo de segredos,
-#      arquivos do Storage, tudo de pe e o teste de fumaca;
+#   3. mostra de quando e de qual escola e o backup, lembra que o servidor antigo nao pode estar no ar junto (os alunos
+#      receberiam tudo em dobro) e pede a confirmacao digitada: o endereco da escola, ou "APAGAR <endereco>" quando
+#      esta instalacao ja tem contas (elas serao apagadas);
+#   4. roda o infra/scripts/restore.sh (o mesmo da nossa producao) com --sem-fumaca: banco inteiro, chave do Vault,
+#      arquivo de segredos, arquivos do Storage e tudo de pe;
 #   5. devolve ao arquivo de segredos o destino e as chaves de acesso com que a restauracao abriu o backup, confere que
 #      a senha do servidor restaurada ainda abre o backup (se nao, cadastra uma nova com a chave de recuperacao), aplica
 #      as migracoes do pacote que o backup ainda nao tinha (membros migrar) e apaga o que foi baixado;
-#   6. sai do modo de restauracao. A licenca veio no backup: no mesmo endereco, o Emissor reconhece a Instalacao na
+#   6. sai do modo de restauracao e roda o teste de fumaca pelo endereco publico (KIT_SCRIPT_FUMACA). Ele so passa
+#      quando o endereco ja aponta para este servidor: se falha, a restauracao continua feita e a mensagem diz para
+#      apontar e conferir de novo. A licenca veio no backup: no mesmo endereco, o Emissor reconhece a Instalacao na
 #      conferencia seguinte (readocao, docs/32 §11.2).
 # A confirmacao pede uma pessoa no terminal (codigo 7 sem terminal). Codigos de saida: os de lib-kit.sh.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: o script usa arrays e BASH_SOURCE.
@@ -34,7 +37,7 @@ while [ $# -gt 0 ]; do
         --chave-arquivo=*) chave_arquivo=${1#*=} ;;
         --destino) [ $# -ge 2 ] || sair "$SAI_USO" "--destino precisa do endereco do backup."; destino=$2; shift ;;
         --destino=*) destino=${1#*=} ;;
-        -h|--help) sed -n 2,19p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,22p "$0"; exit 0 ;;
         *) sair "$SAI_USO" "opcao desconhecida: $1 (veja: membros restaurar --help)" ;;
     esac
     shift
@@ -90,6 +93,8 @@ quando=$(kit_py data-brasilia "$snap_hora")
 
 printf '\n==> Restaurar o backup %s, de %s (horario de Brasilia), da escola %s\n' "$snap_curto" "$quando" "$escola"
 printf '    Isso apaga o banco e os arquivos desta instalacao e poe os do backup no lugar.\n'
+printf '    Use quando o servidor antigo morreu ou ja foi desligado: com os dois no ar sobre a mesma escola, os alunos\n'
+printf '    recebem os e-mails em dobro.\n'
 frase=$escola
 if [ "$contas" -gt 0 ]; then
     printf '    ATENCAO: esta instalacao ja tem uma escola com %s conta(s). Ela sera APAGADA.\n' "$contas"
@@ -103,7 +108,7 @@ IFS= read -r resposta || true
 log "Restaurando (infra/scripts/restore.sh)..."
 restore_rc=0
 BUNKER707_BACKUP_DIR="$KIT_PASTA_BACKUP" BUNKER707_BACKUP_TAG="$KIT_BACKUP_TAG" \
-    bash "$KIT_SCRIPT_RESTORE" --snapshot "$snap_id" --yes || restore_rc=$?
+    bash "$KIT_SCRIPT_RESTORE" --snapshot "$snap_id" --yes --sem-fumaca || restore_rc=$?
 if [ "$restore_rc" -ne 0 ]; then
     sair "$SAI_FALHOU" "A restauracao parou (linhas acima). A instalacao continua esperando a restauracao e o backup diario fica parado. Depois de corrigir, rode de novo: sudo membros restaurar"
 fi
@@ -128,7 +133,22 @@ fi
 rm -f -- "$KIT_MARCA_RESTAURACAO"
 situacao_gravar restauracao.pendente_desde=x: "restauracao.ultima=$(agora_utc)" "restauracao.backup_hora=$snap_hora" "restauracao.snapshot=$snap_curto"
 log "Restaurado: a escola $escola esta como estava no backup de $quando."
-printf '    Falta: apontar %s para o IP deste servidor (registro A, no painel de DNS do dominio).\n' "$escola"
+
+# O teste de fumaca vai pelos enderecos publicos: so passa quando o DNS ja aponta para este servidor e o certificado
+# saiu. Falhar aqui nao desfaz nada: a restauracao esta feita, e a pessoa confere de novo depois de apontar.
+fumaca=pendente
+if [ -f "$KIT_SCRIPT_FUMACA" ]; then
+    log "Conferindo a escola pelo endereco publico (teste de fumaca)..."
+    if bash "$KIT_SCRIPT_FUMACA"; then fumaca=ok; else fumaca=falhou; fi
+fi
+situacao_gravar "restauracao.fumaca=$fumaca"
+if [ "$fumaca" = ok ]; then
+    printf '    A escola responde em %s: o endereco ja aponta para este servidor.\n' "$escola"
+else
+    [ "$fumaca" != falhou ] || printf '    O teste pelo endereco publico nao passou: e o esperado enquanto %s nao aponta para este servidor.\n' "$escola"
+    printf '    Falta: apontar %s para o IP deste servidor (registro A, no painel de DNS do dominio).\n' "$escola"
+    printf '    Depois de apontar, confira: sudo bash %s\n' "$KIT_SCRIPT_FUMACA"
+fi
 printf '    A licenca veio no backup: na conferencia seguinte o Emissor reconhece esta instalacao (ate 24 horas,\n'
 printf '    ou na hora em Configuracoes > Licenca > Verificar agora).\n'
 printf '    O backup diario volta a rodar hoje a noite. A sua folha de recuperacao continua valendo.\n'

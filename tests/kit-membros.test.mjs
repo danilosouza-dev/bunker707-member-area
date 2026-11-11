@@ -653,7 +653,10 @@ test("restaurar: pede terminal, confirma o endereco, roda o restore.sh com a cha
   );
   const migrarFalso = join(s.dir, "migrar.sh");
   writeFileSync(migrarFalso, `#!/usr/bin/env bash\necho migrado > "${join(s.dir, "migrado")}"\n`);
-  const extra = { KIT_SCRIPT_RESTORE: restoreFalso, KIT_SCRIPT_MIGRAR: migrarFalso };
+  // O teste de fumaca de mentira: anota e falha, como pelo endereco publico que ainda aponta para o servidor antigo.
+  const fumacaFalsa = join(s.dir, "smoke.sh");
+  writeFileSync(fumacaFalsa, `#!/usr/bin/env bash\necho fumaca >> "${join(s.dir, "fumaca")}"\nexit "\${FUMACA_STATUS:-1}"\n`);
+  const extra = { KIT_SCRIPT_RESTORE: restoreFalso, KIT_SCRIPT_MIGRAR: migrarFalso, KIT_SCRIPT_FUMACA: fumacaFalsa };
 
   assert.equal(s.rodar(["restaurar"], extra).status, 7, "sem terminal, nada");
   // Confirmacao diferente: nada e restaurado, e a instalacao fica esperando (o backup diario parado).
@@ -669,7 +672,8 @@ test("restaurar: pede terminal, confirma o endereco, roda o restore.sh com a cha
   assert.match(certo.saida, /ATENCAO: esta instalacao ja tem uma escola com 40 conta\(s\)\. Ela sera APAGADA\./);
   assert.match(certo.saida, /Para confirmar, digite: APAGAR alunos\.escola\.test/);
   const chamada = Object.fromEntries(readFileSync(anotacoes, "utf8").trim().split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
-  assert.equal(chamada.args, `--snapshot ${s.resticEstado().repos[s.valores.RESTIC_REPOSITORY].snapshots[0].id} --yes`);
+  assert.equal(chamada.args, `--snapshot ${s.resticEstado().repos[s.valores.RESTIC_REPOSITORY].snapshots[0].id} --yes --sem-fumaca`, "o smoke do restore.sh fica para depois");
+  assert.match(certo.saida, /Use quando o servidor antigo morreu ou ja foi desligado: com os dois no ar sobre a mesma escola, os alunos\s+recebem os e-mails em dobro/);
   assert.equal(chamada.chave, chave, "a chave de recuperacao, por arquivo");
   assert.ok(chamada.arquivo.startsWith(s.temporaria));
   assert.equal(chamada.senha_no_ambiente, "", "nunca no ambiente");
@@ -684,7 +688,12 @@ test("restaurar: pede terminal, confirma o endereco, roda o restore.sh com a cha
   assert.equal(existsSync(join(s.backups, "restore")), false);
   assert.equal(existsSync(join(s.estado, "restauracao-pendente")), false);
   assert.ok(s.situacao().restauracao.ultima);
+  // O teste de fumaca roda depois de tudo, pelo endereco publico; falhar (o DNS ainda no servidor antigo) nao desfaz nada.
+  assert.equal(readFileSync(join(s.dir, "fumaca"), "utf8"), "fumaca\n");
+  assert.match(certo.saida, /O teste pelo endereco publico nao passou: e o esperado enquanto alunos\.escola\.test nao aponta para este servidor/);
   assert.match(certo.saida, /Falta: apontar alunos\.escola\.test para o IP deste servidor/);
+  assert.match(certo.saida, new RegExp(`Depois de apontar, confira: sudo bash ${fumacaFalsa}`));
+  assert.equal(s.situacao().restauracao.fumaca, "falhou");
   assert.deepEqual(readdirSync(s.temporaria), []);
   assert.equal(s.rodar(["backup"]).status, 0, "o backup diario volta");
 });
@@ -693,13 +702,19 @@ test("restaurar: a senha do servidor que veio no backup ja nao abre (foi trocada
   const { s, chave } = servidorProntoParaEnsaio();
   const restoreFalso = join(s.dir, "restore.sh");
   writeFileSync(restoreFalso, `#!/usr/bin/env bash\nprintf 'RESTIC_PASSWORD=senha-velha-que-saiu-do-backup\\nAPP_PUBLIC_URL=https://alunos.escola.test\\n' > "${s.envFile}"\n`);
-  const r = s.pessoa(["restaurar"], [{ espera: "Digite a chave", responde: chave }, { espera: "Para confirmar, digite: ([^\\r\\n]+)\\r?\\n", responde: "{ACHADO}" }], { KIT_SCRIPT_RESTORE: restoreFalso, KIT_SCRIPT_MIGRAR: "/nao/existe", SHIM_CONTAS: "0" });
+  // O endereco ja aponta para o servidor novo: o teste de fumaca passa e nao ha o que apontar.
+  const fumacaQuePassa = join(s.dir, "smoke.sh");
+  writeFileSync(fumacaQuePassa, "#!/usr/bin/env bash\nexit 0\n");
+  const r = s.pessoa(["restaurar"], [{ espera: "Digite a chave", responde: chave }, { espera: "Para confirmar, digite: ([^\\r\\n]+)\\r?\\n", responde: "{ACHADO}" }], { KIT_SCRIPT_RESTORE: restoreFalso, KIT_SCRIPT_MIGRAR: "/nao/existe", KIT_SCRIPT_FUMACA: fumacaQuePassa, SHIM_CONTAS: "0" });
   assert.equal(r.status, 0, r.saida);
   assert.match(r.saida, /cadastrando uma nova com a chave de recuperacao/);
   const nova = s.lerSegredos().RESTIC_PASSWORD;
   assert.notEqual(nova, "senha-velha-que-saiu-do-backup");
   assert.ok(s.resticEstado().repos[s.valores.RESTIC_REPOSITORY].chaves.some((c) => c.senha === nova));
   assert.ok(!r.saida.includes(nova), "a senha nova nao aparece na tela");
+  assert.match(r.saida, /A escola responde em alunos\.escola\.test: o endereco ja aponta para este servidor/);
+  assert.doesNotMatch(r.saida, /Falta: apontar/);
+  assert.equal(s.situacao().restauracao.fumaca, "ok");
 });
 
 test("situacao e status: nenhum segredo (nem a chave de recuperacao) e o kit.py recusa gravar valor que contenha um", { skip }, () => {
@@ -761,7 +776,8 @@ test("infra/scripts/restore.sh aceita a senha por arquivo e a marca do kit", { s
   const s = servidorComBackup();
   const chave = arquivoDaChave(s, SEGREDOS.RESTIC_PASSWORD, "senha.txt");
   s.limparLog();
-  const r = spawnSync("bash", [join(kitDir, "..", "scripts", "restore.sh"), "--snapshot", "latest", "--yes"], {
+  // --sem-fumaca: o smoke (pelos enderecos publicos) fica para quem chamou; sem ele este teste iria a rede.
+  const r = spawnSync("bash", [join(kitDir, "..", "scripts", "restore.sh"), "--snapshot", "latest", "--yes", "--sem-fumaca"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${join(s.dir, "shims")}:${process.env.PATH}`, BUNKER707_COMPOSE_FILE: join(s.compose, "docker-compose.yml"), BUNKER707_ENV_FILE: join(s.dir, "nao-existe.env"), BUNKER707_BACKUP_DIR: join(s.dir, "restauracao"), RESTIC_REPOSITORY: s.valores.RESTIC_REPOSITORY, RESTIC_PASSWORD_FILE: chave, BUNKER707_BACKUP_TAG: "escola", AWS_ACCESS_KEY_ID: "x", AWS_SECRET_ACCESS_KEY: "y", SHIM_LOG: join(s.dir, "chamadas.log"), SHIM_DOCKER_ESTADO: join(s.dir, "docker.json"), SHIM_RESTIC_ESTADO: join(s.dir, "restic.json") }
   });
@@ -770,6 +786,13 @@ test("infra/scripts/restore.sh aceita a senha por arquivo e a marca do kit", { s
   assert.deepEqual(restauracao.args.slice(-2), ["--tag", "escola"]);
   assert.equal(restauracao.porArquivo, true);
   assert.equal(restauracao.chave !== null, true, "a senha do arquivo abriu");
+  // Vai ate o fim: papeis, pg_restore, conferencia do anon, Storage e o stack inteiro de pe, sem o smoke.
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /Teste de fumaca pulado \(--sem-fumaca\): quem chamou roda depois, pelo endereco publico/);
+  assert.doesNotMatch(r.stdout, /==> Teste de fumaca\.\.\./);
+  const compose = docker(s.chamadas()).filter((c) => c.args[0] === "compose").map((c) => c.args.slice(3).join(" "));
+  assert.ok(compose.includes("up -d db") && compose.includes("up -d"), compose.join(" | "));
+  assert.match(r.stdout, /Restauracao concluida/);
   const semSenha = spawnSync("bash", [join(kitDir, "..", "scripts", "restore.sh"), "--yes"], { encoding: "utf8", env: { ...process.env, PATH: `${join(s.dir, "shims")}:${process.env.PATH}`, BUNKER707_ENV_FILE: join(s.dir, "nao-existe.env"), RESTIC_REPOSITORY: "x" } });
   assert.match(semSenha.stderr, /RESTIC_PASSWORD \(ou RESTIC_PASSWORD_FILE\)/);
 });

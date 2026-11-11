@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Restaura um backup (backup.sh) num servidor limpo e roda o teste de fumaca:
 #   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
-#   sh infra/scripts/restore.sh --snapshot latest [--yes]
+#   sh infra/scripts/restore.sh --snapshot latest [--yes] [--sem-fumaca]
 # (RESTIC_PASSWORD_FILE no lugar de RESTIC_PASSWORD e BUNKER707_BACKUP_TAG para outra marca: o kit usa os dois.)
+# --sem-fumaca pula o smoke do fim: o smoke vai pelos enderecos publicos, e num servidor novo o DNS ainda pode apontar
+# para o antigo (o kit restaura antes e roda o smoke depois, sem desfazer a restauracao se ele falhar).
 # Pre-requisitos: bootstrap.sh feito, repositorio clonado, alias SSH `storagebox` (backup.sh --init) e
 # NENHUM dado em infra/compose/volumes/db/data (o script recusa sobrescrever sem --yes).
 # Ordem: restic restore -> .env -> sobe so o Postgres -> devolve a chave do Vault e reinicia -> papeis ->
@@ -15,11 +17,13 @@
 
 snapshot="latest"
 assume_yes=0
+fumaca=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --snapshot) snapshot="$2"; shift ;;
         --yes) assume_yes=1 ;;
-        -h|--help) sed -n 2,11p "$0"; exit 0 ;;
+        --sem-fumaca) fumaca=0 ;;
+        -h|--help) sed -n 2,13p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $1" ;;
     esac
     shift
@@ -151,6 +155,10 @@ log "Subindo o stack completo..."
 compose up -d
 for service in auth rest storage api-gw app; do wait_healthy "$service" 240; done
 
-log "Teste de fumaca..."
-bash "$INFRA_SCRIPTS_DIR/smoke.sh"
+if [ "$fumaca" = 1 ]; then
+    log "Teste de fumaca..."
+    bash "$INFRA_SCRIPTS_DIR/smoke.sh"
+else
+    log "Teste de fumaca pulado (--sem-fumaca): quem chamou roda depois, pelo endereco publico."
+fi
 log "Restauracao concluida. Arquivos baixados ficam em $target (apague quando nao precisar: contem o .env)."

@@ -61,7 +61,16 @@ if (args[0] === "compose") {
   if (sub === "exec") {
     const at = resto.findIndex((a) => !a.startsWith("-"));
     const cmd = resto.slice(at + 1);
-    if (cmd[0] === "psql") { log({ sql: cmd[cmd.indexOf("-c") + 1] }); console.log(env.SHIM_CONTAS ?? "40"); sair(); }
+    if (cmd[0] === "psql") {
+      // -c (ou -tAc) com a consulta na linha de comando: as contas da escola. Pela entrada: so a conferencia do anon do
+      // restore.sh responde (os papeis e os privilegios padrao nao imprimem nada).
+      const iC = cmd.findIndex((a) => /^-[A-Za-z]*c$/.test(a));
+      if (iC >= 0) { log({ sql: cmd[iC + 1] }); console.log(env.SHIM_CONTAS ?? "40"); sair(); }
+      leStdin();
+      log({ stdin: stdin.slice(0, 4000) });
+      if (stdin.includes("has_table_privilege('anon'")) console.log(env.SHIM_ANON ?? "false");
+      sair();
+    }
     log();
     // Como o pg_dumpall de verdade, com a senha (o hash) que o supabase_admin tem na escola.
     if (cmd[0] === "pg_dumpall") { process.stdout.write("-- papeis da escola\nCREATE ROLE anon;\nALTER ROLE supabase_admin WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS PASSWORD 'SCRAM-SHA-256$4096:c2FsZGFlc2NvbGE=$Y2hhdmVkYWVzY29sYQ==:c2Vydmlkb3JkYWVzY29sYQ==';\n"); sair(); }
