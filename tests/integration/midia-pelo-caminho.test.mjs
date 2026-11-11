@@ -27,7 +27,10 @@ const temSupabase = !psqlLocal && Boolean(process.env.SUPABASE_DB_URL && (proces
 const skip = psqlLocal || temSupabase || process.env.CI ? false : "sem Postgres: suba o Supabase local (npm run db:start) ou defina MIDIA_TESTE_PSQL";
 
 const SCRIPT = readFileSync(new URL("../../supabase/dados/202611120001_midia_pelo_caminho.sql", import.meta.url), "utf8");
-const BASE = temSupabase ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL).replace(/\/+$/, "") : "https://api.escola-de-teste.exemplo";
+// A origem dos enderecos de teste e sempre https: o check de lesson_materials.file_url (desde a 202610130001) so aceita
+// https ou o caminho, e o Supabase local do CI responde em http://127.0.0.1. O script nao olha a origem do banco: so a
+// lista dada e o arquivo em storage.objects.
+const BASE = "https://api.escola-de-teste.exemplo";
 const OUTRA = "https://outro-projeto.supabase.co";
 const hex = () => randomBytes(12).toString("hex");
 const ID = hex().slice(0, 8);

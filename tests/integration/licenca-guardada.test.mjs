@@ -145,7 +145,8 @@ test("o adaptador grava só as colunas do patch, confere a versão lida (a velha
     checkInRequestedAt: new Date(agora.getTime() - MINUTO)
   };
 
-  assert.deepEqual(await adaptador.write(tudo, null), { ...tudo, version: 1 });
+  // requestHost (migracao 202611110001) volta null quando a gravacao nao o traz: a coluna existe e esta vazia.
+  assert.deepEqual(await adaptador.write(tudo, null), { ...tudo, requestHost: null, version: 1 });
 
   const gravada = await adaptador.write({ checkInResult: "ok", checkInRequestedAt: null }, 1);
   assert.deepEqual(gravada, { ...tudo, checkInResult: "ok", checkInRequestedAt: null, version: 2 }, "o resto da linha ficou");
